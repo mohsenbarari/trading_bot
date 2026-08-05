@@ -159,14 +159,17 @@ def _envelope_from_record(record: object, *, stream: str, as_of_utc: str) -> Pri
     if not isinstance(payload_text, str) or not payload_text.strip() or published_at is None:
         return None
     try:
-        available_at = normalize_utc(published_at, field_name="private_gold_spool_published_at_utc")
+        # Validate source metadata, but do not use it as fact availability.
+        # Historical backfills can legitimately be posted to the event channel
+        # before their original Telegram timestamp.  The local runner first
+        # knows the payload at ``as_of_utc``; using that conservative receipt
+        # time avoids both a false timestamp-order rejection and look-ahead.
+        normalize_utc(published_at, field_name="private_gold_spool_published_at_utc")
     except MarketStoreContractError:
-        return None
-    if available_at > as_of_utc:
         return None
     return PrivateGoldPayloadEnvelope(
         payload_text=payload_text,
-        available_at_utc=available_at,
+        available_at_utc=as_of_utc,
         stream=stream,
     )
 

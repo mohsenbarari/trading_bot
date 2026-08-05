@@ -101,4 +101,6 @@ JSONL موجود در runtime root را می‌پذیرد. فایل offer و tra
 هر line باید `published_at_utc` و `payload_text` داشته باشد. staging پیش از
 Market Store commit می‌شود تا failure بعدی با replay امن جبران شود. این command
 نه Telegram را می‌خواند، نه spool را حذف می‌کند و نه به‌صورت خودکار اجرا
-می‌شود.
+می‌شود. `published_at_utc` فقط برای اعتبارسنجی metadata است؛ availability
+واقعی را زمان دریافت محافظه‌کارانهٔ runner تعیین می‌کند تا backfill با clock
+یا ترتیب انتشار ناسازگار موجب حذف داده یا نشت زمانی نشود.

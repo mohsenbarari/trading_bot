@@ -135,6 +135,19 @@ class IngestPrivateGoldEventSpoolTests(unittest.TestCase):
         )
         self.assertEqual((result, payload["records_read"], payload["records_rejected"], payload["promoted_offer_facts"]), (0, 1, 1, 1))
 
+    def test_historical_event_post_timestamp_never_rejects_a_later_source_event(self) -> None:
+        historical = _offer()
+        historical["gold"]["telegram_datetime"] = "2026-08-04T12:00:00Z"
+        self._spool("offer.jsonl", _outer(historical, at="2026-08-03T12:00:00Z"))
+        result, payload = self._invoke(
+            "--runtime-root", str(self.root),
+            "--market-store", "market/market.sqlite3",
+            "--staging-store", "private/gold-staging.sqlite3",
+            "--offer-spool", "spool/offer.jsonl",
+            "--as-of-utc", "2026-08-04T12:01:00Z",
+        )
+        self.assertEqual((result, payload["records_rejected"], payload["promoted_offer_facts"]), (0, 0, 1))
+
 
 if __name__ == "__main__":
     unittest.main()

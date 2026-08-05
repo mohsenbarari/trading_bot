@@ -979,6 +979,9 @@ bundle قبلی قابل انتخاب‌اند و Collectorها همچنان ف�
     spool هرگز حذف، rename یا rewrite نمی‌شود؛
   - staging ابتدا commit می‌شود. اگر Market Store commit نشود، runner در
     اجرای بعدی همان factهای opaque را بدون دوباره‌شماری rebuild می‌کند؛
+  - timestamp بیرونیِ spool فقط metadata validate می‌شود؛ availability fact
+    زمان دریافت محافظه‌کارانهٔ runner است. این قاعده backfillهایی را که
+    timestamp انتشارشان از زمان رویداد عقب‌تر است بدون look-ahead می‌پذیرد؛
   - lock غیرمسدودکنندهٔ staging از دو writer محلی جلوگیری می‌کند؛ خروجی فقط
     counter و status دارد، نه متن، شناسه یا path؛
   - Telegram/Telethon، credential، listener، worker، cron و startup hook
