@@ -78,6 +78,8 @@ class StagingOfferOvertimeAcceptanceTests(unittest.TestCase):
         self.assertIn("OT-CANCEL-REQUESTER", wired)
         self.assertIn("OT-QUEUE-ORDER", wired)
         self.assertIn("OT-FINAL-TAIL", wired)
+        self.assertIn("OT-UI-RECONNECT", wired)
+        self.assertIn("OT-UI-RECONNECT", runner.WIRED_IRAN_DRIVER_SCENARIOS)
         self.assertIn("OT-OFFER-BOT-ORIGIN", runner.WIRED_FOREIGN_DRIVER_SCENARIOS)
         self.assertIn("OT-REQ-FOREIGN-TO-FOREIGN", runner.WIRED_FOREIGN_DRIVER_SCENARIOS)
         self.assertIn("OT-REQ-CROSS-FORWARD", runner.WIRED_FOREIGN_DRIVER_SCENARIOS)

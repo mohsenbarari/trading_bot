@@ -49,6 +49,7 @@ SCENARIOS = (
     "OT-CHANNEL-MARKER",
     "OT-SYNC-RECOVERY",
     "OT-TG-RETRY",
+    "OT-UI-RECONNECT",
 )
 # Staging Iran currently carries a single commodity; keep the driver pinned to it.
 DEFAULT_COMMODITY_ID = 1
@@ -1216,6 +1217,233 @@ async def _scenario_req_iran_to_iran(
         "decided_status": decided_status,
         "decision": "owner_rejected",
         "request_change_log_rows": int(request_change_log_rows),
+        "passed": passed,
+    }
+
+
+async def _scenario_ui_reconnect(
+    session,
+    run_prefix: str,
+    minutes: int,
+) -> dict[str, object]:
+    """Pending-owner/requester poll endpoints restore prompt + countdown after reconnect."""
+    from api.deps import EffectiveOwnerActor
+    from api.routers import trades as trades_router
+    from core.services.offer_overtime_preference_service import persist_overtime_preference
+    from core.services.offer_overtime_request_service import (
+        OvertimeRequestCreateCommand,
+        create_overtime_request,
+    )
+    from models.offer_request import OfferRequestSourceSurface, OfferRequestStatus
+
+    if current_server() != "iran":
+        raise DriverRefusal("OT-UI-RECONNECT only runs on the Iran peer")
+    if minutes <= 0:
+        raise DriverRefusal("OT-UI-RECONNECT requires a positive overtime preference")
+
+    await _cleanup(session, run_prefix)
+    owner = await _seed_owner(session, run_prefix)
+    requester = await _seed_user(session, run_prefix, "requester")
+    await session.commit()
+    await session.refresh(owner)
+    await session.refresh(requester)
+    owner_id = int(owner.id)
+    requester_id = int(requester.id)
+
+    await persist_overtime_preference(session, owner, minutes)
+    await session.commit()
+    await session.refresh(owner)
+
+    offer, normal_minutes = await _create_webapp_offer(
+        session,
+        owner,
+        notes=f"{run_prefix} ui reconnect",
+    )
+    offer_id = int(offer.id)
+    offer_public_id = str(offer.offer_public_id)
+    snapshot = int(offer.overtime_minutes_snapshot)
+    if snapshot != minutes:
+        raise DriverRefusal(
+            f"offer snapshot {snapshot} did not match preference {minutes}"
+        )
+
+    await _backdate_offer_into_overtime(session, offer, normal_minutes=normal_minutes)
+    offer = await _reload_offer(session, offer_id)
+    receipt_at = datetime.utcnow()
+
+    create_result = await create_overtime_request(
+        session,
+        OvertimeRequestCreateCommand(
+            offer=offer,
+            requester_user_id=requester_id,
+            actor_user_id=requester_id,
+            requested_quantity=min(2, DEFAULT_OFFER_QUANTITY),
+            idempotency_key=f"{run_prefix}:ot-ui-reconnect",
+            request_source_surface=OfferRequestSourceSurface.WEBAPP,
+            request_source_server="iran",
+            receipt_at=receipt_at,
+            normal_lifetime_minutes=normal_minutes,
+            request_home_server="iran",
+        ),
+        now=receipt_at,
+    )
+    await session.commit()
+    ledger = create_result.ledger
+    await session.refresh(ledger)
+    presented_status = str(
+        getattr(ledger.result_status, "value", ledger.result_status)
+    )
+    request_public_id = str(ledger.request_public_id)
+    request_id = int(ledger.id)
+    if (
+        not create_result.promoted
+        or presented_status != OfferRequestStatus.OVERTIME_PRESENTED.value
+    ):
+        raise DriverRefusal(
+            f"expected promoted OVERTIME_PRESENTED; status={presented_status}"
+        )
+
+    # Reload users after commit so router context sees committed rows.
+    owner = (
+        await session.execute(select(User).where(User.id == owner_id))
+    ).scalar_one()
+    requester = (
+        await session.execute(select(User).where(User.id == requester_id))
+    ).scalar_one()
+    owner_ctx = EffectiveOwnerActor(
+        owner_user=owner,
+        actor_user=owner,
+        relation=None,
+        is_accountant_context=False,
+    )
+    requester_ctx = EffectiveOwnerActor(
+        owner_user=requester,
+        actor_user=requester,
+        relation=None,
+        is_accountant_context=False,
+    )
+
+    # Poll #1 — cold restore (same contract as first refreshPending / reconnect).
+    owner_poll_1 = await trades_router.get_pending_owner_overtime_requests(
+        db=session,
+        context=owner_ctx,
+    )
+    requester_poll_1 = await trades_router.get_pending_requester_overtime_requests(
+        db=session,
+        context=requester_ctx,
+    )
+    owner_current_1 = owner_poll_1.get("current") or {}
+    requester_items_1 = list(requester_poll_1.get("items") or [])
+    requester_current_1 = requester_items_1[0] if requester_items_1 else {}
+
+    owner_remaining_1 = owner_current_1.get("remaining_decision_seconds")
+    requester_remaining_1 = requester_current_1.get("remaining_decision_seconds")
+    poll_1_ok = (
+        owner_poll_1.get("viewer_role") == "owner"
+        and owner_current_1.get("request_public_id") == request_public_id
+        and owner_current_1.get("is_occupying") is True
+        and owner_current_1.get("is_actionable") is True
+        and owner_current_1.get("decision_deadline_at") is not None
+        and isinstance(owner_remaining_1, int)
+        and owner_remaining_1 > 0
+        and requester_poll_1.get("viewer_role") == "requester"
+        and requester_current_1.get("request_public_id") == request_public_id
+        and isinstance(requester_remaining_1, int)
+        and requester_remaining_1 > 0
+        and "requester_user_id" not in owner_current_1
+    )
+    if not poll_1_ok:
+        raise DriverRefusal(
+            "first pending poll did not restore owner prompt / requester countdown "
+            f"(owner={owner_current_1!r}, requester={requester_current_1!r})"
+        )
+
+    # Poll #2 — reconnect / next interval: same occupying id, countdown still coherent.
+    owner_poll_2 = await trades_router.get_pending_owner_overtime_requests(
+        db=session,
+        context=owner_ctx,
+    )
+    requester_poll_2 = await trades_router.get_pending_requester_overtime_requests(
+        db=session,
+        context=requester_ctx,
+    )
+    owner_current_2 = owner_poll_2.get("current") or {}
+    requester_items_2 = list(requester_poll_2.get("items") or [])
+    requester_current_2 = requester_items_2[0] if requester_items_2 else {}
+    owner_remaining_2 = owner_current_2.get("remaining_decision_seconds")
+    requester_remaining_2 = requester_current_2.get("remaining_decision_seconds")
+
+    detail_owner = await trades_router.get_overtime_request(
+        request_public_id=request_public_id,
+        db=session,
+        context=owner_ctx,
+    )
+    detail_requester = await trades_router.get_overtime_request(
+        request_public_id=request_public_id,
+        db=session,
+        context=requester_ctx,
+    )
+
+    poll_2_ok = (
+        owner_current_2.get("request_public_id") == request_public_id
+        and owner_current_2.get("is_occupying") is True
+        and isinstance(owner_remaining_2, int)
+        and owner_remaining_2 > 0
+        and owner_remaining_2 <= int(owner_remaining_1) + 1
+        and requester_current_2.get("request_public_id") == request_public_id
+        and isinstance(requester_remaining_2, int)
+        and requester_remaining_2 > 0
+        and requester_remaining_2 <= int(requester_remaining_1) + 1
+        and detail_owner.get("request_public_id") == request_public_id
+        and detail_owner.get("viewer_role") == "owner"
+        and detail_requester.get("request_public_id") == request_public_id
+        and detail_requester.get("viewer_role") == "requester"
+        and isinstance(detail_owner.get("remaining_decision_seconds"), int)
+        and int(detail_owner["remaining_decision_seconds"]) > 0
+    )
+
+    passed = (
+        create_result.promoted is True
+        and presented_status == OfferRequestStatus.OVERTIME_PRESENTED.value
+        and snapshot == minutes
+        and poll_1_ok
+        and poll_2_ok
+    )
+    return {
+        "owner_user_id": owner_id,
+        "requester_user_id": requester_id,
+        "offer_id": offer_id,
+        "offer_public_id": offer_public_id,
+        "overtime_minutes_snapshot": snapshot,
+        "normal_lifetime_minutes": normal_minutes,
+        "request_id": request_id,
+        "request_public_id": request_public_id,
+        "presented_status": presented_status,
+        "promoted_on_create": bool(create_result.promoted),
+        "owner_poll_1": {
+            "request_public_id": owner_current_1.get("request_public_id"),
+            "is_occupying": owner_current_1.get("is_occupying"),
+            "is_actionable": owner_current_1.get("is_actionable"),
+            "remaining_decision_seconds": owner_remaining_1,
+            "decision_deadline_at": owner_current_1.get("decision_deadline_at"),
+        },
+        "requester_poll_1": {
+            "request_public_id": requester_current_1.get("request_public_id"),
+            "remaining_decision_seconds": requester_remaining_1,
+            "is_actionable": requester_current_1.get("is_actionable"),
+        },
+        "owner_poll_2": {
+            "request_public_id": owner_current_2.get("request_public_id"),
+            "remaining_decision_seconds": owner_remaining_2,
+        },
+        "requester_poll_2": {
+            "request_public_id": requester_current_2.get("request_public_id"),
+            "remaining_decision_seconds": requester_remaining_2,
+        },
+        "detail_restore_ok": bool(
+            detail_owner.get("viewer_role") == "owner"
+            and detail_requester.get("viewer_role") == "requester"
+        ),
         "passed": passed,
     }
 
@@ -3401,6 +3629,8 @@ async def _main_async_with_session(
                 raise DriverRefusal(f"unsupported OT-OFFER-BOT-ORIGIN phase={phase!r}")
         elif args.scenario == "OT-REQ-IRAN-TO-IRAN":
             outcome = await _scenario_req_iran_to_iran(session, run_prefix, args.minutes)
+        elif args.scenario == "OT-UI-RECONNECT":
+            outcome = await _scenario_ui_reconnect(session, run_prefix, args.minutes)
         elif args.scenario == "OT-CANCEL-REQUESTER":
             outcome = await _scenario_cancel_requester(session, run_prefix, args.minutes)
         elif args.scenario == "OT-QUEUE-ORDER":

@@ -76,6 +76,7 @@ WIRED_IRAN_DRIVER_SCENARIOS = (
     "OT-CANCEL-REQUESTER",
     "OT-QUEUE-ORDER",
     "OT-FINAL-TAIL",
+    "OT-UI-RECONNECT",
 )
 WIRED_FOREIGN_DRIVER_SCENARIOS = (
     "OT-OFFER-BOT-ORIGIN",
@@ -1225,6 +1226,7 @@ def run_wired_drivers(args: argparse.Namespace) -> list[dict[str, Any]]:
                 "OT-CANCEL-REQUESTER",
                 "OT-QUEUE-ORDER",
                 "OT-FINAL-TAIL",
+                "OT-UI-RECONNECT",
             }
             else 4
         )
