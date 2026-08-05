@@ -2786,6 +2786,80 @@ def _finalize_successful_trade_ledger(
     )
 
 
+async def _finalize_overtime_trade_side_effects(
+    db: AsyncSession,
+    *,
+    ledger: OfferRequest | object | None,
+    offer: Offer | object | None,
+    approving_overtime: bool,
+    now: datetime | None = None,
+) -> None:
+    """Final-tail remainder expiry + owner-seat release after overtime success."""
+    if not approving_overtime or ledger is None or offer is None:
+        return
+
+    from core.offer_lifecycle import OfferLifecyclePhase, project_offer_lifecycle
+    from core.services.offer_expiry_service import (
+        OfferExpiryCommand,
+        OfferExpiryReason,
+        OfferExpirySourceSurface,
+        apply_offer_expiry,
+    )
+    from core.services.offer_overtime_request_service import (
+        invalidate_overtime_requests_for_offer,
+    )
+    from core.trading_settings import get_trading_settings_async
+
+    stamp = _normalize_naive_utc(now) or datetime.utcnow()
+    ts = await get_trading_settings_async()
+    normal_minutes = int(getattr(ts, "offer_expiry_minutes", 0) or 0)
+
+    # Partial approval in the final tail expires the leftover quantity immediately.
+    if getattr(offer, "status", None) == OfferStatus.ACTIVE:
+        projection = project_offer_lifecycle(
+            offer,
+            normal_lifetime_minutes=normal_minutes,
+            as_of=stamp,
+            has_final_tail_request=True,
+        )
+        past_final = (
+            projection.final_deadline_at is not None
+            and stamp >= _normalize_naive_utc(projection.final_deadline_at)
+        )
+        if projection.phase == OfferLifecyclePhase.FINAL_TAIL or past_final:
+            apply_offer_expiry(
+                offer,
+                OfferExpiryCommand(
+                    reason=OfferExpiryReason.TIME_LIMIT,
+                    source_surface=OfferExpirySourceSurface.SYSTEM,
+                    source_server=current_server(),
+                    require_active=True,
+                ),
+                now=stamp,
+            )
+
+    await invalidate_overtime_requests_for_offer(
+        db,
+        offer,
+        reason="overtime_trade_completed",
+        now=stamp,
+        promote_next=False,
+        normal_lifetime_minutes=normal_minutes,
+        flush=True,
+    )
+    owner_id = getattr(ledger, "offer_owner_user_id", None)
+    home = getattr(ledger, "request_home_server", None)
+    if owner_id is not None and home:
+        await promote_next_for_owner(
+            db,
+            request_home_server=home,
+            offer_owner_user_id=int(owner_id),
+            normal_lifetime_minutes=normal_minutes,
+            now=stamp,
+            flush=True,
+        )
+
+
 async def _reject_trade_offer_contention(
     db: AsyncSession,
     *,
@@ -3781,6 +3855,12 @@ async def _execute_trade_authoritatively(
         resulting_trade_id=getattr(response_trade_record, "id", None),
         approving_overtime=approving_overtime,
         overtime_decided_by_user_id=overtime_decided_by_user_id,
+    )
+    await _finalize_overtime_trade_side_effects(
+        db,
+        ledger=offer_request_ledger,
+        offer=offer,
+        approving_overtime=approving_overtime,
     )
     _apply_trade_counter_increment(owner_user, trade_quantity)
     mark_trade_phase("flushed_trade_state")

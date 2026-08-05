@@ -945,3 +945,200 @@ async def invalidate_request(
     if flush:
         await db.flush()
     return ledger
+
+
+async def list_nonterminal_overtime_requests(
+    db: AsyncSession,
+    *,
+    local_offer_id: int | None = None,
+    offer_public_id: str | None = None,
+    offer_owner_user_id: int | None = None,
+    requester_user_id: int | None = None,
+    request_home_server: str | None = None,
+    for_update: bool = False,
+) -> list[OfferRequest]:
+    """Load nonterminal overtime rows matching any provided filter.
+
+    Filters combine with AND. At least one identity filter is required so a bare
+    call cannot scan the whole ledger.
+    """
+    if (
+        local_offer_id is None
+        and not (offer_public_id or "").strip()
+        and offer_owner_user_id is None
+        and requester_user_id is None
+    ):
+        raise ValueError("list_nonterminal_overtime_requests requires an identity filter")
+
+    stmt = select(OfferRequest).where(
+        OfferRequest.workflow_kind == OfferRequestWorkflow.OVERTIME,
+        OfferRequest.result_status.in_(OVERTIME_NONTERMINAL_STATUSES),
+    )
+    if local_offer_id is not None:
+        stmt = stmt.where(OfferRequest.local_offer_id == int(local_offer_id))
+    public_id = (offer_public_id or "").strip()
+    if public_id:
+        stmt = stmt.where(OfferRequest.offer_public_id == public_id)
+    if offer_owner_user_id is not None:
+        stmt = stmt.where(OfferRequest.offer_owner_user_id == int(offer_owner_user_id))
+    if requester_user_id is not None:
+        stmt = stmt.where(OfferRequest.requester_user_id == int(requester_user_id))
+    if request_home_server is not None:
+        stmt = stmt.where(
+            OfferRequest.request_home_server
+            == normalize_server(request_home_server, current_server())
+        )
+    stmt = stmt.order_by(OfferRequest.id.asc())
+    if for_update:
+        stmt = stmt.with_for_update()
+    result = await db.execute(stmt)
+    return list(result.scalars().all())
+
+
+async def invalidate_overtime_requests(
+    db: AsyncSession,
+    *,
+    reason: str,
+    local_offer_id: int | None = None,
+    offer_public_id: str | None = None,
+    offer_owner_user_id: int | None = None,
+    requester_user_id: int | None = None,
+    request_home_server: str | None = None,
+    now: datetime | None = None,
+    promote_next: bool = True,
+    normal_lifetime_minutes: int | None = None,
+    flush: bool = True,
+) -> list[OfferRequest]:
+    """Invalidate matching nonterminal overtime rows and optionally free owner seats.
+
+    Promotion runs only after invalidation in the same transaction, and only for
+    scopes that lost an occupying/queued row. ``promote_next_for_owner`` still
+    revalidates each candidate offer before presenting it.
+    """
+    stamp = now or utc_now()
+    rows = await list_nonterminal_overtime_requests(
+        db,
+        local_offer_id=local_offer_id,
+        offer_public_id=offer_public_id,
+        offer_owner_user_id=offer_owner_user_id,
+        requester_user_id=requester_user_id,
+        request_home_server=request_home_server,
+        for_update=True,
+    )
+    scopes: set[tuple[int, str]] = set()
+    invalidated: list[OfferRequest] = []
+    for row in rows:
+        before = normalize_offer_request_status(row.result_status)
+        await invalidate_request(db, row, reason=reason, now=stamp, flush=False)
+        after = normalize_offer_request_status(row.result_status)
+        if before != after and after == OfferRequestStatus.OVERTIME_INVALIDATED:
+            invalidated.append(row)
+            owner_id = getattr(row, "offer_owner_user_id", None)
+            home = getattr(row, "request_home_server", None)
+            if owner_id is not None and home:
+                scopes.add((int(owner_id), normalize_server(home, current_server())))
+    if flush:
+        await db.flush()
+    if (
+        promote_next
+        and scopes
+        and normal_lifetime_minutes is not None
+    ):
+        for owner_id, home in sorted(scopes):
+            await promote_next_for_owner(
+                db,
+                request_home_server=home,
+                offer_owner_user_id=owner_id,
+                normal_lifetime_minutes=int(normal_lifetime_minutes),
+                now=stamp,
+                flush=flush,
+            )
+    return invalidated
+
+
+async def invalidate_overtime_requests_for_offer(
+    db: AsyncSession,
+    offer: Offer | object,
+    *,
+    reason: str,
+    now: datetime | None = None,
+    promote_next: bool = True,
+    normal_lifetime_minutes: int | None = None,
+    flush: bool = True,
+) -> list[OfferRequest]:
+    local_id = getattr(offer, "id", None)
+    public_id = (getattr(offer, "offer_public_id", None) or "").strip() or None
+    home = normalize_server(getattr(offer, "home_server", None), current_server())
+    return await invalidate_overtime_requests(
+        db,
+        reason=reason,
+        local_offer_id=int(local_id) if local_id is not None else None,
+        offer_public_id=public_id,
+        request_home_server=home,
+        now=now,
+        promote_next=promote_next,
+        normal_lifetime_minutes=normal_lifetime_minutes,
+        flush=flush,
+    )
+
+
+async def invalidate_overtime_requests_for_user(
+    db: AsyncSession,
+    *,
+    user_id: int,
+    reason: str,
+    request_home_server: str | None = None,
+    now: datetime | None = None,
+    promote_next: bool = True,
+    normal_lifetime_minutes: int | None = None,
+    flush: bool = True,
+) -> list[OfferRequest]:
+    """Invalidate every nonterminal overtime row where the user is owner or requester."""
+    home = normalize_server(request_home_server, current_server())
+    as_owner = await invalidate_overtime_requests(
+        db,
+        reason=reason,
+        offer_owner_user_id=int(user_id),
+        request_home_server=home,
+        now=now,
+        promote_next=False,
+        flush=False,
+    )
+    as_requester = await invalidate_overtime_requests(
+        db,
+        reason=reason,
+        requester_user_id=int(user_id),
+        request_home_server=home,
+        now=now,
+        promote_next=False,
+        flush=False,
+    )
+    # Deduplicate by id while preserving order.
+    seen: set[int] = set()
+    merged: list[OfferRequest] = []
+    scopes: set[tuple[int, str]] = set()
+    for row in (*as_owner, *as_requester):
+        row_id = int(getattr(row, "id", 0) or 0)
+        if row_id and row_id in seen:
+            continue
+        if row_id:
+            seen.add(row_id)
+        merged.append(row)
+        owner_id = getattr(row, "offer_owner_user_id", None)
+        row_home = getattr(row, "request_home_server", None)
+        if owner_id is not None and row_home:
+            scopes.add((int(owner_id), normalize_server(row_home, current_server())))
+    if flush:
+        await db.flush()
+    stamp = now or utc_now()
+    if promote_next and scopes and normal_lifetime_minutes is not None:
+        for owner_id, row_home in sorted(scopes):
+            await promote_next_for_owner(
+                db,
+                request_home_server=row_home,
+                offer_owner_user_id=owner_id,
+                normal_lifetime_minutes=int(normal_lifetime_minutes),
+                now=stamp,
+                flush=flush,
+            )
+    return merged

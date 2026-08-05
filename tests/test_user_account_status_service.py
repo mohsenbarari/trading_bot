@@ -73,8 +73,15 @@ class UserAccountStatusTransitionTests(unittest.IsolatedAsyncioTestCase):
             new=self.enqueue_account_notice,
         )
         self.enqueue_account_notice_patcher.start()
+        self.invalidate_overtime = AsyncMock()
+        self.invalidate_overtime_patcher = patch(
+            "core.services.user_account_status_service._invalidate_overtime_for_inactive_user",
+            new=self.invalidate_overtime,
+        )
+        self.invalidate_overtime_patcher.start()
 
     async def asyncTearDown(self):
+        self.invalidate_overtime_patcher.stop()
         self.enqueue_account_notice_patcher.stop()
 
     async def test_build_activation_join_line_closes_bot_and_tolerates_failures(self):
@@ -136,6 +143,7 @@ class UserAccountStatusTransitionTests(unittest.IsolatedAsyncioTestCase):
         send_telegram.assert_not_awaited()
         remove_from_channel.assert_not_awaited()
         self.enqueue_account_notice.assert_awaited_once()
+        self.invalidate_overtime.assert_awaited_once()
 
     async def test_transition_user_account_status_logs_channel_removal_failure(self):
         user = SimpleNamespace(

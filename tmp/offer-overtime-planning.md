@@ -868,6 +868,20 @@ The next gate is not a question but an approval: the roadmap below may begin onl
 
 **Exit criteria:** terminal offer/account state can never yield a later trade from a stale overtime request.
 
+#### Stage 6 completion notes
+
+**Status:** complete in code on `candidate/offer-overtime` at `STAGE6_SHA`.
+
+**Scope delivered.** Central overtime invalidation lives in `offer_overtime_request_service`: `list_nonterminal_overtime_requests`, `invalidate_overtime_requests`, `invalidate_overtime_requests_for_offer`, and `invalidate_overtime_requests_for_user` (owner or requester). `expire_offer_authoritatively` / `expire_offers_authoritatively` fan out invalidation after every shared expiry reason (manual, cancel-all, time-limit, market-close, recovery, telegram-fail, etc.), then promote freed owner seats once per scope. User deletion (which bypasses the expiry service) and account INACTIVE transitions clear the user's nonterminal overtime rows. After overtime trade success, `_finalize_overtime_trade_side_effects` expires any final-tail remainder, clears leftover nonterminal rows on that offer, and promotes the next queued request. Final-tail deferral of automatic TIME_LIMIT expiry remains Stage 3's occupying-status gate; market/manual/account terminals still kill presented rows immediately.
+
+**Affected components:** `core/services/offer_overtime_request_service.py`, `core/services/offer_expiry_service.py`, `core/services/user_deletion_service.py`, `core/services/user_account_status_service.py`, `api/routers/trades.py`, tests `tests/test_offer_overtime_terminal_events.py`, plus patches in expiry/account/deletion suites.
+
+**Tests and results.** Targeted suites green via `make test-unit MODULES="tests.test_offer_overtime_terminal_events tests.test_offer_expiry_service tests.test_user_account_status_service tests.test_user_deletion_service tests.test_trades_router_overtime_integration tests.test_offer_overtime_request_service"` (53 tests): bulk invalidate by offer/user, expiry fan-out, account-inactive hook assertion, and prior Stage 4/5 regressions.
+
+**Deviations and known gaps.** First, Telegram delivery-job / WebApp prompt cleanup still rides durable status transitions only; queue executors that observe those statuses remain Stages 8–12. Second, a dedicated `OfferExpiryReason` for final-tail partial remainder was not added — remainder expiry reuses `TIME_LIMIT` under system surface. Third, the Stage 1 real-database migration gate remains open for merge/deploy.
+
+**Next stage prerequisites.** Stage 7 may begin. It must extend signed internal trade/request commands and sync payloads so overtime workflow state converges across servers without foreign local decisions.
+
 ### Stage 7 — Cross-Server Commands, Sync, and Recovery
 
 **Goal:** preserve home-server authority through both directions of the existing topology.

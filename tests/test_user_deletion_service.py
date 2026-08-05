@@ -42,8 +42,14 @@ class DeleteUserAccountTests(unittest.IsolatedAsyncioTestCase):
             new=self.enqueue_deletion_notice,
         )
         self.enqueue_deletion_notice_patcher.start()
+        self.invalidate_overtime_patcher = patch(
+            "core.services.user_deletion_service._invalidate_overtime_for_deleted_user",
+            new=AsyncMock(),
+        )
+        self.invalidate_overtime_patcher.start()
 
     async def asyncTearDown(self):
+        self.invalidate_overtime_patcher.stop()
         self.enqueue_deletion_notice_patcher.stop()
 
     async def test_queue_mode_persists_deletion_notice_before_commit(self):

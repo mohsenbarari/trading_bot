@@ -418,6 +418,29 @@ async def _close_linked_customer_relations(db: AsyncSession, user: User) -> None
         relation.deleted_at = relation.deleted_at or now
 
 
+async def _invalidate_overtime_for_deleted_user(
+    db: AsyncSession,
+    user: User,
+    *,
+    now,
+) -> None:
+    """Clear nonterminal overtime rows when deletion bypasses offer expiry service."""
+    from core.services.offer_overtime_request_service import (
+        invalidate_overtime_requests_for_user,
+    )
+    from core.trading_settings import get_trading_settings_async
+
+    ts = await get_trading_settings_async()
+    await invalidate_overtime_requests_for_user(
+        db,
+        user_id=int(user.id),
+        reason="user_deleted",
+        request_home_server=current_server(),
+        now=now,
+        normal_lifetime_minutes=int(getattr(ts, "offer_expiry_minutes", 0) or 0),
+    )
+
+
 async def _delete_user_account_in_transaction(
     db: AsyncSession,
     user: User,
@@ -464,6 +487,8 @@ async def _delete_user_account_in_transaction(
         offer.expired_by_actor_user_id = None
         offer.expire_source_surface = OfferExpirySourceSurface.SYSTEM.value
         offer.expire_source_server = current_server()
+
+    await _invalidate_overtime_for_deleted_user(db, user, now=expired_at)
 
     await _soft_revoke_pending_invitations_for_user_identity(
         db,
