@@ -1076,6 +1076,20 @@ The next gate is not a question but an approval: the roadmap below may begin onl
 
 **Exit criteria:** channel and WebApp present the same lifecycle without direct-send or message-edit races.
 
+#### Stage 13 completion notes
+
+**Status:** complete in code on `candidate/offer-overtime` at `d03e8b47`.
+
+**Scope delivered.** Channel renderer appends inventory M38 `⏳` as its own trailing line during overtime/final-tail and retains it on terminal posts only when `overtime_trade_committed`. Cash/future text and trade tags (`🤝` / `❌`) are unchanged. Final-tail strips public trade buttons via `accepts_new_public_interaction=False`. Authoritative queue payloads (`build_authoritative_offer_delivery_payload`) project lifecycle the same way. Because pure wall-clock phase changes do not bump `Offer.version_id`, a dedicated feeder path enqueues `OVERTIME_CHANNEL_EDIT` / `FINAL_TAIL_CHANNEL_EDIT` at the current offer version (freshness-safe; distinct dedupe keys) and records the rendered phase on `OfferPublicationState.state_metadata["channel_lifecycle_phase"]`. QUEUE_V1 still no-ops legacy `apply_offer_channel_state`; legacy ACTIVE edits use `editMessageText` when the marker or final-tail lock requires it. Migration `e8a4b5c6d7e9` adds the two enum values after `d7f3e9a1b2c4`.
+
+**Affected components:** `core/services/telegram_offer_channel_service.py`, `core/telegram_delivery_offer_freshness.py`, `core/services/telegram_offer_queue_service.py`, `core/telegram_offer_queue_feeder.py`, `core/telegram_delivery_queue_contract.py`, channel-editor allowlists/relink policy, migration `e8a4b5c6d7e9`.
+
+**Tests and results.** Backend unit green via `python3 -m unittest` for channel service, offer freshness, freshness router, runtime composition, and offer-success contract: overtime marker placement, final-tail button strip, terminal retain/remove with trade tags, lifecycle actions in freshness allowlist, no regression on normal/terminal channel edits.
+
+**Deviations and known gaps.** First, synthetic `source_version` overrides were rejected because freshness requires `source_version == offer.version_id`; dedicated actions replace that design. Second, Stage 1 real-database migration gate remains open for merge/deploy (includes this enum migration). Third, deep queue race integration against a live Postgres feeder is deferred to Stage 15 matrix.
+
+**Next stage prerequisites.** Stage 14 may begin (audit/reconciliation/diagnostics).
+
 ### Stage 14 — Audit, Reconciliation, and Operational Diagnostics
 
 **Goal:** make every overtime decision diagnosable without exposing private data.
