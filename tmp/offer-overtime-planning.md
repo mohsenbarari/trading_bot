@@ -1016,6 +1016,20 @@ The next gate is not a question but an approval: the roadmap below may begin onl
 
 **Exit criteria:** an eligible owner receives a safe approval prompt on every authenticated WebApp page without disturbing existing session controls.
 
+#### Stage 11 completion notes
+
+**Status:** complete in code on `candidate/offer-overtime` at `4d49590e`.
+
+**Scope delivered.** Authenticated-shell overtime surface mounts beside session approval (`OvertimeApprovalModal` after `SessionApprovalModal`). New shared arbitration (`authenticatedOverlayPriority`) blocks overtime while session/recovery is open; overtime resumes afterward with remaining server deadline time. `useOvertimeApprovalRuntime` polls Stage 10 GETs (plus visibility/`ws:reconnect`), gates owner prompts to the primary session only (explicit multi-tab rule; no cross-tab handoff), loads public offer text for the owner card, and exposes approve/reject plus requester queued/countdown + `لغو درخواست` (M12/M15/M21/M22/M35/M36/M37). Explicit-save 0–10 stepper (`OfferOvertimePreferencePanel` + `AppNumberStepper`) lands in Settings and Market for eligible owners only (not accountant / not tier-2). `CurrentUserSummary` carries `offer_overtime_minutes`. Inventory strings live in `frontend/src/constants/offerOvertimeCopy.ts` (M9/M4–M8/M35–M36 mirrored in bot copy hub).
+
+**Affected components:** `frontend/src/components/AppAuthenticatedShell.vue`, `SessionApprovalModal.vue`, `OvertimeApprovalModal.vue`, `OfferOvertimePreferencePanel.vue`, `composables/useOvertimeApprovalRuntime.ts`, `authenticatedOverlayPriority.ts`, `services/offerOvertimeApi.ts`, `constants/offerOvertimeCopy.ts`, `utils/currentUser.ts`, `views/SettingsView.vue`, `views/MarketView.vue`, `core/offer_overtime_bot_copy.py`, tests listed below.
+
+**Tests and results.** Frontend unit green via `npm run test:unit:run -- src/composables/useOvertimeApprovalRuntime.test.ts src/components/OfferOvertimePreferencePanel.test.ts src/components/AppAuthenticatedShell.test.ts src/views/SettingsView.test.ts src/views/MarketView.test.ts` (55 tests): primary-session gate, session-priority hide, countdown seed, cancel→M15, preference eligibility/save/M6, shell stub mount, Settings/Market regressions.
+
+**Deviations and known gaps.** First, private overtime state remains HTTP poll–driven (2s) because Stage 10 did not add a private WS event. Second, owner offer body is reconstructed from `GET /api/offers/public/{id}` rather than an overtime-specific snapshot endpoint. Third, remote-home decision `409` still applies (Stage 7). Fourth, market card lifecycle visuals remain Stage 12. Fifth, the Stage 1 real-database migration gate remains open for merge/deploy.
+
+**Next stage prerequisites.** Stage 12 may begin. It must render server lifecycle on market/history cards (green overtime bar, `⏳` placement, reduced-motion) without client-side phase invention.
+
 ### Stage 12 — WebApp Market Cards and History Presentation
 
 **Goal:** render the confirmed lifecycle visibly and without layout regressions.
