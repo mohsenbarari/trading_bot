@@ -870,7 +870,7 @@ The next gate is not a question but an approval: the roadmap below may begin onl
 
 #### Stage 6 completion notes
 
-**Status:** complete in code on `candidate/offer-overtime` at `STAGE6_SHA`.
+**Status:** complete in code on `candidate/offer-overtime` at `066a809c`.
 
 **Scope delivered.** Central overtime invalidation lives in `offer_overtime_request_service`: `list_nonterminal_overtime_requests`, `invalidate_overtime_requests`, `invalidate_overtime_requests_for_offer`, and `invalidate_overtime_requests_for_user` (owner or requester). `expire_offer_authoritatively` / `expire_offers_authoritatively` fan out invalidation after every shared expiry reason (manual, cancel-all, time-limit, market-close, recovery, telegram-fail, etc.), then promote freed owner seats once per scope. User deletion (which bypasses the expiry service) and account INACTIVE transitions clear the user's nonterminal overtime rows. After overtime trade success, `_finalize_overtime_trade_side_effects` expires any final-tail remainder, clears leftover nonterminal rows on that offer, and promotes the next queued request. Final-tail deferral of automatic TIME_LIMIT expiry remains Stage 3's occupying-status gate; market/manual/account terminals still kill presented rows immediately.
 
