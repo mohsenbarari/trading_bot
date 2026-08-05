@@ -69,6 +69,31 @@ class CoinRateEngineTests(unittest.TestCase):
         self.assertGreaterEqual(low.upper_project_price - low.estimated_project_price, low.estimated_project_price - low.lower_project_price)
         self.assertLess(low.upper_project_price - low.lower_project_price, 5_000)
 
+    def test_tomorrow_anchor_uses_same_form_paper_herat_basis(self) -> None:
+        self.add("gold-old", instrument="MELTED_GOLD_PRIVATE", price=803_000_000, unit="IRT_PER_MESGHAL_750", at="2026-08-04T10:00:00Z", settlement="TOMORROW", form="PAPER_NORMAL")
+        self.add("gold-now", instrument="MELTED_GOLD_PRIVATE", price=810_000_000, unit="IRT_PER_MESGHAL_750", at="2026-08-04T10:09:30Z", settlement="TOMORROW", form="PAPER_NORMAL")
+        self.add("imam", instrument="COIN_IMAM", price=186_900, unit="PROJECT_THOUSAND_TOMAN", at="2026-08-04T10:01:00Z", settlement="TOMORROW", form="PHYSICAL", event_type="TRADE")
+        self.add("herat-old", instrument="USD_HERAT", price=1_000_000, unit="IRT_PER_USD", at="2026-08-04T10:00:00Z", settlement="TOMORROW", form="PAPER_NORMAL")
+        self.add("herat-now", instrument="USD_HERAT", price=1_020_000, unit="IRT_PER_USD", at="2026-08-04T10:09:30Z", settlement="TOMORROW", form="PAPER_NORMAL")
+        self.connection.commit()
+        imam = self.rate("IMAM", "TOMORROW")
+        self.assertEqual(imam.estimated_project_price, 189_700)
+        self.assertEqual(imam.herat_source, "HERAT_PAPER_TOMORROW")
+        self.assertIn("HERAT_BASIS_BRIDGE", imam.method)
+        self.assertGreater(imam.herat_basis_relative, 0.01)
+
+    def test_herat_bridge_never_mixes_anchor_and_current_forms(self) -> None:
+        self.add("gold-old", instrument="MELTED_GOLD_PRIVATE", price=803_000_000, unit="IRT_PER_MESGHAL_750", at="2026-08-04T10:00:00Z", settlement="TOMORROW", form="PAPER_NORMAL")
+        self.add("gold-now", instrument="MELTED_GOLD_PRIVATE", price=810_000_000, unit="IRT_PER_MESGHAL_750", at="2026-08-04T10:09:30Z", settlement="TOMORROW", form="PAPER_NORMAL")
+        self.add("imam", instrument="COIN_IMAM", price=186_900, unit="PROJECT_THOUSAND_TOMAN", at="2026-08-04T10:01:00Z", settlement="TOMORROW", form="PHYSICAL", event_type="TRADE")
+        self.add("herat-today", instrument="USD_HERAT", price=1_000_000, unit="IRT_PER_USD", at="2026-08-04T10:00:00Z", settlement="TODAY", form="PAPER_NORMAL")
+        self.add("herat-tomorrow", instrument="USD_HERAT", price=1_020_000, unit="IRT_PER_USD", at="2026-08-04T10:09:30Z", settlement="TOMORROW", form="PAPER_NORMAL")
+        self.connection.commit()
+        imam = self.rate("IMAM", "TOMORROW")
+        self.assertEqual(imam.estimated_project_price, 188_500)
+        self.assertNotIn("HERAT_BASIS_BRIDGE", imam.method)
+        self.assertIsNone(imam.herat_source)
+
 
 if __name__ == "__main__":
     unittest.main()
