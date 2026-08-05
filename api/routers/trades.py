@@ -111,6 +111,11 @@ from api.deps import EffectiveOwnerActor, get_current_user, get_effective_owner_
 from core.server_routing import KNOWN_SERVERS, current_server, is_remote_home, normalize_server
 from core.telegram_trade_callbacks import build_channel_trade_callback_data
 from core.trade_forwarding import forward_trade_to_home_server, verify_internal_signature
+from core.trade_forward_pending import (
+    ambiguous_forward_pending_response,
+    mark_trade_forward_pending,
+    reconcile_trade_forward_pending,
+)
 from core.trading_observability import log_trading_event
 from core.telegram_delivery_runtime_policy import (
     TelegramDeliveryRuntimeConfigurationError,
@@ -3174,6 +3179,23 @@ def _within_in_flight_finalization_grace(
     return transit_seconds <= float(settings.trade_forward_grace_seconds)
 
 
+async def _reconcile_ambiguous_trade_forward(idempotency_key: str) -> None:
+    """Background replay of a retained forward payload (no local ledger write)."""
+    try:
+        await reconcile_trade_forward_pending(idempotency_key)
+    except Exception as exc:
+        log_trading_event(
+            logger,
+            "trade_forward.pending_reconcile_error",
+            level="warning",
+            action="trade_forward",
+            result="failure",
+            error_class=type(exc).__name__,
+            source_server=current_server(),
+            has_idempotency_key=True,
+        )
+
+
 async def _forward_trade_if_remote_home(
     db: AsyncSession,
     trade_data: TradeCreate,
@@ -3182,6 +3204,7 @@ async def _forward_trade_if_remote_home(
     *,
     request_source_surface: OfferRequestSourceSurface | str = OfferRequestSourceSurface.WEBAPP,
     request_pre_gated: bool = False,
+    background_tasks: BackgroundTasks | None = None,
 ) -> Optional[JSONResponse]:
     offer = await db.get(Offer, trade_data.offer_id)
     if not offer or not is_remote_home(offer.home_server):
@@ -3221,6 +3244,40 @@ async def _forward_trade_if_remote_home(
         delegated_actor=getattr(actor_user, "id", None) != owner_user.id,
     )
     status_code, body = await forward_trade_to_home_server(offer.home_server, payload)
+
+    # Uncertain delivery after send: retain the key, show M18, reconcile later.
+    # Definite pre-send failures (503) retain nothing and keep the retry copy.
+    if status_code == 504 and (trade_data.idempotency_key or "").strip():
+        marked = await mark_trade_forward_pending(
+            idempotency_key=trade_data.idempotency_key,
+            home_server=normalize_server(offer.home_server),
+            payload=payload,
+        )
+        if marked and background_tasks is not None:
+            background_tasks.add_task(
+                _reconcile_ambiguous_trade_forward,
+                str(trade_data.idempotency_key).strip(),
+            )
+        log_trading_event(
+            logger,
+            "trade_forward.remote_home_ambiguous",
+            level="warning",
+            action="trade_forward",
+            result="pending",
+            source_server=payload["source_server"],
+            target_server=normalize_server(offer.home_server),
+            offer_id=trade_data.offer_id,
+            status_code=status_code,
+            has_idempotency_key=True,
+        )
+        return JSONResponse(
+            status_code=status.HTTP_202_ACCEPTED,
+            content=ambiguous_forward_pending_response(
+                idempotency_key=str(trade_data.idempotency_key).strip(),
+                offer_public_id=offer_public_id,
+            ),
+        )
+
     if status_code >= 400:
         log_trading_event(
             logger,
@@ -4430,6 +4487,7 @@ async def create_trade(
             edge_received_at,
             request_source_surface=OfferRequestSourceSurface.WEBAPP,
             request_pre_gated=trade_contention_lease_was_pre_gated(trade_contention_lease),
+            background_tasks=background_tasks,
         )
         if forwarded_response is not None:
             return forwarded_response

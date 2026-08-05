@@ -489,11 +489,13 @@ def setup_offer_events():
 def _offer_request_sync_payload(target, connection=None) -> Dict[str, Any]:
     source_surface = getattr(target, "request_source_surface", None)
     result_status = getattr(target, "result_status", None)
+    workflow_kind = getattr(target, "workflow_kind", None)
     commission_rate = getattr(target, "customer_commission_rate_snapshot", None)
     resulting_trade_number = _offer_request_resulting_trade_number(target, connection=connection)
     return {
         "id": target.id,
         "version_id": getattr(target, "version_id", None) or 1,
+        "request_public_id": getattr(target, "request_public_id", None),
         "request_home_server": target.request_home_server,
         "local_offer_id": target.local_offer_id,
         "offer_public_id": target.offer_public_id,
@@ -503,6 +505,15 @@ def _offer_request_sync_payload(target, connection=None) -> Dict[str, Any]:
         "request_source_server": target.request_source_server,
         "requested_quantity": target.requested_quantity,
         "idempotency_key": target.idempotency_key,
+        "workflow_kind": workflow_kind.value if hasattr(workflow_kind, "value") else workflow_kind,
+        "offer_owner_user_id": getattr(target, "offer_owner_user_id", None),
+        "queue_sequence": getattr(target, "queue_sequence", None),
+        "presented_at": _isoformat_or_none(getattr(target, "presented_at", None)),
+        "decision_deadline_at": _isoformat_or_none(getattr(target, "decision_deadline_at", None)),
+        "decided_by_user_id": getattr(target, "decided_by_user_id", None),
+        "terminal_reason": getattr(target, "terminal_reason", None),
+        # telegram_delivery_job_id is local-only (parity); message id syncs for audit mirrors.
+        "telegram_message_id": getattr(target, "telegram_message_id", None),
         "received_at": _isoformat_or_none(getattr(target, "received_at", None)),
         "decided_at": _isoformat_or_none(getattr(target, "decided_at", None)),
         "result_status": result_status.value if hasattr(result_status, "value") else result_status,

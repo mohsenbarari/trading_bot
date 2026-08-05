@@ -897,6 +897,20 @@ The next gate is not a question but an approval: the roadmap below may begin onl
 
 **Exit criteria:** one logical request and one terminal result survive retries, outages, and sync reordering.
 
+#### Stage 7 completion notes
+
+**Status:** complete in code on `candidate/offer-overtime` at `STAGE7_SHA`.
+
+**Scope delivered.** OfferRequest sync payload now carries overtime workflow fields (`workflow_kind`, `request_public_id`, owner/queue/clock stamps, `terminal_reason`, `telegram_message_id`) while keeping `telegram_delivery_job_id` local-only. Sync's `TERMINAL_OFFER_REQUEST_STATUSES` includes overtime terminals so version-gated upserts cannot revive a finished overtime row; nonterminal overtime rows remain mutable under monotonic `version_id`. Forwarding-server ambiguous timeouts retain a Redis pending marker (`core/trade_forward_pending.py`), return HTTP `202` with inventory M18 (`⏳ در حال بررسی درخواست...`), and schedule a background reconcile that re-forwards the same signed payload without creating a local overtime ledger. Definite pre-send failures stay `503` with no retention (bot surfaces inventory M19). Bot remote-home handling no longer treats overtime/`forward_pending` `202` as a completed trade; it uses M10/M11/M18 as appropriate. User/Offer overtime sync from Stage 2 is unchanged. Approve/reject remain home-server-only.
+
+**Affected components:** `core/events.py`, `api/routers/sync.py`, `core/sync_registry.py`, `core/trade_forward_pending.py`, `api/routers/trades.py`, `bot/handlers/trade_execute.py`, tests `tests/test_offer_request_overtime_sync.py`, `tests/test_trade_forward_pending.py`.
+
+**Tests and results.** Targeted suites green via `make test-unit MODULES="tests.test_offer_request_overtime_sync tests.test_trade_forward_pending tests.test_trades_router_helpers tests.test_trading_production_contract_matrix tests.test_server_routing_and_trade_forwarding tests.test_offer_sync_payload"` (44 tests): overtime sync fields, terminal-set membership, pending mark/reconcile, M18 on 504, no retain on 503, and existing forward payload contracts.
+
+**Deviations and known gaps.** First, background reconcile is a single replay task plus Redis TTL/attempt budget, not the full Stage 14 diagnostics worker. Second, rich bot requester status edits after remote overtime create remain Stage 9; this stage only prevents false “trade completed” acks and applies approved M10/M11/M18/M19 copy on the forward path. Third, signed internal approve/reject/cancel forwards were not added because home-only decision endpoints already refuse foreign authority. Fourth, the Stage 1 real-database migration gate remains open for merge/deploy.
+
+**Next stage prerequisites.** Stage 8 may begin. It must add the durable Telegram private approval delivery action and start the owner clock only after a message id is persisted.
+
 ### Stage 8 — Telegram Delivery Queue Contract
 
 **Goal:** add owner approval delivery without bypassing the queue or harming current Telegram flows.

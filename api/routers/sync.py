@@ -225,6 +225,14 @@ TERMINAL_OFFER_REQUEST_STATUSES = {
     "completed_trade",
     "duplicate_replay",
     "failed_internal",
+    # Overtime terminals. Nonterminal overtime rows may still UPDATE across
+    # sync with monotonic version_id; these statuses are immutable once applied.
+    "overtime_rejected_by_owner",
+    "overtime_decision_expired",
+    "overtime_cancelled_by_requester",
+    "overtime_invalidated",
+    "overtime_delivery_expired",
+    "overtime_rejected_requester_limit",
 }
 RELATION_LINK_FIELDS = {
     "accountant_relations": "accountant_user_id",

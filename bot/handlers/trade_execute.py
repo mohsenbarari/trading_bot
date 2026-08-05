@@ -49,6 +49,11 @@ from core.services.telegram_offer_queue_service import (
 )
 from core.server_routing import current_server, is_remote_home
 from core.trade_forwarding import forward_trade_to_home_server
+from core.trade_forward_pending import (
+    AMBIGUOUS_FORWARD_PENDING_MESSAGE,
+    mark_trade_forward_pending,
+    reconcile_trade_forward_pending,
+)
 from core.trading_observability import log_trading_event
 from core.telegram_delivery_runtime_policy import (
     TelegramDeliveryRuntimeMode,
@@ -938,6 +943,55 @@ async def _handle_channel_trade(
                 )
                 return
 
+            body_dict = body if isinstance(body, dict) else {}
+            workflow = body_dict.get("workflow")
+
+            # Ambiguous timeout: retain pending marker (M18) and reconcile later.
+            if status_code == 504:
+                try:
+                    await session.rollback()
+                except Exception as exc:
+                    logger.debug(f"Failed to rollback before remote-home completion recovery: {exc}")
+                await mark_trade_forward_pending(
+                    idempotency_key=idempotency_key,
+                    home_server=offer_home_server,
+                    payload=forward_payload,
+                )
+                asyncio.create_task(reconcile_trade_forward_pending(idempotency_key))
+                _schedule_remote_trade_success_recovery(
+                    bot=bot,
+                    user=user,
+                    offer_snapshot=offer_snapshot,
+                    amount=actual_amount,
+                    idempotency_key=idempotency_key,
+                    fallback_chat_id=callback_chat_id,
+                )
+                await answer_callback_query_via_runtime(
+                    callback,
+                    AMBIGUOUS_FORWARD_PENDING_MESSAGE,
+                    show_alert=False,
+                )
+                return
+
+            # Overtime / forward-pending accepted without a completed trade.
+            if status_code == 202 and workflow in {"overtime", "forward_pending"}:
+                if workflow == "forward_pending":
+                    await mark_trade_forward_pending(
+                        idempotency_key=idempotency_key,
+                        home_server=offer_home_server,
+                        payload=forward_payload,
+                    )
+                    asyncio.create_task(reconcile_trade_forward_pending(idempotency_key))
+                    ack = AMBIGUOUS_FORWARD_PENDING_MESSAGE
+                else:
+                    result_status = str(body_dict.get("result_status") or "")
+                    if result_status == "overtime_queued":
+                        ack = "⏳ درخواست معامله ثبت شد و در صف بررسی است."
+                    else:
+                        ack = "⏳ درخواست در حال بررسی است."
+                await answer_callback_query_via_runtime(callback, ack, show_alert=False)
+                return
+
             if 200 <= status_code < 300:
                 try:
                     if callback.message and callback.message.chat.id != settings.channel_id:
@@ -964,27 +1018,16 @@ async def _handle_channel_trade(
                 )
                 return
 
-            if status_code == 504:
-                try:
-                    await session.rollback()
-                except Exception as exc:
-                    logger.debug(f"Failed to rollback before remote-home completion recovery: {exc}")
-                _schedule_remote_trade_success_recovery(
-                    bot=bot,
-                    user=user,
-                    offer_snapshot=offer_snapshot,
-                    amount=actual_amount,
-                    idempotency_key=idempotency_key,
-                    fallback_chat_id=callback_chat_id,
-                )
+            # Definite pre-send / peer-down failure (M19).
+            if status_code == 503:
                 await answer_callback_query_via_runtime(
                     callback,
-                    "درخواست معامله ارسال شد؛ نتیجه تا چند لحظه دیگر همگام می‌شود.",
-                    show_alert=False,
+                    "درخواست ارسال نشد. لطفاً دوباره تلاش کنید.",
+                    show_alert=True,
                 )
                 return
 
-            detail = body.get("detail") if isinstance(body, dict) else None
+            detail = body_dict.get("detail")
             await answer_callback_query_via_runtime(
                 callback,
                 f"❌ {detail or 'امکان انجام این معامله وجود ندارد.'}",
