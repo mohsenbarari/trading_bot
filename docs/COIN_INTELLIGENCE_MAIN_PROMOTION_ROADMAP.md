@@ -2318,3 +2318,24 @@ bundle قبلی قابل انتخاب‌اند و Collectorها همچنان ف�
   کافی محسوب نمی‌شود. گام بعد جمع‌آوری ورودی‌های واقعی staging در چند ساعت
   کاری و تفکیک آن‌ها از fixture/synthetic audit است. تا آن زمان تمام flagهای
   selection و auto-selection و production خاموش می‌مانند.
+
+### P7-I — اتصال ورودی‌های staging و backfill leakage-safe — 2026-08-05 — IN PROGRESS
+
+- یک bridge محلی و idempotent در
+  `scripts/bridge_staging_market_inputs.py` اضافه شد. این bridge شبکه باز
+  نمی‌کند و فقط داده‌های تولیدشده توسط collectorها و conversation pipeline را
+  به Market Store canonical projection می‌کند.
+- آبشدهٔ عمومی، جریان آبشده، هرات، اونس، Tether و IME از مخزن محلی قدیمی با
+  تبدیل واحد صریح وارد می‌شوند. هراتِ تومان به ریال ×۱۰ تبدیل می‌شود؛ USDT
+  مستقل از Herat می‌ماند و IME حباب مستقل وارد signal اصلی نمی‌شود.
+- آفرها و معاملات گروه‌های فعلی (`GROUP_1`/`GROUP_2`) و export قدیمیِ بدون
+  metadata گروه (`GROUP_HISTORICAL`) با quality gate فعلی وارد می‌شوند؛ متن،
+  هویت و شناسهٔ خام عبور نمی‌کند. فکت‌های `IGNORED` برای audit می‌مانند ولی در
+  Snapshot قابل استفاده نیستند.
+- backfill با `available_at_utc` محافظه‌کارانه انجام می‌شود؛ بنابراین استفاده
+  از آن برای warm-state مجاز است، اما ارزیابی گذشته باید replay جداگانه و
+  cutoff زمانی داشته باشد. جزئیات در
+  `docs/COIN_INTELLIGENCE_STAGING_INPUT_BRIDGE.md` آمده است.
+- گیت باقی‌مانده: تکمیل backfill اولیه، فعال‌سازی timer محلی پس از صحت‌سنجی، و
+  بررسی پوشش/تأخیر هر منبع. این مرحله به‌تنهایی مجوز promotion یا روشن‌کردن
+  selection/auto-selection نیست.
