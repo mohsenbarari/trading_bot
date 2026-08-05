@@ -89,8 +89,51 @@ TEHRAN = ZoneInfo("Asia/Tehran")
 DEFAULT_STATE = RUNTIME_ROOT / "state.json"
 DEFAULT_WRITE_TOKEN_FILE = RUNTIME_ROOT / "manual-entry.token"
 DEFAULT_GROUP_LIVE_CONTROL = RUNTIME_ROOT / "group-live-input-control.json"
+DEFAULT_DASHBOARD_CREDENTIALS_FILE = RUNTIME_ROOT / "dashboard-credentials.json"
 MAX_MANUAL_FORM_BYTES = 16_384
 PERSIAN_DIGITS = str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789")
+
+
+def load_dashboard_credentials() -> tuple[str, str]:
+    """Return (username, password) from env or a mode-0600 runtime file.
+
+    Environment wins when both are set:
+    ``COIN_ESTIMATOR_DASHBOARD_USER`` / ``COIN_ESTIMATOR_DASHBOARD_PASSWORD``.
+    Otherwise ``COIN_ESTIMATOR_DASHBOARD_CREDENTIALS_FILE`` (default
+    ``runtime/dashboard-credentials.json``) must contain
+    ``{"username": "...", "password": "..."}``.
+    """
+
+    env_user = os.environ.get("COIN_ESTIMATOR_DASHBOARD_USER", "").strip()
+    env_password = os.environ.get("COIN_ESTIMATOR_DASHBOARD_PASSWORD", "")
+    if env_user and env_password:
+        return env_user, env_password
+
+    credentials_path = Path(
+        os.environ.get(
+            "COIN_ESTIMATOR_DASHBOARD_CREDENTIALS_FILE",
+            str(DEFAULT_DASHBOARD_CREDENTIALS_FILE),
+        )
+    ).expanduser()
+    if not credentials_path.is_file():
+        raise RuntimeError(
+            "Dashboard credentials missing: set COIN_ESTIMATOR_DASHBOARD_USER/"
+            "COIN_ESTIMATOR_DASHBOARD_PASSWORD or provide "
+            f"{credentials_path}"
+        )
+    mode = credentials_path.stat().st_mode & 0o777
+    if mode & 0o077:
+        raise RuntimeError(
+            f"Dashboard credentials file permissions must be 600: {credentials_path}"
+        )
+    payload = json.loads(credentials_path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise RuntimeError("Dashboard credentials file must contain a JSON object")
+    username = str(payload.get("username") or "").strip()
+    password = str(payload.get("password") or "")
+    if not username or not password:
+        raise RuntimeError("Dashboard credentials file must include username and password")
+    return username, password
 
 
 def ensure_manual_entry_schema(conversation_db: Path) -> None:
@@ -452,12 +495,18 @@ class GroupLiveInputControl:
     received after that moment stay queued in the database and become
     eligible when the gate is re-enabled.  Historical rows before the
     boundary remain usable for anchors and training.
+
+    ``get()`` reloads from disk when the control file's mtime changes so an
+    operator (or automation) can flip the gate by editing the JSON without a
+    process restart.  In-process ``set_enabled`` remains the authoritative
+    path for the authenticated UI.
     """
 
     def __init__(self, path: Path) -> None:
         self._path = path
         self._lock = threading.Lock()
-        self._snapshot = self._load()
+        self._mtime_ns: int | None = None
+        self._snapshot = self._load_and_track()
 
     @staticmethod
     def _default() -> dict[str, Any]:
@@ -468,6 +517,12 @@ class GroupLiveInputControl:
             "changed_at_utc": None,
             "changed_by": None,
         }
+
+    def _stat_mtime_ns(self) -> int | None:
+        try:
+            return self._path.stat().st_mtime_ns
+        except OSError:
+            return None
 
     def _load(self) -> dict[str, Any]:
         if not self._path.is_file():
@@ -482,13 +537,26 @@ class GroupLiveInputControl:
         except (OSError, ValueError, TypeError):
             return self._default()
 
+    def _load_and_track(self) -> dict[str, Any]:
+        self._mtime_ns = self._stat_mtime_ns()
+        return self._load()
+
     def get(self) -> dict[str, Any]:
         with self._lock:
+            current_mtime = self._stat_mtime_ns()
+            if current_mtime != self._mtime_ns:
+                self._snapshot = self._load()
+                self._mtime_ns = current_mtime
             return json.loads(json.dumps(self._snapshot, ensure_ascii=False))
 
     def set_enabled(self, enabled: bool, *, changed_by: str) -> dict[str, Any]:
         now = iso_utc(datetime.now(timezone.utc))
         with self._lock:
+            # Pick up any external file edit before applying the UI mutation.
+            current_mtime = self._stat_mtime_ns()
+            if current_mtime != self._mtime_ns:
+                self._snapshot = self._load()
+                self._mtime_ns = current_mtime
             current = self._snapshot
             next_state = dict(current)
             next_state["schema_version"] = 1
@@ -505,6 +573,7 @@ class GroupLiveInputControl:
                 next_state["disabled_since_utc"] = now
             self._snapshot = next_state
             write_json_atomic(self._path, next_state, mode=0o600)
+            self._mtime_ns = self._stat_mtime_ns()
             return json.loads(json.dumps(next_state, ensure_ascii=False))
 
 
@@ -3389,9 +3458,31 @@ def handler_factory(
                 parsed = parse_qs(payload, keep_blank_values=True)
                 u_val = parsed.get("username", [""])[-1].strip()
                 p_val = parsed.get("password", [""])[-1].strip()
+                try:
+                    expected_user, expected_password = load_dashboard_credentials()
+                except (OSError, ValueError, RuntimeError) as exc:
+                    body = render_login_page(
+                        login_path=login_path,
+                        error="پیکربندی ورود ناقص است؛ با اپراتور تماس بگیرید",
+                    )
+                    self._headers(HTTPStatus.UNAUTHORIZED, "text/html; charset=utf-8", len(body))
+                    self.wfile.write(body)
+                    print(
+                        json.dumps(
+                            {
+                                "event": "dashboard_credentials_error",
+                                "error": f"{type(exc).__name__}: {exc}"[:500],
+                            },
+                            ensure_ascii=False,
+                        ),
+                        flush=True,
+                    )
+                    return
 
-                if hmac.compare_digest(u_val, "bahar") and hmac.compare_digest(p_val, "858518"):
-                    new_token = session_store.create_session("bahar")
+                user_ok = hmac.compare_digest(u_val, expected_user)
+                pass_ok = hmac.compare_digest(p_val, expected_password)
+                if user_ok and pass_ok:
+                    new_token = session_store.create_session(expected_user)
                     cookie_str = f"coin_session_token={new_token}; Path=/; Max-Age=2592000; HttpOnly; SameSite=Lax"
                     self._redirect_with_cookie(normalized, cookie_str)
                     return

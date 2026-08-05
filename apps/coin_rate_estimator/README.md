@@ -35,10 +35,18 @@ export COIN_RATE_ESTIMATOR_RUNTIME_DIR=/var/lib/trading-bot/coin-rate-estimator
 export COIN_RATE_ESTIMATOR_MODEL="$COIN_RATE_ESTIMATOR_RUNTIME_DIR/model.json"
 export COIN_RATE_ESTIMATOR_MARKET_DB="$COIN_RATE_ESTIMATOR_RUNTIME_DIR/market_prices.sqlite3"
 export COIN_CONVERSATION_DB=/var/lib/trading-bot/coin-intelligence/conversation_events.sqlite3
+export COIN_ESTIMATOR_DASHBOARD_USER='...'
+export COIN_ESTIMATOR_DASHBOARD_PASSWORD='...'
+# or mode-0600 JSON at $COIN_RATE_ESTIMATOR_RUNTIME_DIR/dashboard-credentials.json
 export TELEGRAM_API_ID='...'
 export TELEGRAM_API_HASH='...'
 export TELEGRAM_PHONE='...'
 ```
+
+The group-live connect/disconnect gate persists in
+`group-live-input-control.json` and is reloaded from disk when that file's
+mtime changes, so an operator edit takes effect without restarting the
+dashboard.
 
 No credential, session, phone number, public random route, model artifact or
 database is committed with this application.

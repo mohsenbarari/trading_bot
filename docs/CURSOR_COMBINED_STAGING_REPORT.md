@@ -875,6 +875,34 @@ Live fixes applied after activation (also in git):
 Hardcoded dashboard login remains a known debt (move to env before broader exposure).
 
 
+
+### 15. Operator-runtime debt closure + fair rematch start
+
+#### 15.1 Dashboard credentials
+Hardcoded login removed. Credentials load from
+`COIN_ESTIMATOR_DASHBOARD_USER`/`PASSWORD` or mode-`0600`
+`runtime/dashboard-credentials.json` (wired in systemd drop-in).
+
+#### 15.2 Group-live gate disk reload
+`GroupLiveInputControl.get()` now reloads when the control file mtime changes,
+so editing `group-live-input-control.json` takes effect without restart.
+Verified live: disk flip to connect was observed in `state.json`, then restored.
+
+#### 15.3 Fair rematch (started)
+New helper: `scripts/project_market_store_to_legacy_eval.py`
+- copies only `available_at_utc <= cutoff` Market Store rows
+- maps melted/Herat/XAU (+ Wallex/IME externals) into legacy `price_events`
+- sets `event_time_utc := available_at_utc` for leakage-safe operator windows
+
+Pilot compare (group gate off, shared conversation DB) at 15:00Z/16:00Z/17:00Z:
+evidence under `tmp/combined-staging-evidence/fair-rematch-summary.json` and
+`/tmp/coin-eval-fair-rematch/`.
+
+Still owed for a full bake-off: richer label mapping, group-coin projection from
+Market Store (not only conversation DB), and side-by-side with commodity
+snapshots on identical cutoffs.
+
+
 #### 13.6 Still owed
 
 1. Web/Bot shadow checks (no Offer/Trade/Telegram mutation; safe MISSING/ABSTAIN)
