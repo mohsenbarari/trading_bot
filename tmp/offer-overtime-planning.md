@@ -986,6 +986,20 @@ The next gate is not a question but an approval: the roadmap below may begin onl
 
 **Exit criteria:** WebApp receives authoritative phase and request state from the server and cannot create a conflicting decision.
 
+#### Stage 10 completion notes
+
+**Status:** complete in code on `candidate/offer-overtime` at `106b012f`.
+
+**Scope delivered.** Offer REST read models (`OfferResponse`, `PublicOfferResponse`, history via inheritance) and `_offer_lifecycle_response_fields` now expose `accepts_automatic_trade`, `accepts_overtime_request`, and `overtime_trade_committed` alongside existing phase/deadline fields. Public offer-request visibility allowlists include opaque `request_public_id`, `workflow_kind`, and decision-clock stamps without requester identity. WebSocket public allowlists (`offer:created` / `offer:updated` / terminal events) accept the same lifecycle/marker fields; SSE is untouched. Create/sync/trade `offer:updated` / expire publishers emit the additive fields. Authenticated reconnect GETs: `GET /trades/overtime-requests/pending-owner` (current occupying + items), `pending-requester`, and `{request_public_id}` (owner or requester only). Approve/reject/cancel and Iran preference `PUT /api/auth/me/offer-overtime` remain the decision/save surfaces with home-server authority and opaque ids only. Public overtime payloads add `remaining_decision_seconds`, `is_occupying`, `is_actionable` without sequential pk or requester identity.
+
+**Affected components:** `api/routers/offers.py`, `api/routers/trades.py`, `api/routers/realtime.py`, `api/routers/sync.py`, `core/offer_request_policy.py`, tests `tests/test_offer_overtime_webapp_api_contract.py` plus expire/sync/pagination assertion updates for terminal marker payloads.
+
+**Tests and results.** Targeted suites green via `make test-unit MODULES="tests.test_offer_overtime_webapp_api_contract tests.test_trades_router_overtime_integration tests.test_realtime_router_sanitize tests.test_offers_router_expire tests.test_active_offer_pagination tests.test_sync_router_receive_basic tests.test_offer_overtime_preference_save"` (71 tests): lifecycle flags, WS allowlist privacy, reconnect GETs, wrong-user 403 on approve/reject/cancel, opaque-id lookup, preference Iran authority, and backward-compatible optional response defaults.
+
+**Deviations and known gaps.** First, remote-home approve/reject/cancel still return `409` without a signed internal forward (Stage 7 gap; WebApp must call the home server). Second, private overtime request state is HTTP reconnect/poll only — no dedicated private WebSocket event type in this stage (Stage 11 shell will consume the GETs). Third, SSE remains intentionally out of scope. Fourth, the Stage 1 real-database migration gate remains open for merge/deploy.
+
+**Next stage prerequisites.** Stage 11 may begin. It must mount the authenticated WebApp approval shell and preference stepper against these server contracts without inventing client-side phase inference.
+
 ### Stage 11 — WebApp Approval Runtime and User Setting UI
 
 **Goal:** add the global, authenticated WebApp interaction surface.
