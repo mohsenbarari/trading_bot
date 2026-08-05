@@ -10,12 +10,12 @@
 
 ## Document Status
 
-- Phase: product and engineering discovery
+- Phase: discovery complete, awaiting implementation approval. No open questions remain.
 - Implementation status: not started. The branch `candidate/offer-overtime` currently holds only this document; the delivery policy above governs implementation commits once the roadmap is approved.
 - Rule: no implementation, database, deployment, or runtime changes are allowed until the plan is complete and explicitly approved.
 - Decision policy: only confirmed decisions are recorded as final. Unresolved items remain explicitly open.
 - Verification status: the technical review below was re-verified against the codebase at commit `540b2c0c`. Corrections from that verification are folded into the tables and stages.
-- Copy policy: every user-facing message and displayed text in this feature requires explicit product-owner approval of its exact wording before the stage that ships it may be implemented. The message inventory section is the single index of record. All strings call the object a `لفظ` to match existing product vocabulary, and the feature is labelled `وقت اضافه` wherever it is named. All forty-two entries are approved.
+- Copy policy: every user-facing message and displayed text in this feature requires explicit product-owner approval of its exact wording before the stage that ships it may be implemented. The message inventory section is the single index of record. All strings call the object a `لفظ` to match existing product vocabulary, and the feature is labelled `وقت اضافه` wherever it is named. All forty-three entries are approved.
 
 ## 1. Feature Naming
 
@@ -630,11 +630,18 @@ All metadata belonging to the offer and its overtime requests is retained as dur
 
 ## Open Questions Requiring a Decision
 
-Detailed schema, migration, API, queue, and test design will be derived from the confirmed requirements above without changing the stated behavior. One item remains open.
+None. Every product and technical decision this feature depends on is recorded in the Decision Log, and all forty-three user-facing strings are approved in the message inventory. Detailed schema, migration, API, queue, and test design will be derived from the confirmed requirements without changing any stated behavior.
 
-1. **Wording of `M34`.** The callback answer shown when someone other than the economic owner clicks an approval button. Two candidates are recorded in the inventory and one must be chosen before Stage 9 ships the bot approval callbacks. Nothing else depends on it.
+Resolved during review, listed here so the reasoning is not lost:
 
-Everything else that was previously open is now closed: the owner reachability warning has approved wording, the requester limits are set at three overall and one per economic owner, those limits are counted locally on the offer home server with best-effort cross-server accuracy accepted, the feature name is settled because users only ever see `وقت اضافه`, the bot control is a typed value with explicit confirmation rather than a stepper, and forty-one of the forty-two user-facing strings are approved.
+- The owner reachability warning is required, with approved wording that states the per-offer rule rather than promising one surface.
+- Requester limits are three outstanding requests overall and one per economic owner, counted locally on the offer home server with best-effort cross-server accuracy explicitly accepted.
+- The feature name question is closed: users only ever see `وقت اضافه`, so the internal full name never reaches a screen.
+- The bot preference control is a typed value with explicit confirmation, not a stepper; the stepper is WebApp-only.
+- Phase classification uses the trusted first-server receipt time alone, and the transit-grace window no longer moves a request between phases.
+- Every decision is authorized server-side against the caller's identity, and the request carries an opaque public identifier so no identifier is ever a capability.
+
+The next gate is not a question but an approval: the roadmap below may begin only when implementation is explicitly authorized.
 
 ## Stage-Based Implementation Roadmap
 
