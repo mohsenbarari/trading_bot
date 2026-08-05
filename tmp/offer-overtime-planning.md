@@ -776,7 +776,7 @@ The next gate is not a question but an approval: the roadmap below may begin onl
 
 #### Stage 3 completion notes
 
-**Status:** complete in code on `candidate/offer-overtime` (stage-ending commit recorded with these notes).
+**Status:** complete in code on `candidate/offer-overtime` at `bef7ca1b`.
 
 **Scope delivered.** New `core/offer_lifecycle.py` is the single projection for normal deadline, final deadline, display phase, public-interaction flags, terminal-expiry eligibility, and request-intake classification. Normal lifetime remains the dynamic admin setting; overtime is only the offer's immutable snapshot. Request intake uses the trusted first-server receipt alone: `< normal` automatic, exact normal rejected, strict overtime window approval, `>= final` rejected. Transit grace was removed from phase classification and retained only as a bounded post-worker finalization window for receipts that were already automatic. The expiry worker, remote channel presentation, next-delay scheduler, trade guard, offer REST/public responses, create/sync realtime payloads, web-push live filter, Telegram publication freshness (−5s before final), market-history/my-offers stale-active SQL, and the WebApp timer denominator (`timer_total_seconds`) all consume that projection. Final-tail deferral is wired against occupying overtime request statuses so Stage 4 can create those rows without a second worker change. Until Stage 5, approval-phase receipts are refused on the direct trade path rather than executed automatically.
 
