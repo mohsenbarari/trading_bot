@@ -2216,3 +2216,29 @@ bundle قبلی قابل انتخاب‌اند و Collectorها همچنان ف�
   - فقط با تأیید owner، preview و سپس selection محدود در staging می‌توانند
     روی surface کاربرمحور آزموده شوند. روشن‌کردن auto-selection همچنان نیازمند
     threshold cell مصوب owner است.
+
+### P7-E — preview محدود در staging — 2026-08-05 — IN PROGRESS (confirmation-only)
+
+- Scope فعال‌شده:
+  - image مستقل staging از commit candidate ساخته شد و API با یک worker فقط
+    روی loopback اجرا می‌شود؛ filesystem آن read-only است و فقط `/tmp` و
+    uploads موقت writeable هستند.
+  - `coin_intelligence_inference_preview_enabled=true` است، اما
+    `selection=false` و `auto-selection=false` باقی مانده‌اند. background job،
+    bot و sync worker نیز در این runtime شروع نشده‌اند.
+  - Snapshot publisher با timer systemd wall-clock هر ۳۰ ثانیه اجرا می‌شود؛
+    تنها artifact اتمیک زیر runtime محافظت‌شده را می‌نویسد، شبکه ندارد و هیچ
+    collector یا PostgreSQL پروژه را اجرا نمی‌کند.
+- دریافت داده و حریم خصوصی:
+  - collection اولیهٔ چهار کانال عمومی در Store canonical شروع شده و factهای
+    نرمال‌شدهٔ آبشده، هرات و اونس را بدون متن خام یا message id وارد کرده است.
+    session مورد استفاده یک کپی مستقل و permission-protected است؛ collector
+    قدیمی در تمام این گذار فعال مانده تا دریافت داده قطع نشود.
+  - timer دوره‌ای public collector عمداً تا پایان backfill اولیه فعال نشده تا
+    دو process هم‌زمان روی یک session قرار نگیرند.
+- گیت‌های باقی‌مانده:
+  - پایان پاک backfill و سپس فعال‌سازی timer public collector؛
+  - کنترل freshness چند چرخه‌ای برای همهٔ sourceها و Snapshot rate-ready؛
+  - اجرای آزمون authenticated Web/Bot preview با آفر آزمایشی، بدون انتشار Offer؛
+  - selection و auto-selection فقط پس از تأیید جداگانهٔ owner و evidence
+    کافی قابل بررسی هستند.
