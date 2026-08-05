@@ -6,6 +6,10 @@ Requires=docker.service
 
 [Service]
 Type=oneshot
+# A completed Telethon disconnect must never hold the single-writer session
+# forever. The next timer tick can safely resume from canonical checkpoints.
+TimeoutStartSec=90s
+TimeoutStopSec=15s
 # The collector reads only the four allowlisted public channels. Raw messages
 # and Telegram message IDs remain transient; the canonical Market Store keeps
 # only normalized market facts. A protected duplicate session avoids stopping

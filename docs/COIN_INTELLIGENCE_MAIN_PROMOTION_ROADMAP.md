@@ -2217,7 +2217,7 @@ bundle قبلی قابل انتخاب‌اند و Collectorها همچنان ف�
     روی surface کاربرمحور آزموده شوند. روشن‌کردن auto-selection همچنان نیازمند
     threshold cell مصوب owner است.
 
-### P7-E — preview محدود در staging — 2026-08-05 — IN PROGRESS (confirmation-only)
+### P7-E — preview محدود در staging — 2026-08-05 — COMPLETE (Web shadow-only; selection inactive)
 
 - Scope فعال‌شده:
   - image مستقل staging از commit candidate ساخته شد و API با یک worker فقط
@@ -2230,15 +2230,23 @@ bundle قبلی قابل انتخاب‌اند و Collectorها همچنان ف�
     تنها artifact اتمیک زیر runtime محافظت‌شده را می‌نویسد، شبکه ندارد و هیچ
     collector یا PostgreSQL پروژه را اجرا نمی‌کند.
 - دریافت داده و حریم خصوصی:
-  - collection اولیهٔ چهار کانال عمومی در Store canonical شروع شده و factهای
+  - collection اولیهٔ چهار کانال عمومی در Store canonical کامل شد و factهای
     نرمال‌شدهٔ آبشده، هرات و اونس را بدون متن خام یا message id وارد کرده است.
     session مورد استفاده یک کپی مستقل و permission-protected است؛ collector
     قدیمی در تمام این گذار فعال مانده تا دریافت داده قطع نشود.
-  - timer دوره‌ای public collector عمداً تا پایان backfill اولیه فعال نشده تا
-    دو process هم‌زمان روی یک session قرار نگیرند.
+  - پس از پایان پاک backfill، timer دوره‌ای public collector فعال شد. هر اجرا
+    از checkpoint canonical ادامه می‌دهد و `TimeoutStartSec=90s` مانع قفل‌شدن
+    session در صورت disconnect غیرعادی می‌شود. دو timer مستقل public و Snapshot
+    در چند چرخهٔ متوالی اجرا و Snapshot fresh/rate-ready را تأیید کردند.
+- آزمون surface و نتیجه:
+  - یک login توسعه‌دهندهٔ محلی staging و سپس `POST /api/offers/parse` با متن
+    مصنوعیِ فاقد نام کالا اجرا شد. پاسخ `SHADOW_ONLY` با candidate canonical
+    `BAHAR` بود؛ انتخاب، creation یا publication Offer رخ نداد و شمار Offer
+    پیش و پس از آزمون یکسان ماند.
+  - Bot عمداً در این runtime شروع نشده است؛ هیچ credential یا delivery worker
+    جدیدی برای این مرحله فعال نشده.
 - گیت‌های باقی‌مانده:
-  - پایان پاک backfill و سپس فعال‌سازی timer public collector؛
-  - کنترل freshness چند چرخه‌ای برای همهٔ sourceها و Snapshot rate-ready؛
-  - اجرای آزمون authenticated Web/Bot preview با آفر آزمایشی، بدون انتشار Offer؛
+  - آزمون Bot preview فقط در runtime staging جداگانه و با تأیید owner؛
+  - مشاهدهٔ evidence کافی از previewهای واقعی پیش از بررسی selection؛
   - selection و auto-selection فقط پس از تأیید جداگانهٔ owner و evidence
     کافی قابل بررسی هستند.
