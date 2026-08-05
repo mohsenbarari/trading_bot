@@ -148,12 +148,13 @@ class OvertimeIndexTests(unittest.TestCase):
                 columns = [column.name for column in self.indexes[name].columns]
                 self.assertEqual(columns[0], "request_home_server")
 
-    def test_predicates_compare_the_enum_as_text(self):
-        """Binding to the enum OID would break on a later type rebuild."""
+    def test_predicates_compare_enum_labels_without_text_cast(self):
+        """PostgreSQL rejects enum::text in index predicates (not IMMUTABLE)."""
         for name in NEW_OVERTIME_INDEXES:
             with self.subTest(index=name):
                 where = str(self.indexes[name].dialect_options["postgresql"]["where"])
-                self.assertIn("result_status::text", where)
+                self.assertIn("result_status", where)
+                self.assertNotIn("result_status::text", where)
 
     def test_request_public_id_is_unique(self):
         self.assertTrue(OfferRequest.__table__.columns["request_public_id"].unique)

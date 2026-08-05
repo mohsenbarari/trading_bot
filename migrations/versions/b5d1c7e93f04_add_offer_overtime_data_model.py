@@ -147,33 +147,35 @@ def upgrade() -> None:
         ["request_public_id"],
         unique=True,
     )
-    # Predicates compare the enum as text so they never bind to a specific enum
-    # OID, which keeps a later type rebuild from invalidating them.
+    # Predicates compare enum labels directly. PostgreSQL rejects `enum::text`
+    # in index predicates (cast is not IMMUTABLE). ADD VALUE IF NOT EXISTS is
+    # the project's forward-compatible enum pattern, so these labels remain
+    # stable without a type rebuild.
     op.create_index(
         "ux_offer_requests_overtime_active_per_offer",
         "offer_requests",
         ["request_home_server", "offer_public_id"],
         unique=True,
-        postgresql_where=sa.text(f"result_status::text IN ({_quoted(_NONTERMINAL)})"),
+        postgresql_where=sa.text(f"result_status IN ({_quoted(_NONTERMINAL)})"),
     )
     op.create_index(
         "ux_offer_requests_overtime_owner_occupied",
         "offer_requests",
         ["request_home_server", "offer_owner_user_id"],
         unique=True,
-        postgresql_where=sa.text(f"result_status::text IN ({_quoted(_OWNER_OCCUPYING)})"),
+        postgresql_where=sa.text(f"result_status IN ({_quoted(_OWNER_OCCUPYING)})"),
     )
     op.create_index(
         "ix_offer_requests_overtime_queue_order",
         "offer_requests",
         ["request_home_server", "offer_owner_user_id", "queue_sequence"],
-        postgresql_where=sa.text("result_status::text = 'overtime_queued'"),
+        postgresql_where=sa.text("result_status = 'overtime_queued'"),
     )
     op.create_index(
         "ix_offer_requests_overtime_open_by_requester",
         "offer_requests",
         ["requester_user_id"],
-        postgresql_where=sa.text(f"result_status::text IN ({_quoted(_NONTERMINAL)})"),
+        postgresql_where=sa.text(f"result_status IN ({_quoted(_NONTERMINAL)})"),
     )
 
 

@@ -125,13 +125,15 @@ class OfferRequest(Base):
             postgresql_where=text("idempotency_key IS NOT NULL"),
         ),
         # One live overtime request per offer, regardless of lot or quantity.
+        # Compare enum labels directly: `result_status::text` is not IMMUTABLE
+        # and PostgreSQL rejects it in index predicates.
         Index(
             "ux_offer_requests_overtime_active_per_offer",
             "request_home_server",
             "offer_public_id",
             unique=True,
             postgresql_where=text(
-                f"result_status::text IN ({_status_sql_list(OVERTIME_NONTERMINAL_STATUSES)})"
+                f"result_status IN ({_status_sql_list(OVERTIME_NONTERMINAL_STATUSES)})"
             ),
         ),
         # One request in front of any owner at a time, scoped to the offer home
@@ -142,7 +144,7 @@ class OfferRequest(Base):
             "offer_owner_user_id",
             unique=True,
             postgresql_where=text(
-                f"result_status::text IN ({_status_sql_list(OVERTIME_OWNER_OCCUPYING_STATUSES)})"
+                f"result_status IN ({_status_sql_list(OVERTIME_OWNER_OCCUPYING_STATUSES)})"
             ),
         ),
         # FIFO promotion lookup within one owner queue.
@@ -152,7 +154,7 @@ class OfferRequest(Base):
             "offer_owner_user_id",
             "queue_sequence",
             postgresql_where=text(
-                f"result_status::text = '{OfferRequestStatus.OVERTIME_QUEUED.value}'"
+                f"result_status = '{OfferRequestStatus.OVERTIME_QUEUED.value}'"
             ),
         ),
         # Counting a requester's outstanding requests for the concurrency limits.
@@ -160,7 +162,7 @@ class OfferRequest(Base):
             "ix_offer_requests_overtime_open_by_requester",
             "requester_user_id",
             postgresql_where=text(
-                f"result_status::text IN ({_status_sql_list(OVERTIME_NONTERMINAL_STATUSES)})"
+                f"result_status IN ({_status_sql_list(OVERTIME_NONTERMINAL_STATUSES)})"
             ),
         ),
     )
