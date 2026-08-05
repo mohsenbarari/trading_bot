@@ -98,6 +98,7 @@ PRODUCTION_TEST_ISOLATION_INTERNAL_PREFIXES = (
     "/api/auth/internal/telegram-registration",
     "/api/auth/internal/telegram-link",
     "/api/auth/internal/telegram-otp",
+    "/api/auth/internal/offer-overtime",
 )
 BACKGROUND_LEADER_LOCK_KEY = "trading_bot:api:background_leader"
 BACKGROUND_LEADER_REFRESH_SCRIPT = """

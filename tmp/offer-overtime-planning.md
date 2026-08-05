@@ -10,8 +10,8 @@
 
 ## Document Status
 
-- Phase: implementation started. Stage 0 baseline recorded and Stage 1 data model landed; the Stage 1 migration still needs a real-database run before Stage 2. No open questions remain.
-- Implementation status: in progress on `candidate/offer-overtime`, which now carries this document plus the Stage 1 data model. Each stage ends with its own commit and completion notes, per the delivery policy above.
+- Phase: implementation started. Stages 0–2 are complete in code; the Stage 1 migration still needs a real-database run before merge/deploy. No open questions remain.
+- Implementation status: in progress on `candidate/offer-overtime`. Each stage ends with its own commit and completion notes, per the delivery policy above.
 - Rule: implementation was explicitly approved. Deployment and any runtime or production database action remain out of scope until the rollout stages are separately authorized.
 - Decision policy: only confirmed decisions are recorded as final. Unresolved items remain explicitly open.
 - Verification status: the technical review below was re-verified against the codebase at commit `540b2c0c`. Corrections from that verification are folded into the tables and stages.
@@ -741,6 +741,20 @@ The next gate is not a question but an approval: the roadmap below may begin onl
 **Tests:** Iran save, bot-forwarded save, outage rejection, stale-sync recovery, range validation, eligibility across ordinary users, tier-1 customers, tier-2 customers, and accountants, new offer snapshot, and republish using the current preference.
 
 **Exit criteria:** both servers converge on the preference and every newly created offer has an immutable, correct snapshot.
+
+#### Stage 2 completion notes
+
+**Status:** complete in code across two commits on `candidate/offer-overtime`: `92ec83ee` (canonical preference helpers, offer-creation snapshot, user sync payload field) and the stage-ending commit that follows these notes (WebApp/Iran save, signed bot forward, serialization, offer sync payload fields).
+
+**Scope delivered.** A single preference service owns range normalization (including Persian/Arabic-Indic digits), eligibility, approved success/warning/outage copy, Iran-local persist, and the bot-facing save that forwards to Iran. WebApp saves through `PUT /api/auth/me/offer-overtime` on Iran only; a call that lands elsewhere is refused with inventory M7 and no local write. Bot saves go through `save_overtime_preference_from_bot` → signed `POST /api/auth/internal/offer-overtime/update` on Iran via `core/offer_overtime_preference_transport.py`. On transport failure the bot path raises with M7 and leaves the foreign row untouched—no deferred intent and no false success. `UserRead` and the update schemas expose `offer_overtime_minutes`. Nonzero saves return inventory M4 plus reachability warning M6; zero returns M5. Offer creation continues to snapshot from the locked owner row. Because Stage 2 now writes `overtime_minutes_snapshot`, that field and `overtime_trade_committed` were added to `build_offer_sync_payload` ahead of the broader Stage 7 sync pass so offer sync cannot converge peers onto the column default of `0`.
+
+**Affected components:** `core/services/offer_overtime_preference_service.py`, `core/offer_overtime_preference_transport.py`, `core/services/offer_creation_service.py`, `core/events.py` (`build_user_sync_payload`), `core/offer_sync_payload.py`, `schemas.py`, `api/routers/auth.py`, `main.py` (internal isolation prefix), and tests `tests/test_offer_overtime_preference_service.py`, `tests/test_offer_overtime_preference_save.py`, plus updates to the auth current-user and offer sync payload suites.
+
+**Tests and results.** Targeted overtime/auth/sync-payload suites green at 65 tests via `make test-unit MODULES="tests.test_offer_overtime_preference_save tests.test_offer_overtime_preference_service tests.test_offer_sync_payload tests.test_auth_router_current_user_contract tests.test_offer_overtime_data_model"`. Coverage includes Iran save, foreign WebApp refusal, bot forward without local write, outage rejection with M7, range validation, eligibility for ordinary/tier-1/tier-2/accountant, new-offer snapshot, user sync authority, and offer sync payload defaults.
+
+**Deviations and known gaps.** First, the Stage 1 real-database migration gate remains open; it still blocks merge/deploy, not further coding. Second, defensive copy `این تنظیم برای حساب شما در دسترس نیست.` is used when an ineligible account reaches a save path the UI should already hide; it is not yet an inventory entry and must be approved or replaced before any user-visible surface relies on it. Third, bot panel UI and WebApp stepper remain Stage 9 / Stage 10; this stage only ships the authoritative save contract they will call. Fourth, full stale-sync recovery matrix stays with Stage 7; this stage relies on the existing user sync path once Iran persists the field.
+
+**Next stage prerequisites.** Stage 3 may begin. It must not change behavior for snapshot `0`, and it must treat the offer home server's lifecycle projection as the only authoritative answer.
 
 ### Stage 3 — Shared Offer Lifecycle Projection
 

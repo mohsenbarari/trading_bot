@@ -25,11 +25,28 @@ from models.user import User
 OVERTIME_MIN_MINUTES = 0
 OVERTIME_MAX_MINUTES = 10
 
-#: Shown when the submitted value is not a whole number in range.
+#: Shown when the submitted value is not a whole number in range. Inventory M8.
 INVALID_OVERTIME_VALUE_MESSAGE = "لطفاً فقط یک عدد بین ۰ تا ۱۰ بفرستید."
 
-#: Shown to an account that may not own offers at all.
+#: Defensive refusal for accounts that cannot own offers. Not yet in the
+#: approved inventory; surfaces only if an ineligible account reaches a save
+#: path that the UI should already have hidden.
 OVERTIME_NOT_AVAILABLE_MESSAGE = "این تنظیم برای حساب شما در دسترس نیست."
+
+#: Inventory M4. ``{minutes}`` is the saved whole number.
+SAVE_SUCCESS_NONZERO_MESSAGE = "✅ وقت اضافه لفظ‌های جدید شما روی {minutes} دقیقه تنظیم شد."
+
+#: Inventory M5.
+SAVE_SUCCESS_ZERO_MESSAGE = "✅ وقت اضافه برای لفظ‌های جدید شما غیرفعال شد."
+
+#: Inventory M6. Returned with every successful nonzero save.
+REACHABILITY_WARNING_MESSAGE = (
+    "تأیید هر لفظ فقط در همان محل ثبت لفظ نمایش داده می‌شود: "
+    "لفظ وب در وب‌اپ و لفظ بات در بات."
+)
+
+#: Inventory M7. Bot save failed because Iran did not persist the value.
+BOT_SAVE_UNAVAILABLE_MESSAGE = "تنظیم شما ذخیره نشد. لطفاً کمی بعد دوباره تلاش کنید."
 
 
 class OfferOvertimePreferenceError(ValueError):
@@ -40,12 +57,37 @@ class OfferOvertimePreferenceError(ValueError):
         self.message = message
 
 
+class OfferOvertimePreferenceNotAllowedError(PermissionError):
+    """Raised when the account may not hold an overtime preference."""
+
+    def __init__(self, message: str = OVERTIME_NOT_AVAILABLE_MESSAGE) -> None:
+        super().__init__(message)
+        self.message = message
+
+
+class OfferOvertimePreferenceTransportError(RuntimeError):
+    """Raised when a bot save could not be persisted on Iran."""
+
+    def __init__(self, message: str = BOT_SAVE_UNAVAILABLE_MESSAGE) -> None:
+        super().__init__(message)
+        self.message = message
+
+
 @dataclass(frozen=True)
 class OvertimePreferenceEligibility:
     """Whether an account may hold an overtime preference, and why not."""
 
     allowed: bool
     reason: str | None = None
+
+
+@dataclass(frozen=True)
+class OvertimePreferenceSaveResult:
+    """Outcome of a successful Iran-authoritative preference write."""
+
+    offer_overtime_minutes: int
+    detail: str
+    warning: str | None = None
 
 
 def normalize_overtime_minutes(value: object) -> int:
@@ -128,3 +170,106 @@ async def evaluate_overtime_preference_eligibility(
             return OvertimePreferenceEligibility(False, "tier2_customer_cannot_own_offers")
 
     return OvertimePreferenceEligibility(True)
+
+
+def format_overtime_preference_save_messages(minutes: int) -> tuple[str, str | None]:
+    """Return the approved success detail and optional reachability warning."""
+    if minutes == 0:
+        return SAVE_SUCCESS_ZERO_MESSAGE, None
+    return (
+        SAVE_SUCCESS_NONZERO_MESSAGE.format(minutes=minutes),
+        REACHABILITY_WARNING_MESSAGE,
+    )
+
+
+async def persist_overtime_preference(
+    db: AsyncSession,
+    user: User,
+    value: object,
+) -> OvertimePreferenceSaveResult:
+    """Validate and assign the preference on the Iran-local user row.
+
+    Does not commit. Callers on the foreign server must not use this helper;
+    they forward to Iran through ``save_overtime_preference_from_bot`` instead.
+    """
+    minutes = normalize_overtime_minutes(value)
+    eligibility = await evaluate_overtime_preference_eligibility(db, user)
+    if not eligibility.allowed:
+        raise OfferOvertimePreferenceNotAllowedError()
+
+    user.offer_overtime_minutes = minutes
+    detail, warning = format_overtime_preference_save_messages(minutes)
+    return OvertimePreferenceSaveResult(
+        offer_overtime_minutes=minutes,
+        detail=detail,
+        warning=warning,
+    )
+
+
+async def save_overtime_preference_from_bot(
+    db: AsyncSession,
+    user: User,
+    value: object,
+) -> OvertimePreferenceSaveResult:
+    """Persist a bot-origin preference through Iran, never through a local write.
+
+    On the foreign server the value is validated and eligibility-checked locally,
+    then sent as a signed internal command. Success is reported only from Iran's
+    response. A transport failure raises with the approved unavailable copy and
+    leaves the local row untouched so an outage cannot create a false success
+    or a divergent foreign write of an Iran-authoritative field.
+    """
+    from core.server_routing import SERVER_IRAN, current_server
+
+    minutes = normalize_overtime_minutes(value)
+    eligibility = await evaluate_overtime_preference_eligibility(db, user)
+    if not eligibility.allowed:
+        raise OfferOvertimePreferenceNotAllowedError()
+
+    if current_server() == SERVER_IRAN:
+        result = await persist_overtime_preference(db, user, minutes)
+        await db.commit()
+        await db.refresh(user)
+        return result
+
+    from core.offer_overtime_preference_transport import (
+        forward_offer_overtime_preference_to_iran,
+    )
+
+    status_code, body = await forward_offer_overtime_preference_to_iran(
+        {
+            "user_id": int(user.id),
+            "offer_overtime_minutes": minutes,
+        }
+    )
+    if not isinstance(body, dict):
+        raise OfferOvertimePreferenceTransportError()
+
+    if status_code < 200 or status_code >= 300:
+        remote_detail = body.get("detail")
+        if status_code == 400 and isinstance(remote_detail, str) and remote_detail:
+            raise OfferOvertimePreferenceError(remote_detail)
+        if status_code == 403 and isinstance(remote_detail, str) and remote_detail:
+            raise OfferOvertimePreferenceNotAllowedError(remote_detail)
+        raise OfferOvertimePreferenceTransportError()
+
+    saved = body.get("offer_overtime_minutes", minutes)
+    try:
+        saved_minutes = int(saved)
+    except (TypeError, ValueError) as exc:
+        raise OfferOvertimePreferenceTransportError() from exc
+
+    detail = body.get("detail")
+    warning = body.get("warning")
+    if not isinstance(detail, str) or not detail:
+        detail, derived_warning = format_overtime_preference_save_messages(saved_minutes)
+        if warning is None:
+            warning = derived_warning
+    if warning is not None and not isinstance(warning, str):
+        warning = None
+
+    return OvertimePreferenceSaveResult(
+        offer_overtime_minutes=saved_minutes,
+        detail=detail,
+        warning=warning,
+    )

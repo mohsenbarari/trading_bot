@@ -44,6 +44,8 @@ class OfferSyncPayloadTests(unittest.TestCase):
             idempotency_fingerprint_version=1,
             idempotency_fingerprint="a" * 64,
             archived=False,
+            overtime_minutes_snapshot=7,
+            overtime_trade_committed=True,
         )
 
         payload = build_offer_sync_payload(offer)
@@ -56,6 +58,8 @@ class OfferSyncPayloadTests(unittest.TestCase):
         self.assertEqual(payload["republished_from_offer_public_id"], "ofr_source_6")
         self.assertEqual(payload["idempotency_fingerprint_version"], 1)
         self.assertEqual(payload["idempotency_fingerprint"], "a" * 64)
+        self.assertEqual(payload["overtime_minutes_snapshot"], 7)
+        self.assertTrue(payload["overtime_trade_committed"])
 
         offer.remaining_quantity = 0
         self.assertEqual(build_offer_sync_payload(offer)["remaining_quantity"], 0)
@@ -94,6 +98,8 @@ class OfferSyncPayloadTests(unittest.TestCase):
         self.assertIsNone(payload["idempotency_fingerprint_version"])
         self.assertIsNone(payload["idempotency_fingerprint"])
         self.assertEqual(payload["settlement_type"], "cash")
+        self.assertEqual(payload["overtime_minutes_snapshot"], 0)
+        self.assertFalse(payload["overtime_trade_committed"])
 
 
 if __name__ == "__main__":
