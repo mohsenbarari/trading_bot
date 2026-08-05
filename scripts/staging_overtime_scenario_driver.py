@@ -42,6 +42,8 @@ SCENARIOS = (
     "OT-OFFER-BOT-ORIGIN",
     "OT-REQ-IRAN-TO-IRAN",
     "OT-CANCEL-REQUESTER",
+    "OT-QUEUE-ORDER",
+    "OT-REQ-FOREIGN-TO-FOREIGN",
 )
 # Staging Iran currently carries a single commodity; keep the driver pinned to it.
 DEFAULT_COMMODITY_ID = 1
@@ -82,6 +84,12 @@ def _synthetic_mobile(run_prefix: str, suffix: str) -> str:
     return "09" + str(int(digest[:12], 16)).zfill(9)[-9:]
 
 
+def _synthetic_telegram_id(run_prefix: str, suffix: str) -> int:
+    digest = hashlib.sha256(f"{run_prefix}:tg:{suffix}".encode("utf-8")).hexdigest()
+    # Stay in a high positive range that will not collide with real bot users.
+    return 9_000_000_000 + (int(digest[:12], 16) % 900_000_000)
+
+
 async def _seed_user(
     session,
     run_prefix: str,
@@ -89,6 +97,7 @@ async def _seed_user(
     *,
     home_server: str | None = None,
     has_bot_access: bool = False,
+    with_telegram: bool = False,
 ) -> User:
     """Create an isolated standard user that is neither an accountant nor tier-2.
 
@@ -107,6 +116,7 @@ async def _seed_user(
         must_change_password=False,
         home_server=home_server or current_server(),
         offer_overtime_minutes=0,
+        telegram_id=_synthetic_telegram_id(run_prefix, suffix) if with_telegram else None,
     )
     session.add(user)
     await session.flush()
@@ -119,6 +129,7 @@ async def _seed_owner(
     *,
     home_server: str | None = None,
     has_bot_access: bool = False,
+    with_telegram: bool = False,
 ) -> User:
     return await _seed_user(
         session,
@@ -126,6 +137,7 @@ async def _seed_owner(
         "owner",
         home_server=home_server,
         has_bot_access=has_bot_access,
+        with_telegram=with_telegram,
     )
 
 
@@ -254,7 +266,8 @@ async def _await_preference_minutes(
         if int(owner.offer_overtime_minutes) == minutes:
             return True, round(timeout_seconds - (deadline - time.monotonic()), 3)
         await asyncio.sleep(PREFERENCE_MIRROR_POLL_SECONDS)
-        session.expire_all()
+        # Expire only this row so sibling instances (e.g. requester) stay usable.
+        session.expire(owner)
     return False, timeout_seconds
 
 
@@ -1113,6 +1126,354 @@ async def _scenario_cancel_requester(
     }
 
 
+async def _scenario_queue_order(
+    session,
+    run_prefix: str,
+    minutes: int,
+) -> dict[str, object]:
+    """FIFO promote: second owner-scoped request stays queued until the first frees the seat."""
+    from core.services.offer_overtime_preference_service import persist_overtime_preference
+    from core.services.offer_overtime_request_service import (
+        OvertimeRequestCreateCommand,
+        create_overtime_request,
+        reject_by_owner,
+    )
+    from core.trading_settings import get_trading_settings
+    from models.offer_request import OfferRequestSourceSurface, OfferRequestStatus
+
+    if current_server() != "iran":
+        raise DriverRefusal("OT-QUEUE-ORDER only runs on the Iran peer")
+    if minutes <= 0:
+        raise DriverRefusal("OT-QUEUE-ORDER requires a positive overtime preference")
+
+    await _cleanup(session, run_prefix)
+    owner = await _seed_owner(session, run_prefix)
+    requester_a = await _seed_user(session, run_prefix, "requester_a")
+    requester_b = await _seed_user(session, run_prefix, "requester_b")
+    await session.commit()
+    await session.refresh(owner)
+    await session.refresh(requester_a)
+    await session.refresh(requester_b)
+    owner_id = int(owner.id)
+    requester_a_id = int(requester_a.id)
+    requester_b_id = int(requester_b.id)
+
+    await persist_overtime_preference(session, owner, minutes)
+    await session.commit()
+    await session.refresh(owner)
+
+    # One live request per offer; FIFO is owner-scoped across the owner's offers.
+    offer_a, normal_minutes = await _create_webapp_offer(
+        session, owner, notes=f"{run_prefix} queue a"
+    )
+    offer_b, _ = await _create_webapp_offer(
+        session, owner, notes=f"{run_prefix} queue b"
+    )
+    await _backdate_offer_into_overtime(session, offer_a, normal_minutes=normal_minutes)
+    await _backdate_offer_into_overtime(session, offer_b, normal_minutes=normal_minutes)
+    offer_a = await _reload_offer(session, int(offer_a.id))
+    offer_b = await _reload_offer(session, int(offer_b.id))
+    receipt_at = datetime.utcnow()
+    ts = get_trading_settings()
+
+    first = await create_overtime_request(
+        session,
+        OvertimeRequestCreateCommand(
+            offer=offer_a,
+            requester_user_id=requester_a_id,
+            actor_user_id=requester_a_id,
+            requested_quantity=min(2, DEFAULT_OFFER_QUANTITY),
+            idempotency_key=f"{run_prefix}:ot-queue-a",
+            request_source_surface=OfferRequestSourceSurface.WEBAPP,
+            request_source_server="iran",
+            receipt_at=receipt_at,
+            normal_lifetime_minutes=normal_minutes,
+            request_home_server="iran",
+        ),
+        now=receipt_at,
+    )
+    second = await create_overtime_request(
+        session,
+        OvertimeRequestCreateCommand(
+            offer=offer_b,
+            requester_user_id=requester_b_id,
+            actor_user_id=requester_b_id,
+            requested_quantity=min(2, DEFAULT_OFFER_QUANTITY),
+            idempotency_key=f"{run_prefix}:ot-queue-b",
+            request_source_surface=OfferRequestSourceSurface.WEBAPP,
+            request_source_server="iran",
+            receipt_at=receipt_at,
+            normal_lifetime_minutes=normal_minutes,
+            request_home_server="iran",
+        ),
+        now=receipt_at,
+    )
+    await session.commit()
+    await session.refresh(first.ledger)
+    await session.refresh(second.ledger)
+
+    first_status_before = str(
+        getattr(first.ledger.result_status, "value", first.ledger.result_status)
+    )
+    second_status_before = str(
+        getattr(second.ledger.result_status, "value", second.ledger.result_status)
+    )
+    first_seq = int(first.ledger.queue_sequence or 0)
+    second_seq = int(second.ledger.queue_sequence or 0)
+
+    await reject_by_owner(
+        session,
+        first.ledger,
+        decided_by_user_id=owner_id,
+        now=datetime.utcnow(),
+        normal_lifetime_minutes=int(getattr(ts, "offer_expiry_minutes", 0) or 0),
+    )
+    await session.commit()
+    await session.refresh(first.ledger)
+    await session.refresh(second.ledger)
+
+    first_status_after = str(
+        getattr(first.ledger.result_status, "value", first.ledger.result_status)
+    )
+    second_status_after = str(
+        getattr(second.ledger.result_status, "value", second.ledger.result_status)
+    )
+
+    passed = (
+        first.promoted is True
+        and second.promoted is False
+        and first_status_before == OfferRequestStatus.OVERTIME_PRESENTED.value
+        and second_status_before == OfferRequestStatus.OVERTIME_QUEUED.value
+        and first_seq < second_seq
+        and first_status_after == OfferRequestStatus.OVERTIME_REJECTED_BY_OWNER.value
+        and second_status_after == OfferRequestStatus.OVERTIME_PRESENTED.value
+    )
+
+    return {
+        "owner_user_id": owner_id,
+        "requester_a_user_id": requester_a_id,
+        "requester_b_user_id": requester_b_id,
+        "offer_a_public_id": str(offer_a.offer_public_id),
+        "offer_b_public_id": str(offer_b.offer_public_id),
+        "first_request_public_id": str(first.ledger.request_public_id),
+        "second_request_public_id": str(second.ledger.request_public_id),
+        "first_queue_sequence": first_seq,
+        "second_queue_sequence": second_seq,
+        "first_status_before_reject": first_status_before,
+        "second_status_before_reject": second_status_before,
+        "first_status_after_reject": first_status_after,
+        "second_status_after_reject": second_status_after,
+        "passed": passed,
+    }
+
+
+async def _scenario_req_foreign_to_foreign_seed(
+    session,
+    run_prefix: str,
+) -> dict[str, object]:
+    """Seed foreign-home owner + requester on Iran for the foreign request path."""
+    if current_server() != "iran":
+        raise DriverRefusal("OT-REQ-FOREIGN-TO-FOREIGN seed phase only runs on Iran")
+
+    await _cleanup(session, run_prefix)
+    owner = await _seed_owner(
+        session,
+        run_prefix,
+        home_server="foreign",
+        has_bot_access=True,
+        with_telegram=True,
+    )
+    requester = await _seed_user(
+        session,
+        run_prefix,
+        "requester",
+        home_server="foreign",
+        has_bot_access=True,
+        with_telegram=True,
+    )
+    await session.commit()
+    await session.refresh(owner)
+    await session.refresh(requester)
+    return {
+        "phase": "seed",
+        "owner_user_id": int(owner.id),
+        "requester_user_id": int(requester.id),
+        "owner_home_server": str(owner.home_server),
+        "requester_home_server": str(requester.home_server),
+        "owner_telegram_id": int(owner.telegram_id),
+        "passed": (
+            str(owner.home_server) == "foreign"
+            and str(requester.home_server) == "foreign"
+            and int(owner.telegram_id or 0) > 0
+        ),
+    }
+
+
+async def _scenario_req_foreign_to_foreign_run(
+    session,
+    run_prefix: str,
+    minutes: int,
+    *,
+    owner_user_id: int,
+    requester_user_id: int,
+) -> dict[str, object]:
+    """Bot overtime request on a foreign-home offer stays foreign-authoritative."""
+    from core.services.offer_overtime_request_service import (
+        OvertimeRequestCreateCommand,
+        create_overtime_request,
+        mark_presented,
+        reject_by_owner,
+    )
+    from core.trading_settings import get_trading_settings
+    from models.offer_request import OfferRequestSourceSurface, OfferRequestStatus
+
+    if current_server() != "foreign":
+        raise DriverRefusal("OT-REQ-FOREIGN-TO-FOREIGN run phase only runs on foreign")
+    if minutes <= 0:
+        raise DriverRefusal("OT-REQ-FOREIGN-TO-FOREIGN requires a positive overtime preference")
+
+    deadline = time.monotonic() + PREFERENCE_MIRROR_TIMEOUT_SECONDS
+    owner = requester = None
+    while time.monotonic() < deadline:
+        owner = (
+            await session.execute(select(User).where(User.id == int(owner_user_id)))
+        ).scalar_one_or_none()
+        requester = (
+            await session.execute(select(User).where(User.id == int(requester_user_id)))
+        ).scalar_one_or_none()
+        if (
+            owner is not None
+            and requester is not None
+            and not bool(owner.is_deleted)
+            and not bool(requester.is_deleted)
+        ):
+            break
+        await asyncio.sleep(PREFERENCE_MIRROR_POLL_SECONDS)
+        owner = requester = None
+    if owner is None or requester is None:
+        raise DriverRefusal("Iran-seeded foreign-home users did not mirror to foreign")
+
+    owner_id = int(owner.id)
+    requester_id = int(requester.id)
+
+    await _save_bot_preference_with_user_sync_retry(session, owner, minutes)
+    mirrored, mirror_seconds = await _await_preference_minutes(
+        session, owner_id, minutes
+    )
+    if not mirrored:
+        raise DriverRefusal("foreign preference mirror did not converge before offer create")
+    owner = (
+        await session.execute(select(User).where(User.id == owner_id))
+    ).scalar_one()
+
+    offer, normal_minutes = await _create_bot_offer(
+        session,
+        owner,
+        notes=f"{run_prefix} foreign overtime request",
+    )
+    offer_id = int(offer.id)
+    offer_public_id = str(offer.offer_public_id)
+    offer_home = str(offer.home_server)
+    snapshot = int(offer.overtime_minutes_snapshot)
+    await _backdate_offer_into_overtime(session, offer, normal_minutes=normal_minutes)
+    offer = await _reload_offer(session, offer_id)
+    receipt_at = datetime.utcnow()
+    ts = get_trading_settings()
+
+    create_result = await create_overtime_request(
+        session,
+        OvertimeRequestCreateCommand(
+            offer=offer,
+            requester_user_id=requester_id,
+            actor_user_id=requester_id,
+            requested_quantity=min(2, DEFAULT_OFFER_QUANTITY),
+            idempotency_key=f"{run_prefix}:ot-req-foreign",
+            request_source_surface=OfferRequestSourceSurface.TELEGRAM_BOT,
+            request_source_server="foreign",
+            receipt_at=receipt_at,
+            normal_lifetime_minutes=normal_minutes,
+            request_home_server="foreign",
+        ),
+        now=receipt_at,
+    )
+    await session.commit()
+    ledger = create_result.ledger
+    await session.refresh(ledger)
+    delivering_status = str(
+        getattr(ledger.result_status, "value", ledger.result_status)
+    )
+    request_public_id = str(ledger.request_public_id)
+    request_home = str(ledger.request_home_server)
+    request_id = int(ledger.id)
+
+    # Simulate Telegram accept landing so the owner decision clock can start.
+    await mark_presented(
+        session,
+        ledger,
+        presented_at=datetime.utcnow(),
+        telegram_message_id=700_000 + (request_id % 100_000),
+    )
+    await session.commit()
+    await session.refresh(ledger)
+    presented_status = str(
+        getattr(ledger.result_status, "value", ledger.result_status)
+    )
+
+    await reject_by_owner(
+        session,
+        ledger,
+        decided_by_user_id=owner_id,
+        now=datetime.utcnow(),
+        normal_lifetime_minutes=int(getattr(ts, "offer_expiry_minutes", 0) or 0),
+    )
+    await session.commit()
+    await session.refresh(ledger)
+    decided_status = str(
+        getattr(ledger.result_status, "value", ledger.result_status)
+    )
+
+    request_change_log_rows = (
+        await session.execute(
+            select(func.count())
+            .select_from(ChangeLog)
+            .where(
+                ChangeLog.table_name == "offer_requests",
+                ChangeLog.record_id == request_id,
+            )
+        )
+    ).scalar_one()
+
+    passed = (
+        offer_home == "foreign"
+        and snapshot == minutes
+        and create_result.promoted is True
+        and delivering_status == OfferRequestStatus.OVERTIME_DELIVERING.value
+        and presented_status == OfferRequestStatus.OVERTIME_PRESENTED.value
+        and decided_status == OfferRequestStatus.OVERTIME_REJECTED_BY_OWNER.value
+        and request_home == "foreign"
+        and int(request_change_log_rows) > 0
+    )
+
+    return {
+        "phase": "run",
+        "owner_user_id": owner_id,
+        "requester_user_id": requester_id,
+        "preference_mirror_seconds": mirror_seconds,
+        "offer_id": offer_id,
+        "offer_public_id": offer_public_id,
+        "offer_home_server": offer_home,
+        "overtime_minutes_snapshot": snapshot,
+        "request_id": request_id,
+        "request_public_id": request_public_id,
+        "request_home_server": request_home,
+        "delivering_status": delivering_status,
+        "presented_status": presented_status,
+        "decided_status": decided_status,
+        "request_change_log_rows": int(request_change_log_rows),
+        "passed": passed,
+    }
+
+
 async def main_async(args: argparse.Namespace) -> dict[str, object]:
     _guard_environment()
     run_prefix = _guard_run_prefix(args.run_prefix)
@@ -1172,6 +1533,29 @@ async def main_async(args: argparse.Namespace) -> dict[str, object]:
             outcome = await _scenario_req_iran_to_iran(session, run_prefix, args.minutes)
         elif args.scenario == "OT-CANCEL-REQUESTER":
             outcome = await _scenario_cancel_requester(session, run_prefix, args.minutes)
+        elif args.scenario == "OT-QUEUE-ORDER":
+            outcome = await _scenario_queue_order(session, run_prefix, args.minutes)
+        elif args.scenario == "OT-REQ-FOREIGN-TO-FOREIGN":
+            phase = (args.phase or "run").strip().lower()
+            if phase == "seed":
+                outcome = await _scenario_req_foreign_to_foreign_seed(session, run_prefix)
+            elif phase == "run":
+                if args.owner_user_id is None or args.requester_user_id is None:
+                    raise DriverRefusal(
+                        "OT-REQ-FOREIGN-TO-FOREIGN run phase requires "
+                        "--owner-user-id and --requester-user-id from Iran seed"
+                    )
+                outcome = await _scenario_req_foreign_to_foreign_run(
+                    session,
+                    run_prefix,
+                    args.minutes,
+                    owner_user_id=int(args.owner_user_id),
+                    requester_user_id=int(args.requester_user_id),
+                )
+            else:
+                raise DriverRefusal(
+                    f"unsupported OT-REQ-FOREIGN-TO-FOREIGN phase={phase!r}"
+                )
         else:
             raise DriverRefusal(f"no driver implemented for {args.scenario}")
 
@@ -1179,7 +1563,7 @@ async def main_async(args: argparse.Namespace) -> dict[str, object]:
         # Foreign-home owners are Iran-authoritative under registration sync v2;
         # never auto-retire them from the foreign peer after a bot-origin run.
         allow_cleanup = args.cleanup_after and outcome.get("passed")
-        if args.scenario == "OT-OFFER-BOT-ORIGIN":
+        if args.scenario in {"OT-OFFER-BOT-ORIGIN", "OT-REQ-FOREIGN-TO-FOREIGN"}:
             allow_cleanup = False
         if allow_cleanup:
             cleanup = await _cleanup(session, run_prefix)
@@ -1213,6 +1597,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=int,
         default=None,
         help="existing user id for foreign-peer scenarios that cannot INSERT users",
+    )
+    parser.add_argument(
+        "--requester-user-id",
+        type=int,
+        default=None,
+        help="existing requester user id for foreign-peer request scenarios",
     )
     parser.add_argument(
         "--cleanup-after",

@@ -74,9 +74,11 @@ WIRED_IRAN_DRIVER_SCENARIOS = (
     "OT-OFFER-WEBAPP-ORIGIN",
     "OT-REQ-IRAN-TO-IRAN",
     "OT-CANCEL-REQUESTER",
+    "OT-QUEUE-ORDER",
 )
 WIRED_FOREIGN_DRIVER_SCENARIOS = (
     "OT-OFFER-BOT-ORIGIN",
+    "OT-REQ-FOREIGN-TO-FOREIGN",
 )
 WIRED_DRIVER_SCENARIOS = WIRED_IRAN_DRIVER_SCENARIOS + WIRED_FOREIGN_DRIVER_SCENARIOS
 
@@ -628,23 +630,53 @@ def _run_argv(argv: list[str]) -> tuple[subprocess.CompletedProcess[str], float]
     return completed, round(time.time() - started, 3)
 
 
-def run_offer_bot_origin_driver(args: argparse.Namespace, run_prefix: str) -> dict[str, Any]:
+def iran_cleanup_argv(run_prefix: str) -> list[str] | None:
+    host = (os.getenv("STAGING_IRAN_SSH_HOST") or "").strip()
+    if not host:
+        return None
+    port = (os.getenv("STAGING_IRAN_SSH_PORT") or "22").strip()
+    container = (
+        os.getenv("STAGING_IRAN_APP_CONTAINER") or "trading_bot_staging_iran-app-1"
+    ).strip()
+    return [
+        "ssh",
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "ConnectTimeout=15",
+        "-p",
+        port,
+        f"root@{host}",
+        (
+            f"docker exec {container} python scripts/staging_overtime_scenario_driver.py "
+            f"--mode cleanup --run-prefix {run_prefix}"
+        ),
+    ]
+
+
+def run_two_peer_foreign_driver(
+    *,
+    scenario: str,
+    run_prefix: str,
+    minutes: int,
+    foreign_extra_from_seed,
+) -> dict[str, Any]:
     """Seed on Iran, mutate on foreign, retire on Iran (registration sync v2)."""
     seed_argv = iran_driver_argv(
-        "OT-OFFER-BOT-ORIGIN",
+        scenario,
         run_prefix,
-        5,
+        minutes,
         extra_args="--phase seed --no-cleanup-after",
     )
     foreign_probe = foreign_driver_argv(
-        "OT-OFFER-BOT-ORIGIN",
+        scenario,
         run_prefix,
-        5,
+        minutes,
         extra_args="--phase run --owner-user-id 0 --no-cleanup-after",
     )
     if seed_argv is None or foreign_probe is None:
         return {
-            "id": "OT-OFFER-BOT-ORIGIN",
+            "id": scenario,
             "status": "blocked",
             "detail": (
                 "set STAGING_IRAN_SSH_HOST for seed/cleanup and ensure the foreign "
@@ -657,7 +689,7 @@ def run_offer_bot_origin_driver(args: argparse.Namespace, run_prefix: str) -> di
     seed_payload = _parse_driver_stdout(seed_completed.stdout, seed_completed.stderr)
     if not (seed_payload.get("passed") and seed_completed.returncode == 0):
         return {
-            "id": "OT-OFFER-BOT-ORIGIN",
+            "id": scenario,
             "status": "failed",
             "elapsed_seconds": seed_elapsed,
             "run_prefix": run_prefix,
@@ -666,45 +698,18 @@ def run_offer_bot_origin_driver(args: argparse.Namespace, run_prefix: str) -> di
             "payload": seed_payload,
         }
 
-    owner_user_id = int(seed_payload["owner_user_id"])
     run_argv = foreign_driver_argv(
-        "OT-OFFER-BOT-ORIGIN",
+        scenario,
         run_prefix,
-        5,
-        extra_args=f"--phase run --owner-user-id {owner_user_id} --no-cleanup-after",
+        minutes,
+        extra_args=foreign_extra_from_seed(seed_payload),
     )
     assert run_argv is not None
     run_completed, run_elapsed = _run_argv(run_argv)
     run_payload = _parse_driver_stdout(run_completed.stdout, run_completed.stderr)
 
-    cleanup_argv = iran_driver_argv(
-        "OT-OFFER-BOT-ORIGIN",
-        run_prefix,
-        5,
-        extra_args="",
-    )
-    # cleanup uses --mode cleanup, not scenario flags
+    cleanup_argv = iran_cleanup_argv(run_prefix)
     if cleanup_argv is not None:
-        # Replace the scenario invocation with an explicit cleanup command.
-        host = (os.getenv("STAGING_IRAN_SSH_HOST") or "").strip()
-        port = (os.getenv("STAGING_IRAN_SSH_PORT") or "22").strip()
-        container = (
-            os.getenv("STAGING_IRAN_APP_CONTAINER") or "trading_bot_staging_iran-app-1"
-        ).strip()
-        cleanup_argv = [
-            "ssh",
-            "-o",
-            "BatchMode=yes",
-            "-o",
-            "ConnectTimeout=15",
-            "-p",
-            port,
-            f"root@{host}",
-            (
-                f"docker exec {container} python scripts/staging_overtime_scenario_driver.py "
-                f"--mode cleanup --run-prefix {run_prefix}"
-            ),
-        ]
         cleanup_completed, cleanup_elapsed = _run_argv(cleanup_argv)
         cleanup_payload = _parse_driver_stdout(
             cleanup_completed.stdout, cleanup_completed.stderr
@@ -719,15 +724,43 @@ def run_offer_bot_origin_driver(args: argparse.Namespace, run_prefix: str) -> di
         and bool(cleanup_payload.get("passed"))
     )
     return {
-        "id": "OT-OFFER-BOT-ORIGIN",
+        "id": scenario,
         "status": "passed" if passed else "failed",
         "elapsed_seconds": round(seed_elapsed + run_elapsed + cleanup_elapsed, 3),
         "run_prefix": run_prefix,
-        "owner_user_id": owner_user_id,
         "seed": seed_payload,
         "run": run_payload,
         "cleanup": cleanup_payload,
     }
+
+
+def run_offer_bot_origin_driver(args: argparse.Namespace, run_prefix: str) -> dict[str, Any]:
+    del args
+    return run_two_peer_foreign_driver(
+        scenario="OT-OFFER-BOT-ORIGIN",
+        run_prefix=run_prefix,
+        minutes=5,
+        foreign_extra_from_seed=lambda seed: (
+            f"--phase run --owner-user-id {int(seed['owner_user_id'])} --no-cleanup-after"
+        ),
+    )
+
+
+def run_req_foreign_to_foreign_driver(
+    args: argparse.Namespace, run_prefix: str
+) -> dict[str, Any]:
+    del args
+    return run_two_peer_foreign_driver(
+        scenario="OT-REQ-FOREIGN-TO-FOREIGN",
+        run_prefix=run_prefix,
+        minutes=5,
+        foreign_extra_from_seed=lambda seed: (
+            "--phase run "
+            f"--owner-user-id {int(seed['owner_user_id'])} "
+            f"--requester-user-id {int(seed['requester_user_id'])} "
+            "--no-cleanup-after"
+        ),
+    )
 
 
 def run_wired_drivers(args: argparse.Namespace) -> list[dict[str, Any]]:
@@ -743,6 +776,7 @@ def run_wired_drivers(args: argparse.Namespace) -> list[dict[str, Any]]:
                 "OT-OFFER-WEBAPP-ORIGIN",
                 "OT-REQ-IRAN-TO-IRAN",
                 "OT-CANCEL-REQUESTER",
+                "OT-QUEUE-ORDER",
             }
             else 4
         )
@@ -777,6 +811,8 @@ def run_wired_drivers(args: argparse.Namespace) -> list[dict[str, Any]]:
         run_prefix = f"OTACC_{stamp}_F{index:02d}"
         if scenario == "OT-OFFER-BOT-ORIGIN":
             result = run_offer_bot_origin_driver(args, run_prefix)
+        elif scenario == "OT-REQ-FOREIGN-TO-FOREIGN":
+            result = run_req_foreign_to_foreign_driver(args, run_prefix)
         else:
             result = {
                 "id": scenario,
