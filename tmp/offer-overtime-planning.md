@@ -63,7 +63,7 @@ Abuse prevention and operational limits are the least developed topic: the per-o
 | 12 | Requester-offer cooldown | After rejection or timeout, the same requester cannot submit another request for the same offer for 30 seconds; other users remain eligible. | Confirmed |
 | 13 | User overtime setting | Overtime is a synchronized per-user default applied to all new offers, with no per-offer override in the initial version. | Confirmed |
 | 14 | Fixed range and default | Overtime is an integer from 0 to 10 minutes, is not admin-configurable, and defaults to 0 for all existing and new users. | Confirmed |
-| 15 | Owner approval authority | The offer's economic owner supplies the overtime setting and is the sole approver; managers or delegated actors remain only in the existing trade chain. | Confirmed |
+| 15 | Owner approval authority | The offer's economic owner, meaning `offer.user_id`, supplies the overtime setting and is the sole approver. No delegated market actor exists to exclude: accountants have no market access anywhere in the product, and a customer's group leader never acts on the customer's market, remaining only an intermediary in the trade chain, a block principal, and a tier-2 commission recipient. | Confirmed |
 | 16 | Offline owner behavior | Owner presence is not required; the request remains valid for 30 seconds on its origin surface with no cross-surface fallback. | Confirmed |
 | 17 | Overtime presentation | Telegram adds only `⏳` to the post; WebApp restarts the lifetime bar in green and shows an animated `⏳` in the offer-card corner. | Confirmed |
 | 18 | Admin normal-lifetime changes | Preserve the current dynamic behavior: the latest admin-configured normal lifetime applies to all still-active offers. Operationally, this rarely changed setting will be edited only while the market is closed so no active offer is affected. | Confirmed |
@@ -101,10 +101,12 @@ Abuse prevention and operational limits are the least developed topic: the per-o
 | 50 | Worker and request path share one boundary | The expiry worker and the request path evaluate the same strict comparison against the same lifecycle projection. The current asymmetry, where the worker expires an offer exactly at the deadline while the trade path still accepts it, is closed. | Confirmed |
 | 51 | Idempotency key is mandatory | Every overtime request carries an idempotency key, because the request ledger's synchronization identity refuses a row without one. | Confirmed |
 | 52 | Requester concurrency cap | Two limits apply together. A requester may hold at most **three** simultaneously outstanding overtime requests across distinct offers, and at most **one** outstanding request against any single economic owner. Every nonterminal request counts, including one that is merely queued and whose decision clock has not started, because a queued request already holds its offer's logical lock. Both limits release on every terminal outcome, including approval, rejection, timeout, requester cancellation, and hard invalidation. Neither is scoped per home server. | Confirmed |
-| 53 | Owner reachability warning is required | Enabling a nonzero value must warn the owner where approvals will appear. The warning must not promise one fixed surface, because the preference is global while approval is bound per offer to that offer's own origin. Wording, restated under the `لفظ` vocabulary rule and pending reconfirmation: `تأیید هر لفظ فقط در همان محل ثبت لفظ نمایش داده می‌شود: لفظ وب در وب‌اپ و لفظ بات در بات.` Repeated silent expiry for one owner is also an operational signal in the diagnostics stage. | Confirmed in substance, wording pending reconfirmation |
+| 53 | Owner reachability warning is required | Enabling a nonzero value must warn the owner where approvals will appear. The warning must not promise one fixed surface, because the preference is global while approval is bound per offer to that offer's own origin. Approved wording: `تأیید هر لفظ فقط در همان محل ثبت لفظ نمایش داده می‌شود: لفظ وب در وب‌اپ و لفظ بات در بات.` Repeated silent expiry for one owner is also an operational signal in the diagnostics stage. | Confirmed |
 | 54 | One request per requester per owner | The per-owner limit costs the requester nothing, because the owner queue presents one request at a time and a second request against the same owner could never receive a parallel decision anyway. It only removes a reservation that would otherwise block other buyers. Its effect is that a requester's three requests must target three different owners, so all three sit in independent queues, are presented in parallel, and each offer stays locked for its own thirty seconds rather than waiting out the others. | Confirmed |
 | 55 | Where the limits are counted | The offer home server enforces both limits locally and atomically against its own request ledger, which already contains synchronized mirror rows of the other server's requests. No cross-server round trip is added to request creation, and a bot-origin request never becomes dependent on Iran being reachable. Synchronization lag makes the count best-effort across servers, and that is accepted: these limits are abuse controls, not correctness invariants. The strictly atomic guarantees remain the per-offer lock and the one-presented-request-per-owner-scope rule, which are what prevent duplicate trades. A transient overshoot of one request is tolerable and must not be treated as a defect. | Confirmed |
 | 56 | Message-text approval gate | Every message sent to a user and every text shown to a user by this feature requires explicit product-owner approval of its exact wording before the stage that ships it may be implemented. This covers bot messages and their edits, WebApp prompts and status text, inline button labels, callback answers, validation and error text, the preference-save confirmations, the reachability warning, and any channel post change. All such strings call the object a `لفظ`, never an `آفر`. No stage may introduce, reword, or reuse a user-facing string outside the approved inventory. | Confirmed |
+| 57 | Who sees the overtime setting | The setting appears only for accounts that can own their own offers. Accountants never see it, because they are blocked from the market in the API, the bot, and the frontend. Tier-2 customers never see it, because they are refused offer creation and may only request against other people's offers; they also have no bot access at all. Tier-1 customers and ordinary users do see it, and a tier-1 customer's offers are their own, carrying their own `user_id`, so they are their own approver. | Confirmed |
+| 58 | Blocking uses trade principals | Wherever this feature revalidates that neither party is blocked, it must use the existing trade-principal resolution, which maps a customer to their group leader, rather than comparing raw user ids. Otherwise a block between two group leaders would not stop a trade routed through their customers. | Confirmed |
 
 ## Draft Product Scenario
 
@@ -135,7 +137,8 @@ Abuse prevention and operational limits are the least developed topic: the per-o
 - غیرفعال‌کردن در بات با فرستادن مقدار `۰` انجام می‌شود و دکمه مستقل غیرفعال‌سازی ندارد.
 - ورودی خارج از بازه یا غیرعددی با یک متن اعتبارسنجی رد می‌شود و مقدار ذخیره‌شده را تغییر نمی‌دهد.
 - مقدار صفر در هر دو سطح با عنوان `غیرفعال` نمایش داده می‌شود.
-- این تنظیم فقط برای حساب‌هایی نمایش داده می‌شود که مجاز به ثبت آفر متعلق به خودشان هستند.
+- این تنظیم فقط برای حساب‌هایی نمایش داده می‌شود که مجاز به ثبت لفظ متعلق به خودشان هستند. یعنی کاربران عادی و مشتریان سطح ۱. حسابدار آن را هرگز نمی‌بیند چون اصلاً به بازار دسترسی ندارد، و مشتری سطح ۲ هم نمی‌بیند چون اجازه ثبت لفظ ندارد و فقط می‌تواند روی لفظ دیگران درخواست بدهد. مشتری سطح ۲ به بات هم دسترسی ندارد، پس کنترل باتی برای او در هیچ حالتی ظاهر نمی‌شود.
+- مشتری سطح ۲ می‌تواند **درخواست‌دهنده** وقت اضافه باشد. قیمت او با کمیسیون تعدیل می‌شود و این محاسبه همان مسیر فعلی معامله است؛ تأیید وقت اضافه چیزی در آن عوض نمی‌کند.
 - مقدار وقت اضافه انتخابی کاربر هنگام ثبت آفر روی همان آفر تثبیت می‌شود؛ تغییر بعدی تنظیم کاربر فقط روی آفرهای جدید اثر می‌گذارد.
 - زمان عادی آفر رفتار پویای فعلی پروژه را حفظ می‌کند: آخرین مقدار تنظیم‌شده توسط مدیر روی تمام آفرهای هنوز فعال اعمال می‌شود و زمان ورود به وقت اضافه و پایان نهایی آفر را به همان میزان جابه‌جا می‌کند.
 - تغییر زمان عادی توسط مدیر به آفر منقضی‌شده حیات دوباره نمی‌دهد.
@@ -181,7 +184,11 @@ Abuse prevention and operational limits are the least developed topic: the per-o
 
 ### 5. تصمیم لفظ‌دهنده
 
-مرجع تصمیم فقط مالک اقتصادی خود آفر است. مدیر، سرگروه، حسابدار یا ثبت‌کننده نیابتی در تأیید وقت اضافه نقشی ندارد، مگر اینکه خودش مالک آفر باشد.
+مرجع تصمیم فقط مالک اقتصادی خود لفظ است، یعنی همان `user_id` لفظ.
+
+در عمل اینجا ابهامی وجود ندارد، چون ساختار فعلی پروژه اجازه‌ی ثبت نیابتی در بازار را نمی‌دهد. حسابدار در هیچ سطحی به بازار دسترسی ندارد: نه در API آفر و معامله، نه در بات که میدل‌ور اصلاً او را رد می‌کند، و نه در فرانت‌اند که مسیر و تب بازار برایش بسته است. سرگروه هم روی بازار مشتری خودش کاری انجام نمی‌دهد و فقط در زنجیره معامله واسط است، مبنای بررسی بلاک است، و برای مشتری سطح ۲ دریافت‌کننده کمیسیون. مشتری هم لفظ خودش را با شناسه خودش ثبت می‌کند.
+
+نتیجه اینکه روی هر لفظ واقعی بازار، ثبت‌کننده و مالک همیشه یک نفرند و تنها جایی که این دو ستون فرق می‌کنند همانندسازی بین دو سرور است.
 
 #### تأیید
 
@@ -306,47 +313,48 @@ The inventory is the single index of record. If implementation discovers a state
 | No. | Surface | Moment | Exact text | Approval |
 | --- | --- | --- | --- | --- |
 | M1 | Bot | User-panel entry button | `⏳ وقت اضافه` | Confirmed |
-| M2 | Bot | Prompt asking for the value, shown with the current value | `وقت اضافه لفظ‌های جدید شما: {مقدار فعلی}` and `عددی بین ۰ تا ۱۰ دقیقه بفرستید. صفر یعنی غیرفعال.` | Drafted, needs approval |
-| M2b | Bot | Confirmation question after a valid typed value | `وقت اضافه روی {تعداد} دقیقه تنظیم شود؟` | Drafted, needs approval |
-| M2c | Bot | Confirm and cancel buttons on that question | `✅ تایید` and `❌ انصراف` | Drafted, needs approval |
-| M3 | Both | Zero value shown as | `غیرفعال` | Drafted, needs approval |
-| M4 | Both | Save succeeded, nonzero | `✅ وقت اضافه لفظ‌های جدید شما روی {تعداد} دقیقه تنظیم شد.` | Drafted, needs approval |
-| M5 | Both | Save succeeded, zero | `✅ وقت اضافه برای لفظ‌های جدید شما غیرفعال شد.` | Drafted, needs approval |
-| M6 | Both | Warning when enabling a nonzero value | `تأیید هر لفظ فقط در همان محل ثبت لفظ نمایش داده می‌شود: لفظ وب در وب‌اپ و لفظ بات در بات.` | Confirmed in substance; wording restated from `آفر` to `لفظ` and needs reconfirmation |
-| M7 | Bot | Bot save rejected because Iran is unreachable | `ارتباط با سرور اصلی برقرار نشد و تنظیم شما ذخیره نشد. لطفاً کمی بعد دوباره تلاش کنید.` | Drafted, needs approval |
-| M8 | Both | Value outside the 0–10 range, or non-numeric input in the bot | `لطفاً فقط یک عدد بین ۰ تا ۱۰ بفرستید.` | Drafted, needs approval |
-| M9 | WebApp | Settings and market section label for the stepper | `وقت اضافه` with helper text `پس از پایان زمان لفظ، تا این مدت درخواست معامله با تأیید شما پذیرفته می‌شود.` | Drafted, needs approval |
-| M10 | Bot | Requester status, request queued | `⏳ درخواست معامله ثبت شد و در صف بررسی است.` | Drafted, needs approval |
-| M11 | Bot | Requester status edited at promotion | `⏳ درخواست در حال بررسی است.` | Drafted, needs approval |
-| M12 | Both | Requester cancellation button | `لغو درخواست` | Drafted, needs approval |
-| M13 | Bot | Requester status after successful approval | `معامله انجام شد.` | Drafted, needs approval |
-| M14 | Bot | Requester status after rejection, timeout, or invalidation | `درخواست انجام نشد.` | Drafted, needs approval |
-| M15 | Both | Requester status after own cancellation | `درخواست لغو شد.` | Drafted, needs approval |
-| M16 | Both | Second request on a lafz already under review | `درخواست دیگری برای این لفظ در حال بررسی است؛ لطفاً {زمان باقی‌مانده} ثانیه دیگر دوباره تلاش کنید.` | Drafted, needs approval |
-| M17 | Both | Same requester still in cooldown on that lafz | `برای ارسال مجدد درخواست روی این لفظ، لطفاً {زمان باقی‌مانده} ثانیه دیگر تلاش کنید.` | Drafted, needs approval |
-| M18 | Both | Cross-server delivery outcome uncertain | `⏳ در حال بررسی درخواست...` | Drafted, needs approval |
-| M19 | Both | Definite pre-send failure, retry advised | `درخواست ارسال نشد. لطفاً دوباره تلاش کنید.` | Drafted, needs approval |
-| M20 | Both | Requester already holds three outstanding requests and attempts a fourth | `شما هم‌زمان ۳ درخواست باز دارید. لطفاً تا تعیین تکلیف یکی از آن‌ها صبر کنید.` | Drafted, needs approval |
-| M20b | Both | Requester already holds a request against this same owner | Not written | Missing, must be written; must not reveal the owner's identity |
-| M21 | WebApp | Requester queued state before promotion | `در حال ارسال درخواست...` | Drafted, needs approval |
-| M22 | WebApp | Requester countdown display | `۰۰:۳۰` counting to `۰۰:۰۰` | Drafted, needs approval |
-| M23 | Bot | Owner approval message title | `⏳ **درخواست معامله در وقت اضافه**` | Drafted, needs approval |
-| M24 | Bot | Owner approval message lead line | `درخواست معامله برای لفظ شما:` | Drafted, needs approval |
-| M25 | Bot | Owner approval deadline line | `⏱ مهلت پاسخ: ۳۰ ثانیه` | Drafted, needs approval |
-| M26 | Bot | Owner approval closing line | `در صورت تأیید، معامله پس از بررسی نهایی ثبت می‌شود.` | Drafted, needs approval |
-| M27 | Both | Requested quantity line, lot-based offers only | `📦 مقدار درخواستی: {تعداد} عدد` | Drafted, needs approval |
-| M28 | Bot | Owner approval buttons | `✅ تأیید معامله` and `❌ رد درخواست` | Drafted, needs approval |
-| M29 | Bot | Owner message after own approval | `معامله انجام شد.` | Drafted, needs approval |
-| M30 | Bot | Owner message after own rejection | `درخواست رد شد.` | Drafted, needs approval |
-| M31 | Bot | Owner message after timeout, requester cancellation, or invalidation | `درخواست بسته شد.` | Drafted, needs approval |
-| M32 | Bot | Callback answer when the owner clicks after the deadline | `مهلت پاسخ به این درخواست تمام شده است.` | Drafted, needs approval |
-| M33 | Bot | Callback answer when the click is a duplicate or the request is already terminal | `این درخواست قبلاً تعیین تکلیف شده است.` | Drafted, needs approval |
-| M34 | Bot | Callback answer when the clicker is not the economic owner. Cannot occur in the normal path, since only the owner receives the message; needed for a stale or forwarded callback. | `شما اجازه تصمیم‌گیری درباره این درخواست را ندارید.` | Drafted, needs approval |
-| M35 | WebApp | Owner prompt title | `درخواست معامله در وقت اضافه` | Drafted, needs approval |
-| M36 | WebApp | Owner prompt buttons | `تأیید معامله` and `رد درخواست` | Drafted, needs approval |
-| M37 | Both | Owner approved but revalidation failed, so no trade was created. Stays generic so it never leaks which condition changed or anything about the requester. | `شرایط این لفظ تغییر کرده و معامله انجام نشد.` | Drafted, needs approval |
-| M38 | Channel | Overtime marker added to the public post, and removed or retained at terminal outcome | `⏳` | Drafted, needs approval |
-| M39 | Both | Standard trade messages to both parties after a successful overtime trade | Existing project text, content contract unchanged | Existing, unchanged |
+| M2 | Bot | Prompt asking for the value, shown with the current value | `وقت اضافه لفظ‌های جدید شما: {مقدار فعلی}` and `عددی بین ۰ تا ۱۰ دقیقه بفرستید. صفر یعنی غیرفعال.` | Confirmed |
+| M2b | Bot | Confirmation question after a valid nonzero value | `وقت اضافه روی {تعداد} دقیقه تنظیم شود؟` | Confirmed |
+| M2b-zero | Bot | Confirmation question when the typed value is zero, kept separate so the sentence reads naturally | `وقت اضافه غیرفعال شود؟` | Confirmed |
+| M2c | Bot | Confirm and cancel buttons on that question | `✅ تایید` and `❌ انصراف` | Confirmed |
+| M3 | Both | Zero value shown as | `غیرفعال` | Confirmed |
+| M4 | Both | Save succeeded, nonzero | `✅ وقت اضافه لفظ‌های جدید شما روی {تعداد} دقیقه تنظیم شد.` | Confirmed |
+| M5 | Both | Save succeeded, zero | `✅ وقت اضافه برای لفظ‌های جدید شما غیرفعال شد.` | Confirmed |
+| M6 | Both | Warning when enabling a nonzero value | `تأیید هر لفظ فقط در همان محل ثبت لفظ نمایش داده می‌شود: لفظ وب در وب‌اپ و لفظ بات در بات.` | Confirmed |
+| M7 | Bot | Bot save rejected because Iran is unreachable. Deliberately says nothing about servers, since the two-server topology is not something a user needs to learn. | `تنظیم شما ذخیره نشد. لطفاً کمی بعد دوباره تلاش کنید.` | Confirmed |
+| M8 | Both | Value outside the 0–10 range, or non-numeric input in the bot | `لطفاً فقط یک عدد بین ۰ تا ۱۰ بفرستید.` | Confirmed |
+| M9 | WebApp | Settings and market section label for the stepper | `وقت اضافه` with helper text `پس از پایان زمان لفظ، تا این مدت درخواست معامله با تأیید شما پذیرفته می‌شود.` | Confirmed |
+| M10 | Bot | Requester status, request queued | `⏳ درخواست معامله ثبت شد و در صف بررسی است.` | Confirmed |
+| M11 | Bot | Requester status edited at promotion | `⏳ درخواست در حال بررسی است.` | Confirmed |
+| M12 | Both | Requester cancellation button | `لغو درخواست` | Confirmed |
+| M13 | Bot | Requester status after successful approval | `معامله انجام شد.` | Confirmed |
+| M14 | Bot | Requester status after rejection, timeout, or invalidation | `درخواست انجام نشد.` | Confirmed |
+| M15 | Both | Requester status after own cancellation | `درخواست لغو شد.` | Confirmed |
+| M16 | Both | Second request on a lafz already under review | `درخواست دیگری برای این لفظ در حال بررسی است؛ لطفاً {زمان باقی‌مانده} ثانیه دیگر دوباره تلاش کنید.` | Confirmed |
+| M17 | Both | Same requester still in cooldown on that lafz | `برای ارسال مجدد درخواست روی این لفظ، لطفاً {زمان باقی‌مانده} ثانیه دیگر تلاش کنید.` | Confirmed |
+| M18 | Both | Cross-server delivery outcome uncertain | `⏳ در حال بررسی درخواست...` | Confirmed |
+| M19 | Both | Definite pre-send failure, retry advised | `درخواست ارسال نشد. لطفاً دوباره تلاش کنید.` | Confirmed |
+| M20 | Both | Requester already holds three outstanding requests and attempts a fourth | `شما هم‌زمان ۳ درخواست باز دارید. لطفاً تا تعیین تکلیف یکی از آن‌ها صبر کنید.` | Confirmed |
+| M20b | Both | Requester already holds a request against another offer of this same economic owner. Worded vaguely on purpose: it does not state the same-owner reason, so it never hints at who owns which offer. The cost is that the requester cannot distinguish it from other temporary blocks, which was accepted. | `فعلاً نمی‌توانید روی این لفظ درخواست بدهید. لطفاً کمی بعد دوباره تلاش کنید.` | Confirmed |
+| M21 | WebApp | Requester queued state before promotion | `در حال ارسال درخواست...` | Confirmed |
+| M22 | WebApp | Requester countdown display | `۰۰:۳۰` counting to `۰۰:۰۰` | Confirmed |
+| M23 | Bot | Owner approval message title | `⏳ **درخواست معامله در وقت اضافه**` | Confirmed |
+| M24 | Bot | Owner approval message lead line | `درخواست معامله برای لفظ شما:` | Confirmed |
+| M25 | Bot | Owner approval deadline line | `⏱ مهلت پاسخ: ۳۰ ثانیه` | Confirmed |
+| M26 | Bot | Owner approval closing line | `در صورت تأیید، معامله پس از بررسی نهایی ثبت می‌شود.` | Confirmed |
+| M27 | Both | Requested quantity line, lot-based offers only | `📦 مقدار درخواستی: {تعداد} عدد` | Confirmed |
+| M28 | Bot | Owner approval buttons | `✅ تأیید معامله` and `❌ رد درخواست` | Confirmed |
+| M29 | Bot | Owner message after own approval | `معامله انجام شد.` | Confirmed |
+| M30 | Bot | Owner message after own rejection | `درخواست رد شد.` | Confirmed |
+| M31 | Bot | Owner message after timeout, requester cancellation, or invalidation | `درخواست بسته شد.` | Confirmed |
+| M32 | Bot | Callback answer when the owner clicks after the deadline | `مهلت پاسخ به این درخواست تمام شده است.` | Confirmed |
+| M33 | Bot | Callback answer when the click is a duplicate or the request is already terminal | `این درخواست قبلاً تعیین تکلیف شده است.` | Confirmed |
+| M34 | Bot | Callback answer when the clicker is not the economic owner. This is purely a defensive guard, not a role-collision case: no accountant or group leader can reach a market approval at all, so the only realistic triggers are a forwarded message, a stale callback from an earlier session, or a crafted payload. | Two candidates pending choice: `فقط صاحب این لفظ می‌تواند درباره این درخواست تصمیم بگیرد.` or `شما اجازه تصمیم‌گیری درباره این درخواست را ندارید.` | Open, awaiting choice |
+| M35 | WebApp | Owner prompt title | `درخواست معامله در وقت اضافه` | Confirmed |
+| M36 | WebApp | Owner prompt buttons | `تأیید معامله` and `رد درخواست` | Confirmed |
+| M37 | Both | Owner approved but revalidation failed, so no trade was created. Stays generic so it never leaks which condition changed or anything about the requester. | `شرایط این لفظ تغییر کرده و معامله انجام نشد.` | Confirmed |
+| M38 | Channel | Overtime marker added to the public post, and removed or retained at terminal outcome | `⏳` | Confirmed |
+| M39 | Both | Standard trade messages to both parties after a successful overtime trade | Existing project text, content contract unchanged | Confirmed to stay unchanged |
 
 **Vocabulary rule.** Every user-facing string in this feature calls the object a `لفظ`, never an `آفر`. This matches every existing message in the product, such as `این لفظ دیگر فعال نیست.` and `شما حداکثر {تعداد} لفظ فعال دارید.`, and it avoids showing the user two different words for one thing on the same screen. `آفر` remains acceptable only in the technical prose of this document. Because of this rule the confirmed reachability warning was restated from `آفر` to `لفظ` and needs reconfirmation, and the Persian feature name recorded in Decision 1 no longer matches the strings; that is listed as an open question.
 
@@ -544,7 +552,7 @@ The inventory is the single index of record. If implementation discovers a state
 | 2 | Exact time boundaries across two servers | Three separate behaviors exist today and they disagree. The trade path forgives transit delay: when the trusted edge receipt is `<= deadline` and transit is within `trade_forward_grace_seconds` (config default `3`, raised to `max(grace, 8)` on the bot path), a request that lands after the deadline still trades automatically. When that branch does not apply, classification falls back to the home server's own processing time via `now > expiry_at`. The expiry worker instead uses `created_at <= now - minutes`, so it expires an offer exactly at the deadline while the trade path still accepts it. Separately, `allow_in_flight_after_time_limit_expiry` lets an offer already flipped to `EXPIRED`/`time_limit` still finalize a trade when the edge grace applies. | Replace all three with one rule: the trusted first-server receipt time alone determines the phase, and transit delay never changes the phase. Compare strictly against that receipt: `< normal deadline` is automatic, `== normal deadline` rejects, `> normal deadline && < final deadline` enters approval, and `>= final deadline` rejects. The numeric grace window is therefore removed from phase classification; its only remaining job is to let a request whose receipt was validly inside a phase still be finalized after the worker has advanced the offer's status. The processing-time fallback must be deleted so a slow but valid overtime request reaches owner approval instead of being rejected as expired. The home server remains the final clock authority and device time is never trusted. |
 | 3 | Durable request state and queue | `OfferRequest` has a durable ledger but no queued/presented/owner-decision lifecycle, decision deadline, delivery reference, or overtime marker. | Extend this ledger with explicit nonterminal and terminal approval states, immutable timestamps, queue ordering, home-server/owner snapshots, decision deadline, Telegram message reference, and rejection/invalidation reason. Add targeted database indexes and PostgreSQL-enum migrations. |
 | 4 | Atomic one-request-per-offer rule | Current direct trade processing locks the offer, but does not model a pending owner decision. | At the offer home server, lock the offer and active request state in one transaction. A second request for the same offer must be rejected immediately, regardless of lot or requested quantity, and must never join the owner queue. |
-| 5 | Independent owner queues by offer home server | There is no current owner-approval queue. | Scope ordering and exclusivity to `(economic_owner_id, offer_home_server)`. WebApp- and bot-origin offers of one owner may each show one request concurrently; offers with the same home server are FIFO. Use `offer.user_id`, never the delegated actor or a customer's manager, as the owner key. |
+| 5 | Independent owner queues by offer home server | There is no current owner-approval queue. On the ownership side there is less ambiguity than it first appears: for every market offer created through a user-facing path, `actor_user_id` equals `user_id`. Accountants are hard-blocked from the market in the API, the bot middleware, and the frontend router, and customers and group leaders always act as themselves. The only path where the two columns differ is cross-server replication. | Scope ordering and exclusivity to `(economic_owner_id, offer_home_server)`. WebApp- and bot-origin offers of one owner may each show one request concurrently; offers with the same home server are FIFO. Use `offer.user_id` as the owner key. Reading `user_id` rather than `actor_user_id` is correct by definition rather than a defence against delegation, since no delegated market actor exists in production. |
 | 6 | Finalization without a second trade implementation | The current direct path creates the ledger and commits a trade in one authorization flow. | Separate request creation/classification from final approval, then reuse the current authoritative trade-validation/commit core for approval. This preserves lot, block, customer-manager, price, idempotency, and accounting rules instead of recreating them. |
 | 7 | User overtime preference and immediate consistency | `User` has no overtime field. Write authority on `users` is field-level, not whole-record: `allowed_user_fields_for_source` grants the foreign server a small subset, so "Iran is the only writer" is only true per field. Emitting a forbidden foreign write already raises `foreign_user_write_authority_forbidden`. | Add a user-level integer default with migration default `0`, self-service save endpoints/handlers, explicit sync fields, and a per-offer snapshot at creation. Place the field in the Iran-authoritative identity field set, never the foreign-writable set, so the existing authority guard is what mechanically enforces single-writer. A bot save is forwarded to Iran and is shown as successful only after Iran persists it; during an Iran/foreign outage it is rejected without a local write or deferred intent. A new offer uses its persisted local snapshot, never an unsaved browser/bot value. Because bot-origin offers are always foreign-home, a bot-created offer snapshots the foreign mirror of this Iran-authoritative value; that snapshot is accepted as-is even when the mirror is briefly stale, and the staleness window must be bounded and logged rather than blocking offer creation. |
 | 8 | Terminal invalidation fan-out | Manual expiry, automatic expiry, market close, cancel-all, completion, account blocking, and deactivation have separate callers. | Centralize `invalidate_overtime_requests_for_offer(...)` in the existing terminal-transition service. It must atomically close active/queued requests, prevent later callbacks from trading, remove/obsolete Telegram deliveries, close WebApp prompts, and promote the next eligible request only where the offer remains valid. |
@@ -583,7 +591,7 @@ The inventory is the single index of record. If implementation discovers a state
 
 All metadata belonging to the offer and its overtime requests is retained as durable internal data. The implementation must preserve, at minimum:
 
-1. **Offer snapshot:** public identity, home server, economic owner and delegated actor references, commodity, side, settlement type, price, quantity, remaining quantity, wholesale/lot structure, notes, creation time, normal-lifetime calculation inputs, overtime-minute snapshot, channel publication references, and every terminal/phase status transition.
+1. **Offer snapshot:** public identity, home server, both the economic owner and the recorded actor reference even though the two are always identical for market offers, commodity, side, settlement type, price, quantity, remaining quantity, wholesale/lot structure, notes, creation time, normal-lifetime calculation inputs, overtime-minute snapshot, channel publication references, and every terminal/phase status transition.
 2. **Request snapshot:** requester and actor references, source surface/server, idempotency key, requested quantity/lot, authoritative receipt time, queue sequence, presentation and decision timestamps, decision deadline, approver, approval/rejection/timeout/invalidation reason, Telegram delivery/message reference when applicable, and resulting trade reference.
 3. **Privacy boundary:** these records are internal. Requester identity and personal data are not shown to the offer owner before a committed trade, and none of this audit payload is added to public or monitoring-channel posts.
 4. **User data:** the offer/request records retain stable user references and relation snapshots needed to reconstruct the decision. Unrelated duplicate profile copies are not created merely for audit; the existing authoritative user record remains the source for profile details.
@@ -594,7 +602,7 @@ All metadata belonging to the offer and its overtime requests is retained as dur
 2. **Request creation:** direct normal trade; overtime request; duplicate idempotency replay; concurrent requests for one offer with different lots/quantities; same requester cooldown; concurrent requests for different offers under the same and different home servers.
 3. **Decision outcome:** approve, reject, timeout, double click, delayed callback, partial lot completion, full completion, and final-tail approval that causes remaining quantity to expire immediately.
 4. **Invalidation:** manual expiry, automatic final expiry, cancellation, cancel-all, market close, account block/deactivation, and completion while requests are queued, presented, or being delivered.
-5. **Origin and ownership:** WebApp-home and bot-home offers; request issued locally and remotely; normal users, customers with their economic owner, delegated actors, and users without approval eligibility.
+5. **Origin and ownership:** WebApp-home and bot-home offers; request issued locally and remotely; ordinary users; tier-1 customers owning and approving their own offers; tier-2 customers as requesters only, including their commission-adjusted price; accountants confirmed to see neither the setting nor any approval on any surface; and block checks resolved through trade principals so a block between two group leaders stops a trade routed through their customers.
 6. **Telegram:** successful send, 429/retry, failed delivery before deadline, stale queued delivery, callback replay, bot restart, message cleanup, and coexistence with the existing publication queue.
 7. **WebApp:** any authenticated page, reconnect, visibility restore, primary/secondary tabs, server countdown, modal priority, reduced motion, card timers, final-tail read-only controls, and historical marker placement.
 8. **Synchronization and rollout:** user-setting propagation, offer snapshot propagation, request transition parity, temporary cross-server failure/recovery, migration compatibility, and feature-disabled behavior.
@@ -681,7 +689,7 @@ Resolved since the previous revision: the owner reachability warning has fixed w
 
 **Primary locations:** `models/user.py`, user API/service layer, bot internal-command client, `api/routers/sync.py`, `core/events.py`, `core/sync_metadata.py`, offer creation services.
 
-**Tests:** Iran save, bot-forwarded save, outage rejection, stale-sync recovery, range validation, economic-owner/customer/delegated actor cases, new offer snapshot, and republish using the current preference.
+**Tests:** Iran save, bot-forwarded save, outage rejection, stale-sync recovery, range validation, eligibility across ordinary users, tier-1 customers, tier-2 customers, and accountants, new offer snapshot, and republish using the current preference.
 
 **Exit criteria:** both servers converge on the preference and every newly created offer has an immutable, correct snapshot.
 
@@ -729,12 +737,12 @@ Resolved since the previous revision: the owner reachability warning has fixed w
 - Keep the existing direct automatic path for normal-time requests.
 - Route overtime requests into the durable state machine rather than committing a trade immediately.
 - On approved request, re-enter the existing authoritative validation/commit core under the request/offer lock; do not create a second trade implementation.
-- Preserve existing lot, remaining quantity, customer-manager bridge, accountant/delegated actor, limits, blocks, pricing, idempotency, trade messages, and accounting behavior.
+- Preserve existing lot, remaining quantity, customer chain legs, tier-2 commission pricing, limits, principal-resolved blocks, idempotency, trade messages, and accounting behavior.
 - Mark the offer historical overtime flag only after a trade actually commits.
 
 **Primary locations:** `api/routers/trades.py`, current trade service/validation helpers, `models/offer.py`, `models/offer_request.py`.
 
-**Tests:** normal regression, overtime approval/rejection, partial/full lot trade, unavailable lot at approval, customer ownership, delegated actor, price/limit/block revalidation, and exactly-once trade commit.
+**Tests:** normal regression, overtime approval/rejection, partial/full lot trade, unavailable lot at approval, tier-1 customer owning and approving, tier-2 customer requesting with commission pricing, price and limit revalidation, block revalidation through trade principals, and exactly-once trade commit.
 
 **Exit criteria:** approved overtime requests produce the same authoritative trade result as an equivalent valid normal request.
 
