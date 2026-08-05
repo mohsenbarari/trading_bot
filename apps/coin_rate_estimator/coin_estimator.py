@@ -81,7 +81,10 @@ WINDOW_SECONDS = 60
 # inside each estimate use a shorter robust window.  The latest real event is
 # carried separately as ``point_price``; no synthetic forward-filled event is
 # created when a source is quiet.
-MARKET_AVERAGE_SECONDS = 30
+#
+# 30s is too tight for live melted-paper channels that often gap 15–60s between
+# quotes; 90s still rejects multi-minute staleness without inventing quiet rows.
+MARKET_AVERAGE_SECONDS = 90
 MELTED_LIVE_BUCKET_SECONDS = 5
 NO_DATA_TOKEN = "<NO_DATA_THIS_MINUTE>"
 USD_HERAT_ANCHOR_MAX_AGE_SECONDS = 7 * 24 * 60 * 60
@@ -158,6 +161,19 @@ SETTLEMENT_CONFIG = {
                 "آبشده رسمی",
                 "PHYSICAL",
                 "SAME_MINUTE_PHYSICAL_UNDERLYING_FALLBACK",
+            ),
+            # After the cash physical channel goes quiet, keep an explicit paper
+            # reference (never silently relabelled as physical) so CASH does not
+            # collapse to NO_DATA while TOMORROW still has حواله/غیررسمی quotes.
+            (
+                "آبشده حواله",
+                "PAPER",
+                "SAME_MINUTE_PAPER_REFERENCE_FALLBACK",
+            ),
+            (
+                "آبشده غیررسمی",
+                "PAPER",
+                "SAME_MINUTE_PAPER_REFERENCE_FALLBACK",
             ),
         ),
         "coin_market_label": "سکه نقدی",

@@ -124,12 +124,13 @@ deleting them. The state is also exposed in `data.json` under
 
 Inference refreshes every five seconds. Telegram messages remain
 event-driven: no quiet-period rows are fabricated. For each estimate the
-parser/normalizer tables are queried using a 30-second trailing window and the
+parser/normalizer tables are queried using a 90-second trailing window and the
 newest real parsed event is exposed separately as `point_price`. Melted-gold
 events are additionally grouped by market label, settlement, form, event type
 and side into five-second buckets; only the newest event in each bucket is
 presented to the live feature set, while every original parsed event remains
-available for order-flow and training. Herat uses all parsed event types in its
+available for order-flow and training. The longer average window covers common
+15–60s quiet gaps on paper melted channels without inventing quiet-period rows. Herat uses all parsed event types in its
 selected settlement/form lane. Wallex USDT polling defaults to ten seconds and
 XAU history compaction keeps one raw sample per fifteen-second bucket. A
 missing field stays `<NO_DATA_THIS_MINUTE>`; it is never silently

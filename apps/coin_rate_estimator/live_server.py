@@ -3821,7 +3821,13 @@ async def live_collection_loop(
         flood_sleep_threshold=60,
         sequential_updates=True,
     )
-    await client.start(phone=settings.phone)
+    await client.connect()
+    if not await client.is_user_authorized():
+        if not settings.phone:
+            raise RuntimeError(
+                "Telegram session is not authorised and TELEGRAM_PHONE is not configured"
+            )
+        await client.start(phone=settings.phone)
     entities = []
     channel_by_peer: dict[int, tuple[str, str, str]] = {}
     try:

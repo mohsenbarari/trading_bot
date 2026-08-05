@@ -850,6 +850,31 @@ rm -rf /srv/trading-bot/production-data/coin-intelligence/private-gold-live/eval
 # combined staging stays on candidate/combined-staging-overtime-coin with coin flags off
 ```
 
+
+### 14. Coin-price estimator runtime activation (2026-08-05)
+
+Imported `apps/coin_rate_estimator` from `candidate/coin-price-intelligence@0357d003`
+into this combined branch (`38d39154`), then activated the live operator runtime.
+
+| Step | Result |
+| --- | --- |
+| Runtime backup | `.backup-live-cadence-20260805T175409Z/` (code + conversation + market DB) |
+| Targeted apply | `coin_estimator.py`, `live_server.py`, `online_recalibration.py`, collector `db.py`/`collector.py` |
+| Systemd drop-ins | path env + vendor PYTHONPATH under `.pythonpath-repo` (PrivateTmp-safe) |
+| Restart | `coin-rate-estimator-dashboard` + `coin-public-market-telegram` **active** |
+| New tables | `coin_estimate_predictions`, `coin_online_residual_state` auto-created |
+| XAU index | `idx_raw_posts_xau_15s` |
+| Reconnect probe | connect via authenticated `/group-live-control` cleared `DEFERRED_GROUP_INPUT_DISCONNECTED`; restored operator disconnect |
+
+Live fixes applied after activation (also in git):
+
+1. Restore authorized-session Telegram start (no phone required when session exists)
+2. Widen `MARKET_AVERAGE_SECONDS` 30→90 (melted paper gaps were causing total `NO_DATA`)
+3. Add explicit CASH paper reference fallback (`آبشده حواله` / `غیررسمی`)
+
+Hardcoded dashboard login remains a known debt (move to env before broader exposure).
+
+
 #### 13.6 Still owed
 
 1. Web/Bot shadow checks (no Offer/Trade/Telegram mutation; safe MISSING/ABSTAIN)
