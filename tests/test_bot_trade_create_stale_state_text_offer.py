@@ -20,6 +20,7 @@ from bot.callbacks import (
 )
 from bot.handlers.trade_create import (
     _TEXT_OFFER_EXISTING_HANDOFF_STATES,
+    _TEXT_OFFER_PENDING_CONFIRMATION_STATES,
     _TEXT_OFFER_RECOVERY_STATES,
     _disable_pending_text_offer_confirmation,
     _reject_stale_text_offer_callback,
@@ -55,7 +56,7 @@ class BotTradeCreateStaleStateTextOfferTests(unittest.IsolatedAsyncioTestCase):
             for state in (
                 *_TEXT_OFFER_EXISTING_HANDOFF_STATES,
                 *_TEXT_OFFER_RECOVERY_STATES,
-                Trade.awaiting_text_confirm,
+                *_TEXT_OFFER_PENDING_CONFIRMATION_STATES,
             )
         }
 

@@ -137,7 +137,7 @@ EXPECTED_RUNTIME_INVENTORY_COUNTS = {
 # line numbers moved because coin-intelligence inserted code above them in
 # bot/handlers/trade_create.py and api/routers/offers.py.
 EXPECTED_RUNTIME_INVENTORY_SHA256 = (
-    "1b5f85663c7cc57b740f0d5cf668d8b6052fb8958623744492da1a8a4b4b3945"
+    "b857d8b66572b6370edb4f3a81079889515d61a1259c1306d3057d528bdaa17d"
 )
 
 

@@ -1143,6 +1143,12 @@ _TEXT_OFFER_RECOVERY_STATES = (
     Trade.awaiting_legacy_confirm,
 )
 
+# States where a preview is already on screen and new offer text replaces it.
+_TEXT_OFFER_PENDING_CONFIRMATION_STATES = (
+    Trade.awaiting_text_confirm,
+    Trade.awaiting_text_inference_choice,
+)
+
 
 async def _wizard_callback_is_current(callback: types.CallbackQuery, state: FSMContext) -> bool:
     if await state.get_state() in _WIZARD_STATE_VALUES:
@@ -2792,8 +2798,10 @@ async def handle_text_offer(message: types.Message, state: FSMContext, user: Opt
     )
 
 
-@router.message(Trade.awaiting_text_confirm, F.text.func(has_trade_indicator))
-@router.message(Trade.awaiting_text_inference_choice, F.text.func(has_trade_indicator))
+@router.message(
+    StateFilter(*_TEXT_OFFER_PENDING_CONFIRMATION_STATES),
+    F.text.func(has_trade_indicator),
+)
 async def handle_text_offer_while_confirmation_pending(
     message: types.Message,
     state: FSMContext,
