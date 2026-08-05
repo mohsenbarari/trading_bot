@@ -15,15 +15,16 @@
 - Rule: no implementation, database, deployment, or runtime changes are allowed until the plan is complete and explicitly approved.
 - Decision policy: only confirmed decisions are recorded as final. Unresolved items remain explicitly open.
 - Verification status: the technical review below was re-verified against the codebase at commit `540b2c0c`. Corrections from that verification are folded into the tables and stages.
-- Copy policy: every user-facing message and displayed text in this feature requires explicit product-owner approval of its exact wording before the stage that ships it may be implemented. The message inventory section is the single index of record. All strings call the object a `لفظ` to match existing product vocabulary. Every entry now has drafted text except `M20b`, and no entry is approved yet.
+- Copy policy: every user-facing message and displayed text in this feature requires explicit product-owner approval of its exact wording before the stage that ships it may be implemented. The message inventory section is the single index of record. All strings call the object a `لفظ` to match existing product vocabulary, and the feature is labelled `وقت اضافه` wherever it is named. Only `M1` is approved, only `M20b` still has no text, and the rest are drafted and awaiting review.
 
 ## 1. Feature Naming
 
 ### Confirmed decision
 
-- Persian feature name: **وقت اضافه آفر**
-- Short Persian label: **وقت اضافه**
+- Label shown to users, and the only form that appears in the interface: **وقت اضافه**
+- Full descriptive Persian name, for internal and documentation use only: **وقت اضافه آفر**
 - English working name used only in technical discussions: **Offer Overtime**
+- Because every user-facing string of this feature says «لفظ» and never «آفر», the internal full name never collides with anything a user reads.
 
 ### Current high-level meaning
 
@@ -48,7 +49,7 @@ Abuse prevention and operational limits are the least developed topic: the per-o
 
 | No. | Topic | Decision | Status |
 | --- | --- | --- | --- |
-| 1 | Feature name | Persian name is `وقت اضافه آفر`; short label is `وقت اضافه`. | Confirmed |
+| 1 | Feature name | The label users actually see is `وقت اضافه`, and it is the only form that appears anywhere in the interface. `وقت اضافه آفر` remains the full descriptive name for internal and documentation use only; because `آفر` never appears in a user-facing string, the two never conflict on screen. English working name for technical discussion stays `Offer Overtime`. | Confirmed |
 | 2 | Request lifetime | Every overtime trade request is valid for 30 seconds. | Confirmed |
 | 3 | Approval surface | Approval is shown only on the offer's origin surface and home server. | Confirmed |
 | 4 | Telegram approval | Bot-origin offers send an offer-context request with approve/reject buttons to the offer owner. | Confirmed |
@@ -128,7 +129,8 @@ Abuse prevention and operational limits are the least developed topic: the per-o
 - مقدار وقت اضافه فقط می‌تواند یک عدد صحیح از صفر تا ۱۰ دقیقه باشد و سقف آن از تنظیمات مدیر کنترل نمی‌شود.
 - مقدار اولیه برای تمام کاربران فعلی و جدید صفر است؛ بنابراین قابلیت برای هر کاربر به‌صورت انتخابی فعال می‌شود.
 - در وب‌اپ، تنظیم در صفحه تنظیمات کاربر و بخش بازار با کنترل منفی/مثبت، گام یک دقیقه و دکمه ذخیره صریح نمایش داده می‌شود.
-- در بات، دکمه `⏳ وقت اضافه لفظ` در همان کیبورد پنل کاربر موجود اضافه می‌شود و هیچ آیتم تازه‌ای به منوی اصلی افزوده نمی‌شود. تمام متن‌های کاربرپسند این فیچر واژه «لفظ» را به‌کار می‌برند تا با بقیه محصول یکدست بمانند.
+- در بات، دکمه `⏳ وقت اضافه` در همان کیبورد پنل کاربر موجود اضافه می‌شود و هیچ آیتم تازه‌ای به منوی اصلی افزوده نمی‌شود. برچسب دکمه همان برچسب کوتاه تأییدشده فیچر است و با ریتم دکمه‌های همسایه پنل کاربر هم‌خوان می‌ماند.
+- تمام متن‌های کاربرپسند این فیچر واژه «لفظ» را به‌کار می‌برند تا با بقیه محصول یکدست بمانند؛ واژه «آفر» در هیچ متن کاربرپسندی ظاهر نمی‌شود.
 - کنترل بات ورودی تایپی با تأیید صریح است، نه کنترل منفی/مثبت. کاربر عددی بین صفر تا ده می‌فرستد، بات آن را اعتبارسنجی می‌کند و مقدار را با دکمه‌های تأیید و انصراف می‌پرسد، و ذخیره فقط پس از تأیید و پس از ثبت قطعی در ایران انجام می‌شود. این همان الگوی موجود تنظیم محدودیت‌های کاربر است و استپر منفی/مثبت به بات اضافه نمی‌شود.
 - غیرفعال‌کردن در بات با فرستادن مقدار `۰` انجام می‌شود و دکمه مستقل غیرفعال‌سازی ندارد.
 - ورودی خارج از بازه یا غیرعددی با یک متن اعتبارسنجی رد می‌شود و مقدار ذخیره‌شده را تغییر نمی‌دهد.
@@ -303,7 +305,7 @@ The inventory is the single index of record. If implementation discovers a state
 
 | No. | Surface | Moment | Exact text | Approval |
 | --- | --- | --- | --- | --- |
-| M1 | Bot | User-panel entry button | `⏳ وقت اضافه لفظ` | Drafted, needs approval |
+| M1 | Bot | User-panel entry button | `⏳ وقت اضافه` | Confirmed |
 | M2 | Bot | Prompt asking for the value, shown with the current value | `وقت اضافه لفظ‌های جدید شما: {مقدار فعلی}` and `عددی بین ۰ تا ۱۰ دقیقه بفرستید. صفر یعنی غیرفعال.` | Drafted, needs approval |
 | M2b | Bot | Confirmation question after a valid typed value | `وقت اضافه روی {تعداد} دقیقه تنظیم شود؟` | Drafted, needs approval |
 | M2c | Bot | Confirm and cancel buttons on that question | `✅ تایید` and `❌ انصراف` | Drafted, needs approval |
@@ -313,7 +315,7 @@ The inventory is the single index of record. If implementation discovers a state
 | M6 | Both | Warning when enabling a nonzero value | `تأیید هر لفظ فقط در همان محل ثبت لفظ نمایش داده می‌شود: لفظ وب در وب‌اپ و لفظ بات در بات.` | Confirmed in substance; wording restated from `آفر` to `لفظ` and needs reconfirmation |
 | M7 | Bot | Bot save rejected because Iran is unreachable | `ارتباط با سرور اصلی برقرار نشد و تنظیم شما ذخیره نشد. لطفاً کمی بعد دوباره تلاش کنید.` | Drafted, needs approval |
 | M8 | Both | Value outside the 0–10 range, or non-numeric input in the bot | `لطفاً فقط یک عدد بین ۰ تا ۱۰ بفرستید.` | Drafted, needs approval |
-| M9 | WebApp | Settings and market section label for the stepper | `وقت اضافه لفظ‌های جدید` with helper text `پس از پایان زمان لفظ، تا این مدت درخواست معامله با تأیید شما پذیرفته می‌شود.` | Drafted, needs approval |
+| M9 | WebApp | Settings and market section label for the stepper | `وقت اضافه` with helper text `پس از پایان زمان لفظ، تا این مدت درخواست معامله با تأیید شما پذیرفته می‌شود.` | Drafted, needs approval |
 | M10 | Bot | Requester status, request queued | `⏳ درخواست معامله ثبت شد و در صف بررسی است.` | Drafted, needs approval |
 | M11 | Bot | Requester status edited at promotion | `⏳ درخواست در حال بررسی است.` | Drafted, needs approval |
 | M12 | Both | Requester cancellation button | `لغو درخواست` | Drafted, needs approval |
@@ -618,10 +620,9 @@ All metadata belonging to the offer and its overtime requests is retained as dur
 
 Detailed schema, migration, API, queue, and test design will be derived from the confirmed requirements above without changing the stated behavior. Three items remain open and must be answered before Stage 4.
 
-1. **Final copy approval.** Every user-facing string in this feature requires explicit product-owner approval before its stage may be implemented. See the message inventory section for the full list and its approval state. Every entry now has drafted text; none is approved yet.
-2. **Persian name of the feature.** All user-facing strings now use `لفظ`, matching every existing message in the product. Decision 1 still records the Persian feature name as `وقت اضافه آفر`, which no longer matches the strings. Either the name aligns to `وقت اضافه لفظ` or Decision 1 is reaffirmed as a technical-only name that never appears in the interface.
+1. **Final copy approval.** Every user-facing string in this feature requires explicit product-owner approval before its stage may be implemented. See the message inventory section for the full list and its per-entry state. Only `M1` is approved so far, only `M20b` still has no text, and everything between the two is drafted and awaiting review.
 
-Resolved since the previous revision: the owner reachability warning has fixed wording, the requester limits are confirmed at three overall and one per owner, and the limits are counted locally on the offer home server with accepted best-effort cross-server accuracy.
+Resolved since the previous revision: the owner reachability warning has fixed wording, the requester limits are confirmed at three overall and one per owner, the limits are counted locally on the offer home server with accepted best-effort cross-server accuracy, and the feature name question is closed because the user-facing label is `وقت اضافه` while `وقت اضافه آفر` stays internal.
 
 ## Stage-Based Implementation Roadmap
 
@@ -787,7 +788,7 @@ Resolved since the previous revision: the owner reachability warning has fixed w
 
 **Goal:** expose the confirmed bot behavior without changing the persistent keyboard layout.
 
-- Add the `⏳ وقت اضافه لفظ` entry to the existing eligible user panel. The control is a typed value confirmed by explicit accept/cancel, reusing the limit-settings pattern; do not build a plus/minus stepper in the bot. Zero is entered as a value, not a separate disable button. The save result is Iran-authoritative and is reported only after Iran persists it.
+- Add the `⏳ وقت اضافه` entry to the existing eligible user panel. The control is a typed value confirmed by explicit accept/cancel, reusing the limit-settings pattern; do not build a plus/minus stepper in the bot. Zero is entered as a value, not a separate disable button. The save result is Iran-authoritative and is reported only after Iran persists it.
 - Add bot-origin request creation and source-side status messages with the existing inline `لغو درخواست` button only; add no new main-menu, panel, or pending-request-list button.
 - Implement queued-to-presented requester status edit, confirmed terminal texts, owner approval texts/buttons, and button removal through the queue.
 - Keep requester identity hidden in every pre-trade bot message.
