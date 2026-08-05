@@ -929,7 +929,7 @@ The next gate is not a question but an approval: the roadmap below may begin onl
 
 #### Stage 8 completion notes
 
-**Status:** complete in code on `candidate/offer-overtime` at `STAGE8_SHA`.
+**Status:** complete in code on `candidate/offer-overtime` at `e11bcf2c`.
 
 **Scope delivered.** Added durable `TelegramDeliveryAction.OVERTIME_OWNER_APPROVAL` at static priority `(M0, 1)` on the `DIRECT` feeder (no TRADE-matrix renumbering). Claim order is therefore callback/expiry `(M0, 0)` → overtime approval / overdue `TRADE_RESULT` `(M0, 1)` → `OFFER_PUBLISH` `(M0, 2)`. Rank-1 ties use existing `delivery_deadline_at` then `created_sequence`; every approval job carries a finite deadline equal to the offer’s final public lifetime end so an overdue trade result cannot be starved. Fail-closed freshness + lifecycle adapters are registered in the primary lane. Bot-origin `promote_next_for_owner` → `OVERTIME_DELIVERING` enqueues the private approval `sendMessage` (opaque `ota:{request_public_id}:approve|reject` callbacks, approved M23–M28 copy). Lifecycle `apply_delivery_result(SENT)` calls `mark_presented` only after a Telegram `message_id` is persisted (30s clock starts there). Soft delivery retries follow the shared queue; hard undeliverable owner / deadline expiry invalidates the DELIVERING row and promotes the next queued request. Alembic `c6e2d8f0a1b3` adds the enum value after `b5d1c7e93f04`. Relink policy is `SUPPRESS_ON_RELINK`.
 
@@ -955,6 +955,20 @@ The next gate is not a question but an approval: the roadmap below may begin onl
 **Tests:** setting authorization and the typed-input flow including non-numeric input, out-of-range values, zero entered as a value, cancel at each step, and a save attempt while Iran is unreachable; queued/presented/terminal text; cancellation; owner approve/reject; late, duplicate, and non-owner callback clicks; requester/owner identity privacy; remote-home flow; no reply-keyboard/anchor regression; normal bot trading regression; every string emitted matches its approved inventory entry exactly.
 
 **Exit criteria:** bot behavior matches every confirmed message, control, queue, and cancellation decision in this document.
+
+#### Stage 9 completion notes
+
+**Status:** complete in code on `candidate/offer-overtime` at `904be510`.
+
+**Scope delivered.** Bot preference entry `⏳ وقت اضافه` appears on the eligible user panel only (`evaluate_overtime_preference_eligibility`), with typed 0–10 confirm/cancel (M2/M2b/M2c) and Iran-authoritative save via `save_overtime_preference_from_bot` (M4–M8). Overtime trade `202` (local and remote) now sends a private requester status (M10/M11) with inline `لغو درخواست` (M12); queue mode persists `requester_status_outbox_id` (local-only) for later edits. Promote/`mark_presented` schedules M10→M11 while retaining cancel. Opaque callbacks: `otc:{request_public_id}:cancel` and Stage 8 `ota:…:approve|reject` with server-side owner/requester checks and inventory answers M32–M34; terminal edits use M13–M15 / M29–M31 / M37 without deleting messages. HTTP `POST /trades/overtime-requests/{request_public_id}/cancel` mirrors approve/reject home authority. Migration `d7f3e9a1b2c4` adds the outbox column after `c6e2d8f0a1b3`.
+
+**Affected components:** `core/offer_overtime_bot_copy.py`, `bot/handlers/offer_overtime_preference.py`, `bot/handlers/offer_overtime_callbacks.py`, `bot/overtime_request_status.py`, `bot/handlers/trade_execute.py`, `bot/keyboards.py`, `bot/states.py`, `bot/handlers/panel.py`, `api/routers/trades.py`, `core/services/offer_overtime_request_service.py`, `core/services/telegram_overtime_requester_status_service.py`, `models/offer_request.py`, migrations/`d7f3e9a1b2c4_…`, tests `tests/test_bot_offer_overtime_preference.py`, `tests/test_bot_overtime_callbacks_contract.py`.
+
+**Tests and results.** Targeted suites green via `make test-unit MODULES="tests.test_bot_offer_overtime_preference tests.test_bot_overtime_callbacks_contract tests.test_offer_overtime_request_service tests.test_trades_router_overtime_integration tests.test_telegram_delivery_overtime_owner_approval_contract tests.test_telegram_overtime_owner_approval_queue_feedback"` (36 tests).
+
+**Deviations and known gaps.** First, remote-home overtime status can show cancel before a local ledger/sync exists; cancel still home-checks and refuses until a forward path or sync lands (no signed cancel forward yet). Second, decision-timeout / invalidation owner+requester terminal edits outside click handlers are best-effort via durable status and Stage 8 owner message id — a dedicated sweeper remains available for Stage 14. Third, the Stage 1 real-database migration gate remains open for merge/deploy.
+
+**Next stage prerequisites.** Stage 10 may begin. It must expose lifecycle and overtime-request state to WebApp over HTTP/WebSocket with the same home-server authority.
 
 ### Stage 10 — WebApp Server API and Realtime Contract
 
