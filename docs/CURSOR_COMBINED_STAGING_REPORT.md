@@ -380,8 +380,9 @@ compose `depends_on` chain, and both databases reached the merge head.
   with a valid certificate. The foreign host therefore pins the domain to the
   origin in `/etc/hosts`, exactly as compose already does for the containers via
   `extra_hosts`. `/etc/hosts` was backed up to `/root/hosts.backup-<ts>`.
-  **The CDN origin configuration still needs fixing in the Arvan panel** before
-  anyone reaches this staging WebApp from a browser.
+  **Update (2026-08-05 later):** public DNS for `staging.gold-trade.ir` now
+  aliases to the origin (`65.109.220.59`) and answers HTTP `401` basic-auth in
+  ~80ms instead of CDN `504`. CDN/public reachability is treated as fixed.
 - **Frontend dist was rebuilt** from the combined branch and shipped to both hosts,
   so the WebApp bundle contains both the overtime preference panel and the coin
   inference modal.
@@ -731,14 +732,31 @@ requester countdown; single-request detail GET works for both roles.
 
 Evidence: `tmp/combined-staging-evidence/stage16-driver-OT-UI-RECONNECT.json`.
 
+### 12.20 Sync parity quick compare (Iran ↔ foreign)
+
+Read-only `compare_sync_parity.py snapshot --mode quick` on both staging peers,
+then compare (foreign=local, iran=peer).
+
+| Item | Result |
+| --- | --- |
+| Public CDN/`staging.gold-trade.ir` | fixed (`401` ~80ms to origin) |
+| Comparison status | `critical_drift` |
+| Tables compared | 14 |
+| Critical | `users`: Iran-only soft-deleted tombstone id `1356` (`OTACC_20260805152746_owner`, never mirrored); active `OTACC_*` count = 0 after cleanup |
+| Business | `offer_requests`: one row `OTACC_SYNC_…:ot-sync-a` — same terminal status `overtime_decision_expired`, `decided_at` skew ~1.4s from the first sync-recovery attempt |
+| Non-business | 6 tables with `local_only_difference` (row counts match; foreign-local telegram/outbox fields) |
+
+Evidence: `tmp/combined-staging-evidence/stage16-sync-parity-quick-summary.json`
+(full snapshots under `tmp/combined-staging-evidence/sync-parity-20260805T172200Z/`).
+
 ### 12.4 Remaining work before `main`
 
 | Item | State |
 | --- | --- |
-| Mutating Stage 16 scenario drivers | **15 of 15** wired and passing live; `execute` → `execute_partial` once transport env is set |
+| Mutating Stage 16 scenario drivers | **15 of 15** wired and passing live |
 | Overtime preferences | staging users remain at `0` after driver cleanup |
 | Coin inference flags | off by default, untouched |
-| Arvan CDN origin for `staging.gold-trade.ir` | broken, needs panel fix |
-| Sync parity comparison | `comparison_status: missing` — no parity run yet on this pair |
+| Arvan CDN / public Iran hostname | **fixed** (origin `401`, no CDN `504`) |
+| Sync parity comparison | quick run done — `critical_drift` from leftover tombstone + one expired-request timestamp skew (see §12.20) |
 | coin-price vs coin-commodity comparison | still owed per the handoff prompt |
-| Next drivers | none (Stage 16 catalog complete) |
+| Next work | isolated coin-price vs coin-commodity eval (handoff prompt) |

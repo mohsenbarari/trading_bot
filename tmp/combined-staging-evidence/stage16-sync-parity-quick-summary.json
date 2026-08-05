@@ -1,0 +1,39 @@
+{
+  "id": "SYNC-PARITY-QUICK",
+  "compared_at": "2026-08-05T17:21:35.001119Z",
+  "status": "critical_drift",
+  "mode": "quick",
+  "summary": {
+    "status": "critical_drift",
+    "critical_drift_count": 1,
+    "business_drift_count": 1,
+    "non_business_difference_count": 6,
+    "table_count": 14,
+    "mode": "quick",
+    "observed_at": "2026-08-05T17:21:35.001119Z"
+  },
+  "cdn_check": {
+    "staging_gold_trade_ir_dns": "65.109.220.59 (alias coin.gold-trade.ir)",
+    "public_https": "401 in ~80ms (basic auth; no longer 504)",
+    "verdict": "fixed"
+  },
+  "findings": [
+    {
+      "table": "users",
+      "severity": "critical_drift",
+      "detail": "Iran has soft-deleted tombstone user id=1356 (OTACC_20260805152746_owner) never present on foreign; active OTACC count is 0 after cleanup"
+    },
+    {
+      "table": "offer_requests",
+      "severity": "business_drift",
+      "detail": "idempotency OTACC_SYNC_20260805164642:ot-sync-a status matches overtime_decision_expired; decided_at skew foreign=16:47:16.596Z iran=16:47:17.967Z from first sync-recovery attempt"
+    },
+    {
+      "table": "offers/notifications/trades/…",
+      "severity": "local_only_difference",
+      "detail": "row counts match; foreign-local telegram/outbox fields differ as expected"
+    }
+  ],
+  "artifact_dir": "tmp/combined-staging-evidence/sync-parity-20260805T172200Z",
+  "artifact_hash": "fea83d908ac9068677ff62748b930a8c7b1cc9f2772d59bd2295ceb99f116ff9"
+}
