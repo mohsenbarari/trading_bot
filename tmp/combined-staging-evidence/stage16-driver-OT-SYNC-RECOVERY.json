@@ -1,0 +1,173 @@
+{
+  "scenario": "OT-SYNC-RECOVERY",
+  "passed": true,
+  "status": "passed",
+  "run_prefix": "OTACC_SYNC_20260805164756",
+  "elapsed_seconds": 17.396,
+  "phases": {
+    "seed": {
+      "mode": "run",
+      "scenario": "OT-SYNC-RECOVERY",
+      "run_prefix": "OTACC_SYNC_20260805164756",
+      "server_mode": "iran",
+      "started_at": "2026-08-05T16:47:57.475503+00:00",
+      "finished_at": "2026-08-05T16:48:00.111630+00:00",
+      "cleanup": {
+        "users_retired": 0
+      },
+      "phase": "seed",
+      "owner_user_id": 1458,
+      "requester_user_id": 1460,
+      "offer_id": 536,
+      "offer_public_id": "ofr_mer5w67irylLPizzanVdKSoF",
+      "overtime_minutes_snapshot": 5,
+      "normal_lifetime_minutes": 2,
+      "request_a_public_id": "req_tsy00dU5cFlNaPLpQtMwV0iY",
+      "request_a_idempotency_key": "OTACC_SYNC_20260805164756:ot-sync-a",
+      "request_a_status": "overtime_presented",
+      "decision_deadline_at": "2026-08-05T17:03:00.102337+00:00",
+      "passed": true
+    },
+    "assert_mirror": {
+      "mode": "run",
+      "scenario": "OT-SYNC-RECOVERY",
+      "run_prefix": "OTACC_SYNC_20260805164756",
+      "server_mode": "foreign",
+      "started_at": "2026-08-05T16:48:02.499933+00:00",
+      "finished_at": "2026-08-05T16:48:09.144669+00:00",
+      "cleanup": {
+        "users_retired": 0
+      },
+      "phase": "assert_mirror",
+      "request_a_public_id": "req_tsy00dU5cFlNaPLpQtMwV0iY",
+      "request_a_status": "overtime_presented",
+      "mirror_seconds": 0.523,
+      "passed": true
+    },
+    "stop_sync_workers": {
+      "iran": {
+        "returncode": 0,
+        "elapsed_seconds": 10.679,
+        "stdout": "trading_bot_staging_iran-sync_worker-1\n",
+        "stderr": ""
+      },
+      "foreign": {
+        "returncode": 0,
+        "elapsed_seconds": 11.442,
+        "stdout": "trading_bot_staging-foreign_sync_worker-1\n",
+        "stderr": ""
+      },
+      "ok": true
+    },
+    "partition_mutate": {
+      "mode": "run",
+      "scenario": "OT-SYNC-RECOVERY",
+      "run_prefix": "OTACC_SYNC_20260805164756",
+      "server_mode": "iran",
+      "started_at": "2026-08-05T16:48:34.002272+00:00",
+      "finished_at": "2026-08-05T16:48:36.569791+00:00",
+      "cleanup": {
+        "users_retired": 0
+      },
+      "phase": "partition_mutate",
+      "owner_user_id": 1458,
+      "requester_user_id": 1460,
+      "offer_public_id": "ofr_mer5w67irylLPizzanVdKSoF",
+      "request_a_public_id": "req_tsy00dU5cFlNaPLpQtMwV0iY",
+      "request_a_status": "overtime_cancelled_by_requester",
+      "request_b_public_id": "req_sjKpLoOOKRUp3OUbtAkAmcRr",
+      "request_b_idempotency_key": "OTACC_SYNC_20260805164756:ot-sync-b",
+      "request_b_status": "overtime_presented",
+      "active_request_public_id": "req_sjKpLoOOKRUp3OUbtAkAmcRr",
+      "minutes": 5,
+      "passed": true
+    },
+    "assert_skew": {
+      "mode": "run",
+      "scenario": "OT-SYNC-RECOVERY",
+      "run_prefix": "OTACC_SYNC_20260805164756",
+      "server_mode": "foreign",
+      "started_at": "2026-08-05T16:48:38.850046+00:00",
+      "finished_at": "2026-08-05T16:48:45.600460+00:00",
+      "cleanup": {
+        "users_retired": 0
+      },
+      "phase": "assert_skew",
+      "request_a_public_id": "req_tsy00dU5cFlNaPLpQtMwV0iY",
+      "request_a_status": "overtime_presented",
+      "request_b_present": false,
+      "passed": true
+    },
+    "start_sync_workers": {
+      "iran": {
+        "returncode": 0,
+        "elapsed_seconds": 0.555,
+        "stdout": "trading_bot_staging_iran-sync_worker-1\n",
+        "stderr": ""
+      },
+      "foreign": {
+        "returncode": 0,
+        "elapsed_seconds": 0.379,
+        "stdout": "trading_bot_staging-foreign_sync_worker-1\n",
+        "stderr": ""
+      },
+      "ok": true
+    },
+    "assert_converge_foreign": {
+      "mode": "run",
+      "scenario": "OT-SYNC-RECOVERY",
+      "run_prefix": "OTACC_SYNC_20260805164756",
+      "server_mode": "foreign",
+      "started_at": "2026-08-05T16:48:52.229002+00:00",
+      "finished_at": "2026-08-05T16:48:58.762388+00:00",
+      "cleanup": {
+        "users_retired": 0
+      },
+      "phase": "assert_converge",
+      "offer_public_id": "ofr_mer5w67irylLPizzanVdKSoF",
+      "request_a_status": "overtime_cancelled_by_requester",
+      "request_a_converge_seconds": 0.48,
+      "request_b_status": "overtime_presented",
+      "request_b_converge_seconds": 0.003,
+      "nonterminal_request_public_ids": [
+        "req_sjKpLoOOKRUp3OUbtAkAmcRr"
+      ],
+      "owner_occupying_count": 1,
+      "active_request_public_id": "req_sjKpLoOOKRUp3OUbtAkAmcRr",
+      "passed": true
+    },
+    "assert_converge_iran": {
+      "mode": "run",
+      "scenario": "OT-SYNC-RECOVERY",
+      "run_prefix": "OTACC_SYNC_20260805164756",
+      "server_mode": "iran",
+      "started_at": "2026-08-05T16:49:00.955791+00:00",
+      "finished_at": "2026-08-05T16:49:02.990887+00:00",
+      "cleanup": {
+        "users_retired": 0
+      },
+      "phase": "assert_converge",
+      "offer_public_id": "ofr_mer5w67irylLPizzanVdKSoF",
+      "request_a_status": "overtime_cancelled_by_requester",
+      "request_a_converge_seconds": 0.163,
+      "request_b_status": "overtime_presented",
+      "request_b_converge_seconds": 0.001,
+      "nonterminal_request_public_ids": [
+        "req_sjKpLoOOKRUp3OUbtAkAmcRr"
+      ],
+      "owner_occupying_count": 1,
+      "active_request_public_id": "req_sjKpLoOOKRUp3OUbtAkAmcRr",
+      "passed": true
+    },
+    "cleanup": {
+      "mode": "cleanup",
+      "run_prefix": "OTACC_SYNC_20260805164756",
+      "server_mode": "iran",
+      "started_at": "2026-08-05T16:49:04.498928+00:00",
+      "removed": {
+        "users_retired": 2
+      },
+      "passed": true
+    }
+  }
+}

@@ -677,14 +677,31 @@ fixed so the handoff path can run.
 
 Evidence: `tmp/combined-staging-evidence/stage16-driver-OT-CHANNEL-MARKER.json`.
 
+### 12.17 Sync interrupt/recover (`OT-SYNC-RECOVERY`)
+
+Iran presents overtime request A and foreign mirrors it. Both sync workers are
+stopped; Iran cancels A and opens request B under the partition. Foreign stays
+skewed (A still presented, B absent). After workers restart, both peers converge:
+A cancelled, B presented, exactly one nonterminal / owner-occupying seat.
+
+| Assertion | Result |
+| --- | --- |
+| Foreign mirror of A before partition | yes |
+| Sync workers stopped on both peers | yes |
+| Foreign skew under partition (A presented, B absent) | yes |
+| Converge on Iran + foreign after recover | yes |
+| One nonterminal seat (`B` only) | yes |
+
+Evidence: `tmp/combined-staging-evidence/stage16-driver-OT-SYNC-RECOVERY.json`.
+
 ### 12.4 Remaining work before `main`
 
 | Item | State |
 | --- | --- |
-| Mutating Stage 16 scenario drivers | 12 of 15 wired and passing live; `execute` → `execute_partial` once transport env is set |
+| Mutating Stage 16 scenario drivers | 13 of 15 wired and passing live; `execute` → `execute_partial` once transport env is set |
 | Overtime preferences | staging users remain at `0` after driver cleanup |
 | Coin inference flags | off by default, untouched |
 | Arvan CDN origin for `staging.gold-trade.ir` | broken, needs panel fix |
 | Sync parity comparison | `comparison_status: missing` — no parity run yet on this pair |
 | coin-price vs coin-commodity comparison | still owed per the handoff prompt |
-| Next drivers | `OT-SYNC-RECOVERY`, `OT-TG-RETRY`, `OT-UI-RECONNECT` |
+| Next drivers | `OT-TG-RETRY`, `OT-UI-RECONNECT` |
