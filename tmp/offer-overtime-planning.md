@@ -841,7 +841,7 @@ The next gate is not a question but an approval: the roadmap below may begin onl
 
 #### Stage 5 completion notes
 
-**Status:** complete in code on `candidate/offer-overtime` at `STAGE5_SHA`.
+**Status:** complete in code on `candidate/offer-overtime` at `fe6f17ad`.
 
 **Scope delivered.** `_execute_trade_authoritatively` classifies intake after the offer row lock: `AUTOMATIC` keeps the DIRECT ledger + immediate commit path; `APPROVAL` calls `create_overtime_request` (no DIRECT ledger, shared idempotency key preserved) and returns HTTP `202` with the overtime request payload; `REJECTED` still rejects via the DIRECT ledger. `_is_offer_expired_for_trade` now means intake `REJECTED` only. Owner surfaces `POST /trades/overtime-requests/{request_public_id}/approve` and `/reject` were added on the offer home server: approve runs `claim_owner_approval` then re-enters the same authoritative validation/commit core with `overtime_approval_ledger`, finalizes via `record_completed_trade`, and sets `offer.overtime_trade_committed`. Approval-time business failures invalidate the overtime row and promote the next queued request instead of writing DIRECT reject statuses. Idempotent replay recognizes in-flight and terminal overtime rows for the same key.
 
