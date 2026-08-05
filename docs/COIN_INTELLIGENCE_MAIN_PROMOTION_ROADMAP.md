@@ -2186,14 +2186,25 @@ bundle قبلی قابل انتخاب‌اند و Collectorها همچنان ف�
     `tests.test_coin_intelligence_market_snapshot` اجرا شدند:
     `Ran 12 tests ... OK`؛ direct command با Snapshot غایب نیز `UNAVAILABLE`
     و exit `3` برمی‌گرداند.
+- اجرای staging و نتیجه:
+  - پیش از upgrade یک logical dump رمزنگاری‌نشده اما permission-protected
+    (`0600`) از دیتابیس staging گرفته، با `pg_restore -l` و SHA-256 بررسی شد؛
+    production هرگز هدف backup یا migration نبود.
+  - پس از تولید SQL plan فقط‌خواندنی، Alembic staging با موفقیت از
+    `f2c7d8e9a0b1` به `e5a1c4d7b2f9` رسید. جدول‌های audit/outcome، دو trigger
+    append-only و check context مورد انتظار وجود دارند.
+  - یک مشاهدهٔ بدون user و بدون Offer با Snapshot واقعی تا catalog/audit رفت
+    و ایمن `ABSTAIN` کرد؛ علت `CATALOG_CANONICAL_NAME_UNAVAILABLE` بود. این
+    رکورد آزمایشی هیچ قیمت، متن، شناسهٔ کاربر یا offer-id ندارد.
 - موارد عمداً انجام‌نشده / دلیل:
-  - migration روی staging اجرا نشد و preview/selection فعال نشد. دیتابیس
-    staging موجود در revision `f2c7d8e9a0b1` است، در حالی که این branch head
-    `e5a1c4d7b2f9` است؛ `upgrade head` مجموعه‌ای از migrationهای نامرتبط را
-    نیز وارد می‌کرد و با scope این rollout سازگار نبود.
-  - هیچ migration، container، flag یا DB production لمس نشد.
+  - preview/selection فعال نشد. catalog staging فقط `امام` دارد، اما Snapshot
+    فعلی فقط برای `بهار`، `نیم تاریخ پایین` و `ربع تاریخ پایین` نرخ estimated
+    دارد؛ در نتیجه هیچ candidate canonical مشترک برای آزمون CONFIRM وجود
+    ندارد. این fail-closed behavior درست است.
+  - هیچ container user-facing، flag inference یا DB production لمس نشد.
 - گیت مرحلهٔ بعد:
-  - نخست یک staging deployment هم‌نسخه با base/main فعلی لازم است، یا owner
-    باید صراحتاً upgrade کامل staging را تأیید کند. فقط پس از آن migrationهای
-    audit/outcome/context، probe endpoint و selection محدودِ CONFIRM قابل
-    فعال‌سازی هستند.
+  - catalog staging باید از catalog محصول هم‌نسخه، با همان ID/nameهای
+    canonical، sync شود؛ این به معنای تعریف کالای جدید نیست و پیش از copy
+    آن نیاز به تأیید owner دارد. پس از آن آزمون CONFIRM و preview محدود ممکن
+    است؛ روشن‌کردن auto-selection همچنان نیازمند threshold cell مصوب owner
+    است.
