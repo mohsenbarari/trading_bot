@@ -47,6 +47,7 @@ SCENARIOS = (
     "OT-FINAL-TAIL",
     "OT-REQ-CROSS-FORWARD",
     "OT-CHANNEL-MARKER",
+    "OT-SYNC-RECOVERY",
 )
 # Staging Iran currently carries a single commodity; keep the driver pinned to it.
 DEFAULT_COMMODITY_ID = 1
@@ -60,6 +61,8 @@ OFFER_MIRROR_TIMEOUT_SECONDS = 60.0
 OFFER_MIRROR_POLL_SECONDS = 2.0
 CHANNEL_PUBLICATION_TIMEOUT_SECONDS = 90.0
 CHANNEL_PUBLICATION_POLL_SECONDS = 3.0
+REQUEST_MIRROR_TIMEOUT_SECONDS = 60.0
+REQUEST_MIRROR_POLL_SECONDS = 2.0
 
 
 class DriverRefusal(RuntimeError):
@@ -366,6 +369,40 @@ async def _await_channel_publication(
         await asyncio.sleep(CHANNEL_PUBLICATION_POLL_SECONDS)
         session.expire_all()
     return None, timeout_seconds
+
+
+async def _await_request_status(
+    session,
+    request_public_id: str,
+    *,
+    expected_status: str | None = None,
+    timeout_seconds: float = REQUEST_MIRROR_TIMEOUT_SECONDS,
+):
+    """Wait until a mirrored overtime request exists, optionally at a status."""
+    from models.offer_request import OfferRequest
+
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        ledger = (
+            await session.execute(
+                select(OfferRequest).where(
+                    OfferRequest.request_public_id == request_public_id
+                )
+            )
+        ).scalar_one_or_none()
+        if ledger is not None:
+            status = str(getattr(ledger.result_status, "value", ledger.result_status))
+            if expected_status is None or status == expected_status:
+                return ledger, status, round(
+                    timeout_seconds - (deadline - time.monotonic()), 3
+                )
+        await asyncio.sleep(REQUEST_MIRROR_POLL_SECONDS)
+        session.expire_all()
+    return None, None, timeout_seconds
+
+
+def _request_status_value(ledger) -> str:
+    return str(getattr(ledger.result_status, "value", ledger.result_status))
 
 
 async def _save_bot_preference_with_user_sync_retry(
@@ -2239,6 +2276,369 @@ async def _scenario_channel_marker_run(
     }
 
 
+async def _scenario_sync_recovery_seed(
+    session,
+    run_prefix: str,
+    minutes: int,
+) -> dict[str, object]:
+    """Iran: seed an Iran-home overtime request that must mirror before partition."""
+    from core.services.offer_overtime_preference_service import persist_overtime_preference
+    from core.services.offer_overtime_request_service import (
+        OvertimeRequestCreateCommand,
+        create_overtime_request,
+    )
+    from models.offer_request import OfferRequestSourceSurface, OfferRequestStatus
+
+    if current_server() != "iran":
+        raise DriverRefusal("OT-SYNC-RECOVERY seed only runs on the Iran peer")
+    if minutes <= 0:
+        raise DriverRefusal("OT-SYNC-RECOVERY requires a positive overtime preference")
+
+    await _cleanup(session, run_prefix)
+    owner = await _seed_owner(session, run_prefix)
+    requester = await _seed_user(session, run_prefix, "requester")
+    await session.commit()
+    await session.refresh(owner)
+    await session.refresh(requester)
+    owner_id = int(owner.id)
+    requester_id = int(requester.id)
+
+    await persist_overtime_preference(session, owner, minutes)
+    await session.commit()
+    await session.refresh(owner)
+
+    offer, normal_minutes = await _create_webapp_offer(
+        session,
+        owner,
+        notes=f"{run_prefix} sync recovery",
+    )
+    offer_id = int(offer.id)
+    offer_public_id = str(offer.offer_public_id)
+    snapshot = int(offer.overtime_minutes_snapshot)
+    if snapshot != minutes:
+        raise DriverRefusal(
+            f"offer snapshot {snapshot} did not match preference {minutes}"
+        )
+    await _backdate_offer_into_overtime(session, offer, normal_minutes=normal_minutes)
+    offer = await _reload_offer(session, offer_id)
+    receipt_at = datetime.utcnow()
+    create_result = await create_overtime_request(
+        session,
+        OvertimeRequestCreateCommand(
+            offer=offer,
+            requester_user_id=requester_id,
+            actor_user_id=requester_id,
+            requested_quantity=min(2, DEFAULT_OFFER_QUANTITY),
+            idempotency_key=f"{run_prefix}:ot-sync-a",
+            request_source_surface=OfferRequestSourceSurface.WEBAPP,
+            request_source_server="iran",
+            receipt_at=receipt_at,
+            normal_lifetime_minutes=normal_minutes,
+            request_home_server="iran",
+        ),
+        now=receipt_at,
+    )
+    await session.commit()
+    ledger = create_result.ledger
+    await session.refresh(ledger)
+    # Orchestration (mirror + worker stop) can exceed the default 30s decision
+    # window; pin a longer deadline so partition_mutate can still cancel.
+    ledger.decision_deadline_at = datetime.utcnow() + timedelta(minutes=15)
+    await session.commit()
+    await session.refresh(ledger)
+    status = _request_status_value(ledger)
+    passed = (
+        create_result.promoted is True
+        and status == OfferRequestStatus.OVERTIME_PRESENTED.value
+        and ledger.decision_deadline_at is not None
+    )
+    return {
+        "phase": "seed",
+        "owner_user_id": owner_id,
+        "requester_user_id": requester_id,
+        "offer_id": offer_id,
+        "offer_public_id": offer_public_id,
+        "overtime_minutes_snapshot": snapshot,
+        "normal_lifetime_minutes": normal_minutes,
+        "request_a_public_id": str(ledger.request_public_id),
+        "request_a_idempotency_key": f"{run_prefix}:ot-sync-a",
+        "request_a_status": status,
+        "decision_deadline_at": (
+            ledger.decision_deadline_at.isoformat()
+            if ledger.decision_deadline_at is not None
+            else None
+        ),
+        "passed": passed,
+    }
+
+
+async def _scenario_sync_recovery_assert_mirror(
+    session,
+    *,
+    request_a_public_id: str,
+) -> dict[str, object]:
+    """Foreign: prove request A mirrored as presented before the partition."""
+    from models.offer_request import OfferRequestStatus
+
+    if current_server() != "foreign":
+        raise DriverRefusal("OT-SYNC-RECOVERY assert_mirror only runs on foreign")
+    public_id = (request_a_public_id or "").strip()
+    if not public_id:
+        raise DriverRefusal("assert_mirror requires --request-a-public-id")
+
+    ledger, status, seconds = await _await_request_status(
+        session,
+        public_id,
+        expected_status=OfferRequestStatus.OVERTIME_PRESENTED.value,
+    )
+    passed = ledger is not None and status == OfferRequestStatus.OVERTIME_PRESENTED.value
+    return {
+        "phase": "assert_mirror",
+        "request_a_public_id": public_id,
+        "request_a_status": status,
+        "mirror_seconds": seconds,
+        "passed": passed,
+    }
+
+
+async def _scenario_sync_recovery_partition_mutate(
+    session,
+    run_prefix: str,
+    minutes: int,
+    *,
+    request_a_public_id: str,
+) -> dict[str, object]:
+    """Iran under partition: terminalize A and open B so foreign can stay skewed."""
+    from core.services.offer_overtime_request_service import (
+        OvertimeRequestCreateCommand,
+        cancel_by_requester,
+        create_overtime_request,
+        get_active_request_for_offer,
+        load_overtime_request_by_public_id,
+    )
+    from core.trading_settings import get_trading_settings
+    from models.offer_request import OfferRequestSourceSurface, OfferRequestStatus
+
+    if current_server() != "iran":
+        raise DriverRefusal("OT-SYNC-RECOVERY partition_mutate only runs on Iran")
+    public_a = (request_a_public_id or "").strip()
+    if not public_a:
+        raise DriverRefusal("partition_mutate requires --request-a-public-id")
+
+    ledger_a = await load_overtime_request_by_public_id(session, public_a, for_update=True)
+    if ledger_a is None:
+        raise DriverRefusal(f"request A {public_a} missing on Iran before mutate")
+    owner_id = int(ledger_a.offer_owner_user_id)
+    requester_id = int(ledger_a.requester_user_id)
+    offer_public_id = str(ledger_a.offer_public_id)
+    offer_id = int(ledger_a.local_offer_id)
+    ts = get_trading_settings()
+    normal_minutes = int(getattr(ts, "offer_expiry_minutes", 0) or 0)
+
+    await cancel_by_requester(
+        session,
+        ledger_a,
+        requester_user_id=requester_id,
+        now=datetime.utcnow(),
+        normal_lifetime_minutes=normal_minutes,
+    )
+    await session.commit()
+    await session.refresh(ledger_a)
+    status_a = _request_status_value(ledger_a)
+    seat_after_cancel = await get_active_request_for_offer(
+        session,
+        request_home_server="iran",
+        offer_public_id=offer_public_id,
+    )
+
+    offer = await _reload_offer(session, offer_id)
+    # Keep the offer inside overtime after any sync bounce of created_at.
+    await _backdate_offer_into_overtime(session, offer, normal_minutes=normal_minutes)
+    offer = await _reload_offer(session, offer_id)
+    receipt_b = datetime.utcnow()
+    create_b = await create_overtime_request(
+        session,
+        OvertimeRequestCreateCommand(
+            offer=offer,
+            requester_user_id=requester_id,
+            actor_user_id=requester_id,
+            requested_quantity=min(2, DEFAULT_OFFER_QUANTITY),
+            idempotency_key=f"{run_prefix}:ot-sync-b",
+            request_source_surface=OfferRequestSourceSurface.WEBAPP,
+            request_source_server="iran",
+            receipt_at=receipt_b,
+            normal_lifetime_minutes=normal_minutes,
+            request_home_server="iran",
+        ),
+        now=receipt_b,
+    )
+    await session.commit()
+    ledger_b = create_b.ledger
+    await session.refresh(ledger_b)
+    status_b = _request_status_value(ledger_b)
+    active = await get_active_request_for_offer(
+        session,
+        request_home_server="iran",
+        offer_public_id=offer_public_id,
+    )
+
+    passed = (
+        status_a == OfferRequestStatus.OVERTIME_CANCELLED_BY_REQUESTER.value
+        and seat_after_cancel is None
+        and create_b.promoted is True
+        and status_b == OfferRequestStatus.OVERTIME_PRESENTED.value
+        and active is not None
+        and str(active.request_public_id) == str(ledger_b.request_public_id)
+    )
+    return {
+        "phase": "partition_mutate",
+        "owner_user_id": owner_id,
+        "requester_user_id": requester_id,
+        "offer_public_id": offer_public_id,
+        "request_a_public_id": public_a,
+        "request_a_status": status_a,
+        "request_b_public_id": str(ledger_b.request_public_id),
+        "request_b_idempotency_key": f"{run_prefix}:ot-sync-b",
+        "request_b_status": status_b,
+        "active_request_public_id": (
+            str(active.request_public_id) if active is not None else None
+        ),
+        "minutes": minutes,
+        "passed": passed,
+    }
+
+
+async def _scenario_sync_recovery_assert_skew(
+    session,
+    *,
+    request_a_public_id: str,
+    request_b_public_id: str,
+) -> dict[str, object]:
+    """Foreign under partition: A still nonterminal; B must not have arrived yet."""
+    from models.offer_request import OfferRequest, OfferRequestStatus
+
+    if current_server() != "foreign":
+        raise DriverRefusal("OT-SYNC-RECOVERY assert_skew only runs on foreign")
+    public_a = (request_a_public_id or "").strip()
+    public_b = (request_b_public_id or "").strip()
+    if not public_a or not public_b:
+        raise DriverRefusal("assert_skew requires --request-a-public-id and --request-b-public-id")
+
+    ledger_a = (
+        await session.execute(
+            select(OfferRequest).where(OfferRequest.request_public_id == public_a)
+        )
+    ).scalar_one_or_none()
+    ledger_b = (
+        await session.execute(
+            select(OfferRequest).where(OfferRequest.request_public_id == public_b)
+        )
+    ).scalar_one_or_none()
+    status_a = _request_status_value(ledger_a) if ledger_a is not None else None
+    passed = (
+        ledger_a is not None
+        and status_a == OfferRequestStatus.OVERTIME_PRESENTED.value
+        and ledger_b is None
+    )
+    return {
+        "phase": "assert_skew",
+        "request_a_public_id": public_a,
+        "request_a_status": status_a,
+        "request_b_present": ledger_b is not None,
+        "passed": passed,
+    }
+
+
+async def _scenario_sync_recovery_assert_converge(
+    session,
+    *,
+    offer_public_id: str,
+    request_a_public_id: str,
+    request_b_public_id: str,
+    owner_user_id: int,
+) -> dict[str, object]:
+    """After recover: A terminal, B presented, one nonterminal seat, no dual occupy."""
+    from core.services.offer_overtime_request_service import (
+        get_active_request_for_offer,
+        list_nonterminal_overtime_requests,
+    )
+    from models.offer_request import (
+        OVERTIME_OWNER_OCCUPYING_STATUSES,
+        OfferRequest,
+        OfferRequestStatus,
+    )
+
+    public_offer = (offer_public_id or "").strip()
+    public_a = (request_a_public_id or "").strip()
+    public_b = (request_b_public_id or "").strip()
+    if not public_offer or not public_a or not public_b:
+        raise DriverRefusal(
+            "assert_converge requires offer and both request public ids"
+        )
+
+    # Wait for terminal A and presented B to land on this peer.
+    ledger_a, status_a, seconds_a = await _await_request_status(
+        session,
+        public_a,
+        expected_status=OfferRequestStatus.OVERTIME_CANCELLED_BY_REQUESTER.value,
+        timeout_seconds=90.0,
+    )
+    ledger_b, status_b, seconds_b = await _await_request_status(
+        session,
+        public_b,
+        expected_status=OfferRequestStatus.OVERTIME_PRESENTED.value,
+        timeout_seconds=90.0,
+    )
+
+    nonterminals = await list_nonterminal_overtime_requests(
+        session,
+        offer_public_id=public_offer,
+        request_home_server="iran",
+    )
+    nonterminal_ids = [str(row.request_public_id) for row in nonterminals]
+    occupying = (
+        await session.execute(
+            select(OfferRequest).where(
+                OfferRequest.request_home_server == "iran",
+                OfferRequest.offer_owner_user_id == int(owner_user_id),
+                OfferRequest.result_status.in_(OVERTIME_OWNER_OCCUPYING_STATUSES),
+            )
+        )
+    ).scalars().all()
+    active = await get_active_request_for_offer(
+        session,
+        request_home_server="iran",
+        offer_public_id=public_offer,
+    )
+
+    passed = (
+        ledger_a is not None
+        and status_a == OfferRequestStatus.OVERTIME_CANCELLED_BY_REQUESTER.value
+        and ledger_b is not None
+        and status_b == OfferRequestStatus.OVERTIME_PRESENTED.value
+        and nonterminal_ids == [public_b]
+        and len(occupying) == 1
+        and str(occupying[0].request_public_id) == public_b
+        and active is not None
+        and str(active.request_public_id) == public_b
+    )
+    return {
+        "phase": "assert_converge",
+        "server_mode": current_server(),
+        "offer_public_id": public_offer,
+        "request_a_status": status_a,
+        "request_a_converge_seconds": seconds_a,
+        "request_b_status": status_b,
+        "request_b_converge_seconds": seconds_b,
+        "nonterminal_request_public_ids": nonterminal_ids,
+        "owner_occupying_count": len(occupying),
+        "active_request_public_id": (
+            str(active.request_public_id) if active is not None else None
+        ),
+        "passed": passed,
+    }
+
+
 async def _scenario_final_tail(
     session,
     run_prefix: str,
@@ -2608,6 +3008,44 @@ async def _main_async_with_session(
                 )
             else:
                 raise DriverRefusal(f"unsupported OT-CHANNEL-MARKER phase={phase!r}")
+        elif args.scenario == "OT-SYNC-RECOVERY":
+            phase = (args.phase or "run").strip().lower()
+            if phase == "seed":
+                outcome = await _scenario_sync_recovery_seed(
+                    session, run_prefix, args.minutes
+                )
+            elif phase == "assert_mirror":
+                outcome = await _scenario_sync_recovery_assert_mirror(
+                    session,
+                    request_a_public_id=str(args.request_a_public_id or ""),
+                )
+            elif phase == "partition_mutate":
+                outcome = await _scenario_sync_recovery_partition_mutate(
+                    session,
+                    run_prefix,
+                    args.minutes,
+                    request_a_public_id=str(args.request_a_public_id or ""),
+                )
+            elif phase == "assert_skew":
+                outcome = await _scenario_sync_recovery_assert_skew(
+                    session,
+                    request_a_public_id=str(args.request_a_public_id or ""),
+                    request_b_public_id=str(args.request_b_public_id or ""),
+                )
+            elif phase == "assert_converge":
+                if args.owner_user_id is None:
+                    raise DriverRefusal(
+                        "assert_converge requires --owner-user-id"
+                    )
+                outcome = await _scenario_sync_recovery_assert_converge(
+                    session,
+                    offer_public_id=str(args.offer_public_id or ""),
+                    request_a_public_id=str(args.request_a_public_id or ""),
+                    request_b_public_id=str(args.request_b_public_id or ""),
+                    owner_user_id=int(args.owner_user_id),
+                )
+            else:
+                raise DriverRefusal(f"unsupported OT-SYNC-RECOVERY phase={phase!r}")
         else:
             raise DriverRefusal(f"no driver implemented for {args.scenario}")
 
@@ -2620,6 +3058,7 @@ async def _main_async_with_session(
             "OT-REQ-FOREIGN-TO-FOREIGN",
             "OT-REQ-CROSS-FORWARD",
             "OT-CHANNEL-MARKER",
+            "OT-SYNC-RECOVERY",
         }:
             allow_cleanup = False
         if allow_cleanup:
@@ -2645,9 +3084,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--minutes", type=int, default=4)
     parser.add_argument(
         "--phase",
-        choices=("seed", "run", "rebackdate"),
+        choices=(
+            "seed",
+            "run",
+            "rebackdate",
+            "assert_mirror",
+            "partition_mutate",
+            "assert_skew",
+            "assert_converge",
+        ),
         default="run",
-        help="two-peer phases: seed / rebackdate on Iran, run on foreign",
+        help="two-peer phases for foreign/cross/sync scenarios",
     )
     parser.add_argument(
         "--owner-user-id",
@@ -2665,6 +3112,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--offer-public-id",
         default=None,
         help="mirrored offer public id for foreign-edge cross-forward scenarios",
+    )
+    parser.add_argument(
+        "--request-a-public-id",
+        default=None,
+        help="first overtime request public id for sync-recovery phases",
+    )
+    parser.add_argument(
+        "--request-b-public-id",
+        default=None,
+        help="second overtime request public id for sync-recovery phases",
     )
     parser.add_argument(
         "--cleanup-after",

@@ -82,6 +82,7 @@ WIRED_FOREIGN_DRIVER_SCENARIOS = (
     "OT-REQ-FOREIGN-TO-FOREIGN",
     "OT-REQ-CROSS-FORWARD",
     "OT-CHANNEL-MARKER",
+    "OT-SYNC-RECOVERY",
 )
 WIRED_DRIVER_SCENARIOS = WIRED_IRAN_DRIVER_SCENARIOS + WIRED_FOREIGN_DRIVER_SCENARIOS
 
@@ -780,6 +781,297 @@ def run_channel_marker_driver(
     )
 
 
+def _sync_worker_containers() -> tuple[str, str]:
+    iran = (
+        os.getenv("STAGING_IRAN_SYNC_CONTAINER")
+        or "trading_bot_staging_iran-sync_worker-1"
+    ).strip()
+    foreign = (
+        os.getenv("STAGING_FOREIGN_SYNC_CONTAINER")
+        or "trading_bot_staging-foreign_sync_worker-1"
+    ).strip()
+    return iran, foreign
+
+
+def _iran_docker_argv(*docker_args: str) -> list[str] | None:
+    host = (os.getenv("STAGING_IRAN_SSH_HOST") or "").strip()
+    if not host:
+        return None
+    port = (os.getenv("STAGING_IRAN_SSH_PORT") or "22").strip()
+    return [
+        "ssh",
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "ConnectTimeout=15",
+        "-p",
+        port,
+        f"root@{host}",
+        "docker " + " ".join(docker_args),
+    ]
+
+
+def stop_staging_sync_workers() -> dict[str, Any]:
+    iran_container, foreign_container = _sync_worker_containers()
+    iran_argv = _iran_docker_argv("stop", iran_container)
+    foreign_argv = ["docker", "stop", foreign_container]
+    details: dict[str, Any] = {}
+    if iran_argv is None:
+        return {"ok": False, "detail": "STAGING_IRAN_SSH_HOST unset for sync stop"}
+    iran_done, iran_elapsed = _run_argv(iran_argv)
+    foreign_done, foreign_elapsed = _run_argv(foreign_argv)
+    details["iran"] = {
+        "returncode": iran_done.returncode,
+        "elapsed_seconds": iran_elapsed,
+        "stdout": (iran_done.stdout or "")[-500:],
+        "stderr": (iran_done.stderr or "")[-500:],
+    }
+    details["foreign"] = {
+        "returncode": foreign_done.returncode,
+        "elapsed_seconds": foreign_elapsed,
+        "stdout": (foreign_done.stdout or "")[-500:],
+        "stderr": (foreign_done.stderr or "")[-500:],
+    }
+    details["ok"] = iran_done.returncode == 0 and foreign_done.returncode == 0
+    return details
+
+
+def start_staging_sync_workers() -> dict[str, Any]:
+    iran_container, foreign_container = _sync_worker_containers()
+    iran_argv = _iran_docker_argv("start", iran_container)
+    foreign_argv = ["docker", "start", foreign_container]
+    details: dict[str, Any] = {}
+    if iran_argv is None:
+        return {"ok": False, "detail": "STAGING_IRAN_SSH_HOST unset for sync start"}
+    iran_done, iran_elapsed = _run_argv(iran_argv)
+    foreign_done, foreign_elapsed = _run_argv(foreign_argv)
+    details["iran"] = {
+        "returncode": iran_done.returncode,
+        "elapsed_seconds": iran_elapsed,
+        "stdout": (iran_done.stdout or "")[-500:],
+        "stderr": (iran_done.stderr or "")[-500:],
+    }
+    details["foreign"] = {
+        "returncode": foreign_done.returncode,
+        "elapsed_seconds": foreign_elapsed,
+        "stdout": (foreign_done.stdout or "")[-500:],
+        "stderr": (foreign_done.stderr or "")[-500:],
+    }
+    details["ok"] = iran_done.returncode == 0 and foreign_done.returncode == 0
+    return details
+
+
+def run_sync_recovery_driver(
+    args: argparse.Namespace, run_prefix: str
+) -> dict[str, Any]:
+    """Interrupt sync workers, mutate under partition, then prove converge."""
+    del args
+    minutes = 5
+    seed_argv = iran_driver_argv(
+        "OT-SYNC-RECOVERY",
+        run_prefix,
+        minutes,
+        extra_args="--phase seed --no-cleanup-after",
+    )
+    foreign_probe = foreign_driver_argv(
+        "OT-SYNC-RECOVERY",
+        run_prefix,
+        minutes,
+        extra_args="--phase assert_mirror --request-a-public-id x --no-cleanup-after",
+    )
+    if seed_argv is None or foreign_probe is None:
+        return {
+            "id": "OT-SYNC-RECOVERY",
+            "status": "blocked",
+            "detail": (
+                "set STAGING_IRAN_SSH_HOST for seed/cleanup and ensure the foreign "
+                "app container is reachable"
+            ),
+            "run_prefix": run_prefix,
+        }
+
+    phases: dict[str, Any] = {}
+    workers_stopped = False
+    try:
+        seed_completed, seed_elapsed = _run_argv(seed_argv)
+        seed_payload = _parse_driver_stdout(seed_completed.stdout, seed_completed.stderr)
+        phases["seed"] = seed_payload
+        if not (seed_payload.get("passed") and seed_completed.returncode == 0):
+            return {
+                "id": "OT-SYNC-RECOVERY",
+                "status": "failed",
+                "elapsed_seconds": seed_elapsed,
+                "run_prefix": run_prefix,
+                "phase": "seed",
+                "phases": phases,
+            }
+
+        request_a = str(seed_payload["request_a_public_id"])
+        owner_id = int(seed_payload["owner_user_id"])
+        offer_public_id = str(seed_payload["offer_public_id"])
+
+        mirror_argv = foreign_driver_argv(
+            "OT-SYNC-RECOVERY",
+            run_prefix,
+            minutes,
+            extra_args=(
+                f"--phase assert_mirror --request-a-public-id {request_a} "
+                "--no-cleanup-after"
+            ),
+        )
+        assert mirror_argv is not None
+        mirror_completed, mirror_elapsed = _run_argv(mirror_argv)
+        mirror_payload = _parse_driver_stdout(
+            mirror_completed.stdout, mirror_completed.stderr
+        )
+        phases["assert_mirror"] = mirror_payload
+        if not (mirror_payload.get("passed") and mirror_completed.returncode == 0):
+            return {
+                "id": "OT-SYNC-RECOVERY",
+                "status": "failed",
+                "elapsed_seconds": round(seed_elapsed + mirror_elapsed, 3),
+                "run_prefix": run_prefix,
+                "phase": "assert_mirror",
+                "phases": phases,
+            }
+
+        stop_details = stop_staging_sync_workers()
+        phases["stop_sync_workers"] = stop_details
+        workers_stopped = bool(stop_details.get("ok"))
+        if not workers_stopped:
+            return {
+                "id": "OT-SYNC-RECOVERY",
+                "status": "failed",
+                "elapsed_seconds": round(seed_elapsed + mirror_elapsed, 3),
+                "run_prefix": run_prefix,
+                "phase": "stop_sync_workers",
+                "phases": phases,
+            }
+
+        mutate_argv = iran_driver_argv(
+            "OT-SYNC-RECOVERY",
+            run_prefix,
+            minutes,
+            extra_args=(
+                f"--phase partition_mutate --request-a-public-id {request_a} "
+                "--no-cleanup-after"
+            ),
+        )
+        assert mutate_argv is not None
+        mutate_completed, mutate_elapsed = _run_argv(mutate_argv)
+        mutate_payload = _parse_driver_stdout(
+            mutate_completed.stdout, mutate_completed.stderr
+        )
+        phases["partition_mutate"] = mutate_payload
+        if not (mutate_payload.get("passed") and mutate_completed.returncode == 0):
+            return {
+                "id": "OT-SYNC-RECOVERY",
+                "status": "failed",
+                "elapsed_seconds": round(
+                    seed_elapsed + mirror_elapsed + mutate_elapsed, 3
+                ),
+                "run_prefix": run_prefix,
+                "phase": "partition_mutate",
+                "phases": phases,
+            }
+
+        request_b = str(mutate_payload["request_b_public_id"])
+        skew_argv = foreign_driver_argv(
+            "OT-SYNC-RECOVERY",
+            run_prefix,
+            minutes,
+            extra_args=(
+                "--phase assert_skew "
+                f"--request-a-public-id {request_a} "
+                f"--request-b-public-id {request_b} "
+                "--no-cleanup-after"
+            ),
+        )
+        assert skew_argv is not None
+        skew_completed, skew_elapsed = _run_argv(skew_argv)
+        skew_payload = _parse_driver_stdout(skew_completed.stdout, skew_completed.stderr)
+        phases["assert_skew"] = skew_payload
+        if not (skew_payload.get("passed") and skew_completed.returncode == 0):
+            return {
+                "id": "OT-SYNC-RECOVERY",
+                "status": "failed",
+                "elapsed_seconds": round(
+                    seed_elapsed + mirror_elapsed + mutate_elapsed + skew_elapsed, 3
+                ),
+                "run_prefix": run_prefix,
+                "phase": "assert_skew",
+                "phases": phases,
+            }
+    finally:
+        # Always attempt restart so staging is never left partitioned.
+        phases["start_sync_workers"] = start_staging_sync_workers()
+
+    # Give workers a brief moment to reconnect before converge polls.
+    time.sleep(3)
+    request_b = str(phases.get("partition_mutate", {}).get("request_b_public_id") or "")
+    request_a = str(phases.get("seed", {}).get("request_a_public_id") or "")
+    owner_id = int(phases.get("seed", {}).get("owner_user_id") or 0)
+    offer_public_id = str(phases.get("seed", {}).get("offer_public_id") or "")
+
+    converge_extra = (
+        "--phase assert_converge "
+        f"--owner-user-id {owner_id} "
+        f"--offer-public-id {offer_public_id} "
+        f"--request-a-public-id {request_a} "
+        f"--request-b-public-id {request_b} "
+        "--no-cleanup-after"
+    )
+    foreign_converge_argv = foreign_driver_argv(
+        "OT-SYNC-RECOVERY", run_prefix, minutes, extra_args=converge_extra
+    )
+    iran_converge_argv = iran_driver_argv(
+        "OT-SYNC-RECOVERY", run_prefix, minutes, extra_args=converge_extra
+    )
+    assert foreign_converge_argv is not None and iran_converge_argv is not None
+
+    foreign_converge_completed, foreign_converge_elapsed = _run_argv(foreign_converge_argv)
+    foreign_converge = _parse_driver_stdout(
+        foreign_converge_completed.stdout, foreign_converge_completed.stderr
+    )
+    phases["assert_converge_foreign"] = foreign_converge
+
+    iran_converge_completed, iran_converge_elapsed = _run_argv(iran_converge_argv)
+    iran_converge = _parse_driver_stdout(
+        iran_converge_completed.stdout, iran_converge_completed.stderr
+    )
+    phases["assert_converge_iran"] = iran_converge
+
+    cleanup_argv = iran_cleanup_argv(run_prefix)
+    if cleanup_argv is not None:
+        cleanup_completed, cleanup_elapsed = _run_argv(cleanup_argv)
+        cleanup_payload = _parse_driver_stdout(
+            cleanup_completed.stdout, cleanup_completed.stderr
+        )
+    else:
+        cleanup_elapsed = 0.0
+        cleanup_payload = {"passed": False, "error": "cleanup transport unavailable"}
+    phases["cleanup"] = cleanup_payload
+
+    passed = (
+        bool(foreign_converge.get("passed"))
+        and foreign_converge_completed.returncode == 0
+        and bool(iran_converge.get("passed"))
+        and iran_converge_completed.returncode == 0
+        and bool(cleanup_payload.get("passed"))
+        and bool(phases.get("assert_skew", {}).get("passed"))
+        and bool(phases.get("start_sync_workers", {}).get("ok"))
+    )
+    return {
+        "id": "OT-SYNC-RECOVERY",
+        "status": "passed" if passed else "failed",
+        "elapsed_seconds": round(
+            foreign_converge_elapsed + iran_converge_elapsed + cleanup_elapsed, 3
+        ),
+        "run_prefix": run_prefix,
+        "phases": phases,
+    }
+
+
 def run_req_cross_forward_driver(
     args: argparse.Namespace, run_prefix: str
 ) -> dict[str, Any]:
@@ -955,6 +1247,8 @@ def run_wired_drivers(args: argparse.Namespace) -> list[dict[str, Any]]:
             result = run_req_cross_forward_driver(args, run_prefix)
         elif scenario == "OT-CHANNEL-MARKER":
             result = run_channel_marker_driver(args, run_prefix)
+        elif scenario == "OT-SYNC-RECOVERY":
+            result = run_sync_recovery_driver(args, run_prefix)
         else:
             result = {
                 "id": scenario,
