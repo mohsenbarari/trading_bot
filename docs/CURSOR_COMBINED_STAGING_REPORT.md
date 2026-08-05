@@ -488,11 +488,47 @@ Worth carrying into Stage 17: production is **23 revisions** behind the combined
 head, not five. Promoting this line to production is a much larger migration step
 than the overtime and coin chains alone, and needs its own plan.
 
+### 12.7 First mutating scenario passes end to end
+
+`OT-PREF-WEBAPP-SAVE` now runs for real against the live pair. The driver
+(`scripts/staging_overtime_scenario_driver.py`) executes inside the Iran app
+container and goes through `persist_overtime_preference`, the same authoritative
+writer the WebApp endpoint calls.
+
+| Assertion | Result |
+| --- | --- |
+| Owner is eligible (not accountant, not tier-2) | true |
+| Requested 4 minutes, persisted | 4 |
+| Approved success copy and reachability warning returned | yes |
+| Value 11 refused by the writer, not just the UI | true |
+| Change-log rows emitted for the user | 2 |
+| Mirrored to the foreign peer within ~20s | user 1360, value 4, `home_server=iran` |
+| Cleanup retired the user and propagated | `is_deleted=true` on foreign |
+
+Evidence: `tmp/combined-staging-evidence/stage16-driver-OT-PREF-WEBAPP-SAVE.json`.
+
+Three things the product refused along the way, all correctly:
+
+1. A standalone script that skips `setup_event_listeners()` writes user rows that
+   never enter the sync stream. The driver now registers them, which is why the
+   change-log count is non-zero.
+2. `SyncOutboxBypassError` blocked a bulk delete on `users` — a raw delete would
+   leave the peer unaware.
+3. `SyncOutboxError` then blocked an ORM delete, because hard-deleting a synced
+   user emits no outbox row. Cleanup uses `delete_user_account`, the product's own
+   flow, which already invalidates overtime state.
+
+The other 14 scenarios still have no driver, so `execute` remains fail-closed.
+Authentication note for the remaining WebApp-facing scenarios: dev-login is
+deliberately disabled on the Iran staging nginx
+(`return 404; # Full Matrix: dev-login disabled after key rotation`), so drivers
+run in-container rather than as external HTTP clients.
+
 ### 12.4 Remaining work before `main`
 
 | Item | State |
 | --- | --- |
-| Mutating Stage 16 scenario drivers | not wired; `execute` still fail-closed |
+| Mutating Stage 16 scenario drivers | 1 of 15 wired and passing; `execute` still fail-closed |
 | Overtime preferences | all users at `0`, untouched |
 | Coin inference flags | off by default, untouched |
 | Arvan CDN origin for `staging.gold-trade.ir` | broken, needs panel fix |
