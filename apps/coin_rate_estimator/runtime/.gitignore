@@ -1,0 +1,3 @@
+# Mutable runtime artifacts must live on a protected volume and never enter Git.
+*
+!.gitignore
