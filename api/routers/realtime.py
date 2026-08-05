@@ -48,6 +48,19 @@ SENSITIVE_FIELDS = {
 
 PRIVATE_ONLY_EVENT_TYPES = frozenset({"trade:created"})
 
+_OFFER_LIFECYCLE_PUBLIC_FIELDS = frozenset({
+    "expires_at_ts",
+    "normal_deadline_ts",
+    "final_deadline_ts",
+    "lifecycle_phase",
+    "overtime_minutes_snapshot",
+    "timer_total_seconds",
+    "accepts_new_public_interaction",
+    "accepts_automatic_trade",
+    "accepts_overtime_request",
+    "overtime_trade_committed",
+})
+
 PUBLIC_EVENT_ALLOWED_FIELDS = {
     "offer:created": frozenset({
         "id",
@@ -66,8 +79,7 @@ PUBLIC_EVENT_ALLOWED_FIELDS = {
         "is_wholesale",
         "lot_sizes",
         "original_lot_sizes",
-        "expires_at_ts",
-    }),
+    }) | _OFFER_LIFECYCLE_PUBLIC_FIELDS,
     "offer:updated": frozenset({
         "id",
         "offer_public_id",
@@ -76,10 +88,37 @@ PUBLIC_EVENT_ALLOWED_FIELDS = {
         "lot_sizes",
         "expire_reason",
         "expired_at",
+    }) | _OFFER_LIFECYCLE_PUBLIC_FIELDS,
+    "offer:expired": frozenset({
+        "id",
+        "offer_public_id",
+        "status",
+        "expire_reason",
+        "expired_at",
+        "overtime_trade_committed",
+        "lifecycle_phase",
+        "overtime_minutes_snapshot",
     }),
-    "offer:expired": frozenset({"id", "offer_public_id", "status", "expire_reason", "expired_at"}),
-    "offer:cancelled": frozenset({"id", "offer_public_id", "status", "expire_reason", "expired_at"}),
-    "offer:completed": frozenset({"id", "offer_public_id", "status", "remaining_quantity", "lot_sizes"}),
+    "offer:cancelled": frozenset({
+        "id",
+        "offer_public_id",
+        "status",
+        "expire_reason",
+        "expired_at",
+        "overtime_trade_committed",
+        "lifecycle_phase",
+        "overtime_minutes_snapshot",
+    }),
+    "offer:completed": frozenset({
+        "id",
+        "offer_public_id",
+        "status",
+        "remaining_quantity",
+        "lot_sizes",
+        "overtime_trade_committed",
+        "lifecycle_phase",
+        "overtime_minutes_snapshot",
+    }),
     "offer:deleted": frozenset({"id", "offer_public_id"}),
     "market:opened": frozenset({
         "is_open",

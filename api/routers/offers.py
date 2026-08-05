@@ -340,6 +340,9 @@ class OfferResponse(BaseModel):
     overtime_minutes_snapshot: int = 0
     timer_total_seconds: Optional[int] = None
     accepts_new_public_interaction: Optional[bool] = None
+    accepts_automatic_trade: Optional[bool] = None
+    accepts_overtime_request: Optional[bool] = None
+    overtime_trade_committed: bool = False
 
     class Config:
         from_attributes = True
@@ -383,6 +386,9 @@ class PublicOfferResponse(BaseModel):
     lifecycle_phase: Optional[str] = None
     overtime_minutes_snapshot: int = 0
     timer_total_seconds: Optional[int] = None
+    accepts_automatic_trade: Optional[bool] = None
+    accepts_overtime_request: Optional[bool] = None
+    overtime_trade_committed: bool = False
     safe_public_state_label: str
     interaction_available: bool
 
@@ -562,14 +568,19 @@ def _offer_lifecycle_response_fields(
     """Serialize the shared lifecycle projection for API/realtime clients."""
     from core.offer_lifecycle import project_offer_lifecycle
 
+    committed = bool(getattr(offer, "overtime_trade_committed", False))
+    snapshot = int(getattr(offer, "overtime_minutes_snapshot", 0) or 0)
     empty = {
         "expires_at_ts": None,
         "normal_deadline_ts": None,
         "final_deadline_ts": None,
         "lifecycle_phase": None,
-        "overtime_minutes_snapshot": int(getattr(offer, "overtime_minutes_snapshot", 0) or 0),
+        "overtime_minutes_snapshot": snapshot,
         "timer_total_seconds": None,
-        "accepts_new_public_interaction": None,
+        "accepts_new_public_interaction": False,
+        "accepts_automatic_trade": False,
+        "accepts_overtime_request": False,
+        "overtime_trade_committed": committed,
     }
     if getattr(offer, "status", None) != OfferStatus.ACTIVE:
         return empty
@@ -593,6 +604,9 @@ def _offer_lifecycle_response_fields(
         "overtime_minutes_snapshot": projection.overtime_minutes_snapshot,
         "timer_total_seconds": projection.timer_total_seconds,
         "accepts_new_public_interaction": projection.accepts_new_public_interaction,
+        "accepts_automatic_trade": projection.accepts_automatic_trade,
+        "accepts_overtime_request": projection.accepts_overtime_request,
+        "overtime_trade_committed": committed,
     }
 
 
@@ -632,6 +646,11 @@ def _build_public_offer_response(
         lifecycle_phase=lifecycle_fields.get("lifecycle_phase"),
         overtime_minutes_snapshot=int(lifecycle_fields.get("overtime_minutes_snapshot") or 0),
         timer_total_seconds=lifecycle_fields.get("timer_total_seconds"),
+        accepts_automatic_trade=lifecycle_fields.get("accepts_automatic_trade"),
+        accepts_overtime_request=lifecycle_fields.get("accepts_overtime_request"),
+        overtime_trade_committed=bool(
+            lifecycle_fields.get("overtime_trade_committed")
+        ),
         safe_public_state_label=_safe_public_state_label(offer),
         interaction_available=interaction_available,
     )
@@ -639,12 +658,18 @@ def _build_public_offer_response(
 
 def _offer_request_payload(ledger: OfferRequest) -> dict[str, Any]:
     commission_rate = getattr(ledger, "customer_commission_rate_snapshot", None)
+    presented = getattr(ledger, "presented_at", None)
+    deadline = getattr(ledger, "decision_deadline_at", None)
     return {
         "id": getattr(ledger, "id", None),
         "version_id": getattr(ledger, "version_id", None),
         "request_home_server": getattr(ledger, "request_home_server", None),
         "local_offer_id": getattr(ledger, "local_offer_id", None),
         "offer_public_id": getattr(ledger, "offer_public_id", None),
+        "request_public_id": getattr(ledger, "request_public_id", None),
+        "workflow_kind": _enum_value(getattr(ledger, "workflow_kind", None)),
+        "offer_owner_user_id": getattr(ledger, "offer_owner_user_id", None),
+        "queue_sequence": getattr(ledger, "queue_sequence", None),
         "requester_user_id": getattr(ledger, "requester_user_id", None),
         "actor_user_id": getattr(ledger, "actor_user_id", None),
         "request_source_surface": _enum_value(getattr(ledger, "request_source_surface", None)),
@@ -652,6 +677,9 @@ def _offer_request_payload(ledger: OfferRequest) -> dict[str, Any]:
         "requested_quantity": getattr(ledger, "requested_quantity", None),
         "idempotency_key": getattr(ledger, "idempotency_key", None),
         "received_at": to_jalali_str(getattr(ledger, "received_at", None)) if getattr(ledger, "received_at", None) else None,
+        "presented_at": presented.isoformat() if presented is not None else None,
+        "decision_deadline_at": deadline.isoformat() if deadline is not None else None,
+        "terminal_reason": getattr(ledger, "terminal_reason", None),
         "decided_at": to_jalali_str(getattr(ledger, "decided_at", None)) if getattr(ledger, "decided_at", None) else None,
         "result_status": _enum_value(getattr(ledger, "result_status", None)),
         "public_failure_code": getattr(ledger, "public_failure_code", None),
@@ -1023,7 +1051,15 @@ async def _expire_offer_side_effects(
             dedupe_key=side_effect_dedupe_key,
         )
     await _remove_offer_channel_buttons_safely(offer, reason=channel_reason, timeout=channel_timeout)
-    realtime_payload = {"id": offer.id}
+    realtime_payload = {
+        "id": offer.id,
+        "status": _enum_value(getattr(offer, "status", None)),
+        "overtime_trade_committed": bool(getattr(offer, "overtime_trade_committed", False)),
+        "overtime_minutes_snapshot": int(
+            getattr(offer, "overtime_minutes_snapshot", 0) or 0
+        ),
+        "lifecycle_phase": None,
+    }
     if getattr(offer, "offer_public_id", None):
         realtime_payload["offer_public_id"] = offer.offer_public_id
     await _publish_offer_event_safely("offer:expired", realtime_payload, reason=realtime_reason)

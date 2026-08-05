@@ -304,8 +304,21 @@ async def _publish_terminal_offer_realtime_after_sync(db: AsyncSession, terminal
         status_value = _enum_value(getattr(offer, "status", None))
         offer_public_id = getattr(offer, "offer_public_id", None)
         try:
+            marker_fields = {
+                "overtime_trade_committed": bool(
+                    getattr(offer, "overtime_trade_committed", False)
+                ),
+                "overtime_minutes_snapshot": int(
+                    getattr(offer, "overtime_minutes_snapshot", 0) or 0
+                ),
+                "lifecycle_phase": None,
+            }
             if status_value == OfferStatus.EXPIRED.value:
-                realtime_payload = {"id": offer.id}
+                realtime_payload = {
+                    "id": offer.id,
+                    "status": status_value,
+                    **marker_fields,
+                }
                 if offer_public_id:
                     realtime_payload["offer_public_id"] = offer_public_id
                 await publish_event(
@@ -319,6 +332,7 @@ async def _publish_terminal_offer_realtime_after_sync(db: AsyncSession, terminal
                     "status": status_value,
                     "remaining_quantity": getattr(offer, "remaining_quantity", None),
                     "lot_sizes": getattr(offer, "lot_sizes", None),
+                    **marker_fields,
                 }
                 if offer_public_id:
                     realtime_payload["offer_public_id"] = offer_public_id
@@ -411,6 +425,11 @@ async def _publish_synced_offer_created_realtime_after_sync(db: AsyncSession, of
                     "overtime_minutes_snapshot": projection.overtime_minutes_snapshot,
                     "timer_total_seconds": projection.timer_total_seconds,
                     "accepts_new_public_interaction": projection.accepts_new_public_interaction,
+                    "accepts_automatic_trade": projection.accepts_automatic_trade,
+                    "accepts_overtime_request": projection.accepts_overtime_request,
+                    "overtime_trade_committed": bool(
+                        getattr(offer, "overtime_trade_committed", False)
+                    ),
                 }
             except Exception:
                 lifecycle_fields = {"expires_at_ts": None}

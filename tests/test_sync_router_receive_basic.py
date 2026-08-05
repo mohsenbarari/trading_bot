@@ -456,10 +456,23 @@ class SyncRouterReceiveBasicTests(unittest.IsolatedAsyncioTestCase):
                 "status": "completed",
                 "remaining_quantity": 0,
                 "lot_sizes": None,
+                "overtime_trade_committed": False,
+                "overtime_minutes_snapshot": 0,
+                "lifecycle_phase": None,
             },
             source=REALTIME_SOURCE_SYNC_APPLY,
         )
-        publish_mock.assert_any_await("offer:expired", {"id": 42}, source=REALTIME_SOURCE_SYNC_APPLY)
+        publish_mock.assert_any_await(
+            "offer:expired",
+            {
+                "id": 42,
+                "status": "expired",
+                "overtime_trade_committed": False,
+                "overtime_minutes_snapshot": 0,
+                "lifecycle_phase": None,
+            },
+            source=REALTIME_SOURCE_SYNC_APPLY,
+        )
 
     async def test_receive_sync_data_publishes_terminal_realtime_when_completed_trade_sync_arrives_later(self):
         completed_offer = SimpleNamespace(id=51, status="completed", remaining_quantity=0, lot_sizes=None)
@@ -488,6 +501,9 @@ class SyncRouterReceiveBasicTests(unittest.IsolatedAsyncioTestCase):
                 "status": "completed",
                 "remaining_quantity": 0,
                 "lot_sizes": None,
+                "overtime_trade_committed": False,
+                "overtime_minutes_snapshot": 0,
+                "lifecycle_phase": None,
             },
             source=REALTIME_SOURCE_SYNC_APPLY,
         )
@@ -568,6 +584,9 @@ class SyncRouterReceiveBasicTests(unittest.IsolatedAsyncioTestCase):
                 "status": "active",
                 "remaining_quantity": 6,
                 "lot_sizes": [6],
+                "overtime_trade_committed": False,
+                "overtime_minutes_snapshot": 0,
+                "lifecycle_phase": None,
             },
             source=REALTIME_SOURCE_SYNC_APPLY,
         )

@@ -16,11 +16,15 @@ class OfferRequestVisibility(str, Enum):
 PUBLIC_OFFER_REQUEST_FIELDS = frozenset(
     {
         "offer_public_id",
+        "request_public_id",
+        "workflow_kind",
         "requested_quantity",
         "result_status",
         "public_failure_code",
         "public_failure_message",
         "received_at",
+        "presented_at",
+        "decision_deadline_at",
         "decided_at",
     }
 )
@@ -31,6 +35,8 @@ REQUESTER_OFFER_REQUEST_FIELDS = PUBLIC_OFFER_REQUEST_FIELDS | frozenset(
         "requester_user_id",
         "actor_user_id",
         "resulting_trade_id",
+        "terminal_reason",
+        "queue_sequence",
     }
 )
 
@@ -41,6 +47,7 @@ OWNER_AUDIT_OFFER_REQUEST_FIELDS = REQUESTER_OFFER_REQUEST_FIELDS | frozenset(
         "request_source_surface",
         "request_source_server",
         "idempotency_key",
+        "offer_owner_user_id",
         "customer_relation_id",
         "customer_owner_user_id",
         "customer_tier_snapshot",

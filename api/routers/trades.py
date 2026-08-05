@@ -87,10 +87,12 @@ from core.services.offer_overtime_request_service import (
     claim_owner_approval,
     create_overtime_request,
     invalidate_request,
+    list_nonterminal_overtime_requests,
     load_overtime_request_by_public_id,
     promote_next_for_owner,
     record_completed_trade,
     reject_by_owner,
+    remaining_seconds_until,
 )
 from core.services.telegram_offer_channel_service import apply_offer_channel_state
 from core.services.user_account_status_service import is_user_trade_blocked
@@ -100,6 +102,7 @@ from models.customer_relation import CustomerRelation, CustomerRelationStatus, C
 from models.offer import Offer, OfferType, OfferStatus
 from models.offer_request import (
     OVERTIME_NONTERMINAL_STATUSES,
+    OVERTIME_OWNER_OCCUPYING_STATUSES,
     OVERTIME_TERMINAL_STATUSES,
     OfferRequest,
     OfferRequestSourceSurface,
@@ -2994,6 +2997,8 @@ def _overtime_request_public_payload(
     *,
     duplicate_replay: bool = False,
     promoted: bool | None = None,
+    viewer_role: str | None = None,
+    now: datetime | None = None,
 ) -> dict[str, object]:
     if isinstance(result, OvertimeRequestResult):
         ledger = result.ledger
@@ -3007,17 +3012,30 @@ def _overtime_request_public_payload(
     status_value = getattr(status_raw, "value", status_raw)
     deadline = getattr(ledger, "decision_deadline_at", None)
     presented = getattr(ledger, "presented_at", None)
-    return {
+    stamp = now or datetime.utcnow()
+    remaining = remaining_seconds_until(deadline, now=stamp) if deadline is not None else None
+    occupying = status_value in {
+        item.value for item in OVERTIME_OWNER_OCCUPYING_STATUSES
+    }
+    actionable = status_value == OfferRequestStatus.OVERTIME_PRESENTED.value
+    payload: dict[str, object] = {
         "workflow": OfferRequestWorkflow.OVERTIME.value,
         "request_public_id": getattr(ledger, "request_public_id", None),
         "offer_public_id": getattr(ledger, "offer_public_id", None),
+        "request_home_server": getattr(ledger, "request_home_server", None),
         "result_status": status_value,
         "requested_quantity": getattr(ledger, "requested_quantity", None),
         "presented_at": presented.isoformat() if presented is not None else None,
         "decision_deadline_at": deadline.isoformat() if deadline is not None else None,
+        "remaining_decision_seconds": remaining,
+        "is_occupying": occupying,
+        "is_actionable": actionable,
         "promoted": bool(promoted),
         "duplicate_replay": bool(duplicate_replay),
     }
+    if viewer_role:
+        payload["viewer_role"] = viewer_role
+    return payload
 
 
 def _overtime_request_http_response(
@@ -4353,6 +4371,14 @@ async def _execute_trade_authoritatively(
         }
         if getattr(offer, "offer_public_id", None):
             realtime_offer_payload["offer_public_id"] = offer.offer_public_id
+        try:
+            from api.routers.offers import _offer_lifecycle_response_fields
+
+            realtime_offer_payload.update(_offer_lifecycle_response_fields(offer))
+        except Exception:
+            realtime_offer_payload["overtime_trade_committed"] = bool(
+                getattr(offer, "overtime_trade_committed", False)
+            )
         await publish_event("offer:updated", realtime_offer_payload)
     except Exception as exc:
         log_trading_event(
@@ -4505,6 +4531,105 @@ async def create_trade(
         )
     finally:
         await _release_trade_contention_lease(trade_contention_lease)
+
+
+@router.get("/overtime-requests/pending-owner", status_code=status.HTTP_200_OK)
+async def get_pending_owner_overtime_requests(
+    db: AsyncSession = Depends(get_db),
+    context: EffectiveOwnerActor = Depends(get_effective_owner_actor_context),
+):
+    """Reconnect recovery: owner's nonterminal overtime requests on this home server.
+
+    ``current`` is the single occupying/presented request the owner must decide
+    (if any). Queued siblings stay in ``items`` for UI context without exposing
+    requester identity.
+    """
+    _ensure_accountant_market_access_allowed(context)
+    owner_id = int(context.owner_user.id)
+    home = current_server()
+    rows = await list_nonterminal_overtime_requests(
+        db,
+        offer_owner_user_id=owner_id,
+        request_home_server=home,
+    )
+    now = datetime.utcnow()
+    items = [
+        _overtime_request_public_payload(row, viewer_role="owner", now=now)
+        for row in rows
+    ]
+    current_item = next(
+        (item for item in items if item.get("is_occupying")),
+        None,
+    )
+    return {
+        "request_home_server": home,
+        "viewer_role": "owner",
+        "current": current_item,
+        "items": items,
+    }
+
+
+@router.get("/overtime-requests/pending-requester", status_code=status.HTTP_200_OK)
+async def get_pending_requester_overtime_requests(
+    db: AsyncSession = Depends(get_db),
+    context: EffectiveOwnerActor = Depends(get_effective_owner_actor_context),
+):
+    """Reconnect recovery: requester's outstanding overtime requests on this server."""
+    _ensure_accountant_market_access_allowed(context)
+    requester_id = int(context.owner_user.id)
+    home = current_server()
+    rows = await list_nonterminal_overtime_requests(
+        db,
+        requester_user_id=requester_id,
+        request_home_server=home,
+    )
+    now = datetime.utcnow()
+    items = [
+        _overtime_request_public_payload(row, viewer_role="requester", now=now)
+        for row in rows
+    ]
+    return {
+        "request_home_server": home,
+        "viewer_role": "requester",
+        "items": items,
+    }
+
+
+@router.get("/overtime-requests/{request_public_id}", status_code=status.HTTP_200_OK)
+async def get_overtime_request(
+    request_public_id: str,
+    db: AsyncSession = Depends(get_db),
+    context: EffectiveOwnerActor = Depends(get_effective_owner_actor_context),
+):
+    """Reconnect recovery for one opaque request; owner or requester only."""
+    _ensure_accountant_market_access_allowed(context)
+    ledger = await load_overtime_request_by_public_id(db, request_public_id)
+    if ledger is None or not _is_overtime_offer_request(ledger):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="درخواست وقت اضافه یافت نشد.",
+        )
+    caller_id = int(context.owner_user.id)
+    owner_id = getattr(ledger, "offer_owner_user_id", None)
+    requester_id = getattr(ledger, "requester_user_id", None)
+    if caller_id == int(owner_id or 0):
+        viewer_role = "owner"
+    elif caller_id == int(requester_id or 0):
+        viewer_role = "requester"
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="دسترسی به این درخواست مجاز نیست.",
+        )
+    home = normalize_server(getattr(ledger, "request_home_server", None), current_server())
+    payload = _overtime_request_public_payload(
+        ledger,
+        viewer_role=viewer_role,
+        now=datetime.utcnow(),
+    )
+    payload["request_home_server"] = home
+    payload["is_local_home"] = home == current_server()
+    return payload
 
 
 @router.post(
