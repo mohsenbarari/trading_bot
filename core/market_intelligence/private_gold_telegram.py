@@ -114,7 +114,22 @@ async def collect_private_gold_event_telegram(
         market = connect_market_store(settings.market_store_path)
         initialize_private_gold_staging(staging)
         initialize_market_store(market)
-        client = TelegramClient(str(settings.session_path), settings.credentials.api_id, settings.credentials.api_hash, sequential_updates=True, flood_sleep_threshold=60)
+        # This command is normally invoked by a short-interval timer.  A
+        # Telegram network failure must therefore fail promptly and leave the
+        # next timer tick free to retry; the collector must not block for the
+        # library's long default connection-retry cycle.
+        client = TelegramClient(
+            str(settings.session_path),
+            settings.credentials.api_id,
+            settings.credentials.api_hash,
+            sequential_updates=True,
+            flood_sleep_threshold=60,
+            timeout=10,
+            connection_retries=1,
+            retry_delay=1,
+            request_retries=1,
+            auto_reconnect=False,
+        )
         await client.connect()
         if not await client.is_user_authorized():
             if not settings.allow_interactive_login:
@@ -167,4 +182,3 @@ async def collect_private_gold_event_telegram(
         if market is not None: market.close()
         if staging is not None: staging.close()
         os.umask(previous_umask)
-
