@@ -141,6 +141,7 @@ async def collect_private_gold_event_telegram(
                 raise PrivateGoldTelegramTransportError("private_gold_telegram_session_authorization_required")
             await client.start(phone=settings.credentials.phone)
         messages: list[tuple[str, str, int, str]] = []
+        pipeline_as_of = receipt_time
         counters = {"messages": 0, "invalid_items": 0, "staged_changes": 0, "offer_facts": 0, "trade_facts": 0, "paper_minutes": 0}
         for stream, checkpoint_code in _SOURCES:
             channel_id = settings.channels.offer_channel_id if stream == "OFFER" else settings.channels.trade_channel_id
@@ -171,14 +172,33 @@ async def collect_private_gold_event_telegram(
                 batch.append(message)
             for message in batch:
                 payload = str(getattr(message, "message", None) or "")
-                report = stage_private_gold_payload(staging, PrivateGoldPayloadEnvelope(payload, receipt_time, stream), staged_at_utc=receipt_time)
+                # ``now`` is captured before the Telegram read.  A post can
+                # legitimately arrive while that read is in progress, so
+                # snapshot availability per message instead of incorrectly
+                # rejecting the just-arrived event as being in the future.
+                if as_of is not None:
+                    available_at = receipt_time
+                else:
+                    message_date = getattr(message, "date", None)
+                    outer_available_at = (
+                        _iso(message_date if message_date.tzinfo else message_date.replace(tzinfo=timezone.utc))
+                        if isinstance(message_date, datetime)
+                        else receipt_time
+                    )
+                    available_at = max(_iso(datetime.now(timezone.utc)), outer_available_at)
+                report = stage_private_gold_payload(
+                    staging,
+                    PrivateGoldPayloadEnvelope(payload, available_at, stream),
+                    staged_at_utc=available_at,
+                )
+                pipeline_as_of = available_at
                 counters["messages"] += 1
                 counters["invalid_items"] += report.invalid_items
                 counters["staged_changes"] += report.inserted_or_updated_offers + report.inserted_or_updated_trade_updates
                 messages.append((checkpoint_code, stream, int(message.id), _iso(message.date if message.date.tzinfo else message.date.replace(tzinfo=timezone.utc))))
         staging.commit()
         try:
-            pipeline = process_private_gold_payloads(staging, market, (), as_of_utc=receipt_time)
+            pipeline = process_private_gold_payloads(staging, market, (), as_of_utc=pipeline_as_of)
             for checkpoint_code, _stream, message_id, message_time in messages:
                 advance_source_checkpoint(market, source_code=checkpoint_code, message_id=message_id, event_time_utc=message_time)
             market.commit()
