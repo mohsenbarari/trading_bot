@@ -44,6 +44,7 @@ SCENARIOS = (
     "OT-CANCEL-REQUESTER",
     "OT-QUEUE-ORDER",
     "OT-REQ-FOREIGN-TO-FOREIGN",
+    "OT-FINAL-TAIL",
 )
 # Staging Iran currently carries a single commodity; keep the driver pinned to it.
 DEFAULT_COMMODITY_ID = 1
@@ -189,6 +190,8 @@ async def _create_offer(
     *,
     notes: str,
     source_surface,
+    is_wholesale: bool = True,
+    lot_sizes: list[int] | None = None,
 ):
     """Create an offer through the same quota path production surfaces use.
 
@@ -216,6 +219,9 @@ async def _create_offer(
             quantity=DEFAULT_OFFER_QUANTITY,
             price=DEFAULT_OFFER_PRICE,
             notes=notes,
+            is_wholesale=is_wholesale,
+            lot_sizes=lot_sizes,
+            original_lot_sizes=lot_sizes,
         ),
         validate_market=False,
         enforce_market_admission=False,
@@ -228,7 +234,14 @@ async def _create_offer(
     return outcome.offer, int(getattr(ts, "offer_expiry_minutes", 2) or 2)
 
 
-async def _create_webapp_offer(session, owner: User, *, notes: str):
+async def _create_webapp_offer(
+    session,
+    owner: User,
+    *,
+    notes: str,
+    is_wholesale: bool = True,
+    lot_sizes: list[int] | None = None,
+):
     from core.offer_source import OfferSourceSurface
 
     return await _create_offer(
@@ -236,6 +249,8 @@ async def _create_webapp_offer(session, owner: User, *, notes: str):
         owner,
         notes=notes,
         source_surface=OfferSourceSurface.WEBAPP,
+        is_wholesale=is_wholesale,
+        lot_sizes=lot_sizes,
     )
 
 
@@ -873,6 +888,88 @@ async def _backdate_offer_into_overtime(session, offer, *, normal_minutes: int) 
     return stamped
 
 
+async def _backdate_offer_past_final(
+    session,
+    offer,
+    *,
+    normal_minutes: int,
+    overtime_minutes: int,
+) -> datetime:
+    """Move ``created_at`` so wall-clock ``now`` is past the final public deadline."""
+    stamped = datetime.utcnow() - timedelta(
+        minutes=normal_minutes + max(0, int(overtime_minutes)),
+        seconds=5,
+    )
+    offer.created_at = stamped
+    await session.commit()
+    await session.refresh(offer)
+    return stamped
+
+
+async def _approve_presented_overtime_request(
+    session,
+    *,
+    request_public_id: str,
+    owner_id: int,
+    requester_id: int,
+):
+    """Owner-approve through the same trade commit path the product uses."""
+    from fastapi import BackgroundTasks, HTTPException
+
+    from api.routers.trades import (
+        TradeCreate,
+        _execute_trade_authoritatively_with_transient_retry,
+    )
+    from core.services.accountant_relation_service import EffectiveOwnerActor
+    from core.services.offer_overtime_request_service import (
+        claim_owner_approval,
+        load_overtime_request_by_public_id,
+    )
+
+    owner = await session.get(User, owner_id)
+    requester = await session.get(User, requester_id)
+    if owner is None or requester is None:
+        raise DriverRefusal("owner or requester missing before overtime approval")
+    ledger = await load_overtime_request_by_public_id(
+        session,
+        request_public_id,
+        for_update=True,
+    )
+    if ledger is None:
+        raise DriverRefusal("overtime request disappeared before approval")
+    await claim_owner_approval(
+        ledger,
+        decided_by_user_id=owner_id,
+        now=datetime.utcnow(),
+    )
+    try:
+        return await _execute_trade_authoritatively_with_transient_retry(
+            trade_data=TradeCreate(
+                offer_id=int(ledger.local_offer_id),
+                offer_public_id=getattr(ledger, "offer_public_id", None),
+                quantity=int(ledger.requested_quantity),
+                idempotency_key=getattr(ledger, "idempotency_key", None),
+            ),
+            background_tasks=BackgroundTasks(),
+            db=session,
+            context=EffectiveOwnerActor(
+                owner_user=requester,
+                actor_user=requester,
+                relation=None,
+                is_accountant_context=False,
+            ),
+            edge_received_at=getattr(ledger, "received_at", None) or datetime.utcnow(),
+            request_source_surface=getattr(ledger, "request_source_surface", None),
+            request_source_server=getattr(
+                ledger, "request_source_server", current_server()
+            ),
+            overtime_approval_ledger=ledger,
+            overtime_decided_by_user_id=owner_id,
+        )
+    except HTTPException as exc:
+        raise DriverRefusal(f"overtime approval trade failed: {exc.detail}") from exc
+
+
 async def _scenario_req_iran_to_iran(
     session,
     run_prefix: str,
@@ -1474,6 +1571,225 @@ async def _scenario_req_foreign_to_foreign_run(
     }
 
 
+async def _scenario_final_tail(
+    session,
+    run_prefix: str,
+    minutes: int,
+) -> dict[str, object]:
+    """Partial overtime trade leaves a remainder; occupying request past final → final_tail."""
+    from core.offer_expiry import _offer_ids_with_final_tail_requests
+    from core.offer_lifecycle import OfferLifecyclePhase, project_offer_lifecycle
+    from core.services.offer_overtime_preference_service import persist_overtime_preference
+    from core.services.offer_overtime_request_service import (
+        OvertimeRequestCreateCommand,
+        create_overtime_request,
+        load_overtime_request_by_public_id,
+    )
+    from core.services.telegram_offer_channel_service import (
+        offer_channel_overtime_marker_visible,
+    )
+    from models.offer import OfferStatus
+    from models.offer_request import OfferRequestSourceSurface, OfferRequestStatus
+
+    if current_server() != "iran":
+        raise DriverRefusal("OT-FINAL-TAIL currently runs on the Iran peer")
+    if minutes <= 0:
+        raise DriverRefusal("OT-FINAL-TAIL requires a positive overtime preference")
+
+    partial_qty = min(2, DEFAULT_OFFER_QUANTITY)
+    expected_remaining = DEFAULT_OFFER_QUANTITY - partial_qty
+    if expected_remaining <= 0:
+        raise DriverRefusal("OT-FINAL-TAIL needs an offer quantity larger than the partial trade")
+
+    await _cleanup(session, run_prefix)
+    owner = await _seed_owner(session, run_prefix)
+    requester_a = await _seed_user(session, run_prefix, "requester_a")
+    requester_b = await _seed_user(session, run_prefix, "requester_b")
+    await session.commit()
+    await session.refresh(owner)
+    await session.refresh(requester_a)
+    await session.refresh(requester_b)
+    owner_id = int(owner.id)
+    requester_a_id = int(requester_a.id)
+    requester_b_id = int(requester_b.id)
+
+    await persist_overtime_preference(session, owner, minutes)
+    await session.commit()
+    await session.refresh(owner)
+
+    # Retail lots are required: wholesale offers only accept the full remainder.
+    offer, normal_minutes = await _create_webapp_offer(
+        session,
+        owner,
+        notes=f"{run_prefix} final tail",
+        is_wholesale=False,
+        lot_sizes=[partial_qty],
+    )
+    offer_id = int(offer.id)
+    offer_public_id = str(offer.offer_public_id)
+    snapshot = int(offer.overtime_minutes_snapshot)
+    if snapshot != minutes:
+        raise DriverRefusal(
+            f"offer snapshot {snapshot} did not match preference {minutes}"
+        )
+
+    await _backdate_offer_into_overtime(session, offer, normal_minutes=normal_minutes)
+    offer = await _reload_offer(session, offer_id)
+    receipt_a = datetime.utcnow()
+
+    first = await create_overtime_request(
+        session,
+        OvertimeRequestCreateCommand(
+            offer=offer,
+            requester_user_id=requester_a_id,
+            actor_user_id=requester_a_id,
+            requested_quantity=partial_qty,
+            idempotency_key=f"{run_prefix}:ot-final-a",
+            request_source_surface=OfferRequestSourceSurface.WEBAPP,
+            request_source_server="iran",
+            receipt_at=receipt_a,
+            normal_lifetime_minutes=normal_minutes,
+            request_home_server="iran",
+        ),
+        now=receipt_a,
+    )
+    await session.commit()
+    first_ledger = first.ledger
+    await session.refresh(first_ledger)
+    first_request_public_id = str(first_ledger.request_public_id)
+    first_presented = str(
+        getattr(first_ledger.result_status, "value", first_ledger.result_status)
+    )
+
+    await _approve_presented_overtime_request(
+        session,
+        request_public_id=first_request_public_id,
+        owner_id=owner_id,
+        requester_id=requester_a_id,
+    )
+
+    offer = await _reload_offer(session, offer_id)
+    first_ledger = await load_overtime_request_by_public_id(
+        session,
+        first_request_public_id,
+    )
+    if first_ledger is None:
+        raise DriverRefusal("first overtime request disappeared after approval")
+    first_decided = str(
+        getattr(first_ledger.result_status, "value", first_ledger.result_status)
+    )
+    remaining_after_trade = int(
+        getattr(offer, "remaining_quantity", None)
+        if getattr(offer, "remaining_quantity", None) is not None
+        else getattr(offer, "quantity", 0)
+    )
+    committed_after_trade = bool(getattr(offer, "overtime_trade_committed", False))
+    status_after_trade = str(getattr(offer.status, "value", offer.status))
+
+    # Second occupying request while the remainder is still public in overtime.
+    receipt_b = datetime.utcnow()
+    second = await create_overtime_request(
+        session,
+        OvertimeRequestCreateCommand(
+            offer=offer,
+            requester_user_id=requester_b_id,
+            actor_user_id=requester_b_id,
+            requested_quantity=min(partial_qty, remaining_after_trade),
+            idempotency_key=f"{run_prefix}:ot-final-b",
+            request_source_surface=OfferRequestSourceSurface.WEBAPP,
+            request_source_server="iran",
+            receipt_at=receipt_b,
+            normal_lifetime_minutes=normal_minutes,
+            request_home_server="iran",
+        ),
+        now=receipt_b,
+    )
+    await session.commit()
+    second_ledger = second.ledger
+    await session.refresh(second_ledger)
+    second_request_public_id = str(second_ledger.request_public_id)
+    second_presented = str(
+        getattr(second_ledger.result_status, "value", second_ledger.result_status)
+    )
+    second_request_id = int(second_ledger.id)
+
+    await _backdate_offer_past_final(
+        session,
+        offer,
+        normal_minutes=normal_minutes,
+        overtime_minutes=snapshot,
+    )
+    offer = await _reload_offer(session, offer_id)
+    as_of = datetime.utcnow()
+    occupying_ids = await _offer_ids_with_final_tail_requests(session, [offer_id])
+    has_occupying_tail = offer_id in occupying_ids
+
+    without_tail = project_offer_lifecycle(
+        offer,
+        normal_lifetime_minutes=normal_minutes,
+        as_of=as_of,
+        has_final_tail_request=False,
+    )
+    with_tail = project_offer_lifecycle(
+        offer,
+        normal_lifetime_minutes=normal_minutes,
+        as_of=as_of,
+        has_final_tail_request=True,
+    )
+    marker_visible = offer_channel_overtime_marker_visible(
+        offer,
+        lifecycle_phase=with_tail.phase.value,
+    )
+
+    passed = (
+        first.promoted is True
+        and first_presented == OfferRequestStatus.OVERTIME_PRESENTED.value
+        and first_decided == OfferRequestStatus.COMPLETED_TRADE.value
+        and committed_after_trade is True
+        and remaining_after_trade == expected_remaining
+        and status_after_trade == OfferStatus.ACTIVE.value
+        and second.promoted is True
+        and second_presented == OfferRequestStatus.OVERTIME_PRESENTED.value
+        and has_occupying_tail is True
+        and without_tail.phase == OfferLifecyclePhase.EXPIRED
+        and without_tail.terminal_expiry_due is True
+        and with_tail.phase == OfferLifecyclePhase.FINAL_TAIL
+        and with_tail.terminal_expiry_due is False
+        and with_tail.accepts_new_public_interaction is False
+        and marker_visible is True
+    )
+
+    return {
+        "owner_user_id": owner_id,
+        "requester_a_user_id": requester_a_id,
+        "requester_b_user_id": requester_b_id,
+        "offer_id": offer_id,
+        "offer_public_id": offer_public_id,
+        "overtime_minutes_snapshot": snapshot,
+        "normal_lifetime_minutes": normal_minutes,
+        "partial_quantity": partial_qty,
+        "first_request_public_id": first_request_public_id,
+        "first_presented_status": first_presented,
+        "first_decided_status": first_decided,
+        "remaining_after_trade": remaining_after_trade,
+        "overtime_trade_committed": committed_after_trade,
+        "offer_status_after_trade": status_after_trade,
+        "second_request_id": second_request_id,
+        "second_request_public_id": second_request_public_id,
+        "second_presented_status": second_presented,
+        "has_occupying_final_tail_request": has_occupying_tail,
+        "phase_without_tail_hold": without_tail.phase.value,
+        "terminal_expiry_without_tail_hold": without_tail.terminal_expiry_due,
+        "phase_with_tail_hold": with_tail.phase.value,
+        "terminal_expiry_with_tail_hold": with_tail.terminal_expiry_due,
+        "accepts_new_public_interaction_in_final_tail": (
+            with_tail.accepts_new_public_interaction
+        ),
+        "channel_marker_visible_in_final_tail": marker_visible,
+        "passed": passed,
+    }
+
+
 async def main_async(args: argparse.Namespace) -> dict[str, object]:
     _guard_environment()
     run_prefix = _guard_run_prefix(args.run_prefix)
@@ -1556,6 +1872,8 @@ async def main_async(args: argparse.Namespace) -> dict[str, object]:
                 raise DriverRefusal(
                     f"unsupported OT-REQ-FOREIGN-TO-FOREIGN phase={phase!r}"
                 )
+        elif args.scenario == "OT-FINAL-TAIL":
+            outcome = await _scenario_final_tail(session, run_prefix, args.minutes)
         else:
             raise DriverRefusal(f"no driver implemented for {args.scenario}")
 
