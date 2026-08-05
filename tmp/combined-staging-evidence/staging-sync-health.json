@@ -1,0 +1,126 @@
+{
+  "iran": {
+    "status": "ok",
+    "server_mode": "iran",
+    "parity_status": {
+      "status": "available",
+      "comparison_status": "missing",
+      "fresh": false,
+      "latest_comparison": null,
+      "freshness_required_seconds": 900,
+      "snapshot_endpoint": "/api/sync/parity/snapshot",
+      "status_endpoint": "/api/sync/parity/status",
+      "quick_table_count": 14,
+      "deep_table_count": 23
+    },
+    "overtime_reconciliation": {
+      "status": "ok",
+      "server_mode": "iran",
+      "status_counts": {},
+      "finding_counts": {},
+      "silent_owner_count": 0,
+      "sampled_finding_count": 0
+    },
+    "publication_reconciliation": {
+      "status": "ok",
+      "server_mode": "iran",
+      "state_counts": {
+        "telegram_channel": {
+          "disabled": 25
+        }
+      },
+      "finding_counts": {
+        "active_offer_without_telegram_state": 0,
+        "failed_telegram_publication": 0,
+        "lagged_telegram_publication": 0,
+        "legacy_telegram_message_without_state": 0,
+        "offer_missing_legacy_message_id": 0,
+        "active_offer_without_webapp_state": 0,
+        "stale_terminal_webapp_state": 0,
+        "unsynced_publication_state_backlog": 0,
+        "unsynced_offer_backlog": 0
+      },
+      "repairable_issues": [
+        "active_offer_without_telegram_state",
+        "active_offer_without_webapp_state",
+        "failed_telegram_publication",
+        "lagged_telegram_publication",
+        "legacy_telegram_message_without_state",
+        "offer_missing_legacy_message_id",
+        "stale_terminal_webapp_state",
+        "telegram_message_identity_mismatch",
+        "telegram_publisher_identity_mismatch",
+        "telegram_publisher_identity_missing"
+      ]
+    },
+    "unsynced_change_log_count": 0,
+    "oldest_unsynced_age_seconds": 0.0,
+    "runtime_compatibility": {
+      "release_sha": "3c8b3e07",
+      "registry_fingerprint": "12ff8b60fe7b6b1e"
+    },
+    "peer_server_url_configured": true
+  },
+  "foreign": {
+    "status": "ok",
+    "server_mode": "foreign",
+    "parity_status": {
+      "status": "available",
+      "comparison_status": "missing",
+      "fresh": false,
+      "latest_comparison": null,
+      "freshness_required_seconds": 900,
+      "snapshot_endpoint": "/api/sync/parity/snapshot",
+      "status_endpoint": "/api/sync/parity/status",
+      "quick_table_count": 14,
+      "deep_table_count": 23
+    },
+    "overtime_reconciliation": {
+      "status": "ok",
+      "server_mode": "foreign",
+      "status_counts": {},
+      "finding_counts": {},
+      "silent_owner_count": 0,
+      "sampled_finding_count": 0
+    },
+    "publication_reconciliation": {
+      "status": "ok",
+      "server_mode": "foreign",
+      "state_counts": {
+        "telegram_channel": {
+          "disabled": 25
+        }
+      },
+      "finding_counts": {
+        "active_offer_without_telegram_state": 0,
+        "failed_telegram_publication": 0,
+        "lagged_telegram_publication": 0,
+        "legacy_telegram_message_without_state": 0,
+        "offer_missing_legacy_message_id": 0,
+        "active_offer_without_webapp_state": 0,
+        "stale_terminal_webapp_state": 0,
+        "unsynced_publication_state_backlog": 0,
+        "unsynced_offer_backlog": 0
+      },
+      "repairable_issues": [
+        "active_offer_without_telegram_state",
+        "active_offer_without_webapp_state",
+        "failed_telegram_publication",
+        "lagged_telegram_publication",
+        "legacy_telegram_message_without_state",
+        "offer_missing_legacy_message_id",
+        "stale_terminal_webapp_state",
+        "telegram_message_identity_mismatch",
+        "telegram_publisher_identity_mismatch",
+        "telegram_publisher_identity_missing"
+      ]
+    },
+    "unsynced_change_log_count": 4,
+    "oldest_unsynced_age_seconds": 15171.137,
+    "runtime_compatibility": {
+      "release_sha": "3c8b3e07",
+      "registry_fingerprint": "12ff8b60fe7b6b1e"
+    },
+    "peer_server_url_configured": true
+  }
+}

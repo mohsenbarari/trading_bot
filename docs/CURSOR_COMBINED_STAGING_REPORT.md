@@ -414,6 +414,50 @@ even though the deployed head is `f9b0c1d2e3a4`. It now resolves heads from the
 checkout and fails when a line has more than one head — which is the actual risk
 a two-feature merge introduces. Two regression tests cover it.
 
+### 12.5 Live sync works, but the foreign staging database carries stale pollution
+
+The foreign sync worker reaches Iran and Iran accepts the transport:
+
+```
+POST https://staging.gold-trade.ir/api/sync/receive "HTTP/1.1 200 OK"
+```
+
+The bot also started and polls Telegram as `@mbmtrading1_bot` with
+`release_sha: 3c8b3e07`, and the offer-publication, trade-delivery, admin-broadcast
+and notification-outbox workers all came up.
+
+However four `users` change-log rows fail to apply on Iran:
+
+| change_log id | table | op | record | created_at | state |
+| --- | --- | --- | --- | --- | --- |
+| 1281 | users | UPDATE | 86 | 2026-08-05 10:20:34Z | quarantined after 5 attempts |
+| 1282 | users | UPDATE | 86 | 2026-08-05 10:21:58Z | retrying |
+| 1283 | users | UPDATE | 86 | 2026-08-05 10:27:19Z | retrying |
+| 1284 | users | UPDATE | 86 | 2026-08-05 11:16:53Z | retrying |
+
+Iran logs `sync.apply_unexpected_error` with `error_type: ProgrammingError`,
+`error_digest: 268ef289d84ee5ed`.
+
+**This is not caused by the merge.** Three independent facts establish that:
+
+1. All four rows were written between 10:20 and 11:16 today, hours before this
+   deploy started (Iran app 14:25, foreign services 14:31).
+2. The `users` table is byte-identical across both peers — 43 columns each,
+   including `offer_overtime_minutes`. There is no schema mismatch.
+3. The payload carries 38 keys and none of them is an overtime or coin field.
+
+What it actually is: user 86 has `home_server = iran` on both peers, so these are
+**foreign-authored updates to an Iran-authoritative user** — the exact
+single-host pollution the staging README warns about when an Iran-mode `app` runs
+on the foreign host. The fail-closed path behaved correctly: the row was
+quarantined and nothing was applied on Iran.
+
+Impact on Stage 16: the remaining three rows will quarantine the same way, so
+`quarantined_change_log_count` will settle at 4 and add noise to sync-health and
+parity evidence. Overtime scenarios themselves write fresh, correctly-authored
+rows and are unaffected. Cleaning the four rows is an operator decision with
+audit implications and was deliberately left untouched.
+
 ### 12.4 Remaining work before `main`
 
 | Item | State |
