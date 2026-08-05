@@ -16,6 +16,7 @@ loaded from the database and there is no way to pass a value in.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -136,7 +137,51 @@ def snapshot_overtime_minutes_for_new_offer(owner: User | object | None) -> int:
     through here too, so it takes the owner's current preference rather than
     inheriting the source offer's snapshot.
     """
-    return read_persisted_overtime_minutes(owner)
+    minutes = read_persisted_overtime_minutes(owner)
+    maybe_emit_stale_preference_snapshot_signal(owner, snapshot_minutes=minutes)
+    return minutes
+
+
+#: Mirrored Iran-home preference older than this on foreign is a stale-risk signal.
+STALE_PREFERENCE_MIRROR_AGE = timedelta(minutes=2)
+
+
+def maybe_emit_stale_preference_snapshot_signal(
+    owner: User | object | None,
+    *,
+    snapshot_minutes: int,
+) -> None:
+    """Emit a diagnostic when foreign may snapshot a stale Iran preference mirror.
+
+    Does not block offer creation (planning challenge 7).
+    """
+    from core.overtime_observability import emit_overtime_signal, log_overtime_event
+    from core.server_routing import SERVER_FOREIGN, SERVER_IRAN, current_server, normalize_server
+
+    if owner is None:
+        return
+    if normalize_server(current_server(), SERVER_FOREIGN) != SERVER_FOREIGN:
+        return
+    owner_home = normalize_server(getattr(owner, "home_server", None), SERVER_FOREIGN)
+    if owner_home != SERVER_IRAN:
+        return
+    updated_at = getattr(owner, "updated_at", None)
+    if not isinstance(updated_at, datetime):
+        return
+    now = datetime.now(timezone.utc)
+    if updated_at.tzinfo is None:
+        updated_at = updated_at.replace(tzinfo=timezone.utc)
+    if now - updated_at < STALE_PREFERENCE_MIRROR_AGE:
+        return
+    emit_overtime_signal(signal="stale_preference_snapshot")
+    log_overtime_event(
+        "Foreign bot/create may have snapshotted a stale Iran overtime preference",
+        event="stale_preference_snapshot",
+        result="detected",
+        offer_owner_user_id=getattr(owner, "id", None),
+        request_home_server=owner_home,
+        count=int(snapshot_minutes),
+    )
 
 
 async def evaluate_overtime_preference_eligibility(

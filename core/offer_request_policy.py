@@ -65,6 +65,10 @@ ADMIN_AUDIT_OFFER_REQUEST_FIELDS = OWNER_AUDIT_OFFER_REQUEST_FIELDS | frozenset(
         "archived",
         "created_at",
         "updated_at",
+        # Stage 14 diagnostics: decision actor and Telegram delivery refs.
+        "decided_by_user_id",
+        "telegram_message_id",
+        "telegram_delivery_job_id",
     }
 )
 
@@ -76,6 +80,21 @@ SENSITIVE_OFFER_REQUEST_FIELDS = frozenset(
         "idempotency_key",
         "internal_failure_code",
         "internal_failure_context",
+        "customer_relation_id",
+        "customer_owner_user_id",
+        "customer_tier_snapshot",
+        "customer_management_name_snapshot",
+        "customer_commission_rate_snapshot",
+        "customer_commission_context",
+    }
+)
+
+#: Owner-facing identity fields that stay hidden until an overtime request
+#: becomes a committed trade. Prevents pre-trade requester exposure on detail.
+OWNER_PRE_TRADE_IDENTITY_FIELDS = frozenset(
+    {
+        "requester_user_id",
+        "actor_user_id",
         "customer_relation_id",
         "customer_owner_user_id",
         "customer_tier_snapshot",
@@ -121,11 +140,22 @@ def allowed_offer_request_fields(visibility: OfferRequestVisibility | str) -> fr
     return ADMIN_AUDIT_OFFER_REQUEST_FIELDS
 
 
+def _is_pre_trade_overtime_payload(payload: Mapping[str, Any]) -> bool:
+    workflow = str(payload.get("workflow_kind") or "").strip().lower()
+    status = str(payload.get("result_status") or "").strip().lower()
+    if workflow != "overtime":
+        return False
+    return status != "completed_trade"
+
+
 def sanitize_offer_request_payload(
     payload: Mapping[str, Any],
     visibility: OfferRequestVisibility | str,
 ) -> dict[str, Any]:
-    allowed = allowed_offer_request_fields(visibility)
+    role = OfferRequestVisibility(str(getattr(visibility, "value", visibility)))
+    allowed = set(allowed_offer_request_fields(role))
+    if role == OfferRequestVisibility.OWNER and _is_pre_trade_overtime_payload(payload):
+        allowed -= OWNER_PRE_TRADE_IDENTITY_FIELDS
     return {key: value for key, value in payload.items() if key in allowed}
 
 

@@ -455,6 +455,18 @@ async def create_overtime_request(
         idempotency_key=key,
     )
     if existing is not None:
+        from core.overtime_observability import log_overtime_event
+
+        log_overtime_event(
+            "Overtime request idempotent replay",
+            event="create",
+            result="replay",
+            request_public_id=getattr(existing, "request_public_id", None),
+            offer_public_id=offer_public_id,
+            offer_owner_user_id=getattr(existing, "offer_owner_user_id", None),
+            request_home_server=home,
+            status=_status_value(getattr(existing, "result_status", None)),
+        )
         return OvertimeRequestResult(ledger=existing, duplicate_replay=True)
 
     intake = _classify_intake_for_offer(
@@ -568,6 +580,18 @@ async def create_overtime_request(
         normal_lifetime_minutes=command.normal_lifetime_minutes,
         now=current,
         flush=flush,
+    )
+    from core.overtime_observability import log_overtime_event
+
+    log_overtime_event(
+        "Overtime request created",
+        event="create",
+        result="queued" if promoted is not ledger else "presented",
+        request_public_id=getattr(ledger, "request_public_id", None),
+        offer_public_id=offer_public_id,
+        offer_owner_user_id=owner_user_id,
+        request_home_server=home,
+        status=_status_value(getattr(ledger, "result_status", None)),
     )
     return OvertimeRequestResult(
         ledger=ledger,
@@ -815,6 +839,19 @@ async def cancel_by_requester(
     )
     if flush:
         await db.flush()
+    from core.overtime_observability import log_overtime_event
+
+    log_overtime_event(
+        "Overtime request cancelled by requester",
+        event="cancel",
+        result="cancelled",
+        request_public_id=getattr(ledger, "request_public_id", None),
+        offer_public_id=getattr(ledger, "offer_public_id", None),
+        offer_owner_user_id=owner_id,
+        request_home_server=home,
+        status=OfferRequestStatus.OVERTIME_CANCELLED_BY_REQUESTER.value,
+        terminal_reason="requester_cancelled",
+    )
     if promote_next and owner_id is not None and home and normal_lifetime_minutes is not None:
         await promote_next_for_owner(
             db,
@@ -850,6 +887,19 @@ async def reject_by_owner(
     )
     if flush:
         await db.flush()
+    from core.overtime_observability import log_overtime_event
+
+    log_overtime_event(
+        "Overtime request rejected by owner",
+        event="decide",
+        result="rejected",
+        request_public_id=getattr(ledger, "request_public_id", None),
+        offer_public_id=getattr(ledger, "offer_public_id", None),
+        offer_owner_user_id=owner_id,
+        request_home_server=home,
+        status=OfferRequestStatus.OVERTIME_REJECTED_BY_OWNER.value,
+        terminal_reason="owner_rejected",
+    )
     if promote_next and owner_id is not None and home and normal_lifetime_minutes is not None:
         await promote_next_for_owner(
             db,
@@ -900,6 +950,19 @@ async def expire_decision(
     )
     if flush:
         await db.flush()
+    from core.overtime_observability import log_overtime_event
+
+    log_overtime_event(
+        "Overtime presented decision expired",
+        event="decision_timeout",
+        result="timeout",
+        request_public_id=getattr(ledger, "request_public_id", None),
+        offer_public_id=getattr(ledger, "offer_public_id", None),
+        offer_owner_user_id=owner_id,
+        request_home_server=home,
+        status=OfferRequestStatus.OVERTIME_DECISION_EXPIRED.value,
+        terminal_reason="decision_timeout",
+    )
     if promote_next and owner_id is not None and home and normal_lifetime_minutes is not None:
         await promote_next_for_owner(
             db,
@@ -1009,6 +1072,19 @@ async def invalidate_request(
     )
     if flush:
         await db.flush()
+    from core.overtime_observability import log_overtime_event
+
+    log_overtime_event(
+        "Overtime request invalidated",
+        event="invalidate",
+        result="invalidated",
+        request_public_id=getattr(ledger, "request_public_id", None),
+        offer_public_id=getattr(ledger, "offer_public_id", None),
+        offer_owner_user_id=getattr(ledger, "offer_owner_user_id", None),
+        request_home_server=getattr(ledger, "request_home_server", None),
+        status=OfferRequestStatus.OVERTIME_INVALIDATED.value,
+        terminal_reason=reason,
+    )
     return ledger
 
 

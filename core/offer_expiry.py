@@ -106,6 +106,36 @@ async def remove_channel_buttons(channel_message_id: int) -> None:
         logger.debug(f"Failed to remove channel buttons for msg {channel_message_id}: {e}")
 
 
+async def _sweep_overdue_overtime_decisions(session, *, now, expiry_minutes: int) -> None:
+    try:
+        from core.services.offer_overtime_reconciliation_service import (
+            expire_overdue_presented_decisions,
+        )
+
+        swept = await expire_overdue_presented_decisions(
+            session,
+            now=now,
+            normal_lifetime_minutes=expiry_minutes,
+            flush=True,
+        )
+        if swept:
+            await session.commit()
+            logger.info(
+                "Expired overdue overtime presented decisions",
+                extra={
+                    "event": "offer_expiry.overtime_decision_sweep",
+                    "repaired": swept,
+                },
+            )
+    except Exception as exc:
+        await session.rollback()
+        logger.warning(
+            "Overtime decision sweeper failed during offer expiry cycle: %s",
+            exc,
+            extra={"event": "offer_expiry.overtime_decision_sweep_error"},
+        )
+
+
 async def expire_stale_offers() -> int:
     """
     Find and expire all offers that have exceeded their final lifetime.
@@ -140,6 +170,11 @@ async def expire_stale_offers() -> int:
                     now=now,
                     normal_lifetime_minutes=expiry_minutes,
                 )
+                await _sweep_overdue_overtime_decisions(
+                    session,
+                    now=now,
+                    expiry_minutes=expiry_minutes,
+                )
                 return 0
 
             try:
@@ -170,6 +205,11 @@ async def expire_stale_offers() -> int:
                 session,
                 now=now,
                 normal_lifetime_minutes=expiry_minutes,
+            )
+            await _sweep_overdue_overtime_decisions(
+                session,
+                now=now,
+                expiry_minutes=expiry_minutes,
             )
             return 0
 
@@ -205,6 +245,11 @@ async def expire_stale_offers() -> int:
             session,
             now=now,
             normal_lifetime_minutes=expiry_minutes,
+        )
+        await _sweep_overdue_overtime_decisions(
+            session,
+            now=now,
+            expiry_minutes=expiry_minutes,
         )
     
     return count

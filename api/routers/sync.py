@@ -6,6 +6,7 @@ from core.config import settings
 from core.audit_logger import audit_log
 from core.metrics import (
     record_offer_publication_health,
+    record_overtime_reconciliation_health,
     record_sync_conflict,
     record_sync_health,
     record_sync_parity_summary,
@@ -58,6 +59,7 @@ from core.registration_identity import normalize_account_name, normalize_mobile_
 from core.services.cross_server_recovery_service import active_publication_is_gated, load_active_publication_gate
 from core.services.market_transition_service import reconcile_market_runtime_side_effects_for_current_state
 from core.services.offer_publication_reconciliation_service import publication_observability_summary
+from core.services.offer_overtime_reconciliation_service import overtime_observability_summary
 from core.services.telegram_notification_outbox_service import (
     TelegramNotificationRecipient,
     enqueue_account_deletion_telegram_notification_once,
@@ -4641,6 +4643,33 @@ async def get_sync_health(
                 **_summarize_exception(exc),
             },
         )
+    try:
+        overtime_reconciliation = await overtime_observability_summary(
+            db,
+            server_mode=settings.server_mode,
+        )
+        record_overtime_reconciliation_health(
+            server_mode=settings.server_mode,
+            status_counts=overtime_reconciliation.get("status_counts"),
+            finding_counts=overtime_reconciliation.get("finding_counts"),
+            silent_owner_count=int(
+                overtime_reconciliation.get("silent_owner_count") or 0
+            ),
+        )
+    except Exception as exc:
+        overtime_reconciliation = {
+            "status": "error",
+            "error_type": type(exc).__name__,
+        }
+        logger.warning(
+            "Could not collect overtime reconciliation health",
+            extra={
+                "event": "sync.health.overtime_reconciliation_error",
+                "log_class": "integration",
+                "server_mode": settings.server_mode,
+                **_summarize_exception(exc),
+            },
+        )
     if redis_ok:
         registration_jobs = await dual_platform_registration_health(
             redis_client,
@@ -4668,6 +4697,7 @@ async def get_sync_health(
         },
         "active_publication_gate": active_publication_gate,
         "publication_reconciliation": publication_reconciliation,
+        "overtime_reconciliation": overtime_reconciliation,
         "parity_status": _parity_status_payload(latest_parity_summary),
         "registration_sync": registration_sync_capabilities(settings),
         "registration_jobs": registration_jobs,
@@ -4697,6 +4727,9 @@ async def get_sync_health(
             "active_publication_gate_enabled": active_publication_gate.get("enabled"),
             "publication_reconciliation_status": publication_reconciliation.get("status"),
             "publication_reconciliation_findings": publication_reconciliation.get("finding_counts"),
+            "overtime_reconciliation_status": overtime_reconciliation.get("status"),
+            "overtime_reconciliation_findings": overtime_reconciliation.get("finding_counts"),
+            "overtime_silent_owner_count": overtime_reconciliation.get("silent_owner_count"),
             **registration_health_log_fields(registration_jobs),
         },
     )

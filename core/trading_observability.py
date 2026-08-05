@@ -21,6 +21,8 @@ _ALLOWED_ACTIONS = {
     "trade_internal_execute",
     "trade_commit",
     "trading_side_effect",
+    # Overtime admission on the trade path (create returns pending, not error).
+    "overtime_request",
 }
 
 _ALLOWED_RESULTS = {
@@ -34,6 +36,7 @@ _ALLOWED_RESULTS = {
     "noop",
     "slow",
     "timing",
+    "overtime_pending",
 }
 
 _ALLOWED_SIDE_EFFECTS = {
