@@ -25,6 +25,8 @@ from .public_telegram.transport import PublicTelegramCredentials
 
 PRIVATE_GOLD_TELEGRAM_TRANSPORT_VERSION = "private-gold-telegram-v1"
 _MAXIMUM_DAYS = 3
+_DEFAULT_MAXIMUM_MESSAGES_PER_STREAM = 500
+_MAXIMUM_MESSAGES_PER_STREAM = 1_000
 _SOURCES = (("OFFER", "PRIVATE_GOLD_EVENT_OFFER"), ("TRADE", "PRIVATE_GOLD_EVENT_TRADE"))
 
 
@@ -85,6 +87,7 @@ async def collect_private_gold_event_telegram(
     *,
     days: int,
     resume_from_checkpoint: bool,
+    maximum_messages_per_stream: int = _DEFAULT_MAXIMUM_MESSAGES_PER_STREAM,
     as_of: datetime | None = None,
 ) -> dict[str, int]:
     """Read two explicitly configured private channels exactly once.
@@ -95,6 +98,8 @@ async def collect_private_gold_event_telegram(
 
     if days <= 0 or days > _MAXIMUM_DAYS:
         raise ValueError("private_gold_telegram_days_out_of_range")
+    if not 0 < maximum_messages_per_stream <= _MAXIMUM_MESSAGES_PER_STREAM:
+        raise ValueError("private_gold_telegram_maximum_messages_out_of_range")
     settings.validate_paths(repository_root=Path(__file__).resolve().parents[3])
     try:
         from telethon import TelegramClient
@@ -141,17 +146,30 @@ async def collect_private_gold_event_telegram(
             channel_id = settings.channels.offer_channel_id if stream == "OFFER" else settings.channels.trade_channel_id
             entity = await client.get_entity(channel_id)
             minimum_id = read_source_checkpoint(market, checkpoint_code) if resume_from_checkpoint else None
+            # A brand-new live collector intentionally starts at the newest
+            # message rather than replaying an unbounded channel history.
+            # Historical ingestion is an explicit, separately reviewed job.
+            # ``id - 1`` lets this run retain the current newest event while
+            # creating a durable watermark for later timer runs.
+            if minimum_id is None and resume_from_checkpoint:
+                latest = [message async for message in client.iter_messages(entity, limit=1)]
+                minimum_id = max(0, int(latest[0].id) - 1) if latest else 0
             batch = []
-            async for message in client.iter_messages(entity, min_id=minimum_id or 0):
+            async for message in client.iter_messages(
+                entity,
+                min_id=minimum_id or 0,
+                reverse=True,
+                limit=maximum_messages_per_stream,
+            ):
                 date = getattr(message, "date", None)
                 if not isinstance(date, datetime):
                     continue
                 if date.tzinfo is None:
                     date = date.replace(tzinfo=timezone.utc)
                 if date.astimezone(timezone.utc) < cutoff:
-                    break
+                    continue
                 batch.append(message)
-            for message in reversed(batch):
+            for message in batch:
                 payload = str(getattr(message, "message", None) or "")
                 report = stage_private_gold_payload(staging, PrivateGoldPayloadEnvelope(payload, receipt_time, stream), staged_at_utc=receipt_time)
                 counters["messages"] += 1
