@@ -2171,7 +2171,7 @@ bundle قبلی قابل انتخاب‌اند و Collectorها همچنان ف�
     دیتابیس staging، publisher Snapshot محلی و permission مسیر مستقل آزموده
     شوند. روشن‌کردن auto-selection نیازمند threshold cell مصوب owner است.
 
-### P7-D — preflight عملیاتی Snapshot در staging — 2026-08-05 — PARTIAL (selection remains inactive)
+### P7-D — preflight عملیاتی Snapshot در staging — 2026-08-05 — COMPLETE (all inference flags remain inactive)
 
 - Scope انجام‌شده:
   - command مستندشدهٔ `publish_coin_intelligence_snapshot.py` در اجرای مستقیم
@@ -2195,16 +2195,24 @@ bundle قبلی قابل انتخاب‌اند و Collectorها همچنان ف�
     append-only و check context مورد انتظار وجود دارند.
   - یک مشاهدهٔ بدون user و بدون Offer با Snapshot واقعی تا catalog/audit رفت
     و ایمن `ABSTAIN` کرد؛ علت `CATALOG_CANONICAL_NAME_UNAVAILABLE` بود. این
-    رکورد آزمایشی هیچ قیمت، متن، شناسهٔ کاربر یا offer-id ندارد.
+    رکورد آزمایشی هیچ متن، شناسهٔ کاربر یا offer-id ندارد.
+  - پیش از sync catalog نیز یک backup مستقل و معتبر از staging با permission
+    `0600` گرفته شد. سپس فقط شش ردیف canonical موجودِ `commodities` با
+    شناسه‌های `2..7` و همان name از catalog production به staging منتقل شدند؛
+    این کار تعریف کالای جدید، انتقال alias یا انتقال دادهٔ کاربر نبود و sequence
+    staging نیز روی آخرین شناسه هم‌راستا شد.
+  - با Snapshot تازه، یک observation مصنوعیِ `INTERNAL` و بدون Offer برای
+    `BAHAR/CASH` اجرا شد. audit خام با `AUTO_SELECT` و یک candidate canonical
+    ثبت شد، اما projection قابل‌نمایش `CONFIRM` با علت
+    `AUTO_SELECTION_REQUIRES_CONFIRMATION` بود. شمار Offerهای staging پیش و پس
+    از آزمون بدون تغییر ماند؛ هیچ container کاربرمحور و هیچ flagی فعال نشد.
 - موارد عمداً انجام‌نشده / دلیل:
-  - preview/selection فعال نشد. catalog staging فقط `امام` دارد، اما Snapshot
-    فعلی فقط برای `بهار`، `نیم تاریخ پایین` و `ربع تاریخ پایین` نرخ estimated
-    دارد؛ در نتیجه هیچ candidate canonical مشترک برای آزمون CONFIRM وجود
-    ندارد. این fail-closed behavior درست است.
+  - preview/selection/auto-selection همچنان فعال نشده‌اند. آزمون فقط contract
+    محلیِ Snapshot، catalog resolution، audit append-only و projection
+    confirmation-only را پوشش می‌دهد؛ هنوز درخواست HTTP/Bot کاربر اجرا نشده
+    است.
   - هیچ container user-facing، flag inference یا DB production لمس نشد.
 - گیت مرحلهٔ بعد:
-  - catalog staging باید از catalog محصول هم‌نسخه، با همان ID/nameهای
-    canonical، sync شود؛ این به معنای تعریف کالای جدید نیست و پیش از copy
-    آن نیاز به تأیید owner دارد. پس از آن آزمون CONFIRM و preview محدود ممکن
-    است؛ روشن‌کردن auto-selection همچنان نیازمند threshold cell مصوب owner
-    است.
+  - فقط با تأیید owner، preview و سپس selection محدود در staging می‌توانند
+    روی surface کاربرمحور آزموده شوند. روشن‌کردن auto-selection همچنان نیازمند
+    threshold cell مصوب owner است.
