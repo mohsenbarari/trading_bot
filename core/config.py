@@ -6,6 +6,7 @@
 تمام مقادیر از فایل .env خوانده می‌شوند.
 """
 import math
+import os
 
 from pydantic import SecretStr, model_validator
 from pydantic_settings import BaseSettings
@@ -279,6 +280,9 @@ class Settings(BaseSettings):
         return self
     
     class Config:
-        env_file = ".env"
+        # Defaults to the deployment file. Tests point this at ``.env.test`` so
+        # they read code defaults instead of whatever a machine happens to have
+        # configured; see ``tests/__init__.py``.
+        env_file = os.getenv("APP_ENV_FILE", ".env")
 
 settings = Settings()
