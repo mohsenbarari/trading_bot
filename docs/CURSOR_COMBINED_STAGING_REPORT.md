@@ -637,14 +637,35 @@ the channel overtime marker stays visible.
 
 Evidence: `tmp/combined-staging-evidence/stage16-driver-OT-FINAL-TAIL.json`.
 
+### 12.15 Cross-server forward pending (`OT-REQ-CROSS-FORWARD`)
+
+Two-peer path: Iran seeds an Iran-home overtime offer; just before the foreign
+edge run, Iran re-pins the offer into overtime. On foreign:
+
+1. Forced home-forward timeout (`504`) returns inventory M18
+   (`⏳ در حال بررسی درخواست...`) with `workflow=forward_pending`, retains the
+   Redis pending marker, queues reconcile, and creates **no** local ledger row.
+2. Live forward reaches Iran and returns overtime intake (`202` /
+   `overtime_presented`) — not a false trade-complete ack — still without a
+   foreign-local ledger.
+
+| Assertion | Result |
+| --- | --- |
+| M18 copy + `forward_pending` on ambiguous timeout | yes |
+| Redis pending retained then cleared by driver | yes |
+| No local foreign ledger for either idempotency key | yes |
+| Live forward workflow `overtime`, no `trade_number` | yes |
+
+Evidence: `tmp/combined-staging-evidence/stage16-driver-OT-REQ-CROSS-FORWARD.json`.
+
 ### 12.4 Remaining work before `main`
 
 | Item | State |
 | --- | --- |
-| Mutating Stage 16 scenario drivers | 10 of 15 wired and passing live; `execute` → `execute_partial` once transport env is set |
+| Mutating Stage 16 scenario drivers | 11 of 15 wired and passing live; `execute` → `execute_partial` once transport env is set |
 | Overtime preferences | staging users remain at `0` after driver cleanup |
 | Coin inference flags | off by default, untouched |
 | Arvan CDN origin for `staging.gold-trade.ir` | broken, needs panel fix |
 | Sync parity comparison | `comparison_status: missing` — no parity run yet on this pair |
 | coin-price vs coin-commodity comparison | still owed per the handoff prompt |
-| Next drivers | `OT-REQ-CROSS-FORWARD`, channel/TG/UI axes |
+| Next drivers | channel / Telegram / UI reconnect axes |
