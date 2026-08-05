@@ -132,8 +132,12 @@ EXPECTED_RUNTIME_INVENTORY_COUNTS = {
     "non_message_control": 2,
     "queue_execution": 1,
 }
+# Re-reviewed for the combined overtime + coin-intelligence line. The 92 reviewed
+# callsites are unchanged in path, scope, callee, kind, and disposition; only eight
+# line numbers moved because coin-intelligence inserted code above them in
+# bot/handlers/trade_create.py and api/routers/offers.py.
 EXPECTED_RUNTIME_INVENTORY_SHA256 = (
-    "076466c285ec108aecda73af177b70f988a41132899c73eb289ad9cddceb36a2"
+    "1b5f85663c7cc57b740f0d5cf668d8b6052fb8958623744492da1a8a4b4b3945"
 )
 
 
