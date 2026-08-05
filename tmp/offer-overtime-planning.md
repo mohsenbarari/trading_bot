@@ -10,7 +10,7 @@
 
 ## Document Status
 
-- Phase: implementation started. Stages 0–2 are complete in code; the Stage 1 migration still needs a real-database run before merge/deploy. No open questions remain.
+- Phase: implementation started. Stages 0–3 are complete in code; the Stage 1 migration still needs a real-database run before merge/deploy. No open questions remain.
 - Implementation status: in progress on `candidate/offer-overtime`. Each stage ends with its own commit and completion notes, per the delivery policy above.
 - Rule: implementation was explicitly approved. Deployment and any runtime or production database action remain out of scope until the rollout stages are separately authorized.
 - Decision policy: only confirmed decisions are recorded as final. Unresolved items remain explicitly open.
@@ -773,6 +773,22 @@ The next gate is not a question but an approval: the roadmap below may begin onl
 **Tests:** zero/one/ten-minute snapshots; normal and final boundary triplets; trusted forwarded receipt versus delayed home arrival, including a receipt validly inside overtime that arrives late and must reach approval rather than rejection; removal of the transit-grace effect on classification; worker and request path agreeing at the exact deadline; dynamic normal setting including a change landing inside the settings cache window; final-tail behavior; no revival of an already-expired offer; worker timing and clock-skew guards.
 
 **Exit criteria:** one server-side answer drives all lifecycle decisions, with no active behavior change for snapshot `0`.
+
+#### Stage 3 completion notes
+
+**Status:** complete in code on `candidate/offer-overtime` (stage-ending commit recorded with these notes).
+
+**Scope delivered.** New `core/offer_lifecycle.py` is the single projection for normal deadline, final deadline, display phase, public-interaction flags, terminal-expiry eligibility, and request-intake classification. Normal lifetime remains the dynamic admin setting; overtime is only the offer's immutable snapshot. Request intake uses the trusted first-server receipt alone: `< normal` automatic, exact normal rejected, strict overtime window approval, `>= final` rejected. Transit grace was removed from phase classification and retained only as a bounded post-worker finalization window for receipts that were already automatic. The expiry worker, remote channel presentation, next-delay scheduler, trade guard, offer REST/public responses, create/sync realtime payloads, web-push live filter, Telegram publication freshness (−5s before final), market-history/my-offers stale-active SQL, and the WebApp timer denominator (`timer_total_seconds`) all consume that projection. Final-tail deferral is wired against occupying overtime request statuses so Stage 4 can create those rows without a second worker change. Until Stage 5, approval-phase receipts are refused on the direct trade path rather than executed automatically.
+
+**Snapshot `0`.** Display duration, worker terminal time, and publication margin match the previous normal-only lifetime. The intentional boundary tightening from the confirmed decisions remains: exact normal rejects automatic trade, and late processing no longer keeps a post-deadline receipt inside automatic via transit grace.
+
+**Affected components:** `core/offer_lifecycle.py`, `core/offer_expiry.py`, `api/routers/trades.py`, `api/routers/offers.py`, `api/routers/sync.py`, `core/web_push.py`, `core/services/telegram_offer_queue_service.py`, `frontend/src/components/OffersList.vue`, and tests `tests/test_offer_lifecycle.py` plus updates to expiry/trade/web-push/offers/queue suites.
+
+**Tests and results.** Targeted suites green via `make test-unit` covering lifecycle boundaries, worker/remote presentation, trade intake, web push, offers helpers, and Telegram publication freshness.
+
+**Deviations and known gaps.** Approval-phase routing into the durable overtime state machine remains Stage 5. Final-tail deferral is ready but inert until Stage 4 writes occupying request rows. Rich overtime bar restart visuals remain Stage 11/12; this stage only supplies authoritative timestamps and `timer_total_seconds`.
+
+**Next stage prerequisites.** Stage 4 may begin. It must create overtime requests only when intake classification is `approval`, and must populate the occupying statuses the worker already respects for final-tail deferral.
 
 ### Stage 4 — Durable Overtime Request State Machine
 

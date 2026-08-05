@@ -954,22 +954,26 @@ class TradesRouterHelperTests(unittest.IsolatedAsyncioTestCase):
         with patch("core.trading_settings.get_trading_settings_async", AsyncMock(return_value=SimpleNamespace(offer_expiry_minutes=0))):
             self.assertFalse(await trades._is_offer_expired_for_trade(SimpleNamespace(created_at=naive), None))
 
-        with patch("core.trading_settings.get_trading_settings_async", AsyncMock(return_value=SimpleNamespace(offer_expiry_minutes=10))), patch.object(
-            trades.settings, "trade_forward_grace_seconds", 120
-        ), patch("api.routers.trades.datetime") as datetime_mock:
-            datetime_mock.utcnow.side_effect = [datetime(2025, 1, 1, 12, 20), datetime(2025, 1, 1, 12, 20)]
+        # Receipt alone classifies the phase. A pre-deadline receipt stays
+        # automatic even when home processing is late; transit grace no longer
+        # participates in this helper.
+        with patch("core.trading_settings.get_trading_settings_async", AsyncMock(return_value=SimpleNamespace(offer_expiry_minutes=10))):
             expired = await trades._is_offer_expired_for_trade(
-                SimpleNamespace(created_at=datetime(2025, 1, 1, 12, 0)),
+                SimpleNamespace(created_at=datetime(2025, 1, 1, 12, 0), overtime_minutes_snapshot=0),
                 edge_received_at=datetime(2025, 1, 1, 12, 9),
+            )
+        self.assertFalse(expired)
+
+        with patch("core.trading_settings.get_trading_settings_async", AsyncMock(return_value=SimpleNamespace(offer_expiry_minutes=10))):
+            expired = await trades._is_offer_expired_for_trade(
+                SimpleNamespace(created_at=datetime(2025, 1, 1, 12, 0), overtime_minutes_snapshot=0),
+                edge_received_at=datetime(2025, 1, 1, 12, 10),
             )
         self.assertTrue(expired)
 
-        with patch("core.trading_settings.get_trading_settings_async", AsyncMock(return_value=SimpleNamespace(offer_expiry_minutes=10))), patch.object(
-            trades.settings, "trade_forward_grace_seconds", 120
-        ), patch("api.routers.trades.datetime") as datetime_mock:
-            datetime_mock.utcnow.side_effect = [datetime(2025, 1, 1, 12, 10, 30), datetime(2025, 1, 1, 12, 10, 30)]
+        with patch("core.trading_settings.get_trading_settings_async", AsyncMock(return_value=SimpleNamespace(offer_expiry_minutes=10))):
             expired = await trades._is_offer_expired_for_trade(
-                SimpleNamespace(created_at=datetime(2025, 1, 1, 12, 0)),
+                SimpleNamespace(created_at=datetime(2025, 1, 1, 12, 0), overtime_minutes_snapshot=0),
                 edge_received_at=datetime(2025, 1, 1, 12, 9, 45),
             )
         self.assertFalse(expired)

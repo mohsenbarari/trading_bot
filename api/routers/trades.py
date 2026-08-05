@@ -2772,24 +2772,51 @@ async def _flush_trade_request_state(db: AsyncSession) -> None:
         await flush()
 
 
-async def _is_offer_expired_for_trade(offer: Offer, edge_received_at: Optional[datetime]) -> bool:
+async def _classify_trade_request_intake(
+    offer: Offer,
+    edge_received_at: Optional[datetime],
+):
+    """Classify intake from the trusted receipt time via the shared projection."""
+    from core.offer_lifecycle import (
+        OfferRequestIntakePhase,
+        classify_request_intake_phase,
+        compute_lifecycle_deadlines,
+        read_overtime_minutes_snapshot,
+    )
     from core.trading_settings import get_trading_settings_async
 
     ts = await get_trading_settings_async()
-    if ts.offer_expiry_minutes <= 0 or not offer.created_at:
-        return False
+    normal_minutes = int(getattr(ts, "offer_expiry_minutes", 0) or 0)
+    if normal_minutes <= 0 or not getattr(offer, "created_at", None):
+        return OfferRequestIntakePhase.AUTOMATIC, None
 
-    created_at = _normalize_naive_utc(offer.created_at) or datetime.utcnow()
-    expiry_at = created_at + timedelta(minutes=ts.offer_expiry_minutes)
-    now = datetime.utcnow()
-    edge_at = _normalize_naive_utc(edge_received_at)
+    overtime = read_overtime_minutes_snapshot(offer)
+    normal_deadline, final_deadline = compute_lifecycle_deadlines(
+        offer.created_at,
+        normal_lifetime_minutes=normal_minutes,
+        overtime_minutes_snapshot=overtime,
+    )
+    receipt = _normalize_naive_utc(edge_received_at) or datetime.utcnow()
+    phase = classify_request_intake_phase(
+        receipt_at=receipt,
+        normal_deadline_at=normal_deadline,
+        final_deadline_at=final_deadline,
+        overtime_minutes_snapshot=overtime,
+    )
+    return phase, receipt
 
-    if edge_at and edge_at <= expiry_at:
-        transit_seconds = max(0.0, (now - edge_at).total_seconds())
-        if transit_seconds <= settings.trade_forward_grace_seconds:
-            return False
 
-    return now > expiry_at
+async def _is_offer_expired_for_trade(offer: Offer, edge_received_at: Optional[datetime]) -> bool:
+    """True when the request cannot take the direct automatic trade path.
+
+    Phase comes only from the trusted receipt. Transit grace no longer keeps a
+    late receipt inside automatic. Until Stage 5 routes APPROVAL into the
+    overtime state machine, approval-phase receipts are refused here too.
+    """
+    from core.offer_lifecycle import OfferRequestIntakePhase
+
+    phase, _receipt = await _classify_trade_request_intake(offer, edge_received_at)
+    return phase != OfferRequestIntakePhase.AUTOMATIC
 
 
 def _is_time_limit_expired_offer(offer: Offer | object) -> bool:
@@ -2799,6 +2826,20 @@ def _is_time_limit_expired_offer(offer: Offer | object) -> bool:
         getattr(offer, "status", None) == OfferStatus.EXPIRED
         and expire_reason_value == OfferExpiryReason.TIME_LIMIT
     )
+
+
+def _within_in_flight_finalization_grace(
+    *,
+    edge_received_at: Optional[datetime],
+    now: Optional[datetime] = None,
+) -> bool:
+    """Bound the post-worker finalization window; does not affect phase."""
+    edge_at = _normalize_naive_utc(edge_received_at)
+    if edge_at is None:
+        return False
+    current = _normalize_naive_utc(now) or datetime.utcnow()
+    transit_seconds = max(0.0, (current - edge_at).total_seconds())
+    return transit_seconds <= float(settings.trade_forward_grace_seconds)
 
 
 async def _forward_trade_if_remote_home(
@@ -3037,10 +3078,12 @@ async def _execute_trade_authoritatively(
     
     expired_for_trade = await _is_offer_expired_for_trade(offer, edge_received_at)
 
+    # Receipt was validly inside automatic; worker may already have flipped the
+    # row. Grace only bounds that finalization race — it never changes phase.
     allow_in_flight_after_time_limit_expiry = (
         _is_time_limit_expired_offer(offer)
-        and edge_received_at is not None
         and not expired_for_trade
+        and _within_in_flight_finalization_grace(edge_received_at=edge_received_at)
     )
     if (offer.status != OfferStatus.ACTIVE and not allow_in_flight_after_time_limit_expiry) or expired_for_trade:
         await _commit_rejected_offer_request_ledger(

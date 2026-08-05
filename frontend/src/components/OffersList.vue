@@ -121,11 +121,17 @@ onUnmounted(() => {
 })
 
 // --- Timer percent ---
+function timerTotalSeconds(offer: any): number {
+  const authoritative = Number(offer?.timer_total_seconds)
+  if (Number.isFinite(authoritative) && authoritative > 0) return authoritative
+  return (props.expiryMinutes || 2) * 60
+}
+
 function getTimerPercent(offer: any): number {
   if (!offer.expires_at_ts) return 100
   const remaining = offer.expires_at_ts - now.value
   if (remaining <= 0) return 0
-  const total = (props.expiryMinutes || 2) * 60
+  const total = timerTotalSeconds(offer)
   return Math.min(Math.max((remaining / total) * 100, 0), 100)
 }
 
@@ -134,7 +140,7 @@ function cardTimerStyle(offer: any): Record<string, string> {
   if (!offer.expires_at_ts) return {}
   const remainingSec = offer.expires_at_ts - now.value
   if (remainingSec <= 0) return { '--t-pct': '0' }
-  const total = (props.expiryMinutes || 2) * 60
+  const total = timerTotalSeconds(offer)
   const pct = Math.min(Math.max((remainingSec / total) * 100, 0), 100)
   return {
     '--t-pct': String(pct)

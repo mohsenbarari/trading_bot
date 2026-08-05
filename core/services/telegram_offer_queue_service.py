@@ -268,16 +268,23 @@ def offer_publication_freshness_deadline(
     *,
     offer_expiry_minutes: int,
 ) -> datetime:
+    from core.offer_lifecycle import publication_freshness_deadline_at, read_overtime_minutes_snapshot
+
     created_at = getattr(offer, "created_at", None)
     if not isinstance(created_at, datetime):
         raise TelegramOfferQueueError("telegram_offer_queue_created_at_invalid")
     expiry_minutes = int(offer_expiry_minutes)
     if expiry_minutes <= 0:
         raise TelegramOfferQueueError("telegram_offer_queue_expiry_invalid")
-    return _normalized_time(created_at) + timedelta(
-        minutes=expiry_minutes,
-        seconds=-OFFER_PUBLICATION_DEADLINE_SAFETY_SECONDS,
-    )
+    try:
+        return publication_freshness_deadline_at(
+            created_at,
+            normal_lifetime_minutes=expiry_minutes,
+            overtime_minutes_snapshot=read_overtime_minutes_snapshot(offer),
+            safety_seconds=OFFER_PUBLICATION_DEADLINE_SAFETY_SECONDS,
+        )
+    except ValueError as exc:
+        raise TelegramOfferQueueError("telegram_offer_queue_expiry_invalid") from exc
 
 
 async def _supersede_obsolete_offer_jobs(

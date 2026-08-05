@@ -384,15 +384,28 @@ async def _publish_synced_offer_created_realtime_after_sync(db: AsyncSession, of
         if status_value != OfferStatus.ACTIVE.value:
             continue
 
-        expires_at_ts = None
+        lifecycle_fields = {}
         if trading_settings is not None:
             try:
-                expires_at_ts = int(
-                    offer.created_at.timestamp()
-                    + int(getattr(trading_settings, "offer_expiry_minutes", 0) or 0) * 60
+                from core.offer_lifecycle import project_offer_lifecycle
+
+                projection = project_offer_lifecycle(
+                    offer,
+                    normal_lifetime_minutes=int(
+                        getattr(trading_settings, "offer_expiry_minutes", 0) or 0
+                    ),
                 )
+                lifecycle_fields = {
+                    "expires_at_ts": projection.expires_at_ts,
+                    "normal_deadline_ts": projection.normal_deadline_ts,
+                    "final_deadline_ts": projection.final_deadline_ts,
+                    "lifecycle_phase": projection.phase.value,
+                    "overtime_minutes_snapshot": projection.overtime_minutes_snapshot,
+                    "timer_total_seconds": projection.timer_total_seconds,
+                    "accepts_new_public_interaction": projection.accepts_new_public_interaction,
+                }
             except Exception:
-                expires_at_ts = None
+                lifecycle_fields = {"expires_at_ts": None}
 
         offer_public_id = ensure_offer_public_id(offer)
         commodity = getattr(offer, "commodity", None)
@@ -419,7 +432,7 @@ async def _publish_synced_offer_created_realtime_after_sync(db: AsyncSession, of
             "is_wholesale": getattr(offer, "is_wholesale", True),
             "lot_sizes": getattr(offer, "lot_sizes", None),
             "original_lot_sizes": getattr(offer, "original_lot_sizes", None),
-            "expires_at_ts": expires_at_ts,
+            **lifecycle_fields,
         }
 
         try:

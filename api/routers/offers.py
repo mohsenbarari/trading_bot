@@ -7,7 +7,7 @@ import binascii
 import json
 import logging
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, List, Optional
 from uuid import UUID
 
@@ -334,6 +334,12 @@ class OfferResponse(BaseModel):
     customer_tier: Optional[str] = None
     created_at: str
     expires_at_ts: Optional[int] = None
+    normal_deadline_ts: Optional[int] = None
+    final_deadline_ts: Optional[int] = None
+    lifecycle_phase: Optional[str] = None
+    overtime_minutes_snapshot: int = 0
+    timer_total_seconds: Optional[int] = None
+    accepts_new_public_interaction: Optional[bool] = None
 
     class Config:
         from_attributes = True
@@ -372,6 +378,11 @@ class PublicOfferResponse(BaseModel):
     notes: Optional[str]
     created_at: str
     expires_at_ts: Optional[int] = None
+    normal_deadline_ts: Optional[int] = None
+    final_deadline_ts: Optional[int] = None
+    lifecycle_phase: Optional[str] = None
+    overtime_minutes_snapshot: int = 0
+    timer_total_seconds: Optional[int] = None
     safe_public_state_label: str
     interaction_available: bool
 
@@ -475,20 +486,13 @@ def offer_to_response(
             or ""
         )
 
-    expires_at_ts = None
-    logger.debug("offer_expiry_trace id=%s status=%s", offer.id, offer.status)
-    if offer.status == OfferStatus.ACTIVE:
-        try:
-            ts = start_settings or get_trading_settings()
-            created_ts = offer.created_at.timestamp()
-            expiry_seconds = ts.offer_expiry_minutes * 60
-            expires_at_ts = int(created_ts + expiry_seconds)
-            logger.debug("offer_expiry_result id=%s expires_at_ts=%s", offer.id, expires_at_ts)
-        except Exception as exc:
-            logger.error(
-                "offer_expiry_projection_failed",
-                extra={"offer_id": getattr(offer, "id", None), "error_class": type(exc).__name__},
-            )
+    lifecycle_fields = _offer_lifecycle_response_fields(offer, start_settings=start_settings)
+    logger.debug(
+        "offer_expiry_result id=%s expires_at_ts=%s phase=%s",
+        offer.id,
+        lifecycle_fields.get("expires_at_ts"),
+        lifecycle_fields.get("lifecycle_phase"),
+    )
 
     return OfferResponse(
         id=offer.id,
@@ -519,7 +523,7 @@ def offer_to_response(
         customer_management_name=offer_read_model.customer_management_name,
         customer_tier=offer_read_model.customer_tier,
         created_at=to_jalali_str(offer.created_at) or "",
-        expires_at_ts=expires_at_ts,
+        **lifecycle_fields,
     )
 
 
@@ -550,6 +554,48 @@ def _offer_remaining_quantity(offer: Any) -> int:
         return 0
 
 
+def _offer_lifecycle_response_fields(
+    offer: Offer,
+    *,
+    start_settings: Optional['TradingSettings'] = None,
+) -> dict[str, Any]:
+    """Serialize the shared lifecycle projection for API/realtime clients."""
+    from core.offer_lifecycle import project_offer_lifecycle
+
+    empty = {
+        "expires_at_ts": None,
+        "normal_deadline_ts": None,
+        "final_deadline_ts": None,
+        "lifecycle_phase": None,
+        "overtime_minutes_snapshot": int(getattr(offer, "overtime_minutes_snapshot", 0) or 0),
+        "timer_total_seconds": None,
+        "accepts_new_public_interaction": None,
+    }
+    if getattr(offer, "status", None) != OfferStatus.ACTIVE:
+        return empty
+    try:
+        ts = start_settings or get_trading_settings()
+        projection = project_offer_lifecycle(
+            offer,
+            normal_lifetime_minutes=int(getattr(ts, "offer_expiry_minutes", 0) or 0),
+        )
+    except Exception as exc:
+        logger.error(
+            "offer_expiry_projection_failed",
+            extra={"offer_id": getattr(offer, "id", None), "error_class": type(exc).__name__},
+        )
+        return empty
+    return {
+        "expires_at_ts": projection.expires_at_ts,
+        "normal_deadline_ts": projection.normal_deadline_ts,
+        "final_deadline_ts": projection.final_deadline_ts,
+        "lifecycle_phase": projection.phase.value,
+        "overtime_minutes_snapshot": projection.overtime_minutes_snapshot,
+        "timer_total_seconds": projection.timer_total_seconds,
+        "accepts_new_public_interaction": projection.accepts_new_public_interaction,
+    }
+
+
 def _build_public_offer_response(
     offer: Offer,
     *,
@@ -558,18 +604,14 @@ def _build_public_offer_response(
     offer_public_id = ensure_offer_public_id(offer)
     status_value = _enum_value(getattr(offer, "status", None))
     remaining_quantity = _offer_remaining_quantity(offer)
-    expires_at_ts = None
-    if status_value == OfferStatus.ACTIVE.value:
-        try:
-            ts = start_settings or get_trading_settings()
-            expires_at_ts = int(offer.created_at.timestamp() + ts.offer_expiry_minutes * 60)
-        except Exception as exc:
-            logger.error(
-                "public_offer_expiry_projection_failed",
-                extra={"offer_id": getattr(offer, "id", None), "error_class": type(exc).__name__},
-            )
+    lifecycle_fields = _offer_lifecycle_response_fields(offer, start_settings=start_settings)
 
     commodity = getattr(offer, "commodity", None)
+    interaction_available = bool(
+        lifecycle_fields.get("accepts_new_public_interaction")
+        if lifecycle_fields.get("accepts_new_public_interaction") is not None
+        else (status_value == OfferStatus.ACTIVE.value)
+    ) and remaining_quantity > 0
     return PublicOfferResponse(
         offer_public_id=offer_public_id,
         public_link=build_offer_public_link(offer_public_id),
@@ -584,9 +626,14 @@ def _build_public_offer_response(
         lot_sizes=getattr(offer, "lot_sizes", None),
         notes=getattr(offer, "notes", None),
         created_at=to_jalali_str(getattr(offer, "created_at", None)) or "",
-        expires_at_ts=expires_at_ts,
+        expires_at_ts=lifecycle_fields.get("expires_at_ts"),
+        normal_deadline_ts=lifecycle_fields.get("normal_deadline_ts"),
+        final_deadline_ts=lifecycle_fields.get("final_deadline_ts"),
+        lifecycle_phase=lifecycle_fields.get("lifecycle_phase"),
+        overtime_minutes_snapshot=int(lifecycle_fields.get("overtime_minutes_snapshot") or 0),
+        timer_total_seconds=lifecycle_fields.get("timer_total_seconds"),
         safe_public_state_label=_safe_public_state_label(offer),
-        interaction_available=status_value == OfferStatus.ACTIVE.value and remaining_quantity > 0,
+        interaction_available=interaction_available,
     )
 
 
@@ -1550,17 +1597,9 @@ async def create_offer(
 
     await register_market_offer_created(db)
     
-    # دریافت تنظیمات برای محاسبه انقضا
     from core.trading_settings import get_trading_settings_async
     ts = await get_trading_settings_async()
-    
-    # محاسبه expires_at_ts برای SSE event
-    sse_expires_at_ts = None
-    try:
-        created_ts = new_offer.created_at.timestamp()
-        sse_expires_at_ts = int(created_ts + ts.offer_expiry_minutes * 60)
-    except Exception:
-        pass
+    lifecycle_fields = _offer_lifecycle_response_fields(new_offer, start_settings=ts)
     
     await _publish_offer_event_safely("offer:created", {
         "id": new_offer.id,
@@ -1585,7 +1624,7 @@ async def create_offer(
         "is_wholesale": new_offer.is_wholesale,
         "lot_sizes": new_offer.lot_sizes,
         "original_lot_sizes": new_offer.original_lot_sizes,
-        "expires_at_ts": sse_expires_at_ts,
+        **lifecycle_fields,
     }, reason="create_offer")
 
     try:
@@ -1855,6 +1894,19 @@ async def get_market_offer_history(
         Offer.updated_at,
         Offer.created_at,
     )
+    from core.offer_lifecycle import offer_lifetime_end_epoch_sql
+
+    # Final public lifetime end, including each offer's overtime snapshot.
+    active_stale_end_epoch = offer_lifetime_end_epoch_sql(
+        Offer.created_at,
+        Offer.overtime_minutes_snapshot,
+        expiry_minutes,
+    )
+    # Reconstruct a datetime-ish ordering key: created_at + total minutes.
+    # SQLAlchemy's timedelta addition only accepts a constant, so epoch is the
+    # portable per-row form; history_event_at for ACTIVE stale rows uses
+    # created_at + normal as a stable lower bound and the response serializer
+    # can refine from the projection when needed.
     active_stale_event_at_expr = Offer.created_at + timedelta(minutes=expiry_minutes)
     history_event_at_expr = case(
         (Offer.status == OfferStatus.COMPLETED, completed_event_at_expr),
@@ -1878,12 +1930,15 @@ async def get_market_offer_history(
         market_visible_expired_condition,
     ]
     if expiry_minutes > 0:
-        stale_cutoff_time = utc_now_naive() - timedelta(minutes=expiry_minutes)
-        active_stale_created_after = cutoff_time - timedelta(minutes=expiry_minutes)
+        now_epoch = utc_now_naive().replace(tzinfo=timezone.utc).timestamp()
+        # Widest window that could still fall inside the since_hours history:
+        # an offer with the maximum overtime snapshot (10) that ended recently.
+        max_lifetime_minutes = expiry_minutes + 10
+        active_stale_created_after = cutoff_time - timedelta(minutes=max_lifetime_minutes)
         history_conditions.append(
             and_(
                 Offer.status == OfferStatus.ACTIVE,
-                Offer.created_at <= stale_cutoff_time,
+                active_stale_end_epoch <= now_epoch,
                 Offer.created_at >= active_stale_created_after,
                 traded_quantity_expr == 0,
             )
@@ -2066,12 +2121,21 @@ async def get_my_offers(
             ]
             expiry_minutes = int(getattr(start_settings, "offer_expiry_minutes", 0) or 0)
             if expiry_minutes > 0:
-                stale_cutoff_time = utc_now_naive() - timedelta(minutes=expiry_minutes)
-                recent_active_created_after = cutoff_time - timedelta(minutes=expiry_minutes)
+                from core.offer_lifecycle import offer_lifetime_end_epoch_sql
+
+                now_epoch = utc_now_naive().replace(tzinfo=timezone.utc).timestamp()
+                active_final_end_epoch = offer_lifetime_end_epoch_sql(
+                    Offer.created_at,
+                    Offer.overtime_minutes_snapshot,
+                    expiry_minutes,
+                )
+                recent_active_created_after = cutoff_time - timedelta(minutes=expiry_minutes + 10)
                 expired_conditions.append(
                     and_(
                         Offer.status == OfferStatus.ACTIVE,
-                        Offer.created_at < stale_cutoff_time,
+                        # Match the historical strictness of created_at < cutoff:
+                        # at the exact final instant the row is not yet listed here.
+                        active_final_end_epoch < now_epoch,
                         Offer.created_at >= recent_active_created_after,
                     )
                 )
