@@ -47,7 +47,7 @@ def trade_event(*, message_id: str = "101", **changes: object) -> dict:
         "schema_version": "1.0",
         "event_type": "offer_verified",
         "source": {"market": "gold", "source_key": "account1_channel"},
-        "gold": {"message_id": message_id, "verification": {"state": "DONE"}, "trade": trade},
+        "gold": {"message_id": message_id, "verification": {"state": "DONE", "result": "traded"}, "trade": trade},
     }
 
 
@@ -87,6 +87,24 @@ class PrivateGoldPayloadTests(unittest.TestCase):
         ).fetchone()
         self.assertEqual((report.decoded_trade_updates, report.inserted_or_updated_trade_updates), (1, 1))
         self.assertEqual((row["offer_text"], row["trade_status"], row["traded_quantity"]), (None, "FULL", 5))
+
+    def test_explicit_no_trade_without_trade_object_overrides_edit_inference(self) -> None:
+        no_trade = {
+            "schema_version": "1.0",
+            "event_type": "offer_verified",
+            "source": {"market": "gold", "source_key": "account1_channel"},
+            "gold": {
+                "message_id": "101",
+                "verification": {"state": "completed", "result": "no_trade"},
+                "trade": None,
+            },
+        }
+        decoded = decode_private_gold_payload(self.envelope(no_trade, stream="trade"))
+        self.assertEqual((len(decoded.trade_updates), decoded.trade_updates[0].trade_status), (1, "NONE"))
+        report = stage_private_gold_payload(self.connection, self.envelope(no_trade, stream="trade"))
+        self.connection.commit()
+        row = self.connection.execute("SELECT trade_status FROM private_gold_staged_offers").fetchone()
+        self.assertEqual((report.inserted_or_updated_trade_updates, row["trade_status"]), (1, "NONE"))
 
     def test_delimited_batch_deduplicates_and_later_edit_wins(self) -> None:
         original = offer_event()

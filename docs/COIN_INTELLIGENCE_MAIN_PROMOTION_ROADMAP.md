@@ -917,6 +917,9 @@ bundle قبلی قابل انتخاب‌اند و Collectorها همچنان ف�
   - stream از channel بیرونیِ trusted collector می‌آید، اما inner event نیز
     باید `market=gold`، `source_key=account1_channel` و `event_type` سازگار
     داشته باشد؛ عدم تطابق وارد staging نمی‌شود؛
+  - `offer_verified` با `verification.result=no_trade` و بدون شیء `trade`
+    صراحتاً `NONE` است و edit را override می‌کند؛ نتیجهٔ دیگر بدون trade
+    قابل‌تأیید reject می‌شود؛
   - decoder هیچ channel ID، نام، متن یا identifierی را در report/Market Store
     نمی‌نویسد؛ فقط متن موقتِ معتبر را برای staging برمی‌گرداند؛
   - هیچ client، config واقعی، network، listener، worker یا scheduler اضافه

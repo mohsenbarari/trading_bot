@@ -84,6 +84,11 @@ physical امروز/فردا و تمام six paper cellها را جدا نگه �
 سازگار باشد؛ offer و verifier در دو stream جدا هستند و batchهای JSON نیز
 بدون حدس پردازش می‌شوند.
 
+verifier با نتیجهٔ صریح `no_trade` ممکن است هیچ شیء `trade` نداشته باشد. این
+حالت به `NONE` تبدیل می‌شود؛ پس edit قبلی یا دیررس نمی‌تواند به‌اشتباه معامله
+بسازد. verifierهایی که واقعاً معامله دارند باید `result=traded` و شیء trade
+سازگار داشته باشند.
+
 برای complete شدن P2-B، worker/transport جدا باید channel بیرونی را به stream
 مورد اعتماد bind کند، decoder و runtime path محافظت‌شده را صدا بزند، ترتیب
 ingestion را metric کند و `private_gold_pipeline` را با commit/retry کنترل‌شده

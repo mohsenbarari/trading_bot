@@ -197,7 +197,24 @@ def _trade_from_item(
         return None
     message_id = _message_id(gold.get("message_id"))
     trade = gold.get("trade")
-    if message_id is None or not isinstance(trade, Mapping):
+    if message_id is None:
+        return None
+    verification = gold["verification"]
+    verification_result = str(verification.get("result") or "").strip().lower()
+    if trade is None:
+        # The verifier emits no ``trade`` object for the overwhelmingly common
+        # explicit no-trade result.  It is still economically important: it
+        # overrides the source convention that an edited offer means a trade.
+        if verification_result != "no_trade":
+            return None
+        return PrivateGoldStagingTradeUpdate(
+            source_message_id=message_id,
+            available_at_utc=available_at_utc,
+            trade_status="NONE",
+        )
+    if not isinstance(trade, Mapping):
+        return None
+    if verification_result not in {"", "traded"}:
         return None
     status = _status(trade.get("status"))
     if status is None:
