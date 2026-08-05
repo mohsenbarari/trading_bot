@@ -2,9 +2,9 @@
 """Plan/preflight/execute the Stage 16 offer-overtime staging acceptance matrix.
 
 `plan` and `preflight` are non-mutating. `execute` remains fail-closed until the
-confirm env is set and topology preflight is green. Scenario drivers that mutate
-staging data are intentionally not wired yet; execute records a blocked status
-when drivers are unavailable so the contract stays honest.
+confirm env is set and topology preflight is green. Wired Iran-container drivers
+run when ``STAGING_IRAN_SSH_HOST`` (or ``STAGING_IRAN_DRIVER_EXEC``) is set;
+unwired scenarios stay blocked so the contract stays honest about coverage.
 
 This runner stays free of `core.db` / production-matrix imports so it can load
 under staging env files that use sync database URLs.
@@ -64,6 +64,16 @@ SCENARIOS = [
     {"id": "OT-TG-RETRY", "surface": "foreign", "requires": ["telegram_queue_retry"]},
     {"id": "OT-UI-RECONNECT", "surface": "webapp", "requires": ["webapp_poll_reconnect"]},
 ]
+
+# Iran-container drivers implemented in scripts/staging_overtime_scenario_driver.py.
+# Foreign-forward M7 for bot-save and the remaining request/queue/channel axes are
+# still unwired; execute reports that gap instead of pretending the matrix is green.
+WIRED_IRAN_DRIVER_SCENARIOS = (
+    "OT-PREF-WEBAPP-SAVE",
+    "OT-PREF-BOT-SAVE",
+    "OT-PREF-DISABLED-REGRESSION",
+    "OT-OFFER-WEBAPP-ORIGIN",
+)
 
 
 @dataclass
@@ -502,6 +512,95 @@ def run_preflight(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
     return summary, 0 if not failed else 1
 
 
+def iran_driver_argv(scenario: str, run_prefix: str, minutes: int) -> list[str] | None:
+    """Build the remote Iran driver command, or None when topology env is unset."""
+    explicit = (os.getenv("STAGING_IRAN_DRIVER_EXEC") or "").strip()
+    if explicit:
+        rendered = (
+            explicit.replace("{scenario}", scenario)
+            .replace("{run_prefix}", run_prefix)
+            .replace("{minutes}", str(minutes))
+        )
+        return ["bash", "-lc", rendered]
+
+    host = (os.getenv("STAGING_IRAN_SSH_HOST") or "").strip()
+    if not host:
+        return None
+    port = (os.getenv("STAGING_IRAN_SSH_PORT") or "22").strip()
+    container = (
+        os.getenv("STAGING_IRAN_APP_CONTAINER") or "trading_bot_staging_iran-app-1"
+    ).strip()
+    remote = (
+        f"docker exec {container} python scripts/staging_overtime_scenario_driver.py "
+        f"--scenario {scenario} --run-prefix {run_prefix} --minutes {minutes}"
+    )
+    return [
+        "ssh",
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "ConnectTimeout=15",
+        "-p",
+        port,
+        f"root@{host}",
+        remote,
+    ]
+
+
+def run_wired_iran_drivers(args: argparse.Namespace) -> list[dict[str, Any]]:
+    """Execute the Iran-container drivers that are already implemented."""
+    results: list[dict[str, Any]] = []
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+    for index, scenario in enumerate(WIRED_IRAN_DRIVER_SCENARIOS):
+        run_prefix = f"OTACC_{stamp}_{index:02d}"
+        minutes = 5 if scenario == "OT-OFFER-WEBAPP-ORIGIN" else 4
+        argv = iran_driver_argv(scenario, run_prefix, minutes)
+        if argv is None:
+            results.append(
+                {
+                    "id": scenario,
+                    "status": "blocked",
+                    "detail": (
+                        "set STAGING_IRAN_SSH_HOST (and optional STAGING_IRAN_SSH_PORT / "
+                        "STAGING_IRAN_APP_CONTAINER) or STAGING_IRAN_DRIVER_EXEC"
+                    ),
+                }
+            )
+            continue
+        started = time.time()
+        completed = subprocess.run(
+            argv,
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        elapsed = round(time.time() - started, 3)
+        stdout = (completed.stdout or "").strip()
+        payload: dict[str, Any]
+        try:
+            payload = json.loads(stdout.splitlines()[-1]) if stdout else {}
+        except json.JSONDecodeError:
+            payload = {
+                "passed": False,
+                "error": "driver stdout was not JSON",
+                "stdout": stdout[-2000:],
+                "stderr": (completed.stderr or "")[-2000:],
+            }
+        passed = bool(payload.get("passed")) and completed.returncode == 0
+        result = {
+            "id": scenario,
+            "status": "passed" if passed else "failed",
+            "elapsed_seconds": elapsed,
+            "run_prefix": run_prefix,
+            "returncode": completed.returncode,
+            "payload": payload,
+        }
+        results.append(result)
+        write_json(args.artifact_dir / f"driver-{scenario}.json", result)
+    return results
+
+
 def run_execute(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
     if os.getenv(EXECUTION_CONFIRM_ENV) != EXECUTION_CONFIRM_VALUE:
         summary = write_artifact_bundle(
@@ -522,18 +621,52 @@ def run_execute(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
         write_json(args.artifact_dir / "summary.json", summary)
         return summary, 1
 
+    args.artifact_dir.mkdir(parents=True, exist_ok=True)
+    driver_results = run_wired_iran_drivers(args)
+    write_json(args.artifact_dir / "driver-results.json", {"results": driver_results})
+
+    wired_failed = [item for item in driver_results if item["status"] == "failed"]
+    wired_blocked = [item for item in driver_results if item["status"] == "blocked"]
+    wired_passed = [item for item in driver_results if item["status"] == "passed"]
+    unwired = [
+        item["id"] for item in SCENARIOS if item["id"] not in WIRED_IRAN_DRIVER_SCENARIOS
+    ]
+
+    if wired_failed:
+        status = "execute_failed"
+        detail = f"{len(wired_failed)} wired overtime drivers failed"
+        exit_code = 1
+    elif wired_blocked:
+        status = "execute_blocked"
+        detail = (
+            "topology preflight passed, but Iran driver transport env is unset; "
+            f"{len(WIRED_IRAN_DRIVER_SCENARIOS)} drivers are implemented"
+        )
+        exit_code = 3
+    elif unwired:
+        status = "execute_partial"
+        detail = (
+            f"{len(wired_passed)}/{len(SCENARIOS)} scenarios passed via Iran drivers; "
+            f"{len(unwired)} remain unwired"
+        )
+        exit_code = 4
+    else:
+        status = "execute_passed"
+        detail = "all overtime acceptance scenarios passed"
+        exit_code = 0
+
     summary = write_artifact_bundle(
         args.artifact_dir,
         mode="execute",
         manifest=build_manifest(args),
         checks=None,
-        status="execute_blocked",
-        detail=(
-            "topology preflight passed, but mutating overtime scenario drivers "
-            "are not wired yet; deploy migration-first code and add drivers next"
-        ),
+        status=status,
+        detail=detail,
     )
-    return summary, 3
+    summary["wired_driver_results"] = driver_results
+    summary["unwired_scenarios"] = unwired
+    write_json(args.artifact_dir / "summary.json", summary)
+    return summary, exit_code
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:

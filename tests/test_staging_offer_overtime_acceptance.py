@@ -66,6 +66,43 @@ class StagingOfferOvertimeAcceptanceTests(unittest.TestCase):
             self.assertEqual(code, 2)
             self.assertEqual(summary["status"], "execute_blocked")
 
+    def test_wired_iran_driver_catalog_is_non_empty_subset(self):
+        catalog = {item["id"] for item in runner.SCENARIOS}
+        wired = set(runner.WIRED_IRAN_DRIVER_SCENARIOS)
+        self.assertTrue(wired)
+        self.assertTrue(wired.issubset(catalog))
+        self.assertIn("OT-PREF-DISABLED-REGRESSION", wired)
+        self.assertIn("OT-OFFER-WEBAPP-ORIGIN", wired)
+
+    def test_execute_blocks_when_iran_driver_transport_unset(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact_dir = Path(tmp) / "execute-no-transport"
+            args = runner.parse_args(
+                [
+                    "--mode",
+                    "execute",
+                    "--artifact-dir",
+                    str(artifact_dir),
+                ]
+            )
+            env = {
+                key: value
+                for key, value in os.environ.items()
+                if key
+                not in {
+                    "STAGING_IRAN_SSH_HOST",
+                    "STAGING_IRAN_DRIVER_EXEC",
+                }
+            }
+            env[runner.EXECUTION_CONFIRM_ENV] = runner.EXECUTION_CONFIRM_VALUE
+            with patch.dict(os.environ, env, clear=True), patch.object(
+                runner, "run_preflight", return_value=({"status": "preflight_passed"}, 0)
+            ):
+                summary, code = runner.run_execute(args)
+            self.assertEqual(code, 3)
+            self.assertEqual(summary["status"], "execute_blocked")
+            self.assertIn("Iran driver transport", summary["detail"])
+
     def test_preflight_fails_on_wrong_branch(self):
         with tempfile.TemporaryDirectory() as tmp:
             artifact_dir = Path(tmp) / "preflight-run"
