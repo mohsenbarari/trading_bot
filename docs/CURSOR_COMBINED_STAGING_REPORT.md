@@ -758,5 +758,48 @@ Evidence: `tmp/combined-staging-evidence/stage16-sync-parity-quick-summary.json`
 | Coin inference flags | off by default, untouched |
 | Arvan CDN / public Iran hostname | **fixed** (origin `401`, no CDN `504`) |
 | Sync parity comparison | quick run done — `critical_drift` from leftover tombstone + one expired-request timestamp skew (see §12.20) |
-| coin-price vs coin-commodity comparison | still owed per the handoff prompt |
-| Next work | isolated coin-price vs coin-commodity eval (handoff prompt) |
+| coin-price vs coin-commodity comparison | discovery started (§13); full chronological replay still owed |
+| Next work | isolated coin-price vs coin-commodity chronological replay + side-by-side metrics |
+
+### 13. Coin-price vs coin-commodity eval (started)
+
+Per `docs/CURSOR_COMBINED_STAGING_HANDOFF_PROMPT.md`. Combined trading-bot line
+stays **coin-commodity + overtime** only; coin-price remains a parallel eval
+branch until this comparison recommends otherwise.
+
+#### 13.1 Branch inventory (2026-08-05)
+
+| Branch | Worktree | HEAD |
+| --- | --- | --- |
+| `candidate/coin-commodity-inference-promotion` | `/root/trading-bot/coin-commodity-inference-promotion` | `0fbd6a1b` |
+| `candidate/coin-price-intelligence` | `/tmp/coin-price-intelligence` | `dffb2abb` |
+
+- Merge base: `f81d2c8e`
+- Unique commits: commodity +67 / price +158 from merge base
+- Overlapping changed paths: 69 (includes shared API/bot/sync surfaces)
+- coin-price worktree is **dirty** (4 modified estimator/collector files) — fair
+  compare must pin clean `dffb2abb`, not the dirty tree
+
+#### 13.2 Shared staging inputs (read-only check)
+
+Canonical Market Store:
+`/srv/trading-bot/production-data/coin-intelligence/private-gold-live/market/market.sqlite3`
+
+| Check | Result |
+| --- | --- |
+| `market_observations` rows | 913,887 |
+| Duplicate `event_key` | **0** |
+| Non-positive / null `price_num` | **0** |
+| Bridge / private-gold timers | active |
+| Sources present | `MELTED_AGGREGATE`, `MELTED_FLOW`, `USD_HERAT`, `XAUUSD`, `WALLEX_PUBLIC_API`, `IME_REALTIME_BOARD`, `PRIVATE_GOLD_CHANNEL`, `PRIVATE_GOLD_PAPER_MINUTE`, `GROUP_1`, `GROUP_2`, `GROUP_HISTORICAL` |
+
+Notes: `IME_REALTIME_BOARD` and `GROUP_HISTORICAL` look sparse/stale relative to
+live sources; live groups and melted/public feeds are advancing.
+
+#### 13.3 Still owed before coin recommendation
+
+1. Isolated output roots/ports for each candidate (no shared residual/snapshot writes)
+2. Identical chronological cutoffs with `available_at_utc` leakage controls
+3. Side-by-side metrics (commodity detection, abstention, cash/future, intervals, error vs trusted future)
+4. Web/Bot shadow checks (no Offer/Trade/Telegram mutation)
+5. Explicit recommendation + rollback commands
