@@ -811,7 +811,7 @@ The next gate is not a question but an approval: the roadmap below may begin onl
 
 #### Stage 4 completion notes
 
-**Status:** complete in code on `candidate/offer-overtime` at `STAGE4_SHA`.
+**Status:** complete in code on `candidate/offer-overtime` at `10fc0801`.
 
 **Scope delivered.** New `core/services/offer_overtime_request_service.py` owns the durable overtime workflow on the shared `OfferRequest` ledger: create only when intake classification is `approval`, assign FIFO `queue_sequence` per `(offer_owner_user_id, request_home_server)`, promote the head when the owner seat is free, and apply cancel / owner-reject / decision-timeout / invalidate / claim-approval / completed-trade transitions through a legal-transition table. WebApp-origin promotions become `OVERTIME_PRESENTED` (30s clock starts); bot-origin promotions become `OVERTIME_DELIVERING` until `mark_presented` persists the Telegram message id. Same-offer exclusivity, requester outstanding limit (3), one-open-per-economic-owner, idempotent create on `(home, idempotency_key)`, and requester-offer cooldown after owner reject / decision timeout are enforced in the create path. Ledger helper `apply_offer_request_decision` gained `terminal_reason` / `decided_by_user_id`, and overtime terminal statuses were added to `TERMINAL_OFFER_REQUEST_STATUSES` so terminal rows stay immutable. Occupying statuses (`delivering` / `presented`) are the same set Stage 3's final-tail deferral already reads.
 
