@@ -1047,6 +1047,20 @@ The next gate is not a question but an approval: the roadmap below may begin onl
 
 **Exit criteria:** visual state accurately follows the server lifecycle on every market view.
 
+#### Stage 12 completion notes
+
+**Status:** complete in code on `candidate/offer-overtime` at `2e39d2a9`.
+
+**Scope delivered.** Market cards consume server `lifecycle_phase`, deadline stamps, and `timer_total_seconds` without inventing phase. Normal timer uses `normal_deadline_ts`; overtime restarts a green ring from server OT duration; final-tail completes the bar (no ring) and locks trade/cancel controls while the offer stays list-visible. Animated `⏳` (12px in a fixed 14×14 box) sits in a fixed-width RTL end group beside the 10px relative time during overtime; static in final-tail; static in history only when `overtime_trade_committed`. `prefers-reduced-motion` disables both the new marker animation and the existing critical `ring-pulse`. `useOffers.activeRows` keeps final-tail rows via the same lifecycle visibility helper.
+
+**Affected components:** `frontend/src/components/OffersList.vue`, `frontend/src/components/ui/AppOfferCard.vue`, `frontend/src/composables/useOffers.ts`, `frontend/src/utils/offerLifecycle.ts`, tests `offerLifecycle.test.ts`, `OffersList.test.ts` (plus existing useOffers suite).
+
+**Tests and results.** Frontend unit green via `npm run test:unit:run -- src/utils/offerLifecycle.test.ts src/components/OffersList.test.ts src/composables/useOffers.test.ts` (56 tests): overtime green ring + animated marker, final-tail visibility/read-only/static marker, history committed marker only, prior critical-timer and trade flows unchanged.
+
+**Deviations and known gaps.** First, Telegram channel `⏳` rendering remains Stage 13. Second, dashboard/profile trade tables are out of scope (not market offer cards). Third, the Stage 1 real-database migration gate remains open for merge/deploy.
+
+**Next stage prerequisites.** Stage 13 may begin. It must render the same lifecycle on Telegram channel posts through the existing publication queue, without direct-send races.
+
 ### Stage 13 — Telegram Channel Rendering
 
 **Goal:** update public posts through the established renderer and publication queue.
