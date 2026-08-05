@@ -705,11 +705,11 @@ The next gate is not a question but an approval: the roadmap below may begin onl
 
 #### Stage 1 completion notes
 
-**Status:** complete in code, with one prerequisite still outstanding: the migration has not been executed against a real database, because no PostgreSQL instance is reachable from this environment. That is recorded as a deviation below and must be closed before Stage 2.
+**Status:** complete in code. The real-database migration gate was later closed on scratch Postgres during Stage 16 prep (see Stage 1 gate closure notes below).
 
 **Scope delivered.** `User.offer_overtime_minutes` defaults to `0` with a `0..10` check constraint. `Offer` gains `overtime_minutes_snapshot`, also range-checked, and `overtime_trade_committed` for the historical marker. The `OfferRequest` ledger is extended rather than duplicated, with an opaque `request_public_id`, a `workflow_kind` discriminator defaulting to `direct`, an `offer_owner_user_id` snapshot so the owner queue never has to join offers, `queue_sequence` for FIFO promotion, `presented_at` and `decision_deadline_at`, `decided_by_user_id`, `terminal_reason`, and the two Telegram delivery references. Nine overtime statuses were added to `offerrequeststatus`; success deliberately reuses `completed_trade` so there is one meaning of a committed trade across both workflows.
 
-**Four partial indexes carry the concurrency rules into the schema** rather than leaving them to application code: one live overtime request per `(home server, offer)`, one owner-occupying request per `(home server, economic owner)`, a FIFO lookup on the queued set, and a requester lookup for the outstanding-request limits. Their predicates compare `result_status::text`, not the enum, so a later type rebuild cannot invalidate them.
+**Four partial indexes carry the concurrency rules into the schema** rather than leaving them to application code: one live overtime request per `(home server, offer)`, one owner-occupying request per `(home server, economic owner)`, a FIFO lookup on the queued set, and a requester lookup for the outstanding-request limits. Their predicates compare enum labels directly (`result_status IN (...)`); the original `::text` form is rejected by PostgreSQL because the cast is not IMMUTABLE.
 
 **Inertness.** Every new column is nullable or server-defaulted to the disabled value, no code writes any new status, and `workflow_kind` defaults to `direct`, so a row written by code that predates this stage remains valid. Tests assert this directly rather than assuming it.
 
@@ -719,11 +719,13 @@ The next gate is not a question but an approval: the roadmap below may begin onl
 
 **Tests and results.** New suite `tests/test_offer_overtime_data_model.py`, 27 tests, covering inertness, the state groups, index shape and uniqueness scoping, the sync wiring, identifier opacity, and a drift guard that reads the migration with `ast` and compares its status and predicate constants against the models. `tests/test_offer_request_ledger_model.py` was updated because it pins the status set as a contract. Regression: the Stage 0 module list re-run green at 1826 tests, and a further 1058 tests across user, registration, session, contract, parity, auth, and migration modules also green, both with the environment flags at their code defaults.
 
-**Deviations and known gaps.** First, no database was available, so `alembic upgrade head`, the downgrade guard, and the partial-index concurrency probes are untested against PostgreSQL; the migration is verified only by static analysis and model agreement. Second, two additional environment-dependent failures appeared alongside the Stage 0 finding: `.env` sets `TELEGRAM_DIRECT_REGISTRATION_ENABLED` and `TELEGRAM_REGISTRATION_RECONCILIATION_ENABLED` to true while the tests assert the code defaults of false. Third, `tests/test_registration_identity_property` and `tests/test_registration_stateful_fuzz` cannot load because `hypothesis` is not installed. None of the three is caused by this stage.
+**Deviations and known gaps.** First, the original Stage 1 write could not reach PostgreSQL; that gate stayed open until Stage 16 prep. Second, two additional environment-dependent failures appeared alongside the Stage 0 finding: `.env` sets `TELEGRAM_DIRECT_REGISTRATION_ENABLED` and `TELEGRAM_REGISTRATION_RECONCILIATION_ENABLED` to true while the tests assert the code defaults of false. Third, `tests/test_registration_identity_property` and `tests/test_registration_stateful_fuzz` cannot load because `hypothesis` is not installed. None of the three is caused by this stage.
 
 **Evidence retained:** `tmp/offer-overtime-evidence/stage1-regression.log`, `stage1-extra.log`, and `stage1-extra-default-env.log`.
 
-**Next stage prerequisites.** This migration must be run up and down on a real database, with the default-zero backfill confirmed on a representative dataset and the partial indexes probed under concurrent writers. That gate is on **deploying or merging** the feature, not on writing later stages: subsequent stages may be developed against the models while it stays open, since nothing they add is deployable either until the schema is proven. The gate is tracked here until a database-backed environment is available, and Stage 16 cannot be entered while it remains open.
+**Stage 1 gate closure (real Postgres).** Closed on scratch DB `stage1_migration_*` via `scripts/run_offer_overtime_migration_gate.py`: upgrade to head `e8a4b5c6d7e9`, default-zero verification, concurrent unique-index probe, downgrade to `a274f5a6b8c9`, and re-upgrade. The first live attempt failed because `result_status::text` is not IMMUTABLE in PostgreSQL index predicates; predicates were corrected to compare enum labels directly in migration `b5d1c7e93f04` and `models/offer_request.py`. Report: `tmp/offer-overtime-evidence/stage1-migration-gate-report.json` (`status=passed`).
+
+**Next stage prerequisites.** With the real-database gate closed, merge/deploy may proceed migration-first. Stage 16 live execute still needs both staging peers healthy.
 
 ### Stage 2 — Canonical User Preference and Offer Snapshot
 
@@ -1140,7 +1142,7 @@ The next gate is not a question but an approval: the roadmap below may begin onl
 - Backend matrix (`stage15-modules.txt`, 255 modules): **1972 passed, 178 skipped, EXIT:0** → `tmp/offer-overtime-evidence/stage15-backend-default-env.log` (default Stage-0 feature flags / `SERVER_MODE=foreign`).
 - Frontend focused Vitest (Stages 11–12 surfaces): **111 passed, EXIT:0** → `tmp/offer-overtime-evidence/stage15-frontend-unit.log`.
 
-**Deviations and known gaps.** First, Postgres-gated skips remain expected offline (`MARKET_STAGE*_TEST_DATABASE_URL`, counter scratch DB, etc.). Second, Stage 1 real-database migration gate remains open for merge/deploy. Third, no full browser e2e matrix in this environment (unit coverage for Market/OffersList/Settings only). Fourth, reconciler delivery-ref mismatches remain detect-only. Fifth, controlled concurrency / two-server live contract proof is deferred to Stage 16 staging acceptance.
+**Deviations and known gaps.** First, Postgres-gated skips remain expected offline (`MARKET_STAGE*_TEST_DATABASE_URL`, counter scratch DB, etc.). Second, Stage 1 real-database migration gate was still open at Stage 15 close and was closed during Stage 16 prep. Third, no full browser e2e matrix in this environment (unit coverage for Market/OffersList/Settings only). Fourth, reconciler delivery-ref mismatches remain detect-only. Fifth, controlled concurrency / two-server live contract proof remains Stage 16 staging acceptance.
 
 **Next stage prerequisites.** Stage 16 may begin (two-server staging acceptance) after staging deploy of migration-first + compatible app code with all users at overtime `0`.
 
@@ -1154,6 +1156,18 @@ The next gate is not a question but an approval: the roadmap below may begin onl
 - Produce a zipped staging evidence package with logs and test results organized by roadmap stage and scenario.
 
 **Exit criteria:** every acceptance case passes, no data/sync mismatch remains, and feature-disabled users show no regression.
+
+#### Stage 16 progress notes
+
+**Status:** in progress on `candidate/offer-overtime`. Harness and migration-gate prerequisites are landed; live two-server execute is blocked by staging topology health.
+
+**Scope delivered.** Closed the Stage 1 real-database migration gate on scratch Postgres and fixed non-immutable overtime index predicates. Added Stage 16 acceptance contract/docs (`docs/STAGING_OFFER_OVERTIME_ACCEPTANCE_MATRIX.md`), runner (`scripts/run_staging_offer_overtime_acceptance.py` with `plan|preflight|execute`), and unit tests. Plan artifacts and preflight evidence are archived under `tmp/staging-offer-overtime-acceptance/` and `tmp/offer-overtime-evidence/stage16-*`.
+
+**Preflight result (this host).** `OT-ACC-STAGE16-PREFLIGHT` failed 5 checks: Iran `/api/config` + internal ingress timed out; foreign `/foreign-sync` internal paths returned `502`. TLS/URL identity/branch/catalog checks passed. Local staging compose currently has only `db` + `redis` up; Iran staging peer is unhealthy.
+
+**Blocked for full exit.** Migration-first deploy to both staging peers, restore Iran staging app health, start foreign staging app/bot/sync (`STAGING_FOREIGN_ONLY=1`), wire mutating scenario drivers, then re-run preflight/execute with confirm env.
+
+**Next stage prerequisites.** Stage 16 execute must turn green before Stage 17 production rollout gates begin.
 
 ### Stage 17 — Controlled Production Rollout and Rollback Gates
 
