@@ -2170,3 +2170,30 @@ bundle قبلی قابل انتخاب‌اند و Collectorها همچنان ف�
   - پیش از هر staging activation باید migrationهای audit/outcome/context روی
     دیتابیس staging، publisher Snapshot محلی و permission مسیر مستقل آزموده
     شوند. روشن‌کردن auto-selection نیازمند threshold cell مصوب owner است.
+
+### P7-D — preflight عملیاتی Snapshot در staging — 2026-08-05 — PARTIAL (selection remains inactive)
+
+- Scope انجام‌شده:
+  - command مستندشدهٔ `publish_coin_intelligence_snapshot.py` در اجرای مستقیم
+    اصلاح شد تا بدون `PYTHONPATH` محیطی، package محلی repository را resolve
+    کند؛ این تغییر runtime collector یا scheduler ایجاد نمی‌کند.
+  - یک Snapshot اتمیک فقط در زیرشاخهٔ محافظت‌شدهٔ staging منتشر و check شد.
+    Store صرفاً read-only مصرف شد و artifact با permission `0600` باقی ماند؛
+    publish دارای ۶ نرخ estimated، ۸ نرخ no-data و freshness زیر یک دقیقه بود.
+- Test command و نتیجه:
+  - `tests.test_publish_coin_intelligence_snapshot`
+    `tests.test_coin_intelligence_snapshot_publisher` و
+    `tests.test_coin_intelligence_market_snapshot` اجرا شدند:
+    `Ran 12 tests ... OK`؛ direct command با Snapshot غایب نیز `UNAVAILABLE`
+    و exit `3` برمی‌گرداند.
+- موارد عمداً انجام‌نشده / دلیل:
+  - migration روی staging اجرا نشد و preview/selection فعال نشد. دیتابیس
+    staging موجود در revision `f2c7d8e9a0b1` است، در حالی که این branch head
+    `e5a1c4d7b2f9` است؛ `upgrade head` مجموعه‌ای از migrationهای نامرتبط را
+    نیز وارد می‌کرد و با scope این rollout سازگار نبود.
+  - هیچ migration، container، flag یا DB production لمس نشد.
+- گیت مرحلهٔ بعد:
+  - نخست یک staging deployment هم‌نسخه با base/main فعلی لازم است، یا owner
+    باید صراحتاً upgrade کامل staging را تأیید کند. فقط پس از آن migrationهای
+    audit/outcome/context، probe endpoint و selection محدودِ CONFIRM قابل
+    فعال‌سازی هستند.

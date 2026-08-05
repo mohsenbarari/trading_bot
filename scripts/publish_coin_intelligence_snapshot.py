@@ -16,7 +16,15 @@ import fcntl
 import json
 import os
 from pathlib import Path
+import sys
 from typing import Iterator, Sequence
+
+# Direct execution (``python scripts/...``) places ``scripts/`` on sys.path.
+# The documented operational command must resolve the local package without an
+# ambient PYTHONPATH, while imports in unit tests remain unchanged.
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 from core.market_intelligence.market_contracts import normalize_utc
 from core.market_intelligence.market_snapshot import AtomicMarketSnapshotProvider, MarketSnapshotUnavailable

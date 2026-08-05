@@ -8,6 +8,8 @@ import fcntl
 import io
 import json
 from pathlib import Path
+import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -138,6 +140,20 @@ class PublishCoinIntelligenceSnapshotTests(unittest.TestCase):
                 "--snapshot", "snapshots/coin-rates.json",
             )
         self.assertEqual((result, payload["status"], payload["reason"]), (3, "STALE", "SNAPSHOT_STALE_OR_FUTURE"))
+
+    def test_documented_direct_execution_resolves_the_local_package(self) -> None:
+        script = Path(__file__).resolve().parents[1] / "scripts/publish_coin_intelligence_snapshot.py"
+        completed = subprocess.run(
+            [sys.executable, str(script), "check", "--runtime-root", str(self.root), "--snapshot", "missing.json"],
+            cwd=self.root,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(completed.returncode, 3)
+        payload = json.loads(completed.stdout)
+        self.assertEqual((payload["status"], payload["reason"]), ("UNAVAILABLE", "snapshot_file_unavailable"))
+        self.assertEqual(completed.stderr, "")
 
 
 if __name__ == "__main__":
