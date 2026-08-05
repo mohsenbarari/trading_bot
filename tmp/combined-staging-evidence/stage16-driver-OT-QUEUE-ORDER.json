@@ -1,0 +1,24 @@
+{
+  "scenario": "OT-QUEUE-ORDER",
+  "run_prefix": "OTACC_20260805160738",
+  "release_sha": "3c8b3e07",
+  "iran": {
+    "owner_user_id": 1380,
+    "requester_a_user_id": 1382,
+    "requester_b_user_id": 1384,
+    "offer_a_public_id": "ofr_dH-dXYuCaWu_LHPusVvSWMVd",
+    "offer_b_public_id": "ofr_ARFqWKC5msid1vjsvSx0al7U",
+    "first_request_public_id": "req_nq3yz7pCt6dDjiX_lNpg70du",
+    "second_request_public_id": "req_f2ws8urE2L_shV2bMtSwTSJB",
+    "first_queue_sequence": 1,
+    "second_queue_sequence": 2,
+    "first_status_before_reject": "overtime_presented",
+    "second_status_before_reject": "overtime_queued",
+    "first_status_after_reject": "overtime_rejected_by_owner",
+    "second_status_after_reject": "overtime_presented",
+    "passed": true
+  },
+  "cleanup": {
+    "users_retired": 3
+  }
+}

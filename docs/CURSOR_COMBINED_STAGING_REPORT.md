@@ -600,14 +600,31 @@ returns none) and the terminal row mirrors to foreign.
 
 Evidence: `tmp/combined-staging-evidence/stage16-driver-OT-CANCEL-REQUESTER.json`.
 
+### 12.12 Owner queue FIFO (`OT-QUEUE-ORDER`)
+
+Same owner, two Iran-home offers, two requesters: first request presents, second
+stays `overtime_queued` (one owner-occupying seat). Owner reject promotes the
+queued row to `overtime_presented` in FIFO order (`queue_sequence` 1 then 2).
+
+Evidence: `tmp/combined-staging-evidence/stage16-driver-OT-QUEUE-ORDER.json`.
+
+### 12.13 Foreign bot request path (`OT-REQ-FOREIGN-TO-FOREIGN`)
+
+Iran seeds foreign-home owner+requester with Telegram ids; foreign forwards the
+preference, creates a bot offer, opens an overtime request that promotes to
+`overtime_delivering`, simulates Telegram accept via `mark_presented`, then
+owner reject. Request home stays `foreign` and mirrors to Iran.
+
+Evidence: `tmp/combined-staging-evidence/stage16-driver-OT-REQ-FOREIGN-TO-FOREIGN.json`.
+
 ### 12.4 Remaining work before `main`
 
 | Item | State |
 | --- | --- |
-| Mutating Stage 16 scenario drivers | 7 of 15 wired and passing live; `execute` → `execute_partial` once transport env is set |
+| Mutating Stage 16 scenario drivers | 9 of 15 wired and passing live; `execute` → `execute_partial` once transport env is set |
 | Overtime preferences | staging users remain at `0` after driver cleanup |
 | Coin inference flags | off by default, untouched |
 | Arvan CDN origin for `staging.gold-trade.ir` | broken, needs panel fix |
 | Sync parity comparison | `comparison_status: missing` — no parity run yet on this pair |
 | coin-price vs coin-commodity comparison | still owed per the handoff prompt |
-| Next drivers | `OT-REQ-FOREIGN-TO-FOREIGN`, `OT-QUEUE-ORDER`, then channel/UI axes |
+| Next drivers | `OT-REQ-CROSS-FORWARD`, `OT-FINAL-TAIL`, channel/TG/UI axes |

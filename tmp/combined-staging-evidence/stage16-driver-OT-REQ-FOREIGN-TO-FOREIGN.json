@@ -1,0 +1,39 @@
+{
+  "scenario": "OT-REQ-FOREIGN-TO-FOREIGN",
+  "run_prefix": "OTACC_20260805161306",
+  "release_sha": "3c8b3e07",
+  "note": "bot overtime request: DELIVERING then mark_presented then owner reject; foreign-authoritative",
+  "iran_seed": {
+    "owner_user_id": 1406,
+    "requester_user_id": 1408,
+    "owner_home_server": "foreign",
+    "passed": true
+  },
+  "foreign_run": {
+    "owner_user_id": 1406,
+    "requester_user_id": 1408,
+    "preference_mirror_seconds": 2.008,
+    "offer_id": 265,
+    "offer_public_id": "ofr_UOA1cMGxqubgPDwSvEO3XTM6",
+    "offer_home_server": "foreign",
+    "overtime_minutes_snapshot": 5,
+    "request_id": 285,
+    "request_public_id": "req_PZur0uceTcE0dezSIzxopgF9",
+    "request_home_server": "foreign",
+    "delivering_status": "overtime_delivering",
+    "presented_status": "overtime_presented",
+    "decided_status": "overtime_rejected_by_owner",
+    "request_change_log_rows": 4,
+    "passed": true
+  },
+  "iran_mirror": {
+    "request_id": 324,
+    "result_status": "overtime_rejected_by_owner",
+    "request_home_server": "foreign",
+    "observed_after_seconds": 8
+  },
+  "cleanup": {
+    "peer": "iran",
+    "users_retired": 2
+  }
+}
