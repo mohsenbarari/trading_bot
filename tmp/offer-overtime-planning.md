@@ -1128,6 +1128,22 @@ The next gate is not a question but an approval: the roadmap below may begin onl
 
 **Exit criteria:** all suites pass; any known non-feature failure is documented and explicitly accepted before staging.
 
+#### Stage 15 completion notes
+
+**Status:** complete in code on `candidate/offer-overtime` at `30c9e0fe`.
+
+**Scope delivered.** Full Stages 1–14 regression matrix archived under `tmp/offer-overtime-evidence/`. Hardened overtime delivery callsites so requester status legacy Bot API paths are `legacy_mode_guarded`, remote ambiguous trade ack uses inventory M18 (`⏳ در حال بررسی درخواست...`), and Stage 13/14 expiry + feeder hooks no longer break FakeSession/unit mocks. Delivery inventory baseline remains `legacy_mode_guarded: 72` / SHA `076466c285ec108aecda73af177b70f988a41132899c73eb289ad9cddceb36a2` with zero `remaining_interactive_direct`.
+
+**Affected components:** `bot/handlers/trade_execute.py`, `bot/overtime_request_status.py`, `scripts/audit_telegram_delivery_calls.py`, and regression tests for expiry, market close, feeder lifecycle handoff, public/SSE lifecycle fields, remote-home bot copy, and delivery inventory.
+
+**Tests and results.**
+- Backend matrix (`stage15-modules.txt`, 255 modules): **1972 passed, 178 skipped, EXIT:0** → `tmp/offer-overtime-evidence/stage15-backend-default-env.log` (default Stage-0 feature flags / `SERVER_MODE=foreign`).
+- Frontend focused Vitest (Stages 11–12 surfaces): **111 passed, EXIT:0** → `tmp/offer-overtime-evidence/stage15-frontend-unit.log`.
+
+**Deviations and known gaps.** First, Postgres-gated skips remain expected offline (`MARKET_STAGE*_TEST_DATABASE_URL`, counter scratch DB, etc.). Second, Stage 1 real-database migration gate remains open for merge/deploy. Third, no full browser e2e matrix in this environment (unit coverage for Market/OffersList/Settings only). Fourth, reconciler delivery-ref mismatches remain detect-only. Fifth, controlled concurrency / two-server live contract proof is deferred to Stage 16 staging acceptance.
+
+**Next stage prerequisites.** Stage 16 may begin (two-server staging acceptance) after staging deploy of migration-first + compatible app code with all users at overtime `0`.
+
 ### Stage 16 — Two-Server Staging Acceptance
 
 **Goal:** validate the complete behavior against real staging Iran/foreign topology.
