@@ -269,6 +269,68 @@ class TelegramDeliveryQueueContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertIs(await self.claim(queue, worker="b"), trade)
         self.assertIs(await self.claim(queue, worker="c"), publish)
 
+    async def test_m0_order_is_callback_then_overtime_approval_then_publish(self):
+        """Decision #38: overtime approval is M0/rank 1, after rank 0, before publish."""
+        from core.telegram_delivery_queue_contract import priority_and_rank_for_action
+
+        self.assertEqual(
+            priority_and_rank_for_action(
+                TelegramDeliveryAction.OVERTIME_OWNER_APPROVAL
+            ),
+            (TelegramDeliveryPriority.M0, 1),
+        )
+        queue = InMemoryTelegramDeliveryQueue()
+        publish = await self.enqueue(
+            queue,
+            "publish",
+            feeder=TelegramFeederKind.OFFER_CONTROL,
+            action=TelegramDeliveryAction.OFFER_PUBLISH,
+        )
+        approval = await self.enqueue(
+            queue,
+            "approval",
+            action=TelegramDeliveryAction.OVERTIME_OWNER_APPROVAL,
+            delivery_deadline_at=NOW + timedelta(minutes=5),
+        )
+        callback = await self.enqueue(
+            queue,
+            "callback",
+            action=TelegramDeliveryAction.CALLBACK_DEADLINE,
+            delivery_deadline_at=NOW + timedelta(seconds=2),
+        )
+
+        self.assertIs(await self.claim(queue, worker="a"), callback)
+        self.assertIs(await self.claim(queue, worker="b"), approval)
+        self.assertIs(await self.claim(queue, worker="c"), publish)
+
+    async def test_m0_rank1_tie_break_prefers_earlier_delivery_deadline(self):
+        """Overtime approval and overdue TRADE_RESULT share (M0,1); deadline wins."""
+        queue = InMemoryTelegramDeliveryQueue()
+        approval = await self.enqueue(
+            queue,
+            "approval",
+            action=TelegramDeliveryAction.OVERTIME_OWNER_APPROVAL,
+            delivery_deadline_at=NOW + timedelta(minutes=3),
+        )
+        overdue_trade = await self.enqueue(
+            queue,
+            "trade",
+            feeder=TelegramFeederKind.TRADE,
+            action=TelegramDeliveryAction.TRADE_RESULT,
+            delivery_deadline_at=NOW - timedelta(seconds=1),
+        )
+        later_approval = await self.enqueue(
+            queue,
+            "approval-later",
+            action=TelegramDeliveryAction.OVERTIME_OWNER_APPROVAL,
+            delivery_deadline_at=NOW + timedelta(minutes=8),
+        )
+
+        # Overdue trade deadline is in the past → earliest among the three.
+        self.assertIs(await self.claim(queue, worker="a"), overdue_trade)
+        self.assertIs(await self.claim(queue, worker="b"), approval)
+        self.assertIs(await self.claim(queue, worker="c"), later_approval)
+
     async def test_trade_recipient_promotes_independently_after_five_seconds(self):
         queue = InMemoryTelegramDeliveryQueue()
         first = await self.enqueue(

@@ -1,9 +1,9 @@
 """Durable overtime request workflow on the shared OfferRequest ledger.
 
 Stage 4 owns create, queue, promote, cancel, reject, and decision-timeout
-transitions. Trade commit after owner approval is Stage 5. Telegram delivery
-and the bot/WebApp surfaces are later stages; this module only persists state
-and concurrency rules.
+transitions. Trade commit after owner approval is Stage 5. Stage 8 wires
+bot-origin ``OVERTIME_DELIVERING`` rows onto the Telegram delivery queue;
+WebApp surfaces remain later stages.
 """
 from __future__ import annotations
 
@@ -683,13 +683,63 @@ async def promote_next_for_owner(
             candidate,
             new_status=OfferRequestStatus.OVERTIME_DELIVERING,
         )
-    else:
-        candidate.presented_at = current
-        candidate.decision_deadline_at = decision_deadline_at(current)
-        _apply_overtime_transition(
-            candidate,
-            new_status=OfferRequestStatus.OVERTIME_PRESENTED,
+        if flush:
+            await db.flush()
+        # Lazy import keeps the ledger module free of queue package cycles.
+        from core.services.telegram_overtime_owner_approval_queue_service import (
+            enqueue_overtime_owner_approval_delivery,
         )
+
+        if offer is None:
+            await invalidate_request(
+                db,
+                candidate,
+                reason="overtime_promote_offer_missing_for_delivery",
+                now=current,
+                flush=flush,
+            )
+            return await promote_next_for_owner(
+                db,
+                request_home_server=home,
+                offer_owner_user_id=offer_owner_user_id,
+                normal_lifetime_minutes=normal_lifetime_minutes,
+                now=current,
+                load_offer=load_offer,
+                flush=flush,
+            )
+        enqueue_outcome = await enqueue_overtime_owner_approval_delivery(
+            db,
+            current_server=current_server(),
+            ledger=candidate,
+            offer=offer,
+            normal_lifetime_minutes=normal_lifetime_minutes,
+            now=current,
+        )
+        if enqueue_outcome.undeliverable_reason:
+            await invalidate_request(
+                db,
+                candidate,
+                reason=str(enqueue_outcome.undeliverable_reason),
+                now=current,
+                flush=flush,
+            )
+            return await promote_next_for_owner(
+                db,
+                request_home_server=home,
+                offer_owner_user_id=offer_owner_user_id,
+                normal_lifetime_minutes=normal_lifetime_minutes,
+                now=current,
+                load_offer=load_offer,
+                flush=flush,
+            )
+        return candidate
+
+    candidate.presented_at = current
+    candidate.decision_deadline_at = decision_deadline_at(current)
+    _apply_overtime_transition(
+        candidate,
+        new_status=OfferRequestStatus.OVERTIME_PRESENTED,
+    )
     if flush:
         await db.flush()
     return candidate

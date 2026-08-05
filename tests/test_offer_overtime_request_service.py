@@ -29,6 +29,9 @@ from core.services.offer_overtime_request_service import (
     record_completed_trade,
     reject_by_owner,
 )
+from core.services.telegram_overtime_owner_approval_queue_service import (
+    OvertimeOwnerApprovalEnqueueOutcome,
+)
 from models.offer import OfferStatus
 from models.offer_request import (
     OVERTIME_NONTERMINAL_STATUSES,
@@ -354,12 +357,23 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
     async def test_create_bot_request_promotes_to_delivering(self):
         offer = _offer(home_server="foreign")
         db = _MemoryDB(offers={7: offer})
+        enqueue = AsyncMock(
+            return_value=OvertimeOwnerApprovalEnqueueOutcome(
+                enqueued=True,
+                job_id=42,
+                job_created=True,
+            )
+        )
         with patch(
             "core.services.offer_overtime_request_service.current_server",
             return_value="foreign",
         ), patch(
             "core.services.offer_request_ledger_service.current_server",
             return_value="foreign",
+        ), patch(
+            "core.services.telegram_overtime_owner_approval_queue_service."
+            "enqueue_overtime_owner_approval_delivery",
+            enqueue,
         ):
             result = await self._create(
                 db,
@@ -371,6 +385,7 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result.ledger.result_status, OfferRequestStatus.OVERTIME_DELIVERING)
         self.assertIsNone(result.ledger.presented_at)
+        enqueue.assert_awaited_once()
 
         await mark_presented(
             db,

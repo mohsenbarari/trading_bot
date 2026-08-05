@@ -68,6 +68,11 @@ class TelegramDeliveryAction(str, Enum):
     # on the signed, short-lived Redis transport and are forbidden at durable
     # queue enqueue boundaries.
     OTP_DEADLINE = "otp_deadline"
+    # Private overtime owner-approval prompt. Static (M0, 1): after rank-0
+    # callback/expiry work, before offer publication (M0, 2). Shares rank 1
+    # with dynamically promoted overdue TRADE_RESULT; tie-break is
+    # delivery_deadline_at then created_sequence.
+    OVERTIME_OWNER_APPROVAL = "overtime_owner_approval"
     OFFER_PUBLISH = "offer_publish"
     OFFER_SUCCESS = "offer_success"
     OFFER_VALIDATION_RESPONSE = "offer_validation_response"
@@ -238,6 +243,7 @@ _ACTION_PRIORITY_AND_RANK: dict[TelegramDeliveryAction, tuple[TelegramDeliveryPr
     TelegramDeliveryAction.CALLBACK_DEADLINE: (TelegramDeliveryPriority.M0, 0),
     TelegramDeliveryAction.OTP_DEADLINE: (TelegramDeliveryPriority.M0, 0),
     TelegramDeliveryAction.OFFER_EXPIRY_CALLBACK: (TelegramDeliveryPriority.M0, 0),
+    TelegramDeliveryAction.OVERTIME_OWNER_APPROVAL: (TelegramDeliveryPriority.M0, 1),
     TelegramDeliveryAction.OFFER_PUBLISH: (TelegramDeliveryPriority.M0, 2),
     TelegramDeliveryAction.OFFER_SUCCESS: (TelegramDeliveryPriority.M1, 0),
     TelegramDeliveryAction.TRADE_RESULT: (TelegramDeliveryPriority.M1, 1),
@@ -313,6 +319,7 @@ _FEEDER_INTERNAL_RANK: dict[
     (TelegramFeederKind.TIMED_BOT, TelegramDeliveryAction.COSMETIC_CLEANUP): 4,
     (TelegramFeederKind.DIRECT, TelegramDeliveryAction.CALLBACK_DEADLINE): 0,
     (TelegramFeederKind.DIRECT, TelegramDeliveryAction.GENERAL_IMMEDIATE): 0,
+    (TelegramFeederKind.DIRECT, TelegramDeliveryAction.OVERTIME_OWNER_APPROVAL): 0,
     (TelegramFeederKind.DIRECT, TelegramDeliveryAction.PREAUTH_INTERACTION): 1,
     (TelegramFeederKind.DIRECT, TelegramDeliveryAction.PREAUTH_INTERACTION_EDIT): 2,
 }

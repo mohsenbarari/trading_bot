@@ -22,6 +22,7 @@ _SUPPRESS = {
     TelegramDeliveryAction.GENERAL_IMMEDIATE,
     TelegramDeliveryAction.PREAUTH_INTERACTION,
     TelegramDeliveryAction.TRADE_RESULT,
+    TelegramDeliveryAction.OVERTIME_OWNER_APPROVAL,
     TelegramDeliveryAction.TRADE_RESPONSE,
     TelegramDeliveryAction.TRADE_ALTERNATIVE,
     TelegramDeliveryAction.TRADE_UNAVAILABLE,
