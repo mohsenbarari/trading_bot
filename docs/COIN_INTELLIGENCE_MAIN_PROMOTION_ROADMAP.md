@@ -2299,3 +2299,22 @@ bundle قبلی قابل انتخاب‌اند و Collectorها همچنان ف�
   evidence واقعی از ورودی‌های staging است؛ سپس owner می‌تواند دربارهٔ
   selection محدود تصمیم بگیرد. `auto-selection` و production همچنان ممنوع
   هستند.
+
+### P7-H — چرخهٔ Web shadow با Snapshot جاری — 2026-08-05 — COMPLETE (no promotion)
+
+- یک درخواست `inference-preview` احراز‌شده در Web staging با قیمت تخمینی
+  همان Snapshot جاری اجرا شد؛ نتیجه `AUTO_SELECT` با یک candidate بود، اما
+  شمار Offerهای PostgreSQL پیش و پس از درخواست هر دو `25` باقی ماندند. این
+  تأیید می‌کند preview واقعاً shadow-only است و به ایجاد/انتشار Offer وصل
+  نیست.
+- یک ورودی خارج از بازه نیز عمداً بررسی شد و `ABSTAIN` با علت
+  `PRICE_OUTSIDE_PUBLISHED_RANGES` برگشت؛ بنابراین guard قیمت خارج از محدوده
+  فعال است و fallback امام ایجاد نمی‌شود.
+- گزارش ۲۴ساعتهٔ جدید در
+  `staging/evidence/rollout-metrics-24h-20260805T111753Z.json` ذخیره شد:
+  شش تصمیم (`ABSTAIN=3`, `AUTO_SELECT=3`, `CONFIRM=0`)، صفر انتخاب پذیرفته‌شده،
+  `auto_promotion_allowed=false`، privacy سالم و data-quality بدون خطا.
+- این چرخه هنوز دادهٔ کاربر واقعی یا Bot واقعی نیست؛ برای تصمیم promotion
+  کافی محسوب نمی‌شود. گام بعد جمع‌آوری ورودی‌های واقعی staging در چند ساعت
+  کاری و تفکیک آن‌ها از fixture/synthetic audit است. تا آن زمان تمام flagهای
+  selection و auto-selection و production خاموش می‌مانند.
