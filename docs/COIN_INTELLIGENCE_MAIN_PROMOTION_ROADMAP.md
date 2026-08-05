@@ -2279,3 +2279,23 @@ bundle قبلی قابل انتخاب‌اند و Collectorها همچنان ف�
     مرحله نباید rotate شوند؛
   - تا تکمیل این موارد، `selection` و `auto-selection` و هرگونه production
     rollout خاموش می‌مانند.
+
+### P7-G — contract preview برای Bot در محیط ایزوله — 2026-08-05 — COMPLETE (synthetic only)
+
+- suite مربوط به parser/preview Bot با environment کاملاً ساختگی اجرا شد:
+  `Ran 6 tests ... OK`. این تست‌ها تأیید کردند که نام کالای حذف‌شده در حالت
+  shadow وارد FSM یا Offer نمی‌شود و مسیر confirmation-only به انتخاب خودکار
+  تبدیل نمی‌شود.
+- همان contract در image staging، با `--network none`، filesystem خواندنی،
+  background jobs خاموش، بدون Telegram token و بدون اتصال DB واقعی اجرا شد.
+  نتیجهٔ smoke مستقیم `bot_shadow_preview=ok` بود؛ Snapshot غایب به پیام
+  shadowِ «بدون تغییر» منجر شد و هیچ ثبت آفر انجام نشد.
+- یک تلاش برای اجرای test module داخل image به‌دلیل آن‌که image عمداً فایل‌های
+  tests را شامل نمی‌کند اجرا نشد؛ این شکست محیطی است و به‌عنوان pass گزارش
+  نشده است. اعتبار contract با suite میزبان و smoke مستقیم داخل همان image
+  جداگانه اثبات شد.
+- این مرحله **Bot واقعی را روشن نکرده است**. credential، delivery worker،
+  Telegram polling و network همچنان غیرفعال‌اند. گیت بعدی فقط جمع‌آوری چند
+  evidence واقعی از ورودی‌های staging است؛ سپس owner می‌تواند دربارهٔ
+  selection محدود تصمیم بگیرد. `auto-selection` و production همچنان ممنوع
+  هستند.
