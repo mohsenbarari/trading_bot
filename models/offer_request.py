@@ -79,6 +79,23 @@ OVERTIME_OWNER_OCCUPYING_STATUSES = (
     OfferRequestStatus.OVERTIME_PRESENTED,
 )
 
+#: Terminal overtime outcomes. Success reuses COMPLETED_TRADE and is listed
+#: separately by the ledger service's full terminal set.
+OVERTIME_TERMINAL_STATUSES = (
+    OfferRequestStatus.OVERTIME_REJECTED_BY_OWNER,
+    OfferRequestStatus.OVERTIME_DECISION_EXPIRED,
+    OfferRequestStatus.OVERTIME_CANCELLED_BY_REQUESTER,
+    OfferRequestStatus.OVERTIME_INVALIDATED,
+    OfferRequestStatus.OVERTIME_DELIVERY_EXPIRED,
+    OfferRequestStatus.OVERTIME_REJECTED_REQUESTER_LIMIT,
+)
+
+#: Terminals that start the requester-offer cooldown (decision 12).
+OVERTIME_COOLDOWN_TRIGGER_STATUSES = (
+    OfferRequestStatus.OVERTIME_REJECTED_BY_OWNER,
+    OfferRequestStatus.OVERTIME_DECISION_EXPIRED,
+)
+
 
 def _status_sql_list(statuses) -> str:
     return ", ".join(f"'{status.value}'" for status in statuses)

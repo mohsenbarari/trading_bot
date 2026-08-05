@@ -809,6 +809,20 @@ The next gate is not a question but an approval: the roadmap below may begin onl
 
 **Exit criteria:** all request states are durable, idempotent, and mutually exclusive under concurrent access.
 
+#### Stage 4 completion notes
+
+**Status:** complete in code on `candidate/offer-overtime` at `STAGE4_SHA`.
+
+**Scope delivered.** New `core/services/offer_overtime_request_service.py` owns the durable overtime workflow on the shared `OfferRequest` ledger: create only when intake classification is `approval`, assign FIFO `queue_sequence` per `(offer_owner_user_id, request_home_server)`, promote the head when the owner seat is free, and apply cancel / owner-reject / decision-timeout / invalidate / claim-approval / completed-trade transitions through a legal-transition table. WebApp-origin promotions become `OVERTIME_PRESENTED` (30s clock starts); bot-origin promotions become `OVERTIME_DELIVERING` until `mark_presented` persists the Telegram message id. Same-offer exclusivity, requester outstanding limit (3), one-open-per-economic-owner, idempotent create on `(home, idempotency_key)`, and requester-offer cooldown after owner reject / decision timeout are enforced in the create path. Ledger helper `apply_offer_request_decision` gained `terminal_reason` / `decided_by_user_id`, and overtime terminal statuses were added to `TERMINAL_OFFER_REQUEST_STATUSES` so terminal rows stay immutable. Occupying statuses (`delivering` / `presented`) are the same set Stage 3's final-tail deferral already reads.
+
+**Affected components:** `core/services/offer_overtime_request_service.py`, `core/services/offer_request_ledger_service.py`, `models/offer_request.py` (`OVERTIME_TERMINAL_STATUSES`, `OVERTIME_COOLDOWN_TRIGGER_STATUSES`), and tests `tests/test_offer_overtime_request_service.py`.
+
+**Tests and results.** Targeted suites green via `make test-unit MODULES="tests.test_offer_overtime_request_service tests.test_offer_request_ledger_service tests.test_offer_request_ledger_model"` (26 tests): legal/illegal transitions, webapp promote to presented, bot promote to delivering then mark_presented, idempotent replay, same-offer contention, FIFO promote after reject, independent Iran/foreign owner seats, requester and per-owner limits, cancel-versus-reject first-wins, decision timeout + cooldown, owner approval claim + completed trade, exact decision-deadline refusal, and approval-only intake.
+
+**Deviations and known gaps.** First, promote-time revalidation in Stage 4 checks offer presence, `ACTIVE` status, and final-deadline only; full market/account/block/quantity/lot/ownership revalidation remains Stage 5 when approval re-enters the trade core. Second, concurrent mutual exclusion is covered at the service/FakeDB layer (including first-valid-command-wins on cancel vs reject); a real Postgres multi-writer stress test is not in this suite and can wait for Stage 5 integration tests under offer locks. Third, public trade routing, Telegram delivery, WebApp/Bot surfaces, and sync payload enrichment for nonterminal overtime rows remain later stages — this stage only persists state and concurrency rules. Fourth, the Stage 1 real-database migration gate remains open for merge/deploy.
+
+**Next stage prerequisites.** Stage 5 may begin. It must route `approval` intake into `create_overtime_request` instead of the direct trade path, and on owner approval re-enter the existing authoritative trade commit under the request/offer lock before calling `record_completed_trade`.
+
 ### Stage 5 — Authoritative Trade Integration
 
 **Goal:** connect overtime approval to the existing trade engine without duplicating trade rules.

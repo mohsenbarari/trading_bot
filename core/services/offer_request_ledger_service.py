@@ -22,6 +22,14 @@ TERMINAL_OFFER_REQUEST_STATUSES = frozenset(
         OfferRequestStatus.COMPLETED_TRADE,
         OfferRequestStatus.DUPLICATE_REPLAY,
         OfferRequestStatus.FAILED_INTERNAL,
+        # Overtime terminals. Success still uses COMPLETED_TRADE above so both
+        # workflows share one meaning of a committed trade.
+        OfferRequestStatus.OVERTIME_REJECTED_BY_OWNER,
+        OfferRequestStatus.OVERTIME_DECISION_EXPIRED,
+        OfferRequestStatus.OVERTIME_CANCELLED_BY_REQUESTER,
+        OfferRequestStatus.OVERTIME_INVALIDATED,
+        OfferRequestStatus.OVERTIME_DELIVERY_EXPIRED,
+        OfferRequestStatus.OVERTIME_REJECTED_REQUESTER_LIMIT,
     }
 )
 
@@ -126,6 +134,8 @@ def apply_offer_request_decision(
     internal_failure_code: str | None = None,
     internal_failure_context: Mapping[str, Any] | None = None,
     resulting_trade_id: int | None = None,
+    terminal_reason: str | None = None,
+    decided_by_user_id: int | None = None,
 ) -> OfferRequest:
     new_status = normalize_offer_request_status(result_status)
     current_status = normalize_offer_request_status(getattr(ledger, "result_status", OfferRequestStatus.RECEIVED))
@@ -148,6 +158,10 @@ def apply_offer_request_decision(
         ledger.internal_failure_context = dict(internal_failure_context)
     if resulting_trade_id is not None:
         ledger.resulting_trade_id = resulting_trade_id
+    if terminal_reason is not None:
+        ledger.terminal_reason = terminal_reason
+    if decided_by_user_id is not None:
+        ledger.decided_by_user_id = decided_by_user_id
     return ledger
 
 
