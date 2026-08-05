@@ -1,8 +1,10 @@
 # Combined Staging Report — Offer Overtime + Coin Intelligence
 
 Date: 2026-08-05  
-Writer branch: `candidate/combined-staging-overtime-coin` @ `f806c843`  
+Writer branch: `candidate/combined-staging-overtime-coin` @ `d629f03b`  
 Production mutation: **none**
+
+> Section 11 holds the final pre-staging verification and the go/no-go decision.
 
 ## 1. Branch / merge analysis
 
@@ -191,3 +193,163 @@ python3 scripts/run_staging_offer_overtime_acceptance.py --mode preflight \
 - No Telegram messages sent by this session
 - No merge to `main`
 - Combined staging integration branch prepared and tested at unit level
+
+---
+
+## 11. Final pre-staging verification (`d629f03b`)
+
+This section supersedes the provisional findings above. Every check below was run
+on the combined branch, in an isolated environment, against real PostgreSQL where
+schema behaviour was involved.
+
+### 11.1 Merge integrity — no lost work
+
+Five paths were changed by both parents. Diffing the merge result against each
+parent proves the merge is additive in both directions:
+
+| Path | Coin lines added on top of overtime | Overtime lines added on top of coin |
+| --- | --- | --- |
+| `api/routers/offers.py` | +429 / −15 | +147 / −44 |
+| `frontend/src/views/MarketView.vue` | +88 / −5 | +13 / −1 |
+| `core/config.py` | +11 | +5 / −1 |
+| `models/offer.py` | +10 | +11 |
+| `bot/states.py` | +1 | +5 |
+
+Every deletion was inspected: they are the replaced halves of the same function
+(overtime replaced the flat `expires_at_ts` computation with the lifecycle
+projection; coin replaced the flat parse response with the inference-aware one).
+No hunk from either feature was dropped. Both surfaces are still mounted —
+`OfferOvertimePreferencePanel` and `CommodityInferenceSelectionModal` in
+`MarketView.vue`, overtime lifecycle fields and coin inference preview/selection
+in the offers router.
+
+All 204 changed Python files compile.
+
+### 11.2 Combined migration on real PostgreSQL
+
+Scratch database `stage1_migration_combined_*` on the staging PostgreSQL
+container. Both feature chains descend from `a274f5a6b8c9`, so the merge
+revision `f9b0c1d2e3a4` is required for a single head.
+
+| Step | Result |
+| --- | --- |
+| `upgrade head` (117 revisions incl. both features) | passed, head `f9b0c1d2e3a4` |
+| Feature tables present | `coin_intelligence_market_outbox`, `coin_intelligence_inference_audits`, `coin_intelligence_inference_outcomes`, `offer_requests` |
+| Overtime partial indexes present | all four |
+| `users.offer_overtime_minutes` default | `0` |
+| Delivery actions present | `overtime_owner_approval`, `overtime_channel_edit`, `final_tail_channel_edit` |
+| `downgrade a274f5a6b8c9` | passed; coin tables and overtime indexes fully removed |
+| `upgrade head` again | passed, head `f9b0c1d2e3a4` |
+
+Rollback is therefore reversible **while no live overtime or coin rows exist**;
+overtime's own downgrade guard still refuses to discard live decision evidence.
+
+### 11.3 Runtime coupling between the two features
+
+`models/offer.py` registers the coin market-outbox SQLAlchemy listener at import
+time, with **no feature flag**. This is the only always-on coupling and it has
+two consequences for staging:
+
+1. `coin_intelligence_market_outbox` must exist before any Offer or Trade write.
+   Migration-first is not a preference here, it is a hard requirement.
+2. Dropping the coin tables while coin code is deployed would break every offer
+   write. Roll back code before schema, never the reverse.
+
+A probe on the scratch database exercised the overtime transitions against the
+live listener:
+
+| Overtime action | Outbox result |
+| --- | --- |
+| Offer created | one `OFFER_OPENED` row |
+| `overtime_trade_committed = True` only | **no new row** — the overtime marker does not fabricate a market event |
+| Terminal overtime expiry | `OFFER_EXPIRED` appended inside the same commit |
+| Idempotency keys | all distinct |
+
+Everything else coin adds to the app process is flag-gated and off by default
+(`coin_intelligence_inference_preview_enabled`, `_selection_enabled`,
+`_auto_selection_enabled`, `_snapshot_path`). Coin registers no background job in
+the app; its collectors and bridge run as systemd units outside it.
+
+### 11.4 Defects found and fixed on the integration branch
+
+Three failures were real. All three were reproduced on the coin parent branch, so
+the merge introduced none of them — but they would have failed the staging gate.
+
+1. **Coin tables unregistered in the sync registry** (`c773a07d`).
+   `test_registry_covers_every_current_model_table` failed for all three coin
+   tables. They are now `NO_SYNC` local-only entries. The outbox in particular
+   must never sync: the authoritative Offer/Trade row already reaches the peer, so
+   copying the projection would double-count the same market event.
+2. **The coin inference-choice state had no text-offer recovery path** (`d629f03b`).
+   Coin stacked a second `@router.message` decorator on
+   `handle_text_offer_while_confirmation_pending`, which registered a second
+   handler ahead of the `awaiting_text_confirm` one and left the new state outside
+   the recovery-state contract. Both states now go through one
+   `_TEXT_OFFER_PENDING_CONFIRMATION_STATES` tuple used by the router and the test.
+3. **Delivery callsite fingerprint drift** (`3a02952c`, refreshed in `d629f03b`).
+   Coin inserted code above eight reviewed Telegram callsites. The 92 reviewed
+   callsites are byte-for-byte identical in path, scope, callee, kind, and
+   disposition — only line numbers moved — so the identity fingerprint was
+   re-reviewed rather than the dispositions relaxed. Counts are unchanged and
+   `remaining_interactive_direct` stays at 0.
+
+### 11.5 Test evidence on `d629f03b`
+
+| Suite | Result |
+| --- | --- |
+| Backend combined matrix (286 modules: Stage 15 list ∪ all coin ∪ shared seams) | **2154 tests, 178 skipped, OK** |
+| Combined migration up / down / re-up on PostgreSQL | **passed** |
+| Coin-outbox ↔ overtime coupling probe | **passed** |
+| Frontend unit (132 files) | 1186 / 1188 passed |
+| Frontend production build | **passed** (169 precache entries) |
+
+Two environment caveats worth recording, because both produced misleading
+failures during this review:
+
+- **Shell environment pollution.** The first matrix run reported 49 failures and
+  5 errors. The terminal exported `SERVER_MODE=iran`,
+  `REGISTRATION_SYNC_V2_ENABLED=true`, `TELEGRAM_DIRECT_REGISTRATION_ENABLED=true`
+  and others, and OS variables outrank the env file in pydantic-settings. Re-running
+  under `env -i … APP_ENV_FILE=.env.test` left only the three genuine defects above.
+  Always run the gate with an isolated environment.
+- **Frontend flakiness under parallel load.** The two remaining `UserProfile.test.ts`
+  failures are 5s timeouts; the file passes 16/16 in isolation. The overtime parent
+  branch fails the same full suite with a *different* set (`PublicProfile`,
+  `LoginView`), so the failing set moves between runs. This is pre-existing
+  load-sensitive flakiness, not a merge effect.
+- **Full 634-module discovery run.** Excluded from the gate: it stalls for tens of
+  minutes inside the heavy infrastructure/matrix/mutation suites, which are
+  unrelated to either feature. The 286-module curated matrix is the evidence of
+  record, consistent with the Stage 15 pattern.
+
+### 11.6 Go / no-go
+
+**Go for staging deployment of `d629f03b`**, under these conditions:
+
+1. Deploy migration-first to `f9b0c1d2e3a4` on both peers before starting app code.
+2. Keep every staging user at overtime `0` and all `coin_intelligence_inference_*`
+   flags off; enable only for isolated test users afterwards.
+3. Run the acceptance preflight with the combined branch name:
+
+```bash
+python3 scripts/run_staging_offer_overtime_acceptance.py --mode preflight \
+  --expected-branch candidate/combined-staging-overtime-coin \
+  --expected-release-sha "$(git rev-parse HEAD)"
+```
+
+**Still blocked, unchanged from section 9:** Iran staging times out and foreign
+`/foreign-sync` returns 502, so neither the acceptance preflight nor `execute` can
+pass yet. Restore both peers first.
+
+**Not ready for `main`.** Two items must close first: the Stage 16 acceptance
+execute on real staging, and the coin-price vs coin-commodity comparison required
+by the handoff prompt.
+
+### 11.7 Watch items for the staging session
+
+| Item | Why it matters |
+| --- | --- |
+| Outbox idempotency collisions | `idempotency_key` folds `version_id`; a retried transition that reuses a version would raise `IntegrityError` inside the offer transaction |
+| Outbox growth under overtime expiry sweeps | Each swept offer appends a row; confirm the consumer keeps up |
+| `expected_alembic_head` in the acceptance runner | Still pinned to the overtime head `e8a4b5c6d7e9`; on the combined line the head is `f9b0c1d2e3a4` |
+| Coin flag flip with overtime active | Never validated together; enable coin preview only after overtime acceptance is green |
