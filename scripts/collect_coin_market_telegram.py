@@ -15,6 +15,14 @@ from pathlib import Path
 import sys
 from typing import Sequence
 
+# Direct execution (``python scripts/...``) places ``scripts/`` on sys.path.
+# Keep the guarded operational command independent of an ambient PYTHONPATH,
+# just like the Snapshot publisher; optional transport dependencies may still
+# be supplied separately by the runtime.
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
 from core.market_intelligence.public_telegram.sources import (
     PUBLIC_TELEGRAM_SOURCES,
     source_for_code,

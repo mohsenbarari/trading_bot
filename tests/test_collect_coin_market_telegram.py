@@ -5,7 +5,10 @@ from __future__ import annotations
 from contextlib import redirect_stdout
 import io
 import json
+import os
 from pathlib import Path
+import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -73,6 +76,40 @@ class CollectCoinMarketTelegramCommandTests(unittest.TestCase):
             "--session", "missing/public-reader",
         )
         self.assertEqual((result, payload["reason"]), (2, "telegram_session_parent_unavailable"))
+
+    def test_documented_direct_execution_resolves_the_local_package(self) -> None:
+        script = Path(__file__).resolve().parents[1] / "scripts/collect_coin_market_telegram.py"
+        environment = dict(os.environ)
+        for key in (
+            "COIN_MARKET_TELEGRAM_API_ID",
+            "COIN_MARKET_TELEGRAM_API_HASH",
+            "COIN_MARKET_TELEGRAM_PHONE",
+        ):
+            environment.pop(key, None)
+        completed = subprocess.run(
+            [
+                sys.executable,
+                str(script),
+                "--runtime-root",
+                str(self.root),
+                "--market-store",
+                "market/market.sqlite3",
+                "--session",
+                "session/public-reader",
+            ],
+            cwd=self.root,
+            env=environment,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(completed.returncode, 2)
+        payload = json.loads(completed.stdout)
+        self.assertEqual(
+            (payload["status"], payload["reason"]),
+            ("FAILED", "public_telegram_api_id_missing_or_invalid"),
+        )
+        self.assertEqual(completed.stderr, "")
 
 
 if __name__ == "__main__":

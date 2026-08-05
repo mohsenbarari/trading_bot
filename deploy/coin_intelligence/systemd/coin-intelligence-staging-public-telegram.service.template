@@ -1,0 +1,13 @@
+[Unit]
+Description=Collect approved public coin-market Telegram facts into the staging Market Store
+Wants=network-online.target
+After=network-online.target docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+# The collector reads only the four allowlisted public channels. Raw messages
+# and Telegram message IDs remain transient; the canonical Market Store keeps
+# only normalized market facts. A protected duplicate session avoids stopping
+# the legacy collector during the staging transition.
+ExecStart=/usr/bin/docker run --rm --network bridge --read-only --env-file @CREDENTIAL_ENV@ -e PYTHONPATH=/deps -v @RUNTIME_ROOT@:/runtime:rw -v @TELETHON_DEPS@:/deps:ro @IMAGE@ python scripts/collect_coin_market_telegram.py --runtime-root /runtime --market-store market/market.sqlite3 --session session/public-market-telegram-reader --days 1 --batch-size 500
