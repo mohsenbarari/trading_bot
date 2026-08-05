@@ -1004,55 +1004,64 @@ def setup_telegram_notification_outbox_events():
     logger.info("✅ TelegramNotificationOutbox event listeners registered")
 
 
+def build_user_sync_payload(target, *, include_created_at: bool = False) -> Dict[str, Any]:
+    """Explicit wire payload for a synced user row.
+
+    Module level rather than a closure so the field list can be asserted
+    directly; a field missing here simply never reaches the peer.
+    """
+    data = {
+        "id": target.id,
+        "telegram_id": target.telegram_id,
+        "username": target.username,
+        "full_name": target.full_name,
+        "mobile_number": target.mobile_number,
+        "account_name": target.account_name,
+        "address": target.address,
+        "role": target.role.value if target.role else None,
+        "account_status": target.account_status.value if getattr(target, "account_status", None) else None,
+        "deactivated_at": target.deactivated_at.isoformat() if getattr(target, "deactivated_at", None) else None,
+        "messenger_grace_expires_at": target.messenger_grace_expires_at.isoformat() if getattr(target, "messenger_grace_expires_at", None) else None,
+        "messenger_blocked_at": target.messenger_blocked_at.isoformat() if getattr(target, "messenger_blocked_at", None) else None,
+        "global_lock_grace_expires_at": target.messenger_grace_expires_at.isoformat() if getattr(target, "messenger_grace_expires_at", None) else None,
+        "global_web_locked_at": target.messenger_blocked_at.isoformat() if getattr(target, "messenger_blocked_at", None) else None,
+        "has_bot_access": target.has_bot_access,
+        "bot_onboarding_required_step": getattr(target, "bot_onboarding_required_step", 0),
+        "bot_onboarding_completed_step": getattr(target, "bot_onboarding_completed_step", 0),
+        "bot_onboarding_completed_at": target.bot_onboarding_completed_at.isoformat() if getattr(target, "bot_onboarding_completed_at", None) else None,
+        "home_server": target.home_server,
+        "is_deleted": target.is_deleted,
+        "deleted_at": target.deleted_at.isoformat() if target.deleted_at else None,
+        "can_block_users": target.can_block_users,
+        "max_blocked_users": target.max_blocked_users,
+        "max_daily_trades": target.max_daily_trades,
+        "max_active_commodities": target.max_active_commodities,
+        "max_daily_requests": target.max_daily_requests,
+        "trading_restricted_until": target.trading_restricted_until.isoformat() if target.trading_restricted_until else None,
+        "limitations_expire_at": target.limitations_expire_at.isoformat() if target.limitations_expire_at else None,
+        "trades_count": target.trades_count,
+        "commodities_traded_count": target.commodities_traded_count,
+        "channel_messages_count": target.channel_messages_count,
+        "counter_epoch": int(getattr(target, "counter_epoch", 1) or 1),
+        "max_sessions": target.max_sessions,
+        "max_accountants": getattr(target, "max_accountants", 3),
+        "max_customers": getattr(target, "max_customers", 5),
+        "offer_overtime_minutes": int(getattr(target, "offer_overtime_minutes", 0) or 0),
+        "last_seen_at": target.last_seen_at.isoformat() if target.last_seen_at else None,
+        "sync_version": int(getattr(target, "sync_version", 1) or 1),
+    }
+    if include_created_at:
+        data["created_at"] = target.created_at.isoformat() if target.created_at else None
+    else:
+        data["updated_at"] = target.updated_at.isoformat() if target.updated_at else None
+    return data
+
+
 def setup_user_events():
     """Setup event listeners for User model"""
     from models.user import User
 
-    def user_payload(target, *, include_created_at: bool) -> Dict[str, Any]:
-        data = {
-            "id": target.id,
-            "telegram_id": target.telegram_id,
-            "username": target.username,
-            "full_name": target.full_name,
-            "mobile_number": target.mobile_number,
-            "account_name": target.account_name,
-            "address": target.address,
-            "role": target.role.value if target.role else None,
-            "account_status": target.account_status.value if getattr(target, "account_status", None) else None,
-            "deactivated_at": target.deactivated_at.isoformat() if getattr(target, "deactivated_at", None) else None,
-            "messenger_grace_expires_at": target.messenger_grace_expires_at.isoformat() if getattr(target, "messenger_grace_expires_at", None) else None,
-            "messenger_blocked_at": target.messenger_blocked_at.isoformat() if getattr(target, "messenger_blocked_at", None) else None,
-            "global_lock_grace_expires_at": target.messenger_grace_expires_at.isoformat() if getattr(target, "messenger_grace_expires_at", None) else None,
-            "global_web_locked_at": target.messenger_blocked_at.isoformat() if getattr(target, "messenger_blocked_at", None) else None,
-            "has_bot_access": target.has_bot_access,
-            "bot_onboarding_required_step": getattr(target, "bot_onboarding_required_step", 0),
-            "bot_onboarding_completed_step": getattr(target, "bot_onboarding_completed_step", 0),
-            "bot_onboarding_completed_at": target.bot_onboarding_completed_at.isoformat() if getattr(target, "bot_onboarding_completed_at", None) else None,
-            "home_server": target.home_server,
-            "is_deleted": target.is_deleted,
-            "deleted_at": target.deleted_at.isoformat() if target.deleted_at else None,
-            "can_block_users": target.can_block_users,
-            "max_blocked_users": target.max_blocked_users,
-            "max_daily_trades": target.max_daily_trades,
-            "max_active_commodities": target.max_active_commodities,
-            "max_daily_requests": target.max_daily_requests,
-            "trading_restricted_until": target.trading_restricted_until.isoformat() if target.trading_restricted_until else None,
-            "limitations_expire_at": target.limitations_expire_at.isoformat() if target.limitations_expire_at else None,
-            "trades_count": target.trades_count,
-            "commodities_traded_count": target.commodities_traded_count,
-            "channel_messages_count": target.channel_messages_count,
-            "counter_epoch": int(getattr(target, "counter_epoch", 1) or 1),
-            "max_sessions": target.max_sessions,
-            "max_accountants": getattr(target, "max_accountants", 3),
-            "max_customers": getattr(target, "max_customers", 5),
-            "last_seen_at": target.last_seen_at.isoformat() if target.last_seen_at else None,
-            "sync_version": int(getattr(target, "sync_version", 1) or 1),
-        }
-        if include_created_at:
-            data["created_at"] = target.created_at.isoformat() if target.created_at else None
-        else:
-            data["updated_at"] = target.updated_at.isoformat() if target.updated_at else None
-        return data
+    user_payload = build_user_sync_payload
 
     @event.listens_for(User, 'before_update')
     def bump_user_sync_version(mapper, connection, target):

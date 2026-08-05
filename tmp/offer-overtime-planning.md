@@ -723,7 +723,7 @@ The next gate is not a question but an approval: the roadmap below may begin onl
 
 **Evidence retained:** `tmp/offer-overtime-evidence/stage1-regression.log`, `stage1-extra.log`, and `stage1-extra-default-env.log`.
 
-**Next stage prerequisites.** Before Stage 2, run this migration up and down on a real database, confirm the default-zero backfill on a representative dataset, and probe the partial indexes under concurrent writers. Stage 2 is the first stage that gives the new storage a value, so it must not begin while the migration is unproven.
+**Next stage prerequisites.** This migration must be run up and down on a real database, with the default-zero backfill confirmed on a representative dataset and the partial indexes probed under concurrent writers. That gate is on **deploying or merging** the feature, not on writing later stages: subsequent stages may be developed against the models while it stays open, since nothing they add is deployable either until the schema is proven. The gate is tracked here until a database-backed environment is available, and Stage 16 cannot be entered while it remains open.
 
 ### Stage 2 — Canonical User Preference and Offer Snapshot
 
