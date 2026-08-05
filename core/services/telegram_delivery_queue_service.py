@@ -89,6 +89,8 @@ CHANNEL_EDITOR_ACTIONS = frozenset(
         TelegramDeliveryAction.EXPIRED_OFFER_EDIT,
         TelegramDeliveryAction.CANCELLED_OFFER_EDIT,
         TelegramDeliveryAction.OTHER_ACTIVE_OFFER_EDIT,
+        TelegramDeliveryAction.OVERTIME_CHANNEL_EDIT,
+        TelegramDeliveryAction.FINAL_TAIL_CHANNEL_EDIT,
         TelegramDeliveryAction.INVALID_ACTION_BUTTON_EDIT,
         TelegramDeliveryAction.RECONCILIATION_EDIT,
     }

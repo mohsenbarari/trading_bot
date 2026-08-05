@@ -91,6 +91,12 @@ class TelegramDeliveryAction(str, Enum):
     EXPIRED_OFFER_EDIT = "expired_offer_edit"
     CANCELLED_OFFER_EDIT = "cancelled_offer_edit"
     OTHER_ACTIVE_OFFER_EDIT = "other_active_offer_edit"
+    # Wall-clock overtime / final-tail channel edits. Distinct actions so each
+    # phase can enqueue at the same Offer.version_id without colliding with
+    # OTHER_ACTIVE / RECONCILIATION dedupe keys or failing freshness
+    # source_version == offer.version_id checks.
+    OVERTIME_CHANNEL_EDIT = "overtime_channel_edit"
+    FINAL_TAIL_CHANNEL_EDIT = "final_tail_channel_edit"
     INVALID_ACTION_BUTTON_EDIT = "invalid_action_button_edit"
     RECONCILIATION_EDIT = "reconciliation_edit"
     NEW_USER_MEMBERSHIP = "new_user_membership"
@@ -270,6 +276,8 @@ _ACTION_PRIORITY_AND_RANK: dict[TelegramDeliveryAction, tuple[TelegramDeliveryPr
     TelegramDeliveryAction.DELAYED_RESTRICTION: (TelegramDeliveryPriority.M5, 0),
     TelegramDeliveryAction.TARGETED_ADMIN_MESSAGE: (TelegramDeliveryPriority.M5, 1),
     TelegramDeliveryAction.OTHER_ACTIVE_OFFER_EDIT: (TelegramDeliveryPriority.M5, 2),
+    TelegramDeliveryAction.OVERTIME_CHANNEL_EDIT: (TelegramDeliveryPriority.M5, 2),
+    TelegramDeliveryAction.FINAL_TAIL_CHANNEL_EDIT: (TelegramDeliveryPriority.M5, 2),
     TelegramDeliveryAction.TRADE_NONCRITICAL: (TelegramDeliveryPriority.M5, 3),
     TelegramDeliveryAction.ADMIN_BROADCAST: (TelegramDeliveryPriority.M6, 0),
     TelegramDeliveryAction.GENERAL_ANNOUNCEMENT: (TelegramDeliveryPriority.M6, 1),
@@ -294,6 +302,8 @@ _FEEDER_INTERNAL_RANK: dict[
     (TelegramFeederKind.OFFER_EDIT, TelegramDeliveryAction.EXPIRED_OFFER_EDIT): 2,
     (TelegramFeederKind.OFFER_EDIT, TelegramDeliveryAction.CANCELLED_OFFER_EDIT): 3,
     (TelegramFeederKind.OFFER_EDIT, TelegramDeliveryAction.OTHER_ACTIVE_OFFER_EDIT): 4,
+    (TelegramFeederKind.OFFER_EDIT, TelegramDeliveryAction.OVERTIME_CHANNEL_EDIT): 4,
+    (TelegramFeederKind.OFFER_EDIT, TelegramDeliveryAction.FINAL_TAIL_CHANNEL_EDIT): 4,
     (TelegramFeederKind.OFFER_EDIT, TelegramDeliveryAction.RECONCILIATION_EDIT): 5,
     (TelegramFeederKind.TRADE, TelegramDeliveryAction.TRADE_RESULT): 0,
     (TelegramFeederKind.TRADE, TelegramDeliveryAction.TRADE_RESPONSE): 1,

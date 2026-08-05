@@ -18,6 +18,7 @@ from core.services.cross_server_recovery_service import active_publication_is_ga
 from core.services.telegram_offer_queue_service import (
     TelegramOfferQueueError,
     enqueue_current_offer_delivery,
+    enqueue_offer_lifecycle_channel_handoffs,
     load_offer_edit_queue_candidates,
     load_offer_edit_fresh_success_counts,
     load_offer_publication_queue_candidates,
@@ -39,6 +40,7 @@ _loop_errors = RepeatedErrorLogger(every=10)
 class TelegramOfferQueueFeederReport:
     publication_handoffs: int = 0
     edit_handoffs: int = 0
+    lifecycle_handoffs: int = 0
     deduplicated: int = 0
     skipped: int = 0
     invalid: int = 0
@@ -113,6 +115,50 @@ async def _handoff_candidates(
     return handed_off, deduplicated, skipped, invalid
 
 
+async def _handoff_lifecycle_candidates(
+    db,
+    *,
+    expected_channel_id: int,
+    offer_expiry_minutes: int,
+    now,
+) -> tuple[int, int, int, int]:
+    handed_off = 0
+    deduplicated = 0
+    skipped = 0
+    invalid = 0
+    try:
+        async with db.begin_nested():
+            results = await enqueue_offer_lifecycle_channel_handoffs(
+                db,
+                current_server=current_server(),
+                expected_channel_id=expected_channel_id,
+                offer_expiry_minutes=offer_expiry_minutes,
+                limit=_batch_limit(),
+                now=now,
+            )
+    except TelegramOfferQueueError as exc:
+        invalid += 1
+        logger.error(
+            "Offer lifecycle queue handoff rejected",
+            extra={
+                "event": "telegram_offer_queue_feeder.invalid_lifecycle_batch",
+                "reason": str(exc)[:120],
+            },
+        )
+        await db.commit()
+        return handed_off, deduplicated, skipped, invalid
+
+    for result in results:
+        if result.queue_result is None:
+            skipped += 1
+        elif result.queue_result.created:
+            handed_off += 1
+        else:
+            deduplicated += 1
+    await db.commit()
+    return handed_off, deduplicated, skipped, invalid
+
+
 async def run_telegram_offer_queue_handoff_cycle() -> TelegramOfferQueueFeederReport:
     assert_background_job_authority(JOB_TELEGRAM_DELIVERY_QUEUE)
     _assert_queue_runtime_owner()
@@ -131,6 +177,7 @@ async def run_telegram_offer_queue_handoff_cycle() -> TelegramOfferQueueFeederRe
     publication_gated = await active_publication_is_gated()
     publication_counts = (0, 0, 0, 0)
     edit_counts = (0, 0, 0, 0)
+    lifecycle_counts = (0, 0, 0, 0)
     async with AsyncSessionLocal() as db:
         if not publication_gated:
             publication_now = await telegram_delivery_database_now(db)
@@ -167,12 +214,21 @@ async def run_telegram_offer_queue_handoff_cycle() -> TelegramOfferQueueFeederRe
             now=edit_now,
         )
 
+        lifecycle_now = await telegram_delivery_database_now(db)
+        lifecycle_counts = await _handoff_lifecycle_candidates(
+            db,
+            expected_channel_id=channel_id,
+            offer_expiry_minutes=expiry_minutes,
+            now=lifecycle_now,
+        )
+
     return TelegramOfferQueueFeederReport(
         publication_handoffs=publication_counts[0],
         edit_handoffs=edit_counts[0],
-        deduplicated=publication_counts[1] + edit_counts[1],
-        skipped=publication_counts[2] + edit_counts[2],
-        invalid=publication_counts[3] + edit_counts[3],
+        lifecycle_handoffs=lifecycle_counts[0],
+        deduplicated=publication_counts[1] + edit_counts[1] + lifecycle_counts[1],
+        skipped=publication_counts[2] + edit_counts[2] + lifecycle_counts[2],
+        invalid=publication_counts[3] + edit_counts[3] + lifecycle_counts[3],
         publication_gated=publication_gated,
     )
 
@@ -191,6 +247,7 @@ async def telegram_offer_queue_handoff_loop() -> None:
                     (
                         report.publication_handoffs,
                         report.edit_handoffs,
+                        report.lifecycle_handoffs,
                         report.deduplicated,
                         report.skipped,
                         report.invalid,
@@ -205,6 +262,7 @@ async def telegram_offer_queue_handoff_loop() -> None:
                             "iteration": iteration,
                             "publication_handoffs": report.publication_handoffs,
                             "edit_handoffs": report.edit_handoffs,
+                            "lifecycle_handoffs": report.lifecycle_handoffs,
                             "deduplicated": report.deduplicated,
                             "skipped": report.skipped,
                             "invalid": report.invalid,

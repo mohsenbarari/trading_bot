@@ -27,6 +27,10 @@ from core.services.telegram_delivery_queue_service import (
     enqueue_telegram_delivery_job,
     telegram_delivery_database_now,
 )
+from core.services.telegram_offer_channel_service import (
+    CHANNEL_LIFECYCLE_METADATA_KEY,
+    project_offer_channel_lifecycle,
+)
 from core.services.telegram_offer_publication_service import (
     get_or_create_telegram_publication_state,
 )
@@ -630,3 +634,105 @@ async def load_offer_edit_queue_candidates(
         )
     ).all()
     return [TelegramOfferQueueCandidate(offer=row[0], state=row[1]) for row in rows]
+
+
+_LIFECYCLE_CHANNEL_EDIT_ACTIONS = {
+    "overtime": TelegramDeliveryAction.OVERTIME_CHANNEL_EDIT,
+    "final_tail": TelegramDeliveryAction.FINAL_TAIL_CHANNEL_EDIT,
+}
+
+
+def _publication_metadata_dict(state: OfferPublicationState | None) -> dict[str, Any]:
+    raw = getattr(state, "state_metadata", None) if state is not None else None
+    if not isinstance(raw, dict):
+        return {}
+    return dict(raw)
+
+
+async def enqueue_offer_lifecycle_channel_handoffs(
+    db: AsyncSession,
+    *,
+    current_server: str,
+    expected_channel_id: int,
+    offer_expiry_minutes: int | None,
+    limit: int,
+    now: datetime | None = None,
+) -> list[TelegramOfferQueueHandoffResult]:
+    """Enqueue ACTIVE channel edits when wall-clock overtime/final-tail changes.
+
+    Pure phase transitions do not bump ``Offer.version_id``, so the normal edit
+    feeder cannot observe them. Track the last rendered phase on
+    ``OfferPublicationState.state_metadata`` and enqueue dedicated lifecycle
+    actions that share the current offer version (freshness-safe) while keeping
+    distinct dedupe keys per phase.
+    """
+    if offer_expiry_minutes is None or int(offer_expiry_minutes) <= 0:
+        return []
+
+    results: list[TelegramOfferQueueHandoffResult] = []
+    clock = _normalized_time(
+        now if now is not None else await telegram_delivery_database_now(db)
+    )
+    channel_id = _nonzero_int(
+        expected_channel_id,
+        reason="telegram_offer_queue_channel_invalid",
+    )
+    rows = (
+        await db.execute(
+            select(Offer, OfferPublicationState)
+            .join(
+                OfferPublicationState,
+                and_(
+                    OfferPublicationState.offer_public_id == Offer.offer_public_id,
+                    OfferPublicationState.surface
+                    == OfferPublicationSurface.TELEGRAM_CHANNEL,
+                ),
+            )
+            .options(selectinload(Offer.commodity))
+            .where(
+                Offer.status == OfferStatus.ACTIVE,
+                Offer.version_id.is_not(None),
+                OfferPublicationState.telegram_message_id.is_not(None),
+                OfferPublicationState.telegram_chat_id == channel_id,
+            )
+            .order_by(
+                func.coalesce(Offer.updated_at, Offer.created_at).asc(),
+                Offer.id.asc(),
+            )
+            .limit(max(1, int(limit)))
+            .with_for_update(of=Offer, skip_locked=True)
+        )
+    ).all()
+
+    for offer, state in rows:
+        projection = project_offer_channel_lifecycle(
+            offer,
+            normal_lifetime_minutes=int(offer_expiry_minutes),
+            as_of=clock,
+        )
+        phase = projection.phase.value
+        action = _LIFECYCLE_CHANNEL_EDIT_ACTIONS.get(phase)
+        if action is None:
+            continue
+        metadata = _publication_metadata_dict(state)
+        if str(metadata.get(CHANNEL_LIFECYCLE_METADATA_KEY) or "") == phase:
+            continue
+        try:
+            handoff = await enqueue_current_offer_delivery(
+                db,
+                current_server=current_server,
+                offer=offer,
+                state=state,
+                expected_channel_id=channel_id,
+                offer_expiry_minutes=offer_expiry_minutes,
+                action=action,
+                now=clock,
+            )
+        except TelegramOfferQueueError:
+            continue
+        if handoff.queue_result is not None and handoff.skipped_reason is None:
+            metadata[CHANNEL_LIFECYCLE_METADATA_KEY] = phase
+            state.state_metadata = metadata
+            await db.flush()
+        results.append(handoff)
+    return results
