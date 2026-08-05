@@ -22,7 +22,7 @@ class CoinRateEngineTests(unittest.TestCase):
         self.connection.close()
         self.tempdir.cleanup()
 
-    def add(self, key: str, *, instrument: str, price: int, unit: str, at: str, settlement: str, form: str, event_type: str = "QUOTE") -> None:
+    def add(self, key: str, *, instrument: str, price: int, unit: str, at: str, settlement: str, form: str, event_type: str = "QUOTE", is_conditional: bool = False) -> None:
         upsert_observation(
             self.connection,
             MarketObservation(
@@ -30,6 +30,7 @@ class CoinRateEngineTests(unittest.TestCase):
                 event_time_utc=at, available_at_utc=at, instrument=instrument, market_label="TEST_RATE",
                 settlement_term=settlement, trade_form=form, event_type=event_type, side="MID",
                 price=Decimal(price), price_unit=unit, quantity=None, quantity_unit=None,
+                is_conditional=is_conditional,
             ),
         )
 
@@ -42,6 +43,19 @@ class CoinRateEngineTests(unittest.TestCase):
         bahar = self.rate("BAHAR", "CASH")
         self.assertEqual((bahar.status, bahar.method, bahar.estimated_project_price), ("ESTIMATED", "LOW_DATE_MELTED_INTRINSIC", 180_900))
         self.assertLess(bahar.upper_project_price - bahar.lower_project_price, 5_000)
+
+    def test_comparable_physical_condition_is_used_but_outlier_condition_is_not(self) -> None:
+        self.add("normal-1", instrument="MELTED_GOLD_PRIVATE", price=803_000_000, unit="IRT_PER_MESGHAL_750", at="2026-08-04T10:09:00Z", settlement="TODAY", form="PHYSICAL", event_type="OFFER")
+        self.add("normal-2", instrument="MELTED_GOLD_PRIVATE", price=803_100_000, unit="IRT_PER_MESGHAL_750", at="2026-08-04T10:09:05Z", settlement="TODAY", form="PHYSICAL", event_type="OFFER")
+        self.add("comparable", instrument="MELTED_GOLD_PRIVATE", price=803_200_000, unit="IRT_PER_MESGHAL_750", at="2026-08-04T10:09:10Z", settlement="TODAY", form="PHYSICAL", event_type="OFFER", is_conditional=True)
+        for index, at in enumerate(("15", "20", "25"), start=1):
+            self.add(f"outlier-{index}", instrument="MELTED_GOLD_PRIVATE", price=820_000_000, unit="IRT_PER_MESGHAL_750", at=f"2026-08-04T10:09:{at}Z", settlement="TODAY", form="PHYSICAL", event_type="OFFER", is_conditional=True)
+        self.connection.commit()
+
+        bahar = self.rate("BAHAR", "CASH")
+
+        self.assertEqual((bahar.status, bahar.underlying_source), ("ESTIMATED", "PRIVATE_PHYSICAL_TODAY"))
+        self.assertEqual(bahar.estimated_project_price, 180_950)
 
     def test_same_coin_anchor_moves_with_new_underlying_price(self) -> None:
         self.add("gold-old", instrument="MELTED_GOLD_PRIVATE", price=803_000_000, unit="IRT_PER_MESGHAL_750", at="2026-08-04T10:00:00Z", settlement="TODAY", form="PHYSICAL")

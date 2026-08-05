@@ -11,31 +11,50 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+import math
 import re
 import sqlite3
-from typing import Iterable, Mapping
+from statistics import median
+from typing import Iterable, Mapping, Sequence
 
 from .market_contracts import MarketObservation, derive_event_key, normalize_utc
 from .market_store import upsert_observation
 
 
-PRIVATE_GOLD_PARSER_VERSION = "private-gold-rules-v1"
+PRIVATE_GOLD_PARSER_VERSION = "private-gold-rules-v2"
 PRIVATE_GOLD_SOURCE_CODE = "PRIVATE_GOLD_CHANNEL"
 PRIVATE_GOLD_MINUTE_SOURCE_CODE = "PRIVATE_GOLD_PAPER_MINUTE"
 PRIVATE_GOLD_TRADE_WEIGHT = Decimal("3")
 PRIVATE_GOLD_OFFER_WEIGHT = Decimal("1")
+PRIVATE_GOLD_CONDITIONAL_REFERENCE_SECONDS = 10 * 60
+PRIVATE_GOLD_CONDITIONAL_MIN_REFERENCE_COUNT = 2
+PRIVATE_GOLD_CONDITIONAL_MIN_TOLERANCE_RELATIVE = 0.0045
+PRIVATE_GOLD_CONDITIONAL_MAX_TOLERANCE_RELATIVE = 0.0125
 
 _DIGITS = str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789")
 _PRICE = re.compile(r"(?<!\d)(\d{2,3}(?:[,.]\d{3})+|\d{7,9})(?!\d)")
 _QUANTITY = re.compile(r"(?<!\d)(\d{1,4})\s*(?:تا\b|عدد\b|تا\s*عدد)")
+_DESCRIPTION = re.compile(r"(?:توضیحات?|شرایط?)\s*[:：]\s*(.+)", re.S)
 _CONDITIONAL_MARKERS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("ONE_PAYMENT_SLIP", re.compile(r"یک\s*فقره|تک\s*فقره")),
-    ("PAYMENT_SLIP", re.compile(r"فیش")),
-    ("PAYMENT_DEADLINE", re.compile(r"تا\s*(?:ساعت|[0-2]?\d\s*[:.]?\s*[0-5]\d)|مهلت")),
-    ("PAYMENT_CONDITION", re.compile(r"واریز|تسویه|چک")),
-    ("EXCHANGE_CONDITION", re.compile(r"تعویض|خط")),
+    (
+        "PAYMENT_DEADLINE",
+        re.compile(
+            r"(?:فیش|واریز|تسویه|چک).{0,32}(?:تا\s*(?:ساعت|[0-2]?\d\s*[:.]?\s*[0-5]\d)|مهلت)"
+            r"|(?:تا\s*(?:ساعت|[0-2]?\d\s*[:.]?\s*[0-5]\d)|مهلت).{0,32}(?:فیش|واریز|تسویه|چک)"
+        ),
+    ),
+    (
+        "REQUIRED_PAYMENT",
+        re.compile(
+            r"(?:فقط|حتما|حتماً|باید|مشروط(?:\s+به)?|به\s*شرط|در\s*صورت).{0,32}(?:فیش|واریز|تسویه|چک)"
+            r"|(?:فیش|واریز|تسویه|چک).{0,32}(?:فقط|حتما|حتماً|باید|الزامی)"
+        ),
+    ),
+    ("EXCHANGE_CONDITION", re.compile(r"تعویض")),
     ("EXPLICIT_CONDITION", re.compile(r"شرط")),
 )
+_AMBIGUOUS_PAYMENT_NOTE = re.compile(r"فیش|واریز|تسویه|چک")
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,6 +90,8 @@ class ParsedPrivateGoldOffer:
     paper_variant: str | None
     is_conditional: bool
     conditional_reason: str | None
+    condition_class: str
+    has_description: bool
     trade_event_time_utc: str | None
     trade_quantity: int | None
     parse_confidence: float
@@ -162,14 +183,120 @@ def _paper_variant(text: str) -> str:
     return "NORMAL"
 
 
-def _conditional_reason(text: str) -> str | None:
-    description = re.search(r"توضیحات\s*[:：]\s*(.+)", text, re.S)
-    if description and description.group(1).strip():
-        return "FREEFORM_CONDITION_DESCRIPTION"
+def _condition_classification(text: str) -> tuple[str, str | None, bool]:
+    """Classify economic conditions without retaining free-form text.
+
+    A description field is common in physical offers and is not itself a
+    condition. Clear payment/deadline/explicit-condition phrases are gated;
+    a bare payment note is conservatively gated as ambiguous. Ordinary notes
+    remain normal market observations.
+    """
+
+    description = _DESCRIPTION.search(text)
+    has_description = bool(description and description.group(1).strip())
     for reason, marker in _CONDITIONAL_MARKERS:
         if marker.search(text):
-            return reason
-    return None
+            return "CONFIRMED", reason, has_description
+    if has_description and _AMBIGUOUS_PAYMENT_NOTE.search(description.group(1)):
+        return "AMBIGUOUS", "AMBIGUOUS_PAYMENT_NOTE", True
+    return ("NON_CONDITIONAL_NOTE" if has_description else "NONE"), None, has_description
+
+
+def _row_datetime(row: Mapping[str, object], key: str) -> datetime | None:
+    try:
+        value = row[key]
+    except (IndexError, KeyError):
+        return None
+    if value is None:
+        return None
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00")).astimezone(timezone.utc)
+    except ValueError:
+        return None
+
+
+def _row_price(row: Mapping[str, object]) -> float | None:
+    try:
+        value = row["price_num"]
+    except (IndexError, KeyError):
+        return None
+    try:
+        price = float(value)
+    except (TypeError, ValueError):
+        return None
+    return price if math.isfinite(price) and price > 0 else None
+
+
+def filter_comparable_private_gold_physical_rows(
+    rows: Sequence[sqlite3.Row],
+) -> list[sqlite3.Row]:
+    """Keep normal physical facts and only market-comparable gated facts.
+
+    The caller must already limit rows to one physical book and one point in
+    time. A condition is comparable only against at least two *earlier*,
+    non-conditional facts known no later than that condition. This prevents
+    both special settlement terms and future observations from moving a live
+    price. The adaptive tolerance is bounded so a volatile minute is not a
+    blanket permission for arbitrary conditional prices.
+    """
+
+    ordered = sorted(
+        rows,
+        key=lambda row: (
+            _row_datetime(row, "event_time_utc") or datetime.min.replace(tzinfo=timezone.utc),
+            int(row["id"]),
+        ),
+    )
+    accepted: list[sqlite3.Row] = []
+    normal_reference: list[sqlite3.Row] = []
+    for row in ordered:
+        price = _row_price(row)
+        event_time = _row_datetime(row, "event_time_utc")
+        available_at = _row_datetime(row, "available_at_utc")
+        if price is None or event_time is None or available_at is None:
+            continue
+        if not bool(row["is_conditional"]):
+            accepted.append(row)
+            normal_reference.append(row)
+            continue
+        references = [
+            item
+            for item in normal_reference
+            if (
+                (reference_time := _row_datetime(item, "event_time_utc")) is not None
+                and (reference_available := _row_datetime(item, "available_at_utc")) is not None
+                and reference_time <= event_time
+                and reference_available <= available_at
+                and (event_time - reference_time).total_seconds()
+                <= PRIVATE_GOLD_CONDITIONAL_REFERENCE_SECONDS
+            )
+        ]
+        reference_prices = [
+            candidate for item in references if (candidate := _row_price(item)) is not None
+        ]
+        if len(reference_prices) < PRIVATE_GOLD_CONDITIONAL_MIN_REFERENCE_COUNT:
+            continue
+        center = float(median(reference_prices))
+        if center <= 0:
+            continue
+        mad = float(median([abs(candidate - center) for candidate in reference_prices]))
+        tolerance = min(
+            PRIVATE_GOLD_CONDITIONAL_MAX_TOLERANCE_RELATIVE,
+            max(
+                PRIVATE_GOLD_CONDITIONAL_MIN_TOLERANCE_RELATIVE,
+                4.0 * mad / center,
+            ),
+        )
+        if abs(price - center) / center <= tolerance:
+            accepted.append(row)
+    return sorted(
+        accepted,
+        key=lambda row: (
+            _row_datetime(row, "event_time_utc") or datetime.min.replace(tzinfo=timezone.utc),
+            int(row["id"]),
+        ),
+        reverse=True,
+    )
 
 
 def _trade_time_and_quantity(
@@ -221,7 +348,7 @@ def parse_private_gold_offer(source: PrivateGoldOfferInput) -> ParsedPrivateGold
     if dimensions is None or price_toman is None or quantity is None or side is None:
         return None
     trade_form, settlement_term, paper_variant = dimensions
-    conditional_reason = _conditional_reason(text)
+    condition_class, conditional_reason, has_description = _condition_classification(text)
     trade_time, trade_quantity = _trade_time_and_quantity(source, quantity=quantity)
     return ParsedPrivateGoldOffer(
         price_toman=price_toman,
@@ -230,11 +357,17 @@ def parse_private_gold_offer(source: PrivateGoldOfferInput) -> ParsedPrivateGold
         settlement_term=settlement_term,
         trade_form=trade_form,
         paper_variant=paper_variant,
-        is_conditional=conditional_reason is not None,
+        is_conditional=condition_class in {"CONFIRMED", "AMBIGUOUS"},
         conditional_reason=conditional_reason,
+        condition_class=condition_class,
+        has_description=has_description,
         trade_event_time_utc=trade_time,
         trade_quantity=trade_quantity,
-        parse_confidence=0.98 if not conditional_reason else 0.94,
+        parse_confidence=(
+            0.94
+            if condition_class == "CONFIRMED"
+            else 0.96 if condition_class == "AMBIGUOUS" else 0.98
+        ),
     )
 
 
@@ -261,6 +394,9 @@ def private_gold_observations(source: PrivateGoldOfferInput) -> list[MarketObser
     attributes: dict[str, object] = {
         "paper_variant": parsed.paper_variant or "NOT_APPLICABLE",
         "conditional_reason": parsed.conditional_reason or "NONE",
+        "condition_class": parsed.condition_class,
+        "has_description": parsed.has_description,
+        "requires_market_comparability": parsed.is_conditional,
     }
     observations = [
         MarketObservation(

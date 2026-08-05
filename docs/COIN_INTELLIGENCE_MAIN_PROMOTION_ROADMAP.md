@@ -831,7 +831,7 @@ bundle قبلی قابل انتخاب‌اند و Collectorها همچنان ف�
     ایجاد یا فعال نشد؛
   - در نتیجه P2-B و کل P2 همچنان `PARTIAL` هستند.
 - قرارداد/schema/versionهای افزوده یا تغییرکرده:
-  - `PRIVATE_GOLD_PARSER_VERSION = private-gold-rules-v1`؛
+  - `PRIVATE_GOLD_PARSER_VERSION = private-gold-rules-v2`؛
   - قیمت source که تومان است فقط با conversion صریح `×10` وارد
     `IRT_PER_MESGHAL_750` می‌شود؛
   - physical non-conditional raw می‌ماند؛ paper minute quote derived با وزن

@@ -16,9 +16,10 @@ from statistics import median
 from typing import Any, Iterable
 
 from .market_contracts import normalize_utc
+from .private_gold import filter_comparable_private_gold_physical_rows
 
 
-COIN_RATE_ENGINE_VERSION = "coin-rate-engine-v2"
+COIN_RATE_ENGINE_VERSION = "coin-rate-engine-v3"
 PROJECT_IRT_PER_UNIT = 10_000.0  # 1,000 Toman × 10 Rial/Toman
 COIN_SPECS: dict[str, tuple[float, bool]] = {
     "IMAM": (2.253, False),
@@ -93,21 +94,24 @@ def _rows(
     trade_forms: Iterable[str],
     price_unit: str,
     event_types: Iterable[str] = ("OFFER", "TRADE", "QUOTE", "REFERENCE"),
+    include_comparable_conditional: bool = False,
 ) -> list[sqlite3.Row]:
     settlements = tuple(settlement_terms)
     forms = tuple(trade_forms)
     kinds = tuple(event_types)
-    return list(
+    conditional_clause = "" if include_comparable_conditional else "AND is_conditional = 0"
+    rows = list(
         connection.execute(
             f"""
-            SELECT id, event_time_utc, available_at_utc, price_num, event_type
+            SELECT id, event_time_utc, available_at_utc, price_num, event_type,
+                   is_conditional
             FROM market_observations
             WHERE instrument = ?
               AND settlement_term IN ({','.join('?' for _ in settlements)})
               AND trade_form IN ({','.join('?' for _ in forms)})
               AND event_type IN ({','.join('?' for _ in kinds)})
               AND quality_state = 'ELIGIBLE'
-              AND is_conditional = 0
+              {conditional_clause}
               AND price_unit = ?
               AND event_time_utc <= ?
               AND available_at_utc <= ?
@@ -124,6 +128,11 @@ def _rows(
                 _iso(as_of),
             ),
         ).fetchall()
+    )
+    return (
+        filter_comparable_private_gold_physical_rows(rows)
+        if include_comparable_conditional
+        else rows
     )
 
 
@@ -173,6 +182,9 @@ def _melted_point(connection: sqlite3.Connection, *, as_of: datetime, settlement
                 settlement_terms=terms,
                 trade_forms=forms,
                 price_unit="IRT_PER_MESGHAL_750",
+                include_comparable_conditional=(
+                    instrument == "MELTED_GOLD_PRIVATE" and "PHYSICAL" in forms
+                ),
             ),
             as_of=as_of,
             source_kind=label,

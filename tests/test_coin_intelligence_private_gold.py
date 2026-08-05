@@ -67,6 +67,42 @@ class PrivateGoldParserTests(unittest.TestCase):
         self.assertEqual((today.trade_form, today.settlement_term), ("PHYSICAL", "TODAY"))
         self.assertEqual((tomorrow.trade_form, tomorrow.settlement_term), ("PHYSICAL", "TOMORROW"))
 
+    def test_ordinary_description_is_not_treated_as_a_condition(self) -> None:
+        parsed = parse_private_gold_offer(
+            self.source("80,300,000 فروش 5 تا نقد حاضر توضیحات: تحویل تهران")
+        )
+
+        self.assertIsNotNone(parsed)
+        assert parsed is not None
+        self.assertFalse(parsed.is_conditional)
+        self.assertEqual(parsed.condition_class, "NON_CONDITIONAL_NOTE")
+        self.assertTrue(parsed.has_description)
+        observations = private_gold_observations(
+            self.source("80,300,000 فروش 5 تا نقد حاضر توضیحات: تحویل تهران")
+        )
+        self.assertFalse(observations[0].is_conditional)
+        attributes_json = observations[0].normalized().attributes_json
+        self.assertIn('"condition_class":"NON_CONDITIONAL_NOTE"', attributes_json)
+        self.assertNotIn("تهران", attributes_json)
+
+    def test_real_payment_condition_and_ambiguous_payment_note_are_gated(self) -> None:
+        confirmed = parse_private_gold_offer(
+            self.source(
+                "80,300,000 فروش 5 تا نقد حاضر توضیحات: فقط یک فقره فیش تا ساعت 12"
+            )
+        )
+        ambiguous = parse_private_gold_offer(
+            self.source("80,300,000 فروش 5 تا نقد حاضر توضیحات: فیش همراه")
+        )
+
+        self.assertIsNotNone(confirmed)
+        self.assertIsNotNone(ambiguous)
+        assert confirmed is not None and ambiguous is not None
+        self.assertEqual((confirmed.is_conditional, confirmed.condition_class), (True, "CONFIRMED"))
+        self.assertEqual(confirmed.conditional_reason, "ONE_PAYMENT_SLIP")
+        self.assertEqual((ambiguous.is_conditional, ambiguous.condition_class), (True, "AMBIGUOUS"))
+        self.assertEqual(ambiguous.conditional_reason, "AMBIGUOUS_PAYMENT_NOTE")
+
     def test_unmarked_offer_abstains_instead_of_guessing_physical(self) -> None:
         self.assertIsNone(parse_private_gold_offer(self.source("80,300,000 فروش 5 تا")))
 
@@ -219,6 +255,52 @@ class PrivateGoldMinuteAggregationTests(unittest.TestCase):
         ).fetchone()
         self.assertEqual(aggregate["price_num"], 800_000_000.0)
         self.assertEqual(conditional["is_conditional"], 1)
+
+    def test_physical_condition_needs_market_comparability_but_normal_note_does_not(self) -> None:
+        self._ingest(
+            "physical-normal-1",
+            "80,000,000 خرید 5 تا نقد حاضر",
+            published_at_utc="2026-08-04T10:00:05Z",
+            available_at_utc="2026-08-04T10:00:05Z",
+        )
+        self._ingest(
+            "physical-normal-2",
+            "80,100,000 فروش 5 تا نقد حاضر توضیحات: تحویل تهران",
+            published_at_utc="2026-08-04T10:00:15Z",
+            available_at_utc="2026-08-04T10:00:15Z",
+        )
+        self._ingest(
+            "physical-comparable-condition",
+            "80,200,000 فروش 5 تا نقد حاضر توضیحات: فقط یک فقره فیش",
+            published_at_utc="2026-08-04T10:00:25Z",
+            available_at_utc="2026-08-04T10:00:25Z",
+        )
+        self._ingest(
+            "physical-out-of-market-condition",
+            "85,000,000 فروش 5 تا نقد حاضر توضیحات: فقط یک فقره فیش",
+            published_at_utc="2026-08-04T10:00:35Z",
+            available_at_utc="2026-08-04T10:00:35Z",
+        )
+
+        snapshot = build_market_snapshot(
+            self.connection,
+            as_of_utc="2026-08-04T10:00:50Z",
+        )
+        physical = snapshot["signals"]["PRIVATE_GOLD_PHYSICAL_TODAY"]
+        raw_conditions = self.connection.execute(
+            """
+            SELECT COUNT(*) FROM market_observations
+            WHERE source_code='PRIVATE_GOLD_CHANNEL' AND is_conditional=1
+            """
+        ).fetchone()[0]
+
+        self.assertEqual(raw_conditions, 2)
+        self.assertEqual(physical["latest_price"], 802_000_000.0)
+        self.assertEqual(physical["observation_count"], 3)
+        self.assertEqual(
+            physical["method"],
+            "private_physical_market_comparable_conditions_v2",
+        )
 
     def test_minute_quote_cannot_be_published_before_the_minute_closes(self) -> None:
         self._ingest("p1", "80,000,000 خرید 5 تا با حواله")

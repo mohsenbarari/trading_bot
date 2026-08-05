@@ -21,6 +21,7 @@ from typing import Any, Iterable, Mapping, Sequence
 
 from .coin_rate_engine import COIN_RATE_ENGINE_VERSION, COIN_SPECS, build_coin_rate_estimates
 from .market_contracts import MARKET_STORE_CONTRACT_VERSION, normalize_utc
+from .private_gold import filter_comparable_private_gold_physical_rows
 
 
 MARKET_SNAPSHOT_SCHEMA_VERSION = 1
@@ -155,8 +156,9 @@ def _read_fact_rows(
     return list(
         connection.execute(
             f"""
-            SELECT source_code, event_time_utc, available_at_utc, event_type,
-                   side, price_num, price_unit, settlement_term, trade_form
+            SELECT id, source_code, event_time_utc, available_at_utc, event_type,
+                   side, price_num, price_unit, settlement_term, trade_form,
+                   is_conditional
             FROM market_observations
             WHERE {' AND '.join(clauses)}
             ORDER BY event_time_utc DESC, id DESC
@@ -236,20 +238,25 @@ def _signal(
     trade_form: str | None = None,
     market_label: str | None = None,
     source_codes: Sequence[str] | None = None,
+    include_comparable_conditional: bool = False,
     method: str,
 ) -> tuple[str, dict[str, Any]]:
+    rows = _read_fact_rows(
+        connection,
+        as_of=as_of,
+        instrument=instrument,
+        settlement_term=settlement_term,
+        trade_form=trade_form,
+        market_label=market_label,
+        source_codes=source_codes,
+        include_conditional=include_comparable_conditional,
+    )
+    if include_comparable_conditional:
+        rows = filter_comparable_private_gold_physical_rows(rows)
     return (
         key,
         _source_summary(
-            _read_fact_rows(
-                connection,
-                as_of=as_of,
-                instrument=instrument,
-                settlement_term=settlement_term,
-                trade_form=trade_form,
-                market_label=market_label,
-                source_codes=source_codes,
-            ),
+            rows,
             as_of=as_of,
             freshness_seconds=freshness_seconds,
             aggregation_seconds=aggregation_seconds,
@@ -362,10 +369,11 @@ def build_market_snapshot(
                 settlement_term="TODAY",
                 trade_form="PHYSICAL",
                 source_codes=("PRIVATE_GOLD_CHANNEL",),
+                include_comparable_conditional=True,
                 expected_unit="IRT_PER_MESGHAL_750",
                 freshness_seconds=900,
                 aggregation_seconds=60,
-                method="private_physical_individual_events_v1",
+                method="private_physical_market_comparable_conditions_v2",
             ),
             _signal(
                 connection,
@@ -375,10 +383,11 @@ def build_market_snapshot(
                 settlement_term="TOMORROW",
                 trade_form="PHYSICAL",
                 source_codes=("PRIVATE_GOLD_CHANNEL",),
+                include_comparable_conditional=True,
                 expected_unit="IRT_PER_MESGHAL_750",
                 freshness_seconds=900,
                 aggregation_seconds=60,
-                method="private_physical_individual_events_v1",
+                method="private_physical_market_comparable_conditions_v2",
             ),
             _signal(
                 connection,
