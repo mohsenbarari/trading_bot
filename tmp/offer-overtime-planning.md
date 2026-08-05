@@ -15,7 +15,7 @@
 - Rule: no implementation, database, deployment, or runtime changes are allowed until the plan is complete and explicitly approved.
 - Decision policy: only confirmed decisions are recorded as final. Unresolved items remain explicitly open.
 - Verification status: the technical review below was re-verified against the codebase at commit `540b2c0c`. Corrections from that verification are folded into the tables and stages.
-- Copy policy: every user-facing message and displayed text in this feature requires explicit product-owner approval of its exact wording before the stage that ships it may be implemented. The message inventory section is the single index of record. All strings call the object a `لفظ` to match existing product vocabulary, and the feature is labelled `وقت اضافه` wherever it is named. Forty-one of the forty-two entries are approved; only `M34` remains open, awaiting a choice between two candidate wordings.
+- Copy policy: every user-facing message and displayed text in this feature requires explicit product-owner approval of its exact wording before the stage that ships it may be implemented. The message inventory section is the single index of record. All strings call the object a `لفظ` to match existing product vocabulary, and the feature is labelled `وقت اضافه` wherever it is named. All forty-two entries are approved.
 
 ## 1. Feature Naming
 
@@ -351,7 +351,7 @@ The inventory is the single index of record. If implementation discovers a state
 | M31 | Bot | Owner message after timeout, requester cancellation, or invalidation | `درخواست بسته شد.` | Confirmed |
 | M32 | Bot | Callback answer when the owner clicks after the deadline | `مهلت پاسخ به این درخواست تمام شده است.` | Confirmed |
 | M33 | Bot | Callback answer when the click is a duplicate or the request is already terminal | `این درخواست قبلاً تعیین تکلیف شده است.` | Confirmed |
-| M34 | Bot | Callback answer when the clicker is not the economic owner. This is purely a defensive guard, not a role-collision case: no accountant or group leader can reach a market approval at all, so the only realistic triggers are a forwarded message, a stale callback from an earlier session, or a crafted payload. | Two candidates pending choice: `فقط صاحب این لفظ می‌تواند درباره این درخواست تصمیم بگیرد.` or `شما اجازه تصمیم‌گیری درباره این درخواست را ندارید.` | Open, awaiting choice |
+| M34 | Bot | Callback answer when the clicker is not the economic owner. This is purely a defensive guard, not a role-collision case: no accountant or group leader can reach a market approval at all, so the only realistic triggers are a forwarded message, a stale callback from an earlier session, or a crafted payload. | `فقط صاحب این لفظ می‌تواند درباره این درخواست تصمیم بگیرد.` | Confirmed |
 | M35 | WebApp | Owner prompt title | `درخواست معامله در وقت اضافه` | Confirmed |
 | M36 | WebApp | Owner prompt buttons | `تأیید معامله` and `رد درخواست` | Confirmed |
 | M37 | Both | Owner approved but revalidation failed, so no trade was created. Stays generic so it never leaks which condition changed or anything about the requester. | `شرایط این لفظ تغییر کرده و معامله انجام نشد.` | Confirmed |
@@ -360,7 +360,7 @@ The inventory is the single index of record. If implementation discovers a state
 
 **Vocabulary rule.** Every user-facing string in this feature calls the object a `لفظ`, never an `آفر`. This matches every existing message in the product, such as `این لفظ دیگر فعال نیست.` and `شما حداکثر {تعداد} لفظ فعال دارید.`, and it avoids showing the user two different words for one thing on the same screen. `آفر` remains acceptable only in the internal prose of this document. The reachability warning was restated under this rule and reconfirmed, and the feature-name question it raised is closed: users only ever see `وقت اضافه`, so the internal full name never reaches a screen.
 
-**Remaining gap.** Every entry now has text. One choice is still open: `M34` has two candidate wordings and needs one selected before Stage 9 can ship the bot approval callbacks.
+**Status.** Every entry has approved text. Any new state discovered during implementation stops that path until its text is added here and approved.
 
 ## Draft Exact Product Copy
 
