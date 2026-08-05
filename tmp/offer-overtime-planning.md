@@ -1169,6 +1169,13 @@ The next gate is not a question but an approval: the roadmap below may begin onl
 
 **Next stage prerequisites.** Stage 16 execute must turn green before Stage 17 production rollout gates begin.
 
+### Combined staging with coin-intelligence
+
+Integration line: `candidate/combined-staging-overtime-coin` (worktree `/root/trading-bot/combined-staging-overtime-coin`).
+It merges `candidate/offer-overtime` with `candidate/coin-commodity-inference-promotion`, adds Alembic merge head `f9b0c1d2e3a4`, and records the report in `docs/CURSOR_COMBINED_STAGING_REPORT.md` on that branch.
+`candidate/coin-price-intelligence` stays a parallel evaluation branch (not merged into the trading-bot line).
+Live Stage 16 execute remains blocked until Iran/foreign staging apps are healthy; deploy the combined SHA migration-first when topology recovers.
+
 ### Stage 17 — Controlled Production Rollout and Rollback Gates
 
 **Goal:** activate with no unplanned impact on existing market behavior.
