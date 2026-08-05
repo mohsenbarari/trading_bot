@@ -617,14 +617,34 @@ owner reject. Request home stays `foreign` and mirrors to Iran.
 
 Evidence: `tmp/combined-staging-evidence/stage16-driver-OT-REQ-FOREIGN-TO-FOREIGN.json`.
 
+### 12.14 Final-tail remainder (`OT-FINAL-TAIL`)
+
+Iran retail offer (lot size 2 of quantity 5) enters overtime, first request is
+presented and owner-approved through the real trade commit path. Remainder stays
+active with `overtime_trade_committed=true`. A second occupying request is then
+held past the final deadline: without the hold the lifecycle is `expired` /
+terminal-due; with the hold it is `final_tail`, public interaction closed, and
+the channel overtime marker stays visible.
+
+| Assertion | Result |
+| --- | --- |
+| Partial trade qty 2 → remaining 3, offer still `active` | yes |
+| `overtime_trade_committed` after overtime approval | true |
+| Second request occupies past final deadline | yes |
+| Phase without hold / with hold | `expired` / `final_tail` |
+| Terminal expiry deferred while occupied | yes |
+| Channel marker visible in `final_tail` | yes |
+
+Evidence: `tmp/combined-staging-evidence/stage16-driver-OT-FINAL-TAIL.json`.
+
 ### 12.4 Remaining work before `main`
 
 | Item | State |
 | --- | --- |
-| Mutating Stage 16 scenario drivers | 9 of 15 wired and passing live; `execute` → `execute_partial` once transport env is set |
+| Mutating Stage 16 scenario drivers | 10 of 15 wired and passing live; `execute` → `execute_partial` once transport env is set |
 | Overtime preferences | staging users remain at `0` after driver cleanup |
 | Coin inference flags | off by default, untouched |
 | Arvan CDN origin for `staging.gold-trade.ir` | broken, needs panel fix |
 | Sync parity comparison | `comparison_status: missing` — no parity run yet on this pair |
 | coin-price vs coin-commodity comparison | still owed per the handoff prompt |
-| Next drivers | `OT-REQ-CROSS-FORWARD`, `OT-FINAL-TAIL`, channel/TG/UI axes |
+| Next drivers | `OT-REQ-CROSS-FORWARD`, channel/TG/UI axes |
