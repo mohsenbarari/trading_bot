@@ -10,7 +10,7 @@
 
 ## Document Status
 
-- Phase: discovery complete, awaiting implementation approval. No open questions remain.
+- Phase: discovery complete and Stage 0 baseline recorded; awaiting implementation approval. No open questions remain.
 - Implementation status: not started. The branch `candidate/offer-overtime` currently holds only this document; the delivery policy above governs implementation commits once the roadmap is approved.
 - Rule: no implementation, database, deployment, or runtime changes are allowed until the plan is complete and explicitly approved.
 - Decision policy: only confirmed decisions are recorded as final. Unresolved items remain explicitly open.
@@ -668,6 +668,22 @@ The next gate is not a question but an approval: the roadmap below may begin onl
 - Define the feature-disabled acceptance baseline: user setting is absent before migration and, after migration, defaults to `0` with unchanged market behavior.
 
 **Exit criteria:** clean baseline evidence and no untriaged failure in existing behavior.
+
+#### Stage 0 completion notes
+
+**Status:** complete. No code, schema, or runtime state was touched; this stage only recorded facts and ran existing suites.
+
+**Baseline recorded:** `main` at `540b2c0c`; this branch at `75e4f700`, which differs from `main` by this document only. Migration graph in `migrations/versions` is healthy with 113 revisions, a single root `d339d8abee2f` and a single head `a274f5a6b8c9`, so Stage 1 adds onto one linear head rather than resolving a branch. Contract versions at baseline: sync protocol `2`, sync registry `4`, sync field policy `2`, sync parity schema `1`.
+
+**Suites run:** the 241 test modules matching offer, expiry, market, sync, Telegram delivery, and trade. Command: `python3 -m unittest` over the module list retained at `tmp/offer-overtime-evidence/stage0-modules.txt`. Result: **1826 tests, all passing, 178 skipped**. Skips are Postgres-gated integration tests that require `MARKET_STAGEN_TEST_DATABASE_URL`, which is expected outside a database-backed environment.
+
+**Triaged finding, no product defect:** the first run reported 23 failures across nine sync-receiver modules. The cause is environmental, not behavioral. `core/config.py` defaults `registration_sync_v2_enabled` to `False` and those tests are written against that default, but the local `.env` sets `REGISTRATION_SYNC_V2_ENABLED=true`, which routes user inserts down the v2 path and changes the expected outcome. Re-running the identical module list with the flag at its code default gives a fully green suite. This is worth knowing before Stage 1: anyone running these suites on a machine with that `.env` will see the same 23 phantom failures and must not read them as regressions introduced by this feature.
+
+**Evidence retained:** `tmp/offer-overtime-evidence/stage0-modules.txt`, `tmp/offer-overtime-evidence/stage0-targeted.log` (local `.env`, 23 failures), and `tmp/offer-overtime-evidence/stage0-targeted-default-env.log` (code-default flag, green). The directory is inside the ignored `tmp/` tree as the delivery rules require.
+
+**Deviations:** none. The WebApp suite was not run in this stage because no frontend behavior is in scope before Stage 10; it is covered by the Stage 11 and 12 entries instead.
+
+**Next stage prerequisites:** Stage 1 is the first stage that writes code and migrations, so it may not begin until implementation is explicitly authorized. When it does, pin the run to the code-default flag value so the baseline stays comparable, and add onto head `a274f5a6b8c9`.
 
 ### Stage 1 — Additive Data Model and Safe Migrations
 
