@@ -353,3 +353,74 @@ by the handoff prompt.
 | Outbox growth under overtime expiry sweeps | Each swept offer appends a row; confirm the consumer keeps up |
 | `expected_alembic_head` in the acceptance runner | Still pinned to the overtime head `e8a4b5c6d7e9`; on the combined line the head is `f9b0c1d2e3a4` |
 | Coin flag flip with overtime active | Never validated together; enable coin preview only after overtime acceptance is green |
+
+---
+
+## 12. Staging brought up on the combined SHA (`3c8b3e07`)
+
+Both peers now run the combined branch. Migration-first was enforced by the
+compose `depends_on` chain, and both databases reached the merge head.
+
+| Peer | Host | Services | Alembic head | Release |
+| --- | --- | --- | --- | --- |
+| Iran | `65.109.220.59` | `app` (healthy), `sync_worker`, `db`, `redis` | `f9b0c1d2e3a4` | `3c8b3e07` |
+| Foreign | `65.109.216.187` | `foreign_app` (healthy), `bot`, `foreign_sync_worker`, `db`, `redis` | `f9b0c1d2e3a4` | `3c8b3e07` |
+
+### 12.1 What had to be repaired first
+
+- **Iran had no git repository.** `/srv/trading-bot/staging-iran` was a file
+  snapshot whose `.git` pointed at a worktree admin directory that only exists on
+  the foreign host. It was rebuilt in place from a `git bundle` of the combined
+  branch (no push to GitHub). The broken pointer is kept as `.git.broken.<ts>` and
+  `.env.staging` was backed up to `/root/staging-iran-env-backup-<ts>.env`.
+- **The Iran public hostname does not point at the origin.**
+  `staging.gold-trade.ir` resolves to an Arvan CDN edge (`185.143.234.238`,
+  `185.143.233.238`) whose origin path is broken: it answers `504` after 15s.
+  The origin itself is healthy — `--resolve` to `65.109.220.59` answers in 17ms
+  with a valid certificate. The foreign host therefore pins the domain to the
+  origin in `/etc/hosts`, exactly as compose already does for the containers via
+  `extra_hosts`. `/etc/hosts` was backed up to `/root/hosts.backup-<ts>`.
+  **The CDN origin configuration still needs fixing in the Arvan panel** before
+  anyone reaches this staging WebApp from a browser.
+- **Frontend dist was rebuilt** from the combined branch and shipped to both hosts,
+  so the WebApp bundle contains both the overtime preference panel and the coin
+  inference modal.
+
+### 12.2 Verification after bring-up
+
+| Check | Iran | Foreign |
+| --- | --- | --- |
+| `/api/config` with staging Basic Auth | 200 | — |
+| Public surface is not a WebApp | — | 401 (guarded) |
+| `POST /api/sync/receive` | 401 at app layer | 401 at app layer |
+| `POST /api/trades/internal/execute` | 422 at app layer | 422 at app layer |
+| `POST /api/offers/internal/expire` | 422 at app layer | 422 at app layer |
+| `POST /api/sessions/internal/authority-check` | 422 at app layer | 422 at app layer |
+| `/api/sync/health` | `status: ok`, `server_mode: iran` | `status: ok`, `server_mode: foreign` |
+| Stage 14 `overtime_reconciliation` block | `ok`, zero findings | `ok`, zero findings |
+
+No internal endpoint is behind Basic Auth on either peer, which is the condition
+the two-server matrix design requires. Health snapshots are archived in
+`tmp/combined-staging-evidence/staging-sync-health.json`.
+
+### 12.3 Acceptance preflight now passes
+
+`OT-ACC-COMBINED-PREFLIGHT`: **14 of 14 checks passed**, artifacts under
+`tmp/staging-offer-overtime-acceptance/OT-ACC-COMBINED-PREFLIGHT/`.
+
+The `expected_alembic_head` check was replaced while doing this. It used to assert
+a pinned constant (`e8a4b5c6d7e9`, the overtime head) and therefore always passed
+even though the deployed head is `f9b0c1d2e3a4`. It now resolves heads from the
+checkout and fails when a line has more than one head — which is the actual risk
+a two-feature merge introduces. Two regression tests cover it.
+
+### 12.4 Remaining work before `main`
+
+| Item | State |
+| --- | --- |
+| Mutating Stage 16 scenario drivers | not wired; `execute` still fail-closed |
+| Overtime preferences | all users at `0`, untouched |
+| Coin inference flags | off by default, untouched |
+| Arvan CDN origin for `staging.gold-trade.ir` | broken, needs panel fix |
+| Sync parity comparison | `comparison_status: missing` — no parity run yet on this pair |
+| coin-price vs coin-commodity comparison | still owed per the handoff prompt |

@@ -98,5 +98,29 @@ class StagingOfferOvertimeAcceptanceTests(unittest.TestCase):
             self.assertIn("git_branch", summary["failed_checks"])
 
 
+    def test_single_alembic_head_is_resolved_from_the_checkout(self):
+        heads = runner.alembic_heads()
+        self.assertEqual(len(heads), 1, heads)
+
+    def test_preflight_fails_when_the_checkout_has_two_heads(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact_dir = Path(tmp) / "two-heads"
+            args = runner.parse_args(["--mode", "preflight", "--artifact-dir", str(artifact_dir)])
+            with patch.object(runner, "alembic_heads", return_value=["aaa", "bbb"]), patch.object(
+                runner, "check_tls"
+            ) as tls, patch.object(runner, "check_http_json") as http, patch.object(
+                runner, "check_foreign_public_surface_guard"
+            ) as guard, patch.object(
+                runner, "check_internal_ingress_without_basic_auth"
+            ) as ingress:
+                tls.return_value = runner.CheckResult("tls", "passed", "ok")
+                http.return_value = runner.CheckResult("http", "passed", "ok")
+                guard.return_value = runner.CheckResult("guard", "passed", "ok")
+                ingress.return_value = runner.CheckResult("ingress", "passed", "ok")
+                summary, code = runner.run_preflight(args)
+            self.assertEqual(code, 1)
+            self.assertIn("single_alembic_head", summary["failed_checks"])
+
+
 if __name__ == "__main__":
     unittest.main()
