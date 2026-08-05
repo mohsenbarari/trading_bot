@@ -80,6 +80,7 @@ WIRED_IRAN_DRIVER_SCENARIOS = (
 WIRED_FOREIGN_DRIVER_SCENARIOS = (
     "OT-OFFER-BOT-ORIGIN",
     "OT-REQ-FOREIGN-TO-FOREIGN",
+    "OT-REQ-CROSS-FORWARD",
 )
 WIRED_DRIVER_SCENARIOS = WIRED_IRAN_DRIVER_SCENARIOS + WIRED_FOREIGN_DRIVER_SCENARIOS
 
@@ -764,6 +765,126 @@ def run_req_foreign_to_foreign_driver(
     )
 
 
+def run_req_cross_forward_driver(
+    args: argparse.Namespace, run_prefix: str
+) -> dict[str, Any]:
+    """Seed on Iran, re-pin overtime, mutate on foreign, retire on Iran."""
+    del args
+    minutes = 5
+    seed_argv = iran_driver_argv(
+        "OT-REQ-CROSS-FORWARD",
+        run_prefix,
+        minutes,
+        extra_args="--phase seed --no-cleanup-after",
+    )
+    foreign_probe = foreign_driver_argv(
+        "OT-REQ-CROSS-FORWARD",
+        run_prefix,
+        minutes,
+        extra_args="--phase run --owner-user-id 0 --no-cleanup-after",
+    )
+    if seed_argv is None or foreign_probe is None:
+        return {
+            "id": "OT-REQ-CROSS-FORWARD",
+            "status": "blocked",
+            "detail": (
+                "set STAGING_IRAN_SSH_HOST for seed/cleanup and ensure the foreign "
+                "app container is reachable (or set STAGING_FOREIGN_DRIVER_EXEC)"
+            ),
+            "run_prefix": run_prefix,
+        }
+
+    seed_completed, seed_elapsed = _run_argv(seed_argv)
+    seed_payload = _parse_driver_stdout(seed_completed.stdout, seed_completed.stderr)
+    if not (seed_payload.get("passed") and seed_completed.returncode == 0):
+        return {
+            "id": "OT-REQ-CROSS-FORWARD",
+            "status": "failed",
+            "elapsed_seconds": seed_elapsed,
+            "run_prefix": run_prefix,
+            "phase": "seed",
+            "returncode": seed_completed.returncode,
+            "payload": seed_payload,
+        }
+
+    offer_public_id = str(seed_payload["offer_public_id"])
+    rebackdate_argv = iran_driver_argv(
+        "OT-REQ-CROSS-FORWARD",
+        run_prefix,
+        minutes,
+        extra_args=(
+            f"--phase rebackdate --offer-public-id {offer_public_id} --no-cleanup-after"
+        ),
+    )
+    assert rebackdate_argv is not None
+    rebackdate_completed, rebackdate_elapsed = _run_argv(rebackdate_argv)
+    rebackdate_payload = _parse_driver_stdout(
+        rebackdate_completed.stdout, rebackdate_completed.stderr
+    )
+    if not (rebackdate_payload.get("passed") and rebackdate_completed.returncode == 0):
+        cleanup_argv = iran_cleanup_argv(run_prefix)
+        cleanup_payload = {"passed": False}
+        if cleanup_argv is not None:
+            cleanup_completed, _ = _run_argv(cleanup_argv)
+            cleanup_payload = _parse_driver_stdout(
+                cleanup_completed.stdout, cleanup_completed.stderr
+            )
+        return {
+            "id": "OT-REQ-CROSS-FORWARD",
+            "status": "failed",
+            "elapsed_seconds": round(seed_elapsed + rebackdate_elapsed, 3),
+            "run_prefix": run_prefix,
+            "phase": "rebackdate",
+            "seed": seed_payload,
+            "rebackdate": rebackdate_payload,
+            "cleanup": cleanup_payload,
+        }
+
+    run_argv = foreign_driver_argv(
+        "OT-REQ-CROSS-FORWARD",
+        run_prefix,
+        minutes,
+        extra_args=(
+            "--phase run "
+            f"--owner-user-id {int(seed_payload['owner_user_id'])} "
+            f"--requester-user-id {int(seed_payload['requester_user_id'])} "
+            f"--offer-public-id {offer_public_id} "
+            "--no-cleanup-after"
+        ),
+    )
+    assert run_argv is not None
+    run_completed, run_elapsed = _run_argv(run_argv)
+    run_payload = _parse_driver_stdout(run_completed.stdout, run_completed.stderr)
+
+    cleanup_argv = iran_cleanup_argv(run_prefix)
+    if cleanup_argv is not None:
+        cleanup_completed, cleanup_elapsed = _run_argv(cleanup_argv)
+        cleanup_payload = _parse_driver_stdout(
+            cleanup_completed.stdout, cleanup_completed.stderr
+        )
+    else:
+        cleanup_elapsed = 0.0
+        cleanup_payload = {"passed": False, "error": "cleanup transport unavailable"}
+
+    passed = (
+        bool(run_payload.get("passed"))
+        and run_completed.returncode == 0
+        and bool(cleanup_payload.get("passed"))
+    )
+    return {
+        "id": "OT-REQ-CROSS-FORWARD",
+        "status": "passed" if passed else "failed",
+        "elapsed_seconds": round(
+            seed_elapsed + rebackdate_elapsed + run_elapsed + cleanup_elapsed, 3
+        ),
+        "run_prefix": run_prefix,
+        "seed": seed_payload,
+        "rebackdate": rebackdate_payload,
+        "run": run_payload,
+        "cleanup": cleanup_payload,
+    }
+
+
 def run_wired_drivers(args: argparse.Namespace) -> list[dict[str, Any]]:
     """Execute the wired Iran and foreign overtime drivers."""
     results: list[dict[str, Any]] = []
@@ -815,6 +936,8 @@ def run_wired_drivers(args: argparse.Namespace) -> list[dict[str, Any]]:
             result = run_offer_bot_origin_driver(args, run_prefix)
         elif scenario == "OT-REQ-FOREIGN-TO-FOREIGN":
             result = run_req_foreign_to_foreign_driver(args, run_prefix)
+        elif scenario == "OT-REQ-CROSS-FORWARD":
+            result = run_req_cross_forward_driver(args, run_prefix)
         else:
             result = {
                 "id": scenario,

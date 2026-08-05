@@ -45,6 +45,7 @@ SCENARIOS = (
     "OT-QUEUE-ORDER",
     "OT-REQ-FOREIGN-TO-FOREIGN",
     "OT-FINAL-TAIL",
+    "OT-REQ-CROSS-FORWARD",
 )
 # Staging Iran currently carries a single commodity; keep the driver pinned to it.
 DEFAULT_COMMODITY_ID = 1
@@ -54,6 +55,8 @@ PREFERENCE_MIRROR_TIMEOUT_SECONDS = 60.0
 PREFERENCE_MIRROR_POLL_SECONDS = 2.0
 BOT_FORWARD_RETRY_TIMEOUT_SECONDS = 60.0
 BOT_FORWARD_RETRY_POLL_SECONDS = 3.0
+OFFER_MIRROR_TIMEOUT_SECONDS = 60.0
+OFFER_MIRROR_POLL_SECONDS = 2.0
 
 
 class DriverRefusal(RuntimeError):
@@ -284,6 +287,47 @@ async def _await_preference_minutes(
         # Expire only this row so sibling instances (e.g. requester) stay usable.
         session.expire(owner)
     return False, timeout_seconds
+
+
+async def _await_offer_by_public_id(
+    session,
+    offer_public_id: str,
+    *,
+    timeout_seconds: float = OFFER_MIRROR_TIMEOUT_SECONDS,
+):
+    """Wait until a mirrored offer row is locally readable by public id."""
+    from models.offer import Offer
+
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        offer = (
+            await session.execute(
+                select(Offer).where(Offer.offer_public_id == offer_public_id)
+            )
+        ).scalar_one_or_none()
+        if offer is not None:
+            return offer, round(timeout_seconds - (deadline - time.monotonic()), 3)
+        await asyncio.sleep(OFFER_MIRROR_POLL_SECONDS)
+        session.expire_all()
+    return None, timeout_seconds
+
+
+async def _await_user_by_id(
+    session,
+    user_id: int,
+    *,
+    timeout_seconds: float = PREFERENCE_MIRROR_TIMEOUT_SECONDS,
+) -> User | None:
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        user = (
+            await session.execute(select(User).where(User.id == int(user_id)))
+        ).scalar_one_or_none()
+        if user is not None and not bool(user.is_deleted):
+            return user
+        await asyncio.sleep(PREFERENCE_MIRROR_POLL_SECONDS)
+        session.expire_all()
+    return None
 
 
 async def _save_bot_preference_with_user_sync_retry(
@@ -881,6 +925,7 @@ async def _scenario_offer_bot_origin_run(
 async def _backdate_offer_into_overtime(session, offer, *, normal_minutes: int) -> datetime:
     """Move ``created_at`` so wall-clock ``now`` falls inside the overtime window."""
     # 30s past the normal deadline keeps intake in APPROVAL without waiting 2 minutes.
+    # Must go through the ORM so sync outbox listeners still emit change_log rows.
     stamped = datetime.utcnow() - timedelta(minutes=normal_minutes, seconds=30)
     offer.created_at = stamped
     await session.commit()
@@ -1571,6 +1616,302 @@ async def _scenario_req_foreign_to_foreign_run(
     }
 
 
+async def _scenario_req_cross_forward_seed(
+    session,
+    run_prefix: str,
+    minutes: int,
+) -> dict[str, object]:
+    """Iran: seed owner/requester and an Iran-home overtime offer for foreign edge forward."""
+    from core.services.offer_overtime_preference_service import persist_overtime_preference
+
+    if current_server() != "iran":
+        raise DriverRefusal("OT-REQ-CROSS-FORWARD seed only runs on the Iran peer")
+    if minutes <= 0:
+        raise DriverRefusal("OT-REQ-CROSS-FORWARD requires a positive overtime preference")
+
+    await _cleanup(session, run_prefix)
+    owner = await _seed_owner(session, run_prefix)
+    requester = await _seed_user(session, run_prefix, "requester")
+    await session.commit()
+    await session.refresh(owner)
+    await session.refresh(requester)
+    owner_id = int(owner.id)
+    requester_id = int(requester.id)
+
+    await persist_overtime_preference(session, owner, minutes)
+    await session.commit()
+    await session.refresh(owner)
+
+    offer, normal_minutes = await _create_webapp_offer(
+        session,
+        owner,
+        notes=f"{run_prefix} cross forward",
+    )
+    offer_id = int(offer.id)
+    offer_public_id = str(offer.offer_public_id)
+    snapshot = int(offer.overtime_minutes_snapshot)
+    if snapshot != minutes:
+        raise DriverRefusal(
+            f"offer snapshot {snapshot} did not match preference {minutes}"
+        )
+    await _backdate_offer_into_overtime(session, offer, normal_minutes=normal_minutes)
+    # Sync peers can briefly bounce created_at; pin overtime again and prove phase.
+    offer = await _reload_offer(session, offer_id)
+    await _backdate_offer_into_overtime(session, offer, normal_minutes=normal_minutes)
+    offer = await _reload_offer(session, offer_id)
+    from core.offer_lifecycle import OfferLifecyclePhase, project_offer_lifecycle
+
+    projection = project_offer_lifecycle(
+        offer,
+        normal_lifetime_minutes=normal_minutes,
+        as_of=datetime.utcnow(),
+    )
+    if projection.phase != OfferLifecyclePhase.OVERTIME:
+        raise DriverRefusal(
+            "seed offer was not in overtime after backdate "
+            f"(phase={projection.phase.value})"
+        )
+
+    return {
+        "phase": "seed",
+        "owner_user_id": owner_id,
+        "requester_user_id": requester_id,
+        "offer_id": offer_id,
+        "offer_public_id": offer_public_id,
+        "offer_home_server": "iran",
+        "overtime_minutes_snapshot": snapshot,
+        "normal_lifetime_minutes": normal_minutes,
+        "lifecycle_phase_after_backdate": projection.phase.value,
+        "passed": True,
+    }
+
+
+async def _scenario_req_cross_forward_rebackdate(
+    session,
+    *,
+    offer_public_id: str,
+) -> dict[str, object]:
+    """Iran: re-pin an Iran-home offer into overtime just before the foreign edge run."""
+    from core.offer_lifecycle import OfferLifecyclePhase, project_offer_lifecycle
+    from core.trading_settings import get_trading_settings
+    from models.offer import Offer
+
+    if current_server() != "iran":
+        raise DriverRefusal("OT-REQ-CROSS-FORWARD rebackdate only runs on the Iran peer")
+    public_id = (offer_public_id or "").strip()
+    if not public_id:
+        raise DriverRefusal("rebackdate requires --offer-public-id")
+
+    offer = (
+        await session.execute(select(Offer).where(Offer.offer_public_id == public_id))
+    ).scalar_one_or_none()
+    if offer is None:
+        raise DriverRefusal(f"offer {public_id} not found on Iran for rebackdate")
+    normal_minutes = int(getattr(get_trading_settings(), "offer_expiry_minutes", 2) or 2)
+    await _backdate_offer_into_overtime(session, offer, normal_minutes=normal_minutes)
+    offer = await _reload_offer(session, int(offer.id))
+    projection = project_offer_lifecycle(
+        offer,
+        normal_lifetime_minutes=normal_minutes,
+        as_of=datetime.utcnow(),
+    )
+    passed = projection.phase == OfferLifecyclePhase.OVERTIME
+    return {
+        "phase": "rebackdate",
+        "offer_id": int(offer.id),
+        "offer_public_id": public_id,
+        "lifecycle_phase": projection.phase.value,
+        "accepts_overtime_request": projection.accepts_overtime_request,
+        "passed": passed,
+    }
+
+
+async def _scenario_req_cross_forward_run(
+    session,
+    run_prefix: str,
+    minutes: int,
+    *,
+    owner_user_id: int,
+    requester_user_id: int,
+    offer_public_id: str,
+) -> dict[str, object]:
+    """Foreign edge: ambiguous 504 → M18 pending; live forward → overtime, not trade-complete."""
+    import json
+    from unittest.mock import AsyncMock, patch
+
+    from fastapi import BackgroundTasks
+
+    from api.routers.trades import TradeCreate, _forward_trade_if_remote_home
+    from core.server_routing import is_remote_home
+    from core.services.accountant_relation_service import EffectiveOwnerActor
+    from core.services.offer_request_ledger_service import load_offer_request_by_idempotency
+    from core.trade_forward_pending import (
+        AMBIGUOUS_FORWARD_PENDING_MESSAGE,
+        clear_trade_forward_pending,
+        get_trade_forward_pending,
+    )
+    from models.offer_request import OfferRequest
+
+    del minutes  # seed already froze the snapshot; run only needs mirrored rows
+    if current_server() != "foreign":
+        raise DriverRefusal("OT-REQ-CROSS-FORWARD run phase only runs on the foreign peer")
+    public_id = (offer_public_id or "").strip()
+    if not public_id:
+        raise DriverRefusal("OT-REQ-CROSS-FORWARD run requires --offer-public-id from Iran seed")
+
+    requester = await _await_user_by_id(session, requester_user_id)
+    if requester is None:
+        raise DriverRefusal(
+            f"Iran-seeded requester_user_id={requester_user_id} did not mirror to foreign"
+        )
+    owner = await _await_user_by_id(session, owner_user_id)
+    if owner is None:
+        raise DriverRefusal(
+            f"Iran-seeded owner_user_id={owner_user_id} did not mirror to foreign"
+        )
+
+    offer, offer_mirror_seconds = await _await_offer_by_public_id(session, public_id)
+    if offer is None:
+        raise DriverRefusal(f"Iran offer {public_id} did not mirror to foreign")
+    offer_id = int(offer.id)
+    offer_home = str(offer.home_server)
+    if offer_home != "iran" or not is_remote_home(offer_home):
+        raise DriverRefusal(
+            f"expected remote Iran-home offer, got home_server={offer_home!r}"
+        )
+
+    requester_id = int(requester.id)
+    trade_qty = int(
+        getattr(offer, "remaining_quantity", None)
+        if getattr(offer, "remaining_quantity", None) is not None
+        else getattr(offer, "quantity", DEFAULT_OFFER_QUANTITY)
+    )
+    context = EffectiveOwnerActor(
+        owner_user=requester,
+        actor_user=requester,
+        relation=None,
+        is_accountant_context=False,
+    )
+    edge_received_at = datetime.utcnow()
+
+    # --- Ambiguous timeout path (forced 504): M18 + redis retain, no local ledger ---
+    m18_key = f"{run_prefix}:ot-cross-m18"
+    background = BackgroundTasks()
+    with patch(
+        "api.routers.trades.forward_trade_to_home_server",
+        AsyncMock(return_value=(504, {"detail": "timeout"})),
+    ):
+        m18_response = await _forward_trade_if_remote_home(
+            session,
+            TradeCreate(
+                offer_id=offer_id,
+                offer_public_id=public_id,
+                quantity=trade_qty,
+                idempotency_key=m18_key,
+            ),
+            context,
+            edge_received_at,
+            request_source_surface="webapp",
+            background_tasks=background,
+        )
+    if m18_response is None:
+        raise DriverRefusal("remote-home forward returned None; offer was not treated as remote")
+    m18_body = json.loads(m18_response.body.decode())
+    pending_row = await get_trade_forward_pending(m18_key)
+    local_m18_ledger = (
+        await session.execute(
+            select(OfferRequest).where(OfferRequest.idempotency_key == m18_key)
+        )
+    ).scalar_one_or_none()
+    # Do not run the queued reconciler; clear the marker so staging redis stays clean.
+    await clear_trade_forward_pending(m18_key)
+    pending_after_clear = await get_trade_forward_pending(m18_key)
+
+    m18_ok = (
+        int(m18_response.status_code) == 202
+        and m18_body.get("detail") == AMBIGUOUS_FORWARD_PENDING_MESSAGE
+        and m18_body.get("workflow") == "forward_pending"
+        and m18_body.get("pending") is True
+        and pending_row is not None
+        and str(pending_row.get("home_server")) == "iran"
+        and local_m18_ledger is None
+        and pending_after_clear is None
+        and len(background.tasks) == 1
+    )
+
+    # --- Live forward: Iran home answers overtime intake, never a false trade-complete ---
+    live_key = f"{run_prefix}:ot-cross-ok"
+    live_response = await _forward_trade_if_remote_home(
+        session,
+        TradeCreate(
+            offer_id=offer_id,
+            offer_public_id=public_id,
+            quantity=trade_qty,
+            idempotency_key=live_key,
+        ),
+        context,
+        edge_received_at,
+        request_source_surface="webapp",
+        background_tasks=BackgroundTasks(),
+    )
+    if live_response is None:
+        raise DriverRefusal("live remote-home forward returned None")
+    live_body = json.loads(live_response.body.decode())
+    local_live_ledger = (
+        await session.execute(
+            select(OfferRequest).where(OfferRequest.idempotency_key == live_key)
+        )
+    ).scalar_one_or_none()
+    # Authoritative overtime row belongs on Iran; foreign must not invent one.
+    iran_home_ledger = await load_offer_request_by_idempotency(
+        session,
+        request_home_server="foreign",
+        idempotency_key=live_key,
+    )
+
+    live_workflow = str(live_body.get("workflow") or "")
+    live_ok = (
+        int(live_response.status_code) == 202
+        and live_workflow == "overtime"
+        and live_body.get("pending") is not True
+        and "trade_number" not in live_body
+        and local_live_ledger is None
+        and iran_home_ledger is None
+    )
+
+    passed = m18_ok and live_ok
+    return {
+        "phase": "run",
+        "owner_user_id": int(owner.id),
+        "requester_user_id": requester_id,
+        "offer_id": offer_id,
+        "offer_public_id": public_id,
+        "offer_home_server": offer_home,
+        "offer_mirror_seconds": offer_mirror_seconds,
+        "m18": {
+            "status_code": int(m18_response.status_code),
+            "detail": m18_body.get("detail"),
+            "workflow": m18_body.get("workflow"),
+            "pending": m18_body.get("pending"),
+            "redis_pending_retained": pending_row is not None,
+            "local_ledger_created": local_m18_ledger is not None,
+            "reconcile_task_queued": len(background.tasks) == 1,
+            "redis_cleared_after": pending_after_clear is None,
+            "passed": m18_ok,
+        },
+        "live_forward": {
+            "status_code": int(live_response.status_code),
+            "workflow": live_workflow,
+            "result_status": live_body.get("result_status"),
+            "has_trade_number": "trade_number" in live_body,
+            "local_ledger_created": local_live_ledger is not None,
+            "body_keys": sorted(str(key) for key in live_body.keys()),
+            "passed": live_ok,
+        },
+        "passed": passed,
+    }
+
+
 async def _scenario_final_tail(
     session,
     run_prefix: str,
@@ -1802,6 +2143,21 @@ async def main_async(args: argparse.Namespace) -> dict[str, object]:
 
     setup_event_listeners()
 
+    # App startup normally opens Redis; scripts need the same client for M18 markers.
+    from core.redis import close_redis, init_redis
+
+    await init_redis()
+    try:
+        return await _main_async_with_session(args, run_prefix, started)
+    finally:
+        await close_redis()
+
+
+async def _main_async_with_session(
+    args: argparse.Namespace,
+    run_prefix: str,
+    started: str,
+) -> dict[str, object]:
     async with AsyncSessionLocal() as session:
         if args.mode == "cleanup":
             removed = await _cleanup(session, run_prefix)
@@ -1874,6 +2230,39 @@ async def main_async(args: argparse.Namespace) -> dict[str, object]:
                 )
         elif args.scenario == "OT-FINAL-TAIL":
             outcome = await _scenario_final_tail(session, run_prefix, args.minutes)
+        elif args.scenario == "OT-REQ-CROSS-FORWARD":
+            phase = (args.phase or "run").strip().lower()
+            if phase == "seed":
+                outcome = await _scenario_req_cross_forward_seed(
+                    session, run_prefix, args.minutes
+                )
+            elif phase == "rebackdate":
+                outcome = await _scenario_req_cross_forward_rebackdate(
+                    session,
+                    offer_public_id=str(args.offer_public_id or ""),
+                )
+            elif phase == "run":
+                if (
+                    args.owner_user_id is None
+                    or args.requester_user_id is None
+                    or not (args.offer_public_id or "").strip()
+                ):
+                    raise DriverRefusal(
+                        "OT-REQ-CROSS-FORWARD run phase requires "
+                        "--owner-user-id, --requester-user-id, and --offer-public-id"
+                    )
+                outcome = await _scenario_req_cross_forward_run(
+                    session,
+                    run_prefix,
+                    args.minutes,
+                    owner_user_id=int(args.owner_user_id),
+                    requester_user_id=int(args.requester_user_id),
+                    offer_public_id=str(args.offer_public_id),
+                )
+            else:
+                raise DriverRefusal(
+                    f"unsupported OT-REQ-CROSS-FORWARD phase={phase!r}"
+                )
         else:
             raise DriverRefusal(f"no driver implemented for {args.scenario}")
 
@@ -1881,7 +2270,11 @@ async def main_async(args: argparse.Namespace) -> dict[str, object]:
         # Foreign-home owners are Iran-authoritative under registration sync v2;
         # never auto-retire them from the foreign peer after a bot-origin run.
         allow_cleanup = args.cleanup_after and outcome.get("passed")
-        if args.scenario in {"OT-OFFER-BOT-ORIGIN", "OT-REQ-FOREIGN-TO-FOREIGN"}:
+        if args.scenario in {
+            "OT-OFFER-BOT-ORIGIN",
+            "OT-REQ-FOREIGN-TO-FOREIGN",
+            "OT-REQ-CROSS-FORWARD",
+        }:
             allow_cleanup = False
         if allow_cleanup:
             cleanup = await _cleanup(session, run_prefix)
@@ -1906,9 +2299,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--minutes", type=int, default=4)
     parser.add_argument(
         "--phase",
-        choices=("seed", "run"),
+        choices=("seed", "run", "rebackdate"),
         default="run",
-        help="for OT-OFFER-BOT-ORIGIN: seed on Iran, then run on foreign",
+        help="two-peer phases: seed / rebackdate on Iran, run on foreign",
     )
     parser.add_argument(
         "--owner-user-id",
@@ -1921,6 +2314,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=int,
         default=None,
         help="existing requester user id for foreign-peer request scenarios",
+    )
+    parser.add_argument(
+        "--offer-public-id",
+        default=None,
+        help="mirrored offer public id for foreign-edge cross-forward scenarios",
     )
     parser.add_argument(
         "--cleanup-after",
