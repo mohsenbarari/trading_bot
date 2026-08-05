@@ -1,0 +1,19 @@
+[Unit]
+Description=Trading Bot private gold Telegram collector (read-only)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=@CODE_ROOT@
+EnvironmentFile=@RUNTIME_ROOT@/private-gold-telegram.env
+Environment=PYTHONPATH=@RUNTIME_ROOT@/python-packages
+# Serialize with the public collector, bridge and any future canonical writer.
+ExecStart=/usr/bin/flock --exclusive --timeout 300 @RUNTIME_ROOT@/staging/.market-store-writer.lock /usr/bin/python3 -m scripts.collect_private_gold_event_telegram --runtime-root @RUNTIME_ROOT@ --market-store market/market.sqlite3 --staging-store staging/private-gold.sqlite3 --session session/telegram-reader --days 1
+TimeoutStartSec=360
+TimeoutStopSec=20
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=read-only
+ReadWritePaths=@RUNTIME_ROOT@/market @RUNTIME_ROOT@/staging

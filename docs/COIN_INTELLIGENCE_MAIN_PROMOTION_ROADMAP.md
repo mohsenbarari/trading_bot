@@ -2319,7 +2319,7 @@ bundle قبلی قابل انتخاب‌اند و Collectorها همچنان ف�
   کاری و تفکیک آن‌ها از fixture/synthetic audit است. تا آن زمان تمام flagهای
   selection و auto-selection و production خاموش می‌مانند.
 
-### P7-I — اتصال ورودی‌های staging و backfill leakage-safe — 2026-08-05 — IN PROGRESS
+### P7-I — اتصال ورودی‌های staging و backfill leakage-safe — 2026-08-05 — COMPLETE (staging)
 
 - یک bridge محلی و idempotent در
   `scripts/bridge_staging_market_inputs.py` اضافه شد. این bridge شبکه باز
@@ -2336,6 +2336,13 @@ bundle قبلی قابل انتخاب‌اند و Collectorها همچنان ف�
   از آن برای warm-state مجاز است، اما ارزیابی گذشته باید replay جداگانه و
   cutoff زمانی داشته باشد. جزئیات در
   `docs/COIN_INTELLIGENCE_STAGING_INPUT_BRIDGE.md` آمده است.
-- گیت باقی‌مانده: تکمیل backfill اولیه، فعال‌سازی timer محلی پس از صحت‌سنجی، و
-  بررسی پوشش/تأخیر هر منبع. این مرحله به‌تنهایی مجوز promotion یا روشن‌کردن
-  selection/auto-selection نیست.
+- backfill اولیه کامل و یکپارچگی آن تأیید شد: Market Store شامل حدود ۸۹۸هزار
+  مشاهده، بدون کلید تکراری و با `PRAGMA integrity_check=ok` است؛ آخرین
+  checkpoint عمومی/خارجی به انتهای منبع رسیده و گروه‌های جاری و تاریخی نیز
+  refresh شده‌اند.
+- collector عمومی stagingِ تکراری فعال نماند؛ ورودی عمومی از collector پایدار
+  `coin-public-market-telegram.service` به مخزن legacy می‌رسد و bridge آن را
+  با checkpoint وارد staging می‌کند. private collector و bridge با
+  `staging/.market-store-writer.lock` سریال شده‌اند و timer آن‌ها فعال است.
+- این مرحله به‌تنهایی مجوز promotion یا روشن‌کردن selection/auto-selection
+  نیست؛ پایش تأخیر و پوشش منابع و replay leakage-safe همچنان گیت مرحلهٔ بعد است.
