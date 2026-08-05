@@ -562,7 +562,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(json.dumps(run(build_parser().parse_args(argv)), sort_keys=True, ensure_ascii=False), flush=True)
         return 0
     except (BridgeError, OSError, sqlite3.Error, ValueError) as exc:
-        print(json.dumps({"status": "FAILED", "reason": str(exc)}, ensure_ascii=False), flush=True)
+        reason = str(exc)
+        if reason == "bridge_already_running":
+            print(json.dumps({"status": "SKIPPED", "reason": reason}, ensure_ascii=False), flush=True)
+            return 0
+        print(json.dumps({"status": "FAILED", "reason": reason}, ensure_ascii=False), flush=True)
         return 2
 
 
