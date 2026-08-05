@@ -70,6 +70,10 @@ USER_SYNC_IDENTITY_FIELDS = frozenset(
         "max_sessions",
         "max_accountants",
         "max_customers",
+        # Iran is the only writer for the overtime preference. Listing it here,
+        # and never in the foreign set, is what makes the existing write
+        # authority guard reject a foreign write of it.
+        "offer_overtime_minutes",
     }
 )
 USER_SYNC_FOREIGN_FIELDS = frozenset(

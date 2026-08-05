@@ -10,9 +10,9 @@
 
 ## Document Status
 
-- Phase: discovery complete and Stage 0 baseline recorded; awaiting implementation approval. No open questions remain.
-- Implementation status: not started. The branch `candidate/offer-overtime` currently holds only this document; the delivery policy above governs implementation commits once the roadmap is approved.
-- Rule: no implementation, database, deployment, or runtime changes are allowed until the plan is complete and explicitly approved.
+- Phase: implementation started. Stage 0 baseline recorded and Stage 1 data model landed; the Stage 1 migration still needs a real-database run before Stage 2. No open questions remain.
+- Implementation status: in progress on `candidate/offer-overtime`, which now carries this document plus the Stage 1 data model. Each stage ends with its own commit and completion notes, per the delivery policy above.
+- Rule: implementation was explicitly approved. Deployment and any runtime or production database action remain out of scope until the rollout stages are separately authorized.
 - Decision policy: only confirmed decisions are recorded as final. Unresolved items remain explicitly open.
 - Verification status: the technical review below was re-verified against the codebase at commit `540b2c0c`. Corrections from that verification are folded into the tables and stages.
 - Copy policy: every user-facing message and displayed text in this feature requires explicit product-owner approval of its exact wording before the stage that ships it may be implemented. The message inventory section is the single index of record. All strings call the object a `لفظ` to match existing product vocabulary, and the feature is labelled `وقت اضافه` wherever it is named. All forty-three entries are approved.
@@ -702,6 +702,28 @@ The next gate is not a question but an approval: the roadmap below may begin onl
 **Tests:** migration upgrade on empty and representative databases; default-zero backfill; enum compatibility; index/concurrency probes; existing request-ledger tests.
 
 **Exit criteria:** both schemas can store the new fields while feature-disabled code behaves exactly as before.
+
+#### Stage 1 completion notes
+
+**Status:** complete in code, with one prerequisite still outstanding: the migration has not been executed against a real database, because no PostgreSQL instance is reachable from this environment. That is recorded as a deviation below and must be closed before Stage 2.
+
+**Scope delivered.** `User.offer_overtime_minutes` defaults to `0` with a `0..10` check constraint. `Offer` gains `overtime_minutes_snapshot`, also range-checked, and `overtime_trade_committed` for the historical marker. The `OfferRequest` ledger is extended rather than duplicated, with an opaque `request_public_id`, a `workflow_kind` discriminator defaulting to `direct`, an `offer_owner_user_id` snapshot so the owner queue never has to join offers, `queue_sequence` for FIFO promotion, `presented_at` and `decision_deadline_at`, `decided_by_user_id`, `terminal_reason`, and the two Telegram delivery references. Nine overtime statuses were added to `offerrequeststatus`; success deliberately reuses `completed_trade` so there is one meaning of a committed trade across both workflows.
+
+**Four partial indexes carry the concurrency rules into the schema** rather than leaving them to application code: one live overtime request per `(home server, offer)`, one owner-occupying request per `(home server, economic owner)`, a FIFO lookup on the queued set, and a requester lookup for the outstanding-request limits. Their predicates compare `result_status::text`, not the enum, so a later type rebuild cannot invalidate them.
+
+**Inertness.** Every new column is nullable or server-defaulted to the disabled value, no code writes any new status, and `workflow_kind` defaults to `direct`, so a row written by code that predates this stage remains valid. Tests assert this directly rather than assuming it.
+
+**Affected components:** `models/user.py`, `models/offer.py`, `models/offer_request.py`, new `core/offer_request_identity.py`, `core/registration_sync_policy.py`, `core/sync_parity.py`, and `migrations/versions/b5d1c7e93f04_add_offer_overtime_data_model.py` on head `a274f5a6b8c9`, which remains the single head.
+
+**Sync decisions.** `offer_overtime_minutes` is registered in the Iran-authoritative user field set and never in the foreign set, so the existing write-authority guard is what enforces single-writer. `telegram_delivery_job_id` is registered as parity local-only, because the two peers legitimately point at different local delivery rows. The remaining new columns are deliberately absent from the sync payloads at this stage; nothing writes them, so both peers hold identical defaults and parity cannot drift. Wiring them into the payloads belongs to Stage 7 and must not be forgotten.
+
+**Tests and results.** New suite `tests/test_offer_overtime_data_model.py`, 27 tests, covering inertness, the state groups, index shape and uniqueness scoping, the sync wiring, identifier opacity, and a drift guard that reads the migration with `ast` and compares its status and predicate constants against the models. `tests/test_offer_request_ledger_model.py` was updated because it pins the status set as a contract. Regression: the Stage 0 module list re-run green at 1826 tests, and a further 1058 tests across user, registration, session, contract, parity, auth, and migration modules also green, both with the environment flags at their code defaults.
+
+**Deviations and known gaps.** First, no database was available, so `alembic upgrade head`, the downgrade guard, and the partial-index concurrency probes are untested against PostgreSQL; the migration is verified only by static analysis and model agreement. Second, two additional environment-dependent failures appeared alongside the Stage 0 finding: `.env` sets `TELEGRAM_DIRECT_REGISTRATION_ENABLED` and `TELEGRAM_REGISTRATION_RECONCILIATION_ENABLED` to true while the tests assert the code defaults of false. Third, `tests/test_registration_identity_property` and `tests/test_registration_stateful_fuzz` cannot load because `hypothesis` is not installed. None of the three is caused by this stage.
+
+**Evidence retained:** `tmp/offer-overtime-evidence/stage1-regression.log`, `stage1-extra.log`, and `stage1-extra-default-env.log`.
+
+**Next stage prerequisites.** Before Stage 2, run this migration up and down on a real database, confirm the default-zero backfill on a representative dataset, and probe the partial indexes under concurrent writers. Stage 2 is the first stage that gives the new storage a value, so it must not begin while the migration is unproven.
 
 ### Stage 2 — Canonical User Preference and Offer Snapshot
 

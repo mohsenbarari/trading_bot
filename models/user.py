@@ -21,6 +21,10 @@ class User(Base):
     __table_args__ = (
         CheckConstraint("sync_version >= 1", name="ck_users_sync_version_positive"),
         CheckConstraint("counter_epoch >= 1", name="ck_users_counter_epoch_positive"),
+        CheckConstraint(
+            "offer_overtime_minutes BETWEEN 0 AND 10",
+            name="ck_users_offer_overtime_minutes_range",
+        ),
         Index(
             "ux_users_normalized_account_name",
             "normalized_account_name",
@@ -79,6 +83,11 @@ class User(Base):
     # Admin Password Management (SUPER_ADMIN / MIDDLE_MANAGER)
     admin_password_hash = Column(String(255), nullable=True)
     must_change_password = Column(Boolean, default=False, nullable=False)
+
+    # Minutes an offer of this user stays open for owner-approved trades after
+    # its normal lifetime ends. Zero disables the feature for that user. Iran is
+    # the only writer; the value is snapshotted onto each offer at creation.
+    offer_overtime_minutes = Column(Integer, nullable=False, default=0, server_default=text("0"))
 
     # Trading restrictions
     trading_restricted_until = Column(DateTime, nullable=True)
