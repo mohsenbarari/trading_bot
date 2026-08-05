@@ -187,6 +187,9 @@ class OfferExpiryTests(unittest.IsolatedAsyncioTestCase):
              patch("core.offer_expiry.AsyncSessionLocal", return_value=SessionManager()), \
              patch("core.offer_expiry.current_server", return_value="foreign"), \
              patch("core.services.offer_expiry_service.current_server", return_value="foreign"), \
+             patch("core.offer_expiry._offer_ids_with_final_tail_requests", AsyncMock(return_value=set())), \
+             patch("core.offer_expiry._sweep_overdue_overtime_decisions", AsyncMock()), \
+             patch("core.services.offer_expiry_service._invalidate_overtime_after_offer_expiry", AsyncMock()), \
              patch("core.offer_expiry.apply_remote_stale_channel_state", AsyncMock(return_value=0)), \
              patch("core.offer_expiry.apply_offer_channel_state", AsyncMock()) as apply_offer_channel_state, \
              patch("core.events.publish_event_sync") as publish_event_sync, \
@@ -194,7 +197,7 @@ class OfferExpiryTests(unittest.IsolatedAsyncioTestCase):
             count = await offer_expiry.expire_stale_offers()
 
         self.assertEqual(count, 3)
-        self.assertEqual(session.execute.await_count, 2)
+        self.assertEqual(session.execute.await_count, 1)
         session.commit.assert_awaited_once()
         self.assertEqual([offer.status for offer in expired_offers], [OfferStatus.EXPIRED] * 3)
         self.assertEqual([offer.expire_reason for offer in expired_offers], ["time_limit"] * 3)
@@ -223,9 +226,7 @@ class OfferExpiryTests(unittest.IsolatedAsyncioTestCase):
             execute=AsyncMock(
                 side_effect=[
                     scalars_result([first_scan_offer]),
-                    scalars_result([]),
                     scalars_result([retry_scan_offer]),
-                    scalars_result([]),
                 ]
             ),
             rollback=AsyncMock(),
@@ -244,6 +245,8 @@ class OfferExpiryTests(unittest.IsolatedAsyncioTestCase):
              patch("core.offer_expiry.AsyncSessionLocal", return_value=SessionManager()), \
              patch("core.offer_expiry.current_server", return_value="foreign"), \
              patch("core.offer_expiry.expire_offers_authoritatively", expire_authoritatively), \
+             patch("core.offer_expiry._offer_ids_with_final_tail_requests", AsyncMock(return_value=set())), \
+             patch("core.offer_expiry._sweep_overdue_overtime_decisions", AsyncMock()), \
              patch("core.offer_expiry.apply_remote_stale_channel_state", AsyncMock(return_value=0)), \
              patch("core.offer_expiry.apply_offer_channel_state", AsyncMock()) as apply_offer_channel_state, \
              patch("core.events.publish_event_sync"), \
@@ -251,7 +254,7 @@ class OfferExpiryTests(unittest.IsolatedAsyncioTestCase):
             count = await offer_expiry.expire_stale_offers()
 
         self.assertEqual(count, 1)
-        self.assertEqual(session.execute.await_count, 4)
+        self.assertEqual(session.execute.await_count, 2)
         session.rollback.assert_awaited_once()
         self.assertEqual(expire_authoritatively.await_count, 2)
         self.assertEqual(expire_authoritatively.await_args_list[0].args[1], [first_scan_offer])
@@ -278,6 +281,9 @@ class OfferExpiryTests(unittest.IsolatedAsyncioTestCase):
              patch("core.offer_expiry.AsyncSessionLocal", return_value=SessionManager()), \
              patch("core.offer_expiry.current_server", return_value="foreign"), \
              patch("core.services.offer_expiry_service.current_server", return_value="foreign"), \
+             patch("core.offer_expiry._offer_ids_with_final_tail_requests", AsyncMock(return_value=set())), \
+             patch("core.offer_expiry._sweep_overdue_overtime_decisions", AsyncMock()), \
+             patch("core.services.offer_expiry_service._invalidate_overtime_after_offer_expiry", AsyncMock()), \
              patch("core.offer_expiry.apply_remote_stale_channel_state", AsyncMock(return_value=0)), \
              patch("core.offer_expiry.apply_offer_channel_state", AsyncMock()) as apply_offer_channel_state, \
              patch("core.events.publish_event_sync", side_effect=RuntimeError("pubsub down")), \

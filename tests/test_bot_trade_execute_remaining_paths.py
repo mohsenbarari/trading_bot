@@ -213,7 +213,7 @@ class BotTradeExecuteRemainingPathTests(unittest.IsolatedAsyncioTestCase):
             "telegram_callback:5:legacy_offer:7:2:remaining:5:50",
         )
         callback.answer.assert_awaited_with(
-            "درخواست معامله ارسال شد؛ نتیجه تا چند لحظه دیگر همگام می‌شود.",
+            "⏳ در حال بررسی درخواست...",
             show_alert=False,
         )
 

@@ -564,14 +564,22 @@ async def _acknowledge_overtime_request(
         return
     # Remote-home: no local ledger yet; still send status + cancel using public id.
     # Cancel clicks home-check and refuse until sync lands or Stage 7+ forward exists.
-    try:
-        await bot.send_message(
-            chat_id=int(chat_id),
-            text=ack,
-            reply_markup=cancel_inline_keyboard(public_id),
-        )
-    except Exception as exc:
-        logger.debug("remote overtime status send skipped: %s", exc)
+    from types import SimpleNamespace
+
+    from models.offer_request import OfferRequestStatus
+
+    await send_requester_overtime_status(
+        bot=bot,
+        session=session,
+        user=user,
+        ledger=SimpleNamespace(
+            request_public_id=public_id,
+            result_status=result_status or OfferRequestStatus.OVERTIME_QUEUED.value,
+            telegram_message_id=None,
+            requester_status_outbox_id=None,
+        ),
+        chat_id=chat_id,
+    )
 
 
 def _trade_model_to_remote_home_body(trade: Trade | object) -> dict[str, object | None]:

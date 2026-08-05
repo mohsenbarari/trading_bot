@@ -181,6 +181,9 @@ async def edit_requester_overtime_status(
 
     if receipt < 0:
         # Legacy sentinel: negative of telegram message_id.
+        runtime = configured_telegram_delivery_runtime()
+        if runtime.mode == TelegramDeliveryRuntimeMode.QUEUE_V1:
+            return
         message_id = -receipt
         chat_id = getattr(user, "telegram_id", None)
         if bot is None or not chat_id:

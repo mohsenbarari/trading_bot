@@ -559,6 +559,15 @@ class OffersRouterCreateSuccessTests(unittest.IsolatedAsyncioTestCase):
                 "lot_sizes": None,
                 "original_lot_sizes": None,
                 "expires_at_ts": int(reloaded_offer.created_at.timestamp() + 15 * 60),
+                "normal_deadline_ts": int(reloaded_offer.created_at.timestamp() + 15 * 60),
+                "final_deadline_ts": int(reloaded_offer.created_at.timestamp() + 15 * 60),
+                "lifecycle_phase": "expired",
+                "overtime_minutes_snapshot": 0,
+                "timer_total_seconds": 0,
+                "accepts_new_public_interaction": False,
+                "accepts_automatic_trade": False,
+                "accepts_overtime_request": False,
+                "overtime_trade_committed": False,
             },
         )
         response_mock.assert_called_once_with(
@@ -679,6 +688,15 @@ class OffersRouterCreateSuccessTests(unittest.IsolatedAsyncioTestCase):
                 "lot_sizes": None,
                 "original_lot_sizes": None,
                 "expires_at_ts": None,
+                "normal_deadline_ts": None,
+                "final_deadline_ts": None,
+                "lifecycle_phase": None,
+                "overtime_minutes_snapshot": 0,
+                "timer_total_seconds": None,
+                "accepts_new_public_interaction": False,
+                "accepts_automatic_trade": False,
+                "accepts_overtime_request": False,
+                "overtime_trade_committed": False,
             },
         )
         self.assertEqual(result, {"id": 99})
