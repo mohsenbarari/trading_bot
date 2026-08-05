@@ -1,0 +1,34 @@
+{
+  "scenario": "OT-PREF-DISABLED-REGRESSION",
+  "run_prefix": "OTACC_20260805154407",
+  "release_sha": "3c8b3e07",
+  "iran": {
+    "server_mode": "iran",
+    "owner_user_id": 1362,
+    "offer_id": 476,
+    "offer_public_id": "ofr_TET_8yXaBWNNSHl97fm0O3yX",
+    "preference_minutes": 0,
+    "overtime_minutes_snapshot": 0,
+    "normal_lifetime_minutes": 2,
+    "normal_phase": "normal",
+    "accepts_automatic_trade_in_normal": true,
+    "accepts_overtime_request_in_normal": false,
+    "phase_after_normal_deadline": "expired",
+    "intake_after_normal_deadline": "rejected",
+    "offer_change_log_rows": 1,
+    "passed": true
+  },
+  "foreign_mirror": {
+    "offer_id": 233,
+    "overtime_minutes_snapshot": 0,
+    "home_server": "iran",
+    "status": "ACTIVE",
+    "observed_after_seconds": 5
+  },
+  "cleanup": {
+    "path": "core.services.user_deletion_service.delete_user_account",
+    "users_retired": 1,
+    "foreign_user_is_deleted": true,
+    "foreign_offer_status": "EXPIRED"
+  }
+}

@@ -1,0 +1,45 @@
+{
+  "scenario": "OT-OFFER-WEBAPP-ORIGIN",
+  "run_prefix": "OTACC_20260805154625",
+  "release_sha": "3c8b3e07",
+  "iran": {
+    "server_mode": "iran",
+    "owner_user_id": 1366,
+    "offer_id": 480,
+    "offer_public_id": "ofr_MnST7b0veVzZP9I74nRVMDGV",
+    "preference_at_create": 5,
+    "overtime_minutes_snapshot": 5,
+    "snapshot_after_preference_cleared": 5,
+    "preference_after_clear": 0,
+    "lifecycle_fields": {
+      "lifecycle_phase": "normal",
+      "overtime_minutes_snapshot": 5,
+      "accepts_automatic_trade": true,
+      "accepts_overtime_request": false,
+      "normal_deadline_ts": 1785944909,
+      "final_deadline_ts": 1785945209
+    },
+    "overtime_phase": "overtime",
+    "accepts_automatic_in_overtime": false,
+    "accepts_overtime_in_overtime": true,
+    "public_safe": {
+      "safe_public_state_label": "active",
+      "overtime_minutes_snapshot": 5,
+      "private_identity_leaked": false
+    },
+    "offer_change_log_rows": 1,
+    "passed": true
+  },
+  "foreign_mirror": {
+    "offer_id": 237,
+    "overtime_minutes_snapshot": 5,
+    "home_server": "iran",
+    "status": "ACTIVE",
+    "user_preference_after_clear": 0,
+    "observed_after_seconds": 5
+  },
+  "cleanup": {
+    "path": "core.services.user_deletion_service.delete_user_account",
+    "users_retired": 1
+  }
+}

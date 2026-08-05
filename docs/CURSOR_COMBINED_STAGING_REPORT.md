@@ -518,19 +518,43 @@ Three things the product refused along the way, all correctly:
    user emits no outbox row. Cleanup uses `delete_user_account`, the product's own
    flow, which already invalidates overtime state.
 
-The other 14 scenarios still have no driver, so `execute` remains fail-closed.
 Authentication note for the remaining WebApp-facing scenarios: dev-login is
 deliberately disabled on the Iran staging nginx
 (`return 404; # Full Matrix: dev-login disabled after key rotation`), so drivers
 run in-container rather than as external HTTP clients.
 
+### 12.8 Preference + offer snapshot drivers (4/15)
+
+Three more Iran-container drivers passed on the live pair after
+`OT-PREF-WEBAPP-SAVE`. All mutate only `OTACC_*` synthetic users and retire them
+through `delete_user_account`.
+
+| Scenario | Iran assertion | Foreign mirror | Evidence |
+| --- | --- | --- | --- |
+| `OT-PREF-BOT-SAVE` | `save_overtime_preference_from_bot` persisted 3 | user 1368 → 3 within ~5s | `stage16-driver-OT-PREF-BOT-SAVE.json` |
+| `OT-PREF-DISABLED-REGRESSION` | preference 0 → snapshot 0; after normal deadline phase `expired`, intake `rejected` | offer 233 snapshot 0 | `stage16-driver-OT-PREF-DISABLED-REGRESSION.json` |
+| `OT-OFFER-WEBAPP-ORIGIN` | preference 5 frozen on offer; clearing preference leaves snapshot 5; public response has no private identity; overtime phase accepts approval only | offer 237 snapshot 5 | `stage16-driver-OT-OFFER-WEBAPP-ORIGIN.json` |
+
+Notes kept honest:
+
+- `OT-PREF-BOT-SAVE` covers the Iran path of the bot helper. Foreign-forward + M7
+  unreachable behavior is still a follow-up.
+- Offer creation uses the WebApp quota path (`OfferCreationQuotaPolicy`) so the
+  snapshot freeze runs; market competitive-price validation is skipped so staging
+  price state cannot flake the overtime contract.
+- Acceptance `execute` now knows these four wired drivers. With confirm + green
+  preflight + `STAGING_IRAN_SSH_HOST`, it runs them and returns `execute_partial`
+  until the remaining 11 scenarios are wired. Without transport env it stays
+  fail-closed.
+
 ### 12.4 Remaining work before `main`
 
 | Item | State |
 | --- | --- |
-| Mutating Stage 16 scenario drivers | 1 of 15 wired and passing; `execute` still fail-closed |
-| Overtime preferences | all users at `0`, untouched |
+| Mutating Stage 16 scenario drivers | 4 of 15 wired and passing live; `execute` → `execute_partial` once transport env is set |
+| Overtime preferences | staging users remain at `0` after driver cleanup |
 | Coin inference flags | off by default, untouched |
 | Arvan CDN origin for `staging.gold-trade.ir` | broken, needs panel fix |
 | Sync parity comparison | `comparison_status: missing` — no parity run yet on this pair |
 | coin-price vs coin-commodity comparison | still owed per the handoff prompt |
+| Next drivers | `OT-OFFER-BOT-ORIGIN`, then request/queue axes |

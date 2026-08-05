@@ -1,0 +1,29 @@
+{
+  "scenario": "OT-PREF-BOT-SAVE",
+  "run_prefix": "OTACC_20260805154636",
+  "release_sha": "3c8b3e07",
+  "note": "Iran-path of save_overtime_preference_from_bot; foreign-forward/M7 path remains a follow-up",
+  "iran": {
+    "server_mode": "iran",
+    "owner_user_id": 1368,
+    "path": "save_overtime_preference_from_bot",
+    "eligibility_allowed": true,
+    "requested_minutes": 3,
+    "persisted_minutes": 3,
+    "save_detail": "✅ وقت اضافه لفظ‌های جدید شما روی 3 دقیقه تنظیم شد.",
+    "save_warning": "تأیید هر لفظ فقط در همان محل ثبت لفظ نمایش داده می‌شود: لفظ وب در وب‌اپ و لفظ بات در بات.",
+    "user_change_log_rows": 2,
+    "passed": true
+  },
+  "foreign_mirror": {
+    "user_id": 1368,
+    "offer_overtime_minutes": 3,
+    "home_server": "iran",
+    "observed_after_seconds": 5
+  },
+  "cleanup": {
+    "path": "core.services.user_deletion_service.delete_user_account",
+    "users_retired": 1,
+    "foreign_is_deleted": true
+  }
+}
