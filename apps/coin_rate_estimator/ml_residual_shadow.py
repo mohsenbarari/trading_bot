@@ -195,6 +195,11 @@ def apply_ml_residual_to_estimate(
         "max_abs_relative_correction": max_abs_rel,
         "prediction_shrink": shrink,
     }
+    # HGB prediction has a sizable fixed OpenMP cost.  Calling it once per
+    # rate made the ML shadow much more expensive than the estimator itself.
+    # Build the exact same vectors first, then make one batch prediction; the
+    # result for each row is identical and the shadow remains isolated.
+    candidates: list[tuple[dict[str, Any], list[float]]] = []
     for settlement, body in (shadow.get("settlements") or {}).items():
         if not isinstance(body, dict):
             continue
@@ -216,39 +221,45 @@ def apply_ml_residual_to_estimate(
                 inputs=inputs,
                 end=end,
             )
-            raw = float(model.predict([vector])[0]) * shrink
-            base = float(price)
+            candidates.append((rate, vector))
+
+    raw_predictions = (
+        model.predict([vector for _, vector in candidates]) if candidates else []
+    )
+    for (rate, _vector), prediction in zip(candidates, raw_predictions):
+        raw = float(prediction) * shrink
+        base = float(rate["estimated_project_price"])
+        if mode == "relative":
+            correction_rel = max(-max_abs_rel, min(max_abs_rel, raw))
+            corrected = base * (1.0 + correction_rel)
+            correction_abs = corrected - base
+        else:
+            correction_abs = max(-max_abs_abs, min(max_abs_abs, raw))
+            corrected = base + correction_abs
+            correction_rel = correction_abs / max(abs(base), 1.0)
+        corrected_int = int(round(corrected))
+        rate["estimated_project_price"] = corrected_int
+        if rate.get("estimated_price_toman") is not None:
+            # Keep toman display aligned with project units used by live book.
+            multiplier = float(
+                live_estimate.get("project_price_multiplier_to_toman") or 1000.0
+            )
+            rate["estimated_price_toman"] = int(round(corrected_int * multiplier))
+        for band_key in ("lower_project_price", "upper_project_price"):
+            band = rate.get(band_key)
+            if band is None:
+                continue
             if mode == "relative":
-                correction_rel = max(-max_abs_rel, min(max_abs_rel, raw))
-                corrected = base * (1.0 + correction_rel)
-                correction_abs = corrected - base
+                rate[band_key] = int(round(float(band) * (1.0 + correction_rel)))
             else:
-                correction_abs = max(-max_abs_abs, min(max_abs_abs, raw))
-                corrected = base + correction_abs
-                correction_rel = correction_abs / max(abs(base), 1.0)
-            corrected_int = int(round(corrected))
-            rate["estimated_project_price"] = corrected_int
-            if rate.get("estimated_price_toman") is not None:
-                # Keep toman display aligned with project units used by live book.
-                multiplier = float(
-                    live_estimate.get("project_price_multiplier_to_toman") or 1000.0
-                )
-                rate["estimated_price_toman"] = int(round(corrected_int * multiplier))
-            for band_key in ("lower_project_price", "upper_project_price"):
-                band = rate.get(band_key)
-                if band is None:
-                    continue
-                if mode == "relative":
-                    rate[band_key] = int(round(float(band) * (1.0 + correction_rel)))
-                else:
-                    rate[band_key] = int(round(float(band) + correction_abs))
-            rate["method"] = f"{rate.get('method') or 'LIVE'}+ML_RESIDUAL"
-            rate["ml_residual_correction"] = {
-                "raw_prediction": raw,
-                "applied_relative": correction_rel,
-                "applied_absolute_project": correction_abs,
-                "base_project_price": base,
-            }
+                rate[band_key] = int(round(float(band) + correction_abs))
+        rate["method"] = f"{rate.get('method') or 'LIVE'}+ML_RESIDUAL"
+        rate["ml_residual_correction"] = {
+            "raw_prediction": raw,
+            "applied_relative": correction_rel,
+            "applied_absolute_project": correction_abs,
+            "base_project_price": base,
+        }
     return shadow
 
 

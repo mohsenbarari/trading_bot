@@ -25,6 +25,11 @@ RECENT_REALIZED_HALF_LIFE_SECONDS = 30 * 60
 # for the structural model or for a fresh live coin book.
 MAX_RECENT_REALIZED_CORRECTION_RATIO = 0.01
 NORMAL_MATCH_SECONDS = 5 * 60
+# The event parser and trade-confirmation pass are independent workers.  A
+# short grace window allows a late-arriving trusted event to be paired with
+# its normal five-minute prediction window without rescanning the full ledger
+# forever.  Historical rows remain intact for research and manual review.
+NORMAL_EVALUATION_GRACE_SECONDS = 15 * 60
 RECONNECT_MATCH_HOURS = 24
 PROJECT_PRICE_MULTIPLIER = 1_000
 LEDGER_MIN_INTERVAL_SECONDS = 30
@@ -70,6 +75,10 @@ def ensure_schema(connection: sqlite3.Connection) -> None:
         );
         CREATE INDEX IF NOT EXISTS coin_estimate_predictions_pending_idx
             ON coin_estimate_predictions(evaluated_at_utc, prediction_time_utc);
+        CREATE INDEX IF NOT EXISTS coin_estimate_predictions_pending_window_idx
+            ON coin_estimate_predictions(
+                evaluated_at_utc, group_live_enabled, prediction_time_utc
+            );
         CREATE INDEX IF NOT EXISTS coin_estimate_predictions_lookup_idx
             ON coin_estimate_predictions(commodity, settlement, prediction_time_utc);
         CREATE TABLE IF NOT EXISTS coin_online_residual_state (
@@ -342,13 +351,53 @@ def reconcile_predictions(
             "reconnect_bridged": 0,
             "status": "DEFERRED_GROUP_INPUT_DISCONNECTED",
         }
-    pending = connection.execute(
+    normal_cutoff = now - timedelta(seconds=NORMAL_EVALUATION_GRACE_SECONDS)
+    # Normal matching is defined for the first five minutes.  Keep an extra
+    # ten-minute arrival allowance, then leave older rows in the ledger but
+    # outside the hot refresh path.  This preserves training/audit history
+    # without paying an unbounded query cost every cycle.
+    normal_pending = connection.execute(
         """
         SELECT * FROM coin_estimate_predictions
         WHERE evaluated_at_utc IS NULL
+          AND prediction_time_utc>=?
         ORDER BY prediction_time_utc, id
-        """
+        """,
+        (_iso(normal_cutoff),),
     ).fetchall()
+    # A reconnect is the sole exception: the newest prediction made during a
+    # disconnection can bridge to the first post-reconnect trusted event.
+    # Select one such row per commodity/settlement instead of repeatedly
+    # walking every historical pending row.
+    reconnect_pending: list[sqlite3.Row] = []
+    reconnect_candidate_ids: set[int] = set()
+    if reconnect_at is not None:
+        reconnect_at = reconnect_at.astimezone(timezone.utc)
+        reconnect_floor = reconnect_at - timedelta(hours=RECONNECT_MATCH_HOURS)
+        candidates = connection.execute(
+            """
+            SELECT * FROM coin_estimate_predictions
+            WHERE evaluated_at_utc IS NULL
+              AND group_live_enabled=0
+              AND prediction_time_utc>=? AND prediction_time_utc<=?
+            ORDER BY commodity, settlement, prediction_time_utc DESC, id DESC
+            """,
+            (_iso(reconnect_floor), _iso(reconnect_at)),
+        ).fetchall()
+        seen_reconnect_keys: set[tuple[str, str]] = set()
+        for row in candidates:
+            key = (str(row["commodity"]), str(row["settlement"]))
+            if key in seen_reconnect_keys:
+                continue
+            seen_reconnect_keys.add(key)
+            reconnect_pending.append(row)
+            reconnect_candidate_ids.add(int(row["id"]))
+
+    pending = list(normal_pending)
+    normal_pending_ids = {int(row["id"]) for row in pending}
+    pending.extend(
+        row for row in reconnect_pending if int(row["id"]) not in normal_pending_ids
+    )
     evaluated = 0
     bridged = 0
     used_actual_ids: set[tuple[str, int]] = set()
@@ -392,9 +441,13 @@ def reconcile_predictions(
             None,
         )
         mode = "FORWARD_5M"
-        if actual is None and live_group_enabled and reconnect_at is not None:
+        if (
+            actual is None
+            and reconnect_at is not None
+            and int(row["id"]) in reconnect_candidate_ids
+        ):
             key = (str(row["commodity"]), str(row["settlement"]))
-            if not bool(row["group_live_enabled"]) and key not in reconnect_keys:
+            if key not in reconnect_keys:
                 reconnect_start = max(reconnect_at, prediction_time)
                 actuals = _trusted_actuals(
                     connection,

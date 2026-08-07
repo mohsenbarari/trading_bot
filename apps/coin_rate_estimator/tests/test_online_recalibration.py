@@ -92,6 +92,20 @@ class OnlineRecalibrationTests(unittest.TestCase):
         self.assertEqual(state["sample_count"], 1)
         self.assertGreater(state["residual_mean"], 0)
 
+    def test_old_normal_prediction_is_not_requeried_but_is_retained(self) -> None:
+        self._record("2026-08-05T10:00:00Z", 180_000_000, enabled=True)
+        result = reconcile_predictions(
+            self.connection,
+            now=datetime(2026, 8, 5, 10, 20, tzinfo=UTC),
+            live_group_enabled=True,
+        )
+        self.assertEqual(result["evaluated"], 0)
+        row = self.connection.execute(
+            "SELECT evaluated_at_utc FROM coin_estimate_predictions"
+        ).fetchone()
+        # A performance guard must not destroy historical training/audit data.
+        self.assertIsNone(row["evaluated_at_utc"])
+
     def test_correction_waits_for_three_samples_and_never_narrows_range(self) -> None:
         for index in range(3):
             prediction = datetime(2026, 8, 5, 10, index, tzinfo=UTC)
