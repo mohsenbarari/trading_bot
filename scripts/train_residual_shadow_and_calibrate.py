@@ -41,7 +41,7 @@ from coin_estimator import (  # noqa: E402
 )
 
 
-SHADOW_VERSION = "residual-hgb-shadow-v2-relative-20260806"
+SHADOW_VERSION = "residual-hgb-shadow-v3-raw-structural-minute-20260807"
 PURGE = timedelta(minutes=15)
 RECENCY_HALF_LIFE_DAYS = 10.0
 MAX_ABS_RELATIVE_CORRECTION = 0.015
@@ -59,6 +59,7 @@ FEATURE_KEYS = (
     "quantity",
     "tehran_weekday",
     "tehran_hour",
+    "tehran_minute_of_day",
     "hour_sin",
     "hour_cos",
     "is_morning_open",
@@ -106,9 +107,10 @@ def _utc(value: datetime | str) -> datetime:
     return value.astimezone(timezone.utc)
 
 
-def _tehran_parts(moment: datetime) -> tuple[int, int]:
+def _tehran_parts(moment: datetime) -> tuple[int, float, int]:
     local = moment.astimezone(__import__("zoneinfo").ZoneInfo("Asia/Tehran"))
-    return local.weekday(), local.hour
+    minute_of_day = local.hour * 60 + local.minute
+    return local.weekday(), minute_of_day / 60.0, minute_of_day
 
 
 def _f(value: Any, default: float = math.nan) -> float:
@@ -146,7 +148,7 @@ def build_rows(market_db: Path, conversation_db: Path, live_model: dict[str, Any
             if example is None or not example.get("accepted"):
                 continue
             moment = _utc(str(example["event_time_utc"]))
-            weekday, hour = _tehran_parts(moment)
+            weekday, hour, minute_of_day = _tehran_parts(moment)
             commodity = str(example["commodity_name"])
             settlement = str(example["settlement_type"])
             trade_form = str(example.get("trade_form") or "PHYSICAL")
@@ -174,12 +176,14 @@ def build_rows(market_db: Path, conversation_db: Path, live_model: dict[str, Any
                 "market_regime_score": _f(example.get("market_regime_score")),
                 "market_regime_confidence": _f(example.get("market_regime_confidence")),
                 "source_confidence": _f(example.get("source_confidence"), 1.0),
-                "quantity": _f(example.get("quantity"), 1.0),
+                # Serving estimates have no reliable per-rate quantity.
+                "quantity": 1.0,
                 "tehran_weekday": float(weekday),
                 "tehran_hour": float(hour),
+                "tehran_minute_of_day": float(minute_of_day),
                 "hour_sin": math.sin(2.0 * math.pi * hour / 24.0),
                 "hour_cos": math.cos(2.0 * math.pi * hour / 24.0),
-                "is_morning_open": 1.0 if 8 <= hour < 11 else 0.0,
+                "is_morning_open": 1.0 if 9 * 60 + 45 <= minute_of_day < 11 * 60 else 0.0,
                 "commodity_code": float(names.index(commodity) if commodity in names else -1),
                 "settlement_code": 0.0 if settlement == "CASH" else 1.0,
                 "trade_form_code": 0.0 if trade_form == "PHYSICAL" else 1.0,
@@ -366,6 +370,12 @@ def main() -> int:
         action="store_true",
         help="Skip slow permutation importance (recommended for fast retrain).",
     )
+    parser.add_argument(
+        "--runtime-shadow-path",
+        type=Path,
+        default=None,
+        help="Optional explicit artifact destination; defaults to the live model runtime directory.",
+    )
     args = parser.parse_args()
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -425,6 +435,7 @@ def main() -> int:
 
     artifact = {
         "shadow_version": SHADOW_VERSION,
+        "feature_schema_version": "STRUCTURAL_MINUTE_V3",
         "feature_keys": list(FEATURE_KEYS),
         "target_mode": "relative",
         "max_abs_relative_correction": MAX_ABS_RELATIVE_CORRECTION,
@@ -433,11 +444,11 @@ def main() -> int:
         "split": split_meta,
         "selected_hyperparameters": best_params,
         "sklearn_model": model,
-        "applies_to_model": "live-estimate-centers",
-        "training_baseline": "live_model_bubble_table",
+        "applies_to_model": "raw-structural-estimate-centers",
+        "training_baseline": "live_model_bubble_table_approximation",
     }
     model_path = args.output_dir / "residual_shadow_hgb.joblib"
-    runtime_shadow = args.live_model.parent / "residual_shadow_hgb.joblib"
+    runtime_shadow = args.runtime_shadow_path or (args.live_model.parent / "residual_shadow_hgb.joblib")
     joblib.dump(artifact, model_path)
     joblib.dump(artifact, runtime_shadow)
     report_path = args.output_dir / "residual_shadow_report.json"

@@ -93,6 +93,13 @@ PRICE_MULTIPLIER = 1_000  # project convention: 178000 means 178,000,000 toman
 # refresh or change the mathematical result of an individual model.
 _EMPIRICAL_RATIO_SNAPSHOT_CACHE: dict[tuple[Any, ...], dict[str, Any]] = {}
 _EMPIRICAL_RATIO_SNAPSHOT_CACHE_MAX = 128
+# The three structural books (main + two non-ML shadows) observe the exact
+# same market/conversation snapshot.  These outputs do not depend on model
+# coefficients, so sharing them is mathematically neutral and removes repeated
+# SQLite connections/scans from every 30-second shadow cycle.  Keys always
+# include the exact timestamp and input gate, and callers receive a deep copy.
+_MODEL_INDEPENDENT_SNAPSHOT_CACHE: dict[tuple[Any, ...], dict[str, Any]] = {}
+_MODEL_INDEPENDENT_SNAPSHOT_CACHE_MAX = 512
 
 
 def _empirical_ratio_cache_get(key: tuple[Any, ...]) -> dict[str, Any] | None:
@@ -105,6 +112,43 @@ def _empirical_ratio_cache_put(key: tuple[Any, ...], value: dict[str, Any]) -> d
         _EMPIRICAL_RATIO_SNAPSHOT_CACHE.clear()
     _EMPIRICAL_RATIO_SNAPSHOT_CACHE[key] = deepcopy(value)
     return value
+
+
+def _snapshot_cache_get(key: tuple[Any, ...]) -> dict[str, Any] | None:
+    value = _MODEL_INDEPENDENT_SNAPSHOT_CACHE.get(key)
+    return deepcopy(value) if value is not None else None
+
+
+def _snapshot_cache_put(key: tuple[Any, ...], value: dict[str, Any]) -> dict[str, Any]:
+    if len(_MODEL_INDEPENDENT_SNAPSHOT_CACHE) >= _MODEL_INDEPENDENT_SNAPSHOT_CACHE_MAX:
+        _MODEL_INDEPENDENT_SNAPSHOT_CACHE.clear()
+    _MODEL_INDEPENDENT_SNAPSHOT_CACHE[key] = deepcopy(value)
+    return value
+
+
+def _snapshot_timestamp(value: datetime | None) -> str | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc).isoformat()
+
+
+def _market_connection_identity(connection: sqlite3.Connection) -> str | None:
+    """Return a stable file identity; do not cache in-memory test databases."""
+
+    try:
+        rows = connection.execute("PRAGMA database_list").fetchall()
+    except sqlite3.Error:
+        return None
+    for row in rows:
+        # sqlite Row supports the named form; tuple mode is useful in tiny
+        # standalone tests that do not set a row factory.
+        name = str(row[1] if not isinstance(row, sqlite3.Row) else row[1])
+        file_name = str(row[2] if not isinstance(row, sqlite3.Row) else row[2])
+        if name == "main" and file_name:
+            return str(Path(file_name).resolve())
+    return None
 WINDOW_SECONDS = 60
 # A one-minute estimate keeps its existing cadence, but the market inputs
 # inside each estimate use a shorter robust window.  The latest real event is
@@ -1514,7 +1558,7 @@ def select_generic_coin_average(
     return telegram
 
 
-def select_group_offer_anchor(
+def _select_group_offer_anchor_uncached(
     conversation_db: Path,
     *,
     commodity: str,
@@ -1807,7 +1851,47 @@ def select_group_offer_anchor(
     }
 
 
-def select_historical_group_anchor(
+def select_group_offer_anchor(
+    conversation_db: Path,
+    *,
+    commodity: str,
+    settlement: str,
+    trade_form: str,
+    end: datetime,
+    seconds: int = GROUP_ANCHOR_WINDOW_SECONDS,
+    minimum_confidence: float = GROUP_MIN_CONFIDENCE,
+    group_live_events_before: datetime | None = None,
+) -> dict[str, Any]:
+    """Return one model-independent group anchor for this exact snapshot."""
+
+    key = (
+        "GROUP_OFFER_ANCHOR",
+        str(conversation_db.resolve()),
+        commodity,
+        settlement,
+        trade_form,
+        _snapshot_timestamp(end),
+        int(seconds),
+        float(minimum_confidence),
+        _snapshot_timestamp(group_live_events_before),
+    )
+    cached = _snapshot_cache_get(key)
+    if cached is not None:
+        return cached
+    result = _select_group_offer_anchor_uncached(
+        conversation_db,
+        commodity=commodity,
+        settlement=settlement,
+        trade_form=trade_form,
+        end=end,
+        seconds=seconds,
+        minimum_confidence=minimum_confidence,
+        group_live_events_before=group_live_events_before,
+    )
+    return _snapshot_cache_put(key, result)
+
+
+def _select_historical_group_anchor_uncached(
     conversation_db: Path,
     *,
     commodity: str,
@@ -1963,6 +2047,46 @@ def select_historical_group_anchor(
         "latest_is_consistent": latest_is_consistent,
         "source_weight_policy": "TRADE_3X_OFFER_WITH_8M_RECENCY_DECAY",
     }
+
+
+def select_historical_group_anchor(
+    conversation_db: Path,
+    *,
+    commodity: str,
+    settlement: str,
+    trade_form: str,
+    end: datetime,
+    maximum_age_seconds: int = 7 * 86_400,
+    minimum_confidence: float = GROUP_MIN_CONFIDENCE,
+    group_live_events_before: datetime | None = None,
+) -> dict[str, Any]:
+    """Return one model-independent historical anchor per exact snapshot."""
+
+    key = (
+        "HISTORICAL_GROUP_ANCHOR",
+        str(conversation_db.resolve()),
+        commodity,
+        settlement,
+        trade_form,
+        _snapshot_timestamp(end),
+        int(maximum_age_seconds),
+        float(minimum_confidence),
+        _snapshot_timestamp(group_live_events_before),
+    )
+    cached = _snapshot_cache_get(key)
+    if cached is not None:
+        return cached
+    result = _select_historical_group_anchor_uncached(
+        conversation_db,
+        commodity=commodity,
+        settlement=settlement,
+        trade_form=trade_form,
+        end=end,
+        maximum_age_seconds=maximum_age_seconds,
+        minimum_confidence=minimum_confidence,
+        group_live_events_before=group_live_events_before,
+    )
+    return _snapshot_cache_put(key, result)
 
 
 def select_last_cash_tomorrow_ratio(
@@ -2353,7 +2477,7 @@ def select_empirical_cash_tomorrow_ratio(
     return _empirical_ratio_cache_put(key, result)
 
 
-def select_last_low_date_to_imam_ratio(
+def _select_last_low_date_to_imam_ratio_uncached(
     conversation_db: Path,
     *,
     commodity: str,
@@ -2474,6 +2598,43 @@ def select_last_low_date_to_imam_ratio(
         ),
         "selection": "LAST_SAME_SETTLEMENT_LOW_DATE_TO_IMAM_PAIR",
     }
+
+
+def select_last_low_date_to_imam_ratio(
+    conversation_db: Path,
+    *,
+    commodity: str,
+    settlement: str,
+    trade_form: str,
+    end: datetime,
+    maximum_age_seconds: int = 4 * 86_400,
+    maximum_pair_gap_seconds: int = 30 * 60,
+) -> dict[str, Any]:
+    """Return the cached low-date/Imam ratio for one input snapshot."""
+
+    key = (
+        "LOW_DATE_TO_IMAM_RATIO",
+        str(conversation_db.resolve()),
+        commodity,
+        settlement,
+        trade_form,
+        _snapshot_timestamp(end),
+        int(maximum_age_seconds),
+        int(maximum_pair_gap_seconds),
+    )
+    cached = _snapshot_cache_get(key)
+    if cached is not None:
+        return cached
+    result = _select_last_low_date_to_imam_ratio_uncached(
+        conversation_db,
+        commodity=commodity,
+        settlement=settlement,
+        trade_form=trade_form,
+        end=end,
+        maximum_age_seconds=maximum_age_seconds,
+        maximum_pair_gap_seconds=maximum_pair_gap_seconds,
+    )
+    return _snapshot_cache_put(key, result)
 
 
 def select_last_manual_coin_anchor(
@@ -3962,13 +4123,11 @@ def compare_with_group_holdout(
             row
             for row in accepted_trades
             if parse_datetime(str(row["event_time_utc"])) < cutoff
-            and row not in test_rows
         ]
         prior_group = [
             row
             for row in accepted_group
             if parse_datetime(str(row["event_time_utc"])) < cutoff
-            and row not in test_rows
         ]
         augmented_training = prior_trades + prior_group
         baseline_errors: list[float] = []
@@ -4106,7 +4265,6 @@ def telegram_walk_forward_validation(
             row
             for row in (*accepted_confirmed, *accepted_offers)
             if parse_datetime(str(row["event_time_utc"])) < cutoff
-            and row not in test_rows
         ]
         commodity_errors: list[float] = []
         commodity_hits: list[bool] = []
@@ -4218,6 +4376,7 @@ def telegram_conformal_calibration(
     confirmed_trade_rows: Sequence[dict[str, Any]],
     *,
     target_coverage: float = 0.80,
+    use_flow_feature: bool = False,
 ) -> dict[str, Any]:
     """Create a conservative tolerance floor with a strict 60/20/20 split."""
 
@@ -4249,7 +4408,10 @@ def telegram_conformal_calibration(
     errors_by_commodity: dict[str, list[float]] = {}
     for row in calibration_rows_set:
         prediction = _predict_from_training_rows(
-            row, train_rows, use_global_feature=True, use_flow_feature=False
+            row,
+            train_rows,
+            use_global_feature=True,
+            use_flow_feature=use_flow_feature,
         )
         if prediction is None:
             continue
@@ -4284,7 +4446,10 @@ def telegram_conformal_calibration(
         qhat = float(per_commodity_qhat.get(name, global_qhat))
         for row in rows:
             prediction = _predict_from_training_rows(
-                row, train_rows, use_global_feature=True, use_flow_feature=False
+                row,
+                train_rows,
+                use_global_feature=True,
+                use_flow_feature=use_flow_feature,
             )
             if prediction is None:
                 continue
@@ -4366,7 +4531,6 @@ def compare_order_flow_ablation(
             row
             for row in accepted_training
             if parse_datetime(str(row["event_time_utc"])) < cutoff
-            and row not in test_rows
         ]
         local_without: list[float] = []
         local_with: list[float] = []
@@ -4602,6 +4766,7 @@ def train_model(
     conformal_tolerance = telegram_conformal_calibration(
         group_examples,
         confirmed_group_examples + reviewed_group_examples,
+        use_flow_feature=flow_point_adjustment_enabled,
     )
 
     return {
@@ -4772,7 +4937,7 @@ def load_model(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def observed_inputs(
+def _observed_inputs_uncached(
     connection: sqlite3.Connection, settlement: str, end: datetime
 ) -> dict[str, dict[str, Any]]:
     # All values below originate from parser/normalizer output tables.  Raw
@@ -4808,6 +4973,22 @@ def observed_inputs(
         "order_flow": market_order_flow(connection, settlement, end),
         "market_regime": detect_market_regime(connection, end, settlement),
     }
+
+
+def observed_inputs(
+    connection: sqlite3.Connection, settlement: str, end: datetime
+) -> dict[str, dict[str, Any]]:
+    """Read model-independent market inputs once per DB/settlement/timestamp."""
+
+    source = _market_connection_identity(connection)
+    if source is None:
+        return _observed_inputs_uncached(connection, settlement, end)
+    key = ("OBSERVED_INPUTS", source, settlement, _snapshot_timestamp(end))
+    cached = _snapshot_cache_get(key)
+    if cached is not None:
+        return cached
+    result = _observed_inputs_uncached(connection, settlement, end)
+    return _snapshot_cache_put(key, result)
 
 
 def live_point_value(summary: dict[str, Any]) -> float | None:

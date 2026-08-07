@@ -17,6 +17,7 @@ import sqlite3
 import sys
 import threading
 import time
+from copy import deepcopy
 from datetime import datetime, time as dt_time, timedelta, timezone
 from http import HTTPStatus
 from http.cookies import SimpleCookie
@@ -80,13 +81,16 @@ from telegram_price_collector.external_collectors import (  # noqa: E402
 from telegram_price_collector.models import RawPost  # noqa: E402
 from telegram_price_collector.parsers import parse_message  # noqa: E402
 from online_recalibration import (  # noqa: E402
+    MAIN_MODEL_ID,
     apply_snapshot_calibration,
     apply_recent_realized_snapshot_calibration,
     ensure_schema as ensure_online_schema,
     reconcile_predictions,
     record_predictions,
+    summarize_model_outcomes,
 )
 from shadow_parallel import run_shadow_parallel  # noqa: E402
+from estimate_finalization import finalize_deterministic_book  # noqa: E402
 from ml_residual_shadow import (  # noqa: E402
     DEFAULT_ML_ARTIFACT,
     DEFAULT_ML_SHADOW_STATE,
@@ -4527,6 +4531,10 @@ def refresh_estimate(
                 "status": "DEFERRED_GROUP_INPUT_DISCONNECTED",
             }
         )
+        outcome_metrics = summarize_model_outcomes(
+            calibration_connection,
+            as_of=effective_end,
+        )
         calibration_connection.commit()
     except Exception:
         calibration_connection.rollback()
@@ -4541,7 +4549,11 @@ def refresh_estimate(
         live_group_events_enabled=enabled,
         group_live_events_before=disabled_since,
     )
-    term_structure_fixes: list[dict[str, Any]] = []
+    # ML residual is trained for the structural (pre-online-residual) book.
+    # Keep an immutable branch so serving does not mix its baseline with the
+    # main model's learned online calibration.
+    ml_structural_estimate = deepcopy(estimate)
+    finalization = {"term_structure_fixes": [], "low_date_rows": 0, "band_widened": 0}
     calibration_connection = sqlite3.connect(conversation_db)
     calibration_connection.row_factory = sqlite3.Row
     try:
@@ -4554,27 +4566,7 @@ def refresh_estimate(
             settlements=estimate.get("settlements", {}),
             as_of=effective_end,
         )
-        # Residual is learned per settlement.  TOMORROW often has samples while
-        # CASH is still warming up, so a negative TOMORROW pull can invert the
-        # cash/tomorrow term structure — repair before publishing.
-        term_structure_fixes = enforce_cash_tomorrow_term_structure(
-            estimate.get("settlements", {})
-        )
-        # Online residual can pull a non-low-date sibling floor downward after
-        # the first family-band pass; re-clamp so تاریخ پایین never overlaps.
-        for payload in estimate.get("settlements", {}).values():
-            rates = payload.get("rates")
-            if isinstance(rates, list):
-                payload["rates"] = apply_low_date_family_band_separation(rates)
-        predictions_recorded = 0
-        for settlement, payload in estimate.get("settlements", {}).items():
-            predictions_recorded += record_predictions(
-                calibration_connection,
-                prediction_time=effective_end,
-                settlement=str(settlement),
-                rates=list(payload.get("rates", [])),
-                group_live_enabled=enabled,
-            )
+        finalization = finalize_deterministic_book(estimate)
         calibration_connection.commit()
     except Exception:
         calibration_connection.rollback()
@@ -4585,15 +4577,6 @@ def refresh_estimate(
     estimate["live_group_input_control"] = control
     estimate["service_status"] = "RUNNING"
     estimate["manual_entry_counts"] = manual_entry_counts(conversation_db)
-    estimate["online_residual_learning"] = {
-        "mode": "BOUNDED_ONLINE_RESIDUAL_CALIBRATION",
-        "reconciliation": reconciliation,
-        "calibration": online_metadata,
-        "recent_realized_calibration": recent_realized_metadata,
-        "predictions_recorded": predictions_recorded,
-        "automatic_model_weight_promotion": False,
-        "term_structure_fixes": term_structure_fixes,
-    }
     light = shadow_light_mode()
     shadow_meta = run_shadow_parallel(
         live_estimate=estimate,
@@ -4604,6 +4587,7 @@ def refresh_estimate(
         shadow_state_path=shadow_state_path or DEFAULT_SHADOW_STATE,
         live_group_events_enabled=enabled,
         group_live_events_before=disabled_since,
+        finalize_book=finalize_deterministic_book,
     )
     research_meta = run_shadow_parallel(
         live_estimate=estimate,
@@ -4616,14 +4600,17 @@ def refresh_estimate(
         shadow_state_path=research_shadow_state_path or DEFAULT_RESEARCH_SHADOW_STATE,
         live_group_events_enabled=enabled,
         group_live_events_before=disabled_since,
+        finalize_book=finalize_deterministic_book,
     )
     ml_meta = run_ml_residual_shadow(
-        live_estimate=estimate,
+        live_estimate=ml_structural_estimate,
         end=effective_end,
         artifact_path=ml_shadow_model_path
         if ml_shadow_model_path is not None
         else DEFAULT_ML_SHADOW_MODEL,
         shadow_state_path=ml_shadow_state_path or DEFAULT_ML_SHADOW_STATE_PATH,
+        comparison_estimate=estimate,
+        finalize_book=finalize_deterministic_book,
     )
     estimate["shadow_parallel"] = {
         "enabled": shadow_meta.get("enabled"),
@@ -4662,7 +4649,9 @@ def refresh_estimate(
         "light_mode": light,
     }
     # Main book learns from shadows vs morning truth (bounded; not a model swap).
-    cross_apply = (not light) and _env_flag("COIN_RATE_ESTIMATOR_SHADOW_CROSS_CAL_APPLY", "1")
+    # Cross-calibration is research-only unless an operator explicitly opts
+    # in; a shadow must never promote itself through a default environment.
+    cross_apply = (not light) and _env_flag("COIN_RATE_ESTIMATOR_SHADOW_CROSS_CAL_APPLY", "0")
     if light:
         estimate["shadow_cross_calibration"] = {
             "status": "LIGHT_MODE_SKIPPED",
@@ -4681,10 +4670,57 @@ def refresh_estimate(
             apply=cross_apply,
         )
     if (not light) and estimate["shadow_cross_calibration"].get("applied_count"):
-        term_structure_fixes.extend(
-            enforce_cash_tomorrow_term_structure(estimate.get("settlements", {}))
-        )
-        estimate["online_residual_learning"]["term_structure_fixes"] = term_structure_fixes
+        finalization = finalize_deterministic_book(estimate)
+    # Persist all four books only after their final, published-equivalent
+    # deterministic state is known.  Each model receives the same later truth
+    # during reconciliation; only MAIN_ONLINE updates the live residual state.
+    prediction_books = (
+        (MAIN_MODEL_ID, str(model.get("model_kind") or "MAIN"), estimate),
+        ("SHADOW1_PREVIOUS", str(shadow_meta.get("shadow_model_kind") or "UNKNOWN"), shadow_meta.get("estimate")),
+        ("SHADOW2_MORNING_REOPEN", str(research_meta.get("shadow_model_kind") or "UNKNOWN"), research_meta.get("estimate")),
+        ("SHADOW3_ML_RESIDUAL", str(ml_meta.get("shadow_version") or "UNKNOWN"), ml_meta.get("estimate")),
+    )
+    calibration_connection = sqlite3.connect(conversation_db)
+    calibration_connection.row_factory = sqlite3.Row
+    try:
+        ensure_online_schema(calibration_connection)
+        predictions_recorded = 0
+        predictions_by_model: dict[str, int] = {}
+        for model_id, model_version, book in prediction_books:
+            if not isinstance(book, dict):
+                continue
+            count = 0
+            for settlement, payload in (book.get("settlements") or {}).items():
+                if not isinstance(payload, dict):
+                    continue
+                count += record_predictions(
+                    calibration_connection,
+                    prediction_time=effective_end,
+                    settlement=str(settlement),
+                    rates=list(payload.get("rates", [])),
+                    group_live_enabled=enabled,
+                    model_id=model_id,
+                    model_version=model_version,
+                )
+            predictions_by_model[model_id] = count
+            predictions_recorded += count
+        calibration_connection.commit()
+    except Exception:
+        calibration_connection.rollback()
+        calibration_connection.close()
+        raise
+    calibration_connection.close()
+    estimate["online_residual_learning"] = {
+        "mode": "BOUNDED_ONLINE_RESIDUAL_CALIBRATION",
+        "reconciliation": reconciliation,
+        "model_outcomes": outcome_metrics,
+        "calibration": online_metadata,
+        "recent_realized_calibration": recent_realized_metadata,
+        "predictions_recorded": predictions_recorded,
+        "predictions_by_model": predictions_by_model,
+        "automatic_model_weight_promotion": False,
+        "deterministic_finalization": finalization,
+    }
     state.set(estimate)
     write_json_atomic(state_path, estimate, mode=0o644)
     return estimate

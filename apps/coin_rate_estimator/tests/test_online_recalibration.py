@@ -106,6 +106,98 @@ class OnlineRecalibrationTests(unittest.TestCase):
         # A performance guard must not destroy historical training/audit data.
         self.assertIsNone(row["evaluated_at_utc"])
 
+    def test_same_trade_evaluates_each_model_but_only_main_learns_residual(self) -> None:
+        self._record("2026-08-05T10:00:00Z", 180_000_000, enabled=True)
+        record_predictions(
+            self.connection,
+            prediction_time=datetime(2026, 8, 5, 10, 0, tzinfo=UTC),
+            settlement="CASH",
+            rates=[
+                {
+                    "commodity_name": "امام",
+                    "estimated_price_toman": 179_000_000,
+                }
+            ],
+            group_live_enabled=True,
+            model_id="SHADOW1_PREVIOUS",
+            model_version="test",
+        )
+        self.connection.execute(
+            """
+            INSERT INTO confirmed_trades(
+                id,event_time_utc,commodity,price,quantity,settlement,
+                trade_form,confidence,training_eligible
+            ) VALUES (1,'2026-08-05T10:00:30Z','امام',181000,5,'CASH','PHYSICAL',0.99,1)
+            """
+        )
+        self.connection.commit()
+        result = reconcile_predictions(
+            self.connection,
+            now=datetime(2026, 8, 5, 10, 1, tzinfo=UTC),
+            live_group_enabled=True,
+        )
+        self.assertEqual(result["evaluated"], 2)
+        rows = self.connection.execute(
+            "SELECT model_id, actual_price_toman FROM coin_estimate_predictions ORDER BY model_id"
+        ).fetchall()
+        self.assertEqual([row["model_id"] for row in rows], ["MAIN_ONLINE", "SHADOW1_PREVIOUS"])
+        self.assertEqual([row["actual_price_toman"] for row in rows], [181_000_000.0, 181_000_000.0])
+        state = self.connection.execute(
+            "SELECT sample_count FROM coin_online_residual_state"
+        ).fetchone()
+        self.assertEqual(state["sample_count"], 1)
+
+    def test_offer_fallback_requires_a_near_synchronous_two_sided_book(self) -> None:
+        self.connection.executescript(
+            """
+            CREATE TABLE messages (
+                import_id INTEGER NOT NULL,
+                message_id INTEGER NOT NULL,
+                event_time_utc TEXT NOT NULL,
+                PRIMARY KEY(import_id, message_id)
+            );
+            CREATE TABLE offers (
+                id INTEGER PRIMARY KEY,
+                import_id INTEGER NOT NULL,
+                message_id INTEGER NOT NULL,
+                commodity TEXT NOT NULL,
+                price INTEGER NOT NULL,
+                quantity INTEGER,
+                side TEXT NOT NULL,
+                settlement TEXT NOT NULL,
+                trade_form TEXT NOT NULL,
+                confidence REAL NOT NULL
+            );
+            INSERT INTO messages VALUES (1, 1, '2026-08-05T10:00:20Z');
+            INSERT INTO offers VALUES (1, 1, 1, 'امام', 180000, 5, 'BUY', 'CASH', 'PHYSICAL', 0.95);
+            """
+        )
+        self._record("2026-08-05T10:00:00Z", 180_000_000, enabled=True)
+        first = reconcile_predictions(
+            self.connection,
+            now=datetime(2026, 8, 5, 10, 1, tzinfo=UTC),
+            live_group_enabled=True,
+        )
+        self.assertEqual(first["evaluated"], 0)
+        self.connection.executescript(
+            """
+            INSERT INTO messages VALUES (1, 2, '2026-08-05T10:00:40Z');
+            INSERT INTO offers VALUES (2, 1, 2, 'امام', 182000, 5, 'SELL', 'CASH', 'PHYSICAL', 0.95);
+            """
+        )
+        self.connection.commit()
+        second = reconcile_predictions(
+            self.connection,
+            now=datetime(2026, 8, 5, 10, 1, tzinfo=UTC),
+            live_group_enabled=True,
+        )
+        self.assertEqual(second["evaluated"], 1)
+        row = self.connection.execute(
+            "SELECT actual_price_toman, evaluation_mode FROM coin_estimate_predictions"
+        ).fetchone()
+        self.assertEqual(row["actual_price_toman"], 181_000_000.0)
+        self.assertEqual(row["evaluation_mode"], "FORWARD_5M")
+
     def test_correction_waits_for_three_samples_and_never_narrows_range(self) -> None:
         for index in range(3):
             prediction = datetime(2026, 8, 5, 10, index, tzinfo=UTC)

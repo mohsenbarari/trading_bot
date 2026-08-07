@@ -26,6 +26,7 @@ from morning_reopen import morning_open_truth_label, tehran_local
 TEHRAN = ZoneInfo("Asia/Tehran")
 PRICE_MULTIPLIER = 1_000
 MAX_CROSS_CORRECTION = 0.012  # 1.2%
+CORRECTION_HALF_LIFE_HOURS = 3.0
 MIN_TRUTH_ABS_ERROR_TO_ACT = 0.002  # ignore noise below 0.2%
 SNAPSHOT_START_MINUTE = 9 * 60 + 50
 SNAPSHOT_END_MINUTE = 10 * 60
@@ -215,12 +216,20 @@ def build_morning_cross_calibration(
 def apply_cross_calibration_to_estimate(
     estimate: dict[str, Any],
     report: dict[str, Any],
+    *,
+    as_of: datetime,
 ) -> int:
-    """Apply proposed morning cross-cal corrections to the live estimate book."""
+    """Apply a decayed correction without overriding a live group anchor."""
 
     proposals = report.get("proposals") if isinstance(report.get("proposals"), dict) else {}
     if not proposals:
         return 0
+    local = tehran_local(as_of)
+    reference = datetime.combine(
+        local.date(), datetime.min.time(), tzinfo=TEHRAN
+    ).replace(hour=10, minute=30)
+    elapsed_hours = max(0.0, (local - reference).total_seconds() / 3600.0)
+    decay = math.exp(-math.log(2.0) * elapsed_hours / CORRECTION_HALF_LIFE_HOURS)
     applied = 0
     for settlement, body in (estimate.get("settlements") or {}).items():
         for rate in body.get("rates") or []:
@@ -230,7 +239,11 @@ def apply_cross_calibration_to_estimate(
             proposal = proposals.get(key)
             if not isinstance(proposal, dict):
                 continue
+            anchor = rate.get("group_offer_anchor")
+            if isinstance(anchor, dict) and str(anchor.get("status") or "") == "OBSERVED":
+                continue
             correction = float(proposal.get("correction_ratio") or 0.0)
+            correction *= decay
             if abs(correction) < 1e-12:
                 continue
             price = rate.get("estimated_price_toman")
@@ -241,9 +254,25 @@ def apply_cross_calibration_to_estimate(
             rate["_pre_shadow_cross_calibration_price_toman"] = base
             rate["estimated_price_toman"] = corrected
             rate["estimated_project_price"] = int(round(corrected / PRICE_MULTIPLIER))
+            tolerance = rate.get("tolerance")
+            if isinstance(tolerance, dict):
+                lower = tolerance.get("lower_price_toman")
+                upper = tolerance.get("upper_price_toman")
+                try:
+                    shifted_lower = float(lower) * (1.0 + correction)
+                    shifted_upper = float(upper) * (1.0 + correction)
+                except (TypeError, ValueError):
+                    shifted_lower = shifted_upper = None
+                if shifted_lower is not None and shifted_upper is not None:
+                    # Preserve prior coverage as well as the shifted band.
+                    tolerance["lower_price_toman"] = int(round(min(float(lower), shifted_lower) / 50_000.0) * 50_000)
+                    tolerance["upper_price_toman"] = int(round(max(float(upper), shifted_upper) / 50_000.0) * 50_000)
+                    tolerance["lower_project_price"] = int(round(tolerance["lower_price_toman"] / PRICE_MULTIPLIER))
+                    tolerance["upper_project_price"] = int(round(tolerance["upper_price_toman"] / PRICE_MULTIPLIER))
             rate["shadow_cross_calibration"] = {
                 "status": "APPLIED",
                 "correction_ratio": correction,
+                "decay": decay,
                 "best_shadow": proposal.get("best_shadow"),
                 "truth_source": proposal.get("truth_source"),
             }
@@ -306,7 +335,7 @@ def maybe_run_shadow_cross_calibration(
         # Apply at most once per day to the live book path.
         applied_marker = _runtime_root() / f"shadow-cross-calibration-applied-{day}.json"
         if not applied_marker.is_file():
-            count = apply_cross_calibration_to_estimate(live_estimate, report)
+            count = apply_cross_calibration_to_estimate(live_estimate, report, as_of=end)
             meta["applied_count"] = count
             meta["status"] = "APPLIED" if count else "REPORT_READY_NO_ROWS"
             write_json_atomic(
@@ -323,6 +352,6 @@ def maybe_run_shadow_cross_calibration(
             # Still re-apply the same day's proposals so the book stays consistent
             # across refresh cycles after the one-time marker was written.
             meta["applied_count"] = apply_cross_calibration_to_estimate(
-                live_estimate, report
+                live_estimate, report, as_of=end
             )
     return meta
