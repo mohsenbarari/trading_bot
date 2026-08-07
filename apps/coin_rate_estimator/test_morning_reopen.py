@@ -5,12 +5,15 @@ import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest.mock import patch
 
+import morning_reopen as reopen_module
 from morning_reopen import (
     METHOD_NAME,
     build_morning_reopen_anchor,
     is_morning_reopen_window,
     morning_open_truth_label,
+    select_reopen_cash_tomorrow_ratio,
     tehran_clock_utc,
     widen_tolerance,
 )
@@ -20,6 +23,29 @@ TEHRAN = timezone(timedelta(hours=3, minutes=30))
 
 
 class MorningReopenTests(unittest.TestCase):
+    def test_reopen_ratio_snapshot_cache_is_copy_safe(self) -> None:
+        reopen_module._REOPEN_RATIO_SNAPSHOT_CACHE.clear()
+        end = tehran_clock_utc("2026-08-07", 10, 0)
+        result = {"status": "OBSERVED", "ratio": 1.003, "sample_days": [{"day": "x"}]}
+        with patch.object(
+            reopen_module,
+            "_select_reopen_cash_tomorrow_ratio_uncached",
+            return_value=result,
+        ) as raw:
+            first = select_reopen_cash_tomorrow_ratio(
+                Path("/tmp/reopen-cache.sqlite3"),
+                commodity="امام",
+                end=end,
+            )
+            first["sample_days"].append({"day": "mutated"})
+            second = select_reopen_cash_tomorrow_ratio(
+                Path("/tmp/reopen-cache.sqlite3"),
+                commodity="امام",
+                end=end,
+            )
+        self.assertEqual(raw.call_count, 1)
+        self.assertEqual(second["sample_days"], [{"day": "x"}])
+
     def test_window_requires_explicit_enable(self) -> None:
         end = tehran_clock_utc("2026-08-05", 10, 0)
         self.assertFalse(is_morning_reopen_window(end, model={}))

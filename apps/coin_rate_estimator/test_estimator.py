@@ -8,6 +8,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+import coin_estimator as estimator_module
 from coin_estimator import (
     COMMODITY_SPECS,
     NO_DATA_TOKEN,
@@ -636,6 +637,31 @@ class EstimatorTests(unittest.TestCase):
         self.assertEqual(ratio["scope"], "COMMODITY")
         self.assertEqual(ratio["pair_count"], 5)
         self.assertAlmostEqual(ratio["ratio"], 1.005)
+
+    def test_empirical_ratio_snapshot_cache_is_copy_safe(self) -> None:
+        estimator_module._EMPIRICAL_RATIO_SNAPSHOT_CACHE.clear()
+        end = datetime(2026, 8, 7, 12, 0, tzinfo=timezone.utc)
+        result = {"status": "OBSERVED", "ratio": 1.002, "sample": [1]}
+        with patch.object(
+            estimator_module,
+            "_select_empirical_cash_tomorrow_ratio_uncached",
+            return_value=result,
+        ) as raw:
+            first = select_empirical_cash_tomorrow_ratio(
+                Path("/tmp/ratio-cache.sqlite3"),
+                commodity="امام",
+                trade_form="PHYSICAL",
+                end=end,
+            )
+            first["sample"].append(2)
+            second = select_empirical_cash_tomorrow_ratio(
+                Path("/tmp/ratio-cache.sqlite3"),
+                commodity="امام",
+                trade_form="PHYSICAL",
+                end=end,
+            )
+        self.assertEqual(raw.call_count, 1)
+        self.assertEqual(second["sample"], [1])
 
     def test_calibration_prefers_recent_bubble_regime(self) -> None:
         rows = [
