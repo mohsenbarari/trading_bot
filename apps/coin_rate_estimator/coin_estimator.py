@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import bisect
+from copy import deepcopy
 import json
 import math
 import os
@@ -84,6 +85,26 @@ DEFAULT_REVIEW_DECISIONS_DB = Path(
     )
 ).expanduser()
 PRICE_MULTIPLIER = 1_000  # project convention: 178000 means 178,000,000 toman
+
+# A live refresh evaluates the main book and challenger books against the same
+# timestamp.  The cash/tomorrow empirical ratio is model-independent, yet was
+# previously re-queried from SQLite for every challenger.  This cache is keyed
+# by the exact snapshot timestamp, so it cannot carry a value into a later
+# refresh or change the mathematical result of an individual model.
+_EMPIRICAL_RATIO_SNAPSHOT_CACHE: dict[tuple[Any, ...], dict[str, Any]] = {}
+_EMPIRICAL_RATIO_SNAPSHOT_CACHE_MAX = 128
+
+
+def _empirical_ratio_cache_get(key: tuple[Any, ...]) -> dict[str, Any] | None:
+    value = _EMPIRICAL_RATIO_SNAPSHOT_CACHE.get(key)
+    return deepcopy(value) if value is not None else None
+
+
+def _empirical_ratio_cache_put(key: tuple[Any, ...], value: dict[str, Any]) -> dict[str, Any]:
+    if len(_EMPIRICAL_RATIO_SNAPSHOT_CACHE) >= _EMPIRICAL_RATIO_SNAPSHOT_CACHE_MAX:
+        _EMPIRICAL_RATIO_SNAPSHOT_CACHE.clear()
+    _EMPIRICAL_RATIO_SNAPSHOT_CACHE[key] = deepcopy(value)
+    return value
 WINDOW_SECONDS = 60
 # A one-minute estimate keeps its existing cadence, but the market inputs
 # inside each estimate use a shorter robust window.  The latest real event is
@@ -2080,7 +2101,7 @@ def select_last_cash_tomorrow_ratio(
     }
 
 
-def select_empirical_cash_tomorrow_ratio(
+def _select_empirical_cash_tomorrow_ratio_uncached(
     conversation_db: Path,
     *,
     commodity: str,
@@ -2288,6 +2309,48 @@ def select_empirical_cash_tomorrow_ratio(
         "selection": "ROBUST_NEAR_SYNCHRONOUS_TOMORROW_DIVIDED_BY_CASH",
         "trade_weight_multiplier": 3.0,
     }
+
+
+def select_empirical_cash_tomorrow_ratio(
+    conversation_db: Path,
+    *,
+    commodity: str,
+    trade_form: str,
+    end: datetime,
+    maximum_age_seconds: int = 30 * 86_400,
+    maximum_pair_gap_seconds: int = 20 * 60,
+    group_live_events_before: datetime | None = None,
+) -> dict[str, Any]:
+    """Return the per-snapshot empirical ratio, shared by main and shadows."""
+
+    normalized_end = end.astimezone(timezone.utc)
+    cutoff = (
+        group_live_events_before.astimezone(timezone.utc).isoformat()
+        if group_live_events_before is not None
+        else None
+    )
+    key = (
+        str(conversation_db.resolve()),
+        commodity,
+        trade_form,
+        normalized_end.isoformat(),
+        int(maximum_age_seconds),
+        int(maximum_pair_gap_seconds),
+        cutoff,
+    )
+    cached = _empirical_ratio_cache_get(key)
+    if cached is not None:
+        return cached
+    result = _select_empirical_cash_tomorrow_ratio_uncached(
+        conversation_db,
+        commodity=commodity,
+        trade_form=trade_form,
+        end=end,
+        maximum_age_seconds=maximum_age_seconds,
+        maximum_pair_gap_seconds=maximum_pair_gap_seconds,
+        group_live_events_before=group_live_events_before,
+    )
+    return _empirical_ratio_cache_put(key, result)
 
 
 def select_last_low_date_to_imam_ratio(

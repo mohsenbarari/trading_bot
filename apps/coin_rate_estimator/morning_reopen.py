@@ -7,6 +7,7 @@ offer average (newer offers weigh more because early quotes are often unripe).
 
 from __future__ import annotations
 
+from copy import deepcopy
 import math
 import sqlite3
 from datetime import datetime, timedelta, timezone
@@ -42,6 +43,25 @@ REOPEN_RATIO_LOOKBACK_DAYS = 25
 REOPEN_RATIO_HALF_LIFE_DAYS = 12.0
 REOPEN_RATIO_REGIME_TAU = 0.35
 REOPEN_RATIO_MIN_DAYS = 3
+
+# Main and challenger models use the same current timestamp and raw market
+# data.  Reusing this expensive historical-reopen calculation only inside an
+# identical snapshot keeps their comparison fair and avoids duplicate SQLite
+# scans; the exact timestamp/regime is part of the key.
+_REOPEN_RATIO_SNAPSHOT_CACHE: dict[tuple[Any, ...], dict[str, Any]] = {}
+_REOPEN_RATIO_SNAPSHOT_CACHE_MAX = 128
+
+
+def _reopen_ratio_cache_get(key: tuple[Any, ...]) -> dict[str, Any] | None:
+    value = _REOPEN_RATIO_SNAPSHOT_CACHE.get(key)
+    return deepcopy(value) if value is not None else None
+
+
+def _reopen_ratio_cache_put(key: tuple[Any, ...], value: dict[str, Any]) -> dict[str, Any]:
+    if len(_REOPEN_RATIO_SNAPSHOT_CACHE) >= _REOPEN_RATIO_SNAPSHOT_CACHE_MAX:
+        _REOPEN_RATIO_SNAPSHOT_CACHE.clear()
+    _REOPEN_RATIO_SNAPSHOT_CACHE[key] = deepcopy(value)
+    return value
 
 
 def tehran_local(moment: datetime) -> datetime:
@@ -328,7 +348,7 @@ def _window_recency_mean(
     return _weighted_mean([float(row["price"]) for row in rows], weights)
 
 
-def select_reopen_cash_tomorrow_ratio(
+def _select_reopen_cash_tomorrow_ratio_uncached(
     conversation_db: Path,
     *,
     commodity: str,
@@ -600,6 +620,46 @@ def select_reopen_cash_tomorrow_ratio(
             for row in sorted(filtered, key=lambda item: item["day"], reverse=True)[:8]
         ],
     }
+
+
+def select_reopen_cash_tomorrow_ratio(
+    conversation_db: Path,
+    *,
+    commodity: str,
+    trade_form: str = "PHYSICAL",
+    end: datetime,
+    current_regime_score: float | None = None,
+    market_db: Path | None = None,
+    lookback_days: int = REOPEN_RATIO_LOOKBACK_DAYS,
+    minimum_confidence: float = GROUP_MIN_CONFIDENCE,
+) -> dict[str, Any]:
+    """Return a historical reopen ratio shared by identical model snapshots."""
+
+    normalized_end = end.astimezone(timezone.utc)
+    key = (
+        str(conversation_db.resolve()),
+        str(market_db.resolve()) if market_db is not None else None,
+        commodity,
+        trade_form,
+        normalized_end.isoformat(),
+        current_regime_score,
+        int(lookback_days),
+        float(minimum_confidence),
+    )
+    cached = _reopen_ratio_cache_get(key)
+    if cached is not None:
+        return cached
+    result = _select_reopen_cash_tomorrow_ratio_uncached(
+        conversation_db,
+        commodity=commodity,
+        trade_form=trade_form,
+        end=end,
+        current_regime_score=current_regime_score,
+        market_db=market_db,
+        lookback_days=lookback_days,
+        minimum_confidence=minimum_confidence,
+    )
+    return _reopen_ratio_cache_put(key, result)
 
 
 def resolve_cash_tomorrow_ratio_for_estimate(
