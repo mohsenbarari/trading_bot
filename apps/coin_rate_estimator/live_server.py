@@ -140,6 +140,26 @@ MAX_MANUAL_FORM_BYTES = 16_384
 PERSIAN_DIGITS = str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789")
 
 
+def _env_flag(name: str, default: str = "0") -> bool:
+    return os.environ.get(name, default).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def shadow_light_mode() -> bool:
+    """Keep the 30-second cadence and defer only morning cross-calibration."""
+
+    return _env_flag("COIN_RATE_ESTIMATOR_SHADOW_LIGHT", "0")
+
+
+def estimate_refresh_seconds() -> int:
+    raw = os.environ.get("COIN_RATE_ESTIMATOR_ESTIMATE_REFRESH_SECONDS", "").strip()
+    if raw:
+        try:
+            return max(5, int(raw))
+        except ValueError:
+            pass
+    return 30 if shadow_light_mode() else 5
+
+
 def load_dashboard_credentials() -> tuple[str, str]:
     """Return (username, password) from env or a mode-0600 runtime file.
 
@@ -4574,6 +4594,7 @@ def refresh_estimate(
         "automatic_model_weight_promotion": False,
         "term_structure_fixes": term_structure_fixes,
     }
+    light = shadow_light_mode()
     shadow_meta = run_shadow_parallel(
         live_estimate=estimate,
         market_db=market_db,
@@ -4614,6 +4635,7 @@ def refresh_estimate(
         "state_path": str(shadow_state_path or DEFAULT_SHADOW_STATE),
         "label": "سایه ۱ — مدل قبلی زنده",
         "shared_live_window_end_utc": estimate.get("window_end_utc"),
+        "light_mode": light,
     }
     estimate["research_shadow_parallel"] = {
         "enabled": research_meta.get("enabled"),
@@ -4625,6 +4647,7 @@ def refresh_estimate(
         "state_path": str(research_shadow_state_path or DEFAULT_RESEARCH_SHADOW_STATE),
         "label": "سایه ۲ — کاندید بازگشایی صبح",
         "shared_live_window_end_utc": estimate.get("window_end_utc"),
+        "light_mode": light,
     }
     estimate["ml_shadow_parallel"] = {
         "enabled": ml_meta.get("enabled"),
@@ -4636,21 +4659,28 @@ def refresh_estimate(
         "state_path": str(ml_shadow_state_path or DEFAULT_ML_SHADOW_STATE_PATH),
         "label": "سایه ۳ — مدل یادگیری ماشین",
         "shared_live_window_end_utc": estimate.get("window_end_utc"),
+        "light_mode": light,
     }
     # Main book learns from shadows vs morning truth (bounded; not a model swap).
-    cross_apply = os.environ.get("COIN_RATE_ESTIMATOR_SHADOW_CROSS_CAL_APPLY", "1") == "1"
-    estimate["shadow_cross_calibration"] = maybe_run_shadow_cross_calibration(
-        live_estimate=estimate,
-        conversation_db=conversation_db,
-        end=effective_end,
-        shadow_state_paths={
-            "سایه۱-قبلی": shadow_state_path or DEFAULT_SHADOW_STATE,
-            "سایه۲-بازگشایی": research_shadow_state_path or DEFAULT_RESEARCH_SHADOW_STATE,
-            "سایه۳-ML": ml_shadow_state_path or DEFAULT_ML_SHADOW_STATE_PATH,
-        },
-        apply=cross_apply,
-    )
-    if estimate["shadow_cross_calibration"].get("applied_count"):
+    cross_apply = (not light) and _env_flag("COIN_RATE_ESTIMATOR_SHADOW_CROSS_CAL_APPLY", "1")
+    if light:
+        estimate["shadow_cross_calibration"] = {
+            "status": "LIGHT_MODE_SKIPPED",
+            "applied_count": 0,
+        }
+    else:
+        estimate["shadow_cross_calibration"] = maybe_run_shadow_cross_calibration(
+            live_estimate=estimate,
+            conversation_db=conversation_db,
+            end=effective_end,
+            shadow_state_paths={
+                "سایه۱-قبلی": shadow_state_path or DEFAULT_SHADOW_STATE,
+                "سایه۲-بازگشایی": research_shadow_state_path or DEFAULT_RESEARCH_SHADOW_STATE,
+                "سایه۳-ML": ml_shadow_state_path or DEFAULT_ML_SHADOW_STATE_PATH,
+            },
+            apply=cross_apply,
+        )
+    if (not light) and estimate["shadow_cross_calibration"].get("applied_count"):
         term_structure_fixes.extend(
             enforce_cash_tomorrow_term_structure(estimate.get("settlements", {}))
         )
@@ -4676,7 +4706,7 @@ async def estimation_loop(
     ml_shadow_state_path: Path | None = None,
 ) -> None:
     last_run: datetime | None = None
-    refresh_seconds = 5
+    refresh_seconds = estimate_refresh_seconds()
     while True:
         now = datetime.now(timezone.utc).replace(microsecond=0)
         if last_run is None or (now - last_run).total_seconds() >= refresh_seconds:
