@@ -1704,6 +1704,23 @@ TARGETED_SYNC_TABLE_ID_FIELDS = {
     "telegram_admin_broadcast_receipts": "telegram_admin_broadcast_receipt_ids",
 }
 TARGETED_SYNC_TABLES = tuple(TARGETED_SYNC_TABLE_ID_FIELDS)
+# Keep parent rows ahead of dependents in the same catchup stage so foreign
+# apply does not see offer_publication_states before the mirrored offer exists.
+TARGETED_SYNC_TABLE_GROUPS: tuple[tuple[str, ...], ...] = (
+    ("users",),
+    ("invitations",),
+    ("accountant_relations",),
+    ("customer_relations",),
+    ("telegram_link_tokens",),
+    ("notifications",),
+    ("user_blocks",),
+    ("offers", "offer_publication_states"),
+    ("trades",),
+    ("offer_requests",),
+    ("trade_delivery_receipts",),
+    ("telegram_admin_broadcasts",),
+    ("telegram_admin_broadcast_receipts",),
+)
 
 
 def _targeted_sync_batches(entries: list[ChangeLog], *, batch_size: int) -> list[list[ChangeLog]]:
@@ -1767,6 +1784,89 @@ async def collect_targeted_prefix_change_logs(
         return list(result.scalars().all())
 
 
+async def _load_prefix_rows_for_tables(
+    prefix: str,
+    tables: tuple[str, ...],
+) -> list[tuple[str, Any]]:
+    """Load live rows owned by the prefix for catchup replay when change_log is thin."""
+    from api.routers.sync import get_model_class
+
+    plan = await collect_cleanup_plan(prefix)
+    rows: list[tuple[str, Any]] = []
+    async with AsyncSessionLocal() as db:
+        for table in tables:
+            id_field = TARGETED_SYNC_TABLE_ID_FIELDS.get(table)
+            if not id_field:
+                continue
+            ids = [int(value) for value in (getattr(plan, id_field, []) or [])]
+            if not ids:
+                continue
+            model = get_model_class(table)
+            if model is None or not hasattr(model, "id"):
+                continue
+            for batch in cleanup_in_batches(ids):
+                result = await db.execute(select(model).where(model.id.in_(batch)))
+                for row in result.scalars().all():
+                    rows.append((table, row))
+    table_rank = {table: index for index, table in enumerate(TARGETED_SYNC_TABLES)}
+    rows.sort(key=lambda item: (table_rank.get(item[0], 99), int(getattr(item[1], "id", 0) or 0)))
+    return rows
+
+
+async def collect_targeted_prefix_sync_items(
+    prefix: str,
+    *,
+    tables: tuple[str, ...] = TARGETED_SYNC_TABLES,
+    include_synced: bool = False,
+) -> tuple[list[dict[str, Any]], list[int]]:
+    """Build peer sync items from change_log, filling gaps from current DB rows."""
+    from core.sync_repair import build_current_state_replay_item
+    from core.sync_worker import change_log_entry_to_sync_item
+
+    entries = await collect_targeted_prefix_change_logs(
+        prefix,
+        tables=tables,
+        include_synced=include_synced,
+    )
+    items = [change_log_entry_to_sync_item(entry) for entry in entries]
+    change_log_ids = [int(entry.id) for entry in entries]
+    covered = {
+        (str(entry.table_name), int(entry.record_id))
+        for entry in entries
+        if getattr(entry, "record_id", None) is not None
+    }
+
+    # Publication-state catchup often retains change_log rows after the parent
+    # offer change_log was already compacted. Replay live offers/states so the
+    # foreign peer can resolve offer_public_id before applying publication rows.
+    if include_synced or any(table == "offer_publication_states" for table in tables):
+        for table, row in await _load_prefix_rows_for_tables(prefix, tables):
+            record_id = getattr(row, "id", None)
+            if record_id is None:
+                continue
+            key = (table, int(record_id))
+            if key in covered:
+                continue
+            items.append(
+                build_current_state_replay_item(
+                    table_name=table,
+                    row=row,
+                    operation="UPDATE",
+                )
+            )
+            covered.add(key)
+
+    table_rank = {table: index for index, table in enumerate(TARGETED_SYNC_TABLES)}
+    items.sort(
+        key=lambda item: (
+            table_rank.get(str(item.get("table") or ""), 99),
+            int(item.get("id") or 0),
+            int(item.get("change_log_id") or 0),
+        )
+    )
+    return items, change_log_ids
+
+
 async def push_prefix_change_logs_to_peer(
     prefix: str,
     *,
@@ -1776,14 +1876,17 @@ async def push_prefix_change_logs_to_peer(
     include_synced: bool = False,
 ) -> dict[str, Any]:
     from core.server_routing import default_peer_server_url
-    from core.sync_worker import change_log_entry_to_sync_item
 
     target_url = (default_peer_server_url() or "").rstrip("/")
     api_key = getattr(settings, "sync_api_key", None)
     if not target_url or not api_key:
         raise TradingProbeError("targeted prefix sync requires peer URL and sync API key")
 
-    entries = await collect_targeted_prefix_change_logs(prefix, tables=tables, include_synced=include_synced)
+    items, change_log_ids = await collect_targeted_prefix_sync_items(
+        prefix,
+        tables=tables,
+        include_synced=include_synced,
+    )
     report: dict[str, Any] = {
         "status": "ok",
         "prefix": prefix,
@@ -1791,23 +1894,19 @@ async def push_prefix_change_logs_to_peer(
         "target_url_configured": bool(target_url),
         "tables": list(tables),
         "include_synced": bool(include_synced),
-        "entry_count": len(entries),
+        "entry_count": len(items),
+        "change_log_entry_count": len(change_log_ids),
         "processed": 0,
         "batches": [],
     }
-    if not entries:
+    if not items:
         return report
 
     async with httpx.AsyncClient(timeout=60.0) as client:
-        for batch_index, batch in enumerate(_targeted_sync_batches(entries, batch_size=batch_size), start=1):
+        for batch_index, batch in enumerate(_targeted_sync_batches(items, batch_size=batch_size), start=1):
             batch_report: dict[str, Any] | None = None
             for attempt in range(1, max(1, int(max_attempts)) + 1):
-                items = []
-                for entry in batch:
-                    item = change_log_entry_to_sync_item(entry)
-                    items.append(item)
-
-                body = json.dumps(items, sort_keys=True, default=str)
+                body = json.dumps(batch, sort_keys=True, default=str)
                 response = await client.post(
                     f"{target_url}/api/sync/receive",
                     content=body,
@@ -1827,7 +1926,7 @@ async def push_prefix_change_logs_to_peer(
                     "entry_count": len(batch),
                     "status_code": response.status_code,
                     "response": response_payload,
-                    "table_counts": dict(Counter(str(entry.table_name) for entry in batch)),
+                    "table_counts": dict(Counter(str(item.get("table") or "") for item in batch)),
                 }
                 report["batches"].append(batch_report)
 
@@ -1840,20 +1939,27 @@ async def push_prefix_change_logs_to_peer(
                 report["failed_batch"] = batch_report
                 raise TradingProbeError(f"targeted prefix sync failed: {json.dumps(batch_report, default=str)}")
 
-            async with AsyncSessionLocal() as db:
-                ids = [int(entry.id) for entry in batch]
-                mark_result = await db.execute(
-                    text(
-                        """
-                        UPDATE change_log
-                        SET synced = true, verified = true
-                        WHERE id = ANY(:ids)
-                        """
-                    ),
-                    {"ids": ids},
-                )
-                await db.commit()
-                batch_report["marked_change_logs"] = int(mark_result.rowcount or 0)
+            batch_change_log_ids = [
+                int(item["change_log_id"])
+                for item in batch
+                if item.get("change_log_id") not in (None, "")
+            ]
+            if batch_change_log_ids:
+                async with AsyncSessionLocal() as db:
+                    mark_result = await db.execute(
+                        text(
+                            """
+                            UPDATE change_log
+                            SET synced = true, verified = true
+                            WHERE id = ANY(:ids)
+                            """
+                        ),
+                        {"ids": batch_change_log_ids},
+                    )
+                    await db.commit()
+                    batch_report["marked_change_logs"] = int(mark_result.rowcount or 0)
+            else:
+                batch_report["marked_change_logs"] = 0
             report["processed"] += len(batch)
 
     return report
@@ -7366,15 +7472,17 @@ async def sync_prefix_catchup_command(args: argparse.Namespace) -> int:
     prefix = args.prefix
     assert_production_full_matrix_allowed(prefix, allow_flag=bool(args.allow_production_execution))
     tables = tuple(args.table or TARGETED_SYNC_TABLES)
+    selected = set(tables)
     stage_results = []
-    for table in TARGETED_SYNC_TABLES:
-        if table not in tables:
+    for group in TARGETED_SYNC_TABLE_GROUPS:
+        active = tuple(table for table in group if table in selected)
+        if not active:
             continue
         stage_results.append(
             await push_prefix_change_logs_to_peer(
                 prefix,
                 batch_size=int(args.batch_size),
-                tables=(table,),
+                tables=active,
                 include_synced=bool(args.include_synced),
             )
         )
