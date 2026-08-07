@@ -3399,26 +3399,33 @@ class AiogramDispatcherHarness:
         recorded = self.telegram.callback_answers.get(callback_id)
         if recorded is not None:
             return recorded
-        from sqlalchemy import select
+        try:
+            from sqlalchemy import select
 
-        from core.telegram_delivery_callback_contract import (
-            telegram_callback_source_natural_id,
-        )
-        from models.telegram_delivery_job import TelegramDeliveryJob
+            from core.telegram_delivery_callback_contract import (
+                telegram_callback_source_natural_id,
+            )
+            from models.telegram_delivery_job import TelegramDeliveryJobRecord
+        except Exception:
+            return None
 
         source_natural_id = telegram_callback_source_natural_id(callback_id)
-        async with AsyncSessionLocal() as db:
-            row = (
-                await db.execute(
-                    select(TelegramDeliveryJob)
-                    .where(
-                        TelegramDeliveryJob.method == "answerCallbackQuery",
-                        TelegramDeliveryJob.source_natural_id == source_natural_id,
+        try:
+            async with AsyncSessionLocal() as db:
+                row = (
+                    await db.execute(
+                        select(TelegramDeliveryJobRecord)
+                        .where(
+                            TelegramDeliveryJobRecord.method == "answerCallbackQuery",
+                            TelegramDeliveryJobRecord.source_natural_id
+                            == source_natural_id,
+                        )
+                        .order_by(TelegramDeliveryJobRecord.id.desc())
+                        .limit(1)
                     )
-                    .order_by(TelegramDeliveryJob.id.desc())
-                    .limit(1)
-                )
-            ).scalar_one_or_none()
+                ).scalar_one_or_none()
+        except Exception:
+            return None
         if row is None:
             return None
         payload = getattr(row, "payload", None) or {}
