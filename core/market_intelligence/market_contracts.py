@@ -16,6 +16,12 @@ import re
 from typing import Any, Mapping
 from zoneinfo import ZoneInfo
 
+from .price_magnitude_policy import (
+    PriceUnitPolicyError,
+    assert_canonical_magnitude,
+    forbid_irt_unit,
+)
+
 
 MARKET_STORE_CONTRACT_VERSION = 1
 TEHRAN_TIMEZONE = ZoneInfo("Asia/Tehran")
@@ -52,14 +58,16 @@ QUALITY_STATES = frozenset(
 # The names, rather than locale-specific free text, are stored with an
 # observation.  Conversions are explicit in later producers; this contract
 # never silently turns one unit into another.
+# Canonical domestic unit is toman.  PROJECT_THOUSAND_TOMAN is the product
+# coin book (1 unit = 1,000 toman).  XAU remains USD.
 PRICE_UNITS = frozenset(
     {
         "PROJECT_THOUSAND_TOMAN",
-        "IRT_PER_COIN",
-        "IRT_PER_MESGHAL_750",
-        "IRT_PER_GRAM_750",
-        "IRT_PER_USD",
-        "IRT_PER_USDT",
+        "TOMAN_PER_COIN",
+        "TOMAN_PER_MESGHAL_750",
+        "TOMAN_PER_GRAM_750",
+        "TOMAN_PER_USD",
+        "TOMAN_PER_USDT",
         "USD_PER_TROY_OUNCE",
     }
 )
@@ -192,20 +200,20 @@ def _json_attributes(value: Mapping[str, Any]) -> str:
 
 def _validate_instrument_unit(instrument: str, price_unit: str) -> None:
     expected_units = {
-        "USD_HERAT": {"IRT_PER_USD"},
-        "USDT_IRT": {"IRT_PER_USDT"},
+        "USD_HERAT": {"TOMAN_PER_USD"},
+        "USDT_IRT": {"TOMAN_PER_USDT"},
         "XAUUSD": {"USD_PER_TROY_OUNCE"},
-        "IME_GOLD_BAR": {"IRT_PER_MESGHAL_750"},
-        "IME_GOLD_COIN_IMAM": {"IRT_PER_COIN"},
+        "IME_GOLD_BAR": {"TOMAN_PER_MESGHAL_750"},
+        "IME_GOLD_COIN_IMAM": {"TOMAN_PER_COIN"},
     }.get(instrument)
     if expected_units is not None and price_unit not in expected_units:
         raise MarketStoreContractError("instrument_price_unit_mismatch")
     if instrument.startswith("COIN_") and price_unit not in {
         "PROJECT_THOUSAND_TOMAN",
-        "IRT_PER_COIN",
+        "TOMAN_PER_COIN",
     }:
         raise MarketStoreContractError("instrument_price_unit_mismatch")
-    if instrument.startswith("MELTED_GOLD") and price_unit != "IRT_PER_MESGHAL_750":
+    if instrument.startswith("MELTED_GOLD") and price_unit != "TOMAN_PER_MESGHAL_750":
         raise MarketStoreContractError("instrument_price_unit_mismatch")
 
 
@@ -275,6 +283,10 @@ class MarketObservation:
             allowed=EVENT_TYPES,
         )
         side = _normalized_code(self.side, field_name="side", allowed=SIDES)
+        try:
+            forbid_irt_unit(self.price_unit)
+        except PriceUnitPolicyError as exc:
+            raise MarketStoreContractError(str(exc)) from exc
         price_unit = _normalized_code(
             self.price_unit,
             field_name="price_unit",
@@ -282,6 +294,20 @@ class MarketObservation:
         )
         _validate_instrument_unit(instrument, price_unit)
         currency = _normalized_code(self.currency, field_name="currency")
+        if price_unit.startswith("TOMAN") or price_unit == "PROJECT_THOUSAND_TOMAN":
+            if currency not in {"TOMAN", "IRT"}:
+                raise MarketStoreContractError("toman_price_requires_toman_currency")
+            # Canonical currency label for toman prices is TOMAN.
+            currency = "TOMAN"
+        if price_unit == "USD_PER_TROY_OUNCE" and currency != "USD":
+            raise MarketStoreContractError("xau_requires_usd_currency")
+        if currency == "IRT":
+            raise MarketStoreContractError("irt_currency_forbidden_use_toman")
+        price = _positive_decimal(self.price, field_name="price")
+        try:
+            assert_canonical_magnitude(price_unit=price_unit, price=price)
+        except PriceUnitPolicyError as exc:
+            raise MarketStoreContractError(str(exc)) from exc
         try:
             parse_confidence = float(self.parse_confidence)
         except (TypeError, ValueError) as exc:
@@ -327,7 +353,7 @@ class MarketObservation:
             trade_form=trade_form,
             event_type=event_type,
             side=side,
-            price=_positive_decimal(self.price, field_name="price"),
+            price=price,
             price_unit=price_unit,
             currency=currency,
             quantity=quantity,

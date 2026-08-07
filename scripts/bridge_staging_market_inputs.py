@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import argparse
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 import fcntl
 import json
@@ -35,21 +35,61 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from core.market_intelligence.market_contracts import MarketObservation, derive_event_key, normalize_utc
+from core.market_intelligence.market_contracts import (
+    MarketObservation,
+    MarketStoreContractError,
+    derive_event_key,
+    normalize_utc,
+)
 from core.market_intelligence.market_store import (
+    MARKET_STORE_HOT_RETENTION_HOURS,
     _storage_values,
+    archive_observations_older_than,
     connect_market_store,
     initialize_market_store,
 )
+from core.market_intelligence.price_magnitude_policy import (
+    PriceUnitPolicyError,
+    canonicalize_external_price,
+    canonicalize_legacy_public_price,
+)
 
 
-BRIDGE_VERSION = "staging-market-input-bridge-v1"
+BRIDGE_VERSION = "staging-market-input-bridge-v5"
 STATE_VERSION = 1
 BATCH_SIZE = 2000
+GROUP_HOT_RETENTION_HOURS = MARKET_STORE_HOT_RETENTION_HOURS
 _CONDITIONAL = re.compile(r"فیش|شرط|مهلت|واریز|تسویه|چک|شرکت|کدs*ملی|یکجا|فوری")
 _ALLOWED_LEGACY_SOURCES = frozenset({"MELTED_AGGREGATE", "MELTED_FLOW", "USD_HERAT", "XAUUSD"})
 _ALLOWED_EXTERNAL_INSTRUMENTS = frozenset({"USDT_IRT", "IME_GOLD_BAR", "IME_GOLD_COIN_IMAM"})
 _ALLOWED_EXTERNAL_QUOTES = frozenset({"MID", "LAST", "CLOSE", "BID", "ASK"})
+# price_events.instrument is authoritative; source_code only identifies the feed.
+_LEGACY_SOURCE_INSTRUMENTS = {
+    "MELTED_AGGREGATE": "MELTED_GOLD_AGGREGATE",
+    "MELTED_FLOW": "MELTED_GOLD_FLOW",
+    "USD_HERAT": "USD_HERAT",
+    "XAUUSD": "XAUUSD",
+}
+_LEGACY_EVENT_INSTRUMENTS = {
+    "MELTED_AGGREGATE": "MELTED_GOLD_AGGREGATE",
+    "MELTED_GOLD": "MELTED_GOLD_AGGREGATE",
+    "MELTED_GOLD_AGGREGATE": "MELTED_GOLD_AGGREGATE",
+    "MELTED_GOLD_FLOW": "MELTED_GOLD_FLOW",
+    "MELTED_FLOW": "MELTED_GOLD_FLOW",
+    "MELTED_GOLD_UNION": "MELTED_GOLD_UNION",
+    "GOLD_UNION_QUOTE": "MELTED_GOLD_UNION",
+    "GOLD_COIN": "COIN_PUBLIC_CHANNEL",
+    "USD_HERAT": "USD_HERAT",
+    "XAUUSD": "XAUUSD",
+}
+_LEGACY_SKIP_ERRORS = frozenset(
+    {
+        "legacy_price_unit_unsupported",
+        "legacy_price_must_be_positive",
+        "legacy_instrument_unsupported",
+        "instrument_price_unit_mismatch",
+    }
+)
 
 _UPSERT_SQL = """
 INSERT INTO market_observations(
@@ -191,14 +231,31 @@ def _safe_attributes(**values: object) -> dict[str, object]:
     return {key: value for key, value in values.items() if value is not None}
 
 
-def _legacy_observation(row: sqlite3.Row, *, available_at: str) -> MarketObservation:
+def _legacy_instrument(row: sqlite3.Row) -> tuple[str, str]:
+    """Return (feed source_code, canonical instrument).
+
+    Public Telegram feeds can publish several instruments on one channel.  The
+    parsed ``price_events.instrument`` is therefore preferred over the feed
+    code; the feed code remains provenance and the fallback for older rows.
+    """
+
     source = str(row["source_code"]).upper()
-    instrument = {
-        "MELTED_AGGREGATE": "MELTED_GOLD_AGGREGATE",
-        "MELTED_FLOW": "MELTED_GOLD_FLOW",
-        "USD_HERAT": "USD_HERAT",
-        "XAUUSD": "XAUUSD",
-    }[source]
+    if source not in _LEGACY_SOURCE_INSTRUMENTS:
+        raise BridgeError("legacy_instrument_unsupported")
+    try:
+        event_instrument = str(row["instrument"] or "").strip().upper()
+    except (KeyError, IndexError):
+        event_instrument = ""
+    if event_instrument:
+        instrument = _LEGACY_EVENT_INSTRUMENTS.get(event_instrument)
+        if instrument is None:
+            raise BridgeError("legacy_instrument_unsupported")
+        return source, instrument
+    return source, _LEGACY_SOURCE_INSTRUMENTS[source]
+
+
+def _legacy_observation(row: sqlite3.Row, *, available_at: str) -> MarketObservation:
+    source, instrument = _legacy_instrument(row)
     event_type = str(row["event_type"] or "QUOTE").upper()
     side = str(row["side"] or "UNKNOWN").upper()
     if instrument == "XAUUSD":
@@ -209,11 +266,20 @@ def _legacy_observation(row: sqlite3.Row, *, available_at: str) -> MarketObserva
     price = _decimal(row["price_num"], field="legacy_price")
     price_unit = str(row["price_unit"] or "").upper()
     currency = str(row["currency"] or "IRT").upper()
-    if price_unit == "TOMAN_PER_USD":
-        price *= Decimal("10")
-        price_unit = "IRT_PER_USD"
-        currency = "IRT"
-    if price_unit not in {"IRT_PER_MESGHAL_750", "IRT_PER_USD", "USD_PER_TROY_OUNCE"}:
+    try:
+        price, price_unit, currency, conversion_attrs = canonicalize_legacy_public_price(
+            price=price,
+            price_unit=price_unit,
+            currency=currency,
+        )
+    except PriceUnitPolicyError as exc:
+        raise BridgeError(str(exc)) from exc
+    if price_unit not in {
+        "TOMAN_PER_MESGHAL_750",
+        "TOMAN_PER_USD",
+        "USD_PER_TROY_OUNCE",
+        "TOMAN_PER_COIN",
+    }:
         raise BridgeError("legacy_price_unit_unsupported")
     quantity, quantity_unit = _safe_quantity(row["quantity_num"], row["quantity_unit"])
     event_time = _utc(row["event_time_utc"], field="legacy_event_time_utc")
@@ -250,6 +316,8 @@ def _legacy_observation(row: sqlite3.Row, *, available_at: str) -> MarketObserva
             bridge=BRIDGE_VERSION,
             historical_source=True,
             legacy_source=source,
+            legacy_event_instrument=str(row["instrument"] or "").strip().upper() or None,
+            **conversion_attrs,
         ),
     )
 
@@ -262,6 +330,20 @@ def _external_observation(row: sqlite3.Row, *, available_at: str) -> MarketObser
     source = "WALLEX_PUBLIC_API" if instrument == "USDT_IRT" else "IME_REALTIME_BOARD"
     side = {"BID": "BUY", "ASK": "SELL"}.get(quote_kind, "MID")
     event_time = _utc(row["observed_at_utc"], field="external_event_time_utc")
+    price_unit = {
+        "USDT_IRT": "TOMAN_PER_USDT",
+        "IME_GOLD_BAR": "TOMAN_PER_MESGHAL_750",
+        "IME_GOLD_COIN_IMAM": "TOMAN_PER_COIN",
+    }[instrument]
+    price = _decimal(row["normalized_price_num"], field="external_price")
+    try:
+        price, price_unit, conversion_attrs = canonicalize_external_price(
+            instrument=instrument,
+            price=price,
+            price_unit=price_unit,
+        )
+    except PriceUnitPolicyError as exc:
+        raise BridgeError(str(exc)) from exc
     return MarketObservation(
         event_key=derive_event_key("external-market-v1", source, int(row["id"]), instrument, quote_kind),
         source_code=source,
@@ -274,13 +356,9 @@ def _external_observation(row: sqlite3.Row, *, available_at: str) -> MarketObser
         trade_form="NOT_APPLICABLE",
         event_type="REFERENCE",
         side=side,
-        price=_decimal(row["normalized_price_num"], field="external_price"),
-        price_unit={
-            "USDT_IRT": "IRT_PER_USDT",
-            "IME_GOLD_BAR": "IRT_PER_MESGHAL_750",
-            "IME_GOLD_COIN_IMAM": "IRT_PER_COIN",
-        }[instrument],
-        currency="IRT",
+        price=price,
+        price_unit=price_unit,
+        currency="TOMAN",
         parse_confidence=1.0,
         parser_version=BRIDGE_VERSION,
         quality_state="ELIGIBLE",
@@ -291,15 +369,32 @@ def _external_observation(row: sqlite3.Row, *, available_at: str) -> MarketObser
             historical_source=True,
             quote_kind=quote_kind,
             external_provider=source,
+            **conversion_attrs,
         ),
     )
 
 
-def _group_observations(connection: sqlite3.Connection) -> Iterator[MarketObservation]:
-    imports = {
-        int(row["id"]): str(row["imported_at_utc"])
-        for row in connection.execute("SELECT id, imported_at_utc FROM imports")
-    }
+def _group_source_fingerprint(connection: sqlite3.Connection) -> str:
+    offers = connection.execute(
+        "SELECT COUNT(*), COALESCE(MAX(id), 0) FROM offers"
+    ).fetchone()
+    trades = connection.execute(
+        "SELECT COUNT(*), COALESCE(MAX(id), 0) FROM confirmed_trades"
+    ).fetchone()
+    return f"{int(offers[0])}:{int(offers[1])}:{int(trades[0])}:{int(trades[1])}"
+
+
+def _group_cutoff_utc() -> str:
+    return (
+        datetime.now(timezone.utc) - timedelta(hours=GROUP_HOT_RETENTION_HOURS)
+    ).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _group_observations(
+    connection: sqlite3.Connection,
+    *,
+    event_cutoff_utc: str,
+) -> Iterator[MarketObservation]:
     offers = connection.execute(
         """
         SELECT o.*, m.source_html_file, m.event_time_utc AS message_event_time_utc, i.imported_at_utc,
@@ -310,8 +405,10 @@ def _group_observations(connection: sqlite3.Connection) -> Iterator[MarketObserv
         JOIN messages m ON m.import_id = o.import_id AND m.message_id = o.message_id
         JOIN imports i ON i.id = o.import_id
         LEFT JOIN offer_market_quality q ON q.offer_id = o.id
+        WHERE m.event_time_utc >= ?
         ORDER BY o.import_id, o.id
-        """
+        """,
+        (event_cutoff_utc,),
     )
     for row in offers:
         source, group_number = _group_source(row["source_html_file"], int(row["import_id"]))
@@ -337,7 +434,7 @@ def _group_observations(connection: sqlite3.Connection) -> Iterator[MarketObserv
             side=str(row["side"] or "UNKNOWN").upper(),
             price=_decimal(row["price"], field="group_offer_price"),
             price_unit="PROJECT_THOUSAND_TOMAN",
-            currency="IRT",
+            currency="TOMAN",
             quantity=quantity,
             quantity_unit=quantity_unit,
             parse_confidence=float(row["confidence"] or 0.0),
@@ -366,8 +463,10 @@ def _group_observations(connection: sqlite3.Connection) -> Iterator[MarketObserv
         LEFT JOIN messages m ON m.import_id=t.import_id AND m.message_id=t.confirmation_message_id
         LEFT JOIN trade_market_quality q ON q.trade_id=t.id
         LEFT JOIN offers o ON o.import_id=t.import_id AND o.message_id=t.offer_message_id
+        WHERE t.event_time_utc >= ?
         ORDER BY t.import_id, t.id
-        """
+        """,
+        (event_cutoff_utc,),
     )
     for row in trades:
         source, group_number = _group_source(row["source_html_file"], int(row["import_id"]))
@@ -390,7 +489,7 @@ def _group_observations(connection: sqlite3.Connection) -> Iterator[MarketObserv
             side=str(row["side"] or "UNKNOWN").upper(),
             price=_decimal(row["price"], field="group_trade_price"),
             price_unit="PROJECT_THOUSAND_TOMAN",
-            currency="IRT",
+            currency="TOMAN",
             quantity=quantity,
             quantity_unit=quantity_unit,
             parse_confidence=float(row["confidence"] or 0.0),
@@ -456,11 +555,15 @@ def _write_source_rows(
         latest = int(row["id"])
         try:
             observation = convert(row, available_at=available_at)
+            values.append(_storage_values(observation.normalized()))
         except BridgeError as exc:
             if str(exc) in skip_errors:
                 continue
             raise
-        values.append(_storage_values(observation.normalized()))
+        except MarketStoreContractError as exc:
+            if str(exc) in skip_errors:
+                continue
+            raise BridgeError(str(exc)) from exc
     if values:
         destination.executemany(_UPSERT_SQL, values)
         destination.commit()
@@ -526,9 +629,10 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     lock_path = _path_inside(runtime_root, args.lock_file, field="lock_file")
     state = _load_state(state_path)
     available_at = _now()
-    counts = {"legacy_public": 0, "external": 0, "group": 0}
+    counts = {"legacy_public": 0, "external": 0, "group": 0, "archived": 0}
     last_legacy = int(state.get("legacy_price_event_id") or 0)
     last_external = int(state.get("external_observation_id") or 0)
+    group_skipped = False
     with _lock(lock_path):
         destination = connect_market_store(market_path)
         try:
@@ -551,7 +655,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
                         batch,
                         _legacy_observation,
                         available_at=available_at,
-                        skip_errors=frozenset({"legacy_price_unit_unsupported", "legacy_price_must_be_positive"}),
+                        skip_errors=_LEGACY_SKIP_ERRORS,
                     )
                     counts["legacy_public"] += imported
                     last_legacy = max(last_legacy, latest)
@@ -576,7 +680,22 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
                     _save_state(state_path, state)
             if args.conversation_db:
                 with _read_only(Path(args.conversation_db)) as source:
-                    counts["group"] = _write_batch(destination, _group_observations(source))
+                    fingerprint = _group_source_fingerprint(source)
+                    if fingerprint == str(state.get("group_source_fingerprint") or ""):
+                        group_skipped = True
+                        counts["group"] = 0
+                    else:
+                        counts["group"] = _write_batch(
+                            destination,
+                            _group_observations(source, event_cutoff_utc=_group_cutoff_utc()),
+                        )
+                        state["group_source_fingerprint"] = fingerprint
+            archive_report = archive_observations_older_than(
+                destination,
+                retention_hours=GROUP_HOT_RETENTION_HOURS,
+            )
+            counts["archived"] = int(archive_report.get("archived_rows") or 0)
+            state["hot_store"] = archive_report
         finally:
             destination.close()
         state.update({
@@ -586,9 +705,17 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             "legacy_price_event_id": last_legacy,
             "external_observation_id": last_external,
             "last_group_refresh_at_utc": _now(),
+            "group_refresh_skipped": group_skipped,
         })
         _save_state(state_path, state)
-    return {"status": "BRIDGED", "bridge_version": BRIDGE_VERSION, "available_at_utc": available_at, "counts": counts, "state": state}
+    return {
+        "status": "BRIDGED",
+        "bridge_version": BRIDGE_VERSION,
+        "available_at_utc": available_at,
+        "counts": counts,
+        "group_refresh_skipped": group_skipped,
+        "state": state,
+    }
 
 
 def build_parser() -> argparse.ArgumentParser:

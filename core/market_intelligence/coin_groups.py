@@ -251,7 +251,7 @@ def coin_group_offer_observations(source: CoinGroupMessageInput) -> list[MarketO
                 side=parsed.side,
                 price=Decimal(parsed.price_project_thousand_toman),
                 price_unit="PROJECT_THOUSAND_TOMAN",
-                currency="IRT",
+                currency="TOMAN",
                 quantity=parsed.quantity,
                 quantity_unit="COIN_COUNT",
                 parse_confidence=0.96 if parsed.commodity_code else 0.72,

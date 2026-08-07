@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import json
+import os
 from pathlib import Path
 
 from .market_snapshot import (
@@ -15,11 +17,12 @@ from .market_store import (
     MarketStoreError,
     MarketStoreMigrationRequired,
     connect_market_store_read_only,
+    snapshot_input_watermark,
     verify_market_store_read_only,
 )
 
 
-SNAPSHOT_PUBLISHER_VERSION = "market-snapshot-publisher-v1"
+SNAPSHOT_PUBLISHER_VERSION = "market-snapshot-publisher-v2"
 
 
 class MarketSnapshotPublisherError(RuntimeError):
@@ -36,6 +39,7 @@ class MarketSnapshotPublishResult:
     estimated_rate_count: int
     no_data_rate_count: int
     reason: str | None
+    input_watermark: dict[str, int | str] | None = None
 
 
 def _utc_now() -> datetime:
@@ -49,24 +53,86 @@ def _distinct_paths(market_store_path: Path | str, snapshot_path: Path | str) ->
         raise MarketSnapshotPublisherError("snapshot_publisher_store_target_conflict")
 
 
+def _default_watermark_path(snapshot_path: Path) -> Path:
+    return snapshot_path.with_name(f".{snapshot_path.name}.input-watermark.json")
+
+
+def _load_watermark(path: Path) -> dict[str, object] | None:
+    if not path.is_file():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _save_watermark(path: Path, watermark: dict[str, int | str], *, snapshot_digest: str) -> None:
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    payload = {
+        "schema_version": 1,
+        "publisher_version": SNAPSHOT_PUBLISHER_VERSION,
+        "snapshot_digest": snapshot_digest,
+        "watermark": watermark,
+        "updated_at_utc": _utc_now().isoformat().replace("+00:00", "Z"),
+    }
+    temporary.write_text(json.dumps(payload, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+    os.chmod(temporary, 0o600)
+    temporary.replace(path)
+
+
 def publish_rate_ready_snapshot(
     *,
     market_store_path: Path | str,
     snapshot_path: Path | str,
     as_of_utc: datetime | str | None = None,
+    force: bool = False,
+    watermark_path: Path | str | None = None,
 ) -> MarketSnapshotPublishResult:
     """Publish only a Snapshot with at least one usable canonical rate.
 
     The caller owns scheduling and error reporting. This function opens the
     Market Store read-only, never creates a store, and preserves a previous
     valid Snapshot if upstream evidence is empty or not rate-ready.
+
+    When the hot-store watermark is unchanged and a previous Snapshot exists,
+    the rebuild is skipped (``UNCHANGED``) unless ``force`` is true.
     """
 
     _distinct_paths(market_store_path, snapshot_path)
+    snapshot_file = Path(snapshot_path).expanduser().resolve()
+    mark_path = (
+        Path(watermark_path).expanduser().resolve()
+        if watermark_path is not None
+        else _default_watermark_path(snapshot_file)
+    )
     connection = None
+    watermark: dict[str, int | str]
     try:
         connection = connect_market_store_read_only(market_store_path)
         verify_market_store_read_only(connection)
+        watermark = snapshot_input_watermark(connection)
+        previous = _load_watermark(mark_path)
+        previous_mark = previous.get("watermark") if previous else None
+        if (
+            not force
+            and snapshot_file.is_file()
+            and isinstance(previous_mark, dict)
+            and int(previous_mark.get("max_id") or -1) == int(watermark["max_id"])
+            and int(previous_mark.get("eligible_row_count") or -1)
+            == int(watermark["eligible_row_count"])
+            and str(previous_mark.get("max_event_time_utc") or "")
+            == str(watermark["max_event_time_utc"])
+        ):
+            return MarketSnapshotPublishResult(
+                status="UNCHANGED",
+                snapshot_digest=str(previous.get("snapshot_digest") or "") or None,
+                generated_at_utc=None,
+                estimated_rate_count=0,
+                no_data_rate_count=0,
+                reason="INPUT_WATERMARK_UNCHANGED",
+                input_watermark=watermark,
+            )
         snapshot = build_market_snapshot(
             connection,
             as_of_utc=as_of_utc or _utc_now(),
@@ -90,11 +156,13 @@ def publish_rate_ready_snapshot(
             estimated_rate_count=estimated_count,
             no_data_rate_count=no_data_count,
             reason="NO_ESTIMATED_COIN_RATES",
+            input_watermark=watermark,
         )
     try:
-        digest = publish_market_snapshot_atomically(snapshot_path, snapshot)
+        digest = publish_market_snapshot_atomically(snapshot_file, snapshot)
     except MarketSnapshotError as exc:
         raise MarketSnapshotPublisherError("snapshot_publisher_atomic_publish_failed") from exc
+    _save_watermark(mark_path, watermark, snapshot_digest=digest)
     return MarketSnapshotPublishResult(
         status="PUBLISHED",
         snapshot_digest=digest,
@@ -102,6 +170,7 @@ def publish_rate_ready_snapshot(
         estimated_rate_count=estimated_count,
         no_data_rate_count=no_data_count,
         reason=None,
+        input_watermark=watermark,
     )
 
 

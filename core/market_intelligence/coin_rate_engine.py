@@ -16,11 +16,30 @@ from statistics import median
 from typing import Any, Iterable
 
 from .market_contracts import normalize_utc
+from .price_magnitude_policy import RIAL_PER_TOMAN, TRUE_IRT_MESGHAL_FLOOR
 from .private_gold import filter_comparable_private_gold_physical_rows
 
 
-COIN_RATE_ENGINE_VERSION = "coin-rate-engine-v3"
-PROJECT_IRT_PER_UNIT = 10_000.0  # 1,000 Toman × 10 Rial/Toman
+COIN_RATE_ENGINE_VERSION = "coin-rate-engine-v5"
+PROJECT_TOMAN_PER_UNIT = 1_000.0  # 1 project unit = 1,000 toman
+_MESGHAL_TOMAN_MIN = 30_000_000.0
+_MESGHAL_TOMAN_MAX = 200_000_000.0
+
+
+def _canonical_mesghal_toman(price_num: float) -> float | None:
+    """Normalize mesghal toman; convert residual true-rial leftovers once."""
+
+    if price_num <= 0 or not math.isfinite(price_num):
+        return None
+    value = float(price_num)
+    if value >= float(TRUE_IRT_MESGHAL_FLOOR):
+        # Residual rows still stored as rial under the old contract.
+        value /= float(RIAL_PER_TOMAN)
+    if not _MESGHAL_TOMAN_MIN <= value <= _MESGHAL_TOMAN_MAX:
+        return None
+    return value
+
+
 COIN_SPECS: dict[str, tuple[float, bool]] = {
     "IMAM": (2.253, False),
     "BAHAR": (2.253, True),
@@ -48,7 +67,7 @@ class MeltedPoint:
 class HeratPoint:
     """A source-separated Herat point used only as an anchor bridge."""
 
-    value_irt: float | None
+    value_toman: float | None
     age_seconds: float | None
     spread_relative: float
     source_kind: str | None
@@ -143,12 +162,14 @@ def _robust_project_point(rows: list[sqlite3.Row], *, as_of: datetime, source_ki
     age = max(0.0, (as_of - latest_at).total_seconds())
     if age > maximum_age:
         return MeltedPoint(None, age, 0.0, source_kind, fallback)
-    window = [
-        float(row["price_num"]) / PROJECT_IRT_PER_UNIT
-        for row in rows
-        if (_utc(str(row["event_time_utc"]), name="rate_event_time_utc") - latest_at).total_seconds() >= -60
-        and float(row["price_num"]) > 0
-    ]
+    window: list[float] = []
+    for row in rows:
+        if (_utc(str(row["event_time_utc"]), name="rate_event_time_utc") - latest_at).total_seconds() < -60:
+            continue
+        canonical = _canonical_mesghal_toman(float(row["price_num"]))
+        if canonical is None:
+            continue
+        window.append(canonical / PROJECT_TOMAN_PER_UNIT)
     if not window:
         return MeltedPoint(None, age, 0.0, source_kind, fallback)
     center = float(median(window))
@@ -181,7 +202,7 @@ def _melted_point(connection: sqlite3.Connection, *, as_of: datetime, settlement
                 instrument=instrument,
                 settlement_terms=terms,
                 trade_forms=forms,
-                price_unit="IRT_PER_MESGHAL_750",
+                price_unit="TOMAN_PER_MESGHAL_750",
                 include_comparable_conditional=(
                     instrument == "MELTED_GOLD_PRIVATE" and "PHYSICAL" in forms
                 ),
@@ -254,14 +275,14 @@ def _herat_point(connection: sqlite3.Connection, *, as_of: datetime, settlement:
                 instrument="USD_HERAT",
                 settlement_terms=terms,
                 trade_forms=forms,
-                price_unit="IRT_PER_USD",
+                price_unit="TOMAN_PER_USD",
             ),
             as_of=as_of,
             source_kind=label,
             fallback=fallback,
             maximum_age=maximum_age,
         )
-        if point.value_irt is not None:
+        if point.value_toman is not None:
             return point
     return HeratPoint(None, None, 0.0, None, False)
 
@@ -294,7 +315,7 @@ def _ime_imam_point(connection: sqlite3.Connection, *, as_of: datetime) -> float
         instrument="IME_GOLD_COIN_IMAM",
         settlement_terms=("SPOT",),
         trade_forms=("NOT_APPLICABLE",),
-        price_unit="IRT_PER_COIN",
+        price_unit="TOMAN_PER_COIN",
         event_types=("QUOTE", "REFERENCE"),
     )
     if not rows:
@@ -302,7 +323,7 @@ def _ime_imam_point(connection: sqlite3.Connection, *, as_of: datetime) -> float
     event_time = _utc(str(rows[0]["event_time_utc"]), name="ime_imam_event_time_utc")
     if (as_of - event_time).total_seconds() > 3600:
         return None
-    value = float(rows[0]["price_num"]) / PROJECT_IRT_PER_UNIT
+    value = float(rows[0]["price_num"]) / PROJECT_TOMAN_PER_UNIT
     return value if value > 0 else None
 
 
@@ -313,7 +334,7 @@ def _paper_regime(connection: sqlite3.Connection, *, as_of: datetime) -> str:
         instrument="MELTED_GOLD_PRIVATE",
         settlement_terms=("TOMORROW",),
         trade_forms=("PAPER_NORMAL",),
-        price_unit="IRT_PER_MESGHAL_750",
+        price_unit="TOMAN_PER_MESGHAL_750",
     )
     values = [float(row["price_num"]) for row in rows[:20] if float(row["price_num"]) > 0]
     if len(values) < 3:
@@ -400,12 +421,12 @@ def build_coin_rate_estimates(connection: sqlite3.Connection, *, as_of_utc: date
                     current_herat = _herat_point(connection, as_of=as_of, settlement=settlement)
                     anchor_herat = _herat_point(connection, as_of=anchor_time, settlement=settlement)
                     if (
-                        current_herat.value_irt is not None
-                        and anchor_herat.value_irt is not None
+                        current_herat.value_toman is not None
+                        and anchor_herat.value_toman is not None
                         and current_herat.source_kind == anchor_herat.source_kind
                     ):
                         melted_change = current.value_project / anchor_melted.value_project - 1.0
-                        herat_change = current_herat.value_irt / anchor_herat.value_irt - 1.0
+                        herat_change = current_herat.value_toman / anchor_herat.value_toman - 1.0
                         herat_basis_relative = herat_change - melted_change
                         estimate += old_intrinsic * _HERAT_CORRECTION_WEIGHT[settlement] * herat_basis_relative
                         herat_source = current_herat.source_kind

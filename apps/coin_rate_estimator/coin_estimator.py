@@ -39,6 +39,14 @@ from core.market_intelligence.conversation_quality import (  # noqa: E402
     PROJECT_COMPLETED_TRADE_TRAINING_WEIGHT,
     detect_market_regime,
 )
+from morning_reopen import (  # noqa: E402
+    METHOD_NAME as MORNING_REOPEN_METHOD,
+    build_morning_reopen_anchor,
+    is_morning_reopen_window,
+    resolve_cash_tomorrow_ratio_for_estimate,
+    select_reopen_cash_tomorrow_ratio,
+    widen_tolerance,
+)
 
 
 RUNTIME_ROOT = Path(
@@ -4848,6 +4856,205 @@ def observed_anchor_tolerance(
     }
 
 
+# Same melted coefficient ⇒ same intrinsic family.  Low-date bands must not
+# climb into the non-low-date sibling range (e.g. بهار vs امام, نیم تاریخ پایین
+# vs نیم بهار).
+LOW_DATE_FAMILY_SEPARATION_RELATIVE = 0.0015  # 0.15% of sibling point
+LOW_DATE_FAMILY_SEPARATION_MIN_TOMAN = 50_000
+
+
+def low_date_family_sibling_name(commodity_name: str) -> str | None:
+    spec = COMMODITY_SPECS.get(commodity_name)
+    if spec is None or not spec.low_date:
+        return None
+    for name, other in COMMODITY_SPECS.items():
+        if other.low_date:
+            continue
+        if abs(float(other.coefficient) - float(spec.coefficient)) <= 1e-12:
+            return name
+    return None
+
+
+def enforce_cash_tomorrow_term_structure(
+    settlements: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Prevent cash > tomorrow inversions after asymmetric residual calibration.
+
+    TOMORROW is often ``CASH × empirical ratio`` (ratio ≳ 1).  Online residual
+    can then pull only the TOMORROW book (CASH still warming up), which flips
+    the term structure.  Floor tomorrow at cash so the published book never
+    shows a same-commodity cash premium over tomorrow without market evidence.
+    """
+
+    audits: list[dict[str, Any]] = []
+    cash_rates = {
+        str(row.get("commodity_name")): row
+        for row in ((settlements.get("CASH") or {}).get("rates") or [])
+        if isinstance(row, dict) and row.get("commodity_name")
+    }
+    tomorrow_rates = (settlements.get("TOMORROW") or {}).get("rates") or []
+    for rate in tomorrow_rates:
+        if not isinstance(rate, dict):
+            continue
+        if str(rate.get("status")) not in {"ESTIMATED", "OBSERVED_ANCHOR"}:
+            continue
+        name = str(rate.get("commodity_name") or "")
+        cash = cash_rates.get(name)
+        if cash is None or str(cash.get("status")) not in {"ESTIMATED", "OBSERVED_ANCHOR"}:
+            continue
+        cash_price = cash.get("estimated_price_toman")
+        tom_price = rate.get("estimated_price_toman")
+        if cash_price is None or tom_price is None:
+            continue
+        cash_price_f = float(cash_price)
+        tom_price_f = float(tom_price)
+        ratio_meta = (
+            rate.get("settlement_ratio_anchor")
+            if isinstance(rate.get("settlement_ratio_anchor"), dict)
+            else {}
+        )
+        # Prefer historical reopen/empirical ratio as the term-structure floor.
+        # If prior reopens showed tomorrow below cash (ratio<1), that is allowed;
+        # without a ratio, default to cash parity.
+        ratio_floor = 1.0
+        raw_ratio = ratio_meta.get("ratio")
+        if raw_ratio is not None:
+            try:
+                ratio_floor = max(0.97, min(1.08, float(raw_ratio) * 0.998))
+            except (TypeError, ValueError):
+                ratio_floor = 1.0
+        floor_toman = cash_price_f * ratio_floor
+        if tom_price_f + 1e-9 >= floor_toman:
+            continue
+        floor = int(round(floor_toman / 50_000.0) * 50_000)
+        rate["_pre_term_structure_estimated_price_toman"] = tom_price_f
+        rate["estimated_price_toman"] = floor
+        rate["estimated_project_price"] = int(round(floor / PRICE_MULTIPLIER))
+        if rate.get("llm_value") is not None:
+            rate["llm_value"] = rate["estimated_project_price"]
+        tolerance = rate.get("tolerance")
+        if isinstance(tolerance, dict):
+            lower = tolerance.get("lower_price_toman")
+            upper = tolerance.get("upper_price_toman")
+            if lower is not None and float(lower) < floor:
+                tolerance["lower_price_toman"] = floor
+                tolerance["lower_project_price"] = int(round(floor / PRICE_MULTIPLIER))
+            if upper is not None and float(upper) < floor:
+                tolerance["upper_price_toman"] = floor
+                tolerance["upper_project_price"] = int(round(floor / PRICE_MULTIPLIER))
+        audit = {
+            "commodity": name,
+            "policy": "TOMORROW_NOT_BELOW_REOPEN_RATIO_FLOOR",
+            "cash_price_toman": int(cash_price_f),
+            "lifted_from_toman": int(tom_price_f),
+            "lifted_to_toman": floor,
+            "ratio_floor": ratio_floor,
+            "settlement_ratio": raw_ratio,
+            "tomorrow_residual": (
+                (rate.get("online_residual_calibration") or {}).get("correction_ratio")
+                if isinstance(rate.get("online_residual_calibration"), dict)
+                else None
+            ),
+        }
+        rate["term_structure_floor"] = audit
+        audits.append(audit)
+    return audits
+
+
+def apply_low_date_family_band_separation(
+    rates: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Clamp low-date upper bands so they do not overlap same-coefficient coins.
+
+    Uses the sibling non-low-date lower band (or point) minus a small principled
+    gap derived from the 2.253-family intrinsic scale.  Point estimates are left
+    unchanged; only the published tolerance is tightened.
+    """
+
+    by_name = {
+        str(row.get("commodity_name")): row
+        for row in rates
+        if isinstance(row, dict) and row.get("commodity_name")
+    }
+    for row in rates:
+        if not isinstance(row, dict):
+            continue
+        if str(row.get("status")) not in {"ESTIMATED", "OBSERVED_ANCHOR"}:
+            continue
+        name = str(row.get("commodity_name") or "")
+        sibling_name = low_date_family_sibling_name(name)
+        if sibling_name is None:
+            continue
+        sibling = by_name.get(sibling_name)
+        if sibling is None or str(sibling.get("status")) not in {
+            "ESTIMATED",
+            "OBSERVED_ANCHOR",
+        }:
+            continue
+        sibling_point = sibling.get("estimated_price_toman")
+        if sibling_point is None:
+            continue
+        sibling_tol = sibling.get("tolerance") or {}
+        sibling_floor = sibling_tol.get("lower_price_toman")
+        if sibling_floor is None:
+            sibling_floor = sibling_point
+        separation = max(
+            LOW_DATE_FAMILY_SEPARATION_MIN_TOMAN,
+            int(
+                round(
+                    float(sibling_point)
+                    * LOW_DATE_FAMILY_SEPARATION_RELATIVE
+                    / 50_000
+                )
+                * 50_000
+            ),
+        )
+        ceiling = int(sibling_floor) - separation
+        if ceiling <= 0:
+            continue
+        tolerance = dict(row.get("tolerance") or {})
+        point = float(row.get("estimated_price_toman") or 0.0)
+        if point <= 0:
+            continue
+        lower = int(tolerance.get("lower_price_toman") or point)
+        upper = int(tolerance.get("upper_price_toman") or point)
+        original_upper = upper
+        # Keep the point inside the band; allow zero upside if the point is
+        # already pressed against the family ceiling.
+        capped_upper = min(upper, max(int(round(point / 50_000) * 50_000), ceiling))
+        if capped_upper >= upper:
+            continue
+        rounded_point = int(round(point / 50_000) * 50_000)
+        if capped_upper < rounded_point:
+            capped_upper = rounded_point
+        if capped_upper >= original_upper:
+            continue
+        tolerance["upper_price_toman"] = capped_upper
+        tolerance["upper_project_price"] = int(round(capped_upper / PRICE_MULTIPLIER))
+        tolerance["lower_price_toman"] = min(lower, rounded_point)
+        tolerance["lower_project_price"] = int(
+            round(int(tolerance["lower_price_toman"]) / PRICE_MULTIPLIER)
+        )
+        tolerance["negative_tolerance_percent"] = max(
+            0.0,
+            (point - float(tolerance["lower_price_toman"])) / point * 100.0,
+        )
+        tolerance["positive_tolerance_percent"] = max(
+            0.0,
+            (float(capped_upper) - point) / point * 100.0,
+        )
+        tolerance["family_band_cap"] = {
+            "sibling": sibling_name,
+            "sibling_floor_toman": int(sibling_floor),
+            "separation_toman": separation,
+            "ceiling_toman": ceiling,
+            "original_upper_toman": original_upper,
+            "policy": "LOW_DATE_SAME_COEFFICIENT_NO_OVERLAP",
+        }
+        row["tolerance"] = tolerance
+    return rates
+
+
 def fresh_transfer_anchor_qhat(
     anchor: dict[str, Any], *, structural_qhat: float | None
 ) -> float:
@@ -5041,12 +5248,29 @@ def estimate_rates(
                         ),
                         None,
                     )
-                    settlement_ratio = select_empirical_cash_tomorrow_ratio(
+                    empirical_ratio = select_empirical_cash_tomorrow_ratio(
                         anchor_database,
                         commodity=str(commodity["name"]),
                         trade_form="PHYSICAL",
                         end=end,
                         group_live_events_before=group_live_events_before,
+                    )
+                    reopen_ratio = select_reopen_cash_tomorrow_ratio(
+                        anchor_database,
+                        commodity=str(commodity["name"]),
+                        trade_form="PHYSICAL",
+                        end=end,
+                        current_regime_score=(
+                            float(market_regime_score)
+                            if market_regime_score is not None
+                            else None
+                        ),
+                        market_db=market_db,
+                    )
+                    settlement_ratio = resolve_cash_tomorrow_ratio_for_estimate(
+                        empirical=empirical_ratio,
+                        reopen=reopen_ratio,
+                        end=end,
                     )
                     if cash_rate is not None and settlement_ratio.get("status") == "OBSERVED":
                         estimate = float(cash_rate["estimated_price_toman"]) * float(
@@ -5060,13 +5284,33 @@ def estimate_rates(
                         ) / 100.0
                         ratio_qhat = float(settlement_ratio["relative_qhat"])
                         combined_qhat = math.sqrt(cash_qhat ** 2 + ratio_qhat ** 2)
-                        if settlement_ratio.get("scope") == "POOLED_COIN_MARKET":
+                        if settlement_ratio.get("scope") in {
+                            "POOLED_COIN_MARKET",
+                            "REOPEN_REGIME_BLEND_WITH_EMPIRICAL",
+                        }:
                             combined_qhat += 0.001
                         combined_qhat = max(0.003, min(0.015, combined_qhat))
                         transfer_anchor = {
                             "reference_price_toman": estimate,
-                            "reference_source": "CURRENT_CASH_X_EMPIRICAL_SETTLEMENT_RATIO",
+                            "reference_source": "CURRENT_CASH_X_REOPEN_REGIME_SETTLEMENT_RATIO",
                         }
+                        ratio_scope = str(settlement_ratio.get("scope") or "")
+                        if "REOPEN" in ratio_scope:
+                            confidence = "HIGH_REOPEN_REGIME_SETTLEMENT_TRANSFER"
+                            method = (
+                                "CURRENT_CASH_ESTIMATE_X_PREVIOUS_REOPEN_"
+                                "REGIME_WEIGHTED_TOMORROW_CASH_RATIO"
+                            )
+                        elif settlement_ratio.get("scope") == "COMMODITY":
+                            confidence = "HIGH_EMPIRICAL_SETTLEMENT_TRANSFER"
+                            method = (
+                                "CURRENT_CASH_ESTIMATE_X_ROBUST_EMPIRICAL_TOMORROW_CASH_RATIO"
+                            )
+                        else:
+                            confidence = "MEDIUM_POOLED_SETTLEMENT_TRANSFER"
+                            method = (
+                                "CURRENT_CASH_ESTIMATE_X_ROBUST_EMPIRICAL_TOMORROW_CASH_RATIO"
+                            )
                         rates.append(
                             {
                                 "commodity_id": commodity["id"],
@@ -5091,16 +5335,12 @@ def estimate_rates(
                                     transfer_anchor,
                                     relative_error_qhat=combined_qhat,
                                 ),
-                                "confidence": (
-                                    "HIGH_EMPIRICAL_SETTLEMENT_TRANSFER"
-                                    if settlement_ratio.get("scope") == "COMMODITY"
-                                    else "MEDIUM_POOLED_SETTLEMENT_TRANSFER"
-                                ),
+                                "confidence": confidence,
                                 "training_sample_count": calibration_row["sample_count"],
                                 "direct_settlement_sample_count": calibration_row[
                                     "direct_settlement_sample_count"
                                 ],
-                                "method": "CURRENT_CASH_ESTIMATE_X_ROBUST_EMPIRICAL_TOMORROW_CASH_RATIO",
+                                "method": method,
                                 "group_offer_anchor": group_anchor,
                                 "cash_reference_rate": cash_rate,
                                 "settlement_ratio_anchor": settlement_ratio,
@@ -5254,6 +5494,91 @@ def estimate_rates(
                             structural_ratio = max(-0.15, min(2.0, structural_ratio))
                             structural = intrinsic * (1.0 + structural_ratio)
                             age = float(historical_group_anchor["age_seconds"] or 0.0)
+                            use_morning_reopen = is_morning_reopen_window(
+                                end, has_live_anchor=anchor_used, model=model
+                            )
+                            if use_morning_reopen:
+                                current_usdt = live_point_value(inputs.get("usdt") or {})
+                                anchor_usdt = live_point_value(anchor_inputs.get("usdt") or {})
+                                reopen = build_morning_reopen_anchor(
+                                    intrinsic=intrinsic,
+                                    structural=structural,
+                                    transferred=transferred,
+                                    anchor_age_seconds=age,
+                                    current_herat=usd_value,
+                                    anchor_herat=live_point_value(anchor_inputs.get("usd") or {}),
+                                    current_melted=float(melted_value),
+                                    anchor_melted=float(anchor_melted),
+                                    current_usdt=current_usdt,
+                                    anchor_usdt=anchor_usdt,
+                                    settlement=settlement,
+                                    model=model,
+                                )
+                                estimate = float(reopen["estimate_toman"])
+                                rounded_toman = int(reopen["estimated_price_toman"])
+                                adjusted_ratio = estimate / intrinsic - 1.0
+                                structural_qhat = (
+                                    model.get("conformal_tolerance", {})
+                                    .get("per_commodity_relative_error_qhat", {})
+                                    .get(commodity["name"])
+                                    or model.get("conformal_tolerance", {}).get(
+                                        "global_relative_error_qhat"
+                                    )
+                                )
+                                base_tolerance = asymmetric_tolerance(
+                                    intrinsic=intrinsic,
+                                    estimated_price=estimate,
+                                    adjusted_ratio=adjusted_ratio,
+                                    calibration=calibration_row,
+                                    pressure_score=pressure_score,
+                                    market_regime_score=market_regime_score,
+                                    market_regime_confidence=market_regime_confidence,
+                                    conformal_floor=structural_qhat,
+                                )
+                                tolerance = widen_tolerance(
+                                    base_tolerance,
+                                    multiplier=float(reopen["band_multiplier"]),
+                                    center_toman=estimate,
+                                )
+                                rates.append(
+                                    {
+                                        "commodity_id": commodity["id"],
+                                        "commodity_name": commodity["name"],
+                                        "status": "ESTIMATED",
+                                        "llm_value": int(
+                                            round(rounded_toman / PRICE_MULTIPLIER)
+                                        ),
+                                        "intrinsic_toman": intrinsic,
+                                        "bubble_ratio": adjusted_ratio,
+                                        "market_pressure_score": pressure_score,
+                                        "market_regime": market_regime.get("regime"),
+                                        "market_regime_score": market_regime_score,
+                                        "market_regime_confidence": market_regime_confidence,
+                                        "estimated_price_toman": rounded_toman,
+                                        "estimated_project_price": int(
+                                            round(rounded_toman / PRICE_MULTIPLIER)
+                                        ),
+                                        "tolerance": tolerance,
+                                        "confidence": "MEDIUM_MORNING_REOPEN",
+                                        "training_sample_count": calibration_row[
+                                            "sample_count"
+                                        ],
+                                        "direct_settlement_sample_count": calibration_row[
+                                            "direct_settlement_sample_count"
+                                        ],
+                                        "method": MORNING_REOPEN_METHOD,
+                                        "group_offer_anchor": group_anchor,
+                                        "historical_group_anchor": historical_group_anchor,
+                                        "anchor_melted": anchor_inputs["melted_gold"],
+                                        "anchor_weight": reopen["blend_weights"][
+                                            "transferred"
+                                        ],
+                                        "transferred_anchor_price_toman": transferred,
+                                        "structural_price_toman": structural,
+                                        "morning_reopen": reopen,
+                                    }
+                                )
+                                continue
                             reference_source = str(historical_group_anchor.get("reference_source") or "")
                             if "TRADE" in reference_source:
                                 source_weight = 0.92
@@ -5713,6 +6038,37 @@ def estimate_rates(
                     pressure_adjustment = 0.0
                     method = "RECENT_TRADE_THEN_ACTIVE_BOOK_BAND_5M"
 
+                morning_reopen_meta = None
+                if (
+                    not anchor_used
+                    and is_morning_reopen_window(
+                        end, has_live_anchor=False, model=model
+                    )
+                ):
+                    # Overnight market anchors for basis when no same-settlement
+                    # coin quote survived into the reopen window.
+                    overnight = observed_inputs(
+                        connection, settlement, end - timedelta(hours=18)
+                    )
+                    reopen = build_morning_reopen_anchor(
+                        intrinsic=intrinsic,
+                        structural=float(estimate),
+                        transferred=None,
+                        anchor_age_seconds=18 * 3_600,
+                        current_herat=usd_value,
+                        anchor_herat=live_point_value(overnight.get("usd") or {}),
+                        current_melted=float(melted_value),
+                        anchor_melted=live_point_value(overnight.get("melted_gold") or {}),
+                        current_usdt=live_point_value(inputs.get("usdt") or {}),
+                        anchor_usdt=live_point_value(overnight.get("usdt") or {}),
+                        settlement=settlement,
+                        model=model,
+                    )
+                    estimate = float(reopen["estimate_toman"])
+                    adjusted_ratio = estimate / intrinsic - 1.0
+                    method = MORNING_REOPEN_METHOD
+                    morning_reopen_meta = reopen
+
                 rounded_toman = int(round(estimate / 50_000) * 50_000)
                 project_price = int(round(rounded_toman / PRICE_MULTIPLIER))
                 tolerance = (
@@ -5741,41 +6097,52 @@ def estimate_rates(
                         ),
                     )
                 )
-                if pressure_score is not None or market_regime_score is not None:
+                if morning_reopen_meta is not None:
+                    tolerance = widen_tolerance(
+                        tolerance,
+                        multiplier=float(morning_reopen_meta["band_multiplier"]),
+                        center_toman=estimate,
+                    )
+                elif pressure_score is not None or market_regime_score is not None:
                     method += "+ASYMMETRIC_REGIME_AND_ORDER_FLOW_TOLERANCE"
-                rates.append(
-                    {
-                        "commodity_id": commodity["id"],
-                        "commodity_name": commodity["name"],
-                        "status": "ESTIMATED",
-                        "llm_value": project_price,
-                        "intrinsic_toman": intrinsic,
-                        "bubble_ratio": adjusted_ratio,
-                        "market_pressure_score": pressure_score,
-                        "market_regime": market_regime.get("regime"),
-                        "market_regime_score": market_regime_score,
-                        "market_regime_confidence": market_regime_confidence,
-                        "market_pressure_adjustment_ratio": pressure_adjustment,
-                        "estimated_price_toman": rounded_toman,
-                        "estimated_project_price": project_price,
-                        "tolerance": tolerance,
-                        "confidence": (
-                            (
-                                "HIGH_OBSERVED_TRADE"
-                                if group_anchor.get("trade_count")
-                                else "MEDIUM_OBSERVED_BOOK"
-                            )
-                            if anchor_used
+                rate_row = {
+                    "commodity_id": commodity["id"],
+                    "commodity_name": commodity["name"],
+                    "status": "ESTIMATED",
+                    "llm_value": project_price,
+                    "intrinsic_toman": intrinsic,
+                    "bubble_ratio": adjusted_ratio,
+                    "market_pressure_score": pressure_score,
+                    "market_regime": market_regime.get("regime"),
+                    "market_regime_score": market_regime_score,
+                    "market_regime_confidence": market_regime_confidence,
+                    "market_pressure_adjustment_ratio": pressure_adjustment,
+                    "estimated_price_toman": rounded_toman,
+                    "estimated_project_price": project_price,
+                    "tolerance": tolerance,
+                    "confidence": (
+                        (
+                            "HIGH_OBSERVED_TRADE"
+                            if group_anchor.get("trade_count")
+                            else "MEDIUM_OBSERVED_BOOK"
+                        )
+                        if anchor_used
+                        else (
+                            "MEDIUM_MORNING_REOPEN"
+                            if morning_reopen_meta is not None
                             else calibration_row["confidence"]
-                        ),
-                        "training_sample_count": calibration_row["sample_count"],
-                        "direct_settlement_sample_count": calibration_row[
-                            "direct_settlement_sample_count"
-                        ],
-                        "method": method,
-                        "group_offer_anchor": group_anchor,
-                    }
-                )
+                        )
+                    ),
+                    "training_sample_count": calibration_row["sample_count"],
+                    "direct_settlement_sample_count": calibration_row[
+                        "direct_settlement_sample_count"
+                    ],
+                    "method": method,
+                    "group_offer_anchor": group_anchor,
+                }
+                if morning_reopen_meta is not None:
+                    rate_row["morning_reopen"] = morning_reopen_meta
+                rates.append(rate_row)
 
             result["settlements"][settlement] = {
                 "inputs": inputs,
@@ -5786,7 +6153,7 @@ def estimate_rates(
                 "bubble_regime_shift": regime_shift,
                 "market_pressure": inputs["order_flow"],
                 "market_regime": market_regime,
-                "rates": rates,
+                "rates": apply_low_date_family_band_separation(rates),
             }
     return result
 

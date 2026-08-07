@@ -288,7 +288,7 @@ def coin_group_trade_observations(trades: Iterable[LinkedCoinGroupTrade]) -> lis
                 side=trade.side,
                 price=Decimal(trade.price_project_thousand_toman),
                 price_unit="PROJECT_THOUSAND_TOMAN",
-                currency="IRT",
+                currency="TOMAN",
                 quantity=trade.quantity,
                 quantity_unit="COIN_COUNT",
                 parse_confidence=0.99 if trade.quality_state == "ELIGIBLE" else 0.65,
