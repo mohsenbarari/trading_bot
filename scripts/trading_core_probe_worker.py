@@ -49,7 +49,11 @@ from bot.callbacks import ExpireOfferCallback, TextOfferActionCallback
 from bot.handlers import trade_execute as bot_trade_execute
 from bot.handlers import trade_create as bot_trade_create
 from bot.handlers import trade_manage as bot_trade_manage
-from bot.middlewares import AuthMiddleware, TradeContentionGateMiddleware
+from bot.middlewares import (
+    AuthMiddleware,
+    CallbackReceiptMiddleware,
+    TradeContentionGateMiddleware,
+)
 from bot.middlewares.trade_contention_gate import (
     ParsedTelegramTradeCallback,
     claim_telegram_trade_confirmation,
@@ -3275,6 +3279,9 @@ class AiogramDispatcherHarness:
     def __init__(self) -> None:
         self.telegram = RecordingTelegramBot()
         self.dp = Dispatcher(storage=MemoryStorage())
+        # Match run_bot.py: bind edge receipt before auth/handlers so QUEUE_V1
+        # callback answers can prove telegram_callback_received_at.
+        self.dp.update.outer_middleware(CallbackReceiptMiddleware())
         self.dp.update.outer_middleware(TradeContentionGateMiddleware())
         self.dp.update.outer_middleware(AuthMiddleware(AsyncSessionLocal))
         self.dp.update.outer_middleware(BotLoggingContextMiddleware())
@@ -3352,7 +3359,7 @@ class AiogramDispatcherHarness:
             context={"bot": self.telegram.bot},
         )
         await self.dp.feed_update(self.telegram.bot, update)
-        return self.telegram.callback_answers.get(callback_id)
+        return await self._resolve_callback_answer(callback_id)
 
     async def feed_private_callback(
         self,
@@ -3385,7 +3392,43 @@ class AiogramDispatcherHarness:
             context={"bot": self.telegram.bot},
         )
         await self.dp.feed_update(self.telegram.bot, update)
-        return self.telegram.callback_answers.get(callback_id)
+        return await self._resolve_callback_answer(callback_id)
+
+    async def _resolve_callback_answer(self, callback_id: str) -> dict[str, Any] | None:
+        """Return the synchronous recorder answer, or the QUEUE_V1 enqueued payload."""
+        recorded = self.telegram.callback_answers.get(callback_id)
+        if recorded is not None:
+            return recorded
+        from sqlalchemy import select
+
+        from core.telegram_delivery_callback_contract import (
+            telegram_callback_source_natural_id,
+        )
+        from models.telegram_delivery_job import TelegramDeliveryJob
+
+        source_natural_id = telegram_callback_source_natural_id(callback_id)
+        async with AsyncSessionLocal() as db:
+            row = (
+                await db.execute(
+                    select(TelegramDeliveryJob)
+                    .where(
+                        TelegramDeliveryJob.method == "answerCallbackQuery",
+                        TelegramDeliveryJob.source_natural_id == source_natural_id,
+                    )
+                    .order_by(TelegramDeliveryJob.id.desc())
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+        if row is None:
+            return None
+        payload = getattr(row, "payload", None) or {}
+        if not isinstance(payload, dict):
+            return None
+        return {
+            "callback_query_id": callback_id,
+            "text": payload.get("text"),
+            "show_alert": payload.get("show_alert"),
+        }
 
     async def close(self) -> None:
         for router in PROBE_DISPATCHER_ROUTERS:
