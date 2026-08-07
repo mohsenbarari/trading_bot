@@ -2672,6 +2672,11 @@ async def create_offer_for_user(
         normalized_lot_sizes = list(lot_sizes) if lot_sizes else None
         normalized_source_surface = normalize_offer_source_surface(source_surface)
         if normalized_source_surface == OfferSourceSurface.WEBAPP:
+            # OfferCreate caps idempotency_key at 64 chars; include a nonce so
+            # retries / repeated matrix prefixes cannot collide with prior rows.
+            idempotency_key = hashlib.sha1(
+                f"{prefix}:offer:{index}:{user_id}:{uuid.uuid4().hex}".encode("utf-8")
+            ).hexdigest()[:40]
             response = await offers_router.create_offer(
                 offers_router.OfferCreate(
                     offer_type=offer_type,
@@ -2682,6 +2687,7 @@ async def create_offer_for_user(
                     lot_sizes=normalized_lot_sizes,
                     notes=f"{prefix} offer {index}",
                     warning_acknowledged=True,
+                    idempotency_key=idempotency_key,
                 ),
                 db=db,
                 current_user=user,
@@ -7287,6 +7293,8 @@ def build_dual_role_final_report(
                 completed_ledger_count=persistence.completed_ledger_count,
                 trades_without_completed_ledger_count=persistence.trades_without_completed_ledger_count,
                 failed_internal_ledger_count=persistence.failed_internal_ledger_count,
+                expected_remaining_quantity=expected_remaining_quantity,
+                require_terminal_completed=require_terminal_completed,
             )
         report["correctness_failures"] = []
     except TradingProbeError as exc:
