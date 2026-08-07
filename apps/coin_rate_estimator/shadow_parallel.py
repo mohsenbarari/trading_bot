@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from coin_estimator import estimate_rates, iso_utc, load_model, write_json_atomic
 
@@ -17,7 +17,8 @@ def _centers(estimate: dict[str, Any]) -> dict[str, dict[str, Any]]:
             if not isinstance(item, dict):
                 continue
             name = str(item.get("commodity_name") or "")
-            key = f"{name}:{settlement}"
+            form = str(item.get("trade_form") or "PHYSICAL")
+            key = f"{name}:{settlement}:{form}"
             out[key] = {
                 "status": item.get("status"),
                 "estimated_project_price": item.get("estimated_project_price"),
@@ -31,25 +32,37 @@ def compare_centers(live: dict[str, Any], shadow: dict[str, Any]) -> dict[str, A
     right = _centers(shadow)
     paired = []
     abs_pct: list[float] = []
+    signed_pct: list[float] = []
     for key in sorted(set(left) | set(right)):
         a = left.get(key) or {"status": "MISSING"}
         b = right.get(key) or {"status": "MISSING"}
         rel = None
         if (
-            a.get("status") == "ESTIMATED"
-            and b.get("status") == "ESTIMATED"
-            and a.get("estimated_project_price") is not None
+            a.get("estimated_project_price") is not None
             and b.get("estimated_project_price") is not None
         ):
             av = float(a["estimated_project_price"])
             bv = float(b["estimated_project_price"])
             rel = abs(av - bv) / max(abs(av), 1.0)
             abs_pct.append(rel)
+            signed_pct.append((bv - av) / max(abs(av), 1.0))
         paired.append({"key": key, "live": a, "shadow": b, "abs_pct": rel})
+    ordered = sorted(abs_pct)
+    midpoint = len(ordered) // 2
+    median_abs = (
+        None
+        if not ordered
+        else (
+            ordered[midpoint]
+            if len(ordered) % 2
+            else (ordered[midpoint - 1] + ordered[midpoint]) / 2.0
+        )
+    )
     return {
         "paired_estimated_count": len(abs_pct),
         "mean_abs_pct": (sum(abs_pct) / len(abs_pct)) if abs_pct else None,
-        "median_abs_pct": (sorted(abs_pct)[len(abs_pct) // 2] if abs_pct else None),
+        "median_abs_pct": median_abs,
+        "mean_signed_pct": (sum(signed_pct) / len(signed_pct)) if signed_pct else None,
         "pairs": paired,
     }
 
@@ -64,6 +77,7 @@ def run_shadow_parallel(
     shadow_state_path: Path,
     live_group_events_enabled: bool,
     group_live_events_before: datetime | None,
+    finalize_book: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Estimate with an optional shadow model and write an isolated state file."""
 
@@ -87,6 +101,7 @@ def run_shadow_parallel(
             live_group_events_enabled=live_group_events_enabled,
             group_live_events_before=group_live_events_before,
         )
+        finalization = finalize_book(shadow_estimate) if finalize_book else None
         comparison = compare_centers(live_estimate, shadow_estimate)
         payload = {
             "enabled": True,
@@ -99,7 +114,9 @@ def run_shadow_parallel(
                 "paired_estimated_count": comparison["paired_estimated_count"],
                 "mean_abs_pct": comparison["mean_abs_pct"],
                 "median_abs_pct": comparison["median_abs_pct"],
+                "mean_signed_pct": comparison["mean_signed_pct"],
             },
+            "deterministic_finalization": finalization,
             "estimate": shadow_estimate,
             "pair_details": comparison["pairs"],
         }
@@ -110,10 +127,17 @@ def run_shadow_parallel(
                 "status": "OK",
                 "shadow_model_kind": shadow_model.get("model_kind"),
                 "comparison_vs_live": payload["comparison_vs_live"],
+                "estimate": shadow_estimate,
             }
         )
         return meta
     except Exception as exc:  # fail-closed: live path must continue
-        meta.update({"status": "FAILED", "error": type(exc).__name__})
+        meta.update(
+            {
+                "status": "FAILED",
+                "error": type(exc).__name__,
+                "error_detail": str(exc)[:300],
+            }
+        )
         write_json_atomic(shadow_state_path, meta, mode=0o644)
         return meta

@@ -33,6 +33,7 @@ NORMAL_EVALUATION_GRACE_SECONDS = 15 * 60
 RECONNECT_MATCH_HOURS = 24
 PROJECT_PRICE_MULTIPLIER = 1_000
 LEDGER_MIN_INTERVAL_SECONDS = 30
+MAIN_MODEL_ID = "MAIN_ONLINE"
 
 
 def _iso(value: datetime) -> str:
@@ -59,6 +60,8 @@ def ensure_schema(connection: sqlite3.Connection) -> None:
         CREATE TABLE IF NOT EXISTS coin_estimate_predictions (
             id INTEGER PRIMARY KEY,
             prediction_time_utc TEXT NOT NULL,
+            model_id TEXT NOT NULL DEFAULT 'MAIN_ONLINE',
+            model_version TEXT,
             commodity TEXT NOT NULL,
             settlement TEXT NOT NULL,
             structural_estimated_price_toman REAL NOT NULL,
@@ -80,7 +83,7 @@ def ensure_schema(connection: sqlite3.Connection) -> None:
                 evaluated_at_utc, group_live_enabled, prediction_time_utc
             );
         CREATE INDEX IF NOT EXISTS coin_estimate_predictions_lookup_idx
-            ON coin_estimate_predictions(commodity, settlement, prediction_time_utc);
+            ON coin_estimate_predictions(model_id, commodity, settlement, prediction_time_utc);
         CREATE TABLE IF NOT EXISTS coin_online_residual_state (
             commodity TEXT NOT NULL,
             settlement TEXT NOT NULL,
@@ -92,6 +95,43 @@ def ensure_schema(connection: sqlite3.Connection) -> None:
             last_reconnect_evaluation_utc TEXT,
             PRIMARY KEY(commodity, settlement)
         );
+        """
+    )
+    columns = {
+        str(row[1])
+        for row in connection.execute("PRAGMA table_info(coin_estimate_predictions)")
+    }
+    # SQLite's CREATE TABLE IF NOT EXISTS cannot add columns to an existing
+    # production ledger.  These additive migrations retain every historical
+    # main-model row under the explicit default model identity.
+    if "model_id" not in columns:
+        connection.execute(
+            "ALTER TABLE coin_estimate_predictions "
+            "ADD COLUMN model_id TEXT NOT NULL DEFAULT 'MAIN_ONLINE'"
+        )
+    if "model_version" not in columns:
+        connection.execute(
+            "ALTER TABLE coin_estimate_predictions ADD COLUMN model_version TEXT"
+        )
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS coin_estimate_predictions_model_pending_idx
+        ON coin_estimate_predictions(model_id, evaluated_at_utc, prediction_time_utc)
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS coin_estimate_predictions_model_actual_idx
+        ON coin_estimate_predictions(model_id, actual_event_utc)
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS coin_estimate_predictions_model_pending_book_idx
+        ON coin_estimate_predictions(
+            model_id, commodity, settlement, group_live_enabled,
+            evaluated_at_utc, prediction_time_utc
+        )
         """
     )
 
@@ -111,6 +151,8 @@ def record_predictions(
     settlement: str,
     rates: list[dict[str, Any]],
     group_live_enabled: bool,
+    model_id: str = MAIN_MODEL_ID,
+    model_version: str | None = None,
 ) -> int:
     """Persist one snapshot of the rates after bounded calibration."""
 
@@ -128,11 +170,11 @@ def record_predictions(
             """
             SELECT prediction_time_utc
             FROM coin_estimate_predictions
-            WHERE commodity=? AND settlement=?
+            WHERE model_id=? AND commodity=? AND settlement=?
             ORDER BY prediction_time_utc DESC, id DESC
             LIMIT 1
             """,
-            (commodity, settlement),
+            (model_id, commodity, settlement),
         ).fetchone()
         if previous is not None:
             elapsed = (
@@ -146,14 +188,16 @@ def record_predictions(
         connection.execute(
             """
             INSERT INTO coin_estimate_predictions(
-                prediction_time_utc, commodity, settlement,
+                prediction_time_utc, model_id, model_version, commodity, settlement,
                 structural_estimated_price_toman, estimated_price_toman,
                 lower_price_toman, upper_price_toman, group_live_enabled,
                 created_at_utc
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 _iso(prediction_time),
+                model_id,
+                model_version,
                 commodity,
                 settlement,
                 structural,
@@ -168,25 +212,33 @@ def record_predictions(
     return inserted
 
 
-def _trusted_actuals(
+OFFER_MID_MAX_PAIR_GAP_SECONDS = 90
+
+
+def _load_trusted_actual_context(
     connection: sqlite3.Connection,
     *,
-    commodity: str,
-    settlement: str,
     start: datetime,
     end: datetime,
-) -> list[sqlite3.Row]:
-    """Return high-confidence physical group trades, newest parser first."""
+) -> dict[str, dict[tuple[str, str], list[dict[str, Any]]]]:
+    """Fetch eligible observations once for all pending predictions.
 
+    Reconciliation previously repeated schema introspection and two SQLite
+    queries for every pending rate.  A refresh now reads the bounded window
+    once, while preserving the trade-first rule per commodity/settlement.
+    """
+
+    context: dict[str, dict[tuple[str, str], list[dict[str, Any]]]] = {
+        "trades": {},
+        "offers": {},
+    }
     tables = {
         str(row[0])
-        for row in connection.execute(
-            "SELECT name FROM sqlite_master WHERE type='table'"
-        )
+        for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")
     }
     if "confirmed_trades" not in tables and not {"offers", "messages"}.issubset(tables):
-        return []
-    rows: list[sqlite3.Row] = []
+        return context
+    lower, upper = _iso(start), _iso(end)
     if "confirmed_trades" in tables:
         columns = {
             str(row[1])
@@ -203,25 +255,29 @@ def _trusted_actuals(
             if "trade_market_quality" in tables
             else ""
         )
-        rows.extend(
-            connection.execute(
-                f"""
-                SELECT t.id, t.price, t.event_time_utc, 'TRADE' AS source_kind
-                FROM confirmed_trades AS t
-                {quality_join}
-                WHERE t.commodity=? AND t.settlement=?
-                  AND t.trade_form='PHYSICAL'
-                  AND t.confidence>=0.85
-                  AND t.event_time_utc>? AND t.event_time_utc<=?
-                  {eligibility} {quality_filter}
-                ORDER BY t.event_time_utc, t.id
-                """,
-                (commodity, settlement, _iso(start), _iso(end)),
-            ).fetchall()
-        )
-    # If a period has no confirmed trade yet, a quality-approved physical
-    # offer is still useful as a provisional observed price.  Trades sort
-    # first and therefore always win when both arrive for the same moment.
+        rows = connection.execute(
+            f"""
+            SELECT t.id, t.commodity, t.settlement, t.price, t.event_time_utc
+            FROM confirmed_trades AS t
+            {quality_join}
+            WHERE t.trade_form='PHYSICAL' AND t.confidence>=0.85
+              AND t.event_time_utc>? AND t.event_time_utc<=?
+              {eligibility} {quality_filter}
+            ORDER BY t.event_time_utc, t.id
+            """,
+            (lower, upper),
+        ).fetchall()
+        for row in rows:
+            key = (str(row["commodity"]), str(row["settlement"]))
+            context["trades"].setdefault(key, []).append(
+                {
+                    "id": str(row["id"]),
+                    "price": float(row["price"]),
+                    "event_time_utc": str(row["event_time_utc"]),
+                    "stamp": _parse(str(row["event_time_utc"])),
+                    "source_kind": "TRADE",
+                }
+            )
     if {"offers", "messages"}.issubset(tables):
         quality_join = (
             "LEFT JOIN offer_market_quality AS q ON q.offer_id=o.id"
@@ -233,32 +289,92 @@ def _trusted_actuals(
             if "offer_market_quality" in tables
             else ""
         )
-        rows.extend(
-            connection.execute(
-                f"""
-                SELECT o.id, o.price, m.event_time_utc, 'OFFER' AS source_kind
-                FROM offers AS o
-                JOIN messages AS m
-                  ON m.import_id=o.import_id AND m.message_id=o.message_id
-                {quality_join}
-                WHERE o.commodity=? AND o.settlement=?
-                  AND o.trade_form='PHYSICAL'
-                  AND o.confidence>=0.85
-                  AND m.event_time_utc>? AND m.event_time_utc<=?
-                  {quality_filter}
-                ORDER BY m.event_time_utc, o.id
-                """,
-                (commodity, settlement, _iso(start), _iso(end)),
-            ).fetchall()
-        )
-    return sorted(
-        rows,
-        key=lambda row: (
-            0 if str(row["source_kind"]) == "TRADE" else 1,
-            str(row["event_time_utc"]),
-            int(row["id"]),
-        ),
+        rows = connection.execute(
+            f"""
+            SELECT o.id, o.commodity, o.settlement, o.price, o.side, m.event_time_utc
+            FROM offers AS o
+            JOIN messages AS m ON m.import_id=o.import_id AND m.message_id=o.message_id
+            {quality_join}
+            WHERE o.trade_form='PHYSICAL' AND o.confidence>=0.85
+              AND m.event_time_utc>? AND m.event_time_utc<=?
+              {quality_filter}
+            ORDER BY m.event_time_utc, o.id
+            """,
+            (lower, upper),
+        ).fetchall()
+        for row in rows:
+            key = (str(row["commodity"]), str(row["settlement"]))
+            context["offers"].setdefault(key, []).append(
+                {
+                    "id": str(row["id"]),
+                    "price": float(row["price"]),
+                    "side": str(row["side"] or "").upper(),
+                    "event_time_utc": str(row["event_time_utc"]),
+                    "stamp": _parse(str(row["event_time_utc"])),
+                    "source_kind": "OFFER",
+                }
+            )
+    return context
+
+
+def _trusted_actuals(
+    context: dict[str, dict[tuple[str, str], list[dict[str, Any]]]],
+    *,
+    commodity: str,
+    settlement: str,
+    start: datetime,
+    end: datetime,
+) -> list[dict[str, Any]]:
+    """Return trades, else one near-synchronous two-sided offer midpoint."""
+
+    key = (commodity, settlement)
+    trades = [
+        row
+        for row in context["trades"].get(key, [])
+        if row["stamp"] > start and row["stamp"] <= end
+    ]
+    if trades:
+        return trades
+    offers = [
+        row
+        for row in context["offers"].get(key, [])
+        if row["stamp"] > start and row["stamp"] <= end
+    ]
+    bids = [row for row in offers if row.get("side") == "BUY"]
+    asks = [row for row in offers if row.get("side") == "SELL"]
+    pairs: list[tuple[float, float, datetime, dict[str, Any], dict[str, Any]]] = []
+    for bid in bids:
+        for ask in asks:
+            gap = abs((bid["stamp"] - ask["stamp"]).total_seconds())
+            if gap > OFFER_MID_MAX_PAIR_GAP_SECONDS or float(bid["price"]) > float(ask["price"]):
+                continue
+            # Prefer the closest pair, then the tightest spread, then newest.
+            pairs.append(
+                (
+                    gap,
+                    float(ask["price"]) - float(bid["price"]),
+                    max(bid["stamp"], ask["stamp"]),
+                    bid,
+                    ask,
+                )
+            )
+    if not pairs:
+        return []
+    _, _, stamp, bid, ask = min(
+        pairs,
+        key=lambda item: (item[0], item[1], -item[2].timestamp()),
     )
+    return [
+        {
+            "id": f"{bid['id']}:{ask['id']}",
+            "price": (float(bid["price"]) + float(ask["price"])) / 2.0,
+            "event_time_utc": _iso(stamp),
+            "stamp": stamp,
+            "source_kind": "OFFER_MID",
+            "bid_id": bid["id"],
+            "ask_id": ask["id"],
+        }
+    ]
 
 
 def _update_state(
@@ -325,6 +441,7 @@ def reconcile_predictions(
     now: datetime,
     live_group_enabled: bool,
     reconnect_at: datetime | None = None,
+    learning_model_id: str = MAIN_MODEL_ID,
 ) -> dict[str, Any]:
     """Match predictions to later trusted prices and update residual state.
 
@@ -384,9 +501,13 @@ def reconcile_predictions(
             """,
             (_iso(reconnect_floor), _iso(reconnect_at)),
         ).fetchall()
-        seen_reconnect_keys: set[tuple[str, str]] = set()
+        seen_reconnect_keys: set[tuple[str, str, str]] = set()
         for row in candidates:
-            key = (str(row["commodity"]), str(row["settlement"]))
+            key = (
+                str(row["model_id"]),
+                str(row["commodity"]),
+                str(row["settlement"]),
+            )
             if key in seen_reconnect_keys:
                 continue
             seen_reconnect_keys.add(key)
@@ -398,26 +519,41 @@ def reconcile_predictions(
     pending.extend(
         row for row in reconnect_pending if int(row["id"]) not in normal_pending_ids
     )
+    context_start_candidates = [normal_cutoff]
+    if reconnect_at is not None:
+        context_start_candidates.append(reconnect_at - timedelta(seconds=1))
+    actual_context = _load_trusted_actual_context(
+        connection,
+        start=min(context_start_candidates),
+        end=now,
+    )
     evaluated = 0
     bridged = 0
-    used_actual_ids: set[tuple[str, int]] = set()
+    used_actual_ids: set[tuple[str, str, str]] = set()
+    assigned_start = min(context_start_candidates)
     assigned_actuals = {
-        (str(row["commodity"]), str(row["settlement"]), str(row["actual_event_utc"]))
+        (
+            str(row["model_id"]),
+            str(row["commodity"]),
+            str(row["settlement"]),
+            str(row["actual_event_utc"]),
+        )
         for row in connection.execute(
             """
-            SELECT commodity, settlement, actual_event_utc
+            SELECT model_id, commodity, settlement, actual_event_utc
             FROM coin_estimate_predictions
-            WHERE actual_event_utc IS NOT NULL
-            """
+            WHERE actual_event_utc IS NOT NULL AND actual_event_utc>=?
+            """,
+            (_iso(assigned_start),),
         ).fetchall()
     }
     residuals: list[dict[str, Any]] = []
-    reconnect_keys: set[tuple[str, str]] = set()
+    reconnect_keys: set[tuple[str, str, str]] = set()
 
     for row in pending:
         prediction_time = _parse(str(row["prediction_time_utc"]))
         actuals = _trusted_actuals(
-            connection,
+            actual_context,
             commodity=str(row["commodity"]),
             settlement=str(row["settlement"]),
             start=prediction_time,
@@ -428,10 +564,12 @@ def reconcile_predictions(
                 candidate
                 for candidate in actuals
                 if (
+                    str(row["model_id"]),
                     str(candidate["source_kind"]),
-                    int(candidate["id"]),
+                    str(candidate["id"]),
                 ) not in used_actual_ids
                 and (
+                    str(row["model_id"]),
                     str(row["commodity"]),
                     str(row["settlement"]),
                     str(candidate["event_time_utc"]),
@@ -447,10 +585,11 @@ def reconcile_predictions(
             and int(row["id"]) in reconnect_candidate_ids
         ):
             key = (str(row["commodity"]), str(row["settlement"]))
-            if key not in reconnect_keys:
+            reconnect_key = (str(row["model_id"]), *key)
+            if reconnect_key not in reconnect_keys:
                 reconnect_start = max(reconnect_at, prediction_time)
                 actuals = _trusted_actuals(
-                    connection,
+                    actual_context,
                     commodity=key[0],
                     settlement=key[1],
                     start=reconnect_start - timedelta(seconds=1),
@@ -461,10 +600,12 @@ def reconcile_predictions(
                         candidate
                         for candidate in actuals
                         if (
+                            str(row["model_id"]),
                             str(candidate["source_kind"]),
-                            int(candidate["id"]),
+                            str(candidate["id"]),
                         ) not in used_actual_ids
                         and (
+                            str(row["model_id"]),
                             key[0],
                             key[1],
                             str(candidate["event_time_utc"]),
@@ -475,7 +616,7 @@ def reconcile_predictions(
                 )
                 if actual is not None:
                     mode = "RECONNECT_BRIDGE"
-                    reconnect_keys.add(key)
+                    reconnect_keys.add(reconnect_key)
         if actual is None:
             continue
         predicted = _price(row["estimated_price_toman"])
@@ -497,17 +638,29 @@ def reconcile_predictions(
             """,
             (actual_price, _iso(actual_time), residual, _iso(now), mode, int(row["id"])),
         )
-        _update_state(
-            connection,
-            commodity=str(row["commodity"]),
-            settlement=str(row["settlement"]),
-            residual=residual,
-            actual_time=actual_time,
-            now=now,
+        if str(row["model_id"]) == learning_model_id:
+            _update_state(
+                connection,
+                commodity=str(row["commodity"]),
+                settlement=str(row["settlement"]),
+                residual=residual,
+                actual_time=actual_time,
+                now=now,
+            )
+        used_actual_ids.add(
+            (
+                str(row["model_id"]),
+                str(actual["source_kind"]),
+                str(actual["id"]),
+            )
         )
-        used_actual_ids.add((str(actual["source_kind"]), int(actual["id"])))
         assigned_actuals.add(
-            (str(row["commodity"]), str(row["settlement"]), str(actual["event_time_utc"]))
+            (
+                str(row["model_id"]),
+                str(row["commodity"]),
+                str(row["settlement"]),
+                str(actual["event_time_utc"]),
+            )
         )
         evaluated += 1
         if mode == "RECONNECT_BRIDGE":
@@ -516,6 +669,7 @@ def reconcile_predictions(
             {
                 "commodity": str(row["commodity"]),
                 "settlement": str(row["settlement"]),
+                "model_id": str(row["model_id"]),
                 "residual_ratio": residual,
                 "mode": mode,
             }
@@ -578,6 +732,53 @@ def apply_calibration(
         "residual_abs_mean": float(row[2]),
         "correction_ratio": correction,
         "last_actual_utc": row[3],
+    }
+
+
+def summarize_model_outcomes(
+    connection: sqlite3.Connection,
+    *,
+    as_of: datetime,
+    lookback_days: int = 7,
+) -> dict[str, dict[str, Any]]:
+    """Return bounded, comparable accuracy metrics for each forecast book."""
+
+    since = as_of.astimezone(timezone.utc) - timedelta(days=max(1, lookback_days))
+    rows = connection.execute(
+        """
+        SELECT
+            model_id,
+            MAX(model_version) AS model_version,
+            COUNT(*) AS sample_count,
+            AVG(ABS(residual_ratio)) AS mape_ratio,
+            AVG(residual_ratio) AS bias_ratio,
+            AVG(
+                CASE
+                    WHEN lower_price_toman IS NOT NULL AND upper_price_toman IS NOT NULL
+                     AND actual_price_toman BETWEEN lower_price_toman AND upper_price_toman
+                    THEN 1.0 ELSE 0.0
+                END
+            ) AS interval_coverage_ratio
+        FROM coin_estimate_predictions
+        WHERE actual_event_utc IS NOT NULL
+          AND residual_ratio IS NOT NULL
+          AND actual_event_utc>=?
+        GROUP BY model_id
+        ORDER BY model_id
+        """,
+        (_iso(since),),
+    ).fetchall()
+    return {
+        str(row["model_id"]): {
+            "model_version": row["model_version"],
+            "sample_count": int(row["sample_count"] or 0),
+            "mape_percent": float(row["mape_ratio"] or 0.0) * 100.0,
+            "bias_percent": float(row["bias_ratio"] or 0.0) * 100.0,
+            "interval_coverage_percent": float(row["interval_coverage_ratio"] or 0.0)
+            * 100.0,
+            "lookback_days": max(1, lookback_days),
+        }
+        for row in rows
     }
 
 
@@ -666,13 +867,13 @@ def apply_recent_realized_calibration(
         """
         SELECT actual_event_utc, residual_ratio
         FROM coin_estimate_predictions
-        WHERE commodity=? AND settlement=?
+        WHERE model_id=? AND commodity=? AND settlement=?
           AND actual_event_utc IS NOT NULL
           AND residual_ratio IS NOT NULL
           AND actual_event_utc>=? AND actual_event_utc<=?
         ORDER BY actual_event_utc, id
         """,
-        (commodity, settlement, _iso(since), _iso(as_of)),
+        (MAIN_MODEL_ID, commodity, settlement, _iso(since), _iso(as_of)),
     ).fetchall()
     by_actual: dict[str, list[float]] = {}
     for row in rows:

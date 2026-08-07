@@ -10,7 +10,7 @@ from copy import deepcopy
 from datetime import datetime, timezone
 import math
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from zoneinfo import ZoneInfo
 
 import os
@@ -45,6 +45,26 @@ _ARTIFACT_CACHE: dict[str, Any] = {
 }
 
 
+def _predict_small_batch(model: Any, vectors: list[list[float]]) -> Any:
+    """Predict a tiny live batch without waking every OpenMP worker.
+
+    HistGradientBoosting's default OpenMP fan-out is counterproductive for the
+    roughly dozen coin-rate rows in a snapshot: it consumes many CPU cores for
+    a sub-millisecond numerical task.  Limit only this inference call to one
+    worker.  Training remains unconstrained and an unavailable optional
+    dependency simply falls back to sklearn's normal behaviour.
+    """
+
+    if not vectors:
+        return []
+    try:
+        from threadpoolctl import threadpool_limits
+    except ImportError:
+        return model.predict(vectors)
+    with threadpool_limits(limits=1, user_api="openmp"):
+        return model.predict(vectors)
+
+
 def _load_artifact(path: Path) -> dict[str, Any]:
     """Cache the joblib artifact across refresh cycles."""
 
@@ -62,6 +82,14 @@ def _load_artifact(path: Path) -> dict[str, Any]:
     artifact = joblib.load(path)
     if not isinstance(artifact, dict) or "sklearn_model" not in artifact:
         raise ValueError("invalid_ml_artifact")
+    feature_keys = artifact.get("feature_keys")
+    if not isinstance(feature_keys, (list, tuple)) or not feature_keys or not all(
+        isinstance(key, str) and key for key in feature_keys
+    ):
+        raise ValueError("invalid_ml_artifact_feature_keys")
+    expected = getattr(artifact["sklearn_model"], "n_features_in_", None)
+    if expected is not None and int(expected) != len(feature_keys):
+        raise ValueError("ml_artifact_feature_count_mismatch")
     _ARTIFACT_CACHE["path"] = str(path)
     _ARTIFACT_CACHE["mtime_ns"] = stat.st_mtime_ns
     _ARTIFACT_CACHE["artifact"] = artifact
@@ -97,11 +125,20 @@ def feature_vector(
     rate: dict[str, Any],
     inputs: dict[str, Any],
     end: datetime,
+    feature_schema_version: str | None = None,
 ) -> list[float]:
     """Build the same feature layout used at training time."""
 
     names = sorted(COMMODITY_SPECS)
     local = end.astimezone(TEHRAN)
+    minute_of_day = local.hour * 60 + local.minute
+    hour_fraction = minute_of_day / 60.0
+    minute_schema = feature_schema_version == "STRUCTURAL_MINUTE_V3"
+    is_morning_open = (
+        9 * 60 + 45 <= minute_of_day < 11 * 60
+        if minute_schema
+        else 8 <= local.hour < 11
+    )
     melted = inputs.get("melted_gold") if isinstance(inputs.get("melted_gold"), dict) else {}
     usd = inputs.get("usd") if isinstance(inputs.get("usd"), dict) else {}
     usdt = inputs.get("usdt") if isinstance(inputs.get("usdt"), dict) else {}
@@ -151,12 +188,23 @@ def feature_vector(
             rate.get("market_regime_confidence"), _f(regime.get("confidence"))
         ),
         "source_confidence": _f(rate.get("confidence"), 1.0),
+        # A rate-level live estimate does not carry a trustworthy order size.
+        # Training uses the same neutral value so this feature cannot skew.
         "quantity": 1.0,
         "tehran_weekday": float(local.weekday()),
-        "tehran_hour": float(local.hour),
-        "hour_sin": math.sin(2.0 * math.pi * local.hour / 24.0),
-        "hour_cos": math.cos(2.0 * math.pi * local.hour / 24.0),
-        "is_morning_open": 1.0 if 8 <= local.hour < 11 else 0.0,
+        # Retain the v2 layout for the currently approved artifact.  V3 adds
+        # minute precision and is selected only through an explicit artifact
+        # schema marker, so a source deployment cannot silently corrupt an
+        # older shadow's feature meaning.
+        "tehran_hour": hour_fraction if minute_schema else float(local.hour),
+        "tehran_minute_of_day": float(minute_of_day),
+        "hour_sin": math.sin(
+            2.0 * math.pi * (hour_fraction if minute_schema else local.hour) / 24.0
+        ),
+        "hour_cos": math.cos(
+            2.0 * math.pi * (hour_fraction if minute_schema else local.hour) / 24.0
+        ),
+        "is_morning_open": 1.0 if is_morning_open else 0.0,
         "commodity_code": float(
             names.index(commodity_name) if commodity_name in names else -1
         ),
@@ -191,6 +239,7 @@ def apply_ml_residual_to_estimate(
     shadow["ml_residual_shadow"] = {
         "enabled": True,
         "shadow_version": artifact.get("shadow_version"),
+        "feature_schema_version": artifact.get("feature_schema_version") or "LEGACY_V2",
         "target_mode": mode,
         "max_abs_relative_correction": max_abs_rel,
         "prediction_shrink": shrink,
@@ -220,11 +269,12 @@ def apply_ml_residual_to_estimate(
                 rate=rate,
                 inputs=inputs,
                 end=end,
+                feature_schema_version=artifact.get("feature_schema_version"),
             )
             candidates.append((rate, vector))
 
-    raw_predictions = (
-        model.predict([vector for _, vector in candidates]) if candidates else []
+    raw_predictions = _predict_small_batch(
+        model, [vector for _, vector in candidates]
     )
     for (rate, _vector), prediction in zip(candidates, raw_predictions):
         raw = float(prediction) * shrink
@@ -237,7 +287,9 @@ def apply_ml_residual_to_estimate(
             correction_abs = max(-max_abs_abs, min(max_abs_abs, raw))
             corrected = base + correction_abs
             correction_rel = correction_abs / max(abs(base), 1.0)
-        corrected_int = int(round(corrected))
+        # Project units are thousand toman; the published book uses 50,000
+        # toman increments, therefore round the shadow to 50 project units.
+        corrected_int = int(round(corrected / 50.0) * 50)
         rate["estimated_project_price"] = corrected_int
         if rate.get("estimated_price_toman") is not None:
             # Keep toman display aligned with project units used by live book.
@@ -245,6 +297,38 @@ def apply_ml_residual_to_estimate(
                 live_estimate.get("project_price_multiplier_to_toman") or 1000.0
             )
             rate["estimated_price_toman"] = int(round(corrected_int * multiplier))
+        # In the estimator contract the interval belongs to the nested
+        # ``tolerance`` object.  Keep its centre-relative movement aligned
+        # with the ML shadow while retaining the original boundaries too:
+        # a challenger must never claim more certainty than the structural
+        # estimate.  The two top-level keys are retained only for legacy
+        # callers/tests that still provide the old shape.
+        tolerance = rate.get("tolerance")
+        if isinstance(tolerance, dict):
+            lower = _f(tolerance.get("lower_price_toman"))
+            upper = _f(tolerance.get("upper_price_toman"))
+            if math.isfinite(lower) and math.isfinite(upper):
+                if mode == "relative":
+                    shifted_lower = lower * (1.0 + correction_rel)
+                    shifted_upper = upper * (1.0 + correction_rel)
+                else:
+                    multiplier = float(
+                        live_estimate.get("project_price_multiplier_to_toman")
+                        or 1000.0
+                    )
+                    shifted_lower = lower + correction_abs * multiplier
+                    shifted_upper = upper + correction_abs * multiplier
+                tolerance["lower_price_toman"] = int(round(min(lower, shifted_lower)))
+                tolerance["upper_price_toman"] = int(round(max(upper, shifted_upper)))
+                multiplier = float(
+                    live_estimate.get("project_price_multiplier_to_toman") or 1000.0
+                )
+                tolerance["lower_project_price"] = int(
+                    round(tolerance["lower_price_toman"] / multiplier)
+                )
+                tolerance["upper_project_price"] = int(
+                    round(tolerance["upper_price_toman"] / multiplier)
+                )
         for band_key in ("lower_project_price", "upper_project_price"):
             band = rate.get(band_key)
             if band is None:
@@ -269,6 +353,8 @@ def run_ml_residual_shadow(
     end: datetime,
     artifact_path: Path | None = None,
     shadow_state_path: Path | None = None,
+    comparison_estimate: dict[str, Any] | None = None,
+    finalize_book: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Fail-closed ML residual shadow on the identical live estimate payload."""
 
@@ -291,7 +377,8 @@ def run_ml_residual_shadow(
         shadow_estimate = apply_ml_residual_to_estimate(
             live_estimate, artifact, end=end
         )
-        comparison = compare_centers(live_estimate, shadow_estimate)
+        finalization = finalize_book(shadow_estimate) if finalize_book else None
+        comparison = compare_centers(comparison_estimate or live_estimate, shadow_estimate)
         payload = {
             "enabled": True,
             "status": "OK",
@@ -304,7 +391,9 @@ def run_ml_residual_shadow(
                 "paired_estimated_count": comparison["paired_estimated_count"],
                 "mean_abs_pct": comparison["mean_abs_pct"],
                 "median_abs_pct": comparison["median_abs_pct"],
+                "mean_signed_pct": comparison["mean_signed_pct"],
             },
+            "deterministic_finalization": finalization,
             "estimate": shadow_estimate,
             "pair_details": comparison["pairs"],
             "label": "سایه ۳ — مدل یادگیری ماشین",
@@ -316,10 +405,17 @@ def run_ml_residual_shadow(
                 "status": "OK",
                 "comparison_vs_live": payload["comparison_vs_live"],
                 "shadow_version": artifact.get("shadow_version"),
+                "estimate": shadow_estimate,
             }
         )
         return meta
     except Exception as exc:  # fail-closed
-        meta.update({"status": "FAILED", "error": type(exc).__name__})
+        meta.update(
+            {
+                "status": "FAILED",
+                "error": type(exc).__name__,
+                "error_detail": str(exc)[:300],
+            }
+        )
         write_json_atomic(state_path, meta, mode=0o644)
         return meta
