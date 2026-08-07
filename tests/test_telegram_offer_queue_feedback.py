@@ -145,6 +145,27 @@ class TelegramOfferQueueFeedbackTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(mark_success.call_args.kwargs["chat_id"], -100)
         self.db.flush.assert_awaited_once()
 
+    async def test_missing_offer_superseded_freshness_needs_no_domain_row(self):
+        job = make_job(TelegramDeliveryAction.OFFER_PUBLISH)
+        decision = TelegramFreshnessDecision(
+            TelegramFreshnessOutcome.SUPERSEDED,
+            reason="offer_freshness_source_missing",
+        )
+        with patch.object(
+            feedback_module,
+            "_load_offer_and_state_for_update",
+            new=self.load,
+        ):
+            await self.feedback.apply_freshness(
+                self.db,
+                job,
+                decision,
+                utc_now(),
+            )
+
+        self.load.assert_not_awaited()
+        self.db.flush.assert_not_awaited()
+
     async def test_publish_success_without_message_id_rolls_back_feedback(self):
         job = make_job(TelegramDeliveryAction.OFFER_PUBLISH)
         decision = TelegramDeliveryDecision(TelegramDeliveryOutcome.SENT)

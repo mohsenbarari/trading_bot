@@ -171,7 +171,7 @@ class TelegramDeliveryJobSchemaTests(unittest.TestCase):
         )
         self.assertEqual(
             fields["telegram_delivery_queue_destination_min_interval_seconds"].default,
-            0.8,
+            0.9,
         )
         self.assertEqual(
             fields["telegram_delivery_queue_destination_burst_capacity"].default,

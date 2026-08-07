@@ -155,7 +155,7 @@ class CombinedMatrixManifestTests(unittest.TestCase):
             wave_timeout_seconds=5400.0,
         )
         limits = runner._effective_wave_limits(args, expected_valid=4000)
-        self.assertEqual(limits["channel_base_interval_seconds"], 0.8)
+        self.assertEqual(limits["channel_base_interval_seconds"], 0.9)
         self.assertEqual(limits["channel_idle_burst_capacity"], 2)
         self.assertGreater(limits["effective_offer_expiry_minutes"], 120)
         self.assertGreater(limits["effective_wave_timeout_seconds"], 10_000)

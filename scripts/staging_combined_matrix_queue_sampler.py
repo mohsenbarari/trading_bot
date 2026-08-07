@@ -15,7 +15,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from sqlalchemy import Text, cast, func, or_, select
+from sqlalchemy import Text, and_, cast, func, or_, select
 
 from core.config import settings
 from core.db import AsyncSessionLocal
@@ -45,6 +45,26 @@ def _percentile(sorted_values: list[float], pct: float) -> float | None:
     high = min(low + 1, len(sorted_values) - 1)
     weight = rank - low
     return round(sorted_values[low] * (1.0 - weight) + sorted_values[high] * weight, 3)
+
+
+_PREFIX_BOUNDARIES = ("_", ":", "-", " ")
+
+
+def _notes_match_run_prefix(notes_column, prefix: str):
+    """Match offer notes that start with ``prefix`` at a path boundary.
+
+    ``CMB_FOO`` must not match notes for ``CMB_FOO_AG`` / other child lanes.
+    """
+
+    notes = func.coalesce(notes_column, "")
+    prefix_len = len(prefix)
+    return and_(
+        func.left(notes, prefix_len) == prefix,
+        or_(
+            func.length(notes) == prefix_len,
+            func.substr(notes, prefix_len + 1, 1).in_(_PREFIX_BOUNDARIES),
+        ),
+    )
 
 
 def _aware(value: datetime) -> datetime:
@@ -199,7 +219,7 @@ async def _sample(
                 await session.execute(
                     select(Offer.id, Offer.offer_public_id).where(
                             Offer.offer_public_id.is_not(None),
-                            func.left(func.coalesce(Offer.notes, ""), len(prefix)) == prefix,
+                            _notes_match_run_prefix(Offer.notes, prefix),
                     )
                 )
             ).all()

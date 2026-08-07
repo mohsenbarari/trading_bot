@@ -743,7 +743,7 @@ class RedisTelegramDeliveryLimiter:
 
         Telegram may delay channel edits for several seconds without returning
         429. This signal suppresses the next micro-burst and extends only the
-        affected destination gate; ordinary 0.8-second pacing resumes after the
+        affected destination gate; ordinary 0.9-second pacing resumes after the
         short slowdown.
         """
 
@@ -947,7 +947,7 @@ def configured_redis_telegram_delivery_limiter(
             getattr(
                 settings,
                 "telegram_delivery_queue_destination_min_interval_seconds",
-                1.05,
+                0.9,
             )
         ),
         rate_limit_probe_delay_seconds=float(

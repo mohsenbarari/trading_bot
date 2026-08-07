@@ -99,12 +99,12 @@ class Settings(BaseSettings):
     trade_delivery_worker_lease_seconds: int = 30
     trade_delivery_worker_recover_limit: int = 100
     offer_publication_worker_interval_seconds: float = 1.0
-    # Legacy fallback follows the same 0.8s staging calibration as QUEUE_V1.
+    # Legacy fallback follows the same 0.9s staging calibration as QUEUE_V1.
     # Exact channel capacity is learned from provider responses, not a 20/min
     # group-limit assumption.
     offer_publication_worker_batch_limit: int = 30
-    offer_publication_worker_channel_edit_spacing_seconds: float = 0.8
-    offer_publication_worker_channel_send_spacing_seconds: float = 0.8
+    offer_publication_worker_channel_edit_spacing_seconds: float = 0.9
+    offer_publication_worker_channel_send_spacing_seconds: float = 0.9
     # Any due publication item is treated as busy so the worker starts the next
     # cycle immediately after a burst (pacing is owned by telegram_channel_pace).
     offer_publication_worker_busy_backlog_due: int = 1
@@ -153,10 +153,10 @@ class Settings(BaseSettings):
     telegram_delivery_queue_retry_base_seconds: float = 1.0
     telegram_delivery_queue_retry_max_seconds: float = 300.0
     telegram_delivery_queue_retry_jitter_ratio: float = 0.2
-    # Global bot cadence covers different destinations (~28.6/s); the 0.8s
+    # Global bot cadence covers different destinations (~28.6/s); the 0.9s
     # calibration belongs to the per-destination channel gate below.
     telegram_delivery_queue_bot_min_interval_seconds: float = 0.035
-    telegram_delivery_queue_destination_min_interval_seconds: float = 0.8
+    telegram_delivery_queue_destination_min_interval_seconds: float = 0.9
     # A micro-burst is earned only after destination idle time and is serialized
     # (never multiple provider requests in flight for one channel).
     telegram_delivery_queue_destination_burst_capacity: int = 2

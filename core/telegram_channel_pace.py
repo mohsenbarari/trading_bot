@@ -1,6 +1,6 @@
 """In-process fallback pacing for legacy Telegram channel publication.
 
-The staging calibration baseline is one operation every 0.8 seconds. A tiny
+The staging calibration baseline is one operation every 0.9 seconds. A tiny
 idle-earned burst is allowed, while HTTP 429 books the full ``retry_after`` as
 debt. Exact channel limits are dynamic; the durable QUEUE_V1 Redis limiter is
 the production cadence authority.
@@ -70,11 +70,11 @@ class TelegramChannelPace:
         return None
 
 
-OFFER_CHANNEL_BASE_INTERVAL_SECONDS = 0.8
+OFFER_CHANNEL_BASE_INTERVAL_SECONDS = 0.9
 OFFER_CHANNEL_IDLE_BURST_CAPACITY = 2.0
 
 # Legacy-only fallback. Two immediate operations after idle are deliberately a
-# micro-burst; sustained work returns to the calibrated 0.8-second cadence.
+# micro-burst; sustained work returns to the calibrated 0.9-second cadence.
 OFFER_CHANNEL_PACE = TelegramChannelPace(
     rate_per_minute=60.0 / OFFER_CHANNEL_BASE_INTERVAL_SECONDS,
     capacity=OFFER_CHANNEL_IDLE_BURST_CAPACITY,

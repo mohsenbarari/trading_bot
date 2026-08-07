@@ -24,10 +24,10 @@ class TelegramChannelPaceTests(unittest.TestCase):
         pace.note_rate_limited()
         self.assertGreater(pace.wait_seconds_before_send(), 2.0)
 
-    def test_legacy_fallback_matches_point_eight_second_calibration(self):
-        self.assertEqual(OFFER_CHANNEL_BASE_INTERVAL_SECONDS, 0.8)
+    def test_legacy_fallback_matches_zero_point_nine_second_calibration(self):
+        self.assertEqual(OFFER_CHANNEL_BASE_INTERVAL_SECONDS, 0.9)
         self.assertEqual(OFFER_CHANNEL_IDLE_BURST_CAPACITY, 2.0)
-        self.assertEqual(OFFER_CHANNEL_PACE.rate_per_minute, 75.0)
+        self.assertAlmostEqual(OFFER_CHANNEL_PACE.rate_per_minute, 60.0 / 0.9)
         self.assertEqual(OFFER_CHANNEL_PACE.capacity, 2.0)
 
 

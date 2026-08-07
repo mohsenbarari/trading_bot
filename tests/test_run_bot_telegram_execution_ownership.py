@@ -32,7 +32,7 @@ class BotTelegramExecutionOwnershipTests(unittest.TestCase):
             "telegram_delivery_queue_channel_editor_enabled": False,
             "telegram_delivery_queue_channel_editor_bot_token": None,
             "telegram_delivery_queue_bot_min_interval_seconds": 0.035,
-            "telegram_delivery_queue_destination_min_interval_seconds": 1.05,
+            "telegram_delivery_queue_destination_min_interval_seconds": 0.9,
             "telegram_delivery_queue_rate_limit_probe_delay_seconds": 0.1,
             "telegram_delivery_queue_global_rate_limit_window_seconds": 2.0,
             "telegram_delivery_queue_worker_lease_seconds": 30.0,

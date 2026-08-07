@@ -368,7 +368,7 @@ async def run_offer_telegram_publication_cycle(
                 error_message="publication_burst_rate_limit_brake",
             )
         # Legacy fallback pace: a two-operation idle burst, then the calibrated
-        # 0.8-second cadence. QUEUE_V1 owns the durable Redis cadence in normal
+        # 0.9-second cadence. QUEUE_V1 owns the durable Redis cadence in normal
         # staging/production operation.
         wait_seconds = OFFER_CHANNEL_PACE.wait_seconds_before_send()
         if wait_seconds > 0:

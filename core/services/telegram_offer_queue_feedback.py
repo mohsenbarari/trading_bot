@@ -6,6 +6,7 @@ from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from core.config import settings
 from core.server_routing import current_server
@@ -115,6 +116,7 @@ async def _load_offer_and_state_for_update(
     offer = (
         await db.execute(
             select(Offer)
+            .options(selectinload(Offer.commodity))
             .where(Offer.offer_public_id == offer_public_id)
             .with_for_update()
         )
@@ -231,6 +233,14 @@ class TelegramOfferQueueLifecycleFeedback:
             TelegramFreshnessOutcome.WAIT_DEPENDENCY,
             TelegramFreshnessOutcome.QUARANTINED,
         }:
+            return
+        if (
+            outcome == TelegramFreshnessOutcome.SUPERSEDED
+            and reason == "offer_freshness_source_missing"
+        ):
+            # The immutable queue job is authoritative evidence after the offer
+            # itself has been cleaned up. There is no domain row left to update;
+            # the queue service can safely terminalize the stale job.
             return
 
         offer, state = await _load_offer_and_state_for_update(db, job=job)

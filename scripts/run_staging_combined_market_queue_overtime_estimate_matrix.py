@@ -59,7 +59,7 @@ DRIVER_SCRIPTS = (
 )
 
 WAVE_PROFILES = ("burst", "realtime-30m")
-CHANNEL_BASE_INTERVAL_SECONDS = 0.8
+CHANNEL_BASE_INTERVAL_SECONDS = 0.9
 CHANNEL_IDLE_BURST_CAPACITY = 2
 
 
@@ -441,6 +441,61 @@ def run_preflight(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
             "name": "release_sha",
             "status": "passed" if expected == head else "failed",
             "detail": {"expected": expected, "head": head},
+        }
+    )
+    execution_owner = str(
+        os.getenv("TELEGRAM_DELIVERY_EXECUTION_OWNER", "legacy")
+    ).strip().lower()
+    producer_owner = str(
+        os.getenv("TELEGRAM_DELIVERY_PRODUCER_MODE", execution_owner)
+    ).strip().lower()
+    expected_owner = str(
+        os.getenv("TELEGRAM_DELIVERY_EXPECTED_EXECUTION_OWNER", execution_owner)
+    ).strip().lower()
+    queue_worker_enabled = str(
+        os.getenv("TELEGRAM_DELIVERY_QUEUE_WORKER_ENABLED", "false")
+    ).strip().lower() in {"1", "true", "yes", "on"}
+    queue_cutover_ready = str(
+        os.getenv("TELEGRAM_DELIVERY_QUEUE_CUTOVER_READY", "false")
+    ).strip().lower() in {"1", "true", "yes", "on"}
+    expected_primary_bot_id = str(
+        os.getenv("TELEGRAM_DELIVERY_QUEUE_EXPECTED_PRIMARY_BOT_ID", "")
+    ).strip()
+    destination_interval = float(
+        os.getenv(
+            "TELEGRAM_DELIVERY_QUEUE_DESTINATION_MIN_INTERVAL_SECONDS",
+            "0.9",
+        )
+    )
+    queue_runtime_ok = (
+        execution_owner == "queue-v1"
+        and producer_owner == "queue-v1"
+        and expected_owner == "queue-v1"
+        and queue_worker_enabled
+        and queue_cutover_ready
+        and expected_primary_bot_id.isdigit()
+        and int(expected_primary_bot_id) > 0
+        and destination_interval >= CHANNEL_BASE_INTERVAL_SECONDS
+    )
+    checks.append(
+        {
+            "name": "telegram_queue_runtime",
+            "status": "passed" if queue_runtime_ok else "failed",
+            "detail": {
+                "execution_owner": execution_owner,
+                "producer_owner": producer_owner,
+                "expected_owner": expected_owner,
+                "queue_worker_enabled": queue_worker_enabled,
+                "queue_cutover_ready": queue_cutover_ready,
+                "expected_primary_bot_id_configured": bool(
+                    expected_primary_bot_id.isdigit()
+                    and int(expected_primary_bot_id) > 0
+                ),
+                "destination_min_interval_seconds": destination_interval,
+                "required_destination_min_interval_seconds": (
+                    CHANNEL_BASE_INTERVAL_SECONDS
+                ),
+            },
         }
     )
     checks.append(
@@ -1817,9 +1872,15 @@ def run_execute(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
         return {"summary": summary, "lanes": lanes}, 1
 
     # Market drivers first: S2FM execute re-checks parity, so run them while the
-    # topology is still clean after combined preflight. Wave/OT churn afterward.
+    # topology is still clean after combined preflight.
     market = run_market_drivers(args, artifact_dir)
     lanes["market"] = market
+
+    # Queue wave before actor-guards: guards create prefix-scoped offers/notes
+    # (``{run_prefix}_AG``) that would falsely dirty the wave baseline sampler.
+    wave = run_wave(args, preflight["manifest"], artifact_dir)
+    lanes["queue_wave"] = wave
+    write_json(artifact_dir / "lane-queue-wave.json", wave)
 
     # Actor/terminal guards: tier1 success + tier2/reject negatives (Iran home).
     actor_guards, actor_code = _container_python(
@@ -1835,10 +1896,6 @@ def run_execute(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
         "returncode": actor_code,
         "payload": actor_guards,
     }
-
-    wave = run_wave(args, preflight["manifest"], artifact_dir)
-    lanes["queue_wave"] = wave
-    write_json(artifact_dir / "lane-queue-wave.json", wave)
 
     estimate = run_estimate_hooks(args, artifact_dir)
     lanes["estimate"] = estimate
@@ -2007,7 +2064,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=0,
         help=(
             "Minimum temporary offer lifetime. Zero selects a safe value derived "
-            "from selected events, the 0.8s cadence, and the micro-burst size."
+            "from selected events, the 0.9s cadence, and the micro-burst size."
         ),
     )
     parser.add_argument(
@@ -2062,7 +2119,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--snapshot-container-path", default=DEFAULT_SNAPSHOT_CONTAINER)
     args = parser.parse_args(argv)
     if args.run_prefix is None:
-        args.run_prefix = f"CMB_{args.run_id.replace('-', '')}"
+        # Keep one CMB_ head even when --run-id already starts with CMB-...
+        rid = str(args.run_id).strip().replace("-", "_")
+        if rid.startswith("CMB_"):
+            args.run_prefix = rid
+        elif rid.startswith("CMB"):
+            args.run_prefix = f"CMB_{rid[3:].lstrip('_')}"
+        else:
+            args.run_prefix = f"CMB_{rid}"
     if not str(args.run_prefix).startswith("CMB_"):
         raise SystemExit("run prefix must start with CMB_")
     if args.artifact_dir is None:

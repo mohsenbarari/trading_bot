@@ -55,7 +55,7 @@ def _limiter(redis):
     return RedisTelegramDeliveryLimiter(
         redis=redis,
         bot_min_interval_seconds=0.035,
-        destination_min_interval_seconds=1.05,
+        destination_min_interval_seconds=0.9,
         rate_limit_probe_delay_seconds=0.1,
         global_rate_limit_window_seconds=2.0,
         rate_limit_probe_lease_seconds=30.0,
@@ -389,7 +389,7 @@ class TelegramDeliveryQueueLimiterTests(unittest.IsolatedAsyncioTestCase):
             values = {
                 "redis": _FakeRedis(),
                 "bot_min_interval_seconds": 0.035,
-                "destination_min_interval_seconds": 1.05,
+                "destination_min_interval_seconds": 0.9,
                 "rate_limit_probe_delay_seconds": 0.1,
                 "global_rate_limit_window_seconds": 2.0,
                 "rate_limit_probe_lease_seconds": 30.0,

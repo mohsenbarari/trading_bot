@@ -1484,8 +1484,7 @@ async def _telegram_delivery_queue_lane_slot_loop(
             except Exception as exc:
                 _loop_errors.log(
                     logger,
-                    "Error in Telegram delivery lane %s: %s",
-                    lane.bot_identity,
+                    "Error in Telegram delivery lane: %s",
                     exc,
                     job_name=JOB_TELEGRAM_DELIVERY_QUEUE,
                     bot_role=lane.bot_identity,
@@ -2009,10 +2008,12 @@ async def _telegram_delivery_deferred_lane_activation_loop(
         except Exception as exc:
             logger.warning(
                 "Telegram delivery lane activation failed; keeping lane deferred",
+                exc_info=True,
                 extra={
                     "event": "telegram_delivery_queue_lane.activation_retry",
                     "bot_role": lane.bot_identity,
                     "error_class": type(exc).__name__,
+                    "error_detail": str(exc)[:200],
                     "retry_delay_seconds": retry_delay,
                 },
             )
