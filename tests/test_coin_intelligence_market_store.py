@@ -104,7 +104,7 @@ class MarketStoreContractTests(unittest.TestCase):
         ):
             _observation(
                 instrument="MELTED_GOLD_FLOW",
-                price_unit="IRT_PER_GRAM_750",
+                price_unit="TOMAN_PER_GRAM_750",
             ).normalized()
         with self.assertRaisesRegex(
             MarketStoreContractError,
@@ -131,7 +131,7 @@ class MarketStoreContractTests(unittest.TestCase):
                 event_type="REFERENCE",
                 side="MID",
                 price="895000",
-                price_unit="IRT_PER_USD",
+                price_unit="TOMAN_PER_USD",
                 quantity=None,
                 quantity_unit=None,
             ),
@@ -276,7 +276,7 @@ class LegacyMarketStoreUpgradeTests(unittest.TestCase):
             """
             INSERT INTO external_instruments(
                 code, source, normalized_currency, normalized_unit
-            ) VALUES ('USD_HERAT', 'HERAT_FEED', 'IRT', 'IRT_PER_USD')
+            ) VALUES ('USD_HERAT', 'HERAT_FEED', 'TOMAN', 'TOMAN_PER_USD')
             """
         )
         connection.execute(

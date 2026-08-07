@@ -46,6 +46,8 @@ from coin_estimator import (  # noqa: E402
     DEFAULT_MODEL,
     COMMODITY_SPECS,
     NO_DATA_TOKEN,
+    apply_low_date_family_band_separation,
+    enforce_cash_tomorrow_term_structure,
     estimate_rates,
     iso_utc,
     load_model,
@@ -83,10 +85,53 @@ from online_recalibration import (  # noqa: E402
     reconcile_predictions,
     record_predictions,
 )
+from shadow_parallel import run_shadow_parallel  # noqa: E402
+from ml_residual_shadow import (  # noqa: E402
+    DEFAULT_ML_ARTIFACT,
+    DEFAULT_ML_SHADOW_STATE,
+    run_ml_residual_shadow,
+)
+from shadow_cross_calibration import maybe_run_shadow_cross_calibration  # noqa: E402
 
 
 TEHRAN = ZoneInfo("Asia/Tehran")
 DEFAULT_STATE = RUNTIME_ROOT / "state.json"
+DEFAULT_SHADOW_MODEL = Path(
+    os.environ.get(
+        "COIN_RATE_ESTIMATOR_SHADOW_MODEL",
+        str(RUNTIME_ROOT / "model.main-candidate.slim.json"),
+    )
+)
+DEFAULT_SHADOW_STATE = Path(
+    os.environ.get(
+        "COIN_RATE_ESTIMATOR_SHADOW_STATE",
+        str(RUNTIME_ROOT / "state.shadow.json"),
+    )
+)
+DEFAULT_RESEARCH_SHADOW_MODEL = Path(
+    os.environ.get(
+        "COIN_RATE_ESTIMATOR_MORNING_REOPEN_SHADOW_MODEL",
+        str(RUNTIME_ROOT / "model.morning-reopen.candidate.json"),
+    )
+)
+DEFAULT_RESEARCH_SHADOW_STATE = Path(
+    os.environ.get(
+        "COIN_RATE_ESTIMATOR_MORNING_REOPEN_SHADOW_STATE",
+        str(RUNTIME_ROOT / "state.morning-reopen.shadow.json"),
+    )
+)
+DEFAULT_ML_SHADOW_MODEL = Path(
+    os.environ.get(
+        "COIN_RATE_ESTIMATOR_ML_SHADOW_MODEL",
+        str(DEFAULT_ML_ARTIFACT),
+    )
+)
+DEFAULT_ML_SHADOW_STATE_PATH = Path(
+    os.environ.get(
+        "COIN_RATE_ESTIMATOR_ML_SHADOW_STATE",
+        str(DEFAULT_ML_SHADOW_STATE),
+    )
+)
 DEFAULT_WRITE_TOKEN_FILE = RUNTIME_ROOT / "manual-entry.token"
 DEFAULT_GROUP_LIVE_CONTROL = RUNTIME_ROOT / "group-live-input-control.json"
 DEFAULT_DASHBOARD_CREDENTIALS_FILE = RUNTIME_ROOT / "dashboard-credentials.json"
@@ -227,6 +272,35 @@ def normalize_integer(value: str, *, field: str, required: bool = True) -> int |
     return number
 
 
+def normalize_project_toman_price(
+    value: str, *, field: str, required: bool = True
+) -> int | None:
+    """Accept only project-thousand-toman fields (UI label: تومان)."""
+
+    number = normalize_integer(value, field=field, required=required)
+    if number is None:
+        return None
+    try:
+        from core.market_intelligence.price_magnitude_policy import (
+            PriceUnitPolicyError,
+            assert_project_toman_field,
+        )
+
+        return assert_project_toman_field(number, field=field)
+    except PriceUnitPolicyError as exc:
+        code = str(exc)
+        if "full_toman" in code:
+            raise ValueError(
+                f"{field} نباید به تومان کامل باشد؛ واحد مجاز همان عدد پروژه‌ای "
+                "(مثلاً ۱۸۵۰۰۰) است."
+            ) from exc
+        if "rial" in code:
+            raise ValueError(
+                f"{field} شبیه ریال است؛ فقط تومان با واحد پروژه‌ای مجاز است."
+            ) from exc
+        raise ValueError(f"{field} خارج از محدودهٔ مجاز تومان است.") from exc
+
+
 def parse_tehran_form_datetime(value: str, *, field: str) -> datetime:
     normalized = value.translate(PERSIAN_DIGITS).strip().replace("/", "-")
     if not normalized:
@@ -275,7 +349,7 @@ def insert_manual_entry(conversation_db: Path, form: dict[str, str]) -> dict[str
     side = form.get("side", "")
     if side not in {"BUY", "SELL"}:
         raise ValueError("سمت آفر معتبر نیست.")
-    price = normalize_integer(form.get("price", ""), field="قیمت آفر")
+    price = normalize_project_toman_price(form.get("price", ""), field="قیمت آفر")
     quantity = normalize_integer(form.get("quantity", ""), field="تعداد آفر", required=False)
     description = form.get("description", "").strip()
     # The clock embedded by the operator is input metadata, not part of a
@@ -306,7 +380,7 @@ def insert_manual_entry(conversation_db: Path, form: dict[str, str]) -> dict[str
             raise ValueError("زمان معامله نمی‌تواند قبل از زمان آفر باشد.")
         if trade_time > now + timedelta(minutes=2):
             raise ValueError("زمان معامله نمی‌تواند بیش از دو دقیقه در آینده باشد.")
-        trade_price = normalize_integer(
+        trade_price = normalize_project_toman_price(
             form.get("trade_price", ""), field="قیمت معامله", required=False
         ) or price
         trade_quantity = normalize_integer(
@@ -607,6 +681,9 @@ CONFIDENCE_FA = {
     "NONE": "بدون اطمینان",
     "HIGH_OBSERVED_TRADE": "بالا؛ معامله مشاهده‌شده",
     "MEDIUM_OBSERVED_BOOK": "متوسط؛ محدوده دفتر آفر",
+    "MEDIUM_MORNING_REOPEN": "متوسط؛ رژیم بازگشایی صبح",
+    "HIGH_FRESH_GROUP_TRANSFER": "بالا؛ انتقال تازه از گروه",
+    "LOW_STALE_GROUP_TRANSFER": "پایین؛ انتقال کهنه از گروه",
 }
 
 SETTLEMENT_FA = {"CASH": "نقدی", "TOMORROW": "فردایی"}
@@ -671,10 +748,17 @@ def render_combined_rate_rows(settlements: dict[str, dict[str, Any]]) -> str:
         if not rate or str(rate.get("status")) != "ESTIMATED":
             return f"<span class='missing'>{NO_DATA_TOKEN}</span>"
         tolerance = rate.get("tolerance") or {}
+        method = str(rate.get("method") or "")
+        reopen_badge = (
+            "<small style='color:#a5b4fc'>رژیم بازگشایی</small>"
+            if "MORNING_REOPEN" in method
+            else ""
+        )
         return (
             f"<strong>{fa_number(rate.get('estimated_project_price'))}</strong>"
             f"<small>{fa_number(tolerance.get('lower_project_price'))} تا "
             f"{fa_number(tolerance.get('upper_project_price'))}</small>"
+            f"{reopen_badge}"
         )
 
     return "".join(
@@ -1746,6 +1830,512 @@ input[type="text"]:focus, input[type="password"]:focus {{
     return document.encode("utf-8")
 
 
+def load_shadow_dashboard_payload(shadow_state_path: Path | None = None) -> dict[str, Any]:
+    """Read the isolated parallel-shadow state for the operator dashboard."""
+
+    path = shadow_state_path or DEFAULT_SHADOW_STATE
+    if not path.is_file():
+        return {
+            "enabled": False,
+            "status": "MISSING",
+            "estimate": {},
+            "comparison_vs_live": {},
+            "pair_details": [],
+            "shadow_model_path": str(path),
+        }
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        return {
+            "enabled": False,
+            "status": "UNREADABLE",
+            "estimate": {},
+            "comparison_vs_live": {},
+            "pair_details": [],
+            "shadow_model_path": str(path),
+        }
+    if not isinstance(payload, dict):
+        return {
+            "enabled": False,
+            "status": "INVALID",
+            "estimate": {},
+            "comparison_vs_live": {},
+            "pair_details": [],
+            "shadow_model_path": str(path),
+        }
+    return payload
+
+
+def render_shadow_compare_rows(pair_details: list[dict[str, Any]]) -> str:
+    if not pair_details:
+        return f"<tr><td colspan='5' class='missing'>{NO_DATA_TOKEN}</td></tr>"
+    rows = []
+    for item in pair_details:
+        key = str(item.get("key") or "—")
+        live = item.get("live") or {}
+        shadow = item.get("shadow") or {}
+        live_status = str(live.get("status") or "MISSING")
+        shadow_status = str(shadow.get("status") or "MISSING")
+        live_price = (
+            fa_number(live.get("estimated_project_price"))
+            if live_status == "ESTIMATED"
+            else NO_DATA_TOKEN
+        )
+        shadow_price = (
+            fa_number(shadow.get("estimated_project_price"))
+            if shadow_status == "ESTIMATED"
+            else NO_DATA_TOKEN
+        )
+        abs_pct = item.get("abs_pct")
+        diff = (
+            f"{fa_number(round(float(abs_pct) * 100, 3))}٪"
+            if abs_pct is not None
+            else "—"
+        )
+        rows.append(
+            "<tr>"
+            f"<td><strong>{html.escape(key)}</strong></td>"
+            f"<td class='rate-cell'><strong>{live_price}</strong>"
+            f"<small>{html.escape(live_status)}</small></td>"
+            f"<td class='rate-cell'><strong>{shadow_price}</strong>"
+            f"<small>{html.escape(shadow_status)}</small></td>"
+            f"<td>{diff}</td>"
+            f"<td><small>{html.escape(str(shadow.get('method') or '—'))}</small></td>"
+            "</tr>"
+        )
+    return "".join(rows)
+
+
+def _estimate_centers(estimate: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
+    """Map commodity:settlement → rate payload for side-by-side compare."""
+
+    out: dict[str, dict[str, Any]] = {}
+    if not isinstance(estimate, dict):
+        return out
+    for settlement, body in (estimate.get("settlements") or {}).items():
+        if not isinstance(body, dict):
+            continue
+        for item in body.get("rates") or []:
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("commodity_name") or "")
+            if not name:
+                continue
+            out[f"{name}:{settlement}"] = item
+    return out
+
+
+def _shadow_estimate_body(payload: dict[str, Any]) -> dict[str, Any]:
+    estimate = payload.get("estimate") if isinstance(payload.get("estimate"), dict) else {}
+    if not estimate and payload.get("settlements"):
+        estimate = payload
+    return estimate if isinstance(estimate, dict) else {}
+
+
+def _price_cell(rate: dict[str, Any] | None, *, tone: str = "") -> str:
+    if not rate or str(rate.get("status")) != "ESTIMATED":
+        return f"<td class='rate-cell {tone}'><span class='missing'>{NO_DATA_TOKEN}</span></td>"
+    price = fa_number(rate.get("estimated_project_price"))
+    method = html.escape(str(rate.get("method") or "—"))
+    return (
+        f"<td class='rate-cell {tone}'><strong>{price}</strong>"
+        f"<small title='{method}'>{method[:42]}{'…' if len(method) > 42 else ''}</small></td>"
+    )
+
+
+def _diff_cell(live_rate: dict[str, Any] | None, shadow_rate: dict[str, Any] | None) -> str:
+    if (
+        not live_rate
+        or not shadow_rate
+        or str(live_rate.get("status")) != "ESTIMATED"
+        or str(shadow_rate.get("status")) != "ESTIMATED"
+        or live_rate.get("estimated_project_price") is None
+        or shadow_rate.get("estimated_project_price") is None
+    ):
+        return "<td class='diff-cell'>—</td>"
+    live_price = float(live_rate["estimated_project_price"])
+    shadow_price = float(shadow_rate["estimated_project_price"])
+    if live_price == 0:
+        return "<td class='diff-cell'>—</td>"
+    signed = (shadow_price - live_price) / abs(live_price)
+    cls = "diff-up" if signed > 1e-9 else "diff-down" if signed < -1e-9 else "diff-flat"
+    sign = "+" if signed > 0 else ""
+    return (
+        f"<td class='diff-cell {cls}'>"
+        f"{sign}{fa_number(round(signed * 100, 3))}٪"
+        f"</td>"
+    )
+
+
+def render_unified_shadow_compare_table(
+    live_state: dict[str, Any],
+    models: list[tuple[str, dict[str, Any]]],
+) -> str:
+    """One table: live + all shadows for every commodity/settlement."""
+
+    live_centers = _estimate_centers(live_state if isinstance(live_state, dict) else {})
+    model_centers = [
+        (label, _estimate_centers(_shadow_estimate_body(payload)))
+        for label, payload in models
+    ]
+    keys: list[str] = []
+    seen: set[str] = set()
+    for settlement in ("CASH", "TOMORROW"):
+        for name in COMMODITY_SPECS:
+            key = f"{name}:{settlement}"
+            if key in live_centers or any(key in centers for _, centers in model_centers):
+                if key not in seen:
+                    keys.append(key)
+                    seen.add(key)
+        # Include any extra names that appear only in estimates.
+        for source in [live_centers, *[centers for _, centers in model_centers]]:
+            for key in source:
+                if key.endswith(f":{settlement}") and key not in seen:
+                    keys.append(key)
+                    seen.add(key)
+
+    settlement_fa = {"CASH": "نقدی", "TOMORROW": "فردایی"}
+    if not keys:
+        colspan = 3 + 2 * len(models)
+        return f"<tr><td colspan='{colspan}' class='missing'>{NO_DATA_TOKEN}</td></tr>"
+
+    rows: list[str] = []
+    for key in keys:
+        name, settlement = key.split(":", 1)
+        live_rate = live_centers.get(key)
+        cells = [
+            f"<td><strong>{html.escape(name)}</strong></td>",
+            f"<td>{html.escape(settlement_fa.get(settlement, settlement))}</td>",
+            _price_cell(live_rate, tone="col-live"),
+        ]
+        for _, centers in model_centers:
+            shadow_rate = centers.get(key)
+            cells.append(_price_cell(shadow_rate, tone="col-shadow"))
+            cells.append(_diff_cell(live_rate, shadow_rate))
+        rows.append("<tr>" + "".join(cells) + "</tr>")
+    return "".join(rows)
+
+
+def _shadow_status_card(
+    *,
+    title: str,
+    payload: dict[str, Any],
+    accent: str,
+) -> str:
+    estimate = _shadow_estimate_body(payload)
+    comparison = payload.get("comparison_vs_live") or {}
+    mean_pct = comparison.get("mean_abs_pct")
+    mean_text = (
+        f"{fa_number(round(float(mean_pct) * 100, 3))}٪"
+        if mean_pct is not None
+        else "—"
+    )
+    status = html.escape(str(payload.get("status") or "UNKNOWN"))
+    window_end = fa_datetime(estimate.get("window_end_utc") or payload.get("generated_at_utc"))
+    return f"""
+    <div class="input-card observed" style="border-color:{accent}">
+      <span>{html.escape(title)}</span>
+      <strong>{status}</strong>
+      <small>میانگین اختلاف با اصلی: {mean_text}</small>
+      <small>پنجره: {html.escape(window_end)}</small>
+    </div>
+    """
+
+
+def _shadow_panel_html(
+    *,
+    title: str,
+    subtitle: str,
+    badge: str,
+    payload: dict[str, Any],
+    accent: str = "rgba(99,102,241,0.45)",
+) -> str:
+    """Render one clearly titled shadow block for the dual-shadow page."""
+
+    estimate = payload.get("estimate") if isinstance(payload.get("estimate"), dict) else {}
+    if not estimate and payload.get("settlements"):
+        estimate = payload
+    shadow_state = dict(estimate) if isinstance(estimate, dict) else {}
+    settlements = shadow_state.get("settlements") or {}
+    comparison = payload.get("comparison_vs_live") or {}
+    pair_details = list(payload.get("pair_details") or [])
+    generated = fa_datetime(
+        shadow_state.get("generated_at_utc") or payload.get("generated_at_utc")
+    )
+    window_end = fa_datetime(shadow_state.get("window_end_utc"))
+    model_kind = html.escape(
+        str(payload.get("shadow_model_kind") or shadow_state.get("model_kind") or "—")
+    )
+    status = html.escape(str(payload.get("status") or "UNKNOWN"))
+    mean_pct = comparison.get("mean_abs_pct")
+    median_pct = comparison.get("median_abs_pct")
+    paired = comparison.get("paired_estimated_count")
+    mean_text = (
+        f"{fa_number(round(float(mean_pct) * 100, 3))}٪" if mean_pct is not None else "—"
+    )
+    median_text = (
+        f"{fa_number(round(float(median_pct) * 100, 3))}٪"
+        if median_pct is not None
+        else "—"
+    )
+    model_path = html.escape(str(payload.get("shadow_model_path") or "—"))
+    return f"""
+    <section class="shadow-panel" style="border-color:{accent}">
+      <div class="section-head">
+        <div>
+          <h2>{html.escape(title)}</h2>
+          <p class="shadow-subtitle">{html.escape(subtitle)}</p>
+        </div>
+        <span class="badge">{html.escape(badge)}</span>
+      </div>
+      <div class="inputs" style="margin-bottom:12px">
+        <div class="input-card observed"><span>وضعیت</span><strong>{status}</strong><small>{model_kind}</small></div>
+        <div class="input-card observed"><span>میانگین اختلاف با اصلی</span><strong>{mean_text}</strong><small>جفت: {fa_number(paired or 0)}</small></div>
+        <div class="input-card observed"><span>میانهٔ اختلاف</span><strong>{median_text}</strong><small>به‌روزرسانی: {html.escape(generated)}</small></div>
+        <div class="input-card observed"><span>پایان پنجره</span><strong style="font-size:13px">{html.escape(window_end)}</strong><small>فقط پایش</small></div>
+      </div>
+      <div class="table-wrap" style="margin-bottom:12px">
+        <table>
+          <thead>
+            <tr>
+              <th>نوع کالا</th>
+              <th>نرخ نقدی (تومان)</th>
+              <th>نرخ فردایی (تومان)</th>
+            </tr>
+          </thead>
+          <tbody>{render_combined_rate_rows(settlements if isinstance(settlements, dict) else {})}</tbody>
+        </table>
+      </div>
+      <div class="section-head"><h2 style="font-size:14px">مقایسه با مدل اصلی</h2></div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>کالا / تسویه</th>
+              <th>مدل اصلی</th>
+              <th>{html.escape(title)}</th>
+              <th>اختلاف نسبی</th>
+              <th>روش سایه</th>
+            </tr>
+          </thead>
+          <tbody>{render_shadow_compare_rows(pair_details)}</tbody>
+        </table>
+      </div>
+      <p class="shadow-path">مسیر مدل: <code>{model_path}</code></p>
+    </section>
+    """
+
+
+def render_shadow_page(
+    live_state: dict[str, Any],
+    *,
+    home_path: str,
+    shadow_path: str,
+    shadow_data_path: str,
+    shadow_estimate_path: str,
+    logout_path: str = "/logout",
+    user_session: str | None = None,
+    shadow_state_path: Path | None = None,
+    research_shadow_state_path: Path | None = None,
+    research_shadow_data_path: str | None = None,
+    ml_shadow_state_path: Path | None = None,
+    ml_shadow_data_path: str | None = None,
+    estimate_fragment: bool = False,
+) -> bytes:
+    """Operator page: one unified table for live + all shadows."""
+
+    previous_payload = load_shadow_dashboard_payload(
+        shadow_state_path or DEFAULT_SHADOW_STATE
+    )
+    research_path = research_shadow_state_path or DEFAULT_RESEARCH_SHADOW_STATE
+    research_payload = load_shadow_dashboard_payload(research_path)
+    ml_path = ml_shadow_state_path or DEFAULT_ML_SHADOW_STATE_PATH
+    ml_payload = load_shadow_dashboard_payload(ml_path)
+
+    model_specs = [
+        ("سایه ۱ — مدل قبلی", previous_payload, "rgba(245,158,11,0.45)"),
+        ("سایه ۲ — بازگشایی صبح", research_payload, "rgba(6,182,212,0.45)"),
+        ("سایه ۳ — یادگیری ماشین", ml_payload, "rgba(16,185,129,0.45)"),
+    ]
+    live_window = fa_datetime(live_state.get("window_end_utc") if isinstance(live_state, dict) else None)
+    live_card = f"""
+    <div class="input-card observed" style="border-color:rgba(245,158,11,0.55)">
+      <span>مدل اصلی (مرجع)</span>
+      <strong>زنده</strong>
+      <small>پایهٔ مقایسهٔ جدول</small>
+      <small>پنجره: {html.escape(live_window)}</small>
+    </div>
+    """
+    status_cards = live_card + "".join(
+        _shadow_status_card(title=title, payload=payload, accent=accent)
+        for title, payload, accent in model_specs
+    )
+    table_rows = render_unified_shadow_compare_table(
+        live_state if isinstance(live_state, dict) else {},
+        [(title, payload) for title, payload, _ in model_specs],
+    )
+    header_cols = "".join(
+        f"<th>{html.escape(title)}</th><th>اختلاف با اصلی</th>"
+        for title, _, _ in model_specs
+    )
+    panels = f"""
+    <section class="shadow-panel" style="border-color:rgba(99,102,241,0.45)">
+      <div class="section-head">
+        <div>
+          <h2>جدول مقایسهٔ یکپارچه</h2>
+          <p class="shadow-subtitle">مدل اصلی و هر سه سایه در یک جدول — دادهٔ زندهٔ یکسان</p>
+        </div>
+        <span class="badge">۴ ستون نرخ</span>
+      </div>
+      <div class="inputs">{status_cards}</div>
+      <div class="table-wrap">
+        <table class="compare-table">
+          <thead>
+            <tr>
+              <th>نوع کالا</th>
+              <th>تسویه</th>
+              <th>مدل اصلی</th>
+              {header_cols}
+            </tr>
+          </thead>
+          <tbody>{table_rows}</tbody>
+        </table>
+      </div>
+      <p class="shadow-path">اختلاف = (سایه − اصلی) ÷ اصلی · علامت مثبت یعنی سایه بالاتر از اصلی است.</p>
+    </section>
+    """
+    if estimate_fragment:
+        return f"""
+        <div id="table-fragment">{panels}</div>
+        """.encode("utf-8")
+
+    user_badge = (
+        f"<span class='user-label' style='font-size:13px;color:var(--text-sub);margin-left:6px'>"
+        f"👤 <strong>{html.escape(user_session or 'bahar')}</strong></span>"
+    )
+    research_link = ""
+    if research_shadow_data_path:
+        research_link = (
+            f"<a class='nav-btn secondary' href='{html.escape(research_shadow_data_path)}'>"
+            f"JSON سایه ۲</a> "
+        )
+    ml_link = ""
+    if ml_shadow_data_path:
+        ml_link = (
+            f"<a class='nav-btn secondary' href='{html.escape(ml_shadow_data_path)}'>"
+            f"JSON سایه ۳</a> "
+        )
+    navigation = (
+        f"{user_badge} "
+        f"<a class='nav-btn secondary' href='{html.escape(home_path)}'>بازگشت به مدل اصلی</a> "
+        f"<a class='nav-btn secondary' href='{html.escape(shadow_data_path)}'>JSON سایه ۱</a> "
+        f"{research_link}"
+        f"{ml_link}"
+        f"<a class='nav-btn secondary' href='{html.escape(logout_path)}'>خروج</a>"
+    )
+    document = f"""<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>پایش مدل‌های سایه</title>
+<style>
+@import url('https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/Vazirmatn-font-face.css');
+:root {{
+  --bg-deep: #0b1329; --bg-surface: rgba(15, 23, 42, 0.85); --bg-card: #141f36;
+  --border-line: rgba(255, 255, 255, 0.08); --border-gold: rgba(245, 158, 11, 0.35);
+  --text-main: #f8fafc; --text-sub: #94a3b8; --accent-gold: #f59e0b;
+  --accent-cyan: #06b6d4; --accent-emerald: #10b981; --accent-rose: #f43f5e;
+}}
+* {{ box-sizing: border-box; }}
+body {{
+  margin: 0; background: radial-gradient(circle at 50% -10%, #312e81 0%, #0b1329 70%);
+  color: var(--text-main); font-family: Vazirmatn, system-ui, sans-serif; min-height: 100vh;
+}}
+.wrap {{ width: min(1680px, 98%); margin: 16px auto 40px; }}
+header {{
+  display:flex; justify-content:space-between; align-items:center; gap:16px; margin-bottom:16px;
+  padding:14px 20px; background:var(--bg-surface); border:1px solid rgba(99,102,241,0.45);
+  border-radius:16px;
+}}
+header h1 {{ margin:0; font-size:20px; }}
+header p {{ margin:4px 0 0; color:var(--text-sub); font-size:12px; }}
+.nav-btn {{
+  display:inline-block; padding:8px 12px; border-radius:10px; text-decoration:none;
+  background:rgba(99,102,241,0.2); color:var(--text-main); border:1px solid rgba(99,102,241,0.45);
+  font-size:12px; font-weight:700;
+}}
+.nav-btn.secondary {{ background:rgba(148,163,184,0.12); border-color:var(--border-line); }}
+.inputs {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:10px; margin-bottom:14px; }}
+.input-card {{
+  background:var(--bg-card); border:1px solid var(--border-line); border-radius:12px; padding:12px;
+  display:flex; flex-direction:column; gap:4px;
+}}
+.input-card span,.input-card small {{ color:var(--text-sub); font-size:11px; }}
+.input-card strong {{ font-size:18px; color:var(--accent-gold); direction:ltr; text-align:right; }}
+.input-card.no-data strong {{ color:var(--accent-rose); }}
+.shadow-panel {{
+  background:var(--bg-card); border:1px solid var(--border-line); border-radius:16px;
+  padding:16px; margin-bottom:18px;
+}}
+.section-head {{ display:flex; justify-content:space-between; align-items:flex-start; gap:10px; margin-bottom:10px; }}
+.section-head h2 {{ margin:0; font-size:17px; }}
+.shadow-subtitle {{ margin:6px 0 0; color:var(--text-sub); font-size:12px; }}
+.badge {{
+  display:inline-block; padding:3px 10px; border-radius:99px; background:rgba(99,102,241,0.15);
+  border:1px solid rgba(99,102,241,0.4); color:#a5b4fc; font-size:11px; font-weight:600;
+}}
+.table-wrap {{ overflow-x:auto; border-radius:12px; border:1px solid var(--border-line); }}
+table {{ width:100%; border-collapse:collapse; white-space:nowrap; }}
+th, td {{ padding:10px 12px; border-bottom:1px solid var(--border-line); text-align:right; font-size:12px; }}
+th {{ color:var(--text-sub); background:rgba(15,23,42,0.95); position:sticky; top:0; z-index:1; }}
+.compare-table th:nth-child(3), .compare-table td.col-live strong {{ color:var(--accent-gold); }}
+.compare-table th:nth-child(4), .compare-table th:nth-child(5) {{ color:#fbbf24; }}
+.compare-table th:nth-child(6), .compare-table th:nth-child(7) {{ color:#22d3ee; }}
+.compare-table th:nth-child(8), .compare-table th:nth-child(9) {{ color:#34d399; }}
+.rate-cell strong {{ display:block; font-size:15px; color:var(--accent-gold); direction:ltr; text-align:right; }}
+.rate-cell small {{ display:block; color:var(--text-sub); font-size:10px; margin-top:2px; max-width:180px; overflow:hidden; text-overflow:ellipsis; }}
+.diff-cell {{ direction:ltr; text-align:right; font-weight:700; }}
+.diff-up {{ color:var(--accent-rose); }}
+.diff-down {{ color:var(--accent-emerald); }}
+.diff-flat {{ color:var(--text-sub); }}
+.missing {{ color:var(--accent-rose); }}
+.shadow-path {{ margin:12px 0 0; color:var(--text-sub); font-size:11px; word-break:break-all; }}
+footer {{ margin-top:18px; color:var(--text-sub); font-size:12px; }}
+</style>
+</head>
+<body>
+<main class="wrap">
+  <header>
+    <div>
+      <h1>پایش مدل‌های سایه</h1>
+      <p>جدول یکپارچهٔ مقایسه — مدل اصلی و سه سایه روی دادهٔ زندهٔ یکسان</p>
+      <p>سایه ۱ = مدل قبلی · سایه ۲ = بازگشایی صبح · سایه ۳ = یادگیری ماشین</p>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">{navigation}</div>
+  </header>
+  <div id="estimate-content">{panels}</div>
+  <footer>مدل اصلی همچنان تنها منبع نرخ نمایشی کاربر است.</footer>
+</main>
+<script>
+async function refreshShadowView() {{
+  try {{
+    const response = await fetch({json.dumps(shadow_estimate_path)}, {{cache: "no-store"}});
+    if (!response.ok) return;
+    const htmlText = await response.text();
+    const doc = new DOMParser().parseFromString(htmlText, "text/html");
+    const newTable = doc.getElementById("table-fragment");
+    if (newTable && document.getElementById("estimate-content")) {{
+      document.getElementById("estimate-content").innerHTML = newTable.innerHTML;
+    }}
+  }} catch (_) {{}}
+}}
+window.setInterval(refreshShadowView, 15000);
+</script>
+</body>
+</html>"""
+    return document.encode("utf-8")
+
+
 def render_page(
     state: dict[str, Any], *, manual_path: str = "/manual-entry", analytics_path: str = "/analytics",
     logout_path: str = "/logout", user_session: str | None = None,
@@ -1755,6 +2345,7 @@ def render_page(
     market_db: Path | None = None, conversation_db: Path | None = None,
     group_live_control_path: str = "/group-live-control",
     group_live_control: dict[str, Any] | None = None,
+    shadow_path: str = "/shadow",
 ) -> bytes:
     generated = fa_datetime(state.get("generated_at_utc"))
     window_start = fa_datetime(state.get("window_start_utc"))
@@ -1855,18 +2446,68 @@ def render_page(
     user_badge = f"<span class='user-label' style='font-size:13px;color:var(--text-sub);margin-left:6px'>👤 <strong>{html.escape(user_session or 'bahar')}</strong></span>"
     logout_btn = f"<a class='nav-btn secondary' href='{html.escape(logout_path)}'>خروج</a>"
 
+    shadow_payload = load_shadow_dashboard_payload(DEFAULT_SHADOW_STATE)
+    research_payload = load_shadow_dashboard_payload(DEFAULT_RESEARCH_SHADOW_STATE)
+    ml_payload = load_shadow_dashboard_payload(DEFAULT_ML_SHADOW_STATE_PATH)
+    shadow_status = str(shadow_payload.get("status") or "MISSING")
+    research_status = str(research_payload.get("status") or "MISSING")
+    ml_status = str(ml_payload.get("status") or "MISSING")
+    shadow_compare = shadow_payload.get("comparison_vs_live") or {}
+    research_compare = research_payload.get("comparison_vs_live") or {}
+    ml_compare = ml_payload.get("comparison_vs_live") or {}
+    shadow_mean = shadow_compare.get("mean_abs_pct")
+    research_mean = research_compare.get("mean_abs_pct")
+    ml_mean = ml_compare.get("mean_abs_pct")
+    shadow_mean_text = (
+        f"{fa_number(round(float(shadow_mean) * 100, 3))}٪"
+        if shadow_mean is not None
+        else "—"
+    )
+    research_mean_text = (
+        f"{fa_number(round(float(research_mean) * 100, 3))}٪"
+        if research_mean is not None
+        else "—"
+    )
+    ml_mean_text = (
+        f"{fa_number(round(float(ml_mean) * 100, 3))}٪"
+        if ml_mean is not None
+        else "—"
+    )
+    shadow_banner = f"""
+    <section class="group-control-card" style="border-color:rgba(99,102,241,0.45)">
+      <div class="group-control-copy">
+        <div class="section-head">
+          <h2>مدل‌های سایه (پایش موازی)</h2>
+          <span class="badge">۳ سایه روی دادهٔ یکسان</span>
+        </div>
+        <strong>هر سه سایه به همان دادهٔ زنده وصل‌اند؛ هیچ‌کدام خروجی اصلی را عوض نمی‌کنند.</strong>
+        <small>سایه ۱ — مدل قبلی زنده: وضعیت {html.escape(shadow_status)} · میانگین اختلاف {shadow_mean_text}</small>
+        <small>سایه ۲ — کاندید بازگشایی صبح: وضعیت {html.escape(research_status)} · میانگین اختلاف {research_mean_text}</small>
+        <small>سایه ۳ — یادگیری ماشین: وضعیت {html.escape(ml_status)} · میانگین اختلاف {ml_mean_text}</small>
+      </div>
+      <a class="nav-btn" href="{html.escape(shadow_path)}">باز کردن صفحهٔ مدل‌های سایه</a>
+    </section>
+    """
+
     if page == "manual":
         navigation = f"{user_badge} <a class='nav-btn secondary' href='{html.escape('/' + manual_path.strip('/').rsplit('/', 1)[0])}'>بازگشت به داشبورد</a> {logout_btn}"
         page_content = manual_panel_html
         refresh_script = ""
     else:
-        navigation = f"{user_badge} <a class='nav-btn secondary' href='{html.escape(analytics_path)}'>📊 آمار کاربران</a> <a class='nav-btn' href='{html.escape(manual_path)}'>ثبت دستی آفر</a> {logout_btn}"
+        navigation = (
+            f"{user_badge} "
+            f"<a class='nav-btn secondary' href='{html.escape(shadow_path)}'>مدل‌های سایه</a> "
+            f"<a class='nav-btn secondary' href='{html.escape(analytics_path)}'>آمار کاربران</a> "
+            f"<a class='nav-btn' href='{html.escape(manual_path)}'>ثبت دستی آفر</a> "
+            f"{logout_btn}"
+        )
         page_content = f"""
         <div id="ticker-content">
           <div class="top-ticker">
             {ticker_cards}
           </div>
         </div>
+        {shadow_banner}
         {group_control_html}
         <div class="dashboard-grid">
           <div class="main-column">
@@ -3197,6 +3838,11 @@ def handler_factory(
     logout_path = normalized + "/logout"
     estimate_path = normalized + "/estimates.html"
     activity_path = normalized + "/activity.html"
+    shadow_path = normalized + "/shadow"
+    shadow_data_path = shadow_path + "/data.json"
+    shadow_estimate_path = shadow_path + "/estimates.html"
+    research_shadow_data_path = shadow_path + "/morning-reopen/data.json"
+    ml_shadow_data_path = shadow_path + "/ml-residual/data.json"
     group_live_control_path = normalized + "/group-live-control"
     parse_offer_path = manual_path + "/parse-text"
     session_store = SessionStore(RUNTIME_ROOT / "web_sessions.sqlite3")
@@ -3305,8 +3951,71 @@ def handler_factory(
                     conversation_db=conversation_db,
                     group_live_control_path=group_live_control_path,
                     group_live_control=group_live_control.get(),
+                    shadow_path=shadow_path,
                 )
                 self._headers(HTTPStatus.OK, "text/html; charset=utf-8", len(body))
+                self.wfile.write(body)
+                return
+            if path == shadow_path:
+                body = render_shadow_page(
+                    state,
+                    home_path=normalized,
+                    shadow_path=shadow_path,
+                    shadow_data_path=shadow_data_path,
+                    shadow_estimate_path=shadow_estimate_path,
+                    logout_path=logout_path,
+                    user_session=user_session,
+                    shadow_state_path=DEFAULT_SHADOW_STATE,
+                    research_shadow_state_path=DEFAULT_RESEARCH_SHADOW_STATE,
+                    research_shadow_data_path=research_shadow_data_path,
+                    ml_shadow_state_path=DEFAULT_ML_SHADOW_STATE_PATH,
+                    ml_shadow_data_path=ml_shadow_data_path,
+                )
+                self._headers(HTTPStatus.OK, "text/html; charset=utf-8", len(body))
+                self.wfile.write(body)
+                return
+            if path == shadow_estimate_path:
+                body = render_shadow_page(
+                    state,
+                    home_path=normalized,
+                    shadow_path=shadow_path,
+                    shadow_data_path=shadow_data_path,
+                    shadow_estimate_path=shadow_estimate_path,
+                    logout_path=logout_path,
+                    user_session=user_session,
+                    shadow_state_path=DEFAULT_SHADOW_STATE,
+                    research_shadow_state_path=DEFAULT_RESEARCH_SHADOW_STATE,
+                    ml_shadow_state_path=DEFAULT_ML_SHADOW_STATE_PATH,
+                    estimate_fragment=True,
+                )
+                self._headers(HTTPStatus.OK, "text/html; charset=utf-8", len(body))
+                self.wfile.write(body)
+                return
+            if path == shadow_data_path:
+                body = json.dumps(
+                    load_shadow_dashboard_payload(DEFAULT_SHADOW_STATE),
+                    ensure_ascii=False,
+                    indent=2,
+                ).encode("utf-8")
+                self._headers(HTTPStatus.OK, "application/json; charset=utf-8", len(body))
+                self.wfile.write(body)
+                return
+            if path == research_shadow_data_path:
+                body = json.dumps(
+                    load_shadow_dashboard_payload(DEFAULT_RESEARCH_SHADOW_STATE),
+                    ensure_ascii=False,
+                    indent=2,
+                ).encode("utf-8")
+                self._headers(HTTPStatus.OK, "application/json; charset=utf-8", len(body))
+                self.wfile.write(body)
+                return
+            if path == ml_shadow_data_path:
+                body = json.dumps(
+                    load_shadow_dashboard_payload(DEFAULT_ML_SHADOW_STATE_PATH),
+                    ensure_ascii=False,
+                    indent=2,
+                ).encode("utf-8")
+                self._headers(HTTPStatus.OK, "application/json; charset=utf-8", len(body))
                 self.wfile.write(body)
                 return
             if path == analytics_path:
@@ -3408,6 +4117,7 @@ def handler_factory(
                     conversation_db=conversation_db,
                     group_live_control_path=group_live_control_path,
                     group_live_control=group_live_control.get(),
+                    shadow_path=shadow_path,
                 )
                 self._headers(HTTPStatus.OK, "text/html; charset=utf-8", len(body))
                 self.wfile.write(body)
@@ -3749,6 +4459,12 @@ def refresh_estimate(
     *,
     end: datetime | None = None,
     group_live_control: GroupLiveInputControl | None = None,
+    shadow_model_path: Path | None = None,
+    shadow_state_path: Path | None = None,
+    research_shadow_model_path: Path | None = None,
+    research_shadow_state_path: Path | None = None,
+    ml_shadow_model_path: Path | None = None,
+    ml_shadow_state_path: Path | None = None,
 ) -> dict[str, Any]:
     effective_end = (end or datetime.now(timezone.utc)).astimezone(timezone.utc).replace(microsecond=0)
     control = group_live_control.get() if group_live_control else {
@@ -3804,6 +4520,7 @@ def refresh_estimate(
         live_group_events_enabled=enabled,
         group_live_events_before=disabled_since,
     )
+    term_structure_fixes: list[dict[str, Any]] = []
     calibration_connection = sqlite3.connect(conversation_db)
     calibration_connection.row_factory = sqlite3.Row
     try:
@@ -3811,6 +4528,18 @@ def refresh_estimate(
             calibration_connection,
             settlements=estimate.get("settlements", {}),
         )
+        # Residual is learned per settlement.  TOMORROW often has samples while
+        # CASH is still warming up, so a negative TOMORROW pull can invert the
+        # cash/tomorrow term structure — repair before publishing.
+        term_structure_fixes = enforce_cash_tomorrow_term_structure(
+            estimate.get("settlements", {})
+        )
+        # Online residual can pull a non-low-date sibling floor downward after
+        # the first family-band pass; re-clamp so تاریخ پایین never overlaps.
+        for payload in estimate.get("settlements", {}).values():
+            rates = payload.get("rates")
+            if isinstance(rates, list):
+                payload["rates"] = apply_low_date_family_band_separation(rates)
         predictions_recorded = 0
         for settlement, payload in estimate.get("settlements", {}).items():
             predictions_recorded += record_predictions(
@@ -3836,7 +4565,89 @@ def refresh_estimate(
         "calibration": online_metadata,
         "predictions_recorded": predictions_recorded,
         "automatic_model_weight_promotion": False,
+        "term_structure_fixes": term_structure_fixes,
     }
+    shadow_meta = run_shadow_parallel(
+        live_estimate=estimate,
+        market_db=market_db,
+        conversation_db=conversation_db,
+        end=effective_end,
+        shadow_model_path=shadow_model_path,
+        shadow_state_path=shadow_state_path or DEFAULT_SHADOW_STATE,
+        live_group_events_enabled=enabled,
+        group_live_events_before=disabled_since,
+    )
+    research_meta = run_shadow_parallel(
+        live_estimate=estimate,
+        market_db=market_db,
+        conversation_db=conversation_db,
+        end=effective_end,
+        shadow_model_path=research_shadow_model_path
+        if research_shadow_model_path is not None
+        else DEFAULT_RESEARCH_SHADOW_MODEL,
+        shadow_state_path=research_shadow_state_path or DEFAULT_RESEARCH_SHADOW_STATE,
+        live_group_events_enabled=enabled,
+        group_live_events_before=disabled_since,
+    )
+    ml_meta = run_ml_residual_shadow(
+        live_estimate=estimate,
+        end=effective_end,
+        artifact_path=ml_shadow_model_path
+        if ml_shadow_model_path is not None
+        else DEFAULT_ML_SHADOW_MODEL,
+        shadow_state_path=ml_shadow_state_path or DEFAULT_ML_SHADOW_STATE_PATH,
+    )
+    estimate["shadow_parallel"] = {
+        "enabled": shadow_meta.get("enabled"),
+        "status": shadow_meta.get("status"),
+        "shadow_model_path": shadow_meta.get("shadow_model_path"),
+        "shadow_model_kind": shadow_meta.get("shadow_model_kind"),
+        "comparison_vs_live": shadow_meta.get("comparison_vs_live"),
+        "authoritative_override": False,
+        "state_path": str(shadow_state_path or DEFAULT_SHADOW_STATE),
+        "label": "سایه ۱ — مدل قبلی زنده",
+        "shared_live_window_end_utc": estimate.get("window_end_utc"),
+    }
+    estimate["research_shadow_parallel"] = {
+        "enabled": research_meta.get("enabled"),
+        "status": research_meta.get("status"),
+        "shadow_model_path": research_meta.get("shadow_model_path"),
+        "shadow_model_kind": research_meta.get("shadow_model_kind"),
+        "comparison_vs_live": research_meta.get("comparison_vs_live"),
+        "authoritative_override": False,
+        "state_path": str(research_shadow_state_path or DEFAULT_RESEARCH_SHADOW_STATE),
+        "label": "سایه ۲ — کاندید بازگشایی صبح",
+        "shared_live_window_end_utc": estimate.get("window_end_utc"),
+    }
+    estimate["ml_shadow_parallel"] = {
+        "enabled": ml_meta.get("enabled"),
+        "status": ml_meta.get("status"),
+        "shadow_model_path": ml_meta.get("shadow_model_path"),
+        "shadow_model_kind": ml_meta.get("shadow_model_kind"),
+        "comparison_vs_live": ml_meta.get("comparison_vs_live"),
+        "authoritative_override": False,
+        "state_path": str(ml_shadow_state_path or DEFAULT_ML_SHADOW_STATE_PATH),
+        "label": "سایه ۳ — مدل یادگیری ماشین",
+        "shared_live_window_end_utc": estimate.get("window_end_utc"),
+    }
+    # Main book learns from shadows vs morning truth (bounded; not a model swap).
+    cross_apply = os.environ.get("COIN_RATE_ESTIMATOR_SHADOW_CROSS_CAL_APPLY", "1") == "1"
+    estimate["shadow_cross_calibration"] = maybe_run_shadow_cross_calibration(
+        live_estimate=estimate,
+        conversation_db=conversation_db,
+        end=effective_end,
+        shadow_state_paths={
+            "سایه۱-قبلی": shadow_state_path or DEFAULT_SHADOW_STATE,
+            "سایه۲-بازگشایی": research_shadow_state_path or DEFAULT_RESEARCH_SHADOW_STATE,
+            "سایه۳-ML": ml_shadow_state_path or DEFAULT_ML_SHADOW_STATE_PATH,
+        },
+        apply=cross_apply,
+    )
+    if estimate["shadow_cross_calibration"].get("applied_count"):
+        term_structure_fixes.extend(
+            enforce_cash_tomorrow_term_structure(estimate.get("settlements", {}))
+        )
+        estimate["online_residual_learning"]["term_structure_fixes"] = term_structure_fixes
     state.set(estimate)
     write_json_atomic(state_path, estimate, mode=0o644)
     return estimate
@@ -3849,6 +4660,13 @@ async def estimation_loop(
     state_path: Path,
     state: StateStore,
     group_live_control: GroupLiveInputControl,
+    *,
+    shadow_model_path: Path | None = None,
+    shadow_state_path: Path | None = None,
+    research_shadow_model_path: Path | None = None,
+    research_shadow_state_path: Path | None = None,
+    ml_shadow_model_path: Path | None = None,
+    ml_shadow_state_path: Path | None = None,
 ) -> None:
     last_run: datetime | None = None
     refresh_seconds = 5
@@ -3865,6 +4683,12 @@ async def estimation_loop(
                     state,
                     end=end,
                     group_live_control=group_live_control,
+                    shadow_model_path=shadow_model_path,
+                    shadow_state_path=shadow_state_path,
+                    research_shadow_model_path=research_shadow_model_path,
+                    research_shadow_state_path=research_shadow_state_path,
+                    ml_shadow_model_path=ml_shadow_model_path,
+                    ml_shadow_state_path=ml_shadow_state_path,
                 )
                 print(
                     json.dumps(
@@ -4103,6 +4927,42 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--port", type=int, required=True)
     parser.add_argument("--path", required=True)
     parser.add_argument("--model", type=Path, default=DEFAULT_MODEL)
+    parser.add_argument(
+        "--shadow-model",
+        type=Path,
+        default=DEFAULT_SHADOW_MODEL,
+        help="Optional parallel shadow model; never overrides live output.",
+    )
+    parser.add_argument(
+        "--shadow-state",
+        type=Path,
+        default=DEFAULT_SHADOW_STATE,
+        help="Isolated JSON state for the parallel shadow estimate.",
+    )
+    parser.add_argument(
+        "--research-shadow-model",
+        type=Path,
+        default=DEFAULT_RESEARCH_SHADOW_MODEL,
+        help="Second shadow: morning-reopen research candidate; never overrides live.",
+    )
+    parser.add_argument(
+        "--research-shadow-state",
+        type=Path,
+        default=DEFAULT_RESEARCH_SHADOW_STATE,
+        help="Isolated JSON state for the morning-reopen research shadow.",
+    )
+    parser.add_argument(
+        "--ml-shadow-model",
+        type=Path,
+        default=DEFAULT_ML_SHADOW_MODEL,
+        help="Sklearn residual ML artifact (.joblib); never overrides live.",
+    )
+    parser.add_argument(
+        "--ml-shadow-state",
+        type=Path,
+        default=DEFAULT_ML_SHADOW_STATE_PATH,
+        help="Isolated JSON state for the ML residual shadow.",
+    )
     parser.add_argument("--market-db", type=Path, default=DEFAULT_MARKET_DB)
     parser.add_argument(
         "--conversation-db", type=Path, default=DEFAULT_CONVERSATION_DB
@@ -4143,6 +5003,12 @@ async def async_main(
                 args.state,
                 state,
                 group_live_control,
+                shadow_model_path=args.shadow_model,
+                shadow_state_path=args.shadow_state,
+                research_shadow_model_path=args.research_shadow_model,
+                research_shadow_state_path=args.research_shadow_state,
+                ml_shadow_model_path=args.ml_shadow_model,
+                ml_shadow_state_path=args.ml_shadow_state,
             ),
             name="estimator",
         )
@@ -4194,6 +5060,12 @@ def main() -> int:
             args.state,
             state,
             group_live_control=group_live_control,
+            shadow_model_path=args.shadow_model,
+            shadow_state_path=args.shadow_state,
+            research_shadow_model_path=args.research_shadow_model,
+            research_shadow_state_path=args.research_shadow_state,
+            ml_shadow_model_path=args.ml_shadow_model,
+            ml_shadow_state_path=args.ml_shadow_state,
         )
 
     server = start_web_server(

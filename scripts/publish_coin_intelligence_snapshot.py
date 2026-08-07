@@ -108,6 +108,7 @@ def _publish(args: argparse.Namespace) -> int:
             market_store_path=store_path,
             snapshot_path=snapshot_path,
             as_of_utc=as_of,
+            force=bool(getattr(args, "force", False)),
         )
     _emit(
         command="publish",
@@ -118,8 +119,11 @@ def _publish(args: argparse.Namespace) -> int:
         generated_at_utc=result.generated_at_utc,
         estimated_rate_count=result.estimated_rate_count,
         no_data_rate_count=result.no_data_rate_count,
+        input_watermark=result.input_watermark,
     )
-    return 0 if result.status == "PUBLISHED" else 3
+    if result.status in {"PUBLISHED", "UNCHANGED"}:
+        return 0
+    return 3
 
 
 def _check(args: argparse.Namespace) -> int:
@@ -175,6 +179,11 @@ def build_parser() -> argparse.ArgumentParser:
     publish.add_argument("--market-store", required=True)
     publish.add_argument("--snapshot", required=True)
     publish.add_argument("--as-of-utc", default=None)
+    publish.add_argument(
+        "--force",
+        action="store_true",
+        help="rebuild even when the hot-store input watermark is unchanged",
+    )
     publish.set_defaults(handler=_publish)
 
     check = commands.add_parser("check", help="validate a published Snapshot without writing")

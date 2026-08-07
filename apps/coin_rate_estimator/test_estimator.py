@@ -12,6 +12,8 @@ from coin_estimator import (
     COMMODITY_SPECS,
     NO_DATA_TOKEN,
     TRUSTED_TRAINING_SOURCE_KINDS,
+    apply_low_date_family_band_separation,
+    enforce_cash_tomorrow_term_structure,
     average_market_value,
     asymmetric_tolerance,
     calibration_rows,
@@ -20,6 +22,7 @@ from coin_estimator import (
     load_conversation_offer_labels,
     load_group_confirmed_trade_labels,
     latest_melted_events_by_type,
+    low_date_family_sibling_name,
     market_order_flow,
     quantile,
     select_effective_usd_average,
@@ -1454,6 +1457,96 @@ class EstimatorTests(unittest.TestCase):
         pdf_body = render_user_details_pdf_page(db_path, "TestUser", 1, "offer", range_type="today").decode("utf-8")
         self.assertIn("گزارش آمار و فعالیت کاربر", pdf_body)
         self.assertIn("TestUser", pdf_body)
+
+    def test_low_date_family_band_does_not_overlap_sibling(self) -> None:
+        self.assertEqual(low_date_family_sibling_name("بهار"), "امام")
+        self.assertEqual(low_date_family_sibling_name("نیم تاریخ پایین"), "نیم بهار")
+        self.assertEqual(low_date_family_sibling_name("امام"), None)
+        rates = [
+            {
+                "commodity_name": "امام",
+                "status": "ESTIMATED",
+                "estimated_price_toman": 184_100_000,
+                "tolerance": {
+                    "lower_price_toman": 182_800_000,
+                    "upper_price_toman": 185_400_000,
+                    "lower_project_price": 182_800,
+                    "upper_project_price": 185_400,
+                },
+            },
+            {
+                "commodity_name": "بهار",
+                "status": "ESTIMATED",
+                "estimated_price_toman": 181_850_000,
+                "tolerance": {
+                    "lower_price_toman": 180_550_000,
+                    "upper_price_toman": 183_150_000,
+                    "lower_project_price": 180_550,
+                    "upper_project_price": 183_150,
+                },
+            },
+        ]
+        apply_low_date_family_band_separation(rates)
+        bahar = rates[1]["tolerance"]
+        self.assertLess(
+            bahar["upper_price_toman"],
+            rates[0]["tolerance"]["lower_price_toman"],
+        )
+        self.assertEqual(
+            bahar["family_band_cap"]["policy"],
+            "LOW_DATE_SAME_COEFFICIENT_NO_OVERLAP",
+        )
+        self.assertGreaterEqual(
+            bahar["upper_price_toman"], rates[1]["estimated_price_toman"]
+        )
+
+    def test_cash_tomorrow_term_structure_repairs_inversion(self) -> None:
+        settlements = {
+            "CASH": {
+                "rates": [
+                    {
+                        "commodity_name": "امام",
+                        "status": "ESTIMATED",
+                        "estimated_price_toman": 185_300_000,
+                        "estimated_project_price": 185_300,
+                    }
+                ]
+            },
+            "TOMORROW": {
+                "rates": [
+                    {
+                        "commodity_name": "امام",
+                        "status": "ESTIMATED",
+                        "estimated_price_toman": 184_900_000,
+                        "estimated_project_price": 184_900,
+                        "method": "CURRENT_CASH_ESTIMATE_X_ROBUST_EMPIRICAL_TOMORROW_CASH_RATIO",
+                        "online_residual_calibration": {
+                            "status": "APPLIED",
+                            "correction_ratio": -0.0074,
+                        },
+                        "settlement_ratio_anchor": {"ratio": 1.0054},
+                    }
+                ]
+            },
+        }
+        audits = enforce_cash_tomorrow_term_structure(settlements)
+        tom = settlements["TOMORROW"]["rates"][0]
+        self.assertEqual(len(audits), 1)
+        self.assertGreaterEqual(
+            tom["estimated_price_toman"],
+            settlements["CASH"]["rates"][0]["estimated_price_toman"],
+        )
+        self.assertIn(
+            tom["term_structure_floor"]["policy"],
+            {
+                "TOMORROW_NOT_BELOW_CASH",
+                "TOMORROW_NOT_BELOW_REOPEN_RATIO_FLOOR",
+            },
+        )
+        self.assertGreaterEqual(
+            tom["estimated_project_price"],
+            settlements["CASH"]["rates"][0]["estimated_project_price"],
+        )
 
 
 if __name__ == "__main__":

@@ -12,7 +12,7 @@ import hashlib
 import json
 from typing import Any
 
-from sqlalchemy import event, inspect as sa_inspect
+from sqlalchemy import event, inspect as sa_inspect, select
 from sqlalchemy.orm import Session
 
 from models.coin_intelligence_market_outbox import CoinIntelligenceMarketOutbox
@@ -151,6 +151,15 @@ def _append_outbox(
     if key in seen:
         return
     seen.add(key)
+    # Prior hard-deletes of offers can leave durable outbox receipts; replaying
+    # the same subject/version must not abort the originating business commit.
+    existing = session.scalar(
+        select(CoinIntelligenceMarketOutbox.id).where(
+            CoinIntelligenceMarketOutbox.idempotency_key == key
+        )
+    )
+    if existing is not None:
+        return
     session.add(
         CoinIntelligenceMarketOutbox(
             idempotency_key=key,

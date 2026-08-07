@@ -268,7 +268,7 @@ def resolved_coin_group_observations(
                 side=resolved.side,
                 price=Decimal(resolved.price_project_thousand_toman),
                 price_unit="PROJECT_THOUSAND_TOMAN",
-                currency="IRT",
+                currency="TOMAN",
                 quantity=resolved.quantity,
                 quantity_unit="COIN_COUNT",
                 parse_confidence=0.98 if resolved.quality_state == "ELIGIBLE" else 0.0,

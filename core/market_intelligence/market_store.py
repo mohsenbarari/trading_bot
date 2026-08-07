@@ -9,7 +9,7 @@ it through a durable PostgreSQL outbox in P3, not through an ORM callback.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import sqlite3
 from typing import Iterator
@@ -23,7 +23,9 @@ from .market_contracts import (
 )
 
 
-MARKET_STORE_SCHEMA_VERSION = 2
+MARKET_STORE_SCHEMA_VERSION = 3
+# Live snapshot/rate engine only needs a short lookback; older facts stay in archive.
+MARKET_STORE_HOT_RETENTION_HOURS = 168
 
 _SCHEMA = """
 PRAGMA foreign_keys = ON;
@@ -81,6 +83,53 @@ CREATE INDEX IF NOT EXISTS idx_market_observations_source_available
     ON market_observations(source_code, available_at_utc);
 CREATE INDEX IF NOT EXISTS idx_market_observations_quality_time
     ON market_observations(quality_state, event_time_utc);
+-- Snapshot/rate-engine shaped access: filter quality+instrument(+dims) then newest time.
+CREATE INDEX IF NOT EXISTS idx_market_observations_snapshot_lookup
+    ON market_observations(
+        quality_state, instrument, settlement_term, trade_form, event_time_utc DESC, id DESC
+    );
+CREATE INDEX IF NOT EXISTS idx_market_observations_snapshot_instrument_time
+    ON market_observations(
+        quality_state, instrument, event_time_utc DESC, id DESC
+    );
+
+CREATE TABLE IF NOT EXISTS market_observations_archive (
+    id INTEGER PRIMARY KEY,
+    event_key BLOB NOT NULL UNIQUE CHECK(length(event_key) BETWEEN 16 AND 64),
+    source_code TEXT NOT NULL,
+    source_family TEXT NOT NULL,
+    event_time_utc TEXT NOT NULL,
+    available_at_utc TEXT NOT NULL,
+    tehran_datetime TEXT NOT NULL,
+    tehran_date TEXT NOT NULL,
+    tehran_minute TEXT NOT NULL,
+    tehran_weekday INTEGER NOT NULL CHECK(tehran_weekday BETWEEN 0 AND 6),
+    instrument TEXT NOT NULL,
+    market_label TEXT NOT NULL,
+    settlement_term TEXT NOT NULL,
+    trade_form TEXT NOT NULL,
+    event_type TEXT NOT NULL,
+    side TEXT NOT NULL,
+    price_value TEXT NOT NULL,
+    price_num REAL NOT NULL CHECK(price_num > 0),
+    price_unit TEXT NOT NULL,
+    currency TEXT NOT NULL,
+    quantity_value TEXT,
+    quantity_num REAL,
+    quantity_unit TEXT,
+    parse_confidence REAL NOT NULL
+        CHECK(parse_confidence >= 0 AND parse_confidence <= 1),
+    parser_version TEXT NOT NULL,
+    quality_state TEXT NOT NULL,
+    quality_policy_version TEXT NOT NULL,
+    is_conditional INTEGER NOT NULL CHECK(is_conditional IN (0, 1)),
+    attributes_json TEXT NOT NULL,
+    inserted_at_utc TEXT NOT NULL,
+    archived_at_utc TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_market_observations_archive_event_time
+    ON market_observations_archive(event_time_utc);
 
 CREATE TABLE IF NOT EXISTS market_source_checkpoints (
     source_code TEXT PRIMARY KEY,
@@ -146,12 +195,172 @@ def _upgrade_v1_to_v2(connection: sqlite3.Connection) -> None:
     connection.execute(
         """
         UPDATE market_store_metadata
-        SET schema_version = ?
+        SET schema_version = 2
         WHERE singleton = 1 AND schema_version = 1
-        """,
-        (MARKET_STORE_SCHEMA_VERSION,),
+        """
     )
     connection.commit()
+
+
+def _upgrade_v2_to_v3(connection: sqlite3.Connection) -> None:
+    """Add snapshot-shaped indexes and a cold archive table; no fact is rewritten."""
+
+    connection.executescript(
+        """
+        CREATE INDEX IF NOT EXISTS idx_market_observations_snapshot_lookup
+            ON market_observations(
+                quality_state, instrument, settlement_term, trade_form,
+                event_time_utc DESC, id DESC
+            );
+        CREATE INDEX IF NOT EXISTS idx_market_observations_snapshot_instrument_time
+            ON market_observations(
+                quality_state, instrument, event_time_utc DESC, id DESC
+            );
+        CREATE TABLE IF NOT EXISTS market_observations_archive (
+            id INTEGER PRIMARY KEY,
+            event_key BLOB NOT NULL UNIQUE CHECK(length(event_key) BETWEEN 16 AND 64),
+            source_code TEXT NOT NULL,
+            source_family TEXT NOT NULL,
+            event_time_utc TEXT NOT NULL,
+            available_at_utc TEXT NOT NULL,
+            tehran_datetime TEXT NOT NULL,
+            tehran_date TEXT NOT NULL,
+            tehran_minute TEXT NOT NULL,
+            tehran_weekday INTEGER NOT NULL CHECK(tehran_weekday BETWEEN 0 AND 6),
+            instrument TEXT NOT NULL,
+            market_label TEXT NOT NULL,
+            settlement_term TEXT NOT NULL,
+            trade_form TEXT NOT NULL,
+            event_type TEXT NOT NULL,
+            side TEXT NOT NULL,
+            price_value TEXT NOT NULL,
+            price_num REAL NOT NULL CHECK(price_num > 0),
+            price_unit TEXT NOT NULL,
+            currency TEXT NOT NULL,
+            quantity_value TEXT,
+            quantity_num REAL,
+            quantity_unit TEXT,
+            parse_confidence REAL NOT NULL
+                CHECK(parse_confidence >= 0 AND parse_confidence <= 1),
+            parser_version TEXT NOT NULL,
+            quality_state TEXT NOT NULL,
+            quality_policy_version TEXT NOT NULL,
+            is_conditional INTEGER NOT NULL CHECK(is_conditional IN (0, 1)),
+            attributes_json TEXT NOT NULL,
+            inserted_at_utc TEXT NOT NULL,
+            archived_at_utc TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_market_observations_archive_event_time
+            ON market_observations_archive(event_time_utc);
+        """
+    )
+    connection.execute(
+        """
+        UPDATE market_store_metadata
+        SET schema_version = 3
+        WHERE singleton = 1 AND schema_version = 2
+        """
+    )
+    connection.commit()
+
+
+def archive_observations_older_than(
+    connection: sqlite3.Connection,
+    *,
+    retention_hours: int = MARKET_STORE_HOT_RETENTION_HOURS,
+    batch_size: int = 20_000,
+) -> dict[str, int]:
+    """Move cold facts out of the hot table used by live snapshot/rate reads.
+
+    Returns counts only; never drops archive rows.  Callers own scheduling.
+    """
+
+    if retention_hours < 24:
+        raise MarketStoreError("market_store_hot_retention_too_short")
+    if not _table_exists(connection, "market_observations_archive"):
+        raise MarketStoreError("market_store_archive_unavailable")
+    cutoff = (
+        datetime.now(timezone.utc) - timedelta(hours=int(retention_hours))
+    ).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    archived = 0
+    while True:
+        ids = [
+            int(row[0])
+            for row in connection.execute(
+                """
+                SELECT id FROM market_observations
+                WHERE event_time_utc < ?
+                ORDER BY id
+                LIMIT ?
+                """,
+                (cutoff, batch_size),
+            ).fetchall()
+        ]
+        if not ids:
+            break
+        placeholders = ",".join("?" for _ in ids)
+        connection.execute(
+            f"""
+            INSERT OR IGNORE INTO market_observations_archive(
+                id, event_key, source_code, source_family, event_time_utc,
+                available_at_utc, tehran_datetime, tehran_date, tehran_minute,
+                tehran_weekday, instrument, market_label, settlement_term,
+                trade_form, event_type, side, price_value, price_num, price_unit,
+                currency, quantity_value, quantity_num, quantity_unit,
+                parse_confidence, parser_version, quality_state,
+                quality_policy_version, is_conditional, attributes_json,
+                inserted_at_utc, archived_at_utc
+            )
+            SELECT
+                id, event_key, source_code, source_family, event_time_utc,
+                available_at_utc, tehran_datetime, tehran_date, tehran_minute,
+                tehran_weekday, instrument, market_label, settlement_term,
+                trade_form, event_type, side, price_value, price_num, price_unit,
+                currency, quantity_value, quantity_num, quantity_unit,
+                parse_confidence, parser_version, quality_state,
+                quality_policy_version, is_conditional, attributes_json,
+                inserted_at_utc, ?
+            FROM market_observations
+            WHERE id IN ({placeholders})
+            """,
+            (_utc_now(), *ids),
+        )
+        connection.execute(
+            f"DELETE FROM market_observations WHERE id IN ({placeholders})",
+            ids,
+        )
+        connection.commit()
+        archived += len(ids)
+    hot = int(connection.execute("SELECT COUNT(*) FROM market_observations").fetchone()[0])
+    cold = int(
+        connection.execute("SELECT COUNT(*) FROM market_observations_archive").fetchone()[0]
+    )
+    return {
+        "archived_rows": archived,
+        "hot_rows": hot,
+        "archive_rows": cold,
+        "retention_hours": int(retention_hours),
+    }
+
+
+def snapshot_input_watermark(connection: sqlite3.Connection) -> dict[str, int | str]:
+    """Return a cheap watermark of hot facts that can change a Snapshot."""
+
+    row = connection.execute(
+        """
+        SELECT
+            COALESCE(MAX(id), 0) AS max_id,
+            COUNT(*) AS row_count,
+            COALESCE(MAX(event_time_utc), '') AS max_event_time_utc
+        FROM market_observations
+        WHERE quality_state = 'ELIGIBLE'
+        """
+    ).fetchone()
+    return {
+        "max_id": int(row[0] or 0),
+        "eligible_row_count": int(row[1] or 0),
+        "max_event_time_utc": str(row[2] or ""),
+    }
 
 
 def _utc_now() -> str:
@@ -236,6 +445,10 @@ def verify_market_store_read_only(connection: sqlite3.Connection) -> None:
     if (
         not _table_exists(connection, "market_observations")
         or not _table_exists(connection, "market_source_checkpoints")
+        or (
+            int(row["schema_version"]) >= 3
+            and not _table_exists(connection, "market_observations_archive")
+        )
         or not _view_exists(connection, "external_market_observations")
     ):
         raise MarketStoreError("market_store_schema_incomplete")
@@ -260,14 +473,23 @@ def initialize_market_store(connection: sqlite3.Connection) -> None:
         schema_version = int(row["schema_version"])
         if schema_version == 1:
             _upgrade_v1_to_v2(connection)
+            schema_version = 2
+        if schema_version == 2:
+            _upgrade_v2_to_v3(connection)
             schema_version = MARKET_STORE_SCHEMA_VERSION
         if schema_version != MARKET_STORE_SCHEMA_VERSION:
             raise MarketStoreMigrationRequired("market_store_schema_upgrade_required")
+        # Re-read contract after upgrades; metadata row may have changed.
+        row = connection.execute(
+            "SELECT schema_version, contract_version "
+            "FROM market_store_metadata WHERE singleton = 1"
+        ).fetchone()
         if int(row["contract_version"]) != MARKET_STORE_CONTRACT_VERSION:
             raise MarketStoreMigrationRequired("market_store_contract_upgrade_required")
         if (
             not _table_exists(connection, "market_observations")
             or not _table_exists(connection, "market_source_checkpoints")
+            or not _table_exists(connection, "market_observations_archive")
             or not _view_exists(
                 connection,
                 "external_market_observations",
@@ -511,11 +733,18 @@ def _legacy_price_unit(value: str | None) -> str | None:
     normalized = value.strip().upper()
     aliases = {
         "PROJECT_THOUSAND_TOMAN": "PROJECT_THOUSAND_TOMAN",
-        "IRT_PER_COIN": "IRT_PER_COIN",
-        "IRT_PER_MESGHAL_750": "IRT_PER_MESGHAL_750",
-        "IRT_PER_GRAM_750": "IRT_PER_GRAM_750",
-        "IRT_PER_USD": "IRT_PER_USD",
-        "IRT_PER_USDT": "IRT_PER_USDT",
+        "TOMAN_PER_COIN": "TOMAN_PER_COIN",
+        "TOMAN_PER_MESGHAL_750": "TOMAN_PER_MESGHAL_750",
+        "TOMAN_PER_GRAM_750": "TOMAN_PER_GRAM_750",
+        "TOMAN_PER_USD": "TOMAN_PER_USD",
+        "TOMAN_PER_USDT": "TOMAN_PER_USDT",
+        # Legacy IRT labels are remapped to toman; callers must still scale
+        # true-rial magnitudes before insert.
+        "IRT_PER_COIN": "TOMAN_PER_COIN",
+        "IRT_PER_MESGHAL_750": "TOMAN_PER_MESGHAL_750",
+        "IRT_PER_GRAM_750": "TOMAN_PER_GRAM_750",
+        "IRT_PER_USD": "TOMAN_PER_USD",
+        "IRT_PER_USDT": "TOMAN_PER_USDT",
         "USD_PER_TROY_OUNCE": "USD_PER_TROY_OUNCE",
     }
     return aliases.get(normalized)

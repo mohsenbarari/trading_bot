@@ -390,7 +390,7 @@ def private_gold_observations(source: PrivateGoldOfferInput) -> list[MarketObser
     published_at = _strict_utc(source.published_at_utc, field_name="private_gold_published_at_utc")
     available_at = _strict_utc(source.available_at_utc, field_name="private_gold_available_at_utc")
     assert published_at is not None and available_at is not None
-    price_irt = Decimal(parsed.price_toman) * Decimal("10")
+    price_store = Decimal(parsed.price_toman)
     attributes: dict[str, object] = {
         "paper_variant": parsed.paper_variant or "NOT_APPLICABLE",
         "conditional_reason": parsed.conditional_reason or "NONE",
@@ -411,9 +411,9 @@ def private_gold_observations(source: PrivateGoldOfferInput) -> list[MarketObser
             trade_form=parsed.trade_form,
             event_type="OFFER",
             side=parsed.side,
-            price=price_irt,
-            price_unit="IRT_PER_MESGHAL_750",
-            currency="IRT",
+            price=price_store,
+            price_unit="TOMAN_PER_MESGHAL_750",
+            currency="TOMAN",
             quantity=parsed.quantity,
             quantity_unit="LOT_COUNT",
             parse_confidence=parsed.parse_confidence,
@@ -442,9 +442,9 @@ def private_gold_observations(source: PrivateGoldOfferInput) -> list[MarketObser
                 trade_form=parsed.trade_form,
                 event_type="TRADE",
                 side=parsed.side,
-                price=price_irt,
-                price_unit="IRT_PER_MESGHAL_750",
-                currency="IRT",
+                price=price_store,
+                price_unit="TOMAN_PER_MESGHAL_750",
+                currency="TOMAN",
                 quantity=parsed.trade_quantity,
                 quantity_unit="LOT_COUNT",
                 parse_confidence=0.99 if source.edited_at_utc else 0.96,
@@ -553,8 +553,8 @@ def refresh_private_gold_paper_minute(
         event_type="QUOTE",
         side="MID",
         price=weighted_total / weights,
-        price_unit="IRT_PER_MESGHAL_750",
-        currency="IRT",
+        price_unit="TOMAN_PER_MESGHAL_750",
+        currency="TOMAN",
         parse_confidence=1.0,
         parser_version="private-gold-minute-v1",
         quality_state="ELIGIBLE",

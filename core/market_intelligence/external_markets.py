@@ -16,8 +16,8 @@ from typing import Literal
 from .market_contracts import MarketObservation, derive_event_key, normalize_utc
 
 
-EXTERNAL_MARKETS_ADAPTER_VERSION = "external-markets-v1"
-USDT_TOMAN_TO_IRT = Decimal("10")
+EXTERNAL_MARKETS_ADAPTER_VERSION = "external-markets-v2"
+RIAL_PER_TOMAN = Decimal("10")
 MESGHAL_750_GRAMS = Decimal("4.3318")
 IME_GOLD_BAR_FINENESS = Decimal("995")
 STANDARD_GOLD_FINENESS = Decimal("750")
@@ -119,32 +119,31 @@ def _base_observation(
 
 
 def usdt_toman_quote_to_observation(source: ExternalQuoteInput) -> MarketObservation:
-    """Normalize a provider quote explicitly expressed in Toman per USDT."""
+    """Normalize a provider quote explicitly expressed in toman per USDT."""
 
-    price_irt = _decimal(source.price, field_name="usdt_toman_price") * USDT_TOMAN_TO_IRT
+    price_toman = _decimal(source.price, field_name="usdt_toman_price")
     return _base_observation(
         source,
         instrument="USDT_IRT",
-        price=price_irt,
-        price_unit="IRT_PER_USDT",
-        currency="IRT",
+        price=price_toman,
+        price_unit="TOMAN_PER_USDT",
+        currency="TOMAN",
         attributes={
             "input_unit": "TOMAN_PER_USDT",
-            "conversion": "toman_to_irt_x10",
+            "conversion": "identity_toman_per_usdt",
         },
     )
 
 
 def ime_gold_bar_irr_quote_to_observation(source: ExternalQuoteInput) -> MarketObservation:
-    """Convert one 0.1g/995 IME certificate quote to IRR per 750 mesghal.
+    """Convert one 0.1g/995 IME certificate quote to toman per 750 mesghal.
 
-    ``raw_irr / 0.1g × 750/995 × 4.3318g`` yields the common 750-fineness
-    mesghal unit.  No toman conversion occurs here: the output is canonical
-    Iranian rial (IRT) by contract.
+    ``raw_irr / 0.1g × 750/995 × 4.3318g`` yields rial per mesghal; the store
+    keeps toman, so the result is divided by 10 once at this boundary.
     """
 
     raw_irr = _decimal(source.price, field_name="ime_gold_bar_irr_price")
-    normalized = (
+    normalized_rial = (
         raw_irr
         / IME_GOLD_BAR_CERTIFICATE_GRAMS
         * STANDARD_GOLD_FINENESS
@@ -154,31 +153,32 @@ def ime_gold_bar_irr_quote_to_observation(source: ExternalQuoteInput) -> MarketO
     return _base_observation(
         source,
         instrument="IME_GOLD_BAR",
-        price=normalized,
-        price_unit="IRT_PER_MESGHAL_750",
-        currency="IRT",
+        price=normalized_rial / RIAL_PER_TOMAN,
+        price_unit="TOMAN_PER_MESGHAL_750",
+        currency="TOMAN",
         attributes={
             "input_unit": "IRR_PER_CERTIFICATE_0_1G_995",
             "input_fineness": int(IME_GOLD_BAR_FINENESS),
             "input_weight_gram": float(IME_GOLD_BAR_CERTIFICATE_GRAMS),
             "output_fineness": int(STANDARD_GOLD_FINENESS),
             "output_mesghal_gram": float(MESGHAL_750_GRAMS),
-            "conversion": "irr_per_0_1g_995_to_irr_per_mesghal_750",
+            "conversion": "irr_per_0_1g_995_to_toman_per_mesghal_750",
         },
     )
 
 
 def ime_imam_coin_irr_quote_to_observation(source: ExternalQuoteInput) -> MarketObservation:
-    """Normalize an IME Imam coin quote already expressed in IRR per coin."""
+    """Normalize an IME Imam coin quote from rial/coin into toman/coin."""
 
+    price_rial = _decimal(source.price, field_name="ime_imam_coin_irr_price")
     return _base_observation(
         source,
         instrument="IME_GOLD_COIN_IMAM",
-        price=_decimal(source.price, field_name="ime_imam_coin_irr_price"),
-        price_unit="IRT_PER_COIN",
-        currency="IRT",
+        price=price_rial / RIAL_PER_TOMAN,
+        price_unit="TOMAN_PER_COIN",
+        currency="TOMAN",
         attributes={
             "input_unit": "IRR_PER_COIN",
-            "conversion": "identity_irr_per_coin",
+            "conversion": "rial_per_coin_to_toman_per_coin",
         },
     )

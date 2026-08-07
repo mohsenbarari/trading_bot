@@ -67,10 +67,10 @@ def _largest_price(line: str) -> Decimal | None:
     return max(valid) if valid else None
 
 
-def _tomans_to_irt(value: Decimal) -> Decimal:
-    """Public domestic feeds quote Toman; the canonical Store quotes IRT."""
+def _as_toman(value: Decimal) -> Decimal:
+    """Public domestic feeds quote toman; the store keeps toman."""
 
-    return value * Decimal("10")
+    return value
 
 
 def _settlement(text: str) -> str:
@@ -133,9 +133,9 @@ def _parse_melted_aggregate(text: str) -> list[ParsedPublicEvent]:
                     trade_form="UNKNOWN",
                     event_type="QUOTE",
                     side="MID",
-                    price=_tomans_to_irt(price),
-                    price_unit="IRT_PER_MESGHAL_750",
-                    currency="IRT",
+                    price=_as_toman(price),
+                    price_unit="TOMAN_PER_MESGHAL_750",
+                    currency="TOMAN",
                     parse_confidence=0.99,
                 )
             )
@@ -167,9 +167,9 @@ def _parse_melted_aggregate(text: str) -> list[ParsedPublicEvent]:
                 trade_form=trade_form,
                 event_type=event_type,
                 side=side,
-                price=_tomans_to_irt(price),
-                price_unit="IRT_PER_MESGHAL_750",
-                currency="IRT",
+                price=_as_toman(price),
+                price_unit="TOMAN_PER_MESGHAL_750",
+                currency="TOMAN",
                 parse_confidence=0.98,
                 attributes={"subtype_explicit": subtype != "نامشخص"},
             )
@@ -202,9 +202,9 @@ def _parse_melted_flow(text: str) -> list[ParsedPublicEvent]:
             trade_form="PAPER_NORMAL",
             event_type=event_type,
             side=side,
-            price=_tomans_to_irt(price),
-            price_unit="IRT_PER_MESGHAL_750",
-            currency="IRT",
+            price=_as_toman(price),
+            price_unit="TOMAN_PER_MESGHAL_750",
+            currency="TOMAN",
             parse_confidence=0.98 if event_type == "TRADE" else 0.995,
         )
     ]
@@ -241,9 +241,9 @@ def _parse_usd_herat(text: str) -> list[ParsedPublicEvent]:
                 trade_form=trade_form,
                 event_type=event_type,
                 side=side,
-                price=_tomans_to_irt(price),
-                price_unit="IRT_PER_USD",
-                currency="IRT",
+                price=_as_toman(price),
+                price_unit="TOMAN_PER_USD",
+                currency="TOMAN",
                 quantity=quantity,
                 quantity_unit=quantity_unit,
                 parse_confidence=0.97,
