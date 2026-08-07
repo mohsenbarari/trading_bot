@@ -1076,7 +1076,13 @@ async def claim_next_telegram_delivery_job(
                 "allowed_destination_classes_must_not_be_empty"
             )
     trade_overdue = (
-        (TelegramDeliveryJobRecord.action_kind == TelegramDeliveryAction.TRADE_RESULT)
+        TelegramDeliveryJobRecord.action_kind.in_(
+            (
+                TelegramDeliveryAction.TRADE_RESULT.value,
+                TelegramDeliveryAction.PARTIAL_OFFER_EDIT.value,
+                TelegramDeliveryAction.TRADED_OFFER_EDIT.value,
+            )
+        )
         & TelegramDeliveryJobRecord.delivery_deadline_at.is_not(None)
         & (TelegramDeliveryJobRecord.delivery_deadline_at <= current_time)
     )

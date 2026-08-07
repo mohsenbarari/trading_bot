@@ -135,17 +135,13 @@ class TelegramOfferQueueServiceTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertNotIn("message_id", kwargs["payload"])
 
-    async def test_edit_uses_editor_only_when_enabled(self):
+    async def test_edit_always_uses_primary_even_when_editor_flag_enabled(self):
         offer = make_offer(remaining_quantity=10)
         first_enqueued_at = utc_now() - timedelta(minutes=6)
         enqueue = AsyncMock(
             return_value=SimpleNamespace(created=True, job=SimpleNamespace(id=2))
         )
         with patch.object(
-            service.settings,
-            "telegram_delivery_queue_channel_editor_enabled",
-            True,
-        ), patch.object(
             service,
             "enqueue_telegram_delivery_job",
             new=enqueue,
@@ -169,20 +165,17 @@ class TelegramOfferQueueServiceTests(unittest.IsolatedAsyncioTestCase):
 
         kwargs = enqueue.await_args.kwargs
         self.assertEqual(kwargs["action"], TelegramDeliveryAction.PARTIAL_OFFER_EDIT)
-        self.assertEqual(kwargs["bot_identity"], "channel_editor")
+        self.assertEqual(kwargs["bot_identity"], "primary")
         self.assertEqual(kwargs["method"], "editMessageText")
         self.assertEqual(kwargs["payload"]["message_id"], 777)
         self.assertEqual(kwargs["eligible_at"], first_enqueued_at)
+        self.assertIsNotNone(kwargs["delivery_deadline_at"])
 
-    async def test_invalid_action_refresh_uses_trade_feeder_and_editor_lane(self):
+    async def test_invalid_action_refresh_uses_trade_feeder_on_primary(self):
         enqueue = AsyncMock(
             return_value=SimpleNamespace(created=True, job=SimpleNamespace(id=3))
         )
         with patch.object(
-            service.settings,
-            "telegram_delivery_queue_channel_editor_enabled",
-            True,
-        ), patch.object(
             service,
             "enqueue_telegram_delivery_job",
             new=enqueue,
@@ -207,7 +200,7 @@ class TelegramOfferQueueServiceTests(unittest.IsolatedAsyncioTestCase):
             kwargs["action"],
             TelegramDeliveryAction.INVALID_ACTION_BUTTON_EDIT,
         )
-        self.assertEqual(kwargs["bot_identity"], "channel_editor")
+        self.assertEqual(kwargs["bot_identity"], "primary")
         self.assertEqual(kwargs["method"], "editMessageText")
 
     async def test_expired_unpublished_offer_is_not_enqueued(self):

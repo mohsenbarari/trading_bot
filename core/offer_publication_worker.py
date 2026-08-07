@@ -22,11 +22,16 @@ from core.services.offer_publication_state_service import (
     apply_publication_state_update,
     canonical_telegram_publication_identity,
 )
-from core.services.telegram_offer_channel_service import apply_offer_channel_state_with_result
+from core.services.telegram_offer_channel_service import (
+    apply_offer_channel_state_with_result,
+    channel_edit_is_trade_priority,
+    publication_send_backlog_due_count,
+)
 from core.services.telegram_offer_publication_service import (
     get_or_create_telegram_publication_state,
     mark_telegram_publication_success,
 )
+from core.telegram_channel_pace import OFFER_CHANNEL_PACE
 from core.utils import utc_now
 from models.offer import Offer, OfferStatus
 from models.offer_publication_state import (
@@ -62,10 +67,10 @@ class OfferPublicationCycleReport:
 
 @dataclass(frozen=True, slots=True)
 class OfferChannelStateCycleReport:
-    processed: int
-    applied: int
-    failed: int
-    skipped_recent: int
+    processed: int = 0
+    applied: int = 0
+    failed: int = 0
+    skipped_recent: int = 0
     rate_limited: int = 0
     bad_request: int = 0
     retryable_failed: int = 0
@@ -114,7 +119,7 @@ def _bounded_setting_seconds(setting_name: str, *, default: float, minimum: floa
 def _channel_edit_spacing_seconds() -> float:
     return _bounded_setting_seconds(
         "offer_publication_worker_channel_edit_spacing_seconds",
-        default=0.35,
+        default=1.0,
         minimum=0.0,
         maximum=5.0,
     )
@@ -123,10 +128,24 @@ def _channel_edit_spacing_seconds() -> float:
 def _channel_send_spacing_seconds() -> float:
     return _bounded_setting_seconds(
         "offer_publication_worker_channel_send_spacing_seconds",
-        default=0.35,
+        default=1.0,
         minimum=0.0,
         maximum=5.0,
     )
+
+
+def _busy_backlog_due_threshold() -> int:
+    try:
+        return max(1, int(getattr(settings, "offer_publication_worker_busy_backlog_due", 20)))
+    except (TypeError, ValueError):
+        return 20
+
+
+def _channel_state_batch_limit() -> int:
+    try:
+        return max(1, int(getattr(settings, "offer_publication_worker_channel_state_batch_limit", 8)))
+    except (TypeError, ValueError):
+        return 8
 
 
 def _rate_limit_cooldown_seconds(retry_after_seconds: int | None) -> float:
@@ -325,25 +344,81 @@ def _is_terminal_offer(offer: Offer) -> bool:
     }
 
 
-async def run_offer_telegram_publication_cycle(*, limit: int | None = None) -> OfferPublicationCycleReport:
+async def run_offer_telegram_publication_cycle(
+    *,
+    limit: int | None = None,
+    telegram_send_spacing_seconds: float | None = None,
+) -> OfferPublicationCycleReport:
     assert_background_job_authority(JOB_OFFER_TELEGRAM_PUBLICATION)
 
     from api.routers.offers import send_offer_to_channel_with_result
+    from core.services.telegram_offer_publication_service import TelegramOfferSendResult
 
     allow_active_publication = not await active_publication_is_gated()
+    rate_limit_breaker: dict[str, Any] = {"hit": False, "retry_after_seconds": None}
+
+    async def _send_offer_to_channel_with_burst_brake(offer: Any, user: Any):
+        if rate_limit_breaker["hit"]:
+            return TelegramOfferSendResult(
+                message_id=None,
+                response_class="429",
+                status_code=429,
+                retry_after_seconds=rate_limit_breaker["retry_after_seconds"],
+                error_code="telegram_rate_limited",
+                error_message="publication_burst_rate_limit_brake",
+            )
+        # Token-bucket channel pace: allow a short burst (full bucket), then
+        # sustain ~20/min to the same channel. Stops the "flood → long 429 pause"
+        # pattern while still draining faster than a fixed 0.8s gap.
+        wait_seconds = OFFER_CHANNEL_PACE.wait_seconds_before_send()
+        if wait_seconds > 0:
+            await asyncio.sleep(wait_seconds)
+        result = await send_offer_to_channel_with_result(offer, user)
+        status_code = getattr(result, "status_code", None) if result is not None else None
+        response_class = getattr(result, "response_class", None) if result is not None else None
+        if response_class == "429" or status_code == 429:
+            OFFER_CHANNEL_PACE.note_rate_limited(
+                getattr(result, "retry_after_seconds", None)
+            )
+            rate_limit_breaker["hit"] = True
+            rate_limit_breaker["retry_after_seconds"] = getattr(
+                result, "retry_after_seconds", None
+            )
+            # Ensure reconcile stop condition always sees a classified 429 even if
+            # an older callback path returned a loosely typed failure.
+            if result is None or response_class != "429":
+                return TelegramOfferSendResult(
+                    message_id=None,
+                    response_class="429",
+                    status_code=429,
+                    retry_after_seconds=rate_limit_breaker["retry_after_seconds"],
+                    error_code="telegram_rate_limited",
+                )
+        return result
+
     async with AsyncSessionLocal() as db:
+        # Spacing is owned by OFFER_CHANNEL_PACE inside the send wrapper.
+        if telegram_send_spacing_seconds is None:
+            send_spacing = 0.0
+        else:
+            send_spacing = max(0.0, float(telegram_send_spacing_seconds))
         report = await reconcile_offer_publications(
             db,
             server_mode="foreign",
             dry_run=False,
             limit=_worker_batch_limit(limit),
-            send_offer_to_channel=send_offer_to_channel_with_result,
+            send_offer_to_channel=_send_offer_to_channel_with_burst_brake,
             allow_active_publication=allow_active_publication,
-            telegram_send_spacing_seconds=_channel_send_spacing_seconds(),
+            telegram_send_spacing_seconds=send_spacing,
             collect_observability=True,
         )
 
     rate_limited = int(report.get("telegram_rate_limited") or 0)
+    retry_after = _coerce_int(report.get("telegram_retry_after_seconds"))
+    if rate_limit_breaker["hit"]:
+        rate_limited = max(rate_limited, 1)
+        if retry_after is None:
+            retry_after = _coerce_int(rate_limit_breaker.get("retry_after_seconds"))
     return OfferPublicationCycleReport(
         processed=int(report.get("processed") or 0),
         repaired=int(report.get("repaired") or 0),
@@ -352,9 +427,7 @@ async def run_offer_telegram_publication_cycle(*, limit: int | None = None) -> O
         status=str(report.get("status") or "unknown"),
         rate_limited=rate_limited,
         cooldown_seconds=(
-            _rate_limit_cooldown_seconds(_coerce_int(report.get("telegram_retry_after_seconds")))
-            if rate_limited
-            else 0.0
+            _rate_limit_cooldown_seconds(retry_after) if rate_limited else 0.0
         ),
         response_counts=tuple(sorted(dict(report.get("telegram_response_counts") or {}).items())),
         skipped_locked=int(report.get("skipped_locked") or 0),
@@ -373,6 +446,26 @@ async def _load_channel_state_reconciliation_candidates(
 ) -> list[OfferChannelStateCandidate]:
     current_time = now or utc_now()
     publication_state = aliased(OfferPublicationState)
+    # Match shared-queue policy on the legacy path: trade presentation first,
+    # then other active (overtime), expired last.
+    channel_edit_priority = case(
+        (
+            or_(
+                Offer.status == OfferStatus.COMPLETED,
+                and_(
+                    Offer.status == OfferStatus.ACTIVE,
+                    Offer.remaining_quantity.is_not(None),
+                    Offer.quantity.is_not(None),
+                    Offer.remaining_quantity < Offer.quantity,
+                ),
+            ),
+            0,
+        ),
+        (Offer.status == OfferStatus.ACTIVE, 1),
+        (Offer.status == OfferStatus.CANCELLED, 2),
+        (Offer.status == OfferStatus.EXPIRED, 3),
+        else_=2,
+    )
     stmt = (
         select(Offer, publication_state)
         .outerjoin(
@@ -388,7 +481,11 @@ async def _load_channel_state_reconciliation_candidates(
             _channel_state_drift_condition(publication_state),
             _channel_state_due_condition(publication_state, now=current_time),
         )
-        .order_by(_channel_state_age_anchor(publication_state).asc().nullsfirst(), Offer.id.asc())
+        .order_by(
+            channel_edit_priority.asc(),
+            _channel_state_age_anchor(publication_state).asc().nullsfirst(),
+            Offer.id.asc(),
+        )
         .limit(max(int(limit or 1), 1))
     )
     result = await db.execute(stmt)
@@ -596,7 +693,12 @@ def _schedule_channel_state_retry(
     return delay
 
 
-async def run_offer_channel_state_cycle(*, limit: int | None = None) -> OfferChannelStateCycleReport:
+async def run_offer_channel_state_cycle(
+    *,
+    limit: int | None = None,
+    edit_spacing_seconds: float | None = None,
+    trade_priority_only: bool = False,
+) -> OfferChannelStateCycleReport:
     """Repair Telegram channel presentation for offers already published to the channel."""
     assert_background_job_authority(JOB_OFFER_TELEGRAM_PUBLICATION)
     processed = 0
@@ -608,17 +710,26 @@ async def run_offer_channel_state_cycle(*, limit: int | None = None) -> OfferCha
     retryable_failed = 0
     non_retryable_remembered = 0
     skipped_locked = 0
+    deferred = 0
     cooldown_seconds = 0.0
     response_counts: dict[str, int] = {}
     backlog = OfferChannelStateBacklog()
 
     async with AsyncSessionLocal() as db:
+        fetch_limit = _worker_batch_limit(limit)
+        if trade_priority_only:
+            fetch_limit = max(fetch_limit * 4, 32)
         candidates = await _load_channel_state_reconciliation_candidates(
             db,
-            limit=_worker_batch_limit(limit),
+            limit=fetch_limit,
         )
+        trade_budget = _worker_batch_limit(limit)
         for index, candidate in enumerate(candidates):
             offer = candidate.offer
+            if trade_priority_only and not channel_edit_is_trade_priority(offer):
+                continue
+            if trade_priority_only and processed >= trade_budget:
+                break
             if not await _try_acquire_channel_state_lock(db, offer):
                 skipped_locked += 1
                 await db.commit()
@@ -630,6 +741,18 @@ async def run_offer_channel_state_cycle(*, limit: int | None = None) -> OfferCha
                 await db.commit()
                 continue
             _prepare_channel_state_candidate_state(state, offer)
+
+            is_trade = channel_edit_is_trade_priority(offer)
+            if not is_trade:
+                if await publication_send_backlog_due_count() > 0:
+                    deferred += 1
+                    await db.commit()
+                    continue
+
+            wait_seconds = OFFER_CHANNEL_PACE.wait_seconds_before_send()
+            if wait_seconds > 0:
+                await asyncio.sleep(wait_seconds)
+
             processed += 1
             result = await apply_offer_channel_state_with_result(
                 offer,
@@ -641,7 +764,10 @@ async def run_offer_channel_state_cycle(*, limit: int | None = None) -> OfferCha
             if result.ok:
                 applied += 1
                 _mark_channel_state_applied(state, offer, now=utc_now())
+            elif result.response_class == "deferred":
+                deferred += 1
             elif result.response_class == "429":
+                OFFER_CHANNEL_PACE.note_rate_limited(result.retry_after_seconds)
                 failed += 1
                 rate_limited += 1
                 retryable_failed += 1
@@ -650,13 +776,17 @@ async def run_offer_channel_state_cycle(*, limit: int | None = None) -> OfferCha
             elif result.response_class == "400":
                 failed += 1
                 bad_request += 1
-                if _is_terminal_offer(offer):
+                reason = str(getattr(result, "reason", "") or "")
+                if reason in {
+                    "telegram_message_id_invalid",
+                    "telegram_message_not_modified",
+                } or _is_terminal_offer(offer):
                     non_retryable_remembered += 1
                     _mark_channel_state_applied(
                         state,
                         offer,
                         now=utc_now(),
-                        error_code="telegram_terminal_bad_request",
+                        error_code=reason or "telegram_terminal_bad_request",
                     )
                 else:
                     retryable_failed += 1
@@ -670,8 +800,12 @@ async def run_offer_channel_state_cycle(*, limit: int | None = None) -> OfferCha
             if result.response_class == "429":
                 break
 
-            if index < len(candidates) - 1:
-                spacing_seconds = _channel_edit_spacing_seconds()
+            if index < len(candidates) - 1 and result.ok:
+                spacing_seconds = (
+                    _channel_edit_spacing_seconds()
+                    if edit_spacing_seconds is None
+                    else max(0.0, float(edit_spacing_seconds))
+                )
                 if spacing_seconds > 0:
                     await asyncio.sleep(spacing_seconds)
 
@@ -681,7 +815,7 @@ async def run_offer_channel_state_cycle(*, limit: int | None = None) -> OfferCha
         processed=processed,
         applied=applied,
         failed=failed,
-        skipped_recent=skipped_recent,
+        skipped_recent=skipped_recent + deferred,
         rate_limited=rate_limited,
         bad_request=bad_request,
         retryable_failed=retryable_failed,
@@ -715,8 +849,26 @@ async def offer_telegram_publication_loop() -> None:
         with job_context(JOB_OFFER_TELEGRAM_PUBLICATION, iteration=iteration) as run_id:
             try:
                 report = await run_offer_telegram_publication_cycle()
-                channel_state_report = await run_offer_channel_state_cycle()
-                sleep_seconds = max(sleep_seconds, report.cooldown_seconds, channel_state_report.cooldown_seconds)
+                publication_due = int(report.backlog_due or 0)
+                # Send backlog owns the publisher quota. While sends are waiting
+                # or cooling down from 429, only trade presentation edits may run.
+                # Expiry/overtime/cancel wait until the send queue is empty.
+                bursting = publication_due >= _busy_backlog_due_threshold()
+                if report.rate_limited:
+                    channel_state_report = OfferChannelStateCycleReport()
+                else:
+                    channel_state_report = await run_offer_channel_state_cycle(
+                        limit=_channel_state_batch_limit(),
+                        edit_spacing_seconds=0.0 if bursting else None,
+                        trade_priority_only=bursting,
+                    )
+                # Honor Telegram retry_after only. When backlog is still due and
+                # we are not cooling down, start the next send cycle immediately.
+                cooldown = max(report.cooldown_seconds, channel_state_report.cooldown_seconds)
+                if cooldown > 0:
+                    sleep_seconds = max(sleep_seconds, cooldown)
+                elif bursting:
+                    sleep_seconds = 0.0
                 if (
                     report.processed
                     or report.repaired

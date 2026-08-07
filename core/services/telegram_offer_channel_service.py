@@ -121,12 +121,25 @@ def _classify_gateway_result(
             method=result.method,
         )
     if status_code == 400:
+        response_json = result.response_json if isinstance(result.response_json, Mapping) else {}
+        detail = (
+            result.response_text
+            or response_json.get("description")
+            or result.error
+        )
+        detail_text = str(detail or "")
+        reason = "telegram_bad_request"
+        lowered = detail_text.lower()
+        if "message_id_invalid" in lowered or "message to edit not found" in lowered:
+            reason = "telegram_message_id_invalid"
+        elif TELEGRAM_MESSAGE_NOT_MODIFIED in lowered:
+            reason = "telegram_message_not_modified"
         return OfferChannelStateApplyResult(
             ok=False,
             response_class="400",
             status_code=status_code,
-            reason="telegram_bad_request",
-            error=result.error,
+            reason=reason,
+            error=detail_text or result.error,
             method=result.method,
         )
     if status_code is not None and 400 <= status_code <= 499:
@@ -187,6 +200,67 @@ def get_offer_channel_history_tag(offer: Any, traded_quantity: Optional[int] = N
     if quantity and quantity > 0:
         return f"🤝 {quantity:,} تا ✅"
     return TELEGRAM_OFFER_EXPIRED_TAG
+
+
+def _terminal_channel_edit_should_clear_buttons(
+    offer: Any,
+    *,
+    traded_quantity: Optional[int] = None,
+) -> bool:
+    """Whether a terminal channel edit should clear inline buttons.
+
+    Pure time-limit expiry only tags the post and leaves buttons alone.
+    Completed / cancelled / any partial-trade terminal state clears buttons in
+    the same editMessageText call as the text update.
+    """
+    status = _status_value(getattr(offer, "status", None))
+    if status == OfferStatus.EXPIRED.value:
+        quantity = (
+            traded_quantity
+            if traded_quantity is not None
+            else infer_traded_quantity_from_offer(offer)
+        )
+        return bool(quantity and quantity > 0)
+    return True
+
+
+def channel_edit_is_trade_priority(
+    offer: Any,
+    *,
+    traded_quantity: Optional[int] = None,
+) -> bool:
+    """True when this channel edit must preempt the send backlog.
+
+    Fully traded and still-active partial trades are high priority (same family
+    as trade-result delivery). Expiry / overtime / cancel stay deferred while
+    unpublished offers are waiting to be sent.
+    """
+    status = _status_value(getattr(offer, "status", None))
+    if status == OfferStatus.COMPLETED.value:
+        return True
+    if status == OfferStatus.ACTIVE.value:
+        quantity = _finite_int(getattr(offer, "quantity", None))
+        remaining = _finite_int(getattr(offer, "remaining_quantity", None))
+        return (
+            quantity is not None
+            and remaining is not None
+            and remaining < quantity
+        )
+    return False
+
+
+async def publication_send_backlog_due_count() -> int:
+    """How many Telegram channel publishes are due right now (foreign only)."""
+    if current_server() != SERVER_FOREIGN:
+        return 0
+    from core.db import AsyncSessionLocal
+    from core.services.offer_publication_reconciliation_service import (
+        publication_reconciliation_backlog,
+    )
+
+    async with AsyncSessionLocal() as db:
+        backlog = await publication_reconciliation_backlog(db, server_mode="foreign")
+    return int(getattr(backlog, "due", 0) or 0)
 
 
 def project_offer_channel_lifecycle(
@@ -404,17 +478,63 @@ async def apply_offer_channel_state_with_result(
 
     status = _status_value(getattr(offer, "status", None))
     history_tag = get_offer_channel_history_tag(offer, traded_quantity=traded_quantity)
+    # While unpublished offers are waiting, only trade presentation may spend
+    # the publisher bot quota. Expiry/overtime/cancel defer to reconciliation.
+    if not channel_edit_is_trade_priority(offer, traded_quantity=traded_quantity):
+        try:
+            send_backlog_due = await publication_send_backlog_due_count()
+        except Exception as exc:
+            logger.debug(
+                "Failed to read publication backlog before channel edit",
+                extra={
+                    "event": "telegram.offer_channel_edit_backlog_check_failed",
+                    "offer_id": getattr(offer, "id", None),
+                    "reason": reason,
+                    "error_class": type(exc).__name__,
+                },
+            )
+            send_backlog_due = 0
+        if send_backlog_due > 0:
+            return OfferChannelStateApplyResult(
+                ok=False,
+                response_class="deferred",
+                reason="send_backlog_defers_non_trade_edit",
+            )
+
+    # Offer posts are published with the primary bot's inline keyboard. Telegram
+    # rejects a second (editor) bot editing those messages (MESSAGE_ID_INVALID),
+    # even for text-only edits. Always mutate with the publisher bot.
+    publisher_bot_token = None
 
     try:
         if status and status != OfferStatus.ACTIVE.value:
-            result = await telegram_gateway.edit_message_text(
-                channel_id,
-                channel_message_id,
-                build_offer_channel_message(offer, history_tag=history_tag),
-                reply_markup={"inline_keyboard": []},
-                timeout=timeout,
-                idempotency_key=f"offer-channel-state:{getattr(offer, 'id', '')}:{status}",
+            text = build_offer_channel_message(offer, history_tag=history_tag)
+            # Pure expiry: tag the post only; leave buttons untouched.
+            # Trade / cancel / partial-trade-then-expire: one editMessageText that
+            # updates text and clears the keyboard together.
+            clear_buttons = _terminal_channel_edit_should_clear_buttons(
+                offer,
+                traded_quantity=traded_quantity,
             )
+            if clear_buttons:
+                result = await telegram_gateway.edit_message_text(
+                    channel_id,
+                    channel_message_id,
+                    text,
+                    reply_markup={"inline_keyboard": []},
+                    timeout=timeout,
+                    bot_token=publisher_bot_token,
+                    idempotency_key=f"offer-channel-state:{getattr(offer, 'id', '')}:{status}",
+                )
+            else:
+                result = await telegram_gateway.edit_message_text(
+                    channel_id,
+                    channel_message_id,
+                    text,
+                    timeout=timeout,
+                    bot_token=publisher_bot_token,
+                    idempotency_key=f"offer-channel-state:{getattr(offer, 'id', '')}:{status}",
+                )
         else:
             from core.trading_settings import get_trading_settings
 
@@ -443,6 +563,7 @@ async def apply_offer_channel_state_with_result(
                     ),
                     reply_markup=markup or {"inline_keyboard": []},
                     timeout=timeout,
+                    bot_token=publisher_bot_token,
                     idempotency_key=(
                         f"offer-channel-lifecycle:{getattr(offer, 'id', '')}:{phase}"
                     ),
@@ -453,6 +574,7 @@ async def apply_offer_channel_state_with_result(
                     channel_message_id,
                     reply_markup=markup,
                     timeout=timeout,
+                    bot_token=publisher_bot_token,
                     idempotency_key=f"offer-channel-buttons:{getattr(offer, 'id', '')}",
                 )
         return _classify_gateway_result(result)

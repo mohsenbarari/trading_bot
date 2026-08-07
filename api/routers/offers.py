@@ -1410,20 +1410,22 @@ async def send_offer_to_channel_with_result(offer: Offer, user: User) -> Telegra
             reply_markup=build_offer_channel_reply_markup(offer),
             idempotency_key=f"offer-channel-send:{getattr(offer, 'id', '')}",
         )
-        if result.ok:
-            return telegram_offer_send_result_from_gateway(result)
-        log_trading_event(
-            logger,
-            "offer_channel_send_failed",
-            level="warning",
-            action="trading_side_effect",
-            result="failure",
-            side_effect="telegram_message",
-            offer_id=getattr(offer, "id", None),
-            status_code=result.status_code,
-            error=result.error,
-        )
-        return telegram_offer_send_result_from_gateway(result)
+        send_result = telegram_offer_send_result_from_gateway(result)
+        if not result.ok:
+            # Do not pass unsupported kwargs into log_trading_event — a TypeError
+            # here used to discard the classified 429 and break burst backoff.
+            log_trading_event(
+                logger,
+                "offer_channel_send_failed",
+                level="warning",
+                action="trading_side_effect",
+                result="failure",
+                side_effect="telegram_message",
+                offer_id=getattr(offer, "id", None),
+                status_code=result.status_code,
+                error_class=send_result.response_class or result.error or "telegram_send_failed",
+            )
+        return send_result
     except Exception as exc:
         log_trading_event(
             logger,

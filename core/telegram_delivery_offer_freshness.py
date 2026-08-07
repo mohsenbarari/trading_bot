@@ -22,6 +22,7 @@ from core.services.telegram_offer_channel_service import (
     build_offer_channel_message,
     build_offer_channel_reply_markup,
     get_offer_channel_history_tag,
+    infer_traded_quantity_from_offer,
     project_offer_channel_lifecycle,
 )
 from core.telegram_delivery_queue_contract import (
@@ -155,6 +156,12 @@ def _validate_static_route(
         return _quarantined("offer_freshness_edit_route_mismatch")
     if _strict_payload_int(payload.get("message_id")) is None:
         return _quarantined("offer_freshness_edit_message_id_missing")
+    if action == TelegramDeliveryAction.EXPIRED_OFFER_EDIT:
+        markup = payload.get("reply_markup")
+        # Pure expiry omits reply_markup; partial-trade-then-expire clears it.
+        if markup is not None and markup != {"inline_keyboard": []}:
+            return _quarantined("offer_freshness_expired_keyboard_invalid")
+        return None
     if action in OFFER_TERMINAL_EDIT_ACTIONS and payload.get("reply_markup") != {
         "inline_keyboard": []
     }:
@@ -312,14 +319,30 @@ def build_authoritative_offer_delivery_payload(
         return payload
 
     if action in OFFER_TERMINAL_EDIT_ACTIONS:
-        reply_markup: dict[str, Any] | None = {"inline_keyboard": []}
-    else:
-        reply_markup = build_offer_channel_reply_markup(
+        history_tag = get_offer_channel_history_tag(offer)
+        text = build_offer_channel_message(
             offer,
-            accepts_new_public_interaction=projection.accepts_new_public_interaction,
+            history_tag=history_tag,
+            lifecycle_phase=phase,
         )
-        if reply_markup is None:
-            reply_markup = {"inline_keyboard": []}
+        payload = {
+            "chat_id": expected_channel_id,
+            "message_id": message_id,
+            "text": text,
+        }
+        clear_buttons = True
+        if action == TelegramDeliveryAction.EXPIRED_OFFER_EDIT:
+            clear_buttons = bool(infer_traded_quantity_from_offer(offer) > 0)
+        if clear_buttons:
+            payload["reply_markup"] = {"inline_keyboard": []}
+        return payload
+
+    reply_markup = build_offer_channel_reply_markup(
+        offer,
+        accepts_new_public_interaction=projection.accepts_new_public_interaction,
+    )
+    if reply_markup is None:
+        reply_markup = {"inline_keyboard": []}
 
     payload = {
         "chat_id": expected_channel_id,

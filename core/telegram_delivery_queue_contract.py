@@ -261,13 +261,13 @@ _ACTION_PRIORITY_AND_RANK: dict[TelegramDeliveryAction, tuple[TelegramDeliveryPr
     TelegramDeliveryAction.GENERAL_IMMEDIATE: (TelegramDeliveryPriority.M1, 4),
     TelegramDeliveryAction.PREAUTH_INTERACTION: (TelegramDeliveryPriority.M1, 4),
     TelegramDeliveryAction.PREAUTH_INTERACTION_EDIT: (TelegramDeliveryPriority.M1, 4),
-    TelegramDeliveryAction.PARTIAL_OFFER_EDIT: (TelegramDeliveryPriority.M2, 0),
+    # Channel trade presentation shares TRADE_RESULT urgency (M1/1) and the same
+    # 5s overdue promotion to (M0, 1). Editor lane is cancelled; primary owns both.
+    TelegramDeliveryAction.PARTIAL_OFFER_EDIT: (TelegramDeliveryPriority.M1, 1),
+    TelegramDeliveryAction.TRADED_OFFER_EDIT: (TelegramDeliveryPriority.M1, 1),
     TelegramDeliveryAction.NEW_USER_MEMBERSHIP: (TelegramDeliveryPriority.M2, 1),
-    TelegramDeliveryAction.TRADED_OFFER_EDIT: (TelegramDeliveryPriority.M3, 0),
     TelegramDeliveryAction.MARKET_TRANSITION: (TelegramDeliveryPriority.M4, 0),
     TelegramDeliveryAction.MARKET_STATUS_CORRECTION: (TelegramDeliveryPriority.M4, 0),
-    TelegramDeliveryAction.EXPIRED_OFFER_EDIT: (TelegramDeliveryPriority.M4, 1),
-    TelegramDeliveryAction.CANCELLED_OFFER_EDIT: (TelegramDeliveryPriority.M4, 2),
     TelegramDeliveryAction.INVALID_ACTION_BUTTON_EDIT: (TelegramDeliveryPriority.M4, 3),
     TelegramDeliveryAction.ACCOUNT_STATUS: (TelegramDeliveryPriority.M5, 0),
     TelegramDeliveryAction.CHANNEL_MEMBER_BAN: (TelegramDeliveryPriority.M5, 0),
@@ -276,15 +276,19 @@ _ACTION_PRIORITY_AND_RANK: dict[TelegramDeliveryAction, tuple[TelegramDeliveryPr
     TelegramDeliveryAction.DELAYED_RESTRICTION: (TelegramDeliveryPriority.M5, 0),
     TelegramDeliveryAction.TARGETED_ADMIN_MESSAGE: (TelegramDeliveryPriority.M5, 1),
     TelegramDeliveryAction.OTHER_ACTIVE_OFFER_EDIT: (TelegramDeliveryPriority.M5, 2),
-    TelegramDeliveryAction.OVERTIME_CHANNEL_EDIT: (TelegramDeliveryPriority.M5, 2),
-    TelegramDeliveryAction.FINAL_TAIL_CHANNEL_EDIT: (TelegramDeliveryPriority.M5, 2),
     TelegramDeliveryAction.TRADE_NONCRITICAL: (TelegramDeliveryPriority.M5, 3),
-    TelegramDeliveryAction.ADMIN_BROADCAST: (TelegramDeliveryPriority.M6, 0),
-    TelegramDeliveryAction.GENERAL_ANNOUNCEMENT: (TelegramDeliveryPriority.M6, 1),
-    TelegramDeliveryAction.NONCRITICAL_MARKET: (TelegramDeliveryPriority.M6, 2),
-    TelegramDeliveryAction.RECONCILIATION_EDIT: (TelegramDeliveryPriority.M6, 3),
-    TelegramDeliveryAction.TEMPORARY_CLEANUP: (TelegramDeliveryPriority.M7, 0),
-    TelegramDeliveryAction.COSMETIC_CLEANUP: (TelegramDeliveryPriority.M7, 1),
+    # Overtime / final-tail sit one priority band above expired (M7).
+    TelegramDeliveryAction.OVERTIME_CHANNEL_EDIT: (TelegramDeliveryPriority.M6, 0),
+    TelegramDeliveryAction.FINAL_TAIL_CHANNEL_EDIT: (TelegramDeliveryPriority.M6, 0),
+    TelegramDeliveryAction.ADMIN_BROADCAST: (TelegramDeliveryPriority.M6, 1),
+    TelegramDeliveryAction.GENERAL_ANNOUNCEMENT: (TelegramDeliveryPriority.M6, 2),
+    TelegramDeliveryAction.NONCRITICAL_MARKET: (TelegramDeliveryPriority.M6, 3),
+    TelegramDeliveryAction.RECONCILIATION_EDIT: (TelegramDeliveryPriority.M6, 4),
+    # Expired / cancelled channel edits are lowest business work on the primary queue.
+    TelegramDeliveryAction.EXPIRED_OFFER_EDIT: (TelegramDeliveryPriority.M7, 0),
+    TelegramDeliveryAction.CANCELLED_OFFER_EDIT: (TelegramDeliveryPriority.M7, 1),
+    TelegramDeliveryAction.TEMPORARY_CLEANUP: (TelegramDeliveryPriority.M7, 2),
+    TelegramDeliveryAction.COSMETIC_CLEANUP: (TelegramDeliveryPriority.M7, 3),
 }
 
 _FEEDER_INTERNAL_RANK: dict[
@@ -299,12 +303,12 @@ _FEEDER_INTERNAL_RANK: dict[
     (TelegramFeederKind.OFFER_CONTROL, TelegramDeliveryAction.RECONCILIATION_EDIT): 6,
     (TelegramFeederKind.OFFER_EDIT, TelegramDeliveryAction.PARTIAL_OFFER_EDIT): 0,
     (TelegramFeederKind.OFFER_EDIT, TelegramDeliveryAction.TRADED_OFFER_EDIT): 1,
-    (TelegramFeederKind.OFFER_EDIT, TelegramDeliveryAction.EXPIRED_OFFER_EDIT): 2,
-    (TelegramFeederKind.OFFER_EDIT, TelegramDeliveryAction.CANCELLED_OFFER_EDIT): 3,
-    (TelegramFeederKind.OFFER_EDIT, TelegramDeliveryAction.OTHER_ACTIVE_OFFER_EDIT): 4,
-    (TelegramFeederKind.OFFER_EDIT, TelegramDeliveryAction.OVERTIME_CHANNEL_EDIT): 4,
-    (TelegramFeederKind.OFFER_EDIT, TelegramDeliveryAction.FINAL_TAIL_CHANNEL_EDIT): 4,
-    (TelegramFeederKind.OFFER_EDIT, TelegramDeliveryAction.RECONCILIATION_EDIT): 5,
+    (TelegramFeederKind.OFFER_EDIT, TelegramDeliveryAction.OVERTIME_CHANNEL_EDIT): 2,
+    (TelegramFeederKind.OFFER_EDIT, TelegramDeliveryAction.FINAL_TAIL_CHANNEL_EDIT): 2,
+    (TelegramFeederKind.OFFER_EDIT, TelegramDeliveryAction.OTHER_ACTIVE_OFFER_EDIT): 3,
+    (TelegramFeederKind.OFFER_EDIT, TelegramDeliveryAction.CANCELLED_OFFER_EDIT): 4,
+    (TelegramFeederKind.OFFER_EDIT, TelegramDeliveryAction.EXPIRED_OFFER_EDIT): 5,
+    (TelegramFeederKind.OFFER_EDIT, TelegramDeliveryAction.RECONCILIATION_EDIT): 6,
     (TelegramFeederKind.TRADE, TelegramDeliveryAction.TRADE_RESULT): 0,
     (TelegramFeederKind.TRADE, TelegramDeliveryAction.TRADE_RESPONSE): 1,
     (TelegramFeederKind.TRADE, TelegramDeliveryAction.TRADE_ALTERNATIVE): 2,
@@ -350,6 +354,17 @@ def feeder_internal_rank(
         raise ValueError(f"action_not_allowed_for_feeder:{feeder.value}:{action.value}") from exc
 
 
+# Channel trade edits promote like TRADE_RESULT after this many seconds waiting.
+CHANNEL_TRADE_EDIT_DELIVERY_DEADLINE_SECONDS = 5
+_DEADLINE_PROMOTED_ACTIONS = frozenset(
+    {
+        TelegramDeliveryAction.TRADE_RESULT,
+        TelegramDeliveryAction.PARTIAL_OFFER_EDIT,
+        TelegramDeliveryAction.TRADED_OFFER_EDIT,
+    }
+)
+
+
 def priority_and_rank_for_action(
     action: TelegramDeliveryAction,
     *,
@@ -357,7 +372,7 @@ def priority_and_rank_for_action(
     delivery_deadline_at: datetime | None = None,
 ) -> tuple[TelegramDeliveryPriority, int]:
     if (
-        action == TelegramDeliveryAction.TRADE_RESULT
+        action in _DEADLINE_PROMOTED_ACTIONS
         and now is not None
         and delivery_deadline_at is not None
         and now >= delivery_deadline_at

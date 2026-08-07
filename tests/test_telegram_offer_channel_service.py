@@ -118,7 +118,7 @@ class TelegramOfferChannelServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("🤝 ✅", payload["text"])
         self.assertEqual(payload["reply_markup"], {"inline_keyboard": []})
 
-    async def test_apply_pure_expired_edits_text_and_removes_buttons(self):
+    async def test_apply_pure_expired_edits_text_and_keeps_buttons(self):
         response = SimpleNamespace(status_code=200, text="")
         client = FakeHttpClientContext(response=response)
         offer = make_offer(
@@ -129,6 +129,10 @@ class TelegramOfferChannelServiceTests(unittest.IsolatedAsyncioTestCase):
         )
 
         with patch("core.services.telegram_offer_channel_service.current_server", return_value="foreign"), \
+             patch(
+                 "core.services.telegram_offer_channel_service.publication_send_backlog_due_count",
+                 new=AsyncMock(return_value=0),
+             ), \
              patch.object(channel_service.settings, "bot_token", "bot-token"), \
              patch.object(channel_service.settings, "channel_id", -100), \
              patch("core.telegram_gateway.httpx.AsyncClient", return_value=client):
@@ -142,7 +146,52 @@ class TelegramOfferChannelServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload["chat_id"], -100)
         self.assertEqual(payload["message_id"], 123)
         self.assertIn("❌", payload["text"])
-        self.assertEqual(payload["reply_markup"], {"inline_keyboard": []})
+        self.assertNotIn("reply_markup", payload)
+
+    async def test_non_trade_edit_defers_when_send_backlog_due(self):
+        client = FakeHttpClientContext(response=SimpleNamespace(status_code=200, text=""))
+        offer = make_offer(
+            status=OfferStatus.EXPIRED,
+            expire_reason="time_limit",
+            quantity=30,
+            remaining_quantity=30,
+        )
+
+        with patch("core.services.telegram_offer_channel_service.current_server", return_value="foreign"), \
+             patch(
+                 "core.services.telegram_offer_channel_service.publication_send_backlog_due_count",
+                 new=AsyncMock(return_value=12),
+             ), \
+             patch.object(channel_service.settings, "bot_token", "bot-token"), \
+             patch.object(channel_service.settings, "channel_id", -100), \
+             patch("core.telegram_gateway.httpx.AsyncClient", return_value=client) as client_ctor:
+            result = await channel_service.apply_offer_channel_state_with_result(
+                offer,
+                reason="auto_expire_time_limit",
+            )
+
+        self.assertFalse(result.ok)
+        self.assertEqual(result.response_class, "deferred")
+        self.assertEqual(result.reason, "send_backlog_defers_non_trade_edit")
+        client_ctor.assert_not_called()
+
+    async def test_trade_edit_not_deferred_when_send_backlog_due(self):
+        response = SimpleNamespace(status_code=200, text="")
+        client = FakeHttpClientContext(response=response)
+        offer = make_offer(status=OfferStatus.COMPLETED)
+
+        with patch("core.services.telegram_offer_channel_service.current_server", return_value="foreign"), \
+             patch(
+                 "core.services.telegram_offer_channel_service.publication_send_backlog_due_count",
+                 new=AsyncMock(return_value=12),
+             ), \
+             patch.object(channel_service.settings, "bot_token", "bot-token"), \
+             patch.object(channel_service.settings, "channel_id", -100), \
+             patch("core.telegram_gateway.httpx.AsyncClient", return_value=client):
+            result = await channel_service.apply_offer_channel_state(offer, reason="trade")
+
+        self.assertTrue(result)
+        self.assertEqual(client.post.await_count, 1)
 
     async def test_apply_partially_traded_expired_edits_text_and_removes_buttons(self):
         response = SimpleNamespace(status_code=200, text="")
@@ -155,6 +204,10 @@ class TelegramOfferChannelServiceTests(unittest.IsolatedAsyncioTestCase):
         )
 
         with patch("core.services.telegram_offer_channel_service.current_server", return_value="foreign"), \
+             patch(
+                 "core.services.telegram_offer_channel_service.publication_send_backlog_due_count",
+                 new=AsyncMock(return_value=0),
+             ), \
              patch.object(channel_service.settings, "bot_token", "bot-token"), \
              patch.object(channel_service.settings, "channel_id", -100), \
              patch("core.telegram_gateway.httpx.AsyncClient", return_value=client):
@@ -371,6 +424,9 @@ class TelegramOfferChannelServiceTests(unittest.IsolatedAsyncioTestCase):
         with patch(
             "core.services.telegram_offer_channel_service.current_server",
             return_value="foreign",
+        ), patch(
+            "core.services.telegram_offer_channel_service.publication_send_backlog_due_count",
+            new=AsyncMock(return_value=0),
         ), patch.object(
             channel_service.settings, "bot_token", "bot-token"
         ), patch.object(

@@ -355,6 +355,50 @@ class TelegramDeliveryQueueContractTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(first.state, TelegramDeliveryState.SENT)
 
+    async def test_channel_trade_edits_promote_like_trade_result_after_five_seconds(self):
+        from core.telegram_delivery_queue_contract import priority_and_rank_for_action
+
+        self.assertEqual(
+            priority_and_rank_for_action(TelegramDeliveryAction.PARTIAL_OFFER_EDIT),
+            (TelegramDeliveryPriority.M1, 1),
+        )
+        self.assertEqual(
+            priority_and_rank_for_action(TelegramDeliveryAction.TRADED_OFFER_EDIT),
+            (TelegramDeliveryPriority.M1, 1),
+        )
+        self.assertEqual(
+            priority_and_rank_for_action(TelegramDeliveryAction.OVERTIME_CHANNEL_EDIT),
+            (TelegramDeliveryPriority.M6, 0),
+        )
+        self.assertEqual(
+            priority_and_rank_for_action(TelegramDeliveryAction.EXPIRED_OFFER_EDIT),
+            (TelegramDeliveryPriority.M7, 0),
+        )
+        queue = InMemoryTelegramDeliveryQueue()
+        publish = await self.enqueue(
+            queue,
+            "publish",
+            feeder=TelegramFeederKind.OFFER_CONTROL,
+            action=TelegramDeliveryAction.OFFER_PUBLISH,
+        )
+        overdue_partial = await self.enqueue(
+            queue,
+            "partial",
+            feeder=TelegramFeederKind.OFFER_EDIT,
+            action=TelegramDeliveryAction.PARTIAL_OFFER_EDIT,
+            delivery_deadline_at=NOW - timedelta(seconds=1),
+        )
+        expired = await self.enqueue(
+            queue,
+            "expired",
+            feeder=TelegramFeederKind.OFFER_EDIT,
+            action=TelegramDeliveryAction.EXPIRED_OFFER_EDIT,
+        )
+        # Overdue trade edit shares M0 with publish but rank 1 beats publish rank 2.
+        self.assertIs(await self.claim(queue, worker="a"), overdue_partial)
+        self.assertIs(await self.claim(queue, worker="b"), publish)
+        self.assertIs(await self.claim(queue, worker="c"), expired)
+
     def test_all_six_feeder_rank_matrices_match_roadmap(self):
         matrices = {
             TelegramFeederKind.OFFER_CONTROL: [
@@ -369,9 +413,10 @@ class TelegramDeliveryQueueContractTests(unittest.IsolatedAsyncioTestCase):
             TelegramFeederKind.OFFER_EDIT: [
                 TelegramDeliveryAction.PARTIAL_OFFER_EDIT,
                 TelegramDeliveryAction.TRADED_OFFER_EDIT,
-                TelegramDeliveryAction.EXPIRED_OFFER_EDIT,
-                TelegramDeliveryAction.CANCELLED_OFFER_EDIT,
+                TelegramDeliveryAction.OVERTIME_CHANNEL_EDIT,
                 TelegramDeliveryAction.OTHER_ACTIVE_OFFER_EDIT,
+                TelegramDeliveryAction.CANCELLED_OFFER_EDIT,
+                TelegramDeliveryAction.EXPIRED_OFFER_EDIT,
                 TelegramDeliveryAction.RECONCILIATION_EDIT,
             ],
             TelegramFeederKind.TRADE: [

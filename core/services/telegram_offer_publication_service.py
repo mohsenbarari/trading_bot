@@ -448,12 +448,27 @@ async def publish_offer_to_telegram_channel_once(
             retry_after_seconds=send_result.retry_after_seconds,
         )
 
-    mark_telegram_publication_failure(
-        state,
-        offer,
-        error_code=send_result.error_code or "telegram_send_empty_result",
-        error_message=send_result.error_message,
-    )
+    # Preserve Telegram classification even when a concurrent expiry/update makes
+    # the local offer row stale. Losing "429" here previously let the burst loop
+    # keep hammering sendMessage for the rest of the batch.
+    try:
+        mark_telegram_publication_failure(
+            state,
+            offer,
+            error_code=send_result.error_code or "telegram_send_empty_result",
+            error_message=send_result.error_message,
+        )
+    except Exception as exc:
+        logger.warning(
+            "Telegram offer publication failure mark skipped after send",
+            extra={
+                "event": "telegram.offer_publication_failure_mark_skipped",
+                "offer_id": getattr(offer, "id", None),
+                "offer_public_id": getattr(offer, "offer_public_id", None),
+                "response_class": send_result.response_class,
+                "error_type": type(exc).__name__,
+            },
+        )
     return TelegramOfferPublicationResult(
         message_id=None,
         status=OfferPublicationStatus.FAILED,

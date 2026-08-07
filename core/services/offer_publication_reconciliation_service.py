@@ -674,6 +674,10 @@ async def reconcile_offer_publications(
                     "result": "failed",
                     "reason": type(exc).__name__,
                 }
+                # Concurrent offer updates (common during wave expiry) must not
+                # burn the rest of the Telegram burst budget in this cycle.
+                if type(exc).__name__ == "StaleDataError":
+                    stop_repair_loop = True
 
         if result.get("result") == "repaired":
             _clear_candidate_retry(candidate)
@@ -687,10 +691,27 @@ async def reconcile_offer_publications(
                 commit = getattr(db, "commit", None)
                 if commit is not None:
                     await commit()
-        except Exception:
+        except Exception as exc:
             rollback = getattr(db, "rollback", None)
             if rollback is not None:
                 await rollback()
+            # Keep Telegram rate-limit classification even when commit races.
+            if str(result.get("telegram_response_class") or "").strip() == "429":
+                telegram_rate_limited += 1
+                raw_retry_after = _coerce_int(result.get("telegram_retry_after_seconds"))
+                if raw_retry_after is not None:
+                    telegram_retry_after_seconds = max(
+                        telegram_retry_after_seconds or 0, raw_retry_after
+                    )
+                stop_repair_loop = True
+                findings.append(
+                    {
+                        **_candidate_payload(candidate, result=result.get("result", "unknown")),
+                        **result,
+                        "commit_error": type(exc).__name__,
+                    }
+                )
+                break
             raise
 
         if result.get("result") == "repaired":
@@ -702,7 +723,10 @@ async def reconcile_offer_publications(
         response_class = str(result.get("telegram_response_class") or "").strip()
         if response_class:
             telegram_response_counts[response_class] = telegram_response_counts.get(response_class, 0) + 1
-        if response_class == "429":
+        rate_limited = response_class == "429" or str(
+            result.get("reason") or result.get("error_code") or ""
+        ) in {"telegram_rate_limited", "telegram_send_rate_limited"}
+        if rate_limited:
             telegram_rate_limited += 1
             raw_retry_after = _coerce_int(result.get("telegram_retry_after_seconds"))
             if raw_retry_after is not None:

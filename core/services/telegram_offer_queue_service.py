@@ -15,13 +15,11 @@ from sqlalchemy import and_, case, false, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased, selectinload
 
-from core.config import settings
 from core.server_routing import SERVER_FOREIGN
 from core.services.offer_publication_state_service import (
     canonical_telegram_publication_identity,
 )
 from core.services.telegram_delivery_queue_service import (
-    TELEGRAM_CHANNEL_EDITOR_BOT_IDENTITY,
     TELEGRAM_PRIMARY_BOT_IDENTITY,
     TelegramDeliveryEnqueueResult,
     enqueue_telegram_delivery_job,
@@ -118,8 +116,12 @@ def _normalized_time(value: datetime) -> datetime:
 
 
 def configured_offer_edit_bot_identity() -> str:
-    if bool(getattr(settings, "telegram_delivery_queue_channel_editor_enabled", False)):
-        return TELEGRAM_CHANNEL_EDITOR_BOT_IDENTITY
+    """Offer channel edits always use the primary publisher bot.
+
+    A dedicated channel-editor lane cannot edit posts that carry the publisher's
+    inline keyboard (Telegram returns MESSAGE_ID_INVALID). The editor queue is
+    cancelled for offer work; all edits share the primary queue and its pacing.
+    """
     return TELEGRAM_PRIMARY_BOT_IDENTITY
 
 
@@ -464,6 +466,18 @@ async def enqueue_current_offer_delivery(
             rendered_source_version=getattr(state, "offer_version_id", None),
             now=current_time,
         )
+    delivery_deadline_at = None
+    if selected_action in {
+        TelegramDeliveryAction.PARTIAL_OFFER_EDIT,
+        TelegramDeliveryAction.TRADED_OFFER_EDIT,
+    }:
+        from core.telegram_delivery_queue_contract import (
+            CHANNEL_TRADE_EDIT_DELIVERY_DEADLINE_SECONDS,
+        )
+
+        delivery_deadline_at = current_time + timedelta(
+            seconds=CHANNEL_TRADE_EDIT_DELIVERY_DEADLINE_SECONDS
+        )
     queue_result = await enqueue_telegram_delivery_job(
         db,
         current_server=current_server,
@@ -488,6 +502,7 @@ async def enqueue_current_offer_delivery(
         template_version=OFFER_QUEUE_TEMPLATE_VERSION,
         eligible_at=first_edit_enqueued_at,
         freshness_deadline_at=freshness_deadline_at,
+        delivery_deadline_at=delivery_deadline_at,
         source_order_at=(
             _normalized_time(getattr(offer, "created_at", None))
             if feeder == TelegramFeederKind.OFFER_EDIT

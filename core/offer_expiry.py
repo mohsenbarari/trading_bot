@@ -31,6 +31,7 @@ from core.services.offer_expiry_service import (
     expire_offers_authoritatively,
 )
 from core.services.telegram_offer_channel_service import apply_offer_channel_state
+from core.telegram_delivery_credentials import configured_channel_editor_bot_token
 from core.telegram_delivery_runtime_policy import (
     TelegramDeliveryRuntimeMode,
     assert_telegram_provider_execution_authority,
@@ -94,6 +95,7 @@ async def remove_channel_buttons(channel_message_id: int) -> None:
         result = await telegram_gateway.edit_message_reply_markup(
             channel_id,
             channel_message_id,
+            bot_token=configured_channel_editor_bot_token(settings),
             idempotency_key=f"offer-expiry-remove-buttons:{channel_message_id}",
         )
         if not result.ok:

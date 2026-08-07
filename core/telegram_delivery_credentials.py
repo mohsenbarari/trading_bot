@@ -143,3 +143,25 @@ def configured_telegram_delivery_credentials(settings: Any) -> TelegramDeliveryC
             None,
         ),
     )
+
+
+def configured_channel_editor_bot_token(settings: Any) -> str | None:
+    """Return the channel-editor token when that lane is enabled; else None.
+
+    Legacy channel-edit call sites (offer expiry / channel state apply) pass this
+    into telegram_gateway so edits use offereditercgtbot while sends stay on the
+    primary bot.
+
+    Telegram constraint: a second bot cannot edit channel posts that carry the
+    publisher bot's inline keyboard (callback ownership) — such edits fail with
+    MESSAGE_ID_INVALID even with can_edit_messages. Offer channel edits therefore
+    always ride the primary queue; the editor lane stays disabled for offer work.
+    """
+    if not bool(
+        getattr(settings, "telegram_delivery_queue_channel_editor_enabled", False)
+    ):
+        return None
+    token = _secret_value(
+        getattr(settings, "telegram_delivery_queue_channel_editor_bot_token", None)
+    )
+    return token or None

@@ -99,9 +99,17 @@ class Settings(BaseSettings):
     trade_delivery_worker_lease_seconds: int = 30
     trade_delivery_worker_recover_limit: int = 100
     offer_publication_worker_interval_seconds: float = 1.0
-    offer_publication_worker_batch_limit: int = 25
-    offer_publication_worker_channel_edit_spacing_seconds: float = 0.35
-    offer_publication_worker_channel_send_spacing_seconds: float = 0.35
+    # Drain with a short Telegram-allowed burst (token bucket ~20/min to the
+    # same channel), then honor 429/retry_after before the next burst.
+    offer_publication_worker_batch_limit: int = 30
+    offer_publication_worker_channel_edit_spacing_seconds: float = 0.8
+    offer_publication_worker_channel_send_spacing_seconds: float = 0.8
+    # Any due publication item is treated as busy so the worker starts the next
+    # cycle immediately after a burst (pacing is owned by telegram_channel_pace).
+    offer_publication_worker_busy_backlog_due: int = 1
+    # Channel edits share the publisher bot quota, so cap them per cycle to keep
+    # send bursts ahead of presentation repair.
+    offer_publication_worker_channel_state_batch_limit: int = 8
     offer_publication_worker_rate_limit_cooldown_seconds: float = 10.0
     offer_publication_worker_max_rate_limit_cooldown_seconds: float = 120.0
     offer_publication_worker_retry_base_seconds: float = 5.0
@@ -131,21 +139,21 @@ class Settings(BaseSettings):
     telegram_delivery_queue_expected_channel_id: int | None = None
     telegram_delivery_queue_preflight_timeout_seconds: float = 10.0
     telegram_delivery_queue_worker_interval_seconds: float = 1.0
-    telegram_delivery_queue_worker_batch_limit: int = 25
-    telegram_delivery_queue_primary_concurrency: int = 4
+    telegram_delivery_queue_worker_batch_limit: int = 30
+    telegram_delivery_queue_primary_concurrency: int = 8
     telegram_delivery_queue_primary_m0_reserved_concurrency: int = 1
-    telegram_delivery_queue_channel_editor_concurrency: int = 1
+    telegram_delivery_queue_channel_editor_concurrency: int = 2
     telegram_delivery_queue_worker_request_timeout_seconds: float = 10.0
     telegram_delivery_queue_worker_lease_seconds: float = 30.0
     telegram_delivery_queue_worker_recover_limit: int = 100
-    telegram_offer_queue_feeder_batch_limit: int = 25
+    telegram_offer_queue_feeder_batch_limit: int = 30
     telegram_offer_queue_feeder_interval_seconds: float = 0.5
     telegram_delivery_queue_retry_after_safety_seconds: float = 0.1
     telegram_delivery_queue_retry_base_seconds: float = 1.0
     telegram_delivery_queue_retry_max_seconds: float = 300.0
     telegram_delivery_queue_retry_jitter_ratio: float = 0.2
-    telegram_delivery_queue_bot_min_interval_seconds: float = 0.035
-    telegram_delivery_queue_destination_min_interval_seconds: float = 1.05
+    telegram_delivery_queue_bot_min_interval_seconds: float = 0.8
+    telegram_delivery_queue_destination_min_interval_seconds: float = 0.8
     telegram_delivery_queue_rate_limit_probe_delay_seconds: float = 0.1
     telegram_delivery_queue_global_rate_limit_window_seconds: float = 2.0
     telegram_delivery_queue_limiter_key_ttl_seconds: int = 86400
