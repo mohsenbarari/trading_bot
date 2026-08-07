@@ -18,6 +18,7 @@ import math
 import os
 import sys
 import time
+import traceback
 import uuid
 from collections import Counter
 from contextlib import asynccontextmanager
@@ -5124,6 +5125,7 @@ async def execute_bot_trade_with_dispatcher(
             error_details.append(f"{type(exc).__name__}: {exc}")
         if phase_details is not None:
             phase_details["exception"] = type(exc).__name__
+            phase_details["traceback"] = traceback.format_exc()
             phase_details["telegram_update_count"] = telegram_update_count
             phase_details["forward_records"] = forward_records
         return "error"

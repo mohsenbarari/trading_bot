@@ -1,6 +1,7 @@
 """Fail-closed ownership policy for legacy and queue Telegram executors."""
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from enum import Enum
 
@@ -78,6 +79,25 @@ def configured_telegram_delivery_runtime() -> TelegramDeliveryRuntimeDecision:
             getattr(settings, "telegram_delivery_queue_cutover_ready", False)
         ),
     )
+
+
+def is_in_process_load_runner() -> bool:
+    """True for staging probe/load containers that observe Telegram in-process."""
+    return (os.getenv("TRADING_BOT_SERVICE") or "").strip().lower() == "load_runner"
+
+
+def telegram_delivery_uses_in_process_legacy() -> bool:
+    """Prefer direct aiogram calls when Queue-v1 enqueue is not the observer.
+
+    Live bots under Queue-v1 persist delivery jobs. Staging load runners mount an
+    in-process harness and must see answers/edits synchronously instead.
+    """
+    if (
+        configured_telegram_delivery_runtime().mode
+        != TelegramDeliveryRuntimeMode.QUEUE_V1
+    ):
+        return True
+    return is_in_process_load_runner()
 
 
 def resolve_telegram_delivery_producer_mode(

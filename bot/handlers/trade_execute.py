@@ -56,8 +56,7 @@ from core.trade_forward_pending import (
 )
 from core.trading_observability import log_trading_event
 from core.telegram_delivery_runtime_policy import (
-    TelegramDeliveryRuntimeMode,
-    configured_telegram_delivery_runtime,
+    telegram_delivery_uses_in_process_legacy,
 )
 from core.telegram_delivery_queue_contract import TelegramDeliveryAction
 from bot.utils.trade_suggestion_messages import (
@@ -89,10 +88,7 @@ async def _queue_authoritative_channel_offer_refresh(
     """Expedite a canonical channel refresh after a stale button click."""
     if current_server() != "foreign":
         return False
-    if (
-        configured_telegram_delivery_runtime().mode
-        != TelegramDeliveryRuntimeMode.QUEUE_V1
-    ):
+    if telegram_delivery_uses_in_process_legacy():
         return False
     try:
         state = await load_telegram_publication_state_for_update(session, offer)
@@ -401,10 +397,7 @@ async def update_offer_channel_markup(bot: Bot, offer: Offer) -> None:
     """همیشه دکمه‌های کانال را با channel_message_id واقعی به‌روزرسانی کن."""
     if not offer.channel_message_id:
         return
-    if (
-        configured_telegram_delivery_runtime().mode
-        == TelegramDeliveryRuntimeMode.QUEUE_V1
-    ):
+    if not telegram_delivery_uses_in_process_legacy():
         return
 
     if offer.remaining_quantity <= 0 or offer.status != OfferStatus.ACTIVE:
@@ -449,10 +442,7 @@ async def send_or_update_trade_suggestion_message(
 
     if is_private_suggestion_message:
         try:
-            if (
-                configured_telegram_delivery_runtime().mode
-                == TelegramDeliveryRuntimeMode.QUEUE_V1
-            ):
+            if not telegram_delivery_uses_in_process_legacy():
                 if user is None:
                     raise ValueError("trade_suggestion_user_missing")
                 await edit_callback_message_via_runtime(
@@ -487,10 +477,7 @@ async def send_or_update_trade_suggestion_message(
             reply_markup=reply_markup,
         )
     else:
-        if (
-            configured_telegram_delivery_runtime().mode
-            == TelegramDeliveryRuntimeMode.QUEUE_V1
-        ):
+        if not telegram_delivery_uses_in_process_legacy():
             raise ValueError("trade_suggestion_queue_route_invalid")
         sent_message = await bot.send_message(
             chat_id=target_chat_id,

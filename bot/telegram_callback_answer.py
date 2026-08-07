@@ -1,7 +1,6 @@
 """Runtime-owned answerCallbackQuery adapter for bot handlers."""
 from __future__ import annotations
 
-import os
 from typing import Any
 
 from core.db import AsyncSessionLocal
@@ -13,8 +12,7 @@ from core.telegram_callback_receipt_context import (
     current_telegram_callback_received_at,
 )
 from core.telegram_delivery_runtime_policy import (
-    TelegramDeliveryRuntimeMode,
-    configured_telegram_delivery_runtime,
+    telegram_delivery_uses_in_process_legacy,
 )
 
 
@@ -23,10 +21,6 @@ class TelegramCallbackReceiptMissingError(RuntimeError):
 
 
 _UNSET = object()
-
-
-def _is_in_process_load_runner() -> bool:
-    return (os.getenv("TRADING_BOT_SERVICE") or "").strip().lower() == "load_runner"
 
 
 async def answer_callback_query_via_runtime(
@@ -38,11 +32,7 @@ async def answer_callback_query_via_runtime(
     commit: bool = True,
 ):
     """Preserve legacy behavior or persist one direct M0 callback answer."""
-    if (
-        configured_telegram_delivery_runtime().mode
-        != TelegramDeliveryRuntimeMode.QUEUE_V1
-        or _is_in_process_load_runner()
-    ):
+    if telegram_delivery_uses_in_process_legacy():
         # Staging load runners observe answers synchronously through the
         # in-process aiogram harness; durable QUEUE_V1 enqueue is for live bots.
         args = () if text is _UNSET else (text,)

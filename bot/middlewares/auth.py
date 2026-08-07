@@ -1,5 +1,5 @@
 # bot/middlewares/auth.py (نسخه نهایی و اصلاح شده)
-from typing import Callable, Dict, Any, Awaitable
+from typing import Callable, Dict, Any, Awaitable, Optional
 from aiogram import BaseMiddleware
 from aiogram.types import TelegramObject, Message, CallbackQuery, Update
 from sqlalchemy import select
@@ -41,6 +41,52 @@ def _get_event_and_from_user(event: TelegramObject):
     return None, None
 
 
+_HANDLER_USER_ATTRS = (
+    "id",
+    "telegram_id",
+    "sync_version",
+    "role",
+    "account_status",
+    "is_deleted",
+    "has_bot_access",
+    "trading_restricted_until",
+    "limitations_expire_at",
+    "max_daily_trades",
+    "trades_count",
+    "max_active_commodities",
+    "commodities_traded_count",
+    "max_daily_requests",
+    "channel_messages_count",
+    "username",
+    "full_name",
+    "account_name",
+    "offer_overtime_minutes",
+    "messenger_blocked_at",
+    "messenger_grace_expires_at",
+)
+
+
+def _detach_user_for_handler(session: AsyncSession, user: Optional[User]) -> Optional[User]:
+    """Close the auth session before handlers run without leaving lazy loads pending.
+
+    Handlers (and sync helpers like get_trading_settings) must not run while this
+    middleware still holds an AsyncSession open; that combination trips
+    MissingGreenlet under concurrent load. Eager-read common columns, then
+    expunge so scalar access stays safe after the session closes.
+    """
+    if user is None:
+        return None
+    for attr_name in _HANDLER_USER_ATTRS:
+        getattr(user, attr_name, None)
+    # Only detach real SQLAlchemy sessions (unit tests pass MagicMock pools).
+    if isinstance(session, AsyncSession):
+        try:
+            session.expunge(user)
+        except Exception:
+            pass
+    return user
+
+
 class AuthMiddleware(BaseMiddleware):
     """
     این میدل‌ور، session دیتابیس را به handler ها تزریق کرده و کاربر را احراز هویت می‌کند.
@@ -59,6 +105,7 @@ class AuthMiddleware(BaseMiddleware):
         if not user_telegram_obj:
             return await handler(event, data)
 
+        should_call_handler = False
         async with self.session_pool() as session:
             # کاربر را از دیتابیس خودمان پیدا می‌کنیم (فقط کاربران فعال)
             user = (await session.execute(
@@ -142,12 +189,14 @@ class AuthMiddleware(BaseMiddleware):
             if user and user_requires_bot_onboarding(user):
                 if isinstance(inner_event, CallbackQuery):
                     if is_allowed_onboarding_callback(user, getattr(inner_event, "data", None)):
-                        return await handler(event, data)
-                    await answer_callback_query_via_runtime(
-                        inner_event,
-                        BOT_ONBOARDING_BLOCK_MESSAGE,
-                        show_alert=True,
-                    )
+                        should_call_handler = True
+                    else:
+                        await answer_callback_query_via_runtime(
+                            inner_event,
+                            BOT_ONBOARDING_BLOCK_MESSAGE,
+                            show_alert=True,
+                        )
+                        return
                 elif isinstance(inner_event, Message):
                     pending_step = pending_onboarding_step(user)
                     await answer_incoming_message_via_runtime(
@@ -156,6 +205,15 @@ class AuthMiddleware(BaseMiddleware):
                         onboarding_text_for_step(pending_step or 1),
                         reply_markup=build_onboarding_keyboard(pending_step or 1),
                     )
-                return
+                    return
+                else:
+                    return
+            else:
+                should_call_handler = True
 
+            if should_call_handler:
+                data["user"] = _detach_user_for_handler(session, user)
+
+        if should_call_handler:
             return await handler(event, data)
+        return None

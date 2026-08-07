@@ -32,6 +32,7 @@ from core.telegram_delivery_queue_contract import (
 from core.telegram_delivery_runtime_policy import (
     TelegramDeliveryRuntimeMode,
     configured_telegram_delivery_runtime,
+    telegram_delivery_uses_in_process_legacy,
 )
 from core.utils import utc_now
 
@@ -216,10 +217,7 @@ async def answer_incoming_message_via_runtime(
     need an immediate aiogram ``Message`` result.  Result-dependent edits use
     the separate receipt/dependency contract.
     """
-    if (
-        configured_telegram_delivery_runtime().mode
-        != TelegramDeliveryRuntimeMode.QUEUE_V1
-    ):
+    if telegram_delivery_uses_in_process_legacy():
         kwargs: dict[str, Any] = {}
         if parse_mode is not _UNSET:
             kwargs["parse_mode"] = parse_mode
@@ -267,10 +265,7 @@ async def answer_callback_message_via_runtime(
     enters durable storage.
     """
     message = getattr(callback, "message", None)
-    if (
-        configured_telegram_delivery_runtime().mode
-        != TelegramDeliveryRuntimeMode.QUEUE_V1
-    ):
+    if telegram_delivery_uses_in_process_legacy():
         kwargs: dict[str, Any] = {}
         if parse_mode is not _UNSET:
             kwargs["parse_mode"] = parse_mode
@@ -309,10 +304,7 @@ async def edit_callback_message_via_runtime(
 ):
     """Edit one known private callback message or persist the exact edit target."""
     message = getattr(callback, "message", None)
-    if (
-        configured_telegram_delivery_runtime().mode
-        != TelegramDeliveryRuntimeMode.QUEUE_V1
-    ):
+    if telegram_delivery_uses_in_process_legacy():
         kwargs: dict[str, Any] = {}
         if parse_mode is not _UNSET:
             kwargs["parse_mode"] = parse_mode
@@ -370,10 +362,7 @@ async def edit_callback_reply_markup_via_runtime(
     """Edit only the known callback message markup through queue ownership."""
 
     message = getattr(callback, "message", None)
-    if (
-        configured_telegram_delivery_runtime().mode
-        != TelegramDeliveryRuntimeMode.QUEUE_V1
-    ):
+    if telegram_delivery_uses_in_process_legacy():
         kwargs: dict[str, Any] = {}
         if reply_markup is not _UNSET:
             kwargs["reply_markup"] = reply_markup
@@ -433,10 +422,7 @@ async def edit_known_message_via_runtime(
 ):
     """Edit a known private message without requiring callback metadata."""
 
-    if (
-        configured_telegram_delivery_runtime().mode
-        != TelegramDeliveryRuntimeMode.QUEUE_V1
-    ):
+    if telegram_delivery_uses_in_process_legacy():
         kwargs: dict[str, Any] = {}
         if parse_mode is not _UNSET:
             kwargs["parse_mode"] = parse_mode
@@ -499,10 +485,7 @@ async def edit_interaction_result_via_runtime(
     a dependency on the parent outbox receipt and never fabricates a target id.
     """
 
-    if (
-        configured_telegram_delivery_runtime().mode
-        != TelegramDeliveryRuntimeMode.QUEUE_V1
-    ):
+    if telegram_delivery_uses_in_process_legacy():
         kwargs: dict[str, Any] = {}
         if parse_mode is not _UNSET:
             kwargs["parse_mode"] = parse_mode
@@ -585,10 +568,7 @@ async def edit_delivery_receipt_via_runtime(
 ):
     """Persist an edit that depends on a previously stored send receipt."""
 
-    if (
-        configured_telegram_delivery_runtime().mode
-        != TelegramDeliveryRuntimeMode.QUEUE_V1
-    ):
+    if telegram_delivery_uses_in_process_legacy():
         raise TelegramInteractionMessageRouteError(
             "telegram_interaction_receipt_edit_requires_queue_owner"
         )
@@ -721,10 +701,7 @@ async def edit_explicit_private_message_via_runtime(
 ):
     """Persist a private edit when the target id came from durable FSM state."""
 
-    if (
-        configured_telegram_delivery_runtime().mode
-        != TelegramDeliveryRuntimeMode.QUEUE_V1
-    ):
+    if telegram_delivery_uses_in_process_legacy():
         raise TelegramInteractionMessageRouteError(
             "telegram_interaction_explicit_edit_requires_queue_owner"
         )
@@ -791,7 +768,7 @@ async def send_private_document_via_runtime(
     """Send a bounded generated document through the primary durable lane."""
 
     message = getattr(origin, "message", None) or origin
-    if configured_telegram_delivery_runtime().mode != TelegramDeliveryRuntimeMode.QUEUE_V1:
+    if telegram_delivery_uses_in_process_legacy():
         kwargs: dict[str, Any] = {"document": document, "caption": caption}
         if parse_mode is not _UNSET:
             kwargs["parse_mode"] = parse_mode
