@@ -1714,7 +1714,9 @@ TARGETED_SYNC_TABLE_GROUPS: tuple[tuple[str, ...], ...] = (
     ("telegram_link_tokens",),
     ("notifications",),
     ("user_blocks",),
-    ("offers", "offer_publication_states"),
+    # Offers need their owner users present on the peer in the same receive
+    # batch; otherwise foreign apply defers forever on user_id FK.
+    ("users", "offers", "offer_publication_states"),
     ("trades",),
     ("offer_requests",),
     ("trade_delivery_receipts",),
@@ -1828,32 +1830,51 @@ async def collect_targeted_prefix_sync_items(
         tables=tables,
         include_synced=include_synced,
     )
-    items = [change_log_entry_to_sync_item(entry) for entry in entries]
-    change_log_ids = [int(entry.id) for entry in entries]
-    covered = {
-        (str(entry.table_name), int(entry.record_id))
-        for entry in entries
-        if getattr(entry, "record_id", None) is not None
-    }
+    # Keep the newest change_log per record so catchup batches do not replay the
+    # full mutation history (which inflates FK deferrals under load).
+    latest_by_record: dict[tuple[str, int], Any] = {}
+    for entry in entries:
+        record_id = getattr(entry, "record_id", None)
+        if record_id is None:
+            continue
+        key = (str(entry.table_name), int(record_id))
+        previous = latest_by_record.get(key)
+        if previous is None or int(entry.id) >= int(previous.id):
+            latest_by_record[key] = entry
+    selected_entries = list(latest_by_record.values())
+    items = [change_log_entry_to_sync_item(entry) for entry in selected_entries]
+    change_log_ids = [int(entry.id) for entry in selected_entries]
+    covered = set(latest_by_record)
 
-    # Publication-state catchup often retains change_log rows after the parent
-    # offer change_log was already compacted. Replay live offers/states so the
-    # foreign peer can resolve offer_public_id before applying publication rows.
+    # Prefer live-row replay for offers/publication states during catchup so the
+    # peer receives current public ids even if older change_log payloads are thin.
     if include_synced or any(table == "offer_publication_states" for table in tables):
-        for table, row in await _load_prefix_rows_for_tables(prefix, tables):
+        replay_tables = tuple(
+            table
+            for table in tables
+            if table in {"users", "offers", "offer_publication_states"}
+        )
+        for table, row in await _load_prefix_rows_for_tables(prefix, replay_tables):
             record_id = getattr(row, "id", None)
             if record_id is None:
                 continue
             key = (table, int(record_id))
-            if key in covered:
-                continue
-            items.append(
-                build_current_state_replay_item(
-                    table_name=table,
-                    row=row,
-                    operation="UPDATE",
-                )
+            replay_item = build_current_state_replay_item(
+                table_name=table,
+                row=row,
+                operation="UPDATE",
             )
+            if key in covered:
+                # Replace stale change_log payload with current row state.
+                items = [
+                    item
+                    for item in items
+                    if not (
+                        str(item.get("table") or "") == key[0]
+                        and int(item.get("id") or 0) == key[1]
+                    )
+                ]
+            items.append(replay_item)
             covered.add(key)
 
     table_rank = {table: index for index, table in enumerate(TARGETED_SYNC_TABLES)}
