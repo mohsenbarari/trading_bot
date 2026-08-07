@@ -1548,6 +1548,49 @@ class EstimatorTests(unittest.TestCase):
             settlements["CASH"]["rates"][0]["estimated_project_price"],
         )
 
+    def test_observed_tomorrow_book_never_gets_lifted_by_inferred_cash(self) -> None:
+        settlements = {
+            "CASH": {
+                "rates": [
+                    {
+                        "commodity_name": "امام",
+                        "status": "ESTIMATED",
+                        "estimated_price_toman": 187_000_000,
+                        "estimated_project_price": 187_000,
+                        "group_offer_anchor": {"status": "NO_DATA"},
+                        "tolerance": {
+                            "lower_price_toman": 185_900_000,
+                            "upper_price_toman": 188_500_000,
+                        },
+                    }
+                ]
+            },
+            "TOMORROW": {
+                "rates": [
+                    {
+                        "commodity_name": "امام",
+                        "status": "ESTIMATED",
+                        "estimated_price_toman": 185_500_000,
+                        "estimated_project_price": 185_500,
+                        "group_offer_anchor": {
+                            "status": "OBSERVED",
+                            "reference_price_toman": 185_500_000,
+                        },
+                    }
+                ]
+            },
+        }
+        audits = enforce_cash_tomorrow_term_structure(settlements)
+        cash = settlements["CASH"]["rates"][0]
+        tomorrow = settlements["TOMORROW"]["rates"][0]
+        self.assertEqual(len(audits), 1)
+        self.assertEqual(cash["estimated_price_toman"], 185_500_000)
+        self.assertEqual(tomorrow["estimated_price_toman"], 185_500_000)
+        self.assertEqual(
+            cash["term_structure_cap"]["policy"],
+            "CASH_NOT_ABOVE_OBSERVED_TOMORROW_BOOK",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -4878,12 +4878,14 @@ def low_date_family_sibling_name(commodity_name: str) -> str | None:
 def enforce_cash_tomorrow_term_structure(
     settlements: dict[str, Any],
 ) -> list[dict[str, Any]]:
-    """Prevent cash > tomorrow inversions after asymmetric residual calibration.
+    """Prevent unsupported cash/tomorrow inversions after calibration.
 
     TOMORROW is often ``CASH × empirical ratio`` (ratio ≳ 1).  Online residual
     can then pull only the TOMORROW book (CASH still warming up), which flips
-    the term structure.  Floor tomorrow at cash so the published book never
-    shows a same-commodity cash premium over tomorrow without market evidence.
+    the term structure.  A current, observed group book is stronger evidence
+    than this structural rule: never lift an observed TOMORROW price merely
+    because an inferred CASH estimate is stale.  In that case cap the inferred
+    cash estimate at the observed tomorrow book instead.
     """
 
     audits: list[dict[str, Any]] = []
@@ -4908,6 +4910,54 @@ def enforce_cash_tomorrow_term_structure(
             continue
         cash_price_f = float(cash_price)
         tom_price_f = float(tom_price)
+        cash_anchor = cash.get("group_offer_anchor")
+        tomorrow_anchor = rate.get("group_offer_anchor")
+        cash_has_live_anchor = (
+            isinstance(cash_anchor, dict)
+            and str(cash_anchor.get("status") or "") == "OBSERVED"
+        )
+        tomorrow_has_live_anchor = (
+            isinstance(tomorrow_anchor, dict)
+            and str(tomorrow_anchor.get("status") or "") == "OBSERVED"
+        )
+        # A live tomorrow book is authoritative.  If cash is only inferred,
+        # move the inferred cash centre down to that book rather than lifting
+        # the live tomorrow centre upward.  With two conflicting live books,
+        # retain both observations for the caller/operator to inspect.
+        if tomorrow_has_live_anchor:
+            if not cash_has_live_anchor and cash_price_f > tom_price_f:
+                cap = int(round(tom_price_f / 50_000.0) * 50_000)
+                cash["_pre_term_structure_estimated_price_toman"] = cash_price_f
+                cash["estimated_price_toman"] = cap
+                cash["estimated_project_price"] = int(round(cap / PRICE_MULTIPLIER))
+                if cash.get("llm_value") is not None:
+                    cash["llm_value"] = cash["estimated_project_price"]
+                tolerance = cash.get("tolerance")
+                if isinstance(tolerance, dict):
+                    lower = tolerance.get("lower_price_toman")
+                    upper = tolerance.get("upper_price_toman")
+                    if lower is not None and upper is not None:
+                        half_width = max(
+                            cash_price_f - float(lower),
+                            float(upper) - cash_price_f,
+                            0.0,
+                        )
+                        capped_lower = int(round((cap - half_width) / 50_000.0) * 50_000)
+                        capped_upper = int(round((cap + half_width) / 50_000.0) * 50_000)
+                        tolerance["lower_price_toman"] = capped_lower
+                        tolerance["upper_price_toman"] = capped_upper
+                        tolerance["lower_project_price"] = int(round(capped_lower / PRICE_MULTIPLIER))
+                        tolerance["upper_project_price"] = int(round(capped_upper / PRICE_MULTIPLIER))
+                audit = {
+                    "commodity": name,
+                    "policy": "CASH_NOT_ABOVE_OBSERVED_TOMORROW_BOOK",
+                    "cash_limited_from_toman": int(cash_price_f),
+                    "cash_limited_to_toman": cap,
+                    "tomorrow_observed_toman": int(tom_price_f),
+                }
+                cash["term_structure_cap"] = audit
+                audits.append(audit)
+            continue
         ratio_meta = (
             rate.get("settlement_ratio_anchor")
             if isinstance(rate.get("settlement_ratio_anchor"), dict)

@@ -18,6 +18,12 @@ HALF_LIFE_HOURS = 18.0
 MIN_SAMPLES_TO_APPLY = 3
 MAX_RESIDUAL_RATIO = 0.035
 MAX_APPLIED_CORRECTION_RATIO = 0.015
+RECENT_REALIZED_LOOKBACK_SECONDS = 90 * 60
+RECENT_REALIZED_HALF_LIFE_SECONDS = 30 * 60
+# This is deliberately smaller than the long-horizon online-calibration cap.
+# It is a short-lived correction from completed coin events, not a replacement
+# for the structural model or for a fresh live coin book.
+MAX_RECENT_REALIZED_CORRECTION_RATIO = 0.01
 NORMAL_MATCH_SECONDS = 5 * 60
 RECONNECT_MATCH_HOURS = 24
 PROJECT_PRICE_MULTIPLIER = 1_000
@@ -540,5 +546,167 @@ def apply_snapshot_calibration(
                 rate=rate,
             )
             rate["online_residual_calibration"] = info
+            metadata[f"{settlement}:{commodity}"] = info
+    return metadata
+
+
+def _weighted_median(values: list[tuple[float, float]]) -> float | None:
+    """Return a deterministic weighted median for finite positive weights."""
+
+    eligible = sorted(
+        (value, weight)
+        for value, weight in values
+        if math.isfinite(value) and math.isfinite(weight) and weight > 0
+    )
+    if not eligible:
+        return None
+    total = sum(weight for _, weight in eligible)
+    running = 0.0
+    for value, weight in eligible:
+        running += weight
+        if running >= total / 2.0:
+            return value
+    return eligible[-1][0]
+
+
+def _is_fresh_live_group_anchor(rate: dict[str, Any]) -> bool:
+    """A live book wins over any retrospective calibration signal."""
+
+    anchor = rate.get("group_offer_anchor")
+    if not isinstance(anchor, dict):
+        return False
+    return str(anchor.get("status") or "") == "OBSERVED"
+
+
+def apply_recent_realized_calibration(
+    connection: sqlite3.Connection,
+    *,
+    commodity: str,
+    settlement: str,
+    rate: dict[str, Any],
+    as_of: datetime,
+) -> dict[str, Any]:
+    """Apply a bounded short-term residual only when the live coin book is quiet.
+
+    The long-horizon exponentially-decayed residual is intentionally stable.
+    It can therefore react too slowly immediately after a confirmed change in
+    the coin market.  This second guardrail uses only *previous*, distinct
+    realized outcomes from the prediction ledger.  It never runs while a
+    current group-book anchor exists, and it is capped at one percent.
+    """
+
+    original = _price(rate.get("estimated_price_toman"))
+    if original is None:
+        return {"status": "NO_ESTIMATE", "actual_event_count": 0, "correction_ratio": 0.0}
+    if _is_fresh_live_group_anchor(rate):
+        return {
+            "status": "SKIPPED_FRESH_LIVE_GROUP_ANCHOR",
+            "actual_event_count": 0,
+            "correction_ratio": 0.0,
+        }
+
+    if as_of.tzinfo is None:
+        as_of = as_of.replace(tzinfo=timezone.utc)
+    as_of = as_of.astimezone(timezone.utc)
+    since = as_of - timedelta(seconds=RECENT_REALIZED_LOOKBACK_SECONDS)
+    rows = connection.execute(
+        """
+        SELECT actual_event_utc, residual_ratio
+        FROM coin_estimate_predictions
+        WHERE commodity=? AND settlement=?
+          AND actual_event_utc IS NOT NULL
+          AND residual_ratio IS NOT NULL
+          AND actual_event_utc>=? AND actual_event_utc<=?
+        ORDER BY actual_event_utc, id
+        """,
+        (commodity, settlement, _iso(since), _iso(as_of)),
+    ).fetchall()
+    by_actual: dict[str, list[float]] = {}
+    for row in rows:
+        # Residuals are signed and can validly be negative; _price is not
+        # suitable here because it rejects non-positive numeric values.
+        try:
+            residual = float(row["residual_ratio"])
+        except (TypeError, ValueError):
+            continue
+        if not math.isfinite(residual):
+            continue
+        event = str(row["actual_event_utc"])
+        by_actual.setdefault(event, []).append(residual)
+    weighted: list[tuple[float, float]] = []
+    newest_actual: str | None = None
+    for event, residuals in by_actual.items():
+        try:
+            occurred = _parse(event)
+        except (TypeError, ValueError):
+            continue
+        age_seconds = (as_of - occurred).total_seconds()
+        if age_seconds < 0 or age_seconds > RECENT_REALIZED_LOOKBACK_SECONDS:
+            continue
+        median = float(sorted(residuals)[len(residuals) // 2])
+        weight = math.exp(
+            -math.log(2.0) * age_seconds / RECENT_REALIZED_HALF_LIFE_SECONDS
+        )
+        weighted.append((median, weight))
+        if newest_actual is None or event > newest_actual:
+            newest_actual = event
+    raw = _weighted_median(weighted)
+    if raw is None:
+        return {
+            "status": "NO_RECENT_REALIZED_OUTCOME",
+            "actual_event_count": 0,
+            "correction_ratio": 0.0,
+        }
+    correction = max(
+        -MAX_RECENT_REALIZED_CORRECTION_RATIO,
+        min(MAX_RECENT_REALIZED_CORRECTION_RATIO, raw),
+    )
+    corrected = int(round((original * (1.0 + correction)) / 50_000.0) * 50_000)
+    rate["estimated_price_toman"] = corrected
+    rate["estimated_project_price"] = int(round(corrected / PROJECT_PRICE_MULTIPLIER))
+    tolerance = rate.get("tolerance")
+    if isinstance(tolerance, dict):
+        lower = _price(tolerance.get("lower_price_toman"))
+        upper = _price(tolerance.get("upper_price_toman"))
+        if lower is not None and upper is not None:
+            # Preserve (and very slightly widen) the prior uncertainty width
+            # while moving the interval with the newly calibrated centre.
+            half_width = max(original - lower, upper - original, 0.0) * 1.05
+            lower_shifted = corrected - half_width
+            upper_shifted = corrected + half_width
+            tolerance["lower_price_toman"] = int(round(lower_shifted / 50_000.0) * 50_000)
+            tolerance["upper_price_toman"] = int(round(upper_shifted / 50_000.0) * 50_000)
+            tolerance["lower_project_price"] = int(round(tolerance["lower_price_toman"] / PROJECT_PRICE_MULTIPLIER))
+            tolerance["upper_project_price"] = int(round(tolerance["upper_price_toman"] / PROJECT_PRICE_MULTIPLIER))
+    rate["method"] = f"{rate.get('method') or 'LIVE'}+RECENT_REALIZED_RESIDUAL"
+    return {
+        "status": "APPLIED",
+        "actual_event_count": len(weighted),
+        "raw_residual_ratio": raw,
+        "correction_ratio": correction,
+        "newest_actual_utc": newest_actual,
+    }
+
+
+def apply_recent_realized_snapshot_calibration(
+    connection: sqlite3.Connection,
+    *,
+    settlements: dict[str, Any],
+    as_of: datetime,
+) -> dict[str, Any]:
+    """Attach bounded recent-realized calibration metadata to all rate rows."""
+
+    metadata: dict[str, Any] = {}
+    for settlement, payload in settlements.items():
+        for rate in payload.get("rates", []):
+            commodity = str(rate.get("commodity_name") or "")
+            info = apply_recent_realized_calibration(
+                connection,
+                commodity=commodity,
+                settlement=str(settlement),
+                rate=rate,
+                as_of=as_of,
+            )
+            rate["recent_realized_residual_calibration"] = info
             metadata[f"{settlement}:{commodity}"] = info
     return metadata
