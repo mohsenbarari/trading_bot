@@ -1,13 +1,9 @@
-"""In-process Telegram channel send pacing (short burst + sustained ceiling).
+"""In-process fallback pacing for legacy Telegram channel publication.
 
-Telegram's Bot FAQ allows short bursts to a chat, then enforces roughly
-20 messages/minute to the same group/channel. Flooding with zero spacing
-triggers long 429 ``retry_after`` windows and looks like "few posts, long pause".
-
-This helper models a token bucket of capacity ``rate_per_minute`` that refills
-continuously. A full bucket can burst immediately; once empty, callers wait for
-the next token (~3s at 20/min). On HTTP 429, drain the bucket so the next send
-honors ``retry_after`` instead of racing again.
+The staging calibration baseline is one operation every 0.8 seconds. A tiny
+idle-earned burst is allowed, while HTTP 429 books the full ``retry_after`` as
+debt. Exact channel limits are dynamic; the durable QUEUE_V1 Redis limiter is
+the production cadence authority.
 """
 from __future__ import annotations
 
@@ -74,9 +70,12 @@ class TelegramChannelPace:
         return None
 
 
-# Shared publisher-bot channel pace for the foreign offer publication worker.
-# Telegram enforces ~20 messages/minute per channel. With a token bucket, any
-# rolling 60s window can carry at most capacity + rate messages, so 17/min with
-# a 3-token burst keeps every window at <=20 and avoids 429 retry_after pauses
-# entirely, while draining a peak backlog ~20% faster than the previous 14/min.
-OFFER_CHANNEL_PACE = TelegramChannelPace(rate_per_minute=17.0, capacity=3.0)
+OFFER_CHANNEL_BASE_INTERVAL_SECONDS = 0.8
+OFFER_CHANNEL_IDLE_BURST_CAPACITY = 2.0
+
+# Legacy-only fallback. Two immediate operations after idle are deliberately a
+# micro-burst; sustained work returns to the calibrated 0.8-second cadence.
+OFFER_CHANNEL_PACE = TelegramChannelPace(
+    rate_per_minute=60.0 / OFFER_CHANNEL_BASE_INTERVAL_SECONDS,
+    capacity=OFFER_CHANNEL_IDLE_BURST_CAPACITY,
+)

@@ -42,6 +42,40 @@ class WaveBudget:
         return max(0, int(round(self.invalid_target * self.scale)))
 
 
+def _evenly_spaced(
+    items: list[dict[str, Any]], limit: int
+) -> list[dict[str, Any]]:
+    """Select deterministically across the full 30-minute timeline."""
+
+    if limit <= 0:
+        return []
+    if limit >= len(items):
+        return list(items)
+    if limit == 1:
+        return [items[len(items) // 2]]
+    indexes = [
+        int(round(index * (len(items) - 1) / float(limit - 1)))
+        for index in range(limit)
+    ]
+    return [items[index] for index in indexes]
+
+
+def _fixed_mix_quotas(total: int) -> tuple[int, int, int, int]:
+    """40% deferred trades and 50/50 request surfaces within each origin."""
+
+    raw = (total * 0.20, total * 0.20, total * 0.30, total * 0.30)
+    quotas = [int(value) for value in raw]
+    remainder = total - sum(quotas)
+    order = sorted(
+        range(4),
+        key=lambda index: (raw[index] - quotas[index], -index),
+        reverse=True,
+    )
+    for index in order[:remainder]:
+        quotas[index] += 1
+    return quotas[0], quotas[1], quotas[2], quotas[3]
+
+
 def scale_events(events: list[dict[str, Any]], budget: WaveBudget) -> list[dict[str, Any]]:
     """Scale while preserving telegram-heavy offer mix (~40% webapp / ~60% bot)."""
 
@@ -50,18 +84,38 @@ def scale_events(events: list[dict[str, Any]], budget: WaveBudget) -> list[dict[
     if budget.valid_limit >= len(valid):
         selected_valid = list(valid)
     else:
-        by_surface: dict[str, list[dict[str, Any]]] = {"webapp": [], "bot": []}
-        for item in valid:
-            by_surface.setdefault(str(item.get("surface") or "webapp"), []).append(item)
         webapp_n = int(round(budget.valid_limit * 0.40))
         bot_n = budget.valid_limit - webapp_n
         if budget.valid_limit > 0 and bot_n / float(budget.valid_limit) < 0.60:
             bot_n = int(round(budget.valid_limit * 0.60))
             webapp_n = budget.valid_limit - bot_n
-        selected_valid = (
-            list(by_surface.get("webapp", [])[:webapp_n])
-            + list(by_surface.get("bot", [])[:bot_n])
-        )
+        selected_valid = []
+        for surface, surface_limit in (
+            ("webapp", webapp_n),
+            ("bot", bot_n),
+        ):
+            groups: dict[tuple[bool, str], list[dict[str, Any]]] = {}
+            for item in valid:
+                if str(item.get("surface") or "") != surface:
+                    continue
+                key = (
+                    int(item["seq"]) % 100 < 40,
+                    str(item.get("request_surface") or "webapp"),
+                )
+                groups.setdefault(key, []).append(item)
+            quotas = _fixed_mix_quotas(surface_limit)
+            for key, quota in zip(
+                (
+                    (True, "webapp"),
+                    (True, "telegram"),
+                    (False, "webapp"),
+                    (False, "telegram"),
+                ),
+                quotas,
+            ):
+                selected_valid.extend(
+                    _evenly_spaced(groups.get(key, []), quota)
+                )
         # Top up from whichever surface still has leftover if rounding/shortage.
         if len(selected_valid) < budget.valid_limit:
             chosen = {id(item) for item in selected_valid}
@@ -72,7 +126,15 @@ def scale_events(events: list[dict[str, Any]], budget: WaveBudget) -> list[dict[
                 if len(selected_valid) >= budget.valid_limit:
                     break
         selected_valid = selected_valid[: budget.valid_limit]
-    selected_invalid = invalid[: budget.invalid_limit]
+    invalid_webapp_n = int(round(budget.invalid_limit * 0.40))
+    invalid_bot_n = budget.invalid_limit - invalid_webapp_n
+    selected_invalid = _evenly_spaced(
+        [item for item in invalid if item.get("surface") == "webapp"],
+        invalid_webapp_n,
+    ) + _evenly_spaced(
+        [item for item in invalid if item.get("surface") == "bot"],
+        invalid_bot_n,
+    )
     selected = selected_valid + selected_invalid
     if not selected:
         return []

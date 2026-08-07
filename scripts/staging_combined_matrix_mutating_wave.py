@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+from contextlib import AsyncExitStack
 import hashlib
 import json
 import sys
@@ -175,10 +176,15 @@ async def _place_request(
     request_surface: str,
     seq: int,
     prefix: str,
+    telegram_harness=None,
 ) -> dict[str, object]:
-    """Place a live request/trade against the offer (webapp API path)."""
+    """Place a live request through the requested WebApp or Telegram path."""
 
-    from scripts.trading_core_probe_worker import execute_webapp_trade_for_user
+    from scripts.trading_core_probe_worker import (
+        MixedLoadAttemptSpec,
+        execute_bot_trade_with_dispatcher,
+        execute_webapp_trade_for_user,
+    )
 
     quantity = 1
     lots = getattr(offer, "lot_sizes", None) or getattr(offer, "original_lot_sizes", None)
@@ -190,18 +196,38 @@ async def _place_request(
     else:
         remaining = int(getattr(offer, "remaining_quantity", None) or getattr(offer, "quantity", 1) or 1)
         quantity = max(1, min(remaining, DEFAULT_OFFER_QUANTITY))
-    status = await execute_webapp_trade_for_user(
-        user_id=int(requester.id),
-        offer_id=int(offer.id),
-        offer_public_id=getattr(offer, "offer_public_id", None),
-        quantity=quantity,
-        idempotency_key=f"{prefix}:req:{seq}:{request_surface}"[:64],
-    )
+    if request_surface == "telegram":
+        if telegram_harness is None:
+            raise RuntimeError("telegram request surface requires dispatcher harness")
+        telegram_id = getattr(requester, "telegram_id", None)
+        if telegram_id is None:
+            raise RuntimeError("telegram requester has no telegram_id")
+        status = await execute_bot_trade_with_dispatcher(
+            harness=telegram_harness,
+            spec=MixedLoadAttemptSpec(
+                index=int(seq),
+                surface="telegram",
+                user_id=int(requester.id),
+                telegram_id=int(telegram_id),
+            ),
+            offer=offer,
+            amount=quantity,
+            prefix=f"{prefix}:req:",
+        )
+    else:
+        status = await execute_webapp_trade_for_user(
+            user_id=int(requester.id),
+            offer_id=int(offer.id),
+            offer_public_id=getattr(offer, "offer_public_id", None),
+            quantity=quantity,
+            idempotency_key=f"{prefix}:req:{seq}:{request_surface}"[:64],
+        )
     return {
         "status": status,
         "request_surface": request_surface,
+        "execution_surface": request_surface,
         "quantity": quantity,
-        "ok": status in {"success", "rejected"},  # rejected still proves request path ran
+        "ok": status == "success",
     }
 
 
@@ -292,12 +318,21 @@ async def _run(args: argparse.Namespace) -> dict[str, object]:
     if not prefix.startswith(RUN_PREFIX_MARKER):
         raise DriverRefusal("run prefix must start with CMB_")
 
-    async with AsyncSessionLocal() as session:
+    async with AsyncExitStack() as stack:
+        session = await stack.enter_async_context(AsyncSessionLocal())
         if args.cleanup_only:
             removed = await _cleanup(session, prefix)
             return {"ok": True, "mode": "cleanup", "removed_users": removed, "at_utc": _utc()}
 
-        raw_events = json.loads(Path(args.events_file).read_text(encoding="utf-8"))
+        events_bytes = Path(args.events_file).read_bytes()
+        events_file_sha256 = hashlib.sha256(events_bytes).hexdigest()
+        expected_events_sha256 = (args.events_sha256 or "").strip().lower()
+        if expected_events_sha256 and events_file_sha256 != expected_events_sha256:
+            raise DriverRefusal(
+                "events file checksum mismatch "
+                f"expected={expected_events_sha256} actual={events_file_sha256}"
+            )
+        raw_events = json.loads(events_bytes.decode("utf-8"))
         if isinstance(raw_events, dict):
             events = list(raw_events.get("events") or [])
         else:
@@ -305,11 +340,28 @@ async def _run(args: argparse.Namespace) -> dict[str, object]:
         surface_filter = (args.surface_filter or "").strip().lower()
         if surface_filter in {"webapp", "bot"}:
             events = [item for item in events if str(item.get("surface") or "").lower() == surface_filter]
+        input_seq_ids = [int(item["seq"]) for item in events]
+        if len(input_seq_ids) != len(set(input_seq_ids)):
+            raise DriverRefusal("events file contains duplicate seq values")
+        expected_valid_count = sum(1 for item in events if item.get("kind") != "invalid")
+        expected_invalid_count = len(events) - expected_valid_count
+        telegram_harness = None
+        if any(
+            item.get("kind") != "invalid"
+            and str(item.get("request_surface") or "") == "telegram"
+            for item in events
+        ):
+            from scripts.trading_core_probe_worker import AiogramDispatcherHarness
+
+            telegram_harness = AiogramDispatcherHarness()
+            stack.push_async_callback(telegram_harness.close)
         started = time.perf_counter()
         created: list[dict[str, object]] = []
         errors: list[dict[str, object]] = []
         estimate_shadows: list[dict[str, object]] = []
         requests_placed: list[dict[str, object]] = []
+        attempted_seq_ids: list[int] = []
+        invalid_rejected_seq_ids: list[int] = []
 
         owners = {
             "web_ot": await _seed_user(
@@ -395,6 +447,10 @@ async def _run(args: argparse.Namespace) -> dict[str, object]:
                         pending["due_at"] = now + 15.0
                     continue
                 pending_actions.remove(pending)
+                entry["publication_observed_at_utc"] = _utc()
+                entry["publication_observed_elapsed"] = round(
+                    time.perf_counter() - wall_started, 6
+                )
                 try:
                     if pending["action"] == "trade":
                         owner = pending["owner"]
@@ -412,14 +468,36 @@ async def _run(args: argparse.Namespace) -> dict[str, object]:
                             request_surface=str(pending["request_surface"]),
                             seq=int(pending["seq"]),
                             prefix=prefix,
+                            telegram_harness=telegram_harness,
                         )
                         requests_placed.append({"seq": pending["seq"], **request_result})
                         entry["request_status"] = request_result.get("status")
-                        entry["status"] = "published_then_requested"
+                        entry["action_completed_at_utc"] = _utc()
+                        entry["action_completed_elapsed"] = round(
+                            time.perf_counter() - wall_started, 6
+                        )
+                        if request_result.get("status") == "success":
+                            entry["status"] = "published_then_traded"
+                        else:
+                            entry["status"] = "published_then_trade_failed"
+                            errors.append(
+                                {
+                                    "seq": pending["seq"],
+                                    "status": "failed",
+                                    "error": (
+                                        "deferred trade did not succeed after publication: "
+                                        f"{request_result.get('status')}"
+                                    ),
+                                }
+                            )
                     else:
                         await session.refresh(pending["owner"])
                         await _expire_offer(
                             session, offer, pending["owner"], surface=str(pending["surface"])
+                        )
+                        entry["action_completed_at_utc"] = _utc()
+                        entry["action_completed_elapsed"] = round(
+                            time.perf_counter() - wall_started, 6
                         )
                         entry["status"] = "published_then_manual_expired"
                 except Exception as exc:  # noqa: BLE001
@@ -433,6 +511,7 @@ async def _run(args: argparse.Namespace) -> dict[str, object]:
 
         for item in events:
             seq = int(item["seq"])
+            attempted_seq_ids.append(seq)
             if defer_actions and pending_actions:
                 await _process_due_actions()
             if args.realtime:
@@ -464,6 +543,7 @@ async def _run(args: argparse.Namespace) -> dict[str, object]:
                     )
                 except Exception as exc:  # noqa: BLE001
                     await session.rollback()
+                    invalid_rejected_seq_ids.append(seq)
                     errors.append(
                         {
                             "seq": seq,
@@ -574,6 +654,7 @@ async def _run(args: argparse.Namespace) -> dict[str, object]:
                     request_surface=request_surface,
                     seq=seq,
                     prefix=prefix,
+                    telegram_harness=telegram_harness,
                 )
                 requests_placed.append({"seq": seq, **request_result})
                 # Expire only if the offer is still active after the request.
@@ -650,11 +731,80 @@ async def _run(args: argparse.Namespace) -> dict[str, object]:
     invalid_unexpected = sum(1 for item in errors if item.get("status") == "invalid_attempt_unexpected_success")
     req_web = sum(1 for item in requests_placed if item.get("request_surface") == "webapp")
     req_tg = sum(1 for item in requests_placed if item.get("request_surface") == "telegram")
+    executed_web = sum(
+        1 for item in requests_placed if item.get("execution_surface") == "webapp"
+    )
+    executed_tg = sum(
+        1 for item in requests_placed if item.get("execution_surface") == "telegram"
+    )
+    created_seq_ids = [int(item["seq"]) for item in created]
+    offer_public_ids = [
+        str(item["offer_public_id"])
+        for item in created
+        if item.get("offer_public_id")
+    ]
+    trades_planned = sum(1 for item in created if item.get("planned_action") == "trade")
+    manual_expiry_planned = sum(
+        1 for item in created if item.get("planned_action") == "manual_expire"
+    )
+    trades_after_publication = sum(
+        1 for item in created if item.get("status") == "published_then_traded"
+    )
+    manual_expired_after_publication = sum(
+        1 for item in created if item.get("status") == "published_then_manual_expired"
+    )
+    publish_wait_timeouts = sum(
+        1
+        for item in created
+        if item.get("status") == "publish_wait_timeout_left_to_expiry"
+    )
+    action_order_violations = sum(
+        1
+        for item in created
+        if item.get("action_completed_elapsed") is not None
+        and (
+            item.get("publication_observed_elapsed") is None
+            or float(item["action_completed_elapsed"])
+            < float(item["publication_observed_elapsed"])
+        )
+    )
+    assertions = {
+        "input_seq_unique": len(input_seq_ids) == len(set(input_seq_ids)),
+        "all_input_events_attempted_once": sorted(attempted_seq_ids) == sorted(input_seq_ids)
+        and len(attempted_seq_ids) == len(set(attempted_seq_ids)),
+        "valid_created_exactly_once": len(created_seq_ids) == expected_valid_count
+        and len(created_seq_ids) == len(set(created_seq_ids)),
+        "offer_public_ids_unique": len(offer_public_ids) == len(created_seq_ids)
+        and len(offer_public_ids) == len(set(offer_public_ids)),
+        "invalid_rejected_exactly_once": invalid_rejected == expected_invalid_count
+        and sorted(invalid_rejected_seq_ids)
+        == sorted(item["seq"] for item in events if item.get("kind") == "invalid"),
+        "no_invalid_unexpected_success": invalid_unexpected == 0,
+        "no_event_failures": failed == 0,
+        "no_publish_wait_timeouts": publish_wait_timeouts == 0,
+        "no_action_drain_timeouts": action_drain_timeouts == 0,
+        "all_planned_trades_after_publication": trades_after_publication == trades_planned,
+        "all_manual_expiry_after_publication": (
+            manual_expired_after_publication == manual_expiry_planned
+        ),
+        "action_order_valid": action_order_violations == 0,
+    }
     return {
-        "ok": bool(created) and failed == 0 and invalid_unexpected == 0,
+        "ok": bool(created) and all(assertions.values()),
         "mode": "mutating_wave",
         "run_prefix": prefix,
         "server_mode": getattr(settings, "server_mode", None),
+        "events_file_sha256": events_file_sha256,
+        "expected_events_file_sha256": expected_events_sha256 or None,
+        "input_event_count": len(events),
+        "expected_valid_count": expected_valid_count,
+        "expected_invalid_count": expected_invalid_count,
+        "input_seq_ids": input_seq_ids,
+        "attempted_seq_ids": attempted_seq_ids,
+        "created_seq_ids": created_seq_ids,
+        "invalid_rejected_seq_ids": invalid_rejected_seq_ids,
+        "offer_public_ids": offer_public_ids,
+        "assertions": assertions,
         "elapsed_seconds": round(time.perf_counter() - started, 3),
         "created_count": len(created),
         "invalid_rejected": invalid_rejected,
@@ -662,6 +812,10 @@ async def _run(args: argparse.Namespace) -> dict[str, object]:
         "failed_count": failed,
         "requests_placed": len(requests_placed),
         "request_surface_mix": {"webapp": req_web, "telegram": req_tg},
+        "request_execution_mix": {
+            "webapp": executed_web,
+            "telegram": executed_tg,
+        },
         "estimate_probes": sum(1 for item in created if item.get("estimate_probe")),
         "estimate_shadow_count": len(estimate_shadows),
         "overtime_creates": sum(1 for item in created if int(item.get("overtime_minutes") or 0) > 0),
@@ -671,21 +825,16 @@ async def _run(args: argparse.Namespace) -> dict[str, object]:
         "speed": float(args.speed),
         "defer_actions": bool(getattr(args, "defer_actions", False)),
         "deferred_action_stats": {
-            "trades_after_publication": sum(
-                1 for item in created if item.get("status") == "published_then_requested"
-            ),
-            "manual_expired_after_publication": sum(
-                1 for item in created if item.get("status") == "published_then_manual_expired"
-            ),
+            "trades_planned": trades_planned,
+            "trades_after_publication": trades_after_publication,
+            "manual_expiry_planned": manual_expiry_planned,
+            "manual_expired_after_publication": manual_expired_after_publication,
             "left_to_natural_expiry": sum(
                 1 for item in created if item.get("planned_action") == "natural_expiry"
             ),
-            "publish_wait_timeouts": sum(
-                1
-                for item in created
-                if item.get("status") == "publish_wait_timeout_left_to_expiry"
-            ),
+            "publish_wait_timeouts": publish_wait_timeouts,
             "action_drain_timeouts": action_drain_timeouts,
+            "action_order_violations": action_order_violations,
         },
         "owner_pool_size": len(plain_pool) if not args.cleanup_only else 0,
         "created_sample": created[:40],
@@ -700,6 +849,11 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--run-prefix", required=True)
     parser.add_argument("--events-file", required=True)
+    parser.add_argument(
+        "--events-sha256",
+        default="",
+        help="expected SHA-256 of the exact events file bytes",
+    )
     parser.add_argument("--surface-filter", choices=["webapp", "bot", ""], default="")
     parser.add_argument("--snapshot-path", default="")
     parser.add_argument("--realtime", action="store_true")

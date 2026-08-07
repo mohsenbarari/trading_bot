@@ -99,8 +99,9 @@ class Settings(BaseSettings):
     trade_delivery_worker_lease_seconds: int = 30
     trade_delivery_worker_recover_limit: int = 100
     offer_publication_worker_interval_seconds: float = 1.0
-    # Drain with a short Telegram-allowed burst (token bucket ~20/min to the
-    # same channel), then honor 429/retry_after before the next burst.
+    # Legacy fallback follows the same 0.8s staging calibration as QUEUE_V1.
+    # Exact channel capacity is learned from provider responses, not a 20/min
+    # group-limit assumption.
     offer_publication_worker_batch_limit: int = 30
     offer_publication_worker_channel_edit_spacing_seconds: float = 0.8
     offer_publication_worker_channel_send_spacing_seconds: float = 0.8
@@ -152,8 +153,19 @@ class Settings(BaseSettings):
     telegram_delivery_queue_retry_base_seconds: float = 1.0
     telegram_delivery_queue_retry_max_seconds: float = 300.0
     telegram_delivery_queue_retry_jitter_ratio: float = 0.2
-    telegram_delivery_queue_bot_min_interval_seconds: float = 0.8
+    # Global bot cadence covers different destinations (~28.6/s); the 0.8s
+    # calibration belongs to the per-destination channel gate below.
+    telegram_delivery_queue_bot_min_interval_seconds: float = 0.035
     telegram_delivery_queue_destination_min_interval_seconds: float = 0.8
+    # A micro-burst is earned only after destination idle time and is serialized
+    # (never multiple provider requests in flight for one channel).
+    telegram_delivery_queue_destination_burst_capacity: int = 2
+    telegram_delivery_queue_destination_burst_idle_seconds: float = 3.2
+    telegram_delivery_queue_destination_burst_recovery_seconds: float = 300.0
+    # Telegram can silently hold channel edits instead of returning 429. Treat
+    # provider latency above this threshold as a soft congestion signal.
+    telegram_delivery_queue_edit_slow_response_seconds: float = 2.0
+    telegram_delivery_queue_edit_slowdown_seconds: float = 1.6
     telegram_delivery_queue_rate_limit_probe_delay_seconds: float = 0.1
     telegram_delivery_queue_global_rate_limit_window_seconds: float = 2.0
     telegram_delivery_queue_limiter_key_ttl_seconds: int = 86400
@@ -253,6 +265,10 @@ class Settings(BaseSettings):
             "telegram_delivery_queue_retry_max_seconds",
             "telegram_delivery_queue_bot_min_interval_seconds",
             "telegram_delivery_queue_destination_min_interval_seconds",
+            "telegram_delivery_queue_destination_burst_idle_seconds",
+            "telegram_delivery_queue_destination_burst_recovery_seconds",
+            "telegram_delivery_queue_edit_slow_response_seconds",
+            "telegram_delivery_queue_edit_slowdown_seconds",
             "telegram_delivery_queue_rate_limit_probe_delay_seconds",
             "telegram_delivery_queue_global_rate_limit_window_seconds",
         )
@@ -286,6 +302,7 @@ class Settings(BaseSettings):
             "telegram_delivery_queue_channel_editor_concurrency",
             "telegram_offer_queue_feeder_batch_limit",
             "telegram_delivery_queue_limiter_key_ttl_seconds",
+            "telegram_delivery_queue_destination_burst_capacity",
         ):
             if isinstance(getattr(self, name), bool) or int(getattr(self, name)) <= 0:
                 raise ValueError(f"{name}_must_be_positive")

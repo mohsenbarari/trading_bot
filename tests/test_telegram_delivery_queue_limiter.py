@@ -45,6 +45,9 @@ def _job(*, bot="primary", destination="channel:-100123"):
         id=f"{bot}:{destination}",
         bot_identity=bot,
         destination_key=destination,
+        destination_class=(
+            "channel" if destination.startswith("channel:") else "private"
+        ),
     )
 
 
@@ -143,7 +146,7 @@ class TelegramDeliveryQueueLimiterTests(unittest.IsolatedAsyncioTestCase):
 
         await limiter.observe(_job(), decision, now=now)
 
-        ttl_ms = int(redis.eval_calls[0][-1])
+        ttl_ms = int(redis.eval_calls[0][16])
         self.assertGreaterEqual(ttl_ms, 1_000_000_000 + 60_000)
 
     async def test_explicit_bot_cooldown_is_atomic_with_destination_set_max(self):
@@ -167,16 +170,17 @@ class TelegramDeliveryQueueLimiterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(redis.eval_calls), 1)
         call = redis.eval_calls[0]
         script = call[0]
-        self.assertEqual(call[1], 5)
         self.assertIn("local function set_max", script)
         self.assertIn("set_max(KEYS[1], retry_until_ms, ttl_ms)", script)
         self.assertIn("set_max(KEYS[2], durable_bot_until_ms, ttl_ms)", script)
-        self.assertEqual(call[8], 5_000)
-        self.assertEqual(call[11], 127_000)
+        self.assertEqual(call[1], 8)
+        self.assertEqual(call[11], 5_000)
+        self.assertEqual(call[14], 127_000)
         self.assertGreaterEqual(
-            int(call[13]),
+            int(call[16]),
             int((bot_until - now).total_seconds() * 1000) + 60_000,
         )
+        self.assertEqual(call[17], 300_000)
         self.assertEqual(redis.set_calls, [])
 
     async def test_cancelled_probe_compare_and_sets_owner_and_rearms_requirement(self):
@@ -193,11 +197,12 @@ class TelegramDeliveryQueueLimiterTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(len(redis.eval_calls), 1)
         call = redis.eval_calls[0]
-        self.assertEqual(call[1], 2)
+        self.assertEqual(call[1], 3)
         self.assertIn("redis.call('get', KEYS[1]) == ARGV[1]", call[0])
-        self.assertIn("redis.call('set', KEYS[2], 'required'", call[0])
-        self.assertIn(":probe-inflight", call[2])
-        self.assertIn(":probe-required", call[3])
+        self.assertIn("redis.call('set', KEYS[3], 'required'", call[0])
+        self.assertIn(":inflight", call[2])
+        self.assertIn(":probe-inflight", call[3])
+        self.assertIn(":probe-required", call[4])
 
     async def test_recent_429_script_excludes_future_observations(self):
         now = utc_now()
@@ -255,7 +260,7 @@ class TelegramDeliveryQueueLimiterTests(unittest.IsolatedAsyncioTestCase):
 
         await limiter.acquire(_job(), now=now)
 
-        ttl_ms = int(redis.eval_calls[0][11])
+        ttl_ms = int(redis.eval_calls[0][14])
         self.assertGreaterEqual(ttl_ms, 1_000_000 + 60_000)
 
     async def test_pause_outcomes_write_only_the_scoped_block_key(self):
@@ -283,6 +288,13 @@ class TelegramDeliveryQueueLimiterTests(unittest.IsolatedAsyncioTestCase):
         primary = limiter._keys("primary", digest)
         editor = limiter._keys("channel_editor", digest)
         self.assertEqual(primary["destination_next"], editor["destination_next"])
+        self.assertEqual(
+            primary["destination_inflight"], editor["destination_inflight"]
+        )
+        self.assertEqual(
+            primary["destination_burst_state"],
+            editor["destination_burst_state"],
+        )
         self.assertNotEqual(
             primary["destination_block"],
             editor["destination_block"],
@@ -319,6 +331,49 @@ class TelegramDeliveryQueueLimiterTests(unittest.IsolatedAsyncioTestCase):
         ):
             await failing.acquire(_job(), now=utc_now())
 
+    async def test_slow_channel_edit_sets_soft_gate_and_suppresses_burst(self):
+        redis = _FakeRedis([1, 2])
+        limiter = RedisTelegramDeliveryLimiter(
+            redis=redis,
+            bot_min_interval_seconds=0.8,
+            destination_min_interval_seconds=0.8,
+            rate_limit_probe_delay_seconds=0.1,
+            global_rate_limit_window_seconds=2.0,
+            rate_limit_probe_lease_seconds=30.0,
+            destination_burst_capacity=2,
+            destination_burst_idle_seconds=3.2,
+            destination_burst_recovery_seconds=300.0,
+            edit_slow_response_seconds=2.0,
+            edit_slowdown_seconds=1.6,
+        )
+        job = _job(destination="channel:slow-edit")
+        job.method = "editMessageText"
+
+        applied = await limiter.observe_provider_latency(
+            job,
+            provider_latency_seconds=2.5,
+            now=utc_now(),
+        )
+
+        self.assertTrue(applied)
+        call = redis.eval_calls[0]
+        self.assertEqual(call[1], 3)
+        self.assertIn(":destination:", call[2])
+        self.assertIn(":burst-disabled-until", call[3])
+        self.assertIn(":burst-state", call[4])
+        self.assertEqual(call[5], 1_600)
+        self.assertEqual(call[6], 300_000)
+
+        job.method = "sendMessage"
+        self.assertFalse(
+            await limiter.observe_provider_latency(
+                job,
+                provider_latency_seconds=10.0,
+                now=utc_now(),
+            )
+        )
+        self.assertEqual(len(redis.eval_calls), 1)
+
     def test_configuration_rejects_nonpositive_or_nonfinite_rate_settings(self):
         for name, value in (
             ("bot_min_interval_seconds", 0),
@@ -326,6 +381,10 @@ class TelegramDeliveryQueueLimiterTests(unittest.IsolatedAsyncioTestCase):
             ("rate_limit_probe_delay_seconds", float("nan")),
             ("global_rate_limit_window_seconds", float("inf")),
             ("rate_limit_probe_lease_seconds", 0),
+            ("destination_burst_idle_seconds", 0),
+            ("destination_burst_recovery_seconds", float("nan")),
+            ("edit_slow_response_seconds", 0),
+            ("edit_slowdown_seconds", float("inf")),
         ):
             values = {
                 "redis": _FakeRedis(),
@@ -334,6 +393,11 @@ class TelegramDeliveryQueueLimiterTests(unittest.IsolatedAsyncioTestCase):
                 "rate_limit_probe_delay_seconds": 0.1,
                 "global_rate_limit_window_seconds": 2.0,
                 "rate_limit_probe_lease_seconds": 30.0,
+                "destination_burst_capacity": 2,
+                "destination_burst_idle_seconds": 3.2,
+                "destination_burst_recovery_seconds": 300.0,
+                "edit_slow_response_seconds": 2.0,
+                "edit_slowdown_seconds": 1.6,
             }
             values[name] = value
             with self.subTest(name=name), self.assertRaisesRegex(
@@ -341,6 +405,19 @@ class TelegramDeliveryQueueLimiterTests(unittest.IsolatedAsyncioTestCase):
                 name,
             ):
                 RedisTelegramDeliveryLimiter(**values)
+        with self.assertRaisesRegex(
+            TelegramDeliveryLimiterConfigurationError,
+            "destination_burst_capacity",
+        ):
+            RedisTelegramDeliveryLimiter(
+                redis=_FakeRedis(),
+                bot_min_interval_seconds=0.8,
+                destination_min_interval_seconds=0.8,
+                rate_limit_probe_delay_seconds=0.1,
+                global_rate_limit_window_seconds=2.0,
+                rate_limit_probe_lease_seconds=30.0,
+                destination_burst_capacity=0,
+            )
 
     def test_configured_factory_copies_all_explicit_settings(self):
         settings = SimpleNamespace(
@@ -348,6 +425,11 @@ class TelegramDeliveryQueueLimiterTests(unittest.IsolatedAsyncioTestCase):
             telegram_delivery_queue_destination_min_interval_seconds=1.1,
             telegram_delivery_queue_rate_limit_probe_delay_seconds=0.2,
             telegram_delivery_queue_global_rate_limit_window_seconds=3.0,
+            telegram_delivery_queue_destination_burst_capacity=2,
+            telegram_delivery_queue_destination_burst_idle_seconds=4.0,
+            telegram_delivery_queue_destination_burst_recovery_seconds=120.0,
+            telegram_delivery_queue_edit_slow_response_seconds=2.5,
+            telegram_delivery_queue_edit_slowdown_seconds=1.8,
             telegram_delivery_queue_limiter_key_ttl_seconds=900,
         )
         limiter = configured_redis_telegram_delivery_limiter(
@@ -358,6 +440,11 @@ class TelegramDeliveryQueueLimiterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(limiter.destination_min_interval_seconds, 1.1)
         self.assertEqual(limiter.rate_limit_probe_delay_seconds, 0.2)
         self.assertEqual(limiter.global_rate_limit_window_seconds, 3.0)
+        self.assertEqual(limiter.destination_burst_capacity, 2)
+        self.assertEqual(limiter.destination_burst_idle_seconds, 4.0)
+        self.assertEqual(limiter.destination_burst_recovery_seconds, 120.0)
+        self.assertEqual(limiter.edit_slow_response_seconds, 2.5)
+        self.assertEqual(limiter.edit_slowdown_seconds, 1.8)
         self.assertEqual(limiter.rate_limit_probe_lease_seconds, 30.0)
         self.assertEqual(limiter.key_ttl_seconds, 900)
 

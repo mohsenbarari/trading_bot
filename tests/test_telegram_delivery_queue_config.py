@@ -89,6 +89,13 @@ class TelegramDeliveryQueueConfigTests(unittest.TestCase):
             {"telegram_delivery_queue_worker_batch_limit": 0},
             {"telegram_delivery_queue_limiter_key_ttl_seconds": -1},
             {"telegram_delivery_queue_destination_min_interval_seconds": 0},
+            {"telegram_delivery_queue_destination_burst_capacity": 0},
+            {"telegram_delivery_queue_destination_burst_idle_seconds": 0},
+            {
+                "telegram_delivery_queue_destination_burst_recovery_seconds": 0
+            },
+            {"telegram_delivery_queue_edit_slow_response_seconds": 0},
+            {"telegram_delivery_queue_edit_slowdown_seconds": 0},
             {"telegram_delivery_queue_primary_concurrency": 0},
             {"telegram_delivery_queue_primary_m0_reserved_concurrency": 0},
             {

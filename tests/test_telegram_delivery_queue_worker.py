@@ -38,6 +38,11 @@ class _AllowLimiter:
     async def observe(self, _job, _decision, *, now):
         return None
 
+    async def observe_provider_latency(
+        self, _job, *, provider_latency_seconds, now
+    ):
+        return False
+
     async def extend_destination_cooldown(self, _job, *, until):
         return None
 
@@ -644,7 +649,10 @@ class TelegramDeliveryQueueWorkerSafetyTests(unittest.IsolatedAsyncioTestCase):
                 channel_destination_key=channel_destination,
             )
 
-        self.assertEqual(len(slot_calls), 4)
+        self.assertEqual(
+            len(slot_calls),
+            len(worker._lane_slot_plan("primary")),
+        )
         self.assertTrue(
             all(
                 call["allowed_destination_classes"]

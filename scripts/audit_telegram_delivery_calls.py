@@ -125,19 +125,18 @@ EXPECTED_RUNTIME_INVENTORY_COUNTS = {
     "durable_exempt": 4,
     # Includes Stage 8/9 overtime requester/owner status legacy branches that
     # are gated by configured_telegram_delivery_runtime().
-    "legacy_mode_guarded": 72,
+    "legacy_mode_guarded": 73,
     "legacy_owner_guarded": 13,
     "legacy_parameter_guarded": 2,
     "non_delivery_timer": 5,
     "non_message_control": 2,
     "queue_execution": 1,
 }
-# Re-reviewed for the combined overtime + coin-intelligence line. The 92 reviewed
-# callsites are unchanged in path, scope, callee, kind, and disposition; only eight
-# line numbers moved because coin-intelligence inserted code above them in
-# bot/handlers/trade_create.py and api/routers/offers.py.
+# Re-reviewed after consolidating offer edits onto the primary bot. All 100
+# runtime boundaries are classified; the additional offer-channel edit branch
+# is dominated by the QUEUE_V1 exit and remains legacy-mode guarded.
 EXPECTED_RUNTIME_INVENTORY_SHA256 = (
-    "b857d8b66572b6370edb4f3a81079889515d61a1259c1306d3057d528bdaa17d"
+    "3377a7f135be179971956385075ca8b430038c6a90c14b5fb3db966cf5550372"
 )
 
 

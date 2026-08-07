@@ -9,14 +9,16 @@ preflight is green.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
+import re
 import shlex
 import subprocess
 import sys
 import time
 import zipfile
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -27,7 +29,6 @@ if str(REPO_ROOT) not in sys.path:
 
 from scripts import build_staging_combined_matrix_manifest as manifest_builder
 from scripts import staging_combined_matrix_wave_driver as wave_driver
-from scripts.run_staging_two_server_full_matrix import DRIVER_SCENARIOS
 
 
 SCHEMA_VERSION = "staging_combined_matrix_runner_v1"
@@ -56,6 +57,22 @@ DRIVER_SCRIPTS = (
     "scripts/build_staging_combined_matrix_manifest.py",
     "scripts/staging_set_trading_setting.py",
 )
+
+WAVE_PROFILES = ("burst", "realtime-30m")
+CHANNEL_BASE_INTERVAL_SECONDS = 0.8
+CHANNEL_IDLE_BURST_CAPACITY = 2
+
+
+def _driver_scenarios() -> list[dict[str, Any]]:
+    """Load runtime-heavy two-server driver catalog only when it is needed.
+
+    Keeping this import lazy lets ``--mode plan`` run in a neutral environment
+    without database/Redis settings.
+    """
+
+    from scripts.run_staging_two_server_full_matrix import DRIVER_SCENARIOS
+
+    return list(DRIVER_SCENARIOS)
 
 
 def utc_now() -> str:
@@ -140,7 +157,7 @@ def sync_driver_scripts(args: argparse.Namespace) -> dict[str, Any]:
     for rel in DRIVER_SCRIPTS:
         local = REPO_ROOT / rel
         if not local.is_file():
-            continue
+            return {"ok": False, "error": f"required driver script missing: {rel}"}
         remote_path = f"{host}:{args.iran_workdir}/{rel}"
         scp = [
             "scp",
@@ -267,6 +284,7 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
         "manifest_errors": errors,
         "mandatory_cells": manifest["summary"],
         "wave": {
+            "profile": args.wave_profile,
             "schedule_sha256": manifest["wave"]["schedule_sha256"],
             "full_event_count": manifest["wave"]["event_count"],
             "scaled_action_count": len(actions),
@@ -533,14 +551,16 @@ def _set_offer_expiry_minutes(
     return payload
 
 
-def _apply_queue_offer_expiry_override(args: argparse.Namespace) -> dict[str, Any]:
+def _apply_queue_offer_expiry_override(
+    args: argparse.Namespace, *, override_minutes: int
+) -> dict[str, Any]:
     """Raise offer lifetime on both servers so queued offers survive the peak.
 
     With the staging default of 2 minutes, offers deep in a peak-sized send
     backlog would expire before their channel post, which never happens with
     real users. Returns the original values for the later restore.
     """
-    override = int(args.queue_offer_expiry_minutes)
+    override = int(override_minutes)
     if override <= 0:
         return {"enabled": False}
     result: dict[str, Any] = {"enabled": True, "override": override, "servers": {}}
@@ -568,6 +588,248 @@ def _restore_queue_offer_expiry(
     return result
 
 
+def _sha256_file(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _command_step(
+    label: str,
+    argv: list[str],
+    *,
+    timeout: float,
+) -> tuple[bool, dict[str, Any], subprocess.CompletedProcess[str]]:
+    completed = _run(argv, timeout=timeout)
+    evidence = {
+        "label": label,
+        "ok": completed.returncode == 0,
+        "returncode": completed.returncode,
+        "stdout_tail": (completed.stdout or "")[-500:],
+        "stderr_tail": (completed.stderr or "")[-500:],
+    }
+    return completed.returncode == 0, evidence, completed
+
+
+def _verified_event_transfer(
+    args: argparse.Namespace,
+    *,
+    events_path: Path,
+) -> dict[str, Any]:
+    """Copy one immutable events file and verify its bytes in both containers."""
+
+    expected_sha256 = _sha256_file(events_path)
+    host = args.iran_ssh_host if "@" in args.iran_ssh_host else f"root@{args.iran_ssh_host}"
+    safe_run = re.sub(r"[^A-Za-z0-9_.-]+", "-", str(args.run_id))[:120]
+    filename = f"{safe_run}-wave-events-{expected_sha256[:12]}.json"
+    remote_events = f"{args.iran_workdir}/tmp/{filename}"
+    container_events = f"/tmp/{filename}"
+    steps: list[dict[str, Any]] = []
+
+    def checksum_output(completed: subprocess.CompletedProcess[str]) -> str:
+        parts = (completed.stdout or "").strip().split()
+        return parts[0].lower() if parts else ""
+
+    def run_step(
+        label: str, argv: list[str], *, timeout: float = 60.0
+    ) -> subprocess.CompletedProcess[str] | None:
+        ok, evidence, completed = _command_step(label, argv, timeout=timeout)
+        steps.append(evidence)
+        return completed if ok else None
+
+    if run_step(
+        "iran_remote_tmp",
+        iran_ssh(args, f"mkdir -p {shlex.quote(args.iran_workdir + '/tmp')}"),
+        timeout=30,
+    ) is None:
+        return {"ok": False, "expected_sha256": expected_sha256, "steps": steps}
+    if run_step(
+        "scp_to_iran_host",
+        [
+            "scp",
+            "-P",
+            str(args.iran_ssh_port),
+            "-o",
+            "BatchMode=yes",
+            str(events_path),
+            f"{host}:{remote_events}",
+        ],
+        timeout=120,
+    ) is None:
+        return {"ok": False, "expected_sha256": expected_sha256, "steps": steps}
+    host_hash = run_step(
+        "iran_host_checksum",
+        iran_ssh(args, f"sha256sum {shlex.quote(remote_events)}"),
+    )
+    if host_hash is None:
+        return {"ok": False, "expected_sha256": expected_sha256, "steps": steps}
+    if checksum_output(host_hash) != expected_sha256:
+        steps[-1]["ok"] = False
+        steps[-1]["error"] = "Iran host checksum mismatch"
+        return {"ok": False, "expected_sha256": expected_sha256, "steps": steps}
+    if run_step(
+        "docker_cp_iran",
+        iran_ssh(
+            args,
+            "docker cp "
+            f"{shlex.quote(remote_events)} "
+            f"{shlex.quote(args.iran_app_container + ':' + container_events)}",
+        ),
+    ) is None:
+        return {"ok": False, "expected_sha256": expected_sha256, "steps": steps}
+    iran_hash = run_step(
+        "iran_container_checksum",
+        iran_ssh(
+            args,
+            "docker exec "
+            f"{shlex.quote(args.iran_app_container)} "
+            f"sha256sum {shlex.quote(container_events)}",
+        ),
+    )
+    if iran_hash is None:
+        return {"ok": False, "expected_sha256": expected_sha256, "steps": steps}
+    if checksum_output(iran_hash) != expected_sha256:
+        steps[-1]["ok"] = False
+        steps[-1]["error"] = "Iran container checksum mismatch"
+        return {"ok": False, "expected_sha256": expected_sha256, "steps": steps}
+    if run_step(
+        "docker_cp_foreign",
+        [
+            "docker",
+            "cp",
+            str(events_path),
+            f"{args.foreign_app_container}:{container_events}",
+        ],
+    ) is None:
+        return {"ok": False, "expected_sha256": expected_sha256, "steps": steps}
+    foreign_hash = run_step(
+        "foreign_container_checksum",
+        [
+            "docker",
+            "exec",
+            args.foreign_app_container,
+            "sha256sum",
+            container_events,
+        ],
+    )
+    if foreign_hash is None:
+        return {"ok": False, "expected_sha256": expected_sha256, "steps": steps}
+    if checksum_output(foreign_hash) != expected_sha256:
+        steps[-1]["ok"] = False
+        steps[-1]["error"] = "foreign container checksum mismatch"
+        return {"ok": False, "expected_sha256": expected_sha256, "steps": steps}
+    return {
+        "ok": True,
+        "expected_sha256": expected_sha256,
+        "container_events_path": container_events,
+        "iran_remote_path": remote_events,
+        "steps": steps,
+    }
+
+
+def _queue_sample(
+    args: argparse.Namespace,
+    *,
+    since_utc: str | None = None,
+    timing: bool = False,
+) -> dict[str, Any]:
+    script_args = ["--run-prefix", args.run_prefix]
+    if timing:
+        script_args.append("--timing")
+    if since_utc:
+        script_args.extend(["--since-utc", since_utc])
+    else:
+        script_args.extend(
+            ["--lookback-minutes", str(int(args.timing_lookback_minutes))]
+        )
+    payload, code = _container_python(
+        args,
+        server="foreign",
+        script="scripts/staging_combined_matrix_queue_sampler.py",
+        script_args=script_args,
+        timeout=180,
+    )
+    if code != 0:
+        payload = {**payload, "ok": False, "returncode": code}
+    return payload
+
+
+def _effective_wave_limits(
+    args: argparse.Namespace, *, expected_valid: int
+) -> dict[str, Any]:
+    action_share = min(
+        1.0,
+        max(
+            0.0,
+            (int(args.wave_trade_percent) + int(args.wave_manual_expire_percent))
+            / 100.0,
+        ),
+    )
+    estimated_channel_operations = max(
+        1, int(round(expected_valid * (1.0 + action_share)))
+    )
+    drain_seconds = max(
+        0.0,
+        (estimated_channel_operations - CHANNEL_IDLE_BURST_CAPACITY)
+        * CHANNEL_BASE_INTERVAL_SECONDS,
+    )
+    schedule_seconds = (
+        float(manifest_builder.WAVE_SECONDS)
+        if args.wave_profile == "realtime-30m"
+        else 0.0
+    )
+    required_total_seconds = schedule_seconds + drain_seconds
+    required_expiry_minutes = int(required_total_seconds / 60.0 + 30.999)
+    configured_expiry = max(0, int(args.queue_offer_expiry_minutes))
+    effective_expiry = max(required_expiry_minutes, configured_expiry)
+    publish_wait = max(
+        float(args.wave_publish_wait_timeout_seconds),
+        required_total_seconds * 1.20,
+    )
+    action_drain = max(
+        float(args.wave_action_drain_timeout_seconds),
+        required_total_seconds * 1.25,
+    )
+    wave_timeout = max(
+        float(args.wave_timeout_seconds),
+        schedule_seconds + action_drain + 900.0,
+    )
+    return {
+        "estimated_channel_operations": estimated_channel_operations,
+        "channel_base_interval_seconds": CHANNEL_BASE_INTERVAL_SECONDS,
+        "channel_sustained_operations_per_minute": (
+            60.0 / CHANNEL_BASE_INTERVAL_SECONDS
+        ),
+        "channel_idle_burst_capacity": CHANNEL_IDLE_BURST_CAPACITY,
+        "estimated_channel_drain_seconds": round(drain_seconds, 3),
+        "schedule_seconds": schedule_seconds,
+        "required_offer_expiry_minutes": required_expiry_minutes,
+        "effective_offer_expiry_minutes": effective_expiry,
+        "effective_publish_wait_timeout_seconds": round(publish_wait, 3),
+        "effective_action_drain_timeout_seconds": round(action_drain, 3),
+        "effective_wave_timeout_seconds": round(wave_timeout, 3),
+        "default_p50_slo_seconds": round(max(60.0, required_total_seconds * 0.65), 3),
+        "default_p95_slo_seconds": round(max(120.0, required_total_seconds * 1.15), 3),
+    }
+
+
+def _assertion(
+    name: str,
+    *,
+    passed: bool,
+    expected: Any,
+    actual: Any,
+    cells: list[str] | None = None,
+    identifiers: list[Any] | None = None,
+) -> dict[str, Any]:
+    return {
+        "name": name,
+        "passed": bool(passed),
+        "expected": expected,
+        "actual": actual,
+        "cells": cells or [],
+        "identifiers": identifiers or [],
+    }
+
+
 def run_wave(args: argparse.Namespace, manifest: dict[str, Any], artifact_dir: Path) -> dict[str, Any]:
     budget = wave_driver.WaveBudget(
         valid_target=int(manifest["wave"]["valid_target"]),
@@ -582,51 +844,83 @@ def run_wave(args: argparse.Namespace, manifest: dict[str, Any], artifact_dir: P
         ),
     )
     selected = wave_driver.scale_events(list(manifest["wave_events"]), budget)
+    selected_schedule_sha256 = hashlib.sha256(
+        json.dumps(selected, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    manifest_schedule_sha256 = str(manifest["wave"]["schedule_sha256"])
+    full_schedule_hash_matches = (
+        float(budget.scale) < 1.0
+        or selected_schedule_sha256 == manifest_schedule_sha256
+    )
     events_path = artifact_dir / "wave-selected-events.json"
-    write_json(events_path, {"events": selected, "budget": {
-        "scale": budget.scale,
-        "valid_limit": budget.valid_limit,
-        "invalid_limit": budget.invalid_limit,
-        "reduction_reason": budget.reduction_reason,
-    }})
+    write_json(
+        events_path,
+        {
+            "events": selected,
+            "budget": {
+                "scale": budget.scale,
+                "valid_limit": budget.valid_limit,
+                "invalid_limit": budget.invalid_limit,
+                "reduction_reason": budget.reduction_reason,
+            },
+            "selected_schedule_sha256": selected_schedule_sha256,
+            "manifest_schedule_sha256": manifest_schedule_sha256,
+        },
+    )
+    selected_valid = [item for item in selected if item.get("kind") == "valid"]
+    selected_invalid = [item for item in selected if item.get("kind") == "invalid"]
+    limits = _effective_wave_limits(args, expected_valid=len(selected_valid))
+    write_json(artifact_dir / "wave-effective-limits.json", limits)
 
-    # Push selected events into both containers.
-    host = args.iran_ssh_host if "@" in args.iran_ssh_host else f"root@{args.iran_ssh_host}"
-    remote_events = f"{args.iran_workdir}/tmp/{args.run_id}-wave-events.json"
-    _run(
-        [
-            "scp",
-            "-P",
-            str(args.iran_ssh_port),
-            "-o",
-            "BatchMode=yes",
-            str(events_path),
-            f"{host}:{remote_events}",
-        ],
-        timeout=60,
+    # Capture a true pre-wave baseline before any offer is created.
+    queue_baseline = _queue_sample(args)
+    write_json(artifact_dir / "queue-baseline.json", queue_baseline)
+    baseline_scoped = queue_baseline.get("scoped") or {}
+    baseline_clean = (
+        bool(queue_baseline.get("ok"))
+        and int(baseline_scoped.get("offer_count") or 0) == 0
+        and int(baseline_scoped.get("job_count") or 0) == 0
     )
-    _run(
-        iran_ssh(
-            args,
-            f"docker cp {remote_events} {args.iran_app_container}:/tmp/wave-events.json",
-        ),
-        timeout=60,
-    )
-    _run(
-        [
-            "docker",
-            "cp",
-            str(events_path),
-            f"{args.foreign_app_container}:/tmp/wave-events.json",
-        ],
-        timeout=60,
-    )
+    if not baseline_clean:
+        return {
+            "ok": False,
+            "profile": args.wave_profile,
+            "budget": {
+                "scale": budget.scale,
+                "valid_limit": budget.valid_limit,
+                "invalid_limit": budget.invalid_limit,
+                "selected_count": len(selected),
+            },
+            "failure": "run-scoped queue baseline is not clean",
+            "queue": {"baseline": queue_baseline},
+        }
+
+    transfer = _verified_event_transfer(args, events_path=events_path)
+    write_json(artifact_dir / "wave-event-transfer.json", transfer)
+    if not transfer.get("ok"):
+        return {
+            "ok": False,
+            "profile": args.wave_profile,
+            "budget": {
+                "scale": budget.scale,
+                "valid_limit": budget.valid_limit,
+                "invalid_limit": budget.invalid_limit,
+                "selected_count": len(selected),
+            },
+            "failure": "wave event transfer/checksum verification failed",
+            "event_transfer": transfer,
+            "queue": {"baseline": queue_baseline},
+        }
+    container_events_path = str(transfer["container_events_path"])
+    events_file_sha256 = str(transfer["expected_sha256"])
 
     dwell = float(args.publish_dwell_seconds)
     owner_pool = int(args.owner_pool_size)
     wave_args_common = [
         "--events-file",
-        "/tmp/wave-events.json",
+        container_events_path,
+        "--events-sha256",
+        events_file_sha256,
         "--owner-pool-size",
         str(owner_pool),
         "--publish-dwell-seconds",
@@ -634,7 +928,7 @@ def run_wave(args: argparse.Namespace, manifest: dict[str, Any], artifact_dir: P
         "--speed",
         str(float(args.wave_speed)),
     ]
-    if args.realtime_wave:
+    if args.wave_profile == "realtime-30m":
         wave_args_common.append("--realtime")
     if not args.wave_immediate_actions:
         wave_args_common.extend(
@@ -647,9 +941,9 @@ def run_wave(args: argparse.Namespace, manifest: dict[str, Any], artifact_dir: P
                 "--manual-expire-percent",
                 str(int(args.wave_manual_expire_percent)),
                 "--publish-wait-timeout-seconds",
-                str(float(args.wave_publish_wait_timeout_seconds)),
+                str(float(limits["effective_publish_wait_timeout_seconds"])),
                 "--action-drain-timeout-seconds",
-                str(float(args.wave_action_drain_timeout_seconds)),
+                str(float(limits["effective_action_drain_timeout_seconds"])),
             ]
         )
 
@@ -674,8 +968,26 @@ def run_wave(args: argparse.Namespace, manifest: dict[str, Any], artifact_dir: P
     # lifetime for the wave window and always restore it afterwards.
     expiry_override: dict[str, Any] = {"enabled": False}
     if not args.wave_immediate_actions:
-        expiry_override = _apply_queue_offer_expiry_override(args)
+        expiry_override = _apply_queue_offer_expiry_override(
+            args,
+            override_minutes=int(limits["effective_offer_expiry_minutes"]),
+        )
     write_json(artifact_dir / "offer-expiry-override.json", expiry_override)
+    override_servers = (expiry_override.get("servers") or {}).values()
+    if expiry_override.get("enabled") and not all(
+        bool(payload.get("ok")) for payload in override_servers
+    ):
+        restore_state = _restore_queue_offer_expiry(args, expiry_override)
+        write_json(artifact_dir / "offer-expiry-restore.json", restore_state)
+        return {
+            "ok": False,
+            "profile": args.wave_profile,
+            "failure": "offer expiry override failed on at least one server",
+            "offer_expiry_override": expiry_override,
+            "offer_expiry_restore": restore_state,
+            "event_transfer": transfer,
+            "queue": {"baseline": queue_baseline},
+        }
 
     # Iran (webapp) and foreign (bot) must pace the same 30-minute wall clock.
     iran_payload: dict[str, Any] = {}
@@ -683,6 +995,15 @@ def run_wave(args: argparse.Namespace, manifest: dict[str, Any], artifact_dir: P
     iran_code = 1
     foreign_code = 1
     wave_started = time.perf_counter()
+    wave_started_utc = utc_now()
+    queue_monitor_samples: list[dict[str, Any]] = []
+    queue_post_wave: dict[str, Any] = {}
+    queue_final: dict[str, Any] = {}
+    iran_cleanup: dict[str, Any] = {}
+    foreign_cleanup: dict[str, Any] = {}
+    timing: dict[str, Any] = {}
+    wave_exception: str | None = None
+    wave_wall_seconds = 0.0
     try:
         with ThreadPoolExecutor(max_workers=2) as pool:
             futures = {
@@ -692,7 +1013,7 @@ def run_wave(args: argparse.Namespace, manifest: dict[str, Any], artifact_dir: P
                     server="iran",
                     script="scripts/staging_combined_matrix_mutating_wave.py",
                     script_args=iran_script_args,
-                    timeout=float(args.wave_timeout_seconds),
+                    timeout=float(limits["effective_wave_timeout_seconds"]),
                 ): "iran",
                 pool.submit(
                     _container_python,
@@ -700,65 +1021,99 @@ def run_wave(args: argparse.Namespace, manifest: dict[str, Any], artifact_dir: P
                     server="foreign",
                     script="scripts/staging_combined_matrix_mutating_wave.py",
                     script_args=foreign_script_args,
-                    timeout=float(args.wave_timeout_seconds),
+                    timeout=float(limits["effective_wave_timeout_seconds"]),
                 ): "foreign",
             }
-            for future in as_completed(futures):
-                name = futures[future]
-                payload, code = future.result()
-                if name == "iran":
-                    iran_payload, iran_code = payload, code
-                else:
-                    foreign_payload, foreign_code = payload, code
+            pending = set(futures)
+            sample_interval = max(5.0, float(args.queue_sample_interval_seconds))
+            while pending:
+                done, _ = wait(
+                    pending,
+                    timeout=sample_interval,
+                    return_when=FIRST_COMPLETED,
+                )
+                sample = _queue_sample(args, since_utc=wave_started_utc)
+                sample["wave_elapsed_seconds"] = round(
+                    time.perf_counter() - wave_started, 3
+                )
+                queue_monitor_samples.append(sample)
+                for future in done:
+                    name = futures[future]
+                    pending.remove(future)
+                    try:
+                        payload, code = future.result()
+                    except Exception as exc:  # noqa: BLE001
+                        payload = {
+                            "ok": False,
+                            "error": f"{type(exc).__name__}: {exc}",
+                        }
+                        code = 1
+                    if name == "iran":
+                        iran_payload, iran_code = payload, code
+                    else:
+                        foreign_payload, foreign_code = payload, code
         wave_wall_seconds = round(time.perf_counter() - wave_started, 3)
         write_json(artifact_dir / "wave-iran.json", iran_payload)
         write_json(artifact_dir / "wave-foreign.json", foreign_payload)
+        write_json(
+            artifact_dir / "queue-monitor.json",
+            {"samples": queue_monitor_samples},
+        )
 
-        queue_before, _ = _container_python(
-            args,
-            server="foreign",
-            script="scripts/staging_combined_matrix_queue_sampler.py",
-            script_args=["--run-prefix", args.run_prefix],
-            timeout=120,
+        queue_post_wave = _queue_sample(
+            args, since_utc=wave_started_utc, timing=True
         )
         time.sleep(max(15.0, float(args.drain_wait_seconds)))
-        queue_after, _ = _container_python(
-            args,
-            server="foreign",
-            script="scripts/staging_combined_matrix_queue_sampler.py",
-            script_args=[
-                "--run-prefix",
-                args.run_prefix,
-                "--timing",
-                "--lookback-minutes",
-                str(int(args.timing_lookback_minutes)),
-            ],
-            timeout=180,
+        queue_final = _queue_sample(
+            args, since_utc=wave_started_utc, timing=True
         )
         write_json(
             artifact_dir / "queue-sample.json",
-            {"before_drain_wait": queue_before, "after_drain_wait": queue_after},
+            {
+                "baseline": queue_baseline,
+                "post_wave": queue_post_wave,
+                "after_drain_wait": queue_final,
+            },
         )
-        timing = queue_after.get("timing") if isinstance(queue_after, dict) else {}
+        timing = (queue_final.get("scoped") or {}).get("timing") or {}
+        global_timing = (queue_final.get("global") or {}).get("timing") or {}
         write_json(
             artifact_dir / "telegram-send-timing.json",
             {
-                "ok": bool(queue_after.get("ok")),
-                "at_utc": queue_after.get("at_utc"),
-                "pending_jobs": queue_after.get("pending_jobs"),
-                "timing": timing or {},
+                "ok": bool(queue_final.get("ok")),
+                "at_utc": queue_final.get("at_utc"),
+                "prefix": args.run_prefix,
+                "scoped": {
+                    "pending_jobs": (queue_final.get("scoped") or {}).get(
+                        "pending_jobs"
+                    ),
+                    "timing": timing,
+                    "provider_timing": (
+                        queue_final.get("scoped") or {}
+                    ).get("provider_timing"),
+                },
+                "global": {
+                    "pending_jobs": (queue_final.get("global") or {}).get(
+                        "pending_jobs"
+                    ),
+                    "timing": global_timing,
+                },
                 "recommendation": {
-                    "best_send_minute_utc": (timing or {}).get("best_send_minute_utc"),
-                    "best_send_minute_mean_latency_seconds": (timing or {}).get(
+                    "best_send_minute_utc": timing.get("best_send_minute_utc"),
+                    "best_send_minute_mean_latency_seconds": timing.get(
                         "best_send_minute_mean_latency_seconds"
                     ),
-                    "p50_seconds": ((timing or {}).get("latency_seconds") or {}).get("p50"),
-                    "p95_seconds": ((timing or {}).get("latency_seconds") or {}).get("p95"),
+                    "p50_seconds": (timing.get("latency_seconds") or {}).get(
+                        "p50"
+                    ),
+                    "p95_seconds": (timing.get("latency_seconds") or {}).get(
+                        "p95"
+                    ),
                 },
             },
         )
 
-        iran_cleanup, _ = _container_python(
+        iran_cleanup, iran_cleanup_code = _container_python(
             args,
             server="iran",
             script="scripts/staging_combined_matrix_mutating_wave.py",
@@ -766,12 +1121,13 @@ def run_wave(args: argparse.Namespace, manifest: dict[str, Any], artifact_dir: P
                 "--run-prefix",
                 f"{args.run_prefix}_IR",
                 "--events-file",
-                "/tmp/wave-events.json",
+                container_events_path,
                 "--cleanup-only",
             ],
             timeout=300,
         )
-        foreign_cleanup, _ = _container_python(
+        iran_cleanup["returncode"] = iran_cleanup_code
+        foreign_cleanup, foreign_cleanup_code = _container_python(
             args,
             server="foreign",
             script="scripts/staging_combined_matrix_mutating_wave.py",
@@ -779,16 +1135,69 @@ def run_wave(args: argparse.Namespace, manifest: dict[str, Any], artifact_dir: P
                 "--run-prefix",
                 f"{args.run_prefix}_FO",
                 "--events-file",
-                "/tmp/wave-events.json",
+                container_events_path,
                 "--cleanup-only",
             ],
             timeout=300,
         )
+        foreign_cleanup["returncode"] = foreign_cleanup_code
         write_json(
             artifact_dir / "wave-cleanup.json",
             {"iran": iran_cleanup, "foreign": foreign_cleanup},
         )
+    except Exception as exc:  # noqa: BLE001 - return structured gate failure
+        wave_exception = f"{type(exc).__name__}: {exc}"
+        wave_wall_seconds = round(time.perf_counter() - wave_started, 3)
     finally:
+        # Cleanup is best-effort even when sampling or a child process fails.
+        if not iran_cleanup:
+            try:
+                iran_cleanup, iran_cleanup_code = _container_python(
+                    args,
+                    server="iran",
+                    script="scripts/staging_combined_matrix_mutating_wave.py",
+                    script_args=[
+                        "--run-prefix",
+                        f"{args.run_prefix}_IR",
+                        "--events-file",
+                        container_events_path,
+                        "--cleanup-only",
+                    ],
+                    timeout=300,
+                )
+                iran_cleanup["returncode"] = iran_cleanup_code
+            except Exception as exc:  # noqa: BLE001
+                iran_cleanup = {
+                    "ok": False,
+                    "returncode": 1,
+                    "error": f"{type(exc).__name__}: {exc}",
+                }
+        if not foreign_cleanup:
+            try:
+                foreign_cleanup, foreign_cleanup_code = _container_python(
+                    args,
+                    server="foreign",
+                    script="scripts/staging_combined_matrix_mutating_wave.py",
+                    script_args=[
+                        "--run-prefix",
+                        f"{args.run_prefix}_FO",
+                        "--events-file",
+                        container_events_path,
+                        "--cleanup-only",
+                    ],
+                    timeout=300,
+                )
+                foreign_cleanup["returncode"] = foreign_cleanup_code
+            except Exception as exc:  # noqa: BLE001
+                foreign_cleanup = {
+                    "ok": False,
+                    "returncode": 1,
+                    "error": f"{type(exc).__name__}: {exc}",
+                }
+        write_json(
+            artifact_dir / "wave-cleanup.json",
+            {"iran": iran_cleanup, "foreign": foreign_cleanup},
+        )
         # Restore only after the wave offers are cleaned up; restoring earlier
         # would mass-expire queued offers mid-drain and skew send metrics.
         restore_state = _restore_queue_offer_expiry(args, expiry_override)
@@ -797,17 +1206,337 @@ def run_wave(args: argparse.Namespace, manifest: dict[str, Any], artifact_dir: P
 
     created_iran = int(iran_payload.get("created_count") or 0)
     created_foreign = int(foreign_payload.get("created_count") or 0)
-    expected_valid = int(budget.valid_limit)
-    ok = (
+    expected_valid_seq = sorted(int(item["seq"]) for item in selected_valid)
+    expected_invalid_seq = sorted(int(item["seq"]) for item in selected_invalid)
+    actual_created_seq = [
+        int(value)
+        for payload in (iran_payload, foreign_payload)
+        for value in (payload.get("created_seq_ids") or [])
+    ]
+    actual_invalid_seq = [
+        int(value)
+        for payload in (iran_payload, foreign_payload)
+        for value in (payload.get("invalid_rejected_seq_ids") or [])
+    ]
+    expected_offer_public_ids = sorted(
+        str(value)
+        for payload in (iran_payload, foreign_payload)
+        for value in (payload.get("offer_public_ids") or [])
+    )
+    expected_webapp = sum(
+        1 for item in selected_valid if item.get("surface") == "webapp"
+    )
+    expected_bot = len(selected_valid) - expected_webapp
+    trade_selected = [
+        item
+        for item in selected_valid
+        if int(item["seq"]) % 100 < int(args.wave_trade_percent)
+    ]
+    expected_request_web = sum(
+        1 for item in trade_selected if item.get("request_surface") == "webapp"
+    )
+    expected_request_tg = len(trade_selected) - expected_request_web
+    iran_request_mix = iran_payload.get("request_execution_mix") or {}
+    foreign_request_mix = foreign_payload.get("request_execution_mix") or {}
+    actual_request_web = int(iran_request_mix.get("webapp") or 0) + int(
+        foreign_request_mix.get("webapp") or 0
+    )
+    actual_request_tg = int(iran_request_mix.get("telegram") or 0) + int(
+        foreign_request_mix.get("telegram") or 0
+    )
+    actual_request_total = actual_request_web + actual_request_tg
+    actual_request_web_share = (
+        actual_request_web / float(actual_request_total)
+        if actual_request_total
+        else 0.0
+    )
+    payload_assertions_passed = all(
+        bool(value)
+        for payload in (iran_payload, foreign_payload)
+        for value in (payload.get("assertions") or {}).values()
+    ) and all(
+        bool((payload.get("assertions") or {}))
+        for payload in (iran_payload, foreign_payload)
+    )
+    checksum_passed = all(
+        payload.get("events_file_sha256") == events_file_sha256
+        and payload.get("expected_events_file_sha256") == events_file_sha256
+        for payload in (iran_payload, foreign_payload)
+    )
+    monitor_scoped = [
+        sample.get("scoped") or {}
+        for sample in queue_monitor_samples
+        if sample.get("ok")
+    ]
+    monitor_scoped.append(queue_post_wave.get("scoped") or {})
+    peak_pending = max(
+        (int(sample.get("pending_jobs") or 0) for sample in monitor_scoped),
+        default=0,
+    )
+    dynamic_min_peak = max(1, int(round(len(selected_valid) * 0.25)))
+    min_peak = (
+        int(args.queue_slo_min_peak_pending)
+        if args.queue_slo_min_peak_pending is not None
+        else dynamic_min_peak
+    )
+    final_scoped = queue_final.get("scoped") or {}
+    latency = (final_scoped.get("timing") or {}).get("latency_seconds") or {}
+    provider_timing = final_scoped.get("provider_timing") or {}
+    edit_provider_latency = provider_timing.get("edit_latency_seconds") or {}
+    p50 = latency.get("p50")
+    p95 = latency.get("p95")
+    edit_provider_p95 = edit_provider_latency.get("p95")
+    max_p50 = (
+        float(args.queue_slo_max_p50_seconds)
+        if args.queue_slo_max_p50_seconds is not None
+        else float(limits["default_p50_slo_seconds"])
+    )
+    max_p95 = (
+        float(args.queue_slo_max_p95_seconds)
+        if args.queue_slo_max_p95_seconds is not None
+        else float(limits["default_p95_slo_seconds"])
+    )
+    assertions = [
+        _assertion(
+            "wave_orchestration_completed",
+            passed=wave_exception is None,
+            expected={"exception": None},
+            actual={"exception": wave_exception},
+        ),
+        _assertion(
+            "event_transfer_checksums",
+            passed=checksum_passed and full_schedule_hash_matches,
+            expected={
+                "file_sha256": events_file_sha256,
+                "manifest_schedule_sha256": manifest_schedule_sha256,
+            },
+            actual={
+                "iran": iran_payload.get("events_file_sha256"),
+                "foreign": foreign_payload.get("events_file_sha256"),
+                "selected_schedule_sha256": selected_schedule_sha256,
+            },
+        ),
+        _assertion(
+            "all_valid_events_created_exactly_once",
+            passed=sorted(actual_created_seq) == expected_valid_seq
+            and len(actual_created_seq) == len(set(actual_created_seq)),
+            expected=len(expected_valid_seq),
+            actual=len(actual_created_seq),
+            cells=["queue:wave:valid"],
+            identifiers=actual_created_seq,
+        ),
+        _assertion(
+            "all_invalid_events_rejected_exactly_once",
+            passed=sorted(actual_invalid_seq) == expected_invalid_seq
+            and len(actual_invalid_seq) == len(set(actual_invalid_seq)),
+            expected=len(expected_invalid_seq),
+            actual=len(actual_invalid_seq),
+            cells=["queue:wave:invalid"],
+            identifiers=actual_invalid_seq,
+        ),
+        _assertion(
+            "webapp_surface_exact",
+            passed=created_iran == expected_webapp,
+            expected=expected_webapp,
+            actual=created_iran,
+            cells=["queue:surface:webapp"],
+        ),
+        _assertion(
+            "bot_surface_exact",
+            passed=created_foreign == expected_bot,
+            expected=expected_bot,
+            actual=created_foreign,
+            cells=["queue:surface:bot"],
+        ),
+        _assertion(
+            "telegram_heavy_surface_mix",
+            passed=(created_foreign + created_iran) > 0
+            and created_foreign / float(created_foreign + created_iran) >= 0.60
+            and created_foreign == expected_bot,
+            expected={"bot_min_share": 0.60, "bot_count": expected_bot},
+            actual={
+                "bot_count": created_foreign,
+                "bot_share": (
+                    created_foreign / float(created_foreign + created_iran)
+                    if created_foreign + created_iran
+                    else 0.0
+                ),
+            },
+            cells=["queue:surface:telegram_heavy"],
+        ),
+        _assertion(
+            "request_surface_exact_and_balanced",
+            passed=actual_request_web == expected_request_web
+            and actual_request_tg == expected_request_tg
+            and abs(actual_request_web_share - 0.50)
+            <= float(args.request_surface_balance_tolerance),
+            expected={
+                "webapp": expected_request_web,
+                "telegram": expected_request_tg,
+                "webapp_share": 0.50,
+                "tolerance": float(args.request_surface_balance_tolerance),
+            },
+            actual={
+                "webapp": actual_request_web,
+                "telegram": actual_request_tg,
+                "webapp_share": round(actual_request_web_share, 6),
+            },
+            cells=["market:request_surface:balanced"],
+        ),
+        _assertion(
+            "actions_only_after_publication",
+            passed=not args.wave_immediate_actions and payload_assertions_passed,
+            expected={
+                "deferred_actions": True,
+                "publish_timeouts": 0,
+                "action_timeouts": 0,
+                "trade_failures": 0,
+            },
+            actual={
+                "iran": iran_payload.get("deferred_action_stats"),
+                "foreign": foreign_payload.get("deferred_action_stats"),
+            },
+            cells=["queue:wave:valid"],
+        ),
+        _assertion(
+            "run_scoped_baseline_clean",
+            passed=baseline_clean,
+            expected={"offer_count": 0, "job_count": 0},
+            actual=baseline_scoped,
+            cells=["queue:regime:peak"],
+        ),
+        _assertion(
+            "peak_backlog_reached",
+            passed=peak_pending >= min_peak,
+            expected={"minimum_pending": min_peak},
+            actual={"peak_pending": peak_pending},
+            cells=["queue:regime:peak"],
+        ),
+        _assertion(
+            "final_backlog_slo",
+            passed=int(final_scoped.get("pending_jobs") or 0)
+            <= int(args.queue_slo_max_final_pending),
+            expected={"max_pending": int(args.queue_slo_max_final_pending)},
+            actual={"pending": int(final_scoped.get("pending_jobs") or 0)},
+            cells=["queue:regime:peak"],
+        ),
+        _assertion(
+            "queue_failure_slo",
+            passed=int(final_scoped.get("failed_jobs") or 0)
+            <= int(args.queue_slo_max_failed_jobs),
+            expected={"max_failed": int(args.queue_slo_max_failed_jobs)},
+            actual={"failed": int(final_scoped.get("failed_jobs") or 0)},
+            cells=["queue:regime:peak"],
+        ),
+        _assertion(
+            "queue_retry_slo",
+            passed=int(final_scoped.get("retried_jobs") or 0)
+            <= int(args.queue_slo_max_retried_jobs),
+            expected={"max_retried": int(args.queue_slo_max_retried_jobs)},
+            actual={"retried": int(final_scoped.get("retried_jobs") or 0)},
+            cells=["queue:regime:peak"],
+        ),
+        _assertion(
+            "queue_rate_limit_slo",
+            passed=int(final_scoped.get("rate_limited_jobs") or 0)
+            <= int(args.queue_slo_max_rate_limited_jobs),
+            expected={
+                "max_rate_limited": int(args.queue_slo_max_rate_limited_jobs)
+            },
+            actual={
+                "rate_limited": int(final_scoped.get("rate_limited_jobs") or 0)
+            },
+            cells=["queue:regime:peak"],
+        ),
+        _assertion(
+            "queue_latency_slo",
+            passed=p50 is not None
+            and p95 is not None
+            and float(p50) <= max_p50
+            and float(p95) <= max_p95,
+            expected={"p50_max_seconds": max_p50, "p95_max_seconds": max_p95},
+            actual={"p50_seconds": p50, "p95_seconds": p95},
+            cells=["queue:regime:peak"],
+        ),
+        _assertion(
+            "edit_provider_latency_slo",
+            passed=edit_provider_p95 is not None
+            and float(edit_provider_p95)
+            <= float(args.queue_slo_max_edit_provider_p95_seconds)
+            and int(provider_timing.get("slow_edit_count") or 0)
+            <= int(args.queue_slo_max_slow_edit_responses),
+            expected={
+                "edit_p95_max_seconds": float(
+                    args.queue_slo_max_edit_provider_p95_seconds
+                ),
+                "max_slow_edit_responses": int(
+                    args.queue_slo_max_slow_edit_responses
+                ),
+            },
+            actual={
+                "edit_p95_seconds": edit_provider_p95,
+                "slow_edit_count": int(
+                    provider_timing.get("slow_edit_count") or 0
+                ),
+                "edit_sample_count": int(
+                    provider_timing.get("edit_sample_count") or 0
+                ),
+            },
+            cells=["queue:regime:peak"],
+        ),
+        _assertion(
+            "every_offer_publish_sent_exactly_once",
+            passed=sorted(final_scoped.get("sent_offer_public_ids") or [])
+            == expected_offer_public_ids
+            and len(expected_offer_public_ids) == len(selected_valid)
+            and int(
+                (final_scoped.get("sent_action_counts") or {}).get(
+                    "offer_publish"
+                )
+                or 0
+            )
+            == len(selected_valid),
+            expected={
+                "offer_publish_sent": len(selected_valid),
+                "offer_public_ids": expected_offer_public_ids,
+            },
+            actual={
+                "offer_publish_sent": int(
+                    (final_scoped.get("sent_action_counts") or {}).get(
+                        "offer_publish"
+                    )
+                    or 0
+                ),
+                "offer_public_ids": final_scoped.get(
+                    "sent_offer_public_ids"
+                )
+                or [],
+            },
+            cells=["queue:wave:valid"],
+            identifiers=list(final_scoped.get("sent_offer_public_ids") or []),
+        ),
+    ]
+    cleanup_ok = all(
+        bool(payload.get("ok")) and int(payload.get("returncode") or 0) == 0
+        for payload in (iran_cleanup, foreign_cleanup)
+    )
+    restore_ok = not restore_state.get("enabled") or all(
+        bool(payload.get("ok"))
+        for payload in (restore_state.get("servers") or {}).values()
+    )
+    execution_ok = (
         iran_code == 0
         and foreign_code == 0
         and bool(iran_payload.get("ok"))
         and bool(foreign_payload.get("ok"))
-        and bool(queue_after.get("backlog_under_threshold", True))
-        and (created_iran + created_foreign) >= expected_valid
+        and wave_exception is None
+        and all(item["passed"] for item in assertions)
+        and cleanup_ok
+        and restore_ok
     )
     return {
-        "ok": ok,
+        "ok": execution_ok,
+        "profile": args.wave_profile,
         "budget": {
             "scale": budget.scale,
             "valid_limit": budget.valid_limit,
@@ -815,14 +1544,30 @@ def run_wave(args: argparse.Namespace, manifest: dict[str, Any], artifact_dir: P
             "reduction_reason": budget.reduction_reason,
             "selected_count": len(selected),
         },
-        "realtime_wave": bool(args.realtime_wave),
+        "effective_limits": limits,
+        "event_transfer": transfer,
+        "realtime_wave": args.wave_profile == "realtime-30m",
         "wave_speed": float(args.wave_speed),
         "wave_wall_seconds": wave_wall_seconds,
+        "wave_exception": wave_exception,
         "created_total": created_iran + created_foreign,
         "iran": {"returncode": iran_code, "payload": iran_payload},
         "foreign": {"returncode": foreign_code, "payload": foreign_payload},
-        "queue": {"before": queue_before, "after": queue_after},
-        "telegram_send_timing": timing or {},
+        "assertions": assertions,
+        "failed_assertions": [
+            item["name"] for item in assertions if not item["passed"]
+        ],
+        "cleanup_ok": cleanup_ok,
+        "restore_ok": restore_ok,
+        "queue": {
+            "baseline": queue_baseline,
+            "monitor": queue_monitor_samples,
+            "post_wave": queue_post_wave,
+            "after_drain_wait": queue_final,
+            "peak_pending": peak_pending,
+        },
+        "telegram_send_timing": timing,
+        "telegram_provider_timing": provider_timing,
     }
 
 
@@ -878,25 +1623,42 @@ def run_overtime_execute(args: argparse.Namespace, artifact_dir: Path) -> dict[s
             "artifact_dir": str(ot_dir),
         },
     )
-    # OT returns 0 only when all wired; 4 = partial unwired historically — treat passed/partial without failures as ok.
-    status = str(summary.get("status") or "")
-    ok = completed.returncode == 0 or (
-        completed.returncode == 4 and "failed" not in status and status.startswith("execute_")
-    )
-    # Stricter: require no failed wired drivers.
+    scenario_results: list[dict[str, Any]] = []
     driver_path = ot_dir / "driver-results.json"
     if driver_path.is_file():
         drivers = json.loads(driver_path.read_text(encoding="utf-8"))
-        failed = [item for item in drivers.get("results") or [] if item.get("status") == "failed"]
-        blocked = [item for item in drivers.get("results") or [] if item.get("status") == "blocked"]
-        ok = not failed and not blocked
+        scenario_results = list(drivers.get("results") or [])
+        failed = [
+            item for item in scenario_results if item.get("status") == "failed"
+        ]
+        blocked = [
+            item for item in scenario_results if item.get("status") == "blocked"
+        ]
         summary["failed_count"] = len(failed)
         summary["blocked_count"] = len(blocked)
-    return {"ok": ok, "returncode": completed.returncode, "summary": summary, "artifact_dir": str(ot_dir)}
+    expected_ids = {scenario_id for scenario_id, _cell in manifest_builder.OT_FAMILIES}
+    passed_ids = {
+        str(item.get("id"))
+        for item in scenario_results
+        if item.get("status") == "passed"
+    }
+    missing_ids = sorted(expected_ids - passed_ids)
+    ok = completed.returncode == 0 and not missing_ids
+    return {
+        "ok": ok,
+        "returncode": completed.returncode,
+        "summary": summary,
+        "artifact_dir": str(ot_dir),
+        "scenario_results": scenario_results,
+        "expected_scenario_ids": sorted(expected_ids),
+        "passed_scenario_ids": sorted(passed_ids),
+        "missing_scenario_ids": missing_ids,
+    }
 
 
 def run_market_drivers(args: argparse.Namespace, artifact_dir: Path) -> dict[str, Any]:
     s2fm_dir = artifact_dir / "child-s2fm-execute"
+    driver_limit = int(args.market_driver_limit or len(_driver_scenarios()))
     argv = [
         sys.executable,
         "scripts/run_staging_two_server_full_matrix.py",
@@ -927,7 +1689,7 @@ def run_market_drivers(args: argparse.Namespace, artifact_dir: Path) -> dict[str
         "--parity-mode",
         args.parity_mode,
         "--driver-scenario-limit",
-        str(args.market_driver_limit),
+        str(driver_limit),
     ]
     for scenario_id in args.market_driver_id or []:
         argv.extend(["--driver-scenario-id", scenario_id])
@@ -942,6 +1704,12 @@ def run_market_drivers(args: argparse.Namespace, artifact_dir: Path) -> dict[str
     }
     completed = _run(argv, env=env, timeout=args.market_timeout_seconds)
     summary = _parse_json_stdout(completed.stdout)
+    suite_path = s2fm_dir / "driver-suite-summary.json"
+    suite = (
+        json.loads(suite_path.read_text(encoding="utf-8"))
+        if suite_path.is_file()
+        else {}
+    )
     write_json(
         artifact_dir / "market-execute.json",
         {
@@ -952,9 +1720,11 @@ def run_market_drivers(args: argparse.Namespace, artifact_dir: Path) -> dict[str
         },
     )
     return {
-        "ok": completed.returncode == 0,
+        "ok": completed.returncode == 0 and suite.get("status") == "passed",
         "returncode": completed.returncode,
         "summary": summary,
+        "driver_suite": suite,
+        "scenario_results": list(suite.get("results") or []),
         "artifact_dir": str(s2fm_dir),
     }
 
@@ -1004,19 +1774,20 @@ def run_execute(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
         return {"summary": summary}, 1
 
     lanes: dict[str, Any] = {}
-    # Clear leftover CMB_/OTACC_ rows and orphan outbox before market drivers.
-    pre_heal_iran, _ = _container_python(
+    # Remove only remnants owned by this exact run prefix. Unrelated staging
+    # drift must remain visible and block the normal parity preflight.
+    pre_heal_iran, pre_heal_iran_code = _container_python(
         args,
         server="iran",
         script="scripts/staging_combined_matrix_heal.py",
-        script_args=["--hours", "24"],
+        script_args=["--run-prefix", args.run_prefix],
         timeout=300,
     )
-    pre_heal_foreign, _ = _container_python(
+    pre_heal_foreign, pre_heal_foreign_code = _container_python(
         args,
         server="foreign",
         script="scripts/staging_combined_matrix_heal.py",
-        script_args=["--hours", "24"],
+        script_args=["--run-prefix", args.run_prefix],
         timeout=300,
     )
     write_json(
@@ -1024,10 +1795,26 @@ def run_execute(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
         {"iran": pre_heal_iran, "foreign": pre_heal_foreign},
     )
     lanes["pre_heal"] = {
-        "ok": bool(pre_heal_iran.get("ok")) and bool(pre_heal_foreign.get("ok")),
+        "ok": pre_heal_iran_code == 0
+        and pre_heal_foreign_code == 0
+        and bool(pre_heal_iran.get("ok"))
+        and bool(pre_heal_foreign.get("ok")),
+        "returncode": max(pre_heal_iran_code, pre_heal_foreign_code),
         "iran": pre_heal_iran,
         "foreign": pre_heal_foreign,
     }
+    if not lanes["pre_heal"]["ok"]:
+        summary = {
+            **preflight["summary"],
+            "mode": "execute",
+            "status": "execute_blocked_by_pre_heal",
+            "failed_lanes": ["pre_heal"],
+            "lanes": {"pre_heal": lanes["pre_heal"]},
+            "finished_at_utc": utc_now(),
+        }
+        write_json(artifact_dir / "summary.json", summary)
+        write_json(artifact_dir / "lanes.json", lanes)
+        return {"summary": summary, "lanes": lanes}, 1
 
     # Market drivers first: S2FM execute re-checks parity, so run them while the
     # topology is still clean after combined preflight. Wave/OT churn afterward.
@@ -1068,24 +1855,28 @@ def run_execute(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
     lanes["live_coverage"] = coverage
 
     # Final synthetic cleanup so leftover tombstones do not poison the next run.
-    heal_iran, _ = _container_python(
+    heal_iran, heal_iran_code = _container_python(
         args,
         server="iran",
         script="scripts/staging_combined_matrix_heal.py",
-        script_args=["--hours", "6"],
+        script_args=["--run-prefix", args.run_prefix],
     )
-    heal_foreign, _ = _container_python(
+    heal_foreign, heal_foreign_code = _container_python(
         args,
         server="foreign",
         script="scripts/staging_combined_matrix_heal.py",
-        script_args=["--hours", "6"],
+        script_args=["--run-prefix", args.run_prefix],
     )
     write_json(
         artifact_dir / "post-execute-heal.json",
         {"iran": heal_iran, "foreign": heal_foreign},
     )
     lanes["cleanup_heal"] = {
-        "ok": bool(heal_iran.get("ok")) and bool(heal_foreign.get("ok")),
+        "ok": heal_iran_code == 0
+        and heal_foreign_code == 0
+        and bool(heal_iran.get("ok"))
+        and bool(heal_foreign.get("ok")),
+        "returncode": max(heal_iran_code, heal_foreign_code),
         "iran": heal_iran,
         "foreign": heal_foreign,
     }
@@ -1111,6 +1902,7 @@ def run_execute(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
         "wave_wall_seconds": wave.get("wave_wall_seconds"),
         "created_total": wave.get("created_total"),
         "telegram_send_timing": wave.get("telegram_send_timing"),
+        "telegram_provider_timing": wave.get("telegram_provider_timing"),
         "evidence_zip": zip_path,
         "finished_at_utc": utc_now(),
     }
@@ -1134,9 +1926,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--wave-reduction-reason", default=None)
     parser.add_argument(
-        "--realtime-wave",
-        action="store_true",
-        help="Pace Iran/foreign mutating waves against schedule t_seconds (30-minute wall clock).",
+        "--wave-profile",
+        choices=WAVE_PROFILES,
+        required=True,
+        help=(
+            "Required execution model: burst creates selected events immediately; "
+            "realtime-30m honors the deterministic 1800-second schedule."
+        ),
     )
     parser.add_argument(
         "--wave-speed",
@@ -1153,6 +1949,30 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--drain-wait-seconds", type=float, default=180.0)
     parser.add_argument("--timing-lookback-minutes", type=int, default=45)
+    parser.add_argument("--queue-sample-interval-seconds", type=float, default=30.0)
+    parser.add_argument("--queue-slo-min-peak-pending", type=int, default=None)
+    parser.add_argument("--queue-slo-max-final-pending", type=int, default=0)
+    parser.add_argument("--queue-slo-max-failed-jobs", type=int, default=0)
+    parser.add_argument("--queue-slo-max-retried-jobs", type=int, default=0)
+    parser.add_argument("--queue-slo-max-rate-limited-jobs", type=int, default=0)
+    parser.add_argument("--queue-slo-max-p50-seconds", type=float, default=None)
+    parser.add_argument("--queue-slo-max-p95-seconds", type=float, default=None)
+    parser.add_argument(
+        "--queue-slo-max-edit-provider-p95-seconds",
+        type=float,
+        default=2.0,
+    )
+    parser.add_argument(
+        "--queue-slo-max-slow-edit-responses",
+        type=int,
+        default=0,
+    )
+    parser.add_argument(
+        "--request-surface-balance-tolerance",
+        type=float,
+        default=0.02,
+        help="Maximum absolute deviation from the 50/50 WebApp/Telegram request mix.",
+    )
     parser.add_argument(
         "--wave-immediate-actions",
         action="store_true",
@@ -1184,10 +2004,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--queue-offer-expiry-minutes",
         type=int,
-        default=45,
+        default=0,
         help=(
-            "temporary offer lifetime during the queue wave so backlogged offers "
-            "survive until publication; restored after wave cleanup (0 disables)"
+            "Minimum temporary offer lifetime. Zero selects a safe value derived "
+            "from selected events, the 0.8s cadence, and the micro-burst size."
         ),
     )
     parser.add_argument(
@@ -1247,13 +2067,36 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         raise SystemExit("run prefix must start with CMB_")
     if args.artifact_dir is None:
         args.artifact_dir = DEFAULT_ARTIFACT_ROOT / args.run_id
+    if not 0.0 < float(args.wave_scale) <= 1.0:
+        raise SystemExit("wave scale must be greater than 0 and at most 1.0")
     if float(args.wave_scale) < 1.0 and not args.wave_reduction_reason:
         args.wave_reduction_reason = (
             "controlled staging combined-matrix budget "
             f"(scale={args.wave_scale}); full schedule hash retained"
         )
     if int(args.market_driver_limit) <= 0:
-        args.market_driver_limit = len(DRIVER_SCENARIOS)
+        # Keep plan mode free of runtime-heavy imports. Execution resolves the
+        # full driver count lazily in run_market_drivers.
+        args.market_driver_limit = 0
+    if args.wave_profile == "realtime-30m" and float(args.wave_speed) != 1.0:
+        raise SystemExit("realtime-30m requires --wave-speed 1.0")
+    if args.mode == "execute" and args.wave_immediate_actions:
+        raise SystemExit(
+            "--wave-immediate-actions is diagnostic-only and cannot be used by the gate"
+        )
+    if int(args.wave_trade_percent) < 0 or int(args.wave_manual_expire_percent) < 0:
+        raise SystemExit("wave action percentages cannot be negative")
+    if (
+        int(args.wave_trade_percent) + int(args.wave_manual_expire_percent)
+        > 100
+    ):
+        raise SystemExit("wave action percentages cannot exceed 100 combined")
+    if not 0.0 <= float(args.request_surface_balance_tolerance) <= 0.5:
+        raise SystemExit("request surface balance tolerance must be between 0 and 0.5")
+    if float(args.queue_slo_max_edit_provider_p95_seconds) <= 0:
+        raise SystemExit("edit provider P95 SLO must be positive")
+    if int(args.queue_slo_max_slow_edit_responses) < 0:
+        raise SystemExit("slow edit response SLO cannot be negative")
     # S2FM expects user@host; normalize bare IP/hostname.
     if args.iran_ssh_host and "@" not in str(args.iran_ssh_host):
         args.iran_ssh_host = f"root@{args.iran_ssh_host}"
@@ -1266,69 +2109,161 @@ def build_live_coverage_report(
     lanes: dict[str, Any],
     artifact_dir: Path,
 ) -> dict[str, Any]:
-    """Map mandatory cells to live evidence; fail if any required cell lacks a pass."""
+    """Require independent, countable evidence for every mandatory cell."""
 
-    evidence: dict[str, list[str]] = {cell: [] for cell in manifest_builder.MANDATORY_CELLS}
+    evidence: dict[str, dict[str, Any]] = {
+        cell: {
+            "status": "failed",
+            "expected": {"minimum_evidence": 1},
+            "actual": {"evidence_count": 0},
+            "identifiers": [],
+            "sources": [],
+        }
+        for cell in manifest_builder.MANDATORY_CELLS
+    }
 
-    # Market drivers declare manifest_cells.
-    for scenario in DRIVER_SCENARIOS:
-        for cell in scenario.get("manifest_cells") or []:
-            if lanes.get("market", {}).get("ok"):
-                evidence.setdefault(cell, []).append(f"driver:{scenario['id']}")
+    def record(
+        cell: str,
+        *,
+        passed: bool,
+        expected: Any,
+        actual: Any,
+        identifiers: list[Any],
+        source: str,
+    ) -> None:
+        if cell not in evidence:
+            return
+        current = evidence[cell]
+        # A cell may have alternative independent sources (for example actor
+        # guards and market drivers). Preserve every source and pass when at
+        # least one complete source proves the cell.
+        current["sources"].append(
+            {
+                "source": source,
+                "passed": bool(passed),
+                "expected": expected,
+                "actual": actual,
+                "identifiers": identifiers,
+            }
+        )
+        current["identifiers"] = sorted(
+            {
+                str(value)
+                for item in current["sources"]
+                for value in item.get("identifiers") or []
+            }
+        )
+        current["status"] = (
+            "passed"
+            if any(item.get("passed") for item in current["sources"])
+            else "failed"
+        )
+        current["expected"] = expected
+        current["actual"] = actual
+
+    market_results = (lanes.get("market") or {}).get("scenario_results") or []
+    passed_market_ids = {
+        str(item.get("scenario_id") or item.get("manifest_id"))
+        for item in market_results
+        if item.get("status") == "passed"
+    }
+    for cell in (
+        item
+        for item in manifest_builder.MANDATORY_CELLS
+        if item.startswith("market:") and item != "market:request_surface:balanced"
+    ):
+        expected_ids = sorted(
+            str(scenario["id"])
+            for scenario in _driver_scenarios()
+            if cell in (scenario.get("manifest_cells") or [])
+        )
+        actual_ids = sorted(set(expected_ids) & passed_market_ids)
+        if expected_ids:
+            record(
+                cell,
+                passed=bool(actual_ids),
+                expected={"minimum_passed": 1, "eligible_scenarios": expected_ids},
+                actual={"passed_count": len(actual_ids)},
+                identifiers=actual_ids,
+                source="market_driver_suite",
+            )
 
     actor_payload = (lanes.get("actor_guards") or {}).get("payload") or {}
     if actor_payload.get("ok"):
         for cell in actor_payload.get("cells_covered") or []:
-            evidence.setdefault(cell, []).append("actor_guards")
-
-    wave = lanes.get("queue_wave") or {}
-    if wave.get("ok"):
-        for cell in (
-            "queue:surface:webapp",
-            "queue:surface:bot",
-            "queue:surface:telegram_heavy",
-            "queue:wave:valid",
-            "queue:wave:invalid",
-            "queue:regime:peak",
-            "market:request_surface:balanced",
-        ):
-            evidence.setdefault(cell, []).append("queue_wave")
-        iran_reqs = ((wave.get("iran") or {}).get("payload") or {}).get("request_surface_mix") or {}
-        foreign_reqs = ((wave.get("foreign") or {}).get("payload") or {}).get("request_surface_mix") or {}
-        total_web = int(iran_reqs.get("webapp") or 0) + int(foreign_reqs.get("webapp") or 0)
-        total_tg = int(iran_reqs.get("telegram") or 0) + int(foreign_reqs.get("telegram") or 0)
-        if total_web + total_tg > 0:
-            evidence.setdefault("market:request_surface:balanced", []).append(
-                f"wave_requests:webapp={total_web},telegram={total_tg}"
+            record(
+                str(cell),
+                passed=True,
+                expected={"minimum_passed": 1},
+                actual={"passed_count": 1},
+                identifiers=["actor_guards"],
+                source="actor_guards",
             )
 
+    wave_assertions = (lanes.get("queue_wave") or {}).get("assertions") or []
+    assertions_by_cell: dict[str, list[dict[str, Any]]] = {}
+    for assertion in wave_assertions:
+        for cell in assertion.get("cells") or []:
+            assertions_by_cell.setdefault(str(cell), []).append(assertion)
+    for cell, assertions in assertions_by_cell.items():
+        passed_ids = [
+            str(item.get("name")) for item in assertions if item.get("passed")
+        ]
+        expected_ids = [str(item.get("name")) for item in assertions]
+        record(
+            cell,
+            passed=bool(assertions)
+            and len(passed_ids) == len(assertions),
+            expected={
+                "assertion_count": len(assertions),
+                "assertions": expected_ids,
+            },
+            actual={"passed_count": len(passed_ids)},
+            identifiers=passed_ids,
+            source="queue_wave_assertions",
+        )
+
     estimate_payload = (lanes.get("estimate") or {}).get("payload") or {}
-    for item in (
-        estimate_payload.get("checks")
-        or estimate_payload.get("results")
-        or estimate_payload.get("assertions")
-        or []
-    ):
-        cell = item.get("cell")
-        if cell and item.get("passed"):
-            evidence.setdefault(cell, []).append("estimate_hooks")
+    for item in estimate_payload.get("checks") or []:
+        cell = str(item.get("cell") or "")
+        record(
+            cell,
+            passed=bool(item.get("passed")),
+            expected={"passed": True},
+            actual={"passed": bool(item.get("passed")), "status": item.get("status")},
+            identifiers=[cell] if item.get("passed") else [],
+            source="estimate_hook",
+        )
 
-    # Fallback: if estimate lane ok, mark all estimate cells covered by hooks artifact.
-    if (lanes.get("estimate") or {}).get("ok"):
-        for cell in (
-            "estimate:preview_shadow",
-            "estimate:selectable_accept",
-            "estimate:selectable_decline",
-            "estimate:no_data_fail_closed",
-        ):
-            if not evidence.get(cell):
-                evidence.setdefault(cell, []).append("estimate_hooks_lane")
+    overtime_results = (lanes.get("overtime") or {}).get("scenario_results") or []
+    passed_overtime_ids = {
+        str(item.get("id"))
+        for item in overtime_results
+        if item.get("status") == "passed"
+    }
+    overtime_by_cell: dict[str, set[str]] = {}
+    for scenario_id, cell in manifest_builder.OT_FAMILIES:
+        overtime_by_cell.setdefault(cell, set()).add(scenario_id)
+    for cell, expected_set in overtime_by_cell.items():
+        actual_ids = sorted(expected_set & passed_overtime_ids)
+        expected_ids = sorted(expected_set)
+        record(
+            cell,
+            passed=actual_ids == expected_ids,
+            expected={
+                "passed_count": len(expected_ids),
+                "scenario_ids": expected_ids,
+            },
+            actual={"passed_count": len(actual_ids)},
+            identifiers=actual_ids,
+            source="overtime_scenarios",
+        )
 
-    if (lanes.get("overtime") or {}).get("ok"):
-        for sid, cell in manifest_builder.OT_FAMILIES:
-            evidence.setdefault(cell, []).append(f"overtime:{sid}")
-
-    missing = [cell for cell in manifest_builder.MANDATORY_CELLS if not evidence.get(cell)]
+    missing = [
+        cell
+        for cell in manifest_builder.MANDATORY_CELLS
+        if evidence[cell]["status"] != "passed"
+    ]
     return {
         "ok": not missing,
         "mandatory_cell_count": len(manifest_builder.MANDATORY_CELLS),

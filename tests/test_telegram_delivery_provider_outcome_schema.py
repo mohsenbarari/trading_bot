@@ -2,6 +2,10 @@ from pathlib import Path
 import unittest
 
 from core.sync_registry import SyncPolicy, get_sync_registry_entry
+from core.services.telegram_delivery_queue_service import (
+    _sanitized_provider_response,
+)
+from core.telegram_gateway import TelegramGatewayResult
 from models.telegram_delivery_provider_outcome import (
     TelegramDeliveryProviderOutcomeRecord,
 )
@@ -13,6 +17,17 @@ from models.telegram_delivery_job import TelegramDeliveryJobRecord
 
 
 class TelegramProviderOutcomeSchemaTests(unittest.TestCase):
+    def test_exact_provider_latency_is_persisted_in_sanitized_fact(self):
+        payload = _sanitized_provider_response(
+            TelegramGatewayResult(
+                ok=True,
+                method="editMessageText",
+                response_json={"ok": True, "result": {"message_id": 42}},
+                provider_latency_seconds=2.3456,
+            )
+        )
+        self.assertEqual(payload["_provider_latency_ms"], 2345.6)
+
     def test_model_has_fenced_identity_pending_index_and_foreign_key(self):
         table = TelegramDeliveryProviderOutcomeRecord.__table__
         unique_names = {constraint.name for constraint in table.constraints}

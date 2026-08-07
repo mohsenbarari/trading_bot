@@ -241,7 +241,21 @@ class TelegramDeliveryQueueContractTests(unittest.IsolatedAsyncioTestCase):
             await self.enqueue(queue, f"job-{index}", feeder=feeder, action=action)
 
         claimed = [(await self.claim(queue, worker=f"w-{i}")).action for i in range(8)]
-        self.assertEqual(claimed, [action for _feeder, action in reversed(specs)])
+        self.assertEqual(
+            claimed,
+            [
+                TelegramDeliveryAction.OFFER_PUBLISH,
+                TelegramDeliveryAction.OFFER_SUCCESS,
+                # Partial/full trade edits intentionally share M1/rank 1 and
+                # therefore preserve FIFO order within that priority.
+                TelegramDeliveryAction.TRADED_OFFER_EDIT,
+                TelegramDeliveryAction.PARTIAL_OFFER_EDIT,
+                TelegramDeliveryAction.MARKET_TRANSITION,
+                TelegramDeliveryAction.ACCOUNT_STATUS,
+                TelegramDeliveryAction.ADMIN_BROADCAST,
+                TelegramDeliveryAction.COSMETIC_CLEANUP,
+            ],
+        )
 
     async def test_m0_tie_order_is_callback_overdue_trade_then_offer_publish(self):
         queue = InMemoryTelegramDeliveryQueue()

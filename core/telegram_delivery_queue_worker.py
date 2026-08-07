@@ -311,6 +311,7 @@ def build_telegram_delivery_queue_lane_specs(
         for method in (
             "acquire",
             "observe",
+            "observe_provider_latency",
             "extend_destination_cooldown",
             "extend_bot_cooldown",
             "prepare_preflight",
@@ -732,13 +733,18 @@ async def _release_unused_rate_limit_probe(
     admission: Any,
     force: bool = False,
 ) -> None:
-    if not force and not bool(getattr(admission, "is_rate_limit_probe", False)):
+    if not force and not bool(getattr(admission, "allowed", False)):
         return
+    is_probe = force or bool(getattr(admission, "is_rate_limit_probe", False))
     await dispatch_limiter.observe(
         job,
         TelegramDeliveryDecision(
             outcome=TelegramDeliveryOutcome.ALREADY_RESOLVED,
-            reason="rate_limit_probe_cancelled_before_dispatch",
+            reason=(
+                "rate_limit_probe_cancelled_before_dispatch"
+                if is_probe
+                else "dispatch_admission_cancelled_before_dispatch"
+            ),
         ),
         now=utc_now(),
     )
@@ -963,6 +969,7 @@ async def run_telegram_delivery_queue_cycle(
         for method in (
             "acquire",
             "observe",
+            "observe_provider_latency",
             "extend_destination_cooldown",
             "extend_bot_cooldown",
             "prepare_preflight",
@@ -1335,6 +1342,7 @@ async def run_telegram_delivery_queue_cycle(
             continue
 
         try:
+            provider_started_at = time.monotonic()
             try:
                 gateway_result = await gateway_call(
                     str(job.method),
@@ -1354,6 +1362,10 @@ async def run_telegram_delivery_queue_cycle(
                     error=type(exc).__name__,
                     transport_phase="write_unknown",
                 )
+            provider_latency_seconds = max(
+                0.0, time.monotonic() - provider_started_at
+            )
+            gateway_result.provider_latency_seconds = provider_latency_seconds
 
             decision, limiter_decision = await _persist_delivery_result_after_dispatch(
                 bot_identity=lane_identity,
@@ -1377,6 +1389,16 @@ async def run_telegram_delivery_queue_cycle(
         # Redis window ordering follows completed durable persistence, not the
         # earlier provider-response timestamp. This avoids inverse commits
         # treating a future observation as a member of the current window.
+        if gateway_result.ok:
+            slow_edit_brake = await dispatch_limiter.observe_provider_latency(
+                job,
+                provider_latency_seconds=provider_latency_seconds,
+                now=utc_now(),
+            )
+            if slow_edit_brake:
+                status_counts["slow_edit_brake"] = (
+                    status_counts.get("slow_edit_brake", 0) + 1
+                )
         await dispatch_limiter.observe(job, limiter_decision, now=utc_now())
 
     return TelegramDeliveryQueueCycleReport(

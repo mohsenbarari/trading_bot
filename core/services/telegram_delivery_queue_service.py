@@ -11,6 +11,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
+import math
 from typing import Any
 
 from sqlalchemy import and_, case, exists, func, or_, select
@@ -659,30 +660,37 @@ def _provider_error_code(result: TelegramGatewayResultLike) -> int | None:
 
 def _sanitized_provider_response(result: TelegramGatewayResultLike) -> dict[str, Any] | None:
     body = result.response_json
-    if not isinstance(body, Mapping):
-        return None
     sanitized: dict[str, Any] = {}
-    for key in ("ok", "error_code"):
-        if key in body and isinstance(body[key], (bool, int)):
-            sanitized[key] = body[key]
-    description = body.get("description")
-    if description:
-        sanitized["description"] = " ".join(str(description).split())[:500]
-    parameters = body.get("parameters")
-    if isinstance(parameters, Mapping):
-        safe_parameters: dict[str, Any] = {}
-        retry_after = _positive_int(parameters.get("retry_after"))
-        if retry_after is not None:
-            safe_parameters["retry_after"] = retry_after
-        if parameters.get("migrate_to_chat_id") is not None:
-            # Presence affects classification; the raw destination identifier
-            # is not needed in the execution audit row.
-            safe_parameters["migrate_to_chat_id"] = "redacted"
-        if safe_parameters:
-            sanitized["parameters"] = safe_parameters
+    if isinstance(body, Mapping):
+        for key in ("ok", "error_code"):
+            if key in body and isinstance(body[key], (bool, int)):
+                sanitized[key] = body[key]
+        description = body.get("description")
+        if description:
+            sanitized["description"] = " ".join(str(description).split())[:500]
+        parameters = body.get("parameters")
+        if isinstance(parameters, Mapping):
+            safe_parameters: dict[str, Any] = {}
+            retry_after = _positive_int(parameters.get("retry_after"))
+            if retry_after is not None:
+                safe_parameters["retry_after"] = retry_after
+            if parameters.get("migrate_to_chat_id") is not None:
+                # Presence affects classification; the raw destination identifier
+                # is not needed in the execution audit row.
+                safe_parameters["migrate_to_chat_id"] = "redacted"
+            if safe_parameters:
+                sanitized["parameters"] = safe_parameters
     message_id = result.message_id
     if message_id is not None:
         sanitized["result"] = {"message_id": int(message_id)}
+    raw_latency = getattr(result, "provider_latency_seconds", None)
+    if raw_latency is not None:
+        latency = float(raw_latency)
+        if not math.isfinite(latency) or latency < 0:
+            raise TelegramDeliveryQueueValidationError(
+                "provider_outcome_latency_invalid"
+            )
+        sanitized["_provider_latency_ms"] = round(latency * 1000.0, 3)
     return sanitized or None
 
 
@@ -737,6 +745,12 @@ def _provider_outcome_to_gateway_result(
         ),
         error=outcome.provider_error_class,
         transport_phase=outcome.transport_phase,
+        provider_latency_seconds=(
+            float(response["_provider_latency_ms"]) / 1000.0
+            if isinstance(response, Mapping)
+            and isinstance(response.get("_provider_latency_ms"), (int, float))
+            else None
+        ),
     )
 
 

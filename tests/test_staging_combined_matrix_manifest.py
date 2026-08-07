@@ -3,8 +3,16 @@
 from __future__ import annotations
 
 import unittest
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
 
 from scripts import build_staging_combined_matrix_manifest as manifest_builder
+from scripts import run_staging_combined_market_queue_overtime_estimate_matrix as runner
+from scripts import staging_combined_matrix_heal as heal
+from scripts import staging_combined_matrix_mutating_wave as mutating_wave
+from scripts import staging_combined_matrix_queue_sampler as queue_sampler
 from scripts import staging_combined_matrix_wave_driver as wave_driver
 
 
@@ -42,6 +50,30 @@ class CombinedMatrixManifestTests(unittest.TestCase):
         bot = sum(1 for item in valid_selected if item["surface"] == "bot")
         self.assertEqual(webapp, 16)
         self.assertEqual(bot, 24)
+        selected_trades = [
+            item for item in valid_selected if int(item["seq"]) % 100 < 40
+        ]
+        self.assertEqual(
+            sum(
+                item.get("request_surface") == "webapp"
+                for item in selected_trades
+            ),
+            sum(
+                item.get("request_surface") == "telegram"
+                for item in selected_trades
+            ),
+        )
+        selected_invalid = [
+            item for item in selected if item["kind"] == "invalid"
+        ]
+        self.assertEqual(
+            sum(item["surface"] == "webapp" for item in selected_invalid),
+            3,
+        )
+        self.assertEqual(
+            sum(item["surface"] == "bot" for item in selected_invalid),
+            5,
+        )
         self.assertGreater(sum(1 for item in selected if item.get("overtime_creator")), 0)
         self.assertGreater(sum(1 for item in selected if item.get("estimate_probe")), 0)
 
@@ -72,6 +104,176 @@ class CombinedMatrixManifestTests(unittest.TestCase):
                 any(cell.startswith(prefix) for cell in manifest_builder.MANDATORY_CELLS),
                 msg=f"missing lane prefix {prefix}",
             )
+
+    def test_scaled_realtime_schedule_spans_full_window(self) -> None:
+        manifest = manifest_builder.build_manifest(seed=20260806)
+        budget = wave_driver.WaveBudget(
+            valid_target=4000,
+            invalid_target=800,
+            scale=0.01,
+            reduction_reason="unit-test",
+        )
+        selected = wave_driver.scale_events(list(manifest["wave_events"]), budget)
+        times = [float(item["t_seconds"]) for item in selected]
+        self.assertLess(min(times), 180.0)
+        self.assertGreater(max(times), 1620.0)
+
+    def test_profile_is_required_and_realtime_cannot_be_compressed(self) -> None:
+        with self.assertRaises(SystemExit):
+            runner.parse_args(["--mode", "plan"])
+        with self.assertRaises(SystemExit):
+            runner.parse_args(
+                [
+                    "--mode",
+                    "plan",
+                    "--wave-profile",
+                    "realtime-30m",
+                    "--wave-speed",
+                    "2",
+                ]
+            )
+        args = runner.parse_args(
+            [
+                "--mode",
+                "plan",
+                "--wave-profile",
+                "burst",
+                "--artifact-dir",
+                str(Path("/tmp/combined-matrix-unit-plan")),
+            ]
+        )
+        self.assertEqual(args.wave_profile, "burst")
+
+    def test_full_wave_limits_account_for_telegram_channel_ceiling(self) -> None:
+        args = SimpleNamespace(
+            wave_trade_percent=40,
+            wave_manual_expire_percent=20,
+            wave_profile="realtime-30m",
+            queue_offer_expiry_minutes=0,
+            wave_publish_wait_timeout_seconds=1800.0,
+            wave_action_drain_timeout_seconds=2400.0,
+            wave_timeout_seconds=5400.0,
+        )
+        limits = runner._effective_wave_limits(args, expected_valid=4000)
+        self.assertEqual(limits["channel_base_interval_seconds"], 0.8)
+        self.assertEqual(limits["channel_idle_burst_capacity"], 2)
+        self.assertGreater(limits["effective_offer_expiry_minutes"], 120)
+        self.assertGreater(limits["effective_wave_timeout_seconds"], 10_000)
+
+    def test_lane_ok_without_cell_evidence_cannot_green_coverage(self) -> None:
+        manifest = manifest_builder.build_manifest(seed=20260806)
+        lanes = {
+            "market": {"ok": True, "scenario_results": []},
+            "actor_guards": {"ok": True, "payload": {"ok": True, "cells_covered": []}},
+            "queue_wave": {"ok": True, "assertions": []},
+            "estimate": {"ok": True, "payload": {"ok": True, "checks": []}},
+            "overtime": {"ok": True, "scenario_results": []},
+        }
+        with patch.object(runner, "_driver_scenarios", return_value=[]):
+            report = runner.build_live_coverage_report(
+                manifest=manifest,
+                lanes=lanes,
+                artifact_dir=Path("/tmp/combined-matrix-unit-coverage"),
+            )
+        self.assertFalse(report["ok"])
+        self.assertEqual(
+            report["evidence"]["queue:wave:valid"]["status"], "failed"
+        )
+        self.assertEqual(
+            report["evidence"]["overtime:queue_order"]["status"], "failed"
+        )
+
+    def test_heal_refuses_broad_or_short_prefixes(self) -> None:
+        for prefix in (
+            "",
+            "CMB_",
+            "OTACC_2026",
+            "CMB_RUN*",
+            "CMB_RUN?",
+            "CMB_RUN[1]",
+            "CMB_RUN:1",
+        ):
+            with self.assertRaises(heal.DriverRefusal):
+                heal._validate_run_prefix(prefix)
+        self.assertEqual(
+            heal._validate_run_prefix("CMB_20260807_RUN1"),
+            "CMB_20260807_RUN1",
+        )
+
+    def test_provider_timing_separates_slow_channel_edits(self) -> None:
+        started = datetime(2026, 8, 7, tzinfo=timezone.utc)
+        rows = [
+            (
+                1,
+                started,
+                started + timedelta(seconds=0.4),
+                "sent",
+                "offer_post",
+                1,
+                1,
+                None,
+                "sent",
+                started,
+                "sendMessage",
+            ),
+            (
+                2,
+                started,
+                started + timedelta(seconds=2.5),
+                "sent",
+                "traded_offer_edit",
+                1,
+                1,
+                None,
+                "sent",
+                started,
+                "editMessageText",
+                "ofr_provider_timing",
+                {"_provider_latency_ms": 2250.0},
+            ),
+        ]
+        payload = queue_sampler._provider_timing_payload(
+            rows,
+            slow_edit_threshold_seconds=2.0,
+        )
+        self.assertEqual(payload["sample_count"], 2)
+        self.assertEqual(payload["edit_sample_count"], 1)
+        self.assertEqual(payload["slow_edit_count"], 1)
+        self.assertEqual(payload["edit_latency_seconds"]["p95"], 2.25)
+
+
+class CombinedMatrixWaveRouteTests(unittest.IsolatedAsyncioTestCase):
+    async def test_telegram_request_uses_dispatcher_not_webapp_executor(self):
+        requester = SimpleNamespace(id=7, telegram_id=9007)
+        offer = SimpleNamespace(
+            id=11,
+            offer_public_id="ofr_route_test",
+            lot_sizes=[5],
+            original_lot_sizes=[5],
+            remaining_quantity=5,
+            quantity=5,
+        )
+        harness = object()
+        with patch(
+            "scripts.trading_core_probe_worker.execute_bot_trade_with_dispatcher",
+            new=AsyncMock(return_value="success"),
+        ) as bot_execute, patch(
+            "scripts.trading_core_probe_worker.execute_webapp_trade_for_user",
+            new=AsyncMock(return_value="success"),
+        ) as web_execute:
+            result = await mutating_wave._place_request(
+                requester=requester,
+                offer=offer,
+                request_surface="telegram",
+                seq=3,
+                prefix="CMB_ROUTE_TEST",
+                telegram_harness=harness,
+            )
+
+        bot_execute.assert_awaited_once()
+        web_execute.assert_not_awaited()
+        self.assertEqual(result["execution_surface"], "telegram")
+        self.assertTrue(result["ok"])
 
 
 if __name__ == "__main__":

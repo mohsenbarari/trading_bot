@@ -256,12 +256,13 @@ def build_wave_schedule(*, seed: int = 20260806) -> dict[str, Any]:
         webapp_n = VALID_OFFER_TARGET - bot_n
     surfaces = (["webapp"] * webapp_n) + (["bot"] * bot_n)
     rng.shuffle(surfaces)
-    # Planned request surfaces on offers stay 50/50 (independent of offer origin).
-    request_surfaces = (
-        ["webapp"] * (VALID_OFFER_TARGET // 2)
-        + ["telegram"] * (VALID_OFFER_TARGET - VALID_OFFER_TARGET // 2)
-    )
-    rng.shuffle(request_surfaces)
+    # Planned request surfaces stay exactly 50/50 overall and inside each
+    # deterministic 100-sequence action bucket. Pairs avoid coupling request
+    # surface to the alternating buy/sell offer type.
+    request_surfaces = [
+        "webapp" if idx % 4 in (0, 1) else "telegram"
+        for idx in range(VALID_OFFER_TARGET)
+    ]
     for idx, (t, shape, surface) in enumerate(zip(valid_times, shapes, surfaces)):
         events.append(
             {

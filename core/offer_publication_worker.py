@@ -367,9 +367,9 @@ async def run_offer_telegram_publication_cycle(
                 error_code="telegram_rate_limited",
                 error_message="publication_burst_rate_limit_brake",
             )
-        # Token-bucket channel pace: allow a short burst (full bucket), then
-        # sustain ~20/min to the same channel. Stops the "flood → long 429 pause"
-        # pattern while still draining faster than a fixed 0.8s gap.
+        # Legacy fallback pace: a two-operation idle burst, then the calibrated
+        # 0.8-second cadence. QUEUE_V1 owns the durable Redis cadence in normal
+        # staging/production operation.
         wait_seconds = OFFER_CHANNEL_PACE.wait_seconds_before_send()
         if wait_seconds > 0:
             await asyncio.sleep(wait_seconds)

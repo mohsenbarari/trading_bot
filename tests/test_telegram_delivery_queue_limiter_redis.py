@@ -44,6 +44,9 @@ def _job(bot: str, destination: str):
         id=f"{bot}:{destination}",
         bot_identity=bot,
         destination_key=destination,
+        destination_class=(
+            "channel" if destination.startswith("channel:") else "private"
+        ),
     )
 
 
@@ -88,7 +91,7 @@ class TelegramDeliveryQueueRedisLimiterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(sum(result.allowed for result in results), 1)
         self.assertEqual(
             {result.wait_reason for result in results if not result.allowed},
-            {"destination_gate"},
+            {"destination_inflight"},
         )
 
     async def test_bot_budgets_are_independent_but_destination_gate_is_shared(self):
@@ -114,8 +117,187 @@ class TelegramDeliveryQueueRedisLimiterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(sum(result.allowed for result in same_destination), 1)
         self.assertEqual(
             [result.wait_reason for result in same_destination if not result.allowed],
-            ["destination_gate"],
+            ["destination_inflight"],
         )
+
+    async def test_idle_microburst_is_serial_and_then_returns_to_cadence(self):
+        limiter = RedisTelegramDeliveryLimiter(
+            redis=self.redis,
+            bot_min_interval_seconds=0.05,
+            destination_min_interval_seconds=0.05,
+            rate_limit_probe_delay_seconds=0.01,
+            global_rate_limit_window_seconds=1.0,
+            rate_limit_probe_lease_seconds=1.0,
+            destination_burst_capacity=2,
+            destination_burst_idle_seconds=0.10,
+            destination_burst_recovery_seconds=0.30,
+            key_ttl_seconds=60,
+            namespace="telegram:delivery:microburst-test",
+        )
+        now = utc_now()
+        destination = "channel:microburst"
+        first_job = _job("primary", destination + ":first")
+        # Use distinct job ids while preserving one destination key.
+        first_job.destination_key = destination
+        second_job = _job("primary", destination + ":second")
+        second_job.destination_key = destination
+        third_job = _job("primary", destination + ":third")
+        third_job.destination_key = destination
+
+        first = await limiter.acquire(first_job, now=now)
+        concurrent = await limiter.acquire(second_job, now=now)
+        self.assertTrue(first.allowed)
+        self.assertFalse(concurrent.allowed)
+        self.assertEqual(concurrent.wait_reason, "destination_inflight")
+
+        await limiter.observe(
+            first_job,
+            TelegramDeliveryDecision(
+                outcome=TelegramDeliveryOutcome.SENT,
+                reason="sent",
+            ),
+            now=now,
+        )
+        second = await limiter.acquire(second_job, now=now)
+        self.assertTrue(second.allowed)
+        await limiter.observe(
+            second_job,
+            TelegramDeliveryDecision(
+                outcome=TelegramDeliveryOutcome.SENT,
+                reason="sent",
+            ),
+            now=now,
+        )
+        third = await limiter.acquire(third_job, now=now)
+        self.assertFalse(third.allowed)
+        self.assertEqual(third.wait_reason, "destination_gate")
+
+        await asyncio.sleep(0.11)
+        after_idle = await limiter.acquire(third_job, now=utc_now())
+        self.assertTrue(after_idle.allowed)
+
+    async def test_429_disables_microburst_during_recovery_window(self):
+        limiter = RedisTelegramDeliveryLimiter(
+            redis=self.redis,
+            bot_min_interval_seconds=0.03,
+            destination_min_interval_seconds=0.03,
+            rate_limit_probe_delay_seconds=0.01,
+            global_rate_limit_window_seconds=1.0,
+            rate_limit_probe_lease_seconds=1.0,
+            destination_burst_capacity=2,
+            destination_burst_idle_seconds=0.05,
+            destination_burst_recovery_seconds=0.30,
+            key_ttl_seconds=60,
+            namespace="telegram:delivery:microburst-429-test",
+        )
+        destination = "channel:microburst-429"
+        first = _job("primary", destination + ":first")
+        first.destination_key = destination
+        second = _job("primary", destination + ":second")
+        second.destination_key = destination
+        third = _job("primary", destination + ":third")
+        third.destination_key = destination
+
+        now = utc_now()
+        self.assertTrue((await limiter.acquire(first, now=now)).allowed)
+        await limiter.observe(
+            first,
+            _rate_limited(now + timedelta(seconds=0.12)),
+            now=now,
+        )
+        keys = limiter._keys("primary", limiter._validate_job_identity(first)[2])
+        disabled_until = int(
+            await self.redis.get(keys["destination_burst_disabled_until"])
+        )
+        redis_time = await self.redis.time()
+        redis_now_ms = int(redis_time[0]) * 1000 + int(redis_time[1]) // 1000
+        # Recovery is measured from the 429 observation, not appended to
+        # retry_after (which would be ~420ms here).
+        self.assertGreater(disabled_until - redis_now_ms, 240)
+        self.assertLess(disabled_until - redis_now_ms, 360)
+
+        await asyncio.sleep(0.14)
+        recovered = await limiter.acquire(second, now=utc_now())
+        self.assertTrue(recovered.allowed)
+        await limiter.observe(
+            second,
+            TelegramDeliveryDecision(
+                outcome=TelegramDeliveryOutcome.SENT,
+                reason="sent",
+            ),
+            now=utc_now(),
+        )
+        no_burst = await limiter.acquire(third, now=utc_now())
+        self.assertFalse(no_burst.allowed)
+        self.assertEqual(no_burst.wait_reason, "destination_gate")
+
+    async def test_slow_edit_response_applies_destination_only_soft_brake(self):
+        limiter = RedisTelegramDeliveryLimiter(
+            redis=self.redis,
+            bot_min_interval_seconds=0.03,
+            destination_min_interval_seconds=0.03,
+            rate_limit_probe_delay_seconds=0.01,
+            global_rate_limit_window_seconds=1.0,
+            rate_limit_probe_lease_seconds=1.0,
+            destination_burst_capacity=2,
+            destination_burst_idle_seconds=0.05,
+            destination_burst_recovery_seconds=0.20,
+            edit_slow_response_seconds=0.05,
+            edit_slowdown_seconds=0.12,
+            key_ttl_seconds=60,
+            namespace="telegram:delivery:slow-edit-test",
+        )
+        edit = _job("primary", "channel:slow-edit")
+        edit.method = "editMessageText"
+        applied = await limiter.observe_provider_latency(
+            edit,
+            provider_latency_seconds=0.06,
+            now=utc_now(),
+        )
+        self.assertTrue(applied)
+
+        blocked = await limiter.acquire(edit, now=utc_now())
+        self.assertFalse(blocked.allowed)
+        self.assertEqual(blocked.wait_reason, "destination_gate")
+        self.assertGreater(blocked.retry_after_seconds, 0.09)
+
+        unrelated = _job("primary", "channel:unrelated-fast")
+        unrelated.method = "sendMessage"
+        self.assertTrue((await limiter.acquire(unrelated, now=utc_now())).allowed)
+
+    async def test_burst_uses_destination_class_not_key_text(self):
+        limiter = RedisTelegramDeliveryLimiter(
+            redis=self.redis,
+            bot_min_interval_seconds=0.05,
+            destination_min_interval_seconds=0.05,
+            rate_limit_probe_delay_seconds=0.01,
+            global_rate_limit_window_seconds=1.0,
+            rate_limit_probe_lease_seconds=1.0,
+            destination_burst_capacity=2,
+            destination_burst_idle_seconds=0.10,
+            destination_burst_recovery_seconds=0.20,
+            key_ttl_seconds=60,
+            namespace="telegram:delivery:destination-class-test",
+        )
+        first = _job("primary", "channel:text-is-not-authority:first")
+        first.destination_key = "channel:text-is-not-authority"
+        first.destination_class = "private"
+        second = _job("primary", "channel:text-is-not-authority:second")
+        second.destination_key = first.destination_key
+        second.destination_class = "private"
+
+        self.assertTrue((await limiter.acquire(first, now=utc_now())).allowed)
+        await limiter.observe(
+            first,
+            TelegramDeliveryDecision(
+                outcome=TelegramDeliveryOutcome.SENT,
+                reason="sent",
+            ),
+            now=utc_now(),
+        )
+        denied = await limiter.acquire(second, now=utc_now())
+        self.assertFalse(denied.allowed)
+        self.assertEqual(denied.wait_reason, "destination_gate")
 
     async def test_first_and_second_distinct_429_apply_only_expected_scopes(self):
         now = utc_now()
@@ -616,7 +798,7 @@ class TelegramDeliveryQueueRedisLimiterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(sum(item.allowed for item in admissions), 1)
         self.assertEqual(
             {item.wait_reason for item in admissions if not item.allowed},
-            {"destination_gate"},
+            {"destination_inflight"},
         )
 
     async def test_skewed_worker_clock_cannot_bypass_or_extend_cooldown(self):

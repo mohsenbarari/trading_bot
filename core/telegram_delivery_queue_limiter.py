@@ -35,10 +35,34 @@ if redis.call('exists', KEYS[7]) == 1 then
     end
     redis.call('del', KEYS[7])
 end
+if redis.call('exists', KEYS[8]) == 1 then
+    local inflight_ttl = tonumber(redis.call('pttl', KEYS[8]) or '0')
+    if inflight_ttl > 0 then
+        return {0, now_ms + inflight_ttl, 5, now_ms}
+    end
+    redis.call('del', KEYS[8])
+end
 local bot_next = tonumber(redis.call('get', KEYS[1]) or '0')
 local destination_next = tonumber(redis.call('get', KEYS[2]) or '0')
 local not_before = math.max(bot_next, destination_next)
-if not_before > now_ms then
+local burst_capacity = tonumber(ARGV[6])
+local burst_idle_ms = tonumber(ARGV[7])
+local burst_disabled_until = tonumber(redis.call('get', KEYS[10]) or '0')
+if burst_disabled_until <= now_ms and burst_disabled_until > 0 then
+    redis.call('del', KEYS[10])
+    burst_disabled_until = 0
+end
+local last_accept_ms = tonumber(redis.call('hget', KEYS[9], 'last_accept_ms') or '0')
+local burst_remaining = tonumber(redis.call('hget', KEYS[9], 'remaining') or '0')
+if burst_capacity > 1 and burst_disabled_until == 0 then
+    if last_accept_ms == 0 or now_ms - last_accept_ms >= burst_idle_ms then
+        burst_remaining = burst_capacity
+    end
+else
+    burst_remaining = 0
+end
+local use_burst = burst_remaining > 0
+if not use_burst and not_before > now_ms then
     local reason = 1
     if destination_next >= bot_next then
         reason = 2
@@ -48,6 +72,19 @@ end
 local ttl_ms = tonumber(ARGV[3])
 redis.call('set', KEYS[1], now_ms + tonumber(ARGV[1]), 'PX', ttl_ms)
 redis.call('set', KEYS[2], now_ms + tonumber(ARGV[2]), 'PX', ttl_ms)
+if use_burst then
+    burst_remaining = burst_remaining - 1
+end
+redis.call(
+    'hset',
+    KEYS[9],
+    'last_accept_ms',
+    now_ms,
+    'remaining',
+    math.max(0, burst_remaining)
+)
+redis.call('pexpire', KEYS[9], ttl_ms)
+redis.call('set', KEYS[8], ARGV[4], 'PX', tonumber(ARGV[5]))
 if redis.call('exists', KEYS[6]) == 1 then
     redis.call('set', KEYS[7], ARGV[4], 'PX', tonumber(ARGV[5]))
     return {2, now_ms, 0, now_ms}
@@ -81,6 +118,16 @@ local ttl_ms = tonumber(ARGV[7])
 if redis.call('get', KEYS[5]) == job_hash then
     redis.call('del', KEYS[5])
 end
+if redis.call('get', KEYS[6]) == job_hash then
+    redis.call('del', KEYS[6])
+end
+redis.call('hset', KEYS[7], 'last_accept_ms', now_ms, 'remaining', 0)
+redis.call('pexpire', KEYS[7], ttl_ms)
+local burst_disabled_until = math.max(
+    retry_until_ms,
+    now_ms + tonumber(ARGV[8])
+)
+set_max(KEYS[8], burst_disabled_until, ttl_ms)
 set_max(KEYS[1], retry_until_ms, ttl_ms)
 if durable_bot_until_ms > 0 then
     set_max(KEYS[2], durable_bot_until_ms, ttl_ms)
@@ -120,22 +167,34 @@ redis.call('set', KEYS[4], 'required', 'PX', ttl_ms)
 return {1, probe_at}
 """
 
-_CLEAR_PROBE_SCRIPT = """
+_CLEAR_ADMISSION_SCRIPT = """
+local cleared = 0
 if redis.call('get', KEYS[1]) == ARGV[1] then
     redis.call('del', KEYS[1])
-    redis.call('del', KEYS[2])
-    return 1
+    cleared = 1
 end
-return 0
+if redis.call('get', KEYS[2]) == ARGV[1] then
+    redis.call('del', KEYS[2])
+    redis.call('del', KEYS[3])
+    cleared = 1
+end
+return cleared
 """
 
-_RELEASE_PROBE_SCRIPT = """
+_RELEASE_ADMISSION_SCRIPT = """
+local cleared = 0
 if redis.call('get', KEYS[1]) == ARGV[1] then
     redis.call('del', KEYS[1])
-    redis.call('set', KEYS[2], 'required', 'PX', tonumber(ARGV[2]))
-    return 1
+    cleared = 1
 end
-return 0
+if redis.call('get', KEYS[2]) == ARGV[1] then
+    redis.call('del', KEYS[2])
+    if tonumber(ARGV[2]) == 1 then
+        redis.call('set', KEYS[3], 'required', 'PX', tonumber(ARGV[3]))
+    end
+    cleared = 1
+end
+return cleared
 """
 
 _PREPARE_PREFLIGHT_SCRIPT = """
@@ -170,6 +229,53 @@ if candidate > current then
     return candidate
 end
 return current
+"""
+
+_SET_DESTINATION_COOLDOWN_SCRIPT = """
+local function set_max(key, candidate, ttl_ms, now_ms)
+    local current = tonumber(redis.call('get', key) or '0')
+    if candidate > current then
+        local effective_ttl = math.max(ttl_ms, candidate - now_ms + 60000)
+        redis.call('set', key, candidate, 'PX', effective_ttl)
+        return candidate
+    end
+    return current
+end
+local server_time = redis.call('TIME')
+local now_ms = (tonumber(server_time[1]) * 1000) + math.floor(tonumber(server_time[2]) / 1000)
+local ttl_ms = tonumber(ARGV[2])
+local cooldown_until = tonumber(ARGV[1])
+local burst_disabled_until = math.max(
+    cooldown_until,
+    now_ms + tonumber(ARGV[3])
+)
+set_max(KEYS[1], cooldown_until, ttl_ms, now_ms)
+set_max(KEYS[2], burst_disabled_until, ttl_ms, now_ms)
+redis.call('hset', KEYS[3], 'last_accept_ms', now_ms, 'remaining', 0)
+redis.call('pexpire', KEYS[3], ttl_ms)
+return {cooldown_until, burst_disabled_until}
+"""
+
+_RECORD_SLOW_RESPONSE_SCRIPT = """
+local function set_max(key, candidate, ttl_ms, now_ms)
+    local current = tonumber(redis.call('get', key) or '0')
+    if candidate > current then
+        local effective_ttl = math.max(ttl_ms, candidate - now_ms + 60000)
+        redis.call('set', key, candidate, 'PX', effective_ttl)
+        return candidate
+    end
+    return current
+end
+local server_time = redis.call('TIME')
+local now_ms = (tonumber(server_time[1]) * 1000) + math.floor(tonumber(server_time[2]) / 1000)
+local slowdown_until = now_ms + tonumber(ARGV[1])
+local burst_disabled_until = now_ms + tonumber(ARGV[2])
+local ttl_ms = tonumber(ARGV[3])
+set_max(KEYS[1], slowdown_until, ttl_ms, now_ms)
+set_max(KEYS[2], burst_disabled_until, ttl_ms, now_ms)
+redis.call('hset', KEYS[3], 'last_accept_ms', now_ms, 'remaining', 0)
+redis.call('pexpire', KEYS[3], ttl_ms)
+return {slowdown_until, burst_disabled_until}
 """
 
 
@@ -212,6 +318,14 @@ class TelegramDeliveryDispatchLimiter(Protocol):
         *,
         until: datetime,
     ) -> None: ...
+
+    async def observe_provider_latency(
+        self,
+        job: Any,
+        *,
+        provider_latency_seconds: float,
+        now: datetime,
+    ) -> bool: ...
 
     async def extend_bot_cooldown(
         self,
@@ -263,6 +377,11 @@ class RedisTelegramDeliveryLimiter:
     rate_limit_probe_delay_seconds: float
     global_rate_limit_window_seconds: float
     rate_limit_probe_lease_seconds: float
+    destination_burst_capacity: int = 1
+    destination_burst_idle_seconds: float = 3.2
+    destination_burst_recovery_seconds: float = 300.0
+    edit_slow_response_seconds: float = 2.0
+    edit_slowdown_seconds: float = 1.6
     key_ttl_seconds: int = 86400
     namespace: str = TELEGRAM_DELIVERY_LIMITER_PREFIX
     _local_block_reason: str | None = field(default=None, init=False, repr=False)
@@ -282,12 +401,26 @@ class RedisTelegramDeliveryLimiter:
             ("rate_limit_probe_delay_seconds", self.rate_limit_probe_delay_seconds),
             ("global_rate_limit_window_seconds", self.global_rate_limit_window_seconds),
             ("rate_limit_probe_lease_seconds", self.rate_limit_probe_lease_seconds),
+            ("destination_burst_idle_seconds", self.destination_burst_idle_seconds),
+            (
+                "destination_burst_recovery_seconds",
+                self.destination_burst_recovery_seconds,
+            ),
+            ("edit_slow_response_seconds", self.edit_slow_response_seconds),
+            ("edit_slowdown_seconds", self.edit_slowdown_seconds),
         ):
             numeric = float(value)
             if not math.isfinite(numeric) or numeric <= 0:
                 raise TelegramDeliveryLimiterConfigurationError(
                     f"telegram_limiter_invalid_setting:{name}"
                 )
+        if (
+            isinstance(self.destination_burst_capacity, bool)
+            or int(self.destination_burst_capacity) < 1
+        ):
+            raise TelegramDeliveryLimiterConfigurationError(
+                "telegram_limiter_invalid_setting:destination_burst_capacity"
+            )
         if int(self.key_ttl_seconds) < 1:
             raise TelegramDeliveryLimiterConfigurationError(
                 "telegram_limiter_invalid_setting:key_ttl_seconds"
@@ -323,6 +456,17 @@ class RedisTelegramDeliveryLimiter:
             "recent_429": f"{prefix}:bot:{bot_identity}:recent-429",
             "probe_required": f"{prefix}:bot:{bot_identity}:probe-required",
             "probe_inflight": f"{prefix}:bot:{bot_identity}:probe-inflight",
+            # All bot identities share these destination controls. A second bot
+            # must never multiply the channel burst or create parallel sends.
+            "destination_inflight": (
+                f"{prefix}:destination:{destination_digest}:inflight"
+            ),
+            "destination_burst_state": (
+                f"{prefix}:destination:{destination_digest}:burst-state"
+            ),
+            "destination_burst_disabled_until": (
+                f"{prefix}:destination:{destination_digest}:burst-disabled-until"
+            ),
         }
 
     def _ttl_ms(self) -> int:
@@ -332,6 +476,8 @@ class RedisTelegramDeliveryLimiter:
             float(self.rate_limit_probe_delay_seconds),
             float(self.global_rate_limit_window_seconds),
             float(self.rate_limit_probe_lease_seconds),
+            float(self.destination_burst_idle_seconds),
+            float(self.destination_burst_recovery_seconds),
         )
         return max(
             1000,
@@ -354,7 +500,15 @@ class RedisTelegramDeliveryLimiter:
     ) -> TelegramDeliveryDispatchAdmission:
         if self._local_block_reason is not None:
             raise TelegramDeliveryLimiterUnavailableError(self._local_block_reason)
-        bot_identity, _destination_key, destination_digest = self._validate_job_identity(job)
+        bot_identity, destination_key, destination_digest = self._validate_job_identity(job)
+        destination_class = str(
+            getattr(
+                getattr(job, "destination_class", None),
+                "value",
+                getattr(job, "destination_class", ""),
+            )
+            or ""
+        ).strip().lower()
         job_digest = _job_digest(job)
         keys = self._keys(bot_identity, destination_digest)
         # Validate the caller-provided timestamp for API consistency, but never
@@ -364,7 +518,7 @@ class RedisTelegramDeliveryLimiter:
         try:
             raw = await self.redis.eval(
                 _ADMIT_SCRIPT,
-                7,
+                10,
                 keys["bot_next"],
                 keys["destination_next"],
                 keys["bot_block"],
@@ -372,11 +526,20 @@ class RedisTelegramDeliveryLimiter:
                 keys["gateway_block"],
                 keys["probe_required"],
                 keys["probe_inflight"],
+                keys["destination_inflight"],
+                keys["destination_burst_state"],
+                keys["destination_burst_disabled_until"],
                 max(1, int(float(self.bot_min_interval_seconds) * 1000)),
                 max(1, int(float(self.destination_min_interval_seconds) * 1000)),
                 self._ttl_ms(),
                 job_digest,
                 max(1, int(float(self.rate_limit_probe_lease_seconds) * 1000)),
+                (
+                    max(1, int(self.destination_burst_capacity))
+                    if destination_class == "channel"
+                    else 1
+                ),
+                max(1, int(float(self.destination_burst_idle_seconds) * 1000)),
             )
         except Exception as exc:
             self._fail_closed(
@@ -395,7 +558,7 @@ class RedisTelegramDeliveryLimiter:
             if state in {1, 2} and reason_code != 0:
                 raise ValueError("unexpected allowed reason")
             if state == 0 and (
-                reason_code not in {1, 2, 4} or not_before_ms <= redis_now_ms
+                reason_code not in {1, 2, 4, 5} or not_before_ms <= redis_now_ms
             ):
                 raise ValueError("unexpected wait response")
             if state == -1 and reason_code not in {1, 2, 3}:
@@ -412,6 +575,7 @@ class RedisTelegramDeliveryLimiter:
             2: "destination_gate",
             3: "circuit",
             4: "bot_probe_inflight",
+            5: "destination_inflight",
         }[reason_code]
         if state == -1:
             return TelegramDeliveryDispatchAdmission(
@@ -438,13 +602,23 @@ class RedisTelegramDeliveryLimiter:
         job_digest = _job_digest(job)
         keys = self._keys(bot_identity, destination_digest)
         try:
-            if decision.reason == "rate_limit_probe_cancelled_before_dispatch":
+            if decision.reason in {
+                "rate_limit_probe_cancelled_before_dispatch",
+                "dispatch_admission_cancelled_before_dispatch",
+            }:
                 await self.redis.eval(
-                    _RELEASE_PROBE_SCRIPT,
-                    2,
+                    _RELEASE_ADMISSION_SCRIPT,
+                    3,
+                    keys["destination_inflight"],
                     keys["probe_inflight"],
                     keys["probe_required"],
                     job_digest,
+                    (
+                        1
+                        if decision.reason
+                        == "rate_limit_probe_cancelled_before_dispatch"
+                        else 0
+                    ),
                     self._ttl_ms(),
                 )
             elif (
@@ -459,12 +633,15 @@ class RedisTelegramDeliveryLimiter:
                     ttl_until = decision.bot_cooldown_until
                 await self.redis.eval(
                     _RECORD_429_SCRIPT,
-                    5,
+                    8,
                     keys["destination_next"],
                     keys["bot_next"],
                     keys["recent_429"],
                     keys["probe_required"],
                     keys["probe_inflight"],
+                    keys["destination_inflight"],
+                    keys["destination_burst_state"],
+                    keys["destination_burst_disabled_until"],
                     destination_digest,
                     max(
                         1,
@@ -481,7 +658,20 @@ class RedisTelegramDeliveryLimiter:
                     job_digest,
                     max(
                         self._ttl_ms(),
-                        _epoch_ms(ttl_until) - _epoch_ms(now) + 60_000,
+                        _epoch_ms(ttl_until)
+                        - _epoch_ms(now)
+                        + int(
+                            float(self.destination_burst_recovery_seconds)
+                            * 1000
+                        )
+                        + 60_000,
+                    ),
+                    max(
+                        1,
+                        int(
+                            float(self.destination_burst_recovery_seconds)
+                            * 1000
+                        ),
                     ),
                 )
             elif decision.outcome == TelegramDeliveryOutcome.BOT_PAUSED:
@@ -496,10 +686,12 @@ class RedisTelegramDeliveryLimiter:
             if decision.reason not in {
                 "telegram_rate_limited",
                 "rate_limit_probe_cancelled_before_dispatch",
+                "dispatch_admission_cancelled_before_dispatch",
             }:
                 await self.redis.eval(
-                    _CLEAR_PROBE_SCRIPT,
-                    2,
+                    _CLEAR_ADMISSION_SCRIPT,
+                    3,
+                    keys["destination_inflight"],
                     keys["probe_inflight"],
                     keys["probe_required"],
                     job_digest,
@@ -520,17 +712,88 @@ class RedisTelegramDeliveryLimiter:
         keys = self._keys(bot_identity, destination_digest)
         try:
             await self.redis.eval(
-                _SET_MAX_SCRIPT,
-                1,
+                _SET_DESTINATION_COOLDOWN_SCRIPT,
+                3,
                 keys["destination_next"],
+                keys["destination_burst_disabled_until"],
+                keys["destination_burst_state"],
                 _epoch_ms(until),
                 self._ttl_ms(),
+                max(
+                    1,
+                    int(
+                        float(self.destination_burst_recovery_seconds) * 1000
+                    ),
+                ),
             )
         except Exception as exc:
             self._fail_closed(
                 f"telegram_limiter_redis_unavailable:{type(exc).__name__}",
                 exc,
             )
+
+    async def observe_provider_latency(
+        self,
+        job: Any,
+        *,
+        provider_latency_seconds: float,
+        now: datetime,
+    ) -> bool:
+        """Apply a soft edit brake when Telegram holds a channel request.
+
+        Telegram may delay channel edits for several seconds without returning
+        429. This signal suppresses the next micro-burst and extends only the
+        affected destination gate; ordinary 0.8-second pacing resumes after the
+        short slowdown.
+        """
+
+        _epoch_ms(now)
+        latency = float(provider_latency_seconds)
+        if not math.isfinite(latency) or latency < 0:
+            raise TelegramDeliveryLimiterUnavailableError(
+                "telegram_limiter_invalid_provider_latency"
+            )
+        method = str(getattr(job, "method", "") or "")
+        destination_class = str(
+            getattr(
+                getattr(job, "destination_class", None),
+                "value",
+                getattr(job, "destination_class", ""),
+            )
+            or ""
+        ).strip().lower()
+        if (
+            method not in {"editMessageText", "editMessageReplyMarkup"}
+            or destination_class != "channel"
+            or latency < float(self.edit_slow_response_seconds)
+        ):
+            return False
+        bot_identity, _destination_key, destination_digest = (
+            self._validate_job_identity(job)
+        )
+        keys = self._keys(bot_identity, destination_digest)
+        try:
+            await self.redis.eval(
+                _RECORD_SLOW_RESPONSE_SCRIPT,
+                3,
+                keys["destination_next"],
+                keys["destination_burst_disabled_until"],
+                keys["destination_burst_state"],
+                max(1, int(float(self.edit_slowdown_seconds) * 1000)),
+                max(
+                    1,
+                    int(
+                        float(self.destination_burst_recovery_seconds) * 1000
+                    ),
+                ),
+                self._ttl_ms(),
+            )
+        except Exception as exc:
+            self._fail_closed(
+                f"telegram_limiter_latency_observation_failed:{type(exc).__name__}",
+                exc,
+            )
+        return True
 
     async def extend_bot_cooldown(
         self,
@@ -655,6 +918,9 @@ class RedisTelegramDeliveryLimiter:
             primary_keys["destination_block"],
             editor_keys["destination_block"],
             primary_keys["destination_next"],
+            primary_keys["destination_inflight"],
+            primary_keys["destination_burst_state"],
+            primary_keys["destination_burst_disabled_until"],
         )
 
     async def resume_destination(self, destination_key: str) -> None:
@@ -696,6 +962,41 @@ def configured_redis_telegram_delivery_limiter(
                 settings,
                 "telegram_delivery_queue_global_rate_limit_window_seconds",
                 2.0,
+            )
+        ),
+        destination_burst_capacity=int(
+            getattr(
+                settings,
+                "telegram_delivery_queue_destination_burst_capacity",
+                2,
+            )
+        ),
+        destination_burst_idle_seconds=float(
+            getattr(
+                settings,
+                "telegram_delivery_queue_destination_burst_idle_seconds",
+                3.2,
+            )
+        ),
+        destination_burst_recovery_seconds=float(
+            getattr(
+                settings,
+                "telegram_delivery_queue_destination_burst_recovery_seconds",
+                300.0,
+            )
+        ),
+        edit_slow_response_seconds=float(
+            getattr(
+                settings,
+                "telegram_delivery_queue_edit_slow_response_seconds",
+                2.0,
+            )
+        ),
+        edit_slowdown_seconds=float(
+            getattr(
+                settings,
+                "telegram_delivery_queue_edit_slowdown_seconds",
+                1.6,
             )
         ),
         rate_limit_probe_lease_seconds=max(

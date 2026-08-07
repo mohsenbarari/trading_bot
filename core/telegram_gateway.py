@@ -43,6 +43,7 @@ class TelegramGatewayResult:
     idempotency_key: Optional[str] = None
     error: Optional[str] = None
     transport_phase: Optional[str] = None
+    provider_latency_seconds: Optional[float] = None
 
     @property
     def message_id(self) -> Optional[int]:

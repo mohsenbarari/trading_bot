@@ -197,6 +197,11 @@ class _AllowLimiter:
     async def observe(self, _job, _decision, *, now):
         return None
 
+    async def observe_provider_latency(
+        self, _job, *, provider_latency_seconds, now
+    ):
+        return False
+
     async def extend_destination_cooldown(self, _job, *, until):
         return None
 

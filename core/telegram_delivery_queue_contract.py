@@ -29,6 +29,7 @@ class TelegramGatewayResultLike(Protocol):
     response_json: dict[str, Any] | None
     error: str | None
     transport_phase: str | None
+    provider_latency_seconds: float | None
 
     @property
     def message_id(self) -> int | None:
