@@ -1714,9 +1714,10 @@ TARGETED_SYNC_TABLE_GROUPS: tuple[tuple[str, ...], ...] = (
     ("telegram_link_tokens",),
     ("notifications",),
     ("user_blocks",),
-    # Offers need their owner users present on the peer in the same receive
-    # batch; otherwise foreign apply defers forever on user_id FK.
-    ("users", "offers", "offer_publication_states"),
+    # Offers + publication states share one stage (offers first via table_order).
+    # Owner users are synced in the dedicated users stage above; do not re-push
+    # users here or seeded-user catchup with `--table users` would run twice.
+    ("offers", "offer_publication_states"),
     ("trades",),
     ("offer_requests",),
     ("trade_delivery_receipts",),
@@ -1848,11 +1849,13 @@ async def collect_targeted_prefix_sync_items(
 
     # Prefer live-row replay for offers/publication states during catchup so the
     # peer receives current public ids even if older change_log payloads are thin.
+    # Do not replay users here: change_log payloads carry versioned identity
+    # fields that row snapshots omit (`versioned_user_identity_missing`).
     if include_synced or any(table == "offer_publication_states" for table in tables):
         replay_tables = tuple(
             table
             for table in tables
-            if table in {"users", "offers", "offer_publication_states"}
+            if table in {"offers", "offer_publication_states"}
         )
         for table, row in await _load_prefix_rows_for_tables(prefix, replay_tables):
             record_id = getattr(row, "id", None)
