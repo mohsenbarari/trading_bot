@@ -81,6 +81,7 @@ from telegram_price_collector.models import RawPost  # noqa: E402
 from telegram_price_collector.parsers import parse_message  # noqa: E402
 from online_recalibration import (  # noqa: E402
     apply_snapshot_calibration,
+    apply_recent_realized_snapshot_calibration,
     ensure_schema as ensure_online_schema,
     reconcile_predictions,
     record_predictions,
@@ -4528,6 +4529,11 @@ def refresh_estimate(
             calibration_connection,
             settlements=estimate.get("settlements", {}),
         )
+        recent_realized_metadata = apply_recent_realized_snapshot_calibration(
+            calibration_connection,
+            settlements=estimate.get("settlements", {}),
+            as_of=effective_end,
+        )
         # Residual is learned per settlement.  TOMORROW often has samples while
         # CASH is still warming up, so a negative TOMORROW pull can invert the
         # cash/tomorrow term structure — repair before publishing.
@@ -4563,6 +4569,7 @@ def refresh_estimate(
         "mode": "BOUNDED_ONLINE_RESIDUAL_CALIBRATION",
         "reconciliation": reconciliation,
         "calibration": online_metadata,
+        "recent_realized_calibration": recent_realized_metadata,
         "predictions_recorded": predictions_recorded,
         "automatic_model_weight_promotion": False,
         "term_structure_fixes": term_structure_fixes,

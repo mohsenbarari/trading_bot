@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import sqlite3
 import unittest
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from online_recalibration import (
     apply_calibration,
+    apply_recent_realized_calibration,
     ensure_schema,
     reconcile_predictions,
     record_predictions,
@@ -125,6 +126,84 @@ class OnlineRecalibrationTests(unittest.TestCase):
         self.assertGreater(rate["estimated_price_toman"], 180_000_000)
         self.assertLessEqual(rate["tolerance"]["lower_price_toman"], 179_000_000)
         self.assertGreaterEqual(rate["tolerance"]["upper_price_toman"], 181_000_000)
+
+    def test_recent_realized_correction_recenters_quiet_book_from_distinct_actuals(self) -> None:
+        now = datetime(2026, 8, 5, 12, 0, tzinfo=UTC)
+        for offset, residual in ((45, -0.008), (15, -0.010)):
+            occurred = now - timedelta(minutes=offset)
+            self.connection.execute(
+                """
+                INSERT INTO coin_estimate_predictions(
+                    prediction_time_utc, commodity, settlement,
+                    structural_estimated_price_toman, estimated_price_toman,
+                    lower_price_toman, upper_price_toman, group_live_enabled,
+                    actual_price_toman, actual_event_utc, residual_ratio,
+                    evaluated_at_utc, evaluation_mode, created_at_utc
+                ) VALUES (?, 'امام', 'TOMORROW', 180000000, 180000000,
+                          179000000, 181000000, 1,
+                          178200000, ?, ?, ?, 'FORWARD_5M', ?)
+                """,
+                (
+                    (occurred - timedelta(minutes=1)).isoformat().replace("+00:00", "Z"),
+                    occurred.isoformat().replace("+00:00", "Z"),
+                    residual,
+                    now.isoformat().replace("+00:00", "Z"),
+                    now.isoformat().replace("+00:00", "Z"),
+                ),
+            )
+        self.connection.commit()
+        rate = {
+            "estimated_price_toman": 180_000_000,
+            "tolerance": {
+                "lower_price_toman": 179_000_000,
+                "upper_price_toman": 181_000_000,
+            },
+            "group_offer_anchor": {"status": "NO_DATA"},
+        }
+        info = apply_recent_realized_calibration(
+            self.connection,
+            commodity="امام",
+            settlement="TOMORROW",
+            rate=rate,
+            as_of=now,
+        )
+        self.assertEqual(info["status"], "APPLIED")
+        self.assertEqual(info["actual_event_count"], 2)
+        self.assertAlmostEqual(info["correction_ratio"], -0.010)
+        self.assertEqual(rate["estimated_price_toman"], 178_200_000)
+        self.assertEqual(rate["estimated_project_price"], 178_200)
+        self.assertLess(rate["tolerance"]["lower_price_toman"], 179_000_000)
+        self.assertIn("RECENT_REALIZED_RESIDUAL", rate["method"])
+
+    def test_recent_realized_correction_never_overrides_fresh_book(self) -> None:
+        now = datetime(2026, 8, 5, 12, 0, tzinfo=UTC)
+        self.connection.execute(
+            """
+            INSERT INTO coin_estimate_predictions(
+                prediction_time_utc, commodity, settlement,
+                structural_estimated_price_toman, estimated_price_toman,
+                lower_price_toman, upper_price_toman, group_live_enabled,
+                actual_price_toman, actual_event_utc, residual_ratio,
+                evaluated_at_utc, evaluation_mode, created_at_utc
+            ) VALUES ('2026-08-05T11:40:00Z','امام','CASH',180000000,180000000,
+                      179000000,181000000,1,178200000,'2026-08-05T11:45:00Z',-0.01,
+                      '2026-08-05T11:45:01Z','FORWARD_5M','2026-08-05T11:45:01Z')
+            """
+        )
+        self.connection.commit()
+        rate = {
+            "estimated_price_toman": 180_000_000,
+            "group_offer_anchor": {"status": "OBSERVED"},
+        }
+        info = apply_recent_realized_calibration(
+            self.connection,
+            commodity="امام",
+            settlement="CASH",
+            rate=rate,
+            as_of=now,
+        )
+        self.assertEqual(info["status"], "SKIPPED_FRESH_LIVE_GROUP_ANCHOR")
+        self.assertEqual(rate["estimated_price_toman"], 180_000_000)
 
 
 if __name__ == "__main__":
