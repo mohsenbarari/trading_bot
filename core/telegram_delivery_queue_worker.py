@@ -1342,6 +1342,7 @@ async def run_telegram_delivery_queue_cycle(
             continue
 
         try:
+            provider_started_at_utc = utc_now()
             provider_started_at = time.monotonic()
             try:
                 gateway_result = await gateway_call(
@@ -1366,6 +1367,7 @@ async def run_telegram_delivery_queue_cycle(
                 0.0, time.monotonic() - provider_started_at
             )
             gateway_result.provider_latency_seconds = provider_latency_seconds
+            gateway_result.provider_started_at_utc = provider_started_at_utc
 
             decision, limiter_decision = await _persist_delivery_result_after_dispatch(
                 bot_identity=lane_identity,

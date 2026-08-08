@@ -30,6 +30,7 @@ class TelegramGatewayResultLike(Protocol):
     error: str | None
     transport_phase: str | None
     provider_latency_seconds: float | None
+    provider_started_at_utc: datetime | None
 
     @property
     def message_id(self) -> int | None:

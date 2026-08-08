@@ -691,6 +691,21 @@ def _sanitized_provider_response(result: TelegramGatewayResultLike) -> dict[str,
                 "provider_outcome_latency_invalid"
             )
         sanitized["_provider_latency_ms"] = round(latency * 1000.0, 3)
+    raw_started_at = getattr(result, "provider_started_at_utc", None)
+    if raw_started_at is not None:
+        if not isinstance(raw_started_at, datetime):
+            raise TelegramDeliveryQueueValidationError(
+                "provider_outcome_started_at_invalid"
+            )
+        if raw_started_at.tzinfo is None or raw_started_at.utcoffset() is None:
+            raise TelegramDeliveryQueueValidationError(
+                "provider_outcome_started_at_invalid"
+            )
+        sanitized["_provider_started_at_utc"] = (
+            raw_started_at.astimezone(timezone.utc)
+            .isoformat(timespec="microseconds")
+            .replace("+00:00", "Z")
+        )
     return sanitized or None
 
 

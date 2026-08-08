@@ -150,6 +150,33 @@ def _is_first_attempt_without_rate_limit(row: tuple[object, ...]) -> bool:
     )
 
 
+def _provider_started_at(row: tuple[object, ...]) -> datetime | None:
+    """Return the exact provider-call boundary, with a legacy fallback."""
+
+    response = row[12] if len(row) > 12 else None
+    raw = (
+        response.get("_provider_started_at_utc")
+        if isinstance(response, dict)
+        else None
+    )
+    if isinstance(raw, str) and raw.strip():
+        try:
+            return _aware(datetime.fromisoformat(raw.strip().replace("Z", "+00:00")))
+        except ValueError:
+            pass
+    fallback = row[_ROW_DISPATCH_STARTED_AT]
+    return _aware(fallback) if fallback is not None else None
+
+
+def _provider_timestamp_source(row: tuple[object, ...]) -> str:
+    response = row[12] if len(row) > 12 else None
+    return (
+        "provider_started_at_utc"
+        if isinstance(response, dict) and response.get("_provider_started_at_utc")
+        else "dispatch_started_at_legacy_fallback"
+    )
+
+
 def _dispatch_evidence_payload(
     rows: list[tuple[object, ...]],
     *,
@@ -381,15 +408,21 @@ def _dispatch_evidence_payload(
         events.sort()
     for destination, destination_rows in by_destination.items():
         destination_rows.sort(
-            key=lambda row: (_aware(row[_ROW_DISPATCH_STARTED_AT]), int(row[_ROW_ID]))
+            key=lambda row: (
+                _provider_started_at(row) or _aware(row[_ROW_DISPATCH_STARTED_AT]),
+                int(row[_ROW_ID]),
+            )
         )
         destination_class = _enum_text(destination_rows[0][_ROW_DESTINATION_CLASS])
         capacity = configured_burst_capacity if destination_class == "channel" else 1
         accepts_since_idle = 1
         previous = destination_rows[0]
         for current in destination_rows[1:]:
-            previous_at = _aware(previous[_ROW_DISPATCH_STARTED_AT])
-            current_at = _aware(current[_ROW_DISPATCH_STARTED_AT])
+            previous_at = _provider_started_at(previous)
+            current_at = _provider_started_at(current)
+            if previous_at is None or current_at is None:
+                previous = current
+                continue
             gap = max(0.0, (current_at - previous_at).total_seconds())
             all_gaps.append(gap)
             if gap >= idle_seconds - tolerance:
@@ -417,6 +450,7 @@ def _dispatch_evidence_payload(
                         "previous_job_id": int(previous[_ROW_ID]),
                         "job_id": int(current[_ROW_ID]),
                         "gap_seconds": round(gap, 3),
+                        "timestamp_source": _provider_timestamp_source(current),
                         "accept_number_since_idle": accepts_since_idle,
                         "capacity": capacity,
                     }
@@ -427,6 +461,7 @@ def _dispatch_evidence_payload(
                         "previous_job_id": int(previous[_ROW_ID]),
                         "job_id": int(current[_ROW_ID]),
                         "gap_seconds": round(gap, 3),
+                        "timestamp_source": _provider_timestamp_source(current),
                         "capacity": capacity,
                         "burst_disabled_by_recent_429": recent_429 is not None,
                         "destination_sha256": hashlib.sha256(
@@ -447,18 +482,19 @@ def _dispatch_evidence_payload(
     retry_gate_violations: list[dict[str, object]] = []
     retry_gate_verified = 0
     for row in rate_limit_rows:
-        dispatch_started_at = row[_ROW_DISPATCH_STARTED_AT]
+        provider_started_at = _provider_started_at(row)
         retry_until = row[_ROW_LAST_RATE_LIMIT_UNTIL]
-        if dispatch_started_at is None or retry_until is None:
+        if provider_started_at is None or retry_until is None:
             continue
         retry_gate_verified += 1
-        if _aware(dispatch_started_at) + timedelta(seconds=tolerance) < _aware(
+        if provider_started_at + timedelta(seconds=tolerance) < _aware(
             retry_until
         ):
             retry_gate_violations.append(
                 {
                     "job_id": int(row[_ROW_ID]),
-                    "dispatch_started_at": _iso(dispatch_started_at),
+                    "provider_started_at": _iso(provider_started_at),
+                    "timestamp_source": _provider_timestamp_source(row),
                     "last_rate_limit_until": _iso(retry_until),
                 }
             )

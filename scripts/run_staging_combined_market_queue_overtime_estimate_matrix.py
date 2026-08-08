@@ -1036,21 +1036,14 @@ def _wave_prefix_sync_catchup(
 ) -> dict[str, Any]:
     """Push committed wave rows while deferred reactions await publication."""
 
-    results: dict[str, Any] = {
-        "foreign": {
-            "status": "skipped",
-            "reason": (
-                "foreign wave actors are staging-local fixtures; authoritative "
-                "cross-server actor sync is covered by the comprehensive lane"
-            ),
-        }
-    }
+    results: dict[str, Any] = {}
     queue_prefix = _queue_run_prefix(args)
-    for server, suffix in (("iran", "IR"),):
+    overall_ok = True
+    for server in ("iran", "foreign"):
         script_args = [
             "sync-prefix-catchup",
             "--prefix",
-            f"{queue_prefix}_{suffix}",
+            queue_prefix,
             "--batch-size",
             "500",
         ]
@@ -1067,8 +1060,13 @@ def _wave_prefix_sync_catchup(
             timeout=300,
         )
         results[server] = payload
+        overall_ok = (
+            overall_ok
+            and code == 0
+            and str(payload.get("status") or "") == "ok"
+        )
     return {
-        "ok": code == 0 and str(payload.get("status") or "") == "ok",
+        "ok": overall_ok,
         "include_synced": bool(include_synced),
         "results": results,
     }

@@ -478,7 +478,10 @@ async def _run(args: argparse.Namespace) -> dict[str, object]:
                         pending_actions.remove(pending)
                         entry["status"] = "publish_wait_timeout_left_to_expiry"
                     else:
-                        pending["due_at"] = now + 15.0
+                        # The real offer lifetime is only two minutes. Poll the
+                        # synced publication state promptly instead of burning
+                        # a material share of that lifetime on harness sleep.
+                        pending["due_at"] = now + 3.0
                     continue
                 pending_actions.remove(pending)
                 entry["publication_observed_at_utc"] = _utc()

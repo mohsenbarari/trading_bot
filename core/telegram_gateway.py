@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import datetime
 import base64
 import binascii
 import hashlib
@@ -44,6 +45,7 @@ class TelegramGatewayResult:
     error: Optional[str] = None
     transport_phase: Optional[str] = None
     provider_latency_seconds: Optional[float] = None
+    provider_started_at_utc: Optional[datetime] = None
 
     @property
     def message_id(self) -> Optional[int]:

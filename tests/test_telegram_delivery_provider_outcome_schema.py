@@ -1,4 +1,5 @@
 from pathlib import Path
+from datetime import datetime, timezone
 import unittest
 
 from core.sync_registry import SyncPolicy, get_sync_registry_entry
@@ -24,9 +25,16 @@ class TelegramProviderOutcomeSchemaTests(unittest.TestCase):
                 method="editMessageText",
                 response_json={"ok": True, "result": {"message_id": 42}},
                 provider_latency_seconds=2.3456,
+                provider_started_at_utc=datetime(
+                    2026, 8, 8, 12, 34, 56, 123456, tzinfo=timezone.utc
+                ),
             )
         )
         self.assertEqual(payload["_provider_latency_ms"], 2345.6)
+        self.assertEqual(
+            payload["_provider_started_at_utc"],
+            "2026-08-08T12:34:56.123456Z",
+        )
 
     def test_model_has_fenced_identity_pending_index_and_foreign_key(self):
         table = TelegramDeliveryProviderOutcomeRecord.__table__

@@ -36,6 +36,7 @@ def _queue_evidence_row(
     sent_at: datetime | None = None,
     provider_status_code: int | None = 200,
     provider_error_code: int | None = None,
+    provider_started_at: datetime | None = None,
 ) -> tuple[object, ...]:
     return (
         job_id,
@@ -50,7 +51,18 @@ def _queue_evidence_row(
         dispatch_at,
         "sendMessage",
         f"ofr_matrix_{job_id}",
-        {"ok": True},
+        {
+            "ok": True,
+            **(
+                {
+                    "_provider_started_at_utc": provider_started_at.isoformat().replace(
+                        "+00:00", "Z"
+                    )
+                }
+                if provider_started_at is not None
+                else {}
+            ),
+        },
         priority,
         priority_rank,
         enqueued_seq if enqueued_seq is not None else job_id,
@@ -417,10 +429,10 @@ class CombinedMatrixManifestTests(unittest.TestCase):
 
         self.assertTrue(payload["ok"])
         self.assertTrue(payload["include_synced"])
-        self.assertEqual(container_python.call_count, 1)
-        self.assertEqual(payload["results"]["foreign"]["status"], "skipped")
+        self.assertEqual(container_python.call_count, 2)
         for call in container_python.call_args_list:
             self.assertIn("--include-synced", call.kwargs["script_args"])
+            self.assertIn("CMB_DEPENDENCY_BARRIER_QUEUE", call.kwargs["script_args"])
 
     def test_later_wave_prefix_catchups_do_not_replay_synced_rows(self) -> None:
         args = SimpleNamespace(run_prefix="CMB_INCREMENTAL_CATCHUP")
@@ -433,9 +445,37 @@ class CombinedMatrixManifestTests(unittest.TestCase):
 
         self.assertTrue(payload["ok"])
         self.assertFalse(payload["include_synced"])
-        self.assertEqual(container_python.call_count, 1)
+        self.assertEqual(container_python.call_count, 2)
         for call in container_python.call_args_list:
             self.assertNotIn("--include-synced", call.kwargs["script_args"])
+
+    def test_dispatch_evidence_uses_exact_provider_start_for_spacing(self) -> None:
+        base = datetime(2026, 8, 8, tzinfo=timezone.utc)
+        rows = [
+            _queue_evidence_row(
+                job_id=1,
+                created_at=base,
+                dispatch_at=base + timedelta(seconds=10.20),
+                provider_started_at=base + timedelta(seconds=10.25),
+            ),
+            _queue_evidence_row(
+                job_id=2,
+                created_at=base,
+                dispatch_at=base + timedelta(seconds=10.98),
+                provider_started_at=base + timedelta(seconds=11.20),
+            ),
+        ]
+
+        payload = queue_sampler._dispatch_evidence_payload(
+            rows,
+            destination_min_interval_seconds=0.9,
+            destination_burst_idle_seconds=3.2,
+            destination_burst_capacity=1,
+            destination_burst_recovery_seconds=300.0,
+        )
+
+        self.assertTrue(payload["spacing"]["ok"])
+        self.assertEqual(payload["spacing"]["violation_count"], 0)
 
     def test_queue_drain_wait_exits_as_soon_as_scope_reaches_zero(self) -> None:
         args = SimpleNamespace(
@@ -820,7 +860,7 @@ class CombinedMatrixManifestTests(unittest.TestCase):
         self.assertEqual(payload["rate_limit"]["retry_gate_violation_count"], 1)
         self.assertEqual(
             payload["rate_limit"]["retry_gate_violations"][0][
-                "dispatch_started_at"
+                "provider_started_at"
             ],
             "2026-08-08T00:00:06.900000Z",
         )
