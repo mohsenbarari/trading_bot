@@ -69,6 +69,41 @@ def _queue_evidence_row(
 
 
 class CombinedMatrixManifestTests(unittest.TestCase):
+    def test_queue_settings_accept_capacity_above_required_minimum(self) -> None:
+        observed = {
+            server: {
+                "offer_expiry_minutes": {"ok": True, "value": "2"},
+                "max_active_offers": {"ok": True, "value": "50"},
+            }
+            for server in ("foreign", "iran")
+        }
+
+        self.assertTrue(
+            runner._queue_trading_settings_match_contract(
+                observed,
+                offer_expiry_minutes=2,
+            )
+        )
+
+    def test_queue_settings_reject_capacity_below_required_minimum(self) -> None:
+        observed = {
+            "foreign": {
+                "offer_expiry_minutes": {"ok": True, "value": "2"},
+                "max_active_offers": {"ok": True, "value": "9"},
+            },
+            "iran": {
+                "offer_expiry_minutes": {"ok": True, "value": "2"},
+                "max_active_offers": {"ok": True, "value": "50"},
+            },
+        }
+
+        self.assertFalse(
+            runner._queue_trading_settings_match_contract(
+                observed,
+                offer_expiry_minutes=2,
+            )
+        )
+
     def test_runtime_driver_bundle_includes_shared_probe_worker(self) -> None:
         self.assertIn(
             "scripts/trading_core_probe_worker.py",

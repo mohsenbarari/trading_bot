@@ -1249,6 +1249,31 @@ def _assertion(
     }
 
 
+def _queue_trading_settings_match_contract(
+    observed: dict[str, dict[str, Any]],
+    *,
+    offer_expiry_minutes: int,
+    minimum_max_active_offers: int = ACTIVE_OFFERS_PER_SYNTHETIC_OWNER,
+) -> bool:
+    """Accept live capacity at or above the matrix's synthetic-owner need."""
+
+    for values in observed.values():
+        expiry = values.get("offer_expiry_minutes") or {}
+        max_active = values.get("max_active_offers") or {}
+        try:
+            active_value = int(str(max_active.get("value")))
+        except (TypeError, ValueError):
+            return False
+        if not (
+            bool(expiry.get("ok"))
+            and str(expiry.get("value")) == str(int(offer_expiry_minutes))
+            and bool(max_active.get("ok"))
+            and active_value >= int(minimum_max_active_offers)
+        ):
+            return False
+    return True
+
+
 def run_wave(args: argparse.Namespace, manifest: dict[str, Any], artifact_dir: Path) -> dict[str, Any]:
     budget = wave_driver.WaveBudget(
         valid_target=int(manifest["wave"]["valid_target"]),
@@ -1376,14 +1401,9 @@ def run_wave(args: argparse.Namespace, manifest: dict[str, Any], artifact_dir: P
             "offer_expiry_minutes": expiry,
             "max_active_offers": max_active,
         }
-    settings_ok = all(
-        bool(values["offer_expiry_minutes"].get("ok"))
-        and str(values["offer_expiry_minutes"].get("value"))
-        == str(int(args.queue_offer_expiry_minutes))
-        and bool(values["max_active_offers"].get("ok"))
-        and str(values["max_active_offers"].get("value"))
-        == str(ACTIVE_OFFERS_PER_SYNTHETIC_OWNER)
-        for values in trading_settings_observed.values()
+    settings_ok = _queue_trading_settings_match_contract(
+        trading_settings_observed,
+        offer_expiry_minutes=int(args.queue_offer_expiry_minutes),
     )
     write_json(
         artifact_dir / "queue-trading-settings.json",
@@ -1391,7 +1411,7 @@ def run_wave(args: argparse.Namespace, manifest: dict[str, Any], artifact_dir: P
             "ok": settings_ok,
             "expected": {
                 "offer_expiry_minutes": int(args.queue_offer_expiry_minutes),
-                "max_active_offers": ACTIVE_OFFERS_PER_SYNTHETIC_OWNER,
+                "minimum_max_active_offers": ACTIVE_OFFERS_PER_SYNTHETIC_OWNER,
             },
             "servers": trading_settings_observed,
         },
