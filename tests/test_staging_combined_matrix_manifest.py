@@ -445,6 +445,30 @@ class CombinedMatrixManifestTests(unittest.TestCase):
             ],
         )
 
+    def test_child_secrets_are_carried_only_in_environment(self) -> None:
+        args = SimpleNamespace(
+            basic_auth_user="matrix-user",
+            basic_auth_password="matrix-password",
+            observability_api_key="matrix-observability-key",
+        )
+
+        self.assertEqual(
+            runner._child_secret_env(args),
+            {
+                "STAGING_BASIC_AUTH_USER": "matrix-user",
+                "STAGING_BASIC_AUTH_PASSWORD": "matrix-password",
+                "STAGING_OBSERVABILITY_API_KEY": "matrix-observability-key",
+            },
+        )
+        source = Path(runner.__file__).read_text(encoding="utf-8")
+        for secret_flag in (
+            'argv.extend(["--basic-auth-password"',
+            'argv.extend(["--observability-api-key"',
+            'ot_argv.extend(["--basic-auth-password"',
+            's2fm_argv.extend(["--observability-api-key"',
+        ):
+            self.assertNotIn(secret_flag, source)
+
 
 class CombinedMatrixWaveRouteTests(unittest.IsolatedAsyncioTestCase):
     async def test_telegram_request_uses_dispatcher_not_webapp_executor(self):

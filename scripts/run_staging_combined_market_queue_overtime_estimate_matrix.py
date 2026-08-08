@@ -120,6 +120,17 @@ def _run(
     )
 
 
+def _child_secret_env(args: argparse.Namespace) -> dict[str, str]:
+    """Pass child credentials without exposing them in process arguments."""
+
+    values = {
+        "STAGING_BASIC_AUTH_USER": getattr(args, "basic_auth_user", None),
+        "STAGING_BASIC_AUTH_PASSWORD": getattr(args, "basic_auth_password", None),
+        "STAGING_OBSERVABILITY_API_KEY": getattr(args, "observability_api_key", None),
+    }
+    return {name: str(value) for name, value in values.items() if value}
+
+
 def _parse_json_stdout(stdout: str) -> dict[str, Any]:
     text = (stdout or "").strip()
     if not text:
@@ -339,11 +350,8 @@ def run_child_preflight(args: argparse.Namespace, artifact_dir: Path) -> dict[st
         "--foreign-base-url",
         args.foreign_base_url,
     ]
-    if args.basic_auth_user:
-        ot_argv.extend(["--basic-auth-user", args.basic_auth_user])
-    if args.basic_auth_password:
-        ot_argv.extend(["--basic-auth-password", args.basic_auth_password])
-    ot = _run(ot_argv, timeout=180)
+    child_secret_env = _child_secret_env(args)
+    ot = _run(ot_argv, env=child_secret_env, timeout=180)
     results["overtime"] = {
         "returncode": ot.returncode,
         "summary": _parse_json_stdout(ot.stdout),
@@ -381,13 +389,7 @@ def run_child_preflight(args: argparse.Namespace, artifact_dir: Path) -> dict[st
         "--parity-mode",
         args.parity_mode,
     ]
-    if args.observability_api_key:
-        s2fm_argv.extend(["--observability-api-key", args.observability_api_key])
-    if args.basic_auth_user:
-        s2fm_argv.extend(["--basic-auth-user", args.basic_auth_user])
-    if args.basic_auth_password:
-        s2fm_argv.extend(["--basic-auth-password", args.basic_auth_password])
-    s2fm = _run(s2fm_argv, timeout=600)
+    s2fm = _run(s2fm_argv, env=child_secret_env, timeout=600)
     results["two_server_matrix"] = {
         "returncode": s2fm.returncode,
         "summary": _parse_json_stdout(s2fm.stdout),
@@ -1962,11 +1964,8 @@ def run_overtime_execute(args: argparse.Namespace, artifact_dir: Path) -> dict[s
         "--foreign-base-url",
         args.foreign_base_url,
     ]
-    if args.basic_auth_user:
-        argv.extend(["--basic-auth-user", args.basic_auth_user])
-    if args.basic_auth_password:
-        argv.extend(["--basic-auth-password", args.basic_auth_password])
     env = {EXECUTION_CONFIRM_ENV: ""}  # not used by OT
+    env.update(_child_secret_env(args))
     env["STAGING_OFFER_OVERTIME_ACCEPTANCE_CONFIRM"] = "execute-staging-offer-overtime-acceptance"
     env["STAGING_IRAN_SSH_HOST"] = args.iran_ssh_host.split("@")[-1]
     env["STAGING_IRAN_SSH_PORT"] = str(args.iran_ssh_port)
@@ -2053,15 +2052,10 @@ def run_market_drivers(args: argparse.Namespace, artifact_dir: Path) -> dict[str
     ]
     for scenario_id in args.market_driver_id or []:
         argv.extend(["--driver-scenario-id", scenario_id])
-    if args.observability_api_key:
-        argv.extend(["--observability-api-key", args.observability_api_key])
-    if args.basic_auth_user:
-        argv.extend(["--basic-auth-user", args.basic_auth_user])
-    if args.basic_auth_password:
-        argv.extend(["--basic-auth-password", args.basic_auth_password])
     env = {
         "STAGING_TWO_SERVER_FULL_MATRIX_CONFIRM": "execute-staging-two-server-full-matrix",
     }
+    env.update(_child_secret_env(args))
     completed = _run(argv, env=env, timeout=args.market_timeout_seconds)
     summary = _parse_json_stdout(completed.stdout)
     suite_path = s2fm_dir / "driver-suite-summary.json"
