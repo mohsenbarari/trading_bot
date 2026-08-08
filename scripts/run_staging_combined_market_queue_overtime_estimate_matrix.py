@@ -2354,6 +2354,22 @@ def run_execute(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
     comprehensive_market = run_comprehensive_market_matrix(args, artifact_dir)
     lanes["market_comprehensive"] = comprehensive_market
 
+    # The comprehensive lane records all evidence before returning, but its
+    # deterministic Telegram boundary still creates thousands of synthetic
+    # delivery rows. Leaving those rows in the physical queue would put the
+    # queue-wave and overtime markers behind unrelated CLM work even though
+    # their metrics now use isolated prefixes. Remove only the CLM namespace
+    # from both peers before measuring the queue lane.
+    post_comprehensive_heal = _heal_prefix_on_both_peers(
+        args,
+        run_prefix=f"{args.run_prefix}_CLM",
+    )
+    write_json(
+        artifact_dir / "post-comprehensive-heal.json",
+        post_comprehensive_heal,
+    )
+    lanes["post_comprehensive_heal"] = post_comprehensive_heal
+
     # Queue wave before actor-guards: guards create prefix-scoped offers/notes
     # (``{run_prefix}_AG``) that would falsely dirty the wave baseline sampler.
     wave = run_wave(args, preflight["manifest"], artifact_dir)

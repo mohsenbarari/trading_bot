@@ -267,6 +267,12 @@ class CombinedMatrixManifestTests(unittest.TestCase):
             ["OTACC_20260808090438"],
         )
 
+    def test_comprehensive_lane_prefix_is_valid_for_scoped_heal(self) -> None:
+        self.assertEqual(
+            heal._validate_run_prefix("CMB_20260808_RUN1_CLM"),
+            "CMB_20260808_RUN1_CLM",
+        )
+
     def test_heal_change_log_plan_is_prefix_and_record_id_scoped(self) -> None:
         predicates, params = heal._change_log_delete_plan(
             "CMB_20260808_RUN1",
