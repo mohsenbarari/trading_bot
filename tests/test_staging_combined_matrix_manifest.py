@@ -526,6 +526,13 @@ class CombinedMatrixManifestTests(unittest.TestCase):
         self.assertEqual(id_sets, {(19, 21), (31,)})
         self.assertEqual(len(predicates), 3)
 
+    def test_heal_has_post_outbox_change_log_race_sweep(self) -> None:
+        sql = heal._POST_OUTBOX_CHANGE_LOG_DELETE_SQL
+
+        self.assertIn("table_name = 'telegram_notification_outbox'", sql)
+        self.assertIn("record_id = ANY(:outbox_ids)", sql)
+        self.assertNotIn("UPDATE", sql)
+
     def test_provider_timing_separates_slow_channel_edits(self) -> None:
         started = datetime(2026, 8, 7, tzinfo=timezone.utc)
         rows = [

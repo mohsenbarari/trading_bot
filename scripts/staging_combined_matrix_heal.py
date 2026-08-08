@@ -32,6 +32,11 @@ _RUN_PREFIX_RE = re.compile(
     r"(?:CMB_[A-Za-z0-9_-]{4,116}|OTACC_[0-9]{14})\Z"
 )
 _PREFIX_BOUNDARY_SQL = "('_', ':', '-', ' ')"
+_POST_OUTBOX_CHANGE_LOG_DELETE_SQL = (
+    "DELETE FROM change_log WHERE "
+    "table_name = 'telegram_notification_outbox' AND "
+    "record_id = ANY(:outbox_ids)"
+)
 
 
 def _starts_with_run_prefix(column: str) -> str:
@@ -440,6 +445,18 @@ async def _run(run_prefix: str) -> dict[str, object]:
             outbox_params,
             "telegram_outbox_by_offer",
         )
+        # A queue feeder may append an UPDATE change-log row after the first
+        # change-log sweep while waiting on the same outbox row lock. Once the
+        # exact prefix-owned outbox ids have been deleted, sweep their logs a
+        # second time so a completed matrix cannot leave an unsendable child
+        # update behind. This stays bounded to the current synthetic namespace.
+        if notification_outbox_ids:
+            deleted["change_log_after_notification_outbox"] = await _try_delete(
+                session,
+                _POST_OUTBOX_CHANGE_LOG_DELETE_SQL,
+                {"outbox_ids": notification_outbox_ids},
+                "change_log_after_notification_outbox",
+            )
         deleted["telegram_delivery_jobs"] = await _try_delete(
             session,
             "DELETE FROM telegram_delivery_jobs WHERE "
