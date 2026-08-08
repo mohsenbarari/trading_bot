@@ -148,9 +148,70 @@ The live estimator also has a bounded online learning ledger in the
 conversation SQLite database:
 
 - `coin_estimate_predictions` stores structural and calibrated predictions,
-  interval bounds, gate state, and eventual trusted actuals.
+  interval bounds, gate state, and eventual trusted actuals. `MAIN_ONLINE`
+  keeps its 30-second learning stream. Accuracy uses a separate
+  `MAIN_COMPARISON` row plus the three challengers at a shared two-minute
+  cohort timestamp, so all four books are scored against the same later trade
+  from the same forecast instant.
 - `coin_online_residual_state` stores a decayed residual per commodity and
-  settlement.
+  settlement. Only `MAIN_ONLINE` updates it; a challenger is scored, never
+  learned from.
+
+The prediction error is stored twice on purpose. `residual_ratio` stays
+clipped to ±3.5% because the learned residual state must not be moved by a
+single extreme observation. `residual_ratio_raw` keeps the true error, because
+a book that misses by 11% has to be *scored* as 11% rather than as the cap.
+Evaluation reads the raw column and falls back to the clipped one only for
+rows written before that column existed; `error_source` on each model reports
+which case applies.
+
+### Comparing the four books
+
+Comparison rows are written only when all four final books exist, and only for
+commodity/settlement rows present with a valid positive price in every book.
+The 30-second `MAIN_ONLINE` rows are deliberately excluded from comparative
+metrics: they remain available exclusively for bounded online residual
+learning. Rows created before this cohort migration are also excluded from
+promotion evidence because their timestamps were not guaranteed to align.
+
+Two different numbers appear on the shadow page and they answer different
+questions:
+
+- `comparison_vs_live` is **divergence from the main book**, not accuracy. The
+  main book is the reference, so if it is wrong, a more accurate shadow shows
+  a *larger* difference. It is useful only to see whether a challenger moved
+  at all and in which direction.
+- `online_residual_learning.model_outcomes` is **accuracy against realised
+  trades**: mean absolute error, bias, worst error and interval coverage per
+  model over a rolling seven days. This is the only evidence a promotion
+  decision may rest on.
+
+### Ledger retention
+
+A 30-second learning stream plus four two-minute comparison books write where
+one used to, so the ledger is bounded explicitly.
+
+A prediction can only be matched inside the five-minute forward window or
+through the reconnect bridge. Past the reach of both, pending rows are given
+the terminal state `UNMATCHED_EXPIRED` with a NULL residual: excluded from
+scoring, still readable for audit. Rows reconciliation can still reach are
+never touched at any age.
+
+Retention then differs by what a row is worth. A row that matched a real trade
+is the labelled training corpus for the next residual shadow and is kept for a
+year. A row no trade ever arrived for carries no label and is kept 14 days.
+Maintenance runs on the live path at most hourly and in bounded batches, so a
+backlog never blocks a refresh.
+
+Inspect or run it manually:
+
+```bash
+python3 coin_estimator.py ledger --conversation-db "$COIN_CONVERSATION_DB"
+python3 coin_estimator.py ledger --conversation-db "$COIN_CONVERSATION_DB" --prune
+```
+
+Without `--prune` the command only reports. `--outcome-retention-days` and
+`--unmatched-retention-days` override the two horizons.
 
 After a group-input reconnect, the estimator first reconciles pending
 predictions with high-confidence physical confirmed trades. Normal matches must

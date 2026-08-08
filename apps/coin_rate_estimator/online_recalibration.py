@@ -10,7 +10,9 @@ from __future__ import annotations
 
 import math
 import sqlite3
+from copy import deepcopy
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any
 
 
@@ -33,7 +35,64 @@ NORMAL_EVALUATION_GRACE_SECONDS = 15 * 60
 RECONNECT_MATCH_HOURS = 24
 PROJECT_PRICE_MULTIPLIER = 1_000
 LEDGER_MIN_INTERVAL_SECONDS = 30
+# The main book's cadence must not change: its rows feed the learned residual,
+# and recording less often would pair each trade with a staler prediction and
+# therefore shift the residual itself.  A challenger is only ever scored, never
+# learned from, so a coarser cadence costs nothing but a little resolution.
+# Shadow timestamps stay a strict subset of the main model's, which keeps every
+# shadow row directly comparable to a main row at the same instant.
+SHADOW_LEDGER_MIN_INTERVAL_SECONDS = 120
 MAIN_MODEL_ID = "MAIN_ONLINE"
+MAIN_COMPARISON_MODEL_ID = "MAIN_COMPARISON"
+LEARNING_EVALUATION_ROLE = "LEARNING"
+COMPARISON_EVALUATION_ROLE = "COMPARISON"
+# Multi-day accuracy metrics cannot move meaningfully between two consecutive
+# refreshes.  Recomputing them per cycle only re-reads the same answer.
+OUTCOME_SUMMARY_MIN_REFRESH_SECONDS = 300
+# Furthest reach of both matching paths: the normal five-minute window plus its
+# arrival grace, and the reconnect bridge, which can pair a prediction made up
+# to RECONNECT_MATCH_HOURS before a reconnect with an event up to
+# RECONNECT_MATCH_HOURS after it.  Beyond the sum of those, no code path can
+# ever evaluate the row again.
+PENDING_EXPIRY_HOURS = 3 * RECONNECT_MATCH_HOURS
+UNMATCHED_EVALUATION_MODE = "UNMATCHED_EXPIRED"
+# A row with a realised outcome is the labelled training corpus for the next
+# residual shadow, so it is kept for a year.  A row no trade ever arrived for
+# carries no label and is kept only long enough to investigate a coverage gap.
+LEDGER_OUTCOME_RETENTION_DAYS = 365
+LEDGER_UNMATCHED_RETENTION_DAYS = 14
+LEDGER_MAINTENANCE_INTERVAL_SECONDS = 3600
+# Maintenance shares the refresh transaction, so a first run against a long
+# backlog must not hold a write lock while deleting millions of rows.  Each
+# pass does bounded work and the hourly schedule converges on the backlog.
+LEDGER_MAINTENANCE_BATCH_ROWS = 20_000
+_OUTCOME_SUMMARY_CACHE: dict[tuple[Any, ...], tuple[datetime, dict[str, Any]]] = {}
+_OUTCOME_SUMMARY_CACHE_MAX = 16
+_LEDGER_MAINTENANCE_AT: dict[str, datetime] = {}
+
+
+def _connection_identity(connection: sqlite3.Connection) -> str | None:
+    """Return the ledger's file identity, or None for in-memory databases."""
+
+    try:
+        rows = connection.execute("PRAGMA database_list").fetchall()
+    except sqlite3.Error:
+        return None
+    for row in rows:
+        if str(row[1]) == "main" and str(row[2]):
+            return str(Path(str(row[2])).resolve())
+    return None
+
+
+def _invalidate_outcome_summary_cache(connection: sqlite3.Connection) -> None:
+    """Drop cached outcome summaries for the database changed by ``connection``."""
+
+    identity = _connection_identity(connection)
+    if identity is None:
+        return
+    for key in list(_OUTCOME_SUMMARY_CACHE):
+        if key and key[0] == identity:
+            _OUTCOME_SUMMARY_CACHE.pop(key, None)
 
 
 def _iso(value: datetime) -> str:
@@ -62,6 +121,8 @@ def ensure_schema(connection: sqlite3.Connection) -> None:
             prediction_time_utc TEXT NOT NULL,
             model_id TEXT NOT NULL DEFAULT 'MAIN_ONLINE',
             model_version TEXT,
+            evaluation_role TEXT NOT NULL DEFAULT 'LEARNING',
+            comparison_cohort_utc TEXT,
             commodity TEXT NOT NULL,
             settlement TEXT NOT NULL,
             structural_estimated_price_toman REAL NOT NULL,
@@ -72,6 +133,7 @@ def ensure_schema(connection: sqlite3.Connection) -> None:
             actual_price_toman REAL,
             actual_event_utc TEXT,
             residual_ratio REAL,
+            residual_ratio_raw REAL,
             evaluated_at_utc TEXT,
             evaluation_mode TEXT,
             created_at_utc TEXT NOT NULL
@@ -113,6 +175,25 @@ def ensure_schema(connection: sqlite3.Connection) -> None:
         connection.execute(
             "ALTER TABLE coin_estimate_predictions ADD COLUMN model_version TEXT"
         )
+    if "evaluation_role" not in columns:
+        connection.execute(
+            "ALTER TABLE coin_estimate_predictions "
+            "ADD COLUMN evaluation_role TEXT NOT NULL DEFAULT 'LEARNING'"
+        )
+    if "comparison_cohort_utc" not in columns:
+        connection.execute(
+            "ALTER TABLE coin_estimate_predictions ADD COLUMN comparison_cohort_utc TEXT"
+        )
+    # ``residual_ratio`` stays bounded because the learned residual state must
+    # never be moved by a single extreme observation.  Evaluation needs the
+    # opposite property: a book that misses by 11% has to be scored as 11%, not
+    # as the 3.5% cap.  The two concerns get two columns rather than one
+    # compromise.  Rows written before this migration have no raw value, so
+    # scoring falls back to the bounded column for them.
+    if "residual_ratio_raw" not in columns:
+        connection.execute(
+            "ALTER TABLE coin_estimate_predictions ADD COLUMN residual_ratio_raw REAL"
+        )
     connection.execute(
         """
         CREATE INDEX IF NOT EXISTS coin_estimate_predictions_model_pending_idx
@@ -134,6 +215,46 @@ def ensure_schema(connection: sqlite3.Connection) -> None:
         )
         """
     )
+    # Outcome scoring groups by model over an evaluation-time window.  The
+    # full ``(model_id, actual_event_utc)`` index also covers unevaluated rows,
+    # which are the overwhelming majority of the ledger, so grouping walked
+    # every prediction ever recorded.  This partial index holds only rows that
+    # can contribute, keeps the ``model_id`` prefix that satisfies GROUP BY,
+    # and carries the aggregated columns so no table lookup is needed.
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS coin_estimate_predictions_outcome_window_idx
+        ON coin_estimate_predictions(
+            model_id, actual_event_utc, residual_ratio, residual_ratio_raw,
+            model_version, actual_price_toman, lower_price_toman,
+            upper_price_toman
+        )
+        WHERE actual_event_utc IS NOT NULL AND residual_ratio IS NOT NULL
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS coin_estimate_predictions_comparison_outcome_idx
+        ON coin_estimate_predictions(
+            evaluation_role, model_id, actual_event_utc,
+            residual_ratio, residual_ratio_raw, model_version,
+            actual_price_toman, lower_price_toman, upper_price_toman
+        )
+        WHERE evaluation_role='COMPARISON'
+          AND actual_event_utc IS NOT NULL
+          AND residual_ratio IS NOT NULL
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS coin_estimate_predictions_comparison_cohort_idx
+        ON coin_estimate_predictions(
+            evaluation_role, comparison_cohort_utc, model_id,
+            commodity, settlement
+        )
+        WHERE evaluation_role='COMPARISON'
+        """
+    )
 
 
 def _price(value: Any) -> float | None:
@@ -153,9 +274,26 @@ def record_predictions(
     group_live_enabled: bool,
     model_id: str = MAIN_MODEL_ID,
     model_version: str | None = None,
+    min_interval_seconds: int | None = None,
+    evaluation_role: str = LEARNING_EVALUATION_ROLE,
+    comparison_cohort: datetime | None = None,
 ) -> int:
     """Persist one snapshot of the rates after bounded calibration."""
 
+    evaluation_role = str(evaluation_role).strip().upper()
+    if evaluation_role not in {
+        LEARNING_EVALUATION_ROLE,
+        COMPARISON_EVALUATION_ROLE,
+    }:
+        raise ValueError(f"unsupported evaluation_role: {evaluation_role}")
+    if evaluation_role == COMPARISON_EVALUATION_ROLE and comparison_cohort is None:
+        raise ValueError("comparison_cohort is required for comparison predictions")
+    if min_interval_seconds is None:
+        min_interval_seconds = (
+            LEDGER_MIN_INTERVAL_SECONDS
+            if model_id == MAIN_MODEL_ID
+            else SHADOW_LEDGER_MIN_INTERVAL_SECONDS
+        )
     created = _iso(datetime.now(timezone.utc))
     inserted = 0
     for rate in rates:
@@ -170,17 +308,17 @@ def record_predictions(
             """
             SELECT prediction_time_utc
             FROM coin_estimate_predictions
-            WHERE model_id=? AND commodity=? AND settlement=?
+            WHERE model_id=? AND evaluation_role=? AND commodity=? AND settlement=?
             ORDER BY prediction_time_utc DESC, id DESC
             LIMIT 1
             """,
-            (model_id, commodity, settlement),
+            (model_id, evaluation_role, commodity, settlement),
         ).fetchone()
         if previous is not None:
             elapsed = (
                 prediction_time - _parse(str(previous[0]))
             ).total_seconds()
-            if elapsed >= 0 and elapsed < LEDGER_MIN_INTERVAL_SECONDS:
+            if elapsed >= 0 and elapsed < min_interval_seconds:
                 continue
         tolerance = rate.get("tolerance") or {}
         lower = _price(tolerance.get("lower_price_toman"))
@@ -188,16 +326,19 @@ def record_predictions(
         connection.execute(
             """
             INSERT INTO coin_estimate_predictions(
-                prediction_time_utc, model_id, model_version, commodity, settlement,
+                prediction_time_utc, model_id, model_version, evaluation_role,
+                comparison_cohort_utc, commodity, settlement,
                 structural_estimated_price_toman, estimated_price_toman,
                 lower_price_toman, upper_price_toman, group_live_enabled,
                 created_at_utc
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 _iso(prediction_time),
                 model_id,
                 model_version,
+                evaluation_role,
+                _iso(comparison_cohort) if comparison_cohort is not None else None,
                 commodity,
                 settlement,
                 structural,
@@ -478,7 +619,7 @@ def reconcile_predictions(
         SELECT * FROM coin_estimate_predictions
         WHERE evaluated_at_utc IS NULL
           AND prediction_time_utc>=?
-        ORDER BY prediction_time_utc, id
+        ORDER BY prediction_time_utc DESC, id DESC
         """,
         (_iso(normal_cutoff),),
     ).fetchall()
@@ -627,16 +768,29 @@ def reconcile_predictions(
             actual_price *= PROJECT_PRICE_MULTIPLIER
         if predicted is None or actual_price is None:
             continue
-        residual = max(-MAX_RESIDUAL_RATIO, min(MAX_RESIDUAL_RATIO, (actual_price - predicted) / predicted))
+        # Two columns, two purposes.  ``residual_ratio`` stays clipped so every
+        # existing consumer of the learning path keeps its bounded contract;
+        # ``residual_ratio_raw`` keeps the true error so evaluation can report
+        # a large miss as a large miss instead of saturating at the cap.
+        raw_residual = (actual_price - predicted) / predicted
+        residual = max(-MAX_RESIDUAL_RATIO, min(MAX_RESIDUAL_RATIO, raw_residual))
         actual_time = _parse(str(actual["event_time_utc"]))
         connection.execute(
             """
             UPDATE coin_estimate_predictions
             SET actual_price_toman=?, actual_event_utc=?, residual_ratio=?,
-                evaluated_at_utc=?, evaluation_mode=?
+                residual_ratio_raw=?, evaluated_at_utc=?, evaluation_mode=?
             WHERE id=?
             """,
-            (actual_price, _iso(actual_time), residual, _iso(now), mode, int(row["id"])),
+            (
+                actual_price,
+                _iso(actual_time),
+                residual,
+                raw_residual,
+                _iso(now),
+                mode,
+                int(row["id"]),
+            ),
         )
         if str(row["model_id"]) == learning_model_id:
             _update_state(
@@ -671,9 +825,12 @@ def reconcile_predictions(
                 "settlement": str(row["settlement"]),
                 "model_id": str(row["model_id"]),
                 "residual_ratio": residual,
+                "residual_ratio_raw": raw_residual,
                 "mode": mode,
             }
         )
+    if evaluated:
+        _invalidate_outcome_summary_cache(connection)
     return {"evaluated": evaluated, "residuals": residuals, "reconnect_bridged": bridged}
 
 
@@ -740,18 +897,50 @@ def summarize_model_outcomes(
     *,
     as_of: datetime,
     lookback_days: int = 7,
+    min_refresh_seconds: int = OUTCOME_SUMMARY_MIN_REFRESH_SECONDS,
 ) -> dict[str, dict[str, Any]]:
-    """Return bounded, comparable accuracy metrics for each forecast book."""
+    """Return bounded, comparable accuracy metrics for each forecast book.
 
-    since = as_of.astimezone(timezone.utc) - timedelta(days=max(1, lookback_days))
+    The summary spans days, so recomputing it on every five-second refresh
+    only re-reads the same answer.  A short in-process cache keeps the live
+    loop cheap; ``min_refresh_seconds=0`` forces a recompute for tests and
+    one-shot CLI reporting.
+    """
+
+    as_of = as_of.astimezone(timezone.utc)
+    since = as_of - timedelta(days=max(1, lookback_days))
+    # Distinct in-memory databases share no stable identity, so they must never
+    # share a cache slot.  Those are test/one-shot callers and always recompute.
+    identity = _connection_identity(connection)
+    cacheable = identity is not None and min_refresh_seconds > 0
+    cache_key = (identity, int(max(1, lookback_days)))
+    if cacheable:
+        cached = _OUTCOME_SUMMARY_CACHE.get(cache_key)
+        if cached is not None:
+            computed_at, payload = cached
+            if 0 <= (as_of - computed_at).total_seconds() < min_refresh_seconds:
+                return deepcopy(payload)
     rows = connection.execute(
         """
         SELECT
-            model_id,
-            MAX(model_version) AS model_version,
+            p.model_id,
+            (
+                SELECT latest.model_version
+                FROM coin_estimate_predictions AS latest
+                WHERE latest.model_id=p.model_id
+                  AND latest.evaluation_role='COMPARISON'
+                  AND latest.actual_event_utc IS NOT NULL
+                  AND latest.residual_ratio IS NOT NULL
+                  AND latest.actual_event_utc>=?
+                ORDER BY latest.actual_event_utc DESC, latest.id DESC
+                LIMIT 1
+            ) AS model_version,
             COUNT(*) AS sample_count,
-            AVG(ABS(residual_ratio)) AS mape_ratio,
-            AVG(residual_ratio) AS bias_ratio,
+            SUM(CASE WHEN residual_ratio_raw IS NULL THEN 1 ELSE 0 END)
+                AS capped_only_sample_count,
+            AVG(ABS(COALESCE(residual_ratio_raw, residual_ratio))) AS mape_ratio,
+            AVG(COALESCE(residual_ratio_raw, residual_ratio)) AS bias_ratio,
+            MAX(ABS(COALESCE(residual_ratio_raw, residual_ratio))) AS worst_abs_ratio,
             AVG(
                 CASE
                     WHEN lower_price_toman IS NOT NULL AND upper_price_toman IS NOT NULL
@@ -759,27 +948,293 @@ def summarize_model_outcomes(
                     THEN 1.0 ELSE 0.0
                 END
             ) AS interval_coverage_ratio
-        FROM coin_estimate_predictions
-        WHERE actual_event_utc IS NOT NULL
-          AND residual_ratio IS NOT NULL
-          AND actual_event_utc>=?
-        GROUP BY model_id
-        ORDER BY model_id
+        FROM coin_estimate_predictions AS p
+        WHERE p.evaluation_role='COMPARISON'
+          AND p.actual_event_utc IS NOT NULL
+          AND p.residual_ratio IS NOT NULL
+          AND p.actual_event_utc>=?
+        GROUP BY p.model_id
+        ORDER BY p.model_id
         """,
-        (_iso(since),),
+        (_iso(since), _iso(since)),
     ).fetchall()
-    return {
+    summary = {
         str(row["model_id"]): {
             "model_version": row["model_version"],
             "sample_count": int(row["sample_count"] or 0),
             "mape_percent": float(row["mape_ratio"] or 0.0) * 100.0,
             "bias_percent": float(row["bias_ratio"] or 0.0) * 100.0,
+            "worst_abs_error_percent": float(row["worst_abs_ratio"] or 0.0) * 100.0,
             "interval_coverage_percent": float(row["interval_coverage_ratio"] or 0.0)
             * 100.0,
+            # Rows evaluated before the raw-residual migration can only be
+            # scored from the clipped column, so their error is understated.
+            # Surface that rather than letting it hide inside the average.
+            "capped_only_sample_count": int(row["capped_only_sample_count"] or 0),
+            "error_source": (
+                "RAW_UNCLIPPED"
+                if not int(row["capped_only_sample_count"] or 0)
+                else "MIXED_RAW_AND_LEGACY_CLIPPED"
+            ),
             "lookback_days": max(1, lookback_days),
+            "computed_at_utc": _iso(as_of),
         }
         for row in rows
     }
+    if cacheable:
+        if len(_OUTCOME_SUMMARY_CACHE) >= _OUTCOME_SUMMARY_CACHE_MAX:
+            _OUTCOME_SUMMARY_CACHE.clear()
+        _OUTCOME_SUMMARY_CACHE[cache_key] = (as_of, deepcopy(summary))
+    return summary
+
+
+def ledger_storage_report(
+    connection: sqlite3.Connection,
+    *,
+    as_of: datetime,
+    outcome_retention_days: int = LEDGER_OUTCOME_RETENTION_DAYS,
+    unmatched_retention_days: int = LEDGER_UNMATCHED_RETENTION_DAYS,
+) -> dict[str, Any]:
+    """Describe ledger composition and what maintenance would change."""
+
+    as_of = as_of.astimezone(timezone.utc)
+    expiry_cutoff = as_of - timedelta(hours=PENDING_EXPIRY_HOURS)
+    outcome_cutoff = as_of - timedelta(days=max(1, outcome_retention_days))
+    unmatched_cutoff = as_of - timedelta(days=max(1, unmatched_retention_days))
+    row = connection.execute(
+        """
+        SELECT
+            COUNT(*) AS total_rows,
+            MIN(prediction_time_utc) AS oldest_prediction_utc,
+            MAX(prediction_time_utc) AS newest_prediction_utc,
+            SUM(CASE WHEN evaluated_at_utc IS NULL THEN 1 ELSE 0 END)
+                AS pending_rows,
+            SUM(
+                CASE WHEN evaluated_at_utc IS NULL AND prediction_time_utc<?
+                THEN 1 ELSE 0 END
+            ) AS expirable_rows,
+            SUM(CASE WHEN evaluation_mode=? THEN 1 ELSE 0 END) AS unmatched_rows,
+            SUM(
+                CASE WHEN evaluation_mode=? AND prediction_time_utc<?
+                THEN 1 ELSE 0 END
+            ) AS unmatched_prunable_rows,
+            SUM(
+                CASE WHEN actual_event_utc IS NOT NULL THEN 1 ELSE 0 END
+            ) AS outcome_rows,
+            SUM(
+                CASE WHEN actual_event_utc IS NOT NULL AND prediction_time_utc<?
+                THEN 1 ELSE 0 END
+            ) AS outcome_prunable_rows
+        FROM coin_estimate_predictions
+        """,
+        (
+            _iso(expiry_cutoff),
+            UNMATCHED_EVALUATION_MODE,
+            UNMATCHED_EVALUATION_MODE,
+            _iso(unmatched_cutoff),
+            _iso(outcome_cutoff),
+        ),
+    ).fetchone()
+    return {
+        "total_rows": int(row["total_rows"] or 0),
+        "pending_rows": int(row["pending_rows"] or 0),
+        "expirable_rows": int(row["expirable_rows"] or 0),
+        "unmatched_rows": int(row["unmatched_rows"] or 0),
+        "unmatched_prunable_rows": int(row["unmatched_prunable_rows"] or 0),
+        "outcome_rows": int(row["outcome_rows"] or 0),
+        "outcome_prunable_rows": int(row["outcome_prunable_rows"] or 0),
+        "oldest_prediction_utc": row["oldest_prediction_utc"],
+        "newest_prediction_utc": row["newest_prediction_utc"],
+        "pending_expiry_hours": PENDING_EXPIRY_HOURS,
+        "pending_expiry_cutoff_utc": _iso(expiry_cutoff),
+        "outcome_retention_days": max(1, outcome_retention_days),
+        "outcome_retention_cutoff_utc": _iso(outcome_cutoff),
+        "unmatched_retention_days": max(1, unmatched_retention_days),
+        "unmatched_retention_cutoff_utc": _iso(unmatched_cutoff),
+    }
+
+
+def _delete_bounded(
+    connection: sqlite3.Connection,
+    *,
+    predicate: str,
+    parameters: tuple[Any, ...],
+    batch_rows: int | None,
+) -> int:
+    """Delete matching rows, optionally capping how many one pass removes."""
+
+    if batch_rows is None:
+        return int(
+            connection.execute(
+                f"DELETE FROM coin_estimate_predictions WHERE {predicate}",
+                parameters,
+            ).rowcount
+            or 0
+        )
+    return int(
+        connection.execute(
+            f"""
+            DELETE FROM coin_estimate_predictions WHERE id IN (
+                SELECT id FROM coin_estimate_predictions
+                WHERE {predicate}
+                ORDER BY prediction_time_utc
+                LIMIT ?
+            )
+            """,
+            (*parameters, int(batch_rows)),
+        ).rowcount
+        or 0
+    )
+
+
+def expire_unmatched_predictions(
+    connection: sqlite3.Connection,
+    *,
+    as_of: datetime,
+    batch_rows: int | None = None,
+) -> int:
+    """Close pending rows that reconciliation can no longer reach.
+
+    A prediction only earns an outcome if a trusted event arrives inside the
+    five-minute forward window, or — after a disconnection — inside the
+    reconnect bridge.  The overwhelming majority never match, and until now
+    they stayed ``pending`` forever: on staging, 30,057 of 32,247 rows.  That
+    made "pending" meaningless and left the pending indexes growing without
+    bound.  Rows older than the furthest reach of both matching paths get an
+    explicit terminal state with a NULL residual, so they are excluded from
+    scoring while remaining fully readable for audit.
+    """
+
+    cutoff = as_of.astimezone(timezone.utc) - timedelta(hours=PENDING_EXPIRY_HOURS)
+    if batch_rows is None:
+        cursor = connection.execute(
+            """
+            UPDATE coin_estimate_predictions
+            SET evaluated_at_utc=?, evaluation_mode=?
+            WHERE evaluated_at_utc IS NULL AND prediction_time_utc<?
+            """,
+            (
+                _iso(as_of.astimezone(timezone.utc)),
+                UNMATCHED_EVALUATION_MODE,
+                _iso(cutoff),
+            ),
+        )
+        return int(cursor.rowcount or 0)
+    # ``UPDATE ... LIMIT`` needs a non-default SQLite build, so bound the work
+    # through an explicit id subquery instead.
+    cursor = connection.execute(
+        """
+        UPDATE coin_estimate_predictions
+        SET evaluated_at_utc=?, evaluation_mode=?
+        WHERE id IN (
+            SELECT id FROM coin_estimate_predictions
+            WHERE evaluated_at_utc IS NULL AND prediction_time_utc<?
+            ORDER BY prediction_time_utc
+            LIMIT ?
+        )
+        """,
+        (
+            _iso(as_of.astimezone(timezone.utc)),
+            UNMATCHED_EVALUATION_MODE,
+            _iso(cutoff),
+            int(batch_rows),
+        ),
+    )
+    return int(cursor.rowcount or 0)
+
+
+def prune_prediction_ledger(
+    connection: sqlite3.Connection,
+    *,
+    as_of: datetime,
+    outcome_retention_days: int = LEDGER_OUTCOME_RETENTION_DAYS,
+    unmatched_retention_days: int = LEDGER_UNMATCHED_RETENTION_DAYS,
+    expire_pending: bool = True,
+    dry_run: bool = True,
+    batch_rows: int | None = None,
+) -> dict[str, Any]:
+    """Expire unreachable pending rows, then prune on two retention horizons.
+
+    The horizons differ because the rows differ.  A row with a realised
+    outcome is the training corpus for the next residual shadow and is kept
+    for a year.  A row that no trade ever arrived for carries no label, so it
+    is kept only long enough to investigate a gap and then dropped.  Rows that
+    reconciliation can still reach are never touched at any age.
+    """
+
+    as_of = as_of.astimezone(timezone.utc)
+    expired = 0
+    if expire_pending and not dry_run:
+        expired = expire_unmatched_predictions(
+            connection, as_of=as_of, batch_rows=batch_rows
+        )
+    report = ledger_storage_report(
+        connection,
+        as_of=as_of,
+        outcome_retention_days=outcome_retention_days,
+        unmatched_retention_days=unmatched_retention_days,
+    )
+    report["expired_rows"] = expired
+    report["dry_run"] = bool(dry_run)
+    if dry_run:
+        report["deleted_unmatched_rows"] = 0
+        report["deleted_outcome_rows"] = 0
+        report["deleted_rows"] = 0
+        return report
+    unmatched = _delete_bounded(
+        connection,
+        predicate="evaluation_mode=? AND prediction_time_utc<?",
+        parameters=(
+            UNMATCHED_EVALUATION_MODE,
+            report["unmatched_retention_cutoff_utc"],
+        ),
+        batch_rows=batch_rows,
+    )
+    outcomes = _delete_bounded(
+        connection,
+        predicate="actual_event_utc IS NOT NULL AND prediction_time_utc<?",
+        parameters=(report["outcome_retention_cutoff_utc"],),
+        batch_rows=batch_rows,
+    )
+    report["deleted_unmatched_rows"] = unmatched
+    report["deleted_outcome_rows"] = outcomes
+    report["deleted_rows"] = unmatched + outcomes
+    report["batch_rows"] = batch_rows
+    _OUTCOME_SUMMARY_CACHE.clear()
+    return report
+
+
+def maintain_prediction_ledger(
+    connection: sqlite3.Connection, *, as_of: datetime
+) -> dict[str, Any]:
+    """Run ledger maintenance at most once per interval on the live path.
+
+    Expiry and pruning are cheap and indexed, but they do not need to run on
+    every refresh.  This wrapper keeps the hot loop free while guaranteeing the
+    ledger is bounded without waiting for an operator to remember the CLI.
+    """
+
+    as_of = as_of.astimezone(timezone.utc)
+    identity = _connection_identity(connection)
+    if identity is not None:
+        last = _LEDGER_MAINTENANCE_AT.get(identity)
+        if last is not None and 0 <= (as_of - last).total_seconds() < (
+            LEDGER_MAINTENANCE_INTERVAL_SECONDS
+        ):
+            return {"status": "SKIPPED_RECENTLY_RUN", "last_run_utc": _iso(last)}
+    report = prune_prediction_ledger(
+        connection,
+        as_of=as_of,
+        dry_run=False,
+        batch_rows=LEDGER_MAINTENANCE_BATCH_ROWS,
+    )
+    if identity is not None:
+        # Only a successful maintenance pass may suppress the next run.  If
+        # pruning raises and the caller rolls back, the next refresh retries
+        # instead of silently waiting an hour.
+        _LEDGER_MAINTENANCE_AT[identity] = as_of
+    report["status"] = "RAN"
+    return report
 
 
 def apply_snapshot_calibration(
