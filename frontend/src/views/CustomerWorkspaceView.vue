@@ -1558,7 +1558,7 @@ onBeforeUnmount(() => {
 @media (max-width: 767px) {
   .customer-workspace-view :deep(.ds-workspace-main),
   .customer-workspace-view :deep(.ds-workspace-aside) {
-    padding-bottom: calc(var(--ds-bottom-nav-height) + var(--ds-safe-area-bottom) + 1.5rem);
+    padding-bottom: calc(var(--ds-bottom-nav-height) + var(--ds-safe-area-bottom) + 2rem);
   }
 }
 </style>
