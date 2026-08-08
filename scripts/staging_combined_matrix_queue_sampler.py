@@ -269,15 +269,20 @@ async def _sample(
                     TelegramDeliveryJobRecord.id.in_(scoped_private_job_ids)
                 )
             if prefix:
+                # autoescape: SQL LIKE treats "_" as a single-char wildcard; without
+                # escaping, market notes like FMX_STAGE_CMB-14BURST-... falsely match
+                # wave prefix CMB_14BURST_... and block the pre-wave baseline.
                 scope_conditions.extend(
                     (
                         TelegramDeliveryJobRecord.source_natural_id.contains(
-                            prefix
+                            prefix, autoescape=True
                         ),
-                        TelegramDeliveryJobRecord.dedupe_key.contains(prefix),
+                        TelegramDeliveryJobRecord.dedupe_key.contains(
+                            prefix, autoescape=True
+                        ),
                         TelegramDeliveryJobRecord.run_id == prefix,
                         cast(TelegramDeliveryJobRecord.payload, Text).contains(
-                            prefix
+                            prefix, autoescape=True
                         ),
                     )
                 )
