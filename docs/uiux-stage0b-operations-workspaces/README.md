@@ -1,5 +1,7 @@
 # Stage 0B-3 — Operations and workspaces evidence
 
+وضعیت: **تکمیل و تأیید مالک محصول در ۲۰۲۶-۰۸-۰۸ برای ادامه به `0B-4`؛ runtime implementation مجاز نشده است.**
+
 منبع editable اصلی این checkpoint صفحه `02 — Stage 0B-3 Operations & Workspaces` در [فایل Figma پروژه](https://www.figma.com/design/z8jgJxST4O2APzWnlyP9gv) است. Foundations روی صفحه `41:2` و component catalog روی صفحه `46:2` قرار دارند. فایل‌های این پوشه شواهد versioned و harness مشتق‌شده‌اند و کد runtime محصول نیستند.
 
 ترتیب مرجع در صورت اختلاف شواهد:

@@ -1,6 +1,8 @@
 # Stage 0B-2 — Home and authenticated shell evidence
 
-منبع editable اصلی این checkpoint صفحه `01 — Stage 0B-2 Home & Shell` در [فایل Figma پروژه](https://www.figma.com/design/z8jgJxST4O2APzWnlyP9gv) است. فایل‌های این پوشه شواهد versioned و harness مشتق‌شده‌اند و کد runtime محصول نیستند. نسخه نهایی Figma با قرارداد checkpoint و سیاست خلوتی هم‌راستا شده و برای تصمیم مالک محصول آماده است.
+وضعیت: **تکمیل و تأیید مالک محصول در ۲۰۲۶-۰۸-۰۸ برای ادامه به `0B-3`؛ runtime implementation مجاز نشده است.**
+
+منبع editable اصلی این checkpoint صفحه `01 — Stage 0B-2 Home & Shell` در [فایل Figma پروژه](https://www.figma.com/design/z8jgJxST4O2APzWnlyP9gv) است. فایل‌های این پوشه شواهد versioned و harness مشتق‌شده‌اند و کد runtime محصول نیستند. نسخه نهایی Figma با قرارداد checkpoint و سیاست خلوتی هم‌راستا و توسط مالک محصول تأیید شده است.
 
 ترتیب مرجع در اختلاف شواهد:
 

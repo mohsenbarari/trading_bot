@@ -5,7 +5,7 @@
   "sourceCommit": "99aeb6806bcdb212dc1e5e828301da1914f965fd",
   "sourceCommitRole": "design-input-baseline",
   "branch": "condidate/webapp-ui-ux-redesign-v2",
-  "status": "technical_complete_awaiting_owner_approval",
+  "status": "complete_owner_visual_approved",
   "fileKey": "z8jgJxST4O2APzWnlyP9gv",
   "fileUrl": "https://www.figma.com/design/z8jgJxST4O2APzWnlyP9gv",
   "page": {
@@ -140,6 +140,11 @@
   "externalReview": {
     "status": "suspended_by_product_owner",
     "blocking": false
+  },
+  "ownerVisualApproval": {
+    "status": "approved",
+    "approvedOn": "2026-08-08",
+    "blockingNextCheckpoint": false
   },
   "runtimeImplementationAuthorized": false,
   "openFigmaWork": []

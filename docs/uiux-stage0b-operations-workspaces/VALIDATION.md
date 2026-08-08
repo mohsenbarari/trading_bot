@@ -2,7 +2,7 @@
 
 تاریخ: ۲۰۲۶-۰۸-۰۸
 
-وضعیت: audit رسمی Figma پاس؛ طراحی و evidence آماده تصمیم مالک محصول؛ runtime implementation انجام نشده است
+وضعیت: audit رسمی Figma پاس؛ طراحی و evidence در ۲۰۲۶-۰۸-۰۸ به‌صورت صریح توسط مالک محصول برای ادامه به `0B-4` تأیید شده است؛ runtime implementation انجام یا مجاز نشده است
 
 ## دامنه اعتبارسنجی
 
@@ -165,4 +165,4 @@ npm run test:unit:run -- --maxWorkers=1 \
 
 شواهد static نمی‌توانند API واقعی، authorization، router history، بازیابی scroll، focus return، screen reader، keyboard موبایل، WebView تلگرام، شبکه کند، busy lock یا cascade دیتابیس را اثبات کنند. این موارد در Stageهای ۱، ۴، ۵، ۷ و ۸ validation اجرایی دارند.
 
-این checkpoint از نظر طراحی و evidence فنی کامل و در انتظار تأیید صریح مالک محصول است. این وضعیت مجوز تغییر runtime یا عبور خودکار به `0B-4` نیست.
+این checkpoint از نظر طراحی و evidence فنی کامل و در ۲۰۲۶-۰۸-۰۸ به‌صورت صریح توسط مالک محصول برای عبور به `0B-4` تأیید شده است. این تأیید مجوز تغییر runtime نیست و runtime تا تأیید صریح `0B-6` ممنوع می‌ماند.

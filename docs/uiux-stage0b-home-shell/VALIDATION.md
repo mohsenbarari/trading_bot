@@ -1,6 +1,6 @@
 # Stage 0B-2 validation record
 
-وضعیت: تکمیل فنی و آماده تصمیم مالک محصول؛ Figma رسمی، شواهد مستقیم، width sweep، desktop proof و harness مشتق‌شده همگی پاس هستند.
+وضعیت: تکمیل فنی و تأیید مالک محصول در ۲۰۲۶-۰۸-۰۸ برای ادامه به `0B-3`؛ Figma رسمی، شواهد مستقیم، width sweep، desktop proof و harness مشتق‌شده همگی پاس هستند؛ runtime implementation مجاز نشده است.
 
 ## شواهد مستقیم Figma
 
@@ -115,4 +115,4 @@ npm run test:unit:run -- \
 
 شواهد static Figma و HTML نمی‌توانند router واقعی، cache/offline runtime، نصب PWA مرورگر، WebView تلگرام، screen reader، focus management، zoom/font scaling یا modal security behavior را اثبات کنند. این موارد در Stageهای ۱، ۳، ۴، ۷ و ۸ validation اجرایی دارند.
 
-checkpoint از نظر فنی بسته و برای تصمیم صریح مالک محصول آماده است. این نتیجه مجوز تغییر runtime یا عبور خودکار به `0B-3` نیست.
+checkpoint از نظر فنی بسته و در ۲۰۲۶-۰۸-۰۸ به‌صورت صریح توسط مالک محصول برای عبور به `0B-3` تأیید شده است. این تأیید مجوز تغییر runtime نیست و runtime تا تأیید صریح `0B-6` ممنوع می‌ماند.

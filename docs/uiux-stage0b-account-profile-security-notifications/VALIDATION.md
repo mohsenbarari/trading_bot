@@ -2,7 +2,7 @@
 
 تاریخ: ۲۰۲۶-۰۸-۰۸
 
-وضعیت: **شواهد فنی کامل و در انتظار تأیید بصری مالک محصول.** Phase 0، Figma canonical، exportهای مستقیم، harness محلی و Sites خصوصی ثبت و راستی‌آزمایی شده‌اند؛ runtime implementation انجام یا مجاز نشده است.
+وضعیت: **شواهد فنی کامل و خروجی بصری در ۲۰۲۶-۰۸-۰۸ به‌صورت صریح توسط مالک محصول تأیید شده است.** Phase 0، Figma canonical، exportهای مستقیم، harness محلی و Sites خصوصی ثبت و راستی‌آزمایی شده‌اند؛ runtime implementation انجام یا مجاز نشده است.
 
 ## دامنه نهایی
 
@@ -166,7 +166,7 @@ HTML canonical harness برابر `83e4b8a12d04eba3ca547aa31b63ac28598b5192be360
 | زمان reread نهایی انتشار | `2026-08-08T17:43:58.035651Z` |
 | local archive | `391385` بایت، SHA-256 `22d41b9fd89c7543c6be518fc7f23304daab84dd2390e936126bdd0a55f2f731` |
 | connector-normalized content | `890880` بایت، `27` فایل، SHA-256 `058f397ec23d099c0ddcaf84e3f1a54ed1bcce86dc241cc43624b50d0bfc70a2` |
-| drift review | `passed_artifact_and_source_bound`؛ تأیید بصری signed-in مالک pending |
+| drift review | `passed_artifact_and_source_bound`؛ خروجی بصری در ۲۰۲۶-۰۸-۰۸ به‌صورت صریح توسط مالک تأیید شد |
 
 access policy بلافاصله پیش و پس از deploy برابر `custom`، نقش جاری `owner`، یک allowed user، صفر group و صفر external visitor بود. anonymous probe در `2026-08-08T17:43:56Z` پاسخ `401` با `no-store`، `no-referrer` و عنوان `Sign in required` گرفت. bypass token درخواست نشد و signed-in live content واکشی نشد.
 
@@ -215,4 +215,4 @@ cd frontend && npm run test:unit:run -- \
 
 Figma، export، harness و Sites نمی‌توانند authorization، API mutation، redirect واقعی، session revocation، realtime recovery، Push delivery، cross-server/cross-channel sync، clipboard، focus، screen reader، keyboard یا failure race واقعی را اثبات کنند.
 
-شواهد فنی `complete` است، اما owner visual approval هنوز pending است. `0B-6` آغاز نشده و runtime implementation تا تأیید صریح آن unauthorized می‌ماند.
+شواهد فنی `complete` و owner visual approval در ۲۰۲۶-۰۸-۰۸ `approved` است. `0B-6` فقط در سطح قرارداد طراحی در حال انجام و runtime implementation تا تأیید صریح همان checkpoint unauthorized می‌ماند.

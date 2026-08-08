@@ -1,6 +1,6 @@
 # Stage 0B-5 — Account, profile, security and notifications evidence
 
-وضعیت: **شواهد فنی تکمیل شده و در انتظار تأیید بصری مالک محصول است.** مالک فقط Phase 0 را تأیید کرده است؛ این checkpoint هنوز visually approved/closed نیست و هیچ مجوزی برای تغییر runtime صادر نشده است.
+وضعیت: **شواهد فنی تکمیل و خروجی بصری در ۲۰۲۶-۰۸-۰۸ به‌صورت صریح توسط مالک محصول تأیید شده است.** این checkpoint بسته است، اما هیچ مجوزی برای تغییر runtime صادر نشده است.
 
 منبع editable و canonical صفحه `04 — Stage 0B-5 Account, Profile, Security & Notifications` با شناسه `117:2` در [فایل رسمی Figma](https://www.figma.com/design/z8jgJxST4O2APzWnlyP9gv?node-id=117-2) است. freeze نهایی در `2026-08-08T17:10:58.500Z`، audit schema 2 در `2026-08-08T17:11:05.475Z` و capture مستقیم در `2026-08-08T17:13:12.738Z` ثبت شد. Foundations روی `41:2` و component catalog روی `46:2` قرار دارند.
 
@@ -71,7 +71,7 @@ node docs/uiux-stage0b-account-profile-security-notifications/capture-evidence.c
 - archive محلی: `391385` بایت با SHA-256 برابر `22d41b9fd89c7543c6be518fc7f23304daab84dd2390e936126bdd0a55f2f731`؛
 - connector-normalized content: `890880` بایت و `27` فایل با SHA-256 برابر `058f397ec23d099c0ddcaf84e3f1a54ed1bcce86dc241cc43624b50d0bfc70a2`.
 
-دسترسی پیش و پس از deploy به‌صورت `custom` و owner-only راستی‌آزمایی شد: یک کاربر مجاز، صفر گروه و صفر بازدیدکننده خارجی. probe ناشناس در `2026-08-08T17:43:56Z` با `HTTP 401`، `Cache-Control: no-store`، `Referrer-Policy: no-referrer` و عنوان `Sign in required` متوقف شد. bypass token درخواست نشد و محتوای signed-in live واکشی نشد؛ بنابراین drift review فقط `passed_artifact_and_source_bound` است و تأیید بصری مالک همچنان pending می‌ماند.
+دسترسی پیش و پس از deploy به‌صورت `custom` و owner-only راستی‌آزمایی شد: یک کاربر مجاز، صفر گروه و صفر بازدیدکننده خارجی. probe ناشناس در `2026-08-08T17:43:56Z` با `HTTP 401`، `Cache-Control: no-store`، `Referrer-Policy: no-referrer` و عنوان `Sign in required` متوقف شد. bypass token درخواست نشد و محتوای signed-in live واکشی نشد؛ بنابراین drift review فنی فقط `passed_artifact_and_source_bound` است. مالک محصول سپس در ۲۰۲۶-۰۸-۰۸ خروجی بصری را به‌صورت صریح تأیید کرد.
 
 build با Next.js `16.3.0`، audit سطح high با صفر vulnerability، Worker/ASSETS، سه probe محلی با پاسخ `200`، چهار فونت Vazirmatn، sensitive scan و query پانزده‌دقیقه‌ای با صفر Worker error پاس شدند. هیچ source map، env/key یا log وارد بسته نشد.
 
@@ -102,4 +102,4 @@ baseline مرتبط روی ۱۳ فایل به‌صورت سریالی با `--ma
 
 شواهد static و مشتق‌شده permission، API mutation، redirect، session revocation، realtime recovery، Push delivery، cross-server/cross-channel sync، clipboard، focus management، screen reader، keyboard یا failure race واقعی را اثبات نمی‌کنند.
 
-شواهد فنی Stage 0B-5 کامل است، اما checkpoint تا تأیید بصری signed-in مالک بسته نمی‌شود. `0B-6` آغاز نشده و runtime implementation همچنان unauthorized است.
+شواهد فنی Stage 0B-5 کامل و checkpoint با تأیید بصری صریح مالک در ۲۰۲۶-۰۸-۰۸ بسته است. `0B-6` فقط در سطح قرارداد طراحی در حال انجام و runtime implementation همچنان unauthorized است.

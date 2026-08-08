@@ -181,4 +181,4 @@ provenance و نتیجه اجرای نهایی artifactهای محلی:
 
 count authoritative/pagination صف pending و enforcement سمت سرور برای self-target، same-level target و scope مدیر میانی carry-forward صریح Stage اجرایی‌اند؛ وضعیت فعلی backend با contract طراحی یکسان فرض نمی‌شود.
 
-شناسه‌ها، audit/export پس از refreeze، provenance نهایی Figma، harness محلی و Sites URL/source version/archive/deployment/drift review ثبت و تطبیق داده شده‌اند؛ شواهد فنی Stage 0B-4 `complete` و طراحی در ۲۰۲۶-۰۸-۰۸ به‌صورت صریح توسط مالک تأیید شده است. شواهد فنی `0B-5` نیز کامل و تأیید بصری مالک آن pending است؛ تغییر runtime تا تأیید صریح `0B-6` ممنوع می‌ماند.
+شناسه‌ها، audit/export پس از refreeze، provenance نهایی Figma، harness محلی و Sites URL/source version/archive/deployment/drift review ثبت و تطبیق داده شده‌اند؛ شواهد فنی Stage 0B-4 `complete` و طراحی در ۲۰۲۶-۰۸-۰۸ به‌صورت صریح توسط مالک تأیید شده است. `0B-5` نیز با تأیید صریح بصری مالک در ۲۰۲۶-۰۸-۰۸ بسته شده و `0B-6` فقط در سطح قرارداد طراحی در حال انجام است؛ تغییر runtime تا تأیید صریح `0B-6` ممنوع می‌ماند.

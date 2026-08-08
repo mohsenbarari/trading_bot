@@ -2,7 +2,7 @@
 
 تاریخ: ۲۰۲۶-۰۸-۰۸
 
-وضعیت: **شواهد فنی کامل و در انتظار تأیید بصری مالک محصول**؛ Phase 0، Figma canonical، evidence محلی و Sites خصوصی پاس شده‌اند؛ design-only و بدون مجوز تغییر runtime
+وضعیت: **تکمیل و تأیید بصری مالک محصول در ۲۰۲۶-۰۸-۰۸**؛ Phase 0، Figma canonical، evidence محلی و Sites خصوصی پاس شده‌اند؛ design-only و بدون مجوز تغییر runtime
 
 شاخه: `condidate/webapp-ui-ux-redesign-v2`، ساخته‌شده مستقیم از `main`
 
@@ -232,7 +232,7 @@ metrics مستقیم با SHA-256 برابر `351f6afafb0e2d3b1a08e908dcd88cb72d
 - archive محلی `391385` بایت با SHA-256 برابر `22d41b9fd89c7543c6be518fc7f23304daab84dd2390e936126bdd0a55f2f731`؛
 - connector-normalized content شامل `27` فایل و `890880` بایت با SHA-256 برابر `058f397ec23d099c0ddcaf84e3f1a54ed1bcce86dc241cc43624b50d0bfc70a2`.
 
-access policy بلافاصله قبل و بعد deploy برابر `custom`، owner-only، یک allowed user، صفر group و صفر external visitor بود. anonymous probe در `2026-08-08T17:43:56Z` پاسخ `401/no-store/no-referrer` و عنوان `Sign in required` گرفت. bypass token درخواست نشد و signed-in live content واکشی نشد؛ در نتیجه drift review فقط `passed_artifact_and_source_bound` است و تأیید بصری مالک همچنان لازم است.
+access policy بلافاصله قبل و بعد deploy برابر `custom`، owner-only، یک allowed user، صفر group و صفر external visitor بود. anonymous probe در `2026-08-08T17:43:56Z` پاسخ `401/no-store/no-referrer` و عنوان `Sign in required` گرفت. bypass token درخواست نشد و signed-in live content واکشی نشد؛ در نتیجه drift review فنی فقط `passed_artifact_and_source_bound` است. مالک محصول سپس در ۲۰۲۶-۰۸-۰۸ خروجی بصری را به‌صورت صریح تأیید کرد.
 
 build با Next.js `16.3.0`، `npm audit --audit-level=high` با صفر vulnerability، Worker/ASSETS، سه probe محلی `200`، چهار فونت محلی byte-identical، sensitive scan بدون source map/env/key/log و پنجره ۱۵ دقیقه‌ای با صفر Worker error پاس شد.
 
@@ -256,17 +256,16 @@ Figma، PNG، harness و Sites نمی‌توانند authorization، API mutatio
 
 ## ۱۵. گیت جاری و مراحل باقی‌مانده
 
-Figma canonical، audit/export مستقیم، evidence محلی fail-closed و Sites خصوصی ثبت و راستی‌آزمایی شده‌اند؛ شواهد فنی Stage 0B-5 بسته است. مالک فقط Phase 0 را تأیید کرده و تأیید بصری این خروجی هنوز pending است. `0B-6` آغاز نشده و runtime unauthorized می‌ماند.
+Figma canonical، audit/export مستقیم، evidence محلی fail-closed و Sites خصوصی ثبت و راستی‌آزمایی شده‌اند؛ شواهد فنی Stage 0B-5 بسته و خروجی بصری آن در ۲۰۲۶-۰۸-۰۸ به‌صورت صریح توسط مالک محصول تأیید شده است. `0B-6` فقط در سطح قرارداد طراحی در حال انجام است و runtime unauthorized می‌ماند.
 
 مراحل باقی‌مانده:
 
-1. تأیید بصری مالک و بستن checkpoint `0B-5`
-2. `0B-6` — قرارداد نهایی سیستم و اجازه صریح شروع پیاده‌سازی
-3. `Stage 1` — اعتماد و تداوم کار
-4. `Stage 2` — Design System V2 محافظت‌شده
-5. `Stage 3` — پوسته، ورود و جریان‌های عمومی
-6. `Stage 4` — هسته استفاده روزانه
-7. `Stage 5` — workspace مشتریان و حسابداران
-8. `Stage 6` — مدیریت و پروفایل
-9. `Stage 7` — motion، دسترس‌پذیری و polish
-10. `Stage 8` — پذیرش نهایی و عرضه مرحله‌ای
+1. تکمیل و تأیید صریح `0B-6` — قرارداد نهایی سیستم و گیت شروع پیاده‌سازی
+2. `Stage 1` — اعتماد و تداوم کار
+3. `Stage 2` — Design System V2 محافظت‌شده
+4. `Stage 3` — پوسته، ورود و جریان‌های عمومی
+5. `Stage 4` — هسته استفاده روزانه
+6. `Stage 5` — workspace مشتریان و حسابداران
+7. `Stage 6` — مدیریت و پروفایل
+8. `Stage 7` — motion، دسترس‌پذیری و polish
+9. `Stage 8` — پذیرش نهایی و عرضه مرحله‌ای
