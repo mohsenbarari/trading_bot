@@ -47,6 +47,19 @@ MANDATORY_CELLS = (
     "queue:wave:invalid",
     "queue:regime:peak",
     "market:request_surface:balanced",
+    "market:comprehensive:all_228",
+    "market:comprehensive:family:create_offer",
+    "market:comprehensive:family:trade_concurrent",
+    "market:comprehensive:family:trade_non_concurrent",
+    "market:comprehensive:family:manual_expire_contention",
+    "market:comprehensive:family:time_expiry",
+    "market:comprehensive:family:after_completed_reject",
+    "market:comprehensive:family:after_manual_expiry_reject",
+    "market:comprehensive:family:after_time_expiry_reject",
+    "market:comprehensive:family:manual_expire_non_concurrent",
+    "market:comprehensive:family:active_view",
+    "market:comprehensive:family:public_detail_view",
+    "market:comprehensive:family:market_history_view",
     "overtime:pref_save",
     "overtime:offer_snapshot",
     "overtime:req_iran_iran",
@@ -63,6 +76,24 @@ MANDATORY_CELLS = (
     "estimate:selectable_accept",
     "estimate:selectable_decline",
     "estimate:no_data_fail_closed",
+)
+
+COMPREHENSIVE_MARKET_FAMILY_COUNTS = {
+    "create_offer": 12,
+    "trade_concurrent": 12,
+    "trade_non_concurrent": 12,
+    "manual_expire_contention": 12,
+    "time_expiry": 12,
+    "after_completed_reject": 12,
+    "after_manual_expiry_reject": 12,
+    "after_time_expiry_reject": 12,
+    "manual_expire_non_concurrent": 24,
+    "active_view": 24,
+    "public_detail_view": 48,
+    "market_history_view": 36,
+}
+COMPREHENSIVE_MARKET_SCENARIO_COUNT = sum(
+    COMPREHENSIVE_MARKET_FAMILY_COUNTS.values()
 )
 
 OT_FAMILIES = (
@@ -150,6 +181,31 @@ def market_cells() -> list[dict[str, Any]]:
                 lane="market",
                 scenario_id=sid,
                 tags=["market", "terminal", terminal],
+            )
+        )
+    return rows
+
+
+def comprehensive_market_cells() -> list[dict[str, Any]]:
+    """Coverage contract for the exhaustive 228-state Bot/WebApp matrix."""
+
+    rows = [
+        _slot(
+            cell="market:comprehensive:all_228",
+            lane="market_comprehensive",
+            scenario_id="CLM-ALL-228",
+            tags=["market", "comprehensive", "all_states"],
+            detail={"required_scenario_count": COMPREHENSIVE_MARKET_SCENARIO_COUNT},
+        )
+    ]
+    for family, expected_count in COMPREHENSIVE_MARKET_FAMILY_COUNTS.items():
+        rows.append(
+            _slot(
+                cell=f"market:comprehensive:family:{family}",
+                lane="market_comprehensive",
+                scenario_id=f"CLM-FAMILY-{family.upper().replace('_', '-')}",
+                tags=["market", "comprehensive", "family", family],
+                detail={"family": family, "required_scenario_count": expected_count},
             )
         )
     return rows
@@ -399,7 +455,13 @@ def build_wave_schedule(*, seed: int = 20260806) -> dict[str, Any]:
 
 def build_manifest(*, seed: int = 20260806) -> dict[str, Any]:
     wave = build_wave_schedule(seed=seed)
-    scenarios = market_cells() + wave["queue_cells"] + overtime_cells() + estimate_cells()
+    scenarios = (
+        market_cells()
+        + comprehensive_market_cells()
+        + wave["queue_cells"]
+        + overtime_cells()
+        + estimate_cells()
+    )
     by_cell: dict[str, list[str]] = {cell: [] for cell in MANDATORY_CELLS}
     for row in scenarios:
         by_cell.setdefault(row["cell"], []).append(row["scenario_id"])

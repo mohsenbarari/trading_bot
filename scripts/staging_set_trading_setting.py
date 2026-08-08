@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Read or set one trading_settings row inside a staging app container.
 
-Used by the combined-matrix queue wave to temporarily raise
-``offer_expiry_minutes`` so queued offers survive long enough to be published
-during peak-load tests, then restore the original value afterwards.
+Used by the combined-matrix queue wave to read its staging contract. An
+explicit infrastructure-only diagnostic may temporarily change a value and
+restore it, but normal live matrix execution is read-only here.
 Refuses to run outside the staging environment.
 """
 from __future__ import annotations

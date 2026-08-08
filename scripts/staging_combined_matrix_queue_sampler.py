@@ -165,6 +165,63 @@ def _provider_timing_payload(
     }
 
 
+def _queue_partition_payload(
+    rows: list[tuple[object, ...]],
+    *,
+    pending_values: set[str],
+    failure_values: set[str],
+) -> dict[str, object]:
+    """Summarise one queue partition without mixing public and synthetic-private jobs."""
+
+    def value(item: object) -> str:
+        return str(getattr(item, "value", item) or "")
+
+    state_counts: dict[str, int] = {}
+    action_counts: dict[str, int] = {}
+    sent_action_counts: dict[str, int] = {}
+    sent_offer_public_ids: list[str] = []
+    retried = 0
+    rate_limited = 0
+    retry_recovered = 0
+    rate_limit_recovered = 0
+    for row in rows:
+        state = value(row[3])
+        action = value(row[4])
+        state_counts[state] = state_counts.get(state, 0) + 1
+        action_counts[action] = action_counts.get(action, 0) + 1
+        if row[2] is not None:
+            sent_action_counts[action] = sent_action_counts.get(action, 0) + 1
+            if action == "offer_publish" and len(row) > 11:
+                sent_offer_public_ids.append(str(row[11]))
+        was_retried = int(row[5] or 0) > 1 or int(row[6] or 0) > 1
+        was_rate_limited = row[7] is not None
+        terminally_healthy = state not in pending_values and state not in failure_values
+        if was_retried:
+            retried += 1
+            retry_recovered += int(terminally_healthy)
+        if was_rate_limited:
+            rate_limited += 1
+            rate_limit_recovered += int(terminally_healthy)
+    return {
+        "job_count": len(rows),
+        "pending_jobs": sum(
+            count for state, count in state_counts.items() if state in pending_values
+        ),
+        "sent_jobs": sum(1 for row in rows if row[2] is not None),
+        "failed_jobs": sum(
+            count for state, count in state_counts.items() if state in failure_values
+        ),
+        "retried_jobs": retried,
+        "retry_recovered_jobs": retry_recovered,
+        "rate_limited_jobs": rate_limited,
+        "rate_limit_recovered_jobs": rate_limit_recovered,
+        "state_counts": dict(sorted(state_counts.items())),
+        "action_counts": dict(sorted(action_counts.items())),
+        "sent_action_counts": dict(sorted(sent_action_counts.items())),
+        "sent_offer_public_ids": sorted(set(sent_offer_public_ids)),
+    }
+
+
 def _parse_since(value: str | None, *, lookback_minutes: int) -> datetime:
     if value:
         parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
@@ -308,9 +365,6 @@ async def _sample(
                 ).all()
             )
 
-        def _value(item: object) -> str:
-            return str(getattr(item, "value", item) or "")
-
         pending_values = {item.value for item in pending_states}
         failure_values = {
             TelegramDeliveryState.AMBIGUOUS.value,
@@ -322,34 +376,27 @@ async def _sample(
             TelegramDeliveryState.BLOCKED_BOT.value,
             TelegramDeliveryState.BLOCKED_GATEWAY.value,
         }
-        state_counts: dict[str, int] = {}
-        action_counts: dict[str, int] = {}
-        sent_action_counts: dict[str, int] = {}
-        sent_offer_public_ids: list[str] = []
-        for row in scoped_rows:
-            state = _value(row[3])
-            action = _value(row[4])
-            state_counts[state] = state_counts.get(state, 0) + 1
-            action_counts[action] = action_counts.get(action, 0) + 1
-            if row[2] is not None:
-                sent_action_counts[action] = sent_action_counts.get(action, 0) + 1
-                if action == "offer_publish" and len(row) > 11:
-                    sent_offer_public_ids.append(str(row[11]))
-        scoped_pending = sum(
-            count for state, count in state_counts.items() if state in pending_values
+        private_job_ids = set(scoped_private_job_ids)
+        private_rows = [row for row in scoped_rows if int(row[0]) in private_job_ids]
+        public_rows = [row for row in scoped_rows if int(row[0]) not in private_job_ids]
+        scoped_partition = _queue_partition_payload(
+            scoped_rows,
+            pending_values=pending_values,
+            failure_values=failure_values,
         )
-        scoped_failures = sum(
-            count for state, count in state_counts.items() if state in failure_values
+        public_partition = _queue_partition_payload(
+            public_rows,
+            pending_values=pending_values,
+            failure_values=failure_values,
         )
-        scoped_retried = sum(
-            1
-            for row in scoped_rows
-            if int(row[5] or 0) > 1 or int(row[6] or 0) > 1
+        private_partition = _queue_partition_payload(
+            private_rows,
+            pending_values=pending_values,
+            failure_values=failure_values,
         )
-        scoped_rate_limited = sum(1 for row in scoped_rows if row[7] is not None)
         since = _parse_since(since_utc, lookback_minutes=lookback_minutes)
         scoped_timing_rows = [
-            row for row in scoped_rows if row[1] is not None and _aware(row[1]) >= since
+            row for row in public_rows if row[1] is not None and _aware(row[1]) >= since
         ]
         timing_payload = (
             _timing_payload(scoped_timing_rows, since=since) if timing else {}
@@ -368,6 +415,11 @@ async def _sample(
             if timing
             else {}
         )
+        # Keep public-channel timing on the public partition. The combined
+        # runner must never score synthetic private recipients as if they were
+        # the real public Telegram queue.
+        public_partition["timing"] = timing_payload
+        public_partition["provider_timing"] = provider_timing_payload
 
         global_timing_payload: dict[str, object] = {}
         if timing:
@@ -403,17 +455,19 @@ async def _sample(
             "offer_count": len(scoped_offer_ids),
             "offer_public_ids": scoped_offer_ids,
             "private_trade_job_ids": sorted(set(scoped_private_job_ids)),
-            "job_count": len(scoped_rows),
+            "job_count": scoped_partition["job_count"],
             "job_ids": [int(row[0]) for row in scoped_rows],
-            "pending_jobs": scoped_pending,
-            "sent_jobs": sum(1 for row in scoped_rows if row[2] is not None),
-            "failed_jobs": scoped_failures,
-            "retried_jobs": scoped_retried,
-            "rate_limited_jobs": scoped_rate_limited,
-            "state_counts": dict(sorted(state_counts.items())),
-            "action_counts": dict(sorted(action_counts.items())),
-            "sent_action_counts": dict(sorted(sent_action_counts.items())),
-            "sent_offer_public_ids": sorted(set(sent_offer_public_ids)),
+            "pending_jobs": scoped_partition["pending_jobs"],
+            "sent_jobs": scoped_partition["sent_jobs"],
+            "failed_jobs": scoped_partition["failed_jobs"],
+            "retried_jobs": scoped_partition["retried_jobs"],
+            "rate_limited_jobs": scoped_partition["rate_limited_jobs"],
+            "state_counts": scoped_partition["state_counts"],
+            "action_counts": scoped_partition["action_counts"],
+            "sent_action_counts": scoped_partition["sent_action_counts"],
+            "sent_offer_public_ids": scoped_partition["sent_offer_public_ids"],
+            "public": public_partition,
+            "synthetic_private": private_partition,
             "timing": timing_payload,
             "provider_timing": provider_timing_payload,
         },

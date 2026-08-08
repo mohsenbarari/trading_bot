@@ -363,14 +363,38 @@ async def _run(args: argparse.Namespace) -> dict[str, object]:
         attempted_seq_ids: list[int] = []
         invalid_rejected_seq_ids: list[int] = []
 
-        owners = {
-            "web_ot": await _seed_user(
-                session, prefix, "wave_web_ot", overtime=3, with_telegram=False, has_bot_access=False
-            ),
-            "bot_ot": await _seed_user(
-                session, prefix, "wave_bot_ot", overtime=2, with_telegram=True, has_bot_access=True
-            ),
+        max_active_offers = max(1, int(args.max_active_offers))
+        overtime_counts = {
+            surface: sum(
+                1
+                for item in events
+                if item.get("kind") != "invalid"
+                and item.get("overtime_creator")
+                and str(item.get("surface") or "") == surface
+            )
+            for surface in ("webapp", "bot")
         }
+        owners: dict[str, list[User]] = {"web_ot": [], "bot_ot": []}
+        for surface, key, overtime, with_telegram, has_bot_access in (
+            ("webapp", "web_ot", 3, False, False),
+            ("bot", "bot_ot", 2, True, True),
+        ):
+            pool_size = max(
+                1,
+                (overtime_counts[surface] + max_active_offers - 1)
+                // max_active_offers,
+            )
+            for idx in range(pool_size):
+                owners[key].append(
+                    await _seed_user(
+                        session,
+                        prefix,
+                        f"wave_{key}_{idx:02d}",
+                        overtime=overtime,
+                        with_telegram=with_telegram,
+                        has_bot_access=has_bot_access,
+                    )
+                )
         # Pool of plain users keeps create churn under max_active_offers.
         plain_pool = []
         for idx in range(max(4, int(args.owner_pool_size))):
@@ -398,16 +422,13 @@ async def _run(args: argparse.Namespace) -> dict[str, object]:
             )
         plain_cursor = 0
         req_cursor = 0
+        overtime_cursors = {"web_ot": 0, "bot_ot": 0}
 
         # Deferred-action mode: offers are traded/expired only AFTER their
         # channel post exists, mirroring real users who react to what they see.
-        # Owners must then hold many concurrent active offers, so the creation
-        # quota is widened instead of terminalizing offers instantly.
+        # Owner pools are sized by the real max-active quota; the wave must not
+        # widen the product policy merely to manufacture a larger backlog.
         defer_actions = bool(getattr(args, "defer_actions", False))
-        valid_event_count = sum(1 for item in events if item.get("kind") != "invalid")
-        deferred_quota: int | None = None
-        if defer_actions and plain_pool:
-            deferred_quota = max(8, (valid_event_count + len(plain_pool) - 1) // len(plain_pool) + 4)
         pending_actions: list[dict[str, object]] = []
 
         async def _process_due_actions() -> None:
@@ -554,7 +575,10 @@ async def _run(args: argparse.Namespace) -> dict[str, object]:
                     )
                 continue
             if item.get("overtime_creator"):
-                owner = owners["web_ot"] if surface == "webapp" else owners["bot_ot"]
+                owner_key = "web_ot" if surface == "webapp" else "bot_ot"
+                owner_pool = owners[owner_key]
+                owner = owner_pool[overtime_cursors[owner_key] % len(owner_pool)]
+                overtime_cursors[owner_key] += 1
             else:
                 owner = plain_pool[plain_cursor % len(plain_pool)]
                 plain_cursor += 1
@@ -591,7 +615,7 @@ async def _run(args: argparse.Namespace) -> dict[str, object]:
                     surface=surface,
                     shape=shape,
                     offer_type=offer_type,
-                    max_active_override=deferred_quota,
+                    max_active_override=max_active_offers,
                 )
                 if defer_actions:
                     action = _deferred_action_for_seq(
@@ -859,6 +883,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--realtime", action="store_true")
     parser.add_argument("--speed", type=float, default=1.0, help=">1 compresses realtime waits")
     parser.add_argument("--owner-pool-size", type=int, default=16)
+    parser.add_argument("--max-active-offers", type=int, default=10)
     parser.add_argument("--publish-dwell-seconds", type=float, default=0.35)
     parser.add_argument(
         "--defer-actions",

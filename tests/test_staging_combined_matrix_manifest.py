@@ -105,6 +105,26 @@ class CombinedMatrixManifestTests(unittest.TestCase):
                 msg=f"missing lane prefix {prefix}",
             )
 
+    def test_manifest_requires_every_comprehensive_market_family(self) -> None:
+        manifest = manifest_builder.build_manifest(seed=20260806)
+        self.assertEqual(
+            manifest_builder.COMPREHENSIVE_MARKET_SCENARIO_COUNT,
+            228,
+        )
+        for family, expected_count in (
+            manifest_builder.COMPREHENSIVE_MARKET_FAMILY_COUNTS.items()
+        ):
+            cell = f"market:comprehensive:family:{family}"
+            self.assertIn(cell, manifest_builder.MANDATORY_CELLS)
+            self.assertTrue(manifest["coverage_index"][cell])
+            slot = next(
+                item for item in manifest["scenarios"] if item["cell"] == cell
+            )
+            self.assertEqual(
+                slot["detail"]["required_scenario_count"],
+                expected_count,
+            )
+
     def test_scaled_realtime_schedule_spans_full_window(self) -> None:
         manifest = manifest_builder.build_manifest(seed=20260806)
         budget = wave_driver.WaveBudget(
@@ -149,7 +169,10 @@ class CombinedMatrixManifestTests(unittest.TestCase):
             wave_trade_percent=40,
             wave_manual_expire_percent=20,
             wave_profile="realtime-30m",
-            queue_offer_expiry_minutes=0,
+            queue_offer_expiry_minutes=2,
+            allow_temporary_queue_expiry_override=False,
+            wave_immediate_actions=False,
+            wave_action_delay_seconds=45.0,
             wave_publish_wait_timeout_seconds=1800.0,
             wave_action_drain_timeout_seconds=2400.0,
             wave_timeout_seconds=5400.0,
@@ -157,8 +180,27 @@ class CombinedMatrixManifestTests(unittest.TestCase):
         limits = runner._effective_wave_limits(args, expected_valid=4000)
         self.assertEqual(limits["channel_base_interval_seconds"], 0.9)
         self.assertEqual(limits["channel_idle_burst_capacity"], 2)
-        self.assertGreater(limits["effective_offer_expiry_minutes"], 120)
+        self.assertEqual(limits["effective_offer_expiry_minutes"], 2)
+        self.assertFalse(limits["temporary_expiry_override_enabled"])
+        self.assertFalse(limits["fits_configured_offer_lifetime"])
         self.assertGreater(limits["effective_wave_timeout_seconds"], 10_000)
+
+    def test_expiry_override_is_never_implicit(self) -> None:
+        args = SimpleNamespace(
+            wave_trade_percent=40,
+            wave_manual_expire_percent=20,
+            wave_profile="burst",
+            queue_offer_expiry_minutes=2,
+            allow_temporary_queue_expiry_override=True,
+            wave_immediate_actions=False,
+            wave_action_delay_seconds=15.0,
+            wave_publish_wait_timeout_seconds=1800.0,
+            wave_action_drain_timeout_seconds=2400.0,
+            wave_timeout_seconds=5400.0,
+        )
+        limits = runner._effective_wave_limits(args, expected_valid=800)
+        self.assertTrue(limits["temporary_expiry_override_enabled"])
+        self.assertGreater(limits["effective_offer_expiry_minutes"], 2)
 
     def test_lane_ok_without_cell_evidence_cannot_green_coverage(self) -> None:
         manifest = manifest_builder.build_manifest(seed=20260806)
@@ -240,6 +282,49 @@ class CombinedMatrixManifestTests(unittest.TestCase):
         self.assertEqual(payload["edit_sample_count"], 1)
         self.assertEqual(payload["slow_edit_count"], 1)
         self.assertEqual(payload["edit_latency_seconds"]["p95"], 2.25)
+
+    def test_queue_partition_requires_retried_jobs_to_recover(self) -> None:
+        now = datetime.now(timezone.utc)
+        rows = [
+            (
+                1,
+                None,
+                now,
+                "sent",
+                "offer_publish",
+                2,
+                1,
+                now,
+                None,
+                None,
+                None,
+                "ofr_public",
+            ),
+            (
+                2,
+                None,
+                None,
+                "failed_permanent",
+                "trade_result",
+                2,
+                2,
+                now,
+                None,
+                None,
+                None,
+                None,
+            ),
+        ]
+        payload = queue_sampler._queue_partition_payload(
+            rows,
+            pending_values={"pending", "retry_wait"},
+            failure_values={"failed_permanent"},
+        )
+        self.assertEqual(payload["retried_jobs"], 2)
+        self.assertEqual(payload["retry_recovered_jobs"], 1)
+        self.assertEqual(payload["rate_limited_jobs"], 2)
+        self.assertEqual(payload["rate_limit_recovered_jobs"], 1)
+        self.assertEqual(payload["sent_offer_public_ids"], ["ofr_public"])
 
 
 class CombinedMatrixWaveRouteTests(unittest.IsolatedAsyncioTestCase):
