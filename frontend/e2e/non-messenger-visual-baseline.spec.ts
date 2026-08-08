@@ -145,6 +145,30 @@ async function installApiMocks(page: Page) {
     if (path === '/api/auth/me') {
       return json(CURRENT_USER)
     }
+    if (path === `/api/users-public/${CURRENT_USER.id}`) {
+      return json({
+        id: CURRENT_USER.id,
+        account_name: CURRENT_USER.account_name,
+        mobile_number: '09120000000',
+        address: 'تهران، خیابان نمونه، پلاک ۱۲',
+        created_at: fixedNow,
+        trades_count: 0,
+        last_seen_at: fixedNow,
+      })
+    }
+    if (path === '/api/invitations/lookup/uiux-baseline') {
+      return json({
+        valid: true,
+        state: 'pending',
+        token: 'uiux-baseline-token',
+        bot_available: true,
+        web_available: true,
+        expires_at: null,
+      })
+    }
+    if (path === '/api/config') {
+      return json({ bot_username: 'uiux_baseline_bot' })
+    }
     if (path === '/api/sessions/verify') {
       return json({ ok: true })
     }
