@@ -514,6 +514,21 @@ describe('auth utils', () => {
     expect(isAppConnecting.value).toBe(false)
   })
 
+  it('apiFetch can isolate a bounded route request from the global connection indicator', async () => {
+    localStorage.setItem('auth_token', 'auth-token')
+    fetchMock.mockResolvedValueOnce(makeJsonResponse({ ok: true }))
+
+    const { apiFetch, isAppConnecting } = await import(authModulePath)
+    isAppConnecting.value = true
+
+    await expect(apiFetch('/api/bounded-route', {
+      retryNetwork: false,
+      trackConnectionState: false,
+    })).resolves.toMatchObject({ ok: true })
+
+    expect(isAppConnecting.value).toBe(true)
+  })
+
   it('apiFetchJson returns null for 204 and surfaces response details on failures', async () => {
     fetchMock
       .mockResolvedValueOnce(makeJsonResponse(null, 204))

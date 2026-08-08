@@ -1,5 +1,7 @@
 import { ref } from 'vue'
 import { apiFetch } from './auth'
+import { AppHttpError } from './httpErrorPolicy'
+import { routeRequestJson } from './routeRequest'
 
 export interface CurrentUserSummary {
   id?: number
@@ -20,6 +22,22 @@ export interface CurrentUserSummary {
   telegram_linked?: boolean
   can_connect_telegram?: boolean
   telegram_link_denial_reason?: string | null
+}
+
+export type CurrentUserLoadState = 'ready' | 'stale' | 'unauthorized' | 'error'
+export type CurrentUserLoadSource = 'cache' | 'network'
+
+export interface CurrentUserLoadResult {
+  state: CurrentUserLoadState
+  source: CurrentUserLoadSource
+  user: CurrentUserSummary | null
+  error: AppHttpError | null
+}
+
+export interface CurrentUserLoadOptions {
+  force?: boolean
+  signal?: AbortSignal
+  timeoutMs?: number | null
 }
 
 const CURRENT_USER_STORAGE_KEY = 'current_user_summary'
@@ -105,6 +123,126 @@ export function clearCurrentUserSummary() {
   }
 }
 
+function currentUserLoadError(error: unknown, errorCode = 'CURRENT_USER_LOAD_ERROR') {
+  if (error instanceof AppHttpError) return error
+  const detail = error instanceof Error && error.message
+    ? error.message
+    : 'دریافت اطلاعات حساب ممکن نشد.'
+
+  return new AppHttpError({
+    status: null,
+    errorCode,
+    detail,
+    context: {
+      surface: 'app',
+      scope: 'page',
+      operation: 'initial-load',
+      fallbackMessage: 'دریافت اطلاعات حساب ممکن نشد.',
+    },
+  })
+}
+
+let currentUserStructuredRequestRevision = 0
+
+function supersededCurrentUserResult(): CurrentUserLoadResult {
+  const user = currentUserSummary.value
+  return {
+    state: user ? 'stale' : 'error',
+    source: user ? 'cache' : 'network',
+    user,
+    error: currentUserLoadError(
+      new Error('A newer current-user request completed first.'),
+      'CURRENT_USER_REQUEST_SUPERSEDED',
+    ),
+  }
+}
+
+/**
+ * Structured counterpart to primeCurrentUserSummary for route state machines.
+ * The legacy prime helper intentionally keeps its cache-first, fail-soft
+ * return semantics; this loader adds explicit error/stale/authorization truth.
+ */
+export async function loadCurrentUserSummary(
+  options: CurrentUserLoadOptions = {},
+): Promise<CurrentUserLoadResult> {
+  const { force = false, signal, timeoutMs } = options
+  const cachedUser = currentUserSummary.value
+
+  if (!force && cachedUser?.role) {
+    return { state: 'ready', source: 'cache', user: cachedUser, error: null }
+  }
+
+  const requestAuthToken = hasStorage() ? localStorage.getItem('auth_token') : null
+  const requestRevision = ++currentUserStructuredRequestRevision
+
+  try {
+    const payload = await routeRequestJson<unknown>('/api/auth/me', {
+      signal,
+      ...(timeoutMs === undefined ? {} : { timeoutMs }),
+      errorContext: {
+        surface: 'app',
+        scope: 'page',
+        operation: 'initial-load',
+        resourceLabel: 'حساب کاربری',
+        fallbackMessage: 'دریافت اطلاعات حساب ممکن نشد.',
+      },
+    })
+
+    if (requestRevision !== currentUserStructuredRequestRevision) {
+      return supersededCurrentUserResult()
+    }
+
+    if ((hasStorage() ? localStorage.getItem('auth_token') : null) !== requestAuthToken) {
+      const error = currentUserLoadError(
+        new Error('Authentication context changed while loading the current user.'),
+        'CURRENT_USER_CONTEXT_CHANGED',
+      )
+      const currentUser = currentUserSummary.value
+      return {
+        state: currentUser ? 'stale' : 'error',
+        source: currentUser ? 'cache' : 'network',
+        user: currentUser,
+        error,
+      }
+    }
+
+    const normalized = normalizeCurrentUserSummary(payload)
+    if (!normalized) {
+      const error = currentUserLoadError(
+        new Error('Current-user response is invalid.'),
+        'CURRENT_USER_INVALID_RESPONSE',
+      )
+      return {
+        state: cachedUser ? 'stale' : 'error',
+        source: cachedUser ? 'cache' : 'network',
+        user: cachedUser,
+        error,
+      }
+    }
+
+    const user = cacheCurrentUserSummary(normalized)
+    return { state: 'ready', source: 'network', user, error: null }
+  } catch (caught) {
+    if (requestRevision !== currentUserStructuredRequestRevision) {
+      return supersededCurrentUserResult()
+    }
+
+    const error = currentUserLoadError(caught)
+    if (error.status === 401 || error.status === 403) {
+      clearCurrentUserSummary()
+      return { state: 'unauthorized', source: 'network', user: null, error }
+    }
+
+    const retainedUser = currentUserSummary.value || cachedUser
+    return {
+      state: retainedUser ? 'stale' : 'error',
+      source: retainedUser ? 'cache' : 'network',
+      user: retainedUser,
+      error,
+    }
+  }
+}
+
 let currentUserRequest: Promise<CurrentUserSummary | null> | null = null
 let currentUserRequestAuthToken: string | null = null
 
@@ -119,7 +257,8 @@ export async function primeCurrentUserSummary(force = false): Promise<CurrentUse
     return currentUserRequest
   }
 
-  const request = (async () => {
+  let request!: Promise<CurrentUserSummary | null>
+  request = (async () => {
     try {
       const response = await apiFetch('/api/auth/me')
       if (!response.ok) {

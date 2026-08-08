@@ -225,10 +225,11 @@ export function forceLogout() {
 
 export type ApiFetchOptions = RequestInit & {
     retryNetwork?: boolean;
+    trackConnectionState?: boolean;
 };
 
 export async function apiFetch(url: string, options: ApiFetchOptions = {}) {
-    const { retryNetwork = true, ...requestOptions } = options;
+    const { retryNetwork = true, trackConnectionState = true, ...requestOptions } = options;
     let retries = 0;
     let didRefresh = false;
 
@@ -256,7 +257,7 @@ export async function apiFetch(url: string, options: ApiFetchOptions = {}) {
             const originalResponse = await fetch(fullUrl, config);
             
             // If we were connecting/retrying, we reconnected successfully
-            if (isAppConnecting.value) isAppConnecting.value = false;
+            if (trackConnectionState && isAppConnecting.value) isAppConnecting.value = false;
 
             // Proxy the response to intercept json() and clone()
             const response = new Proxy(originalResponse, {
@@ -279,7 +280,7 @@ export async function apiFetch(url: string, options: ApiFetchOptions = {}) {
             });
 
             // 🔴 403 Forbidden with specific detail
-            if (isAppConnecting.value) isAppConnecting.value = false;
+            if (trackConnectionState && isAppConnecting.value) isAppConnecting.value = false;
 
             // 🔴 403 Forbidden with specific detail
             if (response.status === 403) {
@@ -344,7 +345,7 @@ export async function apiFetch(url: string, options: ApiFetchOptions = {}) {
 
             // Is this a network fetch drop?
             if (retryNetwork && isRetryableNetworkError) {
-                isAppConnecting.value = true;
+                if (trackConnectionState) isAppConnecting.value = true;
                 retries++;
                 console.warn(`[apiFetch] Connection lost. Retrying (${retries})...`);
                 await sleep(Math.min(3000, 1000 * Math.pow(1.5, retries))); // Max 3s backoff

@@ -1,15 +1,21 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const apiFetchMock = vi.fn()
+const routeRequestJsonMock = vi.fn()
 
 vi.mock('./auth', () => ({
   apiFetch: apiFetchMock,
+}))
+
+vi.mock('./routeRequest', () => ({
+  routeRequestJson: routeRequestJsonMock,
 }))
 
 describe('currentUser utils', () => {
   beforeEach(() => {
     vi.resetModules()
     apiFetchMock.mockReset()
+    routeRequestJsonMock.mockReset()
     localStorage.clear()
   })
 
@@ -194,5 +200,126 @@ describe('currentUser utils', () => {
       role: 'مدیر ارشد',
       account_name: 'new-admin',
     })
+  })
+
+  it('returns structured cache and network success without changing prime semantics', async () => {
+    const {
+      cacheCurrentUserSummary,
+      loadCurrentUserSummary,
+      primeCurrentUserSummary,
+    } = await import('./currentUser')
+    const cached = cacheCurrentUserSummary({ id: 21, role: 'عادی', account_name: 'cached' })
+
+    await expect(loadCurrentUserSummary()).resolves.toEqual({
+      state: 'ready',
+      source: 'cache',
+      user: cached,
+      error: null,
+    })
+    expect(routeRequestJsonMock).not.toHaveBeenCalled()
+    expect(apiFetchMock).not.toHaveBeenCalled()
+
+    routeRequestJsonMock.mockResolvedValueOnce({ id: 22, role: 'مدیر میانی', account_name: 'fresh' })
+    const controller = new AbortController()
+    await expect(loadCurrentUserSummary({ force: true, signal: controller.signal, timeoutMs: 900 })).resolves.toMatchObject({
+      state: 'ready',
+      source: 'network',
+      user: { id: 22, role: 'مدیر میانی', account_name: 'fresh' },
+      error: null,
+    })
+    expect(routeRequestJsonMock).toHaveBeenCalledWith('/api/auth/me', expect.objectContaining({
+      signal: controller.signal,
+      timeoutMs: 900,
+    }))
+
+    await expect(primeCurrentUserSummary(false)).resolves.toMatchObject({ id: 22, account_name: 'fresh' })
+    expect(apiFetchMock).not.toHaveBeenCalled()
+  })
+
+  it('retains cached identity as stale on structured load failure', async () => {
+    const { AppHttpError } = await import('./httpErrorPolicy')
+    const { cacheCurrentUserSummary, loadCurrentUserSummary } = await import('./currentUser')
+    const cached = cacheCurrentUserSummary({ id: 31, role: 'عادی', account_name: 'retained' })
+    routeRequestJsonMock.mockRejectedValueOnce(new AppHttpError({
+      status: null,
+      errorCode: 'NETWORK_ERROR',
+      detail: 'offline',
+    }))
+
+    const result = await loadCurrentUserSummary({ force: true })
+
+    expect(result).toMatchObject({ state: 'stale', source: 'cache', user: cached })
+    expect(result.error).toBeInstanceOf(AppHttpError)
+    expect(result.error?.errorCode).toBe('NETWORK_ERROR')
+  })
+
+  it('clears assumed identity on structured authorization failure', async () => {
+    const { AppHttpError } = await import('./httpErrorPolicy')
+    const {
+      cacheCurrentUserSummary,
+      currentUserSummary,
+      loadCurrentUserSummary,
+      readCachedCurrentUserSummary,
+    } = await import('./currentUser')
+    cacheCurrentUserSummary({ id: 41, role: 'مدیر ارشد', account_name: 'no-longer-authorized' })
+    routeRequestJsonMock.mockRejectedValueOnce(new AppHttpError({
+      status: 403,
+      detail: 'forbidden',
+    }))
+
+    await expect(loadCurrentUserSummary({ force: true })).resolves.toMatchObject({
+      state: 'unauthorized',
+      source: 'network',
+      user: null,
+      error: { status: 403 },
+    })
+    expect(currentUserSummary.value).toBeNull()
+    expect(readCachedCurrentUserSummary()).toBeNull()
+  })
+
+  it('reports invalid current-user payloads as errors instead of false ready state', async () => {
+    routeRequestJsonMock.mockResolvedValueOnce({ id: 51, account_name: 'missing-role' })
+    const { loadCurrentUserSummary } = await import('./currentUser')
+
+    const result = await loadCurrentUserSummary({ force: true })
+
+    expect(result).toMatchObject({
+      state: 'error',
+      source: 'network',
+      user: null,
+      error: { errorCode: 'CURRENT_USER_INVALID_RESPONSE' },
+    })
+  })
+
+  it('lets only the latest structured same-token request update the cache', async () => {
+    let resolveOlder!: (value: unknown) => void
+    let resolveLatest!: (value: unknown) => void
+    routeRequestJsonMock
+      .mockReturnValueOnce(new Promise((resolve) => {
+        resolveOlder = resolve
+      }))
+      .mockReturnValueOnce(new Promise((resolve) => {
+        resolveLatest = resolve
+      }))
+
+    const { loadCurrentUserSummary, readCachedCurrentUserSummary } = await import('./currentUser')
+    localStorage.setItem('auth_token', 'same-token')
+    const older = loadCurrentUserSummary({ force: true })
+    const latest = loadCurrentUserSummary({ force: true })
+
+    resolveLatest({ id: 62, role: 'مدیر میانی', account_name: 'latest' })
+    await expect(latest).resolves.toMatchObject({
+      state: 'ready',
+      user: { id: 62, account_name: 'latest' },
+    })
+
+    resolveOlder({ id: 61, role: 'عادی', account_name: 'older' })
+    await expect(older).resolves.toMatchObject({
+      state: 'stale',
+      source: 'cache',
+      user: { id: 62, account_name: 'latest' },
+      error: { errorCode: 'CURRENT_USER_REQUEST_SUPERSEDED' },
+    })
+    expect(readCachedCurrentUserSummary()).toMatchObject({ id: 62, account_name: 'latest' })
   })
 })
