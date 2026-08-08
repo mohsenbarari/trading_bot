@@ -1,0 +1,263 @@
+{
+  "schema": 2,
+  "stage": "0B-5",
+  "status": "passed",
+  "source": {
+    "fileKey": "z8jgJxST4O2APzWnlyP9gv",
+    "url": "https://www.figma.com/design/z8jgJxST4O2APzWnlyP9gv",
+    "pageId": "117:2",
+    "pageName": "04 — Stage 0B-5 Account, Profile, Security & Notifications",
+    "frozenAt": "2026-08-08T17:10:58.500Z",
+    "auditedAt": "2026-08-08T17:11:05.475Z",
+    "directEvidenceCapturedAt": "2026-08-08T17:13:12.738Z",
+    "sourceCommit": "fa2a0a42934493752e7a7106e4dd10f168eb16d7",
+    "sourceCommitRole": "design_checkpoint_baseline_not_runtime_implementation"
+  },
+  "sections": {
+    "contract": "117:3",
+    "accountProfileScenarios": "117:4",
+    "securityStorageScenarios": "117:5",
+    "notificationCenterScenarios": "117:6",
+    "stateRouteVisibilityPushMatrix": "117:7",
+    "responsiveDesktopProofs": "117:8"
+  },
+  "productRoots": [
+    "128:3",
+    "128:64",
+    "128:111",
+    "129:132",
+    "129:187",
+    "131:823",
+    "131:881",
+    "131:935",
+    "132:1627",
+    "132:1683"
+  ],
+  "responsiveRoots": [
+    { "id": "141:456", "width": 360, "height": 844 },
+    { "id": "141:512", "width": 375, "height": 844 },
+    { "id": "141:568", "width": 390, "height": 844 },
+    { "id": "141:624", "width": 414, "height": 844 },
+    { "id": "141:680", "width": 430, "height": 844 }
+  ],
+  "desktopRoot": {
+    "id": "143:668",
+    "boardId": "143:632",
+    "width": 1440,
+    "height": 900
+  },
+  "supplementalNodes": {
+    "recoveryAtlas": "136:409",
+    "visibilityRoutePermissionMatrix": "137:414",
+    "pushMatrix": "138:414",
+    "visibilityForbiddenRow": "149:687",
+    "addressSubstates": "148:687",
+    "sessionSubstates": "148:694",
+    "storageSubstates": "148:701",
+    "notificationEmptySubstates": "148:708"
+  },
+  "components": {
+    "reused": {
+      "button": "48:14",
+      "status": "49:14",
+      "authenticatedHeader": "51:33",
+      "detailHeader": "51:19",
+      "bottomNavigation": "52:46",
+      "formField": "77:610",
+      "decisionPanel": "81:566"
+    },
+    "stage0b5": {
+      "accountActionRow": "121:14",
+      "sessionRow": "122:1327",
+      "notificationRow": "123:1330",
+      "bottomNavigationAccountOwner": "127:14",
+      "bottomNavigationAccountAccountant": "127:35"
+    }
+  },
+  "designSystemInventory": {
+    "variableCount": 65,
+    "textStyleCount": 9,
+    "effectCount": 2,
+    "componentSetCount": 12,
+    "componentVariantCount": 54,
+    "boundInstanceCountOnStagePage": 77,
+    "detachedInstanceCountOnStagePage": 0
+  },
+  "geometry": {
+    "mobileRootCount": 10,
+    "mobileWidth": 390,
+    "mobileHeight": 844,
+    "responsiveRootCount": 5,
+    "responsiveWidths": [360, 375, 390, 414, 430],
+    "responsiveHeight": 844,
+    "desktopRootCount": 1,
+    "desktopWidth": 1440,
+    "desktopHeight": 900,
+    "desktopFactCount": 19,
+    "mobileReferenceFactCount": 19,
+    "overflowFailureCount": 0,
+    "textClipFailureCount": 0
+  },
+  "interaction": {
+    "semanticHitContainerCount": 142,
+    "minimumHitWidthPx": 44,
+    "minimumHitHeightPx": 44,
+    "boundButtonCount": 15,
+    "minimumButtonHeightPx": 48,
+    "minimumNavigationLabelFontSizePx": 11,
+    "detailHeaderHeightPx": 112,
+    "detailHeaderBackTargetWidthPx": 44,
+    "detailHeaderBackTargetHeightPx": 44
+  },
+  "stateCoverage": {
+    "recoveryGroupCount": 15,
+    "namedNestedSubstateCount": 14,
+    "pushStateCount": 9,
+    "pushStates": [
+      "checking",
+      "unsupported",
+      "insecure",
+      "server-disabled",
+      "permission-blocked",
+      "permission-default",
+      "subscribed",
+      "unsubscribed",
+      "error"
+    ],
+    "semanticNames": [
+      "Address/validation",
+      "Address/busy",
+      "Address/success",
+      "Address/failure",
+      "Session/busy",
+      "Session/success",
+      "Session/failure",
+      "Storage/busy",
+      "Storage/success",
+      "Storage/failure",
+      "Storage/valid-zero",
+      "Storage/size-error",
+      "Notification/true-empty",
+      "Notification/category-empty"
+    ]
+  },
+  "typographyAndContrast": {
+    "fontFamilies": ["Vazirmatn"],
+    "missingFontCount": 0,
+    "visibleTextSampleCount": 401,
+    "textContrastFailureCount": 0,
+    "minimumTextContrastRatio": 4.548,
+    "minimumFocusContrastRatio": 3.972,
+    "focusStrokeWidthPx": 3,
+    "m04ContrastRatios": {
+      "label": 5.33,
+      "value": 15.84,
+      "privacy": 5.7,
+      "primaryCta": 4.55
+    }
+  },
+  "contentAndScope": {
+    "syntheticIdentitiesOnly": true,
+    "rawRouteOrBackendMetadataHits": 0,
+    "bannedNoiseHits": 0,
+    "marketInteriorNodeCount": 0,
+    "messengerInteriorNodeCount": 0,
+    "protectedInteriors": ["market", "messenger"],
+    "desktopAddsNewFacts": false,
+    "responsiveM09DataParity": true
+  },
+  "assertions": [
+    { "order": 1, "id": "font-vazirmatn-loaded", "status": "passed" },
+    { "order": 2, "id": "ten-mobile-scenarios-complete", "status": "passed" },
+    { "order": 3, "id": "mobile-roots-exact-390x844", "status": "passed" },
+    { "order": 4, "id": "no-product-overflow-or-clipping", "status": "passed" },
+    { "order": 5, "id": "touch-targets-44", "status": "passed" },
+    { "order": 6, "id": "cta-height-48", "status": "passed" },
+    { "order": 7, "id": "responsive-width-sweep", "status": "passed" },
+    { "order": 8, "id": "desktop-security-sessions-1440x900", "status": "passed" },
+    { "order": 9, "id": "desktop-adds-no-facts", "status": "passed" },
+    { "order": 10, "id": "shell-account-destination-invariant", "status": "passed" },
+    { "order": 11, "id": "canonical-account-route-contract", "status": "passed" },
+    { "order": 12, "id": "minimal-content-contract", "status": "passed" },
+    { "order": 13, "id": "synthetic-identities-only", "status": "passed" },
+    { "order": 14, "id": "account-hub-destinations-unique", "status": "passed" },
+    { "order": 15, "id": "accountant-account-scope-bounded", "status": "passed" },
+    { "order": 16, "id": "self-profile-progressive-disclosure", "status": "passed" },
+    { "order": 17, "id": "profile-address-feedback-in-context", "status": "passed" },
+    { "order": 18, "id": "public-profile-visibility-matrix-exact", "status": "passed" },
+    { "order": 19, "id": "public-profile-actions-bounded", "status": "passed" },
+    { "order": 20, "id": "session-list-metadata-bounded", "status": "passed" },
+    { "order": 21, "id": "session-decision-feedback-in-context", "status": "passed" },
+    { "order": 22, "id": "storage-action-feedback-in-context", "status": "passed" },
+    { "order": 23, "id": "notification-center-metadata-bounded", "status": "passed" },
+    { "order": 24, "id": "notification-empty-error-semantics-distinct", "status": "passed" },
+    { "order": 25, "id": "push-state-matrix-complete-and-truthful", "status": "passed" },
+    { "order": 26, "id": "recovery-state-atlas-complete", "status": "passed" },
+    { "order": 27, "id": "protected-interiors-absent", "status": "passed" }
+  ],
+  "directEvidence": [
+    {
+      "path": "assets/figma-account-profile-scenarios.png",
+      "sourceNodeId": "117:4",
+      "width": 1520,
+      "height": 2200,
+      "sha256": "1c0674024f5191e3a8b3b74d162e40e9aa827ac21a99dc5a887836c7170ebfb0"
+    },
+    {
+      "path": "assets/figma-security-storage-scenarios.png",
+      "sourceNodeId": "117:5",
+      "width": 1520,
+      "height": 1180,
+      "sha256": "f361380c6755f1bde70ba957dd8583e42c88f861a09afbe9a7042de9ae136f18"
+    },
+    {
+      "path": "assets/figma-notification-center-scenarios.png",
+      "sourceNodeId": "117:6",
+      "width": 1100,
+      "height": 1180,
+      "sha256": "6dc10354978a853e8e31d163d88716babd67df53a84f9e010891511c10d29c02"
+    },
+    {
+      "path": "assets/figma-state-route-visibility-push-matrix.png",
+      "sourceNodeId": "117:7",
+      "width": 3060,
+      "height": 2940,
+      "sha256": "5df6e5ddcc7b0e54b818a239f95518840f9e34c939fc91bc67dad157fd88c565"
+    },
+    {
+      "path": "assets/figma-responsive-and-desktop-proofs.png",
+      "sourceNodeId": "117:8",
+      "width": 4180,
+      "height": 1280,
+      "sha256": "3546789eea3dee0b35dc020c3edc2138a42d1f04b4f023779d01cc550fefb8fc"
+    },
+    {
+      "path": "assets/figma-desktop-security-sessions-1440x900.png",
+      "sourceNodeId": "143:668",
+      "width": 1440,
+      "height": 900,
+      "sha256": "9a5b34bb9fd8aa46e4ce87af53a3a0c7f5f88b1fc43763218a6ccc58fcf7faff"
+    }
+  ],
+  "knownNonBlockingCarryForwards": [
+    {
+      "id": "header-avatar-initials-local-text-style",
+      "scope": "inherited component",
+      "status": "carry_forward",
+      "detail": "Avatar initials do not have an exact matching local text style; all rendered text remains Vazirmatn and passes contrast and fit checks."
+    },
+    {
+      "id": "pre-0b5-bottom-navigation-operations-focus-layout-style-debt",
+      "scope": "pre-0B-5 Operations-active variants",
+      "status": "carry_forward",
+      "detail": "Inherited Operations-active variants retain pre-existing focus/layout/style debt; Stage 0B-5 Account-active variants and product roots pass the locked interaction contract."
+    }
+  ],
+  "checks": {
+    "skipInvisibleInstanceChildren": false,
+    "allAssertionsPassed": true,
+    "assertionCount": 27,
+    "assertionFailureCount": 0,
+    "figmaDesignBlockerCount": 0
+  }
+}

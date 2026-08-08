@@ -2,7 +2,7 @@
 
 تاریخ: ۲۰۲۶-۰۷-۱۷
 
-وضعیت: مورد تأیید مالک محصول؛ Stage 0A تکمیل و «مالی مدرن» انتخاب شد؛ 0B-1 تا 0B-3 تأیید شده‌اند؛ شواهد فنی 0B-4 تکمیل و این checkpoint در انتظار تأیید بصری مالک است؛ 0B-5 آغاز نشده و گیت چهار‌دستیار فعلاً تعلیق است
+وضعیت: مورد تأیید مالک محصول؛ Stage 0A تکمیل و «مالی مدرن» انتخاب شد؛ 0B-1 تا 0B-4 تکمیل و با تأیید مالک بسته شده‌اند؛ شواهد فنی `0B-5` کامل و تأیید بصری مالک pending است؛ `0B-6` آغاز نشده، runtime unauthorized و گیت چهار‌دستیار فعلاً تعلیق است
 
 نوع خروجی: تحلیل و نقشه راه مصوب؛ بدون تغییر کد محصول
 
@@ -287,11 +287,11 @@
 | `0B-1` ورود، دعوت و ثبت‌نام | تکمیل و تأیید مالک محصول برای ادامه | `docs/WEBAPP_UI_UX_REDESIGN_V2_STAGE0B_AUTH_CHECKPOINT_20260718.md` |
 | `0B-2` خانه و پوسته احراز‌شده | تکمیل و تأیید مالک محصول برای ادامه | `docs/WEBAPP_UI_UX_REDESIGN_V2_STAGE0B_HOME_SHELL_CHECKPOINT_20260808.md` |
 | `0B-3` عملیات و workspace مشتری/حسابدار | تکمیل و تأیید مالک محصول برای ادامه | `docs/WEBAPP_UI_UX_REDESIGN_V2_STAGE0B_OPERATIONS_WORKSPACES_CHECKPOINT_20260808.md` |
-| `0B-4` مدیریت کاربران و دعوت‌ها | شواهد فنی کامل؛ Figma، evidence محلی و Sites خصوصی پاس؛ در انتظار تأیید بصری مالک | `docs/WEBAPP_UI_UX_REDESIGN_V2_STAGE0B_ADMIN_USERS_INVITATIONS_CHECKPOINT_20260808.md` |
-| `0B-5` حساب، پروفایل، امنیت و اعلان‌ها | آغاز نشده | — |
+| `0B-4` مدیریت کاربران و دعوت‌ها | تکمیل؛ شواهد فنی پاس و طراحی به‌صورت صریح توسط مالک محصول تأیید شده است | `docs/WEBAPP_UI_UX_REDESIGN_V2_STAGE0B_ADMIN_USERS_INVITATIONS_CHECKPOINT_20260808.md` |
+| `0B-5` حساب، پروفایل، امنیت و اعلان‌ها | شواهد فنی کامل؛ Figma schema 2، harness `27/27` و Sites خصوصی پاس؛ در انتظار تأیید بصری مالک | `docs/WEBAPP_UI_UX_REDESIGN_V2_STAGE0B_ACCOUNT_PROFILE_SECURITY_NOTIFICATIONS_CHECKPOINT_20260808.md` |
 | `0B-6` قرارداد نهایی سیستم و پذیرش | آغاز نشده؛ گیت صریح شروع runtime | — |
 
-خروجی `0B-3` شامل ۱۰ root موبایل، state atlas، پنج width proof، یک master/detail دقیق ۱۴۴۰×۹۰۰، ۶۵ variable، ۵ component set و ۱۷ variant در Figma رسمی است و با تأیید مالک محصول بسته شده است. قرارداد Phase 0 در `0B-4` نیز جست‌وجوی پایدار بدون filter ناقص، جدایی actionهای مدیریتی، دعوت استاندارد و stateهای permission-safe را قطعی کرده است؛ nodeها، snapshotها، audit schema 7، evidence محلی و preview خصوصی Sites این checkpoint از نظر فنی پاس شده‌اند و تأیید بصری مالک باقی مانده است. هیچ‌کدام مجوز شروع کدنویسی پیش از `0B-6` نیستند.
+خروجی `0B-3` شامل ۱۰ root موبایل، state atlas، پنج width proof، یک master/detail دقیق ۱۴۴۰×۹۰۰، ۶۵ variable، ۵ component set و ۱۷ variant در Figma رسمی است و با تأیید مالک محصول بسته شده است. قرارداد Phase 0 در `0B-4` نیز جست‌وجوی پایدار بدون filter ناقص، جدایی actionهای مدیریتی، دعوت استاندارد و stateهای permission-safe را قطعی کرده است؛ nodeها، snapshotها، audit schema 7، evidence محلی و preview خصوصی Sites از نظر فنی پاس و طراحی در ۲۰۲۶-۰۸-۰۸ به‌صورت صریح توسط مالک محصول تأیید شده است. در `0B-5` صفحه canonical `117:2`، ۱۰ root موبایل، پنج width proof، desktop `1440×900`، state/visibility/push matrix، audit schema 2 با `27/27`، harness محلی `27/27` و preview خصوصی source-bound ثبت و پاس شده‌اند؛ مالک فقط Phase 0 را تأیید کرده و تأیید بصری خروجی نهایی هنوز باقی است. هیچ‌کدام مجوز شروع کدنویسی پیش از `0B-6` نیستند.
 
 ### مرحله ۱ — اعتماد و تداوم کار
 

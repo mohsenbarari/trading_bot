@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Stage 0B-5 — شواهد مشتق‌شده حساب، پروفایل، امنیت و اعلان‌ها</title>
+  <style>
+    @font-face{font-family:"Vazirmatn";src:url("../../frontend/node_modules/vazirmatn/fonts/webfonts/Vazirmatn-Regular.woff2") format("woff2");font-weight:400;font-display:block}
+    @font-face{font-family:"Vazirmatn";src:url("../../frontend/node_modules/vazirmatn/fonts/webfonts/Vazirmatn-Medium.woff2") format("woff2");font-weight:500;font-display:block}
+    @font-face{font-family:"Vazirmatn";src:url("../../frontend/node_modules/vazirmatn/fonts/webfonts/Vazirmatn-SemiBold.woff2") format("woff2");font-weight:600;font-display:block}
+    @font-face{font-family:"Vazirmatn";src:url("../../frontend/node_modules/vazirmatn/fonts/webfonts/Vazirmatn-Bold.woff2") format("woff2");font-weight:700;font-display:block}
+    :root{color-scheme:light;font-family:"Vazirmatn",Tahoma,Arial,sans-serif;--ink:#12263f;--muted:#52687b;--subtle:#52687b;--border:#d5e0e8;--border-strong:#b9cad7;--page:#f3f7fa;--surface:#fff;--soft:#f8fafc;--action:#235fc7;--action-strong:#194997;--action-soft:#e8f0ff;--success:#0b6b62;--success-soft:#e5f6f1;--warning:#795207;--warning-soft:#fff2cf;--danger:#a52732;--danger-soft:#fcecef;--focus:#1c63d5;--shadow:0 20px 54px rgba(15,35,60,.12);background:#e7edf3;color:var(--ink)}
+    *{box-sizing:border-box}html{min-width:320px;background:#e7edf3}body{min-width:320px;margin:0;background:radial-gradient(circle at 94% 0,rgba(35,95,199,.12),transparent 35rem),radial-gradient(circle at 1% 35%,rgba(18,38,63,.07),transparent 30rem),#e7edf3;color:var(--ink)}
+    button,input,a{font:inherit}button,a{color:inherit}button{cursor:default}a{text-decoration:none}button:focus-visible,a:focus-visible,input:focus-visible{outline:3px solid var(--focus);outline-offset:2px}bdi,.ltr{direction:ltr;unicode-bidi:isolate}
+    .board{width:min(3140px,calc(100% - 32px));margin:24px auto 64px}.board-intro,.evidence-section{border:1px solid #d3dee7;border-radius:26px;background:rgba(255,255,255,.97);box-shadow:0 16px 46px rgba(24,48,75,.07)}
+    .board-intro{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:18px 24px;padding:27px 30px}.board-intro h1,.section-heading h2,.scenario-heading h3{margin:0;letter-spacing:-.025em}.board-intro h1{font-size:30px;line-height:1.5}.board-intro p{max-width:1250px;margin:7px 0 0;color:var(--muted);font-size:13px;line-height:2}.board-tags{display:flex;flex-wrap:wrap;gap:8px;align-content:start;justify-content:flex-end}.board-tag{display:inline-flex;min-height:36px;align-items:center;padding:7px 12px;border:1px solid #bed0e0;border-radius:999px;background:#eef4ff;color:var(--action-strong);font-size:11px;font-weight:700;white-space:nowrap}.source-note{grid-column:1/-1;display:flex;align-items:center;gap:10px;padding:11px 14px;border:1px dashed #c7d5e2;border-radius:14px;background:var(--soft);color:var(--muted);font-size:12px;line-height:1.8}.source-note::before{width:8px;height:8px;flex:0 0 auto;border-radius:50%;background:var(--action);content:""}
+    .evidence-section{width:max-content;max-width:100%;margin:28px auto 0;padding:24px;overflow:hidden}.section-heading{display:flex;max-width:2500px;align-items:start;justify-content:space-between;gap:24px;margin-bottom:22px}.section-heading h2{font-size:23px;line-height:1.55}.section-heading p{max-width:1500px;margin:5px 0 0;color:var(--muted);font-size:12px;line-height:1.9}.section-code{direction:ltr;padding:5px 8px;border-radius:8px;background:#e2eaf2;color:#466179;font-size:10px;font-weight:700}
+    .scenario-grid,.responsive-grid{display:flex;align-items:flex-start;justify-content:center;gap:24px;direction:ltr}.scenario{direction:rtl}.scenario-heading{min-height:76px;padding:0 10px 12px}.scenario-heading h3{font-size:15px;line-height:1.7}.scenario-heading p{max-width:390px;margin:3px 0 0;color:var(--subtle);font-size:11px;line-height:1.75}
+    .device{position:relative;display:grid;grid-template-rows:112px 652px 80px;width:var(--device-width,390px);height:844px;overflow:hidden;border:0;border-radius:34px;background:var(--page);box-shadow:0 0 0 1px var(--border-strong),var(--shadow);color:var(--ink);isolation:isolate}.device::before{position:absolute;top:9px;left:50%;z-index:8;width:56px;height:5px;border-radius:99px;background:rgba(18,38,63,.16);content:"";transform:translateX(-50%)}
+    .mobile-header{display:flex;min-width:0;align-items:end;padding:26px 16px 14px;border-bottom:1px solid var(--border);background:rgba(255,255,255,.98)}.mobile-header__row{display:grid;width:100%;min-width:0;grid-template-columns:44px minmax(0,1fr) 44px;align-items:center;gap:10px}.mobile-title{min-width:0;text-align:center}.mobile-title h4{overflow:hidden;margin:0;color:var(--ink);font-size:17px;line-height:1.55;text-overflow:ellipsis;white-space:nowrap}.mobile-title p{overflow:hidden;margin:1px 0 0;color:var(--muted);font-size:11px;line-height:1.6;text-overflow:ellipsis;white-space:nowrap}.header-spacer{width:44px;height:44px}
+    .screen-content{min-width:0;min-height:0;overflow:hidden;padding:16px}.contract-root{display:flex;min-width:0;flex-direction:column;gap:12px}.compact{gap:9px}.card,.action-row,.session-row,.notification-row,.notice,.field-wrap,.decision{min-width:0;border:1px solid var(--border);border-radius:16px;background:var(--surface)}.card,.notice,.decision{padding:14px}.soft{background:var(--soft)}.card h5,.notice h5,.decision h5{margin:0;font-size:14px;line-height:1.6}.card p,.notice p,.decision p{margin:4px 0 0;color:var(--muted);font-size:11px;line-height:1.85}.eyebrow{display:block;color:var(--subtle);font-size:10px;font-weight:600;line-height:1.6}.identity{display:flex;align-items:center;gap:12px}.avatar{display:grid;width:52px;height:52px;flex:0 0 auto;place-items:center;border-radius:18px;background:linear-gradient(135deg,#d8e6ff,#eef4ff);color:var(--action-strong);font-size:17px;font-weight:700}.identity-copy{min-width:0}.identity-copy strong{display:block;overflow:hidden;font-size:15px;line-height:1.65;text-overflow:ellipsis;white-space:nowrap}.identity-copy span{display:block;overflow:hidden;color:var(--muted);font-size:11px;line-height:1.65;text-overflow:ellipsis;white-space:nowrap}
+    .action-row{display:grid;min-height:66px;grid-template-columns:minmax(0,1fr) 44px;align-items:center;gap:10px;padding:10px 12px;text-align:right}.action-copy{min-width:0}.action-copy strong,.action-copy span{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.action-copy strong{font-size:13px;line-height:1.7}.action-copy span{color:var(--muted);font-size:10px;line-height:1.6}.chevron{display:grid;width:44px;height:44px;place-items:center;color:var(--action);font-size:22px}.mini-status,.status{display:inline-flex;min-height:28px;align-items:center;justify-content:center;border-radius:999px;background:var(--action-soft);color:var(--action-strong);font-size:10px;font-weight:700;white-space:nowrap}.status{padding:5px 9px}.status.success{background:var(--success-soft);color:var(--success)}.status.warning{background:var(--warning-soft);color:var(--warning)}.status.danger{background:var(--danger-soft);color:var(--danger)}
+    .field-wrap{padding:11px 12px}.field-wrap label{display:block;margin-bottom:6px;color:var(--muted);font-size:11px;font-weight:600}.field{width:100%;height:48px;padding:0 12px;border:1px solid var(--border-strong);border-radius:12px;background:#fff;color:var(--ink);font-size:12px}.hint{margin:6px 0 0;color:var(--muted);font-size:10px;line-height:1.7}.inline-feedback{padding:10px 12px;border-radius:13px;background:var(--action-soft);color:var(--action-strong);font-size:10px;line-height:1.75}.inline-feedback.error{background:var(--danger-soft);color:var(--danger)}
+    .button,.icon-button{display:inline-flex;align-items:center;justify-content:center;border:1px solid var(--border-strong);border-radius:13px;background:#fff;color:var(--ink);font-weight:700}.button{min-width:44px;min-height:44px;padding:9px 14px;font-size:11px}.icon-button{width:44px;height:44px;padding:0;font-size:20px}.button.primary{border-color:var(--action);background:var(--action);color:#fff}.button.danger{border-color:#d74e5a;background:var(--danger);color:#fff}.button:disabled{opacity:.74}.cta{min-height:48px}.full{width:100%}.action-pair{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+    .session-row{display:grid;min-height:94px;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:10px;padding:12px}.session-row.current-session{grid-template-columns:minmax(0,1fr)}.session-copy{min-width:0}.session-copy strong,.session-copy span{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.session-copy strong{font-size:13px;line-height:1.7}.session-copy span{color:var(--muted);font-size:10px;line-height:1.65}.session-tags{display:flex;gap:5px;margin-top:7px}.session-row .button{width:82px;padding-inline:8px}.decision{border-color:#c5d6e5}.decision .truth{margin-top:8px;padding:9px 10px;border-radius:10px;background:var(--soft);color:var(--ink)}
+    .tabs{display:grid;height:52px;grid-template-columns:1fr 1fr;padding:3px;border:1px solid var(--border);border-radius:14px;background:#e9eff4}.tab{min-height:44px;border:0;border-radius:11px;background:transparent;color:var(--muted);font-size:11px;font-weight:700}.tab.active{background:#fff;color:var(--action-strong);box-shadow:0 2px 7px rgba(17,38,63,.09)}.notification-row{display:grid;min-height:104px;grid-template-columns:minmax(0,1fr) 44px;align-items:center;gap:10px;padding:12px;text-align:right}.notification-row.route-less{grid-template-columns:minmax(0,1fr)}.notification-copy{min-width:0}.notification-copy strong{display:-webkit-box;overflow:hidden;font-size:12px;line-height:1.8;-webkit-box-orient:vertical;-webkit-line-clamp:2}.notification-meta{display:flex;align-items:center;gap:7px;margin-top:7px;color:var(--muted);font-size:10px}.new-dot{width:8px;height:8px;border-radius:50%;background:var(--action)}
+    .bottom-nav{display:grid;width:100%;height:80px;grid-template-columns:repeat(5,minmax(0,1fr));align-items:stretch;border-top:1px solid var(--border);background:#fff}.nav-item{display:flex;min-width:44px;min-height:52px;align-items:center;justify-content:center;flex-direction:column;gap:3px;padding:6px 1px;color:#52687b;font-size:11px;font-weight:600}.nav-item svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8}.nav-item.is-active{color:var(--action-strong)}.nav-item.is-active svg{fill:var(--action-soft)}.nav-item span{display:block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .matrix-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px;direction:ltr}.matrix-card{direction:rtl;border:1px solid var(--border);border-radius:18px;background:#fff;padding:16px}.matrix-card h3{margin:0 0 5px;font-size:16px}.matrix-card>p{margin:0 0 12px;color:var(--muted);font-size:11px;line-height:1.8}.table{overflow:hidden;border:1px solid var(--border);border-radius:13px}.table-row{display:grid;min-height:48px;align-items:center;gap:8px;padding:8px 10px;border-top:1px solid var(--border);font-size:11px}.table-row:first-child{border-top:0;background:var(--soft);font-weight:700}.table.visibility .table-row{grid-template-columns:1.15fr .8fr .8fr}.table.routes .table-row{grid-template-columns:.8fr 1.2fr .95fr}.table.permissions .table-row{grid-template-columns:1.2fr repeat(3,.75fr)}.yes{color:var(--success);font-weight:700}.no{color:var(--danger);font-weight:700}.masked{color:var(--warning);font-weight:700}.route-code{direction:ltr;unicode-bidi:isolate;color:var(--action-strong);font-family:ui-monospace,monospace;font-size:10px}
+    .atlas-grid{display:grid;grid-template-columns:repeat(5,272px);gap:14px;direction:ltr}.state-group{display:flex;min-height:250px;direction:rtl;flex-direction:column;gap:10px;padding:14px;border:1px solid var(--border);border-radius:18px;background:#fff}.state-group h3{margin:0;font-size:13px;line-height:1.7}.state-group>p{margin:0;color:var(--muted);font-size:10px;line-height:1.75}.skeleton{display:grid;gap:8px}.skeleton span{display:block;height:15px;border-radius:6px;background:linear-gradient(90deg,#edf2f6,#dfe7ee,#edf2f6)}.skeleton span:nth-child(2){width:76%}.nested-states{display:grid;gap:7px}.state-line{min-height:48px;padding:8px 10px;border:1px solid var(--border);border-radius:11px;background:var(--soft);font-size:10px;line-height:1.7}.state-line strong{display:block;font-size:11px}.state-line.success{border-color:#acd7cc;background:var(--success-soft);color:var(--success)}.state-line.error{border-color:#efbbc0;background:var(--danger-soft);color:var(--danger)}.state-line.warning{border-color:#ebd58d;background:var(--warning-soft);color:var(--warning)}.state-line.busy{border-color:#b9cef3;background:var(--action-soft);color:var(--action-strong)}.state-line .button{margin-top:7px}
+    .push-grid{display:grid;grid-template-columns:repeat(3,280px);gap:12px;direction:ltr}.push-card{display:flex;min-height:170px;direction:rtl;flex-direction:column;padding:14px;border:1px solid var(--border);border-radius:17px;background:#fff}.push-card h3{margin:0;font-size:13px}.push-card p{margin:6px 0 0;color:var(--muted);font-size:10px;line-height:1.8}.push-card .button{align-self:flex-start;margin-top:auto}.push-key{direction:ltr;margin-bottom:8px;color:var(--action-strong);font-size:9px;font-weight:700}
+    .responsive-grid{gap:18px}.responsive-proof{--device-width:var(--responsive-width)}.responsive-proof .screen-content{padding-inline:16px}.responsive-proof .notification-row{min-height:104px}.responsive-label{direction:ltr;text-align:center}.responsive-label strong{font-size:13px}.responsive-label p{margin:2px 0 10px;color:var(--muted);font-size:10px}
+    .desktop-proof{display:grid;width:1440px;height:900px;grid-template-rows:80px minmax(0,1fr);overflow:hidden;border:1px solid var(--border-strong);border-radius:24px;background:var(--page);box-shadow:var(--shadow)}.desktop-header{display:grid;grid-template-columns:200px minmax(0,1fr) 200px;align-items:center;padding:0 32px;border-bottom:1px solid var(--border);background:#fff}.desktop-brand{font-size:15px;font-weight:700}.desktop-nav{display:flex;height:64px;align-items:center;justify-content:center;gap:8px}.desktop-nav .nav-item{width:92px;height:56px;border-radius:12px}.desktop-nav .nav-item.is-active{background:var(--action-soft)}.desktop-header-spacer{width:200px}.desktop-main{display:flex;min-height:0;align-items:flex-start;justify-content:center;padding:56px 32px}.desktop-contained{width:880px}.desktop-title{display:flex;align-items:end;justify-content:space-between;margin-bottom:18px}.desktop-title h3{margin:0;font-size:25px}.desktop-title p{margin:5px 0 0;color:var(--muted);font-size:12px}.desktop-session-list{display:grid;gap:12px}.desktop-session-list .session-row{min-height:108px}.desktop-decision{margin-top:16px}.desktop-decision .button{margin-top:12px}
+    @media(max-width:800px){.board{width:calc(100% - 16px);margin-top:8px}.board-intro{grid-template-columns:1fr;padding:20px}.board-tags{justify-content:flex-start}.evidence-section{max-width:100%;overflow:auto}.section-heading{min-width:390px}.scenario-grid,.responsive-grid{justify-content:flex-start}.matrix-grid{grid-template-columns:1fr}.atlas-grid{grid-template-columns:repeat(5,272px)}}
+  </style>
+</head>
+<body>
+  <main class="board">
+    <header class="board-intro">
+      <div><h1>Stage 0B-5 — حساب، پروفایل، امنیت و اعلان‌ها</h1><p>این صفحه فقط شواهد محلی مشتق‌شده از قرارداد Figma است: محصول موبایل‌محور، خلوت، بدون افزودن حقیقت تازه در دسکتاپ و بدون ورود به سطح داخلی بازار یا پیام‌رسان.</p></div>
+      <div class="board-tags"><span class="board-tag">Modern Finance</span><span class="board-tag">Mobile-first 390×844</span><span class="board-tag">Synthetic only</span><span class="board-tag">Runtime unchanged</span></div>
+      <div class="source-note">Figma منبع canonical طراحی است. این صفحه و تصاویر آن فقط برای اندازه‌گیری، بازبینی و ثبت شواهد ثانویه استفاده می‌شوند.</div>
+    </header>
+
+    <section id="account-profile-scenarios" class="evidence-section">
+      <header class="section-heading"><div><h2>حساب و پروفایل</h2><p>پنج سناریوی اول با مقصدهای یکتا، افشای تدریجی و حریم خصوصی روشن؛ هیچ داده عملیاتی یا شمارنده تزئینی اضافه نشده است.</p></div><span class="section-code">M01–M05</span></header>
+      <div class="scenario-grid">
+        <article class="scenario"><header class="scenario-heading"><h3>M01 — مرکز حساب</h3><p>پنج مقصد یکتا برای کاربر عادی؛ هر ردیف یک کار روشن دارد.</p></header>
+          <section class="device" data-product-surface data-mobile-scenario data-product-screen="M01" data-synthetic="true">
+            <header class="mobile-header"><div class="mobile-header__row"><span class="header-spacer"></span><div class="mobile-title"><h4>حساب</h4><p>نگار پارسا</p></div><span class="header-spacer"></span></div></header>
+            <main class="screen-content"><div class="contract-root compact" data-default-content>
+              <a class="action-row" href="#profile" data-default-unit data-necessity="keep" data-account-destination="profile" data-route="/profile"><span class="action-copy"><strong>پروفایل من</strong><span>تصویر و نشانی</span></span><span class="chevron">‹</span></a>
+              <a class="action-row" href="#security" data-default-unit data-necessity="keep" data-account-destination="security" data-route="/account/security"><span class="action-copy"><strong>امنیت حساب</strong><span>نشست‌های فعال</span></span><span class="chevron">‹</span></a>
+              <a class="action-row" href="#storage" data-default-unit data-necessity="keep" data-account-destination="storage" data-route="/account/storage"><span class="action-copy"><strong>حافظه و داده‌ها</strong><span>همین مرورگر</span></span><span class="chevron">‹</span></a>
+              <a class="action-row" href="#notifications" data-default-unit data-necessity="keep" data-account-destination="notifications" data-route="/account/notifications"><span class="action-copy"><strong>اعلان‌ها</strong><span>معاملات و پیام مدیریت</span></span><span class="chevron">‹</span></a>
+              <button class="action-row" type="button" data-default-unit data-necessity="keep" data-account-destination="telegram"><span class="action-copy"><strong>اتصال تلگرام</strong><span>مدیریت اتصال حساب</span></span><span class="chevron">‹</span></button>
+            </div></main><div class="nav-slot"></div>
+          </section>
+        </article>
+        <article class="scenario"><header class="scenario-heading"><h3>M02 — حساب حسابدار</h3><p>فقط پروفایل، حافظه و اعلان؛ نشست، خروج و اتصال تلگرام حذف شده‌اند.</p></header>
+          <section class="device" data-product-surface data-mobile-scenario data-product-screen="M02" data-synthetic="true" data-actor="accountant">
+            <header class="mobile-header"><div class="mobile-header__row"><span class="header-spacer"></span><div class="mobile-title"><h4>حساب</h4><p>رها نیکویی</p></div><span class="header-spacer"></span></div></header>
+            <main class="screen-content"><div class="contract-root" data-default-content>
+              <a class="action-row" href="#profile" data-default-unit data-necessity="keep" data-account-destination="profile" data-route="/profile"><span class="action-copy"><strong>پروفایل من</strong><span>اطلاعات حساب</span></span><span class="chevron">‹</span></a>
+              <a class="action-row" href="#storage" data-default-unit data-necessity="keep" data-account-destination="storage" data-route="/account/storage"><span class="action-copy"><strong>حافظه و داده‌ها</strong><span>همین مرورگر</span></span><span class="chevron">‹</span></a>
+              <a class="action-row" href="#notifications" data-default-unit data-necessity="keep" data-account-destination="notifications" data-route="/account/notifications"><span class="action-copy"><strong>اعلان‌ها</strong><span>معاملات و پیام مدیریت</span></span><span class="chevron">‹</span></a>
+            </div></main><div class="nav-slot"></div>
+          </section>
+        </article>
+        <article class="scenario"><header class="scenario-heading"><h3>M03 — پروفایل شخصی</h3><p>هویت اصلی در نگاه اول؛ جزئیات کم‌کاربرد فقط هنگام درخواست.</p></header>
+          <section class="device" data-product-surface data-mobile-scenario data-product-screen="M03" data-synthetic="true">
+            <header class="mobile-header"><div class="mobile-header__row"><button class="icon-button" type="button" aria-label="بازگشت">›</button><div class="mobile-title"><h4>پروفایل من</h4><p>اطلاعات قابل ویرایش</p></div><span class="header-spacer"></span></div></header>
+            <main class="screen-content"><div class="contract-root" data-default-content>
+              <section class="card identity" data-default-unit data-necessity="keep"><span class="avatar">ن‌پ</span><span class="identity-copy"><strong>نگار پارسا</strong><span data-self-phone="full">sample.user · ۰۹۱۲ ۰۰۰ ۰۰۰۰</span></span></section>
+              <section class="card soft" data-default-unit data-necessity="keep"><span class="eyebrow">نشانی</span><h5 data-self-address="full">تهران، خیابان نمونه، پلاک ۱۲</h5><p>فقط برای خود شما و مدیر مجاز کامل نمایش داده می‌شود.</p></section>
+              <button class="button full" type="button" data-profile-secondary="on-demand">نمایش اطلاعات تکمیلی</button>
+              <a class="button primary cta full" href="#edit-profile" data-route="/profile?edit=1">ویرایش پروفایل</a>
+            </div></main><div class="nav-slot"></div>
+          </section>
+        </article>
+        <article class="scenario"><header class="scenario-heading"><h3>M04 — ویرایش پروفایل</h3><p>بازخورد نشانی کنار همان فیلد قرار می‌گیرد و ورودی در شکست حفظ می‌شود.</p></header>
+          <section class="device" data-product-surface data-mobile-scenario data-product-screen="M04" data-synthetic="true">
+            <header class="mobile-header"><div class="mobile-header__row"><button class="icon-button" type="button" aria-label="بازگشت">›</button><div class="mobile-title"><h4>ویرایش پروفایل</h4><p>تصویر و نشانی</p></div><span class="header-spacer"></span></div></header>
+            <main class="screen-content"><form class="contract-root" data-default-content>
+              <section class="card identity" data-default-unit data-necessity="keep"><span class="avatar">ک‌ن</span><span class="identity-copy"><strong>تصویر پروفایل</strong><span>تصویر نمونه فعلی</span></span><button class="button" type="button">تغییر</button></section>
+              <div class="field-wrap" data-default-unit data-necessity="keep"><label for="profile-address">نشانی</label><input id="profile-address" class="field" value="تهران، خیابان نمونه، پلاک ۱۲" data-address-input><p class="hint">نشانی فقط در حوزه‌های مجاز حساب نمایش داده می‌شود.</p></div>
+              <div class="inline-feedback" data-address-feedback="context">نشانی آماده ذخیره است.</div>
+              <button class="button primary cta full" type="button" data-profile-save>ذخیره تغییرات</button>
+            </form></main><div class="nav-slot"></div>
+          </section>
+        </article>
+        <article class="scenario"><header class="scenario-heading"><h3>M05 — پروفایل عمومی</h3><p>موبایل ماسک‌شده، نشانی پنهان و بدون سطح تاریخچه یا رابطه کامل.</p></header>
+          <section class="device" data-product-surface data-mobile-scenario data-product-screen="M05" data-synthetic="true" data-viewer="normal">
+            <header class="mobile-header"><div class="mobile-header__row"><button class="icon-button" type="button" aria-label="بازگشت">›</button><div class="mobile-title"><h4>پروفایل عمومی</h4><p>اطلاعات مجاز</p></div><span class="header-spacer"></span></div></header>
+            <main class="screen-content"><div class="contract-root" data-default-content data-public-actions="none">
+              <section class="card identity" data-default-unit data-necessity="keep"><span class="avatar">آ‌ن</span><span class="identity-copy"><strong>آزمایشی نمونه</strong><span>public.demo</span></span></section>
+              <section class="card soft" data-default-unit data-necessity="keep" data-public-phone="masked"><span class="eyebrow">موبایل</span><h5>09•• ••• ••18</h5></section>
+              <section class="notice" data-default-unit data-necessity="keep" data-public-address="hidden"><h5>نشانی خصوصی است</h5><p>این اطلاعات برای شما نمایش داده نمی‌شود.</p></section>
+              <button class="button cta full" type="button">بازگشت</button>
+            </div></main><div class="nav-slot"></div>
+          </section>
+        </article>
+      </div>
+    </section>
+
+    <section id="profile-visibility-matrix" class="evidence-section">
+      <header class="section-heading"><div><h2>ماتریس حریم خصوصی پروفایل</h2><p>چهار وضعیت دقیق؛ نمایش اطلاعات کامل تنها برای خود کاربر یا مدیر دارای مجوز است.</p></div><span class="section-code">VISIBILITY · 4</span></header>
+      <div class="matrix-card" data-product-surface data-visibility-matrix>
+        <div class="table visibility">
+          <div class="table-row"><strong>بیننده</strong><strong>موبایل</strong><strong>نشانی</strong></div>
+          <div class="table-row" data-visibility-row="self" data-phone="full" data-address="full"><span>خود کاربر</span><span class="yes">کامل</span><span class="yes">کامل</span></div>
+          <div class="table-row" data-visibility-row="normal" data-phone="masked" data-address="hidden"><span>کاربر عادی</span><span class="masked">ماسک‌شده</span><span class="no">پنهان</span></div>
+          <div class="table-row" data-visibility-row="authorized-admin" data-phone="full" data-address="full"><span>مدیر مجاز</span><span class="yes">کامل</span><span class="yes">کامل</span></div>
+          <div class="table-row" data-visibility-row="unavailable" data-phone="hidden" data-address="hidden"><span>ممنوع یا ناموجود</span><span class="no">پنهان</span><span class="no">پنهان</span></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="security-storage-scenarios" class="evidence-section">
+      <header class="section-heading"><div><h2>امنیت و حافظه</h2><p>فهرست نشست با metadata محدود، تصمیم پایان نشست با حفظ نشست جاری و پاک‌سازی صرفاً محلی.</p></div><span class="section-code">M06–M08</span></header>
+      <div class="scenario-grid">
+        <article class="scenario"><header class="scenario-heading"><h3>M06 — نشست‌های فعال</h3><p>فقط دستگاه، بستر، زمان فعالیت و signal لازم.</p></header>
+          <section class="device" data-product-surface data-mobile-scenario data-product-screen="M06" data-synthetic="true">
+            <header class="mobile-header"><div class="mobile-header__row"><button class="icon-button" type="button" aria-label="بازگشت">›</button><div class="mobile-title"><h4>امنیت حساب</h4><p>نشست‌های فعال</p></div><span class="header-spacer"></span></div></header>
+            <main class="screen-content"><div class="contract-root" data-default-content data-session-inventory="local-per-server">
+              <section class="session-row current-session" data-default-unit data-necessity="keep" data-session-id="pixel-current" data-device="Pixel 8" data-platform="Chrome · Android" data-activity="اکنون" data-signal="current"><span class="session-copy"><strong><bdi>Pixel 8</bdi></strong><span><bdi>Chrome · Android</bdi> · آخرین فعالیت: اکنون</span><span class="session-tags"><span class="status success" data-current-session-signal>این دستگاه</span></span></span></section>
+              <section class="session-row" data-default-unit data-necessity="keep" data-session-id="iphone-other" data-device="iPhone 15" data-platform="Safari · iOS" data-activity="۱ ساعت پیش" data-signal="other"><span class="session-copy"><strong><bdi>iPhone 15</bdi></strong><span><bdi>Safari · iOS</bdi> · ۱ ساعت پیش</span></span><button class="button" type="button">پایان</button></section>
+              <button class="button danger cta full" type="button" data-terminate-others>پایان همه نشست‌های دیگر</button>
+            </div></main><div class="nav-slot"></div>
+          </section>
+        </article>
+        <article class="scenario"><header class="scenario-heading"><h3>M07 — تصمیم پایان نشست</h3><p>نشست جاری حفظ می‌شود؛ تأیید و نتیجه همان‌جا دیده می‌شوند.</p></header>
+          <section class="device" data-product-surface data-mobile-scenario data-product-screen="M07" data-synthetic="true">
+            <header class="mobile-header"><div class="mobile-header__row"><button class="icon-button" type="button" aria-label="بازگشت">›</button><div class="mobile-title"><h4>پایان نشست‌ها</h4><p>تصمیم امنیتی</p></div><span class="header-spacer"></span></div></header>
+            <main class="screen-content"><div class="contract-root" data-default-content data-session-decision>
+              <section class="decision" data-default-unit data-necessity="keep"><h5>همه نشست‌های دیگر پایان یابند؟</h5><p>نشست جاری روی <bdi>Pixel 8</bdi> حفظ می‌شود.</p><p class="truth">فقط نشست‌های دیگر از حساب خارج می‌شوند.</p></section>
+              <button class="button full" type="button" aria-pressed="true" data-session-ack>پیامد را خواندم</button>
+              <div class="action-pair"><button class="button cta" type="button">انصراف</button><button class="button danger cta" type="button" data-session-confirm>تأیید پایان</button></div>
+              <div class="inline-feedback error" data-session-inline-outcome="failure-preserved">تغییر ثبت نشد؛ تصمیم شما حفظ شده است و می‌توانید دوباره تلاش کنید.</div>
+            </div></main><div class="nav-slot"></div>
+          </section>
+        </article>
+        <article class="scenario"><header class="scenario-heading"><h3>M08 — حافظه محلی</h3><p>حساب، پیام‌ها و نشست‌ها باقی می‌مانند؛ اندازه صفر با خطای اندازه یکی نیست.</p></header>
+          <section class="device" data-product-surface data-mobile-scenario data-product-screen="M08" data-synthetic="true">
+            <header class="mobile-header"><div class="mobile-header__row"><button class="icon-button" type="button" aria-label="بازگشت">›</button><div class="mobile-title"><h4>حافظه و داده‌ها</h4><p>همین مرورگر</p></div><span class="header-spacer"></span></div></header>
+            <main class="screen-content"><div class="contract-root" data-default-content data-storage-scope="current-browser-device">
+              <section class="card" data-default-unit data-necessity="keep" data-storage-size="12.4 MB"><span class="eyebrow">فایل‌های موقت</span><h5>۱۲٫۴ مگابایت</h5><p>فقط فایل‌های موقت همین مرورگر حذف می‌شوند.</p></section>
+              <section class="notice" data-default-unit data-necessity="keep"><h5>چه چیزی باقی می‌ماند؟</h5><p>حساب، پیام‌ها و نشست‌های فعال بدون تغییر می‌مانند.</p></section>
+              <button class="button danger cta full" type="button" data-clear-local-storage>پاک‌کردن فایل‌های موقت</button>
+              <div class="inline-feedback error" data-storage-inline-outcome="failure">پاک‌سازی کامل نشد؛ دوباره تلاش کنید.</div>
+            </div></main><div class="nav-slot"></div>
+          </section>
+        </article>
+      </div>
+    </section>
+
+    <section id="notification-center-scenarios" class="evidence-section">
+      <header class="section-heading"><div><h2>مرکز اعلان و Push</h2><p>بدون شمارنده ساختگی، با نشان «جدید» فقط برای مورد realtime و بدون affordance برای اعلان بدون مقصد.</p></div><span class="section-code">M09–M10</span></header>
+      <div class="scenario-grid">
+        <article class="scenario"><header class="scenario-heading"><h3>M09 — مرکز اعلان</h3><p>دو دسته بدون عدد؛ محتوای محدود و مقصد فقط هنگام وجود واقعی.</p></header>
+          <section class="device" data-product-surface data-mobile-scenario data-product-screen="M09" data-synthetic="true" data-m09-signature="trade-request|اکنون|actionable|new;trade-final|۱۰ دقیقه پیش|actionable|read">
+            <header class="mobile-header"><div class="mobile-header__row"><button class="icon-button" type="button" aria-label="بازگشت">›</button><div class="mobile-title"><h4>اعلان‌ها</h4><p>مرکز اعلان</p></div><span class="header-spacer"></span></div></header>
+            <main class="screen-content"><div class="contract-root" data-default-content>
+              <div class="tabs" role="tablist" aria-label="دسته اعلان"><button class="tab active" type="button" role="tab" aria-selected="true">معاملات</button><button class="tab" type="button" role="tab" aria-selected="false">سایر</button></div>
+              <button class="notification-row" type="button" data-default-unit data-necessity="keep" data-notification-id="trade-request" data-content="درخواست معامله تازه‌ای ثبت شد." data-time="اکنون" data-route-state="actionable" data-new="true"><span class="notification-copy"><strong>درخواست معامله تازه‌ای ثبت شد.</strong><span class="notification-meta"><span class="new-dot"></span><span>جدید</span><span>اکنون</span></span></span><span class="chevron">‹</span></button>
+              <button class="notification-row" type="button" data-default-unit data-necessity="keep" data-notification-id="trade-final" data-content="معامله شما نهایی شد؛ نتیجه را مشاهده کنید." data-time="۱۰ دقیقه پیش" data-route-state="actionable" data-new="false"><span class="notification-copy"><strong>معامله شما نهایی شد؛ نتیجه را مشاهده کنید.</strong><span class="notification-meta"><span>۱۰ دقیقه پیش</span></span></span><span class="chevron">‹</span></button>
+            </div></main><div class="nav-slot"></div>
+          </section>
+        </article>
+        <article class="scenario"><header class="scenario-heading"><h3>M10 — Push قابل اقدام</h3><p>مجوز هنوز درخواست نشده؛ تنها اقدام واقعی، فعال‌سازی در همین مرورگر است.</p></header>
+          <section class="device" data-product-surface data-mobile-scenario data-product-screen="M10" data-synthetic="true" data-push-mobile-state="permission-default">
+            <header class="mobile-header"><div class="mobile-header__row"><button class="icon-button" type="button" aria-label="بازگشت">›</button><div class="mobile-title"><h4>اعلان دستگاه</h4><p>همین مرورگر</p></div><span class="header-spacer"></span></div></header>
+            <main class="screen-content"><div class="contract-root" data-default-content>
+              <section class="card" data-default-unit data-necessity="keep"><span class="eyebrow">وضعیت</span><h5>آماده فعال‌سازی</h5><p>مرورگر هنوز اجازه نمایش اعلان را نپرسیده است.</p></section>
+              <section class="notice" data-default-unit data-necessity="keep"><h5>کنترل مرورگر</h5><p>پس از انتخاب فعال‌سازی، درخواست مجوز مرورگر نمایش داده می‌شود.</p></section>
+              <button class="button primary cta full" type="button" data-push-action="enable">فعال‌سازی اعلان</button>
+            </div></main><div class="nav-slot"></div>
+          </section>
+        </article>
+      </div>
+    </section>
+
+    <section id="state-route-push-atlas" class="evidence-section">
+      <header class="section-heading"><div><h2>حالت، بازیابی، مسیر و مجوز</h2><p>۱۵ گروه بازیابی، مسیرهای canonical، مجوز نشست شخصی و ۹ حالت دقیق Push در یک بسته قابل اندازه‌گیری.</p></div><span class="section-code">ATLAS · ROUTE · PUSH</span></header>
+      <div class="atlas-grid" data-recovery-atlas>
+        <article class="state-group" data-product-surface data-recovery-group="account-loading"><h3>حساب · در حال دریافت</h3><div class="skeleton"><span></span><span></span><span></span></div><p>ساختار مقصدها حفظ می‌شود.</p></article>
+        <article class="state-group" data-product-surface data-recovery-group="account-error-retry"><h3>حساب دریافت نشد</h3><p>اطلاعات کامل نیست؛ از همین‌جا دوباره تلاش کنید.</p><button class="button" type="button">تلاش دوباره</button></article>
+        <article class="state-group" data-product-surface data-recovery-group="account-inactive-restricted"><h3>حساب محدود یا غیرفعال</h3><p>مقصدهای نامجاز نمایش داده نمی‌شوند.</p><button class="button" type="button">مشاهده وضعیت حساب</button></article>
+        <article class="state-group" data-product-surface data-recovery-group="profile-loading"><h3>پروفایل · در حال دریافت</h3><div class="skeleton"><span></span><span></span></div><p>هویت اصلی جای خود را حفظ می‌کند.</p></article>
+        <article class="state-group" data-product-surface data-recovery-group="profile-error-retry"><h3>پروفایل دریافت نشد</h3><p>دوباره تلاش کنید؛ اطلاعات حدسی نمایش داده نمی‌شود.</p><button class="button" type="button">تلاش دوباره</button></article>
+        <article class="state-group" data-product-surface data-recovery-group="profile-unavailable"><h3>پروفایل در دسترس نیست</h3><p>ممکن است وجود نداشته باشد یا مجوز مشاهده تغییر کرده باشد.</p><button class="button" type="button">بازگشت</button></article>
+        <article class="state-group" data-product-surface data-recovery-group="profile-address-feedback" data-preserved-input="تهران، خیابان نمونه، پلاک ۱۲"><h3>نشانی · بازخورد کنار فیلد</h3><div class="nested-states"><div class="state-line warning" data-nested-state="validation"><strong>اعتبارسنجی</strong>نشانی باید کامل باشد.</div><div class="state-line busy" data-nested-state="busy"><strong>در حال ذخیره</strong>ورودی حفظ شده است.</div><div class="state-line success" data-nested-state="success"><strong>ذخیره شد</strong>نشانی تازه ثبت شد.</div><div class="state-line error" data-nested-state="failure" data-input-preserved="true"><strong>ذخیره نشد</strong>«تهران، خیابان نمونه، پلاک ۱۲» حفظ شد.<button class="button" type="button">تلاش دوباره</button></div></div></article>
+        <article class="state-group" data-product-surface data-recovery-group="session-loading"><h3>نشست‌ها · در حال دریافت</h3><div class="skeleton"><span></span><span></span></div><p>ردیف ساختاری جای خود را حفظ می‌کند.</p></article>
+        <article class="state-group" data-product-surface data-recovery-group="session-true-empty"><h3>نشست دیگری وجود ندارد</h3><p>نشست جاری تنها نشست قابل مشاهده است.</p><button class="button" type="button">بازگشت به امنیت</button></article>
+        <article class="state-group" data-product-surface data-recovery-group="session-error-retry"><h3>نشست‌ها دریافت نشدند</h3><p>فهرست ناقص نمایش داده نمی‌شود.</p><button class="button" type="button">تلاش دوباره</button></article>
+        <article class="state-group" data-product-surface data-recovery-group="session-termination-feedback"><h3>پایان نشست · نتیجه</h3><div class="nested-states"><div class="state-line busy" data-nested-state="busy"><strong>در حال پایان</strong>نشست جاری حفظ می‌شود.</div><div class="state-line success" data-nested-state="success"><strong>پایان یافت</strong>نشست‌های دیگر خارج شدند.</div><div class="state-line error" data-nested-state="failure"><strong>پایان نیافت</strong>دوباره تلاش کنید.<button class="button" type="button">تلاش دوباره</button></div></div></article>
+        <article class="state-group" data-product-surface data-recovery-group="session-permission"><h3>مجوز نشست</h3><div class="nested-states"><div class="state-line warning" data-nested-state="forbidden"><strong>اقدام مجاز نیست</strong>نشست فقط مشاهده می‌شود.</div><div class="state-line warning" data-nested-state="accountant-forbidden"><strong>حسابدار</strong>نشست شخصی برای این نقش در دسترس نیست.</div></div><button class="button" type="button">بازگشت</button></article>
+        <article class="state-group" data-product-surface data-recovery-group="storage-feedback"><h3>حافظه · نتیجه محلی</h3><div class="nested-states"><div class="state-line busy" data-nested-state="busy"><strong>در حال پاک‌سازی</strong></div><div class="state-line success" data-nested-state="success"><strong>پاک شد</strong></div><div class="state-line error" data-nested-state="failure"><strong>پاک نشد</strong><button class="button" type="button">تلاش دوباره</button></div><div class="state-line" data-nested-state="valid-zero"><strong><bdi>0 MB</bdi></strong>حافظه موقت خالی است.</div><div class="state-line warning" data-nested-state="size-error"><strong>اندازه در دسترس نیست</strong>صفر فرض نمی‌شود.</div></div></article>
+        <article class="state-group" data-product-surface data-recovery-group="notification-loading"><h3>اعلان‌ها · در حال دریافت</h3><div class="skeleton"><span></span><span></span></div><p>ردیف ساختاری حفظ می‌شود.</p></article>
+        <article class="state-group" data-product-surface data-recovery-group="notification-empty-error"><h3>اعلان · حالت‌های متمایز</h3><div class="nested-states"><div class="state-line" data-nested-state="true-empty"><strong>هنوز اعلانی نیست</strong></div><div class="state-line" data-nested-state="category-empty"><strong>در این دسته اعلانی نیست</strong></div><div class="state-line error" data-nested-state="error-retry"><strong>دریافت نشد</strong><button class="button" type="button">تلاش دوباره</button></div><div class="state-line" data-nested-state="route-less"><strong>بدون مقصد</strong>کنترل بازکردن ندارد.</div><div class="state-line success" data-nested-state="realtime-new"><strong>اعلان تازه</strong>فقط این مورد نشان جدید دارد.</div></div></article>
+      </div>
+
+      <div class="matrix-grid" style="margin-top:18px" data-route-permission-matrices>
+        <article class="matrix-card" data-product-surface data-route-matrix><h3>مسیرهای حساب</h3><p>مسیرهای قدیمی در پیاده‌سازی آینده فقط redirect می‌شوند.</p><div class="table routes">
+          <div class="table-row"><strong>نوع</strong><strong>مسیر</strong><strong>مقصد</strong></div>
+          <div class="table-row" data-route-row="canonical"><span>canonical</span><code class="route-code">/account</code><span>مرکز حساب</span></div>
+          <div class="table-row" data-route-row="canonical"><span>canonical</span><code class="route-code">/account/security</code><span>امنیت</span></div>
+          <div class="table-row" data-route-row="canonical"><span>canonical</span><code class="route-code">/account/storage</code><span>حافظه</span></div>
+          <div class="table-row" data-route-row="canonical"><span>canonical</span><code class="route-code">/account/notifications</code><span>اعلان</span></div>
+          <div class="table-row" data-route-row="canonical"><span>canonical</span><code class="route-code">/profile</code><span>پروفایل شخصی</span></div>
+          <div class="table-row" data-route-row="canonical"><span>canonical</span><code class="route-code">/users/:id</code><span>پروفایل عمومی</span></div>
+          <div class="table-row" data-route-row="legacy-redirect"><span>legacy redirect</span><code class="route-code">/settings</code><span>/account/storage</span></div>
+          <div class="table-row" data-route-row="legacy-redirect"><span>legacy redirect</span><code class="route-code">/notifications</code><span>/account/notifications</span></div>
+        </div></article>
+        <article class="matrix-card" data-product-surface data-personal-session-permission-matrix><h3>مجوز نشست شخصی</h3><p>نقش و نوع نشست از هم جدا هستند.</p><div class="table permissions">
+          <div class="table-row"><strong>وضعیت</strong><strong>مشاهده</strong><strong>پایان دیگر</strong><strong>همه دیگر</strong></div>
+          <div class="table-row" data-session-permission-row="primary" data-view="yes" data-terminate-other="yes" data-terminate-all-other="yes"><span>نشست جاری اصلی</span><span class="yes">بله</span><span class="yes">بله</span><span class="yes">بله</span></div>
+          <div class="table-row" data-session-permission-row="non-primary" data-view="yes" data-terminate-other="no" data-terminate-all-other="no"><span>نشست جاری غیراصلی</span><span class="yes">بله</span><span class="no">خیر</span><span class="no">خیر</span></div>
+          <div class="table-row" data-session-permission-row="accountant" data-view="no" data-terminate-other="no" data-terminate-all-other="no"><span>حسابدار</span><span class="no">خیر</span><span class="no">خیر</span><span class="no">خیر</span></div>
+        </div></article>
+      </div>
+
+      <div class="push-grid" style="margin-top:18px" data-push-state-matrix>
+        <article class="push-card" data-product-surface data-push-state="checking"><span class="push-key">checking</span><h3>در حال بررسی</h3><p>وضعیت مرورگر در حال مشخص‌شدن است.</p></article>
+        <article class="push-card" data-product-surface data-push-state="unsupported"><span class="push-key">unsupported</span><h3>پشتیبانی نمی‌شود</h3><p>این مرورگر امکان اعلان دستگاه را ندارد.</p></article>
+        <article class="push-card" data-product-surface data-push-state="insecure"><span class="push-key">insecure</span><h3>اتصال امن لازم است</h3><p>اعلان دستگاه در این محیط فعال نمی‌شود.</p></article>
+        <article class="push-card" data-product-surface data-push-state="server-disabled"><span class="push-key">server-disabled</span><h3>اکنون فعال نیست</h3><p>کنترل قابل اقدامی نمایش داده نمی‌شود.</p></article>
+        <article class="push-card" data-product-surface data-push-state="permission-blocked"><span class="push-key">permission-blocked</span><h3>در مرورگر مسدود است</h3><p>اجازه باید از تنظیمات مرورگر تغییر کند.</p></article>
+        <article class="push-card" data-product-surface data-push-state="permission-default"><span class="push-key">permission-default</span><h3>آماده فعال‌سازی</h3><p>درخواست مجوز مرورگر هنوز انجام نشده است.</p><button class="button primary" type="button" data-push-state-action="enable">فعال‌سازی</button></article>
+        <article class="push-card" data-product-surface data-push-state="subscribed"><span class="push-key">subscribed</span><h3>فعال</h3><p>این مرورگر برای دریافت اعلان ثبت شده است.</p></article>
+        <article class="push-card" data-product-surface data-push-state="unsubscribed"><span class="push-key">unsubscribed</span><h3>فعال نیست</h3><p>می‌توانید این مرورگر را فعال کنید.</p><button class="button primary" type="button" data-push-state-action="enable">فعال‌سازی</button></article>
+        <article class="push-card" data-product-surface data-push-state="error"><span class="push-key">error</span><h3>بررسی کامل نشد</h3><p>یک بار دیگر وضعیت را بررسی کنید.</p><button class="button" type="button" data-push-state-action="retry">تلاش دوباره</button></article>
+      </div>
+    </section>
+
+    <section id="account-notifications-responsive-sweep" class="evidence-section">
+      <header class="section-heading"><div><h2>Responsive sweep — داده یکسان M09</h2><p>هر پنج proof دقیقاً محتوای M09 را در ارتفاع ۸۴۴ نشان می‌دهد؛ فقط عرض تغییر می‌کند.</p></div><span class="section-code">360 · 375 · 390 · 414 · 430</span></header>
+      <div id="responsive-proof-grid" class="responsive-grid"></div>
+    </section>
+
+    <section id="desktop-security-sessions" class="evidence-section">
+      <header class="section-heading"><div><h2>Desktop — امنیت و نشست‌ها</h2><p>چیدمان contained و مستقل؛ همان واقعیت‌های M06، بدون KPI یا metadata اضافه.</p></div><span class="section-code">1440×900</span></header>
+      <section class="desktop-proof" data-product-surface data-desktop-proof data-synthetic="true">
+        <header class="desktop-header"><div class="desktop-brand">پنل مالی</div><div class="desktop-nav nav-slot-desktop"></div><div class="desktop-header-spacer"></div></header>
+        <main class="desktop-main"><div class="desktop-contained">
+          <header class="desktop-title"><div><h3>امنیت حساب</h3><p>نشست‌های فعال</p></div><button class="button" type="button">بازگشت</button></header>
+          <div class="desktop-session-list" data-desktop-session-facts>
+            <section class="session-row current-session" data-session-id="pixel-current" data-device="Pixel 8" data-platform="Chrome · Android" data-activity="اکنون" data-signal="current"><span class="session-copy"><strong><bdi>Pixel 8</bdi></strong><span><bdi>Chrome · Android</bdi> · آخرین فعالیت: اکنون</span><span class="session-tags"><span class="status success" data-current-session-signal>این دستگاه</span></span></span></section>
+            <section class="session-row" data-session-id="iphone-other" data-device="iPhone 15" data-platform="Safari · iOS" data-activity="۱ ساعت پیش" data-signal="other"><span class="session-copy"><strong><bdi>iPhone 15</bdi></strong><span><bdi>Safari · iOS</bdi> · ۱ ساعت پیش</span></span><button class="button" type="button">پایان</button></section>
+          </div>
+          <section class="decision desktop-decision"><h5>پایان همه نشست‌های دیگر</h5><p>نشست جاری روی <bdi>Pixel 8</bdi> حفظ می‌شود.</p><button class="button danger cta" type="button">بررسی و تأیید</button></section>
+        </div></main>
+      </section>
+    </section>
+  </main>
+
+  <script>
+    (() => {
+      const navItems = [
+        ['home','خانه'],['market','بازار'],['messenger','پیام‌رسان'],['operations','عملیات'],['account','حساب']
+      ]
+      const icon = '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="7"></circle><path d="M8 12h8M12 8v8"></path></svg>'
+      const navMarkup = (desktop = false) => `<nav class="${desktop ? 'desktop-nav' : 'bottom-nav'}" data-shell-navigation>${navItems.map(([key,label]) => `<a href="#${key}" class="nav-item${key === 'account' ? ' is-active' : ''}" data-nav-destination="${key}" aria-label="${label}">${icon}<span>${label}</span></a>`).join('')}</nav>`
+      document.querySelectorAll('.nav-slot').forEach((slot) => { slot.innerHTML = navMarkup(false) })
+      document.querySelectorAll('.nav-slot-desktop').forEach((slot) => { slot.outerHTML = navMarkup(true) })
+
+      const widths = [360,375,390,414,430]
+      const signature = 'trade-request|اکنون|actionable|new;trade-final|۱۰ دقیقه پیش|actionable|read'
+      document.getElementById('responsive-proof-grid').innerHTML = widths.map((width) => `<article class="responsive-label" data-responsive-width="${width}"><strong>${width}×844</strong><p>M09 · same data</p><section class="device responsive-proof" style="--responsive-width:${width}px" data-product-surface data-responsive-proof data-synthetic="true" data-m09-signature="${signature}"><header class="mobile-header"><div class="mobile-header__row"><button class="icon-button" type="button" aria-label="بازگشت">›</button><div class="mobile-title"><h4>اعلان‌ها</h4><p>مرکز اعلان</p></div><span class="header-spacer"></span></div></header><main class="screen-content"><div class="contract-root" data-default-content><div class="tabs" role="tablist" aria-label="دسته اعلان"><button class="tab active" type="button" role="tab" aria-selected="true">معاملات</button><button class="tab" type="button" role="tab" aria-selected="false">سایر</button></div><button class="notification-row" type="button" data-default-unit data-necessity="keep" data-notification-id="trade-request" data-content="درخواست معامله تازه‌ای ثبت شد." data-time="اکنون" data-route-state="actionable" data-new="true"><span class="notification-copy"><strong>درخواست معامله تازه‌ای ثبت شد.</strong><span class="notification-meta"><span class="new-dot"></span><span>جدید</span><span>اکنون</span></span></span><span class="chevron">‹</span></button><button class="notification-row" type="button" data-default-unit data-necessity="keep" data-notification-id="trade-final" data-content="معامله شما نهایی شد؛ نتیجه را مشاهده کنید." data-time="۱۰ دقیقه پیش" data-route-state="actionable" data-new="false"><span class="notification-copy"><strong>معامله شما نهایی شد؛ نتیجه را مشاهده کنید.</strong><span class="notification-meta"><span>۱۰ دقیقه پیش</span></span></span><span class="chevron">‹</span></button></div></main>${navMarkup(false)}</section></article>`).join('')
+    })()
+  </script>
+</body>
+</html>

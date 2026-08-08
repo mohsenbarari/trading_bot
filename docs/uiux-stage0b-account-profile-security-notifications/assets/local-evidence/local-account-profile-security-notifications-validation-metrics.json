@@ -1,0 +1,6745 @@
+{
+  "schemaVersion": 3,
+  "runId": "2839230-1786210464518",
+  "runMode": "publish",
+  "evidenceRole": "secondary-local-derivative",
+  "scope": "Stage 0B-5 account, profile, security, storage, notifications and Push; Market and Messenger interiors excluded",
+  "generatedAt": "2026-08-08T17:34:30.693Z",
+  "canonicalFigma": {
+    "fileKey": "z8jgJxST4O2APzWnlyP9gv",
+    "pageId": "117:2",
+    "sectionIds": [
+      "117:3",
+      "117:4",
+      "117:5",
+      "117:6",
+      "117:7",
+      "117:8"
+    ],
+    "frozenAt": "2026-08-08T17:10:58.500Z",
+    "auditedAt": "2026-08-08T17:11:05.475Z",
+    "auditSchemaVersion": 2,
+    "auditAssertionCount": 27,
+    "auditAssertionsPassed": 27,
+    "sourceCommit": "fa2a0a42934493752e7a7106e4dd10f168eb16d7",
+    "mobileRootIds": [
+      "128:3",
+      "128:64",
+      "128:111",
+      "129:132",
+      "129:187",
+      "131:823",
+      "131:881",
+      "131:935",
+      "132:1627",
+      "132:1683"
+    ],
+    "responsiveBoardId": "141:417",
+    "responsiveRootIds": [
+      "141:456",
+      "141:512",
+      "141:568",
+      "141:624",
+      "141:680"
+    ],
+    "desktopBoardId": "143:632",
+    "desktopRootId": "143:668",
+    "recoveryBoardId": "136:409",
+    "visibilityRoutePermissionBoardId": "137:414",
+    "visibilityRowId": "149:687",
+    "pushBoardId": "138:414",
+    "nestedSubstateNodeIds": [
+      "148:687",
+      "148:694",
+      "148:701",
+      "148:708"
+    ],
+    "directAuditPath": "assets/figma-stage0b5-audit-metrics.json",
+    "directAuditSha256": "351f6afafb0e2d3b1a08e908dcd88cb72d9d2fd4fed8110c3fb22c12c6658d94",
+    "auditMetrics": {
+      "designSystemInventory": {
+        "variableCount": 65,
+        "textStyleCount": 9,
+        "effectCount": 2,
+        "componentSetCount": 12,
+        "componentVariantCount": 54,
+        "boundInstanceCountOnStagePage": 77,
+        "detachedInstanceCountOnStagePage": 0
+      },
+      "geometry": {
+        "mobileRootCount": 10,
+        "mobileWidth": 390,
+        "mobileHeight": 844,
+        "responsiveRootCount": 5,
+        "responsiveWidths": [
+          360,
+          375,
+          390,
+          414,
+          430
+        ],
+        "responsiveHeight": 844,
+        "desktopRootCount": 1,
+        "desktopWidth": 1440,
+        "desktopHeight": 900,
+        "desktopFactCount": 19,
+        "mobileReferenceFactCount": 19,
+        "overflowFailureCount": 0,
+        "textClipFailureCount": 0
+      },
+      "interaction": {
+        "semanticHitContainerCount": 142,
+        "minimumHitWidthPx": 44,
+        "minimumHitHeightPx": 44,
+        "boundButtonCount": 15,
+        "minimumButtonHeightPx": 48,
+        "minimumNavigationLabelFontSizePx": 11,
+        "detailHeaderHeightPx": 112,
+        "detailHeaderBackTargetWidthPx": 44,
+        "detailHeaderBackTargetHeightPx": 44
+      },
+      "stateCoverage": {
+        "recoveryGroupCount": 15,
+        "namedNestedSubstateCount": 14,
+        "pushStateCount": 9,
+        "pushStates": [
+          "checking",
+          "unsupported",
+          "insecure",
+          "server-disabled",
+          "permission-blocked",
+          "permission-default",
+          "subscribed",
+          "unsubscribed",
+          "error"
+        ],
+        "semanticNames": [
+          "Address/validation",
+          "Address/busy",
+          "Address/success",
+          "Address/failure",
+          "Session/busy",
+          "Session/success",
+          "Session/failure",
+          "Storage/busy",
+          "Storage/success",
+          "Storage/failure",
+          "Storage/valid-zero",
+          "Storage/size-error",
+          "Notification/true-empty",
+          "Notification/category-empty"
+        ]
+      },
+      "typographyAndContrast": {
+        "fontFamilies": [
+          "Vazirmatn"
+        ],
+        "missingFontCount": 0,
+        "visibleTextSampleCount": 401,
+        "textContrastFailureCount": 0,
+        "minimumTextContrastRatio": 4.548,
+        "minimumFocusContrastRatio": 3.972,
+        "focusStrokeWidthPx": 3,
+        "m04ContrastRatios": {
+          "label": 5.33,
+          "value": 15.84,
+          "privacy": 5.7,
+          "primaryCta": 4.55
+        }
+      },
+      "contentAndScope": {
+        "syntheticIdentitiesOnly": true,
+        "rawRouteOrBackendMetadataHits": 0,
+        "bannedNoiseHits": 0,
+        "marketInteriorNodeCount": 0,
+        "messengerInteriorNodeCount": 0,
+        "protectedInteriors": [
+          "market",
+          "messenger"
+        ],
+        "desktopAddsNewFacts": false,
+        "responsiveM09DataParity": true
+      },
+      "checks": {
+        "skipInvisibleInstanceChildren": false,
+        "allAssertionsPassed": true,
+        "assertionCount": 27,
+        "assertionFailureCount": 0,
+        "figmaDesignBlockerCount": 0
+      }
+    }
+  },
+  "directFigmaAuditValidation": {
+    "passed": true,
+    "path": "assets/figma-stage0b5-audit-metrics.json",
+    "sha256": "351f6afafb0e2d3b1a08e908dcd88cb72d9d2fd4fed8110c3fb22c12c6658d94",
+    "semanticHitContainerCount": 142,
+    "canonicalMetricGroupsCompared": 7,
+    "assertionCount": 27,
+    "assertionFailures": 0
+  },
+  "environment": {
+    "playwrightSource": "/tmp/trading-bot-webapp-uiux-redesign-v2/frontend/node_modules/playwright",
+    "browser": "147.0.7727.15",
+    "viewport": {
+      "width": 3200,
+      "height": 2000,
+      "deviceScaleFactor": 1
+    },
+    "fontSourceRoot": "/tmp/trading-bot-webapp-uiux-redesign-v2/frontend/node_modules/vazirmatn/fonts/webfonts"
+  },
+  "integrity": {
+    "preflightCanonicalDomSha256": "c5693eb79e0405cd7946a7d3ebeedd6b9a8fac3b7fe3699454aeac4c82eae831",
+    "postCaptureCanonicalDomSha256": "c5693eb79e0405cd7946a7d3ebeedd6b9a8fac3b7fe3699454aeac4c82eae831",
+    "canonicalDomUnchangedDuringCapture": true,
+    "preflightRawDomSha256": "fa82caa99b08478f4229e0118e9b65c87ea219c1b0b4f1e07ec113d0df87b113",
+    "postCaptureRawDomSha256": "3eff41f971415da72f5685d21f8c0606af033e18beba23f5323765fcfc0e088b",
+    "preAndPostAssertionsIdentical": true,
+    "postCaptureRemeasurementCompleted": true,
+    "atomicDirectorySwap": true,
+    "recoveryRanBeforeDependencyResolution": true
+  },
+  "font": {
+    "loaded": true,
+    "checks": [
+      {
+        "weight": 400,
+        "loaded": true
+      },
+      {
+        "weight": 500,
+        "loaded": true
+      },
+      {
+        "weight": 600,
+        "loaded": true
+      },
+      {
+        "weight": 700,
+        "loaded": true
+      }
+    ],
+    "faces": [
+      {
+        "family": "Vazirmatn Evidence",
+        "weight": "400",
+        "style": "normal",
+        "status": "loaded"
+      },
+      {
+        "family": "Vazirmatn Evidence",
+        "weight": "500",
+        "style": "normal",
+        "status": "loaded"
+      },
+      {
+        "family": "Vazirmatn Evidence",
+        "weight": "600",
+        "style": "normal",
+        "status": "loaded"
+      },
+      {
+        "family": "Vazirmatn Evidence",
+        "weight": "700",
+        "style": "normal",
+        "status": "loaded"
+      }
+    ],
+    "computedBodyFamily": "\"Vazirmatn Evidence\", Vazirmatn, Tahoma, Arial, sans-serif"
+  },
+  "captures": [
+    {
+      "selector": "#account-profile-scenarios",
+      "filename": "local-account-profile-scenarios.png",
+      "pixelDimensions": {
+        "width": 2096,
+        "height": 1057
+      },
+      "sha256": "e20e9506559a13fa4ee10abd0e9818f1a45b1d627df2f2c313afd98738ab9c6d"
+    },
+    {
+      "selector": "#profile-visibility-matrix",
+      "filename": "local-profile-visibility-matrix.png",
+      "pixelDimensions": {
+        "width": 548,
+        "height": 412
+      },
+      "sha256": "752b4bbd78ba0e210d1b1e36de84efef9ee6469e1b8fa70bf0473d5ed64623eb"
+    },
+    {
+      "selector": "#security-storage-scenarios",
+      "filename": "local-security-storage-scenarios.png",
+      "pixelDimensions": {
+        "width": 1268,
+        "height": 1056
+      },
+      "sha256": "57d0f6821811d9c03f8d1334840c8b87d832962b2928fd714940d2c3a80eeac3"
+    },
+    {
+      "selector": "#notification-center-scenarios",
+      "filename": "local-notification-center-scenarios.png",
+      "pixelDimensions": {
+        "width": 854,
+        "height": 1057
+      },
+      "sha256": "020de1fb8511dd1d5937358a3fc9998056e20a148338a8e0c095b43964b2d3ab"
+    },
+    {
+      "selector": "#state-route-push-atlas",
+      "filename": "local-state-route-push-atlas.png",
+      "pixelDimensions": {
+        "width": 1466,
+        "height": 2244
+      },
+      "sha256": "4dc14d64f2182d751732f8f49f5c48d47f1ef785f40b09be6caf81418de579b1"
+    },
+    {
+      "selector": "#account-notifications-responsive-sweep",
+      "filename": "local-account-notifications-responsive-sweep.png",
+      "pixelDimensions": {
+        "width": 2092,
+        "height": 1033
+      },
+      "sha256": "27473d99ea97c6366b8fe4ec054270cc56bc0ade2076754bedbe3fffbcf391ba"
+    },
+    {
+      "selector": "[data-desktop-proof]",
+      "filename": "local-desktop-security-sessions-1440x900.png",
+      "pixelDimensions": {
+        "width": 1440,
+        "height": 900
+      },
+      "sha256": "b05876afb412f5467f51d682a58ede7f23f203a230942ef3d9620c9ec09df950"
+    }
+  ],
+  "measurements": {
+    "geometry": [
+      {
+        "id": "M01",
+        "rect": {
+          "width": 390,
+          "height": 844,
+          "left": 577,
+          "top": -5842.969,
+          "right": 967,
+          "bottom": -4998.969
+        },
+        "overflowX": false,
+        "overflowY": false,
+        "descendantsOutside": [],
+        "clippedText": []
+      },
+      {
+        "id": "M02",
+        "rect": {
+          "width": 390,
+          "height": 844,
+          "left": 991,
+          "top": -5842.969,
+          "right": 1381,
+          "bottom": -4998.969
+        },
+        "overflowX": false,
+        "overflowY": false,
+        "descendantsOutside": [],
+        "clippedText": []
+      },
+      {
+        "id": "M03",
+        "rect": {
+          "width": 390,
+          "height": 844,
+          "left": 1405,
+          "top": -5842.969,
+          "right": 1795,
+          "bottom": -4998.969
+        },
+        "overflowX": false,
+        "overflowY": false,
+        "descendantsOutside": [],
+        "clippedText": []
+      },
+      {
+        "id": "M04",
+        "rect": {
+          "width": 390,
+          "height": 844,
+          "left": 1819,
+          "top": -5842.969,
+          "right": 2209,
+          "bottom": -4998.969
+        },
+        "overflowX": false,
+        "overflowY": false,
+        "descendantsOutside": [],
+        "clippedText": []
+      },
+      {
+        "id": "M05",
+        "rect": {
+          "width": 390,
+          "height": 844,
+          "left": 2233,
+          "top": -5842.969,
+          "right": 2623,
+          "bottom": -4998.969
+        },
+        "overflowX": false,
+        "overflowY": false,
+        "descendantsOutside": [],
+        "clippedText": []
+      },
+      {
+        "id": "surface-5",
+        "rect": {
+          "width": 498,
+          "height": 276,
+          "left": 1351,
+          "top": -4835.531,
+          "right": 1849,
+          "bottom": -4559.531
+        },
+        "overflowX": false,
+        "overflowY": false,
+        "descendantsOutside": [],
+        "clippedText": []
+      },
+      {
+        "id": "M06",
+        "rect": {
+          "width": 390,
+          "height": 844,
+          "left": 991,
+          "top": -4320.094,
+          "right": 1381,
+          "bottom": -3476.094
+        },
+        "overflowX": false,
+        "overflowY": false,
+        "descendantsOutside": [],
+        "clippedText": []
+      },
+      {
+        "id": "M07",
+        "rect": {
+          "width": 390,
+          "height": 844,
+          "left": 1405,
+          "top": -4320.094,
+          "right": 1795,
+          "bottom": -3476.094
+        },
+        "overflowX": false,
+        "overflowY": false,
+        "descendantsOutside": [],
+        "clippedText": []
+      },
+      {
+        "id": "M08",
+        "rect": {
+          "width": 390,
+          "height": 844,
+          "left": 1819,
+          "top": -4320.094,
+          "right": 2209,
+          "bottom": -3476.094
+        },
+        "overflowX": false,
+        "overflowY": false,
+        "descendantsOutside": [],
+        "clippedText": []
+      },
+      {
+        "id": "M09",
+        "rect": {
+          "width": 390,
+          "height": 844,
+          "left": 1198,
+          "top": -3236.656,
+          "right": 1588,
+          "bottom": -2392.656
+        },
+        "overflowX": false,
+        "overflowY": false,
+        "descendantsOutside": [],
+        "clippedText": []
+      },
+      {
+        "id": "M10",
+        "rect": {
+          "width": 390,
+          "height": 844,
+          "left": 1612,
+          "top": -3236.656,
+          "right": 2002,
+          "bottom": -2392.656
+        },
+        "overflowX": false,
+        "overflowY": false,
+        "descendantsOutside": [],
+        "clippedText": []
+      },
+      {
+        "id": "account-loading",
+        "rect": {
+          "width": 272,
+          "height": 250,
+          "left": 892,
+          "top": -2229.219,
+          "right": 1164,
+          "bottom": -1979.219
+        },
+        "overflowX": false,
+        "overflowY": false,
+        "descendantsOutside": [],
+        "clippedText": []
+      },
+      {
+        "id": "account-error-retry",
+        "rect": {
+          "width": 272,
+          "height": 250,
+          "left": 1178,
+          "top": -2229.219,
+          "right": 1450,
+          "bottom": -1979.219
+        },
+        "overflowX": false,
+        "overflowY": false,
+        "descendantsOutside": [],
+        "clippedText": []
+      },
+      {
+        "id": "account-inactive-restricted",
+        "rect": {
+          "width": 272,
+          "height": 250,
+          "left": 1464,
+          "top": -2229.219,
+          "right": 1736,
+          "bottom": -1979.219
+        },
+        "overflowX": false,
+        "overflowY": false,
+        "descendantsOutside": [],
+        "clippedText": []
+      },
+      {
+        "id": "profile-loading",
+        "rect": {
+          "width": 272,
+          "height": 250,
+          "left": 1750,
+          "top": -2229.219,
+          "right": 2022,
+          "bottom": -1979.219
+        },
+        "overflowX": false,
+        "overflowY": false,
+        "descendantsOutside": [],
+        "clippedText": []
+      },
+      {
+        "id": "profile-error-retry",
+        "rect": {
+          "width": 272,
+          "height": 250,
+          "left": 2036,
+          "top": -2229.219,
+          "right": 2308,
+          "bottom": -1979.219
+        },
+        "overflowX": false,
+        "overflowY": false,
+        "descendantsOutside": [],
+        "clippedText": []
+      },
+      {
+        "id": "profile-unavailable",
+        "rect": {
+          "width": 272,
+          "height": 348.844,
+          "left": 892,
+          "top": -1965.219,
+          "right": 1164,
+          "bottom": -1616.375
+        },
+        "overflowX": false,
+        "overflowY": false,
+        "descendantsOutside": [],
+        "clippedText": []
+      },
+      {
+        "id": "profile-address-feedback",
+        "rect": {
+          "width": 272,
+          "height": 348.844,
+          "left": 1178,
+          "top": -1965.219,
+          "right": 1450,
+          "bottom": -1616.375
+        },
+        "overflowX": false,
+        "overflowY": false,
+        "descendantsOutside": [],
+        "clippedText": []
+      },
+      {
+        "id": "session-loading",
+        "rect": {
+          "width": 272,
+          "height": 348.844,
+          "left": 1464,
+          "top": -1965.219,
+          "right": 1736,
+          "bottom": -1616.375
+        },
+        "overflowX": false,
+        "overflowY": false,
+        "descendantsOutside": [],
+        "clippedText": []
+      },
+      {
+        "id": "session-true-empty",
+        "rect": {
+          "width": 272,
+          "height": 348.844,
+          "left": 1750,
+          "top": -1965.219,
+          "right": 2022,
+          "bottom": -1616.375
+        },
+        "overflowX": false,
+        "overflowY": false,
+        "descendantsOutside": [],
+        "clippedText": []
+      },
+      {
+        "id": "session-error-retry",
+        "rect": {
+          "width": 272,
+          "height": 348.844,
+          "left": 2036,
+          "top": -1965.219,
+          "right": 2308,
+          "bottom": -1616.375
+        },
+        "overflowX": false,
+        "overflowY": false,
+        "descendantsOutside": [],
+        "clippedText": []
+      },
+      {
+        "id": "session-termination-feedback",
+        "rect": {
+          "width": 272,
+          "height": 381.156,
+          "left": 892,
+          "top": -1602.375,
+          "right": 1164,
+          "bottom": -1221.219
+        },
+        "overflowX": false,
+        "overflowY": false,
+        "descendantsOutside": [],
+        "clippedText": []
+      },
+      {
+        "id": "session-permission",
+        "rect": {
+          "width": 272,
+          "height": 381.156,
+          "left": 1178,
+          "top": -1602.375,
+          "right": 1450,
+          "bottom": -1221.219
+        },
+        "overflowX": false,
+        "overflowY": false,
+        "descendantsOutside": [],
+        "clippedText": []
+      },
+      {
+        "id": "storage-feedback",
+        "rect": {
+          "width": 272,
+          "height": 381.156,
+          "left": 1464,
+          "top": -1602.375,
+          "right": 1736,
+          "bottom": -1221.219
+        },
+        "overflowX": false,
+        "overflowY": false,
+        "descendantsOutside": [],
+        "clippedText": []
+      },
+      {
+        "id": "notification-loading",
+        "rect": {
+          "width": 272,
+          "height": 381.156,
+          "left": 1750,
+          "top": -1602.375,
+          "right": 2022,
+          "bottom": -1221.219
+        },
+        "overflowX": false,
+        "overflowY": false,
+        "descendantsOutside": [],
+        "clippedText": []
+      },
+      {
+        "id": "notification-empty-error",
+        "rect": {
+          "width": 272,
+          "height": 381.156,
+          "left": 2036,
+          "top": -1602.375,
+          "right": 2308,
+          "bottom": -1221.219
+        },
+        "overflowX": false,
+        "overflowY": false,
+        "descendantsOutside": [],
+        "clippedText": []
+      },
+      {
+        "id": "surface-26",
+        "rect": {
+          "width": 699,
+          "height": 529.797,
+          "left": 892,
+          "top": -1203.219,
+          "right": 1591,
+          "bottom": -673.422
+        },
+        "overflowX": false,
+        "overflowY": false,
+        "descendantsOutside": [],
+        "clippedText": []
+      },
+      {
+        "id": "surface-27",
+        "rect": {
+          "width": 699,
+          "height": 529.797,
+          "left": 1609,
+          "top": -1203.219,
+          "right": 2308,
+          "bottom": -673.422
+        },
+        "overflowX": false,
+        "overflowY": false,
+        "descendantsOutside": [],
+        "clippedText": []
+      },
+      {
+        "id": "checking",
+        "rect": {
+          "width": 280,
+          "height": 170,
+          "left": 892,
+          "top": -655.422,
+          "right": 1172,
+          "bottom": -485.422
+        },
+        "overflowX": false,
+        "overflowY": false,
+        "descendantsOutside": [],
+        "clippedText": []
+      },
+      {
+        "id": "unsupported",
+        "rect": {
+          "width": 280,
+          "height": 170,
+          "left": 1184,
+          "top": -655.422,
+          "right": 1464,
+          "bottom": -485.422
+        },
+        "overflowX": false,
+        "overflowY": false,
+        "descendantsOutside": [],
+        "clippedText": []
+      },
+      {
+        "id": "insecure",
+        "rect": {
+          "width": 280,
+          "height": 170,
+          "left": 1476,
+          "top": -655.422,
+          "right": 1756,
+          "bottom": -485.422
+        },
+        "overflowX": false,
+        "overflowY": false,
+        "descendantsOutside": [],
+        "clippedText": []
+      },
+      {
+        "id": "server-disabled",
+        "rect": {
+          "width": 280,
+          "height": 170,
+          "left": 892,
+          "top": -473.422,
+          "right": 1172,
+          "bottom": -303.422
+        },
+        "overflowX": false,
+        "overflowY": false,
+        "descendantsOutside": [],
+        "clippedText": []
+      },
+      {
+        "id": "permission-blocked",
+        "rect": {
+          "width": 280,
+          "height": 170,
+          "left": 1184,
+          "top": -473.422,
+          "right": 1464,
+          "bottom": -303.422
+        },
+        "overflowX": false,
+        "overflowY": false,
+        "descendantsOutside": [],
+        "clippedText": []
+      },
+      {
+        "id": "permission-default",
+        "rect": {
+          "width": 280,
+          "height": 170,
+          "left": 1476,
+          "top": -473.422,
+          "right": 1756,
+          "bottom": -303.422
+        },
+        "overflowX": false,
+        "overflowY": false,
+        "descendantsOutside": [],
+        "clippedText": []
+      },
+      {
+        "id": "subscribed",
+        "rect": {
+          "width": 280,
+          "height": 170,
+          "left": 892,
+          "top": -291.422,
+          "right": 1172,
+          "bottom": -121.422
+        },
+        "overflowX": false,
+        "overflowY": false,
+        "descendantsOutside": [],
+        "clippedText": []
+      },
+      {
+        "id": "unsubscribed",
+        "rect": {
+          "width": 280,
+          "height": 170,
+          "left": 1184,
+          "top": -291.422,
+          "right": 1464,
+          "bottom": -121.422
+        },
+        "overflowX": false,
+        "overflowY": false,
+        "descendantsOutside": [],
+        "clippedText": []
+      },
+      {
+        "id": "error",
+        "rect": {
+          "width": 280,
+          "height": 170,
+          "left": 1476,
+          "top": -291.422,
+          "right": 1756,
+          "bottom": -121.422
+        },
+        "overflowX": false,
+        "overflowY": false,
+        "descendantsOutside": [],
+        "clippedText": []
+      },
+      {
+        "id": "responsive-360px",
+        "rect": {
+          "width": 360,
+          "height": 844,
+          "left": 579.5,
+          "top": 94.016,
+          "right": 939.5,
+          "bottom": 938.016
+        },
+        "overflowX": false,
+        "overflowY": false,
+        "descendantsOutside": [],
+        "clippedText": []
+      },
+      {
+        "id": "responsive-375px",
+        "rect": {
+          "width": 375,
+          "height": 844,
+          "left": 957.5,
+          "top": 94.016,
+          "right": 1332.5,
+          "bottom": 938.016
+        },
+        "overflowX": false,
+        "overflowY": false,
+        "descendantsOutside": [],
+        "clippedText": []
+      },
+      {
+        "id": "responsive-390px",
+        "rect": {
+          "width": 390,
+          "height": 844,
+          "left": 1350.5,
+          "top": 94.016,
+          "right": 1740.5,
+          "bottom": 938.016
+        },
+        "overflowX": false,
+        "overflowY": false,
+        "descendantsOutside": [],
+        "clippedText": []
+      },
+      {
+        "id": "responsive-414px",
+        "rect": {
+          "width": 414,
+          "height": 844,
+          "left": 1758.5,
+          "top": 94.016,
+          "right": 2172.5,
+          "bottom": 938.016
+        },
+        "overflowX": false,
+        "overflowY": false,
+        "descendantsOutside": [],
+        "clippedText": []
+      },
+      {
+        "id": "responsive-430px",
+        "rect": {
+          "width": 430,
+          "height": 844,
+          "left": 2190.5,
+          "top": 94.016,
+          "right": 2620.5,
+          "bottom": 938.016
+        },
+        "overflowX": false,
+        "overflowY": false,
+        "descendantsOutside": [],
+        "clippedText": []
+      },
+      {
+        "id": "desktop",
+        "rect": {
+          "width": 1440,
+          "height": 900,
+          "left": 880,
+          "top": 1101.453,
+          "right": 2320,
+          "bottom": 2001.453
+        },
+        "overflowX": false,
+        "overflowY": false,
+        "descendantsOutside": [],
+        "clippedText": []
+      }
+    ],
+    "screenContentOverflow": [
+      {
+        "overflowX": false,
+        "overflowY": false,
+        "rect": {
+          "width": 390,
+          "height": 652,
+          "left": 577,
+          "top": -5730.969,
+          "right": 967,
+          "bottom": -5078.969
+        },
+        "scroll": {
+          "width": 390,
+          "height": 652
+        }
+      },
+      {
+        "overflowX": false,
+        "overflowY": false,
+        "rect": {
+          "width": 390,
+          "height": 652,
+          "left": 991,
+          "top": -5730.969,
+          "right": 1381,
+          "bottom": -5078.969
+        },
+        "scroll": {
+          "width": 390,
+          "height": 652
+        }
+      },
+      {
+        "overflowX": false,
+        "overflowY": false,
+        "rect": {
+          "width": 390,
+          "height": 652,
+          "left": 1405,
+          "top": -5730.969,
+          "right": 1795,
+          "bottom": -5078.969
+        },
+        "scroll": {
+          "width": 390,
+          "height": 652
+        }
+      },
+      {
+        "overflowX": false,
+        "overflowY": false,
+        "rect": {
+          "width": 390,
+          "height": 652,
+          "left": 1819,
+          "top": -5730.969,
+          "right": 2209,
+          "bottom": -5078.969
+        },
+        "scroll": {
+          "width": 390,
+          "height": 652
+        }
+      },
+      {
+        "overflowX": false,
+        "overflowY": false,
+        "rect": {
+          "width": 390,
+          "height": 652,
+          "left": 2233,
+          "top": -5730.969,
+          "right": 2623,
+          "bottom": -5078.969
+        },
+        "scroll": {
+          "width": 390,
+          "height": 652
+        }
+      },
+      {
+        "overflowX": false,
+        "overflowY": false,
+        "rect": {
+          "width": 390,
+          "height": 652,
+          "left": 991,
+          "top": -4208.094,
+          "right": 1381,
+          "bottom": -3556.094
+        },
+        "scroll": {
+          "width": 390,
+          "height": 652
+        }
+      },
+      {
+        "overflowX": false,
+        "overflowY": false,
+        "rect": {
+          "width": 390,
+          "height": 652,
+          "left": 1405,
+          "top": -4208.094,
+          "right": 1795,
+          "bottom": -3556.094
+        },
+        "scroll": {
+          "width": 390,
+          "height": 652
+        }
+      },
+      {
+        "overflowX": false,
+        "overflowY": false,
+        "rect": {
+          "width": 390,
+          "height": 652,
+          "left": 1819,
+          "top": -4208.094,
+          "right": 2209,
+          "bottom": -3556.094
+        },
+        "scroll": {
+          "width": 390,
+          "height": 652
+        }
+      },
+      {
+        "overflowX": false,
+        "overflowY": false,
+        "rect": {
+          "width": 390,
+          "height": 652,
+          "left": 1198,
+          "top": -3124.656,
+          "right": 1588,
+          "bottom": -2472.656
+        },
+        "scroll": {
+          "width": 390,
+          "height": 652
+        }
+      },
+      {
+        "overflowX": false,
+        "overflowY": false,
+        "rect": {
+          "width": 390,
+          "height": 652,
+          "left": 1612,
+          "top": -3124.656,
+          "right": 2002,
+          "bottom": -2472.656
+        },
+        "scroll": {
+          "width": 390,
+          "height": 652
+        }
+      },
+      {
+        "overflowX": false,
+        "overflowY": false,
+        "rect": {
+          "width": 360,
+          "height": 652,
+          "left": 579.5,
+          "top": 206.016,
+          "right": 939.5,
+          "bottom": 858.016
+        },
+        "scroll": {
+          "width": 360,
+          "height": 652
+        }
+      },
+      {
+        "overflowX": false,
+        "overflowY": false,
+        "rect": {
+          "width": 375,
+          "height": 652,
+          "left": 957.5,
+          "top": 206.016,
+          "right": 1332.5,
+          "bottom": 858.016
+        },
+        "scroll": {
+          "width": 375,
+          "height": 652
+        }
+      },
+      {
+        "overflowX": false,
+        "overflowY": false,
+        "rect": {
+          "width": 390,
+          "height": 652,
+          "left": 1350.5,
+          "top": 206.016,
+          "right": 1740.5,
+          "bottom": 858.016
+        },
+        "scroll": {
+          "width": 390,
+          "height": 652
+        }
+      },
+      {
+        "overflowX": false,
+        "overflowY": false,
+        "rect": {
+          "width": 414,
+          "height": 652,
+          "left": 1758.5,
+          "top": 206.016,
+          "right": 2172.5,
+          "bottom": 858.016
+        },
+        "scroll": {
+          "width": 414,
+          "height": 652
+        }
+      },
+      {
+        "overflowX": false,
+        "overflowY": false,
+        "rect": {
+          "width": 430,
+          "height": 652,
+          "left": 2190.5,
+          "top": 206.016,
+          "right": 2620.5,
+          "bottom": 858.016
+        },
+        "scroll": {
+          "width": 430,
+          "height": 652
+        }
+      }
+    ],
+    "actions": {
+      "count": 155,
+      "minimumWidth": 44,
+      "minimumHeight": 44,
+      "violations": []
+    },
+    "ctas": {
+      "count": 9,
+      "minimumHeight": 48,
+      "violations": []
+    },
+    "mobile": [
+      {
+        "id": "M01",
+        "rect": {
+          "width": 390,
+          "height": 844,
+          "left": 577,
+          "top": -5842.969,
+          "right": 967,
+          "bottom": -4998.969
+        },
+        "synthetic": "true",
+        "navigation": {
+          "context": "mobile",
+          "destinations": [
+            "home",
+            "market",
+            "messenger",
+            "operations",
+            "account"
+          ],
+          "labels": [
+            "خانه",
+            "بازار",
+            "پیام‌رسان",
+            "عملیات",
+            "حساب"
+          ],
+          "active": [
+            "account"
+          ],
+          "svgCount": 5,
+          "minimumWidth": 78,
+          "minimumHeight": 79,
+          "minimumLabelFontSize": 11,
+          "labelBoundsViolations": 0,
+          "navigationHeight": 80
+        },
+        "directContentChildren": 5
+      },
+      {
+        "id": "M02",
+        "rect": {
+          "width": 390,
+          "height": 844,
+          "left": 991,
+          "top": -5842.969,
+          "right": 1381,
+          "bottom": -4998.969
+        },
+        "synthetic": "true",
+        "navigation": {
+          "context": "mobile",
+          "destinations": [
+            "home",
+            "market",
+            "messenger",
+            "operations",
+            "account"
+          ],
+          "labels": [
+            "خانه",
+            "بازار",
+            "پیام‌رسان",
+            "عملیات",
+            "حساب"
+          ],
+          "active": [
+            "account"
+          ],
+          "svgCount": 5,
+          "minimumWidth": 78,
+          "minimumHeight": 79,
+          "minimumLabelFontSize": 11,
+          "labelBoundsViolations": 0,
+          "navigationHeight": 80
+        },
+        "directContentChildren": 3
+      },
+      {
+        "id": "M03",
+        "rect": {
+          "width": 390,
+          "height": 844,
+          "left": 1405,
+          "top": -5842.969,
+          "right": 1795,
+          "bottom": -4998.969
+        },
+        "synthetic": "true",
+        "navigation": {
+          "context": "mobile",
+          "destinations": [
+            "home",
+            "market",
+            "messenger",
+            "operations",
+            "account"
+          ],
+          "labels": [
+            "خانه",
+            "بازار",
+            "پیام‌رسان",
+            "عملیات",
+            "حساب"
+          ],
+          "active": [
+            "account"
+          ],
+          "svgCount": 5,
+          "minimumWidth": 78,
+          "minimumHeight": 79,
+          "minimumLabelFontSize": 11,
+          "labelBoundsViolations": 0,
+          "navigationHeight": 80
+        },
+        "directContentChildren": 4
+      },
+      {
+        "id": "M04",
+        "rect": {
+          "width": 390,
+          "height": 844,
+          "left": 1819,
+          "top": -5842.969,
+          "right": 2209,
+          "bottom": -4998.969
+        },
+        "synthetic": "true",
+        "navigation": {
+          "context": "mobile",
+          "destinations": [
+            "home",
+            "market",
+            "messenger",
+            "operations",
+            "account"
+          ],
+          "labels": [
+            "خانه",
+            "بازار",
+            "پیام‌رسان",
+            "عملیات",
+            "حساب"
+          ],
+          "active": [
+            "account"
+          ],
+          "svgCount": 5,
+          "minimumWidth": 78,
+          "minimumHeight": 79,
+          "minimumLabelFontSize": 11,
+          "labelBoundsViolations": 0,
+          "navigationHeight": 80
+        },
+        "directContentChildren": 4
+      },
+      {
+        "id": "M05",
+        "rect": {
+          "width": 390,
+          "height": 844,
+          "left": 2233,
+          "top": -5842.969,
+          "right": 2623,
+          "bottom": -4998.969
+        },
+        "synthetic": "true",
+        "navigation": {
+          "context": "mobile",
+          "destinations": [
+            "home",
+            "market",
+            "messenger",
+            "operations",
+            "account"
+          ],
+          "labels": [
+            "خانه",
+            "بازار",
+            "پیام‌رسان",
+            "عملیات",
+            "حساب"
+          ],
+          "active": [
+            "account"
+          ],
+          "svgCount": 5,
+          "minimumWidth": 78,
+          "minimumHeight": 79,
+          "minimumLabelFontSize": 11,
+          "labelBoundsViolations": 0,
+          "navigationHeight": 80
+        },
+        "directContentChildren": 4
+      },
+      {
+        "id": "M06",
+        "rect": {
+          "width": 390,
+          "height": 844,
+          "left": 991,
+          "top": -4320.094,
+          "right": 1381,
+          "bottom": -3476.094
+        },
+        "synthetic": "true",
+        "navigation": {
+          "context": "mobile",
+          "destinations": [
+            "home",
+            "market",
+            "messenger",
+            "operations",
+            "account"
+          ],
+          "labels": [
+            "خانه",
+            "بازار",
+            "پیام‌رسان",
+            "عملیات",
+            "حساب"
+          ],
+          "active": [
+            "account"
+          ],
+          "svgCount": 5,
+          "minimumWidth": 78,
+          "minimumHeight": 79,
+          "minimumLabelFontSize": 11,
+          "labelBoundsViolations": 0,
+          "navigationHeight": 80
+        },
+        "directContentChildren": 3
+      },
+      {
+        "id": "M07",
+        "rect": {
+          "width": 390,
+          "height": 844,
+          "left": 1405,
+          "top": -4320.094,
+          "right": 1795,
+          "bottom": -3476.094
+        },
+        "synthetic": "true",
+        "navigation": {
+          "context": "mobile",
+          "destinations": [
+            "home",
+            "market",
+            "messenger",
+            "operations",
+            "account"
+          ],
+          "labels": [
+            "خانه",
+            "بازار",
+            "پیام‌رسان",
+            "عملیات",
+            "حساب"
+          ],
+          "active": [
+            "account"
+          ],
+          "svgCount": 5,
+          "minimumWidth": 78,
+          "minimumHeight": 79,
+          "minimumLabelFontSize": 11,
+          "labelBoundsViolations": 0,
+          "navigationHeight": 80
+        },
+        "directContentChildren": 4
+      },
+      {
+        "id": "M08",
+        "rect": {
+          "width": 390,
+          "height": 844,
+          "left": 1819,
+          "top": -4320.094,
+          "right": 2209,
+          "bottom": -3476.094
+        },
+        "synthetic": "true",
+        "navigation": {
+          "context": "mobile",
+          "destinations": [
+            "home",
+            "market",
+            "messenger",
+            "operations",
+            "account"
+          ],
+          "labels": [
+            "خانه",
+            "بازار",
+            "پیام‌رسان",
+            "عملیات",
+            "حساب"
+          ],
+          "active": [
+            "account"
+          ],
+          "svgCount": 5,
+          "minimumWidth": 78,
+          "minimumHeight": 79,
+          "minimumLabelFontSize": 11,
+          "labelBoundsViolations": 0,
+          "navigationHeight": 80
+        },
+        "directContentChildren": 4
+      },
+      {
+        "id": "M09",
+        "rect": {
+          "width": 390,
+          "height": 844,
+          "left": 1198,
+          "top": -3236.656,
+          "right": 1588,
+          "bottom": -2392.656
+        },
+        "synthetic": "true",
+        "navigation": {
+          "context": "mobile",
+          "destinations": [
+            "home",
+            "market",
+            "messenger",
+            "operations",
+            "account"
+          ],
+          "labels": [
+            "خانه",
+            "بازار",
+            "پیام‌رسان",
+            "عملیات",
+            "حساب"
+          ],
+          "active": [
+            "account"
+          ],
+          "svgCount": 5,
+          "minimumWidth": 78,
+          "minimumHeight": 79,
+          "minimumLabelFontSize": 11,
+          "labelBoundsViolations": 0,
+          "navigationHeight": 80
+        },
+        "directContentChildren": 3
+      },
+      {
+        "id": "M10",
+        "rect": {
+          "width": 390,
+          "height": 844,
+          "left": 1612,
+          "top": -3236.656,
+          "right": 2002,
+          "bottom": -2392.656
+        },
+        "synthetic": "true",
+        "navigation": {
+          "context": "mobile",
+          "destinations": [
+            "home",
+            "market",
+            "messenger",
+            "operations",
+            "account"
+          ],
+          "labels": [
+            "خانه",
+            "بازار",
+            "پیام‌رسان",
+            "عملیات",
+            "حساب"
+          ],
+          "active": [
+            "account"
+          ],
+          "svgCount": 5,
+          "minimumWidth": 78,
+          "minimumHeight": 79,
+          "minimumLabelFontSize": 11,
+          "labelBoundsViolations": 0,
+          "navigationHeight": 80
+        },
+        "directContentChildren": 3
+      }
+    ],
+    "responsive": [
+      {
+        "requestedWidth": 360,
+        "found": true,
+        "rect": {
+          "width": 360,
+          "height": 844,
+          "left": 579.5,
+          "top": 94.016,
+          "right": 939.5,
+          "bottom": 938.016
+        },
+        "signature": "trade-request|اکنون|actionable|new;trade-final|۱۰ دقیقه پیش|actionable|read",
+        "synthetic": "true",
+        "facts": [
+          {
+            "id": "trade-request",
+            "content": "درخواست معامله تازه‌ای ثبت شد.",
+            "time": "اکنون",
+            "routeState": "actionable",
+            "isNew": "true",
+            "interactive": true,
+            "newDotCount": 1
+          },
+          {
+            "id": "trade-final",
+            "content": "معامله شما نهایی شد؛ نتیجه را مشاهده کنید.",
+            "time": "۱۰ دقیقه پیش",
+            "routeState": "actionable",
+            "isNew": "false",
+            "interactive": true,
+            "newDotCount": 0
+          }
+        ],
+        "navigation": {
+          "context": "responsive",
+          "destinations": [
+            "home",
+            "market",
+            "messenger",
+            "operations",
+            "account"
+          ],
+          "labels": [
+            "خانه",
+            "بازار",
+            "پیام‌رسان",
+            "عملیات",
+            "حساب"
+          ],
+          "active": [
+            "account"
+          ],
+          "svgCount": 5,
+          "minimumWidth": 72,
+          "minimumHeight": 79,
+          "minimumLabelFontSize": 11,
+          "labelBoundsViolations": 0,
+          "navigationHeight": 80
+        },
+        "overflowX": false,
+        "overflowY": false
+      },
+      {
+        "requestedWidth": 375,
+        "found": true,
+        "rect": {
+          "width": 375,
+          "height": 844,
+          "left": 957.5,
+          "top": 94.016,
+          "right": 1332.5,
+          "bottom": 938.016
+        },
+        "signature": "trade-request|اکنون|actionable|new;trade-final|۱۰ دقیقه پیش|actionable|read",
+        "synthetic": "true",
+        "facts": [
+          {
+            "id": "trade-request",
+            "content": "درخواست معامله تازه‌ای ثبت شد.",
+            "time": "اکنون",
+            "routeState": "actionable",
+            "isNew": "true",
+            "interactive": true,
+            "newDotCount": 1
+          },
+          {
+            "id": "trade-final",
+            "content": "معامله شما نهایی شد؛ نتیجه را مشاهده کنید.",
+            "time": "۱۰ دقیقه پیش",
+            "routeState": "actionable",
+            "isNew": "false",
+            "interactive": true,
+            "newDotCount": 0
+          }
+        ],
+        "navigation": {
+          "context": "responsive",
+          "destinations": [
+            "home",
+            "market",
+            "messenger",
+            "operations",
+            "account"
+          ],
+          "labels": [
+            "خانه",
+            "بازار",
+            "پیام‌رسان",
+            "عملیات",
+            "حساب"
+          ],
+          "active": [
+            "account"
+          ],
+          "svgCount": 5,
+          "minimumWidth": 75,
+          "minimumHeight": 79,
+          "minimumLabelFontSize": 11,
+          "labelBoundsViolations": 0,
+          "navigationHeight": 80
+        },
+        "overflowX": false,
+        "overflowY": false
+      },
+      {
+        "requestedWidth": 390,
+        "found": true,
+        "rect": {
+          "width": 390,
+          "height": 844,
+          "left": 1350.5,
+          "top": 94.016,
+          "right": 1740.5,
+          "bottom": 938.016
+        },
+        "signature": "trade-request|اکنون|actionable|new;trade-final|۱۰ دقیقه پیش|actionable|read",
+        "synthetic": "true",
+        "facts": [
+          {
+            "id": "trade-request",
+            "content": "درخواست معامله تازه‌ای ثبت شد.",
+            "time": "اکنون",
+            "routeState": "actionable",
+            "isNew": "true",
+            "interactive": true,
+            "newDotCount": 1
+          },
+          {
+            "id": "trade-final",
+            "content": "معامله شما نهایی شد؛ نتیجه را مشاهده کنید.",
+            "time": "۱۰ دقیقه پیش",
+            "routeState": "actionable",
+            "isNew": "false",
+            "interactive": true,
+            "newDotCount": 0
+          }
+        ],
+        "navigation": {
+          "context": "responsive",
+          "destinations": [
+            "home",
+            "market",
+            "messenger",
+            "operations",
+            "account"
+          ],
+          "labels": [
+            "خانه",
+            "بازار",
+            "پیام‌رسان",
+            "عملیات",
+            "حساب"
+          ],
+          "active": [
+            "account"
+          ],
+          "svgCount": 5,
+          "minimumWidth": 78,
+          "minimumHeight": 79,
+          "minimumLabelFontSize": 11,
+          "labelBoundsViolations": 0,
+          "navigationHeight": 80
+        },
+        "overflowX": false,
+        "overflowY": false
+      },
+      {
+        "requestedWidth": 414,
+        "found": true,
+        "rect": {
+          "width": 414,
+          "height": 844,
+          "left": 1758.5,
+          "top": 94.016,
+          "right": 2172.5,
+          "bottom": 938.016
+        },
+        "signature": "trade-request|اکنون|actionable|new;trade-final|۱۰ دقیقه پیش|actionable|read",
+        "synthetic": "true",
+        "facts": [
+          {
+            "id": "trade-request",
+            "content": "درخواست معامله تازه‌ای ثبت شد.",
+            "time": "اکنون",
+            "routeState": "actionable",
+            "isNew": "true",
+            "interactive": true,
+            "newDotCount": 1
+          },
+          {
+            "id": "trade-final",
+            "content": "معامله شما نهایی شد؛ نتیجه را مشاهده کنید.",
+            "time": "۱۰ دقیقه پیش",
+            "routeState": "actionable",
+            "isNew": "false",
+            "interactive": true,
+            "newDotCount": 0
+          }
+        ],
+        "navigation": {
+          "context": "responsive",
+          "destinations": [
+            "home",
+            "market",
+            "messenger",
+            "operations",
+            "account"
+          ],
+          "labels": [
+            "خانه",
+            "بازار",
+            "پیام‌رسان",
+            "عملیات",
+            "حساب"
+          ],
+          "active": [
+            "account"
+          ],
+          "svgCount": 5,
+          "minimumWidth": 82.796875,
+          "minimumHeight": 79,
+          "minimumLabelFontSize": 11,
+          "labelBoundsViolations": 0,
+          "navigationHeight": 80
+        },
+        "overflowX": false,
+        "overflowY": false
+      },
+      {
+        "requestedWidth": 430,
+        "found": true,
+        "rect": {
+          "width": 430,
+          "height": 844,
+          "left": 2190.5,
+          "top": 94.016,
+          "right": 2620.5,
+          "bottom": 938.016
+        },
+        "signature": "trade-request|اکنون|actionable|new;trade-final|۱۰ دقیقه پیش|actionable|read",
+        "synthetic": "true",
+        "facts": [
+          {
+            "id": "trade-request",
+            "content": "درخواست معامله تازه‌ای ثبت شد.",
+            "time": "اکنون",
+            "routeState": "actionable",
+            "isNew": "true",
+            "interactive": true,
+            "newDotCount": 1
+          },
+          {
+            "id": "trade-final",
+            "content": "معامله شما نهایی شد؛ نتیجه را مشاهده کنید.",
+            "time": "۱۰ دقیقه پیش",
+            "routeState": "actionable",
+            "isNew": "false",
+            "interactive": true,
+            "newDotCount": 0
+          }
+        ],
+        "navigation": {
+          "context": "responsive",
+          "destinations": [
+            "home",
+            "market",
+            "messenger",
+            "operations",
+            "account"
+          ],
+          "labels": [
+            "خانه",
+            "بازار",
+            "پیام‌رسان",
+            "عملیات",
+            "حساب"
+          ],
+          "active": [
+            "account"
+          ],
+          "svgCount": 5,
+          "minimumWidth": 86,
+          "minimumHeight": 79,
+          "minimumLabelFontSize": 11,
+          "labelBoundsViolations": 0,
+          "navigationHeight": 80
+        },
+        "overflowX": false,
+        "overflowY": false
+      }
+    ],
+    "m09Facts": [
+      {
+        "id": "trade-request",
+        "content": "درخواست معامله تازه‌ای ثبت شد.",
+        "time": "اکنون",
+        "routeState": "actionable",
+        "isNew": "true",
+        "interactive": true,
+        "newDotCount": 1
+      },
+      {
+        "id": "trade-final",
+        "content": "معامله شما نهایی شد؛ نتیجه را مشاهده کنید.",
+        "time": "۱۰ دقیقه پیش",
+        "routeState": "actionable",
+        "isNew": "false",
+        "interactive": true,
+        "newDotCount": 0
+      }
+    ],
+    "desktop": {
+      "rect": {
+        "width": 1440,
+        "height": 900,
+        "left": 880,
+        "top": 1101.453,
+        "right": 2320,
+        "bottom": 2001.453
+      },
+      "synthetic": "true",
+      "navigation": {
+        "context": "desktop",
+        "destinations": [
+          "home",
+          "market",
+          "messenger",
+          "operations",
+          "account"
+        ],
+        "labels": [
+          "خانه",
+          "بازار",
+          "پیام‌رسان",
+          "عملیات",
+          "حساب"
+        ],
+        "active": [
+          "account"
+        ],
+        "svgCount": 5,
+        "minimumWidth": 92,
+        "minimumHeight": 56,
+        "minimumLabelFontSize": 11,
+        "labelBoundsViolations": 0,
+        "navigationHeight": 64
+      },
+      "sessionFacts": [
+        {
+          "id": "pixel-current",
+          "device": "Pixel 8",
+          "platform": "Chrome · Android",
+          "activity": "اکنون",
+          "signal": "current"
+        },
+        {
+          "id": "iphone-other",
+          "device": "iPhone 15",
+          "platform": "Safari · iOS",
+          "activity": "۱ ساعت پیش",
+          "signal": "other"
+        }
+      ],
+      "mobileSessionFacts": [
+        {
+          "id": "pixel-current",
+          "device": "Pixel 8",
+          "platform": "Chrome · Android",
+          "activity": "اکنون",
+          "signal": "current"
+        },
+        {
+          "id": "iphone-other",
+          "device": "iPhone 15",
+          "platform": "Safari · iOS",
+          "activity": "۱ ساعت پیش",
+          "signal": "other"
+        }
+      ],
+      "currentSessionSignalCount": 1,
+      "kpiCount": 0,
+      "extraFactCount": 0,
+      "overflowX": false,
+      "overflowY": false
+    },
+    "typography": {
+      "textNodeCount": 431,
+      "fontViolations": [],
+      "contrastRows": [
+        {
+          "text": "حساب",
+          "ratio": 15.276,
+          "fontSize": 17,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "نگار پارسا",
+          "ratio": 5.793,
+          "fontSize": 11,
+          "fontWeight": 400,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "پروفایل من",
+          "ratio": 15.276,
+          "fontSize": 13,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "تصویر و نشانی",
+          "ratio": 5.793,
+          "fontSize": 10,
+          "fontWeight": 400,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "‹",
+          "ratio": 5.944,
+          "fontSize": 22,
+          "fontWeight": 400,
+          "color": "rgb(35, 95, 199)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "امنیت حساب",
+          "ratio": 15.276,
+          "fontSize": 13,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "نشست‌های فعال",
+          "ratio": 5.793,
+          "fontSize": 10,
+          "fontWeight": 400,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "‹",
+          "ratio": 5.944,
+          "fontSize": 22,
+          "fontWeight": 400,
+          "color": "rgb(35, 95, 199)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "حافظه و داده‌ها",
+          "ratio": 15.276,
+          "fontSize": 13,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "همین مرورگر",
+          "ratio": 5.793,
+          "fontSize": 10,
+          "fontWeight": 400,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "‹",
+          "ratio": 5.944,
+          "fontSize": 22,
+          "fontWeight": 400,
+          "color": "rgb(35, 95, 199)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "اعلان‌ها",
+          "ratio": 15.276,
+          "fontSize": 13,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "معاملات و پیام مدیریت",
+          "ratio": 5.793,
+          "fontSize": 10,
+          "fontWeight": 400,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "‹",
+          "ratio": 5.944,
+          "fontSize": 22,
+          "fontWeight": 400,
+          "color": "rgb(35, 95, 199)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "اتصال تلگرام",
+          "ratio": 15.276,
+          "fontSize": 13,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "مدیریت اتصال حساب",
+          "ratio": 5.793,
+          "fontSize": 10,
+          "fontWeight": 400,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "‹",
+          "ratio": 5.944,
+          "fontSize": 22,
+          "fontWeight": 400,
+          "color": "rgb(35, 95, 199)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "خانه",
+          "ratio": 5.793,
+          "fontSize": 11,
+          "fontWeight": 600,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "بازار",
+          "ratio": 5.793,
+          "fontSize": 11,
+          "fontWeight": 600,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "پیام‌رسان",
+          "ratio": 5.793,
+          "fontSize": 11,
+          "fontWeight": 600,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "عملیات",
+          "ratio": 5.793,
+          "fontSize": 11,
+          "fontWeight": 600,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "حساب",
+          "ratio": 8.602,
+          "fontSize": 11,
+          "fontWeight": 600,
+          "color": "rgb(25, 73, 151)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "حساب",
+          "ratio": 15.276,
+          "fontSize": 17,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "رها نیکویی",
+          "ratio": 5.793,
+          "fontSize": 11,
+          "fontWeight": 400,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "پروفایل من",
+          "ratio": 15.276,
+          "fontSize": 13,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "اطلاعات حساب",
+          "ratio": 5.793,
+          "fontSize": 10,
+          "fontWeight": 400,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "‹",
+          "ratio": 5.944,
+          "fontSize": 22,
+          "fontWeight": 400,
+          "color": "rgb(35, 95, 199)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "حافظه و داده‌ها",
+          "ratio": 15.276,
+          "fontSize": 13,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "همین مرورگر",
+          "ratio": 5.793,
+          "fontSize": 10,
+          "fontWeight": 400,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "‹",
+          "ratio": 5.944,
+          "fontSize": 22,
+          "fontWeight": 400,
+          "color": "rgb(35, 95, 199)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "اعلان‌ها",
+          "ratio": 15.276,
+          "fontSize": 13,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "معاملات و پیام مدیریت",
+          "ratio": 5.793,
+          "fontSize": 10,
+          "fontWeight": 400,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "‹",
+          "ratio": 5.944,
+          "fontSize": 22,
+          "fontWeight": 400,
+          "color": "rgb(35, 95, 199)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "خانه",
+          "ratio": 5.793,
+          "fontSize": 11,
+          "fontWeight": 600,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "بازار",
+          "ratio": 5.793,
+          "fontSize": 11,
+          "fontWeight": 600,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "پیام‌رسان",
+          "ratio": 5.793,
+          "fontSize": 11,
+          "fontWeight": 600,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "عملیات",
+          "ratio": 5.793,
+          "fontSize": 11,
+          "fontWeight": 600,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "حساب",
+          "ratio": 8.602,
+          "fontSize": 11,
+          "fontWeight": 600,
+          "color": "rgb(25, 73, 151)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "›",
+          "ratio": 15.276,
+          "fontSize": 20,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgb(255, 255, 255)"
+        },
+        {
+          "text": "پروفایل من",
+          "ratio": 15.276,
+          "fontSize": 17,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "اطلاعات قابل ویرایش",
+          "ratio": 5.793,
+          "fontSize": 11,
+          "fontWeight": 400,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "ن‌پ",
+          "ratio": 8.602,
+          "fontSize": 17,
+          "fontWeight": 700,
+          "color": "rgb(25, 73, 151)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "نگار پارسا",
+          "ratio": 15.276,
+          "fontSize": 15,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "sample.user · ۰۹۱۲ ۰۰۰ ۰۰۰۰",
+          "ratio": 5.793,
+          "fontSize": 11,
+          "fontWeight": 400,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "نشانی",
+          "ratio": 5.537,
+          "fontSize": 10,
+          "fontWeight": 600,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "تهران، خیابان نمونه، پلاک ۱۲",
+          "ratio": 14.6,
+          "fontSize": 14,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "فقط برای خود شما و مدیر مجاز کامل نمایش داده می‌شود.",
+          "ratio": 5.537,
+          "fontSize": 11,
+          "fontWeight": 400,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "نمایش اطلاعات تکمیلی",
+          "ratio": 15.276,
+          "fontSize": 11,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgb(255, 255, 255)"
+        },
+        {
+          "text": "ویرایش پروفایل",
+          "ratio": 5.944,
+          "fontSize": 11,
+          "fontWeight": 700,
+          "color": "rgb(255, 255, 255)",
+          "background": "rgb(35, 95, 199)"
+        },
+        {
+          "text": "خانه",
+          "ratio": 5.793,
+          "fontSize": 11,
+          "fontWeight": 600,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "بازار",
+          "ratio": 5.793,
+          "fontSize": 11,
+          "fontWeight": 600,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "پیام‌رسان",
+          "ratio": 5.793,
+          "fontSize": 11,
+          "fontWeight": 600,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "عملیات",
+          "ratio": 5.793,
+          "fontSize": 11,
+          "fontWeight": 600,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "حساب",
+          "ratio": 8.602,
+          "fontSize": 11,
+          "fontWeight": 600,
+          "color": "rgb(25, 73, 151)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "›",
+          "ratio": 15.276,
+          "fontSize": 20,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgb(255, 255, 255)"
+        },
+        {
+          "text": "ویرایش پروفایل",
+          "ratio": 15.276,
+          "fontSize": 17,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "تصویر و نشانی",
+          "ratio": 5.793,
+          "fontSize": 11,
+          "fontWeight": 400,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "ک‌ن",
+          "ratio": 8.602,
+          "fontSize": 17,
+          "fontWeight": 700,
+          "color": "rgb(25, 73, 151)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "تصویر پروفایل",
+          "ratio": 15.276,
+          "fontSize": 15,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "تصویر نمونه فعلی",
+          "ratio": 5.793,
+          "fontSize": 11,
+          "fontWeight": 400,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "تغییر",
+          "ratio": 15.276,
+          "fontSize": 11,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgb(255, 255, 255)"
+        },
+        {
+          "text": "نشانی",
+          "ratio": 5.793,
+          "fontSize": 11,
+          "fontWeight": 600,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "نشانی فقط در حوزه‌های مجاز حساب نمایش داده می‌شود.",
+          "ratio": 5.793,
+          "fontSize": 10,
+          "fontWeight": 400,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "نشانی آماده ذخیره است.",
+          "ratio": 7.512,
+          "fontSize": 10,
+          "fontWeight": 400,
+          "color": "rgb(25, 73, 151)",
+          "background": "rgb(232, 240, 255)"
+        },
+        {
+          "text": "ذخیره تغییرات",
+          "ratio": 5.944,
+          "fontSize": 11,
+          "fontWeight": 700,
+          "color": "rgb(255, 255, 255)",
+          "background": "rgb(35, 95, 199)"
+        },
+        {
+          "text": "خانه",
+          "ratio": 5.793,
+          "fontSize": 11,
+          "fontWeight": 600,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "بازار",
+          "ratio": 5.793,
+          "fontSize": 11,
+          "fontWeight": 600,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "پیام‌رسان",
+          "ratio": 5.793,
+          "fontSize": 11,
+          "fontWeight": 600,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "عملیات",
+          "ratio": 5.793,
+          "fontSize": 11,
+          "fontWeight": 600,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "حساب",
+          "ratio": 8.602,
+          "fontSize": 11,
+          "fontWeight": 600,
+          "color": "rgb(25, 73, 151)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "›",
+          "ratio": 15.276,
+          "fontSize": 20,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgb(255, 255, 255)"
+        },
+        {
+          "text": "پروفایل عمومی",
+          "ratio": 15.276,
+          "fontSize": 17,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "اطلاعات مجاز",
+          "ratio": 5.793,
+          "fontSize": 11,
+          "fontWeight": 400,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "آ‌ن",
+          "ratio": 8.602,
+          "fontSize": 17,
+          "fontWeight": 700,
+          "color": "rgb(25, 73, 151)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "آزمایشی نمونه",
+          "ratio": 15.276,
+          "fontSize": 15,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "public.demo",
+          "ratio": 5.793,
+          "fontSize": 11,
+          "fontWeight": 400,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "موبایل",
+          "ratio": 5.537,
+          "fontSize": 10,
+          "fontWeight": 600,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "09•• ••• ••18",
+          "ratio": 14.6,
+          "fontSize": 14,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "نشانی خصوصی است",
+          "ratio": 15.276,
+          "fontSize": 14,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "این اطلاعات برای شما نمایش داده نمی‌شود.",
+          "ratio": 5.793,
+          "fontSize": 11,
+          "fontWeight": 400,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "بازگشت",
+          "ratio": 15.276,
+          "fontSize": 11,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgb(255, 255, 255)"
+        },
+        {
+          "text": "خانه",
+          "ratio": 5.793,
+          "fontSize": 11,
+          "fontWeight": 600,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "بازار",
+          "ratio": 5.793,
+          "fontSize": 11,
+          "fontWeight": 600,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "پیام‌رسان",
+          "ratio": 5.793,
+          "fontSize": 11,
+          "fontWeight": 600,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "عملیات",
+          "ratio": 5.793,
+          "fontSize": 11,
+          "fontWeight": 600,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "حساب",
+          "ratio": 8.602,
+          "fontSize": 11,
+          "fontWeight": 600,
+          "color": "rgb(25, 73, 151)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "بیننده",
+          "ratio": 14.6,
+          "fontSize": 11,
+          "fontWeight": 900,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "موبایل",
+          "ratio": 14.6,
+          "fontSize": 11,
+          "fontWeight": 900,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "نشانی",
+          "ratio": 14.6,
+          "fontSize": 11,
+          "fontWeight": 900,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "خود کاربر",
+          "ratio": 15.276,
+          "fontSize": 11,
+          "fontWeight": 400,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "کامل",
+          "ratio": 6.376,
+          "fontSize": 11,
+          "fontWeight": 700,
+          "color": "rgb(11, 107, 98)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "کامل",
+          "ratio": 6.376,
+          "fontSize": 11,
+          "fontWeight": 700,
+          "color": "rgb(11, 107, 98)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "کاربر عادی",
+          "ratio": 15.276,
+          "fontSize": 11,
+          "fontWeight": 400,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "ماسک‌شده",
+          "ratio": 6.947,
+          "fontSize": 11,
+          "fontWeight": 700,
+          "color": "rgb(121, 82, 7)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "پنهان",
+          "ratio": 7.152,
+          "fontSize": 11,
+          "fontWeight": 700,
+          "color": "rgb(165, 39, 50)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "مدیر مجاز",
+          "ratio": 15.276,
+          "fontSize": 11,
+          "fontWeight": 400,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "کامل",
+          "ratio": 6.376,
+          "fontSize": 11,
+          "fontWeight": 700,
+          "color": "rgb(11, 107, 98)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "کامل",
+          "ratio": 6.376,
+          "fontSize": 11,
+          "fontWeight": 700,
+          "color": "rgb(11, 107, 98)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "ممنوع یا ناموجود",
+          "ratio": 15.276,
+          "fontSize": 11,
+          "fontWeight": 400,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "پنهان",
+          "ratio": 7.152,
+          "fontSize": 11,
+          "fontWeight": 700,
+          "color": "rgb(165, 39, 50)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "پنهان",
+          "ratio": 7.152,
+          "fontSize": 11,
+          "fontWeight": 700,
+          "color": "rgb(165, 39, 50)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "›",
+          "ratio": 15.276,
+          "fontSize": 20,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgb(255, 255, 255)"
+        },
+        {
+          "text": "امنیت حساب",
+          "ratio": 15.276,
+          "fontSize": 17,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "نشست‌های فعال",
+          "ratio": 5.793,
+          "fontSize": 11,
+          "fontWeight": 400,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "Pixel 8",
+          "ratio": 15.276,
+          "fontSize": 13,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "Chrome · Android",
+          "ratio": 5.793,
+          "fontSize": 10,
+          "fontWeight": 400,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "Chrome · Android · آخرین فعالیت: اکنون",
+          "ratio": 5.793,
+          "fontSize": 10,
+          "fontWeight": 400,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "این دستگاه",
+          "ratio": 5.703,
+          "fontSize": 10,
+          "fontWeight": 700,
+          "color": "rgb(11, 107, 98)",
+          "background": "rgb(229, 246, 241)"
+        },
+        {
+          "text": "iPhone 15",
+          "ratio": 15.276,
+          "fontSize": 13,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "Safari · iOS",
+          "ratio": 5.793,
+          "fontSize": 10,
+          "fontWeight": 400,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "Safari · iOS · ۱ ساعت پیش",
+          "ratio": 5.793,
+          "fontSize": 10,
+          "fontWeight": 400,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "پایان",
+          "ratio": 15.276,
+          "fontSize": 11,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgb(255, 255, 255)"
+        },
+        {
+          "text": "پایان همه نشست‌های دیگر",
+          "ratio": 7.152,
+          "fontSize": 11,
+          "fontWeight": 700,
+          "color": "rgb(255, 255, 255)",
+          "background": "rgb(165, 39, 50)"
+        },
+        {
+          "text": "خانه",
+          "ratio": 5.793,
+          "fontSize": 11,
+          "fontWeight": 600,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "بازار",
+          "ratio": 5.793,
+          "fontSize": 11,
+          "fontWeight": 600,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "پیام‌رسان",
+          "ratio": 5.793,
+          "fontSize": 11,
+          "fontWeight": 600,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "عملیات",
+          "ratio": 5.793,
+          "fontSize": 11,
+          "fontWeight": 600,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "حساب",
+          "ratio": 8.602,
+          "fontSize": 11,
+          "fontWeight": 600,
+          "color": "rgb(25, 73, 151)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "›",
+          "ratio": 15.276,
+          "fontSize": 20,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgb(255, 255, 255)"
+        },
+        {
+          "text": "پایان نشست‌ها",
+          "ratio": 15.276,
+          "fontSize": 17,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "تصمیم امنیتی",
+          "ratio": 5.793,
+          "fontSize": 11,
+          "fontWeight": 400,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "همه نشست‌های دیگر پایان یابند؟",
+          "ratio": 15.276,
+          "fontSize": 14,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "نشست جاری روی Pixel 8 حفظ می‌شود.",
+          "ratio": 5.793,
+          "fontSize": 11,
+          "fontWeight": 400,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "Pixel 8",
+          "ratio": 5.793,
+          "fontSize": 11,
+          "fontWeight": 400,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "فقط نشست‌های دیگر از حساب خارج می‌شوند.",
+          "ratio": 14.6,
+          "fontSize": 11,
+          "fontWeight": 400,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgb(248, 250, 252)"
+        },
+        {
+          "text": "پیامد را خواندم",
+          "ratio": 15.276,
+          "fontSize": 11,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgb(255, 255, 255)"
+        },
+        {
+          "text": "انصراف",
+          "ratio": 15.276,
+          "fontSize": 11,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgb(255, 255, 255)"
+        },
+        {
+          "text": "تأیید پایان",
+          "ratio": 7.152,
+          "fontSize": 11,
+          "fontWeight": 700,
+          "color": "rgb(255, 255, 255)",
+          "background": "rgb(165, 39, 50)"
+        },
+        {
+          "text": "تغییر ثبت نشد؛ تصمیم شما حفظ شده است و می‌توانید دوباره تلاش کنید.",
+          "ratio": 6.261,
+          "fontSize": 10,
+          "fontWeight": 400,
+          "color": "rgb(165, 39, 50)",
+          "background": "rgb(252, 236, 239)"
+        },
+        {
+          "text": "خانه",
+          "ratio": 5.793,
+          "fontSize": 11,
+          "fontWeight": 600,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "بازار",
+          "ratio": 5.793,
+          "fontSize": 11,
+          "fontWeight": 600,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "پیام‌رسان",
+          "ratio": 5.793,
+          "fontSize": 11,
+          "fontWeight": 600,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "عملیات",
+          "ratio": 5.793,
+          "fontSize": 11,
+          "fontWeight": 600,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "حساب",
+          "ratio": 8.602,
+          "fontSize": 11,
+          "fontWeight": 600,
+          "color": "rgb(25, 73, 151)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "›",
+          "ratio": 15.276,
+          "fontSize": 20,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgb(255, 255, 255)"
+        },
+        {
+          "text": "حافظه و داده‌ها",
+          "ratio": 15.276,
+          "fontSize": 17,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "همین مرورگر",
+          "ratio": 5.793,
+          "fontSize": 11,
+          "fontWeight": 400,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "فایل‌های موقت",
+          "ratio": 5.793,
+          "fontSize": 10,
+          "fontWeight": 600,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "۱۲٫۴ مگابایت",
+          "ratio": 15.276,
+          "fontSize": 14,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "فقط فایل‌های موقت همین مرورگر حذف می‌شوند.",
+          "ratio": 5.793,
+          "fontSize": 11,
+          "fontWeight": 400,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "چه چیزی باقی می‌ماند؟",
+          "ratio": 15.276,
+          "fontSize": 14,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "حساب، پیام‌ها و نشست‌های فعال بدون تغییر می‌مانند.",
+          "ratio": 5.793,
+          "fontSize": 11,
+          "fontWeight": 400,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "پاک‌کردن فایل‌های موقت",
+          "ratio": 7.152,
+          "fontSize": 11,
+          "fontWeight": 700,
+          "color": "rgb(255, 255, 255)",
+          "background": "rgb(165, 39, 50)"
+        },
+        {
+          "text": "پاک‌سازی کامل نشد؛ دوباره تلاش کنید.",
+          "ratio": 6.261,
+          "fontSize": 10,
+          "fontWeight": 400,
+          "color": "rgb(165, 39, 50)",
+          "background": "rgb(252, 236, 239)"
+        },
+        {
+          "text": "خانه",
+          "ratio": 5.793,
+          "fontSize": 11,
+          "fontWeight": 600,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "بازار",
+          "ratio": 5.793,
+          "fontSize": 11,
+          "fontWeight": 600,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "پیام‌رسان",
+          "ratio": 5.793,
+          "fontSize": 11,
+          "fontWeight": 600,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "عملیات",
+          "ratio": 5.793,
+          "fontSize": 11,
+          "fontWeight": 600,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "حساب",
+          "ratio": 8.602,
+          "fontSize": 11,
+          "fontWeight": 600,
+          "color": "rgb(25, 73, 151)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "›",
+          "ratio": 15.276,
+          "fontSize": 20,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgb(255, 255, 255)"
+        },
+        {
+          "text": "اعلان‌ها",
+          "ratio": 15.276,
+          "fontSize": 17,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "مرکز اعلان",
+          "ratio": 5.793,
+          "fontSize": 11,
+          "fontWeight": 400,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "معاملات",
+          "ratio": 8.602,
+          "fontSize": 11,
+          "fontWeight": 700,
+          "color": "rgb(25, 73, 151)",
+          "background": "rgb(255, 255, 255)"
+        },
+        {
+          "text": "سایر",
+          "ratio": 4.998,
+          "fontSize": 11,
+          "fontWeight": 700,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "درخواست معامله تازه‌ای ثبت شد.",
+          "ratio": 15.276,
+          "fontSize": 12,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "جدید",
+          "ratio": 5.793,
+          "fontSize": 10,
+          "fontWeight": 400,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "اکنون",
+          "ratio": 5.793,
+          "fontSize": 10,
+          "fontWeight": 400,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "‹",
+          "ratio": 5.944,
+          "fontSize": 22,
+          "fontWeight": 400,
+          "color": "rgb(35, 95, 199)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "معامله شما نهایی شد؛ نتیجه را مشاهده کنید.",
+          "ratio": 15.276,
+          "fontSize": 12,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "۱۰ دقیقه پیش",
+          "ratio": 5.793,
+          "fontSize": 10,
+          "fontWeight": 400,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "‹",
+          "ratio": 5.944,
+          "fontSize": 22,
+          "fontWeight": 400,
+          "color": "rgb(35, 95, 199)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "خانه",
+          "ratio": 5.793,
+          "fontSize": 11,
+          "fontWeight": 600,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "بازار",
+          "ratio": 5.793,
+          "fontSize": 11,
+          "fontWeight": 600,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "پیام‌رسان",
+          "ratio": 5.793,
+          "fontSize": 11,
+          "fontWeight": 600,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "عملیات",
+          "ratio": 5.793,
+          "fontSize": 11,
+          "fontWeight": 600,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "حساب",
+          "ratio": 8.602,
+          "fontSize": 11,
+          "fontWeight": 600,
+          "color": "rgb(25, 73, 151)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "›",
+          "ratio": 15.276,
+          "fontSize": 20,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgb(255, 255, 255)"
+        },
+        {
+          "text": "اعلان دستگاه",
+          "ratio": 15.276,
+          "fontSize": 17,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "همین مرورگر",
+          "ratio": 5.793,
+          "fontSize": 11,
+          "fontWeight": 400,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "وضعیت",
+          "ratio": 5.793,
+          "fontSize": 10,
+          "fontWeight": 600,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "آماده فعال‌سازی",
+          "ratio": 15.276,
+          "fontSize": 14,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "مرورگر هنوز اجازه نمایش اعلان را نپرسیده است.",
+          "ratio": 5.793,
+          "fontSize": 11,
+          "fontWeight": 400,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "کنترل مرورگر",
+          "ratio": 15.276,
+          "fontSize": 14,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "پس از انتخاب فعال‌سازی، درخواست مجوز مرورگر نمایش داده می‌شود.",
+          "ratio": 5.793,
+          "fontSize": 11,
+          "fontWeight": 400,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "فعال‌سازی اعلان",
+          "ratio": 5.944,
+          "fontSize": 11,
+          "fontWeight": 700,
+          "color": "rgb(255, 255, 255)",
+          "background": "rgb(35, 95, 199)"
+        },
+        {
+          "text": "خانه",
+          "ratio": 5.793,
+          "fontSize": 11,
+          "fontWeight": 600,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "بازار",
+          "ratio": 5.793,
+          "fontSize": 11,
+          "fontWeight": 600,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "پیام‌رسان",
+          "ratio": 5.793,
+          "fontSize": 11,
+          "fontWeight": 600,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "عملیات",
+          "ratio": 5.793,
+          "fontSize": 11,
+          "fontWeight": 600,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "حساب",
+          "ratio": 8.602,
+          "fontSize": 11,
+          "fontWeight": 600,
+          "color": "rgb(25, 73, 151)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "حساب · در حال دریافت",
+          "ratio": 15.276,
+          "fontSize": 13,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "ساختار مقصدها حفظ می‌شود.",
+          "ratio": 5.793,
+          "fontSize": 10,
+          "fontWeight": 400,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "حساب دریافت نشد",
+          "ratio": 15.276,
+          "fontSize": 13,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "اطلاعات کامل نیست؛ از همین‌جا دوباره تلاش کنید.",
+          "ratio": 5.793,
+          "fontSize": 10,
+          "fontWeight": 400,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "تلاش دوباره",
+          "ratio": 15.276,
+          "fontSize": 11,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgb(255, 255, 255)"
+        },
+        {
+          "text": "حساب محدود یا غیرفعال",
+          "ratio": 15.276,
+          "fontSize": 13,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "مقصدهای نامجاز نمایش داده نمی‌شوند.",
+          "ratio": 5.793,
+          "fontSize": 10,
+          "fontWeight": 400,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "مشاهده وضعیت حساب",
+          "ratio": 15.276,
+          "fontSize": 11,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgb(255, 255, 255)"
+        },
+        {
+          "text": "پروفایل · در حال دریافت",
+          "ratio": 15.276,
+          "fontSize": 13,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "هویت اصلی جای خود را حفظ می‌کند.",
+          "ratio": 5.793,
+          "fontSize": 10,
+          "fontWeight": 400,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "پروفایل دریافت نشد",
+          "ratio": 15.276,
+          "fontSize": 13,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "دوباره تلاش کنید؛ اطلاعات حدسی نمایش داده نمی‌شود.",
+          "ratio": 5.793,
+          "fontSize": 10,
+          "fontWeight": 400,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "تلاش دوباره",
+          "ratio": 15.276,
+          "fontSize": 11,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgb(255, 255, 255)"
+        },
+        {
+          "text": "پروفایل در دسترس نیست",
+          "ratio": 15.276,
+          "fontSize": 13,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "ممکن است وجود نداشته باشد یا مجوز مشاهده تغییر کرده باشد.",
+          "ratio": 5.793,
+          "fontSize": 10,
+          "fontWeight": 400,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "بازگشت",
+          "ratio": 15.276,
+          "fontSize": 11,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgb(255, 255, 255)"
+        },
+        {
+          "text": "نشانی · بازخورد کنار فیلد",
+          "ratio": 15.276,
+          "fontSize": 13,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "اعتبارسنجی",
+          "ratio": 6.237,
+          "fontSize": 11,
+          "fontWeight": 700,
+          "color": "rgb(121, 82, 7)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "اعتبارسنجینشانی باید کامل باشد.",
+          "ratio": 6.237,
+          "fontSize": 10,
+          "fontWeight": 400,
+          "color": "rgb(121, 82, 7)",
+          "background": "rgb(255, 242, 207)"
+        },
+        {
+          "text": "در حال ذخیره",
+          "ratio": 7.512,
+          "fontSize": 11,
+          "fontWeight": 700,
+          "color": "rgb(25, 73, 151)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "در حال ذخیرهورودی حفظ شده است.",
+          "ratio": 7.512,
+          "fontSize": 10,
+          "fontWeight": 400,
+          "color": "rgb(25, 73, 151)",
+          "background": "rgb(232, 240, 255)"
+        },
+        {
+          "text": "ذخیره شد",
+          "ratio": 5.703,
+          "fontSize": 11,
+          "fontWeight": 700,
+          "color": "rgb(11, 107, 98)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "ذخیره شدنشانی تازه ثبت شد.",
+          "ratio": 5.703,
+          "fontSize": 10,
+          "fontWeight": 400,
+          "color": "rgb(11, 107, 98)",
+          "background": "rgb(229, 246, 241)"
+        },
+        {
+          "text": "ذخیره نشد",
+          "ratio": 6.261,
+          "fontSize": 11,
+          "fontWeight": 700,
+          "color": "rgb(165, 39, 50)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "ذخیره نشد«تهران، خیابان نمونه، پلاک ۱۲» حفظ شد.تلاش دوباره",
+          "ratio": 6.261,
+          "fontSize": 10,
+          "fontWeight": 400,
+          "color": "rgb(165, 39, 50)",
+          "background": "rgb(252, 236, 239)"
+        },
+        {
+          "text": "تلاش دوباره",
+          "ratio": 15.276,
+          "fontSize": 11,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgb(255, 255, 255)"
+        },
+        {
+          "text": "نشست‌ها · در حال دریافت",
+          "ratio": 15.276,
+          "fontSize": 13,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "ردیف ساختاری جای خود را حفظ می‌کند.",
+          "ratio": 5.793,
+          "fontSize": 10,
+          "fontWeight": 400,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "نشست دیگری وجود ندارد",
+          "ratio": 15.276,
+          "fontSize": 13,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "نشست جاری تنها نشست قابل مشاهده است.",
+          "ratio": 5.793,
+          "fontSize": 10,
+          "fontWeight": 400,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "بازگشت به امنیت",
+          "ratio": 15.276,
+          "fontSize": 11,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgb(255, 255, 255)"
+        },
+        {
+          "text": "نشست‌ها دریافت نشدند",
+          "ratio": 15.276,
+          "fontSize": 13,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "فهرست ناقص نمایش داده نمی‌شود.",
+          "ratio": 5.793,
+          "fontSize": 10,
+          "fontWeight": 400,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "تلاش دوباره",
+          "ratio": 15.276,
+          "fontSize": 11,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgb(255, 255, 255)"
+        },
+        {
+          "text": "پایان نشست · نتیجه",
+          "ratio": 15.276,
+          "fontSize": 13,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "در حال پایان",
+          "ratio": 7.512,
+          "fontSize": 11,
+          "fontWeight": 700,
+          "color": "rgb(25, 73, 151)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "در حال پایاننشست جاری حفظ می‌شود.",
+          "ratio": 7.512,
+          "fontSize": 10,
+          "fontWeight": 400,
+          "color": "rgb(25, 73, 151)",
+          "background": "rgb(232, 240, 255)"
+        },
+        {
+          "text": "پایان یافت",
+          "ratio": 5.703,
+          "fontSize": 11,
+          "fontWeight": 700,
+          "color": "rgb(11, 107, 98)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "پایان یافتنشست‌های دیگر خارج شدند.",
+          "ratio": 5.703,
+          "fontSize": 10,
+          "fontWeight": 400,
+          "color": "rgb(11, 107, 98)",
+          "background": "rgb(229, 246, 241)"
+        },
+        {
+          "text": "پایان نیافت",
+          "ratio": 6.261,
+          "fontSize": 11,
+          "fontWeight": 700,
+          "color": "rgb(165, 39, 50)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "پایان نیافتدوباره تلاش کنید.تلاش دوباره",
+          "ratio": 6.261,
+          "fontSize": 10,
+          "fontWeight": 400,
+          "color": "rgb(165, 39, 50)",
+          "background": "rgb(252, 236, 239)"
+        },
+        {
+          "text": "تلاش دوباره",
+          "ratio": 15.276,
+          "fontSize": 11,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgb(255, 255, 255)"
+        },
+        {
+          "text": "مجوز نشست",
+          "ratio": 15.276,
+          "fontSize": 13,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "اقدام مجاز نیست",
+          "ratio": 6.237,
+          "fontSize": 11,
+          "fontWeight": 700,
+          "color": "rgb(121, 82, 7)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "اقدام مجاز نیستنشست فقط مشاهده می‌شود.",
+          "ratio": 6.237,
+          "fontSize": 10,
+          "fontWeight": 400,
+          "color": "rgb(121, 82, 7)",
+          "background": "rgb(255, 242, 207)"
+        },
+        {
+          "text": "حسابدار",
+          "ratio": 6.237,
+          "fontSize": 11,
+          "fontWeight": 700,
+          "color": "rgb(121, 82, 7)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "حسابدارنشست شخصی برای این نقش در دسترس نیست.",
+          "ratio": 6.237,
+          "fontSize": 10,
+          "fontWeight": 400,
+          "color": "rgb(121, 82, 7)",
+          "background": "rgb(255, 242, 207)"
+        },
+        {
+          "text": "بازگشت",
+          "ratio": 15.276,
+          "fontSize": 11,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgb(255, 255, 255)"
+        },
+        {
+          "text": "حافظه · نتیجه محلی",
+          "ratio": 15.276,
+          "fontSize": 13,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "در حال پاک‌سازی",
+          "ratio": 7.512,
+          "fontSize": 11,
+          "fontWeight": 700,
+          "color": "rgb(25, 73, 151)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "پاک شد",
+          "ratio": 5.703,
+          "fontSize": 11,
+          "fontWeight": 700,
+          "color": "rgb(11, 107, 98)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "پاک نشد",
+          "ratio": 6.261,
+          "fontSize": 11,
+          "fontWeight": 700,
+          "color": "rgb(165, 39, 50)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "تلاش دوباره",
+          "ratio": 15.276,
+          "fontSize": 11,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgb(255, 255, 255)"
+        },
+        {
+          "text": "0 MB",
+          "ratio": 14.6,
+          "fontSize": 11,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "0 MBحافظه موقت خالی است.",
+          "ratio": 14.6,
+          "fontSize": 10,
+          "fontWeight": 400,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgb(248, 250, 252)"
+        },
+        {
+          "text": "اندازه در دسترس نیست",
+          "ratio": 6.237,
+          "fontSize": 11,
+          "fontWeight": 700,
+          "color": "rgb(121, 82, 7)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "اندازه در دسترس نیستصفر فرض نمی‌شود.",
+          "ratio": 6.237,
+          "fontSize": 10,
+          "fontWeight": 400,
+          "color": "rgb(121, 82, 7)",
+          "background": "rgb(255, 242, 207)"
+        },
+        {
+          "text": "اعلان‌ها · در حال دریافت",
+          "ratio": 15.276,
+          "fontSize": 13,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "ردیف ساختاری حفظ می‌شود.",
+          "ratio": 5.793,
+          "fontSize": 10,
+          "fontWeight": 400,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "اعلان · حالت‌های متمایز",
+          "ratio": 15.276,
+          "fontSize": 13,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "هنوز اعلانی نیست",
+          "ratio": 14.6,
+          "fontSize": 11,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "در این دسته اعلانی نیست",
+          "ratio": 14.6,
+          "fontSize": 11,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "دریافت نشد",
+          "ratio": 6.261,
+          "fontSize": 11,
+          "fontWeight": 700,
+          "color": "rgb(165, 39, 50)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "تلاش دوباره",
+          "ratio": 15.276,
+          "fontSize": 11,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgb(255, 255, 255)"
+        },
+        {
+          "text": "بدون مقصد",
+          "ratio": 14.6,
+          "fontSize": 11,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "بدون مقصدکنترل بازکردن ندارد.",
+          "ratio": 14.6,
+          "fontSize": 10,
+          "fontWeight": 400,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgb(248, 250, 252)"
+        },
+        {
+          "text": "اعلان تازه",
+          "ratio": 5.703,
+          "fontSize": 11,
+          "fontWeight": 700,
+          "color": "rgb(11, 107, 98)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "اعلان تازهفقط این مورد نشان جدید دارد.",
+          "ratio": 5.703,
+          "fontSize": 10,
+          "fontWeight": 400,
+          "color": "rgb(11, 107, 98)",
+          "background": "rgb(229, 246, 241)"
+        },
+        {
+          "text": "مسیرهای حساب",
+          "ratio": 15.276,
+          "fontSize": 16,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "مسیرهای قدیمی در پیاده‌سازی آینده فقط redirect می‌شوند.",
+          "ratio": 5.793,
+          "fontSize": 11,
+          "fontWeight": 400,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "نوع",
+          "ratio": 14.6,
+          "fontSize": 11,
+          "fontWeight": 900,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "مسیر",
+          "ratio": 14.6,
+          "fontSize": 11,
+          "fontWeight": 900,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "مقصد",
+          "ratio": 14.6,
+          "fontSize": 11,
+          "fontWeight": 900,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "canonical",
+          "ratio": 15.276,
+          "fontSize": 11,
+          "fontWeight": 400,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "/account",
+          "ratio": 8.602,
+          "fontSize": 10,
+          "fontWeight": 400,
+          "color": "rgb(25, 73, 151)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "مرکز حساب",
+          "ratio": 15.276,
+          "fontSize": 11,
+          "fontWeight": 400,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "canonical",
+          "ratio": 15.276,
+          "fontSize": 11,
+          "fontWeight": 400,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "/account/security",
+          "ratio": 8.602,
+          "fontSize": 10,
+          "fontWeight": 400,
+          "color": "rgb(25, 73, 151)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "امنیت",
+          "ratio": 15.276,
+          "fontSize": 11,
+          "fontWeight": 400,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "canonical",
+          "ratio": 15.276,
+          "fontSize": 11,
+          "fontWeight": 400,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "/account/storage",
+          "ratio": 8.602,
+          "fontSize": 10,
+          "fontWeight": 400,
+          "color": "rgb(25, 73, 151)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "حافظه",
+          "ratio": 15.276,
+          "fontSize": 11,
+          "fontWeight": 400,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "canonical",
+          "ratio": 15.276,
+          "fontSize": 11,
+          "fontWeight": 400,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "/account/notifications",
+          "ratio": 8.602,
+          "fontSize": 10,
+          "fontWeight": 400,
+          "color": "rgb(25, 73, 151)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "اعلان",
+          "ratio": 15.276,
+          "fontSize": 11,
+          "fontWeight": 400,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "canonical",
+          "ratio": 15.276,
+          "fontSize": 11,
+          "fontWeight": 400,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "/profile",
+          "ratio": 8.602,
+          "fontSize": 10,
+          "fontWeight": 400,
+          "color": "rgb(25, 73, 151)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "پروفایل شخصی",
+          "ratio": 15.276,
+          "fontSize": 11,
+          "fontWeight": 400,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "canonical",
+          "ratio": 15.276,
+          "fontSize": 11,
+          "fontWeight": 400,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "/users/:id",
+          "ratio": 8.602,
+          "fontSize": 10,
+          "fontWeight": 400,
+          "color": "rgb(25, 73, 151)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "پروفایل عمومی",
+          "ratio": 15.276,
+          "fontSize": 11,
+          "fontWeight": 400,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "legacy redirect",
+          "ratio": 15.276,
+          "fontSize": 11,
+          "fontWeight": 400,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "/settings",
+          "ratio": 8.602,
+          "fontSize": 10,
+          "fontWeight": 400,
+          "color": "rgb(25, 73, 151)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "/account/storage",
+          "ratio": 15.276,
+          "fontSize": 11,
+          "fontWeight": 400,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "legacy redirect",
+          "ratio": 15.276,
+          "fontSize": 11,
+          "fontWeight": 400,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "/notifications",
+          "ratio": 8.602,
+          "fontSize": 10,
+          "fontWeight": 400,
+          "color": "rgb(25, 73, 151)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "/account/notifications",
+          "ratio": 15.276,
+          "fontSize": 11,
+          "fontWeight": 400,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "مجوز نشست شخصی",
+          "ratio": 15.276,
+          "fontSize": 16,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "نقش و نوع نشست از هم جدا هستند.",
+          "ratio": 5.793,
+          "fontSize": 11,
+          "fontWeight": 400,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "وضعیت",
+          "ratio": 14.6,
+          "fontSize": 11,
+          "fontWeight": 900,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "مشاهده",
+          "ratio": 14.6,
+          "fontSize": 11,
+          "fontWeight": 900,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "پایان دیگر",
+          "ratio": 14.6,
+          "fontSize": 11,
+          "fontWeight": 900,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "همه دیگر",
+          "ratio": 14.6,
+          "fontSize": 11,
+          "fontWeight": 900,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "نشست جاری اصلی",
+          "ratio": 15.276,
+          "fontSize": 11,
+          "fontWeight": 400,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "بله",
+          "ratio": 6.376,
+          "fontSize": 11,
+          "fontWeight": 700,
+          "color": "rgb(11, 107, 98)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "بله",
+          "ratio": 6.376,
+          "fontSize": 11,
+          "fontWeight": 700,
+          "color": "rgb(11, 107, 98)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "بله",
+          "ratio": 6.376,
+          "fontSize": 11,
+          "fontWeight": 700,
+          "color": "rgb(11, 107, 98)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "نشست جاری غیراصلی",
+          "ratio": 15.276,
+          "fontSize": 11,
+          "fontWeight": 400,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "بله",
+          "ratio": 6.376,
+          "fontSize": 11,
+          "fontWeight": 700,
+          "color": "rgb(11, 107, 98)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "خیر",
+          "ratio": 7.152,
+          "fontSize": 11,
+          "fontWeight": 700,
+          "color": "rgb(165, 39, 50)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "خیر",
+          "ratio": 7.152,
+          "fontSize": 11,
+          "fontWeight": 700,
+          "color": "rgb(165, 39, 50)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "حسابدار",
+          "ratio": 15.276,
+          "fontSize": 11,
+          "fontWeight": 400,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "خیر",
+          "ratio": 7.152,
+          "fontSize": 11,
+          "fontWeight": 700,
+          "color": "rgb(165, 39, 50)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "خیر",
+          "ratio": 7.152,
+          "fontSize": 11,
+          "fontWeight": 700,
+          "color": "rgb(165, 39, 50)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "خیر",
+          "ratio": 7.152,
+          "fontSize": 11,
+          "fontWeight": 700,
+          "color": "rgb(165, 39, 50)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "checking",
+          "ratio": 8.602,
+          "fontSize": 9,
+          "fontWeight": 700,
+          "color": "rgb(25, 73, 151)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "در حال بررسی",
+          "ratio": 15.276,
+          "fontSize": 13,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "وضعیت مرورگر در حال مشخص‌شدن است.",
+          "ratio": 5.793,
+          "fontSize": 10,
+          "fontWeight": 400,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "unsupported",
+          "ratio": 8.602,
+          "fontSize": 9,
+          "fontWeight": 700,
+          "color": "rgb(25, 73, 151)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "پشتیبانی نمی‌شود",
+          "ratio": 15.276,
+          "fontSize": 13,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "این مرورگر امکان اعلان دستگاه را ندارد.",
+          "ratio": 5.793,
+          "fontSize": 10,
+          "fontWeight": 400,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "insecure",
+          "ratio": 8.602,
+          "fontSize": 9,
+          "fontWeight": 700,
+          "color": "rgb(25, 73, 151)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "اتصال امن لازم است",
+          "ratio": 15.276,
+          "fontSize": 13,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "اعلان دستگاه در این محیط فعال نمی‌شود.",
+          "ratio": 5.793,
+          "fontSize": 10,
+          "fontWeight": 400,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "server-disabled",
+          "ratio": 8.602,
+          "fontSize": 9,
+          "fontWeight": 700,
+          "color": "rgb(25, 73, 151)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "اکنون فعال نیست",
+          "ratio": 15.276,
+          "fontSize": 13,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "کنترل قابل اقدامی نمایش داده نمی‌شود.",
+          "ratio": 5.793,
+          "fontSize": 10,
+          "fontWeight": 400,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "permission-blocked",
+          "ratio": 8.602,
+          "fontSize": 9,
+          "fontWeight": 700,
+          "color": "rgb(25, 73, 151)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "در مرورگر مسدود است",
+          "ratio": 15.276,
+          "fontSize": 13,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "اجازه باید از تنظیمات مرورگر تغییر کند.",
+          "ratio": 5.793,
+          "fontSize": 10,
+          "fontWeight": 400,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "permission-default",
+          "ratio": 8.602,
+          "fontSize": 9,
+          "fontWeight": 700,
+          "color": "rgb(25, 73, 151)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "آماده فعال‌سازی",
+          "ratio": 15.276,
+          "fontSize": 13,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "درخواست مجوز مرورگر هنوز انجام نشده است.",
+          "ratio": 5.793,
+          "fontSize": 10,
+          "fontWeight": 400,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "فعال‌سازی",
+          "ratio": 5.944,
+          "fontSize": 11,
+          "fontWeight": 700,
+          "color": "rgb(255, 255, 255)",
+          "background": "rgb(35, 95, 199)"
+        },
+        {
+          "text": "subscribed",
+          "ratio": 8.602,
+          "fontSize": 9,
+          "fontWeight": 700,
+          "color": "rgb(25, 73, 151)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "فعال",
+          "ratio": 15.276,
+          "fontSize": 13,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "این مرورگر برای دریافت اعلان ثبت شده است.",
+          "ratio": 5.793,
+          "fontSize": 10,
+          "fontWeight": 400,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "unsubscribed",
+          "ratio": 8.602,
+          "fontSize": 9,
+          "fontWeight": 700,
+          "color": "rgb(25, 73, 151)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "فعال نیست",
+          "ratio": 15.276,
+          "fontSize": 13,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "می‌توانید این مرورگر را فعال کنید.",
+          "ratio": 5.793,
+          "fontSize": 10,
+          "fontWeight": 400,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "فعال‌سازی",
+          "ratio": 5.944,
+          "fontSize": 11,
+          "fontWeight": 700,
+          "color": "rgb(255, 255, 255)",
+          "background": "rgb(35, 95, 199)"
+        },
+        {
+          "text": "error",
+          "ratio": 8.602,
+          "fontSize": 9,
+          "fontWeight": 700,
+          "color": "rgb(25, 73, 151)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "بررسی کامل نشد",
+          "ratio": 15.276,
+          "fontSize": 13,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "یک بار دیگر وضعیت را بررسی کنید.",
+          "ratio": 5.793,
+          "fontSize": 10,
+          "fontWeight": 400,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "تلاش دوباره",
+          "ratio": 15.276,
+          "fontSize": 11,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgb(255, 255, 255)"
+        },
+        {
+          "text": "›",
+          "ratio": 15.276,
+          "fontSize": 20,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgb(255, 255, 255)"
+        },
+        {
+          "text": "اعلان‌ها",
+          "ratio": 15.276,
+          "fontSize": 17,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "مرکز اعلان",
+          "ratio": 5.793,
+          "fontSize": 10,
+          "fontWeight": 400,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "معاملات",
+          "ratio": 8.602,
+          "fontSize": 11,
+          "fontWeight": 700,
+          "color": "rgb(25, 73, 151)",
+          "background": "rgb(255, 255, 255)"
+        },
+        {
+          "text": "سایر",
+          "ratio": 4.998,
+          "fontSize": 11,
+          "fontWeight": 700,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "درخواست معامله تازه‌ای ثبت شد.",
+          "ratio": 15.276,
+          "fontSize": 13,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "جدید",
+          "ratio": 5.793,
+          "fontSize": 10,
+          "fontWeight": 400,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "اکنون",
+          "ratio": 5.793,
+          "fontSize": 10,
+          "fontWeight": 400,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "‹",
+          "ratio": 5.944,
+          "fontSize": 22,
+          "fontWeight": 400,
+          "color": "rgb(35, 95, 199)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "معامله شما نهایی شد؛ نتیجه را مشاهده کنید.",
+          "ratio": 15.276,
+          "fontSize": 13,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "۱۰ دقیقه پیش",
+          "ratio": 5.793,
+          "fontSize": 10,
+          "fontWeight": 400,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "‹",
+          "ratio": 5.944,
+          "fontSize": 22,
+          "fontWeight": 400,
+          "color": "rgb(35, 95, 199)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "خانه",
+          "ratio": 5.793,
+          "fontSize": 11,
+          "fontWeight": 600,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "بازار",
+          "ratio": 5.793,
+          "fontSize": 11,
+          "fontWeight": 600,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "پیام‌رسان",
+          "ratio": 5.793,
+          "fontSize": 11,
+          "fontWeight": 600,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "عملیات",
+          "ratio": 5.793,
+          "fontSize": 11,
+          "fontWeight": 600,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "حساب",
+          "ratio": 8.602,
+          "fontSize": 11,
+          "fontWeight": 600,
+          "color": "rgb(25, 73, 151)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "›",
+          "ratio": 15.276,
+          "fontSize": 20,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgb(255, 255, 255)"
+        },
+        {
+          "text": "اعلان‌ها",
+          "ratio": 15.276,
+          "fontSize": 17,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "مرکز اعلان",
+          "ratio": 5.793,
+          "fontSize": 10,
+          "fontWeight": 400,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "معاملات",
+          "ratio": 8.602,
+          "fontSize": 11,
+          "fontWeight": 700,
+          "color": "rgb(25, 73, 151)",
+          "background": "rgb(255, 255, 255)"
+        },
+        {
+          "text": "سایر",
+          "ratio": 4.998,
+          "fontSize": 11,
+          "fontWeight": 700,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "درخواست معامله تازه‌ای ثبت شد.",
+          "ratio": 15.276,
+          "fontSize": 13,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "جدید",
+          "ratio": 5.793,
+          "fontSize": 10,
+          "fontWeight": 400,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "اکنون",
+          "ratio": 5.793,
+          "fontSize": 10,
+          "fontWeight": 400,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "‹",
+          "ratio": 5.944,
+          "fontSize": 22,
+          "fontWeight": 400,
+          "color": "rgb(35, 95, 199)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "معامله شما نهایی شد؛ نتیجه را مشاهده کنید.",
+          "ratio": 15.276,
+          "fontSize": 13,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "۱۰ دقیقه پیش",
+          "ratio": 5.793,
+          "fontSize": 10,
+          "fontWeight": 400,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "‹",
+          "ratio": 5.944,
+          "fontSize": 22,
+          "fontWeight": 400,
+          "color": "rgb(35, 95, 199)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "خانه",
+          "ratio": 5.793,
+          "fontSize": 11,
+          "fontWeight": 600,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "بازار",
+          "ratio": 5.793,
+          "fontSize": 11,
+          "fontWeight": 600,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "پیام‌رسان",
+          "ratio": 5.793,
+          "fontSize": 11,
+          "fontWeight": 600,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "عملیات",
+          "ratio": 5.793,
+          "fontSize": 11,
+          "fontWeight": 600,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "حساب",
+          "ratio": 8.602,
+          "fontSize": 11,
+          "fontWeight": 600,
+          "color": "rgb(25, 73, 151)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "›",
+          "ratio": 15.276,
+          "fontSize": 20,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgb(255, 255, 255)"
+        },
+        {
+          "text": "اعلان‌ها",
+          "ratio": 15.276,
+          "fontSize": 17,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "مرکز اعلان",
+          "ratio": 5.793,
+          "fontSize": 10,
+          "fontWeight": 400,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "معاملات",
+          "ratio": 8.602,
+          "fontSize": 11,
+          "fontWeight": 700,
+          "color": "rgb(25, 73, 151)",
+          "background": "rgb(255, 255, 255)"
+        },
+        {
+          "text": "سایر",
+          "ratio": 4.998,
+          "fontSize": 11,
+          "fontWeight": 700,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "درخواست معامله تازه‌ای ثبت شد.",
+          "ratio": 15.276,
+          "fontSize": 13,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "جدید",
+          "ratio": 5.793,
+          "fontSize": 10,
+          "fontWeight": 400,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "اکنون",
+          "ratio": 5.793,
+          "fontSize": 10,
+          "fontWeight": 400,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "‹",
+          "ratio": 5.944,
+          "fontSize": 22,
+          "fontWeight": 400,
+          "color": "rgb(35, 95, 199)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "معامله شما نهایی شد؛ نتیجه را مشاهده کنید.",
+          "ratio": 15.276,
+          "fontSize": 13,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "۱۰ دقیقه پیش",
+          "ratio": 5.793,
+          "fontSize": 10,
+          "fontWeight": 400,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "‹",
+          "ratio": 5.944,
+          "fontSize": 22,
+          "fontWeight": 400,
+          "color": "rgb(35, 95, 199)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "خانه",
+          "ratio": 5.793,
+          "fontSize": 11,
+          "fontWeight": 600,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "بازار",
+          "ratio": 5.793,
+          "fontSize": 11,
+          "fontWeight": 600,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "پیام‌رسان",
+          "ratio": 5.793,
+          "fontSize": 11,
+          "fontWeight": 600,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "عملیات",
+          "ratio": 5.793,
+          "fontSize": 11,
+          "fontWeight": 600,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "حساب",
+          "ratio": 8.602,
+          "fontSize": 11,
+          "fontWeight": 600,
+          "color": "rgb(25, 73, 151)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "›",
+          "ratio": 15.276,
+          "fontSize": 20,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgb(255, 255, 255)"
+        },
+        {
+          "text": "اعلان‌ها",
+          "ratio": 15.276,
+          "fontSize": 17,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "مرکز اعلان",
+          "ratio": 5.793,
+          "fontSize": 10,
+          "fontWeight": 400,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "معاملات",
+          "ratio": 8.602,
+          "fontSize": 11,
+          "fontWeight": 700,
+          "color": "rgb(25, 73, 151)",
+          "background": "rgb(255, 255, 255)"
+        },
+        {
+          "text": "سایر",
+          "ratio": 4.998,
+          "fontSize": 11,
+          "fontWeight": 700,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "درخواست معامله تازه‌ای ثبت شد.",
+          "ratio": 15.276,
+          "fontSize": 13,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "جدید",
+          "ratio": 5.793,
+          "fontSize": 10,
+          "fontWeight": 400,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "اکنون",
+          "ratio": 5.793,
+          "fontSize": 10,
+          "fontWeight": 400,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "‹",
+          "ratio": 5.944,
+          "fontSize": 22,
+          "fontWeight": 400,
+          "color": "rgb(35, 95, 199)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "معامله شما نهایی شد؛ نتیجه را مشاهده کنید.",
+          "ratio": 15.276,
+          "fontSize": 13,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "۱۰ دقیقه پیش",
+          "ratio": 5.793,
+          "fontSize": 10,
+          "fontWeight": 400,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "‹",
+          "ratio": 5.944,
+          "fontSize": 22,
+          "fontWeight": 400,
+          "color": "rgb(35, 95, 199)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "خانه",
+          "ratio": 5.793,
+          "fontSize": 11,
+          "fontWeight": 600,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "بازار",
+          "ratio": 5.793,
+          "fontSize": 11,
+          "fontWeight": 600,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "پیام‌رسان",
+          "ratio": 5.793,
+          "fontSize": 11,
+          "fontWeight": 600,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "عملیات",
+          "ratio": 5.793,
+          "fontSize": 11,
+          "fontWeight": 600,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "حساب",
+          "ratio": 8.602,
+          "fontSize": 11,
+          "fontWeight": 600,
+          "color": "rgb(25, 73, 151)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "›",
+          "ratio": 15.276,
+          "fontSize": 20,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgb(255, 255, 255)"
+        },
+        {
+          "text": "اعلان‌ها",
+          "ratio": 15.276,
+          "fontSize": 17,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "مرکز اعلان",
+          "ratio": 5.793,
+          "fontSize": 10,
+          "fontWeight": 400,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "معاملات",
+          "ratio": 8.602,
+          "fontSize": 11,
+          "fontWeight": 700,
+          "color": "rgb(25, 73, 151)",
+          "background": "rgb(255, 255, 255)"
+        },
+        {
+          "text": "سایر",
+          "ratio": 4.998,
+          "fontSize": 11,
+          "fontWeight": 700,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "درخواست معامله تازه‌ای ثبت شد.",
+          "ratio": 15.276,
+          "fontSize": 13,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "جدید",
+          "ratio": 5.793,
+          "fontSize": 10,
+          "fontWeight": 400,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "اکنون",
+          "ratio": 5.793,
+          "fontSize": 10,
+          "fontWeight": 400,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "‹",
+          "ratio": 5.944,
+          "fontSize": 22,
+          "fontWeight": 400,
+          "color": "rgb(35, 95, 199)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "معامله شما نهایی شد؛ نتیجه را مشاهده کنید.",
+          "ratio": 15.276,
+          "fontSize": 13,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "۱۰ دقیقه پیش",
+          "ratio": 5.793,
+          "fontSize": 10,
+          "fontWeight": 400,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "‹",
+          "ratio": 5.944,
+          "fontSize": 22,
+          "fontWeight": 400,
+          "color": "rgb(35, 95, 199)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "خانه",
+          "ratio": 5.793,
+          "fontSize": 11,
+          "fontWeight": 600,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "بازار",
+          "ratio": 5.793,
+          "fontSize": 11,
+          "fontWeight": 600,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "پیام‌رسان",
+          "ratio": 5.793,
+          "fontSize": 11,
+          "fontWeight": 600,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "عملیات",
+          "ratio": 5.793,
+          "fontSize": 11,
+          "fontWeight": 600,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "حساب",
+          "ratio": 8.602,
+          "fontSize": 11,
+          "fontWeight": 600,
+          "color": "rgb(25, 73, 151)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "پنل مالی",
+          "ratio": 15.276,
+          "fontSize": 15,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "خانه",
+          "ratio": 5.793,
+          "fontSize": 11,
+          "fontWeight": 600,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "بازار",
+          "ratio": 5.793,
+          "fontSize": 11,
+          "fontWeight": 600,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "پیام‌رسان",
+          "ratio": 5.793,
+          "fontSize": 11,
+          "fontWeight": 600,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "عملیات",
+          "ratio": 5.793,
+          "fontSize": 11,
+          "fontWeight": 600,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "حساب",
+          "ratio": 7.512,
+          "fontSize": 11,
+          "fontWeight": 600,
+          "color": "rgb(25, 73, 151)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "امنیت حساب",
+          "ratio": 14.181,
+          "fontSize": 25,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "نشست‌های فعال",
+          "ratio": 5.378,
+          "fontSize": 12,
+          "fontWeight": 400,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "بازگشت",
+          "ratio": 15.276,
+          "fontSize": 11,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgb(255, 255, 255)"
+        },
+        {
+          "text": "Pixel 8",
+          "ratio": 15.276,
+          "fontSize": 13,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "Chrome · Android",
+          "ratio": 5.793,
+          "fontSize": 10,
+          "fontWeight": 400,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "Chrome · Android · آخرین فعالیت: اکنون",
+          "ratio": 5.793,
+          "fontSize": 10,
+          "fontWeight": 400,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "این دستگاه",
+          "ratio": 5.703,
+          "fontSize": 10,
+          "fontWeight": 700,
+          "color": "rgb(11, 107, 98)",
+          "background": "rgb(229, 246, 241)"
+        },
+        {
+          "text": "iPhone 15",
+          "ratio": 15.276,
+          "fontSize": 13,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "Safari · iOS",
+          "ratio": 5.793,
+          "fontSize": 10,
+          "fontWeight": 400,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "Safari · iOS · ۱ ساعت پیش",
+          "ratio": 5.793,
+          "fontSize": 10,
+          "fontWeight": 400,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "پایان",
+          "ratio": 15.276,
+          "fontSize": 11,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgb(255, 255, 255)"
+        },
+        {
+          "text": "پایان همه نشست‌های دیگر",
+          "ratio": 15.276,
+          "fontSize": 14,
+          "fontWeight": 700,
+          "color": "rgb(18, 38, 63)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "نشست جاری روی Pixel 8 حفظ می‌شود.",
+          "ratio": 5.793,
+          "fontSize": 11,
+          "fontWeight": 400,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "Pixel 8",
+          "ratio": 5.793,
+          "fontSize": 11,
+          "fontWeight": 400,
+          "color": "rgb(82, 104, 123)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "text": "بررسی و تأیید",
+          "ratio": 7.152,
+          "fontSize": 11,
+          "fontWeight": 700,
+          "color": "rgb(255, 255, 255)",
+          "background": "rgb(165, 39, 50)"
+        }
+      ],
+      "minimumContrast": 4.998,
+      "contrastViolations": []
+    },
+    "focus": {
+      "width": 3,
+      "style": "solid",
+      "color": "rgb(28, 99, 213)",
+      "contrast": 5.534
+    },
+    "minimalism": {
+      "defaultUnits": [
+        {
+          "necessity": "keep",
+          "text": "پروفایل من تصویر و نشانی ‹"
+        },
+        {
+          "necessity": "keep",
+          "text": "امنیت حساب نشست‌های فعال ‹"
+        },
+        {
+          "necessity": "keep",
+          "text": "حافظه و داده‌ها همین مرورگر ‹"
+        },
+        {
+          "necessity": "keep",
+          "text": "اعلان‌ها معاملات و پیام مدیریت ‹"
+        },
+        {
+          "necessity": "keep",
+          "text": "اتصال تلگرام مدیریت اتصال حساب ‹"
+        },
+        {
+          "necessity": "keep",
+          "text": "پروفایل من اطلاعات حساب ‹"
+        },
+        {
+          "necessity": "keep",
+          "text": "حافظه و داده‌ها همین مرورگر ‹"
+        },
+        {
+          "necessity": "keep",
+          "text": "اعلان‌ها معاملات و پیام مدیریت ‹"
+        },
+        {
+          "necessity": "keep",
+          "text": "ن‌پ نگار پارسا sample.user · ۰۹۱۲ ۰۰۰ ۰۰۰۰"
+        },
+        {
+          "necessity": "keep",
+          "text": "نشانی تهران، خیابان نمونه، پلاک ۱۲ فقط برای خود شما و مدیر مجاز کامل نمایش داده "
+        },
+        {
+          "necessity": "keep",
+          "text": "ک‌ن تصویر پروفایل تصویر نمونه فعلی تغییر"
+        },
+        {
+          "necessity": "keep",
+          "text": "نشانی نشانی فقط در حوزه‌های مجاز حساب نمایش داده می‌شود."
+        },
+        {
+          "necessity": "keep",
+          "text": "آ‌ن آزمایشی نمونه public.demo"
+        },
+        {
+          "necessity": "keep",
+          "text": "موبایل 09•• ••• ••18"
+        },
+        {
+          "necessity": "keep",
+          "text": "نشانی خصوصی است این اطلاعات برای شما نمایش داده نمی‌شود."
+        },
+        {
+          "necessity": "keep",
+          "text": "Pixel 8 Chrome · Android · آخرین فعالیت: اکنون این دستگاه"
+        },
+        {
+          "necessity": "keep",
+          "text": "iPhone 15 Safari · iOS · ۱ ساعت پیش پایان"
+        },
+        {
+          "necessity": "keep",
+          "text": "همه نشست‌های دیگر پایان یابند؟ نشست جاری روی Pixel 8 حفظ می‌شود. فقط نشست‌های دی"
+        },
+        {
+          "necessity": "keep",
+          "text": "فایل‌های موقت ۱۲٫۴ مگابایت فقط فایل‌های موقت همین مرورگر حذف می‌شوند."
+        },
+        {
+          "necessity": "keep",
+          "text": "چه چیزی باقی می‌ماند؟ حساب، پیام‌ها و نشست‌های فعال بدون تغییر می‌مانند."
+        },
+        {
+          "necessity": "keep",
+          "text": "درخواست معامله تازه‌ای ثبت شد. جدید اکنون ‹"
+        },
+        {
+          "necessity": "keep",
+          "text": "معامله شما نهایی شد؛ نتیجه را مشاهده کنید. ۱۰ دقیقه پیش ‹"
+        },
+        {
+          "necessity": "keep",
+          "text": "وضعیت آماده فعال‌سازی مرورگر هنوز اجازه نمایش اعلان را نپرسیده است."
+        },
+        {
+          "necessity": "keep",
+          "text": "کنترل مرورگر پس از انتخاب فعال‌سازی، درخواست مجوز مرورگر نمایش داده می‌شود."
+        },
+        {
+          "necessity": "keep",
+          "text": "درخواست معامله تازه‌ای ثبت شد. جدید اکنون ‹"
+        },
+        {
+          "necessity": "keep",
+          "text": "معامله شما نهایی شد؛ نتیجه را مشاهده کنید. ۱۰ دقیقه پیش ‹"
+        },
+        {
+          "necessity": "keep",
+          "text": "درخواست معامله تازه‌ای ثبت شد. جدید اکنون ‹"
+        },
+        {
+          "necessity": "keep",
+          "text": "معامله شما نهایی شد؛ نتیجه را مشاهده کنید. ۱۰ دقیقه پیش ‹"
+        },
+        {
+          "necessity": "keep",
+          "text": "درخواست معامله تازه‌ای ثبت شد. جدید اکنون ‹"
+        },
+        {
+          "necessity": "keep",
+          "text": "معامله شما نهایی شد؛ نتیجه را مشاهده کنید. ۱۰ دقیقه پیش ‹"
+        },
+        {
+          "necessity": "keep",
+          "text": "درخواست معامله تازه‌ای ثبت شد. جدید اکنون ‹"
+        },
+        {
+          "necessity": "keep",
+          "text": "معامله شما نهایی شد؛ نتیجه را مشاهده کنید. ۱۰ دقیقه پیش ‹"
+        },
+        {
+          "necessity": "keep",
+          "text": "درخواست معامله تازه‌ای ثبت شد. جدید اکنون ‹"
+        },
+        {
+          "necessity": "keep",
+          "text": "معامله شما نهایی شد؛ نتیجه را مشاهده کنید. ۱۰ دقیقه پیش ‹"
+        }
+      ],
+      "forbiddenTerms": [],
+      "summaryCount": 0
+    },
+    "synthetic": {
+      "rootFlags": [
+        "true",
+        "true",
+        "true",
+        "true",
+        "true",
+        "true",
+        "true",
+        "true",
+        "true",
+        "true",
+        "true",
+        "true",
+        "true",
+        "true",
+        "true",
+        "true"
+      ],
+      "realDataViolations": [],
+      "phoneViolations": []
+    },
+    "shell": {
+      "navigationContracts": [
+        {
+          "context": "mobile",
+          "destinations": [
+            "home",
+            "market",
+            "messenger",
+            "operations",
+            "account"
+          ],
+          "labels": [
+            "خانه",
+            "بازار",
+            "پیام‌رسان",
+            "عملیات",
+            "حساب"
+          ],
+          "active": [
+            "account"
+          ],
+          "svgCount": 5,
+          "minimumWidth": 78,
+          "minimumHeight": 79,
+          "minimumLabelFontSize": 11,
+          "labelBoundsViolations": 0,
+          "navigationHeight": 80
+        },
+        {
+          "context": "mobile",
+          "destinations": [
+            "home",
+            "market",
+            "messenger",
+            "operations",
+            "account"
+          ],
+          "labels": [
+            "خانه",
+            "بازار",
+            "پیام‌رسان",
+            "عملیات",
+            "حساب"
+          ],
+          "active": [
+            "account"
+          ],
+          "svgCount": 5,
+          "minimumWidth": 78,
+          "minimumHeight": 79,
+          "minimumLabelFontSize": 11,
+          "labelBoundsViolations": 0,
+          "navigationHeight": 80
+        },
+        {
+          "context": "mobile",
+          "destinations": [
+            "home",
+            "market",
+            "messenger",
+            "operations",
+            "account"
+          ],
+          "labels": [
+            "خانه",
+            "بازار",
+            "پیام‌رسان",
+            "عملیات",
+            "حساب"
+          ],
+          "active": [
+            "account"
+          ],
+          "svgCount": 5,
+          "minimumWidth": 78,
+          "minimumHeight": 79,
+          "minimumLabelFontSize": 11,
+          "labelBoundsViolations": 0,
+          "navigationHeight": 80
+        },
+        {
+          "context": "mobile",
+          "destinations": [
+            "home",
+            "market",
+            "messenger",
+            "operations",
+            "account"
+          ],
+          "labels": [
+            "خانه",
+            "بازار",
+            "پیام‌رسان",
+            "عملیات",
+            "حساب"
+          ],
+          "active": [
+            "account"
+          ],
+          "svgCount": 5,
+          "minimumWidth": 78,
+          "minimumHeight": 79,
+          "minimumLabelFontSize": 11,
+          "labelBoundsViolations": 0,
+          "navigationHeight": 80
+        },
+        {
+          "context": "mobile",
+          "destinations": [
+            "home",
+            "market",
+            "messenger",
+            "operations",
+            "account"
+          ],
+          "labels": [
+            "خانه",
+            "بازار",
+            "پیام‌رسان",
+            "عملیات",
+            "حساب"
+          ],
+          "active": [
+            "account"
+          ],
+          "svgCount": 5,
+          "minimumWidth": 78,
+          "minimumHeight": 79,
+          "minimumLabelFontSize": 11,
+          "labelBoundsViolations": 0,
+          "navigationHeight": 80
+        },
+        {
+          "context": "mobile",
+          "destinations": [
+            "home",
+            "market",
+            "messenger",
+            "operations",
+            "account"
+          ],
+          "labels": [
+            "خانه",
+            "بازار",
+            "پیام‌رسان",
+            "عملیات",
+            "حساب"
+          ],
+          "active": [
+            "account"
+          ],
+          "svgCount": 5,
+          "minimumWidth": 78,
+          "minimumHeight": 79,
+          "minimumLabelFontSize": 11,
+          "labelBoundsViolations": 0,
+          "navigationHeight": 80
+        },
+        {
+          "context": "mobile",
+          "destinations": [
+            "home",
+            "market",
+            "messenger",
+            "operations",
+            "account"
+          ],
+          "labels": [
+            "خانه",
+            "بازار",
+            "پیام‌رسان",
+            "عملیات",
+            "حساب"
+          ],
+          "active": [
+            "account"
+          ],
+          "svgCount": 5,
+          "minimumWidth": 78,
+          "minimumHeight": 79,
+          "minimumLabelFontSize": 11,
+          "labelBoundsViolations": 0,
+          "navigationHeight": 80
+        },
+        {
+          "context": "mobile",
+          "destinations": [
+            "home",
+            "market",
+            "messenger",
+            "operations",
+            "account"
+          ],
+          "labels": [
+            "خانه",
+            "بازار",
+            "پیام‌رسان",
+            "عملیات",
+            "حساب"
+          ],
+          "active": [
+            "account"
+          ],
+          "svgCount": 5,
+          "minimumWidth": 78,
+          "minimumHeight": 79,
+          "minimumLabelFontSize": 11,
+          "labelBoundsViolations": 0,
+          "navigationHeight": 80
+        },
+        {
+          "context": "mobile",
+          "destinations": [
+            "home",
+            "market",
+            "messenger",
+            "operations",
+            "account"
+          ],
+          "labels": [
+            "خانه",
+            "بازار",
+            "پیام‌رسان",
+            "عملیات",
+            "حساب"
+          ],
+          "active": [
+            "account"
+          ],
+          "svgCount": 5,
+          "minimumWidth": 78,
+          "minimumHeight": 79,
+          "minimumLabelFontSize": 11,
+          "labelBoundsViolations": 0,
+          "navigationHeight": 80
+        },
+        {
+          "context": "mobile",
+          "destinations": [
+            "home",
+            "market",
+            "messenger",
+            "operations",
+            "account"
+          ],
+          "labels": [
+            "خانه",
+            "بازار",
+            "پیام‌رسان",
+            "عملیات",
+            "حساب"
+          ],
+          "active": [
+            "account"
+          ],
+          "svgCount": 5,
+          "minimumWidth": 78,
+          "minimumHeight": 79,
+          "minimumLabelFontSize": 11,
+          "labelBoundsViolations": 0,
+          "navigationHeight": 80
+        },
+        {
+          "context": "responsive",
+          "destinations": [
+            "home",
+            "market",
+            "messenger",
+            "operations",
+            "account"
+          ],
+          "labels": [
+            "خانه",
+            "بازار",
+            "پیام‌رسان",
+            "عملیات",
+            "حساب"
+          ],
+          "active": [
+            "account"
+          ],
+          "svgCount": 5,
+          "minimumWidth": 72,
+          "minimumHeight": 79,
+          "minimumLabelFontSize": 11,
+          "labelBoundsViolations": 0,
+          "navigationHeight": 80
+        },
+        {
+          "context": "responsive",
+          "destinations": [
+            "home",
+            "market",
+            "messenger",
+            "operations",
+            "account"
+          ],
+          "labels": [
+            "خانه",
+            "بازار",
+            "پیام‌رسان",
+            "عملیات",
+            "حساب"
+          ],
+          "active": [
+            "account"
+          ],
+          "svgCount": 5,
+          "minimumWidth": 75,
+          "minimumHeight": 79,
+          "minimumLabelFontSize": 11,
+          "labelBoundsViolations": 0,
+          "navigationHeight": 80
+        },
+        {
+          "context": "responsive",
+          "destinations": [
+            "home",
+            "market",
+            "messenger",
+            "operations",
+            "account"
+          ],
+          "labels": [
+            "خانه",
+            "بازار",
+            "پیام‌رسان",
+            "عملیات",
+            "حساب"
+          ],
+          "active": [
+            "account"
+          ],
+          "svgCount": 5,
+          "minimumWidth": 78,
+          "minimumHeight": 79,
+          "minimumLabelFontSize": 11,
+          "labelBoundsViolations": 0,
+          "navigationHeight": 80
+        },
+        {
+          "context": "responsive",
+          "destinations": [
+            "home",
+            "market",
+            "messenger",
+            "operations",
+            "account"
+          ],
+          "labels": [
+            "خانه",
+            "بازار",
+            "پیام‌رسان",
+            "عملیات",
+            "حساب"
+          ],
+          "active": [
+            "account"
+          ],
+          "svgCount": 5,
+          "minimumWidth": 82.796875,
+          "minimumHeight": 79,
+          "minimumLabelFontSize": 11,
+          "labelBoundsViolations": 0,
+          "navigationHeight": 80
+        },
+        {
+          "context": "responsive",
+          "destinations": [
+            "home",
+            "market",
+            "messenger",
+            "operations",
+            "account"
+          ],
+          "labels": [
+            "خانه",
+            "بازار",
+            "پیام‌رسان",
+            "عملیات",
+            "حساب"
+          ],
+          "active": [
+            "account"
+          ],
+          "svgCount": 5,
+          "minimumWidth": 86,
+          "minimumHeight": 79,
+          "minimumLabelFontSize": 11,
+          "labelBoundsViolations": 0,
+          "navigationHeight": 80
+        },
+        {
+          "context": "desktop",
+          "destinations": [
+            "home",
+            "market",
+            "messenger",
+            "operations",
+            "account"
+          ],
+          "labels": [
+            "خانه",
+            "بازار",
+            "پیام‌رسان",
+            "عملیات",
+            "حساب"
+          ],
+          "active": [
+            "account"
+          ],
+          "svgCount": 5,
+          "minimumWidth": 92,
+          "minimumHeight": 56,
+          "minimumLabelFontSize": 11,
+          "labelBoundsViolations": 0,
+          "navigationHeight": 64
+        }
+      ]
+    },
+    "routes": {
+      "canonical": [
+        "/account",
+        "/account/security",
+        "/account/storage",
+        "/account/notifications",
+        "/profile",
+        "/users/:id"
+      ],
+      "legacy": [
+        {
+          "from": "/settings",
+          "to": "/account/storage"
+        },
+        {
+          "from": "/notifications",
+          "to": "/account/notifications"
+        }
+      ],
+      "expectedCanonicalCount": 6
+    },
+    "accountHub": {
+      "destinations": [
+        "profile",
+        "security",
+        "storage",
+        "notifications",
+        "telegram"
+      ],
+      "headerBackCount": 0,
+      "positiveStatusCount": 0,
+      "headerSubtitle": "نگار پارسا"
+    },
+    "accountant": {
+      "destinations": [
+        "profile",
+        "storage",
+        "notifications"
+      ],
+      "text": "حساب رها نیکویی پروفایل من اطلاعات حساب ‹ حافظه و داده‌ها همین مرورگر ‹ اعلان‌ها معاملات و پیام مدیریت ‹ خانه بازار پیام‌رسان عملیات حساب",
+      "forbiddenElements": 0,
+      "headerBackCount": 0,
+      "roleChipCount": 0,
+      "headerSubtitle": "رها نیکویی"
+    },
+    "selfProfile": {
+      "onDemandCount": 1,
+      "defaultSecondaryCount": 0,
+      "phoneMode": "full",
+      "phoneText": "sample.user · ۰۹۱۲ ۰۰۰ ۰۰۰۰",
+      "addressMode": "full",
+      "addressText": "تهران، خیابان نمونه، پلاک ۱۲"
+    },
+    "profileAddress": {
+      "inputValue": "تهران، خیابان نمونه، پلاک ۱۲",
+      "contextFeedbackCount": 1
+    },
+    "visibility": [
+      {
+        "key": "self",
+        "phone": "full",
+        "address": "full"
+      },
+      {
+        "key": "normal",
+        "phone": "masked",
+        "address": "hidden"
+      },
+      {
+        "key": "authorized-admin",
+        "phone": "full",
+        "address": "full"
+      },
+      {
+        "key": "unavailable",
+        "phone": "hidden",
+        "address": "hidden"
+      }
+    ],
+    "publicProfile": {
+      "phone": "masked",
+      "address": "hidden",
+      "actionMode": "none",
+      "relationSurfaceCount": 0
+    },
+    "sessions": {
+      "facts": [
+        {
+          "id": "pixel-current",
+          "device": "Pixel 8",
+          "platform": "Chrome · Android",
+          "activity": "اکنون",
+          "signal": "current"
+        },
+        {
+          "id": "iphone-other",
+          "device": "iPhone 15",
+          "platform": "Safari · iOS",
+          "activity": "۱ ساعت پیش",
+          "signal": "other"
+        }
+      ],
+      "inventoryScope": "local-per-server",
+      "currentSessionSignalCount": 1,
+      "forbiddenMetadataCount": 0,
+      "forbiddenMetadataTerms": []
+    },
+    "sessionDecision": {
+      "ackCount": 1,
+      "confirmCount": 1,
+      "outcomeCount": 1,
+      "text": "› پایان نشست‌ها تصمیم امنیتی همه نشست‌های دیگر پایان یابند؟ نشست جاری روی Pixel 8 حفظ می‌شود. فقط نشست‌های دیگر از حساب خارج می‌شوند. پیامد را خواندم انصراف تأیید پایان تغییر ثبت نشد؛ تصمیم شما حفظ شده است و می‌توانید دوباره تلاش کنید. خانه بازار پیام‌رسان عملیات حساب"
+    },
+    "storage": {
+      "scope": "current-browser-device",
+      "size": "12.4 MB",
+      "clearActionCount": 1,
+      "outcomeCount": 1,
+      "text": "› حافظه و داده‌ها همین مرورگر فایل‌های موقت ۱۲٫۴ مگابایت فقط فایل‌های موقت همین مرورگر حذف می‌شوند. چه چیزی باقی می‌ماند؟ حساب، پیام‌ها و نشست‌های فعال بدون تغییر می‌مانند. پاک‌کردن فایل‌های موقت پاک‌سازی کامل نشد؛ دوباره تلاش کنید. خانه بازار پیام‌رسان عملیات حساب"
+    },
+    "notifications": {
+      "tabs": [
+        "معاملات",
+        "سایر"
+      ],
+      "facts": [
+        {
+          "id": "trade-request",
+          "content": "درخواست معامله تازه‌ای ثبت شد.",
+          "time": "اکنون",
+          "routeState": "actionable",
+          "isNew": "true",
+          "interactive": true,
+          "newDotCount": 1
+        },
+        {
+          "id": "trade-final",
+          "content": "معامله شما نهایی شد؛ نتیجه را مشاهده کنید.",
+          "time": "۱۰ دقیقه پیش",
+          "routeState": "actionable",
+          "isNew": "false",
+          "interactive": true,
+          "newDotCount": 0
+        }
+      ],
+      "countElements": 0,
+      "rawRouteElements": 0,
+      "newSignalCount": 1
+    },
+    "pushMobile": {
+      "state": "permission-default",
+      "actions": [
+        "enable"
+      ]
+    },
+    "recovery": [
+      {
+        "key": "account-loading",
+        "nested": [],
+        "actionCount": 0,
+        "preservedInput": null,
+        "failurePreserved": null,
+        "text": "حساب · در حال دریافت ساختار مقصدها حفظ می‌شود."
+      },
+      {
+        "key": "account-error-retry",
+        "nested": [],
+        "actionCount": 1,
+        "preservedInput": null,
+        "failurePreserved": null,
+        "text": "حساب دریافت نشد اطلاعات کامل نیست؛ از همین‌جا دوباره تلاش کنید. تلاش دوباره"
+      },
+      {
+        "key": "account-inactive-restricted",
+        "nested": [],
+        "actionCount": 1,
+        "preservedInput": null,
+        "failurePreserved": null,
+        "text": "حساب محدود یا غیرفعال مقصدهای نامجاز نمایش داده نمی‌شوند. مشاهده وضعیت حساب"
+      },
+      {
+        "key": "profile-loading",
+        "nested": [],
+        "actionCount": 0,
+        "preservedInput": null,
+        "failurePreserved": null,
+        "text": "پروفایل · در حال دریافت هویت اصلی جای خود را حفظ می‌کند."
+      },
+      {
+        "key": "profile-error-retry",
+        "nested": [],
+        "actionCount": 1,
+        "preservedInput": null,
+        "failurePreserved": null,
+        "text": "پروفایل دریافت نشد دوباره تلاش کنید؛ اطلاعات حدسی نمایش داده نمی‌شود. تلاش دوباره"
+      },
+      {
+        "key": "profile-unavailable",
+        "nested": [],
+        "actionCount": 1,
+        "preservedInput": null,
+        "failurePreserved": null,
+        "text": "پروفایل در دسترس نیست ممکن است وجود نداشته باشد یا مجوز مشاهده تغییر کرده باشد. بازگشت"
+      },
+      {
+        "key": "profile-address-feedback",
+        "nested": [
+          "validation",
+          "busy",
+          "success",
+          "failure"
+        ],
+        "actionCount": 1,
+        "preservedInput": "تهران، خیابان نمونه، پلاک ۱۲",
+        "failurePreserved": "true",
+        "text": "نشانی · بازخورد کنار فیلد اعتبارسنجی نشانی باید کامل باشد. در حال ذخیره ورودی حفظ شده است. ذخیره شد نشانی تازه ثبت شد. ذخیره نشد «تهران، خیابان نمونه، پلاک ۱۲» حفظ شد.تلاش دوباره"
+      },
+      {
+        "key": "session-loading",
+        "nested": [],
+        "actionCount": 0,
+        "preservedInput": null,
+        "failurePreserved": null,
+        "text": "نشست‌ها · در حال دریافت ردیف ساختاری جای خود را حفظ می‌کند."
+      },
+      {
+        "key": "session-true-empty",
+        "nested": [],
+        "actionCount": 1,
+        "preservedInput": null,
+        "failurePreserved": null,
+        "text": "نشست دیگری وجود ندارد نشست جاری تنها نشست قابل مشاهده است. بازگشت به امنیت"
+      },
+      {
+        "key": "session-error-retry",
+        "nested": [],
+        "actionCount": 1,
+        "preservedInput": null,
+        "failurePreserved": null,
+        "text": "نشست‌ها دریافت نشدند فهرست ناقص نمایش داده نمی‌شود. تلاش دوباره"
+      },
+      {
+        "key": "session-termination-feedback",
+        "nested": [
+          "busy",
+          "success",
+          "failure"
+        ],
+        "actionCount": 1,
+        "preservedInput": null,
+        "failurePreserved": null,
+        "text": "پایان نشست · نتیجه در حال پایان نشست جاری حفظ می‌شود. پایان یافت نشست‌های دیگر خارج شدند. پایان نیافت دوباره تلاش کنید.تلاش دوباره"
+      },
+      {
+        "key": "session-permission",
+        "nested": [
+          "forbidden",
+          "accountant-forbidden"
+        ],
+        "actionCount": 1,
+        "preservedInput": null,
+        "failurePreserved": null,
+        "text": "مجوز نشست اقدام مجاز نیست نشست فقط مشاهده می‌شود. حسابدار نشست شخصی برای این نقش در دسترس نیست. بازگشت"
+      },
+      {
+        "key": "storage-feedback",
+        "nested": [
+          "busy",
+          "success",
+          "failure",
+          "valid-zero",
+          "size-error"
+        ],
+        "actionCount": 1,
+        "preservedInput": null,
+        "failurePreserved": null,
+        "text": "حافظه · نتیجه محلی در حال پاک‌سازی پاک شد پاک نشد تلاش دوباره 0 MB حافظه موقت خالی است. اندازه در دسترس نیست صفر فرض نمی‌شود."
+      },
+      {
+        "key": "notification-loading",
+        "nested": [],
+        "actionCount": 0,
+        "preservedInput": null,
+        "failurePreserved": null,
+        "text": "اعلان‌ها · در حال دریافت ردیف ساختاری حفظ می‌شود."
+      },
+      {
+        "key": "notification-empty-error",
+        "nested": [
+          "true-empty",
+          "category-empty",
+          "error-retry",
+          "route-less",
+          "realtime-new"
+        ],
+        "actionCount": 1,
+        "preservedInput": null,
+        "failurePreserved": null,
+        "text": "اعلان · حالت‌های متمایز هنوز اعلانی نیست در این دسته اعلانی نیست دریافت نشد تلاش دوباره بدون مقصد کنترل بازکردن ندارد. اعلان تازه فقط این مورد نشان جدید دارد."
+      }
+    ],
+    "push": [
+      {
+        "key": "checking",
+        "actions": [],
+        "text": "checking در حال بررسی وضعیت مرورگر در حال مشخص‌شدن است."
+      },
+      {
+        "key": "unsupported",
+        "actions": [],
+        "text": "unsupported پشتیبانی نمی‌شود این مرورگر امکان اعلان دستگاه را ندارد."
+      },
+      {
+        "key": "insecure",
+        "actions": [],
+        "text": "insecure اتصال امن لازم است اعلان دستگاه در این محیط فعال نمی‌شود."
+      },
+      {
+        "key": "server-disabled",
+        "actions": [],
+        "text": "server-disabled اکنون فعال نیست کنترل قابل اقدامی نمایش داده نمی‌شود."
+      },
+      {
+        "key": "permission-blocked",
+        "actions": [],
+        "text": "permission-blocked در مرورگر مسدود است اجازه باید از تنظیمات مرورگر تغییر کند."
+      },
+      {
+        "key": "permission-default",
+        "actions": [
+          "enable"
+        ],
+        "text": "permission-default آماده فعال‌سازی درخواست مجوز مرورگر هنوز انجام نشده است. فعال‌سازی"
+      },
+      {
+        "key": "subscribed",
+        "actions": [],
+        "text": "subscribed فعال این مرورگر برای دریافت اعلان ثبت شده است."
+      },
+      {
+        "key": "unsubscribed",
+        "actions": [
+          "enable"
+        ],
+        "text": "unsubscribed فعال نیست می‌توانید این مرورگر را فعال کنید. فعال‌سازی"
+      },
+      {
+        "key": "error",
+        "actions": [
+          "retry"
+        ],
+        "text": "error بررسی کامل نشد یک بار دیگر وضعیت را بررسی کنید. تلاش دوباره"
+      }
+    ],
+    "visibilityRows": [
+      {
+        "key": "self",
+        "phone": "full",
+        "address": "full"
+      },
+      {
+        "key": "normal",
+        "phone": "masked",
+        "address": "hidden"
+      },
+      {
+        "key": "authorized-admin",
+        "phone": "full",
+        "address": "full"
+      },
+      {
+        "key": "unavailable",
+        "phone": "hidden",
+        "address": "hidden"
+      }
+    ],
+    "sessionPermissions": [
+      {
+        "key": "primary",
+        "view": "yes",
+        "terminateOther": "yes",
+        "terminateAllOther": "yes"
+      },
+      {
+        "key": "non-primary",
+        "view": "yes",
+        "terminateOther": "no",
+        "terminateAllOther": "no"
+      },
+      {
+        "key": "accountant",
+        "view": "no",
+        "terminateOther": "no",
+        "terminateAllOther": "no"
+      }
+    ],
+    "protectedScope": {
+      "marketInteriorCount": 0,
+      "messengerInteriorCount": 0,
+      "protectedTextViolations": []
+    }
+  },
+  "preflightAssertions": [
+    {
+      "id": "font-vazirmatn-loaded",
+      "passed": true,
+      "detail": "4 loaded faces; family violations=0"
+    },
+    {
+      "id": "ten-mobile-scenarios-complete",
+      "passed": true,
+      "detail": "M01, M02, M03, M04, M05, M06, M07, M08, M09, M10"
+    },
+    {
+      "id": "mobile-roots-exact-390x844",
+      "passed": true,
+      "detail": "M01:390×844, M02:390×844, M03:390×844, M04:390×844, M05:390×844, M06:390×844, M07:390×844, M08:390×844, M09:390×844, M10:390×844"
+    },
+    {
+      "id": "no-product-overflow-or-clipping",
+      "passed": true,
+      "detail": "surface=none; content=0"
+    },
+    {
+      "id": "touch-targets-44",
+      "passed": true,
+      "detail": "count=155; minimum=44×44; violations=0"
+    },
+    {
+      "id": "cta-height-48",
+      "passed": true,
+      "detail": "count=9; minimum=48; violations=0"
+    },
+    {
+      "id": "responsive-width-sweep",
+      "passed": true,
+      "detail": "360:360×844/same=true, 375:375×844/same=true, 390:390×844/same=true, 414:414×844/same=true, 430:430×844/same=true"
+    },
+    {
+      "id": "desktop-security-sessions-1440x900",
+      "passed": true,
+      "detail": "1440×900; overflow=false/false"
+    },
+    {
+      "id": "desktop-adds-no-facts",
+      "passed": true,
+      "detail": "same-session-facts=true; current-signal=1; kpi=0; extra=0"
+    },
+    {
+      "id": "shell-account-destination-invariant",
+      "passed": true,
+      "detail": "nav=16; valid=16; focus=3px/5.534:1"
+    },
+    {
+      "id": "canonical-account-route-contract",
+      "passed": true,
+      "detail": "canonical=/account,/account/security,/account/storage,/account/notifications,/profile,/users/:id; legacy=/settings->/account/storage,/notifications->/account/notifications"
+    },
+    {
+      "id": "minimal-content-contract",
+      "passed": true,
+      "detail": "units=34; unjustified=0; forbidden=none; top-level-back=0/0; positive-status=0; role-chip=0; self=full/full; contrast-min=4.998; contrast-violations=0"
+    },
+    {
+      "id": "synthetic-identities-only",
+      "passed": true,
+      "detail": "flags=16; real=none; phone=none"
+    },
+    {
+      "id": "account-hub-destinations-unique",
+      "passed": true,
+      "detail": "profile, security, storage, notifications, telegram; back=0; status=0; identity=نگار پارسا"
+    },
+    {
+      "id": "accountant-account-scope-bounded",
+      "passed": true,
+      "detail": "destinations=profile,storage,notifications; forbidden-elements=0; back=0; role-chip=0; identity=رها نیکویی"
+    },
+    {
+      "id": "self-profile-progressive-disclosure",
+      "passed": true,
+      "detail": "on-demand=1; default-secondary=0; phone=full:sample.user · ۰۹۱۲ ۰۰۰ ۰۰۰۰; address=full:تهران، خیابان نمونه، پلاک ۱۲"
+    },
+    {
+      "id": "profile-address-feedback-in-context",
+      "passed": true,
+      "detail": "input=تهران، خیابان نمونه، پلاک ۱۲; preserved=تهران، خیابان نمونه، پلاک ۱۲; context=1; states=validation,busy,success,failure"
+    },
+    {
+      "id": "public-profile-visibility-matrix-exact",
+      "passed": true,
+      "detail": "[{\"key\":\"self\",\"phone\":\"full\",\"address\":\"full\"},{\"key\":\"normal\",\"phone\":\"masked\",\"address\":\"hidden\"},{\"key\":\"authorized-admin\",\"phone\":\"full\",\"address\":\"full\"},{\"key\":\"unavailable\",\"phone\":\"hidden\",\"address\":\"hidden\"}]"
+    },
+    {
+      "id": "public-profile-actions-bounded",
+      "passed": true,
+      "detail": "mode=none; relation/history=0"
+    },
+    {
+      "id": "session-list-metadata-bounded",
+      "passed": true,
+      "detail": "facts=[{\"id\":\"pixel-current\",\"device\":\"Pixel 8\",\"platform\":\"Chrome · Android\",\"activity\":\"اکنون\",\"signal\":\"current\"},{\"id\":\"iphone-other\",\"device\":\"iPhone 15\",\"platform\":\"Safari · iOS\",\"activity\":\"۱ ساعت پیش\",\"signal\":\"other\"}]; current-signal=1; forbidden=0/none"
+    },
+    {
+      "id": "session-decision-feedback-in-context",
+      "passed": true,
+      "detail": "ack=1; confirm=1; outcome=1; triad=busy,success,failure; permissions=true"
+    },
+    {
+      "id": "storage-action-feedback-in-context",
+      "passed": true,
+      "detail": "scope=current-browser-device; size=12.4 MB; action=1; outcome=1; states=busy,success,failure,valid-zero,size-error"
+    },
+    {
+      "id": "notification-center-metadata-bounded",
+      "passed": true,
+      "detail": "tabs=معاملات,سایر; rows=2; counts=0; new=1"
+    },
+    {
+      "id": "notification-empty-error-semantics-distinct",
+      "passed": true,
+      "detail": "true-empty,category-empty,error-retry,route-less,realtime-new"
+    },
+    {
+      "id": "push-state-matrix-complete-and-truthful",
+      "passed": true,
+      "detail": "checking:none, unsupported:none, insecure:none, server-disabled:none, permission-blocked:none, permission-default:enable, subscribed:none, unsubscribed:enable, error:retry; mobile=permission-default"
+    },
+    {
+      "id": "recovery-state-atlas-complete",
+      "passed": true,
+      "detail": "account-loading[]; account-error-retry[]; account-inactive-restricted[]; profile-loading[]; profile-error-retry[]; profile-unavailable[]; profile-address-feedback[validation,busy,success,failure]; session-loading[]; session-true-empty[]; session-error-retry[]; session-termination-feedback[busy,success,failure]; session-permission[forbidden,accountant-forbidden]; storage-feedback[busy,success,failure,valid-zero,size-error]; notification-loading[]; notification-empty-error[true-empty,category-empty,error-retry,route-less,realtime-new]"
+    },
+    {
+      "id": "protected-interiors-absent",
+      "passed": true,
+      "detail": "market=0; messenger=0; text=none"
+    }
+  ],
+  "assertions": [
+    {
+      "id": "font-vazirmatn-loaded",
+      "passed": true,
+      "detail": "4 loaded faces; family violations=0"
+    },
+    {
+      "id": "ten-mobile-scenarios-complete",
+      "passed": true,
+      "detail": "M01, M02, M03, M04, M05, M06, M07, M08, M09, M10"
+    },
+    {
+      "id": "mobile-roots-exact-390x844",
+      "passed": true,
+      "detail": "M01:390×844, M02:390×844, M03:390×844, M04:390×844, M05:390×844, M06:390×844, M07:390×844, M08:390×844, M09:390×844, M10:390×844"
+    },
+    {
+      "id": "no-product-overflow-or-clipping",
+      "passed": true,
+      "detail": "surface=none; content=0"
+    },
+    {
+      "id": "touch-targets-44",
+      "passed": true,
+      "detail": "count=155; minimum=44×44; violations=0"
+    },
+    {
+      "id": "cta-height-48",
+      "passed": true,
+      "detail": "count=9; minimum=48; violations=0"
+    },
+    {
+      "id": "responsive-width-sweep",
+      "passed": true,
+      "detail": "360:360×844/same=true, 375:375×844/same=true, 390:390×844/same=true, 414:414×844/same=true, 430:430×844/same=true"
+    },
+    {
+      "id": "desktop-security-sessions-1440x900",
+      "passed": true,
+      "detail": "1440×900; overflow=false/false"
+    },
+    {
+      "id": "desktop-adds-no-facts",
+      "passed": true,
+      "detail": "same-session-facts=true; current-signal=1; kpi=0; extra=0"
+    },
+    {
+      "id": "shell-account-destination-invariant",
+      "passed": true,
+      "detail": "nav=16; valid=16; focus=3px/5.534:1"
+    },
+    {
+      "id": "canonical-account-route-contract",
+      "passed": true,
+      "detail": "canonical=/account,/account/security,/account/storage,/account/notifications,/profile,/users/:id; legacy=/settings->/account/storage,/notifications->/account/notifications"
+    },
+    {
+      "id": "minimal-content-contract",
+      "passed": true,
+      "detail": "units=34; unjustified=0; forbidden=none; top-level-back=0/0; positive-status=0; role-chip=0; self=full/full; contrast-min=4.998; contrast-violations=0"
+    },
+    {
+      "id": "synthetic-identities-only",
+      "passed": true,
+      "detail": "flags=16; real=none; phone=none"
+    },
+    {
+      "id": "account-hub-destinations-unique",
+      "passed": true,
+      "detail": "profile, security, storage, notifications, telegram; back=0; status=0; identity=نگار پارسا"
+    },
+    {
+      "id": "accountant-account-scope-bounded",
+      "passed": true,
+      "detail": "destinations=profile,storage,notifications; forbidden-elements=0; back=0; role-chip=0; identity=رها نیکویی"
+    },
+    {
+      "id": "self-profile-progressive-disclosure",
+      "passed": true,
+      "detail": "on-demand=1; default-secondary=0; phone=full:sample.user · ۰۹۱۲ ۰۰۰ ۰۰۰۰; address=full:تهران، خیابان نمونه، پلاک ۱۲"
+    },
+    {
+      "id": "profile-address-feedback-in-context",
+      "passed": true,
+      "detail": "input=تهران، خیابان نمونه، پلاک ۱۲; preserved=تهران، خیابان نمونه، پلاک ۱۲; context=1; states=validation,busy,success,failure"
+    },
+    {
+      "id": "public-profile-visibility-matrix-exact",
+      "passed": true,
+      "detail": "[{\"key\":\"self\",\"phone\":\"full\",\"address\":\"full\"},{\"key\":\"normal\",\"phone\":\"masked\",\"address\":\"hidden\"},{\"key\":\"authorized-admin\",\"phone\":\"full\",\"address\":\"full\"},{\"key\":\"unavailable\",\"phone\":\"hidden\",\"address\":\"hidden\"}]"
+    },
+    {
+      "id": "public-profile-actions-bounded",
+      "passed": true,
+      "detail": "mode=none; relation/history=0"
+    },
+    {
+      "id": "session-list-metadata-bounded",
+      "passed": true,
+      "detail": "facts=[{\"id\":\"pixel-current\",\"device\":\"Pixel 8\",\"platform\":\"Chrome · Android\",\"activity\":\"اکنون\",\"signal\":\"current\"},{\"id\":\"iphone-other\",\"device\":\"iPhone 15\",\"platform\":\"Safari · iOS\",\"activity\":\"۱ ساعت پیش\",\"signal\":\"other\"}]; current-signal=1; forbidden=0/none"
+    },
+    {
+      "id": "session-decision-feedback-in-context",
+      "passed": true,
+      "detail": "ack=1; confirm=1; outcome=1; triad=busy,success,failure; permissions=true"
+    },
+    {
+      "id": "storage-action-feedback-in-context",
+      "passed": true,
+      "detail": "scope=current-browser-device; size=12.4 MB; action=1; outcome=1; states=busy,success,failure,valid-zero,size-error"
+    },
+    {
+      "id": "notification-center-metadata-bounded",
+      "passed": true,
+      "detail": "tabs=معاملات,سایر; rows=2; counts=0; new=1"
+    },
+    {
+      "id": "notification-empty-error-semantics-distinct",
+      "passed": true,
+      "detail": "true-empty,category-empty,error-retry,route-less,realtime-new"
+    },
+    {
+      "id": "push-state-matrix-complete-and-truthful",
+      "passed": true,
+      "detail": "checking:none, unsupported:none, insecure:none, server-disabled:none, permission-blocked:none, permission-default:enable, subscribed:none, unsubscribed:enable, error:retry; mobile=permission-default"
+    },
+    {
+      "id": "recovery-state-atlas-complete",
+      "passed": true,
+      "detail": "account-loading[]; account-error-retry[]; account-inactive-restricted[]; profile-loading[]; profile-error-retry[]; profile-unavailable[]; profile-address-feedback[validation,busy,success,failure]; session-loading[]; session-true-empty[]; session-error-retry[]; session-termination-feedback[busy,success,failure]; session-permission[forbidden,accountant-forbidden]; storage-feedback[busy,success,failure,valid-zero,size-error]; notification-loading[]; notification-empty-error[true-empty,category-empty,error-retry,route-less,realtime-new]"
+    },
+    {
+      "id": "protected-interiors-absent",
+      "passed": true,
+      "detail": "market=0; messenger=0; text=none"
+    }
+  ],
+  "summary": {
+    "passed": true,
+    "assertionCount": 27,
+    "passedCount": 27,
+    "failureCount": 0,
+    "pageErrorCount": 0
+  },
+  "failures": [],
+  "pageErrors": []
+}

@@ -1,0 +1,472 @@
+{
+  "schemaVersion": 2,
+  "stage": "0B-5",
+  "status": "technical_evidence_complete_awaiting_owner_visual_approval",
+  "branch": "condidate/webapp-ui-ux-redesign-v2",
+  "sourceCommit": "fa2a0a42934493752e7a7106e4dd10f168eb16d7",
+  "sourceCommitRole": "design_checkpoint_baseline_not_runtime_implementation",
+  "fileKey": "z8jgJxST4O2APzWnlyP9gv",
+  "fileUrl": "https://www.figma.com/design/z8jgJxST4O2APzWnlyP9gv",
+  "capturedAt": "2026-08-08T17:13:12.738Z",
+  "localEvidenceGeneratedAt": "2026-08-08T17:34:30.693Z",
+  "sitesPublishedAt": "2026-08-08T17:43:58.035651Z",
+  "page": {
+    "id": "117:2",
+    "name": "04 — Stage 0B-5 Account, Profile, Security & Notifications",
+    "url": "https://www.figma.com/design/z8jgJxST4O2APzWnlyP9gv?node-id=117-2",
+    "status": "final"
+  },
+  "phase0": {
+    "status": "approved",
+    "approvedOn": "2026-08-08",
+    "runtimeAuthorized": false
+  },
+  "figmaFreeze": {
+    "frozenAt": "2026-08-08T17:10:58.500Z",
+    "auditedAt": "2026-08-08T17:11:05.475Z",
+    "directEvidenceCapturedAt": "2026-08-08T17:13:12.738Z",
+    "auditSchemaVersion": 2,
+    "postFreezeAuditPending": false,
+    "postFreezeExportPending": false,
+    "status": "passed"
+  },
+  "supportingPages": [
+    {
+      "id": "41:2",
+      "name": "01.5 — UIUX v2 Foundations",
+      "kind": "foundations"
+    },
+    {
+      "id": "46:2",
+      "name": "01.6 — UIUX v2 Components",
+      "kind": "components"
+    }
+  ],
+  "sections": [
+    { "id": "117:3", "name": "00 — Contract", "status": "final" },
+    { "id": "117:4", "name": "01 — Account and profile scenarios", "status": "final" },
+    { "id": "117:5", "name": "02 — Security and storage scenarios", "status": "final" },
+    { "id": "117:6", "name": "03 — Notification center scenarios", "status": "final" },
+    { "id": "117:7", "name": "04 — State, route, visibility and push matrix", "status": "final" },
+    { "id": "117:8", "name": "05 — Responsive and desktop proofs", "status": "final" }
+  ],
+  "rootContract": {
+    "mobileRootCount": 10,
+    "referenceMobileWidth": 390,
+    "referenceMobileHeight": 844,
+    "responsiveWidths": [360, 375, 390, 414, 430],
+    "responsiveHeight": 844,
+    "desktopWidth": 1440,
+    "desktopHeight": 900,
+    "desktopPattern": "contained_security_and_sessions",
+    "desktopAddsNewFacts": false
+  },
+  "mobileScenarios": [
+    { "id": "128:3", "scenarioId": "0B5-M01", "name": "normal sparse account hub", "status": "final" },
+    { "id": "128:64", "scenarioId": "0B5-M02", "name": "accountant bounded account hub", "status": "final" },
+    { "id": "128:111", "scenarioId": "0B5-M03", "name": "self profile progressive disclosure", "status": "final" },
+    { "id": "129:132", "scenarioId": "0B5-M04", "name": "avatar and address edit feedback", "status": "final" },
+    { "id": "129:187", "scenarioId": "0B5-M05", "name": "public profile privacy and action proof", "status": "final" },
+    { "id": "131:823", "scenarioId": "0B5-M06", "name": "active sessions bounded metadata", "status": "final" },
+    { "id": "131:881", "scenarioId": "0B5-M07", "name": "session termination decision and outcome", "status": "final" },
+    { "id": "131:935", "scenarioId": "0B5-M08", "name": "local cache cleanup", "status": "final" },
+    { "id": "132:1627", "scenarioId": "0B5-M09", "name": "notification center and realtime new", "status": "final" },
+    { "id": "132:1683", "scenarioId": "0B5-M10", "name": "actionable push state", "status": "final" }
+  ],
+  "responsiveProofs": [
+    { "id": "141:456", "width": 360, "height": 844, "status": "final" },
+    { "id": "141:512", "width": 375, "height": 844, "status": "final" },
+    { "id": "141:568", "width": 390, "height": 844, "status": "final" },
+    { "id": "141:624", "width": 414, "height": 844, "status": "final" },
+    { "id": "141:680", "width": 430, "height": 844, "status": "final" }
+  ],
+  "desktopProof": {
+    "id": "143:668",
+    "boardId": "143:632",
+    "name": "Desktop Security and Sessions proof",
+    "width": 1440,
+    "height": 900,
+    "mobileReferenceFactCount": 19,
+    "desktopFactCount": 19,
+    "status": "final"
+  },
+  "supplementalNodes": {
+    "recoveryAtlas": "136:409",
+    "visibilityRoutePermissionMatrix": "137:414",
+    "pushMatrix": "138:414",
+    "visibilityForbiddenRow": "149:687",
+    "addressSubstates": "148:687",
+    "sessionSubstates": "148:694",
+    "storageSubstates": "148:701",
+    "notificationEmptySubstates": "148:708"
+  },
+  "crossStageShellInvariant": {
+    "sourceStage": "0B-2",
+    "navigationItems": [
+      { "key": "home", "label": "خانه", "order": 1 },
+      { "key": "market", "label": "بازار", "order": 2 },
+      { "key": "messenger", "label": "پیام‌رسان", "order": 3 },
+      { "key": "operations", "label": "عملیات", "order": 4 },
+      { "key": "account", "label": "حساب", "order": 5 }
+    ],
+    "activeItem": "account",
+    "iconTreatment": "reuse_approved_svg",
+    "mobileMinimumLabelFontSizePx": 11,
+    "mobileMinimumItemHeightPx": 52,
+    "mobileMinimumNavigationHeightPx": 78,
+    "desktopMinimumItemWidthPx": 48,
+    "desktopMinimumItemHeightPx": 48,
+    "scope": "shell_only",
+    "protectedInteriors": ["market", "messenger"]
+  },
+  "designSystemContract": {
+    "createNewVariableCollection": false,
+    "createNewVariables": false,
+    "createNewTextStyles": false,
+    "createNewEffects": false,
+    "variableCount": 65,
+    "textStyleCount": 9,
+    "effectCount": 2,
+    "componentSetCount": 12,
+    "componentVariantCount": 54,
+    "boundInstanceCountOnStagePage": 77,
+    "detachedInstanceCountOnStagePage": 0,
+    "components": {
+      "reused": {
+        "button": "48:14",
+        "status": "49:14",
+        "authenticatedHeader": "51:33",
+        "detailHeader": "51:19",
+        "bottomNavigation": "52:46",
+        "formField": "77:610",
+        "decisionPanel": "81:566"
+      },
+      "stage0b5": {
+        "accountActionRow": "121:14",
+        "sessionRow": "122:1327",
+        "notificationRow": "123:1330",
+        "bottomNavigationAccountOwner": "127:14",
+        "bottomNavigationAccountAccountant": "127:35"
+      }
+    },
+    "status": "passed"
+  },
+  "approvedTruthContract": {
+    "canonicalRoutes": [
+      "/account",
+      "/account/security",
+      "/account/storage",
+      "/account/notifications",
+      "/profile",
+      "/users/:id"
+    ],
+    "legacyRoutesToRedirectInFutureRuntime": ["/settings", "/notifications"],
+    "accountantScope": ["profile", "storage", "notifications"],
+    "accountantPersonalSessionManagement": false,
+    "accountantPersonalLogout": false,
+    "accountantTelegramLink": false,
+    "editableSelfProfileFields": ["avatar", "address"],
+    "normalViewerPublicPhone": "masked",
+    "normalViewerPublicAddress": "hidden",
+    "fullPublicProfileDataRequires": "self_or_backend_authorized_admin",
+    "terminateAllSemantics": "terminate_other_sessions_and_retain_current",
+    "sessionInventoryScope": "local_per_server_not_merged",
+    "storageScope": "current_browser_or_device_local_cache_only",
+    "storageZeroEqualsSizeError": false,
+    "notificationFetchLimit": 50,
+    "notificationCategoryCountsAreAuthoritativeTotals": false,
+    "notificationTabs": ["trade", "other"],
+    "notificationDeleteOrClearSupported": false,
+    "enteringCenterMarksExistingRead": true,
+    "onlyRealtimeNewItemMayCarryNewSignal": true,
+    "routeLessNotificationClickable": false,
+    "pushDisableControlSupported": false,
+    "pushTestControlSupported": false,
+    "pushStateKeys": [
+      "checking",
+      "unsupported",
+      "insecure",
+      "server-disabled",
+      "permission-blocked",
+      "permission-default",
+      "subscribed",
+      "unsubscribed",
+      "error"
+    ],
+    "marketNotificationPreferenceInScope": false,
+    "crossChannelDeliveryGuaranteed": false,
+    "syntheticExampleDataOnly": true
+  },
+  "exactAssertions": [
+    { "order": 1, "id": "font-vazirmatn-loaded", "status": "passed" },
+    { "order": 2, "id": "ten-mobile-scenarios-complete", "status": "passed" },
+    { "order": 3, "id": "mobile-roots-exact-390x844", "status": "passed" },
+    { "order": 4, "id": "no-product-overflow-or-clipping", "status": "passed" },
+    { "order": 5, "id": "touch-targets-44", "status": "passed" },
+    { "order": 6, "id": "cta-height-48", "status": "passed" },
+    { "order": 7, "id": "responsive-width-sweep", "status": "passed" },
+    { "order": 8, "id": "desktop-security-sessions-1440x900", "status": "passed" },
+    { "order": 9, "id": "desktop-adds-no-facts", "status": "passed" },
+    { "order": 10, "id": "shell-account-destination-invariant", "status": "passed" },
+    { "order": 11, "id": "canonical-account-route-contract", "status": "passed" },
+    { "order": 12, "id": "minimal-content-contract", "status": "passed" },
+    { "order": 13, "id": "synthetic-identities-only", "status": "passed" },
+    { "order": 14, "id": "account-hub-destinations-unique", "status": "passed" },
+    { "order": 15, "id": "accountant-account-scope-bounded", "status": "passed" },
+    { "order": 16, "id": "self-profile-progressive-disclosure", "status": "passed" },
+    { "order": 17, "id": "profile-address-feedback-in-context", "status": "passed" },
+    { "order": 18, "id": "public-profile-visibility-matrix-exact", "status": "passed" },
+    { "order": 19, "id": "public-profile-actions-bounded", "status": "passed" },
+    { "order": 20, "id": "session-list-metadata-bounded", "status": "passed" },
+    { "order": 21, "id": "session-decision-feedback-in-context", "status": "passed" },
+    { "order": 22, "id": "storage-action-feedback-in-context", "status": "passed" },
+    { "order": 23, "id": "notification-center-metadata-bounded", "status": "passed" },
+    { "order": 24, "id": "notification-empty-error-semantics-distinct", "status": "passed" },
+    { "order": 25, "id": "push-state-matrix-complete-and-truthful", "status": "passed" },
+    { "order": 26, "id": "recovery-state-atlas-complete", "status": "passed" },
+    { "order": 27, "id": "protected-interiors-absent", "status": "passed" }
+  ],
+  "directFigmaEvidence": [
+    { "path": "assets/figma-account-profile-scenarios.png", "nodeId": "117:4", "capturedAt": "2026-08-08T17:13:12.738Z", "sha256": "1c0674024f5191e3a8b3b74d162e40e9aa827ac21a99dc5a887836c7170ebfb0", "status": "final" },
+    { "path": "assets/figma-security-storage-scenarios.png", "nodeId": "117:5", "capturedAt": "2026-08-08T17:13:12.738Z", "sha256": "f361380c6755f1bde70ba957dd8583e42c88f861a09afbe9a7042de9ae136f18", "status": "final" },
+    { "path": "assets/figma-notification-center-scenarios.png", "nodeId": "117:6", "capturedAt": "2026-08-08T17:13:12.738Z", "sha256": "6dc10354978a853e8e31d163d88716babd67df53a84f9e010891511c10d29c02", "status": "final" },
+    { "path": "assets/figma-state-route-visibility-push-matrix.png", "nodeId": "117:7", "capturedAt": "2026-08-08T17:13:12.738Z", "sha256": "5df6e5ddcc7b0e54b818a239f95518840f9e34c939fc91bc67dad157fd88c565", "status": "final" },
+    { "path": "assets/figma-responsive-and-desktop-proofs.png", "nodeId": "117:8", "capturedAt": "2026-08-08T17:13:12.738Z", "sha256": "3546789eea3dee0b35dc020c3edc2138a42d1f04b4f023779d01cc550fefb8fc", "status": "final" },
+    { "path": "assets/figma-desktop-security-sessions-1440x900.png", "nodeId": "143:668", "capturedAt": "2026-08-08T17:13:12.738Z", "sha256": "9a5b34bb9fd8aa46e4ce87af53a3a0c7f5f88b1fc43763218a6ccc58fcf7faff", "status": "final" }
+  ],
+  "technicalEvidence": [
+    {
+      "path": "assets/figma-stage0b5-audit-metrics.json",
+      "generatedAt": "2026-08-08T17:11:05.475Z",
+      "sha256": "351f6afafb0e2d3b1a08e908dcd88cb72d9d2fd4fed8110c3fb22c12c6658d94",
+      "status": "final"
+    },
+    {
+      "path": "account-profile-security-notifications-evidence.html",
+      "sha256": "83e4b8a12d04eba3ca547aa31b63ac28598b5192be3606580838c29b0450e77e",
+      "status": "final"
+    },
+    {
+      "path": "capture-evidence.cjs",
+      "sha256": "bfba40a15fee2edf4ee924703a02ba9b5de860ce8d92c1458526fbcdd7c222f3",
+      "status": "final"
+    }
+  ],
+  "secondaryDerivativeEvidence": [
+    { "path": "assets/local-evidence/local-account-profile-scenarios.png", "generatedAt": "2026-08-08T17:34:30.693Z", "sha256": "e20e9506559a13fa4ee10abd0e9818f1a45b1d627df2f2c313afd98738ab9c6d", "status": "final" },
+    { "path": "assets/local-evidence/local-profile-visibility-matrix.png", "generatedAt": "2026-08-08T17:34:30.693Z", "sha256": "752b4bbd78ba0e210d1b1e36de84efef9ee6469e1b8fa70bf0473d5ed64623eb", "status": "final" },
+    { "path": "assets/local-evidence/local-security-storage-scenarios.png", "generatedAt": "2026-08-08T17:34:30.693Z", "sha256": "57d0f6821811d9c03f8d1334840c8b87d832962b2928fd714940d2c3a80eeac3", "status": "final" },
+    { "path": "assets/local-evidence/local-notification-center-scenarios.png", "generatedAt": "2026-08-08T17:34:30.693Z", "sha256": "020de1fb8511dd1d5937358a3fc9998056e20a148338a8e0c095b43964b2d3ab", "status": "final" },
+    { "path": "assets/local-evidence/local-state-route-push-atlas.png", "generatedAt": "2026-08-08T17:34:30.693Z", "sha256": "4dc14d64f2182d751732f8f49f5c48d47f1ef785f40b09be6caf81418de579b1", "status": "final" },
+    { "path": "assets/local-evidence/local-account-notifications-responsive-sweep.png", "generatedAt": "2026-08-08T17:34:30.693Z", "sha256": "27473d99ea97c6366b8fe4ec054270cc56bc0ade2076754bedbe3fffbcf391ba", "status": "final" },
+    { "path": "assets/local-evidence/local-desktop-security-sessions-1440x900.png", "generatedAt": "2026-08-08T17:34:30.693Z", "sha256": "b05876afb412f5467f51d682a58ede7f23f203a230942ef3d9620c9ec09df950", "status": "final" },
+    { "path": "assets/local-evidence/local-account-profile-security-notifications-validation-metrics.json", "generatedAt": "2026-08-08T17:34:30.693Z", "sha256": "293524253132064c0056022132325e213f8122fc43c0bd8a3a9601a7f222ca91", "status": "final" }
+  ],
+  "figmaAudit": {
+    "status": "passed",
+    "auditSchemaVersion": 2,
+    "auditedAt": "2026-08-08T17:11:05.475Z",
+    "assertionsPassed": 27,
+    "assertionFailures": 0,
+    "figmaDesignBlockerCount": 0,
+    "mobileRootCount": 10,
+    "responsiveProofCount": 5,
+    "desktopProofCount": 1,
+    "overflowFailureCount": 0,
+    "textClipFailureCount": 0,
+    "semanticHitContainerCount": 142,
+    "minimumHitWidthPx": 44,
+    "minimumHitHeightPx": 44,
+    "boundButtonCount": 15,
+    "minimumButtonHeightPx": 48,
+    "minimumNavigationLabelFontSizePx": 11,
+    "recoveryGroupCount": 15,
+    "namedNestedSubstateCount": 14,
+    "pushStateCount": 9,
+    "fontFamilies": ["Vazirmatn"],
+    "missingFontCount": 0,
+    "textContrastFailureCount": 0,
+    "minimumTextContrastRatio": 4.548,
+    "minimumFocusContrastRatio": 3.972,
+    "syntheticIdentitiesOnly": true,
+    "rawRouteOrBackendMetadataHits": 0,
+    "bannedNoiseHits": 0,
+    "marketInteriorNodeCount": 0,
+    "messengerInteriorNodeCount": 0,
+    "desktopAddsNewFacts": false,
+    "responsiveM09DataParity": true
+  },
+  "localHarness": {
+    "status": "passed",
+    "schemaVersion": 3,
+    "generatedAt": "2026-08-08T17:34:30.693Z",
+    "runId": "2839230-1786210464518",
+    "assertionsExpected": 27,
+    "assertionsPassed": 27,
+    "assertionFailures": 0,
+    "pageErrors": 0,
+    "responsiveWidths": [360, 375, 390, 414, 430],
+    "minimumTargetPx": 44,
+    "minimumCtaHeightPx": 48,
+    "loadedFontFaceCount": 4,
+    "actionTargetCount": 155,
+    "captureCount": 7,
+    "metricsSha256": "293524253132064c0056022132325e213f8122fc43c0bd8a3a9601a7f222ca91",
+    "canonicalDomSha256": "c5693eb79e0405cd7946a7d3ebeedd6b9a8fac3b7fe3699454aeac4c82eae831",
+    "canonicalDomUnchangedDuringCapture": true,
+    "preAndPostAssertionsIdentical": true,
+    "postCaptureRemeasurementCompleted": true,
+    "atomicDirectorySwap": true,
+    "failClosedDirectoryBundlePromotion": true
+  },
+  "sitesEvidence": {
+    "status": "published_private_owner_only_verified",
+    "url": "https://trading-bot-uiux-stage0b5.mohsenbarari235.chatgpt.site",
+    "title": "Trading Bot UI/UX — Stage 0B-5",
+    "projectId": "appgprj_6a776942e35c819198a0dcab372ac65e",
+    "slug": "trading-bot-uiux-stage0b5",
+    "publishedAt": "2026-08-08T17:43:58.035651Z",
+    "sourceNodeIds": ["117:2", "117:3", "117:4", "117:5", "117:6", "117:7", "117:8", "143:668"],
+    "sourceVersion": {
+      "canonicalFigmaFileKey": "z8jgJxST4O2APzWnlyP9gv",
+      "figmaFrozenAt": "2026-08-08T17:10:58.500Z",
+      "sitesSourceCommit": "9a710611d52ca24c5cd300fc010f464fb1ad33c3",
+      "versionNumber": 1,
+      "versionId": "appgprj_6a776942e35c819198a0dcab372ac65e~appgver_d0bbd46aed2481918e6dd16377916706"
+    },
+    "canonical": false,
+    "derivedPrivatePreviewOnly": true,
+    "archives": {
+      "localPreparedTgz": {
+        "sha256": "22d41b9fd89c7543c6be518fc7f23304daab84dd2390e936126bdd0a55f2f731",
+        "byteSize": 391385
+      },
+      "connectorNormalizedContent": {
+        "sha256": "058f397ec23d099c0ddcaf84e3f1a54ed1bcce86dc241cc43624b50d0bfc70a2",
+        "byteSize": 890880,
+        "fileCount": 27
+      }
+    },
+    "deployment": {
+      "id": "appgdep_6a776aae0604819185ff740c57054fac",
+      "provider": "site---6a776942e35c819198a0dcab372ac65e",
+      "status": "succeeded",
+      "succeededAt": "2026-08-08T17:43:19.978890Z",
+      "publishedAt": "2026-08-08T17:43:58.035651Z",
+      "workerErrorQueryWindowMinutes": 15,
+      "workerErrorEventCount": 0
+    },
+    "access": {
+      "mode": "custom",
+      "currentRole": "owner",
+      "allowedUserCount": 1,
+      "allowedUsers": "owner_only",
+      "allowedGroupCount": 0,
+      "externalVisitorCount": 0,
+      "verifiedImmediatelyBeforeDeploy": true,
+      "verifiedImmediatelyAfterDeploy": true
+    },
+    "anonymousProbe": {
+      "probedAt": "2026-08-08T17:43:56Z",
+      "httpStatus": 401,
+      "cacheControl": "no-store",
+      "referrerPolicy": "no-referrer",
+      "title": "Sign in required",
+      "result": "siwc_owner_gate_confirmed",
+      "anonymousRenderingClaimed": false
+    },
+    "buildVerification": {
+      "productionBuild": "passed",
+      "framework": "Next.js 16.3.0",
+      "npmAuditLevel": "high",
+      "npmAuditVulnerabilityCount": 0,
+      "workerAssetsDelegationTest": "passed",
+      "workerWithoutAssetsReturns503": true,
+      "requiredOutputsPresent": ["dist/server/index.js", "dist/client", "dist/.openai/hosting.json"],
+      "workerSha256": "55e64c6d4c7bc3d45166f2ac5b2f350bc719e86074367b97d69d645ec35b40b3",
+      "hostingManifestSha256": "825bfeaf99c56601d8159d884036d41eb7876691aa1911e946e3c3ee07ed0621",
+      "publicAndBuiltHtmlByteIdentical": true,
+      "htmlSha256": "83e4b8a12d04eba3ca547aa31b63ac28598b5192be3606580838c29b0450e77e",
+      "localUrlProbeCount": 3,
+      "localUrlProbeStatuses": [200, 200, 200],
+      "localVazirmatnFontCount": 4,
+      "localVazirmatnFontsByteIdentical": true,
+      "fontSha256": {
+        "Vazirmatn-Regular.woff2": "e382101336c6eb32cfb31381c027d02d2e0354bad08f6a395d4088beb3db3d91",
+        "Vazirmatn-Medium.woff2": "3333e31188a2b628db8780ca22fd5aad85bc083ccee9beb8d4d52db18cb98d48",
+        "Vazirmatn-SemiBold.woff2": "6a39a3c25eb18503cad590527b95bb5d4062b889a7ebbd3f01b0488d239e0499",
+        "Vazirmatn-Bold.woff2": "836fae7d42d83faa249bc00e0099592be98a1fa260d22d82f269b6091e585627"
+      },
+      "sensitiveArtifactScan": "passed",
+      "sourceMapCount": 0,
+      "environmentOrKeyArtifactCount": 0,
+      "logArtifactCount": 0
+    },
+    "driftReview": {
+      "status": "passed_artifact_and_source_bound",
+      "localVisualEvidenceFinal": true,
+      "archiveBoundToSourceVersion": true,
+      "signedInLiveContentFetched": false,
+      "bypassTokenRequested": false,
+      "reason": "private SIWC owner gate was not bypassed; owner visual review remains available at the live URL"
+    }
+  },
+  "runtimeBaseline": {
+    "status": "passed",
+    "testFileCount": 13,
+    "testCount": 128,
+    "passedTestCount": 128,
+    "exitCode": 0,
+    "vitestDurationSeconds": 38.54,
+    "maxWorkers": 1,
+    "fileParallelism": false,
+    "testFiles": [
+      "src/views/AccountHubView.test.ts",
+      "src/views/ProfileView.test.ts",
+      "src/views/SettingsView.test.ts",
+      "src/views/NotificationsView.test.ts",
+      "src/router/index.test.ts",
+      "src/views/SetupPassword.test.ts",
+      "src/stores/notifications.test.ts",
+      "src/composables/useNotificationRuntime.test.ts",
+      "src/services/webPush.test.ts",
+      "src/utils/browserNotifications.test.ts",
+      "src/services/telegramLink.test.ts",
+      "src/components/PublicProfile.test.ts",
+      "src/components/UserProfile.test.ts"
+    ],
+    "knownNonFailingOutput": [
+      "stale Browserslist caniuse-lite warning",
+      "expected mocked NetworkError, clear-cache and browser-notification failure logs",
+      "test debug output"
+    ],
+    "provesNewDesignRuntime": false
+  },
+  "knownNonBlockingFigmaCarryForwards": [
+    {
+      "id": "header-avatar-initials-local-text-style",
+      "scope": "inherited component",
+      "status": "carry_forward",
+      "detail": "Avatar initials do not have an exact matching local text style; all rendered text remains Vazirmatn and passes contrast and fit checks."
+    },
+    {
+      "id": "pre-0b5-bottom-navigation-operations-focus-layout-style-debt",
+      "scope": "pre-0B-5 Operations-active variants",
+      "status": "carry_forward",
+      "detail": "Inherited Operations-active variants retain pre-existing focus/layout/style debt; Stage 0B-5 Account-active variants and product roots pass the locked interaction contract."
+    }
+  ],
+  "ownerVisualApproval": {
+    "status": "pending",
+    "reviewUrl": "https://trading-bot-uiux-stage0b5.mohsenbarari235.chatgpt.site",
+    "access": "signed_in_owner_only",
+    "blockingNextCheckpoint": true
+  },
+  "externalReview": {
+    "status": "suspended_by_product_owner",
+    "blocking": false
+  },
+  "protectedInteriors": ["market", "messenger"],
+  "runtimeImplementationAuthorized": false,
+  "openFigmaWork": []
+}
