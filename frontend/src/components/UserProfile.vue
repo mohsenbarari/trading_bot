@@ -3,7 +3,6 @@ import { ref, computed, watchEffect, onUnmounted, watch, toRef } from 'vue';
 import moment from 'moment-jalaali';
 import {
   AlertTriangle,
-  ArrowRight,
   Ban,
   Bell,
   Check,
@@ -16,17 +15,50 @@ import {
   Undo2,
   Users,
 } from 'lucide-vue-next';
-import { apiFetch } from '../utils/auth';
+import { ActionContractError, useActionState } from '../composables/useActionState';
 import { useUserProfileTiming } from '../composables/useUserProfileTiming';
 import { isCachedMiddleManager } from '../utils/adminAccess';
+import { normalizeErrorPresentation } from '../utils/httpErrorPolicy';
 import { formatIranDateTime } from '../utils/iranTime';
+import { routeRequest } from '../utils/routeRequest';
 import CustomerNameWithBadge from './CustomerNameWithBadge.vue';
 import HelpPopover from './HelpPopover.vue';
 import JalaliDatePicker from './JalaliDatePicker.vue';
-import { AppResponsiveDialog, AppSelect } from './ui';
+import { AppConfirmDialog, AppResponsiveDialog, AppSelect } from './ui';
+
+type UserProfileUser = {
+  id: number;
+  account_name?: string | null;
+  mobile_number?: string | null;
+  role: string;
+  account_status?: string | null;
+  can_block_users?: boolean | null;
+  max_blocked_users?: number | null;
+  max_sessions?: number | null;
+  max_accountants?: number | null;
+  max_customers?: number | null;
+  trading_restricted_until?: string | null;
+  trading_restricted_until_jalali?: string | null;
+  max_daily_trades?: number | null;
+  max_active_commodities?: number | null;
+  max_daily_requests?: number | null;
+  limitations_expire_at?: string | null;
+  limitations_expire_at_jalali?: string | null;
+  trades_count?: number | null;
+  commodities_traded_count?: number | null;
+  channel_messages_count?: number | null;
+  global_lock_grace_expires_at?: string | null;
+  global_web_locked_at?: string | null;
+  is_accountant?: boolean;
+  is_customer?: boolean;
+  customer_management_name?: string | null;
+  customer_owner_account_name?: string | null;
+  customer_tier?: string | null;
+  [key: string]: unknown;
+};
 
 const props = defineProps<{
-  user: any;
+  user: UserProfileUser;
   isAdminView?: boolean;
   apiBaseUrl?: string;
   jwtToken?: string | null;
@@ -45,24 +77,224 @@ const isEditingRole = ref(false);
 const showSettings = ref(false);
 const showBlockModal = ref(false);
 const showLimitationsModal = ref(false);
-const isLoading = ref(false);
+
+type UserRecord = Record<string, unknown>;
+type UserActionContext = {
+  userId: number;
+  action: string;
+};
+type ActionFeedback = {
+  tone: 'success' | 'error';
+  message: string;
+};
+type ConfirmationKind =
+  | 'account-status'
+  | 'unblock'
+  | 'remove-limitations'
+  | 'terminate-sessions'
+  | 'delete-user';
+type PendingConfirmation = {
+  kind: ConfirmationKind;
+  key: string;
+  title: string;
+  message: string;
+  confirmLabel: string;
+  tone: 'warning' | 'danger';
+  targetStatus?: 'active' | 'inactive';
+};
+
+const userActions = useActionState<UserActionContext, unknown>();
+const actionFeedback = ref<ActionFeedback | null>(null);
+const quotaFeedback = ref<ActionFeedback | null>(null);
+const roleError = ref('');
+const blockError = ref('');
+const limitationsError = ref('');
+const pendingConfirmation = ref<PendingConfirmation | null>(null);
+const confirmationError = ref('');
+const activeUserMutationKey = ref<string | null>(null);
+const isUserMutationBusy = computed(() => activeUserMutationKey.value !== null);
+const confirmationBusy = computed(() => {
+  const key = pendingConfirmation.value?.key;
+  return key ? userActions.states.value[key]?.status === 'busy' : false;
+});
+
+function actionKey(action: string) {
+  return `user:${props.user?.id ?? 'unknown'}:${action}`;
+}
+
+function isActionBusy(action: string) {
+  const key = actionKey(action);
+  return activeUserMutationKey.value === key || userActions.states.value[key]?.status === 'busy';
+}
+
+function errorMessage(error: unknown, fallback: string) {
+  if (error instanceof ActionContractError) return fallback;
+  return normalizeErrorPresentation(error, {
+    surface: 'admin',
+    scope: 'action',
+    operation: 'update',
+    userInitiated: true,
+    fallbackMessage: fallback,
+  }).message || fallback;
+}
+
+function isRecord(value: unknown): value is UserRecord {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+const validUserRoles = new Set(['تماشا', 'عادی', 'پلیس', 'مدیر میانی', 'مدیر ارشد']);
+const validAccountStatuses = new Set(['active', 'inactive']);
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === 'string' && Boolean(value.trim());
+}
+
+function dateTimeEpoch(value: unknown): number | null {
+  if (!isNonEmptyString(value)) return null;
+  const trimmed = value.trim();
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,6})?)?(?:Z|[+-]\d{2}:\d{2})?$/i.test(trimmed)) {
+    return null;
+  }
+  const normalized = /(?:Z|[+-]\d{2}:\d{2})$/i.test(trimmed) ? trimmed : `${trimmed}Z`;
+  const epoch = Date.parse(normalized);
+  return Number.isFinite(epoch) ? epoch : null;
+}
+
+function isDateTimeString(value: unknown): value is string {
+  return dateTimeEpoch(value) !== null;
+}
+
+function isSameDateTime(value: unknown, expected: string) {
+  const actualEpoch = dateTimeEpoch(value);
+  const expectedEpoch = dateTimeEpoch(expected);
+  return actualEpoch !== null && expectedEpoch !== null && actualEpoch === expectedEpoch;
+}
+
+function isMinimalUserRead(receipt: unknown, targetUserId: number): receipt is UserRecord {
+  if (!isRecord(receipt)) return false;
+  return Number.isInteger(receipt.id)
+    && receipt.id === targetUserId
+    && typeof receipt.full_name === 'string'
+    && typeof receipt.account_name === 'string'
+    && typeof receipt.mobile_number === 'string'
+    && typeof receipt.role === 'string'
+    && validUserRoles.has(receipt.role)
+    && typeof receipt.account_status === 'string'
+    && validAccountStatuses.has(receipt.account_status)
+    && typeof receipt.has_bot_access === 'boolean'
+    && isDateTimeString(receipt.created_at);
+}
+
+function isExpectedUserReceipt(
+  receipt: unknown,
+  expected: Record<string, unknown | ((value: unknown) => boolean)>,
+): receipt is UserRecord {
+  if (!isMinimalUserRead(receipt, props.user.id)) return false;
+  return Object.entries(expected).every(([field, expectedValue]) => {
+    if (!(field in receipt)) return false;
+    return typeof expectedValue === 'function'
+      ? expectedValue(receipt[field])
+      : Object.is(receipt[field], expectedValue);
+  });
+}
+
+async function parseReceipt(response: Response) {
+  try {
+    return await response.json();
+  } catch {
+    throw new Error('پاسخ سرور قابل تأیید نبود. دوباره تلاش کنید.');
+  }
+}
+
+async function runJsonAction(options: {
+  action: string;
+  url: string;
+  method: 'PUT' | 'POST' | 'DELETE';
+  body?: Record<string, unknown>;
+  validate: (receipt: unknown) => boolean;
+  fallbackError: string;
+}) {
+  const key = actionKey(options.action);
+  const context = { userId: props.user.id, action: options.action };
+  if (activeUserMutationKey.value !== null) {
+    return { outcome: 'duplicate' as const, key, context };
+  }
+
+  activeUserMutationKey.value = key;
+  actionFeedback.value = null;
+  try {
+    return await userActions.run({
+      key,
+      context,
+      action: async () => {
+        const response = await routeRequest(options.url, {
+          method: options.method,
+          ...(options.body ? { body: JSON.stringify(options.body) } : {}),
+          errorContext: {
+            surface: 'admin',
+            scope: 'action',
+            operation: options.method === 'DELETE' ? 'delete' : 'update',
+            userInitiated: true,
+            fallbackMessage: options.fallbackError,
+          },
+        });
+        return { response, receipt: await parseReceipt(response) };
+      },
+      validateReceipt: options.validate,
+    });
+  } finally {
+    if (activeUserMutationKey.value === key) activeUserMutationKey.value = null;
+  }
+}
+
+async function runUserUpdate(options: {
+  action: string;
+  body: Record<string, unknown>;
+  expected: Record<string, unknown | ((value: unknown) => boolean)>;
+  fallbackError: string;
+}) {
+  const result = await runJsonAction({
+    action: options.action,
+    url: `/api/users/${props.user.id}`,
+    method: 'PUT',
+    body: options.body,
+    validate: (receipt) => isExpectedUserReceipt(receipt, options.expected),
+    fallbackError: options.fallbackError,
+  });
+
+  if (result.outcome === 'success') {
+    Object.assign(props.user, result.receipt as UserRecord);
+  }
+  return result;
+}
+
+function setActionSuccess(message: string) {
+  actionFeedback.value = { tone: 'success', message };
+}
+
+function setQuotaError(error: unknown, fallback: string) {
+  quotaFeedback.value = { tone: 'error', message: errorMessage(error, fallback) };
+}
+
+function setQuotaSuccess(message: string) {
+  quotaFeedback.value = { tone: 'success', message };
+}
 
 // Limitation Refs
 const limitMaxTrades = ref<number | null>(null);
 const limitMaxCommodities = ref<number | null>(null);
 const limitMaxRequests = ref<number | null>(null);
 const limitDurationMinutes = ref(0); // 0 = Unlimited
-const showCustomLimitDateInput = ref(false);
 const showLimitDateModal = ref(false);
 const customLimitDate = ref('');
 const selectedRole = ref(props.user?.role || 'تماشا');
-const editMaxSessions = ref(props.user?.max_sessions ?? 1);
+const editMaxSessions = ref(props.user?.is_accountant ? 1 : (props.user?.max_sessions ?? 1));
 const editMaxAccountants = ref(props.user?.max_accountants ?? 3);
 const editMaxCustomers = ref(props.user?.max_customers ?? 5);
 const canBlockUsers = ref(props.user?.can_block_users ?? true);
 const editMaxBlockedUsers = ref(props.user?.max_blocked_users ?? 10);
 const accountStatus = ref(props.user?.account_status ?? 'active');
-const isTerminatingSessions = ref(false);
+const isTerminatingSessions = computed(() => isActionBusy('terminate-sessions'));
 const showCustomerContext = computed(() => Boolean(
   props.user?.is_customer
   || props.user?.customer_management_name
@@ -76,6 +308,11 @@ const userDisplayName = computed(() => {
   return customerName || props.user?.account_name || '---';
 });
 const canEditRole = !isCachedMiddleManager();
+const hasFixedSingleSessionLimit = computed(() => (
+  props.user?.is_accountant === true
+  || props.user?.role === 'مدیر ارشد'
+  || props.user?.role === 'مدیر میانی'
+));
 
 function getCustomerTierLabel(value: string | null | undefined) {
   if (value === 'tier2') return 'سطح 2';
@@ -91,8 +328,8 @@ const customDate = ref('');
 const pickerStep = ref(1);
 const tempDatePart = ref('');
 const tempTimePart = ref('');
-const blockTimePickerRef = ref<any>(null);
-const limitTimePickerRef = ref<any>(null);
+const blockTimePickerRef = ref<{ modelValue?: unknown } | null>(null);
+const limitTimePickerRef = ref<{ modelValue?: unknown } | null>(null);
 
 // Watch tempTimePart for debugging
 watch(tempTimePart, (newVal, oldVal) => {
@@ -100,9 +337,9 @@ watch(tempTimePart, (newVal, oldVal) => {
 });
 
 watch(
-  () => props.user?.max_sessions,
-  (value) => {
-    editMaxSessions.value = value ?? 1;
+  () => [props.user?.max_sessions, props.user?.is_accountant] as const,
+  ([value, isAccountant]) => {
+    editMaxSessions.value = isAccountant ? 1 : (value ?? 1);
   }
 );
 
@@ -159,12 +396,6 @@ function initDatePicker(currentValue: string) {
     }
 }
 
-// Keep compatibility with existing helper tests and external date-change events.
-function onDateChange(val: any) {
-    console.log('Date Change:', val);
-  if (typeof val === 'string' && val) tempDatePart.value = val;
-}
-
 // Final submission handler
 function handleNextStep() {
     if (!tempDatePart.value) return;
@@ -177,7 +408,8 @@ function handleFinalSubmit() {
     console.log('tempTimePart before submit:', tempTimePart.value);
 
     if (!tempDatePart.value) {
-        alert('لطفاً تاریخ را انتخاب کنید.');
+        if (showBlockDateModal.value) blockError.value = 'لطفاً تاریخ را انتخاب کنید.';
+        if (showLimitDateModal.value) limitationsError.value = 'لطفاً تاریخ را انتخاب کنید.';
         return;
     }
 
@@ -218,36 +450,10 @@ function handleFinalSubmit() {
 
 // Legacy handler - can be removed or kept as alias
 // Explicit update handlers to ensure v-model sync works for custom integration
-function updateDatePart(val: any) {
+function updateDatePart(val: unknown) {
     console.log('updateDatePart received:', val, 'type:', typeof val);
     // Do NOT modify tempDatePart here - v-model handles it.
     // This handler is only for logging/debugging.
-}
-
-function updateTimePart(val: any) {
-    console.log('updateTimePart received:', val, 'type:', typeof val);
-    if (!val) return;
-
-    // Handle different formats the picker might return
-    if (typeof val === 'string') {
-        // If it's already HH:mm format
-        if (/^\d{2}:\d{2}$/.test(val)) {
-            tempTimePart.value = val;
-        } else {
-            // Try to parse with moment
-            const m = moment(val, ['HH:mm', 'HH:mm:ss', 'h:mm A']);
-            if (m.isValid()) {
-                tempTimePart.value = m.format('HH:mm');
-            } else {
-                tempTimePart.value = val;
-            }
-        }
-    } else if (val instanceof Date) {
-        tempTimePart.value = moment(val).format('HH:mm');
-    } else {
-        tempTimePart.value = String(val);
-    }
-    console.log('tempTimePart set to:', tempTimePart.value);
 }
 
 const roles = [
@@ -289,7 +495,11 @@ function setLimitDurationValue(value: string) {
 
 // Lock body scroll when any modal is open
 watchEffect(() => {
-    const anyModalOpen = showBlockModal.value || showLimitationsModal.value || showBlockDateModal.value || showLimitDateModal.value;
+    const anyModalOpen = showBlockModal.value
+      || showLimitationsModal.value
+      || showBlockDateModal.value
+      || showLimitDateModal.value
+      || Boolean(pendingConfirmation.value);
     document.body.style.overflow = anyModalOpen ? 'hidden' : '';
 });
 
@@ -349,46 +559,51 @@ const accountStatusDetailText = computed(() => {
 
 async function saveRole() {
   if (!canEditRole) return;
-  if (!props.jwtToken) return;
-  isLoading.value = true;
-  try {
-    const response = await apiFetch(`/api/users/${props.user.id}`, {
-      method: 'PUT',
-      body: JSON.stringify({ role: selectedRole.value })
-    });
-    if (!response.ok) throw new Error('خطا در ذخیره نقش');
-    const updatedUser = await response.json();
-    Object.assign(props.user, updatedUser);
+  if (!props.jwtToken || isUserMutationBusy.value) return;
+  roleError.value = '';
+  const result = await runUserUpdate({
+    action: 'role',
+    body: { role: selectedRole.value },
+    expected: { role: selectedRole.value },
+    fallbackError: 'ذخیره نقش کاربر ناموفق بود.',
+  });
+  if (result.outcome === 'success') {
     isEditingRole.value = false;
-    alert('نقش کاربر تغییر کرد.');
-  } catch (e) {
-    alert('خطا در ذخیره تغییرات');
-  } finally {
-    isLoading.value = false;
+    setActionSuccess('نقش کاربر تغییر کرد.');
+  } else if (result.outcome === 'error') {
+    roleError.value = errorMessage(result.error, 'ذخیره نقش کاربر ناموفق بود.');
   }
 }
 
-async function toggleAccountStatus() {
-  if (!props.jwtToken) return;
-  if (!confirm(`آیا از ${isAccountInactive.value ? 'فعال' : 'غیرفعال'} کردن حساب اطمینان دارید؟`)) return;
+function openConfirmation(confirmation: Omit<PendingConfirmation, 'key'> & { action: string }) {
+  if (isUserMutationBusy.value) return;
+  const { action, ...pending } = confirmation;
+  pendingConfirmation.value = { ...pending, key: actionKey(action) };
+  confirmationError.value = '';
+}
 
-  isLoading.value = true;
-  try {
-    const newValue = isAccountInactive.value ? 'active' : 'inactive';
-    const response = await apiFetch(`/api/users/${props.user.id}`, {
-      method: 'PUT',
-      body: JSON.stringify({ account_status: newValue })
-    });
-    if (!response.ok) throw new Error('خطا در تغییر دسترسی');
-    const updatedUser = await response.json();
-    Object.assign(props.user, updatedUser);
-    accountStatus.value = newValue;
-    alert(`وضعیت حساب ${newValue === 'active' ? 'فعال' : 'غیرفعال'} شد.`);
-  } catch (e) {
-    alert('خطا در تغییر دسترسی');
-  } finally {
-    isLoading.value = false;
-  }
+function closeConfirmation() {
+  if (confirmationBusy.value) return;
+  pendingConfirmation.value = null;
+  confirmationError.value = '';
+}
+
+function toggleAccountStatus() {
+  if (!props.jwtToken) return;
+  const targetStatus = isAccountInactive.value ? 'active' : 'inactive';
+  const verb = targetStatus === 'active' ? 'فعال' : 'غیرفعال';
+  const message = targetStatus === 'inactive'
+    ? 'فوری: بازار بسته می‌شود. خروج کاربر از کانال تلگرام مورد انتظار است؛ نتیجه آن در این صفحه قابل‌تأیید نیست. اگر حساب تا پایان مهلت دو روزه دوباره فعال نشود، دسترسی وب و پیام‌رسان قفل و نشست‌ها لغو می‌شوند.'
+    : 'این حساب دوباره فعال شود؟ دسترسی‌های مجاز فقط پس از پاسخ معتبر سرور بازمی‌گردند.';
+  openConfirmation({
+    kind: 'account-status',
+    action: 'account-status',
+    targetStatus,
+    title: `تأیید ${verb}‌سازی حساب`,
+    message,
+    confirmLabel: `${verb} کردن`,
+    tone: targetStatus === 'inactive' ? 'danger' : 'warning',
+  });
 }
 
 async function blockUser(minutes: number) {
@@ -400,166 +615,143 @@ async function blockUser(minutes: number) {
       return;
   }
 
-  isLoading.value = true;
-  try {
-    let restrictedUntil = null;
-    if (minutes === 0) {
-        // نامحدود (100 سال)
-        const date = new Date();
-        date.setFullYear(date.getFullYear() + 100);
-        restrictedUntil = date.toISOString();
-    } else {
-        const date = new Date();
-        date.setMinutes(date.getMinutes() + minutes);
-        restrictedUntil = date.toISOString();
-    }
-
-    await sendBlockRequest(restrictedUntil);
-  } catch (e) {
-    alert('خطا در انجام عملیات');
-  } finally {
-    isLoading.value = false;
+  if (isUserMutationBusy.value) return;
+  let restrictedUntil: string;
+  if (minutes === 0) {
+    // نامحدود (100 سال)
+    const date = new Date();
+    date.setFullYear(date.getFullYear() + 100);
+    restrictedUntil = date.toISOString();
+  } else {
+    const date = new Date();
+    date.setMinutes(date.getMinutes() + minutes);
+    restrictedUntil = date.toISOString();
   }
+  await sendBlockRequest(restrictedUntil);
 }
 
 async function blockUserCustom() {
-    if (!customDate.value) {
-        alert('لطفاً یک تاریخ معتبر انتخاب کنید.');
-        return;
-    }
-    isLoading.value = true;
-    try {
-        // Normalize digits (Persian to English) before parsing
-        const normalizedDate = toEnglishDigits(customDate.value);
-        console.log('Raw Date:', customDate.value);
-        console.log('Normalized Date:', normalizedDate);
+  if (!customDate.value) {
+    blockError.value = 'لطفاً یک تاریخ معتبر انتخاب کنید.';
+    return;
+  }
+  if (isUserMutationBusy.value) return;
 
-        // Parse Jalali date string strictly as Iran Time
-        const isoDate = parseJalaliToIranISO(normalizedDate);
-
-        if (!isoDate) {
-             console.error('Date Invalid:', normalizedDate);
-             alert('تاریخ نامعتبر است.');
-             isLoading.value = false;
-             return;
-        }
-
-        console.log('Sending ISO (Iran Time -> UTC):', isoDate);
-        await sendBlockRequest(isoDate);
-
-    } catch (e) {
-        console.error('Custom Block Error:', e);
-        alert('خطا در انجام عملیات');
-    } finally {
-        isLoading.value = false;
-    }
+  const normalizedDate = toEnglishDigits(customDate.value);
+  const isoDate = parseJalaliToIranISO(normalizedDate);
+  if (!isoDate) {
+    blockError.value = 'تاریخ نامعتبر است.';
+    return;
+  }
+  await sendBlockRequest(isoDate);
 }
 
 async function sendBlockRequest(restrictedUntil: string) {
-    try {
-        const response = await apiFetch(`/api/users/${props.user.id}`, {
-          method: 'PUT',
-          body: JSON.stringify({ trading_restricted_until: restrictedUntil })
-        });
-
-        if (!response.ok) throw new Error('خطا در مسدودسازی');
-        const updatedUser = await response.json();
-        console.log('Block User Response:', updatedUser);
-        Object.assign(props.user, updatedUser);
-        console.log('Props User Restricted Until:', props.user.trading_restricted_until);
-
-        showBlockModal.value = false;
-        showCustomDateInput.value = false;
-        alert('کاربر مسدود شد.');
-    } catch (e) {
-        console.error('Block Error:', e);
-        alert('خطا در اعمال مسدودیت');
-    }
+  blockError.value = '';
+  const result = await runUserUpdate({
+    action: 'block',
+    body: { trading_restricted_until: restrictedUntil },
+    expected: {
+      trading_restricted_until: (value) => isSameDateTime(value, restrictedUntil),
+    },
+    fallbackError: 'اعمال مسدودیت ناموفق بود.',
+  });
+  if (result.outcome === 'success') {
+    showBlockModal.value = false;
+    showCustomDateInput.value = false;
+    setActionSuccess('کاربر مسدود شد.');
+  } else if (result.outcome === 'error') {
+    blockError.value = errorMessage(result.error, 'اعمال مسدودیت ناموفق بود.');
+  }
 }
 
 async function saveLimitations() {
-    if (!props.jwtToken) return;
-    isLoading.value = true;
-    try {
-        let expireAt = null;
-        if (limitDurationMinutes.value === -1) {
-             if (!customLimitDate.value) {
-                 alert('لطفاً تاریخ پایان محدودیت را انتخاب کنید.');
-                 isLoading.value = false;
-                 return;
-             }
-             expireAt = parseJalaliToIranISO(customLimitDate.value);
-             if (!expireAt) {
-                 alert('تاریخ نامعتبر است.');
-                 isLoading.value = false;
-                 return;
-             }
-        } else if (limitDurationMinutes.value > 0) {
-             const date = new Date();
-             date.setMinutes(date.getMinutes() + limitDurationMinutes.value);
-             expireAt = date.toISOString();
-        }
-        // If 0 (Unlimited), expireAt remains null (permanent limitation until removed?)
-        // Or maybe we want to set it to far future?
-        // Let's assume null means "Permanent" for limitations too, or we can use the same logic as block.
-        // For now, let's treat 0 as "Permanent" (null in DB implies no expiry, so it's always active if values are set).
-
-        const body = {
-            max_daily_trades: limitMaxTrades.value,
-            max_active_commodities: limitMaxCommodities.value,
-            max_daily_requests: limitMaxRequests.value,
-            limitations_expire_at: expireAt
-        };
-
-        const response = await apiFetch(`/api/users/${props.user.id}`, {
-            method: 'PUT',
-            body: JSON.stringify(body)
-        });
-
-        if (!response.ok) throw new Error('خطا در ذخیره محدودیت‌ها');
-        const updatedUser = await response.json();
-        Object.assign(props.user, updatedUser);
-        showLimitationsModal.value = false;
-        alert('محدودیت‌ها اعمال شد.');
-    } catch (e) {
-        alert('خطا در ذخیره محدودیت‌ها');
-    } finally {
-        isLoading.value = false;
+  if (!props.jwtToken || isUserMutationBusy.value) return;
+  limitationsError.value = '';
+  let expireAt: string | null = null;
+  if (limitDurationMinutes.value === -1) {
+    if (!customLimitDate.value) {
+      limitationsError.value = 'لطفاً تاریخ پایان محدودیت را انتخاب کنید.';
+      return;
     }
+    expireAt = parseJalaliToIranISO(customLimitDate.value);
+    if (!expireAt) {
+      limitationsError.value = 'تاریخ نامعتبر است.';
+      return;
+    }
+  } else if (limitDurationMinutes.value > 0) {
+    const date = new Date();
+    date.setMinutes(date.getMinutes() + limitDurationMinutes.value);
+    expireAt = date.toISOString();
+  }
+
+  const body = {
+    max_daily_trades: limitMaxTrades.value,
+    max_active_commodities: limitMaxCommodities.value,
+    max_daily_requests: limitMaxRequests.value,
+    limitations_expire_at: expireAt,
+  };
+  const result = await runUserUpdate({
+    action: 'limitations',
+    body,
+    expected: {
+      max_daily_trades: body.max_daily_trades,
+      max_active_commodities: body.max_active_commodities,
+      max_daily_requests: body.max_daily_requests,
+      limitations_expire_at: expireAt === null
+        ? null
+        : (value) => isSameDateTime(value, expireAt),
+    },
+    fallbackError: 'ذخیره محدودیت‌ها ناموفق بود.',
+  });
+  if (result.outcome === 'success') {
+    showLimitationsModal.value = false;
+    setActionSuccess('محدودیت‌ها اعمال شد.');
+  } else if (result.outcome === 'error') {
+    limitationsError.value = errorMessage(result.error, 'ذخیره محدودیت‌ها ناموفق بود.');
+  }
 }
 
 function openLimitationsModal() {
+    if (isUserMutationBusy.value) return;
     limitMaxTrades.value = props.user.max_daily_trades;
     limitMaxCommodities.value = props.user.max_active_commodities;
     limitMaxRequests.value = props.user.max_daily_requests;
     // We don't easily know the duration from expire_at, so reset duration to default
     limitDurationMinutes.value = 0;
     customLimitDate.value = ''; // Reset custom date
+    limitationsError.value = '';
     showLimitationsModal.value = true;
+}
+
+function closeLimitationsModal() {
+  if (isUserMutationBusy.value) return;
+  showLimitationsModal.value = false;
+}
+
+function openBlockModal() {
+  if (isUserMutationBusy.value) return;
+  blockError.value = '';
+  showBlockModal.value = true;
+}
+
+function closeBlockModal() {
+  if (isUserMutationBusy.value) return;
+  showBlockModal.value = false;
 }
 
 
 
-async function unblockUser() {
-  if (!confirm('آیا از رفع مسدودیت اطمینان دارید؟')) return;
+function unblockUser() {
   if (!props.jwtToken) return;
-  isLoading.value = true;
-  try {
-    const response = await apiFetch(`/api/users/${props.user.id}`, {
-      method: 'PUT',
-      body: JSON.stringify({ trading_restricted_until: null })
-    });
-
-    if (!response.ok) throw new Error('خطا در رفع مسدودیت');
-    const updatedUser = await response.json();
-    Object.assign(props.user, updatedUser);
-    customDate.value = ''; // Reset custom date
-    alert('رفع مسدودیت انجام شد.');
-  } catch (e) {
-    alert('خطا در انجام عملیات');
-  } finally {
-    isLoading.value = false;
-  }
+  openConfirmation({
+    kind: 'unblock',
+    action: 'unblock',
+    title: 'تأیید رفع مسدودیت',
+    message: 'مسدودیت معاملاتی این کاربر برداشته شود؟',
+    confirmLabel: 'رفع مسدودیت',
+    tone: 'warning',
+  });
 }
 
 // Check if user has active limitations
@@ -569,44 +761,33 @@ const hasLimitations = computed(() => {
            props.user.max_daily_requests != null;
 });
 
-async function removeLimitations() {
-  if (!confirm('آیا از رفع محدودیت‌ها اطمینان دارید؟')) return;
+function removeLimitations() {
   if (!props.jwtToken) return;
-  isLoading.value = true;
-  try {
-    const response = await apiFetch(`/api/users/${props.user.id}`, {
-      method: 'PUT',
-      body: JSON.stringify({
-        max_daily_trades: null,
-        max_active_commodities: null,
-        max_daily_requests: null,
-        limitations_expire_at: null
-      })
-    });
-
-    if (!response.ok) throw new Error('خطا در رفع محدودیت‌ها');
-    const updatedUser = await response.json();
-    Object.assign(props.user, updatedUser);
-    alert('محدودیت‌ها برداشته شد.');
-  } catch (e) {
-    alert('خطا در انجام عملیات');
-  } finally {
-    isLoading.value = false;
-  }
+  openConfirmation({
+    kind: 'remove-limitations',
+    action: 'remove-limitations',
+    title: 'تأیید رفع محدودیت‌ها',
+    message: 'همه محدودیت‌های ثبت‌شده برای این کاربر برداشته شود؟',
+    confirmLabel: 'رفع محدودیت‌ها',
+    tone: 'warning',
+  });
 }
 
 async function saveMaxSessions() {
-  try {
-    const response = await apiFetch(`/api/users/${props.user.id}`, {
-      method: 'PUT',
-      body: JSON.stringify({ max_sessions: editMaxSessions.value })
-    });
-    if (!response.ok) throw new Error('خطا');
-    const updatedUser = await response.json();
-    Object.assign(props.user, updatedUser);
-  } catch (e) {
-    alert('خطا در ذخیره تنظیمات نشست');
-    editMaxSessions.value = props.user.max_sessions ?? 1;
+  if (isUserMutationBusy.value) return;
+  quotaFeedback.value = null;
+  const requestedValue = hasFixedSingleSessionLimit.value ? 1 : editMaxSessions.value;
+  editMaxSessions.value = requestedValue;
+  const result = await runUserUpdate({
+    action: 'max-sessions',
+    body: { max_sessions: requestedValue },
+    expected: { max_sessions: requestedValue },
+    fallbackError: 'ذخیره تنظیمات نشست ناموفق بود.',
+  });
+  if (result.outcome === 'success') {
+    setQuotaSuccess('حداکثر نشست همزمان ذخیره شد.');
+  } else if (result.outcome === 'error') {
+    setQuotaError(result.error, 'ذخیره تنظیمات نشست ناموفق بود.');
   }
 }
 
@@ -617,128 +798,230 @@ function handleMaxSessionsSelect(value: string) {
 }
 
 async function saveMaxAccountants() {
+  if (isUserMutationBusy.value) return;
   const normalizedValue = Number.isFinite(editMaxAccountants.value)
     ? Math.max(0, Math.trunc(editMaxAccountants.value))
     : 0;
   editMaxAccountants.value = normalizedValue;
-
-  try {
-    const response = await apiFetch(`/api/users/${props.user.id}`, {
-      method: 'PUT',
-      body: JSON.stringify({ max_accountants: normalizedValue })
-    });
-    if (!response.ok) throw new Error('خطا');
-    const updatedUser = await response.json();
-    Object.assign(props.user, updatedUser);
-  } catch (e) {
-    alert('خطا در ذخیره سقف حسابداران');
-    editMaxAccountants.value = props.user.max_accountants ?? 3;
+  quotaFeedback.value = null;
+  const result = await runUserUpdate({
+    action: 'max-accountants',
+    body: { max_accountants: normalizedValue },
+    expected: { max_accountants: normalizedValue },
+    fallbackError: 'ذخیره سقف حسابداران ناموفق بود.',
+  });
+  if (result.outcome === 'success') {
+    setQuotaSuccess('سقف حسابداران ذخیره شد.');
+  } else if (result.outcome === 'error') {
+    setQuotaError(result.error, 'ذخیره سقف حسابداران ناموفق بود.');
   }
 }
 
 async function saveMaxCustomers() {
+  if (isUserMutationBusy.value) return;
   const normalizedValue = Number.isFinite(editMaxCustomers.value)
     ? Math.max(0, Math.trunc(editMaxCustomers.value))
     : 0;
   editMaxCustomers.value = normalizedValue;
-
-  try {
-    const response = await apiFetch(`/api/users/${props.user.id}`, {
-      method: 'PUT',
-      body: JSON.stringify({ max_customers: normalizedValue })
-    });
-    if (!response.ok) throw new Error('خطا');
-    const updatedUser = await response.json();
-    Object.assign(props.user, updatedUser);
-  } catch (e) {
-    alert('خطا در ذخیره سقف مشتریان');
-    editMaxCustomers.value = props.user.max_customers ?? 5;
+  quotaFeedback.value = null;
+  const result = await runUserUpdate({
+    action: 'max-customers',
+    body: { max_customers: normalizedValue },
+    expected: { max_customers: normalizedValue },
+    fallbackError: 'ذخیره سقف مشتریان ناموفق بود.',
+  });
+  if (result.outcome === 'success') {
+    setQuotaSuccess('سقف مشتریان ذخیره شد.');
+  } else if (result.outcome === 'error') {
+    setQuotaError(result.error, 'ذخیره سقف مشتریان ناموفق بود.');
   }
 }
 
 async function toggleBlockCapability() {
+  if (isUserMutationBusy.value) return;
   const nextValue = !canBlockUsers.value;
-
-  try {
-    const response = await apiFetch(`/api/users/${props.user.id}`, {
-      method: 'PUT',
-      body: JSON.stringify({ can_block_users: nextValue })
-    });
-    if (!response.ok) throw new Error('خطا');
-    const updatedUser = await response.json();
-    Object.assign(props.user, updatedUser);
-    canBlockUsers.value = updatedUser.can_block_users ?? nextValue;
-    alert(`حق بلاک‌کردن دیگران ${canBlockUsers.value ? 'فعال' : 'غیرفعال'} شد.`);
-  } catch (e) {
-    alert('خطا در ذخیره مجوز بلاک');
+  quotaFeedback.value = null;
+  const result = await runUserUpdate({
+    action: 'block-capability',
+    body: { can_block_users: nextValue },
+    expected: { can_block_users: nextValue },
+    fallbackError: 'ذخیره مجوز بلاک ناموفق بود.',
+  });
+  if (result.outcome === 'success') {
+    canBlockUsers.value = nextValue;
+    setQuotaSuccess(`حق بلاک‌کردن دیگران ${nextValue ? 'فعال' : 'غیرفعال'} شد.`);
+  } else if (result.outcome === 'error') {
+    setQuotaError(result.error, 'ذخیره مجوز بلاک ناموفق بود.');
   }
 }
 
 async function saveMaxBlockedUsers() {
+  if (isUserMutationBusy.value) return;
   const normalizedValue = Number.isFinite(editMaxBlockedUsers.value)
     ? Math.min(100, Math.max(1, Math.trunc(editMaxBlockedUsers.value)))
     : 10;
   editMaxBlockedUsers.value = normalizedValue;
-
-  try {
-    const response = await apiFetch(`/api/users/${props.user.id}`, {
-      method: 'PUT',
-      body: JSON.stringify({ max_blocked_users: normalizedValue })
-    });
-    if (!response.ok) throw new Error('خطا');
-    const updatedUser = await response.json();
-    Object.assign(props.user, updatedUser);
-  } catch (e) {
-    alert('خطا در ذخیره سقف بلاک');
-    editMaxBlockedUsers.value = props.user.max_blocked_users ?? 10;
+  quotaFeedback.value = null;
+  const result = await runUserUpdate({
+    action: 'max-blocked-users',
+    body: { max_blocked_users: normalizedValue },
+    expected: { max_blocked_users: normalizedValue },
+    fallbackError: 'ذخیره سقف بلاک ناموفق بود.',
+  });
+  if (result.outcome === 'success') {
+    setQuotaSuccess('سقف کاربران قابل بلاک ذخیره شد.');
+  } else if (result.outcome === 'error') {
+    setQuotaError(result.error, 'ذخیره سقف بلاک ناموفق بود.');
   }
 }
 
-async function terminateAllSessions() {
-  if (!confirm('آیا از پایان دادن فوری به همه نشست‌های فعال این کاربر اطمینان دارید؟')) return;
-
-  isTerminatingSessions.value = true;
-  try {
-    const response = await apiFetch(`/api/users/${props.user.id}/sessions/terminate-all`, {
-      method: 'POST',
-    });
-    if (!response.ok) throw new Error('خطا');
-
-    const result = await response.json();
-    const terminatedSessions = Number(result.terminated_sessions ?? 0);
-    alert(
-      terminatedSessions > 0
-        ? `${terminatedSessions} نشست پایان یافت.`
-        : 'نشست فعالی برای پایان دادن وجود نداشت.'
-    );
-  } catch (e) {
-    alert('خطا در پایان دادن به نشست‌های فعال');
-  } finally {
-    isTerminatingSessions.value = false;
-  }
+function terminateAllSessions() {
+  openConfirmation({
+    kind: 'terminate-sessions',
+    action: 'terminate-sessions',
+    title: 'پایان همه نشست‌ها',
+    message: 'همه نشست‌های فعال این کاربر فوراً پایان یابد؟',
+    confirmLabel: 'پایان نشست‌ها',
+    tone: 'danger',
+  });
 }
 
 function handleAdminSessionClick() {
-  if (props.user.role === 'مدیر ارشد' || props.user.role === 'مدیر میانی') {
-    alert('به دلایل امنیتی، تعداد نشست‌های مجاز برای مدیران سایت نمی‌تواند بیش از ۱ باشد.');
+  if (hasFixedSingleSessionLimit.value) {
+    quotaFeedback.value = {
+      tone: 'error',
+      message: 'به دلایل امنیتی، تعداد نشست‌های مجاز برای مدیران سایت نمی‌تواند بیش از ۱ باشد.',
+    };
   }
 }
 
-async function deleteUser() {
-  if (!confirm('آیا از حذف این کاربر اطمینان دارید؟')) return;
+function deleteUser() {
   if (!props.jwtToken) return;
-  isLoading.value = true;
-  try {
-    const response = await apiFetch(`/api/users/${props.user.id}`, {
-      method: 'DELETE',
+  openConfirmation({
+    kind: 'delete-user',
+    action: 'delete-user',
+    title: 'حذف کاربر',
+    message: `حذف حساب «${userDisplayName.value}» دسترسی وب‌اپ و بات را غیرفعال می‌کند، همه نشست‌ها را پایان می‌دهد، آفرهای فعال را منقضی و دعوت‌های در انتظار را لغو می‌کند و روابط مشتری/حسابدار متعلق یا لینک‌شده را به‌صورت بازگشتی می‌بندد. این اقدام بازگشت‌پذیر نیست.`,
+    confirmLabel: 'حذف کاربر',
+    tone: 'danger',
+  });
+}
+
+async function confirmPendingAction() {
+  const confirmation = pendingConfirmation.value;
+  if (!confirmation || isUserMutationBusy.value) return;
+  confirmationError.value = '';
+
+  if (confirmation.kind === 'account-status' && confirmation.targetStatus) {
+    const expected = confirmation.targetStatus === 'inactive'
+      ? {
+          account_status: 'inactive',
+          global_lock_grace_expires_at: isDateTimeString,
+          global_web_locked_at: null,
+        }
+      : {
+          account_status: 'active',
+          global_lock_grace_expires_at: null,
+          global_web_locked_at: null,
+        };
+    const result = await runUserUpdate({
+      action: 'account-status',
+      body: { account_status: confirmation.targetStatus },
+      expected,
+      fallbackError: 'تغییر وضعیت حساب ناموفق بود.',
     });
-    if (!response.ok) throw new Error('خطا در حذف کاربر');
-    alert('کاربر حذف شد.');
-    emit('navigate', 'manage_users');
-  } catch (e) {
-    alert('خطا در حذف کاربر');
-  } finally {
-    isLoading.value = false;
+    if (result.outcome === 'success') {
+      accountStatus.value = confirmation.targetStatus;
+      if (confirmation.targetStatus === 'inactive') {
+        const deadline = formatAccountStatusDate(props.user.global_lock_grace_expires_at);
+        setActionSuccess(deadline
+          ? `حساب غیرفعال شد. مهلت فعال‌سازی تا ${deadline} است.`
+          : 'وضعیت حساب غیرفعال شد.');
+      } else {
+        setActionSuccess('وضعیت حساب فعال شد.');
+      }
+      closeConfirmation();
+    } else if (result.outcome === 'error') {
+      confirmationError.value = errorMessage(result.error, 'تغییر وضعیت حساب ناموفق بود.');
+    }
+    return;
+  }
+
+  if (confirmation.kind === 'unblock') {
+    const result = await runUserUpdate({
+      action: 'unblock',
+      body: { trading_restricted_until: null },
+      expected: { trading_restricted_until: null },
+      fallbackError: 'رفع مسدودیت ناموفق بود.',
+    });
+    if (result.outcome === 'success') {
+      customDate.value = '';
+      setActionSuccess('رفع مسدودیت انجام شد.');
+      closeConfirmation();
+    } else if (result.outcome === 'error') {
+      confirmationError.value = errorMessage(result.error, 'رفع مسدودیت ناموفق بود.');
+    }
+    return;
+  }
+
+  if (confirmation.kind === 'remove-limitations') {
+    const clearedLimits = {
+      max_daily_trades: null,
+      max_active_commodities: null,
+      max_daily_requests: null,
+      limitations_expire_at: null,
+    };
+    const result = await runUserUpdate({
+      action: 'remove-limitations',
+      body: clearedLimits,
+      expected: clearedLimits,
+      fallbackError: 'رفع محدودیت‌ها ناموفق بود.',
+    });
+    if (result.outcome === 'success') {
+      setActionSuccess('محدودیت‌ها برداشته شد.');
+      closeConfirmation();
+    } else if (result.outcome === 'error') {
+      confirmationError.value = errorMessage(result.error, 'رفع محدودیت‌ها ناموفق بود.');
+    }
+    return;
+  }
+
+  if (confirmation.kind === 'terminate-sessions') {
+    const result = await runJsonAction({
+      action: 'terminate-sessions',
+      url: `/api/users/${props.user.id}/sessions/terminate-all`,
+      method: 'POST',
+      validate: (receipt) => isRecord(receipt)
+        && Number.isInteger(receipt.terminated_sessions)
+        && receipt.terminated_sessions >= 0,
+      fallbackError: 'پایان دادن به نشست‌های فعال ناموفق بود.',
+    });
+    if (result.outcome === 'success') {
+      const terminatedSessions = (result.receipt as UserRecord).terminated_sessions as number;
+      setActionSuccess(terminatedSessions > 0
+        ? `${terminatedSessions} نشست پایان یافت.`
+        : 'نشست فعالی برای پایان دادن وجود نداشت.');
+      closeConfirmation();
+    } else if (result.outcome === 'error') {
+      confirmationError.value = errorMessage(result.error, 'پایان دادن به نشست‌های فعال ناموفق بود.');
+    }
+    return;
+  }
+
+  if (confirmation.kind === 'delete-user') {
+    const result = await runJsonAction({
+      action: 'delete-user',
+      url: `/api/users/${props.user.id}`,
+      method: 'DELETE',
+      validate: (receipt) => isRecord(receipt) && receipt.message === 'User deleted successfully',
+      fallbackError: 'حذف کاربر ناموفق بود.',
+    });
+    if (result.outcome === 'success') {
+      closeConfirmation();
+      emit('navigate', 'manage_users');
+    } else if (result.outcome === 'error') {
+      confirmationError.value = errorMessage(result.error, 'حذف کاربر ناموفق بود.');
+    }
   }
 }
 </script>
@@ -839,6 +1122,16 @@ async function deleteUser() {
             </div>
           </div>
 
+      <p
+        v-if="actionFeedback"
+        class="user-action-feedback"
+        :class="`user-action-feedback--${actionFeedback.tone}`"
+        :role="actionFeedback.tone === 'error' ? 'alert' : 'status'"
+        aria-live="polite"
+      >
+        {{ actionFeedback.message }}
+      </p>
+
       <!-- تنظیمات نشست -->
       <div v-if="isAdminView" class="sessions-config-box">
         <div class="detail-item">
@@ -848,8 +1141,8 @@ async function deleteUser() {
               :model-value="maxSessionsSelectValue"
               class="form-select-sm"
               :options="maxSessionOptions"
-              :disabled="user.role === 'مدیر ارشد' || user.role === 'مدیر میانی'"
-              :style="{ pointerEvents: (user.role === 'مدیر ارشد' || user.role === 'مدیر میانی') ? 'none' : 'auto' }"
+              :disabled="hasFixedSingleSessionLimit || isUserMutationBusy"
+              :style="{ pointerEvents: hasFixedSingleSessionLimit ? 'none' : 'auto' }"
               @update:modelValue="handleMaxSessionsSelect"
             />
           </div>
@@ -863,6 +1156,7 @@ async function deleteUser() {
               min="0"
               step="1"
               class="form-input-sm max-accountants-input"
+              :disabled="isUserMutationBusy"
               @change="saveMaxAccountants"
             />
           </div>
@@ -876,6 +1170,7 @@ async function deleteUser() {
               min="0"
               step="1"
               class="form-input-sm max-customers-input"
+              :disabled="isUserMutationBusy"
               @change="saveMaxCustomers"
             />
           </div>
@@ -887,6 +1182,7 @@ async function deleteUser() {
               type="button"
               class="inline-control toggle-block-capability-btn"
               :class="{ 'is-disabled': !canBlockUsers }"
+              :disabled="isUserMutationBusy"
               @click="toggleBlockCapability"
             >
               {{ canBlockUsers ? 'فعال' : 'غیرفعال' }}
@@ -903,6 +1199,7 @@ async function deleteUser() {
               max="100"
               step="1"
               class="form-input-sm max-blocked-users-input"
+              :disabled="isUserMutationBusy"
               @change="saveMaxBlockedUsers"
             />
           </div>
@@ -913,24 +1210,36 @@ async function deleteUser() {
             <button
               type="button"
               class="inline-control danger-inline-btn terminate-sessions-btn"
-              :disabled="isTerminatingSessions"
+              :disabled="isUserMutationBusy"
               @click="terminateAllSessions"
             >
               {{ isTerminatingSessions ? 'در حال قطع...' : 'پایان فوری همه نشست‌ها' }}
             </button>
           </div>
         </div>
+        <p
+          v-if="quotaFeedback"
+          class="user-action-feedback quota-feedback"
+          :class="`user-action-feedback--${quotaFeedback.tone}`"
+          :role="quotaFeedback.tone === 'error' ? 'alert' : 'status'"
+          aria-live="polite"
+        >
+          {{ quotaFeedback.message }}
+        </p>
       </div>
 
       <!-- ویرایش نقش (مودال داخلی) -->
       <div v-if="isEditingRole && canEditRole" class="edit-section">
         <div class="form-group">
             <label>انتخاب نقش جدید:</label>
-            <AppSelect v-model="selectedRole" class="form-select" :options="roles" />
+            <AppSelect v-model="selectedRole" class="form-select" :options="roles" :disabled="isUserMutationBusy" />
         </div>
+        <p v-if="roleError" class="user-action-feedback user-action-feedback--error" role="alert">{{ roleError }}</p>
         <div class="action-buttons">
-            <button @click="saveRole" :disabled="isLoading" class="save-btn">ذخیره</button>
-            <button @click="isEditingRole = false" class="cancel-btn">انصراف</button>
+            <button @click="saveRole" :disabled="isUserMutationBusy" class="save-btn">
+              {{ isActionBusy('role') ? 'در حال ذخیره...' : 'ذخیره' }}
+            </button>
+            <button @click="isEditingRole = false" :disabled="isUserMutationBusy" class="cancel-btn">انصراف</button>
         </div>
       </div>
 
@@ -948,7 +1257,7 @@ async function deleteUser() {
               <span class="profile-control__icon" aria-hidden="true"><Settings :size="18" /></span>
               <span class="profile-control__label">تنظیمات کاربر</span>
             </button>
-            <button @click="deleteUser" class="profile-control delete-btn">
+            <button @click="deleteUser" :disabled="isUserMutationBusy" class="profile-control delete-btn">
               <span class="profile-control__icon" aria-hidden="true"><Trash2 :size="18" /></span>
               <span class="profile-control__label">حذف کاربر</span>
             </button>
@@ -966,29 +1275,29 @@ async function deleteUser() {
             label="راهنمای زیرمنوی تنظیمات کاربر"
             text="این زیرمنو برای تغییر وضعیت حساب، نقش، محدودیت و مسدودیت کاربر است. گزینه‌های حذف یا بازگشت در منوی قبلی قرار دارند."
           />
-          <button @click="toggleAccountStatus" class="profile-control">
+          <button @click="toggleAccountStatus" :disabled="isUserMutationBusy" class="profile-control">
             <span class="profile-control__icon" aria-hidden="true"><RotateCcw :size="18" /></span>
             <span class="profile-control__label">تغییر وضعیت حساب ({{ isAccountInactive ? 'غیرفعال' : 'فعال' }})</span>
             </button>
-            <button v-if="canEditRole" @click="isEditingRole = true" class="profile-control">
+            <button v-if="canEditRole" @click="roleError = ''; isEditingRole = true" :disabled="isUserMutationBusy" class="profile-control">
               <span class="profile-control__icon" aria-hidden="true"><Pencil :size="18" /></span>
               <span class="profile-control__label">ویرایش نقش</span>
             </button>
 
-            <button v-if="!hasLimitations" @click="openLimitationsModal" class="profile-control">
+            <button v-if="!hasLimitations" @click="openLimitationsModal" :disabled="isUserMutationBusy" class="profile-control">
               <span class="profile-control__icon" aria-hidden="true"><AlertTriangle :size="18" /></span>
               <span class="profile-control__label">اعمال محدودیت</span>
             </button>
-            <button v-else @click="removeLimitations" class="profile-control unlimit-btn">
+            <button v-else @click="removeLimitations" :disabled="isUserMutationBusy" class="profile-control unlimit-btn">
                 <span class="profile-control__icon" aria-hidden="true"><Check :size="18" /></span>
                 <span class="profile-control__label">رفع محدودیت</span>
             </button>
 
-            <button v-if="!isRestricted" @click="showBlockModal = true" class="profile-control block-btn">
+            <button v-if="!isRestricted" @click="openBlockModal" :disabled="isUserMutationBusy" class="profile-control block-btn">
                 <span class="profile-control__icon" aria-hidden="true"><Ban :size="18" /></span>
                 <span class="profile-control__label">مسدود کردن</span>
             </button>
-            <button v-else @click="unblockUser" class="profile-control unblock-btn">
+            <button v-else @click="unblockUser" :disabled="isUserMutationBusy" class="profile-control unblock-btn">
                 <span class="profile-control__icon" aria-hidden="true"><Undo2 :size="18" /></span>
                 <span class="profile-control__label">رفع مسدودیت</span>
             </button>
@@ -1007,11 +1316,12 @@ async function deleteUser() {
       title="مدت زمان مسدودیت"
       backdrop-class="modal-overlay"
       panel-class="modal-content"
-      @close="showBlockModal = false"
+      @close="closeBlockModal"
     >
       <div v-if="!showCustomDateInput">
         <div class="duration-list">
           <button v-for="duration in blockDurations" :key="duration.minutes"
+                  :disabled="isUserMutationBusy"
                   @click="blockUser(duration.minutes)" class="duration-btn">
             {{ duration.label }}
           </button>
@@ -1028,12 +1338,22 @@ async function deleteUser() {
         </div>
 
         <div class="action-buttons">
-          <button @click="blockUserCustom" class="save-btn">تایید نهایی</button>
-          <button @click="showCustomDateInput = false" class="cancel-btn">بازگشت</button>
+          <button @click="blockUserCustom" :disabled="isUserMutationBusy" class="save-btn">
+            {{ isActionBusy('block') ? 'در حال ثبت...' : 'تایید نهایی' }}
+          </button>
+          <button @click="showCustomDateInput = false" :disabled="isUserMutationBusy" class="cancel-btn">بازگشت</button>
         </div>
       </div>
 
-      <button v-if="!showCustomDateInput" @click="showBlockModal = false" class="cancel-btn full-width">انصراف</button>
+      <p v-if="blockError" class="user-action-feedback user-action-feedback--error" role="alert">{{ blockError }}</p>
+      <button
+        v-if="!showCustomDateInput"
+        @click="closeBlockModal"
+        :disabled="isUserMutationBusy"
+        class="cancel-btn full-width"
+      >
+        انصراف
+      </button>
     </AppResponsiveDialog>
 
     <!-- مودال اعمال محدودیت -->
@@ -1042,19 +1362,19 @@ async function deleteUser() {
       title="اعمال محدودیت"
       backdrop-class="modal-overlay"
       panel-class="modal-content"
-      @close="showLimitationsModal = false"
+      @close="closeLimitationsModal"
     >
       <div class="form-group">
         <label>مجموع تعداد معاملات:</label>
-        <input type="number" v-model.number="limitMaxTrades" class="form-input" min="0" placeholder="نامحدود (خالی)" />
+        <input type="number" v-model.number="limitMaxTrades" class="form-input" min="0" placeholder="نامحدود (خالی)" :disabled="isUserMutationBusy" />
       </div>
       <div class="form-group">
         <label>مجموع تعداد کالای معامله شده:</label>
-        <input type="number" v-model.number="limitMaxCommodities" class="form-input" min="0" placeholder="نامحدود (خالی)" />
+        <input type="number" v-model.number="limitMaxCommodities" class="form-input" min="0" placeholder="نامحدود (خالی)" :disabled="isUserMutationBusy" />
       </div>
       <div class="form-group">
         <label>مجموع ارسال لفظ در کانال:</label>
-        <input type="number" v-model.number="limitMaxRequests" class="form-input" min="0" placeholder="نامحدود (خالی)" />
+        <input type="number" v-model.number="limitMaxRequests" class="form-input" min="0" placeholder="نامحدود (خالی)" :disabled="isUserMutationBusy" />
       </div>
 
       <div class="form-group">
@@ -1063,6 +1383,7 @@ async function deleteUser() {
           :model-value="limitDurationSelectValue"
           class="form-select"
           :options="limitDurationOptions"
+          :disabled="isUserMutationBusy"
           @update:modelValue="setLimitDurationValue"
         />
       </div>
@@ -1077,9 +1398,12 @@ async function deleteUser() {
         </div>
       </div>
 
+      <p v-if="limitationsError" class="user-action-feedback user-action-feedback--error" role="alert">{{ limitationsError }}</p>
       <div class="action-buttons">
-        <button @click="saveLimitations" :disabled="isLoading" class="save-btn">ذخیره</button>
-        <button @click="showLimitationsModal = false" class="cancel-btn">انصراف</button>
+        <button @click="saveLimitations" :disabled="isUserMutationBusy" class="save-btn">
+          {{ isActionBusy('limitations') ? 'در حال ذخیره...' : 'ذخیره' }}
+        </button>
+        <button @click="closeLimitationsModal" :disabled="isUserMutationBusy" class="cancel-btn">انصراف</button>
       </div>
     </AppResponsiveDialog>
 
@@ -1192,6 +1516,20 @@ async function deleteUser() {
         <button v-if="pickerStep === 2" @click="handleFinalSubmit" class="integrated-save-btn">تایید نهایی</button>
       </div>
     </AppResponsiveDialog>
+
+    <AppConfirmDialog
+      v-if="pendingConfirmation"
+      :open="Boolean(pendingConfirmation)"
+      :title="pendingConfirmation.title"
+      :message="pendingConfirmation.message"
+      :confirm-label="pendingConfirmation.confirmLabel"
+      :tone="pendingConfirmation.tone"
+      :busy="confirmationBusy"
+      :error="confirmationError"
+      :confirm-disabled="confirmationBusy"
+      @cancel="closeConfirmation"
+      @confirm="confirmPendingAction"
+    />
 </template>
 
 <style>
@@ -1792,6 +2130,28 @@ input[type="number"].form-input::-webkit-inner-spin-button {
   background: #f0fdf4;
   border: 1px solid #bbf7d0;
   border-radius: 0.75rem;
+}
+.user-action-feedback {
+  margin: 0.75rem 0;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid;
+  border-radius: 0.75rem;
+  font-size: 0.78rem;
+  line-height: 1.7;
+  text-align: right;
+}
+.user-action-feedback--success {
+  color: #166534;
+  background: #f0fdf4;
+  border-color: #bbf7d0;
+}
+.user-action-feedback--error {
+  color: #991b1b;
+  background: #fef2f2;
+  border-color: #fecaca;
+}
+.quota-feedback {
+  margin-bottom: 0;
 }
 .sessions-config-box .detail-item {
   display: flex;

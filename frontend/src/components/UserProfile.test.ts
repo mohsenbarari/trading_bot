@@ -1,15 +1,14 @@
 import { nextTick } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { flushPromises, mount } from '@vue/test-utils'
-import JalaliDatePicker from './JalaliDatePicker.vue'
+import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 
-const apiFetchMock = vi.fn()
+const routeRequestMock = vi.fn()
 const userProfileTimingMocks = vi.hoisted(() => ({
   parseJalaliToIranISOMock: vi.fn(),
 }))
 
-vi.mock('../utils/auth', () => ({
-  apiFetch: apiFetchMock,
+vi.mock('../utils/routeRequest', () => ({
+  routeRequest: routeRequestMock,
 }))
 
 vi.mock('../composables/useUserProfileTiming', () => ({
@@ -40,21 +39,45 @@ vi.mock('lucide-vue-next', () => ({
   Users: { template: '<span />' },
 }))
 
-function makeResponse(payload: unknown, ok = true) {
+function makeResponse(payload: unknown, options: { ok?: boolean; status?: number; rejectJson?: boolean } = {}) {
+  const ok = options.ok ?? true
   return {
     ok,
-    json: async () => payload,
-  }
+    status: options.status ?? (ok ? 200 : 500),
+    statusText: ok ? 'OK' : 'Server Error',
+    headers: { get: () => 'application/json' },
+    json: options.rejectJson
+      ? async () => { throw new SyntaxError('invalid json') }
+      : async () => payload,
+  } as unknown as Response
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise
+    reject = rejectPromise
+  })
+  return { promise, resolve, reject }
 }
 
 function makeUser(overrides: Record<string, unknown> = {}) {
   return {
     id: 12,
+    telegram_id: null,
+    username: null,
+    full_name: 'Owner Twelve',
     account_name: 'owner12',
     mobile_number: '09120000000',
     role: 'عادی',
     account_status: 'active',
+    deactivated_at: null,
+    created_at: '2026-01-10T08:30:00Z',
     has_bot_access: true,
+    is_deleted: false,
+    global_lock_grace_expires_at: null,
+    global_web_locked_at: null,
     can_block_users: true,
     max_blocked_users: 10,
     trading_restricted_until: null,
@@ -74,990 +97,736 @@ function makeUser(overrides: Record<string, unknown> = {}) {
   }
 }
 
-async function setOpenJalaliDate(wrapper: ReturnType<typeof mount>, value: string) {
-  const picker = wrapper.findComponent(JalaliDatePicker)
-  expect(picker.exists()).toBe(true)
-  picker.vm.$emit('update:modelValue', value)
-  picker.vm.$emit('change', value)
-  await nextTick()
+async function mountProfile(user = makeUser(), props: Record<string, unknown> = {}) {
+  const UserProfile = (await import('./UserProfile.vue')).default
+  return mount(UserProfile, {
+    props: {
+      user,
+      isAdminView: true,
+      jwtToken: 'token',
+      ...props,
+    },
+    global: {
+      stubs: { teleport: true },
+    },
+  })
 }
 
-function findButtonByText(wrapper: ReturnType<typeof mount>, text: string) {
+function findButtonByText(wrapper: VueWrapper, text: string) {
   const button = wrapper.findAll('button').find((candidate) => candidate.text().includes(text))
   if (!button) throw new Error(`Button not found: ${text}`)
   return button
 }
 
-describe('UserProfile.vue', () => {
+async function openSettings(wrapper: VueWrapper) {
+  await wrapper.get('.settings-btn').trigger('click')
+}
+
+async function confirmDialog(wrapper: VueWrapper) {
+  const dialog = wrapper.get('.ui-confirm-dialog')
+  const button = dialog.findAll('button').at(-1)
+  if (!button) throw new Error('Confirmation button not found')
+  await button.trigger('click')
+}
+
+function expectMutationCall(
+  callNumber: number,
+  url: string,
+  method: 'PUT' | 'POST' | 'DELETE',
+  body: Record<string, unknown> | undefined,
+  fallbackMessage: string,
+) {
+  expect(routeRequestMock).toHaveBeenNthCalledWith(callNumber, url, {
+    method,
+    ...(body ? { body: JSON.stringify(body) } : {}),
+    errorContext: {
+      surface: 'admin',
+      scope: 'action',
+      operation: method === 'DELETE' ? 'delete' : 'update',
+      userInitiated: true,
+      fallbackMessage,
+    },
+  })
+}
+
+describe('UserProfile.vue authoritative admin actions', () => {
   beforeEach(() => {
-    apiFetchMock.mockReset()
+    routeRequestMock.mockReset()
     userProfileTimingMocks.parseJalaliToIranISOMock.mockReset()
     localStorage.clear()
-    vi.spyOn(window, 'alert').mockImplementation(() => {})
-    vi.spyOn(window, 'confirm').mockImplementation(() => true)
   })
 
-  it('allows admin to update max accountants and max customers for an owner', async () => {
+  it('saves a role once, applies only the returned user, and never opens native dialogs', async () => {
+    const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => {})
+    const confirmSpy = vi.spyOn(window, 'confirm').mockImplementation(() => true)
     const user = makeUser()
+    const pending = deferred<Response>()
+    routeRequestMock.mockReturnValueOnce(pending.promise)
+    const wrapper = await mountProfile(user)
 
-    apiFetchMock.mockResolvedValueOnce(makeResponse({
-      ...user,
-      max_accountants: 6,
-    }))
-    apiFetchMock.mockResolvedValueOnce(makeResponse({
-      ...user,
-      max_accountants: 6,
-      max_customers: 8,
-    }))
-
-    const UserProfile = (await import('./UserProfile.vue')).default
-    const wrapper = mount(UserProfile, {
-      props: {
-        user,
-        isAdminView: true,
-        jwtToken: 'token',
-      },
-      global: {
-        stubs: {
-          teleport: true,
-        },
-      },
-    })
-
-    const input = wrapper.get('.max-accountants-input')
-    await input.setValue('6')
-    await input.trigger('change')
-    await flushPromises()
-
-    const maxCustomersInput = wrapper.get('.max-customers-input')
-    await maxCustomersInput.setValue('8')
-    await maxCustomersInput.trigger('change')
-    await flushPromises()
-
-    expect(apiFetchMock).toHaveBeenNthCalledWith(1, '/api/users/12', {
-      method: 'PUT',
-      body: JSON.stringify({ max_accountants: 6 }),
-    })
-    expect(apiFetchMock.mock.calls).toContainEqual(['/api/users/12', {
-      method: 'PUT',
-      body: JSON.stringify({ max_customers: 8 }),
-    }])
-    expect(user.max_accountants).toBe(6)
-    expect(user.max_customers).toBe(8)
-  })
-
-  it('renders read-only customer context for customer targets in admin view', async () => {
-    const user = makeUser({
-      is_customer: true,
-      customer_owner_account_name: 'owner20',
-      customer_management_name: 'مشتری ویژه',
-      customer_tier: 'tier2',
-    })
-
-    const UserProfile = (await import('./UserProfile.vue')).default
-    const wrapper = mount(UserProfile, {
-      props: {
-        user,
-        isAdminView: true,
-        jwtToken: 'token',
-      },
-      global: {
-        stubs: {
-          teleport: true,
-        },
-      },
-    })
-
-    expect(wrapper.text()).toContain('اطلاعات مشتری')
-    expect(wrapper.text()).toContain('مشتری ویژه')
-    expect(wrapper.text()).toContain('owner20')
-    expect(wrapper.text()).toContain('سطح 2')
-  })
-
-  it('allows admin to update block permissions and terminate all sessions', async () => {
-    const user = makeUser({
-      id: 15,
-      account_name: 'owner15',
-      mobile_number: '09123334444',
-    })
-
-    apiFetchMock
-      .mockResolvedValueOnce(makeResponse({
-        ...user,
-        can_block_users: false,
-      }))
-      .mockResolvedValueOnce(makeResponse({
-        ...user,
-        can_block_users: false,
-        max_blocked_users: 25,
-      }))
-      .mockResolvedValueOnce(makeResponse({
-        detail: '3 نشست پایان یافت',
-        terminated_sessions: 3,
-      }))
-
-    const UserProfile = (await import('./UserProfile.vue')).default
-    const wrapper = mount(UserProfile, {
-      props: {
-        user,
-        isAdminView: true,
-        jwtToken: 'token',
-      },
-      global: {
-        stubs: {
-          teleport: true,
-        },
-      },
-    })
-
-    await wrapper.get('.toggle-block-capability-btn').trigger('click')
-    await flushPromises()
-
-    const maxBlockedInput = wrapper.get('.max-blocked-users-input')
-    await maxBlockedInput.setValue('25')
-    await flushPromises()
-
-    await wrapper.get('.terminate-sessions-btn').trigger('click')
-    await flushPromises()
-
-    expect(apiFetchMock).toHaveBeenCalledTimes(3)
-    expect(apiFetchMock).toHaveBeenNthCalledWith(1, '/api/users/15', {
-      method: 'PUT',
-      body: JSON.stringify({ can_block_users: false }),
-    })
-    expect(apiFetchMock).toHaveBeenNthCalledWith(2, '/api/users/15', {
-      method: 'PUT',
-      body: JSON.stringify({ max_blocked_users: 25 }),
-    })
-    expect(apiFetchMock).toHaveBeenNthCalledWith(3, '/api/users/15/sessions/terminate-all', {
-      method: 'POST',
-    })
-    expect(user.can_block_users).toBe(false)
-    expect(user.max_blocked_users).toBe(25)
-  })
-
-  it('lets admins toggle account status, edit role, and delete the user from the settings flow', async () => {
-    const user = makeUser({
-      id: 18,
-      global_lock_grace_expires_at: '2026-05-20T12:00:00Z',
-      global_web_locked_at: null,
-    })
-
-    apiFetchMock
-      .mockResolvedValueOnce(makeResponse({
-        ...user,
-        account_status: 'inactive',
-        global_lock_grace_expires_at: '2026-05-20T12:00:00Z',
-        global_web_locked_at: null,
-      }))
-      .mockResolvedValueOnce(makeResponse({
-        ...user,
-        account_status: 'inactive',
-        role: 'پلیس',
-        global_lock_grace_expires_at: '2026-05-20T12:00:00Z',
-        global_web_locked_at: null,
-      }))
-      .mockResolvedValueOnce({ ok: true })
-
-    const UserProfile = (await import('./UserProfile.vue')).default
-    const wrapper = mount(UserProfile, {
-      props: {
-        user,
-        isAdminView: true,
-        jwtToken: 'token',
-      },
-      global: {
-        stubs: {
-          teleport: true,
-        },
-      },
-    })
-
-    await wrapper.get('.settings-btn').trigger('click')
-  await findButtonByText(wrapper, 'تغییر وضعیت حساب').trigger('click')
-    await flushPromises()
-
-    expect(wrapper.text()).toContain('در مهلت فعال‌سازی')
-    expect(wrapper.text()).toContain('پایان مهلت فعال‌سازی')
-
+    await openSettings(wrapper)
     await findButtonByText(wrapper, 'ویرایش نقش').trigger('click')
-    expect(wrapper.get('.form-select').classes()).toContain('ui-select')
-    await wrapper.get('.form-select').setValue('پلیس')
+    await wrapper.get('.edit-section .form-select').setValue('پلیس')
+
+    const vm = wrapper.vm as unknown as { saveRole: () => Promise<unknown> }
+    const first = vm.saveRole()
+    const duplicate = vm.saveRole()
+    expect(routeRequestMock).toHaveBeenCalledTimes(1)
+
+    pending.resolve(makeResponse({ ...user, role: 'پلیس' }))
+    await Promise.all([first, duplicate])
+    await flushPromises()
+
+    expectMutationCall(1, '/api/users/12', 'PUT', { role: 'پلیس' }, 'ذخیره نقش کاربر ناموفق بود.')
+    expect(user.role).toBe('پلیس')
+    expect(wrapper.find('.edit-section').exists()).toBe(false)
+    expect(wrapper.text()).toContain('نقش کاربر تغییر کرد.')
+    expect(alertSpy).not.toHaveBeenCalled()
+    expect(confirmSpy).not.toHaveBeenCalled()
+  })
+
+  it('keeps the role editor and selected draft after HTTP or invalid-receipt failures', async () => {
+    const user = makeUser()
+    routeRequestMock
+      .mockResolvedValueOnce(makeResponse({}, { ok: false }))
+      .mockResolvedValueOnce(makeResponse({ id: user.id, role: 'پلیس' }))
+      .mockResolvedValueOnce(makeResponse({ ...user, id: 99, role: 'پلیس' }))
+    const wrapper = await mountProfile(user)
+
+    await openSettings(wrapper)
+    await findButtonByText(wrapper, 'ویرایش نقش').trigger('click')
+    await wrapper.get('.edit-section .form-select').setValue('پلیس')
     await wrapper.get('.edit-section .save-btn').trigger('click')
     await flushPromises()
 
-    await findButtonByText(wrapper, 'بازگشت').trigger('click')
-    await wrapper.get('.delete-btn').trigger('click')
-    await flushPromises()
+    expect(wrapper.find('.edit-section').exists()).toBe(true)
+    expect((wrapper.get('.edit-section .form-select').element as HTMLSelectElement).value).toBe('پلیس')
+    expect(user.role).toBe('عادی')
+    expect(wrapper.get('.edit-section [role="alert"]').text()).toContain('ناموفق')
 
-    expect(apiFetchMock).toHaveBeenNthCalledWith(1, '/api/users/18', {
-      method: 'PUT',
-      body: JSON.stringify({ account_status: 'inactive' }),
-    })
-    expect(apiFetchMock).toHaveBeenNthCalledWith(2, '/api/users/18', {
-      method: 'PUT',
-      body: JSON.stringify({ role: 'پلیس' }),
-    })
-    expect(apiFetchMock).toHaveBeenNthCalledWith(3, '/api/users/18', {
-      method: 'DELETE',
-    })
-    expect(user.account_status).toBe('inactive')
+    await wrapper.get('.edit-section .save-btn').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.edit-section').exists()).toBe(true)
+    expect(user.role).toBe('عادی')
+
+    await wrapper.get('.edit-section .save-btn').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.edit-section').exists()).toBe(true)
+    expect(user.role).toBe('عادی')
+    expect(routeRequestMock).toHaveBeenCalledTimes(3)
+  })
+
+  it('serializes different keyed mutations per user and still guards same-key duplicates', async () => {
+    const user = makeUser({ max_customers: 5 })
+    const roleRequest = deferred<Response>()
+    routeRequestMock
+      .mockReturnValueOnce(roleRequest.promise)
+      .mockResolvedValueOnce(makeResponse({ ...user, role: 'پلیس', max_customers: 9 }))
+    const wrapper = await mountProfile(user)
+    await openSettings(wrapper)
+    await findButtonByText(wrapper, 'ویرایش نقش').trigger('click')
+    await wrapper.get('.edit-section .form-select').setValue('پلیس')
+    const vm = wrapper.vm as unknown as {
+      editMaxCustomers: number
+      saveRole: () => Promise<unknown>
+      saveMaxCustomers: () => Promise<void>
+    }
+
+    const role = vm.saveRole()
+    const duplicateRole = vm.saveRole()
+    vm.editMaxCustomers = 9
+    const racingQuota = vm.saveMaxCustomers()
+    expect(routeRequestMock).toHaveBeenCalledTimes(1)
+    await nextTick()
+    expect(wrapper.get('.max-customers-input').attributes('disabled')).toBeDefined()
+
+    roleRequest.resolve(makeResponse({ ...user, role: 'پلیس' }))
+    await Promise.all([role, duplicateRole, racingQuota])
+    await flushPromises()
     expect(user.role).toBe('پلیس')
-    expect(wrapper.emitted('navigate')).toContainEqual(['manage_users'])
+    expect(user.max_customers).toBe(5)
+
+    vm.editMaxCustomers = 9
+    await vm.saveMaxCustomers()
+    await flushPromises()
+    expect(routeRequestMock).toHaveBeenCalledTimes(2)
+    expect(user.max_customers).toBe(9)
+    expectMutationCall(1, '/api/users/12', 'PUT', { role: 'پلیس' }, 'ذخیره نقش کاربر ناموفق بود.')
+    expectMutationCall(2, '/api/users/12', 'PUT', { max_customers: 9 }, 'ذخیره سقف مشتریان ناموفق بود.')
   })
 
-  it('renders the stronger account-status detail when the account is globally locked', async () => {
+  it('uses an in-context account-status confirmation and retains it until a valid receipt arrives', async () => {
+    const user = makeUser()
+    routeRequestMock
+      .mockResolvedValueOnce(makeResponse({ ...user, account_status: 'inactive' }))
+      .mockResolvedValueOnce(makeResponse({
+        ...user,
+        account_status: 'inactive',
+        global_lock_grace_expires_at: '2026-08-10T14:30:00Z',
+        global_web_locked_at: '2026-08-10T14:31:00Z',
+      }))
+      .mockResolvedValueOnce(makeResponse({
+        ...user,
+        account_status: 'inactive',
+        global_lock_grace_expires_at: '2026-08-10T14:30:00Z',
+      }))
+    const wrapper = await mountProfile(user)
+
+    await openSettings(wrapper)
+    await findButtonByText(wrapper, 'تغییر وضعیت حساب').trigger('click')
+    expect(routeRequestMock).not.toHaveBeenCalled()
+    expect(wrapper.get('.ui-confirm-dialog').text()).toContain('غیرفعال')
+    expect(wrapper.get('.ui-confirm-dialog').text()).toContain('خروج کاربر از کانال تلگرام مورد انتظار است')
+    expect(wrapper.get('.ui-confirm-dialog').text()).toContain('مهلت دو روزه')
+
+    await confirmDialog(wrapper)
+    await flushPromises()
+    expect(user.account_status).toBe('active')
+    expect(wrapper.find('.ui-confirm-dialog').exists()).toBe(true)
+    expect(wrapper.get('.ui-confirm-dialog [role="alert"]').text()).toContain('ناموفق')
+
+    await confirmDialog(wrapper)
+    await flushPromises()
+    expect(user.account_status).toBe('active')
+    expect(wrapper.find('.ui-confirm-dialog').exists()).toBe(true)
+
+    await confirmDialog(wrapper)
+    await flushPromises()
+    expect(user.account_status).toBe('inactive')
+    expect(wrapper.find('.ui-confirm-dialog').exists()).toBe(false)
+    expect(wrapper.text()).toContain('حساب غیرفعال شد. مهلت فعال‌سازی تا')
+    expectMutationCall(3, '/api/users/12', 'PUT', { account_status: 'inactive' }, 'تغییر وضعیت حساب ناموفق بود.')
+  })
+
+  it('accepts activation only after both global-lock fields are authoritatively cleared', async () => {
     const user = makeUser({
-      id: 19,
       account_status: 'inactive',
-      global_lock_grace_expires_at: '2026-05-20T12:00:00Z',
-      global_web_locked_at: '2026-05-21T08:00:00Z',
+      deactivated_at: '2026-08-08T10:00:00Z',
+      global_lock_grace_expires_at: '2026-08-10T10:00:00Z',
+      global_web_locked_at: '2026-08-11T10:00:00Z',
     })
+    routeRequestMock
+      .mockResolvedValueOnce(makeResponse({
+        ...user,
+        account_status: 'active',
+        global_lock_grace_expires_at: '2026-08-10T10:00:00Z',
+        global_web_locked_at: null,
+      }))
+      .mockResolvedValueOnce(makeResponse({
+        ...user,
+        account_status: 'active',
+        global_lock_grace_expires_at: null,
+        global_web_locked_at: '2026-08-11T10:00:00Z',
+      }))
+      .mockResolvedValueOnce(makeResponse({
+        ...user,
+        account_status: 'active',
+        deactivated_at: null,
+        global_lock_grace_expires_at: null,
+        global_web_locked_at: null,
+      }))
+    const wrapper = await mountProfile(user)
 
-    const UserProfile = (await import('./UserProfile.vue')).default
-    const wrapper = mount(UserProfile, {
-      props: {
-        user,
-        isAdminView: true,
-        jwtToken: 'token',
-      },
-      global: {
-        stubs: {
-          teleport: true,
-        },
-      },
-    })
+    await openSettings(wrapper)
+    await findButtonByText(wrapper, 'تغییر وضعیت حساب').trigger('click')
+    await confirmDialog(wrapper)
+    await flushPromises()
+    expect(user.account_status).toBe('inactive')
+    expect(wrapper.find('.ui-confirm-dialog').exists()).toBe(true)
 
-    expect(wrapper.text()).toContain('غیرفعال (قفل کامل)')
-    expect(wrapper.text()).toContain('قفل سراسری وب/پیام‌رسان')
+    await confirmDialog(wrapper)
+    await flushPromises()
+    expect(user.account_status).toBe('inactive')
+    expect(wrapper.find('.ui-confirm-dialog').exists()).toBe(true)
+
+    await confirmDialog(wrapper)
+    await flushPromises()
+    expect(user.account_status).toBe('active')
+    expect(user.global_lock_grace_expires_at).toBeNull()
+    expect(user.global_web_locked_at).toBeNull()
+    expect(wrapper.find('.ui-confirm-dialog').exists()).toBe(false)
+    expectMutationCall(3, '/api/users/12', 'PUT', { account_status: 'active' }, 'تغییر وضعیت حساب ناموفق بود.')
   })
 
-  it('lets admins apply and remove limitations, then block and unblock the user', async () => {
-    const user = makeUser({ id: 21 })
-
-    apiFetchMock
+  it('keeps block modal and custom date on network/receipt failure, then closes on the returned user', async () => {
+    const user = makeUser()
+    userProfileTimingMocks.parseJalaliToIranISOMock.mockReturnValue('2031-03-21T08:15:00.000Z')
+    routeRequestMock
+      .mockRejectedValueOnce(new TypeError('Failed to fetch'))
+      .mockResolvedValueOnce(makeResponse({ ...user, id: 99, trading_restricted_until: '2031-03-21T08:15:00Z' }))
       .mockResolvedValueOnce(makeResponse({
         ...user,
-        max_daily_trades: 5,
-        max_active_commodities: 6,
-        max_daily_requests: 7,
+        trading_restricted_until: '2031-03-21T08:15:00Z',
+        trading_restricted_until_jalali: '۱۴۰۹/۰۱/۰۱',
       }))
-      .mockResolvedValueOnce(makeResponse({
-        ...user,
-        max_daily_trades: 5,
-        max_active_commodities: 6,
-        max_daily_requests: 7,
-        trading_restricted_until: '2030-01-01T00:00:00Z',
-        trading_restricted_until_jalali: '۱۴۰۸/۱۰/۱۱',
-      }))
-      .mockResolvedValueOnce(makeResponse({
-        ...user,
-        max_daily_trades: 5,
-        max_active_commodities: 6,
-        max_daily_requests: 7,
-        trading_restricted_until: null,
-        trading_restricted_until_jalali: null,
-      }))
-      .mockResolvedValueOnce(makeResponse(makeUser({ id: 21 })))
-
-    const UserProfile = (await import('./UserProfile.vue')).default
-    const wrapper = mount(UserProfile, {
-      props: {
-        user,
-        isAdminView: true,
-        jwtToken: 'token',
-      },
-      global: {
-        stubs: {
-          teleport: true,
-        },
-      },
-    })
-
-    await wrapper.get('.settings-btn').trigger('click')
-    await findButtonByText(wrapper, 'اعمال محدودیت').trigger('click')
-    expect(wrapper.get('.modal-content').classes()).toContain('ui-responsive-dialog')
-    expect(wrapper.get('.modal-overlay').classes()).toContain('ui-responsive-dialog-backdrop')
-
-    const limitInputs = wrapper.findAll('.modal-content .form-input')
-    expect(limitInputs[0]).toBeTruthy()
-    await limitInputs[0]!.setValue('5')
-    await limitInputs[1]!.setValue('6')
-    await limitInputs[2]!.setValue('7')
-    const saveButtons = wrapper.findAll('.modal-content .save-btn')
-    expect(saveButtons[0]).toBeTruthy()
-    await saveButtons[0]!.trigger('click')
-    await flushPromises()
-
+    const wrapper = await mountProfile(user)
+    await openSettings(wrapper)
     await wrapper.get('.block-btn').trigger('click')
-    await findButtonByText(wrapper, '1 ساعت').trigger('click')
-    await flushPromises()
+    await findButtonByText(wrapper, 'انتخاب زمان دلخواه').trigger('click')
+    const vm = wrapper.vm as unknown as {
+      customDate: string
+      showBlockModal: boolean
+      blockUserCustom: () => Promise<void>
+    }
+    vm.customDate = '1409/01/01 08:15'
 
-    await wrapper.get('.unblock-btn').trigger('click')
+    await vm.blockUserCustom()
     await flushPromises()
+    expect(vm.showBlockModal).toBe(true)
+    expect(vm.customDate).toBe('1409/01/01 08:15')
+    expect(user.trading_restricted_until).toBeNull()
+    expect(wrapper.get('.modal-content [role="alert"]').text()).toBeTruthy()
 
-    await wrapper.get('.unlimit-btn').trigger('click')
+    await vm.blockUserCustom()
     await flushPromises()
+    expect(vm.showBlockModal).toBe(true)
+    expect(user.trading_restricted_until).toBeNull()
 
-    expect(apiFetchMock).toHaveBeenNthCalledWith(1, '/api/users/21', {
-      method: 'PUT',
-      body: JSON.stringify({
+    await vm.blockUserCustom()
+    await flushPromises()
+    expect(vm.showBlockModal).toBe(false)
+    expect(user.trading_restricted_until).toBe('2031-03-21T08:15:00Z')
+  })
+
+  it('preserves limitation drafts on failure and removes limits only through confirmation', async () => {
+    const user = makeUser()
+    routeRequestMock
+      .mockResolvedValueOnce(makeResponse({}, { ok: false }))
+      .mockResolvedValueOnce(makeResponse({
+        ...user,
         max_daily_trades: 5,
         max_active_commodities: 6,
         max_daily_requests: 7,
-        limitations_expire_at: null,
-      }),
-    })
-
-    const blockCall = apiFetchMock.mock.calls[1]
-    expect(blockCall?.[0]).toBe('/api/users/21')
-    expect(blockCall?.[1]?.method).toBe('PUT')
-    expect(JSON.parse(blockCall?.[1]?.body as string)).toEqual({
-      trading_restricted_until: expect.any(String),
-    })
-
-    expect(apiFetchMock).toHaveBeenNthCalledWith(3, '/api/users/21', {
-      method: 'PUT',
-      body: JSON.stringify({ trading_restricted_until: null }),
-    })
-    expect(apiFetchMock).toHaveBeenNthCalledWith(4, '/api/users/21', {
-      method: 'PUT',
-      body: JSON.stringify({
+      }))
+      .mockResolvedValueOnce(makeResponse(makeUser({
         max_daily_trades: null,
         max_active_commodities: null,
         max_daily_requests: null,
         limitations_expire_at: null,
-      }),
-    })
-  })
-
-  it('emits notifications and settings navigation for non-admin profiles', async () => {
-    const user = makeUser({ role: 'تماشا' })
-
-    const UserProfile = (await import('./UserProfile.vue')).default
-    const wrapper = mount(UserProfile, {
-      props: {
-        user,
-        isAdminView: false,
-      },
-      global: {
-        stubs: {
-          teleport: true,
-        },
-      },
-    })
-
-    await wrapper.get('.notification-btn').trigger('click')
-    await wrapper.get('.profile-control.settings-btn').trigger('click')
-
-    expect(wrapper.emitted('navigate')).toEqual([
-      ['notifications'],
-      ['user_settings'],
-    ])
-  })
-
-  it('shows the admin session security warning and restores max session value after a save failure', async () => {
-    const user = makeUser({ id: 30, max_sessions: 2 })
-    apiFetchMock.mockResolvedValueOnce({ ok: false })
-
-    const UserProfile = (await import('./UserProfile.vue')).default
-    const wrapper = mount(UserProfile, {
-      props: {
-        user,
-        isAdminView: true,
-        jwtToken: 'token',
-      },
-      global: {
-        stubs: {
-          teleport: true,
-        },
-      },
-    })
-
-    expect(wrapper.get('.form-select-sm').classes()).toContain('ui-select')
-    await wrapper.get('.form-select-sm').setValue('3')
-    await flushPromises()
-
-    expect(apiFetchMock).toHaveBeenCalledWith('/api/users/30', {
-      method: 'PUT',
-      body: JSON.stringify({ max_sessions: 3 }),
-    })
-    expect(window.alert).toHaveBeenCalledWith('خطا در ذخیره تنظیمات نشست')
-    expect((wrapper.get('.form-select-sm').element as HTMLSelectElement).value).toBe('2')
-
-    const securedWrapper = mount(UserProfile, {
-      props: {
-        user: makeUser({ id: 31, role: 'مدیر ارشد', max_sessions: 1 }),
-        isAdminView: true,
-        jwtToken: 'token',
-      },
-      global: {
-        stubs: {
-          teleport: true,
-        },
-      },
-    })
-
-    await securedWrapper.find('.sessions-config-box .inline-edit').trigger('click')
-    expect(window.alert).toHaveBeenCalledWith('به دلایل امنیتی، تعداد نشست‌های مجاز برای مدیران سایت نمی‌تواند بیش از ۱ باشد.')
-  })
-
-  it('hides role editing for middle managers in admin view', async () => {
-    localStorage.setItem('current_user_summary', JSON.stringify({ role: 'مدیر میانی' }))
-    const user = makeUser({ id: 31 })
-
-    const UserProfile = (await import('./UserProfile.vue')).default
-    const wrapper = mount(UserProfile, {
-      props: {
-        user,
-        isAdminView: true,
-        jwtToken: 'token',
-      },
-      global: {
-        stubs: {
-          teleport: true,
-        },
-      },
-    })
-
-    await wrapper.get('.settings-btn').trigger('click')
-
-    expect(wrapper.text()).not.toContain('ویرایش نقش')
-  })
-
-  it('requires explicit custom dates before saving manual limitations or manual blocks', async () => {
-    const user = makeUser({ id: 32 })
-
-    const UserProfile = (await import('./UserProfile.vue')).default
-    const wrapper = mount(UserProfile, {
-      props: {
-        user,
-        isAdminView: true,
-        jwtToken: 'token',
-      },
-      global: {
-        stubs: {
-          teleport: true,
-        },
-      },
-    })
-
-    await wrapper.get('.settings-btn').trigger('click')
+      })))
+    const wrapper = await mountProfile(user)
+    await openSettings(wrapper)
     await findButtonByText(wrapper, 'اعمال محدودیت').trigger('click')
-    await wrapper.findAll('.modal-content .form-select')[0]!.setValue('-1')
-    await wrapper.findAll('.modal-content .save-btn')[0]!.trigger('click')
-    expect(window.alert).toHaveBeenCalledWith('لطفاً تاریخ پایان محدودیت را انتخاب کنید.')
-    expect(apiFetchMock).not.toHaveBeenCalled()
+    const inputs = wrapper.findAll('.modal-content .form-input')
+    await inputs[0]!.setValue('5')
+    await inputs[1]!.setValue('6')
+    await inputs[2]!.setValue('7')
 
-    await wrapper.findAll('.modal-content .cancel-btn')[0]!.trigger('click')
-    await wrapper.get('.block-btn').trigger('click')
-    await findButtonByText(wrapper, 'انتخاب زمان دلخواه').trigger('click')
-    await findButtonByText(wrapper, 'تایید نهایی').trigger('click')
+    await wrapper.get('.modal-content .save-btn').trigger('click')
+    await flushPromises()
+    expect((inputs[0]!.element as HTMLInputElement).value).toBe('5')
+    expect(wrapper.find('.modal-content').exists()).toBe(true)
+    expect(user.max_daily_trades).toBeNull()
 
-    expect(window.alert).toHaveBeenCalledWith('لطفاً یک تاریخ معتبر انتخاب کنید.')
-    expect(apiFetchMock).not.toHaveBeenCalled()
+    await wrapper.get('.modal-content .save-btn').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.modal-content').exists()).toBe(false)
+    expect(user.max_daily_trades).toBe(5)
+
+    await wrapper.get('.unlimit-btn').trigger('click')
+    expect(wrapper.get('.ui-confirm-dialog').text()).toContain('رفع محدودیت‌ها')
+    await confirmDialog(wrapper)
+    await flushPromises()
+    expect(user.max_daily_trades).toBeNull()
+    expect(wrapper.find('.ui-confirm-dialog').exists()).toBe(false)
+    expectMutationCall(3, '/api/users/12', 'PUT', {
+      max_daily_trades: null,
+      max_active_commodities: null,
+      max_daily_requests: null,
+      limitations_expire_at: null,
+    }, 'رفع محدودیت‌ها ناموفق بود.')
   })
 
-  it('normalizes and rolls back owner limits when max-accountant or max-block save calls fail', async () => {
-    const user = makeUser({ id: 33, max_accountants: 4, max_blocked_users: 12 })
-    apiFetchMock
-      .mockResolvedValueOnce({ ok: false })
-      .mockResolvedValueOnce({ ok: false })
-
-    const UserProfile = (await import('./UserProfile.vue')).default
-    const wrapper = mount(UserProfile, {
-      props: {
-        user,
-        isAdminView: true,
-        jwtToken: 'token',
-      },
-      global: {
-        stubs: {
-          teleport: true,
-        },
-      },
-    })
-
-    const maxAccountantsInput = wrapper.get('.max-accountants-input')
-    await maxAccountantsInput.setValue('-5')
-    await maxAccountantsInput.trigger('change')
-    await flushPromises()
-
-    const maxBlockedInput = wrapper.get('.max-blocked-users-input')
-    await maxBlockedInput.setValue('500')
-    await flushPromises()
-
-    expect(apiFetchMock.mock.calls).toContainEqual([
-      '/api/users/33',
-      {
-        method: 'PUT',
-        body: JSON.stringify({ max_accountants: 0 }),
-      },
-    ])
-    expect(apiFetchMock.mock.calls).toContainEqual([
-      '/api/users/33',
-      {
-        method: 'PUT',
-        body: JSON.stringify({ max_blocked_users: 100 }),
-      },
-    ])
-    expect(window.alert).toHaveBeenCalledWith('خطا در ذخیره سقف حسابداران')
-    expect(window.alert).toHaveBeenCalledWith('خطا در ذخیره سقف بلاک')
-    expect((wrapper.get('.max-accountants-input').element as HTMLInputElement).value).toBe('4')
-    expect((wrapper.get('.max-blocked-users-input').element as HTMLInputElement).value).toBe('12')
-  })
-
-  it('covers custom date picker helpers and custom block/limit save branches', async () => {
-    const user = makeUser({ id: 34 })
-    userProfileTimingMocks.parseJalaliToIranISOMock
-      .mockReturnValueOnce(null)
-      .mockReturnValueOnce('2031-03-21T08:15:00.000Z')
-      .mockReturnValueOnce(null)
-      .mockReturnValueOnce('2031-03-21T08:15:00.000Z')
-    apiFetchMock
+  it('rejects invalid or stale finite limitation expiry receipts before exact-instant success', async () => {
+    const user = makeUser()
+    const expectedExpiry = '2031-03-21T08:15:00.000Z'
+    userProfileTimingMocks.parseJalaliToIranISOMock.mockReturnValue(expectedExpiry)
+    routeRequestMock
       .mockResolvedValueOnce(makeResponse({
         ...user,
-        trading_restricted_until: '2031-03-21T08:15:00.000Z',
+        max_daily_trades: 2,
+        max_active_commodities: 3,
+        max_daily_requests: 4,
+        limitations_expire_at: 'invalid-date',
       }))
       .mockResolvedValueOnce(makeResponse({
         ...user,
         max_daily_trades: 2,
         max_active_commodities: 3,
         max_daily_requests: 4,
-        limitations_expire_at: '2031-03-21T08:15:00.000Z',
+        limitations_expire_at: '2030-03-21T08:15:00Z',
       }))
-
-    const UserProfile = (await import('./UserProfile.vue')).default
-    const wrapper = mount(UserProfile, {
-      props: {
-        user,
-        isAdminView: true,
-        jwtToken: 'token',
-      },
-      global: {
-        stubs: {
-          teleport: true,
-        },
-      },
-    })
-
+      .mockResolvedValueOnce(makeResponse({
+        ...user,
+        max_daily_trades: 2,
+        max_active_commodities: 3,
+        max_daily_requests: 4,
+        limitations_expire_at: '2031-03-21T08:15:00',
+      }))
+    const wrapper = await mountProfile(user)
+    await openSettings(wrapper)
+    await findButtonByText(wrapper, 'اعمال محدودیت').trigger('click')
     const vm = wrapper.vm as unknown as {
-      customDate: string
       customLimitDate: string
       limitDurationMinutes: number
-      limitMaxTrades: number
-      limitMaxCommodities: number
-      limitMaxRequests: number
-      pickerStep: number
-      tempDatePart: string
-      tempTimePart: string
-      showBlockDateModal: boolean
-      showLimitDateModal: boolean
-      blockTimePickerRef: { modelValue?: unknown } | null
-      limitTimePickerRef: { modelValue?: unknown } | null
-      initDatePicker: (currentValue: string) => void
-      onDateChange: (value: unknown) => void
-      handleNextStep: () => void
-      handleFinalSubmit: () => void
-      updateDatePart: (value: unknown) => void
-      updateTimePart: (value: unknown) => void
-      blockUser: (minutes: number) => Promise<void>
-      blockUserCustom: () => Promise<void>
+      limitMaxTrades: number | null
+      limitMaxCommodities: number | null
+      limitMaxRequests: number | null
+      showLimitationsModal: boolean
       saveLimitations: () => Promise<void>
     }
-
-    vm.initDatePicker('invalid-date')
-    expect(vm.tempDatePart).toBeTruthy()
-    expect(vm.tempTimePart).toBeTruthy()
-
-    vm.onDateChange('1409/01/01')
-    vm.tempDatePart = ''
-    vm.handleNextStep()
-    expect(vm.pickerStep).toBe(1)
-    vm.tempDatePart = '1409/01/01'
-    vm.handleNextStep()
-    expect(vm.pickerStep).toBe(2)
-
-    vm.updateDatePart('1409/01/02')
-    vm.updateTimePart('08:15')
-    expect(vm.tempTimePart).toBe('08:15')
-    vm.updateTimePart('8:15 AM')
-    expect(vm.tempTimePart).toBe('08:15')
-    vm.updateTimePart(new Date('2031-03-21T12:45:00Z'))
-    expect(vm.tempTimePart).toBe('12:45')
-    vm.updateTimePart(915)
-    expect(vm.tempTimePart).toBe('915')
-
-    vm.showBlockDateModal = true
-    vm.tempDatePart = ''
-    vm.handleFinalSubmit()
-    expect(window.alert).toHaveBeenCalledWith('لطفاً تاریخ را انتخاب کنید.')
-
-    vm.tempDatePart = '1409/01/01'
-    vm.tempTimePart = ''
-    vm.blockTimePickerRef = { modelValue: '08:15' }
-    vm.handleFinalSubmit()
-    expect(vm.customDate).toBe('1409/01/01 08:15')
-    expect(vm.showBlockDateModal).toBe(false)
-
-    await vm.blockUser(0)
-    await flushPromises()
-    expect(apiFetchMock).toHaveBeenCalledWith('/api/users/34', expect.objectContaining({ method: 'PUT' }))
-
-    vm.customDate = '1409/01/01 08:15'
-    await vm.blockUserCustom()
-    expect(window.alert).toHaveBeenCalledWith('تاریخ نامعتبر است.')
-
-    vm.customDate = '1409/01/01 08:15'
-    await vm.blockUserCustom()
-    await flushPromises()
-    expect(userProfileTimingMocks.parseJalaliToIranISOMock).toHaveBeenCalledWith('1409/01/01 08:15')
-
+    vm.customLimitDate = '1410/01/01 11:45'
     vm.limitDurationMinutes = -1
     vm.limitMaxTrades = 2
     vm.limitMaxCommodities = 3
     vm.limitMaxRequests = 4
-    vm.customLimitDate = '1409/01/01 08:15'
-    await vm.saveLimitations()
-    expect(window.alert).toHaveBeenCalledWith('تاریخ نامعتبر است.')
-
-    vm.showLimitDateModal = true
-    vm.tempDatePart = '1409/01/01'
-    vm.tempTimePart = ''
-    vm.limitTimePickerRef = { modelValue: new Date('2031-03-21T08:15:00Z') }
-    vm.handleFinalSubmit()
-    expect(vm.customLimitDate).toBe('1409/01/01 08:15')
-    expect(vm.showLimitDateModal).toBe(false)
+    const expectedBody = {
+      max_daily_trades: 2,
+      max_active_commodities: 3,
+      max_daily_requests: 4,
+      limitations_expire_at: expectedExpiry,
+    }
 
     await vm.saveLimitations()
     await flushPromises()
-    expect(apiFetchMock.mock.calls).toContainEqual([
-      '/api/users/34',
-      {
-        method: 'PUT',
-        body: JSON.stringify({
-          max_daily_trades: 2,
-          max_active_commodities: 3,
-          max_daily_requests: 4,
-          limitations_expire_at: '2031-03-21T08:15:00.000Z',
-        }),
-      },
-    ])
+    expect(vm.showLimitationsModal).toBe(true)
+    expect(user.limitations_expire_at).toBeNull()
+
+    await vm.saveLimitations()
+    await flushPromises()
+    expect(vm.showLimitationsModal).toBe(true)
+    expect(user.limitations_expire_at).toBeNull()
+
+    await vm.saveLimitations()
+    await flushPromises()
+    expect(vm.showLimitationsModal).toBe(false)
+    expect(user.limitations_expire_at).toBe('2031-03-21T08:15:00')
+    expectMutationCall(1, '/api/users/12', 'PUT', expectedBody, 'ذخیره محدودیت‌ها ناموفق بود.')
+    expectMutationCall(2, '/api/users/12', 'PUT', expectedBody, 'ذخیره محدودیت‌ها ناموفق بود.')
+    expectMutationCall(3, '/api/users/12', 'PUT', expectedBody, 'ذخیره محدودیت‌ها ناموفق بود.')
   })
 
-  it('drives the custom block and limitation date modals through their UI controls', async () => {
-    const user = makeUser({ id: 35 })
-    userProfileTimingMocks.parseJalaliToIranISOMock
-      .mockReturnValueOnce('2031-03-21T09:30:00.000Z')
-      .mockReturnValueOnce('2031-03-22T10:45:00.000Z')
-    apiFetchMock
-      .mockResolvedValueOnce(makeResponse({
-        ...user,
-        trading_restricted_until: '2031-03-21T09:30:00.000Z',
-        trading_restricted_until_jalali: '۱۴۰۹/۰۱/۰۱ ۰۹:۳۰',
-      }))
-      .mockResolvedValueOnce(makeResponse({
-        ...user,
-        max_daily_trades: 7,
-        max_active_commodities: 8,
-        max_daily_requests: 9,
-        limitations_expire_at: '2031-03-22T10:45:00.000Z',
-        limitations_expire_at_jalali: '۱۴۰۹/۰۱/۰۲ ۱۰:۴۵',
-      }))
+  it('preserves session and accountant quota drafts across failures', async () => {
+    const user = makeUser({ max_sessions: 2, max_accountants: 4 })
+    routeRequestMock
+      .mockResolvedValueOnce(makeResponse({}, { ok: false }))
+      .mockResolvedValueOnce(makeResponse({}, { ok: false }))
+    const wrapper = await mountProfile(user)
 
-    const UserProfile = (await import('./UserProfile.vue')).default
-    const wrapper = mount(UserProfile, {
+    await wrapper.get('.form-select-sm').setValue('3')
+    await flushPromises()
+    expect((wrapper.get('.form-select-sm').element as HTMLSelectElement).value).toBe('3')
+    expect(user.max_sessions).toBe(2)
+
+    const maxAccountants = wrapper.get('.max-accountants-input')
+    await maxAccountants.setValue('-5')
+    await maxAccountants.trigger('change')
+    await flushPromises()
+    expect((maxAccountants.element as HTMLInputElement).value).toBe('0')
+    expect(user.max_accountants).toBe(4)
+    expect(wrapper.get('.quota-feedback').attributes('role')).toBe('alert')
+    expectMutationCall(1, '/api/users/12', 'PUT', { max_sessions: 3 }, 'ذخیره تنظیمات نشست ناموفق بود.')
+    expectMutationCall(2, '/api/users/12', 'PUT', { max_accountants: 0 }, 'ذخیره سقف حسابداران ناموفق بود.')
+  })
+
+  it('uses the exact max-customer contract and retains the draft until a valid success receipt', async () => {
+    const user = makeUser({ max_customers: 5 })
+    routeRequestMock
+      .mockResolvedValueOnce(makeResponse({}, { ok: false }))
+      .mockResolvedValueOnce(makeResponse({ ...user, max_customers: 8 }))
+    const wrapper = await mountProfile(user)
+    const input = wrapper.get('.max-customers-input')
+
+    await input.setValue('8')
+    await input.trigger('change')
+    await flushPromises()
+    expect(user.max_customers).toBe(5)
+    expect((input.element as HTMLInputElement).value).toBe('8')
+    expectMutationCall(1, '/api/users/12', 'PUT', { max_customers: 8 }, 'ذخیره سقف مشتریان ناموفق بود.')
+
+    await input.trigger('change')
+    await flushPromises()
+    expect(user.max_customers).toBe(8)
+    expect(wrapper.get('.quota-feedback').attributes('role')).toBe('status')
+    expectMutationCall(2, '/api/users/12', 'PUT', { max_customers: 8 }, 'ذخیره سقف مشتریان ناموفق بود.')
+  })
+
+  it('uses the exact block-quota contract and rejects mismatched receipts before success', async () => {
+    const user = makeUser({ max_blocked_users: 12 })
+    routeRequestMock
+      .mockResolvedValueOnce(makeResponse({ ...user, max_blocked_users: 12 }))
+      .mockResolvedValueOnce(makeResponse({ ...user, max_blocked_users: 25 }))
+    const wrapper = await mountProfile(user)
+    const input = wrapper.get('.max-blocked-users-input')
+
+    await input.setValue('25')
+    await input.trigger('change')
+    await flushPromises()
+    expect(user.max_blocked_users).toBe(12)
+    expect((input.element as HTMLInputElement).value).toBe('25')
+    expectMutationCall(1, '/api/users/12', 'PUT', { max_blocked_users: 25 }, 'ذخیره سقف بلاک ناموفق بود.')
+
+    await input.trigger('change')
+    await flushPromises()
+    expect(user.max_blocked_users).toBe(25)
+    expectMutationCall(2, '/api/users/12', 'PUT', { max_blocked_users: 25 }, 'ذخیره سقف بلاک ناموفق بود.')
+  })
+
+  it('uses the exact block-capability contract and never infers success from intent', async () => {
+    const user = makeUser({ can_block_users: true })
+    routeRequestMock
+      .mockResolvedValueOnce(makeResponse({ ...user, can_block_users: true }))
+      .mockResolvedValueOnce(makeResponse({ ...user, can_block_users: false }))
+    const wrapper = await mountProfile(user)
+
+    await wrapper.get('.toggle-block-capability-btn').trigger('click')
+    await flushPromises()
+    expect(user.can_block_users).toBe(true)
+    expect(wrapper.get('.toggle-block-capability-btn').text()).toContain('فعال')
+    expectMutationCall(1, '/api/users/12', 'PUT', { can_block_users: false }, 'ذخیره مجوز بلاک ناموفق بود.')
+
+    await wrapper.get('.toggle-block-capability-btn').trigger('click')
+    await flushPromises()
+    expect(user.can_block_users).toBe(false)
+    expect(wrapper.get('.toggle-block-capability-btn').text()).toContain('غیرفعال')
+    expectMutationCall(2, '/api/users/12', 'PUT', { can_block_users: false }, 'ذخیره مجوز بلاک ناموفق بود.')
+  })
+
+  it('uses the exact preset-block payload and keeps the modal open through failure', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2030-01-01T10:00:00.000Z'))
+    const user = makeUser()
+    const restrictedUntil = '2030-01-01T11:00:00.000Z'
+    routeRequestMock
+      .mockResolvedValueOnce(makeResponse({
+        ...user,
+        trading_restricted_until: 'not-a-date',
+      }))
+      .mockResolvedValueOnce(makeResponse({
+        ...user,
+        trading_restricted_until: '2029-01-01T11:00:00Z',
+      }))
+      .mockResolvedValueOnce(makeResponse({
+        ...user,
+        trading_restricted_until: '2030-01-01T11:00:00',
+        trading_restricted_until_jalali: '۱۴۰۸/۱۰/۱۱ ۱۴:۳۰',
+      }))
+    const wrapper = await mountProfile(user)
+
+    try {
+      await openSettings(wrapper)
+      await wrapper.get('.block-btn').trigger('click')
+      await findButtonByText(wrapper, '1 ساعت').trigger('click')
+      await flushPromises()
+      expect(wrapper.find('.modal-content').exists()).toBe(true)
+      expect(user.trading_restricted_until).toBeNull()
+      expectMutationCall(1, '/api/users/12', 'PUT', { trading_restricted_until: restrictedUntil }, 'اعمال مسدودیت ناموفق بود.')
+
+      await findButtonByText(wrapper, '1 ساعت').trigger('click')
+      await flushPromises()
+      expect(wrapper.find('.modal-content').exists()).toBe(true)
+      expect(user.trading_restricted_until).toBeNull()
+      expectMutationCall(2, '/api/users/12', 'PUT', { trading_restricted_until: restrictedUntil }, 'اعمال مسدودیت ناموفق بود.')
+
+      await findButtonByText(wrapper, '1 ساعت').trigger('click')
+      await flushPromises()
+      expect(wrapper.find('.modal-content').exists()).toBe(false)
+      expect(user.trading_restricted_until).toBe('2030-01-01T11:00:00')
+      expectMutationCall(3, '/api/users/12', 'PUT', { trading_restricted_until: restrictedUntil }, 'اعمال مسدودیت ناموفق بود.')
+    } finally {
+      wrapper.unmount()
+      vi.useRealTimers()
+    }
+  })
+
+  it('validates terminated_sessions and guards duplicate terminate-all submissions', async () => {
+    const user = makeUser({ id: 15 })
+    routeRequestMock.mockResolvedValueOnce(makeResponse({ detail: 'missing receipt' }))
+    const wrapper = await mountProfile(user)
+    await wrapper.get('.terminate-sessions-btn').trigger('click')
+    await confirmDialog(wrapper)
+    await flushPromises()
+    expect(wrapper.find('.ui-confirm-dialog').exists()).toBe(true)
+    expect(wrapper.get('.ui-confirm-dialog [role="alert"]').text()).toContain('ناموفق')
+
+    const pending = deferred<Response>()
+    routeRequestMock.mockReturnValueOnce(pending.promise)
+    const vm = wrapper.vm as unknown as { confirmPendingAction: () => Promise<void> }
+    const first = vm.confirmPendingAction()
+    const duplicate = vm.confirmPendingAction()
+    expect(routeRequestMock).toHaveBeenCalledTimes(2)
+    pending.resolve(makeResponse({ detail: '3 نشست پایان یافت', terminated_sessions: 3 }))
+    await Promise.all([first, duplicate])
+    await flushPromises()
+
+    expectMutationCall(
+      2,
+      '/api/users/15/sessions/terminate-all',
+      'POST',
+      undefined,
+      'پایان دادن به نشست‌های فعال ناموفق بود.',
+    )
+    expect(wrapper.find('.ui-confirm-dialog').exists()).toBe(false)
+    expect(wrapper.text()).toContain('3 نشست پایان یافت.')
+  })
+
+  it('keeps delete confirmation on HTTP, malformed JSON, and wrong receipt; navigates only after exact receipt', async () => {
+    const user = makeUser({ id: 18 })
+    routeRequestMock
+      .mockResolvedValueOnce(makeResponse({}, { ok: false }))
+      .mockResolvedValueOnce(makeResponse(null, { rejectJson: true }))
+      .mockResolvedValueOnce(makeResponse({ message: 'deleted maybe' }))
+      .mockResolvedValueOnce(makeResponse({ message: 'User deleted successfully' }))
+    const wrapper = await mountProfile(user)
+
+    await wrapper.get('.delete-btn').trigger('click')
+    expect(wrapper.get('.ui-confirm-dialog').text()).toContain('آفرهای فعال را منقضی')
+    expect(wrapper.get('.ui-confirm-dialog').text()).toContain('دعوت‌های در انتظار را لغو')
+    expect(wrapper.get('.ui-confirm-dialog').text()).toContain('روابط مشتری/حسابدار')
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      await confirmDialog(wrapper)
+      await flushPromises()
+      expect(wrapper.find('.ui-confirm-dialog').exists()).toBe(true)
+      expect(wrapper.emitted('navigate')).toBeUndefined()
+    }
+
+    await confirmDialog(wrapper)
+    await flushPromises()
+    expect(wrapper.find('.ui-confirm-dialog').exists()).toBe(false)
+    expect(wrapper.emitted('navigate')).toEqual([['manage_users']])
+    expectMutationCall(4, '/api/users/18', 'DELETE', undefined, 'حذف کاربر ناموفق بود.')
+  })
+
+  it('confirms unblock and mutates the restriction only from the returned user', async () => {
+    const user = makeUser({
+      trading_restricted_until: '2031-03-21T08:15:00Z',
+      trading_restricted_until_jalali: '۱۴۰۹/۰۱/۰۱',
+    })
+    routeRequestMock
+      .mockResolvedValueOnce(makeResponse({ ...user, trading_restricted_until: '2031-03-21T08:15:00Z' }))
+      .mockResolvedValueOnce(makeResponse({ ...user, trading_restricted_until: null, trading_restricted_until_jalali: null }))
+    const wrapper = await mountProfile(user)
+    await openSettings(wrapper)
+    await wrapper.get('.unblock-btn').trigger('click')
+
+    await confirmDialog(wrapper)
+    await flushPromises()
+    expect(user.trading_restricted_until).toBe('2031-03-21T08:15:00Z')
+    expect(wrapper.find('.ui-confirm-dialog').exists()).toBe(true)
+
+    await confirmDialog(wrapper)
+    await flushPromises()
+    expect(user.trading_restricted_until).toBeNull()
+    expect(wrapper.find('.ui-confirm-dialog').exists()).toBe(false)
+    expectMutationCall(1, '/api/users/12', 'PUT', { trading_restricted_until: null }, 'رفع مسدودیت ناموفق بود.')
+    expectMutationCall(2, '/api/users/12', 'PUT', { trading_restricted_until: null }, 'رفع مسدودیت ناموفق بود.')
+  })
+
+  it('shows date validation in the active modal without sending a request', async () => {
+    const wrapper = await mountProfile(makeUser())
+    await openSettings(wrapper)
+    await findButtonByText(wrapper, 'اعمال محدودیت').trigger('click')
+    await wrapper.get('.modal-content .form-select').setValue('-1')
+    await wrapper.get('.modal-content .save-btn').trigger('click')
+    expect(wrapper.get('.modal-content [role="alert"]').text()).toContain('تاریخ پایان محدودیت')
+
+    await wrapper.get('.modal-content .cancel-btn').trigger('click')
+    await wrapper.get('.block-btn').trigger('click')
+    await findButtonByText(wrapper, 'انتخاب زمان دلخواه').trigger('click')
+    await findButtonByText(wrapper, 'تایید نهایی').trigger('click')
+    expect(wrapper.get('.modal-content [role="alert"]').text()).toContain('تاریخ معتبر')
+    expect(routeRequestMock).not.toHaveBeenCalled()
+  })
+
+  it('retains customer context and non-admin navigation behavior', async () => {
+    const customer = makeUser({
+      is_customer: true,
+      customer_owner_account_name: 'owner20',
+      customer_management_name: 'مشتری ویژه',
+      customer_tier: 'tier2',
+    })
+    const wrapper = await mountProfile(customer)
+    expect(wrapper.text()).toContain('اطلاعات مشتری')
+    expect(wrapper.text()).toContain('مشتری ویژه')
+    expect(wrapper.text()).toContain('owner20')
+    expect(wrapper.text()).toContain('سطح 2')
+
+    const nonAdmin = await mountProfile(makeUser({ role: 'تماشا' }), { isAdminView: false, jwtToken: null })
+    await nonAdmin.get('.notification-btn').trigger('click')
+    await nonAdmin.get('.profile-control.settings-btn').trigger('click')
+    expect(nonAdmin.emitted('navigate')).toEqual([
+      ['notifications'],
+      ['user_settings'],
+    ])
+
+    const ordinary = await mountProfile(makeUser({ role: 'عادی' }), { isAdminView: false, jwtToken: null })
+    expect(ordinary.find('.profile-control.settings-btn').exists()).toBe(false)
+    expect(ordinary.find('.notification-btn').exists()).toBe(true)
+  })
+
+  it('renders the authoritative global-lock detail for an inactive account', async () => {
+    const wrapper = await mountProfile(makeUser({
+      account_status: 'inactive',
+      global_lock_grace_expires_at: '2026-08-09T14:30:00Z',
+      global_web_locked_at: '2026-08-10T14:30:00Z',
+    }))
+
+    expect(wrapper.text()).toContain('غیرفعال (قفل کامل)')
+    expect(wrapper.text()).toContain('قفل سراسری وب/پیام‌رسان')
+  })
+
+  it('keeps role editing hidden for a cached middle-manager actor', async () => {
+    vi.resetModules()
+    localStorage.setItem('current_user_summary', JSON.stringify({ role: 'مدیر میانی' }))
+    const FreshUserProfile = (await import('./UserProfile.vue')).default
+    const wrapper = mount(FreshUserProfile, {
       props: {
-        user,
+        user: makeUser(),
         isAdminView: true,
         jwtToken: 'token',
       },
-      global: {
-        stubs: {
-          teleport: true,
-        },
-      },
+      global: { stubs: { teleport: true } },
     })
 
     await wrapper.get('.settings-btn').trigger('click')
-    await wrapper.get('.block-btn').trigger('click')
-    expect(wrapper.get('.modal-content').classes()).toContain('ui-responsive-dialog')
-    expect(wrapper.get('.modal-overlay').classes()).toContain('ui-responsive-dialog-backdrop')
-    await wrapper.get('.modal-content .cancel-btn.full-width').trigger('click')
-
-    await wrapper.get('.block-btn').trigger('click')
-    await findButtonByText(wrapper, 'انتخاب زمان دلخواه').trigger('click')
-    await wrapper.get('.custom-date-section .cancel-btn').trigger('click')
-
-    await findButtonByText(wrapper, 'انتخاب زمان دلخواه').trigger('click')
-    await wrapper.get('.custom-date-trigger').trigger('click')
-    expect(wrapper.get('.date-modal-content').classes()).toContain('ui-responsive-dialog')
-    expect(wrapper.get('.date-modal-overlay').classes()).toContain('ui-responsive-dialog-backdrop')
-    expect(wrapper.find('.date-modal-content .ui-responsive-dialog__header button').exists()).toBe(false)
-    await wrapper.get('.date-modal-content .integrated-cancel-btn').trigger('click')
-
-    await wrapper.get('.custom-date-trigger').trigger('click')
-    await setOpenJalaliDate(wrapper, '1409/02/03')
-    await wrapper.get('.date-modal-content .integrated-save-btn').trigger('click')
-    await wrapper.get('.date-modal-content .time-input').setValue('09:30')
-    await wrapper.get('.date-modal-content .integrated-save-btn').trigger('click')
-    await flushPromises()
-
-    expect(wrapper.get('.custom-date-trigger').text()).toContain('1409/02/03 09:30')
-
-    await wrapper.get('.custom-date-section .save-btn').trigger('click')
-    await flushPromises()
-
-    expect(apiFetchMock).toHaveBeenNthCalledWith(1, '/api/users/35', {
-      method: 'PUT',
-      body: JSON.stringify({ trading_restricted_until: '2031-03-21T09:30:00.000Z' }),
-    })
-
-    await findButtonByText(wrapper, 'اعمال محدودیت').trigger('click')
-    const limitInputs = wrapper.findAll('.modal-content .form-input')
-    await limitInputs[0]!.setValue('7')
-    await limitInputs[1]!.setValue('8')
-    await limitInputs[2]!.setValue('9')
-    expect(wrapper.get('.modal-content .form-select').classes()).toContain('ui-select')
-    await wrapper.get('.modal-content .form-select').setValue('-1')
-
-    await wrapper.get('.modal-content .custom-date-trigger').trigger('click')
-    expect(wrapper.get('.date-modal-content').classes()).toContain('ui-responsive-dialog')
-    expect(wrapper.get('.date-modal-overlay').classes()).toContain('ui-responsive-dialog-backdrop')
-    expect(wrapper.find('.date-modal-content .ui-responsive-dialog__header button').exists()).toBe(false)
-    await wrapper.get('.date-modal-content .integrated-cancel-btn').trigger('click')
-    await wrapper.get('.modal-content .custom-date-trigger').trigger('click')
-    await setOpenJalaliDate(wrapper, '1409/02/03')
-    await wrapper.get('.date-modal-content .integrated-save-btn').trigger('click')
-    await wrapper.get('.date-modal-content .time-input').setValue('10:45')
-    await wrapper.get('.date-modal-content .integrated-save-btn').trigger('click')
-    await flushPromises()
-
-    expect(wrapper.findAll('.modal-content .custom-date-trigger')[0]!.text()).toContain('1409/02/03 10:45')
-
-    await wrapper.get('.modal-content .save-btn').trigger('click')
-    await flushPromises()
-
-    expect(apiFetchMock).toHaveBeenNthCalledWith(2, '/api/users/35', {
-      method: 'PUT',
-      body: JSON.stringify({
-        max_daily_trades: 7,
-        max_active_commodities: 8,
-        max_daily_requests: 9,
-        limitations_expire_at: '2031-03-22T10:45:00.000Z',
-      }),
-    })
-    expect(userProfileTimingMocks.parseJalaliToIranISOMock).toHaveBeenCalledWith('1409/02/03 09:30')
-    expect(userProfileTimingMocks.parseJalaliToIranISOMock).toHaveBeenCalledWith('1409/02/03 10:45')
+    expect(wrapper.text()).not.toContain('ویرایش نقش')
   })
 
-  it('syncs prop-backed admin refs, uses helper fallbacks, and restores body overflow on unmount', async () => {
-    vi.useFakeTimers()
-    vi.setSystemTime(new Date('2031-03-21T06:07:00Z'))
+  it('shows the fixed admin-session rule without a browser alert and restores body overflow', async () => {
+    const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => {})
+    const wrapper = await mountProfile(makeUser({ role: 'مدیر ارشد', max_sessions: 1 }))
+    await wrapper.find('.sessions-config-box .inline-edit').trigger('click')
+    expect(wrapper.get('.quota-feedback').text()).toContain('نمی‌تواند بیش از ۱ باشد')
+    expect(alertSpy).not.toHaveBeenCalled()
 
-    const user = makeUser({
-      id: 37,
-      max_sessions: 2,
-      max_accountants: 3,
-      max_customers: 4,
-      can_block_users: true,
-      max_blocked_users: 9,
-      account_status: 'active',
-    })
-
-    const UserProfile = (await import('./UserProfile.vue')).default
-    const wrapper = mount(UserProfile, {
-      props: {
-        user,
-        isAdminView: true,
-        jwtToken: 'token',
-      },
-      global: {
-        stubs: {
-          teleport: true,
-        },
-      },
-    })
-
-    const vm = wrapper.vm as unknown as {
-      editMaxSessions: number
-      editMaxCustomers: number
-      canBlockUsers: boolean
-      editMaxBlockedUsers: number
-      accountStatus: string
-      showBlockModal: boolean
-      showBlockDateModal: boolean
-      tempDatePart: string
-      tempTimePart: string
-      blockTimePickerRef: { modelValue?: unknown } | null
-      customDate: string
-      handleFinalSubmit: () => void
-      getCustomerTierLabel: (value: string | null | undefined) => string
-    }
-
-    await wrapper.setProps({
-      user: makeUser({
-        id: 37,
-        max_sessions: 8,
-        max_accountants: 3,
-        max_customers: 11,
-        can_block_users: false,
-        max_blocked_users: 15,
-        account_status: 'inactive',
-      }),
-    })
-    await flushPromises()
-
-    expect(vm.editMaxSessions).toBe(8)
-    expect(vm.editMaxCustomers).toBe(11)
-    expect(vm.canBlockUsers).toBe(false)
-    expect(vm.editMaxBlockedUsers).toBe(15)
-    expect(vm.accountStatus).toBe('inactive')
-    expect(vm.getCustomerTierLabel('tier1')).toBe('سطح 1')
-    expect(vm.getCustomerTierLabel('unknown-tier')).toBe('---')
-    expect(wrapper.text()).toContain('غیرفعال')
-    expect(wrapper.text()).toContain('این حساب از بازار خارج شده و تا فعال‌سازی مجدد، دسترسی معاملاتی ندارد.')
-
+    const vm = wrapper.vm as unknown as { showBlockModal: boolean }
     vm.showBlockModal = true
     await nextTick()
     expect(document.body.style.overflow).toBe('hidden')
-
-    vm.showBlockDateModal = true
-    vm.tempDatePart = '1409/01/09'
-    vm.tempTimePart = ''
-    vm.blockTimePickerRef = null
-    vm.handleFinalSubmit()
-    expect(vm.customDate).toMatch(/^1409\/01\/09 \d{2}:\d{2}$/)
-
     wrapper.unmount()
     expect(document.body.style.overflow).toBe('')
-    vi.useRealTimers()
   })
 
-  it('covers session and customer save helpers plus zero-session and delete-failure branches', async () => {
-    const confirmMock = vi.spyOn(window, 'confirm').mockReturnValue(true)
-    const user = makeUser({
-      id: 38,
-      max_sessions: 2,
-      max_customers: 5,
-      can_block_users: true,
-    })
+  it('keeps an accountant session limit fixed at the backend-authoritative value of one', async () => {
+    const user = makeUser({ is_accountant: true, max_sessions: 3 })
+    const wrapper = await mountProfile(user)
+    const select = wrapper.get('.form-select-sm')
 
-    apiFetchMock
-      .mockResolvedValueOnce(makeResponse({ ...user, max_sessions: 9 }))
-      .mockResolvedValueOnce(makeResponse({ ...user, max_customers: 0 }))
-      .mockResolvedValueOnce({ ok: false })
-      .mockResolvedValueOnce(makeResponse({ terminated_sessions: 0 }))
-      .mockResolvedValueOnce({ ok: false })
-
-    const UserProfile = (await import('./UserProfile.vue')).default
-    const wrapper = mount(UserProfile, {
-      props: {
-        user,
-        isAdminView: true,
-        jwtToken: 'token',
-      },
-      global: {
-        stubs: {
-          teleport: true,
-        },
-      },
-    })
+    expect((select.element as HTMLSelectElement).value).toBe('1')
+    expect(select.attributes('disabled')).toBeDefined()
 
     const vm = wrapper.vm as unknown as {
-      editMaxCustomers: number
-      saveMaxCustomers: () => Promise<void>
-      toggleBlockCapability: () => Promise<void>
-      terminateAllSessions: () => Promise<void>
-      deleteUser: () => Promise<void>
+      editMaxSessions: number
+      saveMaxSessions: () => Promise<void>
     }
-
-    await wrapper.get('.sessions-config-box .form-select-sm').setValue('3')
-    vm.editMaxCustomers = Number.NaN
-    await vm.saveMaxCustomers()
-    await vm.toggleBlockCapability()
-    await vm.terminateAllSessions()
-    await vm.deleteUser()
+    vm.editMaxSessions = 3
+    routeRequestMock.mockResolvedValueOnce(makeResponse({ ...user, max_sessions: 1 }))
+    await vm.saveMaxSessions()
     await flushPromises()
 
-    expect(apiFetchMock).toHaveBeenNthCalledWith(1, '/api/users/38', {
-      method: 'PUT',
-      body: JSON.stringify({ max_sessions: 3 }),
-    })
-    expect(apiFetchMock).toHaveBeenNthCalledWith(2, '/api/users/38', {
-      method: 'PUT',
-      body: JSON.stringify({ max_customers: 0 }),
-    })
-    expect(apiFetchMock).toHaveBeenNthCalledWith(3, '/api/users/38', {
-      method: 'PUT',
-      body: JSON.stringify({ can_block_users: false }),
-    })
-    expect(apiFetchMock).toHaveBeenNthCalledWith(4, '/api/users/38/sessions/terminate-all', {
-      method: 'POST',
-    })
-    expect(apiFetchMock).toHaveBeenNthCalledWith(5, '/api/users/38', {
-      method: 'DELETE',
-    })
-    expect(vm.editMaxCustomers).toBe(0)
-    expect(window.alert).toHaveBeenCalledWith('خطا در ذخیره مجوز بلاک')
-    expect(window.alert).toHaveBeenCalledWith('نشست فعالی برای پایان دادن وجود نداشت.')
-    expect(window.alert).toHaveBeenCalledWith('خطا در حذف کاربر')
-    expect(confirmMock).toHaveBeenCalledWith('آیا از پایان دادن فوری به همه نشست‌های فعال این کاربر اطمینان دارید؟')
-    expect(confirmMock).toHaveBeenCalledWith('آیا از حذف این کاربر اطمینان دارید؟')
-  })
-
-  it('keeps role editing open on save failure, supports admin back actions, and hides settings for ordinary users', async () => {
-    const confirmMock = vi.spyOn(window, 'confirm').mockReturnValue(false)
-    const user = makeUser({ id: 36, role: 'عادی' })
-    apiFetchMock.mockResolvedValueOnce({ ok: false })
-
-    const UserProfile = (await import('./UserProfile.vue')).default
-    const wrapper = mount(UserProfile, {
-      props: {
-        user,
-        isAdminView: true,
-        jwtToken: 'token',
-      },
-      global: {
-        stubs: {
-          teleport: true,
-        },
-      },
-    })
-
-    await wrapper.get('.profile-nav-back').trigger('click')
-    await wrapper.get('.main-actions .back-btn').trigger('click')
-    await wrapper.get('.settings-btn').trigger('click')
-    await findButtonByText(wrapper, 'تغییر وضعیت حساب').trigger('click')
-    await findButtonByText(wrapper, 'ویرایش نقش').trigger('click')
-    await wrapper.get('.edit-section .save-btn').trigger('click')
-    await flushPromises()
-
-    expect(confirmMock).toHaveBeenCalledWith('آیا از غیرفعال کردن حساب اطمینان دارید؟')
-    expect(apiFetchMock).toHaveBeenCalledTimes(1)
-    expect(window.alert).toHaveBeenCalledWith('خطا در ذخیره تغییرات')
-    expect(wrapper.find('.edit-section').exists()).toBe(true)
-
-    await wrapper.get('.edit-section .cancel-btn').trigger('click')
-    expect(wrapper.find('.edit-section').exists()).toBe(false)
-    expect(wrapper.emitted('navigate')).toEqual([
-      ['manage_users'],
-      ['manage_users'],
-    ])
-
-    const nonAdminWrapper = mount(UserProfile, {
-      props: {
-        user: makeUser({ role: 'عادی' }),
-        isAdminView: false,
-      },
-      global: {
-        stubs: {
-          teleport: true,
-        },
-      },
-    })
-
-    expect(nonAdminWrapper.find('.notification-btn').exists()).toBe(true)
-    expect(nonAdminWrapper.find('.profile-control.settings-btn').exists()).toBe(false)
+    expectMutationCall(1, '/api/users/12', 'PUT', { max_sessions: 1 }, 'ذخیره تنظیمات نشست ناموفق بود.')
+    expect(user.max_sessions).toBe(1)
+    expect(vm.editMaxSessions).toBe(1)
+    expect(wrapper.get('.quota-feedback').attributes('role')).toBe('status')
   })
 })
