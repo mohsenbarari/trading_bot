@@ -5,6 +5,7 @@ import { Bell, Store, LogOut, AlertTriangle, Ban, ChevronDown, PackageCheck, Use
 import { useNotificationStore } from '../stores/notifications'
 import { apiFetch, forceLogout } from '../utils/auth'
 import { cacheCurrentUserSummary } from '../utils/currentUser'
+import { routeRequestJson } from '../utils/routeRequest'
 import { formatIranDateTime, getIranHour, IRAN_TIME_ZONE, parseIranDisplayDate } from '../utils/iranTime'
 import { marketRuntime } from '../composables/useMarketRuntime'
 import { openTelegramLink, requestTelegramLink } from '../services/telegramLink'
@@ -66,6 +67,7 @@ const router = useRouter()
 const notificationStore = useNotificationStore()
 const user = ref<any>(null)
 const loading = ref(true)
+const userError = ref('')
 const todayTrades = ref<DashboardTrade[]>([])
 const todayTradesLoading = ref(false)
 const todayTradesError = ref('')
@@ -86,6 +88,7 @@ const projectUsersOffset = ref(0)
 const projectUsersHasMore = ref(false)
 const telegramLinkBusy = ref(false)
 const telegramLinkError = ref('')
+let userRequestInFlight = false
 
 const isRestricted = computed(() => {
   if (!user.value?.trading_restricted_until) return false
@@ -288,17 +291,24 @@ async function loadTodayTrades() {
   todayTradesError.value = ''
 
   try {
-    const response = await apiFetch(`/api/trades/my?from_date=${today}&to_date=${today}&limit=20`)
-    const payload = await response.json().catch(() => null)
-    if (!response.ok) {
-      throw new Error(payload?.detail || 'دریافت معاملات امروز ناموفق بود')
+    const payload = await routeRequestJson<unknown>(
+      `/api/trades/my?from_date=${today}&to_date=${today}&limit=20`,
+      {
+        errorContext: {
+          surface: 'app',
+          scope: 'section',
+          operation: 'refresh',
+          resourceLabel: 'معاملات امروز',
+          fallbackMessage: 'دریافت معاملات امروز انجام نشد.',
+        },
+      },
+    )
+    if (!Array.isArray(payload)) {
+      throw new Error('today_trades_payload_invalid')
     }
-    todayTrades.value = Array.isArray(payload)
-      ? (payload as DashboardTrade[]).filter(isTradeParticipantForPerspective)
-      : []
-  } catch (error: any) {
-    todayTrades.value = []
-    todayTradesError.value = error?.message || 'دریافت معاملات امروز ناموفق بود'
+    todayTrades.value = (payload as DashboardTrade[]).filter(isTradeParticipantForPerspective)
+  } catch {
+    todayTradesError.value = 'دریافت معاملات امروز انجام نشد. دوباره تلاش کنید.'
   } finally {
     todayTradesLoading.value = false
   }
@@ -505,18 +515,32 @@ function openProjectUserProfile(projectUser: DashboardProjectUser) {
 }
 
 async function fetchUser() {
+  if (userRequestInFlight) return
+  userRequestInFlight = true
+  loading.value = true
+  userError.value = ''
   try {
-    const res = await apiFetch('/api/auth/me')
-    if (res.ok) {
-      user.value = await res.json()
-      cacheCurrentUserSummary(user.value)
-      void loadTodayTrades()
+    const payload = await routeRequestJson<unknown>('/api/auth/me', {
+      errorContext: {
+        surface: 'app',
+        scope: 'page',
+        operation: 'initial-load',
+        fallbackMessage: 'دریافت اطلاعات حساب ممکن نشد.',
+      },
+    })
+    if (!payload || typeof payload !== 'object') {
+      throw new Error('identity_payload_invalid')
     }
+
+    user.value = payload
+    cacheCurrentUserSummary(user.value)
+    void loadTodayTrades()
     // 401 handling is automatic via apiFetch → forceLogout
-  } catch (e) {
-    console.error(e)
+  } catch {
+    userError.value = 'دریافت اطلاعات حساب انجام نشد. برای ادامه دوباره تلاش کنید.'
   } finally {
     loading.value = false
+    userRequestInFlight = false
   }
 }
 
@@ -565,6 +589,17 @@ onMounted(fetchUser)
     
     <!-- Loading -->
     <AppLoadingState v-if="loading" class="ds-loading-state" label="در حال دریافت داشبورد" />
+
+    <AppErrorState
+      v-else-if="userError && !user"
+      class="dashboard-identity-error ds-loading-state"
+      title="داشبورد بارگذاری نشد"
+      :message="userError"
+    >
+      <template #actions>
+        <AppButton type="button" class="dashboard-identity-retry" @click="fetchUser">تلاش دوباره</AppButton>
+      </template>
+    </AppErrorState>
 
     <div v-else-if="user" class="dashboard-content">
 
@@ -701,24 +736,38 @@ onMounted(fetchUser)
             </AppButton>
           </template>
 
+          <p
+            v-if="todayTradesLoading && todayTrades.length > 0"
+            class="today-trades-inline-status"
+            role="status"
+          >
+            در حال بروزرسانی؛ اطلاعات قبلی تا دریافت پاسخ حفظ شده است.
+          </p>
+          <p
+            v-if="todayTradesError && todayTrades.length > 0"
+            class="today-trades-inline-status today-trades-inline-status--error"
+            role="alert"
+          >
+            {{ todayTradesError }} اطلاعات قبلی حفظ شده است.
+          </p>
           <AppLoadingState
-            v-if="todayTradesLoading"
+            v-if="todayTradesLoading && todayTrades.length === 0"
             class="dashboard-state-card"
             label="در حال دریافت معاملات"
           />
           <AppErrorState
-            v-else-if="todayTradesError"
+            v-else-if="todayTradesError && todayTrades.length === 0"
             class="dashboard-state-card"
             title="دریافت معاملات امروز ناموفق بود"
             :message="todayTradesError"
           />
           <AppEmptyState
-            v-else-if="todayTrades.length === 0"
+            v-else-if="!todayTradesLoading && !todayTradesError && todayTrades.length === 0"
             class="dashboard-state-card"
             title="امروز معامله‌ای ثبت نشده است"
             message="بعد از انجام معامله، خلاصه روز جاری همین‌جا نمایش داده می‌شود."
           />
-          <div v-else class="today-trades-scroll">
+          <div v-if="todayTrades.length > 0" class="today-trades-scroll">
             <div class="today-trades-table" role="table" aria-label="معاملات امروز">
               <div class="today-trades-row today-trades-row--head" role="row">
                 <span role="columnheader">طرف مقابل معامله</span>
@@ -1363,6 +1412,16 @@ onMounted(fetchUser)
 
 .today-trades-refresh {
   flex-shrink: 0;
+}
+
+.today-trades-inline-status {
+  margin: 0 0 12px;
+  color: var(--ds-text-secondary);
+  font-size: 0.875rem;
+}
+
+.today-trades-inline-status--error {
+  color: var(--ds-danger-700);
 }
 
 .today-trades-scroll {

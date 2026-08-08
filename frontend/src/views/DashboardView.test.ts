@@ -101,6 +101,39 @@ describe('DashboardView.vue', () => {
     })
   })
 
+  it('leaves initial loading for a cause-neutral identity error and retries the real request', async () => {
+    dashboardViewMocks.apiFetchMock
+      .mockRejectedValueOnce(new Error('private transport detail'))
+      .mockResolvedValueOnce(makeJsonResponse({
+        id: 73,
+        full_name: 'کاربر بازیابی‌شده',
+        account_name: 'recovered73',
+        account_status: 'active',
+        global_lock_grace_expires_at: null,
+        global_web_locked_at: null,
+        trading_restricted_until: null,
+      }))
+      .mockResolvedValueOnce(makeJsonResponse([]))
+
+    const wrapper = await mountView()
+
+    expect(wrapper.find('.ui-loading-state').exists()).toBe(false)
+    expect(wrapper.get('.dashboard-identity-error').text()).toContain('داشبورد بارگذاری نشد')
+    expect(wrapper.text()).not.toContain('private transport detail')
+    expect(wrapper.text()).not.toContain('اتصال برقرار نشد')
+
+    await wrapper.get('.dashboard-identity-retry').trigger('click')
+    await flushPromises()
+
+    expect(dashboardViewMocks.apiFetchMock).toHaveBeenNthCalledWith(2, '/api/auth/me', expect.objectContaining({
+      retryNetwork: false,
+      signal: expect.any(AbortSignal),
+      trackConnectionState: false,
+    }))
+    expect(wrapper.find('.dashboard-identity-error').exists()).toBe(false)
+    expect(wrapper.text()).toContain('کاربر بازیابی‌شده')
+  })
+
   it('shows the Telegram connect panel only before linking and opens the generated link', async () => {
     mockDashboardApi({
       user: {
@@ -206,8 +239,19 @@ describe('DashboardView.vue', () => {
 
     const wrapper = await mountView()
 
-    expect(dashboardViewMocks.apiFetchMock).toHaveBeenCalledWith('/api/auth/me')
-    expect(dashboardViewMocks.apiFetchMock).toHaveBeenCalledWith('/api/trades/my?from_date=2026-05-14&to_date=2026-05-14&limit=20')
+    expect(dashboardViewMocks.apiFetchMock).toHaveBeenCalledWith('/api/auth/me', expect.objectContaining({
+      retryNetwork: false,
+      signal: expect.any(AbortSignal),
+      trackConnectionState: false,
+    }))
+    expect(dashboardViewMocks.apiFetchMock).toHaveBeenCalledWith(
+      '/api/trades/my?from_date=2026-05-14&to_date=2026-05-14&limit=20',
+      expect.objectContaining({
+        retryNetwork: false,
+        signal: expect.any(AbortSignal),
+        trackConnectionState: false,
+      }),
+    )
     expect(dashboardViewMocks.apiFetchMock).not.toHaveBeenCalledWith('/api/commodities/')
     expect(wrapper.text()).toContain('صبح بخیر')
     expect(wrapper.text()).toContain('رضا محمدی')
@@ -266,6 +310,51 @@ describe('DashboardView.vue', () => {
       params: { id: 31 },
       query: { account_name: 'ali31' },
     })
+  })
+
+  it('keeps the last authoritative trade rows when a bounded refresh fails', async () => {
+    let tradeRequests = 0
+    dashboardViewMocks.apiFetchMock.mockImplementation(async (url: string) => {
+      if (url === '/api/auth/me') {
+        return makeJsonResponse({
+          id: 33,
+          full_name: 'کاربر معاملات',
+          account_name: 'trades33',
+          account_status: 'active',
+          global_lock_grace_expires_at: null,
+          global_web_locked_at: null,
+          trading_restricted_until: null,
+        })
+      }
+      if (url.startsWith('/api/trades/my?')) {
+        tradeRequests += 1
+        if (tradeRequests === 1) {
+          return makeJsonResponse([{
+            id: 3301,
+            trade_type: 'buy',
+            offer_user_id: 19,
+            responder_user_id: 33,
+            counterparty_name: 'طرف معتبر قبلی',
+            commodity_name: 'سکه',
+            quantity: 2,
+            price: 100,
+          }])
+        }
+        throw new Error('private refresh failure')
+      }
+      return makeJsonResponse([])
+    })
+
+    const wrapper = await mountView()
+    expect(wrapper.get('.today-trades-card').text()).toContain('طرف معتبر قبلی')
+
+    await wrapper.get('.today-trades-refresh').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('.today-trades-card').text()).toContain('طرف معتبر قبلی')
+    expect(wrapper.get('.today-trades-inline-status--error').text()).toContain('اطلاعات قبلی حفظ شده است')
+    expect(wrapper.text()).not.toContain('private refresh failure')
+    expect(tradeRequests).toBe(2)
   })
 
   it('shows the inactive warning and blocks market navigation for inactive accounts', async () => {

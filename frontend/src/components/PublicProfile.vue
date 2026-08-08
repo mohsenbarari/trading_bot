@@ -39,6 +39,7 @@ import { resolveTradeParticipantProfileTarget } from '../utils/accountantChatIde
 import { apiFetch } from '../utils/auth';
 import { buildChatFileUrl, getAvatarInitial, uploadAvatarImage } from '../utils/chatFiles';
 import { currentUserSummary } from '../utils/currentUser';
+import { routeRequestJson } from '../utils/routeRequest';
 import { formatLastSeenStatus, isUserOnline as isPresenceOnline } from '../utils/userPresence';
 import { formatIranDate } from '../utils/iranTime';
 import { tradeSettlementLabel, type SettlementType } from '../utils/settlementType';
@@ -189,6 +190,8 @@ const historyCounterpartyUserId = ref<number | null>(null);
 const historyCounterpartyOptions = ref<ProjectUserDirectoryEntry[]>([]);
 const historyCounterpartyOptionsLoading = ref(false);
 let historyRequestRevision = 0;
+let profileRequestRevision = 0;
+let projectUsersRequestRevision = 0;
 const historyCounterpartyOptionsLoaded = ref(false);
 const historyCounterpartyError = ref('');
 const avatarBusy = ref(false);
@@ -571,6 +574,9 @@ function getActionIconComponent(action: ProfileActionCard) {
 }
 
 async function loadProfile() {
+  const requestRevision = ++profileRequestRevision;
+  isLoading.value = true;
+  error.value = '';
   if (!props.user?.id || !props.jwtToken) {
     error.value = 'اطلاعات کاربر نامعتبر است.';
     isLoading.value = false;
@@ -580,11 +586,20 @@ async function loadProfile() {
   resetProjectUsersDirectoryState();
 
   try {
-    const response = await apiFetch(`/api/users-public/${props.user.id}`);
-
-    if (!response.ok) throw new Error('خطا در دریافت اطلاعات کاربر');
-    
-    profileData.value = await response.json();
+    const payload = await routeRequestJson<PublicUser>(`/api/users-public/${props.user.id}`, {
+      errorContext: {
+        surface: 'public-profile',
+        scope: 'page',
+        operation: 'initial-load',
+        resourceLabel: 'پروفایل',
+        fallbackMessage: 'خطا در دریافت اطلاعات کاربر',
+      },
+    });
+    if (requestRevision !== profileRequestRevision) return;
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload) || !Number.isInteger(Number(payload.id))) {
+      throw new Error('پاسخ پروفایل معتبر نیست.');
+    }
+    profileData.value = payload;
     addressDraft.value = profileData.value?.address || '';
     if (showPublicBlockAction.value) {
       await refreshPublicBlockUiState();
@@ -597,9 +612,12 @@ async function loadProfile() {
       await loadProjectUsersDirectory(true);
     }
   } catch (e: any) {
+    if (requestRevision !== profileRequestRevision) return;
     error.value = e.message || 'خطا در برقراری ارتباط';
   } finally {
-    isLoading.value = false;
+    if (requestRevision === profileRequestRevision) {
+      isLoading.value = false;
+    }
   }
 }
 
@@ -761,11 +779,15 @@ async function loadHistoryCommodityOptions() {
 
   historyCommodityOptionsLoading.value = true;
   try {
-    const response = await apiFetch('/api/commodities/');
-    const payload = await response.json().catch(() => null);
-    if (!response.ok) {
-      throw new Error(parseApiError(payload, 'خطا در دریافت فهرست کالاها'));
-    }
+    const payload = await routeRequestJson<unknown>('/api/commodities/', {
+      errorContext: {
+        surface: 'public-profile',
+        scope: 'section',
+        operation: 'initial-load',
+        resourceLabel: 'فهرست کالاها',
+        fallbackMessage: 'خطا در دریافت فهرست کالاها',
+      },
+    });
     historyCommodityOptions.value = normalizeCommodityOptions(payload);
     historyCommodityOptionsLoaded.value = true;
   } catch (e) {
@@ -796,13 +818,24 @@ async function loadHistoryCounterpartyOptions() {
   historyCounterpartyError.value = '';
   try {
     const params = new URLSearchParams({ limit: '100' });
-    const response = await apiFetch(`/api/users-public/${targetProfileUserId}/project-users?${params.toString()}`);
-    const payload = await response.json().catch(() => null);
-    if (!response.ok) {
-      throw new Error(parseApiError(payload, 'خطا در دریافت اعضای پروژه'));
+    const payload = await routeRequestJson<unknown>(
+      `/api/users-public/${targetProfileUserId}/project-users?${params.toString()}`,
+      {
+        errorContext: {
+          surface: 'public-profile',
+          scope: 'section',
+          operation: 'initial-load',
+          resourceLabel: 'اعضای پروژه',
+          fallbackMessage: 'خطا در دریافت اعضای پروژه',
+        },
+      },
+    );
+
+    if (!Array.isArray(payload)) {
+      throw new Error('پاسخ اعضای پروژه معتبر نیست.');
     }
 
-    historyCounterpartyOptions.value = (Array.isArray(payload) ? payload as ProjectUserDirectoryEntry[] : [])
+    historyCounterpartyOptions.value = (payload as ProjectUserDirectoryEntry[])
       .filter((user) => Number(user.id) !== targetProfileUserId);
     historyCounterpartyOptionsLoaded.value = true;
   } catch (e: any) {
@@ -832,6 +865,7 @@ async function applyHistoryPreset(months: number) {
 }
 
 async function resetHistoryFilters() {
+  const hadLoadedHistory = hasLoadedHistoryOnce.value;
   historyActivePresetMonths.value = null;
   historyFromDate.value = '';
   historyToDate.value = '';
@@ -839,12 +873,9 @@ async function resetHistoryFilters() {
   historyTradeType.value = '';
   historySettlementType.value = '';
   historyCounterpartyUserId.value = null;
-  historyLoadedQueryKey.value = '';
   historyError.value = '';
   historyPaginationError.value = '';
-  historyNextCursor.value = null;
-  historyHasMore.value = false;
-  if (hasLoadedHistoryOnce.value) {
+  if (hadLoadedHistory) {
     await loadMutualTrades(true);
   }
 }
@@ -1021,9 +1052,6 @@ async function loadMutualTrades(force = false, append = false) {
   const validationError = validateHistoryFilters();
   if (validationError) {
     historyError.value = validationError;
-    mutualTrades.value = [];
-    historyNextCursor.value = null;
-    historyHasMore.value = false;
     if (!append) {
       isHistoryLoading.value = false;
       isHistoryLoadingMore.value = false;
@@ -1050,9 +1078,6 @@ async function loadMutualTrades(force = false, append = false) {
     isHistoryLoadingMore.value = false;
     historyError.value = '';
     historyPaginationError.value = '';
-    historyNextCursor.value = null;
-    historyHasMore.value = false;
-    mutualTrades.value = [];
   }
   try {
     const params = buildHistoryQueryParams();
@@ -1061,13 +1086,17 @@ async function loadMutualTrades(force = false, append = false) {
       params.set('cursor', historyNextCursor.value);
     }
     const endpoint = `${requestEndpoint}?${params.toString()}`;
-    const response = await apiFetch(endpoint, { retryNetwork: false });
-    const payload = await response.json().catch(() => null);
+    const payload = await routeRequestJson<any>(endpoint, {
+      errorContext: {
+        surface: 'public-profile',
+        scope: 'section',
+        operation: append ? 'load-more' : 'refresh',
+        resourceLabel: 'تاریخچه معاملات',
+        fallbackMessage: 'خطا در دریافت تاریخچه معاملات',
+      },
+    });
     const requestIsStale = requestRevision !== historyRequestRevision;
     if (requestIsStale) return;
-    if (!response.ok) {
-      throw new Error(parseApiError(payload, 'خطا در دریافت تاریخچه معاملات'));
-    }
     const items = Array.isArray(payload)
       ? payload as MutualTradePreview[]
       : Array.isArray(payload?.items)
@@ -1089,14 +1118,13 @@ async function loadMutualTrades(force = false, append = false) {
     if (requestIsStale) return;
     console.error("Failed to load history", e);
     if (append) {
-      historyPaginationError.value = e?.message === 'NetworkError'
+      historyPaginationError.value = e?.message === 'NetworkError' || e?.errorCode === 'NETWORK_ERROR'
         ? 'خطا در دریافت ادامه تاریخچه معاملات'
         : e?.message || 'خطا در دریافت ادامه تاریخچه معاملات';
     } else {
-      historyError.value = e?.message === 'NetworkError'
+      historyError.value = e?.message === 'NetworkError' || e?.errorCode === 'NETWORK_ERROR'
         ? 'خطا در دریافت تاریخچه معاملات'
         : e?.message || 'خطا در دریافت تاریخچه معاملات';
-      mutualTrades.value = [];
     }
   } finally {
     if (append && requestRevision === historyRequestRevision) {
@@ -1129,6 +1157,11 @@ async function loadProjectUsersDirectory(force = false) {
     return;
   }
 
+  const requestRevision = force
+    ? ++projectUsersRequestRevision
+    : projectUsersRequestRevision;
+  const requestOffset = isLoadMore ? projectUsersOffset.value : 0;
+
   if (isLoadMore) {
     projectUsersLoadingMore.value = true;
   } else {
@@ -1138,17 +1171,29 @@ async function loadProjectUsersDirectory(force = false) {
   try {
     const params = new URLSearchParams();
     params.set('limit', String(PROJECT_USERS_PAGE_SIZE));
-    params.set('offset', String(isLoadMore ? projectUsersOffset.value : 0));
+    params.set('offset', String(requestOffset));
     if (normalizedQuery) {
       params.set('q', normalizedQuery);
     }
-    const response = await apiFetch(`/api/users-public/${targetProfileUserId}/project-users?${params.toString()}`);
-    const payload = await response.json().catch(() => null);
-    if (!response.ok) {
-      throw new Error(parseApiError(payload, 'خطا در دریافت لیست کاربران پروژه'));
+    const payload = await routeRequestJson<unknown>(
+      `/api/users-public/${targetProfileUserId}/project-users?${params.toString()}`,
+      {
+        errorContext: {
+          surface: 'public-profile',
+          scope: 'section',
+          operation: isLoadMore ? 'load-more' : 'refresh',
+          resourceLabel: 'فهرست کاربران پروژه',
+          fallbackMessage: 'خطا در دریافت لیست کاربران پروژه',
+        },
+      },
+    );
+    if (requestRevision !== projectUsersRequestRevision) return;
+
+    if (!Array.isArray(payload)) {
+      throw new Error('پاسخ فهرست کاربران پروژه معتبر نیست.');
     }
 
-    const rawRows = Array.isArray(payload) ? payload as ProjectUserDirectoryEntry[] : [];
+    const rawRows = payload as ProjectUserDirectoryEntry[];
     const nextRows = rawRows.filter((user) => Number(user.id) !== targetProfileUserId);
     if (isLoadMore) {
       const existingIds = new Set(projectUsers.value.map((user) => user.id));
@@ -1162,12 +1207,15 @@ async function loadProjectUsersDirectory(force = false) {
     projectUsersLoaded.value = true;
     lastLoadedProjectUsersQuery.value = normalizedQuery;
     projectUsersHasMore.value = rawRows.length === PROJECT_USERS_PAGE_SIZE;
-    projectUsersOffset.value += rawRows.length;
+    projectUsersOffset.value = requestOffset + rawRows.length;
   } catch (e: any) {
+    if (requestRevision !== projectUsersRequestRevision) return;
     projectUsersError.value = e?.message || 'خطا در دریافت لیست کاربران پروژه';
   } finally {
-    projectUsersLoading.value = false;
-    projectUsersLoadingMore.value = false;
+    if (requestRevision === projectUsersRequestRevision) {
+      projectUsersLoading.value = false;
+      projectUsersLoadingMore.value = false;
+    }
   }
 }
 
@@ -1183,7 +1231,6 @@ function resetProjectUsersDirectoryState() {
 }
 
 async function submitProjectUsersSearch() {
-  resetProjectUsersDirectoryState();
   await loadProjectUsersDirectory(true);
 }
 
@@ -1612,7 +1659,7 @@ function handleHistoryPresetChipChange(value: string) {
 
     <AppErrorState v-else-if="error" title="دریافت پروفایل انجام نشد" :message="error" class="error-state">
       <template #actions>
-        <button class="retry-btn" @click="$emit('navigate', 'home')">بازگشت به خانه</button>
+        <button class="retry-btn" type="button" :disabled="isLoading" @click="loadProfile">تلاش دوباره</button>
       </template>
     </AppErrorState>
 
@@ -1726,19 +1773,22 @@ function handleHistoryPresetChipChange(value: string) {
               <AppButton type="submit" size="sm" :loading="projectUsersLoading">جستجو</AppButton>
             </form>
 
-            <p v-if="projectUsersError" class="admin-user-error">{{ projectUsersError }}</p>
-            <LoadingSkeleton v-else-if="projectUsersLoading" :count="3" :height="52" />
+            <p v-if="projectUsersError" class="admin-user-error" role="alert">
+              {{ projectUsersError }}
+              <span v-if="projectUsers.length > 0"> فهرست قبلی حفظ شده است.</span>
+            </p>
+            <LoadingSkeleton v-if="projectUsersLoading && projectUsers.length === 0" :count="3" :height="52" />
             <AppEmptyState
-              v-else-if="!hasLoadedProjectUsersOnce"
+              v-else-if="!projectUsersError && !hasLoadedProjectUsersOnce"
               title="فهرست همکاران آماده نمایش نیست"
               message="در صورت بروز مشکل می‌توانید دوباره جستجو یا بارگذاری را تکرار کنید."
             />
             <AppEmptyState
-              v-else-if="projectUsers.length === 0"
+              v-else-if="!projectUsersError && !projectUsersLoading && projectUsers.length === 0"
               title="همکاری برای نمایش پیدا نشد"
               :message="projectUsersQuery.trim() ? 'همکاری با این جستجو پیدا نشد.' : 'همکاری برای نمایش وجود ندارد.'"
             />
-            <template v-else>
+            <template v-if="projectUsers.length > 0">
               <div class="project-users-list">
                 <AppListItem
                   v-for="projectUser in projectUsers"

@@ -7,15 +7,17 @@ import {
   ChevronLeft,
 } from 'lucide-vue-next'
 import { useRoute, useRouter } from 'vue-router'
-import { apiFetch, forceLogout } from '../utils/auth'
+import { forceLogout } from '../utils/auth'
 import { openTelegramLink, requestTelegramLink } from '../services/telegramLink'
 import TelegramConnectPanel from '../components/account/TelegramConnectPanel.vue'
 import { useChatFileHandler } from '../composables/chat/useChatFileHandler'
-import { currentUserSummary, primeCurrentUserSummary } from '../utils/currentUser'
+import { currentUserSummary, loadCurrentUserSummary } from '../utils/currentUser'
+import { routeRequestJson } from '../utils/routeRequest'
 import {
   AppButton,
   AppCard,
   AppEmptyState,
+  AppErrorState,
   AppLoadingState,
   AppPage,
   AppPageHeader,
@@ -28,16 +30,25 @@ const router = useRouter()
 const route = useRoute()
 const { getCacheSize, clearFileCache } = useChatFileHandler()
 
-const cacheSize = ref('0.00 MB')
+const cacheSize = ref('نامشخص')
 const cacheBusy = ref(false)
 const cacheFeedback = ref<string | null>(null)
+const cacheSizeError = ref<string | null>(null)
 const sessions = ref<any[]>([])
 const sessionsLoading = ref(false)
 const sessionsError = ref<string | null>(null)
+const sessionActionError = ref<string | null>(null)
+const sessionActionReceipt = ref<string | null>(null)
+const sessionBusyIds = ref<string[]>([])
+const logoutAllBusy = ref(false)
 const telegramLinkBusy = ref(false)
 const telegramLinkError = ref<string | null>(null)
+const identityState = ref<'loading' | 'ready' | 'stale' | 'error'>('loading')
+const identityBusy = ref(false)
 
-const isAccountant = computed(() => currentUserSummary.value?.is_accountant === true)
+const hasIdentity = computed(() => currentUserSummary.value !== null)
+const isAccountant = computed(() => hasIdentity.value && currentUserSummary.value?.is_accountant === true)
+const canManageSessions = computed(() => hasIdentity.value && !isAccountant.value)
 const telegramConnected = computed(() => currentUserSummary.value?.telegram_linked === true)
 const showTelegramConnectSection = computed(() => (
   !isAccountant.value
@@ -66,10 +77,12 @@ const settingsDescription = computed(() => {
 })
 
 async function refreshCacheSize() {
+  cacheSizeError.value = null
   try {
     cacheSize.value = await getCacheSize()
   } catch {
-    cacheSize.value = '0.00 MB'
+    cacheSize.value = 'نامشخص'
+    cacheSizeError.value = 'محاسبه فضای اشغال‌شده ممکن نشد.'
   }
 }
 
@@ -96,19 +109,25 @@ async function fetchSessions() {
     sessionsError.value = null
     return
   }
+  if (sessionsLoading.value) return
   sessionsLoading.value = true
   sessionsError.value = null
   try {
-    const res = await apiFetch('/api/sessions/active')
-    if (res.ok) {
-      sessions.value = await res.json()
-      return
+    const payload = await routeRequestJson<unknown>('/api/sessions/active', {
+      errorContext: {
+        surface: 'settings',
+        scope: 'list',
+        operation: sessions.value.length > 0 ? 'background-refresh' : 'load-list',
+        preserveExistingData: sessions.value.length > 0,
+        fallbackMessage: 'دریافت نشست‌های فعال ناموفق بود.',
+      },
+    })
+    if (!Array.isArray(payload)) {
+      throw new Error('invalid_sessions_payload')
     }
-    sessions.value = []
-    sessionsError.value = 'دریافت نشست‌های فعال ناموفق بود.'
+    sessions.value = payload
   } catch (e) {
     console.error(e)
-    sessions.value = []
     sessionsError.value = 'دریافت نشست‌های فعال ناموفق بود.'
   } finally {
     sessionsLoading.value = false
@@ -116,22 +135,85 @@ async function fetchSessions() {
 }
 
 async function terminateSession(sessionId: string) {
+  if (sessionBusyIds.value.includes(sessionId) || logoutAllBusy.value) return
+  sessionBusyIds.value = [...sessionBusyIds.value, sessionId]
+  sessionActionError.value = null
+  sessionActionReceipt.value = null
   try {
-    const res = await apiFetch(`/api/sessions/${sessionId}`, { method: 'DELETE' })
-    if (res.ok) {
-      sessions.value = sessions.value.filter((session) => session.id !== sessionId)
+    const receipt = await routeRequestJson<{ detail?: unknown }>(`/api/sessions/${sessionId}`, {
+      method: 'DELETE',
+      errorContext: {
+        surface: 'settings',
+        scope: 'action',
+        operation: 'delete',
+        userInitiated: true,
+        fallbackMessage: 'پایان دادن نشست ممکن نشد.',
+      },
+    })
+    const detail = typeof receipt?.detail === 'string' ? receipt.detail.trim() : ''
+    if (!detail) {
+      throw new Error('invalid_terminate_session_receipt')
     }
-  } catch (e) {
-    console.error(e)
+    sessions.value = sessions.value.filter((session) => session.id !== sessionId)
+    sessionActionReceipt.value = detail
+  } catch {
+    sessionActionError.value = 'پایان دادن نشست ممکن نشد. فهرست فعلی تغییر نکرد.'
+  } finally {
+    sessionBusyIds.value = sessionBusyIds.value.filter((id) => id !== sessionId)
   }
 }
 
 async function logoutAll() {
+  if (logoutAllBusy.value || sessionBusyIds.value.length > 0) return
+  logoutAllBusy.value = true
+  sessionActionError.value = null
+  sessionActionReceipt.value = null
   try {
-    await apiFetch('/api/sessions/logout-all', { method: 'POST' })
+    const receipt = await routeRequestJson<{ detail?: unknown }>('/api/sessions/logout-all', {
+      method: 'POST',
+      errorContext: {
+        surface: 'settings',
+        scope: 'action',
+        operation: 'delete',
+        userInitiated: true,
+        fallbackMessage: 'خروج از همه نشست‌ها ممکن نشد.',
+      },
+    })
+    const detail = typeof receipt?.detail === 'string' ? receipt.detail.trim() : ''
+    if (!detail) {
+      throw new Error('invalid_logout_all_receipt')
+    }
+    sessionActionReceipt.value = detail
     await fetchSessions()
-  } catch (e) {
-    console.error(e)
+  } catch {
+    sessionActionError.value = 'خروج از همه نشست‌ها ممکن نشد. فهرست فعلی حفظ شده است.'
+  } finally {
+    logoutAllBusy.value = false
+  }
+}
+
+function isSessionBusy(sessionId: string) {
+  return sessionBusyIds.value.includes(sessionId)
+}
+
+async function loadIdentityAndSessions() {
+  if (identityBusy.value) return
+  identityBusy.value = true
+  if (!currentUserSummary.value) identityState.value = 'loading'
+  try {
+    const result = await loadCurrentUserSummary({ force: true })
+    if (!result.user) {
+      identityState.value = 'error'
+      return
+    }
+    identityState.value = result.state === 'stale' ? 'stale' : 'ready'
+    if (result.user.is_accountant !== true) {
+      await fetchSessions()
+    }
+  } catch {
+    identityState.value = currentUserSummary.value ? 'stale' : 'error'
+  } finally {
+    identityBusy.value = false
   }
 }
 
@@ -139,7 +221,16 @@ async function logout() {
   const currentSession = sessions.value.find((session) => session.is_current)
   if (currentSession) {
     try {
-      await apiFetch(`/api/sessions/${currentSession.id}`, { method: 'DELETE' })
+      await routeRequestJson<{ detail?: unknown }>(`/api/sessions/${currentSession.id}`, {
+        method: 'DELETE',
+        errorContext: {
+          surface: 'settings',
+          scope: 'action',
+          operation: 'delete',
+          userInitiated: true,
+          fallbackMessage: 'پایان نشست فعلی ممکن نشد.',
+        },
+      })
     } catch (e) {
       console.error(e)
     }
@@ -166,18 +257,14 @@ async function connectTelegram() {
 }
 
 onMounted(() => {
-  void primeCurrentUserSummary(true).finally(() => {
-    if (!isAccountant.value) {
-      void fetchSessions()
-    }
-  })
+  void loadIdentityAndSessions()
   void refreshCacheSize()
 })
 
 watch(
   () => [route.name, route.query.section],
   () => {
-    if (!isAccountant.value && routeSection.value === 'sessions' && sessions.length === 0 && !sessionsLoading.value) {
+    if (canManageSessions.value && routeSection.value === 'sessions' && sessions.value.length === 0 && !sessionsLoading.value) {
       void fetchSessions()
     }
   },
@@ -199,8 +286,33 @@ watch(
         </template>
       </AppPageHeader>
 
+      <AppLoadingState
+        v-if="identityState === 'loading' && !hasIdentity"
+        class="settings-identity-loading"
+        label="در حال بررسی دسترسی‌های حساب"
+      />
+      <AppErrorState
+        v-else-if="identityState === 'error' && !hasIdentity"
+        class="settings-identity-error"
+        title="دسترسی‌های حساب مشخص نشد"
+        message="تا دریافت پاسخ معتبر، نشست‌ها و اقدام‌های حساب نمایش داده نمی‌شوند."
+      >
+        <template #actions>
+          <AppButton type="button" class="settings-identity-retry" :loading="identityBusy" @click="loadIdentityAndSessions">تلاش دوباره</AppButton>
+        </template>
+      </AppErrorState>
       <WorkspaceNotice
-        v-if="isAccountant"
+        v-if="identityState === 'stale' && hasIdentity"
+        class="settings-identity-stale"
+        tone="warning"
+        title="اطلاعات حساب به‌روز نشد"
+        message="دسترسی‌های ذخیره‌شده قبلی حفظ شده‌اند."
+      >
+        <AppButton type="button" size="sm" variant="secondary" :loading="identityBusy" @click="loadIdentityAndSessions">به‌روزرسانی</AppButton>
+      </WorkspaceNotice>
+
+      <WorkspaceNotice
+        v-if="hasIdentity && isAccountant"
         class="settings-role-notice"
         tone="warning"
         title="نشست و خروج برای حسابدار محدود است"
@@ -223,29 +335,63 @@ watch(
       </AppSectionCard>
 
       <AppSectionCard
-        v-if="!isAccountant"
+        v-if="canManageSessions"
         class="settings-section-card"
         title="نشست‌های فعال"
         description="دستگاه‌های فعال، نشست جاری و پایان دادن به نشست‌های دیگر را از این بخش مدیریت کنید."
         :tone="routeSection === 'sessions' ? 'primary' : 'neutral'"
       >
-        <AppLoadingState v-if="sessionsLoading" label="در حال دریافت نشست‌ها" />
-
         <WorkspaceNotice
-          v-else-if="sessionsError"
+          v-if="sessionActionError"
+          class="session-action-feedback"
           tone="danger"
-          title="خطا در دریافت نشست‌ها"
-          :message="sessionsError"
+          role="alert"
+          title="اقدام انجام نشد"
+          :message="sessionActionError"
+        />
+        <WorkspaceNotice
+          v-else-if="sessionActionReceipt"
+          class="session-action-feedback"
+          tone="success"
+          title="اقدام انجام شد"
+          :message="sessionActionReceipt"
         />
 
+        <AppLoadingState v-if="sessionsLoading && sessions.length === 0" label="در حال دریافت نشست‌ها" />
+
+        <AppErrorState
+          v-if="sessionsError && sessions.length === 0"
+          class="sessions-load-error"
+          title="خطا در دریافت نشست‌ها"
+          :message="sessionsError"
+        >
+          <template #actions>
+            <AppButton type="button" size="sm" variant="secondary" class="sessions-retry" :loading="sessionsLoading" @click="fetchSessions">
+              تلاش دوباره
+            </AppButton>
+          </template>
+        </AppErrorState>
+        <WorkspaceNotice
+          v-else-if="sessionsError"
+          class="sessions-refresh-error"
+          tone="warning"
+          role="alert"
+          title="به‌روزرسانی نشست‌ها انجام نشد"
+          message="فهرست قبلی حفظ شده است."
+        >
+          <AppButton type="button" size="sm" variant="secondary" class="sessions-retry" :loading="sessionsLoading" @click="fetchSessions">
+            تلاش دوباره
+          </AppButton>
+        </WorkspaceNotice>
+
         <AppEmptyState
-          v-else-if="sessions.length === 0"
+          v-if="!sessionsLoading && !sessionsError && sessions.length === 0"
           title="نشست فعالی یافت نشد"
           message="در حال حاضر دستگاه دیگری برای مدیریت نمایش داده نمی‌شود."
           tone="info"
         />
 
-        <div v-else class="sessions-list">
+        <div v-if="sessions.length > 0" class="sessions-list">
           <AppCard v-for="session in sessions" :key="session.id" class="session-card">
             <div class="session-card__main">
               <div class="session-card__identity">
@@ -269,6 +415,8 @@ watch(
                 class="session-delete-btn"
                 variant="ghost"
                 size="sm"
+                :loading="isSessionBusy(session.id)"
+                :disabled="logoutAllBusy"
                 @click="terminateSession(session.id)"
               >
                 <template #icon>
@@ -286,6 +434,8 @@ watch(
               type="button"
               variant="danger"
               block
+              :loading="logoutAllBusy"
+              :disabled="sessionBusyIds.length > 0"
               @click="logoutAll"
             >
               خروج از همه نشست‌ها
@@ -309,6 +459,15 @@ watch(
             <strong class="storage-value" dir="ltr">{{ cacheSize }}</strong>
           </div>
 
+          <WorkspaceNotice
+            v-if="cacheSizeError"
+            class="storage-size-error"
+            tone="danger"
+            role="alert"
+            title="حجم حافظه نامشخص است"
+            :message="cacheSizeError"
+          />
+
           <AppButton
             type="button"
             class="storage-clear-btn"
@@ -329,7 +488,7 @@ watch(
       </AppSectionCard>
 
       <AppSectionCard
-        v-if="!isAccountant"
+        v-if="canManageSessions"
         class="settings-section-card"
         title="خروج از حساب"
         description="نشست فعلی را ببندید و از حساب کاربری خارج شوید."

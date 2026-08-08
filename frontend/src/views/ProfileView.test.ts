@@ -66,7 +66,11 @@ describe('ProfileView.vue', () => {
     })
     await flushPromises()
 
-    expect(apiFetchMock).toHaveBeenCalledWith('/api/auth/me')
+    expect(apiFetchMock).toHaveBeenCalledWith('/api/auth/me', expect.objectContaining({
+      retryNetwork: false,
+      signal: expect.any(AbortSignal),
+      trackConnectionState: false,
+    }))
     expect(wrapper.find('.public-profile-stub').exists()).toBe(true)
     expect(wrapper.get('.stub-user').text()).toBe('ali')
     expect(wrapper.get('.stub-viewer').text()).toBe('42')
@@ -125,9 +129,13 @@ describe('ProfileView.vue', () => {
     expect(routerPushMock).toHaveBeenNthCalledWith(6, { name: 'account' })
   })
 
-  it('keeps the loading fallback and logs when loading the current profile fails', async () => {
-    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
-    apiFetchMock.mockRejectedValue(new Error('profile fetch failed'))
+  it('leaves loading for an explicit error and retries the current profile request', async () => {
+    apiFetchMock
+      .mockRejectedValueOnce(new Error('profile fetch failed'))
+      .mockResolvedValueOnce(makeResponse({
+        id: 91,
+        account_name: 'retried-user',
+      }))
 
     const wrapper = mount(ProfileView, {
       global: {
@@ -141,9 +149,14 @@ describe('ProfileView.vue', () => {
     await flushPromises()
 
     expect(wrapper.find('.public-profile-stub').exists()).toBe(false)
-    expect(wrapper.find('.loading-container').exists()).toBe(true)
-    expect(errorSpy).toHaveBeenCalledWith(expect.any(Error))
+    expect(wrapper.find('.loading-container').exists()).toBe(false)
+    expect(wrapper.get('.profile-load-error').text()).toContain('پروفایل بارگذاری نشد')
 
-    errorSpy.mockRestore()
+    await wrapper.get('.profile-load-retry').trigger('click')
+    await flushPromises()
+
+    expect(apiFetchMock).toHaveBeenCalledTimes(2)
+    expect(wrapper.find('.profile-load-error').exists()).toBe(false)
+    expect(wrapper.find('.public-profile-stub').exists()).toBe(true)
   })
 })

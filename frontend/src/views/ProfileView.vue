@@ -2,8 +2,8 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import PublicProfile from '../components/PublicProfile.vue'
-import { AppLoadingState, AppPage } from '../components/ui'
-import { apiFetch } from '../utils/auth'
+import { AppButton, AppErrorState, AppLoadingState, AppPage } from '../components/ui'
+import { routeRequestJson } from '../utils/routeRequest'
 
 const router = useRouter()
 const route = useRoute()
@@ -15,6 +15,9 @@ const initialOwnerWorkspace = computed<'customers' | 'accountants' | null>(() =>
 })
 
 const currentUser = ref<{ id: number; account_name: string } | null>(null)
+const currentUserLoading = ref(true)
+const currentUserError = ref('')
+let currentUserRequestInFlight = false
 
 function handleNavigate(view: string, payload?: any) {
   if (view === 'settings') {
@@ -40,20 +43,38 @@ function handleNavigate(view: string, payload?: any) {
   }
 }
 
-onMounted(async () => {
+async function loadCurrentUser() {
+  if (currentUserRequestInFlight) return
+  currentUserRequestInFlight = true
+  currentUserLoading.value = true
+  currentUserError.value = ''
   try {
-    const response = await apiFetch('/api/auth/me')
-    if (response.ok) {
-      const data = await response.json()
-      currentUser.value = {
-        id: data.id,
-        account_name: data.account_name || data.full_name || 'کاربر'
-      }
+    const data = await routeRequestJson<any>('/api/auth/me', {
+      errorContext: {
+        surface: 'public-profile',
+        scope: 'page',
+        operation: 'initial-load',
+        fallbackMessage: 'دریافت پروفایل ممکن نشد.',
+      },
+    })
+    const id = Number(data?.id)
+    if (!Number.isInteger(id) || id <= 0) {
+      throw new Error('current_user_payload_invalid')
     }
-  } catch (e) {
-    console.error(e)
+
+    currentUser.value = {
+      id,
+      account_name: data.account_name || data.full_name || 'کاربر'
+    }
+  } catch {
+    currentUserError.value = 'دریافت پروفایل ممکن نشد. لطفاً دوباره تلاش کنید.'
+  } finally {
+    currentUserLoading.value = false
+    currentUserRequestInFlight = false
   }
-})
+}
+
+onMounted(loadCurrentUser)
 </script>
 
 <template>
@@ -69,7 +90,17 @@ onMounted(async () => {
         :initialOwnerWorkspace="initialOwnerWorkspace"
         @navigate="handleNavigate"
       />
-      <div v-else class="loading-container">
+      <AppErrorState
+        v-else-if="currentUserError"
+        class="profile-load-error"
+        title="پروفایل بارگذاری نشد"
+        :message="currentUserError"
+      >
+        <template #actions>
+          <AppButton type="button" class="profile-load-retry" @click="loadCurrentUser">تلاش دوباره</AppButton>
+        </template>
+      </AppErrorState>
+      <div v-else-if="currentUserLoading" class="loading-container">
         <AppLoadingState label="در حال دریافت پروفایل" />
       </div>
     </div>

@@ -5,19 +5,24 @@ import { useRouter } from 'vue-router'
 import { Bell, ChevronLeft, Database, Settings, Smartphone, UserRound } from 'lucide-vue-next'
 import {
   AppActionCard,
+  AppButton,
+  AppErrorState,
   AppIconButton,
+  AppLoadingState,
   AppPage,
   AppSectionCard,
   AppStatusBadge,
 } from '../components/ui'
 import { WorkspaceNotice } from '../components/workspace'
-import { currentUserSummary, primeCurrentUserSummary } from '../utils/currentUser'
+import { currentUserSummary, loadCurrentUserSummary } from '../utils/currentUser'
 import { openTelegramLink, requestTelegramLink } from '../services/telegramLink'
 import TelegramConnectPanel from '../components/account/TelegramConnectPanel.vue'
 
 const router = useRouter()
 const telegramLinkBusy = ref(false)
 const telegramLinkError = ref<string | null>(null)
+const identityState = ref<'loading' | 'ready' | 'stale' | 'error'>('loading')
+const identityBusy = ref(false)
 
 interface AccountAction {
   key: string
@@ -28,16 +33,26 @@ interface AccountAction {
 }
 
 const user = computed(() => currentUserSummary.value)
+const hasIdentity = computed(() => user.value !== null)
 const isAccountant = computed(() => currentUserSummary.value?.is_accountant === true)
 const displayName = computed(() => (
   user.value?.customer_management_name?.trim()
   || user.value?.full_name?.trim()
   || user.value?.account_name?.trim()
-  || 'کاربر'
+  || ''
 ))
 const isInactiveAccount = computed(() => user.value?.account_status === 'inactive')
-const accountStatusLabel = computed(() => (isInactiveAccount.value ? 'غیرفعال' : 'فعال'))
-const accountStatusTone = computed(() => (isInactiveAccount.value ? 'danger' : 'success'))
+const isActiveAccount = computed(() => user.value?.account_status === 'active')
+const accountStatusLabel = computed(() => {
+  if (isInactiveAccount.value) return 'غیرفعال'
+  if (isActiveAccount.value) return 'فعال'
+  return 'نامشخص'
+})
+const accountStatusTone = computed(() => {
+  if (isInactiveAccount.value) return 'danger'
+  if (isActiveAccount.value) return 'success'
+  return 'neutral'
+})
 const telegramConnected = computed(() => currentUserSummary.value?.telegram_linked === true)
 const showTelegramConnectPanel = computed(() => (
   !isAccountant.value
@@ -47,7 +62,7 @@ const showTelegramConnectPanel = computed(() => (
   )
 ))
 
-const profileActions = computed<AccountAction[]>(() => [
+const profileActions = computed<AccountAction[]>(() => hasIdentity.value ? [
   {
     key: 'profile',
     title: 'پروفایل من',
@@ -62,9 +77,10 @@ const profileActions = computed<AccountAction[]>(() => [
     icon: Settings,
     action: () => router.push({ name: 'account-storage' }),
   },
-])
+] : [])
 
 const securityActions = computed<AccountAction[]>(() => {
+  if (!hasIdentity.value) return []
   const actions: AccountAction[] = []
 
   if (!isAccountant.value) {
@@ -88,7 +104,7 @@ const securityActions = computed<AccountAction[]>(() => {
   return actions
 })
 
-const notificationActions = computed<AccountAction[]>(() => [
+const notificationActions = computed<AccountAction[]>(() => hasIdentity.value ? [
   {
     key: 'notifications',
     title: 'اعلان‌ها',
@@ -96,7 +112,7 @@ const notificationActions = computed<AccountAction[]>(() => [
     icon: Bell,
     action: () => router.push({ name: 'account-notifications' }),
   },
-])
+] : [])
 
 const sessionsRestriction = computed(() => {
   if (!isAccountant.value) return null
@@ -124,14 +140,55 @@ async function connectTelegram() {
   }
 }
 
-onMounted(() => {
-  void primeCurrentUserSummary(true)
-})
+async function refreshIdentity() {
+  if (identityBusy.value) return
+  identityBusy.value = true
+  if (!user.value) identityState.value = 'loading'
+  try {
+    const result = await loadCurrentUserSummary({ force: true })
+    if (!result.user) {
+      identityState.value = 'error'
+      return
+    }
+    identityState.value = result.state === 'stale' ? 'stale' : 'ready'
+  } catch {
+    identityState.value = user.value ? 'stale' : 'error'
+  } finally {
+    identityBusy.value = false
+  }
+}
+
+onMounted(refreshIdentity)
 </script>
 
 <template>
   <div class="ds-page account-hub-page">
     <AppPage>
+      <AppLoadingState
+        v-if="identityState === 'loading' && !user"
+        class="account-identity-loading"
+        label="در حال دریافت اطلاعات حساب"
+      />
+      <AppErrorState
+        v-else-if="identityState === 'error' && !user"
+        class="account-identity-error"
+        title="حساب بارگذاری نشد"
+        message="وضعیت و دسترسی‌های حساب تا پاسخ معتبر دریافت نشود نمایش داده نمی‌شود."
+      >
+        <template #actions>
+          <AppButton type="button" class="account-identity-retry" :loading="identityBusy" @click="refreshIdentity">تلاش دوباره</AppButton>
+        </template>
+      </AppErrorState>
+      <template v-else-if="user">
+      <WorkspaceNotice
+        v-if="identityState === 'stale'"
+        class="account-identity-stale"
+        tone="warning"
+        title="اطلاعات حساب به‌روز نشد"
+        message="نسخه ذخیره‌شده قبلی نمایش داده شده است."
+      >
+        <AppButton type="button" size="sm" variant="secondary" :loading="identityBusy" @click="refreshIdentity">به‌روزرسانی</AppButton>
+      </WorkspaceNotice>
       <header class="account-compact-header" aria-label="حساب کاربری">
         <AppIconButton type="button" class="account-return-control" label="بازگشت" size="sm" @click="router.back()">
           <ChevronLeft :size="18" />
@@ -224,6 +281,7 @@ onMounted(() => {
         </div>
       </AppSectionCard>
 
+      </template>
     </AppPage>
   </div>
 </template>

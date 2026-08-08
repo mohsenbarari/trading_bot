@@ -99,9 +99,9 @@ describe('SettingsView.vue', () => {
         })
       }
       if (path === '/api/sessions/active') return responseOf(sessionsFixture)
-      if (path === '/api/sessions/session-secondary' && options?.method === 'DELETE') return responseOf({})
-      if (path === '/api/sessions/logout-all' && options?.method === 'POST') return responseOf({})
-      if (path === '/api/sessions/session-current' && options?.method === 'DELETE') return responseOf({})
+      if (path === '/api/sessions/session-secondary' && options?.method === 'DELETE') return responseOf({ detail: 'نشست با موفقیت پایان یافت' })
+      if (path === '/api/sessions/logout-all' && options?.method === 'POST') return responseOf({ detail: '۱ نشست پایان یافت' })
+      if (path === '/api/sessions/session-current' && options?.method === 'DELETE') return responseOf({ detail: 'نشست با موفقیت پایان یافت' })
       return responseOf({})
     })
 
@@ -118,7 +118,11 @@ describe('SettingsView.vue', () => {
     const wrapper = await mountSettingsView()
     await flushPromises()
 
-    expect(settingsViewMocks.apiFetchMock).toHaveBeenCalledWith('/api/sessions/active')
+    expect(settingsViewMocks.apiFetchMock).toHaveBeenCalledWith('/api/sessions/active', expect.objectContaining({
+      retryNetwork: false,
+      signal: expect.any(AbortSignal),
+      trackConnectionState: false,
+    }))
     expect(settingsViewMocks.getCacheSizeMock).toHaveBeenCalled()
 
     expect(wrapper.text()).toContain('Chrome')
@@ -126,12 +130,14 @@ describe('SettingsView.vue', () => {
 
     await wrapper.find('.logout-all-btn').trigger('click')
     await flushPromises()
-    expect(settingsViewMocks.apiFetchMock).toHaveBeenCalledWith('/api/sessions/logout-all', { method: 'POST' })
+    expect(settingsViewMocks.apiFetchMock).toHaveBeenCalledWith('/api/sessions/logout-all', expect.objectContaining({ method: 'POST' }))
+    expect(wrapper.get('.session-action-feedback').text()).toContain('۱ نشست پایان یافت')
 
     await wrapper.find('.session-delete-btn').trigger('click')
     await flushPromises()
-    expect(settingsViewMocks.apiFetchMock).toHaveBeenCalledWith('/api/sessions/session-secondary', { method: 'DELETE' })
+    expect(settingsViewMocks.apiFetchMock).toHaveBeenCalledWith('/api/sessions/session-secondary', expect.objectContaining({ method: 'DELETE' }))
     expect(wrapper.text()).not.toContain('Android')
+    expect(wrapper.get('.session-action-feedback').text()).toContain('نشست با موفقیت پایان یافت')
 
     await wrapper.find('.settings-return-control').trigger('click')
     expect(settingsViewMocks.backMock).toHaveBeenCalled()
@@ -240,7 +246,7 @@ describe('SettingsView.vue', () => {
     await wrapper.find('.logout-btn').trigger('click')
     await flushPromises()
 
-    expect(settingsViewMocks.apiFetchMock).toHaveBeenCalledWith('/api/sessions/session-current', { method: 'DELETE' })
+    expect(settingsViewMocks.apiFetchMock).toHaveBeenCalledWith('/api/sessions/session-current', expect.objectContaining({ method: 'DELETE' }))
     expect(settingsViewMocks.forceLogoutMock).toHaveBeenCalled()
 
     wrapper.unmount()
@@ -256,7 +262,8 @@ describe('SettingsView.vue', () => {
     const wrapper = await mountSettingsView()
     await flushPromises()
 
-    expect(wrapper.find('.storage-value').text()).toBe('0.00 MB')
+    expect(wrapper.find('.storage-value').text()).toBe('نامشخص')
+    expect(wrapper.get('.storage-size-error').text()).toContain('حجم حافظه نامشخص است')
 
     const clearButton = wrapper.find('.storage-clear-btn')
     await clearButton.trigger('click')
@@ -277,6 +284,9 @@ describe('SettingsView.vue', () => {
 
   it('still force-logs out when no current session exists', async () => {
     settingsViewMocks.apiFetchMock.mockImplementation(async (path: string, options?: RequestInit) => {
+      if (path === '/api/auth/me') {
+        return responseOf({ id: 10, role: 'عادی', account_name: 'settings-user', is_accountant: false })
+      }
       if (path === '/api/sessions/active') {
         return responseOf([
           {
@@ -305,6 +315,9 @@ describe('SettingsView.vue', () => {
   it('logs session loading failures on mount without breaking the page shell', async () => {
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
     settingsViewMocks.apiFetchMock.mockImplementation(async (path: string) => {
+      if (path === '/api/auth/me') {
+        return responseOf({ id: 10, role: 'عادی', account_name: 'settings-user', is_accountant: false })
+      }
       if (path === '/api/sessions/active') throw new Error('sessions-load-failed')
       return responseOf({})
     })
@@ -320,6 +333,9 @@ describe('SettingsView.vue', () => {
   it('logs terminate/logout failures but still forces local logout for the current session', async () => {
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
     settingsViewMocks.apiFetchMock.mockImplementation(async (path: string, options?: RequestInit) => {
+      if (path === '/api/auth/me') {
+        return responseOf({ id: 10, role: 'عادی', account_name: 'settings-user', is_accountant: false })
+      }
       if (path === '/api/sessions/active') return responseOf(sessionsFixture)
       if (path === '/api/sessions/logout-all' && options?.method === 'POST') throw new Error('logout-all-failed')
       if (path === '/api/sessions/session-secondary' && options?.method === 'DELETE') throw new Error('terminate-failed')
@@ -339,8 +355,129 @@ describe('SettingsView.vue', () => {
     await wrapper.find('.logout-btn').trigger('click')
     await flushPromises()
 
-    expect(errorSpy).toHaveBeenCalledTimes(3)
+    expect(wrapper.get('.session-action-feedback').text()).toContain('پایان دادن نشست ممکن نشد')
+    expect(errorSpy).toHaveBeenCalledTimes(1)
     expect(settingsViewMocks.forceLogoutMock).toHaveBeenCalledTimes(1)
     errorSpy.mockRestore()
+  })
+
+  it('does not request or expose sessions before current-user authority resolves', async () => {
+    let resolveIdentity: ((response: ReturnType<typeof responseOf>) => void) | null = null
+    settingsViewMocks.apiFetchMock.mockImplementation((path: string) => {
+      if (path === '/api/auth/me') {
+        return new Promise((resolve) => { resolveIdentity = resolve })
+      }
+      if (path === '/api/sessions/active') return Promise.resolve(responseOf(sessionsFixture))
+      return Promise.resolve(responseOf({}))
+    })
+
+    const wrapper = await mountSettingsView()
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(wrapper.find('.settings-identity-loading').exists()).toBe(true)
+    expect(wrapper.find('.logout-btn').exists()).toBe(false)
+    expect(settingsViewMocks.apiFetchMock.mock.calls.some(([path]) => path === '/api/sessions/active')).toBe(false)
+
+    if (!resolveIdentity) throw new Error('Expected identity resolver')
+    ;(resolveIdentity as (response: ReturnType<typeof responseOf>) => void)(responseOf({
+      id: 10,
+      role: 'عادی',
+      account_name: 'settings-user',
+      is_accountant: false,
+    }))
+    await flushPromises()
+
+    expect(settingsViewMocks.apiFetchMock.mock.calls.some(([path]) => path === '/api/sessions/active')).toBe(true)
+    expect(wrapper.text()).toContain('Chrome')
+  })
+
+  it('guards duplicate logout-all and per-session mutations and shows authoritative receipts', async () => {
+    let resolveLogoutAll: ((response: ReturnType<typeof responseOf>) => void) | null = null
+    let resolveTerminate: ((response: ReturnType<typeof responseOf>) => void) | null = null
+    settingsViewMocks.apiFetchMock.mockImplementation((path: string, options?: RequestInit) => {
+      if (path === '/api/auth/me') {
+        return Promise.resolve(responseOf({ id: 10, role: 'عادی', account_name: 'settings-user', is_accountant: false }))
+      }
+      if (path === '/api/sessions/active') return Promise.resolve(responseOf(sessionsFixture))
+      if (path === '/api/sessions/logout-all' && options?.method === 'POST') {
+        return new Promise((resolve) => { resolveLogoutAll = resolve })
+      }
+      if (path === '/api/sessions/session-secondary' && options?.method === 'DELETE') {
+        return new Promise((resolve) => { resolveTerminate = resolve })
+      }
+      return Promise.resolve(responseOf({}))
+    })
+
+    const wrapper = await mountSettingsView()
+    await flushPromises()
+
+    const logoutAllButton = wrapper.get('.logout-all-btn')
+    await logoutAllButton.trigger('click')
+    await logoutAllButton.trigger('click')
+    expect(settingsViewMocks.apiFetchMock.mock.calls.filter(([path]) => path === '/api/sessions/logout-all')).toHaveLength(1)
+
+    if (!resolveLogoutAll) throw new Error('Expected logout-all resolver')
+    ;(resolveLogoutAll as (response: ReturnType<typeof responseOf>) => void)(responseOf({ detail: '۱ نشست پایان یافت' }))
+    await flushPromises()
+    expect(wrapper.get('.session-action-feedback').text()).toContain('۱ نشست پایان یافت')
+
+    const terminateButton = wrapper.get('.session-delete-btn')
+    await terminateButton.trigger('click')
+    await terminateButton.trigger('click')
+    expect(settingsViewMocks.apiFetchMock.mock.calls.filter(([path]) => path === '/api/sessions/session-secondary')).toHaveLength(1)
+
+    if (!resolveTerminate) throw new Error('Expected terminate resolver')
+    ;(resolveTerminate as (response: ReturnType<typeof responseOf>) => void)(responseOf({ detail: 'نشست با موفقیت پایان یافت' }))
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('Android')
+    expect(wrapper.get('.session-action-feedback').text()).toContain('نشست با موفقیت پایان یافت')
+  })
+
+  it('keeps session rows on refresh failure and renders a compact stale notice', async () => {
+    let activeCalls = 0
+    settingsViewMocks.apiFetchMock.mockImplementation(async (path: string, options?: RequestInit) => {
+      if (path === '/api/auth/me') {
+        return responseOf({ id: 10, role: 'عادی', account_name: 'settings-user', is_accountant: false })
+      }
+      if (path === '/api/sessions/active') {
+        activeCalls += 1
+        if (activeCalls === 1) return responseOf(sessionsFixture)
+        throw new Error('sessions-refresh-failed')
+      }
+      if (path === '/api/sessions/logout-all' && options?.method === 'POST') {
+        return responseOf({ detail: '۱ نشست پایان یافت' })
+      }
+      return responseOf({})
+    })
+    vi.spyOn(console, 'error').mockImplementation(() => undefined)
+
+    const wrapper = await mountSettingsView()
+    await flushPromises()
+    await wrapper.get('.logout-all-btn').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('.sessions-refresh-error').text()).toContain('فهرست قبلی حفظ شده است')
+    expect(wrapper.text()).toContain('Chrome')
+    expect(wrapper.text()).toContain('Android')
+  })
+
+  it('does not apply a 2xx mutation without a valid receipt', async () => {
+    settingsViewMocks.apiFetchMock.mockImplementation(async (path: string, options?: RequestInit) => {
+      if (path === '/api/auth/me') {
+        return responseOf({ id: 10, role: 'عادی', account_name: 'settings-user', is_accountant: false })
+      }
+      if (path === '/api/sessions/active') return responseOf(sessionsFixture)
+      if (path === '/api/sessions/session-secondary' && options?.method === 'DELETE') return responseOf({})
+      return responseOf({})
+    })
+
+    const wrapper = await mountSettingsView()
+    await flushPromises()
+    await wrapper.get('.session-delete-btn').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('Android')
+    expect(wrapper.get('.session-action-feedback').text()).toContain('فهرست فعلی تغییر نکرد')
   })
 })

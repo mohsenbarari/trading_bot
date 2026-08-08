@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import type { Component } from 'vue'
 import { useRouter } from 'vue-router'
 import {
@@ -20,11 +20,15 @@ import {
 import {
   AppActionCard,
   AppButton,
+  AppErrorState,
+  AppLoadingState,
   AppStatusBadge,
 } from '../components/ui'
-import { currentUserSummary, isAdminRole, primeCurrentUserSummary } from '../utils/currentUser'
+import { currentUserSummary, isAdminRole, loadCurrentUserSummary } from '../utils/currentUser'
 
 const router = useRouter()
+const identityState = ref<'loading' | 'ready' | 'stale' | 'error'>('loading')
+const identityBusy = ref(false)
 
 interface OperationAction {
   key: string
@@ -38,11 +42,12 @@ interface OperationAction {
 }
 
 const user = computed(() => currentUserSummary.value)
+const hasIdentity = computed(() => user.value !== null)
 const userRole = computed(() => user.value?.role || '')
 const isAdmin = computed(() => isAdminRole(userRole.value))
 const isSuperAdmin = computed(() => userRole.value === 'مدیر ارشد')
 const isCustomer = computed(() => user.value?.is_customer === true)
-const canUseOwnerRelations = computed(() => !isCustomer.value)
+const canUseOwnerRelations = computed(() => hasIdentity.value && !isCustomer.value)
 
 const ownerActions = computed<OperationAction[]>(() => {
   if (!canUseOwnerRelations.value) return []
@@ -152,9 +157,25 @@ const managementNote = computed(() => {
 const relationAccessLabel = computed(() => (ownerActions.value.length ? `${ownerActions.value.length} مسیر` : 'غیرفعال'))
 const adminAccessLabel = computed(() => (adminActions.value.length ? `${adminActions.value.length} ابزار` : 'ندارد'))
 
-onMounted(() => {
-  void primeCurrentUserSummary()
-})
+async function refreshIdentity() {
+  if (identityBusy.value) return
+  identityBusy.value = true
+  if (!user.value) identityState.value = 'loading'
+  try {
+    const result = await loadCurrentUserSummary({ force: true })
+    if (!result.user) {
+      identityState.value = 'error'
+      return
+    }
+    identityState.value = result.state === 'stale' ? 'stale' : 'ready'
+  } catch {
+    identityState.value = user.value ? 'stale' : 'error'
+  } finally {
+    identityBusy.value = false
+  }
+}
+
+onMounted(refreshIdentity)
 </script>
 
 <template>
@@ -176,7 +197,33 @@ onMounted(() => {
         </AppButton>
       </template>
 
+      <AppLoadingState
+        v-if="identityState === 'loading' && !user"
+        class="operations-identity-loading"
+        label="در حال بررسی دسترسی‌ها"
+      />
+      <AppErrorState
+        v-else-if="identityState === 'error' && !user"
+        class="operations-identity-error"
+        title="دسترسی‌ها مشخص نشد"
+        message="بدون دریافت اطلاعات حساب، هیچ مسیری به‌عنوان مجاز نشان داده نمی‌شود."
+      >
+        <template #actions>
+          <AppButton type="button" class="operations-identity-retry" :loading="identityBusy" @click="refreshIdentity">تلاش دوباره</AppButton>
+        </template>
+      </AppErrorState>
+      <WorkspaceNotice
+        v-if="identityState === 'stale' && user"
+        class="operations-identity-stale"
+        tone="warning"
+        title="اطلاعات حساب به‌روز نشد"
+        message="دسترسی‌های ذخیره‌شده قبلی نمایش داده شده‌اند."
+      >
+        <AppButton type="button" size="sm" variant="secondary" :loading="identityBusy" @click="refreshIdentity">به‌روزرسانی</AppButton>
+      </WorkspaceNotice>
+
       <WorkspaceSection
+        v-if="user"
         title="روابط کاری"
         description="مدیریت مشتریان و حسابداران از مسیرهای اختصاصی همین بخش."
         tone="primary"
@@ -211,6 +258,7 @@ onMounted(() => {
       </WorkspaceSection>
 
       <WorkspaceSection
+        v-if="user"
         title="مدیریت"
         :description="managementNote || 'ابزارهای مدیریتی فقط برای نقش‌های مجاز نمایش داده می‌شوند.'"
         :tone="isAdmin ? 'success' : 'neutral'"
@@ -245,6 +293,7 @@ onMounted(() => {
 
       <template #aside>
         <WorkspaceSection
+          v-if="user"
           title="وضعیت دسترسی"
           description="فقط مسیرهای مجاز نقش فعلی شما در این بخش فعال است."
         >

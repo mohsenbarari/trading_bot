@@ -463,7 +463,8 @@ describe('PublicProfile.vue', () => {
     expect(wrapper.text()).not.toContain('نمایش پروفایل مالک اصلی')
   })
 
-  it('shows an invalid-user error when required props are missing and emits navigate on retry', async () => {
+  it('shows an invalid-user error and lets a corrected request retry in place', async () => {
+    const fetchMock = vi.mocked(fetch)
     const PublicProfile = (await import('./PublicProfile.vue')).default
     const wrapper = mount(PublicProfile, {
       props: {
@@ -483,8 +484,37 @@ describe('PublicProfile.vue', () => {
     await flushPromises()
 
     expect(wrapper.text()).toContain('اطلاعات کاربر نامعتبر است.')
+    await wrapper.setProps({
+      user: { id: 64, account_name: 'retry64' },
+      jwtToken: 'token',
+    })
+    fetchMock.mockResolvedValueOnce(makeResponse({
+      id: 64,
+      account_name: 'retry64',
+      avatar_file_id: null,
+      mobile_number: '09120000064',
+      address: 'تهران',
+      created_at_jalali: '۱۴۰۵/۰۵/۱۷',
+      trades_count: 0,
+      accountant_relations: [],
+    }))
+    fetchMock.mockResolvedValueOnce(makeResponse({
+      can_block: true,
+      can_block_now: true,
+      max_blocked: 10,
+      current_blocked: 0,
+      remaining: 10,
+      reason_code: null,
+      reason_message: null,
+    }))
+    fetchMock.mockResolvedValueOnce(makeResponse({ is_blocked_by_me: false }))
+
     await wrapper.get('.retry-btn').trigger('click')
-    expect(wrapper.emitted('navigate')?.[0]).toEqual(['home'])
+    await flushPromises()
+
+    expect(fetchMock.mock.calls.some(([url]) => url === '/api/users-public/64')).toBe(true)
+    expect(wrapper.find('.error-state').exists()).toBe(false)
+    expect(wrapper.text()).toContain('retry64')
   })
 
   it('shows the visitor action and navigates to chat for direct public profiles', async () => {
@@ -982,6 +1012,68 @@ describe('PublicProfile.vue', () => {
     ))).toBe(true)
     expect(wrapper.text()).not.toContain('دریافت کاربران پروژه ممکن نشد')
     expect(wrapper.text()).toContain('manager61')
+  })
+
+  it('keeps the previous project-user rows and search query when a new search fails', async () => {
+    const fetchMock = vi.mocked(fetch)
+    fetchMock.mockImplementation((input: RequestInfo | URL) => {
+      const url = typeof input === 'string'
+        ? input
+        : input instanceof URL
+          ? input.toString()
+          : input.url
+      if (url === '/api/users-public/44') {
+        return Promise.resolve(makeResponse({
+          id: 44,
+          account_name: 'owner44',
+          avatar_file_id: null,
+          mobile_number: '09127777777',
+          address: 'اصفهان',
+          created_at_jalali: '۱۴۰۵/۰۱/۰۵',
+          trades_count: 18,
+          accountant_relations: [],
+        }))
+      }
+      if (url.includes('/api/users-public/44/project-users?') && url.includes('q=new-query')) {
+        return Promise.resolve(makeResponse({ detail: 'جستجو موقتاً ممکن نیست' }, false, 400))
+      }
+      if (url.includes('/api/users-public/44/project-users?')) {
+        return Promise.resolve(makeResponse([{
+          id: 61,
+          account_name: 'preserved61',
+          mobile_number: '09121110000',
+        }]))
+      }
+      return defaultFetchResponse(url)
+    })
+
+    const PublicProfile = (await import('./PublicProfile.vue')).default
+    const wrapper = mount(PublicProfile, {
+      props: {
+        user: { id: 44, account_name: 'owner44' },
+        viewerUserId: 44,
+        apiBaseUrl: '',
+        jwtToken: 'token',
+      },
+      global: {
+        stubs: {
+          LoadingSkeleton: true,
+          OwnerCustomerManagerModal: true,
+          OwnerAccountantManagerModal: true,
+        },
+      },
+    })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('preserved61')
+    await wrapper.get('.project-users-search-input').setValue('new-query')
+    await wrapper.get('.project-users-search').trigger('submit')
+    await flushPromises()
+
+    expect(wrapper.get('.project-users-search-input').element).toHaveProperty('value', 'new-query')
+    expect(wrapper.text()).toContain('جستجو موقتاً ممکن نیست')
+    expect(wrapper.text()).toContain('فهرست قبلی حفظ شده است')
+    expect(wrapper.text()).toContain('preserved61')
   })
 
   it('hides the project users directory on customer self profiles', async () => {
@@ -2396,6 +2488,82 @@ describe('PublicProfile.vue', () => {
       typeof url === 'string' && url.includes('cursor=cursor-50')
     ))
     expect(cursorCalls).toHaveLength(2)
+  })
+
+  it('keeps loaded history and selected filters visible when a refresh fails', async () => {
+    const fetchMock = vi.mocked(fetch)
+    const preservedTrade = {
+      id: 501,
+      trade_number: 30501,
+      created_at: '2026-07-15T09:00:00Z',
+      quantity: 2,
+      commodity_name: 'سکه',
+      price: 125000,
+      trade_type: 'BUY',
+      settlement_type: 'cash',
+      offer_user_id: 80,
+      offer_user_name: 'seller80',
+      responder_user_id: 50,
+      responder_user_name: 'owner50',
+    }
+    fetchMock.mockImplementation((input: RequestInfo | URL) => {
+      const url = typeof input === 'string'
+        ? input
+        : input instanceof URL
+          ? input.toString()
+          : input.url
+      if (url === '/api/users-public/50') {
+        return Promise.resolve(makeResponse({
+          id: 50,
+          account_name: 'owner50',
+          avatar_file_id: null,
+          mobile_number: '09121112222',
+          address: 'قم',
+          created_at_jalali: '۱۴۰۵/۰۱/۱۰',
+          trades_count: 1,
+          accountant_relations: [],
+        }))
+      }
+      if (url.startsWith('/api/trades/with/50/page?') && url.includes('trade_type=sell')) {
+        return Promise.resolve(makeResponse({ detail: 'بازخوانی تاریخچه ناموفق بود' }, false, 400))
+      }
+      if (url.startsWith('/api/trades/with/50/page?')) {
+        return Promise.resolve(makeHistoryPage([preservedTrade]))
+      }
+      return defaultFetchResponse(url)
+    })
+
+    const PublicProfile = (await import('./PublicProfile.vue')).default
+    const wrapper = mount(PublicProfile, {
+      props: {
+        user: { id: 50, account_name: 'owner50' },
+        viewerUserId: 99,
+        apiBaseUrl: '',
+        jwtToken: 'token',
+      },
+      global: {
+        stubs: {
+          LoadingSkeleton: true,
+          OwnerAccountantManagerModal: true,
+        },
+      },
+    })
+    await flushPromises()
+
+    const tradeTypeSelect = wrapper.findAll('.history-filter-field select')[1]!
+    const applyButton = wrapper.findAll('button').find((node) => node.text().includes('اعمال فیلتر'))!
+    await tradeTypeSelect.setValue('buy')
+    await applyButton.trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('#30501')
+
+    await tradeTypeSelect.setValue('sell')
+    await applyButton.trigger('click')
+    await flushPromises()
+
+    expect(tradeTypeSelect.element).toHaveProperty('value', 'sell')
+    expect(wrapper.text()).toContain('بازخوانی تاریخچه ناموفق بود')
+    expect(wrapper.text()).toContain('#30501')
   })
 
   it('ignores an older history response after a newer filter request completes', async () => {

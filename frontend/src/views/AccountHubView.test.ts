@@ -8,7 +8,7 @@ const accountHubMocks = vi.hoisted(() => ({
   currentUserSummary: {
     value: null as null | Record<string, unknown>,
   },
-  primeCurrentUserSummaryMock: vi.fn(async () => null),
+  loadCurrentUserSummaryMock: vi.fn(),
   requestTelegramLinkMock: vi.fn(),
   openTelegramLinkMock: vi.fn(),
 }))
@@ -22,7 +22,7 @@ vi.mock('vue-router', () => ({
 
 vi.mock('../utils/currentUser', () => ({
   currentUserSummary: accountHubMocks.currentUserSummary,
-  primeCurrentUserSummary: accountHubMocks.primeCurrentUserSummaryMock,
+  loadCurrentUserSummary: accountHubMocks.loadCurrentUserSummaryMock,
 }))
 
 vi.mock('../services/telegramLink', () => ({
@@ -44,10 +44,16 @@ describe('AccountHubView.vue', () => {
   beforeEach(() => {
     accountHubMocks.routerPushMock.mockReset()
     accountHubMocks.routerBackMock.mockReset()
-    accountHubMocks.primeCurrentUserSummaryMock.mockClear()
+    accountHubMocks.loadCurrentUserSummaryMock.mockReset()
     accountHubMocks.requestTelegramLinkMock.mockReset()
     accountHubMocks.openTelegramLinkMock.mockReset()
     accountHubMocks.currentUserSummary.value = null
+    accountHubMocks.loadCurrentUserSummaryMock.mockImplementation(async () => ({
+      state: accountHubMocks.currentUserSummary.value ? 'ready' : 'error',
+      source: 'network',
+      user: accountHubMocks.currentUserSummary.value,
+      error: accountHubMocks.currentUserSummary.value ? null : new Error('identity unavailable'),
+    }))
   })
 
   it('renders account sections and routes normal users to profile, sessions, storage and notifications', async () => {
@@ -56,12 +62,13 @@ describe('AccountHubView.vue', () => {
       role: 'عادی',
       full_name: 'محمد',
       account_name: 'mohammad',
+      account_status: 'active',
       is_accountant: false,
     }
 
     const wrapper = await mountView()
 
-    expect(accountHubMocks.primeCurrentUserSummaryMock).toHaveBeenCalledWith(true)
+    expect(accountHubMocks.loadCurrentUserSummaryMock).toHaveBeenCalledWith({ force: true })
     expect(wrapper.findAll('.account-section-card')).toHaveLength(3)
     expect(wrapper.text()).not.toContain('مرکز حساب کاربری')
     expect(wrapper.text()).toContain('محمد')
@@ -172,5 +179,43 @@ describe('AccountHubView.vue', () => {
 
     await linkedWrapper.get('.telegram-connect-panel').trigger('click')
     expect(accountHubMocks.requestTelegramLinkMock).not.toHaveBeenCalled()
+  })
+
+  it('does not invent identity or active status when the account request fails', async () => {
+    accountHubMocks.loadCurrentUserSummaryMock.mockResolvedValueOnce({
+      state: 'error',
+      source: 'network',
+      user: null,
+      error: new Error('offline'),
+    })
+
+    const wrapper = await mountView()
+
+    expect(wrapper.find('.account-identity-error').exists()).toBe(true)
+    expect(wrapper.find('.account-compact-header').exists()).toBe(false)
+    expect(wrapper.findAll('.hub-action')).toHaveLength(0)
+    expect(wrapper.text()).not.toContain('فعال')
+  })
+
+  it('keeps cached account actions with a stale marker and never assumes a missing status is active', async () => {
+    accountHubMocks.currentUserSummary.value = {
+      id: 9,
+      role: 'عادی',
+      account_name: 'cached9',
+      account_status: null,
+      is_accountant: false,
+    }
+    accountHubMocks.loadCurrentUserSummaryMock.mockResolvedValueOnce({
+      state: 'stale',
+      source: 'cache',
+      user: accountHubMocks.currentUserSummary.value,
+      error: new Error('refresh failed'),
+    })
+
+    const wrapper = await mountView()
+
+    expect(wrapper.get('.account-identity-stale').text()).toContain('نسخه ذخیره‌شده قبلی')
+    expect(wrapper.get('.account-status-badge').text()).toBe('نامشخص')
+    expect(findAction(wrapper, 'نشست‌های فعال')?.exists()).toBe(true)
   })
 })
