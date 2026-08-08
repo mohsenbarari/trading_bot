@@ -3,6 +3,16 @@ import { flushPromises } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import AccountantWorkspaceView from './AccountantWorkspaceView.vue'
 
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise
+    reject = rejectPromise
+  })
+  return { promise, resolve, reject }
+}
+
 const accountantWorkspaceMocks = vi.hoisted(() => ({
   routerPushMock: vi.fn(),
   fetchOwnerAccountantRelationsMock: vi.fn(),
@@ -321,5 +331,93 @@ describe('AccountantWorkspaceView.vue', () => {
       duty_description: 'هماهنگی معاملات روزانه',
     })
     expect(wrapper.text()).toContain('شرح وظیفه ذخیره شد')
+  })
+
+  it('keeps a failed direct-detail load distinct from not-found and retries beside the failure', async () => {
+    accountantWorkspaceMocks.routeState.params = { relationId: '11' }
+    accountantWorkspaceMocks.fetchOwnerAccountantRelationsMock.mockRejectedValueOnce(new Error('ارتباط با سرور برقرار نشد.'))
+
+    const wrapper = mount(AccountantWorkspaceView)
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('دریافت پرونده حسابدار ممکن نشد')
+    expect(wrapper.text()).toContain('ارتباط با سرور برقرار نشد.')
+    expect(wrapper.text()).not.toContain('حسابدار پیدا نشد')
+    expect(wrapper.text()).not.toContain('هنوز حسابداری ثبت نشده است')
+
+    await wrapper.get('.accountant-detail-retry').trigger('click')
+    await flushPromises()
+
+    expect(accountantWorkspaceMocks.fetchOwnerAccountantRelationsMock).toHaveBeenCalledTimes(2)
+    expect(wrapper.text()).toContain('حسابدار تست')
+    expect(wrapper.text()).not.toContain('دریافت پرونده حسابدار ممکن نشد')
+  })
+
+  it('retains accountant list, selection, search, filter, and duty draft across refresh failure and retry', async () => {
+    accountantWorkspaceMocks.routeState.params = { relationId: '11' }
+    accountantWorkspaceMocks.routeState.query = { tab: 'duty' }
+
+    const wrapper = mount(AccountantWorkspaceView)
+    await flushPromises()
+    const vm = wrapper.vm as any
+    const snapshot = vm.accountantState.relations.value.map((relation: Record<string, unknown>) => ({ ...relation }))
+
+    await wrapper.get('input[aria-label="جستجوی حسابدار"]').setValue('حسابدار تست')
+    const activeFilter = wrapper.findAll('.ui-filter-chip').find((chip) => chip.text() === 'فعال')
+    await activeFilter!.trigger('click')
+    await wrapper.get('textarea').setValue('پیش‌نویس ذخیره‌نشده')
+
+    accountantWorkspaceMocks.fetchOwnerAccountantRelationsMock.mockRejectedValueOnce(new Error('نوسازی حسابداران ناموفق بود.'))
+    await vm.loadRelations()
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('نوسازی حسابداران ناموفق بود.')
+    expect(wrapper.text()).toContain('حسابدار تست')
+    expect((wrapper.get('input[aria-label="جستجوی حسابدار"]').element as HTMLInputElement).value).toBe('حسابدار تست')
+    expect(activeFilter!.attributes('aria-selected')).toBe('true')
+    expect((wrapper.get('textarea').element as HTMLTextAreaElement).value).toBe('پیش‌نویس ذخیره‌نشده')
+    expect(wrapper.text()).not.toContain('حسابدار پیدا نشد')
+
+    accountantWorkspaceMocks.fetchOwnerAccountantRelationsMock.mockResolvedValueOnce(snapshot)
+    await wrapper.get('.accountant-list-retry').trigger('click')
+    await flushPromises()
+
+    expect((wrapper.get('textarea').element as HTMLTextAreaElement).value).toBe('پیش‌نویس ذخیره‌نشده')
+    expect((wrapper.get('input[aria-label="جستجوی حسابدار"]').element as HTMLInputElement).value).toBe('حسابدار تست')
+    expect(wrapper.text()).not.toContain('نوسازی حسابداران ناموفق بود.')
+  })
+
+  it('keeps relation confirmation errors in-dialog and removes only the relation named by the expected receipt', async () => {
+    const wrapper = mount(AccountantWorkspaceView)
+    await flushPromises()
+    await wrapper.get('.accountant-pending-card .ui-button--danger').trigger('click')
+    const vm = wrapper.vm as any
+
+    accountantWorkspaceMocks.deleteOwnerAccountantRelationMock.mockResolvedValueOnce({
+      ...vm.accountantState.relations.value.find((relation: { id: number }) => relation.id === 12),
+      status: 'pending',
+    })
+    await vm.handleConfirmAction()
+    await flushPromises()
+
+    expect(wrapper.find('.ui-confirm-dialog').exists()).toBe(true)
+    expect(wrapper.get('.ui-confirm-dialog').text()).toContain('پاسخ لغو دعوت حسابدار معتبر نبود.')
+    expect(vm.detailSessionsError).toBe('')
+    expect(wrapper.text()).toContain('دعوت حسابدار')
+
+    const pendingDelete = deferred<Record<string, unknown>>()
+    accountantWorkspaceMocks.deleteOwnerAccountantRelationMock.mockReturnValueOnce(pendingDelete.promise)
+    const firstAttempt = vm.handleConfirmAction()
+    const duplicateAttempt = vm.handleConfirmAction()
+    expect(accountantWorkspaceMocks.deleteOwnerAccountantRelationMock).toHaveBeenCalledTimes(2)
+    expect(wrapper.find('.ui-confirm-dialog').exists()).toBe(true)
+
+    const relation = vm.accountantState.relations.value.find((item: { id: number }) => item.id === 12)
+    pendingDelete.resolve({ ...relation, status: 'revoked' })
+    await Promise.all([firstAttempt, duplicateAttempt])
+    await flushPromises()
+
+    expect(wrapper.find('.ui-confirm-dialog').exists()).toBe(false)
+    expect(vm.accountantState.relations.value.some((item: { id: number }) => item.id === 12)).toBe(false)
   })
 })

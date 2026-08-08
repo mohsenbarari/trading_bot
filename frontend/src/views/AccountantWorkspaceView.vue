@@ -41,7 +41,9 @@ import { invitationRelationLink, invitationSmsStatusMessage } from '../utils/inv
 const route = useRoute()
 const router = useRouter()
 const accountantState = useOwnerAccountants()
-const isLoading = ref(true)
+const isLoading = ref(false)
+const isRefreshingRelations = ref(false)
+const hasLoadedRelations = ref(false)
 const isMobile = ref(false)
 const error = ref('')
 const isCompatibilityManagerOpen = ref(false)
@@ -60,6 +62,8 @@ const confirmMessage = ref('')
 const confirmAction = ref<'terminate-session' | 'cancel-invitation' | 'unlink-relation' | null>(null)
 const confirmRelation = ref<AccountantRelation | null>(null)
 const confirmSession = ref<AccountantSessionSummary | null>(null)
+const isConfirmBusy = ref(false)
+const confirmError = ref('')
 const searchQuery = ref('')
 const relationFilter = ref('all')
 const detailSessions = ref<AccountantSessionSummary[]>([])
@@ -101,6 +105,7 @@ const activeRelation = computed(() => {
   if (id == null) return null
   return accountantState.relations.value.find((relation) => relation.id === id) ?? null
 })
+const activeRelationId = computed(() => activeRelation.value?.id ?? null)
 
 const activeCount = computed(() => accountantState.relations.value.filter((relation) => relation.status === 'active').length)
 const inactiveCount = computed(() => accountantState.relations.value.filter((relation) => relation.status !== 'active' && relation.status !== 'pending').length)
@@ -147,14 +152,20 @@ const visibleManageableRelations = computed(() => filteredRelations.value.filter
 const generatedGlobalAccountName = computed(() => accountantState.createForm.account_name.trim())
 
 async function loadRelations() {
-  isLoading.value = true
+  if (isLoading.value || isRefreshingRelations.value) return
+  const isInitialLoad = !hasLoadedRelations.value
+  if (isInitialLoad) isLoading.value = true
+  else isRefreshingRelations.value = true
   error.value = ''
   try {
-    accountantState.relations.value = await fetchOwnerAccountantRelations()
+    const relations = await fetchOwnerAccountantRelations()
+    accountantState.relations.value = relations
+    hasLoadedRelations.value = true
   } catch (err: any) {
     error.value = err?.message || 'دریافت لیست حسابداران ناموفق بود.'
   } finally {
     isLoading.value = false
+    isRefreshingRelations.value = false
   }
 }
 
@@ -269,6 +280,9 @@ async function createRelation() {
       mobile_number: accountantState.createForm.mobile_number,
       duty_description: normalizeDutyDescription(accountantState.createForm.duty_description),
     })
+    if (!created || !Number.isInteger(created.id) || created.id <= 0) {
+      throw new Error('پاسخ ایجاد حسابدار معتبر نبود.')
+    }
     accountantState.relations.value = [created, ...accountantState.relations.value.filter((item) => item.id !== created.id)]
     createNotice.value = invitationSmsStatusMessage(created.sms_status) || 'دعوت حسابدار با موفقیت ثبت شد.'
     resetCreateForm()
@@ -296,6 +310,9 @@ async function saveDuty() {
     const updated = await updateOwnerAccountantRelation(relation.id, {
       duty_description: normalizedDuty,
     })
+    if (!updated || updated.id !== relation.id) {
+      throw new Error('پاسخ ویرایش حسابدار معتبر نبود.')
+    }
     accountantState.relations.value = accountantState.relations.value.map((item) => (item.id === updated.id ? updated : item))
     seedEditForm(updated, { resetFeedback: false })
     dutyNotice.value = 'شرح وظیفه حسابدار ذخیره شد.'
@@ -327,9 +344,11 @@ function openConfirmDialog(
   relation: AccountantRelation,
   session: AccountantSessionSummary | null = null,
 ) {
+  if (isConfirmBusy.value) return
   confirmAction.value = kind
   confirmRelation.value = relation
   confirmSession.value = session
+  confirmError.value = ''
   confirmTitle.value = kind === 'terminate-session'
     ? 'پایان نشست'
     : kind === 'cancel-invitation'
@@ -344,42 +363,66 @@ function openConfirmDialog(
 }
 
 function closeConfirmDialog() {
+  if (isConfirmBusy.value) return
+  resetConfirmDialog()
+}
+
+function resetConfirmDialog() {
   isConfirmDialogOpen.value = false
   confirmAction.value = null
   confirmRelation.value = null
   confirmSession.value = null
+  confirmError.value = ''
 }
 
 async function handleConfirmAction() {
   const relation = confirmRelation.value
-  if (!relation || !confirmAction.value) return
+  if (!relation || !confirmAction.value || isConfirmBusy.value) return
   const action = confirmAction.value
   const session = confirmSession.value
-  closeConfirmDialog()
-
-  if (action === 'terminate-session' && session) {
-    detailSessionsError.value = ''
-    try {
-      await terminateOwnerAccountantSession(relation.id, session.id)
-      await loadDetailSessions(true)
-    } catch (err: any) {
-      detailSessionsError.value = err?.message || 'پایان دادن نشست حسابدار ناموفق بود.'
-    }
-    return
-  }
+  isConfirmBusy.value = true
+  confirmError.value = ''
 
   try {
-    await deleteOwnerAccountantRelation(
+    if (action === 'terminate-session') {
+      if (!session) throw new Error('نشست حسابدار برای پایان دادن در دسترس نیست.')
+      const receipt = await terminateOwnerAccountantSession(relation.id, session.id)
+      if (!receipt || receipt.terminated_session_id !== session.id) {
+        throw new Error('پاسخ پایان نشست حسابدار معتبر نبود.')
+      }
+      detailSessions.value = detailSessions.value
+        .filter((item) => item.id !== receipt.terminated_session_id)
+        .map((item) => ({
+          ...item,
+          is_primary: receipt.promoted_primary_session_id === item.id ? true : item.is_primary,
+        }))
+      isConfirmBusy.value = false
+      resetConfirmDialog()
+      return
+    }
+
+    const receipt = await deleteOwnerAccountantRelation(
       relation.id,
       action === 'cancel-invitation' ? 'لغو دعوت حسابدار ناموفق بود.' : 'قطع ارتباط حسابدار ناموفق بود.',
     )
+    const expectedStatus = action === 'cancel-invitation' ? 'revoked' : 'deleted'
+    if (!receipt || receipt.id !== relation.id || receipt.status !== expectedStatus) {
+      throw new Error(action === 'cancel-invitation'
+        ? 'پاسخ لغو دعوت حسابدار معتبر نبود.'
+        : 'پاسخ قطع ارتباط حسابدار معتبر نبود.')
+    }
+    const wasActiveRelation = activeRelation.value?.id === relation.id
     accountantState.relations.value = accountantState.relations.value.filter((item) => item.id !== relation.id)
-    if (activeRelation.value?.id === relation.id) {
+    isConfirmBusy.value = false
+    resetConfirmDialog()
+    if (wasActiveRelation) {
       backToList()
     }
   } catch (err: any) {
-    detailSessionsError.value = err?.message
+    confirmError.value = err?.message
       || (action === 'cancel-invitation' ? 'لغو دعوت حسابدار ناموفق بود.' : 'قطع ارتباط حسابدار ناموفق بود.')
+  } finally {
+    isConfirmBusy.value = false
   }
 }
 
@@ -438,13 +481,16 @@ watch(initialPanel, (panel) => {
   }
 }, { immediate: true })
 
-watch([activeRelation, detailTab], () => {
-  detailSessions.value = []
-  detailSessionsError.value = ''
+watch([activeRelationId, detailTab], ([nextRelationId], [previousRelationId]) => {
+  if (nextRelationId !== previousRelationId) {
+    detailSessions.value = []
+    detailSessionsError.value = ''
+  }
   refreshCurrentDetailTab()
 }, { flush: 'post' })
 
 watch(activeRelation, (relation, previousRelation) => {
+  if (relation?.id === previousRelation?.id) return
   seedEditForm(relation, {
     resetFeedback: relation?.id !== previousRelation?.id,
   })
@@ -506,7 +552,24 @@ onBeforeUnmount(() => {
           description="مشخصات، شرح وظیفه، نشست‌ها و اقدامات حساس در یک نمای یکپارچه."
         >
           <WorkspaceNotice
-            v-if="!activeRelation && !isLoading"
+            v-if="!hasLoadedRelations && error"
+            tone="danger"
+            role="alert"
+            title="دریافت پرونده حسابدار ممکن نشد"
+            :message="error"
+          >
+            <AppButton class="accountant-detail-retry" size="sm" variant="secondary" :loading="isLoading" @click="loadRelations">
+              تلاش دوباره
+            </AppButton>
+          </WorkspaceNotice>
+          <WorkspaceNotice
+            v-else-if="!hasLoadedRelations && isLoading"
+            tone="info"
+            title="در حال دریافت پرونده حسابدار"
+            message="لطفاً چند لحظه صبر کنید."
+          />
+          <WorkspaceNotice
+            v-else-if="!activeRelation && hasLoadedRelations"
             tone="warning"
             title="حسابدار پیدا نشد"
             message="این رابطه در لیست فعلی وجود ندارد یا هنوز همگام‌سازی نشده است."
@@ -592,11 +655,13 @@ onBeforeUnmount(() => {
                   نوسازی
                 </AppButton>
               </div>
-              <WorkspaceNotice v-if="detailSessionsError" tone="danger" title="خطا در دریافت نشست‌ها" :message="detailSessionsError" />
-              <WorkspaceNotice v-else-if="activeRelation.status !== 'active' || !activeRelation.accountant_user_id" tone="info" title="نشست قابل نمایش نیست" message="نشست‌ها فقط برای حسابدار فعال نمایش داده می‌شوند." />
-              <WorkspaceNotice v-else-if="detailSessionsLoading" tone="info" title="در حال دریافت نشست‌ها" message="لطفاً چند لحظه صبر کنید." />
-              <WorkspaceNotice v-else-if="!detailSessions.length" tone="info" title="نشست فعالی وجود ندارد" message="برای این حسابدار نشست فعالی ثبت نشده است." />
-              <template v-else>
+              <WorkspaceNotice v-if="detailSessionsError" tone="danger" role="alert" title="خطا در دریافت نشست‌ها" :message="detailSessionsError">
+                <AppButton size="sm" variant="secondary" :loading="detailSessionsLoading" @click="loadDetailSessions(true)">تلاش دوباره</AppButton>
+              </WorkspaceNotice>
+              <WorkspaceNotice v-if="activeRelation.status !== 'active' || !activeRelation.accountant_user_id" tone="info" title="نشست قابل نمایش نیست" message="نشست‌ها فقط برای حسابدار فعال نمایش داده می‌شوند." />
+              <WorkspaceNotice v-else-if="detailSessionsLoading && !detailSessions.length" tone="info" title="در حال دریافت نشست‌ها" message="لطفاً چند لحظه صبر کنید." />
+              <WorkspaceNotice v-else-if="!detailSessionsError && !detailSessions.length" tone="info" title="نشست فعالی وجود ندارد" message="برای این حسابدار نشست فعالی ثبت نشده است." />
+              <template v-if="detailSessions.length">
                 <AppListItem
                   v-for="session in detailSessions"
                   :key="session.id"
@@ -656,7 +721,7 @@ onBeforeUnmount(() => {
           description="جستجو، فیلتر و انتخاب حسابدار با دسترسی مستقیم به دعوت‌ها و پرونده‌های فعال."
         >
           <template #actions>
-            <div class="workspace-summary-badges">
+            <div v-if="hasLoadedRelations" class="workspace-summary-badges">
               <AppStatusBadge tone="primary">{{ accountantState.relations.value.length.toLocaleString('fa-IR') }} رابطه</AppStatusBadge>
               <AppStatusBadge v-if="activeCount" tone="success">{{ activeCount.toLocaleString('fa-IR') }} فعال</AppStatusBadge>
               <AppStatusBadge v-if="accountantState.pendingInvitationRelations.value.length" tone="warning">
@@ -682,30 +747,35 @@ onBeforeUnmount(() => {
           />
 
           <WorkspaceNotice
-            v-if="error"
+            v-if="error && (!relationIdNumber || hasLoadedRelations)"
             tone="danger"
+            role="alert"
             title="خطا در دریافت حسابداران"
             :message="error"
-          />
+          >
+            <AppButton class="accountant-list-retry" size="sm" variant="secondary" :loading="isLoading || isRefreshingRelations" @click="loadRelations">
+              تلاش دوباره
+            </AppButton>
+          </WorkspaceNotice>
           <WorkspaceNotice
-            v-else-if="isLoading"
+            v-if="isLoading && !relationIdNumber"
             tone="info"
             title="در حال دریافت حسابداران"
             message="لطفاً چند لحظه صبر کنید."
           />
           <WorkspaceNotice
-            v-else-if="!accountantState.orderedRelations.value.length"
+            v-if="hasLoadedRelations && !accountantState.orderedRelations.value.length"
             tone="info"
             title="هنوز حسابداری ثبت نشده است"
             message="برای شروع، از دکمه افزودن حسابدار استفاده کنید."
           />
           <WorkspaceNotice
-            v-else-if="!filteredRelations.length"
+            v-else-if="hasLoadedRelations && !filteredRelations.length"
             tone="info"
             title="نتیجه‌ای پیدا نشد"
             message="فیلتر یا عبارت جستجو را تغییر دهید."
           />
-          <AppMasterDetail v-else class="accountant-master-detail-grid">
+          <AppMasterDetail v-if="hasLoadedRelations && accountantState.orderedRelations.value.length" class="accountant-master-detail-grid">
             <template #master>
               <div class="workspace-relation-list">
                 <div v-if="visiblePendingRelations.length" class="accountant-list-group">
@@ -891,6 +961,9 @@ onBeforeUnmount(() => {
       :message="confirmMessage"
       :confirm-label="confirmAction === 'terminate-session' ? 'پایان نشست' : confirmAction === 'cancel-invitation' ? 'لغو دعوت' : 'قطع ارتباط'"
       :tone="confirmAction === 'terminate-session' ? 'warning' : 'danger'"
+      :busy="isConfirmBusy"
+      :error="confirmError"
+      :confirm-disabled="isConfirmBusy"
       @cancel="closeConfirmDialog"
       @confirm="handleConfirmAction"
     />

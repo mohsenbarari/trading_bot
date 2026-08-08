@@ -3,6 +3,16 @@ import { flushPromises } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import CustomerWorkspaceView from './CustomerWorkspaceView.vue'
 
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise
+    reject = rejectPromise
+  })
+  return { promise, resolve, reject }
+}
+
 const customerWorkspaceMocks = vi.hoisted(() => ({
   routerPushMock: vi.fn(),
   fetchOwnerCustomerRelationsMock: vi.fn(),
@@ -439,5 +449,108 @@ describe('CustomerWorkspaceView.vue', () => {
       max_daily_trades: 7,
     })
     expect(wrapper.text()).toContain('تغییرات ذخیره شد')
+  })
+
+  it('keeps a failed direct-detail load distinct from not-found and retries beside the failure', async () => {
+    customerWorkspaceMocks.routeState.params = { relationId: '11' }
+    customerWorkspaceMocks.fetchOwnerCustomerRelationsMock.mockRejectedValueOnce(new Error('ارتباط با سرور برقرار نشد.'))
+
+    const wrapper = mount(CustomerWorkspaceView)
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('دریافت پرونده مشتری ممکن نشد')
+    expect(wrapper.text()).toContain('ارتباط با سرور برقرار نشد.')
+    expect(wrapper.text()).not.toContain('مشتری پیدا نشد')
+    expect(wrapper.text()).not.toContain('هنوز مشتری ثبت نشده است')
+
+    await wrapper.get('.customer-detail-retry').trigger('click')
+    await flushPromises()
+
+    expect(customerWorkspaceMocks.fetchOwnerCustomerRelationsMock).toHaveBeenCalledTimes(2)
+    expect(wrapper.text()).toContain('مشتری تست')
+    expect(wrapper.text()).not.toContain('دریافت پرونده مشتری ممکن نشد')
+  })
+
+  it('retains the customer list, selected detail, search, filter, and unsaved draft across refresh failure and retry', async () => {
+    customerWorkspaceMocks.routeState.params = { relationId: '11' }
+    customerWorkspaceMocks.routeState.query = { tab: 'limits' }
+
+    const wrapper = mount(CustomerWorkspaceView)
+    await flushPromises()
+    const vm = wrapper.vm as any
+    const snapshot = vm.customerState.relations.value.map((relation: Record<string, unknown>) => ({ ...relation }))
+
+    await wrapper.get('input[aria-label="جستجوی مشتری"]').setValue('مشتری تست')
+    const activeFilter = wrapper.findAll('.ui-filter-chip').find((chip) => chip.text() === 'فعال')
+    await activeFilter!.trigger('click')
+    await wrapper.get('input[placeholder="مثلاً ۴"]').setValue('7')
+
+    customerWorkspaceMocks.fetchOwnerCustomerRelationsMock.mockRejectedValueOnce(new Error('نوسازی مشتریان ناموفق بود.'))
+    await vm.loadRelations()
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('نوسازی مشتریان ناموفق بود.')
+    expect(wrapper.text()).toContain('مشتری تست')
+    expect((wrapper.get('input[aria-label="جستجوی مشتری"]').element as HTMLInputElement).value).toBe('مشتری تست')
+    expect(activeFilter!.attributes('aria-selected')).toBe('true')
+    expect((wrapper.get('input[placeholder="مثلاً ۴"]').element as HTMLInputElement).value).toBe('7')
+    expect(wrapper.text()).not.toContain('مشتری پیدا نشد')
+
+    customerWorkspaceMocks.fetchOwnerCustomerRelationsMock.mockResolvedValueOnce(snapshot)
+    await wrapper.get('.customer-list-retry').trigger('click')
+    await flushPromises()
+
+    expect((wrapper.get('input[placeholder="مثلاً ۴"]').element as HTMLInputElement).value).toBe('7')
+    expect((wrapper.get('input[aria-label="جستجوی مشتری"]').element as HTMLInputElement).value).toBe('مشتری تست')
+    expect(wrapper.text()).not.toContain('نوسازی مشتریان ناموفق بود.')
+  })
+
+  it('keeps a sensitive session confirmation in context, suppresses duplicates, and closes only for the expected receipt', async () => {
+    customerWorkspaceMocks.routeState.params = { relationId: '11' }
+    customerWorkspaceMocks.routeState.query = { tab: 'sessions' }
+    const pendingTermination = deferred<never>()
+    customerWorkspaceMocks.terminateOwnerCustomerSessionMock.mockReturnValueOnce(pendingTermination.promise)
+
+    const wrapper = mount(CustomerWorkspaceView)
+    await flushPromises()
+    await wrapper.get('.customer-session-actions .ui-button').trigger('click')
+    const vm = wrapper.vm as any
+
+    const firstAttempt = vm.handleConfirmAction()
+    const duplicateAttempt = vm.handleConfirmAction()
+    expect(customerWorkspaceMocks.terminateOwnerCustomerSessionMock).toHaveBeenCalledTimes(1)
+    expect(wrapper.find('.ui-confirm-dialog').exists()).toBe(true)
+
+    pendingTermination.reject(new Error('پایان نشست انجام نشد.'))
+    await Promise.all([firstAttempt, duplicateAttempt])
+    await flushPromises()
+
+    expect(wrapper.find('.ui-confirm-dialog').exists()).toBe(true)
+    expect(wrapper.get('.ui-confirm-dialog').text()).toContain('پایان نشست انجام نشد.')
+    expect(vm.detailSessionsError).toBe('')
+    expect(wrapper.text()).toContain('Chrome')
+
+    customerWorkspaceMocks.terminateOwnerCustomerSessionMock.mockResolvedValueOnce({
+      detail: 'done',
+      terminated_session_id: 'different-session',
+      promoted_primary_session_id: null,
+    })
+    await vm.handleConfirmAction()
+    await flushPromises()
+    expect(wrapper.find('.ui-confirm-dialog').exists()).toBe(true)
+    expect(wrapper.get('.ui-confirm-dialog').text()).toContain('پاسخ پایان نشست مشتری معتبر نبود.')
+    expect(wrapper.text()).toContain('Chrome')
+
+    customerWorkspaceMocks.terminateOwnerCustomerSessionMock.mockResolvedValueOnce({
+      detail: 'done',
+      terminated_session_id: 'session-1',
+      promoted_primary_session_id: null,
+    })
+    await vm.handleConfirmAction()
+    await flushPromises()
+
+    expect(wrapper.find('.ui-confirm-dialog').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('Chrome')
+    expect(customerWorkspaceMocks.fetchOwnerCustomerSessionsMock).toHaveBeenCalledTimes(1)
   })
 })

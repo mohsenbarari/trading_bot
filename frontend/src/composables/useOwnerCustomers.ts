@@ -1,5 +1,5 @@
 import { computed, reactive, ref } from 'vue'
-import { apiFetch } from '../utils/auth'
+import { routeRequestJson } from '../utils/routeRequest'
 
 export type RelationStatus = 'pending' | 'active' | 'expired' | 'revoked' | 'deleted' | string
 export type CustomerTier = 'tier1' | 'tier2'
@@ -189,98 +189,143 @@ export function buildCustomerDetailUpdatePayload(
   return payload
 }
 
-async function parseJson(response: Response) {
-  return response.json().catch(() => null)
+interface OwnerCustomerRequestOptions {
+  signal?: AbortSignal | null
+  retryNetwork?: boolean
 }
 
-export async function fetchOwnerCustomerRelations(options: { retryNetwork?: boolean } = {}) {
-  const response = await apiFetch('/api/customers/owner-relations', {
-    retryNetwork: options.retryNetwork ?? true,
+function requireArrayPayload<T>(payload: unknown, fallback: string): T[] {
+  if (!Array.isArray(payload)) throw new Error(fallback)
+  return payload as T[]
+}
+
+export async function fetchOwnerCustomerRelations(options: OwnerCustomerRequestOptions = {}) {
+  const payload = await routeRequestJson<unknown>('/api/customers/owner-relations', {
+    ...(options.signal ? { signal: options.signal } : {}),
+    errorContext: {
+      scope: 'list',
+      operation: 'load-list',
+      fallbackMessage: 'دریافت لیست مشتریان ناموفق بود.',
+    },
   })
-  const payload = await parseJson(response)
-  if (!response.ok) {
-    throw new Error(parseOwnerRelationApiError(payload, 'دریافت لیست مشتریان ناموفق بود.'))
-  }
-  return Array.isArray(payload) ? payload as CustomerRelation[] : []
+  return requireArrayPayload<CustomerRelation>(payload, 'پاسخ لیست مشتریان معتبر نبود.')
 }
 
-export async function createOwnerCustomerRelation(payload: Record<string, unknown>) {
-  const response = await apiFetch('/api/customers/owner-relations', {
+export async function createOwnerCustomerRelation(
+  payload: Record<string, unknown>,
+  options: OwnerCustomerRequestOptions = {},
+) {
+  return routeRequestJson<CustomerRelation>('/api/customers/owner-relations', {
     method: 'POST',
     body: JSON.stringify(payload),
+    ...(options.signal ? { signal: options.signal } : {}),
+    errorContext: {
+      scope: 'form',
+      operation: 'submit',
+      userInitiated: true,
+      fallbackMessage: 'ایجاد مشتری ناموفق بود.',
+    },
   })
-  const responsePayload = await parseJson(response)
-  if (!response.ok) {
-    throw new Error(parseOwnerRelationApiError(responsePayload, 'ایجاد مشتری ناموفق بود.'))
-  }
-  return responsePayload as CustomerRelation
 }
 
 export async function updateOwnerCustomerRelation(
   relationId: number,
   payload: Record<string, unknown>,
-  options: { signal?: AbortSignal | null; retryNetwork?: boolean } = {},
+  options: OwnerCustomerRequestOptions = {},
 ) {
-  const response = await apiFetch(`/api/customers/owner-relations/${relationId}`, {
+  return routeRequestJson<CustomerRelation>(`/api/customers/owner-relations/${relationId}`, {
     method: 'PATCH',
     body: JSON.stringify(payload),
-    retryNetwork: options.retryNetwork ?? false,
     ...(options.signal ? { signal: options.signal } : {}),
+    errorContext: {
+      scope: 'form',
+      operation: 'update',
+      userInitiated: true,
+      fallbackMessage: 'ویرایش مشتری ناموفق بود.',
+    },
   })
-  const responsePayload = await parseJson(response)
-  if (!response.ok) {
-    throw new Error(parseOwnerRelationApiError(responsePayload, 'ویرایش مشتری ناموفق بود.'))
-  }
-  return responsePayload as CustomerRelation
 }
 
-export async function deleteOwnerCustomerRelation(relationId: number, fallback: string) {
-  const response = await apiFetch(`/api/customers/owner-relations/${relationId}`, {
+export async function deleteOwnerCustomerRelation(
+  relationId: number,
+  fallback: string,
+  options: OwnerCustomerRequestOptions = {},
+) {
+  return routeRequestJson<CustomerRelation>(`/api/customers/owner-relations/${relationId}`, {
     method: 'DELETE',
+    ...(options.signal ? { signal: options.signal } : {}),
+    errorContext: {
+      scope: 'action',
+      operation: 'delete',
+      userInitiated: true,
+      fallbackMessage: fallback,
+    },
   })
-  const payload = await parseJson(response)
-  if (!response.ok) {
-    throw new Error(parseOwnerRelationApiError(payload, fallback))
-  }
-  return payload
 }
 
-export async function fetchOwnerCustomerSessions(relationId: number) {
-  const response = await apiFetch(`/api/customers/owner-relations/${relationId}/sessions`, {
+export async function fetchOwnerCustomerSessions(
+  relationId: number,
+  options: OwnerCustomerRequestOptions = {},
+) {
+  const payload = await routeRequestJson<unknown>(`/api/customers/owner-relations/${relationId}/sessions`, {
     method: 'GET',
+    ...(options.signal ? { signal: options.signal } : {}),
+    errorContext: {
+      scope: 'list',
+      operation: 'load-detail',
+      fallbackMessage: 'دریافت نشست‌های مشتری ناموفق بود.',
+    },
   })
-  const payload = await parseJson(response)
-  if (!response.ok) {
-    throw new Error(parseOwnerRelationApiError(payload, 'دریافت نشست‌های مشتری ناموفق بود.'))
-  }
-  return Array.isArray(payload) ? payload as CustomerSessionSummary[] : []
+  return requireArrayPayload<CustomerSessionSummary>(payload, 'پاسخ نشست‌های مشتری معتبر نبود.')
 }
 
-export async function terminateOwnerCustomerSession(relationId: number, sessionId: string) {
-  const response = await apiFetch(`/api/customers/owner-relations/${relationId}/sessions/${sessionId}`, {
+export async function terminateOwnerCustomerSession(
+  relationId: number,
+  sessionId: string,
+  options: OwnerCustomerRequestOptions = {},
+) {
+  return routeRequestJson<CustomerSessionTerminateResponse>(`/api/customers/owner-relations/${relationId}/sessions/${sessionId}`, {
     method: 'DELETE',
+    ...(options.signal ? { signal: options.signal } : {}),
+    errorContext: {
+      scope: 'action',
+      operation: 'delete',
+      userInitiated: true,
+      fallbackMessage: 'پایان دادن نشست مشتری ناموفق بود.',
+    },
   })
-  const payload = await parseJson(response)
-  if (!response.ok) {
-    throw new Error(parseOwnerRelationApiError(payload, 'پایان دادن نشست مشتری ناموفق بود.'))
-  }
-  return payload as CustomerSessionTerminateResponse | null
 }
 
-export async function fetchOwnerCustomerTrades(customerUserId: number, options: { limit?: number } = {}) {
-  const response = await apiFetch(`/api/trades/with/${customerUserId}?limit=${options.limit ?? 20}`)
-  const payload = await parseJson(response)
-  if (!response.ok) {
-    throw new Error(parseOwnerRelationApiError(payload, 'دریافت معاملات مشتری ناموفق بود.'))
-  }
-  return Array.isArray(payload) ? payload as CustomerTradeSummary[] : []
+export async function fetchOwnerCustomerTrades(
+  customerUserId: number,
+  options: OwnerCustomerRequestOptions & { limit?: number } = {},
+) {
+  const payload = await routeRequestJson<unknown>(`/api/trades/with/${customerUserId}?limit=${options.limit ?? 20}`, {
+    ...(options.signal ? { signal: options.signal } : {}),
+    errorContext: {
+      scope: 'list',
+      operation: 'load-detail',
+      fallbackMessage: 'دریافت معاملات مشتری ناموفق بود.',
+    },
+  })
+  return requireArrayPayload<CustomerTradeSummary>(payload, 'پاسخ معاملات مشتری معتبر نبود.')
 }
 
-export async function fetchOwnerCustomerTradeStats(relationId: number, days: number) {
-  const response = await apiFetch(`/api/customers/owner-relations/${relationId}/trade-stats?days=${days}`)
-  const payload = await parseJson(response)
-  if (!response.ok) {
-    throw new Error(parseOwnerRelationApiError(payload, 'دریافت آمار مشتری ناموفق بود.'))
+export async function fetchOwnerCustomerTradeStats(
+  relationId: number,
+  days: number,
+  options: OwnerCustomerRequestOptions = {},
+) {
+  const payload = await routeRequestJson<unknown>(`/api/customers/owner-relations/${relationId}/trade-stats?days=${days}`, {
+    ...(options.signal ? { signal: options.signal } : {}),
+    errorContext: {
+      scope: 'panel',
+      operation: 'load-detail',
+      fallbackMessage: 'دریافت آمار مشتری ناموفق بود.',
+    },
+  })
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    throw new Error('پاسخ آمار مشتری معتبر نبود.')
   }
   return payload as CustomerTradeStats
 }

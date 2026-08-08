@@ -51,7 +51,9 @@ import { tradeSettlementLabel } from '../utils/settlementType'
 const route = useRoute()
 const router = useRouter()
 const customerState = useOwnerCustomers()
-const isLoading = ref(true)
+const isLoading = ref(false)
+const isRefreshingRelations = ref(false)
+const hasLoadedRelations = ref(false)
 const isMobile = ref(false)
 const error = ref('')
 const isCompatibilityManagerOpen = ref(false)
@@ -71,6 +73,8 @@ const confirmMessage = ref('')
 const confirmAction = ref<'terminate-session' | 'cancel-invitation' | 'unlink-relation' | null>(null)
 const confirmRelation = ref<CustomerRelation | null>(null)
 const confirmSession = ref<CustomerSessionSummary | null>(null)
+const isConfirmBusy = ref(false)
+const confirmError = ref('')
 const searchQuery = ref('')
 const relationFilter = ref('all')
 const detailTrades = ref<CustomerTradeSummary[]>([])
@@ -122,6 +126,7 @@ const activeRelation = computed(() => {
   if (id == null) return null
   return customerState.relations.value.find((relation) => relation.id === id) ?? null
 })
+const activeRelationId = computed(() => activeRelation.value?.id ?? null)
 
 const activeCount = computed(() => customerState.relations.value.filter((relation) => relation.status === 'active').length)
 const tier2Count = computed(() => customerState.relations.value.filter((relation) => relation.customer_tier === 'tier2').length)
@@ -211,14 +216,20 @@ const generatedCreateAccountName = computed(() => {
 })
 
 async function loadRelations() {
-  isLoading.value = true
+  if (isLoading.value || isRefreshingRelations.value) return
+  const isInitialLoad = !hasLoadedRelations.value
+  if (isInitialLoad) isLoading.value = true
+  else isRefreshingRelations.value = true
   error.value = ''
   try {
-    customerState.relations.value = await fetchOwnerCustomerRelations()
+    const relations = await fetchOwnerCustomerRelations()
+    customerState.relations.value = relations
+    hasLoadedRelations.value = true
   } catch (err: any) {
     error.value = err?.message || 'دریافت لیست مشتریان ناموفق بود.'
   } finally {
     isLoading.value = false
+    isRefreshingRelations.value = false
   }
 }
 
@@ -408,6 +419,9 @@ async function createRelation() {
       mobile_number: customerState.createForm.mobile_number,
       ...buildCustomerPayload(customerState.createForm),
     })
+    if (!created || !Number.isInteger(created.id) || created.id <= 0) {
+      throw new Error('پاسخ ایجاد مشتری معتبر نبود.')
+    }
     customerState.relations.value = [created, ...customerState.relations.value.filter((item) => item.id !== created.id)]
     createNotice.value = invitationSmsStatusMessage(created.sms_status) || 'دعوت مشتری با موفقیت ثبت شد.'
     resetCreateForm()
@@ -432,6 +446,9 @@ async function saveDetailLimits() {
   limitsNotice.value = ''
   try {
     const updated = await updateOwnerCustomerRelation(relation.id, payload)
+    if (!updated || updated.id !== relation.id) {
+      throw new Error('پاسخ ویرایش مشتری معتبر نبود.')
+    }
     customerState.relations.value = customerState.relations.value.map((item) => (item.id === updated.id ? updated : item))
     seedDetailEditForm(updated)
     limitsNotice.value = 'تنظیمات مشتری ذخیره شد.'
@@ -467,9 +484,11 @@ function openConfirmDialog(
   relation: CustomerRelation,
   session: CustomerSessionSummary | null = null,
 ) {
+  if (isConfirmBusy.value) return
   confirmAction.value = kind
   confirmRelation.value = relation
   confirmSession.value = session
+  confirmError.value = ''
   confirmTitle.value = kind === 'terminate-session'
     ? 'پایان نشست'
     : kind === 'cancel-invitation'
@@ -484,42 +503,66 @@ function openConfirmDialog(
 }
 
 function closeConfirmDialog() {
+  if (isConfirmBusy.value) return
+  resetConfirmDialog()
+}
+
+function resetConfirmDialog() {
   isConfirmDialogOpen.value = false
   confirmAction.value = null
   confirmRelation.value = null
   confirmSession.value = null
+  confirmError.value = ''
 }
 
 async function handleConfirmAction() {
   const relation = confirmRelation.value
-  if (!relation || !confirmAction.value) return
+  if (!relation || !confirmAction.value || isConfirmBusy.value) return
   const action = confirmAction.value
   const session = confirmSession.value
-  closeConfirmDialog()
-
-  if (action === 'terminate-session' && session) {
-    detailSessionsError.value = ''
-    try {
-      await terminateOwnerCustomerSession(relation.id, session.id)
-      await loadDetailSessions(true)
-    } catch (err: any) {
-      detailSessionsError.value = err?.message || 'پایان دادن نشست مشتری ناموفق بود.'
-    }
-    return
-  }
+  isConfirmBusy.value = true
+  confirmError.value = ''
 
   try {
-    await deleteOwnerCustomerRelation(
+    if (action === 'terminate-session') {
+      if (!session) throw new Error('نشست مشتری برای پایان دادن در دسترس نیست.')
+      const receipt = await terminateOwnerCustomerSession(relation.id, session.id)
+      if (!receipt || receipt.terminated_session_id !== session.id) {
+        throw new Error('پاسخ پایان نشست مشتری معتبر نبود.')
+      }
+      detailSessions.value = detailSessions.value
+        .filter((item) => item.id !== receipt.terminated_session_id)
+        .map((item) => ({
+          ...item,
+          is_primary: receipt.promoted_primary_session_id === item.id ? true : item.is_primary,
+        }))
+      isConfirmBusy.value = false
+      resetConfirmDialog()
+      return
+    }
+
+    const receipt = await deleteOwnerCustomerRelation(
       relation.id,
       action === 'cancel-invitation' ? 'لغو دعوت مشتری ناموفق بود.' : 'قطع ارتباط مشتری ناموفق بود.',
     )
+    const expectedStatus = action === 'cancel-invitation' ? 'revoked' : 'deleted'
+    if (!receipt || receipt.id !== relation.id || receipt.status !== expectedStatus) {
+      throw new Error(action === 'cancel-invitation'
+        ? 'پاسخ لغو دعوت مشتری معتبر نبود.'
+        : 'پاسخ قطع ارتباط مشتری معتبر نبود.')
+    }
+    const wasActiveRelation = activeRelation.value?.id === relation.id
     customerState.relations.value = customerState.relations.value.filter((item) => item.id !== relation.id)
-    if (activeRelation.value?.id === relation.id) {
+    isConfirmBusy.value = false
+    resetConfirmDialog()
+    if (wasActiveRelation) {
       backToList()
     }
   } catch (err: any) {
-    detailSessionsError.value = err?.message
+    confirmError.value = err?.message
       || (action === 'cancel-invitation' ? 'لغو دعوت مشتری ناموفق بود.' : 'قطع ارتباط مشتری ناموفق بود.')
+  } finally {
+    isConfirmBusy.value = false
   }
 }
 
@@ -596,17 +639,20 @@ watch(initialPanel, (panel) => {
   }
 }, { immediate: true })
 
-watch([activeRelation, detailTab], () => {
-  detailTrades.value = []
-  detailStats.value = null
-  detailSessions.value = []
-  detailTradesError.value = ''
-  detailStatsError.value = ''
-  detailSessionsError.value = ''
+watch([activeRelationId, detailTab], ([nextRelationId], [previousRelationId]) => {
+  if (nextRelationId !== previousRelationId) {
+    detailTrades.value = []
+    detailStats.value = null
+    detailSessions.value = []
+    detailTradesError.value = ''
+    detailStatsError.value = ''
+    detailSessionsError.value = ''
+  }
   refreshCurrentDetailTab()
 }, { flush: 'post' })
 
 watch(activeRelation, (relation, previousRelation) => {
+  if (relation?.id === previousRelation?.id) return
   seedDetailEditForm(relation, {
     resetFeedback: relation?.id !== previousRelation?.id,
   })
@@ -674,7 +720,24 @@ onBeforeUnmount(() => {
           description="مشخصات، محدودیت‌ها، معاملات، آمار، نشست‌ها و اقدامات حساس در یک نمای یکپارچه."
         >
           <WorkspaceNotice
-            v-if="!activeRelation && !isLoading"
+            v-if="!hasLoadedRelations && error"
+            tone="danger"
+            role="alert"
+            title="دریافت پرونده مشتری ممکن نشد"
+            :message="error"
+          >
+            <AppButton class="customer-detail-retry" size="sm" variant="secondary" :loading="isLoading" @click="loadRelations">
+              تلاش دوباره
+            </AppButton>
+          </WorkspaceNotice>
+          <WorkspaceNotice
+            v-else-if="!hasLoadedRelations && isLoading"
+            tone="info"
+            title="در حال دریافت پرونده مشتری"
+            message="لطفاً چند لحظه صبر کنید."
+          />
+          <WorkspaceNotice
+            v-else-if="!activeRelation && hasLoadedRelations"
             tone="warning"
             title="مشتری پیدا نشد"
             message="این رابطه در لیست فعلی وجود ندارد یا هنوز همگام‌سازی نشده است."
@@ -816,10 +879,12 @@ onBeforeUnmount(() => {
                   نوسازی
                 </AppButton>
               </div>
-              <WorkspaceNotice v-if="detailTradesError" tone="danger" title="خطا در دریافت معاملات" :message="detailTradesError" />
-              <WorkspaceNotice v-else-if="detailTradesLoading" tone="info" title="در حال دریافت معاملات" message="لطفاً چند لحظه صبر کنید." />
-              <WorkspaceNotice v-else-if="!detailTrades.length" tone="info" title="معامله‌ای ثبت نشده است" message="برای این مشتری هنوز معامله‌ای در بازه اخیر پیدا نشد." />
-              <template v-else>
+              <WorkspaceNotice v-if="detailTradesError" tone="danger" role="alert" title="خطا در دریافت معاملات" :message="detailTradesError">
+                <AppButton size="sm" variant="secondary" :loading="detailTradesLoading" @click="loadDetailTrades(true)">تلاش دوباره</AppButton>
+              </WorkspaceNotice>
+              <WorkspaceNotice v-if="detailTradesLoading && !detailTrades.length" tone="info" title="در حال دریافت معاملات" message="لطفاً چند لحظه صبر کنید." />
+              <WorkspaceNotice v-if="!detailTradesLoading && !detailTradesError && !detailTrades.length" tone="info" title="معامله‌ای ثبت نشده است" message="برای این مشتری هنوز معامله‌ای در بازه اخیر پیدا نشد." />
+              <template v-if="detailTrades.length">
                 <AppListItem
                   v-for="trade in detailTrades"
                   :key="trade.id"
@@ -846,9 +911,11 @@ onBeforeUnmount(() => {
                   {{ days.toLocaleString('fa-IR') }} روز
                 </button>
               </div>
-              <WorkspaceNotice v-if="detailStatsError" tone="danger" title="خطا در دریافت آمار" :message="detailStatsError" />
-              <WorkspaceNotice v-else-if="detailStatsLoading" tone="info" title="در حال محاسبه آمار" message="لطفاً چند لحظه صبر کنید." />
-              <div v-else-if="detailStats" class="customer-stats-grid">
+              <WorkspaceNotice v-if="detailStatsError" tone="danger" role="alert" title="خطا در دریافت آمار" :message="detailStatsError">
+                <AppButton size="sm" variant="secondary" :loading="detailStatsLoading" @click="loadDetailStats(true)">تلاش دوباره</AppButton>
+              </WorkspaceNotice>
+              <WorkspaceNotice v-if="detailStatsLoading && !detailStats" tone="info" title="در حال محاسبه آمار" message="لطفاً چند لحظه صبر کنید." />
+              <div v-if="detailStats" class="customer-stats-grid">
                 <AppMetricCard label="تعداد معاملات" :value="detailStats.trade_count" />
                 <AppMetricCard label="حجم کل" :value="detailStats.total_quantity" tone="primary" />
                 <AppMetricCard label="سود کمیسیون" :value="formatToman(detailStats.commission_profit_toman)" tone="success" />
@@ -862,7 +929,7 @@ onBeforeUnmount(() => {
                   </ul>
                 </AppCard>
               </div>
-              <WorkspaceNotice v-else tone="info" title="آماری در دسترس نیست" message="برای این مشتری هنوز گزارش قابل نمایش وجود ندارد." />
+              <WorkspaceNotice v-if="!detailStatsLoading && !detailStatsError && !detailStats" tone="info" title="آماری در دسترس نیست" message="برای این مشتری هنوز گزارش قابل نمایش وجود ندارد." />
             </div>
 
             <div v-else-if="detailTab === 'sessions'" class="customer-detail-list">
@@ -872,11 +939,13 @@ onBeforeUnmount(() => {
                   نوسازی
                 </AppButton>
               </div>
-              <WorkspaceNotice v-if="detailSessionsError" tone="danger" title="خطا در دریافت نشست‌ها" :message="detailSessionsError" />
-              <WorkspaceNotice v-else-if="activeRelation.status !== 'active' || !activeRelation.customer_user_id" tone="info" title="نشست قابل نمایش نیست" message="نشست‌ها فقط برای مشتری فعال نمایش داده می‌شوند." />
-              <WorkspaceNotice v-else-if="detailSessionsLoading" tone="info" title="در حال دریافت نشست‌ها" message="لطفاً چند لحظه صبر کنید." />
-              <WorkspaceNotice v-else-if="!detailSessions.length" tone="info" title="نشست فعالی وجود ندارد" message="برای این مشتری نشست فعالی ثبت نشده است." />
-              <template v-else>
+              <WorkspaceNotice v-if="detailSessionsError" tone="danger" role="alert" title="خطا در دریافت نشست‌ها" :message="detailSessionsError">
+                <AppButton size="sm" variant="secondary" :loading="detailSessionsLoading" @click="loadDetailSessions(true)">تلاش دوباره</AppButton>
+              </WorkspaceNotice>
+              <WorkspaceNotice v-if="activeRelation.status !== 'active' || !activeRelation.customer_user_id" tone="info" title="نشست قابل نمایش نیست" message="نشست‌ها فقط برای مشتری فعال نمایش داده می‌شوند." />
+              <WorkspaceNotice v-else-if="detailSessionsLoading && !detailSessions.length" tone="info" title="در حال دریافت نشست‌ها" message="لطفاً چند لحظه صبر کنید." />
+              <WorkspaceNotice v-else-if="!detailSessionsError && !detailSessions.length" tone="info" title="نشست فعالی وجود ندارد" message="برای این مشتری نشست فعالی ثبت نشده است." />
+              <template v-if="detailSessions.length">
                 <AppListItem
                   v-for="session in detailSessions"
                   :key="session.id"
@@ -936,7 +1005,7 @@ onBeforeUnmount(() => {
           description="جستجو، فیلتر و انتخاب مشتری با دسترسی مستقیم به دعوت‌ها و پرونده‌های فعال."
         >
           <template #actions>
-            <div class="workspace-summary-badges">
+            <div v-if="hasLoadedRelations" class="workspace-summary-badges">
               <AppStatusBadge tone="primary">{{ customerState.relations.value.length.toLocaleString('fa-IR') }} رابطه</AppStatusBadge>
               <AppStatusBadge v-if="activeCount" tone="success">{{ activeCount.toLocaleString('fa-IR') }} فعال</AppStatusBadge>
               <AppStatusBadge v-if="customerState.pendingInvitationRelations.value.length" tone="warning">
@@ -963,30 +1032,35 @@ onBeforeUnmount(() => {
           />
 
           <WorkspaceNotice
-            v-if="error"
+            v-if="error && (!relationIdNumber || hasLoadedRelations)"
             tone="danger"
+            role="alert"
             title="خطا در دریافت مشتریان"
             :message="error"
-          />
+          >
+            <AppButton class="customer-list-retry" size="sm" variant="secondary" :loading="isLoading || isRefreshingRelations" @click="loadRelations">
+              تلاش دوباره
+            </AppButton>
+          </WorkspaceNotice>
           <WorkspaceNotice
-            v-else-if="isLoading"
+            v-if="isLoading && !relationIdNumber"
             tone="info"
             title="در حال دریافت مشتریان"
             message="لطفاً چند لحظه صبر کنید."
           />
           <WorkspaceNotice
-            v-else-if="!customerState.orderedRelations.value.length"
+            v-if="hasLoadedRelations && !customerState.orderedRelations.value.length"
             tone="info"
             title="هنوز مشتری ثبت نشده است"
             message="برای شروع، از دکمه افزودن مشتری استفاده کنید."
           />
           <WorkspaceNotice
-            v-else-if="!filteredRelations.length"
+            v-else-if="hasLoadedRelations && !filteredRelations.length"
             tone="info"
             title="نتیجه‌ای پیدا نشد"
             message="فیلتر یا عبارت جستجو را تغییر دهید."
           />
-          <AppMasterDetail class="customer-master-detail-grid">
+          <AppMasterDetail v-if="hasLoadedRelations && customerState.orderedRelations.value.length" class="customer-master-detail-grid">
             <template #master>
               <div class="workspace-relation-list">
                 <div v-if="visiblePendingRelations.length" class="customer-list-group">
@@ -1226,6 +1300,9 @@ onBeforeUnmount(() => {
       :message="confirmMessage"
       :confirm-label="confirmAction === 'terminate-session' ? 'پایان نشست' : confirmAction === 'cancel-invitation' ? 'لغو دعوت' : 'قطع ارتباط'"
       :tone="confirmAction === 'terminate-session' ? 'warning' : 'danger'"
+      :busy="isConfirmBusy"
+      :error="confirmError"
+      :confirm-disabled="isConfirmBusy"
       @cancel="closeConfirmDialog"
       @confirm="handleConfirmAction"
     />

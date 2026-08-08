@@ -14,6 +14,15 @@ function makeResponse(payload: unknown, ok = true) {
   }
 }
 
+function boundedRequestOptions(options: Record<string, unknown> = {}) {
+  return expect.objectContaining({
+    ...options,
+    retryNetwork: false,
+    signal: expect.any(AbortSignal),
+    trackConnectionState: false,
+  })
+}
+
 function makeRelation(overrides: Record<string, unknown> = {}) {
   return {
     id: 1,
@@ -115,7 +124,7 @@ describe('OwnerAccountantManagerModal.vue', () => {
     await wrapper.get('.submit-create').trigger('click')
     await flushPromises()
 
-    expect(apiFetchMock).toHaveBeenCalledWith('/api/accountants/owner-relations', {
+    expect(apiFetchMock).toHaveBeenCalledWith('/api/accountants/owner-relations', boundedRequestOptions({
       method: 'POST',
       body: JSON.stringify({
         account_name: 'acc2',
@@ -123,7 +132,7 @@ describe('OwnerAccountantManagerModal.vue', () => {
         mobile_number: '09123333333',
         duty_description: 'گزارش‌گیری',
       }),
-    })
+    }))
     expect(wrapper.text()).toContain('دعوت حسابدار ثبت شد.')
     expect(wrapper.text()).toContain('حسابدار دوم')
   })
@@ -205,12 +214,12 @@ describe('OwnerAccountantManagerModal.vue', () => {
     await wrapper.get('.save-edit').trigger('click')
     await flushPromises()
 
-    expect(apiFetchMock).toHaveBeenCalledWith('/api/accountants/owner-relations/8', {
+    expect(apiFetchMock).toHaveBeenCalledWith('/api/accountants/owner-relations/8', boundedRequestOptions({
       method: 'PATCH',
       body: JSON.stringify({
         duty_description: 'مدیریت ثبت‌ها',
       }),
-    })
+    }))
     expect(wrapper.text()).toContain('اطلاعات حسابدار به‌روزرسانی شد.')
 
     await wrapper.get('.accountant-detail-topbar .ghost-btn').trigger('click')
@@ -218,9 +227,9 @@ describe('OwnerAccountantManagerModal.vue', () => {
     await wrapper.get('.cancel-pending').trigger('click')
     await flushPromises()
 
-    expect(apiFetchMock).toHaveBeenCalledWith('/api/accountants/owner-relations/1', {
+    expect(apiFetchMock).toHaveBeenCalledWith('/api/accountants/owner-relations/1', boundedRequestOptions({
       method: 'DELETE',
-    })
+    }))
     expect(wrapper.text()).toContain('دعوت حسابدار لغو شد.')
     expect(wrapper.text()).not.toContain('حسابدار اول')
   })
@@ -248,9 +257,9 @@ describe('OwnerAccountantManagerModal.vue', () => {
     await wrapper.get('.unlink-active').trigger('click')
     await flushPromises()
 
-    expect(apiFetchMock).toHaveBeenCalledWith('/api/accountants/owner-relations/8', {
+    expect(apiFetchMock).toHaveBeenCalledWith('/api/accountants/owner-relations/8', boundedRequestOptions({
       method: 'DELETE',
-    })
+    }))
     expect(wrapper.text()).toContain('ارتباط حسابدار قطع شد')
     expect(wrapper.text()).not.toContain('حسابدار فعال')
   })
@@ -293,9 +302,9 @@ describe('OwnerAccountantManagerModal.vue', () => {
     await openFirstAccountantDetail(wrapper)
     await openDetailSection(wrapper, 1)
 
-    expect(apiFetchMock).toHaveBeenCalledWith('/api/accountants/owner-relations/8/sessions', {
+    expect(apiFetchMock).toHaveBeenCalledWith('/api/accountants/owner-relations/8/sessions', boundedRequestOptions({
       method: 'GET',
-    })
+    }))
     expect(wrapper.text()).toContain('نشست حسابدار')
     expect(wrapper.text()).toContain('Chrome')
 
@@ -303,9 +312,9 @@ describe('OwnerAccountantManagerModal.vue', () => {
     await flushPromises()
 
     expect(window.confirm).toHaveBeenCalledWith('نشست «Chrome» پایان یابد؟')
-    expect(apiFetchMock).toHaveBeenCalledWith('/api/accountants/owner-relations/8/sessions/session-1', {
+    expect(apiFetchMock).toHaveBeenCalledWith('/api/accountants/owner-relations/8/sessions/session-1', boundedRequestOptions({
       method: 'DELETE',
-    })
+    }))
     expect(wrapper.text()).toContain('نشست حسابدار با موفقیت پایان یافت')
     expect(wrapper.text()).toContain('در حال حاضر نشست فعالی برای این حسابدار ثبت نشده است.')
   })

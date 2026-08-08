@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
+import { AppHttpError } from '../utils/httpErrorPolicy'
 
 import OwnerCustomerManagerModal from './OwnerCustomerManagerModal.vue'
 
@@ -17,6 +18,15 @@ function makeResponse(payload: unknown, ok = true, status = ok ? 200 : 400) {
     headers: {
       'Content-Type': 'application/json',
     },
+  })
+}
+
+function boundedRequestOptions(options: Record<string, unknown> = {}) {
+  return expect.objectContaining({
+    ...options,
+    retryNetwork: false,
+    signal: expect.any(AbortSignal),
+    trackConnectionState: false,
   })
 }
 
@@ -230,7 +240,10 @@ describe('OwnerCustomerManagerModal.vue', () => {
     await openDetailAccordion(wrapper, 'نشست مشتری')
     await flushPromises()
 
-    expect(apiFetchMock).toHaveBeenCalledWith('/api/customers/owner-relations/11/sessions', { method: 'GET' })
+    expect(apiFetchMock).toHaveBeenCalledWith(
+      '/api/customers/owner-relations/11/sessions',
+      boundedRequestOptions({ method: 'GET' }),
+    )
     expect(wrapper.text()).toContain('Chrome on Android')
     expect(wrapper.text()).toContain('primary')
 
@@ -240,7 +253,7 @@ describe('OwnerCustomerManagerModal.vue', () => {
     expect(confirmMock).toHaveBeenCalled()
     expect(apiFetchMock).toHaveBeenCalledWith(
       '/api/customers/owner-relations/11/sessions/11111111-1111-1111-1111-111111111111',
-      { method: 'DELETE' },
+      boundedRequestOptions({ method: 'DELETE' }),
     )
     expect(wrapper.text()).toContain('نشست مشتری با موفقیت پایان یافت')
     expect(wrapper.text()).toContain('در حال حاضر نشست فعالی برای این مشتری ثبت نشده است.')
@@ -438,7 +451,11 @@ describe('OwnerCustomerManagerModal.vue', () => {
         return makeResponse(relationLoadCount === 1 ? [activeRelation] : [updatedRelation])
       }
       if (url === '/api/customers/owner-relations/11' && options?.method === 'PATCH') {
-        throw new Error('NetworkError')
+        throw new AppHttpError({
+          errorCode: 'NETWORK_ERROR',
+          detail: 'NetworkError',
+          context: { operation: 'update' },
+        })
       }
       throw new Error(`Unexpected apiFetch call: ${url}`)
     })
@@ -453,7 +470,10 @@ describe('OwnerCustomerManagerModal.vue', () => {
     await wrapper.get('.save-edit').trigger('click')
     await flushPromises()
 
-    expect(apiFetchMock).toHaveBeenCalledWith('/api/customers/owner-relations', { retryNetwork: false })
+    expect(apiFetchMock).toHaveBeenCalledWith(
+      '/api/customers/owner-relations',
+      boundedRequestOptions(),
+    )
     expect(wrapper.find('.customer-banner.error').exists()).toBe(false)
     expect(wrapper.text()).not.toContain('NetworkError')
     expect(wrapper.get('.customer-viewport-toast--success').text()).toBe('تنظیمات مشتری با موفقیت ذخیره شد.')
@@ -558,7 +578,10 @@ describe('OwnerCustomerManagerModal.vue', () => {
     await flushPromises()
 
     expect(confirmMock).toHaveBeenCalledWith('دعوت مشتری ویژه لغو شود؟')
-    expect(apiFetchMock).toHaveBeenCalledWith('/api/customers/owner-relations/12', { method: 'DELETE' })
+    expect(apiFetchMock).toHaveBeenCalledWith(
+      '/api/customers/owner-relations/12',
+      boundedRequestOptions({ method: 'DELETE' }),
+    )
     expect(wrapper.text()).toContain('دعوت مشتری لغو شد.')
     expect(wrapper.text()).toContain('هنوز مشتری فعالی یا دعوت در انتظار ثبت نشده است.')
 
@@ -595,7 +618,10 @@ describe('OwnerCustomerManagerModal.vue', () => {
     await flushPromises()
 
     expect(confirmMock).toHaveBeenCalledWith('ارتباط مشتری مشتری ویژه قطع شود؟ این عملیات دسترسی مشتری را کامل غیرفعال می‌کند.')
-    expect(apiFetchMock).toHaveBeenCalledWith('/api/customers/owner-relations/11', { method: 'DELETE' })
+    expect(apiFetchMock).toHaveBeenCalledWith(
+      '/api/customers/owner-relations/11',
+      boundedRequestOptions({ method: 'DELETE' }),
+    )
     expect(wrapper.text()).toContain('ارتباط مشتری قطع شد و دسترسی او غیرفعال گردید.')
 
     wrapper.unmount()
@@ -658,7 +684,7 @@ describe('OwnerCustomerManagerModal.vue', () => {
     await openDetailAccordion(wrapper, 'نشست مشتری')
     await flushPromises()
 
-    expect(wrapper.find('.customer-banner.error').text()).toBe('دریافت نشست‌های مشتری شکست خورد.')
+    expect(wrapper.find('.customer-banner.error').text()).toBe('دریافت نشست‌های مشتری ناموفق بود.')
     expect(wrapper.find('.session-empty').text()).toContain('در حال حاضر نشست فعالی برای این مشتری ثبت نشده است.')
 
     wrapper.unmount()
@@ -813,7 +839,7 @@ describe('OwnerCustomerManagerModal.vue', () => {
     await openCustomerDetail(wrapper)
     await openDetailAccordion(wrapper, 'نشست مشتری')
     await flushPromises()
-    expect(wrapper.text()).toContain('نشست‌های مشتری در دسترس نیست.')
+    expect(wrapper.text()).toContain('دریافت نشست‌های مشتری ناموفق بود.')
 
     await openDetailAccordion(wrapper, 'مشخصات و محدودیت‌ها')
     await wrapper.get('.edit-min-trade').setValue('3')

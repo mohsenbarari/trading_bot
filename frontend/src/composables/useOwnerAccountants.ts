@@ -1,6 +1,6 @@
 import { computed, reactive, ref } from 'vue'
-import { apiFetch } from '../utils/auth'
-import { parseOwnerRelationApiError, type RelationStatus } from './useOwnerCustomers'
+import { routeRequestJson } from '../utils/routeRequest'
+import { type RelationStatus } from './useOwnerCustomers'
 
 export interface AccountantRelation {
   id: number
@@ -61,74 +61,110 @@ export function normalizeDutyDescription(value: string) {
   return cleaned || null
 }
 
-async function parseJson(response: Response) {
-  return response.json().catch(() => null)
+interface OwnerAccountantRequestOptions {
+  signal?: AbortSignal | null
 }
 
-export async function fetchOwnerAccountantRelations() {
-  const response = await apiFetch('/api/accountants/owner-relations')
-  const payload = await parseJson(response)
-  if (!response.ok) {
-    throw new Error(parseOwnerRelationApiError(payload, 'دریافت لیست حسابداران ناموفق بود.'))
-  }
-  return Array.isArray(payload) ? payload as AccountantRelation[] : []
+function requireArrayPayload<T>(payload: unknown, fallback: string): T[] {
+  if (!Array.isArray(payload)) throw new Error(fallback)
+  return payload as T[]
 }
 
-export async function createOwnerAccountantRelation(payload: Record<string, unknown>) {
-  const response = await apiFetch('/api/accountants/owner-relations', {
+export async function fetchOwnerAccountantRelations(options: OwnerAccountantRequestOptions = {}) {
+  const payload = await routeRequestJson<unknown>('/api/accountants/owner-relations', {
+    ...(options.signal ? { signal: options.signal } : {}),
+    errorContext: {
+      scope: 'list',
+      operation: 'load-list',
+      fallbackMessage: 'دریافت لیست حسابداران ناموفق بود.',
+    },
+  })
+  return requireArrayPayload<AccountantRelation>(payload, 'پاسخ لیست حسابداران معتبر نبود.')
+}
+
+export async function createOwnerAccountantRelation(
+  payload: Record<string, unknown>,
+  options: OwnerAccountantRequestOptions = {},
+) {
+  return routeRequestJson<AccountantRelation>('/api/accountants/owner-relations', {
     method: 'POST',
     body: JSON.stringify(payload),
+    ...(options.signal ? { signal: options.signal } : {}),
+    errorContext: {
+      scope: 'form',
+      operation: 'submit',
+      userInitiated: true,
+      fallbackMessage: 'ایجاد حسابدار ناموفق بود.',
+    },
   })
-  const responsePayload = await parseJson(response)
-  if (!response.ok) {
-    throw new Error(parseOwnerRelationApiError(responsePayload, 'ایجاد حسابدار ناموفق بود.'))
-  }
-  return responsePayload as AccountantRelation
 }
 
-export async function updateOwnerAccountantRelation(relationId: number, payload: Record<string, unknown>) {
-  const response = await apiFetch(`/api/accountants/owner-relations/${relationId}`, {
+export async function updateOwnerAccountantRelation(
+  relationId: number,
+  payload: Record<string, unknown>,
+  options: OwnerAccountantRequestOptions = {},
+) {
+  return routeRequestJson<AccountantRelation>(`/api/accountants/owner-relations/${relationId}`, {
     method: 'PATCH',
     body: JSON.stringify(payload),
+    ...(options.signal ? { signal: options.signal } : {}),
+    errorContext: {
+      scope: 'form',
+      operation: 'update',
+      userInitiated: true,
+      fallbackMessage: 'ویرایش حسابدار ناموفق بود.',
+    },
   })
-  const responsePayload = await parseJson(response)
-  if (!response.ok) {
-    throw new Error(parseOwnerRelationApiError(responsePayload, 'ویرایش حسابدار ناموفق بود.'))
-  }
-  return responsePayload as AccountantRelation
 }
 
-export async function deleteOwnerAccountantRelation(relationId: number, fallback: string) {
-  const response = await apiFetch(`/api/accountants/owner-relations/${relationId}`, {
+export async function deleteOwnerAccountantRelation(
+  relationId: number,
+  fallback: string,
+  options: OwnerAccountantRequestOptions = {},
+) {
+  return routeRequestJson<AccountantRelation>(`/api/accountants/owner-relations/${relationId}`, {
     method: 'DELETE',
+    ...(options.signal ? { signal: options.signal } : {}),
+    errorContext: {
+      scope: 'action',
+      operation: 'delete',
+      userInitiated: true,
+      fallbackMessage: fallback,
+    },
   })
-  const payload = await parseJson(response)
-  if (!response.ok) {
-    throw new Error(parseOwnerRelationApiError(payload, fallback))
-  }
-  return payload
 }
 
-export async function fetchOwnerAccountantSessions(relationId: number) {
-  const response = await apiFetch(`/api/accountants/owner-relations/${relationId}/sessions`, {
+export async function fetchOwnerAccountantSessions(
+  relationId: number,
+  options: OwnerAccountantRequestOptions = {},
+) {
+  const payload = await routeRequestJson<unknown>(`/api/accountants/owner-relations/${relationId}/sessions`, {
     method: 'GET',
+    ...(options.signal ? { signal: options.signal } : {}),
+    errorContext: {
+      scope: 'list',
+      operation: 'load-detail',
+      fallbackMessage: 'دریافت نشست‌های حسابدار ناموفق بود.',
+    },
   })
-  const payload = await parseJson(response)
-  if (!response.ok) {
-    throw new Error(parseOwnerRelationApiError(payload, 'دریافت نشست‌های حسابدار ناموفق بود.'))
-  }
-  return Array.isArray(payload) ? payload as AccountantSessionSummary[] : []
+  return requireArrayPayload<AccountantSessionSummary>(payload, 'پاسخ نشست‌های حسابدار معتبر نبود.')
 }
 
-export async function terminateOwnerAccountantSession(relationId: number, sessionId: string) {
-  const response = await apiFetch(`/api/accountants/owner-relations/${relationId}/sessions/${sessionId}`, {
+export async function terminateOwnerAccountantSession(
+  relationId: number,
+  sessionId: string,
+  options: OwnerAccountantRequestOptions = {},
+) {
+  return routeRequestJson<AccountantSessionTerminateResponse>(`/api/accountants/owner-relations/${relationId}/sessions/${sessionId}`, {
     method: 'DELETE',
+    ...(options.signal ? { signal: options.signal } : {}),
+    errorContext: {
+      scope: 'action',
+      operation: 'delete',
+      userInitiated: true,
+      fallbackMessage: 'پایان دادن نشست حسابدار ناموفق بود.',
+    },
   })
-  const payload = await parseJson(response)
-  if (!response.ok) {
-    throw new Error(parseOwnerRelationApiError(payload, 'پایان دادن نشست حسابدار ناموفق بود.'))
-  }
-  return payload as AccountantSessionTerminateResponse | null
 }
 
 export function useOwnerAccountants() {

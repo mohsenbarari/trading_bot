@@ -128,31 +128,51 @@ describe('owner relation composables', () => {
       .mockResolvedValueOnce(makeResponse({ relation_id: 1, period_days: 7 }))
 
     expect(await fetchOwnerCustomerRelations({ retryNetwork: false })).toEqual([customer])
-    expect(apiFetchMock).toHaveBeenNthCalledWith(1, '/api/customers/owner-relations', { retryNetwork: false })
+    expect(apiFetchMock).toHaveBeenNthCalledWith(1, '/api/customers/owner-relations', expect.objectContaining({
+      retryNetwork: false,
+      signal: expect.any(AbortSignal),
+      trackConnectionState: false,
+    }))
 
     await createOwnerCustomerRelation({ management_name: 'مشتری دوم' })
-    expect(apiFetchMock).toHaveBeenNthCalledWith(2, '/api/customers/owner-relations', {
+    expect(apiFetchMock).toHaveBeenNthCalledWith(2, '/api/customers/owner-relations', expect.objectContaining({
       method: 'POST',
       body: JSON.stringify({ management_name: 'مشتری دوم' }),
-    })
+      retryNetwork: false,
+      signal: expect.any(AbortSignal),
+      trackConnectionState: false,
+    }))
 
     await updateOwnerCustomerRelation(1, { commission_rate: 0.8 }, { retryNetwork: false })
-    expect(apiFetchMock).toHaveBeenNthCalledWith(3, '/api/customers/owner-relations/1', {
+    expect(apiFetchMock).toHaveBeenNthCalledWith(3, '/api/customers/owner-relations/1', expect.objectContaining({
       method: 'PATCH',
       body: JSON.stringify({ commission_rate: 0.8 }),
       retryNetwork: false,
-    })
+      signal: expect.any(AbortSignal),
+      trackConnectionState: false,
+    }))
 
     await terminateOwnerCustomerSession(1, 'session-1')
-    expect(apiFetchMock).toHaveBeenNthCalledWith(4, '/api/customers/owner-relations/1/sessions/session-1', {
+    expect(apiFetchMock).toHaveBeenNthCalledWith(4, '/api/customers/owner-relations/1/sessions/session-1', expect.objectContaining({
       method: 'DELETE',
-    })
+      retryNetwork: false,
+      signal: expect.any(AbortSignal),
+      trackConnectionState: false,
+    }))
 
     await fetchOwnerCustomerTrades(10, { limit: 20 })
-    expect(apiFetchMock).toHaveBeenNthCalledWith(5, '/api/trades/with/10?limit=20')
+    expect(apiFetchMock).toHaveBeenNthCalledWith(5, '/api/trades/with/10?limit=20', expect.objectContaining({
+      retryNetwork: false,
+      signal: expect.any(AbortSignal),
+      trackConnectionState: false,
+    }))
 
     await fetchOwnerCustomerTradeStats(1, 7)
-    expect(apiFetchMock).toHaveBeenNthCalledWith(6, '/api/customers/owner-relations/1/trade-stats?days=7')
+    expect(apiFetchMock).toHaveBeenNthCalledWith(6, '/api/customers/owner-relations/1/trade-stats?days=7', expect.objectContaining({
+      retryNetwork: false,
+      signal: expect.any(AbortSignal),
+      trackConnectionState: false,
+    }))
   })
 
   it('routes accountant API calls and state through the extracted data layer', async () => {
@@ -193,23 +213,45 @@ describe('owner relation composables', () => {
       .mockResolvedValueOnce(makeResponse({ detail: 'done' }))
 
     expect(await fetchOwnerAccountantRelations()).toEqual([accountant])
-    expect(apiFetchMock).toHaveBeenNthCalledWith(1, '/api/accountants/owner-relations')
+    expect(apiFetchMock).toHaveBeenNthCalledWith(1, '/api/accountants/owner-relations', expect.objectContaining({
+      retryNetwork: false,
+      signal: expect.any(AbortSignal),
+      trackConnectionState: false,
+    }))
 
     await createOwnerAccountantRelation({ relation_display_name: 'حسابدار جدید' })
-    expect(apiFetchMock).toHaveBeenNthCalledWith(2, '/api/accountants/owner-relations', {
+    expect(apiFetchMock).toHaveBeenNthCalledWith(2, '/api/accountants/owner-relations', expect.objectContaining({
       method: 'POST',
       body: JSON.stringify({ relation_display_name: 'حسابدار جدید' }),
-    })
+      retryNetwork: false,
+      signal: expect.any(AbortSignal),
+      trackConnectionState: false,
+    }))
 
     await updateOwnerAccountantRelation(8, { duty_description: 'ثبت معاملات' })
-    expect(apiFetchMock).toHaveBeenNthCalledWith(3, '/api/accountants/owner-relations/8', {
+    expect(apiFetchMock).toHaveBeenNthCalledWith(3, '/api/accountants/owner-relations/8', expect.objectContaining({
       method: 'PATCH',
       body: JSON.stringify({ duty_description: 'ثبت معاملات' }),
-    })
+      retryNetwork: false,
+      signal: expect.any(AbortSignal),
+      trackConnectionState: false,
+    }))
 
     await terminateOwnerAccountantSession(8, 'session-8')
-    expect(apiFetchMock).toHaveBeenNthCalledWith(4, '/api/accountants/owner-relations/8/sessions/session-8', {
+    expect(apiFetchMock).toHaveBeenNthCalledWith(4, '/api/accountants/owner-relations/8/sessions/session-8', expect.objectContaining({
       method: 'DELETE',
-    })
+      retryNetwork: false,
+      signal: expect.any(AbortSignal),
+      trackConnectionState: false,
+    }))
+  })
+
+  it('rejects invalid relation-list payloads instead of converting failures to true empty lists', async () => {
+    apiFetchMock
+      .mockResolvedValueOnce(makeResponse({ detail: 'not-an-array' }))
+      .mockResolvedValueOnce(makeResponse(null))
+
+    await expect(fetchOwnerCustomerRelations()).rejects.toThrow('پاسخ لیست مشتریان معتبر نبود.')
+    await expect(fetchOwnerAccountantRelations()).rejects.toThrow('پاسخ لیست حسابداران معتبر نبود.')
   })
 })
