@@ -123,6 +123,11 @@ done
 [[ -f "$ENV_FILE" ]] || die "missing $ENV_FILE; run scripts/deploy_staging.sh ensure-env first"
 [[ -f "$COMPOSE_FILE" ]] || die "missing $COMPOSE_FILE"
 
+case "$ARTIFACT_DIR" in
+    /*) ;;
+    *) ARTIFACT_DIR="$PROJECT_DIR/$ARTIFACT_DIR" ;;
+esac
+ARTIFACT_DIR="$(realpath -m "$ARTIFACT_DIR")"
 mkdir -p "$ARTIFACT_DIR"
 
 run_load_service() {
