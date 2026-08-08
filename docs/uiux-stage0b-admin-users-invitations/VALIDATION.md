@@ -2,7 +2,7 @@
 
 تاریخ: ۲۰۲۶-۰۸-۰۸
 
-وضعیت: **شواهد فنی تکمیل شده؛ در انتظار تأیید بصری مالک محصول.** Phase 0، بسته رسمی Figma، harness محلی و Sites خصوصی ثبت شده‌اند؛ runtime implementation انجام نشده است.
+وضعیت: **تکمیل و با تأیید صریح بصری مالک محصول در ۲۰۲۶-۰۸-۰۸ بسته شده است.** Phase 0، بسته رسمی Figma، harness محلی و Sites خصوصی ثبت شده‌اند؛ runtime implementation انجام نشده است.
 
 ## دامنه برنامه‌ریزی‌شده
 
@@ -105,9 +105,9 @@ metrics نهایی: `assets/figma-stage0b4-audit-metrics.json` با SHA-256 بر
 | deployment | `appgdep_6a77396e6a5c8191b9945deaf884107d` روی `site---6a772e6ffef481918c82f9c70b4c71c8` |
 | زمان انتشار موفق | `2026-08-08T14:13:17.018345Z` |
 | archive | `901120` بایت، `28` فایل، SHA-256 `eab92d01cea68f922c80bd90c0229aa16088367f55a7d8701a457498ce0a85ce` |
-| بازبینی drift | `passed_artifact_and_source_bound`؛ تأیید بصری signed-in مالک pending |
+| بازبینی drift | `passed_artifact_and_source_bound`؛ طراحی به‌صورت صریح توسط مالک تأیید شده است |
 
-access policy بلافاصله پیش و پس از deploy دوباره خوانده شد: `access_mode=custom`، نقش جاری `owner`، یک کاربر مجاز و آن هم مالک، صفر گروه و صفر بازدیدکننده خارجی. probe ناشناس در `2026-08-08T14:13:54Z` پاسخ `HTTP 401`، `Cache-Control: no-store`، `Referrer-Policy: no-referrer` و عنوان `Sign in required` گرفت و SIWC owner gate را تأیید کرد. بنابراین render ناشناس ادعا نمی‌شود. bypass token درخواست نشد و signed-in live content دور زده/واکشی نشد؛ مالک می‌تواند URL بالا را برای تأیید بصری باز کند.
+access policy بلافاصله پیش و پس از deploy دوباره خوانده شد: `access_mode=custom`، نقش جاری `owner`، یک کاربر مجاز و آن هم مالک، صفر گروه و صفر بازدیدکننده خارجی. probe ناشناس در `2026-08-08T14:13:54Z` پاسخ `HTTP 401`، `Cache-Control: no-store`، `Referrer-Policy: no-referrer` و عنوان `Sign in required` گرفت و SIWC owner gate را تأیید کرد. بنابراین render ناشناس ادعا نمی‌شود. bypass token درخواست نشد و signed-in live content دور زده/واکشی نشد؛ مالک محصول طراحی را در ۲۰۲۶-۰۸-۰۸ به‌صورت صریح تأیید کرد.
 
 verification بسته و deploy:
 
@@ -181,4 +181,4 @@ provenance و نتیجه اجرای نهایی artifactهای محلی:
 
 count authoritative/pagination صف pending و enforcement سمت سرور برای self-target، same-level target و scope مدیر میانی carry-forward صریح Stage اجرایی‌اند؛ وضعیت فعلی backend با contract طراحی یکسان فرض نمی‌شود.
 
-شناسه‌ها، audit/export پس از refreeze، provenance نهایی Figma، harness محلی و Sites URL/source version/archive/deployment/drift review ثبت و تطبیق داده شده‌اند؛ شواهد فنی Stage 0B-4 `complete` است. تأیید بصری مالک در محیط signed-in هنوز pending است، `0B-5` آغاز نشده و تغییر runtime تا تأیید صریح `0B-6` ممنوع می‌ماند.
+شناسه‌ها، audit/export پس از refreeze، provenance نهایی Figma، harness محلی و Sites URL/source version/archive/deployment/drift review ثبت و تطبیق داده شده‌اند؛ شواهد فنی Stage 0B-4 `complete` و طراحی در ۲۰۲۶-۰۸-۰۸ به‌صورت صریح توسط مالک تأیید شده است. شواهد فنی `0B-5` نیز کامل و تأیید بصری مالک آن pending است؛ تغییر runtime تا تأیید صریح `0B-6` ممنوع می‌ماند.

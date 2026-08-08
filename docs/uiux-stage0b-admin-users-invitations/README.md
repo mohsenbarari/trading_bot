@@ -1,6 +1,6 @@
 # Stage 0B-4 — Admin users and standard invitations evidence
 
-وضعیت: **شواهد فنی تکمیل شده؛ در انتظار تأیید بصری مالک محصول.** Phase 0، بسته رسمی Figma، local evidence و Sites خصوصی ثبت شده‌اند.
+وضعیت: **تکمیل و با تأیید صریح بصری مالک محصول در ۲۰۲۶-۰۸-۰۸ بسته شده است.** Phase 0، بسته رسمی Figma، local evidence و Sites خصوصی ثبت شده‌اند.
 
 منبع editable اصلی این checkpoint صفحه `03 — Stage 0B-4 Admin Users & Invitations` با شناسه `75:2` در [فایل Figma پروژه](https://www.figma.com/design/z8jgJxST4O2APzWnlyP9gv) است. freeze نهایی در `2026-08-08T13:43:05.564Z`، audit schema 7 پاس در `2026-08-08T13:44:57.691Z` و capture مستقیم در `2026-08-08T13:45:57.660Z` ثبت شد. Foundations روی `41:2` و component catalog روی `46:2` قرار دارند.
 
@@ -42,7 +42,7 @@ source node، timestamp و SHA-256 نهایی همه خروجی‌ها در mani
 - deployment: `appgdep_6a77396e6a5c8191b9945deaf884107d`، موفق در `2026-08-08T14:13:17.018345Z`
 - archive: `901120` بایت، `28` فایل، SHA-256 `eab92d01cea68f922c80bd90c0229aa16088367f55a7d8701a457498ce0a85ce`
 
-دسترسی پیش و پس از deploy به‌صورت `custom` و owner-only راستی‌آزمایی شد: یک کاربر مجاز، صفر گروه و صفر بازدیدکننده خارجی. probe ناشناس در `2026-08-08T14:13:54Z` با `HTTP 401` و صفحه `Sign in required` متوقف شد؛ render ناشناس ادعا نمی‌شود. signed-in live content نیز بدون bypass token واکشی نشد و تأیید بصری مالک در URL بالا pending است.
+دسترسی پیش و پس از deploy به‌صورت `custom` و owner-only راستی‌آزمایی شد: یک کاربر مجاز، صفر گروه و صفر بازدیدکننده خارجی. probe ناشناس در `2026-08-08T14:13:54Z` با `HTTP 401` و صفحه `Sign in required` متوقف شد؛ render ناشناس ادعا نمی‌شود. signed-in live content نیز بدون bypass token واکشی نشد؛ مالک محصول طراحی را در ۲۰۲۶-۰۸-۰۸ به‌صورت صریح تأیید کرد.
 
 این preview نباید:
 

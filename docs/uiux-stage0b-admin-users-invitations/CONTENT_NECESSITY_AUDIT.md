@@ -1,6 +1,6 @@
 # Stage 0B-4 content-necessity audit
 
-وضعیت: قرارداد محتوایی Phase 0 در بسته نهایی Figma با audit schema 7، در evidence محلی با `25 / 25` assertion و در بسته source-bound پیش‌نمایش خصوصی Sites پاس است؛ تأیید بصری مالک pending است.
+وضعیت: قرارداد محتوایی Phase 0 در بسته نهایی Figma با audit schema 7، در evidence محلی با `25 / 25` assertion و در بسته source-bound پیش‌نمایش خصوصی Sites پاس است؛ طراحی در ۲۰۲۶-۰۸-۰۸ به‌صورت صریح توسط مالک محصول تأیید شده است.
 
 اصل مرجع: هر واحد پیش‌فرض باید تصمیم، اقدام، وضعیت ضروری یا پیشگیری از ریسک را روشن کند. داشتن داده، نقش ادمین یا فضای خالی توجیه نمایش نیست.
 
@@ -86,4 +86,4 @@
 
 ## گیت نهایی
 
-این inventory قرارداد ورودی طراحی است. تطبیق rootهای Figma، screenshotهای مستقیم، harness محلی و archive/source پیش‌نمایش خصوصی Sites با این جدول پاس شده و شواهد فنی Stage بسته است. محتوای signed-in live بدون bypass token واکشی نشده؛ بنابراین تأیید بصری مالک در URL owner-only هنوز لازم است و هیچ ادعای render ناشناس یا رفتار runtime وجود ندارد.
+این inventory قرارداد ورودی طراحی است. تطبیق rootهای Figma، screenshotهای مستقیم، harness محلی و archive/source پیش‌نمایش خصوصی Sites با این جدول پاس شده، شواهد فنی Stage بسته و طراحی در ۲۰۲۶-۰۸-۰۸ به‌صورت صریح توسط مالک محصول تأیید شده است. محتوای signed-in live بدون bypass token واکشی نشده؛ هیچ ادعای render ناشناس یا رفتار runtime وجود ندارد.
