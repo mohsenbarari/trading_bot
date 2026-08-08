@@ -304,8 +304,11 @@ services:
       FOREIGN_SERVER_URL: ${STAGING_FOREIGN_FOREIGN_SERVER_URL:-http://foreign_app:8000}
       GERMANY_SERVER_URL: ${STAGING_FOREIGN_FOREIGN_SERVER_URL:-http://foreign_app:8000}
       BOT_TOKEN: ""
-      DB_POOL_SIZE: ${STAGING_LOAD_DB_POOL_SIZE:-5}
-      DB_MAX_OVERFLOW: ${STAGING_LOAD_DB_MAX_OVERFLOW:-5}
+      # Match the production application's 15+10 connection envelope.  The
+      # comprehensive correctness matrix admits up to 24 independent writes;
+      # a 5+5 pool measures pool starvation instead of market correctness.
+      DB_POOL_SIZE: ${STAGING_LOAD_DB_POOL_SIZE:-15}
+      DB_MAX_OVERFLOW: ${STAGING_LOAD_DB_MAX_OVERFLOW:-10}
       DB_POOL_RECYCLE_SECONDS: ${DB_POOL_RECYCLE_SECONDS:-3600}
       OTP_DELIVERY_STATE_SECRET: ""
       IRAN_OTP_DELIVERY_STATE_SECRET: ""
@@ -336,8 +339,9 @@ services:
       SERVER_MODE: iran
       RELEASE_SHA: ${STAGING_RELEASE_SHA:-staging}
       BOT_TOKEN: ""
-      DB_POOL_SIZE: ${STAGING_LOAD_DB_POOL_SIZE:-5}
-      DB_MAX_OVERFLOW: ${STAGING_LOAD_DB_MAX_OVERFLOW:-5}
+      # Keep both load-runner roles symmetric and production-representative.
+      DB_POOL_SIZE: ${STAGING_LOAD_DB_POOL_SIZE:-15}
+      DB_MAX_OVERFLOW: ${STAGING_LOAD_DB_MAX_OVERFLOW:-10}
       DB_POOL_RECYCLE_SECONDS: ${DB_POOL_RECYCLE_SECONDS:-3600}
       OTP_DELIVERY_STATE_SECRET: ""
       IRAN_OTP_DELIVERY_STATE_SECRET: ""

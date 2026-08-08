@@ -176,9 +176,12 @@ BROAD_CLEANUP_PREFIXES = {
     "tmp",
     "user",
 }
-CLEANUP_DB_RETRY_ATTEMPTS = 6
+CLEANUP_DB_RETRY_ATTEMPTS = 12
 CLEANUP_SQL_IN_BATCH_SIZE = 5000
-RETRYABLE_CLEANUP_SQLSTATES = {"40P01", "40001"}
+# 55P03 is raised by the cleanup's fail-fast NOWAIT row pre-lock.  Treating it
+# as transient keeps cleanup from ever joining a worker lock cycle while still
+# failing closed when the synthetic scope cannot converge after bounded retries.
+RETRYABLE_CLEANUP_SQLSTATES = {"40P01", "40001", "55P03"}
 _PRODUCTION_CLEANUP_HARD_DELETE_ALLOWED = False
 
 
@@ -1761,9 +1764,11 @@ TARGETED_SYNC_TABLE_GROUPS: tuple[tuple[str, ...], ...] = (
     # Owner users are synced in the dedicated users stage above; do not re-push
     # users here or seeded-user catchup with `--table users` would run twice.
     ("offers", "offer_publication_states"),
-    ("trades",),
-    ("offer_requests",),
-    ("trade_delivery_receipts",),
+    # Keep trade parents and their dependent request/receipt rows in one peer
+    # receive transaction.  The receiver's deferred pass can then localize a
+    # receipt by trade_number even when its parent was absent before this
+    # catchup request began.
+    ("trades", "offer_requests", "trade_delivery_receipts"),
     ("telegram_admin_broadcasts",),
     ("telegram_admin_broadcast_receipts",),
 )
@@ -1942,7 +1947,7 @@ async def push_prefix_change_logs_to_peer(
     *,
     batch_size: int = 200,
     tables: tuple[str, ...] = TARGETED_SYNC_TABLES,
-    max_attempts: int = 3,
+    max_attempts: int = 8,
     include_synced: bool = False,
 ) -> dict[str, Any]:
     from core.server_routing import default_peer_server_url
@@ -2036,10 +2041,97 @@ async def push_prefix_change_logs_to_peer(
 
 
 async def lock_cleanup_users(db: Any, user_ids: list[int]) -> None:
-    for batch in cleanup_in_batches(user_ids):
+    for batch in cleanup_in_batches(sorted(user_ids)):
         await db.execute(
-            cleanup_mutating_statement(select(User.id).where(User.id.in_(batch)).with_for_update())
+            cleanup_mutating_statement(
+                select(User.id)
+                .where(User.id.in_(batch))
+                .order_by(User.id.asc())
+                .with_for_update(nowait=True)
+            )
         )
+
+
+async def lock_cleanup_rows_nowait(
+    db: Any,
+    model: Any,
+    column: Any,
+    values: list[Any],
+) -> None:
+    """Pre-lock a synthetic cleanup scope without waiting on live workers.
+
+    Queue and delivery workers lock operational rows in their own transaction
+    order.  A cleanup transaction must not wait while holding a different row,
+    otherwise the matrix itself can manufacture a PostgreSQL deadlock.  NOWAIT
+    makes a busy row a bounded cleanup retry instead of a lock cycle.
+    """
+    ordered_values = sorted(stable_unique(values), key=str)
+    for batch in cleanup_in_batches(ordered_values):
+        await db.execute(
+            cleanup_mutating_statement(
+                select(model.id)
+                .where(column.in_(batch))
+                .order_by(model.id.asc())
+                .with_for_update(nowait=True)
+            )
+        )
+
+
+async def lock_cleanup_plan_rows_nowait(db: Any, plan: CleanupPlan) -> None:
+    """Acquire deterministic fail-fast locks before deleting any scoped row."""
+    targets = (
+        (
+            SingleSessionRecoveryAdminTarget,
+            SingleSessionRecoveryAdminTarget.id,
+            plan.recovery_admin_target_ids,
+        ),
+        (
+            SingleSessionRecoveryRequest,
+            SingleSessionRecoveryRequest.id,
+            plan.recovery_request_ids,
+        ),
+        (SessionLoginRequest, SessionLoginRequest.id, plan.session_login_request_ids),
+        (UserSession, UserSession.id, plan.user_session_ids),
+        (TelegramLinkToken, TelegramLinkToken.id, plan.telegram_link_token_ids),
+        (PushSubscription, PushSubscription.id, plan.push_subscription_ids),
+        (TradeDeliveryReceipt, TradeDeliveryReceipt.id, plan.trade_delivery_receipt_ids),
+        (
+            TelegramAdminBroadcastReceipt,
+            TelegramAdminBroadcastReceipt.id,
+            plan.telegram_admin_broadcast_receipt_ids,
+        ),
+        (
+            TelegramNotificationOutbox,
+            TelegramNotificationOutbox.id,
+            plan.telegram_notification_outbox_ids,
+        ),
+        (
+            TelegramDeliveryJobRecord,
+            TelegramDeliveryJobRecord.id,
+            plan.telegram_delivery_job_ids,
+        ),
+        (Notification, Notification.id, plan.notification_ids),
+        (
+            TelegramAdminBroadcast,
+            TelegramAdminBroadcast.id,
+            plan.telegram_admin_broadcast_ids,
+        ),
+        (
+            OfferPublicationState,
+            OfferPublicationState.id,
+            plan.publication_state_ids,
+        ),
+        (OfferRequest, OfferRequest.id, plan.offer_request_ids),
+        (ChatMember, ChatMember.id, plan.chat_member_ids),
+        (UserBlock, UserBlock.id, plan.user_block_ids),
+        (AccountantRelation, AccountantRelation.id, plan.accountant_relation_ids),
+        (CustomerRelation, CustomerRelation.id, plan.customer_relation_ids),
+        (Invitation, Invitation.id, plan.invitation_ids),
+        (Trade, Trade.id, plan.trade_ids),
+        (Offer, Offer.id, plan.offer_ids),
+    )
+    for model, column, values in targets:
+        await lock_cleanup_rows_nowait(db, model, column, list(values))
 
 
 async def delete_in_batches(db: Any, model: Any, column: Any, values: list[int] | list[str]) -> int:
@@ -2074,6 +2166,9 @@ async def delete_cleanup_plan(plan: CleanupPlan) -> dict[str, Any]:
         deleted_users = 0
         deleted_offer_requests = 0
         deleted_publication_states = 0
+        # Fail fast before the first mutation if a live queue/delivery worker
+        # owns any scoped row.  The outer bounded retry gets a fresh plan.
+        await lock_cleanup_plan_rows_nowait(db, plan)
         await lock_cleanup_users(db, plan.user_ids)
         deleted_recovery_admin_targets = await delete_in_batches(
             db,

@@ -2629,7 +2629,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--comprehensive-market-write-max-concurrency",
         type=int,
-        default=24,
+        default=8,
+        help=(
+            "Correctness-lane admission limit for independent writes. Queue "
+            "throughput is stressed separately by the deterministic wave."
+        ),
     )
     parser.add_argument(
         "--comprehensive-market-timeout-seconds",

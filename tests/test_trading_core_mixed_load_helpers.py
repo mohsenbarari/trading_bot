@@ -1527,6 +1527,24 @@ class TradingCoreMixedLoadHelperTests(unittest.TestCase):
             with self.assertRaises(worker.TradingProbeError):
                 worker.cleanup_mutating_statement(worker.delete(worker.Offer).where(worker.Offer.id == 1))
 
+    def test_cleanup_prelocks_scoped_rows_with_nowait(self):
+        row_lock_source = inspect.getsource(worker.lock_cleanup_rows_nowait)
+        plan_lock_source = inspect.getsource(worker.lock_cleanup_plan_rows_nowait)
+
+        self.assertIn("with_for_update(nowait=True)", row_lock_source)
+        self.assertIn("TelegramDeliveryJobRecord", plan_lock_source)
+        self.assertIn("TelegramNotificationOutbox", plan_lock_source)
+        self.assertIn("TradeDeliveryReceipt", plan_lock_source)
+
+    def test_cleanup_lock_not_available_is_bounded_retryable(self):
+        class LockNotAvailable(Exception):
+            sqlstate = "55P03"
+
+        exc = worker.DBAPIError("SELECT FOR UPDATE NOWAIT", {}, LockNotAvailable())
+
+        self.assertTrue(worker.is_retryable_cleanup_database_error(exc))
+        self.assertGreaterEqual(worker.CLEANUP_DB_RETRY_ATTEMPTS, 10)
+
     def test_cleanup_deletes_late_chat_members_by_user_id_before_users(self):
         source = inspect.getsource(worker.delete_cleanup_plan)
 

@@ -128,7 +128,7 @@ READ_VIEW_FAMILIES = {
 }
 DEFAULT_READ_VIEW_MAX_CONCURRENCY = 96
 EXPIRY_BUSY_RETRY_ATTEMPTS = 8
-EXPIRY_RECONCILE_ROUNDS = 4
+EXPIRY_RECONCILE_ROUNDS = 8
 
 
 def scenario_key(value: str) -> str:
@@ -613,13 +613,20 @@ async def finalize_offer_for_terminal_state(
             return offer_id
         if terminal_state == "manual_expired":
             target_server = SERVER_FOREIGN if origin == "bot" else SERVER_IRAN
-            try:
-                with override_current_server(target_server):
-                    await worker.expire_offer_for_user(user_id=owner.user_id, offer_id=offer_id)
-            except Exception as exc:
-                raise worker.TradingProbeError(
-                    f"terminal manual expiry setup failed: {type(exc).__name__}: {exc}"
-                ) from exc
+            for attempt in range(EXPIRY_BUSY_RETRY_ATTEMPTS):
+                try:
+                    with override_current_server(target_server):
+                        await worker.expire_offer_for_user(user_id=owner.user_id, offer_id=offer_id)
+                    break
+                except Exception as exc:
+                    detail = str(getattr(exc, "detail", "") or exc)
+                    busy = worker.offers_router.OFFER_EXPIRY_LOCK_BUSY_DETAIL in detail
+                    if busy and attempt < EXPIRY_BUSY_RETRY_ATTEMPTS - 1:
+                        await asyncio.sleep(0.15 * (attempt + 1))
+                        continue
+                    raise worker.TradingProbeError(
+                        f"terminal manual expiry setup failed: {type(exc).__name__}: {exc}"
+                    ) from exc
             await assert_offer_terminal(offer_id=offer_id, expected_status=OfferStatus.EXPIRED.value)
             return offer_id
         if terminal_state == "time_expired":

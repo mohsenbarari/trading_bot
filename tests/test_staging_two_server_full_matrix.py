@@ -739,6 +739,10 @@ class StagingTwoServerFullMatrixTests(unittest.TestCase):
             worker.TARGETED_SYNC_TABLES.index("trades"),
             worker.TARGETED_SYNC_TABLES.index("trade_delivery_receipts"),
         )
+        self.assertIn(
+            ("trades", "offer_requests", "trade_delivery_receipts"),
+            worker.TARGETED_SYNC_TABLE_GROUPS,
+        )
 
     def test_driver_sync_catchup_replays_synced_prefix_rows_for_convergence(self):
         calls = []
