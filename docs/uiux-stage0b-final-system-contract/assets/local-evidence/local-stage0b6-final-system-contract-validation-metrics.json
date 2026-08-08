@@ -1,0 +1,1803 @@
+{
+  "schemaVersion": 1,
+  "stage": "0B-6",
+  "status": "passed",
+  "runId": "stage0b6-20260808T205504009Z-c6c1b8be",
+  "startedAt": "2026-08-08T20:55:04.009Z",
+  "completedAt": "2026-08-08T20:55:13.301Z",
+  "canonicalFigma": {
+    "fileKey": "z8jgJxST4O2APzWnlyP9gv",
+    "pageId": "168:1974",
+    "boardId": "168:1975",
+    "frozenAt": "2026-08-08T19:54:11.151Z",
+    "auditedAt": "2026-08-08T20:06:32.118Z",
+    "provenanceRereadAt": "2026-08-08T20:15:41.663Z",
+    "canonicalRole": "primary",
+    "localEvidenceRole": "secondary-derivative",
+    "directAudit": {
+      "assertionCount": 32,
+      "passed": 32,
+      "failed": 0,
+      "status": "passed",
+      "variables": 65,
+      "textStyles": 9,
+      "effects": 2,
+      "componentSets": 12,
+      "componentVariants": 56,
+      "brokenAliases": 0,
+      "productInstances": 30,
+      "detachedProductInstances": 0,
+      "operationsConsumers": 31,
+      "factPairsPassed": 11,
+      "factPairsTotal": 11,
+      "productOverflowFindings": 0,
+      "textClippingFindings": 0,
+      "minimumTextContrast": 4.55,
+      "touchTargetsMeasured": 41,
+      "minimumTouchTarget": 44,
+      "primaryCta": {
+        "width": 358,
+        "height": 48
+      },
+      "minimumNavigationLabelPx": 11,
+      "focusContrast": 4.35,
+      "focusStrokePx": 3,
+      "reviewerMetadataFindings": 0,
+      "piiFindings": 0,
+      "forbiddenCopyFindings": 0,
+      "protectedInteriorFindings": 0,
+      "provenance": "post-freeze-direct-figma-audit",
+      "localHarnessClaim": false
+    },
+    "exactAssertionIds": [
+      "owner-approval-0b1-through-0b5-recorded",
+      "canonical-source-registry-complete",
+      "canonical-source-references-resolve",
+      "approved-source-fact-parity",
+      "stage0b6-contract-only-no-new-feature-facts",
+      "runtime-diff-empty",
+      "modern-finance-direction-locked",
+      "font-vazirmatn-only",
+      "foundation-inventory-65-9-2",
+      "broken-variable-aliases-zero",
+      "component-inventory-12-sets-56-variants-with-delta",
+      "product-proof-detached-instances-zero",
+      "known-figma-debt-disposition-complete",
+      "five-mobile-family-references-complete",
+      "mobile-reference-roots-390x844",
+      "responsive-widths-360-375-390-414-430",
+      "desktop-layout-archetypes-complete",
+      "desktop-fact-parity",
+      "no-product-overflow-or-clipping",
+      "touch-targets-44",
+      "primary-cta-height-48",
+      "navigation-label-11",
+      "text-contrast-45",
+      "focus-contrast-3-stroke-3",
+      "shell-route-layer-contract-complete",
+      "common-state-feedback-contract-complete",
+      "motion-reduced-motion-contract-complete",
+      "content-necessity-inventory-complete",
+      "reviewer-metadata-absent-from-product-roots",
+      "synthetic-identities-and-forbidden-copy-clean",
+      "protected-interiors-absent",
+      "implementation-gate-and-static-limits-explicit"
+    ]
+  },
+  "directFigmaReconciliation": {
+    "status": "passed",
+    "provenance": "hash-bound post-freeze direct audit JSON; not inferred by local browser",
+    "auditedAt": "2026-08-08T20:06:32.118Z",
+    "assertionCount": 32,
+    "passed": 32,
+    "failed": 0,
+    "exactAssertionIds": [
+      "owner-approval-0b1-through-0b5-recorded",
+      "canonical-source-registry-complete",
+      "canonical-source-references-resolve",
+      "approved-source-fact-parity",
+      "stage0b6-contract-only-no-new-feature-facts",
+      "runtime-diff-empty",
+      "modern-finance-direction-locked",
+      "font-vazirmatn-only",
+      "foundation-inventory-65-9-2",
+      "broken-variable-aliases-zero",
+      "component-inventory-12-sets-56-variants-with-delta",
+      "product-proof-detached-instances-zero",
+      "known-figma-debt-disposition-complete",
+      "five-mobile-family-references-complete",
+      "mobile-reference-roots-390x844",
+      "responsive-widths-360-375-390-414-430",
+      "desktop-layout-archetypes-complete",
+      "desktop-fact-parity",
+      "no-product-overflow-or-clipping",
+      "touch-targets-44",
+      "primary-cta-height-48",
+      "navigation-label-11",
+      "text-contrast-45",
+      "focus-contrast-3-stroke-3",
+      "shell-route-layer-contract-complete",
+      "common-state-feedback-contract-complete",
+      "motion-reduced-motion-contract-complete",
+      "content-necessity-inventory-complete",
+      "reviewer-metadata-absent-from-product-roots",
+      "synthetic-identities-and-forbidden-copy-clean",
+      "protected-interiors-absent",
+      "implementation-gate-and-static-limits-explicit"
+    ],
+    "localHarnessClaim": false,
+    "auditJson": {
+      "path": "docs/uiux-stage0b-final-system-contract/assets/figma-stage0b6-audit-metrics.json",
+      "bytes": 7363,
+      "sha256": "7eaa85d626366ea623714fa4d22cc521bf4455434c05e72db1a4b38a9659e2ff",
+      "schema": 3
+    },
+    "exports": [
+      {
+        "file": "figma-approved-family-reference-strip.png",
+        "width": 1720,
+        "height": 1992,
+        "bytes": 152409,
+        "sha256": "a9ecd7aa52688d1d1ef217894d8e611ea9246ad93e1e060a0c479a32c7bc3108",
+        "validated": true
+      },
+      {
+        "file": "figma-content-privacy-protected-surfaces-contract.png",
+        "width": 1720,
+        "height": 542,
+        "bytes": 63242,
+        "sha256": "d6b621c463f6eebfc798794d3a83ea0a36e8ea2735a7a710d77a641e3a417bd0",
+        "validated": true
+      },
+      {
+        "file": "figma-desktop-operational-master-detail-1440x900.png",
+        "width": 1440,
+        "height": 900,
+        "bytes": 63343,
+        "sha256": "dca4b855d7d04c7b9664978b6e49a67eb2d629b37ae8b0c8c3d4b3e99a326361",
+        "validated": true
+      },
+      {
+        "file": "figma-foundations-components-contract.png",
+        "width": 1720,
+        "height": 426,
+        "bytes": 46337,
+        "sha256": "ecdff065886a2da92878515702f7afbc35e7c1f373aa793c25d9f164652f1e29",
+        "validated": true
+      },
+      {
+        "file": "figma-implementation-stage-map.png",
+        "width": 1720,
+        "height": 566,
+        "bytes": 68419,
+        "sha256": "c397b399c1f787024a512168661c6bb367f07c0ec4bb98632d185fb9f8e35705",
+        "validated": true
+      },
+      {
+        "file": "figma-responsive-desktop-acceptance-proofs.png",
+        "width": 1720,
+        "height": 3206,
+        "bytes": 166773,
+        "sha256": "ee54bfbf6b674c4621dee5de4331642d461f27726413f486b07c46a024e880fe",
+        "validated": true
+      },
+      {
+        "file": "figma-shell-route-layout-contract.png",
+        "width": 1720,
+        "height": 706,
+        "bytes": 106651,
+        "sha256": "4cb6b124aac4d7ffbda39325e34dcd9c75fbdf73d0289bde9fc25d5034e7cfa5",
+        "validated": true
+      },
+      {
+        "file": "figma-state-feedback-motion-accessibility-contract.png",
+        "width": 1720,
+        "height": 448,
+        "bytes": 55788,
+        "sha256": "1d3d9ab1b009b1024df286d60a5e5aab36bfd930e908a8d8c7546d82ecbcf91a",
+        "validated": true
+      },
+      {
+        "file": "figma-system-scope-provenance-gate.png",
+        "width": 1720,
+        "height": 444,
+        "bytes": 44974,
+        "sha256": "7a68aa07a73166ccbedcdade3ee6c6af3a5ea44f1de2656c81461f6ae8f6c5f2",
+        "validated": true
+      }
+    ],
+    "exportAggregateSha256": "7e051d3c101a37591c01de4cec8884a1aba3c40b0d73b451e5ad96c2999ec7e2"
+  },
+  "localEvidence": {
+    "role": "secondary-derivative",
+    "canonical": false,
+    "productBehaviorProof": false,
+    "sourceHtml": {
+      "path": "docs/uiux-stage0b-final-system-contract/final-system-contract-evidence.html",
+      "bytes": 69362,
+      "sha256": "6bfe3fce136eb2477f6cbac99561d2e934b469324f3db3c6ca5ec60fee61d5fa"
+    },
+    "mobileFirstShare": 95
+  },
+  "runtimeDiffProof": {
+    "kind": "external-read-only",
+    "status": "passed",
+    "runtimeDiff": "empty",
+    "localHarnessClaim": false,
+    "behaviorProven": false
+  },
+  "protectedScope": {
+    "omitted": [
+      "market",
+      "messenger",
+      "share-receive",
+      "admin-channels"
+    ],
+    "localInteriorCaptures": 0
+  },
+  "sourceReferences": [
+    {
+      "path": "docs/WEBAPP_UI_UX_REDESIGN_V2_STAGE0B_AUTH_CHECKPOINT_20260718.md",
+      "bytes": 26037,
+      "sha256": "fc28bc4d535f3e70871d6a2070d369d143a2cb4ff15c1cf05183ce3eb86393b5",
+      "resolved": true
+    },
+    {
+      "path": "docs/WEBAPP_UI_UX_REDESIGN_V2_STAGE0B_HOME_SHELL_CHECKPOINT_20260808.md",
+      "bytes": 15662,
+      "sha256": "fec7b3e2f245c5ecd4cfdd2db697df45804e003370cb3f91c3bb9571d2c0c339",
+      "resolved": true
+    },
+    {
+      "path": "docs/WEBAPP_UI_UX_REDESIGN_V2_STAGE0B_OPERATIONS_WORKSPACES_CHECKPOINT_20260808.md",
+      "bytes": 17749,
+      "sha256": "7e84bda248ff21145ba1a9bc5c2f3ef01874768dd50f0a1de5916008da09c21a",
+      "resolved": true
+    },
+    {
+      "path": "docs/WEBAPP_UI_UX_REDESIGN_V2_STAGE0B_ADMIN_USERS_INVITATIONS_CHECKPOINT_20260808.md",
+      "bytes": 31096,
+      "sha256": "60a377a9ce8cfc23f596b7e82e0e2e535a67f8cde811e2e9deb4973071c1f527",
+      "resolved": true
+    },
+    {
+      "path": "docs/WEBAPP_UI_UX_REDESIGN_V2_STAGE0B_ACCOUNT_PROFILE_SECURITY_NOTIFICATIONS_CHECKPOINT_20260808.md",
+      "bytes": 22271,
+      "sha256": "29afb9988189360b8e6852197a37c4d289d5781dc3692b842c7157a2748b5422",
+      "resolved": true
+    }
+  ],
+  "recoveryBeforeDependencyResolution": {
+    "action": "clean",
+    "recovered": false
+  },
+  "dependencies": {
+    "node": "v20.19.5",
+    "platform": "linux-x64",
+    "playwright": "/root/trading-bot/trading_bot/frontend/node_modules/playwright/index.js",
+    "browser": {
+      "engine": "chromium",
+      "version": "147.0.7727.15",
+      "viewport": {
+        "width": 2300,
+        "height": 1200
+      },
+      "deviceScaleFactor": 1
+    },
+    "fonts": {
+      "family": "Vazirmatn",
+      "root": "/tmp/trading-bot-webapp-uiux-redesign-v2/frontend/node_modules/vazirmatn/fonts/webfonts",
+      "checks": [
+        {
+          "weight": 400,
+          "loaded": true
+        },
+        {
+          "weight": 500,
+          "loaded": true
+        },
+        {
+          "weight": 600,
+          "loaded": true
+        },
+        {
+          "weight": 700,
+          "loaded": true
+        }
+      ],
+      "files": [
+        {
+          "file": "Vazirmatn-Regular.woff2",
+          "weight": 400,
+          "bytes": 50684,
+          "sha256": "e382101336c6eb32cfb31381c027d02d2e0354bad08f6a395d4088beb3db3d91"
+        },
+        {
+          "file": "Vazirmatn-Medium.woff2",
+          "weight": 500,
+          "bytes": 51128,
+          "sha256": "3333e31188a2b628db8780ca22fd5aad85bc083ccee9beb8d4d52db18cb98d48"
+        },
+        {
+          "file": "Vazirmatn-SemiBold.woff2",
+          "weight": 600,
+          "bytes": 51032,
+          "sha256": "6a39a3c25eb18503cad590527b95bb5d4062b889a7ebbd3f01b0488d239e0499"
+        },
+        {
+          "file": "Vazirmatn-Bold.woff2",
+          "weight": 700,
+          "bytes": 51020,
+          "sha256": "836fae7d42d83faa249bc00e0099592be98a1fa260d22d82f269b6091e585627"
+        }
+      ]
+    }
+  },
+  "integrity": {
+    "preDomSha256": "c974469f9240d756449587e577cb965387634577b0d873263471aa411d88680c",
+    "postDomSha256": "c974469f9240d756449587e577cb965387634577b0d873263471aa411d88680c",
+    "domEqual": true,
+    "preAuditSha256": "f6a7ed5b95871475ff96d31d8b6fe73fb89d6caaef947cea8f8b046f364d0955",
+    "postAuditSha256": "f6a7ed5b95871475ff96d31d8b6fe73fb89d6caaef947cea8f8b046f364d0955",
+    "auditEqual": true,
+    "postCaptureRemeasurement": true,
+    "consoleErrors": [],
+    "pageErrors": [],
+    "failedRequests": [],
+    "blockedNetworkRequests": []
+  },
+  "assertions": [
+    {
+      "id": "owner-approval-0b1-through-0b5-recorded",
+      "passed": true,
+      "evidence": [
+        {
+          "stage": "0B-1",
+          "status": "approved"
+        },
+        {
+          "stage": "0B-2",
+          "status": "approved"
+        },
+        {
+          "stage": "0B-3",
+          "status": "approved"
+        },
+        {
+          "stage": "0B-4",
+          "status": "approved"
+        },
+        {
+          "stage": "0B-5",
+          "status": "approved"
+        }
+      ]
+    },
+    {
+      "id": "canonical-source-registry-complete",
+      "passed": true,
+      "evidence": [
+        {
+          "stage": "0B-1",
+          "family": "auth",
+          "status": "resolved",
+          "path": "docs/WEBAPP_UI_UX_REDESIGN_V2_STAGE0B_AUTH_CHECKPOINT_20260718.md"
+        },
+        {
+          "stage": "0B-2",
+          "family": "home-shell",
+          "status": "resolved",
+          "path": "docs/WEBAPP_UI_UX_REDESIGN_V2_STAGE0B_HOME_SHELL_CHECKPOINT_20260808.md"
+        },
+        {
+          "stage": "0B-3",
+          "family": "operations-workspaces",
+          "status": "resolved",
+          "path": "docs/WEBAPP_UI_UX_REDESIGN_V2_STAGE0B_OPERATIONS_WORKSPACES_CHECKPOINT_20260808.md"
+        },
+        {
+          "stage": "0B-4",
+          "family": "admin-invitations",
+          "status": "resolved",
+          "path": "docs/WEBAPP_UI_UX_REDESIGN_V2_STAGE0B_ADMIN_USERS_INVITATIONS_CHECKPOINT_20260808.md"
+        },
+        {
+          "stage": "0B-5",
+          "family": "account-profile",
+          "status": "resolved",
+          "path": "docs/WEBAPP_UI_UX_REDESIGN_V2_STAGE0B_ACCOUNT_PROFILE_SECURITY_NOTIFICATIONS_CHECKPOINT_20260808.md"
+        }
+      ]
+    },
+    {
+      "id": "canonical-source-references-resolve",
+      "passed": true,
+      "evidence": {
+        "sourceReferencesResolved": true,
+        "paths": [
+          "docs/WEBAPP_UI_UX_REDESIGN_V2_STAGE0B_AUTH_CHECKPOINT_20260718.md",
+          "docs/WEBAPP_UI_UX_REDESIGN_V2_STAGE0B_HOME_SHELL_CHECKPOINT_20260808.md",
+          "docs/WEBAPP_UI_UX_REDESIGN_V2_STAGE0B_OPERATIONS_WORKSPACES_CHECKPOINT_20260808.md",
+          "docs/WEBAPP_UI_UX_REDESIGN_V2_STAGE0B_ADMIN_USERS_INVITATIONS_CHECKPOINT_20260808.md",
+          "docs/WEBAPP_UI_UX_REDESIGN_V2_STAGE0B_ACCOUNT_PROFILE_SECURITY_NOTIFICATIONS_CHECKPOINT_20260808.md"
+        ]
+      }
+    },
+    {
+      "id": "approved-source-fact-parity",
+      "passed": true,
+      "evidence": {
+        "familyBindings": [
+          [
+            "auth",
+            "0B-1"
+          ],
+          [
+            "home-shell",
+            "0B-2"
+          ],
+          [
+            "operations-workspaces",
+            "0B-3"
+          ],
+          [
+            "admin-invitations",
+            "0B-4"
+          ],
+          [
+            "account-profile",
+            "0B-5"
+          ]
+        ],
+        "exactVisibleFactParity": [
+          {
+            "family": "auth",
+            "passed": true,
+            "actual": [
+              "0912 345 6789",
+              "دریافت کد",
+              "دریافت کد تأیید",
+              "سامانه معاملات",
+              "شماره موبایل",
+              "شماره موبایل ثبت‌شده را وارد کنید تا کد تأیید برای شما ارسال شود.",
+              "مرحله ۱ از ۲",
+              "ورود به سامانه",
+              "کد ابتدا در تلگرام و در صورت نیاز به‌صورت خودکار با پیامک ارسال می‌شود."
+            ],
+            "expected": [
+              "0912 345 6789",
+              "دریافت کد",
+              "دریافت کد تأیید",
+              "سامانه معاملات",
+              "شماره موبایل",
+              "شماره موبایل ثبت‌شده را وارد کنید تا کد تأیید برای شما ارسال شود.",
+              "مرحله ۱ از ۲",
+              "ورود به سامانه",
+              "کد ابتدا در تلگرام و در صورت نیاز به‌صورت خودکار با پیامک ارسال می‌شود."
+            ]
+          },
+          {
+            "family": "home-shell",
+            "passed": true,
+            "actual": [
+              "بازار",
+              "حساب",
+              "خانه",
+              "خانه",
+              "عملیات",
+              "ن",
+              "نگار پارسا",
+              "پیام‌رسان",
+              "۲"
+            ],
+            "expected": [
+              "بازار",
+              "حساب",
+              "خانه",
+              "خانه",
+              "عملیات",
+              "ن",
+              "نگار پارسا",
+              "پیام‌رسان",
+              "۲"
+            ]
+          },
+          {
+            "family": "operations-workspaces",
+            "passed": true,
+            "actual": [
+              "+",
+              "0912 *** 0003 · تا ۲۲ مرداد",
+              "0912 *** 0004 · سطح ۲",
+              "0912 *** 0005 · سطح ۱",
+              "0912 *** 0006",
+              "بازار",
+              "جستجوی مشتری",
+              "حساب",
+              "خانه",
+              "دعوت",
+              "دعوت نمونه",
+              "عملیات",
+              "غیرفعال",
+              "فعال",
+              "فعال",
+              "مشتری نمونه دو",
+              "مشتری نمونه سه",
+              "مشتری نمونه یک",
+              "مشتریان",
+              "ن",
+              "نگار پارسا",
+              "پیام‌رسان",
+              "۲ دعوت در انتظار"
+            ],
+            "expected": [
+              "+",
+              "0912 *** 0003 · تا ۲۲ مرداد",
+              "0912 *** 0004 · سطح ۲",
+              "0912 *** 0005 · سطح ۱",
+              "0912 *** 0006",
+              "بازار",
+              "جستجوی مشتری",
+              "حساب",
+              "خانه",
+              "دعوت",
+              "دعوت نمونه",
+              "عملیات",
+              "غیرفعال",
+              "فعال",
+              "فعال",
+              "مشتری نمونه دو",
+              "مشتری نمونه سه",
+              "مشتری نمونه یک",
+              "مشتریان",
+              "ن",
+              "نگار پارسا",
+              "پیام‌رسان",
+              "۲ دعوت در انتظار"
+            ]
+          },
+          {
+            "family": "admin-invitations",
+            "passed": true,
+            "actual": [
+              "0912 *** 0000 · کاربر عادی",
+              "0912 *** 0001 · تماشا",
+              "0912 *** 0002 · غیرفعال",
+              "بازار",
+              "جست‌وجو",
+              "حساب",
+              "خانه",
+              "عملیات",
+              "فعال",
+              "فعال",
+              "م",
+              "مدیر نمونه",
+              "نام، شماره یا حساب",
+              "نیازمند اقدام",
+              "پیام‌رسان",
+              "کاربر آزمایشی",
+              "کاربر نمونه",
+              "کاربر نمونه با نام طولانی",
+              "کاربران"
+            ],
+            "expected": [
+              "0912 *** 0000 · کاربر عادی",
+              "0912 *** 0001 · تماشا",
+              "0912 *** 0002 · غیرفعال",
+              "بازار",
+              "جست‌وجو",
+              "حساب",
+              "خانه",
+              "عملیات",
+              "فعال",
+              "فعال",
+              "م",
+              "مدیر نمونه",
+              "نام، شماره یا حساب",
+              "نیازمند اقدام",
+              "پیام‌رسان",
+              "کاربر آزمایشی",
+              "کاربر نمونه",
+              "کاربر نمونه با نام طولانی",
+              "کاربران"
+            ]
+          },
+          {
+            "family": "account-profile",
+            "passed": true,
+            "actual": [
+              "آواتار و آدرس حساب",
+              "اتصال تلگرام",
+              "اختیاری؛ دسترسی وب محدود نمی‌شود",
+              "اعلان‌ها",
+              "امنیت و نشست‌ها",
+              "بازار",
+              "حافظه و داده‌ها",
+              "حساب",
+              "حساب",
+              "خانه",
+              "دستگاه‌های فعال این حساب",
+              "عملیات",
+              "فایل‌های ذخیره‌شده همین دستگاه",
+              "معاملات و سایر پیام‌ها",
+              "ن",
+              "نگار پارسا",
+              "پروفایل",
+              "پیام‌رسان"
+            ],
+            "expected": [
+              "آواتار و آدرس حساب",
+              "اتصال تلگرام",
+              "اختیاری؛ دسترسی وب محدود نمی‌شود",
+              "اعلان‌ها",
+              "امنیت و نشست‌ها",
+              "بازار",
+              "حافظه و داده‌ها",
+              "حساب",
+              "حساب",
+              "خانه",
+              "دستگاه‌های فعال این حساب",
+              "عملیات",
+              "فایل‌های ذخیره‌شده همین دستگاه",
+              "معاملات و سایر پیام‌ها",
+              "ن",
+              "نگار پارسا",
+              "پروفایل",
+              "پیام‌رسان"
+            ]
+          }
+        ],
+        "exactActionParity": [
+          {
+            "family": "auth",
+            "passed": true,
+            "actual": [
+              "0912 345 6789",
+              "دریافت کد تأیید"
+            ],
+            "expected": [
+              "0912 345 6789",
+              "دریافت کد تأیید"
+            ]
+          },
+          {
+            "family": "home-shell",
+            "passed": true,
+            "actual": [
+              "اعلان‌ها",
+              "خانه",
+              "بازار",
+              "پیام‌رسان",
+              "عملیات",
+              "حساب"
+            ],
+            "expected": [
+              "اعلان‌ها",
+              "خانه",
+              "بازار",
+              "پیام‌رسان",
+              "عملیات",
+              "حساب"
+            ]
+          },
+          {
+            "family": "operations-workspaces",
+            "passed": true,
+            "actual": [
+              "اعلان‌ها",
+              "جستجوی مشتری",
+              "افزودن مشتری",
+              "۲ دعوت در انتظار",
+              "دعوت دعوت نمونه 0912 *** 0003 · تا ۲۲ مرداد",
+              "فعال مشتری نمونه یک 0912 *** 0004 · سطح ۲",
+              "فعال مشتری نمونه دو 0912 *** 0005 · سطح ۱",
+              "غیرفعال مشتری نمونه سه 0912 *** 0006",
+              "خانه",
+              "بازار",
+              "پیام‌رسان",
+              "عملیات",
+              "حساب"
+            ],
+            "expected": [
+              "اعلان‌ها",
+              "جستجوی مشتری",
+              "افزودن مشتری",
+              "۲ دعوت در انتظار",
+              "دعوت دعوت نمونه 0912 *** 0003 · تا ۲۲ مرداد",
+              "فعال مشتری نمونه یک 0912 *** 0004 · سطح ۲",
+              "فعال مشتری نمونه دو 0912 *** 0005 · سطح ۱",
+              "غیرفعال مشتری نمونه سه 0912 *** 0006",
+              "خانه",
+              "بازار",
+              "پیام‌رسان",
+              "عملیات",
+              "حساب"
+            ]
+          },
+          {
+            "family": "admin-invitations",
+            "passed": true,
+            "actual": [
+              "اعلان‌ها",
+              "نام، شماره یا حساب",
+              "فعال کاربر نمونه 0912 *** 0000 · کاربر عادی",
+              "فعال کاربر نمونه با نام طولانی 0912 *** 0001 · تماشا",
+              "نیازمند اقدام کاربر آزمایشی 0912 *** 0002 · غیرفعال",
+              "خانه",
+              "بازار",
+              "پیام‌رسان",
+              "عملیات",
+              "حساب"
+            ],
+            "expected": [
+              "اعلان‌ها",
+              "نام، شماره یا حساب",
+              "فعال کاربر نمونه 0912 *** 0000 · کاربر عادی",
+              "فعال کاربر نمونه با نام طولانی 0912 *** 0001 · تماشا",
+              "نیازمند اقدام کاربر آزمایشی 0912 *** 0002 · غیرفعال",
+              "خانه",
+              "بازار",
+              "پیام‌رسان",
+              "عملیات",
+              "حساب"
+            ]
+          },
+          {
+            "family": "account-profile",
+            "passed": true,
+            "actual": [
+              "اعلان‌ها",
+              "پروفایل آواتار و آدرس حساب",
+              "امنیت و نشست‌ها دستگاه‌های فعال این حساب",
+              "حافظه و داده‌ها فایل‌های ذخیره‌شده همین دستگاه",
+              "اعلان‌ها معاملات و سایر پیام‌ها",
+              "اتصال تلگرام اختیاری؛ دسترسی وب محدود نمی‌شود",
+              "خانه",
+              "بازار",
+              "پیام‌رسان",
+              "عملیات",
+              "حساب"
+            ],
+            "expected": [
+              "اعلان‌ها",
+              "پروفایل آواتار و آدرس حساب",
+              "امنیت و نشست‌ها دستگاه‌های فعال این حساب",
+              "حافظه و داده‌ها فایل‌های ذخیره‌شده همین دستگاه",
+              "اعلان‌ها معاملات و سایر پیام‌ها",
+              "اتصال تلگرام اختیاری؛ دسترسی وب محدود نمی‌شود",
+              "خانه",
+              "بازار",
+              "پیام‌رسان",
+              "عملیات",
+              "حساب"
+            ]
+          }
+        ],
+        "authVisualState": {
+          "value": "0912 345 6789",
+          "direction": "ltr",
+          "textAlign": "left",
+          "borderColor": "rgb(31, 94, 216)",
+          "borderWidth": 2,
+          "readOnly": false
+        },
+        "approvedFacts": 20
+      }
+    },
+    {
+      "id": "stage0b6-contract-only-no-new-feature-facts",
+      "passed": true,
+      "evidence": {
+        "newFeatureFacts": 0,
+        "nonApprovedFacts": 0,
+        "canonicalDriftFindings": []
+      }
+    },
+    {
+      "id": "runtime-diff-empty",
+      "passed": true,
+      "evidence": {
+        "kind": "external-read-only",
+        "status": "passed",
+        "localHarnessClaim": "false"
+      }
+    },
+    {
+      "id": "modern-finance-direction-locked",
+      "passed": true,
+      "evidence": {
+        "designDirection": "modern-finance",
+        "canonicalKind": "figma",
+        "localEvidenceRole": "secondary-derivative",
+        "mobileFirstShare": "95"
+      }
+    },
+    {
+      "id": "font-vazirmatn-only",
+      "passed": true,
+      "evidence": {
+        "fontsLoaded": true,
+        "rootCount": 11,
+        "families": [
+          "Vazirmatn, Tahoma, Arial, sans-serif"
+        ]
+      }
+    },
+    {
+      "id": "foundation-inventory-65-9-2",
+      "passed": true,
+      "evidence": {
+        "variables": 65,
+        "textStyles": 9,
+        "effects": 2
+      }
+    },
+    {
+      "id": "broken-variable-aliases-zero",
+      "passed": true,
+      "evidence": {
+        "brokenAliases": 0
+      }
+    },
+    {
+      "id": "component-inventory-12-sets-56-variants-with-delta",
+      "passed": true,
+      "evidence": {
+        "sets": 12,
+        "variants": 56,
+        "HomeDelta": 2
+      }
+    },
+    {
+      "id": "product-proof-detached-instances-zero",
+      "passed": true,
+      "evidence": {
+        "detachedProductInstances": 0
+      }
+    },
+    {
+      "id": "known-figma-debt-disposition-complete",
+      "passed": true,
+      "evidence": {
+        "debtGates": [
+          {
+            "gate": "auth-canonicalization",
+            "status": "resolved"
+          },
+          {
+            "gate": "home-binding",
+            "status": "resolved"
+          },
+          {
+            "gate": "operations-navigation",
+            "status": "resolved"
+          }
+        ],
+        "carryForward": {
+          "debt": "avatar-initials-text-style",
+          "status": "documented"
+        }
+      }
+    },
+    {
+      "id": "five-mobile-family-references-complete",
+      "passed": true,
+      "evidence": {
+        "families": [
+          "auth",
+          "home-shell",
+          "operations-workspaces",
+          "admin-invitations",
+          "account-profile"
+        ]
+      }
+    },
+    {
+      "id": "mobile-reference-roots-390x844",
+      "passed": true,
+      "evidence": [
+        {
+          "family": "auth",
+          "width": 390,
+          "height": 844
+        },
+        {
+          "family": "home-shell",
+          "width": 390,
+          "height": 844
+        },
+        {
+          "family": "operations-workspaces",
+          "width": 390,
+          "height": 844
+        },
+        {
+          "family": "admin-invitations",
+          "width": 390,
+          "height": 844
+        },
+        {
+          "family": "account-profile",
+          "width": 390,
+          "height": 844
+        }
+      ]
+    },
+    {
+      "id": "responsive-widths-360-375-390-414-430",
+      "passed": true,
+      "evidence": {
+        "dimensions": [
+          {
+            "declaredWidth": 360,
+            "width": 360,
+            "height": 844
+          },
+          {
+            "declaredWidth": 375,
+            "width": 375,
+            "height": 844
+          },
+          {
+            "declaredWidth": 390,
+            "width": 390,
+            "height": 844
+          },
+          {
+            "declaredWidth": 414,
+            "width": 414,
+            "height": 844
+          },
+          {
+            "declaredWidth": 430,
+            "width": 430,
+            "height": 844
+          }
+        ],
+        "exactQuietHomeParity": [
+          {
+            "width": 360,
+            "source": "0B-2",
+            "bodyChildren": 0,
+            "tokenParity": true,
+            "actionParity": true
+          },
+          {
+            "width": 375,
+            "source": "0B-2",
+            "bodyChildren": 0,
+            "tokenParity": true,
+            "actionParity": true
+          },
+          {
+            "width": 390,
+            "source": "0B-2",
+            "bodyChildren": 0,
+            "tokenParity": true,
+            "actionParity": true
+          },
+          {
+            "width": 414,
+            "source": "0B-2",
+            "bodyChildren": 0,
+            "tokenParity": true,
+            "actionParity": true
+          },
+          {
+            "width": 430,
+            "source": "0B-2",
+            "bodyChildren": 0,
+            "tokenParity": true,
+            "actionParity": true
+          }
+        ]
+      }
+    },
+    {
+      "id": "desktop-layout-archetypes-complete",
+      "passed": true,
+      "evidence": {
+        "archetypes": [
+          {
+            "name": "public-centered-auth",
+            "status": "complete"
+          },
+          {
+            "name": "home-contained-shell",
+            "status": "complete"
+          },
+          {
+            "name": "operations-workspace-list-detail",
+            "status": "complete"
+          },
+          {
+            "name": "admin-list-detail",
+            "status": "complete"
+          },
+          {
+            "name": "account-security-contained-detail",
+            "status": "complete"
+          }
+        ],
+        "desktopDimensions": {
+          "width": 1440,
+          "height": 900
+        }
+      }
+    },
+    {
+      "id": "desktop-fact-parity",
+      "passed": true,
+      "evidence": {
+        "exactVisibleFactParity": true,
+        "actualTokens": [
+          "0912 *** 0004",
+          "0912 *** 0004",
+          "0912 *** 0005",
+          "0912 *** 0006",
+          "اثر تغییر",
+          "افزودن مشتری",
+          "بازار",
+          "بدون محدودیت",
+          "تا ۲۲ مرداد",
+          "تنظیمات مالی",
+          "جست‌وجوی مشتری",
+          "حساب",
+          "خانه",
+          "دعوت",
+          "سطح حساب",
+          "سطح ۲",
+          "سقف خرید",
+          "سقف فروش",
+          "عملیات",
+          "غیرفعال",
+          "فروشگاه مرکزی",
+          "فعال",
+          "فعال",
+          "فعال",
+          "مرور تغییرات",
+          "مشتری فروشگاه",
+          "مشتری قدیمی",
+          "مشتری نمونه یک",
+          "مشتری نمونه یک",
+          "مشتریان",
+          "ن",
+          "نگار پارسا",
+          "پیام‌رسان",
+          "کارمزد",
+          "کارمزد و سقف‌های جدید فقط روی معاملات آینده اثر دارند؛ تاریخچه معاملات تغییر نمی‌کند.",
+          "۰٫۵٪",
+          "۲ دعوت در انتظار",
+          "۵۰ گرم",
+          "♢"
+        ],
+        "expectedTokens": [
+          "0912 *** 0004",
+          "0912 *** 0004",
+          "0912 *** 0005",
+          "0912 *** 0006",
+          "اثر تغییر",
+          "افزودن مشتری",
+          "بازار",
+          "بدون محدودیت",
+          "تا ۲۲ مرداد",
+          "تنظیمات مالی",
+          "جست‌وجوی مشتری",
+          "حساب",
+          "خانه",
+          "دعوت",
+          "سطح حساب",
+          "سطح ۲",
+          "سقف خرید",
+          "سقف فروش",
+          "عملیات",
+          "غیرفعال",
+          "فروشگاه مرکزی",
+          "فعال",
+          "فعال",
+          "فعال",
+          "مرور تغییرات",
+          "مشتری فروشگاه",
+          "مشتری قدیمی",
+          "مشتری نمونه یک",
+          "مشتری نمونه یک",
+          "مشتریان",
+          "ن",
+          "نگار پارسا",
+          "پیام‌رسان",
+          "کارمزد",
+          "کارمزد و سقف‌های جدید فقط روی معاملات آینده اثر دارند؛ تاریخچه معاملات تغییر نمی‌کند.",
+          "۰٫۵٪",
+          "۲ دعوت در انتظار",
+          "۵۰ گرم",
+          "♢"
+        ],
+        "exactActionParity": true,
+        "actualActions": [
+          "اعلان‌ها",
+          "خانه",
+          "بازار",
+          "پیام‌رسان",
+          "عملیات",
+          "حساب",
+          "افزودن مشتری",
+          "جست‌وجوی مشتری",
+          "۲ دعوت در انتظار",
+          "فعال مشتری نمونه یک 0912 *** 0004",
+          "دعوت مشتری فروشگاه تا ۲۲ مرداد",
+          "فعال فروشگاه مرکزی 0912 *** 0005",
+          "غیرفعال مشتری قدیمی 0912 *** 0006",
+          "مرور تغییرات"
+        ],
+        "expectedActions": [
+          "اعلان‌ها",
+          "خانه",
+          "بازار",
+          "پیام‌رسان",
+          "عملیات",
+          "حساب",
+          "افزودن مشتری",
+          "جست‌وجوی مشتری",
+          "۲ دعوت در انتظار",
+          "فعال مشتری نمونه یک 0912 *** 0004",
+          "دعوت مشتری فروشگاه تا ۲۲ مرداد",
+          "فعال فروشگاه مرکزی 0912 *** 0005",
+          "غیرفعال مشتری قدیمی 0912 *** 0006",
+          "مرور تغییرات"
+        ],
+        "desktopFacts": {
+          "task": "customer-management",
+          "selected": "customer-one",
+          "status": "active",
+          "level": "2",
+          "commission": "0.5-percent",
+          "buy-limit": "unlimited",
+          "sell-limit": "50-grams",
+          "scope": "future-only"
+        },
+        "expectedDesktopFacts": {
+          "task": "customer-management",
+          "selected": "customer-one",
+          "status": "active",
+          "level": "2",
+          "commission": "0.5-percent",
+          "buy-limit": "unlimited",
+          "sell-limit": "50-grams",
+          "scope": "future-only"
+        },
+        "desktopPrimaryCtaDimensions": [
+          {
+            "width": 105,
+            "height": 48
+          },
+          {
+            "width": 716,
+            "height": 48
+          }
+        ],
+        "desktopSelectionState": {
+          "selectedBorderColor": "rgb(31, 94, 216)",
+          "unselectedBorderColor": "rgb(216, 225, 236)",
+          "selectedBackground": "rgb(234, 241, 255)",
+          "unselectedBackground": "rgb(255, 255, 255)",
+          "distinct": true
+        }
+      }
+    },
+    {
+      "id": "no-product-overflow-or-clipping",
+      "passed": true,
+      "evidence": {
+        "rootOverflow": [
+          {
+            "kind": "auth",
+            "horizontal": 0,
+            "vertical": 0
+          },
+          {
+            "kind": "home-shell",
+            "horizontal": 0,
+            "vertical": 0
+          },
+          {
+            "kind": "operations-workspaces",
+            "horizontal": 0,
+            "vertical": 0
+          },
+          {
+            "kind": "admin-invitations",
+            "horizontal": 0,
+            "vertical": 0
+          },
+          {
+            "kind": "account-profile",
+            "horizontal": 0,
+            "vertical": 0
+          },
+          {
+            "kind": "360",
+            "horizontal": 0,
+            "vertical": 0
+          },
+          {
+            "kind": "375",
+            "horizontal": 0,
+            "vertical": 0
+          },
+          {
+            "kind": "390",
+            "horizontal": 0,
+            "vertical": 0
+          },
+          {
+            "kind": "414",
+            "horizontal": 0,
+            "vertical": 0
+          },
+          {
+            "kind": "430",
+            "horizontal": 0,
+            "vertical": 0
+          },
+          {
+            "kind": "desktop",
+            "horizontal": 0,
+            "vertical": 0
+          }
+        ],
+        "fitClipping": []
+      }
+    },
+    {
+      "id": "touch-targets-44",
+      "passed": true,
+      "evidence": {
+        "count": 86,
+        "minimumWidth": 44,
+        "minimumHeight": 44,
+        "failures": []
+      }
+    },
+    {
+      "id": "primary-cta-height-48",
+      "passed": true,
+      "evidence": {
+        "count": 4,
+        "minimumHeight": 48,
+        "failures": []
+      }
+    },
+    {
+      "id": "navigation-label-11",
+      "passed": true,
+      "evidence": {
+        "count": 45,
+        "minimumPx": 11
+      }
+    },
+    {
+      "id": "text-contrast-45",
+      "passed": true,
+      "evidence": {
+        "pairs": [
+          {
+            "foreground": "#10233f",
+            "background": "#ffffff",
+            "ratio": 15.74
+          },
+          {
+            "foreground": "#52657b",
+            "background": "#ffffff",
+            "ratio": 5.99
+          },
+          {
+            "foreground": "#ffffff",
+            "background": "#1f5ed8",
+            "ratio": 5.75
+          },
+          {
+            "foreground": "#0d6245",
+            "background": "#eaf8f2",
+            "ratio": 6.74
+          },
+          {
+            "foreground": "#6c4d00",
+            "background": "#fff6d9",
+            "ratio": 7.2
+          }
+        ],
+        "minimum": 5.75
+      }
+    },
+    {
+      "id": "focus-contrast-3-stroke-3",
+      "passed": true,
+      "evidence": {
+        "color": "#1f5ed8",
+        "page": "#edf2f7",
+        "surface": "#ffffff",
+        "stroke": 3,
+        "pageContrast": 5.11,
+        "surfaceContrast": 5.75
+      }
+    },
+    {
+      "id": "shell-route-layer-contract-complete",
+      "passed": true,
+      "evidence": {
+        "shells": [
+          "public",
+          "focused-authenticated",
+          "standard-authenticated",
+          "protected-legacy",
+          "invalid-forbidden-recovery"
+        ],
+        "layers": [
+          1,
+          2,
+          3,
+          4,
+          5
+        ],
+        "routeCount": 29,
+        "uniqueRouteCount": 29,
+        "catchAll": "planned"
+      }
+    },
+    {
+      "id": "common-state-feedback-contract-complete",
+      "passed": true,
+      "evidence": {
+        "commonStates": [
+          "loading",
+          "empty",
+          "normal-dense",
+          "error-retry",
+          "offline",
+          "stale-reconnecting"
+        ],
+        "actionStates": [
+          "confirm",
+          "busy",
+          "success",
+          "failure-preserved"
+        ]
+      }
+    },
+    {
+      "id": "motion-reduced-motion-contract-complete",
+      "passed": true,
+      "evidence": {
+        "microMs": 140,
+        "stateMs": 180,
+        "reducedMotion": "true"
+      }
+    },
+    {
+      "id": "content-necessity-inventory-complete",
+      "passed": true,
+      "evidence": {
+        "contentFamilies": [
+          {
+            "family": "auth",
+            "status": "complete"
+          },
+          {
+            "family": "home-shell",
+            "status": "complete"
+          },
+          {
+            "family": "operations-workspaces",
+            "status": "complete"
+          },
+          {
+            "family": "admin-invitations",
+            "status": "complete"
+          },
+          {
+            "family": "account-profile",
+            "status": "complete"
+          }
+        ],
+        "defaultUnitCount": 20,
+        "unclassified": 0,
+        "exactFamilyContent": true,
+        "exactResponsiveContent": true,
+        "exactDesktopContent": true,
+        "policy": "Every always-visible unit is bounded by exact canonical text/action signatures; whitespace is valid and Home bodies are empty."
+      }
+    },
+    {
+      "id": "reviewer-metadata-absent-from-product-roots",
+      "passed": true,
+      "evidence": {
+        "findings": []
+      }
+    },
+    {
+      "id": "synthetic-identities-and-forbidden-copy-clean",
+      "passed": true,
+      "evidence": {
+        "productRootCount": 11,
+        "allSynthetic": true,
+        "forbiddenCopyFindings": []
+      }
+    },
+    {
+      "id": "protected-interiors-absent",
+      "passed": true,
+      "evidence": {
+        "protectedInteriorCount": 0,
+        "protectedReferences": [
+          {
+            "name": "market",
+            "status": "omitted"
+          },
+          {
+            "name": "messenger",
+            "status": "omitted"
+          },
+          {
+            "name": "share-receive",
+            "status": "omitted"
+          },
+          {
+            "name": "admin-channels",
+            "status": "omitted"
+          }
+        ]
+      }
+    },
+    {
+      "id": "implementation-gate-and-static-limits-explicit",
+      "passed": true,
+      "evidence": {
+        "ownerApproval": "pending",
+        "runtimeAuthorized": "false",
+        "nextStage": "none",
+        "staticLimits": [
+          "authorization",
+          "mutation",
+          "delivery",
+          "realtime",
+          "keyboard",
+          "screen-reader"
+        ]
+      }
+    }
+  ],
+  "assertionSummary": {
+    "total": 32,
+    "passed": 32,
+    "failed": 0,
+    "exactOrder": true
+  },
+  "measurements": {
+    "productRootCount": 11,
+    "familyReferences": [
+      {
+        "family": "auth",
+        "width": 390,
+        "height": 844
+      },
+      {
+        "family": "home-shell",
+        "width": 390,
+        "height": 844
+      },
+      {
+        "family": "operations-workspaces",
+        "width": 390,
+        "height": 844
+      },
+      {
+        "family": "admin-invitations",
+        "width": 390,
+        "height": 844
+      },
+      {
+        "family": "account-profile",
+        "width": 390,
+        "height": 844
+      }
+    ],
+    "responsiveProofs": [
+      {
+        "declaredWidth": 360,
+        "width": 360,
+        "height": 844
+      },
+      {
+        "declaredWidth": 375,
+        "width": 375,
+        "height": 844
+      },
+      {
+        "declaredWidth": 390,
+        "width": 390,
+        "height": 844
+      },
+      {
+        "declaredWidth": 414,
+        "width": 414,
+        "height": 844
+      },
+      {
+        "declaredWidth": 430,
+        "width": 430,
+        "height": 844
+      }
+    ],
+    "desktopProof": {
+      "width": 1440,
+      "height": 900
+    },
+    "productOverflow": [
+      {
+        "kind": "auth",
+        "horizontal": 0,
+        "vertical": 0
+      },
+      {
+        "kind": "home-shell",
+        "horizontal": 0,
+        "vertical": 0
+      },
+      {
+        "kind": "operations-workspaces",
+        "horizontal": 0,
+        "vertical": 0
+      },
+      {
+        "kind": "admin-invitations",
+        "horizontal": 0,
+        "vertical": 0
+      },
+      {
+        "kind": "account-profile",
+        "horizontal": 0,
+        "vertical": 0
+      },
+      {
+        "kind": "360",
+        "horizontal": 0,
+        "vertical": 0
+      },
+      {
+        "kind": "375",
+        "horizontal": 0,
+        "vertical": 0
+      },
+      {
+        "kind": "390",
+        "horizontal": 0,
+        "vertical": 0
+      },
+      {
+        "kind": "414",
+        "horizontal": 0,
+        "vertical": 0
+      },
+      {
+        "kind": "430",
+        "horizontal": 0,
+        "vertical": 0
+      },
+      {
+        "kind": "desktop",
+        "horizontal": 0,
+        "vertical": 0
+      }
+    ],
+    "fitClippingFindings": 0,
+    "touchTargets": {
+      "count": 86,
+      "minimumWidth": 44,
+      "minimumHeight": 44
+    },
+    "primaryCtas": {
+      "count": 4,
+      "minimumHeight": 48
+    },
+    "navigationLabels": {
+      "count": 45,
+      "minimumPx": 11
+    },
+    "textContrast": {
+      "pairs": [
+        {
+          "foreground": "#10233f",
+          "background": "#ffffff",
+          "ratio": 15.74
+        },
+        {
+          "foreground": "#52657b",
+          "background": "#ffffff",
+          "ratio": 5.99
+        },
+        {
+          "foreground": "#ffffff",
+          "background": "#1f5ed8",
+          "ratio": 5.75
+        },
+        {
+          "foreground": "#0d6245",
+          "background": "#eaf8f2",
+          "ratio": 6.74
+        },
+        {
+          "foreground": "#6c4d00",
+          "background": "#fff6d9",
+          "ratio": 7.2
+        }
+      ],
+      "minimum": 5.75
+    },
+    "focus": {
+      "color": "#1f5ed8",
+      "page": "#edf2f7",
+      "surface": "#ffffff",
+      "stroke": 3,
+      "pageContrast": 5.11,
+      "surfaceContrast": 5.75
+    },
+    "foundations": {
+      "variables": 65,
+      "textStyles": 9,
+      "effects": 2
+    },
+    "components": {
+      "sets": 12,
+      "variants": 56,
+      "HomeDelta": 2
+    },
+    "routes": {
+      "count": 29,
+      "unique": 29
+    },
+    "canonicalContentParity": {
+      "familyRoots": [
+        {
+          "family": "auth",
+          "visibleFactsExact": true,
+          "actionsExact": true
+        },
+        {
+          "family": "home-shell",
+          "visibleFactsExact": true,
+          "actionsExact": true
+        },
+        {
+          "family": "operations-workspaces",
+          "visibleFactsExact": true,
+          "actionsExact": true
+        },
+        {
+          "family": "admin-invitations",
+          "visibleFactsExact": true,
+          "actionsExact": true
+        },
+        {
+          "family": "account-profile",
+          "visibleFactsExact": true,
+          "actionsExact": true
+        }
+      ],
+      "responsiveQuietHomeExact": true,
+      "desktopVisibleFactsExact": true,
+      "desktopActionsExact": true,
+      "driftFindings": []
+    },
+    "contentDefaultUnits": 20,
+    "protectedInteriorFindings": 0,
+    "reviewerMetadataFindings": 0,
+    "forbiddenCopyFindings": 0
+  },
+  "captures": [
+    {
+      "file": "local-system-scope-provenance-gate.png",
+      "selector": "#system-contract-overview",
+      "width": 1720,
+      "height": 1323,
+      "bytes": 204704,
+      "sha256": "4c53825c86ba4362d4f7ab0e4c033676362795630317718ee680d5863a8d0b87",
+      "visualStats": {
+        "uniqueColorCount": 257,
+        "changedPixelCount": 2275528
+      }
+    },
+    {
+      "file": "local-approved-family-reference-strip.png",
+      "selector": "#family-references",
+      "width": 1320,
+      "height": 2024,
+      "bytes": 195809,
+      "sha256": "f63140772895143cce0c830a77aab18cf56c54f6d7998687ae9599f4c9cfa075",
+      "visualStats": {
+        "uniqueColorCount": 257,
+        "changedPixelCount": 2671629
+      }
+    },
+    {
+      "file": "local-foundations-components-contract.png",
+      "selector": "#foundations-components",
+      "width": 1720,
+      "height": 621,
+      "bytes": 85103,
+      "sha256": "4b6b90b370107131ca9744606eab076d88bc56cbf6d73e360874413ee05699af",
+      "visualStats": {
+        "uniqueColorCount": 257,
+        "changedPixelCount": 1068097
+      }
+    },
+    {
+      "file": "local-shell-state-feedback-contract.png",
+      "selector": "#shell-state-contract",
+      "width": 1720,
+      "height": 1118,
+      "bytes": 127183,
+      "sha256": "8eeab8ad8afad17d05cbcc7cb96ec6d256a17bb10d95713e73efe7831300df48",
+      "visualStats": {
+        "uniqueColorCount": 257,
+        "changedPixelCount": 1922906
+      }
+    },
+    {
+      "file": "local-content-privacy-protected-contract.png",
+      "selector": "#content-protected-contract",
+      "width": 1720,
+      "height": 637,
+      "bytes": 97158,
+      "sha256": "84dcd026ed2dd9988ada050a85b721ac2380ee22f72cdb424b1bf4461dfe87c1",
+      "visualStats": {
+        "uniqueColorCount": 257,
+        "changedPixelCount": 1095615
+      }
+    },
+    {
+      "file": "local-responsive-acceptance-proofs.png",
+      "selector": "#responsive-proofs",
+      "width": 2160,
+      "height": 1030,
+      "bytes": 49933,
+      "sha256": "64fb26cfbcc0e71bb17cf141977a7ea4635177579ac5b45b04200ab25432b084",
+      "visualStats": {
+        "uniqueColorCount": 257,
+        "changedPixelCount": 2224756
+      }
+    },
+    {
+      "file": "local-desktop-operational-master-detail-1440x900.png",
+      "selector": "[data-desktop-proof]",
+      "width": 1440,
+      "height": 900,
+      "bytes": 74928,
+      "sha256": "723ef8cc55bae781217641cf8123104e1a0360d5c311f8b5365e49cad936110c",
+      "visualStats": {
+        "uniqueColorCount": 257,
+        "changedPixelCount": 1277216
+      }
+    }
+  ],
+  "outputSet": {
+    "policy": "exact",
+    "pngCount": 7,
+    "metricsCount": 1,
+    "files": [
+      "local-approved-family-reference-strip.png",
+      "local-content-privacy-protected-contract.png",
+      "local-desktop-operational-master-detail-1440x900.png",
+      "local-foundations-components-contract.png",
+      "local-responsive-acceptance-proofs.png",
+      "local-shell-state-feedback-contract.png",
+      "local-stage0b6-final-system-contract-validation-metrics.json",
+      "local-system-scope-provenance-gate.png"
+    ]
+  },
+  "publication": {
+    "strategy": "atomic-directory-rename",
+    "partialPromotionAllowed": false,
+    "validationBeforePromotion": true,
+    "validationAfterPromotion": true
+  }
+}

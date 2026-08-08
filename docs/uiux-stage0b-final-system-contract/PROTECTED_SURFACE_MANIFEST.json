@@ -1,0 +1,175 @@
+{
+  "schemaVersion": 1,
+  "stage": "0B-6",
+  "status": "stage0b6_complete_stage1_authorized",
+  "branch": "condidate/webapp-ui-ux-redesign-v2",
+  "ownerSystemContractApproval": {
+    "status": "approved",
+    "approvedAt": "2026-08-08T20:57:28.073Z"
+  },
+  "continuousProgressionAuthorized": true,
+  "runtimeImplementationAuthorized": true,
+  "nextAuthorizedRuntimeStage": "Stage 1",
+  "runtimeGateClosedAt": "2026-08-08T21:07:38Z",
+  "stage1RuntimeWorkStarted": false,
+  "sourceCommit": null,
+  "sourceRouterPath": "frontend/src/router/index.ts",
+  "currentRouteCount": 29,
+  "plannedCatchAll": {
+    "path": "/:pathMatch(.*)*",
+    "ownership": "system_owned_recovery",
+    "includedInCurrentRouteCount": false,
+    "implementationStage": 3,
+    "status": "pending"
+  },
+  "scopeRule": "V2 styles, tokens and components are route-scoped and must not alter protected interiors.",
+  "protectedSurfaces": [
+    {
+      "id": "market-route-interior",
+      "routes": ["/market"],
+      "kind": "market_interior",
+      "allowed": [
+        "preserve the existing wrapper and navigation contract",
+        "verify visual and behavioral regression baselines"
+      ],
+      "forbidden": [
+        "redesign interior layout, content, offers, controls or behavior",
+        "introduce new status, copy or CTA",
+        "apply unscoped V2 CSS, tokens or component mutations"
+      ],
+      "runtimeDiffAllowed": false,
+      "visualDiffAllowed": false
+    },
+    {
+      "id": "home-market-widget",
+      "routes": ["/"],
+      "kind": "embedded_market_module",
+      "allowed": [
+        "reserve or reposition the shell slot around the existing widget",
+        "preserve the existing widget behavior and facts unchanged"
+      ],
+      "forbidden": [
+        "redesign the widget interior",
+        "add market status, CTA, filter, copy or feature facts",
+        "replace current widget behavior with a design placeholder at runtime"
+      ],
+      "runtimeDiffAllowed": false,
+      "visualDiffAllowed": false
+    },
+    {
+      "id": "messenger-route-interior",
+      "routes": ["/chat"],
+      "kind": "messenger_interior",
+      "allowed": [
+        "preserve the shell destination and existing wrapper",
+        "verify visual and behavioral regression baselines"
+      ],
+      "forbidden": [
+        "redesign conversations, composer, list, realtime behavior or FAB",
+        "apply unscoped V2 CSS, tokens or component mutations"
+      ],
+      "runtimeDiffAllowed": false,
+      "visualDiffAllowed": false
+    },
+    {
+      "id": "messenger-share-receiver",
+      "routes": ["/share-receive"],
+      "kind": "messenger_support_surface",
+      "allowed": [
+        "preserve existing routing and behavior",
+        "verify regression baselines"
+      ],
+      "forbidden": [
+        "redesign or alter receive/share behavior",
+        "apply V2 product facts or visual treatment"
+      ],
+      "runtimeDiffAllowed": false,
+      "visualDiffAllowed": false
+    },
+    {
+      "id": "admin-channel-interior",
+      "routes": ["/admin/channels"],
+      "kind": "messenger_admin_surface",
+      "allowed": [
+        "preserve route entry and existing behavior",
+        "verify regression baselines"
+      ],
+      "forbidden": [
+        "redesign channel interior or delivery workflow",
+        "claim delivery without an authoritative channel receipt"
+      ],
+      "runtimeDiffAllowed": false,
+      "visualDiffAllowed": false
+    }
+  ],
+  "sharedRiskControls": [
+    {
+      "id": "route-scoped-v2",
+      "requirement": "V2 activation must be scoped to explicitly authorized routes.",
+      "status": "carry_forward_stage2"
+    },
+    {
+      "id": "no-global-selector-leak",
+      "requirement": "No new global selector may change protected descendants.",
+      "status": "carry_forward_stage2_and_stage8"
+    },
+    {
+      "id": "visual-freeze",
+      "requirement": "Protected mobile and desktop baselines must remain visually unchanged.",
+      "status": "carry_forward_stage8"
+    },
+    {
+      "id": "behavior-freeze",
+      "requirement": "Protected route behavior and interaction contracts must remain unchanged.",
+      "status": "carry_forward_stage8"
+    }
+  ],
+  "figmaEvidence": {
+    "pageId": "168:1974",
+    "boardId": "168:1975",
+    "protectedScopeSectionId": "168:1981",
+    "path": "assets/figma-content-privacy-protected-surfaces-contract.png",
+    "capturedAt": "2026-08-08T19:55:52.512Z",
+    "width": 1720,
+    "height": 542,
+    "bytes": 63242,
+    "sha256": "d6b621c463f6eebfc798794d3a83ea0a36e8ea2735a7a710d77a641e3a417bd0",
+    "auditPath": "assets/figma-stage0b6-audit-metrics.json",
+    "auditSha256": "7eaa85d626366ea623714fa4d22cc521bf4455434c05e72db1a4b38a9659e2ff",
+    "protectedInteriorFindings": 0,
+    "status": "passed_design_evidence"
+  },
+  "runtimeVerification": {
+    "baselineRunId": "sha256:47705d3d10e0a1280b3aa37ffd2fa92b6293294ec2de85617d9007586f3343c0",
+    "baselineArtifactPathExternal": "/tmp/uiux-stage0b6-runtime-baseline.json",
+    "baselineArtifactSha256": "47705d3d10e0a1280b3aa37ffd2fa92b6293294ec2de85617d9007586f3343c0",
+    "testFileCount": 35,
+    "passedTestFileCount": 35,
+    "testCount": 322,
+    "passedTestCount": 322,
+    "failedTestCount": 0,
+    "skippedTestCount": 0,
+    "runtimeDiffEmpty": true,
+    "protectedSurfaceDiffEmpty": true,
+    "visualDiffHash": null,
+    "behaviorDiffHash": null,
+    "nullDiffHashReason": "stage0b6_made_no_runtime_or_protected_surface_mutation",
+    "verifiedAt": "2026-08-08T20:06:52.945Z",
+    "status": "stage0b6_passed_future_regression_gates_carried_forward"
+  },
+  "sites": {
+    "projectId": "appgprj_6a77997ed65481918d71b8f1f3db541f",
+    "versionId": "appgprj_6a77997ed65481918d71b8f1f3db541f~appgver_f16d87d4a1a08191add25935f7034e97",
+    "deploymentId": "appgdep_6a779a76a0348191ba7f15b7a4fb2fd8",
+    "url": "https://trading-bot-uiux-stage0b6.mohsenbarari235.chatgpt.site",
+    "accessPolicy": "custom_owner_only",
+    "allowedUserCount": 1,
+    "workspaceGroupCount": 0,
+    "tenantGroupCount": 0,
+    "externalVisitorCount": 0,
+    "anonymousRootStatus": 401,
+    "anonymousEvidenceStatus": 401,
+    "publishedAt": "2026-08-08T21:07:15.893642Z",
+    "status": "passed"
+  }
+}

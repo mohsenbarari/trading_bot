@@ -1,0 +1,412 @@
+{
+  "schemaVersion": 2,
+  "stage": "0B-6",
+  "status": "stage0b6_complete_stage1_authorized",
+  "branch": "condidate/webapp-ui-ux-redesign-v2",
+  "ownerSystemContractApproval": {
+    "status": "approved",
+    "approvedAt": "2026-08-08T20:57:28.073Z",
+    "scope": "stage0b6_system_contract_and_continuous_roadmap_progression"
+  },
+  "continuousProgressionAuthorized": true,
+  "runtimeImplementationAuthorized": true,
+  "nextAuthorizedRuntimeStage": "Stage 1",
+  "runtimeGateClosedAt": "2026-08-08T21:07:38Z",
+  "stage1RuntimeWorkStarted": false,
+  "sourceCommit": null,
+  "evidenceBaseCommit": "88caea3a6c1fa96c658a9cc23a1f893de61cd378",
+  "sourceCommitRole": "final_stage0b6_package_commit_pending",
+  "fileKey": "z8jgJxST4O2APzWnlyP9gv",
+  "fileUrl": "https://www.figma.com/design/z8jgJxST4O2APzWnlyP9gv",
+  "frozenAt": "2026-08-08T19:54:11.151Z",
+  "directEvidenceCapturedAt": "2026-08-08T19:55:52.512Z",
+  "auditedAt": "2026-08-08T20:06:32.118Z",
+  "provenanceRereadAt": "2026-08-08T20:15:41.663Z",
+  "localEvidenceGeneratedAt": "2026-08-08T20:55:13.301Z",
+  "sitesPublishedAt": "2026-08-08T21:07:15.893642Z",
+  "page": {
+    "id": "168:1974",
+    "name": "05 — Stage 0B-6 Final System Contract",
+    "url": "https://www.figma.com/design/z8jgJxST4O2APzWnlyP9gv?node-id=168-1974",
+    "boardId": "168:1975",
+    "status": "frozen_and_audited"
+  },
+  "freezeMetadata": {
+    "namespace": "openai_uiux",
+    "pageKeys": ["stage0b6_freeze"],
+    "boardKeys": ["stage0b6_freeze", "contract"],
+    "exact": true,
+    "postFreezeMutationCount": 0
+  },
+  "supportingPages": [
+    {
+      "id": "41:2",
+      "name": "01.5 — UIUX v2 Foundations",
+      "kind": "foundations",
+      "status": "audited"
+    },
+    {
+      "id": "46:2",
+      "name": "01.6 — UIUX v2 Components",
+      "kind": "components",
+      "status": "audited"
+    }
+  ],
+  "canonicalSourceRegistry": [
+    {
+      "stage": "0B-1",
+      "family": "auth_invite_registration",
+      "approvedCheckpoint": "docs/WEBAPP_UI_UX_REDESIGN_V2_STAGE0B_AUTH_CHECKPOINT_20260718.md",
+      "approvedLocalArtifact": "docs/uiux-stage0b-auth/auth-scenarios.html",
+      "existingPageId": null,
+      "representativeSourceNodeId": null,
+      "canonicalTargetNodeId": "168:2017",
+      "gate": "auth_canonicalization",
+      "status": "passed"
+    },
+    {
+      "stage": "0B-2",
+      "family": "home_authenticated_shell",
+      "approvedCheckpoint": "docs/WEBAPP_UI_UX_REDESIGN_V2_STAGE0B_HOME_SHELL_CHECKPOINT_20260808.md",
+      "existingPageId": "12:2",
+      "representativeSourceNodeId": "13:9",
+      "canonicalTargetNodeId": "168:2018",
+      "gate": "home_binding_audit_and_rebind",
+      "status": "passed"
+    },
+    {
+      "stage": "0B-3",
+      "family": "operations_workspaces",
+      "approvedCheckpoint": "docs/WEBAPP_UI_UX_REDESIGN_V2_STAGE0B_OPERATIONS_WORKSPACES_CHECKPOINT_20260808.md",
+      "existingPageId": "55:2",
+      "representativeSourceNodeId": "56:6",
+      "canonicalTargetNodeId": "168:2079",
+      "gate": "operations_active_navigation_debt_resolution",
+      "status": "passed"
+    },
+    {
+      "stage": "0B-4",
+      "family": "admin_users_invitations",
+      "approvedCheckpoint": "docs/WEBAPP_UI_UX_REDESIGN_V2_STAGE0B_ADMIN_USERS_INVITATIONS_CHECKPOINT_20260808.md",
+      "existingPageId": "75:2",
+      "representativeSourceNodeId": "83:53",
+      "canonicalTargetNodeId": "168:2163",
+      "gate": null,
+      "status": "passed"
+    },
+    {
+      "stage": "0B-5",
+      "family": "account_profile_security_notifications",
+      "approvedCheckpoint": "docs/WEBAPP_UI_UX_REDESIGN_V2_STAGE0B_ACCOUNT_PROFILE_SECURITY_NOTIFICATIONS_CHECKPOINT_20260808.md",
+      "existingPageId": "117:2",
+      "representativeSourceNodeId": "128:3",
+      "canonicalTargetNodeId": "168:2171",
+      "gate": null,
+      "status": "passed"
+    }
+  ],
+  "sections": [
+    { "order": 1, "id": "168:1976", "name": "System scope, provenance and gate", "status": "frozen" },
+    { "order": 2, "id": "168:1977", "name": "Approved family references", "status": "frozen" },
+    { "order": 3, "id": "168:1978", "name": "Foundations and components", "status": "frozen" },
+    { "order": 4, "id": "168:1979", "name": "Shell, route and layout", "status": "frozen" },
+    { "order": 5, "id": "168:1980", "name": "State, feedback, motion and accessibility", "status": "frozen" },
+    { "order": 6, "id": "168:1981", "name": "Content, privacy and protected surfaces", "status": "frozen" },
+    { "order": 7, "id": "168:1982", "name": "Responsive and desktop acceptance proofs", "status": "frozen" },
+    { "order": 8, "id": "168:1983", "name": "Implementation stage map and owner decision", "status": "frozen" }
+  ],
+  "rootContract": {
+    "mobileFamilyReferenceCount": 5,
+    "referenceMobileWidth": 390,
+    "referenceMobileHeight": 844,
+    "responsiveWidths": [360, 375, 390, 414, 430],
+    "responsiveHeight": 844,
+    "desktopWidth": 1440,
+    "desktopHeight": 900,
+    "desktopAddsNewFacts": false,
+    "mobileReferenceNodeIds": ["168:2017", "168:2018", "168:2079", "168:2163", "168:2171"],
+    "responsiveProofNodeIds": ["173:2279", "173:2341", "173:2403", "173:2472", "173:2534"],
+    "desktopProofNodeId": "173:2600",
+    "status": "passed"
+  },
+  "designSystemContract": {
+    "direction": "modern_finance",
+    "fontFamilies": ["Vazirmatn"],
+    "variableCount": 65,
+    "textStyleCount": 9,
+    "effectCount": 2,
+    "componentSetCount": 12,
+    "componentVariantCount": 56,
+    "componentVariantDelta": 2,
+    "componentVariantDeltaReason": "Home active navigation variants",
+    "brokenVariableAliasCount": 0,
+    "brokenBindingCount": 0,
+    "detachedProductInstanceCount": 0,
+    "knownCarryForward": "avatar_initials_exact_local_text_style_stage2",
+    "status": "passed_with_documented_stage2_carry_forward"
+  },
+  "mandatoryFigmaGates": [
+    {
+      "id": "auth-canonicalization",
+      "targetNodeId": "168:2017",
+      "auditPath": "assets/figma-stage0b6-audit-metrics.json",
+      "auditSha256": "7eaa85d626366ea623714fa4d22cc521bf4455434c05e72db1a4b38a9659e2ff",
+      "status": "passed"
+    },
+    {
+      "id": "home-binding-audit-and-rebind",
+      "targetNodeId": "168:2018",
+      "auditPath": "assets/figma-stage0b6-audit-metrics.json",
+      "auditSha256": "7eaa85d626366ea623714fa4d22cc521bf4455434c05e72db1a4b38a9659e2ff",
+      "status": "passed"
+    },
+    {
+      "id": "operations-navigation-debt-resolution",
+      "targetNodeId": "168:2079",
+      "auditPath": "assets/figma-stage0b6-audit-metrics.json",
+      "auditSha256": "7eaa85d626366ea623714fa4d22cc521bf4455434c05e72db1a4b38a9659e2ff",
+      "status": "passed"
+    }
+  ],
+  "exactAssertions": [
+    { "order": 1, "id": "owner-approval-0b1-through-0b5-recorded", "figma": "passed", "local": "passed" },
+    { "order": 2, "id": "canonical-source-registry-complete", "figma": "passed", "local": "passed" },
+    { "order": 3, "id": "canonical-source-references-resolve", "figma": "passed", "local": "passed" },
+    { "order": 4, "id": "approved-source-fact-parity", "figma": "passed", "local": "passed" },
+    { "order": 5, "id": "stage0b6-contract-only-no-new-feature-facts", "figma": "passed", "local": "passed" },
+    { "order": 6, "id": "runtime-diff-empty", "figma": "passed", "local": "passed" },
+    { "order": 7, "id": "modern-finance-direction-locked", "figma": "passed", "local": "passed" },
+    { "order": 8, "id": "font-vazirmatn-only", "figma": "passed", "local": "passed" },
+    { "order": 9, "id": "foundation-inventory-65-9-2", "figma": "passed", "local": "passed" },
+    { "order": 10, "id": "broken-variable-aliases-zero", "figma": "passed", "local": "passed" },
+    { "order": 11, "id": "component-inventory-12-sets-56-variants-with-delta", "figma": "passed", "local": "passed" },
+    { "order": 12, "id": "product-proof-detached-instances-zero", "figma": "passed", "local": "passed" },
+    { "order": 13, "id": "known-figma-debt-disposition-complete", "figma": "passed", "local": "passed" },
+    { "order": 14, "id": "five-mobile-family-references-complete", "figma": "passed", "local": "passed" },
+    { "order": 15, "id": "mobile-reference-roots-390x844", "figma": "passed", "local": "passed" },
+    { "order": 16, "id": "responsive-widths-360-375-390-414-430", "figma": "passed", "local": "passed" },
+    { "order": 17, "id": "desktop-layout-archetypes-complete", "figma": "passed", "local": "passed" },
+    { "order": 18, "id": "desktop-fact-parity", "figma": "passed", "local": "passed" },
+    { "order": 19, "id": "no-product-overflow-or-clipping", "figma": "passed", "local": "passed" },
+    { "order": 20, "id": "touch-targets-44", "figma": "passed", "local": "passed" },
+    { "order": 21, "id": "primary-cta-height-48", "figma": "passed", "local": "passed" },
+    { "order": 22, "id": "navigation-label-11", "figma": "passed", "local": "passed" },
+    { "order": 23, "id": "text-contrast-45", "figma": "passed", "local": "passed" },
+    { "order": 24, "id": "focus-contrast-3-stroke-3", "figma": "passed", "local": "passed" },
+    { "order": 25, "id": "shell-route-layer-contract-complete", "figma": "passed", "local": "passed" },
+    { "order": 26, "id": "common-state-feedback-contract-complete", "figma": "passed", "local": "passed" },
+    { "order": 27, "id": "motion-reduced-motion-contract-complete", "figma": "passed", "local": "passed" },
+    { "order": 28, "id": "content-necessity-inventory-complete", "figma": "passed", "local": "passed" },
+    { "order": 29, "id": "reviewer-metadata-absent-from-product-roots", "figma": "passed", "local": "passed" },
+    { "order": 30, "id": "synthetic-identities-and-forbidden-copy-clean", "figma": "passed", "local": "passed" },
+    { "order": 31, "id": "protected-interiors-absent", "figma": "passed", "local": "passed" },
+    { "order": 32, "id": "implementation-gate-and-static-limits-explicit", "figma": "passed", "local": "passed" }
+  ],
+  "directFigmaAudit": {
+    "path": "assets/figma-stage0b6-audit-metrics.json",
+    "bytes": 7363,
+    "sha256": "7eaa85d626366ea623714fa4d22cc521bf4455434c05e72db1a4b38a9659e2ff",
+    "assertionCount": 32,
+    "passedAssertionCount": 32,
+    "failedAssertionCount": 0,
+    "status": "passed"
+  },
+  "directFigmaEvidence": [
+    { "path": "assets/figma-system-scope-provenance-gate.png", "nodeId": "168:1976", "capturedAt": "2026-08-08T19:55:52.512Z", "width": 1720, "height": 444, "bytes": 44974, "sha256": "7a68aa07a73166ccbedcdade3ee6c6af3a5ea44f1de2656c81461f6ae8f6c5f2", "status": "passed" },
+    { "path": "assets/figma-approved-family-reference-strip.png", "nodeId": "168:1977", "capturedAt": "2026-08-08T19:55:52.512Z", "width": 1720, "height": 1992, "bytes": 152409, "sha256": "a9ecd7aa52688d1d1ef217894d8e611ea9246ad93e1e060a0c479a32c7bc3108", "status": "passed" },
+    { "path": "assets/figma-foundations-components-contract.png", "nodeId": "168:1978", "capturedAt": "2026-08-08T19:55:52.512Z", "width": 1720, "height": 426, "bytes": 46337, "sha256": "ecdff065886a2da92878515702f7afbc35e7c1f373aa793c25d9f164652f1e29", "status": "passed" },
+    { "path": "assets/figma-shell-route-layout-contract.png", "nodeId": "168:1979", "capturedAt": "2026-08-08T19:55:52.512Z", "width": 1720, "height": 706, "bytes": 106651, "sha256": "4cb6b124aac4d7ffbda39325e34dcd9c75fbdf73d0289bde9fc25d5034e7cfa5", "status": "passed" },
+    { "path": "assets/figma-state-feedback-motion-accessibility-contract.png", "nodeId": "168:1980", "capturedAt": "2026-08-08T19:55:52.512Z", "width": 1720, "height": 448, "bytes": 55788, "sha256": "1d3d9ab1b009b1024df286d60a5e5aab36bfd930e908a8d8c7546d82ecbcf91a", "status": "passed" },
+    { "path": "assets/figma-content-privacy-protected-surfaces-contract.png", "nodeId": "168:1981", "capturedAt": "2026-08-08T19:55:52.512Z", "width": 1720, "height": 542, "bytes": 63242, "sha256": "d6b621c463f6eebfc798794d3a83ea0a36e8ea2735a7a710d77a641e3a417bd0", "status": "passed" },
+    { "path": "assets/figma-responsive-desktop-acceptance-proofs.png", "nodeId": "168:1982", "capturedAt": "2026-08-08T19:55:52.512Z", "width": 1720, "height": 3206, "bytes": 166773, "sha256": "ee54bfbf6b674c4621dee5de4331642d461f27726413f486b07c46a024e880fe", "status": "passed" },
+    { "path": "assets/figma-implementation-stage-map.png", "nodeId": "168:1983", "capturedAt": "2026-08-08T19:55:52.512Z", "width": 1720, "height": 566, "bytes": 68419, "sha256": "c397b399c1f787024a512168661c6bb367f07c0ec4bb98632d185fb9f8e35705", "status": "passed" },
+    { "path": "assets/figma-desktop-operational-master-detail-1440x900.png", "nodeId": "173:2600", "capturedAt": "2026-08-08T19:55:52.512Z", "width": 1440, "height": 900, "bytes": 63343, "sha256": "dca4b855d7d04c7b9664978b6e49a67eb2d629b37ae8b0c8c3d4b3e99a326361", "status": "passed" }
+  ],
+  "technicalEvidence": [
+    { "path": "assets/figma-stage0b6-audit-metrics.json", "bytes": 7363, "sha256": "7eaa85d626366ea623714fa4d22cc521bf4455434c05e72db1a4b38a9659e2ff", "status": "passed" },
+    { "path": "final-system-contract-evidence.html", "bytes": 69362, "sha256": "6bfe3fce136eb2477f6cbac99561d2e934b469324f3db3c6ca5ec60fee61d5fa", "status": "passed" },
+    { "path": "capture-evidence.cjs", "bytes": 69827, "sha256": "1491a6ccd536e68b38deebd4b0989ad32b62fff86d69517d0604476673758bc0", "status": "passed" },
+    { "path": "assets/local-evidence/local-stage0b6-final-system-contract-validation-metrics.json", "bytes": 51698, "sha256": "6639bc3a6398bff15972c825bc33300cb43bef316d7c1e30efcc00218da844d8", "status": "passed" }
+  ],
+  "localEvidence": {
+    "runId": "stage0b6-20260808T205504009Z-c6c1b8be",
+    "startedAt": "2026-08-08T20:55:04.009Z",
+    "completedAt": "2026-08-08T20:55:13.301Z",
+    "assertionCount": 32,
+    "passedAssertionCount": 32,
+    "failedAssertionCount": 0,
+    "canonicalTreeSha256Before": "c974469f9240d756449587e577cb965387634577b0d873263471aa411d88680c",
+    "canonicalTreeSha256After": "c974469f9240d756449587e577cb965387634577b0d873263471aa411d88680c",
+    "auditSha256Before": "f6a7ed5b95871475ff96d31d8b6fe73fb89d6caaef947cea8f8b046f364d0955",
+    "auditSha256After": "f6a7ed5b95871475ff96d31d8b6fe73fb89d6caaef947cea8f8b046f364d0955",
+    "metricsSha256": "6639bc3a6398bff15972c825bc33300cb43bef316d7c1e30efcc00218da844d8",
+    "semanticHardening": {
+      "canonicalContentParityAllFiveFamilies": true,
+      "responsiveQuietHomeExact": true,
+      "desktopVisibleFactsExact": true,
+      "desktopActionsExact": true,
+      "authInputDirection": "ltr",
+      "authInputTextAlign": "left",
+      "authInputBorderColor": "rgb(31, 94, 216)",
+      "authInputBorderWidth": 2,
+      "authInputReadOnly": false,
+      "desktopSelectedRowDistinct": true,
+      "desktopSelectedRowAriaCurrent": true,
+      "driftFindings": []
+    },
+    "captures": [
+      { "path": "assets/local-evidence/local-system-scope-provenance-gate.png", "width": 1720, "height": 1323, "bytes": 204704, "sha256": "4c53825c86ba4362d4f7ab0e4c033676362795630317718ee680d5863a8d0b87" },
+      { "path": "assets/local-evidence/local-approved-family-reference-strip.png", "width": 1320, "height": 2024, "bytes": 195809, "sha256": "f63140772895143cce0c830a77aab18cf56c54f6d7998687ae9599f4c9cfa075" },
+      { "path": "assets/local-evidence/local-foundations-components-contract.png", "width": 1720, "height": 621, "bytes": 85103, "sha256": "4b6b90b370107131ca9744606eab076d88bc56cbf6d73e360874413ee05699af" },
+      { "path": "assets/local-evidence/local-shell-state-feedback-contract.png", "width": 1720, "height": 1118, "bytes": 127183, "sha256": "8eeab8ad8afad17d05cbcc7cb96ec6d256a17bb10d95713e73efe7831300df48" },
+      { "path": "assets/local-evidence/local-content-privacy-protected-contract.png", "width": 1720, "height": 637, "bytes": 97158, "sha256": "84dcd026ed2dd9988ada050a85b721ac2380ee22f72cdb424b1bf4461dfe87c1" },
+      { "path": "assets/local-evidence/local-responsive-acceptance-proofs.png", "width": 2160, "height": 1030, "bytes": 49933, "sha256": "64fb26cfbcc0e71bb17cf141977a7ea4635177579ac5b45b04200ab25432b084" },
+      { "path": "assets/local-evidence/local-desktop-operational-master-detail-1440x900.png", "width": 1440, "height": 900, "bytes": 74928, "sha256": "723ef8cc55bae781217641cf8123104e1a0360d5c311f8b5365e49cad936110c" }
+    ],
+    "status": "passed"
+  },
+  "sites": {
+    "title": "Trading Bot UI/UX — Stage 0B-6",
+    "slug": "trading-bot-uiux-stage0b6",
+    "projectId": "appgprj_6a77997ed65481918d71b8f1f3db541f",
+    "provider": "site---6a77997ed65481918d71b8f1f3db541f",
+    "sourceRepositoryBranch": "main",
+    "sourceCommit": "c42eff2b6fb84ee6030a32d0e01f0b3a5fe4c982",
+    "versionId": "appgprj_6a77997ed65481918d71b8f1f3db541f~appgver_f16d87d4a1a08191add25935f7034e97",
+    "versionNumber": 1,
+    "deploymentId": "appgdep_6a779a76a0348191ba7f15b7a4fb2fd8",
+    "deploymentStatus": "succeeded",
+    "url": "https://trading-bot-uiux-stage0b6.mohsenbarari235.chatgpt.site",
+    "updatedAt": "2026-08-08T21:07:15.893642Z",
+    "publishedAt": "2026-08-08T21:07:15.893642Z",
+    "sourceArchive": {
+      "pathExternal": "/tmp/uiux-stage0b6-sites-preview-dist.tgz",
+      "topologyRoot": "dist",
+      "workerEntry": "dist/server/index.js",
+      "bytes": 401983,
+      "sha256": "e01ab7ea18a5a7d85ae3e5f39ab3f21230f23714ebd1db1de66352c8f31ee4b6"
+    },
+    "normalizedSitesTar": {
+      "fileCount": 27,
+      "bytes": 931840,
+      "sha256": "db0b581048f8033cc4d19f39e5d685ab4e2c4df5e03568c6e95922d805ee0288"
+    },
+    "distTree": {
+      "fileCount": 27,
+      "summedBytes": 908833,
+      "sha256": "2449d36955c9af32461ddc509c761be27f9c9601d555cccb45f8064ad56af2b9"
+    },
+    "hostingConfig": {
+      "sourcePath": ".openai/hosting.json",
+      "distPath": "dist/.openai/hosting.json",
+      "sourceDistEqual": true,
+      "bytes": 63,
+      "sha256": "c5a5444d8fb03d30e39aff801b7cac56ab1ec84fb2b237498ded3e607a291843"
+    },
+    "worker": {
+      "path": "dist/server/index.js",
+      "bytes": 231,
+      "sha256": "55e64c6d4c7bc3d45166f2ac5b2f350bc719e86074367b97d69d645ec35b40b3"
+    },
+    "sourceHtml": {
+      "path": "dist/client/docs/uiux-stage0b-final-system-contract/final-system-contract-evidence.html",
+      "bytes": 69362,
+      "sha256": "6bfe3fce136eb2477f6cbac99561d2e934b469324f3db3c6ca5ec60fee61d5fa"
+    },
+    "validation": {
+      "npmVerify": "passed",
+      "npmBuild": "passed",
+      "npmAuditDist": "passed",
+      "npmAuditFinal": "passed",
+      "npmAuditFinalVulnerabilityCount": 0
+    },
+    "environment": {
+      "revision": 0,
+      "entryCount": 0
+    },
+    "workerLogs": {
+      "windowMinutes": 60,
+      "errorCount": 0
+    },
+    "access": {
+      "policy": "custom",
+      "ownerOnly": true,
+      "allowedUserCount": 1,
+      "allowedUserRole": "owner",
+      "workspaceGroupCount": 0,
+      "tenantGroupCount": 0,
+      "externalVisitorCount": 0
+    },
+    "bypass": {
+      "capabilityExists": true,
+      "generated": false,
+      "requested": false,
+      "read": false,
+      "used": false,
+      "persisted": false,
+      "exposed": false
+    },
+    "anonymousProbes": {
+      "probedAt": "2026-08-08T21:07:38Z",
+      "requestContext": "no_cookie_no_auth_no_bypass",
+      "results": [
+        {
+          "path": "/",
+          "httpStatus": 401,
+          "cacheControl": "no-store",
+          "referrerPolicy": "no-referrer"
+        },
+        {
+          "path": "/docs/uiux-stage0b-final-system-contract/final-system-contract-evidence.html",
+          "httpStatus": 401,
+          "cacheControl": "no-store",
+          "referrerPolicy": "no-referrer"
+        }
+      ],
+      "status": "passed"
+    },
+    "status": "passed_private_owner_only_source_bound"
+  },
+  "runtimeBaseline": {
+    "kind": "read_only_preimplementation_baseline",
+    "command": "scoped Vitest run over 35 explicit test files with JSON reporter",
+    "runId": "sha256:47705d3d10e0a1280b3aa37ffd2fa92b6293294ec2de85617d9007586f3343c0",
+    "startedAt": "2026-08-08T20:05:12.286Z",
+    "completedAt": "2026-08-08T20:06:52.945Z",
+    "testFileCount": 35,
+    "passedTestFileCount": 35,
+    "testCount": 322,
+    "passedTestCount": 322,
+    "failedTestCount": 0,
+    "skippedTestCount": 0,
+    "exitCode": 0,
+    "artifactPathExternal": "/tmp/uiux-stage0b6-runtime-baseline.json",
+    "artifactBytes": 108408,
+    "artifactSha256": "47705d3d10e0a1280b3aa37ffd2fa92b6293294ec2de85617d9007586f3343c0",
+    "status": "passed"
+  },
+  "supplementalRuntimeChecks": {
+    "build": {
+      "command": "npm run build",
+      "moduleCount": 2146,
+      "buildDurationSeconds": 24.69,
+      "status": "passed"
+    },
+    "uiGuard": {
+      "command": "npm run guard:ui",
+      "checks": ["design-token", "hardcoded-trade-side-color", "bespoke-modal-overlay"],
+      "status": "passed"
+    }
+  },
+  "finalScopeAudit": {
+    "branch": "condidate/webapp-ui-ux-redesign-v2",
+    "runtimeDiffEmpty": true,
+    "protectedSurfaceDiffEmpty": true,
+    "exactFileSetSha256": "3f7a974969db2027aa51b0574f6016b7f4ae221100055fac0eeec4c5801ddbc5",
+    "exactFileSetHashMethod": "SHA-256 of 21 newline-delimited SHA-256/path records sorted by path; includes 20 local contract evidence files and the bound Sites source archive",
+    "sitesProvenanceComplete": true,
+    "finalPackageCommit": null,
+    "finalPackageCommitDisposition": "written_by_parent_after_manifest_freeze; not a technical closure blocker and cannot self-reference this manifest",
+    "status": "passed"
+  }
+}

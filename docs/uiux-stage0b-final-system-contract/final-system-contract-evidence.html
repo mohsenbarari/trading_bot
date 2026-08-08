@@ -1,0 +1,791 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Stage 0B-6 — Final System Contract Evidence</title>
+  <style>
+    :root {
+      --page: #edf2f7;
+      --surface: #ffffff;
+      --surface-soft: #f6f8fb;
+      --navy: #10233f;
+      --muted: #52657b;
+      --blue: #1f5ed8;
+      --blue-soft: #eaf1ff;
+      --gold: #b78618;
+      --success: #0d6245;
+      --success-soft: #eaf8f2;
+      --warning: #6c4d00;
+      --warning-soft: #fff6d9;
+      --danger: #9d2638;
+      --danger-soft: #fff0f2;
+      --border: #d8e1ec;
+      --border-strong: #b8c5d5;
+      --focus: #1f5ed8;
+      --shadow: 0 12px 32px rgba(16, 35, 63, .09);
+      --radius-sm: 10px;
+      --radius-md: 16px;
+      --radius-lg: 24px;
+      --micro-motion: 140ms;
+      --state-motion: 180ms;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100%; background: var(--page); color: var(--navy); }
+    body {
+      font-family: Vazirmatn, Tahoma, Arial, sans-serif;
+      padding: 32px;
+      line-height: 1.65;
+      text-rendering: geometricPrecision;
+    }
+    button, input { font: inherit; }
+    button:focus-visible, input:focus-visible, [tabindex]:focus-visible {
+      outline: 3px solid var(--focus);
+      outline-offset: 2px;
+    }
+    h1, h2, h3, h4, h5, p { margin: 0; }
+    h1 { font-size: 30px; line-height: 1.35; }
+    h2 { font-size: 23px; line-height: 1.4; }
+    h3 { font-size: 17px; line-height: 1.5; }
+    h4 { font-size: 18px; line-height: 1.45; }
+    h5 { font-size: 15px; line-height: 1.5; }
+    p { color: var(--muted); font-size: 14px; }
+    code { direction: ltr; unicode-bidi: isolate; font-family: ui-monospace, monospace; font-size: 12px; }
+
+    .evidence-section {
+      width: 1720px;
+      margin: 0 auto 28px;
+      padding: 28px;
+      border: 1px solid var(--border);
+      border-radius: 28px;
+      background: var(--surface);
+      box-shadow: var(--shadow);
+    }
+    .section-heading {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 24px;
+      padding-bottom: 18px;
+      margin-bottom: 22px;
+      border-bottom: 1px solid var(--border);
+    }
+    .section-heading p { margin-top: 5px; max-width: 980px; }
+    .reviewer-chip, .badge {
+      display: inline-flex;
+      align-items: center;
+      min-height: 32px;
+      padding: 5px 11px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: var(--surface-soft);
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+    .badge.success { color: var(--success); background: var(--success-soft); border-color: #b8e2d1; }
+    .badge.warning { color: var(--warning); background: var(--warning-soft); border-color: #ead59a; }
+    .badge.danger { color: var(--danger); background: var(--danger-soft); border-color: #efbdc5; }
+    .eyebrow { color: var(--blue); font-size: 12px; font-weight: 700; letter-spacing: .03em; }
+    .grid { display: grid; gap: 16px; }
+    .grid.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .grid.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .grid.five { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+    .review-card {
+      padding: 18px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      background: var(--surface-soft);
+    }
+    .review-card h3 { margin-bottom: 9px; }
+    .review-card p + p { margin-top: 5px; }
+    .metric-row, .source-row, .table-row {
+      display: grid;
+      align-items: center;
+      gap: 12px;
+      min-height: 46px;
+      padding: 8px 12px;
+      border-bottom: 1px solid var(--border);
+      font-size: 13px;
+    }
+    .metric-row:last-child, .source-row:last-child, .table-row:last-child { border-bottom: 0; }
+    .metric-row { grid-template-columns: 1fr auto; }
+    .source-row { grid-template-columns: 84px 1.2fr 1fr auto; }
+    .table-row { grid-template-columns: 70px 1.15fr 1fr 1fr; }
+    .metric-value { direction: ltr; unicode-bidi: isolate; font-weight: 700; color: var(--navy); }
+    .assertion-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 8px;
+      padding: 0;
+      margin: 0;
+      list-style: none;
+      direction: ltr;
+    }
+    .assertion-grid li {
+      min-height: 42px;
+      padding: 9px 10px;
+      border: 1px solid #b8e2d1;
+      border-radius: var(--radius-sm);
+      background: var(--success-soft);
+      color: var(--success);
+      font-size: 11px;
+      line-height: 1.35;
+      overflow-wrap: anywhere;
+    }
+
+    .family-board { width: 1320px; }
+    .family-grid { display: grid; grid-template-columns: repeat(3, 390px); gap: 22px; justify-content: center; align-items: start; }
+    .family-grid .family-card:nth-child(n+4) { transform: translateX(-206px); }
+    .family-card { width: 390px; }
+    .family-label { min-height: 64px; padding: 0 4px 10px; }
+    .family-label p { font-size: 12px; }
+    .device, .responsive-device {
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      width: 390px;
+      height: 844px;
+      overflow: hidden;
+      border: 1px solid #c8d3e0;
+      border-radius: 32px;
+      background: #f5f7fa;
+      box-shadow: 0 10px 24px rgba(16, 35, 63, .10);
+      direction: rtl;
+    }
+    .phone-status {
+      height: 28px;
+      flex: 0 0 28px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 18px;
+      background: var(--surface);
+      color: var(--navy);
+      font-size: 11px;
+      font-weight: 600;
+    }
+    .mobile-header {
+      min-height: 76px;
+      flex: 0 0 76px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface);
+    }
+    .authenticated-header {
+      min-height: 112px;
+      flex: 0 0 112px;
+      display: grid;
+      grid-template-rows: 44px 42px;
+      align-content: center;
+      gap: 6px;
+      padding: 10px 16px;
+    }
+    .identity-row { display: flex; align-items: center; gap: 10px; min-width: 0; }
+    .identity-row .mobile-header__copy { text-align: right; }
+    .identity-row .mobile-header__copy h4 { font-size: 14px; }
+    .authenticated-header .avatar { width: 40px; height: 40px; flex-basis: 40px; border-radius: 20px; color: var(--blue); background: var(--blue-soft); }
+    .authenticated-header .notification-button { margin-inline-start: auto; }
+    .header-page-title { align-self: center; font-size: 23px; line-height: 1.4; }
+    .notification-button::before {
+      content: "";
+      display: block;
+      width: 16px;
+      height: 18px;
+      margin: auto;
+      border: 2px solid currentColor;
+      border-top-left-radius: 10px;
+      border-top-right-radius: 10px;
+      border-bottom: 0;
+    }
+    .mobile-header__copy { min-width: 0; flex: 1; }
+    .mobile-header__copy p { font-size: 12px; }
+    .avatar {
+      width: 44px;
+      height: 44px;
+      flex: 0 0 44px;
+      display: grid;
+      place-items: center;
+      border-radius: 14px;
+      color: #fff;
+      background: var(--navy);
+      font-size: 14px;
+      font-weight: 700;
+    }
+    .icon-button, .tap {
+      min-width: 44px;
+      min-height: 44px;
+      border: 1px solid var(--border);
+      border-radius: 13px;
+      color: var(--navy);
+      background: var(--surface);
+      cursor: pointer;
+    }
+    .screen-content {
+      flex: 1 1 auto;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 13px;
+      padding: 18px 16px;
+      overflow: hidden;
+    }
+    .screen-intro { display: grid; gap: 5px; }
+    .screen-intro h4 { font-size: 21px; }
+    .card, .list-row, .notice, .form-field, .decision {
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      background: var(--surface);
+    }
+    .card, .notice, .decision { padding: 15px; }
+    .card p, .notice p, .decision p { margin-top: 5px; font-size: 12px; }
+    .list-row {
+      display: flex;
+      align-items: center;
+      gap: 11px;
+      min-height: 64px;
+      padding: 10px 12px;
+      color: var(--navy);
+      text-align: right;
+    }
+    .list-row.relation-row { min-height: 76px; }
+    .list-row .badge { min-width: 92px; justify-content: center; }
+    button.list-row { width: 100%; cursor: pointer; }
+    .list-row__copy { min-width: 0; flex: 1; display: grid; gap: 2px; }
+    .list-row__copy span { color: var(--muted); font-size: 12px; }
+    .button {
+      min-width: 44px;
+      min-height: 44px;
+      padding: 9px 14px;
+      border: 1px solid var(--border-strong);
+      border-radius: 13px;
+      background: var(--surface);
+      color: var(--navy);
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 650;
+    }
+    .button.primary { color: #fff; border-color: var(--blue); background: var(--blue); }
+    .button.danger { color: #fff; border-color: var(--danger); background: var(--danger); }
+    .button.full { width: 100%; }
+    .primary-cta { min-height: 48px; }
+    .form-field { display: grid; gap: 6px; padding: 10px 12px; }
+    .form-field label { color: var(--muted); font-size: 11px; font-weight: 650; }
+    .form-field input {
+      width: 100%;
+      min-height: 48px;
+      padding: 8px 10px;
+      border: 1px solid var(--border-strong);
+      border-radius: 11px;
+      background: #fff;
+      color: var(--navy);
+      direction: rtl;
+    }
+    .form-field input.canonical-focus-input { direction: ltr; text-align: left; border: 2px solid var(--blue); box-shadow: 0 0 0 1px rgba(31,94,216,.08); }
+    .list-row.selected { border-color: var(--blue); background: var(--blue-soft); box-shadow: inset 0 0 0 1px rgba(31,94,216,.12); }
+    .inline-feedback {
+      min-height: 44px;
+      display: flex;
+      align-items: center;
+      padding: 9px 12px;
+      border: 1px solid #b8e2d1;
+      border-radius: 12px;
+      background: var(--success-soft);
+      color: var(--success);
+      font-size: 12px;
+    }
+    .inline-feedback.warning { border-color: #ead59a; background: var(--warning-soft); color: var(--warning); }
+    .bottom-nav {
+      min-height: 78px;
+      flex: 0 0 78px;
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 4px;
+      padding: 7px 8px 9px;
+      border-top: 1px solid var(--border);
+      background: var(--surface);
+    }
+    .bottom-nav.four { grid-template-columns: repeat(4, 1fr); }
+    .nav-item {
+      min-width: 44px;
+      min-height: 58px;
+      display: grid;
+      place-items: center;
+      align-content: center;
+      gap: 3px;
+      padding: 4px 2px;
+      border: 0;
+      border-radius: 13px;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+    }
+    .nav-item.active { color: var(--blue); background: var(--blue-soft); }
+    .nav-icon { width: 18px; height: 18px; display: block; position: relative; }
+    .nav-icon::before { content: ""; position: absolute; inset: 2px; border: 1.8px solid currentColor; border-radius: 5px; }
+    .nav-item[data-destination="home"] .nav-icon::before { transform: rotate(45deg); border-radius: 3px; }
+    .nav-item[data-destination="messenger"] .nav-icon::before { border-radius: 6px 6px 6px 2px; }
+    .nav-item[data-destination="operations"] .nav-icon::before { border-radius: 2px; box-shadow: 6px 0 0 -4px currentColor, 0 6px 0 -4px currentColor, 6px 6px 0 -4px currentColor; }
+    .nav-item[data-destination="account"] .nav-icon::before { border-radius: 50%; }
+    .unread-badge { position: absolute; inset-block-start: 2px; inset-inline-start: 7px; min-width: 18px; height: 18px; display: grid; place-items: center; padding: 0 4px; border: 2px solid #fff; border-radius: 99px; color: #fff; background: var(--danger); font-size: 10px; line-height: 1; }
+    .nav-item { position: relative; }
+    .nav-label { font-size: 11px; line-height: 1.25; font-weight: 600; white-space: nowrap; }
+    .brand-mark { width: 44px; height: 4px; border-radius: 99px; background: var(--gold); }
+    .action-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .search-row { display: grid; grid-template-columns: 1fr 48px; gap: 8px; }
+    .search-row input { min-width: 0; }
+    .search-control { min-height: 48px; display: flex; align-items: center; gap: 8px; padding: 0 13px; border: 1px solid var(--border); border-radius: 13px; background: #fff; color: var(--muted); font-size: 12px; }
+    .queue-row { min-height: 48px; display: flex; align-items: center; justify-content: space-between; padding: 0 14px; border: 1px solid #d4ad50; border-radius: 13px; color: var(--warning); background: var(--warning-soft); font-size: 12px; font-weight: 650; }
+    .auth-progress { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 28px; }
+    .auth-bars { display: flex; gap: 6px; direction: ltr; }
+    .auth-bars span { width: 32px; height: 4px; border-radius: 99px; background: #cbd9e8; }
+    .auth-bars span:first-child { background: var(--blue); }
+    .spacer { flex: 1; }
+
+    .foundations-grid { display: grid; grid-template-columns: 1.1fr .9fr 1fr; gap: 16px; }
+    .inventory-strip { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; }
+    .inventory-item { padding: 14px; border: 1px solid var(--border); border-radius: 13px; background: #fff; }
+    .inventory-item strong { display: block; direction: ltr; font-size: 22px; }
+    .contrast-list { display: grid; gap: 8px; }
+    .contrast-pair { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 44px; padding: 8px 11px; border-radius: 11px; border: 1px solid var(--border); }
+    .debt-row { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: center; min-height: 48px; border-bottom: 1px solid var(--border); }
+    .debt-row:last-child { border-bottom: 0; }
+
+    .route-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+    .route-row { min-height: 38px; padding: 7px 9px; border: 1px solid var(--border); border-radius: 10px; background: #fff; direction: ltr; text-align: left; }
+    .contract-chip-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 9px; }
+    .contract-chip { min-height: 54px; display: grid; place-items: center; padding: 9px; border-radius: 12px; border: 1px solid var(--border); background: #fff; text-align: center; font-size: 12px; }
+
+    .responsive-board { width: 2160px; }
+    .responsive-track { display: flex; direction: ltr; gap: 18px; align-items: flex-start; justify-content: center; }
+    .responsive-device { flex: 0 0 auto; direction: rtl; }
+    .responsive-device .screen-content { gap: 12px; }
+    .responsive-device .authenticated-header { min-height: 112px; flex-basis: 112px; }
+    .responsive-device .bottom-nav { min-height: 78px; flex-basis: 78px; }
+
+    .desktop-proof {
+      width: 1440px;
+      height: 900px;
+      margin: 0 auto 28px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      background: var(--page);
+      direction: rtl;
+      display: flex;
+      flex-direction: column;
+    }
+    .desktop-sidebar { padding: 26px 18px; color: #fff; background: var(--navy); display: flex; flex-direction: column; gap: 16px; }
+    .desktop-brand { display: grid; gap: 7px; padding: 0 8px 18px; border-bottom: 1px solid rgba(255,255,255,.16); }
+    .desktop-brand p { color: #d7e2f1; }
+    .desktop-nav { display: grid; gap: 7px; }
+    .desktop-nav button { min-height: 48px; text-align: right; padding: 10px 12px; border: 0; border-radius: 12px; color: #d7e2f1; background: transparent; }
+    .desktop-nav button.active { color: #fff; background: rgba(255,255,255,.13); }
+    .desktop-shell-header { min-height: 88px; flex: 0 0 88px; display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; padding: 18px 40px; border-bottom: 1px solid var(--border); background: #fff; direction: ltr; }
+    .desktop-shell-header > .icon-button { width: 48px; height: 48px; justify-self: start; }
+    .desktop-current-account { display: flex; align-items: center; justify-self: end; gap: 10px; direction: rtl; }
+    .desktop-current-account .avatar { width: 46px; height: 46px; flex-basis: 46px; border-radius: 50%; color: var(--blue); background: var(--blue-soft); }
+    .desktop-shell-nav { display: flex; gap: 8px; justify-content: center; direction: rtl; }
+    .desktop-shell-nav button { min-width: 102px; min-height: 44px; border: 0; border-radius: 12px; color: var(--muted); background: transparent; }
+    .desktop-shell-nav button.active { color: var(--blue); background: var(--blue-soft); font-weight: 700; }
+    .desktop-main { min-width: 0; min-height: 0; flex: 1; display: flex; flex-direction: column; }
+    .desktop-header { min-height: 90px; display: flex; align-items: center; justify-content: space-between; padding: 18px 130px 12px; background: transparent; direction: ltr; }
+    .desktop-header > * { direction: rtl; }
+    .desktop-content { min-height: 0; flex: 1; padding: 0 130px 34px; display: grid; grid-template-columns: minmax(0, 1fr) 400px; gap: 24px; direction: ltr; }
+    .desktop-panel { min-width: 0; min-height: 0; padding: 18px; border: 1px solid var(--border); border-radius: 18px; background: #fff; overflow: hidden; }
+    .desktop-list-panel { grid-column: 2; grid-row: 1; direction: rtl; }
+    .desktop-panel__head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-bottom: 14px; border-bottom: 1px solid var(--border); }
+    .desktop-list { display: grid; gap: 9px; padding-top: 14px; }
+    .desktop-detail { grid-column: 1; grid-row: 1; display: grid; grid-template-rows: auto auto auto auto auto; align-content: start; gap: 14px; direction: rtl; }
+    .desktop-facts { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+    .desktop-fact { padding: 13px; border: 1px solid var(--border); border-radius: 13px; background: var(--surface-soft); }
+    .desktop-fact span { display: block; color: var(--muted); font-size: 12px; }
+    .desktop-actions { display: flex; gap: 10px; justify-content: flex-start; align-items: flex-start; min-height: 48px; }
+    .desktop-actions .primary-cta { height: 48px; max-height: 48px; }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation-duration: .001ms !important; transition-duration: .001ms !important; scroll-behavior: auto !important; }
+    }
+  </style>
+</head>
+<body
+  data-design-direction="modern-finance"
+  data-mobile-first-share="95"
+  data-canonical-kind="figma"
+  data-local-evidence-role="secondary-derivative"
+>
+  <section id="system-contract-overview" class="evidence-section" data-reviewer-only>
+    <header class="section-heading">
+      <div>
+        <span class="eyebrow">STAGE 0B-6 · FINAL SYSTEM CONTRACT</span>
+        <h1>قرارداد نهایی سیستم و گیت پذیرش</h1>
+        <p>Figma منبع canonical است. این صفحه فقط evidence مشتق محلی، design-only و بدون مجوز runtime است.</p>
+      </div>
+      <span class="reviewer-chip">32 exact assertions · fail closed</span>
+    </header>
+
+    <div class="grid three">
+      <article class="review-card" data-approval-registry>
+        <h3>تأیید checkpointهای ورودی</h3>
+        <div class="metric-row" data-owner-approval-stage="0B-1" data-status="approved"><span>0B-1 · Auth</span><span class="badge success">مصوب</span></div>
+        <div class="metric-row" data-owner-approval-stage="0B-2" data-status="approved"><span>0B-2 · Home/Shell</span><span class="badge success">مصوب</span></div>
+        <div class="metric-row" data-owner-approval-stage="0B-3" data-status="approved"><span>0B-3 · Workspaces</span><span class="badge success">مصوب</span></div>
+        <div class="metric-row" data-owner-approval-stage="0B-4" data-status="approved"><span>0B-4 · Admin</span><span class="badge success">مصوب</span></div>
+        <div class="metric-row" data-owner-approval-stage="0B-5" data-status="approved"><span>0B-5 · Account</span><span class="badge success">مصوب</span></div>
+      </article>
+
+      <article class="review-card" data-runtime-external-proof data-kind="external-read-only" data-status="passed" data-local-harness-claim="false">
+        <h3>مرز runtime و اثبات بیرونی</h3>
+        <p>خالی‌بودن runtime diff از audit بیرونی خوانده می‌شود؛ این harness آن را جعل یا از تصویر استنتاج نمی‌کند.</p>
+        <p><strong>Runtime implementation: not implemented or authorized in Stage 0B-6.</strong></p>
+        <div class="metric-row"><span>Runtime diff</span><span class="badge success">external · empty</span></div>
+        <div class="metric-row"><span>Protected diff</span><span class="badge success">external · empty</span></div>
+        <div class="metric-row"><span>Runtime behavior</span><span class="badge warning">اثبات نمی‌شود</span></div>
+      </article>
+
+      <article class="review-card" data-implementation-gate data-owner-approval="pending" data-runtime-authorized="false" data-next-stage="none">
+        <h3>گیت اجرا</h3>
+        <div class="metric-row"><span>تأیید قرارداد نهایی</span><span class="badge warning">در انتظار مالک</span></div>
+        <div class="metric-row"><span>مجوز runtime</span><span class="badge danger">خیر</span></div>
+        <div class="metric-row"><span>مرحله بعدی</span><span class="badge">فقط پس از تأیید: Stage 1</span></div>
+        <div data-static-limits>
+          <span data-static-limit="authorization"></span><span data-static-limit="mutation"></span><span data-static-limit="delivery"></span>
+          <span data-static-limit="realtime"></span><span data-static-limit="keyboard"></span><span data-static-limit="screen-reader"></span>
+        </div>
+      </article>
+    </div>
+
+    <article class="review-card" style="margin-top:16px" data-canonical-source-registry>
+      <h3>ثبت منابع canonical خانواده‌ها</h3>
+      <div class="source-row" data-source-stage="0B-1" data-family="auth" data-status="resolved" data-local-path="docs/WEBAPP_UI_UX_REDESIGN_V2_STAGE0B_AUTH_CHECKPOINT_20260718.md"><strong>0B-1</strong><span>Auth, Invite, Registration</span><span>مصوب و canonicalized در contract نهایی</span><span class="badge success">resolved</span></div>
+      <div class="source-row" data-source-stage="0B-2" data-family="home-shell" data-status="resolved" data-local-path="docs/WEBAPP_UI_UX_REDESIGN_V2_STAGE0B_HOME_SHELL_CHECKPOINT_20260808.md"><strong>0B-2</strong><span>Home &amp; Authenticated Shell</span><span>binding audit بسته</span><span class="badge success">resolved</span></div>
+      <div class="source-row" data-source-stage="0B-3" data-family="operations-workspaces" data-status="resolved" data-local-path="docs/WEBAPP_UI_UX_REDESIGN_V2_STAGE0B_OPERATIONS_WORKSPACES_CHECKPOINT_20260808.md"><strong>0B-3</strong><span>Operations &amp; Workspaces</span><span>navigation debt بسته</span><span class="badge success">resolved</span></div>
+      <div class="source-row" data-source-stage="0B-4" data-family="admin-invitations" data-status="resolved" data-local-path="docs/WEBAPP_UI_UX_REDESIGN_V2_STAGE0B_ADMIN_USERS_INVITATIONS_CHECKPOINT_20260808.md"><strong>0B-4</strong><span>Admin &amp; Invitations</span><span>permission truth حفظ شده</span><span class="badge success">resolved</span></div>
+      <div class="source-row" data-source-stage="0B-5" data-family="account-profile" data-status="resolved" data-local-path="docs/WEBAPP_UI_UX_REDESIGN_V2_STAGE0B_ACCOUNT_PROFILE_SECURITY_NOTIFICATIONS_CHECKPOINT_20260808.md"><strong>0B-5</strong><span>Account, Profile, Security, Notifications</span><span>privacy/state truth حفظ شده</span><span class="badge success">resolved</span></div>
+    </article>
+
+    <article class="review-card" style="margin-top:16px">
+      <h3>رجیستری assertionهای دقیق</h3>
+      <ol class="assertion-grid" aria-label="Exact assertion registry">
+        <li data-assertion-id="owner-approval-0b1-through-0b5-recorded">01 owner-approval-0b1-through-0b5-recorded</li>
+        <li data-assertion-id="canonical-source-registry-complete">02 canonical-source-registry-complete</li>
+        <li data-assertion-id="canonical-source-references-resolve">03 canonical-source-references-resolve</li>
+        <li data-assertion-id="approved-source-fact-parity">04 approved-source-fact-parity</li>
+        <li data-assertion-id="stage0b6-contract-only-no-new-feature-facts">05 stage0b6-contract-only-no-new-feature-facts</li>
+        <li data-assertion-id="runtime-diff-empty">06 runtime-diff-empty</li>
+        <li data-assertion-id="modern-finance-direction-locked">07 modern-finance-direction-locked</li>
+        <li data-assertion-id="font-vazirmatn-only">08 font-vazirmatn-only</li>
+        <li data-assertion-id="foundation-inventory-65-9-2">09 foundation-inventory-65-9-2</li>
+        <li data-assertion-id="broken-variable-aliases-zero">10 broken-variable-aliases-zero</li>
+        <li data-assertion-id="component-inventory-12-sets-56-variants-with-delta">11 component-inventory-12-sets-56-variants-with-delta</li>
+        <li data-assertion-id="product-proof-detached-instances-zero">12 product-proof-detached-instances-zero</li>
+        <li data-assertion-id="known-figma-debt-disposition-complete">13 known-figma-debt-disposition-complete</li>
+        <li data-assertion-id="five-mobile-family-references-complete">14 five-mobile-family-references-complete</li>
+        <li data-assertion-id="mobile-reference-roots-390x844">15 mobile-reference-roots-390x844</li>
+        <li data-assertion-id="responsive-widths-360-375-390-414-430">16 responsive-widths-360-375-390-414-430</li>
+        <li data-assertion-id="desktop-layout-archetypes-complete">17 desktop-layout-archetypes-complete</li>
+        <li data-assertion-id="desktop-fact-parity">18 desktop-fact-parity</li>
+        <li data-assertion-id="no-product-overflow-or-clipping">19 no-product-overflow-or-clipping</li>
+        <li data-assertion-id="touch-targets-44">20 touch-targets-44</li>
+        <li data-assertion-id="primary-cta-height-48">21 primary-cta-height-48</li>
+        <li data-assertion-id="navigation-label-11">22 navigation-label-11</li>
+        <li data-assertion-id="text-contrast-45">23 text-contrast-45</li>
+        <li data-assertion-id="focus-contrast-3-stroke-3">24 focus-contrast-3-stroke-3</li>
+        <li data-assertion-id="shell-route-layer-contract-complete">25 shell-route-layer-contract-complete</li>
+        <li data-assertion-id="common-state-feedback-contract-complete">26 common-state-feedback-contract-complete</li>
+        <li data-assertion-id="motion-reduced-motion-contract-complete">27 motion-reduced-motion-contract-complete</li>
+        <li data-assertion-id="content-necessity-inventory-complete">28 content-necessity-inventory-complete</li>
+        <li data-assertion-id="reviewer-metadata-absent-from-product-roots">29 reviewer-metadata-absent-from-product-roots</li>
+        <li data-assertion-id="synthetic-identities-and-forbidden-copy-clean">30 synthetic-identities-and-forbidden-copy-clean</li>
+        <li data-assertion-id="protected-interiors-absent">31 protected-interiors-absent</li>
+        <li data-assertion-id="implementation-gate-and-static-limits-explicit">32 implementation-gate-and-static-limits-explicit</li>
+      </ol>
+    </article>
+  </section>
+
+  <section id="family-references" class="evidence-section family-board" data-reviewer-only>
+    <header class="section-heading">
+      <div><span class="eyebrow">FIVE APPROVED FAMILIES</span><h2>پنج مرجع موبایل مصوب</h2><p>هر root دقیقاً ۳۹۰×۸۴۴، mobile-first و فقط شامل حقیقت‌های سناریوی مصوب است.</p></div>
+      <span class="reviewer-chip">5 × 390×844</span>
+    </header>
+    <div class="family-grid">
+      <article class="family-card">
+        <header class="family-label"><h3>Auth / Invite / Registration</h3><p>پوسته عمومی، یک اقدام اصلی و بدون PWA.</p></header>
+        <section class="device" data-product-root data-mobile-family-reference data-family="auth" data-approved-source="0B-1" data-synthetic="true">
+          <header class="mobile-header"><div class="mobile-header__copy"><h4 data-fit>سامانه معاملات</h4></div><div class="brand-mark" aria-hidden="true"></div></header>
+          <main class="screen-content">
+            <div class="auth-progress" data-default-unit data-necessity="keep" data-fact-origin="approved"><strong data-fit>مرحله ۱ از ۲</strong><div class="auth-bars" aria-hidden="true"><span></span><span></span></div></div>
+            <div class="screen-intro" data-default-unit data-necessity="keep" data-fact-origin="approved"><h4 data-fit>ورود به سامانه</h4><p data-fit>شماره موبایل ثبت‌شده را وارد کنید تا کد تأیید برای شما ارسال شود.</p></div>
+            <div class="form-field" data-default-unit data-necessity="keep" data-fact-origin="approved"><label for="mobile-demo">شماره موبایل</label><input class="canonical-focus-input" id="mobile-demo" value="0912 345 6789" dir="ltr" aria-label="شماره موبایل نمونه"></div>
+            <button class="button primary primary-cta full" type="button" data-default-unit data-necessity="keep" data-fact-origin="approved">دریافت کد تأیید</button>
+            <div class="notice" data-default-unit data-necessity="keep" data-fact-origin="approved"><h5 data-fit>دریافت کد</h5><p data-fit>کد ابتدا در تلگرام و در صورت نیاز به‌صورت خودکار با پیامک ارسال می‌شود.</p></div>
+            <div class="spacer"></div>
+          </main>
+        </section>
+      </article>
+
+      <article class="family-card">
+        <header class="family-label"><h3>Home / Authenticated Shell</h3><p>هویت کوتاه، یک وضعیت مؤثر و navigation نقش‌محور.</p></header>
+        <section class="device" data-product-root data-mobile-family-reference data-family="home-shell" data-approved-source="0B-2" data-synthetic="true">
+          <header class="mobile-header authenticated-header"><div class="identity-row"><div class="avatar">ن</div><div class="mobile-header__copy"><h4 data-fit>نگار پارسا</h4></div><button class="icon-button notification-button" type="button" aria-label="اعلان‌ها"></button></div><h4 class="header-page-title" data-fit>خانه</h4></header>
+          <main class="screen-content"></main>
+          <nav class="bottom-nav" aria-label="ناوبری اصلی">
+            <button class="nav-item active" data-destination="home" type="button"><span class="nav-icon" aria-hidden="true"></span><span class="nav-label" data-nav-label>خانه</span></button>
+            <button class="nav-item" data-destination="market" type="button"><span class="nav-icon" aria-hidden="true"></span><span class="nav-label" data-nav-label>بازار</span></button>
+            <button class="nav-item" data-destination="messenger" type="button"><span class="nav-icon" aria-hidden="true"></span><span class="unread-badge">۲</span><span class="nav-label" data-nav-label>پیام‌رسان</span></button>
+            <button class="nav-item" data-destination="operations" type="button"><span class="nav-icon" aria-hidden="true"></span><span class="nav-label" data-nav-label>عملیات</span></button>
+            <button class="nav-item" data-destination="account" type="button"><span class="nav-icon" aria-hidden="true"></span><span class="nav-label" data-nav-label>حساب</span></button>
+          </nav>
+        </section>
+      </article>
+
+      <article class="family-card">
+        <header class="family-label"><h3>Operations / Workspaces</h3><p>فهرست مستقیم، context پایدار و واقعیت مالی future-only.</p></header>
+        <section class="device" data-product-root data-mobile-family-reference data-family="operations-workspaces" data-approved-source="0B-3" data-synthetic="true">
+          <header class="mobile-header authenticated-header"><div class="identity-row"><div class="avatar">ن</div><div class="mobile-header__copy"><h4 data-fit>نگار پارسا</h4></div><button class="icon-button notification-button" type="button" aria-label="اعلان‌ها"></button></div><h4 class="header-page-title" data-fit>مشتریان</h4></header>
+          <main class="screen-content">
+            <div class="search-row" data-default-unit data-necessity="keep" data-fact-origin="approved"><button class="search-control" type="button"><span aria-hidden="true">⌕</span><span data-fit>جستجوی مشتری</span></button><button class="button primary primary-cta" type="button" aria-label="افزودن مشتری">+</button></div>
+            <button class="queue-row" type="button" data-default-unit data-necessity="keep" data-fact-origin="approved"><span data-fit>۲ دعوت در انتظار</span><span aria-hidden="true">‹</span></button>
+            <button class="list-row relation-row" type="button" data-default-unit data-necessity="keep" data-fact-origin="approved"><span class="badge warning">دعوت</span><span class="list-row__copy"><strong data-fit>دعوت نمونه</strong><span data-fit>0912 *** 0003 · تا ۲۲ مرداد</span></span><span aria-hidden="true">‹</span></button>
+            <button class="list-row relation-row" type="button" data-default-unit data-necessity="keep" data-fact-origin="approved"><span class="badge success">فعال</span><span class="list-row__copy"><strong data-fit>مشتری نمونه یک</strong><span data-fit>0912 *** 0004 · سطح ۲</span></span><span aria-hidden="true">‹</span></button>
+            <button class="list-row relation-row" type="button" data-default-unit data-necessity="keep" data-fact-origin="approved"><span class="badge success">فعال</span><span class="list-row__copy"><strong data-fit>مشتری نمونه دو</strong><span data-fit>0912 *** 0005 · سطح ۱</span></span><span aria-hidden="true">‹</span></button>
+            <button class="list-row relation-row" type="button" data-default-unit data-necessity="keep" data-fact-origin="approved"><span class="badge">غیرفعال</span><span class="list-row__copy"><strong data-fit>مشتری نمونه سه</strong><span data-fit>0912 *** 0006</span></span><span aria-hidden="true">‹</span></button>
+            <div class="spacer"></div>
+          </main>
+          <nav class="bottom-nav" aria-label="ناوبری اصلی">
+            <button class="nav-item" data-destination="home" type="button"><span class="nav-icon" aria-hidden="true"></span><span class="nav-label" data-nav-label>خانه</span></button>
+            <button class="nav-item" data-destination="market" type="button"><span class="nav-icon" aria-hidden="true"></span><span class="nav-label" data-nav-label>بازار</span></button>
+            <button class="nav-item" data-destination="messenger" type="button"><span class="nav-icon" aria-hidden="true"></span><span class="nav-label" data-nav-label>پیام‌رسان</span></button>
+            <button class="nav-item active" data-destination="operations" type="button"><span class="nav-icon" aria-hidden="true"></span><span class="nav-label" data-nav-label>عملیات</span></button>
+            <button class="nav-item" data-destination="account" type="button"><span class="nav-icon" aria-hidden="true"></span><span class="nav-label" data-nav-label>حساب</span></button>
+          </nav>
+        </section>
+      </article>
+
+      <article class="family-card">
+        <header class="family-label"><h3>Admin / Invitations</h3><p>جست‌وجوی پایدار، صف نیازمند رسیدگی و اقدام‌های جدا.</p></header>
+        <section class="device" data-product-root data-mobile-family-reference data-family="admin-invitations" data-approved-source="0B-4" data-synthetic="true">
+          <header class="mobile-header authenticated-header"><div class="identity-row"><div class="avatar">م</div><div class="mobile-header__copy"><h4 data-fit>مدیر نمونه</h4></div><button class="icon-button notification-button" type="button" aria-label="اعلان‌ها"></button></div><h4 class="header-page-title" data-fit>کاربران</h4></header>
+          <main class="screen-content">
+            <div class="form-field" data-default-unit data-necessity="keep" data-fact-origin="approved"><label for="admin-search">جست‌وجو</label><input id="admin-search" value="نام، شماره یا حساب" readonly aria-label="جست‌وجوی کاربر"></div>
+            <button class="list-row relation-row" type="button" data-default-unit data-necessity="keep" data-fact-origin="approved"><span class="badge success">فعال</span><span class="list-row__copy"><strong data-fit>کاربر نمونه</strong><span data-fit>0912 *** 0000 · کاربر عادی</span></span><span aria-hidden="true">‹</span></button>
+            <button class="list-row relation-row" type="button" data-default-unit data-necessity="keep" data-fact-origin="approved"><span class="badge success">فعال</span><span class="list-row__copy"><strong data-fit>کاربر نمونه با نام طولانی</strong><span data-fit>0912 *** 0001 · تماشا</span></span><span aria-hidden="true">‹</span></button>
+            <button class="list-row relation-row" type="button" data-default-unit data-necessity="keep" data-fact-origin="approved"><span class="badge danger">نیازمند اقدام</span><span class="list-row__copy"><strong data-fit>کاربر آزمایشی</strong><span data-fit>0912 *** 0002 · غیرفعال</span></span><span aria-hidden="true">‹</span></button>
+            <div class="spacer"></div>
+          </main>
+          <nav class="bottom-nav" aria-label="ناوبری اصلی">
+            <button class="nav-item" data-destination="home" type="button"><span class="nav-icon" aria-hidden="true"></span><span class="nav-label" data-nav-label>خانه</span></button>
+            <button class="nav-item" data-destination="market" type="button"><span class="nav-icon" aria-hidden="true"></span><span class="nav-label" data-nav-label>بازار</span></button>
+            <button class="nav-item" data-destination="messenger" type="button"><span class="nav-icon" aria-hidden="true"></span><span class="nav-label" data-nav-label>پیام‌رسان</span></button>
+            <button class="nav-item active" data-destination="operations" type="button"><span class="nav-icon" aria-hidden="true"></span><span class="nav-label" data-nav-label>عملیات</span></button>
+            <button class="nav-item" data-destination="account" type="button"><span class="nav-icon" aria-hidden="true"></span><span class="nav-label" data-nav-label>حساب</span></button>
+          </nav>
+        </section>
+      </article>
+
+      <article class="family-card">
+        <header class="family-label"><h3>Account / Profile / Security</h3><p>مقصدهای یکتا، PII حداقلی و stateهای صادقانه.</p></header>
+        <section class="device" data-product-root data-mobile-family-reference data-family="account-profile" data-approved-source="0B-5" data-synthetic="true">
+          <header class="mobile-header authenticated-header"><div class="identity-row"><div class="avatar">ن</div><div class="mobile-header__copy"><h4 data-fit>نگار پارسا</h4></div><button class="icon-button notification-button" type="button" aria-label="اعلان‌ها"></button></div><h4 class="header-page-title" data-fit>حساب</h4></header>
+          <main class="screen-content">
+            <button class="list-row relation-row" type="button" data-default-unit data-necessity="keep" data-fact-origin="approved"><span class="list-row__copy"><strong data-fit>پروفایل</strong><span data-fit>آواتار و آدرس حساب</span></span><span aria-hidden="true">‹</span></button>
+            <button class="list-row relation-row" type="button" data-default-unit data-necessity="keep" data-fact-origin="approved"><span class="list-row__copy"><strong data-fit>امنیت و نشست‌ها</strong><span data-fit>دستگاه‌های فعال این حساب</span></span><span aria-hidden="true">‹</span></button>
+            <button class="list-row relation-row" type="button" data-default-unit data-necessity="keep" data-fact-origin="approved"><span class="list-row__copy"><strong data-fit>حافظه و داده‌ها</strong><span data-fit>فایل‌های ذخیره‌شده همین دستگاه</span></span><span aria-hidden="true">‹</span></button>
+            <button class="list-row relation-row" type="button" data-default-unit data-necessity="keep" data-fact-origin="approved"><span class="list-row__copy"><strong data-fit>اعلان‌ها</strong><span data-fit>معاملات و سایر پیام‌ها</span></span><span aria-hidden="true">‹</span></button>
+            <button class="list-row relation-row" type="button" data-default-unit data-necessity="keep" data-fact-origin="approved"><span class="list-row__copy"><strong data-fit>اتصال تلگرام</strong><span data-fit>اختیاری؛ دسترسی وب محدود نمی‌شود</span></span><span aria-hidden="true">‹</span></button>
+            <div class="spacer"></div>
+          </main>
+          <nav class="bottom-nav" aria-label="ناوبری اصلی">
+            <button class="nav-item" data-destination="home" type="button"><span class="nav-icon" aria-hidden="true"></span><span class="nav-label" data-nav-label>خانه</span></button>
+            <button class="nav-item" data-destination="market" type="button"><span class="nav-icon" aria-hidden="true"></span><span class="nav-label" data-nav-label>بازار</span></button>
+            <button class="nav-item" data-destination="messenger" type="button"><span class="nav-icon" aria-hidden="true"></span><span class="nav-label" data-nav-label>پیام‌رسان</span></button>
+            <button class="nav-item" data-destination="operations" type="button"><span class="nav-icon" aria-hidden="true"></span><span class="nav-label" data-nav-label>عملیات</span></button>
+            <button class="nav-item active" data-destination="account" type="button"><span class="nav-icon" aria-hidden="true"></span><span class="nav-label" data-nav-label>حساب</span></button>
+          </nav>
+        </section>
+      </article>
+    </div>
+  </section>
+
+  <section id="foundations-components" class="evidence-section" data-reviewer-only data-variable-count="65" data-text-style-count="9" data-effect-count="2" data-broken-alias-count="0" data-component-set-count="12" data-component-variant-count="56" data-component-variant-delta="2" data-detached-product-instance-count="0">
+    <header class="section-heading"><div><span class="eyebrow">FOUNDATIONS · COMPONENTS · DEBT</span><h2>سیستم طراحی نهایی و disposition بدهی‌ها</h2><p>دو variant افزوده‌شده بخشی از همان ۱۲ set هستند؛ inventory نهایی دقیقاً ۱۲/۵۶ است.</p></div><span class="reviewer-chip">65 · 9 · 2 · 12 · 56</span></header>
+    <div class="inventory-strip">
+      <div class="inventory-item"><span>Variable</span><strong>65</strong></div>
+      <div class="inventory-item"><span>Text style</span><strong>9</strong></div>
+      <div class="inventory-item"><span>Effect</span><strong>2</strong></div>
+      <div class="inventory-item"><span>Component set</span><strong>12</strong></div>
+      <div class="inventory-item"><span>Variant</span><strong>56 <small>(+2)</small></strong></div>
+    </div>
+    <div class="foundations-grid" style="margin-top:16px">
+      <article class="review-card">
+        <h3>کنتراست consequential</h3>
+        <div class="contrast-list">
+          <div class="contrast-pair" data-contrast-pair data-foreground="#10233f" data-background="#ffffff" style="color:#10233f;background:#ffffff"><span>متن اصلی</span><strong>روی سطح</strong></div>
+          <div class="contrast-pair" data-contrast-pair data-foreground="#52657b" data-background="#ffffff" style="color:#52657b;background:#ffffff"><span>متن ثانویه</span><strong>روی سطح</strong></div>
+          <div class="contrast-pair" data-contrast-pair data-foreground="#ffffff" data-background="#1f5ed8" style="color:#ffffff;background:#1f5ed8"><span>CTA</span><strong>آبی</strong></div>
+          <div class="contrast-pair" data-contrast-pair data-foreground="#0d6245" data-background="#eaf8f2" style="color:#0d6245;background:#eaf8f2"><span>موفقیت</span><strong>معنایی</strong></div>
+          <div class="contrast-pair" data-contrast-pair data-foreground="#6c4d00" data-background="#fff6d9" style="color:#6c4d00;background:#fff6d9"><span>هشدار</span><strong>معنایی</strong></div>
+        </div>
+      </article>
+      <article class="review-card" data-focus-contract data-color="#1f5ed8" data-surface="#ffffff" data-page="#edf2f7" data-stroke="3">
+        <h3>Focus و حرکت</h3>
+        <div class="metric-row"><span>Focus stroke</span><span class="metric-value">3px</span></div>
+        <div class="metric-row"><span>Micro</span><span class="metric-value">140ms</span></div>
+        <div class="metric-row"><span>State</span><span class="metric-value">180ms</span></div>
+        <div class="metric-row"><span>Reduced motion</span><span class="badge success">الزامی</span></div>
+      </article>
+      <article class="review-card" data-debt-disposition>
+        <h3>بدهی‌های شناخته‌شده</h3>
+        <div class="debt-row" data-debt-gate="auth-canonicalization" data-status="resolved"><span>Auth canonicalization</span><span class="badge success">بسته</span></div>
+        <div class="debt-row" data-debt-gate="home-binding" data-status="resolved"><span>Home binding audit</span><span class="badge success">بسته</span></div>
+        <div class="debt-row" data-debt-gate="operations-navigation" data-status="resolved"><span>Operations-active navigation</span><span class="badge success">بسته</span></div>
+        <div class="debt-row" data-debt-carry-forward="avatar-initials-text-style" data-status="documented"><span>Avatar initials text style</span><span class="badge">Stage 2</span></div>
+      </article>
+    </div>
+  </section>
+
+  <section id="shell-state-contract" class="evidence-section" data-reviewer-only>
+    <header class="section-heading"><div><span class="eyebrow">SHELL · ROUTE · STATE · MOTION</span><h2>قرارداد سراسری ناوبری و بازیابی</h2><p>۲۹ route فعلی طبقه‌بندی شده‌اند؛ catch-all فقط carry-forward Stage 3 است.</p></div><span class="reviewer-chip">29 routes + planned catch-all</span></header>
+    <div class="grid two">
+      <article class="review-card" data-shell-contract>
+        <h3>پنج نوع shell</h3>
+        <div class="contract-chip-grid" style="grid-template-columns:repeat(5,1fr)">
+          <div class="contract-chip" data-shell-kind="public">Public</div>
+          <div class="contract-chip" data-shell-kind="focused-authenticated">Focused authenticated</div>
+          <div class="contract-chip" data-shell-kind="standard-authenticated">Standard authenticated</div>
+          <div class="contract-chip" data-shell-kind="protected-legacy">Protected legacy</div>
+          <div class="contract-chip" data-shell-kind="invalid-forbidden-recovery">Invalid / forbidden</div>
+        </div>
+        <h3 style="margin-top:16px">اولویت لایه‌ها</h3>
+        <div class="contract-chip-grid" style="grid-template-columns:repeat(5,1fr)" data-layer-contract>
+          <div class="contract-chip" data-layer-priority="1">امنیت نشست</div><div class="contract-chip" data-layer-priority="2">اتصال</div><div class="contract-chip" data-layer-priority="3">نتیجه اقدام</div><div class="contract-chip" data-layer-priority="4">PWA</div><div class="contract-chip" data-layer-priority="5">Navigation</div>
+        </div>
+      </article>
+      <article class="review-card" data-state-contract>
+        <h3>state و feedback مشترک</h3>
+        <div class="contract-chip-grid">
+          <div class="contract-chip" data-common-state="loading">Loading</div><div class="contract-chip" data-common-state="empty">Empty</div><div class="contract-chip" data-common-state="normal-dense">Normal / dense</div><div class="contract-chip" data-common-state="error-retry">Error / retry</div><div class="contract-chip" data-common-state="offline">Offline</div><div class="contract-chip" data-common-state="stale-reconnecting">Stale / reconnecting</div>
+        </div>
+        <h3 style="margin-top:16px">اقدام حساس</h3>
+        <div class="contract-chip-grid" style="grid-template-columns:repeat(4,1fr)">
+          <div class="contract-chip" data-action-state="confirm">Confirm</div><div class="contract-chip" data-action-state="busy">Busy</div><div class="contract-chip" data-action-state="success">Success</div><div class="contract-chip" data-action-state="failure-preserved">Failure + preserved context</div>
+        </div>
+      </article>
+    </div>
+    <article class="review-card" style="margin-top:16px" data-route-contract data-route-count="29" data-catch-all="planned">
+      <h3>Route inventory</h3>
+      <div class="route-grid">
+        <div class="route-row" data-route="/">/</div><div class="route-row" data-route="/setup-password">/setup-password</div><div class="route-row" data-route="/login">/login</div>
+        <div class="route-row" data-route="/market">/market</div><div class="route-row" data-route="/operations">/operations</div><div class="route-row" data-route="/operations/customers">/operations/customers</div>
+        <div class="route-row" data-route="/operations/customers/:relationId">/operations/customers/:relationId</div><div class="route-row" data-route="/operations/accountants">/operations/accountants</div><div class="route-row" data-route="/operations/accountants/:relationId">/operations/accountants/:relationId</div>
+        <div class="route-row" data-route="/account">/account</div><div class="route-row" data-route="/account/security">/account/security</div><div class="route-row" data-route="/account/storage">/account/storage</div>
+        <div class="route-row" data-route="/account/notifications">/account/notifications</div><div class="route-row" data-route="/chat">/chat</div><div class="route-row" data-route="/users/:id">/users/:id</div>
+        <div class="route-row" data-route="/profile">/profile</div><div class="route-row" data-route="/settings">/settings</div><div class="route-row" data-route="/admin">/admin</div>
+        <div class="route-row" data-route="/admin/invitations">/admin/invitations</div><div class="route-row" data-route="/admin/channels">/admin/channels</div><div class="route-row" data-route="/admin/users">/admin/users</div>
+        <div class="route-row" data-route="/admin/users/:id">/admin/users/:id</div><div class="route-row" data-route="/admin/commodities">/admin/commodities</div><div class="route-row" data-route="/admin/messages">/admin/messages</div>
+        <div class="route-row" data-route="/admin/system">/admin/system</div><div class="route-row" data-route="/i/:code">/i/:code</div><div class="route-row" data-route="/register">/register</div>
+        <div class="route-row" data-route="/notifications">/notifications</div><div class="route-row" data-route="/share-receive">/share-receive</div>
+      </div>
+    </article>
+    <article class="review-card" style="margin-top:16px" data-motion-contract data-micro-ms="140" data-state-ms="180" data-reduced-motion="true">
+      <h3>Motion contract</h3><p>حرکت فقط continuity و state را روشن می‌کند؛ decorative loop و وابستگی قابلیت به animation ممنوع است. Reduced motion تبدیل/اسلاید غیرضروری را حذف می‌کند.</p>
+    </article>
+  </section>
+
+  <section id="content-protected-contract" class="evidence-section" data-reviewer-only>
+    <header class="section-heading"><div><span class="eyebrow">CONTENT · PRIVACY · PROTECTED SCOPE</span><h2>اقتصاد اطلاعات و مرزهای قفل‌شده</h2><p>خلوتی، مجوز حذف privacy/recovery نیست و سطح محافظت‌شده هیچ interior نمایشی ندارد.</p></div><span class="reviewer-chip">Keep · On demand · Remove</span></header>
+    <div class="grid three">
+      <article class="review-card" data-content-necessity-matrix>
+        <h3>ممیزی پنج خانواده</h3>
+        <div class="metric-row" data-content-family="auth" data-status="complete"><span>Auth</span><span class="badge success">complete</span></div>
+        <div class="metric-row" data-content-family="home-shell" data-status="complete"><span>Home/Shell</span><span class="badge success">complete</span></div>
+        <div class="metric-row" data-content-family="operations-workspaces" data-status="complete"><span>Workspaces</span><span class="badge success">complete</span></div>
+        <div class="metric-row" data-content-family="admin-invitations" data-status="complete"><span>Admin</span><span class="badge success">complete</span></div>
+        <div class="metric-row" data-content-family="account-profile" data-status="complete"><span>Account</span><span class="badge success">complete</span></div>
+      </article>
+      <article class="review-card" data-privacy-matrix>
+        <h3>حریم خصوصی پروفایل</h3>
+        <div class="table-row" data-privacy-row="self" data-phone="full" data-address="full"><strong>Self</strong><span>شماره کامل</span><span>نشانی کامل</span><span class="badge success">مجاز</span></div>
+        <div class="table-row" data-privacy-row="normal" data-phone="masked" data-address="hidden"><strong>Normal</strong><span>ماسک</span><span>پنهان</span><span class="badge">حداقلی</span></div>
+        <div class="table-row" data-privacy-row="admin-context" data-phone="permission-bound" data-address="on-demand"><strong>Admin</strong><span>permission-bound</span><span>on demand</span><span class="badge warning">اختصاصی</span></div>
+        <div class="table-row" data-privacy-row="forbidden" data-phone="hidden" data-address="hidden"><strong>Forbidden</strong><span>پنهان</span><span>پنهان</span><span class="badge danger">بدون افشا</span></div>
+      </article>
+      <article class="review-card" data-protected-omission-contract>
+        <h3>سطح‌های محافظت‌شده</h3>
+        <div class="metric-row" data-protected-reference="market" data-status="omitted"><span>Market interior</span><span class="badge success">omitted</span></div>
+        <div class="metric-row" data-protected-reference="messenger" data-status="omitted"><span>Messenger interior</span><span class="badge success">omitted</span></div>
+        <div class="metric-row" data-protected-reference="share-receive" data-status="omitted"><span>Share receiver</span><span class="badge success">omitted</span></div>
+        <div class="metric-row" data-protected-reference="admin-channels" data-status="omitted"><span>Admin channels</span><span class="badge success">omitted</span></div>
+      </article>
+    </div>
+    <div class="grid two" style="margin-top:16px">
+      <article class="review-card" data-cross-platform-truth>
+        <h3>حقیقت بین پلتفرم‌ها</h3>
+        <p>محدودیت تعدادی فقط با پایان مثبت و enforceable؛ receipt شرط ادعای delivery؛ write خارج از authority یا forward می‌شود یا fail-closed.</p>
+      </article>
+      <article class="review-card" data-session-notification-truth>
+        <h3>نشست و اعلان</h3>
+        <p>نشست local per-server و بدون topology؛ اعلان آخرین ۵۰ مورد، بدون total ساختگی و با refetch + dedupe محدود به همان پنجره.</p>
+      </article>
+    </div>
+  </section>
+
+  <section id="responsive-proofs" class="evidence-section responsive-board" data-reviewer-only>
+    <header class="section-heading"><div><span class="eyebrow">RESPONSIVE ACCEPTANCE</span><h2>پنج عرض مرجع موبایل</h2><p>همان حقیقت و همان اولویت؛ فضای بیشتر یا کمتر واقعیت تازه نمی‌سازد.</p></div><span class="reviewer-chip">360 · 375 · 390 · 414 · 430</span></header>
+    <div class="responsive-track">
+      <section class="responsive-device" style="width:360px" data-product-root data-responsive-proof data-width="360" data-synthetic="true" data-approved-source="0B-2"><header class="mobile-header authenticated-header"><div class="identity-row"><div class="avatar">ن</div><div class="mobile-header__copy"><h4 data-fit>نگار پارسا</h4></div><button class="icon-button notification-button" type="button" aria-label="اعلان‌ها"></button></div><h4 class="header-page-title" data-fit>خانه</h4></header><main class="screen-content"></main><nav class="bottom-nav"><button class="nav-item active" data-destination="home" type="button"><span class="nav-icon" aria-hidden="true"></span><span class="nav-label" data-nav-label>خانه</span></button><button class="nav-item" data-destination="market" type="button"><span class="nav-icon" aria-hidden="true"></span><span class="nav-label" data-nav-label>بازار</span></button><button class="nav-item" data-destination="messenger" type="button"><span class="nav-icon" aria-hidden="true"></span><span class="unread-badge">۲</span><span class="nav-label" data-nav-label>پیام‌رسان</span></button><button class="nav-item" data-destination="operations" type="button"><span class="nav-icon" aria-hidden="true"></span><span class="nav-label" data-nav-label>عملیات</span></button><button class="nav-item" data-destination="account" type="button"><span class="nav-icon" aria-hidden="true"></span><span class="nav-label" data-nav-label>حساب</span></button></nav></section>
+      <section class="responsive-device" style="width:375px" data-product-root data-responsive-proof data-width="375" data-synthetic="true" data-approved-source="0B-2"><header class="mobile-header authenticated-header"><div class="identity-row"><div class="avatar">ن</div><div class="mobile-header__copy"><h4 data-fit>نگار پارسا</h4></div><button class="icon-button notification-button" type="button" aria-label="اعلان‌ها"></button></div><h4 class="header-page-title" data-fit>خانه</h4></header><main class="screen-content"></main><nav class="bottom-nav"><button class="nav-item active" data-destination="home" type="button"><span class="nav-icon" aria-hidden="true"></span><span class="nav-label" data-nav-label>خانه</span></button><button class="nav-item" data-destination="market" type="button"><span class="nav-icon" aria-hidden="true"></span><span class="nav-label" data-nav-label>بازار</span></button><button class="nav-item" data-destination="messenger" type="button"><span class="nav-icon" aria-hidden="true"></span><span class="unread-badge">۲</span><span class="nav-label" data-nav-label>پیام‌رسان</span></button><button class="nav-item" data-destination="operations" type="button"><span class="nav-icon" aria-hidden="true"></span><span class="nav-label" data-nav-label>عملیات</span></button><button class="nav-item" data-destination="account" type="button"><span class="nav-icon" aria-hidden="true"></span><span class="nav-label" data-nav-label>حساب</span></button></nav></section>
+      <section class="responsive-device" style="width:390px" data-product-root data-responsive-proof data-width="390" data-synthetic="true" data-approved-source="0B-2"><header class="mobile-header authenticated-header"><div class="identity-row"><div class="avatar">ن</div><div class="mobile-header__copy"><h4 data-fit>نگار پارسا</h4></div><button class="icon-button notification-button" type="button" aria-label="اعلان‌ها"></button></div><h4 class="header-page-title" data-fit>خانه</h4></header><main class="screen-content"></main><nav class="bottom-nav"><button class="nav-item active" data-destination="home" type="button"><span class="nav-icon" aria-hidden="true"></span><span class="nav-label" data-nav-label>خانه</span></button><button class="nav-item" data-destination="market" type="button"><span class="nav-icon" aria-hidden="true"></span><span class="nav-label" data-nav-label>بازار</span></button><button class="nav-item" data-destination="messenger" type="button"><span class="nav-icon" aria-hidden="true"></span><span class="unread-badge">۲</span><span class="nav-label" data-nav-label>پیام‌رسان</span></button><button class="nav-item" data-destination="operations" type="button"><span class="nav-icon" aria-hidden="true"></span><span class="nav-label" data-nav-label>عملیات</span></button><button class="nav-item" data-destination="account" type="button"><span class="nav-icon" aria-hidden="true"></span><span class="nav-label" data-nav-label>حساب</span></button></nav></section>
+      <section class="responsive-device" style="width:414px" data-product-root data-responsive-proof data-width="414" data-synthetic="true" data-approved-source="0B-2"><header class="mobile-header authenticated-header"><div class="identity-row"><div class="avatar">ن</div><div class="mobile-header__copy"><h4 data-fit>نگار پارسا</h4></div><button class="icon-button notification-button" type="button" aria-label="اعلان‌ها"></button></div><h4 class="header-page-title" data-fit>خانه</h4></header><main class="screen-content"></main><nav class="bottom-nav"><button class="nav-item active" data-destination="home" type="button"><span class="nav-icon" aria-hidden="true"></span><span class="nav-label" data-nav-label>خانه</span></button><button class="nav-item" data-destination="market" type="button"><span class="nav-icon" aria-hidden="true"></span><span class="nav-label" data-nav-label>بازار</span></button><button class="nav-item" data-destination="messenger" type="button"><span class="nav-icon" aria-hidden="true"></span><span class="unread-badge">۲</span><span class="nav-label" data-nav-label>پیام‌رسان</span></button><button class="nav-item" data-destination="operations" type="button"><span class="nav-icon" aria-hidden="true"></span><span class="nav-label" data-nav-label>عملیات</span></button><button class="nav-item" data-destination="account" type="button"><span class="nav-icon" aria-hidden="true"></span><span class="nav-label" data-nav-label>حساب</span></button></nav></section>
+      <section class="responsive-device" style="width:430px" data-product-root data-responsive-proof data-width="430" data-synthetic="true" data-approved-source="0B-2"><header class="mobile-header authenticated-header"><div class="identity-row"><div class="avatar">ن</div><div class="mobile-header__copy"><h4 data-fit>نگار پارسا</h4></div><button class="icon-button notification-button" type="button" aria-label="اعلان‌ها"></button></div><h4 class="header-page-title" data-fit>خانه</h4></header><main class="screen-content"></main><nav class="bottom-nav"><button class="nav-item active" data-destination="home" type="button"><span class="nav-icon" aria-hidden="true"></span><span class="nav-label" data-nav-label>خانه</span></button><button class="nav-item" data-destination="market" type="button"><span class="nav-icon" aria-hidden="true"></span><span class="nav-label" data-nav-label>بازار</span></button><button class="nav-item" data-destination="messenger" type="button"><span class="nav-icon" aria-hidden="true"></span><span class="unread-badge">۲</span><span class="nav-label" data-nav-label>پیام‌رسان</span></button><button class="nav-item" data-destination="operations" type="button"><span class="nav-icon" aria-hidden="true"></span><span class="nav-label" data-nav-label>عملیات</span></button><button class="nav-item" data-destination="account" type="button"><span class="nav-icon" aria-hidden="true"></span><span class="nav-label" data-nav-label>حساب</span></button></nav></section>
+    </div>
+  </section>
+
+  <section class="desktop-proof" data-product-root data-desktop-proof data-synthetic="true" data-approved-source="0B-3" data-parity-scope="operations-desktop">
+    <header class="desktop-shell-header">
+      <button class="icon-button" type="button" aria-label="اعلان‌ها">♢</button>
+      <nav class="desktop-shell-nav" aria-label="ناوبری دسکتاپ"><button type="button">خانه</button><button type="button">بازار</button><button type="button">پیام‌رسان</button><button class="active" type="button">عملیات</button><button type="button">حساب</button></nav>
+      <div class="desktop-current-account"><div class="avatar">ن</div><strong data-fit>نگار پارسا</strong></div>
+    </header>
+    <div class="desktop-main">
+      <header class="desktop-header"><button class="button primary primary-cta" type="button">افزودن مشتری</button><h2 data-fit data-fact="task" data-value="customer-management">مشتریان</h2></header>
+      <main class="desktop-content">
+        <section class="desktop-panel desktop-list-panel">
+          <button class="search-control" type="button"><span aria-hidden="true">⌕</span><span data-fit>جست‌وجوی مشتری</span></button>
+          <button class="queue-row" type="button" style="width:100%;margin-top:12px"><span data-fit>۲ دعوت در انتظار</span><span aria-hidden="true">‹</span></button>
+          <div class="desktop-list">
+            <button class="list-row relation-row selected" type="button" aria-current="true"><span class="badge success">فعال</span><span class="list-row__copy"><strong data-fit data-fact="selected" data-value="customer-one">مشتری نمونه یک</strong><span data-fit>0912 *** 0004</span></span><span aria-hidden="true">‹</span></button>
+            <button class="list-row relation-row" type="button"><span class="badge warning">دعوت</span><span class="list-row__copy"><strong data-fit>مشتری فروشگاه</strong><span data-fit>تا ۲۲ مرداد</span></span><span aria-hidden="true">‹</span></button>
+            <button class="list-row relation-row" type="button"><span class="badge success">فعال</span><span class="list-row__copy"><strong data-fit>فروشگاه مرکزی</strong><span data-fit>0912 *** 0005</span></span><span aria-hidden="true">‹</span></button>
+            <button class="list-row relation-row" type="button"><span class="badge">غیرفعال</span><span class="list-row__copy"><strong data-fit>مشتری قدیمی</strong><span data-fit>0912 *** 0006</span></span><span aria-hidden="true">‹</span></button>
+          </div>
+        </section>
+        <section class="desktop-panel desktop-detail">
+          <div class="desktop-panel__head"><div><h2 data-fit>مشتری نمونه یک</h2><p data-fit>0912 *** 0004</p></div><span class="badge success" data-fact="status" data-value="active">فعال</span></div>
+          <h3 data-fit>تنظیمات مالی</h3>
+          <div class="desktop-facts">
+            <div class="desktop-fact"><span>سطح حساب</span><strong data-fit data-fact="level" data-value="2">سطح ۲</strong></div>
+            <div class="desktop-fact"><span>کارمزد</span><strong data-fit data-fact="commission" data-value="0.5-percent">۰٫۵٪</strong></div>
+            <div class="desktop-fact"><span>سقف خرید</span><strong data-fit data-fact="buy-limit" data-value="unlimited">بدون محدودیت</strong></div>
+            <div class="desktop-fact"><span>سقف فروش</span><strong data-fit data-fact="sell-limit" data-value="50-grams">۵۰ گرم</strong></div>
+          </div>
+          <section class="decision"><h3>اثر تغییر</h3><p data-fit data-fact="scope" data-value="future-only">کارمزد و سقف‌های جدید فقط روی معاملات آینده اثر دارند؛ تاریخچه معاملات تغییر نمی‌کند.</p></section>
+          <div class="desktop-actions"><button class="button primary primary-cta full" type="button">مرور تغییرات</button></div>
+        </section>
+      </main>
+    </div>
+  </section>
+
+  <section aria-hidden="true" data-desktop-archetype-matrix data-reviewer-only style="display:none">
+    <span data-desktop-archetype="public-centered-auth" data-status="complete"></span>
+    <span data-desktop-archetype="home-contained-shell" data-status="complete"></span>
+    <span data-desktop-archetype="operations-workspace-list-detail" data-status="complete"></span>
+    <span data-desktop-archetype="admin-list-detail" data-status="complete"></span>
+    <span data-desktop-archetype="account-security-contained-detail" data-status="complete"></span>
+  </section>
+</body>
+</html>

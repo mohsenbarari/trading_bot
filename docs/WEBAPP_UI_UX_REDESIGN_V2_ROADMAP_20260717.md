@@ -2,7 +2,7 @@
 
 تاریخ: ۲۰۲۶-۰۷-۱۷
 
-وضعیت: مورد تأیید مالک محصول؛ Stage 0A تکمیل و «مالی مدرن» انتخاب شد؛ 0B-1 تا 0B-5 تکمیل و با تأیید مالک بسته شده‌اند؛ `0B-6` فقط در سطح قرارداد طراحی در حال انجام، runtime unauthorized و گیت چهار‌دستیار فعلاً تعلیق است
+وضعیت: مورد تأیید مالک محصول؛ Stage 0A و `0B-1..0B-6` بسته شده‌اند. قرارداد و پیشروی بی‌وقفه roadmap در `2026-08-08T20:57:28.073Z` تأیید و closure فنی/Sites در `2026-08-08T21:07:38Z` پاس شده است. Stage 1 اکنون next authorized و هنوز runtime edit آن شروع‌نشده است
 
 نوع خروجی: تحلیل و نقشه راه مصوب؛ بدون تغییر کد محصول
 
@@ -12,7 +12,7 @@
 
 تصمیم تراکم اطلاعات: مالک محصول در ۲۰۲۶-۰۸-۰۸ «خلوتی هدفمند» را به‌عنوان قاعده الزام‌آور همه صفحه‌ها تعیین کرد. قرارداد کامل در `docs/WEBAPP_UI_UX_REDESIGN_V2_CONTENT_MINIMALISM_POLICY_20260808.md` و inventory صفحه‌ها در `docs/WEBAPP_UI_UX_REDESIGN_V2_CONTENT_PRUNING_INVENTORY_20260808.md` ثبت شده و در صورت تعارض، نمونه‌های پرتراکم قبلی را در سطح محتوا جایگزین می‌کند.
 
-تصمیم گیت بازبینی: مالک محصول در ۲۰۲۶-۰۸-۰۸ اعلام کرد تأیید چهار دستیار خارجی فعلاً شرط پیشروی نیست و ادامه با Figma انجام شود. پروتکل و یافته‌های معتبر حفظ می‌شوند، اما prompt/ZIP و quorum جدید تا درخواست بعدی blocking نیستند. تصمیم مالک هر checkpoint و ممنوعیت شروع runtime تا تأیید `0B-6` همچنان برقرار است.
+تصمیم گیت بازبینی: مالک محصول در ۲۰۲۶-۰۸-۰۸ اعلام کرد تأیید چهار دستیار خارجی فعلاً شرط پیشروی نیست و ادامه با Figma انجام شود. پروتکل و یافته‌های معتبر حفظ می‌شوند، اما prompt/ZIP و quorum جدید تا درخواست بعدی blocking نیستند. سپس در `2026-08-08T20:57:28.073Z` قرارداد نهایی و پیشروی بی‌وقفه تا تکمیل roadmap یا توقف صریح مالک را تأیید کرد؛ تأیید جداگانه مالک برای هر Stage لازم نیست، اما گیت فنی، test، protected diff و rollback هر Stage الزام‌آور می‌ماند. closure فنی/Sites `0B-6` پاس و Stage 1 مجاز شده است، بدون اینکه runtime edit آن در Stage 0 ادعا شود.
 
 ## ۱. جمع‌بندی مدیریتی
 
@@ -289,9 +289,9 @@
 | `0B-3` عملیات و workspace مشتری/حسابدار | تکمیل و تأیید مالک محصول برای ادامه | `docs/WEBAPP_UI_UX_REDESIGN_V2_STAGE0B_OPERATIONS_WORKSPACES_CHECKPOINT_20260808.md` |
 | `0B-4` مدیریت کاربران و دعوت‌ها | تکمیل؛ شواهد فنی پاس و طراحی به‌صورت صریح توسط مالک محصول تأیید شده است | `docs/WEBAPP_UI_UX_REDESIGN_V2_STAGE0B_ADMIN_USERS_INVITATIONS_CHECKPOINT_20260808.md` |
 | `0B-5` حساب، پروفایل، امنیت و اعلان‌ها | تکمیل؛ شواهد فنی پاس و خروجی بصری در ۲۰۲۶-۰۸-۰۸ به‌صورت صریح توسط مالک محصول تأیید شده است | `docs/WEBAPP_UI_UX_REDESIGN_V2_STAGE0B_ACCOUNT_PROFILE_SECURITY_NOTIFICATIONS_CHECKPOINT_20260808.md` |
-| `0B-6` قرارداد نهایی سیستم و پذیرش | در حال انجام فقط در سطح قرارداد طراحی؛ گیت صریح شروع runtime هنوز تأیید نشده است | — |
+| `0B-6` قرارداد نهایی سیستم و پذیرش | تکمیل؛ Figma `32/32`، local `32/32`، baseline `322/322`، build/guard و Sites owner-only source-bound پاس؛ `runtimeImplementationAuthorized: true` و `nextAuthorizedRuntimeStage: Stage 1`، بدون runtime edit Stage 1 | [checkpoint قرارداد نهایی](WEBAPP_UI_UX_REDESIGN_V2_STAGE0B_FINAL_SYSTEM_CONTRACT_CHECKPOINT_20260808.md) |
 
-خروجی `0B-3` شامل ۱۰ root موبایل، state atlas، پنج width proof، یک master/detail دقیق ۱۴۴۰×۹۰۰، ۶۵ variable، ۵ component set و ۱۷ variant در Figma رسمی است و با تأیید مالک محصول بسته شده است. قرارداد Phase 0 در `0B-4` نیز جست‌وجوی پایدار بدون filter ناقص، جدایی actionهای مدیریتی، دعوت استاندارد و stateهای permission-safe را قطعی کرده است؛ nodeها، snapshotها، audit schema 7، evidence محلی و preview خصوصی Sites از نظر فنی پاس و طراحی در ۲۰۲۶-۰۸-۰۸ به‌صورت صریح توسط مالک محصول تأیید شده است. در `0B-5` صفحه canonical `117:2`، ۱۰ root موبایل، پنج width proof، desktop `1440×900`، state/visibility/push matrix، audit schema 2 با `27/27`، harness محلی `27/27` و preview خصوصی source-bound ثبت و پاس شده‌اند و خروجی بصری نیز در ۲۰۲۶-۰۸-۰۸ به‌صورت صریح توسط مالک محصول تأیید شده است. هیچ‌کدام مجوز شروع کدنویسی پیش از تأیید صریح `0B-6` نیستند.
+خروجی `0B-3` شامل ۱۰ root موبایل، state atlas، پنج width proof، یک master/detail دقیق ۱۴۴۰×۹۰۰، ۶۵ variable، ۵ component set و ۱۷ variant در Figma رسمی است و با تأیید مالک محصول بسته شده است. قرارداد Phase 0 در `0B-4` نیز جست‌وجوی پایدار بدون filter ناقص، جدایی actionهای مدیریتی، دعوت استاندارد و stateهای permission-safe را قطعی کرده است؛ nodeها، snapshotها، audit schema 7، evidence محلی و preview خصوصی Sites از نظر فنی پاس و طراحی در ۲۰۲۶-۰۸-۰۸ به‌صورت صریح توسط مالک محصول تأیید شده است. در `0B-5` صفحه canonical `117:2`، ۱۰ root موبایل، پنج width proof، desktop `1440×900`، state/visibility/push matrix، audit schema 2 با `27/27`، harness محلی `27/27` و preview خصوصی source-bound ثبت و پاس شده‌اند و خروجی بصری نیز در ۲۰۲۶-۰۸-۰۸ به‌صورت صریح توسط مالک محصول تأیید شده است. در `0B-6` صفحه `168:1974` و board `168:1975`، قرارداد `SYS-01..SYS-14`، exact `32/32` در Figma و local، inventory ۲۹ route، پنج family، پنج width، desktop `1440×900` و baseline `35/35` فایل و `322/322` تست ثبت و پاس شده‌اند. Sites project `appgprj_6a77997ed65481918d71b8f1f3db541f` نیز private owner-only و source-bound پاس است؛ Stage 1 مجاز و هنوز runtime edit آن شروع‌نشده است.
 
 ### مرحله ۱ — اعتماد و تداوم کار
 
@@ -475,7 +475,7 @@
 3. گسترش مرحله‌ای؛
 4. حذف adapterهای قدیمی فقط پس از اطمینان از rollback و نبود وابستگی.
 
-گیت پایان: تأیید مالک محصول بر اساس استفاده واقعی و مقایسه تصویری؛ green بودن تست‌ها به‌تنهایی به معنی پذیرش زیبایی نیست.
+گیت پایان: بازبینی انسانی بر اساس استفاده واقعی و مقایسه تصویری همراه با گیت‌های فنی؛ green بودن تست‌ها به‌تنهایی به معنی پذیرش زیبایی نیست. مطابق اجازه پیوسته مالک، این Stage منتظر تأیید جداگانه per-stage نمی‌ماند مگر مالک صریحاً توقف یا اصلاح بخواهد.
 
 ## ۹. ترتیب پوشش همه سطح‌ها
 
