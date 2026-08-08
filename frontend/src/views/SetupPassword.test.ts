@@ -46,7 +46,10 @@ describe('SetupPassword.vue', () => {
   })
 
   it('submits a valid password and redirects to the app root', async () => {
-    setupPasswordMocks.apiFetch.mockResolvedValue(new Response(null, { status: 200 }))
+    setupPasswordMocks.apiFetch.mockResolvedValue(new Response(JSON.stringify({ detail: 'رمز عبور با موفقیت ثبت شد' }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }))
     const wrapper = mount(SetupPassword)
     const inputs = wrapper.findAll('input')
 
@@ -55,10 +58,13 @@ describe('SetupPassword.vue', () => {
     await wrapper.get('form').trigger('submit.prevent')
     await flushPromises()
 
-    expect(setupPasswordMocks.apiFetch).toHaveBeenCalledWith('/api/auth/setup-password', {
+    expect(setupPasswordMocks.apiFetch).toHaveBeenCalledWith('/api/auth/setup-password', expect.objectContaining({
       method: 'POST',
       body: JSON.stringify({ password: 'StrongPass1!' }),
-    })
+      retryNetwork: false,
+      trackConnectionState: false,
+      signal: expect.any(AbortSignal),
+    }))
     expect(setupPasswordMocks.replace).toHaveBeenCalledWith('/')
   })
 
@@ -78,5 +84,82 @@ describe('SetupPassword.vue', () => {
     expect(wrapper.text()).toContain('server rejected password')
     expect(wrapper.get('button[type="submit"]').attributes('disabled')).toBeUndefined()
     expect(setupPasswordMocks.replace).not.toHaveBeenCalled()
+  })
+
+  it('preserves both password fields and clears busy after a network failure', async () => {
+    setupPasswordMocks.apiFetch.mockRejectedValueOnce(new TypeError('Failed to fetch'))
+    const wrapper = mount(SetupPassword)
+    const inputs = wrapper.findAll('input')
+
+    await inputs[0]!.setValue('StrongPass1!')
+    await inputs[1]!.setValue('StrongPass1!')
+    await wrapper.get('form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('ارتباط با سرور برقرار نشد')
+    expect((inputs[0]!.element as HTMLInputElement).value).toBe('StrongPass1!')
+    expect((inputs[1]!.element as HTMLInputElement).value).toBe('StrongPass1!')
+    expect(wrapper.get('button[type="submit"]').attributes('disabled')).toBeUndefined()
+    expect(setupPasswordMocks.replace).not.toHaveBeenCalled()
+  })
+
+  it('requires the authoritative success receipt before redirecting', async () => {
+    setupPasswordMocks.apiFetch.mockResolvedValueOnce(new Response(JSON.stringify({}), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }))
+    const wrapper = mount(SetupPassword)
+    const inputs = wrapper.findAll('input')
+
+    await inputs[0]!.setValue('StrongPass1!')
+    await inputs[1]!.setValue('StrongPass1!')
+    await wrapper.get('form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('پاسخ ثبت رمز عبور کامل نیست')
+    expect(setupPasswordMocks.replace).not.toHaveBeenCalled()
+  })
+
+  it('uses cause-neutral copy for malformed successful JSON and preserves the draft', async () => {
+    setupPasswordMocks.apiFetch.mockResolvedValueOnce(new Response('{not-json', {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }))
+    const wrapper = mount(SetupPassword)
+    const inputs = wrapper.findAll('input')
+    await inputs[0]!.setValue('StrongPass1!')
+    await inputs[1]!.setValue('StrongPass1!')
+    await wrapper.get('form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('ثبت رمز عبور اکنون ممکن نشد')
+    expect(wrapper.text()).not.toContain('Unexpected')
+    expect((inputs[0]!.element as HTMLInputElement).value).toBe('StrongPass1!')
+    expect((inputs[1]!.element as HTMLInputElement).value).toBe('StrongPass1!')
+    expect(setupPasswordMocks.replace).not.toHaveBeenCalled()
+  })
+
+  it('guards duplicate password submissions while the first request is pending', async () => {
+    let resolveRequest!: (response: Response) => void
+    setupPasswordMocks.apiFetch.mockReturnValueOnce(new Promise<Response>((resolve) => {
+      resolveRequest = resolve
+    }))
+    const wrapper = mount(SetupPassword)
+    const inputs = wrapper.findAll('input')
+    await inputs[0]!.setValue('StrongPass1!')
+    await inputs[1]!.setValue('StrongPass1!')
+
+    const first = (wrapper.vm as any).submitPassword()
+    const duplicate = (wrapper.vm as any).submitPassword()
+    expect(setupPasswordMocks.apiFetch).toHaveBeenCalledTimes(1)
+
+    resolveRequest(new Response(JSON.stringify({ detail: 'رمز عبور با موفقیت ثبت شد' }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }))
+    await Promise.all([first, duplicate])
+    await flushPromises()
+
+    expect(setupPasswordMocks.replace).toHaveBeenCalledTimes(1)
   })
 })

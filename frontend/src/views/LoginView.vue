@@ -2,8 +2,10 @@
 import { ref, reactive, onMounted, onUnmounted, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Smartphone, Lock, Loader2, Download, Clock, CheckCircle2, XCircle, ShieldCheck } from 'lucide-vue-next'
-import { apiFetch, setupExpiryTimer } from '../utils/auth'
+import { setupExpiryTimer } from '../utils/auth'
 import { primeCurrentUserSummary } from '../utils/currentUser'
+import { isAppHttpError } from '../utils/httpErrorPolicy'
+import { routeRequestJson } from '../utils/routeRequest'
 import { pushBackState, popBackState, clearBackStack } from '../composables/useBackButton'
 import { AppButton, AppFormField, AppInput, AppPage, AppSectionCard, AppStatusBadge, AppTextarea } from '../components/ui'
 
@@ -84,6 +86,136 @@ const recoveryCameraInput = ref<HTMLInputElement | null>(null)
 const recoveryDocumentInput = ref<HTMLInputElement | null>(null)
 let recoveryTimerInterval: any = null
 let recoveryPollInterval: any = null
+type LoginActionKey =
+  | 'request-otp'
+  | 'resend-otp'
+  | 'verify-otp'
+  | 'start-recovery'
+  | 'cancel-recovery'
+  | 'submit-recovery-identity'
+  | 'enter-approved-recovery'
+  | 'dev-login'
+const activeActions = new Set<LoginActionKey>()
+let approvalPollPending = false
+let recoveryPollPending = false
+let loginContextEpoch = 0
+
+type JsonObject = Record<string, unknown>
+type LoginTokenReceipt = JsonObject & { access_token: string; refresh_token?: string | null }
+type VerifyOtpReceipt = LoginTokenReceipt | (
+  JsonObject & {
+    status: 'approval_required' | 'registration_required'
+    login_request_id?: string
+    registration_token?: string
+    expires_at?: string
+  }
+)
+type RecoveryReceipt = JsonObject & { status: string }
+
+function isObject(value: unknown): value is JsonObject {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
+function beginAction(key: LoginActionKey) {
+  if (activeActions.has(key)) return false
+  activeActions.add(key)
+  loading.value = true
+  return true
+}
+
+function finishAction(key: LoginActionKey) {
+  activeActions.delete(key)
+  loading.value = activeActions.size > 0
+}
+
+function requestErrorMessage(cause: unknown, fallback: string) {
+  if (isAppHttpError(cause)) {
+    if (cause.status !== null && cause.status >= 500) return cause.presentation.message
+    return parseResponseError(cause.payload, cause.detail || fallback)
+  }
+  if (cause instanceof SyntaxError) return fallback
+  if (cause instanceof Error && /^[\u0600-\u06ff]/u.test(cause.message)) return cause.message
+  return fallback
+}
+
+interface LoginContextSnapshot {
+  epoch: number
+  step: LoginStep
+  mobile: string
+  code?: string
+  otpRequestId?: string | null
+}
+
+function invalidateLoginContext() {
+  loginContextEpoch += 1
+}
+
+function captureLoginContext(options: { includeCode?: boolean; includeOtpRequestId?: boolean } = {}): LoginContextSnapshot {
+  return {
+    epoch: loginContextEpoch,
+    step: step.value,
+    mobile: form.mobile,
+    ...(options.includeCode ? { code: form.code } : {}),
+    ...(options.includeOtpRequestId ? { otpRequestId: otpRequestId.value } : {}),
+  }
+}
+
+function isLoginContextCurrent(snapshot: LoginContextSnapshot) {
+  return snapshot.epoch === loginContextEpoch
+    && snapshot.step === step.value
+    && snapshot.mobile === form.mobile
+    && (snapshot.code === undefined || snapshot.code === form.code)
+    && (snapshot.otpRequestId === undefined || snapshot.otpRequestId === otpRequestId.value)
+}
+
+function hasLoginTokens(value: unknown): value is LoginTokenReceipt {
+  return isObject(value)
+    && typeof value.access_token === 'string'
+    && Boolean(value.access_token.trim())
+    && (value.refresh_token === undefined || value.refresh_token === null || typeof value.refresh_token === 'string')
+}
+
+function isOtpDeliveryReceipt(value: unknown): value is JsonObject {
+  if (!isObject(value)) return false
+  if (value.method === 'log') {
+    const hasDetail = typeof value.detail === 'string' && Boolean(value.detail.trim())
+    const hasExpiry = (typeof value.expires_in === 'number' && Number.isFinite(value.expires_in) && value.expires_in > 0)
+      || (typeof value.expires_at === 'string' && Boolean(value.expires_at.trim()))
+    return hasDetail && hasExpiry
+  }
+  return value.method === 'telegram'
+    || value.method === 'sms'
+    || (typeof value.otp_request_id === 'string' && Boolean(value.otp_request_id.trim()))
+}
+
+function isVerifyOtpReceipt(value: unknown): value is VerifyOtpReceipt {
+  if (hasLoginTokens(value)) return true
+  if (!isObject(value) || typeof value.status !== 'string') return false
+  if (value.status === 'approval_required') {
+    return typeof value.login_request_id === 'string' && Boolean(value.login_request_id.trim())
+  }
+  if (value.status === 'registration_required') {
+    return typeof value.registration_token === 'string' && Boolean(value.registration_token.trim())
+  }
+  return false
+}
+
+const knownRecoveryStatuses = new Set([
+  'not_started',
+  'pending_admin_review',
+  'identity_verification_requested',
+  'identity_submitted',
+  'approved',
+  'rejected',
+  'expired',
+  'cancelled',
+])
+
+function isRecoveryReceipt(value: unknown): value is RecoveryReceipt {
+  return isObject(value)
+    && typeof value.status === 'string'
+    && knownRecoveryStatuses.has(value.status)
+}
 
 async function completeAuthenticatedLogin(data: { access_token: string; refresh_token?: string | null }) {
   localStorage.setItem('auth_token', data.access_token)
@@ -271,6 +403,9 @@ function goToOtpStep() {
   if (step.value === 'otp') return
   step.value = 'otp'
   pushBackState(() => {
+    invalidateLoginContext()
+    clearOtpAttempt()
+    form.code = ''
     step.value = 'mobile'
     error.value = ''
   })
@@ -287,24 +422,38 @@ async function requestOtp() {
     return
   }
 
-  loading.value = true
+  if (!beginAction('request-otp')) return
+  const requestContext = captureLoginContext()
   error.value = ''
   
   try {
-    const res = await apiFetch('/api/auth/request-otp', {
+    const data = await routeRequestJson<unknown>('/api/auth/request-otp', {
+      mode: 'public',
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ mobile_number: form.mobile })
+      body: JSON.stringify({ mobile_number: requestContext.mobile }),
+      errorContext: {
+        surface: 'auth',
+        scope: 'form',
+        operation: 'submit',
+        fallbackMessage: 'خطا در ارسال کد',
+      },
     })
+    if (!isLoginContextCurrent(requestContext)) return
+    if (!isOtpDeliveryReceipt(data)) throw new Error('پاسخ ارسال کد کامل نیست.')
+    applyOtpTiming(data)
+    goToOtpStep()
     
-    if (!res.ok) {
-      const err = await res.json()
-      if (res.status === 429 && err?.code === 'otp_active' && err?.expires_at) {
-        applyOtpTiming(err)
+  } catch (cause: unknown) {
+    if (!isLoginContextCurrent(requestContext)) return
+    if (isAppHttpError(cause) && cause.status === 429) {
+      const payload = cause.payload
+      if (payload?.code === 'otp_active' && typeof payload.expires_at === 'string') {
+        applyOtpTiming(payload)
         goToOtpStep()
         return
       }
-      if (res.status === 429 && !err?.code) {
+      if (!payload?.code) {
         applyOtpTiming({
           delivery_contract: 'legacy',
           manual_sms_resend: true,
@@ -313,47 +462,43 @@ async function requestOtp() {
         goToOtpStep()
         return
       }
-      const detail = typeof err?.detail === 'string' ? err.detail : err?.detail?.message
-      throw new Error(detail || 'خطا در ارسال کد')
     }
-    
-    const data = await res.json()
-    applyOtpTiming(data)
-    goToOtpStep()
-    
-  } catch (e: any) {
-    error.value = e.message
+    error.value = requestErrorMessage(cause, 'خطا در ارسال کد')
   } finally {
-    loading.value = false
+    finishAction('request-otp')
   }
 }
 
 async function resendOtpSms() {
-  loading.value = true
+  if (!beginAction('resend-otp')) return
+  const requestContext = captureLoginContext({ includeOtpRequestId: true })
   error.value = ''
   
   try {
-    const res = await apiFetch('/api/auth/resend-otp-sms', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ mobile_number: form.mobile })
+    const data = await routeRequestJson<unknown>('/api/auth/resend-otp-sms', {
+      mode: 'public',
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ mobile_number: requestContext.mobile }),
+      errorContext: {
+        surface: 'auth',
+        scope: 'form',
+        operation: 'submit',
+        fallbackMessage: 'خطا در ارسال پیامک',
+      },
     })
-    
-    if (!res.ok) {
-        const err = await res.json()
-        throw new Error(err.detail || 'خطا در ارسال پیامک')
-    }
-    
-    const data = await res.json()
+    if (!isLoginContextCurrent(requestContext)) return
+    if (!isOtpDeliveryReceipt(data)) throw new Error('پاسخ ارسال پیامک کامل نیست.')
     
     // SMS Sent successfully
     applyOtpTiming({ ...data, method: 'sms', otp_request_id: data.otp_request_id || otpRequestId.value })
 
     
-  } catch (e: any) {
-    error.value = e.message
+  } catch (cause: unknown) {
+    if (!isLoginContextCurrent(requestContext)) return
+    error.value = requestErrorMessage(cause, 'خطا در ارسال پیامک')
   } finally {
-    loading.value = false
+    finishAction('resend-otp')
   }
 }
 
@@ -368,34 +513,35 @@ function handleResend() {
 
 
 async function verifyOtp() {
-  if (loading.value) return
   if (!form.code || form.code.length < 4) {
     error.value = 'کد احراز هویت نامعتبر است'
     return
   }
 
-  loading.value = true
+  if (!beginAction('verify-otp')) return
+  const requestContext = captureLoginContext({ includeCode: true, includeOtpRequestId: true })
   error.value = ''
 
   try {
-    const res = await apiFetch('/api/auth/verify-otp', {
+    const data = await routeRequestJson<unknown>('/api/auth/verify-otp', {
+      mode: 'public',
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({
-        mobile_number: form.mobile || undefined,
-        otp_request_id: otpRequestId.value || undefined,
-        code: form.code,
+        mobile_number: requestContext.mobile || undefined,
+        otp_request_id: requestContext.otpRequestId || undefined,
+        code: requestContext.code,
         suspended_refresh_token: localStorage.getItem("suspended_refresh_token") || undefined,
-      })
+      }),
+      errorContext: {
+        surface: 'auth',
+        scope: 'field',
+        operation: 'submit',
+        fallbackMessage: 'کد نادرست است',
+      },
     })
-
-    
-    if (!res.ok) {
-        const err = await res.json()
-        throw new Error(err.detail || 'کد نادرست است')
-    }
-    
-    const data = await res.json()
+    if (!isLoginContextCurrent(requestContext)) return
+    if (!isVerifyOtpReceipt(data)) throw new Error('پاسخ تایید ورود کامل نیست.')
     clearOtpAttempt()
     localStorage.removeItem('suspended_refresh_token')
 
@@ -415,10 +561,11 @@ async function verifyOtp() {
     }
     
     await completeAuthenticatedLogin(data)
-  } catch (e: any) {
-    error.value = e.message
+  } catch (cause: unknown) {
+    if (!isLoginContextCurrent(requestContext)) return
+    error.value = requestErrorMessage(cause, 'کد نادرست است')
   } finally {
-    loading.value = false
+    finishAction('verify-otp')
   }
 }
 
@@ -439,14 +586,19 @@ function startApprovalPolling() {
   // Poll every 2 seconds
   if (approvalPollInterval) clearInterval(approvalPollInterval)
   approvalPollInterval = setInterval(async () => {
-    if (!loginRequestId.value) return
+    if (!loginRequestId.value || approvalPollPending) return
+    const requestId = loginRequestId.value
+    approvalPollPending = true
     try {
-      const res = await fetch(`/api/sessions/login-requests/${loginRequestId.value}/status`)
-      if (!res.ok) return
-      const data = await res.json()
+      const data = await routeRequestJson<unknown>(`/api/sessions/login-requests/${encodeURIComponent(requestId)}/status`, {
+        mode: 'public',
+        errorContext: { surface: 'auth', scope: 'action', operation: 'background-refresh' },
+      })
+      if (loginRequestId.value !== requestId) return
+      if (!isObject(data) || typeof data.status !== 'string') return
       localStorage.removeItem('suspended_refresh_token')
       
-      if (data.status === 'approved' && data.access_token) {
+      if (data.status === 'approved' && hasLoginTokens(data)) {
         stopApprovalPolling()
         await completeAuthenticatedLogin(data)
       } else if (data.status === 'rejected') {
@@ -458,8 +610,10 @@ function startApprovalPolling() {
         error.value = 'زمان انتظار تایید به پایان رسید.'
         step.value = 'otp'
       }
-    } catch (e) {
+    } catch {
       // Ignore polling errors
+    } finally {
+      approvalPollPending = false
     }
   }, 2000)
 }
@@ -576,6 +730,7 @@ function applyRecoveryStatus(data: any) {
   }
 
   if (nextStatus === 'cancelled') {
+    invalidateLoginContext()
     stopRecoveryPolling()
     clearRecoveryDraft()
     form.code = ''
@@ -585,15 +740,22 @@ function applyRecoveryStatus(data: any) {
 }
 
 async function pollRecoveryStatusOnce() {
-  if (!loginRequestId.value) return
+  if (!loginRequestId.value || recoveryPollPending) return
+  const requestId = loginRequestId.value
+  recoveryPollPending = true
 
   try {
-    const res = await fetch(`/api/sessions/login-requests/${loginRequestId.value}/recovery/status`)
-    if (!res.ok) return
-    const data = await res.json()
+    const data = await routeRequestJson<unknown>(`/api/sessions/login-requests/${encodeURIComponent(requestId)}/recovery/status`, {
+      mode: 'public',
+      errorContext: { surface: 'auth', scope: 'action', operation: 'background-refresh' },
+    })
+    if (loginRequestId.value !== requestId) return
+    if (!isRecoveryReceipt(data)) return
     applyRecoveryStatus(data)
   } catch {
     // Ignore polling errors.
+  } finally {
+    recoveryPollPending = false
   }
 }
 
@@ -606,41 +768,50 @@ function startRecoveryPolling() {
 }
 
 async function startRecoveryFlow() {
-  if (!loginRequestId.value || loading.value) return
+  if (!loginRequestId.value || !beginAction('start-recovery')) return
 
-  loading.value = true
   error.value = ''
   try {
-    const res = await fetch(`/api/sessions/login-requests/${loginRequestId.value}/recovery`, {
+    const data = await routeRequestJson<unknown>(`/api/sessions/login-requests/${encodeURIComponent(loginRequestId.value)}/recovery`, {
+      mode: 'public',
       method: 'POST',
+      errorContext: {
+        surface: 'auth',
+        scope: 'action',
+        operation: 'submit',
+        fallbackMessage: 'شروع مسیر بازیابی ممکن نشد',
+      },
     })
-    const data = await res.json().catch(() => ({}))
-    if (!res.ok) {
-      throw new Error(parseResponseError(data, 'شروع مسیر بازیابی ممکن نشد'))
-    }
+    if (!isRecoveryReceipt(data) || data.status === 'not_started') throw new Error('پاسخ شروع مسیر بازیابی کامل نیست.')
 
     stopApprovalPolling(true)
     applyRecoveryStatus(data)
     startRecoveryPolling()
-  } catch (e: any) {
-    error.value = e.message
+  } catch (cause: unknown) {
+    error.value = requestErrorMessage(cause, 'شروع مسیر بازیابی ممکن نشد')
   } finally {
-    loading.value = false
+    finishAction('start-recovery')
   }
 }
 
 async function cancelRecoveryFlow() {
-  if (!loginRequestId.value || loading.value) return
+  if (!loginRequestId.value || !beginAction('cancel-recovery')) return
 
-  loading.value = true
   error.value = ''
   try {
-    const res = await fetch(`/api/sessions/login-requests/${loginRequestId.value}/recovery/cancel`, {
+    const data = await routeRequestJson<unknown>(`/api/sessions/login-requests/${encodeURIComponent(loginRequestId.value)}/recovery/cancel`, {
+      mode: 'public',
       method: 'POST',
+      errorContext: {
+        surface: 'auth',
+        scope: 'action',
+        operation: 'submit',
+        fallbackMessage: 'لغو درخواست بازیابی ممکن نشد',
+      },
     })
-    const data = await res.json().catch(() => ({}))
-    if (!res.ok) {
-      throw new Error(parseResponseError(data, 'لغو درخواست بازیابی ممکن نشد'))
+    const recovery = isObject(data) && isRecoveryReceipt(data.recovery) ? data.recovery : data
+    if (!isRecoveryReceipt(recovery) || recovery.status !== 'cancelled') {
+      throw new Error('پاسخ لغو درخواست بازیابی کامل نیست.')
     }
 
     stopApprovalPolling()
@@ -649,10 +820,10 @@ async function cancelRecoveryFlow() {
     form.code = ''
     step.value = 'mobile'
     error.value = 'درخواست بازیابی لغو شد. برای ادامه دوباره کد تایید دریافت کنید.'
-  } catch (e: any) {
-    error.value = e.message
+  } catch (cause: unknown) {
+    error.value = requestErrorMessage(cause, 'لغو درخواست بازیابی ممکن نشد')
   } finally {
-    loading.value = false
+    finishAction('cancel-recovery')
   }
 }
 
@@ -688,7 +859,7 @@ async function submitRecoveryIdentity() {
     return
   }
 
-  loading.value = true
+  if (!beginAction('submit-recovery-identity')) return
   error.value = ''
   try {
     const formData = new FormData()
@@ -698,36 +869,70 @@ async function submitRecoveryIdentity() {
       formData.set('caption', trimmedCaption)
     }
 
-    const res = await fetch(`/api/sessions/login-requests/${loginRequestId.value}/recovery/identity`, {
+    const data = await routeRequestJson<unknown>(`/api/sessions/login-requests/${encodeURIComponent(loginRequestId.value)}/recovery/identity`, {
+      mode: 'public',
       method: 'POST',
       body: formData,
+      errorContext: {
+        surface: 'auth',
+        scope: 'form',
+        operation: 'upload',
+        fallbackMessage: 'ارسال مدرک ممکن نشد',
+      },
     })
-    const data = await res.json().catch(() => ({}))
-    if (!res.ok) {
-      throw new Error(parseResponseError(data, 'ارسال مدرک ممکن نشد'))
+    const recovery = isObject(data) && isRecoveryReceipt(data.recovery) ? data.recovery : data
+    if (!isRecoveryReceipt(recovery) || recovery.status !== 'identity_submitted') {
+      throw new Error('پاسخ ارسال مدرک کامل نیست.')
     }
 
     setRecoveryFile(null)
     recoveryCaption.value = ''
-    applyRecoveryStatus(data?.recovery || data)
+    applyRecoveryStatus(recovery)
     startRecoveryPolling()
-  } catch (e: any) {
-    error.value = e.message
+  } catch (cause: unknown) {
+    error.value = requestErrorMessage(cause, 'ارسال مدرک ممکن نشد')
   } finally {
-    loading.value = false
+    finishAction('submit-recovery-identity')
   }
 }
 
 async function enterWithApprovedRecovery() {
-  if (!recoveryApprovedTokens.value?.access_token) {
-    error.value = 'توکن ورود آماده نیست. لطفاً دوباره تلاش کنید.'
-    return
-  }
+  if (!beginAction('enter-approved-recovery')) return
+  error.value = ''
+  try {
+    let tokens = recoveryApprovedTokens.value
+    if (!tokens?.access_token) {
+      const requestId = loginRequestId.value
+      if (!requestId) throw new Error('دسترسی ورود آماده نیست. مسیر ورود را دوباره آغاز کنید.')
 
-  await completeAuthenticatedLogin(recoveryApprovedTokens.value)
+      const data = await routeRequestJson<unknown>(`/api/sessions/login-requests/${encodeURIComponent(requestId)}/recovery/status`, {
+        mode: 'public',
+        errorContext: {
+          surface: 'auth',
+          scope: 'action',
+          operation: 'submit',
+          fallbackMessage: 'دریافت دسترسی ورود ممکن نشد.',
+        },
+      })
+      if (loginRequestId.value !== requestId) return
+      if (!isRecoveryReceipt(data) || data.status !== 'approved' || !hasLoginTokens(data)) {
+        throw new Error('دسترسی ورود هنوز آماده نیست. دوباره تلاش کنید.')
+      }
+      applyRecoveryStatus(data)
+      tokens = recoveryApprovedTokens.value
+    }
+
+    if (!tokens?.access_token) throw new Error('دسترسی ورود هنوز آماده نیست. دوباره تلاش کنید.')
+    await completeAuthenticatedLogin(tokens)
+  } catch (cause: unknown) {
+    error.value = requestErrorMessage(cause, 'دریافت دسترسی ورود ممکن نشد.')
+  } finally {
+    finishAction('enter-approved-recovery')
+  }
 }
 
 function restartLoginFlow() {
+  invalidateLoginContext()
   stopApprovalPolling()
   stopRecoveryPolling()
   clearRecoveryDraft()
@@ -779,25 +984,26 @@ const isDevMode = stagingDevLoginFlag === 'true' ||
                     window.location.hostname.startsWith('10.')
 
 async function startDevLogin() {
-  if (loading.value) return
-  loading.value = true
+  if (!beginAction('dev-login')) return
   error.value = ''
   try {
-    const baseUrl = import.meta.env.VITE_API_BASE_URL || ''
-    const res = await fetch(`${baseUrl}/api/auth/dev-login`, {
+    const data = await routeRequestJson<unknown>('/api/auth/dev-login', {
+      mode: 'public',
       method: 'POST',
       credentials: 'include',
+      errorContext: {
+        surface: 'auth',
+        scope: 'action',
+        operation: 'submit',
+        fallbackMessage: 'دسترسی مجاز نیست',
+      },
     })
-    if (!res.ok) {
-        const err = await res.json()
-        throw new Error(err.detail || 'دسترسی مجاز نیست')
-    }
-    const data = await res.json()
+    if (!hasLoginTokens(data)) throw new Error('پاسخ ورود سریع کامل نیست.')
     await completeAuthenticatedLogin(data)
-  } catch (e: any) {
-    error.value = e.message
+  } catch (cause: unknown) {
+    error.value = requestErrorMessage(cause, 'دسترسی مجاز نیست')
   } finally {
-    loading.value = false
+    finishAction('dev-login')
   }
 }
 
@@ -853,11 +1059,16 @@ onMounted(() => {
   }, 4000)
 })
 
-watch(() => form.code, (newVal) => {
+watch(() => form.code, (newVal, previousValue) => {
+  if (newVal !== previousValue) invalidateLoginContext()
   if (newVal && newVal.length === 5) {
     verifyOtp()
   }
-})
+}, { flush: 'sync' })
+
+watch(() => form.mobile, (newValue, previousValue) => {
+  if (newValue !== previousValue) invalidateLoginContext()
+}, { flush: 'sync' })
 
 let ac: AbortController | null = null;
 
@@ -911,6 +1122,7 @@ onUnmounted(() => {
 
 // Back to mobile step (UI-initiated via "ویرایش شماره" button)
 function goBackToMobile() {
+  invalidateLoginContext()
   stopApprovalPolling()
   stopRecoveryPolling()
   clearRecoveryDraft()

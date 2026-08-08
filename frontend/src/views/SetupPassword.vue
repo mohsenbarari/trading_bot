@@ -3,13 +3,15 @@ import { computed, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { Eye, EyeOff, LockKeyhole, ShieldCheck } from 'lucide-vue-next'
 import { AppButton, AppCard, AppFormField, AppInput, AppPage, AppPageHeader, AppStatusBadge } from '../components/ui'
-import { apiFetch } from '../utils/auth'
+import { isAppHttpError } from '../utils/httpErrorPolicy'
+import { routeRequestJson } from '../utils/routeRequest'
 
 const router = useRouter()
 const loading = ref(false)
 const error = ref('')
 const showPassword = ref(false)
 const showConfirmPassword = ref(false)
+let submitPending = false
 
 const form = reactive({
   password: '',
@@ -45,27 +47,49 @@ async function submitPassword() {
     return
   }
 
+  if (submitPending) return
+
   error.value = ''
+  submitPending = true
   loading.value = true
 
   try {
-    const res = await apiFetch('/api/auth/setup-password', {
+    const data = await routeRequestJson<unknown>('/api/auth/setup-password', {
       method: 'POST',
       body: JSON.stringify({ password: form.password }),
+      errorContext: {
+        surface: 'auth',
+        scope: 'form',
+        operation: 'submit',
+        fallbackMessage: 'خطا در ثبت رمز عبور',
+      },
     })
-
-    if (!res.ok) {
-      if (res.status === 405) {
-        throw new Error('خطای دسترسی سیستمی: Method Not Allowed. مسیر API درست نیست.')
-      }
-      const data = await res.json()
-      throw new Error(data.detail || 'خطا در ثبت رمز عبور')
+    if (
+      !data
+      || typeof data !== 'object'
+      || typeof (data as Record<string, unknown>).detail !== 'string'
+      || !(data as Record<string, string>).detail.trim()
+    ) {
+      throw new Error('پاسخ ثبت رمز عبور کامل نیست.')
     }
 
     router.replace('/')
-  } catch (err: any) {
-    error.value = err.message
+  } catch (cause: unknown) {
+    if (isAppHttpError(cause) && cause.status === 405) {
+      error.value = 'خطای دسترسی سیستمی: Method Not Allowed. مسیر API درست نیست.'
+    } else if (isAppHttpError(cause)) {
+      error.value = cause.status !== null && cause.status >= 500
+        ? cause.presentation.message
+        : (cause.detail || 'خطا در ثبت رمز عبور')
+    } else if (cause instanceof SyntaxError) {
+      error.value = 'ثبت رمز عبور اکنون ممکن نشد. دوباره تلاش کنید.'
+    } else {
+      error.value = cause instanceof Error && /^[\u0600-\u06ff]/u.test(cause.message)
+        ? cause.message
+        : 'ثبت رمز عبور اکنون ممکن نشد. دوباره تلاش کنید.'
+    }
   } finally {
+    submitPending = false
     loading.value = false
   }
 }

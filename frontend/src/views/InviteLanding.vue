@@ -3,8 +3,10 @@ import { onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Globe2, Send } from 'lucide-vue-next'
 import { AppButton, AppCard, AppErrorState, AppLoadingState, AppPage, AppPageHeader, AppStatusBadge } from '../components/ui'
-import { invitationTerminalMessage, normalizeInvitationContract } from '../utils/invitationContract'
+import { invitationTerminalMessage, normalizeInvitationContract, type InvitationContractPayload } from '../utils/invitationContract'
+import { isAppHttpError } from '../utils/httpErrorPolicy'
 import { formatIranDateTime } from '../utils/iranTime'
+import { routeRequestJson } from '../utils/routeRequest'
 
 const route = useRoute()
 const router = useRouter()
@@ -13,29 +15,57 @@ const shortCode = route.params.code as string
 const loading = ref(true)
 const redirecting = ref(false)
 const error = ref('')
+const retryAvailable = ref(false)
 const token = ref('')
 const botLink = ref('')
 const botAvailable = ref(false)
 const webAvailable = ref(false)
 const expiresAt = ref('')
-const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || ''
+let invitationLookupPending = false
 
-onMounted(async () => {
+class TerminalInvitationError extends Error {}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
+function isTerminalLookupError(cause: unknown) {
+  return isAppHttpError(cause)
+    && cause.status !== null
+    && [400, 401, 403, 404, 410, 422].includes(cause.status)
+}
+
+async function loadInvitation() {
+  if (invitationLookupPending) return
+  invitationLookupPending = true
+  loading.value = true
+  redirecting.value = false
+  error.value = ''
+  retryAvailable.value = false
+
   try {
-    const res = await fetch(`${apiBaseUrl}/api/invitations/lookup/${shortCode}`)
-    if (!res.ok) throw new Error('دعوت‌نامه نامعتبر یا منقضی شده است.')
-
-    const data = await res.json()
-    const contract = normalizeInvitationContract(data)
+    const data = await routeRequestJson<unknown>(`/api/invitations/lookup/${encodeURIComponent(shortCode)}`, {
+      mode: 'public',
+      errorContext: {
+        surface: 'auth',
+        scope: 'page',
+        operation: 'initial-load',
+        resourceLabel: 'دعوت‌نامه',
+      },
+    })
+    if (!isObject(data)) {
+      throw new Error('پاسخ بررسی دعوت‌نامه کامل نیست.')
+    }
+    const contract = normalizeInvitationContract(data as InvitationContractPayload)
     if (contract.state === 'completed') {
       redirecting.value = true
       await router.replace({ name: 'login', query: { registration: 'complete' } })
       return
     }
     if (contract.state !== 'pending' || data.valid === false) {
-      throw new Error(invitationTerminalMessage(contract.state))
+      throw new TerminalInvitationError(invitationTerminalMessage(contract.state))
     }
-    if (!contract.token) throw new Error('دعوت‌نامه نامعتبر یا منقضی شده است.')
+    if (!contract.token) throw new TerminalInvitationError('دعوت‌نامه نامعتبر یا منقضی شده است.')
 
     token.value = contract.token
     botAvailable.value = contract.botAvailable
@@ -44,21 +74,44 @@ onMounted(async () => {
 
     if (botAvailable.value) {
       try {
-        const configRes = await fetch(`${apiBaseUrl}/api/config`)
-        if (!configRes.ok) throw new Error('bot_config_unavailable')
-        const config = await configRes.json()
-        if (!config.bot_username) throw new Error('bot_config_unavailable')
+        const config = await routeRequestJson<unknown>('/api/config', {
+          mode: 'public',
+          errorContext: {
+            surface: 'auth',
+            scope: 'action',
+            operation: 'initial-load',
+          },
+        })
+        if (!isObject(config) || typeof config.bot_username !== 'string' || !config.bot_username.trim()) {
+          throw new Error('bot_config_unavailable')
+        }
         botLink.value = `https://t.me/${config.bot_username}?start=${token.value}`
       } catch {
         botAvailable.value = false
+        if (!webAvailable.value) {
+          throw new Error('مسیر ثبت‌نام تلگرام اکنون در دسترس نیست.')
+        }
       }
     }
-  } catch (e: any) {
+  } catch (cause: unknown) {
     redirecting.value = false
-    error.value = e.message
+    if (cause instanceof TerminalInvitationError || isTerminalLookupError(cause)) {
+      error.value = cause instanceof TerminalInvitationError
+        ? cause.message
+        : 'دعوت‌نامه نامعتبر یا منقضی شده است.'
+      retryAvailable.value = false
+    } else {
+      error.value = 'بررسی دعوت‌نامه اکنون ممکن نشد. دوباره تلاش کنید.'
+      retryAvailable.value = true
+    }
   } finally {
+    invitationLookupPending = false
     loading.value = false
   }
+}
+
+onMounted(() => {
+  void loadInvitation()
 })
 
 function goToWebRegister() {
@@ -78,7 +131,15 @@ function goToWebRegister() {
       <AppCard class="invite-card">
         <AppLoadingState v-if="loading || redirecting" :label="redirecting ? 'در حال انتقال به ورود' : 'در حال بررسی دعوت‌نامه'" />
 
-        <AppErrorState v-else-if="error" title="دعوت‌نامه قابل استفاده نیست" :message="error" />
+        <AppErrorState
+          v-else-if="error"
+          :title="retryAvailable ? 'بررسی دعوت‌نامه انجام نشد' : 'دعوت‌نامه قابل استفاده نیست'"
+          :message="error"
+        >
+          <template v-if="retryAvailable" #actions>
+            <AppButton variant="secondary" block :loading="loading" @click="loadInvitation">تلاش مجدد</AppButton>
+          </template>
+        </AppErrorState>
 
         <div v-else class="actions">
           <div class="invite-intro">
