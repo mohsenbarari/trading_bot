@@ -222,6 +222,27 @@ class TelegramQueueLocalEvidenceRunnerTests(unittest.TestCase):
         self.assertEqual(console.getvalue(), evidence.getvalue())
         self.assertIn("Ran 3 tests", evidence.getvalue())
 
+    def test_sync_process_resources_are_closed_before_fd_audit(self):
+        from core import events, trading_settings
+
+        event_redis = Mock()
+        settings_redis = Mock()
+        settings_engine = Mock()
+        with patch.object(events, "_sync_redis", event_redis), patch.object(
+            trading_settings,
+            "_sync_redis_client",
+            settings_redis,
+        ), patch.object(trading_settings, "_sync_engine", settings_engine):
+            failures = runner._close_known_sync_process_resources()
+
+            self.assertEqual(failures, [])
+            event_redis.connection_pool.disconnect.assert_called_once_with()
+            settings_redis.connection_pool.disconnect.assert_called_once_with()
+            settings_engine.dispose.assert_called_once_with()
+            self.assertIsNone(events._sync_redis)
+            self.assertIsNone(trading_settings._sync_redis_client)
+            self.assertIsNone(trading_settings._sync_engine)
+
 
 if __name__ == "__main__":
     unittest.main()

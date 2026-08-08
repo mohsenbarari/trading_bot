@@ -338,6 +338,42 @@ def _open_fd_snapshot() -> dict[int, str] | None:
     return snapshot
 
 
+def _close_known_sync_process_resources() -> list[str]:
+    """Mirror application shutdown for lazy synchronous singleton resources.
+
+    Queue freshness rendering reads trading settings from synchronous Redis and
+    PostgreSQL helpers. Those pools are process-lifetime resources in the app,
+    but the evidence runner is itself the whole process and must close them
+    before its final descriptor audit.
+    """
+
+    failures: list[str] = []
+    try:
+        from core import events
+
+        client = getattr(events, "_sync_redis", None)
+        if client is not None:
+            client.connection_pool.disconnect()
+            events._sync_redis = None
+    except Exception as exc:  # noqa: BLE001 - becomes fail-closed evidence
+        failures.append(f"core.events._sync_redis:{type(exc).__name__}")
+
+    try:
+        from core import trading_settings
+
+        client = getattr(trading_settings, "_sync_redis_client", None)
+        if client is not None:
+            client.connection_pool.disconnect()
+            trading_settings._sync_redis_client = None
+        engine = getattr(trading_settings, "_sync_engine", None)
+        if engine is not None:
+            engine.dispose()
+            trading_settings._sync_engine = None
+    except Exception as exc:  # noqa: BLE001 - becomes fail-closed evidence
+        failures.append(f"core.trading_settings.sync_resources:{type(exc).__name__}")
+    return failures
+
+
 def _install_async_hygiene(loop_failures: list[str]) -> None:
     def loop_factory() -> asyncio.AbstractEventLoop:
         loop = asyncio.new_event_loop()
@@ -464,10 +500,12 @@ def main(argv: list[str] | None = None) -> int:
         if evidence_log is not None:
             evidence_log.close()
 
+    sync_resource_cleanup_failures: list[str] = []
     try:
         # Keep the evidence hook installed through deterministic finalization.
         # Otherwise a late __del__ ResourceWarning can be printed after the
         # JSON verdict and escape the report entirely.
+        sync_resource_cleanup_failures = _close_known_sync_process_resources()
         gc.collect()
         fd_after_snapshot = _open_fd_snapshot()
     finally:
@@ -498,6 +536,7 @@ def main(argv: list[str] | None = None) -> int:
     hygiene_ok = (
         not unraisable_failures
         and not loop_failures
+        and not sync_resource_cleanup_failures
         and (fd_growth is None or fd_growth <= 0)
         and result_inventory_complete
         and not result.skipped
@@ -520,6 +559,7 @@ def main(argv: list[str] | None = None) -> int:
         "slow_callback_threshold_seconds": _SLOW_CALLBACK_THRESHOLD_SECONDS,
         "unraisable_failures": unraisable_failures,
         "asyncio_loop_failures": loop_failures,
+        "sync_resource_cleanup_failures": sync_resource_cleanup_failures,
         "fd_before": fd_before,
         "fd_after": fd_after,
         "fd_growth": fd_growth,

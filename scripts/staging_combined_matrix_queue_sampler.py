@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
+import heapq
 import json
 import sys
 from datetime import datetime, timedelta, timezone
@@ -51,6 +53,39 @@ _PREFIX_BOUNDARIES = ("_", ":", "-", " ")
 _SYNTHETIC_PRIVATE_ACTIONS = frozenset(
     {"callback_deadline", "offer_repeat_response", "trade_result"}
 )
+_DEADLINE_PROMOTED_ACTIONS = frozenset(
+    {"trade_result", "partial_offer_edit", "traded_offer_edit"}
+)
+
+# Queue sample tuple layout.  The first thirteen columns are intentionally kept
+# stable because older evidence helpers and tests consume those offsets.
+_ROW_ID = 0
+_ROW_CREATED_AT = 1
+_ROW_SENT_AT = 2
+_ROW_STATE = 3
+_ROW_ACTION = 4
+_ROW_ATTEMPT_COUNT = 5
+_ROW_PROVIDER_ATTEMPT_COUNT = 6
+_ROW_LAST_RATE_LIMITED_AT = 7
+_ROW_OUTCOME_REASON = 8
+_ROW_DISPATCH_STARTED_AT = 9
+_ROW_METHOD = 10
+_ROW_SOURCE_NATURAL_ID = 11
+_ROW_PROVIDER_RESPONSE = 12
+_ROW_PRIORITY = 13
+_ROW_PRIORITY_RANK = 14
+_ROW_ENQUEUED_SEQ = 15
+_ROW_ELIGIBLE_AT = 16
+_ROW_DELIVERY_DEADLINE_AT = 17
+_ROW_DESTINATION_KEY = 18
+_ROW_BOT_IDENTITY = 19
+_ROW_FEEDER_KIND = 20
+_ROW_SOURCE_ORDER_AT = 21
+_ROW_NEXT_RETRY_AT = 22
+_ROW_DESTINATION_CLASS = 23
+_ROW_LAST_RATE_LIMIT_UNTIL = 24
+_ROW_PROVIDER_STATUS_CODE = 25
+_ROW_PROVIDER_ERROR_CODE = 26
 
 
 def _notes_match_run_prefix(notes_column, prefix: str):
@@ -72,6 +107,441 @@ def _notes_match_run_prefix(notes_column, prefix: str):
 
 def _aware(value: datetime) -> datetime:
     return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+
+
+def _enum_text(value: object) -> str:
+    return str(getattr(value, "value", value) or "")
+
+
+def _iso(value: datetime | None) -> str | None:
+    if value is None:
+        return None
+    return _aware(value).isoformat().replace("+00:00", "Z")
+
+
+def _effective_priority_at_dispatch(row: tuple[object, ...]) -> tuple[int, int]:
+    dispatched = row[_ROW_DISPATCH_STARTED_AT]
+    if dispatched is None:
+        return int(row[_ROW_PRIORITY] or 0), int(row[_ROW_PRIORITY_RANK] or 0)
+    return _effective_priority_at(row, at=_aware(dispatched))
+
+
+def _effective_priority_at(
+    row: tuple[object, ...], *, at: datetime
+) -> tuple[int, int]:
+    priority = int(row[_ROW_PRIORITY] or 0)
+    rank = int(row[_ROW_PRIORITY_RANK] or 0)
+    action = _enum_text(row[_ROW_ACTION])
+    deadline = row[_ROW_DELIVERY_DEADLINE_AT]
+    if (
+        action in _DEADLINE_PROMOTED_ACTIONS
+        and deadline is not None
+        and at >= _aware(deadline)
+    ):
+        return 0, 1
+    return priority, rank
+
+
+def _is_first_attempt_without_rate_limit(row: tuple[object, ...]) -> bool:
+    return (
+        int(row[_ROW_ATTEMPT_COUNT] or 0) <= 1
+        and int(row[_ROW_PROVIDER_ATTEMPT_COUNT] or 0) <= 1
+        and row[_ROW_LAST_RATE_LIMITED_AT] is None
+    )
+
+
+def _dispatch_evidence_payload(
+    rows: list[tuple[object, ...]],
+    *,
+    destination_min_interval_seconds: float,
+    destination_burst_idle_seconds: float,
+    destination_burst_capacity: int,
+    destination_burst_recovery_seconds: float,
+    claim_race_grace_seconds: float = 0.5,
+    clock_tolerance_seconds: float = 0.03,
+) -> dict[str, object]:
+    """Build bounded, auditable evidence for order, pacing, burst and 429.
+
+    A terminal job row retains only its latest dispatch timestamp.  Retried or
+    rate-limited rows are therefore excluded from strict first-claim ordering,
+    but remain in the retry/429 and pacing evidence.  Priority inversions are
+    reported only for a higher-priority job that was demonstrably enqueued and
+    eligible on the same serialized destination before the lower-priority
+    dispatch (with a small claim-to-dispatch race allowance).
+    """
+
+    dispatched_rows = [
+        row
+        for row in rows
+        if len(row) > _ROW_PROVIDER_ERROR_CODE
+        and row[_ROW_DISPATCH_STARTED_AT] is not None
+    ]
+    dispatched_rows.sort(
+        key=lambda row: (_aware(row[_ROW_DISPATCH_STARTED_AT]), int(row[_ROW_ID]))
+    )
+    strict_rows = [row for row in dispatched_rows if _is_first_attempt_without_rate_limit(row)]
+    strict_ids = {int(row[_ROW_ID]) for row in strict_rows}
+    grace = timedelta(seconds=max(0.0, float(claim_race_grace_seconds)))
+
+    priority_inversions: list[dict[str, object]] = []
+    fifo_inversions: list[dict[str, object]] = []
+    strict_by_destination: dict[str, list[tuple[object, ...]]] = {}
+    for row in strict_rows:
+        strict_by_destination.setdefault(str(row[_ROW_DESTINATION_KEY] or ""), []).append(row)
+
+    # O(n log n) live audit.  For each serialized destination, rows enter the
+    # pending heap only after their creation/eligibility is provably before the
+    # current claim boundary. Deadline promotions are represented by a newer
+    # heap generation and stale entries are discarded lazily.
+    for destination, destination_rows in strict_by_destination.items():
+        destination_rows.sort(
+            key=lambda row: (_aware(row[_ROW_DISPATCH_STARTED_AT]), int(row[_ROW_ID]))
+        )
+        available_rows = sorted(
+            destination_rows,
+            key=lambda row: max(
+                _aware(row[_ROW_CREATED_AT]),
+                _aware(row[_ROW_ELIGIBLE_AT])
+                if row[_ROW_ELIGIBLE_AT] is not None
+                else _aware(row[_ROW_CREATED_AT]),
+            ),
+        )
+        deadline_rows = sorted(
+            (
+                row
+                for row in destination_rows
+                if _enum_text(row[_ROW_ACTION]) in _DEADLINE_PROMOTED_ACTIONS
+                and row[_ROW_DELIVERY_DEADLINE_AT] is not None
+            ),
+            key=lambda row: _aware(row[_ROW_DELIVERY_DEADLINE_AT]),
+        )
+        active: set[int] = set()
+        dispatched: set[int] = set()
+        generation: dict[int, int] = {}
+        priority_heap: list[tuple[int, int, int, int, int]] = []
+        publish_heaps: dict[tuple[int, int], list[tuple[int, int]]] = {}
+        available_index = 0
+        deadline_index = 0
+
+        def push(row: tuple[object, ...], priority: tuple[int, int]) -> None:
+            job_id = int(row[_ROW_ID])
+            generation[job_id] = generation.get(job_id, 0) + 1
+            heapq.heappush(
+                priority_heap,
+                (
+                    int(priority[0]),
+                    int(priority[1]),
+                    int(row[_ROW_ENQUEUED_SEQ]),
+                    job_id,
+                    generation[job_id],
+                ),
+            )
+
+        for current in destination_rows:
+            current_dispatch = _aware(current[_ROW_DISPATCH_STARTED_AT])
+            claim_boundary = current_dispatch - grace
+            while available_index < len(available_rows):
+                candidate = available_rows[available_index]
+                available_at = max(
+                    _aware(candidate[_ROW_CREATED_AT]),
+                    _aware(candidate[_ROW_ELIGIBLE_AT])
+                    if candidate[_ROW_ELIGIBLE_AT] is not None
+                    else _aware(candidate[_ROW_CREATED_AT]),
+                )
+                if available_at > claim_boundary:
+                    break
+                available_index += 1
+                candidate_id = int(candidate[_ROW_ID])
+                active.add(candidate_id)
+                push(candidate, _effective_priority_at(candidate, at=claim_boundary))
+                if _enum_text(candidate[_ROW_ACTION]) == "offer_publish":
+                    key = (
+                        int(candidate[_ROW_PRIORITY]),
+                        int(candidate[_ROW_PRIORITY_RANK]),
+                    )
+                    heapq.heappush(
+                        publish_heaps.setdefault(key, []),
+                        (int(candidate[_ROW_ENQUEUED_SEQ]), candidate_id),
+                    )
+            while deadline_index < len(deadline_rows):
+                candidate = deadline_rows[deadline_index]
+                if _aware(candidate[_ROW_DELIVERY_DEADLINE_AT]) > claim_boundary:
+                    break
+                deadline_index += 1
+                candidate_id = int(candidate[_ROW_ID])
+                if candidate_id in active and candidate_id not in dispatched:
+                    push(candidate, (0, 1))
+
+            current_id = int(current[_ROW_ID])
+            dispatched.add(current_id)
+            active.discard(current_id)
+            while priority_heap:
+                priority, rank, _seq, candidate_id, candidate_generation = priority_heap[0]
+                if (
+                    candidate_id in dispatched
+                    or candidate_id not in active
+                    or generation.get(candidate_id) != candidate_generation
+                ):
+                    heapq.heappop(priority_heap)
+                    continue
+                break
+            current_priority = _effective_priority_at(current, at=claim_boundary)
+            if priority_heap and priority_heap[0][:2] < current_priority:
+                priority, rank, _seq, candidate_id, _generation = priority_heap[0]
+                priority_inversions.append(
+                    {
+                        "dispatched_job_id": current_id,
+                        "waiting_job_id": candidate_id,
+                        "dispatched_at": _iso(current_dispatch),
+                        "dispatched_priority": list(current_priority),
+                        "waiting_priority": [priority, rank],
+                        "destination_sha256": hashlib.sha256(
+                            destination.encode("utf-8")
+                        ).hexdigest()[:16],
+                    }
+                )
+
+            if _enum_text(current[_ROW_ACTION]) == "offer_publish":
+                key = (
+                    int(current[_ROW_PRIORITY]),
+                    int(current[_ROW_PRIORITY_RANK]),
+                )
+                publish_heap = publish_heaps.get(key, [])
+                while publish_heap and (
+                    publish_heap[0][1] in dispatched
+                    or publish_heap[0][1] not in active
+                ):
+                    heapq.heappop(publish_heap)
+                if (
+                    publish_heap
+                    and publish_heap[0][0] < int(current[_ROW_ENQUEUED_SEQ])
+                ):
+                    waiting_seq, waiting_id = publish_heap[0]
+                    fifo_inversions.append(
+                        {
+                            "dispatched_job_id": current_id,
+                            "waiting_job_id": waiting_id,
+                            "dispatched_at": _iso(current_dispatch),
+                            "dispatched_priority": list(current_priority),
+                            "waiting_priority": list(current_priority),
+                            "dispatched_enqueued_seq": int(
+                                current[_ROW_ENQUEUED_SEQ]
+                            ),
+                            "waiting_enqueued_seq": waiting_seq,
+                            "destination_sha256": hashlib.sha256(
+                                destination.encode("utf-8")
+                            ).hexdigest()[:16],
+                        }
+                    )
+
+    ordered_digest_rows = [
+        {
+            "job_id": int(row[_ROW_ID]),
+            "action": _enum_text(row[_ROW_ACTION]),
+            "effective_priority": list(_effective_priority_at_dispatch(row)),
+            "enqueued_seq": int(row[_ROW_ENQUEUED_SEQ]),
+            "dispatch_started_at": _iso(row[_ROW_DISPATCH_STARTED_AT]),
+            "destination_sha256": hashlib.sha256(
+                str(row[_ROW_DESTINATION_KEY] or "").encode("utf-8")
+            ).hexdigest()[:16],
+        }
+        for row in dispatched_rows
+    ]
+    sequence_digest = hashlib.sha256(
+        json.dumps(
+            ordered_digest_rows,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+
+    by_destination: dict[str, list[tuple[object, ...]]] = {}
+    for row in dispatched_rows:
+        by_destination.setdefault(str(row[_ROW_DESTINATION_KEY] or ""), []).append(row)
+    all_gaps: list[float] = []
+    sustained_gaps: list[float] = []
+    allowed_burst_gaps: list[dict[str, object]] = []
+    spacing_violations: list[dict[str, object]] = []
+    tolerance = max(0.0, float(clock_tolerance_seconds))
+    minimum_interval = max(0.001, float(destination_min_interval_seconds))
+    idle_seconds = max(minimum_interval, float(destination_burst_idle_seconds))
+    recovery_seconds = max(0.0, float(destination_burst_recovery_seconds))
+    configured_burst_capacity = max(1, int(destination_burst_capacity))
+
+    rate_limit_events_by_destination: dict[str, list[datetime]] = {}
+    for row in rows:
+        if (
+            len(row) > _ROW_LAST_RATE_LIMITED_AT
+            and row[_ROW_LAST_RATE_LIMITED_AT] is not None
+        ):
+            rate_limit_events_by_destination.setdefault(
+                str(row[_ROW_DESTINATION_KEY] or ""), []
+            ).append(_aware(row[_ROW_LAST_RATE_LIMITED_AT]))
+    for events in rate_limit_events_by_destination.values():
+        events.sort()
+    for destination, destination_rows in by_destination.items():
+        destination_rows.sort(
+            key=lambda row: (_aware(row[_ROW_DISPATCH_STARTED_AT]), int(row[_ROW_ID]))
+        )
+        destination_class = _enum_text(destination_rows[0][_ROW_DESTINATION_CLASS])
+        capacity = configured_burst_capacity if destination_class == "channel" else 1
+        accepts_since_idle = 1
+        previous = destination_rows[0]
+        for current in destination_rows[1:]:
+            previous_at = _aware(previous[_ROW_DISPATCH_STARTED_AT])
+            current_at = _aware(current[_ROW_DISPATCH_STARTED_AT])
+            gap = max(0.0, (current_at - previous_at).total_seconds())
+            all_gaps.append(gap)
+            if gap >= idle_seconds - tolerance:
+                accepts_since_idle = 1
+            else:
+                accepts_since_idle += 1
+            recent_429 = next(
+                (
+                    observed
+                    for observed in reversed(
+                        rate_limit_events_by_destination.get(destination, [])
+                    )
+                    if observed <= current_at
+                    and (current_at - observed).total_seconds() < recovery_seconds
+                ),
+                None,
+            )
+            burst_permitted = recent_429 is None and capacity > 1
+            short_gap = gap + tolerance < minimum_interval
+            if not short_gap:
+                sustained_gaps.append(gap)
+            elif burst_permitted and accepts_since_idle <= capacity:
+                allowed_burst_gaps.append(
+                    {
+                        "previous_job_id": int(previous[_ROW_ID]),
+                        "job_id": int(current[_ROW_ID]),
+                        "gap_seconds": round(gap, 3),
+                        "accept_number_since_idle": accepts_since_idle,
+                        "capacity": capacity,
+                    }
+                )
+            else:
+                spacing_violations.append(
+                    {
+                        "previous_job_id": int(previous[_ROW_ID]),
+                        "job_id": int(current[_ROW_ID]),
+                        "gap_seconds": round(gap, 3),
+                        "capacity": capacity,
+                        "burst_disabled_by_recent_429": recent_429 is not None,
+                        "destination_sha256": hashlib.sha256(
+                            destination.encode("utf-8")
+                        ).hexdigest()[:16],
+                    }
+                )
+            previous = current
+
+    all_gaps.sort()
+    sustained_gaps.sort()
+    rate_limit_rows = [
+        row
+        for row in rows
+        if len(row) > _ROW_PROVIDER_ERROR_CODE
+        and row[_ROW_LAST_RATE_LIMITED_AT] is not None
+    ]
+    retry_gate_violations: list[dict[str, object]] = []
+    retry_gate_verified = 0
+    for row in rate_limit_rows:
+        dispatch_started_at = row[_ROW_DISPATCH_STARTED_AT]
+        retry_until = row[_ROW_LAST_RATE_LIMIT_UNTIL]
+        if dispatch_started_at is None or retry_until is None:
+            continue
+        retry_gate_verified += 1
+        if _aware(dispatch_started_at) + timedelta(seconds=tolerance) < _aware(
+            retry_until
+        ):
+            retry_gate_violations.append(
+                {
+                    "job_id": int(row[_ROW_ID]),
+                    "dispatch_started_at": _iso(dispatch_started_at),
+                    "last_rate_limit_until": _iso(retry_until),
+                }
+            )
+
+    sample = ordered_digest_rows[:20]
+    if len(ordered_digest_rows) > 40:
+        sample += ordered_digest_rows[-20:]
+    elif len(ordered_digest_rows) > 20:
+        sample += ordered_digest_rows[20:]
+    return {
+        "dispatch_count": len(dispatched_rows),
+        "strict_first_attempt_dispatch_count": len(strict_rows),
+        "strict_first_attempt_job_ids_sha256": hashlib.sha256(
+            ",".join(str(value) for value in sorted(strict_ids)).encode("utf-8")
+        ).hexdigest(),
+        "retry_rows_excluded_from_strict_order": len(dispatched_rows) - len(strict_rows),
+        "dispatch_sequence_sha256": sequence_digest,
+        "dispatch_sequence_sample": sample,
+        "priority": {
+            "ok": not priority_inversions,
+            "proven_inversion_count": len(priority_inversions),
+            "proven_inversions": priority_inversions[:100],
+            "claim_race_grace_seconds": float(claim_race_grace_seconds),
+        },
+        "offer_publish_fifo": {
+            "ok": not fifo_inversions,
+            "proven_inversion_count": len(fifo_inversions),
+            "proven_inversions": fifo_inversions[:100],
+        },
+        "spacing": {
+            "ok": not spacing_violations,
+            "configured_min_interval_seconds": minimum_interval,
+            "clock_tolerance_seconds": tolerance,
+            "gap_sample_count": len(all_gaps),
+            "gap_seconds": {
+                "min": round(all_gaps[0], 3) if all_gaps else None,
+                "p50": _percentile(all_gaps, 50),
+                "p95": _percentile(all_gaps, 95),
+                "max": round(all_gaps[-1], 3) if all_gaps else None,
+            },
+            "sustained_non_burst_gap_seconds": {
+                "min": round(sustained_gaps[0], 3) if sustained_gaps else None,
+                "p50": _percentile(sustained_gaps, 50),
+                "p95": _percentile(sustained_gaps, 95),
+            },
+            "allowed_burst_gap_count": len(allowed_burst_gaps),
+            "allowed_burst_gap_sample": allowed_burst_gaps[:40],
+            "violation_count": len(spacing_violations),
+            "violations": spacing_violations[:100],
+        },
+        "rate_limit": {
+            "observed_job_count": len(rate_limit_rows),
+            "retry_gate_verified_count": retry_gate_verified,
+            "retry_gate_respected": not retry_gate_violations,
+            "retry_gate_violation_count": len(retry_gate_violations),
+            "retry_gate_violations": retry_gate_violations[:100],
+            "burst_recovery_seconds": recovery_seconds,
+        },
+        "provider_outcomes": {
+            "status_code_counts": {
+                str(code): sum(1 for row in rows if row[_ROW_PROVIDER_STATUS_CODE] == code)
+                for code in sorted(
+                    {
+                        int(row[_ROW_PROVIDER_STATUS_CODE])
+                        for row in rows
+                        if len(row) > _ROW_PROVIDER_ERROR_CODE
+                        and row[_ROW_PROVIDER_STATUS_CODE] is not None
+                    }
+                )
+            },
+            "error_code_counts": {
+                str(code): sum(1 for row in rows if row[_ROW_PROVIDER_ERROR_CODE] == code)
+                for code in sorted(
+                    {
+                        int(row[_ROW_PROVIDER_ERROR_CODE])
+                        for row in rows
+                        if len(row) > _ROW_PROVIDER_ERROR_CODE
+                        and row[_ROW_PROVIDER_ERROR_CODE] is not None
+                    }
+                )
+            },
+        },
+    }
 
 
 def _timing_payload(
@@ -394,6 +864,20 @@ async def _sample(
                             TelegramDeliveryJobRecord.method,
                             TelegramDeliveryJobRecord.source_natural_id,
                             TelegramDeliveryJobRecord.provider_response,
+                            TelegramDeliveryJobRecord.priority,
+                            TelegramDeliveryJobRecord.priority_rank,
+                            TelegramDeliveryJobRecord.enqueued_seq,
+                            TelegramDeliveryJobRecord.eligible_at,
+                            TelegramDeliveryJobRecord.delivery_deadline_at,
+                            TelegramDeliveryJobRecord.destination_key,
+                            TelegramDeliveryJobRecord.bot_identity,
+                            TelegramDeliveryJobRecord.feeder_kind,
+                            TelegramDeliveryJobRecord.source_order_at,
+                            TelegramDeliveryJobRecord.next_retry_at,
+                            TelegramDeliveryJobRecord.destination_class,
+                            TelegramDeliveryJobRecord.last_rate_limit_until,
+                            TelegramDeliveryJobRecord.provider_status_code,
+                            TelegramDeliveryJobRecord.provider_error_code,
                         ).where(or_(*scope_conditions))
                     )
                 ).all()
@@ -462,6 +946,41 @@ async def _sample(
         # the real public Telegram queue.
         public_partition["timing"] = timing_payload
         public_partition["provider_timing"] = provider_timing_payload
+        public_partition["dispatch_evidence"] = (
+            _dispatch_evidence_payload(
+                scoped_timing_rows,
+                destination_min_interval_seconds=float(
+                    getattr(
+                        settings,
+                        "telegram_delivery_queue_destination_min_interval_seconds",
+                        0.9,
+                    )
+                ),
+                destination_burst_idle_seconds=float(
+                    getattr(
+                        settings,
+                        "telegram_delivery_queue_destination_burst_idle_seconds",
+                        3.2,
+                    )
+                ),
+                destination_burst_capacity=int(
+                    getattr(
+                        settings,
+                        "telegram_delivery_queue_destination_burst_capacity",
+                        2,
+                    )
+                ),
+                destination_burst_recovery_seconds=float(
+                    getattr(
+                        settings,
+                        "telegram_delivery_queue_destination_burst_recovery_seconds",
+                        300.0,
+                    )
+                ),
+            )
+            if timing
+            else {}
+        )
 
         global_timing_payload: dict[str, object] = {}
         if timing:
@@ -512,6 +1031,7 @@ async def _sample(
             "synthetic_private": private_partition,
             "timing": timing_payload,
             "provider_timing": provider_timing_payload,
+            "dispatch_evidence": public_partition["dispatch_evidence"],
         },
         "global": {
             "pending_jobs": global_pending,

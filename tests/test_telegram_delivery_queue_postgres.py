@@ -144,6 +144,7 @@ from models.market_runtime_state import MarketRuntimeState
 
 
 DATABASE_NAME_PATTERN = re.compile(r"^telegram_queue_stage3_[a-z0-9_]+_test$")
+EXPECTED_ALEMBIC_HEAD = "f9b0c1d2e3a4"
 
 
 @dataclass(frozen=True)
@@ -311,7 +312,7 @@ def _run_alembic(sync_url: str, *args: str) -> None:
     env["DATABASE_URL"] = sync_url
     env["TRADING_BOT_MIGRATION_MODE"] = "scratch"
     env["TRADING_BOT_EXPECTED_CHECKOUT"] = os.getcwd()
-    env["TRADING_BOT_EXPECTED_ALEMBIC_HEAD"] = "b986c7d8e0f1"
+    env["TRADING_BOT_EXPECTED_ALEMBIC_HEAD"] = EXPECTED_ALEMBIC_HEAD
     result = subprocess.run(
         [sys.executable, "scripts/run_guarded_scratch_alembic.py", *args],
         capture_output=True,
@@ -421,35 +422,17 @@ class TelegramDeliveryQueuePostgresTests(unittest.IsolatedAsyncioTestCase):
             )
 
     async def _reset_authoritative_fixture(self, *statements) -> None:
-        """Reset scratch-only product rows without granting an owner bypass.
+        """Reset scratch-only product rows in one rollback-safe transaction.
 
-        The production write guard correctly rejects direct owner writes.  A
-        fixture reset therefore disables enforcement only inside one owner
-        transaction, restores it before commit, and rolls the entire change
-        back if any reset statement fails.
+        This branch deliberately carries the queue without the archived
+        three-site DR write-guard schema.  The maintenance connection is bound
+        to the already validated scratch database, so no production bypass or
+        ``dr_database_runtime`` toggle is either available or required.
         """
 
         async with self.maintenance_engine.begin() as connection:
-            disabled = await connection.scalar(
-                text(
-                    "UPDATE dr_database_runtime SET enforcement_enabled=false "
-                    "WHERE singleton_id=1 AND enforcement_enabled=true RETURNING 1"
-                )
-            )
-            if disabled != 1:
-                raise RuntimeError(
-                    "scratch fixture reset requires active database enforcement"
-                )
             for statement, parameters in statements:
                 await connection.execute(text(statement), parameters)
-            restored = await connection.scalar(
-                text(
-                    "UPDATE dr_database_runtime SET enforcement_enabled=true "
-                    "WHERE singleton_id=1 AND enforcement_enabled=false RETURNING 1"
-                )
-            )
-            if restored != 1:
-                raise RuntimeError("scratch fixture reset failed to restore enforcement")
 
     async def test_two_processes_cannot_own_queue_executor_simultaneously(self):
         environment = os.environ.copy()

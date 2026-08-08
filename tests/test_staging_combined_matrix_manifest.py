@@ -16,6 +16,58 @@ from scripts import staging_combined_matrix_queue_sampler as queue_sampler
 from scripts import staging_combined_matrix_wave_driver as wave_driver
 
 
+def _queue_evidence_row(
+    *,
+    job_id: int,
+    created_at: datetime,
+    dispatch_at: datetime,
+    action: str = "offer_publish",
+    priority: int = 0,
+    priority_rank: int = 2,
+    enqueued_seq: int | None = None,
+    destination: str = "channel:matrix-test",
+    destination_class: str = "channel",
+    eligible_at: datetime | None = None,
+    delivery_deadline_at: datetime | None = None,
+    attempt_count: int = 1,
+    provider_attempt_count: int = 1,
+    last_rate_limited_at: datetime | None = None,
+    last_rate_limit_until: datetime | None = None,
+    sent_at: datetime | None = None,
+    provider_status_code: int | None = 200,
+    provider_error_code: int | None = None,
+) -> tuple[object, ...]:
+    return (
+        job_id,
+        created_at,
+        sent_at or dispatch_at + timedelta(milliseconds=20),
+        "sent",
+        action,
+        attempt_count,
+        provider_attempt_count,
+        last_rate_limited_at,
+        "sent",
+        dispatch_at,
+        "sendMessage",
+        f"ofr_matrix_{job_id}",
+        {"ok": True},
+        priority,
+        priority_rank,
+        enqueued_seq if enqueued_seq is not None else job_id,
+        eligible_at,
+        delivery_deadline_at,
+        destination,
+        "primary",
+        "offer_control",
+        None,
+        None,
+        destination_class,
+        last_rate_limit_until,
+        provider_status_code,
+        provider_error_code,
+    )
+
+
 class CombinedMatrixManifestTests(unittest.TestCase):
     def test_runtime_driver_bundle_includes_shared_probe_worker(self) -> None:
         self.assertIn(
@@ -272,6 +324,53 @@ class CombinedMatrixManifestTests(unittest.TestCase):
         self.assertTrue(limits["temporary_expiry_override_enabled"])
         self.assertGreater(limits["effective_offer_expiry_minutes"], 2)
 
+    def test_small_live_wave_fits_real_two_minute_offer_lifetime(self) -> None:
+        manifest = manifest_builder.build_manifest(seed=20260806)
+        args = SimpleNamespace(
+            wave_scale=0.004,
+            wave_reduction_reason="real two-minute lifecycle",
+            wave_trade_percent=40,
+            wave_manual_expire_percent=20,
+            wave_profile="burst",
+            queue_offer_expiry_minutes=2,
+            allow_temporary_queue_expiry_override=False,
+            wave_immediate_actions=False,
+            wave_action_delay_seconds=15.0,
+            wave_publish_wait_timeout_seconds=1800.0,
+            wave_action_drain_timeout_seconds=2400.0,
+            wave_timeout_seconds=5400.0,
+        )
+
+        capacity = runner._wave_capacity_preflight(args, manifest)
+
+        self.assertTrue(capacity["ok"])
+        self.assertTrue(capacity["fits_real_offer_lifetime"])
+        self.assertEqual(capacity["selected_valid_count"], 16)
+        self.assertEqual(capacity["selected_invalid_count"], 3)
+
+    def test_full_live_wave_fails_preflight_before_mutation(self) -> None:
+        manifest = manifest_builder.build_manifest(seed=20260806)
+        args = SimpleNamespace(
+            wave_scale=1.0,
+            wave_reduction_reason=None,
+            wave_trade_percent=40,
+            wave_manual_expire_percent=20,
+            wave_profile="realtime-30m",
+            queue_offer_expiry_minutes=2,
+            allow_temporary_queue_expiry_override=False,
+            wave_immediate_actions=False,
+            wave_action_delay_seconds=45.0,
+            wave_publish_wait_timeout_seconds=1800.0,
+            wave_action_drain_timeout_seconds=2400.0,
+            wave_timeout_seconds=5400.0,
+        )
+
+        capacity = runner._wave_capacity_preflight(args, manifest)
+
+        self.assertFalse(capacity["ok"])
+        self.assertFalse(capacity["fits_real_offer_lifetime"])
+        self.assertIn("lifecycle-independent", capacity["guidance"])
+
     def test_wave_prefix_catchup_replays_synced_dependency_parents(self) -> None:
         args = SimpleNamespace(run_prefix="CMB_DEPENDENCY_BARRIER")
         with patch.object(
@@ -467,6 +566,222 @@ class CombinedMatrixManifestTests(unittest.TestCase):
         self.assertEqual(payload["edit_sample_count"], 1)
         self.assertEqual(payload["slow_edit_count"], 1)
         self.assertEqual(payload["edit_latency_seconds"]["p95"], 2.25)
+
+    def test_dispatch_evidence_detects_proven_priority_inversion(self) -> None:
+        base = datetime(2026, 8, 8, tzinfo=timezone.utc)
+        rows = [
+            _queue_evidence_row(
+                job_id=1,
+                created_at=base,
+                dispatch_at=base + timedelta(seconds=10),
+                action="other_active_offer_edit",
+                priority=5,
+                priority_rank=2,
+            ),
+            _queue_evidence_row(
+                job_id=2,
+                created_at=base,
+                dispatch_at=base + timedelta(seconds=11),
+                priority=0,
+                priority_rank=2,
+            ),
+        ]
+
+        payload = queue_sampler._dispatch_evidence_payload(
+            rows,
+            destination_min_interval_seconds=0.9,
+            destination_burst_idle_seconds=3.2,
+            destination_burst_capacity=2,
+            destination_burst_recovery_seconds=300.0,
+        )
+
+        self.assertFalse(payload["priority"]["ok"])
+        self.assertEqual(payload["priority"]["proven_inversion_count"], 1)
+        self.assertEqual(
+            payload["priority"]["proven_inversions"][0]["waiting_job_id"], 2
+        )
+
+    def test_dispatch_evidence_applies_overdue_trade_promotion(self) -> None:
+        base = datetime(2026, 8, 8, tzinfo=timezone.utc)
+        rows = [
+            _queue_evidence_row(
+                job_id=1,
+                created_at=base,
+                dispatch_at=base + timedelta(seconds=10),
+                priority=0,
+                priority_rank=2,
+            ),
+            _queue_evidence_row(
+                job_id=2,
+                created_at=base,
+                dispatch_at=base + timedelta(seconds=11),
+                action="trade_result",
+                priority=1,
+                priority_rank=1,
+                delivery_deadline_at=base + timedelta(seconds=2),
+            ),
+        ]
+
+        payload = queue_sampler._dispatch_evidence_payload(
+            rows,
+            destination_min_interval_seconds=0.9,
+            destination_burst_idle_seconds=3.2,
+            destination_burst_capacity=2,
+            destination_burst_recovery_seconds=300.0,
+        )
+
+        self.assertFalse(payload["priority"]["ok"])
+        self.assertEqual(
+            payload["priority"]["proven_inversions"][0]["waiting_priority"],
+            [0, 1],
+        )
+
+    def test_dispatch_evidence_detects_offer_publish_fifo_inversion(self) -> None:
+        base = datetime(2026, 8, 8, tzinfo=timezone.utc)
+        rows = [
+            _queue_evidence_row(
+                job_id=2,
+                created_at=base,
+                dispatch_at=base + timedelta(seconds=10),
+                enqueued_seq=2,
+            ),
+            _queue_evidence_row(
+                job_id=1,
+                created_at=base,
+                dispatch_at=base + timedelta(seconds=11),
+                enqueued_seq=1,
+            ),
+        ]
+
+        payload = queue_sampler._dispatch_evidence_payload(
+            rows,
+            destination_min_interval_seconds=0.9,
+            destination_burst_idle_seconds=3.2,
+            destination_burst_capacity=2,
+            destination_burst_recovery_seconds=300.0,
+        )
+
+        self.assertFalse(payload["offer_publish_fifo"]["ok"])
+        self.assertEqual(
+            payload["offer_publish_fifo"]["proven_inversion_count"], 1
+        )
+
+    def test_dispatch_evidence_allows_one_idle_channel_microburst(self) -> None:
+        base = datetime(2026, 8, 8, tzinfo=timezone.utc)
+        rows = [
+            _queue_evidence_row(
+                job_id=1,
+                created_at=base,
+                dispatch_at=base + timedelta(seconds=10),
+            ),
+            _queue_evidence_row(
+                job_id=2,
+                created_at=base + timedelta(seconds=10),
+                dispatch_at=base + timedelta(seconds=10.1),
+            ),
+            _queue_evidence_row(
+                job_id=3,
+                created_at=base + timedelta(seconds=10.8),
+                dispatch_at=base + timedelta(seconds=11),
+            ),
+        ]
+
+        payload = queue_sampler._dispatch_evidence_payload(
+            rows,
+            destination_min_interval_seconds=0.9,
+            destination_burst_idle_seconds=3.2,
+            destination_burst_capacity=2,
+            destination_burst_recovery_seconds=300.0,
+        )
+
+        self.assertTrue(payload["spacing"]["ok"])
+        self.assertEqual(payload["spacing"]["allowed_burst_gap_count"], 1)
+        self.assertEqual(payload["spacing"]["violation_count"], 0)
+
+    def test_dispatch_evidence_rejects_burst_beyond_capacity(self) -> None:
+        base = datetime(2026, 8, 8, tzinfo=timezone.utc)
+        rows = [
+            _queue_evidence_row(
+                job_id=index,
+                created_at=base,
+                dispatch_at=base + timedelta(seconds=10 + index / 10),
+            )
+            for index in (1, 2, 3)
+        ]
+
+        payload = queue_sampler._dispatch_evidence_payload(
+            rows,
+            destination_min_interval_seconds=0.9,
+            destination_burst_idle_seconds=3.2,
+            destination_burst_capacity=2,
+            destination_burst_recovery_seconds=300.0,
+        )
+
+        self.assertFalse(payload["spacing"]["ok"])
+        self.assertEqual(payload["spacing"]["allowed_burst_gap_count"], 1)
+        self.assertEqual(payload["spacing"]["violation_count"], 1)
+
+    def test_dispatch_evidence_verifies_429_retry_deadline(self) -> None:
+        base = datetime(2026, 8, 8, tzinfo=timezone.utc)
+        rows = [
+            _queue_evidence_row(
+                job_id=1,
+                created_at=base,
+                dispatch_at=base + timedelta(seconds=8),
+                attempt_count=2,
+                provider_attempt_count=2,
+                last_rate_limited_at=base + timedelta(seconds=2),
+                last_rate_limit_until=base + timedelta(seconds=7),
+                sent_at=base + timedelta(seconds=8.1),
+            )
+        ]
+
+        payload = queue_sampler._dispatch_evidence_payload(
+            rows,
+            destination_min_interval_seconds=0.9,
+            destination_burst_idle_seconds=3.2,
+            destination_burst_capacity=2,
+            destination_burst_recovery_seconds=300.0,
+        )
+
+        self.assertEqual(payload["rate_limit"]["observed_job_count"], 1)
+        self.assertEqual(payload["rate_limit"]["retry_gate_verified_count"], 1)
+        self.assertTrue(payload["rate_limit"]["retry_gate_respected"])
+        self.assertEqual(payload["retry_rows_excluded_from_strict_order"], 1)
+
+    def test_dispatch_evidence_rejects_429_retry_started_before_deadline(self) -> None:
+        base = datetime(2026, 8, 8, tzinfo=timezone.utc)
+        rows = [
+            _queue_evidence_row(
+                job_id=1,
+                created_at=base,
+                dispatch_at=base + timedelta(seconds=6.9),
+                attempt_count=2,
+                provider_attempt_count=2,
+                last_rate_limited_at=base + timedelta(seconds=2),
+                last_rate_limit_until=base + timedelta(seconds=7),
+                # A response received after the deadline must not hide that the
+                # provider attempt itself started too early.
+                sent_at=base + timedelta(seconds=7.2),
+            )
+        ]
+
+        payload = queue_sampler._dispatch_evidence_payload(
+            rows,
+            destination_min_interval_seconds=0.9,
+            destination_burst_idle_seconds=3.2,
+            destination_burst_capacity=2,
+            destination_burst_recovery_seconds=300.0,
+        )
+
+        self.assertFalse(payload["rate_limit"]["retry_gate_respected"])
+        self.assertEqual(payload["rate_limit"]["retry_gate_violation_count"], 1)
+        self.assertEqual(
+            payload["rate_limit"]["retry_gate_violations"][0][
+                "dispatch_started_at"
+            ],
+            "2026-08-08T00:00:06.900000Z",
+        )
 
     def test_queue_partition_requires_retried_jobs_to_recover(self) -> None:
         now = datetime.now(timezone.utc)

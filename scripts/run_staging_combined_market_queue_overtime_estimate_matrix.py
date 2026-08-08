@@ -590,6 +590,15 @@ def run_preflight(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
             "detail": plan["summary"].get("manifest_errors") or [],
         }
     )
+    wave_capacity = _wave_capacity_preflight(args, plan["manifest"])
+    checks.append(
+        {
+            "name": "live_queue_wave_capacity",
+            "status": "passed" if wave_capacity["ok"] else "failed",
+            "detail": wave_capacity,
+        }
+    )
+    write_json(artifact_dir / "wave-capacity-preflight.json", wave_capacity)
     checks.append(
         {
             "name": "matrix_ready_env",
@@ -1180,6 +1189,47 @@ def _effective_wave_limits(
     }
 
 
+def _wave_capacity_preflight(
+    args: argparse.Namespace, manifest: dict[str, Any]
+) -> dict[str, Any]:
+    """Reject an impossible live wave before any expensive/mutating lane runs."""
+
+    budget = wave_driver.WaveBudget(
+        valid_target=int(manifest["wave"]["valid_target"]),
+        invalid_target=int(manifest["wave"]["invalid_target"]),
+        scale=float(args.wave_scale),
+        reduction_reason=args.wave_reduction_reason
+        or ("preflight lifecycle capacity check" if float(args.wave_scale) < 1.0 else None),
+    )
+    selected = wave_driver.scale_events(list(manifest["wave_events"]), budget)
+    selected_valid_count = sum(item.get("kind") == "valid" for item in selected)
+    limits = _effective_wave_limits(args, expected_valid=selected_valid_count)
+    fits = bool(limits["fits_configured_offer_lifetime"])
+    override = bool(args.allow_temporary_queue_expiry_override)
+    return {
+        "ok": fits or override,
+        "live_business_wave": True,
+        "selected_valid_count": selected_valid_count,
+        "selected_invalid_count": len(selected) - selected_valid_count,
+        "wave_scale": float(args.wave_scale),
+        "fits_real_offer_lifetime": fits,
+        "temporary_expiry_override_enabled": override,
+        "configured_offer_expiry_minutes": limits[
+            "configured_offer_expiry_minutes"
+        ],
+        "required_offer_lifecycle_seconds": limits[
+            "required_offer_lifecycle_seconds"
+        ],
+        "estimated_channel_operations": limits["estimated_channel_operations"],
+        "guidance": (
+            "Use a smaller real end-to-end wave; run large queue pressure in the "
+            "lifecycle-independent synthetic queue lane."
+            if not fits and not override
+            else None
+        ),
+    }
+
+
 def _assertion(
     name: str,
     *,
@@ -1553,6 +1603,10 @@ def run_wave(args: argparse.Namespace, manifest: dict[str, Any], artifact_dir: P
         )
         timing = (queue_final.get("scoped") or {}).get("timing") or {}
         global_timing = (queue_final.get("global") or {}).get("timing") or {}
+        timing_scoped = queue_final.get("scoped") or {}
+        timing_public = timing_scoped.get("public") or timing_scoped
+        dispatch_evidence = timing_public.get("dispatch_evidence") or {}
+        spacing_evidence = dispatch_evidence.get("spacing") or {}
         write_json(
             artifact_dir / "telegram-send-timing.json",
             {
@@ -1567,6 +1621,7 @@ def run_wave(args: argparse.Namespace, manifest: dict[str, Any], artifact_dir: P
                     "provider_timing": (
                         queue_final.get("scoped") or {}
                     ).get("provider_timing"),
+                    "dispatch_evidence": dispatch_evidence,
                 },
                 "global": {
                     "pending_jobs": (queue_final.get("global") or {}).get(
@@ -1575,15 +1630,31 @@ def run_wave(args: argparse.Namespace, manifest: dict[str, Any], artifact_dir: P
                     "timing": global_timing,
                 },
                 "recommendation": {
-                    "best_send_minute_utc": timing.get("best_send_minute_utc"),
-                    "best_send_minute_mean_latency_seconds": timing.get(
-                        "best_send_minute_mean_latency_seconds"
+                    "configured_min_interval_seconds": spacing_evidence.get(
+                        "configured_min_interval_seconds"
                     ),
-                    "p50_seconds": (timing.get("latency_seconds") or {}).get(
+                    "observed_sustained_non_burst_gap_seconds": (
+                        spacing_evidence.get("sustained_non_burst_gap_seconds")
+                        or {}
+                    ),
+                    "allowed_burst_gap_count": spacing_evidence.get(
+                        "allowed_burst_gap_count"
+                    ),
+                    "spacing_violation_count": spacing_evidence.get(
+                        "violation_count"
+                    ),
+                    "queue_latency_p50_seconds": (
+                        timing.get("latency_seconds") or {}
+                    ).get(
                         "p50"
                     ),
-                    "p95_seconds": (timing.get("latency_seconds") or {}).get(
-                        "p95"
+                    "queue_latency_p95_seconds": (
+                        timing.get("latency_seconds") or {}
+                    ).get("p95"),
+                    "calibration_note": (
+                        "The lowest safe configured interval requires repeated "
+                        "controlled interval trials; this artifact reports the "
+                        "actual sustained gaps and never infers it from a minute bucket."
                     ),
                 },
             },
@@ -1762,6 +1833,11 @@ def run_wave(args: argparse.Namespace, manifest: dict[str, Any], artifact_dir: P
     final_all_scoped = queue_final.get("scoped") or {}
     final_scoped = final_all_scoped.get("public") or final_all_scoped
     final_private = final_all_scoped.get("synthetic_private") or {}
+    dispatch_evidence = final_scoped.get("dispatch_evidence") or {}
+    priority_evidence = dispatch_evidence.get("priority") or {}
+    fifo_evidence = dispatch_evidence.get("offer_publish_fifo") or {}
+    spacing_evidence = dispatch_evidence.get("spacing") or {}
+    rate_limit_evidence = dispatch_evidence.get("rate_limit") or {}
     latency = (final_scoped.get("timing") or {}).get("latency_seconds") or {}
     provider_timing = final_scoped.get("provider_timing") or {}
     edit_provider_latency = provider_timing.get("edit_latency_seconds") or {}
@@ -1974,6 +2050,96 @@ def run_wave(args: argparse.Namespace, manifest: dict[str, Any], artifact_dir: P
                 "recovered": rate_limit_recovered_jobs,
             },
             cells=["queue:regime:peak"],
+        ),
+        _assertion(
+            "strict_priority_dispatch_order",
+            passed=int(
+                dispatch_evidence.get("strict_first_attempt_dispatch_count") or 0
+            )
+            > 0
+            and bool(priority_evidence.get("ok")),
+            expected={"proven_priority_inversions": 0},
+            actual={
+                "strict_first_attempt_dispatch_count": int(
+                    dispatch_evidence.get("strict_first_attempt_dispatch_count")
+                    or 0
+                ),
+                "proven_priority_inversions": int(
+                    priority_evidence.get("proven_inversion_count") or 0
+                ),
+                "dispatch_sequence_sha256": dispatch_evidence.get(
+                    "dispatch_sequence_sha256"
+                ),
+            },
+            cells=["queue:priority:strict"],
+            identifiers=[
+                item.get("waiting_job_id")
+                for item in (priority_evidence.get("proven_inversions") or [])
+            ],
+        ),
+        _assertion(
+            "offer_publish_fifo_dispatch_order",
+            passed=bool(fifo_evidence.get("ok")),
+            expected={"proven_fifo_inversions": 0},
+            actual={
+                "proven_fifo_inversions": int(
+                    fifo_evidence.get("proven_inversion_count") or 0
+                )
+            },
+            cells=["queue:priority:fifo"],
+            identifiers=[
+                item.get("waiting_job_id")
+                for item in (fifo_evidence.get("proven_inversions") or [])
+            ],
+        ),
+        _assertion(
+            "destination_interval_and_burst_policy",
+            passed=int(spacing_evidence.get("gap_sample_count") or 0) > 0
+            and bool(spacing_evidence.get("ok")),
+            expected={
+                "spacing_violations": 0,
+                "burst_never_exceeds_configured_capacity": True,
+            },
+            actual={
+                "gap_sample_count": int(
+                    spacing_evidence.get("gap_sample_count") or 0
+                ),
+                "allowed_burst_gap_count": int(
+                    spacing_evidence.get("allowed_burst_gap_count") or 0
+                ),
+                "spacing_violations": int(
+                    spacing_evidence.get("violation_count") or 0
+                ),
+                "sustained_non_burst_gap_seconds": spacing_evidence.get(
+                    "sustained_non_burst_gap_seconds"
+                ),
+            },
+            cells=["queue:pacing:destination", "queue:burst:bounded"],
+            identifiers=[
+                item.get("job_id")
+                for item in (spacing_evidence.get("violations") or [])
+            ],
+        ),
+        _assertion(
+            "observed_429_retry_deadlines_respected",
+            passed=bool(rate_limit_evidence.get("retry_gate_respected", True)),
+            expected={"retry_before_persisted_429_deadline": 0},
+            actual={
+                "observed_rate_limited_jobs": int(
+                    rate_limit_evidence.get("observed_job_count") or 0
+                ),
+                "verified_retry_gates": int(
+                    rate_limit_evidence.get("retry_gate_verified_count") or 0
+                ),
+                "retry_gate_violations": int(
+                    rate_limit_evidence.get("retry_gate_violation_count") or 0
+                ),
+            },
+            cells=["queue:error:429"],
+            identifiers=[
+                item.get("job_id")
+                for item in (rate_limit_evidence.get("retry_gate_violations") or [])
+            ],
         ),
         _assertion(
             "queue_latency_slo",
