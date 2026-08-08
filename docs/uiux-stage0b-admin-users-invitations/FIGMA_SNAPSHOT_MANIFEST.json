@@ -1,0 +1,446 @@
+{
+  "schemaVersion": 1,
+  "stage": "0B-4",
+  "status": "technical_evidence_complete_awaiting_owner_visual_approval",
+  "capturedAt": "2026-08-08T13:45:57.660Z",
+  "capturedAtRole": "final_direct_figma_evidence_batch",
+  "localEvidenceGeneratedAt": "2026-08-08T13:46:25.656Z",
+  "sitesPublishedAt": "2026-08-08T14:13:17.018345Z",
+  "sourceCommit": "a29f988ed7024a8e2b07c5f39a39acac25f6f205",
+  "sourceCommitRole": "phase0_design_input_baseline",
+  "branch": "condidate/webapp-ui-ux-redesign-v2",
+  "fileKey": "z8jgJxST4O2APzWnlyP9gv",
+  "fileUrl": "https://www.figma.com/design/z8jgJxST4O2APzWnlyP9gv",
+  "page": {
+    "id": "75:2",
+    "name": "03 — Stage 0B-4 Admin Users & Invitations",
+    "url": "https://www.figma.com/design/z8jgJxST4O2APzWnlyP9gv?node-id=75-2",
+    "status": "final"
+  },
+  "figmaFreeze": {
+    "boardId": "75:3",
+    "frozenAt": "2026-08-08T13:43:05.564Z",
+    "directEvidenceCapturedAt": "2026-08-08T13:45:57.660Z",
+    "finalAuditedAt": "2026-08-08T13:44:57.691Z",
+    "auditSchemaVersion": 7,
+    "supersededAudit": {
+      "auditedAt": "2026-08-08T13:31:57.955Z",
+      "schemaVersion": 5,
+      "permissionRowCount": 5,
+      "reason": "superseded by the final six-row permission, protected-recovery and shell contract refrozen at 2026-08-08T13:43:05.564Z"
+    },
+    "recordedAuditAppliesToPriorFreeze": false,
+    "postRefreezeAuditPending": false,
+    "postRefreezeExportPending": false,
+    "status": "passed"
+  },
+  "supportingPages": [
+    {
+      "id": "41:2",
+      "name": "01.5 — UIUX v2 Foundations",
+      "kind": "foundations"
+    },
+    {
+      "id": "46:2",
+      "name": "01.6 — UIUX v2 Components",
+      "kind": "components"
+    }
+  ],
+  "canonicalCrossReferences": [
+    {
+      "id": "60:325",
+      "name": "0B3-M09 phone — terminate session",
+      "use": "session decision pattern"
+    },
+    {
+      "id": "60:386",
+      "name": "0B3-M10 phone — delete account cascade",
+      "use": "delete-account canonical flow"
+    }
+  ],
+  "plannedRootContract": {
+    "mobileRootCount": 10,
+    "referenceMobileWidth": 390,
+    "referenceMobileHeight": 844,
+    "responsiveWidths": [360, 375, 390, 414, 430],
+    "desktopWidth": 1440,
+    "desktopHeight": 900,
+    "desktopPattern": "user directory master/detail"
+  },
+  "crossStageShellInvariant": {
+    "sourceStage": "0B-2",
+    "navigationItems": [
+      { "key": "home", "label": "خانه", "order": 1 },
+      { "key": "market", "label": "بازار", "order": 2 },
+      { "key": "messenger", "label": "پیام‌رسان", "order": 3 },
+      { "key": "operations", "label": "عملیات", "order": 4 },
+      { "key": "account", "label": "حساب", "order": 5 }
+    ],
+    "activeItem": "operations",
+    "iconTreatment": "reuse_approved_svg",
+    "mobileMinimumLabelFontSizePx": 11,
+    "mobileMinimumItemHeightPx": 52,
+    "mobileMinimumNavigationHeightPx": 78,
+    "desktopMinimumItemWidthPx": 48,
+    "desktopMinimumItemHeightPx": 48,
+    "scope": "shell_only",
+    "protectedInteriors": ["market", "messenger"],
+    "desktopProof": {
+      "rootId": "89:758",
+      "navigationInstanceId": "108:743",
+      "exactStage0B2Reuse": true,
+      "itemWidthPx": 66,
+      "itemHeightPx": 58
+    }
+  },
+  "approvedSafetyContract": {
+    "pendingInvitationIndicator": "non_numeric_needs_attention",
+    "pendingEndpointMaximumLoadedItems": 100,
+    "pendingEndpointHasAuthoritativeTotal": false,
+    "pendingArrayLengthMayBeShownAsTotal": false,
+    "authoritativeCountAndPaginationCarryForward": true,
+    "selfTarget": "visible_read_only_for_all_sensitive_actions_including_role_edit",
+    "sameLevelSuperAdminTarget": "visible_read_only_for_all_sensitive_actions_including_role_edit",
+    "superAdminManageableTargetScope": "lower_roles_only",
+    "superAdminVisibleTargetScope": [
+      "lower_roles",
+      "self",
+      "peer_super_admin"
+    ],
+    "superAdminSelfAndPeerSensitiveActions": "visible_read_only",
+    "middleManagerReceivesOtherAdminTargets": false,
+    "middleManagerOwnTarget": "visible_read_only_protected_exception",
+    "requiredPermissionRows": [
+      "middle_to_non_admin",
+      "middle_to_self",
+      "middle_to_other_admin",
+      "super_to_lower_role",
+      "super_to_self",
+      "super_to_peer_super"
+    ],
+    "invitationRoles": {
+      "middleManager": ["watch", "standard"],
+      "superAdmin": ["watch", "standard", "police", "middle"],
+      "superRoleAllowed": false
+    },
+    "pendingInvitationScope": {
+      "middleManager": "own_only",
+      "superAdmin": "all"
+    },
+    "rawInvitationUrlVisibleInProduct": false,
+    "rawInvitationUrlClipboardFallbackAllowed": false,
+    "syntheticExampleDataOnly": true,
+    "realUserIdentityOrPhoneAllowed": false,
+    "deactivationExpiresOrCollectsOffers": false,
+    "offerExpiryOrCollectionBelongsTo": "delete_account_only",
+    "requiredActionDimensions": [
+      "view",
+      "role_edit",
+      "trading_restriction",
+      "quantitative_limits",
+      "deactivation",
+      "terminate_all_sessions",
+      "delete"
+    ],
+    "backendEnforcementCurrentlyProven": false,
+    "backendEnforcementCarryForward": true,
+    "deactivationSuccessClaims": [
+      "observable_account_state_updated",
+      "observable_grace_deadline_updated"
+    ],
+    "deactivationSuccessMustNotClaim": [
+      "telegram_channel_removal_request_started_or_registered",
+      "telegram_channel_removal_completed",
+      "telegram_notification_delivered"
+    ],
+    "deactivationConfirmationMayDescribeExpectedChannelExit": true,
+    "channelRemovalOutcomeVerifiedByMutationResponse": false,
+    "channelRemovalReceiptCarryForward": true,
+    "canonicalScenarioFacts": {
+      "m04TradingRestrictionDeadline": "۲۲ مرداد ۱۴۰۵، ۱۴:۳۰",
+      "m04StatusCopy": "وضعیت: فعال ← محدود",
+      "m04DeadlineCopy": "پایان: ۲۲ مرداد ۱۴۰۵، ساعت ۱۴:۳۰",
+      "m04ExplicitDeadlineCount": 1,
+      "m04StatusContainsDeadline": false,
+      "m05QuantitativeLimitDeadline": "۲۲ مرداد ۱۴۰۵، ۱۴:۳۰",
+      "m05TradedCommodityQuotaUnit": "item_count_not_grams",
+      "m06DeactivationDeadline": "۱۹ مرداد ۱۴۰۵، ۱۴:۳۰",
+      "deactivationSuccessDeadline": "۱۹ مرداد ۱۴۰۵، ۱۴:۳۰",
+      "m06ConfirmationCopy": "فوری: بازار بسته می‌شود. خروج کاربر از کانال تلگرام مورد انتظار است؛ نتیجه آن در این صفحه قابل‌تأیید نیست."
+    }
+  },
+  "nodes": [
+    {
+      "id": "75:3",
+      "name": "Stage 0B-4 — Admin Users & Standard Invitations",
+      "kind": "board",
+      "status": "final"
+    },
+    {
+      "id": "75:4",
+      "name": "00 — Contract",
+      "kind": "contract",
+      "status": "final"
+    },
+    {
+      "id": "75:7",
+      "name": "01 — Admin entry and user directory",
+      "kind": "section",
+      "status": "final"
+    },
+    {
+      "id": "75:12",
+      "name": "02 — User decisions",
+      "kind": "section",
+      "status": "final"
+    },
+    {
+      "id": "75:17",
+      "name": "03 — Standard invitations",
+      "kind": "section",
+      "status": "final"
+    },
+    {
+      "id": "75:22",
+      "name": "04 — State and permission atlas",
+      "kind": "section",
+      "status": "final"
+    },
+    {
+      "id": "75:27",
+      "name": "05 — Responsive and desktop proofs",
+      "kind": "section",
+      "status": "final"
+    }
+  ],
+  "mobileScenarios": [
+    { "id": "83:5", "scenarioId": "0B4-M01", "name": "middle-manager admin entry", "status": "final" },
+    { "id": "83:53", "scenarioId": "0B4-M02", "name": "user directory with persistent search", "status": "final" },
+    { "id": "83:123", "scenarioId": "0B4-M03", "name": "user detail", "status": "final" },
+    { "id": "84:128", "scenarioId": "0B4-M04", "name": "trading restriction review", "status": "final" },
+    { "id": "84:183", "scenarioId": "0B4-M05", "name": "finite quantitative limits review", "status": "final" },
+    { "id": "84:238", "scenarioId": "0B4-M06", "name": "account deactivation confirmation", "status": "final" },
+    { "id": "84:293", "scenarioId": "0B4-M07", "name": "advanced controls", "status": "final" },
+    { "id": "85:300", "scenarioId": "0B4-M08", "name": "standard invitation form", "status": "final" },
+    { "id": "85:364", "scenarioId": "0B4-M09", "name": "invitation created-or-reused result", "status": "final" },
+    { "id": "85:417", "scenarioId": "0B4-M10", "name": "pending invitation queue and revoke", "status": "final" }
+  ],
+  "responsiveProofs": [
+    { "id": "89:428", "width": 360, "height": 844, "status": "final" },
+    { "id": "89:494", "width": 375, "height": 844, "status": "final" },
+    { "id": "89:560", "width": 390, "height": 844, "status": "final" },
+    { "id": "89:626", "width": 414, "height": 844, "status": "final" },
+    { "id": "89:692", "width": 430, "height": 844, "status": "final" }
+  ],
+  "desktopProof": {
+    "id": "89:758",
+    "name": "Desktop Admin User Directory Master Detail proof",
+    "width": 1440,
+    "height": 900,
+    "status": "final"
+  },
+  "directFigmaEvidence": [
+    { "path": "assets/figma-admin-entry-directory-scenarios.png", "nodeId": "83:2", "capturedAt": "2026-08-08T13:45:57.660Z", "sha256": "22c0d82bd0d9f1b45dc46fcd2883e901f9522411eea525944d42ccfcd79f204c", "status": "final" },
+    { "path": "assets/figma-admin-user-decision-scenarios.png", "nodeId": "75:12", "capturedAt": "2026-08-08T13:45:57.660Z", "sha256": "6c94393cb2c7d5c5c59beb75a44780f6da9451fef91f8f89ad0dfc89c50bbb0a", "status": "final" },
+    { "path": "assets/figma-standard-invitation-scenarios.png", "nodeId": "75:17", "capturedAt": "2026-08-08T13:45:57.660Z", "sha256": "8b637f984881655914f197d0135068cb7a123a6ce4b9e3c687c017d91a835f5a", "status": "final" },
+    { "path": "assets/figma-admin-state-permission-atlas.png", "nodeId": "75:22", "capturedAt": "2026-08-08T13:45:57.660Z", "sha256": "becf3a64007558698cd4d6731a3f119b4a3cbaffeb014e80f047fe7b81993054", "status": "final" },
+    { "path": "assets/figma-responsive-and-desktop-proofs.png", "nodeId": "75:27", "capturedAt": "2026-08-08T13:45:57.660Z", "sha256": "7c2c0b0322eb2cf442004c3698f1570a2f5e26086836c01cec783c754e935d2a", "status": "final" },
+    { "path": "assets/figma-desktop-user-master-detail-1440x900.png", "nodeId": "89:758", "capturedAt": "2026-08-08T13:45:57.660Z", "sha256": "63edf585480242b1d1b038d7754e6acfe6797699a52345537e453f483c313aea", "status": "final" }
+  ],
+  "technicalEvidence": [
+    {
+      "path": "assets/figma-stage0b4-audit-metrics.json",
+      "generatedAt": "2026-08-08T13:44:57.691Z",
+      "sha256": "5c57aa316f0cdf5053eef8e29f9f6f19be5f29791057559b277c2e8fc2b09a1c",
+      "status": "final"
+    }
+  ],
+  "sitesEvidence": {
+    "status": "published_private_owner_only_verified",
+    "url": "https://trading-bot-uiux-stage0b4.mohsenbarari235.chatgpt.site",
+    "title": "Trading Bot UI/UX — Stage 0B-4",
+    "projectId": "appgprj_6a772e6ffef481918c82f9c70b4c71c8",
+    "slug": "trading-bot-uiux-stage0b4",
+    "publishedAt": "2026-08-08T14:13:17.018345Z",
+    "sourceNodeIds": ["75:2", "75:3", "75:7", "75:12", "75:17", "75:22", "75:27", "89:758"],
+    "sourceVersion": {
+      "canonicalFigmaFileKey": "z8jgJxST4O2APzWnlyP9gv",
+      "figmaRefrozenAt": "2026-08-08T13:43:05.564Z",
+      "sitesSourceCommit": "0874c43781805bf1404226cc1948485ebdbb04f1",
+      "versionNumber": 3,
+      "versionId": "appgprj_6a772e6ffef481918c82f9c70b4c71c8~appgver_c31913427d2081918c4e4b3a290620cb"
+    },
+    "canonical": false,
+    "derivedPrivatePreviewOnly": true,
+    "archive": {
+      "sha256": "eab92d01cea68f922c80bd90c0229aa16088367f55a7d8701a457498ce0a85ce",
+      "byteSize": 901120,
+      "fileCount": 28
+    },
+    "deployment": {
+      "id": "appgdep_6a77396e6a5c8191b9945deaf884107d",
+      "provider": "site---6a772e6ffef481918c82f9c70b4c71c8",
+      "status": "succeeded",
+      "publishedAt": "2026-08-08T14:13:17.018345Z",
+      "workerErrorQueryWindowMinutes": 15,
+      "workerErrorEventCount": 0
+    },
+    "access": {
+      "mode": "custom",
+      "currentRole": "owner",
+      "allowedUserCount": 1,
+      "allowedUsers": "owner_only",
+      "allowedGroupCount": 0,
+      "externalVisitorCount": 0,
+      "verifiedImmediatelyBeforeDeploy": true,
+      "verifiedImmediatelyAfterDeploy": true
+    },
+    "anonymousProbe": {
+      "probedAt": "2026-08-08T14:13:54Z",
+      "httpStatus": 401,
+      "cacheControl": "no-store",
+      "referrerPolicy": "no-referrer",
+      "title": "Sign in required",
+      "result": "siwc_owner_gate_confirmed",
+      "anonymousRenderingClaimed": false
+    },
+    "buildVerification": {
+      "productionBuild": "passed",
+      "npmAuditLevel": "high",
+      "npmAuditVulnerabilityCount": 0,
+      "workerAssetsDelegationTest": "passed",
+      "workerWithoutAssetsReturns503": true,
+      "requiredOutputsPresent": ["dist/server/index.js", "dist/client", "dist/.openai/hosting.json"],
+      "workerSha256": "55e64c6d4c7bc3d45166f2ac5b2f350bc719e86074367b97d69d645ec35b40b3",
+      "hostingManifestSha256": "b2889f33ae17ba8bb80e195d4caa6069b18351b393287a8fde0b918574916966",
+      "publicAndBuiltHtmlByteIdentical": true,
+      "htmlSha256": "ca44c01da79ce479d34efb22f89e39c3b8f1c1dda9008c42fc7c3658c7178ec7",
+      "localVazirmatnFontCount": 4,
+      "localVazirmatnFontsByteIdentical": true,
+      "sensitiveArtifactScan": "passed",
+      "wholeDistHashUsedAsReproducibilityProof": false,
+      "wholeDistHashExclusionReason": "Next build IDs are intentionally variable; saved archive and semantic artifact hashes are authoritative"
+    },
+    "driftReview": {
+      "status": "passed_artifact_and_source_bound",
+      "localVisualEvidenceFinal": true,
+      "archiveBoundToSourceVersion": true,
+      "signedInLiveContentFetched": false,
+      "bypassTokenRequested": false,
+      "reason": "private SIWC owner gate was not bypassed; owner visual review remains available at the live URL"
+    }
+  },
+  "secondaryDerivativeEvidence": [
+    { "path": "assets/local-evidence/local-admin-entry-user-directory.png", "generatedAt": "2026-08-08T13:46:25.656Z", "sha256": "087eef038b84f7b07a2ced893a3abf3ddf870f772ec581d8f6598369bd7141cd", "status": "final" },
+    { "path": "assets/local-evidence/local-user-decision-flow.png", "generatedAt": "2026-08-08T13:46:25.656Z", "sha256": "8953cc3cd44220b015cfe134823754c2de42dcfc325a5638db79480d2ad16417", "status": "final" },
+    { "path": "assets/local-evidence/local-standard-invitation-flow.png", "generatedAt": "2026-08-08T13:46:25.656Z", "sha256": "fb6cd32e3f3857c629616ec1f96fa3fc18470046dcca186897385553057188c8", "status": "final" },
+    { "path": "assets/local-evidence/local-admin-users-state-atlas.png", "generatedAt": "2026-08-08T13:46:25.656Z", "sha256": "9a476ee641ed3ddc4bc29b8c5592b80bd24675e98d5d293041c92449ca72e412", "status": "final" },
+    { "path": "assets/local-evidence/local-admin-users-permission-matrix.png", "generatedAt": "2026-08-08T13:46:25.656Z", "sha256": "17965afee45114883e500353f55abc1f4ae4ae646c8ca4158e051eb3de418b0e", "status": "final" },
+    { "path": "assets/local-evidence/local-admin-users-responsive-sweep.png", "generatedAt": "2026-08-08T13:46:25.656Z", "sha256": "e157234bf47c66717805c4c91a45140fce5a06dd6c40425d8270bd63f84d4319", "status": "final" },
+    { "path": "assets/local-evidence/local-admin-user-master-detail-1440x900.png", "generatedAt": "2026-08-08T13:46:25.656Z", "sha256": "8886d753aead56876802d6695f228a2cb661e25b5b8fff8aed58a9a796bbcc17", "status": "final" },
+    { "path": "assets/local-evidence/local-admin-users-invitations-validation-metrics.json", "generatedAt": "2026-08-08T13:46:25.656Z", "sha256": "5219d9c90d3c33a36c51b3a461e8da753c7f144a719ae7b176771a3812f0c41b", "status": "final" }
+  ],
+  "figmaAudit": {
+    "status": "passed",
+    "auditSchemaVersion": 7,
+    "auditedAt": "2026-08-08T13:44:57.691Z",
+    "postRefreezeAuditPending": false,
+    "mobileRootCount": 10,
+    "responsiveProofCount": 5,
+    "desktopProofCount": 1,
+    "overflowViolationCount": 0,
+    "missingFontCount": 0,
+    "textHeightIssueCount": 0,
+    "forbiddenCopyViolationCount": 0,
+    "protectedSurfaceLeakCount": 0,
+    "semanticTargetCount": 142,
+    "minimumSemanticTargetWidthPx": 44,
+    "minimumSemanticTargetHeightPx": 44,
+    "ctaCount": 13,
+    "minimumCtaHeightPx": 48,
+    "textNodeCount": 330,
+    "recordedPermissionRowCount": 6,
+    "requiredPermissionRowCount": 6,
+    "finalPermissionMatrixStatus": "passed",
+    "protectedRecoveryAction": {
+      "nodeId": "106:743",
+      "label": "بازگشت به جزئیات",
+      "status": "passed"
+    },
+    "fontFamilies": ["Vazirmatn"],
+    "variables": {
+      "primitive": 20,
+      "semantic": 26,
+      "dimensions": 19,
+      "total": 65,
+      "brokenAliasCount": 0
+    },
+    "components": {
+      "existingComponentSetCount": 5,
+      "existingVariantCount": 17,
+      "addedComponentSetCount": 4,
+      "addedVariantCount": 19,
+      "totalComponentSetCount": 9,
+      "totalVariantCount": 36
+    },
+    "contrast": {
+      "pairCount": 9,
+      "passCount": 9,
+      "ratios": [12.489, 13.428, 5.729, 7.056, 5.722, 5.051, 5.009, 4.23, 4.548]
+    },
+    "recordedChecks": {
+      "geometry": true,
+      "noClippedText": true,
+      "vazirmatnOnly": true,
+      "variableBoundSolids": true,
+      "targets44": true,
+      "ctas48": true,
+      "shell": true,
+      "forbiddenCopy": true,
+      "exactContract": true,
+      "permissionMatrix": true,
+      "protectedRecovery": true,
+      "desktopNavigationExactReuse": true,
+      "invitationScope": true,
+      "contrast": true
+    }
+  },
+  "localHarness": {
+    "status": "passed",
+    "generatedAt": "2026-08-08T13:46:25.656Z",
+    "runId": "2251888-1786196776466",
+    "assertionsPassed": 25,
+    "assertionFailures": 0,
+    "pageErrors": 0,
+    "productScreenCount": 10,
+    "responsiveWidths": [360, 375, 390, 414, 430],
+    "minimumTargetPx": 44,
+    "minimumCtaHeightPx": 48,
+    "loadedFontFaceCount": 4,
+    "actionTargetCount": 176,
+    "exactAssertionContract": true,
+    "postCaptureValidation": "passed_with_identical_pre_and_post_assertions",
+    "failClosedDirectoryBundlePromotion": true,
+    "captureHashesEmbedded": true,
+    "captureCount": 7,
+    "metricsSha256": "5219d9c90d3c33a36c51b3a461e8da753c7f144a719ae7b176771a3812f0c41b",
+    "canonicalDomUnchangedDuringCapture": true
+  },
+  "phase0": {
+    "status": "approved",
+    "approvedAt": "2026-08-08",
+    "runtimeAuthorized": false
+  },
+  "externalReview": {
+    "status": "suspended_by_product_owner",
+    "blocking": false
+  },
+  "ownerVisualApproval": {
+    "status": "pending",
+    "reviewUrl": "https://trading-bot-uiux-stage0b4.mohsenbarari235.chatgpt.site",
+    "access": "signed_in_owner_only",
+    "blockingNextCheckpoint": true
+  },
+  "runtimeImplementationAuthorized": false,
+  "openFigmaWork": []
+}

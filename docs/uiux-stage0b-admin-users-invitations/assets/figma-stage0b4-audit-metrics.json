@@ -1,0 +1,398 @@
+{
+  "schema": 7,
+  "stage": "0B-4",
+  "status": "passed",
+  "source": {
+    "fileKey": "z8jgJxST4O2APzWnlyP9gv",
+    "url": "https://www.figma.com/design/z8jgJxST4O2APzWnlyP9gv",
+    "pageId": "75:2",
+    "pageName": "03 — Stage 0B-4 Admin Users & Invitations",
+    "boardId": "75:3",
+    "refrozenAt": "2026-08-08T13:43:05.564Z",
+    "finalAuditedAt": "2026-08-08T13:44:57.691Z",
+    "directEvidenceCapturedAt": "2026-08-08T13:45:57.660Z",
+    "sourceCommit": "a29f988ed7024a8e2b07c5f39a39acac25f6f205"
+  },
+  "sections": {
+    "adminEntryDirectory": "75:7",
+    "userDecisions": "75:12",
+    "standardInvitations": "75:17",
+    "statePermissionAtlas": "75:22",
+    "responsiveDesktop": "75:27"
+  },
+  "productRoots": [
+    "83:5",
+    "83:53",
+    "83:123",
+    "84:128",
+    "84:183",
+    "84:238",
+    "84:293",
+    "85:300",
+    "85:364",
+    "85:417"
+  ],
+  "responsiveRoots": [
+    "89:428",
+    "89:494",
+    "89:560",
+    "89:626",
+    "89:692"
+  ],
+  "desktopRoot": "89:758",
+  "supplementalNodes": {
+    "permissionRecoveryAction": "106:743",
+    "desktopNavigation": "108:743"
+  },
+  "components": {
+    "reused": {
+      "button": "48:14",
+      "status": "49:14",
+      "relationRow": "50:26",
+      "authenticatedHeader": "51:33",
+      "bottomNavigation": "52:46"
+    },
+    "stage0b4": {
+      "formField": "77:610",
+      "adminUserRow": "78:566",
+      "standardInvitationRow": "80:574",
+      "decisionPanel": "81:566"
+    }
+  },
+  "directEvidence": [
+    {
+      "path": "assets/figma-admin-entry-directory-scenarios.png",
+      "sourceNodeId": "83:2",
+      "width": 1218,
+      "height": 872,
+      "sha256": "22c0d82bd0d9f1b45dc46fcd2883e901f9522411eea525944d42ccfcd79f204c"
+    },
+    {
+      "path": "assets/figma-admin-user-decision-scenarios.png",
+      "sourceNodeId": "75:12",
+      "width": 2544,
+      "height": 1122,
+      "sha256": "6c94393cb2c7d5c5c59beb75a44780f6da9451fef91f8f89ad0dfc89c50bbb0a"
+    },
+    {
+      "path": "assets/figma-standard-invitation-scenarios.png",
+      "sourceNodeId": "75:17",
+      "width": 2544,
+      "height": 1166,
+      "sha256": "8b637f984881655914f197d0135068cb7a123a6ce4b9e3c687c017d91a835f5a"
+    },
+    {
+      "path": "assets/figma-admin-state-permission-atlas.png",
+      "sourceNodeId": "75:22",
+      "width": 2544,
+      "height": 1122,
+      "sha256": "becf3a64007558698cd4d6731a3f119b4a3cbaffeb014e80f047fe7b81993054"
+    },
+    {
+      "path": "assets/figma-responsive-and-desktop-proofs.png",
+      "sourceNodeId": "75:27",
+      "width": 2544,
+      "height": 1946,
+      "sha256": "7c2c0b0322eb2cf442004c3698f1570a2f5e26086836c01cec783c754e935d2a"
+    },
+    {
+      "path": "assets/figma-desktop-user-master-detail-1440x900.png",
+      "sourceNodeId": "89:758",
+      "width": 1440,
+      "height": 900,
+      "sha256": "63edf585480242b1d1b038d7754e6acfe6797699a52345537e453f483c313aea"
+    }
+  ],
+  "audit": {
+    "schema": 7,
+    "refrozenAt": "2026-08-08T13:43:05.564Z",
+    "auditedAt": "2026-08-08T13:44:57.691Z",
+    "fileKey": "z8jgJxST4O2APzWnlyP9gv",
+    "pageId": "75:2",
+    "pageName": "03 — Stage 0B-4 Admin Users & Invitations",
+    "pass": true,
+    "checks": {
+      "geometry": true,
+      "noClippedText": true,
+      "vazirmatnOnly": true,
+      "variableBoundSolids": true,
+      "targets44": true,
+      "ctas48": true,
+      "mobileShell": true,
+      "desktopShell": true,
+      "forbiddenCopy": true,
+      "exactContract": true,
+      "permissionMatrix": true,
+      "invitationScope": true,
+      "contrast": true
+    },
+    "geometry": {
+      "mobile": [
+        {
+          "id": "83:5",
+          "name": "0B4-M01 — ورودی مدیریت",
+          "width": 390,
+          "height": 844,
+          "pass": true
+        },
+        {
+          "id": "83:53",
+          "name": "0B4-M02 — فهرست کاربران",
+          "width": 390,
+          "height": 844,
+          "pass": true
+        },
+        {
+          "id": "83:123",
+          "name": "0B4-M03 — جزئیات کاربر",
+          "width": 390,
+          "height": 844,
+          "pass": true
+        },
+        {
+          "id": "84:128",
+          "name": "0B4-M04 — مرور محدودیت معاملاتی",
+          "width": 390,
+          "height": 844,
+          "pass": true
+        },
+        {
+          "id": "84:183",
+          "name": "0B4-M05 — مرور محدودیت‌های تعدادی",
+          "width": 390,
+          "height": 844,
+          "pass": true
+        },
+        {
+          "id": "84:238",
+          "name": "0B4-M06 — تأیید غیرفعال‌سازی",
+          "width": 390,
+          "height": 844,
+          "pass": true
+        },
+        {
+          "id": "84:293",
+          "name": "0B4-M07 — کنترل‌های پیشرفته",
+          "width": 390,
+          "height": 844,
+          "pass": true
+        },
+        {
+          "id": "85:300",
+          "name": "0B4-M08 — فرم دعوت استاندارد",
+          "width": 390,
+          "height": 844,
+          "pass": true
+        },
+        {
+          "id": "85:364",
+          "name": "0B4-M09 — نتیجه دعوت",
+          "width": 390,
+          "height": 844,
+          "pass": true
+        },
+        {
+          "id": "85:417",
+          "name": "0B4-M10 — صف و لغو دعوت",
+          "width": 390,
+          "height": 844,
+          "pass": true
+        }
+      ],
+      "responsive": [
+        {
+          "id": "89:428",
+          "width": 360,
+          "height": 844,
+          "pass": true
+        },
+        {
+          "id": "89:494",
+          "width": 375,
+          "height": 844,
+          "pass": true
+        },
+        {
+          "id": "89:560",
+          "width": 390,
+          "height": 844,
+          "pass": true
+        },
+        {
+          "id": "89:626",
+          "width": 414,
+          "height": 844,
+          "pass": true
+        },
+        {
+          "id": "89:692",
+          "width": 430,
+          "height": 844,
+          "pass": true
+        }
+      ],
+      "desktop": {
+        "id": "89:758",
+        "width": 1440,
+        "height": 900,
+        "pass": true
+      }
+    },
+    "counts": {
+      "mobileRoots": 10,
+      "responsiveProofs": 5,
+      "desktopProofs": 1,
+      "textNodes": 330,
+      "semanticTargets": 142,
+      "ctas": 13,
+      "colorVariables": 46,
+      "contrastPairs": 9,
+      "permissionRows": 6,
+      "m04VisibleDeadlineOccurrences": 1
+    },
+    "minima": {
+      "targetWidth": 44,
+      "targetHeight": 44,
+      "ctaHeight": 48,
+      "mobileNavLabelFont": 11,
+      "mobileNavItemHeight": 58,
+      "mobileNavHeight": 80,
+      "desktopNavItemWidth": 66,
+      "desktopNavItemHeight": 58,
+      "desktopNavLabelFont": 11
+    },
+    "desktopShell": {
+      "navId": "108:743",
+      "present": true,
+      "ordered": true,
+      "itemCount": 5,
+      "minItemWidth": 66,
+      "minItemHeight": 58,
+      "minLabelFont": 11,
+      "svgItemCount": 5,
+      "operationsActive": true,
+      "pass": true
+    },
+    "exact": {
+      "m04Status": true,
+      "m04SingleDeadline": true,
+      "m05Quota": true,
+      "m05Usage": true,
+      "m05Deadline": true,
+      "m06Deadline": true,
+      "m06ExpectedUnverified": true,
+      "m09Expiry": true,
+      "m10Expiry": true,
+      "middleOwnScope": true,
+      "deactivationObservableOnly": true,
+      "m08MiddleRoles": true,
+      "permissionRecovery": true,
+      "noRawUrls": true
+    },
+    "permissionDimensions": [
+      "View",
+      "Role",
+      "Trading restriction",
+      "Quantitative quotas",
+      "Deactivate",
+      "Terminate sessions",
+      "Delete"
+    ],
+    "permissionRows": [
+      "مدیر میانی → غیرادمین",
+      "مدیر میانی → خودش",
+      "مدیر میانی → هر مدیر دیگر",
+      "سوپر ادمین → نقش پایین‌تر",
+      "سوپر ادمین → خودش",
+      "سوپر ادمین → سوپر هم‌سطح"
+    ],
+    "permissionMatrixNode": {
+      "id": "87:478",
+      "width": 2360,
+      "height": 396
+    },
+    "contrast": [
+      {
+        "label": "text/page",
+        "foreground": "color/text/primary",
+        "background": "color/surface/page",
+        "minimum": 4.5,
+        "ratio": 12.489,
+        "pass": true
+      },
+      {
+        "label": "text/card",
+        "foreground": "color/text/primary",
+        "background": "color/surface/card",
+        "minimum": 4.5,
+        "ratio": 13.428,
+        "pass": true
+      },
+      {
+        "label": "secondary/card",
+        "foreground": "color/text/secondary",
+        "background": "color/surface/card",
+        "minimum": 4.5,
+        "ratio": 5.729,
+        "pass": true
+      },
+      {
+        "label": "action/card",
+        "foreground": "color/text/action",
+        "background": "color/surface/card",
+        "minimum": 4.5,
+        "ratio": 7.056,
+        "pass": true
+      },
+      {
+        "label": "danger/danger-bg",
+        "foreground": "color/status/danger",
+        "background": "color/status/danger-bg",
+        "minimum": 4.5,
+        "ratio": 5.722,
+        "pass": true
+      },
+      {
+        "label": "warning/warning-bg",
+        "foreground": "color/status/warning",
+        "background": "color/status/warning-bg",
+        "minimum": 4.5,
+        "ratio": 5.051,
+        "pass": true
+      },
+      {
+        "label": "success/success-bg",
+        "foreground": "color/status/success",
+        "background": "color/status/success-bg",
+        "minimum": 4.5,
+        "ratio": 5.009,
+        "pass": true
+      },
+      {
+        "label": "focus/page",
+        "foreground": "color/border/focus",
+        "background": "color/surface/page",
+        "minimum": 3,
+        "ratio": 4.23,
+        "pass": true
+      },
+      {
+        "label": "focus/card",
+        "foreground": "color/border/focus",
+        "background": "color/surface/card",
+        "minimum": 3,
+        "ratio": 4.548,
+        "pass": true
+      }
+    ],
+    "forbiddenHits": [],
+    "failures": {
+      "clipped": [],
+      "wrongFonts": [],
+      "unboundSolidPaints": [],
+      "targetFailures": [],
+      "ctaFailures": [],
+      "mobileShell": []
+    }
+  }
+}

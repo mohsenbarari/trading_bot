@@ -1,0 +1,2801 @@
+{
+  "schemaVersion": 2,
+  "runId": "2251888-1786196776466",
+  "evidenceRole": "secondary-derivative-evidence",
+  "primaryDesignSource": "Figma file z8jgJxST4O2APzWnlyP9gv",
+  "scope": "Stage 0B-4 admin users and standard invitations; Market and Messenger interiors excluded",
+  "generatedAt": "2026-08-08T13:46:25.656Z",
+  "environment": {
+    "playwrightSource": "/tmp/trading-bot-webapp-uiux-redesign-v2/frontend/node_modules/playwright",
+    "browser": "147.0.7727.15",
+    "viewport": {
+      "width": 2400,
+      "height": 1800,
+      "deviceScaleFactor": 1
+    },
+    "fontSourceRoot": "/tmp/trading-bot-webapp-uiux-redesign-v2/frontend/node_modules/vazirmatn/fonts/webfonts"
+  },
+  "integrity": {
+    "preflightCanonicalDomSha256": "6a53f28edaea779b97be7193842bef7aa5795580e1678e822a80bc96b6bbcb18",
+    "postCaptureCanonicalDomSha256": "6a53f28edaea779b97be7193842bef7aa5795580e1678e822a80bc96b6bbcb18",
+    "canonicalDomUnchangedDuringCapture": true,
+    "preflightRawDomSha256": "9d880481ffaa8e1a4a4117a2df888ffc584a549070189b02c077be14bdfe1cc2",
+    "postCaptureRawDomSha256": "53a3e3f772a4663800005114f399bc0d3bb849651fb5947e54e3d4294b8c0237",
+    "rawDomOnlyBrowserNormalization": true,
+    "ignoredNormalization": "empty style attributes added by Chromium screenshot caret handling",
+    "preAndPostAssertionsIdentical": true
+  },
+  "font": {
+    "loaded": true,
+    "checks": [
+      {
+        "weight": 400,
+        "loaded": true
+      },
+      {
+        "weight": 500,
+        "loaded": true
+      },
+      {
+        "weight": 600,
+        "loaded": true
+      },
+      {
+        "weight": 700,
+        "loaded": true
+      }
+    ],
+    "faces": [
+      {
+        "family": "Vazirmatn Evidence",
+        "weight": "400",
+        "style": "normal",
+        "status": "loaded"
+      },
+      {
+        "family": "Vazirmatn Evidence",
+        "weight": "500",
+        "style": "normal",
+        "status": "loaded"
+      },
+      {
+        "family": "Vazirmatn Evidence",
+        "weight": "600",
+        "style": "normal",
+        "status": "loaded"
+      },
+      {
+        "family": "Vazirmatn Evidence",
+        "weight": "700",
+        "style": "normal",
+        "status": "loaded"
+      }
+    ],
+    "computedBodyFamily": "\"Vazirmatn Evidence\", Vazirmatn, Tahoma, Arial, sans-serif"
+  },
+  "captures": [
+    {
+      "selector": "#admin-entry-directory",
+      "filename": "local-admin-entry-user-directory.png",
+      "pixelDimensions": {
+        "width": 854,
+        "height": 1057
+      },
+      "sha256": "087eef038b84f7b07a2ced893a3abf3ddf870f772ec581d8f6598369bd7141cd"
+    },
+    {
+      "selector": "#user-decision-flow-capture",
+      "filename": "local-user-decision-flow.png",
+      "pixelDimensions": {
+        "width": 1268,
+        "height": 2139
+      },
+      "sha256": "8953cc3cd44220b015cfe134823754c2de42dcfc325a5638db79480d2ad16417"
+    },
+    {
+      "selector": "#standard-invitations",
+      "filename": "local-standard-invitation-flow.png",
+      "pixelDimensions": {
+        "width": 1288,
+        "height": 1311
+      },
+      "sha256": "fb6cd32e3f3857c629616ec1f96fa3fc18470046dcca186897385553057188c8"
+    },
+    {
+      "selector": "#admin-state-atlas",
+      "filename": "local-admin-users-state-atlas.png",
+      "pixelDimensions": {
+        "width": 1186,
+        "height": 952
+      },
+      "sha256": "9a476ee641ed3ddc4bc29b8c5592b80bd24675e98d5d293041c92449ca72e412"
+    },
+    {
+      "selector": "#admin-permission-matrix",
+      "filename": "local-admin-users-permission-matrix.png",
+      "pixelDimensions": {
+        "width": 1308,
+        "height": 595
+      },
+      "sha256": "17965afee45114883e500353f55abc1f4ae4ae646c8ca4158e051eb3de418b0e"
+    },
+    {
+      "selector": "#admin-users-responsive-sweep",
+      "filename": "local-admin-users-responsive-sweep.png",
+      "pixelDimensions": {
+        "width": 2116,
+        "height": 981
+      },
+      "sha256": "e157234bf47c66717805c4c91a45140fce5a06dd6c40425d8270bd63f84d4319"
+    },
+    {
+      "selector": "#desktop-admin-user-master-detail [data-desktop-proof]",
+      "filename": "local-admin-user-master-detail-1440x900.png",
+      "pixelDimensions": {
+        "width": 1440,
+        "height": 900
+      },
+      "sha256": "8886d753aead56876802d6695f228a2cb661e25b5b8fff8aed58a9a796bbcc17"
+    }
+  ],
+  "measurements": {
+    "surfaceGeometry": [
+      {
+        "id": "M01",
+        "raw": {
+          "width": 390,
+          "height": 844,
+          "x": 798,
+          "y": 436.03125,
+          "right": 1188,
+          "bottom": 1280.03125
+        },
+        "rounded": {
+          "width": 390,
+          "height": 844,
+          "x": 798,
+          "y": 436.031,
+          "right": 1188,
+          "bottom": 1280.031
+        },
+        "overflowX": false,
+        "overflowY": false,
+        "descendantBoundsViolations": [],
+        "clippedTextViolations": []
+      },
+      {
+        "id": "M02",
+        "raw": {
+          "width": 390,
+          "height": 844,
+          "x": 1212,
+          "y": 436.03125,
+          "right": 1602,
+          "bottom": 1280.03125
+        },
+        "rounded": {
+          "width": 390,
+          "height": 844,
+          "x": 1212,
+          "y": 436.031,
+          "right": 1602,
+          "bottom": 1280.031
+        },
+        "overflowX": false,
+        "overflowY": false,
+        "descendantBoundsViolations": [],
+        "clippedTextViolations": []
+      },
+      {
+        "id": "M03",
+        "raw": {
+          "width": 390,
+          "height": 844,
+          "x": 591,
+          "y": 1519.46875,
+          "right": 981,
+          "bottom": 2363.46875
+        },
+        "rounded": {
+          "width": 390,
+          "height": 844,
+          "x": 591,
+          "y": 1519.469,
+          "right": 981,
+          "bottom": 2363.469
+        },
+        "overflowX": false,
+        "overflowY": false,
+        "descendantBoundsViolations": [],
+        "clippedTextViolations": []
+      },
+      {
+        "id": "M04",
+        "raw": {
+          "width": 390,
+          "height": 844,
+          "x": 1005,
+          "y": 1519.46875,
+          "right": 1395,
+          "bottom": 2363.46875
+        },
+        "rounded": {
+          "width": 390,
+          "height": 844,
+          "x": 1005,
+          "y": 1519.469,
+          "right": 1395,
+          "bottom": 2363.469
+        },
+        "overflowX": false,
+        "overflowY": false,
+        "descendantBoundsViolations": [],
+        "clippedTextViolations": []
+      },
+      {
+        "id": "M05",
+        "raw": {
+          "width": 390,
+          "height": 844,
+          "x": 1419,
+          "y": 1519.46875,
+          "right": 1809,
+          "bottom": 2363.46875
+        },
+        "rounded": {
+          "width": 390,
+          "height": 844,
+          "x": 1419,
+          "y": 1519.469,
+          "right": 1809,
+          "bottom": 2363.469
+        },
+        "overflowX": false,
+        "overflowY": false,
+        "descendantBoundsViolations": [],
+        "clippedTextViolations": []
+      },
+      {
+        "id": "M06",
+        "raw": {
+          "width": 390,
+          "height": 844,
+          "x": 798,
+          "y": 2602.90625,
+          "right": 1188,
+          "bottom": 3446.90625
+        },
+        "rounded": {
+          "width": 390,
+          "height": 844,
+          "x": 798,
+          "y": 2602.906,
+          "right": 1188,
+          "bottom": 3446.906
+        },
+        "overflowX": false,
+        "overflowY": false,
+        "descendantBoundsViolations": [],
+        "clippedTextViolations": []
+      },
+      {
+        "id": "M07",
+        "raw": {
+          "width": 390,
+          "height": 844,
+          "x": 1212,
+          "y": 2602.90625,
+          "right": 1602,
+          "bottom": 3446.90625
+        },
+        "rounded": {
+          "width": 390,
+          "height": 844,
+          "x": 1212,
+          "y": 2602.906,
+          "right": 1602,
+          "bottom": 3446.906
+        },
+        "overflowX": false,
+        "overflowY": false,
+        "descendantBoundsViolations": [],
+        "clippedTextViolations": []
+      },
+      {
+        "id": "M08",
+        "raw": {
+          "width": 390,
+          "height": 844,
+          "x": 581,
+          "y": 3686.34375,
+          "right": 971,
+          "bottom": 4530.34375
+        },
+        "rounded": {
+          "width": 390,
+          "height": 844,
+          "x": 581,
+          "y": 3686.344,
+          "right": 971,
+          "bottom": 4530.344
+        },
+        "overflowX": false,
+        "overflowY": false,
+        "descendantBoundsViolations": [],
+        "clippedTextViolations": []
+      },
+      {
+        "id": "M09",
+        "raw": {
+          "width": 390,
+          "height": 844,
+          "x": 1015,
+          "y": 3689.34375,
+          "right": 1405,
+          "bottom": 4533.34375
+        },
+        "rounded": {
+          "width": 390,
+          "height": 844,
+          "x": 1015,
+          "y": 3689.344,
+          "right": 1405,
+          "bottom": 4533.344
+        },
+        "overflowX": false,
+        "overflowY": false,
+        "descendantBoundsViolations": [],
+        "clippedTextViolations": []
+      },
+      {
+        "id": "M10",
+        "raw": {
+          "width": 390,
+          "height": 844,
+          "x": 1429,
+          "y": 3686.34375,
+          "right": 1819,
+          "bottom": 4530.34375
+        },
+        "rounded": {
+          "width": 390,
+          "height": 844,
+          "x": 1429,
+          "y": 3686.344,
+          "right": 1819,
+          "bottom": 4530.344
+        },
+        "overflowX": false,
+        "overflowY": false,
+        "descendantBoundsViolations": [],
+        "clippedTextViolations": []
+      },
+      {
+        "id": "surface-10",
+        "raw": {
+          "width": 430,
+          "height": 231,
+          "x": 985,
+          "y": 4553.34375,
+          "right": 1415,
+          "bottom": 4784.34375
+        },
+        "rounded": {
+          "width": 430,
+          "height": 231,
+          "x": 985,
+          "y": 4553.344,
+          "right": 1415,
+          "bottom": 4784.344
+        },
+        "overflowX": false,
+        "overflowY": false,
+        "descendantBoundsViolations": [],
+        "clippedTextViolations": []
+      },
+      {
+        "id": "surface-11",
+        "raw": {
+          "width": 1258,
+          "height": 458.390625,
+          "x": 571,
+          "y": 4947.78125,
+          "right": 1829,
+          "bottom": 5406.171875
+        },
+        "rounded": {
+          "width": 1258,
+          "height": 458.391,
+          "x": 571,
+          "y": 4947.781,
+          "right": 1829,
+          "bottom": 5406.172
+        },
+        "overflowX": false,
+        "overflowY": false,
+        "descendantBoundsViolations": [],
+        "clippedTextViolations": []
+      },
+      {
+        "id": "loading",
+        "raw": {
+          "width": 272,
+          "height": 186,
+          "x": 632,
+          "y": 5569.609375,
+          "right": 904,
+          "bottom": 5755.609375
+        },
+        "rounded": {
+          "width": 272,
+          "height": 186,
+          "x": 632,
+          "y": 5569.609,
+          "right": 904,
+          "bottom": 5755.609
+        },
+        "overflowX": false,
+        "overflowY": false,
+        "descendantBoundsViolations": [],
+        "clippedTextViolations": []
+      },
+      {
+        "id": "load-error",
+        "raw": {
+          "width": 272,
+          "height": 186,
+          "x": 920,
+          "y": 5569.609375,
+          "right": 1192,
+          "bottom": 5755.609375
+        },
+        "rounded": {
+          "width": 272,
+          "height": 186,
+          "x": 920,
+          "y": 5569.609,
+          "right": 1192,
+          "bottom": 5755.609
+        },
+        "overflowX": false,
+        "overflowY": false,
+        "descendantBoundsViolations": [],
+        "clippedTextViolations": []
+      },
+      {
+        "id": "true-empty",
+        "raw": {
+          "width": 272,
+          "height": 186,
+          "x": 1208,
+          "y": 5569.609375,
+          "right": 1480,
+          "bottom": 5755.609375
+        },
+        "rounded": {
+          "width": 272,
+          "height": 186,
+          "x": 1208,
+          "y": 5569.609,
+          "right": 1480,
+          "bottom": 5755.609
+        },
+        "overflowX": false,
+        "overflowY": false,
+        "descendantBoundsViolations": [],
+        "clippedTextViolations": []
+      },
+      {
+        "id": "search-empty",
+        "raw": {
+          "width": 272,
+          "height": 186,
+          "x": 1496,
+          "y": 5569.609375,
+          "right": 1768,
+          "bottom": 5755.609375
+        },
+        "rounded": {
+          "width": 272,
+          "height": 186,
+          "x": 1496,
+          "y": 5569.609,
+          "right": 1768,
+          "bottom": 5755.609
+        },
+        "overflowX": false,
+        "overflowY": false,
+        "descendantBoundsViolations": [],
+        "clippedTextViolations": []
+      },
+      {
+        "id": "missing-detail",
+        "raw": {
+          "width": 272,
+          "height": 184,
+          "x": 632,
+          "y": 5771.609375,
+          "right": 904,
+          "bottom": 5955.609375
+        },
+        "rounded": {
+          "width": 272,
+          "height": 184,
+          "x": 632,
+          "y": 5771.609,
+          "right": 904,
+          "bottom": 5955.609
+        },
+        "overflowX": false,
+        "overflowY": false,
+        "descendantBoundsViolations": [],
+        "clippedTextViolations": []
+      },
+      {
+        "id": "permission-protected",
+        "raw": {
+          "width": 272,
+          "height": 184,
+          "x": 920,
+          "y": 5771.609375,
+          "right": 1192,
+          "bottom": 5955.609375
+        },
+        "rounded": {
+          "width": 272,
+          "height": 184,
+          "x": 920,
+          "y": 5771.609,
+          "right": 1192,
+          "bottom": 5955.609
+        },
+        "overflowX": false,
+        "overflowY": false,
+        "descendantBoundsViolations": [],
+        "clippedTextViolations": []
+      },
+      {
+        "id": "busy",
+        "raw": {
+          "width": 272,
+          "height": 184,
+          "x": 1208,
+          "y": 5771.609375,
+          "right": 1480,
+          "bottom": 5955.609375
+        },
+        "rounded": {
+          "width": 272,
+          "height": 184,
+          "x": 1208,
+          "y": 5771.609,
+          "right": 1480,
+          "bottom": 5955.609
+        },
+        "overflowX": false,
+        "overflowY": false,
+        "descendantBoundsViolations": [],
+        "clippedTextViolations": []
+      },
+      {
+        "id": "success",
+        "raw": {
+          "width": 272,
+          "height": 184,
+          "x": 1496,
+          "y": 5771.609375,
+          "right": 1768,
+          "bottom": 5955.609375
+        },
+        "rounded": {
+          "width": 272,
+          "height": 184,
+          "x": 1496,
+          "y": 5771.609,
+          "right": 1768,
+          "bottom": 5955.609
+        },
+        "overflowX": false,
+        "overflowY": false,
+        "descendantBoundsViolations": [],
+        "clippedTextViolations": []
+      },
+      {
+        "id": "failure",
+        "raw": {
+          "width": 272,
+          "height": 184,
+          "x": 632,
+          "y": 5971.609375,
+          "right": 904,
+          "bottom": 6155.609375
+        },
+        "rounded": {
+          "width": 272,
+          "height": 184,
+          "x": 632,
+          "y": 5971.609,
+          "right": 904,
+          "bottom": 6155.609
+        },
+        "overflowX": false,
+        "overflowY": false,
+        "descendantBoundsViolations": [],
+        "clippedTextViolations": []
+      },
+      {
+        "id": "clipboard-failure",
+        "raw": {
+          "width": 272,
+          "height": 184,
+          "x": 920,
+          "y": 5971.609375,
+          "right": 1192,
+          "bottom": 6155.609375
+        },
+        "rounded": {
+          "width": 272,
+          "height": 184,
+          "x": 920,
+          "y": 5971.609,
+          "right": 1192,
+          "bottom": 6155.609
+        },
+        "overflowX": false,
+        "overflowY": false,
+        "descendantBoundsViolations": [],
+        "clippedTextViolations": []
+      },
+      {
+        "id": "invite-not-pending",
+        "raw": {
+          "width": 272,
+          "height": 184,
+          "x": 1208,
+          "y": 5971.609375,
+          "right": 1480,
+          "bottom": 6155.609375
+        },
+        "rounded": {
+          "width": 272,
+          "height": 184,
+          "x": 1208,
+          "y": 5971.609,
+          "right": 1480,
+          "bottom": 6155.609
+        },
+        "overflowX": false,
+        "overflowY": false,
+        "descendantBoundsViolations": [],
+        "clippedTextViolations": []
+      },
+      {
+        "id": "surface-23",
+        "raw": {
+          "width": 430,
+          "height": 210,
+          "x": 985,
+          "y": 6175.609375,
+          "right": 1415,
+          "bottom": 6385.609375
+        },
+        "rounded": {
+          "width": 430,
+          "height": 210,
+          "x": 985,
+          "y": 6175.609,
+          "right": 1415,
+          "bottom": 6385.609
+        },
+        "overflowX": false,
+        "overflowY": false,
+        "descendantBoundsViolations": [],
+        "clippedTextViolations": []
+      },
+      {
+        "id": "responsive-24",
+        "raw": {
+          "width": 360,
+          "height": 844,
+          "x": 167.5,
+          "y": 6549.046875,
+          "right": 527.5,
+          "bottom": 7393.046875
+        },
+        "rounded": {
+          "width": 360,
+          "height": 844,
+          "x": 167.5,
+          "y": 6549.047,
+          "right": 527.5,
+          "bottom": 7393.047
+        },
+        "overflowX": false,
+        "overflowY": false,
+        "descendantBoundsViolations": [],
+        "clippedTextViolations": []
+      },
+      {
+        "id": "responsive-25",
+        "raw": {
+          "width": 375,
+          "height": 844,
+          "x": 551.5,
+          "y": 6549.046875,
+          "right": 926.5,
+          "bottom": 7393.046875
+        },
+        "rounded": {
+          "width": 375,
+          "height": 844,
+          "x": 551.5,
+          "y": 6549.047,
+          "right": 926.5,
+          "bottom": 7393.047
+        },
+        "overflowX": false,
+        "overflowY": false,
+        "descendantBoundsViolations": [],
+        "clippedTextViolations": []
+      },
+      {
+        "id": "responsive-26",
+        "raw": {
+          "width": 390,
+          "height": 844,
+          "x": 950.5,
+          "y": 6549.046875,
+          "right": 1340.5,
+          "bottom": 7393.046875
+        },
+        "rounded": {
+          "width": 390,
+          "height": 844,
+          "x": 950.5,
+          "y": 6549.047,
+          "right": 1340.5,
+          "bottom": 7393.047
+        },
+        "overflowX": false,
+        "overflowY": false,
+        "descendantBoundsViolations": [],
+        "clippedTextViolations": []
+      },
+      {
+        "id": "responsive-27",
+        "raw": {
+          "width": 414,
+          "height": 844,
+          "x": 1364.5,
+          "y": 6549.046875,
+          "right": 1778.5,
+          "bottom": 7393.046875
+        },
+        "rounded": {
+          "width": 414,
+          "height": 844,
+          "x": 1364.5,
+          "y": 6549.047,
+          "right": 1778.5,
+          "bottom": 7393.047
+        },
+        "overflowX": false,
+        "overflowY": false,
+        "descendantBoundsViolations": [],
+        "clippedTextViolations": []
+      },
+      {
+        "id": "responsive-28",
+        "raw": {
+          "width": 430,
+          "height": 844,
+          "x": 1802.5,
+          "y": 6549.046875,
+          "right": 2232.5,
+          "bottom": 7393.046875
+        },
+        "rounded": {
+          "width": 430,
+          "height": 844,
+          "x": 1802.5,
+          "y": 6549.047,
+          "right": 2232.5,
+          "bottom": 7393.047
+        },
+        "overflowX": false,
+        "overflowY": false,
+        "descendantBoundsViolations": [],
+        "clippedTextViolations": []
+      },
+      {
+        "id": "desktop",
+        "raw": {
+          "width": 1440,
+          "height": 900,
+          "x": 480,
+          "y": 7556.484375,
+          "right": 1920,
+          "bottom": 8456.484375
+        },
+        "rounded": {
+          "width": 1440,
+          "height": 900,
+          "x": 480,
+          "y": 7556.484,
+          "right": 1920,
+          "bottom": 8456.484
+        },
+        "overflowX": false,
+        "overflowY": false,
+        "descendantBoundsViolations": [],
+        "clippedTextViolations": []
+      }
+    ],
+    "requiredSelectors": [
+      {
+        "selector": "[data-mobile-scenario]",
+        "expected": 10,
+        "total": 10,
+        "visible": 10,
+        "hiddenReasons": []
+      },
+      {
+        "selector": "[data-responsive-proof]",
+        "expected": 5,
+        "total": 5,
+        "visible": 5,
+        "hiddenReasons": []
+      },
+      {
+        "selector": "[data-desktop-proof]",
+        "expected": 1,
+        "total": 1,
+        "visible": 1,
+        "hiddenReasons": []
+      },
+      {
+        "selector": "[data-permission-matrix]",
+        "expected": 1,
+        "total": 1,
+        "visible": 1,
+        "hiddenReasons": []
+      },
+      {
+        "selector": "[data-state-contract]",
+        "expected": 11,
+        "total": 11,
+        "visible": 11,
+        "hiddenReasons": []
+      },
+      {
+        "selector": "[data-product-screen=\"M01\"] [data-admin-destination]",
+        "expected": 2,
+        "total": 2,
+        "visible": 2,
+        "hiddenReasons": []
+      },
+      {
+        "selector": "[data-product-screen=\"M02\"] [data-user-search]",
+        "expected": 1,
+        "total": 1,
+        "visible": 1,
+        "hiddenReasons": []
+      },
+      {
+        "selector": "[data-product-screen=\"M02\"] [data-user-row]",
+        "expected": 3,
+        "total": 3,
+        "visible": 3,
+        "hiddenReasons": []
+      },
+      {
+        "selector": "[data-product-screen=\"M03\"] [data-user-action]",
+        "expected": 5,
+        "total": 5,
+        "visible": 5,
+        "hiddenReasons": []
+      },
+      {
+        "selector": "[data-product-screen=\"M04\"] [data-sensitive-review=\"trading\"]",
+        "expected": 1,
+        "total": 1,
+        "visible": 1,
+        "hiddenReasons": []
+      },
+      {
+        "selector": "[data-product-screen=\"M04\"] [data-finite-deadline=\"trading\"]",
+        "expected": 1,
+        "total": 1,
+        "visible": 1,
+        "hiddenReasons": []
+      },
+      {
+        "selector": "[data-product-screen=\"M05\"] [data-quota]",
+        "expected": 3,
+        "total": 3,
+        "visible": 3,
+        "hiddenReasons": []
+      },
+      {
+        "selector": "[data-product-screen=\"M05\"] [data-counter-reset-disclosure]",
+        "expected": 1,
+        "total": 1,
+        "visible": 1,
+        "hiddenReasons": []
+      },
+      {
+        "selector": "[data-product-screen=\"M06\"] [data-consequence]",
+        "expected": 2,
+        "total": 2,
+        "visible": 2,
+        "hiddenReasons": []
+      },
+      {
+        "selector": "[data-product-screen=\"M07\"] [data-advanced-group]",
+        "expected": 3,
+        "total": 3,
+        "visible": 3,
+        "hiddenReasons": []
+      },
+      {
+        "selector": "[data-product-screen=\"M07\"] [data-session-control]",
+        "expected": 1,
+        "total": 1,
+        "visible": 1,
+        "hiddenReasons": []
+      },
+      {
+        "selector": "[data-product-screen=\"M08\"] [data-standard-invitation-form]",
+        "expected": 1,
+        "total": 1,
+        "visible": 1,
+        "hiddenReasons": []
+      },
+      {
+        "selector": "[data-product-screen=\"M09\"] [data-invitation-result]",
+        "expected": 1,
+        "total": 1,
+        "visible": 1,
+        "hiddenReasons": []
+      },
+      {
+        "selector": "[data-product-screen=\"M10\"] [data-pending-invitation-row]",
+        "expected": 1,
+        "total": 1,
+        "visible": 1,
+        "hiddenReasons": []
+      },
+      {
+        "selector": "[data-product-screen=\"M10\"] [data-revoke-confirmation]",
+        "expected": 1,
+        "total": 1,
+        "visible": 1,
+        "hiddenReasons": []
+      }
+    ],
+    "actions": {
+      "count": 176,
+      "minimumWidth": 44,
+      "minimumHeight": 44,
+      "violations": []
+    },
+    "ctas": {
+      "count": 14,
+      "minimumHeight": 48,
+      "violations": []
+    },
+    "mobileScenarios": [
+      {
+        "id": "M01",
+        "mode": "list",
+        "raw": {
+          "width": 390,
+          "height": 844,
+          "x": 798,
+          "y": 436.03125,
+          "right": 1188,
+          "bottom": 1280.03125
+        },
+        "rounded": {
+          "width": 390,
+          "height": 844,
+          "x": 798,
+          "y": 436.031,
+          "right": 1188,
+          "bottom": 1280.031
+        },
+        "listCount": 1,
+        "detailCount": 0,
+        "xor": true,
+        "visibleMainChildCount": 1,
+        "unmarkedMainChildCount": 0,
+        "contractRootCount": 1,
+        "contractDirectChildCount": 2,
+        "nestedContractCount": 0,
+        "unexpectedTaskPaneCount": 0,
+        "unmarkedInlinePanelCount": 0,
+        "actionCount": 7,
+        "mainOverflowX": false,
+        "mainOverflowY": false
+      },
+      {
+        "id": "M02",
+        "mode": "list",
+        "raw": {
+          "width": 390,
+          "height": 844,
+          "x": 1212,
+          "y": 436.03125,
+          "right": 1602,
+          "bottom": 1280.03125
+        },
+        "rounded": {
+          "width": 390,
+          "height": 844,
+          "x": 1212,
+          "y": 436.031,
+          "right": 1602,
+          "bottom": 1280.031
+        },
+        "listCount": 1,
+        "detailCount": 0,
+        "xor": true,
+        "visibleMainChildCount": 1,
+        "unmarkedMainChildCount": 0,
+        "contractRootCount": 1,
+        "contractDirectChildCount": 4,
+        "nestedContractCount": 0,
+        "unexpectedTaskPaneCount": 0,
+        "unmarkedInlinePanelCount": 0,
+        "actionCount": 10,
+        "mainOverflowX": false,
+        "mainOverflowY": false
+      },
+      {
+        "id": "M03",
+        "mode": "detail",
+        "raw": {
+          "width": 390,
+          "height": 844,
+          "x": 591,
+          "y": 1519.46875,
+          "right": 981,
+          "bottom": 2363.46875
+        },
+        "rounded": {
+          "width": 390,
+          "height": 844,
+          "x": 591,
+          "y": 1519.469,
+          "right": 981,
+          "bottom": 2363.469
+        },
+        "listCount": 0,
+        "detailCount": 1,
+        "xor": true,
+        "visibleMainChildCount": 1,
+        "unmarkedMainChildCount": 0,
+        "contractRootCount": 1,
+        "contractDirectChildCount": 3,
+        "nestedContractCount": 0,
+        "unexpectedTaskPaneCount": 0,
+        "unmarkedInlinePanelCount": 0,
+        "actionCount": 11,
+        "mainOverflowX": false,
+        "mainOverflowY": false
+      },
+      {
+        "id": "M04",
+        "mode": "detail",
+        "raw": {
+          "width": 390,
+          "height": 844,
+          "x": 1005,
+          "y": 1519.46875,
+          "right": 1395,
+          "bottom": 2363.46875
+        },
+        "rounded": {
+          "width": 390,
+          "height": 844,
+          "x": 1005,
+          "y": 1519.469,
+          "right": 1395,
+          "bottom": 2363.469
+        },
+        "listCount": 0,
+        "detailCount": 1,
+        "xor": true,
+        "visibleMainChildCount": 1,
+        "unmarkedMainChildCount": 0,
+        "contractRootCount": 1,
+        "contractDirectChildCount": 3,
+        "nestedContractCount": 0,
+        "unexpectedTaskPaneCount": 0,
+        "unmarkedInlinePanelCount": 0,
+        "actionCount": 9,
+        "mainOverflowX": false,
+        "mainOverflowY": false
+      },
+      {
+        "id": "M05",
+        "mode": "detail",
+        "raw": {
+          "width": 390,
+          "height": 844,
+          "x": 1419,
+          "y": 1519.46875,
+          "right": 1809,
+          "bottom": 2363.46875
+        },
+        "rounded": {
+          "width": 390,
+          "height": 844,
+          "x": 1419,
+          "y": 1519.469,
+          "right": 1809,
+          "bottom": 2363.469
+        },
+        "listCount": 0,
+        "detailCount": 1,
+        "xor": true,
+        "visibleMainChildCount": 1,
+        "unmarkedMainChildCount": 0,
+        "contractRootCount": 1,
+        "contractDirectChildCount": 4,
+        "nestedContractCount": 0,
+        "unexpectedTaskPaneCount": 0,
+        "unmarkedInlinePanelCount": 0,
+        "actionCount": 12,
+        "mainOverflowX": false,
+        "mainOverflowY": false
+      },
+      {
+        "id": "M06",
+        "mode": "detail",
+        "raw": {
+          "width": 390,
+          "height": 844,
+          "x": 798,
+          "y": 2602.90625,
+          "right": 1188,
+          "bottom": 3446.90625
+        },
+        "rounded": {
+          "width": 390,
+          "height": 844,
+          "x": 798,
+          "y": 2602.906,
+          "right": 1188,
+          "bottom": 3446.906
+        },
+        "listCount": 0,
+        "detailCount": 1,
+        "xor": true,
+        "visibleMainChildCount": 1,
+        "unmarkedMainChildCount": 0,
+        "contractRootCount": 1,
+        "contractDirectChildCount": 4,
+        "nestedContractCount": 0,
+        "unexpectedTaskPaneCount": 0,
+        "unmarkedInlinePanelCount": 0,
+        "actionCount": 9,
+        "mainOverflowX": false,
+        "mainOverflowY": false
+      },
+      {
+        "id": "M07",
+        "mode": "detail",
+        "raw": {
+          "width": 390,
+          "height": 844,
+          "x": 1212,
+          "y": 2602.90625,
+          "right": 1602,
+          "bottom": 3446.90625
+        },
+        "rounded": {
+          "width": 390,
+          "height": 844,
+          "x": 1212,
+          "y": 2602.906,
+          "right": 1602,
+          "bottom": 3446.906
+        },
+        "listCount": 0,
+        "detailCount": 1,
+        "xor": true,
+        "visibleMainChildCount": 1,
+        "unmarkedMainChildCount": 0,
+        "contractRootCount": 1,
+        "contractDirectChildCount": 4,
+        "nestedContractCount": 0,
+        "unexpectedTaskPaneCount": 0,
+        "unmarkedInlinePanelCount": 0,
+        "actionCount": 11,
+        "mainOverflowX": false,
+        "mainOverflowY": false
+      },
+      {
+        "id": "M08",
+        "mode": "detail",
+        "raw": {
+          "width": 390,
+          "height": 844,
+          "x": 581,
+          "y": 3686.34375,
+          "right": 971,
+          "bottom": 4530.34375
+        },
+        "rounded": {
+          "width": 390,
+          "height": 844,
+          "x": 581,
+          "y": 3686.344,
+          "right": 971,
+          "bottom": 4530.344
+        },
+        "listCount": 0,
+        "detailCount": 1,
+        "xor": true,
+        "visibleMainChildCount": 1,
+        "unmarkedMainChildCount": 0,
+        "contractRootCount": 1,
+        "contractDirectChildCount": 5,
+        "nestedContractCount": 0,
+        "unexpectedTaskPaneCount": 0,
+        "unmarkedInlinePanelCount": 0,
+        "actionCount": 11,
+        "mainOverflowX": false,
+        "mainOverflowY": false
+      },
+      {
+        "id": "M09",
+        "mode": "detail",
+        "raw": {
+          "width": 390,
+          "height": 844,
+          "x": 1015,
+          "y": 3689.34375,
+          "right": 1405,
+          "bottom": 4533.34375
+        },
+        "rounded": {
+          "width": 390,
+          "height": 844,
+          "x": 1015,
+          "y": 3689.344,
+          "right": 1405,
+          "bottom": 4533.344
+        },
+        "listCount": 0,
+        "detailCount": 1,
+        "xor": true,
+        "visibleMainChildCount": 1,
+        "unmarkedMainChildCount": 0,
+        "contractRootCount": 1,
+        "contractDirectChildCount": 4,
+        "nestedContractCount": 0,
+        "unexpectedTaskPaneCount": 0,
+        "unmarkedInlinePanelCount": 0,
+        "actionCount": 9,
+        "mainOverflowX": false,
+        "mainOverflowY": false
+      },
+      {
+        "id": "M10",
+        "mode": "detail",
+        "raw": {
+          "width": 390,
+          "height": 844,
+          "x": 1429,
+          "y": 3686.34375,
+          "right": 1819,
+          "bottom": 4530.34375
+        },
+        "rounded": {
+          "width": 390,
+          "height": 844,
+          "x": 1429,
+          "y": 3686.344,
+          "right": 1819,
+          "bottom": 4530.344
+        },
+        "listCount": 0,
+        "detailCount": 1,
+        "xor": true,
+        "visibleMainChildCount": 1,
+        "unmarkedMainChildCount": 0,
+        "contractRootCount": 1,
+        "contractDirectChildCount": 4,
+        "nestedContractCount": 0,
+        "unexpectedTaskPaneCount": 0,
+        "unmarkedInlinePanelCount": 0,
+        "actionCount": 11,
+        "mainOverflowX": false,
+        "mainOverflowY": false
+      }
+    ],
+    "responsive": [
+      {
+        "requestedWidth": 360,
+        "found": true,
+        "raw": {
+          "width": 360,
+          "height": 844,
+          "x": 167.5,
+          "y": 6549.046875,
+          "right": 527.5,
+          "bottom": 7393.046875
+        },
+        "rounded": {
+          "width": 360,
+          "height": 844,
+          "x": 167.5,
+          "y": 6549.047,
+          "right": 527.5,
+          "bottom": 7393.047
+        },
+        "exactWidth": true,
+        "exactHeight": true,
+        "overflowX": false,
+        "overflowY": false,
+        "listCount": 1,
+        "detailCount": 0,
+        "navigationCount": 1,
+        "searchCount": 1,
+        "filterCount": 0,
+        "actionCount": 10,
+        "rowIdentities": [
+          "سارا نادری",
+          "کیان مرادی",
+          "نرگس آقایی"
+        ]
+      },
+      {
+        "requestedWidth": 375,
+        "found": true,
+        "raw": {
+          "width": 375,
+          "height": 844,
+          "x": 551.5,
+          "y": 6549.046875,
+          "right": 926.5,
+          "bottom": 7393.046875
+        },
+        "rounded": {
+          "width": 375,
+          "height": 844,
+          "x": 551.5,
+          "y": 6549.047,
+          "right": 926.5,
+          "bottom": 7393.047
+        },
+        "exactWidth": true,
+        "exactHeight": true,
+        "overflowX": false,
+        "overflowY": false,
+        "listCount": 1,
+        "detailCount": 0,
+        "navigationCount": 1,
+        "searchCount": 1,
+        "filterCount": 0,
+        "actionCount": 10,
+        "rowIdentities": [
+          "سارا نادری",
+          "کیان مرادی",
+          "نرگس آقایی"
+        ]
+      },
+      {
+        "requestedWidth": 390,
+        "found": true,
+        "raw": {
+          "width": 390,
+          "height": 844,
+          "x": 950.5,
+          "y": 6549.046875,
+          "right": 1340.5,
+          "bottom": 7393.046875
+        },
+        "rounded": {
+          "width": 390,
+          "height": 844,
+          "x": 950.5,
+          "y": 6549.047,
+          "right": 1340.5,
+          "bottom": 7393.047
+        },
+        "exactWidth": true,
+        "exactHeight": true,
+        "overflowX": false,
+        "overflowY": false,
+        "listCount": 1,
+        "detailCount": 0,
+        "navigationCount": 1,
+        "searchCount": 1,
+        "filterCount": 0,
+        "actionCount": 10,
+        "rowIdentities": [
+          "سارا نادری",
+          "کیان مرادی",
+          "نرگس آقایی"
+        ]
+      },
+      {
+        "requestedWidth": 414,
+        "found": true,
+        "raw": {
+          "width": 414,
+          "height": 844,
+          "x": 1364.5,
+          "y": 6549.046875,
+          "right": 1778.5,
+          "bottom": 7393.046875
+        },
+        "rounded": {
+          "width": 414,
+          "height": 844,
+          "x": 1364.5,
+          "y": 6549.047,
+          "right": 1778.5,
+          "bottom": 7393.047
+        },
+        "exactWidth": true,
+        "exactHeight": true,
+        "overflowX": false,
+        "overflowY": false,
+        "listCount": 1,
+        "detailCount": 0,
+        "navigationCount": 1,
+        "searchCount": 1,
+        "filterCount": 0,
+        "actionCount": 10,
+        "rowIdentities": [
+          "سارا نادری",
+          "کیان مرادی",
+          "نرگس آقایی"
+        ]
+      },
+      {
+        "requestedWidth": 430,
+        "found": true,
+        "raw": {
+          "width": 430,
+          "height": 844,
+          "x": 1802.5,
+          "y": 6549.046875,
+          "right": 2232.5,
+          "bottom": 7393.046875
+        },
+        "rounded": {
+          "width": 430,
+          "height": 844,
+          "x": 1802.5,
+          "y": 6549.047,
+          "right": 2232.5,
+          "bottom": 7393.047
+        },
+        "exactWidth": true,
+        "exactHeight": true,
+        "overflowX": false,
+        "overflowY": false,
+        "listCount": 1,
+        "detailCount": 0,
+        "navigationCount": 1,
+        "searchCount": 1,
+        "filterCount": 0,
+        "actionCount": 10,
+        "rowIdentities": [
+          "سارا نادری",
+          "کیان مرادی",
+          "نرگس آقایی"
+        ]
+      }
+    ],
+    "desktop": {
+      "raw": {
+        "width": 1440,
+        "height": 900,
+        "x": 480,
+        "y": 7556.484375,
+        "right": 1920,
+        "bottom": 8456.484375
+      },
+      "rounded": {
+        "width": 1440,
+        "height": 900,
+        "x": 480,
+        "y": 7556.484,
+        "right": 1920,
+        "bottom": 8456.484
+      },
+      "listCount": 1,
+      "detailCount": 1,
+      "navigationCount": 1,
+      "sidebarCount": 0,
+      "kpiCount": 0,
+      "summaryCountCount": 0,
+      "currentAdminMetadataCount": 0,
+      "extraPaneCount": 0,
+      "sideBySide": true,
+      "selectedRowCount": 1,
+      "sameIdentity": true,
+      "rowIdentities": [
+        "سارا نادری",
+        "کیان مرادی",
+        "نرگس آقایی"
+      ],
+      "actionLabels": [
+        "محدودیت معاملاتی",
+        "محدودیت تعدادی",
+        "غیرفعال‌سازی حساب",
+        "تنظیمات پیشرفته",
+        "بررسی حذف کاربر"
+      ],
+      "detailText": "سارا نادری sara.demo · 0912 ••• 2468 فعال هویت حساب عادی اقدامات کاربر هر اقدام در مرور مستقل با پیامد و تأیید نهایی باز می‌شود. محدودیت معاملاتی محدودیت تعدادی غیرفعال‌سازی حساب تنظیمات پیشرفته بررسی حذف کاربر",
+      "detailBodyChildCount": 2,
+      "overflowX": false,
+      "overflowY": false
+    },
+    "typography": {
+      "nodeCount": 577,
+      "violations": []
+    },
+    "minimalism": {
+      "forbiddenTextChecks": [
+        {
+          "term": "تعداد روابط",
+          "present": false
+        },
+        {
+          "term": "تعداد رابطه",
+          "present": false
+        },
+        {
+          "term": "کل روابط",
+          "present": false
+        },
+        {
+          "term": "کل کاربران",
+          "present": false
+        },
+        {
+          "term": "مجموع کاربران",
+          "present": false
+        },
+        {
+          "term": "مسیر",
+          "present": false
+        },
+        {
+          "term": "ابزار",
+          "present": false
+        },
+        {
+          "term": "سرور",
+          "present": false
+        },
+        {
+          "term": "بک‌اند",
+          "present": false
+        },
+        {
+          "term": "backend",
+          "present": false
+        },
+        {
+          "term": "home_server",
+          "present": false
+        },
+        {
+          "term": "API",
+          "present": false
+        },
+        {
+          "term": "نقش فعلی",
+          "present": false
+        },
+        {
+          "term": "وضعیت دسترسی",
+          "present": false
+        },
+        {
+          "term": "خلاصه دسترسی",
+          "present": false
+        }
+      ],
+      "syntheticDataViolations": [],
+      "obsoleteCanonicalViolations": [],
+      "numericPendingViolations": [],
+      "summaryCountCount": 0,
+      "roleChipCount": 0,
+      "inventedRestrictionReasonCount": 0
+    },
+    "protectedScope": {
+      "marketInteriorCount": 0,
+      "messengerInteriorCount": 0,
+      "protectedTextViolations": [],
+      "protectedInteractiveViolations": [],
+      "marketConsequenceReferenceCount": 1,
+      "messengerConsequenceReferenceCount": 2,
+      "navigationContracts": [
+        {
+          "context": "mobile-root",
+          "navigationHeight": 78,
+          "destinations": [
+            "home",
+            "market",
+            "messenger",
+            "operations",
+            "account"
+          ],
+          "labels": [
+            "خانه",
+            "بازار",
+            "پیام‌رسان",
+            "عملیات",
+            "حساب"
+          ],
+          "activeDestinations": [
+            "operations"
+          ],
+          "svgCount": 5,
+          "labelBoundsViolationCount": 0,
+          "minimumWidth": 72.796875,
+          "minimumHeight": 52,
+          "minimumLabelFontSize": 11
+        },
+        {
+          "context": "mobile-root",
+          "navigationHeight": 78,
+          "destinations": [
+            "home",
+            "market",
+            "messenger",
+            "operations",
+            "account"
+          ],
+          "labels": [
+            "خانه",
+            "بازار",
+            "پیام‌رسان",
+            "عملیات",
+            "حساب"
+          ],
+          "activeDestinations": [
+            "operations"
+          ],
+          "svgCount": 5,
+          "labelBoundsViolationCount": 0,
+          "minimumWidth": 72.796875,
+          "minimumHeight": 52,
+          "minimumLabelFontSize": 11
+        },
+        {
+          "context": "mobile-root",
+          "navigationHeight": 78,
+          "destinations": [
+            "home",
+            "market",
+            "messenger",
+            "operations",
+            "account"
+          ],
+          "labels": [
+            "خانه",
+            "بازار",
+            "پیام‌رسان",
+            "عملیات",
+            "حساب"
+          ],
+          "activeDestinations": [
+            "operations"
+          ],
+          "svgCount": 5,
+          "labelBoundsViolationCount": 0,
+          "minimumWidth": 72.796875,
+          "minimumHeight": 52,
+          "minimumLabelFontSize": 11
+        },
+        {
+          "context": "mobile-root",
+          "navigationHeight": 78,
+          "destinations": [
+            "home",
+            "market",
+            "messenger",
+            "operations",
+            "account"
+          ],
+          "labels": [
+            "خانه",
+            "بازار",
+            "پیام‌رسان",
+            "عملیات",
+            "حساب"
+          ],
+          "activeDestinations": [
+            "operations"
+          ],
+          "svgCount": 5,
+          "labelBoundsViolationCount": 0,
+          "minimumWidth": 72.796875,
+          "minimumHeight": 52,
+          "minimumLabelFontSize": 11
+        },
+        {
+          "context": "mobile-root",
+          "navigationHeight": 78,
+          "destinations": [
+            "home",
+            "market",
+            "messenger",
+            "operations",
+            "account"
+          ],
+          "labels": [
+            "خانه",
+            "بازار",
+            "پیام‌رسان",
+            "عملیات",
+            "حساب"
+          ],
+          "activeDestinations": [
+            "operations"
+          ],
+          "svgCount": 5,
+          "labelBoundsViolationCount": 0,
+          "minimumWidth": 72.796875,
+          "minimumHeight": 52,
+          "minimumLabelFontSize": 11
+        },
+        {
+          "context": "mobile-root",
+          "navigationHeight": 78,
+          "destinations": [
+            "home",
+            "market",
+            "messenger",
+            "operations",
+            "account"
+          ],
+          "labels": [
+            "خانه",
+            "بازار",
+            "پیام‌رسان",
+            "عملیات",
+            "حساب"
+          ],
+          "activeDestinations": [
+            "operations"
+          ],
+          "svgCount": 5,
+          "labelBoundsViolationCount": 0,
+          "minimumWidth": 72.796875,
+          "minimumHeight": 52,
+          "minimumLabelFontSize": 11
+        },
+        {
+          "context": "mobile-root",
+          "navigationHeight": 78,
+          "destinations": [
+            "home",
+            "market",
+            "messenger",
+            "operations",
+            "account"
+          ],
+          "labels": [
+            "خانه",
+            "بازار",
+            "پیام‌رسان",
+            "عملیات",
+            "حساب"
+          ],
+          "activeDestinations": [
+            "operations"
+          ],
+          "svgCount": 5,
+          "labelBoundsViolationCount": 0,
+          "minimumWidth": 72.796875,
+          "minimumHeight": 52,
+          "minimumLabelFontSize": 11
+        },
+        {
+          "context": "mobile-root",
+          "navigationHeight": 78,
+          "destinations": [
+            "home",
+            "market",
+            "messenger",
+            "operations",
+            "account"
+          ],
+          "labels": [
+            "خانه",
+            "بازار",
+            "پیام‌رسان",
+            "عملیات",
+            "حساب"
+          ],
+          "activeDestinations": [
+            "operations"
+          ],
+          "svgCount": 5,
+          "labelBoundsViolationCount": 0,
+          "minimumWidth": 72.796875,
+          "minimumHeight": 52,
+          "minimumLabelFontSize": 11
+        },
+        {
+          "context": "mobile-root",
+          "navigationHeight": 78,
+          "destinations": [
+            "home",
+            "market",
+            "messenger",
+            "operations",
+            "account"
+          ],
+          "labels": [
+            "خانه",
+            "بازار",
+            "پیام‌رسان",
+            "عملیات",
+            "حساب"
+          ],
+          "activeDestinations": [
+            "operations"
+          ],
+          "svgCount": 5,
+          "labelBoundsViolationCount": 0,
+          "minimumWidth": 72.796875,
+          "minimumHeight": 52,
+          "minimumLabelFontSize": 11
+        },
+        {
+          "context": "mobile-root",
+          "navigationHeight": 78,
+          "destinations": [
+            "home",
+            "market",
+            "messenger",
+            "operations",
+            "account"
+          ],
+          "labels": [
+            "خانه",
+            "بازار",
+            "پیام‌رسان",
+            "عملیات",
+            "حساب"
+          ],
+          "activeDestinations": [
+            "operations"
+          ],
+          "svgCount": 5,
+          "labelBoundsViolationCount": 0,
+          "minimumWidth": 72.796875,
+          "minimumHeight": 52,
+          "minimumLabelFontSize": 11
+        },
+        {
+          "context": "responsive",
+          "navigationHeight": 78,
+          "destinations": [
+            "home",
+            "market",
+            "messenger",
+            "operations",
+            "account"
+          ],
+          "labels": [
+            "خانه",
+            "بازار",
+            "پیام‌رسان",
+            "عملیات",
+            "حساب"
+          ],
+          "activeDestinations": [
+            "operations"
+          ],
+          "svgCount": 5,
+          "labelBoundsViolationCount": 0,
+          "minimumWidth": 66.796875,
+          "minimumHeight": 52,
+          "minimumLabelFontSize": 11
+        },
+        {
+          "context": "responsive",
+          "navigationHeight": 78,
+          "destinations": [
+            "home",
+            "market",
+            "messenger",
+            "operations",
+            "account"
+          ],
+          "labels": [
+            "خانه",
+            "بازار",
+            "پیام‌رسان",
+            "عملیات",
+            "حساب"
+          ],
+          "activeDestinations": [
+            "operations"
+          ],
+          "svgCount": 5,
+          "labelBoundsViolationCount": 0,
+          "minimumWidth": 69.796875,
+          "minimumHeight": 52,
+          "minimumLabelFontSize": 11
+        },
+        {
+          "context": "responsive",
+          "navigationHeight": 78,
+          "destinations": [
+            "home",
+            "market",
+            "messenger",
+            "operations",
+            "account"
+          ],
+          "labels": [
+            "خانه",
+            "بازار",
+            "پیام‌رسان",
+            "عملیات",
+            "حساب"
+          ],
+          "activeDestinations": [
+            "operations"
+          ],
+          "svgCount": 5,
+          "labelBoundsViolationCount": 0,
+          "minimumWidth": 72.796875,
+          "minimumHeight": 52,
+          "minimumLabelFontSize": 11
+        },
+        {
+          "context": "responsive",
+          "navigationHeight": 78,
+          "destinations": [
+            "home",
+            "market",
+            "messenger",
+            "operations",
+            "account"
+          ],
+          "labels": [
+            "خانه",
+            "بازار",
+            "پیام‌رسان",
+            "عملیات",
+            "حساب"
+          ],
+          "activeDestinations": [
+            "operations"
+          ],
+          "svgCount": 5,
+          "labelBoundsViolationCount": 0,
+          "minimumWidth": 77.59375,
+          "minimumHeight": 52,
+          "minimumLabelFontSize": 11
+        },
+        {
+          "context": "responsive",
+          "navigationHeight": 78,
+          "destinations": [
+            "home",
+            "market",
+            "messenger",
+            "operations",
+            "account"
+          ],
+          "labels": [
+            "خانه",
+            "بازار",
+            "پیام‌رسان",
+            "عملیات",
+            "حساب"
+          ],
+          "activeDestinations": [
+            "operations"
+          ],
+          "svgCount": 5,
+          "labelBoundsViolationCount": 0,
+          "minimumWidth": 80.796875,
+          "minimumHeight": 52,
+          "minimumLabelFontSize": 11
+        },
+        {
+          "context": "desktop",
+          "navigationHeight": 48,
+          "destinations": [
+            "home",
+            "market",
+            "messenger",
+            "operations",
+            "account"
+          ],
+          "labels": [
+            "خانه",
+            "بازار",
+            "پیام‌رسان",
+            "عملیات",
+            "حساب"
+          ],
+          "activeDestinations": [
+            "operations"
+          ],
+          "svgCount": 5,
+          "labelBoundsViolationCount": 0,
+          "minimumWidth": 96,
+          "minimumHeight": 48,
+          "minimumLabelFontSize": 11
+        }
+      ]
+    },
+    "landing": {
+      "destinations": [
+        "users",
+        "standard-invitations"
+      ],
+      "helperCardCount": 0,
+      "actionableCountCount": 1,
+      "actionableCountText": "نیازمند رسیدگی"
+    },
+    "directory": {
+      "searchCount": 1,
+      "filterCount": 0,
+      "selectCount": 0,
+      "instructionalHintCount": 0,
+      "rows": [
+        {
+          "identity": "سارا نادری",
+          "primaryCount": 1,
+          "phoneCount": 1,
+          "metadataPartCount": 2,
+          "badgeCount": 0
+        },
+        {
+          "identity": "کیان مرادی",
+          "primaryCount": 1,
+          "phoneCount": 1,
+          "metadataPartCount": 2,
+          "badgeCount": 0
+        },
+        {
+          "identity": "نرگس آقایی",
+          "primaryCount": 1,
+          "phoneCount": 1,
+          "metadataPartCount": 2,
+          "badgeCount": 0
+        }
+      ]
+    },
+    "permissions": {
+      "cards": [
+        {
+          "role": "middle",
+          "targets": [
+            {
+              "key": "self",
+              "text": "خود حساب بله فقط مشاهده خیر",
+              "protectedActions": [
+                "role",
+                "restriction",
+                "quotas",
+                "deactivate",
+                "terminate-sessions",
+                "delete"
+              ],
+              "permissions": {
+                "listed": true,
+                "view": "yes",
+                "role": "no",
+                "restriction": "no",
+                "quotas": "no",
+                "deactivate": "no",
+                "terminateSessions": "no",
+                "delete": "no"
+              }
+            },
+            {
+              "key": "lower",
+              "text": "کاربر غیرادمین بله بله خیر",
+              "protectedActions": [],
+              "permissions": {
+                "listed": true,
+                "view": "yes",
+                "role": "no",
+                "restriction": "yes",
+                "quotas": "yes",
+                "deactivate": "yes",
+                "terminateSessions": "yes",
+                "delete": "yes"
+              }
+            },
+            {
+              "key": "admin",
+              "text": "هر مدیر دیگر در فهرست نیست خیر خیر",
+              "protectedActions": [
+                "role",
+                "restriction",
+                "quotas",
+                "deactivate",
+                "terminate-sessions",
+                "delete"
+              ],
+              "permissions": {
+                "listed": false,
+                "view": "no",
+                "role": "no",
+                "restriction": "no",
+                "quotas": "no",
+                "deactivate": "no",
+                "terminateSessions": "no",
+                "delete": "no"
+              }
+            }
+          ],
+          "invitableRoles": [
+            "تماشا",
+            "عادی"
+          ],
+          "pendingQueueScope": "own",
+          "pendingQueueScopeCopy": "دعوت‌های در انتظار: فقط دعوت‌های ساخته‌شده توسط خود مدیر",
+          "protectionCopyCount": 1
+        },
+        {
+          "role": "super",
+          "targets": [
+            {
+              "key": "self",
+              "text": "خود حساب بله فقط مشاهده خیر",
+              "protectedActions": [
+                "role",
+                "restriction",
+                "quotas",
+                "deactivate",
+                "terminate-sessions",
+                "delete"
+              ],
+              "permissions": {
+                "listed": true,
+                "view": "yes",
+                "role": "no",
+                "restriction": "no",
+                "quotas": "no",
+                "deactivate": "no",
+                "terminateSessions": "no",
+                "delete": "no"
+              }
+            },
+            {
+              "key": "lower",
+              "text": "نقش پایین‌تر بله بله بله",
+              "protectedActions": [],
+              "permissions": {
+                "listed": true,
+                "view": "yes",
+                "role": "yes",
+                "restriction": "yes",
+                "quotas": "yes",
+                "deactivate": "yes",
+                "terminateSessions": "yes",
+                "delete": "yes"
+              }
+            },
+            {
+              "key": "peer",
+              "text": "مدیر ارشد دیگر بله فقط مشاهده خیر",
+              "protectedActions": [
+                "role",
+                "restriction",
+                "quotas",
+                "deactivate",
+                "terminate-sessions",
+                "delete"
+              ],
+              "permissions": {
+                "listed": true,
+                "view": "yes",
+                "role": "no",
+                "restriction": "no",
+                "quotas": "no",
+                "deactivate": "no",
+                "terminateSessions": "no",
+                "delete": "no"
+              }
+            }
+          ],
+          "invitableRoles": [
+            "تماشا",
+            "عادی",
+            "پلیس",
+            "مدیر میانی"
+          ],
+          "pendingQueueScope": "all",
+          "pendingQueueScopeCopy": "دامنه صف: همه دعوت‌های در انتظار",
+          "protectionCopyCount": 1
+        }
+      ]
+    },
+    "detail": {
+      "actions": [
+        "trading",
+        "quotas",
+        "deactivate",
+        "advanced",
+        "delete"
+      ],
+      "standaloneWarningActionCount": 0,
+      "identity": "sara.demo",
+      "protectedNoticeCount": 0,
+      "sessionControlCount": 1,
+      "terminateAllCount": 1,
+      "sessionConsequenceCopy": "با پایان همه نشست‌ها، کاربر فوراً از همه دستگاه‌ها خارج می‌شود.",
+      "sessionTokenJargonPresent": false
+    },
+    "sensitive": {
+      "tradingReviewCount": 1,
+      "tradingBeforeCount": 1,
+      "tradingAfterCount": 1,
+      "tradingDeadlineCount": 1,
+      "tradingConfirmCount": 1,
+      "tradingStatusCopy": "وضعیت: فعال ← محدود",
+      "tradingDeadlineValue": "پایان: ۲۲ مرداد ۱۴۰۵، ساعت ۱۴:۳۰",
+      "tradingDeadlineLiteralOccurrences": 1,
+      "tradingEffectText": "کاربر نمی‌تواند پیشنهاد معاملاتی ایجاد کند یا معامله انجام دهد؛ ورود او به حساب برقرار می‌ماند.",
+      "quotaKeys": [
+        "daily-trades",
+        "traded-quantity",
+        "channel-offer-requests"
+      ],
+      "quotaReviewLines": [
+        "معامله روزانه: ۲۰ ← ۱۰",
+        "تعداد کالای معامله‌شده: ۵۰۰ ← ۳۰۰",
+        "درخواست آفر کانال: ۶ ← ۴"
+      ],
+      "quotaCurrentValues": [
+        "20",
+        "500",
+        "6"
+      ],
+      "quotaProposedValues": [
+        "10",
+        "300",
+        "4"
+      ],
+      "proposedQuotaValues": [
+        "۱۰",
+        "۳۰۰",
+        "۴"
+      ],
+      "quotaDeadlineCount": 1,
+      "quotaDeadlineValue": "۲۲ مرداد ۱۴۰۵، ۱۴:۳۰",
+      "quotaConfirmCount": 1,
+      "noPermanentCopy": "مصرف فعلی: ۳ معامله، ۱۲۰ عدد کالا و ۲ درخواست. با تأیید، هر سه شمارنده از صفر آغاز می‌شوند. این محدودیت فقط با موعد پایان مشخص اعمال می‌شود.",
+      "quotaUsageConsequenceCopy": "مصرف فعلی: ۳ معامله، ۱۲۰ عدد کالا و ۲ درخواست. با تأیید، هر سه شمارنده از صفر آغاز می‌شوند.",
+      "finiteOnlyCopy": "این محدودیت فقط با موعد پایان مشخص اعمال می‌شود.",
+      "counterResetCount": 1,
+      "permanentLimitTermPresent": false,
+      "permanentLimitMarkerCount": 0
+    },
+    "deactivation": {
+      "consequenceKeys": [
+        "immediate",
+        "delayed-global"
+      ],
+      "consequenceCopy": [
+        "فوری: بازار بسته می‌شود. خروج کاربر از کانال تلگرام مورد انتظار است؛ نتیجه آن در این صفحه قابل‌تأیید نیست.",
+        "اگر تا پایان دو روز فعال نشود: ورود وب‌اپ و پیام‌رسان قفل و همه نشست‌ها پایان می‌یابد."
+      ],
+      "acknowledgementCount": 1,
+      "confirmCount": 1,
+      "forbiddenOfferEffect": false,
+      "forbiddenInitiationTerms": [],
+      "delayedConditional": true,
+      "deadlineCopy": "غیرفعال؛ مهلت تا ۱۹ مرداد ۱۴۰۵، ۱۴:۳۰",
+      "successSideEffectClaimCount": 0,
+      "successProof": {
+        "count": 1,
+        "statusCopy": "وضعیت حساب: غیرفعال",
+        "deadlineCopy": "مهلت فعال‌سازی تا ۱۹ مرداد ۱۴۰۵، ۱۴:۳۰",
+        "factualFieldCount": 2,
+        "sideEffectInitiationCount": 0,
+        "actionCount": 1,
+        "forbiddenOutcomeClaim": false
+      }
+    },
+    "feedback": [
+      {
+        "type": "busy",
+        "context": "سارا نادری|محدودیت معاملاتی",
+        "actionCount": 1,
+        "disabledActionCount": 1,
+        "text": "در حال اعمال محدودیت برای سارا نادری تا ۲۲ مرداد؛ صفحه را نبند. در حال ثبت…"
+      },
+      {
+        "type": "success",
+        "context": "سارا نادری|محدودیت معاملاتی",
+        "actionCount": 1,
+        "disabledActionCount": 0,
+        "text": "محدودیت ثبت شد سارا نادری تا ۲۲ مرداد محدود است. بازگشت به کاربر"
+      },
+      {
+        "type": "failure",
+        "context": "سارا نادری|محدودیت معاملاتی",
+        "actionCount": 1,
+        "disabledActionCount": 0,
+        "text": "تغییر ثبت نشد موعد انتخاب‌شده حفظ شده است؛ دوباره تلاش کن. تلاش دوباره"
+      },
+      {
+        "type": "clipboard-failure",
+        "context": "narges.demo|کپی لینک وب",
+        "actionCount": 1,
+        "disabledActionCount": 0,
+        "text": "لینک کپی نشد دعوت همچنان فعال است؛ اجازه مرورگر را بررسی کن. تلاش دوباره برای کپی"
+      }
+    ],
+    "invitationForm": {
+      "formCount": 1,
+      "fieldKeys": [
+        "account",
+        "mobile"
+      ],
+      "roleSelectCount": 1,
+      "roleOptions": [
+        "تماشا",
+        "عادی"
+      ],
+      "createCount": 1,
+      "actorCopy": "مدیر میانی · حساب جدید",
+      "mixedActorHintCount": 0
+    },
+    "invitationResult": {
+      "resultCount": 1,
+      "created": "false",
+      "kind": "reused",
+      "copySurfaces": [
+        "web",
+        "telegram"
+      ],
+      "expiryCount": 1,
+      "smsState": "accepted",
+      "telegramDeliveryClaim": "none",
+      "expiryCopies": [
+        "تا ۲۲ مرداد ۱۴۰۵، ۱۴:۳۰"
+      ],
+      "text": "› دعوت آماده است نرگس آقایی فعال دعوت فعال قبلی پیدا شد دعوت تازه‌ای ساخته نشد و پیامک دوباره ارسال نمی‌شود. اعتبار دعوت تا ۲۲ مرداد ۱۴۰۵، ۱۴:۳۰ پیامک قبلاً پذیرفته شد روش‌های در دسترس لینک‌ها آماده کپی هستند؛ این وضعیت، تحویل پیام در تلگرام را تأیید نمی‌کند. کپی لینک وب کپی لینک تلگرام دعوت‌های در انتظار خانه بازار پیام‌رسان عملیات حساب",
+      "variants": [
+        {
+          "created": "false",
+          "kind": "reused",
+          "availability": "web-telegram",
+          "copySurfaces": [
+            "web",
+            "telegram"
+          ],
+          "smsState": "accepted",
+          "expiryCount": 1,
+          "expiryCopy": "تا ۲۲ مرداد ۱۴۰۵، ۱۴:۳۰",
+          "telegramDeliveryClaim": "none",
+          "outsideMobileRoot": false,
+          "text": "دعوت فعال قبلی پیدا شد دعوت تازه‌ای ساخته نشد و پیامک دوباره ارسال نمی‌شود. اعتبار دعوت تا ۲۲ مرداد ۱۴۰۵، ۱۴:۳۰ پیامک قبلاً پذیرفته شد روش‌های در دسترس لینک‌ها آماده کپی هستند؛ این وضعیت، تحویل پیام در تلگرام را تأیید نمی‌کند. کپی لینک وب کپی لینک تلگرام دعوت‌های در انتظار"
+        },
+        {
+          "created": "true",
+          "kind": "fresh",
+          "availability": "web-only",
+          "copySurfaces": [
+            "web"
+          ],
+          "smsState": "pending",
+          "expiryCount": 1,
+          "expiryCopy": "اعتبار تا ۲۲ مرداد ۱۴۰۵، ۱۴:۳۰",
+          "telegramDeliveryClaim": "none",
+          "outsideMobileRoot": true,
+          "text": "حالت مکمل · دعوت تازه دعوت تازه ساخته شد اعتبار تا ۲۲ مرداد ۱۴۰۵، ۱۴:۳۰ پیامک برای ارسال ثبت شده است. فقط روشی که اکنون در دسترس است نمایش داده می‌شود. برای این دعوت لینک تلگرام در دسترس نیست و هیچ کنترل تلگرامی نمایش داده نمی‌شود. کپی لینک وب"
+        }
+      ]
+    },
+    "pendingQueue": {
+      "rowCount": 1,
+      "copySurfaces": [
+        "web",
+        "telegram"
+      ],
+      "expiryCount": 1,
+      "queueTotalCount": 0,
+      "actorRole": "middle",
+      "scope": "own",
+      "scopeCopy": "نرگس آقایی · دعوت خود شما",
+      "pendingMetaCopy": "تماشا · تا ۲۲ مرداد ۱۴۰۵، ۱۴:۳۰"
+    },
+    "revoke": {
+      "confirmationCount": 1,
+      "acknowledgementCount": 1,
+      "actionCount": 1,
+      "confirmationText": "این دعوت لغو شود؟ تأیید لازم هر دو لینک همین دعوت از کار می‌افتد. برای دعوت دوباره باید دعوت تازه‌ای بسازی."
+    },
+    "rawUrls": {
+      "violations": []
+    },
+    "states": [
+      {
+        "type": "loading",
+        "actionCount": 0,
+        "actionLabels": [],
+        "queryCount": 0,
+        "skeletonCount": 1,
+        "text": "در حال دریافت کاربران ساختار فهرست تا آماده‌شدن داده حفظ می‌شود."
+      },
+      {
+        "type": "load-error",
+        "actionCount": 1,
+        "actionLabels": [
+          "تلاش دوباره"
+        ],
+        "queryCount": 0,
+        "skeletonCount": 0,
+        "text": "فهرست دریافت نشد دریافت اطلاعات کامل نشد؛ دوباره تلاش کن. تلاش دوباره"
+      },
+      {
+        "type": "true-empty",
+        "actionCount": 1,
+        "actionLabels": [
+          "ساخت دعوت"
+        ],
+        "queryCount": 0,
+        "skeletonCount": 0,
+        "text": "هنوز کاربری وجود ندارد در صورت نیاز، دعوت استاندارد بساز. ساخت دعوت"
+      },
+      {
+        "type": "search-empty",
+        "actionCount": 1,
+        "actionLabels": [
+          "پاک‌کردن جست‌وجو"
+        ],
+        "queryCount": 1,
+        "skeletonCount": 0,
+        "text": "نتیجه‌ای پیدا نشد جست‌وجو: «رضا شریفی» عبارت جست‌وجو حفظ شده است. پاک‌کردن جست‌وجو"
+      },
+      {
+        "type": "missing-detail",
+        "actionCount": 1,
+        "actionLabels": [
+          "بازگشت به فهرست"
+        ],
+        "queryCount": 0,
+        "skeletonCount": 0,
+        "text": "کاربر دیگر در دسترس نیست ممکن است حساب حذف شده یا دسترسی شما تغییر کرده باشد. بازگشت به فهرست"
+      },
+      {
+        "type": "permission-protected",
+        "actionCount": 1,
+        "actionLabels": [
+          "بازگشت به جزئیات"
+        ],
+        "queryCount": 0,
+        "skeletonCount": 0,
+        "text": "این حساب محافظت‌شده است اطلاعات قابل مشاهده است، اما اقدام حساس روی خود حساب یا مدیر هم‌سطح مجاز نیست. بازگشت به جزئیات"
+      },
+      {
+        "type": "busy",
+        "actionCount": 1,
+        "actionLabels": [
+          "در حال ثبت…"
+        ],
+        "queryCount": 0,
+        "skeletonCount": 0,
+        "text": "در حال اعمال محدودیت برای سارا نادری تا ۲۲ مرداد؛ صفحه را نبند. در حال ثبت…"
+      },
+      {
+        "type": "success",
+        "actionCount": 1,
+        "actionLabels": [
+          "بازگشت به کاربر"
+        ],
+        "queryCount": 0,
+        "skeletonCount": 0,
+        "text": "محدودیت ثبت شد سارا نادری تا ۲۲ مرداد محدود است. بازگشت به کاربر"
+      },
+      {
+        "type": "failure",
+        "actionCount": 1,
+        "actionLabels": [
+          "تلاش دوباره"
+        ],
+        "queryCount": 0,
+        "skeletonCount": 0,
+        "text": "تغییر ثبت نشد موعد انتخاب‌شده حفظ شده است؛ دوباره تلاش کن. تلاش دوباره"
+      },
+      {
+        "type": "clipboard-failure",
+        "actionCount": 1,
+        "actionLabels": [
+          "تلاش دوباره برای کپی"
+        ],
+        "queryCount": 0,
+        "skeletonCount": 0,
+        "text": "لینک کپی نشد دعوت همچنان فعال است؛ اجازه مرورگر را بررسی کن. تلاش دوباره برای کپی"
+      },
+      {
+        "type": "invite-not-pending",
+        "actionCount": 1,
+        "actionLabels": [
+          "بازگشت به دعوت‌ها"
+        ],
+        "queryCount": 0,
+        "skeletonCount": 0,
+        "text": "دعوت دیگر در انتظار نیست ممکن است استفاده، منقضی یا توسط مدیر دیگری لغو شده باشد. بازگشت به دعوت‌ها"
+      }
+    ]
+  },
+  "preflightAssertions": [
+    {
+      "id": "font-vazirmatn-loaded",
+      "passed": true,
+      "detail": "4 faces; 0 computed-family violation(s)"
+    },
+    {
+      "id": "ten-mobile-scenarios-complete",
+      "passed": true,
+      "detail": "M01, M02, M03, M04, M05, M06, M07, M08, M09, M10; required-node violations=none"
+    },
+    {
+      "id": "mobile-roots-exact-390x844",
+      "passed": true,
+      "detail": "M01:390×844, M02:390×844, M03:390×844, M04:390×844, M05:390×844, M06:390×844, M07:390×844, M08:390×844, M09:390×844, M10:390×844"
+    },
+    {
+      "id": "mobile-list-detail-xor",
+      "passed": true,
+      "detail": "exact roots/actions; no nested or unmarked task panes"
+    },
+    {
+      "id": "no-product-overflow-or-clipping",
+      "passed": true,
+      "detail": "0 geometry violation(s): none; 0 required-node visibility violation(s)"
+    },
+    {
+      "id": "touch-targets-44",
+      "passed": true,
+      "detail": "minimum raw 44×44px across 176; violations=0"
+    },
+    {
+      "id": "cta-height-48",
+      "passed": true,
+      "detail": "minimum raw 48px across 14; violations=0"
+    },
+    {
+      "id": "responsive-width-sweep",
+      "passed": true,
+      "detail": "360:360×844/actions=10/rows=سارا نادری|کیان مرادی|نرگس آقایی, 375:375×844/actions=10/rows=سارا نادری|کیان مرادی|نرگس آقایی, 390:390×844/actions=10/rows=سارا نادری|کیان مرادی|نرگس آقایی, 414:414×844/actions=10/rows=سارا نادری|کیان مرادی|نرگس آقایی, 430:430×844/actions=10/rows=سارا نادری|کیان مرادی|نرگس آقایی"
+    },
+    {
+      "id": "desktop-user-master-detail-1440x900",
+      "passed": true,
+      "detail": "1440×900; side-by-side=true; same-identity=true; current-admin-metadata=0; exact-detail-copy=true"
+    },
+    {
+      "id": "minimal-content-contract",
+      "passed": true,
+      "detail": "forbidden=none; real-data=none; obsolete-canonical=none; numeric-pending=0; invented-reason=0"
+    },
+    {
+      "id": "admin-landing-action-focused",
+      "passed": true,
+      "detail": "destinations=users,standard-invitations; helper=0; actionable=نیازمند رسیدگی"
+    },
+    {
+      "id": "user-directory-metadata-bounded",
+      "passed": true,
+      "detail": "3 rows; metadata=2,2,2; hints=0"
+    },
+    {
+      "id": "user-filters-bounded-actionable",
+      "passed": true,
+      "detail": "persistent-search=1; filters=0; selects=0"
+    },
+    {
+      "id": "role-permission-matrix-exact",
+      "passed": true,
+      "detail": "roles=middle,super; exact-matrix=true; middle-self=خود حساب بله فقط مشاهده خیر; middle-other-admin=هر مدیر دیگر در فهرست نیست خیر خیر; queue-scopes=middle:own,super:all; protected-rows=4; protected-actions=role|restriction|quotas|deactivate|terminate-sessions|delete"
+    },
+    {
+      "id": "user-detail-progressive-disclosure",
+      "passed": true,
+      "detail": "actions=trading,quotas,deactivate,advanced,delete; warning=0; generic-protection-notice=0; terminate-all=1; session-copy=با پایان همه نشست‌ها، کاربر فوراً از همه دستگاه‌ها خارج می‌شود.; token-jargon=false"
+    },
+    {
+      "id": "sensitive-decision-review-complete",
+      "passed": true,
+      "detail": "trading=وضعیت: فعال ← محدود; trading-deadline=پایان: ۲۲ مرداد ۱۴۰۵، ساعت ۱۴:۳۰; trading-deadline-occurrences=1; exact-effect=کاربر نمی‌تواند پیشنهاد معاملاتی ایجاد کند یا معامله انجام دهد؛ ورود او به حساب برقرار می‌ماند.; quotas=معامله روزانه: ۲۰ ← ۱۰|تعداد کالای معامله‌شده: ۵۰۰ ← ۳۰۰|درخواست آفر کانال: ۶ ← ۴; proposed-inputs=۱۰,۳۰۰,۴; usage=مصرف فعلی: ۳ معامله، ۱۲۰ عدد کالا و ۲ درخواست. با تأیید، هر سه شمارنده از صفر آغاز می‌شوند.; deadline=۲۲ مرداد ۱۴۰۵، ۱۴:۳۰; reset=1; permanent-term=false; permanent-markers=0"
+    },
+    {
+      "id": "account-deactivation-consequences-truthful",
+      "passed": true,
+      "detail": "immediate,delayed-global; exact-consequences=[\"فوری: بازار بسته می‌شود. خروج کاربر از کانال تلگرام مورد انتظار است؛ نتیجه آن در این صفحه قابل‌تأیید نیست.\",\"اگر تا پایان دو روز فعال نشود: ورود وب‌اپ و پیام‌رسان قفل و همه نشست‌ها پایان می‌یابد.\"]; forbidden-initiation=none; deadline=غیرفعال؛ مهلت تا ۱۹ مرداد ۱۴۰۵، ۱۴:۳۰; conditional=true; forbidden-offer-effect=false; success-proof=1/facts=2/deadline=مهلت فعال‌سازی تا ۱۹ مرداد ۱۴۰۵، ۱۴:۳۰/initiation=0/forbidden=false; success-side-effect-claims=0"
+    },
+    {
+      "id": "action-feedback-in-context",
+      "passed": true,
+      "detail": "busy:سارا نادری|محدودیت معاملاتی/actions=1, success:سارا نادری|محدودیت معاملاتی/actions=1, failure:سارا نادری|محدودیت معاملاتی/actions=1, clipboard-failure:narges.demo|کپی لینک وب/actions=1; decision-context-equal=true"
+    },
+    {
+      "id": "standard-invitation-form-bounded",
+      "passed": true,
+      "detail": "actor=مدیر میانی · حساب جدید; fields=account,mobile+role; roles=تماشا,عادی; mixed-hints=0"
+    },
+    {
+      "id": "standard-invitation-result-truthful",
+      "passed": true,
+      "detail": "variants=false:reused:web-telegram[web,telegram]/expiry=1:تا ۲۲ مرداد ۱۴۰۵، ۱۴:۳۰/outside=false; true:fresh:web-only[web]/expiry=1:اعتبار تا ۲۲ مرداد ۱۴۰۵، ۱۴:۳۰/outside=true; reused-expiry=تا ۲۲ مرداد ۱۴۰۵، ۱۴:۳۰; reused-sms=accepted"
+    },
+    {
+      "id": "pending-invitation-queue-actionable",
+      "passed": true,
+      "detail": "rows=1; meta=تماشا · تا ۲۲ مرداد ۱۴۰۵، ۱۴:۳۰; links=web,telegram; totals=0; actor/scope=middle/own"
+    },
+    {
+      "id": "invitation-revoke-confirmation-complete",
+      "passed": true,
+      "detail": "confirmation=1; acknowledgement=1; danger-action=1"
+    },
+    {
+      "id": "raw-invitation-urls-hidden-by-default",
+      "passed": true,
+      "detail": "0 visible raw URL/token violation(s)"
+    },
+    {
+      "id": "recovery-state-atlas-complete",
+      "passed": true,
+      "detail": "loading:actions=0/skeleton=1, load-error:actions=1/skeleton=0, true-empty:actions=1/skeleton=0, search-empty:actions=1/skeleton=0, missing-detail:actions=1/skeleton=0, permission-protected:actions=1/skeleton=0, busy:actions=1/skeleton=0, success:actions=1/skeleton=0, failure:actions=1/skeleton=0, clipboard-failure:actions=1/skeleton=0, invite-not-pending:actions=1/skeleton=0; protected-action=بازگشت به جزئیات"
+    },
+    {
+      "id": "protected-interiors-absent",
+      "passed": true,
+      "detail": "market=0; messenger=0; consequence-refs=1/2; lexicon=[]; interactive=[]; desktop-shell=1:home>market>messenger>operations>account/خانه>بازار>پیام‌رسان>عملیات>حساب/active=operations/svg=5/item=96×48; nav=mobile-root:home>market>messenger>operations>account/خانه>بازار>پیام‌رسان>عملیات>حساب/active=operations/svg=5/label-bounds=0/nav-h=78/item=72.796875×52/font=11; mobile-root:home>market>messenger>operations>account/خانه>بازار>پیام‌رسان>عملیات>حساب/active=operations/svg=5/label-bounds=0/nav-h=78/item=72.796875×52/font=11; mobile-root:home>market>messenger>operations>account/خانه>بازار>پیام‌رسان>عملیات>حساب/active=operations/svg=5/label-bounds=0/nav-h=78/item=72.796875×52/font=11; mobile-root:home>market>messenger>operations>account/خانه>بازار>پیام‌رسان>عملیات>حساب/active=operations/svg=5/label-bounds=0/nav-h=78/item=72.796875×52/font=11; mobile-root:home>market>messenger>operations>account/خانه>بازار>پیام‌رسان>عملیات>حساب/active=operations/svg=5/label-bounds=0/nav-h=78/item=72.796875×52/font=11; mobile-root:home>market>messenger>operations>account/خانه>بازار>پیام‌رسان>عملیات>حساب/active=operations/svg=5/label-bounds=0/nav-h=78/item=72.796875×52/font=11; mobile-root:home>market>messenger>operations>account/خانه>بازار>پیام‌رسان>عملیات>حساب/active=operations/svg=5/label-bounds=0/nav-h=78/item=72.796875×52/font=11; mobile-root:home>market>messenger>operations>account/خانه>بازار>پیام‌رسان>عملیات>حساب/active=operations/svg=5/label-bounds=0/nav-h=78/item=72.796875×52/font=11; mobile-root:home>market>messenger>operations>account/خانه>بازار>پیام‌رسان>عملیات>حساب/active=operations/svg=5/label-bounds=0/nav-h=78/item=72.796875×52/font=11; mobile-root:home>market>messenger>operations>account/خانه>بازار>پیام‌رسان>عملیات>حساب/active=operations/svg=5/label-bounds=0/nav-h=78/item=72.796875×52/font=11; responsive:home>market>messenger>operations>account/خانه>بازار>پیام‌رسان>عملیات>حساب/active=operations/svg=5/label-bounds=0/nav-h=78/item=66.796875×52/font=11; responsive:home>market>messenger>operations>account/خانه>بازار>پیام‌رسان>عملیات>حساب/active=operations/svg=5/label-bounds=0/nav-h=78/item=69.796875×52/font=11; responsive:home>market>messenger>operations>account/خانه>بازار>پیام‌رسان>عملیات>حساب/active=operations/svg=5/label-bounds=0/nav-h=78/item=72.796875×52/font=11; responsive:home>market>messenger>operations>account/خانه>بازار>پیام‌رسان>عملیات>حساب/active=operations/svg=5/label-bounds=0/nav-h=78/item=77.59375×52/font=11; responsive:home>market>messenger>operations>account/خانه>بازار>پیام‌رسان>عملیات>حساب/active=operations/svg=5/label-bounds=0/nav-h=78/item=80.796875×52/font=11; desktop:home>market>messenger>operations>account/خانه>بازار>پیام‌رسان>عملیات>حساب/active=operations/svg=5/label-bounds=0/nav-h=48/item=96×48/font=11"
+    }
+  ],
+  "assertions": [
+    {
+      "id": "font-vazirmatn-loaded",
+      "passed": true,
+      "detail": "4 faces; 0 computed-family violation(s)"
+    },
+    {
+      "id": "ten-mobile-scenarios-complete",
+      "passed": true,
+      "detail": "M01, M02, M03, M04, M05, M06, M07, M08, M09, M10; required-node violations=none"
+    },
+    {
+      "id": "mobile-roots-exact-390x844",
+      "passed": true,
+      "detail": "M01:390×844, M02:390×844, M03:390×844, M04:390×844, M05:390×844, M06:390×844, M07:390×844, M08:390×844, M09:390×844, M10:390×844"
+    },
+    {
+      "id": "mobile-list-detail-xor",
+      "passed": true,
+      "detail": "exact roots/actions; no nested or unmarked task panes"
+    },
+    {
+      "id": "no-product-overflow-or-clipping",
+      "passed": true,
+      "detail": "0 geometry violation(s): none; 0 required-node visibility violation(s)"
+    },
+    {
+      "id": "touch-targets-44",
+      "passed": true,
+      "detail": "minimum raw 44×44px across 176; violations=0"
+    },
+    {
+      "id": "cta-height-48",
+      "passed": true,
+      "detail": "minimum raw 48px across 14; violations=0"
+    },
+    {
+      "id": "responsive-width-sweep",
+      "passed": true,
+      "detail": "360:360×844/actions=10/rows=سارا نادری|کیان مرادی|نرگس آقایی, 375:375×844/actions=10/rows=سارا نادری|کیان مرادی|نرگس آقایی, 390:390×844/actions=10/rows=سارا نادری|کیان مرادی|نرگس آقایی, 414:414×844/actions=10/rows=سارا نادری|کیان مرادی|نرگس آقایی, 430:430×844/actions=10/rows=سارا نادری|کیان مرادی|نرگس آقایی"
+    },
+    {
+      "id": "desktop-user-master-detail-1440x900",
+      "passed": true,
+      "detail": "1440×900; side-by-side=true; same-identity=true; current-admin-metadata=0; exact-detail-copy=true"
+    },
+    {
+      "id": "minimal-content-contract",
+      "passed": true,
+      "detail": "forbidden=none; real-data=none; obsolete-canonical=none; numeric-pending=0; invented-reason=0"
+    },
+    {
+      "id": "admin-landing-action-focused",
+      "passed": true,
+      "detail": "destinations=users,standard-invitations; helper=0; actionable=نیازمند رسیدگی"
+    },
+    {
+      "id": "user-directory-metadata-bounded",
+      "passed": true,
+      "detail": "3 rows; metadata=2,2,2; hints=0"
+    },
+    {
+      "id": "user-filters-bounded-actionable",
+      "passed": true,
+      "detail": "persistent-search=1; filters=0; selects=0"
+    },
+    {
+      "id": "role-permission-matrix-exact",
+      "passed": true,
+      "detail": "roles=middle,super; exact-matrix=true; middle-self=خود حساب بله فقط مشاهده خیر; middle-other-admin=هر مدیر دیگر در فهرست نیست خیر خیر; queue-scopes=middle:own,super:all; protected-rows=4; protected-actions=role|restriction|quotas|deactivate|terminate-sessions|delete"
+    },
+    {
+      "id": "user-detail-progressive-disclosure",
+      "passed": true,
+      "detail": "actions=trading,quotas,deactivate,advanced,delete; warning=0; generic-protection-notice=0; terminate-all=1; session-copy=با پایان همه نشست‌ها، کاربر فوراً از همه دستگاه‌ها خارج می‌شود.; token-jargon=false"
+    },
+    {
+      "id": "sensitive-decision-review-complete",
+      "passed": true,
+      "detail": "trading=وضعیت: فعال ← محدود; trading-deadline=پایان: ۲۲ مرداد ۱۴۰۵، ساعت ۱۴:۳۰; trading-deadline-occurrences=1; exact-effect=کاربر نمی‌تواند پیشنهاد معاملاتی ایجاد کند یا معامله انجام دهد؛ ورود او به حساب برقرار می‌ماند.; quotas=معامله روزانه: ۲۰ ← ۱۰|تعداد کالای معامله‌شده: ۵۰۰ ← ۳۰۰|درخواست آفر کانال: ۶ ← ۴; proposed-inputs=۱۰,۳۰۰,۴; usage=مصرف فعلی: ۳ معامله، ۱۲۰ عدد کالا و ۲ درخواست. با تأیید، هر سه شمارنده از صفر آغاز می‌شوند.; deadline=۲۲ مرداد ۱۴۰۵، ۱۴:۳۰; reset=1; permanent-term=false; permanent-markers=0"
+    },
+    {
+      "id": "account-deactivation-consequences-truthful",
+      "passed": true,
+      "detail": "immediate,delayed-global; exact-consequences=[\"فوری: بازار بسته می‌شود. خروج کاربر از کانال تلگرام مورد انتظار است؛ نتیجه آن در این صفحه قابل‌تأیید نیست.\",\"اگر تا پایان دو روز فعال نشود: ورود وب‌اپ و پیام‌رسان قفل و همه نشست‌ها پایان می‌یابد.\"]; forbidden-initiation=none; deadline=غیرفعال؛ مهلت تا ۱۹ مرداد ۱۴۰۵، ۱۴:۳۰; conditional=true; forbidden-offer-effect=false; success-proof=1/facts=2/deadline=مهلت فعال‌سازی تا ۱۹ مرداد ۱۴۰۵، ۱۴:۳۰/initiation=0/forbidden=false; success-side-effect-claims=0"
+    },
+    {
+      "id": "action-feedback-in-context",
+      "passed": true,
+      "detail": "busy:سارا نادری|محدودیت معاملاتی/actions=1, success:سارا نادری|محدودیت معاملاتی/actions=1, failure:سارا نادری|محدودیت معاملاتی/actions=1, clipboard-failure:narges.demo|کپی لینک وب/actions=1; decision-context-equal=true"
+    },
+    {
+      "id": "standard-invitation-form-bounded",
+      "passed": true,
+      "detail": "actor=مدیر میانی · حساب جدید; fields=account,mobile+role; roles=تماشا,عادی; mixed-hints=0"
+    },
+    {
+      "id": "standard-invitation-result-truthful",
+      "passed": true,
+      "detail": "variants=false:reused:web-telegram[web,telegram]/expiry=1:تا ۲۲ مرداد ۱۴۰۵، ۱۴:۳۰/outside=false; true:fresh:web-only[web]/expiry=1:اعتبار تا ۲۲ مرداد ۱۴۰۵، ۱۴:۳۰/outside=true; reused-expiry=تا ۲۲ مرداد ۱۴۰۵، ۱۴:۳۰; reused-sms=accepted"
+    },
+    {
+      "id": "pending-invitation-queue-actionable",
+      "passed": true,
+      "detail": "rows=1; meta=تماشا · تا ۲۲ مرداد ۱۴۰۵، ۱۴:۳۰; links=web,telegram; totals=0; actor/scope=middle/own"
+    },
+    {
+      "id": "invitation-revoke-confirmation-complete",
+      "passed": true,
+      "detail": "confirmation=1; acknowledgement=1; danger-action=1"
+    },
+    {
+      "id": "raw-invitation-urls-hidden-by-default",
+      "passed": true,
+      "detail": "0 visible raw URL/token violation(s)"
+    },
+    {
+      "id": "recovery-state-atlas-complete",
+      "passed": true,
+      "detail": "loading:actions=0/skeleton=1, load-error:actions=1/skeleton=0, true-empty:actions=1/skeleton=0, search-empty:actions=1/skeleton=0, missing-detail:actions=1/skeleton=0, permission-protected:actions=1/skeleton=0, busy:actions=1/skeleton=0, success:actions=1/skeleton=0, failure:actions=1/skeleton=0, clipboard-failure:actions=1/skeleton=0, invite-not-pending:actions=1/skeleton=0; protected-action=بازگشت به جزئیات"
+    },
+    {
+      "id": "protected-interiors-absent",
+      "passed": true,
+      "detail": "market=0; messenger=0; consequence-refs=1/2; lexicon=[]; interactive=[]; desktop-shell=1:home>market>messenger>operations>account/خانه>بازار>پیام‌رسان>عملیات>حساب/active=operations/svg=5/item=96×48; nav=mobile-root:home>market>messenger>operations>account/خانه>بازار>پیام‌رسان>عملیات>حساب/active=operations/svg=5/label-bounds=0/nav-h=78/item=72.796875×52/font=11; mobile-root:home>market>messenger>operations>account/خانه>بازار>پیام‌رسان>عملیات>حساب/active=operations/svg=5/label-bounds=0/nav-h=78/item=72.796875×52/font=11; mobile-root:home>market>messenger>operations>account/خانه>بازار>پیام‌رسان>عملیات>حساب/active=operations/svg=5/label-bounds=0/nav-h=78/item=72.796875×52/font=11; mobile-root:home>market>messenger>operations>account/خانه>بازار>پیام‌رسان>عملیات>حساب/active=operations/svg=5/label-bounds=0/nav-h=78/item=72.796875×52/font=11; mobile-root:home>market>messenger>operations>account/خانه>بازار>پیام‌رسان>عملیات>حساب/active=operations/svg=5/label-bounds=0/nav-h=78/item=72.796875×52/font=11; mobile-root:home>market>messenger>operations>account/خانه>بازار>پیام‌رسان>عملیات>حساب/active=operations/svg=5/label-bounds=0/nav-h=78/item=72.796875×52/font=11; mobile-root:home>market>messenger>operations>account/خانه>بازار>پیام‌رسان>عملیات>حساب/active=operations/svg=5/label-bounds=0/nav-h=78/item=72.796875×52/font=11; mobile-root:home>market>messenger>operations>account/خانه>بازار>پیام‌رسان>عملیات>حساب/active=operations/svg=5/label-bounds=0/nav-h=78/item=72.796875×52/font=11; mobile-root:home>market>messenger>operations>account/خانه>بازار>پیام‌رسان>عملیات>حساب/active=operations/svg=5/label-bounds=0/nav-h=78/item=72.796875×52/font=11; mobile-root:home>market>messenger>operations>account/خانه>بازار>پیام‌رسان>عملیات>حساب/active=operations/svg=5/label-bounds=0/nav-h=78/item=72.796875×52/font=11; responsive:home>market>messenger>operations>account/خانه>بازار>پیام‌رسان>عملیات>حساب/active=operations/svg=5/label-bounds=0/nav-h=78/item=66.796875×52/font=11; responsive:home>market>messenger>operations>account/خانه>بازار>پیام‌رسان>عملیات>حساب/active=operations/svg=5/label-bounds=0/nav-h=78/item=69.796875×52/font=11; responsive:home>market>messenger>operations>account/خانه>بازار>پیام‌رسان>عملیات>حساب/active=operations/svg=5/label-bounds=0/nav-h=78/item=72.796875×52/font=11; responsive:home>market>messenger>operations>account/خانه>بازار>پیام‌رسان>عملیات>حساب/active=operations/svg=5/label-bounds=0/nav-h=78/item=77.59375×52/font=11; responsive:home>market>messenger>operations>account/خانه>بازار>پیام‌رسان>عملیات>حساب/active=operations/svg=5/label-bounds=0/nav-h=78/item=80.796875×52/font=11; desktop:home>market>messenger>operations>account/خانه>بازار>پیام‌رسان>عملیات>حساب/active=operations/svg=5/label-bounds=0/nav-h=48/item=96×48/font=11"
+    }
+  ],
+  "summary": {
+    "passed": true,
+    "assertionCount": 25,
+    "failureCount": 0,
+    "pageErrorCount": 0
+  },
+  "failures": [],
+  "pageErrors": []
+}
