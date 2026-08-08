@@ -2031,6 +2031,58 @@ def run_overtime_execute(args: argparse.Namespace, artifact_dir: Path) -> dict[s
     }
 
 
+def _overtime_cleanup_prefixes(overtime: dict[str, Any]) -> list[str]:
+    """Return exact OT execution stamps safe for scoped hard cleanup.
+
+    The overtime runner owns a separate OTACC_ namespace from the combined
+    matrix CMB_ namespace. Its product-level retirement flow intentionally
+    leaves audit rows behind; those synthetic rows can retain two equally
+    terminal peer states and poison the next parity preflight. A 14-digit
+    execution stamp is shared by every scenario in one OT run and is narrow
+    enough for staging_combined_matrix_heal to remove only that run after
+    artifacts have been written.
+    """
+
+    prefixes: set[str] = set()
+    for item in overtime.get("scenario_results") or []:
+        raw = str(item.get("run_prefix") or "").strip()
+        match = re.fullmatch(r"(OTACC_[0-9]{14})_(?:F)?[0-9]{2}", raw)
+        if match is not None:
+            prefixes.add(match.group(1))
+    return sorted(prefixes)
+
+
+def _heal_prefix_on_both_peers(
+    args: argparse.Namespace,
+    *,
+    run_prefix: str,
+) -> dict[str, Any]:
+    iran, iran_code = _container_python(
+        args,
+        server="iran",
+        script="scripts/staging_combined_matrix_heal.py",
+        script_args=["--run-prefix", run_prefix],
+        timeout=300,
+    )
+    foreign, foreign_code = _container_python(
+        args,
+        server="foreign",
+        script="scripts/staging_combined_matrix_heal.py",
+        script_args=["--run-prefix", run_prefix],
+        timeout=300,
+    )
+    return {
+        "run_prefix": run_prefix,
+        "ok": iran_code == 0
+        and foreign_code == 0
+        and bool(iran.get("ok"))
+        and bool(foreign.get("ok")),
+        "returncode": max(iran_code, foreign_code),
+        "iran": iran,
+        "foreign": foreign,
+    }
+
+
 def run_market_drivers(args: argparse.Namespace, artifact_dir: Path) -> dict[str, Any]:
     s2fm_dir = artifact_dir / "child-s2fm-execute"
     driver_limit = int(args.market_driver_limit or len(_driver_scenarios()))
@@ -2351,31 +2403,27 @@ def run_execute(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
     write_json(artifact_dir / "live-coverage.json", coverage)
     lanes["live_coverage"] = coverage
 
-    # Final synthetic cleanup so leftover tombstones do not poison the next run.
-    heal_iran, heal_iran_code = _container_python(
-        args,
-        server="iran",
-        script="scripts/staging_combined_matrix_heal.py",
-        script_args=["--run-prefix", args.run_prefix],
-    )
-    heal_foreign, heal_foreign_code = _container_python(
-        args,
-        server="foreign",
-        script="scripts/staging_combined_matrix_heal.py",
-        script_args=["--run-prefix", args.run_prefix],
-    )
+    # Final synthetic cleanup so leftover tombstones do not poison the next
+    # run. Overtime uses its own OTACC timestamp namespace, so clean both the
+    # combined prefix and every exact OT execution stamp found in evidence.
+    heal_reports = [
+        _heal_prefix_on_both_peers(args, run_prefix=args.run_prefix),
+        *(
+            _heal_prefix_on_both_peers(args, run_prefix=prefix)
+            for prefix in _overtime_cleanup_prefixes(overtime)
+        ),
+    ]
     write_json(
         artifact_dir / "post-execute-heal.json",
-        {"iran": heal_iran, "foreign": heal_foreign},
+        {"prefixes": heal_reports},
     )
     lanes["cleanup_heal"] = {
-        "ok": heal_iran_code == 0
-        and heal_foreign_code == 0
-        and bool(heal_iran.get("ok"))
-        and bool(heal_foreign.get("ok")),
-        "returncode": max(heal_iran_code, heal_foreign_code),
-        "iran": heal_iran,
-        "foreign": heal_foreign,
+        "ok": all(report.get("ok") for report in heal_reports),
+        "returncode": max(
+            (int(report.get("returncode") or 0) for report in heal_reports),
+            default=1,
+        ),
+        "prefixes": heal_reports,
     }
 
     failed_lanes = [name for name, payload in lanes.items() if not payload.get("ok")]

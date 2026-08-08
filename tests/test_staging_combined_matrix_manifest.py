@@ -246,6 +246,26 @@ class CombinedMatrixManifestTests(unittest.TestCase):
             heal._validate_run_prefix("CMB_20260807_RUN1"),
             "CMB_20260807_RUN1",
         )
+        self.assertEqual(
+            heal._validate_run_prefix("OTACC_20260808090438"),
+            "OTACC_20260808090438",
+        )
+
+    def test_overtime_cleanup_prefixes_are_exact_execution_stamps(self) -> None:
+        self.assertEqual(
+            runner._overtime_cleanup_prefixes(
+                {
+                    "scenario_results": [
+                        {"run_prefix": "OTACC_20260808090438_00"},
+                        {"run_prefix": "OTACC_20260808090438_F05"},
+                        {"run_prefix": "OTACC_20260808090438_08"},
+                        {"run_prefix": "OTACC_20260808090439_bad"},
+                        {"run_prefix": "CMB_NOT_OVERTIME"},
+                    ]
+                }
+            ),
+            ["OTACC_20260808090438"],
+        )
 
     def test_heal_change_log_plan_is_prefix_and_record_id_scoped(self) -> None:
         predicates, params = heal._change_log_delete_plan(

@@ -28,7 +28,9 @@ class DriverRefusal(RuntimeError):
     pass
 
 
-_RUN_PREFIX_RE = re.compile(r"CMB_[A-Za-z0-9_-]{4,116}\Z")
+_RUN_PREFIX_RE = re.compile(
+    r"(?:CMB_[A-Za-z0-9_-]{4,116}|OTACC_[0-9]{14})\Z"
+)
 _PREFIX_BOUNDARY_SQL = "('_', ':', '-', ' ')"
 
 
@@ -101,7 +103,8 @@ def _validate_run_prefix(value: str) -> str:
     prefix = (value or "").strip()
     if _RUN_PREFIX_RE.fullmatch(prefix) is None:
         raise DriverRefusal(
-            "run prefix must match CMB_[A-Za-z0-9_-]{4,116}"
+            "run prefix must match CMB_[A-Za-z0-9_-]{4,116} or "
+            "an exact OTACC_YYYYMMDDhhmmss execution stamp"
         )
     return prefix
 
