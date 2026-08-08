@@ -3,7 +3,8 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ChevronLeft } from 'lucide-vue-next'
 import { pushBackState, popBackState, clearBackStack } from '../composables/useBackButton'
-import { apiFetch } from '../utils/auth'
+import { routeRequestJson } from '../utils/routeRequest'
+import { isAppHttpError } from '../utils/httpErrorPolicy'
 import AdminPanel from '../components/AdminPanel.vue'
 import UserManager from '../components/UserManager.vue'
 import CommodityManager from '../components/CommodityManager.vue'
@@ -13,6 +14,8 @@ import CreateInvitationView from '../components/CreateInvitationView.vue'
 import CreateChannelView from '../components/CreateChannelView.vue'
 import UserProfile from '../components/UserProfile.vue'
 import AppIconButton from '../components/ui/AppIconButton.vue'
+import AppButton from '../components/ui/AppButton.vue'
+import AppErrorState from '../components/ui/AppErrorState.vue'
 import AppLoadingState from '../components/ui/AppLoadingState.vue'
 import AppPage from '../components/ui/AppPage.vue'
 import AppPageHeader from '../components/ui/AppPageHeader.vue'
@@ -26,6 +29,9 @@ const jwtToken = ref<string | null>(null)
 const apiBaseUrl = '' // Relative path for proxy
 const selectedUserForProfile = ref<any>(null)
 const isLoadingRouteUserProfile = ref(false)
+const routeUserProfileError = ref<{ title: string; message: string } | null>(null)
+let routeUserProfileRequestSequence = 0
+let routeUserProfileAbortController: AbortController | null = null
 const canAccessSystemSettings = computed(() => isCachedSuperAdmin())
 const sectionMetaByKey: Record<string, { title: string; description: string }> = {
   menu: {
@@ -177,22 +183,62 @@ async function loadRouteUserProfile(userId: number) {
     return
   }
 
+  const requestSequence = ++routeUserProfileRequestSequence
+  routeUserProfileAbortController?.abort()
+  routeUserProfileAbortController = new AbortController()
   currentSection.value = 'user_profile'
   selectedUserForProfile.value = null
+  routeUserProfileError.value = null
   isLoadingRouteUserProfile.value = true
   try {
-    const response = await apiFetch(`/api/users/${userId}`)
-    if (!response.ok) {
-      goToMenu()
-      return
+    const user = await routeRequestJson<any>(`/api/users/${userId}`, {
+      signal: routeUserProfileAbortController.signal,
+      errorContext: {
+        surface: 'admin',
+        scope: 'page',
+        operation: 'load-detail',
+        resourceLabel: 'کاربر',
+        fallbackMessage: 'دریافت پروفایل کاربر ممکن نشد.',
+      },
+    })
+    if (requestSequence !== routeUserProfileRequestSequence || getRouteUserProfileId() !== userId) return
+    if (!user || typeof user !== 'object' || Array.isArray(user) || Number(user.id) !== userId) {
+      throw new Error('invalid_route_user_payload')
     }
 
-    selectedUserForProfile.value = await response.json()
+    selectedUserForProfile.value = user
     currentSection.value = 'user_profile'
-  } catch {
-    goToMenu()
+  } catch (error) {
+    if (requestSequence !== routeUserProfileRequestSequence || getRouteUserProfileId() !== userId) return
+    if (error instanceof DOMException && error.name === 'AbortError') return
+
+    if (isAppHttpError(error) && error.status === 403) {
+      routeUserProfileError.value = {
+        title: 'دسترسی به پروفایل مجاز نیست',
+        message: 'مجوز مشاهده این پروفایل را ندارید.',
+      }
+    } else if (isAppHttpError(error) && error.status === 404) {
+      routeUserProfileError.value = {
+        title: 'کاربر پیدا نشد',
+        message: 'این کاربر در دسترس نیست یا دیگر وجود ندارد.',
+      }
+    } else {
+      routeUserProfileError.value = {
+        title: 'پروفایل کاربر در دسترس نیست',
+        message: 'دریافت اطلاعات کاربر انجام نشد. دوباره تلاش کنید.',
+      }
+    }
   } finally {
-    isLoadingRouteUserProfile.value = false
+    if (requestSequence === routeUserProfileRequestSequence) {
+      isLoadingRouteUserProfile.value = false
+    }
+  }
+}
+
+function retryRouteUserProfile() {
+  const userId = getRouteUserProfileId()
+  if (userId && !isLoadingRouteUserProfile.value) {
+    void loadRouteUserProfile(userId)
   }
 }
 
@@ -208,8 +254,13 @@ watch(
 )
 
 function goToMenu() {
+  routeUserProfileRequestSequence += 1
+  routeUserProfileAbortController?.abort()
+  routeUserProfileAbortController = null
   currentSection.value = 'menu'
   selectedUserForProfile.value = null
+  routeUserProfileError.value = null
+  isLoadingRouteUserProfile.value = false
   popBackState()
   if (shouldClearRouteUserProfile()) {
     void router.replace({ name: 'admin' })
@@ -283,7 +334,11 @@ function handleOpenPublicProfile(payload?: { id?: number; account_name?: string 
   })
 }
 
-onUnmounted(() => clearBackStack())
+onUnmounted(() => {
+  routeUserProfileRequestSequence += 1
+  routeUserProfileAbortController?.abort()
+  clearBackStack()
+})
 </script>
 
 <template>
@@ -360,6 +415,19 @@ onUnmounted(() => clearBackStack())
                 v-else-if="currentSection === 'user_profile' && isLoadingRouteUserProfile"
                 label="در حال بارگذاری پروفایل کاربر"
               />
+
+              <AppErrorState
+                v-else-if="currentSection === 'user_profile' && routeUserProfileError"
+                class="admin-route-profile-error"
+                :title="routeUserProfileError.title"
+                :message="routeUserProfileError.message"
+              >
+                <template #actions>
+                  <AppButton type="button" variant="secondary" @click="retryRouteUserProfile">
+                    تلاش مجدد
+                  </AppButton>
+                </template>
+              </AppErrorState>
 
               <TradingSettings
                 v-else-if="currentSection === 'settings' && canAccessSystemSettings"

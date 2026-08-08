@@ -3,6 +3,15 @@ import { nextTick, reactive } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import AdminView from './AdminView.vue'
 
+function responseOf(payload: unknown, status = 200) {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    headers: { get: () => 'application/json' },
+    json: async () => payload,
+  }
+}
+
 const adminViewMocks = vi.hoisted(() => ({
   route: {
     name: 'admin' as string,
@@ -168,7 +177,10 @@ describe('AdminView.vue', () => {
     const wrapper = mountView()
     await flushPromises()
 
-    expect(adminViewMocks.apiFetchMock).toHaveBeenCalledWith('/api/users/91')
+    expect(adminViewMocks.apiFetchMock).toHaveBeenCalledWith('/api/users/91', expect.objectContaining({
+      retryNetwork: false,
+      trackConnectionState: false,
+    }))
     expect(wrapper.text()).toContain('پروفایل کاربر')
     expect(wrapper.get('.user-profile-stub').text()).toBe('route-user')
   })
@@ -193,7 +205,7 @@ describe('AdminView.vue', () => {
     const profileWrapper = mountView()
     await flushPromises()
 
-    expect(adminViewMocks.apiFetchMock).toHaveBeenCalledWith('/api/users/91')
+    expect(adminViewMocks.apiFetchMock).toHaveBeenCalledWith('/api/users/91', expect.any(Object))
     expect(profileWrapper.text()).toContain('پروفایل کاربر')
     expect(profileWrapper.get('.user-profile-stub').text()).toBe('route-param-user')
   })
@@ -223,33 +235,80 @@ describe('AdminView.vue', () => {
     expect(wrapper.find('.user-profile-stub').exists()).toBe(false)
   })
 
-  it('falls back to the admin menu when the route profile request is rejected or not found', async () => {
-    adminViewMocks.route.query = {
-      section: 'user_profile',
-      user_id: '52',
-    }
-    adminViewMocks.apiFetchMock.mockResolvedValueOnce({
-      ok: false,
-      json: async () => ({ message: 'missing' }),
-    })
+  it.each([
+    [403, 'دسترسی به پروفایل مجاز نیست', 'مجوز مشاهده این پروفایل را ندارید.'],
+    [404, 'کاربر پیدا نشد', 'این کاربر در دسترس نیست یا دیگر وجود ندارد.'],
+    [500, 'پروفایل کاربر در دسترس نیست', 'دریافت اطلاعات کاربر انجام نشد. دوباره تلاش کنید.'],
+  ])('keeps the profile deep link in place for HTTP %s and renders its bounded error state', async (status, title, message) => {
+    adminViewMocks.route.name = 'admin-user-profile'
+    adminViewMocks.route.params = reactive({ id: '52' }) as Record<string, string>
+    adminViewMocks.apiFetchMock.mockResolvedValueOnce(responseOf({ detail: 'backend detail' }, status))
 
-    const notFoundWrapper = mountView()
+    const wrapper = mountView()
     await flushPromises()
 
-    expect(notFoundWrapper.text()).toContain('بخش مورد نظر خود را انتخاب کنید')
-    expect(adminViewMocks.routerReplaceMock).toHaveBeenCalledWith({ name: 'admin' })
+    expect(wrapper.text()).toContain('پروفایل کاربر')
+    expect(wrapper.text()).toContain(title)
+    expect(wrapper.text()).toContain(message)
+    expect(wrapper.text()).toContain('تلاش مجدد')
+    expect(adminViewMocks.routerReplaceMock).not.toHaveBeenCalled()
+  })
 
-    adminViewMocks.route.query = {
-      section: 'user_profile',
-      user_id: '53',
-    }
-    adminViewMocks.apiFetchMock.mockRejectedValueOnce(new Error('network failed'))
+  it('treats a mismatched successful profile payload as unavailable instead of rendering a blank detail', async () => {
+    adminViewMocks.route.name = 'admin-user-profile'
+    adminViewMocks.route.params = reactive({ id: '52' }) as Record<string, string>
+    adminViewMocks.apiFetchMock.mockResolvedValueOnce(responseOf({ id: 99, account_name: 'wrong-user' }))
 
-    const rejectedWrapper = mountView()
+    const wrapper = mountView()
     await flushPromises()
 
-    expect(rejectedWrapper.text()).toContain('بخش مورد نظر خود را انتخاب کنید')
-    expect(adminViewMocks.routerReplaceMock).toHaveBeenCalledWith({ name: 'admin' })
+    expect(wrapper.text()).toContain('پروفایل کاربر در دسترس نیست')
+    expect(wrapper.text()).toContain('تلاش مجدد')
+    expect(wrapper.find('.user-profile-stub').exists()).toBe(false)
+    expect(adminViewMocks.routerReplaceMock).not.toHaveBeenCalled()
+  })
+
+  it('retries the same profile route after a transport failure without losing context', async () => {
+    adminViewMocks.route.name = 'admin-user-profile'
+    adminViewMocks.route.params = reactive({ id: '53' }) as Record<string, string>
+    adminViewMocks.apiFetchMock
+      .mockRejectedValueOnce(new Error('network failed'))
+      .mockResolvedValueOnce(responseOf({ id: 53, account_name: 'recovered-user' }))
+
+    const wrapper = mountView()
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('پروفایل کاربر در دسترس نیست')
+    await wrapper.get('.admin-route-profile-error .ui-button').trigger('click')
+    await flushPromises()
+
+    expect(adminViewMocks.apiFetchMock).toHaveBeenCalledTimes(2)
+    expect(wrapper.get('.user-profile-stub').text()).toBe('recovered-user')
+    expect(adminViewMocks.routerReplaceMock).not.toHaveBeenCalled()
+  })
+
+  it('lets the latest route profile response win when requests settle out of order', async () => {
+    let resolveFirst: ((value: ReturnType<typeof responseOf>) => void) | undefined
+    const firstResponse = new Promise<ReturnType<typeof responseOf>>((resolve) => { resolveFirst = resolve })
+    adminViewMocks.route.name = 'admin-user-profile'
+    adminViewMocks.route.params = reactive({ id: '61' }) as Record<string, string>
+    adminViewMocks.apiFetchMock
+      .mockReturnValueOnce(firstResponse)
+      .mockResolvedValueOnce(responseOf({ id: 62, account_name: 'latest-user' }))
+
+    const wrapper = mountView()
+    await flushPromises()
+
+    adminViewMocks.route.params.id = '62'
+    await nextTick()
+    await flushPromises()
+    expect(wrapper.get('.user-profile-stub').text()).toBe('latest-user')
+
+    resolveFirst!(responseOf({ id: 61, account_name: 'stale-user' }))
+    await flushPromises()
+
+    expect(wrapper.get('.user-profile-stub').text()).toBe('latest-user')
+    expect(wrapper.text()).not.toContain('stale-user')
   })
 
   it('ignores invalid public-profile payloads and invalid route profile ids', async () => {
@@ -361,7 +420,7 @@ describe('AdminView.vue', () => {
     adminViewMocks.route.query.section = 'user_profile'
     await nextTick()
     await flushPromises()
-    expect(adminViewMocks.apiFetchMock).toHaveBeenCalledWith('/api/users/92')
+    expect(adminViewMocks.apiFetchMock).toHaveBeenCalledWith('/api/users/92', expect.any(Object))
     expect(wrapper.get('.user-profile-stub').text()).toBe('route-reactive-user')
 
     const vm = wrapper.vm as any

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import {
   ArrowRight,
   Package,
@@ -8,7 +8,8 @@ import {
   Tag,
   Trash2,
 } from 'lucide-vue-next'
-import { apiFetch } from '../utils/auth'
+import { routeRequest, routeRequestJson } from '../utils/routeRequest'
+import { useActionState } from '../composables/useActionState'
 import AppButton from './ui/AppButton.vue'
 import AppDangerZone from './ui/AppDangerZone.vue'
 import AppEmptyState from './ui/AppEmptyState.vue'
@@ -57,7 +58,9 @@ type ViewMode =
   | 'delete_alias'
 
 const viewMode = ref<ViewMode>('list')
-const isLoading = ref(true)
+const listLoading = ref(false)
+const hasLoadedList = ref(false)
+const actionBusyKey = ref<string | null>(null)
 const errorMessage = ref('')
 const successMessage = ref('')
 const commodities = ref<Commodity[]>([])
@@ -66,6 +69,12 @@ const selectedAlias = ref<CommodityAlias | null>(null)
 const form = reactive<FormState>({ name: '', aliasesText: '' })
 const selectedCommodityIsLockedImam = computed(() => selectedCommodity.value?.name === LOCKED_IMAM_COMMODITY_NAME)
 const selectedCommodityAliasCount = computed(() => selectedCommodity.value?.aliases.length ?? 0)
+const isActionBusy = computed(() => actionBusyKey.value !== null)
+const mutationActions = useActionState<{ kind: string; entityId?: number }, unknown>()
+let listRequestSequence = 0
+let listAbortController: AbortController | null = null
+let detailRequestSequence = 0
+let detailAbortController: AbortController | null = null
 
 function resetMessages() {
   errorMessage.value = ''
@@ -77,56 +86,152 @@ function resetForm() {
   form.aliasesText = ''
 }
 
-function getErrorDetail(error: any, defaultMsg: string): string {
-  const detail = error.detail || error.message
-  if (!detail) return defaultMsg
-
-  if (typeof detail === 'object') {
-    try {
-      return JSON.stringify(detail, null, 2)
-    } catch {
-      return defaultMsg
-    }
-  }
-  return detail
-}
-
 function aliasCountLabel(count: number) {
   if (count <= 0) return 'بدون نام مستعار'
   return `${count.toLocaleString('fa-IR')} نام مستعار`
 }
 
-async function fetchCommodities() {
-  viewMode.value = 'list'
-  isLoading.value = true
-  resetMessages()
+function isCommodity(value: unknown): value is Commodity {
+  if (!value || typeof value !== 'object') return false
+  const candidate = value as Partial<Commodity>
+  return Number.isInteger(candidate.id)
+    && typeof candidate.name === 'string'
+    && Array.isArray(candidate.aliases)
+}
+
+function isCommodityAlias(value: unknown): value is CommodityAlias {
+  if (!value || typeof value !== 'object') return false
+  const candidate = value as Partial<CommodityAlias>
+  return Number.isInteger(candidate.id)
+    && Number.isInteger(candidate.commodity_id)
+    && typeof candidate.alias === 'string'
+}
+
+function replaceCommodity(nextCommodity: Commodity) {
+  const index = commodities.value.findIndex((commodity) => commodity.id === nextCommodity.id)
+  if (index === -1) {
+    commodities.value = [...commodities.value, nextCommodity]
+    return
+  }
+  commodities.value = commodities.value.map((commodity) => (
+    commodity.id === nextCommodity.id ? nextCommodity : commodity
+  ))
+}
+
+async function runMutation(input: {
+  key: string
+  context: { kind: string; entityId?: number }
+  url: string
+  method: 'POST' | 'PUT' | 'DELETE'
+  body?: string
+  operation: 'submit' | 'update' | 'delete'
+  fallbackMessage: string
+  validate: (receipt: unknown, response: Response) => boolean
+}) {
+  if (actionBusyKey.value !== null || mutationActions.isBusy(input.key)) return null
+  actionBusyKey.value = input.key
   try {
-    const response = await apiFetch('/api/commodities/')
-    if (!response.ok) throw new Error('خطا در بارگیری لیست کالاها')
-    commodities.value = await response.json()
-  } catch (e: any) {
-    errorMessage.value = getErrorDetail(e, 'خطای ناشناخته')
+    return await mutationActions.run({
+      key: input.key,
+      context: input.context,
+      action: async () => {
+        const response = await routeRequest(input.url, {
+          method: input.method,
+          ...(input.body ? { body: input.body } : {}),
+          errorContext: {
+            surface: 'admin',
+            scope: 'action',
+            operation: input.operation,
+            userInitiated: true,
+            fallbackMessage: input.fallbackMessage,
+          },
+        })
+        const receipt = response.status === 204 ? null : await response.json()
+        return { response, receipt }
+      },
+      validateReceipt: (receipt, _context, response) => input.validate(receipt, response),
+    })
   } finally {
-    isLoading.value = false
+    if (actionBusyKey.value === input.key) actionBusyKey.value = null
+  }
+}
+
+async function fetchCommodities(options: { preserveMessages?: boolean } = {}) {
+  const requestSequence = ++listRequestSequence
+  listAbortController?.abort()
+  listAbortController = new AbortController()
+  viewMode.value = 'list'
+  listLoading.value = true
+  if (!options.preserveMessages) resetMessages()
+  else errorMessage.value = ''
+  try {
+    const payload = await routeRequestJson<unknown>('/api/commodities/', {
+      signal: listAbortController.signal,
+      errorContext: {
+        surface: 'admin',
+        scope: 'list',
+        operation: hasLoadedList.value ? 'background-refresh' : 'load-list',
+        preserveExistingData: hasLoadedList.value,
+        fallbackMessage: 'دریافت فهرست کالاها ممکن نشد.',
+      },
+    })
+    if (requestSequence !== listRequestSequence) return
+    if (!Array.isArray(payload) || !payload.every(isCommodity)) throw new Error('invalid_commodities_payload')
+    commodities.value = payload
+    hasLoadedList.value = true
+  } catch (error) {
+    if (requestSequence !== listRequestSequence) return
+    if (error instanceof DOMException && error.name === 'AbortError') return
+    errorMessage.value = 'دریافت فهرست کالاها ممکن نشد. اطلاعات فعلی حفظ شده است.'
+  } finally {
+    if (requestSequence === listRequestSequence) listLoading.value = false
   }
 }
 
 async function onManageAliases(commodity: Commodity, preserveMessages = false) {
-  isLoading.value = true
+  const requestSequence = ++detailRequestSequence
+  detailAbortController?.abort()
+  detailAbortController = new AbortController()
+  listLoading.value = true
   if (!preserveMessages) {
     resetMessages()
   }
   try {
-    const response = await apiFetch(`/api/commodities/${commodity.id}`)
-    if (!response.ok) throw new Error('خطا در دریافت اطلاعات کالا')
-    selectedCommodity.value = await response.json()
+    const payload = await routeRequestJson<unknown>(`/api/commodities/${commodity.id}`, {
+      signal: detailAbortController.signal,
+      errorContext: {
+        surface: 'admin',
+        scope: 'panel',
+        operation: selectedCommodity.value?.id === commodity.id ? 'background-refresh' : 'load-detail',
+        preserveExistingData: selectedCommodity.value?.id === commodity.id,
+        fallbackMessage: 'دریافت اطلاعات کالا ممکن نشد.',
+      },
+    })
+    if (requestSequence !== detailRequestSequence) return
+    if (!isCommodity(payload)) throw new Error('invalid_commodity_payload')
+    selectedCommodity.value = payload
+    replaceCommodity(payload)
     viewMode.value = 'aliases'
-  } catch (e: any) {
-    errorMessage.value = getErrorDetail(e, 'خطای ناشناخته')
-    viewMode.value = 'list'
+  } catch (error) {
+    if (requestSequence !== detailRequestSequence) return
+    if (error instanceof DOMException && error.name === 'AbortError') return
+    errorMessage.value = 'دریافت اطلاعات کالا ممکن نشد. اطلاعات فعلی حفظ شده است.'
+    if (selectedCommodity.value?.id !== commodity.id) viewMode.value = 'list'
   } finally {
-    isLoading.value = false
+    if (requestSequence === detailRequestSequence) listLoading.value = false
   }
+}
+
+function returnToList() {
+  if (isActionBusy.value) return
+  resetMessages()
+  viewMode.value = 'list'
+}
+
+function returnToAliases() {
+  if (!selectedCommodity.value || isActionBusy.value) return
+  resetMessages()
+  viewMode.value = 'aliases'
 }
 
 function onAddCommodityStart() {
@@ -136,42 +241,40 @@ function onAddCommodityStart() {
 }
 
 async function onAddCommoditySubmit() {
-  isLoading.value = true
+  if (isActionBusy.value) return
   resetMessages()
-  try {
-    const aliasList = form.aliasesText.split(/[،-]/)
-      .map((alias) => alias.trim())
-      .filter((alias) => alias.length > 0)
-
-    const commodityName = form.name.trim()
-    if (commodityName && !aliasList.includes(commodityName)) {
-      aliasList.unshift(commodityName)
-    }
-
-    const payload = {
-      commodity_data: { name: commodityName },
-      aliases: aliasList,
-    }
-
-    const response = await apiFetch('/api/commodities/', {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    })
-
-    const data = await response.json()
-
-    if (!response.ok) {
-      throw { detail: data.detail || 'خطا در افزودن کالا' }
-    }
-
-    successMessage.value = `کالا «${data.name}» با موفقیت افزوده شد.`
-    await fetchCommodities()
-  } catch (e: any) {
-    errorMessage.value = getErrorDetail(e, 'خطای ناشناخته')
-    viewMode.value = 'add_commodity'
-  } finally {
-    isLoading.value = false
+  const aliasList = form.aliasesText.split(/[،-]/)
+    .map((alias) => alias.trim())
+    .filter((alias) => alias.length > 0)
+  const commodityName = form.name.trim()
+  if (!commodityName) {
+    errorMessage.value = 'نام اصلی کالا را وارد کنید.'
+    return
   }
+  if (!aliasList.includes(commodityName)) aliasList.unshift(commodityName)
+
+  const result = await runMutation({
+    key: 'create-commodity',
+    context: { kind: 'create-commodity' },
+    url: '/api/commodities/',
+    method: 'POST',
+    body: JSON.stringify({ commodity_data: { name: commodityName }, aliases: aliasList }),
+    operation: 'submit',
+    fallbackMessage: 'افزودن کالا انجام نشد.',
+    validate: (receipt, response) => response.status === 201 && isCommodity(receipt),
+  })
+  if (!result || result.outcome === 'duplicate') return
+  if (result.outcome === 'error') {
+    errorMessage.value = 'افزودن کالا انجام نشد. اطلاعات واردشده حفظ شده است.'
+    viewMode.value = 'add_commodity'
+    return
+  }
+
+  const data = result.receipt as Commodity
+  replaceCommodity(data)
+  successMessage.value = `کالا «${data.name}» با موفقیت افزوده شد.`
+  viewMode.value = 'list'
+  await fetchCommodities({ preserveMessages: true })
 }
 
 function onEditCommodityNameStart() {
@@ -187,27 +290,32 @@ function onEditCommodityNameStart() {
 }
 
 async function onEditCommodityNameSubmit() {
-  if (!selectedCommodity.value) return
-  isLoading.value = true
+  if (!selectedCommodity.value || isActionBusy.value) return
+  const commodity = selectedCommodity.value
   resetMessages()
-  try {
-    const response = await apiFetch(`/api/commodities/${selectedCommodity.value.id}`, {
-      method: 'PUT',
-      body: JSON.stringify({ name: form.name.trim() }),
-    })
-    const data = await response.json()
-    if (!response.ok) {
-      throw { detail: data.detail || 'خطا در ویرایش نام' }
-    }
-
-    successMessage.value = `نام کالا با موفقیت به «${data.name}» تغییر یافت.`
-    await onManageAliases(data)
-  } catch (e: any) {
-    errorMessage.value = getErrorDetail(e, 'خطای ناشناخته')
+  const result = await runMutation({
+    key: `update-commodity:${commodity.id}`,
+    context: { kind: 'update-commodity', entityId: commodity.id },
+    url: `/api/commodities/${commodity.id}`,
+    method: 'PUT',
+    body: JSON.stringify({ name: form.name.trim() }),
+    operation: 'update',
+    fallbackMessage: 'ویرایش نام کالا انجام نشد.',
+    validate: (receipt, response) => response.status === 200 && isCommodity(receipt),
+  })
+  if (!result || result.outcome === 'duplicate') return
+  if (result.outcome === 'error') {
+    errorMessage.value = 'ویرایش نام کالا انجام نشد. اطلاعات واردشده حفظ شده است.'
     viewMode.value = 'edit_commodity_name'
-  } finally {
-    isLoading.value = false
+    return
   }
+
+  const data = result.receipt as Commodity
+  selectedCommodity.value = data
+  replaceCommodity(data)
+  successMessage.value = `نام کالا با موفقیت به «${data.name}» تغییر یافت.`
+  viewMode.value = 'aliases'
+  await onManageAliases(data, true)
 }
 
 function onAddAliasStart() {
@@ -218,31 +326,42 @@ function onAddAliasStart() {
 }
 
 async function onAddAliasSubmit() {
-  if (!selectedCommodity.value) return
-  isLoading.value = true
+  if (!selectedCommodity.value || isActionBusy.value) return
+  const commodity = selectedCommodity.value
   resetMessages()
+  const actionKey = `create-aliases:${commodity.id}`
+  actionBusyKey.value = actionKey
   try {
     const aliasList = form.name.split(/[،\-]/)
       .map((alias) => alias.trim())
       .filter((alias) => alias.length > 0)
 
     if (aliasList.length === 0) {
-      throw { detail: 'لطفاً حداقل یک نام مستعار وارد کنید.' }
+      errorMessage.value = 'لطفاً حداقل یک نام مستعار وارد کنید.'
+      return
     }
 
     const addedAliases: string[] = []
     const failedAliases: string[] = []
 
     for (const aliasName of aliasList) {
-      const response = await apiFetch(`/api/commodities/${selectedCommodity.value.id}/aliases`, {
-        method: 'POST',
-        body: JSON.stringify({ alias: aliasName }),
-      })
-      const data = await response.json()
-      if (response.ok) {
+      try {
+        const data = await routeRequestJson<unknown>(`/api/commodities/${commodity.id}/aliases`, {
+          method: 'POST',
+          body: JSON.stringify({ alias: aliasName }),
+          errorContext: {
+            surface: 'admin',
+            scope: 'action',
+            operation: 'submit',
+            userInitiated: true,
+            fallbackMessage: 'افزودن نام مستعار انجام نشد.',
+          },
+        })
+        if (!isCommodityAlias(data)) throw new Error('invalid_alias_receipt')
         addedAliases.push(data.alias)
-      } else {
-        failedAliases.push(`${aliasName}: ${data.detail || 'خطا'}`)
+        commodity.aliases = [...commodity.aliases.filter((alias) => alias.id !== data.id), data]
+      } catch {
+        failedAliases.push(aliasName)
       }
     }
 
@@ -250,15 +369,18 @@ async function onAddAliasSubmit() {
       successMessage.value = `نام‌های مستعار «${addedAliases.join('، ')}» با موفقیت افزوده شدند.`
     }
     if (failedAliases.length > 0) {
-      errorMessage.value = failedAliases.join('\n')
+      errorMessage.value = `ثبت نام‌های «${failedAliases.join('، ')}» انجام نشد.`
     }
 
-    await onManageAliases(selectedCommodity.value, addedAliases.length > 0 || failedAliases.length > 0)
-  } catch (e: any) {
-    errorMessage.value = getErrorDetail(e, 'خطای ناشناخته')
-    viewMode.value = 'add_alias'
+    replaceCommodity(commodity)
+    if (addedAliases.length > 0) {
+      viewMode.value = 'aliases'
+      await onManageAliases(commodity, true)
+    } else {
+      viewMode.value = 'add_alias'
+    }
   } finally {
-    isLoading.value = false
+    if (actionBusyKey.value === actionKey) actionBusyKey.value = null
   }
 }
 
@@ -271,27 +393,35 @@ function onEditAliasStart(alias: CommodityAlias) {
 }
 
 async function onEditAliasSubmit() {
-  if (!selectedCommodity.value || !selectedAlias.value) return
-  isLoading.value = true
+  if (!selectedCommodity.value || !selectedAlias.value || isActionBusy.value) return
+  const commodity = selectedCommodity.value
+  const alias = selectedAlias.value
   resetMessages()
-  try {
-    const response = await apiFetch(`/api/commodities/aliases/${selectedAlias.value.id}`, {
-      method: 'PUT',
-      body: JSON.stringify({ alias: form.name.trim() }),
-    })
-    const data = await response.json()
-    if (!response.ok) {
-      throw { detail: data.detail || 'خطا در ویرایش نام مستعار' }
-    }
-
-    successMessage.value = `نام مستعار با موفقیت به «${data.alias}» تغییر یافت.`
-    await onManageAliases(selectedCommodity.value)
-  } catch (e: any) {
-    errorMessage.value = getErrorDetail(e, 'خطای ناشناخته')
+  const result = await runMutation({
+    key: `update-alias:${alias.id}`,
+    context: { kind: 'update-alias', entityId: alias.id },
+    url: `/api/commodities/aliases/${alias.id}`,
+    method: 'PUT',
+    body: JSON.stringify({ alias: form.name.trim() }),
+    operation: 'update',
+    fallbackMessage: 'ویرایش نام مستعار انجام نشد.',
+    validate: (receipt, response) => response.status === 200 && isCommodityAlias(receipt),
+  })
+  if (!result || result.outcome === 'duplicate') return
+  if (result.outcome === 'error') {
+    errorMessage.value = 'ویرایش نام مستعار انجام نشد. اطلاعات واردشده حفظ شده است.'
     viewMode.value = 'edit_alias'
-  } finally {
-    isLoading.value = false
+    return
   }
+
+  const data = result.receipt as CommodityAlias
+  commodity.aliases = commodity.aliases.map((entry) => entry.id === data.id ? data : entry)
+  selectedCommodity.value = commodity
+  selectedAlias.value = data
+  replaceCommodity(commodity)
+  successMessage.value = `نام مستعار با موفقیت به «${data.alias}» تغییر یافت.`
+  viewMode.value = 'aliases'
+  await onManageAliases(commodity, true)
 }
 
 function onDeleteCommodityStart() {
@@ -306,28 +436,30 @@ function onDeleteCommodityStart() {
 }
 
 async function onDeleteCommodityConfirm() {
-  if (!selectedCommodity.value) return
-  isLoading.value = true
+  if (!selectedCommodity.value || isActionBusy.value) return
+  const commodity = selectedCommodity.value
   resetMessages()
-  try {
-    const response = await apiFetch(`/api/commodities/${selectedCommodity.value.id}`, {
-      method: 'DELETE',
-    })
-    if (!response.ok) {
-      const data = response.status !== 204 ? await response.json() : null
-      if (data) {
-        throw { detail: data.detail || 'خطا در حذف کالا' }
-      }
-    }
-
-    successMessage.value = `کالا «${selectedCommodity.value.name}» با موفقیت حذف شد.`
-    await fetchCommodities()
-  } catch (e: any) {
-    errorMessage.value = getErrorDetail(e, 'خطای ناشناخته')
-    await onManageAliases(selectedCommodity.value)
-  } finally {
-    isLoading.value = false
+  const result = await runMutation({
+    key: `delete-commodity:${commodity.id}`,
+    context: { kind: 'delete-commodity', entityId: commodity.id },
+    url: `/api/commodities/${commodity.id}`,
+    method: 'DELETE',
+    operation: 'delete',
+    fallbackMessage: 'حذف کالا انجام نشد.',
+    validate: (receipt, response) => response.status === 204 && receipt === null,
+  })
+  if (!result || result.outcome === 'duplicate') return
+  if (result.outcome === 'error') {
+    errorMessage.value = 'حذف کالا انجام نشد. کالا و صفحهٔ تأیید تغییری نکرده‌اند.'
+    viewMode.value = 'delete_commodity'
+    return
   }
+
+  commodities.value = commodities.value.filter((entry) => entry.id !== commodity.id)
+  selectedCommodity.value = null
+  successMessage.value = `کالا «${commodity.name}» با موفقیت حذف شد.`
+  viewMode.value = 'list'
+  await fetchCommodities({ preserveMessages: true })
 }
 
 function onDeleteAliasStart(alias: CommodityAlias) {
@@ -338,31 +470,42 @@ function onDeleteAliasStart(alias: CommodityAlias) {
 }
 
 async function onDeleteAliasConfirm() {
-  if (!selectedCommodity.value || !selectedAlias.value) return
-  isLoading.value = true
+  if (!selectedCommodity.value || !selectedAlias.value || isActionBusy.value) return
+  const commodity = selectedCommodity.value
+  const alias = selectedAlias.value
   resetMessages()
-  try {
-    const response = await apiFetch(`/api/commodities/aliases/${selectedAlias.value.id}`, {
-      method: 'DELETE',
-    })
-    if (!response.ok) {
-      const data = response.status !== 204 ? await response.json() : null
-      if (data) {
-        throw { detail: data.detail || 'خطا در حذف نام مستعار' }
-      }
-    }
-
-    successMessage.value = `نام مستعار «${selectedAlias.value.alias}» با موفقیت حذف شد.`
-    await onManageAliases(selectedCommodity.value)
-  } catch (e: any) {
-    errorMessage.value = getErrorDetail(e, 'خطای ناشناخته')
-    await onManageAliases(selectedCommodity.value)
-  } finally {
-    isLoading.value = false
+  const result = await runMutation({
+    key: `delete-alias:${alias.id}`,
+    context: { kind: 'delete-alias', entityId: alias.id },
+    url: `/api/commodities/aliases/${alias.id}`,
+    method: 'DELETE',
+    operation: 'delete',
+    fallbackMessage: 'حذف نام مستعار انجام نشد.',
+    validate: (receipt, response) => response.status === 204 && receipt === null,
+  })
+  if (!result || result.outcome === 'duplicate') return
+  if (result.outcome === 'error') {
+    errorMessage.value = 'حذف نام مستعار انجام نشد. نام و صفحهٔ تأیید تغییری نکرده‌اند.'
+    viewMode.value = 'delete_alias'
+    return
   }
+
+  commodity.aliases = commodity.aliases.filter((entry) => entry.id !== alias.id)
+  selectedCommodity.value = commodity
+  selectedAlias.value = null
+  replaceCommodity(commodity)
+  successMessage.value = `نام مستعار «${alias.alias}» با موفقیت حذف شد.`
+  viewMode.value = 'aliases'
+  await onManageAliases(commodity, true)
 }
 
 onMounted(fetchCommodities)
+onUnmounted(() => {
+  listRequestSequence += 1
+  detailRequestSequence += 1
+  listAbortController?.abort()
+  detailAbortController?.abort()
+})
 </script>
 
 <template>
@@ -373,8 +516,18 @@ onMounted(fetchCommodities)
     </div>
 
     <div v-if="errorMessage" class="commodity-feedback commodity-feedback--error" role="alert" aria-live="assertive">
-      <strong>ثبت اطلاعات انجام نشد</strong>
+      <strong>{{ viewMode === 'list' && !hasLoadedList ? 'دریافت اطلاعات انجام نشد' : 'ثبت اطلاعات انجام نشد' }}</strong>
       <pre class="error-pre">{{ errorMessage }}</pre>
+      <AppButton
+        v-if="viewMode === 'list' && !hasLoadedList"
+        type="button"
+        class="commodity-list-retry"
+        variant="secondary"
+        :loading="listLoading"
+        @click="fetchCommodities"
+      >
+        تلاش مجدد
+      </AppButton>
     </div>
 
     <AppSectionCard
@@ -391,10 +544,10 @@ onMounted(fetchCommodities)
         </AppButton>
       </template>
 
-      <AppLoadingState v-if="isLoading" label="در حال دریافت کالاها" />
+      <AppLoadingState v-if="listLoading && !hasLoadedList" label="در حال دریافت کالاها" />
 
       <AppEmptyState
-        v-else-if="commodities.length === 0"
+        v-else-if="hasLoadedList && commodities.length === 0"
         title="هنوز کالایی ثبت نشده است"
         message="ابتدا کالای اصلی را ثبت کنید و سپس نام‌های مستعار آن را مدیریت کنید."
       >
@@ -406,7 +559,7 @@ onMounted(fetchCommodities)
         </template>
       </AppEmptyState>
 
-      <div v-else class="list-group">
+      <div v-else-if="hasLoadedList" class="list-group" :aria-busy="listLoading">
         <AppListItem
           v-for="comm in commodities"
           :key="comm.id"
@@ -436,16 +589,14 @@ onMounted(fetchCommodities)
         <template #actions>
           <div class="aliases-header-actions">
             <AppStatusBadge tone="info">{{ aliasCountLabel(selectedCommodityAliasCount) }}</AppStatusBadge>
-            <AppIconButton @click="fetchCommodities" class="commodity-back-control" label="بازگشت به فهرست کالاها">
+            <AppIconButton @click="returnToList" class="commodity-back-control" label="بازگشت به فهرست کالاها">
               <ArrowRight :size="16" />
             </AppIconButton>
           </div>
         </template>
 
-        <AppLoadingState v-if="isLoading" label="در حال دریافت نام‌های مستعار" />
-
         <AppEmptyState
-          v-else-if="selectedCommodity.aliases.length === 0"
+          v-if="selectedCommodity.aliases.length === 0"
           title="نام مستعاری برای این کالا ثبت نشده است"
           message="می‌توانید یک یا چند نام مستعار جدید به این کالا اضافه کنید."
         >
@@ -561,8 +712,8 @@ onMounted(fetchCommodities)
         </AppFormField>
 
         <div class="form-footer">
-          <AppButton type="submit" variant="primary" :loading="isLoading">افزودن کالا</AppButton>
-          <AppButton type="button" variant="secondary" :disabled="isLoading" @click="fetchCommodities">لغو</AppButton>
+          <AppButton type="submit" variant="primary" :loading="isActionBusy">افزودن کالا</AppButton>
+          <AppButton type="button" variant="secondary" :disabled="isActionBusy" @click="returnToList">لغو</AppButton>
         </div>
       </form>
     </AppSectionCard>
@@ -587,8 +738,8 @@ onMounted(fetchCommodities)
         </AppFormField>
 
         <div class="form-footer">
-          <AppButton type="submit" variant="primary" :loading="isLoading">ذخیره نام</AppButton>
-          <AppButton type="button" variant="secondary" :disabled="isLoading" @click="onManageAliases(selectedCommodity)">لغو</AppButton>
+          <AppButton type="submit" variant="primary" :loading="isActionBusy">ذخیره نام</AppButton>
+          <AppButton type="button" variant="secondary" :disabled="isActionBusy" @click="returnToAliases">لغو</AppButton>
         </div>
       </form>
     </AppSectionCard>
@@ -614,8 +765,8 @@ onMounted(fetchCommodities)
         </AppFormField>
 
         <div class="form-footer">
-          <AppButton type="submit" variant="primary" :loading="isLoading">افزودن</AppButton>
-          <AppButton type="button" variant="secondary" :disabled="isLoading" @click="onManageAliases(selectedCommodity)">لغو</AppButton>
+          <AppButton type="submit" variant="primary" :loading="isActionBusy">افزودن</AppButton>
+          <AppButton type="button" variant="secondary" :disabled="isActionBusy" @click="returnToAliases">لغو</AppButton>
         </div>
       </form>
     </AppSectionCard>
@@ -640,8 +791,8 @@ onMounted(fetchCommodities)
         </AppFormField>
 
         <div class="form-footer">
-          <AppButton type="submit" variant="primary" :loading="isLoading">ذخیره</AppButton>
-          <AppButton type="button" variant="secondary" :disabled="isLoading" @click="onManageAliases(selectedCommodity)">لغو</AppButton>
+          <AppButton type="submit" variant="primary" :loading="isActionBusy">ذخیره</AppButton>
+          <AppButton type="button" variant="secondary" :disabled="isActionBusy" @click="returnToAliases">لغو</AppButton>
         </div>
       </form>
     </AppSectionCard>
@@ -653,8 +804,8 @@ onMounted(fetchCommodities)
     >
       <p class="confirm-text">آیا از حذف کامل «{{ selectedCommodity.name }}» مطمئن هستید؟</p>
       <div class="form-footer">
-        <AppButton type="button" variant="danger" :loading="isLoading" @click="onDeleteCommodityConfirm">بله، حذف کامل</AppButton>
-        <AppButton type="button" variant="secondary" :disabled="isLoading" @click="onManageAliases(selectedCommodity)">لغو</AppButton>
+        <AppButton type="button" variant="danger" :loading="isActionBusy" @click="onDeleteCommodityConfirm">بله، حذف کامل</AppButton>
+        <AppButton type="button" variant="secondary" :disabled="isActionBusy" @click="returnToAliases">لغو</AppButton>
       </div>
     </AppDangerZone>
 
@@ -665,8 +816,8 @@ onMounted(fetchCommodities)
     >
       <p class="confirm-text">آیا از حذف نام مستعار «{{ selectedAlias.alias }}» مطمئن هستید؟</p>
       <div class="form-footer">
-        <AppButton type="button" variant="danger" :loading="isLoading" @click="onDeleteAliasConfirm">بله، حذف شود</AppButton>
-        <AppButton type="button" variant="secondary" :disabled="isLoading" @click="onManageAliases(selectedCommodity)">لغو</AppButton>
+        <AppButton type="button" variant="danger" :loading="isActionBusy" @click="onDeleteAliasConfirm">بله، حذف شود</AppButton>
+        <AppButton type="button" variant="secondary" :disabled="isActionBusy" @click="returnToAliases">لغو</AppButton>
       </div>
     </AppDangerZone>
   </div>

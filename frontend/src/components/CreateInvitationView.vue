@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue';
-import { apiFetch } from '../utils/auth';
+import { routeRequest, routeRequestJson } from '../utils/routeRequest';
+import { useActionState } from '../composables/useActionState';
 import { getInvitableRoleOptions } from '../utils/adminAccess';
 import { formatIranDateTime } from '../utils/iranTime';
 import { invitationSmsStatusMessage, normalizeInvitationContract, type InvitationSmsStatus } from '../utils/invitationContract';
@@ -51,8 +52,12 @@ const webCopyMessage = ref('');
 const pendingInvitations = ref<PendingInvitation[]>([]);
 const pendingLoading = ref(false);
 const pendingError = ref('');
+const pendingHasLoaded = ref(false);
 const pendingDeleteId = ref<number | null>(null);
+const pendingDeleteCandidate = ref<PendingInvitation | null>(null);
+const pendingDeleteError = ref('');
 const pendingCopyState = reactive<Record<string, string>>({});
+const pendingDeleteActions = useActionState<{ invitationId: number }, null>();
 
 onMounted(() => {
   if (props.jwtToken) {
@@ -150,15 +155,6 @@ function formatDateTime(value: string | null | undefined): string {
   }) || value;
 }
 
-async function readErrorDetail(resp: Response, fallback: string): Promise<string> {
-  try {
-    const data = await resp.json();
-    return data.detail || fallback;
-  } catch {
-    return fallback;
-  }
-}
-
 async function loadPendingInvitations() {
   if (!props.jwtToken) {
     pendingInvitations.value = [];
@@ -168,14 +164,20 @@ async function loadPendingInvitations() {
   pendingLoading.value = true;
   pendingError.value = '';
   try {
-    const resp = await apiFetch('/api/invitations/pending');
-    if (!resp.ok) {
-      throw new Error(await readErrorDetail(resp, 'خطا در دریافت دعوت‌نامه‌های pending'));
-    }
-    const data = await resp.json();
-    pendingInvitations.value = Array.isArray(data) ? data : [];
-  } catch (e: any) {
-    pendingError.value = e.message || 'خطا در دریافت دعوت‌نامه‌های pending';
+    const data = await routeRequestJson<unknown>('/api/invitations/pending', {
+      errorContext: {
+        surface: 'admin',
+        scope: 'list',
+        operation: pendingHasLoaded.value ? 'background-refresh' : 'load-list',
+        preserveExistingData: pendingHasLoaded.value,
+        fallbackMessage: 'دریافت دعوت‌نامه‌ها ممکن نشد.',
+      },
+    });
+    if (!Array.isArray(data)) throw new Error('invalid_pending_invitations_payload');
+    pendingInvitations.value = data as PendingInvitation[];
+    pendingHasLoaded.value = true;
+  } catch {
+    pendingError.value = 'دریافت دعوت‌نامه‌ها ممکن نشد. دوباره تلاش کنید.';
   } finally {
     pendingLoading.value = false;
   }
@@ -224,26 +226,58 @@ function copyPendingLink(invitation: PendingInvitation, surface: 'bot' | 'web') 
   });
 }
 
-async function deletePendingInvitation(invitation: PendingInvitation) {
-  const confirmed = window.confirm(`دعوت‌نامه ${invitation.account_name} حذف شود؟`);
-  if (!confirmed) return;
+function requestPendingInvitationDelete(invitation: PendingInvitation) {
+  if (pendingDeleteId.value !== null) return;
+  pendingDeleteCandidate.value = invitation;
+  pendingDeleteError.value = '';
+}
+
+function cancelPendingInvitationDelete() {
+  if (pendingDeleteId.value !== null) return;
+  pendingDeleteCandidate.value = null;
+  pendingDeleteError.value = '';
+}
+
+async function confirmPendingInvitationDelete() {
+  const invitation = pendingDeleteCandidate.value;
+  if (!invitation || pendingDeleteId.value !== null) return;
+
+  const actionKey = `delete-pending-invitation:${invitation.id}`;
+  if (pendingDeleteActions.isBusy(actionKey)) return;
 
   pendingDeleteId.value = invitation.id;
-  pendingError.value = '';
-  try {
-    const resp = await apiFetch(`/api/invitations/pending/${invitation.id}`, { method: 'DELETE' });
-    if (!resp.ok) {
-      throw new Error(await readErrorDetail(resp, 'خطا در حذف دعوت‌نامه'));
-    }
+  pendingDeleteError.value = '';
+  const result = await pendingDeleteActions.run({
+    key: actionKey,
+    context: { invitationId: invitation.id },
+    action: async () => {
+      const response = await routeRequest(`/api/invitations/pending/${invitation.id}`, {
+        method: 'DELETE',
+        errorContext: {
+          surface: 'admin',
+          scope: 'action',
+          operation: 'delete',
+          userInitiated: true,
+          fallbackMessage: 'حذف دعوت‌نامه انجام نشد.',
+        },
+      });
+      return { response, receipt: null };
+    },
+    validateReceipt: (receipt, _context, response) => receipt === null && response.status === 204,
+  });
+
+  if (result.outcome === 'success') {
     pendingInvitations.value = pendingInvitations.value.filter((item) => item.id !== invitation.id);
-  } catch (e: any) {
-    pendingError.value = e.message || 'خطا در حذف دعوت‌نامه';
-  } finally {
-    pendingDeleteId.value = null;
+    pendingDeleteCandidate.value = null;
+    pendingDeleteError.value = '';
+  } else if (result.outcome === 'error') {
+    pendingDeleteError.value = 'حذف دعوت‌نامه انجام نشد. دعوت‌نامه تغییری نکرده است.';
   }
+  pendingDeleteId.value = null;
 }
 
 async function createInvite() {
+  if (isLoading.value) return;
   if (!props.jwtToken) {
     resultMessage.value = '❌ خطا: شما احراز هویت نشده‌اید.';
     return;
@@ -263,20 +297,21 @@ async function createInvite() {
   copyMessage.value = '';
 
   try {
-    const resp = await apiFetch(`/api/invitations/`, {
+    const data = await routeRequestJson<unknown>(`/api/invitations/`, {
       method: 'POST',
       body: JSON.stringify({ ...invite, mobile_number: normalizedMobile }),
+      errorContext: {
+        surface: 'admin',
+        scope: 'form',
+        operation: 'submit',
+        userInitiated: true,
+        fallbackMessage: 'ساخت دعوت‌نامه انجام نشد.',
+      },
     });
-    
-    const data = await resp.json();
-    if (!resp.ok) {
-      const detail = data.detail || 'خطا در ایجاد دعوت‌نامه';
-      resultMessage.value = `❌ ${detail.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')}`;
-      throw new Error(detail);
-    }
 
     const contract = normalizeInvitationContract(data);
     if (contract.state !== 'pending' || (!contract.botLink && !contract.webLink)) {
+      resultMessage.value = '❌ لینک قابل استفاده‌ای برای این دعوت‌نامه آماده نشد.';
       throw new Error('لینک قابل استفاده‌ای برای این دعوت‌نامه آماده نشد.');
     }
     inviteLink.value = contract.botLink;
@@ -289,9 +324,9 @@ async function createInvite() {
     
     // emit('invite-created', plainTextMessage); // (حذف شد)
     
-  } catch (e: any) {
+  } catch {
     if (!resultMessage.value.startsWith('❌')) {
-       resultMessage.value = `❌ ${e.message}`;
+       resultMessage.value = '❌ ساخت دعوت‌نامه انجام نشد. اطلاعات واردشده حفظ شده است؛ دوباره تلاش کنید.';
     }
   } finally {
     isLoading.value = false;
@@ -332,7 +367,8 @@ function normalizeMobile(mobile: string): string {
       </div>
     </form>
 
-    <div v-if="resultMessage && !createdContract" class="result-box error" v-html="resultMessage">
+    <div v-if="resultMessage && !createdContract" class="result-box error" role="alert">
+      {{ resultMessage }}
     </div>
 
     <div v-if="createdContract" class="success-box">
@@ -366,18 +402,28 @@ function normalizeMobile(mobile: string): string {
       </div>
 
       <AppErrorState
-        v-if="pendingError"
+        v-if="pendingError && !pendingHasLoaded"
         class="pending-error"
-        title="خطا در دریافت دعوت‌نامه‌ها"
+        title="دریافت دعوت‌نامه‌ها انجام نشد"
         :message="pendingError"
-      />
+      >
+        <template #actions>
+          <AppButton type="button" variant="secondary" :loading="pendingLoading" @click="loadPendingInvitations">
+            تلاش مجدد
+          </AppButton>
+        </template>
+      </AppErrorState>
+      <div v-else-if="pendingError" class="pending-refresh-error" role="alert">
+        <span>{{ pendingError }}</span>
+        <AppButton type="button" variant="ghost" size="sm" :loading="pendingLoading" @click="loadPendingInvitations">تلاش مجدد</AppButton>
+      </div>
       <AppLoadingState
-        v-if="pendingLoading && !pendingInvitations.length"
+        v-if="pendingLoading && !pendingHasLoaded"
         class="pending-state"
         label="در حال دریافت دعوت‌نامه‌ها..."
       />
       <AppEmptyState
-        v-else-if="!pendingInvitations.length"
+        v-else-if="pendingHasLoaded && !pendingInvitations.length"
         class="pending-state empty"
         title="دعوت‌نامه pending وجود ندارد."
       />
@@ -409,10 +455,30 @@ function normalizeMobile(mobile: string): string {
             class="delete-pending-btn"
             variant="danger"
             :loading="pendingDeleteId === pending.id"
-            @click="deletePendingInvitation(pending)"
+            :disabled="pendingDeleteId !== null"
+            @click="requestPendingInvitationDelete(pending)"
           >
             {{ pendingDeleteId === pending.id ? 'در حال حذف...' : 'حذف' }}
           </AppButton>
+          <div
+            v-if="pendingDeleteCandidate?.id === pending.id"
+            class="pending-delete-confirm"
+            role="alertdialog"
+            aria-modal="false"
+            :aria-labelledby="`pending-delete-title-${pending.id}`"
+          >
+            <strong :id="`pending-delete-title-${pending.id}`">حذف دعوت‌نامه {{ pending.account_name }}؟</strong>
+            <p>دعوت‌نامه فقط پس از تأیید پاسخ سرور از فهرست حذف می‌شود.</p>
+            <p v-if="pendingDeleteError" class="pending-delete-error" role="alert">{{ pendingDeleteError }}</p>
+            <div class="pending-delete-actions">
+              <AppButton type="button" variant="danger" :loading="pendingDeleteId === pending.id" @click="confirmPendingInvitationDelete">
+                تأیید حذف
+              </AppButton>
+              <AppButton type="button" variant="secondary" :disabled="pendingDeleteId !== null" @click="cancelPendingInvitationDelete">
+                انصراف
+              </AppButton>
+            </div>
+          </div>
         </div>
       </div>
     </section>
@@ -560,6 +626,38 @@ input:focus, select:focus {
   border: 1px solid var(--ds-danger-200);
   color: var(--ds-danger-800);
   font-size: 0.78rem;
+}
+.pending-refresh-error,
+.pending-delete-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  margin-bottom: 0.75rem;
+  padding: 0.75rem;
+  border: 1px solid var(--ds-danger-200);
+  border-radius: var(--ds-radius-md);
+  background: var(--ds-danger-50);
+  color: var(--ds-danger-800);
+  font-size: var(--ds-font-xs);
+}
+.pending-refresh-error {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+}
+.pending-delete-confirm {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+.pending-delete-confirm p {
+  margin: 0;
+}
+.pending-delete-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+.pending-delete-error {
+  font-weight: 700;
 }
 .pending-state {
   padding: 0.875rem;

@@ -124,14 +124,16 @@ describe('CreateInvitationView.vue', () => {
     await wrapper.get('form').trigger('submit.prevent')
     await flushPromises()
 
-    expect(createInvitationMocks.apiFetchMock).toHaveBeenCalledWith('/api/invitations/', {
+    expect(createInvitationMocks.apiFetchMock).toHaveBeenCalledWith('/api/invitations/', expect.objectContaining({
       method: 'POST',
       body: JSON.stringify({
         account_name: 'alireza',
         mobile_number: '09123456789',
         role: 'مدیر میانی',
       }),
-    })
+      retryNetwork: false,
+      trackConnectionState: false,
+    }))
     const textInputs = wrapper.findAll('.success-box input[readonly]')
     expect(wrapper.text()).toContain('✅ لینک دعوت با موفقیت ایجاد شد:')
     expect(textInputs[0]!.classes()).toContain('ui-input')
@@ -187,7 +189,7 @@ describe('CreateInvitationView.vue', () => {
     expect(wrapper.text()).toContain('لینک قابل استفاده‌ای برای این دعوت‌نامه آماده نشد.')
   })
 
-  it('renders backend error details with strong markup when invite creation is rejected', async () => {
+  it('keeps the draft and renders a cause-neutral message when invite creation is rejected', async () => {
     createInvitationMocks.apiFetchMock.mockResolvedValue(
       makeJsonResponse({ detail: 'خطا **مهم**' }, false, 409),
     )
@@ -198,8 +200,11 @@ describe('CreateInvitationView.vue', () => {
     await wrapper.get('form').trigger('submit.prevent')
     await flushPromises()
 
-    expect(wrapper.get('.result-box.error').html()).toContain('<strong>مهم</strong>')
-    expect(wrapper.text()).toContain('❌ خطا مهم')
+    expect(wrapper.get('.result-box.error').text()).toContain('ساخت دعوت‌نامه انجام نشد.')
+    expect(wrapper.get('.result-box.error').text()).not.toContain('خطا مهم')
+    expect((wrapper.get('#account_name').element as HTMLInputElement).value).toBe('alireza')
+    expect((wrapper.get('#mobile_number').element as HTMLInputElement).value).toBe('09123456789')
+    expect((wrapper.get('#role').element as HTMLSelectElement).value).toBe('مدیر میانی')
   })
 
   it('shows thrown request errors when the API call itself fails', async () => {
@@ -211,7 +216,8 @@ describe('CreateInvitationView.vue', () => {
     await wrapper.get('form').trigger('submit.prevent')
     await flushPromises()
 
-    expect(wrapper.text()).toContain('❌ network down')
+    expect(wrapper.text()).toContain('❌ ساخت دعوت‌نامه انجام نشد.')
+    expect(wrapper.text()).not.toContain('network down')
   })
 
   it('copies the Telegram invite link through navigator.clipboard and clears the toast after the timeout', async () => {
@@ -353,7 +359,7 @@ describe('CreateInvitationView.vue', () => {
 
     const wrapper = await mountView({}, { clearInitialFetch: false })
 
-    expect(createInvitationMocks.apiFetchMock).toHaveBeenCalledWith('/api/invitations/pending')
+    expect(createInvitationMocks.apiFetchMock).toHaveBeenCalledWith('/api/invitations/pending', expect.any(Object))
     expect(wrapper.text()).toContain('pending-user')
     expect(wrapper.text()).toContain('09120000000')
     expect(wrapper.get('.pending-refresh-btn').classes()).toContain('ui-button')
@@ -491,8 +497,17 @@ describe('CreateInvitationView.vue', () => {
     await wrapper.get('.delete-pending-btn').trigger('click')
     await flushPromises()
 
-    expect(window.confirm).toHaveBeenCalledWith('دعوت‌نامه pending-user حذف شود؟')
-    expect(createInvitationMocks.apiFetchMock).toHaveBeenCalledWith('/api/invitations/pending/12', { method: 'DELETE' })
+    expect(wrapper.get('.pending-delete-confirm').text()).toContain('حذف دعوت‌نامه pending-user؟')
+    expect(createInvitationMocks.apiFetchMock).not.toHaveBeenCalledWith('/api/invitations/pending/12', expect.anything())
+
+    await wrapper.get('.pending-delete-confirm .ui-button--danger').trigger('click')
+    await flushPromises()
+
+    expect(createInvitationMocks.apiFetchMock).toHaveBeenCalledWith('/api/invitations/pending/12', expect.objectContaining({
+      method: 'DELETE',
+      retryNetwork: false,
+      trackConnectionState: false,
+    }))
     expect(wrapper.text()).not.toContain('pending-user')
     expect(wrapper.get('.pending-state.empty').classes()).toContain('ui-empty-state')
     expect(wrapper.text()).toContain('دعوت‌نامه pending وجود ندارد.')
@@ -508,7 +523,42 @@ describe('CreateInvitationView.vue', () => {
     const pendingError = wrapper.get('.pending-error')
     expect(pendingError.classes()).toContain('ui-empty-state')
     expect(pendingError.attributes('role')).toBe('alert')
-    expect(pendingError.text()).toContain('pending down')
+    expect(pendingError.text()).toContain('دریافت دعوت‌نامه‌ها ممکن نشد. دوباره تلاش کنید.')
+    expect(pendingError.text()).not.toContain('pending down')
+  })
+
+  it('keeps the invitation and controlled confirmation open after a failed delete and ignores duplicate confirms', async () => {
+    let resolveDelete: ((value: ReturnType<typeof makeJsonResponse>) => void) | undefined
+    const deleteResponse = new Promise<ReturnType<typeof makeJsonResponse>>((resolve) => { resolveDelete = resolve })
+    createInvitationMocks.apiFetchMock.mockImplementation((url: string, init?: RequestInit) => {
+      if (url === '/api/invitations/pending') {
+        return Promise.resolve(makeJsonResponse([{
+          id: 18,
+          account_name: 'kept-user',
+          mobile_number: '09120000018',
+          role: 'عادی',
+          web_link: 'https://coin.gold-trade.ir/i/INV18',
+          expires_at: '2026-07-14T10:00:00Z',
+        }]))
+      }
+      if (url === '/api/invitations/pending/18' && init?.method === 'DELETE') return deleteResponse
+      return Promise.reject(new Error(`Unexpected API call: ${url}`))
+    })
+
+    const wrapper = await mountView({}, { clearInitialFetch: false })
+    await wrapper.get('.delete-pending-btn').trigger('click')
+    const confirmButton = wrapper.get('.pending-delete-confirm .ui-button--danger')
+    await confirmButton.trigger('click')
+    await confirmButton.trigger('click')
+
+    expect(createInvitationMocks.apiFetchMock.mock.calls.filter(([url]) => url === '/api/invitations/pending/18')).toHaveLength(1)
+    resolveDelete!(makeJsonResponse({ detail: 'server detail' }, false, 500))
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('kept-user')
+    expect(wrapper.find('.pending-delete-confirm').exists()).toBe(true)
+    expect(wrapper.get('.pending-delete-error').text()).toContain('دعوت‌نامه تغییری نکرده است.')
+    expect(wrapper.text()).not.toContain('server detail')
   })
 
   it('shows a fallback copy error for the Telegram link when execCommand returns false', async () => {

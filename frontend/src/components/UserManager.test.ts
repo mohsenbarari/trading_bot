@@ -72,7 +72,10 @@ describe('UserManager.vue', () => {
 
     const wrapper = await mountView()
 
-    expect(userManagerMocks.apiFetchMock).toHaveBeenCalledWith('/api/users/')
+    expect(userManagerMocks.apiFetchMock).toHaveBeenCalledWith('/api/users/', expect.objectContaining({
+      retryNetwork: false,
+      trackConnectionState: false,
+    }))
     expect(wrapper.text()).toContain('alireza')
     expect(wrapper.text()).toContain('مشتری بازار')
     expect(wrapper.text()).toContain('مشتری')
@@ -102,7 +105,7 @@ describe('UserManager.vue', () => {
     await wrapper.get('input').trigger('keyup.enter')
     await flushPromises()
 
-    expect(userManagerMocks.apiFetchMock).toHaveBeenNthCalledWith(2, '/api/users/?search=ali%20search')
+    expect(userManagerMocks.apiFetchMock).toHaveBeenNthCalledWith(2, '/api/users/?search=ali%20search', expect.any(Object))
     expect(wrapper.text()).toContain('ali-search')
   })
 
@@ -123,7 +126,7 @@ describe('UserManager.vue', () => {
     await wrapper.get('.search-toggle-btn').trigger('click')
     await flushPromises()
 
-    expect(userManagerMocks.apiFetchMock).toHaveBeenNthCalledWith(3, '/api/users/')
+    expect(userManagerMocks.apiFetchMock).toHaveBeenNthCalledWith(3, '/api/users/', expect.any(Object))
     await wrapper.get('.search-toggle-btn').trigger('click')
     expect((wrapper.get('input').element as HTMLInputElement).value).toBe('')
     expect(wrapper.text()).toContain('base-user')
@@ -139,14 +142,63 @@ describe('UserManager.vue', () => {
     expect(wrapper.text()).toContain('کاربری یافت نشد.')
   })
 
-  it('surfaces API failures as a danger message', async () => {
-    userManagerMocks.apiFetchMock.mockResolvedValue(makeJsonResponse({ detail: 'boom' }, false))
+  it('surfaces an initial failure with a same-screen retry that can recover', async () => {
+    userManagerMocks.apiFetchMock
+      .mockResolvedValueOnce(makeJsonResponse({ detail: 'boom' }, false))
+      .mockResolvedValueOnce(makeJsonResponse([makeUser({ account_name: 'retry-user' })]))
 
     const wrapper = await mountView()
 
     const errorState = wrapper.get('.ds-message.danger')
     expect(errorState.classes()).toContain('ui-empty-state')
     expect(errorState.attributes('role')).toBe('alert')
-    expect(errorState.text()).toContain('خطا در دریافت لیست کاربران')
+    expect(errorState.text()).toContain('دریافت کاربران ممکن نشد. دوباره تلاش کنید.')
+
+    await wrapper.get('.user-load-retry').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('retry-user')
+    expect(wrapper.find('.user-initial-error').exists()).toBe(false)
+  })
+
+  it('retains rows and the active query when a search refresh fails', async () => {
+    userManagerMocks.apiFetchMock
+      .mockResolvedValueOnce(makeJsonResponse([makeUser({ account_name: 'existing-user' })]))
+      .mockResolvedValueOnce(makeJsonResponse({ detail: 'search down' }, false))
+
+    const wrapper = await mountView()
+    await wrapper.get('.search-toggle-btn').trigger('click')
+    await wrapper.get('input').setValue(' existing ')
+    await wrapper.get('.search-submit-btn').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('existing-user')
+    expect((wrapper.get('input').element as HTMLInputElement).value).toBe(' existing ')
+    expect(wrapper.get('.user-refresh-error').text()).toContain('دریافت کاربران ممکن نشد. دوباره تلاش کنید.')
+    expect(wrapper.find('.no-results').exists()).toBe(false)
+  })
+
+  it('applies only the latest search response when overlapping requests settle out of order', async () => {
+    let resolveSlow: ((value: ReturnType<typeof makeJsonResponse>) => void) | undefined
+    const slowResponse = new Promise<ReturnType<typeof makeJsonResponse>>((resolve) => { resolveSlow = resolve })
+    userManagerMocks.apiFetchMock
+      .mockResolvedValueOnce(makeJsonResponse([makeUser({ account_name: 'initial-user' })]))
+      .mockReturnValueOnce(slowResponse)
+      .mockResolvedValueOnce(makeJsonResponse([makeUser({ id: 3, account_name: 'latest-user' })]))
+
+    const wrapper = await mountView()
+    await wrapper.get('.search-toggle-btn').trigger('click')
+    await wrapper.get('input').setValue('slow')
+    await wrapper.get('.search-submit-btn').trigger('click')
+    await wrapper.get('input').setValue('latest')
+    await wrapper.get('.search-submit-btn').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('latest-user')
+    resolveSlow!(makeJsonResponse([makeUser({ id: 2, account_name: 'stale-user' })]))
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('latest-user')
+    expect(wrapper.text()).not.toContain('stale-user')
   })
 })

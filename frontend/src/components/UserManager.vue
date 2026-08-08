@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
-import { apiFetch } from '../utils/auth';
+import { ref, onMounted, onUnmounted } from 'vue';
+import { routeRequestJson } from '../utils/routeRequest';
 import LoadingSkeleton from './LoadingSkeleton.vue';
 import CustomerNameWithBadge from './CustomerNameWithBadge.vue';
 import { Search, X, ChevronLeft } from 'lucide-vue-next';
@@ -35,8 +35,14 @@ const isLoading = ref(true);
 const errorMessage = ref('');
 const searchQuery = ref('');
 const showSearch = ref(false);
+const hasSuccessfulResponse = ref(false);
+let usersRequestSequence = 0;
+let usersAbortController: AbortController | null = null;
 
 async function fetchUsers() {
+  const requestSequence = ++usersRequestSequence;
+  usersAbortController?.abort();
+  usersAbortController = new AbortController();
   isLoading.value = true;
   errorMessage.value = '';
   try {
@@ -45,13 +51,28 @@ async function fetchUsers() {
       url += `?search=${encodeURIComponent(searchQuery.value.trim())}`;
     }
     
-    const response = await apiFetch(url);
-    if (!response.ok) throw new Error('خطا در دریافت لیست کاربران');
-    users.value = await response.json();
-  } catch (e: any) {
-    errorMessage.value = e.message || 'خطای ناشناخته';
+    const payload = await routeRequestJson<unknown>(url, {
+      signal: usersAbortController.signal,
+      errorContext: {
+        surface: 'admin',
+        scope: 'list',
+        operation: hasSuccessfulResponse.value ? 'background-refresh' : 'load-list',
+        preserveExistingData: hasSuccessfulResponse.value,
+        fallbackMessage: 'دریافت کاربران ممکن نشد.',
+      },
+    });
+    if (requestSequence !== usersRequestSequence) return;
+    if (!Array.isArray(payload)) throw new Error('invalid_users_payload');
+    users.value = payload as User[];
+    hasSuccessfulResponse.value = true;
+  } catch (error) {
+    if (requestSequence !== usersRequestSequence) return;
+    if (error instanceof DOMException && error.name === 'AbortError') return;
+    errorMessage.value = 'دریافت کاربران ممکن نشد. دوباره تلاش کنید.';
   } finally {
-    isLoading.value = false;
+    if (requestSequence === usersRequestSequence) {
+      isLoading.value = false;
+    }
   }
 }
 
@@ -72,6 +93,10 @@ function getUserDisplayName(user: User) {
 }
 
 onMounted(fetchUsers);
+onUnmounted(() => {
+  usersRequestSequence += 1;
+  usersAbortController?.abort();
+});
 </script>
 
 <template>
@@ -100,13 +125,29 @@ onMounted(fetchUsers);
         </div>
       </transition>
 
-      <div v-if="isLoading" class="loading-state">
+      <div v-if="isLoading && !hasSuccessfulResponse" class="loading-state">
          <LoadingSkeleton :count="6" :height="70" />
       </div>
       
-      <AppErrorState v-else-if="errorMessage" class="ds-message danger" title="خطا در دریافت کاربران" :message="errorMessage" />
+      <AppErrorState
+        v-else-if="errorMessage && !hasSuccessfulResponse"
+        class="ds-message danger user-initial-error"
+        title="دریافت کاربران انجام نشد"
+        :message="errorMessage"
+      >
+        <template #actions>
+          <AppButton type="button" class="user-load-retry" variant="secondary" :loading="isLoading" @click="fetchUsers">
+            تلاش مجدد
+          </AppButton>
+        </template>
+      </AppErrorState>
       
-      <div v-else class="users-list">
+      <div v-else-if="hasSuccessfulResponse" class="users-list" :aria-busy="isLoading">
+        <div v-if="errorMessage" class="user-refresh-error" role="alert">
+          <span>{{ errorMessage }}</span>
+          <AppButton type="button" size="sm" variant="ghost" :loading="isLoading" @click="fetchUsers">تلاش مجدد</AppButton>
+        </div>
+
         <AppEmptyState v-if="users.length === 0" class="no-results" title="کاربری یافت نشد.">
           <template #icon>
             <Search :size="24" />
@@ -215,6 +256,19 @@ onMounted(fetchUsers);
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
+}
+
+.user-refresh-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--ds-danger-100);
+  border-radius: var(--ds-radius-md);
+  background: var(--ds-danger-50);
+  color: var(--ds-danger-700);
+  font-size: var(--ds-font-xs);
 }
 
 .no-results {
