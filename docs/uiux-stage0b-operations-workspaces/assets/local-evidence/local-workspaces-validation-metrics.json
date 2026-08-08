@@ -1,0 +1,1343 @@
+{
+  "schemaVersion": 1,
+  "runId": "1862305-1786188481595",
+  "evidenceRole": "secondary-derivative-evidence",
+  "primaryDesignSource": "Figma file z8jgJxST4O2APzWnlyP9gv",
+  "scope": "Stage 0B-3 operations and customer/accountant workspaces; Market and Messenger interiors excluded",
+  "generatedAt": "2026-08-08T11:28:07.167Z",
+  "environment": {
+    "playwrightSource": "/tmp/trading-bot-webapp-uiux-redesign-v2/frontend/node_modules/playwright",
+    "browser": "147.0.7727.15",
+    "viewport": {
+      "width": 2400,
+      "height": 1800,
+      "deviceScaleFactor": 1
+    },
+    "fontSourceRoot": "/tmp/trading-bot-webapp-uiux-redesign-v2/frontend/node_modules/vazirmatn/fonts/webfonts"
+  },
+  "font": {
+    "loaded": true,
+    "checks": [
+      {
+        "weight": 400,
+        "loaded": true
+      },
+      {
+        "weight": 500,
+        "loaded": true
+      },
+      {
+        "weight": 600,
+        "loaded": true
+      },
+      {
+        "weight": 700,
+        "loaded": true
+      }
+    ],
+    "faces": [
+      {
+        "family": "Vazirmatn Evidence",
+        "weight": "400",
+        "style": "normal",
+        "status": "loaded"
+      },
+      {
+        "family": "Vazirmatn Evidence",
+        "weight": "500",
+        "style": "normal",
+        "status": "loaded"
+      },
+      {
+        "family": "Vazirmatn Evidence",
+        "weight": "600",
+        "style": "normal",
+        "status": "loaded"
+      },
+      {
+        "family": "Vazirmatn Evidence",
+        "weight": "700",
+        "style": "normal",
+        "status": "loaded"
+      }
+    ],
+    "computedBodyFamily": "\"Vazirmatn Evidence\", Vazirmatn, Tahoma, Arial, sans-serif"
+  },
+  "captures": [
+    {
+      "selector": "#operations-role-matrix",
+      "filename": "local-operations-role-matrix.png",
+      "pixelDimensions": {
+        "width": 1268,
+        "height": 1057
+      },
+      "sha256": "01fa23d2c87d85a67cac8b82d28cea8359bbd33ee6d9ddb8719b1f0d4ae85644"
+    },
+    {
+      "selector": "#customer-task-flow",
+      "filename": "local-customer-task-flow.png",
+      "pixelDimensions": {
+        "width": 1268,
+        "height": 1056
+      },
+      "sha256": "8ac1d23054bf8859994d3627db975b60735826d1adf5450402e0679b5acfbf1d"
+    },
+    {
+      "selector": "#accountant-task-flow",
+      "filename": "local-accountant-task-flow.png",
+      "pixelDimensions": {
+        "width": 854,
+        "height": 1056
+      },
+      "sha256": "6dd589b51be5d04efe4fd0db1a5208382a62545b419f8890a8222688a5e9aa56"
+    },
+    {
+      "selector": "#workspace-state-atlas",
+      "filename": "local-workspace-state-atlas.png",
+      "pixelDimensions": {
+        "width": 1514,
+        "height": 443
+      },
+      "sha256": "3e78c678bc21cf1e30cdbb6172e749f5ceacea71d50e2855f9ab28423b8eee3b"
+    },
+    {
+      "selector": "#workspace-action-feedback",
+      "filename": "local-workspace-action-feedback.png",
+      "pixelDimensions": {
+        "width": 854,
+        "height": 1057
+      },
+      "sha256": "aef265050014db9c24910644b7f55fc2fcbb800cce2556a370ee1cca3055d157"
+    },
+    {
+      "selector": "#workspaces-responsive-sweep",
+      "filename": "local-workspaces-responsive-sweep.png",
+      "pixelDimensions": {
+        "width": 2116,
+        "height": 936
+      },
+      "sha256": "2b7f31d4a3df8df7044ecd0c484aa2f37f7ae541bca548977aaf8b8d6c1407bf"
+    },
+    {
+      "selector": "#desktop-customer-master-detail",
+      "filename": "local-customer-master-detail-1440x900.png",
+      "pixelDimensions": {
+        "width": 1440,
+        "height": 900
+      },
+      "sha256": "8b5d9b2d9cccc3752990c14d4ccc96b571f17cdcdb28d511870243268421c069"
+    }
+  ],
+  "measurements": {
+    "productScreens": [
+      {
+        "id": "M01",
+        "width": 390,
+        "height": 844,
+        "x": 591,
+        "y": 436.031,
+        "right": 981,
+        "bottom": 1280.031,
+        "clientWidth": 388,
+        "clientHeight": 842,
+        "scrollWidth": 388,
+        "scrollHeight": 842,
+        "overflowX": false,
+        "overflowY": false,
+        "mainOverflowX": false,
+        "mainOverflowY": false,
+        "contentContracts": [
+          {
+            "insideMain": true,
+            "width": 356,
+            "height": 136.188,
+            "x": 608,
+            "y": 546.156,
+            "right": 964,
+            "bottom": 682.344
+          }
+        ],
+        "descendantBoundsViolations": [],
+        "clippedTextViolations": [],
+        "visibleMainChildCount": 1,
+        "unmarkedMainChildCount": 0
+      },
+      {
+        "id": "M02",
+        "width": 390,
+        "height": 844,
+        "x": 1005,
+        "y": 436.031,
+        "right": 1395,
+        "bottom": 1280.031,
+        "clientWidth": 388,
+        "clientHeight": 842,
+        "scrollWidth": 388,
+        "scrollHeight": 842,
+        "overflowX": false,
+        "overflowY": false,
+        "mainOverflowX": false,
+        "mainOverflowY": false,
+        "contentContracts": [
+          {
+            "insideMain": true,
+            "width": 356,
+            "height": 346.469,
+            "x": 1022,
+            "y": 546.156,
+            "right": 1378,
+            "bottom": 892.625
+          }
+        ],
+        "descendantBoundsViolations": [],
+        "clippedTextViolations": [],
+        "visibleMainChildCount": 1,
+        "unmarkedMainChildCount": 0
+      },
+      {
+        "id": "M03",
+        "width": 390,
+        "height": 844,
+        "x": 1419,
+        "y": 436.031,
+        "right": 1809,
+        "bottom": 1280.031,
+        "clientWidth": 388,
+        "clientHeight": 842,
+        "scrollWidth": 388,
+        "scrollHeight": 842,
+        "overflowX": false,
+        "overflowY": false,
+        "mainOverflowX": false,
+        "mainOverflowY": false,
+        "contentContracts": [
+          {
+            "insideMain": true,
+            "width": 356,
+            "height": 128.531,
+            "x": 1436,
+            "y": 546.156,
+            "right": 1792,
+            "bottom": 674.688
+          }
+        ],
+        "descendantBoundsViolations": [],
+        "clippedTextViolations": [],
+        "visibleMainChildCount": 1,
+        "unmarkedMainChildCount": 0
+      },
+      {
+        "id": "M04",
+        "width": 390,
+        "height": 844,
+        "x": 591,
+        "y": 1519.469,
+        "right": 981,
+        "bottom": 2363.469,
+        "clientWidth": 388,
+        "clientHeight": 842,
+        "scrollWidth": 388,
+        "scrollHeight": 842,
+        "overflowX": false,
+        "overflowY": false,
+        "mainOverflowX": false,
+        "mainOverflowY": false,
+        "contentContracts": [
+          {
+            "insideMain": true,
+            "width": 356,
+            "height": 328.375,
+            "x": 608,
+            "y": 1629.594,
+            "right": 964,
+            "bottom": 1957.969
+          }
+        ],
+        "descendantBoundsViolations": [],
+        "clippedTextViolations": [],
+        "visibleMainChildCount": 1,
+        "unmarkedMainChildCount": 0
+      },
+      {
+        "id": "M05",
+        "width": 390,
+        "height": 844,
+        "x": 1005,
+        "y": 1519.469,
+        "right": 1395,
+        "bottom": 2363.469,
+        "clientWidth": 388,
+        "clientHeight": 842,
+        "scrollWidth": 388,
+        "scrollHeight": 842,
+        "overflowX": false,
+        "overflowY": false,
+        "mainOverflowX": false,
+        "mainOverflowY": false,
+        "contentContracts": [
+          {
+            "insideMain": true,
+            "width": 356,
+            "height": 274.031,
+            "x": 1022,
+            "y": 1629.594,
+            "right": 1378,
+            "bottom": 1903.625
+          }
+        ],
+        "descendantBoundsViolations": [],
+        "clippedTextViolations": [],
+        "visibleMainChildCount": 1,
+        "unmarkedMainChildCount": 0
+      },
+      {
+        "id": "M06",
+        "width": 390,
+        "height": 844,
+        "x": 1419,
+        "y": 1519.469,
+        "right": 1809,
+        "bottom": 2363.469,
+        "clientWidth": 388,
+        "clientHeight": 842,
+        "scrollWidth": 388,
+        "scrollHeight": 842,
+        "overflowX": false,
+        "overflowY": false,
+        "mainOverflowX": false,
+        "mainOverflowY": false,
+        "contentContracts": [
+          {
+            "insideMain": true,
+            "width": 356,
+            "height": 516.375,
+            "x": 1436,
+            "y": 1629.594,
+            "right": 1792,
+            "bottom": 2145.969
+          }
+        ],
+        "descendantBoundsViolations": [],
+        "clippedTextViolations": [],
+        "visibleMainChildCount": 1,
+        "unmarkedMainChildCount": 0
+      },
+      {
+        "id": "M07",
+        "width": 390,
+        "height": 844,
+        "x": 798,
+        "y": 2602.906,
+        "right": 1188,
+        "bottom": 3446.906,
+        "clientWidth": 388,
+        "clientHeight": 842,
+        "scrollWidth": 388,
+        "scrollHeight": 842,
+        "overflowX": false,
+        "overflowY": false,
+        "mainOverflowX": false,
+        "mainOverflowY": false,
+        "contentContracts": [
+          {
+            "insideMain": true,
+            "width": 356,
+            "height": 328.375,
+            "x": 815,
+            "y": 2713.031,
+            "right": 1171,
+            "bottom": 3041.406
+          }
+        ],
+        "descendantBoundsViolations": [],
+        "clippedTextViolations": [],
+        "visibleMainChildCount": 1,
+        "unmarkedMainChildCount": 0
+      },
+      {
+        "id": "M08",
+        "width": 390,
+        "height": 844,
+        "x": 1212,
+        "y": 2602.906,
+        "right": 1602,
+        "bottom": 3446.906,
+        "clientWidth": 388,
+        "clientHeight": 842,
+        "scrollWidth": 388,
+        "scrollHeight": 842,
+        "overflowX": false,
+        "overflowY": false,
+        "mainOverflowX": false,
+        "mainOverflowY": false,
+        "contentContracts": [
+          {
+            "insideMain": true,
+            "width": 356,
+            "height": 276.531,
+            "x": 1229,
+            "y": 2713.031,
+            "right": 1585,
+            "bottom": 2989.563
+          }
+        ],
+        "descendantBoundsViolations": [],
+        "clippedTextViolations": [],
+        "visibleMainChildCount": 1,
+        "unmarkedMainChildCount": 0
+      },
+      {
+        "id": "M09",
+        "width": 390,
+        "height": 844,
+        "x": 798,
+        "y": 3686.344,
+        "right": 1188,
+        "bottom": 4530.344,
+        "clientWidth": 388,
+        "clientHeight": 842,
+        "scrollWidth": 388,
+        "scrollHeight": 842,
+        "overflowX": false,
+        "overflowY": false,
+        "mainOverflowX": false,
+        "mainOverflowY": false,
+        "contentContracts": [
+          {
+            "insideMain": true,
+            "width": 356,
+            "height": 231.094,
+            "x": 815,
+            "y": 3796.469,
+            "right": 1171,
+            "bottom": 4027.563
+          }
+        ],
+        "descendantBoundsViolations": [],
+        "clippedTextViolations": [],
+        "visibleMainChildCount": 1,
+        "unmarkedMainChildCount": 0
+      },
+      {
+        "id": "M10",
+        "width": 390,
+        "height": 844,
+        "x": 1212,
+        "y": 3686.344,
+        "right": 1602,
+        "bottom": 4530.344,
+        "clientWidth": 388,
+        "clientHeight": 842,
+        "scrollWidth": 388,
+        "scrollHeight": 842,
+        "overflowX": false,
+        "overflowY": false,
+        "mainOverflowX": false,
+        "mainOverflowY": false,
+        "contentContracts": [
+          {
+            "insideMain": true,
+            "width": 356,
+            "height": 371.531,
+            "x": 1229,
+            "y": 3796.469,
+            "right": 1585,
+            "bottom": 4168
+          }
+        ],
+        "descendantBoundsViolations": [],
+        "clippedTextViolations": [],
+        "visibleMainChildCount": 1,
+        "unmarkedMainChildCount": 0
+      },
+      {
+        "id": "responsive-360",
+        "width": 360,
+        "height": 740,
+        "x": 167.5,
+        "y": 5223.969,
+        "right": 527.5,
+        "bottom": 5963.969,
+        "clientWidth": 358,
+        "clientHeight": 738,
+        "scrollWidth": 358,
+        "scrollHeight": 738,
+        "overflowX": false,
+        "overflowY": false,
+        "mainOverflowX": false,
+        "mainOverflowY": false,
+        "contentContracts": [
+          {
+            "insideMain": true,
+            "width": 332,
+            "height": 312.375,
+            "x": 181.5,
+            "y": 5329.094,
+            "right": 513.5,
+            "bottom": 5641.469
+          }
+        ],
+        "descendantBoundsViolations": [],
+        "clippedTextViolations": [],
+        "visibleMainChildCount": 1,
+        "unmarkedMainChildCount": 0
+      },
+      {
+        "id": "responsive-375",
+        "width": 375,
+        "height": 740,
+        "x": 551.5,
+        "y": 5223.969,
+        "right": 926.5,
+        "bottom": 5963.969,
+        "clientWidth": 373,
+        "clientHeight": 738,
+        "scrollWidth": 373,
+        "scrollHeight": 738,
+        "overflowX": false,
+        "overflowY": false,
+        "mainOverflowX": false,
+        "mainOverflowY": false,
+        "contentContracts": [
+          {
+            "insideMain": true,
+            "width": 347,
+            "height": 312.375,
+            "x": 565.5,
+            "y": 5329.094,
+            "right": 912.5,
+            "bottom": 5641.469
+          }
+        ],
+        "descendantBoundsViolations": [],
+        "clippedTextViolations": [],
+        "visibleMainChildCount": 1,
+        "unmarkedMainChildCount": 0
+      },
+      {
+        "id": "responsive-390",
+        "width": 390,
+        "height": 740,
+        "x": 950.5,
+        "y": 5223.969,
+        "right": 1340.5,
+        "bottom": 5963.969,
+        "clientWidth": 388,
+        "clientHeight": 738,
+        "scrollWidth": 388,
+        "scrollHeight": 738,
+        "overflowX": false,
+        "overflowY": false,
+        "mainOverflowX": false,
+        "mainOverflowY": false,
+        "contentContracts": [
+          {
+            "insideMain": true,
+            "width": 362,
+            "height": 312.375,
+            "x": 964.5,
+            "y": 5329.094,
+            "right": 1326.5,
+            "bottom": 5641.469
+          }
+        ],
+        "descendantBoundsViolations": [],
+        "clippedTextViolations": [],
+        "visibleMainChildCount": 1,
+        "unmarkedMainChildCount": 0
+      },
+      {
+        "id": "responsive-414",
+        "width": 414,
+        "height": 740,
+        "x": 1364.5,
+        "y": 5223.969,
+        "right": 1778.5,
+        "bottom": 5963.969,
+        "clientWidth": 412,
+        "clientHeight": 738,
+        "scrollWidth": 412,
+        "scrollHeight": 738,
+        "overflowX": false,
+        "overflowY": false,
+        "mainOverflowX": false,
+        "mainOverflowY": false,
+        "contentContracts": [
+          {
+            "insideMain": true,
+            "width": 386,
+            "height": 312.375,
+            "x": 1378.5,
+            "y": 5329.094,
+            "right": 1764.5,
+            "bottom": 5641.469
+          }
+        ],
+        "descendantBoundsViolations": [],
+        "clippedTextViolations": [],
+        "visibleMainChildCount": 1,
+        "unmarkedMainChildCount": 0
+      },
+      {
+        "id": "responsive-430",
+        "width": 430,
+        "height": 740,
+        "x": 1802.5,
+        "y": 5223.969,
+        "right": 2232.5,
+        "bottom": 5963.969,
+        "clientWidth": 428,
+        "clientHeight": 738,
+        "scrollWidth": 428,
+        "scrollHeight": 738,
+        "overflowX": false,
+        "overflowY": false,
+        "mainOverflowX": false,
+        "mainOverflowY": false,
+        "contentContracts": [
+          {
+            "insideMain": true,
+            "width": 402,
+            "height": 312.375,
+            "x": 1816.5,
+            "y": 5329.094,
+            "right": 2218.5,
+            "bottom": 5641.469
+          }
+        ],
+        "descendantBoundsViolations": [],
+        "clippedTextViolations": [],
+        "visibleMainChildCount": 1,
+        "unmarkedMainChildCount": 0
+      },
+      {
+        "id": "desktop-customer-master-detail",
+        "width": 1440,
+        "height": 900,
+        "x": 480,
+        "y": 6127.406,
+        "right": 1920,
+        "bottom": 7027.406,
+        "clientWidth": 1438,
+        "clientHeight": 898,
+        "scrollWidth": 1438,
+        "scrollHeight": 898,
+        "overflowX": false,
+        "overflowY": false,
+        "mainOverflowX": false,
+        "mainOverflowY": false,
+        "contentContracts": [
+          {
+            "insideMain": true,
+            "width": 736,
+            "height": 748,
+            "x": 610,
+            "y": 6244.406,
+            "right": 1346,
+            "bottom": 6992.406
+          },
+          {
+            "insideMain": true,
+            "width": 420,
+            "height": 748,
+            "x": 1370,
+            "y": 6244.406,
+            "right": 1790,
+            "bottom": 6992.406
+          }
+        ],
+        "descendantBoundsViolations": [],
+        "clippedTextViolations": [],
+        "visibleMainChildCount": 2,
+        "unmarkedMainChildCount": 0
+      }
+    ],
+    "surfaceOverflow": [
+      {
+        "id": "M01",
+        "overflowX": false,
+        "overflowY": false
+      },
+      {
+        "id": "M02",
+        "overflowX": false,
+        "overflowY": false
+      },
+      {
+        "id": "M03",
+        "overflowX": false,
+        "overflowY": false
+      },
+      {
+        "id": "M04",
+        "overflowX": false,
+        "overflowY": false
+      },
+      {
+        "id": "M05",
+        "overflowX": false,
+        "overflowY": false
+      },
+      {
+        "id": "M06",
+        "overflowX": false,
+        "overflowY": false
+      },
+      {
+        "id": "M07",
+        "overflowX": false,
+        "overflowY": false
+      },
+      {
+        "id": "M08",
+        "overflowX": false,
+        "overflowY": false
+      },
+      {
+        "id": "M09",
+        "overflowX": false,
+        "overflowY": false
+      },
+      {
+        "id": "M10",
+        "overflowX": false,
+        "overflowY": false
+      },
+      {
+        "id": "loading",
+        "overflowX": false,
+        "overflowY": false
+      },
+      {
+        "id": "error",
+        "overflowX": false,
+        "overflowY": false
+      },
+      {
+        "id": "true-empty",
+        "overflowX": false,
+        "overflowY": false
+      },
+      {
+        "id": "filter-empty",
+        "overflowX": false,
+        "overflowY": false
+      },
+      {
+        "id": "missing-detail",
+        "overflowX": false,
+        "overflowY": false
+      },
+      {
+        "id": "responsive-360",
+        "overflowX": false,
+        "overflowY": false
+      },
+      {
+        "id": "responsive-375",
+        "overflowX": false,
+        "overflowY": false
+      },
+      {
+        "id": "responsive-390",
+        "overflowX": false,
+        "overflowY": false
+      },
+      {
+        "id": "responsive-414",
+        "overflowX": false,
+        "overflowY": false
+      },
+      {
+        "id": "responsive-430",
+        "overflowX": false,
+        "overflowY": false
+      },
+      {
+        "id": "desktop-customer-master-detail",
+        "overflowX": false,
+        "overflowY": false
+      }
+    ],
+    "actions": {
+      "count": 178,
+      "minimumWidth": 44,
+      "minimumHeight": 44,
+      "violations": []
+    },
+    "ctas": {
+      "count": 9,
+      "minimumHeight": 48,
+      "violations": []
+    },
+    "mobileScenarios": [
+      {
+        "id": "M01",
+        "mode": "list",
+        "width": 390,
+        "height": 844,
+        "x": 591,
+        "y": 436.031,
+        "right": 981,
+        "bottom": 1280.031,
+        "listCount": 1,
+        "detailCount": 0,
+        "visibleMainChildCount": 1,
+        "unmarkedMainChildCount": 0,
+        "contractRootCount": 1,
+        "contractDirectChildCount": 2,
+        "nestedContractCount": 0,
+        "unexpectedTaskPaneCount": 0,
+        "actionCount": 8,
+        "xor": true,
+        "expectedMode": true
+      },
+      {
+        "id": "M02",
+        "mode": "list",
+        "width": 390,
+        "height": 844,
+        "x": 1005,
+        "y": 436.031,
+        "right": 1395,
+        "bottom": 1280.031,
+        "listCount": 1,
+        "detailCount": 0,
+        "visibleMainChildCount": 1,
+        "unmarkedMainChildCount": 0,
+        "contractRootCount": 1,
+        "contractDirectChildCount": 5,
+        "nestedContractCount": 0,
+        "unexpectedTaskPaneCount": 0,
+        "actionCount": 11,
+        "xor": true,
+        "expectedMode": true
+      },
+      {
+        "id": "M03",
+        "mode": "list",
+        "width": 390,
+        "height": 844,
+        "x": 1419,
+        "y": 436.031,
+        "right": 1809,
+        "bottom": 1280.031,
+        "listCount": 1,
+        "detailCount": 0,
+        "visibleMainChildCount": 1,
+        "unmarkedMainChildCount": 0,
+        "contractRootCount": 1,
+        "contractDirectChildCount": 2,
+        "nestedContractCount": 0,
+        "unexpectedTaskPaneCount": 0,
+        "actionCount": 6,
+        "xor": true,
+        "expectedMode": true
+      },
+      {
+        "id": "M04",
+        "mode": "list",
+        "width": 390,
+        "height": 844,
+        "x": 591,
+        "y": 1519.469,
+        "right": 981,
+        "bottom": 2363.469,
+        "listCount": 1,
+        "detailCount": 0,
+        "visibleMainChildCount": 1,
+        "unmarkedMainChildCount": 0,
+        "contractRootCount": 1,
+        "contractDirectChildCount": 5,
+        "nestedContractCount": 0,
+        "unexpectedTaskPaneCount": 0,
+        "actionCount": 12,
+        "xor": true,
+        "expectedMode": true
+      },
+      {
+        "id": "M05",
+        "mode": "detail",
+        "width": 390,
+        "height": 844,
+        "x": 1005,
+        "y": 1519.469,
+        "right": 1395,
+        "bottom": 2363.469,
+        "listCount": 0,
+        "detailCount": 1,
+        "visibleMainChildCount": 1,
+        "unmarkedMainChildCount": 0,
+        "contractRootCount": 1,
+        "contractDirectChildCount": 4,
+        "nestedContractCount": 0,
+        "unexpectedTaskPaneCount": 0,
+        "actionCount": 10,
+        "xor": true,
+        "expectedMode": true
+      },
+      {
+        "id": "M06",
+        "mode": "detail",
+        "width": 390,
+        "height": 844,
+        "x": 1419,
+        "y": 1519.469,
+        "right": 1809,
+        "bottom": 2363.469,
+        "listCount": 0,
+        "detailCount": 1,
+        "visibleMainChildCount": 1,
+        "unmarkedMainChildCount": 0,
+        "contractRootCount": 1,
+        "contractDirectChildCount": 5,
+        "nestedContractCount": 0,
+        "unexpectedTaskPaneCount": 0,
+        "actionCount": 9,
+        "xor": true,
+        "expectedMode": true
+      },
+      {
+        "id": "M07",
+        "mode": "list",
+        "width": 390,
+        "height": 844,
+        "x": 798,
+        "y": 2602.906,
+        "right": 1188,
+        "bottom": 3446.906,
+        "listCount": 1,
+        "detailCount": 0,
+        "visibleMainChildCount": 1,
+        "unmarkedMainChildCount": 0,
+        "contractRootCount": 1,
+        "contractDirectChildCount": 5,
+        "nestedContractCount": 0,
+        "unexpectedTaskPaneCount": 0,
+        "actionCount": 12,
+        "xor": true,
+        "expectedMode": true
+      },
+      {
+        "id": "M08",
+        "mode": "detail",
+        "width": 390,
+        "height": 844,
+        "x": 1212,
+        "y": 2602.906,
+        "right": 1602,
+        "bottom": 3446.906,
+        "listCount": 0,
+        "detailCount": 1,
+        "visibleMainChildCount": 1,
+        "unmarkedMainChildCount": 0,
+        "contractRootCount": 1,
+        "contractDirectChildCount": 3,
+        "nestedContractCount": 0,
+        "unexpectedTaskPaneCount": 0,
+        "actionCount": 9,
+        "xor": true,
+        "expectedMode": true
+      },
+      {
+        "id": "M09",
+        "mode": "detail",
+        "width": 390,
+        "height": 844,
+        "x": 798,
+        "y": 3686.344,
+        "right": 1188,
+        "bottom": 4530.344,
+        "listCount": 0,
+        "detailCount": 1,
+        "visibleMainChildCount": 1,
+        "unmarkedMainChildCount": 0,
+        "contractRootCount": 1,
+        "contractDirectChildCount": 2,
+        "nestedContractCount": 0,
+        "unexpectedTaskPaneCount": 0,
+        "actionCount": 9,
+        "xor": true,
+        "expectedMode": true
+      },
+      {
+        "id": "M10",
+        "mode": "detail",
+        "width": 390,
+        "height": 844,
+        "x": 1212,
+        "y": 3686.344,
+        "right": 1602,
+        "bottom": 4530.344,
+        "listCount": 0,
+        "detailCount": 1,
+        "visibleMainChildCount": 1,
+        "unmarkedMainChildCount": 0,
+        "contractRootCount": 1,
+        "contractDirectChildCount": 5,
+        "nestedContractCount": 0,
+        "unexpectedTaskPaneCount": 0,
+        "actionCount": 10,
+        "xor": true,
+        "expectedMode": true
+      }
+    ],
+    "responsive": [
+      {
+        "requestedWidth": 360,
+        "found": true,
+        "width": 360,
+        "height": 740,
+        "x": 167.5,
+        "y": 5223.969,
+        "right": 527.5,
+        "bottom": 5963.969,
+        "exactWidth": true,
+        "overflowX": false,
+        "overflowY": false,
+        "listCount": 1,
+        "detailCount": 0,
+        "navigationCount": 1,
+        "actionableCountCount": 1
+      },
+      {
+        "requestedWidth": 375,
+        "found": true,
+        "width": 375,
+        "height": 740,
+        "x": 551.5,
+        "y": 5223.969,
+        "right": 926.5,
+        "bottom": 5963.969,
+        "exactWidth": true,
+        "overflowX": false,
+        "overflowY": false,
+        "listCount": 1,
+        "detailCount": 0,
+        "navigationCount": 1,
+        "actionableCountCount": 1
+      },
+      {
+        "requestedWidth": 390,
+        "found": true,
+        "width": 390,
+        "height": 740,
+        "x": 950.5,
+        "y": 5223.969,
+        "right": 1340.5,
+        "bottom": 5963.969,
+        "exactWidth": true,
+        "overflowX": false,
+        "overflowY": false,
+        "listCount": 1,
+        "detailCount": 0,
+        "navigationCount": 1,
+        "actionableCountCount": 1
+      },
+      {
+        "requestedWidth": 414,
+        "found": true,
+        "width": 414,
+        "height": 740,
+        "x": 1364.5,
+        "y": 5223.969,
+        "right": 1778.5,
+        "bottom": 5963.969,
+        "exactWidth": true,
+        "overflowX": false,
+        "overflowY": false,
+        "listCount": 1,
+        "detailCount": 0,
+        "navigationCount": 1,
+        "actionableCountCount": 1
+      },
+      {
+        "requestedWidth": 430,
+        "found": true,
+        "width": 430,
+        "height": 740,
+        "x": 1802.5,
+        "y": 5223.969,
+        "right": 2232.5,
+        "bottom": 5963.969,
+        "exactWidth": true,
+        "overflowX": false,
+        "overflowY": false,
+        "listCount": 1,
+        "detailCount": 0,
+        "navigationCount": 1,
+        "actionableCountCount": 1
+      }
+    ],
+    "desktop": {
+      "width": 1440,
+      "height": 900,
+      "x": 480,
+      "y": 6127.406,
+      "right": 1920,
+      "bottom": 7027.406,
+      "listCount": 1,
+      "detailCount": 1,
+      "navigationCount": 1,
+      "sidebarCount": 0,
+      "kpiCount": 0,
+      "extraPaneCount": 0,
+      "sideBySide": true,
+      "selectedRowCount": 1,
+      "sameIdentity": true,
+      "overflowX": false,
+      "overflowY": false
+    },
+    "typography": {
+      "nodeCount": 557,
+      "violations": []
+    },
+    "minimalism": {
+      "forbiddenTextChecks": [
+        {
+          "term": "تعداد روابط",
+          "present": false
+        },
+        {
+          "term": "تعداد رابطه",
+          "present": false
+        },
+        {
+          "term": "کل روابط",
+          "present": false
+        },
+        {
+          "term": "مسیر",
+          "present": false
+        },
+        {
+          "term": "ابزار",
+          "present": false
+        },
+        {
+          "term": "سرور",
+          "present": false
+        },
+        {
+          "term": "بک‌اند",
+          "present": false
+        },
+        {
+          "term": "backend",
+          "present": false
+        },
+        {
+          "term": "home_server",
+          "present": false
+        },
+        {
+          "term": "API",
+          "present": false
+        },
+        {
+          "term": "نقش فعلی",
+          "present": false
+        },
+        {
+          "term": "وضعیت دسترسی",
+          "present": false
+        },
+        {
+          "term": "خلاصه دسترسی",
+          "present": false
+        }
+      ],
+      "countTextViolations": [],
+      "summaryCountCount": 0,
+      "roleChipCount": 0
+    },
+    "protectedScope": {
+      "marketInteriorCount": 0,
+      "messengerInteriorCount": 0,
+      "protectedWordViolations": [],
+      "protectedInteractiveViolations": []
+    },
+    "operations": {
+      "ownerActions": [
+        "customers",
+        "accountants"
+      ],
+      "adminActionCount": 5,
+      "accountantOwnerActionCount": 0,
+      "accountantFollowupCount": 1
+    },
+    "customer": {
+      "listActionableCount": 1,
+      "relationRowCount": 3,
+      "inviteDeadlineCount": 1,
+      "smsFailureCount": 1,
+      "inviteCopyCount": 2,
+      "futureOnlyCount": 1,
+      "completedHistoryUnchanged": true,
+      "reviewCount": 1,
+      "changeRowCount": 4,
+      "beforeValueCount": 4,
+      "afterValueCount": 4,
+      "confirmCount": 1,
+      "returnToEditCount": 1
+    },
+    "accountant": {
+      "listActionableCount": 1,
+      "relationRowCount": 3,
+      "dutyEditorCount": 1,
+      "duplicateCurrentDutyCount": 0,
+      "inlineSuccessCount": 1
+    },
+    "session": {
+      "cardCount": 1,
+      "confirmationCount": 1,
+      "confirmationActionCount": 2,
+      "immediateEffectCount": 1,
+      "primaryStatusCount": 1,
+      "deviceFactCount": 1,
+      "lastActivityCount": 1,
+      "homeServerCount": 0,
+      "forbiddenHomeServerText": false
+    },
+    "deletion": {
+      "cascadeKeys": [
+        "web-bot",
+        "sessions",
+        "offers",
+        "invites-relations"
+      ],
+      "cascadeCopy": [
+        "ورود وب‌اپ و بات غیرفعال می‌شود",
+        "همه نشست‌ها پایان می‌یابد",
+        "آفرهای فعال منقضی می‌شود",
+        "دعوت‌های در انتظار و روابط وابسته بسته می‌شوند"
+      ],
+      "confirmationInputCount": 1,
+      "confirmationValue": "محمد همتی",
+      "acknowledgementCount": 1,
+      "dangerActionCount": 1
+    },
+    "states": [
+      {
+        "type": "loading",
+        "actionCount": 0,
+        "queryCount": 0
+      },
+      {
+        "type": "error",
+        "actionCount": 1,
+        "queryCount": 0
+      },
+      {
+        "type": "true-empty",
+        "actionCount": 1,
+        "queryCount": 0
+      },
+      {
+        "type": "filter-empty",
+        "actionCount": 1,
+        "queryCount": 1
+      },
+      {
+        "type": "missing-detail",
+        "actionCount": 1,
+        "queryCount": 0
+      }
+    ]
+  },
+  "assertions": [
+    {
+      "id": "font-vazirmatn-loaded",
+      "passed": true,
+      "detail": "4 faces; 0 computed-family violation(s)"
+    },
+    {
+      "id": "ten-mobile-scenarios-complete",
+      "passed": true,
+      "detail": "M01, M02, M03, M04, M05, M06, M07, M08, M09, M10"
+    },
+    {
+      "id": "mobile-list-detail-xor",
+      "passed": true,
+      "detail": "0 mode violation(s); 0 content/action structure violation(s)"
+    },
+    {
+      "id": "mobile-roots-exact-390x844",
+      "passed": true,
+      "detail": "0 violation(s)"
+    },
+    {
+      "id": "no-product-overflow-or-clipping",
+      "passed": true,
+      "detail": "0 screen violation(s)"
+    },
+    {
+      "id": "touch-targets-44",
+      "passed": true,
+      "detail": "minimum 44×44px across 178"
+    },
+    {
+      "id": "cta-height-48",
+      "passed": true,
+      "detail": "minimum 48px across 9"
+    },
+    {
+      "id": "responsive-width-sweep",
+      "passed": true,
+      "detail": "360, 375, 390, 414, 430"
+    },
+    {
+      "id": "desktop-true-master-detail-1440x900",
+      "passed": true,
+      "detail": "1440×900; list=1; detail=1; side-by-side=true; same-identity=true"
+    },
+    {
+      "id": "minimal-content-contract",
+      "passed": true,
+      "detail": "0 forbidden term(s); 0 non-actionable count(s)"
+    },
+    {
+      "id": "protected-interiors-absent",
+      "passed": true,
+      "detail": "market=0; messenger=0; text=[]; interactive=[]"
+    },
+    {
+      "id": "operations-role-destinations-bounded",
+      "passed": true,
+      "detail": "owner=customers, accountants; admin=5; accountant-dead=0"
+    },
+    {
+      "id": "customer-flow-decision-complete",
+      "passed": true,
+      "detail": "pending=1; rows=3; deadline=1; copies=2; review=4 before/after row(s); future-only=1"
+    },
+    {
+      "id": "accountant-flow-not-duplicated",
+      "passed": true,
+      "detail": "rows=3; editor=1; duplicate=0; success=1"
+    },
+    {
+      "id": "session-decision-in-context",
+      "passed": true,
+      "detail": "card=1; dialog=1; primary=1; device=1; home-server=0"
+    },
+    {
+      "id": "maximum-risk-deletion-complete",
+      "passed": true,
+      "detail": "web-bot, sessions, offers, invites-relations; visible-copy=4; confirmation=محمد همتی"
+    },
+    {
+      "id": "recovery-state-atlas-complete",
+      "passed": true,
+      "detail": "loading:0, error:1, true-empty:1, filter-empty:1/query=1, missing-detail:1"
+    }
+  ],
+  "summary": {
+    "passed": true,
+    "assertionCount": 17,
+    "failureCount": 0,
+    "pageErrorCount": 0
+  },
+  "failures": [],
+  "pageErrors": []
+}

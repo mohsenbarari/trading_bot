@@ -1,0 +1,146 @@
+{
+  "schemaVersion": 2,
+  "capturedAt": "2026-08-08T11:01:56.541Z",
+  "localEvidenceGeneratedAt": "2026-08-08T11:28:07.167Z",
+  "sourceCommit": "99aeb6806bcdb212dc1e5e828301da1914f965fd",
+  "sourceCommitRole": "design-input-baseline",
+  "branch": "condidate/webapp-ui-ux-redesign-v2",
+  "status": "technical_complete_awaiting_owner_approval",
+  "fileKey": "z8jgJxST4O2APzWnlyP9gv",
+  "fileUrl": "https://www.figma.com/design/z8jgJxST4O2APzWnlyP9gv",
+  "page": {
+    "id": "55:2",
+    "name": "02 — Stage 0B-3 Operations & Workspaces",
+    "url": "https://www.figma.com/design/z8jgJxST4O2APzWnlyP9gv?node-id=55-2"
+  },
+  "root": {
+    "id": "55:3",
+    "name": "Stage 0B-3 — Operations & Workspaces"
+  },
+  "supportingPages": [
+    { "id": "41:2", "name": "01.5 — UIUX v2 Foundations", "kind": "foundations" },
+    { "id": "46:2", "name": "01.6 — UIUX v2 Components", "kind": "components" }
+  ],
+  "fonts": [
+    "Vazirmatn Regular",
+    "Vazirmatn Medium",
+    "Vazirmatn SemiBold",
+    "Vazirmatn Bold"
+  ],
+  "nodes": [
+    { "id": "55:4", "name": "00 — Contract", "kind": "contract" },
+    { "id": "55:19", "name": "01 — Operations role scenarios", "kind": "section", "screenshotStatus": "final" },
+    { "id": "56:6", "name": "0B3-M01 phone — owner operations", "kind": "mobile", "width": 390, "height": 844 },
+    { "id": "56:57", "name": "0B3-M02 phone — superadmin operations", "kind": "mobile", "width": 390, "height": 844 },
+    { "id": "56:129", "name": "0B3-M03 phone — accountant no action", "kind": "mobile", "width": 390, "height": 844 },
+    { "id": "55:22", "name": "02 — Customer workspace scenarios", "kind": "section", "screenshotStatus": "final" },
+    { "id": "57:93", "name": "0B3-M04 phone — customer list", "kind": "mobile", "width": 390, "height": 844 },
+    { "id": "57:177", "name": "0B3-M05 phone — pending customer invitation", "kind": "mobile", "width": 390, "height": 844 },
+    { "id": "57:235", "name": "0B3-M06 phone — customer financial review", "kind": "mobile", "width": 390, "height": 844 },
+    { "id": "55:25", "name": "03 — Accountant workspace scenarios", "kind": "section", "screenshotStatus": "final" },
+    { "id": "58:231", "name": "0B3-M07 phone — accountant list", "kind": "mobile", "width": 390, "height": 844 },
+    { "id": "58:309", "name": "0B3-M08 phone — accountant duty edit", "kind": "mobile", "width": 390, "height": 844 },
+    { "id": "55:28", "name": "04 — Sensitive actions and state atlas", "kind": "section", "screenshotStatus": "final" },
+    { "id": "60:325", "name": "0B3-M09 phone — terminate session", "kind": "mobile", "width": 390, "height": 844 },
+    { "id": "60:386", "name": "0B3-M10 phone — delete account cascade", "kind": "mobile", "width": 390, "height": 844 },
+    { "id": "60:452", "name": "Workspace state atlas", "kind": "state-atlas" },
+    { "id": "55:31", "name": "05 — Responsive and desktop proofs", "kind": "section", "screenshotStatus": "final" },
+    { "id": "62:397", "name": "Responsive Customer List 360", "kind": "mobile-proof", "width": 360, "height": 844 },
+    { "id": "62:465", "name": "Responsive Customer List 375", "kind": "mobile-proof", "width": 375, "height": 844 },
+    { "id": "62:533", "name": "Responsive Customer List 390", "kind": "mobile-proof", "width": 390, "height": 844 },
+    { "id": "62:602", "name": "Responsive Customer List 414", "kind": "mobile-proof", "width": 414, "height": 844 },
+    { "id": "62:670", "name": "Responsive Customer List 430", "kind": "mobile-proof", "width": 430, "height": 844 },
+    { "id": "63:544", "name": "Desktop Customer Master Detail proof", "kind": "desktop-proof", "width": 1440, "height": 900, "screenshotStatus": "final" }
+  ],
+  "directFigmaEvidence": [
+    { "path": "assets/figma-operations-role-scenarios.png", "nodeId": "55:19", "sha256": "84c92e009e5f406fea1335c6ea626593001f3f2879ae6e57ca150160c051578e" },
+    { "path": "assets/figma-customer-workspace-scenarios.png", "nodeId": "55:22", "sha256": "39e0a4b76857f408773b6640a08e85c382da551f13c3de20c6e808491a894892" },
+    { "path": "assets/figma-accountant-workspace-scenarios.png", "nodeId": "55:25", "sha256": "436c1c6b3faca52d1591cf036f6145847b6e35aa9c304a9f984059a8b5a26ec7" },
+    { "path": "assets/figma-actions-and-state-atlas.png", "nodeId": "55:28", "sha256": "683d2c48ddcb387d1a851211862d63340b0abdd1ae7d8c45566431a04afac062" },
+    { "path": "assets/figma-responsive-and-desktop-proofs.png", "nodeId": "55:31", "sha256": "a19b366d08a1a7ec4f96b7d67beb03f056541996468365eb7d21ccc23110534d" },
+    { "path": "assets/figma-desktop-customer-master-detail-1440x900.png", "nodeId": "63:544", "sha256": "6e52f3610c4a47956c9487a6440b6a56d4de04380ec632379e6ecb959a422bc5" }
+  ],
+  "technicalEvidence": [
+    {
+      "path": "assets/figma-stage0b3-audit-metrics.json",
+      "sha256": "46816eaaf7ca07bc91462d727b0b42e11b01be59d0c2fe177d1838b4a6c778b7"
+    }
+  ],
+  "secondaryDerivativeEvidence": [
+    { "path": "assets/local-evidence/local-operations-role-matrix.png", "sha256": "01fa23d2c87d85a67cac8b82d28cea8359bbd33ee6d9ddb8719b1f0d4ae85644" },
+    { "path": "assets/local-evidence/local-customer-task-flow.png", "sha256": "8ac1d23054bf8859994d3627db975b60735826d1adf5450402e0679b5acfbf1d" },
+    { "path": "assets/local-evidence/local-accountant-task-flow.png", "sha256": "6dd589b51be5d04efe4fd0db1a5208382a62545b419f8890a8222688a5e9aa56" },
+    { "path": "assets/local-evidence/local-workspace-state-atlas.png", "sha256": "3e78c678bc21cf1e30cdbb6172e749f5ceacea71d50e2855f9ab28423b8eee3b" },
+    { "path": "assets/local-evidence/local-workspace-action-feedback.png", "sha256": "aef265050014db9c24910644b7f55fc2fcbb800cce2556a370ee1cca3055d157" },
+    { "path": "assets/local-evidence/local-workspaces-responsive-sweep.png", "sha256": "2b7f31d4a3df8df7044ecd0c484aa2f37f7ae541bca548977aaf8b8d6c1407bf" },
+    { "path": "assets/local-evidence/local-customer-master-detail-1440x900.png", "sha256": "8b5d9b2d9cccc3752990c14d4ccc96b571f17cdcdb28d511870243268421c069" },
+    { "path": "assets/local-evidence/local-workspaces-validation-metrics.json", "sha256": "ff7339c62e97a8cf9dfdec0acb074fcdc307ea8d27663e72d30fdc313db90774" }
+  ],
+  "figmaAudit": {
+    "auditSchemaVersion": 2,
+    "mobileRootCount": 10,
+    "responsiveProofCount": 5,
+    "desktopProofCount": 1,
+    "overflowViolationCount": 0,
+    "missingFontCount": 0,
+    "textHeightIssueCount": 0,
+    "forbiddenCopyViolationCount": 0,
+    "protectedSurfaceLeakCount": 0,
+    "semanticTargetCount": 61,
+    "minimumSemanticTargetWidthPx": 48,
+    "minimumSemanticTargetHeightPx": 44,
+    "stateAtlasActionCount": 4,
+    "stateAtlasMinimumActionHeightPx": 44,
+    "stateAtlasOverflowViolationCount": 0,
+    "fontFamilies": ["Vazirmatn"],
+    "variables": {
+      "primitive": 20,
+      "semantic": 26,
+      "dimensions": 19,
+      "total": 65,
+      "brokenAliasCount": 0
+    },
+    "components": {
+      "componentSetCount": 5,
+      "variantCount": 17
+    },
+    "contrast": {
+      "pairCount": 9,
+      "passCount": 9,
+      "ratios": [13.428, 5.729, 7.056, 4.548, 5.722, 5.051, 5.364, 5.009, 4.548]
+    },
+    "contracts": {
+      "mobileListXorDetail": true,
+      "desktopMasterDetailAddsNoFacts": true,
+      "accountantDeadOwnerDestinations": 0,
+      "financialReviewIsBeforeAfterAndFutureOnly": true,
+      "financialReviewBeforeAfterCellCount": 8,
+      "financialReviewConfirmActionCount": 1,
+      "deleteAccountCascadeTruthPresent": true,
+      "homeServerVisibleCount": 0,
+      "protectedMarketMessengerInteriorCount": 0
+    }
+  },
+  "localHarness": {
+    "status": "passed",
+    "assertionsPassed": 17,
+    "assertionFailures": 0,
+    "pageErrors": 0,
+    "productScreenCount": 16,
+    "responsiveWidths": [360, 375, 390, 414, 430],
+    "minimumTargetPx": 44,
+    "minimumCtaHeightPx": 48,
+    "loadedFontFaceCount": 4,
+    "actionTargetCount": 178,
+    "exactAssertionContract": true,
+    "postCaptureValidation": true,
+    "failClosedDirectoryBundlePromotion": true,
+    "captureHashesEmbedded": true
+  },
+  "externalReview": {
+    "status": "suspended_by_product_owner",
+    "blocking": false
+  },
+  "runtimeImplementationAuthorized": false,
+  "openFigmaWork": []
+}

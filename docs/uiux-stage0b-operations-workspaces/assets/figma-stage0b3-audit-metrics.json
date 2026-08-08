@@ -1,0 +1,64 @@
+{
+  "schemaVersion": 2,
+  "auditedAt": "2026-08-08T11:01:40.775Z",
+  "fileKey": "z8jgJxST4O2APzWnlyP9gv",
+  "pageId": "55:2",
+  "roots": {
+    "mobile": 10,
+    "responsive": 5,
+    "desktop": 1,
+    "responsiveWidths": [360, 375, 390, 414, 430],
+    "mobileHeight": 844,
+    "desktopSize": [1440, 900]
+  },
+  "overflow": {
+    "violations": 0
+  },
+  "typography": {
+    "families": ["Vazirmatn"],
+    "faces": ["Regular", "Medium", "SemiBold", "Bold"],
+    "missingFonts": 0,
+    "textHeightIssues": 0
+  },
+  "targets": {
+    "semanticTargetCount": 61,
+    "minimumWidthPx": 48,
+    "minimumHeightPx": 44,
+    "violations": 0,
+    "stateAtlasActionCount": 4,
+    "stateAtlasMinimumHeightPx": 44,
+    "stateAtlasOverflowViolations": 0
+  },
+  "content": {
+    "forbiddenCopyViolations": 0,
+    "protectedMarketMessengerLeaks": 0
+  },
+  "financialReview": {
+    "beforeAfterCells": 8,
+    "confirmActionCount": 1,
+    "futureOnlyAndCompletedHistoryCopyCount": 1
+  },
+  "tokens": {
+    "totalVariables": 65,
+    "primitiveVariables": 20,
+    "semanticVariables": 26,
+    "dimensionVariables": 19,
+    "brokenAliases": 0
+  },
+  "components": {
+    "componentSets": 5,
+    "variants": 17
+  },
+  "contrastPairs": [
+    {"name": "text-primary/card", "minimum": 4.5, "ratio": 13.428, "pass": true},
+    {"name": "text-secondary/card", "minimum": 4.5, "ratio": 5.729, "pass": true},
+    {"name": "text-action/card", "minimum": 4.5, "ratio": 7.056, "pass": true},
+    {"name": "on-action/primary", "minimum": 4.5, "ratio": 4.548, "pass": true},
+    {"name": "danger/danger-bg", "minimum": 4.5, "ratio": 5.722, "pass": true},
+    {"name": "warning/warning-bg", "minimum": 4.5, "ratio": 5.051, "pass": true},
+    {"name": "info/info-bg", "minimum": 4.5, "ratio": 5.364, "pass": true},
+    {"name": "success/success-bg", "minimum": 4.5, "ratio": 5.009, "pass": true},
+    {"name": "focus/card", "minimum": 3.0, "ratio": 4.548, "pass": true}
+  ],
+  "pass": true
+}

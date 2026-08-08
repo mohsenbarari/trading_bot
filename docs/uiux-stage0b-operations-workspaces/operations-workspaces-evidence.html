@@ -1,0 +1,759 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Stage 0B-3 — شواهد مشتق‌شده عملیات و فضاهای کاری</title>
+  <style>
+    @font-face {
+      font-family: "Vazirmatn";
+      src: url("../../frontend/node_modules/vazirmatn/fonts/webfonts/Vazirmatn-Regular.woff2") format("woff2");
+      font-style: normal;
+      font-weight: 400;
+      font-display: swap;
+    }
+
+    @font-face {
+      font-family: "Vazirmatn";
+      src: url("../../frontend/node_modules/vazirmatn/fonts/webfonts/Vazirmatn-Medium.woff2") format("woff2");
+      font-style: normal;
+      font-weight: 500;
+      font-display: swap;
+    }
+
+    @font-face {
+      font-family: "Vazirmatn";
+      src: url("../../frontend/node_modules/vazirmatn/fonts/webfonts/Vazirmatn-SemiBold.woff2") format("woff2");
+      font-style: normal;
+      font-weight: 600;
+      font-display: swap;
+    }
+
+    @font-face {
+      font-family: "Vazirmatn";
+      src: url("../../frontend/node_modules/vazirmatn/fonts/webfonts/Vazirmatn-Bold.woff2") format("woff2");
+      font-style: normal;
+      font-weight: 700;
+      font-display: swap;
+    }
+
+    :root {
+      color-scheme: light;
+      font-family: "Vazirmatn", Tahoma, Arial, sans-serif;
+      --ink: #0f233c;
+      --ink-2: #12314a;
+      --muted: #52697b;
+      --muted-2: #718397;
+      --border: #d4e0e9;
+      --border-strong: #bdcddd;
+      --page: #f4f7fa;
+      --surface: #ffffff;
+      --subtle: #f8fafc;
+      --action: #2f6fed;
+      --action-dark: #2353b5;
+      --action-soft: #e8f0ff;
+      --danger: #b4232c;
+      --danger-soft: #fdecee;
+      --warning: #8a6110;
+      --warning-soft: #fff4d8;
+      --info: #176b8c;
+      --info-soft: #e8f5fa;
+      --success: #0f766e;
+      --success-soft: #eaf8f3;
+      --shadow: 0 20px 54px rgba(15, 35, 60, 0.12);
+      background: #e8eef4;
+      color: var(--ink);
+    }
+
+    * { box-sizing: border-box; }
+    html { min-width: 320px; background: #e8eef4; }
+    body {
+      min-width: 320px;
+      margin: 0;
+      background:
+        radial-gradient(circle at 94% -3%, rgba(47, 111, 237, 0.12), transparent 34rem),
+        radial-gradient(circle at 1% 36%, rgba(15, 35, 60, 0.07), transparent 31rem),
+        #e8eef4;
+    }
+
+    button, input, select, textarea, a { font: inherit; }
+    button { cursor: default; }
+    a { color: inherit; text-decoration: none; }
+    bdi, .ltr { direction: ltr; unicode-bidi: isolate; }
+    svg { display: block; width: 20px; height: 20px; }
+
+    .visually-hidden {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
+
+    .board {
+      width: min(2360px, calc(100% - 32px));
+      margin: 24px auto 64px;
+    }
+
+    .board-intro,
+    .evidence-section {
+      border: 1px solid #d6e0ea;
+      border-radius: 26px;
+      background: rgba(255, 255, 255, 0.96);
+      box-shadow: 0 16px 46px rgba(24, 48, 75, 0.07);
+    }
+
+    .board-intro {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 18px 24px;
+      padding: 27px 30px;
+    }
+
+    .board-intro h1,
+    .section-heading h2,
+    .scenario-heading h3 {
+      margin: 0;
+      color: var(--ink);
+      letter-spacing: -0.025em;
+    }
+
+    .board-intro h1 { font-size: 30px; line-height: 1.5; }
+    .board-intro p { max-width: 1200px; margin: 7px 0 0; color: var(--muted); font-size: 13px; line-height: 2; }
+    .board-tags { display: flex; flex-wrap: wrap; gap: 8px; align-content: start; justify-content: flex-end; }
+    .board-tag {
+      display: inline-flex;
+      min-height: 36px;
+      align-items: center;
+      padding: 7px 12px;
+      border: 1px solid #c2d4e6;
+      border-radius: 999px;
+      background: #eef4ff;
+      color: var(--action-dark);
+      font-size: 11px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    .source-note {
+      grid-column: 1 / -1;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 11px 14px;
+      border: 1px dashed #c7d5e2;
+      border-radius: 14px;
+      background: var(--subtle);
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.8;
+    }
+    .source-note::before { width: 8px; height: 8px; flex: 0 0 auto; border-radius: 50%; background: var(--action); content: ""; }
+
+    .evidence-section {
+      width: max-content;
+      max-width: 100%;
+      margin: 28px auto 0;
+      padding: 24px;
+      overflow: hidden;
+    }
+
+    .section-heading {
+      display: flex;
+      max-width: 1560px;
+      align-items: start;
+      justify-content: space-between;
+      gap: 24px;
+      margin-bottom: 22px;
+    }
+    .section-heading h2 { font-size: 23px; line-height: 1.55; }
+    .section-heading p { max-width: 1060px; margin: 5px 0 0; color: var(--muted); font-size: 12px; line-height: 1.9; }
+    .section-code { direction: ltr; padding: 5px 8px; border-radius: 8px; background: #e2eaf2; color: #466179; font-size: 10px; font-weight: 700; }
+
+    .scenario-grid,
+    .responsive-grid {
+      display: flex;
+      align-items: flex-start;
+      justify-content: center;
+      gap: 24px;
+      direction: ltr;
+    }
+    .scenario { direction: rtl; }
+    .scenario-heading { min-height: 76px; padding: 0 10px 12px; }
+    .scenario-heading h3 { font-size: 15px; line-height: 1.7; }
+    .scenario-heading p { max-width: 370px; margin: 3px 0 0; color: var(--muted-2); font-size: 11px; line-height: 1.75; }
+
+    .device {
+      position: relative;
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr) auto;
+      width: var(--device-width, 390px);
+      height: var(--device-height, 844px);
+      overflow: hidden;
+      border: 1px solid var(--border-strong);
+      border-radius: 34px;
+      background: var(--page);
+      box-shadow: var(--shadow);
+      color: var(--ink);
+      isolation: isolate;
+    }
+
+    .device::before {
+      position: absolute;
+      top: 9px;
+      left: 50%;
+      z-index: 8;
+      width: 56px;
+      height: 5px;
+      border-radius: 99px;
+      background: rgba(15, 35, 60, 0.15);
+      content: "";
+      transform: translateX(-50%);
+    }
+
+    .mobile-header {
+      min-width: 0;
+      padding: 27px 16px 14px;
+      border-bottom: 1px solid rgba(212, 224, 233, 0.94);
+      background: rgba(255, 255, 255, 0.95);
+    }
+
+    .mobile-header__row { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 12px; }
+    .mobile-title { min-width: 0; }
+    .mobile-title h4 { margin: 0; overflow: hidden; color: var(--ink); font-size: 21px; line-height: 1.45; text-overflow: ellipsis; white-space: nowrap; }
+    .mobile-title p { margin: 2px 0 0; overflow: hidden; color: var(--muted); font-size: 11px; line-height: 1.7; text-overflow: ellipsis; white-space: nowrap; }
+    .header-spacer { width: 44px; height: 44px; flex: 0 0 44px; }
+
+    .icon-button,
+    .back-button {
+      display: grid;
+      width: 44px;
+      height: 44px;
+      flex: 0 0 44px;
+      padding: 0;
+      place-items: center;
+      border: 1px solid var(--border);
+      border-radius: 13px;
+      background: var(--surface);
+      color: var(--ink-2);
+    }
+
+    .screen-content {
+      min-width: 0;
+      min-height: 0;
+      overflow: hidden;
+      padding: 16px;
+    }
+
+    .content-stack { display: grid; gap: 12px; min-width: 0; }
+    .compact-stack { gap: 9px; }
+    .split-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .toolbar { display: grid; grid-template-columns: minmax(0, 1fr) 48px; gap: 8px; }
+    .search-field,
+    .field,
+    .select-field,
+    .text-area {
+      width: 100%;
+      min-width: 0;
+      min-height: 44px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      outline: none;
+      background: var(--surface);
+      color: var(--ink);
+      font-size: 12px;
+    }
+    .search-field,
+    .field,
+    .select-field { padding: 0 12px; }
+    .text-area { min-height: 116px; resize: none; padding: 11px 12px; line-height: 1.9; }
+
+    .primary-action,
+    .secondary-action,
+    .danger-action,
+    .quiet-action {
+      display: inline-flex;
+      min-width: 44px;
+      min-height: 44px;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+      padding: 0 13px;
+      border-radius: 12px;
+      font-size: 12px;
+      font-weight: 700;
+      line-height: 1.5;
+    }
+    .primary-action { border: 1px solid var(--action); background: var(--action); color: #fff; }
+    .secondary-action { border: 1px solid #b9cceb; background: var(--surface); color: var(--action-dark); }
+    .danger-action { border: 1px solid var(--danger); background: var(--danger); color: #fff; }
+    .quiet-action { border: 1px solid var(--border); background: var(--surface); color: var(--ink-2); }
+    .cta { width: 100%; min-height: 48px; }
+
+    .action-card,
+    .relation-row,
+    .pending-link,
+    .session-card {
+      display: flex;
+      width: 100%;
+      min-width: 0;
+      min-height: 58px;
+      align-items: center;
+      gap: 11px;
+      padding: 10px 12px;
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      background: var(--surface);
+      text-align: right;
+    }
+    .action-card__icon,
+    .relation-avatar {
+      display: grid;
+      width: 38px;
+      height: 38px;
+      flex: 0 0 38px;
+      place-items: center;
+      border-radius: 12px;
+      background: var(--action-soft);
+      color: var(--action-dark);
+      font-size: 13px;
+      font-weight: 800;
+    }
+    .action-card__copy,
+    .relation-copy,
+    .session-copy { min-width: 0; flex: 1; }
+    .action-card strong,
+    .relation-row strong,
+    .pending-link strong,
+    .session-card strong { display: block; overflow: hidden; color: var(--ink); font-size: 13px; line-height: 1.7; text-overflow: ellipsis; white-space: nowrap; }
+    .action-card small,
+    .relation-row small,
+    .pending-link small,
+    .session-card small { display: block; margin-top: 1px; overflow: hidden; color: var(--muted); font-size: 10px; line-height: 1.7; text-overflow: ellipsis; white-space: nowrap; }
+    .row-chevron { width: 18px; height: 18px; flex: 0 0 18px; color: #7e92a6; transform: rotate(180deg); }
+
+    .pending-link { min-height: 52px; border-color: #c8d8f5; background: #f3f7ff; color: var(--action-dark); }
+    .relation-row[data-selected-row] { border-color: #8fb2f3; background: var(--action-soft); }
+    .pending-link .action-card__icon { width: 32px; height: 32px; flex-basis: 32px; border-radius: 10px; background: #dce8ff; }
+
+    .status {
+      display: inline-flex;
+      min-height: 26px;
+      align-items: center;
+      padding: 3px 8px;
+      border-radius: 999px;
+      font-size: 9px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+    .status--success { background: var(--success-soft); color: var(--success); }
+    .status--warning { background: var(--warning-soft); color: var(--warning); }
+    .status--neutral { background: #edf2f6; color: #5f7285; }
+    .status--danger { background: var(--danger-soft); color: var(--danger); }
+
+    .notice {
+      padding: 11px 12px;
+      border: 1px solid var(--border);
+      border-radius: 13px;
+      font-size: 11px;
+      line-height: 1.85;
+    }
+    .notice strong { display: block; margin-bottom: 2px; color: inherit; font-size: 12px; }
+    .notice--info { border-color: #bcddea; background: var(--info-soft); color: var(--info); }
+    .notice--warning { border-color: #ead7a7; background: var(--warning-soft); color: var(--warning); }
+    .notice--danger { border-color: #edbdc1; background: var(--danger-soft); color: var(--danger); }
+    .notice--success { border-color: #b9dfd6; background: var(--success-soft); color: var(--success); }
+
+    .detail-card {
+      padding: 13px;
+      border: 1px solid var(--border);
+      border-radius: 15px;
+      background: var(--surface);
+    }
+    .detail-card h5 { margin: 0; color: var(--ink); font-size: 14px; line-height: 1.7; }
+    .detail-card p { margin: 5px 0 0; color: var(--muted); font-size: 10px; line-height: 1.85; }
+    .detail-card__top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+    .field-label { display: grid; gap: 5px; color: var(--muted); font-size: 10px; font-weight: 600; }
+    .field-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
+    .comparison-card { display: grid; gap: 6px; padding: 11px 12px; border: 1px solid var(--border); border-radius: 15px; background: var(--surface); }
+    .comparison-head,
+    .comparison-row { display: grid; grid-template-columns: 82px 1fr 18px 1fr; gap: 6px; align-items: center; }
+    .comparison-head { color: var(--muted); font-size: 9px; font-weight: 600; text-align: center; }
+    .comparison-head span:first-child { text-align: right; }
+    .comparison-row { min-height: 40px; }
+    .comparison-label { color: var(--muted); font-size: 9px; font-weight: 600; }
+    .comparison-value { display: grid; min-height: 34px; place-items: center; padding: 4px 6px; border: 1px solid var(--border); border-radius: 10px; background: var(--subtle); color: var(--ink-2); font-size: 10px; font-weight: 700; text-align: center; }
+    .comparison-value--after { border-color: #c9d9f7; background: var(--action-soft); color: var(--action-dark); }
+    .comparison-arrow { color: var(--action-dark); font-size: 13px; text-align: center; }
+
+    .confirmation-sheet {
+      padding: 14px;
+      border: 1px solid #e7c7ca;
+      border-radius: 17px;
+      background: var(--surface);
+      box-shadow: 0 18px 46px rgba(15, 35, 60, 0.12);
+    }
+    .confirmation-sheet h5 { margin: 0; color: var(--ink); font-size: 15px; line-height: 1.7; }
+    .confirmation-sheet p { margin: 5px 0 12px; color: var(--muted); font-size: 10px; line-height: 1.85; }
+    .cascade-list { display: grid; gap: 7px; margin: 10px 0 12px; padding: 0; list-style: none; }
+    .cascade-list li { position: relative; padding-right: 17px; color: #4b6074; font-size: 10px; line-height: 1.7; }
+    .cascade-list li::before { position: absolute; top: 8px; right: 2px; width: 6px; height: 6px; border-radius: 50%; background: var(--danger); content: ""; }
+    .check-target { justify-content: flex-start; width: 100%; border: 0; background: transparent; color: var(--ink-2); font-size: 11px; font-weight: 600; }
+    .check-box { display: grid; width: 22px; height: 22px; place-items: center; border-radius: 7px; background: var(--action); color: #fff; }
+
+    .bottom-nav {
+      display: grid;
+      grid-template-columns: repeat(var(--nav-count, 5), minmax(0, 1fr));
+      min-width: 0;
+      min-height: 80px;
+      padding: 7px 7px 9px;
+      border-top: 1px solid var(--border);
+      background: rgba(255, 255, 255, 0.97);
+    }
+    .nav-item {
+      display: grid;
+      min-width: 44px;
+      min-height: 62px;
+      align-content: center;
+      justify-items: center;
+      gap: 4px;
+      border-radius: 12px;
+      color: #728498;
+      font-size: 10px;
+      font-weight: 600;
+    }
+    .nav-item svg { width: 19px; height: 19px; }
+    .nav-item.is-active { background: var(--action-soft); color: var(--action-dark); }
+
+    .responsive-scenario .scenario-heading { min-height: 58px; }
+    .responsive-device { --device-height: 740px; border-radius: 30px; }
+    .responsive-device .mobile-header { padding-top: 25px; }
+    .responsive-device .screen-content { padding: 13px; }
+    .responsive-device .content-stack { gap: 8px; }
+    .responsive-device .relation-row { min-height: 55px; padding: 8px 10px; }
+    .responsive-device .bottom-nav { min-height: 76px; }
+
+    .state-grid {
+      display: grid;
+      grid-template-columns: repeat(5, 280px);
+      gap: 16px;
+      direction: ltr;
+    }
+    .state-card { direction: rtl; }
+    .state-card__heading { min-height: 67px; padding: 0 7px 10px; }
+    .state-card__heading h3 { margin: 0; color: var(--ink); font-size: 13px; line-height: 1.7; }
+    .state-card__heading p { margin: 2px 0 0; color: var(--muted-2); font-size: 10px; line-height: 1.65; }
+    .state-surface {
+      display: grid;
+      width: 280px;
+      height: 240px;
+      min-width: 0;
+      align-content: center;
+      gap: 11px;
+      overflow: hidden;
+      padding: 18px;
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      background: var(--page);
+    }
+    .state-surface h4 { margin: 0; color: var(--ink); font-size: 14px; line-height: 1.7; text-align: center; }
+    .state-surface p { margin: 0; color: var(--muted); font-size: 10px; line-height: 1.8; text-align: center; }
+    .state-surface .primary-action,
+    .state-surface .secondary-action { width: 100%; }
+    .skeleton { display: grid; gap: 10px; }
+    .skeleton span { height: 13px; border-radius: 8px; background: linear-gradient(90deg, #e4eaf0, #f5f7f9, #e4eaf0); }
+    .skeleton span:nth-child(1) { width: 48%; }
+    .skeleton span:nth-child(3) { height: 70px; }
+    .state-mark { display: grid; width: 44px; height: 44px; margin: 0 auto; place-items: center; border-radius: 14px; background: var(--action-soft); color: var(--action-dark); font-size: 18px; font-weight: 800; }
+
+    .desktop-proof {
+      display: grid;
+      grid-template-rows: 82px minmax(0, 1fr);
+      width: 1440px;
+      height: 900px;
+      overflow: hidden;
+      border: 1px solid var(--border-strong);
+      border-radius: 22px;
+      background: var(--page);
+      box-shadow: var(--shadow);
+    }
+    .desktop-topbar {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 32px;
+      padding: 0 34px;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface);
+    }
+    .desktop-brand { color: var(--ink); font-size: 17px; font-weight: 800; }
+    .desktop-nav { display: flex; justify-content: center; gap: 8px; }
+    .desktop-nav .nav-item { display: flex; min-width: 92px; min-height: 48px; grid-auto-flow: column; gap: 7px; padding: 0 12px; }
+    .desktop-identity { display: flex; align-items: center; gap: 10px; }
+    .desktop-avatar { display: grid; width: 42px; height: 42px; place-items: center; border-radius: 13px; background: var(--action-soft); color: var(--action-dark); font-weight: 800; }
+    .desktop-identity strong { color: var(--ink); font-size: 12px; }
+    .desktop-workspace {
+      display: grid;
+      grid-template-columns: minmax(0, 736px) 420px;
+      align-items: stretch;
+      justify-content: center;
+      gap: 24px;
+      min-height: 0;
+      padding: 34px 40px;
+      direction: ltr;
+    }
+    .desktop-panel {
+      min-width: 0;
+      min-height: 0;
+      overflow: hidden;
+      padding: 22px;
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      background: var(--surface);
+      direction: rtl;
+    }
+    .desktop-panel__head { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
+    .desktop-panel__head h3 { margin: 0; color: var(--ink); font-size: 20px; }
+    .desktop-panel__head p { margin: 3px 0 0; color: var(--muted); font-size: 11px; }
+    .desktop-list { display: grid; align-content: start; gap: 10px; }
+    .desktop-list .relation-row { min-height: 62px; }
+    .desktop-detail { display: grid; align-content: start; gap: 16px; }
+    .desktop-detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .desktop-detail .detail-card { padding: 16px; }
+    .desktop-consequence { max-width: 620px; }
+
+    @media (max-width: 900px) {
+      .board-intro { grid-template-columns: 1fr; }
+      .board-tags { justify-content: flex-start; }
+      .source-note { grid-column: auto; }
+    }
+  </style>
+</head>
+<body>
+  <svg class="visually-hidden" aria-hidden="true">
+    <symbol id="i-home" viewBox="0 0 24 24"><path d="m3 11 9-8 9 8v9H5z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M9 20v-6h6v6" fill="none" stroke="currentColor" stroke-width="1.8"/></symbol>
+    <symbol id="i-store" viewBox="0 0 24 24"><path d="M4 10v10h16V10M3 10l2-6h14l2 6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M3 10c0 2 3 2 4.5 0 1.5 2 4.5 2 6 0 1.5 2 4.5 2 6 0" fill="none" stroke="currentColor" stroke-width="1.8"/></symbol>
+    <symbol id="i-message" viewBox="0 0 24 24"><path d="M4 5h16v11H9l-5 4z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></symbol>
+    <symbol id="i-briefcase" viewBox="0 0 24 24"><path d="M4 8h16v12H4zM9 8V5h6v3M4 12h16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></symbol>
+    <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M4 21c.6-4 3.3-6 8-6s7.4 2 8 6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+    <symbol id="i-users" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.4" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M3 20c.5-3.5 2.5-5.2 6-5.2s5.5 1.7 6 5.2M15 5.2c2.3.1 3.5 1.2 3.5 3.3S17.3 11.8 15 12M17 14.8c2.3.5 3.7 2.2 4 5.2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+    <symbol id="i-arrow" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="m15.5 15.5 5 5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+    <symbol id="i-link" viewBox="0 0 24 24"><path d="M9.5 14.5 14.5 9M7 17H5a4 4 0 0 1 0-8h3M17 7h2a4 4 0 1 1 0 8h-3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 7v5l3 2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3 5 6v5c0 4.8 2.8 8.3 7 10 4.2-1.7 7-5.2 7-10V6z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M5 7h14M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-bell" viewBox="0 0 24 24"><path d="M6 17h12l-1.5-2.5V10a4.5 4.5 0 0 0-9 0v4.5zM10 20h4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  </svg>
+
+  <main id="evidence-board" class="board">
+    <header class="board-intro">
+      <div>
+        <h1>عملیات و فضاهای کاری — شواهد محلی Stage 0B-3</h1>
+        <p>بازتولید سناریومحور برای سنجش قرارداد موبایل‌اول، تفکیک فهرست و جزئیات، بازخورد اقدام‌های حساس و سازگاری دسکتاپ. این صفحه منبع طراحی نیست.</p>
+      </div>
+      <div class="board-tags" aria-label="ویژگی‌های بسته شواهد">
+        <span class="board-tag">Mobile first · 95%</span>
+        <span class="board-tag">Modern Finance</span>
+        <span class="board-tag">Secondary evidence</span>
+      </div>
+      <div class="source-note">منبع اصلی و قابل‌ویرایش، فایل Figma پروژه است. این خروجی فقط برای بازتولید تصویری و اندازه‌گیری خودکار نگهداری می‌شود؛ سطوح داخلی دو بخش محافظت‌شده در آن طراحی نشده‌اند.</div>
+    </header>
+
+    <section id="operations-role-matrix" class="evidence-section">
+      <div class="section-heading">
+        <div><h2>عملیات متناسب با کار واقعی</h2><p>هر کاربر فقط مقصد قابل‌استفاده خود را می‌بیند؛ بدون خلاصه‌های تزئینی، نشان نقش یا اقدام بی‌اثر.</p></div>
+        <span class="section-code">0B3-E01</span>
+      </div>
+      <div id="operations-grid" class="scenario-grid" aria-label="سناریوهای عملیات"></div>
+    </section>
+
+    <section id="customer-task-flow" class="evidence-section">
+      <div class="section-heading">
+        <div><h2>کارهای اصلی مشتری</h2><p>فهرست، دعوت در انتظار و ویرایش مالی در قاب‌های مستقل موبایل قرار دارند تا وضعیت انتخاب‌شده در صفحه شلوغ نشود.</p></div>
+        <span class="section-code">0B3-E02</span>
+      </div>
+      <div id="customer-grid" class="scenario-grid" aria-label="سناریوهای مشتری"></div>
+    </section>
+
+    <section id="accountant-task-flow" class="evidence-section">
+      <div class="section-heading">
+        <div><h2>فهرست و وظیفه حسابدار</h2><p>یک نشانه متمایزکننده در ردیف و یک ویرایشگر مستقیم در جزئیات؛ بدون تکرار مقدار فعلی.</p></div>
+        <span class="section-code">0B3-E03</span>
+      </div>
+      <div id="accountant-grid" class="scenario-grid" aria-label="سناریوهای حسابدار"></div>
+    </section>
+
+    <section id="workspace-action-feedback" class="evidence-section">
+      <div class="section-heading">
+        <div><h2>تصمیم‌های حساس در همان زمینه</h2><p>پایان نشست با اثر فوری توضیح داده می‌شود و حذف حساب، همه پیامدهای واقعی را پیش از تأیید افشا می‌کند.</p></div>
+        <span class="section-code">0B3-E04</span>
+      </div>
+      <div id="sensitive-grid" class="scenario-grid" aria-label="سناریوهای حساس"></div>
+    </section>
+
+    <section id="workspace-state-atlas" class="evidence-section">
+      <div class="section-heading">
+        <div><h2>اطلس وضعیت‌های بازیابی</h2><p>بارگذاری، خطا، خالی واقعی، نتیجه خالی جستجو و جزئیات از دست‌رفته هرکدام اقدام بعدی روشن دارند.</p></div>
+        <span class="section-code">0B3-E05</span>
+      </div>
+      <div class="state-grid">
+        <article class="state-card"><header class="state-card__heading"><h3>بارگذاری ساختاری</h3><p>هندسه پایدار و بدون داده فرضی</p></header><div id="state-loading" class="state-surface" data-product-surface data-state-contract="loading"><div class="skeleton" aria-label="در حال بارگذاری"><span></span><span></span><span></span></div></div></article>
+        <article class="state-card"><header class="state-card__heading"><h3>خطای دریافت</h3><p>یک پیام و یک اقدام بازیابی</p></header><div id="state-error" class="state-surface" data-product-surface data-state-contract="error"><div class="state-mark" aria-hidden="true">!</div><h4>دریافت اطلاعات انجام نشد</h4><button class="primary-action cta" type="button" data-retry>تلاش دوباره</button></div></article>
+        <article class="state-card"><header class="state-card__heading"><h3>خالی واقعی</h3><p>اولین اقدام از همان وضعیت</p></header><div id="state-true-empty" class="state-surface" data-product-surface data-state-contract="true-empty"><div class="state-mark" aria-hidden="true"><svg><use href="#i-users"/></svg></div><h4>هنوز مشتری اضافه نشده است</h4><button class="primary-action cta" type="button" data-empty-add>افزودن مشتری</button></div></article>
+        <article class="state-card"><header class="state-card__heading"><h3>جستجوی بدون نتیجه</h3><p>پاک‌کردن جستجو، نه ساخت داده جدید</p></header><div id="state-filter-empty" class="state-surface" data-product-surface data-state-contract="filter-empty"><div class="state-mark" aria-hidden="true"><svg><use href="#i-search"/></svg></div><h4>نتیجه‌ای برای «حسینی» پیدا نشد</h4><p data-search-query>جستجوی فعلی: حسینی</p><button class="secondary-action" type="button" data-clear-search>پاک‌کردن جستجو</button></div></article>
+        <article class="state-card"><header class="state-card__heading"><h3>جزئیات در دسترس نیست</h3><p>بازگشت امن به فهرست</p></header><div id="state-missing-detail" class="state-surface" data-product-surface data-state-contract="missing-detail"><div class="state-mark" aria-hidden="true">؟</div><h4>این مورد دیگر در دسترس نیست</h4><button class="secondary-action" type="button" data-back-to-list>بازگشت به فهرست</button></div></article>
+      </div>
+    </section>
+
+    <section id="workspaces-responsive-sweep" class="evidence-section">
+      <div class="section-heading">
+        <div><h2>فهرست مشتری در پنج عرض واقعی</h2><p>ساختار، اهداف لمسی و ناوبری در عرض‌های <bdi>360</bdi> تا <bdi>430</bdi> بدون شکست یا هم‌زیستی جزئیات حفظ می‌شود.</p></div>
+        <span class="section-code">0B3-E06</span>
+      </div>
+      <div id="responsive-grid" class="responsive-grid" aria-label="پنج عرض موبایل"></div>
+    </section>
+
+    <section id="desktop-master-detail-section" class="evidence-section">
+      <div class="section-heading">
+        <div><h2>Master/detail واقعی دسکتاپ</h2><p>در دسکتاپ، فهرست و جزئیات انتخاب‌شده هم‌زمان دیده می‌شوند؛ محتوا بیشتر نشده و ستون جانبی مستقلی ساخته نشده است.</p></div>
+        <span class="section-code">0B3-E07</span>
+      </div>
+      <div id="desktop-customer-master-detail" class="desktop-proof product-screen" data-product-screen="desktop-customer-master-detail" data-product-surface data-desktop-proof>
+        <header class="desktop-topbar">
+          <div class="desktop-brand">سامانه معاملات</div>
+          <nav id="desktop-nav" class="desktop-nav" data-shell-navigation aria-label="ناوبری اصلی"></nav>
+          <div class="desktop-identity"><div class="desktop-avatar" aria-hidden="true">م</div><strong>محمد رضایی</strong><button class="icon-button" type="button" aria-label="اعلان‌ها"><svg><use href="#i-bell"/></svg></button></div>
+        </header>
+        <main class="desktop-workspace">
+          <section class="desktop-panel desktop-detail" data-detail-view data-contract-content>
+            <div class="desktop-panel__head"><div><h3 data-detail-identity>محمد همتی</h3><p>ویرایش شرایط مالی</p></div><span class="status status--success">فعال</span></div>
+            <div class="desktop-detail-grid">
+              <label class="field-label">سطح مشتری<select class="select-field" aria-label="سطح مشتری"><option>سطح ۲</option></select></label>
+              <label class="field-label">نرخ کمیسیون<input class="field" value="۰٫۵٪" aria-label="نرخ کمیسیون"></label>
+              <label class="field-label">حد خرید<input class="field" value="۲۵۰ گرم" aria-label="حد خرید"></label>
+              <label class="field-label">حد فروش<input class="field" value="۲۰۰ گرم" aria-label="حد فروش"></label>
+            </div>
+            <div class="notice notice--info desktop-consequence" data-future-only><strong>اثر تغییر</strong>این ویرایش فقط برای محاسبات بعدی اعمال می‌شود؛ سوابق نهایی‌شده تغییر نمی‌کند.</div>
+            <button class="primary-action cta" type="button">مرور و ثبت تغییرات</button>
+          </section>
+          <section class="desktop-panel desktop-list" data-master-list data-contract-content>
+            <div class="desktop-panel__head"><div><h3>مشتریان</h3><p>برای دیدن جزئیات، یک مشتری را انتخاب کنید.</p></div><button class="primary-action" type="button"><svg><use href="#i-plus"/></svg>افزودن</button></div>
+            <input class="search-field" aria-label="جستجوی مشتری" placeholder="جستجوی مشتری">
+            <button class="pending-link" type="button" data-actionable-count><span class="action-card__icon"><svg><use href="#i-clock"/></svg></span><span class="action-card__copy"><strong>۲ دعوت در انتظار</strong><small>پیگیری دعوت‌های تکمیل‌نشده</small></span><svg class="row-chevron"><use href="#i-arrow"/></svg></button>
+            <div id="desktop-customer-rows"></div>
+          </section>
+        </main>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const NAV_ITEMS = [
+      { name: 'home', label: 'خانه', icon: 'i-home' },
+      { name: 'market', label: 'بازار', icon: 'i-store' },
+      { name: 'messenger', label: 'پیام‌رسان', icon: 'i-message' },
+      { name: 'operations', label: 'عملیات', icon: 'i-briefcase' },
+      { name: 'account', label: 'حساب', icon: 'i-user' },
+    ]
+
+    const icon = (name) => `<svg aria-hidden="true"><use href="#${name}"/></svg>`
+
+    function navMarkup(active = 'operations', { accountant = false } = {}) {
+      const items = NAV_ITEMS.filter((item) => !(accountant && item.name === 'market'))
+      return `<nav class="bottom-nav" style="--nav-count:${items.length}" data-shell-navigation aria-label="ناوبری اصلی">${items.map((item) => `<a class="nav-item ${item.name === active ? 'is-active' : ''}" href="#operations-role-matrix" data-nav-destination="${item.name}" aria-label="${item.label}">${icon(item.icon)}<span>${item.label}</span></a>`).join('')}</nav>`
+    }
+
+    function headerMarkup(title, subtitle, detail = false) {
+      return `<header class="mobile-header"><div class="mobile-header__row">${detail ? `<button class="back-button" type="button" aria-label="بازگشت به فهرست">${icon('i-arrow')}</button>` : '<div class="header-spacer" aria-hidden="true"></div>'}<div class="mobile-title"><h4>${title}</h4><p>${subtitle}</p></div><button class="icon-button" type="button" aria-label="اعلان‌ها">${icon('i-bell')}</button></div></header>`
+    }
+
+    function actionCard(key, title, subtitle, glyph = 'i-arrow') {
+      return `<a class="action-card" href="#" data-operation-action="${key}"><span class="action-card__icon">${icon(key.includes('accountant') ? 'i-briefcase' : 'i-users')}</span><span class="action-card__copy"><strong>${title}</strong><small>${subtitle}</small></span><svg class="row-chevron"><use href="#${glyph}"/></svg></a>`
+    }
+
+    function relationRow(name, subtitle, status, tone = 'success', selected = false) {
+      return `<button class="relation-row" type="button" ${selected ? 'data-selected-row aria-current="true"' : ''}><span class="relation-avatar" aria-hidden="true">${name.trim().slice(0, 1)}</span><span class="relation-copy"><strong>${name}</strong><small>${subtitle}</small></span><span class="status status--${tone}">${status}</span></button>`
+    }
+
+    function mobileScenario({ id, label, note, title, subtitle, mode, body, accountant = false }) {
+      return `<article class="scenario"><header class="scenario-heading"><h3>${id} · ${label}</h3><p>${note}</p></header><div id="${id.toLowerCase()}" class="device product-screen" data-product-screen="${id}" data-product-surface data-mobile-scenario data-screen-mode="${mode}">${headerMarkup(title, subtitle, mode === 'detail')}<main class="screen-content">${body}</main>${navMarkup('operations', { accountant })}</div></article>`
+    }
+
+    const operationScenarios = [
+      mobileScenario({
+        id: 'M01', label: 'عملیات سرگروه', note: 'فقط دو مقصد روزمره و واقعی', title: 'عملیات', subtitle: 'مدیریت ارتباطات کاری', mode: 'list',
+        body: `<div class="content-stack" data-master-list data-contract-content>${actionCard('customers', 'مشتریان', 'دعوت و مدیریت مشتریان')}${actionCard('accountants', 'حسابداران', 'دعوت و تعیین وظیفه')}</div>`,
+      }),
+      mobileScenario({
+        id: 'M02', label: 'عملیات مدیر ارشد', note: 'مقصدهای مجاز بدون خلاصه و شمارنده', title: 'عملیات', subtitle: 'کارهای مدیریتی', mode: 'list',
+        body: `<div class="content-stack compact-stack" data-master-list data-contract-content>${actionCard('invite', 'ارسال دعوت‌نامه', 'ساخت دعوت جدید')}${actionCard('users', 'مدیریت کاربران', 'جستجو و رسیدگی به کاربر')}${actionCard('commodities', 'مدیریت کالاها', 'تعریف و ویرایش کالا')}${actionCard('admin-messages', 'پیام‌های مدیریت', 'ارسال اطلاعیه مدیریتی')}${actionCard('settings', 'تنظیمات سامانه', 'تغییر تنظیمات حساس')}</div>`,
+      }),
+      mobileScenario({
+        id: 'M03', label: 'عملیات حسابدار', note: 'هیچ اقدام مالکانه بی‌اثر نمایش داده نمی‌شود', title: 'عملیات', subtitle: 'اقدام در دسترس', mode: 'list', accountant: true,
+        body: `<div class="content-stack" data-master-list data-contract-content><div class="notice notice--info"><strong>کار مستقیمی در این بخش ندارید</strong>برای ادامه، وضعیت حساب خود را بررسی کنید.</div><a class="primary-action cta" href="#" data-account-followup>رفتن به حساب</a></div>`,
+      }),
+    ]
+
+    const customerScenarios = [
+      mobileScenario({
+        id: 'M04', label: 'فهرست مشتریان', note: 'جستجو، افزودن و صفی که اقدام می‌خواهد', title: 'مشتریان', subtitle: 'انتخاب برای مشاهده جزئیات', mode: 'list',
+        body: `<div class="content-stack compact-stack" data-master-list data-contract-content><div class="toolbar"><input class="search-field" aria-label="جستجوی مشتری" placeholder="جستجوی مشتری"><button class="primary-action" type="button" aria-label="افزودن مشتری">${icon('i-plus')}</button></div><button class="pending-link" type="button" data-actionable-count><span class="action-card__icon">${icon('i-clock')}</span><span class="action-card__copy"><strong>۲ دعوت در انتظار</strong><small>برای پیگیری لمس کنید</small></span><svg class="row-chevron"><use href="#i-arrow"/></svg></button>${relationRow('محمد همتی', 'سطح ۲', 'فعال')}${relationRow('سارا نادری', 'دعوت ارسال شده', 'دعوت', 'warning')}${relationRow('مهدی یوسفی', 'سطح ۱', 'غیرفعال', 'neutral')}</div>`,
+      }),
+      mobileScenario({
+        id: 'M05', label: 'دعوت در انتظار', note: 'یک مهلت، خطای پیامک و دو راه اشتراک', title: 'دعوت محمد کریمی', subtitle: 'در انتظار تکمیل ثبت‌نام', mode: 'detail',
+        body: `<div class="content-stack" data-detail-view data-contract-content><div class="detail-card"><div class="detail-card__top"><h5>دعوت فعال</h5><span class="status status--warning">در انتظار</span></div><p data-invite-deadline>مهلت استفاده: تا ۲۰ مرداد، ساعت ۱۸:۰۰</p></div><div class="notice notice--danger" data-sms-failure><strong>ارسال پیامک انجام نشد</strong>لینک را از یکی از روش‌های زیر برای کاربر بفرستید.</div><div class="split-actions"><button class="secondary-action" type="button" data-copy-invite="web">${icon('i-link')}کپی لینک وب‌اپ</button><button class="secondary-action" type="button" data-copy-invite="telegram">${icon('i-link')}کپی لینک تلگرام</button></div><button class="danger-action cta" type="button">لغو دعوت</button></div>`,
+      }),
+      mobileScenario({
+        id: 'M06', label: 'مرور تغییر مالی', note: 'قبل و بعد، اثر آینده و تأیید نهایی', title: 'محمد همتی', subtitle: 'مرور پیش از ثبت', mode: 'detail',
+        body: `<div class="content-stack compact-stack" data-detail-view data-contract-content><div class="detail-card"><div class="detail-card__top"><h5>مرور تغییرات</h5><span class="status status--success">فعال</span></div><p>پیش از ثبت، مقدارهای قبل و بعد را بررسی کنید.</p></div><div class="comparison-card" data-before-after-review><div class="comparison-head"><span>مورد</span><span>قبل</span><span></span><span>بعد</span></div><div class="comparison-row" data-change-row><span class="comparison-label">سطح مشتری</span><span class="comparison-value" data-before-value>سطح ۱</span><span class="comparison-arrow">←</span><span class="comparison-value comparison-value--after" data-after-value>سطح ۲</span></div><div class="comparison-row" data-change-row><span class="comparison-label">کمیسیون</span><span class="comparison-value" data-before-value>۰٫۳٪</span><span class="comparison-arrow">←</span><span class="comparison-value comparison-value--after" data-after-value>۱٫۲۵٪</span></div><div class="comparison-row" data-change-row><span class="comparison-label">حد هر معامله</span><span class="comparison-value" data-before-value>۱ تا ۳</span><span class="comparison-arrow">←</span><span class="comparison-value comparison-value--after" data-after-value>۲ تا ۵</span></div><div class="comparison-row" data-change-row><span class="comparison-label">سقف روزانه</span><span class="comparison-value" data-before-value>۲۰ واحد</span><span class="comparison-arrow">←</span><span class="comparison-value comparison-value--after" data-after-value>۴۰ واحد</span></div></div><div class="notice notice--info" data-future-only><strong>اثر از این لحظه به بعد</strong>این تغییرها فقط روی معاملات آینده اثر دارند؛ سوابق نهایی‌شده تغییر نمی‌کند.</div><button class="primary-action cta" type="button" data-confirm-financial>ثبت تغییرات</button><button class="secondary-action" type="button" data-return-financial-edit>بازگشت و اصلاح</button></div>`,
+      }),
+    ]
+
+    const accountantScenarios = [
+      mobileScenario({
+        id: 'M07', label: 'فهرست حسابداران', note: 'هر ردیف فقط یک نشانه متمایزکننده دارد', title: 'حسابداران', subtitle: 'انتخاب برای مشاهده جزئیات', mode: 'list',
+        body: `<div class="content-stack compact-stack" data-master-list data-contract-content><div class="toolbar"><input class="search-field" aria-label="جستجوی حسابدار" placeholder="جستجوی حسابدار"><button class="primary-action" type="button" aria-label="افزودن حسابدار">${icon('i-plus')}</button></div><button class="pending-link" type="button" data-actionable-count><span class="action-card__icon">${icon('i-clock')}</span><span class="action-card__copy"><strong>۱ دعوت در انتظار</strong><small>برای پیگیری لمس کنید</small></span><svg class="row-chevron"><use href="#i-arrow"/></svg></button>${relationRow('امین تکبیری', 'ثبت فروش', 'فعال')}${relationRow('زهرا احمدی', 'تسویه روزانه', 'فعال')}${relationRow('رضا اکبری', 'دعوت ارسال شده', 'دعوت', 'warning')}</div>`,
+      }),
+      mobileScenario({
+        id: 'M08', label: 'ویرایش وظیفه', note: 'یک ویرایشگر و بازخورد ذخیره در همان زمینه', title: 'امین تکبیری', subtitle: 'ویرایش وظیفه', mode: 'detail',
+        body: `<div class="content-stack" data-detail-view data-contract-content><label class="field-label" data-duty-editor>شرح وظیفه<textarea class="text-area" aria-label="شرح وظیفه">ثبت فروش‌های روزانه و آماده‌سازی گزارش تسویه</textarea></label><div class="notice notice--success" data-inline-success><strong>وظیفه ذخیره شد</strong>تغییر از همین لحظه قابل مشاهده است.</div><button class="primary-action cta" type="button">ذخیره وظیفه</button></div>`,
+      }),
+    ]
+
+    const sensitiveScenarios = [
+      mobileScenario({
+        id: 'M09', label: 'پایان نشست', note: 'دستگاه، آخرین فعالیت و اثر فوری تصمیم', title: 'نشست‌های محمد همتی', subtitle: 'مدیریت ورودهای فعال', mode: 'detail',
+        body: `<div class="content-stack" data-detail-view data-contract-content><div class="session-card" data-session-card><span class="action-card__icon">${icon('i-shield')}</span><span class="session-copy"><strong>Chrome · وب</strong><small data-session-device>Windows · نشست اصلی</small><small data-session-last-activity>آخرین فعالیت: امروز، ۱۴:۲۰</small></span><span class="status status--success" data-session-primary>اصلی</span></div><section class="confirmation-sheet" role="dialog" aria-modal="true" aria-labelledby="session-confirm-title" data-session-confirmation><h5 id="session-confirm-title">این نشست پایان یابد؟</h5><p data-session-immediate-effect>کاربر فوراً از این دستگاه خارج می‌شود.</p><div class="split-actions"><button class="secondary-action" type="button">انصراف</button><button class="danger-action cta" type="button">پایان نشست</button></div></section></div>`,
+      }),
+      mobileScenario({
+        id: 'M10', label: 'حذف حساب', note: 'بیشترین ریسک با افشای کامل پیامدها', title: 'قطع ارتباط', subtitle: 'اقدام غیرقابل بازگشت', mode: 'detail',
+        body: `<div class="content-stack compact-stack" data-detail-view data-contract-content><div class="notice notice--danger"><strong>حساب محمد همتی حذف می‌شود</strong>پیش از ادامه، همه پیامدها را بررسی کنید.</div><ul class="cascade-list"><li data-cascade="web-bot">ورود وب‌اپ و بات غیرفعال می‌شود</li><li data-cascade="sessions">همه نشست‌ها پایان می‌یابد</li><li data-cascade="offers">آفرهای فعال منقضی می‌شود</li><li data-cascade="invites-relations">دعوت‌های در انتظار و روابط وابسته بسته می‌شوند</li></ul><label class="field-label">برای تأیید، نام کاربر را وارد کنید<input class="field" value="محمد همتی" aria-label="تأیید نام کاربر" data-delete-confirmation-input></label><button class="check-target quiet-action" type="button" aria-pressed="true" data-delete-acknowledgement><span class="check-box">${icon('i-check')}</span>پیامدها را خواندم</button><button class="danger-action cta" type="button" data-delete-account>${icon('i-trash')}حذف حساب و قطع ارتباط</button></div>`,
+      }),
+    ]
+
+    function responsiveScenario(width) {
+      return `<article class="scenario responsive-scenario" data-responsive-width="${width}"><header class="scenario-heading"><h3><bdi>${width}px</bdi></h3><p>فهرست مستقل از جزئیات</p></header><div id="responsive-${width}" class="device responsive-device product-screen" style="--device-width:${width}px" data-product-screen="responsive-${width}" data-product-surface data-responsive-proof data-screen-mode="list">${headerMarkup('مشتریان', 'انتخاب برای مشاهده جزئیات')}<main class="screen-content"><div class="content-stack" data-master-list data-contract-content><div class="toolbar"><input class="search-field" aria-label="جستجوی مشتری" placeholder="جستجوی مشتری"><button class="primary-action" type="button" aria-label="افزودن مشتری">${icon('i-plus')}</button></div><button class="pending-link" type="button" data-actionable-count><span class="action-card__icon">${icon('i-clock')}</span><span class="action-card__copy"><strong>۲ دعوت در انتظار</strong><small>برای پیگیری لمس کنید</small></span><svg class="row-chevron"><use href="#i-arrow"/></svg></button>${relationRow('محمد همتی', 'سطح ۲', 'فعال')}${relationRow('سارا نادری', 'دعوت ارسال شده', 'دعوت', 'warning')}${relationRow('مهدی یوسفی', 'سطح ۱', 'غیرفعال', 'neutral')}</div></main>${navMarkup('operations')}</div></article>`
+    }
+
+    document.querySelector('#operations-grid').innerHTML = operationScenarios.join('')
+    document.querySelector('#customer-grid').innerHTML = customerScenarios.join('')
+    document.querySelector('#accountant-grid').innerHTML = accountantScenarios.join('')
+    document.querySelector('#sensitive-grid').innerHTML = sensitiveScenarios.join('')
+    document.querySelector('#responsive-grid').innerHTML = [360, 375, 390, 414, 430].map(responsiveScenario).join('')
+    document.querySelector('#desktop-nav').innerHTML = NAV_ITEMS.map((item) => `<a class="nav-item ${item.name === 'operations' ? 'is-active' : ''}" href="#operations-role-matrix" data-nav-destination="${item.name}">${icon(item.icon)}<span>${item.label}</span></a>`).join('')
+    document.querySelector('#desktop-customer-rows').innerHTML = [
+      relationRow('محمد همتی', 'سطح ۲', 'فعال', 'success', true),
+      relationRow('سارا نادری', 'دعوت ارسال شده', 'دعوت', 'warning'),
+      relationRow('مهدی یوسفی', 'سطح ۱', 'غیرفعال', 'neutral'),
+      relationRow('لیلا احمدی', 'سطح ۱', 'فعال'),
+    ].join('')
+  </script>
+</body>
+</html>
