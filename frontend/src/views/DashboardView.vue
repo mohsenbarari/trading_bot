@@ -5,7 +5,7 @@ import { Bell, Store, LogOut, AlertTriangle, Ban, ChevronDown, PackageCheck, Use
 import { useNotificationStore } from '../stores/notifications'
 import { apiFetch, forceLogout } from '../utils/auth'
 import { cacheCurrentUserSummary } from '../utils/currentUser'
-import { routeRequestJson } from '../utils/routeRequest'
+import { routeRequest, routeRequestJson } from '../utils/routeRequest'
 import { formatIranDateTime, getIranHour, IRAN_TIME_ZONE, parseIranDisplayDate } from '../utils/iranTime'
 import { marketRuntime } from '../composables/useMarketRuntime'
 import { openTelegramLink, requestTelegramLink } from '../services/telegramLink'
@@ -89,6 +89,7 @@ const projectUsersHasMore = ref(false)
 const telegramLinkBusy = ref(false)
 const telegramLinkError = ref('')
 let userRequestInFlight = false
+let projectUsersRequestRevision = 0
 
 const isRestricted = computed(() => {
   if (!user.value?.trading_restricted_until) return false
@@ -332,15 +333,6 @@ function getCommodityAliasLabels(commodity: DashboardCommodity) {
   return Array.from(new Set(aliases.filter((alias) => alias !== commodity.name)))
 }
 
-function parseDashboardApiError(payload: unknown, fallback: string) {
-  if (payload && typeof payload === 'object' && 'detail' in payload) {
-    const detail = (payload as { detail?: unknown }).detail
-    if (typeof detail === 'string' && detail.trim()) return detail
-    if (Array.isArray(detail) && detail.length > 0) return fallback
-  }
-  return fallback
-}
-
 async function loadAllowedCommodities() {
   if (!showAllowedCommoditiesSection.value) {
     allowedCommodities.value = []
@@ -434,19 +426,32 @@ async function loadProjectUsersDirectory(force = false) {
     projectUsersLoading.value = true
   }
   projectUsersError.value = ''
+  const requestRevision = force ? ++projectUsersRequestRevision : projectUsersRequestRevision
+  const requestOffset = isLoadMore ? projectUsersOffset.value : 0
 
   try {
     const params = new URLSearchParams()
     params.set('limit', String(PROJECT_USERS_PAGE_SIZE))
-    params.set('offset', String(isLoadMore ? projectUsersOffset.value : 0))
+    params.set('offset', String(requestOffset))
     if (normalizedQuery) params.set('q', normalizedQuery)
-    const response = await apiFetch(`/api/users-public/${targetId}/project-users?${params.toString()}`)
-    const payload = await response.json().catch(() => null)
-    if (!response.ok) {
-      throw new Error(parseDashboardApiError(payload, 'خطا در دریافت لیست همکاران'))
+    const payload = await routeRequestJson<unknown>(
+      `/api/users-public/${targetId}/project-users?${params.toString()}`,
+      {
+        errorContext: {
+          surface: 'app',
+          scope: 'section',
+          operation: isLoadMore ? 'load-more' : 'refresh',
+          resourceLabel: 'فهرست همکاران',
+          fallbackMessage: 'دریافت فهرست همکاران انجام نشد.',
+        },
+      },
+    )
+    if (requestRevision !== projectUsersRequestRevision) return
+    if (!Array.isArray(payload)) {
+      throw new Error('project_users_payload_invalid')
     }
 
-    const rawRows = Array.isArray(payload) ? payload : []
+    const rawRows = payload
     const nextRows = rawRows
       .map((entry) => normalizeProjectUser(entry))
       .filter((entry): entry is DashboardProjectUser => entry !== null && entry.id !== targetId)
@@ -462,12 +467,15 @@ async function loadProjectUsersDirectory(force = false) {
     projectUsersLoaded.value = true
     lastLoadedProjectUsersQuery.value = normalizedQuery
     projectUsersHasMore.value = rawRows.length === PROJECT_USERS_PAGE_SIZE
-    projectUsersOffset.value += rawRows.length
-  } catch (error: any) {
-    projectUsersError.value = error?.message || 'خطا در دریافت لیست همکاران'
+    projectUsersOffset.value = requestOffset + rawRows.length
+  } catch {
+    if (requestRevision !== projectUsersRequestRevision) return
+    projectUsersError.value = 'دریافت فهرست همکاران انجام نشد. دوباره تلاش کنید.'
   } finally {
-    projectUsersLoading.value = false
-    projectUsersLoadingMore.value = false
+    if (requestRevision === projectUsersRequestRevision) {
+      projectUsersLoading.value = false
+      projectUsersLoadingMore.value = false
+    }
   }
 }
 
@@ -483,7 +491,6 @@ function resetProjectUsersDirectoryState() {
 }
 
 async function submitProjectUsersSearch() {
-  resetProjectUsersDirectoryState()
   await loadProjectUsersDirectory(true)
 }
 
@@ -546,11 +553,28 @@ async function fetchUser() {
 
 async function logout() {
   try {
-    const res = await apiFetch('/api/sessions/active')
-    const activeSessions = await res.json()
+    const activeSessions = await routeRequestJson<unknown>('/api/sessions/active', {
+      errorContext: {
+        surface: 'app',
+        scope: 'action',
+        operation: 'load-list',
+        userInitiated: true,
+        fallbackMessage: 'دریافت نشست جاری انجام نشد.',
+      },
+    })
+    if (!Array.isArray(activeSessions)) throw new Error('active_sessions_payload_invalid')
     const currentSession = activeSessions.find((s: any) => s.is_current)
     if (currentSession) {
-      await apiFetch(`/api/sessions/${currentSession.id}`, { method: 'DELETE' })
+      await routeRequest(`/api/sessions/${currentSession.id}`, {
+        method: 'DELETE',
+        errorContext: {
+          surface: 'app',
+          scope: 'action',
+          operation: 'delete',
+          userInitiated: true,
+          fallbackMessage: 'پایان نشست جاری انجام نشد.',
+        },
+      })
     }
   } catch (e) {
     console.error(e)
@@ -842,23 +866,43 @@ onMounted(fetchUser)
               <AppButton type="submit" size="sm" :loading="projectUsersLoading">جستجو</AppButton>
             </form>
 
+            <p
+              v-if="projectUsersLoading && projectUsers.length > 0"
+              class="dashboard-project-users-inline-status"
+              role="status"
+            >
+              در حال بروزرسانی؛ فهرست قبلی حفظ شده است.
+            </p>
+            <p
+              v-if="projectUsersError && projectUsers.length > 0"
+              class="dashboard-project-users-inline-status dashboard-project-users-inline-status--error"
+              role="alert"
+            >
+              {{ projectUsersError }} فهرست قبلی حفظ شده است.
+            </p>
             <AppLoadingState
-              v-if="projectUsersLoading"
+              v-if="projectUsersLoading && projectUsers.length === 0"
               class="dashboard-state-card"
               label="در حال دریافت لیست همکاران"
             />
             <AppErrorState
-              v-else-if="projectUsersError"
+              v-else-if="projectUsersError && projectUsers.length === 0"
               class="dashboard-state-card"
               title="دریافت لیست همکاران ناموفق بود"
               :message="projectUsersError"
-            />
+            >
+              <template #actions>
+                <AppButton type="button" size="sm" variant="secondary" :loading="projectUsersLoading" @click="loadProjectUsersDirectory(true)">
+                  تلاش دوباره
+                </AppButton>
+              </template>
+            </AppErrorState>
             <AppEmptyState
-              v-else-if="projectUsersLoaded && projectUsers.length === 0"
+              v-if="projectUsersLoaded && !projectUsersLoading && !projectUsersError && projectUsers.length === 0"
               title="همکاری برای نمایش پیدا نشد"
               :message="projectUsersQuery.trim() ? 'همکاری با این جستجو پیدا نشد.' : 'همکاری برای نمایش وجود ندارد.'"
             />
-            <div v-else-if="projectUsers.length > 0" class="dashboard-project-users-list">
+            <div v-if="projectUsers.length > 0" class="dashboard-project-users-list">
               <AppListItem
                 v-for="projectUser in projectUsers"
                 :key="projectUser.id"
@@ -1248,6 +1292,16 @@ onMounted(fetchUser)
   min-height: 36px;
   padding-block: 0.35rem;
   font-size: var(--ds-font-sm);
+}
+
+.dashboard-project-users-inline-status {
+  margin: 0;
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-font-sm);
+}
+
+.dashboard-project-users-inline-status--error {
+  color: var(--ds-danger-700);
 }
 
 .dashboard-state-card {

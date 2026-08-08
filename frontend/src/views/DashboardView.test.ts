@@ -281,7 +281,10 @@ describe('DashboardView.vue', () => {
 
     await wrapper.get('.dashboard-accordion-toggle--project-users').trigger('click')
     await flushPromises()
-    expect(dashboardViewMocks.apiFetchMock).toHaveBeenCalledWith('/api/users-public/12/project-users?limit=25&offset=0')
+    expect(dashboardViewMocks.apiFetchMock).toHaveBeenCalledWith(
+      '/api/users-public/12/project-users?limit=25&offset=0',
+      expect.objectContaining({ retryNetwork: false, trackConnectionState: false }),
+    )
     expect(wrapper.get('.dashboard-project-users-card').text()).toContain('ali31')
     expect(wrapper.get('.dashboard-project-users-card').text()).toContain('09120000031')
     const projectUserCards = wrapper.findAll('.dashboard-project-user-card')
@@ -355,6 +358,45 @@ describe('DashboardView.vue', () => {
     expect(wrapper.get('.today-trades-inline-status--error').text()).toContain('اطلاعات قبلی حفظ شده است')
     expect(wrapper.text()).not.toContain('private refresh failure')
     expect(tradeRequests).toBe(2)
+  })
+
+  it('keeps coworker rows and the current query when a bounded search refresh fails', async () => {
+    dashboardViewMocks.apiFetchMock.mockImplementation(async (url: string) => {
+      if (url === '/api/auth/me') {
+        return makeJsonResponse({
+          id: 34,
+          full_name: 'کاربر همکاران',
+          account_name: 'coworkers34',
+          account_status: 'active',
+          global_lock_grace_expires_at: null,
+          global_web_locked_at: null,
+          trading_restricted_until: null,
+        })
+      }
+      if (url.startsWith('/api/trades/my?')) return makeJsonResponse([])
+      if (url.includes('/project-users?') && url.includes('q=new-query')) {
+        throw new Error('private project-user failure')
+      }
+      if (url.includes('/project-users?')) {
+        return makeJsonResponse([{ id: 3401, account_name: 'همکار معتبر قبلی', mobile_number: '09120003401' }])
+      }
+      return makeJsonResponse([])
+    })
+
+    const wrapper = await mountView()
+    await wrapper.get('.dashboard-accordion-toggle--project-users').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('.dashboard-project-users-card').text()).toContain('همکار معتبر قبلی')
+
+    const searchInput = wrapper.get('.dashboard-project-users-search input')
+    await searchInput.setValue('new-query')
+    await wrapper.get('.dashboard-project-users-search').trigger('submit')
+    await flushPromises()
+
+    expect(wrapper.get('.dashboard-project-users-card').text()).toContain('همکار معتبر قبلی')
+    expect(wrapper.get('.dashboard-project-users-inline-status--error').text()).toContain('فهرست قبلی حفظ شده است')
+    expect((searchInput.element as HTMLInputElement).value).toBe('new-query')
+    expect(wrapper.text()).not.toContain('private project-user failure')
   })
 
   it('shows the inactive warning and blocks market navigation for inactive accounts', async () => {
@@ -453,7 +495,10 @@ describe('DashboardView.vue', () => {
     await wrapper.get('.dashboard-accordion-toggle--project-users').trigger('click')
     await flushPromises()
 
-    expect(dashboardViewMocks.apiFetchMock).toHaveBeenCalledWith('/api/users-public/44/project-users?limit=25&offset=0')
+    expect(dashboardViewMocks.apiFetchMock).toHaveBeenCalledWith(
+      '/api/users-public/44/project-users?limit=25&offset=0',
+      expect.objectContaining({ retryNetwork: false, trackConnectionState: false }),
+    )
     expect(wrapper.get('.dashboard-project-users-card').text()).toContain('owner-peer')
     expect(dashboardViewMocks.routerPushMock).not.toHaveBeenCalledWith('/market')
   })
@@ -550,8 +595,14 @@ describe('DashboardView.vue', () => {
     await wrapper.get('.logout-btn').trigger('click')
     await flushPromises()
 
-    expect(dashboardViewMocks.apiFetchMock).toHaveBeenCalledWith('/api/sessions/active')
-    expect(dashboardViewMocks.apiFetchMock).toHaveBeenCalledWith('/api/sessions/session-b', { method: 'DELETE' })
+    expect(dashboardViewMocks.apiFetchMock).toHaveBeenCalledWith(
+      '/api/sessions/active',
+      expect.objectContaining({ retryNetwork: false, trackConnectionState: false }),
+    )
+    expect(dashboardViewMocks.apiFetchMock).toHaveBeenCalledWith(
+      '/api/sessions/session-b',
+      expect.objectContaining({ method: 'DELETE', retryNetwork: false, trackConnectionState: false }),
+    )
     expect(dashboardViewMocks.forceLogoutMock).toHaveBeenCalledTimes(1)
   })
 
