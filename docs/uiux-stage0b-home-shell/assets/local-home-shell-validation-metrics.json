@@ -1,0 +1,2143 @@
+{
+  "schemaVersion": 1,
+  "evidenceRole": "secondary-derivative-evidence",
+  "primaryDesignSource": "Figma file z8jgJxST4O2APzWnlyP9gv",
+  "scope": "Stage 0B-2 home and authenticated shell; Market and Messenger internals excluded",
+  "generatedAt": "2026-08-08T07:00:53.843Z",
+  "environment": {
+    "playwrightSource": "/tmp/trading-bot-webapp-uiux-redesign-v2/frontend/node_modules/playwright",
+    "browser": "147.0.7727.15",
+    "viewport": {
+      "width": 2400,
+      "height": 1600,
+      "deviceScaleFactor": 1
+    },
+    "fontSourceRoot": "/tmp/trading-bot-webapp-uiux-redesign-v2/frontend/node_modules/vazirmatn/fonts/webfonts"
+  },
+  "font": {
+    "loaded": true,
+    "checks": [
+      {
+        "weight": 400,
+        "loaded": true
+      },
+      {
+        "weight": 500,
+        "loaded": true
+      },
+      {
+        "weight": 600,
+        "loaded": true
+      },
+      {
+        "weight": 700,
+        "loaded": true
+      }
+    ],
+    "faces": [
+      {
+        "family": "Vazirmatn Evidence",
+        "weight": "400",
+        "style": "normal",
+        "status": "loaded"
+      },
+      {
+        "family": "Vazirmatn Evidence",
+        "weight": "500",
+        "style": "normal",
+        "status": "loaded"
+      },
+      {
+        "family": "Vazirmatn Evidence",
+        "weight": "600",
+        "style": "normal",
+        "status": "loaded"
+      },
+      {
+        "family": "Vazirmatn Evidence",
+        "weight": "700",
+        "style": "normal",
+        "status": "loaded"
+      }
+    ],
+    "computedBodyFamily": "\"Vazirmatn Evidence\", Vazirmatn, Tahoma, Arial, sans-serif"
+  },
+  "captures": [
+    {
+      "selector": "#responsive-sweep",
+      "filename": "local-home-shell-responsive-sweep.png",
+      "pixelDimensions": {
+        "width": 2360,
+        "height": 1053
+      }
+    },
+    {
+      "selector": "#quiet-home-390",
+      "filename": "local-home-shell-quiet-390.png",
+      "pixelDimensions": {
+        "width": 390,
+        "height": 844
+      }
+    },
+    {
+      "selector": "#route-shell-matrix",
+      "filename": "local-home-shell-route-matrix.png",
+      "pixelDimensions": {
+        "width": 2360,
+        "height": 774
+      }
+    },
+    {
+      "selector": "#state-atlas",
+      "filename": "local-home-shell-state-atlas.png",
+      "pixelDimensions": {
+        "width": 2360,
+        "height": 1140
+      }
+    },
+    {
+      "selector": "#security-modal-device",
+      "filename": "local-home-shell-security-session-modal.png",
+      "pixelDimensions": {
+        "width": 390,
+        "height": 844
+      }
+    },
+    {
+      "selector": "#adaptive-desktop",
+      "filename": "local-home-shell-adaptive-desktop.png",
+      "pixelDimensions": {
+        "width": 2360,
+        "height": 1036
+      }
+    },
+    {
+      "selector": "#desktop-viewport",
+      "filename": "local-home-shell-desktop-1440x900.png",
+      "pixelDimensions": {
+        "width": 1440,
+        "height": 900
+      }
+    }
+  ],
+  "measurements": {
+    "responsive": [
+      {
+        "requestedWidth": 360,
+        "device": {
+          "x": 168,
+          "y": 432,
+          "width": 360,
+          "height": 844,
+          "right": 528,
+          "bottom": 1276
+        },
+        "exactWidth": true,
+        "overflowX": false,
+        "overflowY": false,
+        "bottomNavClearance": 503,
+        "identityCount": 1,
+        "notificationCount": 1,
+        "protectedMarketSlotCount": 1,
+        "navigationCount": 1,
+        "navDestinationCount": 5
+      },
+      {
+        "requestedWidth": 375,
+        "device": {
+          "x": 552,
+          "y": 432,
+          "width": 375,
+          "height": 844,
+          "right": 927,
+          "bottom": 1276
+        },
+        "exactWidth": true,
+        "overflowX": false,
+        "overflowY": false,
+        "bottomNavClearance": 503,
+        "identityCount": 1,
+        "notificationCount": 1,
+        "protectedMarketSlotCount": 1,
+        "navigationCount": 1,
+        "navDestinationCount": 5
+      },
+      {
+        "requestedWidth": 390,
+        "device": {
+          "x": 951,
+          "y": 432,
+          "width": 390,
+          "height": 844,
+          "right": 1341,
+          "bottom": 1276
+        },
+        "exactWidth": true,
+        "overflowX": false,
+        "overflowY": false,
+        "bottomNavClearance": 503,
+        "identityCount": 1,
+        "notificationCount": 1,
+        "protectedMarketSlotCount": 1,
+        "navigationCount": 1,
+        "navDestinationCount": 5
+      },
+      {
+        "requestedWidth": 414,
+        "device": {
+          "x": 1365,
+          "y": 432,
+          "width": 414,
+          "height": 844,
+          "right": 1779,
+          "bottom": 1276
+        },
+        "exactWidth": true,
+        "overflowX": false,
+        "overflowY": false,
+        "bottomNavClearance": 503,
+        "identityCount": 1,
+        "notificationCount": 1,
+        "protectedMarketSlotCount": 1,
+        "navigationCount": 1,
+        "navDestinationCount": 5
+      },
+      {
+        "requestedWidth": 430,
+        "device": {
+          "x": 1803,
+          "y": 432,
+          "width": 430,
+          "height": 844,
+          "right": 2233,
+          "bottom": 1276
+        },
+        "exactWidth": true,
+        "overflowX": false,
+        "overflowY": false,
+        "bottomNavClearance": 503,
+        "identityCount": 1,
+        "notificationCount": 1,
+        "protectedMarketSlotCount": 1,
+        "navigationCount": 1,
+        "navDestinationCount": 5
+      }
+    ],
+    "productScreens": [
+      {
+        "id": "quiet-home-360",
+        "x": 168,
+        "y": 432,
+        "width": 360,
+        "height": 844,
+        "right": 528,
+        "bottom": 1276,
+        "clientWidth": 358,
+        "clientHeight": 842,
+        "scrollWidth": 358,
+        "scrollHeight": 842,
+        "overflowX": false,
+        "overflowY": false
+      },
+      {
+        "id": "quiet-home-375",
+        "x": 552,
+        "y": 432,
+        "width": 375,
+        "height": 844,
+        "right": 927,
+        "bottom": 1276,
+        "clientWidth": 373,
+        "clientHeight": 842,
+        "scrollWidth": 373,
+        "scrollHeight": 842,
+        "overflowX": false,
+        "overflowY": false
+      },
+      {
+        "id": "quiet-home-390",
+        "x": 951,
+        "y": 432,
+        "width": 390,
+        "height": 844,
+        "right": 1341,
+        "bottom": 1276,
+        "clientWidth": 388,
+        "clientHeight": 842,
+        "scrollWidth": 388,
+        "scrollHeight": 842,
+        "overflowX": false,
+        "overflowY": false
+      },
+      {
+        "id": "quiet-home-414",
+        "x": 1365,
+        "y": 432,
+        "width": 414,
+        "height": 844,
+        "right": 1779,
+        "bottom": 1276,
+        "clientWidth": 412,
+        "clientHeight": 842,
+        "scrollWidth": 412,
+        "scrollHeight": 842,
+        "overflowX": false,
+        "overflowY": false
+      },
+      {
+        "id": "quiet-home-430",
+        "x": 1803,
+        "y": 432,
+        "width": 430,
+        "height": 844,
+        "right": 2233,
+        "bottom": 1276,
+        "clientWidth": 428,
+        "clientHeight": 842,
+        "scrollWidth": 428,
+        "scrollHeight": 842,
+        "overflowX": false,
+        "overflowY": false
+      },
+      {
+        "id": "route-home",
+        "x": 360,
+        "y": 1517,
+        "width": 260,
+        "height": 560,
+        "right": 620,
+        "bottom": 2077,
+        "clientWidth": 258,
+        "clientHeight": 558,
+        "scrollWidth": 258,
+        "scrollHeight": 558,
+        "overflowX": false,
+        "overflowY": false
+      },
+      {
+        "id": "route-operations",
+        "x": 644,
+        "y": 1517,
+        "width": 260,
+        "height": 560,
+        "right": 904,
+        "bottom": 2077,
+        "clientWidth": 258,
+        "clientHeight": 558,
+        "scrollWidth": 258,
+        "scrollHeight": 558,
+        "overflowX": false,
+        "overflowY": false
+      },
+      {
+        "id": "route-account",
+        "x": 928,
+        "y": 1517,
+        "width": 260,
+        "height": 560,
+        "right": 1188,
+        "bottom": 2077,
+        "clientWidth": 258,
+        "clientHeight": 558,
+        "scrollWidth": 258,
+        "scrollHeight": 558,
+        "overflowX": false,
+        "overflowY": false
+      },
+      {
+        "id": "route-market",
+        "x": 1212,
+        "y": 1517,
+        "width": 260,
+        "height": 560,
+        "right": 1472,
+        "bottom": 2077,
+        "clientWidth": 258,
+        "clientHeight": 558,
+        "scrollWidth": 258,
+        "scrollHeight": 558,
+        "overflowX": false,
+        "overflowY": false
+      },
+      {
+        "id": "route-messenger",
+        "x": 1496,
+        "y": 1517,
+        "width": 260,
+        "height": 560,
+        "right": 1756,
+        "bottom": 2077,
+        "clientWidth": 258,
+        "clientHeight": 558,
+        "scrollWidth": 258,
+        "scrollHeight": 558,
+        "overflowX": false,
+        "overflowY": false
+      },
+      {
+        "id": "route-accountant-home",
+        "x": 1780,
+        "y": 1517,
+        "width": 260,
+        "height": 560,
+        "right": 2040,
+        "bottom": 2077,
+        "clientWidth": 258,
+        "clientHeight": 558,
+        "scrollWidth": 258,
+        "scrollHeight": 558,
+        "overflowX": false,
+        "overflowY": false
+      },
+      {
+        "id": "state-offline",
+        "x": 562,
+        "y": 2320,
+        "width": 408,
+        "height": 410,
+        "right": 970,
+        "bottom": 2730,
+        "clientWidth": 408,
+        "clientHeight": 410,
+        "scrollWidth": 408,
+        "scrollHeight": 410,
+        "overflowX": false,
+        "overflowY": false
+      },
+      {
+        "id": "state-stale",
+        "x": 996,
+        "y": 2320,
+        "width": 408,
+        "height": 410,
+        "right": 1404,
+        "bottom": 2730,
+        "clientWidth": 408,
+        "clientHeight": 410,
+        "scrollWidth": 408,
+        "scrollHeight": 410,
+        "overflowX": false,
+        "overflowY": false
+      },
+      {
+        "id": "state-pwa",
+        "x": 1430,
+        "y": 2320,
+        "width": 408,
+        "height": 410,
+        "right": 1838,
+        "bottom": 2730,
+        "clientWidth": 408,
+        "clientHeight": 410,
+        "scrollWidth": 408,
+        "scrollHeight": 410,
+        "overflowX": false,
+        "overflowY": false
+      },
+      {
+        "id": "state-inactive",
+        "x": 562,
+        "y": 2834,
+        "width": 408,
+        "height": 410,
+        "right": 970,
+        "bottom": 3244,
+        "clientWidth": 408,
+        "clientHeight": 410,
+        "scrollWidth": 408,
+        "scrollHeight": 410,
+        "overflowX": false,
+        "overflowY": false
+      },
+      {
+        "id": "state-loading",
+        "x": 996,
+        "y": 2834,
+        "width": 408,
+        "height": 410,
+        "right": 1404,
+        "bottom": 3244,
+        "clientWidth": 408,
+        "clientHeight": 410,
+        "scrollWidth": 408,
+        "scrollHeight": 410,
+        "overflowX": false,
+        "overflowY": false
+      },
+      {
+        "id": "state-error",
+        "x": 1430,
+        "y": 2834,
+        "width": 408,
+        "height": 410,
+        "right": 1838,
+        "bottom": 3244,
+        "clientWidth": 408,
+        "clientHeight": 410,
+        "scrollWidth": 408,
+        "scrollHeight": 410,
+        "overflowX": false,
+        "overflowY": false
+      },
+      {
+        "id": "security-session-modal",
+        "x": 1005,
+        "y": 3408,
+        "width": 390,
+        "height": 844,
+        "right": 1395,
+        "bottom": 4252,
+        "clientWidth": 388,
+        "clientHeight": 842,
+        "scrollWidth": 388,
+        "scrollHeight": 842,
+        "overflowX": false,
+        "overflowY": false
+      },
+      {
+        "id": "adaptive-desktop",
+        "x": 915,
+        "y": 4416,
+        "width": 1440,
+        "height": 900,
+        "right": 2355,
+        "bottom": 5316,
+        "clientWidth": 1438,
+        "clientHeight": 898,
+        "scrollWidth": 1438,
+        "scrollHeight": 898,
+        "overflowX": false,
+        "overflowY": false
+      }
+    ],
+    "actions": {
+      "count": 73,
+      "minimumWidth": 44,
+      "minimumHeight": 44,
+      "violations": [],
+      "items": [
+        {
+          "id": "quiet-home-360:button:0",
+          "screen": "quiet-home-360",
+          "label": "اعلان‌ها",
+          "tag": "button",
+          "disabled": false,
+          "x": 185,
+          "y": 460,
+          "width": 44,
+          "height": 44,
+          "right": 229,
+          "bottom": 504
+        },
+        {
+          "id": "quiet-home-360:a:1",
+          "screen": "quiet-home-360",
+          "label": "خانه",
+          "tag": "a",
+          "disabled": false,
+          "x": 452,
+          "y": 1210,
+          "width": 67,
+          "height": 52,
+          "right": 519,
+          "bottom": 1262
+        },
+        {
+          "id": "quiet-home-360:a:2",
+          "screen": "quiet-home-360",
+          "label": "بازار",
+          "tag": "a",
+          "disabled": false,
+          "x": 383,
+          "y": 1210,
+          "width": 67,
+          "height": 52,
+          "right": 450,
+          "bottom": 1262
+        },
+        {
+          "id": "quiet-home-360:a:3",
+          "screen": "quiet-home-360",
+          "label": "پیام‌رسان",
+          "tag": "a",
+          "disabled": false,
+          "x": 314,
+          "y": 1210,
+          "width": 67,
+          "height": 52,
+          "right": 381,
+          "bottom": 1262
+        },
+        {
+          "id": "quiet-home-360:a:4",
+          "screen": "quiet-home-360",
+          "label": "عملیات",
+          "tag": "a",
+          "disabled": false,
+          "x": 245,
+          "y": 1210,
+          "width": 67,
+          "height": 52,
+          "right": 312,
+          "bottom": 1262
+        },
+        {
+          "id": "quiet-home-360:a:5",
+          "screen": "quiet-home-360",
+          "label": "حساب",
+          "tag": "a",
+          "disabled": false,
+          "x": 177,
+          "y": 1210,
+          "width": 67,
+          "height": 52,
+          "right": 243,
+          "bottom": 1262
+        },
+        {
+          "id": "quiet-home-375:button:6",
+          "screen": "quiet-home-375",
+          "label": "اعلان‌ها",
+          "tag": "button",
+          "disabled": false,
+          "x": 569,
+          "y": 460,
+          "width": 44,
+          "height": 44,
+          "right": 613,
+          "bottom": 504
+        },
+        {
+          "id": "quiet-home-375:a:7",
+          "screen": "quiet-home-375",
+          "label": "خانه",
+          "tag": "a",
+          "disabled": false,
+          "x": 848,
+          "y": 1210,
+          "width": 70,
+          "height": 52,
+          "right": 918,
+          "bottom": 1262
+        },
+        {
+          "id": "quiet-home-375:a:8",
+          "screen": "quiet-home-375",
+          "label": "بازار",
+          "tag": "a",
+          "disabled": false,
+          "x": 776,
+          "y": 1210,
+          "width": 70,
+          "height": 52,
+          "right": 846,
+          "bottom": 1262
+        },
+        {
+          "id": "quiet-home-375:a:9",
+          "screen": "quiet-home-375",
+          "label": "پیام‌رسان",
+          "tag": "a",
+          "disabled": false,
+          "x": 704,
+          "y": 1210,
+          "width": 70,
+          "height": 52,
+          "right": 774,
+          "bottom": 1262
+        },
+        {
+          "id": "quiet-home-375:a:10",
+          "screen": "quiet-home-375",
+          "label": "عملیات",
+          "tag": "a",
+          "disabled": false,
+          "x": 632,
+          "y": 1210,
+          "width": 70,
+          "height": 52,
+          "right": 702,
+          "bottom": 1262
+        },
+        {
+          "id": "quiet-home-375:a:11",
+          "screen": "quiet-home-375",
+          "label": "حساب",
+          "tag": "a",
+          "disabled": false,
+          "x": 561,
+          "y": 1210,
+          "width": 70,
+          "height": 52,
+          "right": 630,
+          "bottom": 1262
+        },
+        {
+          "id": "quiet-home-390:button:12",
+          "screen": "quiet-home-390",
+          "label": "اعلان‌ها",
+          "tag": "button",
+          "disabled": false,
+          "x": 968,
+          "y": 460,
+          "width": 44,
+          "height": 44,
+          "right": 1012,
+          "bottom": 504
+        },
+        {
+          "id": "quiet-home-390:a:13",
+          "screen": "quiet-home-390",
+          "label": "خانه",
+          "tag": "a",
+          "disabled": false,
+          "x": 1259,
+          "y": 1210,
+          "width": 73,
+          "height": 52,
+          "right": 1332,
+          "bottom": 1262
+        },
+        {
+          "id": "quiet-home-390:a:14",
+          "screen": "quiet-home-390",
+          "label": "بازار",
+          "tag": "a",
+          "disabled": false,
+          "x": 1184,
+          "y": 1210,
+          "width": 73,
+          "height": 52,
+          "right": 1257,
+          "bottom": 1262
+        },
+        {
+          "id": "quiet-home-390:a:15",
+          "screen": "quiet-home-390",
+          "label": "پیام‌رسان",
+          "tag": "a",
+          "disabled": false,
+          "x": 1109,
+          "y": 1210,
+          "width": 73,
+          "height": 52,
+          "right": 1182,
+          "bottom": 1262
+        },
+        {
+          "id": "quiet-home-390:a:16",
+          "screen": "quiet-home-390",
+          "label": "عملیات",
+          "tag": "a",
+          "disabled": false,
+          "x": 1034,
+          "y": 1210,
+          "width": 73,
+          "height": 52,
+          "right": 1107,
+          "bottom": 1262
+        },
+        {
+          "id": "quiet-home-390:a:17",
+          "screen": "quiet-home-390",
+          "label": "حساب",
+          "tag": "a",
+          "disabled": false,
+          "x": 960,
+          "y": 1210,
+          "width": 73,
+          "height": 52,
+          "right": 1032,
+          "bottom": 1262
+        },
+        {
+          "id": "quiet-home-414:button:18",
+          "screen": "quiet-home-414",
+          "label": "اعلان‌ها",
+          "tag": "button",
+          "disabled": false,
+          "x": 1382,
+          "y": 460,
+          "width": 44,
+          "height": 44,
+          "right": 1426,
+          "bottom": 504
+        },
+        {
+          "id": "quiet-home-414:a:19",
+          "screen": "quiet-home-414",
+          "label": "خانه",
+          "tag": "a",
+          "disabled": false,
+          "x": 1692,
+          "y": 1210,
+          "width": 78,
+          "height": 52,
+          "right": 1770,
+          "bottom": 1262
+        },
+        {
+          "id": "quiet-home-414:a:20",
+          "screen": "quiet-home-414",
+          "label": "بازار",
+          "tag": "a",
+          "disabled": false,
+          "x": 1612,
+          "y": 1210,
+          "width": 78,
+          "height": 52,
+          "right": 1690,
+          "bottom": 1262
+        },
+        {
+          "id": "quiet-home-414:a:21",
+          "screen": "quiet-home-414",
+          "label": "پیام‌رسان",
+          "tag": "a",
+          "disabled": false,
+          "x": 1533,
+          "y": 1210,
+          "width": 78,
+          "height": 52,
+          "right": 1610,
+          "bottom": 1262
+        },
+        {
+          "id": "quiet-home-414:a:22",
+          "screen": "quiet-home-414",
+          "label": "عملیات",
+          "tag": "a",
+          "disabled": false,
+          "x": 1453,
+          "y": 1210,
+          "width": 78,
+          "height": 52,
+          "right": 1531,
+          "bottom": 1262
+        },
+        {
+          "id": "quiet-home-414:a:23",
+          "screen": "quiet-home-414",
+          "label": "حساب",
+          "tag": "a",
+          "disabled": false,
+          "x": 1374,
+          "y": 1210,
+          "width": 78,
+          "height": 52,
+          "right": 1451,
+          "bottom": 1262
+        },
+        {
+          "id": "quiet-home-430:button:24",
+          "screen": "quiet-home-430",
+          "label": "اعلان‌ها",
+          "tag": "button",
+          "disabled": false,
+          "x": 1820,
+          "y": 460,
+          "width": 44,
+          "height": 44,
+          "right": 1864,
+          "bottom": 504
+        },
+        {
+          "id": "quiet-home-430:a:25",
+          "screen": "quiet-home-430",
+          "label": "خانه",
+          "tag": "a",
+          "disabled": false,
+          "x": 2143,
+          "y": 1210,
+          "width": 81,
+          "height": 52,
+          "right": 2224,
+          "bottom": 1262
+        },
+        {
+          "id": "quiet-home-430:a:26",
+          "screen": "quiet-home-430",
+          "label": "بازار",
+          "tag": "a",
+          "disabled": false,
+          "x": 2060,
+          "y": 1210,
+          "width": 81,
+          "height": 52,
+          "right": 2141,
+          "bottom": 1262
+        },
+        {
+          "id": "quiet-home-430:a:27",
+          "screen": "quiet-home-430",
+          "label": "پیام‌رسان",
+          "tag": "a",
+          "disabled": false,
+          "x": 1977,
+          "y": 1210,
+          "width": 81,
+          "height": 52,
+          "right": 2058,
+          "bottom": 1262
+        },
+        {
+          "id": "quiet-home-430:a:28",
+          "screen": "quiet-home-430",
+          "label": "عملیات",
+          "tag": "a",
+          "disabled": false,
+          "x": 1894,
+          "y": 1210,
+          "width": 81,
+          "height": 52,
+          "right": 1975,
+          "bottom": 1262
+        },
+        {
+          "id": "quiet-home-430:a:29",
+          "screen": "quiet-home-430",
+          "label": "حساب",
+          "tag": "a",
+          "disabled": false,
+          "x": 1812,
+          "y": 1210,
+          "width": 81,
+          "height": 52,
+          "right": 1892,
+          "bottom": 1262
+        },
+        {
+          "id": "route-home:button:30",
+          "screen": "route-home",
+          "label": "اعلان‌ها",
+          "tag": "button",
+          "disabled": false,
+          "x": 373,
+          "y": 1542,
+          "width": 44,
+          "height": 44,
+          "right": 417,
+          "bottom": 1586
+        },
+        {
+          "id": "route-home:a:31",
+          "screen": "route-home",
+          "label": "خانه",
+          "tag": "a",
+          "disabled": false,
+          "x": 567,
+          "y": 2017,
+          "width": 48,
+          "height": 48,
+          "right": 615,
+          "bottom": 2065
+        },
+        {
+          "id": "route-home:a:32",
+          "screen": "route-home",
+          "label": "بازار",
+          "tag": "a",
+          "disabled": false,
+          "x": 516,
+          "y": 2017,
+          "width": 48,
+          "height": 48,
+          "right": 565,
+          "bottom": 2065
+        },
+        {
+          "id": "route-home:a:33",
+          "screen": "route-home",
+          "label": "پیام‌رسان",
+          "tag": "a",
+          "disabled": false,
+          "x": 466,
+          "y": 2017,
+          "width": 48,
+          "height": 48,
+          "right": 514,
+          "bottom": 2065
+        },
+        {
+          "id": "route-home:a:34",
+          "screen": "route-home",
+          "label": "عملیات",
+          "tag": "a",
+          "disabled": false,
+          "x": 415,
+          "y": 2017,
+          "width": 48,
+          "height": 48,
+          "right": 464,
+          "bottom": 2065
+        },
+        {
+          "id": "route-home:a:35",
+          "screen": "route-home",
+          "label": "حساب",
+          "tag": "a",
+          "disabled": false,
+          "x": 365,
+          "y": 2017,
+          "width": 48,
+          "height": 48,
+          "right": 413,
+          "bottom": 2065
+        },
+        {
+          "id": "route-operations:button:36",
+          "screen": "route-operations",
+          "label": "اعلان‌ها",
+          "tag": "button",
+          "disabled": false,
+          "x": 657,
+          "y": 1542,
+          "width": 44,
+          "height": 44,
+          "right": 701,
+          "bottom": 1586
+        },
+        {
+          "id": "route-operations:a:37",
+          "screen": "route-operations",
+          "label": "خانه",
+          "tag": "a",
+          "disabled": false,
+          "x": 851,
+          "y": 2017,
+          "width": 48,
+          "height": 48,
+          "right": 899,
+          "bottom": 2065
+        },
+        {
+          "id": "route-operations:a:38",
+          "screen": "route-operations",
+          "label": "بازار",
+          "tag": "a",
+          "disabled": false,
+          "x": 800,
+          "y": 2017,
+          "width": 48,
+          "height": 48,
+          "right": 849,
+          "bottom": 2065
+        },
+        {
+          "id": "route-operations:a:39",
+          "screen": "route-operations",
+          "label": "پیام‌رسان",
+          "tag": "a",
+          "disabled": false,
+          "x": 750,
+          "y": 2017,
+          "width": 48,
+          "height": 48,
+          "right": 798,
+          "bottom": 2065
+        },
+        {
+          "id": "route-operations:a:40",
+          "screen": "route-operations",
+          "label": "عملیات",
+          "tag": "a",
+          "disabled": false,
+          "x": 699,
+          "y": 2017,
+          "width": 48,
+          "height": 48,
+          "right": 748,
+          "bottom": 2065
+        },
+        {
+          "id": "route-operations:a:41",
+          "screen": "route-operations",
+          "label": "حساب",
+          "tag": "a",
+          "disabled": false,
+          "x": 649,
+          "y": 2017,
+          "width": 48,
+          "height": 48,
+          "right": 697,
+          "bottom": 2065
+        },
+        {
+          "id": "route-account:button:42",
+          "screen": "route-account",
+          "label": "اعلان‌ها",
+          "tag": "button",
+          "disabled": false,
+          "x": 941,
+          "y": 1542,
+          "width": 44,
+          "height": 44,
+          "right": 985,
+          "bottom": 1586
+        },
+        {
+          "id": "route-account:a:43",
+          "screen": "route-account",
+          "label": "خانه",
+          "tag": "a",
+          "disabled": false,
+          "x": 1135,
+          "y": 2017,
+          "width": 48,
+          "height": 48,
+          "right": 1183,
+          "bottom": 2065
+        },
+        {
+          "id": "route-account:a:44",
+          "screen": "route-account",
+          "label": "بازار",
+          "tag": "a",
+          "disabled": false,
+          "x": 1084,
+          "y": 2017,
+          "width": 48,
+          "height": 48,
+          "right": 1133,
+          "bottom": 2065
+        },
+        {
+          "id": "route-account:a:45",
+          "screen": "route-account",
+          "label": "پیام‌رسان",
+          "tag": "a",
+          "disabled": false,
+          "x": 1034,
+          "y": 2017,
+          "width": 48,
+          "height": 48,
+          "right": 1082,
+          "bottom": 2065
+        },
+        {
+          "id": "route-account:a:46",
+          "screen": "route-account",
+          "label": "عملیات",
+          "tag": "a",
+          "disabled": false,
+          "x": 983,
+          "y": 2017,
+          "width": 48,
+          "height": 48,
+          "right": 1032,
+          "bottom": 2065
+        },
+        {
+          "id": "route-account:a:47",
+          "screen": "route-account",
+          "label": "حساب",
+          "tag": "a",
+          "disabled": false,
+          "x": 933,
+          "y": 2017,
+          "width": 48,
+          "height": 48,
+          "right": 981,
+          "bottom": 2065
+        },
+        {
+          "id": "route-market:button:48",
+          "screen": "route-market",
+          "label": "باز کردن ناوبری",
+          "tag": "button",
+          "disabled": false,
+          "x": 1229,
+          "y": 2016,
+          "width": 44,
+          "height": 44,
+          "right": 1273,
+          "bottom": 2060
+        },
+        {
+          "id": "route-messenger:button:49",
+          "screen": "route-messenger",
+          "label": "باز کردن ناوبری",
+          "tag": "button",
+          "disabled": false,
+          "x": 1513,
+          "y": 2016,
+          "width": 44,
+          "height": 44,
+          "right": 1557,
+          "bottom": 2060
+        },
+        {
+          "id": "route-accountant-home:button:50",
+          "screen": "route-accountant-home",
+          "label": "اعلان‌ها",
+          "tag": "button",
+          "disabled": false,
+          "x": 1793,
+          "y": 1542,
+          "width": 44,
+          "height": 44,
+          "right": 1837,
+          "bottom": 1586
+        },
+        {
+          "id": "route-accountant-home:a:51",
+          "screen": "route-accountant-home",
+          "label": "خانه",
+          "tag": "a",
+          "disabled": false,
+          "x": 1974,
+          "y": 2017,
+          "width": 61,
+          "height": 48,
+          "right": 2035,
+          "bottom": 2065
+        },
+        {
+          "id": "route-accountant-home:a:52",
+          "screen": "route-accountant-home",
+          "label": "پیام‌رسان",
+          "tag": "a",
+          "disabled": false,
+          "x": 1911,
+          "y": 2017,
+          "width": 61,
+          "height": 48,
+          "right": 1972,
+          "bottom": 2065
+        },
+        {
+          "id": "route-accountant-home:a:53",
+          "screen": "route-accountant-home",
+          "label": "عملیات",
+          "tag": "a",
+          "disabled": false,
+          "x": 1848,
+          "y": 2017,
+          "width": 61,
+          "height": 48,
+          "right": 1909,
+          "bottom": 2065
+        },
+        {
+          "id": "route-accountant-home:a:54",
+          "screen": "route-accountant-home",
+          "label": "حساب",
+          "tag": "a",
+          "disabled": false,
+          "x": 1785,
+          "y": 2017,
+          "width": 61,
+          "height": 48,
+          "right": 1846,
+          "bottom": 2065
+        },
+        {
+          "id": "state-pwa:button:55",
+          "screen": "state-pwa",
+          "label": "بعداً",
+          "tag": "button",
+          "disabled": false,
+          "x": 1686,
+          "y": 2545,
+          "width": 121,
+          "height": 48,
+          "right": 1807,
+          "bottom": 2593
+        },
+        {
+          "id": "state-pwa:button:56",
+          "screen": "state-pwa",
+          "label": "نصب",
+          "tag": "button",
+          "disabled": false,
+          "x": 1461,
+          "y": 2545,
+          "width": 217,
+          "height": 48,
+          "right": 1678,
+          "bottom": 2593
+        },
+        {
+          "id": "state-inactive:a:57",
+          "screen": "state-inactive",
+          "label": "پیگیری در حساب",
+          "tag": "a",
+          "disabled": false,
+          "x": 578,
+          "y": 2941,
+          "width": 376,
+          "height": 48,
+          "right": 954,
+          "bottom": 2989
+        },
+        {
+          "id": "state-error:button:58",
+          "screen": "state-error",
+          "label": "تلاش دوباره",
+          "tag": "button",
+          "disabled": false,
+          "x": 1465,
+          "y": 3050,
+          "width": 338,
+          "height": 48,
+          "right": 1803,
+          "bottom": 3098
+        },
+        {
+          "id": "security-session-modal:button:59",
+          "screen": "security-session-modal",
+          "label": "اعلان‌ها",
+          "tag": "button",
+          "disabled": false,
+          "x": 1022,
+          "y": 3436,
+          "width": 44,
+          "height": 44,
+          "right": 1066,
+          "bottom": 3480
+        },
+        {
+          "id": "security-session-modal:a:60",
+          "screen": "security-session-modal",
+          "label": "خانه",
+          "tag": "a",
+          "disabled": false,
+          "x": 1313,
+          "y": 4186,
+          "width": 73,
+          "height": 52,
+          "right": 1386,
+          "bottom": 4238
+        },
+        {
+          "id": "security-session-modal:a:61",
+          "screen": "security-session-modal",
+          "label": "بازار",
+          "tag": "a",
+          "disabled": false,
+          "x": 1238,
+          "y": 4186,
+          "width": 73,
+          "height": 52,
+          "right": 1311,
+          "bottom": 4238
+        },
+        {
+          "id": "security-session-modal:a:62",
+          "screen": "security-session-modal",
+          "label": "پیام‌رسان",
+          "tag": "a",
+          "disabled": false,
+          "x": 1164,
+          "y": 4186,
+          "width": 73,
+          "height": 52,
+          "right": 1236,
+          "bottom": 4238
+        },
+        {
+          "id": "security-session-modal:a:63",
+          "screen": "security-session-modal",
+          "label": "عملیات",
+          "tag": "a",
+          "disabled": false,
+          "x": 1089,
+          "y": 4186,
+          "width": 73,
+          "height": 52,
+          "right": 1162,
+          "bottom": 4238
+        },
+        {
+          "id": "security-session-modal:a:64",
+          "screen": "security-session-modal",
+          "label": "حساب",
+          "tag": "a",
+          "disabled": false,
+          "x": 1014,
+          "y": 4186,
+          "width": 73,
+          "height": 52,
+          "right": 1087,
+          "bottom": 4238
+        },
+        {
+          "id": "security-session-modal:button:65",
+          "screen": "security-session-modal",
+          "label": "رد",
+          "tag": "button",
+          "disabled": false,
+          "x": 1205,
+          "y": 3941,
+          "width": 153,
+          "height": 48,
+          "right": 1357,
+          "bottom": 3989
+        },
+        {
+          "id": "security-session-modal:button:66",
+          "screen": "security-session-modal",
+          "label": "تأیید",
+          "tag": "button",
+          "disabled": false,
+          "x": 1043,
+          "y": 3941,
+          "width": 153,
+          "height": 48,
+          "right": 1196,
+          "bottom": 3989
+        },
+        {
+          "id": "adaptive-desktop:a:67",
+          "screen": "adaptive-desktop",
+          "label": "خانه",
+          "tag": "a",
+          "disabled": false,
+          "x": 1778,
+          "y": 4436,
+          "width": 89,
+          "height": 48,
+          "right": 1867,
+          "bottom": 4484
+        },
+        {
+          "id": "adaptive-desktop:a:68",
+          "screen": "adaptive-desktop",
+          "label": "بازار",
+          "tag": "a",
+          "disabled": false,
+          "x": 1684,
+          "y": 4436,
+          "width": 89,
+          "height": 48,
+          "right": 1773,
+          "bottom": 4484
+        },
+        {
+          "id": "adaptive-desktop:a:69",
+          "screen": "adaptive-desktop",
+          "label": "پیام‌رسان",
+          "tag": "a",
+          "disabled": false,
+          "x": 1591,
+          "y": 4436,
+          "width": 89,
+          "height": 48,
+          "right": 1679,
+          "bottom": 4484
+        },
+        {
+          "id": "adaptive-desktop:a:70",
+          "screen": "adaptive-desktop",
+          "label": "عملیات",
+          "tag": "a",
+          "disabled": false,
+          "x": 1497,
+          "y": 4436,
+          "width": 89,
+          "height": 48,
+          "right": 1586,
+          "bottom": 4484
+        },
+        {
+          "id": "adaptive-desktop:a:71",
+          "screen": "adaptive-desktop",
+          "label": "حساب",
+          "tag": "a",
+          "disabled": false,
+          "x": 1404,
+          "y": 4436,
+          "width": 89,
+          "height": 48,
+          "right": 1492,
+          "bottom": 4484
+        },
+        {
+          "id": "adaptive-desktop:button:72",
+          "screen": "adaptive-desktop",
+          "label": "اعلان‌ها",
+          "tag": "button",
+          "disabled": false,
+          "x": 1211,
+          "y": 4438,
+          "width": 44,
+          "height": 44,
+          "right": 1255,
+          "bottom": 4482
+        }
+      ]
+    },
+    "ctas": {
+      "count": 5,
+      "minimumHeight": 48,
+      "violations": [],
+      "items": [
+        {
+          "id": "state-pwa:button:0",
+          "screen": "state-pwa",
+          "label": "نصب",
+          "tag": "button",
+          "disabled": false,
+          "x": 1461,
+          "y": 2545,
+          "width": 217,
+          "height": 48,
+          "right": 1678,
+          "bottom": 2593
+        },
+        {
+          "id": "state-inactive:a:1",
+          "screen": "state-inactive",
+          "label": "پیگیری در حساب",
+          "tag": "a",
+          "disabled": false,
+          "x": 578,
+          "y": 2941,
+          "width": 376,
+          "height": 48,
+          "right": 954,
+          "bottom": 2989
+        },
+        {
+          "id": "state-error:button:2",
+          "screen": "state-error",
+          "label": "تلاش دوباره",
+          "tag": "button",
+          "disabled": false,
+          "x": 1465,
+          "y": 3050,
+          "width": 338,
+          "height": 48,
+          "right": 1803,
+          "bottom": 3098
+        },
+        {
+          "id": "security-session-modal:button:3",
+          "screen": "security-session-modal",
+          "label": "رد",
+          "tag": "button",
+          "disabled": false,
+          "x": 1205,
+          "y": 3941,
+          "width": 153,
+          "height": 48,
+          "right": 1357,
+          "bottom": 3989
+        },
+        {
+          "id": "security-session-modal:button:4",
+          "screen": "security-session-modal",
+          "label": "تأیید",
+          "tag": "button",
+          "disabled": false,
+          "x": 1043,
+          "y": 3941,
+          "width": 153,
+          "height": 48,
+          "right": 1196,
+          "bottom": 3989
+        }
+      ]
+    },
+    "navigationTypography": {
+      "count": 54,
+      "minimumFontSize": 11,
+      "requiredMinimumFontSize": 11,
+      "violations": [],
+      "items": [
+        {
+          "label": "خانه",
+          "fontSize": 11,
+          "screen": "quiet-home-360"
+        },
+        {
+          "label": "بازار",
+          "fontSize": 11,
+          "screen": "quiet-home-360"
+        },
+        {
+          "label": "پیام‌رسان",
+          "fontSize": 11,
+          "screen": "quiet-home-360"
+        },
+        {
+          "label": "عملیات",
+          "fontSize": 11,
+          "screen": "quiet-home-360"
+        },
+        {
+          "label": "حساب",
+          "fontSize": 11,
+          "screen": "quiet-home-360"
+        },
+        {
+          "label": "خانه",
+          "fontSize": 11,
+          "screen": "quiet-home-375"
+        },
+        {
+          "label": "بازار",
+          "fontSize": 11,
+          "screen": "quiet-home-375"
+        },
+        {
+          "label": "پیام‌رسان",
+          "fontSize": 11,
+          "screen": "quiet-home-375"
+        },
+        {
+          "label": "عملیات",
+          "fontSize": 11,
+          "screen": "quiet-home-375"
+        },
+        {
+          "label": "حساب",
+          "fontSize": 11,
+          "screen": "quiet-home-375"
+        },
+        {
+          "label": "خانه",
+          "fontSize": 11,
+          "screen": "quiet-home-390"
+        },
+        {
+          "label": "بازار",
+          "fontSize": 11,
+          "screen": "quiet-home-390"
+        },
+        {
+          "label": "پیام‌رسان",
+          "fontSize": 11,
+          "screen": "quiet-home-390"
+        },
+        {
+          "label": "عملیات",
+          "fontSize": 11,
+          "screen": "quiet-home-390"
+        },
+        {
+          "label": "حساب",
+          "fontSize": 11,
+          "screen": "quiet-home-390"
+        },
+        {
+          "label": "خانه",
+          "fontSize": 11,
+          "screen": "quiet-home-414"
+        },
+        {
+          "label": "بازار",
+          "fontSize": 11,
+          "screen": "quiet-home-414"
+        },
+        {
+          "label": "پیام‌رسان",
+          "fontSize": 11,
+          "screen": "quiet-home-414"
+        },
+        {
+          "label": "عملیات",
+          "fontSize": 11,
+          "screen": "quiet-home-414"
+        },
+        {
+          "label": "حساب",
+          "fontSize": 11,
+          "screen": "quiet-home-414"
+        },
+        {
+          "label": "خانه",
+          "fontSize": 11,
+          "screen": "quiet-home-430"
+        },
+        {
+          "label": "بازار",
+          "fontSize": 11,
+          "screen": "quiet-home-430"
+        },
+        {
+          "label": "پیام‌رسان",
+          "fontSize": 11,
+          "screen": "quiet-home-430"
+        },
+        {
+          "label": "عملیات",
+          "fontSize": 11,
+          "screen": "quiet-home-430"
+        },
+        {
+          "label": "حساب",
+          "fontSize": 11,
+          "screen": "quiet-home-430"
+        },
+        {
+          "label": "خانه",
+          "fontSize": 11,
+          "screen": "route-home"
+        },
+        {
+          "label": "بازار",
+          "fontSize": 11,
+          "screen": "route-home"
+        },
+        {
+          "label": "پیام‌رسان",
+          "fontSize": 11,
+          "screen": "route-home"
+        },
+        {
+          "label": "عملیات",
+          "fontSize": 11,
+          "screen": "route-home"
+        },
+        {
+          "label": "حساب",
+          "fontSize": 11,
+          "screen": "route-home"
+        },
+        {
+          "label": "خانه",
+          "fontSize": 11,
+          "screen": "route-operations"
+        },
+        {
+          "label": "بازار",
+          "fontSize": 11,
+          "screen": "route-operations"
+        },
+        {
+          "label": "پیام‌رسان",
+          "fontSize": 11,
+          "screen": "route-operations"
+        },
+        {
+          "label": "عملیات",
+          "fontSize": 11,
+          "screen": "route-operations"
+        },
+        {
+          "label": "حساب",
+          "fontSize": 11,
+          "screen": "route-operations"
+        },
+        {
+          "label": "خانه",
+          "fontSize": 11,
+          "screen": "route-account"
+        },
+        {
+          "label": "بازار",
+          "fontSize": 11,
+          "screen": "route-account"
+        },
+        {
+          "label": "پیام‌رسان",
+          "fontSize": 11,
+          "screen": "route-account"
+        },
+        {
+          "label": "عملیات",
+          "fontSize": 11,
+          "screen": "route-account"
+        },
+        {
+          "label": "حساب",
+          "fontSize": 11,
+          "screen": "route-account"
+        },
+        {
+          "label": "خانه",
+          "fontSize": 11,
+          "screen": "route-accountant-home"
+        },
+        {
+          "label": "پیام‌رسان",
+          "fontSize": 11,
+          "screen": "route-accountant-home"
+        },
+        {
+          "label": "عملیات",
+          "fontSize": 11,
+          "screen": "route-accountant-home"
+        },
+        {
+          "label": "حساب",
+          "fontSize": 11,
+          "screen": "route-accountant-home"
+        },
+        {
+          "label": "خانه",
+          "fontSize": 11,
+          "screen": "security-session-modal"
+        },
+        {
+          "label": "بازار",
+          "fontSize": 11,
+          "screen": "security-session-modal"
+        },
+        {
+          "label": "پیام‌رسان",
+          "fontSize": 11,
+          "screen": "security-session-modal"
+        },
+        {
+          "label": "عملیات",
+          "fontSize": 11,
+          "screen": "security-session-modal"
+        },
+        {
+          "label": "حساب",
+          "fontSize": 11,
+          "screen": "security-session-modal"
+        },
+        {
+          "label": "خانه",
+          "fontSize": 11,
+          "screen": "adaptive-desktop"
+        },
+        {
+          "label": "بازار",
+          "fontSize": 11,
+          "screen": "adaptive-desktop"
+        },
+        {
+          "label": "پیام‌رسان",
+          "fontSize": 11,
+          "screen": "adaptive-desktop"
+        },
+        {
+          "label": "عملیات",
+          "fontSize": 11,
+          "screen": "adaptive-desktop"
+        },
+        {
+          "label": "حساب",
+          "fontSize": 11,
+          "screen": "adaptive-desktop"
+        }
+      ]
+    },
+    "routeShells": [
+      {
+        "id": "route-home",
+        "mode": "bottom-nav",
+        "bottomNavigationCount": 1,
+        "floatingNavigationCount": 0,
+        "notificationCount": 1,
+        "activeDestinationCount": 1,
+        "destinations": [
+          "home",
+          "market",
+          "messenger",
+          "operations",
+          "account"
+        ]
+      },
+      {
+        "id": "route-operations",
+        "mode": "bottom-nav",
+        "bottomNavigationCount": 1,
+        "floatingNavigationCount": 0,
+        "notificationCount": 1,
+        "activeDestinationCount": 1,
+        "destinations": [
+          "home",
+          "market",
+          "messenger",
+          "operations",
+          "account"
+        ]
+      },
+      {
+        "id": "route-account",
+        "mode": "bottom-nav",
+        "bottomNavigationCount": 1,
+        "floatingNavigationCount": 0,
+        "notificationCount": 1,
+        "activeDestinationCount": 1,
+        "destinations": [
+          "home",
+          "market",
+          "messenger",
+          "operations",
+          "account"
+        ]
+      },
+      {
+        "id": "route-market",
+        "mode": "floating",
+        "bottomNavigationCount": 0,
+        "floatingNavigationCount": 1,
+        "notificationCount": 0,
+        "activeDestinationCount": 0,
+        "destinations": []
+      },
+      {
+        "id": "route-messenger",
+        "mode": "floating",
+        "bottomNavigationCount": 0,
+        "floatingNavigationCount": 1,
+        "notificationCount": 0,
+        "activeDestinationCount": 0,
+        "destinations": []
+      },
+      {
+        "id": "route-accountant-home",
+        "mode": "bottom-nav",
+        "bottomNavigationCount": 1,
+        "floatingNavigationCount": 0,
+        "notificationCount": 1,
+        "activeDestinationCount": 1,
+        "destinations": [
+          "home",
+          "messenger",
+          "operations",
+          "account"
+        ]
+      }
+    ],
+    "securityModal": {
+      "dialogCount": 1,
+      "actionCount": 2,
+      "actions": [
+        {
+          "id": "security-session-modal:button:0",
+          "screen": "security-session-modal",
+          "label": "رد",
+          "tag": "button",
+          "disabled": false,
+          "x": 1205,
+          "y": 3941,
+          "width": 153,
+          "height": 48,
+          "right": 1357,
+          "bottom": 3989
+        },
+        {
+          "id": "security-session-modal:button:1",
+          "screen": "security-session-modal",
+          "label": "تأیید",
+          "tag": "button",
+          "disabled": false,
+          "x": 1043,
+          "y": 3941,
+          "width": 153,
+          "height": 48,
+          "right": 1196,
+          "bottom": 3989
+        }
+      ],
+      "notificationCount": 1,
+      "requestTimeCount": 1,
+      "countdownCount": 1,
+      "overflowX": false,
+      "overflowY": false
+    },
+    "desktop": {
+      "x": 915,
+      "y": 4416,
+      "width": 1440,
+      "height": 900,
+      "right": 2355,
+      "bottom": 5316,
+      "navigationCount": 1,
+      "identityCount": 1,
+      "notificationCount": 1,
+      "protectedMarketSlotCount": 1,
+      "sidebarCount": 0,
+      "kpiCount": 0,
+      "overflowX": false,
+      "overflowY": false
+    },
+    "contentMinimalism": {
+      "forbiddenTextChecks": [
+        {
+          "term": "حساب فعال",
+          "present": false
+        },
+        {
+          "term": "حساب جاری",
+          "present": false
+        },
+        {
+          "term": "تعداد روابط",
+          "present": false
+        },
+        {
+          "term": "تعداد مسیر",
+          "present": false
+        },
+        {
+          "term": "تعداد ابزار",
+          "present": false
+        },
+        {
+          "term": "تعداد معامله",
+          "present": false
+        },
+        {
+          "term": "معاملات امروز",
+          "present": false
+        },
+        {
+          "term": "همکاران",
+          "present": false
+        },
+        {
+          "term": "کالاها",
+          "present": false
+        },
+        {
+          "term": "خوش آمدید",
+          "present": false
+        }
+      ],
+      "structuralExclusions": {
+        "accountActiveBadgeCount": 0,
+        "roleChipCount": 0,
+        "kpiCount": 0,
+        "dailyEmptyCardCount": 0,
+        "collaboratorSectionCount": 0,
+        "commoditySectionCount": 0,
+        "sidebarCount": 0
+      }
+    },
+    "scopeGuards": {
+      "protectedMarketSlotCount": 10,
+      "nonNormativePlaceholderCount": 10,
+      "protectedMarketInteractiveDescendantCount": 0,
+      "protectedMarketStateBadgeCount": 0
+    },
+    "stateContracts": {
+      "inactive": {
+        "accountFollowupCount": 1,
+        "accountFollowupLabel": "پیگیری در حساب",
+        "protectedMarketSlotCount": 0,
+        "disabledActionCount": 0
+      },
+      "loading": {
+        "permissionDestinationCount": 0
+      },
+      "error": {
+        "permissionDestinationCount": 0,
+        "presumedCauseTerms": []
+      },
+      "offline": {
+        "connectionSignalCount": 1,
+        "disabledActionCount": 0,
+        "stateBadgeCount": 0
+      },
+      "stale": {
+        "connectionSignalCount": 1,
+        "disabledActionCount": 0,
+        "stateBadgeCount": 0
+      },
+      "pwa": {
+        "realIconCount": 1,
+        "realIconLoaded": true,
+        "realIconSource": "../../frontend/public/pwa-192x192.png"
+      },
+      "futureRetryPromises": []
+    }
+  },
+  "assertions": [
+    {
+      "id": "font-vazirmatn-loaded",
+      "passed": true,
+      "detail": "4 loaded faces"
+    },
+    {
+      "id": "responsive-widths-exact",
+      "passed": true,
+      "detail": "360, 375, 390, 414, 430"
+    },
+    {
+      "id": "quiet-home-core-contract",
+      "passed": true,
+      "detail": "identity=1, notification=1, market-slot=1, navigation=1 per width"
+    },
+    {
+      "id": "quiet-home-nav-clearance",
+      "passed": true,
+      "detail": "minimum 503px"
+    },
+    {
+      "id": "no-product-screen-overflow",
+      "passed": true,
+      "detail": "0 violation(s)"
+    },
+    {
+      "id": "touch-targets-44",
+      "passed": true,
+      "detail": "minimum 44×44px across 73"
+    },
+    {
+      "id": "cta-height-48",
+      "passed": true,
+      "detail": "minimum 48px across 5"
+    },
+    {
+      "id": "navigation-label-font-11",
+      "passed": true,
+      "detail": "minimum 11px across 54"
+    },
+    {
+      "id": "route-shell-matrix-complete",
+      "passed": true,
+      "detail": "4 bottom + 2 floating"
+    },
+    {
+      "id": "route-shell-active-destination",
+      "passed": true,
+      "detail": "standard shell has one notification and active destination; protected shell has one floating control"
+    },
+    {
+      "id": "accountant-market-omitted",
+      "passed": true,
+      "detail": "home, messenger, operations, account"
+    },
+    {
+      "id": "security-modal-decision-complete",
+      "passed": true,
+      "detail": "2 actions; time=1; countdown=1"
+    },
+    {
+      "id": "desktop-exact-1440x900",
+      "passed": true,
+      "detail": "1440×900"
+    },
+    {
+      "id": "desktop-content-economy",
+      "passed": true,
+      "detail": "nav=1, identity=1, notification=1, market-slot=1, sidebar=0, KPI=0"
+    },
+    {
+      "id": "forbidden-content-absent",
+      "passed": true,
+      "detail": "all forbidden text and structures absent"
+    },
+    {
+      "id": "protected-market-placeholder-only",
+      "passed": true,
+      "detail": "10/10 locked placeholders; interactive=0; states=0"
+    },
+    {
+      "id": "pwa-real-icon-loaded",
+      "passed": true,
+      "detail": "../../frontend/public/pwa-192x192.png; loaded=true"
+    },
+    {
+      "id": "draft-state-blockers-resolved",
+      "passed": true,
+      "detail": "canonical account follow-up; loading/error neutral; offline/stale single-signal; no future retry promise"
+    }
+  ],
+  "summary": {
+    "passed": true,
+    "assertionCount": 18,
+    "failureCount": 0,
+    "pageErrorCount": 0
+  },
+  "failures": [],
+  "pageErrors": []
+}

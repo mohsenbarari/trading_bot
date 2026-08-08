@@ -1,0 +1,755 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Stage 0B-2 — شواهد مشتق‌شده خانه و پوسته احرازشده</title>
+  <style>
+    @font-face {
+      font-family: "Vazirmatn";
+      src: url("../../frontend/node_modules/vazirmatn/fonts/webfonts/Vazirmatn-Regular.woff2") format("woff2");
+      font-style: normal;
+      font-weight: 400;
+      font-display: swap;
+    }
+
+    @font-face {
+      font-family: "Vazirmatn";
+      src: url("../../frontend/node_modules/vazirmatn/fonts/webfonts/Vazirmatn-Medium.woff2") format("woff2");
+      font-style: normal;
+      font-weight: 500;
+      font-display: swap;
+    }
+
+    @font-face {
+      font-family: "Vazirmatn";
+      src: url("../../frontend/node_modules/vazirmatn/fonts/webfonts/Vazirmatn-SemiBold.woff2") format("woff2");
+      font-style: normal;
+      font-weight: 600;
+      font-display: swap;
+    }
+
+    @font-face {
+      font-family: "Vazirmatn";
+      src: url("../../frontend/node_modules/vazirmatn/fonts/webfonts/Vazirmatn-Bold.woff2") format("woff2");
+      font-style: normal;
+      font-weight: 700;
+      font-display: swap;
+    }
+
+    :root {
+      color-scheme: light;
+      font-family: "Vazirmatn", Tahoma, Arial, sans-serif;
+      --navy-950: #0b2033;
+      --navy-900: #12314a;
+      --navy-700: #2c506c;
+      --blue-700: #1f5ed8;
+      --blue-600: #2f6fed;
+      --blue-100: #dfeaff;
+      --blue-50: #eef4ff;
+      --gold-500: #d5a84b;
+      --page: #f3f6fa;
+      --surface: #ffffff;
+      --surface-subtle: #f8fafc;
+      --text: #10243b;
+      --text-secondary: #52677e;
+      --text-muted: #63778d;
+      --border: #d3dfeb;
+      --border-strong: #b9cadb;
+      --success: #087a58;
+      --success-bg: #e9f8f2;
+      --warning: #8c5b08;
+      --warning-bg: #fff5d9;
+      --danger: #c52f45;
+      --danger-bg: #fff0f2;
+      --info: #176b8b;
+      --info-bg: #eaf7fb;
+      --shadow: 0 18px 48px rgba(24, 48, 75, 0.12);
+      background: #e8eef4;
+      color: var(--text);
+    }
+
+    * { box-sizing: border-box; }
+    html { min-width: 320px; background: #e8eef4; }
+    body {
+      min-width: 320px;
+      margin: 0;
+      background:
+        radial-gradient(circle at 92% -3%, rgba(47, 111, 237, 0.13), transparent 34rem),
+        radial-gradient(circle at 2% 34%, rgba(18, 49, 74, 0.07), transparent 30rem),
+        #e8eef4;
+    }
+
+    button, a { font: inherit; }
+    button { cursor: default; }
+    a { color: inherit; }
+    bdi, .ltr { direction: ltr; unicode-bidi: isolate; }
+    svg { display: block; }
+
+    .visually-hidden {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
+
+    .board {
+      width: min(2360px, calc(100% - 32px));
+      margin: 24px auto 64px;
+    }
+
+    .board-intro,
+    .evidence-section {
+      border: 1px solid #d6e0ea;
+      border-radius: 26px;
+      background: rgba(255, 255, 255, 0.95);
+      box-shadow: 0 16px 46px rgba(24, 48, 75, 0.07);
+    }
+
+    .board-intro {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 18px 24px;
+      padding: 27px 30px;
+    }
+
+    .board-intro h1,
+    .section-heading h2,
+    .scenario-heading h3 {
+      margin: 0;
+      color: var(--navy-950);
+      letter-spacing: -0.025em;
+    }
+
+    .board-intro h1 { font-size: 30px; line-height: 1.5; }
+    .board-intro p { max-width: 1180px; margin: 7px 0 0; color: var(--text-secondary); font-size: 13px; line-height: 2; }
+    .board-tags { display: flex; flex-wrap: wrap; gap: 8px; align-content: start; justify-content: flex-end; }
+    .board-tag {
+      display: inline-flex;
+      align-items: center;
+      min-height: 36px;
+      padding: 7px 12px;
+      border: 1px solid #c2d4e6;
+      border-radius: 999px;
+      background: var(--blue-50);
+      color: var(--blue-700);
+      font-size: 11px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    .source-note {
+      grid-column: 1 / -1;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 11px 14px;
+      border: 1px dashed #c7d5e2;
+      border-radius: 14px;
+      background: #f8fafc;
+      color: #53687e;
+      font-size: 12px;
+      line-height: 1.8;
+    }
+    .source-note::before { width: 8px; height: 8px; flex: 0 0 auto; border-radius: 50%; background: var(--blue-600); content: ""; }
+
+    .evidence-section { margin-top: 28px; padding: 24px; overflow: hidden; }
+    .section-heading { display: flex; align-items: start; justify-content: space-between; gap: 24px; margin-bottom: 22px; }
+    .section-heading h2 { font-size: 23px; line-height: 1.55; }
+    .section-heading p { max-width: 1020px; margin: 5px 0 0; color: var(--text-muted); font-size: 12px; line-height: 1.9; }
+    .section-code { direction: ltr; padding: 5px 8px; border-radius: 8px; background: #e2eaf2; color: #466179; font-size: 10px; font-weight: 700; }
+
+    .sweep-grid,
+    .route-grid,
+    .state-grid {
+      display: flex;
+      align-items: flex-start;
+      justify-content: center;
+      gap: 24px;
+      direction: ltr;
+    }
+
+    .scenario { direction: rtl; }
+    .scenario-heading { min-height: 72px; padding: 0 10px 12px; }
+    .scenario-heading h3 { font-size: 15px; line-height: 1.7; }
+    .scenario-heading p { margin: 3px 0 0; color: var(--text-muted); font-size: 11px; line-height: 1.75; }
+
+    .device {
+      position: relative;
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr) auto;
+      width: var(--device-width, 390px);
+      height: var(--device-height, 844px);
+      overflow: hidden;
+      border: 1px solid var(--border-strong);
+      border-radius: 34px;
+      background: var(--page);
+      box-shadow: var(--shadow);
+      color: var(--text);
+      isolation: isolate;
+    }
+
+    .device::before {
+      position: absolute;
+      top: 9px;
+      left: 50%;
+      z-index: 8;
+      width: 56px;
+      height: 5px;
+      border-radius: 99px;
+      background: rgba(11, 32, 51, 0.16);
+      content: "";
+      transform: translateX(-50%);
+    }
+
+    .shell-header {
+      min-width: 0;
+      padding: 27px 16px 14px;
+      border-bottom: 1px solid rgba(211, 223, 235, 0.92);
+      background: rgba(255, 255, 255, 0.93);
+    }
+
+    .identity-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; min-width: 0; }
+    .identity { display: flex; align-items: center; gap: 10px; min-width: 0; }
+    .avatar {
+      display: grid;
+      width: 40px;
+      height: 40px;
+      flex: 0 0 40px;
+      place-items: center;
+      border-radius: 13px;
+      background: var(--blue-100);
+      color: var(--blue-700);
+      font-size: 15px;
+      font-weight: 800;
+    }
+    .identity strong { display: block; overflow: hidden; color: var(--navy-950); font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+    .identity-copy { min-width: 0; }
+    .notification-action {
+      display: grid;
+      width: 44px;
+      height: 44px;
+      flex: 0 0 44px;
+      padding: 0;
+      place-items: center;
+      border: 1px solid var(--border);
+      border-radius: 13px;
+      background: #fff;
+      color: var(--navy-700);
+    }
+    .notification-action svg { width: 20px; height: 20px; }
+    .screen-title { margin: 15px 0 0; color: var(--navy-950); font-size: 22px; line-height: 1.45; letter-spacing: -0.025em; }
+
+    .screen-content {
+      min-width: 0;
+      min-height: 0;
+      overflow: hidden;
+      padding: 20px 16px 18px;
+    }
+
+    .market-slot {
+      width: 100%;
+      padding: 16px;
+      border: 1px solid var(--border);
+      border-radius: 17px;
+      background: var(--surface);
+    }
+    .market-slot--locked {
+      border-style: dashed;
+      background:
+        repeating-linear-gradient(-45deg, rgba(223, 234, 255, 0.38) 0, rgba(223, 234, 255, 0.38) 8px, rgba(255, 255, 255, 0.85) 8px, rgba(255, 255, 255, 0.85) 16px);
+    }
+    .locked-market-placeholder { display: flex; min-height: 74px; align-items: center; gap: 12px; color: var(--navy-700); }
+    .locked-market-placeholder svg { width: 22px; height: 22px; flex: 0 0 auto; color: var(--blue-700); }
+    .locked-market-placeholder strong { display: block; color: var(--navy-950); font-size: 14px; }
+    .locked-market-placeholder small { display: block; margin-top: 3px; color: var(--text-muted); font-size: 10px; line-height: 1.7; }
+
+    .primary-action,
+    .secondary-action,
+    .danger-action {
+      display: inline-flex;
+      min-height: 48px;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      border-radius: 12px;
+      font-size: 13px;
+      font-weight: 800;
+      text-decoration: none;
+    }
+    .primary-action { border: 1px solid var(--blue-600); background: var(--blue-600); color: #fff; }
+    .secondary-action { border: 1px solid #c7d8e9; background: #fff; color: var(--blue-700); }
+    .danger-action { border: 1px solid #efbcc4; background: #fff; color: var(--danger); }
+    .primary-action:disabled,
+    .secondary-action:disabled { border-color: #e1e8ee; background: #e9eef3; color: #91a2b1; }
+
+    .bottom-nav {
+      position: relative;
+      z-index: 4;
+      display: flex;
+      min-width: 0;
+      min-height: 78px;
+      align-items: center;
+      justify-content: space-around;
+      gap: 2px;
+      padding: 8px 8px 10px;
+      border-top: 1px solid var(--border);
+      background: rgba(255, 255, 255, 0.96);
+    }
+
+    .nav-item {
+      display: flex;
+      min-width: 44px;
+      min-height: 52px;
+      flex: 1 1 0;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 3px;
+      padding: 5px 2px;
+      border: 0;
+      border-radius: 12px;
+      background: transparent;
+      color: #536f83;
+      font-size: 11px;
+      font-weight: 600;
+      line-height: 1.25;
+      text-decoration: none;
+      white-space: nowrap;
+    }
+    .nav-item svg { width: 20px; height: 20px; }
+    .nav-item.is-active { background: var(--blue-100); color: var(--blue-700); font-weight: 800; }
+    .nav-item.is-disabled { color: #a7b6c3; }
+
+    .route-grid { flex-wrap: wrap; }
+    .route-scenario { width: 260px; }
+    .route-scenario .scenario-heading { min-height: 78px; }
+    .route-device { --device-width: 260px; --device-height: 560px; border-radius: 28px; }
+    .route-device::before { width: 44px; }
+    .route-device .shell-header { padding: 24px 12px 11px; }
+    .route-device .avatar { width: 34px; height: 34px; flex-basis: 34px; border-radius: 11px; font-size: 12px; }
+    .route-device .identity strong { font-size: 11px; }
+    .route-device .screen-title { margin-top: 10px; font-size: 17px; }
+    .route-device .screen-content { padding: 14px 12px; }
+    .route-device .bottom-nav { min-height: 70px; padding-inline: 4px; }
+    .route-device .nav-item { min-width: 44px; min-height: 48px; padding-inline: 0; font-size: 11px; }
+    .route-device .nav-item svg { width: 18px; height: 18px; }
+
+    .shell-canvas {
+      height: 100%;
+      min-height: 0;
+      border: 1px dashed #d3dee8;
+      border-radius: 15px;
+      background:
+        linear-gradient(90deg, rgba(223, 234, 245, 0.33) 1px, transparent 1px),
+        linear-gradient(rgba(223, 234, 245, 0.33) 1px, transparent 1px),
+        rgba(255, 255, 255, 0.55);
+      background-size: 18px 18px;
+    }
+    .protected-canvas { border: 0; background: #eef3f7; }
+    .floating-nav {
+      position: absolute;
+      bottom: 16px;
+      left: 16px;
+      z-index: 6;
+      display: grid;
+      width: 44px;
+      height: 44px;
+      padding: 0;
+      place-items: center;
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      background: #fff;
+      color: var(--navy-700);
+      box-shadow: 0 8px 22px rgba(24, 48, 75, 0.14);
+    }
+    .floating-nav svg { width: 20px; height: 20px; }
+
+    .state-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 410px);
+      flex-wrap: wrap;
+    }
+    .state-card {
+      width: 410px;
+      direction: rtl;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      background: var(--page);
+    }
+    .state-card__heading { min-height: 78px; padding: 14px 16px; border-bottom: 1px solid var(--border); background: #fff; }
+    .state-card__heading h3 { margin: 0; color: var(--navy-950); font-size: 15px; line-height: 1.7; }
+    .state-card__heading p { margin: 3px 0 0; color: var(--text-muted); font-size: 11px; line-height: 1.7; }
+    .state-screen { position: relative; min-height: 410px; overflow: hidden; padding: 16px; }
+    .state-screen .market-slot { margin-top: 12px; }
+    .state-followup { display: grid; gap: 12px; }
+    .state-followup .primary-action { width: 100%; }
+
+    .notice {
+      padding: 14px;
+      border: 1px solid;
+      border-radius: 15px;
+      font-size: 12px;
+      line-height: 1.9;
+    }
+    .notice strong { display: block; margin-bottom: 2px; font-size: 13px; }
+    .notice--warning { border-color: #edcf85; background: var(--warning-bg); color: var(--warning); }
+    .notice--info { border-color: #afd7e6; background: var(--info-bg); color: var(--info); }
+    .notice--danger { border-color: #efb5bf; background: var(--danger-bg); color: var(--danger); }
+
+    .pwa-card {
+      display: grid;
+      grid-template-columns: 48px minmax(0, 1fr);
+      gap: 12px;
+      margin-top: 14px;
+      padding: 14px;
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      background: #fff;
+    }
+    .pwa-mark {
+      display: grid;
+      width: 48px;
+      height: 48px;
+      overflow: hidden;
+      place-items: center;
+      border: 1px solid #e2bd68;
+      border-radius: 14px;
+      background: #fff;
+    }
+    .pwa-mark img { display: block; width: 100%; height: 100%; object-fit: cover; }
+    .pwa-copy h4 { margin: 0; color: var(--navy-950); font-size: 14px; }
+    .pwa-copy p { margin: 4px 0 0; color: var(--text-muted); font-size: 11px; line-height: 1.7; }
+    .pwa-actions { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.8fr); gap: 8px; }
+
+    .skeleton { display: grid; gap: 12px; }
+    .skeleton-line,
+    .skeleton-block { border-radius: 10px; background: #dfe7ee; }
+    .skeleton-line { width: 43%; height: 15px; }
+    .skeleton-line--short { width: 23%; }
+    .skeleton-block { height: 140px; }
+
+    .error-state { display: grid; min-height: 320px; place-items: center; }
+    .error-card { width: 100%; padding: 24px 18px; border: 1px solid var(--border); border-radius: 17px; background: #fff; text-align: center; }
+    .error-icon { display: grid; width: 48px; height: 48px; margin: 0 auto 12px; place-items: center; border-radius: 14px; background: var(--danger-bg); color: var(--danger); font-size: 22px; font-weight: 800; }
+    .error-card h4 { margin: 0; color: var(--navy-950); font-size: 16px; }
+    .error-card p { margin: 7px 0 14px; color: var(--text-muted); font-size: 12px; line-height: 1.8; }
+    .error-card .primary-action { width: 100%; }
+
+    .modal-stage { display: grid; place-items: center; }
+    .modal-device { --device-width: 390px; --device-height: 844px; }
+    .modal-device .screen-content { filter: saturate(0.7); }
+    .modal-layer {
+      position: absolute;
+      inset: 0;
+      z-index: 20;
+      display: grid;
+      padding: 18px;
+      place-items: center;
+      background: rgba(11, 32, 51, 0.52);
+      backdrop-filter: blur(3px);
+    }
+    .security-modal {
+      width: 100%;
+      overflow: hidden;
+      border: 1px solid rgba(255, 255, 255, 0.5);
+      border-radius: 21px;
+      background: #fff;
+      box-shadow: 0 24px 60px rgba(11, 32, 51, 0.28);
+    }
+    .security-modal__top { padding: 20px 20px 16px; background: var(--blue-50); text-align: center; }
+    .security-mark { display: grid; width: 52px; height: 52px; margin: 0 auto 10px; place-items: center; border-radius: 16px; background: var(--blue-600); color: #fff; }
+    .security-mark svg { width: 26px; height: 26px; }
+    .security-modal h3 { margin: 0; color: var(--navy-950); font-size: 18px; }
+    .security-modal__body { padding: 18px; }
+    .device-detail { padding: 13px 14px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface-subtle); }
+    .device-detail strong { display: block; color: var(--navy-950); font-size: 13px; }
+    .device-detail span { display: block; margin-top: 3px; color: var(--text-muted); font-size: 11px; direction: ltr; unicode-bidi: isolate; text-align: right; }
+    .session-request-meta { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 10px; color: var(--text-secondary); font-size: 11px; }
+    .session-request-meta time { color: var(--navy-700); }
+    .session-request-meta strong { color: var(--warning); font-size: 11px; }
+    .security-question { margin: 13px 0; color: var(--text-secondary); font-size: 12px; line-height: 1.9; text-align: center; }
+    .security-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
+
+    .desktop-viewport {
+      position: relative;
+      display: grid;
+      grid-template-rows: 88px minmax(0, 1fr);
+      width: 1440px;
+      height: 900px;
+      overflow: hidden;
+      border: 1px solid var(--border-strong);
+      border-radius: 24px;
+      background: var(--page);
+      box-shadow: var(--shadow);
+    }
+    .desktop-topbar {
+      display: grid;
+      grid-template-columns: minmax(190px, 1fr) auto minmax(190px, 1fr);
+      align-items: center;
+      gap: 20px;
+      padding: 14px 28px;
+      border-bottom: 1px solid var(--border);
+      background: rgba(255, 255, 255, 0.96);
+    }
+    .desktop-brand { justify-self: end; color: var(--navy-950); font-size: 14px; font-weight: 900; }
+    .desktop-nav { display: flex; align-items: center; justify-content: center; gap: 5px; direction: rtl; }
+    .desktop-nav .nav-item { min-width: 88px; min-height: 48px; flex-direction: row; gap: 7px; padding-inline: 12px; font-size: 11px; }
+    .desktop-nav .nav-item svg { width: 19px; height: 19px; }
+    .desktop-topbar .identity { justify-self: start; }
+    .desktop-account-controls { display: flex; align-items: center; justify-self: start; gap: 12px; }
+    .desktop-content { width: min(720px, calc(100% - 48px)); margin: 0 auto; padding: 55px 0; }
+    .desktop-content .screen-title { margin: 0 0 26px; font-size: 30px; }
+    .desktop-content .market-slot { padding: 20px; border-radius: 20px; }
+
+    @media (max-width: 900px) {
+      .board-intro { grid-template-columns: 1fr; }
+      .board-tags { justify-content: flex-start; }
+      .source-note { grid-column: 1; }
+    }
+  </style>
+</head>
+<body>
+  <svg class="visually-hidden" aria-hidden="true" width="0" height="0">
+    <symbol id="i-home" viewBox="0 0 24 24"><path d="M3 11.5 12 4l9 7.5v8a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-store" viewBox="0 0 24 24"><path d="M4 9h16l-1.5-5h-13zM5 9v11h14V9M9 20v-6h6v6M4 9c0 1.5 1 2.5 2.5 2.5S9 10.5 9 9c0 1.5 1 2.5 3 2.5S15 10.5 15 9c0 1.5 1 2.5 2.5 2.5S20 10.5 20 9" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-message" viewBox="0 0 24 24"><path d="M5 4h14a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H9l-5 4v-4.5A2 2 0 0 1 3 15V6a2 2 0 0 1 2-2Z" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/></symbol>
+    <symbol id="i-briefcase" viewBox="0 0 24 24"><path d="M9 6V4h6v2M4 7h16a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1Zm-1 5h18M10 12v2h4v-2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4" fill="none" stroke="currentColor" stroke-width="1.9"/><path d="M4.5 21c.6-4.2 3-6.2 7.5-6.2s6.9 2 7.5 6.2" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></symbol>
+    <symbol id="i-bell" viewBox="0 0 24 24"><path d="M6 17h12l-1.5-2.2V10a4.5 4.5 0 0 0-9 0v4.8zM10 20h4" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-menu" viewBox="0 0 24 24"><path d="M5 7h14M5 12h14M5 17h14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3 5 6v5c0 4.8 2.8 8.3 7 10 4.2-1.7 7-5.2 7-10V6z" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/><path d="m9.5 12 1.7 1.7 3.8-4" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  </svg>
+
+  <main id="evidence-board" class="board">
+    <header class="board-intro">
+      <div>
+        <h1>خانه و پوسته احرازشده — شواهد محلی Stage 0B-2</h1>
+        <p>نسخه‌ای قابل‌تکرار برای سنجش هندسه، فونت، اهداف لمسی و اقتصاد اطلاعات. این سند منبع طراحی نیست و فقط قراردادهای مصوب در فایل Figma را به شواهد قابل‌ردیابی تبدیل می‌کند.</p>
+      </div>
+      <div class="board-tags" aria-label="ویژگی‌های بسته شواهد">
+        <span class="board-tag">Mobile first · 95%</span>
+        <span class="board-tag">Modern Finance</span>
+        <span class="board-tag">Secondary evidence</span>
+      </div>
+      <div class="source-note">منبع اصلی و قابل‌ویرایش، فایل Figma پروژه است. این خروجی فقط برای بازتولید تصویری و اندازه‌گیری خودکار نگهداری می‌شود و هیچ UI داخلی بازار یا پیام‌رسان را تعریف نمی‌کند.</div>
+    </header>
+
+    <section id="responsive-sweep" class="evidence-section">
+      <div class="section-heading">
+        <div>
+          <h2>خانه آرام در پنج عرض واقعی موبایل</h2>
+          <p>هر قاب دقیقاً سه واحد ضروری دارد: هویت، یک جایگاه ورود به بازار و ناوبری. فضای سفید تعمدی است و با کارت یا عدد پر نشده است.</p>
+        </div>
+        <span class="section-code">0B2-E01</span>
+      </div>
+      <div id="responsive-sweep-grid" class="sweep-grid" aria-label="پنج عرض خانه آرام"></div>
+    </section>
+
+    <section id="route-shell-matrix" class="evidence-section">
+      <div class="section-heading">
+        <div>
+          <h2>ماتریس پوسته‌ی مسیرها</h2>
+          <p>خانه، عملیات و حساب ناوبری پایین دارند؛ در بازار و پیام‌رسان فقط کنترل شناور پوسته نشان داده می‌شود و سطح داخلی عمداً خالی می‌ماند. نسخه حسابداری بازار را از ناوبری حذف می‌کند.</p>
+        </div>
+        <span class="section-code">0B2-E02</span>
+      </div>
+      <div id="route-grid" class="route-grid" aria-label="ماتریس پوسته مسیرها"></div>
+    </section>
+
+    <section id="state-atlas" class="evidence-section">
+      <div class="section-heading">
+        <div>
+          <h2>اطلس وضعیت‌های پوسته و خانه</h2>
+          <p>وضعیت فقط وقتی ظاهر می‌شود که دسترسی یا اقدام بعدی را تغییر دهد: قطع اتصال، داده قبلی، حساب غیرفعال، نصب واجد شرایط، بارگذاری ساختاری و خطای قابل‌بازیابی.</p>
+        </div>
+        <span class="section-code">0B2-E03</span>
+      </div>
+      <div class="state-grid">
+        <article class="state-card">
+          <header class="state-card__heading"><h3>آفلاین با داده ذخیره‌شده</h3><p>یک پیام کوتاه؛ بدون CTA یا وضعیت تکراری.</p></header>
+          <div id="state-offline" class="state-screen product-screen" data-product-screen="state-offline">
+            <div class="notice notice--warning" data-connection-signal><strong>اینترنت قطع است</strong>اطلاعات ذخیره‌شده نمایش داده می‌شود.</div>
+            <section class="market-slot market-slot--locked" data-protected-market-slot>
+              <div class="locked-market-placeholder" data-non-normative-market-placeholder><svg aria-hidden="true"><use href="#i-store"/></svg><div><strong>جایگاه بازار</strong><small>قفل طراحی · رابط فعلی بازار حفظ می‌شود</small></div></div>
+            </section>
+          </div>
+        </article>
+
+        <article class="state-card">
+          <header class="state-card__heading"><h3>اتصال دوباره با داده قبلی</h3><p>محتوا نمی‌پرد و تصمیم تا تازه‌شدن داده قفل می‌ماند.</p></header>
+          <div id="state-stale" class="state-screen product-screen" data-product-screen="state-stale">
+            <div class="notice notice--info" data-connection-signal><strong>در حال اتصال دوباره</strong>آخرین اطلاعات معتبر مربوط به ساعت <bdi>۱۴:۲۰</bdi> است.</div>
+            <section class="market-slot market-slot--locked" data-protected-market-slot>
+              <div class="locked-market-placeholder" data-non-normative-market-placeholder><svg aria-hidden="true"><use href="#i-store"/></svg><div><strong>جایگاه بازار</strong><small>قفل طراحی · رابط فعلی بازار حفظ می‌شود</small></div></div>
+            </section>
+          </div>
+        </article>
+
+        <article class="state-card">
+          <header class="state-card__heading"><h3>پیشنهاد نصب واجد شرایط</h3><p>inline، پس از آمادگی مرورگر و دور از ناوبری.</p></header>
+          <div id="state-pwa" class="state-screen product-screen" data-product-screen="state-pwa">
+            <section class="market-slot market-slot--locked" data-protected-market-slot>
+              <div class="locked-market-placeholder" data-non-normative-market-placeholder><svg aria-hidden="true"><use href="#i-store"/></svg><div><strong>جایگاه بازار</strong><small>قفل طراحی · رابط فعلی بازار حفظ می‌شود</small></div></div>
+            </section>
+            <section class="pwa-card">
+              <div class="pwa-mark"><img data-pwa-app-icon src="../../frontend/public/pwa-192x192.png" alt=""></div>
+              <div class="pwa-copy"><h4>نصب وب‌اپ</h4><p>برای ورود سریع‌تر در دفعات بعد.</p></div>
+              <div class="pwa-actions"><button class="secondary-action" type="button">بعداً</button><button class="primary-action cta" type="button">نصب</button></div>
+            </section>
+          </div>
+        </article>
+
+        <article class="state-card">
+          <header class="state-card__heading"><h3>حساب غیرفعال</h3><p>اثر وضعیت و مقصد پیگیری در یک خانه بصری.</p></header>
+          <div id="state-inactive" class="state-screen product-screen" data-product-screen="state-inactive">
+            <div class="state-followup">
+              <div class="notice notice--danger"><strong>حساب شما غیرفعال است</strong>برای بررسی وضعیت از بخش حساب پیگیری کنید.</div>
+              <a class="primary-action cta" href="#route-shell-matrix" data-follow-up-destination="account">پیگیری در حساب</a>
+            </div>
+          </div>
+        </article>
+
+        <article class="state-card">
+          <header class="state-card__heading"><h3>بارگذاری ساختاری</h3><p>هندسه پایدار است و داده فرضی نمایش داده نمی‌شود.</p></header>
+          <div id="state-loading" class="state-screen product-screen" data-product-screen="state-loading" aria-label="خانه در حال بارگذاری">
+            <div class="skeleton" aria-hidden="true"><div class="skeleton-line skeleton-line--short"></div><div class="skeleton-line"></div><div class="skeleton-block"></div></div>
+          </div>
+        </article>
+
+        <article class="state-card">
+          <header class="state-card__heading"><h3>خطای قابل‌بازیابی</h3><p>یک توضیح کوتاه و یک اقدام واقعی.</p></header>
+          <div id="state-error" class="state-screen product-screen" data-product-screen="state-error">
+            <div class="error-state"><section class="error-card"><div class="error-icon" aria-hidden="true">!</div><h4>خانه بارگذاری نشد</h4><p>دریافت اطلاعات کامل نشد. می‌توانید دوباره درخواست کنید.</p><button class="primary-action cta" type="button">تلاش دوباره</button></section></div>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <section id="security-session-modal" class="evidence-section">
+      <div class="section-heading">
+        <div>
+          <h2>Modal تصمیم امنیت نشست</h2>
+          <p>هویت دستگاه و تصمیم‌های رد/تأیید در همان قاب باقی می‌مانند؛ داده ثانویه یا اقدام اضافی نمایش داده نمی‌شود.</p>
+        </div>
+        <span class="section-code">0B2-E04</span>
+      </div>
+      <div class="modal-stage">
+        <div id="security-modal-device" class="device modal-device product-screen" data-product-screen="security-session-modal">
+          <header class="shell-header"><div class="identity-row"><div class="identity"><div class="avatar" aria-hidden="true">م</div><div class="identity-copy"><strong>محمد رضایی</strong></div></div><button class="notification-action" type="button" aria-label="اعلان‌ها" data-header-notification><svg aria-hidden="true"><use href="#i-bell"/></svg></button></div><h3 class="screen-title">خانه</h3></header>
+          <main class="screen-content"><section class="market-slot market-slot--locked" data-protected-market-slot><div class="locked-market-placeholder" data-non-normative-market-placeholder><svg aria-hidden="true"><use href="#i-store"/></svg><div><strong>جایگاه بازار</strong><small>قفل طراحی · رابط فعلی بازار حفظ می‌شود</small></div></div></section></main>
+          <nav class="bottom-nav" aria-label="ناوبری اصلی"></nav>
+          <div class="modal-layer">
+            <section class="security-modal" role="dialog" aria-modal="true" aria-labelledby="security-title">
+              <div class="security-modal__top"><div class="security-mark" aria-hidden="true"><svg><use href="#i-shield"/></svg></div><h3 id="security-title">درخواست ورود جدید</h3></div>
+              <div class="security-modal__body">
+                <div class="device-detail"><strong>Chrome روی Android</strong><span>87.107.3.22 · Tehran</span></div>
+                <div class="session-request-meta"><time data-session-request-time datetime="2026-08-08T14:23:00+03:30">امروز، ۱۴:۲۳</time><strong data-session-countdown><bdi>۰۰:۴۵</bdi> باقی‌مانده</strong></div>
+                <p class="security-question">آیا این ورود متعلق به شماست؟</p>
+                <div class="security-actions"><button class="danger-action cta" type="button">رد</button><button class="primary-action cta" type="button">تأیید</button></div>
+              </div>
+            </section>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="adaptive-desktop" class="evidence-section">
+      <div class="section-heading">
+        <div>
+          <h2>اثبات adaptive دسکتاپ بدون افزایش محتوا</h2>
+          <p>قاب دقیق <bdi>1440×900</bdi> همان اقتصاد اطلاعات موبایل را نگه می‌دارد: ناوبری افقی، هویت و یک ورودی بازار؛ بدون ستون کناری یا آمار جدید.</p>
+        </div>
+        <span class="section-code">0B2-E05</span>
+      </div>
+      <div id="desktop-viewport" class="desktop-viewport product-screen" data-product-screen="adaptive-desktop">
+        <header class="desktop-topbar">
+          <div class="desktop-brand">سامانه معاملات</div>
+          <nav class="desktop-nav" aria-label="ناوبری اصلی"></nav>
+          <div class="desktop-account-controls"><div class="identity"><div class="avatar" aria-hidden="true">م</div><div class="identity-copy"><strong>محمد رضایی</strong></div></div><button class="notification-action" type="button" aria-label="اعلان‌ها" data-header-notification><svg aria-hidden="true"><use href="#i-bell"/></svg></button></div>
+        </header>
+        <main class="desktop-content">
+          <h3 class="screen-title">خانه</h3>
+          <section class="market-slot market-slot--locked" data-protected-market-slot>
+            <div class="locked-market-placeholder" data-non-normative-market-placeholder><svg aria-hidden="true"><use href="#i-store"/></svg><div><strong>جایگاه بازار</strong><small>قفل طراحی · رابط فعلی بازار حفظ می‌شود</small></div></div>
+          </section>
+        </main>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const NAV_ITEMS = [
+      { name: 'home', label: 'خانه', icon: 'i-home' },
+      { name: 'market', label: 'بازار', icon: 'i-store' },
+      { name: 'messenger', label: 'پیام‌رسان', icon: 'i-message' },
+      { name: 'operations', label: 'عملیات', icon: 'i-briefcase' },
+      { name: 'account', label: 'حساب', icon: 'i-user' },
+    ]
+
+    const icon = (name) => `<svg aria-hidden="true"><use href="#${name}"/></svg>`
+
+    function navMarkup(active = 'home', { accountant = false, compact = false } = {}) {
+      return NAV_ITEMS
+        .filter((item) => !(accountant && item.name === 'market'))
+        .map((item) => {
+          const classes = ['nav-item', item.name === active ? 'is-active' : ''].filter(Boolean).join(' ')
+          return `<a class="${classes}" href="#route-shell-matrix" data-nav-destination="${item.name}" aria-label="${item.label}">${icon(item.icon)}<span>${item.label}</span></a>`
+        })
+        .join('')
+    }
+
+    function quietHomeMarkup(width) {
+      return `
+        <article class="scenario quiet-scenario" data-responsive-width="${width}">
+          <header class="scenario-heading"><h3><bdi>${width}px</bdi></h3><p>خانه آرام، بدون محتوای تزئینی</p></header>
+          <div id="quiet-home-${width}" class="device product-screen quiet-home" data-product-screen="quiet-home-${width}" style="--device-width:${width}px">
+            <header class="shell-header">
+              <div class="identity-row"><div class="identity"><div class="avatar" aria-hidden="true">م</div><div class="identity-copy"><strong>محمد رضایی</strong></div></div><button class="notification-action" type="button" aria-label="اعلان‌ها" data-header-notification><svg aria-hidden="true"><use href="#i-bell"/></svg></button></div>
+              <h3 class="screen-title">خانه</h3>
+            </header>
+            <main class="screen-content">
+              <section class="market-slot market-slot--locked" data-protected-market-slot>
+                <div class="locked-market-placeholder" data-non-normative-market-placeholder>${icon('i-store')}<div><strong>جایگاه بازار</strong><small>قفل طراحی · رابط فعلی بازار حفظ می‌شود</small></div></div>
+              </section>
+            </main>
+            <nav class="bottom-nav" aria-label="ناوبری اصلی">${navMarkup('home')}</nav>
+          </div>
+        </article>`
+    }
+
+    const ROUTE_SCENARIOS = [
+      { id: 'route-home', title: 'خانه', active: 'home', shell: 'bottom-nav' },
+      { id: 'route-operations', title: 'عملیات', active: 'operations', shell: 'bottom-nav' },
+      { id: 'route-account', title: 'حساب', active: 'account', shell: 'bottom-nav' },
+      { id: 'route-market', title: 'بازار · سطح محافظت‌شده', active: 'market', shell: 'floating' },
+      { id: 'route-messenger', title: 'پیام‌رسان · سطح محافظت‌شده', active: 'messenger', shell: 'floating' },
+      { id: 'route-accountant-home', title: 'خانه حسابداری · بدون بازار', active: 'home', shell: 'bottom-nav', accountant: true },
+    ]
+
+    function routeMarkup(route) {
+      const isProtected = route.shell === 'floating'
+      return `
+        <article class="scenario route-scenario" data-route-shell="${route.id}" data-shell-mode="${route.shell}">
+          <header class="scenario-heading"><h3>${route.title}</h3><p>${isProtected ? 'فقط کنترل ناوبری پوسته' : 'ناوبری پایدار و مقصد فعال'}</p></header>
+          <div id="${route.id}" class="device route-device product-screen" data-product-screen="${route.id}">
+            ${isProtected ? '' : `<header class="shell-header"><div class="identity-row"><div class="identity"><div class="avatar" aria-hidden="true">م</div><div class="identity-copy"><strong>محمد رضایی</strong></div></div><button class="notification-action" type="button" aria-label="اعلان‌ها" data-header-notification>${icon('i-bell')}</button></div><h3 class="screen-title">${route.title.split(' · ')[0]}</h3></header>`}
+            <main class="screen-content"><div class="shell-canvas ${isProtected ? 'protected-canvas' : ''}" aria-hidden="true"></div></main>
+            ${isProtected ? `<button class="floating-nav" type="button" aria-label="باز کردن ناوبری">${icon('i-menu')}</button>` : `<nav class="bottom-nav" aria-label="ناوبری اصلی">${navMarkup(route.active, { accountant: route.accountant })}</nav>`}
+          </div>
+        </article>`
+    }
+
+    document.querySelector('#responsive-sweep-grid').innerHTML = [360, 375, 390, 414, 430].map(quietHomeMarkup).join('')
+    document.querySelector('#route-grid').innerHTML = ROUTE_SCENARIOS.map(routeMarkup).join('')
+    document.querySelector('#security-modal-device .bottom-nav').innerHTML = navMarkup('home')
+    document.querySelector('#desktop-viewport .desktop-nav').innerHTML = navMarkup('home')
+  </script>
+</body>
+</html>
