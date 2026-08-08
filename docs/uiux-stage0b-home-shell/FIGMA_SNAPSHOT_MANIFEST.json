@@ -1,11 +1,11 @@
 {
-  "schemaVersion": 1,
-  "capturedAt": "2026-08-08T06:32:59Z",
-  "localEvidenceGeneratedAt": "2026-08-08T07:00:53.843Z",
+  "schemaVersion": 2,
+  "capturedAt": "2026-08-08T09:36:13Z",
+  "localEvidenceGeneratedAt": "2026-08-08T09:24:41.283Z",
   "sourceCommit": "9aef668dadf6ecee3d9568923394894dd5a2f6c2",
   "sourceCommitRole": "design-input-baseline",
   "branch": "condidate/webapp-ui-ux-redesign-v2",
-  "status": "in_progress_figma_rate_limited",
+  "status": "technical_complete_awaiting_owner_approval",
   "fileKey": "z8jgJxST4O2APzWnlyP9gv",
   "fileUrl": "https://www.figma.com/design/z8jgJxST4O2APzWnlyP9gv",
   "page": {
@@ -25,45 +25,67 @@
   ],
   "nodes": [
     { "id": "12:4", "name": "00 — Contract", "kind": "contract" },
-    { "id": "13:2", "name": "01 — Core mobile scenarios", "kind": "section" },
+    { "id": "13:2", "name": "01 — Core mobile scenarios", "kind": "section", "screenshotStatus": "final" },
     { "id": "13:9", "name": "0B2-M01 phone", "kind": "mobile", "width": 390, "height": 844 },
     { "id": "13:78", "name": "0B2-M02 phone", "kind": "mobile", "width": 390, "height": 844 },
     { "id": "13:156", "name": "0B2-M03 phone", "kind": "mobile", "width": 390, "height": 844 },
-    { "id": "14:2", "name": "02 — Role and recovery scenarios", "kind": "section" },
+    { "id": "14:2", "name": "02 — Role and recovery scenarios", "kind": "section", "screenshotStatus": "final" },
     { "id": "14:6", "name": "0B2-M04 phone — accountant", "kind": "mobile", "width": 390, "height": 844 },
     { "id": "14:86", "name": "0B2-M05 phone — loading", "kind": "mobile", "width": 390, "height": 844 },
     { "id": "14:164", "name": "0B2-M06 phone — load error", "kind": "mobile", "width": 390, "height": 844 },
-    { "id": "15:2", "name": "03 — Connectivity and PWA scenarios", "kind": "section" },
+    { "id": "15:2", "name": "03 — Connectivity and PWA scenarios", "kind": "section", "screenshotStatus": "final" },
     { "id": "15:6", "name": "0B2-M07 phone — offline cached", "kind": "mobile", "width": 390, "height": 844 },
     { "id": "15:85", "name": "0B2-M08 phone — stale reconnecting", "kind": "mobile", "width": 390, "height": 844 },
     { "id": "15:164", "name": "0B2-M09 phone — PWA eligible", "kind": "mobile", "width": 390, "height": 844 },
     { "id": "15:239", "name": "PWA app icon", "kind": "image", "source": "frontend/public/pwa-192x192.png" },
-    { "id": "16:2", "name": "04 — Authenticated shell contracts", "kind": "section", "screenshotStatus": "blocked_by_starter_rate_limit" },
+    { "id": "16:2", "name": "04 — Authenticated shell contracts", "kind": "section", "screenshotStatus": "final" },
     { "id": "16:9", "name": "0B2-M10 phone — session approval", "kind": "mobile", "width": 390, "height": 844 },
     { "id": "16:98", "name": "Shell route matrix", "kind": "contract" },
-    { "id": "16:125", "name": "Shell layer priority", "kind": "contract" }
+    { "id": "16:125", "name": "Shell layer priority", "kind": "contract" },
+    { "id": "27:2", "name": "05 — Responsive and desktop proofs", "kind": "section", "screenshotStatus": "final" },
+    { "id": "27:9", "name": "Responsive Home 360", "kind": "mobile-proof", "width": 360, "height": 844 },
+    { "id": "27:72", "name": "Responsive Home 375", "kind": "mobile-proof", "width": 375, "height": 844 },
+    { "id": "27:135", "name": "Responsive Home 390", "kind": "mobile-proof", "width": 390, "height": 844 },
+    { "id": "27:198", "name": "Responsive Home 414", "kind": "mobile-proof", "width": 414, "height": 844 },
+    { "id": "27:261", "name": "Responsive Home 430", "kind": "mobile-proof", "width": 430, "height": 844 },
+    { "id": "28:4", "name": "Desktop Home proof", "kind": "desktop-proof", "width": 1440, "height": 900, "screenshotStatus": "final" }
   ],
   "directFigmaEvidence": [
     {
       "path": "assets/figma-core-mobile-scenarios.png",
       "nodeId": "13:2",
-      "sha256": "fab296ff987f75c818b802ae10353aa70b19771f4e24103f4755bd055fcee0ed"
+      "sha256": "07389f9166f414b0c0acbfedaba938a62b081407c3edca4465a2c7fa6dd591d5"
     },
     {
       "path": "assets/figma-role-recovery-scenarios.png",
       "nodeId": "14:2",
-      "sha256": "f66994f2ed892aebe9a077c15bb689f8efa198d9d2bbbcd6f5c0785d93f7dfcb"
+      "sha256": "c608ed8aa9963133182660b8953622e9bd8d42e696ce25b41b4a7989abbbd0bd"
     },
     {
       "path": "assets/figma-connectivity-pwa-scenarios.png",
       "nodeId": "15:2",
-      "sha256": "e81ebc3d01d2e00b23f81771ab349da20bd375cc72eaaf93826795d4b5eaf537"
+      "sha256": "12dd618dd75ef0223ae65f17bb07b7fb22b4b4d3ba7f2e78e48e241d8474b8ad"
+    },
+    {
+      "path": "assets/figma-authenticated-shell-contracts.png",
+      "nodeId": "16:2",
+      "sha256": "ef3f802b1c044d1901317b20a93ed9063cb24f5b5ebd573be9c72c44a9346c0f"
+    },
+    {
+      "path": "assets/figma-responsive-and-desktop-proofs.png",
+      "nodeId": "27:2",
+      "sha256": "df455b09ebf1f04ce85b390f8cf539a9de4021dd3dda4c5703812501a68d482f"
+    },
+    {
+      "path": "assets/figma-desktop-1440x900.png",
+      "nodeId": "28:4",
+      "sha256": "2b2386e1abf12788e7e052b4b525128931fda79a79243ed3a04f06518d6ea777"
     }
   ],
   "secondaryDerivativeEvidence": [
     {
       "path": "assets/local-home-shell-responsive-sweep.png",
-      "sha256": "748cb7447e4f01b3b3a32ab17a6b90c8ce41c159915780959f26479d39f9df68"
+      "sha256": "728d456e5af77d3d778e02896f032fbe9308ea192a32064d4f0417c791696489"
     },
     {
       "path": "assets/local-home-shell-quiet-390.png",
@@ -71,37 +93,54 @@
     },
     {
       "path": "assets/local-home-shell-route-matrix.png",
-      "sha256": "815c51c96d82a470db031a47765a01b8d7d80c174ad5292b5d44d33f80ba83f6"
+      "sha256": "eb348bcb4dc915d6e7be0d795c76c58008ab3bfee63ab13b7d15546364204e50"
     },
     {
       "path": "assets/local-home-shell-state-atlas.png",
-      "sha256": "c1769c567d8c50b9912fc2b21e160ae06e59d455a0acdf98779dd8e9cc2b35ea"
+      "sha256": "bc37d7263fe603ed956bd6c84096e33febe4738bbe500e008dc752ee2c9d376f"
     },
     {
       "path": "assets/local-home-shell-security-session-modal.png",
-      "sha256": "71cd714f8bbbf0a2304675261da5e19711a932b052f30190d85a6ca657b4a39b"
+      "sha256": "aeda8494cf25751aecd9750fd52546cac5b519abcf88c3253f7619935bd07a46"
     },
     {
       "path": "assets/local-home-shell-adaptive-desktop.png",
-      "sha256": "b4be884505520704d77f2217a19a6f5126a06c0caa4d998912de33b91cf6d3ae"
+      "sha256": "cc1bd608947b35c19b81b3aa04079ccc6cc682cec496fd5fc683212733eb805a"
     },
     {
       "path": "assets/local-home-shell-desktop-1440x900.png",
-      "sha256": "1474482e7dff400027aeeebca074983714453d48e54dc44172ea39604e96f95e"
+      "sha256": "8eb820788dcc46ee25c4e26a80df7762e1a9c490124a1879c858d14d5115bbfa"
     },
     {
       "path": "assets/local-home-shell-validation-metrics.json",
-      "sha256": "b222d226b243ac2b2fdc797054cf1f39713a988c3c90c6ec902cea7f2b6bd3dd"
+      "sha256": "5d688446a7d2bb709751603facfc119125af9ecb97f4c7b3199258471aa57f60"
     }
   ],
-  "openFigmaWork": [
-    "Replace every newly styled Market widget interior with a visibly non-normative protected placeholder",
-    "Remove the repeated حساب جاری subtitle from authenticated headers",
-    "Add direct Account follow-up for inactive state and neutral permission-loading navigation",
-    "Make generic load error cause-neutral and remove repeated/promise-only connectivity controls",
-    "Capture and inspect node 16:2 after MCP capacity is available",
-    "Add responsive width sweep nodes for 360, 375, 390, 414 and 430",
-    "Add the 1440x900 adaptive desktop proof without a new sidebar or KPI",
-    "Run final Figma metadata and screenshot validation"
-  ]
+  "figmaAudit": {
+    "productRootCount": 16,
+    "forbiddenCopyViolationCount": 0,
+    "overflowViolationCount": 0,
+    "protectedMarketUiViolationCount": 0,
+    "inactiveMarketDestinationCount": 0,
+    "loadingIdentityRtl": true,
+    "sessionRequestTimeCount": 1,
+    "sessionCountdownCount": 1,
+    "sessionModalOverflow": false,
+    "minimumNavigationLabelPx": 11,
+    "minimumTargetPx": 48,
+    "minimumCtaHeightPx": 48,
+    "fontFamilies": ["Vazirmatn"]
+  },
+  "localHarness": {
+    "assertionsPassed": 19,
+    "assertionFailures": 0,
+    "pageErrors": 0,
+    "productScreenCount": 20,
+    "responsiveWidths": [360, 375, 390, 414, 430],
+    "minimumTargetPx": 44,
+    "minimumCtaHeightPx": 48,
+    "minimumNavigationLabelPx": 11,
+    "loadedFontFaceCount": 4
+  },
+  "openFigmaWork": []
 }

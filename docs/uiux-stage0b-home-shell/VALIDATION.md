@@ -1,25 +1,29 @@
 # Stage 0B-2 validation record
 
-وضعیت: در حال اجرا؛ شواهد مستقیم سه section موبایل Figma ثبت شده‌اند، اما screenshot نهایی shell و انتقال width sweep/desktop proof به Figma به‌دلیل سقف Starter باز است.
+وضعیت: تکمیل فنی و آماده تصمیم مالک محصول؛ Figma رسمی، شواهد مستقیم، width sweep، desktop proof و harness مشتق‌شده همگی پاس هستند.
 
 ## شواهد مستقیم Figma
 
 - صفحه مستقل: `12:2`؛
-- ۱۰ قاب موبایل طراحی‌شده با مرجع ۳۹۰×۸۴۴؛
-- سه screenshot مستقیم و checksum‌شده از nodeهای `13:2`، `14:2` و `15:2`؛
+- ۱۰ قاب سناریویی موبایل با مرجع ۳۹۰×۸۴۴؛
+- پنج proof responsive دقیق روی nodeهای `27:9`، `27:72`، `27:135`، `27:198` و `27:261`؛
+- proof دسکتاپ دقیق ۱۴۴۰×۹۰۰ روی node `28:4`؛
+- شش screenshot مستقیم و checksum‌شده از nodeهای `13:2`، `14:2`، `15:2`، `16:2`، `27:2` و `28:4`؛
 - فونت‌های در دسترس و استفاده‌شده: Vazirmatn با وزن‌های ۴۰۰، ۵۰۰، ۶۰۰ و ۷۰۰؛
 - icon واقعی PWA روی node `15:239`؛
-- section قرارداد shell با node `16:2` ساخته شد، اما screenshot بعدی با پیام سقف Starter متوقف شد و تکرار نشد.
+- قرارداد shell و route/layer روی node `16:2`.
 
 بازبینی بصری screenshots موجود نشان داد:
 
-- bottom navigation داخل همه قاب‌ها می‌ماند و محتوای اصلی را نمی‌پوشاند؛
+- bottom navigation داخل همه قاب‌های واجد آن می‌ماند و محتوای اصلی را نمی‌پوشاند؛
 - حالت آرام فضای سفید هدفمند دارد؛
-- هشدار محدودیت و غیرفعالی فقط یک خانه بصری دارند؛
+- هشدار محدودیت و غیرفعالی فقط یک خانه بصری دارند و `M03` یک اقدام مستقیم «پیگیری در حساب» ارائه می‌کند؛
 - offline، stale و PWA به‌صورت سه state قابل‌تمایز دیده می‌شوند؛
-- هیچ شمارنده مسیر/ابزار/رابطه، role chip، greeting یا summary سلامت در قاب‌های محصول وجود ندارد.
-
-دو deviation بصری در همین screenshots وجود دارد و مانع پذیرش نهایی است: subtitle تکراری «حساب جاری» و طراحی تازه داخل slot محافظت‌شده بازار. علاوه بر آن، stateهای inactive/error/offline/stale باید مطابق findingهای checkpoint اصلاح شوند. بنابراین screenshots موجود provenance working draft هستند، نه evidence پذیرش نهایی.
+- هیچ شمارنده مسیر/ابزار/رابطه، role chip، greeting، summary سلامت، subtitle «حساب جاری» یا متن داخلی route/backend در قاب‌های محصول وجود ندارد؛
+- همه جایگاه‌های بازار placeholder قفل‌شده و غیرهنجاری‌اند و هیچ status، badge یا CTA تازه برای widget محافظت‌شده بازار ندارند؛
+- loading/error تا روشن‌شدن permission مقصد نقش‌وابسته نشان نمی‌دهند، خطا cause-neutral است و stale زمان کامل «امروز، ساعت ۱۴:۲۰» دارد؛
+- حساب غیرفعال navigation چهارتایی و بدون مقصد مرده بازار دارد؛ skeleton هویت loading راست‌به‌چپ است؛ modal نشست هم زمان درخواست و هم countdown را بدون overflow نشان می‌دهد؛
+- ممیزی ساختاری ۱۶ root محصول: صفر overflow، صفر متن ممنوع، صفر تخطی بازار، فقط Vazirmatn، navigation label حداقل ۱۱px و target/CTA حداقل ۴۸px.
 
 ## harness مشتق‌شده
 
@@ -37,12 +41,12 @@
 
 اجرای محلی نهایی در ۲۰۲۶-۰۸-۰۸:
 
-- ۱۸/۱۸ assertion پاس، بدون failure یا `pageerror`؛
+- ۱۹/۱۹ assertion پاس، بدون failure یا `pageerror`؛
 - پنج عرض CSS دقیق: ۳۶۰، ۳۷۵، ۳۹۰، ۴۱۴ و ۴۳۰؛
-- ۱۹ product screen بدون overflow افقی یا عمودی؛
+- ۲۰ product screen بدون overflow افقی یا عمودی؛
 - حداقل clearance محتوای خانه آرام تا bottom navigation برابر ۵۰۳px؛
-- ۷۳ target قابل‌تعامل با حداقل اندازه ۴۴×۴۴؛
-- ۵ CTA با حداقل ارتفاع ۴۸px؛
+- ۷۵ target قابل‌تعامل با حداقل اندازه ۴۴×۴۴؛
+- ۶ CTA با حداقل ارتفاع ۴۸px؛
 - ۵۴ برچسب navigation با حداقل اندازه متن ۱۱px و بدون violation؛
 - چهار face واقعی Vazirmatn در وزن‌های ۴۰۰، ۵۰۰، ۶۰۰ و ۷۰۰ با status برابر `loaded`؛
 - proof مستقل و دقیق دسکتاپ با فایل ۱۴۴۰×۹۰۰؛
@@ -89,7 +93,7 @@
 ```text
 Test Files  7 passed (7)
 Tests       39 passed (39)
-Duration    9.37s
+Duration    8.31s
 ```
 
 دستور:
@@ -111,4 +115,4 @@ npm run test:unit:run -- \
 
 شواهد static Figma و HTML نمی‌توانند router واقعی، cache/offline runtime، نصب PWA مرورگر، WebView تلگرام، screen reader، focus management، zoom/font scaling یا modal security behavior را اثبات کنند. این موارد در Stageهای ۱، ۳، ۴، ۷ و ۸ validation اجرایی دارند.
 
-تا وقتی width sweep و desktop proof روی صفحه Figma ثبت و screenshot/metadata نهایی گرفته نشود، checkpoint از نظر فنی بسته نیست.
+checkpoint از نظر فنی بسته و برای تصمیم صریح مالک محصول آماده است. این نتیجه مجوز تغییر runtime یا عبور خودکار به `0B-3` نیست.

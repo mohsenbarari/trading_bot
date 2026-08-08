@@ -285,6 +285,7 @@ async function measureEvidence(page) {
 
     const protectedSlots = [...document.querySelectorAll('.product-screen [data-protected-market-slot]')]
     const inactiveState = document.querySelector('#state-inactive')
+    const accountantState = document.querySelector('#state-accountant')
     const loadingState = document.querySelector('#state-loading')
     const errorState = document.querySelector('#state-error')
     const offlineState = document.querySelector('#state-offline')
@@ -354,10 +355,24 @@ async function measureEvidence(page) {
           protectedMarketSlotCount: inactiveState.querySelectorAll('[data-protected-market-slot]').length,
           disabledActionCount: inactiveState.querySelectorAll('button:disabled, a[aria-disabled="true"]').length,
         },
+        accountant: {
+          pageTitleCount: accountantState.querySelectorAll('[data-accountant-page-title]').length,
+          pageTitle: (accountantState.querySelector('[data-accountant-page-title]')?.textContent || '').trim(),
+          actionTitleCount: accountantState.querySelectorAll('[data-accountant-action-title]').length,
+          actionTitle: (accountantState.querySelector('[data-accountant-action-title]')?.textContent || '').trim(),
+          customerActionCount: accountantState.querySelectorAll('[data-accountant-customer-action]').length,
+          customerActionLabel: (accountantState.querySelector('[data-accountant-customer-action]')?.textContent || '').trim(),
+          protectedMarketSlotCount: accountantState.querySelectorAll('[data-protected-market-slot]').length,
+        },
         loading: {
+          fullShellCount: loadingState.matches('[data-full-shell-state="loading"]') ? 1 : 0,
+          neutralShellCount: loadingState.querySelectorAll('[data-permission-neutral-shell]').length,
           permissionDestinationCount: loadingState.querySelectorAll('[data-nav-destination="market"], [data-nav-destination="operations"], [data-protected-market-slot]').length,
         },
         error: {
+          fullShellCount: errorState.matches('[data-full-shell-state="error"]') ? 1 : 0,
+          neutralShellCount: errorState.querySelectorAll('[data-permission-neutral-shell]').length,
+          title: (errorState.querySelector('[data-error-title]')?.textContent || '').trim(),
           permissionDestinationCount: errorState.querySelectorAll('[data-nav-destination="market"], [data-nav-destination="operations"], [data-protected-market-slot]').length,
           presumedCauseTerms: ['اینترنت', 'اتصال', 'شبکه'].filter((term) => errorText.includes(term)),
         },
@@ -368,6 +383,7 @@ async function measureEvidence(page) {
         },
         stale: {
           connectionSignalCount: staleState.querySelectorAll('[data-connection-signal]').length,
+          freshnessTodayCount: (staleState.textContent || '').includes('امروز، ساعت ۱۴:۲۰') ? 1 : 0,
           disabledActionCount: staleState.querySelectorAll('button:disabled, a[aria-disabled="true"]').length,
           stateBadgeCount: staleState.querySelectorAll('.market-state, [data-market-state]').length,
         },
@@ -394,6 +410,7 @@ function buildAssertions(metrics, font) {
   const structuralValues = Object.values(metrics.contentMinimalism.structuralExclusions)
   const guards = metrics.scopeGuards
   const states = metrics.stateContracts
+  const accountant = states.accountant
 
   return [
     { id: 'font-vazirmatn-loaded', passed: font.loaded && font.faces.length >= 4, detail: `${font.faces.length} loaded faces` },
@@ -407,13 +424,14 @@ function buildAssertions(metrics, font) {
     { id: 'route-shell-matrix-complete', passed: metrics.routeShells.length === 6 && bottomShells.length === 4 && floatingShells.length === 2, detail: `${bottomShells.length} bottom + ${floatingShells.length} floating` },
     { id: 'route-shell-active-destination', passed: bottomShells.every((item) => item.bottomNavigationCount === 1 && item.notificationCount === 1 && item.activeDestinationCount === 1) && floatingShells.every((item) => item.floatingNavigationCount === 1 && item.bottomNavigationCount === 0 && item.notificationCount === 0), detail: 'standard shell has one notification and active destination; protected shell has one floating control' },
     { id: 'accountant-market-omitted', passed: accountantShell && !accountantShell.destinations.includes('market') && accountantShell.destinations.length === 4, detail: accountantShell ? accountantShell.destinations.join(', ') : 'missing shell' },
+    { id: 'accountant-and-permission-state-contracts', passed: accountant.pageTitleCount === 1 && accountant.pageTitle === 'خانه' && accountant.actionTitleCount === 1 && accountant.actionTitle === 'مشتریان' && accountant.customerActionCount === 1 && accountant.customerActionLabel === 'مشاهده مشتریان' && accountant.protectedMarketSlotCount === 0 && states.loading.fullShellCount === 1 && states.loading.neutralShellCount === 1 && states.error.fullShellCount === 1 && states.error.neutralShellCount === 1 && states.error.title === 'دریافت اطلاعات خانه انجام نشد', detail: 'accountant title/action explicit; loading/error are full permission-neutral shells' },
     { id: 'security-modal-decision-complete', passed: metrics.securityModal.dialogCount === 1 && metrics.securityModal.actionCount === 2 && metrics.securityModal.notificationCount === 1 && metrics.securityModal.requestTimeCount === 1 && metrics.securityModal.countdownCount === 1 && !metrics.securityModal.overflowX && !metrics.securityModal.overflowY, detail: `${metrics.securityModal.actionCount} actions; time=1; countdown=1` },
     { id: 'desktop-exact-1440x900', passed: metrics.desktop.width === 1440 && metrics.desktop.height === 900, detail: `${metrics.desktop.width}×${metrics.desktop.height}` },
     { id: 'desktop-content-economy', passed: metrics.desktop.navigationCount === 1 && metrics.desktop.identityCount === 1 && metrics.desktop.notificationCount === 1 && metrics.desktop.protectedMarketSlotCount === 1 && metrics.desktop.sidebarCount === 0 && metrics.desktop.kpiCount === 0, detail: 'nav=1, identity=1, notification=1, market-slot=1, sidebar=0, KPI=0' },
     { id: 'forbidden-content-absent', passed: metrics.contentMinimalism.forbiddenTextChecks.every((item) => !item.present) && structuralValues.every((value) => value === 0), detail: 'all forbidden text and structures absent' },
     { id: 'protected-market-placeholder-only', passed: guards.protectedMarketSlotCount > 0 && guards.nonNormativePlaceholderCount === guards.protectedMarketSlotCount && guards.protectedMarketInteractiveDescendantCount === 0 && guards.protectedMarketStateBadgeCount === 0, detail: `${guards.nonNormativePlaceholderCount}/${guards.protectedMarketSlotCount} locked placeholders; interactive=${guards.protectedMarketInteractiveDescendantCount}; states=${guards.protectedMarketStateBadgeCount}` },
     { id: 'pwa-real-icon-loaded', passed: states.pwa.realIconCount === 1 && states.pwa.realIconLoaded && states.pwa.realIconSource.endsWith('/frontend/public/pwa-192x192.png'), detail: `${states.pwa.realIconSource || 'missing'}; loaded=${states.pwa.realIconLoaded}` },
-    { id: 'draft-state-blockers-resolved', passed: states.inactive.accountFollowupCount === 1 && states.inactive.accountFollowupLabel === 'پیگیری در حساب' && states.inactive.protectedMarketSlotCount === 0 && states.inactive.disabledActionCount === 0 && states.loading.permissionDestinationCount === 0 && states.error.permissionDestinationCount === 0 && states.error.presumedCauseTerms.length === 0 && states.offline.connectionSignalCount === 1 && states.offline.disabledActionCount === 0 && states.offline.stateBadgeCount === 0 && states.stale.connectionSignalCount === 1 && states.stale.disabledActionCount === 0 && states.stale.stateBadgeCount === 0 && states.futureRetryPromises.length === 0, detail: 'canonical account follow-up; loading/error neutral; offline/stale single-signal; no future retry promise' },
+    { id: 'draft-state-blockers-resolved', passed: states.inactive.accountFollowupCount === 1 && states.inactive.accountFollowupLabel === 'پیگیری در حساب' && states.inactive.protectedMarketSlotCount === 0 && states.inactive.disabledActionCount === 0 && states.loading.permissionDestinationCount === 0 && states.error.permissionDestinationCount === 0 && states.error.presumedCauseTerms.length === 0 && states.offline.connectionSignalCount === 1 && states.offline.disabledActionCount === 0 && states.offline.stateBadgeCount === 0 && states.stale.connectionSignalCount === 1 && states.stale.freshnessTodayCount === 1 && states.stale.disabledActionCount === 0 && states.stale.stateBadgeCount === 0 && states.futureRetryPromises.length === 0, detail: 'canonical account follow-up; loading/error neutral; offline/stale single-signal with complete freshness; no future retry promise' },
   ]
 }
 

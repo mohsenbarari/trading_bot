@@ -390,6 +390,39 @@
     .state-screen .market-slot { margin-top: 12px; }
     .state-followup { display: grid; gap: 12px; }
     .state-followup .primary-action { width: 100%; }
+    .state-device {
+      --device-width: 390px;
+      --device-height: 844px;
+      margin: 12px auto;
+      box-shadow: none;
+    }
+    .state-device .screen-content { padding-top: 16px; }
+    .permission-neutral-bottom {
+      display: grid;
+      min-height: 78px;
+      place-items: center;
+      border-top: 1px solid var(--border);
+      background: rgba(255, 255, 255, 0.96);
+    }
+    .permission-neutral-bottom span {
+      width: 128px;
+      height: 8px;
+      border-radius: 99px;
+      background: #dfe7ee;
+    }
+    .loading-identity {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .loading-avatar { width: 40px; height: 40px; border-radius: 13px; background: #dfe7ee; }
+    .loading-copy { display: grid; gap: 7px; width: 132px; }
+    .loading-copy span { height: 11px; border-radius: 99px; background: #dfe7ee; }
+    .loading-copy span:last-child { width: 58%; }
+    .accountant-state { display: grid; gap: 12px; }
+    .accountant-state h4 { margin: 0; color: var(--navy-950); font-size: 17px; }
+    .accountant-state p { margin: 0; color: var(--text-muted); font-size: 12px; line-height: 1.9; }
+    .accountant-state .primary-action { width: 100%; }
 
     .notice {
       padding: 14px;
@@ -585,7 +618,7 @@
         <article class="state-card">
           <header class="state-card__heading"><h3>اتصال دوباره با داده قبلی</h3><p>محتوا نمی‌پرد و تصمیم تا تازه‌شدن داده قفل می‌ماند.</p></header>
           <div id="state-stale" class="state-screen product-screen" data-product-screen="state-stale">
-            <div class="notice notice--info" data-connection-signal><strong>در حال اتصال دوباره</strong>آخرین اطلاعات معتبر مربوط به ساعت <bdi>۱۴:۲۰</bdi> است.</div>
+            <div class="notice notice--info" data-connection-signal><strong>در حال اتصال دوباره</strong>آخرین اطلاعات معتبر: امروز، ساعت <bdi>۱۴:۲۰</bdi></div>
             <section class="market-slot market-slot--locked" data-protected-market-slot>
               <div class="locked-market-placeholder" data-non-normative-market-placeholder><svg aria-hidden="true"><use href="#i-store"/></svg><div><strong>جایگاه بازار</strong><small>قفل طراحی · رابط فعلی بازار حفظ می‌شود</small></div></div>
             </section>
@@ -610,23 +643,42 @@
           <header class="state-card__heading"><h3>حساب غیرفعال</h3><p>اثر وضعیت و مقصد پیگیری در یک خانه بصری.</p></header>
           <div id="state-inactive" class="state-screen product-screen" data-product-screen="state-inactive">
             <div class="state-followup">
-              <div class="notice notice--danger"><strong>حساب شما غیرفعال است</strong>برای بررسی وضعیت از بخش حساب پیگیری کنید.</div>
+              <div class="notice notice--danger"><strong>حساب شما غیرفعال است</strong>ورود به بازار ممکن نیست.</div>
               <a class="primary-action cta" href="#route-shell-matrix" data-follow-up-destination="account">پیگیری در حساب</a>
             </div>
           </div>
         </article>
 
         <article class="state-card">
+          <header class="state-card__heading"><h3>خانه حسابدار</h3><p>عنوان اقدام و مقصد واقعی، بدون شمارنده یا بازار.</p></header>
+          <div id="state-accountant" class="state-screen product-screen" data-product-screen="state-accountant">
+            <section class="accountant-state">
+              <h3 class="screen-title" data-accountant-page-title>خانه</h3>
+              <h4 data-accountant-action-title>مشتریان</h4>
+              <p>برای ادامه کار، مشتری موردنظر را انتخاب کنید.</p>
+              <a class="primary-action cta" href="#route-accountant-home" data-accountant-customer-action>مشاهده مشتریان</a>
+            </section>
+          </div>
+        </article>
+
+        <article class="state-card">
           <header class="state-card__heading"><h3>بارگذاری ساختاری</h3><p>هندسه پایدار است و داده فرضی نمایش داده نمی‌شود.</p></header>
-          <div id="state-loading" class="state-screen product-screen" data-product-screen="state-loading" aria-label="خانه در حال بارگذاری">
-            <div class="skeleton" aria-hidden="true"><div class="skeleton-line skeleton-line--short"></div><div class="skeleton-line"></div><div class="skeleton-block"></div></div>
+          <div id="state-loading" class="device state-device product-screen" data-product-screen="state-loading" data-full-shell-state="loading" aria-label="خانه در حال بارگذاری">
+            <header class="shell-header">
+              <div class="identity-row"><div class="loading-identity" aria-hidden="true"><div class="loading-avatar"></div><div class="loading-copy"><span></span><span></span></div></div></div>
+              <h3 class="screen-title">خانه</h3>
+            </header>
+            <main class="screen-content"><div class="skeleton" aria-hidden="true"><div class="skeleton-line skeleton-line--short"></div><div class="skeleton-line"></div><div class="skeleton-block"></div></div></main>
+            <nav class="permission-neutral-bottom" data-permission-neutral-shell aria-label="ناوبری در حال دریافت مجوز"><span aria-hidden="true"></span></nav>
           </div>
         </article>
 
         <article class="state-card">
           <header class="state-card__heading"><h3>خطای قابل‌بازیابی</h3><p>یک توضیح کوتاه و یک اقدام واقعی.</p></header>
-          <div id="state-error" class="state-screen product-screen" data-product-screen="state-error">
-            <div class="error-state"><section class="error-card"><div class="error-icon" aria-hidden="true">!</div><h4>خانه بارگذاری نشد</h4><p>دریافت اطلاعات کامل نشد. می‌توانید دوباره درخواست کنید.</p><button class="primary-action cta" type="button">تلاش دوباره</button></section></div>
+          <div id="state-error" class="device state-device product-screen" data-product-screen="state-error" data-full-shell-state="error">
+            <header class="shell-header"><div class="identity-row"><div aria-hidden="true"></div><button class="notification-action" type="button" aria-label="اعلان‌ها" data-header-notification><svg aria-hidden="true"><use href="#i-bell"/></svg></button></div><h3 class="screen-title">خانه</h3></header>
+            <main class="screen-content"><div class="error-state"><section class="error-card"><div class="error-icon" aria-hidden="true">!</div><h4 data-error-title>دریافت اطلاعات خانه انجام نشد</h4><button class="primary-action cta" type="button">تلاش دوباره</button></section></div></main>
+            <nav class="permission-neutral-bottom" data-permission-neutral-shell aria-label="ناوبری تا دریافت مجوز در دسترس نیست"></nav>
           </div>
         </article>
       </div>

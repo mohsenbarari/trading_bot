@@ -3,7 +3,7 @@
   "evidenceRole": "secondary-derivative-evidence",
   "primaryDesignSource": "Figma file z8jgJxST4O2APzWnlyP9gv",
   "scope": "Stage 0B-2 home and authenticated shell; Market and Messenger internals excluded",
-  "generatedAt": "2026-08-08T07:00:53.843Z",
+  "generatedAt": "2026-08-08T09:24:41.283Z",
   "environment": {
     "playwrightSource": "/tmp/trading-bot-webapp-uiux-redesign-v2/frontend/node_modules/playwright",
     "browser": "147.0.7727.15",
@@ -92,7 +92,7 @@
       "filename": "local-home-shell-state-atlas.png",
       "pixelDimensions": {
         "width": 2360,
-        "height": 1140
+        "height": 2570
       }
     },
     {
@@ -450,7 +450,7 @@
         "overflowY": false
       },
       {
-        "id": "state-loading",
+        "id": "state-accountant",
         "x": 996,
         "y": 2834,
         "width": 408,
@@ -465,28 +465,43 @@
         "overflowY": false
       },
       {
+        "id": "state-loading",
+        "x": 1439,
+        "y": 2846,
+        "width": 390,
+        "height": 844,
+        "right": 1829,
+        "bottom": 3690,
+        "clientWidth": 388,
+        "clientHeight": 842,
+        "scrollWidth": 388,
+        "scrollHeight": 842,
+        "overflowX": false,
+        "overflowY": false
+      },
+      {
         "id": "state-error",
-        "x": 1430,
-        "y": 2834,
-        "width": 408,
-        "height": 410,
-        "right": 1838,
-        "bottom": 3244,
-        "clientWidth": 408,
-        "clientHeight": 410,
-        "scrollWidth": 408,
-        "scrollHeight": 410,
+        "x": 571,
+        "y": 3818,
+        "width": 390,
+        "height": 844,
+        "right": 961,
+        "bottom": 4662,
+        "clientWidth": 388,
+        "clientHeight": 842,
+        "scrollWidth": 388,
+        "scrollHeight": 842,
         "overflowX": false,
         "overflowY": false
       },
       {
         "id": "security-session-modal",
         "x": 1005,
-        "y": 3408,
+        "y": 4838,
         "width": 390,
         "height": 844,
         "right": 1395,
-        "bottom": 4252,
+        "bottom": 5682,
         "clientWidth": 388,
         "clientHeight": 842,
         "scrollWidth": 388,
@@ -497,11 +512,11 @@
       {
         "id": "adaptive-desktop",
         "x": 915,
-        "y": 4416,
+        "y": 5846,
         "width": 1440,
         "height": 900,
         "right": 2355,
-        "bottom": 5316,
+        "bottom": 6746,
         "clientWidth": 1438,
         "clientHeight": 898,
         "scrollWidth": 1438,
@@ -511,7 +526,7 @@
       }
     ],
     "actions": {
-      "count": 73,
+      "count": 75,
       "minimumWidth": 44,
       "minimumHeight": 44,
       "violations": [],
@@ -1271,204 +1286,230 @@
           "bottom": 2989
         },
         {
-          "id": "state-error:button:58",
+          "id": "state-accountant:a:58",
+          "screen": "state-accountant",
+          "label": "مشاهده مشتریان",
+          "tag": "a",
+          "disabled": false,
+          "x": 1012,
+          "y": 2982,
+          "width": 376,
+          "height": 48,
+          "right": 1388,
+          "bottom": 3030
+        },
+        {
+          "id": "state-error:button:59",
+          "screen": "state-error",
+          "label": "اعلان‌ها",
+          "tag": "button",
+          "disabled": false,
+          "x": 588,
+          "y": 3846,
+          "width": 44,
+          "height": 44,
+          "right": 632,
+          "bottom": 3890
+        },
+        {
+          "id": "state-error:button:60",
           "screen": "state-error",
           "label": "تلاش دوباره",
           "tag": "button",
           "disabled": false,
-          "x": 1465,
-          "y": 3050,
-          "width": 338,
+          "x": 607,
+          "y": 4146,
+          "width": 318,
           "height": 48,
-          "right": 1803,
-          "bottom": 3098
+          "right": 925,
+          "bottom": 4194
         },
         {
-          "id": "security-session-modal:button:59",
+          "id": "security-session-modal:button:61",
           "screen": "security-session-modal",
           "label": "اعلان‌ها",
           "tag": "button",
           "disabled": false,
           "x": 1022,
-          "y": 3436,
+          "y": 4866,
           "width": 44,
           "height": 44,
           "right": 1066,
-          "bottom": 3480
+          "bottom": 4910
         },
         {
-          "id": "security-session-modal:a:60",
+          "id": "security-session-modal:a:62",
           "screen": "security-session-modal",
           "label": "خانه",
           "tag": "a",
           "disabled": false,
           "x": 1313,
-          "y": 4186,
+          "y": 5616,
           "width": 73,
           "height": 52,
           "right": 1386,
-          "bottom": 4238
+          "bottom": 5668
         },
         {
-          "id": "security-session-modal:a:61",
+          "id": "security-session-modal:a:63",
           "screen": "security-session-modal",
           "label": "بازار",
           "tag": "a",
           "disabled": false,
           "x": 1238,
-          "y": 4186,
+          "y": 5616,
           "width": 73,
           "height": 52,
           "right": 1311,
-          "bottom": 4238
+          "bottom": 5668
         },
         {
-          "id": "security-session-modal:a:62",
+          "id": "security-session-modal:a:64",
           "screen": "security-session-modal",
           "label": "پیام‌رسان",
           "tag": "a",
           "disabled": false,
           "x": 1164,
-          "y": 4186,
+          "y": 5616,
           "width": 73,
           "height": 52,
           "right": 1236,
-          "bottom": 4238
+          "bottom": 5668
         },
         {
-          "id": "security-session-modal:a:63",
+          "id": "security-session-modal:a:65",
           "screen": "security-session-modal",
           "label": "عملیات",
           "tag": "a",
           "disabled": false,
           "x": 1089,
-          "y": 4186,
+          "y": 5616,
           "width": 73,
           "height": 52,
           "right": 1162,
-          "bottom": 4238
+          "bottom": 5668
         },
         {
-          "id": "security-session-modal:a:64",
+          "id": "security-session-modal:a:66",
           "screen": "security-session-modal",
           "label": "حساب",
           "tag": "a",
           "disabled": false,
           "x": 1014,
-          "y": 4186,
+          "y": 5616,
           "width": 73,
           "height": 52,
           "right": 1087,
-          "bottom": 4238
+          "bottom": 5668
         },
         {
-          "id": "security-session-modal:button:65",
+          "id": "security-session-modal:button:67",
           "screen": "security-session-modal",
           "label": "رد",
           "tag": "button",
           "disabled": false,
           "x": 1205,
-          "y": 3941,
+          "y": 5371,
           "width": 153,
           "height": 48,
           "right": 1357,
-          "bottom": 3989
+          "bottom": 5419
         },
         {
-          "id": "security-session-modal:button:66",
+          "id": "security-session-modal:button:68",
           "screen": "security-session-modal",
           "label": "تأیید",
           "tag": "button",
           "disabled": false,
           "x": 1043,
-          "y": 3941,
+          "y": 5371,
           "width": 153,
           "height": 48,
           "right": 1196,
-          "bottom": 3989
+          "bottom": 5419
         },
         {
-          "id": "adaptive-desktop:a:67",
+          "id": "adaptive-desktop:a:69",
           "screen": "adaptive-desktop",
           "label": "خانه",
           "tag": "a",
           "disabled": false,
           "x": 1778,
-          "y": 4436,
+          "y": 5866,
           "width": 89,
           "height": 48,
           "right": 1867,
-          "bottom": 4484
+          "bottom": 5914
         },
         {
-          "id": "adaptive-desktop:a:68",
+          "id": "adaptive-desktop:a:70",
           "screen": "adaptive-desktop",
           "label": "بازار",
           "tag": "a",
           "disabled": false,
           "x": 1684,
-          "y": 4436,
+          "y": 5866,
           "width": 89,
           "height": 48,
           "right": 1773,
-          "bottom": 4484
+          "bottom": 5914
         },
         {
-          "id": "adaptive-desktop:a:69",
+          "id": "adaptive-desktop:a:71",
           "screen": "adaptive-desktop",
           "label": "پیام‌رسان",
           "tag": "a",
           "disabled": false,
           "x": 1591,
-          "y": 4436,
+          "y": 5866,
           "width": 89,
           "height": 48,
           "right": 1679,
-          "bottom": 4484
+          "bottom": 5914
         },
         {
-          "id": "adaptive-desktop:a:70",
+          "id": "adaptive-desktop:a:72",
           "screen": "adaptive-desktop",
           "label": "عملیات",
           "tag": "a",
           "disabled": false,
           "x": 1497,
-          "y": 4436,
+          "y": 5866,
           "width": 89,
           "height": 48,
           "right": 1586,
-          "bottom": 4484
+          "bottom": 5914
         },
         {
-          "id": "adaptive-desktop:a:71",
+          "id": "adaptive-desktop:a:73",
           "screen": "adaptive-desktop",
           "label": "حساب",
           "tag": "a",
           "disabled": false,
           "x": 1404,
-          "y": 4436,
+          "y": 5866,
           "width": 89,
           "height": 48,
           "right": 1492,
-          "bottom": 4484
+          "bottom": 5914
         },
         {
-          "id": "adaptive-desktop:button:72",
+          "id": "adaptive-desktop:button:74",
           "screen": "adaptive-desktop",
           "label": "اعلان‌ها",
           "tag": "button",
           "disabled": false,
           "x": 1211,
-          "y": 4438,
+          "y": 5868,
           "width": 44,
           "height": 44,
           "right": 1255,
-          "bottom": 4482
+          "bottom": 5912
         }
       ]
     },
     "ctas": {
-      "count": 5,
+      "count": 6,
       "minimumHeight": 48,
       "violations": [],
       "items": [
@@ -1499,43 +1540,56 @@
           "bottom": 2989
         },
         {
-          "id": "state-error:button:2",
+          "id": "state-accountant:a:2",
+          "screen": "state-accountant",
+          "label": "مشاهده مشتریان",
+          "tag": "a",
+          "disabled": false,
+          "x": 1012,
+          "y": 2982,
+          "width": 376,
+          "height": 48,
+          "right": 1388,
+          "bottom": 3030
+        },
+        {
+          "id": "state-error:button:3",
           "screen": "state-error",
           "label": "تلاش دوباره",
           "tag": "button",
           "disabled": false,
-          "x": 1465,
-          "y": 3050,
-          "width": 338,
+          "x": 607,
+          "y": 4146,
+          "width": 318,
           "height": 48,
-          "right": 1803,
-          "bottom": 3098
+          "right": 925,
+          "bottom": 4194
         },
         {
-          "id": "security-session-modal:button:3",
+          "id": "security-session-modal:button:4",
           "screen": "security-session-modal",
           "label": "رد",
           "tag": "button",
           "disabled": false,
           "x": 1205,
-          "y": 3941,
+          "y": 5371,
           "width": 153,
           "height": 48,
           "right": 1357,
-          "bottom": 3989
+          "bottom": 5419
         },
         {
-          "id": "security-session-modal:button:4",
+          "id": "security-session-modal:button:5",
           "screen": "security-session-modal",
           "label": "تأیید",
           "tag": "button",
           "disabled": false,
           "x": 1043,
-          "y": 3941,
+          "y": 5371,
           "width": 153,
           "height": 48,
           "right": 1196,
-          "bottom": 3989
+          "bottom": 5419
         }
       ]
     },
@@ -1907,11 +1961,11 @@
           "tag": "button",
           "disabled": false,
           "x": 1205,
-          "y": 3941,
+          "y": 5371,
           "width": 153,
           "height": 48,
           "right": 1357,
-          "bottom": 3989
+          "bottom": 5419
         },
         {
           "id": "security-session-modal:button:1",
@@ -1920,11 +1974,11 @@
           "tag": "button",
           "disabled": false,
           "x": 1043,
-          "y": 3941,
+          "y": 5371,
           "width": 153,
           "height": 48,
           "right": 1196,
-          "bottom": 3989
+          "bottom": 5419
         }
       ],
       "notificationCount": 1,
@@ -1935,11 +1989,11 @@
     },
     "desktop": {
       "x": 915,
-      "y": 4416,
+      "y": 5846,
       "width": 1440,
       "height": 900,
       "right": 2355,
-      "bottom": 5316,
+      "bottom": 6746,
       "navigationCount": 1,
       "identityCount": 1,
       "notificationCount": 1,
@@ -2015,10 +2069,24 @@
         "protectedMarketSlotCount": 0,
         "disabledActionCount": 0
       },
+      "accountant": {
+        "pageTitleCount": 1,
+        "pageTitle": "خانه",
+        "actionTitleCount": 1,
+        "actionTitle": "مشتریان",
+        "customerActionCount": 1,
+        "customerActionLabel": "مشاهده مشتریان",
+        "protectedMarketSlotCount": 0
+      },
       "loading": {
+        "fullShellCount": 1,
+        "neutralShellCount": 1,
         "permissionDestinationCount": 0
       },
       "error": {
+        "fullShellCount": 1,
+        "neutralShellCount": 1,
+        "title": "دریافت اطلاعات خانه انجام نشد",
         "permissionDestinationCount": 0,
         "presumedCauseTerms": []
       },
@@ -2029,6 +2097,7 @@
       },
       "stale": {
         "connectionSignalCount": 1,
+        "freshnessTodayCount": 1,
         "disabledActionCount": 0,
         "stateBadgeCount": 0
       },
@@ -2069,12 +2138,12 @@
     {
       "id": "touch-targets-44",
       "passed": true,
-      "detail": "minimum 44×44px across 73"
+      "detail": "minimum 44×44px across 75"
     },
     {
       "id": "cta-height-48",
       "passed": true,
-      "detail": "minimum 48px across 5"
+      "detail": "minimum 48px across 6"
     },
     {
       "id": "navigation-label-font-11",
@@ -2095,6 +2164,11 @@
       "id": "accountant-market-omitted",
       "passed": true,
       "detail": "home, messenger, operations, account"
+    },
+    {
+      "id": "accountant-and-permission-state-contracts",
+      "passed": true,
+      "detail": "accountant title/action explicit; loading/error are full permission-neutral shells"
     },
     {
       "id": "security-modal-decision-complete",
@@ -2129,12 +2203,12 @@
     {
       "id": "draft-state-blockers-resolved",
       "passed": true,
-      "detail": "canonical account follow-up; loading/error neutral; offline/stale single-signal; no future retry promise"
+      "detail": "canonical account follow-up; loading/error neutral; offline/stale single-signal with complete freshness; no future retry promise"
     }
   ],
   "summary": {
     "passed": true,
-    "assertionCount": 18,
+    "assertionCount": 19,
     "failureCount": 0,
     "pageErrorCount": 0
   },
