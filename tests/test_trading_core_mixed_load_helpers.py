@@ -1453,6 +1453,8 @@ class TradingCoreMixedLoadHelperTests(unittest.TestCase):
             telegram_link_token_ids=[],
             telegram_admin_broadcast_ids=[],
             telegram_admin_broadcast_receipt_ids=[],
+            telegram_notification_outbox_ids=[80, 81],
+            telegram_delivery_job_ids=[90, 91],
             push_subscription_ids=[],
             offer_ids=[10],
             offer_public_ids=["ofr_10"],
@@ -1471,6 +1473,8 @@ class TradingCoreMixedLoadHelperTests(unittest.TestCase):
         self.assertEqual(report["planned_counts"]["offer_requests"], 2)
         self.assertEqual(report["planned_counts"]["offer_publication_states"], 2)
         self.assertEqual(report["planned_counts"]["user_blocks"], 1)
+        self.assertEqual(report["planned_counts"]["telegram_notification_outbox"], 2)
+        self.assertEqual(report["planned_counts"]["telegram_delivery_jobs"], 2)
         self.assertEqual(report["planned_ids"]["offer_public_ids"], ["ofr_10"])
         self.assertEqual(report["deleted_offer_requests"], 0)
         self.assertEqual(report["deleted_publication_states"], 0)
@@ -1496,6 +1500,23 @@ class TradingCoreMixedLoadHelperTests(unittest.TestCase):
         self.assertIn(late_chat_member_delete, source)
         self.assertLess(source.index(user_lock), source.index(late_chat_member_delete))
         self.assertLess(source.index(late_chat_member_delete), source.index(user_delete))
+
+    def test_cleanup_deletes_synthetic_notification_outbox_before_jobs_and_users(self):
+        source = inspect.getsource(worker.delete_cleanup_plan)
+
+        outbox_delete = "delete_in_batches(\n            db,\n            TelegramNotificationOutbox"
+        job_delete = "delete_in_batches(\n            db,\n            TelegramDeliveryJobRecord"
+        user_delete = "delete_in_batches(db, User, User.id, plan.user_ids)"
+        change_log_clause = (
+            "table_name = 'telegram_notification_outbox' AND "
+            "record_id = ANY(:telegram_notification_outbox_ids)"
+        )
+
+        self.assertIn(outbox_delete, source)
+        self.assertIn(job_delete, source)
+        self.assertIn(change_log_clause, source)
+        self.assertLess(source.index(outbox_delete), source.index(job_delete))
+        self.assertLess(source.index(job_delete), source.index(user_delete))
 
     def test_cleanup_tracks_user_blocks_before_deleting_users_and_change_logs(self):
         source = inspect.getsource(worker.delete_cleanup_plan)

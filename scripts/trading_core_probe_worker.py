@@ -95,6 +95,8 @@ from models.session import (
 )
 from models.telegram_link_token import TelegramLinkToken
 from models.telegram_admin_broadcast import TelegramAdminBroadcast, TelegramAdminBroadcastReceipt
+from models.telegram_delivery_job import TelegramDeliveryJobRecord
+from models.telegram_notification_outbox import TelegramNotificationOutbox
 from models.trade import Trade, TradeStatus, TradeType
 from models.trade_delivery_receipt import TradeDeliveryReceipt
 from models.user import User, UserRole
@@ -309,6 +311,8 @@ class CleanupPlan:
     trade_delivery_receipt_ids: list[int]
     telegram_admin_broadcast_ids: list[int]
     telegram_admin_broadcast_receipt_ids: list[int]
+    telegram_notification_outbox_ids: list[int]
+    telegram_delivery_job_ids: list[int]
     offer_request_ids: list[int]
     publication_state_ids: list[int]
     notification_ids: list[int]
@@ -1303,6 +1307,8 @@ def cleanup_plan_counts(plan: CleanupPlan) -> dict[str, int]:
         "trade_delivery_receipts": len(plan.trade_delivery_receipt_ids),
         "telegram_admin_broadcasts": len(plan.telegram_admin_broadcast_ids),
         "telegram_admin_broadcast_receipts": len(plan.telegram_admin_broadcast_receipt_ids),
+        "telegram_notification_outbox": len(plan.telegram_notification_outbox_ids),
+        "telegram_delivery_jobs": len(plan.telegram_delivery_job_ids),
         "notifications": len(plan.notification_ids),
     }
 
@@ -1328,6 +1334,8 @@ def cleanup_report_payload(
     deleted_trade_delivery_receipts: int = 0,
     deleted_telegram_admin_broadcasts: int = 0,
     deleted_telegram_admin_broadcast_receipts: int = 0,
+    deleted_telegram_notification_outbox: int = 0,
+    deleted_telegram_delivery_jobs: int = 0,
     deleted_notifications: int = 0,
     deleted_offer_requests: int = 0,
     deleted_publication_states: int = 0,
@@ -1357,6 +1365,8 @@ def cleanup_report_payload(
         "deleted_trade_delivery_receipts": deleted_trade_delivery_receipts,
         "deleted_telegram_admin_broadcasts": deleted_telegram_admin_broadcasts,
         "deleted_telegram_admin_broadcast_receipts": deleted_telegram_admin_broadcast_receipts,
+        "deleted_telegram_notification_outbox": deleted_telegram_notification_outbox,
+        "deleted_telegram_delivery_jobs": deleted_telegram_delivery_jobs,
         "deleted_notifications": deleted_notifications,
         "deleted_offer_requests": deleted_offer_requests,
         "deleted_publication_states": deleted_publication_states,
@@ -1620,6 +1630,37 @@ async def collect_cleanup_plan(prefix: str) -> CleanupPlan:
                 (TelegramAdminBroadcastReceipt.recipient_user_id, user_ids),
             ],
         )
+        telegram_notification_outbox_ids = await collect_int_ids_by_statement_and_batched_filters(
+            db,
+            select(TelegramNotificationOutbox.id).where(
+                TelegramNotificationOutbox.dedupe_key.like(
+                    contains_pattern, escape=LIKE_ESCAPE
+                )
+                | TelegramNotificationOutbox.text.like(
+                    contains_pattern, escape=LIKE_ESCAPE
+                )
+            ),
+            TelegramNotificationOutbox.id,
+            [
+                (TelegramNotificationOutbox.recipient_user_id, user_ids),
+                (TelegramNotificationOutbox.source_id, offer_public_ids),
+            ],
+        )
+        telegram_delivery_job_ids: list[int] = []
+        for batch in cleanup_in_batches(telegram_notification_outbox_ids):
+            telegram_delivery_job_ids.extend(
+                int(item)
+                for item in (
+                    await db.execute(
+                        select(TelegramNotificationOutbox.queue_job_id).where(
+                            TelegramNotificationOutbox.id.in_(batch),
+                            TelegramNotificationOutbox.queue_job_id.is_not(None),
+                        )
+                    )
+                ).scalars().all()
+                if item is not None
+            )
+        telegram_delivery_job_ids = stable_unique(telegram_delivery_job_ids)
         notification_ids = await collect_int_ids_by_statement_and_batched_filters(
             db,
             select(Notification.id).where(
@@ -1658,6 +1699,8 @@ async def collect_cleanup_plan(prefix: str) -> CleanupPlan:
         trade_delivery_receipt_ids=trade_delivery_receipt_ids,
         telegram_admin_broadcast_ids=telegram_admin_broadcast_ids,
         telegram_admin_broadcast_receipt_ids=telegram_admin_broadcast_receipt_ids,
+        telegram_notification_outbox_ids=telegram_notification_outbox_ids,
+        telegram_delivery_job_ids=telegram_delivery_job_ids,
         offer_request_ids=offer_request_ids,
         publication_state_ids=publication_state_ids,
         notification_ids=notification_ids,
@@ -2021,6 +2064,8 @@ async def delete_cleanup_plan(plan: CleanupPlan) -> dict[str, Any]:
         deleted_trade_delivery_receipts = 0
         deleted_telegram_admin_broadcasts = 0
         deleted_telegram_admin_broadcast_receipts = 0
+        deleted_telegram_notification_outbox = 0
+        deleted_telegram_delivery_jobs = 0
         deleted_trades = 0
         deleted_offers = 0
         deleted_users = 0
@@ -2054,6 +2099,18 @@ async def delete_cleanup_plan(plan: CleanupPlan) -> dict[str, Any]:
             TelegramAdminBroadcastReceipt,
             TelegramAdminBroadcastReceipt.id,
             plan.telegram_admin_broadcast_receipt_ids,
+        )
+        deleted_telegram_notification_outbox = await delete_in_batches(
+            db,
+            TelegramNotificationOutbox,
+            TelegramNotificationOutbox.id,
+            plan.telegram_notification_outbox_ids,
+        )
+        deleted_telegram_delivery_jobs = await delete_in_batches(
+            db,
+            TelegramDeliveryJobRecord,
+            TelegramDeliveryJobRecord.id,
+            plan.telegram_delivery_job_ids,
         )
         deleted_notifications = await delete_in_batches(db, Notification, Notification.id, plan.notification_ids)
         deleted_telegram_admin_broadcasts = await delete_in_batches(
@@ -2095,6 +2152,7 @@ async def delete_cleanup_plan(plan: CleanupPlan) -> dict[str, Any]:
                        OR (table_name = 'trade_delivery_receipts' AND record_id = ANY(:trade_delivery_receipt_ids))
                        OR (table_name = 'telegram_admin_broadcasts' AND record_id = ANY(:telegram_admin_broadcast_ids))
                        OR (table_name = 'telegram_admin_broadcast_receipts' AND record_id = ANY(:telegram_admin_broadcast_receipt_ids))
+                       OR (table_name = 'telegram_notification_outbox' AND record_id = ANY(:telegram_notification_outbox_ids))
                        OR (table_name = 'offer_requests' AND record_id = ANY(:offer_request_ids))
                        OR (table_name = 'offer_publication_states' AND record_id = ANY(:publication_state_ids))
                        OR (table_name = 'notifications' AND record_id = ANY(:notification_ids))
@@ -2114,6 +2172,7 @@ async def delete_cleanup_plan(plan: CleanupPlan) -> dict[str, Any]:
                 "trade_delivery_receipt_ids": plan.trade_delivery_receipt_ids or [-1],
                 "telegram_admin_broadcast_ids": plan.telegram_admin_broadcast_ids or [-1],
                 "telegram_admin_broadcast_receipt_ids": plan.telegram_admin_broadcast_receipt_ids or [-1],
+                "telegram_notification_outbox_ids": plan.telegram_notification_outbox_ids or [-1],
                 "offer_request_ids": plan.offer_request_ids or [-1],
                 "publication_state_ids": plan.publication_state_ids or [-1],
                 "notification_ids": plan.notification_ids or [-1],
@@ -2144,6 +2203,8 @@ async def delete_cleanup_plan(plan: CleanupPlan) -> dict[str, Any]:
         deleted_trade_delivery_receipts=deleted_trade_delivery_receipts,
         deleted_telegram_admin_broadcasts=deleted_telegram_admin_broadcasts,
         deleted_telegram_admin_broadcast_receipts=deleted_telegram_admin_broadcast_receipts,
+        deleted_telegram_notification_outbox=deleted_telegram_notification_outbox,
+        deleted_telegram_delivery_jobs=deleted_telegram_delivery_jobs,
         deleted_notifications=deleted_notifications,
         deleted_offer_requests=deleted_offer_requests,
         deleted_publication_states=deleted_publication_states,
