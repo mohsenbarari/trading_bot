@@ -9,6 +9,7 @@ import glob
 import hmac
 import html
 import json
+import math
 import os
 import re
 import secrets
@@ -81,10 +82,14 @@ from telegram_price_collector.external_collectors import (  # noqa: E402
 from telegram_price_collector.models import RawPost  # noqa: E402
 from telegram_price_collector.parsers import parse_message  # noqa: E402
 from online_recalibration import (  # noqa: E402
+    COMPARISON_EVALUATION_ROLE,
+    LEARNING_EVALUATION_ROLE,
+    MAIN_COMPARISON_MODEL_ID,
     MAIN_MODEL_ID,
     apply_snapshot_calibration,
     apply_recent_realized_snapshot_calibration,
     ensure_schema as ensure_online_schema,
+    maintain_prediction_ledger,
     reconcile_predictions,
     record_predictions,
     summarize_model_outcomes,
@@ -2165,6 +2170,90 @@ def _shadow_panel_html(
     """
 
 
+MODEL_OUTCOME_LABELS = {
+    MAIN_COMPARISON_MODEL_ID: "مدل اصلی",
+    "SHADOW1_PREVIOUS": "سایه ۱ — مدل قبلی",
+    "SHADOW2_MORNING_REOPEN": "سایه ۲ — بازگشایی صبح",
+    "SHADOW3_ML_RESIDUAL": "سایه ۳ — یادگیری ماشین",
+}
+
+
+def render_model_outcome_panel(live_state: dict[str, Any]) -> str:
+    """Render accuracy against realised trades — the only promotion evidence."""
+
+    learning = (
+        live_state.get("online_residual_learning")
+        if isinstance(live_state, dict)
+        else None
+    )
+    outcomes = (
+        learning.get("model_outcomes") if isinstance(learning, dict) else None
+    )
+    if not isinstance(outcomes, dict) or not outcomes:
+        body = (
+            "<tr><td colspan='6'>هنوز هیچ پیش‌بینی‌ای به معاملهٔ واقعی متصل نشده "
+            "است. تا انباشت داده، مقایسهٔ معتبر در دسترس نیست.</td></tr>"
+        )
+        footnote = ""
+    else:
+        rows = []
+        legacy = 0
+        for model_id in sorted(outcomes):
+            entry = outcomes[model_id]
+            if not isinstance(entry, dict):
+                continue
+            legacy += int(entry.get("capped_only_sample_count") or 0)
+            label = MODEL_OUTCOME_LABELS.get(model_id, model_id)
+            rows.append(
+                "<tr>"
+                f"<td>{html.escape(label)}</td>"
+                f"<td class='rate-cell'>{fa_number(entry.get('sample_count'))}</td>"
+                f"<td class='rate-cell'>{fa_number(round(float(entry.get('mape_percent') or 0.0), 3))}٪</td>"
+                f"<td class='rate-cell'>{fa_number(round(float(entry.get('bias_percent') or 0.0), 3))}٪</td>"
+                f"<td class='rate-cell'>{fa_number(round(float(entry.get('worst_abs_error_percent') or 0.0), 3))}٪</td>"
+                f"<td class='rate-cell'>{fa_number(round(float(entry.get('interval_coverage_percent') or 0.0), 1))}٪</td>"
+                "</tr>"
+            )
+        body = "".join(rows)
+        footnote = (
+            "<p class='shadow-path'>بخشی از ردیف‌ها پیش از افزودن ستون خطای خام "
+            "ارزیابی شده‌اند و خطایشان در سقف ۳٫۵٪ محدود مانده؛ میانگین این "
+            "مدل‌ها کمتر از واقعیت است.</p>"
+            if legacy
+            else ""
+        )
+    return f"""
+    <section class="shadow-panel" style="border-color:rgba(16,185,129,0.55)">
+      <div class="section-head">
+        <div>
+          <h2>دقت واقعی در برابر معاملهٔ انجام‌شده</h2>
+          <p class="shadow-subtitle">تنها معیار معتبر برای ارتقای یک سایه</p>
+        </div>
+        <span class="badge">۷ روز گذشته</span>
+      </div>
+      <div class="table-wrap">
+        <table class="compare-table">
+          <thead>
+            <tr>
+              <th>مدل</th>
+              <th>تعداد ارزیابی</th>
+              <th>میانگین خطای مطلق</th>
+              <th>سوگیری</th>
+              <th>بدترین خطا</th>
+              <th>پوشش بازه</th>
+            </tr>
+          </thead>
+          <tbody>{body}</tbody>
+        </table>
+      </div>
+      <p class="shadow-path">هر چهار کتاب با همان معاملهٔ واقعی سنجیده می‌شوند.
+      سوگیری منفی یعنی مدل به‌طور سیستماتیک پایین‌تر از بازار تخمین زده است.
+      پوشش بازه باید نزدیک ۸۰٪ باشد؛ کمتر یعنی بازه‌ها بیش از حد باریک‌اند.</p>
+      {footnote}
+    </section>
+    """
+
+
 def render_shadow_page(
     live_state: dict[str, Any],
     *,
@@ -2241,7 +2330,12 @@ def render_shadow_page(
         </table>
       </div>
       <p class="shadow-path">اختلاف = (سایه − اصلی) ÷ اصلی · علامت مثبت یعنی سایه بالاتر از اصلی است.</p>
+      <p class="shadow-path"><strong>این ستون معیار دقت نیست.</strong> فقط واگرایی از کتاب
+      اصلیِ کالیبره‌شده را نشان می‌دهد؛ اگر مدل اصلی خطا داشته باشد، سایهٔ دقیق‌تر
+      «اختلاف بیشتر» نشان می‌دهد. تنها معیار معتبر برای ارتقا، ارزیابی هر مدل در
+      برابر معاملهٔ واقعی است که در جدول زیر می‌آید.</p>
     </section>
+    {render_model_outcome_panel(live_state if isinstance(live_state, dict) else {})}
     """
     if estimate_fragment:
         return f"""
@@ -4685,39 +4779,107 @@ def refresh_estimate(
         )
     if (not light) and estimate["shadow_cross_calibration"].get("applied_count"):
         finalization = finalize_deterministic_book(estimate)
-    # Persist all four books only after their final, published-equivalent
-    # deterministic state is known.  Each model receives the same later truth
-    # during reconciliation; only MAIN_ONLINE updates the live residual state.
-    prediction_books = (
-        (MAIN_MODEL_ID, str(model.get("model_kind") or "MAIN"), estimate),
+    # MAIN_ONLINE keeps its 30-second learning cadence.  Accuracy is a separate
+    # cohort: the same final main book plus all three challengers are recorded
+    # only when all four exist, at one exact timestamp.  This prevents a later
+    # trade from scoring a 30-second main forecast against a two-minute shadow
+    # forecast and calling that a fair comparison.
+    comparison_books = (
+        (MAIN_COMPARISON_MODEL_ID, str(model.get("model_kind") or "MAIN"), estimate),
         ("SHADOW1_PREVIOUS", str(shadow_meta.get("shadow_model_kind") or "UNKNOWN"), shadow_meta.get("estimate")),
         ("SHADOW2_MORNING_REOPEN", str(research_meta.get("shadow_model_kind") or "UNKNOWN"), research_meta.get("estimate")),
         ("SHADOW3_ML_RESIDUAL", str(ml_meta.get("shadow_version") or "UNKNOWN"), ml_meta.get("estimate")),
     )
+    comparison_ready = all(isinstance(book, dict) for _, _, book in comparison_books)
+    comparison_commodities: dict[str, set[str]] = {}
+    if comparison_ready:
+        settlement_sets = [
+            set((book.get("settlements") or {}).keys())
+            for _, _, book in comparison_books
+            if isinstance(book, dict)
+        ]
+        shared_settlements = set.intersection(*settlement_sets) if settlement_sets else set()
+        for settlement in shared_settlements:
+            book_commodities: list[set[str]] = []
+            for _, _, book in comparison_books:
+                payload = (book.get("settlements") or {}).get(settlement, {})
+                names: set[str] = set()
+                for rate in payload.get("rates", []) if isinstance(payload, dict) else []:
+                    if not isinstance(rate, dict):
+                        continue
+                    try:
+                        value = float(rate.get("estimated_price_toman"))
+                    except (TypeError, ValueError):
+                        continue
+                    name = str(rate.get("commodity_name") or "")
+                    if name and math.isfinite(value) and value > 0:
+                        names.add(name)
+                book_commodities.append(names)
+            comparison_commodities[str(settlement)] = (
+                set.intersection(*book_commodities) if book_commodities else set()
+            )
+    prediction_books = [
+        (
+            MAIN_MODEL_ID,
+            str(model.get("model_kind") or "MAIN"),
+            estimate,
+            LEARNING_EVALUATION_ROLE,
+            None,
+        )
+    ]
+    if comparison_ready:
+        prediction_books.extend(
+            (
+                model_id,
+                model_version,
+                book,
+                COMPARISON_EVALUATION_ROLE,
+                effective_end,
+            )
+            for model_id, model_version, book in comparison_books
+        )
     calibration_connection = sqlite3.connect(conversation_db)
     calibration_connection.row_factory = sqlite3.Row
     try:
         ensure_online_schema(calibration_connection)
         predictions_recorded = 0
         predictions_by_model: dict[str, int] = {}
-        for model_id, model_version, book in prediction_books:
+        for model_id, model_version, book, evaluation_role, comparison_cohort in prediction_books:
             if not isinstance(book, dict):
                 continue
             count = 0
             for settlement, payload in (book.get("settlements") or {}).items():
                 if not isinstance(payload, dict):
                     continue
+                rates = list(payload.get("rates", []))
+                if evaluation_role == COMPARISON_EVALUATION_ROLE:
+                    shared = comparison_commodities.get(str(settlement), set())
+                    rates = [
+                        rate
+                        for rate in rates
+                        if isinstance(rate, dict)
+                        and str(rate.get("commodity_name") or "") in shared
+                    ]
                 count += record_predictions(
                     calibration_connection,
                     prediction_time=effective_end,
                     settlement=str(settlement),
-                    rates=list(payload.get("rates", [])),
+                    rates=rates,
                     group_live_enabled=enabled,
                     model_id=model_id,
                     model_version=model_version,
+                    evaluation_role=evaluation_role,
+                    comparison_cohort=comparison_cohort,
                 )
             predictions_by_model[model_id] = count
             predictions_recorded += count
+        # One learning book plus four comparison books write where one used to.
+        # Bounding the ledger cannot wait
+        # for an operator to remember a CLI, so maintenance runs here — but at
+        # most hourly, so the refresh path stays free.
+        ledger_maintenance = maintain_prediction_ledger(
+            calibration_connection, as_of=effective_end
+        )
         calibration_connection.commit()
     except Exception:
         calibration_connection.rollback()
@@ -4727,11 +4889,16 @@ def refresh_estimate(
     estimate["online_residual_learning"] = {
         "mode": "BOUNDED_ONLINE_RESIDUAL_CALIBRATION",
         "reconciliation": reconciliation,
+        # Accuracy against later realised trades.  This is the only promotion
+        # evidence; the per-shadow ``comparison_vs_live`` block is divergence
+        # from the main book, not a quality score.
         "model_outcomes": outcome_metrics,
         "calibration": online_metadata,
         "recent_realized_calibration": recent_realized_metadata,
         "predictions_recorded": predictions_recorded,
         "predictions_by_model": predictions_by_model,
+        "comparison_cohort_ready": comparison_ready,
+        "ledger_maintenance": ledger_maintenance,
         "automatic_model_weight_promotion": False,
         "deterministic_finalization": finalization,
     }

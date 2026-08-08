@@ -48,6 +48,12 @@ from morning_reopen import (  # noqa: E402
     select_reopen_cash_tomorrow_ratio,
     widen_tolerance,
 )
+from online_recalibration import (  # noqa: E402
+    LEDGER_OUTCOME_RETENTION_DAYS,
+    LEDGER_UNMATCHED_RETENTION_DAYS,
+    ensure_schema as ensure_online_schema,
+    prune_prediction_ledger,
+)
 
 
 RUNTIME_ROOT = Path(
@@ -6651,6 +6657,31 @@ def build_parser() -> argparse.ArgumentParser:
     )
     estimate_parser.add_argument("--end", help="UTC ISO timestamp; defaults to latest event minute")
     estimate_parser.add_argument("--output", type=Path)
+
+    ledger_parser = subparsers.add_parser(
+        "ledger",
+        help="Inspect or prune the multi-model prediction ledger.",
+    )
+    ledger_parser.add_argument(
+        "--conversation-db", type=Path, default=DEFAULT_CONVERSATION_DB
+    )
+    ledger_parser.add_argument(
+        "--outcome-retention-days",
+        type=int,
+        default=LEDGER_OUTCOME_RETENTION_DAYS,
+        help="Keep rows that matched a real trade for this long (training corpus).",
+    )
+    ledger_parser.add_argument(
+        "--unmatched-retention-days",
+        type=int,
+        default=LEDGER_UNMATCHED_RETENTION_DAYS,
+        help="Keep rows no trade ever arrived for this long; they carry no label.",
+    )
+    ledger_parser.add_argument(
+        "--prune",
+        action="store_true",
+        help="Actually expire and delete; without this flag the command only reports.",
+    )
     return parser
 
 
@@ -6704,6 +6735,27 @@ def main() -> int:
                 indent=2,
             )
         )
+        return 0
+
+    if args.command == "ledger":
+        connection = sqlite3.connect(args.conversation_db)
+        connection.row_factory = sqlite3.Row
+        try:
+            ensure_online_schema(connection)
+            report = prune_prediction_ledger(
+                connection,
+                as_of=datetime.now(timezone.utc),
+                outcome_retention_days=args.outcome_retention_days,
+                unmatched_retention_days=args.unmatched_retention_days,
+                dry_run=not args.prune,
+            )
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
+        print(json.dumps(report, ensure_ascii=False, indent=2))
         return 0
 
     model = load_model(args.model)
