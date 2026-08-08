@@ -1,12 +1,14 @@
 # Stage 0B-1 validation evidence
 
-تاریخ: ۲۰۲۶-۰۷-۱۸
+تاریخ ایجاد: ۲۰۲۶-۰۷-۱۸
+
+آخرین بازتولید: ۲۰۲۶-۰۸-۰۸، پس از اعمال سیاست خلوتی هدفمند
 
 دامنه: artifactهای design-only ورود، دعوت، ثبت‌نام، recovery و تنظیم رمز؛ بدون تغییر runtime محصول
 
 ## وضعیت این سند
 
-capture اصلاح‌شده پس از رسیدگی به یافته‌های دور دوم اجرا شد. نتیجه‌های زیر مستقیماً از `assets/stage0b-auth-validation-metrics.json` با schema نسخه `4` و زمان تولید `2026-07-18T19:01:34.748Z` خوانده شده‌اند.
+capture پس از رسیدگی به یافته‌های دور دوم و اصلاح محتوای همیشه‌نمایان اجرا شد. نتیجه‌های زیر مستقیماً از `assets/stage0b-auth-validation-metrics.json` با schema نسخه `4` و زمان تولید `2026-08-08T05:24:51.369Z` خوانده شده‌اند.
 
 ## دستور بازتولید
 
@@ -44,8 +46,8 @@ node docs/uiux-stage0b-auth/capture-prototype.cjs
 
 نتیجه render جدید:
 
-- کمترین slack طبیعی در عرض ۳۹۰: `116px`؛ قاب دارای slack منفی: صفر.
-- حداقل slack به‌ترتیب در عرض‌های ۳۶۰، ۳۷۵، ۳۹۰، ۴۱۴ و ۴۳۰: `95px`، `95px`، `116px`، `116px` و `116px`؛ قاب نامتناسب در همه عرض‌ها: صفر.
+- کمترین slack طبیعی در عرض ۳۹۰: `212px`؛ قاب دارای slack منفی: صفر.
+- حداقل slack در هر پنج عرض ۳۶۰، ۳۷۵، ۳۹۰، ۴۱۴ و ۴۳۰ برابر `212px` است؛ قاب نامتناسب در همه عرض‌ها: صفر.
 - عرض دارای horizontal overflow: صفر.
 
 این اندازه‌گیری بر محتوای normal-flow قاب‌های فعلی تکیه دارد. descendantهای `absolute` یا `fixed` که در ارتفاع طبیعی containing block مشارکت نمی‌کنند می‌توانند از این روش عبور کنند؛ بنابراین پیاده‌سازی باید علاوه بر این sweep، bounding/viewport assertion مخصوص محتوای out-of-flow داشته باشد یا آن را در این خانواده ممنوع کند.
@@ -67,7 +69,7 @@ JSON موارد زیر را جداگانه گزارش می‌کند:
 
 نتیجه render جدید:
 
-- تعداد اهداف semantic/actionable در عرض مرجع: `41`؛ کمینه `49 × 44` پیکسل.
+- تعداد اهداف semantic/actionable در عرض مرجع: `39`؛ کمینه `49 × 44` پیکسل.
 - اهداف زیر ۴۴ پیکسل: صفر.
 - اهداف actionable بدون marker: صفر.
 - تعداد دکمه‌های CTA اندازه‌گیری‌شده، شامل variantهای primary، secondary، danger و ghost: `20`؛ کمینه ارتفاع `48px` و مورد زیر آستانه: صفر.
@@ -75,9 +77,9 @@ JSON موارد زیر را جداگانه گزارش می‌کند:
 
 ## پیمایش فوکوس و نام‌گذاری تزئینات
 
-پس از render، اسکریپت یک پیمایش مصنوعی `Tab` روی همه کنترل‌های قابل‌مشاهده و فعال artifact انجام می‌دهد. این پیمایش وجود `:focus-visible`، outline پیوسته با ضخامت حداقل `3px`، تطابق رنگ محاسبه‌شده هر outline با token آزموده‌شده `--focus-ring` و کامل‌بودن چرخه را ثبت می‌کند. دو CTA غیرفعال عمداً از شمار focusable کنار گذاشته می‌شوند؛ در نتیجه `39` کنترل مورد انتظار و هر `39` کنترل بازدید شدند، رنگ محاسبه‌شده همه `rgb(31, 94, 216)`، کمینه ضخامت outline برابر `3px` و failure صفر بود.
+پس از render، اسکریپت یک پیمایش مصنوعی `Tab` روی همه کنترل‌های قابل‌مشاهده و فعال artifact انجام می‌دهد. این پیمایش وجود `:focus-visible`، outline پیوسته با ضخامت حداقل `3px`، تطابق رنگ محاسبه‌شده هر outline با token آزموده‌شده `--focus-ring` و کامل‌بودن چرخه را ثبت می‌کند. دو CTA غیرفعال عمداً از شمار focusable کنار گذاشته می‌شوند؛ در نتیجه `37` کنترل مورد انتظار و هر `37` کنترل بازدید شدند، رنگ محاسبه‌شده همه `rgb(31, 94, 216)`، کمینه ضخامت outline برابر `3px` و failure صفر بود.
 
-شش glyph تزئینی picker و ۱۴ marker تزئینی notice نیز از نظر source بررسی شدند. همه با `aria-hidden="true"` از نام دسترس‌پذیر کنار گذاشته شده‌اند و pickerها `aria-label` صریح و بدون glyph دارند؛ exposed decorative count صفر است. این source audit و Tab sweep مربوط به artifact ثابت است و جای accessibility-tree، screen-reader یا runtime WebView test را نمی‌گیرد.
+شش glyph تزئینی picker و سه marker تزئینی notice نیز از نظر source بررسی شدند. همه با `aria-hidden="true"` از نام دسترس‌پذیر کنار گذاشته شده‌اند و pickerها `aria-label` صریح و بدون glyph دارند؛ exposed decorative count صفر است. این source audit و Tab sweep مربوط به artifact ثابت است و جای accessibility-tree، screen-reader یا runtime WebView test را نمی‌گیرد.
 
 ## اثبات بارگذاری فونت
 
@@ -103,6 +105,17 @@ capture اکنون ۱۴ جفت consequential را با threshold متناسب ب
 
 همه PNGها و metrics ابتدا در یک sibling staging directory تولید می‌شوند. فقط پس از عبور همه assertionهای تعداد و ابعاد قاب‌ها، fit طبیعی در هر پنج عرض، نبود horizontal overflow، حداقل ۴۴ پیکسل برای همه اهداف، marker صریح اهداف، حداقل ۴۸ پیکسل برای CTA، پیمایش کامل فوکوس، semantics تزئینات، بارگذاری فونت و کنتراست scoped، کل مجموعه با directory promotion جایگزین assets قبلی می‌شود. بنابراین اجرای ناموفق، نسل تازه و ناقصی از PNGها را کنار metrics قدیمی باقی نمی‌گذارد.
 
+## ممیزی ضرورت محتوا
+
+fit، overflow، contrast و touch target فقط کیفیت رندر و تعامل artifact را می‌سنجند؛ هیچ‌کدام ثابت نمی‌کنند اطلاعات برای کاربر مفید است. ممیزی دستی مستقل در `CONTENT_NECESSITY_AUDIT.md` برای هر ۱۵ قاب ثبت می‌کند:
+
+- پرسش یا کار جاری کاربر؛
+- اثر هر واحد نگه‌داشته‌شده بر تصمیم، اقدام، وضعیت ضروری یا ریسک؛
+- واحدهای حذف‌شده یا منتقل‌شده به نمایش درخواستی؛
+- مرز میان annotation بازبین و UI محصول.
+
+پس از اصلاح، تعداد واحدهای همیشه‌نمایان بدون توجیه ثبت‌شده صفر است. این نتیجه یک تصمیم محتوایی قابل بازبینی است، نه assertion خودکار؛ بازبین انسانی باید آن را مستقل از metrics فنی راستی‌آزمایی کند.
+
 ## تست قرارداد رفتاری موجود
 
 rerun پس از اصلاح artifact:
@@ -112,7 +125,7 @@ LoginView + InviteLanding + WebRegister + SetupPassword
 48 passed, 0 failures, 0 errors
 ```
 
-JUnit خام آخرین rerun در `/tmp/stage0b-auth-unit-tests-r3.xml` قرار دارد: InviteLanding برابر ۸، LoginView برابر ۳۰، SetupPassword برابر ۴ و WebRegister برابر ۶ تست؛ skipped نیز صفر است. این عدد فقط قرارداد runtime موجود را پوشش می‌دهد و صحت HTML/prototype جدید را ثابت نمی‌کند.
+JUnit خام آخرین rerun در `/tmp/stage0b-auth-unit-tests-minimalism.xml` قرار دارد: InviteLanding برابر ۸، LoginView برابر ۳۰، SetupPassword برابر ۴ و WebRegister برابر ۶ تست؛ skipped نیز صفر است. این عدد فقط قرارداد runtime موجود را پوشش می‌دهد و صحت HTML/prototype جدید را ثابت نمی‌کند.
 
 ## مرز شواهد
 

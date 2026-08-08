@@ -164,7 +164,26 @@ The canonical and supplemental reports count as one Pro role, but every independ
 
 ## Round-two remediation evidence
 
-The schema-4 capture generated all PNGs and metrics in a sibling staging directory and promoted them together only after every hard assertion passed. It records 15 full scenario captures, 41 atlas states, 41 semantic/actionable controls with zero below 44px, 20 CTA buttons with zero below 48px, `39/39` synthetic focus traversal, zero exposed decorative markers, 14 passing scoped contrast pairs, no horizontal overflow, and natural-fit minima of `95/95/116/116/116px` at 360/375/390/414/430px. The out-of-flow, real-keyboard, zoom/font-scaling, screen-reader, and runtime boundaries remain explicit in `VALIDATION.md`.
+At snapshot `b2fe9a0e`, the schema-4 capture generated all PNGs and metrics in a sibling staging directory and promoted them together only after every hard assertion passed. It records 15 full scenario captures, 41 atlas states, 41 semantic/actionable controls with zero below 44px, 20 CTA buttons with zero below 48px, `39/39` synthetic focus traversal, zero exposed decorative markers, 14 passing scoped contrast pairs, no horizontal overflow, and natural-fit minima of `95/95/116/116/116px` at 360/375/390/414/430px. These values are historical evidence for that snapshot and are superseded by the post-amendment capture recorded in `VALIDATION.md`. The out-of-flow, real-keyboard, zoom/font-scaling, screen-reader, and runtime boundaries remain explicit there.
+
+## Product-owner content-minimalism amendment — 2026-08-08
+
+This is a direct product-owner decision, not a retroactive external-review finding.
+
+| Decision ID | Authority | Disposition | Evidence-based application | Carry-forward |
+| --- | --- | --- | --- | --- |
+| `OWNER-MINIMALISM-01` | Product owner | `binding` | Every always-visible content unit must support the current decision/action, an essential state/result, or prevention of a consequential error/privacy/security risk. Relationship/tool/route counts, route/backend-source metadata, repeated summaries, obligatory surface chips, contractual footers, and content added merely to fill space are prohibited by default. Real Web-vs-Telegram choices, effective deadlines, field errors, recovery actions, password rules, and proximal privacy disclosures remain because they are consequential. | Every later Stage must provide a tracked `Keep / On demand / Remove` content inventory. Reviewers must distinguish technical fit from content relevance and report any unjustified visible unit. |
+
+Applied to Stage 0B-1:
+
+- removed the login-time PWA card and deferred its non-disruptive post-auth placement to Stage 0B-2;
+- removed all in-phone surface chips and fixed contractual footers;
+- removed duplicated status tracks/notices and internal server/route explanations;
+- reduced invitation states to validity, one effective deadline, genuine registration choices, and link-safety guidance;
+- reduced registration, recovery, Telegram-link, password, and desktop proofs while retaining consequential context and actions;
+- added `CONTENT_NECESSITY_AUDIT.md` as the tracked content-relevance evidence. Fit, touch-target, focus, semantics, font, and contrast metrics remain separate evidence and do not prove unclutteredness.
+
+The amendment materially changes the design artifact after `b2fe9a0e`. Earlier reports remain useful inputs for their reviewed snapshots but cannot approve the amended exact SHA. The next gate must again request all four named roles and must carry `OWNER-MINIMALISM-01` explicitly.
 
 ## Closure rule
 

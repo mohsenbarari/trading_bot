@@ -14,4 +14,6 @@ PNGها و metrics ابتدا در staging sibling تولید و فقط پس ا�
 
 روش، اعداد و مرز ادعاها در `VALIDATION.md` و disposition بازبینی‌های خارجی در `EXTERNAL_REVIEW_FINDINGS.md` ثبت شده‌اند.
 
+قضاوت خلوتی و ارزش اطلاعات با `CONTENT_NECESSITY_AUDIT.md` انجام می‌شود. metrics فنی مانند fit و نبود overflow نمی‌توانند مفیدبودن محتوا را ثابت کنند.
+
 بازار و پیام‌رسان در این artifact حضور ندارند و بررسی نشده‌اند.

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 4,
-  "generatedAt": "2026-07-18T19:01:34.748Z",
+  "generatedAt": "2026-08-08T05:24:51.369Z",
   "authoringWidth": 390,
   "captureSemantics": {
     "phoneElement": "The mock device element itself; expected outer dimensions are 390x844 at the authoring width.",
@@ -356,158 +356,158 @@
   "screensAtAuthoringWidth": [
     {
       "id": "auth-login-mobile",
-      "availableHeight": 680,
-      "naturalHeight": 481,
-      "slack": 199,
+      "availableHeight": 728,
+      "naturalHeight": 343,
+      "slack": 385,
       "naturalContentClipped": false,
-      "renderedClientHeight": 680,
-      "renderedScrollHeight": 680,
+      "renderedClientHeight": 728,
+      "renderedScrollHeight": 728,
       "renderedOverflowDetected": false
     },
     {
       "id": "auth-login-otp",
-      "availableHeight": 680,
-      "naturalHeight": 546,
-      "slack": 134,
+      "availableHeight": 728,
+      "naturalHeight": 402,
+      "slack": 326,
       "naturalContentClipped": false,
-      "renderedClientHeight": 680,
-      "renderedScrollHeight": 680,
+      "renderedClientHeight": 728,
+      "renderedScrollHeight": 728,
       "renderedOverflowDetected": false
     },
     {
       "id": "auth-device-approval",
-      "availableHeight": 680,
-      "naturalHeight": 456,
-      "slack": 224,
+      "availableHeight": 728,
+      "naturalHeight": 365,
+      "slack": 363,
       "naturalContentClipped": false,
-      "renderedClientHeight": 680,
-      "renderedScrollHeight": 680,
+      "renderedClientHeight": 728,
+      "renderedScrollHeight": 728,
       "renderedOverflowDetected": false
     },
     {
       "id": "auth-recovery-unavailable",
-      "availableHeight": 680,
-      "naturalHeight": 471,
-      "slack": 209,
+      "availableHeight": 728,
+      "naturalHeight": 275,
+      "slack": 453,
       "naturalContentClipped": false,
-      "renderedClientHeight": 680,
-      "renderedScrollHeight": 680,
+      "renderedClientHeight": 728,
+      "renderedScrollHeight": 728,
       "renderedOverflowDetected": false
     },
     {
       "id": "auth-recovery-waiting",
-      "availableHeight": 680,
-      "naturalHeight": 500,
-      "slack": 180,
+      "availableHeight": 728,
+      "naturalHeight": 312,
+      "slack": 416,
       "naturalContentClipped": false,
-      "renderedClientHeight": 680,
-      "renderedScrollHeight": 680,
+      "renderedClientHeight": 728,
+      "renderedScrollHeight": 728,
       "renderedOverflowDetected": false
     },
     {
       "id": "auth-invite-valid",
-      "availableHeight": 680,
-      "naturalHeight": 498,
-      "slack": 182,
+      "availableHeight": 728,
+      "naturalHeight": 295,
+      "slack": 433,
       "naturalContentClipped": false,
-      "renderedClientHeight": 680,
-      "renderedScrollHeight": 680,
+      "renderedClientHeight": 728,
+      "renderedScrollHeight": 728,
       "renderedOverflowDetected": false
     },
     {
       "id": "auth-invite-web-only",
-      "availableHeight": 680,
-      "naturalHeight": 382,
-      "slack": 298,
+      "availableHeight": 728,
+      "naturalHeight": 212,
+      "slack": 516,
       "naturalContentClipped": false,
-      "renderedClientHeight": 680,
-      "renderedScrollHeight": 680,
+      "renderedClientHeight": 728,
+      "renderedScrollHeight": 728,
       "renderedOverflowDetected": false
     },
     {
       "id": "auth-register-review",
-      "availableHeight": 680,
-      "naturalHeight": 484,
-      "slack": 196,
+      "availableHeight": 728,
+      "naturalHeight": 425,
+      "slack": 303,
       "naturalContentClipped": false,
-      "renderedClientHeight": 680,
-      "renderedScrollHeight": 680,
+      "renderedClientHeight": 728,
+      "renderedScrollHeight": 728,
       "renderedOverflowDetected": false
     },
     {
       "id": "auth-register-otp",
-      "availableHeight": 680,
-      "naturalHeight": 404,
-      "slack": 276,
+      "availableHeight": 728,
+      "naturalHeight": 326,
+      "slack": 402,
       "naturalContentClipped": false,
-      "renderedClientHeight": 680,
-      "renderedScrollHeight": 680,
+      "renderedClientHeight": 728,
+      "renderedScrollHeight": 728,
       "renderedOverflowDetected": false
     },
     {
       "id": "auth-register-address",
-      "availableHeight": 680,
-      "naturalHeight": 564,
-      "slack": 116,
+      "availableHeight": 728,
+      "naturalHeight": 379,
+      "slack": 349,
       "naturalContentClipped": false,
-      "renderedClientHeight": 680,
-      "renderedScrollHeight": 680,
+      "renderedClientHeight": 728,
+      "renderedScrollHeight": 728,
       "renderedOverflowDetected": false
     },
     {
       "id": "auth-register-direct",
-      "availableHeight": 680,
-      "naturalHeight": 507,
-      "slack": 173,
+      "availableHeight": 728,
+      "naturalHeight": 299,
+      "slack": 429,
       "naturalContentClipped": false,
-      "renderedClientHeight": 680,
-      "renderedScrollHeight": 680,
+      "renderedClientHeight": 728,
+      "renderedScrollHeight": 728,
       "renderedOverflowDetected": false
     },
     {
       "id": "auth-register-telegram",
-      "availableHeight": 680,
-      "naturalHeight": 478,
-      "slack": 202,
+      "availableHeight": 728,
+      "naturalHeight": 346,
+      "slack": 382,
       "naturalContentClipped": false,
-      "renderedClientHeight": 680,
-      "renderedScrollHeight": 680,
+      "renderedClientHeight": 728,
+      "renderedScrollHeight": 728,
       "renderedOverflowDetected": false
     },
     {
       "id": "auth-recovery-identity",
-      "availableHeight": 680,
-      "naturalHeight": 540,
-      "slack": 140,
+      "availableHeight": 728,
+      "naturalHeight": 516,
+      "slack": 212,
       "naturalContentClipped": false,
-      "renderedClientHeight": 680,
-      "renderedScrollHeight": 680,
+      "renderedClientHeight": 728,
+      "renderedScrollHeight": 728,
       "renderedOverflowDetected": false
     },
     {
       "id": "auth-setup-password",
-      "availableHeight": 680,
-      "naturalHeight": 537,
-      "slack": 143,
+      "availableHeight": 728,
+      "naturalHeight": 435,
+      "slack": 293,
       "naturalContentClipped": false,
-      "renderedClientHeight": 680,
-      "renderedScrollHeight": 680,
+      "renderedClientHeight": 728,
+      "renderedScrollHeight": 728,
       "renderedOverflowDetected": false
     },
     {
       "id": "auth-setup-password-error",
-      "availableHeight": 680,
-      "naturalHeight": 534,
-      "slack": 146,
+      "availableHeight": 728,
+      "naturalHeight": 437,
+      "slack": 291,
       "naturalContentClipped": false,
-      "renderedClientHeight": 680,
-      "renderedScrollHeight": 680,
+      "renderedClientHeight": 728,
+      "renderedScrollHeight": 728,
       "renderedOverflowDetected": false
     }
   ],
   "actionableTargetsAtAuthoringWidth": {
-    "count": 41,
-    "semanticCount": 41,
+    "count": 39,
+    "semanticCount": 39,
     "minimumWidth": 49,
     "minimumHeight": 44,
     "below44": [],
@@ -526,19 +526,7 @@
         "markedTouchTarget": true
       },
       {
-        "id": "auth-login-mobile:button:1",
-        "context": "auth-login-mobile",
-        "tag": "button",
-        "role": null,
-        "label": "راهنمای نصب اپ",
-        "width": 98,
-        "height": 44,
-        "semantic": true,
-        "explicitlyDeclared": true,
-        "markedTouchTarget": true
-      },
-      {
-        "id": "auth-login-otp:button:2",
+        "id": "auth-login-otp:button:1",
         "context": "auth-login-otp",
         "tag": "button",
         "role": null,
@@ -550,7 +538,7 @@
         "markedTouchTarget": true
       },
       {
-        "id": "auth-login-otp:button:3",
+        "id": "auth-login-otp:button:2",
         "context": "auth-login-otp",
         "tag": "button",
         "role": null,
@@ -562,7 +550,7 @@
         "markedTouchTarget": true
       },
       {
-        "id": "auth-device-approval:button:4",
+        "id": "auth-device-approval:button:3",
         "context": "auth-device-approval",
         "tag": "button",
         "role": null,
@@ -574,7 +562,7 @@
         "markedTouchTarget": true
       },
       {
-        "id": "auth-device-approval:button:5",
+        "id": "auth-device-approval:button:4",
         "context": "auth-device-approval",
         "tag": "button",
         "role": null,
@@ -586,19 +574,7 @@
         "markedTouchTarget": true
       },
       {
-        "id": "auth-recovery-unavailable:button:6",
-        "context": "auth-recovery-unavailable",
-        "tag": "button",
-        "role": null,
-        "label": "ادامه انتظار برای تأیید دستگاه",
-        "width": 352,
-        "height": 50,
-        "semantic": true,
-        "explicitlyDeclared": true,
-        "markedTouchTarget": true
-      },
-      {
-        "id": "auth-recovery-waiting:button:7",
+        "id": "auth-recovery-waiting:button:5",
         "context": "auth-recovery-waiting",
         "tag": "button",
         "role": null,
@@ -610,7 +586,7 @@
         "markedTouchTarget": true
       },
       {
-        "id": "auth-invite-valid:button:8",
+        "id": "auth-invite-valid:button:6",
         "context": "auth-invite-valid",
         "tag": "button",
         "role": null,
@@ -622,7 +598,7 @@
         "markedTouchTarget": true
       },
       {
-        "id": "auth-invite-valid:button:9",
+        "id": "auth-invite-valid:button:7",
         "context": "auth-invite-valid",
         "tag": "button",
         "role": null,
@@ -634,19 +610,19 @@
         "markedTouchTarget": true
       },
       {
-        "id": "auth-invite-web-only:button:10",
+        "id": "auth-invite-web-only:button:8",
         "context": "auth-invite-web-only",
         "tag": "button",
         "role": null,
-        "label": "ادامه ثبت‌نام از طریق وب",
+        "label": "ادامه ثبت‌نام در وب‌اپ",
         "width": 352,
-        "height": 62,
+        "height": 50,
         "semantic": true,
         "explicitlyDeclared": true,
         "markedTouchTarget": true
       },
       {
-        "id": "auth-register-review:button:11",
+        "id": "auth-register-review:button:9",
         "context": "auth-register-review",
         "tag": "button",
         "role": null,
@@ -658,7 +634,7 @@
         "markedTouchTarget": true
       },
       {
-        "id": "auth-register-review:button:12",
+        "id": "auth-register-review:button:10",
         "context": "auth-register-review",
         "tag": "button",
         "role": null,
@@ -670,7 +646,7 @@
         "markedTouchTarget": true
       },
       {
-        "id": "auth-register-otp:button:13",
+        "id": "auth-register-otp:button:11",
         "context": "auth-register-otp",
         "tag": "button",
         "role": null,
@@ -682,7 +658,7 @@
         "markedTouchTarget": true
       },
       {
-        "id": "auth-register-otp:button:14",
+        "id": "auth-register-otp:button:12",
         "context": "auth-register-otp",
         "tag": "button",
         "role": null,
@@ -694,7 +670,7 @@
         "markedTouchTarget": true
       },
       {
-        "id": "auth-register-address:button:15",
+        "id": "auth-register-address:button:13",
         "context": "auth-register-address",
         "tag": "button",
         "role": null,
@@ -706,7 +682,7 @@
         "markedTouchTarget": true
       },
       {
-        "id": "auth-register-address:button:16",
+        "id": "auth-register-address:button:14",
         "context": "auth-register-address",
         "tag": "button",
         "role": null,
@@ -718,7 +694,7 @@
         "markedTouchTarget": true
       },
       {
-        "id": "auth-register-direct:button:17",
+        "id": "auth-register-direct:button:15",
         "context": "auth-register-direct",
         "tag": "button",
         "role": null,
@@ -730,7 +706,7 @@
         "markedTouchTarget": true
       },
       {
-        "id": "auth-register-telegram:button:18",
+        "id": "auth-register-telegram:button:16",
         "context": "auth-register-telegram",
         "tag": "button",
         "role": null,
@@ -742,7 +718,7 @@
         "markedTouchTarget": true
       },
       {
-        "id": "auth-register-telegram:button:19",
+        "id": "auth-register-telegram:button:17",
         "context": "auth-register-telegram",
         "tag": "button",
         "role": null,
@@ -754,11 +730,35 @@
         "markedTouchTarget": true
       },
       {
-        "id": "auth-recovery-identity:button:20",
+        "id": "auth-recovery-identity:button:18",
         "context": "auth-recovery-identity",
         "tag": "button",
         "role": null,
         "label": "انتخاب از گالری",
+        "width": 112,
+        "height": 60,
+        "semantic": true,
+        "explicitlyDeclared": true,
+        "markedTouchTarget": true
+      },
+      {
+        "id": "auth-recovery-identity:button:19",
+        "context": "auth-recovery-identity",
+        "tag": "button",
+        "role": null,
+        "label": "گرفتن تصویر با دوربین",
+        "width": 112,
+        "height": 60,
+        "semantic": true,
+        "explicitlyDeclared": true,
+        "markedTouchTarget": true
+      },
+      {
+        "id": "auth-recovery-identity:button:20",
+        "context": "auth-recovery-identity",
+        "tag": "button",
+        "role": null,
+        "label": "انتخاب فایل",
         "width": 112,
         "height": 60,
         "semantic": true,
@@ -770,30 +770,6 @@
         "context": "auth-recovery-identity",
         "tag": "button",
         "role": null,
-        "label": "گرفتن تصویر با دوربین",
-        "width": 112,
-        "height": 60,
-        "semantic": true,
-        "explicitlyDeclared": true,
-        "markedTouchTarget": true
-      },
-      {
-        "id": "auth-recovery-identity:button:22",
-        "context": "auth-recovery-identity",
-        "tag": "button",
-        "role": null,
-        "label": "انتخاب فایل",
-        "width": 112,
-        "height": 60,
-        "semantic": true,
-        "explicitlyDeclared": true,
-        "markedTouchTarget": true
-      },
-      {
-        "id": "auth-recovery-identity:button:23",
-        "context": "auth-recovery-identity",
-        "tag": "button",
-        "role": null,
         "label": "ارسال مدرک برای بررسی",
         "width": 352,
         "height": 50,
@@ -802,7 +778,7 @@
         "markedTouchTarget": true
       },
       {
-        "id": "auth-recovery-identity:button:24",
+        "id": "auth-recovery-identity:button:22",
         "context": "auth-recovery-identity",
         "tag": "button",
         "role": null,
@@ -814,7 +790,7 @@
         "markedTouchTarget": true
       },
       {
-        "id": "auth-setup-password:button:25",
+        "id": "auth-setup-password:button:23",
         "context": "auth-setup-password",
         "tag": "button",
         "role": null,
@@ -826,7 +802,7 @@
         "markedTouchTarget": true
       },
       {
-        "id": "auth-setup-password:button:26",
+        "id": "auth-setup-password:button:24",
         "context": "auth-setup-password",
         "tag": "button",
         "role": null,
@@ -838,13 +814,37 @@
         "markedTouchTarget": true
       },
       {
-        "id": "auth-setup-password:button:27",
+        "id": "auth-setup-password:button:25",
         "context": "auth-setup-password",
         "tag": "button",
         "role": null,
         "label": "ثبت رمز و ورود",
         "width": 352,
         "height": 50,
+        "semantic": true,
+        "explicitlyDeclared": true,
+        "markedTouchTarget": true
+      },
+      {
+        "id": "auth-setup-password-error:button:26",
+        "context": "auth-setup-password-error",
+        "tag": "button",
+        "role": null,
+        "label": "نمایش رمز عبور",
+        "width": 49,
+        "height": 44,
+        "semantic": true,
+        "explicitlyDeclared": true,
+        "markedTouchTarget": true
+      },
+      {
+        "id": "auth-setup-password-error:button:27",
+        "context": "auth-setup-password-error",
+        "tag": "button",
+        "role": null,
+        "label": "نمایش تکرار رمز عبور",
+        "width": 49,
+        "height": 44,
         "semantic": true,
         "explicitlyDeclared": true,
         "markedTouchTarget": true
@@ -854,30 +854,6 @@
         "context": "auth-setup-password-error",
         "tag": "button",
         "role": null,
-        "label": "نمایش رمز عبور",
-        "width": 49,
-        "height": 44,
-        "semantic": true,
-        "explicitlyDeclared": true,
-        "markedTouchTarget": true
-      },
-      {
-        "id": "auth-setup-password-error:button:29",
-        "context": "auth-setup-password-error",
-        "tag": "button",
-        "role": null,
-        "label": "نمایش تکرار رمز عبور",
-        "width": 49,
-        "height": 44,
-        "semantic": true,
-        "explicitlyDeclared": true,
-        "markedTouchTarget": true
-      },
-      {
-        "id": "auth-setup-password-error:button:30",
-        "context": "auth-setup-password-error",
-        "tag": "button",
-        "role": null,
         "label": "ثبت رمز و ورود",
         "width": 352,
         "height": 50,
@@ -886,7 +862,7 @@
         "markedTouchTarget": true
       },
       {
-        "id": "static-keyboard-illustration:button:31",
+        "id": "static-keyboard-illustration:button:29",
         "context": "static-keyboard-illustration",
         "tag": "button",
         "role": null,
@@ -898,7 +874,7 @@
         "markedTouchTarget": true
       },
       {
-        "id": "static-keyboard-illustration:button:32",
+        "id": "static-keyboard-illustration:button:30",
         "context": "static-keyboard-illustration",
         "tag": "button",
         "role": null,
@@ -910,7 +886,7 @@
         "markedTouchTarget": true
       },
       {
-        "id": "static-keyboard-illustration:button:33",
+        "id": "static-keyboard-illustration:button:31",
         "context": "static-keyboard-illustration",
         "tag": "button",
         "role": null,
@@ -922,7 +898,7 @@
         "markedTouchTarget": true
       },
       {
-        "id": "static-keyboard-illustration:button:34",
+        "id": "static-keyboard-illustration:button:32",
         "context": "static-keyboard-illustration",
         "tag": "button",
         "role": null,
@@ -934,7 +910,7 @@
         "markedTouchTarget": true
       },
       {
-        "id": "static-keyboard-illustration:button:35",
+        "id": "static-keyboard-illustration:button:33",
         "context": "static-keyboard-illustration",
         "tag": "button",
         "role": null,
@@ -946,7 +922,7 @@
         "markedTouchTarget": true
       },
       {
-        "id": "adaptive-desktop-proof:button:36",
+        "id": "adaptive-desktop-proof:button:34",
         "context": "adaptive-desktop-proof",
         "tag": "button",
         "role": null,
@@ -958,7 +934,7 @@
         "markedTouchTarget": true
       },
       {
-        "id": "adaptive-desktop-proof:button:37",
+        "id": "adaptive-desktop-proof:button:35",
         "context": "adaptive-desktop-proof",
         "tag": "button",
         "role": null,
@@ -970,7 +946,7 @@
         "markedTouchTarget": true
       },
       {
-        "id": "adaptive-desktop-proof:button:38",
+        "id": "adaptive-desktop-proof:button:36",
         "context": "adaptive-desktop-proof",
         "tag": "button",
         "role": null,
@@ -982,7 +958,7 @@
         "markedTouchTarget": true
       },
       {
-        "id": "adaptive-desktop-proof:button:39",
+        "id": "adaptive-desktop-proof:button:37",
         "context": "adaptive-desktop-proof",
         "tag": "button",
         "role": null,
@@ -994,7 +970,7 @@
         "markedTouchTarget": true
       },
       {
-        "id": "adaptive-desktop-proof:button:40",
+        "id": "adaptive-desktop-proof:button:38",
         "context": "adaptive-desktop-proof",
         "tag": "button",
         "role": null,
@@ -1049,11 +1025,11 @@
         "markedTouchTarget": true
       },
       {
-        "id": "auth-recovery-unavailable:button:3",
-        "context": "auth-recovery-unavailable",
+        "id": "auth-recovery-waiting:button:3",
+        "context": "auth-recovery-waiting",
         "tag": "button",
         "role": null,
-        "label": "ادامه انتظار برای تأیید دستگاه",
+        "label": "انصراف از درخواست بازیابی",
         "width": 352,
         "height": 50,
         "semantic": true,
@@ -1061,11 +1037,11 @@
         "markedTouchTarget": true
       },
       {
-        "id": "auth-recovery-waiting:button:4",
-        "context": "auth-recovery-waiting",
+        "id": "auth-invite-web-only:button:4",
+        "context": "auth-invite-web-only",
         "tag": "button",
         "role": null,
-        "label": "انصراف از درخواست بازیابی",
+        "label": "ادامه ثبت‌نام در وب‌اپ",
         "width": 352,
         "height": 50,
         "semantic": true,
@@ -1603,8 +1579,8 @@
   },
   "focusTraversal": {
     "classification": "Synthetic keyboard Tab traversal of the static artifact; not a runtime, WebView, or assistive-technology test.",
-    "expectedFocusableCount": 39,
-    "visitedFocusableCount": 39,
+    "expectedFocusableCount": 37,
+    "visitedFocusableCount": 37,
     "allExpectedVisited": true,
     "expectedOutlineColor": "rgb(31, 94, 216)",
     "minimumOutlineWidth": 3,
@@ -1623,17 +1599,6 @@
       },
       {
         "id": "focus-1",
-        "context": "auth-login-mobile",
-        "tag": "button",
-        "label": "راهنمای نصب اپ",
-        "focusVisible": true,
-        "outlineStyle": "solid",
-        "outlineWidth": 3,
-        "outlineColor": "rgb(31, 94, 216)",
-        "outlineOffset": 2
-      },
-      {
-        "id": "focus-2",
         "context": "auth-login-otp",
         "tag": "button",
         "label": "ویرایش شماره",
@@ -1644,7 +1609,7 @@
         "outlineOffset": 2
       },
       {
-        "id": "focus-3",
+        "id": "focus-2",
         "context": "auth-login-otp",
         "tag": "button",
         "label": "تأیید و ادامه",
@@ -1655,7 +1620,7 @@
         "outlineOffset": 2
       },
       {
-        "id": "focus-4",
+        "id": "focus-3",
         "context": "auth-device-approval",
         "tag": "button",
         "label": "به دستگاه قبلی دسترسی ندارم",
@@ -1666,7 +1631,7 @@
         "outlineOffset": 2
       },
       {
-        "id": "focus-5",
+        "id": "focus-4",
         "context": "auth-device-approval",
         "tag": "button",
         "label": "بازگشت به مرحله کد تأیید",
@@ -1677,18 +1642,7 @@
         "outlineOffset": 2
       },
       {
-        "id": "focus-6",
-        "context": "auth-recovery-unavailable",
-        "tag": "button",
-        "label": "ادامه انتظار برای تأیید دستگاه",
-        "focusVisible": true,
-        "outlineStyle": "solid",
-        "outlineWidth": 3,
-        "outlineColor": "rgb(31, 94, 216)",
-        "outlineOffset": 2
-      },
-      {
-        "id": "focus-7",
+        "id": "focus-5",
         "context": "auth-recovery-waiting",
         "tag": "button",
         "label": "انصراف از درخواست بازیابی",
@@ -1699,7 +1653,7 @@
         "outlineOffset": 2
       },
       {
-        "id": "focus-8",
+        "id": "focus-6",
         "context": "auth-invite-valid",
         "tag": "button",
         "label": "ثبت‌نام با تلگرام",
@@ -1710,7 +1664,7 @@
         "outlineOffset": 2
       },
       {
-        "id": "focus-9",
+        "id": "focus-7",
         "context": "auth-invite-valid",
         "tag": "button",
         "label": "ثبت‌نام از طریق وب",
@@ -1721,10 +1675,10 @@
         "outlineOffset": 2
       },
       {
-        "id": "focus-10",
+        "id": "focus-8",
         "context": "auth-invite-web-only",
         "tag": "button",
-        "label": "ادامه ثبت‌نام از طریق وب",
+        "label": "ادامه ثبت‌نام در وب‌اپ",
         "focusVisible": true,
         "outlineStyle": "solid",
         "outlineWidth": 3,
@@ -1732,7 +1686,7 @@
         "outlineOffset": 2
       },
       {
-        "id": "focus-11",
+        "id": "focus-9",
         "context": "auth-register-review",
         "tag": "button",
         "label": "ارسال کد تأیید",
@@ -1743,7 +1697,7 @@
         "outlineOffset": 2
       },
       {
-        "id": "focus-12",
+        "id": "focus-10",
         "context": "auth-register-review",
         "tag": "button",
         "label": "بازگشت به دعوت‌نامه",
@@ -1754,7 +1708,7 @@
         "outlineOffset": 2
       },
       {
-        "id": "focus-13",
+        "id": "focus-11",
         "context": "auth-register-otp",
         "tag": "button",
         "label": "تأیید کد",
@@ -1765,7 +1719,7 @@
         "outlineOffset": 2
       },
       {
-        "id": "focus-14",
+        "id": "focus-12",
         "context": "auth-register-otp",
         "tag": "button",
         "label": "بازگشت به اطلاعات دعوت",
@@ -1776,7 +1730,7 @@
         "outlineOffset": 2
       },
       {
-        "id": "focus-15",
+        "id": "focus-13",
         "context": "auth-register-address",
         "tag": "button",
         "label": "تکمیل ثبت‌نام",
@@ -1787,7 +1741,7 @@
         "outlineOffset": 2
       },
       {
-        "id": "focus-16",
+        "id": "focus-14",
         "context": "auth-register-address",
         "tag": "button",
         "label": "بازگشت به مرحله قبل",
@@ -1798,7 +1752,7 @@
         "outlineOffset": 2
       },
       {
-        "id": "focus-17",
+        "id": "focus-15",
         "context": "auth-register-direct",
         "tag": "button",
         "label": "تکمیل ثبت‌نام",
@@ -1809,7 +1763,7 @@
         "outlineOffset": 2
       },
       {
-        "id": "focus-18",
+        "id": "focus-16",
         "context": "auth-register-telegram",
         "tag": "button",
         "label": "اتصال به ربات تلگرام",
@@ -1820,7 +1774,7 @@
         "outlineOffset": 2
       },
       {
-        "id": "focus-19",
+        "id": "focus-17",
         "context": "auth-register-telegram",
         "tag": "button",
         "label": "فعلاً رد می‌کنم",
@@ -1831,10 +1785,32 @@
         "outlineOffset": 2
       },
       {
-        "id": "focus-20",
+        "id": "focus-18",
         "context": "auth-recovery-identity",
         "tag": "button",
         "label": "انتخاب از گالری",
+        "focusVisible": true,
+        "outlineStyle": "solid",
+        "outlineWidth": 3,
+        "outlineColor": "rgb(31, 94, 216)",
+        "outlineOffset": 2
+      },
+      {
+        "id": "focus-19",
+        "context": "auth-recovery-identity",
+        "tag": "button",
+        "label": "گرفتن تصویر با دوربین",
+        "focusVisible": true,
+        "outlineStyle": "solid",
+        "outlineWidth": 3,
+        "outlineColor": "rgb(31, 94, 216)",
+        "outlineOffset": 2
+      },
+      {
+        "id": "focus-20",
+        "context": "auth-recovery-identity",
+        "tag": "button",
+        "label": "انتخاب فایل",
         "focusVisible": true,
         "outlineStyle": "solid",
         "outlineWidth": 3,
@@ -1845,7 +1821,7 @@
         "id": "focus-21",
         "context": "auth-recovery-identity",
         "tag": "button",
-        "label": "گرفتن تصویر با دوربین",
+        "label": "ارسال مدرک برای بررسی",
         "focusVisible": true,
         "outlineStyle": "solid",
         "outlineWidth": 3,
@@ -1856,7 +1832,7 @@
         "id": "focus-22",
         "context": "auth-recovery-identity",
         "tag": "button",
-        "label": "انتخاب فایل",
+        "label": "انصراف از درخواست بازیابی",
         "focusVisible": true,
         "outlineStyle": "solid",
         "outlineWidth": 3,
@@ -1865,9 +1841,9 @@
       },
       {
         "id": "focus-23",
-        "context": "auth-recovery-identity",
+        "context": "auth-setup-password",
         "tag": "button",
-        "label": "ارسال مدرک برای بررسی",
+        "label": "نمایش رمز عبور",
         "focusVisible": true,
         "outlineStyle": "solid",
         "outlineWidth": 3,
@@ -1876,9 +1852,9 @@
       },
       {
         "id": "focus-24",
-        "context": "auth-recovery-identity",
+        "context": "auth-setup-password",
         "tag": "button",
-        "label": "انصراف از درخواست بازیابی",
+        "label": "نمایش تکرار رمز عبور",
         "focusVisible": true,
         "outlineStyle": "solid",
         "outlineWidth": 3,
@@ -1889,28 +1865,6 @@
         "id": "focus-25",
         "context": "auth-setup-password",
         "tag": "button",
-        "label": "نمایش رمز عبور",
-        "focusVisible": true,
-        "outlineStyle": "solid",
-        "outlineWidth": 3,
-        "outlineColor": "rgb(31, 94, 216)",
-        "outlineOffset": 2
-      },
-      {
-        "id": "focus-26",
-        "context": "auth-setup-password",
-        "tag": "button",
-        "label": "نمایش تکرار رمز عبور",
-        "focusVisible": true,
-        "outlineStyle": "solid",
-        "outlineWidth": 3,
-        "outlineColor": "rgb(31, 94, 216)",
-        "outlineOffset": 2
-      },
-      {
-        "id": "focus-27",
-        "context": "auth-setup-password",
-        "tag": "button",
         "label": "ثبت رمز و ورود",
         "focusVisible": true,
         "outlineStyle": "solid",
@@ -1919,7 +1873,7 @@
         "outlineOffset": 2
       },
       {
-        "id": "focus-28",
+        "id": "focus-26",
         "context": "auth-setup-password-error",
         "tag": "button",
         "label": "نمایش رمز عبور",
@@ -1930,7 +1884,7 @@
         "outlineOffset": 2
       },
       {
-        "id": "focus-29",
+        "id": "focus-27",
         "context": "auth-setup-password-error",
         "tag": "button",
         "label": "نمایش تکرار رمز عبور",
@@ -1941,7 +1895,7 @@
         "outlineOffset": 2
       },
       {
-        "id": "focus-30",
+        "id": "focus-28",
         "context": "static-keyboard-illustration",
         "tag": "button",
         "label": "دریافت کد تأیید",
@@ -1952,7 +1906,7 @@
         "outlineOffset": 2
       },
       {
-        "id": "focus-31",
+        "id": "focus-29",
         "context": "static-keyboard-illustration",
         "tag": "button",
         "label": "تکمیل ثبت‌نام",
@@ -1963,7 +1917,7 @@
         "outlineOffset": 2
       },
       {
-        "id": "focus-32",
+        "id": "focus-30",
         "context": "static-keyboard-illustration",
         "tag": "button",
         "label": "نمایش رمز عبور",
@@ -1974,7 +1928,7 @@
         "outlineOffset": 2
       },
       {
-        "id": "focus-33",
+        "id": "focus-31",
         "context": "static-keyboard-illustration",
         "tag": "button",
         "label": "ثبت رمز و ورود",
@@ -1985,7 +1939,7 @@
         "outlineOffset": 2
       },
       {
-        "id": "focus-34",
+        "id": "focus-32",
         "context": "adaptive-desktop-proof",
         "tag": "button",
         "label": "انتخاب از گالری",
@@ -1996,7 +1950,7 @@
         "outlineOffset": 2
       },
       {
-        "id": "focus-35",
+        "id": "focus-33",
         "context": "adaptive-desktop-proof",
         "tag": "button",
         "label": "گرفتن تصویر با دوربین",
@@ -2007,7 +1961,7 @@
         "outlineOffset": 2
       },
       {
-        "id": "focus-36",
+        "id": "focus-34",
         "context": "adaptive-desktop-proof",
         "tag": "button",
         "label": "انتخاب فایل",
@@ -2018,7 +1972,7 @@
         "outlineOffset": 2
       },
       {
-        "id": "focus-37",
+        "id": "focus-35",
         "context": "adaptive-desktop-proof",
         "tag": "button",
         "label": "ارسال مدرک برای بررسی",
@@ -2029,7 +1983,7 @@
         "outlineOffset": 2
       },
       {
-        "id": "focus-38",
+        "id": "focus-36",
         "context": "adaptive-desktop-proof",
         "tag": "button",
         "label": "انصراف",
@@ -2044,7 +1998,7 @@
   "decorativeSemantics": {
     "pickerGlyphCount": 6,
     "pickerGlyphsExposedToAccessibilityTree": 0,
-    "noticeMarkerCount": 14,
+    "noticeMarkerCount": 3,
     "noticeMarkersExposedToAccessibilityTree": 0,
     "classification": "Decorative glyph source audit in the static artifact; runtime accessible names require implementation tests."
   },
@@ -2195,162 +2149,162 @@
       "screenNaturalFit": [
         {
           "id": "auth-login-mobile",
-          "availableHeight": 680,
-          "naturalHeight": 504,
-          "slack": 176,
+          "availableHeight": 728,
+          "naturalHeight": 367,
+          "slack": 361,
           "naturalContentClipped": false,
-          "renderedClientHeight": 680,
-          "renderedScrollHeight": 680,
+          "renderedClientHeight": 728,
+          "renderedScrollHeight": 728,
           "renderedOverflowDetected": false
         },
         {
           "id": "auth-login-otp",
-          "availableHeight": 680,
-          "naturalHeight": 546,
-          "slack": 134,
+          "availableHeight": 728,
+          "naturalHeight": 402,
+          "slack": 326,
           "naturalContentClipped": false,
-          "renderedClientHeight": 680,
-          "renderedScrollHeight": 680,
+          "renderedClientHeight": 728,
+          "renderedScrollHeight": 728,
           "renderedOverflowDetected": false
         },
         {
           "id": "auth-device-approval",
-          "availableHeight": 680,
-          "naturalHeight": 456,
-          "slack": 224,
+          "availableHeight": 728,
+          "naturalHeight": 365,
+          "slack": 363,
           "naturalContentClipped": false,
-          "renderedClientHeight": 680,
-          "renderedScrollHeight": 680,
+          "renderedClientHeight": 728,
+          "renderedScrollHeight": 728,
           "renderedOverflowDetected": false
         },
         {
           "id": "auth-recovery-unavailable",
-          "availableHeight": 680,
-          "naturalHeight": 471,
-          "slack": 209,
+          "availableHeight": 728,
+          "naturalHeight": 275,
+          "slack": 453,
           "naturalContentClipped": false,
-          "renderedClientHeight": 680,
-          "renderedScrollHeight": 680,
+          "renderedClientHeight": 728,
+          "renderedScrollHeight": 728,
           "renderedOverflowDetected": false
         },
         {
           "id": "auth-recovery-waiting",
-          "availableHeight": 680,
-          "naturalHeight": 500,
-          "slack": 180,
+          "availableHeight": 728,
+          "naturalHeight": 312,
+          "slack": 416,
           "naturalContentClipped": false,
-          "renderedClientHeight": 680,
-          "renderedScrollHeight": 680,
+          "renderedClientHeight": 728,
+          "renderedScrollHeight": 728,
           "renderedOverflowDetected": false
         },
         {
           "id": "auth-invite-valid",
-          "availableHeight": 680,
-          "naturalHeight": 498,
-          "slack": 182,
+          "availableHeight": 728,
+          "naturalHeight": 295,
+          "slack": 433,
           "naturalContentClipped": false,
-          "renderedClientHeight": 680,
-          "renderedScrollHeight": 680,
+          "renderedClientHeight": 728,
+          "renderedScrollHeight": 728,
           "renderedOverflowDetected": false
         },
         {
           "id": "auth-invite-web-only",
-          "availableHeight": 680,
-          "naturalHeight": 427,
-          "slack": 253,
+          "availableHeight": 728,
+          "naturalHeight": 212,
+          "slack": 516,
           "naturalContentClipped": false,
-          "renderedClientHeight": 680,
-          "renderedScrollHeight": 680,
+          "renderedClientHeight": 728,
+          "renderedScrollHeight": 728,
           "renderedOverflowDetected": false
         },
         {
           "id": "auth-register-review",
-          "availableHeight": 680,
-          "naturalHeight": 484,
-          "slack": 196,
+          "availableHeight": 728,
+          "naturalHeight": 425,
+          "slack": 303,
           "naturalContentClipped": false,
-          "renderedClientHeight": 680,
-          "renderedScrollHeight": 680,
+          "renderedClientHeight": 728,
+          "renderedScrollHeight": 728,
           "renderedOverflowDetected": false
         },
         {
           "id": "auth-register-otp",
-          "availableHeight": 680,
-          "naturalHeight": 449,
-          "slack": 231,
+          "availableHeight": 728,
+          "naturalHeight": 349,
+          "slack": 379,
           "naturalContentClipped": false,
-          "renderedClientHeight": 680,
-          "renderedScrollHeight": 680,
+          "renderedClientHeight": 728,
+          "renderedScrollHeight": 728,
           "renderedOverflowDetected": false
         },
         {
           "id": "auth-register-address",
-          "availableHeight": 680,
-          "naturalHeight": 585,
-          "slack": 95,
+          "availableHeight": 728,
+          "naturalHeight": 379,
+          "slack": 349,
           "naturalContentClipped": false,
-          "renderedClientHeight": 680,
-          "renderedScrollHeight": 680,
+          "renderedClientHeight": 728,
+          "renderedScrollHeight": 728,
           "renderedOverflowDetected": false
         },
         {
           "id": "auth-register-direct",
-          "availableHeight": 680,
-          "naturalHeight": 507,
-          "slack": 173,
+          "availableHeight": 728,
+          "naturalHeight": 299,
+          "slack": 429,
           "naturalContentClipped": false,
-          "renderedClientHeight": 680,
-          "renderedScrollHeight": 680,
+          "renderedClientHeight": 728,
+          "renderedScrollHeight": 728,
           "renderedOverflowDetected": false
         },
         {
           "id": "auth-register-telegram",
-          "availableHeight": 680,
-          "naturalHeight": 478,
-          "slack": 202,
+          "availableHeight": 728,
+          "naturalHeight": 346,
+          "slack": 382,
           "naturalContentClipped": false,
-          "renderedClientHeight": 680,
-          "renderedScrollHeight": 680,
+          "renderedClientHeight": 728,
+          "renderedScrollHeight": 728,
           "renderedOverflowDetected": false
         },
         {
           "id": "auth-recovery-identity",
-          "availableHeight": 680,
-          "naturalHeight": 540,
-          "slack": 140,
+          "availableHeight": 728,
+          "naturalHeight": 516,
+          "slack": 212,
           "naturalContentClipped": false,
-          "renderedClientHeight": 680,
-          "renderedScrollHeight": 680,
+          "renderedClientHeight": 728,
+          "renderedScrollHeight": 728,
           "renderedOverflowDetected": false
         },
         {
           "id": "auth-setup-password",
-          "availableHeight": 680,
-          "naturalHeight": 557,
-          "slack": 123,
+          "availableHeight": 728,
+          "naturalHeight": 435,
+          "slack": 293,
           "naturalContentClipped": false,
-          "renderedClientHeight": 680,
-          "renderedScrollHeight": 680,
+          "renderedClientHeight": 728,
+          "renderedScrollHeight": 728,
           "renderedOverflowDetected": false
         },
         {
           "id": "auth-setup-password-error",
-          "availableHeight": 680,
-          "naturalHeight": 558,
-          "slack": 122,
+          "availableHeight": 728,
+          "naturalHeight": 437,
+          "slack": 291,
           "naturalContentClipped": false,
-          "renderedClientHeight": 680,
-          "renderedScrollHeight": 680,
+          "renderedClientHeight": 728,
+          "renderedScrollHeight": 728,
           "renderedOverflowDetected": false
         }
       ],
       "naturalFitSummary": {
-        "minimumSlack": 95,
+        "minimumSlack": 212,
         "clippedFrameIds": []
       },
       "actionableTargets": {
-        "count": 41,
-        "semanticCount": 41,
+        "count": 39,
+        "semanticCount": 39,
         "minimumWidth": 49,
         "minimumHeight": 44,
         "below44": [],
@@ -2369,19 +2323,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-login-mobile:button:1",
-            "context": "auth-login-mobile",
-            "tag": "button",
-            "role": null,
-            "label": "راهنمای نصب اپ",
-            "width": 98,
-            "height": 44,
-            "semantic": true,
-            "explicitlyDeclared": true,
-            "markedTouchTarget": true
-          },
-          {
-            "id": "auth-login-otp:button:2",
+            "id": "auth-login-otp:button:1",
             "context": "auth-login-otp",
             "tag": "button",
             "role": null,
@@ -2393,7 +2335,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-login-otp:button:3",
+            "id": "auth-login-otp:button:2",
             "context": "auth-login-otp",
             "tag": "button",
             "role": null,
@@ -2405,7 +2347,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-device-approval:button:4",
+            "id": "auth-device-approval:button:3",
             "context": "auth-device-approval",
             "tag": "button",
             "role": null,
@@ -2417,7 +2359,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-device-approval:button:5",
+            "id": "auth-device-approval:button:4",
             "context": "auth-device-approval",
             "tag": "button",
             "role": null,
@@ -2429,19 +2371,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-recovery-unavailable:button:6",
-            "context": "auth-recovery-unavailable",
-            "tag": "button",
-            "role": null,
-            "label": "ادامه انتظار برای تأیید دستگاه",
-            "width": 322,
-            "height": 50,
-            "semantic": true,
-            "explicitlyDeclared": true,
-            "markedTouchTarget": true
-          },
-          {
-            "id": "auth-recovery-waiting:button:7",
+            "id": "auth-recovery-waiting:button:5",
             "context": "auth-recovery-waiting",
             "tag": "button",
             "role": null,
@@ -2453,7 +2383,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-invite-valid:button:8",
+            "id": "auth-invite-valid:button:6",
             "context": "auth-invite-valid",
             "tag": "button",
             "role": null,
@@ -2465,7 +2395,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-invite-valid:button:9",
+            "id": "auth-invite-valid:button:7",
             "context": "auth-invite-valid",
             "tag": "button",
             "role": null,
@@ -2477,19 +2407,19 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-invite-web-only:button:10",
+            "id": "auth-invite-web-only:button:8",
             "context": "auth-invite-web-only",
             "tag": "button",
             "role": null,
-            "label": "ادامه ثبت‌نام از طریق وب",
+            "label": "ادامه ثبت‌نام در وب‌اپ",
             "width": 322,
-            "height": 62,
+            "height": 50,
             "semantic": true,
             "explicitlyDeclared": true,
             "markedTouchTarget": true
           },
           {
-            "id": "auth-register-review:button:11",
+            "id": "auth-register-review:button:9",
             "context": "auth-register-review",
             "tag": "button",
             "role": null,
@@ -2501,7 +2431,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-register-review:button:12",
+            "id": "auth-register-review:button:10",
             "context": "auth-register-review",
             "tag": "button",
             "role": null,
@@ -2513,7 +2443,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-register-otp:button:13",
+            "id": "auth-register-otp:button:11",
             "context": "auth-register-otp",
             "tag": "button",
             "role": null,
@@ -2525,7 +2455,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-register-otp:button:14",
+            "id": "auth-register-otp:button:12",
             "context": "auth-register-otp",
             "tag": "button",
             "role": null,
@@ -2537,7 +2467,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-register-address:button:15",
+            "id": "auth-register-address:button:13",
             "context": "auth-register-address",
             "tag": "button",
             "role": null,
@@ -2549,7 +2479,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-register-address:button:16",
+            "id": "auth-register-address:button:14",
             "context": "auth-register-address",
             "tag": "button",
             "role": null,
@@ -2561,7 +2491,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-register-direct:button:17",
+            "id": "auth-register-direct:button:15",
             "context": "auth-register-direct",
             "tag": "button",
             "role": null,
@@ -2573,7 +2503,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-register-telegram:button:18",
+            "id": "auth-register-telegram:button:16",
             "context": "auth-register-telegram",
             "tag": "button",
             "role": null,
@@ -2585,7 +2515,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-register-telegram:button:19",
+            "id": "auth-register-telegram:button:17",
             "context": "auth-register-telegram",
             "tag": "button",
             "role": null,
@@ -2597,11 +2527,35 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-recovery-identity:button:20",
+            "id": "auth-recovery-identity:button:18",
             "context": "auth-recovery-identity",
             "tag": "button",
             "role": null,
             "label": "انتخاب از گالری",
+            "width": 102,
+            "height": 60,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-recovery-identity:button:19",
+            "context": "auth-recovery-identity",
+            "tag": "button",
+            "role": null,
+            "label": "گرفتن تصویر با دوربین",
+            "width": 102,
+            "height": 60,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-recovery-identity:button:20",
+            "context": "auth-recovery-identity",
+            "tag": "button",
+            "role": null,
+            "label": "انتخاب فایل",
             "width": 102,
             "height": 60,
             "semantic": true,
@@ -2613,30 +2567,6 @@
             "context": "auth-recovery-identity",
             "tag": "button",
             "role": null,
-            "label": "گرفتن تصویر با دوربین",
-            "width": 102,
-            "height": 60,
-            "semantic": true,
-            "explicitlyDeclared": true,
-            "markedTouchTarget": true
-          },
-          {
-            "id": "auth-recovery-identity:button:22",
-            "context": "auth-recovery-identity",
-            "tag": "button",
-            "role": null,
-            "label": "انتخاب فایل",
-            "width": 102,
-            "height": 60,
-            "semantic": true,
-            "explicitlyDeclared": true,
-            "markedTouchTarget": true
-          },
-          {
-            "id": "auth-recovery-identity:button:23",
-            "context": "auth-recovery-identity",
-            "tag": "button",
-            "role": null,
             "label": "ارسال مدرک برای بررسی",
             "width": 322,
             "height": 50,
@@ -2645,7 +2575,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-recovery-identity:button:24",
+            "id": "auth-recovery-identity:button:22",
             "context": "auth-recovery-identity",
             "tag": "button",
             "role": null,
@@ -2657,7 +2587,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-setup-password:button:25",
+            "id": "auth-setup-password:button:23",
             "context": "auth-setup-password",
             "tag": "button",
             "role": null,
@@ -2669,7 +2599,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-setup-password:button:26",
+            "id": "auth-setup-password:button:24",
             "context": "auth-setup-password",
             "tag": "button",
             "role": null,
@@ -2681,13 +2611,37 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-setup-password:button:27",
+            "id": "auth-setup-password:button:25",
             "context": "auth-setup-password",
             "tag": "button",
             "role": null,
             "label": "ثبت رمز و ورود",
             "width": 322,
             "height": 50,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-setup-password-error:button:26",
+            "context": "auth-setup-password-error",
+            "tag": "button",
+            "role": null,
+            "label": "نمایش رمز عبور",
+            "width": 49,
+            "height": 44,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-setup-password-error:button:27",
+            "context": "auth-setup-password-error",
+            "tag": "button",
+            "role": null,
+            "label": "نمایش تکرار رمز عبور",
+            "width": 49,
+            "height": 44,
             "semantic": true,
             "explicitlyDeclared": true,
             "markedTouchTarget": true
@@ -2697,30 +2651,6 @@
             "context": "auth-setup-password-error",
             "tag": "button",
             "role": null,
-            "label": "نمایش رمز عبور",
-            "width": 49,
-            "height": 44,
-            "semantic": true,
-            "explicitlyDeclared": true,
-            "markedTouchTarget": true
-          },
-          {
-            "id": "auth-setup-password-error:button:29",
-            "context": "auth-setup-password-error",
-            "tag": "button",
-            "role": null,
-            "label": "نمایش تکرار رمز عبور",
-            "width": 49,
-            "height": 44,
-            "semantic": true,
-            "explicitlyDeclared": true,
-            "markedTouchTarget": true
-          },
-          {
-            "id": "auth-setup-password-error:button:30",
-            "context": "auth-setup-password-error",
-            "tag": "button",
-            "role": null,
             "label": "ثبت رمز و ورود",
             "width": 322,
             "height": 50,
@@ -2729,7 +2659,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "static-keyboard-illustration:button:31",
+            "id": "static-keyboard-illustration:button:29",
             "context": "static-keyboard-illustration",
             "tag": "button",
             "role": null,
@@ -2741,7 +2671,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "static-keyboard-illustration:button:32",
+            "id": "static-keyboard-illustration:button:30",
             "context": "static-keyboard-illustration",
             "tag": "button",
             "role": null,
@@ -2753,7 +2683,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "static-keyboard-illustration:button:33",
+            "id": "static-keyboard-illustration:button:31",
             "context": "static-keyboard-illustration",
             "tag": "button",
             "role": null,
@@ -2765,7 +2695,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "static-keyboard-illustration:button:34",
+            "id": "static-keyboard-illustration:button:32",
             "context": "static-keyboard-illustration",
             "tag": "button",
             "role": null,
@@ -2777,7 +2707,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "static-keyboard-illustration:button:35",
+            "id": "static-keyboard-illustration:button:33",
             "context": "static-keyboard-illustration",
             "tag": "button",
             "role": null,
@@ -2789,7 +2719,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "adaptive-desktop-proof:button:36",
+            "id": "adaptive-desktop-proof:button:34",
             "context": "adaptive-desktop-proof",
             "tag": "button",
             "role": null,
@@ -2801,7 +2731,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "adaptive-desktop-proof:button:37",
+            "id": "adaptive-desktop-proof:button:35",
             "context": "adaptive-desktop-proof",
             "tag": "button",
             "role": null,
@@ -2813,7 +2743,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "adaptive-desktop-proof:button:38",
+            "id": "adaptive-desktop-proof:button:36",
             "context": "adaptive-desktop-proof",
             "tag": "button",
             "role": null,
@@ -2825,7 +2755,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "adaptive-desktop-proof:button:39",
+            "id": "adaptive-desktop-proof:button:37",
             "context": "adaptive-desktop-proof",
             "tag": "button",
             "role": null,
@@ -2837,7 +2767,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "adaptive-desktop-proof:button:40",
+            "id": "adaptive-desktop-proof:button:38",
             "context": "adaptive-desktop-proof",
             "tag": "button",
             "role": null,
@@ -2892,11 +2822,11 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-recovery-unavailable:button:3",
-            "context": "auth-recovery-unavailable",
+            "id": "auth-recovery-waiting:button:3",
+            "context": "auth-recovery-waiting",
             "tag": "button",
             "role": null,
-            "label": "ادامه انتظار برای تأیید دستگاه",
+            "label": "انصراف از درخواست بازیابی",
             "width": 322,
             "height": 50,
             "semantic": true,
@@ -2904,11 +2834,11 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-recovery-waiting:button:4",
-            "context": "auth-recovery-waiting",
+            "id": "auth-invite-web-only:button:4",
+            "context": "auth-invite-web-only",
             "tag": "button",
             "role": null,
-            "label": "انصراف از درخواست بازیابی",
+            "label": "ادامه ثبت‌نام در وب‌اپ",
             "width": 322,
             "height": 50,
             "semantic": true,
@@ -3311,162 +3241,162 @@
       "screenNaturalFit": [
         {
           "id": "auth-login-mobile",
-          "availableHeight": 680,
-          "naturalHeight": 481,
-          "slack": 199,
+          "availableHeight": 728,
+          "naturalHeight": 343,
+          "slack": 385,
           "naturalContentClipped": false,
-          "renderedClientHeight": 680,
-          "renderedScrollHeight": 680,
+          "renderedClientHeight": 728,
+          "renderedScrollHeight": 728,
           "renderedOverflowDetected": false
         },
         {
           "id": "auth-login-otp",
-          "availableHeight": 680,
-          "naturalHeight": 546,
-          "slack": 134,
+          "availableHeight": 728,
+          "naturalHeight": 402,
+          "slack": 326,
           "naturalContentClipped": false,
-          "renderedClientHeight": 680,
-          "renderedScrollHeight": 680,
+          "renderedClientHeight": 728,
+          "renderedScrollHeight": 728,
           "renderedOverflowDetected": false
         },
         {
           "id": "auth-device-approval",
-          "availableHeight": 680,
-          "naturalHeight": 456,
-          "slack": 224,
+          "availableHeight": 728,
+          "naturalHeight": 365,
+          "slack": 363,
           "naturalContentClipped": false,
-          "renderedClientHeight": 680,
-          "renderedScrollHeight": 680,
+          "renderedClientHeight": 728,
+          "renderedScrollHeight": 728,
           "renderedOverflowDetected": false
         },
         {
           "id": "auth-recovery-unavailable",
-          "availableHeight": 680,
-          "naturalHeight": 471,
-          "slack": 209,
+          "availableHeight": 728,
+          "naturalHeight": 275,
+          "slack": 453,
           "naturalContentClipped": false,
-          "renderedClientHeight": 680,
-          "renderedScrollHeight": 680,
+          "renderedClientHeight": 728,
+          "renderedScrollHeight": 728,
           "renderedOverflowDetected": false
         },
         {
           "id": "auth-recovery-waiting",
-          "availableHeight": 680,
-          "naturalHeight": 500,
-          "slack": 180,
+          "availableHeight": 728,
+          "naturalHeight": 312,
+          "slack": 416,
           "naturalContentClipped": false,
-          "renderedClientHeight": 680,
-          "renderedScrollHeight": 680,
+          "renderedClientHeight": 728,
+          "renderedScrollHeight": 728,
           "renderedOverflowDetected": false
         },
         {
           "id": "auth-invite-valid",
-          "availableHeight": 680,
-          "naturalHeight": 498,
-          "slack": 182,
+          "availableHeight": 728,
+          "naturalHeight": 295,
+          "slack": 433,
           "naturalContentClipped": false,
-          "renderedClientHeight": 680,
-          "renderedScrollHeight": 680,
+          "renderedClientHeight": 728,
+          "renderedScrollHeight": 728,
           "renderedOverflowDetected": false
         },
         {
           "id": "auth-invite-web-only",
-          "availableHeight": 680,
-          "naturalHeight": 427,
-          "slack": 253,
+          "availableHeight": 728,
+          "naturalHeight": 212,
+          "slack": 516,
           "naturalContentClipped": false,
-          "renderedClientHeight": 680,
-          "renderedScrollHeight": 680,
+          "renderedClientHeight": 728,
+          "renderedScrollHeight": 728,
           "renderedOverflowDetected": false
         },
         {
           "id": "auth-register-review",
-          "availableHeight": 680,
-          "naturalHeight": 484,
-          "slack": 196,
+          "availableHeight": 728,
+          "naturalHeight": 425,
+          "slack": 303,
           "naturalContentClipped": false,
-          "renderedClientHeight": 680,
-          "renderedScrollHeight": 680,
+          "renderedClientHeight": 728,
+          "renderedScrollHeight": 728,
           "renderedOverflowDetected": false
         },
         {
           "id": "auth-register-otp",
-          "availableHeight": 680,
-          "naturalHeight": 425,
-          "slack": 255,
+          "availableHeight": 728,
+          "naturalHeight": 326,
+          "slack": 402,
           "naturalContentClipped": false,
-          "renderedClientHeight": 680,
-          "renderedScrollHeight": 680,
+          "renderedClientHeight": 728,
+          "renderedScrollHeight": 728,
           "renderedOverflowDetected": false
         },
         {
           "id": "auth-register-address",
-          "availableHeight": 680,
-          "naturalHeight": 585,
-          "slack": 95,
+          "availableHeight": 728,
+          "naturalHeight": 379,
+          "slack": 349,
           "naturalContentClipped": false,
-          "renderedClientHeight": 680,
-          "renderedScrollHeight": 680,
+          "renderedClientHeight": 728,
+          "renderedScrollHeight": 728,
           "renderedOverflowDetected": false
         },
         {
           "id": "auth-register-direct",
-          "availableHeight": 680,
-          "naturalHeight": 507,
-          "slack": 173,
+          "availableHeight": 728,
+          "naturalHeight": 299,
+          "slack": 429,
           "naturalContentClipped": false,
-          "renderedClientHeight": 680,
-          "renderedScrollHeight": 680,
+          "renderedClientHeight": 728,
+          "renderedScrollHeight": 728,
           "renderedOverflowDetected": false
         },
         {
           "id": "auth-register-telegram",
-          "availableHeight": 680,
-          "naturalHeight": 478,
-          "slack": 202,
+          "availableHeight": 728,
+          "naturalHeight": 346,
+          "slack": 382,
           "naturalContentClipped": false,
-          "renderedClientHeight": 680,
-          "renderedScrollHeight": 680,
+          "renderedClientHeight": 728,
+          "renderedScrollHeight": 728,
           "renderedOverflowDetected": false
         },
         {
           "id": "auth-recovery-identity",
-          "availableHeight": 680,
-          "naturalHeight": 540,
-          "slack": 140,
+          "availableHeight": 728,
+          "naturalHeight": 516,
+          "slack": 212,
           "naturalContentClipped": false,
-          "renderedClientHeight": 680,
-          "renderedScrollHeight": 680,
+          "renderedClientHeight": 728,
+          "renderedScrollHeight": 728,
           "renderedOverflowDetected": false
         },
         {
           "id": "auth-setup-password",
-          "availableHeight": 680,
-          "naturalHeight": 537,
-          "slack": 143,
+          "availableHeight": 728,
+          "naturalHeight": 435,
+          "slack": 293,
           "naturalContentClipped": false,
-          "renderedClientHeight": 680,
-          "renderedScrollHeight": 680,
+          "renderedClientHeight": 728,
+          "renderedScrollHeight": 728,
           "renderedOverflowDetected": false
         },
         {
           "id": "auth-setup-password-error",
-          "availableHeight": 680,
-          "naturalHeight": 558,
-          "slack": 122,
+          "availableHeight": 728,
+          "naturalHeight": 437,
+          "slack": 291,
           "naturalContentClipped": false,
-          "renderedClientHeight": 680,
-          "renderedScrollHeight": 680,
+          "renderedClientHeight": 728,
+          "renderedScrollHeight": 728,
           "renderedOverflowDetected": false
         }
       ],
       "naturalFitSummary": {
-        "minimumSlack": 95,
+        "minimumSlack": 212,
         "clippedFrameIds": []
       },
       "actionableTargets": {
-        "count": 41,
-        "semanticCount": 41,
+        "count": 39,
+        "semanticCount": 39,
         "minimumWidth": 49,
         "minimumHeight": 44,
         "below44": [],
@@ -3485,19 +3415,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-login-mobile:button:1",
-            "context": "auth-login-mobile",
-            "tag": "button",
-            "role": null,
-            "label": "راهنمای نصب اپ",
-            "width": 98,
-            "height": 44,
-            "semantic": true,
-            "explicitlyDeclared": true,
-            "markedTouchTarget": true
-          },
-          {
-            "id": "auth-login-otp:button:2",
+            "id": "auth-login-otp:button:1",
             "context": "auth-login-otp",
             "tag": "button",
             "role": null,
@@ -3509,7 +3427,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-login-otp:button:3",
+            "id": "auth-login-otp:button:2",
             "context": "auth-login-otp",
             "tag": "button",
             "role": null,
@@ -3521,7 +3439,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-device-approval:button:4",
+            "id": "auth-device-approval:button:3",
             "context": "auth-device-approval",
             "tag": "button",
             "role": null,
@@ -3533,7 +3451,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-device-approval:button:5",
+            "id": "auth-device-approval:button:4",
             "context": "auth-device-approval",
             "tag": "button",
             "role": null,
@@ -3545,19 +3463,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-recovery-unavailable:button:6",
-            "context": "auth-recovery-unavailable",
-            "tag": "button",
-            "role": null,
-            "label": "ادامه انتظار برای تأیید دستگاه",
-            "width": 337,
-            "height": 50,
-            "semantic": true,
-            "explicitlyDeclared": true,
-            "markedTouchTarget": true
-          },
-          {
-            "id": "auth-recovery-waiting:button:7",
+            "id": "auth-recovery-waiting:button:5",
             "context": "auth-recovery-waiting",
             "tag": "button",
             "role": null,
@@ -3569,7 +3475,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-invite-valid:button:8",
+            "id": "auth-invite-valid:button:6",
             "context": "auth-invite-valid",
             "tag": "button",
             "role": null,
@@ -3581,7 +3487,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-invite-valid:button:9",
+            "id": "auth-invite-valid:button:7",
             "context": "auth-invite-valid",
             "tag": "button",
             "role": null,
@@ -3593,19 +3499,19 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-invite-web-only:button:10",
+            "id": "auth-invite-web-only:button:8",
             "context": "auth-invite-web-only",
             "tag": "button",
             "role": null,
-            "label": "ادامه ثبت‌نام از طریق وب",
+            "label": "ادامه ثبت‌نام در وب‌اپ",
             "width": 337,
-            "height": 62,
+            "height": 50,
             "semantic": true,
             "explicitlyDeclared": true,
             "markedTouchTarget": true
           },
           {
-            "id": "auth-register-review:button:11",
+            "id": "auth-register-review:button:9",
             "context": "auth-register-review",
             "tag": "button",
             "role": null,
@@ -3617,7 +3523,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-register-review:button:12",
+            "id": "auth-register-review:button:10",
             "context": "auth-register-review",
             "tag": "button",
             "role": null,
@@ -3629,7 +3535,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-register-otp:button:13",
+            "id": "auth-register-otp:button:11",
             "context": "auth-register-otp",
             "tag": "button",
             "role": null,
@@ -3641,7 +3547,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-register-otp:button:14",
+            "id": "auth-register-otp:button:12",
             "context": "auth-register-otp",
             "tag": "button",
             "role": null,
@@ -3653,7 +3559,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-register-address:button:15",
+            "id": "auth-register-address:button:13",
             "context": "auth-register-address",
             "tag": "button",
             "role": null,
@@ -3665,7 +3571,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-register-address:button:16",
+            "id": "auth-register-address:button:14",
             "context": "auth-register-address",
             "tag": "button",
             "role": null,
@@ -3677,7 +3583,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-register-direct:button:17",
+            "id": "auth-register-direct:button:15",
             "context": "auth-register-direct",
             "tag": "button",
             "role": null,
@@ -3689,7 +3595,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-register-telegram:button:18",
+            "id": "auth-register-telegram:button:16",
             "context": "auth-register-telegram",
             "tag": "button",
             "role": null,
@@ -3701,7 +3607,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-register-telegram:button:19",
+            "id": "auth-register-telegram:button:17",
             "context": "auth-register-telegram",
             "tag": "button",
             "role": null,
@@ -3713,11 +3619,35 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-recovery-identity:button:20",
+            "id": "auth-recovery-identity:button:18",
             "context": "auth-recovery-identity",
             "tag": "button",
             "role": null,
             "label": "انتخاب از گالری",
+            "width": 107,
+            "height": 60,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-recovery-identity:button:19",
+            "context": "auth-recovery-identity",
+            "tag": "button",
+            "role": null,
+            "label": "گرفتن تصویر با دوربین",
+            "width": 107,
+            "height": 60,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-recovery-identity:button:20",
+            "context": "auth-recovery-identity",
+            "tag": "button",
+            "role": null,
+            "label": "انتخاب فایل",
             "width": 107,
             "height": 60,
             "semantic": true,
@@ -3729,30 +3659,6 @@
             "context": "auth-recovery-identity",
             "tag": "button",
             "role": null,
-            "label": "گرفتن تصویر با دوربین",
-            "width": 107,
-            "height": 60,
-            "semantic": true,
-            "explicitlyDeclared": true,
-            "markedTouchTarget": true
-          },
-          {
-            "id": "auth-recovery-identity:button:22",
-            "context": "auth-recovery-identity",
-            "tag": "button",
-            "role": null,
-            "label": "انتخاب فایل",
-            "width": 107,
-            "height": 60,
-            "semantic": true,
-            "explicitlyDeclared": true,
-            "markedTouchTarget": true
-          },
-          {
-            "id": "auth-recovery-identity:button:23",
-            "context": "auth-recovery-identity",
-            "tag": "button",
-            "role": null,
             "label": "ارسال مدرک برای بررسی",
             "width": 337,
             "height": 50,
@@ -3761,7 +3667,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-recovery-identity:button:24",
+            "id": "auth-recovery-identity:button:22",
             "context": "auth-recovery-identity",
             "tag": "button",
             "role": null,
@@ -3773,7 +3679,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-setup-password:button:25",
+            "id": "auth-setup-password:button:23",
             "context": "auth-setup-password",
             "tag": "button",
             "role": null,
@@ -3785,7 +3691,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-setup-password:button:26",
+            "id": "auth-setup-password:button:24",
             "context": "auth-setup-password",
             "tag": "button",
             "role": null,
@@ -3797,13 +3703,37 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-setup-password:button:27",
+            "id": "auth-setup-password:button:25",
             "context": "auth-setup-password",
             "tag": "button",
             "role": null,
             "label": "ثبت رمز و ورود",
             "width": 337,
             "height": 50,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-setup-password-error:button:26",
+            "context": "auth-setup-password-error",
+            "tag": "button",
+            "role": null,
+            "label": "نمایش رمز عبور",
+            "width": 49,
+            "height": 44,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-setup-password-error:button:27",
+            "context": "auth-setup-password-error",
+            "tag": "button",
+            "role": null,
+            "label": "نمایش تکرار رمز عبور",
+            "width": 49,
+            "height": 44,
             "semantic": true,
             "explicitlyDeclared": true,
             "markedTouchTarget": true
@@ -3813,30 +3743,6 @@
             "context": "auth-setup-password-error",
             "tag": "button",
             "role": null,
-            "label": "نمایش رمز عبور",
-            "width": 49,
-            "height": 44,
-            "semantic": true,
-            "explicitlyDeclared": true,
-            "markedTouchTarget": true
-          },
-          {
-            "id": "auth-setup-password-error:button:29",
-            "context": "auth-setup-password-error",
-            "tag": "button",
-            "role": null,
-            "label": "نمایش تکرار رمز عبور",
-            "width": 49,
-            "height": 44,
-            "semantic": true,
-            "explicitlyDeclared": true,
-            "markedTouchTarget": true
-          },
-          {
-            "id": "auth-setup-password-error:button:30",
-            "context": "auth-setup-password-error",
-            "tag": "button",
-            "role": null,
             "label": "ثبت رمز و ورود",
             "width": 337,
             "height": 50,
@@ -3845,7 +3751,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "static-keyboard-illustration:button:31",
+            "id": "static-keyboard-illustration:button:29",
             "context": "static-keyboard-illustration",
             "tag": "button",
             "role": null,
@@ -3857,7 +3763,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "static-keyboard-illustration:button:32",
+            "id": "static-keyboard-illustration:button:30",
             "context": "static-keyboard-illustration",
             "tag": "button",
             "role": null,
@@ -3869,7 +3775,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "static-keyboard-illustration:button:33",
+            "id": "static-keyboard-illustration:button:31",
             "context": "static-keyboard-illustration",
             "tag": "button",
             "role": null,
@@ -3881,7 +3787,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "static-keyboard-illustration:button:34",
+            "id": "static-keyboard-illustration:button:32",
             "context": "static-keyboard-illustration",
             "tag": "button",
             "role": null,
@@ -3893,7 +3799,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "static-keyboard-illustration:button:35",
+            "id": "static-keyboard-illustration:button:33",
             "context": "static-keyboard-illustration",
             "tag": "button",
             "role": null,
@@ -3905,7 +3811,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "adaptive-desktop-proof:button:36",
+            "id": "adaptive-desktop-proof:button:34",
             "context": "adaptive-desktop-proof",
             "tag": "button",
             "role": null,
@@ -3917,7 +3823,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "adaptive-desktop-proof:button:37",
+            "id": "adaptive-desktop-proof:button:35",
             "context": "adaptive-desktop-proof",
             "tag": "button",
             "role": null,
@@ -3929,7 +3835,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "adaptive-desktop-proof:button:38",
+            "id": "adaptive-desktop-proof:button:36",
             "context": "adaptive-desktop-proof",
             "tag": "button",
             "role": null,
@@ -3941,7 +3847,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "adaptive-desktop-proof:button:39",
+            "id": "adaptive-desktop-proof:button:37",
             "context": "adaptive-desktop-proof",
             "tag": "button",
             "role": null,
@@ -3953,7 +3859,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "adaptive-desktop-proof:button:40",
+            "id": "adaptive-desktop-proof:button:38",
             "context": "adaptive-desktop-proof",
             "tag": "button",
             "role": null,
@@ -4008,11 +3914,11 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-recovery-unavailable:button:3",
-            "context": "auth-recovery-unavailable",
+            "id": "auth-recovery-waiting:button:3",
+            "context": "auth-recovery-waiting",
             "tag": "button",
             "role": null,
-            "label": "ادامه انتظار برای تأیید دستگاه",
+            "label": "انصراف از درخواست بازیابی",
             "width": 337,
             "height": 50,
             "semantic": true,
@@ -4020,11 +3926,11 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-recovery-waiting:button:4",
-            "context": "auth-recovery-waiting",
+            "id": "auth-invite-web-only:button:4",
+            "context": "auth-invite-web-only",
             "tag": "button",
             "role": null,
-            "label": "انصراف از درخواست بازیابی",
+            "label": "ادامه ثبت‌نام در وب‌اپ",
             "width": 337,
             "height": 50,
             "semantic": true,
@@ -4427,162 +4333,162 @@
       "screenNaturalFit": [
         {
           "id": "auth-login-mobile",
-          "availableHeight": 680,
-          "naturalHeight": 481,
-          "slack": 199,
+          "availableHeight": 728,
+          "naturalHeight": 343,
+          "slack": 385,
           "naturalContentClipped": false,
-          "renderedClientHeight": 680,
-          "renderedScrollHeight": 680,
+          "renderedClientHeight": 728,
+          "renderedScrollHeight": 728,
           "renderedOverflowDetected": false
         },
         {
           "id": "auth-login-otp",
-          "availableHeight": 680,
-          "naturalHeight": 546,
-          "slack": 134,
+          "availableHeight": 728,
+          "naturalHeight": 402,
+          "slack": 326,
           "naturalContentClipped": false,
-          "renderedClientHeight": 680,
-          "renderedScrollHeight": 680,
+          "renderedClientHeight": 728,
+          "renderedScrollHeight": 728,
           "renderedOverflowDetected": false
         },
         {
           "id": "auth-device-approval",
-          "availableHeight": 680,
-          "naturalHeight": 456,
-          "slack": 224,
+          "availableHeight": 728,
+          "naturalHeight": 365,
+          "slack": 363,
           "naturalContentClipped": false,
-          "renderedClientHeight": 680,
-          "renderedScrollHeight": 680,
+          "renderedClientHeight": 728,
+          "renderedScrollHeight": 728,
           "renderedOverflowDetected": false
         },
         {
           "id": "auth-recovery-unavailable",
-          "availableHeight": 680,
-          "naturalHeight": 471,
-          "slack": 209,
+          "availableHeight": 728,
+          "naturalHeight": 275,
+          "slack": 453,
           "naturalContentClipped": false,
-          "renderedClientHeight": 680,
-          "renderedScrollHeight": 680,
+          "renderedClientHeight": 728,
+          "renderedScrollHeight": 728,
           "renderedOverflowDetected": false
         },
         {
           "id": "auth-recovery-waiting",
-          "availableHeight": 680,
-          "naturalHeight": 500,
-          "slack": 180,
+          "availableHeight": 728,
+          "naturalHeight": 312,
+          "slack": 416,
           "naturalContentClipped": false,
-          "renderedClientHeight": 680,
-          "renderedScrollHeight": 680,
+          "renderedClientHeight": 728,
+          "renderedScrollHeight": 728,
           "renderedOverflowDetected": false
         },
         {
           "id": "auth-invite-valid",
-          "availableHeight": 680,
-          "naturalHeight": 498,
-          "slack": 182,
+          "availableHeight": 728,
+          "naturalHeight": 295,
+          "slack": 433,
           "naturalContentClipped": false,
-          "renderedClientHeight": 680,
-          "renderedScrollHeight": 680,
+          "renderedClientHeight": 728,
+          "renderedScrollHeight": 728,
           "renderedOverflowDetected": false
         },
         {
           "id": "auth-invite-web-only",
-          "availableHeight": 680,
-          "naturalHeight": 382,
-          "slack": 298,
+          "availableHeight": 728,
+          "naturalHeight": 212,
+          "slack": 516,
           "naturalContentClipped": false,
-          "renderedClientHeight": 680,
-          "renderedScrollHeight": 680,
+          "renderedClientHeight": 728,
+          "renderedScrollHeight": 728,
           "renderedOverflowDetected": false
         },
         {
           "id": "auth-register-review",
-          "availableHeight": 680,
-          "naturalHeight": 484,
-          "slack": 196,
+          "availableHeight": 728,
+          "naturalHeight": 425,
+          "slack": 303,
           "naturalContentClipped": false,
-          "renderedClientHeight": 680,
-          "renderedScrollHeight": 680,
+          "renderedClientHeight": 728,
+          "renderedScrollHeight": 728,
           "renderedOverflowDetected": false
         },
         {
           "id": "auth-register-otp",
-          "availableHeight": 680,
-          "naturalHeight": 404,
-          "slack": 276,
+          "availableHeight": 728,
+          "naturalHeight": 326,
+          "slack": 402,
           "naturalContentClipped": false,
-          "renderedClientHeight": 680,
-          "renderedScrollHeight": 680,
+          "renderedClientHeight": 728,
+          "renderedScrollHeight": 728,
           "renderedOverflowDetected": false
         },
         {
           "id": "auth-register-address",
-          "availableHeight": 680,
-          "naturalHeight": 564,
-          "slack": 116,
+          "availableHeight": 728,
+          "naturalHeight": 379,
+          "slack": 349,
           "naturalContentClipped": false,
-          "renderedClientHeight": 680,
-          "renderedScrollHeight": 680,
+          "renderedClientHeight": 728,
+          "renderedScrollHeight": 728,
           "renderedOverflowDetected": false
         },
         {
           "id": "auth-register-direct",
-          "availableHeight": 680,
-          "naturalHeight": 507,
-          "slack": 173,
+          "availableHeight": 728,
+          "naturalHeight": 299,
+          "slack": 429,
           "naturalContentClipped": false,
-          "renderedClientHeight": 680,
-          "renderedScrollHeight": 680,
+          "renderedClientHeight": 728,
+          "renderedScrollHeight": 728,
           "renderedOverflowDetected": false
         },
         {
           "id": "auth-register-telegram",
-          "availableHeight": 680,
-          "naturalHeight": 478,
-          "slack": 202,
+          "availableHeight": 728,
+          "naturalHeight": 346,
+          "slack": 382,
           "naturalContentClipped": false,
-          "renderedClientHeight": 680,
-          "renderedScrollHeight": 680,
+          "renderedClientHeight": 728,
+          "renderedScrollHeight": 728,
           "renderedOverflowDetected": false
         },
         {
           "id": "auth-recovery-identity",
-          "availableHeight": 680,
-          "naturalHeight": 540,
-          "slack": 140,
+          "availableHeight": 728,
+          "naturalHeight": 516,
+          "slack": 212,
           "naturalContentClipped": false,
-          "renderedClientHeight": 680,
-          "renderedScrollHeight": 680,
+          "renderedClientHeight": 728,
+          "renderedScrollHeight": 728,
           "renderedOverflowDetected": false
         },
         {
           "id": "auth-setup-password",
-          "availableHeight": 680,
-          "naturalHeight": 537,
-          "slack": 143,
+          "availableHeight": 728,
+          "naturalHeight": 435,
+          "slack": 293,
           "naturalContentClipped": false,
-          "renderedClientHeight": 680,
-          "renderedScrollHeight": 680,
+          "renderedClientHeight": 728,
+          "renderedScrollHeight": 728,
           "renderedOverflowDetected": false
         },
         {
           "id": "auth-setup-password-error",
-          "availableHeight": 680,
-          "naturalHeight": 534,
-          "slack": 146,
+          "availableHeight": 728,
+          "naturalHeight": 437,
+          "slack": 291,
           "naturalContentClipped": false,
-          "renderedClientHeight": 680,
-          "renderedScrollHeight": 680,
+          "renderedClientHeight": 728,
+          "renderedScrollHeight": 728,
           "renderedOverflowDetected": false
         }
       ],
       "naturalFitSummary": {
-        "minimumSlack": 116,
+        "minimumSlack": 212,
         "clippedFrameIds": []
       },
       "actionableTargets": {
-        "count": 41,
-        "semanticCount": 41,
+        "count": 39,
+        "semanticCount": 39,
         "minimumWidth": 49,
         "minimumHeight": 44,
         "below44": [],
@@ -4601,19 +4507,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-login-mobile:button:1",
-            "context": "auth-login-mobile",
-            "tag": "button",
-            "role": null,
-            "label": "راهنمای نصب اپ",
-            "width": 98,
-            "height": 44,
-            "semantic": true,
-            "explicitlyDeclared": true,
-            "markedTouchTarget": true
-          },
-          {
-            "id": "auth-login-otp:button:2",
+            "id": "auth-login-otp:button:1",
             "context": "auth-login-otp",
             "tag": "button",
             "role": null,
@@ -4625,7 +4519,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-login-otp:button:3",
+            "id": "auth-login-otp:button:2",
             "context": "auth-login-otp",
             "tag": "button",
             "role": null,
@@ -4637,7 +4531,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-device-approval:button:4",
+            "id": "auth-device-approval:button:3",
             "context": "auth-device-approval",
             "tag": "button",
             "role": null,
@@ -4649,7 +4543,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-device-approval:button:5",
+            "id": "auth-device-approval:button:4",
             "context": "auth-device-approval",
             "tag": "button",
             "role": null,
@@ -4661,19 +4555,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-recovery-unavailable:button:6",
-            "context": "auth-recovery-unavailable",
-            "tag": "button",
-            "role": null,
-            "label": "ادامه انتظار برای تأیید دستگاه",
-            "width": 352,
-            "height": 50,
-            "semantic": true,
-            "explicitlyDeclared": true,
-            "markedTouchTarget": true
-          },
-          {
-            "id": "auth-recovery-waiting:button:7",
+            "id": "auth-recovery-waiting:button:5",
             "context": "auth-recovery-waiting",
             "tag": "button",
             "role": null,
@@ -4685,7 +4567,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-invite-valid:button:8",
+            "id": "auth-invite-valid:button:6",
             "context": "auth-invite-valid",
             "tag": "button",
             "role": null,
@@ -4697,7 +4579,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-invite-valid:button:9",
+            "id": "auth-invite-valid:button:7",
             "context": "auth-invite-valid",
             "tag": "button",
             "role": null,
@@ -4709,19 +4591,19 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-invite-web-only:button:10",
+            "id": "auth-invite-web-only:button:8",
             "context": "auth-invite-web-only",
             "tag": "button",
             "role": null,
-            "label": "ادامه ثبت‌نام از طریق وب",
+            "label": "ادامه ثبت‌نام در وب‌اپ",
             "width": 352,
-            "height": 62,
+            "height": 50,
             "semantic": true,
             "explicitlyDeclared": true,
             "markedTouchTarget": true
           },
           {
-            "id": "auth-register-review:button:11",
+            "id": "auth-register-review:button:9",
             "context": "auth-register-review",
             "tag": "button",
             "role": null,
@@ -4733,7 +4615,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-register-review:button:12",
+            "id": "auth-register-review:button:10",
             "context": "auth-register-review",
             "tag": "button",
             "role": null,
@@ -4745,7 +4627,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-register-otp:button:13",
+            "id": "auth-register-otp:button:11",
             "context": "auth-register-otp",
             "tag": "button",
             "role": null,
@@ -4757,7 +4639,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-register-otp:button:14",
+            "id": "auth-register-otp:button:12",
             "context": "auth-register-otp",
             "tag": "button",
             "role": null,
@@ -4769,7 +4651,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-register-address:button:15",
+            "id": "auth-register-address:button:13",
             "context": "auth-register-address",
             "tag": "button",
             "role": null,
@@ -4781,7 +4663,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-register-address:button:16",
+            "id": "auth-register-address:button:14",
             "context": "auth-register-address",
             "tag": "button",
             "role": null,
@@ -4793,7 +4675,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-register-direct:button:17",
+            "id": "auth-register-direct:button:15",
             "context": "auth-register-direct",
             "tag": "button",
             "role": null,
@@ -4805,7 +4687,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-register-telegram:button:18",
+            "id": "auth-register-telegram:button:16",
             "context": "auth-register-telegram",
             "tag": "button",
             "role": null,
@@ -4817,7 +4699,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-register-telegram:button:19",
+            "id": "auth-register-telegram:button:17",
             "context": "auth-register-telegram",
             "tag": "button",
             "role": null,
@@ -4829,11 +4711,35 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-recovery-identity:button:20",
+            "id": "auth-recovery-identity:button:18",
             "context": "auth-recovery-identity",
             "tag": "button",
             "role": null,
             "label": "انتخاب از گالری",
+            "width": 112,
+            "height": 60,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-recovery-identity:button:19",
+            "context": "auth-recovery-identity",
+            "tag": "button",
+            "role": null,
+            "label": "گرفتن تصویر با دوربین",
+            "width": 112,
+            "height": 60,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-recovery-identity:button:20",
+            "context": "auth-recovery-identity",
+            "tag": "button",
+            "role": null,
+            "label": "انتخاب فایل",
             "width": 112,
             "height": 60,
             "semantic": true,
@@ -4845,30 +4751,6 @@
             "context": "auth-recovery-identity",
             "tag": "button",
             "role": null,
-            "label": "گرفتن تصویر با دوربین",
-            "width": 112,
-            "height": 60,
-            "semantic": true,
-            "explicitlyDeclared": true,
-            "markedTouchTarget": true
-          },
-          {
-            "id": "auth-recovery-identity:button:22",
-            "context": "auth-recovery-identity",
-            "tag": "button",
-            "role": null,
-            "label": "انتخاب فایل",
-            "width": 112,
-            "height": 60,
-            "semantic": true,
-            "explicitlyDeclared": true,
-            "markedTouchTarget": true
-          },
-          {
-            "id": "auth-recovery-identity:button:23",
-            "context": "auth-recovery-identity",
-            "tag": "button",
-            "role": null,
             "label": "ارسال مدرک برای بررسی",
             "width": 352,
             "height": 50,
@@ -4877,7 +4759,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-recovery-identity:button:24",
+            "id": "auth-recovery-identity:button:22",
             "context": "auth-recovery-identity",
             "tag": "button",
             "role": null,
@@ -4889,7 +4771,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-setup-password:button:25",
+            "id": "auth-setup-password:button:23",
             "context": "auth-setup-password",
             "tag": "button",
             "role": null,
@@ -4901,7 +4783,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-setup-password:button:26",
+            "id": "auth-setup-password:button:24",
             "context": "auth-setup-password",
             "tag": "button",
             "role": null,
@@ -4913,13 +4795,37 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-setup-password:button:27",
+            "id": "auth-setup-password:button:25",
             "context": "auth-setup-password",
             "tag": "button",
             "role": null,
             "label": "ثبت رمز و ورود",
             "width": 352,
             "height": 50,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-setup-password-error:button:26",
+            "context": "auth-setup-password-error",
+            "tag": "button",
+            "role": null,
+            "label": "نمایش رمز عبور",
+            "width": 49,
+            "height": 44,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-setup-password-error:button:27",
+            "context": "auth-setup-password-error",
+            "tag": "button",
+            "role": null,
+            "label": "نمایش تکرار رمز عبور",
+            "width": 49,
+            "height": 44,
             "semantic": true,
             "explicitlyDeclared": true,
             "markedTouchTarget": true
@@ -4929,30 +4835,6 @@
             "context": "auth-setup-password-error",
             "tag": "button",
             "role": null,
-            "label": "نمایش رمز عبور",
-            "width": 49,
-            "height": 44,
-            "semantic": true,
-            "explicitlyDeclared": true,
-            "markedTouchTarget": true
-          },
-          {
-            "id": "auth-setup-password-error:button:29",
-            "context": "auth-setup-password-error",
-            "tag": "button",
-            "role": null,
-            "label": "نمایش تکرار رمز عبور",
-            "width": 49,
-            "height": 44,
-            "semantic": true,
-            "explicitlyDeclared": true,
-            "markedTouchTarget": true
-          },
-          {
-            "id": "auth-setup-password-error:button:30",
-            "context": "auth-setup-password-error",
-            "tag": "button",
-            "role": null,
             "label": "ثبت رمز و ورود",
             "width": 352,
             "height": 50,
@@ -4961,7 +4843,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "static-keyboard-illustration:button:31",
+            "id": "static-keyboard-illustration:button:29",
             "context": "static-keyboard-illustration",
             "tag": "button",
             "role": null,
@@ -4973,7 +4855,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "static-keyboard-illustration:button:32",
+            "id": "static-keyboard-illustration:button:30",
             "context": "static-keyboard-illustration",
             "tag": "button",
             "role": null,
@@ -4985,7 +4867,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "static-keyboard-illustration:button:33",
+            "id": "static-keyboard-illustration:button:31",
             "context": "static-keyboard-illustration",
             "tag": "button",
             "role": null,
@@ -4997,7 +4879,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "static-keyboard-illustration:button:34",
+            "id": "static-keyboard-illustration:button:32",
             "context": "static-keyboard-illustration",
             "tag": "button",
             "role": null,
@@ -5009,7 +4891,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "static-keyboard-illustration:button:35",
+            "id": "static-keyboard-illustration:button:33",
             "context": "static-keyboard-illustration",
             "tag": "button",
             "role": null,
@@ -5021,7 +4903,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "adaptive-desktop-proof:button:36",
+            "id": "adaptive-desktop-proof:button:34",
             "context": "adaptive-desktop-proof",
             "tag": "button",
             "role": null,
@@ -5033,7 +4915,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "adaptive-desktop-proof:button:37",
+            "id": "adaptive-desktop-proof:button:35",
             "context": "adaptive-desktop-proof",
             "tag": "button",
             "role": null,
@@ -5045,7 +4927,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "adaptive-desktop-proof:button:38",
+            "id": "adaptive-desktop-proof:button:36",
             "context": "adaptive-desktop-proof",
             "tag": "button",
             "role": null,
@@ -5057,7 +4939,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "adaptive-desktop-proof:button:39",
+            "id": "adaptive-desktop-proof:button:37",
             "context": "adaptive-desktop-proof",
             "tag": "button",
             "role": null,
@@ -5069,7 +4951,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "adaptive-desktop-proof:button:40",
+            "id": "adaptive-desktop-proof:button:38",
             "context": "adaptive-desktop-proof",
             "tag": "button",
             "role": null,
@@ -5124,11 +5006,11 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-recovery-unavailable:button:3",
-            "context": "auth-recovery-unavailable",
+            "id": "auth-recovery-waiting:button:3",
+            "context": "auth-recovery-waiting",
             "tag": "button",
             "role": null,
-            "label": "ادامه انتظار برای تأیید دستگاه",
+            "label": "انصراف از درخواست بازیابی",
             "width": 352,
             "height": 50,
             "semantic": true,
@@ -5136,11 +5018,11 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-recovery-waiting:button:4",
-            "context": "auth-recovery-waiting",
+            "id": "auth-invite-web-only:button:4",
+            "context": "auth-invite-web-only",
             "tag": "button",
             "role": null,
-            "label": "انصراف از درخواست بازیابی",
+            "label": "ادامه ثبت‌نام در وب‌اپ",
             "width": 352,
             "height": 50,
             "semantic": true,
@@ -5543,162 +5425,162 @@
       "screenNaturalFit": [
         {
           "id": "auth-login-mobile",
-          "availableHeight": 680,
-          "naturalHeight": 481,
-          "slack": 199,
+          "availableHeight": 728,
+          "naturalHeight": 343,
+          "slack": 385,
           "naturalContentClipped": false,
-          "renderedClientHeight": 680,
-          "renderedScrollHeight": 680,
+          "renderedClientHeight": 728,
+          "renderedScrollHeight": 728,
           "renderedOverflowDetected": false
         },
         {
           "id": "auth-login-otp",
-          "availableHeight": 680,
-          "naturalHeight": 546,
-          "slack": 134,
+          "availableHeight": 728,
+          "naturalHeight": 402,
+          "slack": 326,
           "naturalContentClipped": false,
-          "renderedClientHeight": 680,
-          "renderedScrollHeight": 680,
+          "renderedClientHeight": 728,
+          "renderedScrollHeight": 728,
           "renderedOverflowDetected": false
         },
         {
           "id": "auth-device-approval",
-          "availableHeight": 680,
-          "naturalHeight": 456,
-          "slack": 224,
+          "availableHeight": 728,
+          "naturalHeight": 365,
+          "slack": 363,
           "naturalContentClipped": false,
-          "renderedClientHeight": 680,
-          "renderedScrollHeight": 680,
+          "renderedClientHeight": 728,
+          "renderedScrollHeight": 728,
           "renderedOverflowDetected": false
         },
         {
           "id": "auth-recovery-unavailable",
-          "availableHeight": 680,
-          "naturalHeight": 471,
-          "slack": 209,
+          "availableHeight": 728,
+          "naturalHeight": 275,
+          "slack": 453,
           "naturalContentClipped": false,
-          "renderedClientHeight": 680,
-          "renderedScrollHeight": 680,
+          "renderedClientHeight": 728,
+          "renderedScrollHeight": 728,
           "renderedOverflowDetected": false
         },
         {
           "id": "auth-recovery-waiting",
-          "availableHeight": 680,
-          "naturalHeight": 500,
-          "slack": 180,
+          "availableHeight": 728,
+          "naturalHeight": 312,
+          "slack": 416,
           "naturalContentClipped": false,
-          "renderedClientHeight": 680,
-          "renderedScrollHeight": 680,
+          "renderedClientHeight": 728,
+          "renderedScrollHeight": 728,
           "renderedOverflowDetected": false
         },
         {
           "id": "auth-invite-valid",
-          "availableHeight": 680,
-          "naturalHeight": 474,
-          "slack": 206,
+          "availableHeight": 728,
+          "naturalHeight": 295,
+          "slack": 433,
           "naturalContentClipped": false,
-          "renderedClientHeight": 680,
-          "renderedScrollHeight": 680,
+          "renderedClientHeight": 728,
+          "renderedScrollHeight": 728,
           "renderedOverflowDetected": false
         },
         {
           "id": "auth-invite-web-only",
-          "availableHeight": 680,
-          "naturalHeight": 382,
-          "slack": 298,
+          "availableHeight": 728,
+          "naturalHeight": 212,
+          "slack": 516,
           "naturalContentClipped": false,
-          "renderedClientHeight": 680,
-          "renderedScrollHeight": 680,
+          "renderedClientHeight": 728,
+          "renderedScrollHeight": 728,
           "renderedOverflowDetected": false
         },
         {
           "id": "auth-register-review",
-          "availableHeight": 680,
-          "naturalHeight": 460,
-          "slack": 220,
+          "availableHeight": 728,
+          "naturalHeight": 401,
+          "slack": 327,
           "naturalContentClipped": false,
-          "renderedClientHeight": 680,
-          "renderedScrollHeight": 680,
+          "renderedClientHeight": 728,
+          "renderedScrollHeight": 728,
           "renderedOverflowDetected": false
         },
         {
           "id": "auth-register-otp",
-          "availableHeight": 680,
-          "naturalHeight": 404,
-          "slack": 276,
+          "availableHeight": 728,
+          "naturalHeight": 326,
+          "slack": 402,
           "naturalContentClipped": false,
-          "renderedClientHeight": 680,
-          "renderedScrollHeight": 680,
+          "renderedClientHeight": 728,
+          "renderedScrollHeight": 728,
           "renderedOverflowDetected": false
         },
         {
           "id": "auth-register-address",
-          "availableHeight": 680,
-          "naturalHeight": 564,
-          "slack": 116,
+          "availableHeight": 728,
+          "naturalHeight": 379,
+          "slack": 349,
           "naturalContentClipped": false,
-          "renderedClientHeight": 680,
-          "renderedScrollHeight": 680,
+          "renderedClientHeight": 728,
+          "renderedScrollHeight": 728,
           "renderedOverflowDetected": false
         },
         {
           "id": "auth-register-direct",
-          "availableHeight": 680,
-          "naturalHeight": 507,
-          "slack": 173,
+          "availableHeight": 728,
+          "naturalHeight": 299,
+          "slack": 429,
           "naturalContentClipped": false,
-          "renderedClientHeight": 680,
-          "renderedScrollHeight": 680,
+          "renderedClientHeight": 728,
+          "renderedScrollHeight": 728,
           "renderedOverflowDetected": false
         },
         {
           "id": "auth-register-telegram",
-          "availableHeight": 680,
-          "naturalHeight": 478,
-          "slack": 202,
+          "availableHeight": 728,
+          "naturalHeight": 346,
+          "slack": 382,
           "naturalContentClipped": false,
-          "renderedClientHeight": 680,
-          "renderedScrollHeight": 680,
+          "renderedClientHeight": 728,
+          "renderedScrollHeight": 728,
           "renderedOverflowDetected": false
         },
         {
           "id": "auth-recovery-identity",
-          "availableHeight": 680,
-          "naturalHeight": 540,
-          "slack": 140,
+          "availableHeight": 728,
+          "naturalHeight": 516,
+          "slack": 212,
           "naturalContentClipped": false,
-          "renderedClientHeight": 680,
-          "renderedScrollHeight": 680,
+          "renderedClientHeight": 728,
+          "renderedScrollHeight": 728,
           "renderedOverflowDetected": false
         },
         {
           "id": "auth-setup-password",
-          "availableHeight": 680,
-          "naturalHeight": 516,
-          "slack": 164,
+          "availableHeight": 728,
+          "naturalHeight": 435,
+          "slack": 293,
           "naturalContentClipped": false,
-          "renderedClientHeight": 680,
-          "renderedScrollHeight": 680,
+          "renderedClientHeight": 728,
+          "renderedScrollHeight": 728,
           "renderedOverflowDetected": false
         },
         {
           "id": "auth-setup-password-error",
-          "availableHeight": 680,
-          "naturalHeight": 534,
-          "slack": 146,
+          "availableHeight": 728,
+          "naturalHeight": 437,
+          "slack": 291,
           "naturalContentClipped": false,
-          "renderedClientHeight": 680,
-          "renderedScrollHeight": 680,
+          "renderedClientHeight": 728,
+          "renderedScrollHeight": 728,
           "renderedOverflowDetected": false
         }
       ],
       "naturalFitSummary": {
-        "minimumSlack": 116,
+        "minimumSlack": 212,
         "clippedFrameIds": []
       },
       "actionableTargets": {
-        "count": 41,
-        "semanticCount": 41,
+        "count": 39,
+        "semanticCount": 39,
         "minimumWidth": 49,
         "minimumHeight": 44,
         "below44": [],
@@ -5717,19 +5599,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-login-mobile:button:1",
-            "context": "auth-login-mobile",
-            "tag": "button",
-            "role": null,
-            "label": "راهنمای نصب اپ",
-            "width": 98,
-            "height": 44,
-            "semantic": true,
-            "explicitlyDeclared": true,
-            "markedTouchTarget": true
-          },
-          {
-            "id": "auth-login-otp:button:2",
+            "id": "auth-login-otp:button:1",
             "context": "auth-login-otp",
             "tag": "button",
             "role": null,
@@ -5741,7 +5611,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-login-otp:button:3",
+            "id": "auth-login-otp:button:2",
             "context": "auth-login-otp",
             "tag": "button",
             "role": null,
@@ -5753,7 +5623,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-device-approval:button:4",
+            "id": "auth-device-approval:button:3",
             "context": "auth-device-approval",
             "tag": "button",
             "role": null,
@@ -5765,7 +5635,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-device-approval:button:5",
+            "id": "auth-device-approval:button:4",
             "context": "auth-device-approval",
             "tag": "button",
             "role": null,
@@ -5777,19 +5647,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-recovery-unavailable:button:6",
-            "context": "auth-recovery-unavailable",
-            "tag": "button",
-            "role": null,
-            "label": "ادامه انتظار برای تأیید دستگاه",
-            "width": 376,
-            "height": 50,
-            "semantic": true,
-            "explicitlyDeclared": true,
-            "markedTouchTarget": true
-          },
-          {
-            "id": "auth-recovery-waiting:button:7",
+            "id": "auth-recovery-waiting:button:5",
             "context": "auth-recovery-waiting",
             "tag": "button",
             "role": null,
@@ -5801,7 +5659,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-invite-valid:button:8",
+            "id": "auth-invite-valid:button:6",
             "context": "auth-invite-valid",
             "tag": "button",
             "role": null,
@@ -5813,7 +5671,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-invite-valid:button:9",
+            "id": "auth-invite-valid:button:7",
             "context": "auth-invite-valid",
             "tag": "button",
             "role": null,
@@ -5825,19 +5683,19 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-invite-web-only:button:10",
+            "id": "auth-invite-web-only:button:8",
             "context": "auth-invite-web-only",
             "tag": "button",
             "role": null,
-            "label": "ادامه ثبت‌نام از طریق وب",
+            "label": "ادامه ثبت‌نام در وب‌اپ",
             "width": 376,
-            "height": 62,
+            "height": 50,
             "semantic": true,
             "explicitlyDeclared": true,
             "markedTouchTarget": true
           },
           {
-            "id": "auth-register-review:button:11",
+            "id": "auth-register-review:button:9",
             "context": "auth-register-review",
             "tag": "button",
             "role": null,
@@ -5849,7 +5707,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-register-review:button:12",
+            "id": "auth-register-review:button:10",
             "context": "auth-register-review",
             "tag": "button",
             "role": null,
@@ -5861,7 +5719,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-register-otp:button:13",
+            "id": "auth-register-otp:button:11",
             "context": "auth-register-otp",
             "tag": "button",
             "role": null,
@@ -5873,7 +5731,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-register-otp:button:14",
+            "id": "auth-register-otp:button:12",
             "context": "auth-register-otp",
             "tag": "button",
             "role": null,
@@ -5885,7 +5743,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-register-address:button:15",
+            "id": "auth-register-address:button:13",
             "context": "auth-register-address",
             "tag": "button",
             "role": null,
@@ -5897,7 +5755,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-register-address:button:16",
+            "id": "auth-register-address:button:14",
             "context": "auth-register-address",
             "tag": "button",
             "role": null,
@@ -5909,7 +5767,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-register-direct:button:17",
+            "id": "auth-register-direct:button:15",
             "context": "auth-register-direct",
             "tag": "button",
             "role": null,
@@ -5921,7 +5779,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-register-telegram:button:18",
+            "id": "auth-register-telegram:button:16",
             "context": "auth-register-telegram",
             "tag": "button",
             "role": null,
@@ -5933,7 +5791,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-register-telegram:button:19",
+            "id": "auth-register-telegram:button:17",
             "context": "auth-register-telegram",
             "tag": "button",
             "role": null,
@@ -5945,11 +5803,35 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-recovery-identity:button:20",
+            "id": "auth-recovery-identity:button:18",
             "context": "auth-recovery-identity",
             "tag": "button",
             "role": null,
             "label": "انتخاب از گالری",
+            "width": 120,
+            "height": 60,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-recovery-identity:button:19",
+            "context": "auth-recovery-identity",
+            "tag": "button",
+            "role": null,
+            "label": "گرفتن تصویر با دوربین",
+            "width": 120,
+            "height": 60,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-recovery-identity:button:20",
+            "context": "auth-recovery-identity",
+            "tag": "button",
+            "role": null,
+            "label": "انتخاب فایل",
             "width": 120,
             "height": 60,
             "semantic": true,
@@ -5961,30 +5843,6 @@
             "context": "auth-recovery-identity",
             "tag": "button",
             "role": null,
-            "label": "گرفتن تصویر با دوربین",
-            "width": 120,
-            "height": 60,
-            "semantic": true,
-            "explicitlyDeclared": true,
-            "markedTouchTarget": true
-          },
-          {
-            "id": "auth-recovery-identity:button:22",
-            "context": "auth-recovery-identity",
-            "tag": "button",
-            "role": null,
-            "label": "انتخاب فایل",
-            "width": 120,
-            "height": 60,
-            "semantic": true,
-            "explicitlyDeclared": true,
-            "markedTouchTarget": true
-          },
-          {
-            "id": "auth-recovery-identity:button:23",
-            "context": "auth-recovery-identity",
-            "tag": "button",
-            "role": null,
             "label": "ارسال مدرک برای بررسی",
             "width": 376,
             "height": 50,
@@ -5993,7 +5851,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-recovery-identity:button:24",
+            "id": "auth-recovery-identity:button:22",
             "context": "auth-recovery-identity",
             "tag": "button",
             "role": null,
@@ -6005,7 +5863,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-setup-password:button:25",
+            "id": "auth-setup-password:button:23",
             "context": "auth-setup-password",
             "tag": "button",
             "role": null,
@@ -6017,7 +5875,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-setup-password:button:26",
+            "id": "auth-setup-password:button:24",
             "context": "auth-setup-password",
             "tag": "button",
             "role": null,
@@ -6029,13 +5887,37 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-setup-password:button:27",
+            "id": "auth-setup-password:button:25",
             "context": "auth-setup-password",
             "tag": "button",
             "role": null,
             "label": "ثبت رمز و ورود",
             "width": 376,
             "height": 50,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-setup-password-error:button:26",
+            "context": "auth-setup-password-error",
+            "tag": "button",
+            "role": null,
+            "label": "نمایش رمز عبور",
+            "width": 49,
+            "height": 44,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-setup-password-error:button:27",
+            "context": "auth-setup-password-error",
+            "tag": "button",
+            "role": null,
+            "label": "نمایش تکرار رمز عبور",
+            "width": 49,
+            "height": 44,
             "semantic": true,
             "explicitlyDeclared": true,
             "markedTouchTarget": true
@@ -6045,30 +5927,6 @@
             "context": "auth-setup-password-error",
             "tag": "button",
             "role": null,
-            "label": "نمایش رمز عبور",
-            "width": 49,
-            "height": 44,
-            "semantic": true,
-            "explicitlyDeclared": true,
-            "markedTouchTarget": true
-          },
-          {
-            "id": "auth-setup-password-error:button:29",
-            "context": "auth-setup-password-error",
-            "tag": "button",
-            "role": null,
-            "label": "نمایش تکرار رمز عبور",
-            "width": 49,
-            "height": 44,
-            "semantic": true,
-            "explicitlyDeclared": true,
-            "markedTouchTarget": true
-          },
-          {
-            "id": "auth-setup-password-error:button:30",
-            "context": "auth-setup-password-error",
-            "tag": "button",
-            "role": null,
             "label": "ثبت رمز و ورود",
             "width": 376,
             "height": 50,
@@ -6077,7 +5935,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "static-keyboard-illustration:button:31",
+            "id": "static-keyboard-illustration:button:29",
             "context": "static-keyboard-illustration",
             "tag": "button",
             "role": null,
@@ -6089,7 +5947,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "static-keyboard-illustration:button:32",
+            "id": "static-keyboard-illustration:button:30",
             "context": "static-keyboard-illustration",
             "tag": "button",
             "role": null,
@@ -6101,7 +5959,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "static-keyboard-illustration:button:33",
+            "id": "static-keyboard-illustration:button:31",
             "context": "static-keyboard-illustration",
             "tag": "button",
             "role": null,
@@ -6113,7 +5971,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "static-keyboard-illustration:button:34",
+            "id": "static-keyboard-illustration:button:32",
             "context": "static-keyboard-illustration",
             "tag": "button",
             "role": null,
@@ -6125,7 +5983,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "static-keyboard-illustration:button:35",
+            "id": "static-keyboard-illustration:button:33",
             "context": "static-keyboard-illustration",
             "tag": "button",
             "role": null,
@@ -6137,7 +5995,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "adaptive-desktop-proof:button:36",
+            "id": "adaptive-desktop-proof:button:34",
             "context": "adaptive-desktop-proof",
             "tag": "button",
             "role": null,
@@ -6149,7 +6007,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "adaptive-desktop-proof:button:37",
+            "id": "adaptive-desktop-proof:button:35",
             "context": "adaptive-desktop-proof",
             "tag": "button",
             "role": null,
@@ -6161,7 +6019,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "adaptive-desktop-proof:button:38",
+            "id": "adaptive-desktop-proof:button:36",
             "context": "adaptive-desktop-proof",
             "tag": "button",
             "role": null,
@@ -6173,7 +6031,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "adaptive-desktop-proof:button:39",
+            "id": "adaptive-desktop-proof:button:37",
             "context": "adaptive-desktop-proof",
             "tag": "button",
             "role": null,
@@ -6185,7 +6043,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "adaptive-desktop-proof:button:40",
+            "id": "adaptive-desktop-proof:button:38",
             "context": "adaptive-desktop-proof",
             "tag": "button",
             "role": null,
@@ -6240,11 +6098,11 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-recovery-unavailable:button:3",
-            "context": "auth-recovery-unavailable",
+            "id": "auth-recovery-waiting:button:3",
+            "context": "auth-recovery-waiting",
             "tag": "button",
             "role": null,
-            "label": "ادامه انتظار برای تأیید دستگاه",
+            "label": "انصراف از درخواست بازیابی",
             "width": 376,
             "height": 50,
             "semantic": true,
@@ -6252,11 +6110,11 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-recovery-waiting:button:4",
-            "context": "auth-recovery-waiting",
+            "id": "auth-invite-web-only:button:4",
+            "context": "auth-invite-web-only",
             "tag": "button",
             "role": null,
-            "label": "انصراف از درخواست بازیابی",
+            "label": "ادامه ثبت‌نام در وب‌اپ",
             "width": 376,
             "height": 50,
             "semantic": true,
@@ -6659,162 +6517,162 @@
       "screenNaturalFit": [
         {
           "id": "auth-login-mobile",
-          "availableHeight": 680,
-          "naturalHeight": 461,
-          "slack": 219,
+          "availableHeight": 728,
+          "naturalHeight": 322,
+          "slack": 406,
           "naturalContentClipped": false,
-          "renderedClientHeight": 680,
-          "renderedScrollHeight": 680,
+          "renderedClientHeight": 728,
+          "renderedScrollHeight": 728,
           "renderedOverflowDetected": false
         },
         {
           "id": "auth-login-otp",
-          "availableHeight": 680,
-          "naturalHeight": 546,
-          "slack": 134,
+          "availableHeight": 728,
+          "naturalHeight": 402,
+          "slack": 326,
           "naturalContentClipped": false,
-          "renderedClientHeight": 680,
-          "renderedScrollHeight": 680,
+          "renderedClientHeight": 728,
+          "renderedScrollHeight": 728,
           "renderedOverflowDetected": false
         },
         {
           "id": "auth-device-approval",
-          "availableHeight": 680,
-          "naturalHeight": 456,
-          "slack": 224,
+          "availableHeight": 728,
+          "naturalHeight": 365,
+          "slack": 363,
           "naturalContentClipped": false,
-          "renderedClientHeight": 680,
-          "renderedScrollHeight": 680,
+          "renderedClientHeight": 728,
+          "renderedScrollHeight": 728,
           "renderedOverflowDetected": false
         },
         {
           "id": "auth-recovery-unavailable",
-          "availableHeight": 680,
-          "naturalHeight": 471,
-          "slack": 209,
+          "availableHeight": 728,
+          "naturalHeight": 275,
+          "slack": 453,
           "naturalContentClipped": false,
-          "renderedClientHeight": 680,
-          "renderedScrollHeight": 680,
+          "renderedClientHeight": 728,
+          "renderedScrollHeight": 728,
           "renderedOverflowDetected": false
         },
         {
           "id": "auth-recovery-waiting",
-          "availableHeight": 680,
-          "naturalHeight": 500,
-          "slack": 180,
+          "availableHeight": 728,
+          "naturalHeight": 312,
+          "slack": 416,
           "naturalContentClipped": false,
-          "renderedClientHeight": 680,
-          "renderedScrollHeight": 680,
+          "renderedClientHeight": 728,
+          "renderedScrollHeight": 728,
           "renderedOverflowDetected": false
         },
         {
           "id": "auth-invite-valid",
-          "availableHeight": 680,
-          "naturalHeight": 453,
-          "slack": 227,
+          "availableHeight": 728,
+          "naturalHeight": 295,
+          "slack": 433,
           "naturalContentClipped": false,
-          "renderedClientHeight": 680,
-          "renderedScrollHeight": 680,
+          "renderedClientHeight": 728,
+          "renderedScrollHeight": 728,
           "renderedOverflowDetected": false
         },
         {
           "id": "auth-invite-web-only",
-          "availableHeight": 680,
-          "naturalHeight": 382,
-          "slack": 298,
+          "availableHeight": 728,
+          "naturalHeight": 212,
+          "slack": 516,
           "naturalContentClipped": false,
-          "renderedClientHeight": 680,
-          "renderedScrollHeight": 680,
+          "renderedClientHeight": 728,
+          "renderedScrollHeight": 728,
           "renderedOverflowDetected": false
         },
         {
           "id": "auth-register-review",
-          "availableHeight": 680,
-          "naturalHeight": 460,
-          "slack": 220,
+          "availableHeight": 728,
+          "naturalHeight": 401,
+          "slack": 327,
           "naturalContentClipped": false,
-          "renderedClientHeight": 680,
-          "renderedScrollHeight": 680,
+          "renderedClientHeight": 728,
+          "renderedScrollHeight": 728,
           "renderedOverflowDetected": false
         },
         {
           "id": "auth-register-otp",
-          "availableHeight": 680,
-          "naturalHeight": 404,
-          "slack": 276,
+          "availableHeight": 728,
+          "naturalHeight": 326,
+          "slack": 402,
           "naturalContentClipped": false,
-          "renderedClientHeight": 680,
-          "renderedScrollHeight": 680,
+          "renderedClientHeight": 728,
+          "renderedScrollHeight": 728,
           "renderedOverflowDetected": false
         },
         {
           "id": "auth-register-address",
-          "availableHeight": 680,
-          "naturalHeight": 564,
-          "slack": 116,
+          "availableHeight": 728,
+          "naturalHeight": 379,
+          "slack": 349,
           "naturalContentClipped": false,
-          "renderedClientHeight": 680,
-          "renderedScrollHeight": 680,
+          "renderedClientHeight": 728,
+          "renderedScrollHeight": 728,
           "renderedOverflowDetected": false
         },
         {
           "id": "auth-register-direct",
-          "availableHeight": 680,
-          "naturalHeight": 507,
-          "slack": 173,
+          "availableHeight": 728,
+          "naturalHeight": 299,
+          "slack": 429,
           "naturalContentClipped": false,
-          "renderedClientHeight": 680,
-          "renderedScrollHeight": 680,
+          "renderedClientHeight": 728,
+          "renderedScrollHeight": 728,
           "renderedOverflowDetected": false
         },
         {
           "id": "auth-register-telegram",
-          "availableHeight": 680,
-          "naturalHeight": 478,
-          "slack": 202,
+          "availableHeight": 728,
+          "naturalHeight": 346,
+          "slack": 382,
           "naturalContentClipped": false,
-          "renderedClientHeight": 680,
-          "renderedScrollHeight": 680,
+          "renderedClientHeight": 728,
+          "renderedScrollHeight": 728,
           "renderedOverflowDetected": false
         },
         {
           "id": "auth-recovery-identity",
-          "availableHeight": 680,
+          "availableHeight": 728,
           "naturalHeight": 516,
-          "slack": 164,
+          "slack": 212,
           "naturalContentClipped": false,
-          "renderedClientHeight": 680,
-          "renderedScrollHeight": 680,
+          "renderedClientHeight": 728,
+          "renderedScrollHeight": 728,
           "renderedOverflowDetected": false
         },
         {
           "id": "auth-setup-password",
-          "availableHeight": 680,
-          "naturalHeight": 516,
-          "slack": 164,
+          "availableHeight": 728,
+          "naturalHeight": 435,
+          "slack": 293,
           "naturalContentClipped": false,
-          "renderedClientHeight": 680,
-          "renderedScrollHeight": 680,
+          "renderedClientHeight": 728,
+          "renderedScrollHeight": 728,
           "renderedOverflowDetected": false
         },
         {
           "id": "auth-setup-password-error",
-          "availableHeight": 680,
-          "naturalHeight": 534,
-          "slack": 146,
+          "availableHeight": 728,
+          "naturalHeight": 437,
+          "slack": 291,
           "naturalContentClipped": false,
-          "renderedClientHeight": 680,
-          "renderedScrollHeight": 680,
+          "renderedClientHeight": 728,
+          "renderedScrollHeight": 728,
           "renderedOverflowDetected": false
         }
       ],
       "naturalFitSummary": {
-        "minimumSlack": 116,
+        "minimumSlack": 212,
         "clippedFrameIds": []
       },
       "actionableTargets": {
-        "count": 41,
-        "semanticCount": 41,
+        "count": 39,
+        "semanticCount": 39,
         "minimumWidth": 49,
         "minimumHeight": 44,
         "below44": [],
@@ -6833,19 +6691,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-login-mobile:button:1",
-            "context": "auth-login-mobile",
-            "tag": "button",
-            "role": null,
-            "label": "راهنمای نصب اپ",
-            "width": 98,
-            "height": 44,
-            "semantic": true,
-            "explicitlyDeclared": true,
-            "markedTouchTarget": true
-          },
-          {
-            "id": "auth-login-otp:button:2",
+            "id": "auth-login-otp:button:1",
             "context": "auth-login-otp",
             "tag": "button",
             "role": null,
@@ -6857,7 +6703,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-login-otp:button:3",
+            "id": "auth-login-otp:button:2",
             "context": "auth-login-otp",
             "tag": "button",
             "role": null,
@@ -6869,7 +6715,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-device-approval:button:4",
+            "id": "auth-device-approval:button:3",
             "context": "auth-device-approval",
             "tag": "button",
             "role": null,
@@ -6881,7 +6727,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-device-approval:button:5",
+            "id": "auth-device-approval:button:4",
             "context": "auth-device-approval",
             "tag": "button",
             "role": null,
@@ -6893,19 +6739,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-recovery-unavailable:button:6",
-            "context": "auth-recovery-unavailable",
-            "tag": "button",
-            "role": null,
-            "label": "ادامه انتظار برای تأیید دستگاه",
-            "width": 392,
-            "height": 50,
-            "semantic": true,
-            "explicitlyDeclared": true,
-            "markedTouchTarget": true
-          },
-          {
-            "id": "auth-recovery-waiting:button:7",
+            "id": "auth-recovery-waiting:button:5",
             "context": "auth-recovery-waiting",
             "tag": "button",
             "role": null,
@@ -6917,7 +6751,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-invite-valid:button:8",
+            "id": "auth-invite-valid:button:6",
             "context": "auth-invite-valid",
             "tag": "button",
             "role": null,
@@ -6929,7 +6763,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-invite-valid:button:9",
+            "id": "auth-invite-valid:button:7",
             "context": "auth-invite-valid",
             "tag": "button",
             "role": null,
@@ -6941,19 +6775,19 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-invite-web-only:button:10",
+            "id": "auth-invite-web-only:button:8",
             "context": "auth-invite-web-only",
             "tag": "button",
             "role": null,
-            "label": "ادامه ثبت‌نام از طریق وب",
+            "label": "ادامه ثبت‌نام در وب‌اپ",
             "width": 392,
-            "height": 62,
+            "height": 50,
             "semantic": true,
             "explicitlyDeclared": true,
             "markedTouchTarget": true
           },
           {
-            "id": "auth-register-review:button:11",
+            "id": "auth-register-review:button:9",
             "context": "auth-register-review",
             "tag": "button",
             "role": null,
@@ -6965,7 +6799,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-register-review:button:12",
+            "id": "auth-register-review:button:10",
             "context": "auth-register-review",
             "tag": "button",
             "role": null,
@@ -6977,7 +6811,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-register-otp:button:13",
+            "id": "auth-register-otp:button:11",
             "context": "auth-register-otp",
             "tag": "button",
             "role": null,
@@ -6989,7 +6823,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-register-otp:button:14",
+            "id": "auth-register-otp:button:12",
             "context": "auth-register-otp",
             "tag": "button",
             "role": null,
@@ -7001,7 +6835,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-register-address:button:15",
+            "id": "auth-register-address:button:13",
             "context": "auth-register-address",
             "tag": "button",
             "role": null,
@@ -7013,7 +6847,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-register-address:button:16",
+            "id": "auth-register-address:button:14",
             "context": "auth-register-address",
             "tag": "button",
             "role": null,
@@ -7025,7 +6859,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-register-direct:button:17",
+            "id": "auth-register-direct:button:15",
             "context": "auth-register-direct",
             "tag": "button",
             "role": null,
@@ -7037,7 +6871,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-register-telegram:button:18",
+            "id": "auth-register-telegram:button:16",
             "context": "auth-register-telegram",
             "tag": "button",
             "role": null,
@@ -7049,7 +6883,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-register-telegram:button:19",
+            "id": "auth-register-telegram:button:17",
             "context": "auth-register-telegram",
             "tag": "button",
             "role": null,
@@ -7061,11 +6895,35 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-recovery-identity:button:20",
+            "id": "auth-recovery-identity:button:18",
             "context": "auth-recovery-identity",
             "tag": "button",
             "role": null,
             "label": "انتخاب از گالری",
+            "width": 125,
+            "height": 60,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-recovery-identity:button:19",
+            "context": "auth-recovery-identity",
+            "tag": "button",
+            "role": null,
+            "label": "گرفتن تصویر با دوربین",
+            "width": 125,
+            "height": 60,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-recovery-identity:button:20",
+            "context": "auth-recovery-identity",
+            "tag": "button",
+            "role": null,
+            "label": "انتخاب فایل",
             "width": 125,
             "height": 60,
             "semantic": true,
@@ -7077,30 +6935,6 @@
             "context": "auth-recovery-identity",
             "tag": "button",
             "role": null,
-            "label": "گرفتن تصویر با دوربین",
-            "width": 125,
-            "height": 60,
-            "semantic": true,
-            "explicitlyDeclared": true,
-            "markedTouchTarget": true
-          },
-          {
-            "id": "auth-recovery-identity:button:22",
-            "context": "auth-recovery-identity",
-            "tag": "button",
-            "role": null,
-            "label": "انتخاب فایل",
-            "width": 125,
-            "height": 60,
-            "semantic": true,
-            "explicitlyDeclared": true,
-            "markedTouchTarget": true
-          },
-          {
-            "id": "auth-recovery-identity:button:23",
-            "context": "auth-recovery-identity",
-            "tag": "button",
-            "role": null,
             "label": "ارسال مدرک برای بررسی",
             "width": 392,
             "height": 50,
@@ -7109,7 +6943,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-recovery-identity:button:24",
+            "id": "auth-recovery-identity:button:22",
             "context": "auth-recovery-identity",
             "tag": "button",
             "role": null,
@@ -7121,7 +6955,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-setup-password:button:25",
+            "id": "auth-setup-password:button:23",
             "context": "auth-setup-password",
             "tag": "button",
             "role": null,
@@ -7133,7 +6967,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-setup-password:button:26",
+            "id": "auth-setup-password:button:24",
             "context": "auth-setup-password",
             "tag": "button",
             "role": null,
@@ -7145,13 +6979,37 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-setup-password:button:27",
+            "id": "auth-setup-password:button:25",
             "context": "auth-setup-password",
             "tag": "button",
             "role": null,
             "label": "ثبت رمز و ورود",
             "width": 392,
             "height": 50,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-setup-password-error:button:26",
+            "context": "auth-setup-password-error",
+            "tag": "button",
+            "role": null,
+            "label": "نمایش رمز عبور",
+            "width": 49,
+            "height": 44,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-setup-password-error:button:27",
+            "context": "auth-setup-password-error",
+            "tag": "button",
+            "role": null,
+            "label": "نمایش تکرار رمز عبور",
+            "width": 49,
+            "height": 44,
             "semantic": true,
             "explicitlyDeclared": true,
             "markedTouchTarget": true
@@ -7161,30 +7019,6 @@
             "context": "auth-setup-password-error",
             "tag": "button",
             "role": null,
-            "label": "نمایش رمز عبور",
-            "width": 49,
-            "height": 44,
-            "semantic": true,
-            "explicitlyDeclared": true,
-            "markedTouchTarget": true
-          },
-          {
-            "id": "auth-setup-password-error:button:29",
-            "context": "auth-setup-password-error",
-            "tag": "button",
-            "role": null,
-            "label": "نمایش تکرار رمز عبور",
-            "width": 49,
-            "height": 44,
-            "semantic": true,
-            "explicitlyDeclared": true,
-            "markedTouchTarget": true
-          },
-          {
-            "id": "auth-setup-password-error:button:30",
-            "context": "auth-setup-password-error",
-            "tag": "button",
-            "role": null,
             "label": "ثبت رمز و ورود",
             "width": 392,
             "height": 50,
@@ -7193,7 +7027,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "static-keyboard-illustration:button:31",
+            "id": "static-keyboard-illustration:button:29",
             "context": "static-keyboard-illustration",
             "tag": "button",
             "role": null,
@@ -7205,7 +7039,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "static-keyboard-illustration:button:32",
+            "id": "static-keyboard-illustration:button:30",
             "context": "static-keyboard-illustration",
             "tag": "button",
             "role": null,
@@ -7217,7 +7051,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "static-keyboard-illustration:button:33",
+            "id": "static-keyboard-illustration:button:31",
             "context": "static-keyboard-illustration",
             "tag": "button",
             "role": null,
@@ -7229,7 +7063,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "static-keyboard-illustration:button:34",
+            "id": "static-keyboard-illustration:button:32",
             "context": "static-keyboard-illustration",
             "tag": "button",
             "role": null,
@@ -7241,7 +7075,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "static-keyboard-illustration:button:35",
+            "id": "static-keyboard-illustration:button:33",
             "context": "static-keyboard-illustration",
             "tag": "button",
             "role": null,
@@ -7253,7 +7087,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "adaptive-desktop-proof:button:36",
+            "id": "adaptive-desktop-proof:button:34",
             "context": "adaptive-desktop-proof",
             "tag": "button",
             "role": null,
@@ -7265,7 +7099,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "adaptive-desktop-proof:button:37",
+            "id": "adaptive-desktop-proof:button:35",
             "context": "adaptive-desktop-proof",
             "tag": "button",
             "role": null,
@@ -7277,7 +7111,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "adaptive-desktop-proof:button:38",
+            "id": "adaptive-desktop-proof:button:36",
             "context": "adaptive-desktop-proof",
             "tag": "button",
             "role": null,
@@ -7289,7 +7123,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "adaptive-desktop-proof:button:39",
+            "id": "adaptive-desktop-proof:button:37",
             "context": "adaptive-desktop-proof",
             "tag": "button",
             "role": null,
@@ -7301,7 +7135,7 @@
             "markedTouchTarget": true
           },
           {
-            "id": "adaptive-desktop-proof:button:40",
+            "id": "adaptive-desktop-proof:button:38",
             "context": "adaptive-desktop-proof",
             "tag": "button",
             "role": null,
@@ -7356,11 +7190,11 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-recovery-unavailable:button:3",
-            "context": "auth-recovery-unavailable",
+            "id": "auth-recovery-waiting:button:3",
+            "context": "auth-recovery-waiting",
             "tag": "button",
             "role": null,
-            "label": "ادامه انتظار برای تأیید دستگاه",
+            "label": "انصراف از درخواست بازیابی",
             "width": 392,
             "height": 50,
             "semantic": true,
@@ -7368,11 +7202,11 @@
             "markedTouchTarget": true
           },
           {
-            "id": "auth-recovery-waiting:button:4",
-            "context": "auth-recovery-waiting",
+            "id": "auth-invite-web-only:button:4",
+            "context": "auth-invite-web-only",
             "tag": "button",
             "role": null,
-            "label": "انصراف از درخواست بازیابی",
+            "label": "ادامه ثبت‌نام در وب‌اپ",
             "width": 392,
             "height": 50,
             "semantic": true,
@@ -7635,33 +7469,33 @@
     "stateCardCount": 41,
     "phoneElementCount": 15,
     "phoneElementDimensionMismatches": [],
-    "minimumNaturalSlackAtAuthoringWidth": 116,
+    "minimumNaturalSlackAtAuthoringWidth": 212,
     "naturallyClippedAtAuthoringWidth": [],
     "widthsWithHorizontalOverflow": [],
     "naturalFitByWidth": [
       {
         "width": 360,
-        "minimumSlack": 95,
+        "minimumSlack": 212,
         "clippedFrameIds": []
       },
       {
         "width": 375,
-        "minimumSlack": 95,
+        "minimumSlack": 212,
         "clippedFrameIds": []
       },
       {
         "width": 390,
-        "minimumSlack": 116,
+        "minimumSlack": 212,
         "clippedFrameIds": []
       },
       {
         "width": 414,
-        "minimumSlack": 116,
+        "minimumSlack": 212,
         "clippedFrameIds": []
       },
       {
         "width": 430,
-        "minimumSlack": 116,
+        "minimumSlack": 212,
         "clippedFrameIds": []
       }
     ],
