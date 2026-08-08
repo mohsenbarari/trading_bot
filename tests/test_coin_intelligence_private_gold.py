@@ -106,7 +106,7 @@ class PrivateGoldParserTests(unittest.TestCase):
     def test_unmarked_offer_abstains_instead_of_guessing_physical(self) -> None:
         self.assertIsNone(parse_private_gold_offer(self.source("80,300,000 فروش 5 تا")))
 
-    def test_edit_time_is_trade_time_and_price_is_explicitly_converted_to_irt(self) -> None:
+    def test_edit_time_is_trade_time_and_price_remains_toman(self) -> None:
         observations = private_gold_observations(
             self.source(
                 "80,300,000 فروش 5 تا با حواله",
@@ -117,7 +117,7 @@ class PrivateGoldParserTests(unittest.TestCase):
         )
 
         self.assertEqual([item.event_type for item in observations], ["OFFER", "TRADE"])
-        self.assertEqual(str(observations[0].price), "803000000")
+        self.assertEqual(str(observations[0].price), "80300000")
         self.assertEqual(str(observations[1].event_time_utc), "2026-08-04T10:02:00Z")
         self.assertEqual(observations[1].quantity, 5)
 
@@ -212,7 +212,7 @@ class PrivateGoldMinuteAggregationTests(unittest.TestCase):
             """
         ).fetchone()
         self.assertEqual(raw_count, 3)  # two offers + one edited confirmation
-        self.assertEqual(aggregate["price_num"], 808_000_000.0)
+        self.assertEqual(aggregate["price_num"], 80_800_000.0)
         self.assertIn('"trade_count":1', aggregate["attributes_json"])
         snapshot = build_market_snapshot(
             self.connection,
@@ -220,7 +220,7 @@ class PrivateGoldMinuteAggregationTests(unittest.TestCase):
         )
         self.assertEqual(
             snapshot["signals"]["PRIVATE_GOLD_PAPER_NORMAL_TOMORROW"]["latest_price"],
-            808_000_000.0,
+            80_800_000.0,
         )
         self.assertEqual(
             snapshot["signals"]["PRIVATE_GOLD_PAPER_REVERSE_TOMORROW"]["status"],
@@ -250,10 +250,10 @@ class PrivateGoldMinuteAggregationTests(unittest.TestCase):
             """
             SELECT is_conditional FROM market_observations
             WHERE source_code = 'PRIVATE_GOLD_CHANNEL'
-              AND price_num = 600000000
+              AND price_num = 60000000
             """
         ).fetchone()
-        self.assertEqual(aggregate["price_num"], 800_000_000.0)
+        self.assertEqual(aggregate["price_num"], 80_000_000.0)
         self.assertEqual(conditional["is_conditional"], 1)
 
     def test_physical_condition_needs_market_comparability_but_normal_note_does_not(self) -> None:
@@ -295,7 +295,7 @@ class PrivateGoldMinuteAggregationTests(unittest.TestCase):
         ).fetchone()[0]
 
         self.assertEqual(raw_conditions, 2)
-        self.assertEqual(physical["latest_price"], 802_000_000.0)
+        self.assertEqual(physical["latest_price"], 80_200_000.0)
         self.assertEqual(physical["observation_count"], 3)
         self.assertEqual(
             physical["method"],

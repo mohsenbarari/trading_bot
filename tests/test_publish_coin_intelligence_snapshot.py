@@ -52,7 +52,7 @@ class PublishCoinIntelligenceSnapshotTests(unittest.TestCase):
                 trade_form="PHYSICAL",
                 event_type="QUOTE",
                 side="MID",
-                price=803_000_000,
+                price=80_300_000,
                 price_unit="TOMAN_PER_MESGHAL_750",
                 currency="TOMAN",
                 parse_confidence=1.0,

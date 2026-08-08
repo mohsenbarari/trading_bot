@@ -253,6 +253,21 @@ Training reads paths supplied through the runtime environment. A chronological
 conformal calibration supplies a minimum tolerance floor only after separate
 test coverage is recorded in the model artifact.
 
+The scikit-learn challengers are research-only and use dependencies kept out
+of the production application image. Install them explicitly before running
+the shadow training scripts:
+
+```bash
+python3 -m pip install -r apps/coin_rate_estimator/requirements-research.txt
+python3 scripts/train_and_compare_coin_shadow_ml.py --skip-commodity-engine
+python3 scripts/train_residual_shadow_and_calibrate.py --skip-importance
+```
+
+Research runs write only to their requested output directory. They do not
+change the runtime model or shadow artifact unless the operator supplies the
+corresponding explicit `--stage-runtime-artifact` or
+`--stage-runtime-artifacts` flag. No research result is promoted automatically.
+
 Start the configured live service:
 
 ```bash

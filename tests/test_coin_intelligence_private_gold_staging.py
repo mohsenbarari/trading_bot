@@ -98,7 +98,7 @@ class PrivateGoldStagingTests(unittest.TestCase):
             (trade["event_type"], trade["event_time_utc"], trade["available_at_utc"]),
             ("TRADE", "2026-08-04T12:01:10Z", "2026-08-04T12:02:00Z"),
         )
-        self.assertEqual((trade["price_num"], trade["quantity_num"]), (803_000_000.0, 5.0))
+        self.assertEqual((trade["price_num"], trade["quantity_num"]), (80_300_000.0, 5.0))
         self.assertEqual((trade["trade_form"], trade["settlement_term"]), ("PAPER_NORMAL", "TOMORROW"))
 
     def test_verifier_update_before_offer_waits_then_reconciles(self) -> None:

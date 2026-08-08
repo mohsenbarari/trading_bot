@@ -43,7 +43,7 @@ class PublicTelegramParserTests(unittest.TestCase):
         )
         self.assertEqual(len(events), 1)
         self.assertEqual(events[0].instrument, "MELTED_GOLD_AGGREGATE")
-        self.assertEqual(str(events[0].price), "801500000")
+        self.assertEqual(str(events[0].price), "80150000")
         self.assertEqual(events[0].trade_form, "PHYSICAL")
         self.assertTrue(
             should_ignore_public_message(
@@ -81,11 +81,11 @@ class PublicTelegramParserTests(unittest.TestCase):
         )[0]
         self.assertEqual(
             (cash.trade_form, cash.settlement_term, str(cash.price)),
-            ("PHYSICAL", "UNKNOWN", "1143000"),
+            ("PHYSICAL", "UNKNOWN", "114300"),
         )
         self.assertEqual(
             (today.trade_form, today.settlement_term, str(today.price)),
-            ("PAPER_NORMAL", "TODAY", "1144000"),
+            ("PAPER_NORMAL", "TODAY", "114400"),
         )
 
     def test_ounce_is_spot_not_a_trade(self) -> None:
@@ -167,7 +167,7 @@ class PublicTelegramIngestionTests(unittest.TestCase):
             "SELECT COUNT(*) AS count, price_value FROM market_observations"
         ).fetchone()
         self.assertEqual(row["count"], 1)
-        self.assertEqual(row["price_value"], "802000000")
+        self.assertEqual(row["price_value"], "80200000")
 
     def test_xau_compacts_to_latest_event_in_the_minute(self) -> None:
         self.ingest("XAUUSD", 2, "2026-08-04T05:35:59Z", "🔵4539.50")
@@ -220,7 +220,7 @@ class PublicTelegramIngestionTests(unittest.TestCase):
         self.assertEqual(row["parse_confidence"], 0.97)
         self.assertIn("+offer-link-v1", row["parser_version"])
 
-    def test_schema_v1_upgrades_only_the_operational_checkpoint_table(self) -> None:
+    def test_schema_v1_upgrades_to_current_schema_and_restores_checkpoint(self) -> None:
         self.connection.execute("DROP TABLE market_source_checkpoints")
         self.connection.execute(
             "UPDATE market_store_metadata SET schema_version = 1 WHERE singleton = 1"
@@ -230,7 +230,7 @@ class PublicTelegramIngestionTests(unittest.TestCase):
         row = self.connection.execute(
             "SELECT schema_version FROM market_store_metadata"
         ).fetchone()
-        self.assertEqual(row["schema_version"], 2)
+        self.assertEqual(row["schema_version"], 3)
         self.assertIsNotNone(
             self.connection.execute(
                 "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'market_source_checkpoints'"

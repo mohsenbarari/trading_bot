@@ -102,7 +102,7 @@ class PrivateGoldPipelineTests(unittest.TestCase):
         quote = self.market.execute(
             "SELECT price_num, attributes_json FROM market_observations WHERE source_code = 'PRIVATE_GOLD_PAPER_MINUTE'"
         ).fetchone()
-        self.assertEqual(quote["price_num"], 803_000_000.0)
+        self.assertEqual(quote["price_num"], 80_300_000.0)
         self.assertIn('"trade_count":1', quote["attributes_json"])
 
         process_private_gold_payloads(

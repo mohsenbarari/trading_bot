@@ -130,7 +130,7 @@ class MarketStoreContractTests(unittest.TestCase):
                 trade_form="UNKNOWN",
                 event_type="REFERENCE",
                 side="MID",
-                price="895000",
+                price="89500",
                 price_unit="TOMAN_PER_USD",
                 quantity=None,
                 quantity_unit=None,
@@ -152,7 +152,7 @@ class MarketStoreContractTests(unittest.TestCase):
         ).fetchone()
         self.assertEqual(schema_row["type"], "view")
         self.assertEqual(view_row["instrument_code"], "USD_HERAT")
-        self.assertEqual(view_row["normalized_price_value"], "895000")
+        self.assertEqual(view_row["normalized_price_value"], "89500")
         self.assertEqual(view_row["quote_kind"], "MID")
 
     def test_spot_ounce_has_explicit_non_trade_dimensions(self) -> None:
@@ -283,7 +283,7 @@ class LegacyMarketStoreUpgradeTests(unittest.TestCase):
             """
             INSERT INTO external_market_observations(
                 id, instrument_code, observed_at_utc, quote_kind, normalized_price_num
-            ) VALUES (1, 'USD_HERAT', '2026-08-04T05:35:31Z', 'MID', 895000)
+            ) VALUES (1, 'USD_HERAT', '2026-08-04T05:35:31Z', 'MID', 89500)
             """
         )
         connection.commit()

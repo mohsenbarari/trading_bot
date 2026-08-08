@@ -936,6 +936,20 @@ def query_user_analytics(
     db_path = find_analytics_db(conversation_db)
     start_utc, end_utc, label = calculate_time_bounds(range_type, start_shamsi, end_shamsi)
 
+    def empty_group() -> dict[str, Any]:
+        return {
+            "summary": {
+                "total_offer_count": 0,
+                "total_offer_qty": 0,
+                "total_trade_count": 0,
+                "total_trade_qty": 0,
+            },
+            "top_offer_count": [],
+            "top_trade_count": [],
+            "top_offer_qty": [],
+            "top_trade_qty": [],
+        }
+
     empty_result = {
         "range_type": range_type,
         "range_label": label,
@@ -943,7 +957,7 @@ def query_user_analytics(
         "end_utc": end_utc,
         "start_shamsi": start_shamsi or "",
         "end_shamsi": end_shamsi or "",
-        "groups": {1: {}, 2: {}},
+        "groups": {1: empty_group(), 2: empty_group()},
     }
     if not db_path or not db_path.exists():
         return empty_result

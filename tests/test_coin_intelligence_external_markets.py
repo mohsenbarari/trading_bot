@@ -36,14 +36,14 @@ class ExternalMarketAdapterTests(unittest.TestCase):
         values.update(changes)
         return ExternalQuoteInput(**values)  # type: ignore[arg-type]
 
-    def test_usdt_toman_is_explicitly_converted_to_irt(self) -> None:
+    def test_usdt_toman_remains_toman(self) -> None:
         observation = usdt_toman_quote_to_observation(self.source("188,500"))
 
-        self.assertEqual(str(observation.price), "1885000")
-        self.assertEqual(observation.price_unit, "IRT_PER_USDT")
-        self.assertEqual(observation.attributes["conversion"], "toman_to_irt_x10")
+        self.assertEqual(str(observation.price), "188500")
+        self.assertEqual(observation.price_unit, "TOMAN_PER_USDT")
+        self.assertEqual(observation.attributes["conversion"], "identity_toman_per_usdt")
 
-    def test_ime_gold_bar_converts_weight_and_fineness_into_750_mesghal_irr(self) -> None:
+    def test_ime_gold_bar_converts_weight_and_fineness_into_750_mesghal_toman(self) -> None:
         observation = ime_gold_bar_irr_quote_to_observation(self.source("25000000"))
         expected = (
             Decimal("25000000")
@@ -51,17 +51,18 @@ class ExternalMarketAdapterTests(unittest.TestCase):
             * Decimal("750")
             / Decimal("995")
             * Decimal("4.3318")
+            / Decimal("10")
         )
 
         self.assertEqual(observation.price, expected)
-        self.assertEqual(observation.price_unit, "IRT_PER_MESGHAL_750")
+        self.assertEqual(observation.price_unit, "TOMAN_PER_MESGHAL_750")
         self.assertEqual(observation.attributes["input_unit"], "IRR_PER_CERTIFICATE_0_1G_995")
 
-    def test_ime_coin_is_already_irr_per_coin_and_is_not_divided_by_ten(self) -> None:
+    def test_ime_coin_rial_is_converted_once_to_toman(self) -> None:
         observation = ime_imam_coin_irr_quote_to_observation(self.source("1825000000"))
 
-        self.assertEqual(str(observation.price), "1825000000")
-        self.assertEqual(observation.price_unit, "IRT_PER_COIN")
+        self.assertEqual(str(observation.price), "182500000")
+        self.assertEqual(observation.price_unit, "TOMAN_PER_COIN")
 
     def test_timestamp_or_quote_kind_error_fails_closed(self) -> None:
         with self.assertRaisesRegex(ExternalMarketAdapterError, "external_available_before_observed"):
@@ -115,8 +116,8 @@ class ExternalMarketSnapshotTests(unittest.TestCase):
         bar = snapshot["signals"]["IME_GOLD_BAR"]
         coin = snapshot["signals"]["IME_GOLD_COIN_IMAM"]
         self.assertEqual((bar["status"], coin["status"]), ("FRESH", "FRESH"))
-        self.assertEqual(bar["price_unit"], "IRT_PER_MESGHAL_750")
-        self.assertEqual(coin["latest_price"], 1_825_000_000.0)
+        self.assertEqual(bar["price_unit"], "TOMAN_PER_MESGHAL_750")
+        self.assertEqual(coin["latest_price"], 182_500_000.0)
 
 
 if __name__ == "__main__":

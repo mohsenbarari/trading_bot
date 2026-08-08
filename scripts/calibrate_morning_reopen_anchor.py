@@ -339,6 +339,14 @@ def main() -> int:
     parser.add_argument("--start-day", default="2026-07-01")
     parser.add_argument("--end-day", default="2026-08-05")
     parser.add_argument("--holdout-days", type=int, default=5)
+    parser.add_argument(
+        "--stage-runtime-artifacts",
+        action="store_true",
+        help=(
+            "Also write the candidate model and research state beside --live-model. "
+            "Disabled by default so calibration is read-only with respect to runtime."
+        ),
+    )
     args = parser.parse_args()
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
@@ -434,11 +442,14 @@ def main() -> int:
     )
 
     candidate_path = args.output_dir / "model.morning-reopen.candidate.json"
-    # Also stage next to runtime for optional later promote.
     runtime_candidate = args.live_model.parent / "model.morning-reopen.candidate.json"
     text = json.dumps(candidate, ensure_ascii=False, indent=2)
     candidate_path.write_text(text, encoding="utf-8")
-    runtime_candidate.write_text(text, encoding="utf-8")
+    runtime_staged = False
+    if args.stage_runtime_artifacts:
+        if runtime_candidate.resolve() != candidate_path.resolve():
+            runtime_candidate.write_text(text, encoding="utf-8")
+        runtime_staged = True
 
     report = {
         "status": "OK",
@@ -504,14 +515,18 @@ def main() -> int:
             ),
         },
         "candidate_model_path": str(candidate_path),
-        "runtime_candidate_path": str(runtime_candidate),
+        "runtime_staging": {
+            "requested": bool(args.stage_runtime_artifacts),
+            "staged": runtime_staged,
+            "candidate_path": str(runtime_candidate) if runtime_staged else None,
+        },
         "as_of": "Tehran 10:00 primary; ladder 08:05/09:05/09:55/10:00",
         "truth": "trades if any in [10:00,10:30) else recency-weighted offers",
         "morning_ladder_holdout": ladder,
         "staging_decision": {
             "auto_promote": False,
             "promote_ready": promote_ready,
-            "live_model_unchanged": not promote_ready,
+            "live_model_unchanged": True,
             "reason": (
                 "Holdout point error improved; candidate eligible for manual promote."
                 if promote_ready
@@ -529,7 +544,11 @@ def main() -> int:
         "shadow_rows": shadow_holdout.get("rows") if shadow_holdout else None,
     }
     # Research shadow artifact: isolated state, never overrides live.
-    research_state = args.live_model.parent / "state.morning-reopen.shadow.json"
+    research_state = (
+        args.live_model.parent / "state.morning-reopen.shadow.json"
+        if args.stage_runtime_artifacts
+        else args.output_dir / "state.morning-reopen.shadow.json"
+    )
     try:
         from shadow_parallel import run_shadow_parallel
 
@@ -542,7 +561,7 @@ def main() -> int:
             group_live_events_before=datetime.now(timezone.utc),
         )
         # Persist candidate path as the research shadow model file.
-        research_model_path = runtime_candidate
+        research_model_path = runtime_candidate if runtime_staged else candidate_path
         run_shadow_parallel(
             live_estimate=live_now,
             market_db=args.market_db,

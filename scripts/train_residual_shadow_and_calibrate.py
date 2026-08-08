@@ -366,6 +366,14 @@ def main() -> int:
         action="store_true",
         help="Skip slow permutation importance (recommended for fast retrain).",
     )
+    parser.add_argument(
+        "--stage-runtime-artifact",
+        action="store_true",
+        help=(
+            "Also copy the trained shadow artifact beside --live-model. "
+            "Disabled by default so research runs cannot change runtime state."
+        ),
+    )
     args = parser.parse_args()
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -437,15 +445,25 @@ def main() -> int:
         "training_baseline": "live_model_bubble_table",
     }
     model_path = args.output_dir / "residual_shadow_hgb.joblib"
-    runtime_shadow = args.live_model.parent / "residual_shadow_hgb.joblib"
     joblib.dump(artifact, model_path)
-    joblib.dump(artifact, runtime_shadow)
+    runtime_shadow = args.live_model.parent / "residual_shadow_hgb.joblib"
+    runtime_staged = False
+    if args.stage_runtime_artifact:
+        if runtime_shadow.resolve() != model_path.resolve():
+            joblib.dump(artifact, runtime_shadow)
+        runtime_staged = True
     report_path = args.output_dir / "residual_shadow_report.json"
+    report["runtime_staging"] = {
+        "requested": bool(args.stage_runtime_artifact),
+        "staged": runtime_staged,
+        "path": str(runtime_shadow) if runtime_staged else None,
+    }
     write_json_atomic(report_path, report)
     print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
     print(f"wrote {report_path}")
     print(f"wrote {model_path}")
-    print(f"wrote {runtime_shadow}")
+    if runtime_staged:
+        print(f"staged {runtime_shadow}")
     return 0
 
 

@@ -66,7 +66,7 @@ class MarketSnapshotTests(unittest.TestCase):
                 side=side,
                 price=price,
                 price_unit=price_unit,
-                currency="USD" if instrument == "XAUUSD" else "IRT",
+                currency="USD" if instrument == "XAUUSD" else "TOMAN",
                 parse_confidence=1.0,
                 parser_version="snapshot-test-v1",
                 quality_state="ELIGIBLE",
@@ -80,7 +80,7 @@ class MarketSnapshotTests(unittest.TestCase):
             identity="paper-known-late",
             source_code="MELTED_FLOW",
             instrument="MELTED_GOLD_FLOW",
-            price=800_000_000,
+            price=80_000_000,
             price_unit="TOMAN_PER_MESGHAL_750",
             event_time=self.now - timedelta(minutes=1),
             available_time=self.now + timedelta(minutes=1),
@@ -105,7 +105,7 @@ class MarketSnapshotTests(unittest.TestCase):
         )
         observed = after_available["signals"]["MELTED_PAPER_TOMORROW"]
         self.assertEqual(observed["status"], "FRESH")
-        self.assertEqual(observed["latest_price"], 800_000_000.0)
+        self.assertEqual(observed["latest_price"], 80_000_000.0)
         self.assertEqual(observed["event_counts"], {"TRADE": 1})
 
     def test_snapshot_keeps_herat_and_usdt_separate(self) -> None:
@@ -114,7 +114,7 @@ class MarketSnapshotTests(unittest.TestCase):
             identity="herat",
             source_code="USD_HERAT",
             instrument="USD_HERAT",
-            price=1_140_000,
+            price=114_000,
             price_unit="TOMAN_PER_USD",
             event_time=event_time,
             settlement="TOMORROW",
@@ -126,7 +126,7 @@ class MarketSnapshotTests(unittest.TestCase):
             identity="usdt",
             source_code="USDT_PROVIDER",
             instrument="USDT_IRT",
-            price=1_160_000,
+            price=116_000,
             price_unit="TOMAN_PER_USDT",
             event_time=event_time,
         )
@@ -135,8 +135,8 @@ class MarketSnapshotTests(unittest.TestCase):
 
         herat = snapshot["signals"]["USD_HERAT_TOMORROW"]
         usdt = snapshot["signals"]["USDT_IRT"]
-        self.assertEqual(herat["latest_price"], 1_140_000.0)
-        self.assertEqual(usdt["latest_price"], 1_160_000.0)
+        self.assertEqual(herat["latest_price"], 114_000.0)
+        self.assertEqual(usdt["latest_price"], 116_000.0)
         self.assertNotEqual(herat["price_unit"], usdt["price_unit"])
         self.assertEqual(
             usdt["method"],
@@ -148,7 +148,7 @@ class MarketSnapshotTests(unittest.TestCase):
             identity="private-physical",
             source_code="PRIVATE_GOLD_CHANNEL",
             instrument="MELTED_GOLD_PRIVATE",
-            price=803_000_000,
+            price=80_300_000,
             price_unit="TOMAN_PER_MESGHAL_750",
             event_time=self.now - timedelta(seconds=20),
             settlement="TODAY",
