@@ -166,6 +166,31 @@ class TelegramOfferQueueFeedbackTests(unittest.IsolatedAsyncioTestCase):
         self.load.assert_not_awaited()
         self.db.flush.assert_not_awaited()
 
+    async def test_durable_provider_fact_terminalizes_when_offer_was_deleted(self):
+        job = make_job(TelegramDeliveryAction.OFFER_PUBLISH)
+        decision = TelegramDeliveryDecision(
+            TelegramDeliveryOutcome.PERMANENT_UNDELIVERABLE,
+            reason="telegram_bad_request",
+        )
+        missing = feedback_module.TelegramOfferQueueOfferMissingError(
+            "telegram_offer_queue_feedback_offer_missing"
+        )
+        load = AsyncMock(side_effect=missing)
+        with patch.object(
+            feedback_module,
+            "_load_offer_and_state_for_update",
+            new=load,
+        ):
+            await self.feedback.apply_delivery_result(
+                self.db,
+                job,
+                decision,
+                utc_now(),
+            )
+
+        load.assert_awaited_once()
+        self.db.flush.assert_not_awaited()
+
     async def test_publish_success_without_message_id_rolls_back_feedback(self):
         job = make_job(TelegramDeliveryAction.OFFER_PUBLISH)
         decision = TelegramDeliveryDecision(TelegramDeliveryOutcome.SENT)

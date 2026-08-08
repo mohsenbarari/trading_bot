@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, patch
 
 from core import telegram_offer_queue_feeder as feeder
 from core.services.telegram_offer_queue_service import TelegramOfferQueueError
+from core.telegram_delivery_queue_contract import TelegramDeliveryDedupeConflictError
 from core.telegram_delivery_runtime_policy import TelegramDeliveryRuntimeMode
 from core.utils import utc_now
 
@@ -222,6 +223,37 @@ class TelegramOfferQueueFeederTests(unittest.IsolatedAsyncioTestCase):
         enqueue = AsyncMock(
             side_effect=[
                 TelegramOfferQueueError("unsafe"),
+                SimpleNamespace(
+                    queue_result=SimpleNamespace(created=True),
+                    skipped_reason=None,
+                ),
+            ]
+        )
+
+        with patch.object(
+            feeder,
+            "enqueue_current_offer_delivery",
+            new=enqueue,
+        ):
+            counts = await feeder._handoff_candidates(
+                session,
+                candidates,
+                expected_channel_id=-100,
+                offer_expiry_minutes=2,
+                now=self.database_now,
+            )
+
+        self.assertEqual(counts, (1, 0, 0, 1))
+        session.commit.assert_awaited_once()
+        session.rollback.assert_not_awaited()
+        self.assertEqual(session.savepoint_entries, 2)
+
+    async def test_dedupe_conflict_isolated_and_next_candidate_continues(self):
+        session = FakeSession()
+        candidates = [candidate("ofr_conflict"), candidate("ofr_good")]
+        enqueue = AsyncMock(
+            side_effect=[
+                TelegramDeliveryDedupeConflictError("conflicting-key"),
                 SimpleNamespace(
                     queue_result=SimpleNamespace(created=True),
                     skipped_reason=None,

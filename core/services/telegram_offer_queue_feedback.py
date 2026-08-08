@@ -61,6 +61,10 @@ class TelegramOfferQueueFeedbackError(ValueError):
     """Raised when queue feedback cannot prove its Offer binding."""
 
 
+class TelegramOfferQueueOfferMissingError(TelegramOfferQueueFeedbackError):
+    """Raised when a durable queue fact outlives its deleted Offer row."""
+
+
 def _enum_value(value: Any) -> str:
     return str(getattr(value, "value", value) or "").strip().lower()
 
@@ -122,7 +126,7 @@ async def _load_offer_and_state_for_update(
         )
     ).scalar_one_or_none()
     if offer is None:
-        raise TelegramOfferQueueFeedbackError(
+        raise TelegramOfferQueueOfferMissingError(
             "telegram_offer_queue_feedback_offer_missing"
         )
     state = (
@@ -309,7 +313,16 @@ class TelegramOfferQueueLifecycleFeedback:
         outcome = decision.outcome
         if outcome == TelegramDeliveryOutcome.STALE_LEASE:
             return
-        offer, state = await _load_offer_and_state_for_update(db, job=job)
+        try:
+            offer, state = await _load_offer_and_state_for_update(db, job=job)
+        except TelegramOfferQueueOfferMissingError:
+            # The provider response is already a durable immutable fact.  A
+            # cleanup/retention race may remove the Offer before replay applies
+            # domain feedback; there is then no domain row left to mutate, but
+            # retrying forever would block lease recovery and the whole role.
+            # Returning lets the queue service terminalize the job according
+            # to the persisted provider outcome without another Telegram call.
+            return
         reason = str(decision.reason or outcome.value)
 
         if outcome == TelegramDeliveryOutcome.SENT:

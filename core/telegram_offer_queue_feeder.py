@@ -24,7 +24,10 @@ from core.services.telegram_offer_queue_service import (
     load_offer_publication_queue_candidates,
 )
 from core.services.telegram_delivery_queue_service import telegram_delivery_database_now
-from core.telegram_delivery_queue_contract import EDIT_CATCH_UP_FRESH_COUNT
+from core.telegram_delivery_queue_contract import (
+    EDIT_CATCH_UP_FRESH_COUNT,
+    TelegramDeliveryDedupeConflictError,
+)
 from core.telegram_delivery_runtime_policy import (
     TelegramDeliveryRuntimeMode,
     configured_telegram_delivery_runtime,
@@ -99,7 +102,10 @@ async def _handoff_candidates(
                 handed_off += 1
             else:
                 deduplicated += 1
-        except TelegramOfferQueueError as exc:
+        except (
+            TelegramOfferQueueError,
+            TelegramDeliveryDedupeConflictError,
+        ) as exc:
             invalid += 1
             logger.error(
                 "Offer queue handoff rejected unsafe candidate",

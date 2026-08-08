@@ -60,12 +60,23 @@ def _utc() -> str:
 
 
 async def _try_delete(session, sql: str, params: dict, label: str) -> int:
-    try:
-        async with session.begin_nested():
-            result = await session.execute(text(sql), params)
-            return int(result.rowcount or 0)
-    except Exception:  # noqa: BLE001
-        return -1
+    for attempt in range(1, 7):
+        try:
+            async with session.begin_nested():
+                result = await session.execute(text(sql), params)
+                return int(result.rowcount or 0)
+        except Exception as exc:  # noqa: BLE001
+            orig = getattr(exc, "orig", None)
+            code = getattr(orig, "sqlstate", None) or getattr(orig, "pgcode", None)
+            message = str(exc).lower()
+            retryable = code in {"40P01", "40001"} or any(
+                marker in message
+                for marker in ("deadlock detected", "could not serialize access")
+            )
+            if not retryable or attempt >= 6:
+                return -1
+            await asyncio.sleep(0.2 * attempt)
+    return -1
 
 
 async def _select_ids(session, sql: str, params: dict) -> list[int]:

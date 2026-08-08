@@ -176,7 +176,7 @@ BROAD_CLEANUP_PREFIXES = {
     "tmp",
     "user",
 }
-CLEANUP_DB_RETRY_ATTEMPTS = 3
+CLEANUP_DB_RETRY_ATTEMPTS = 6
 CLEANUP_SQL_IN_BATCH_SIZE = 5000
 RETRYABLE_CLEANUP_SQLSTATES = {"40P01", "40001"}
 _PRODUCTION_CLEANUP_HARD_DELETE_ALLOWED = False
@@ -1723,7 +1723,7 @@ async def cleanup_prefix(prefix: str, *, dry_run: bool = False) -> dict[str, Any
             if not is_retryable_cleanup_database_error(exc) or attempt >= CLEANUP_DB_RETRY_ATTEMPTS:
                 raise
             last_retryable_error = exc
-            await asyncio.sleep(0.15 * attempt)
+            await asyncio.sleep(0.2 * attempt)
             plan = await collect_cleanup_plan(prefix)
     if last_retryable_error is not None:
         raise last_retryable_error

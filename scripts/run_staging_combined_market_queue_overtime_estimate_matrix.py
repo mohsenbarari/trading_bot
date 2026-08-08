@@ -1385,7 +1385,7 @@ def run_wave(args: argparse.Namespace, manifest: dict[str, Any], artifact_dir: P
             script="scripts/staging_combined_matrix_mutating_wave.py",
             script_args=[
                 "--run-prefix",
-                f"{args.run_prefix}_IR",
+                f"{queue_prefix}_IR",
                 "--events-file",
                 container_events_path,
                 "--cleanup-only",
@@ -1399,7 +1399,7 @@ def run_wave(args: argparse.Namespace, manifest: dict[str, Any], artifact_dir: P
             script="scripts/staging_combined_matrix_mutating_wave.py",
             script_args=[
                 "--run-prefix",
-                f"{args.run_prefix}_FO",
+                f"{queue_prefix}_FO",
                 "--events-file",
                 container_events_path,
                 "--cleanup-only",
@@ -1424,7 +1424,7 @@ def run_wave(args: argparse.Namespace, manifest: dict[str, Any], artifact_dir: P
                     script="scripts/staging_combined_matrix_mutating_wave.py",
                     script_args=[
                         "--run-prefix",
-                        f"{args.run_prefix}_IR",
+                        f"{queue_prefix}_IR",
                         "--events-file",
                         container_events_path,
                         "--cleanup-only",
@@ -1446,7 +1446,7 @@ def run_wave(args: argparse.Namespace, manifest: dict[str, Any], artifact_dir: P
                     script="scripts/staging_combined_matrix_mutating_wave.py",
                     script_args=[
                         "--run-prefix",
-                        f"{args.run_prefix}_FO",
+                        f"{queue_prefix}_FO",
                         "--events-file",
                         container_events_path,
                         "--cleanup-only",
