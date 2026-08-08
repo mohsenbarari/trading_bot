@@ -1398,6 +1398,7 @@ class EstimatorTests(unittest.TestCase):
         ).decode("utf-8")
         self.assertIn(NO_DATA_TOKEN, body)
         self.assertIn("توصیه خرید یا فروش نیست", body)
+        self.assertIn("پایش موازی یکپارچه", body)
 
     def test_page_exposes_group_live_toggle_without_hiding_activity_contract(self) -> None:
         body = render_page(

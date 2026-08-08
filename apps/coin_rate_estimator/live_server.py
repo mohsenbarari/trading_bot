@@ -2606,19 +2606,42 @@ def render_page(
         if ml_mean is not None
         else "—"
     )
+    shadow_model_specs = [
+        ("سایه ۱ — مدل قبلی", shadow_payload),
+        ("سایه ۲ — بازگشایی صبح", research_payload),
+        ("سایه ۳ — یادگیری ماشین", ml_payload),
+    ]
+    shadow_table_rows = render_unified_shadow_compare_table(
+        state if isinstance(state, dict) else {},
+        shadow_model_specs,
+    )
     shadow_banner = f"""
     <section class="group-control-card" style="border-color:rgba(99,102,241,0.45)">
       <div class="group-control-copy">
         <div class="section-head">
-          <h2>مدل‌های سایه (پایش موازی)</h2>
+          <h2>مدل‌های سایه (پایش موازی یکپارچه)</h2>
           <span class="badge">۳ سایه روی دادهٔ یکسان</span>
         </div>
-        <strong>هر سه سایه به همان دادهٔ زنده وصل‌اند؛ هیچ‌کدام خروجی اصلی را عوض نمی‌کنند.</strong>
-        <small>سایه ۱ — مدل قبلی زنده: وضعیت {html.escape(shadow_status)} · میانگین اختلاف {shadow_mean_text}</small>
-        <small>سایه ۲ — کاندید بازگشایی صبح: وضعیت {html.escape(research_status)} · میانگین اختلاف {research_mean_text}</small>
-        <small>سایه ۳ — یادگیری ماشین: وضعیت {html.escape(ml_status)} · میانگین اختلاف {ml_mean_text}</small>
+        <strong>مدل اصلی و هر سه سایه روی دادهٔ زندهٔ یکسان؛ هیچ سایه‌ای خروجی اصلی را تغییر نمی‌دهد.</strong>
+        <div class="table-wrap" style="margin:12px 0">
+          <table class="compare-table">
+            <thead>
+              <tr>
+                <th>نوع کالا</th>
+                <th>تسویه</th>
+                <th>مدل اصلی</th>
+                <th>سایه ۱</th><th>اختلاف</th>
+                <th>سایه ۲</th><th>اختلاف</th>
+                <th>سایه ۳</th><th>اختلاف</th>
+              </tr>
+            </thead>
+            <tbody>{shadow_table_rows}</tbody>
+          </table>
+        </div>
+        <small>وضعیت سایه‌ها: {html.escape(shadow_status)} · {html.escape(research_status)} · {html.escape(ml_status)}</small>
+        <small>میانگین اختلاف: {shadow_mean_text} · {research_mean_text} · {ml_mean_text}</small>
       </div>
-      <a class="nav-btn" href="{html.escape(shadow_path)}">باز کردن صفحهٔ مدل‌های سایه</a>
+      <a class="nav-btn" href="{html.escape(shadow_path)}">مشاهده جزئیات و دقت در برابر معامله</a>
     </section>
     """
 
