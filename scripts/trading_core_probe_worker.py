@@ -1890,15 +1890,18 @@ async def collect_targeted_prefix_sync_items(
     change_log_ids = [int(entry.id) for entry in selected_entries]
     covered = set(latest_by_record)
 
-    # Prefer live-row replay for offers/publication states during catchup so the
-    # peer receives current public ids even if older change_log payloads are thin.
-    # Do not replay users here: change_log payloads carry versioned identity
-    # fields that row snapshots omit (`versioned_user_identity_missing`).
+    # Prefer live-row replay for dependency parents during catchup so the peer
+    # receives the current public identity even when a load worker produced a
+    # thin or missing change_log row.  Trades must be replayed here because
+    # trade_delivery_receipts are localized by trade_number on the peer; a
+    # missing parent otherwise leaves an otherwise valid receipt permanently
+    # deferred.  Do not replay users here: change_log payloads carry versioned
+    # identity fields that row snapshots omit (`versioned_user_identity_missing`).
     if include_synced or any(table == "offer_publication_states" for table in tables):
         replay_tables = tuple(
             table
             for table in tables
-            if table in {"offers", "offer_publication_states"}
+            if table in {"offers", "offer_publication_states", "trades"}
         )
         for table, row in await _load_prefix_rows_for_tables(prefix, replay_tables):
             record_id = getattr(row, "id", None)

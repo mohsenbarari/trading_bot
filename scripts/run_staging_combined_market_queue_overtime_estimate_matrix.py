@@ -822,7 +822,7 @@ def _queue_sample(
     since_utc: str | None = None,
     timing: bool = False,
 ) -> dict[str, Any]:
-    script_args = ["--run-prefix", args.run_prefix]
+    script_args = ["--run-prefix", _queue_run_prefix(args)]
     if timing:
         script_args.append("--timing")
     if since_utc:
@@ -843,11 +843,26 @@ def _queue_sample(
     return payload
 
 
+def _queue_run_prefix(args: argparse.Namespace) -> str:
+    """Return a queue-only namespace that cannot match other matrix lanes.
+
+    The comprehensive market lane intentionally runs before the queue lane and
+    uses ``{run_prefix}_CLM_``.  Sampling the broad combined prefix therefore
+    counts comprehensive delivery jobs as queue-wave baseline residue.  Keep
+    the queue namespace below the combined prefix so final healing can still
+    remove the whole run, while isolating queue SLO evidence from every other
+    lane.
+    """
+
+    return f"{args.run_prefix}_QUEUE"
+
+
 def _wave_prefix_sync_catchup(args: argparse.Namespace) -> dict[str, Any]:
     """Push committed wave rows while deferred reactions await publication."""
 
     results: dict[str, Any] = {}
     codes: list[int] = []
+    queue_prefix = _queue_run_prefix(args)
     for server, suffix in (("iran", "IR"), ("foreign", "FO")):
         payload, code = _container_python(
             args,
@@ -856,7 +871,7 @@ def _wave_prefix_sync_catchup(args: argparse.Namespace) -> dict[str, Any]:
             script_args=[
                 "sync-prefix-catchup",
                 "--prefix",
-                f"{args.run_prefix}_{suffix}",
+                f"{queue_prefix}_{suffix}",
                 "--batch-size",
                 "500",
             ],
@@ -1195,9 +1210,10 @@ def run_wave(args: argparse.Namespace, manifest: dict[str, Any], artifact_dir: P
             ]
         )
 
+    queue_prefix = _queue_run_prefix(args)
     iran_script_args = [
         "--run-prefix",
-        f"{args.run_prefix}_IR",
+        f"{queue_prefix}_IR",
         "--surface-filter",
         "webapp",
         "--snapshot-path",
@@ -1206,7 +1222,7 @@ def run_wave(args: argparse.Namespace, manifest: dict[str, Any], artifact_dir: P
     ]
     foreign_script_args = [
         "--run-prefix",
-        f"{args.run_prefix}_FO",
+        f"{queue_prefix}_FO",
         "--surface-filter",
         "bot",
         *wave_args_common,

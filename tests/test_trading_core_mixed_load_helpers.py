@@ -656,6 +656,43 @@ class TradingCoreMixedLoadHelperTests(unittest.TestCase):
         self.assertFalse(worker._peer_sync_response_is_success({"status": "success", "processed": 2, "errors": 0}, 3))
         self.assertFalse(worker._peer_sync_response_is_success({"status": "success", "processed": 3, "errors": 1}, 3))
 
+    def test_targeted_sync_replays_current_trade_when_change_log_is_missing(self):
+        trade = SimpleNamespace(id=71)
+        replay_item = {
+            "table": "trades",
+            "id": 71,
+            "data": {"trade_number": "TRD-CURRENT-71"},
+        }
+
+        async def run_probe():
+            with patch.object(
+                worker,
+                "collect_targeted_prefix_change_logs",
+                new=AsyncMock(return_value=[]),
+            ), patch.object(
+                worker,
+                "_load_prefix_rows_for_tables",
+                new=AsyncMock(return_value=[("trades", trade)]),
+            ) as load_rows, patch(
+                "core.sync_repair.build_current_state_replay_item",
+                return_value=replay_item,
+            ):
+                items, change_log_ids = await worker.collect_targeted_prefix_sync_items(
+                    "FMX_STAGE_TRADE_REPLAY_",
+                    tables=("trades",),
+                    include_synced=True,
+                )
+            return items, change_log_ids, load_rows
+
+        items, change_log_ids, load_rows = asyncio.run(run_probe())
+
+        self.assertEqual(items, [replay_item])
+        self.assertEqual(change_log_ids, [])
+        load_rows.assert_awaited_once_with(
+            "FMX_STAGE_TRADE_REPLAY_",
+            ("trades",),
+        )
+
     def test_cleanup_redis_for_user_ids_removes_exact_expire_rate_key(self):
         class FakeRedis:
             def __init__(self):

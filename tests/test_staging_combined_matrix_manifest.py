@@ -469,6 +469,15 @@ class CombinedMatrixManifestTests(unittest.TestCase):
         ):
             self.assertNotIn(secret_flag, source)
 
+    def test_queue_wave_uses_lane_specific_prefix(self) -> None:
+        args = SimpleNamespace(run_prefix="CMB_20260808_EXECUTE")
+
+        queue_prefix = runner._queue_run_prefix(args)
+
+        self.assertEqual(queue_prefix, "CMB_20260808_EXECUTE_QUEUE")
+        self.assertFalse("CMB_20260808_EXECUTE_CLM_".startswith(queue_prefix))
+        self.assertFalse("CMB_20260808_EXECUTE_AG".startswith(queue_prefix))
+
 
 class CombinedMatrixWaveRouteTests(unittest.IsolatedAsyncioTestCase):
     async def test_telegram_request_uses_dispatcher_not_webapp_executor(self):
