@@ -247,6 +247,32 @@ class CombinedMatrixManifestTests(unittest.TestCase):
             "CMB_20260807_RUN1",
         )
 
+    def test_heal_change_log_plan_is_prefix_and_record_id_scoped(self) -> None:
+        predicates, params = heal._change_log_delete_plan(
+            "CMB_20260808_RUN1",
+            {
+                "offers": [19, 19, 21],
+                "chat_members": [31],
+                "notifications": [],
+            },
+        )
+
+        self.assertIn("data::text", predicates[0])
+        self.assertEqual(params["prefix"], "CMB_20260808_RUN1")
+        table_values = {
+            value
+            for key, value in params.items()
+            if key.startswith("change_table_")
+        }
+        self.assertEqual(table_values, {"offers", "chat_members"})
+        id_sets = {
+            tuple(value)
+            for key, value in params.items()
+            if key.startswith("change_ids_")
+        }
+        self.assertEqual(id_sets, {(19, 21), (31,)})
+        self.assertEqual(len(predicates), 3)
+
     def test_provider_timing_separates_slow_channel_edits(self) -> None:
         started = datetime(2026, 8, 7, tzinfo=timezone.utc)
         rows = [

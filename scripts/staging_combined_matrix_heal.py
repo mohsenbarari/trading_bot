@@ -66,6 +66,37 @@ async def _try_delete(session, sql: str, params: dict, label: str) -> int:
         return -1
 
 
+async def _select_ids(session, sql: str, params: dict) -> list[int]:
+    return sorted(
+        {
+            int(row[0])
+            for row in (await session.execute(text(sql), params)).fetchall()
+            if row[0] is not None
+        }
+    )
+
+
+def _change_log_delete_plan(
+    prefix: str,
+    record_ids_by_table: dict[str, list[int]],
+) -> tuple[list[str], dict[str, object]]:
+    predicates = [f"({_contains_run_prefix('data::text')})"]
+    params: dict[str, object] = {"prefix": prefix}
+    for index, (table_name, record_ids) in enumerate(
+        sorted(record_ids_by_table.items())
+    ):
+        if not record_ids:
+            continue
+        table_key = f"change_table_{index}"
+        ids_key = f"change_ids_{index}"
+        predicates.append(
+            f"(table_name = :{table_key} AND record_id = ANY(:{ids_key}))"
+        )
+        params[table_key] = table_name
+        params[ids_key] = sorted(set(int(value) for value in record_ids))
+    return predicates, params
+
+
 def _validate_run_prefix(value: str) -> str:
     prefix = (value or "").strip()
     if _RUN_PREFIX_RE.fullmatch(prefix) is None:
@@ -273,6 +304,83 @@ async def _run(run_prefix: str) -> dict[str, object]:
         synthetic_job_ids = sorted(set(synthetic_job_ids))
         deleted["telegram_delivery_jobs_selected"] = len(synthetic_job_ids)
 
+        outbox_predicates = [
+            f"({_contains_run_prefix('dedupe_key')})",
+            f"({_contains_run_prefix('text')})",
+            f"({_contains_run_prefix('source_id')})",
+        ]
+        outbox_params: dict[str, object] = {"prefix": prefix}
+        if offer_public_ids:
+            outbox_predicates.append("source_id = ANY(:public_ids)")
+            outbox_params["public_ids"] = offer_public_ids
+        if synthetic_job_ids:
+            outbox_predicates.append("queue_job_id = ANY(:job_ids)")
+            outbox_params["job_ids"] = synthetic_job_ids
+        if ids:
+            outbox_predicates.append("recipient_user_id = ANY(:user_ids)")
+            outbox_params["user_ids"] = ids
+
+        publication_state_ids = (
+            await _select_ids(
+                session,
+                "SELECT id FROM offer_publication_states "
+                "WHERE offer_id = ANY(:offer_ids)",
+                {"offer_ids": offer_ids},
+            )
+            if offer_ids
+            else []
+        )
+        chat_member_ids = (
+            await _select_ids(
+                session,
+                "SELECT id FROM chat_members WHERE user_id = ANY(:user_ids)",
+                {"user_ids": ids},
+            )
+            if ids
+            else []
+        )
+        notification_ids = (
+            await _select_ids(
+                session,
+                "SELECT id FROM notifications WHERE user_id = ANY(:user_ids)",
+                {"user_ids": ids},
+            )
+            if ids
+            else []
+        )
+        notification_outbox_ids = await _select_ids(
+            session,
+            "SELECT id FROM telegram_notification_outbox WHERE "
+            + " OR ".join(outbox_predicates),
+            outbox_params,
+        )
+
+        # Remove only change-log rows whose source record was selected by this
+        # exact synthetic namespace. Without this, hard-deleting the matrix
+        # rows leaves deferred child updates behind and poisons the next
+        # preflight even though no business row remains.
+        change_log_record_ids = {
+            "users": ids,
+            "offers": offer_ids,
+            "offer_requests": request_ids,
+            "trades": trade_ids,
+            "trade_delivery_receipts": receipt_ids,
+            "offer_publication_states": publication_state_ids,
+            "chat_members": chat_member_ids,
+            "notifications": notification_ids,
+            "telegram_notification_outbox": notification_outbox_ids,
+        }
+        change_log_predicates, change_log_params = _change_log_delete_plan(
+            prefix,
+            change_log_record_ids,
+        )
+        deleted["change_log"] = await _try_delete(
+            session,
+            "DELETE FROM change_log WHERE " + " OR ".join(change_log_predicates),
+            change_log_params,
+            "change_log",
+        )
+
         # RESTRICT children must be removed before their synthetic queue jobs.
         # Every delete remains bound to job ids selected by this exact CMB_
         # prefix; unrelated staging queue data is never touched.
@@ -311,15 +419,6 @@ async def _run(run_prefix: str) -> dict[str, object]:
                     table,
                 )
 
-        outbox_predicates = [
-            f"({_contains_run_prefix('dedupe_key')})",
-            f"({_contains_run_prefix('text')})",
-            f"({_contains_run_prefix('source_id')})",
-        ]
-        outbox_params: dict[str, object] = {"prefix": prefix}
-        if offer_public_ids:
-            outbox_predicates.append("source_id = ANY(:public_ids)")
-            outbox_params["public_ids"] = offer_public_ids
         deleted["telegram_outbox_by_offer"] = await _try_delete(
             session,
             "DELETE FROM telegram_notification_outbox WHERE "
