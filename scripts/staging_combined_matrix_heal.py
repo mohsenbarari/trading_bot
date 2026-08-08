@@ -258,13 +258,58 @@ async def _run(run_prefix: str) -> dict[str, object]:
         if private_trade_job_ids:
             job_predicates.append("id = ANY(:private_job_ids)")
             job_params["private_job_ids"] = private_trade_job_ids
-        deleted["telegram_delivery_jobs"] = await _try_delete(
-            session,
-            "DELETE FROM telegram_delivery_jobs WHERE "
-            + " OR ".join(job_predicates),
-            job_params,
-            "telegram_delivery_jobs",
-        )
+        synthetic_job_ids = [
+            int(row[0])
+            for row in (
+                await session.execute(
+                    text(
+                        "SELECT id FROM telegram_delivery_jobs WHERE "
+                        + " OR ".join(job_predicates)
+                    ),
+                    job_params,
+                )
+            ).fetchall()
+        ]
+        synthetic_job_ids = sorted(set(synthetic_job_ids))
+        deleted["telegram_delivery_jobs_selected"] = len(synthetic_job_ids)
+
+        # RESTRICT children must be removed before their synthetic queue jobs.
+        # Every delete remains bound to job ids selected by this exact CMB_
+        # prefix; unrelated staging queue data is never touched.
+        if synthetic_job_ids:
+            for table, predicate in (
+                (
+                    "market_channel_notice_receipts",
+                    "queue_job_id = ANY(:job_ids)",
+                ),
+                (
+                    "telegram_admin_broadcast_receipts",
+                    "queue_job_id = ANY(:job_ids)",
+                ),
+                (
+                    "telegram_scheduled_operations",
+                    "queue_job_id = ANY(:job_ids)",
+                ),
+                (
+                    "telegram_channel_membership_sagas",
+                    "ban_job_id = ANY(:job_ids) OR unban_job_id = ANY(:job_ids)",
+                ),
+                (
+                    "telegram_notification_outbox_by_queue_job",
+                    "queue_job_id = ANY(:job_ids)",
+                ),
+            ):
+                sql_table = (
+                    "telegram_notification_outbox"
+                    if table == "telegram_notification_outbox_by_queue_job"
+                    else table
+                )
+                deleted[table] = await _try_delete(
+                    session,
+                    f"DELETE FROM {sql_table} WHERE {predicate}",
+                    {"job_ids": synthetic_job_ids},
+                    table,
+                )
 
         outbox_predicates = [
             f"({_contains_run_prefix('dedupe_key')})",
@@ -281,6 +326,13 @@ async def _run(run_prefix: str) -> dict[str, object]:
             + " OR ".join(outbox_predicates),
             outbox_params,
             "telegram_outbox_by_offer",
+        )
+        deleted["telegram_delivery_jobs"] = await _try_delete(
+            session,
+            "DELETE FROM telegram_delivery_jobs WHERE "
+            + " OR ".join(job_predicates),
+            job_params,
+            "telegram_delivery_jobs",
         )
         if request_ids:
             deleted["offer_requests"] = await _try_delete(

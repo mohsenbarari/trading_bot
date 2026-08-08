@@ -179,6 +179,18 @@ def _document_multipart_payload(
     }
 
 
+def _telegram_json_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """Omit absent optional parameters from Telegram JSON requests.
+
+    Telegram treats JSON ``null`` for parameters such as ``parse_mode`` as an
+    explicit (and invalid) value.  Queue freshness snapshots intentionally
+    retain those ``None`` fields for hashing, so the transport boundary is the
+    correct place to remove them without changing the durable contract.
+    """
+
+    return {key: value for key, value in payload.items() if value is not None}
+
+
 async def post_telegram_method(
     method: str,
     payload: Mapping[str, Any],
@@ -208,7 +220,7 @@ async def post_telegram_method(
             else:
                 response = await client.post(
                     f"{TELEGRAM_API_BASE_URL}/bot{token}/{method}",
-                    json=dict(payload),
+                    json=_telegram_json_payload(payload),
                     timeout=timeout,
                 )
     except Exception as exc:
@@ -276,7 +288,7 @@ def post_telegram_method_sync(
         else:
             response = httpx.post(
                 f"{TELEGRAM_API_BASE_URL}/bot{token}/{method}",
-                json=dict(payload),
+                json=_telegram_json_payload(payload),
                 timeout=timeout,
             )
     except Exception as exc:

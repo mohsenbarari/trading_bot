@@ -18,6 +18,7 @@ DB_POOL_SIZE="${DB_POOL_SIZE:-32}"
 DB_MAX_OVERFLOW="${DB_MAX_OVERFLOW:-32}"
 WRITE_MAX_CONCURRENCY="${WRITE_MAX_CONCURRENCY:-24}"
 KEEP_DATA="${KEEP_DATA:-0}"
+HEALTH_BASE_URL="${HEALTH_BASE_URL:-}"
 MAX_SCENARIOS=""
 families=()
 scenarios=()
@@ -50,6 +51,7 @@ Options:
   --target-rps N               Target business request RPS per scenario. Default: $TARGET_RPS
   --telegram-ratio N           Telegram request ratio. Default: $TELEGRAM_RATIO
   --write-max-concurrency N    Admission limit for write-heavy non-contention scenarios. Default: $WRITE_MAX_CONCURRENCY
+  --health-base-url URL        Explicit staging surface used by the health gate.
   --family NAME                Run only a scenario family. Repeatable.
   --scenario ID_OR_NAME        Run only a scenario id/name. Repeatable.
   --max-scenarios N            Run only the first N selected scenarios.
@@ -86,6 +88,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --write-max-concurrency)
             WRITE_MAX_CONCURRENCY="${2:?missing --write-max-concurrency value}"
+            shift 2
+            ;;
+        --health-base-url)
+            HEALTH_BASE_URL="${2:?missing --health-base-url value}"
             shift 2
             ;;
         --family)
@@ -133,7 +139,11 @@ run_load_service() {
 }
 
 log "checking staging health"
-scripts/deploy_staging.sh health >/dev/null
+if [[ -n "$HEALTH_BASE_URL" ]]; then
+    scripts/deploy_staging.sh health "$HEALTH_BASE_URL" >/dev/null
+else
+    scripts/deploy_staging.sh health >/dev/null
+fi
 
 log "checking load-runner runtime guards"
 run_load_service load_telegram_foreign \

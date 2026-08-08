@@ -128,33 +128,42 @@ async def _tier1_success(prefix: str) -> dict[str, object]:
     }
 
 
-async def _run(prefix: str) -> dict[str, object]:
+_NEGATIVE_CASES = (
+    "tier2_offer_creation",
+    "tier2_telegram_request",
+    "invalid_request_amount",
+    "own_offer_request",
+)
+
+
+async def _run(
+    prefix: str,
+    *,
+    case_ids: tuple[str, ...] = _NEGATIVE_CASES,
+    include_tier1: bool = True,
+) -> dict[str, object]:
     _guard()
     if not prefix.startswith("CMB_"):
         raise DriverRefusal("run prefix must start with CMB_")
     started = time.perf_counter()
     cases: list[dict[str, object]] = []
-    for case_id in (
-        "tier2_offer_creation",
-        "tier2_telegram_request",
-        "invalid_request_amount",
-        "own_offer_request",
-    ):
+    for case_id in case_ids:
         try:
             cases.append(await _run_negative(case_id, prefix))
         except Exception as exc:  # noqa: BLE001
             cases.append({"case_id": case_id, "ok": False, "error": str(exc)[:240]})
-    try:
-        cases.append(await _tier1_success(prefix))
-    except Exception as exc:  # noqa: BLE001
-        cases.append(
-            {
-                "case_id": "tier1_customer_success",
-                "cell": "market:actor:tier1_customer",
-                "ok": False,
-                "error": str(exc)[:240],
-            }
-        )
+    if include_tier1:
+        try:
+            cases.append(await _tier1_success(prefix))
+        except Exception as exc:  # noqa: BLE001
+            cases.append(
+                {
+                    "case_id": "tier1_customer_success",
+                    "cell": "market:actor:tier1_customer",
+                    "ok": False,
+                    "error": str(exc)[:240],
+                }
+            )
     ok = all(bool(item.get("ok")) for item in cases)
     return {
         "ok": ok,
@@ -173,9 +182,17 @@ async def _run(prefix: str) -> dict[str, object]:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--run-prefix", required=True)
+    parser.add_argument("--case-id", action="append", choices=_NEGATIVE_CASES)
+    parser.add_argument("--skip-tier1", action="store_true")
     args = parser.parse_args(argv)
     try:
-        payload = asyncio.run(_run(args.run_prefix))
+        payload = asyncio.run(
+            _run(
+                args.run_prefix,
+                case_ids=tuple(args.case_id or _NEGATIVE_CASES),
+                include_tier1=not bool(args.skip_tier1),
+            )
+        )
     except DriverRefusal as exc:
         print(json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False))
         return 2

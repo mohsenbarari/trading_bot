@@ -48,6 +48,9 @@ def _percentile(sorted_values: list[float], pct: float) -> float | None:
 
 
 _PREFIX_BOUNDARIES = ("_", ":", "-", " ")
+_SYNTHETIC_PRIVATE_ACTIONS = frozenset(
+    {"callback_deadline", "offer_repeat_response", "trade_result"}
+)
 
 
 def _notes_match_run_prefix(notes_column, prefix: str):
@@ -170,6 +173,7 @@ def _queue_partition_payload(
     *,
     pending_values: set[str],
     failure_values: set[str],
+    synthetic_private: bool = False,
 ) -> dict[str, object]:
     """Summarise one queue partition without mixing public and synthetic-private jobs."""
 
@@ -184,6 +188,9 @@ def _queue_partition_payload(
     rate_limited = 0
     retry_recovered = 0
     rate_limit_recovered = 0
+    expected_failed = 0
+    unexpected_failed = 0
+    failure_reason_counts: dict[str, int] = {}
     for row in rows:
         state = value(row[3])
         action = value(row[4])
@@ -202,6 +209,30 @@ def _queue_partition_payload(
         if was_rate_limited:
             rate_limited += 1
             rate_limit_recovered += int(terminally_healthy)
+        if state in failure_values:
+            response = row[12] if len(row) > 12 else None
+            description = ""
+            if isinstance(response, dict):
+                description = str(
+                    response.get("description") or response.get("error") or ""
+                ).lower()
+            outcome = str(row[8] or "") if len(row) > 8 else ""
+            if "chat not found" in description:
+                reason = "telegram_chat_not_found"
+            elif "unsupported parse_mode" in description:
+                reason = "telegram_unsupported_parse_mode"
+            else:
+                reason = outcome or "unspecified_terminal_failure"
+            failure_reason_counts[reason] = failure_reason_counts.get(reason, 0) + 1
+            expected_private_failure = (
+                synthetic_private
+                and action in {"offer_repeat_response", "trade_result"}
+                and reason == "telegram_chat_not_found"
+            )
+            if expected_private_failure:
+                expected_failed += 1
+            else:
+                unexpected_failed += 1
     return {
         "job_count": len(rows),
         "pending_jobs": sum(
@@ -211,6 +242,9 @@ def _queue_partition_payload(
         "failed_jobs": sum(
             count for state, count in state_counts.items() if state in failure_values
         ),
+        "expected_failed_jobs": expected_failed,
+        "unexpected_failed_jobs": unexpected_failed,
+        "failure_reason_counts": dict(sorted(failure_reason_counts.items())),
         "retried_jobs": retried,
         "retry_recovered_jobs": retry_recovered,
         "rate_limited_jobs": rate_limited,
@@ -377,8 +411,15 @@ async def _sample(
             TelegramDeliveryState.BLOCKED_GATEWAY.value,
         }
         private_job_ids = set(scoped_private_job_ids)
-        private_rows = [row for row in scoped_rows if int(row[0]) in private_job_ids]
-        public_rows = [row for row in scoped_rows if int(row[0]) not in private_job_ids]
+        private_rows = [
+            row
+            for row in scoped_rows
+            if int(row[0]) in private_job_ids
+            or str(getattr(row[4], "value", row[4]) or "")
+            in _SYNTHETIC_PRIVATE_ACTIONS
+        ]
+        private_row_ids = {int(row[0]) for row in private_rows}
+        public_rows = [row for row in scoped_rows if int(row[0]) not in private_row_ids]
         scoped_partition = _queue_partition_payload(
             scoped_rows,
             pending_values=pending_values,
@@ -393,6 +434,7 @@ async def _sample(
             private_rows,
             pending_values=pending_values,
             failure_values=failure_values,
+            synthetic_private=True,
         )
         since = _parse_since(since_utc, lookback_minutes=lookback_minutes)
         scoped_timing_rows = [

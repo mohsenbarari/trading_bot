@@ -183,7 +183,12 @@ class CombinedMatrixManifestTests(unittest.TestCase):
         self.assertEqual(limits["effective_offer_expiry_minutes"], 2)
         self.assertFalse(limits["temporary_expiry_override_enabled"])
         self.assertFalse(limits["fits_configured_offer_lifetime"])
-        self.assertGreater(limits["effective_wave_timeout_seconds"], 10_000)
+        self.assertEqual(limits["effective_publish_wait_timeout_seconds"], 52.0)
+        self.assertLessEqual(limits["effective_wave_timeout_seconds"], 8_000)
+        self.assertGreater(
+            limits["required_offer_lifecycle_seconds"],
+            limits["effective_offer_expiry_minutes"] * 60,
+        )
 
     def test_expiry_override_is_never_implicit(self) -> None:
         args = SimpleNamespace(
@@ -325,6 +330,94 @@ class CombinedMatrixManifestTests(unittest.TestCase):
         self.assertEqual(payload["rate_limited_jobs"], 2)
         self.assertEqual(payload["rate_limit_recovered_jobs"], 1)
         self.assertEqual(payload["sent_offer_public_ids"], ["ofr_public"])
+
+    def test_synthetic_private_failures_are_classified_by_provider_reason(self) -> None:
+        rows = [
+            (
+                1,
+                None,
+                None,
+                "quarantined",
+                "trade_result",
+                1,
+                1,
+                None,
+                "provider_rejected",
+                None,
+                "sendMessage",
+                None,
+                {"description": "Bad Request: chat not found"},
+            ),
+            (
+                2,
+                None,
+                None,
+                "quarantined",
+                "offer_repeat_response",
+                1,
+                1,
+                None,
+                "provider_rejected",
+                None,
+                "sendMessage",
+                None,
+                {"description": "Bad Request: unsupported parse_mode"},
+            ),
+        ]
+        payload = queue_sampler._queue_partition_payload(
+            rows,
+            pending_values={"pending", "retry_wait"},
+            failure_values={"quarantined"},
+            synthetic_private=True,
+        )
+        self.assertEqual(payload["expected_failed_jobs"], 1)
+        self.assertEqual(payload["unexpected_failed_jobs"], 1)
+        self.assertEqual(
+            payload["failure_reason_counts"],
+            {
+                "telegram_chat_not_found": 1,
+                "telegram_unsupported_parse_mode": 1,
+            },
+        )
+
+    def test_load_runner_env_is_scoped_to_container_exec(self) -> None:
+        args = SimpleNamespace(
+            wave_timeout_seconds=30,
+            foreign_app_container="foreign-app",
+        )
+        with patch.object(
+            runner,
+            "_run",
+            return_value=SimpleNamespace(
+                returncode=0,
+                stdout='{"ok": true}',
+                stderr="",
+            ),
+        ) as execute:
+            payload, code = runner._container_python(
+                args,
+                server="foreign",
+                script="scripts/guard.py",
+                script_args=["--case", "tier2"],
+                container_env={"TRADING_BOT_SERVICE": "load_runner"},
+            )
+
+        self.assertEqual(code, 0)
+        self.assertTrue(payload["ok"])
+        self.assertEqual(
+            execute.call_args.args[0],
+            [
+                "docker",
+                "exec",
+                "-e",
+                "TRADING_BOT_SERVICE=load_runner",
+                "foreign-app",
+                "python",
+                "scripts/guard.py",
+                "--case",
+                "tier2",
+            ],
+        )
 
 
 class CombinedMatrixWaveRouteTests(unittest.IsolatedAsyncioTestCase):

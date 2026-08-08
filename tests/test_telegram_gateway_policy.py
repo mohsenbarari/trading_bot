@@ -74,6 +74,25 @@ class TelegramGatewayPolicyTests(unittest.IsolatedAsyncioTestCase):
             {"chat_id": 9, "text": "hello", "parse_mode": "HTML"},
         )
 
+    async def test_async_gateway_omits_none_optional_parameters(self):
+        client = FakeAsyncClientContext(response=FakeResponse())
+
+        with patch("core.telegram_gateway.current_server", return_value="foreign"), patch(
+            "core.telegram_gateway.httpx.AsyncClient",
+            return_value=client,
+        ):
+            result = await telegram_gateway.post_telegram_method(
+                "sendMessage",
+                {"chat_id": 9, "text": "hello", "parse_mode": None},
+                bot_token="token",
+            )
+
+        self.assertTrue(result.ok)
+        self.assertEqual(
+            client.post.await_args.kwargs["json"],
+            {"chat_id": 9, "text": "hello"},
+        )
+
     async def test_document_gateway_decodes_verified_content_into_multipart(self):
         document = b"safe-binary-report"
         client = FakeAsyncClientContext(response=FakeResponse())
@@ -240,6 +259,25 @@ class TelegramGatewayPolicyTests(unittest.IsolatedAsyncioTestCase):
             "https://api.telegram.org/bottoken/sendMessage",
             json={"chat_id": 9, "text": "hello", "parse_mode": "HTML"},
             timeout=10,
+        )
+
+    def test_sync_gateway_omits_none_optional_parameters(self):
+        response = SimpleNamespace(status_code=200, text="", json=lambda: {"ok": True})
+
+        with patch("core.telegram_gateway.current_server", return_value="foreign"), patch(
+            "core.telegram_gateway.httpx.post",
+            return_value=response,
+        ) as http_post:
+            result = telegram_gateway.post_telegram_method_sync(
+                "sendMessage",
+                {"chat_id": 9, "text": "hello", "parse_mode": None},
+                bot_token="token",
+            )
+
+        self.assertTrue(result.ok)
+        self.assertEqual(
+            http_post.call_args.kwargs["json"],
+            {"chat_id": 9, "text": "hello"},
         )
 
     def test_sync_document_gateway_uses_verified_multipart(self):

@@ -421,6 +421,7 @@ async def _run(args: argparse.Namespace) -> dict[str, object]:
                 )
             )
         plain_cursor = 0
+        invalid_cursor = 0
         req_cursor = 0
         overtime_cursors = {"web_ot": 0, "bot_ot": 0}
 
@@ -542,8 +543,12 @@ async def _run(args: argparse.Namespace) -> dict[str, object]:
                     await asyncio.sleep(min(delay, 5.0) if float(args.speed) >= 20 else delay)
             surface = str(item.get("surface") or "webapp")
             if item.get("kind") == "invalid":
-                owner = plain_pool[plain_cursor % len(plain_pool)]
-                plain_cursor += 1
+                # Invalid probes must not perturb valid-owner round robin.
+                # Otherwise an uneven invalid distribution can place more than
+                # max_active_offers valid offers on one owner even though the
+                # auto-sized pool is large enough for the valid wave.
+                owner = plain_pool[invalid_cursor % len(plain_pool)]
+                invalid_cursor += 1
                 try:
                     await session.refresh(owner)
                     await _create_offer(

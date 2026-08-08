@@ -573,15 +573,32 @@ def _container_python(
     script: str,
     script_args: list[str],
     timeout: float | None = None,
+    container_env: dict[str, str] | None = None,
 ) -> tuple[dict[str, Any], int]:
+    env_args = [
+        part
+        for key, value in sorted((container_env or {}).items())
+        for part in ("-e", f"{key}={value}")
+    ]
     if server == "iran":
         remote = (
-            f"docker exec {shlex.quote(args.iran_app_container)} python {shlex.quote(script)} "
+            "docker exec "
+            + " ".join(shlex.quote(part) for part in env_args)
+            + (" " if env_args else "")
+            + f"{shlex.quote(args.iran_app_container)} python {shlex.quote(script)} "
             + " ".join(shlex.quote(part) for part in script_args)
         )
         argv = iran_ssh(args, remote)
     else:
-        argv = ["docker", "exec", args.foreign_app_container, "python", script, *script_args]
+        argv = [
+            "docker",
+            "exec",
+            *env_args,
+            args.foreign_app_container,
+            "python",
+            script,
+            *script_args,
+        ]
     completed = _run(argv, timeout=timeout if timeout is not None else args.wave_timeout_seconds)
     payload = _parse_json_stdout(completed.stdout)
     if completed.returncode != 0 and "ok" not in payload:
@@ -824,6 +841,37 @@ def _queue_sample(
     return payload
 
 
+def _wave_prefix_sync_catchup(args: argparse.Namespace) -> dict[str, Any]:
+    """Push committed wave rows while deferred reactions await publication."""
+
+    results: dict[str, Any] = {}
+    codes: list[int] = []
+    for server, suffix in (("iran", "IR"), ("foreign", "FO")):
+        payload, code = _container_python(
+            args,
+            server=server,
+            script="scripts/trading_core_probe_worker.py",
+            script_args=[
+                "sync-prefix-catchup",
+                "--prefix",
+                f"{args.run_prefix}_{suffix}",
+                "--batch-size",
+                "500",
+            ],
+            timeout=300,
+        )
+        results[server] = payload
+        codes.append(code)
+    return {
+        "ok": all(code == 0 for code in codes)
+        and all(
+            str(payload.get("status") or "") == "ok"
+            for payload in results.values()
+        ),
+        "results": results,
+    }
+
+
 def _effective_wave_limits(
     args: argparse.Namespace, *, expected_valid: int
 ) -> dict[str, Any]:
@@ -869,18 +917,39 @@ def _effective_wave_limits(
         if override_enabled
         else configured_expiry
     )
-    publish_wait = max(
-        float(args.wave_publish_wait_timeout_seconds),
-        required_total_seconds * 1.20,
-    )
-    action_drain = max(
-        float(args.wave_action_drain_timeout_seconds),
-        required_total_seconds * 1.25,
-    )
-    wave_timeout = max(
-        float(args.wave_timeout_seconds),
-        schedule_seconds + action_drain + 900.0,
-    )
+    if override_enabled:
+        publish_wait = max(
+            float(args.wave_publish_wait_timeout_seconds),
+            required_total_seconds * 1.20,
+        )
+        action_drain = max(
+            float(args.wave_action_drain_timeout_seconds),
+            required_total_seconds * 1.25,
+        )
+        wave_timeout = max(
+            float(args.wave_timeout_seconds),
+            schedule_seconds + action_drain + 900.0,
+        )
+    else:
+        # Waiting beyond the real offer lifetime cannot produce a valid user
+        # reaction.  Bound the default 30/40-minute diagnostic timeouts to the
+        # two-minute product contract so a publication failure fails promptly.
+        lifetime_seconds = max(60.0, float(effective_expiry) * 60.0)
+        publish_wait = min(
+            float(args.wave_publish_wait_timeout_seconds),
+            max(15.0, lifetime_seconds - latest_action_delay - 5.0),
+        )
+        action_drain = min(
+            float(args.wave_action_drain_timeout_seconds),
+            max(required_total_seconds * 1.25, lifetime_seconds + 30.0),
+        )
+        wave_timeout = max(
+            required_total_seconds + 60.0,
+            min(
+                float(args.wave_timeout_seconds),
+                schedule_seconds + action_drain + 300.0,
+            ),
+        )
     return {
         "estimated_channel_operations": estimated_channel_operations,
         "channel_base_interval_seconds": CHANNEL_BASE_INTERVAL_SECONDS,
@@ -1214,6 +1283,7 @@ def run_wave(args: argparse.Namespace, manifest: dict[str, Any], artifact_dir: P
                 sample["wave_elapsed_seconds"] = round(
                     time.perf_counter() - wave_started, 3
                 )
+                sample["prefix_sync_catchup"] = _wave_prefix_sync_catchup(args)
                 queue_monitor_samples.append(sample)
                 for future in done:
                     name = futures[future]
@@ -1432,6 +1502,10 @@ def run_wave(args: argparse.Namespace, manifest: dict[str, Any], artifact_dir: P
         bool((payload.get("assertions") or {}))
         for payload in (iran_payload, foreign_payload)
     )
+    prefix_sync_catchup_ok = bool(queue_monitor_samples) and all(
+        bool((sample.get("prefix_sync_catchup") or {}).get("ok"))
+        for sample in queue_monitor_samples
+    )
     checksum_passed = all(
         payload.get("events_file_sha256") == events_file_sha256
         and payload.get("expected_events_file_sha256") == events_file_sha256
@@ -1599,6 +1673,21 @@ def run_wave(args: argparse.Namespace, manifest: dict[str, Any], artifact_dir: P
             cells=["queue:wave:valid"],
         ),
         _assertion(
+            "wave_prefix_sync_catchup",
+            passed=prefix_sync_catchup_ok,
+            expected={"all_monitor_rounds_ok": True},
+            actual={
+                "round_count": len(queue_monitor_samples),
+                "failed_rounds": sum(
+                    not bool(
+                        (sample.get("prefix_sync_catchup") or {}).get("ok")
+                    )
+                    for sample in queue_monitor_samples
+                ),
+            },
+            cells=["queue:wave:valid"],
+        ),
+        _assertion(
             "run_scoped_baseline_clean",
             passed=baseline_clean,
             expected={"offer_count": 0, "job_count": 0},
@@ -1689,12 +1778,26 @@ def run_wave(args: argparse.Namespace, manifest: dict[str, Any], artifact_dir: P
         ),
         _assertion(
             "synthetic_private_jobs_reached_terminal_state",
-            passed=int(final_private.get("pending_jobs") or 0) == 0,
-            expected={"pending_synthetic_private_jobs": 0},
+            passed=int(final_private.get("pending_jobs") or 0) == 0
+            and int(final_private.get("unexpected_failed_jobs") or 0) == 0,
+            expected={
+                "pending_synthetic_private_jobs": 0,
+                "unexpected_failed_jobs": 0,
+            },
             actual={
                 "job_count": int(final_private.get("job_count") or 0),
                 "pending": int(final_private.get("pending_jobs") or 0),
                 "failed": int(final_private.get("failed_jobs") or 0),
+                "expected_failed": int(
+                    final_private.get("expected_failed_jobs") or 0
+                ),
+                "unexpected_failed": int(
+                    final_private.get("unexpected_failed_jobs") or 0
+                ),
+                "failure_reason_counts": final_private.get(
+                    "failure_reason_counts"
+                )
+                or {},
                 "state_counts": final_private.get("state_counts") or {},
             },
             cells=["queue:wave:valid"],
@@ -1796,6 +1899,47 @@ def run_estimate_hooks(args: argparse.Namespace, artifact_dir: Path) -> dict[str
     )
     write_json(artifact_dir / "estimate-hooks.json", payload)
     return {"ok": code == 0 and bool(payload.get("ok")), "returncode": code, "payload": payload}
+
+
+def run_post_wave_sync_barrier(
+    args: argparse.Namespace, artifact_dir: Path
+) -> dict[str, Any]:
+    """Flush both home-owned wave prefixes before cross-server lanes run.
+
+    The queue wave deliberately creates enough Iran and foreign mutations to
+    exercise backpressure.  Overtime cross-forward must not start behind that
+    synthetic backlog or it measures queue residue instead of its own sync
+    contract.
+    """
+
+    results: dict[str, Any] = {}
+    codes: list[int] = []
+    for server, suffix in (("iran", "IR"), ("foreign", "FO")):
+        payload, code = _container_python(
+            args,
+            server=server,
+            script="scripts/trading_core_probe_worker.py",
+            script_args=[
+                "sync-prefix-catchup",
+                "--prefix",
+                f"{args.run_prefix}_{suffix}",
+                "--include-synced",
+            ],
+            timeout=600,
+        )
+        results[server] = payload
+        codes.append(code)
+    ok = all(code == 0 for code in codes) and all(
+        str(payload.get("status") or "") == "ok"
+        for payload in results.values()
+    )
+    report = {
+        "ok": ok,
+        "returncode": max(codes or [1]),
+        "results": results,
+    }
+    write_json(artifact_dir / "post-wave-sync-barrier.json", report)
+    return report
 
 
 def run_overtime_execute(args: argparse.Namespace, artifact_dir: Path) -> dict[str, Any]:
@@ -1973,6 +2117,8 @@ def run_comprehensive_market_matrix(
         "0.6",
         "--write-max-concurrency",
         str(args.comprehensive_market_write_max_concurrency),
+        "--health-base-url",
+        str(args.iran_base_url),
     ]
     completed = _run(
         argv,
@@ -2152,13 +2298,19 @@ def run_execute(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
     lanes["queue_wave"] = wave
     write_json(artifact_dir / "lane-queue-wave.json", wave)
 
-    # Actor/terminal guards: tier1 success + tier2/reject negatives (Iran home).
+    post_wave_sync = run_post_wave_sync_barrier(args, artifact_dir)
+    lanes["post_wave_sync"] = post_wave_sync
+
+    # This is an in-process aiogram load harness, not the live queue worker.
+    # Mark only this exec process as a load runner so callback answers remain
+    # observable synchronously, per telegram_delivery_runtime_policy.
     actor_guards, actor_code = _container_python(
         args,
         server="iran",
         script="scripts/staging_combined_matrix_actor_guards.py",
         script_args=["--run-prefix", f"{args.run_prefix}_AG"],
         timeout=1800,
+        container_env={"TRADING_BOT_SERVICE": "load_runner"},
     )
     write_json(artifact_dir / "actor-guards.json", actor_guards)
     lanes["actor_guards"] = {
@@ -2645,16 +2797,38 @@ def build_live_coverage_report(
         )
 
     actor_payload = (lanes.get("actor_guards") or {}).get("payload") or {}
-    if actor_payload.get("ok"):
-        for cell in actor_payload.get("cells_covered") or []:
-            record(
-                str(cell),
-                passed=True,
-                expected={"minimum_passed": 1},
-                actual={"passed_count": 1},
-                identifiers=["actor_guards"],
-                source="actor_guards",
-            )
+    actor_cases = {
+        str(item.get("case_id") or ""): item
+        for item in actor_payload.get("cases") or []
+    }
+    actor_cell_cases = {
+        "market:actor:tier1_customer": ("tier1_customer_success",),
+        "market:actor:tier2_customer": (
+            "tier2_offer_creation",
+            "tier2_telegram_request",
+        ),
+        "market:terminal:rejected": (
+            "tier2_offer_creation",
+            "tier2_telegram_request",
+            "invalid_request_amount",
+            "own_offer_request",
+        ),
+    }
+    for cell, required_cases in actor_cell_cases.items():
+        statuses = {
+            case_id: bool((actor_cases.get(case_id) or {}).get("ok"))
+            for case_id in required_cases
+        }
+        record(
+            cell,
+            passed=bool(statuses) and all(statuses.values()),
+            expected={"required_cases": list(required_cases)},
+            actual={"case_statuses": statuses},
+            identifiers=[
+                case_id for case_id, passed in statuses.items() if passed
+            ],
+            source="actor_guards",
+        )
 
     wave_assertions = (lanes.get("queue_wave") or {}).get("assertions") or []
     assertions_by_cell: dict[str, list[dict[str, Any]]] = {}
