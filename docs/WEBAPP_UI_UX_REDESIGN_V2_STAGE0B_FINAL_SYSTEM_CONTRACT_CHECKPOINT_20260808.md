@@ -2,7 +2,7 @@
 
 تاریخ: ۲۰۲۶-۰۸-۰۸
 
-وضعیت: **تکمیل فنی Stage `0B-6` و مجوز Stage 1**. `ownerSystemContractApproval.status: approved` در `2026-08-08T20:57:28.073Z`، `continuousProgressionAuthorized: true` و closure فنی/Sites در `2026-08-08T21:07:38Z` ثبت شده است. `runtimeImplementationAuthorized: true` و `nextAuthorizedRuntimeStage: Stage 1` است؛ Stage 1 هنوز runtime edit شروع‌شده ندارد.
+وضعیت: **تکمیل فنی Stage `0B-6` و Stage 1؛ Stage 2 مرحله بعدی مجاز و شروع‌نشده**. `ownerSystemContractApproval.status: approved` در `2026-08-08T20:57:28.073Z`، `continuousProgressionAuthorized: true` و closure فنی/Sites در `2026-08-08T21:07:38Z` ثبت شده است. Stage 1 پس از این closure اجرا و در [checkpoint مستقل](WEBAPP_UI_UX_REDESIGN_V2_STAGE1_TRUST_CONTINUITY_CHECKPOINT_20260808.md) بسته شد.
 
 شاخه: `condidate/webapp-ui-ux-redesign-v2`، ساخته‌شده مستقیم از `main`
 
@@ -10,7 +10,7 @@
 
 این checkpoint تصمیم‌های تأییدشده `0B-1` تا `0B-5` را به یک قرارداد واحد و قابل‌ممیزی برای کل وب‌اپ غیر بازار/پیام‌رسان تبدیل می‌کند. خروجی باید نشان دهد رنگ، تایپوگرافی، فاصله، شعاع، پوسته، ناوبری، state، feedback، motion، حریم خصوصی و اقتصاد اطلاعات در همه خانواده‌ها یک معنا دارند و برای ورود مرحله‌ای به runtime ابهام حل‌نشده‌ای باقی نمانده است.
 
-Figma canonical، audit و export مستقیم، harness محلی، baseline خواندنی runtime و Sites خصوصی source-bound تکمیل و پاس شده‌اند. هیچ تصویر یا harness ایستایی نباید به‌عنوان اثبات رفتار runtime خوانده شود. مالک ادامه بی‌وقفه roadmap را تأیید کرده و Stage 1 اکنون next authorized است، اما این checkpoint هیچ runtime edit از Stage 1 را ادعا نمی‌کند.
+Figma canonical، audit و export مستقیم، harness محلی، baseline خواندنی runtime و Sites خصوصی source-bound تکمیل و پاس شده‌اند. هیچ تصویر یا harness ایستایی نباید به‌عنوان اثبات رفتار runtime خوانده شود. مالک ادامه بی‌وقفه roadmap را تأیید کرده است؛ Stage 1 بعد از closure این checkpoint با گیت مستقل اجرا و بسته شد و Stage 2 اکنون next authorized است.
 
 ## ۲. منبع canonical و سابقه تأیید
 
@@ -158,7 +158,7 @@ router فعلی دقیقاً ۲۹ route دارد. قرارداد route، shell،
 - archive source-bound: `401983` byte و SHA-256 `e01ab7ea18a5a7d85ae3e5f39ab3f21230f23714ebd1db1de66352c8f31ee4b6`؛ normalized Sites tar برابر ۲۷ فایل/`931840` byte/SHA-256 `db0b581048f8033cc4d19f39e5d685ab4e2c4df5e03568c6e95922d805ee0288`؛
 - probe ناشناس `2026-08-08T21:07:38Z`: root و evidence هر دو `HTTP 401` با `no-store` و `no-referrer`؛ bypass هرگز generate/request/read/use/persist/expose نشده است؛
 - `npm verify`، build، `audit:dist` و npm audit نهایی پاس با صفر vulnerability؛ environment خالی و error log پنجره ۶۰ دقیقه‌ای صفر؛
-- وضعیت: technical/Sites complete؛ Stage 1 مجاز و هنوز شروع‌نشده است.
+- وضعیت: technical/Sites complete؛ Stage 1 پس از closure اجرا و `complete` شده و Stage 2 مرحله بعدی مجاز اما هنوز شروع‌نشده است.
 
 ## ۱۰. carry-forward مرحله‌های اجرایی
 
@@ -193,11 +193,15 @@ ownerSystemContractApproval.status = approved
 ownerSystemContractApproval.approvedAt = 2026-08-08T20:57:28.073Z
 continuousProgressionAuthorized = true
 runtimeImplementationAuthorized = true
-nextAuthorizedRuntimeStage = Stage 1
-stage1RuntimeWorkStarted = false
+nextAuthorizedRuntimeStage = Stage 2
+stage1RuntimeWorkStarted = true
+stage1Status = complete
+stage1TechnicalGate = passed
+stage2RuntimeImplementationAuthorized = true
+stage2RuntimeWorkStarted = false
 ```
 
-Stage 1 next authorized است؛ اجرای آن در Stage بعدی و با گیت فنی مستقل ثبت خواهد شد.
+closure Stage 1، گیت‌های fresh و carry-forward تصویری صریح در [checkpoint Stage 1](WEBAPP_UI_UX_REDESIGN_V2_STAGE1_TRUST_CONTINUITY_CHECKPOINT_20260808.md) ثبت شده‌اند.
 
 ## ۱۲. فهرست بسته
 

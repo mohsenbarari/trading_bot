@@ -1,21 +1,25 @@
 # Stage 0B-6 — Final system contract evidence package
 
-وضعیت: `stage0b6_complete_stage1_authorized`
+وضعیت: `stage0b6_complete_stage1_complete_stage2_authorized`
 
 ```text
 ownerSystemContractApproval.status = approved
 ownerSystemContractApproval.approvedAt = 2026-08-08T20:57:28.073Z
 continuousProgressionAuthorized = true
 runtimeImplementationAuthorized = true
-nextAuthorizedRuntimeStage = Stage 1
-stage1RuntimeWorkStarted = false
+nextAuthorizedRuntimeStage = Stage 2
+stage1RuntimeWorkStarted = true
+stage1Status = complete
+stage1TechnicalGate = passed
+stage2RuntimeImplementationAuthorized = true
+stage2RuntimeWorkStarted = false
 ```
 
 ## هدف بسته
 
 این پوشه evidence و قرارداد نهایی Stage 0B را بدون تغییر runtime جمع می‌کند. منبع editable نهایی Figma رسمی است؛ export مستقیم provenance همان node را دارد، harness محلی assertionهای یکسان را مستقل و fail-closed سنجیده و Sites فقط preview خصوصی owner-only خواهد بود.
 
-Figma canonical، ۹ export مستقیم، audit مستقیم `32/32`، مشتق محلی با ۷ PNG و `32/32`، baseline خواندنی `35/35` فایل و `322/322` تست، build و `guard:ui` پاس شده‌اند. semantic hardening محلی parity دقیق هر پنج خانواده، Home آرام responsive، fact/action دسکتاپ، state دیداری Auth (`LTR`، border آبی `2px` و input قابل‌ویرایش) و selection متمایز/`aria-current` دسکتاپ را سنجیده و drift صفر ثبت کرده است. Sites خصوصی owner-only نیز source-bound، منتشر و با دو probe ناشناس `401` پاس شده است. **Stage `0B-6` از نظر فنی کامل و Stage 1 مجاز است؛ هیچ runtime edit مربوط به Stage 1 در این بسته ادعا نمی‌شود.**
+Figma canonical، ۹ export مستقیم، audit مستقیم `32/32`، مشتق محلی با ۷ PNG و `32/32`، baseline خواندنی `35/35` فایل و `322/322` تست، build و `guard:ui` پاس شده‌اند. semantic hardening محلی parity دقیق هر پنج خانواده، Home آرام responsive، fact/action دسکتاپ، Auth `LTR` با border آبی `2px` و input قابل‌ویرایش، و selection متمایز/`aria-current` دسکتاپ را سنجیده و drift صفر ثبت کرده است. Sites خصوصی owner-only نیز source-bound، منتشر و با دو probe ناشناس `401` پاس شده است. **Stage `0B-6` از نظر فنی کامل است؛ Stage 1 پس از closure اجرا و در بسته مستقل `uiux-stage1-trust-continuity` بسته شد.**
 
 ## ترتیب مرجع
 
@@ -90,8 +94,12 @@ assertion `known-figma-debt-disposition-complete` در audit مستقیم و م�
 
 ```text
 runtimeImplementationAuthorized = true
-nextAuthorizedRuntimeStage = Stage 1
-stage1RuntimeWorkStarted = false
+nextAuthorizedRuntimeStage = Stage 2
+stage1RuntimeWorkStarted = true
+stage1Status = complete
+stage1TechnicalGate = passed
+stage2RuntimeImplementationAuthorized = true
+stage2RuntimeWorkStarted = false
 ```
 
-Stage 1 اکنون next authorized است اما runtime edit آن هنوز شروع‌شده اعلام نمی‌شود. پس از شروع، ادامه Stageهای 2 تا 8 نیازمند تأیید جداگانه مالک نیست اما هرکدام گیت فنی، test، protected diff و rollback خود را دارند؛ مگر اینکه مالک صریحاً توقف کند.
+Stage 1 اکنون `complete` است؛ [بسته evidence](../uiux-stage1-trust-continuity/README.md) گیت fresh و مجوز Stage 2 را ثبت می‌کند. Stage 2 next authorized اما شروع‌نشده است. ادامه Stageهای 2 تا 8 نیازمند تأیید جداگانه مالک نیست اما هرکدام گیت فنی، test، protected diff و rollback خود را دارند؛ مگر اینکه مالک صریحاً توقف کند.

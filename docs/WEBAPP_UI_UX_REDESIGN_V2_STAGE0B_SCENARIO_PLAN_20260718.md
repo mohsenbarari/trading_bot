@@ -2,7 +2,7 @@
 
 تاریخ: ۲۰۲۶-۰۷-۱۸
 
-وضعیت: مالک محصول `0B-1..0B-6` را تأیید کرده و در `2026-08-08T20:57:28.073Z` پیشروی بی‌وقفه تا تکمیل roadmap یا توقف صریح را مجاز کرده است. closure فنی/Sites `0B-6` در `2026-08-08T21:07:38Z` پاس شده؛ Stage 1 next authorized و هنوز runtime edit آن شروع‌نشده است
+وضعیت: مالک محصول `0B-1..0B-6` را تأیید کرده و در `2026-08-08T20:57:28.073Z` پیشروی بی‌وقفه تا تکمیل roadmap یا توقف صریح را مجاز کرده است. closure فنی/Sites `0B-6` در `2026-08-08T21:07:38Z` پاس شده؛ Stage 1 نیز با گیت فنی مستقل `complete` و Stage 2 next authorized اما هنوز شروع‌نشده است
 
 جهت مصوب: **مالی مدرن**
 
@@ -56,11 +56,11 @@
 
 ### 0B-6 — قرارداد نهایی سیستم و پذیرش
 
-وضعیت: **تکمیل و بسته‌شده.** `ownerSystemContractApproval.status: approved`، `continuousProgressionAuthorized: true`، `runtimeImplementationAuthorized: true` و `nextAuthorizedRuntimeStage: Stage 1` است؛ Stage 1 هنوز شروع‌نشده است. مرجع نهایی: [checkpoint قرارداد نهایی](WEBAPP_UI_UX_REDESIGN_V2_STAGE0B_FINAL_SYSTEM_CONTRACT_CHECKPOINT_20260808.md).
+وضعیت: **تکمیل و بسته‌شده.** `ownerSystemContractApproval.status: approved`، `continuousProgressionAuthorized: true` و `runtimeImplementationAuthorized: true` ثبت شده است؛ Stage 1 پس از closure اجرا و بسته شد و Stage 2 مرحله بعدی مجاز است. مرجع نهایی Stage 0: [checkpoint قرارداد نهایی](WEBAPP_UI_UX_REDESIGN_V2_STAGE0B_FINAL_SYSTEM_CONTRACT_CHECKPOINT_20260808.md)؛ مرجع closure بعدی: [checkpoint Stage 1](WEBAPP_UI_UX_REDESIGN_V2_STAGE1_TRUST_CONTINUITY_CHECKPOINT_20260808.md).
 
 نمونه‌های تأییدشده کنار هم قرار می‌گیرند تا رنگ، typography، spacing، radius، navigation، stateها و motion در همه آن‌ها یک قرارداد واحد داشته باشد.
 
-خروجی تصمیم: design contract نهایی `SYS-01..SYS-14`، ماتریس ضرورت محتوای همه خانواده‌ها، inventory دقیق ۲۹ route و catch-all system-owned، ۳۲ assertion fail-closed و traceability مرحله‌های 1 تا 8. Auth canonicalization، Home binding audit/rebind و رفع بدهی ناوبری Operations در Figma بسته شده‌اند. صفحه `168:1974`، ۹ export مستقیم و audit `32/32`، harness نهایی `32/32` با semantic hardening، baseline `35/35` فایل و `322/322` تست، build/guard و Sites خصوصی owner-only source-bound پاس هستند. Stage 1 اکنون next authorized است و progression بدون تأیید جداگانه هر Stage اما با گیت فنی خود آن Stage ادامه دارد.
+خروجی تصمیم: design contract نهایی `SYS-01..SYS-14`، ماتریس ضرورت محتوای همه خانواده‌ها، inventory دقیق ۲۹ route و catch-all system-owned، ۳۲ assertion fail-closed و traceability مرحله‌های 1 تا 8. Auth canonicalization، Home binding audit/rebind و رفع بدهی ناوبری Operations در Figma بسته شده‌اند. صفحه `168:1974`، ۹ export مستقیم و audit `32/32`، harness نهایی `32/32` با semantic hardening، baseline `35/35` فایل و `322/322` تست، build/guard و Sites خصوصی owner-only source-bound پاس هستند. Stage 1 پس از این closure اجرا و با گیت فنی خودش بسته شد؛ progression بدون تأیید جداگانه هر Stage اما با گیت فنی خود آن Stage ادامه دارد.
 
 ## قواعد توقف و تأیید
 
@@ -73,4 +73,4 @@
 
 ## گام بعدی
 
-گام بعدی **Stage 1 — اعتماد و تداوم کار** است. Stage `0B-6` بسته شده و runtime Stage 1 مجاز است، اما این سند هیچ runtime edit شروع‌شده‌ای برای Stage 1 ادعا نمی‌کند. progression تا تکمیل roadmap یا توقف صریح مالک ادامه می‌یابد.
+Stage 1 — اعتماد و تداوم کار اکنون **`complete`** است. گام بعدی **Stage 2 — Design System V2 محافظت‌شده** است؛ مجاز شده ولی runtime/Figma/Sites آن در زمان closure این سند هنوز شروع نشده است. progression تا تکمیل roadmap یا توقف صریح مالک ادامه می‌یابد.

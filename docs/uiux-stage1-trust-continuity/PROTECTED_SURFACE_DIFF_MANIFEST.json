@@ -1,0 +1,160 @@
+{
+  "schemaVersion": 2,
+  "stage": "1",
+  "status": "complete_with_explicit_visual_carry_forward",
+  "branch": "condidate/webapp-ui-ux-redesign-v2",
+  "comparisonBaseCommit": "e6dcad4b157c6fad7930ba9709f28f546068f5f8",
+  "comparisonHeadCommit": "c5fc56996d7f8fa9c575646d70e8785811564633",
+  "freezePolicy": "zero source and behavioral change inside protected interiors; inherited visual renderer drift must be reproduced and carried explicitly",
+  "protectedFullFiles": [
+    "frontend/src/views/MarketView.vue",
+    "frontend/src/components/OffersList.vue",
+    "frontend/src/components/OfferPreviewModal.vue",
+    "frontend/src/components/TradeLotSuggestionAlert.vue",
+    "frontend/src/composables/useMarketRuntime.ts",
+    "frontend/src/composables/useOffers.ts",
+    "frontend/src/utils/offerDraftText.ts",
+    "frontend/src/views/MessengerView.vue",
+    "frontend/src/components/ChatView.vue",
+    "frontend/src/views/ShareReceiveView.vue",
+    "frontend/src/components/CreateChannelView.vue"
+  ],
+  "protectedPathPatterns": [
+    "frontend/src/components/ui/AppOffer*.vue",
+    "frontend/src/components/ui/AppSettlementBadge.vue",
+    "frontend/src/components/ui/AppTradeActionButton.vue",
+    "frontend/src/components/chat/**",
+    "frontend/src/components/messenger-v2/**",
+    "frontend/src/composables/chat/**",
+    "frontend/src/services/chat*/**",
+    "frontend/src/services/chat*.ts",
+    "frontend/src/stores/chat/**",
+    "frontend/src/types/chat.ts",
+    "frontend/src/utils/chat*.ts",
+    "frontend/src/utils/messenger*.ts",
+    "frontend/src/styles/messenger-design-tokens.css"
+  ],
+  "protectedPartialFiles": [
+    {
+      "path": "frontend/src/views/DashboardView.vue",
+      "surface": "embedded Home market module",
+      "baseRegionSha256": "ac18a6f06dc95bf77d4c577e5cf97ec8248fe1dde8ae09cafab5370fc27adbd5",
+      "headRegionSha256": "ac18a6f06dc95bf77d4c577e5cf97ec8248fe1dde8ae09cafab5370fc27adbd5",
+      "regionDiffStatus": "passed_zero_diff",
+      "allowedOutsideRegion": "Stage 1 identity/state/retry changes that do not alter market facts, copy, DOM, CTA or behavior"
+    },
+    {
+      "path": "frontend/src/components/AdminMessagesView.vue",
+      "surface": "market and messenger admin interiors",
+      "regionDiffStatus": "passed_zero_diff",
+      "allowedOutsideRegion": "none during Stage 1; full-file freeze"
+    },
+    {
+      "path": "frontend/src/components/TradingSettings.vue",
+      "surface": "market settings controls",
+      "regionDiffStatus": "passed_zero_diff",
+      "allowedOutsideRegion": "none during Stage 1; full-file freeze"
+    }
+  ],
+  "stage1AdditionalFullFileFreeze": [
+    "frontend/src/App.vue",
+    "frontend/src/components/AppAuthenticatedShell.vue",
+    "frontend/src/components/BottomNav.vue",
+    "frontend/src/components/AppToasts.vue",
+    "frontend/src/assets/main.css",
+    "frontend/src/components/AdminMessagesView.vue",
+    "frontend/src/components/TradingSettings.vue"
+  ],
+  "landedSliceCommits": [
+    "88f167d8bfe16b410e5a690a4329c202d27dc24d",
+    "a552e264ba858ab9e78f1075b3109a1fcdba9dc0",
+    "8e96beef53485d8c48c2fccbb5d600e9d9bc4f07",
+    "bea58d4e4aaae6e73b98c3ad323e2eb85fa89581",
+    "6f12fbfc44325b5b0485118fa585c4e2a5072b77",
+    "a4828a5a9fcf50d6254d014feea522f307c0beab",
+    "8a3ff7519677702c65a760518df8e3690b968fa7",
+    "43df38fcc46e6eb3b4106b36d0376cf961e0c41f",
+    "f897a6fa9920c112efa7336d67479654f1d4ce4e",
+    "c5fc56996d7f8fa9c575646d70e8785811564633"
+  ],
+  "verification": {
+    "sourceDiffStatus": "passed",
+    "changedProtectedPathCount": 0,
+    "changedProtectedPaths": [],
+    "diffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "protectedPartialRegionDiffStatus": "passed",
+    "behaviorRegressionStatus": "passed_231_of_231_unit_and_2_of_2_mock_mutation",
+    "snapshotsChanged": false,
+    "realMutationE2eStatus": "not_run_environment_safety"
+  },
+  "testEvidence": {
+    "focused": {
+      "artifactPathExternal": "/tmp/uiux-stage1-runtime-gate.json",
+      "artifactSha256": "2d2063d9a3d7e4192f5909212ee565c64ae984cefe9cf26208072cc4f564b2b8",
+      "fileCount": 39,
+      "testCount": 413,
+      "passedTestCount": 413,
+      "durationMs": 108745.17,
+      "status": "passed"
+    },
+    "protected": {
+      "artifactPathExternal": "/tmp/uiux-stage1-protected-unit-gate.json",
+      "artifactSha256": "b8195779fcb9fd7edf7f03eaf8353cc491c3f983c447f2d990773ca0040e491f",
+      "fileCount": 10,
+      "testCount": 231,
+      "passedTestCount": 231,
+      "durationMs": 40258.86,
+      "status": "passed"
+    },
+    "full": {
+      "artifactPathExternal": "/tmp/uiux-stage1-full-unit-gate.json",
+      "artifactSha256": "adb1beada7cf71de2f3324ec906e3ff1248987de5d00a5e9a989f40349813460",
+      "fileCount": 132,
+      "testCount": 1255,
+      "passedTestCount": 1255,
+      "durationMs": 289284.44,
+      "status": "passed"
+    }
+  },
+  "visualComparison": {
+    "status": "known_drift_carried_forward_stage2",
+    "suitePassed": false,
+    "exitCode": 1,
+    "scenarioCount": 26,
+    "passedScenarioCount": 21,
+    "failedScenarioCount": 5,
+    "snapshotUpdates": 0,
+    "findings": [
+      {
+        "scenario": "mobile-390:market",
+        "pixelDifference": 1725,
+        "baseReproductionPixelDifference": 1725,
+        "disposition": "inherited_renderer_snapshot_drift_protected_source_diff_zero"
+      },
+      {
+        "scenario": "mobile-390:customers",
+        "pixelDifference": 2243,
+        "disposition": "approved_list_only_state_continuity_vs_stale_empty_snapshot"
+      },
+      {
+        "scenario": "mobile-390:profile",
+        "pixelDifference": 7887,
+        "disposition": "source_truth_self_fixture_vs_stale_placeholder_snapshot"
+      },
+      {
+        "scenario": "desktop-1440:profile",
+        "pixelDifference": 9965,
+        "disposition": "source_truth_self_fixture_vs_stale_placeholder_snapshot"
+      },
+      {
+        "scenario": "mobile-390:invite-landing",
+        "pixelDifference": 16442,
+        "disposition": "valid_canonical_invitation_vs_stale_invalid_mobile_snapshot_desktop_passed"
+      }
+    ]
+  },
+  "stage1TechnicalGate": "passed",
+  "nextAuthorizedRuntimeStage": "Stage 2",
+  "stage2RuntimeImplementationAuthorized": true,
+  "stage2RuntimeWorkStarted": false
+}

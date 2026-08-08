@@ -2,7 +2,7 @@
 
 تاریخ: ۲۰۲۶-۰۷-۱۷
 
-وضعیت: مورد تأیید مالک محصول؛ Stage 0A و `0B-1..0B-6` بسته شده‌اند. قرارداد و پیشروی بی‌وقفه roadmap در `2026-08-08T20:57:28.073Z` تأیید و closure فنی/Sites در `2026-08-08T21:07:38Z` پاس شده است. Stage 1 اکنون next authorized و هنوز runtime edit آن شروع‌نشده است
+وضعیت: مورد تأیید مالک محصول؛ Stage 0A، `0B-1..0B-6` و Stage 1 بسته شده‌اند. قرارداد و پیشروی بی‌وقفه roadmap در `2026-08-08T20:57:28.073Z` تأیید و closure فنی/Sites در `2026-08-08T21:07:38Z` پاس شده است. گیت فنی Stage 1 روی runtime head `c5fc56996d7f8fa9c575646d70e8785811564633` بسته است؛ Stage 2 مرحله بعدی مجاز و هنوز شروع‌نشده است
 
 نوع خروجی: تحلیل و نقشه راه مصوب؛ بدون تغییر کد محصول
 
@@ -116,6 +116,8 @@
 | کانال/اشتراک‌گذاری | `/admin/channels`، `/share-receive` | پیام‌رسان | خارج از محدوده |
 
 ## ۵. یافته‌های ممیزی
+
+یادداشت وضعیت: این بخش snapshot ممیزیِ پیش از اجرای Stage 1 را حفظ می‌کند. موارد اعتماد، recovery و اقدام حساسِ متعلق به Stage 1 در closure همان مرحله بسته شده‌اند؛ باقی موارد مطابق مالکیت Stageهای 2 تا 8 پیگیری می‌شوند.
 
 ### ۵.۱. چرا اصلاحات قبلی به نتیجه مورد انتظار نرسیده‌اند؟
 
@@ -291,11 +293,13 @@
 | `0B-5` حساب، پروفایل، امنیت و اعلان‌ها | تکمیل؛ شواهد فنی پاس و خروجی بصری در ۲۰۲۶-۰۸-۰۸ به‌صورت صریح توسط مالک محصول تأیید شده است | `docs/WEBAPP_UI_UX_REDESIGN_V2_STAGE0B_ACCOUNT_PROFILE_SECURITY_NOTIFICATIONS_CHECKPOINT_20260808.md` |
 | `0B-6` قرارداد نهایی سیستم و پذیرش | تکمیل؛ Figma `32/32`، local `32/32`، baseline `322/322`، build/guard و Sites owner-only source-bound پاس؛ `runtimeImplementationAuthorized: true` و `nextAuthorizedRuntimeStage: Stage 1`، بدون runtime edit Stage 1 | [checkpoint قرارداد نهایی](WEBAPP_UI_UX_REDESIGN_V2_STAGE0B_FINAL_SYSTEM_CONTRACT_CHECKPOINT_20260808.md) |
 
-خروجی `0B-3` شامل ۱۰ root موبایل، state atlas، پنج width proof، یک master/detail دقیق ۱۴۴۰×۹۰۰، ۶۵ variable، ۵ component set و ۱۷ variant در Figma رسمی است و با تأیید مالک محصول بسته شده است. قرارداد Phase 0 در `0B-4` نیز جست‌وجوی پایدار بدون filter ناقص، جدایی actionهای مدیریتی، دعوت استاندارد و stateهای permission-safe را قطعی کرده است؛ nodeها، snapshotها، audit schema 7، evidence محلی و preview خصوصی Sites از نظر فنی پاس و طراحی در ۲۰۲۶-۰۸-۰۸ به‌صورت صریح توسط مالک محصول تأیید شده است. در `0B-5` صفحه canonical `117:2`، ۱۰ root موبایل، پنج width proof، desktop `1440×900`، state/visibility/push matrix، audit schema 2 با `27/27`، harness محلی `27/27` و preview خصوصی source-bound ثبت و پاس شده‌اند و خروجی بصری نیز در ۲۰۲۶-۰۸-۰۸ به‌صورت صریح توسط مالک محصول تأیید شده است. در `0B-6` صفحه `168:1974` و board `168:1975`، قرارداد `SYS-01..SYS-14`، exact `32/32` در Figma و local، inventory ۲۹ route، پنج family، پنج width، desktop `1440×900` و baseline `35/35` فایل و `322/322` تست ثبت و پاس شده‌اند. Sites project `appgprj_6a77997ed65481918d71b8f1f3db541f` نیز private owner-only و source-bound پاس است؛ Stage 1 مجاز و هنوز runtime edit آن شروع‌نشده است.
+خروجی `0B-3` شامل ۱۰ root موبایل، state atlas، پنج width proof، یک master/detail دقیق ۱۴۴۰×۹۰۰، ۶۵ variable، ۵ component set و ۱۷ variant در Figma رسمی است و با تأیید مالک محصول بسته شده است. قرارداد Phase 0 در `0B-4` نیز جست‌وجوی پایدار بدون filter ناقص، جدایی actionهای مدیریتی، دعوت استاندارد و stateهای permission-safe را قطعی کرده است؛ nodeها، snapshotها، audit schema 7، evidence محلی و preview خصوصی Sites از نظر فنی پاس و طراحی در ۲۰۲۶-۰۸-۰۸ به‌صورت صریح توسط مالک محصول تأیید شده است. در `0B-5` صفحه canonical `117:2`، ۱۰ root موبایل، پنج width proof، desktop `1440×900`، state/visibility/push matrix، audit schema 2 با `27/27`، harness محلی `27/27` و preview خصوصی source-bound ثبت و پاس شده‌اند و خروجی بصری نیز در ۲۰۲۶-۰۸-۰۸ به‌صورت صریح توسط مالک محصول تأیید شده است. در `0B-6` صفحه `168:1974` و board `168:1975`، قرارداد `SYS-01..SYS-14`، exact `32/32` در Figma و local، inventory ۲۹ route، پنج family، پنج width، desktop `1440×900` و baseline `35/35` فایل و `322/322` تست ثبت و پاس شده‌اند. Sites project `appgprj_6a77997ed65481918d71b8f1f3db541f` نیز private owner-only و source-bound پاس است؛ Stage 1 پس از این closure اجرا و با گیت فنی مستقل بسته شد.
 
 ### مرحله ۱ — اعتماد و تداوم کار
 
 مدت پیشنهادی: ۴ تا ۶ روز
+
+وضعیت اجرایی: **`complete`**؛ ده commit rollback-safe ثبت شده و گیت fresh با `413/413` تست متمرکز، `231/231` تست protected، `1255/1255` تست کامل، typecheck/build/guard، viewport `8/8` و protected source diff صفر بسته است. مقایسه تصویری exact برابر `21/26` است و پنج اختلاف شناخته‌شده بدون snapshot update به Stage 2 carry-forward شده‌اند؛ یکی از آن‌ها روی base دست‌نخورده دقیقاً بازتولید شده و چهار مورد دیگر snapshot/fixture قدیمی‌اند. مرجع: [checkpoint Stage 1](WEBAPP_UI_UX_REDESIGN_V2_STAGE1_TRUST_CONTINUITY_CHECKPOINT_20260808.md). Stage 2 مرحله بعدی مجاز و هنوز شروع‌نشده است.
 
 هدف: برطرف کردن مشکلاتی که حتی در UI زیبا نیز تجربه را غیرقابل اعتماد می‌کنند.
 

@@ -1,6 +1,6 @@
 # Stage 0B-6 — قرارداد نهایی طراحی `SYS-01..SYS-14`
 
-وضعیت: `stage0b6_complete_stage1_authorized`؛ مالک قرارداد و ادامه بی‌وقفه roadmap را در `2026-08-08T20:57:28.073Z` تأیید کرد و closure فنی/Sites در `2026-08-08T21:07:38Z` پاس شد. این قرارداد خود runtime را تغییر نمی‌دهد؛ Stage 1 مجاز اما هنوز شروع‌نشده است.
+وضعیت: `stage0b6_complete_stage1_complete_stage2_authorized`؛ مالک قرارداد و ادامه بی‌وقفه roadmap را در `2026-08-08T20:57:28.073Z` تأیید کرد و closure فنی/Sites در `2026-08-08T21:07:38Z` پاس شد. این قرارداد خود runtime را تغییر نمی‌دهد؛ Stage 1 پس از closure اجرا و بسته شد و Stage 2 مرحله بعدی مجاز اما شروع‌نشده است.
 
 ## مبنای قرارداد
 
@@ -238,8 +238,12 @@ ownerSystemContractApproval.status = approved
 ownerSystemContractApproval.approvedAt = 2026-08-08T20:57:28.073Z
 continuousProgressionAuthorized = true
 runtimeImplementationAuthorized = true
-nextAuthorizedRuntimeStage = Stage 1
-stage1RuntimeWorkStarted = false
+nextAuthorizedRuntimeStage = Stage 2
+stage1RuntimeWorkStarted = true
+stage1Status = complete
+stage1TechnicalGate = passed
+stage2RuntimeImplementationAuthorized = true
+stage2RuntimeWorkStarted = false
 ```
 
-Stage 1 مطابق اجازه مالک باز است و این سند ادعای شروع runtime edit آن را ندارد.
+Stage 1 مطابق اجازه مالک اجرا و با گیت فنی مستقل بسته شد؛ closure و carry-forwardهای صریح آن در [checkpoint Stage 1](../WEBAPP_UI_UX_REDESIGN_V2_STAGE1_TRUST_CONTINUITY_CHECKPOINT_20260808.md) ثبت شده‌اند. Stage 2 next authorized است و هنوز شروع نشده است.
