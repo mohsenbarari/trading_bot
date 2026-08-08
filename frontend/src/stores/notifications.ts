@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { apiFetch } from '../utils/auth'
 import { playNotificationSound } from '../utils/audio'
+import { routeRequest, routeRequestJson } from '../utils/routeRequest'
 import {
     createToastNotification,
     normalizeAppNotificationPayload,
@@ -12,6 +13,14 @@ import {
     type ToastNotification,
 } from '../types/notifications'
 
+export type NotificationHistoryStatus = 'idle' | 'loading' | 'success' | 'error'
+
+export type NotificationHistoryResult =
+    | { ok: true; count: number }
+    | { ok: false; error: string }
+
+const NOTIFICATION_HISTORY_ERROR = 'دریافت اعلان‌ها انجام نشد.'
+
 export const useNotificationStore = defineStore('notifications', () => {
     const chatUnreadCount = ref(0)
     const unreadChatUserIds = ref<number[]>([])
@@ -21,10 +30,18 @@ export const useNotificationStore = defineStore('notifications', () => {
     const appNotifications = ref<NormalizedAppNotification[]>([])
     const activeToasts = ref<ToastNotification[]>([])
     const isLoadingHistory = ref(false)
+    const isRefreshingHistory = ref(false)
+    const historyStatus = ref<NotificationHistoryStatus>('idle')
+    const historyError = ref<string | null>(null)
+    const hasLoadedHistory = ref(false)
     const MAX_IN_MEMORY_NOTIFICATIONS = 100
     const NOTIFICATION_HISTORY_LIMIT = 50
     const TOAST_LIFETIME_MS = 5000
     let clientReceivedAtCursor = 0
+    let notificationMutationCursor = 0
+    let activeHistoryRequest: Promise<NotificationHistoryResult> | null = null
+    let activeOpenNotificationCenterRequest: Promise<NotificationHistoryResult> | null = null
+    const realtimeRevisionById = new Map<number | string, number>()
 
     const normalizeConversationKey = (value: unknown): number | null => {
         const conversationKey = Number(value)
@@ -83,18 +100,36 @@ export const useNotificationStore = defineStore('notifications', () => {
 
     const replaceHistoryPreservingConcurrentRealtime = (
         incomingNotifications: NormalizedAppNotification[],
-        fetchStartedAt: number
+        fetchStartedRevision: number
     ) => {
-        const incomingIds = new Set(incomingNotifications.map((notification) => notification.id))
+        const incomingById = new Map<number | string, NormalizedAppNotification>()
+        for (const notification of incomingNotifications) {
+            incomingById.set(notification.id, notification)
+        }
+
+        for (const [notificationId, incomingNotification] of incomingById) {
+            if ((realtimeRevisionById.get(notificationId) ?? 0) <= fetchStartedRevision) continue
+
+            const realtimeNotification = appNotifications.value.find(
+                (notification) => notification.id === notificationId
+            )
+            if (realtimeNotification) {
+                incomingById.set(notificationId, {
+                    ...incomingNotification,
+                    ...realtimeNotification,
+                })
+            }
+        }
+
+        const incomingIds = new Set(incomingById.keys())
         const concurrentRealtimeNotifications = appNotifications.value.filter((notification) =>
             !incomingIds.has(notification.id)
-            && typeof notification.client_received_at === 'number'
-            && notification.client_received_at > fetchStartedAt
+            && (realtimeRevisionById.get(notification.id) ?? 0) > fetchStartedRevision
         )
 
         appNotifications.value = trimNotificationList([
             ...concurrentRealtimeNotifications,
-            ...incomingNotifications,
+            ...incomingById.values(),
         ])
     }
 
@@ -297,20 +332,49 @@ export const useNotificationStore = defineStore('notifications', () => {
             const existingNotification = nextById.get(normalizedId)
             const normalized = withClientReceivedAt(notification, reserveClientReceivedAt(), existingNotification)
             nextById.set(normalizedId, normalized)
+            notificationMutationCursor += 1
+            realtimeRevisionById.set(normalizedId, notificationMutationCursor)
             normalizedBatch.push(normalized)
         }
 
         appNotifications.value = trimNotificationList(sortNotificationsByRecency(Array.from(nextById.values())))
+        if (historyStatus.value === 'loading' && appNotifications.value.length > 0) {
+            isLoadingHistory.value = false
+            isRefreshingHistory.value = true
+        }
         return normalizedBatch
     }
 
-    const fetchHistory = async () => {
-        isLoadingHistory.value = true
-        const fetchStartedAt = Date.now()
-        try {
-            const response = await apiFetch(`/api/notifications/?limit=${NOTIFICATION_HISTORY_LIMIT}&offset=0`)
-            if (response.ok) {
-                const data = await response.json()
+    const fetchHistory = (): Promise<NotificationHistoryResult> => {
+        if (activeHistoryRequest) return activeHistoryRequest
+
+        const historySnapshotReceivedAt = reserveClientReceivedAt()
+        const fetchStartedRevision = notificationMutationCursor
+        const hasRetainedRows = appNotifications.value.length > 0
+        isLoadingHistory.value = !hasLoadedHistory.value && !hasRetainedRows
+        isRefreshingHistory.value = hasLoadedHistory.value || hasRetainedRows
+        historyStatus.value = 'loading'
+        historyError.value = null
+
+        activeHistoryRequest = (async (): Promise<NotificationHistoryResult> => {
+            try {
+                const data = await routeRequestJson<AppRealtimeNotificationPayload[]>(
+                    `/api/notifications/?limit=${NOTIFICATION_HISTORY_LIMIT}&offset=0`,
+                    {
+                        errorContext: {
+                            surface: 'settings',
+                            scope: 'list',
+                            operation: hasRetainedRows ? 'background-refresh' : 'initial-load',
+                            preserveExistingData: hasRetainedRows,
+                            resourceLabel: 'اعلان‌ها',
+                            fallbackMessage: NOTIFICATION_HISTORY_ERROR,
+                        },
+                    }
+                )
+                if (!Array.isArray(data)) {
+                    throw new Error('Notification history response is not an array')
+                }
+
                 const existingById = new Map(
                     appNotifications.value.map((notification) => [notification.id, notification] as const)
                 )
@@ -318,31 +382,66 @@ export const useNotificationStore = defineStore('notifications', () => {
                     const normalized = normalizeAppNotificationPayload(notification)
                     return withClientReceivedAt(
                         notification,
-                        fetchStartedAt,
+                        historySnapshotReceivedAt,
                         existingById.get(normalized.id)
                     )
                 })
-                replaceHistoryPreservingConcurrentRealtime(normalizedHistory, fetchStartedAt)
+                replaceHistoryPreservingConcurrentRealtime(normalizedHistory, fetchStartedRevision)
+                hasLoadedHistory.value = true
+                historyStatus.value = 'success'
+                return { ok: true, count: new Set(normalizedHistory.map((notification) => notification.id)).size }
+            } catch (error) {
+                historyStatus.value = 'error'
+                historyError.value = NOTIFICATION_HISTORY_ERROR
+                console.error('Failed to fetch notifications history:', error)
+                return { ok: false, error: NOTIFICATION_HISTORY_ERROR }
+            } finally {
+                isLoadingHistory.value = false
+                isRefreshingHistory.value = false
+                activeHistoryRequest = null
             }
-        } catch (error) {
-            console.error('Failed to fetch notifications history:', error)
-        } finally {
-            isLoadingHistory.value = false
-        }
+        })()
+
+        return activeHistoryRequest
     }
 
-    const openNotificationCenter = async () => {
-        await fetchHistory()
-        await markAllAsRead()
+    const openNotificationCenter = (): Promise<NotificationHistoryResult> => {
+        if (activeOpenNotificationCenterRequest) return activeOpenNotificationCenterRequest
+
+        activeOpenNotificationCenterRequest = (async () => {
+            const historyResult = await fetchHistory()
+            if (!historyResult.ok) return historyResult
+
+            await markAllAsRead()
+            return historyResult
+        })().finally(() => {
+            activeOpenNotificationCenterRequest = null
+        })
+
+        return activeOpenNotificationCenterRequest
     }
 
     const markAllAsRead = async () => {
+        const markStartedRevision = notificationMutationCursor
         try {
-            const response = await apiFetch('/api/notifications/mark-all-read', { method: 'POST' })
-            if (!response.ok) throw new Error()
-            appNotifications.value = appNotifications.value.map((notification) => ({ ...notification, is_read: true }))
+            await routeRequest('/api/notifications/mark-all-read', {
+                method: 'POST',
+                errorContext: {
+                    surface: 'settings',
+                    scope: 'action',
+                    operation: 'update',
+                    fallbackMessage: 'ثبت وضعیت خوانده‌شده انجام نشد.',
+                },
+            })
+            appNotifications.value = appNotifications.value.map((notification) => (
+                (realtimeRevisionById.get(notification.id) ?? 0) <= markStartedRevision
+                    ? { ...notification, is_read: true }
+                    : notification
+            ))
+            return { ok: true as const }
         } catch (error) {
             console.error('Failed to mark all as read:', error)
+            return { ok: false as const }
         }
     }
 
@@ -354,11 +453,16 @@ export const useNotificationStore = defineStore('notifications', () => {
         notification.is_read = isRead
 
         try {
-            const response = await apiFetch(`/api/notifications/${id}/read`, {
+            await routeRequest(`/api/notifications/${id}/read`, {
                 method: 'PATCH',
                 body: JSON.stringify({ is_read: isRead }),
+                errorContext: {
+                    surface: 'settings',
+                    scope: 'item',
+                    operation: 'update',
+                    fallbackMessage: 'تغییر وضعیت اعلان انجام نشد.',
+                },
             })
-            if (!response.ok) throw new Error()
         } catch (error) {
             notification.is_read = originalState
             console.error('Failed to toggle read status:', error)
@@ -370,8 +474,15 @@ export const useNotificationStore = defineStore('notifications', () => {
         appNotifications.value = []
 
         try {
-            const response = await apiFetch('/api/notifications/', { method: 'DELETE' })
-            if (!response.ok) throw new Error()
+            await routeRequest('/api/notifications/', {
+                method: 'DELETE',
+                errorContext: {
+                    surface: 'settings',
+                    scope: 'action',
+                    operation: 'delete',
+                    fallbackMessage: 'پاک‌کردن اعلان‌ها انجام نشد.',
+                },
+            })
         } catch (error) {
             restoreClearedNotifications(originalList)
             console.error('Clear all notifications failed:', error)
@@ -386,8 +497,15 @@ export const useNotificationStore = defineStore('notifications', () => {
         appNotifications.value = appNotifications.value.filter((notification) => notification.id !== id)
 
         try {
-            const response = await apiFetch(`/api/notifications/${id}`, { method: 'DELETE' })
-            if (!response.ok) throw new Error()
+            await routeRequest(`/api/notifications/${id}`, {
+                method: 'DELETE',
+                errorContext: {
+                    surface: 'settings',
+                    scope: 'item',
+                    operation: 'delete',
+                    fallbackMessage: 'حذف اعلان انجام نشد.',
+                },
+            })
         } catch (error) {
             restoreDeletedNotification(originalList, removedNotification)
             console.error('Delete failed:', error)
@@ -442,6 +560,10 @@ export const useNotificationStore = defineStore('notifications', () => {
         addToastsBatch,
         removeToast,
         isLoadingHistory,
+        isRefreshingHistory,
+        historyStatus,
+        historyError,
+        hasLoadedHistory,
         fetchHistory,
         openNotificationCenter,
         markAllAsRead,

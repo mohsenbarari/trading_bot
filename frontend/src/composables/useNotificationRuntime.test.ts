@@ -21,6 +21,7 @@ const notificationRuntimeMocks = vi.hoisted(() => ({
     incrementMentionUnread: vi.fn(),
     incrementMentionUnreadBatch: undefined as any,
     fetchInitialCounts: vi.fn(),
+    fetchHistory: vi.fn(),
   },
   conversationsStore: {
     conversations: [] as any[],
@@ -144,6 +145,7 @@ describe('useNotificationRuntime', () => {
     notificationRuntimeMocks.store.incrementMentionUnread.mockReset()
     notificationRuntimeMocks.store.incrementMentionUnreadBatch = undefined
     notificationRuntimeMocks.store.fetchInitialCounts.mockReset()
+    notificationRuntimeMocks.store.fetchHistory.mockReset()
     notificationRuntimeMocks.conversationsStore.conversations = []
     notificationRuntimeMocks.conversationsStore.patchConversation.mockReset()
     notificationRuntimeMocks.store.addAppNotification.mockReturnValue({
@@ -202,6 +204,30 @@ describe('useNotificationRuntime', () => {
     expect(notificationRuntimeMocks.off).toHaveBeenCalledWith(WS_NOTIFICATION_EVENTS.wsReconnect, expect.any(Function))
     expect(notificationRuntimeMocks.off).toHaveBeenCalledWith(WS_NOTIFICATION_EVENTS.appMessage, expect.any(Function))
     expect(notificationRuntimeMocks.off).toHaveBeenCalledWith(WS_NOTIFICATION_EVENTS.chatMessage, expect.any(Function))
+  })
+
+  it('refetches the bounded notification window on notification-center reconnects but never on chat reconnects', async () => {
+    setRoute('/notifications', '/notifications')
+    const wrapper = mountRuntime()
+
+    emitWsEvent(WS_NOTIFICATION_EVENTS.wsReconnect)
+    expect(notificationRuntimeMocks.store.fetchHistory).toHaveBeenCalledTimes(1)
+    expect(notificationRuntimeMocks.store.fetchHistory).toHaveBeenLastCalledWith()
+    expect(notificationRuntimeMocks.store.fetchInitialCounts).toHaveBeenCalledTimes(1)
+
+    setRoute('/account/notifications', '/account/notifications')
+    await nextTick()
+    emitWsEvent(WS_NOTIFICATION_EVENTS.wsReconnect)
+    expect(notificationRuntimeMocks.store.fetchHistory).toHaveBeenCalledTimes(2)
+    expect(notificationRuntimeMocks.store.fetchInitialCounts).toHaveBeenCalledTimes(2)
+
+    setRoute('/chat', '/chat?user_id=42', { user_id: '42' })
+    await nextTick()
+    emitWsEvent(WS_NOTIFICATION_EVENTS.wsReconnect)
+    expect(notificationRuntimeMocks.store.fetchHistory).toHaveBeenCalledTimes(2)
+    expect(notificationRuntimeMocks.store.fetchInitialCounts).toHaveBeenCalledTimes(3)
+
+    wrapper.unmount()
   })
 
   it('normalizes app notifications into toasts and browser notifications, but suppresses toast rendering in the notification center', async () => {

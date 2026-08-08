@@ -45,6 +45,8 @@ describe('NotificationsView.vue', () => {
 
   it('opens the notification center on mount and renders the empty state when there are no notifications', async () => {
     const store = useNotificationStore()
+    store.hasLoadedHistory = true
+    store.historyStatus = 'success'
     const openNotificationCenterSpy = vi.spyOn(store, 'openNotificationCenter').mockResolvedValue()
 
     const wrapper = mount(NotificationsView)
@@ -52,6 +54,66 @@ describe('NotificationsView.vue', () => {
 
     expect(openNotificationCenterSpy).toHaveBeenCalledTimes(1)
     expect(wrapper.text()).toContain('هیچ اعلانی یافت نشد')
+    expect(wrapper.text()).toContain('در آخرین اعلان‌های دریافت‌شده')
+  })
+
+  it('shows a retryable error instead of a false empty state when the initial history request fails', async () => {
+    const store = useNotificationStore()
+    store.historyStatus = 'error'
+    store.historyError = 'دریافت اعلان‌ها انجام نشد.'
+    const openNotificationCenterSpy = vi.spyOn(store, 'openNotificationCenter').mockResolvedValue({
+      ok: false,
+      error: 'دریافت اعلان‌ها انجام نشد.',
+    })
+
+    const wrapper = mount(NotificationsView)
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('اعلان‌ها دریافت نشدند')
+    expect(wrapper.text()).toContain('دریافت اعلان‌ها انجام نشد. دوباره تلاش کنید.')
+    expect(wrapper.text()).not.toContain('هیچ اعلانی یافت نشد')
+    expect(wrapper.find('.notification-category-tabs').text()).not.toContain('۰')
+
+    await wrapper.get('.notification-history-retry').trigger('click')
+    await flushPromises()
+    expect(openNotificationCenterSpy).toHaveBeenCalledTimes(2)
+  })
+
+  it('keeps retained notifications visible with compact refresh and retry feedback', async () => {
+    const store = useNotificationStore()
+    store.hasLoadedHistory = true
+    store.historyStatus = 'error'
+    store.historyError = 'دریافت اعلان‌ها انجام نشد.'
+    store.appNotifications = [
+      {
+        id: 71,
+        title: 'اعلان باقی‌مانده',
+        body: 'این مورد از دریافت قبلی حفظ شده است',
+        content: 'این مورد از دریافت قبلی حفظ شده است',
+        message: 'این مورد از دریافت قبلی حفظ شده است',
+        level: 'info',
+        category: 'system',
+        is_read: true,
+      },
+    ]
+    const openNotificationCenterSpy = vi.spyOn(store, 'openNotificationCenter').mockResolvedValue({
+      ok: false,
+      error: 'دریافت اعلان‌ها انجام نشد.',
+    })
+
+    const wrapper = mount(NotificationsView)
+    await flushPromises()
+    await wrapper.find('.notification-category-tabs').findAll('[role="tab"]')[1]!.trigger('click')
+
+    expect(wrapper.find('.notif-item').exists()).toBe(true)
+    expect(wrapper.text()).toContain('موارد قبلی همچنان نمایش داده می‌شوند')
+    expect(wrapper.text()).not.toContain('هیچ اعلانی یافت نشد')
+
+    store.historyStatus = 'loading'
+    store.isRefreshingHistory = true
+    await flushPromises()
+    expect(wrapper.find('.notif-item').exists()).toBe(true)
+    expect(wrapper.text()).toContain('در حال به‌روزرسانی اعلان‌ها')
   })
 
   it('shows only the enable action when push notifications are inactive', async () => {
@@ -139,6 +201,8 @@ describe('NotificationsView.vue', () => {
     const categoryTabs = wrapper.find('.notification-category-tabs').findAll('[role="tab"]')
     expect(categoryTabs).toHaveLength(2)
     expect(categoryTabs[0]!.attributes('aria-selected')).toBe('true')
+    expect(categoryTabs[0]!.text()).toContain('معاملات ۱')
+    expect(categoryTabs[1]!.text()).toContain('سایر ۱')
     expect(wrapper.find('.notification-toolbar').exists()).toBe(false)
     expect(wrapper.text()).not.toContain('پیام مدیریتی')
     expect(wrapper.find('.notif-item.category-trade').exists()).toBe(true)

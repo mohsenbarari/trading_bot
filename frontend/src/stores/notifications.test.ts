@@ -66,6 +66,127 @@ describe('notification store', () => {
 
     await historyPromise
     expect(store.appNotifications.map((notification) => notification.id)).toEqual([99, 1])
+    expect(apiFetchMock).toHaveBeenCalledWith('/api/notifications/?limit=50&offset=0', expect.objectContaining({
+      retryNetwork: false,
+      signal: expect.any(AbortSignal),
+    }))
+  })
+
+  it('distinguishes a confirmed empty history from network and server failures', async () => {
+    const { useNotificationStore } = await import('./notifications')
+    const store = useNotificationStore()
+
+    apiFetchMock.mockRejectedValueOnce(new Error('network failed'))
+    await expect(store.fetchHistory()).resolves.toEqual({
+      ok: false,
+      error: 'دریافت اعلان‌ها انجام نشد.',
+    })
+    expect(store.historyStatus).toBe('error')
+    expect(store.historyError).toBe('دریافت اعلان‌ها انجام نشد.')
+    expect(store.hasLoadedHistory).toBe(false)
+    expect(store.appNotifications).toEqual([])
+
+    apiFetchMock.mockResolvedValueOnce(makeResponse({ detail: 'server failed' }, false))
+    await expect(store.fetchHistory()).resolves.toEqual({
+      ok: false,
+      error: 'دریافت اعلان‌ها انجام نشد.',
+    })
+    expect(store.historyStatus).toBe('error')
+    expect(store.hasLoadedHistory).toBe(false)
+
+    apiFetchMock.mockResolvedValueOnce(makeResponse([]))
+    await expect(store.fetchHistory()).resolves.toEqual({ ok: true, count: 0 })
+    expect(store.historyStatus).toBe('success')
+    expect(store.historyError).toBeNull()
+    expect(store.hasLoadedHistory).toBe(true)
+    expect(store.appNotifications).toEqual([])
+  })
+
+  it('keeps retained rows visible and exposes refreshing/error state when a refresh fails', async () => {
+    const { useNotificationStore } = await import('./notifications')
+    const store = useNotificationStore()
+
+    apiFetchMock.mockResolvedValueOnce(makeResponse([
+      { id: 1, message: 'retained', category: 'system', is_read: false },
+    ]))
+    await store.fetchHistory()
+
+    const pendingRefresh = deferred<ReturnType<typeof makeResponse>>()
+    apiFetchMock.mockReturnValueOnce(pendingRefresh.promise)
+    const refreshPromise = store.fetchHistory()
+
+    expect(store.isLoadingHistory).toBe(false)
+    expect(store.isRefreshingHistory).toBe(true)
+    expect(store.historyStatus).toBe('loading')
+    expect(store.appNotifications.map((notification) => notification.id)).toEqual([1])
+
+    pendingRefresh.reject(new Error('refresh failed'))
+    await expect(refreshPromise).resolves.toMatchObject({ ok: false })
+
+    expect(store.isRefreshingHistory).toBe(false)
+    expect(store.historyStatus).toBe('error')
+    expect(store.hasLoadedHistory).toBe(true)
+    expect(store.appNotifications.map((notification) => notification.id)).toEqual([1])
+  })
+
+  it('dedupes history ids while preserving a same-id realtime update that arrives during refresh', async () => {
+    const { useNotificationStore } = await import('./notifications')
+    const store = useNotificationStore()
+    const pendingFetch = deferred<ReturnType<typeof makeResponse>>()
+
+    apiFetchMock.mockReturnValueOnce(pendingFetch.promise)
+    const historyPromise = store.fetchHistory()
+    store.addAppNotification({
+      id: 7,
+      message: 'realtime wins',
+      category: 'user',
+      route: '/users/7',
+      is_read: false,
+    })
+
+    pendingFetch.resolve(makeResponse([
+      { id: 7, message: 'older history', category: 'system', is_read: true },
+      { id: 7, message: 'duplicate history', category: 'system', is_read: true },
+    ]))
+    await historyPromise
+
+    expect(store.appNotifications).toHaveLength(1)
+    expect(store.appNotifications[0]).toMatchObject({
+      id: 7,
+      message: 'realtime wins',
+      route: '/users/7',
+      is_read: false,
+    })
+  })
+
+  it('does not mark all read when history fails and leaves realtime arrivals unread during mark-all', async () => {
+    const { useNotificationStore } = await import('./notifications')
+    const store = useNotificationStore()
+
+    apiFetchMock.mockRejectedValueOnce(new Error('history failed'))
+    await store.openNotificationCenter()
+    expect(apiFetchMock).toHaveBeenCalledTimes(1)
+    expect(apiFetchMock).not.toHaveBeenCalledWith('/api/notifications/mark-all-read', expect.anything())
+
+    apiFetchMock.mockResolvedValueOnce(makeResponse([
+      { id: 1, message: 'existing', category: 'system', is_read: false },
+    ]))
+    const pendingMark = deferred<ReturnType<typeof makeResponse>>()
+    apiFetchMock.mockReturnValueOnce(pendingMark.promise)
+    const openPromise = store.openNotificationCenter()
+    await vi.waitFor(() => {
+      expect(apiFetchMock).toHaveBeenCalledWith('/api/notifications/mark-all-read', expect.objectContaining({
+        method: 'POST',
+        retryNetwork: false,
+        signal: expect.any(AbortSignal),
+      }))
+    })
+    store.addAppNotification({ id: 2, message: 'fresh realtime', category: 'user', is_read: false })
+    pendingMark.resolve(makeResponse({ ok: true }))
+    await openPromise
+
+    expect(store.appNotifications.find((notification) => notification.id === 1)?.is_read).toBe(true)
+    expect(store.appNotifications.find((notification) => notification.id === 2)?.is_read).toBe(false)
   })
 
   it('preserves route metadata from a realtime notification when matching history arrives later', async () => {
@@ -247,8 +368,15 @@ describe('notification store', () => {
     apiFetchMock.mockResolvedValueOnce(makeResponse([{ id: 4, message: 'history', category: 'user', is_read: false }]))
     apiFetchMock.mockResolvedValueOnce(makeResponse({ ok: true }))
     await store.openNotificationCenter()
-    expect(apiFetchMock).toHaveBeenNthCalledWith(1, '/api/notifications/?limit=50&offset=0')
-    expect(apiFetchMock).toHaveBeenNthCalledWith(2, '/api/notifications/mark-all-read', { method: 'POST' })
+    expect(apiFetchMock).toHaveBeenNthCalledWith(1, '/api/notifications/?limit=50&offset=0', expect.objectContaining({
+      retryNetwork: false,
+      signal: expect.any(AbortSignal),
+    }))
+    expect(apiFetchMock).toHaveBeenNthCalledWith(2, '/api/notifications/mark-all-read', expect.objectContaining({
+      method: 'POST',
+      retryNetwork: false,
+      signal: expect.any(AbortSignal),
+    }))
     expect(store.appNotifications.every((notification) => notification.is_read)).toBe(true)
 
     apiFetchMock.mockResolvedValueOnce(makeResponse({}, false))

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { Bell, BellRing, ChevronRight } from 'lucide-vue-next'
+import { Bell, BellRing, ChevronRight, RefreshCw } from 'lucide-vue-next'
 import {
   AppButton,
   AppEmptyState,
@@ -34,11 +34,39 @@ const managementNotifications = computed(() => notificationStore.appNotification
 const activeCategoryNotifications = computed(() => (
   activeCategory.value === 'trade' ? tradeNotifications.value : managementNotifications.value
 ))
+const hasNotifications = computed(() => notificationStore.appNotifications.length > 0)
+const shouldShowCategoryCounts = computed(() => (
+  notificationStore.hasLoadedHistory || hasNotifications.value
+))
 const categoryOptions = computed(() => [
-  { key: 'trade' as const, label: `معاملات ${tradeNotifications.value.length.toLocaleString('fa-IR')}` },
-  { key: 'management' as const, label: `پیام مدیریت ${managementNotifications.value.length.toLocaleString('fa-IR')}` },
+  {
+    key: 'trade' as const,
+    label: shouldShowCategoryCounts.value
+      ? `معاملات ${tradeNotifications.value.length.toLocaleString('fa-IR')}`
+      : 'معاملات',
+  },
+  {
+    key: 'management' as const,
+    label: shouldShowCategoryCounts.value
+      ? `سایر ${managementNotifications.value.length.toLocaleString('fa-IR')}`
+      : 'سایر',
+  },
 ])
 const filteredNotifications = computed(() => activeCategoryNotifications.value)
+const hasInitialHistoryError = computed(() => (
+  notificationStore.historyStatus === 'error' && !hasNotifications.value
+))
+const hasRetainedHistoryError = computed(() => (
+  notificationStore.historyStatus === 'error' && hasNotifications.value
+))
+const hasConfirmedEmptyHistory = computed(() => (
+  notificationStore.hasLoadedHistory
+  && notificationStore.historyStatus === 'success'
+  && !hasNotifications.value
+))
+const isHistoryBusy = computed(() => (
+  notificationStore.isLoadingHistory || notificationStore.isRefreshingHistory
+))
 const pushStatusLabel = computed(() => {
   if (pushState.value === 'checking') return 'در حال بررسی'
   if (pushState.value === 'unsupported') return 'پشتیبانی نمی‌شود'
@@ -137,7 +165,7 @@ async function refreshPushState() {
   try {
     const status = await getWebPushStatus()
     pushState.value = status.state
-  } catch (error) {
+  } catch {
     pushState.value = 'error'
   }
 }
@@ -150,12 +178,17 @@ async function enablePush() {
     const status = await enableWebPushNotifications()
     pushState.value = status.state
     pushActionMessage.value = status.state === 'subscribed' ? 'فعال شد' : pushStatusLabel.value
-  } catch (error) {
+  } catch {
     pushState.value = 'error'
     pushActionMessage.value = 'فعال‌سازی ناموفق بود'
   } finally {
     isPushBusy.value = false
   }
+}
+
+async function retryHistory() {
+  if (isHistoryBusy.value) return
+  await notificationStore.openNotificationCenter()
 }
 
 const openNotificationRoute = (notification: NormalizedAppNotification) => {
@@ -217,12 +250,42 @@ onMounted(async () => {
           <p v-if="pushActionMessage" class="push-action-message">{{ pushActionMessage }}</p>
         </AppSectionCard>
 
-        <AppLoadingState v-if="notificationStore.isLoadingHistory" class="ds-loading-state" label="در حال دریافت اعلان‌ها" />
+        <AppLoadingState
+          v-if="notificationStore.isLoadingHistory && !hasNotifications"
+          class="ds-loading-state"
+          label="در حال دریافت اعلان‌ها"
+        />
 
         <AppEmptyState
-          v-else-if="notificationStore.appNotifications.length === 0"
+          v-else-if="hasInitialHistoryError"
+          class="notification-history-error"
+          title="اعلان‌ها دریافت نشدند"
+          message="دریافت اعلان‌ها انجام نشد. دوباره تلاش کنید."
+          tone="danger"
+          role="alert"
+        >
+          <template #icon>
+            <Bell :size="48" />
+          </template>
+          <template #actions>
+            <AppButton
+              class="notification-history-retry"
+              size="sm"
+              :loading="isHistoryBusy"
+              @click="retryHistory"
+            >
+              <template #icon>
+                <RefreshCw :size="16" />
+              </template>
+              تلاش دوباره
+            </AppButton>
+          </template>
+        </AppEmptyState>
+
+        <AppEmptyState
+          v-else-if="hasConfirmedEmptyHistory"
           title="هیچ اعلانی یافت نشد"
-          message="اعلان‌های سیستم، بازار و معاملات بعد از دریافت در این بخش نمایش داده می‌شوند."
+          message="در آخرین اعلان‌های دریافت‌شده موردی برای نمایش وجود ندارد."
           tone="info"
         >
           <template #icon>
@@ -231,14 +294,43 @@ onMounted(async () => {
         </AppEmptyState>
 
         <section
-          v-else
+          v-else-if="hasNotifications"
           class="notifications-section"
         >
+          <div
+            v-if="notificationStore.isRefreshingHistory"
+            class="notification-history-feedback is-refreshing"
+            role="status"
+            aria-live="polite"
+          >
+            <span>در حال به‌روزرسانی اعلان‌ها</span>
+          </div>
+
+          <div
+            v-else-if="hasRetainedHistoryError"
+            class="notification-history-feedback is-error"
+            role="alert"
+          >
+            <span>به‌روزرسانی اعلان‌ها انجام نشد؛ موارد قبلی همچنان نمایش داده می‌شوند.</span>
+            <AppButton
+              class="notification-history-retry"
+              variant="ghost"
+              size="sm"
+              :loading="isHistoryBusy"
+              @click="retryHistory"
+            >
+              <template #icon>
+                <RefreshCw :size="16" />
+              </template>
+              تلاش دوباره
+            </AppButton>
+          </div>
+
           <AppEmptyState
             v-if="filteredNotifications.length === 0"
             class="notification-filter-empty"
             title="اعلانی در این فیلتر وجود ندارد"
-            :message="activeCategory === 'trade' ? 'اعلان معاملاتی برای نمایش وجود ندارد.' : 'پیام مدیریتی برای نمایش وجود ندارد.'"
+            :message="activeCategory === 'trade' ? 'اعلان معاملاتی برای نمایش وجود ندارد.' : 'اعلانی در دسته سایر برای نمایش وجود ندارد.'"
             tone="neutral"
           >
             <template #icon>
@@ -366,6 +458,33 @@ onMounted(async () => {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
+}
+
+.notification-history-feedback {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  min-height: var(--ds-touch-target);
+  padding: 0.55rem 0.75rem;
+  border: 1px solid var(--ds-border-light);
+  border-radius: var(--ds-radius-md);
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-font-sm);
+}
+
+.notification-history-feedback.is-refreshing {
+  background: var(--ds-bg-page);
+}
+
+.notification-history-feedback.is-error {
+  border-color: var(--ds-danger-500);
+  background: var(--ds-danger-50);
+  color: var(--ds-danger-500);
+}
+
+.notification-history-retry {
+  flex: 0 0 auto;
 }
 
 .push-section :deep(.ui-section-card__body) {

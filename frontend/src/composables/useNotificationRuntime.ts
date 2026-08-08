@@ -287,11 +287,19 @@ export function useNotificationRuntime({ connect, on, off, ensureSessionValidati
     }
 
     const handleReconnect = () => {
+        const isNotificationCenterRoute = (
+            route.path === '/notifications' || route.path === '/account/notifications'
+        )
+
         if (skipNextReconnectCountsFetch) {
             skipNextReconnectCountsFetch = false
-            return
+        } else {
+            void notificationStore.fetchInitialCounts()
         }
-        void notificationStore.fetchInitialCounts()
+
+        if (isNotificationCenterRoute) {
+            void notificationStore.fetchHistory()
+        }
     }
 
     const bootstrapAuthenticatedRuntime = () => {
