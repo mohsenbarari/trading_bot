@@ -17,6 +17,32 @@ from scripts import staging_combined_matrix_wave_driver as wave_driver
 
 
 class CombinedMatrixManifestTests(unittest.TestCase):
+    def test_runtime_driver_bundle_includes_shared_probe_worker(self) -> None:
+        self.assertIn(
+            "scripts/trading_core_probe_worker.py",
+            runner.DRIVER_SCRIPTS,
+        )
+
+    def test_iran_mutating_wave_registers_outbox_before_prefix_validation(self) -> None:
+        args = SimpleNamespace(run_prefix="NOT_A_MATRIX_PREFIX")
+
+        async def run_probe() -> None:
+            with patch.object(mutating_wave, "_guard"), patch.object(
+                mutating_wave,
+                "setup_event_listeners",
+            ) as setup_events, patch.object(
+                mutating_wave,
+                "current_server",
+                return_value=mutating_wave.SERVER_IRAN,
+            ):
+                with self.assertRaises(mutating_wave.DriverRefusal):
+                    await mutating_wave._run(args)
+                setup_events.assert_called_once_with()
+
+        import asyncio
+
+        asyncio.run(run_probe())
+
     def test_manifest_fills_mandatory_cells(self) -> None:
         manifest = manifest_builder.build_manifest(seed=20260806)
         errors = manifest_builder.validate_combined_manifest(manifest)
@@ -97,6 +123,39 @@ class CombinedMatrixManifestTests(unittest.TestCase):
         mix = manifest["wave"]["request_surface_mix"]
         self.assertEqual(mix["webapp_share"], 0.5)
         self.assertEqual(mix["telegram_share"], 0.5)
+
+    def test_wave_runtime_topology_keeps_telegram_actions_on_foreign(self) -> None:
+        manifest = manifest_builder.build_manifest(seed=20260806)
+        budget = wave_driver.WaveBudget(
+            valid_target=4000,
+            invalid_target=800,
+            scale=0.1,
+            reduction_reason="unit-test",
+        )
+        selected = [
+            dict(item)
+            for item in wave_driver.scale_events(list(manifest["wave_events"]), budget)
+        ]
+
+        report = runner._route_wave_requests_for_runtime_topology(
+            selected,
+            trade_percent=40,
+        )
+
+        actionable = [
+            item
+            for item in selected
+            if item.get("kind") == "valid" and int(item["seq"]) % 100 < 40
+        ]
+        self.assertEqual(report["manifest_request_mix"], report["effective_request_mix"])
+        self.assertEqual(report["iran_telegram_actions"], 0)
+        self.assertTrue(
+            all(
+                item.get("surface") == "bot"
+                for item in actionable
+                if item.get("effective_request_surface") == "telegram"
+            )
+        )
 
     def test_mandatory_cells_include_all_lanes(self) -> None:
         for prefix in ("market:", "queue:", "overtime:", "estimate:"):
@@ -180,6 +239,12 @@ class CombinedMatrixManifestTests(unittest.TestCase):
         limits = runner._effective_wave_limits(args, expected_valid=4000)
         self.assertEqual(limits["channel_base_interval_seconds"], 0.9)
         self.assertEqual(limits["channel_idle_burst_capacity"], 2)
+        self.assertEqual(limits["channel_drain_safety_factor"], 2.25)
+        self.assertEqual(limits["estimated_channel_operations"], 10400)
+        self.assertGreater(
+            limits["protected_channel_drain_seconds"],
+            limits["estimated_channel_drain_seconds"],
+        )
         self.assertEqual(limits["effective_offer_expiry_minutes"], 2)
         self.assertFalse(limits["temporary_expiry_override_enabled"])
         self.assertFalse(limits["fits_configured_offer_lifetime"])
@@ -206,6 +271,69 @@ class CombinedMatrixManifestTests(unittest.TestCase):
         limits = runner._effective_wave_limits(args, expected_valid=800)
         self.assertTrue(limits["temporary_expiry_override_enabled"])
         self.assertGreater(limits["effective_offer_expiry_minutes"], 2)
+
+    def test_wave_prefix_catchup_replays_synced_dependency_parents(self) -> None:
+        args = SimpleNamespace(run_prefix="CMB_DEPENDENCY_BARRIER")
+        with patch.object(
+            runner,
+            "_container_python",
+            return_value=({"status": "ok"}, 0),
+        ) as container_python:
+            payload = runner._wave_prefix_sync_catchup(args, include_synced=True)
+
+        self.assertTrue(payload["ok"])
+        self.assertTrue(payload["include_synced"])
+        self.assertEqual(container_python.call_count, 1)
+        self.assertEqual(payload["results"]["foreign"]["status"], "skipped")
+        for call in container_python.call_args_list:
+            self.assertIn("--include-synced", call.kwargs["script_args"])
+
+    def test_later_wave_prefix_catchups_do_not_replay_synced_rows(self) -> None:
+        args = SimpleNamespace(run_prefix="CMB_INCREMENTAL_CATCHUP")
+        with patch.object(
+            runner,
+            "_container_python",
+            return_value=({"status": "ok"}, 0),
+        ) as container_python:
+            payload = runner._wave_prefix_sync_catchup(args, include_synced=False)
+
+        self.assertTrue(payload["ok"])
+        self.assertFalse(payload["include_synced"])
+        self.assertEqual(container_python.call_count, 1)
+        for call in container_python.call_args_list:
+            self.assertNotIn("--include-synced", call.kwargs["script_args"])
+
+    def test_queue_drain_wait_exits_as_soon_as_scope_reaches_zero(self) -> None:
+        args = SimpleNamespace(
+            drain_wait_seconds=180.0,
+            queue_sample_interval_seconds=5.0,
+        )
+        samples = [
+            {"ok": True, "scoped": {"pending_jobs": 1}},
+            {"ok": True, "scoped": {"pending_jobs": 0}},
+        ]
+        ticks = iter(range(100))
+        with patch.object(runner, "_queue_sample", side_effect=samples), patch.object(
+            runner.time,
+            "sleep",
+            return_value=None,
+        ), patch.object(
+            runner.time,
+            "perf_counter",
+            side_effect=lambda: float(next(ticks)),
+        ):
+            final_sample, report = runner._wait_for_scoped_queue_drain(
+                args,
+                since_utc="2026-08-08T00:00:00Z",
+                initial_sample={"ok": True, "scoped": {"pending_jobs": 2}},
+                effective_limits={"protected_channel_drain_seconds": 60.0},
+            )
+
+        self.assertEqual(final_sample["scoped"]["pending_jobs"], 0)
+        self.assertTrue(report["ok"])
+        self.assertEqual(report["outcome"], "drained")
+        self.assertEqual(report["initial_pending_jobs"], 2)
+        self.assertEqual(report["final_pending_jobs"], 0)
 
     def test_lane_ok_without_cell_evidence_cannot_green_coverage(self) -> None:
         manifest = manifest_builder.build_manifest(seed=20260806)

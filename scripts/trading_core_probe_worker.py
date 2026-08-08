@@ -178,6 +178,8 @@ BROAD_CLEANUP_PREFIXES = {
 }
 CLEANUP_DB_RETRY_ATTEMPTS = 12
 CLEANUP_SQL_IN_BATCH_SIZE = 5000
+CLEANUP_OPERATIONAL_DRAIN_ATTEMPTS = 40
+CLEANUP_OPERATIONAL_DRAIN_BATCH_SIZE = 256
 # 55P03 is raised by the cleanup's fail-fast NOWAIT row pre-lock.  Treating it
 # as transient keeps cleanup from ever joining a worker lock cycle while still
 # failing closed when the synthetic scope cannot converge after bounded retries.
@@ -1718,10 +1720,34 @@ async def cleanup_prefix(prefix: str, *, dry_run: bool = False) -> dict[str, Any
         planned_redis_keys = await cleanup_redis_for_user_ids(plan.user_ids, dry_run=True)
         return cleanup_report_payload(plan=plan, dry_run=True, deleted_redis_keys=planned_redis_keys)
 
+    # Queue workers deliberately hold/refresh delivery rows while publishing.
+    # Requiring every operational row to be simultaneously free made cleanup
+    # starvation-prone under the real staging worker: one busy row caused the
+    # whole deterministic NOWAIT pre-lock to roll back, even though the other
+    # rows were safe to remove.  Drain only unlocked, prefix-owned queue leaves
+    # in short transactions first.  The normal all-or-nothing cleanup below
+    # still owns the authoritative final zero check for every other table.
+    initial_plan = plan
+    operational_drain = await drain_cleanup_operational_rows(plan)
+    plan = await collect_cleanup_plan(prefix)
+
     last_retryable_error: BaseException | None = None
     for attempt in range(1, CLEANUP_DB_RETRY_ATTEMPTS + 1):
         try:
-            return await delete_cleanup_plan(plan)
+            report = await delete_cleanup_plan(plan)
+            report["deleted_telegram_notification_outbox"] += int(
+                operational_drain["deleted_telegram_notification_outbox"]
+            )
+            report["deleted_telegram_admin_broadcast_receipts"] += int(
+                operational_drain["deleted_telegram_admin_broadcast_receipts"]
+            )
+            report["deleted_telegram_delivery_jobs"] += int(
+                operational_drain["deleted_telegram_delivery_jobs"]
+            )
+            report["planned_counts"] = cleanup_plan_counts(initial_plan)
+            report["planned_ids"] = asdict(initial_plan)
+            report["operational_drain"] = operational_drain
+            return report
         except DBAPIError as exc:
             if not is_retryable_cleanup_database_error(exc) or attempt >= CLEANUP_DB_RETRY_ATTEMPTS:
                 raise
@@ -1900,13 +1926,25 @@ async def collect_targeted_prefix_sync_items(
     # thin or missing change_log row.  Trades must be replayed here because
     # trade_delivery_receipts are localized by trade_number on the peer; a
     # missing parent otherwise leaves an otherwise valid receipt permanently
-    # deferred.  Do not replay users here: change_log payloads carry versioned
-    # identity fields that row snapshots omit (`versioned_user_identity_missing`).
-    if include_synced or any(table == "offer_publication_states" for table in tables):
-        replay_tables = tuple(
+    # deferred. Versioned users are never reconstructed from a row snapshot:
+    # their normal change-log event carries identity/replay metadata that the
+    # receiver contract requires, and the matrix registers those listeners.
+    selected_tables = {str(entry.table_name) for entry in selected_entries}
+    replay_table_names: set[str] = set()
+    if include_synced:
+        replay_table_names.update(
             table
             for table in tables
             if table in {"offers", "offer_publication_states", "trades"}
+        )
+    elif "offer_publication_states" in selected_tables:
+        # A newly-unsynced publication state needs its offer parent in the same
+        # catchup transaction. Do not replay every state/offer merely because
+        # the table was selected; idle monitor ticks must be true no-ops.
+        replay_table_names.add("offers")
+    if replay_table_names:
+        replay_tables = tuple(
+            table for table in tables if table in replay_table_names
         )
         for table, row in await _load_prefix_rows_for_tables(prefix, replay_tables):
             record_id = getattr(row, "id", None)
@@ -2050,6 +2088,118 @@ async def lock_cleanup_users(db: Any, user_ids: list[int]) -> None:
                 .with_for_update(nowait=True)
             )
         )
+
+
+async def delete_unlocked_cleanup_rows(
+    model: Any,
+    column: Any,
+    values: list[Any],
+    *,
+    batch_size: int = CLEANUP_OPERATIONAL_DRAIN_BATCH_SIZE,
+) -> tuple[int, list[Any]]:
+    """Delete currently unlocked synthetic rows without waiting on a worker.
+
+    Each selected batch is locked with ``SKIP LOCKED`` and deleted in the same
+    short transaction.  Busy rows remain in the returned list for a later
+    bounded round.  This monotonically shrinks a hot queue scope instead of
+    repeatedly demanding that every job be free at the same instant.
+    """
+    remaining = sorted(stable_unique(list(values)), key=str)
+    if not remaining:
+        return 0, []
+
+    deleted = 0
+    for candidate_batch in cleanup_in_batches(remaining, batch_size=batch_size):
+        async with AsyncSessionLocal() as db:
+            locked_ids = list(
+                (
+                    await db.execute(
+                        cleanup_mutating_statement(
+                            select(column)
+                            .where(column.in_(candidate_batch))
+                            .order_by(column.asc())
+                            .with_for_update(skip_locked=True)
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            if not locked_ids:
+                await db.rollback()
+                continue
+            result = await db.execute(
+                cleanup_mutating_statement(delete(model).where(column.in_(locked_ids)))
+            )
+            await db.commit()
+            deleted += int(result.rowcount or 0)
+            locked_id_set = set(locked_ids)
+            remaining = [value for value in remaining if value not in locked_id_set]
+    return deleted, remaining
+
+
+async def drain_cleanup_operational_rows(plan: CleanupPlan) -> dict[str, Any]:
+    """Incrementally remove prefix-owned queue leaves under live workers.
+
+    Notification/admin receipt rows must be removed before their referenced
+    delivery jobs (the database uses ``ON DELETE RESTRICT``).  No unrelated
+    rows or shared Redis queues are touched.  Any still-busy rows are left for
+    the normal fail-closed cleanup retry rather than being force-unlocked.
+    """
+    remaining_outbox = list(plan.telegram_notification_outbox_ids)
+    remaining_admin_receipts = list(plan.telegram_admin_broadcast_receipt_ids)
+    remaining_jobs = list(plan.telegram_delivery_job_ids)
+    deleted_outbox = 0
+    deleted_admin_receipts = 0
+    deleted_jobs = 0
+    rounds = 0
+
+    for attempt in range(1, CLEANUP_OPERATIONAL_DRAIN_ATTEMPTS + 1):
+        rounds = attempt
+        round_deleted = 0
+
+        count, remaining_outbox = await delete_unlocked_cleanup_rows(
+            TelegramNotificationOutbox,
+            TelegramNotificationOutbox.id,
+            remaining_outbox,
+        )
+        deleted_outbox += count
+        round_deleted += count
+
+        count, remaining_admin_receipts = await delete_unlocked_cleanup_rows(
+            TelegramAdminBroadcastReceipt,
+            TelegramAdminBroadcastReceipt.id,
+            remaining_admin_receipts,
+        )
+        deleted_admin_receipts += count
+        round_deleted += count
+
+        # A delivery job may be deleted only after every prefix-owned
+        # restrictive child handled above is gone.  Other restricted child
+        # types are not created by this load harness and remain protected by
+        # the database plus the final fail-closed cleanup.
+        if not remaining_outbox and not remaining_admin_receipts:
+            count, remaining_jobs = await delete_unlocked_cleanup_rows(
+                TelegramDeliveryJobRecord,
+                TelegramDeliveryJobRecord.id,
+                remaining_jobs,
+            )
+            deleted_jobs += count
+            round_deleted += count
+
+        if not remaining_outbox and not remaining_admin_receipts and not remaining_jobs:
+            break
+        await asyncio.sleep(0.05 if round_deleted else min(0.1 * attempt, 0.5))
+
+    return {
+        "rounds": rounds,
+        "deleted_telegram_notification_outbox": deleted_outbox,
+        "deleted_telegram_admin_broadcast_receipts": deleted_admin_receipts,
+        "deleted_telegram_delivery_jobs": deleted_jobs,
+        "remaining_telegram_notification_outbox": len(remaining_outbox),
+        "remaining_telegram_admin_broadcast_receipts": len(remaining_admin_receipts),
+        "remaining_telegram_delivery_jobs": len(remaining_jobs),
+    }
 
 
 async def lock_cleanup_rows_nowait(

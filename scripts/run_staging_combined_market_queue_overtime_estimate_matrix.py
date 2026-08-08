@@ -48,6 +48,10 @@ DEFAULT_SNAPSHOT_HOST = (
 )
 DEFAULT_SNAPSHOT_CONTAINER = "/tmp/combined-matrix-coin-rates.json"
 DRIVER_SCRIPTS = (
+    # The combined runner invokes this shared probe for prefix catchup and
+    # fail-closed cleanup; stage the exact branch version with the other
+    # drivers instead of silently using whichever release happens to run.
+    "scripts/trading_core_probe_worker.py",
     "scripts/staging_combined_matrix_mutating_wave.py",
     "scripts/staging_combined_matrix_estimate_hooks.py",
     "scripts/staging_combined_matrix_queue_sampler.py",
@@ -61,7 +65,85 @@ DRIVER_SCRIPTS = (
 WAVE_PROFILES = ("burst", "realtime-30m")
 CHANNEL_BASE_INTERVAL_SECONDS = 0.9
 CHANNEL_IDLE_BURST_CAPACITY = 2
+# Telegram backoff, provider jitter and edit supersession make a nominal
+# channel-rate estimate optimistic during a real burst.  Keep the temporary
+# diagnostic lifetime above the deterministic lower bound without changing
+# the product's persisted two-minute setting (the runner always restores it).
+# Live CMB-33 evidence showed that one offer generates more than its publish
+# plus terminal edit: active-list refreshes, retries and final-tail edits share
+# the same destination limiter.  Protect the diagnostic lifetime with the
+# measured end-to-end queue envelope, not only the raw Telegram call interval.
+CHANNEL_DRAIN_SAFETY_FACTOR = 2.25
 ACTIVE_OFFERS_PER_SYNTHETIC_OWNER = 10
+
+
+def _route_wave_requests_for_runtime_topology(
+    events: list[dict[str, Any]],
+    *,
+    trade_percent: int,
+) -> dict[str, Any]:
+    """Route Telegram reactions only through the foreign bot runtime.
+
+    The deterministic manifest balances request surfaces globally, but an Iran
+    worker cannot execute a Telegram callback: the bot exists only on foreign.
+    Keep the same global WebApp/Telegram action count by assigning all Iran
+    actions to WebApp and selecting the required Telegram share from foreign
+    bot-offer actions. Cross-origin surface routing remains covered by the
+    comprehensive two-server matrix.
+    """
+
+    actionable = [
+        item
+        for item in events
+        if item.get("kind") == "valid"
+        and int(item.get("seq") or 0) % 100 < int(trade_percent)
+    ]
+    target_telegram = sum(
+        str(item.get("request_surface") or "") == "telegram"
+        for item in actionable
+    )
+    foreign_actions = [
+        item for item in actionable if str(item.get("surface") or "") == "bot"
+    ]
+    if len(foreign_actions) < target_telegram:
+        raise ValueError(
+            "selected wave has too few foreign bot actions to preserve the "
+            "manifest Telegram request count"
+        )
+
+    for item in actionable:
+        item["effective_request_surface"] = "webapp"
+    # Preserve originally-Telegram events first, then fill deterministically by
+    # sequence so reruns retain identical topology routing.
+    foreign_actions.sort(
+        key=lambda item: (
+            0 if str(item.get("request_surface") or "") == "telegram" else 1,
+            int(item.get("seq") or 0),
+        )
+    )
+    for item in foreign_actions[:target_telegram]:
+        item["effective_request_surface"] = "telegram"
+
+    effective_telegram = sum(
+        item.get("effective_request_surface") == "telegram" for item in actionable
+    )
+    effective_webapp = len(actionable) - effective_telegram
+    return {
+        "action_count": len(actionable),
+        "manifest_request_mix": {
+            "telegram": target_telegram,
+            "webapp": len(actionable) - target_telegram,
+        },
+        "effective_request_mix": {
+            "telegram": effective_telegram,
+            "webapp": effective_webapp,
+        },
+        "iran_telegram_actions": sum(
+            item.get("effective_request_surface") == "telegram"
+            and str(item.get("surface") or "") == "webapp"
+            for item in actionable
+        ),
+    }
 
 
 def _driver_scenarios() -> list[dict[str, Any]]:
@@ -843,6 +925,87 @@ def _queue_sample(
     return payload
 
 
+def _scoped_pending_jobs(sample: dict[str, Any]) -> int:
+    try:
+        return max(0, int((sample.get("scoped") or {}).get("pending_jobs") or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _wait_for_scoped_queue_drain(
+    args: argparse.Namespace,
+    *,
+    since_utc: str,
+    initial_sample: dict[str, Any],
+    effective_limits: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Poll a hot run scope until it drains or demonstrably stops moving.
+
+    A fixed sleep hid the difference between a healthy slow retry and a stuck
+    queue.  This bounded progress loop exits early when the scope reaches zero,
+    records every count transition, and refuses to wait forever when the count
+    has not decreased for a full diagnostic window.
+    """
+
+    configured_wait = max(15.0, float(args.drain_wait_seconds))
+    protected_drain = max(
+        configured_wait,
+        float(effective_limits.get("protected_channel_drain_seconds") or 0.0),
+    )
+    timeout_seconds = min(600.0, protected_drain)
+    interval_seconds = min(
+        15.0,
+        max(5.0, float(args.queue_sample_interval_seconds)),
+    )
+    stagnant_limit_seconds = min(
+        timeout_seconds,
+        max(120.0, configured_wait),
+    )
+    samples = [initial_sample]
+    started = time.perf_counter()
+    last_pending = _scoped_pending_jobs(initial_sample)
+    stagnant_seconds = 0.0
+    outcome = "already_drained" if last_pending == 0 else "timeout"
+
+    while last_pending > 0:
+        elapsed = time.perf_counter() - started
+        remaining = timeout_seconds - elapsed
+        if remaining <= 0:
+            outcome = "timeout"
+            break
+        sleep_seconds = min(interval_seconds, remaining)
+        time.sleep(sleep_seconds)
+        sample = _queue_sample(args, since_utc=since_utc)
+        sample["drain_elapsed_seconds"] = round(time.perf_counter() - started, 3)
+        samples.append(sample)
+        pending = _scoped_pending_jobs(sample)
+        if pending == 0:
+            last_pending = 0
+            outcome = "drained"
+            break
+        if pending < last_pending:
+            stagnant_seconds = 0.0
+        else:
+            stagnant_seconds += sleep_seconds
+        last_pending = pending
+        if stagnant_seconds >= stagnant_limit_seconds:
+            outcome = "stagnant"
+            break
+
+    report = {
+        "ok": last_pending == 0,
+        "outcome": outcome,
+        "elapsed_seconds": round(time.perf_counter() - started, 3),
+        "timeout_seconds": round(timeout_seconds, 3),
+        "sample_interval_seconds": round(interval_seconds, 3),
+        "stagnant_limit_seconds": round(stagnant_limit_seconds, 3),
+        "initial_pending_jobs": _scoped_pending_jobs(initial_sample),
+        "final_pending_jobs": last_pending,
+        "samples": samples,
+    }
+    return samples[-1], report
+
+
 def _queue_run_prefix(args: argparse.Namespace) -> str:
     """Return a queue-only namespace that cannot match other matrix lanes.
 
@@ -857,34 +1020,47 @@ def _queue_run_prefix(args: argparse.Namespace) -> str:
     return f"{args.run_prefix}_QUEUE"
 
 
-def _wave_prefix_sync_catchup(args: argparse.Namespace) -> dict[str, Any]:
+def _wave_prefix_sync_catchup(
+    args: argparse.Namespace,
+    *,
+    include_synced: bool,
+) -> dict[str, Any]:
     """Push committed wave rows while deferred reactions await publication."""
 
-    results: dict[str, Any] = {}
-    codes: list[int] = []
+    results: dict[str, Any] = {
+        "foreign": {
+            "status": "skipped",
+            "reason": (
+                "foreign wave actors are staging-local fixtures; authoritative "
+                "cross-server actor sync is covered by the comprehensive lane"
+            ),
+        }
+    }
     queue_prefix = _queue_run_prefix(args)
-    for server, suffix in (("iran", "IR"), ("foreign", "FO")):
+    for server, suffix in (("iran", "IR"),):
+        script_args = [
+            "sync-prefix-catchup",
+            "--prefix",
+            f"{queue_prefix}_{suffix}",
+            "--batch-size",
+            "500",
+        ]
+        if include_synced:
+            # Use one current-state dependency barrier at wave start. Replaying
+            # every already-synced offer on every monitor tick manufactures
+            # duplicate publication edits and can itself starve the queue.
+            script_args.append("--include-synced")
         payload, code = _container_python(
             args,
             server=server,
             script="scripts/trading_core_probe_worker.py",
-            script_args=[
-                "sync-prefix-catchup",
-                "--prefix",
-                f"{queue_prefix}_{suffix}",
-                "--batch-size",
-                "500",
-            ],
+            script_args=script_args,
             timeout=300,
         )
         results[server] = payload
-        codes.append(code)
     return {
-        "ok": all(code == 0 for code in codes)
-        and all(
-            str(payload.get("status") or "") == "ok"
-            for payload in results.values()
-        ),
+        "ok": code == 0 and str(payload.get("status") or "") == "ok",
+        "include_synced": bool(include_synced),
         "results": results,
     }
 
@@ -901,7 +1077,16 @@ def _effective_wave_limits(
         ),
     )
     estimated_channel_operations = max(
-        1, int(round(expected_valid * (1.0 + action_share)))
+        1,
+        int(
+            round(
+                expected_valid
+                * (
+                    2.0  # publish + active-list refresh
+                    + action_share  # trade/manual-expiry terminal edit
+                )
+            )
+        ),
     )
     drain_seconds = max(
         0.0,
@@ -913,7 +1098,8 @@ def _effective_wave_limits(
         if args.wave_profile == "realtime-30m"
         else 0.0
     )
-    required_total_seconds = schedule_seconds + drain_seconds
+    protected_drain_seconds = drain_seconds * CHANNEL_DRAIN_SAFETY_FACTOR
+    required_total_seconds = schedule_seconds + protected_drain_seconds
     # Include the latest scheduled reaction. With the real two-minute offer
     # lifetime, a live wave must fit this wall-clock budget instead of silently
     # extending the product setting for the test.
@@ -960,10 +1146,10 @@ def _effective_wave_limits(
             float(args.wave_action_drain_timeout_seconds),
             max(required_total_seconds * 1.25, lifetime_seconds + 30.0),
         )
-        wave_timeout = max(
-            required_total_seconds + 60.0,
-            min(
-                float(args.wave_timeout_seconds),
+        wave_timeout = min(
+            float(args.wave_timeout_seconds),
+            max(
+                required_total_seconds + 60.0,
                 schedule_seconds + action_drain + 300.0,
             ),
         )
@@ -975,6 +1161,8 @@ def _effective_wave_limits(
         ),
         "channel_idle_burst_capacity": CHANNEL_IDLE_BURST_CAPACITY,
         "estimated_channel_drain_seconds": round(drain_seconds, 3),
+        "channel_drain_safety_factor": CHANNEL_DRAIN_SAFETY_FACTOR,
+        "protected_channel_drain_seconds": round(protected_drain_seconds, 3),
         "schedule_seconds": schedule_seconds,
         "required_offer_expiry_minutes": required_expiry_minutes,
         "required_offer_lifecycle_seconds": round(required_lifecycle_seconds, 3),
@@ -1024,7 +1212,10 @@ def run_wave(args: argparse.Namespace, manifest: dict[str, Any], artifact_dir: P
             else None
         ),
     )
-    selected = wave_driver.scale_events(list(manifest["wave_events"]), budget)
+    selected = [
+        dict(item)
+        for item in wave_driver.scale_events(list(manifest["wave_events"]), budget)
+    ]
     selected_schedule_sha256 = hashlib.sha256(
         json.dumps(selected, sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
@@ -1032,6 +1223,10 @@ def run_wave(args: argparse.Namespace, manifest: dict[str, Any], artifact_dir: P
     full_schedule_hash_matches = (
         float(budget.scale) < 1.0
         or selected_schedule_sha256 == manifest_schedule_sha256
+    )
+    request_surface_topology = _route_wave_requests_for_runtime_topology(
+        selected,
+        trade_percent=int(args.wave_trade_percent),
     )
     events_path = artifact_dir / "wave-selected-events.json"
     write_json(
@@ -1046,6 +1241,7 @@ def run_wave(args: argparse.Namespace, manifest: dict[str, Any], artifact_dir: P
             },
             "selected_schedule_sha256": selected_schedule_sha256,
             "manifest_schedule_sha256": manifest_schedule_sha256,
+            "request_surface_topology": request_surface_topology,
         },
     )
     selected_valid = [item for item in selected if item.get("kind") == "valid"]
@@ -1301,7 +1497,10 @@ def run_wave(args: argparse.Namespace, manifest: dict[str, Any], artifact_dir: P
                 sample["wave_elapsed_seconds"] = round(
                     time.perf_counter() - wave_started, 3
                 )
-                sample["prefix_sync_catchup"] = _wave_prefix_sync_catchup(args)
+                sample["prefix_sync_catchup"] = _wave_prefix_sync_catchup(
+                    args,
+                    include_synced=not queue_monitor_samples,
+                )
                 queue_monitor_samples.append(sample)
                 for future in done:
                     name = futures[future]
@@ -1329,7 +1528,18 @@ def run_wave(args: argparse.Namespace, manifest: dict[str, Any], artifact_dir: P
         queue_post_wave = _queue_sample(
             args, since_utc=wave_started_utc, timing=True
         )
-        time.sleep(max(15.0, float(args.drain_wait_seconds)))
+        queue_final, queue_drain_progress = _wait_for_scoped_queue_drain(
+            args,
+            since_utc=wave_started_utc,
+            initial_sample=queue_post_wave,
+            effective_limits=limits,
+        )
+        write_json(
+            artifact_dir / "queue-drain-progress.json",
+            queue_drain_progress,
+        )
+        # Capture timing after the final progress decision.  Intermediate
+        # polls intentionally omit the heavier percentile query.
         queue_final = _queue_sample(
             args, since_utc=wave_started_utc, timing=True
         )
@@ -1495,7 +1705,10 @@ def run_wave(args: argparse.Namespace, manifest: dict[str, Any], artifact_dir: P
         if int(item["seq"]) % 100 < int(args.wave_trade_percent)
     ]
     expected_request_web = sum(
-        1 for item in trade_selected if item.get("request_surface") == "webapp"
+        1
+        for item in trade_selected
+        if item.get("effective_request_surface", item.get("request_surface"))
+        == "webapp"
     )
     expected_request_tg = len(trade_selected) - expected_request_web
     iran_request_mix = iran_payload.get("request_execution_mix") or {}

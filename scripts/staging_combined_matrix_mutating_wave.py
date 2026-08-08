@@ -21,7 +21,8 @@ from sqlalchemy import select
 
 from core.config import settings
 from core.db import AsyncSessionLocal
-from core.server_routing import current_server
+from core.events import setup_event_listeners
+from core.server_routing import SERVER_IRAN, current_server
 from models.user import User, UserRole
 
 
@@ -314,6 +315,14 @@ async def _cleanup(session, prefix: str) -> int:
 
 async def _run(args: argparse.Namespace) -> dict[str, object]:
     _guard()
+    # Standalone matrix workers do not run application startup. Iran is the
+    # user authority, so its synthetic users must be emitted through the real
+    # versioned outbox. Foreign synthetic actors are local staging fixtures;
+    # seed those before enabling the outbox guard, then enable it for every
+    # offer/request/trade mutation below.
+    listeners_registered = current_server() == SERVER_IRAN
+    if listeners_registered:
+        setup_event_listeners()
     prefix = args.run_prefix.strip()
     if not prefix.startswith(RUN_PREFIX_MARKER):
         raise DriverRefusal("run prefix must start with CMB_")
@@ -420,6 +429,9 @@ async def _run(args: argparse.Namespace) -> dict[str, object]:
                     has_bot_access=True,
                 )
             )
+        if not listeners_registered:
+            setup_event_listeners()
+            listeners_registered = True
         plain_cursor = 0
         invalid_cursor = 0
         req_cursor = 0
@@ -589,7 +601,11 @@ async def _run(args: argparse.Namespace) -> dict[str, object]:
                 plain_cursor += 1
             shape = str(item.get("shape") or "wholesale")
             offer_type = str(item.get("offer_type") or "sell")
-            request_surface = str(item.get("request_surface") or ("webapp" if surface == "webapp" else "telegram"))
+            request_surface = str(
+                item.get("effective_request_surface")
+                or item.get("request_surface")
+                or ("webapp" if surface == "webapp" else "telegram")
+            )
             try:
                 await session.refresh(owner)
                 if args.snapshot_path and item.get("estimate_probe") and surface == "webapp":
@@ -818,6 +834,16 @@ async def _run(args: argparse.Namespace) -> dict[str, object]:
         ),
         "action_order_valid": action_order_violations == 0,
     }
+    # Expected negative probes are deliberately noisy (and usually arrive
+    # before deferred user actions).  Keep real failures at the front of the
+    # bounded artifact so a late trade/publication failure cannot be hidden by
+    # the first forty expected constraint violations.
+    unexpected_error_sample = [
+        item for item in errors if item.get("status") != "invalid_attempt_rejected"
+    ]
+    expected_rejection_sample = [
+        item for item in errors if item.get("status") == "invalid_attempt_rejected"
+    ]
     return {
         "ok": bool(created) and all(assertions.values()),
         "mode": "mutating_wave",
@@ -869,7 +895,8 @@ async def _run(args: argparse.Namespace) -> dict[str, object]:
         "created_sample": created[:40],
         "request_sample": requests_placed[:40],
         "estimate_shadow_sample": estimate_shadows[:20],
-        "error_sample": errors[:40],
+        "error_sample": (unexpected_error_sample + expected_rejection_sample)[:40],
+        "expected_rejection_sample": expected_rejection_sample[:20],
         "at_utc": _utc(),
     }
 

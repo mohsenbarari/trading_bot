@@ -693,6 +693,30 @@ class TradingCoreMixedLoadHelperTests(unittest.TestCase):
             ("trades",),
         )
 
+    def test_incremental_idle_offer_stage_does_not_replay_current_rows(self):
+        async def run_probe():
+            with patch.object(
+                worker,
+                "collect_targeted_prefix_change_logs",
+                new=AsyncMock(return_value=[]),
+            ), patch.object(
+                worker,
+                "_load_prefix_rows_for_tables",
+                new=AsyncMock(return_value=[]),
+            ) as load_rows:
+                items, change_log_ids = await worker.collect_targeted_prefix_sync_items(
+                    "CMB_IDLE_INCREMENTAL_",
+                    tables=("offers", "offer_publication_states"),
+                    include_synced=False,
+                )
+            return items, change_log_ids, load_rows
+
+        items, change_log_ids, load_rows = asyncio.run(run_probe())
+
+        self.assertEqual(items, [])
+        self.assertEqual(change_log_ids, [])
+        load_rows.assert_not_awaited()
+
     def test_cleanup_redis_for_user_ids_removes_exact_expire_rate_key(self):
         class FakeRedis:
             def __init__(self):
@@ -1530,11 +1554,26 @@ class TradingCoreMixedLoadHelperTests(unittest.TestCase):
     def test_cleanup_prelocks_scoped_rows_with_nowait(self):
         row_lock_source = inspect.getsource(worker.lock_cleanup_rows_nowait)
         plan_lock_source = inspect.getsource(worker.lock_cleanup_plan_rows_nowait)
+        drain_source = inspect.getsource(worker.delete_unlocked_cleanup_rows)
 
         self.assertIn("with_for_update(nowait=True)", row_lock_source)
+        self.assertIn("with_for_update(skip_locked=True)", drain_source)
         self.assertIn("TelegramDeliveryJobRecord", plan_lock_source)
         self.assertIn("TelegramNotificationOutbox", plan_lock_source)
         self.assertIn("TradeDeliveryReceipt", plan_lock_source)
+
+    def test_cleanup_drains_restrictive_queue_children_before_delivery_jobs(self):
+        source = inspect.getsource(worker.drain_cleanup_operational_rows)
+
+        outbox = "TelegramNotificationOutbox,"
+        admin_receipt = "TelegramAdminBroadcastReceipt,"
+        job = "TelegramDeliveryJobRecord,"
+        self.assertIn(outbox, source)
+        self.assertIn(admin_receipt, source)
+        self.assertIn(job, source)
+        self.assertLess(source.index(outbox), source.index(job))
+        self.assertLess(source.index(admin_receipt), source.index(job))
+        self.assertIn("remaining_telegram_delivery_jobs", source)
 
     def test_cleanup_lock_not_available_is_bounded_retryable(self):
         class LockNotAvailable(Exception):
