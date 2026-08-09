@@ -17,7 +17,7 @@
   "sourceBaseline": {
     "branch": "condidate/webapp-ui-ux-redesign-v2",
     "comparisonBaseCommit": "8e4cdbf4d1bf23c1b8c159eeaea3544f5fd7cd54",
-    "comparisonHeadCommit": null
+    "comparisonHeadCommit": "7d1833f33d3332d574ceae312cfc624daaf4f1e5"
   },
   "foundations": {
     "collections": [

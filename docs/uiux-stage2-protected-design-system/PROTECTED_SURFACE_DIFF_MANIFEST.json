@@ -4,7 +4,7 @@
   "status": "stage2_complete_stage3_authorized_not_started",
   "branch": "condidate/webapp-ui-ux-redesign-v2",
   "comparisonBaseCommit": "8e4cdbf4d1bf23c1b8c159eeaea3544f5fd7cd54",
-  "comparisonHeadCommit": null,
+  "comparisonHeadCommit": "7d1833f33d3332d574ceae312cfc624daaf4f1e5",
   "freezePolicy": "Stage 2 is opt-in foundation only: zero source, region, behavior, and new visual drift is allowed in protected Market, Messenger, and shared-shell surfaces.",
   "expectedDiff": {
     "changedProtectedPathCount": 0,

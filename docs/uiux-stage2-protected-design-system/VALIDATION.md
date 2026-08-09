@@ -11,7 +11,7 @@
 ```text
 branch = condidate/webapp-ui-ux-redesign-v2
 comparisonBaseCommit = 8e4cdbf4d1bf23c1b8c159eeaea3544f5fd7cd54
-comparisonHeadCommit = not_recorded_before_root_transaction
+comparisonHeadCommit = 7d1833f33d3332d574ceae312cfc624daaf4f1e5
 stage2Status = complete
 stage2TechnicalGate = passed_with_preexisting_full_typecheck_parity
 nextAuthorizedRuntimeStage = Stage 3
@@ -147,8 +147,8 @@ Stage 2 فقط وقتی قابل بستن است که همه موارد زیر �
 4. protected source/region/visual diff صفر و snapshot update صفر باشد؛
 5. پنج carry-forward Stage 1 disposition مستند داشته باشند؛
 6. evidence محلی immutable و Sites خصوصی source-bound با probe ناشناس پاس باشد؛
-7. checkpoint/manifestها با comparison base و hashهای واقعی evidence/source به‌روزرسانی شوند؛ product head فقط در transaction بعدی root و پس از ایجاد commit واقعی ثبت می‌شود؛
-8. closure فنی/مالکانه ثبت شود؛ commit/push شاخه محصول در transaction بعدی root با hash واقعی ثبت می‌شود.
+7. checkpoint/manifestها با comparison base، implementation head واقعی و hashهای واقعی evidence/source به‌روزرسانی شوند؛
+8. closure فنی/مالکانه و implementation/evidence commit واقعی ثبت شوند؛ governance binding commit و push شاخه در ادامه transaction root انجام می‌شوند.
 
 تصمیم فعلی:
 
@@ -163,4 +163,4 @@ stage3RuntimeImplementationAuthorized = true
 stage3RuntimeWorkStarted = false
 ```
 
-همه گیت‌های فنی closure پاس هستند و مجوز پیوسته مالک Stage 2 را می‌بندد. `comparisonHeadCommit` عمداً پیش از transaction Git محصول ثبت نشده و جعلی نیست. Stage 3 مجاز است، اما هیچ ویرایش runtime آن در این ledger شروع‌شده ادعا نمی‌شود. screenshot connector بازبینی شد؛ signed-in live HTML fetch نشد و این محدودیت محفوظ است.
+همه گیت‌های فنی closure پاس هستند و مجوز پیوسته مالک Stage 2 را می‌بندد. `comparisonHeadCommit` از commit واقعی implementation/evidence برابر `7d1833f33d3332d574ceae312cfc624daaf4f1e5` ثبت شده است؛ این governance commit همان binding را حمل می‌کند و push پس از آن انجام می‌شود. Stage 3 مجاز است، اما هیچ ویرایش runtime آن در این ledger شروع‌شده ادعا نمی‌شود. screenshot connector بازبینی شد؛ signed-in live HTML fetch نشد و این محدودیت محفوظ است.

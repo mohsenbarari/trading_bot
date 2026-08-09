@@ -2,7 +2,7 @@
 
 تاریخ: ۲۰۲۶-۰۸-۰۹
 
-وضعیت: **`complete`**. منبع Figma frozen و reread canonical، گیت فنی runtime، protected diff، evidence hash-bound و Sites خصوصی owner-only همگی پاس هستند. مجوز پیشروی بی‌وقفه مالک closure فنی/مالکانه Stage 2 را می‌بندد و Stage 3 را مجاز می‌کند؛ ویرایش runtime آن هنوز شروع نشده است. commit شاخه محصول در transaction بعدی root ثبت می‌شود و hash آن در این سند جعل نشده است.
+وضعیت: **`complete`**. منبع Figma frozen و reread canonical، گیت فنی runtime، protected diff، evidence hash-bound و Sites خصوصی owner-only همگی پاس هستند. مجوز پیشروی بی‌وقفه مالک closure فنی/مالکانه Stage 2 را می‌بندد و Stage 3 را مجاز می‌کند؛ ویرایش runtime آن هنوز شروع نشده است. implementation/evidence commit واقعی شاخه محصول `7d1833f33d3332d574ceae312cfc624daaf4f1e5` ثبت شده و این سند در governance transaction بعدی به آن bind می‌شود.
 
 ```text
 continuousProgressionAuthorized = true
@@ -183,7 +183,7 @@ protected source diff نسبت به base خالی و SHA-256 خروجی خالی
 | snapshot update | `0` |
 | local evidence + immutability | `passed`؛ `25/25`، `6 PNG + 1 metrics`، DOM/audit pre-post برابر |
 | Sites owner-only/source-bound/probe | `passed`؛ project/version/deployment/access/probe exact |
-| commit/push شاخه محصول | `handoff_pending_root_transaction` ؛ hash جعل نشده و در closure فنی فرض نشده است |
+| commit/push شاخه محصول | implementation/evidence commit واقعی `7d1833f33d3332d574ceae312cfc624daaf4f1e5` ثبت شد؛ governance binding commit و push در همین transaction root ادامه دارد |
 
 hashهای settled QA مستقل:
 
@@ -237,7 +237,7 @@ stage3RuntimeImplementationAuthorized = true
 stage3RuntimeWorkStarted = false
 ```
 
-Stage 2 از نظر فنی و approval مالکانه `complete` است. Stage 3 مجاز است اما `stage3RuntimeWorkStarted=false` باقی می‌ماند. `comparisonHeadCommit` و commit/push نهایی شاخه محصول باید در transaction بعدی root از Git واقعی ثبت شوند؛ این checkpoint هیچ hash پیشاپیشی جعل نمی‌کند.
+Stage 2 از نظر فنی و approval مالکانه `complete` است. Stage 3 مجاز است اما `stage3RuntimeWorkStarted=false` باقی می‌ماند. `comparisonHeadCommit` اکنون از Git واقعی برابر `7d1833f33d3332d574ceae312cfc624daaf4f1e5` است؛ governance commit حامل این binding و push شاخه در transaction root انجام می‌شوند و هیچ hash پیشاپیشی جعل نشده است.
 
 ## ۱۱. بسته governance
 
