@@ -1,0 +1,160 @@
+{
+  "schemaVersion": 1,
+  "stage": 4,
+  "status": "authored_snapshot_hash_bound",
+  "fileKey": "z8jgJxST4O2APzWnlyP9gv",
+  "pageId": "283:18",
+  "rootNodeId": "283:19",
+  "canonicalAuthority": "Stage 4 Daily Core authored design contract",
+  "stage4FreezeCreated": true,
+  "figmaMutationPerformed": true,
+  "implementationCommit": "007f94d170cb02cd69911d9e1f122b83fbacd535",
+  "implementationTree": "807a01c76c93489ccce1e5b72cea9c214fd52d31",
+  "browserRunId": "uiux-stage4-browser-20260809T180340666Z",
+  "browserSourceBindingSha256": "1f8858264f0c52479c227bb84822a6c109f9b4fadb968500df596126acf099bf",
+  "provenanceNodeId": "291:554",
+  "claimBoundary": "These direct exports and the direct structural audit freeze the authored Stage 4 design contract. Runtime behavior remains proven by the separately hash-bound browser and technical artifacts; Sites is not proven here.",
+  "directAudit": {
+    "path": "assets/figma/stage4-figma-direct-audit.json",
+    "bytes": 2030,
+    "sha256": "55601f8cb0db38a55835b936b1efe9163f2356ca8640f555116c06017cb62772",
+    "status": "passed",
+    "sectionCount": 6,
+    "canonicalScreenCount": 6,
+    "linkedInstanceCount": 66,
+    "detachedInstanceCount": 0,
+    "protectedMarketImageCount": 1,
+    "errorCount": 0
+  },
+  "captures": [
+    {
+      "nodeId": "283:19",
+      "label": "Stage 4 Daily Core root",
+      "path": "assets/figma/stage4-figma-root.png",
+      "width": 968,
+      "height": 4096,
+      "bytes": 365560,
+      "sha256": "806923b48c401995243c64ff4f7b7b6c23335aac6f653b520d3785e02dba996e"
+    },
+    {
+      "nodeId": "283:20",
+      "label": "Contract and legend",
+      "path": "assets/figma/stage4-figma-contract.png",
+      "width": 1280,
+      "height": 516,
+      "bytes": 56537,
+      "sha256": "b89019d01f3ba44525ce16ec12d9b3a52c76f00f42ba70396a17a6e06f30508b"
+    },
+    {
+      "nodeId": "283:21",
+      "label": "Canonical mobile section",
+      "path": "assets/figma/stage4-figma-canonical-mobile.png",
+      "width": 1280,
+      "height": 1864,
+      "bytes": 192829,
+      "sha256": "65d390bbfbb27e8f80c8092c76ebd140449929159317485aa46b550b41886754"
+    },
+    {
+      "nodeId": "283:22",
+      "label": "Role and authority proofs",
+      "path": "assets/figma/stage4-figma-role-authority.png",
+      "width": 1280,
+      "height": 492,
+      "bytes": 47354,
+      "sha256": "51d2b88d8cf55e28db7079c86d55b0dcb56e9c83a1e171e5d73f2f1536df70fe"
+    },
+    {
+      "nodeId": "283:23",
+      "label": "Recovery and mutation proofs",
+      "path": "assets/figma/stage4-figma-recovery-mutation.png",
+      "width": 1280,
+      "height": 572,
+      "bytes": 77019,
+      "sha256": "620dcf1b7be8700dea1ec24758480ea0ca735dd87e4f33b88006bd648c223c72"
+    },
+    {
+      "nodeId": "283:24",
+      "label": "Desktop Operations proof",
+      "path": "assets/figma/stage4-figma-desktop-operations.png",
+      "width": 1280,
+      "height": 922,
+      "bytes": 31173,
+      "sha256": "4c1487c1d0d01e23ae0bd404e54a9ff602b293fad0e09ae568d5643bc1f55086"
+    },
+    {
+      "nodeId": "283:25",
+      "label": "Component and state matrix",
+      "path": "assets/figma/stage4-figma-component-matrix.png",
+      "width": 1280,
+      "height": 1508,
+      "bytes": 137191,
+      "sha256": "b171ae515e7b4ef4a1b590ed1a67857b054ee54925d5934363194a05037123a3"
+    },
+    {
+      "nodeId": "284:22",
+      "label": "Home canonical mobile",
+      "path": "assets/figma/stage4-figma-home.png",
+      "width": 390,
+      "height": 844,
+      "bytes": 50834,
+      "sha256": "b63a200250bab2ba3ef7c52bd29849346883cd3c88735d06ebad46d471d7ccdb"
+    },
+    {
+      "nodeId": "284:23",
+      "label": "Operations canonical mobile",
+      "path": "assets/figma/stage4-figma-operations.png",
+      "width": 390,
+      "height": 844,
+      "bytes": 17755,
+      "sha256": "0f3735b6095a79bf06cc4710ee4bdb1351b9c2102f1242ac71d7ce7cee5bea81"
+    },
+    {
+      "nodeId": "284:24",
+      "label": "Account canonical mobile",
+      "path": "assets/figma/stage4-figma-account.png",
+      "width": 390,
+      "height": 844,
+      "bytes": 32317,
+      "sha256": "e01b8829112460daec7a1c602ef51a0bd586597cc92990d75dce4d757ffed062"
+    },
+    {
+      "nodeId": "284:25",
+      "label": "Security canonical mobile",
+      "path": "assets/figma/stage4-figma-security.png",
+      "width": 390,
+      "height": 844,
+      "bytes": 39294,
+      "sha256": "1dd99361f50cdd7b9240e1425b4fc0c2ff0c5e726a36cc672c916766aba5a373"
+    },
+    {
+      "nodeId": "284:26",
+      "label": "Storage canonical mobile",
+      "path": "assets/figma/stage4-figma-storage.png",
+      "width": 390,
+      "height": 844,
+      "bytes": 35582,
+      "sha256": "12e6559261cb12350a30bf7484864dc55c72c2866cdd7f14f9e0848bea91f6cc"
+    },
+    {
+      "nodeId": "284:27",
+      "label": "Notifications canonical mobile",
+      "path": "assets/figma/stage4-figma-notifications.png",
+      "width": 390,
+      "height": 844,
+      "bytes": 34946,
+      "sha256": "6c6ebd4b3a798dab7d6b72c461d6f63db8ca6642106a5d0c178a838fc736b2d1"
+    }
+  ],
+  "captureAggregate": {
+    "count": 13,
+    "bytes": 1118391,
+    "algorithm": "sha256(JSON.stringify(captures projected to nodeId,path,width,height,bytes,sha256 in manifest order))",
+    "sha256": "46e329154d226cc0ed6fb302b4c33b0215b29280a25d9d8abccfe1e6a266774a"
+  },
+  "inputFileAggregate": {
+    "count": 14,
+    "bytes": 1120421,
+    "algorithm": "sha256(JSON.stringify(records sorted by path; key order path,bytes,sha256))",
+    "sha256": "1e53902f6abc88042874c5d71baf94ad319170de8e83b6bfde34e0823e9ff1fc"
+  }
+}

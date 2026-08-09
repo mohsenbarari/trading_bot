@@ -1,0 +1,215 @@
+{
+  "schemaVersion": 1,
+  "stage": 4,
+  "status": "passed",
+  "comparisonBase": "9dfa961000832c830729ce67e8a54357915c716a",
+  "comparisonTree": "1540c2534d8052a3a8cfcffcdc2f65e4b85fc874",
+  "completedAt": "2026-08-09T18:18:05.174Z",
+  "source": {
+    "changedPaths": 67,
+    "trackedModified": 60,
+    "untrackedAdded": 7,
+    "ignoredStage4Docs": 7,
+    "staged": 0,
+    "pathsetSha256": "25a5773b2e3ca1f6e45bbf48800dcac4ce3cd8e8125f1913fee674529720739f",
+    "pathContentSha256": "517ae0b1d3d630f6fa086cdc208905fabb9a532035cec539f61f9cd5f67af35e",
+    "prePostChangedMtimeFingerprintSha256": "a2563558372d4c024aee7c5dc9a86cd218809846e82c03db68969b481ad4fb42",
+    "browserBinding": {
+      "runId": "uiux-stage4-browser-20260809T180340666Z",
+      "fileCount": 398,
+      "sha256": "1f8858264f0c52479c227bb84822a6c109f9b4fadb968500df596126acf099bf",
+      "bytesMtimeHashMismatches": 0
+    }
+  },
+  "frontend": {
+    "files": 34,
+    "tests": 450,
+    "passed": 450,
+    "failed": 0,
+    "json": {
+      "bytes": 149408,
+      "sha256": "c2e4d8be51b88ebb7d7ab75c903ee60452fb03c0db6b9b317ead66a0bcd6a9fa"
+    }
+  },
+  "guards": {
+    "selfTestFiles": 3,
+    "selfTests": 55,
+    "passed": 55,
+    "failed": 0,
+    "aggregateGuard": "passed",
+    "protected": "passed"
+  },
+  "backend": {
+    "modules": 11,
+    "tests": 69,
+    "passed": 69,
+    "failed": 0,
+    "environment": "explicit non-secret dummy PostgreSQL DSNs; no database connection performed; PYTHONDONTWRITEBYTECODE=1",
+    "caveats": [
+      "first diagnostic attempt selected sqlite+aiosqlite but aiosqlite is not installed: environmental import failure, 31 tests discovered with 11 errors; discarded",
+      "successful rerun used the already-installed PostgreSQL drivers and explicit dummy settings",
+      "two inherited schemas.py DeprecationWarning messages were emitted"
+    ]
+  },
+  "typecheck": {
+    "status": "passed",
+    "exitCode": 0
+  },
+  "build": {
+    "status": "passed",
+    "exitCode": 0,
+    "modules": 2162,
+    "seconds": 31.5,
+    "pwaEntries": 161,
+    "pwaKiB": 4190.04,
+    "caveats": [
+      "Browserslist caniuse-lite age advisory",
+      "Rollup >500 kB chunk advisory"
+    ]
+  },
+  "quality": {
+    "eslint": {
+      "currentFiles": 64,
+      "baseFiles": 57,
+      "current": {
+        "total": 121,
+        "errors": 110,
+        "warnings": 11
+      },
+      "base": {
+        "total": 167,
+        "errors": 155,
+        "warnings": 12
+      },
+      "inherited": 121,
+      "added": 0,
+      "removed": 46,
+      "rawCurrentExit": 1,
+      "rawBaseExit": 1
+    },
+    "prettier": {
+      "currentFiles": 67,
+      "baseFiles": 60,
+      "currentDirty": 22,
+      "baseDirty": 35,
+      "inherited": 22,
+      "added": 0,
+      "removed": 13,
+      "rawCurrentExit": 1,
+      "rawBaseExit": 1
+    },
+    "acceptance": "Stage4-new=0 for ESLint and Prettier; nonzero raw exits are inherited baseline only"
+  },
+  "diffCheck": {
+    "status": "passed",
+    "exitCode": 0
+  },
+  "residue": {
+    "unexpectedProcesses": 0,
+    "forbiddenFrontendEnvFiles": 0,
+    "unexpectedStandardUntrackedOutsideFrontend": 0,
+    "backendDatabaseFileCreated": false,
+    "expectedIgnoredBuildOutput": {
+      "path": "mini_app_dist",
+      "files": 170,
+      "bytes": 5692710
+    },
+    "sourceOrStatusDrift": 0
+  },
+  "protected": {
+    "homeMarket": {
+      "sections": 6,
+      "bytes": 4553,
+      "sha256": "f25c01dac38db208517047ffc0f2458e2c89868e988a6d7f68749221db106860"
+    },
+    "market": {
+      "files": 19,
+      "bytes": 137246,
+      "pathsetSha256": "37aa0b51e20f4ae86f7daf6c3c231d93b3d1f288ade1471490a1f843a57c9589",
+      "sha256": "162e9e618684a24f3db3298eb8ff2c62498b18753cd4e0b6d6b97650d0202058"
+    },
+    "messenger": {
+      "files": 85,
+      "bytes": 1312405,
+      "pathsetSha256": "f6af1f961e45d785ba9c752ee670643571086c6a946843807fe6f581d11aea58",
+      "sha256": "f66debf9809180d97b2bac98f5195ba24200d3b61b0d8e0e5cd423a8a7b97248"
+    },
+    "adminMessagesSha256": "5572589b83a8a07776d5b983777a14a91e2104f9577fa76960df5a54562a431a",
+    "tradingSettingsSha256": "509dd32235e1cb98aa164940cf7722604f16b6518f7387699554bf3a828ecfaa",
+    "routes": {
+      "full": 4,
+      "mixed": 3,
+      "manifestRuntime": "7/7"
+    }
+  },
+  "artifacts": {
+    "/tmp/stage4-final-vitest.json": {
+      "bytes": 149408,
+      "sha256": "c2e4d8be51b88ebb7d7ab75c903ee60452fb03c0db6b9b317ead66a0bcd6a9fa"
+    },
+    "/tmp/stage4-final-guard-tests.json": {
+      "bytes": 18074,
+      "sha256": "361f0c3a546dfd9db194e3f8ee9f5dc70dcd722c5aff4d491ff9ecffcfd5a0bb"
+    },
+    "/tmp/stage4-final-backend.log": {
+      "bytes": 739,
+      "sha256": "bbfe9db8279e80940784bdf48acb84987f386fce89536b0d8b6818a63c17c216"
+    },
+    "/tmp/stage4-final-vue-tsc.log": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "/tmp/stage4-final-build.log": {
+      "bytes": 20055,
+      "sha256": "5557e85c14f3f34a79188bd7528149f8acd6bec9f91fa7e423d5c92db9b60bdc"
+    },
+    "/tmp/stage4-final-guard-ui.log": {
+      "bytes": 1417,
+      "sha256": "3df3f6dfc3f90e8fba36358ee22f3db29f789847ef1122a503f15f296e40e1d7"
+    },
+    "/tmp/stage4-final-protected-list.log": {
+      "bytes": 5823,
+      "sha256": "861d92a91b881d9ad5285f6b6302d8c9477e7b9f5dcd6f07af1d20c151fff888"
+    },
+    "/tmp/stage4-eslint-current-final.json": {
+      "bytes": 264531,
+      "sha256": "6ed86236bc9d7bf3cbef4f68f9e9dc1d4e6be4fb602a8abd70809e4dd167b133"
+    },
+    "/tmp/stage4-eslint-base-final.json": {
+      "bytes": 407966,
+      "sha256": "4e5c46dd70df825d85bb002bec411baf0dba01252c137b13adcb002f27f2f584"
+    },
+    "/tmp/stage4-eslint-delta-final.json": {
+      "bytes": 75388,
+      "sha256": "3c57e3029120d2eb42b976b67cdf7bc683e2ae65a1e826cf2440b2eaa3645f84"
+    },
+    "/tmp/stage4-prettier-current-final.txt": {
+      "bytes": 782,
+      "sha256": "3dc1a95f7f69f25a44a9b2d61aaf747adcde5724fc3461074e2ed8fcc62b22ba"
+    },
+    "/tmp/stage4-prettier-base-final.txt": {
+      "bytes": 1203,
+      "sha256": "b44e14135bdefbbd8af03b8b1ef7441b80a037af99110ac74fab4dc0e4be0fb6"
+    },
+    "/tmp/stage4-prettier-inherited-final.txt": {
+      "bytes": 782,
+      "sha256": "3dc1a95f7f69f25a44a9b2d61aaf747adcde5724fc3461074e2ed8fcc62b22ba"
+    },
+    "/tmp/stage4-prettier-added-final.txt": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "/tmp/stage4-prettier-removed-final.txt": {
+      "bytes": 421,
+      "sha256": "12c5b789dbbc98bc9b17bf902af66243ceec3d7035d6c43dc4e169fbcfceaff6"
+    },
+    "/tmp/stage4-final-diff-check.log": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "/tmp/stage4-final-stability.json": {
+      "bytes": 487,
+      "sha256": "8ef2a1a5f83f685456c5a5c2f6dbfc5f6cffdcc7d3059bc1cc994d3270296757"
+    }
+  }
+}

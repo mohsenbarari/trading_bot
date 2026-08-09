@@ -1,0 +1,87 @@
+{
+  "schemaVersion": 1,
+  "stage": 4,
+  "status": "passed",
+  "fileKey": "z8jgJxST4O2APzWnlyP9gv",
+  "page": {
+    "id": "283:18",
+    "name": "06 — Stage 4 Daily Core"
+  },
+  "root": {
+    "id": "283:19",
+    "name": "F4/Root Stage 4 Daily Core",
+    "width": 1440,
+    "height": 6098
+  },
+  "sourceBinding": {
+    "implementationCommit": "007f94d170cb02cd69911d9e1f122b83fbacd535",
+    "implementationTree": "807a01c76c93489ccce1e5b72cea9c214fd52d31",
+    "browserRunId": "uiux-stage4-browser-20260809T180340666Z",
+    "browserSourceBinding": "1f8858264f0c52479c227bb84822a6c109f9b4fadb968500df596126acf099bf",
+    "provenanceNodeId": "291:554"
+  },
+  "sections": {
+    "expected": 6,
+    "unique": 6,
+    "names": [
+      "F4/00 Contract & Legend",
+      "F4/01 Canonical Mobile",
+      "F4/02 Role & Authority Proofs",
+      "F4/03 Recovery & Mutation Proofs",
+      "F4/04 Desktop Operations Proof",
+      "F4/05 Component & State Matrix"
+    ]
+  },
+  "canonicalScreens": {
+    "expected": 6,
+    "unique": 6,
+    "width": 390,
+    "height": 844,
+    "names": [
+      "F4/Screen/Home",
+      "F4/Screen/Operations",
+      "F4/Screen/Account",
+      "F4/Screen/Security",
+      "F4/Screen/Storage",
+      "F4/Screen/Notifications"
+    ]
+  },
+  "linkedInstances": {
+    "count": 66,
+    "detachedCount": 0,
+    "componentSetNames": [
+      "UIUX/Authenticated Header",
+      "UIUX/Button",
+      "UIUX/Bottom Navigation",
+      "UIUX/Account Action Row",
+      "UIUX/Session Row",
+      "UIUX/Status",
+      "UIUX/Notification Row"
+    ]
+  },
+  "geometryFailures": [],
+  "placeholders": [],
+  "freeTextFontFailures": [],
+  "imageNodes": [
+    {
+      "id": "286:150",
+      "name": "F4/Home/Protected Market Reference",
+      "width": 342,
+      "height": 740
+    }
+  ],
+  "invalidImages": [],
+  "forbiddenCopy": [],
+  "missingCopy": [],
+  "buttons": {
+    "count": 10,
+    "smallerThan48": []
+  },
+  "bottomNavigation": {
+    "count": 15,
+    "invalid": []
+  },
+  "textNodeCount": 274,
+  "frameCount": 304,
+  "errors": []
+}

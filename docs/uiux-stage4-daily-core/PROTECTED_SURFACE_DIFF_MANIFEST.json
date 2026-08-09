@@ -1,0 +1,335 @@
+{
+  "schemaVersion": 1,
+  "stage": 4,
+  "status": "stage4_complete",
+  "branch": "condidate/webapp-ui-ux-redesign-v2",
+  "recordedDate": "2026-08-09",
+  "comparisonBaseCommit": "9dfa961000832c830729ce67e8a54357915c716a",
+  "comparisonBaseTree": "1540c2534d8052a3a8cfcffcdc2f65e4b85fc874",
+  "guard": {
+    "command": "cd frontend && npm run guard:ui:stage4",
+    "directObservedCommand": "node frontend/scripts/check-stage4-protected-surfaces.mjs --list",
+    "directObservedStatus": "passed",
+    "libraryPath": "frontend/scripts/lib/stage4-protected-surface-guard.mjs",
+    "librarySha256": "255f56136de95a55b46af4cce4283a2bc338cfd076be347e2ce23a1e89dbaa21",
+    "runnerPath": "frontend/scripts/check-stage4-protected-surfaces.mjs",
+    "runnerSha256": "040bae454e6eed3f235c5a27bf1fac41f0458c034fb50111a3e4a620493d87b5",
+    "selfTestPath": "frontend/scripts/stage4-protected-surface-guard.test.mjs",
+    "selfTestSha256": "30a1ebdc1b301f36c8654b9881741f186db0a26eed5fd56f62db260c41445a6c",
+    "selfTestCount": 8,
+    "selfTestStatus": "passed_in_final_guard_run",
+    "finalAggregate": {
+      "files": 3,
+      "suites": 8,
+      "tests": 55,
+      "passed": 55,
+      "failed": 0,
+      "aggregateGuardStatus": "passed"
+    }
+  },
+  "routeProtection": {
+    "count": 7,
+    "fullOffCount": 4,
+    "mixedCount": 3,
+    "sortedPathSetSha256": "0a93cd78b0dfa7bde13c3f9d135f15e2560a30edff70b5c635f9e4bae9522c19",
+    "pathSetHashAlgorithm": "sha256(sorted paths joined by LF plus terminal LF)",
+    "routes": [
+      {
+        "path": "/",
+        "shellClass": "standard-authenticated",
+        "protection": "mixed",
+        "protectedInteriors": ["home-market-widget"],
+        "v2Scope": "section"
+      },
+      {
+        "path": "/admin/channels",
+        "shellClass": "protected-legacy",
+        "protection": "full",
+        "protectedInteriors": [],
+        "v2Scope": "off"
+      },
+      {
+        "path": "/admin/messages",
+        "shellClass": "standard-authenticated",
+        "protection": "mixed",
+        "protectedInteriors": [
+          "admin-messages-market-delivery",
+          "admin-messages-messenger-delivery"
+        ],
+        "v2Scope": "section"
+      },
+      {
+        "path": "/admin/system",
+        "shellClass": "standard-authenticated",
+        "protection": "mixed",
+        "protectedInteriors": ["trading-settings-market-controls"],
+        "v2Scope": "section"
+      },
+      {
+        "path": "/chat",
+        "shellClass": "protected-legacy",
+        "protection": "full",
+        "protectedInteriors": [],
+        "v2Scope": "off"
+      },
+      {
+        "path": "/market",
+        "shellClass": "protected-legacy",
+        "protection": "full",
+        "protectedInteriors": [],
+        "v2Scope": "off"
+      },
+      {
+        "path": "/share-receive",
+        "shellClass": "protected-legacy",
+        "protection": "full",
+        "protectedInteriors": [],
+        "v2Scope": "off"
+      }
+    ],
+    "manifestAndRuntimeObserved": "passed_7_of_7",
+    "finalVerificationStatus": "passed_7_of_7"
+  },
+  "marketRuntime": {
+    "contract": "stage4-market-owned-runtime-v1",
+    "count": 19,
+    "contentBytes": 137246,
+    "pathSetSha256": "37aa0b51e20f4ae86f7daf6c3c231d93b3d1f288ade1471490a1f843a57c9589",
+    "aggregateSha256": "162e9e618684a24f3db3298eb8ff2c62498b18753cd4e0b6d6b97650d0202058",
+    "paths": [
+      "frontend/src/components/OfferPreviewModal.vue",
+      "frontend/src/components/OffersList.vue",
+      "frontend/src/components/TradeLotSuggestionAlert.vue",
+      "frontend/src/components/ui/AppOfferCard.vue",
+      "frontend/src/components/ui/AppOfferCustomerContext.vue",
+      "frontend/src/components/ui/AppOfferEmptyState.vue",
+      "frontend/src/components/ui/AppOfferHistoryStamp.vue",
+      "frontend/src/components/ui/AppOfferLoadingSkeletonList.vue",
+      "frontend/src/components/ui/AppOfferPrice.vue",
+      "frontend/src/components/ui/AppOfferQuantityBadge.vue",
+      "frontend/src/components/ui/AppOfferSideBadge.vue",
+      "frontend/src/components/ui/AppOfferTradeErrorToast.vue",
+      "frontend/src/components/ui/AppSettlementBadge.vue",
+      "frontend/src/components/ui/AppTradeActionButton.vue",
+      "frontend/src/composables/useMarketRuntime.ts",
+      "frontend/src/composables/useOffers.ts",
+      "frontend/src/utils/offerDraftText.ts",
+      "frontend/src/utils/settlementType.ts",
+      "frontend/src/views/MarketView.vue"
+    ],
+    "baselineObservedStatus": "passed",
+    "finalDiffStatus": "passed_equal_to_comparison_base"
+  },
+  "messengerRuntime": {
+    "contract": "stage4-messenger-owned-runtime-v1",
+    "count": 85,
+    "contentBytes": 1312405,
+    "pathSetSha256": "f6af1f961e45d785ba9c752ee670643571086c6a946843807fe6f581d11aea58",
+    "aggregateSha256": "f66debf9809180d97b2bac98f5195ba24200d3b61b0d8e0e5cd423a8a7b97248",
+    "paths": [
+      "frontend/src/components/AdminBroadcastModal.vue",
+      "frontend/src/components/ChatView.vue",
+      "frontend/src/components/CreateChannelView.vue",
+      "frontend/src/components/chat/AttachmentMenu.vue",
+      "frontend/src/components/chat/BlurHashCanvas.vue",
+      "frontend/src/components/chat/ChatAlbumLayout.vue",
+      "frontend/src/components/chat/ChatContextMenu.vue",
+      "frontend/src/components/chat/ChatConversationList.vue",
+      "frontend/src/components/chat/ChatEmptyState.vue",
+      "frontend/src/components/chat/ChatForwardModal.vue",
+      "frontend/src/components/chat/ChatGroupManagerModal.vue",
+      "frontend/src/components/chat/ChatHeader.vue",
+      "frontend/src/components/chat/ChatInputBar.vue",
+      "frontend/src/components/chat/ChatLightbox.vue",
+      "frontend/src/components/chat/ChatLocationModal.vue",
+      "frontend/src/components/chat/ChatMessageItem.vue",
+      "frontend/src/components/chat/ChatNewConversationModal.vue",
+      "frontend/src/components/chat/ChatSearchBottomBar.vue",
+      "frontend/src/components/chat/ChatSearchGlobalList.vue",
+      "frontend/src/components/chat/ChatSkeleton.vue",
+      "frontend/src/components/chat/ChatUserListRow.vue",
+      "frontend/src/components/chat/ChatVirtualTimeline.vue",
+      "frontend/src/components/chat/ConversationSkeleton.vue",
+      "frontend/src/components/chat/EmojiStickerPicker.vue",
+      "frontend/src/components/chat/GalleryPreviewModal.vue",
+      "frontend/src/components/chat/ImageEditorModal.vue",
+      "frontend/src/components/chat/LocationViewerModal.vue",
+      "frontend/src/components/chat/MessengerLoadingScreen.vue",
+      "frontend/src/components/chat/containers/ChatRoomContainer.vue",
+      "frontend/src/components/chat/containers/ChatShell.vue",
+      "frontend/src/components/chat/containers/ConversationListContainer.vue",
+      "frontend/src/components/chat/messages/ForwardedHeader.vue",
+      "frontend/src/components/chat/messages/MessageRenderBoundary.vue",
+      "frontend/src/components/chat/messages/ReplyPreview.vue",
+      "frontend/src/components/chat/messages/TextMessageBubble.vue",
+      "frontend/src/components/messenger-v2/MessengerRefactorShell.vue",
+      "frontend/src/composables/chat/useChatFileHandler.ts",
+      "frontend/src/composables/chat/useChatMedia.ts",
+      "frontend/src/composables/chat/useChatMessages.ts",
+      "frontend/src/composables/chat/useChatScroll.ts",
+      "frontend/src/composables/chat/useChatWebSocket.ts",
+      "frontend/src/services/chat/chatApi.ts",
+      "frontend/src/services/chat/chatCacheRepository.ts",
+      "frontend/src/services/chat/chatEventGateway.ts",
+      "frontend/src/services/chat/chatManagerCache.ts",
+      "frontend/src/services/chat/chatRoomLifecycle.ts",
+      "frontend/src/services/chatDocumentDownloadBackground.ts",
+      "frontend/src/services/chatTransferResumeHints.ts",
+      "frontend/src/services/chatUploadBackground.ts",
+      "frontend/src/stores/audio.ts",
+      "frontend/src/stores/chat/conversations.ts",
+      "frontend/src/stores/chat/messages.ts",
+      "frontend/src/stores/chat/session.ts",
+      "frontend/src/stores/chat/transfers.ts",
+      "frontend/src/stores/chat/ui.ts",
+      "frontend/src/styles/messenger-design-tokens.css",
+      "frontend/src/types/chat.ts",
+      "frontend/src/utils/accountantChatIdentity.ts",
+      "frontend/src/utils/audioRecorder.ts",
+      "frontend/src/utils/chatFiles.ts",
+      "frontend/src/utils/chatMediaDimensions.ts",
+      "frontend/src/utils/chatMediaMessagePayload.ts",
+      "frontend/src/utils/chatMediaTelemetry.ts",
+      "frontend/src/utils/chatMessagePreview.ts",
+      "frontend/src/utils/chatMessageTransferState.ts",
+      "frontend/src/utils/chatRealtimeMediaPolicy.ts",
+      "frontend/src/utils/chatRoleBadges.ts",
+      "frontend/src/utils/chatRoomRouting.ts",
+      "frontend/src/utils/chatTimelineController.ts",
+      "frontend/src/utils/chatUnread.ts",
+      "frontend/src/utils/chatVirtualTimeline.ts",
+      "frontend/src/utils/composerOverlayState.ts",
+      "frontend/src/utils/conversationListModel.ts",
+      "frontend/src/utils/emojiStickerCatalog.ts",
+      "frontend/src/utils/imagePreprocessClient.ts",
+      "frontend/src/utils/messageContextMenuModel.ts",
+      "frontend/src/utils/messageReactions.ts",
+      "frontend/src/utils/messengerDiagnosticsMetrics.ts",
+      "frontend/src/utils/messengerRefactor.ts",
+      "frontend/src/utils/messengerRolloutPolicy.ts",
+      "frontend/src/utils/shareTargetStore.ts",
+      "frontend/src/utils/sharedVisibilityObserver.ts",
+      "frontend/src/views/MessengerView.vue",
+      "frontend/src/views/ShareReceiveView.vue",
+      "frontend/src/workers/imagePreprocess.worker.ts"
+    ],
+    "baselineObservedStatus": "passed",
+    "finalDiffStatus": "passed_equal_to_comparison_base"
+  },
+  "homeMarketInterior": {
+    "path": "frontend/src/views/DashboardView.vue",
+    "surface": "home-market-widget",
+    "contract": "stage3-dashboard-market-region-v1",
+    "sectionCount": 6,
+    "compositeBytes": 4553,
+    "compositeSha256": "f25c01dac38db208517047ffc0f2458e2c89868e988a6d7f68749221db106860",
+    "sections": [
+      {
+        "id": "market-computed",
+        "bytes": 447,
+        "sha256": "b5382a65587d3761ce1e1b8a93deccabbb5a64a93708528f824e9b6b41b1b7c5"
+      },
+      {
+        "id": "open-market",
+        "bytes": 110,
+        "sha256": "8e83786d905c517262335c9f3cb96f39be9bd6de4111f97087193499f4e7f62f"
+      },
+      {
+        "id": "template-hero",
+        "bytes": 988,
+        "sha256": "9465e50ebbd472bb71b79cc2c00eb446b8a1132da8cac7b9ecf3c1ad2c750032"
+      },
+      {
+        "id": "hero-disabled-css",
+        "bytes": 61,
+        "sha256": "55c63ccebc6f046cf781dbff94c701985dac0e2dd2ffd2ea99b69af966f34035"
+      },
+      {
+        "id": "hero-focus-css",
+        "bytes": 220,
+        "sha256": "e2076d4446eec39e8c9027e0ab38df68e1fb8980f87d0a8252299d77c2c5b981"
+      },
+      {
+        "id": "hero-css",
+        "bytes": 2585,
+        "sha256": "ea13cbc20d5177bde87082a778995bf95239df0e983307e16ee56a80c9183ba9"
+      }
+    ],
+    "baselineObservedStatus": "passed",
+    "finalDiffStatus": "passed_equal_to_comparison_base"
+  },
+  "wholeFileProtected": [
+    {
+      "path": "frontend/src/components/AdminMessagesView.vue",
+      "surface": "admin-messages-market-and-messenger-delivery",
+      "sha256": "5572589b83a8a07776d5b983777a14a91e2104f9577fa76960df5a54562a431a",
+      "baselineObservedStatus": "passed",
+      "finalDiffStatus": "passed_equal_to_comparison_base"
+    },
+    {
+      "path": "frontend/src/components/TradingSettings.vue",
+      "surface": "trading-settings-market-controls",
+      "sha256": "509dd32235e1cb98aa164940cf7722604f16b6518f7387699554bf3a828ecfaa",
+      "baselineObservedStatus": "passed",
+      "finalDiffStatus": "passed_equal_to_comparison_base"
+    }
+  ],
+  "closureExpectations": {
+    "unauthorizedProtectedSourceDriftCount": 0,
+    "unauthorizedProtectedBehaviorDriftCount": 0,
+    "unauthorizedProtectedVisualDriftCount": 0,
+    "protectedPathSetDriftCount": 0,
+    "snapshotUpdatesWithoutDisposition": 0,
+    "finalSourceDiffStatus": "passed_zero_unauthorized_drift",
+    "finalBehaviorDiffStatus": "passed_zero_unauthorized_drift",
+    "finalVisualDiffStatus": "passed_zero_unauthorized_drift"
+  },
+  "verification": {
+    "status": "passed_git_browser_figma_evidence_sites_bound",
+    "implementationCommit": "007f94d170cb02cd69911d9e1f122b83fbacd535",
+    "implementationTree": "807a01c76c93489ccce1e5b72cea9c214fd52d31",
+    "implementationParent": "9dfa961000832c830729ce67e8a54357915c716a",
+    "exactPathCount": 67,
+    "pathSetSha256": "25a5773b2e3ca1f6e45bbf48800dcac4ce3cd8e8125f1913fee674529720739f",
+    "pathContentSha256": "517ae0b1d3d630f6fa086cdc208905fabb9a532035cec539f61f9cd5f67af35e",
+    "browserRunId": "uiux-stage4-browser-20260809T180340666Z",
+    "browserAssertions": "49/49",
+    "browserMetricsSha256": "83445d91bd78fd0903f49833a5b72c5d49345d517d9e5ae05e2fdd42954cd01f",
+    "figma": {
+      "fileKey": "z8jgJxST4O2APzWnlyP9gv",
+      "pageId": "283:18",
+      "rootNodeId": "283:19",
+      "provenanceNodeId": "291:554",
+      "directAuditStatus": "passed",
+      "detachedInstanceCount": 0,
+      "protectedMarketImageCount": 1
+    },
+    "frozenEvidencePackage": {
+      "fileCount": 70,
+      "bytes": 5863416,
+      "aggregateSha256": "8c123a1eeb717f799c0449443f2d8ea76f201a0ae2c31e062b1cff09584a7971",
+      "evidenceManifestSha256": "7a1a4a7da5c82f7c3744fba2f94adf0402dc6e6d5b47944234d2c0b266efdda8"
+    },
+    "technicalGateSummarySha256": "f5f1b32ef85d010aa2134b3531f628ac941f91f9dc4adfb58ee46cfa39a86ac2",
+    "sites": {
+      "projectId": "appgprj_6a78cd05d74c8191a9c5e095f15c6381",
+      "deploymentId": "appgdep_6a78ce229a0081919ae50975911e9e7d",
+      "deploymentStatus": "succeeded",
+      "accessPolicy": "custom_owner_only",
+      "anonymousRootAndEvidenceStatus": 401,
+      "provenancePath": "SITES_PROVENANCE.json",
+      "provenanceSha256": "3197cac8f90dcc1abfc2d52ee4fa4d87059e34863250a8042709230eb1bde1f8"
+    }
+  },
+  "browserStatus": "passed_49_of_49_promotable",
+  "evidenceStatus": "passed_frozen_70_file_package",
+  "figmaStatus": "passed_authored_snapshot_hash_bound",
+  "sitesStatus": "passed_private_owner_only_source_bound",
+  "gitStatus": "passed_commit_tree_parent_and_67_path_binding",
+  "implementationCommitStatus": "verified_exact_head_parent_tree_and_67_path_delta",
+  "nextAuthorizedRuntimeStage": null,
+  "stage5RuntimeImplementationAuthorized": false,
+  "stage5RuntimeWorkStarted": false,
+  "workStoppedAfterStage4": true,
+  "claimBoundary": "This manifest records the final zero-unauthorized-drift Stage 4 protected-surface closure. The frozen evidence package remained immutable, Sites provenance is separate, and Stage 5 is not authorized or started."
+}

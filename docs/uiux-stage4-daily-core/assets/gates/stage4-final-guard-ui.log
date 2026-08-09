@@ -1,0 +1,15 @@
+
+> frontend@0.0.0 guard:ui
+> node scripts/check-ui-ux-guards.mjs && node scripts/check-design-system-v2-guards.mjs && node scripts/check-stage3-protected-regions.mjs && node scripts/check-stage4-protected-surfaces.mjs
+
+PASS undefined design-token guard
+PASS hardcoded trade-side color guard
+PASS new bespoke modal-overlay guard
+PASS UIUX v2 scope guard (3 V2 CSS files, 30 product routes)
+PASS Stage 3 protected Home market region (6 sections, 4553 bytes, f25c01dac38db208517047ffc0f2458e2c89868e988a6d7f68749221db106860)
+PASS Stage 4 protected baseline (9dfa961000832c830729ce67e8a54357915c716a, tree 1540c2534d8052a3a8cfcffcdc2f65e4b85fc874)
+PASS Stage 4 Market runtime (19 files, 137246 bytes, 37aa0b51e20f4ae86f7daf6c3c231d93b3d1f288ade1471490a1f843a57c9589, 162e9e618684a24f3db3298eb8ff2c62498b18753cd4e0b6d6b97650d0202058)
+PASS Stage 4 Messenger runtime (85 files, 1312405 bytes, f6af1f961e45d785ba9c752ee670643571086c6a946843807fe6f581d11aea58, f66debf9809180d97b2bac98f5195ba24200d3b61b0d8e0e5cd423a8a7b97248)
+PASS Stage 4 Home market interior (6 sections, 4553 bytes, f25c01dac38db208517047ffc0f2458e2c89868e988a6d7f68749221db106860)
+PASS Stage 4 admin protected files (AdminMessages 5572589b83a8a07776d5b983777a14a91e2104f9577fa76960df5a54562a431a, TradingSettings 509dd32235e1cb98aa164940cf7722604f16b6518f7387699554bf3a828ecfaa)
+PASS Stage 4 route protection (4 full/off, 3 mixed; manifest + runtime 7/7)

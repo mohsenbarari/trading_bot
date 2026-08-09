@@ -1,0 +1,656 @@
+{
+  "schemaVersion": 1,
+  "stage": 4,
+  "status": "passed",
+  "localEvidenceStatus": "frozen",
+  "runId": "stage4-local-588243cd033dce300388",
+  "recordedDate": "2026-08-09",
+  "comparisonBaseCommit": "9dfa961000832c830729ce67e8a54357915c716a",
+  "claimBoundary": {
+    "localDerivative": true,
+    "stageCompleteAuthority": false,
+    "sitesProven": false,
+    "figmaAuthoredSnapshot": true,
+    "runtimeEvidenceHashBound": true
+  },
+  "inputs": {
+    "evidenceManifest": {
+      "path": "EVIDENCE_MANIFEST.json",
+      "bytes": 15950,
+      "sha256": "7a1a4a7da5c82f7c3744fba2f94adf0402dc6e6d5b47944234d2c0b266efdda8",
+      "inputCount": 62,
+      "inputBytes": 4988801,
+      "inputProjectionAggregateSha256": "588243cd033dce3003889e0580c815bde7bd3b390edd3500e7a9c1adbcf50ba2"
+    },
+    "implementation": {
+      "commit": "007f94d170cb02cd69911d9e1f122b83fbacd535",
+      "tree": "807a01c76c93489ccce1e5b72cea9c214fd52d31",
+      "parent": "9dfa961000832c830729ce67e8a54357915c716a",
+      "pathCount": 67,
+      "pathSetSha256": "25a5773b2e3ca1f6e45bbf48800dcac4ce3cd8e8125f1913fee674529720739f",
+      "pathContentSha256": "517ae0b1d3d630f6fa086cdc208905fabb9a532035cec539f61f9cd5f67af35e",
+      "looseObjectSha1Verified": true
+    },
+    "html": {
+      "path": "stage4-daily-core-evidence.html",
+      "bytes": 26394,
+      "sha256": "3dba8efa5aadf0dda015e48d09a19a53c893471d0a8af79a4061fdc16c8d99da"
+    },
+    "script": {
+      "path": "capture-evidence.cjs",
+      "bytes": 60071,
+      "sha256": "c22056c8b44b2eb9c8c8bb0cccdde276928b8936293dfbca070c67868d67b82a"
+    },
+    "figma": {
+      "manifest": {
+        "path": "FIGMA_SNAPSHOT_MANIFEST.json",
+        "bytes": 5547,
+        "sha256": "c2140704a405baee6d07f17cf5b1094cc02ebbfb4092f32435e966832637b483"
+      },
+      "audit": {
+        "path": "assets/figma/stage4-figma-direct-audit.json",
+        "bytes": 2030,
+        "sha256": "55601f8cb0db38a55835b936b1efe9163f2356ca8640f555116c06017cb62772"
+      },
+      "captureCount": 13,
+      "captureBytes": 1118391,
+      "captureAggregateSha256": "46e329154d226cc0ed6fb302b4c33b0215b29280a25d9d8abccfe1e6a266774a",
+      "inputCount": 14,
+      "inputBytes": 1120421,
+      "inputAggregateSha256": "1e53902f6abc88042874c5d71baf94ad319170de8e83b6bfde34e0823e9ff1fc"
+    },
+    "browser": {
+      "metrics": {
+        "path": "assets/browser-evidence/stage4-browser-acceptance-metrics.json",
+        "bytes": 790083,
+        "sha256": "83445d91bd78fd0903f49833a5b72c5d49345d517d9e5ae05e2fdd42954cd01f"
+      },
+      "binding": {
+        "path": "assets/browser-evidence/stage4-final-source-binding.json",
+        "bytes": 90454,
+        "sha256": "04f5c126cae096c0de3b6f738108aae18f239aae0310d119b0bb870e6f9e856b"
+      },
+      "harness": {
+        "path": "assets/browser-evidence/stage4-browser-acceptance-harness.mjs",
+        "bytes": 198607,
+        "sha256": "66ddbc5683f178633d37673ee6299d84863b29cdbafa66d9d764862622cb3a34"
+      },
+      "runId": "uiux-stage4-browser-20260809T180340666Z",
+      "assertions": 49,
+      "screenshots": 22,
+      "sourceCount": 398,
+      "sourceBindingSha256": "1f8858264f0c52479c227bb84822a6c109f9b4fadb968500df596126acf099bf",
+      "fullCount": 25,
+      "fullBytes": 2806569,
+      "fullAggregateSha256": "ad9903fad3550eea196dbc8564d083a81dbbd608cd8153281ef04682d9322bef"
+    },
+    "gates": {
+      "summary": {
+        "path": "assets/gates/stage4-final-gates-summary.json",
+        "bytes": 6881,
+        "sha256": "f5f1b32ef85d010aa2134b3531f628ac941f91f9dc4adfb58ee46cfa39a86ac2"
+      },
+      "manifest": {
+        "path": "assets/gates/stage4-final-gate-manifest.md",
+        "bytes": 14098,
+        "sha256": "ae5da32b7eec554cb25c3e167f9e17b80d63d69dd9bde812cc6fc89c817907af"
+      },
+      "gitBinding": {
+        "path": "assets/gates/stage4-implementation-git-binding.json",
+        "bytes": 1744,
+        "sha256": "ee804e317685b2ddcc91d00af9948aa27bf3f1cc57810f00ed8e07b1585b3e7a"
+      },
+      "fileCount": 20,
+      "bytes": 969799,
+      "fullAggregateSha256": "8a7b4ad4b7a2bf93e9a25c6eabcb929b8c85f2b96b82113e928a70e576391b0d"
+    }
+  },
+  "dependencies": {
+    "node": "v20.19.5",
+    "platform": "linux-x64",
+    "playwright": "/root/trading-bot/trading_bot/frontend/node_modules/playwright/index.js",
+    "browser": {
+      "engine": "chromium",
+      "version": "147.0.7727.15",
+      "viewport": {
+        "width": 1500,
+        "height": 1200
+      },
+      "deviceScaleFactor": 1
+    },
+    "fonts": {
+      "family": "Vazirmatn",
+      "root": "/tmp/trading-bot-webapp-uiux-redesign-v2/frontend/node_modules/vazirmatn/fonts/webfonts",
+      "checks": [
+        {
+          "weight": 400,
+          "loaded": true
+        },
+        {
+          "weight": 500,
+          "loaded": true
+        },
+        {
+          "weight": 600,
+          "loaded": true
+        },
+        {
+          "weight": 700,
+          "loaded": true
+        }
+      ],
+      "files": [
+        {
+          "file": "Vazirmatn-Regular.woff2",
+          "weight": 400,
+          "bytes": 50684,
+          "sha256": "e382101336c6eb32cfb31381c027d02d2e0354bad08f6a395d4088beb3db3d91"
+        },
+        {
+          "file": "Vazirmatn-Medium.woff2",
+          "weight": 500,
+          "bytes": 51128,
+          "sha256": "3333e31188a2b628db8780ca22fd5aad85bc083ccee9beb8d4d52db18cb98d48"
+        },
+        {
+          "file": "Vazirmatn-SemiBold.woff2",
+          "weight": 600,
+          "bytes": 51032,
+          "sha256": "6a39a3c25eb18503cad590527b95bb5d4062b889a7ebbd3f01b0488d239e0499"
+        },
+        {
+          "file": "Vazirmatn-Bold.woff2",
+          "weight": 700,
+          "bytes": 51020,
+          "sha256": "836fae7d42d83faa249bc00e0099592be98a1fa260d22d82f269b6091e585627"
+        }
+      ]
+    }
+  },
+  "integrity": {
+    "preDomSha256": "ffb2858cf8323eecf9364df4757e152078529efa1ba95d24def65094daa17aaa",
+    "postDomSha256": "ffb2858cf8323eecf9364df4757e152078529efa1ba95d24def65094daa17aaa",
+    "domEqual": true,
+    "preAuditSha256": "b8c7326edb3a237785f132e564499cb00b211a54d5a03b7c0c3b3d2959e49424",
+    "postAuditSha256": "b8c7326edb3a237785f132e564499cb00b211a54d5a03b7c0c3b3d2959e49424",
+    "auditEqual": true,
+    "postCaptureRemeasurement": true,
+    "consoleErrors": [],
+    "pageErrors": [],
+    "failedRequests": [],
+    "blockedNetworkRequests": []
+  },
+  "assertions": [
+    {
+      "id": "claim-boundary-local-not-stage-or-sites",
+      "passed": true,
+      "details": {
+        "stage": "4",
+        "sites": "false"
+      }
+    },
+    {
+      "id": "implementation-commit-tree-parent-exact",
+      "passed": true,
+      "details": {
+        "objectVerified": true,
+        "commit": "007f94d170cb02cd69911d9e1f122b83fbacd535",
+        "tree": "807a01c76c93489ccce1e5b72cea9c214fd52d31",
+        "parent": "9dfa961000832c830729ce67e8a54357915c716a",
+        "pathCount": 67,
+        "pathSetSha256": "25a5773b2e3ca1f6e45bbf48800dcac4ce3cd8e8125f1913fee674529720739f"
+      }
+    },
+    {
+      "id": "git-sixtyseven-path-binding-exact",
+      "passed": true,
+      "details": {
+        "count": 67,
+        "sha256": "25a5773b2e3ca1f6e45bbf48800dcac4ce3cd8e8125f1913fee674529720739f"
+      }
+    },
+    {
+      "id": "figma-authored-snapshot-identity-exact",
+      "passed": true,
+      "details": {
+        "fileKey": "z8jgJxST4O2APzWnlyP9gv",
+        "page": "283:18",
+        "root": "283:19"
+      }
+    },
+    {
+      "id": "figma-thirteen-exports-hash-bound",
+      "passed": true,
+      "details": {
+        "captureCount": 13,
+        "aggregate": "46e329154d226cc0ed6fb302b4c33b0215b29280a25d9d8abccfe1e6a266774a",
+        "loadedImages": true
+      }
+    },
+    {
+      "id": "figma-audit-six-six-sixtysix-zero-one",
+      "passed": true,
+      "details": {
+        "audit": {
+          "fileKey": "z8jgJxST4O2APzWnlyP9gv",
+          "captureCount": 13,
+          "captureAggregate": "46e329154d226cc0ed6fb302b4c33b0215b29280a25d9d8abccfe1e6a266774a",
+          "auditPassed": true,
+          "sections": 6,
+          "screens": 6,
+          "linked": 66,
+          "detached": 0,
+          "protectedImages": 1
+        }
+      }
+    },
+    {
+      "id": "canonical-routes-six-redirects-two",
+      "passed": true,
+      "details": {
+        "canonical": 6,
+        "redirects": 2
+      }
+    },
+    {
+      "id": "role-authority-matrix-truthful",
+      "passed": true,
+      "details": {
+        "owner": 2,
+        "middle": 2,
+        "senior": 5
+      }
+    },
+    {
+      "id": "accountant-destinations-and-owner-actions-exact",
+      "passed": true,
+      "details": {
+        "accountantOwnerActions": 0
+      }
+    },
+    {
+      "id": "security-storage-route-exclusive-receipt-bound",
+      "passed": true,
+      "details": {
+        "security": "true",
+        "storage": "true"
+      }
+    },
+    {
+      "id": "notifications-recovery-route-safety-exact",
+      "passed": true,
+      "details": {
+        "retained": "true",
+        "routeLess": "false"
+      }
+    },
+    {
+      "id": "push-nine-state-explicit-permission",
+      "passed": true,
+      "details": {
+        "pushStates": [
+          "checking",
+          "unsupported",
+          "insecure",
+          "server-disabled",
+          "permission-blocked",
+          "permission-default",
+          "subscribed",
+          "unsubscribed",
+          "error"
+        ]
+      }
+    },
+    {
+      "id": "browser-run-49-of-49-promotable",
+      "passed": true,
+      "details": {
+        "status": "passed",
+        "promotable": true,
+        "assertions": 49,
+        "screenshots": 22,
+        "viewports": 8,
+        "suites": 9,
+        "expectedHttp": 16,
+        "expectedConsole": 17,
+        "unexpected": 0,
+        "sourceCount": 398,
+        "sourceIdentical": true,
+        "protectedIdentical": true
+      }
+    },
+    {
+      "id": "browser-twentytwo-screenshots-hash-bound",
+      "passed": true,
+      "details": {
+        "screenshots": 22
+      }
+    },
+    {
+      "id": "browser-eight-widths-nine-suites",
+      "passed": true,
+      "details": {
+        "viewports": 8,
+        "suites": 9
+      }
+    },
+    {
+      "id": "browser-expected-failures-and-zero-unexpected",
+      "passed": true,
+      "details": {
+        "expectedHttp": 16,
+        "expectedConsole": 17,
+        "unexpected": 0
+      }
+    },
+    {
+      "id": "browser-source-398-pre-post-identical",
+      "passed": true,
+      "details": {
+        "sourceCount": 398
+      }
+    },
+    {
+      "id": "vitest-34-450-passed",
+      "passed": true,
+      "details": {
+        "frontendFiles": 34,
+        "frontendTests": 450,
+        "guardFiles": 3,
+        "guardTests": 55,
+        "backendModules": 11,
+        "backendTests": 69,
+        "backendCaveats": 3,
+        "typecheck": true,
+        "build": true,
+        "buildModules": 2162,
+        "pwaEntries": 161,
+        "eslintAdded": 0,
+        "eslintInherited": 121,
+        "prettierAdded": 0,
+        "prettierInherited": 22,
+        "adminHashesExact": true
+      }
+    },
+    {
+      "id": "guards-3-55-and-ui-passed",
+      "passed": true,
+      "details": {
+        "frontendFiles": 34,
+        "frontendTests": 450,
+        "guardFiles": 3,
+        "guardTests": 55,
+        "backendModules": 11,
+        "backendTests": 69,
+        "backendCaveats": 3,
+        "typecheck": true,
+        "build": true,
+        "buildModules": 2162,
+        "pwaEntries": 161,
+        "eslintAdded": 0,
+        "eslintInherited": 121,
+        "prettierAdded": 0,
+        "prettierInherited": 22,
+        "adminHashesExact": true
+      }
+    },
+    {
+      "id": "backend-11-69-passed-with-caveat",
+      "passed": true,
+      "details": {
+        "frontendFiles": 34,
+        "frontendTests": 450,
+        "guardFiles": 3,
+        "guardTests": 55,
+        "backendModules": 11,
+        "backendTests": 69,
+        "backendCaveats": 3,
+        "typecheck": true,
+        "build": true,
+        "buildModules": 2162,
+        "pwaEntries": 161,
+        "eslintAdded": 0,
+        "eslintInherited": 121,
+        "prettierAdded": 0,
+        "prettierInherited": 22,
+        "adminHashesExact": true
+      }
+    },
+    {
+      "id": "type-build-pwa-passed",
+      "passed": true,
+      "details": {
+        "frontendFiles": 34,
+        "frontendTests": 450,
+        "guardFiles": 3,
+        "guardTests": 55,
+        "backendModules": 11,
+        "backendTests": 69,
+        "backendCaveats": 3,
+        "typecheck": true,
+        "build": true,
+        "buildModules": 2162,
+        "pwaEntries": 161,
+        "eslintAdded": 0,
+        "eslintInherited": 121,
+        "prettierAdded": 0,
+        "prettierInherited": 22,
+        "adminHashesExact": true
+      }
+    },
+    {
+      "id": "eslint-delta-zero-inherited-disclosed",
+      "passed": true,
+      "details": {
+        "frontendFiles": 34,
+        "frontendTests": 450,
+        "guardFiles": 3,
+        "guardTests": 55,
+        "backendModules": 11,
+        "backendTests": 69,
+        "backendCaveats": 3,
+        "typecheck": true,
+        "build": true,
+        "buildModules": 2162,
+        "pwaEntries": 161,
+        "eslintAdded": 0,
+        "eslintInherited": 121,
+        "prettierAdded": 0,
+        "prettierInherited": 22,
+        "adminHashesExact": true
+      }
+    },
+    {
+      "id": "prettier-delta-zero-inherited-disclosed",
+      "passed": true,
+      "details": {
+        "frontendFiles": 34,
+        "frontendTests": 450,
+        "guardFiles": 3,
+        "guardTests": 55,
+        "backendModules": 11,
+        "backendTests": 69,
+        "backendCaveats": 3,
+        "typecheck": true,
+        "build": true,
+        "buildModules": 2162,
+        "pwaEntries": 161,
+        "eslintAdded": 0,
+        "eslintInherited": 121,
+        "prettierAdded": 0,
+        "prettierInherited": 22,
+        "adminHashesExact": true
+      }
+    },
+    {
+      "id": "home-market-six-4553-hash-exact",
+      "passed": true,
+      "details": {
+        "sections": 6,
+        "bytes": 4553,
+        "sha256": "f25c01dac38db208517047ffc0f2458e2c89868e988a6d7f68749221db106860"
+      }
+    },
+    {
+      "id": "market-19-and-messenger-85-hashes-exact",
+      "passed": true,
+      "details": {
+        "market": "162e9e618684a24f3db3298eb8ff2c62498b18753cd4e0b6d6b97650d0202058",
+        "messenger": "f66debf9809180d97b2bac98f5195ba24200d3b61b0d8e0e5cd423a8a7b97248"
+      }
+    },
+    {
+      "id": "protected-seven-routes-admin-hashes-exact",
+      "passed": true,
+      "details": {
+        "protectedRoutes": 7,
+        "registryCount": 26
+      }
+    }
+  ],
+  "assertionSummary": {
+    "total": 26,
+    "passed": 26,
+    "failed": 0,
+    "exactOrder": true
+  },
+  "measurements": {
+    "loadedImageCount": 20,
+    "routes": 8,
+    "pushStates": [
+      "checking",
+      "unsupported",
+      "insecure",
+      "server-disabled",
+      "permission-blocked",
+      "permission-default",
+      "subscribed",
+      "unsubscribed",
+      "error"
+    ],
+    "registry": [
+      "claim-boundary-local-not-stage-or-sites",
+      "implementation-commit-tree-parent-exact",
+      "git-sixtyseven-path-binding-exact",
+      "figma-authored-snapshot-identity-exact",
+      "figma-thirteen-exports-hash-bound",
+      "figma-audit-six-six-sixtysix-zero-one",
+      "canonical-routes-six-redirects-two",
+      "role-authority-matrix-truthful",
+      "accountant-destinations-and-owner-actions-exact",
+      "security-storage-route-exclusive-receipt-bound",
+      "notifications-recovery-route-safety-exact",
+      "push-nine-state-explicit-permission",
+      "browser-run-49-of-49-promotable",
+      "browser-twentytwo-screenshots-hash-bound",
+      "browser-eight-widths-nine-suites",
+      "browser-expected-failures-and-zero-unexpected",
+      "browser-source-398-pre-post-identical",
+      "vitest-34-450-passed",
+      "guards-3-55-and-ui-passed",
+      "backend-11-69-passed-with-caveat",
+      "type-build-pwa-passed",
+      "eslint-delta-zero-inherited-disclosed",
+      "prettier-delta-zero-inherited-disclosed",
+      "home-market-six-4553-hash-exact",
+      "market-19-and-messenger-85-hashes-exact",
+      "protected-seven-routes-admin-hashes-exact"
+    ]
+  },
+  "captures": [
+    {
+      "file": "local-stage4-overview.png",
+      "selector": "#stage4-overview",
+      "width": 1440,
+      "height": 495,
+      "bytes": 84188,
+      "sha256": "87bb4d5b646af609837aa18e59e69e8345863c9bbcadb42de57728994099d724",
+      "visualStats": {
+        "uniqueColorCount": 513,
+        "changedPixelCount": 712734
+      }
+    },
+    {
+      "file": "local-stage4-figma-proof.png",
+      "selector": "#stage4-figma-proof",
+      "width": 1440,
+      "height": 1071,
+      "bytes": 134452,
+      "sha256": "05a53908e06aa824c58bb2969a81028ef2131a3be1dc68cbc0951bb5d7045dec",
+      "visualStats": {
+        "uniqueColorCount": 513,
+        "changedPixelCount": 1541986
+      }
+    },
+    {
+      "file": "local-stage4-route-authority.png",
+      "selector": "#stage4-route-authority",
+      "width": 1440,
+      "height": 986,
+      "bytes": 122859,
+      "sha256": "1870b2a80658782dc3a200499c2e78a93fb376812b77d7fe7c4e5fd3d97cdc4b",
+      "visualStats": {
+        "uniqueColorCount": 513,
+        "changedPixelCount": 1419806
+      }
+    },
+    {
+      "file": "local-stage4-browser-proof.png",
+      "selector": "#stage4-browser-proof",
+      "width": 1440,
+      "height": 1577,
+      "bytes": 190301,
+      "sha256": "391ec2e92e7f2fe349e7863810d5765fa5ff8d68f08c8e248035cb6d71f1c1e2",
+      "visualStats": {
+        "uniqueColorCount": 513,
+        "changedPixelCount": 2270770
+      }
+    },
+    {
+      "file": "local-stage4-recovery-mutations.png",
+      "selector": "#stage4-recovery-mutations",
+      "width": 1440,
+      "height": 1102,
+      "bytes": 164580,
+      "sha256": "f1184f9056893c85cee82c622596358ae7d4462ab5cac85192521bf952e63966",
+      "visualStats": {
+        "uniqueColorCount": 513,
+        "changedPixelCount": 1586709
+      }
+    },
+    {
+      "file": "local-stage4-gates-protected.png",
+      "selector": "#stage4-gates-protected",
+      "width": 1440,
+      "height": 1143,
+      "bytes": 143330,
+      "sha256": "168d77ad45368ab141a6acf7d9bc063994f9ad2e387d17138a2acf3b6646bbae",
+      "visualStats": {
+        "uniqueColorCount": 513,
+        "changedPixelCount": 1645910
+      }
+    }
+  ],
+  "outputSet": {
+    "policy": "exact",
+    "pngCount": 6,
+    "metricsCount": 1,
+    "files": [
+      "local-stage4-browser-proof.png",
+      "local-stage4-daily-core-validation-metrics.json",
+      "local-stage4-figma-proof.png",
+      "local-stage4-gates-protected.png",
+      "local-stage4-overview.png",
+      "local-stage4-recovery-mutations.png",
+      "local-stage4-route-authority.png"
+    ]
+  },
+  "publication": {
+    "strategy": "atomic-directory-rename",
+    "partialPromotionAllowed": false,
+    "validationBeforePromotion": true,
+    "validationAfterPromotion": true,
+    "residueAllowed": false,
+    "deterministicRunId": true
+  }
+}

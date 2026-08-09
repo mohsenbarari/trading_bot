@@ -1,0 +1,11 @@
+{
+  "browserRun": "uiux-stage4-browser-20260809T180340666Z",
+  "browserSourceBindingSha256": "1f8858264f0c52479c227bb84822a6c109f9b4fadb968500df596126acf099bf",
+  "browserSourceFileCount": 398,
+  "exactBytesMtimeHashMatch": true,
+  "mismatchCount": 0,
+  "mismatches": [],
+  "changedCount": 67,
+  "changedPathsetSha256": "25a5773b2e3ca1f6e45bbf48800dcac4ce3cd8e8125f1913fee674529720739f",
+  "changedPathContentSha256": "517ae0b1d3d630f6fa086cdc208905fabb9a532035cec539f61f9cd5f67af35e"
+}

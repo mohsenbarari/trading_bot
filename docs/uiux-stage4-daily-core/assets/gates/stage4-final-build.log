@@ -1,0 +1,184 @@
+
+> frontend@0.0.0 build
+> vite build
+
+vite v7.3.2 building client environment for production...
+transforming...
+Browserslist: browsers data (caniuse-lite) is 7 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+✓ 2162 modules transformed.
+rendering chunks...
+computing gzip size...
+../mini_app_dist/manifest.webmanifest                                                         1.05 kB
+../mini_app_dist/assets/imagePreprocess.worker-FAhd-Xu4.js                                    1.77 kB
+../mini_app_dist/index.html                                                                   6.53 kB │ gzip:   2.30 kB
+../mini_app_dist/assets/Vazirmatn-Black-DA1YqYMq.woff2                                       50.57 kB
+../mini_app_dist/assets/Vazirmatn-Regular-CtGL0YI-.woff2                                     50.68 kB
+../mini_app_dist/assets/Vazirmatn-Thin-DdUiS1cj.woff2                                        50.80 kB
+../mini_app_dist/assets/Vazirmatn-Bold-_OhAJEdh.woff2                                        51.02 kB
+../mini_app_dist/assets/Vazirmatn-SemiBold-26ZP1ILp.woff2                                    51.03 kB
+../mini_app_dist/assets/Vazirmatn-ExtraBold-DCjt2qDm.woff2                                   51.12 kB
+../mini_app_dist/assets/Vazirmatn-Medium-D86t5Axy.woff2                                      51.13 kB
+../mini_app_dist/assets/Vazirmatn-Light-Byrs-DlH.woff2                                       51.18 kB
+../mini_app_dist/assets/Vazirmatn-ExtraLight-DNfybfsL.woff2                                  51.27 kB
+../mini_app_dist/assets/PublicProfileView-BFyRQnCZ.css                                        0.12 kB │ gzip:   0.13 kB
+../mini_app_dist/assets/ProfileView-BJeXajuV.css                                              0.22 kB │ gzip:   0.16 kB
+../mini_app_dist/assets/ChatVirtualTimeline-CekcCdTw.css                                      0.27 kB │ gzip:   0.17 kB
+../mini_app_dist/assets/LoadingSkeleton-IdwQmTwg.css                                          0.43 kB │ gzip:   0.25 kB
+../mini_app_dist/assets/ShareReceiveView-DLCjgJkI.css                                         0.55 kB │ gzip:   0.32 kB
+../mini_app_dist/assets/OperationsView-Dura7t4e.css                                           0.59 kB │ gzip:   0.29 kB
+../mini_app_dist/assets/ChatSearchBottomBar-BxezJvVj.css                                      0.81 kB │ gzip:   0.39 kB
+../mini_app_dist/assets/HelpPopover-Dows4ZRe.css                                              1.34 kB │ gzip:   0.57 kB
+../mini_app_dist/assets/ChatLocationModal-BT9Tq4De.css                                        1.42 kB │ gzip:   0.59 kB
+../mini_app_dist/assets/ChatSearchGlobalList-DmjR_Aa4.css                                     1.71 kB │ gzip:   0.62 kB
+../mini_app_dist/assets/ChatNewConversationModal--__yAIh3.css                                 2.31 kB │ gzip:   0.81 kB
+../mini_app_dist/assets/GalleryPreviewModal-CcA5FHz7.css                                      2.41 kB │ gzip:   0.80 kB
+../mini_app_dist/assets/AdminBroadcastModal-BJTK1xjB.css                                      2.49 kB │ gzip:   0.87 kB
+../mini_app_dist/assets/DashboardView-BJR11XVq.css                                            2.89 kB │ gzip:   0.96 kB
+../mini_app_dist/assets/SettingsView-Djkydb-4.css                                             2.95 kB │ gzip:   0.81 kB
+../mini_app_dist/assets/ChatUserListRow-CSUXKPEp.css                                          3.46 kB │ gzip:   1.01 kB
+../mini_app_dist/assets/AccountHubView-mw76P6cP.css                                           4.88 kB │ gzip:   1.43 kB
+../mini_app_dist/assets/ChatForwardModal-BnTVj9Ku.css                                         6.02 kB │ gzip:   1.64 kB
+../mini_app_dist/assets/NotificationsView-vdjb1Z8_.css                                        7.26 kB │ gzip:   1.60 kB
+../mini_app_dist/assets/ImageEditorModal-lQwBSZLo.css                                         8.54 kB │ gzip:   2.20 kB
+../mini_app_dist/assets/AppAuthenticatedShell-DnWbdh_z.css                                    9.37 kB │ gzip:   2.20 kB
+../mini_app_dist/assets/CreateChannelView-CLSR83fX.css                                       10.59 kB │ gzip:   2.53 kB
+../mini_app_dist/assets/ChatGroupManagerModal-CSjhBhNs.css                                   11.14 kB │ gzip:   2.63 kB
+../mini_app_dist/assets/ChatLightbox-4kGc4Agi.css                                            12.89 kB │ gzip:   2.76 kB
+../mini_app_dist/assets/vue-leaflet-Dgihpmma.css                                             15.04 kB │ gzip:   6.38 kB
+../mini_app_dist/assets/AttachmentMenu-9fggpPnI.css                                          16.17 kB │ gzip:   3.50 kB
+../mini_app_dist/assets/UserProfile-Fdsl1Aq3.css                                             17.67 kB │ gzip:   3.87 kB
+../mini_app_dist/assets/PublicProfile-Bkzb9Tb9.css                                           19.30 kB │ gzip:   4.00 kB
+../mini_app_dist/assets/AccountantWorkspaceView-BDrC0uMw.css                                 22.43 kB │ gzip:   4.00 kB
+../mini_app_dist/assets/CustomerWorkspaceView-HBsHypBO.css                                   26.04 kB │ gzip:   4.65 kB
+../mini_app_dist/assets/MarketView-P2a8a17W.css                                              26.19 kB │ gzip:   5.34 kB
+../mini_app_dist/assets/AdminView-Bj-Ykrpx.css                                               32.64 kB │ gzip:   5.96 kB
+../mini_app_dist/assets/MessengerView-UltGePgP.css                                          105.49 kB │ gzip:  18.14 kB
+../mini_app_dist/assets/index-DOi8iiRH.css                                                  117.03 kB │ gzip:  16.75 kB
+../mini_app_dist/assets/_plugin-vue_export-helper-DlAUqK2U.js                                 0.09 kB │ gzip:   0.10 kB
+../mini_app_dist/assets/check-BWiH9112.js                                                     0.12 kB │ gzip:   0.13 kB
+../mini_app_dist/assets/chevron-down-Dgveq0XS.js                                              0.13 kB │ gzip:   0.14 kB
+../mini_app_dist/assets/chevron-left-D4ahQ_y_.js                                              0.13 kB │ gzip:   0.14 kB
+../mini_app_dist/assets/chevron-right-CsSbrLzd.js                                             0.13 kB │ gzip:   0.14 kB
+../mini_app_dist/assets/plus-C7Hnnr8A.js                                                      0.15 kB │ gzip:   0.15 kB
+../mini_app_dist/assets/x-BruWoEUm.js                                                         0.15 kB │ gzip:   0.15 kB
+../mini_app_dist/assets/search-Wjl_U4YZ.js                                                    0.17 kB │ gzip:   0.16 kB
+../mini_app_dist/assets/ban-Bu06ZDa5.js                                                       0.17 kB │ gzip:   0.17 kB
+../mini_app_dist/assets/user-round-BRdC2Hbw.js                                                0.17 kB │ gzip:   0.17 kB
+../mini_app_dist/assets/smartphone-OlYlq4TH.js                                                0.19 kB │ gzip:   0.18 kB
+../mini_app_dist/assets/log-out--1_f58qI.js                                                   0.23 kB │ gzip:   0.19 kB
+../mini_app_dist/assets/message-circle-feNAOkVo.js                                            0.24 kB │ gzip:   0.21 kB
+../mini_app_dist/assets/circle-alert-Be9yppgY.js                                              0.25 kB │ gzip:   0.19 kB
+../mini_app_dist/assets/triangle-alert-5eDv129f.js                                            0.26 kB │ gzip:   0.21 kB
+../mini_app_dist/assets/AppPage.vue_vue_type_script_setup_true_lang-97nM-bxo.js               0.27 kB │ gzip:   0.23 kB
+../mini_app_dist/assets/AppStatusBadge.vue_vue_type_script_setup_true_lang-RWDwwWmH.js        0.28 kB │ gzip:   0.23 kB
+../mini_app_dist/assets/bell-BjeW0Twi.js                                                      0.29 kB │ gzip:   0.24 kB
+../mini_app_dist/assets/send-C2ZGZbK7.js                                                      0.29 kB │ gzip:   0.23 kB
+../mini_app_dist/assets/users-BVIuxxvF.js                                                     0.30 kB │ gzip:   0.22 kB
+../mini_app_dist/assets/user-plus-BTNGFXcc.js                                                 0.31 kB │ gzip:   0.23 kB
+../mini_app_dist/assets/AppCard.vue_vue_type_script_setup_true_lang-DnVEcpk_.js               0.32 kB │ gzip:   0.25 kB
+../mini_app_dist/assets/briefcase-business-Bqd9VgO4.js                                        0.32 kB │ gzip:   0.24 kB
+../mini_app_dist/assets/trash-2-C0FWQLEe.js                                                   0.33 kB │ gzip:   0.21 kB
+../mini_app_dist/assets/megaphone-CbkZm5M1.js                                                 0.34 kB │ gzip:   0.24 kB
+../mini_app_dist/assets/shield-alert-TLcKczF2.js                                              0.35 kB │ gzip:   0.26 kB
+../mini_app_dist/assets/settlementType-CGjNLhWs.js                                            0.36 kB │ gzip:   0.23 kB
+../mini_app_dist/assets/bell-off-roDwzm9X.js                                                  0.36 kB │ gzip:   0.27 kB
+../mini_app_dist/assets/package-BVerGg2y.js                                                   0.37 kB │ gzip:   0.26 kB
+../mini_app_dist/assets/AppLoadingState.vue_vue_type_script_setup_true_lang-DR481Njl.js       0.41 kB │ gzip:   0.32 kB
+../mini_app_dist/assets/AppDangerZone.vue_vue_type_script_setup_true_lang-Bc0OftuV.js         0.45 kB │ gzip:   0.30 kB
+../mini_app_dist/assets/settings-De3wP8gf.js                                                  0.48 kB │ gzip:   0.25 kB
+../mini_app_dist/assets/AppIconButton.vue_vue_type_script_setup_true_lang-CfArpHsu.js         0.49 kB │ gzip:   0.32 kB
+../mini_app_dist/assets/AppMetricCard.vue_vue_type_script_setup_true_lang-Cgxb8_-g.js         0.50 kB │ gzip:   0.32 kB
+../mini_app_dist/assets/_commonjs-dynamic-modules-BQy7Czjx.js                                 0.50 kB │ gzip:   0.32 kB
+../mini_app_dist/assets/LoadingSkeleton-D27XO8pb.js                                           0.54 kB │ gzip:   0.37 kB
+../mini_app_dist/assets/notificationUi-9LWoHAXF.js                                            0.58 kB │ gzip:   0.37 kB
+../mini_app_dist/assets/AppErrorState.vue_vue_type_script_setup_true_lang-D0eaIqpA.js         0.59 kB │ gzip:   0.35 kB
+../mini_app_dist/assets/AppPageHeader.vue_vue_type_script_setup_true_lang-g-fszI_u.js         0.59 kB │ gzip:   0.34 kB
+../mini_app_dist/assets/AppSelect.vue_vue_type_script_setup_true_lang-Dsi52Y5b.js             0.60 kB │ gzip:   0.39 kB
+../mini_app_dist/assets/AppEmptyState.vue_vue_type_script_setup_true_lang-C5lZ51jg.js         0.61 kB │ gzip:   0.37 kB
+../mini_app_dist/assets/chatRoleBadges-BraSeE5T.js                                            0.62 kB │ gzip:   0.27 kB
+../mini_app_dist/assets/CustomerNameWithBadge-D0HNJnGq.js                                     0.66 kB │ gzip:   0.42 kB
+../mini_app_dist/assets/AppSectionCard.vue_vue_type_script_setup_true_lang-AtD8fOVD.js        0.67 kB │ gzip:   0.37 kB
+../mini_app_dist/assets/AppToast.vue_vue_type_script_setup_true_lang-DpjGSqmg.js              0.81 kB │ gzip:   0.46 kB
+../mini_app_dist/assets/chatManagerCache-a4JwNllM.js                                          0.83 kB │ gzip:   0.51 kB
+../mini_app_dist/assets/marker-shadow-DU6CIJ0p.js                                             0.88 kB │ gzip:   0.72 kB
+../mini_app_dist/assets/WorkspaceNotice.vue_vue_type_script_setup_true_lang-DD8ZpXu-.js       0.89 kB │ gzip:   0.51 kB
+../mini_app_dist/assets/chatRoomRouting-DUuGffSX.js                                           0.91 kB │ gzip:   0.40 kB
+../mini_app_dist/assets/users-round-Ck0tV5ne.js                                               1.05 kB │ gzip:   0.50 kB
+../mini_app_dist/assets/AppActionCard.vue_vue_type_script_setup_true_lang-B_JwKiB8.js         1.06 kB │ gzip:   0.53 kB
+../mini_app_dist/assets/HelpPopover-D4eezlFE.js                                               1.15 kB │ gzip:   0.68 kB
+../mini_app_dist/assets/AppFilterChips.vue_vue_type_script_setup_true_lang-Dz3BXn9U.js        1.61 kB │ gzip:   0.83 kB
+../mini_app_dist/assets/telegramLink-BfrCyUQh.js                                              1.65 kB │ gzip:   0.89 kB
+../mini_app_dist/assets/iranTime-DqXNOqdF.js                                                  1.69 kB │ gzip:   0.74 kB
+../mini_app_dist/assets/useWebSocket-_zcY1Dgm.js                                              1.80 kB │ gzip:   0.98 kB
+../mini_app_dist/assets/marker-icon-C2eJqgqv.js                                               2.01 kB │ gzip:   1.57 kB
+../mini_app_dist/assets/invitationContract-6pQ7-MEM.js                                        2.04 kB │ gzip:   0.92 kB
+../mini_app_dist/assets/ChatUserListRow-CXzYcuE0.js                                           2.23 kB │ gzip:   1.05 kB
+../mini_app_dist/assets/accountantChatIdentity-DaM6hq-T.js                                    2.35 kB │ gzip:   0.78 kB
+../mini_app_dist/assets/ChatSearchGlobalList-CZcT6nI5.js                                      2.52 kB │ gzip:   1.34 kB
+../mini_app_dist/assets/ChatLocationModal-CssXWJ0A.js                                         2.59 kB │ gzip:   1.35 kB
+../mini_app_dist/assets/ChatSearchBottomBar-BNuOKtMZ.js                                       2.74 kB │ gzip:   1.02 kB
+../mini_app_dist/assets/AdminBroadcastModal-6SGjU25R.js                                       3.01 kB │ gzip:   1.56 kB
+../mini_app_dist/assets/WorkspaceShell.vue_vue_type_script_setup_true_lang-CDjEZ2JX.js        3.09 kB │ gzip:   1.14 kB
+../mini_app_dist/assets/marker-icon-2x-D4k_ikNW.js                                            3.34 kB │ gzip:   2.55 kB
+../mini_app_dist/assets/registrationHandoff-DVBLc4hd.js                                       3.38 kB │ gzip:   1.42 kB
+../mini_app_dist/assets/securityLayerState-Bwsf5mTw.js                                        3.49 kB │ gzip:   1.19 kB
+../mini_app_dist/assets/ChatNewConversationModal-fQ5XCHsX.js                                  3.86 kB │ gzip:   2.02 kB
+../mini_app_dist/assets/AppTabs.vue_vue_type_script_setup_true_lang-BL0f5tPq.js               4.02 kB │ gzip:   1.85 kB
+../mini_app_dist/assets/ProfileView-B9V9ToON.js                                               4.09 kB │ gzip:   1.90 kB
+../mini_app_dist/assets/webPush-Cg0MIABs.js                                                   4.19 kB │ gzip:   1.52 kB
+../mini_app_dist/assets/GalleryPreviewModal-Dqee456s.js                                       4.27 kB │ gzip:   1.98 kB
+../mini_app_dist/assets/PublicProfileView-DvGdD3CE.js                                         4.83 kB │ gzip:   2.11 kB
+../mini_app_dist/assets/chatFiles-DB_Q8LLb.js                                                 5.58 kB │ gzip:   2.34 kB
+../mini_app_dist/assets/workbox-window.prod.es5-CcvICf7O.js                                   5.78 kB │ gzip:   2.37 kB
+../mini_app_dist/assets/OperationsView-BOs8wsHa.js                                            6.14 kB │ gzip:   2.40 kB
+../mini_app_dist/assets/SetupPassword-rO1C4n5a.js                                             6.30 kB │ gzip:   2.53 kB
+../mini_app_dist/assets/ShareReceiveView-CWvKgsuj.js                                          6.57 kB │ gzip:   2.89 kB
+../mini_app_dist/assets/AppConfirmDialog.vue_vue_type_script_setup_true_lang-EelUQ_Iq.js      6.88 kB │ gzip:   2.61 kB
+../mini_app_dist/assets/chatDocumentDownloadBackground-DvTDUA7v.js                            7.29 kB │ gzip:   2.79 kB
+../mini_app_dist/assets/InviteLanding-Dw9U9Dae.js                                             7.55 kB │ gzip:   3.05 kB
+../mini_app_dist/assets/AccountHubView-C5Zv7DJX.js                                            9.07 kB │ gzip:   3.31 kB
+../mini_app_dist/assets/ChatForwardModal-BRVRi90l.js                                         10.13 kB │ gzip:   3.52 kB
+../mini_app_dist/assets/notifications-CjCasmzG.js                                            10.84 kB │ gzip:   4.33 kB
+../mini_app_dist/assets/useChatFileHandler-_dnyKV8Q.js                                       11.46 kB │ gzip:   4.13 kB
+../mini_app_dist/assets/DashboardView-mFZoPkI7.js                                            11.72 kB │ gzip:   4.43 kB
+../mini_app_dist/assets/NotificationsView-BEytMH8h.js                                        11.92 kB │ gzip:   4.43 kB
+../mini_app_dist/assets/ImageEditorModal-3S2prplk.js                                         13.40 kB │ gzip:   5.21 kB
+../mini_app_dist/assets/WebRegister-CzYBpapJ.js                                              15.12 kB │ gzip:   4.80 kB
+../mini_app_dist/assets/vue-leaflet.es-DBFw3n10.js                                           15.56 kB │ gzip:   5.07 kB
+../mini_app_dist/assets/ChatLightbox-DobH4xZ2.js                                             18.99 kB │ gzip:   6.17 kB
+../mini_app_dist/assets/SettingsView-Djq8DlcS.js                                             22.16 kB │ gzip:   6.23 kB
+../mini_app_dist/assets/ChatVirtualTimeline-Dgi_v6NI.js                                      23.96 kB │ gzip:   8.01 kB
+../mini_app_dist/assets/ChatGroupManagerModal-KDHnLb1N.js                                    26.55 kB │ gzip:   7.35 kB
+../mini_app_dist/assets/localforage-CQ17d5cT.js                                              29.55 kB │ gzip:   9.49 kB
+../mini_app_dist/assets/AppAuthenticatedShell-DQdTyQad.js                                    33.32 kB │ gzip:  11.19 kB
+../mini_app_dist/assets/CreateChannelView-BCwNLNyT.js                                        34.04 kB │ gzip:   9.67 kB
+../mini_app_dist/assets/chatUploadBackground-DJwm6CD7.js                                     38.01 kB │ gzip:  11.52 kB
+../mini_app_dist/assets/cropper.esm-B1TiAoQJ.js                                              38.06 kB │ gzip:  12.23 kB
+../mini_app_dist/assets/AttachmentMenu-A6aVff3E.js                                           42.11 kB │ gzip:  13.83 kB
+../mini_app_dist/assets/PublicProfile-BEuqJ3TS.js                                            49.99 kB │ gzip:  14.54 kB
+../mini_app_dist/assets/AccountantWorkspaceView-2j3c0MVQ.js                                  54.75 kB │ gzip:  14.14 kB
+../mini_app_dist/assets/MarketView-o-Sa95uU.js                                               54.80 kB │ gzip:  17.04 kB
+../mini_app_dist/assets/CustomerWorkspaceView-CaNPzwxb.js                                    82.36 kB │ gzip:  20.88 kB
+../mini_app_dist/assets/AdminView-pPnv12TL.js                                                92.62 kB │ gzip:  24.50 kB
+../mini_app_dist/assets/UserProfile-DiJHEmYW.js                                             129.25 kB │ gzip:  39.54 kB
+../mini_app_dist/assets/leaflet-src.esm-BrHDw9hw.js                                         149.31 kB │ gzip:  43.14 kB
+../mini_app_dist/assets/leaflet-src-3_XbxGvV.js                                             149.98 kB │ gzip:  43.52 kB
+../mini_app_dist/assets/index-CfXHjqvK.js                                                   201.41 kB │ gzip:  69.43 kB
+../mini_app_dist/assets/index.min-BX8ATpQA.js                                               298.42 kB │ gzip:  93.62 kB
+../mini_app_dist/assets/MessengerView-D5pVSndL.js                                           581.39 kB │ gzip: 127.24 kB
+../mini_app_dist/assets/heic2any-C-2qH2Cj.js                                              1,352.97 kB │ gzip: 341.28 kB
+
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+✓ built in 31.50s
+
+PWA v1.2.0
+mode      generateSW
+precache  161 entries (4190.04 KiB)
+files generated
+  ../mini_app_dist/sw.js
+  ../mini_app_dist/workbox-0c3ee0c1.js

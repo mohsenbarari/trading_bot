@@ -1,0 +1,2569 @@
+{
+  "changedCount": 67,
+  "currentLintFileCount": 64,
+  "baseLintFileCount": 57,
+  "current": {
+    "total": 121,
+    "errors": 110,
+    "warnings": 11
+  },
+  "base": {
+    "total": 167,
+    "errors": 155,
+    "warnings": 12
+  },
+  "inheritedCount": 121,
+  "addedCount": 0,
+  "removedCount": 46,
+  "inherited": [
+    {
+      "current": {
+        "file": "e2e/non-messenger-visual-baseline.spec.ts",
+        "ruleId": "playwright/no-wait-for-timeout",
+        "severity": 1,
+        "message": "Unexpected use of page.waitForTimeout().",
+        "line": 275,
+        "column": 13
+      },
+      "base": {
+        "file": "e2e/non-messenger-visual-baseline.spec.ts",
+        "ruleId": "playwright/no-wait-for-timeout",
+        "severity": 1,
+        "message": "Unexpected use of page.waitForTimeout().",
+        "line": 275,
+        "column": 13
+      }
+    },
+    {
+      "current": {
+        "file": "e2e/non-messenger-visual-baseline.spec.ts",
+        "ruleId": "playwright/no-skipped-test",
+        "severity": 1,
+        "message": "Unexpected use of the `.skip()` annotation.",
+        "line": 314,
+        "column": 3
+      },
+      "base": {
+        "file": "e2e/non-messenger-visual-baseline.spec.ts",
+        "ruleId": "playwright/no-skipped-test",
+        "severity": 1,
+        "message": "Unexpected use of the `.skip()` annotation.",
+        "line": 314,
+        "column": 3
+      }
+    },
+    {
+      "current": {
+        "file": "e2e/non-messenger-visual-baseline.spec.ts",
+        "ruleId": "playwright/no-conditional-in-test",
+        "severity": 1,
+        "message": "Avoid having conditionals in tests",
+        "line": 322,
+        "column": 9
+      },
+      "base": {
+        "file": "e2e/non-messenger-visual-baseline.spec.ts",
+        "ruleId": "playwright/no-conditional-in-test",
+        "severity": 1,
+        "message": "Avoid having conditionals in tests",
+        "line": 322,
+        "column": 9
+      }
+    },
+    {
+      "current": {
+        "file": "e2e/non-messenger-visual-baseline.spec.ts",
+        "ruleId": "playwright/no-conditional-in-test",
+        "severity": 1,
+        "message": "Avoid having conditionals in tests",
+        "line": 339,
+        "column": 9
+      },
+      "base": {
+        "file": "e2e/non-messenger-visual-baseline.spec.ts",
+        "ruleId": "playwright/no-conditional-in-test",
+        "severity": 1,
+        "message": "Avoid having conditionals in tests",
+        "line": 339,
+        "column": 9
+      }
+    },
+    {
+      "current": {
+        "file": "e2e/notifications.spec.ts",
+        "ruleId": "playwright/no-wait-for-timeout",
+        "severity": 1,
+        "message": "Unexpected use of page.waitForTimeout().",
+        "line": 734,
+        "column": 11
+      },
+      "base": {
+        "file": "e2e/notifications.spec.ts",
+        "ruleId": "playwright/no-wait-for-timeout",
+        "severity": 1,
+        "message": "Unexpected use of page.waitForTimeout().",
+        "line": 734,
+        "column": 11
+      }
+    },
+    {
+      "current": {
+        "file": "e2e/notifications.spec.ts",
+        "ruleId": "playwright/no-wait-for-timeout",
+        "severity": 1,
+        "message": "Unexpected use of page.waitForTimeout().",
+        "line": 774,
+        "column": 11
+      },
+      "base": {
+        "file": "e2e/notifications.spec.ts",
+        "ruleId": "playwright/no-wait-for-timeout",
+        "severity": 1,
+        "message": "Unexpected use of page.waitForTimeout().",
+        "line": 774,
+        "column": 11
+      }
+    },
+    {
+      "current": {
+        "file": "e2e/notifications.spec.ts",
+        "ruleId": "playwright/no-wait-for-timeout",
+        "severity": 1,
+        "message": "Unexpected use of page.waitForTimeout().",
+        "line": 810,
+        "column": 11
+      },
+      "base": {
+        "file": "e2e/notifications.spec.ts",
+        "ruleId": "playwright/no-wait-for-timeout",
+        "severity": 1,
+        "message": "Unexpected use of page.waitForTimeout().",
+        "line": 810,
+        "column": 11
+      }
+    },
+    {
+      "current": {
+        "file": "e2e/notifications.spec.ts",
+        "ruleId": "playwright/no-wait-for-timeout",
+        "severity": 1,
+        "message": "Unexpected use of page.waitForTimeout().",
+        "line": 843,
+        "column": 11
+      },
+      "base": {
+        "file": "e2e/notifications.spec.ts",
+        "ruleId": "playwright/no-wait-for-timeout",
+        "severity": 1,
+        "message": "Unexpected use of page.waitForTimeout().",
+        "line": 843,
+        "column": 11
+      }
+    },
+    {
+      "current": {
+        "file": "e2e/notifications.spec.ts",
+        "ruleId": "playwright/no-wait-for-timeout",
+        "severity": 1,
+        "message": "Unexpected use of page.waitForTimeout().",
+        "line": 866,
+        "column": 11
+      },
+      "base": {
+        "file": "e2e/notifications.spec.ts",
+        "ruleId": "playwright/no-wait-for-timeout",
+        "severity": 1,
+        "message": "Unexpected use of page.waitForTimeout().",
+        "line": 866,
+        "column": 11
+      }
+    },
+    {
+      "current": {
+        "file": "e2e/notifications.spec.ts",
+        "ruleId": "playwright/no-wait-for-timeout",
+        "severity": 1,
+        "message": "Unexpected use of page.waitForTimeout().",
+        "line": 890,
+        "column": 11
+      },
+      "base": {
+        "file": "e2e/notifications.spec.ts",
+        "ruleId": "playwright/no-wait-for-timeout",
+        "severity": 1,
+        "message": "Unexpected use of page.waitForTimeout().",
+        "line": 890,
+        "column": 11
+      }
+    },
+    {
+      "current": {
+        "file": "src/components/AppAuthenticatedShell.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 89,
+        "column": 23
+      },
+      "base": {
+        "file": "src/components/AppAuthenticatedShell.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 89,
+        "column": 23
+      }
+    },
+    {
+      "current": {
+        "file": "src/components/AppAuthenticatedShell.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 96,
+        "column": 46
+      },
+      "base": {
+        "file": "src/components/AppAuthenticatedShell.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 96,
+        "column": 46
+      }
+    },
+    {
+      "current": {
+        "file": "src/components/AppAuthenticatedShell.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 126,
+        "column": 75
+      },
+      "base": {
+        "file": "src/components/AppAuthenticatedShell.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 126,
+        "column": 75
+      }
+    },
+    {
+      "current": {
+        "file": "src/components/AppAuthenticatedShell.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 179,
+        "column": 46
+      },
+      "base": {
+        "file": "src/components/AppAuthenticatedShell.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 179,
+        "column": 46
+      }
+    },
+    {
+      "current": {
+        "file": "src/components/AppAuthenticatedShell.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 194,
+        "column": 75
+      },
+      "base": {
+        "file": "src/components/AppAuthenticatedShell.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 194,
+        "column": 75
+      }
+    },
+    {
+      "current": {
+        "file": "src/env.d.ts",
+        "ruleId": "<parser>",
+        "severity": 1,
+        "message": "Unused eslint-disable directive (no problems were reported).",
+        "line": 4,
+        "column": 1
+      },
+      "base": {
+        "file": "src/env.d.ts",
+        "ruleId": "<parser>",
+        "severity": 1,
+        "message": "Unused eslint-disable directive (no problems were reported).",
+        "line": 4,
+        "column": 1
+      }
+    },
+    {
+      "current": {
+        "file": "src/types/notifications.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 145,
+        "column": 48
+      },
+      "base": {
+        "file": "src/types/notifications.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 94,
+        "column": 48
+      }
+    },
+    {
+      "current": {
+        "file": "src/utils/browserNotifications.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 115,
+        "column": 32
+      },
+      "base": {
+        "file": "src/utils/browserNotifications.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 115,
+        "column": 32
+      }
+    },
+    {
+      "current": {
+        "file": "src/utils/browserNotifications.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 50,
+        "column": 14
+      },
+      "base": {
+        "file": "src/utils/browserNotifications.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 44,
+        "column": 14
+      }
+    },
+    {
+      "current": {
+        "file": "src/utils/currentUser.ts",
+        "ruleId": "prefer-const",
+        "severity": 2,
+        "message": "'request' is never reassigned. Use 'const' instead.",
+        "line": 314,
+        "column": 3
+      },
+      "base": {
+        "file": "src/utils/currentUser.ts",
+        "ruleId": "prefer-const",
+        "severity": 2,
+        "message": "'request' is never reassigned. Use 'const' instead.",
+        "line": 261,
+        "column": 3
+      }
+    },
+    {
+      "current": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 11,
+        "column": 42
+      },
+      "base": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 11,
+        "column": 42
+      }
+    },
+    {
+      "current": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 84,
+        "column": 94
+      },
+      "base": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 84,
+        "column": 94
+      }
+    },
+    {
+      "current": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 92,
+        "column": 40
+      },
+      "base": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 92,
+        "column": 40
+      }
+    },
+    {
+      "current": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 114,
+        "column": 81
+      },
+      "base": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 114,
+        "column": 81
+      }
+    },
+    {
+      "current": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 154,
+        "column": 13
+      },
+      "base": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 141,
+        "column": 13
+      }
+    },
+    {
+      "current": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 175,
+        "column": 13
+      },
+      "base": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 162,
+        "column": 13
+      }
+    },
+    {
+      "current": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 201,
+        "column": 76
+      },
+      "base": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 188,
+        "column": 76
+      }
+    },
+    {
+      "current": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 204,
+        "column": 13
+      },
+      "base": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 191,
+        "column": 13
+      }
+    },
+    {
+      "current": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 231,
+        "column": 69
+      },
+      "base": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 218,
+        "column": 69
+      }
+    },
+    {
+      "current": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 237,
+        "column": 15
+      },
+      "base": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 224,
+        "column": 15
+      }
+    },
+    {
+      "current": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 287,
+        "column": 69
+      },
+      "base": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 274,
+        "column": 69
+      }
+    },
+    {
+      "current": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 291,
+        "column": 15
+      },
+      "base": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 278,
+        "column": 15
+      }
+    },
+    {
+      "current": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 409,
+        "column": 69
+      },
+      "base": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 396,
+        "column": 69
+      }
+    },
+    {
+      "current": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 415,
+        "column": 15
+      },
+      "base": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 402,
+        "column": 15
+      }
+    },
+    {
+      "current": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 425,
+        "column": 17
+      },
+      "base": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 412,
+        "column": 17
+      }
+    },
+    {
+      "current": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 428,
+        "column": 37
+      },
+      "base": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 415,
+        "column": 37
+      }
+    },
+    {
+      "current": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 580,
+        "column": 12
+      },
+      "base": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 567,
+        "column": 12
+      }
+    },
+    {
+      "current": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 622,
+        "column": 15
+      },
+      "base": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 609,
+        "column": 15
+      }
+    },
+    {
+      "current": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 629,
+        "column": 15
+      },
+      "base": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 616,
+        "column": 15
+      }
+    },
+    {
+      "current": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 631,
+        "column": 74
+      },
+      "base": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 618,
+        "column": 74
+      }
+    },
+    {
+      "current": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 671,
+        "column": 15
+      },
+      "base": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 658,
+        "column": 15
+      }
+    },
+    {
+      "current": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 677,
+        "column": 15
+      },
+      "base": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 664,
+        "column": 15
+      }
+    },
+    {
+      "current": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 716,
+        "column": 13
+      },
+      "base": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 703,
+        "column": 13
+      }
+    },
+    {
+      "current": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 751,
+        "column": 94
+      },
+      "base": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 738,
+        "column": 94
+      }
+    },
+    {
+      "current": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 814,
+        "column": 30
+      },
+      "base": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 801,
+        "column": 30
+      }
+    },
+    {
+      "current": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 845,
+        "column": 85
+      },
+      "base": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 832,
+        "column": 85
+      }
+    },
+    {
+      "current": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 853,
+        "column": 15
+      },
+      "base": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 840,
+        "column": 15
+      }
+    },
+    {
+      "current": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 863,
+        "column": 26
+      },
+      "base": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 850,
+        "column": 26
+      }
+    },
+    {
+      "current": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 872,
+        "column": 78
+      },
+      "base": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 859,
+        "column": 78
+      }
+    },
+    {
+      "current": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 904,
+        "column": 12
+      },
+      "base": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 891,
+        "column": 12
+      }
+    },
+    {
+      "current": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 936,
+        "column": 69
+      },
+      "base": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 923,
+        "column": 69
+      }
+    },
+    {
+      "current": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 942,
+        "column": 15
+      },
+      "base": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 929,
+        "column": 15
+      }
+    },
+    {
+      "current": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 949,
+        "column": 15
+      },
+      "base": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 936,
+        "column": 15
+      }
+    },
+    {
+      "current": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 959,
+        "column": 17
+      },
+      "base": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 946,
+        "column": 17
+      }
+    },
+    {
+      "current": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 962,
+        "column": 37
+      },
+      "base": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 949,
+        "column": 37
+      }
+    },
+    {
+      "current": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 992,
+        "column": 69
+      },
+      "base": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 979,
+        "column": 69
+      }
+    },
+    {
+      "current": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 998,
+        "column": 15
+      },
+      "base": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 985,
+        "column": 15
+      }
+    },
+    {
+      "current": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1004,
+        "column": 15
+      },
+      "base": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 991,
+        "column": 15
+      }
+    },
+    {
+      "current": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1010,
+        "column": 15
+      },
+      "base": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 997,
+        "column": 15
+      }
+    },
+    {
+      "current": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1012,
+        "column": 75
+      },
+      "base": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 999,
+        "column": 75
+      }
+    },
+    {
+      "current": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1053,
+        "column": 69
+      },
+      "base": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1040,
+        "column": 69
+      }
+    },
+    {
+      "current": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1059,
+        "column": 15
+      },
+      "base": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1046,
+        "column": 15
+      }
+    },
+    {
+      "current": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1065,
+        "column": 15
+      },
+      "base": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1052,
+        "column": 15
+      }
+    },
+    {
+      "current": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1071,
+        "column": 15
+      },
+      "base": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1058,
+        "column": 15
+      }
+    },
+    {
+      "current": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1111,
+        "column": 69
+      },
+      "base": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1098,
+        "column": 69
+      }
+    },
+    {
+      "current": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1117,
+        "column": 15
+      },
+      "base": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1104,
+        "column": 15
+      }
+    },
+    {
+      "current": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1123,
+        "column": 15
+      },
+      "base": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1110,
+        "column": 15
+      }
+    },
+    {
+      "current": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1129,
+        "column": 15
+      },
+      "base": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1116,
+        "column": 15
+      }
+    },
+    {
+      "current": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1138,
+        "column": 15
+      },
+      "base": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1125,
+        "column": 15
+      }
+    },
+    {
+      "current": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1144,
+        "column": 15
+      },
+      "base": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1131,
+        "column": 15
+      }
+    },
+    {
+      "current": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1193,
+        "column": 69
+      },
+      "base": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1180,
+        "column": 69
+      }
+    },
+    {
+      "current": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1199,
+        "column": 15
+      },
+      "base": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1186,
+        "column": 15
+      }
+    },
+    {
+      "current": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1206,
+        "column": 15
+      },
+      "base": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1193,
+        "column": 15
+      }
+    },
+    {
+      "current": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1213,
+        "column": 15
+      },
+      "base": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1200,
+        "column": 15
+      }
+    },
+    {
+      "current": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1223,
+        "column": 17
+      },
+      "base": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1210,
+        "column": 17
+      }
+    },
+    {
+      "current": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1226,
+        "column": 37
+      },
+      "base": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1213,
+        "column": 37
+      }
+    },
+    {
+      "current": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1257,
+        "column": 13
+      },
+      "base": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1244,
+        "column": 13
+      }
+    },
+    {
+      "current": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1267,
+        "column": 17
+      },
+      "base": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1254,
+        "column": 17
+      }
+    },
+    {
+      "current": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1270,
+        "column": 37
+      },
+      "base": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1257,
+        "column": 37
+      }
+    },
+    {
+      "current": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1347,
+        "column": 85
+      },
+      "base": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1334,
+        "column": 85
+      }
+    },
+    {
+      "current": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1356,
+        "column": 76
+      },
+      "base": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1343,
+        "column": 76
+      }
+    },
+    {
+      "current": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1366,
+        "column": 85
+      },
+      "base": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1353,
+        "column": 85
+      }
+    },
+    {
+      "current": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1374,
+        "column": 85
+      },
+      "base": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1361,
+        "column": 85
+      }
+    },
+    {
+      "current": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1385,
+        "column": 69
+      },
+      "base": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1372,
+        "column": 69
+      }
+    },
+    {
+      "current": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1386,
+        "column": 72
+      },
+      "base": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1373,
+        "column": 72
+      }
+    },
+    {
+      "current": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1413,
+        "column": 10
+      },
+      "base": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1400,
+        "column": 10
+      }
+    },
+    {
+      "current": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1437,
+        "column": 30
+      },
+      "base": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1424,
+        "column": 30
+      }
+    },
+    {
+      "current": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1457,
+        "column": 69
+      },
+      "base": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1444,
+        "column": 69
+      }
+    },
+    {
+      "current": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1463,
+        "column": 15
+      },
+      "base": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1450,
+        "column": 15
+      }
+    },
+    {
+      "current": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1483,
+        "column": 69
+      },
+      "base": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1470,
+        "column": 69
+      }
+    },
+    {
+      "current": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1489,
+        "column": 15
+      },
+      "base": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1476,
+        "column": 15
+      }
+    },
+    {
+      "current": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1495,
+        "column": 15
+      },
+      "base": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1482,
+        "column": 15
+      }
+    },
+    {
+      "current": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1501,
+        "column": 15
+      },
+      "base": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1488,
+        "column": 15
+      }
+    },
+    {
+      "current": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1519,
+        "column": 69
+      },
+      "base": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1506,
+        "column": 69
+      }
+    },
+    {
+      "current": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1525,
+        "column": 15
+      },
+      "base": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1512,
+        "column": 15
+      }
+    },
+    {
+      "current": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1531,
+        "column": 15
+      },
+      "base": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1518,
+        "column": 15
+      }
+    },
+    {
+      "current": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1550,
+        "column": 69
+      },
+      "base": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1537,
+        "column": 69
+      }
+    },
+    {
+      "current": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1556,
+        "column": 15
+      },
+      "base": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1543,
+        "column": 15
+      }
+    },
+    {
+      "current": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1558,
+        "column": 78
+      },
+      "base": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1545,
+        "column": 78
+      }
+    },
+    {
+      "current": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1574,
+        "column": 69
+      },
+      "base": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1561,
+        "column": 69
+      }
+    },
+    {
+      "current": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1580,
+        "column": 15
+      },
+      "base": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1567,
+        "column": 15
+      }
+    },
+    {
+      "current": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1586,
+        "column": 15
+      },
+      "base": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1573,
+        "column": 15
+      }
+    },
+    {
+      "current": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1592,
+        "column": 15
+      },
+      "base": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1579,
+        "column": 15
+      }
+    },
+    {
+      "current": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1594,
+        "column": 78
+      },
+      "base": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1581,
+        "column": 78
+      }
+    },
+    {
+      "current": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1595,
+        "column": 78
+      },
+      "base": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1582,
+        "column": 78
+      }
+    },
+    {
+      "current": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1596,
+        "column": 74
+      },
+      "base": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1583,
+        "column": 74
+      }
+    },
+    {
+      "current": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1597,
+        "column": 74
+      },
+      "base": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1584,
+        "column": 74
+      }
+    },
+    {
+      "current": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1638,
+        "column": 13
+      },
+      "base": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1625,
+        "column": 13
+      }
+    },
+    {
+      "current": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1648,
+        "column": 17
+      },
+      "base": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1635,
+        "column": 17
+      }
+    },
+    {
+      "current": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1651,
+        "column": 37
+      },
+      "base": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1638,
+        "column": 37
+      }
+    },
+    {
+      "current": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1656,
+        "column": 30
+      },
+      "base": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1643,
+        "column": 30
+      }
+    },
+    {
+      "current": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1679,
+        "column": 69
+      },
+      "base": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1666,
+        "column": 69
+      }
+    },
+    {
+      "current": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1681,
+        "column": 91
+      },
+      "base": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1668,
+        "column": 91
+      }
+    },
+    {
+      "current": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1686,
+        "column": 95
+      },
+      "base": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1673,
+        "column": 95
+      }
+    },
+    {
+      "current": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1689,
+        "column": 37
+      },
+      "base": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1676,
+        "column": 37
+      }
+    },
+    {
+      "current": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1743,
+        "column": 30
+      },
+      "base": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1730,
+        "column": 30
+      }
+    },
+    {
+      "current": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1759,
+        "column": 85
+      },
+      "base": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1746,
+        "column": 85
+      }
+    },
+    {
+      "current": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1764,
+        "column": 46
+      },
+      "base": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1751,
+        "column": 46
+      }
+    },
+    {
+      "current": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1807,
+        "column": 85
+      },
+      "base": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1794,
+        "column": 85
+      }
+    },
+    {
+      "current": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1846,
+        "column": 30
+      },
+      "base": {
+        "file": "src/views/LoginView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 1833,
+        "column": 30
+      }
+    },
+    {
+      "current": {
+        "file": "src/views/NotificationsView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 419,
+        "column": 10
+      },
+      "base": {
+        "file": "src/views/NotificationsView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 281,
+        "column": 10
+      }
+    }
+  ],
+  "added": [],
+  "removed": [
+    {
+      "file": "public/push-notifications-sw.js",
+      "ruleId": "<parser>",
+      "severity": 1,
+      "message": "Unused eslint-disable directive (no problems were reported).",
+      "line": 1,
+      "column": 1
+    },
+    {
+      "file": "src/components/BottomNav.test.ts",
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "severity": 2,
+      "message": "Unexpected any. Specify a different type.",
+      "line": 115,
+      "column": 21
+    },
+    {
+      "file": "src/components/BottomNav.test.ts",
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "severity": 2,
+      "message": "Unexpected any. Specify a different type.",
+      "line": 349,
+      "column": 21
+    },
+    {
+      "file": "src/composables/useNotificationRuntime.test.ts",
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "severity": 2,
+      "message": "Unexpected any. Specify a different type.",
+      "line": 10,
+      "column": 18
+    },
+    {
+      "file": "src/composables/useNotificationRuntime.test.ts",
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "severity": 2,
+      "message": "Unexpected any. Specify a different type.",
+      "line": 11,
+      "column": 25
+    },
+    {
+      "file": "src/composables/useNotificationRuntime.test.ts",
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "severity": 2,
+      "message": "Unexpected any. Specify a different type.",
+      "line": 16,
+      "column": 44
+    },
+    {
+      "file": "src/composables/useNotificationRuntime.test.ts",
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "severity": 2,
+      "message": "Unexpected any. Specify a different type.",
+      "line": 17,
+      "column": 34
+    },
+    {
+      "file": "src/composables/useNotificationRuntime.test.ts",
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "severity": 2,
+      "message": "Unexpected any. Specify a different type.",
+      "line": 20,
+      "column": 44
+    },
+    {
+      "file": "src/composables/useNotificationRuntime.test.ts",
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "severity": 2,
+      "message": "Unexpected any. Specify a different type.",
+      "line": 22,
+      "column": 47
+    },
+    {
+      "file": "src/composables/useNotificationRuntime.test.ts",
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "severity": 2,
+      "message": "Unexpected any. Specify a different type.",
+      "line": 27,
+      "column": 26
+    },
+    {
+      "file": "src/composables/useNotificationRuntime.test.ts",
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "severity": 2,
+      "message": "Unexpected any. Specify a different type.",
+      "line": 34,
+      "column": 46
+    },
+    {
+      "file": "src/composables/useNotificationRuntime.test.ts",
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "severity": 2,
+      "message": "Unexpected any. Specify a different type.",
+      "line": 36,
+      "column": 50
+    },
+    {
+      "file": "src/composables/useNotificationRuntime.test.ts",
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "severity": 2,
+      "message": "Unexpected any. Specify a different type.",
+      "line": 85,
+      "column": 47
+    },
+    {
+      "file": "src/composables/useNotificationRuntime.test.ts",
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "severity": 2,
+      "message": "Unexpected any. Specify a different type.",
+      "line": 91,
+      "column": 72
+    },
+    {
+      "file": "src/composables/useNotificationRuntime.ts",
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "severity": 2,
+      "message": "Unexpected any. Specify a different type.",
+      "line": 20,
+      "column": 32
+    },
+    {
+      "file": "src/services/webPush.ts",
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "severity": 2,
+      "message": "Unexpected any. Specify a different type.",
+      "line": 63,
+      "column": 39
+    },
+    {
+      "file": "src/utils/auth.test.ts",
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "severity": 2,
+      "message": "Unexpected any. Specify a different type.",
+      "line": 206,
+      "column": 53
+    },
+    {
+      "file": "src/utils/auth.test.ts",
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "severity": 2,
+      "message": "Unexpected any. Specify a different type.",
+      "line": 206,
+      "column": 64
+    },
+    {
+      "file": "src/utils/auth.test.ts",
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "severity": 2,
+      "message": "Unexpected any. Specify a different type.",
+      "line": 217,
+      "column": 12
+    },
+    {
+      "file": "src/utils/auth.test.ts",
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "severity": 2,
+      "message": "Unexpected any. Specify a different type.",
+      "line": 218,
+      "column": 13
+    },
+    {
+      "file": "src/utils/auth.test.ts",
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "severity": 2,
+      "message": "Unexpected any. Specify a different type.",
+      "line": 227,
+      "column": 74
+    },
+    {
+      "file": "src/utils/auth.test.ts",
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "severity": 2,
+      "message": "Unexpected any. Specify a different type.",
+      "line": 227,
+      "column": 85
+    },
+    {
+      "file": "src/utils/auth.test.ts",
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "severity": 2,
+      "message": "Unexpected any. Specify a different type.",
+      "line": 232,
+      "column": 74
+    },
+    {
+      "file": "src/utils/auth.test.ts",
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "severity": 2,
+      "message": "Unexpected any. Specify a different type.",
+      "line": 232,
+      "column": 85
+    },
+    {
+      "file": "src/utils/auth.test.ts",
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "severity": 2,
+      "message": "Unexpected any. Specify a different type.",
+      "line": 246,
+      "column": 88
+    },
+    {
+      "file": "src/utils/auth.test.ts",
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "severity": 2,
+      "message": "Unexpected any. Specify a different type.",
+      "line": 247,
+      "column": 13
+    },
+    {
+      "file": "src/utils/auth.test.ts",
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "severity": 2,
+      "message": "Unexpected any. Specify a different type.",
+      "line": 263,
+      "column": 88
+    },
+    {
+      "file": "src/utils/auth.test.ts",
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "severity": 2,
+      "message": "Unexpected any. Specify a different type.",
+      "line": 264,
+      "column": 13
+    },
+    {
+      "file": "src/utils/auth.test.ts",
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "severity": 2,
+      "message": "Unexpected any. Specify a different type.",
+      "line": 292,
+      "column": 80
+    },
+    {
+      "file": "src/utils/auth.test.ts",
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "severity": 2,
+      "message": "Unexpected any. Specify a different type.",
+      "line": 293,
+      "column": 13
+    },
+    {
+      "file": "src/utils/auth.test.ts",
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "severity": 2,
+      "message": "Unexpected any. Specify a different type.",
+      "line": 330,
+      "column": 88
+    },
+    {
+      "file": "src/utils/auth.test.ts",
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "severity": 2,
+      "message": "Unexpected any. Specify a different type.",
+      "line": 331,
+      "column": 13
+    },
+    {
+      "file": "src/utils/auth.test.ts",
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "severity": 2,
+      "message": "Unexpected any. Specify a different type.",
+      "line": 365,
+      "column": 88
+    },
+    {
+      "file": "src/utils/auth.test.ts",
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "severity": 2,
+      "message": "Unexpected any. Specify a different type.",
+      "line": 366,
+      "column": 13
+    },
+    {
+      "file": "src/utils/auth.test.ts",
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "severity": 2,
+      "message": "Unexpected any. Specify a different type.",
+      "line": 394,
+      "column": 80
+    },
+    {
+      "file": "src/utils/auth.test.ts",
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "severity": 2,
+      "message": "Unexpected any. Specify a different type.",
+      "line": 395,
+      "column": 13
+    },
+    {
+      "file": "src/utils/auth.test.ts",
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "severity": 2,
+      "message": "Unexpected any. Specify a different type.",
+      "line": 409,
+      "column": 88
+    },
+    {
+      "file": "src/utils/auth.test.ts",
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "severity": 2,
+      "message": "Unexpected any. Specify a different type.",
+      "line": 410,
+      "column": 13
+    },
+    {
+      "file": "src/utils/auth.test.ts",
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "severity": 2,
+      "message": "Unexpected any. Specify a different type.",
+      "line": 423,
+      "column": 80
+    },
+    {
+      "file": "src/utils/auth.test.ts",
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "severity": 2,
+      "message": "Unexpected any. Specify a different type.",
+      "line": 424,
+      "column": 13
+    },
+    {
+      "file": "src/utils/auth.test.ts",
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "severity": 2,
+      "message": "Unexpected any. Specify a different type.",
+      "line": 438,
+      "column": 88
+    },
+    {
+      "file": "src/utils/auth.test.ts",
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "severity": 2,
+      "message": "Unexpected any. Specify a different type.",
+      "line": 439,
+      "column": 13
+    },
+    {
+      "file": "src/views/AccountHubView.vue",
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "severity": 2,
+      "message": "Unexpected any. Specify a different type.",
+      "line": 136,
+      "column": 19
+    },
+    {
+      "file": "src/views/NotificationsView.test.ts",
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "severity": 2,
+      "message": "Unexpected any. Specify a different type.",
+      "line": 315,
+      "column": 10
+    },
+    {
+      "file": "src/views/SettingsView.vue",
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "severity": 2,
+      "message": "Unexpected any. Specify a different type.",
+      "line": 37,
+      "column": 22
+    },
+    {
+      "file": "src/views/SettingsView.vue",
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "severity": 2,
+      "message": "Unexpected any. Specify a different type.",
+      "line": 252,
+      "column": 19
+    }
+  ]
+}

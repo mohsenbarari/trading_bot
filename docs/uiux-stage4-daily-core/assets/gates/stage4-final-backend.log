@@ -1,0 +1,10 @@
+/tmp/trading-bot-webapp-uiux-redesign-v2/schemas.py:138: DeprecationWarning: deprecated
+  return self.messenger_grace_expires_at
+/tmp/trading-bot-webapp-uiux-redesign-v2/schemas.py:142: DeprecationWarning: deprecated
+  return self.messenger_blocked_at
+..........Executing <Task finished name='Task-52' coro=<NotificationPreferencesTests.test_update_notification_preferences_creates_user_row() done, defined at /tmp/trading-bot-webapp-uiux-redesign-v2/tests/test_notifications_preferences.py:53> result=None created at /usr/lib/python3.12/asyncio/runners.py:100> took 0.276 seconds
+...........................................................
+----------------------------------------------------------------------
+Ran 69 tests in 0.832s
+
+OK

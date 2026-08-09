@@ -1,0 +1,426 @@
+{
+  "schemaVersion": 1,
+  "stage": 4,
+  "status": "local_evidence_inputs_frozen",
+  "comparisonBaseCommit": "9dfa961000832c830729ce67e8a54357915c716a",
+  "comparisonBaseTree": "1540c2534d8052a3a8cfcffcdc2f65e4b85fc874",
+  "implementationCommit": "007f94d170cb02cd69911d9e1f122b83fbacd535",
+  "implementationTree": "807a01c76c93489ccce1e5b72cea9c214fd52d31",
+  "stageCompleteAuthority": false,
+  "sitesProven": false,
+  "claimBoundary": "This manifest freezes the exact local Stage 4 evidence inputs and binds them to the implementation commit. It does not prove Sites publication, mark the whole stage complete, or authorize Stage 5.",
+  "figmaSnapshot": {
+    "status": "authored_snapshot_hash_bound",
+    "fileKey": "z8jgJxST4O2APzWnlyP9gv",
+    "pageId": "283:18",
+    "rootNodeId": "283:19",
+    "provenanceNodeId": "291:554",
+    "captureCount": 13,
+    "captureBytes": 1118391,
+    "captureAggregateSha256": "46e329154d226cc0ed6fb302b4c33b0215b29280a25d9d8abccfe1e6a266774a",
+    "inputCount": 14,
+    "inputBytes": 1120421,
+    "inputAggregateSha256": "1e53902f6abc88042874c5d71baf94ad319170de8e83b6bfde34e0823e9ff1fc",
+    "directAuditSha256": "55601f8cb0db38a55835b936b1efe9163f2356ca8640f555116c06017cb62772",
+    "linkedInstances": 66,
+    "detachedInstances": 0,
+    "protectedMarketImages": 1
+  },
+  "browserEvidence": {
+    "status": "passed_promotable",
+    "runId": "uiux-stage4-browser-20260809T180340666Z",
+    "assertions": 49,
+    "suites": 9,
+    "screenshots": 22,
+    "sourceCount": 398,
+    "sourceBindingSha256": "1f8858264f0c52479c227bb84822a6c109f9b4fadb968500df596126acf099bf",
+    "metricsSha256": "83445d91bd78fd0903f49833a5b72c5d49345d517d9e5ae05e2fdd42954cd01f",
+    "finalBindingSha256": "04f5c126cae096c0de3b6f738108aae18f239aae0310d119b0bb870e6f9e856b",
+    "harnessSha256": "66ddbc5683f178633d37673ee6299d84863b29cdbafa66d9d764862622cb3a34",
+    "fullCount": 25,
+    "fullBytes": 2806569,
+    "fullAggregateSha256": "ad9903fad3550eea196dbc8564d083a81dbbd608cd8153281ef04682d9322bef",
+    "expectedHttpFailures": 16,
+    "expectedConsoleErrors": 17,
+    "unexpectedDiagnostics": 0
+  },
+  "technicalGates": {
+    "status": "passed_with_inherited_diagnostics_disclosed",
+    "summarySha256": "f5f1b32ef85d010aa2134b3531f628ac941f91f9dc4adfb58ee46cfa39a86ac2",
+    "manifestSha256": "ae5da32b7eec554cb25c3e167f9e17b80d63d69dd9bde812cc6fc89c817907af",
+    "fullCount": 20,
+    "fullBytes": 969799,
+    "fullAggregateSha256": "8a7b4ad4b7a2bf93e9a25c6eabcb929b8c85f2b96b82113e928a70e576391b0d",
+    "frontend": {
+      "files": 34,
+      "tests": 450
+    },
+    "guards": {
+      "files": 3,
+      "tests": 55
+    },
+    "backend": {
+      "modules": 11,
+      "tests": 69
+    },
+    "build": {
+      "modules": 2162,
+      "pwaEntries": 161
+    },
+    "eslintStage4New": 0,
+    "prettierStage4New": 0
+  },
+  "gitBinding": {
+    "status": "bound_from_git",
+    "parent": "9dfa961000832c830729ce67e8a54357915c716a",
+    "commit": "007f94d170cb02cd69911d9e1f122b83fbacd535",
+    "tree": "807a01c76c93489ccce1e5b72cea9c214fd52d31",
+    "exactPathCount": 67,
+    "pathSetSha256": "25a5773b2e3ca1f6e45bbf48800dcac4ce3cd8e8125f1913fee674529720739f",
+    "pathContentSha256": "517ae0b1d3d630f6fa086cdc208905fabb9a532035cec539f61f9cd5f67af35e"
+  },
+  "localCapture": {
+    "harness": "capture-evidence.cjs",
+    "html": "stage4-daily-core-evidence.html",
+    "outputDirectory": "assets/local-evidence",
+    "outputPolicy": "exact",
+    "networkPolicy": "http_and_https_blocked",
+    "requiredIntegrity": [
+      "all_input_bytes_and_sha256_exact",
+      "git_head_tree_parent_exact",
+      "browser_bound_source_current",
+      "pre_post_dom_equal",
+      "pre_post_audit_equal",
+      "post_capture_remeasurement",
+      "all_png_nonblank",
+      "console_page_request_errors_zero",
+      "atomic_publication_residue_zero",
+      "deterministic_rerun_equal"
+    ],
+    "expectedFiles": [
+      "local-stage4-browser-proof.png",
+      "local-stage4-daily-core-validation-metrics.json",
+      "local-stage4-figma-proof.png",
+      "local-stage4-gates-protected.png",
+      "local-stage4-overview.png",
+      "local-stage4-recovery-mutations.png",
+      "local-stage4-route-authority.png"
+    ]
+  },
+  "inputCount": 62,
+  "inputBytes": 4988801,
+  "inputProjectionAlgorithm": "sha256(JSON.stringify(inputs projected to path,bytes,sha256 in sorted path order))",
+  "inputProjectionAggregateSha256": "588243cd033dce3003889e0580c815bde7bd3b390edd3500e7a9c1adbcf50ba2",
+  "inputs": [
+    {
+      "path": "FIGMA_SNAPSHOT_MANIFEST.json",
+      "bytes": 5547,
+      "sha256": "c2140704a405baee6d07f17cf5b1094cc02ebbfb4092f32435e966832637b483"
+    },
+    {
+      "path": "assets/browser-evidence/stage4-account-mobile-390-scroll-001.png",
+      "bytes": 44137,
+      "sha256": "d932f51c627fc4c91c70fb488963ce69d8bb355647e8967f7a8debc2af625195"
+    },
+    {
+      "path": "assets/browser-evidence/stage4-account-mobile-390.png",
+      "bytes": 48120,
+      "sha256": "685aa13e442a11be29be10fb9787d30e54a7779466518c86478abf0c81dc520a"
+    },
+    {
+      "path": "assets/browser-evidence/stage4-browser-acceptance-harness.mjs",
+      "bytes": 198607,
+      "sha256": "66ddbc5683f178633d37673ee6299d84863b29cdbafa66d9d764862622cb3a34"
+    },
+    {
+      "path": "assets/browser-evidence/stage4-browser-acceptance-metrics.json",
+      "bytes": 790083,
+      "sha256": "83445d91bd78fd0903f49833a5b72c5d49345d517d9e5ae05e2fdd42954cd01f"
+    },
+    {
+      "path": "assets/browser-evidence/stage4-final-source-binding.json",
+      "bytes": 90454,
+      "sha256": "04f5c126cae096c0de3b6f738108aae18f239aae0310d119b0bb870e6f9e856b"
+    },
+    {
+      "path": "assets/browser-evidence/stage4-home-desktop-1440.png",
+      "bytes": 245186,
+      "sha256": "b725e3b3282cf16095fa1a89cf1599ea44adb73e681c302c8b17e107964abf7a"
+    },
+    {
+      "path": "assets/browser-evidence/stage4-home-mobile-390.png",
+      "bytes": 93492,
+      "sha256": "dc1ed1d8cd5275fa61924942ca14d65bc7d1b6139b7f843e0b94d18a2a7cd9bc"
+    },
+    {
+      "path": "assets/browser-evidence/stage4-home-pwa-ready-mobile-390.png",
+      "bytes": 102662,
+      "sha256": "dca021de52c50b65cde819ca48d4f2b18839f8ee0730622f15e83c791bce9519"
+    },
+    {
+      "path": "assets/browser-evidence/stage4-layer-coexistence-mobile-390.png",
+      "bytes": 52625,
+      "sha256": "15b4f08069d07c5abf8b4d144e5f3828bfac54e7dfd9354e512de6a9f804ac9d"
+    },
+    {
+      "path": "assets/browser-evidence/stage4-notifications-desktop-1440.png",
+      "bytes": 234976,
+      "sha256": "9fc96e48a5eceb4ba95b79b20693bd8c0dae8292a9e52d5b270c348a54b2e112"
+    },
+    {
+      "path": "assets/browser-evidence/stage4-notifications-mobile-390-scroll-001.png",
+      "bytes": 75042,
+      "sha256": "c0cc13efa53025c1ce7e27763c4eed8d2514bd4ae86681b724d68297eabbb467"
+    },
+    {
+      "path": "assets/browser-evidence/stage4-notifications-mobile-390.png",
+      "bytes": 83601,
+      "sha256": "e36f3bf4b17960fd35b894533fd8e5bdff9d34d6050b4e387f61e6471eea749a"
+    },
+    {
+      "path": "assets/browser-evidence/stage4-operations-desktop-1440-scroll-001.png",
+      "bytes": 46001,
+      "sha256": "cd16f0b9aeeb93c3be12a266dd76418c9bdfc29f93e0df3d20804815536d8af1"
+    },
+    {
+      "path": "assets/browser-evidence/stage4-operations-desktop-1440.png",
+      "bytes": 25562,
+      "sha256": "e1c7bdb049ec4a410c1690aff04436d6a4011e72c90220c8372ba26aca54565c"
+    },
+    {
+      "path": "assets/browser-evidence/stage4-operations-mobile-390-scroll-001.png",
+      "bytes": 25784,
+      "sha256": "0f7c717201b2540a7e0ffbbf8f2687a631c7da3b80c7bf88986fb5e514ef9db3"
+    },
+    {
+      "path": "assets/browser-evidence/stage4-operations-mobile-390.png",
+      "bytes": 22872,
+      "sha256": "9f76fd26690394f6b30e6d56b4bf89ac5a30b47932ced8ef2d3cce4387db3291"
+    },
+    {
+      "path": "assets/browser-evidence/stage4-private-catalog-mobile-390.png",
+      "bytes": 358066,
+      "sha256": "dd07301f3339c1318f663e359ab155b02002101dd4c75b8f7755c425ee4969a6"
+    },
+    {
+      "path": "assets/browser-evidence/stage4-protected-market-mobile-390-scroll-001.png",
+      "bytes": 17510,
+      "sha256": "1bd19a4f0c352ad6b01aa65d067b7abd6ceb740fefef37766a5a367ceadcc243"
+    },
+    {
+      "path": "assets/browser-evidence/stage4-protected-market-mobile-390.png",
+      "bytes": 21428,
+      "sha256": "1205870c683d6e88065a9e860c07f2f40d9c318ab21794291f5582af009a4a8d"
+    },
+    {
+      "path": "assets/browser-evidence/stage4-protected-messenger-mobile-390-scroll-001.png",
+      "bytes": 25114,
+      "sha256": "78f4ca9773c3b2e72c6ea72d2dcd9d69cc9b4e0982ddb157c3469f4418689e3d"
+    },
+    {
+      "path": "assets/browser-evidence/stage4-protected-messenger-mobile-390.png",
+      "bytes": 25114,
+      "sha256": "78f4ca9773c3b2e72c6ea72d2dcd9d69cc9b4e0982ddb157c3469f4418689e3d"
+    },
+    {
+      "path": "assets/browser-evidence/stage4-security-mobile-390-scroll-001.png",
+      "bytes": 43655,
+      "sha256": "ef6985aec27aaf94296a1d712e5910fa2650ceb08fb6d96cb52c3f3cb9ff2ac9"
+    },
+    {
+      "path": "assets/browser-evidence/stage4-security-mobile-390.png",
+      "bytes": 55079,
+      "sha256": "4b3c77dc22f55314c383056012b85fb4d4a1f42b6ffee23e7c2b07faeda88c27"
+    },
+    {
+      "path": "assets/browser-evidence/stage4-storage-mobile-390-scroll-001.png",
+      "bytes": 39756,
+      "sha256": "c36aa80525fb71f8646dfcc4834d0b02312cd7060ee14fbd07bb493a8261b7da"
+    },
+    {
+      "path": "assets/browser-evidence/stage4-storage-mobile-390.png",
+      "bytes": 41643,
+      "sha256": "c6710f10d792929d221bb19237c1c286c61af9bb0190fe4dd7263b5284ac60f7"
+    },
+    {
+      "path": "assets/figma/stage4-figma-account.png",
+      "bytes": 32317,
+      "sha256": "e01b8829112460daec7a1c602ef51a0bd586597cc92990d75dce4d757ffed062"
+    },
+    {
+      "path": "assets/figma/stage4-figma-canonical-mobile.png",
+      "bytes": 192829,
+      "sha256": "65d390bbfbb27e8f80c8092c76ebd140449929159317485aa46b550b41886754"
+    },
+    {
+      "path": "assets/figma/stage4-figma-component-matrix.png",
+      "bytes": 137191,
+      "sha256": "b171ae515e7b4ef4a1b590ed1a67857b054ee54925d5934363194a05037123a3"
+    },
+    {
+      "path": "assets/figma/stage4-figma-contract.png",
+      "bytes": 56537,
+      "sha256": "b89019d01f3ba44525ce16ec12d9b3a52c76f00f42ba70396a17a6e06f30508b"
+    },
+    {
+      "path": "assets/figma/stage4-figma-desktop-operations.png",
+      "bytes": 31173,
+      "sha256": "4c1487c1d0d01e23ae0bd404e54a9ff602b293fad0e09ae568d5643bc1f55086"
+    },
+    {
+      "path": "assets/figma/stage4-figma-direct-audit.json",
+      "bytes": 2030,
+      "sha256": "55601f8cb0db38a55835b936b1efe9163f2356ca8640f555116c06017cb62772"
+    },
+    {
+      "path": "assets/figma/stage4-figma-home.png",
+      "bytes": 50834,
+      "sha256": "b63a200250bab2ba3ef7c52bd29849346883cd3c88735d06ebad46d471d7ccdb"
+    },
+    {
+      "path": "assets/figma/stage4-figma-notifications.png",
+      "bytes": 34946,
+      "sha256": "6c6ebd4b3a798dab7d6b72c461d6f63db8ca6642106a5d0c178a838fc736b2d1"
+    },
+    {
+      "path": "assets/figma/stage4-figma-operations.png",
+      "bytes": 17755,
+      "sha256": "0f3735b6095a79bf06cc4710ee4bdb1351b9c2102f1242ac71d7ce7cee5bea81"
+    },
+    {
+      "path": "assets/figma/stage4-figma-recovery-mutation.png",
+      "bytes": 77019,
+      "sha256": "620dcf1b7be8700dea1ec24758480ea0ca735dd87e4f33b88006bd648c223c72"
+    },
+    {
+      "path": "assets/figma/stage4-figma-role-authority.png",
+      "bytes": 47354,
+      "sha256": "51d2b88d8cf55e28db7079c86d55b0dcb56e9c83a1e171e5d73f2f1536df70fe"
+    },
+    {
+      "path": "assets/figma/stage4-figma-root.png",
+      "bytes": 365560,
+      "sha256": "806923b48c401995243c64ff4f7b7b6c23335aac6f653b520d3785e02dba996e"
+    },
+    {
+      "path": "assets/figma/stage4-figma-security.png",
+      "bytes": 39294,
+      "sha256": "1dd99361f50cdd7b9240e1425b4fc0c2ff0c5e726a36cc672c916766aba5a373"
+    },
+    {
+      "path": "assets/figma/stage4-figma-storage.png",
+      "bytes": 35582,
+      "sha256": "12e6559261cb12350a30bf7484864dc55c72c2866cdd7f14f9e0848bea91f6cc"
+    },
+    {
+      "path": "assets/gates/stage4-eslint-base-final.json",
+      "bytes": 407966,
+      "sha256": "4e5c46dd70df825d85bb002bec411baf0dba01252c137b13adcb002f27f2f584"
+    },
+    {
+      "path": "assets/gates/stage4-eslint-current-final.json",
+      "bytes": 264531,
+      "sha256": "6ed86236bc9d7bf3cbef4f68f9e9dc1d4e6be4fb602a8abd70809e4dd167b133"
+    },
+    {
+      "path": "assets/gates/stage4-eslint-delta-final.json",
+      "bytes": 75388,
+      "sha256": "3c57e3029120d2eb42b976b67cdf7bc683e2ae65a1e826cf2440b2eaa3645f84"
+    },
+    {
+      "path": "assets/gates/stage4-final-backend.log",
+      "bytes": 739,
+      "sha256": "bbfe9db8279e80940784bdf48acb84987f386fce89536b0d8b6818a63c17c216"
+    },
+    {
+      "path": "assets/gates/stage4-final-build.log",
+      "bytes": 20055,
+      "sha256": "5557e85c14f3f34a79188bd7528149f8acd6bec9f91fa7e423d5c92db9b60bdc"
+    },
+    {
+      "path": "assets/gates/stage4-final-diff-check.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "assets/gates/stage4-final-gate-manifest.md",
+      "bytes": 14098,
+      "sha256": "ae5da32b7eec554cb25c3e167f9e17b80d63d69dd9bde812cc6fc89c817907af"
+    },
+    {
+      "path": "assets/gates/stage4-final-gates-summary.json",
+      "bytes": 6881,
+      "sha256": "f5f1b32ef85d010aa2134b3531f628ac941f91f9dc4adfb58ee46cfa39a86ac2"
+    },
+    {
+      "path": "assets/gates/stage4-final-guard-tests.json",
+      "bytes": 18074,
+      "sha256": "361f0c3a546dfd9db194e3f8ee9f5dc70dcd722c5aff4d491ff9ecffcfd5a0bb"
+    },
+    {
+      "path": "assets/gates/stage4-final-guard-ui.log",
+      "bytes": 1417,
+      "sha256": "3df3f6dfc3f90e8fba36358ee22f3db29f789847ef1122a503f15f296e40e1d7"
+    },
+    {
+      "path": "assets/gates/stage4-final-protected-list.log",
+      "bytes": 5823,
+      "sha256": "861d92a91b881d9ad5285f6b6302d8c9477e7b9f5dcd6f07af1d20c151fff888"
+    },
+    {
+      "path": "assets/gates/stage4-final-stability.json",
+      "bytes": 487,
+      "sha256": "8ef2a1a5f83f685456c5a5c2f6dbfc5f6cffdcc7d3059bc1cc994d3270296757"
+    },
+    {
+      "path": "assets/gates/stage4-final-vitest.json",
+      "bytes": 149408,
+      "sha256": "c2e4d8be51b88ebb7d7ab75c903ee60452fb03c0db6b9b317ead66a0bcd6a9fa"
+    },
+    {
+      "path": "assets/gates/stage4-final-vue-tsc.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "assets/gates/stage4-implementation-git-binding.json",
+      "bytes": 1744,
+      "sha256": "ee804e317685b2ddcc91d00af9948aa27bf3f1cc57810f00ed8e07b1585b3e7a"
+    },
+    {
+      "path": "assets/gates/stage4-prettier-added-final.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "assets/gates/stage4-prettier-base-final.txt",
+      "bytes": 1203,
+      "sha256": "b44e14135bdefbbd8af03b8b1ef7441b80a037af99110ac74fab4dc0e4be0fb6"
+    },
+    {
+      "path": "assets/gates/stage4-prettier-current-final.txt",
+      "bytes": 782,
+      "sha256": "3dc1a95f7f69f25a44a9b2d61aaf747adcde5724fc3461074e2ed8fcc62b22ba"
+    },
+    {
+      "path": "assets/gates/stage4-prettier-inherited-final.txt",
+      "bytes": 782,
+      "sha256": "3dc1a95f7f69f25a44a9b2d61aaf747adcde5724fc3461074e2ed8fcc62b22ba"
+    },
+    {
+      "path": "assets/gates/stage4-prettier-removed-final.txt",
+      "bytes": 421,
+      "sha256": "12c5b789dbbc98bc9b17bf902af66243ceec3d7035d6c43dc4e169fbcfceaff6"
+    },
+    {
+      "path": "capture-evidence.cjs",
+      "bytes": 60071,
+      "sha256": "c22056c8b44b2eb9c8c8bb0cccdde276928b8936293dfbca070c67868d67b82a"
+    },
+    {
+      "path": "stage4-daily-core-evidence.html",
+      "bytes": 26394,
+      "sha256": "3dba8efa5aadf0dda015e48d09a19a53c893471d0a8af79a4061fdc16c8d99da"
+    }
+  ]
+}

@@ -1,0 +1,142 @@
+{
+  "schemaVersion": 1,
+  "stage": "4",
+  "status": "passed_private_owner_only_source_bound",
+  "claimBoundary": "This separate Sites closure artifact remains outside the immutable 70-file local evidence package. It proves the private source-bound Stage 4 preview; Stage 4 completion additionally depends on the independently recorded implementation, browser, Figma, protected-surface, and technical gates. It does not authorize Stage 5.",
+  "canonical": {
+    "kind": "figma_authored_snapshot",
+    "fileKey": "z8jgJxST4O2APzWnlyP9gv",
+    "pageId": "283:18",
+    "rootNodeId": "283:19",
+    "provenanceNodeId": "291:554",
+    "directAuditStatus": "passed",
+    "linkedInstanceCount": 66,
+    "detachedInstanceCount": 0,
+    "protectedMarketImageCount": 1,
+    "localEvidenceRun": "stage4-local-588243cd033dce300388",
+    "localEvidenceAssertions": {
+      "passed": 26,
+      "total": 26
+    },
+    "frozenEvidencePackage": {
+      "fileCount": 70,
+      "bytes": 5863416,
+      "aggregateSha256": "8c123a1eeb717f799c0449443f2d8ea76f201a0ae2c31e062b1cff09584a7971",
+      "evidenceManifestSha256": "7a1a4a7da5c82f7c3744fba2f94adf0402dc6e6d5b47944234d2c0b266efdda8",
+      "mutatedBySitesClosure": false
+    }
+  },
+  "source": {
+    "repositoryPath": "/tmp/trading-bot-uiux-stage4-daily-core-sites-preview",
+    "branch": "main",
+    "commit": "b55e221cf4fe363a12e2bf6b0f6a212a9adcd2ae",
+    "tree": "3e26a938ac569441a789d5430ee551d2bcd8ed52",
+    "parentEvidenceCommit": "4fde1c10502205385ce713a25e6013c1810e2676",
+    "worktreeClean": true,
+    "pushStatus": "succeeded_exact_final_commit",
+    "evidenceLockSha256": "47c109ba51ffd56964b5aa660fd8428d34d5d809476637a8b58b4ca734706437",
+    "projectLockSha256": "7c08aec5d4e3c49add92f01359d73aba408fcce357f67c73e7eaafbdd4de5d04",
+    "hostingConfigSha256": "883f006c83d4fb0f799056f201377a00ced88997a46db496dc2dbfba4af9a47d",
+    "mainWorktreeAlteredBySitesWorkflow": false,
+    "implementationCommit": "007f94d170cb02cd69911d9e1f122b83fbacd535",
+    "implementationTree": "807a01c76c93489ccce1e5b72cea9c214fd52d31",
+    "implementationParent": "9dfa961000832c830729ce67e8a54357915c716a",
+    "exactPathCount": 67,
+    "pathSetSha256": "25a5773b2e3ca1f6e45bbf48800dcac4ce3cd8e8125f1913fee674529720739f",
+    "pathContentSha256": "517ae0b1d3d630f6fa086cdc208905fabb9a532035cec539f61f9cd5f67af35e",
+    "implementationCommitStatus": "bound_from_git"
+  },
+  "archives": {
+    "local": {
+      "path": "/tmp/uiux-stage4-daily-core-sites-dist.tgz",
+      "fileCount": 50,
+      "bytes": 1808222,
+      "sha256": "9ae7770165762ff3008fec93b7ff58cc369ecfdf73ab037a795181197251a861",
+      "normalizedTreeSha256": "bea21c825fe073c6898e91636f136da5948f00a60a2f75fc91d78daa8bbdfc26",
+      "byteStable": true
+    },
+    "providerStored": {
+      "fileCount": 50,
+      "bytes": 2406400,
+      "contentHash": "sha256:b3ac973d4248dda0730fa47c95cf6a89e43c51cb37d729fbc85371d602446ea4"
+    }
+  },
+  "sites": {
+    "title": "Trading Bot UI/UX — Stage 4 Daily Core",
+    "slug": "trading-bot-uiux-stage4-daily-core",
+    "projectId": "appgprj_6a78cd05d74c8191a9c5e095f15c6381",
+    "projectCreatedAt": "2026-08-09T18:55:05.341699+00:00",
+    "projectUpdatedAt": "2026-08-09T18:59:58.401035+00:00",
+    "requesterRole": "owner",
+    "versionId": "appgprj_6a78cd05d74c8191a9c5e095f15c6381~appgver_8e6170326bdc819197ec4a44175859d0",
+    "versionNumber": 1,
+    "versionSourceCommit": "b55e221cf4fe363a12e2bf6b0f6a212a9adcd2ae",
+    "deploymentId": "appgdep_6a78ce229a0081919ae50975911e9e7d",
+    "deploymentStatus": "succeeded",
+    "publishedAt": "2026-08-09T18:59:58.457092+00:00",
+    "url": "https://trading-bot-uiux-stage4-daily-core.mohsenbarari235.chatgpt.site",
+    "access": {
+      "status": "passed",
+      "policy": "custom",
+      "effectiveScope": "owner_only",
+      "allowedUserCount": 1,
+      "allowedAccountIdCount": 1,
+      "allowedUserRole": "owner",
+      "workspaceGroupCount": 0,
+      "tenantGroupCount": 0,
+      "externalVisitorCount": 0
+    },
+    "anonymousProbes": {
+      "requestContext": "anonymous_without_credentials_or_bypass",
+      "root": {
+        "path": "/",
+        "protocol": "HTTP/2",
+        "status": 401,
+        "cacheControl": "no-store",
+        "referrerPolicy": "no-referrer"
+      },
+      "evidence": {
+        "path": "/docs/uiux-stage4-daily-core/stage4-daily-core-evidence.html",
+        "protocol": "HTTP/2",
+        "status": 401,
+        "cacheControl": "no-store",
+        "referrerPolicy": "no-referrer"
+      },
+      "status": "passed"
+    },
+    "postDeployErrorsOnlyLogs": {
+      "windowMinutes": 15,
+      "errorCount": 0,
+      "status": "passed"
+    },
+    "environment": {
+      "revision": 0,
+      "entryCount": 0
+    },
+    "onlineNpmAudit": {
+      "vulnerabilityCount": 0,
+      "status": "passed"
+    },
+    "localReleaseGates": "passed",
+    "bypass": {
+      "providerManagedStateObservedPresent": true,
+      "anonymousProbeUsedBypass": false,
+      "valueRead": false,
+      "usedByWorkflow": false,
+      "persistedInSource": false,
+      "persistedInArchive": false,
+      "persistedInDocs": false,
+      "exposedToUserOrArtifacts": false,
+      "valueHandling": "never_read_never_echoed"
+    }
+  },
+  "governance": {
+    "implementationCommit": "007f94d170cb02cd69911d9e1f122b83fbacd535",
+    "implementationCommitStatus": "bound_from_git",
+    "stage4Status": "stage4_complete",
+    "nextAuthorizedRuntimeStage": null,
+    "stage5RuntimeImplementationAuthorized": false,
+    "stage5RuntimeWorkStarted": false,
+    "workStoppedAfterStage4": true
+  }
+}

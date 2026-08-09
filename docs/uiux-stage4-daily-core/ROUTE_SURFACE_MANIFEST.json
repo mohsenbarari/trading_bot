@@ -1,0 +1,453 @@
+{
+  "schemaVersion": 1,
+  "stage": 4,
+  "status": "stage4_complete",
+  "branch": "condidate/webapp-ui-ux-redesign-v2",
+  "recordedDate": "2026-08-09",
+  "comparisonBaseCommit": "9dfa961000832c830729ce67e8a54357915c716a",
+  "comparisonBaseTree": "1540c2534d8052a3a8cfcffcdc2f65e4b85fc874",
+  "stage4RuntimeImplementationAuthorized": true,
+  "stage4RuntimeWorkStarted": true,
+  "implementationCommit": "007f94d170cb02cd69911d9e1f122b83fbacd535",
+  "implementationCommitStatus": "verified_exact_head_parent_tree_and_67_path_delta",
+  "technicalGateStatus": "passed_with_inherited_diagnostics_disclosed",
+  "protectedFinalDiffStatus": "passed_zero_unauthorized_drift",
+  "browserStatus": "passed_49_of_49_promotable",
+  "evidenceStatus": "passed_frozen_70_file_package",
+  "figmaStatus": "passed_authored_snapshot_hash_bound",
+  "sitesStatus": "passed_private_owner_only_source_bound",
+  "gitStatus": "passed_commit_tree_parent_and_67_path_binding",
+  "routeRegistry": {
+    "count": 30,
+    "v2ScopeCounts": {
+      "route": 10,
+      "section": 16,
+      "off": 4
+    },
+    "shellClassCounts": {
+      "public": 3,
+      "focused-authenticated": 1,
+      "standard-authenticated": 21,
+      "protected-legacy": 4,
+      "system-recovery": 1
+    },
+    "protectionCounts": {
+      "none": 23,
+      "full": 4,
+      "mixed": 3
+    },
+    "scopeManifestPath": "frontend/src/design-system-v2/scope-manifest.json",
+    "scopeManifestSha256": "18c7fa738ec527d39462a964157ff24d4e2cb5093a28060745ca831765ef3fbc",
+    "routeContractPath": "frontend/src/router/uiRouteContract.ts",
+    "routeContractSha256": "8e7495a05dfbf6b36bcc242af1b20919bef56a8bd0ed9458360d36cf79fba144",
+    "routerPath": "frontend/src/router/index.ts",
+    "routerSha256": "a85c2432ff6a4ad0230ee63e58d54dce7aaa5d1a781b50efa3b44d0fcf8c051c"
+  },
+  "stage4CanonicalRoutes": [
+    {
+      "path": "/",
+      "name": "home",
+      "component": "frontend/src/views/DashboardView.vue",
+      "shellClass": "standard-authenticated",
+      "v2Scope": "section",
+      "protection": "mixed",
+      "protectedInteriors": ["home-market-widget"]
+    },
+    {
+      "path": "/operations",
+      "name": "operations",
+      "component": "frontend/src/views/OperationsView.vue",
+      "shellClass": "standard-authenticated",
+      "v2Scope": "route",
+      "protection": "none",
+      "protectedInteriors": []
+    },
+    {
+      "path": "/account",
+      "name": "account",
+      "component": "frontend/src/views/AccountHubView.vue",
+      "shellClass": "standard-authenticated",
+      "v2Scope": "route",
+      "protection": "none",
+      "protectedInteriors": []
+    },
+    {
+      "path": "/account/security",
+      "name": "account-security",
+      "component": "frontend/src/views/SettingsView.vue",
+      "shellClass": "standard-authenticated",
+      "v2Scope": "route",
+      "protection": "none",
+      "protectedInteriors": []
+    },
+    {
+      "path": "/account/storage",
+      "name": "account-storage",
+      "component": "frontend/src/views/SettingsView.vue",
+      "shellClass": "standard-authenticated",
+      "v2Scope": "route",
+      "protection": "none",
+      "protectedInteriors": []
+    },
+    {
+      "path": "/account/notifications",
+      "name": "account-notifications",
+      "component": "frontend/src/views/NotificationsView.vue",
+      "shellClass": "standard-authenticated",
+      "v2Scope": "route",
+      "protection": "none",
+      "protectedInteriors": []
+    }
+  ],
+  "stage4CanonicalCounts": {
+    "routes": 6,
+    "routeScope": 5,
+    "sectionScope": 1,
+    "mixedProtected": 1,
+    "unprotected": 5
+  },
+  "legacyRedirects": [
+    {
+      "path": "/settings",
+      "name": "settings",
+      "redirect": {
+        "name": "account-security"
+      },
+      "rendersLegacyComponent": false,
+      "status": "passed_canonical_redirect_validation"
+    },
+    {
+      "path": "/notifications",
+      "name": "notifications",
+      "redirect": {
+        "name": "account-notifications"
+      },
+      "rendersLegacyComponent": false,
+      "status": "passed_canonical_redirect_validation"
+    }
+  ],
+  "stage5Boundary": {
+    "status": "preserved",
+    "stage4AllowedAdapterComponents": [
+      "frontend/src/components/workspace/WorkspaceShell.vue",
+      "frontend/src/components/workspace/WorkspaceSection.vue",
+      "frontend/src/components/workspace/WorkspaceNotice.vue",
+      "frontend/src/components/workspace/WorkspaceActionTile.vue",
+      "frontend/src/components/workspace/WorkspaceDangerZone.vue",
+      "frontend/src/components/workspace/WorkspaceStatTile.vue"
+    ],
+    "stage5OwnedRoutes": [
+      "/operations/customers",
+      "/operations/customers/:relationId",
+      "/operations/accountants",
+      "/operations/accountants/:relationId"
+    ],
+    "stage5OwnedViews": [
+      "frontend/src/views/CustomerWorkspaceView.vue",
+      "frontend/src/views/AccountantWorkspaceView.vue"
+    ],
+    "stage4ConsumerRegressionOnly": true,
+    "forbiddenStage4Changes": [
+      "workspace_workflow_or_information_architecture",
+      "workspace_route_or_query_semantics",
+      "workspace_api_or_permission_semantics",
+      "workspace_mutation_or_destructive_action_semantics"
+    ]
+  },
+  "roleMatrix": [
+    {
+      "role": "member_or_authorized_owner",
+      "home": "market only with existing authority; attention and next action only",
+      "operations": [
+        "operations-customers when owner predicate is true",
+        "operations-accountants when owner predicate is true"
+      ],
+      "account": [
+        "profile",
+        "account-security",
+        "account-storage",
+        "account-notifications",
+        "telegram only when backend capability is actionable"
+      ]
+    },
+    {
+      "role": "customer",
+      "home": "existing market authority only",
+      "operations": [
+        "no owner-relation destination",
+        "account recovery destination when no action exists"
+      ],
+      "account": [
+        "profile",
+        "account-security",
+        "account-storage",
+        "account-notifications"
+      ]
+    },
+    {
+      "role": "accountant",
+      "home": "no market and no customers or operations deep-link; preliminary 0B2 CTA is superseded by 0B3 and ensure_owner_context 403 authority",
+      "operations": [
+        "no owner-relation destination",
+        "account recovery destination"
+      ],
+      "account": ["profile", "account-storage", "account-notifications"],
+      "forbidden": [
+        "personal_session_management",
+        "personal_logout",
+        "telegram_connect"
+      ]
+    },
+    {
+      "role": "middle_admin",
+      "home": "no decorative admin metadata",
+      "operations": [
+        "admin-invitations",
+        "admin-users",
+        "owner relations only when the owner predicate is independently true"
+      ],
+      "account": "non-accountant contract"
+    },
+    {
+      "role": "senior_admin",
+      "home": "no decorative admin metadata",
+      "operations": [
+        "admin-invitations",
+        "admin-users",
+        "admin-commodities",
+        "admin-messages",
+        "admin-system",
+        "owner relations only when the owner predicate is independently true"
+      ],
+      "account": "non-accountant contract"
+    },
+    {
+      "role": "inactive_or_restricted",
+      "home": "one actionable warning; no positive health badge",
+      "operations": "no dead destination",
+      "account": "negative status only; no positive active badge"
+    }
+  ],
+  "settingsContract": {
+    "securityAndStorageMutuallyExclusiveByCanonicalRoute": true,
+    "deterministicBackRouteName": "account",
+    "telegramOnlyInAccount": true,
+    "sessionsLocalPerServer": true,
+    "defaultSessionMetadata": [
+      "device",
+      "platform",
+      "last_activity",
+      "current_signal",
+      "primary_signal"
+    ],
+    "forbiddenDefaultSessionMetadata": [
+      "home_server",
+      "backend_or_api_source",
+      "device_ip"
+    ],
+    "primaryAuthorityRequiredForOtherSessionTermination": true,
+    "logoutAllPreservesCurrentSession": true,
+    "inlineConfirmAndActionLocalFeedback": true,
+    "storageClearScope": "downloaded_or_cached_files_on_current_browser_device_only",
+    "sizeErrorDistinctFromZero": true
+  },
+  "notificationsContract": {
+    "canonicalRoute": "/account/notifications",
+    "deterministicBackRouteName": "account",
+    "categories": ["trade", "other"],
+    "categoryCountsDisplayed": false,
+    "historyWindowLimit": 50,
+    "historyWindowIsNotTotal": true,
+    "routeLessItemsInteractive": false,
+    "rawRouteOrBackendMetadataDisplayed": false,
+    "deleteOrClearUiAdded": false,
+    "pushPermissionRequiresExplicitUserAction": true,
+    "pushStates": [
+      "checking",
+      "unsupported",
+      "insecure",
+      "server-disabled",
+      "permission-blocked",
+      "permission-default",
+      "subscribed",
+      "unsubscribed",
+      "error"
+    ],
+    "crossChannelOrCrossServerDeliveryClaim": false
+  },
+  "testBaseline": {
+    "frontendCore": {
+      "files": 21,
+      "tests": 177,
+      "status": "historical_preimplementation_baseline_inventory"
+    },
+    "shellPwaInvariant": {
+      "files": 4,
+      "tests": 31,
+      "status": "historical_preimplementation_baseline_inventory"
+    },
+    "guardSelfInherited": {
+      "files": 2,
+      "tests": 45,
+      "status": "stage3_baseline"
+    },
+    "stage4ProtectedGuardAdded": {
+      "files": 1,
+      "tests": 8,
+      "status": "passed_in_final_guard_run"
+    },
+    "backendApi": {
+      "modules": 11,
+      "tests": 69,
+      "status": "historical_preimplementation_baseline_inventory"
+    }
+  },
+  "focusedHistoricalResults": [
+    {
+      "slice": "dashboard",
+      "files": 1,
+      "tests": 14,
+      "status": "passed_focused_superseded_by_final_closure"
+    },
+    {
+      "slice": "operations_and_workspace_adapter_consumers",
+      "files": 4,
+      "tests": 34,
+      "status": "passed_focused_superseded_by_final_closure"
+    },
+    {
+      "slice": "account_and_settings",
+      "files": 2,
+      "tests": 27,
+      "status": "passed_focused_superseded_by_final_closure"
+    },
+    {
+      "slice": "notifications_and_push",
+      "files": 4,
+      "tests": 48,
+      "breakdown": {
+        "frontend/src/views/NotificationsView.test.ts": 22,
+        "frontend/src/composables/useNotificationRuntime.test.ts": 10,
+        "frontend/src/router/index.test.ts": 9,
+        "frontend/src/router/uiRouteContract.test.ts": 7
+      },
+      "status": "passed_focused_superseded_by_final_closure"
+    },
+    {
+      "slice": "bottom_navigation_role_visibility",
+      "files": 1,
+      "tests": 12,
+      "status": "passed_focused_superseded_by_final_closure"
+    }
+  ],
+  "closure": {
+    "implementation": {
+      "commit": "007f94d170cb02cd69911d9e1f122b83fbacd535",
+      "tree": "807a01c76c93489ccce1e5b72cea9c214fd52d31",
+      "parent": "9dfa961000832c830729ce67e8a54357915c716a",
+      "exactPathCount": 67,
+      "trackedModifiedCount": 60,
+      "addedCount": 7,
+      "deletedCount": 0,
+      "pathSetSha256": "25a5773b2e3ca1f6e45bbf48800dcac4ce3cd8e8125f1913fee674529720739f",
+      "pathContentSha256": "517ae0b1d3d630f6fa086cdc208905fabb9a532035cec539f61f9cd5f67af35e"
+    },
+    "technicalGates": {
+      "status": "passed_with_inherited_diagnostics_disclosed",
+      "frontend": {
+        "files": 34,
+        "tests": 450,
+        "passed": 450,
+        "failed": 0
+      },
+      "guards": {
+        "files": 3,
+        "suites": 8,
+        "tests": 55,
+        "passed": 55,
+        "failed": 0,
+        "aggregateGuard": "passed"
+      },
+      "backend": {
+        "modules": 11,
+        "tests": 69,
+        "passed": 69,
+        "failed": 0,
+        "caveat": "The first sqlite+aiosqlite diagnostic failed because the environmental dependency was absent and was discarded; the valid PostgreSQL-driver rerun used non-secret dummy DSNs and made no database connection."
+      },
+      "typecheck": "passed",
+      "build": {
+        "status": "passed",
+        "modules": 2162,
+        "pwaEntries": 161
+      },
+      "diffCheck": "passed",
+      "eslint": {
+        "stage4New": 0,
+        "inherited": 121,
+        "rawCurrentExit": 1
+      },
+      "prettier": {
+        "stage4New": 0,
+        "inherited": 22,
+        "rawCurrentExit": 1
+      },
+      "summarySha256": "f5f1b32ef85d010aa2134b3531f628ac941f91f9dc4adfb58ee46cfa39a86ac2"
+    },
+    "browser": {
+      "runId": "uiux-stage4-browser-20260809T180340666Z",
+      "assertionsPassed": 49,
+      "assertionsTotal": 49,
+      "suites": 9,
+      "viewports": 8,
+      "screenshots": 22,
+      "unexpectedDiagnostics": 0,
+      "sourceCount": 398,
+      "sourceBindingSha256": "1f8858264f0c52479c227bb84822a6c109f9b4fadb968500df596126acf099bf",
+      "metricsSha256": "83445d91bd78fd0903f49833a5b72c5d49345d517d9e5ae05e2fdd42954cd01f"
+    },
+    "figma": {
+      "status": "passed_authored_snapshot_hash_bound",
+      "fileKey": "z8jgJxST4O2APzWnlyP9gv",
+      "pageId": "283:18",
+      "rootNodeId": "283:19",
+      "provenanceNodeId": "291:554",
+      "sectionCount": 6,
+      "canonicalScreenCount": 6,
+      "linkedInstanceCount": 66,
+      "detachedInstanceCount": 0,
+      "captureCount": 13
+    },
+    "localEvidence": {
+      "runId": "stage4-local-588243cd033dce300388",
+      "assertionsPassed": 26,
+      "assertionsTotal": 26,
+      "frozenPackage": {
+        "fileCount": 70,
+        "bytes": 5863416,
+        "aggregateSha256": "8c123a1eeb717f799c0449443f2d8ea76f201a0ae2c31e062b1cff09584a7971",
+        "evidenceManifestSha256": "7a1a4a7da5c82f7c3744fba2f94adf0402dc6e6d5b47944234d2c0b266efdda8"
+      }
+    },
+    "sites": {
+      "status": "passed_private_owner_only_source_bound",
+      "projectId": "appgprj_6a78cd05d74c8191a9c5e095f15c6381",
+      "versionId": "appgprj_6a78cd05d74c8191a9c5e095f15c6381~appgver_8e6170326bdc819197ec4a44175859d0",
+      "deploymentId": "appgdep_6a78ce229a0081919ae50975911e9e7d",
+      "deploymentStatus": "succeeded",
+      "accessPolicy": "custom_owner_only",
+      "anonymousRootAndEvidenceStatus": 401,
+      "provenancePath": "SITES_PROVENANCE.json",
+      "provenanceSha256": "3197cac8f90dcc1abfc2d52ee4fa4d87059e34863250a8042709230eb1bde1f8"
+    },
+    "contentNecessity": {
+      "policyAndRouteAssertions": "passed",
+      "quantitativeInventory": "not_measured_non_contract_hard"
+    }
+  },
+  "nextAuthorizedRuntimeStage": null,
+  "stage5RuntimeImplementationAuthorized": false,
+  "stage5RuntimeWorkStarted": false,
+  "workStoppedAfterStage4": true,
+  "claimBoundary": "This manifest records complete hash-bound Stage 4 closure. The frozen 70-file evidence package remained immutable, the Sites provenance is separate, Stage 5 is not authorized or started, and work stops after Stage 4."
+}
