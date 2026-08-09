@@ -1,0 +1,387 @@
+{
+  "schemaVersion": 1,
+  "baseCommit": "3822df67a48e7ee3197bc6d67c79aa7ee84a7905",
+  "scope": {
+    "logicalCurrentFiles": 66,
+    "baseExistingFiles": 48,
+    "baseAbsentFiles": 18
+  },
+  "reports": {
+    "current": {
+      "path": "/tmp/uiux-stage3-eslint-final-settled.json",
+      "sha256": "8bb5b1f13d315d44831675d4edda16f56e3c4ce7244d3b3b528303591f24a7a2",
+      "records": 66,
+      "affectedFiles": 12,
+      "errors": 184,
+      "warnings": 1,
+      "diagnostics": 185,
+      "rules": [
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "count": 181
+        },
+        {
+          "rule": "<directive>",
+          "count": 1
+        },
+        {
+          "rule": "@typescript-eslint/no-unused-vars",
+          "count": 3
+        }
+      ]
+    },
+    "base": {
+      "path": "/tmp/uiux-stage3-eslint-base-final-postfix.json",
+      "sha256": "e44507896d94046e43d11c23808217bccbe99bb7e92d27c7049bd9e3fb162694",
+      "records": 48,
+      "affectedFiles": 28,
+      "errors": 267,
+      "warnings": 1,
+      "diagnostics": 268,
+      "rules": [
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "count": 260
+        },
+        {
+          "rule": "@typescript-eslint/no-unused-vars",
+          "count": 7
+        },
+        {
+          "rule": "<directive>",
+          "count": 1
+        }
+      ]
+    }
+  },
+  "comparison": {
+    "exactMatched": 148,
+    "currentUnmatched": 37,
+    "baseUnmatched": 120,
+    "semanticMatched": 37,
+    "stage3New": 0,
+    "baseOnlyRemoved": 83,
+    "unexpectedCurrentFiles": [],
+    "semanticEvidence": {
+      "main": {
+        "matched": 1,
+        "current": [
+          {
+            "file": "src/main.test.ts",
+            "rule": "@typescript-eslint/no-explicit-any",
+            "severity": 2,
+            "message": "Unexpected any. Specify a different type.",
+            "line": 70,
+            "column": 15,
+            "text": ";(window as any).Telegram = enabled ? { WebApp: mainMocks.telegram } : undefined",
+            "testBlock": "<module/setup>"
+          }
+        ],
+        "base": [
+          {
+            "file": "src/main.test.ts",
+            "rule": "@typescript-eslint/no-explicit-any",
+            "severity": 2,
+            "message": "Unexpected any. Specify a different type.",
+            "line": 68,
+            "column": 15,
+            "text": ";(window as any).Telegram = enabled",
+            "testBlock": "<module/setup>"
+          }
+        ]
+      },
+      "auth": {
+        "unmatchedMatched": 20,
+        "coverage": {
+          "covered": 26,
+          "currentTotal": 26,
+          "evidence": [
+            {
+              "currentTitle": "authGuard redirects according to auth and admin requirements",
+              "baseTitle": "authGuard redirects according to auth and admin requirements",
+              "currentCount": 12,
+              "baseCount": 12,
+              "covered": true
+            },
+            {
+              "currentTitle": "authGuard fetches /api/auth/me when admin cache is missing",
+              "baseTitle": "authGuard fetches /api/auth/me when admin cache is missing",
+              "currentCount": 2,
+              "baseCount": 2,
+              "covered": true
+            },
+            {
+              "currentTitle": "authGuard fetches /api/auth/me when market access cache is missing and blocks inactive users",
+              "baseTitle": "authGuard fetches /api/auth/me when market access cache is missing and blocks inactive users",
+              "currentCount": 2,
+              "baseCount": 2,
+              "covered": true
+            },
+            {
+              "currentTitle": "authGuard blocks accountants from market routes when /api/auth/me resolves accountant context",
+              "baseTitle": "authGuard blocks accountants from market routes when /api/auth/me resolves accountant context",
+              "currentCount": 2,
+              "baseCount": 2,
+              "covered": true
+            },
+            {
+              "currentTitle": "authGuard distinguishes authoritative denial from unavailable admin and market checks",
+              "baseTitle": "authGuard tolerates broken cache, failed profile fetches, and non-admin fallback responses",
+              "currentCount": 8,
+              "baseCount": 8,
+              "covered": true
+            }
+          ]
+        }
+      },
+      "login": {
+        "unmatchedMatched": 16,
+        "coverage": {
+          "covered": 100,
+          "currentTotal": 100,
+          "evidence": [
+            {
+              "currentTitle": "<module/setup>",
+              "baseTitle": "<module/setup>",
+              "currentCount": 3,
+              "baseCount": 9,
+              "covered": true
+            },
+            {
+              "currentTitle": "moves to the OTP step after a successful OTP request",
+              "baseTitle": "moves to the OTP step after a successful OTP request",
+              "currentCount": 1,
+              "baseCount": 1,
+              "covered": true
+            },
+            {
+              "currentTitle": "accepts the authoritative staging-log OTP delivery receipt",
+              "baseTitle": "accepts the authoritative staging-log OTP delivery receipt",
+              "currentCount": 1,
+              "baseCount": 1,
+              "covered": true
+            },
+            {
+              "currentTitle": "ignores an OTP request response after the submitted mobile context changes",
+              "baseTitle": "ignores an OTP request response after the submitted mobile context changes",
+              "currentCount": 1,
+              "baseCount": 1,
+              "covered": true
+            },
+            {
+              "currentTitle": "does not apply a pending verify response after edit-number invalidates the OTP context",
+              "baseTitle": "does not apply a pending verify response after edit-number invalidates the OTP context",
+              "currentCount": 2,
+              "baseCount": 2,
+              "covered": true
+            },
+            {
+              "currentTitle": "switches to waiting approval when verify-otp requires session approval",
+              "baseTitle": "switches to waiting approval when verify-otp requires session approval",
+              "currentCount": 2,
+              "baseCount": 2,
+              "covered": true
+            },
+            {
+              "currentTitle": "routes invited users to registration completion after OTP verification",
+              "baseTitle": "routes invited users to registration completion after OTP verification",
+              "currentCount": 2,
+              "baseCount": 2,
+              "covered": true
+            },
+            {
+              "currentTitle": "primes the current user cache before routing after a successful OTP verification",
+              "baseTitle": "primes the current user cache before routing after a successful OTP verification",
+              "currentCount": 4,
+              "baseCount": 4,
+              "covered": true
+            },
+            {
+              "currentTitle": "shows validation errors, enters the OTP step on rate limiting, and lets the user go back to the mobile step",
+              "baseTitle": "shows validation errors, enters the OTP step on rate limiting, and lets the user go back to the mobile step",
+              "currentCount": 1,
+              "baseCount": 1,
+              "covered": true
+            },
+            {
+              "currentTitle": "waits for automatic SMS after Telegram delivery without exposing a manual resend",
+              "baseTitle": "waits for automatic SMS after Telegram delivery without exposing a manual resend",
+              "currentCount": 3,
+              "baseCount": 3,
+              "covered": true
+            },
+            {
+              "currentTitle": "keeps legacy Telegram delivery truthful and preserves manual SMS resend",
+              "baseTitle": "keeps legacy Telegram delivery truthful and preserves manual SMS resend",
+              "currentCount": 2,
+              "baseCount": 2,
+              "covered": true
+            },
+            {
+              "currentTitle": "uses absolute fallback deadlines after browser clock jumps and visibility changes",
+              "baseTitle": "uses absolute fallback deadlines after browser clock jumps and visibility changes",
+              "currentCount": 1,
+              "baseCount": 1,
+              "covered": true
+            },
+            {
+              "currentTitle": "restores an opaque active OTP request after refresh without persisting mobile PII",
+              "baseTitle": "restores an opaque active OTP request after refresh without persisting mobile PII",
+              "currentCount": 1,
+              "baseCount": 1,
+              "covered": true
+            },
+            {
+              "currentTitle": "keeps OTP timer and browser-storage failures bounded to client state",
+              "baseTitle": "keeps OTP timer and browser-storage failures bounded to client state",
+              "currentCount": 1,
+              "baseCount": 1,
+              "covered": true
+            },
+            {
+              "currentTitle": "uses nested OTP errors and keeps automatic Telegram fallback non-resendable",
+              "baseTitle": "uses nested OTP errors and keeps automatic Telegram fallback non-resendable",
+              "currentCount": 3,
+              "baseCount": 3,
+              "covered": true
+            },
+            {
+              "currentTitle": "uses bounded legacy recovery without deriving timing from localized 429 copy",
+              "baseTitle": "uses bounded legacy recovery without deriving timing from localized 429 copy",
+              "currentCount": 1,
+              "baseCount": 1,
+              "covered": true
+            },
+            {
+              "currentTitle": "restores OTP entry from a structured flags-off active-code response",
+              "baseTitle": "restores OTP entry from a structured flags-off active-code response",
+              "currentCount": 1,
+              "baseCount": 1,
+              "covered": true
+            },
+            {
+              "currentTitle": "completes login when approval polling returns approved tokens",
+              "baseTitle": "completes login when approval polling returns approved tokens",
+              "currentCount": 5,
+              "baseCount": 5,
+              "covered": true
+            },
+            {
+              "currentTitle": "handles recovery waiting cancellation and returns to the mobile step",
+              "baseTitle": "handles recovery waiting cancellation and returns to the mobile step",
+              "currentCount": 5,
+              "baseCount": 5,
+              "covered": true
+            },
+            {
+              "currentTitle": "validates recovery identity uploads and opens every picker input",
+              "baseTitle": "validates recovery identity uploads and opens every picker input",
+              "currentCount": 4,
+              "baseCount": 4,
+              "covered": true
+            },
+            {
+              "currentTitle": "starts the recovery flow from the waiting screen and submits identity material",
+              "baseTitle": "starts the recovery flow from the waiting screen and submits identity material",
+              "currentCount": 6,
+              "baseCount": 6,
+              "covered": true
+            },
+            {
+              "currentTitle": "completes login from an approved recovery result",
+              "baseTitle": "completes login from an approved recovery result",
+              "currentCount": 6,
+              "baseCount": 6,
+              "covered": true
+            },
+            {
+              "currentTitle": "supports the developer quick-login flow and clears suspended refresh tokens",
+              "baseTitle": "supports the developer quick-login flow and clears suspended refresh tokens",
+              "currentCount": 3,
+              "baseCount": 3,
+              "covered": true
+            },
+            {
+              "currentTitle": "surfaces request, resend, and verify error branches without leaving the current flow",
+              "baseTitle": "surfaces request, resend, and verify error branches without leaving the current flow",
+              "currentCount": 4,
+              "baseCount": 4,
+              "covered": true
+            },
+            {
+              "currentTitle": "keeps the OTP draft in place when verification returns an invalid success payload",
+              "baseTitle": "keeps the OTP draft in place when verification returns an invalid success payload",
+              "currentCount": 2,
+              "baseCount": 2,
+              "covered": true
+            },
+            {
+              "currentTitle": "uses cause-neutral copy for malformed successful OTP JSON",
+              "baseTitle": "uses cause-neutral copy for malformed successful OTP JSON",
+              "currentCount": 1,
+              "baseCount": 1,
+              "covered": true
+            },
+            {
+              "currentTitle": "offers app cache recovery for network-like login errors",
+              "baseTitle": "offers app cache recovery for network-like login errors",
+              "currentCount": 1,
+              "baseCount": 1,
+              "covered": true
+            },
+            {
+              "currentTitle": "handles approval expiry plus recovery rejected and expired states",
+              "baseTitle": "handles approval expiry plus recovery rejected and expired states",
+              "currentCount": 9,
+              "baseCount": 9,
+              "covered": true
+            },
+            {
+              "currentTitle": "covers recovery request/cancel/identity failure branches and missing approved tokens",
+              "baseTitle": "covers recovery request/cancel/identity failure branches and missing approved tokens",
+              "currentCount": 11,
+              "baseCount": 11,
+              "covered": true
+            },
+            {
+              "currentTitle": "retries a bounded recovery-status request when approval arrives before its login token",
+              "baseTitle": "retries a bounded recovery-status request when approval arrives before its login token",
+              "currentCount": 4,
+              "baseCount": 4,
+              "covered": true
+            },
+            {
+              "currentTitle": "initializes WebOTP with abort cleanup without taking ownership of PWA installation",
+              "baseTitle": "initializes install and WebOTP browser hooks including abort cleanup",
+              "currentCount": 4,
+              "baseCount": 4,
+              "covered": true
+            },
+            {
+              "currentTitle": "covers helper branches for OTP reuse, resend failures, approval expiry polling, recovery status helpers, and dev-login errors",
+              "baseTitle": "covers helper branches for OTP reuse, resend failures, approval expiry polling, recovery status helpers, and dev-login errors",
+              "currentCount": 4,
+              "baseCount": 4,
+              "covered": true
+            },
+            {
+              "currentTitle": "keeps public auth free of install guidance while covering WebOTP error and step-abort cleanup",
+              "baseTitle": "hydrates initial install state for iOS and covers WebOTP error plus step-abort cleanup",
+              "currentCount": 1,
+              "baseCount": 3,
+              "covered": true
+            }
+          ]
+        }
+      }
+    }
+  },
+  "gate": {
+    "name": "stage3-eslint-baseline-delta",
+    "required": {
+      "stage3New": 0,
+      "baseOnlyRemoved": 83
+    },
+    "passed": true
+  }
+}

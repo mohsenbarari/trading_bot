@@ -1,0 +1,735 @@
+{
+  "schemaVersion": 1,
+  "stage": "3",
+  "comparisonBaseCommit": "3822df67a48e7ee3197bc6d67c79aa7ee84a7905",
+  "status": "source-bound",
+  "scope": "all non-doc files modified or added relative to comparison base, including untracked non-ignored runtime/test/deploy sources",
+  "algorithm": "sha256(JSON.stringify(sources)); sources sorted by path; key order status,path,bytes,sha256",
+  "sourceCount": 120,
+  "modifiedCount": 98,
+  "addedCount": 22,
+  "deletedCount": 0,
+  "aggregateSha256": "6c9a3f0bcd96635a1fb40fda00278401c4f54da87d7535132cd342945cf5f87f",
+  "sources": [
+    {
+      "status": "modified",
+      "path": "api/routers/accountants.py",
+      "bytes": 13985,
+      "sha256": "67470931449ec1830bcb6b824aa3bd8ac4f47f0ba3066db56c945d5c6472735e"
+    },
+    {
+      "status": "modified",
+      "path": "api/routers/auth.py",
+      "bytes": 109745,
+      "sha256": "b229ad7a0cd27fd8a4f9ad7a6bbe41b1f64e130195f0e9bae8d85a4baa77f9ac"
+    },
+    {
+      "status": "modified",
+      "path": "api/routers/customers.py",
+      "bytes": 33271,
+      "sha256": "3ddbed20d46cdf21e6f4c70adae057f60502dca9a317d5ff66e415f937280ee3"
+    },
+    {
+      "status": "modified",
+      "path": "api/routers/invitations.py",
+      "bytes": 16518,
+      "sha256": "9afb9190df4f0276c960c891f62ccd900ad28152ac8553d52ec5574476d03e99"
+    },
+    {
+      "status": "modified",
+      "path": "bot/handlers/panel.py",
+      "bytes": 51677,
+      "sha256": "b2a232457bfed5feea9a2666838011b7c07a23c90d38d8162dfee8855f87178b"
+    },
+    {
+      "status": "modified",
+      "path": "bot/handlers/start.py",
+      "bytes": 66591,
+      "sha256": "9942a5a3b766409409f20758ef726d048ec4c2fec2aabff00147531934eecd40"
+    },
+    {
+      "status": "modified",
+      "path": "core/db.py",
+      "bytes": 2450,
+      "sha256": "0c167fe1a50559afce1668bc1d30fa08e907b2670b8dde4fa3ced581316571f3"
+    },
+    {
+      "status": "modified",
+      "path": "core/invitation_contract_service.py",
+      "bytes": 5300,
+      "sha256": "ab42ddc52b2a664eceaf92a33a618f246352c2248b832d65e3f30754dbdea6d3"
+    },
+    {
+      "status": "modified",
+      "path": "core/log_redaction.py",
+      "bytes": 6751,
+      "sha256": "21002e0b82d3f3c031fbe8af1fd70240f505cdd50573f596669f0750fb2ab0f1"
+    },
+    {
+      "status": "modified",
+      "path": "core/logging_config.py",
+      "bytes": 7026,
+      "sha256": "41751aad4f54aea1c5df525e881717e522c059bbbf36aff405bc46da713c455b"
+    },
+    {
+      "status": "modified",
+      "path": "core/metrics.py",
+      "bytes": 25661,
+      "sha256": "d89b499afe0d81bba53bf9ac4ff6cad8735123c2a279c2c22980c0760701d9cd"
+    },
+    {
+      "status": "modified",
+      "path": "core/registration_contracts.py",
+      "bytes": 10979,
+      "sha256": "094afa7b21615ac0e25b762f336dfce0fd09fd65e694a65c9a502f9645dbda20"
+    },
+    {
+      "status": "modified",
+      "path": "deploy/production/nginx-iran-online-https.conf.template",
+      "bytes": 4755,
+      "sha256": "46f3f44e7b538a7f2a648f7de620c2d21c9e44cb75f9e58fc05e4214649039cc"
+    },
+    {
+      "status": "modified",
+      "path": "deploy/production/nginx-iran-online.conf.template",
+      "bytes": 4487,
+      "sha256": "7cf078d416496456fb705b02d22011d54e1b3aac9365650969b9ddecb838189c"
+    },
+    {
+      "status": "modified",
+      "path": "deploy/staging/nginx-staging.conf.template",
+      "bytes": 8670,
+      "sha256": "07f1c9d94830a234fe8be6b149120aad669bb5d3ef579ded6f3066ac151d9c03"
+    },
+    {
+      "status": "modified",
+      "path": "frontend/e2e/mandatory-channel.spec.ts",
+      "bytes": 9755,
+      "sha256": "7d60626ba22c4a8e709b1a7e4698d6f6768d1762303ccb61d49d931cc0bd6c2e"
+    },
+    {
+      "status": "modified",
+      "path": "frontend/index.html",
+      "bytes": 6384,
+      "sha256": "7fee8e884ae88b77daaa30c5a26c90f96c5dbde8abdce877b6ca366d77548d05"
+    },
+    {
+      "status": "modified",
+      "path": "frontend/package.json",
+      "bytes": 3803,
+      "sha256": "694e63ddd811474d2b1dc517566906de90595abdf7af21cce0b5f397a044b641"
+    },
+    {
+      "status": "added",
+      "path": "frontend/public/uiux-v2-brand-mark.svg",
+      "bytes": 270,
+      "sha256": "50ba9277c41ea0431e3ff85af506cd9d2e6ad660d124780e0ef518f48124c319"
+    },
+    {
+      "status": "modified",
+      "path": "frontend/scripts/check-design-system-v2-guards.mjs",
+      "bytes": 4326,
+      "sha256": "3e0f90b0e9a80aeff9dfcaee309350f9a9de74fcd4f014a57638723eb0eb5ad3"
+    },
+    {
+      "status": "added",
+      "path": "frontend/scripts/check-stage3-protected-regions.mjs",
+      "bytes": 1098,
+      "sha256": "fa6defc3af585091c8f8d0a6dfdbd1c3616a016715ce8fc7ca6f80a8d4860ea9"
+    },
+    {
+      "status": "modified",
+      "path": "frontend/scripts/design-system-v2-guard.test.mjs",
+      "bytes": 35427,
+      "sha256": "ecc0b917c08cb10aa68c662783ae7b15ce6062e183d69b5c0bb9980adf20a92c"
+    },
+    {
+      "status": "modified",
+      "path": "frontend/scripts/lib/design-system-v2-guard.mjs",
+      "bytes": 58330,
+      "sha256": "f6ff6c425c32623f9d647f96022bf790371968d7cd66a85aef1f581f7d0d215c"
+    },
+    {
+      "status": "added",
+      "path": "frontend/scripts/lib/stage3-protected-region-guard.mjs",
+      "bytes": 4581,
+      "sha256": "b51660e830f52e7da9a8e1989cdacb1ea9b82b4a3d907f5f9ac5b8c888ac01a5"
+    },
+    {
+      "status": "added",
+      "path": "frontend/scripts/stage3-protected-region-guard.test.mjs",
+      "bytes": 2087,
+      "sha256": "6a26749ce07ccb7a95adda7997b811a14210a1284c32b73a37fed057f8bc82fa"
+    },
+    {
+      "status": "modified",
+      "path": "frontend/src/App.test.ts",
+      "bytes": 12605,
+      "sha256": "0c5ed19739c6433c8aea18f9f77c056e9e0fece6c4534ca2a78a85b75226b59b"
+    },
+    {
+      "status": "modified",
+      "path": "frontend/src/App.vue",
+      "bytes": 7674,
+      "sha256": "e16ebedbefd1dd0b9ab9db0947e4c5c292e9e7d8975d7e8966fed16179f85100"
+    },
+    {
+      "status": "added",
+      "path": "frontend/src/bootRecoveryHtml.test.ts",
+      "bytes": 4109,
+      "sha256": "0b55637d2dcc13dc487c2d6f6babec0d506558d8f6288b52a3dcaf37b7012d28"
+    },
+    {
+      "status": "modified",
+      "path": "frontend/src/components/AppAuthenticatedShell.test.ts",
+      "bytes": 7630,
+      "sha256": "17cd19d781c2deedba80744960063cc904097f5d646fd1b0f196e685e24f3d08"
+    },
+    {
+      "status": "modified",
+      "path": "frontend/src/components/AppAuthenticatedShell.vue",
+      "bytes": 2883,
+      "sha256": "18accc88f3784f78d3e7911fd86000426fa799a38e75ea179ff8317189fd0f0a"
+    },
+    {
+      "status": "modified",
+      "path": "frontend/src/components/AppToasts.test.ts",
+      "bytes": 7339,
+      "sha256": "ffff3e04e5ce8e4fd501d319f56dada7d8cb080d6da2aee496dd43fc0d0b1838"
+    },
+    {
+      "status": "modified",
+      "path": "frontend/src/components/AppToasts.vue",
+      "bytes": 7031,
+      "sha256": "e72e1f27de553fae30b0342d0b8a6148f41e9213eac25289306e7c97c963810e"
+    },
+    {
+      "status": "added",
+      "path": "frontend/src/components/auth/AuthFlowShell.test.ts",
+      "bytes": 2012,
+      "sha256": "5718bbccbbdc600dfae357d1e840587b6ff7a01d2f1fc9c6d4de344b875af46e"
+    },
+    {
+      "status": "added",
+      "path": "frontend/src/components/auth/AuthFlowShell.vue",
+      "bytes": 1959,
+      "sha256": "04b94926da8927ea36e0993a5f9dcdae8185a5c5bfc5cd35fdfe76fcc6b56cde"
+    },
+    {
+      "status": "modified",
+      "path": "frontend/src/components/BottomNav.test.ts",
+      "bytes": 15547,
+      "sha256": "8583c47a9cbf66f35a17fae96d31ef01c243d87439e36ea6f22b05e93263208d"
+    },
+    {
+      "status": "modified",
+      "path": "frontend/src/components/BottomNav.vue",
+      "bytes": 22168,
+      "sha256": "203a4c9e0d15c26bb82be00edeb2c88a21c58b28e2515994c702df0f06dddf46"
+    },
+    {
+      "status": "modified",
+      "path": "frontend/src/components/CreateInvitationView.test.ts",
+      "bytes": 24936,
+      "sha256": "050974462c3da9817e18a671cd793f1634ceaf00062480d05653e67720e50dda"
+    },
+    {
+      "status": "modified",
+      "path": "frontend/src/components/OwnerAccountantManagerModal.test.ts",
+      "bytes": 19717,
+      "sha256": "33be05e198668131aad9b52148aacb1d5afcaf499ccf25d486ec78dd05c10586"
+    },
+    {
+      "status": "modified",
+      "path": "frontend/src/components/OwnerCustomerManagerModal.test.ts",
+      "bytes": 34217,
+      "sha256": "900f27bb7eafec92c907f3c1d55d41d8ae2eb55591361a7745afc9549fb0329f"
+    },
+    {
+      "status": "modified",
+      "path": "frontend/src/components/PWAInstallOverlay.test.ts",
+      "bytes": 8164,
+      "sha256": "110b9acf8e4a7286049ca170f0d45cd1756120cae52cde509d568ae3300e2017"
+    },
+    {
+      "status": "modified",
+      "path": "frontend/src/components/PWAInstallOverlay.vue",
+      "bytes": 5150,
+      "sha256": "bd66c161ec16ae60edf7500da1274df173cce616baba6af81c2b20fcc8089f77"
+    },
+    {
+      "status": "added",
+      "path": "frontend/src/components/SessionApprovalModal.test.ts",
+      "bytes": 8349,
+      "sha256": "750275766be9bbe87945b1388f9cc121770bfe541b911e092d3c83b56dde20d6"
+    },
+    {
+      "status": "modified",
+      "path": "frontend/src/components/SessionApprovalModal.vue",
+      "bytes": 14092,
+      "sha256": "4e94441efc2efaf73b34015ffefb95e781c6cd200b25bc77415a0170f4e210b4"
+    },
+    {
+      "status": "modified",
+      "path": "frontend/src/components/ui/AppInput.vue",
+      "bytes": 1290,
+      "sha256": "6d6104b4c6c79daae96e2ed726cf7b6f83c85950f8201d511b53c767b03eaf73"
+    },
+    {
+      "status": "modified",
+      "path": "frontend/src/components/ui/index.ts",
+      "bytes": 3346,
+      "sha256": "2a6e440cf7aade61b7fcedd39a139ec02e5e73e94aa784583db4cf8e131da990"
+    },
+    {
+      "status": "modified",
+      "path": "frontend/src/composables/useOwnerAccountants.ts",
+      "bytes": 6399,
+      "sha256": "cb768e606f7ff3ab96d024b3b70fb39943b01d650893344d948817ce32050aeb"
+    },
+    {
+      "status": "modified",
+      "path": "frontend/src/composables/useOwnerCustomers.ts",
+      "bytes": 11813,
+      "sha256": "d082dfb850586d20d686c4c1cfd8d2e931e1b328b2c6fb8a8ac33839ecea82a6"
+    },
+    {
+      "status": "modified",
+      "path": "frontend/src/composables/useOwnerRelations.test.ts",
+      "bytes": 9562,
+      "sha256": "fd260cf0051ca0818c58d70a147bd5e4ef00c8e5a1fc43a7dbccc570c0cfc7cb"
+    },
+    {
+      "status": "modified",
+      "path": "frontend/src/design-system-v2/scope-manifest.json",
+      "bytes": 7717,
+      "sha256": "94fc3599a334098d41a39438092ee7c6e0b3f3f67140885addc3be33b80befaf"
+    },
+    {
+      "status": "modified",
+      "path": "frontend/src/env.d.ts",
+      "bytes": 447,
+      "sha256": "28e53c16e40a7e1386a5de3120910d7e48fbccad19942875816c8132c1677f79"
+    },
+    {
+      "status": "modified",
+      "path": "frontend/src/main.test.ts",
+      "bytes": 12837,
+      "sha256": "3b94085e70540a4a297618d85abd48ebed0a068a57f99abf0d6412ee414d52f3"
+    },
+    {
+      "status": "modified",
+      "path": "frontend/src/main.ts",
+      "bytes": 4507,
+      "sha256": "c9d66dc8f9f4f311759d9042fbfa41c23f8a05844996ad111def0d8995248f8f"
+    },
+    {
+      "status": "added",
+      "path": "frontend/src/router/chunkRecovery.test.ts",
+      "bytes": 2735,
+      "sha256": "11e8ad57768963c4847330794902d532665721fb84131227682f632b59f52bbb"
+    },
+    {
+      "status": "added",
+      "path": "frontend/src/router/chunkRecovery.ts",
+      "bytes": 2362,
+      "sha256": "8c15b447c8e58c0b389345a39e7d60c41ad3dbf0b6f863f582c05289df7d8cdb"
+    },
+    {
+      "status": "modified",
+      "path": "frontend/src/router/index.test.ts",
+      "bytes": 11530,
+      "sha256": "022eb85fef9573c49dfca149c16fe6058245b4dfd5653026384a46fa17217341"
+    },
+    {
+      "status": "modified",
+      "path": "frontend/src/router/index.ts",
+      "bytes": 7815,
+      "sha256": "39b0f951a17122473294e553706de494f4573b65a5765ebd4b1288811437286e"
+    },
+    {
+      "status": "added",
+      "path": "frontend/src/router/systemRecovery.test.ts",
+      "bytes": 1156,
+      "sha256": "4807a4895f3c46c0340657b43d370f1cf765c3ba2f488cd84ccede295124faae"
+    },
+    {
+      "status": "added",
+      "path": "frontend/src/router/systemRecovery.ts",
+      "bytes": 1045,
+      "sha256": "effcf46866b97a3c949c2db82d29f262db268e74eb52a53efd1682f8208d5402"
+    },
+    {
+      "status": "modified",
+      "path": "frontend/src/router/uiRouteContract.test.ts",
+      "bytes": 5855,
+      "sha256": "d7e9c89f0c82843746aeea814a7047c61f5ae5dc7aa03e5450e2a2eb8befe5e8"
+    },
+    {
+      "status": "modified",
+      "path": "frontend/src/router/uiRouteContract.ts",
+      "bytes": 10053,
+      "sha256": "f159a613ff4565daa6ab513974e9f8350d3093767971dce5f8135f4c1376d5b1"
+    },
+    {
+      "status": "modified",
+      "path": "frontend/src/styles/design-system-v2.components.css",
+      "bytes": 38094,
+      "sha256": "be35018924e72317ebcc0dee1bf949928805170e742cf7761370d019fa7cdabf"
+    },
+    {
+      "status": "modified",
+      "path": "frontend/src/styles/designSystemV2.test.ts",
+      "bytes": 14237,
+      "sha256": "1f659c3928934344818afaeec086dc6c9d66f9bd6213f3f3aefefca6564071cf"
+    },
+    {
+      "status": "modified",
+      "path": "frontend/src/utils/auth.test.ts",
+      "bytes": 32369,
+      "sha256": "41a0e648e2e698d3bb40b0da9e1eb81c026a3f69ac569b20d8c36b6c7ccda3a1"
+    },
+    {
+      "status": "modified",
+      "path": "frontend/src/utils/auth.ts",
+      "bytes": 14938,
+      "sha256": "d8dd8a0f146e68e01d390e986235094b1e39ecdce8736e27d23cf17539cd322e"
+    },
+    {
+      "status": "added",
+      "path": "frontend/src/utils/authNavigation.test.ts",
+      "bytes": 4805,
+      "sha256": "2bb4ba6585046516c13ca6837d4c8f53e1ee198b6002c511496b3b5007df44e3"
+    },
+    {
+      "status": "added",
+      "path": "frontend/src/utils/authNavigation.ts",
+      "bytes": 6616,
+      "sha256": "c6fe57620c5e505f8a69dca2f182049386d76efb05789595569358bd88d0ffbc"
+    },
+    {
+      "status": "modified",
+      "path": "frontend/src/utils/invitationContract.test.ts",
+      "bytes": 3985,
+      "sha256": "66b046ac37dd37e52b04cd11316a49660b7aeec209f8b36ff17c95c765568368"
+    },
+    {
+      "status": "modified",
+      "path": "frontend/src/utils/invitationContract.ts",
+      "bytes": 4767,
+      "sha256": "937c32a0f251c31fbe1a3cecb366d5d0f2d8ef81c3b6f07709181e96a1ee75cf"
+    },
+    {
+      "status": "added",
+      "path": "frontend/src/utils/navigationResult.test.ts",
+      "bytes": 556,
+      "sha256": "24a51584b374a9e33b61982be664c031a3eda6da380441157ca8e49020002786"
+    },
+    {
+      "status": "added",
+      "path": "frontend/src/utils/navigationResult.ts",
+      "bytes": 444,
+      "sha256": "a44277f7dabc3bbd5b0e1add75ac2b71964c9c5c91558322a3592e77613180a5"
+    },
+    {
+      "status": "modified",
+      "path": "frontend/src/utils/pwaInstall.test.ts",
+      "bytes": 4362,
+      "sha256": "15125eb69c70ba2d389104e67baac787b768765aab6b4c0cd7973793d447ce4a"
+    },
+    {
+      "status": "modified",
+      "path": "frontend/src/utils/pwaInstall.ts",
+      "bytes": 2526,
+      "sha256": "aa4cbe014fc4371659f59a55da95fbba5ad151c4a465abca1818497e16e0d3a2"
+    },
+    {
+      "status": "added",
+      "path": "frontend/src/utils/registrationHandoff.test.ts",
+      "bytes": 12320,
+      "sha256": "948db11208b2e029ba2bbc55062cab5bc419d99c442cdebab1bfbd68eff3351f"
+    },
+    {
+      "status": "added",
+      "path": "frontend/src/utils/registrationHandoff.ts",
+      "bytes": 11332,
+      "sha256": "e3dab61733ff3c32768249eb4b8bb888eefbe2fc1784b14cb9de4218d857730a"
+    },
+    {
+      "status": "added",
+      "path": "frontend/src/utils/securityLayerState.test.ts",
+      "bytes": 710,
+      "sha256": "62795d925d40d3f161a127fb646107c676bf64b9806b9a09e558488437b49de4"
+    },
+    {
+      "status": "added",
+      "path": "frontend/src/utils/securityLayerState.ts",
+      "bytes": 513,
+      "sha256": "7d6140f828ba4f3580b2f1f7baa33cb02875b39b449a4379b9c63a60c0b7ce11"
+    },
+    {
+      "status": "modified",
+      "path": "frontend/src/views/AccountantWorkspaceView.test.ts",
+      "bytes": 18091,
+      "sha256": "3ce482791571487ba313e090fef8c7bf5eecb7de31c92aa1be862d8de1436b03"
+    },
+    {
+      "status": "modified",
+      "path": "frontend/src/views/AccountantWorkspaceView.vue",
+      "bytes": 44687,
+      "sha256": "82d79ca96f40b3d92206b89b428581576973860c5a043e7d0955c263c6418008"
+    },
+    {
+      "status": "modified",
+      "path": "frontend/src/views/CustomerWorkspaceView.test.ts",
+      "bytes": 22980,
+      "sha256": "813a5bf03120b45255166a51f0ead25d742f1f884d1818b138285ffab4ec54db"
+    },
+    {
+      "status": "modified",
+      "path": "frontend/src/views/CustomerWorkspaceView.vue",
+      "bytes": 61502,
+      "sha256": "bdbb361ed63102535a920b256ff19c4bba7b368e93145205ab5abbd0115d2cca"
+    },
+    {
+      "status": "modified",
+      "path": "frontend/src/views/DashboardView.test.ts",
+      "bytes": 29660,
+      "sha256": "683c599ab0bd58f7eb2db084d824597c7b5e0485721648ea0f65651c249f3b8f"
+    },
+    {
+      "status": "modified",
+      "path": "frontend/src/views/DashboardView.vue",
+      "bytes": 55103,
+      "sha256": "86b7c178e0d6501c63425191e3d0fa254f36c4b15d7067973ba31bac74e5fb21"
+    },
+    {
+      "status": "modified",
+      "path": "frontend/src/views/InviteLanding.test.ts",
+      "bytes": 23734,
+      "sha256": "d816a8d4cda0b124eb379a5223486e91c36b076981a83658121f621458b7519e"
+    },
+    {
+      "status": "modified",
+      "path": "frontend/src/views/InviteLanding.vue",
+      "bytes": 11617,
+      "sha256": "31b1f6ecde0fc68a456361fc9613037480a921f021ee965405a827d39b7e81d7"
+    },
+    {
+      "status": "modified",
+      "path": "frontend/src/views/LoginView.test.ts",
+      "bytes": 70626,
+      "sha256": "084ca8cd69c1cd0c21efc7f0ab9e6b44898a6a70d663001054c20eca27f38233"
+    },
+    {
+      "status": "modified",
+      "path": "frontend/src/views/LoginView.vue",
+      "bytes": 55822,
+      "sha256": "794858fe51123a31a1338f63c9f456bd550f04ff05aa7996ac7c5d02ec3741fe"
+    },
+    {
+      "status": "modified",
+      "path": "frontend/src/views/SetupPassword.test.ts",
+      "bytes": 12058,
+      "sha256": "15ebf1085ed06bbd5662b12816c74851c7fb1c616cf6940d60e159feb1a78ba8"
+    },
+    {
+      "status": "modified",
+      "path": "frontend/src/views/SetupPassword.vue",
+      "bytes": 8641,
+      "sha256": "01f62b917724c3e891fc73f5e8e1089474dcdb6449e86e0e46c033e70d47ff91"
+    },
+    {
+      "status": "added",
+      "path": "frontend/src/views/SystemRecoveryView.test.ts",
+      "bytes": 2899,
+      "sha256": "51ff655258fbe036bc565431476fa654072b307fd51fe4bb477813c896174115"
+    },
+    {
+      "status": "added",
+      "path": "frontend/src/views/SystemRecoveryView.vue",
+      "bytes": 2319,
+      "sha256": "b8df279237ee88819a6c53f4d9793f68ee27b785f8adda132acf7bd4ea70e6d1"
+    },
+    {
+      "status": "modified",
+      "path": "frontend/src/views/WebRegister.test.ts",
+      "bytes": 37126,
+      "sha256": "33ed24e6a9e29646fe7b750b18121de7f708b0d201a62258b00a6337a6bbbdbc"
+    },
+    {
+      "status": "modified",
+      "path": "frontend/src/views/WebRegister.vue",
+      "bytes": 26395,
+      "sha256": "60aba8ddcb348c5ab3a8d08c5c3c4e4b2eb0c335d217261f3e7e0eebe34cfca9"
+    },
+    {
+      "status": "modified",
+      "path": "main.py",
+      "bytes": 22282,
+      "sha256": "b36bb46c728fe7ea1a43b857ab9885af13c65d3dafd24a7fa6393c3574ce76a2"
+    },
+    {
+      "status": "modified",
+      "path": "nginx.conf",
+      "bytes": 5401,
+      "sha256": "214dcd1e1c404526b2cce9188cf37aff7b7eb8dc3c4e34fd42bf144d57f569cb"
+    },
+    {
+      "status": "modified",
+      "path": "schemas.py",
+      "bytes": 17452,
+      "sha256": "60da14c49c2db2727c4199a1da8f59bfb6833588ab86a46cb8c6e6985e29f7c9"
+    },
+    {
+      "status": "modified",
+      "path": "scripts/setup_foreign_nginx.sh",
+      "bytes": 5786,
+      "sha256": "98665c39ce2419ab0c4cbb99dc564d4267680521cbb4204d0ac7af6296e835a9"
+    },
+    {
+      "status": "modified",
+      "path": "scripts/setup_iran_nginx.sh",
+      "bytes": 7595,
+      "sha256": "f2a880460f8275993eb66faf932aeff2eb8215e80c04385ecae002d3f0faaa6f"
+    },
+    {
+      "status": "modified",
+      "path": "tests/customer_live_auth_smoke.py",
+      "bytes": 12907,
+      "sha256": "77cf4766c4a08e28206c4ac104be012811b97dd7cddc414eb5091b4d1e6f4b0c"
+    },
+    {
+      "status": "modified",
+      "path": "tests/test_accountants_router.py",
+      "bytes": 15702,
+      "sha256": "fa650c45331c4b98ec3161ff23f33650b783575cbf2e06ee9f1f080ee9df4ff0"
+    },
+    {
+      "status": "modified",
+      "path": "tests/test_auth_router_login_otp_flows.py",
+      "bytes": 42293,
+      "sha256": "eea1d54c85a3a183dbcc0ad121584a74508cdd143bd3fa09b44722a52166de6f"
+    },
+    {
+      "status": "modified",
+      "path": "tests/test_auth_router_registration_flows.py",
+      "bytes": 64512,
+      "sha256": "cc8a6fd6d03748e21d8b4c5b4cf0efc838a5a152d72905a509ab08fdd49f16b0"
+    },
+    {
+      "status": "modified",
+      "path": "tests/test_authoritative_registration_postgres.py",
+      "bytes": 98796,
+      "sha256": "2f91251ca847042927bdab88a55cdd02cd45537c05829bcb2f732ac1e9c914b1"
+    },
+    {
+      "status": "modified",
+      "path": "tests/test_bot_admin_role.py",
+      "bytes": 6171,
+      "sha256": "0b0f01ff3c0ae6d1348af14236d4e9b6dbc172b87f100be58247ee78c95cc940"
+    },
+    {
+      "status": "modified",
+      "path": "tests/test_bot_panel_standard_actions.py",
+      "bytes": 22497,
+      "sha256": "78954c567bc9cffce94cf938d09d8d545eb02b18e66a6ee4e6a1ccd258e43db3"
+    },
+    {
+      "status": "modified",
+      "path": "tests/test_bot_start_invitation_entry.py",
+      "bytes": 10180,
+      "sha256": "bf89179a436a1a2d9ea4d34f208586d5072c00385521be7e25d12af00a607c46"
+    },
+    {
+      "status": "modified",
+      "path": "tests/test_bot_start_profile_token_success.py",
+      "bytes": 3578,
+      "sha256": "f1683aca727d71c97cc834a5adc21a7511f9da85e31666a1eb1de39c1fbd8eca"
+    },
+    {
+      "status": "modified",
+      "path": "tests/test_bot_start_registration_address.py",
+      "bytes": 3085,
+      "sha256": "92ef136831ca55bbfbcdb3e78d6f9eb15c1e355bb4e366cfda181cc00f4ae2a7"
+    },
+    {
+      "status": "modified",
+      "path": "tests/test_bot_start_registration_contact.py",
+      "bytes": 2759,
+      "sha256": "78b78e48897cc0d757c055412a372c659c52dcb7fb9426a4405ecdf55838fc76"
+    },
+    {
+      "status": "modified",
+      "path": "tests/test_customers_router.py",
+      "bytes": 39922,
+      "sha256": "fd3101fdac80882ad79cc6693ea03f3f50dce0149617b6440ac3ac1ddbf520d6"
+    },
+    {
+      "status": "modified",
+      "path": "tests/test_deploy_surface_smoke.py",
+      "bytes": 42413,
+      "sha256": "5deee6231ec2ba7168fd69f54d82dbbf9d51768a1c3f21d676e28075dc798e50"
+    },
+    {
+      "status": "modified",
+      "path": "tests/test_error_tracking.py",
+      "bytes": 7806,
+      "sha256": "3c6a8a7bbca4a105ca3faa11c4f20ebaa1feae0522d1b867a4f97e6a4c4af7ea"
+    },
+    {
+      "status": "modified",
+      "path": "tests/test_invitation_public_access.py",
+      "bytes": 6272,
+      "sha256": "a249599c86908683a6046b32d4d0e8ed705f4c01635352d06ff9bf5b825b02dc"
+    },
+    {
+      "status": "modified",
+      "path": "tests/test_invitations_router.py",
+      "bytes": 20919,
+      "sha256": "18d06fc28346e080b63c23b10beddbf96237228a32ffe51111347b31668ea290"
+    },
+    {
+      "status": "modified",
+      "path": "tests/test_logging_foundation.py",
+      "bytes": 14530,
+      "sha256": "d24c9aee849b9f5f8d3c28a20de9bfd85ebc5a9d230320313ade43d2e180f187"
+    },
+    {
+      "status": "modified",
+      "path": "tests/test_main_frontend_serving.py",
+      "bytes": 3210,
+      "sha256": "c53fd0e8bf47f613cbef6a2fdd0cb86edfe9fa813526d3394e340714007e1791"
+    },
+    {
+      "status": "modified",
+      "path": "tests/test_metrics.py",
+      "bytes": 6400,
+      "sha256": "43b29e821ce6f9eb6a8808156001b449cac85a0707e8ab69ba61da1d91f389d0"
+    },
+    {
+      "status": "modified",
+      "path": "tests/test_registration_stage1_contracts.py",
+      "bytes": 22638,
+      "sha256": "503859d179f1d468fb25e611313d8fcec7dd2f99a760ee0f8b04e3730db0bd04"
+    },
+    {
+      "status": "modified",
+      "path": "tests/test_render_release_artifacts.py",
+      "bytes": 6013,
+      "sha256": "5febfc848a16d95ac67580b6228f1e0dce18372b1ef9b5c935af2618974e3d9a"
+    },
+    {
+      "status": "modified",
+      "path": "tests/test_request_logging.py",
+      "bytes": 14045,
+      "sha256": "e7e920781879800cd43cafd58239011e452e0bc2e755c164a4f7db7d523139bd"
+    },
+    {
+      "status": "modified",
+      "path": "tests/test_stage5_direct_telegram_registration.py",
+      "bytes": 76583,
+      "sha256": "2edb8ee1fdcf1b35acdc1cc404d2d7c46ad81f6ca6abd476a5994a52f4b6cf1d"
+    }
+  ]
+}

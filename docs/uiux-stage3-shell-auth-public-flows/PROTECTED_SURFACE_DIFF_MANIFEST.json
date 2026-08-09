@@ -1,0 +1,272 @@
+{
+  "schemaVersion": 1,
+  "stage": "3",
+  "status": "stage3_complete",
+  "branch": "condidate/webapp-ui-ux-redesign-v2",
+  "comparisonBaseCommit": "3822df67a48e7ee3197bc6d67c79aa7ee84a7905",
+  "comparisonHeadCommit": "bfe4e59192d678eaf4776fbc025d3aa0f431896d",
+  "comparisonHeadStatus": "bound_from_git",
+  "stage3RuntimeImplementationAuthorized": true,
+  "stage3RuntimeWorkStarted": true,
+  "stage3TechnicalGate": "passed_with_disclosed_inherited_diagnostics_and_compose_fixture_caveat",
+  "stage3ProtectedDiffStatus": "passed_zero_unauthorized_drift",
+  "stage3EvidenceStatus": "passed_frozen_31_file_package",
+  "stage3SitesStatus": "passed_private_owner_only_source_bound",
+  "stage3FigmaClosureStatus": "passed_read_only_reference_hash_bound",
+  "nextAuthorizedRuntimeStage": "4",
+  "stage4RuntimeImplementationAuthorized": true,
+  "stage4RuntimeWorkStarted": false,
+  "stage3InvitationSecuritySourceSnapshot": {
+    "canonicalActiveWebInvitationPathPattern": "^/i/[A-Za-z0-9]{8}$",
+    "activeWebProducerSurfaces": [
+      "api",
+      "sms",
+      "bot_copy"
+    ],
+    "createListAndInternalRelationOmittedFields": [
+      "token",
+      "invitation_token"
+    ],
+    "onlyRawBearerResponseException": "GET /api/invitations/lookup/:code; no-store",
+    "onlyRawBearerUrlException": "explicit-user-action https://t.me/<bot>?start=<raw-invitation>",
+    "retiredRawValidation": "GET /api/invitations/validate/{token}; unconditional 410/no-store before database access",
+    "retiredRawRegistrationMutations": "unconditional 410/no-store before Redis/database/OTP/provider",
+    "sqlAlchemyEngineHideParameters": true,
+    "prefixAwareRegistrationBearerRedaction": [
+      "INV",
+      "ACCT",
+      "CUST",
+      "REG"
+    ],
+    "loggingAndErrorTrackingFocusedRegression": "passed_23_of_23",
+    "browserEvidenceFigmaSitesAndFinalMetrics": "passed",
+    "implementationCommit": "bfe4e59192d678eaf4776fbc025d3aa0f431896d",
+    "implementationCommitStatus": "bound_from_git"
+  },
+  "freezePolicy": "Unauthorized source, interior, behavior, or visual drift remains zero. Base-identical is required for protected interiors and legacy normal fixtures, while exactly two Stage 3 shared-behavior deltas are authorized only with explicit disposition and independent QA.",
+  "expectedAtClosure": {
+    "changedProtectedFullPathCount": 0,
+    "changedProtectedFullPaths": [],
+    "changedProtectedRegionCount": 0,
+    "unauthorizedProtectedInteriorSourceDriftCount": 0,
+    "unauthorizedProtectedInteriorBehaviorDriftCount": 0,
+    "unauthorizedProtectedVisualDriftCount": 0,
+    "protectedLegacyNormalFixtureDriftCount": 0,
+    "authorizedSharedBehaviorDeltaCount": 2,
+    "snapshotUpdatesWithoutDisposition": 0,
+    "emptyDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "equivalenceBoundary": {
+    "baseIdenticalRequiredFor": [
+      "protected_full_route_interiors_after_allowed_load",
+      "named_mixed_route_protected_source_regions",
+      "protected_legacy_normal_behavior_fixtures",
+      "protected_legacy_normal_visual_fixtures"
+    ],
+    "baseIdenticalNotClaimedFor": [
+      "authorized_home_only_pwa_disposition",
+      "authorized_access_recovery_disposition"
+    ],
+    "unauthorizedDriftAllowed": false,
+    "verificationStatus": "passed"
+  },
+  "intentionalSharedBehaviorDispositions": [
+    {
+      "id": "stage3-pwa-home-only",
+      "authorization": "Stage 3 Home-only PWA contract",
+      "baselineBehavior": "The shared PWA layer could render outside Home, including protected routes when eligible.",
+      "stage3Behavior": "The PWA prompt is Home-owned and no longer renders on protected routes.",
+      "classification": "intentional_shared_behavior_delta_not_protected_interior_drift",
+      "protectedInteriorImpactRequired": "none",
+      "legacyNormalFixtureExpectation": "base_identical",
+      "qaStatus": "passed",
+      "evidencePath": "assets/browser-evidence/stage3-browser-acceptance-metrics.json",
+      "evidenceSha256": "e93d7ffa69d7dbbacbf6749f3a49030da9895b1e987925d96f23083dbaf3f52c"
+    },
+    {
+      "id": "stage3-access-denial-unavailable-system-recovery",
+      "authorization": "Stage 3 explicit forbidden and deep-link recovery contract",
+      "baselineBehavior": "Shared route access failure did not use the canonical System Recovery outcomes.",
+      "stage3Behavior": "Authoritative forbidden and unavailable outcomes route to System Recovery before a protected interior renders.",
+      "classification": "intentional_shared_guard_delta_not_protected_interior_drift",
+      "protectedInteriorImpactRequired": "none",
+      "legacyNormalFixtureExpectation": "base_identical",
+      "qaStatus": "passed",
+      "evidencePath": "assets/browser-evidence/stage3-browser-acceptance-metrics.json",
+      "evidenceSha256": "e93d7ffa69d7dbbacbf6749f3a49030da9895b1e987925d96f23083dbaf3f52c"
+    }
+  ],
+  "protectedRoutes": {
+    "full": [
+      "/market",
+      "/chat",
+      "/share-receive",
+      "/admin/channels"
+    ],
+    "mixed": [
+      {
+        "path": "/",
+        "protectedInteriors": [
+          "home-market-widget"
+        ]
+      },
+      {
+        "path": "/admin/messages",
+        "protectedInteriors": [
+          "admin-messages-market-delivery",
+          "admin-messages-messenger-delivery"
+        ]
+      },
+      {
+        "path": "/admin/system",
+        "protectedInteriors": [
+          "trading-settings-market-controls"
+        ]
+      }
+    ]
+  },
+  "protectedFullFiles": [
+    "frontend/src/views/MarketView.vue",
+    "frontend/src/components/OffersList.vue",
+    "frontend/src/components/OfferPreviewModal.vue",
+    "frontend/src/components/TradeLotSuggestionAlert.vue",
+    "frontend/src/composables/useMarketRuntime.ts",
+    "frontend/src/composables/useOffers.ts",
+    "frontend/src/utils/offerDraftText.ts",
+    "frontend/src/views/MessengerView.vue",
+    "frontend/src/components/ChatView.vue",
+    "frontend/src/views/ShareReceiveView.vue",
+    "frontend/src/components/CreateChannelView.vue"
+  ],
+  "protectedPathPatterns": [
+    "frontend/src/components/ui/AppOffer*.vue",
+    "frontend/src/components/ui/AppSettlementBadge.vue",
+    "frontend/src/components/ui/AppTradeActionButton.vue",
+    "frontend/src/components/chat/**",
+    "frontend/src/components/messenger-v2/**",
+    "frontend/src/composables/chat/**",
+    "frontend/src/services/chat*/**",
+    "frontend/src/services/chat*.ts",
+    "frontend/src/stores/chat/**",
+    "frontend/src/types/chat.ts",
+    "frontend/src/utils/chat*.ts",
+    "frontend/src/utils/messenger*.ts",
+    "frontend/src/styles/messenger-design-tokens.css"
+  ],
+  "protectedPartialFiles": [
+    {
+      "path": "frontend/src/views/DashboardView.vue",
+      "surface": "home-market-widget",
+      "regionAlgorithm": "stage3-dashboard-market-region-v1",
+      "sectionCount": 6,
+      "baseCompositeBytes": 4553,
+      "baseCompositeSha256": "f25c01dac38db208517047ffc0f2458e2c89868e988a6d7f68749221db106860",
+      "sourceObservedHeadCompositeBytes": 4553,
+      "sourceObservedHeadCompositeSha256": "f25c01dac38db208517047ffc0f2458e2c89868e988a6d7f68749221db106860",
+      "sourceObservedBaseEqualsHead": true,
+      "finalGitBoundHeadCompositeSha256": "f25c01dac38db208517047ffc0f2458e2c89868e988a6d7f68749221db106860",
+      "comparisonNote": "The retired d037fff0 whole-file/legacy extraction is not the Stage 3 protected-region contract. The final guard and Git-bound head both match the exact v1 composite.",
+      "verificationStatus": "passed_git_bound"
+    },
+    {
+      "path": "frontend/src/components/AdminMessagesView.vue",
+      "surface": "admin-messages-market-and-messenger-delivery",
+      "baseRegionSha256": "5572589b83a8a07776d5b983777a14a91e2104f9577fa76960df5a54562a431a",
+      "headRegionSha256": "5572589b83a8a07776d5b983777a14a91e2104f9577fa76960df5a54562a431a",
+      "verificationStatus": "passed_equal"
+    },
+    {
+      "path": "frontend/src/components/TradingSettings.vue",
+      "surface": "trading-settings-market-controls",
+      "baseRegionSha256": "509dd32235e1cb98aa164940cf7722604f16b6518f7387699554bf3a828ecfaa",
+      "headRegionSha256": "509dd32235e1cb98aa164940cf7722604f16b6518f7387699554bf3a828ecfaa",
+      "verificationStatus": "passed_equal"
+    }
+  ],
+  "sharedShellPolicy": {
+    "pathsPotentiallyChangeableByStage3": [
+      "frontend/src/App.vue",
+      "frontend/src/components/AppAuthenticatedShell.vue",
+      "frontend/src/components/BottomNav.vue",
+      "frontend/src/components/AppToasts.vue",
+      "frontend/src/components/PWAInstallOverlay.vue",
+      "frontend/src/assets/main.css"
+    ],
+    "sourceFreeze": false,
+    "protectedInteriorAndLegacyNormalFixturesMustRemainBaseIdentical": true,
+    "authorizedSharedBehaviorDeltaIds": [
+      "stage3-pwa-home-only",
+      "stage3-access-denial-unavailable-system-recovery"
+    ],
+    "legacyFalseBranchQa": {
+      "useSessionApprovalRuntime": "passed",
+      "SessionApprovalModal": "passed",
+      "AppToasts": "passed",
+      "BottomNav": "passed"
+    },
+    "verificationStatus": "passed"
+  },
+  "stage4CarryForward": {
+    "component": "frontend/src/components/workspace/WorkspaceShell.vue",
+    "adapterFamily": "ds-workspace-*",
+    "stage3MayAbsorb": false,
+    "verificationStatus": "preserved_for_stage4_not_authorized"
+  },
+  "historicalVisualCarryForwards": {
+    "sourceStage": 1,
+    "count": 5,
+    "snapshotUpdateAllowedWithoutExplicitDisposition": false,
+    "items": [
+      "mobile-390:market",
+      "mobile-390:customers",
+      "mobile-390:profile",
+      "desktop-1440:profile",
+      "mobile-390:invite-landing"
+    ],
+    "stage3Disposition": "passed_no_unauthorized_visual_drift"
+  },
+  "verification": {
+    "status": "passed_git_bound",
+    "measuredAt": "2026-08-09T12:28:38.180Z",
+    "implementationCommit": "bfe4e59192d678eaf4776fbc025d3aa0f431896d",
+    "implementationTree": "0b0e1b1e6f615a34622659fca351507e4f7c1404",
+    "implementationParent": "3822df67a48e7ee3197bc6d67c79aa7ee84a7905",
+    "exactPathCount": 120,
+    "stagedPathSetSha256": "fabe8de11af4c13240ba4adc62a717d4d4aa78213345e98be48ac8566e496f0e",
+    "implementationCommitStatus": "bound_from_git",
+    "changedProtectedFullPathCount": 0,
+    "changedProtectedFullPaths": [],
+    "protectedFullDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "protectedPartialRegionDiffStatus": "passed_equal",
+    "unauthorizedProtectedInteriorSourceDriftCount": 0,
+    "unauthorizedProtectedInteriorBehaviorDriftCount": 0,
+    "unauthorizedProtectedVisualDriftCount": 0,
+    "protectedLegacyNormalFixtureDriftCount": 0,
+    "intentionalDispositionQaStatus": "passed",
+    "legacyFalseBranchQaStatus": "passed",
+    "snapshotsChanged": 0,
+    "artifactPath": "assets/gates/stage3-technical-gates.json",
+    "artifactBytes": 6025,
+    "artifactSha256": "e4685bf2d5e4f6e1e4fc0c9dc05629418e4be22a434b2fd9df1786b1bd06f8c1"
+  },
+  "sitesPreview": {
+    "status": "passed_private_owner_only_source_bound",
+    "projectId": "appgprj_6a787773edb081918c882d90fdaa72a8",
+    "slug": "trading-bot-uiux-stage3-auth",
+    "versionId": "appgprj_6a787773edb081918c882d90fdaa72a8~appgver_90ada74ab6348191834f5fcc2c4a74ed",
+    "versionNumber": 1,
+    "deploymentId": "appgdep_6a787879a7dc81919502f4ff014d1dc5",
+    "deploymentStatus": "succeeded",
+    "url": "https://trading-bot-uiux-stage3-auth.mohsenbarari235.chatgpt.site",
+    "previewSourceCommit": "6a40b53a7333c9841f083456de88e701b98c4bd2",
+    "accessPolicy": "custom_owner_only",
+    "allowedUserCount": 1,
+    "groupCount": 0,
+    "externalVisitorCount": 0,
+    "anonymousRootAndEvidenceStatus": 401,
+    "environmentEntryCount": 0,
+    "errorsOnlyLogCount": 0,
+    "provenancePath": "SITES_PROVENANCE.json",
+    "provenanceSha256": "ba5188430eb083f1c4a13793ea973b5f2590812a94608f3c3dabfc55b6c0b0b8"
+  }
+}

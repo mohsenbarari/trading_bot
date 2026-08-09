@@ -1,0 +1,168 @@
+{
+  "schemaVersion": 1,
+  "stage": "3",
+  "status": "settled_with_disclosed_inherited_diagnostics_and_compose_fixture_caveat",
+  "comparisonBaseCommit": "3822df67a48e7ee3197bc6d67c79aa7ee84a7905",
+  "claimBoundary": "This ledger records the settled Stage 3 gates. ESLint and Prettier are delta-clean rather than globally clean. The literal clean-worktree Compose test is not called passing: its two failures are isolated to the intentionally absent ignored .env fixture, and a byte-identical isolated mirror with an empty .env passes both subtests.",
+  "frontend": {
+    "serialVitest": {
+      "status": "passed",
+      "artifactPath": "assets/gates/stage3-runtime-final.json",
+      "artifactBytes": 219627,
+      "artifactSha256": "73de6208d8dc9ad8b3c67c3cf81548946898676ff8719b5ffca4faff52fa18b9",
+      "testFiles": 58,
+      "testSuites": 118,
+      "tests": 664,
+      "failed": 0,
+      "durationMs": 222548.052,
+      "snapshotUpdates": 0
+    },
+    "guardSelfTests": {
+      "status": "passed",
+      "tests": 45,
+      "failed": 0
+    },
+    "guardUi": {
+      "status": "passed",
+      "v2CssFiles": 3,
+      "routes": 30,
+      "protectedRegion": {
+        "algorithm": "stage3-dashboard-market-region-v1",
+        "sections": 6,
+        "bytes": 4553,
+        "sha256": "f25c01dac38db208517047ffc0f2458e2c89868e988a6d7f68749221db106860"
+      }
+    },
+    "vueTsc": {
+      "status": "passed",
+      "exitCode": 0,
+      "durationSeconds": null
+    },
+    "build": {
+      "status": "passed",
+      "exitCode": 0,
+      "modules": 2160,
+      "viteDurationSeconds": 39.88,
+      "pwaEntries": 166,
+      "pwaKiB": 4178.09,
+      "contentAggregateSha256": "43f355493275ae596c4953d907cf7b33e0632df2c131d3561bb204562c978be2",
+      "pathSizeAggregateSha256": "b2ca3a4644d92243de0afbee93fa2f24e11c743615fddb0a96842c1eb53d0e5f",
+      "warnings": [
+        "Browserslist database age",
+        "large chunk advisory"
+      ]
+    },
+    "eslint": {
+      "status": "passed_stage3_delta_no_new_diagnostics",
+      "rawStatus": "nonzero_inherited_diagnostics_disclosed",
+      "rawExitCode": 1,
+      "exactFiles": 66,
+      "errors": 184,
+      "warnings": 1,
+      "artifactPath": "assets/gates/stage3-eslint-final.json",
+      "artifactBytes": 482285,
+      "artifactSha256": "8bb5b1f13d315d44831675d4edda16f56e3c4ce7244d3b3b528303591f24a7a2",
+      "deltaArtifactPath": "assets/gates/stage3-eslint-delta.json",
+      "deltaArtifactBytes": 15717,
+      "deltaArtifactSha256": "d905b42b822da31f7ee7556ceae7f583de378cbc601175e037afcd8c1e0965c1",
+      "stage3NewDiagnostics": 0,
+      "baseOnlyRemoved": 83,
+      "exactMatched": 148,
+      "semanticMatched": 37
+    },
+    "prettier": {
+      "status": "passed_stage3_delta_no_new_hunks",
+      "rawStatus": "nonzero_inherited_format_debt_and_svg_parser_inference_disclosed",
+      "rawExitCode": 2,
+      "files": 77,
+      "inheritedStyleDirtyFiles": 14,
+      "genericParserErrorFile": "frontend/public/uiux-v2-brand-mark.svg",
+      "explicitSvgHtmlParserStatus": "passed",
+      "systemRecoveryFocusedStatus": "passed",
+      "deltaArtifactPath": "assets/gates/stage3-prettier-delta.json",
+      "deltaArtifactBytes": 3468,
+      "deltaArtifactSha256": "f104fbf9a5a4bb6fe182e4e24c1e4a879161bba4716dda22c9209ed12484a60a",
+      "currentHunks": 343,
+      "baseHunks": 345,
+      "stage3NewHunks": 0,
+      "baseOnlyRemoved": 4,
+      "intentionalException": "frontend/index.html exact boot privacy meta spelling"
+    }
+  },
+  "backendAndDeploy": {
+    "g1": {
+      "status": "passed_with_opt_in_postgres_skips",
+      "passed": 231,
+      "skipped": 20,
+      "durationSeconds": 16.7
+    },
+    "g2": {
+      "status": "passed",
+      "passed": 47,
+      "total": 47,
+      "durationSeconds": 3.65
+    },
+    "g3LiteralCleanWorktree": {
+      "status": "failed_fixture_prerequisite_disclosed",
+      "tests": 46,
+      "exitCode": 1,
+      "failureRecords": 2,
+      "failureScope": "two Compose subtests only",
+      "cause": "ignored .env is absent from the literal clean worktree",
+      "durationSeconds": 19.38,
+      "allNonComposeTestsPassed": true,
+      "dockerfileChecksPassed": true,
+      "nginxSyntaxAndRuntimeChecksPassed": true,
+      "blanketPassClaimed": false
+    },
+    "isolatedByteIdenticalComposeMirror": {
+      "status": "passed",
+      "fixture": "dummy empty .env only",
+      "passed": 1,
+      "total": 1,
+      "bothComposeSubtestsPassed": true,
+      "exitCode": 0
+    },
+    "pyCompile": {
+      "status": "passed",
+      "exitCode": 0
+    },
+    "bashSyntax": {
+      "status": "passed",
+      "exitCode": 0
+    },
+    "sourceTestBinding": {
+      "status": "pre_post_identical",
+      "aggregateSha256": "daa5d390693f3e919ddc1e80a1ff910dc01fdb06b84a19720681a06aca1eee90"
+    }
+  },
+  "browserAcceptance": {
+    "status": "passed",
+    "runId": "uiux-stage3-browser-20260809T115615647Z",
+    "metricsPath": "assets/browser-evidence/stage3-browser-acceptance-metrics.json",
+    "metricsBytes": 105542,
+    "metricsSha256": "e93d7ffa69d7dbbacbf6749f3a49030da9895b1e987925d96f23083dbaf3f52c",
+    "assertions": 23,
+    "screenshots": 8,
+    "measuredAcceptanceDurationSeconds": 109.5,
+    "sourcePrePostIdentical": true,
+    "nineFileBytes": 817599,
+    "nineFileAggregateSha256": "769d588660fead77e1bdb00f0dd9cf871c8ef1a0ea48f7e03e25b4985c8b56c9",
+    "harnessPath": "assets/browser-evidence/stage3-browser-acceptance-harness.mjs",
+    "harnessBytes": 94749,
+    "harnessSha256": "6c47b4f691219847390d8d91c8d018a96e4bb7d882f033e4e86c2f17556749d9"
+  },
+  "protectedBoundary": {
+    "status": "passed",
+    "changedProtectedFullPathCount": 0,
+    "unauthorizedProtectedInteriorDriftCount": 0,
+    "protectedLegacyNormalFixtureDriftCount": 0,
+    "protectedDiffBytes": 0,
+    "protectedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "dashboardMarketRegion": {
+      "sections": 6,
+      "bytes": 4553,
+      "sha256": "f25c01dac38db208517047ffc0f2458e2c89868e988a6d7f68749221db106860"
+    }
+  }
+}

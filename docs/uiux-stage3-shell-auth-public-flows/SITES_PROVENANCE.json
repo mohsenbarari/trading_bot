@@ -1,0 +1,119 @@
+{
+  "schemaVersion": 1,
+  "stage": "3",
+  "status": "passed_private_owner_only_source_bound",
+  "claimBoundary": "This separate Sites closure artifact remains outside the immutable 31-file local evidence package. It proves the private source-bound preview; Stage 3 completion and Stage 4 authorization additionally depend on the independently recorded Git and technical gates.",
+  "canonical": {
+    "kind": "figma_read_only_reference",
+    "fileKey": "z8jgJxST4O2APzWnlyP9gv",
+    "pageId": "168:1974",
+    "nodeIds": [
+      "168:2017",
+      "168:2018",
+      "168:1979",
+      "168:1980"
+    ],
+    "detachedInstanceCount": 0,
+    "localEvidenceRun": "stage3-local-20260809T122824300Z-21fd706e",
+    "localEvidenceAssertions": {
+      "passed": 21,
+      "total": 21
+    },
+    "frozenEvidencePackage": {
+      "fileCount": 31,
+      "bytes": 2599621,
+      "aggregateSha256": "ba851f9714c55d1d35d15e49d51fca31ebf0ca6c20de3b31b8a2592567489d24",
+      "mutatedBySitesClosure": false
+    }
+  },
+  "source": {
+    "repositoryPath": "/tmp/uiux-stage3-shell-auth-public-flows-sites-preview",
+    "branch": "main",
+    "commit": "6a40b53a7333c9841f083456de88e701b98c4bd2",
+    "worktreeClean": true,
+    "evidenceLockSha256": "c1c834da6b9113f59bdaa9c74d553bfeec81845c04d80f864a2cd75d85b035a6",
+    "projectLockSha256": "a121e22ac0572560dced048d4af9aa1264dbe47d75bd5ba5ca7ccc23631f8ab7d",
+    "hostingConfigSha256": "c9919da4173d03cbc028167babdf6eae12f8e393f0ab216925e1e94909d39cd7",
+    "mainWorktreeAlteredBySitesWorkflow": false,
+    "implementationCommit": "bfe4e59192d678eaf4776fbc025d3aa0f431896d",
+    "implementationTree": "0b0e1b1e6f615a34622659fca351507e4f7c1404",
+    "implementationParent": "3822df67a48e7ee3197bc6d67c79aa7ee84a7905",
+    "exactPathCount": 120,
+    "stagedPathSetSha256": "fabe8de11af4c13240ba4adc62a717d4d4aa78213345e98be48ac8566e496f0e",
+    "implementationCommitStatus": "bound_from_git"
+  },
+  "archives": {
+    "local": {
+      "path": "/tmp/uiux-stage3-shell-auth-public-flows-sites-dist.tgz",
+      "fileCount": 42,
+      "bytes": 1272101,
+      "sha256": "060d1369eeab1d3790ecab7a091ef3df811a850771e5bd337b0208e56bcab7d4"
+    },
+    "providerNormalized": {
+      "fileCount": 42,
+      "bytes": 1843200,
+      "sha256": "e9a1f2a94da6c3bd59dbf68594e41184a160dd7c653f14183a3a0c7d6ffc62c5"
+    }
+  },
+  "sites": {
+    "title": "Trading Bot UI/UX — Stage 3 Shell, Auth & Public Flows",
+    "slug": "trading-bot-uiux-stage3-auth",
+    "projectId": "appgprj_6a787773edb081918c882d90fdaa72a8",
+    "versionId": "appgprj_6a787773edb081918c882d90fdaa72a8~appgver_90ada74ab6348191834f5fcc2c4a74ed",
+    "versionNumber": 1,
+    "versionSourceCommit": "6a40b53a7333c9841f083456de88e701b98c4bd2",
+    "deploymentId": "appgdep_6a787879a7dc81919502f4ff014d1dc5",
+    "deploymentStatus": "succeeded",
+    "url": "https://trading-bot-uiux-stage3-auth.mohsenbarari235.chatgpt.site",
+    "access": {
+      "status": "passed",
+      "policy": "custom",
+      "effectiveScope": "owner_only",
+      "allowedUserCount": 1,
+      "allowedUserRole": "owner",
+      "groupCount": 0,
+      "externalVisitorCount": 0
+    },
+    "anonymousProbes": {
+      "requestContext": "anonymous_without_credentials_or_bypass",
+      "root": {
+        "path": "/",
+        "status": 401,
+        "cacheControl": "no-store",
+        "referrerPolicy": "no-referrer"
+      },
+      "evidence": {
+        "path": "/docs/uiux-stage3-shell-auth-public-flows/stage3-shell-auth-public-flows-evidence.html",
+        "status": 401,
+        "cacheControl": "no-store",
+        "referrerPolicy": "no-referrer"
+      },
+      "status": "passed"
+    },
+    "postDeployErrorsOnlyLogs": {
+      "errorCount": 0,
+      "status": "passed"
+    },
+    "environment": {
+      "entryCount": 0
+    },
+    "bypass": {
+      "providerManagedStateObservedPresent": true,
+      "valueRead": false,
+      "usedByWorkflow": false,
+      "persistedInSource": false,
+      "persistedInArchive": false,
+      "persistedInDocs": false,
+      "exposedToUserOrArtifacts": false,
+      "valueHandling": "never_read_never_echoed"
+    }
+  },
+  "governance": {
+    "implementationCommit": "bfe4e59192d678eaf4776fbc025d3aa0f431896d",
+    "implementationCommitStatus": "bound_from_git",
+    "stage3Status": "stage3_complete",
+    "nextAuthorizedRuntimeStage": "4",
+    "stage4RuntimeImplementationAuthorized": true,
+    "stage4RuntimeWorkStarted": false
+  }
+}

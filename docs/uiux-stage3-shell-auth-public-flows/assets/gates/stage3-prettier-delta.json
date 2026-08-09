@@ -1,0 +1,132 @@
+{
+  "schemaVersion": 1,
+  "baseCommit": "3822df67a48e7ee3197bc6d67c79aa7ee84a7905",
+  "scope": {
+    "frontendFiles": 77,
+    "prettierFiles": 77
+  },
+  "rawCheck": {
+    "exitCode": 2,
+    "styleDirtyFiles": 14,
+    "parserErrors": 1,
+    "parserErrorFile": "public/uiux-v2-brand-mark.svg"
+  },
+  "explicitSvgCheck": {
+    "parser": "html",
+    "exitCode": 0
+  },
+  "comparison": {
+    "currentHunks": 343,
+    "baseHunks": 345,
+    "exactBaseMatched": 322,
+    "semanticOrContextMatchedCurrent": 21,
+    "semanticOrContextMatchedBase": 19,
+    "stage3New": 0,
+    "baseOnlyRemoved": 4
+  },
+  "intentionalExceptions": [
+    {
+      "file": "index.html",
+      "line": 6,
+      "reason": "Executable boot privacy contract requires exact legacy meta spelling without self-closing slash; base document is already Prettier-dirty."
+    }
+  ],
+  "files": [
+    {
+      "file": "index.html",
+      "currentHunks": 15,
+      "baseHunks": 13,
+      "classification": "inherited/context + intentional contract exception"
+    },
+    {
+      "file": "src/components/BottomNav.test.ts",
+      "currentHunks": 14,
+      "baseHunks": 14,
+      "classification": "inherited"
+    },
+    {
+      "file": "src/components/BottomNav.vue",
+      "currentHunks": 35,
+      "baseHunks": 39,
+      "classification": "inherited; Stage3-new=0; base-only removed=4"
+    },
+    {
+      "file": "src/components/CreateInvitationView.test.ts",
+      "currentHunks": 20,
+      "baseHunks": 20,
+      "classification": "inherited/context"
+    },
+    {
+      "file": "src/components/OwnerAccountantManagerModal.test.ts",
+      "currentHunks": 17,
+      "baseHunks": 17,
+      "classification": "inherited"
+    },
+    {
+      "file": "src/components/OwnerCustomerManagerModal.test.ts",
+      "currentHunks": 17,
+      "baseHunks": 17,
+      "classification": "inherited/context"
+    },
+    {
+      "file": "src/composables/useOwnerAccountants.ts",
+      "currentHunks": 5,
+      "baseHunks": 5,
+      "classification": "inherited"
+    },
+    {
+      "file": "src/composables/useOwnerCustomers.ts",
+      "currentHunks": 10,
+      "baseHunks": 10,
+      "classification": "inherited"
+    },
+    {
+      "file": "src/composables/useOwnerRelations.test.ts",
+      "currentHunks": 14,
+      "baseHunks": 14,
+      "classification": "inherited"
+    },
+    {
+      "file": "src/router/systemRecovery.ts",
+      "currentHunks": 0,
+      "baseHunks": 0,
+      "classification": "new file formatted"
+    },
+    {
+      "file": "src/views/AccountantWorkspaceView.test.ts",
+      "currentHunks": 10,
+      "baseHunks": 10,
+      "classification": "inherited/context"
+    },
+    {
+      "file": "src/views/AccountantWorkspaceView.vue",
+      "currentHunks": 52,
+      "baseHunks": 52,
+      "classification": "inherited"
+    },
+    {
+      "file": "src/views/CustomerWorkspaceView.test.ts",
+      "currentHunks": 10,
+      "baseHunks": 10,
+      "classification": "inherited/context"
+    },
+    {
+      "file": "src/views/CustomerWorkspaceView.vue",
+      "currentHunks": 76,
+      "baseHunks": 76,
+      "classification": "inherited"
+    },
+    {
+      "file": "src/views/DashboardView.vue",
+      "currentHunks": 48,
+      "baseHunks": 48,
+      "classification": "inherited; Stage3-new=0; protected slices untouched"
+    },
+    {
+      "file": "public/uiux-v2-brand-mark.svg",
+      "currentHunks": 0,
+      "baseHunks": 0,
+      "classification": "new file formatted; requires explicit html parser"
+    }
+  ]
+}

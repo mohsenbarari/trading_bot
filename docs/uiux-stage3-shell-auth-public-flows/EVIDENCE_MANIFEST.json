@@ -1,0 +1,195 @@
+{
+  "schemaVersion": 1,
+  "stage": "3",
+  "status": "local_evidence_inputs_frozen",
+  "comparisonBaseCommit": "3822df67a48e7ee3197bc6d67c79aa7ee84a7905",
+  "stageCompleteAuthority": false,
+  "sitesProven": false,
+  "claimBoundary": "This manifest freezes local evidence inputs only. It does not mark Stage 3 complete, create a new Figma freeze, prove Sites access control, bind a Git implementation commit, or authorize Stage 4.",
+  "figmaReference": {
+    "status": "read_only_reference_hash_bound",
+    "newFreezeCreated": false,
+    "captureCount": 4,
+    "bytes": 196931,
+    "aggregateSha256": "98fed43b41661d2f63c605bfa8a68c42fb35ba514633cba8da84ce5ae31ccdc7"
+  },
+  "browserEvidence": {
+    "status": "passed",
+    "runId": "uiux-stage3-browser-20260809T115615647Z",
+    "assertions": 23,
+    "screenshots": 8,
+    "viewports": 8,
+    "nineFileBytes": 817599,
+    "reportedNineFileAggregateSha256": "769d588660fead77e1bdb00f0dd9cf871c8ef1a0ea48f7e03e25b4985c8b56c9",
+    "manifestProjectionAggregateSha256": "e59a649abc54732269e61689c9a1c9777cff2b742a92fc1d910417a2be42ef90",
+    "metricsSha256": "e93d7ffa69d7dbbacbf6749f3a49030da9895b1e987925d96f23083dbaf3f52c",
+    "harnessSha256": "6c47b4f691219847390d8d91c8d018a96e4bb7d882f033e4e86c2f17556749d9"
+  },
+  "runtimeSourceBinding": {
+    "path": "assets/gates/stage3-runtime-source-binding.json",
+    "bytes": 24599,
+    "sha256": "d3161a120e32ec68f9edf8b67f7e210b6eb05b13d16d058daa85083d9f24075c",
+    "sourceCount": 120,
+    "modifiedCount": 98,
+    "addedCount": 22,
+    "deletedCount": 0,
+    "aggregateSha256": "6c9a3f0bcd96635a1fb40fda00278401c4f54da87d7535132cd342945cf5f87f"
+  },
+  "protectedBoundary": {
+    "unauthorizedDriftCount": 0,
+    "diffBytes": 0,
+    "diffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "dashboardMarketRegion": {
+      "sections": 6,
+      "bytes": 4553,
+      "sha256": "f25c01dac38db208517047ffc0f2458e2c89868e988a6d7f68749221db106860"
+    }
+  },
+  "localCapture": {
+    "harness": "capture-evidence.cjs",
+    "html": "stage3-shell-auth-public-flows-evidence.html",
+    "outputDirectory": "assets/local-evidence",
+    "outputPolicy": "exact",
+    "networkPolicy": "http_and_https_blocked",
+    "requiredIntegrity": [
+      "all_input_bytes_and_sha256_exact",
+      "runtime_source_binding_current",
+      "pre_post_dom_equal",
+      "pre_post_audit_equal",
+      "post_capture_remeasurement",
+      "all_png_nonblank",
+      "console_page_request_errors_zero",
+      "publication_residue_zero"
+    ],
+    "expectedFiles": [
+      "local-stage3-browser-proof.png",
+      "local-stage3-figma-reference.png",
+      "local-stage3-gates-protected.png",
+      "local-stage3-overview.png",
+      "local-stage3-secure-registration.png",
+      "local-stage3-shell-auth-public-flows-validation-metrics.json",
+      "local-stage3-shell-matrix.png"
+    ]
+  },
+  "inputCount": 23,
+  "inputBytes": 1955057,
+  "inputProjectionAlgorithm": "sha256(JSON.stringify(inputs projected to path,bytes,sha256 in manifest order))",
+  "inputProjectionAggregateSha256": "2e21ff0d75cefb8593f283d5e29fbcd84e88f9b1458220cc75816fe6d1877ff8",
+  "inputs": [
+    {
+      "path": "FIGMA_SNAPSHOT_MANIFEST.json",
+      "bytes": 2146,
+      "sha256": "08cc6ec8ec7df57a6277377a7d0f123870d81fec7bffe08e359aa18e9d35b4c6"
+    },
+    {
+      "path": "assets/browser-evidence/home-pwa-positive-mobile-390.png",
+      "bytes": 101042,
+      "sha256": "e21907ae908dd6e5ac8cc1bcb6fd141325996c378be6438456be30de5c21b315"
+    },
+    {
+      "path": "assets/browser-evidence/home-standard-desktop-1440.png",
+      "bytes": 288820,
+      "sha256": "13a17448149d425cb31a6d7775d3d0f91d1457129da1b2097b37681dfcf6482b"
+    },
+    {
+      "path": "assets/browser-evidence/layer-coexistence-session-connection-toast-nav-mobile-390.png",
+      "bytes": 63968,
+      "sha256": "b17786f94187000f5f880478c73f6337cea4a9540dfccbe9b4e296a7faefda59"
+    },
+    {
+      "path": "assets/browser-evidence/legacy-session-modal-protected-market-mobile-390.png",
+      "bytes": 52372,
+      "sha256": "08e9c3b0324af8179e099f97930854dfd118b6043b86a2f9a019d4814bd49f49"
+    },
+    {
+      "path": "assets/browser-evidence/login-public-mobile-390.png",
+      "bytes": 50548,
+      "sha256": "0194ae5b077e3dca06ad8ff0354a2c063454ad8de8410d2fc15c51ac82d78077"
+    },
+    {
+      "path": "assets/browser-evidence/registration-resumed-step-3-mobile-390.png",
+      "bytes": 47631,
+      "sha256": "519f4d728e12bfb1e994e88c4a5ca151c050d48bdb625cd13da1e9e21521e974"
+    },
+    {
+      "path": "assets/browser-evidence/registration-step-4-retained-marker-mobile-390.png",
+      "bytes": 52531,
+      "sha256": "7c17b4e465cc3ccb207ad8dc6c8503ec38d2e5a12ef2aaeb33fd111eaf553dca"
+    },
+    {
+      "path": "assets/browser-evidence/setup-password-focused-mobile-390.png",
+      "bytes": 55145,
+      "sha256": "497d9af385649ccd404f406a80b886b650dd00c712c04688f1a0d8c685283d48"
+    },
+    {
+      "path": "assets/browser-evidence/stage3-browser-acceptance-harness.mjs",
+      "bytes": 94749,
+      "sha256": "6c47b4f691219847390d8d91c8d018a96e4bb7d882f033e4e86c2f17556749d9"
+    },
+    {
+      "path": "assets/browser-evidence/stage3-browser-acceptance-metrics.json",
+      "bytes": 105542,
+      "sha256": "e93d7ffa69d7dbbacbf6749f3a49030da9895b1e987925d96f23083dbaf3f52c"
+    },
+    {
+      "path": "assets/figma/figma-stage3-auth-168-2017.png",
+      "bytes": 20697,
+      "sha256": "61c13fdeb43a342e387046d22abdc8102205e2c5ed0d0c05825ee9fffd019bd4"
+    },
+    {
+      "path": "assets/figma/figma-stage3-home-168-2018.png",
+      "bytes": 12964,
+      "sha256": "8ffdf6c6957940e6f5dea8123439f6bf68f2b996e9762d2cbc8d80d8044720ac"
+    },
+    {
+      "path": "assets/figma/figma-stage3-shell-168-1979.png",
+      "bytes": 107241,
+      "sha256": "4a8ee0bd7387ad3190c6774d006a5ee1c5524d509b8c3fbc2f3de285c0de8eb9"
+    },
+    {
+      "path": "assets/figma/figma-stage3-state-168-1980.png",
+      "bytes": 56029,
+      "sha256": "c6577ab7c4af8b79eaabd2be0f960b2ab1c3f864b4704f23b7408fa515728d7f"
+    },
+    {
+      "path": "assets/gates/stage3-eslint-delta.json",
+      "bytes": 15717,
+      "sha256": "d905b42b822da31f7ee7556ceae7f583de378cbc601175e037afcd8c1e0965c1"
+    },
+    {
+      "path": "assets/gates/stage3-eslint-final.json",
+      "bytes": 482285,
+      "sha256": "8bb5b1f13d315d44831675d4edda16f56e3c4ce7244d3b3b528303591f24a7a2"
+    },
+    {
+      "path": "assets/gates/stage3-prettier-delta.json",
+      "bytes": 3468,
+      "sha256": "f104fbf9a5a4bb6fe182e4e24c1e4a879161bba4716dda22c9209ed12484a60a"
+    },
+    {
+      "path": "assets/gates/stage3-runtime-final.json",
+      "bytes": 219627,
+      "sha256": "73de6208d8dc9ad8b3c67c3cf81548946898676ff8719b5ffca4faff52fa18b9"
+    },
+    {
+      "path": "assets/gates/stage3-runtime-source-binding.json",
+      "bytes": 24599,
+      "sha256": "d3161a120e32ec68f9edf8b67f7e210b6eb05b13d16d058daa85083d9f24075c"
+    },
+    {
+      "path": "assets/gates/stage3-technical-gates.json",
+      "bytes": 6025,
+      "sha256": "e4685bf2d5e4f6e1e4fc0c9dc05629418e4be22a434b2fd9df1786b1bd06f8c1"
+    },
+    {
+      "path": "capture-evidence.cjs",
+      "bytes": 64588,
+      "sha256": "00530457886bb4944afe535dd92f4c5a354e0afffe591d015564760d4e246670"
+    },
+    {
+      "path": "stage3-shell-auth-public-flows-evidence.html",
+      "bytes": 27323,
+      "sha256": "7e27c979e829f3df222b044bd9bca20524171140d5515712857b9563f27a065e"
+    }
+  ]
+}

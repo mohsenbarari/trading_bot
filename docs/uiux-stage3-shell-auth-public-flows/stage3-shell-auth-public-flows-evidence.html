@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Stage 3 — شواهد پوسته، ورود و جریان‌های عمومی</title>
+  <style>
+    :root{color-scheme:light;--page:#f4f7fa;--surface:#fff;--ink:#0f233c;--muted:#52697b;--line:#8091a3;--brand:#315da8;--soft:#e8f0ff;--good:#187a55;--warn:#8a6110;--danger:#b4232c;--shadow:0 14px 36px rgba(15,35,60,.09)}
+    *{box-sizing:border-box}html,body{margin:0;background:var(--page);color:var(--ink);font-family:Vazirmatn,Tahoma,Arial,sans-serif;font-size:16px;line-height:1.65}body{padding:28px}
+    main{width:1440px;max-width:100%;margin:0 auto;display:grid;gap:26px}section{width:100%;background:var(--surface);border:2px solid var(--line);border-radius:24px;padding:30px;box-shadow:var(--shadow);overflow:hidden}
+    h1,h2,h3,p{margin-top:0}h1{font-size:38px;line-height:1.28;margin-bottom:12px}h2{font-size:28px;margin-bottom:8px}h3{font-size:18px;margin-bottom:7px}.eyebrow{color:var(--brand);font-weight:800;letter-spacing:.035em}.muted{color:var(--muted)}.pass{color:var(--good);font-weight:800}.warning{color:var(--warn);font-weight:800}.mono{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:12px;direction:ltr;text-align:left;overflow-wrap:anywhere}.ltr{direction:ltr;unicode-bidi:isolate}
+    .header{display:grid;grid-template-columns:1.45fr .75fr;gap:24px}.status{border:2px solid var(--brand);background:var(--soft);padding:20px;border-radius:18px}.status strong{display:block;font-size:25px;color:var(--brand)}
+    .facts{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:13px}.fact{border:1px solid #b9c5d1;border-radius:16px;padding:15px;background:#fbfdff;min-width:0}.fact strong{display:block;font-size:26px;direction:ltr;unicode-bidi:isolate}.fact span{font-size:13px;color:var(--muted)}
+    .grid-2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:17px}.grid-3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}.card{border:1px solid #b9c5d1;border-radius:18px;padding:17px;background:#fff}.card ul{margin:7px 0 0;padding-right:21px}
+    .image-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:13px}.image-card{border:1px solid #b9c5d1;border-radius:16px;padding:10px;background:#fbfdff;min-width:0}.image-card img{width:100%;height:220px;display:block;object-fit:contain;object-position:top;background:#eef3f7;border-radius:10px}.image-card.browser img{height:305px}.image-card figcaption{font-size:12px;color:var(--muted);padding-top:8px}.image-card code{display:block;font-size:10px;direction:ltr;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .route-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px}.route{border:1px solid #c8d3df;border-radius:12px;padding:8px 10px;background:#fbfdff;display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center}.route code{direction:ltr;text-align:left;font-size:11px;overflow-wrap:anywhere}.badge{border-radius:999px;background:#e9eef3;color:#3e5268;padding:2px 7px;font-size:10px;font-weight:800;white-space:nowrap}.badge.route-scope{background:#dfeaff;color:#24518f}.badge.off{background:#f2e7ea;color:#8e3341}
+    .flow{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px;direction:ltr}.step{border:2px solid #9eb2c6;border-radius:18px;padding:16px;background:#fbfdff;min-height:150px;direction:rtl}.step b{display:grid;place-items:center;width:32px;height:32px;border-radius:50%;background:var(--brand);color:white;margin-bottom:12px;direction:ltr}.step code{font-size:11px;direction:ltr;text-align:left;display:block;overflow-wrap:anywhere}.boundary{border:2px dashed var(--danger);border-radius:18px;padding:17px;background:#fff8fa}.boundary strong{color:var(--danger)}
+    table{border-collapse:collapse;width:100%;font-size:13px}th,td{border-bottom:1px solid #d7e0e8;padding:9px;text-align:right;vertical-align:top}th{background:#edf3f7;color:#34485f}.assertions{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px 14px}.assertion{display:flex;gap:8px;border-bottom:1px solid #e1e7ed;padding:6px 0;font-size:11px}.assertion b{color:var(--good)}.capture-note{margin:16px 0 0;padding:11px 14px;background:#f0f4f7;border-radius:12px;color:#465b72;font-size:12px}
+    @media(max-width:900px){body{padding:12px}.header,.grid-2,.grid-3,.route-grid{grid-template-columns:1fr}.facts{grid-template-columns:repeat(2,1fr)}.image-grid{grid-template-columns:repeat(2,1fr)}.flow{grid-template-columns:1fr;direction:rtl}.assertions{grid-template-columns:1fr}}
+  </style>
+</head>
+<body
+  data-stage="3"
+  data-evidence-role="hash-bound-local-derivative"
+  data-stage-complete-authority="false"
+  data-sites-proven="false"
+  data-figma-role="read-only-reference"
+  data-stage3-figma-freeze-created="false"
+  data-figma-file-key="z8jgJxST4O2APzWnlyP9gv"
+  data-figma-page-id="168:1974"
+  data-figma-capture-aggregate-sha256="98fed43b41661d2f63c605bfa8a68c42fb35ba514633cba8da84ce5ae31ccdc7"
+  data-browser-run-id="uiux-stage3-browser-20260809T115615647Z"
+  data-browser-metrics-sha256="e93d7ffa69d7dbbacbf6749f3a49030da9895b1e987925d96f23083dbaf3f52c"
+  data-browser-nine-file-aggregate-sha256="769d588660fead77e1bdb00f0dd9cf871c8ef1a0ea48f7e03e25b4985c8b56c9"
+  data-browser-harness-sha256="6c47b4f691219847390d8d91c8d018a96e4bb7d882f033e4e86c2f17556749d9"
+  data-runtime-source-count="120"
+  data-runtime-source-aggregate-sha256="6c9a3f0bcd96635a1fb40fda00278401c4f54da87d7535132cd342945cf5f87f"
+>
+<main>
+  <section id="stage3-overview" data-capture-section="overview" data-route-count="30" data-browser-assertions="23" data-browser-screenshot-count="8" data-runtime-test-files="58" data-runtime-test-suites="118" data-runtime-test-count="664">
+    <div class="header">
+      <div>
+        <p class="eyebrow">STAGE 3 · SHELL · AUTH · PUBLIC FLOWS</p>
+        <h1>بستهٔ شواهد محلیِ hash-bound</h1>
+        <p class="muted">این صفحه، Figma خواندنی، اجرای واقعی مرورگر و گیت‌های فنی را به source فعلی متصل می‌کند. خودش مرجع canonical طراحی، مجوز Stage بعدی یا اثبات Sites نیست.</p>
+      </div>
+      <aside class="status" data-local-freeze-status="inputs-settled-local-capture"><strong>LOCAL EVIDENCE</strong><span>ورودی‌ها settled؛ capture محلی fail-closed</span><p class="mono">comparison base<br>3822df67a48e7ee3197bc6d67c79aa7ee84a7905</p></aside>
+    </div>
+    <div class="facts">
+      <div class="fact"><strong>30</strong><span>route در قرارداد نهایی Stage 3</span></div>
+      <div class="fact"><strong>23 / 23</strong><span>assertion واقعی Chromium</span></div>
+      <div class="fact"><strong>58 / 664</strong><span>فایل تست / تست Vitest</span></div>
+      <div class="fact"><strong>0</strong><span>drift غیرمجاز protected</span></div>
+    </div>
+    <div class="grid-3" style="margin-top:16px">
+      <article class="card"><h3>مرز طراحی</h3><p><span class="pass">۴/۴</span> export مستقیم از nodeهای مصوب، detached صفر؛ فریز تازه ایجاد نشده است.</p></article>
+      <article class="card"><h3>مرز runtime</h3><p><span class="pass">۸ viewport</span>، Auth، PWA، layering، recovery و registration امن در Chromium واقعی.</p></article>
+      <article class="card"><h3>مرز انتشار</h3><p><span class="warning">Sites هنوز خارج از این artifact است.</span> این بسته وضعیت کل Stage را complete نمی‌کند.</p></article>
+    </div>
+  </section>
+
+  <section id="stage3-figma-reference" data-capture-section="figma" data-figma-capture-count="4" data-detached-count="0" data-new-freeze="false">
+    <p class="eyebrow">READ-ONLY FIGMA REFERENCE</p><h2>چهار مرجع مستقیم؛ بدون write یا refreeze</h2>
+    <div class="image-grid">
+      <figure class="image-card" data-figma-export="assets/figma/figma-stage3-auth-168-2017.png" data-node-id="168:2017"><img src="assets/figma/figma-stage3-auth-168-2017.png" alt="مرجع Auth در Figma"><figcaption>Auth canonical · 390×844<code>168:2017 · 61c13f…19bd4</code></figcaption></figure>
+      <figure class="image-card" data-figma-export="assets/figma/figma-stage3-home-168-2018.png" data-node-id="168:2018"><img src="assets/figma/figma-stage3-home-168-2018.png" alt="مرجع Home در Figma"><figcaption>Home canonical · 390×844<code>168:2018 · 8ffdf6…20ac</code></figcaption></figure>
+      <figure class="image-card" data-figma-export="assets/figma/figma-stage3-shell-168-1979.png" data-node-id="168:1979"><img src="assets/figma/figma-stage3-shell-168-1979.png" alt="قرارداد پوسته در Figma"><figcaption>Shell contract · 1720×706<code>168:1979 · 4a8ee0…8eb9</code></figcaption></figure>
+      <figure class="image-card" data-figma-export="assets/figma/figma-stage3-state-168-1980.png" data-node-id="168:1980"><img src="assets/figma/figma-stage3-state-168-1980.png" alt="قرارداد state و access در Figma"><figcaption>State/access · 1720×448<code>168:1980 · c6577a…28d7f</code></figcaption></figure>
+    </div>
+    <p class="capture-note">Figma نقش reference مصوب دارد؛ parity نهایی با browser evidence و source binding سنجیده می‌شود، نه با بازسازی استاتیک این صفحه.</p>
+  </section>
+
+  <section id="stage3-shell-matrix" data-capture-section="shell" data-route-count="30" data-scope-route="5" data-scope-section="21" data-scope-off="4" data-shell-public="3" data-shell-focused="1" data-shell-standard="21" data-shell-protected="4" data-shell-recovery="1">
+    <p class="eyebrow">ROUTE · SHELL · SCOPE CONTRACT</p><h2>سی route؛ scope و shell صریح</h2>
+    <div class="facts">
+      <div class="fact"><strong>5 / 21 / 4</strong><span>route / section / off</span></div><div class="fact"><strong>3 / 1</strong><span>public / focused-authenticated</span></div><div class="fact"><strong>21</strong><span>standard-authenticated</span></div><div class="fact"><strong>4 / 1</strong><span>protected-legacy / recovery</span></div>
+    </div>
+    <div class="route-grid" style="margin-top:16px">
+      <div class="route" data-route="/" data-scope="section" data-shell="standard-authenticated"><code>/</code><span class="badge">section</span></div>
+      <div class="route" data-route="/setup-password" data-scope="route" data-shell="focused-authenticated"><code>/setup-password</code><span class="badge route-scope">route</span></div>
+      <div class="route" data-route="/login" data-scope="route" data-shell="public"><code>/login</code><span class="badge route-scope">route</span></div>
+      <div class="route" data-route="/market" data-scope="off" data-shell="protected-legacy"><code>/market</code><span class="badge off">off</span></div>
+      <div class="route" data-route="/operations" data-scope="section" data-shell="standard-authenticated"><code>/operations</code><span class="badge">section</span></div>
+      <div class="route" data-route="/operations/customers" data-scope="section" data-shell="standard-authenticated"><code>/operations/customers</code><span class="badge">section</span></div>
+      <div class="route" data-route="/operations/customers/:relationId" data-scope="section" data-shell="standard-authenticated"><code>/operations/customers/:relationId</code><span class="badge">section</span></div>
+      <div class="route" data-route="/operations/accountants" data-scope="section" data-shell="standard-authenticated"><code>/operations/accountants</code><span class="badge">section</span></div>
+      <div class="route" data-route="/operations/accountants/:relationId" data-scope="section" data-shell="standard-authenticated"><code>/operations/accountants/:relationId</code><span class="badge">section</span></div>
+      <div class="route" data-route="/account" data-scope="section" data-shell="standard-authenticated"><code>/account</code><span class="badge">section</span></div>
+      <div class="route" data-route="/account/security" data-scope="section" data-shell="standard-authenticated"><code>/account/security</code><span class="badge">section</span></div>
+      <div class="route" data-route="/account/storage" data-scope="section" data-shell="standard-authenticated"><code>/account/storage</code><span class="badge">section</span></div>
+      <div class="route" data-route="/account/notifications" data-scope="section" data-shell="standard-authenticated"><code>/account/notifications</code><span class="badge">section</span></div>
+      <div class="route" data-route="/chat" data-scope="off" data-shell="protected-legacy"><code>/chat</code><span class="badge off">off</span></div>
+      <div class="route" data-route="/users/:id" data-scope="section" data-shell="standard-authenticated"><code>/users/:id</code><span class="badge">section</span></div>
+      <div class="route" data-route="/profile" data-scope="section" data-shell="standard-authenticated"><code>/profile</code><span class="badge">section</span></div>
+      <div class="route" data-route="/settings" data-scope="section" data-shell="standard-authenticated"><code>/settings</code><span class="badge">section</span></div>
+      <div class="route" data-route="/admin" data-scope="section" data-shell="standard-authenticated"><code>/admin</code><span class="badge">section</span></div>
+      <div class="route" data-route="/admin/invitations" data-scope="section" data-shell="standard-authenticated"><code>/admin/invitations</code><span class="badge">section</span></div>
+      <div class="route" data-route="/admin/channels" data-scope="off" data-shell="protected-legacy"><code>/admin/channels</code><span class="badge off">off</span></div>
+      <div class="route" data-route="/admin/users" data-scope="section" data-shell="standard-authenticated"><code>/admin/users</code><span class="badge">section</span></div>
+      <div class="route" data-route="/admin/users/:id" data-scope="section" data-shell="standard-authenticated"><code>/admin/users/:id</code><span class="badge">section</span></div>
+      <div class="route" data-route="/admin/commodities" data-scope="section" data-shell="standard-authenticated"><code>/admin/commodities</code><span class="badge">section</span></div>
+      <div class="route" data-route="/admin/messages" data-scope="section" data-shell="standard-authenticated"><code>/admin/messages</code><span class="badge">section</span></div>
+      <div class="route" data-route="/admin/system" data-scope="section" data-shell="standard-authenticated"><code>/admin/system</code><span class="badge">section</span></div>
+      <div class="route" data-route="/i/:code" data-scope="route" data-shell="public"><code>/i/:code</code><span class="badge route-scope">route</span></div>
+      <div class="route" data-route="/register" data-scope="route" data-shell="public"><code>/register</code><span class="badge route-scope">route</span></div>
+      <div class="route" data-route="/notifications" data-scope="section" data-shell="standard-authenticated"><code>/notifications</code><span class="badge">section</span></div>
+      <div class="route" data-route="/share-receive" data-scope="off" data-shell="protected-legacy"><code>/share-receive</code><span class="badge off">off</span></div>
+      <div class="route" data-route="/:pathMatch(.*)*" data-scope="route" data-shell="system-recovery"><code>/:pathMatch(.*)*</code><span class="badge route-scope">route</span></div>
+    </div>
+  </section>
+
+  <section id="stage3-secure-registration" data-capture-section="security" data-web-link-pattern="^/i/[A-Za-z0-9]{8}$" data-raw-response-exceptions="1" data-raw-url-exceptions="1" data-context-ttl-max="600" data-secret-browser-leaks="0" data-recovery-outcomes="not-found,forbidden,deep-link-failure">
+    <p class="eyebrow">SECURE PUBLIC REGISTRATION</p><h2>short code عمومی؛ bearer خام فقط در دو استثنای محدود</h2>
+    <div class="flow">
+      <article class="step"><b>1</b><h3>لینک Web</h3><code>/i/[A-Za-z0-9]{8}</code><p>بدون bearer خام در URL.</p></article>
+      <article class="step"><b>2</b><h3>Lookup</h3><code>GET /api/invitations/lookup/:code</code><p>تنها response خام؛ no-store و memory-only.</p></article>
+      <article class="step"><b>3</b><h3>Exchange</h3><code>POST /api/auth/registration-context/exchange</code><p>یک‌بار در body؛ exchange_id تب‌محلی.</p></article>
+      <article class="step"><b>4</b><h3>Opaque context</h3><code>HttpOnly · SameSite=Strict · TTL≤600s</code><p>کلید Redis فقط از hash handle.</p></article>
+      <article class="step"><b>5</b><h3>Complete/recover</h3><code>context-bound proof</code><p>retry و response-loss بدون POST تکراری.</p></article>
+    </div>
+    <div class="grid-2" style="margin-top:16px">
+      <article class="boundary"><strong>استثنای URL خام</strong><p class="mono">explicit user action only: https://t.me/&lt;bot&gt;?start=&lt;raw-invitation&gt;</p><p>purpose-bound؛ هیچ fallback خام Web را مجاز نمی‌کند.</p></article>
+      <article class="card"><h3>System Recovery</h3><p class="mono">not-found · forbidden · deep-link-failure</p><p>query و fragment حساس carry نمی‌شوند؛ route یا backend detail افشا نمی‌شود.</p></article>
+    </div>
+    <div class="image-grid" style="margin-top:16px">
+      <figure class="image-card browser" data-browser-screenshot="registration-resumed-step-3-mobile-390.png"><img src="assets/browser-evidence/registration-resumed-step-3-mobile-390.png" alt="ثبت نام از مرحله سه ازسرگرفته شده"><figcaption>context resume · step 3<code>519f4d…e974</code></figcaption></figure>
+      <figure class="image-card browser" data-browser-screenshot="registration-step-4-retained-marker-mobile-390.png"><img src="assets/browser-evidence/registration-step-4-retained-marker-mobile-390.png" alt="مرحله چهار با completion marker"><figcaption>step 4 · retained marker recovery<code>7c17b4…3dca</code></figcaption></figure>
+      <figure class="image-card browser" data-browser-screenshot="login-public-mobile-390.png"><img src="assets/browser-evidence/login-public-mobile-390.png" alt="ورود در پوسته عمومی"><figcaption>public Login · 390×844<code>0194ae…077</code></figcaption></figure>
+      <figure class="image-card browser" data-browser-screenshot="setup-password-focused-mobile-390.png"><img src="assets/browser-evidence/setup-password-focused-mobile-390.png" alt="تنظیم رمز در پوسته متمرکز"><figcaption>focused Setup Password<code>497d9a…3d48</code></figcaption></figure>
+    </div>
+  </section>
+
+  <section id="stage3-browser-proof" data-capture-section="browser" data-browser-status="passed" data-browser-assertion-count="23" data-browser-failed-count="0" data-browser-screenshot-count="8" data-responsive-row-count="8" data-source-pre-post-identical="true" data-unexpected-diagnostics="0">
+    <p class="eyebrow">REAL CHROMIUM ACCEPTANCE</p><h2>هشت viewport، لایه‌ها، PWA و legacy false branch</h2>
+    <div class="facts"><div class="fact"><strong>8</strong><span>360 تا 1440 px</span></div><div class="fact"><strong>3px</strong><span>focus indicator</span></div><div class="fact"><strong>≤1ms</strong><span>reduced motion</span></div><div class="fact"><strong>0</strong><span>unexpected diagnostic / secret leak</span></div></div>
+    <div class="image-grid" style="margin-top:16px">
+      <figure class="image-card browser" data-browser-screenshot="home-standard-desktop-1440.png"><img src="assets/browser-evidence/home-standard-desktop-1440.png" alt="خانه دسکتاپ"><figcaption>standard Home · 1440×900<code>13a174…82b</code></figcaption></figure>
+      <figure class="image-card browser" data-browser-screenshot="home-pwa-positive-mobile-390.png"><img src="assets/browser-evidence/home-pwa-positive-mobile-390.png" alt="پرامپت PWA در خانه"><figcaption>Home-only PWA positive<code>e21907…315</code></figcaption></figure>
+      <figure class="image-card browser" data-browser-screenshot="layer-coexistence-session-connection-toast-nav-mobile-390.png"><img src="assets/browser-evidence/layer-coexistence-session-connection-toast-nav-mobile-390.png" alt="همزیستی لایه ها"><figcaption>security › connection › toast › nav<code>b17786…a59</code></figcaption></figure>
+      <figure class="image-card browser" data-browser-screenshot="legacy-session-modal-protected-market-mobile-390.png"><img src="assets/browser-evidence/legacy-session-modal-protected-market-mobile-390.png" alt="مودال legacy روی بازار محافظت شده"><figcaption>protected legacy false branch<code>08e9c3…f49</code></figcaption></figure>
+    </div>
+    <p class="capture-note mono">run uiux-stage3-browser-20260809T115615647Z · metrics e93d7ffa…f52c · 9-file aggregate 769d5886…56c9 · source hash+mtime pre/post identical</p>
+  </section>
+
+  <section id="stage3-gates-protected" data-capture-section="gates" data-vitest-files="58" data-vitest-suites="118" data-vitest-tests="664" data-guard-tests="45" data-guard-routes="30" data-v2-css-files="3" data-build-modules="2160" data-pwa-entries="166" data-eslint-stage3-new="0" data-prettier-stage3-new="0" data-protected-diff-bytes="0" data-protected-diff-sha256="e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" data-protected-region-sections="6" data-protected-region-bytes="4553" data-protected-region-sha256="f25c01dac38db208517047ffc0f2458e2c89868e988a6d7f68749221db106860" data-runtime-source-count="120" data-runtime-source-aggregate="6c9a3f0bcd96635a1fb40fda00278401c4f54da87d7535132cd342945cf5f87f">
+    <p class="eyebrow">TECHNICAL GATES · PROTECTED BOUNDARY</p><h2>passهای صریح؛ debt و caveat پنهان نشده‌اند</h2>
+    <div class="grid-2">
+      <article class="card"><h3>Frontend</h3><table><tbody><tr><td>Vitest</td><td class="ltr">58 files · 118 suites · 664/664</td></tr><tr><td>Guard</td><td class="ltr">45/45 · 3 CSS · 30 routes</td></tr><tr><td>vue-tsc / build</td><td class="ltr">exit 0 · 2160 modules · PWA 166</td></tr><tr><td>ESLint delta</td><td class="ltr">new 0 · raw inherited 184E/1W</td></tr><tr><td>Prettier delta</td><td class="ltr">new 0 · raw inherited 14 files</td></tr></tbody></table></article>
+      <article class="card"><h3>Backend / deploy</h3><table><tbody><tr><td>G1</td><td class="ltr">231 passed · 20 opt-in PG skips</td></tr><tr><td>G2</td><td class="ltr">47/47</td></tr><tr><td>G3 literal clean tree</td><td class="ltr">exit 1 · only 2 Compose fixture failures</td></tr><tr><td>byte-identical mirror + empty .env</td><td class="ltr">1/1 · both subtests · exit 0</td></tr><tr><td>py_compile / bash -n</td><td class="ltr">exit 0 / exit 0</td></tr></tbody></table></article>
+    </div>
+    <div class="grid-3" style="margin-top:16px">
+      <article class="card"><h3>Protected full</h3><p><strong class="pass">۰ path تغییرکرده</strong></p><p class="mono">empty diff · e3b0c442…b855</p></article>
+      <article class="card"><h3>Home market region</h3><p><strong class="pass">۶ section · 4553 bytes</strong></p><p class="mono">f25c01da…606860</p></article>
+      <article class="card"><h3>Runtime source binding</h3><p><strong class="pass">۱۲۰ source · ۹۸ modified · ۲۲ added</strong></p><p class="mono">6c9a3f0b…f5f87f</p></article>
+    </div>
+    <article class="boundary" style="margin-top:16px"><strong>Compose caveat، نه pass کلی</strong><p>دو failure در اجرای literal clean-worktree فقط از نبود فایل ignored <span class="mono ltr">.env</span> هستند. تمام تست‌های دیگر G3 و Dockerfile/Nginx پاس‌اند؛ mirror بایت‌یکسان با fixture خالی هر دو subtest را پاس کرده است.</p></article>
+    <div class="assertions" data-assertion-registry-count="21" style="margin-top:18px">
+      <div class="assertion" data-assertion-id="claim-boundary-local-not-stage-or-sites"><b>01</b><code>claim-boundary-local-not-stage-or-sites</code></div>
+      <div class="assertion" data-assertion-id="figma-read-only-reference-no-new-freeze"><b>02</b><code>figma-read-only-reference-no-new-freeze</code></div>
+      <div class="assertion" data-assertion-id="figma-four-direct-exports-hash-bound"><b>03</b><code>figma-four-direct-exports-hash-bound</code></div>
+      <div class="assertion" data-assertion-id="route-registry-thirty-exact"><b>04</b><code>route-registry-thirty-exact</code></div>
+      <div class="assertion" data-assertion-id="scope-counts-five-twentyone-four"><b>05</b><code>scope-counts-five-twentyone-four</code></div>
+      <div class="assertion" data-assertion-id="shell-counts-three-one-twentyone-four-one"><b>06</b><code>shell-counts-three-one-twentyone-four-one</code></div>
+      <div class="assertion" data-assertion-id="public-focused-routes-exact"><b>07</b><code>public-focused-routes-exact</code></div>
+      <div class="assertion" data-assertion-id="system-recovery-outcomes-exact"><b>08</b><code>system-recovery-outcomes-exact</code></div>
+      <div class="assertion" data-assertion-id="canonical-short-link-two-raw-exceptions"><b>09</b><code>canonical-short-link-two-raw-exceptions</code></div>
+      <div class="assertion" data-assertion-id="opaque-context-ttl-browser-leaks-zero"><b>10</b><code>opaque-context-ttl-browser-leaks-zero</code></div>
+      <div class="assertion" data-assertion-id="browser-run-metrics-23-of-23"><b>11</b><code>browser-run-metrics-23-of-23</code></div>
+      <div class="assertion" data-assertion-id="browser-eight-screenshots-loaded-hash-bound"><b>12</b><code>browser-eight-screenshots-loaded-hash-bound</code></div>
+      <div class="assertion" data-assertion-id="responsive-eight-widths-source-stable"><b>13</b><code>responsive-eight-widths-source-stable</code></div>
+      <div class="assertion" data-assertion-id="browser-accessibility-layer-security-zero-unexpected"><b>14</b><code>browser-accessibility-layer-security-zero-unexpected</code></div>
+      <div class="assertion" data-assertion-id="vitest-58-118-664-snapshots-zero"><b>15</b><code>vitest-58-118-664-snapshots-zero</code></div>
+      <div class="assertion" data-assertion-id="eslint-delta-zero-inherited-disclosed"><b>16</b><code>eslint-delta-zero-inherited-disclosed</code></div>
+      <div class="assertion" data-assertion-id="prettier-delta-zero-inherited-disclosed"><b>17</b><code>prettier-delta-zero-inherited-disclosed</code></div>
+      <div class="assertion" data-assertion-id="guard-type-build-passed"><b>18</b><code>guard-type-build-passed</code></div>
+      <div class="assertion" data-assertion-id="backend-compose-caveat-exact"><b>19</b><code>backend-compose-caveat-exact</code></div>
+      <div class="assertion" data-assertion-id="protected-empty-diff-region-exact"><b>20</b><code>protected-empty-diff-region-exact</code></div>
+      <div class="assertion" data-assertion-id="runtime-source-binding-120-exact"><b>21</b><code>runtime-source-binding-120-exact</code></div>
+    </div>
+  </section>
+</main>
+</body>
+</html>

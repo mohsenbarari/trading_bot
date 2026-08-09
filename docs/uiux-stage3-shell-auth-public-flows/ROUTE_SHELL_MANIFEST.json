@@ -1,0 +1,353 @@
+{
+  "schemaVersion": 1,
+  "stage": "3",
+  "status": "stage3_complete",
+  "branch": "condidate/webapp-ui-ux-redesign-v2",
+  "governanceRecordedAt": "2026-08-09T03:46:25.671Z",
+  "comparisonBaseCommit": "3822df67a48e7ee3197bc6d67c79aa7ee84a7905",
+  "comparisonHeadCommit": "bfe4e59192d678eaf4776fbc025d3aa0f431896d",
+  "comparisonHeadStatus": "bound_from_git",
+  "stage3RuntimeImplementationAuthorized": true,
+  "stage3RuntimeWorkStarted": true,
+  "stage3TechnicalGate": "passed_with_disclosed_inherited_diagnostics_and_compose_fixture_caveat",
+  "stage3ProtectedDiffStatus": "passed_zero_unauthorized_drift",
+  "stage3EvidenceStatus": "passed_frozen_31_file_package",
+  "stage3SitesStatus": "passed_private_owner_only_source_bound",
+  "stage3FigmaClosureStatus": "passed_read_only_reference_hash_bound",
+  "nextAuthorizedRuntimeStage": "4",
+  "stage4RuntimeImplementationAuthorized": true,
+  "stage4RuntimeWorkStarted": false,
+  "stage3InvitationSecuritySourceSnapshot": {
+    "canonicalActiveWebInvitationPathPattern": "^/i/[A-Za-z0-9]{8}$",
+    "activeWebProducerSurfaces": [
+      "api",
+      "sms",
+      "bot_copy"
+    ],
+    "createListAndInternalRelationOmittedFields": [
+      "token",
+      "invitation_token"
+    ],
+    "onlyRawBearerResponseException": "GET /api/invitations/lookup/:code; no-store",
+    "onlyRawBearerUrlException": "explicit-user-action https://t.me/<bot>?start=<raw-invitation>",
+    "retiredRawValidation": "GET /api/invitations/validate/{token}; unconditional 410/no-store before database access",
+    "retiredRawRegistrationMutations": "unconditional 410/no-store before Redis/database/OTP/provider",
+    "sqlAlchemyEngineHideParameters": true,
+    "prefixAwareRegistrationBearerRedaction": [
+      "INV",
+      "ACCT",
+      "CUST",
+      "REG"
+    ],
+    "loggingAndErrorTrackingFocusedRegression": "passed_23_of_23",
+    "browserEvidenceFigmaSitesAndFinalMetrics": "passed",
+    "implementationCommit": "bfe4e59192d678eaf4776fbc025d3aa0f431896d",
+    "implementationCommitStatus": "bound_from_git"
+  },
+  "baseline": {
+    "routeCount": 29,
+    "protectionCounts": {
+      "none": 22,
+      "full": 4,
+      "mixed": 3
+    },
+    "v2ScopeCounts": {
+      "off": 29,
+      "section": 0,
+      "route": 0
+    },
+    "routeContractPath": "frontend/src/router/uiRouteContract.ts",
+    "routeContractSha256": "a9c9959c5a178df606aad48e36547b2bfb7db2c477d0829e1fc87b90acda742a",
+    "scopeManifestPath": "frontend/src/design-system-v2/scope-manifest.json",
+    "scopeManifestSha256": "84f29186f12f648113c191067d69f6166d5a1035ba6cbc6794f261353a4a453f",
+    "verificationStatus": "passed_exact_29_all_off_at_comparison_base"
+  },
+  "implementationSourceSnapshot": {
+    "claimBoundary": "Hash-bound Stage 3 closure facts bound to the exact implementation commit. Stage 4 is the next authorized runtime stage and has not started.",
+    "routeCount": 30,
+    "protectionCounts": {
+      "none": 23,
+      "full": 4,
+      "mixed": 3
+    },
+    "v2ScopeCounts": {
+      "route": 5,
+      "section": 21,
+      "off": 4
+    },
+    "shellClassCounts": {
+      "public": 3,
+      "focusedAuthenticated": 1,
+      "standardAuthenticated": 21,
+      "protectedLegacy": 4,
+      "systemRecovery": 1
+    },
+    "canonicalWebInvitationPathPattern": "^/i/[A-Za-z0-9]{8}$",
+    "invitationSecurityFocusedRegression": "passed_23_of_23",
+    "routeContractSha256": "f159a613ff4565daa6ab513974e9f8350d3093767971dce5f8135f4c1376d5b1",
+    "scopeManifestSha256": "94fc3599a334098d41a39438092ee7c6e0b3f3f67140885addc3be33b80befaf",
+    "verificationStatus": "passed_hash_bound_local_evidence"
+  },
+  "stage3RouteFamilies": {
+    "public": [
+      "/login",
+      "/i/:code",
+      "/register"
+    ],
+    "focusedAuthenticated": [
+      "/setup-password"
+    ],
+    "fullProtectedCurrentWrapper": [
+      "/market",
+      "/chat",
+      "/share-receive",
+      "/admin/channels"
+    ],
+    "mixedProtected": [
+      {
+        "path": "/",
+        "protectedInteriors": [
+          "home-market-widget"
+        ]
+      },
+      {
+        "path": "/admin/messages",
+        "protectedInteriors": [
+          "admin-messages-market-delivery",
+          "admin-messages-messenger-delivery"
+        ]
+      },
+      {
+        "path": "/admin/system",
+        "protectedInteriors": [
+          "trading-settings-market-controls"
+        ]
+      }
+    ],
+    "systemOwnedCatchAll": {
+      "path": "/:pathMatch(.*)*",
+      "plannedRouteOrdinal": 30,
+      "requiredOutcomes": [
+        "not-found",
+        "forbidden",
+        "deep-link-failure"
+      ],
+      "mustNot": [
+        "blank",
+        "redirect_loop",
+        "route_or_backend_copy_disclosure",
+        "protected_interior_fallback"
+      ]
+    }
+  },
+  "scopeRules": {
+    "fullProtectedMustRemainOff": true,
+    "mixedProtectedMayNeverUseRouteScope": true,
+    "standardAuthenticatedSectionScopeMustBeMountedAndTested": true,
+    "implementedRouteCount": 30,
+    "implementedV2ScopeCounts": {
+      "route": 5,
+      "section": 21,
+      "off": 4
+    },
+    "finalRouteCount": 30,
+    "finalV2ScopeCounts": {
+      "route": 5,
+      "section": 21,
+      "off": 4
+    },
+    "verificationStatus": "passed"
+  },
+  "firstRuntimeEditObservation": {
+    "observedAt": "2026-08-09T03:46:25.671Z",
+    "paths": [
+      "frontend/src/components/auth/AuthFlowShell.vue",
+      "frontend/src/components/ui/index.ts",
+      "frontend/public/uiux-v2-brand-mark.svg"
+    ],
+    "claimBoundary": "Presence proves that scoped implementation started; it does not prove route wiring, parity, tests, evidence, or completion."
+  },
+  "implementation": {
+    "routeWiring": "passed",
+    "authViewMigration": "passed",
+    "authenticatedShellIntegration": "passed",
+    "catchAll": "passed",
+    "pwaLayering": "passed",
+    "connectionToastSessionLayering": "passed",
+    "registrationHandoff": {
+      "canonicalWebInvitationLinks": {
+        "pathPattern": "^/i/[A-Za-z0-9]{8}$",
+        "activeProducerSurfaces": [
+          "api",
+          "sms",
+          "bot_copy"
+        ],
+        "rawBearerInWebUrl": false,
+        "createListAndInternalRelationOmittedFields": [
+          "token",
+          "invitation_token"
+        ],
+        "verificationStatus": "passed"
+      },
+      "publicShortCodeLookup": {
+        "route": "/i/:code",
+        "endpoint": "/api/invitations/lookup/:code",
+        "responseContainsRawInvitationBearer": true,
+        "classification": "only_approved_raw_invitation_bearer_response_exception",
+        "controls": [
+          "cache_control_no_store",
+          "referrer_policy_no_referrer",
+          "proxy_access_log_off",
+          "page_memory_only_until_route_selection"
+        ]
+      },
+      "webExchange": {
+        "transport": "one_shot_json_post_body_from_page_memory",
+        "method": "POST",
+        "path": "/api/auth/registration-context/exchange",
+        "clientBinding": "random_256_bit_tab_local_exchange_id_ttl_max_10_minutes",
+        "bindingStorageRecord": "exchange_id_and_created_at_only",
+        "forbiddenPersistence": [
+          "web_storage_raw_bearer",
+          "history_state_raw_bearer",
+          "dom_raw_bearer",
+          "cookie_raw_bearer",
+          "log_raw_bearer"
+        ],
+        "legacyQueryDisposition": "fail_closed_consume_and_immediate_url_router_state_scrub",
+        "rawBearerUrlProhibitionScope": "web_handoff"
+      },
+      "opaqueServerContext": {
+        "browserTransport": "httponly_samesite_strict_cookie",
+        "productionAndStagingCookie": "__Host-web_registration; Secure; HttpOnly; SameSite=Strict; Path=/; no Domain",
+        "developmentCookie": "web_registration; HttpOnly; SameSite=Strict; Path=/; Secure=false",
+        "redisKey": "sha256_random_opaque_handle",
+        "ttlMaxSeconds": 600,
+        "response": "masked_account_mobile_and_kind_progress_requires_otp_only",
+        "verifiedProof": "sha256_handle_bound_and_ttl_capped_to_remaining_context",
+        "globalRawBearerProof": false
+      },
+      "currentEndpoints": [
+        "POST /api/auth/registration-context/exchange",
+        "POST /api/auth/registration-context",
+        "POST /api/auth/registration-context/otp/request",
+        "POST /api/auth/registration-context/otp/verify",
+        "POST /api/auth/registration-context/complete",
+        "POST /api/auth/registration-context/clear"
+      ],
+      "retiredEndpoints": {
+        "unconditionalGoneRawValidationPath": "GET /api/invitations/validate/{token}",
+        "rawValidationRoute": "unconditional_410_gone_no_store_before_database_access",
+        "unconditionalGoneRawMutationPaths": [
+          "POST /api/auth/register-otp-request",
+          "POST /api/auth/register-otp-verify",
+          "POST /api/auth/register-complete"
+        ],
+        "rawMutationRoutes": "unconditional_410_gone_no_store_before_redis_db_otp_or_provider",
+        "compatibilityMutationAvailable": false,
+        "implementationReuse": "undecorated_server_private_helpers_after_opaque_context_load_and_verification"
+      },
+      "telegramDeepLinkException": {
+        "urlShape": "https://t.me/<bot>?start=<raw-invitation>",
+        "activation": "explicit_user_action_only",
+        "classification": "only_approved_raw_invitation_url_exception_purpose_bound",
+        "authorizesWebRawFallback": false
+      },
+      "databaseLoggingAndErrorTrackingProtection": {
+        "sqlAlchemyEngineHideParameters": true,
+        "registrationBearerPrefixes": [
+          "INV",
+          "ACCT",
+          "CUST",
+          "REG"
+        ],
+        "redactionScope": [
+          "logging_formatters",
+          "error_tracking_events"
+        ],
+        "focusedTestModules": [
+          "tests.test_logging_foundation",
+          "tests.test_error_tracking"
+        ],
+        "focusedTestPassed": 23,
+        "focusedTestTotal": 23,
+        "finalIntegrationGate": "passed_in_final_serial_vitest"
+      },
+      "navigationCommit": {
+        "resolvedNavigationFailureCountsAsFailure": true,
+        "setupPasswordSuccessfulReceiptRetainedForNavigationRetry": true,
+        "loginIntendedRouteCleanup": "after_awaited_successful_navigation",
+        "directRegisterHomeCleanup": "after_awaited_successful_navigation",
+        "optionalTelegramTerminalCleanup": "after_completion_receipt_valid_me_and_step4_render",
+        "optionalTelegramSkipFailure": "retain_navigation_retry_state",
+        "causeNeutralFailureCopy": true
+      },
+      "verificationStatus": "passed"
+    },
+    "staleDeployFallback": {
+      "statusCode": 410,
+      "cacheControl": "no-store, no-cache, must-revalidate",
+      "clientReloadScript": false,
+      "verificationStatus": "passed"
+    },
+    "systemRecoveryShell": {
+      "guest": "public_auth_flow_shell_without_authenticated_navigation",
+      "authenticated": "authenticated_shell_with_system_recovery_content",
+      "verificationStatus": "passed"
+    },
+    "implementationCommit": "bfe4e59192d678eaf4776fbc025d3aa0f431896d",
+    "implementationTree": "0b0e1b1e6f615a34622659fca351507e4f7c1404",
+    "implementationParent": "3822df67a48e7ee3197bc6d67c79aa7ee84a7905",
+    "exactPathCount": 120,
+    "stagedPathSetSha256": "fabe8de11af4c13240ba4adc62a717d4d4aa78213345e98be48ac8566e496f0e",
+    "status": "stage3_complete"
+  },
+  "evidence": {
+    "directFigmaContext": "passed_read_only_reference",
+    "figmaClosure": {
+      "status": "passed_read_only_reference_hash_bound",
+      "fileKey": "z8jgJxST4O2APzWnlyP9gv",
+      "pageId": "168:1974",
+      "nodeIds": [
+        "168:2017",
+        "168:2018",
+        "168:1979",
+        "168:1980"
+      ],
+      "detachedInstanceCount": 0
+    },
+    "runtimeTests": "passed_58_files_118_suites_664_tests",
+    "focusedInvitationSecurityRegression": "passed_23_of_23",
+    "browserAcceptance": {
+      "status": "passed_23_of_23",
+      "runId": "uiux-stage3-browser-20260809T115615647Z",
+      "metricsSha256": "e93d7ffa69d7dbbacbf6749f3a49030da9895b1e987925d96f23083dbaf3f52c"
+    },
+    "localEvidence": {
+      "status": "passed_21_of_21",
+      "runId": "stage3-local-20260809T122824300Z-21fd706e"
+    },
+    "frozenEvidencePackage": {
+      "status": "immutable",
+      "fileCount": 31,
+      "bytes": 2599621,
+      "aggregateSha256": "ba851f9714c55d1d35d15e49d51fca31ebf0ca6c20de3b31b8a2592567489d24"
+    },
+    "sites": {
+      "status": "passed_private_owner_only_source_bound",
+      "provenancePath": "SITES_PROVENANCE.json"
+    },
+    "finalMetrics": {
+      "testFiles": 58,
+      "testSuites": 118,
+      "tests": 664,
+      "failed": 0
+    },
+    "finalArtifactPath": "assets/gates/stage3-runtime-final.json",
+    "finalArtifactSha256": "73de6208d8dc9ad8b3c67c3cf81548946898676ff8719b5ffca4faff52fa18b9",
+    "implementationCommit": "bfe4e59192d678eaf4776fbc025d3aa0f431896d",
+    "implementationCommitStatus": "bound_from_git",
+    "stage4RuntimeImplementationAuthorized": true,
+    "stage4RuntimeWorkStarted": false
+  }
+}
