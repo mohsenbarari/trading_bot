@@ -7,6 +7,8 @@ import {
   normalizeNotificationCategory,
   normalizeNotificationId,
   normalizeNotificationLevel,
+  sanitizeNotificationBody,
+  sanitizeNotificationTitle,
 } from './notifications'
 
 describe('notification type helpers', () => {
@@ -54,6 +56,55 @@ describe('notification type helpers', () => {
     expect(normalized.trade_number).toBe(10025)
     expect(normalized.recipient_role).toBe('offer_owner')
     expect(normalized.message).toBe('trade body')
+  })
+
+  it('removes route and backend metadata from every normalized display body', () => {
+    const rawBody = [
+      'route: /market',
+      'route=/admin',
+      '🧭 مسیر: /account',
+      'مسیر：/market',
+      'backend: iran',
+      'backend＝foreign',
+      'server: api-01',
+      '🏷️ کالا: امام',
+      '📝 توضیحات: سالم',
+    ].join('\n')
+    const normalized = normalizeAppNotificationPayload({ message: rawBody, category: 'trade' })
+
+    expect(normalized.body).toBe('🏷️ کالا: امام\n📝 توضیحات: سالم')
+    expect(normalized.content).toBe(normalized.body)
+    expect(normalized.message).toBe(normalized.body)
+    expect(sanitizeNotificationBody(rawBody)).toBe(normalized.body)
+    expect(normalized.body).not.toContain('/market')
+    expect(normalized.body).not.toContain('/account')
+    expect(normalized.body).not.toContain('iran')
+    expect(normalized.body).not.toContain('api-01')
+  })
+
+  it('removes metadata separated by every JSON line-break form', () => {
+    expect(
+      sanitizeNotificationBody(
+        'متن سالم\rbackend=iran\rroute=/admin\u2028مسیر：/market\u2029server＝foreign',
+      ),
+    ).toBe('متن سالم')
+  })
+
+  it('replaces hostile metadata titles with the category fallback', () => {
+    for (const title of [
+      'route: /admin/system',
+      'route=/admin/system',
+      '🧭 مسیر: /market',
+      'مسیر：/market',
+      'BACK-END: iran',
+      'server: api-01',
+    ]) {
+      const normalized = normalizeAppNotificationPayload({ title, body: 'متن امن' })
+      expect(normalized.title).toBe('پیام مدیریت')
+      expect(normalized.title).not.toContain('/')
+      expect(normalized.title).not.toContain('iran')
+    }
+    expect(sanitizeNotificationTitle('route: /market', 'عنوان امن')).toBe('عنوان امن')
   })
 
   it('creates toast ids and resolves display kinds for chat, system, and level-driven items', () => {

@@ -3,8 +3,14 @@ import { createPinia, setActivePinia } from 'pinia'
 import { flushPromises, mount } from '@vue/test-utils'
 import NotificationsView from './NotificationsView.vue'
 import { useNotificationStore } from '../stores/notifications'
+import type { NormalizedAppNotification } from '../types/notifications'
 
 const routerPushMock = vi.fn()
+const routerReplaceMock = vi.fn()
+const routerResolveMock = vi.fn()
+const routerCurrentRouteMock = {
+  value: { name: 'account-notifications', fullPath: '/account/notifications' },
+}
 const webPushMocks = vi.hoisted(() => ({
   getWebPushStatus: vi.fn(),
   enableWebPushNotifications: vi.fn(),
@@ -13,6 +19,9 @@ const webPushMocks = vi.hoisted(() => ({
 vi.mock('vue-router', () => ({
   useRouter: () => ({
     push: routerPushMock,
+    replace: routerReplaceMock,
+    resolve: routerResolveMock,
+    currentRoute: routerCurrentRouteMock,
   }),
 }))
 
@@ -25,6 +34,16 @@ describe('NotificationsView.vue', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     routerPushMock.mockReset()
+    routerReplaceMock.mockReset()
+    routerResolveMock.mockReset()
+    routerCurrentRouteMock.value = {
+      name: 'account-notifications',
+      fullPath: '/account/notifications',
+    }
+    routerResolveMock.mockImplementation((path: string) => ({
+      name: path.startsWith('/missing') ? 'system-recovery' : 'resolved-notification',
+      matched: path.startsWith('/missing') ? [] : [{ name: 'resolved-notification' }],
+    }))
     webPushMocks.getWebPushStatus.mockReset()
     webPushMocks.enableWebPushNotifications.mockReset()
     webPushMocks.getWebPushStatus.mockResolvedValue({ state: 'subscribed' })
@@ -55,6 +74,13 @@ describe('NotificationsView.vue', () => {
     expect(openNotificationCenterSpy).toHaveBeenCalledTimes(1)
     expect(wrapper.text()).toContain('هیچ اعلانی یافت نشد')
     expect(wrapper.text()).toContain('در آخرین اعلان‌های دریافت‌شده')
+    expect(wrapper.findAll('main')).toHaveLength(1)
+    expect(wrapper.get('[role="tabpanel"]').attributes('id')).toBe(
+      'notifications-category-trade-panel',
+    )
+    expect(wrapper.get('[role="tabpanel"]').attributes('aria-labelledby')).toBe(
+      'notifications-category-trade-tab',
+    )
   })
 
   it('shows a retryable error instead of a false empty state when the initial history request fails', async () => {
@@ -137,7 +163,33 @@ describe('NotificationsView.vue', () => {
     expect(wrapper.find('.push-disable-btn').exists()).toBe(false)
   })
 
-  it('routes back home and does not render per-notification action buttons', async () => {
+  it.each([
+    ['checking', 'در حال بررسی'],
+    ['unsupported', 'پشتیبانی نمی‌شود'],
+    ['insecure', 'نیازمند HTTPS'],
+    ['server-disabled', 'غیرفعال در سرور'],
+    ['permission-blocked', 'مسدود در مرورگر'],
+    ['permission-default', 'آماده فعال‌سازی'],
+    ['subscribed', 'فعال'],
+    ['unsubscribed', 'غیرفعال'],
+    ['error', 'خطا'],
+  ] as const)('renders the truthful browser Push state %s', async (state, label) => {
+    webPushMocks.getWebPushStatus.mockResolvedValueOnce({ state })
+    const store = useNotificationStore()
+    vi.spyOn(store, 'openNotificationCenter').mockResolvedValue()
+
+    const wrapper = mount(NotificationsView)
+    await flushPromises()
+
+    expect(wrapper.get('.ui-v2-browser-push').text()).toContain(label)
+    expect(wrapper.get('.push-device-scope').text()).toContain('همین مرورگر و دستگاه')
+    expect(wrapper.find('.push-enable-btn').exists()).toBe(
+      state === 'permission-default' || state === 'unsubscribed',
+    )
+    expect(wrapper.find('.push-status-retry').exists()).toBe(state === 'error')
+  })
+
+  it('routes back to the canonical account hub and does not render per-notification action buttons', async () => {
     const store = useNotificationStore()
     store.appNotifications = [
       {
@@ -158,11 +210,11 @@ describe('NotificationsView.vue', () => {
     await flushPromises()
 
     await wrapper.get('.notifications-return').trigger('click')
-    expect(routerPushMock).toHaveBeenCalledWith('/')
+    expect(routerPushMock).toHaveBeenCalledWith({ name: 'account' })
     expect(wrapper.find('.clear-btn').exists()).toBe(false)
     expect(wrapper.find('.notification-toolbar').exists()).toBe(false)
     expect(wrapper.text()).not.toContain('صندوق ورودی')
-    expect(wrapper.find('.notifications-topbar h1').exists()).toBe(false)
+    expect(wrapper.get('h1').text()).toBe('اعلان‌ها')
     expect(wrapper.find('.delete-btn').exists()).toBe(false)
     expect(wrapper.find('.toggle-read-btn').exists()).toBe(false)
     expect(wrapper.find('.notif-actions').exists()).toBe(false)
@@ -201,8 +253,8 @@ describe('NotificationsView.vue', () => {
     const categoryTabs = wrapper.find('.notification-category-tabs').findAll('[role="tab"]')
     expect(categoryTabs).toHaveLength(2)
     expect(categoryTabs[0]!.attributes('aria-selected')).toBe('true')
-    expect(categoryTabs[0]!.text()).toContain('معاملات ۱')
-    expect(categoryTabs[1]!.text()).toContain('سایر ۱')
+    expect(categoryTabs[0]!.text()).toBe('معاملات')
+    expect(categoryTabs[1]!.text()).toBe('سایر')
     expect(wrapper.find('.notification-toolbar').exists()).toBe(false)
     expect(wrapper.text()).not.toContain('پیام مدیریتی')
     expect(wrapper.find('.notif-item.category-trade').exists()).toBe(true)
@@ -240,7 +292,7 @@ describe('NotificationsView.vue', () => {
 
     vi.spyOn(store, 'openNotificationCenter').mockResolvedValue()
 
-    const wrapper = mount(NotificationsView)
+    const wrapper = mount(NotificationsView, { attachTo: document.body })
     await flushPromises()
 
     const chips = () => wrapper.find('.notification-category-tabs').findAll('[role="tab"]')
@@ -248,6 +300,20 @@ describe('NotificationsView.vue', () => {
     expect(chips()[0]!.attributes('aria-selected')).toBe('true')
     expect(wrapper.text()).not.toContain('پیام مدیریتی')
     expect(wrapper.find('.notif-item.category-trade').exists()).toBe(true)
+    expect(chips()[0]!.attributes('id')).toBe('notifications-category-trade-tab')
+    expect(chips()[0]!.attributes('aria-controls')).toBe('notifications-category-trade-panel')
+
+    chips()[0]!.element.focus()
+    await chips()[0]!.trigger('keydown', { key: 'ArrowLeft' })
+    await flushPromises()
+    expect(document.activeElement).toBe(chips()[1]!.element)
+    expect(wrapper.get('[role="tabpanel"]').attributes('id')).toBe(
+      'notifications-category-management-panel',
+    )
+
+    await chips()[1]!.trigger('keydown', { key: 'ArrowRight' })
+    await flushPromises()
+    expect(document.activeElement).toBe(chips()[0]!.element)
 
     await chips()[0]!.trigger('keydown', { key: 'Home' })
     expect(chips()[0]!.attributes('aria-selected')).toBe('true')
@@ -262,11 +328,12 @@ describe('NotificationsView.vue', () => {
     expect(wrapper.text()).not.toContain('پیام مدیریتی')
     expect(wrapper.find('.notif-item.category-trade').exists()).toBe(true)
     expect(wrapper.find('.notif-title').exists()).toBe(false)
+    wrapper.unmount()
   })
 
   it('opens a notification route when the item carries one', async () => {
     const store = useNotificationStore()
-    store.appNotifications = [
+    const hostileNotifications: NormalizedAppNotification[] = [
       {
         id: 12,
         title: 'معامله',
@@ -278,7 +345,8 @@ describe('NotificationsView.vue', () => {
         is_read: false,
         route: '/users/19?account_name=owner-19',
       },
-    ] as any
+    ]
+    store.appNotifications = hostileNotifications
 
     vi.spyOn(store, 'openNotificationCenter').mockResolvedValue()
 
@@ -289,12 +357,48 @@ describe('NotificationsView.vue', () => {
 
     await wrapper.get('.notif-item').trigger('click')
     expect(routerPushMock).toHaveBeenCalledWith('/users/19?account_name=owner-19')
-    expect(wrapper.get('.notif-item').attributes('role')).toBe('button')
-    expect(wrapper.get('.notif-item').attributes('tabindex')).toBe('0')
+    expect(wrapper.get('.notif-item').element.tagName).toBe('BUTTON')
+    expect(wrapper.get('.notif-item').attributes('type')).toBe('button')
+  })
 
-    routerPushMock.mockClear()
-    await wrapper.get('.notif-item').trigger('keydown', { key: 'Enter' })
-    expect(routerPushMock).toHaveBeenCalledWith('/users/19?account_name=owner-19')
+  it('restores the notification center when an auth guard redirects a target to recovery', async () => {
+    const store = useNotificationStore()
+    store.appNotifications = [
+      {
+        id: 16,
+        title: 'بازار',
+        body: 'اعلان بازار',
+        content: 'اعلان بازار',
+        message: 'اعلان بازار',
+        level: 'info',
+        category: 'trade',
+        is_read: true,
+        route: '/market',
+      },
+    ]
+    vi.spyOn(store, 'openNotificationCenter').mockResolvedValue()
+    routerPushMock.mockImplementationOnce(async () => {
+      routerCurrentRouteMock.value = {
+        name: 'system-recovery',
+        fullPath: '/system/permission-denied',
+      }
+    })
+    routerReplaceMock.mockImplementationOnce(async () => {
+      routerCurrentRouteMock.value = {
+        name: 'account-notifications',
+        fullPath: '/account/notifications',
+      }
+    })
+
+    const wrapper = mount(NotificationsView)
+    await flushPromises()
+    await wrapper.get('.notif-item').trigger('click')
+    await flushPromises()
+
+    expect(routerPushMock).toHaveBeenCalledWith('/market')
+    expect(routerReplaceMock).toHaveBeenCalledWith({ name: 'account-notifications' })
+    expect(routerCurrentRouteMock.value.name).toBe('account-notifications')
+    expect(wrapper.text()).toContain('اعلان بازار')
   })
 
   it('renders plain notifications with fallback title and ignores route-less item clicks', async () => {
@@ -325,12 +429,64 @@ describe('NotificationsView.vue', () => {
     expect(wrapper.find('.notif-title').text()).toBe('اعلان جدید')
     expect(wrapper.find('.unread-dot').exists()).toBe(true)
     expect(wrapper.find('.notif-time').exists()).toBe(true)
-    expect(wrapper.text()).toContain('جدید')
+    expect(wrapper.text()).not.toContain('خوانده‌شده')
     expect(wrapper.find('.toggle-read-btn').exists()).toBe(false)
     expect(wrapper.find('.delete-btn').exists()).toBe(false)
     expect(routerPushMock).not.toHaveBeenCalled()
 
     await wrapper.get('.notif-item').trigger('click')
+    expect(routerPushMock).not.toHaveBeenCalled()
+  })
+
+  it('fails closed for external, sensitive, and unmatched notification routes', async () => {
+    const store = useNotificationStore()
+    const hostileRouteNotifications: NormalizedAppNotification[] = [
+      {
+        id: 41,
+        title: 'مسیر نامعتبر',
+        body: 'بدنه',
+        content: 'بدنه',
+        message: 'بدنه',
+        level: 'warning',
+        category: 'system',
+        is_read: true,
+        route: 'https://evil.example/collect',
+      },
+      {
+        id: 42,
+        title: 'مسیر حساس',
+        body: 'بدنه',
+        content: 'بدنه',
+        message: 'بدنه',
+        level: 'warning',
+        category: 'system',
+        is_read: true,
+        route: '/account?token=raw-secret',
+      },
+      {
+        id: 43,
+        title: 'مسیر ناشناخته',
+        body: 'بدنه',
+        content: 'بدنه',
+        message: 'بدنه',
+        level: 'warning',
+        category: 'system',
+        is_read: true,
+        route: '/missing/notification-target',
+      },
+    ]
+    store.appNotifications = hostileRouteNotifications
+    vi.spyOn(store, 'openNotificationCenter').mockResolvedValue()
+
+    const wrapper = mount(NotificationsView)
+    await flushPromises()
+    await wrapper.find('.notification-category-tabs').findAll('[role="tab"]')[1]!.trigger('click')
+
+    expect(wrapper.findAll('.notif-item')).toHaveLength(3)
+    expect(wrapper.findAll('.notif-item').every((item) => item.element.tagName === 'ARTICLE')).toBe(
+      true,
+    )
+    for (const item of wrapper.findAll('.notif-item')) await item.trigger('click')
     expect(routerPushMock).not.toHaveBeenCalled()
   })
 
@@ -374,7 +530,7 @@ describe('NotificationsView.vue', () => {
     expect(wrapper.find('.notif-badges').exists()).toBe(false)
     expect(wrapper.text()).not.toContain('اعلان معامله')
     expect(wrapper.find('.notif-line-plain').text()).toContain('فروش')
-    expect(wrapper.findAll('.notif-line-field')).toHaveLength(8)
+    expect(wrapper.findAll('.notif-line-field')).toHaveLength(7)
     expect(wrapper.findAll('.notif-line-label').map((node) => node.text())).toEqual([
       'فی',
       'تعداد',
@@ -382,11 +538,62 @@ describe('NotificationsView.vue', () => {
       'طرف معامله',
       'شماره معامله',
       'زمان معامله',
-      'مسیر',
       'توضیحات',
     ])
-    expect(wrapper.text()).toContain('مالک ↔ مشتری سطح ۱')
+    expect(wrapper.text()).not.toContain('مالک ↔ مشتری سطح ۱')
+    expect(wrapper.text()).not.toContain('مسیر')
     expect(wrapper.text()).toContain('تحویل حضوری')
+  })
+
+  it('filters raw route and backend metadata before interpreting a leading token as an icon', async () => {
+    const store = useNotificationStore()
+    const tradeBody =
+      [
+        'route: /market',
+        'route=/admin',
+        'مسیر: /account',
+        'مسیر：/market',
+        'backend: iran',
+        'backend＝foreign',
+        'server: api-01',
+        '🏷️ کالا: امام',
+        '📝 توضیحات: سالم',
+      ].join('\n') + '\rserver=secondary\u2028route=/hidden\u2029backend: hidden'
+
+    store.appNotifications = [
+      {
+        id: 14,
+        title: 'اعلان پالایش‌شده',
+        body: tradeBody,
+        content: tradeBody,
+        message: tradeBody,
+        level: 'success',
+        category: 'trade',
+        is_read: true,
+      },
+    ]
+
+    vi.spyOn(store, 'openNotificationCenter').mockResolvedValue()
+
+    const wrapper = mount(NotificationsView)
+    await flushPromises()
+    await wrapper.find('.notification-category-tabs').findAll('[role="tab"]')[0]!.trigger('click')
+
+    expect(wrapper.findAll('.notif-line-field')).toHaveLength(2)
+    expect(wrapper.findAll('.notif-line-label').map((node) => node.text())).toEqual([
+      'کالا',
+      'توضیحات',
+    ])
+    expect(wrapper.text()).toContain('امام')
+    expect(wrapper.text()).toContain('سالم')
+    expect(wrapper.text()).not.toContain('/market')
+    expect(wrapper.text()).not.toContain('/account')
+    expect(wrapper.text()).not.toContain('/admin')
+    expect(wrapper.text()).not.toContain('iran')
+    expect(wrapper.text()).not.toContain('secondary')
+    expect(wrapper.text()).not.toContain('/hidden')
+    expect(wrapper.text()).not.toContain('foreign')
+    expect(wrapper.text()).not.toContain('api-01')
   })
 
   it('filters blank structured lines and keeps non-trade multiline notifications in structured mode', async () => {

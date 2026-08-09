@@ -7,6 +7,7 @@ import { clearIntendedRoute, readIntendedRoute } from '../utils/authNavigation'
 import { clearCurrentUserSummary, primeCurrentUserSummary } from '../utils/currentUser'
 import { isAppHttpError } from '../utils/httpErrorPolicy'
 import { assertSuccessfulNavigation } from '../utils/navigationResult'
+import { consumeLocalLogoutReceipt } from '../utils/localLogoutReceipt'
 import { routeRequestJson } from '../utils/routeRequest'
 import { pushBackState, popBackState, clearBackStack } from '../composables/useBackButton'
 import { AppButton, AppFormField, AppInput, AppTextarea, AuthFlowShell } from '../components/ui'
@@ -14,6 +15,7 @@ import { AppButton, AppFormField, AppInput, AppTextarea, AuthFlowShell } from '.
 const router = useRouter()
 const route = useRoute()
 const completedRegistrationNotice = computed(() => route.query.registration === 'complete')
+const localLogoutNotice = ref(consumeLocalLogoutReceipt())
 type LoginStep =
   | 'mobile'
   | 'otp'
@@ -1377,6 +1379,31 @@ function goBackToMobile() {
         >
           <strong>ثبت‌نام قبلاً تکمیل شده است</strong>
           <span>برای ورود به وب‌اپ، کد تأیید دریافت کنید.</span>
+        </div>
+
+        <div
+          v-if="localLogoutNotice"
+          class="ui-v2-auth-login-note"
+          :class="{
+            'ui-v2-auth-login-note--success': localLogoutNotice === 'server-confirmed',
+          }"
+          role="status"
+          data-local-logout-notice
+        >
+          <strong>
+            {{
+              localLogoutNotice === 'server-confirmed'
+                ? 'خروج این دستگاه ثبت شد'
+                : 'اطلاعات ورود این دستگاه پاک شد'
+            }}
+          </strong>
+          <span>
+            {{
+              localLogoutNotice === 'server-confirmed'
+                ? 'نشست این دستگاه روی سرور پایان یافت.'
+                : 'تأیید سرور دریافت نشد؛ اطلاعات ورود فقط از این دستگاه پاک شد.'
+            }}
+          </span>
         </div>
 
         <AppFormField label="شماره موبایل" :error="mobileFieldError">

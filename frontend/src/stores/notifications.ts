@@ -28,6 +28,7 @@ export const useNotificationStore = defineStore('notifications', () => {
     const unreadMentionChats = ref<number[]>([])
     const mutedConversationIds = ref<number[]>([])
     const appNotifications = ref<NormalizedAppNotification[]>([])
+    const appUnreadCount = ref(0)
     const activeToasts = ref<ToastNotification[]>([])
     const isLoadingHistory = ref(false)
     const isRefreshingHistory = ref(false)
@@ -37,6 +38,14 @@ export const useNotificationStore = defineStore('notifications', () => {
     const MAX_IN_MEMORY_NOTIFICATIONS = 100
     const NOTIFICATION_HISTORY_LIMIT = 50
     const TOAST_LIFETIME_MS = 5000
+    type ToastPauseReason = 'focus' | 'hover' | 'security-layer'
+    type ToastTimerState = {
+        remainingMs: number
+        startedAt: number | null
+        timeoutId: number | null
+        pauseReasons: Set<ToastPauseReason>
+    }
+    const toastTimers = new Map<number, ToastTimerState>()
     let clientReceivedAtCursor = 0
     let notificationMutationCursor = 0
     let activeHistoryRequest: Promise<NotificationHistoryResult> | null = null
@@ -245,9 +254,10 @@ export const useNotificationStore = defineStore('notifications', () => {
         const token = localStorage.getItem('auth_token')
         if (!token) return
 
-        try {
-            const response = await apiFetch('/api/chat/poll')
-            if (response.ok) {
+        await Promise.allSettled([
+            (async () => {
+                const response = await apiFetch('/api/chat/poll')
+                if (!response.ok) return
                 const data = await response.json()
                 syncUnreadChatIds(
                     data.conversations_with_unread || [],
@@ -255,9 +265,26 @@ export const useNotificationStore = defineStore('notifications', () => {
                     data.total_unread_mentions || 0
                 )
                 syncMutedConversationIds(data.muted_conversation_ids || [])
-            }
-        } catch (error) {
-            console.error('Failed to fetch initial notification counts:', error)
+            })(),
+            fetchAppUnreadCount(),
+        ])
+    }
+
+    const fetchAppUnreadCount = async () => {
+        const token = localStorage.getItem('auth_token')
+        if (!token) return false
+
+        try {
+            const response = await apiFetch('/api/notifications/unread-count')
+            if (!response.ok) return false
+            const payload = await response.json()
+            const count = Number(payload)
+            if (!Number.isInteger(count) || count < 0) return false
+            appUnreadCount.value = count
+            return true
+        } catch {
+            // Preserve the last confirmed count without exposing request details.
+            return false
         }
     }
 
@@ -330,7 +357,11 @@ export const useNotificationStore = defineStore('notifications', () => {
         for (const notification of notifications) {
             const normalizedId = normalizeNotificationId(notification.id)
             const existingNotification = nextById.get(normalizedId)
-            const normalized = withClientReceivedAt(notification, reserveClientReceivedAt(), existingNotification)
+            const normalized = withClientReceivedAt(
+                { ...notification, id: normalizedId },
+                reserveClientReceivedAt(),
+                existingNotification
+            )
             nextById.set(normalizedId, normalized)
             notificationMutationCursor += 1
             realtimeRevisionById.set(normalizedId, notificationMutationCursor)
@@ -381,7 +412,7 @@ export const useNotificationStore = defineStore('notifications', () => {
                 const normalizedHistory = data.map((notification: AppRealtimeNotificationPayload) => {
                     const normalized = normalizeAppNotificationPayload(notification)
                     return withClientReceivedAt(
-                        notification,
+                        normalized,
                         historySnapshotReceivedAt,
                         existingById.get(normalized.id)
                     )
@@ -390,10 +421,9 @@ export const useNotificationStore = defineStore('notifications', () => {
                 hasLoadedHistory.value = true
                 historyStatus.value = 'success'
                 return { ok: true, count: new Set(normalizedHistory.map((notification) => notification.id)).size }
-            } catch (error) {
+            } catch {
                 historyStatus.value = 'error'
                 historyError.value = NOTIFICATION_HISTORY_ERROR
-                console.error('Failed to fetch notifications history:', error)
                 return { ok: false, error: NOTIFICATION_HISTORY_ERROR }
             } finally {
                 isLoadingHistory.value = false
@@ -408,11 +438,15 @@ export const useNotificationStore = defineStore('notifications', () => {
     const openNotificationCenter = (): Promise<NotificationHistoryResult> => {
         if (activeOpenNotificationCenterRequest) return activeOpenNotificationCenterRequest
 
+        // Notifications arriving after the center is opened must remain unread,
+        // even when they arrive while the history request is still pending.
+        const centerOpenedRevision = notificationMutationCursor
+
         activeOpenNotificationCenterRequest = (async () => {
             const historyResult = await fetchHistory()
             if (!historyResult.ok) return historyResult
 
-            await markAllAsRead()
+            await markAllAsRead(centerOpenedRevision)
             return historyResult
         })().finally(() => {
             activeOpenNotificationCenterRequest = null
@@ -421,28 +455,44 @@ export const useNotificationStore = defineStore('notifications', () => {
         return activeOpenNotificationCenterRequest
     }
 
-    const markAllAsRead = async () => {
-        const markStartedRevision = notificationMutationCursor
-        try {
-            await routeRequest('/api/notifications/mark-all-read', {
-                method: 'POST',
-                errorContext: {
-                    surface: 'settings',
-                    scope: 'action',
-                    operation: 'update',
-                    fallbackMessage: 'ثبت وضعیت خوانده‌شده انجام نشد.',
-                },
-            })
-            appNotifications.value = appNotifications.value.map((notification) => (
-                (realtimeRevisionById.get(notification.id) ?? 0) <= markStartedRevision
-                    ? { ...notification, is_read: true }
-                    : notification
+    const markAllAsRead = async (markStartedRevision = notificationMutationCursor) => {
+        const eligibleIds = appNotifications.value
+            .filter((notification) => (
+                notification.is_read !== true
+                && typeof notification.id === 'number'
+                && Number.isInteger(notification.id)
+                && notification.id > 0
+                && (realtimeRevisionById.get(notification.id) ?? 0) <= markStartedRevision
             ))
-            return { ok: true as const }
-        } catch (error) {
-            console.error('Failed to mark all as read:', error)
-            return { ok: false as const }
-        }
+            .map((notification) => notification.id as number)
+        if (eligibleIds.length === 0) return { ok: true as const }
+
+        const results = await Promise.allSettled(eligibleIds.map((notificationId) => (
+            routeRequest(`/api/notifications/${notificationId}/read`, {
+                    method: 'PATCH',
+                    errorContext: {
+                        surface: 'settings',
+                        scope: 'item',
+                        operation: 'update',
+                        fallbackMessage: 'ثبت وضعیت خوانده‌شده انجام نشد.',
+                    },
+                })
+        )))
+        const confirmedIds = new Set<number | string>(
+            results.flatMap((result, index) => (
+                result.status === 'fulfilled' ? [eligibleIds[index]!] : []
+            ))
+        )
+        appNotifications.value = appNotifications.value.map((notification) => (
+            confirmedIds.has(notification.id)
+            && (realtimeRevisionById.get(notification.id) ?? 0) <= markStartedRevision
+                ? { ...notification, is_read: true }
+                : notification
+        ))
+        const confirmedUnreadCount = results.filter((result) => result.status === 'fulfilled').length
+        appUnreadCount.value = Math.max(0, appUnreadCount.value - confirmedUnreadCount)
+        await fetchAppUnreadCount()
+        return { ok: results.every((result) => result.status === 'fulfilled') }
     }
 
     const toggleReadStatus = async (id: number | string, isRead: boolean) => {
@@ -463,9 +513,8 @@ export const useNotificationStore = defineStore('notifications', () => {
                     fallbackMessage: 'تغییر وضعیت اعلان انجام نشد.',
                 },
             })
-        } catch (error) {
+        } catch {
             notification.is_read = originalState
-            console.error('Failed to toggle read status:', error)
         }
     }
 
@@ -483,9 +532,8 @@ export const useNotificationStore = defineStore('notifications', () => {
                     fallbackMessage: 'پاک‌کردن اعلان‌ها انجام نشد.',
                 },
             })
-        } catch (error) {
+        } catch {
             restoreClearedNotifications(originalList)
-            console.error('Clear all notifications failed:', error)
         }
     }
 
@@ -506,14 +554,41 @@ export const useNotificationStore = defineStore('notifications', () => {
                     fallbackMessage: 'حذف اعلان انجام نشد.',
                 },
             })
-        } catch (error) {
+        } catch {
             restoreDeletedNotification(originalList, removedNotification)
-            console.error('Delete failed:', error)
         }
     }
 
     const addToast = (toast: ToastInput) => {
         addToastsBatch([toast])
+    }
+
+    const armToastTimer = (toastId: number, timer: ToastTimerState) => {
+        if (timer.pauseReasons.size > 0 || timer.timeoutId !== null) return
+        timer.startedAt = Date.now()
+        timer.timeoutId = window.setTimeout(() => {
+            removeToast(toastId)
+        }, Math.max(0, timer.remainingMs))
+    }
+
+    const pauseToast = (toastId: number, reason: ToastPauseReason) => {
+        const timer = toastTimers.get(toastId)
+        if (!timer || timer.pauseReasons.has(reason)) return
+        timer.pauseReasons.add(reason)
+        if (timer.timeoutId === null) return
+        window.clearTimeout(timer.timeoutId)
+        timer.timeoutId = null
+        if (timer.startedAt !== null) {
+            timer.remainingMs = Math.max(0, timer.remainingMs - (Date.now() - timer.startedAt))
+        }
+        timer.startedAt = null
+    }
+
+    const resumeToast = (toastId: number, reason: ToastPauseReason) => {
+        const timer = toastTimers.get(toastId)
+        if (!timer || !timer.pauseReasons.has(reason)) return
+        timer.pauseReasons.delete(reason)
+        armToastTimer(toastId, timer)
     }
 
     const addToastsBatch = (toasts: ToastInput[]) => {
@@ -525,13 +600,23 @@ export const useNotificationStore = defineStore('notifications', () => {
         playNotificationSound()
 
         for (const toast of nextToasts) {
-            window.setTimeout(() => {
-                removeToast(toast.id)
-            }, TOAST_LIFETIME_MS)
+            const previousTimer = toastTimers.get(toast.id)
+            if (previousTimer?.timeoutId != null) window.clearTimeout(previousTimer.timeoutId)
+            const timer: ToastTimerState = {
+                remainingMs: TOAST_LIFETIME_MS,
+                startedAt: null,
+                timeoutId: null,
+                pauseReasons: new Set(),
+            }
+            toastTimers.set(toast.id, timer)
+            armToastTimer(toast.id, timer)
         }
     }
 
     const removeToast = (id: number) => {
+        const timer = toastTimers.get(id)
+        if (timer?.timeoutId != null) window.clearTimeout(timer.timeoutId)
+        toastTimers.delete(id)
         activeToasts.value = activeToasts.value.filter((toast) => toast.id !== id)
     }
 
@@ -544,8 +629,10 @@ export const useNotificationStore = defineStore('notifications', () => {
         incrementMentionUnreadBatch,
         mutedConversationIds,
         appNotifications,
+        appUnreadCount,
         activeToasts,
         fetchInitialCounts,
+        fetchAppUnreadCount,
         setChatUnreadCount,
         incrementChatUnread,
         incrementChatUnreadBatch,
@@ -558,6 +645,8 @@ export const useNotificationStore = defineStore('notifications', () => {
         addAppNotificationsBatch,
         addToast,
         addToastsBatch,
+        pauseToast,
+        resumeToast,
         removeToast,
         isLoadingHistory,
         isRefreshingHistory,

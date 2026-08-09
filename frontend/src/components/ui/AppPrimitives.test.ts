@@ -472,14 +472,32 @@ describe('ui primitives', () => {
       props: {
         modelValue: 'all',
         label: 'فیلتر مشتریان',
+        idPrefix: 'customer-filter',
+        focusSelectionOnKeyboard: true,
         options: [
           { key: 'all', label: 'همه' },
           { key: 'active', label: 'فعال' },
         ],
       },
+      attachTo: document.body,
     })
     await chips.findAll('[role="tab"]')[1]!.trigger('click')
     expect(chips.emitted('update:modelValue')?.[0]).toEqual(['active'])
+    expect(chips.findAll('[role="tab"]')[0]!.attributes('id')).toBe('customer-filter-all-tab')
+    expect(chips.findAll('[role="tab"]')[0]!.attributes('aria-controls')).toBe(
+      'customer-filter-all-panel',
+    )
+
+    const chipTabs = chips.findAll<HTMLButtonElement>('[role="tab"]')
+    chipTabs[0]!.element.focus()
+    await chipTabs[0]!.trigger('keydown', { key: 'ArrowLeft' })
+    await nextTick()
+    expect(chips.emitted('update:modelValue')?.at(-1)).toEqual(['active'])
+    expect(document.activeElement).toBe(chipTabs[1]!.element)
+    await chipTabs[1]!.trigger('keydown', { key: 'Home' })
+    await nextTick()
+    expect(document.activeElement).toBe(chipTabs[0]!.element)
+    chips.unmount()
 
     const stepper = mount(AppNumberStepper, {
       props: { modelValue: 0.5, min: 0, max: 2, step: 0.1, label: 'درصد کمیسیون' },
@@ -488,6 +506,28 @@ describe('ui primitives', () => {
     expect(stepper.emitted('update:modelValue')?.[0]).toEqual([0.6])
     await stepper.get('input').setValue('1.23')
     expect(stepper.emitted('update:modelValue')?.[1]).toEqual([1.23])
+  })
+
+  it('keeps legacy filter-chip focus behavior unless focus-follow-selection is opted in', async () => {
+    const chips = mount(AppFilterChips, {
+      props: {
+        modelValue: 'all',
+        label: 'فیلتر بازار',
+        options: [
+          { key: 'all', label: 'همه' },
+          { key: 'active', label: 'فعال' },
+        ],
+      },
+      attachTo: document.body,
+    })
+    const tabs = chips.findAll<HTMLButtonElement>('[role="tab"]')
+    tabs[0]!.element.focus()
+    await tabs[0]!.trigger('keydown', { key: 'ArrowLeft' })
+    await nextTick()
+
+    expect(chips.emitted('update:modelValue')?.at(-1)).toEqual(['active'])
+    expect(document.activeElement).toBe(tabs[0]!.element)
+    chips.unmount()
   })
 
   it('renders toast, bottom sheet, and responsive dialog primitives', async () => {

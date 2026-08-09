@@ -241,6 +241,8 @@ const CANONICAL_V2_CLASS =
   /^(?:ui-v2-catalog(?:__[-_a-z0-9]+)?|ui-v2-motion-(?:micro|state)|ui-v2-scope)$/
 const STAGE3_PRODUCT_CLASS =
   /^ui-v2-(?:auth|bottom-nav|connection|pwa|route|session|toast)-[-_a-z0-9]+$/
+const STAGE4_PRODUCT_CLASS =
+  /^ui-v2-(?:account|browser-push|daily|home|notifications|operations|settings|workspace)(?:[-_]|$)[-_a-z0-9]*$/
 const ALLOWED_STAGE3_PRODUCT_CLASSES = new Set([
   'app-route-v2-scope',
   'ui-v2-bottom-nav',
@@ -248,11 +250,14 @@ const ALLOWED_STAGE3_PRODUCT_CLASSES = new Set([
 ])
 const ALLOWED_LEGACY_PRIMITIVE_CLASSES = new Set([
   'ui-button',
+  'ui-button--primary',
   'ui-button--danger',
   'ui-button--block',
   'ui-button--ghost',
   'ui-button--secondary',
   'ui-button__spinner',
+  'ui-button__icon',
+  'ui-button__label',
   'ui-card',
   'ui-empty-state',
   'ui-empty-state--danger',
@@ -265,8 +270,50 @@ const ALLOWED_LEGACY_PRIMITIVE_CLASSES = new Set([
   'ui-list-item',
   'ui-list-item__copy',
   'ui-list-item__trailing',
+  'ui-page',
+  'ui-page--narrow',
+  'ui-page-header',
+  'ui-page-header__actions',
+  'ui-page-header__copy',
+  'ui-page-header__eyebrow',
+  'ui-workspace',
+  'ui-workspace--narrow',
+  'ui-icon-button',
+  'ui-icon-button--neutral',
+  'ui-icon-button--md',
+  'ui-icon-button--sm',
+  'ui-icon-button--primary',
+  'ui-icon-button--danger',
+  'ui-action-card',
+  'ui-action-card--neutral',
+  'ui-action-card--primary',
+  'ui-action-card--success',
+  'ui-action-card--warning',
+  'ui-action-card--danger',
+  'ui-action-card--info',
+  'ui-action-card__arrow',
+  'ui-action-card__badge',
+  'ui-action-card__copy',
+  'ui-action-card__description',
+  'ui-action-card__icon',
+  'ui-action-card__title-row',
+  'ui-filter-chips',
+  'ui-filter-chip',
   'ui-section-card',
+  'ui-section-card--neutral',
+  'ui-section-card--primary',
+  'ui-section-card--success',
+  'ui-section-card--warning',
+  'ui-section-card--danger',
+  'ui-section-card--info',
+  'ui-section-card__actions',
+  'ui-section-card__body',
+  'ui-section-card__copy',
+  'ui-section-card__header',
   'ui-status-badge',
+  'ui-status-badge--neutral',
+  'ui-status-badge--primary',
+  'ui-status-badge--warning',
   'ui-status-badge--info',
   'ui-status-badge--danger',
   'ui-status-badge--success',
@@ -277,6 +324,8 @@ const ALLOWED_LEGACY_PRIMITIVE_CLASSES = new Set([
   'ui-toast--success',
   'ui-toast--warning',
   'is-current',
+  'is-active',
+  'is-loading',
   'is-invalid',
   'slide-up-enter-active',
   'slide-up-enter-from',
@@ -405,23 +454,32 @@ const CATALOG_ROUTE =
 
 const REQUIRED_FULL_PROTECTED_ROUTES = ['/market', '/chat', '/admin/channels', '/share-receive']
 
-const STAGE3_CATCH_ALL_PATH = '/:pathMatch(.*)*'
+const STAGE4_CATCH_ALL_PATH = '/:pathMatch(.*)*'
 
-const REQUIRED_STAGE3_SCOPE_ROUTES = new Map([
-  ['route', ['/setup-password', '/login', '/i/:code', '/register', STAGE3_CATCH_ALL_PATH]],
+const REQUIRED_STAGE4_SCOPE_ROUTES = new Map([
   [
-    'section',
+    'route',
     [
-      '/',
+      '/setup-password',
+      '/login',
       '/operations',
-      '/operations/customers',
-      '/operations/customers/:relationId',
-      '/operations/accountants',
-      '/operations/accountants/:relationId',
       '/account',
       '/account/security',
       '/account/storage',
       '/account/notifications',
+      '/i/:code',
+      '/register',
+      STAGE4_CATCH_ALL_PATH,
+    ],
+  ],
+  [
+    'section',
+    [
+      '/',
+      '/operations/customers',
+      '/operations/customers/:relationId',
+      '/operations/accountants',
+      '/operations/accountants/:relationId',
       '/users/:id',
       '/profile',
       '/settings',
@@ -438,18 +496,56 @@ const REQUIRED_STAGE3_SCOPE_ROUTES = new Map([
   ['off', REQUIRED_FULL_PROTECTED_ROUTES],
 ])
 
-const REQUIRED_STAGE3_SHELL_ROUTES = new Map([
+const REQUIRED_STANDARD_AUTHENTICATED_ROUTES = [
+  '/',
+  '/operations',
+  '/operations/customers',
+  '/operations/customers/:relationId',
+  '/operations/accountants',
+  '/operations/accountants/:relationId',
+  '/account',
+  '/account/security',
+  '/account/storage',
+  '/account/notifications',
+  '/users/:id',
+  '/profile',
+  '/settings',
+  '/admin',
+  '/admin/invitations',
+  '/admin/users',
+  '/admin/users/:id',
+  '/admin/commodities',
+  '/admin/messages',
+  '/admin/system',
+  '/notifications',
+]
+
+const REQUIRED_STAGE4_SHELL_ROUTES = new Map([
   ['public', ['/login', '/i/:code', '/register']],
   ['focused-authenticated', ['/setup-password']],
-  ['standard-authenticated', REQUIRED_STAGE3_SCOPE_ROUTES.get('section')],
+  ['standard-authenticated', REQUIRED_STANDARD_AUTHENTICATED_ROUTES],
   ['protected-legacy', REQUIRED_FULL_PROTECTED_ROUTES],
-  ['system-recovery', [STAGE3_CATCH_ALL_PATH]],
+  ['system-recovery', [STAGE4_CATCH_ALL_PATH]],
 ])
 
-const STAGE3_ACTIVATION_BOUNDARY_PATHS = new Set([
+const STAGE4_ACTIVATION_BOUNDARY_PATHS = new Set([
   'src/App.vue',
   'src/components/SessionApprovalModal.vue',
+  'src/components/workspace/WorkspaceActionTile.vue',
+  'src/components/workspace/WorkspaceDangerZone.vue',
+  'src/components/workspace/WorkspaceNotice.vue',
+  'src/components/workspace/WorkspaceSection.vue',
+  'src/components/workspace/WorkspaceShell.vue',
+  'src/components/workspace/WorkspaceStatTile.vue',
   'src/views/DashboardView.vue',
+])
+
+const STAGE4_WORKSPACE_HELPER_BOUNDARY_PATHS = new Set([
+  'src/components/workspace/WorkspaceActionTile.vue',
+  'src/components/workspace/WorkspaceDangerZone.vue',
+  'src/components/workspace/WorkspaceNotice.vue',
+  'src/components/workspace/WorkspaceSection.vue',
+  'src/components/workspace/WorkspaceStatTile.vue',
 ])
 
 const REQUIRED_MIXED_INTERIORS = new Map([
@@ -788,6 +884,7 @@ export function checkV2Styles(styleFiles, { enforceFrozenTokenContract = true } 
           if (
             CANONICAL_V2_CLASS.test(match[1]) ||
             STAGE3_PRODUCT_CLASS.test(match[1]) ||
+            STAGE4_PRODUCT_CLASS.test(match[1]) ||
             ALLOWED_STAGE3_PRODUCT_CLASSES.has(match[1]) ||
             ALLOWED_LEGACY_PRIMITIVE_CLASSES.has(match[1])
           )
@@ -1508,8 +1605,48 @@ function sourceActivationEvidence(sourcePath, source) {
   return null
 }
 
-function isApprovedStage3ActivationBoundary({ path: sourcePath, source }) {
-  if (!STAGE3_ACTIVATION_BOUNDARY_PATHS.has(sourcePath)) return false
+function isApprovedStage4WorkspaceBoundary(sourcePath, source) {
+  const hasOptInContract =
+    /\bv2Scope\??\s*:\s*boolean\b/.test(source) &&
+    /\bv2Scope\s*:\s*false\b/.test(source) &&
+    /\bprops\.v2Scope\b/.test(source)
+  if (!hasOptInContract) return false
+
+  if (sourcePath === 'src/components/workspace/WorkspaceShell.vue') {
+    if (
+      !/\bprops\.v2Scope\s*\?\s*AppDesignSystemScope\s*:\s*['"]section['"]/.test(source) ||
+      !/:is\s*=\s*["']workspaceRoot["']/.test(source)
+    ) {
+      return false
+    }
+    const withoutApprovedScope = source.replace(/\bAppDesignSystemScope\b/g, '')
+    return sourceActivationEvidence(sourcePath, withoutApprovedScope) === null
+  }
+
+  if (!STAGE4_WORKSPACE_HELPER_BOUNDARY_PATHS.has(sourcePath)) return false
+  const helperCalls = [...source.matchAll(/\bgetUiDesignSystemScopeAttributes\s*\(\s*\)/g)]
+  if (
+    helperCalls.length !== 1 ||
+    !/\bprops\.v2Scope\s*\?\s*getUiDesignSystemScopeAttributes\s*\(\s*\)\s*:\s*\{\s*\}/.test(
+      source,
+    ) ||
+    !/\bv-bind\s*=\s*["']scopeAttributes["']/.test(source) ||
+    !/["']ui-v2-scope["']\s*:\s*v2Scope\b/.test(source)
+  ) {
+    return false
+  }
+  const withoutApprovedHelper = source
+    .replace(/\bgetUiDesignSystemScopeAttributes\b/g, '')
+    .replace(/["']ui-v2-scope["']\s*:\s*v2Scope\b/g, '')
+  return sourceActivationEvidence(sourcePath, withoutApprovedHelper) === null
+}
+
+function isApprovedStage4ActivationBoundary({ path: sourcePath, source }) {
+  if (!STAGE4_ACTIVATION_BOUNDARY_PATHS.has(sourcePath)) return false
+
+  if (sourcePath.startsWith('src/components/workspace/')) {
+    return isApprovedStage4WorkspaceBoundary(sourcePath, source)
+  }
 
   if (sourcePath === 'src/components/SessionApprovalModal.vue') {
     const scopeBindings = [...source.matchAll(/:data-ui-system\s*=\s*["']portalScopeValue["']/g)]
@@ -1564,10 +1701,27 @@ function isApprovedStage3ActivationBoundary({ path: sourcePath, source }) {
     const scopedSections = [
       ...source.matchAll(/<AppDesignSystemScope\b([^>]*)>([\s\S]*?)<\/AppDesignSystemScope>/g),
     ]
+    const homeSections = scopedSections.filter((section) =>
+      /\bclass\s*=\s*["'][^"']*\bui-v2-home-top\b[^"']*["']/.test(section[1]),
+    )
+    const pwaSections = scopedSections.filter((section) =>
+      /\bclass\s*=\s*["'][^"']*\bui-v2-pwa-section\b[^"']*["']/.test(section[1]),
+    )
+    const homeContent = homeSections[0]?.[2] ?? ''
+    const pwaContent = pwaSections[0]?.[2] ?? ''
     if (
-      scopedSections.length !== 1 ||
-      !/\bclass\s*=\s*["'][^"']*\bui-v2-pwa-section\b[^"']*["']/.test(scopedSections[0][1]) ||
-      !/^\s*<PWAInstallOverlay\b[^>]*\/>\s*$/.test(scopedSections[0][2])
+      scopedSections.length !== 2 ||
+      homeSections.length !== 1 ||
+      pwaSections.length !== 1 ||
+      !/<header\b[^>]*\bui-v2-home-header\b/.test(homeContent) ||
+      !/\bui-v2-home-header__main\b/.test(homeContent) ||
+      !/\bui-v2-home-identity\b/.test(homeContent) ||
+      !/\bui-v2-home-notifications\b/.test(homeContent) ||
+      !/\bui-v2-home-title\b/.test(homeContent) ||
+      !/\bui-v2-home-alert\b/.test(homeContent) ||
+      /\bhero-btn\b|Market Entry|<MarketHero\b|<PWAInstallOverlay\b/.test(homeContent) ||
+      !/^\s*<PWAInstallOverlay\b[^>]*\/>\s*$/.test(pwaContent) ||
+      /\bhero-btn\b|Market Entry|<MarketHero\b/.test(pwaContent)
     ) {
       return false
     }
@@ -1594,17 +1748,17 @@ export function checkRoutePolicy({ manifest, routerSource, activationSources = [
       violation(
         'runtime-route-registry-mutation',
         sourcePath,
-        'Stage 3 requires the exact static 30-route registry; addRoute/removeRoute/clearRoutes are forbidden',
+        'Stage 4 requires the exact static 30-route registry; addRoute/removeRoute/clearRoutes are forbidden',
       ),
     )
   }
 
-  if (manifest?.schemaVersion !== 2 || manifest?.stage !== 3 || manifest?.mode !== 'opt-in') {
+  if (manifest?.schemaVersion !== 3 || manifest?.stage !== 4 || manifest?.mode !== 'opt-in') {
     findings.push(
       violation(
         'invalid-scope-manifest',
         'src/design-system-v2/scope-manifest.json',
-        'Expected schemaVersion 2, Stage 3, opt-in scope manifest',
+        'Expected schemaVersion 3, Stage 4, opt-in scope manifest',
       ),
     )
   }
@@ -1613,7 +1767,7 @@ export function checkRoutePolicy({ manifest, routerSource, activationSources = [
       violation(
         'invalid-scope-contract',
         'src/design-system-v2/scope-manifest.json',
-        'Scope selector and V2 token prefix are immutable in Stage 3',
+        'Scope selector and V2 token prefix are immutable in Stage 4',
       ),
     )
   }
@@ -1663,8 +1817,8 @@ export function checkRoutePolicy({ manifest, routerSource, activationSources = [
       typeof route.name !== 'string' ||
       typeof route.testId !== 'string' ||
       !/^route-[a-z0-9-]+$/.test(route.testId) ||
-      !REQUIRED_STAGE3_SHELL_ROUTES.has(route.shellClass) ||
-      !REQUIRED_STAGE3_SCOPE_ROUTES.has(route.v2Scope) ||
+      !REQUIRED_STAGE4_SHELL_ROUTES.has(route.shellClass) ||
+      !REQUIRED_STAGE4_SCOPE_ROUTES.has(route.v2Scope) ||
       !['none', 'full', 'mixed'].includes(route.protection) ||
       !Array.isArray(route.protectedInteriors)
     ) {
@@ -1685,15 +1839,15 @@ export function checkRoutePolicy({ manifest, routerSource, activationSources = [
       violation(
         'route-registry-drift',
         'src/router/index.ts',
-        'Router path/name pairs differ from the Stage 3 scope manifest',
+        'Router path/name pairs differ from the Stage 4 scope manifest',
       ),
     )
   }
 
   if (
-    routes.at(-1)?.path !== STAGE3_CATCH_ALL_PATH ||
+    routes.at(-1)?.path !== STAGE4_CATCH_ALL_PATH ||
     routes.at(-1)?.name !== 'system-recovery' ||
-    routerRoutes.at(-1)?.path !== STAGE3_CATCH_ALL_PATH ||
+    routerRoutes.at(-1)?.path !== STAGE4_CATCH_ALL_PATH ||
     routerRoutes.at(-1)?.name !== 'system-recovery'
   ) {
     findings.push(
@@ -1783,28 +1937,28 @@ export function checkRoutePolicy({ manifest, routerSource, activationSources = [
     }
   }
 
-  for (const [scope, expectedPaths] of REQUIRED_STAGE3_SCOPE_ROUTES) {
+  for (const [scope, expectedPaths] of REQUIRED_STAGE4_SCOPE_ROUTES) {
     const actualPaths = routes.filter((route) => route.v2Scope === scope).map((route) => route.path)
     if (sameValues(actualPaths, expectedPaths)) continue
     findings.push(
       violation(
-        'stage3-v2-scope-contract-drift',
+        'stage4-v2-scope-contract-drift',
         'src/design-system-v2/scope-manifest.json',
-        `Stage 3 ${scope} scope routes changed; expected ${expectedPaths.length}, found ${actualPaths.length}`,
+        `Stage 4 ${scope} scope routes changed; expected ${expectedPaths.length}, found ${actualPaths.length}`,
       ),
     )
   }
 
-  for (const [shellClass, expectedPaths] of REQUIRED_STAGE3_SHELL_ROUTES) {
+  for (const [shellClass, expectedPaths] of REQUIRED_STAGE4_SHELL_ROUTES) {
     const actualPaths = routes
       .filter((route) => route.shellClass === shellClass)
       .map((route) => route.path)
     if (sameValues(actualPaths, expectedPaths)) continue
     findings.push(
       violation(
-        'stage3-shell-contract-drift',
+        'stage4-shell-contract-drift',
         'src/design-system-v2/scope-manifest.json',
-        `Stage 3 ${shellClass} shell routes changed; expected ${expectedPaths.length}, found ${actualPaths.length}`,
+        `Stage 4 ${shellClass} shell routes changed; expected ${expectedPaths.length}, found ${actualPaths.length}`,
       ),
     )
   }
@@ -1812,12 +1966,12 @@ export function checkRoutePolicy({ manifest, routerSource, activationSources = [
   for (const activationSource of activationSources) {
     const evidence = sourceActivationEvidence(activationSource.path, activationSource.source)
     if (!evidence) continue
-    if (isApprovedStage3ActivationBoundary(activationSource)) continue
+    if (isApprovedStage4ActivationBoundary(activationSource)) continue
     findings.push(
       violation(
-        'stage3-product-source-activation',
+        'stage4-product-source-activation',
         activationSource.path,
-        `Product source activates V2 outside an approved Stage 3 boundary with ${evidence}`,
+        `Product source activates V2 outside an approved Stage 4 boundary with ${evidence}`,
       ),
     )
   }

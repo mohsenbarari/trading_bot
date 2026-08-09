@@ -6,36 +6,50 @@ import { WS_NOTIFICATION_EVENTS } from '../types/notifications'
 import { BROWSER_NOTIFICATION_CLICK_EVENT } from '../utils/browserNotifications'
 import { cacheCurrentUserSummary, clearCurrentUserSummary } from '../utils/currentUser'
 
+type RuntimeRouteMock = {
+  path: string
+  fullPath: string
+  query: Record<string, unknown>
+}
+
+type RuntimeCurrentRouteMock = {
+  value: { name?: string; fullPath: string }
+}
+
+type OptionalMock = ReturnType<typeof vi.fn> | undefined
+
 const notificationRuntimeMocks = vi.hoisted(() => ({
-  route: null as any,
-  currentRoute: null as any,
+  route: null as unknown as RuntimeRouteMock,
+  currentRoute: null as unknown as RuntimeCurrentRouteMock,
   push: vi.fn(),
+  replace: vi.fn(),
+  resolve: vi.fn(),
   store: {
     addAppNotification: vi.fn(),
     addToast: vi.fn(),
-    addAppNotificationsBatch: undefined as any,
-    addToastsBatch: undefined as any,
+    addAppNotificationsBatch: undefined as OptionalMock,
+    addToastsBatch: undefined as OptionalMock,
     isConversationMuted: vi.fn(),
     incrementChatUnread: vi.fn(),
-    incrementChatUnreadBatch: undefined as any,
+    incrementChatUnreadBatch: undefined as OptionalMock,
     incrementMentionUnread: vi.fn(),
-    incrementMentionUnreadBatch: undefined as any,
+    incrementMentionUnreadBatch: undefined as OptionalMock,
     fetchInitialCounts: vi.fn(),
     fetchHistory: vi.fn(),
   },
   conversationsStore: {
-    conversations: [] as any[],
+    conversations: [] as Array<Record<string, unknown>>,
     patchConversation: vi.fn(),
   },
   requestNotificationPermission: vi.fn(),
-  promptAndEnableWebPushNotifications: vi.fn(),
+  getWebPushStatus: vi.fn(),
   showBrowserNotification: vi.fn(),
   unlockAudioContext: vi.fn(),
-  handlers: new Map<string, Array<(payload?: any) => void>>(),
+  handlers: new Map<string, Array<(payload?: unknown) => void>>(),
   connect: vi.fn(),
-  on: vi.fn((event: string, callback: (payload?: any) => void) => {
+  on: vi.fn(<T>(event: string, callback: (payload: T) => void) => {
     const current = notificationRuntimeMocks.handlers.get(event) ?? []
-    current.push(callback)
+    current.push((payload) => callback(payload as T))
     notificationRuntimeMocks.handlers.set(event, current)
   }),
   off: vi.fn(),
@@ -49,12 +63,14 @@ vi.mock('vue-router', async () => {
     fullPath: '/dashboard',
     query: {},
   })
-  notificationRuntimeMocks.currentRoute = vue.ref({ fullPath: '/dashboard' })
+  notificationRuntimeMocks.currentRoute = vue.ref({ name: 'dashboard', fullPath: '/dashboard' })
 
   return {
     useRoute: () => notificationRuntimeMocks.route,
     useRouter: () => ({
       push: notificationRuntimeMocks.push,
+      replace: notificationRuntimeMocks.replace,
+      resolve: notificationRuntimeMocks.resolve,
       currentRoute: notificationRuntimeMocks.currentRoute,
     }),
   }
@@ -79,20 +95,20 @@ vi.mock('../utils/audio', () => ({
 }))
 
 vi.mock('../services/webPush', () => ({
-  promptAndEnableWebPushNotifications: notificationRuntimeMocks.promptAndEnableWebPushNotifications,
+  getWebPushStatus: notificationRuntimeMocks.getWebPushStatus,
 }))
 
-function emitWsEvent(event: string, payload?: any) {
+function emitWsEvent(event: string, payload?: unknown) {
   for (const handler of notificationRuntimeMocks.handlers.get(event) ?? []) {
     handler(payload)
   }
 }
 
-function setRoute(path: string, fullPath = path, query: Record<string, any> = {}) {
+function setRoute(path: string, fullPath = path, query: Record<string, unknown> = {}) {
   notificationRuntimeMocks.route.path = path
   notificationRuntimeMocks.route.fullPath = fullPath
   notificationRuntimeMocks.route.query = query
-  notificationRuntimeMocks.currentRoute.value = { fullPath }
+  notificationRuntimeMocks.currentRoute.value = { name: 'runtime-route', fullPath }
 }
 
 function setDocumentHidden(hidden: boolean) {
@@ -126,13 +142,35 @@ describe('useNotificationRuntime', () => {
     cacheCurrentUserSummary({ id: 7, role: 'عادی', account_name: 'ali' })
     notificationRuntimeMocks.handlers.clear()
     notificationRuntimeMocks.push.mockReset()
+    notificationRuntimeMocks.replace.mockReset()
+    notificationRuntimeMocks.resolve.mockReset()
+    notificationRuntimeMocks.resolve.mockImplementation((path: string) => ({
+      name: path.startsWith('/missing') ? 'system-recovery' : 'resolved-runtime',
+      fullPath: path,
+      href: path,
+      matched: path.startsWith('/missing') ? [] : [{ name: 'resolved-runtime' }],
+    }))
+    notificationRuntimeMocks.push.mockImplementation(async (path: string) => {
+      const resolved = notificationRuntimeMocks.resolve(path)
+      notificationRuntimeMocks.currentRoute.value = {
+        name: resolved.name,
+        fullPath: resolved.fullPath,
+      }
+    })
+    notificationRuntimeMocks.replace.mockImplementation(async (path: string) => {
+      const resolved = notificationRuntimeMocks.resolve(path)
+      notificationRuntimeMocks.currentRoute.value = {
+        name: resolved.name,
+        fullPath: resolved.fullPath,
+      }
+    })
     notificationRuntimeMocks.connect.mockReset()
     notificationRuntimeMocks.on.mockClear()
     notificationRuntimeMocks.off.mockClear()
     notificationRuntimeMocks.ensureSessionValidation.mockReset()
     notificationRuntimeMocks.requestNotificationPermission.mockReset()
-    notificationRuntimeMocks.promptAndEnableWebPushNotifications.mockReset()
-    notificationRuntimeMocks.promptAndEnableWebPushNotifications.mockResolvedValue({ state: 'subscribed' })
+    notificationRuntimeMocks.getWebPushStatus.mockReset()
+    notificationRuntimeMocks.getWebPushStatus.mockResolvedValue({ state: 'subscribed' })
     notificationRuntimeMocks.showBrowserNotification.mockReset()
     notificationRuntimeMocks.unlockAudioContext.mockReset()
     notificationRuntimeMocks.store.addAppNotification.mockReset()
@@ -166,11 +204,11 @@ describe('useNotificationRuntime', () => {
     expect(notificationRuntimeMocks.connect).toHaveBeenCalledTimes(1)
     expect(notificationRuntimeMocks.store.fetchInitialCounts).toHaveBeenCalledTimes(1)
     expect(notificationRuntimeMocks.ensureSessionValidation).toHaveBeenCalledTimes(1)
+    expect(notificationRuntimeMocks.getWebPushStatus).toHaveBeenCalledTimes(1)
 
     window.dispatchEvent(new Event('click'))
     window.dispatchEvent(new Event('touchstart'))
     expect(notificationRuntimeMocks.requestNotificationPermission).not.toHaveBeenCalled()
-    expect(notificationRuntimeMocks.promptAndEnableWebPushNotifications).toHaveBeenCalledTimes(1)
     expect(notificationRuntimeMocks.unlockAudioContext).toHaveBeenCalledTimes(1)
     expect(removeWindowSpy).toHaveBeenCalledWith('click', expect.any(Function))
     expect(removeWindowSpy).toHaveBeenCalledWith('touchstart', expect.any(Function))
@@ -188,22 +226,148 @@ describe('useNotificationRuntime', () => {
     emitWsEvent(WS_NOTIFICATION_EVENTS.wsReconnect)
     expect(notificationRuntimeMocks.store.fetchInitialCounts).toHaveBeenCalledTimes(2)
 
-    window.dispatchEvent(new CustomEvent(BROWSER_NOTIFICATION_CLICK_EVENT, {
-      detail: { route: '/notifications' },
-    }))
-    expect(notificationRuntimeMocks.push).toHaveBeenCalledWith('/notifications')
+    window.dispatchEvent(
+      new CustomEvent(BROWSER_NOTIFICATION_CLICK_EVENT, {
+        detail: { route: '/account/notifications' },
+      }),
+    )
+    await flushPromises()
+    expect(notificationRuntimeMocks.push).toHaveBeenCalledWith('/account/notifications')
 
-    setRoute('/notifications', '/notifications')
-    window.dispatchEvent(new CustomEvent(BROWSER_NOTIFICATION_CLICK_EVENT, {
-      detail: { route: '/notifications' },
-    }))
+    setRoute('/account/notifications', '/account/notifications')
+    window.dispatchEvent(
+      new CustomEvent(BROWSER_NOTIFICATION_CLICK_EVENT, {
+        detail: { route: '/account/notifications' },
+      }),
+    )
+    await flushPromises()
+    expect(notificationRuntimeMocks.push).toHaveBeenCalledTimes(1)
+
+    window.dispatchEvent(
+      new CustomEvent(BROWSER_NOTIFICATION_CLICK_EVENT, {
+        detail: { route: 'https://attacker.example/collect' },
+      }),
+    )
+    await flushPromises()
     expect(notificationRuntimeMocks.push).toHaveBeenCalledTimes(1)
 
     wrapper.unmount()
-    expect(notificationRuntimeMocks.off).toHaveBeenCalledWith(WS_NOTIFICATION_EVENTS.sessionRevoked, expect.any(Function))
-    expect(notificationRuntimeMocks.off).toHaveBeenCalledWith(WS_NOTIFICATION_EVENTS.wsReconnect, expect.any(Function))
-    expect(notificationRuntimeMocks.off).toHaveBeenCalledWith(WS_NOTIFICATION_EVENTS.appMessage, expect.any(Function))
-    expect(notificationRuntimeMocks.off).toHaveBeenCalledWith(WS_NOTIFICATION_EVENTS.chatMessage, expect.any(Function))
+    expect(notificationRuntimeMocks.off).toHaveBeenCalledWith(
+      WS_NOTIFICATION_EVENTS.sessionRevoked,
+      expect.any(Function),
+    )
+    expect(notificationRuntimeMocks.off).toHaveBeenCalledWith(
+      WS_NOTIFICATION_EVENTS.wsReconnect,
+      expect.any(Function),
+    )
+    expect(notificationRuntimeMocks.off).toHaveBeenCalledWith(
+      WS_NOTIFICATION_EVENTS.appMessage,
+      expect.any(Function),
+    )
+    expect(notificationRuntimeMocks.off).toHaveBeenCalledWith(
+      WS_NOTIFICATION_EVENTS.chatMessage,
+      expect.any(Function),
+    )
+  })
+
+  it('reconciles Web Push without a permission prompt when the authenticated account changes', async () => {
+    const wrapper = mountRuntime()
+    await flushPromises()
+
+    expect(notificationRuntimeMocks.getWebPushStatus).toHaveBeenCalledTimes(1)
+    expect(notificationRuntimeMocks.requestNotificationPermission).not.toHaveBeenCalled()
+
+    localStorage.setItem('auth_token', 'token-2')
+    setRoute('/market')
+    await nextTick()
+    await flushPromises()
+
+    expect(notificationRuntimeMocks.getWebPushStatus).toHaveBeenCalledTimes(2)
+    expect(notificationRuntimeMocks.ensureSessionValidation).toHaveBeenCalledTimes(2)
+    expect(notificationRuntimeMocks.store.fetchInitialCounts).toHaveBeenCalledTimes(2)
+    expect(notificationRuntimeMocks.requestNotificationPermission).not.toHaveBeenCalled()
+
+    wrapper.unmount()
+  })
+
+  it('restores the previous safe context after browser-click redirects and failures', async () => {
+    const wrapper = mountRuntime()
+    await flushPromises()
+
+    notificationRuntimeMocks.push.mockImplementationOnce(async () => {
+      notificationRuntimeMocks.currentRoute.value = {
+        name: 'system-recovery',
+        fullPath: '/__system/recovery?outcome=forbidden',
+      }
+    })
+    window.dispatchEvent(
+      new CustomEvent(BROWSER_NOTIFICATION_CLICK_EVENT, {
+        detail: { route: '/market' },
+      }),
+    )
+    await flushPromises()
+
+    expect(notificationRuntimeMocks.push).toHaveBeenNthCalledWith(1, '/market')
+    expect(notificationRuntimeMocks.replace).toHaveBeenNthCalledWith(1, '/dashboard')
+    expect(notificationRuntimeMocks.currentRoute.value.fullPath).toBe('/dashboard')
+
+    notificationRuntimeMocks.push.mockImplementationOnce(async () => {
+      notificationRuntimeMocks.currentRoute.value = {
+        name: 'system-recovery',
+        fullPath: '/__system/recovery?outcome=deep-link-failure',
+      }
+      throw new Error('navigation failed')
+    })
+    window.dispatchEvent(
+      new CustomEvent(BROWSER_NOTIFICATION_CLICK_EVENT, {
+        detail: { route: '/account' },
+      }),
+    )
+    await flushPromises()
+
+    expect(notificationRuntimeMocks.push).toHaveBeenNthCalledWith(2, '/account')
+    expect(notificationRuntimeMocks.replace).toHaveBeenNthCalledWith(2, '/dashboard')
+    expect(notificationRuntimeMocks.currentRoute.value.fullPath).toBe('/dashboard')
+
+    wrapper.unmount()
+  })
+
+  it('fails closed for unsafe, unmatched, and unexpectedly redirected browser-click routes', async () => {
+    const wrapper = mountRuntime()
+    await flushPromises()
+
+    window.dispatchEvent(
+      new CustomEvent(BROWSER_NOTIFICATION_CLICK_EVENT, {
+        detail: { route: 'https://attacker.example/collect' },
+      }),
+    )
+    window.dispatchEvent(
+      new CustomEvent(BROWSER_NOTIFICATION_CLICK_EVENT, {
+        detail: { route: '/missing/target' },
+      }),
+    )
+    await flushPromises()
+
+    expect(notificationRuntimeMocks.push).not.toHaveBeenCalled()
+
+    notificationRuntimeMocks.push.mockImplementationOnce(async () => {
+      notificationRuntimeMocks.currentRoute.value = {
+        name: 'account',
+        fullPath: '/account',
+      }
+    })
+    window.dispatchEvent(
+      new CustomEvent(BROWSER_NOTIFICATION_CLICK_EVENT, {
+        detail: { route: '/market' },
+      }),
+    )
+    await flushPromises()
+
+    expect(notificationRuntimeMocks.push).toHaveBeenCalledWith('/market')
+    expect(notificationRuntimeMocks.replace).toHaveBeenCalledWith('/dashboard')
+    expect(notificationRuntimeMocks.currentRoute.value.fullPath).toBe('/dashboard')
+
+    wrapper.unmount()
   })
 
   it('refetches the bounded notification window on notification-center reconnects but never on chat reconnects', async () => {
@@ -237,20 +401,27 @@ describe('useNotificationRuntime', () => {
     emitWsEvent(WS_NOTIFICATION_EVENTS.appMessage, { id: 'n1', message: 'payload' })
     await flushPromises()
 
-    expect(notificationRuntimeMocks.store.addAppNotification).toHaveBeenCalledWith({ id: 'n1', message: 'payload' })
+    expect(notificationRuntimeMocks.store.addAppNotification).toHaveBeenCalledWith({
+      id: 'n1',
+      message: 'payload',
+    })
     expect(notificationRuntimeMocks.store.addToast).toHaveBeenCalledWith({
       title: 'اعلان جدید',
       body: 'متن اعلان',
-      route: '/notifications',
+      route: '/account/notifications',
       kind: 'app',
       level: 'INFO',
       category: 'SYSTEM',
     })
-    expect(notificationRuntimeMocks.showBrowserNotification).toHaveBeenCalledWith('اعلان جدید', 'متن اعلان', {
-      route: '/notifications',
-    })
+    expect(notificationRuntimeMocks.showBrowserNotification).toHaveBeenCalledWith(
+      'اعلان جدید',
+      'متن اعلان',
+      {
+        route: '/account/notifications',
+      },
+    )
 
-    setRoute('/notifications', '/notifications')
+    setRoute('/account/notifications', '/account/notifications')
     emitWsEvent(WS_NOTIFICATION_EVENTS.appMessage, { id: 'n2' })
     await flushPromises()
     expect(notificationRuntimeMocks.store.addAppNotification).toHaveBeenCalledTimes(2)
@@ -277,7 +448,7 @@ describe('useNotificationRuntime', () => {
     expect(notificationRuntimeMocks.store.addToast).toHaveBeenLastCalledWith({
       title: 'معامله جدید',
       body: 'طرف معامله: دفتر مالک',
-      route: '/users/19?account_name=owner-19',
+      route: '/account/notifications',
       kind: 'app',
       level: 'success',
       category: 'trade',
@@ -285,7 +456,47 @@ describe('useNotificationRuntime', () => {
     expect(notificationRuntimeMocks.showBrowserNotification).toHaveBeenLastCalledWith(
       'معامله جدید',
       'طرف معامله: دفتر مالک',
-      { route: '/users/19?account_name=owner-19' },
+      { route: '/account/notifications' },
+    )
+
+    wrapper.unmount()
+  })
+
+  it('removes route and backend metadata from app toast and browser notification bodies', async () => {
+    notificationRuntimeMocks.store.addAppNotification.mockReturnValueOnce({
+      title: 'route: /admin/system',
+      body: [
+        'route: /market',
+        '🧭 مسیر: /account',
+        'backend: iran',
+        'server: api-01',
+        '📝 توضیحات: سالم',
+      ].join('\n'),
+      level: 'info',
+      category: 'system',
+    })
+
+    const wrapper = mountRuntime()
+    setDocumentHidden(true)
+    emitWsEvent(WS_NOTIFICATION_EVENTS.appMessage, { id: 'safe-body' })
+    await flushPromises()
+
+    expect(notificationRuntimeMocks.store.addToast).toHaveBeenLastCalledWith(
+      expect.objectContaining({ body: '📝 توضیحات: سالم' }),
+    )
+    expect(notificationRuntimeMocks.showBrowserNotification).toHaveBeenLastCalledWith(
+      'اعلان جدید',
+      '📝 توضیحات: سالم',
+      { route: '/account/notifications' },
+    )
+    expect(JSON.stringify(notificationRuntimeMocks.store.addToast.mock.calls)).not.toContain(
+      '/market',
+    )
+    expect(
+      JSON.stringify(notificationRuntimeMocks.showBrowserNotification.mock.calls),
+    ).not.toContain('api-01')
+    expect(JSON.stringify(notificationRuntimeMocks.store.addToast.mock.calls)).not.toContain(
+      '/admin/system',
     )
 
     wrapper.unmount()
@@ -325,7 +536,9 @@ describe('useNotificationRuntime', () => {
       route: '/chat?user_id=42&user_name=%D8%B9%D9%84%DB%8C',
     })
 
-    notificationRuntimeMocks.store.isConversationMuted.mockImplementation((conversationKey: number) => conversationKey === 43)
+    notificationRuntimeMocks.store.isConversationMuted.mockImplementation(
+      (conversationKey: number) => conversationKey === 43,
+    )
     emitWsEvent(WS_NOTIFICATION_EVENTS.chatMessage, {
       sender_id: 43,
       sender_name: 'رضا',
@@ -362,7 +575,8 @@ describe('useNotificationRuntime', () => {
     expect(notificationRuntimeMocks.store.addToast).toHaveBeenLastCalledWith({
       title: 'اطلاع‌رسانی',
       body: 'ویدئو',
-      route: '/chat?user_id=-77&user_name=%D8%A7%D8%B7%D9%84%D8%A7%D8%B9%E2%80%8C%D8%B1%D8%B3%D8%A7%D9%86%DB%8C',
+      route:
+        '/chat?user_id=-77&user_name=%D8%A7%D8%B7%D9%84%D8%A7%D8%B9%E2%80%8C%D8%B1%D8%B3%D8%A7%D9%86%DB%8C',
       kind: 'chat',
     })
     expect(notificationRuntimeMocks.showBrowserNotification).toHaveBeenCalledTimes(2)
@@ -377,9 +591,10 @@ describe('useNotificationRuntime', () => {
     expect(notificationRuntimeMocks.connect).not.toHaveBeenCalled()
     expect(notificationRuntimeMocks.store.fetchInitialCounts).not.toHaveBeenCalled()
     expect(notificationRuntimeMocks.ensureSessionValidation).not.toHaveBeenCalled()
+    expect(notificationRuntimeMocks.getWebPushStatus).not.toHaveBeenCalled()
 
     window.dispatchEvent(new Event('click'))
-    expect(notificationRuntimeMocks.promptAndEnableWebPushNotifications).not.toHaveBeenCalled()
+    expect(notificationRuntimeMocks.requestNotificationPermission).not.toHaveBeenCalled()
 
     setDocumentHidden(true)
     emitWsEvent(WS_NOTIFICATION_EVENTS.chatMessage, {
@@ -433,9 +648,13 @@ describe('useNotificationRuntime', () => {
       route: '/chat?user_id=58&user_name=%D8%AF%D9%81%D8%AA%D8%B1%20%D9%85%D8%A7%D9%84%DA%A9',
       kind: 'chat',
     })
-    expect(notificationRuntimeMocks.showBrowserNotification).toHaveBeenLastCalledWith('دفتر مالک', 'پیام تست', {
-      route: '/chat?user_id=58&user_name=%D8%AF%D9%81%D8%AA%D8%B1%20%D9%85%D8%A7%D9%84%DA%A9',
-    })
+    expect(notificationRuntimeMocks.showBrowserNotification).toHaveBeenLastCalledWith(
+      'دفتر مالک',
+      'پیام تست',
+      {
+        route: '/chat?user_id=58&user_name=%D8%AF%D9%81%D8%AA%D8%B1%20%D9%85%D8%A7%D9%84%DA%A9',
+      },
+    )
 
     wrapper.unmount()
   })
@@ -474,13 +693,15 @@ describe('useNotificationRuntime', () => {
   })
 
   it('patches conversation previews from chat notifications without requiring list reloads', async () => {
-    notificationRuntimeMocks.conversationsStore.conversations = [{
-      other_user_id: 42,
-      unread_count: 2,
-      last_message_at: '2026-06-04T10:00:00Z',
-      last_message_type: 'text',
-      last_message_content: 'قبلی',
-    }]
+    notificationRuntimeMocks.conversationsStore.conversations = [
+      {
+        other_user_id: 42,
+        unread_count: 2,
+        last_message_at: '2026-06-04T10:00:00Z',
+        last_message_type: 'text',
+        last_message_content: 'قبلی',
+      },
+    ]
     const wrapper = mountRuntime()
 
     setRoute('/dashboard')
@@ -544,12 +765,14 @@ describe('useNotificationRuntime', () => {
     await flushPromises()
 
     expect(notificationRuntimeMocks.store.incrementChatUnreadBatch).toHaveBeenCalledWith([42, 42])
-    expect(notificationRuntimeMocks.store.addToastsBatch).toHaveBeenCalledWith([{
-      title: 'علی',
-      body: 'تصویر',
-      route: '/chat?user_id=42&user_name=%D8%B9%D9%84%DB%8C',
-      kind: 'chat',
-    }])
+    expect(notificationRuntimeMocks.store.addToastsBatch).toHaveBeenCalledWith([
+      {
+        title: 'علی',
+        body: 'تصویر',
+        route: '/chat?user_id=42&user_name=%D8%B9%D9%84%DB%8C',
+        kind: 'chat',
+      },
+    ])
     expect(notificationRuntimeMocks.showBrowserNotification).toHaveBeenCalledTimes(1)
     expect(notificationRuntimeMocks.showBrowserNotification).toHaveBeenCalledWith('علی', 'تصویر', {
       route: '/chat?user_id=42&user_name=%D8%B9%D9%84%DB%8C',

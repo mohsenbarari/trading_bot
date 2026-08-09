@@ -131,6 +131,19 @@ describe('LoginView.vue', () => {
     wrapper.unmount()
   }, 10000)
 
+  it('shows and consumes the fixed local logout receipt after the hard login redirect', async () => {
+    sessionStorage.setItem('stage4_local_logout_result_v1', 'local-only')
+    const LoginView = (await import('./LoginView.vue')).default
+    const wrapper = mount(LoginView)
+
+    expect(wrapper.get('[data-local-logout-notice]').text()).toContain(
+      'اطلاعات ورود این دستگاه پاک شد',
+    )
+    expect(wrapper.get('[data-local-logout-notice]').text()).toContain('تأیید سرور دریافت نشد')
+    expect(sessionStorage.getItem('stage4_local_logout_result_v1')).toBeNull()
+    wrapper.unmount()
+  })
+
   it('accepts the authoritative staging-log OTP delivery receipt', async () => {
     const fetchMock = vi.mocked(fetch)
     fetchMock.mockResolvedValueOnce(

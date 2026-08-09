@@ -77,7 +77,7 @@ describe('router/index.ts', () => {
     expect(createWebHistorySpy).toHaveBeenCalledTimes(1)
   }, 10_000)
 
-  it('registers heavy non-messenger workspace routes and remaining compatibility redirects', async () => {
+  it('registers heavy non-messenger workspace routes and canonical compatibility redirects', async () => {
     await import('./index')
 
     const options = createRouterSpy.mock.calls[0]?.[0] as RouterOptionsUnderTest
@@ -89,6 +89,18 @@ describe('router/index.ts', () => {
       '/operations/customers/:relationId',
     )
     expect(routeByName.get('operations-accountants')?.path).toBe('/operations/accountants')
+
+    for (const name of [
+      'operations-customers',
+      'operations-customers-detail',
+      'operations-accountants',
+      'operations-accountants-detail',
+    ]) {
+      expect(routeByName.get(name)?.meta).toMatchObject({
+        requiresAuth: true,
+        requiresOwnerAccess: true,
+      })
+    }
     expect(routeByName.get('account-security')?.path).toBe('/account/security')
     expect(routeByName.get('admin-channels')?.path).toBe('/admin/channels')
     expect(routeByName.get('admin-user-profile')?.path).toBe('/admin/users/:id')
@@ -105,6 +117,18 @@ describe('router/index.ts', () => {
     expect(routeByName.get('account-storage')?.component).toBeTypeOf('function')
     expect(routeByName.get('account-notifications')?.component).toBeTypeOf('function')
     expect(routeByName.get('account-storage')?.redirect).toBeUndefined()
+    expect(routeByName.get('settings')?.component).toBeUndefined()
+    expect(routeByName.get('settings')?.redirect).toEqual({
+      name: 'account-security',
+      query: {},
+      hash: '',
+    })
+    expect(routeByName.get('notifications')?.component).toBeUndefined()
+    expect(routeByName.get('notifications')?.redirect).toEqual({
+      name: 'account-notifications',
+      query: {},
+      hash: '',
+    })
     expect(routeByName.get('admin-invitations')?.component).toBeTypeOf('function')
     expect(routeByName.get('admin-channels')?.component).toBeTypeOf('function')
     expect(routeByName.get('admin-users')?.component).toBeTypeOf('function')
@@ -119,7 +143,7 @@ describe('router/index.ts', () => {
     })
   })
 
-  it('mirrors the Stage 3 route contract into metadata and keeps eager recovery last', async () => {
+  it('mirrors the Stage 4 route contract into metadata and keeps eager recovery last', async () => {
     await import('./index')
 
     const options = createRouterSpy.mock.calls[0]?.[0] as RouterOptionsUnderTest

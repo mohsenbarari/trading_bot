@@ -10,6 +10,7 @@ declare module 'vue-router' {
     requiresAuth?: boolean
     requiresAdmin?: boolean
     requiresMarketAccess?: boolean
+    requiresOwnerAccess?: boolean
     uiShellClass?: UiRouteShellClass
     uiV2Scope?: UiV2Scope
     uiRouteTestId?: string

@@ -1,25 +1,24 @@
-import { flushPromises, mount } from '@vue/test-utils'
+import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { currentUserSummary } from '../utils/currentUser'
 
 const settingsViewMocks = vi.hoisted(() => ({
   route: {
-    name: 'settings' as string,
+    name: 'account-security' as string,
     query: {} as Record<string, string>,
   },
-  backMock: vi.fn(),
+  routerPushMock: vi.fn(),
   apiFetchMock: vi.fn(),
   forceLogoutMock: vi.fn(),
   getCacheSizeMock: vi.fn(),
-  clearFileCacheMock: vi.fn(),
-  requestTelegramLinkMock: vi.fn(),
-  openTelegramLinkMock: vi.fn(),
+  clearStorageFileCacheMock: vi.fn(),
+  reloadAfterStorageCacheClearMock: vi.fn(),
 }))
 
 vi.mock('vue-router', () => ({
   useRoute: () => settingsViewMocks.route,
   useRouter: () => ({
-    back: settingsViewMocks.backMock,
+    push: settingsViewMocks.routerPushMock,
   }),
 }))
 
@@ -28,16 +27,10 @@ vi.mock('../utils/auth', () => ({
   forceLogout: settingsViewMocks.forceLogoutMock,
 }))
 
-vi.mock('../composables/chat/useChatFileHandler', () => ({
-  useChatFileHandler: () => ({
-    getCacheSize: settingsViewMocks.getCacheSizeMock,
-    clearFileCache: settingsViewMocks.clearFileCacheMock,
-  }),
-}))
-
-vi.mock('../services/telegramLink', () => ({
-  requestTelegramLink: settingsViewMocks.requestTelegramLinkMock,
-  openTelegramLink: settingsViewMocks.openTelegramLinkMock,
+vi.mock('../composables/useStorageCacheMetrics', () => ({
+  getStorageCacheSize: settingsViewMocks.getCacheSizeMock,
+  clearStorageFileCache: settingsViewMocks.clearStorageFileCacheMock,
+  reloadAfterStorageCacheClear: settingsViewMocks.reloadAfterStorageCacheClearMock,
 }))
 
 const sessionsFixture = [
@@ -46,16 +39,20 @@ const sessionsFixture = [
     device_name: 'Chrome',
     platform: 'Linux',
     device_ip: '10.0.0.1',
+    home_server: 'foreign',
     is_primary: true,
     is_current: true,
+    last_active_at: '2026-08-09T10:00:00Z',
   },
   {
     id: 'session-secondary',
     device_name: 'Android',
     platform: 'Android',
     device_ip: '10.0.0.2',
+    home_server: 'iran',
     is_primary: false,
     is_current: false,
+    last_active_at: '2026-08-08T12:30:00Z',
   },
 ]
 
@@ -66,306 +63,583 @@ function responseOf(data: unknown, ok = true) {
   }
 }
 
-async function mountSettingsView() {
+function authoritativeUser(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 10,
+    role: 'عادی',
+    account_name: 'settings-user',
+    account_status: 'active',
+    is_accountant: false,
+    is_customer: false,
+    ...overrides,
+  }
+}
+
+async function mountSettingsView(
+  routeName: 'account-security' | 'account-storage' = 'account-security',
+) {
+  settingsViewMocks.route.name = routeName
   const SettingsView = (await import('./SettingsView.vue')).default
-  return mount(SettingsView)
+  const wrapper = mount(SettingsView, { attachTo: document.body })
+  await flushPromises()
+  return wrapper
+}
+
+function buttonWithText(wrapper: VueWrapper, text: string) {
+  return wrapper.findAll('button').find((button) => button.text().includes(text))
+}
+
+function requestsFor(path: string) {
+  return settingsViewMocks.apiFetchMock.mock.calls.filter(([requestPath]) => requestPath === path)
 }
 
 describe('SettingsView.vue', () => {
   beforeEach(() => {
-    vi.useFakeTimers()
     localStorage.clear()
+    sessionStorage.clear()
     currentUserSummary.value = null
-    settingsViewMocks.route.name = 'settings'
+    settingsViewMocks.route.name = 'account-security'
     settingsViewMocks.route.query = {}
-    settingsViewMocks.backMock.mockReset()
+    settingsViewMocks.routerPushMock.mockReset()
     settingsViewMocks.apiFetchMock.mockReset()
     settingsViewMocks.forceLogoutMock.mockReset()
     settingsViewMocks.getCacheSizeMock.mockReset()
-    settingsViewMocks.clearFileCacheMock.mockReset()
-    settingsViewMocks.requestTelegramLinkMock.mockReset()
-    settingsViewMocks.openTelegramLinkMock.mockReset()
+    settingsViewMocks.clearStorageFileCacheMock.mockReset()
+    settingsViewMocks.reloadAfterStorageCacheClearMock.mockReset()
 
     settingsViewMocks.getCacheSizeMock.mockResolvedValue('12.50 MB')
-    settingsViewMocks.clearFileCacheMock.mockResolvedValue(undefined)
-
-    settingsViewMocks.apiFetchMock.mockImplementation(async (path: string, options?: RequestInit) => {
-      if (path === '/api/auth/me') {
-        return responseOf(currentUserSummary.value ?? {
-          id: 10,
-          role: 'عادی',
-          account_name: 'settings-user',
-          is_accountant: false,
-        })
-      }
-      if (path === '/api/sessions/active') return responseOf(sessionsFixture)
-      if (path === '/api/sessions/session-secondary' && options?.method === 'DELETE') return responseOf({ detail: 'نشست با موفقیت پایان یافت' })
-      if (path === '/api/sessions/logout-all' && options?.method === 'POST') return responseOf({ detail: '۱ نشست پایان یافت' })
-      if (path === '/api/sessions/session-current' && options?.method === 'DELETE') return responseOf({ detail: 'نشست با موفقیت پایان یافت' })
-      return responseOf({})
-    })
-
-    vi.spyOn(window, 'alert').mockImplementation(() => {})
-    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    settingsViewMocks.clearStorageFileCacheMock.mockResolvedValue(undefined)
+    settingsViewMocks.apiFetchMock.mockImplementation(
+      async (path: string, options?: RequestInit) => {
+        if (path === '/api/auth/me') {
+          return responseOf(currentUserSummary.value ?? authoritativeUser())
+        }
+        if (path === '/api/sessions/active') return responseOf(sessionsFixture)
+        if (path === '/api/sessions/session-secondary' && options?.method === 'DELETE') {
+          return responseOf({ detail: 'نشست با موفقیت پایان یافت' })
+        }
+        if (path === '/api/sessions/logout-all' && options?.method === 'POST') {
+          return responseOf({ detail: '1 نشست پایان یافت' })
+        }
+        if (path === '/api/sessions/session-current' && options?.method === 'DELETE') {
+          return responseOf({ detail: 'نشست با موفقیت پایان یافت' })
+        }
+        return responseOf({})
+      },
+    )
   })
 
   afterEach(() => {
     vi.restoreAllMocks()
-    vi.useRealTimers()
+    document.body.innerHTML = ''
   })
 
-  it('loads sessions and cache size on mount, manages sessions, and handles back navigation', async () => {
+  it('renders only Security on its canonical route and keeps the session list server-local', async () => {
+    const wrapper = await mountSettingsView('account-security')
+
+    expect(wrapper.get('.settings-security-card').text()).toContain('نشست‌های این سرور')
+    expect(wrapper.find('.settings-storage-card').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('اتصال تلگرام')
+    expect(settingsViewMocks.getCacheSizeMock).not.toHaveBeenCalled()
+    expect(requestsFor('/api/sessions/active')).toHaveLength(1)
+    expect(wrapper.text()).toContain('آخرین فعالیت:')
+    expect(wrapper.text()).not.toContain('10.0.0.1')
+    expect(wrapper.text()).not.toContain('foreign')
+    expect(wrapper.text()).not.toContain('iran')
+  }, 15_000)
+
+  it('renders only Storage on its canonical route without loading sessions or Telegram', async () => {
+    const wrapper = await mountSettingsView('account-storage')
+
+    expect(wrapper.get('.settings-storage-card').text()).toContain('فایل‌های پیام‌رسان این دستگاه')
+    expect(wrapper.find('.settings-security-card').exists()).toBe(false)
+    expect(wrapper.find('.settings-current-logout-card').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('اتصال تلگرام')
+    expect(settingsViewMocks.getCacheSizeMock).toHaveBeenCalledTimes(1)
+    expect(requestsFor('/api/sessions/active')).toHaveLength(0)
+  })
+
+  it('returns deterministically to Account instead of browser history', async () => {
+    const wrapper = await mountSettingsView('account-storage')
+
+    await wrapper.get('.settings-return-control').trigger('click')
+
+    expect(settingsViewMocks.routerPushMock).toHaveBeenCalledWith({ name: 'account' })
+  })
+
+  it('shows primary and current authority exactly as reported by the server', async () => {
     const wrapper = await mountSettingsView()
-    await flushPromises()
 
-    expect(settingsViewMocks.apiFetchMock).toHaveBeenCalledWith('/api/sessions/active', expect.objectContaining({
-      retryNetwork: false,
-      signal: expect.any(AbortSignal),
-      trackConnectionState: false,
-    }))
-    expect(settingsViewMocks.getCacheSizeMock).toHaveBeenCalled()
-
-    expect(wrapper.text()).toContain('Chrome')
-    expect(wrapper.text()).toContain('Android')
-
-    await wrapper.find('.logout-all-btn').trigger('click')
-    await flushPromises()
-    expect(settingsViewMocks.apiFetchMock).toHaveBeenCalledWith('/api/sessions/logout-all', expect.objectContaining({ method: 'POST' }))
-    expect(wrapper.get('.session-action-feedback').text()).toContain('۱ نشست پایان یافت')
-
-    await wrapper.find('.session-delete-btn').trigger('click')
-    await flushPromises()
-    expect(settingsViewMocks.apiFetchMock).toHaveBeenCalledWith('/api/sessions/session-secondary', expect.objectContaining({ method: 'DELETE' }))
-    expect(wrapper.text()).not.toContain('Android')
-    expect(wrapper.get('.session-action-feedback').text()).toContain('نشست با موفقیت پایان یافت')
-
-    await wrapper.find('.settings-return-control').trigger('click')
-    expect(settingsViewMocks.backMock).toHaveBeenCalled()
-
-    wrapper.unmount()
-  }, 15000)
-
-  it('clears cached files from the storage accordion and shows feedback', async () => {
-    const wrapper = await mountSettingsView()
-    await flushPromises()
-
-    expect(wrapper.find('.storage-value').text()).toBe('12.50 MB')
-    await wrapper.find('.storage-clear-btn').trigger('click')
-    await flushPromises()
-
-    expect(settingsViewMocks.clearFileCacheMock).toHaveBeenCalled()
-    expect(wrapper.find('.storage-value').text()).toBe('0.00 MB')
-    expect(wrapper.find('.storage-feedback').text()).toContain('حافظه با موفقیت پاک شد.')
-
-    vi.runAllTimers()
-    await flushPromises()
-    expect(wrapper.find('.storage-feedback').exists()).toBe(false)
-
-    wrapper.unmount()
+    expect(wrapper.get('.session-authority-notice').text()).toContain('این دستگاه، نشست اصلی است')
+    expect(wrapper.get('.session-card').text()).toContain('اصلی')
+    expect(wrapper.get('.session-card').text()).toContain('این دستگاه')
+    expect(wrapper.findAll('.session-delete-btn')).toHaveLength(1)
+    expect(wrapper.find('.logout-all-btn').exists()).toBe(true)
   })
 
-  it('opens account route sections from route names without legacy query handoff', async () => {
-    settingsViewMocks.route.name = 'account-storage'
-    const storageWrapper = await mountSettingsView()
-    await flushPromises()
-
-    expect(storageWrapper.text()).toContain('حافظه و داده‌ها')
-    expect(storageWrapper.find('.settings-page').exists()).toBe(true)
-    expect(storageWrapper.findAll('.settings-section-card').length).toBeGreaterThanOrEqual(2)
-
-    settingsViewMocks.route.name = 'account-security'
-    const securityWrapper = await mountSettingsView()
-    await flushPromises()
-
-    expect(securityWrapper.text()).toContain('امنیت حساب')
-    expect(securityWrapper.find('.settings-page').exists()).toBe(true)
-    expect(securityWrapper.findAll('.settings-section-card').length).toBeGreaterThanOrEqual(3)
-  })
-
-  it('does not render the blocked-users management section or call block APIs', async () => {
-    const wrapper = await mountSettingsView()
-    await flushPromises()
-
-    expect(wrapper.text()).not.toContain('لیست مسدودشدگان')
-    expect(wrapper.find('.search-input-wrapper').exists()).toBe(false)
-    expect(settingsViewMocks.apiFetchMock.mock.calls.some(([path]) => String(path).startsWith('/api/blocks'))).toBe(false)
-
-    wrapper.unmount()
-  })
-
-  it('keeps the Telegram panel visible as disabled after the account is linked', async () => {
-    currentUserSummary.value = {
-      id: 51,
-      role: 'عادی',
-      is_accountant: false,
-      can_connect_telegram: true,
-      telegram_linked: true,
-    }
-
-    const wrapper = await mountSettingsView()
-    await flushPromises()
-
-    const panel = wrapper.get('.telegram-connect-panel')
-    expect(panel.text()).toContain('برای استفاده از امکانات اپ در بستر تلگرام ضربه بزنید!')
-    expect(panel.text()).toContain('متصل')
-    expect(panel.attributes('disabled')).toBeDefined()
-
-    await panel.trigger('click')
-    expect(settingsViewMocks.requestTelegramLinkMock).not.toHaveBeenCalled()
-
-    currentUserSummary.value = null
-    wrapper.unmount()
-  })
-
-  it('hides session management and logout for accountant users without loading sessions', async () => {
-    currentUserSummary.value = {
-      id: 44,
-      role: 'عادی',
-      is_accountant: true,
-      accountant_owner_user_id: 20,
-      accountant_owner_account_name: 'owner20',
-    }
-
-    const wrapper = await mountSettingsView()
-    await flushPromises()
-
-    expect(wrapper.text()).not.toContain('نشست‌های فعال')
-    expect(wrapper.text()).toContain('نشست و خروج برای حسابدار محدود است')
-    expect(wrapper.find('.logout-btn').exists()).toBe(false)
-    expect(settingsViewMocks.apiFetchMock.mock.calls.some(([path]) => path === '/api/sessions/active')).toBe(false)
-    expect(settingsViewMocks.getCacheSizeMock).toHaveBeenCalled()
-
-    currentUserSummary.value = null
-    wrapper.unmount()
-  })
-
-  it('logs out the current session and forces a local logout', async () => {
-    const wrapper = await mountSettingsView()
-    await flushPromises()
-
-    await wrapper.find('.logout-btn').trigger('click')
-    await flushPromises()
-
-    expect(settingsViewMocks.apiFetchMock).toHaveBeenCalledWith('/api/sessions/session-current', expect.objectContaining({ method: 'DELETE' }))
-    expect(settingsViewMocks.forceLogoutMock).toHaveBeenCalled()
-
-    wrapper.unmount()
-  })
-
-  it('falls back when cache refresh or cache clearing fails and ignores duplicate clear requests while busy', async () => {
-    let rejectClear: ((reason?: unknown) => void) | null = null
-    settingsViewMocks.getCacheSizeMock.mockRejectedValueOnce(new Error('cache-size-failed'))
-    settingsViewMocks.clearFileCacheMock.mockImplementationOnce(() => new Promise((_, reject) => {
-      rejectClear = reject
-    }))
-
-    const wrapper = await mountSettingsView()
-    await flushPromises()
-
-    expect(wrapper.find('.storage-value').text()).toBe('نامشخص')
-    expect(wrapper.get('.storage-size-error').text()).toContain('حجم حافظه نامشخص است')
-
-    const clearButton = wrapper.find('.storage-clear-btn')
-    await clearButton.trigger('click')
-    await clearButton.trigger('click')
-    expect(settingsViewMocks.clearFileCacheMock).toHaveBeenCalledTimes(1)
-
-    if (!rejectClear) {
-      throw new Error('Expected clear-cache rejection handler')
-    }
-    ;(rejectClear as (e: Error) => void)(new Error('clear-cache-failed'))
-    await flushPromises()
-
-    expect(wrapper.find('.storage-feedback').text()).toContain('پاک‌سازی حافظه ناموفق بود.')
-
-    await vi.advanceTimersByTimeAsync(3500)
-    expect(wrapper.find('.storage-feedback').exists()).toBe(false)
-  })
-
-  it('still force-logs out when no current session exists', async () => {
-    settingsViewMocks.apiFetchMock.mockImplementation(async (path: string, options?: RequestInit) => {
-      if (path === '/api/auth/me') {
-        return responseOf({ id: 10, role: 'عادی', account_name: 'settings-user', is_accountant: false })
-      }
+  it('does not offer cross-session actions when the current session is not primary', async () => {
+    settingsViewMocks.apiFetchMock.mockImplementation(async (path: string) => {
+      if (path === '/api/auth/me') return responseOf(authoritativeUser())
       if (path === '/api/sessions/active') {
         return responseOf([
-          {
-            id: 'session-secondary-only',
-            device_name: 'Android',
-            platform: 'Android',
-            device_ip: '10.0.0.3',
-            is_primary: false,
-            is_current: false,
-          },
+          { ...sessionsFixture[0], is_current: false, is_primary: true },
+          { ...sessionsFixture[1], is_current: true, is_primary: false },
         ])
       }
       return responseOf({})
     })
 
     const wrapper = await mountSettingsView()
-    await flushPromises()
 
-    await wrapper.find('.logout-btn').trigger('click')
-    await flushPromises()
-
-    expect(settingsViewMocks.apiFetchMock).not.toHaveBeenCalledWith('/api/sessions/session-current', { method: 'DELETE' })
-    expect(settingsViewMocks.forceLogoutMock).toHaveBeenCalled()
+    expect(wrapper.get('.session-authority-notice').text()).toContain('این دستگاه، نشست فرعی است')
+    expect(wrapper.find('.session-delete-btn').exists()).toBe(false)
+    expect(wrapper.find('.logout-all-btn').exists()).toBe(false)
+    expect(wrapper.find('.logout-btn').exists()).toBe(true)
   })
 
-  it('logs session loading failures on mount without breaking the page shell', async () => {
-    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+  it('fails closed when the current session cannot be identified', async () => {
     settingsViewMocks.apiFetchMock.mockImplementation(async (path: string) => {
-      if (path === '/api/auth/me') {
-        return responseOf({ id: 10, role: 'عادی', account_name: 'settings-user', is_accountant: false })
+      if (path === '/api/auth/me') return responseOf(authoritativeUser())
+      if (path === '/api/sessions/active') {
+        return responseOf(sessionsFixture.map((session) => ({ ...session, is_current: false })))
       }
-      if (path === '/api/sessions/active') throw new Error('sessions-load-failed')
       return responseOf({})
     })
 
     const wrapper = await mountSettingsView()
-    await flushPromises()
 
-    expect(errorSpy).toHaveBeenCalledWith(expect.any(Error))
-    expect(wrapper.find('.settings-page').exists()).toBe(true)
-    errorSpy.mockRestore()
+    expect(wrapper.get('.session-authority-notice').text()).toContain('اختیار این دستگاه مشخص نیست')
+    expect(wrapper.find('.session-delete-btn').exists()).toBe(false)
+    expect(wrapper.find('.logout-all-btn').exists()).toBe(false)
   })
 
-  it('logs terminate/logout failures but still forces local logout for the current session', async () => {
-    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
-    settingsViewMocks.apiFetchMock.mockImplementation(async (path: string, options?: RequestInit) => {
-      if (path === '/api/auth/me') {
-        return responseOf({ id: 10, role: 'عادی', account_name: 'settings-user', is_accountant: false })
-      }
-      if (path === '/api/sessions/active') return responseOf(sessionsFixture)
-      if (path === '/api/sessions/logout-all' && options?.method === 'POST') throw new Error('logout-all-failed')
-      if (path === '/api/sessions/session-secondary' && options?.method === 'DELETE') throw new Error('terminate-failed')
-      if (path === '/api/sessions/session-current' && options?.method === 'DELETE') throw new Error('logout-current-failed')
-      return responseOf({})
-    })
-
+  it('requires inline confirmation before ending one session and keeps the receipt local to the list', async () => {
     const wrapper = await mountSettingsView()
+
+    await wrapper.get('.session-delete-btn').trigger('click')
+    expect(wrapper.get('.session-inline-confirm').text()).toContain('Android')
+    expect(document.activeElement).toBe(wrapper.get('.session-terminate-confirm').element)
+    expect(requestsFor('/api/sessions/session-secondary')).toHaveLength(0)
+
+    await buttonWithText(wrapper, 'انصراف')!.trigger('click')
+    expect(wrapper.find('.session-inline-confirm').exists()).toBe(false)
+    expect(document.activeElement).toBe(wrapper.get('.session-delete-btn').element)
+
+    await wrapper.get('.session-delete-btn').trigger('click')
+    await wrapper.get('.session-terminate-confirm').trigger('click')
     await flushPromises()
 
-    await wrapper.find('.logout-all-btn').trigger('click')
+    expect(requestsFor('/api/sessions/session-secondary')).toHaveLength(1)
+    expect(wrapper.text()).not.toContain('Android')
+    expect(wrapper.get('.session-mutation-feedback').text()).toContain(
+      'نشست انتخاب‌شده در همین سرور پایان یافت',
+    )
+    expect(document.activeElement).toBe(wrapper.get('.session-mutation-feedback').element)
+  })
+
+  it('keeps a session row and shows a cause-neutral local failure when termination fails', async () => {
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    settingsViewMocks.apiFetchMock.mockImplementation(
+      async (path: string, options?: RequestInit) => {
+        if (path === '/api/auth/me') return responseOf(authoritativeUser())
+        if (path === '/api/sessions/active') return responseOf(sessionsFixture)
+        if (path === '/api/sessions/session-secondary' && options?.method === 'DELETE') {
+          throw new Error('raw-sensitive-cause')
+        }
+        return responseOf({})
+      },
+    )
+    const wrapper = await mountSettingsView()
+
+    await wrapper.get('.session-delete-btn').trigger('click')
+    await wrapper.get('.session-terminate-confirm').trigger('click')
     await flushPromises()
 
-    await wrapper.find('.session-delete-btn').trigger('click')
+    expect(wrapper.text()).toContain('Android')
+    expect(wrapper.get('.session-mutation-feedback').text()).toContain(
+      'این نشست در فهرست باقی ماند',
+    )
+    expect(wrapper.text()).not.toContain('raw-sensitive-cause')
+    expect(consoleSpy).not.toHaveBeenCalled()
+  })
+
+  it('guards duplicate session termination while its local confirm action is busy', async () => {
+    let resolveTerminate: ((value: ReturnType<typeof responseOf>) => void) | null = null
+    settingsViewMocks.apiFetchMock.mockImplementation((path: string, options?: RequestInit) => {
+      if (path === '/api/auth/me') return Promise.resolve(responseOf(authoritativeUser()))
+      if (path === '/api/sessions/active') return Promise.resolve(responseOf(sessionsFixture))
+      if (path === '/api/sessions/session-secondary' && options?.method === 'DELETE') {
+        return new Promise((resolve) => {
+          resolveTerminate = resolve
+        })
+      }
+      return Promise.resolve(responseOf({}))
+    })
+    const wrapper = await mountSettingsView()
+
+    await wrapper.get('.session-delete-btn').trigger('click')
+    const confirmButton = wrapper.get('.session-terminate-confirm')
+    await confirmButton.trigger('click')
+    await confirmButton.trigger('click')
+
+    expect(requestsFor('/api/sessions/session-secondary')).toHaveLength(1)
+    if (!resolveTerminate) throw new Error('Expected terminate resolver')
+    ;(resolveTerminate as (value: ReturnType<typeof responseOf>) => void)(
+      responseOf({ detail: 'نشست پایان یافت' }),
+    )
+    await flushPromises()
+  })
+
+  it('uses other-session copy, inline confirmation and preserves the current session after logout-all', async () => {
+    let activeCalls = 0
+    settingsViewMocks.apiFetchMock.mockImplementation(
+      async (path: string, options?: RequestInit) => {
+        if (path === '/api/auth/me') return responseOf(authoritativeUser())
+        if (path === '/api/sessions/active') {
+          activeCalls += 1
+          return responseOf(activeCalls === 1 ? sessionsFixture : [sessionsFixture[0]])
+        }
+        if (path === '/api/sessions/logout-all' && options?.method === 'POST') {
+          return responseOf({ detail: '1 نشست پایان یافت' })
+        }
+        return responseOf({})
+      },
+    )
+    const wrapper = await mountSettingsView()
+
+    expect(wrapper.get('.settings-other-sessions-card').text()).toContain(
+      'نشست فعلی این دستگاه را حفظ می‌کند',
+    )
+    await wrapper.get('.logout-all-btn').trigger('click')
+    expect(document.activeElement).toBe(wrapper.get('.logout-others-confirm').element)
+    expect(wrapper.get('[aria-label="تأیید خروج از نشست‌های دیگر"]').text()).toContain(
+      'نشست فعلی این دستگاه باز می‌ماند',
+    )
+    expect(requestsFor('/api/sessions/logout-all')).toHaveLength(0)
+
+    await wrapper.get('.logout-others-confirm').trigger('click')
     await flushPromises()
 
-    await wrapper.find('.logout-btn').trigger('click')
+    expect(requestsFor('/api/sessions/logout-all')).toHaveLength(1)
+    expect(wrapper.get('.logout-others-feedback').text()).toContain('نشست فعلی این دستگاه حفظ شد')
+    expect(document.activeElement).toBe(wrapper.get('.logout-others-feedback').element)
+    expect(wrapper.text()).toContain('Chrome')
+    expect(wrapper.text()).not.toContain('Android')
+  })
+
+  it('reconciles to the current session immediately when the post-receipt refresh fails', async () => {
+    let activeCalls = 0
+    settingsViewMocks.apiFetchMock.mockImplementation(
+      async (path: string, options?: RequestInit) => {
+        if (path === '/api/auth/me') return responseOf(authoritativeUser())
+        if (path === '/api/sessions/active') {
+          activeCalls += 1
+          if (activeCalls === 1) return responseOf(sessionsFixture)
+          throw new Error('post-receipt-refresh-failed')
+        }
+        if (path === '/api/sessions/logout-all' && options?.method === 'POST') {
+          return responseOf({ detail: '1 نشست پایان یافت' })
+        }
+        return responseOf({})
+      },
+    )
+    const wrapper = await mountSettingsView()
+
+    await wrapper.get('.logout-all-btn').trigger('click')
+    await wrapper.get('.logout-others-confirm').trigger('click')
     await flushPromises()
 
-    expect(wrapper.get('.session-action-feedback').text()).toContain('پایان دادن نشست ممکن نشد')
-    expect(errorSpy).toHaveBeenCalledTimes(1)
+    expect(requestsFor('/api/sessions/active')).toHaveLength(2)
+    expect(wrapper.get('.logout-others-feedback').text()).toContain('نشست فعلی این دستگاه حفظ شد')
+    expect(wrapper.text()).toContain('Chrome')
+    expect(wrapper.text()).not.toContain('Android')
+    expect(wrapper.get('.sessions-refresh-error').text()).toContain('فهرست قبلی حفظ شده است')
+    expect(wrapper.text()).not.toContain('post-receipt-refresh-failed')
+  })
+
+  it('keeps the prior list and local error when logout of other sessions fails', async () => {
+    settingsViewMocks.apiFetchMock.mockImplementation(
+      async (path: string, options?: RequestInit) => {
+        if (path === '/api/auth/me') return responseOf(authoritativeUser())
+        if (path === '/api/sessions/active') return responseOf(sessionsFixture)
+        if (path === '/api/sessions/logout-all' && options?.method === 'POST')
+          throw new Error('raw-cause')
+        return responseOf({})
+      },
+    )
+    const wrapper = await mountSettingsView()
+
+    await wrapper.get('.logout-all-btn').trigger('click')
+    await wrapper.get('.logout-others-confirm').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('.logout-others-feedback').text()).toContain('فهرست فعلی حفظ شده است')
+    expect(wrapper.text()).toContain('Chrome')
+    expect(wrapper.text()).toContain('Android')
+    expect(wrapper.text()).not.toContain('raw-cause')
+  })
+
+  it('uses hostile terminate and logout-others receipts only as proof', async () => {
+    const hostileTerminateReceipt = 'server=iran route=/api/internal/session-secondary'
+    const hostileLogoutOthersReceipt = 'backend=foreign api=/api/internal/logout-all'
+    settingsViewMocks.apiFetchMock.mockImplementation(
+      async (path: string, options?: RequestInit) => {
+        if (path === '/api/auth/me') return responseOf(authoritativeUser())
+        if (path === '/api/sessions/active') return responseOf(sessionsFixture)
+        if (path === '/api/sessions/logout-all' && options?.method === 'POST') {
+          return responseOf({ detail: hostileLogoutOthersReceipt })
+        }
+        if (path === '/api/sessions/session-secondary' && options?.method === 'DELETE') {
+          return responseOf({ detail: hostileTerminateReceipt })
+        }
+        return responseOf({})
+      },
+    )
+    const wrapper = await mountSettingsView()
+
+    await wrapper.get('.logout-all-btn').trigger('click')
+    await wrapper.get('.logout-others-confirm').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('.logout-others-feedback').text()).toContain(
+      'نشست‌های دیگر این سرور پایان یافتند',
+    )
+    expect(wrapper.text()).not.toContain(hostileLogoutOthersReceipt)
+
+    await wrapper.get('.session-delete-btn').trigger('click')
+    await wrapper.get('.session-terminate-confirm').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('.session-mutation-feedback').text()).toContain(
+      'نشست انتخاب‌شده در همین سرور پایان یافت',
+    )
+    expect(wrapper.text()).not.toContain(hostileTerminateReceipt)
+    expect(wrapper.text()).not.toContain('server=iran')
+    expect(wrapper.text()).not.toContain('/api/internal')
+  })
+
+  it('confirms logout inline, ends the reported current session, then clears local auth', async () => {
+    const wrapper = await mountSettingsView()
+
+    await wrapper.get('.logout-btn').trigger('click')
+    expect(wrapper.get('[aria-label="تأیید خروج از این دستگاه"]').text()).toContain(
+      'نشست‌های دیگر تغییر نمی‌کنند',
+    )
+    expect(settingsViewMocks.forceLogoutMock).not.toHaveBeenCalled()
+
+    await wrapper.get('.local-logout-confirm').trigger('click')
+    await flushPromises()
+
+    expect(requestsFor('/api/sessions/session-current')).toHaveLength(1)
     expect(settingsViewMocks.forceLogoutMock).toHaveBeenCalledTimes(1)
-    errorSpy.mockRestore()
+    expect(wrapper.get('.local-logout-feedback').text()).toContain('خروج این دستگاه ثبت شد')
+    expect(sessionStorage.getItem('stage4_local_logout_result_v1')).toBe('server-confirmed')
   })
 
-  it('does not request or expose sessions before current-user authority resolves', async () => {
+  it('clears local auth without raw logging when current-session revocation is unavailable', async () => {
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    settingsViewMocks.apiFetchMock.mockImplementation(
+      async (path: string, options?: RequestInit) => {
+        if (path === '/api/auth/me') return responseOf(authoritativeUser())
+        if (path === '/api/sessions/active') return responseOf(sessionsFixture)
+        if (path === '/api/sessions/session-current' && options?.method === 'DELETE')
+          throw new Error('raw-logout-cause')
+        return responseOf({})
+      },
+    )
+    const wrapper = await mountSettingsView()
+
+    await wrapper.get('.logout-btn').trigger('click')
+    await wrapper.get('.local-logout-confirm').trigger('click')
+    await flushPromises()
+
+    expect(settingsViewMocks.forceLogoutMock).toHaveBeenCalledTimes(1)
+    expect(wrapper.get('.local-logout-feedback').text()).toContain(
+      'اطلاعات ورود این دستگاه به‌صورت محلی پاک می‌شود',
+    )
+    expect(wrapper.text()).not.toContain('raw-logout-cause')
+    expect(consoleSpy).not.toHaveBeenCalled()
+  })
+
+  it('does not claim server-confirmed logout for an invalid successful receipt', async () => {
+    settingsViewMocks.apiFetchMock.mockImplementation(
+      async (path: string, options?: RequestInit) => {
+        if (path === '/api/auth/me') return responseOf(authoritativeUser())
+        if (path === '/api/sessions/active') return responseOf(sessionsFixture)
+        if (path === '/api/sessions/session-current' && options?.method === 'DELETE')
+          return responseOf({})
+        return responseOf({})
+      },
+    )
+    const wrapper = await mountSettingsView()
+
+    await wrapper.get('.logout-btn').trigger('click')
+    await wrapper.get('.local-logout-confirm').trigger('click')
+    await flushPromises()
+
+    expect(settingsViewMocks.forceLogoutMock).toHaveBeenCalledTimes(1)
+    expect(wrapper.get('.local-logout-feedback').text()).toContain('تأیید سرور دریافت نشد')
+    expect(sessionStorage.getItem('stage4_local_logout_result_v1')).toBe('local-only')
+    expect(wrapper.get('.local-logout-feedback').text()).not.toContain('خروج این دستگاه ثبت شد')
+  })
+
+  it('keeps accountant Security restricted while allowing the separate Storage route', async () => {
+    currentUserSummary.value = {
+      ...authoritativeUser({ id: 44, is_accountant: true }),
+      accountant_owner_user_id: 20,
+      accountant_owner_account_name: 'owner20',
+    }
+
+    const securityWrapper = await mountSettingsView('account-security')
+    expect(securityWrapper.get('.settings-role-notice').text()).toContain(
+      'مدیریت نشست برای حسابدار در دسترس نیست',
+    )
+    expect(securityWrapper.find('.settings-security-card').exists()).toBe(false)
+    expect(securityWrapper.find('.logout-btn').exists()).toBe(false)
+    expect(requestsFor('/api/sessions/active')).toHaveLength(0)
+
+    const storageWrapper = await mountSettingsView('account-storage')
+    expect(storageWrapper.find('.settings-storage-card').exists()).toBe(true)
+    expect(settingsViewMocks.getCacheSizeMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps a cache-size error distinct from zero and supports a local retry', async () => {
+    settingsViewMocks.getCacheSizeMock
+      .mockRejectedValueOnce(new Error('raw-size-cause'))
+      .mockResolvedValueOnce('7.25 MB')
+
+    const wrapper = await mountSettingsView('account-storage')
+
+    expect(wrapper.get('.storage-value').text()).toBe('نامشخص')
+    expect(wrapper.get('.storage-size-error').text()).toContain('به معنی صفر بودن فضا نیست')
+    expect(wrapper.text()).not.toContain('0.00 MB')
+
+    await buttonWithText(wrapper, 'محاسبه دوباره')!.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('.storage-value').text()).toBe('7.25 MB')
+    expect(wrapper.find('.storage-size-error').exists()).toBe(false)
+  })
+
+  it('confirms the truthful local clear scope, guards duplicates and reports a local result', async () => {
+    let resolveClear: (() => void) | null = null
+    settingsViewMocks.clearStorageFileCacheMock.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveClear = resolve
+        }),
+    )
+    const wrapper = await mountSettingsView('account-storage')
+
+    expect(wrapper.get('.settings-storage-card').text()).toContain(
+      'پیام‌ها، تنظیمات حساب و فایل‌های روی سرور تغییر نمی‌کنند',
+    )
+    await wrapper.get('.storage-clear-btn').trigger('click')
+    expect(document.activeElement).toBe(wrapper.get('.storage-clear-confirm').element)
+    expect(settingsViewMocks.clearStorageFileCacheMock).not.toHaveBeenCalled()
+    expect(wrapper.get('.storage-inline-confirm').text()).toContain('روی همین دستگاه')
+
+    await buttonWithText(wrapper, 'انصراف')!.trigger('click')
+    expect(document.activeElement).toBe(wrapper.get('.storage-clear-btn').element)
+    await wrapper.get('.storage-clear-btn').trigger('click')
+
+    const confirmButton = wrapper.get('.storage-clear-confirm')
+    await confirmButton.trigger('click')
+    await confirmButton.trigger('click')
+    expect(settingsViewMocks.clearStorageFileCacheMock).toHaveBeenCalledTimes(1)
+
+    if (!resolveClear) throw new Error('Expected clear-cache resolver')
+    ;(resolveClear as () => void)()
+    await flushPromises()
+
+    expect(wrapper.get('.storage-value').text()).toBe('0.00 MB')
+    expect(wrapper.get('.storage-feedback').text()).toContain(
+      'فقط فایل‌های ذخیره‌شده پیام‌رسان روی همین دستگاه حذف شدند',
+    )
+    expect(settingsViewMocks.reloadAfterStorageCacheClearMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps cache-clear failure cause-neutral and local without console error output', async () => {
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    settingsViewMocks.clearStorageFileCacheMock.mockRejectedValueOnce(new Error('raw-clear-cause'))
+    const wrapper = await mountSettingsView('account-storage')
+
+    await wrapper.get('.storage-clear-btn').trigger('click')
+    await wrapper.get('.storage-clear-confirm').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('.storage-feedback').text()).toContain(
+      'فایل‌های محلی این دستگاه تغییر نکردند',
+    )
+    expect(wrapper.text()).not.toContain('raw-clear-cause')
+    expect(settingsViewMocks.reloadAfterStorageCacheClearMock).not.toHaveBeenCalled()
+    expect(consoleSpy).not.toHaveBeenCalled()
+  })
+
+  it('does not request sessions for a partial cached identity until an authoritative payload arrives', async () => {
+    let identityPayload: Record<string, unknown> = {
+      id: 72,
+      role: 'مدیر ارشد',
+      account_name: 'partial-settings-user',
+    }
+    currentUserSummary.value = identityPayload as { role: string }
+    settingsViewMocks.apiFetchMock.mockImplementation(async (path: string) => {
+      if (path === '/api/auth/me') return responseOf(identityPayload)
+      if (path === '/api/sessions/active') return responseOf(sessionsFixture)
+      return responseOf({})
+    })
+
+    const wrapper = await mountSettingsView()
+
+    expect(wrapper.find('.settings-identity-error').exists()).toBe(true)
+    expect(wrapper.find('.settings-security-card').exists()).toBe(false)
+    expect(requestsFor('/api/sessions/active')).toHaveLength(0)
+
+    identityPayload = authoritativeUser({ id: 72, role: 'مدیر ارشد' })
+    await wrapper.get('.settings-identity-retry').trigger('click')
+    await flushPromises()
+
+    expect(requestsFor('/api/sessions/active')).toHaveLength(1)
+    expect(wrapper.get('.settings-security-card').text()).toContain('نشست‌های این سرور')
+    expect(wrapper.text()).toContain('Chrome')
+  })
+
+  it('marks authoritative cached access as stale while the initial refresh is pending', async () => {
+    let resolveIdentity: ((response: ReturnType<typeof responseOf>) => void) | null = null
+    currentUserSummary.value = authoritativeUser()
+    settingsViewMocks.apiFetchMock.mockImplementation((path: string) => {
+      if (path === '/api/auth/me') {
+        return new Promise((resolve) => {
+          resolveIdentity = resolve
+        })
+      }
+      if (path === '/api/sessions/active') return Promise.resolve(responseOf(sessionsFixture))
+      return Promise.resolve(responseOf({}))
+    })
+
+    const wrapper = await mountSettingsView()
+
+    expect(wrapper.get('.settings-identity-stale').text()).toContain('دسترسی‌های ذخیره‌شده قبلی')
+    expect(wrapper.find('.settings-security-card').exists()).toBe(true)
+    expect(requestsFor('/api/sessions/active')).toHaveLength(0)
+
+    if (!resolveIdentity) throw new Error('Expected identity resolver')
+    ;(resolveIdentity as (response: ReturnType<typeof responseOf>) => void)(
+      responseOf(authoritativeUser()),
+    )
+    await flushPromises()
+
+    expect(requestsFor('/api/sessions/active')).toHaveLength(1)
+    expect(wrapper.find('.settings-identity-stale').exists()).toBe(false)
+  })
+
+  it('does not request or expose section data before current-user authority resolves', async () => {
     let resolveIdentity: ((response: ReturnType<typeof responseOf>) => void) | null = null
     settingsViewMocks.apiFetchMock.mockImplementation((path: string) => {
       if (path === '/api/auth/me') {
-        return new Promise((resolve) => { resolveIdentity = resolve })
+        return new Promise((resolve) => {
+          resolveIdentity = resolve
+        })
       }
       if (path === '/api/sessions/active') return Promise.resolve(responseOf(sessionsFixture))
       return Promise.resolve(responseOf({}))
@@ -376,108 +650,38 @@ describe('SettingsView.vue', () => {
     await Promise.resolve()
 
     expect(wrapper.find('.settings-identity-loading').exists()).toBe(true)
-    expect(wrapper.find('.logout-btn').exists()).toBe(false)
-    expect(settingsViewMocks.apiFetchMock.mock.calls.some(([path]) => path === '/api/sessions/active')).toBe(false)
+    expect(wrapper.find('.settings-security-card').exists()).toBe(false)
+    expect(requestsFor('/api/sessions/active')).toHaveLength(0)
 
     if (!resolveIdentity) throw new Error('Expected identity resolver')
-    ;(resolveIdentity as (response: ReturnType<typeof responseOf>) => void)(responseOf({
-      id: 10,
-      role: 'عادی',
-      account_name: 'settings-user',
-      is_accountant: false,
-    }))
+    ;(resolveIdentity as (response: ReturnType<typeof responseOf>) => void)(
+      responseOf(authoritativeUser()),
+    )
     await flushPromises()
 
-    expect(settingsViewMocks.apiFetchMock.mock.calls.some(([path]) => path === '/api/sessions/active')).toBe(true)
+    expect(requestsFor('/api/sessions/active')).toHaveLength(1)
     expect(wrapper.text()).toContain('Chrome')
   })
 
-  it('guards duplicate logout-all and per-session mutations and shows authoritative receipts', async () => {
-    let resolveLogoutAll: ((response: ReturnType<typeof responseOf>) => void) | null = null
-    let resolveTerminate: ((response: ReturnType<typeof responseOf>) => void) | null = null
-    settingsViewMocks.apiFetchMock.mockImplementation((path: string, options?: RequestInit) => {
-      if (path === '/api/auth/me') {
-        return Promise.resolve(responseOf({ id: 10, role: 'عادی', account_name: 'settings-user', is_accountant: false }))
-      }
-      if (path === '/api/sessions/active') return Promise.resolve(responseOf(sessionsFixture))
-      if (path === '/api/sessions/logout-all' && options?.method === 'POST') {
-        return new Promise((resolve) => { resolveLogoutAll = resolve })
-      }
-      if (path === '/api/sessions/session-secondary' && options?.method === 'DELETE') {
-        return new Promise((resolve) => { resolveTerminate = resolve })
-      }
-      return Promise.resolve(responseOf({}))
-    })
-
+  it('does not apply a successful status without an authoritative mutation receipt', async () => {
+    settingsViewMocks.apiFetchMock.mockImplementation(
+      async (path: string, options?: RequestInit) => {
+        if (path === '/api/auth/me') return responseOf(authoritativeUser())
+        if (path === '/api/sessions/active') return responseOf(sessionsFixture)
+        if (path === '/api/sessions/session-secondary' && options?.method === 'DELETE')
+          return responseOf({})
+        return responseOf({})
+      },
+    )
     const wrapper = await mountSettingsView()
-    await flushPromises()
 
-    const logoutAllButton = wrapper.get('.logout-all-btn')
-    await logoutAllButton.trigger('click')
-    await logoutAllButton.trigger('click')
-    expect(settingsViewMocks.apiFetchMock.mock.calls.filter(([path]) => path === '/api/sessions/logout-all')).toHaveLength(1)
-
-    if (!resolveLogoutAll) throw new Error('Expected logout-all resolver')
-    ;(resolveLogoutAll as (response: ReturnType<typeof responseOf>) => void)(responseOf({ detail: '۱ نشست پایان یافت' }))
-    await flushPromises()
-    expect(wrapper.get('.session-action-feedback').text()).toContain('۱ نشست پایان یافت')
-
-    const terminateButton = wrapper.get('.session-delete-btn')
-    await terminateButton.trigger('click')
-    await terminateButton.trigger('click')
-    expect(settingsViewMocks.apiFetchMock.mock.calls.filter(([path]) => path === '/api/sessions/session-secondary')).toHaveLength(1)
-
-    if (!resolveTerminate) throw new Error('Expected terminate resolver')
-    ;(resolveTerminate as (response: ReturnType<typeof responseOf>) => void)(responseOf({ detail: 'نشست با موفقیت پایان یافت' }))
-    await flushPromises()
-    expect(wrapper.text()).not.toContain('Android')
-    expect(wrapper.get('.session-action-feedback').text()).toContain('نشست با موفقیت پایان یافت')
-  })
-
-  it('keeps session rows on refresh failure and renders a compact stale notice', async () => {
-    let activeCalls = 0
-    settingsViewMocks.apiFetchMock.mockImplementation(async (path: string, options?: RequestInit) => {
-      if (path === '/api/auth/me') {
-        return responseOf({ id: 10, role: 'عادی', account_name: 'settings-user', is_accountant: false })
-      }
-      if (path === '/api/sessions/active') {
-        activeCalls += 1
-        if (activeCalls === 1) return responseOf(sessionsFixture)
-        throw new Error('sessions-refresh-failed')
-      }
-      if (path === '/api/sessions/logout-all' && options?.method === 'POST') {
-        return responseOf({ detail: '۱ نشست پایان یافت' })
-      }
-      return responseOf({})
-    })
-    vi.spyOn(console, 'error').mockImplementation(() => undefined)
-
-    const wrapper = await mountSettingsView()
-    await flushPromises()
-    await wrapper.get('.logout-all-btn').trigger('click')
-    await flushPromises()
-
-    expect(wrapper.get('.sessions-refresh-error').text()).toContain('فهرست قبلی حفظ شده است')
-    expect(wrapper.text()).toContain('Chrome')
-    expect(wrapper.text()).toContain('Android')
-  })
-
-  it('does not apply a 2xx mutation without a valid receipt', async () => {
-    settingsViewMocks.apiFetchMock.mockImplementation(async (path: string, options?: RequestInit) => {
-      if (path === '/api/auth/me') {
-        return responseOf({ id: 10, role: 'عادی', account_name: 'settings-user', is_accountant: false })
-      }
-      if (path === '/api/sessions/active') return responseOf(sessionsFixture)
-      if (path === '/api/sessions/session-secondary' && options?.method === 'DELETE') return responseOf({})
-      return responseOf({})
-    })
-
-    const wrapper = await mountSettingsView()
-    await flushPromises()
     await wrapper.get('.session-delete-btn').trigger('click')
+    await wrapper.get('.session-terminate-confirm').trigger('click')
     await flushPromises()
 
     expect(wrapper.text()).toContain('Android')
-    expect(wrapper.get('.session-action-feedback').text()).toContain('فهرست فعلی تغییر نکرد')
+    expect(wrapper.get('.session-mutation-feedback').text()).toContain(
+      'این نشست در فهرست باقی ماند',
+    )
   })
 })

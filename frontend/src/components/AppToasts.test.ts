@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { mount } from '@vue/test-utils'
 import { nextTick, TransitionGroup } from 'vue'
@@ -10,10 +10,18 @@ import {
 } from '../utils/securityLayerState'
 
 const routerPushMock = vi.fn()
+const routerReplaceMock = vi.fn()
+const routerResolveMock = vi.fn()
+const routerCurrentRouteMock = {
+  value: { name: 'home', fullPath: '/' },
+}
 
 vi.mock('vue-router', () => ({
   useRouter: () => ({
     push: routerPushMock,
+    replace: routerReplaceMock,
+    resolve: routerResolveMock,
+    currentRoute: routerCurrentRouteMock,
   }),
 }))
 
@@ -21,10 +29,21 @@ describe('AppToasts.vue', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     routerPushMock.mockReset()
+    routerReplaceMock.mockReset()
+    routerResolveMock.mockReset()
+    routerResolveMock.mockImplementation((path: string) => ({
+      name: path.startsWith('/missing') ? 'system-recovery' : 'resolved-toast',
+      matched: path.startsWith('/missing') ? [] : [{ name: 'resolved-toast' }],
+    }))
+    routerCurrentRouteMock.value = { name: 'home', fullPath: '/' }
     resetSecurityLayerStateForTests()
   })
 
-  it('navigates to the toast route and removes the toast on click', async () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('uses a named native route button and removes the toast after activation', async () => {
     const store = useNotificationStore()
     store.activeToasts = [
       { id: 1, title: 'اعلان', body: 'متن اعلان', route: '/notifications', kind: 'app' },
@@ -39,7 +58,15 @@ describe('AppToasts.vue', () => {
       },
     })
 
-    await wrapper.get('.toast-card-floating').trigger('click')
+    const routeAction = wrapper.get('.toast-card-floating__action--interactive')
+    const dismissAction = wrapper.get('.close-btn-minimal')
+
+    expect(routeAction.element.tagName).toBe('BUTTON')
+    expect(routeAction.attributes('type')).toBe('button')
+    expect(routeAction.attributes('aria-label')).toBe('باز کردن اعلان «اعلان»')
+    expect(routeAction.element.contains(dismissAction.element)).toBe(false)
+
+    await routeAction.trigger('click')
 
     expect(routerPushMock).toHaveBeenCalledWith('/notifications')
     expect(removeToastSpy).toHaveBeenCalledWith(1)
@@ -163,11 +190,12 @@ describe('AppToasts.vue', () => {
     })
 
     const toast = wrapper.get('.toast-card-floating')
+    const routeAction = wrapper.get('.toast-card-floating__action--interactive')
     await toast.trigger('touchstart', { touches: [{ clientX: 20 }] })
     await toast.trigger('touchmove', { touches: [{ clientX: 95 }] })
 
     expect(toast.attributes('style')).toContain('translateX(75px)')
-    await toast.trigger('click')
+    await routeAction.trigger('click')
 
     expect(routerPushMock).not.toHaveBeenCalled()
     expect(removeToastSpy).not.toHaveBeenCalled()
@@ -176,7 +204,7 @@ describe('AppToasts.vue', () => {
     expect(removeToastSpy).toHaveBeenCalledWith(9)
   })
 
-  it('removes toasts without navigating when they have no route or only a tiny swipe gesture', async () => {
+  it('keeps a route-less toast non-interactive and leaves dismissal to the separate control', async () => {
     const store = useNotificationStore()
     store.activeToasts = [{ id: 11, title: 'بدون مسیر', body: 'کلیک ساده', kind: 'app' }]
 
@@ -196,8 +224,79 @@ describe('AppToasts.vue', () => {
 
     expect(removeToastSpy).not.toHaveBeenCalled()
 
-    await toast.trigger('click')
+    const surface = wrapper.get('.toast-card-floating__action')
+    expect(surface.element.tagName).toBe('DIV')
+    expect(wrapper.find('.toast-card-floating__action--interactive').exists()).toBe(false)
+
+    await surface.trigger('click')
     expect(routerPushMock).not.toHaveBeenCalled()
+    expect(removeToastSpy).not.toHaveBeenCalled()
+
+    await wrapper.get('.close-btn-minimal').trigger('click')
     expect(removeToastSpy).toHaveBeenCalledWith(11)
+  })
+
+  it('keeps toast context for unsafe, failed, and recovery-redirected navigation', async () => {
+    const store = useNotificationStore()
+    store.activeToasts = [
+      { id: 20, title: 'بیرونی', body: 'متن', route: 'https://evil.example', kind: 'app' },
+      { id: 21, title: 'نامعتبر', body: 'متن', route: '/missing/target', kind: 'app' },
+      { id: 22, title: 'خطا', body: 'متن', route: '/account', kind: 'app' },
+      { id: 23, title: 'محدود', body: 'متن', route: '/market', kind: 'app' },
+    ]
+    const removeToastSpy = vi.spyOn(store, 'removeToast')
+    const wrapper = mount(AppToasts)
+
+    const routeActions = wrapper.findAll('.toast-card-floating__action--interactive')
+    expect(routeActions).toHaveLength(2)
+    routerPushMock.mockRejectedValueOnce(new Error('chunk unavailable'))
+    await routeActions[0]!.trigger('click')
+    routerPushMock.mockImplementationOnce(async () => {
+      routerCurrentRouteMock.value = {
+        name: 'system-recovery',
+        fullPath: '/system/permission-denied',
+      }
+    })
+    routerReplaceMock.mockImplementationOnce(async () => {
+      routerCurrentRouteMock.value = { name: 'home', fullPath: '/' }
+    })
+    await routeActions[1]!.trigger('click')
+
+    expect(routerReplaceMock).toHaveBeenCalledWith('/')
+    expect(removeToastSpy).not.toHaveBeenCalled()
+    expect(store.activeToasts).toHaveLength(4)
+  })
+
+  it('pauses auto-dismiss for focus, hover, and a blocking security layer', async () => {
+    vi.useFakeTimers()
+    const store = useNotificationStore()
+    store.addToast({ title: 'قابل مکث', body: 'پیام', route: '/account', kind: 'app' })
+    const wrapper = mount(AppToasts, { props: { v2Scope: true }, attachTo: document.body })
+    const toast = wrapper.get('.toast-card-floating')
+
+    vi.advanceTimersByTime(3000)
+    await toast.trigger('focusin')
+    await toast.trigger('mouseenter')
+    await toast.trigger('focusout', { relatedTarget: document.body })
+    vi.advanceTimersByTime(10_000)
+    expect(store.activeToasts).toHaveLength(1)
+
+    await toast.trigger('mouseleave', { relatedTarget: document.body })
+    vi.advanceTimersByTime(1999)
+    expect(store.activeToasts).toHaveLength(1)
+    vi.advanceTimersByTime(1)
+    expect(store.activeToasts).toHaveLength(0)
+
+    store.addToast({ title: 'پشت لایه امنیتی', body: 'پیام', kind: 'app' })
+    setSecurityLayerActive('session-approval', true)
+    await nextTick()
+    vi.advanceTimersByTime(10_000)
+    expect(store.activeToasts).toHaveLength(1)
+
+    setSecurityLayerActive('session-approval', false)
+    await nextTick()
+    vi.advanceTimersByTime(5000)
+    expect(store.activeToasts).toHaveLength(0)
+    wrapper.unmount()
   })
 })

@@ -6,14 +6,18 @@ import {
   AppButton,
   AppEmptyState,
   AppFilterChips,
-  AppIconButton,
   AppLoadingState,
   AppPage,
+  AppPageHeader,
   AppSectionCard,
   AppStatusBadge,
 } from '../components/ui'
 import { useNotificationStore } from '../stores/notifications'
-import type { NormalizedAppNotification } from '../types/notifications'
+import {
+  isForbiddenNotificationMetadataLabel,
+  notificationMetadataSeparatorIndex,
+  type NormalizedAppNotification,
+} from '../types/notifications'
 import { formatIranTime } from '../utils/iranTime'
 import { getNotificationIconComponent } from '../utils/notificationUi'
 import {
@@ -21,6 +25,8 @@ import {
   getWebPushStatus,
   type WebPushRuntimeState,
 } from '../services/webPush'
+import { validateIntendedRoute } from '../utils/authNavigation'
+import { assertSuccessfulNavigation } from '../utils/navigationResult'
 
 const router = useRouter()
 const notificationStore = useNotificationStore()
@@ -35,21 +41,14 @@ const activeCategoryNotifications = computed(() => (
   activeCategory.value === 'trade' ? tradeNotifications.value : managementNotifications.value
 ))
 const hasNotifications = computed(() => notificationStore.appNotifications.length > 0)
-const shouldShowCategoryCounts = computed(() => (
-  notificationStore.hasLoadedHistory || hasNotifications.value
-))
 const categoryOptions = computed(() => [
   {
     key: 'trade' as const,
-    label: shouldShowCategoryCounts.value
-      ? `معاملات ${tradeNotifications.value.length.toLocaleString('fa-IR')}`
-      : 'معاملات',
+    label: 'معاملات',
   },
   {
     key: 'management' as const,
-    label: shouldShowCategoryCounts.value
-      ? `سایر ${managementNotifications.value.length.toLocaleString('fa-IR')}`
-      : 'سایر',
+    label: 'سایر',
   },
 ])
 const filteredNotifications = computed(() => activeCategoryNotifications.value)
@@ -87,16 +86,26 @@ const pushStatusTone = computed<'neutral' | 'success' | 'warning' | 'danger'>(()
 const canEnablePush = computed(() => (
   pushState.value === 'permission-default'
   || pushState.value === 'unsubscribed'
-  || pushState.value === 'error'
 ))
-const showPushEnablePanel = computed(() => (
-  pushState.value === 'checking'
-  || canEnablePush.value
-  || Boolean(pushActionMessage.value)
-))
+const pushStateDescription = computed(() => {
+  if (pushState.value === 'checking') return 'وضعیت اعلان در همین مرورگر بررسی می‌شود.'
+  if (pushState.value === 'unsupported') return 'این مرورگر یا دستگاه از اعلان مرورگر پشتیبانی نمی‌کند.'
+  if (pushState.value === 'insecure') return 'فعال‌سازی اعلان مرورگر فقط در اتصال امن در دسترس است.'
+  if (pushState.value === 'server-disabled') return 'اعلان مرورگر در حال حاضر از سمت سرویس فعال نیست.'
+  if (pushState.value === 'permission-blocked') return 'اجازه اعلان در تنظیمات همین مرورگر مسدود است.'
+  if (pushState.value === 'permission-default') return 'برای دریافت اعلان‌های مهم در همین مرورگر، اجازه نمایش اعلان را فعال کنید.'
+  if (pushState.value === 'subscribed') return 'اعلان‌های این مرورگر فعال است.'
+  if (pushState.value === 'unsubscribed') return 'این مرورگر اجازه اعلان دارد، اما اشتراک فعالی ندارد.'
+  return 'وضعیت اعلان مرورگر مشخص نشد. دوباره بررسی کنید.'
+})
 
-const goBack = () => {
-  router.push('/')
+const goBack = async () => {
+  try {
+    assertSuccessfulNavigation(await router.push({ name: 'account' }))
+  } catch {
+    // The user remains in the fully usable notification center when the
+    // transition is cancelled or its lazy chunk cannot load.
+  }
 }
 
 const formatTime = (ts: unknown) => {
@@ -116,10 +125,23 @@ const parseNotificationLine = (rawLine: string): ParsedNotificationLine | null =
   const trimmed = rawLine.trim()
   if (!trimmed) return null
 
-  const iconMatch = trimmed.match(/^(\S+)\s+(.*)$/)
+  // Filter implementation metadata before attempting to interpret a leading
+  // token as an icon. Otherwise a line such as `route: /market` would treat
+  // `route:` as the icon and expose the raw value as plain text.
+  const rawColonIndex = notificationMetadataSeparatorIndex(trimmed)
+  if (
+    rawColonIndex !== -1 &&
+    isForbiddenNotificationMetadataLabel(trimmed.slice(0, rawColonIndex))
+  ) {
+    return null
+  }
+
+  const iconMatch = trimmed.match(
+    /^([\p{Extended_Pictographic}\p{Emoji_Presentation}\u200d\ufe0f]+)\s+(.*)$/u,
+  )
   const icon = iconMatch?.[1] || ''
   const remainder = (iconMatch?.[2] || trimmed).trim()
-  const colonIndex = remainder.indexOf(':')
+  const colonIndex = notificationMetadataSeparatorIndex(remainder)
 
   if (colonIndex === -1) {
     return {
@@ -134,6 +156,7 @@ const parseNotificationLine = (rawLine: string): ParsedNotificationLine | null =
 
   const label = remainder.slice(0, colonIndex).trim()
   const value = remainder.slice(colonIndex + 1).trim()
+  if (isForbiddenNotificationMetadataLabel(label)) return null
   const isWide = label === 'زمان معامله' || label === 'مسیر' || label === 'توضیحات'
 
   return {
@@ -149,14 +172,14 @@ const parseNotificationLine = (rawLine: string): ParsedNotificationLine | null =
 const getNotificationLines = (notification: NormalizedAppNotification): ParsedNotificationLine[] => {
   const body = notification.content || notification.body || ''
   return body
-    .split(/\r?\n+/)
+    .split(/[\r\n\u2028\u2029]+/u)
     .map(parseNotificationLine)
     .filter((line): line is ParsedNotificationLine => line !== null)
 }
 
 const shouldUseStructuredLines = (notification: NormalizedAppNotification): boolean => {
   const body = notification.content || notification.body || ''
-  return body.includes('\n') || notification.category === 'trade'
+  return /[\r\n\u2028\u2029]/u.test(body) || notification.category === 'trade'
 }
 
 async function refreshPushState() {
@@ -191,14 +214,35 @@ async function retryHistory() {
   await notificationStore.openNotificationCenter()
 }
 
-const openNotificationRoute = (notification: NormalizedAppNotification) => {
+function resolveNotificationRoute(notification: NormalizedAppNotification): string | null {
   const routePath = typeof notification.route === 'string' ? notification.route.trim() : ''
-  if (!routePath) return
-  router.push(routePath)
+  const safePath = validateIntendedRoute({ fullPath: routePath })
+  if (!safePath) return null
+
+  try {
+    const resolved = router.resolve(safePath)
+    if (!resolved.matched.length || resolved.name === 'system-recovery') return null
+    return safePath
+  } catch {
+    return null
+  }
 }
 
 function canOpenNotificationRoute(notification: NormalizedAppNotification): boolean {
-  return typeof notification.route === 'string' && notification.route.trim().length > 0
+  return resolveNotificationRoute(notification) !== null
+}
+
+const openNotificationRoute = async (notification: NormalizedAppNotification) => {
+  const routePath = resolveNotificationRoute(notification)
+  if (!routePath) return
+  try {
+    assertSuccessfulNavigation(await router.push(routePath))
+    if (router.currentRoute.value.name === 'system-recovery') {
+      assertSuccessfulNavigation(await router.replace({ name: 'account-notifications' }))
+    }
+  } catch {
+    // Keep the notification and its context visible when navigation fails.
+  }
 }
 
 onMounted(async () => {
@@ -208,26 +252,41 @@ onMounted(async () => {
 </script>
 
 <template>
-  <AppPage narrow>
-    <div class="notifications-view">
-      <header class="notifications-topbar" aria-label="مرکز اعلانات">
-        <AppIconButton type="button" class="notifications-return" label="بازگشت" size="sm" @click="goBack">
-          <ChevronRight :size="22" />
-        </AppIconButton>
+  <AppPage narrow class="ui-v2-daily-page ui-v2-notifications-page">
+    <div class="notifications-view ui-v2-daily-page__content">
+      <AppPageHeader eyebrow="حساب" title="اعلان‌ها" description="آخرین اعلان‌های دریافت‌شده در این حساب">
+        <template #actions>
+          <AppButton
+            type="button"
+            class="notifications-return"
+            variant="ghost"
+            size="sm"
+            @click="goBack"
+          >
+            <template #icon>
+              <ChevronRight :size="18" />
+            </template>
+            بازگشت به حساب
+          </AppButton>
+        </template>
+      </AppPageHeader>
+
+      <div class="notifications-topbar" aria-label="دسته‌بندی مرکز اعلان‌ها">
         <AppFilterChips
           v-model="activeCategory"
           class="notification-category-tabs"
           label="دسته‌بندی اعلان‌ها"
+          id-prefix="notifications-category"
+          focus-selection-on-keyboard
           :options="categoryOptions"
         />
-      </header>
+      </div>
 
-      <main class="content">
+      <div class="content">
         <AppSectionCard
-          v-if="showPushEnablePanel"
-          title="اعلان دستگاه"
-          :description="pushStatusLabel"
-          class="push-section"
+          title="اعلان مرورگر"
+          :description="pushStateDescription"
+          class="push-section ui-v2-browser-push ui-v2-notifications-push"
         >
           <template #actions>
             <AppStatusBadge :tone="pushStatusTone">{{ pushStatusLabel }}</AppStatusBadge>
@@ -237,129 +296,144 @@ onMounted(async () => {
             <AppButton
               v-if="canEnablePush"
               class="push-enable-btn"
-              size="sm"
               :loading="isPushBusy"
               @click="enablePush"
             >
               <template #icon>
                 <BellRing :size="16" />
               </template>
-              فعال‌سازی
+              فعال‌سازی اعلان مرورگر
+            </AppButton>
+            <AppButton
+              v-else-if="pushState === 'error'"
+              class="push-status-retry"
+              variant="secondary"
+              :loading="pushState === 'checking'"
+              @click="refreshPushState"
+            >
+              <template #icon>
+                <RefreshCw :size="16" />
+              </template>
+              بررسی دوباره
             </AppButton>
           </div>
-          <p v-if="pushActionMessage" class="push-action-message">{{ pushActionMessage }}</p>
+          <p class="push-device-scope">این تنظیم فقط برای همین مرورگر و دستگاه است.</p>
+          <p v-if="pushActionMessage" class="push-action-message" role="status" aria-live="polite">
+            {{ pushActionMessage }}
+          </p>
         </AppSectionCard>
 
-        <AppLoadingState
-          v-if="notificationStore.isLoadingHistory && !hasNotifications"
-          class="ds-loading-state"
-          label="در حال دریافت اعلان‌ها"
-        />
-
-        <AppEmptyState
-          v-else-if="hasInitialHistoryError"
-          class="notification-history-error"
-          title="اعلان‌ها دریافت نشدند"
-          message="دریافت اعلان‌ها انجام نشد. دوباره تلاش کنید."
-          tone="danger"
-          role="alert"
+        <div
+          :id="`notifications-category-${activeCategory}-panel`"
+          class="notification-category-panel"
+          role="tabpanel"
+          :aria-labelledby="`notifications-category-${activeCategory}-tab`"
         >
-          <template #icon>
-            <Bell :size="48" />
-          </template>
-          <template #actions>
-            <AppButton
-              class="notification-history-retry"
-              size="sm"
-              :loading="isHistoryBusy"
-              @click="retryHistory"
-            >
-              <template #icon>
-                <RefreshCw :size="16" />
-              </template>
-              تلاش دوباره
-            </AppButton>
-          </template>
-        </AppEmptyState>
-
-        <AppEmptyState
-          v-else-if="hasConfirmedEmptyHistory"
-          title="هیچ اعلانی یافت نشد"
-          message="در آخرین اعلان‌های دریافت‌شده موردی برای نمایش وجود ندارد."
-          tone="info"
-        >
-          <template #icon>
-            <Bell :size="48" />
-          </template>
-        </AppEmptyState>
-
-        <section
-          v-else-if="hasNotifications"
-          class="notifications-section"
-        >
-          <div
-            v-if="notificationStore.isRefreshingHistory"
-            class="notification-history-feedback is-refreshing"
-            role="status"
-            aria-live="polite"
-          >
-            <span>در حال به‌روزرسانی اعلان‌ها</span>
-          </div>
-
-          <div
-            v-else-if="hasRetainedHistoryError"
-            class="notification-history-feedback is-error"
-            role="alert"
-          >
-            <span>به‌روزرسانی اعلان‌ها انجام نشد؛ موارد قبلی همچنان نمایش داده می‌شوند.</span>
-            <AppButton
-              class="notification-history-retry"
-              variant="ghost"
-              size="sm"
-              :loading="isHistoryBusy"
-              @click="retryHistory"
-            >
-              <template #icon>
-                <RefreshCw :size="16" />
-              </template>
-              تلاش دوباره
-            </AppButton>
-          </div>
+          <AppLoadingState
+            v-if="notificationStore.isLoadingHistory && !hasNotifications"
+            class="ds-loading-state"
+            label="در حال دریافت اعلان‌ها"
+          />
 
           <AppEmptyState
-            v-if="filteredNotifications.length === 0"
-            class="notification-filter-empty"
-            title="اعلانی در این فیلتر وجود ندارد"
-            :message="activeCategory === 'trade' ? 'اعلان معاملاتی برای نمایش وجود ندارد.' : 'اعلانی در دسته سایر برای نمایش وجود ندارد.'"
-            tone="neutral"
+            v-else-if="hasInitialHistoryError"
+            class="notification-history-error"
+            title="اعلان‌ها دریافت نشدند"
+            message="دریافت اعلان‌ها انجام نشد. دوباره تلاش کنید."
+            tone="danger"
+            role="alert"
           >
             <template #icon>
-              <Bell :size="40" />
+              <Bell :size="48" />
+            </template>
+            <template #actions>
+              <AppButton
+                class="notification-history-retry"
+                size="sm"
+                :loading="isHistoryBusy"
+                @click="retryHistory"
+              >
+                <template #icon>
+                  <RefreshCw :size="16" />
+                </template>
+                تلاش دوباره
+              </AppButton>
             </template>
           </AppEmptyState>
 
-          <div
-            v-else
-            :id="`notifications-${activeCategory}-panel`"
-            class="notifications-list"
-            role="tabpanel"
-            :aria-label="`اعلان‌های ${categoryOptions.find((option) => option.key === activeCategory)?.label || ''}`"
+          <AppEmptyState
+            v-else-if="hasConfirmedEmptyHistory"
+            title="هیچ اعلانی یافت نشد"
+            message="در آخرین اعلان‌های دریافت‌شده موردی برای نمایش وجود ندارد."
+            tone="info"
+          >
+            <template #icon>
+              <Bell :size="48" />
+            </template>
+          </AppEmptyState>
+
+          <section
+            v-else-if="hasNotifications"
+            class="notifications-section"
           >
             <div
+              v-if="notificationStore.isRefreshingHistory"
+              class="notification-history-feedback is-refreshing"
+              role="status"
+              aria-live="polite"
+            >
+              <span>در حال به‌روزرسانی اعلان‌ها</span>
+            </div>
+
+            <div
+              v-else-if="hasRetainedHistoryError"
+              class="notification-history-feedback is-error"
+              role="alert"
+            >
+              <span>به‌روزرسانی اعلان‌ها انجام نشد؛ موارد قبلی همچنان نمایش داده می‌شوند.</span>
+              <AppButton
+                class="notification-history-retry"
+                variant="ghost"
+                size="sm"
+                :loading="isHistoryBusy"
+                @click="retryHistory"
+              >
+                <template #icon>
+                  <RefreshCw :size="16" />
+                </template>
+                تلاش دوباره
+              </AppButton>
+            </div>
+
+            <AppEmptyState
+              v-if="filteredNotifications.length === 0"
+              class="notification-filter-empty"
+              title="اعلانی در این فیلتر وجود ندارد"
+              :message="activeCategory === 'trade' ? 'اعلان معاملاتی برای نمایش وجود ندارد.' : 'اعلانی در دسته سایر برای نمایش وجود ندارد.'"
+              tone="neutral"
+            >
+              <template #icon>
+                <Bell :size="40" />
+              </template>
+            </AppEmptyState>
+
+            <div v-else class="notifications-list">
+            <component
               v-for="notif in filteredNotifications"
               :key="notif.id"
-              class="notif-item"
+              :is="canOpenNotificationRoute(notif) ? 'button' : 'article'"
+              :type="canOpenNotificationRoute(notif) ? 'button' : undefined"
+              class="notif-item ui-v2-notifications-item"
               :class="[
                 `type-${notif.level || 'info'}`,
                 `category-${notif.category || 'system'}`,
-                { 'is-unread': !notif.is_read },
+                {
+                  'is-unread': !notif.is_read,
+                  'ui-v2-notifications-item--unread': !notif.is_read,
+                },
               ]"
-              :role="canOpenNotificationRoute(notif) ? 'button' : undefined"
-              :tabindex="canOpenNotificationRoute(notif) ? 0 : undefined"
               :aria-label="canOpenNotificationRoute(notif) ? `باز کردن اعلان ${notif.title || 'اعلان جدید'}` : undefined"
               @click="openNotificationRoute(notif)"
-              @keydown.enter.prevent="openNotificationRoute(notif)"
-              @keydown.space.prevent="openNotificationRoute(notif)"
             >
               <div class="notif-main">
                 <div class="notif-icon">
@@ -370,11 +444,6 @@ onMounted(async () => {
                 <div class="notif-body">
                   <div v-if="notif.category !== 'trade'" class="notif-meta-row">
                     <h3 class="notif-title">{{ notif.title || 'اعلان جدید' }}</h3>
-                    <div class="notif-badges">
-                      <AppStatusBadge :tone="notif.is_read ? 'neutral' : 'warning'">
-                        {{ notif.is_read ? 'خوانده‌شده' : 'جدید' }}
-                      </AppStatusBadge>
-                    </div>
                   </div>
 
                   <div
@@ -385,9 +454,9 @@ onMounted(async () => {
                     <div
                       v-for="(line, lineIndex) in getNotificationLines(notif)"
                       :key="`${notif.id}-line-${lineIndex}`"
-                      class="notif-line"
+                      class="notif-line ui-v2-notifications-line"
                       :class="[
-                        line.isField ? 'notif-line-field' : 'notif-line-plain',
+                        line.isField ? 'notif-line-field ui-v2-notifications-field' : 'notif-line-plain',
                         { 'notif-line-wide': line.isWide },
                       ]"
                     >
@@ -406,10 +475,11 @@ onMounted(async () => {
                 </div>
               </div>
 
+            </component>
             </div>
-          </div>
-        </section>
-      </main>
+          </section>
+        </div>
+      </div>
     </div>
   </AppPage>
 </template>
@@ -423,11 +493,8 @@ onMounted(async () => {
 }
 
 .notifications-topbar {
-  display: grid;
-  grid-template-columns: var(--ds-touch-target) minmax(0, 1fr);
-  align-items: center;
-  gap: 0.55rem;
-  min-height: 3rem;
+  display: block;
+  min-width: 0;
 }
 
 .notifications-return {
@@ -511,6 +578,12 @@ onMounted(async () => {
   font-size: var(--ds-font-sm);
 }
 
+.push-device-scope {
+  margin: 0;
+  color: var(--ds-info-700);
+  font-size: var(--ds-font-xs);
+}
+
 .notif-item:focus-visible {
   outline: 3px solid rgba(245, 158, 11, 0.34);
   outline-offset: 3px;
@@ -525,6 +598,7 @@ onMounted(async () => {
 
 .notif-item {
   position: relative;
+  width: 100%;
   display: flex;
   flex-direction: column;
   gap: 0.65rem;
@@ -535,9 +609,12 @@ onMounted(async () => {
   border-right: 4px solid var(--ds-border-strong);
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   box-shadow: var(--ds-shadow-xs);
+  color: inherit;
+  font: inherit;
+  text-align: start;
 }
 
-.notif-item[role='button'] {
+.notif-item:is(button) {
   cursor: pointer;
 }
 

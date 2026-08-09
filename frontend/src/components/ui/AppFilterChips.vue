@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { nextTick } from 'vue'
+
 interface FilterChipOption {
   key: string
   label: string
@@ -9,6 +11,8 @@ const props = defineProps<{
   modelValue: string
   options: FilterChipOption[]
   label: string
+  idPrefix?: string
+  focusSelectionOnKeyboard?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -42,7 +46,14 @@ function handleKeydown(event: KeyboardEvent, index: number) {
   }
 
   event.preventDefault()
-  emit('update:modelValue', enabledOptions[nextIndex]!.key)
+  const nextOption = enabledOptions[nextIndex]!
+  const currentButton = event.currentTarget as HTMLButtonElement | null
+  emit('update:modelValue', nextOption.key)
+  if (!props.focusSelectionOnKeyboard) return
+  void nextTick(() => {
+    const tabs = currentButton?.parentElement?.querySelectorAll<HTMLButtonElement>('[role="tab"]')
+    tabs?.[nextOption.optionIndex]?.focus()
+  })
 }
 </script>
 
@@ -55,6 +66,8 @@ function handleKeydown(event: KeyboardEvent, index: number) {
       class="ui-filter-chip"
       :class="{ 'is-active': modelValue === option.key }"
       role="tab"
+      :id="idPrefix ? `${idPrefix}-${option.key}-tab` : undefined"
+      :aria-controls="idPrefix ? `${idPrefix}-${option.key}-panel` : undefined"
       :aria-selected="modelValue === option.key"
       :tabindex="modelValue === option.key ? 0 : -1"
       :disabled="option.disabled"

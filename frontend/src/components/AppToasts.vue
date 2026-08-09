@@ -1,11 +1,13 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { X } from 'lucide-vue-next'
 import { useNotificationStore } from '../stores/notifications'
 import { getNotificationIconComponent } from '../utils/notificationUi'
 import { getNotificationDisplayKind, type ToastNotification } from '../types/notifications'
 import { isSecurityLayerActive } from '../utils/securityLayerState'
+import { validateIntendedRoute } from '../utils/authNavigation'
+import { assertSuccessfulNavigation } from '../utils/navigationResult'
 import AppToast from './ui/AppToast.vue'
 
 const props = withDefaults(defineProps<{ v2Scope?: boolean }>(), { v2Scope: false })
@@ -14,6 +16,41 @@ const store = useNotificationStore()
 const router = useRouter()
 const toastLayerBlocked = computed(() => props.v2Scope && isSecurityLayerActive.value)
 const transitionName = computed(() => (props.v2Scope ? 'ui-v2-toast' : 'toast'))
+
+watch(
+  [toastLayerBlocked, () => store.activeToasts.map((toast) => toast.id).join(',')],
+  ([blocked]) => {
+    for (const toast of store.activeToasts) {
+      if (blocked) store.pauseToast(toast.id, 'security-layer')
+      else store.resumeToast(toast.id, 'security-layer')
+    }
+  },
+  { immediate: true },
+)
+
+const pauseToastInteraction = (id: number, reason: 'focus' | 'hover') => {
+  store.pauseToast(id, reason)
+}
+
+const resumeToastInteraction = (
+  event: FocusEvent | MouseEvent,
+  id: number,
+  reason: 'focus' | 'hover',
+) => {
+  const currentTarget = event.currentTarget as HTMLElement | null
+  const relatedTarget = event.relatedTarget
+  if (currentTarget && relatedTarget instanceof Node && currentTarget.contains(relatedTarget))
+    return
+  store.resumeToast(id, reason)
+}
+
+onBeforeUnmount(() => {
+  for (const toast of store.activeToasts) {
+    store.resumeToast(toast.id, 'focus')
+    store.resumeToast(toast.id, 'hover')
+    store.resumeToast(toast.id, 'security-layer')
+  }
+})
 
 // Swipe to dismiss logic
 const dragState = ref<Record<number, { startX: number; currentX: number }>>({})
@@ -79,7 +116,24 @@ const getToastTone = (toast: ToastNotification): ToastTone => {
   return 'neutral'
 }
 
-const handleToastClick = (toast: ToastNotification) => {
+const resolveToastRoute = (toast: ToastNotification): string | null => {
+  const safePath = validateIntendedRoute({ fullPath: toast.route })
+  if (!safePath) return null
+  try {
+    const resolved = router.resolve(safePath)
+    if (!resolved.matched.length || resolved.name === 'system-recovery') return null
+    return safePath
+  } catch {
+    return null
+  }
+}
+
+const hasToastRouteAction = (toast: ToastNotification) => resolveToastRoute(toast) !== null
+
+const getToastRouteActionLabel = (toast: ToastNotification) =>
+  toast.title.trim() ? `باز کردن اعلان «${toast.title.trim()}»` : 'باز کردن اعلان'
+
+const handleToastClick = async (toast: ToastNotification) => {
   // If user was swiping, don't trigger click navigation
   const state = dragState.value[toast.id]
   if (state) {
@@ -88,7 +142,18 @@ const handleToastClick = (toast: ToastNotification) => {
   }
 
   if (toast.route) {
-    void router.push(toast.route)
+    const routePath = resolveToastRoute(toast)
+    if (!routePath) return
+    const previousPath = router.currentRoute.value.fullPath
+    try {
+      assertSuccessfulNavigation(await router.push(routePath))
+      if (router.currentRoute.value.name === 'system-recovery') {
+        if (previousPath) assertSuccessfulNavigation(await router.replace(previousPath))
+        return
+      }
+    } catch {
+      return
+    }
   }
   store.removeToast(toast.id)
 }
@@ -114,17 +179,29 @@ const handleToastClick = (toast: ToastNotification) => {
         @touchstart="onTouchStart($event, toast.id)"
         @touchmove="onTouchMove($event, toast.id)"
         @touchend="onTouchEnd(toast.id)"
-        @click="handleToastClick(toast)"
+        @mouseenter="pauseToastInteraction(toast.id, 'hover')"
+        @mouseleave="resumeToastInteraction($event, toast.id, 'hover')"
+        @focusin="pauseToastInteraction(toast.id, 'focus')"
+        @focusout="resumeToastInteraction($event, toast.id, 'focus')"
       >
-        <div class="notif-icon-circle" :class="{ 'ui-v2-toast-icon': v2Scope }">
-          <component :is="getNotificationIconComponent(toast)" :size="20" />
-        </div>
-        <AppToast
-          class="toast-card-floating__surface"
-          :title="toast.title"
-          :message="toast.body"
-          :tone="getToastTone(toast)"
-        />
+        <component
+          :is="hasToastRouteAction(toast) ? 'button' : 'div'"
+          class="toast-card-floating__action"
+          :class="{ 'toast-card-floating__action--interactive': hasToastRouteAction(toast) }"
+          :type="hasToastRouteAction(toast) ? 'button' : undefined"
+          :aria-label="hasToastRouteAction(toast) ? getToastRouteActionLabel(toast) : undefined"
+          @click="hasToastRouteAction(toast) && handleToastClick(toast)"
+        >
+          <div class="notif-icon-circle" :class="{ 'ui-v2-toast-icon': v2Scope }">
+            <component :is="getNotificationIconComponent(toast)" :size="20" />
+          </div>
+          <AppToast
+            class="toast-card-floating__surface"
+            :title="toast.title"
+            :message="toast.body"
+            :tone="getToastTone(toast)"
+          />
+        </component>
         <button
           class="close-btn-minimal"
           :class="{ 'ui-v2-toast-dismiss': v2Scope }"
@@ -147,10 +224,32 @@ const handleToastClick = (toast: ToastNotification) => {
   display: flex;
   align-items: stretch;
   gap: 0.75rem;
-  cursor: pointer;
   user-select: none;
   touch-action: pan-y;
   will-change: transform, opacity;
+}
+
+.toast-card-floating__action {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  align-items: stretch;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: inherit;
+}
+
+.toast-card-floating__action--interactive {
+  cursor: pointer;
+}
+
+.toast-card-floating__action--interactive:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 3px;
+  border-radius: var(--ds-radius-md);
 }
 
 .toast-card-floating__surface {

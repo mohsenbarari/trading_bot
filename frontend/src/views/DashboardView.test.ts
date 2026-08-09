@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import DashboardView from './DashboardView.vue'
@@ -6,17 +8,24 @@ import {
   applyMarketRuntimePatch,
   resetMarketRuntimeForTests,
 } from '../composables/useMarketRuntime'
+import {
+  cacheCurrentUserSummary,
+  clearCurrentUserSummary,
+  currentUserSummary,
+} from '../utils/currentUser'
+// @ts-expect-error The production guard helper is intentionally shipped as plain ESM.
+import {
+  DASHBOARD_MARKET_REGION_SHA256,
+  dashboardMarketRegionEvidence,
+} from '../../scripts/lib/stage3-protected-region-guard.mjs'
 
 const dashboardViewMocks = vi.hoisted(() => ({
   routerPushMock: vi.fn(),
   apiFetchMock: vi.fn(),
-  forceLogoutMock: vi.fn(),
   isAppConnecting: { value: false },
-  locationAssignMock: vi.fn(),
-  requestTelegramLinkMock: vi.fn(),
-  openTelegramLinkMock: vi.fn(),
   notificationStore: {
     appNotifications: [] as Array<Record<string, unknown>>,
+    appUnreadCount: 0,
   },
 }))
 
@@ -32,13 +41,7 @@ vi.mock('../stores/notifications', () => ({
 
 vi.mock('../utils/auth', () => ({
   apiFetch: dashboardViewMocks.apiFetchMock,
-  forceLogout: dashboardViewMocks.forceLogoutMock,
   isAppConnecting: dashboardViewMocks.isAppConnecting,
-}))
-
-vi.mock('../services/telegramLink', () => ({
-  requestTelegramLink: dashboardViewMocks.requestTelegramLinkMock,
-  openTelegramLink: dashboardViewMocks.openTelegramLinkMock,
 }))
 
 function makeJsonResponse(payload: unknown, ok = true) {
@@ -48,40 +51,18 @@ function makeJsonResponse(payload: unknown, ok = true) {
   }
 }
 
-function mockDashboardApi(options: {
-  user: Record<string, unknown>
-  trades?: unknown[]
-  commodities?: unknown[]
-  projectUsers?: unknown[]
-  activeSessions?: unknown[]
-  failSessionLookup?: boolean
-}) {
-  dashboardViewMocks.apiFetchMock.mockImplementation(
-    async (url: string, requestOptions?: RequestInit) => {
-      if (url === '/api/auth/me') {
-        return makeJsonResponse(options.user)
-      }
-      if (url.startsWith('/api/trades/my?')) {
-        return makeJsonResponse(options.trades || [])
-      }
-      if (url === '/api/commodities/') {
-        return makeJsonResponse(options.commodities || [])
-      }
-      if (url.startsWith('/api/users-public/') && url.includes('/project-users?')) {
-        return makeJsonResponse(options.projectUsers || [])
-      }
-      if (url === '/api/sessions/active') {
-        if (options.failSessionLookup) {
-          throw new Error('session lookup failed')
-        }
-        return makeJsonResponse(options.activeSessions || [])
-      }
-      if (url.startsWith('/api/sessions/') && requestOptions?.method === 'DELETE') {
-        return makeJsonResponse({ ok: true })
-      }
-      return makeJsonResponse(null)
-    },
-  )
+function mockIdentity(user: Record<string, unknown>) {
+  dashboardViewMocks.apiFetchMock.mockImplementation(async (url: string) => {
+    if (url === '/api/auth/me') {
+      return makeJsonResponse({
+        role: 'عادی',
+        is_accountant: false,
+        is_customer: false,
+        ...user,
+      })
+    }
+    return makeJsonResponse(null, false)
+  })
 }
 
 async function mountView() {
@@ -90,32 +71,37 @@ async function mountView() {
   return wrapper
 }
 
-describe('DashboardView.vue', () => {
+function requestedUrls() {
+  return dashboardViewMocks.apiFetchMock.mock.calls.map(([url]) => url)
+}
+
+describe('DashboardView.vue Stage 4 Home contract', () => {
   beforeEach(() => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date(2026, 4, 14, 5, 0, 0))
     dashboardViewMocks.routerPushMock.mockReset()
     dashboardViewMocks.apiFetchMock.mockReset()
-    dashboardViewMocks.forceLogoutMock.mockReset()
     dashboardViewMocks.isAppConnecting.value = false
-    dashboardViewMocks.locationAssignMock.mockReset()
-    dashboardViewMocks.requestTelegramLinkMock.mockReset()
-    dashboardViewMocks.openTelegramLinkMock.mockReset()
     dashboardViewMocks.notificationStore.appNotifications = []
-    resetMarketRuntimeForTests()
-    localStorage.clear()
-    vi.stubGlobal('location', {
-      ...window.location,
-      assign: dashboardViewMocks.locationAssignMock,
+    dashboardViewMocks.notificationStore.appUnreadCount = 0
+    Object.defineProperty(window.navigator, 'onLine', {
+      configurable: true,
+      value: true,
     })
+    resetMarketRuntimeForTests()
+    clearCurrentUserSummary()
+    localStorage.clear()
   })
 
-  it('leaves initial loading for a cause-neutral identity error and retries the real request', async () => {
+  it('leaves loading for a cause-neutral identity error and retries the only Home request', async () => {
     dashboardViewMocks.apiFetchMock
       .mockRejectedValueOnce(new Error('private transport detail'))
       .mockResolvedValueOnce(
         makeJsonResponse({
           id: 73,
+          role: 'عادی',
+          is_accountant: false,
+          is_customer: false,
           full_name: 'کاربر بازیابی‌شده',
           account_name: 'recovered73',
           account_status: 'active',
@@ -124,446 +110,420 @@ describe('DashboardView.vue', () => {
           trading_restricted_until: null,
         }),
       )
-      .mockResolvedValueOnce(makeJsonResponse([]))
 
     const wrapper = await mountView()
 
     expect(wrapper.find('.ui-loading-state').exists()).toBe(false)
-    expect(wrapper.get('.dashboard-identity-error').text()).toContain('داشبورد بارگذاری نشد')
+    expect(wrapper.get('.dashboard-identity-error').text()).toContain(
+      'دریافت اطلاعات خانه انجام نشد',
+    )
     expect(wrapper.text()).not.toContain('private transport detail')
-    expect(wrapper.text()).not.toContain('اتصال برقرار نشد')
+    expect(wrapper.text()).not.toContain('اینترنت')
+    expect(wrapper.findComponent(PWAInstallOverlay).exists()).toBe(false)
 
     await wrapper.get('.dashboard-identity-retry').trigger('click')
     await flushPromises()
 
-    expect(dashboardViewMocks.apiFetchMock).toHaveBeenNthCalledWith(
-      2,
-      '/api/auth/me',
-      expect.objectContaining({
-        retryNetwork: false,
-        signal: expect.any(AbortSignal),
-        trackConnectionState: false,
-      }),
-    )
+    expect(requestedUrls()).toEqual(['/api/auth/me', '/api/auth/me'])
     expect(wrapper.find('.dashboard-identity-error').exists()).toBe(false)
     expect(wrapper.text()).toContain('کاربر بازیابی‌شده')
   })
 
-  it('keeps the PWA prompt ineligible until the initial Home activity load succeeds', async () => {
-    let resolveTrades!: (value: ReturnType<typeof makeJsonResponse>) => void
-    dashboardViewMocks.apiFetchMock.mockImplementation((url: string) => {
-      if (url === '/api/auth/me') {
-        return Promise.resolve(
-          makeJsonResponse({
-            id: 91,
-            full_name: 'کاربر سالم',
-            account_name: 'healthy91',
-            account_status: 'active',
-            global_lock_grace_expires_at: null,
-            global_web_locked_at: null,
-            trading_restricted_until: null,
-          }),
-        )
-      }
-      if (url.startsWith('/api/trades/my?')) {
-        return new Promise((resolve) => {
-          resolveTrades = resolve
-        })
-      }
-      return Promise.resolve(makeJsonResponse([]))
+  it('retains cached identity offline, shows freshness, removes retry, and suppresses PWA', async () => {
+    cacheCurrentUserSummary({
+      id: 70,
+      role: 'عادی',
+      is_accountant: false,
+      is_customer: false,
+      full_name: 'کاربر ذخیره‌شده',
+      account_name: 'cached70',
+      account_status: 'active',
+      trading_restricted_until: null,
     })
+    Object.defineProperty(window.navigator, 'onLine', {
+      configurable: true,
+      value: false,
+    })
+    dashboardViewMocks.apiFetchMock.mockRejectedValue(new Error('offline transport detail'))
+
+    const wrapper = await mountView()
+
+    expect(wrapper.text()).toContain('کاربر ذخیره‌شده')
+    expect(wrapper.get('.dashboard-connectivity-notice').text()).toContain(
+      'اتصال اینترنت در دسترس نیست',
+    )
+    expect(wrapper.get('.dashboard-connectivity-notice').text()).toContain(
+      'آخرین به‌روزرسانی ذخیره‌شده',
+    )
+    expect(wrapper.text()).not.toContain('offline transport detail')
+    expect(wrapper.find('.dashboard-identity-retry').exists()).toBe(false)
+    expect(wrapper.getComponent(PWAInstallOverlay).props('eligible')).toBe(false)
+  })
+
+  it('keeps cached Home visible while stale and retries without returning to loading', async () => {
+    cacheCurrentUserSummary({
+      id: 71,
+      role: 'عادی',
+      is_accountant: false,
+      is_customer: false,
+      full_name: 'کاربر قبلی',
+      account_name: 'cached71',
+      account_status: 'active',
+      trading_restricted_until: null,
+    })
+    dashboardViewMocks.apiFetchMock
+      .mockRejectedValueOnce(new Error('temporary refresh failure'))
+      .mockResolvedValueOnce(
+        makeJsonResponse({
+          id: 71,
+          role: 'عادی',
+          is_accountant: false,
+          is_customer: false,
+          full_name: 'کاربر تازه',
+          account_name: 'cached71',
+          account_status: 'active',
+          trading_restricted_until: null,
+        }),
+      )
+
+    const wrapper = await mountView()
+
+    expect(wrapper.find('.ui-loading-state').exists()).toBe(false)
+    expect(wrapper.text()).toContain('کاربر قبلی')
+    expect(wrapper.get('.dashboard-connectivity-notice').text()).toContain(
+      'اطلاعات خانه به‌روز نشد',
+    )
+    expect(wrapper.getComponent(PWAInstallOverlay).props('eligible')).toBe(false)
+
+    await wrapper.get('.dashboard-identity-retry').trigger('click')
+    await flushPromises()
+
+    expect(requestedUrls()).toEqual(['/api/auth/me', '/api/auth/me'])
+    expect(wrapper.find('.dashboard-connectivity-notice').exists()).toBe(false)
+    expect(wrapper.text()).toContain('کاربر تازه')
+    expect(wrapper.getComponent(PWAInstallOverlay).props('eligible')).toBe(true)
+  })
+
+  it.each([
+    ['empty object', {}],
+    ['array payload', []],
+    [
+      'missing account status',
+      { role: 'عادی', full_name: 'کاربر', is_accountant: false, is_customer: false },
+    ],
+    [
+      'unknown account status',
+      {
+        role: 'عادی',
+        full_name: 'کاربر',
+        account_status: 'pending',
+        is_accountant: false,
+        is_customer: false,
+      },
+    ],
+    [
+      'missing accountant truth',
+      { role: 'عادی', full_name: 'کاربر', account_status: 'active', is_customer: false },
+    ],
+    [
+      'missing customer truth',
+      { role: 'عادی', full_name: 'کاربر', account_status: 'active', is_accountant: false },
+    ],
+  ])('rejects %s before enabling Home or PWA', async (_label, payload) => {
+    dashboardViewMocks.apiFetchMock.mockResolvedValue(makeJsonResponse(payload))
+
+    const wrapper = await mountView()
+
+    expect(requestedUrls()).toEqual(['/api/auth/me'])
+    expect(wrapper.get('.dashboard-identity-error').text()).toContain(
+      'دریافت اطلاعات خانه انجام نشد',
+    )
+    expect(wrapper.find('.dashboard-content').exists()).toBe(false)
+    expect(wrapper.findComponent(PWAInstallOverlay).exists()).toBe(false)
+    expect(currentUserSummary.value).toBeNull()
+  })
+
+  it('renders the quiet Home header, one unread dot, canonical routes, and no removed dashboard content', async () => {
+    dashboardViewMocks.notificationStore.appNotifications = [
+      { id: 1, is_read: true },
+      { id: 2, is_read: false },
+    ]
+    mockIdentity({
+      id: 12,
+      role: 'owner',
+      full_name: 'رضا محمدی',
+      account_name: 'reza12',
+      account_status: 'active',
+      global_lock_grace_expires_at: null,
+      global_web_locked_at: null,
+      trading_restricted_until: null,
+    })
+
+    const wrapper = await mountView()
+
+    expect(requestedUrls()).toEqual(['/api/auth/me'])
+    expect(wrapper.get('#dashboard-page-title').text()).toBe('خانه')
+    expect(wrapper.get('.user-name').text()).toBe('رضا محمدی')
+    expect(wrapper.get('.avatar').text()).toBe('ر')
+    expect(wrapper.get('.user-info-center').attributes('aria-label')).toBe(
+      'مشاهده پروفایل رضا محمدی',
+    )
+    expect(wrapper.findAll('.notif-dot')).toHaveLength(1)
+    expect(wrapper.get('.notif-btn').attributes('aria-label')).toBe('اعلان‌های خوانده‌نشده')
+    expect(wrapper.text()).not.toContain('۲ اعلان')
+    expect(wrapper.text()).not.toContain('صبح بخیر')
+    expect(wrapper.text()).not.toContain('حساب فعال')
+    expect(wrapper.text()).not.toContain('آماده انجام عملیات روزانه')
+    expect(wrapper.text()).not.toContain('معاملات امروز')
+    expect(wrapper.text()).not.toContain('لیست همکاران')
+    expect(wrapper.text()).not.toContain('کالاهای مجاز برای معامله')
+    expect(wrapper.text()).not.toContain('اتصال تلگرام')
+    expect(wrapper.find('.logout-btn').exists()).toBe(false)
+    expect(wrapper.getComponent(PWAInstallOverlay).props('eligible')).toBe(true)
+
+    const marketHero = wrapper.get('.hero-btn')
+    expect(marketHero.element.closest('[data-ui-system="v2"]')).toBeNull()
+
+    await wrapper.get('.notif-btn').trigger('click')
+    await wrapper.get('.user-info-center').trigger('click')
+    await marketHero.trigger('click')
+
+    expect(dashboardViewMocks.routerPushMock).toHaveBeenNthCalledWith(1, '/account/notifications')
+    expect(dashboardViewMocks.routerPushMock).toHaveBeenNthCalledWith(2, '/profile')
+    expect(dashboardViewMocks.routerPushMock).toHaveBeenNthCalledWith(3, '/market')
+  })
+
+  it('does not turn read notification history into an unread indicator', async () => {
+    dashboardViewMocks.notificationStore.appNotifications = [
+      { id: 1, is_read: true },
+      { id: 2, is_read: true },
+    ]
+    mockIdentity({
+      id: 19,
+      full_name: 'کاربر بدون اعلان تازه',
+      account_name: 'read19',
+      account_status: 'active',
+      global_lock_grace_expires_at: null,
+      global_web_locked_at: null,
+      trading_restricted_until: null,
+    })
+
+    const wrapper = await mountView()
+
+    expect(wrapper.find('.notif-dot').exists()).toBe(false)
+    expect(wrapper.get('.notif-btn').attributes('aria-label')).toBe('اعلان‌ها')
+  })
+
+  it('shows durable unread attention from the server count before history is opened', async () => {
+    dashboardViewMocks.notificationStore.appUnreadCount = 4
+    mockIdentity({
+      id: 20,
+      full_name: 'کاربر دارای اعلان',
+      account_name: 'unread20',
+      account_status: 'active',
+      global_lock_grace_expires_at: null,
+      global_web_locked_at: null,
+      trading_restricted_until: null,
+    })
+
+    const wrapper = await mountView()
+
+    expect(wrapper.findAll('.notif-dot')).toHaveLength(1)
+    expect(wrapper.get('.notif-btn').attributes('aria-label')).toBe('اعلان‌های خوانده‌نشده')
+    expect(wrapper.text()).not.toContain('۴ اعلان')
+  })
+
+  it('makes PWA eligibility depend on healthy Home identity, not a removed activity request', async () => {
+    let resolveIdentity!: (value: ReturnType<typeof makeJsonResponse>) => void
+    dashboardViewMocks.apiFetchMock.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveIdentity = resolve
+        }),
+    )
 
     const wrapper = mount(DashboardView)
     await flushPromises()
 
-    expect(wrapper.getComponent(PWAInstallOverlay).props('eligible')).toBe(false)
+    expect(wrapper.findComponent(PWAInstallOverlay).exists()).toBe(false)
 
-    resolveTrades(makeJsonResponse([]))
+    resolveIdentity(
+      makeJsonResponse({
+        id: 91,
+        role: 'عادی',
+        is_accountant: false,
+        is_customer: false,
+        full_name: 'کاربر سالم',
+        account_name: 'healthy91',
+        account_status: 'active',
+        global_lock_grace_expires_at: null,
+        global_web_locked_at: null,
+        trading_restricted_until: null,
+      }),
+    )
     await flushPromises()
 
+    expect(requestedUrls()).toEqual(['/api/auth/me'])
     expect(wrapper.getComponent(PWAInstallOverlay).props('eligible')).toBe(true)
   })
 
-  it('keeps the PWA prompt ineligible when the initial Home activity load fails', async () => {
-    dashboardViewMocks.apiFetchMock.mockImplementation((url: string) => {
-      if (url === '/api/auth/me') {
-        return Promise.resolve(
-          makeJsonResponse({
-            id: 92,
-            full_name: 'کاربر خطا',
-            account_name: 'failed92',
-            account_status: 'active',
-            global_lock_grace_expires_at: null,
-            global_web_locked_at: null,
-            trading_restricted_until: null,
-          }),
-        )
-      }
-      if (url.startsWith('/api/trades/my?'))
-        return Promise.reject(new Error('activity unavailable'))
-      return Promise.resolve(makeJsonResponse([]))
+  it('leaves shared reconnect feedback to App while keeping the Home PWA ineligible', async () => {
+    dashboardViewMocks.isAppConnecting.value = true
+    mockIdentity({
+      id: 93,
+      full_name: 'کاربر اتصال',
+      account_name: 'connecting93',
+      account_status: 'active',
+      global_lock_grace_expires_at: null,
+      global_web_locked_at: null,
+      trading_restricted_until: null,
     })
 
     const wrapper = await mountView()
 
     expect(wrapper.getComponent(PWAInstallOverlay).props('eligible')).toBe(false)
-    expect(wrapper.find('.today-trades-inline-status--error').exists()).toBe(false)
-    expect(wrapper.get('.ui-empty-state--danger').text()).toContain(
-      'دریافت معاملات امروز انجام نشد',
-    )
+    expect(wrapper.find('.dashboard-connectivity-notice').exists()).toBe(false)
+    expect(requestedUrls()).toEqual(['/api/auth/me'])
   })
 
-  it('keeps the PWA prompt hidden while the shared connection is recovering', async () => {
+  it('does not duplicate the global reconnect banner when retained Home identity is stale', async () => {
     dashboardViewMocks.isAppConnecting.value = true
-    mockDashboardApi({
-      user: {
-        id: 93,
-        full_name: 'کاربر اتصال',
-        account_name: 'connecting93',
-        account_status: 'active',
-        global_lock_grace_expires_at: null,
-        global_web_locked_at: null,
-        trading_restricted_until: null,
-      },
-      trades: [],
+    cacheCurrentUserSummary({
+      id: 94,
+      role: 'عادی',
+      full_name: 'کاربر ذخیره‌شده',
+      account_name: 'cached94',
+      account_status: 'active',
+      is_accountant: false,
+      is_customer: false,
+      cached_at: '2026-08-09T12:00:00Z',
+    })
+    dashboardViewMocks.apiFetchMock.mockRejectedValueOnce(new Error('offline'))
+
+    const wrapper = await mountView()
+
+    expect(wrapper.find('.dashboard-connectivity-notice').exists()).toBe(false)
+    expect(wrapper.getComponent(PWAInstallOverlay).props('eligible')).toBe(false)
+  })
+
+  it('shows one actionable inactive warning, removes dead Market entry, and routes follow-up to Account', async () => {
+    mockIdentity({
+      id: 13,
+      full_name: 'کاربر غیرفعال',
+      account_name: 'inactive13',
+      account_status: 'inactive',
+      global_lock_grace_expires_at: '2026-05-20T12:00:00Z',
+      global_web_locked_at: null,
+      trading_restricted_until: '2026-05-20T12:00:00Z',
     })
 
     const wrapper = await mountView()
-    expect(wrapper.getComponent(PWAInstallOverlay).props('eligible')).toBe(false)
 
-    dashboardViewMocks.isAppConnecting.value = false
-    await wrapper.get('.today-trades-refresh').trigger('click')
-    await flushPromises()
+    expect(wrapper.findAll('.dashboard-alert-card')).toHaveLength(1)
+    expect(wrapper.get('.dashboard-alert-card').text()).toContain('حساب کاربری غیرفعال شده است')
+    expect(wrapper.text()).not.toContain('معاملات موقتاً محدود است')
+    expect(wrapper.get('.dashboard-account-follow-up').text()).toBe('پیگیری در حساب')
+    expect(wrapper.find('.hero-btn').exists()).toBe(false)
+    expect(wrapper.getComponent(PWAInstallOverlay).props('eligible')).toBe(false)
+    expect(dashboardViewMocks.routerPushMock).not.toHaveBeenCalled()
+
+    await wrapper.get('.dashboard-account-follow-up').trigger('click')
+    expect(dashboardViewMocks.routerPushMock).toHaveBeenCalledWith({ name: 'account' })
+  })
+
+  it('uses the stronger inactive copy when the account is already globally locked', async () => {
+    mockIdentity({
+      id: 16,
+      full_name: 'کاربر قفل‌شده',
+      account_name: 'locked16',
+      account_status: 'inactive',
+      global_lock_grace_expires_at: '2026-05-16T12:00:00Z',
+      global_web_locked_at: '2026-05-17T12:00:00Z',
+      trading_restricted_until: null,
+    })
+
+    const wrapper = await mountView()
+
+    expect(wrapper.get('.dashboard-alert-card').text()).toContain('حساب کاربری قفل شده است')
+    expect(wrapper.get('.dashboard-alert-card').text()).toContain('نشست‌های وب و پیام‌رسان')
+    expect(wrapper.getComponent(PWAInstallOverlay).props('eligible')).toBe(false)
+  })
+
+  it('shows one deadline-based restricted warning without inventing a second action', async () => {
+    mockIdentity({
+      id: 14,
+      full_name: 'کاربر محدود',
+      account_name: 'limited14',
+      account_status: 'active',
+      global_lock_grace_expires_at: null,
+      global_web_locked_at: null,
+      trading_restricted_until: '2026-05-20T12:00:00Z',
+    })
+
+    const wrapper = await mountView()
+
+    expect(wrapper.findAll('.dashboard-alert-card')).toHaveLength(1)
+    expect(wrapper.get('.dashboard-alert-card').text()).toContain('معاملات موقتاً محدود است')
+    expect(wrapper.get('.dashboard-alert-card').text()).toContain('محدود شده است')
+    expect(wrapper.find('.dashboard-account-follow-up').exists()).toBe(false)
+    expect(wrapper.get('.hero-btn').attributes('disabled')).toBeUndefined()
+    expect(wrapper.getComponent(PWAInstallOverlay).props('eligible')).toBe(false)
+  })
+
+  it('keeps accountant Home quiet without dead Market or owner-customer destinations', async () => {
+    mockIdentity({
+      id: 18,
+      full_name: 'حسابدار امید',
+      account_name: 'accountant18',
+      account_status: 'active',
+      is_accountant: true,
+      global_lock_grace_expires_at: null,
+      global_web_locked_at: null,
+      trading_restricted_until: null,
+    })
+
+    const wrapper = await mountView()
+
+    expect(wrapper.find('.hero-btn').exists()).toBe(false)
+    expect(wrapper.find('.accountant-customers-action').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('مشتریان')
+    expect(wrapper.text()).not.toContain('مشاهده محدود بازار')
+    expect(requestedUrls()).toEqual(['/api/auth/me'])
     expect(wrapper.getComponent(PWAInstallOverlay).props('eligible')).toBe(true)
-
-    dashboardViewMocks.isAppConnecting.value = true
-    await wrapper.get('.today-trades-refresh').trigger('click')
-    await flushPromises()
-    expect(wrapper.getComponent(PWAInstallOverlay).props('eligible')).toBe(false)
-  })
-
-  it('shows the Telegram connect panel only before linking and opens the generated link', async () => {
-    mockDashboardApi({
-      user: {
-        id: 41,
-        full_name: 'کاربر تلگرام',
-        account_name: 'telegram41',
-        account_status: 'active',
-        can_connect_telegram: true,
-        telegram_linked: false,
-        global_lock_grace_expires_at: null,
-        global_web_locked_at: null,
-        trading_restricted_until: null,
-      },
-    })
-    dashboardViewMocks.requestTelegramLinkMock.mockResolvedValue({
-      telegram_linked: false,
-      can_connect_telegram: true,
-      telegram_url: 'https://t.me/example_bot?start=link_token',
-    })
-
-    const wrapper = await mountView()
-
-    expect(wrapper.get('.telegram-connect-section').text()).toContain(
-      'برای استفاده از امکانات اپ در بستر تلگرام ضربه بزنید!',
-    )
-
-    await wrapper.get('.telegram-connect-panel').trigger('click')
-    await flushPromises()
-
-    expect(dashboardViewMocks.requestTelegramLinkMock).toHaveBeenCalledTimes(1)
-    expect(dashboardViewMocks.openTelegramLinkMock).toHaveBeenCalledWith(
-      'https://t.me/example_bot?start=link_token',
-    )
-
-    wrapper.unmount()
-
-    mockDashboardApi({
-      user: {
-        id: 42,
-        full_name: 'کاربر متصل',
-        account_name: 'telegram42',
-        account_status: 'active',
-        can_connect_telegram: true,
-        telegram_linked: true,
-        global_lock_grace_expires_at: null,
-        global_web_locked_at: null,
-        trading_restricted_until: null,
-      },
-    })
-
-    const connectedWrapper = await mountView()
-    expect(connectedWrapper.find('.telegram-connect-section').exists()).toBe(false)
-  })
-
-  it('loads the current user, shows the unread notification dot, and routes the top-bar actions', async () => {
-    dashboardViewMocks.notificationStore.appNotifications = [{ id: 1 }]
-    mockDashboardApi({
-      user: {
-        id: 12,
-        full_name: 'رضا محمدی',
-        account_name: 'reza12',
-        account_status: 'active',
-        global_lock_grace_expires_at: null,
-        global_web_locked_at: null,
-        trading_restricted_until: null,
-      },
-      trades: [
-        {
-          id: 101,
-          trade_type: 'buy',
-          settlement_type: 'tomorrow',
-          offer_user_id: 44,
-          responder_user_id: 12,
-          counterparty_name: 'حسین رضایی',
-          commodity_name: 'سکه',
-          quantity: 3,
-          price: 123000,
-        },
-        {
-          id: 102,
-          trade_type: 'sell',
-          offer_user_id: 77,
-          responder_user_id: 88,
-          counterparty_name: 'نباید دیده شود',
-          commodity_name: 'امام',
-          quantity: 40,
-          price: 170000,
-        },
-      ],
-      commodities: [
-        {
-          id: 1,
-          name: 'سکه',
-          aliases: [{ alias: 'امامی' }, { alias: 'طرح جدید' }],
-        },
-        {
-          id: 2,
-          name: 'طلای آب‌شده',
-          aliases: [],
-        },
-      ],
-      projectUsers: [
-        {
-          id: 31,
-          account_name: 'ali31',
-          mobile_number: '09120000031',
-          created_at: '2026-05-12T07:30:00Z',
-        },
-        {
-          id: 32,
-          account_name: 'zahra32',
-          mobile_number: '09120000032',
-          created_at: '2026-04-20T07:30:00Z',
-        },
-      ],
-    })
-
-    const wrapper = await mountView()
-
-    expect(dashboardViewMocks.apiFetchMock).toHaveBeenCalledWith(
-      '/api/auth/me',
-      expect.objectContaining({
-        retryNetwork: false,
-        signal: expect.any(AbortSignal),
-        trackConnectionState: false,
-      }),
-    )
-    expect(dashboardViewMocks.apiFetchMock).toHaveBeenCalledWith(
-      '/api/trades/my?from_date=2026-05-14&to_date=2026-05-14&limit=20',
-      expect.objectContaining({
-        retryNetwork: false,
-        signal: expect.any(AbortSignal),
-        trackConnectionState: false,
-      }),
-    )
-    expect(dashboardViewMocks.apiFetchMock).not.toHaveBeenCalledWith('/api/commodities/')
-    expect(wrapper.text()).toContain('صبح بخیر')
-    expect(wrapper.text()).toContain('رضا محمدی')
-    expect(wrapper.get('.avatar').text()).toContain('ر')
-    expect(wrapper.get('.user-info-center').element.tagName).toBe('BUTTON')
-    expect(wrapper.get('.user-info-center').attributes('aria-label')).toBe(
-      'مشاهده پروفایل رضا محمدی',
-    )
-    expect(wrapper.find('.notif-dot').exists()).toBe(true)
-    expect(wrapper.get('.today-trades-card').text()).toContain('طرف مقابل معامله')
-    expect(wrapper.get('.today-trades-card').text()).toContain('حسین رضایی')
-    expect(wrapper.get('.today-trades-card').text()).toContain('خرید')
-    expect(wrapper.get('.today-trades-card').text()).toContain('فردایی')
-    expect(
-      wrapper
-        .get('.today-trades-card .ui-settlement-badge--tomorrow')
-        .attributes('data-settlement-type'),
-    ).toBe('tomorrow')
-    expect(wrapper.get('.today-trades-card').text()).toContain('سکه')
-    expect(wrapper.get('.today-trades-card').text()).not.toContain('نباید دیده شود')
-    expect(wrapper.find('.dashboard-shortcuts').exists()).toBe(false)
-    expect(wrapper.findAll('.dashboard-action-card')).toHaveLength(0)
-    expect(wrapper.get('.dashboard-header-summary').text()).toContain('حساب فعال')
-    expect(wrapper.get('.dashboard-header-summary').text()).toContain('آماده انجام عملیات روزانه')
-    expect(wrapper.get('.dashboard-header-summary').text()).toContain('بازار باز')
-    expect(wrapper.get('.dashboard-header-summary').text()).toContain('کار امروز ۱ معامله')
-    expect(wrapper.get('.dashboard-header-summary').text()).toContain('۱ اعلان')
-    expect(wrapper.get('.dashboard-project-users-card').text()).toContain('لیست همکاران')
-    expect(wrapper.get('.dashboard-project-users-card').text()).toContain('باز کنید')
-    expect(wrapper.get('.dashboard-commodities-card').text()).toContain('کالاهای مجاز برای معامله')
-    expect(wrapper.get('.dashboard-commodities-card').text()).toContain('باز کنید')
-    expect(wrapper.get('.dashboard-commodities-card').text()).not.toContain('امامی')
-
-    await wrapper.get('.dashboard-accordion-toggle--project-users').trigger('click')
-    await flushPromises()
-    expect(dashboardViewMocks.apiFetchMock).toHaveBeenCalledWith(
-      '/api/users-public/12/project-users?limit=25&offset=0',
-      expect.objectContaining({ retryNetwork: false, trackConnectionState: false }),
-    )
-    expect(wrapper.get('.dashboard-project-users-card').text()).toContain('ali31')
-    expect(wrapper.get('.dashboard-project-users-card').text()).toContain('09120000031')
-    const projectUserCards = wrapper.findAll('.dashboard-project-user-card')
-    expect(projectUserCards[0]!.text()).toContain('جدید')
-    expect(projectUserCards[1]!.text()).not.toContain('جدید')
-
-    await wrapper.get('.dashboard-accordion-toggle--commodities').trigger('click')
-    await flushPromises()
-    expect(dashboardViewMocks.apiFetchMock).toHaveBeenCalledWith('/api/commodities/')
-    expect(wrapper.get('.dashboard-commodities-card').text()).toContain('سکه')
-    expect(wrapper.get('.dashboard-commodities-card').text()).toContain('امامی')
-    expect(wrapper.get('.dashboard-commodities-card').text()).toContain('طرح جدید')
-    expect(wrapper.get('.dashboard-commodities-card').text()).toContain('طلای آب‌شده')
-    expect(wrapper.get('.dashboard-commodities-card').text()).toContain(
-      'برای این کالا هنوز نام مستعار جداگانه‌ای ثبت نشده است',
-    )
 
     await wrapper.get('.notif-btn').trigger('click')
     await wrapper.get('.user-info-center').trigger('click')
-    await wrapper.get('.hero-btn').trigger('click')
-    await wrapper.findAll('.dashboard-project-user-card')[0]!.trigger('click')
 
-    expect(dashboardViewMocks.routerPushMock).toHaveBeenNthCalledWith(1, '/notifications')
+    expect(dashboardViewMocks.routerPushMock).toHaveBeenNthCalledWith(1, '/account/notifications')
     expect(dashboardViewMocks.routerPushMock).toHaveBeenNthCalledWith(2, '/profile')
-    expect(dashboardViewMocks.routerPushMock).toHaveBeenNthCalledWith(3, '/market')
-    expect(dashboardViewMocks.routerPushMock).toHaveBeenNthCalledWith(4, {
-      name: 'public-profile',
-      params: { id: 31 },
-      query: { account_name: 'ali31' },
+    expect(dashboardViewMocks.routerPushMock).not.toHaveBeenCalledWith({
+      name: 'operations-customers',
     })
   })
 
-  it('keeps the last authoritative trade rows when a bounded refresh fails', async () => {
-    let tradeRequests = 0
-    dashboardViewMocks.apiFetchMock.mockImplementation(async (url: string) => {
-      if (url === '/api/auth/me') {
-        return makeJsonResponse({
-          id: 33,
-          full_name: 'کاربر معاملات',
-          account_name: 'trades33',
-          account_status: 'active',
-          global_lock_grace_expires_at: null,
-          global_web_locked_at: null,
-          trading_restricted_until: null,
-        })
-      }
-      if (url.startsWith('/api/trades/my?')) {
-        tradeRequests += 1
-        if (tradeRequests === 1) {
-          return makeJsonResponse([
-            {
-              id: 3301,
-              trade_type: 'buy',
-              offer_user_id: 19,
-              responder_user_id: 33,
-              counterparty_name: 'طرف معتبر قبلی',
-              commodity_name: 'سکه',
-              quantity: 2,
-              price: 100,
-            },
-          ])
-        }
-        throw new Error('private refresh failure')
-      }
-      return makeJsonResponse([])
+  it.each([
+    ['owner', 'owner'],
+    ['admin', 'admin'],
+  ])('keeps the protected Market hero for an active %s identity', async (_label, role) => {
+    mockIdentity({
+      id: role === 'owner' ? 31 : 32,
+      role,
+      full_name: role === 'owner' ? 'مالک فعال' : 'مدیر فعال',
+      account_name: `${role}31`,
+      account_status: 'active',
+      is_accountant: false,
+      global_lock_grace_expires_at: null,
+      global_web_locked_at: null,
+      trading_restricted_until: null,
     })
 
     const wrapper = await mountView()
-    expect(wrapper.get('.today-trades-card').text()).toContain('طرف معتبر قبلی')
 
-    await wrapper.get('.today-trades-refresh').trigger('click')
-    await flushPromises()
-
-    expect(wrapper.get('.today-trades-card').text()).toContain('طرف معتبر قبلی')
-    expect(wrapper.get('.today-trades-inline-status--error').text()).toContain(
-      'اطلاعات قبلی حفظ شده است',
-    )
-    expect(wrapper.text()).not.toContain('private refresh failure')
-    expect(tradeRequests).toBe(2)
+    expect(wrapper.findAll('.hero-btn')).toHaveLength(1)
+    expect(wrapper.get('.hero-btn').text()).toContain('ورود به بازار')
   })
 
-  it('keeps coworker rows and the current query when a bounded search refresh fails', async () => {
-    dashboardViewMocks.apiFetchMock.mockImplementation(async (url: string) => {
-      if (url === '/api/auth/me') {
-        return makeJsonResponse({
-          id: 34,
-          full_name: 'کاربر همکاران',
-          account_name: 'coworkers34',
-          account_status: 'active',
-          global_lock_grace_expires_at: null,
-          global_web_locked_at: null,
-          trading_restricted_until: null,
-        })
-      }
-      if (url.startsWith('/api/trades/my?')) return makeJsonResponse([])
-      if (url.includes('/project-users?') && url.includes('q=new-query')) {
-        throw new Error('private project-user failure')
-      }
-      if (url.includes('/project-users?')) {
-        return makeJsonResponse([
-          { id: 3401, account_name: 'همکار معتبر قبلی', mobile_number: '09120003401' },
-        ])
-      }
-      return makeJsonResponse([])
-    })
-
-    const wrapper = await mountView()
-    await wrapper.get('.dashboard-accordion-toggle--project-users').trigger('click')
-    await flushPromises()
-    expect(wrapper.get('.dashboard-project-users-card').text()).toContain('همکار معتبر قبلی')
-
-    const searchInput = wrapper.get('.dashboard-project-users-search input')
-    await searchInput.setValue('new-query')
-    await wrapper.get('.dashboard-project-users-search').trigger('submit')
-    await flushPromises()
-
-    expect(wrapper.get('.dashboard-project-users-card').text()).toContain('همکار معتبر قبلی')
-    expect(wrapper.get('.dashboard-project-users-inline-status--error').text()).toContain(
-      'فهرست قبلی حفظ شده است',
-    )
-    expect((searchInput.element as HTMLInputElement).value).toBe('new-query')
-    expect(wrapper.text()).not.toContain('private project-user failure')
-  })
-
-  it('shows the inactive warning and blocks market navigation for inactive accounts', async () => {
-    dashboardViewMocks.apiFetchMock.mockResolvedValue(
-      makeJsonResponse({
-        id: 13,
-        full_name: 'کاربر مسدود',
-        account_name: 'blocked13',
-        account_status: 'inactive',
-        global_lock_grace_expires_at: '2026-05-20T12:00:00Z',
-        global_web_locked_at: null,
-        trading_restricted_until: '2026-05-20T12:00:00Z',
-      }),
-    )
-
-    const wrapper = await mountView()
-
-    expect(wrapper.text()).toContain('حساب کاربری غیرفعال شده است')
-    expect(wrapper.text()).toContain('اگر حساب تا')
-    expect(wrapper.text()).not.toContain('معاملات محدود شده')
-
-    await wrapper.get('.hero-btn').trigger('click')
-    expect(dashboardViewMocks.routerPushMock).not.toHaveBeenCalled()
-  })
-
-  it('styles the market entry for closed hours while keeping the market page reachable', async () => {
+  it('keeps the protected closed-market behavior reachable for active users', async () => {
     applyMarketRuntimePatch({
       is_open: false,
       active_web_notice_visible: true,
@@ -571,17 +531,15 @@ describe('DashboardView.vue', () => {
       last_transition_at: '2026-06-12T10:00:00Z',
       next_transition_at: '2026-06-13T06:00:00Z',
     })
-    dashboardViewMocks.apiFetchMock.mockResolvedValue(
-      makeJsonResponse({
-        id: 17,
-        full_name: 'کاربر بازار',
-        account_name: 'market17',
-        account_status: 'active',
-        global_lock_grace_expires_at: null,
-        global_web_locked_at: null,
-        trading_restricted_until: null,
-      }),
-    )
+    mockIdentity({
+      id: 17,
+      full_name: 'کاربر بازار',
+      account_name: 'market17',
+      account_status: 'active',
+      global_lock_grace_expires_at: null,
+      global_web_locked_at: null,
+      trading_restricted_until: null,
+    })
 
     const wrapper = await mountView()
     const marketButton = wrapper.get('.hero-btn')
@@ -594,208 +552,37 @@ describe('DashboardView.vue', () => {
     expect(dashboardViewMocks.routerPushMock).toHaveBeenCalledWith('/market')
   })
 
-  it('hides the market entry button for accountants', async () => {
-    mockDashboardApi({
-      user: {
-        id: 18,
-        full_name: 'حسابدار وب',
-        account_name: 'accountant18',
-        account_status: 'active',
-        is_accountant: true,
-        accountant_owner_user_id: 44,
-        global_lock_grace_expires_at: null,
-        global_web_locked_at: null,
-        trading_restricted_until: null,
-      },
-      trades: [
-        {
-          id: 181,
-          trade_type: 'sell',
-          offer_user_id: 19,
-          responder_user_id: 44,
-          counterparty_name: 'طرف مالک',
-          commodity_name: 'طلای آب‌شده',
-          quantity: 7,
-          price: 456000,
-        },
-      ],
-      projectUsers: [{ id: 20, account_name: 'owner-peer', mobile_number: '09120000020' }],
-    })
+  it('contains no removed Home API, component, content, or CSS implementation', () => {
+    const source = readFileSync(resolve(process.cwd(), 'src/views/DashboardView.vue'), 'utf8')
+    const styleStart = source.indexOf('<style scoped>')
+    const runtimeSource = source.slice(0, styleStart)
+    const styleSource = source.slice(styleStart)
 
-    const wrapper = await mountView()
-
-    expect(wrapper.find('.hero-btn').exists()).toBe(false)
-    expect(wrapper.find('.logout-btn').exists()).toBe(false)
-    expect(wrapper.find('.dashboard-commodities-card').exists()).toBe(false)
-    expect(wrapper.find('.dashboard-project-users-card').exists()).toBe(true)
-    expect(wrapper.get('.today-trades-card').text()).toContain('طرف مالک')
-    expect(wrapper.get('.today-trades-card').text()).toContain('فروش')
-
-    await wrapper.get('.dashboard-accordion-toggle--project-users').trigger('click')
-    await flushPromises()
-
-    expect(dashboardViewMocks.apiFetchMock).toHaveBeenCalledWith(
-      '/api/users-public/44/project-users?limit=25&offset=0',
-      expect.objectContaining({ retryNetwork: false, trackConnectionState: false }),
+    expect(runtimeSource).not.toMatch(/\/api\/trades\/my|\/api\/commodities|project-users/)
+    expect(runtimeSource).not.toMatch(/telegramLink|TelegramConnectPanel/)
+    expect(runtimeSource).not.toMatch(
+      /معاملات امروز|لیست همکاران|کالاهای مجاز|اتصال تلگرام|operations-customers/,
     )
-    expect(wrapper.get('.dashboard-project-users-card').text()).toContain('owner-peer')
-    expect(dashboardViewMocks.routerPushMock).not.toHaveBeenCalledWith('/market')
-  })
-
-  it('hides the commodities section for tier-2 customers', async () => {
-    mockDashboardApi({
-      user: {
-        id: 22,
-        full_name: 'customer_09120000022',
-        account_name: 'customer_09120000022',
-        customer_management_name: 'محسن',
-        customer_tier: 'tier2',
-        is_customer: true,
-        account_status: 'active',
-        global_lock_grace_expires_at: null,
-        global_web_locked_at: null,
-        trading_restricted_until: null,
-      },
-      trades: [],
-      commodities: [{ id: 1, name: 'سکه', aliases: [{ alias: 'امامی' }] }],
-    })
-
-    const wrapper = await mountView()
-
-    expect(wrapper.get('.user-name').text()).toBe('محسن')
-    expect(wrapper.get('.avatar').text()).toContain('م')
-    expect(wrapper.get('.user-info-center').attributes('aria-label')).toBe('مشاهده پروفایل محسن')
-    expect(wrapper.find('.dashboard-commodities-card').exists()).toBe(false)
-    expect(wrapper.find('.dashboard-project-users-card').exists()).toBe(false)
-    expect(dashboardViewMocks.apiFetchMock).not.toHaveBeenCalledWith('/api/commodities/')
-  })
-
-  it('shows the stronger lock copy when the account is already globally locked', async () => {
-    dashboardViewMocks.apiFetchMock.mockResolvedValue(
-      makeJsonResponse({
-        id: 16,
-        full_name: 'کاربر قفل‌شده',
-        account_name: 'locked16',
-        account_status: 'inactive',
-        global_lock_grace_expires_at: '2026-05-16T12:00:00Z',
-        global_web_locked_at: '2026-05-17T12:00:00Z',
-        trading_restricted_until: null,
-      }),
+    expect(styleSource).not.toMatch(
+      /\.today-trades-card|\.dashboard-project-users|\.dashboard-commodit|\.telegram-connect/,
     )
-
-    const wrapper = await mountView()
-
-    expect(wrapper.text()).toContain('حساب کاربری قفل شده است')
-    expect(wrapper.text()).toContain('نشست‌های وب و پیام‌رسان این حساب')
-
-    await wrapper.get('.hero-btn').trigger('click')
-    expect(dashboardViewMocks.routerPushMock).not.toHaveBeenCalled()
+    expect(styleSource.match(/\.today-trades-refresh/g)).toHaveLength(1)
   })
 
-  it('shows the restricted trading warning with a formatted deadline when the user is temporarily restricted', async () => {
-    dashboardViewMocks.apiFetchMock.mockResolvedValue(
-      makeJsonResponse({
-        id: 14,
-        full_name: 'کاربر محدود',
-        account_name: 'limited14',
-        account_status: 'active',
-        global_lock_grace_expires_at: null,
-        global_web_locked_at: null,
-        trading_restricted_until: '2026-05-20T12:00:00Z',
-      }),
-    )
+  it('retains the byte-locked six-section Market interior contract', () => {
+    const source = readFileSync(resolve(process.cwd(), 'src/views/DashboardView.vue'), 'utf8')
+    const evidence = dashboardMarketRegionEvidence(source)
 
-    const wrapper = await mountView()
-
-    expect(wrapper.text()).toContain('معاملات محدود شده')
-    expect(wrapper.text()).toContain('محدود شده است')
-  })
-
-  it('logs out by terminating the current session before forcing a local logout', async () => {
-    mockDashboardApi({
-      user: {
-        id: 15,
-        full_name: 'کاربر خروج',
-        account_name: 'logout15',
-        account_status: 'active',
-        global_lock_grace_expires_at: null,
-        global_web_locked_at: null,
-        trading_restricted_until: null,
-      },
-      activeSessions: [
-        { id: 'session-a', is_current: false },
-        { id: 'session-b', is_current: true },
-      ],
-    })
-
-    const wrapper = await mountView()
-    await wrapper.get('.logout-btn').trigger('click')
-    await flushPromises()
-
-    expect(dashboardViewMocks.apiFetchMock).toHaveBeenCalledWith(
-      '/api/sessions/active',
-      expect.objectContaining({ retryNetwork: false, trackConnectionState: false }),
-    )
-    expect(dashboardViewMocks.apiFetchMock).toHaveBeenCalledWith(
-      '/api/sessions/session-b',
-      expect.objectContaining({
-        method: 'DELETE',
-        retryNetwork: false,
-        trackConnectionState: false,
-      }),
-    )
-    expect(dashboardViewMocks.forceLogoutMock).toHaveBeenCalledTimes(1)
-  })
-
-  it('renders the midday and evening greetings for later hours', async () => {
-    const payload = {
-      id: 21,
-      full_name: 'کاربر زمان‌بندی',
-      account_name: 'timed21',
-      account_status: 'active',
-      global_lock_grace_expires_at: null,
-      global_web_locked_at: null,
-      trading_restricted_until: null,
-    }
-
-    vi.setSystemTime(new Date(2026, 4, 14, 13, 0, 0))
-    dashboardViewMocks.apiFetchMock.mockResolvedValueOnce(makeJsonResponse(payload))
-    const middayWrapper = await mountView()
-    expect(middayWrapper.text()).toContain('ظهر بخیر')
-    middayWrapper.unmount()
-
-    vi.setSystemTime(new Date(2026, 4, 14, 18, 0, 0))
-    dashboardViewMocks.apiFetchMock.mockResolvedValueOnce(makeJsonResponse(payload))
-    const eveningWrapper = await mountView()
-    expect(eveningWrapper.text()).toContain('عصر بخیر')
-    eveningWrapper.unmount()
-  })
-
-  it('forces a local logout even when session lookup fails', async () => {
-    mockDashboardApi({
-      user: {
-        id: 95,
-        full_name: 'کاربر خروج اجباری',
-        account_name: 'logout95',
-        role: 'عادی',
-        account_status: 'active',
-        global_lock_grace_expires_at: null,
-        global_web_locked_at: null,
-        trading_restricted_until: null,
-      },
-      failSessionLookup: true,
-    })
-
-    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
-    const wrapper = await mountView()
-
-    await wrapper.get('.logout-btn').trigger('click')
-    await flushPromises()
-
-    expect(consoleErrorSpy).toHaveBeenCalled()
-    expect(dashboardViewMocks.forceLogoutMock).toHaveBeenCalledTimes(1)
-
-    consoleErrorSpy.mockRestore()
-    wrapper.unmount()
+    expect(evidence.sections.map(({ id }: { id: string }) => id)).toEqual([
+      'market-computed',
+      'open-market',
+      'template-hero',
+      'hero-disabled-css',
+      'hero-focus-css',
+      'hero-css',
+    ])
+    expect(evidence.bytes).toBe(4553)
+    expect(evidence.sha256).toBe(DASHBOARD_MARKET_REGION_SHA256)
+    expect(evidence.sha256).toBe('f25c01dac38db208517047ffc0f2458e2c89868e988a6d7f68749221db106860')
   })
 })

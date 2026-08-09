@@ -96,7 +96,7 @@ describe('UI route contract', () => {
     })
   })
 
-  it('locks Stage 3 activation to 5 route, 21 section, and 4 off routes', () => {
+  it('locks Stage 4 activation to 10 route, 16 section, and 4 off routes', () => {
     expect(
       Object.fromEntries(
         Object.values(UI_V2_SCOPE).map((scope) => [
@@ -104,13 +104,24 @@ describe('UI route contract', () => {
           uiRouteContract.filter(({ v2Scope }) => v2Scope === scope).length,
         ]),
       ),
-    ).toEqual({ off: 4, section: 21, route: 5 })
+    ).toEqual({ off: 4, section: 16, route: 10 })
 
     expect(
       uiRouteContract
         .filter(({ v2Scope }) => v2Scope === UI_V2_SCOPE.ROUTE)
         .map(({ path }) => path),
-    ).toEqual(['/setup-password', '/login', '/i/:code', '/register', '/:pathMatch(.*)*'])
+    ).toEqual([
+      '/setup-password',
+      '/login',
+      '/operations',
+      '/account',
+      '/account/security',
+      '/account/storage',
+      '/account/notifications',
+      '/i/:code',
+      '/register',
+      '/:pathMatch(.*)*',
+    ])
 
     expect(
       uiRouteContract.filter(({ v2Scope }) => v2Scope === UI_V2_SCOPE.OFF).map(({ path }) => path),
@@ -148,8 +159,8 @@ describe('UI route contract', () => {
 
   it('keeps the machine-readable scope manifest in exact parity', () => {
     expect(scopeManifest).toMatchObject({
-      schemaVersion: 2,
-      stage: 3,
+      schemaVersion: 3,
+      stage: 4,
       mode: 'opt-in',
       scopeSelector: '[data-ui-system="v2"]',
       tokenPrefix: '--ui-v2-',

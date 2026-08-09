@@ -1,6 +1,6 @@
 {
-  "schemaVersion": 2,
-  "stage": 3,
+  "schemaVersion": 3,
+  "stage": 4,
   "mode": "opt-in",
   "scopeSelector": "[data-ui-system=\"v2\"]",
   "tokenPrefix": "--ui-v2-",
@@ -50,7 +50,7 @@
       "shellClass": "standard-authenticated",
       "protection": "none",
       "protectedInteriors": [],
-      "v2Scope": "section"
+      "v2Scope": "route"
     },
     {
       "path": "/operations/customers",
@@ -95,7 +95,7 @@
       "shellClass": "standard-authenticated",
       "protection": "none",
       "protectedInteriors": [],
-      "v2Scope": "section"
+      "v2Scope": "route"
     },
     {
       "path": "/account/security",
@@ -104,7 +104,7 @@
       "shellClass": "standard-authenticated",
       "protection": "none",
       "protectedInteriors": [],
-      "v2Scope": "section"
+      "v2Scope": "route"
     },
     {
       "path": "/account/storage",
@@ -113,7 +113,7 @@
       "shellClass": "standard-authenticated",
       "protection": "none",
       "protectedInteriors": [],
-      "v2Scope": "section"
+      "v2Scope": "route"
     },
     {
       "path": "/account/notifications",
@@ -122,7 +122,7 @@
       "shellClass": "standard-authenticated",
       "protection": "none",
       "protectedInteriors": [],
-      "v2Scope": "section"
+      "v2Scope": "route"
     },
     {
       "path": "/chat",

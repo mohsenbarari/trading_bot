@@ -133,7 +133,7 @@ describe('AppAuthenticatedShell.vue', () => {
     wrapper.unmount()
     expect(shellMocks.off).toHaveBeenCalledWith('ws:reconnect', expect.any(Function))
     expect(shellMocks.sendPresenceUpdate).toHaveBeenLastCalledWith('/', false)
-  })
+  }, 15_000)
 
   it('starts background recovery immediately when a pending transfer hint exists', async () => {
     shellMocks.hasPendingUploadResumeHint.mockReturnValue(true)

@@ -30,7 +30,7 @@ const ROUTES: RouteCase[] = [
   { path: '/operations/accountants', label: 'accountants', authenticated: true, readyText: 'حسابداران' },
   { path: '/account', label: 'account', authenticated: true, readyText: 'پروفایل و تنظیمات' },
   { path: '/profile', label: 'profile', authenticated: true, readyText: 'اطلاعات شخصی' },
-  { path: '/notifications', label: 'notifications', authenticated: true, readyText: 'هیچ اعلانی یافت نشد' },
+  { path: '/account/notifications', label: 'notifications', authenticated: true, readyText: 'هیچ اعلانی یافت نشد' },
   { path: '/admin/users', label: 'admin-users', authenticated: true, readyText: 'مدیریت کاربران' },
   { path: '/admin/commodities', label: 'admin-commodities', authenticated: true, readyText: 'مدیریت کالاها' },
   { path: '/login', label: 'login', authenticated: false, readyText: 'ورود به بازار' },

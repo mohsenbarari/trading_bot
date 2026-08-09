@@ -2,7 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import type { Component } from 'vue'
 import { useRouter } from 'vue-router'
-import { Bell, ChevronLeft, Database, Settings, Smartphone, UserRound } from 'lucide-vue-next'
+import { Bell, ChevronLeft, Database, Smartphone, UserRound } from 'lucide-vue-next'
 import {
   AppActionCard,
   AppButton,
@@ -14,14 +14,32 @@ import {
   AppStatusBadge,
 } from '../components/ui'
 import { WorkspaceNotice } from '../components/workspace'
-import { currentUserSummary, loadCurrentUserSummary } from '../utils/currentUser'
-import { openTelegramLink, requestTelegramLink } from '../services/telegramLink'
+import {
+  currentUserSummary,
+  isAuthoritativeCurrentUserSummary,
+  loadCurrentUserSummary,
+} from '../utils/currentUser'
+import {
+  openTelegramAccountLink,
+  requestTelegramLink,
+  TELEGRAM_LINK_REQUEST_FAILED_MESSAGE,
+  TELEGRAM_LINK_UNAVAILABLE_MESSAGE,
+} from '../services/telegramLink'
 import TelegramConnectPanel from '../components/account/TelegramConnectPanel.vue'
 
 const router = useRouter()
 const telegramLinkBusy = ref(false)
 const telegramLinkError = ref<string | null>(null)
-const identityState = ref<'loading' | 'ready' | 'stale' | 'error'>('loading')
+const cachedAccountIdentity = currentUserSummary.value
+const hasCachedAccountIdentity = Boolean(
+  isAuthoritativeCurrentUserSummary(cachedAccountIdentity) &&
+    (cachedAccountIdentity.customer_management_name?.trim() ||
+      cachedAccountIdentity.full_name?.trim() ||
+      cachedAccountIdentity.account_name?.trim()),
+)
+const identityState = ref<'loading' | 'ready' | 'stale' | 'error'>(
+  hasCachedAccountIdentity ? 'stale' : 'loading',
+)
 const identityBusy = ref(false)
 
 interface AccountAction {
@@ -33,51 +51,43 @@ interface AccountAction {
 }
 
 const user = computed(() => currentUserSummary.value)
-const hasIdentity = computed(() => user.value !== null)
+const displayName = computed(
+  () =>
+    user.value?.customer_management_name?.trim() ||
+    user.value?.full_name?.trim() ||
+    user.value?.account_name?.trim() ||
+    '',
+)
+const hasIdentity = computed(
+  () => isAuthoritativeCurrentUserSummary(user.value) && Boolean(displayName.value),
+)
 const isAccountant = computed(() => currentUserSummary.value?.is_accountant === true)
-const displayName = computed(() => (
-  user.value?.customer_management_name?.trim()
-  || user.value?.full_name?.trim()
-  || user.value?.account_name?.trim()
-  || ''
-))
 const isInactiveAccount = computed(() => user.value?.account_status === 'inactive')
-const isActiveAccount = computed(() => user.value?.account_status === 'active')
-const accountStatusLabel = computed(() => {
-  if (isInactiveAccount.value) return 'غیرفعال'
-  if (isActiveAccount.value) return 'فعال'
-  return 'نامشخص'
-})
-const accountStatusTone = computed(() => {
-  if (isInactiveAccount.value) return 'danger'
-  if (isActiveAccount.value) return 'success'
-  return 'neutral'
+const accountRestriction = computed<{ label: string; tone: 'danger' | 'warning' } | null>(() => {
+  if (isInactiveAccount.value) return { label: 'حساب غیرفعال', tone: 'danger' }
+  if (user.value?.global_web_locked_at) return { label: 'دسترسی محدود', tone: 'warning' }
+  return null
 })
 const telegramConnected = computed(() => currentUserSummary.value?.telegram_linked === true)
-const showTelegramConnectPanel = computed(() => (
-  !isAccountant.value
-  && (
-    currentUserSummary.value?.can_connect_telegram === true
-    || telegramConnected.value
-  )
-))
+const showTelegramConnectPanel = computed(
+  () =>
+    !isAccountant.value &&
+    (currentUserSummary.value?.can_connect_telegram === true || telegramConnected.value),
+)
 
-const profileActions = computed<AccountAction[]>(() => hasIdentity.value ? [
-  {
-    key: 'profile',
-    title: 'پروفایل من',
-    description: 'مشاهده و ویرایش اطلاعات حساب',
-    icon: UserRound,
-    action: () => router.push({ name: 'profile' }),
-  },
-  {
-    key: 'settings',
-    title: 'تنظیمات کاربری',
-    description: isAccountant.value ? 'دسترسی‌های مجاز حسابدار و حافظه دستگاه' : 'امنیت حساب، حافظه دستگاه و خروج',
-    icon: Settings,
-    action: () => router.push({ name: 'account-storage' }),
-  },
-] : [])
+const profileActions = computed<AccountAction[]>(() =>
+  hasIdentity.value
+    ? [
+        {
+          key: 'profile',
+          title: 'پروفایل من',
+          description: 'مشاهده و ویرایش اطلاعات حساب',
+          icon: UserRound,
+          action: () => router.push({ name: 'profile' }),
+        },
+      ]
+    : [],
+)
 
 const securityActions = computed<AccountAction[]>(() => {
   if (!hasIdentity.value) return []
@@ -104,23 +114,25 @@ const securityActions = computed<AccountAction[]>(() => {
   return actions
 })
 
-const notificationActions = computed<AccountAction[]>(() => hasIdentity.value ? [
-  {
-    key: 'notifications',
-    title: 'اعلان‌ها',
-    description: 'اعلان‌های سیستمی، بازار و معاملات',
-    icon: Bell,
-    action: () => router.push({ name: 'account-notifications' }),
-  },
-] : [])
+const securitySectionDescription = computed(() =>
+  isAccountant.value
+    ? 'حافظه دستگاه و داده‌های محلی را از مسیر مشخص خود مدیریت کنید.'
+    : 'نشست‌ها، حافظه دستگاه و داده‌های محلی را از مسیر مشخص خود مدیریت کنید.',
+)
 
-const sessionsRestriction = computed(() => {
-  if (!isAccountant.value) return null
-  return {
-    title: 'مدیریت نشست برای حسابدار فعال نیست',
-    description: 'نشست‌های حسابدار توسط سرگروه مدیریت و در صورت نیاز منقضی می‌شود. این محدودیت با تنظیمات امنیتی پروژه هماهنگ است.',
-  }
-})
+const notificationActions = computed<AccountAction[]>(() =>
+  hasIdentity.value
+    ? [
+        {
+          key: 'notifications',
+          title: 'اعلان‌ها',
+          description: 'اعلان‌های سیستمی، بازار و معاملات',
+          icon: Bell,
+          action: () => router.push({ name: 'account-notifications' }),
+        },
+      ]
+    : [],
+)
 
 async function connectTelegram() {
   if (telegramLinkBusy.value || telegramConnected.value) return
@@ -128,13 +140,10 @@ async function connectTelegram() {
   telegramLinkError.value = null
   try {
     const payload = await requestTelegramLink()
-    if (payload.telegram_url) {
-      openTelegramLink(payload.telegram_url)
-      return
-    }
-    telegramLinkError.value = payload.detail || 'لینک اتصال تلگرام آماده نشد.'
-  } catch (error: any) {
-    telegramLinkError.value = error?.message || 'ساخت لینک اتصال تلگرام ناموفق بود.'
+    if (openTelegramAccountLink(payload)) return
+    telegramLinkError.value = TELEGRAM_LINK_UNAVAILABLE_MESSAGE
+  } catch {
+    telegramLinkError.value = TELEGRAM_LINK_REQUEST_FAILED_MESSAGE
   } finally {
     telegramLinkBusy.value = false
   }
@@ -143,16 +152,23 @@ async function connectTelegram() {
 async function refreshIdentity() {
   if (identityBusy.value) return
   identityBusy.value = true
-  if (!user.value) identityState.value = 'loading'
+  if (!hasIdentity.value) identityState.value = 'loading'
   try {
     const result = await loadCurrentUserSummary({ force: true })
-    if (!result.user) {
+    if (
+      !isAuthoritativeCurrentUserSummary(result.user) ||
+      !(
+        result.user.customer_management_name?.trim() ||
+        result.user.full_name?.trim() ||
+        result.user.account_name?.trim()
+      )
+    ) {
       identityState.value = 'error'
       return
     }
     identityState.value = result.state === 'stale' ? 'stale' : 'ready'
   } catch {
-    identityState.value = user.value ? 'stale' : 'error'
+    identityState.value = hasIdentity.value ? 'stale' : 'error'
   } finally {
     identityBusy.value = false
   }
@@ -162,125 +178,144 @@ onMounted(refreshIdentity)
 </script>
 
 <template>
-  <div class="ds-page account-hub-page">
+  <div class="ds-page account-hub-page ui-v2-daily-page ui-v2-account-page">
     <AppPage>
+      <h1 class="sr-only account-page-title">حساب</h1>
       <AppLoadingState
-        v-if="identityState === 'loading' && !user"
+        v-if="identityState === 'loading' && !hasIdentity"
         class="account-identity-loading"
         label="در حال دریافت اطلاعات حساب"
       />
       <AppErrorState
-        v-else-if="identityState === 'error' && !user"
+        v-else-if="identityState === 'error' && !hasIdentity"
         class="account-identity-error"
         title="حساب بارگذاری نشد"
         message="وضعیت و دسترسی‌های حساب تا پاسخ معتبر دریافت نشود نمایش داده نمی‌شود."
       >
         <template #actions>
-          <AppButton type="button" class="account-identity-retry" :loading="identityBusy" @click="refreshIdentity">تلاش دوباره</AppButton>
+          <AppButton
+            type="button"
+            class="account-identity-retry"
+            :loading="identityBusy"
+            @click="refreshIdentity"
+            >تلاش دوباره</AppButton
+          >
         </template>
       </AppErrorState>
-      <template v-else-if="user">
-      <WorkspaceNotice
-        v-if="identityState === 'stale'"
-        class="account-identity-stale"
-        tone="warning"
-        title="اطلاعات حساب به‌روز نشد"
-        message="نسخه ذخیره‌شده قبلی نمایش داده شده است."
-      >
-        <AppButton type="button" size="sm" variant="secondary" :loading="identityBusy" @click="refreshIdentity">به‌روزرسانی</AppButton>
-      </WorkspaceNotice>
-      <header class="account-compact-header" aria-label="حساب کاربری">
-        <AppIconButton type="button" class="account-return-control" label="بازگشت" size="sm" @click="router.back()">
-          <ChevronLeft :size="18" />
-        </AppIconButton>
-        <div class="account-identity">
-          <div class="account-identity-name-row">
-            <span class="account-status-dot" :class="`account-status-dot--${accountStatusTone}`" aria-hidden="true"></span>
-            <strong>{{ displayName }}</strong>
-          </div>
-          <AppStatusBadge class="account-status-badge" :tone="accountStatusTone">{{ accountStatusLabel }}</AppStatusBadge>
-        </div>
-        <div class="account-header-spacer" aria-hidden="true"></div>
-      </header>
-
-      <AppSectionCard
-        class="account-section-card"
-        title="پروفایل و تنظیمات"
-        tone="primary"
-      >
-        <div class="account-action-grid">
-          <AppActionCard
-            v-for="action in profileActions"
-            :key="action.key"
-            class="hub-action"
-            :title="action.title"
-            :description="action.description"
-            @select="action.action"
-          >
-            <template #icon>
-              <component :is="action.icon" :size="20" />
-            </template>
-          </AppActionCard>
-        </div>
-        <TelegramConnectPanel
-          v-if="showTelegramConnectPanel"
-          class="account-telegram-panel"
-          :connected="telegramConnected"
-          :loading="telegramLinkBusy"
-          :error="telegramLinkError"
-          @connect="connectTelegram"
-        />
-      </AppSectionCard>
-
-      <AppSectionCard
-        class="account-section-card"
-        title="امنیت و داده‌ها"
-        description="نشست‌ها، حافظه دستگاه و داده‌های محلی را در یک سطح منظم ببینید."
-      >
+      <template v-else-if="hasIdentity && user">
         <WorkspaceNotice
-          v-if="sessionsRestriction"
-          class="account-empty-state"
+          v-if="identityState === 'stale'"
+          class="account-identity-stale"
           tone="warning"
-          :title="sessionsRestriction.title"
-          :message="sessionsRestriction.description"
-        />
-        <div class="account-action-grid">
-          <AppActionCard
-            v-for="action in securityActions"
-            :key="action.key"
-            class="hub-action"
-            :title="action.title"
-            :description="action.description"
-            @select="action.action"
+          title="اطلاعات حساب به‌روز نشد"
+          message="نسخه ذخیره‌شده قبلی نمایش داده شده است."
+        >
+          <AppButton
+            type="button"
+            size="sm"
+            variant="secondary"
+            :loading="identityBusy"
+            @click="refreshIdentity"
+            >به‌روزرسانی</AppButton
           >
-            <template #icon>
-              <component :is="action.icon" :size="20" />
-            </template>
-          </AppActionCard>
-        </div>
-      </AppSectionCard>
-
-      <AppSectionCard
-        class="account-section-card"
-        title="اعلان‌ها"
-        description="اعلان‌های بازار، معامله و سیستم را از مسیر اختصاصی خود ببینید."
-      >
-        <div class="account-action-grid">
-          <AppActionCard
-            v-for="action in notificationActions"
-            :key="action.key"
-            class="hub-action"
-            :title="action.title"
-            :description="action.description"
-            @select="action.action"
+        </WorkspaceNotice>
+        <header class="account-compact-header ui-v2-account-header" aria-label="حساب کاربری">
+          <AppIconButton
+            type="button"
+            class="account-return-control"
+            label="بازگشت"
+            size="sm"
+            @click="router.back()"
           >
-            <template #icon>
-              <component :is="action.icon" :size="20" />
-            </template>
-          </AppActionCard>
-        </div>
-      </AppSectionCard>
+            <ChevronLeft :size="18" />
+          </AppIconButton>
+          <div class="account-identity ui-v2-account-header__identity">
+            <div class="account-identity-name-row">
+              <span
+                v-if="accountRestriction"
+                class="account-status-dot"
+                :class="`account-status-dot--${accountRestriction.tone}`"
+                aria-hidden="true"
+              ></span>
+              <strong>{{ displayName }}</strong>
+            </div>
+            <AppStatusBadge
+              v-if="accountRestriction"
+              class="account-status-badge"
+              :tone="accountRestriction.tone"
+            >
+              {{ accountRestriction.label }}
+            </AppStatusBadge>
+          </div>
+          <div class="account-header-spacer" aria-hidden="true"></div>
+        </header>
 
+        <AppSectionCard class="account-section-card" title="پروفایل" tone="primary">
+          <div class="account-action-grid">
+            <AppActionCard
+              v-for="action in profileActions"
+              :key="action.key"
+              class="hub-action"
+              :title="action.title"
+              :description="action.description"
+              @select="action.action"
+            >
+              <template #icon>
+                <component :is="action.icon" :size="20" />
+              </template>
+            </AppActionCard>
+          </div>
+          <TelegramConnectPanel
+            v-if="showTelegramConnectPanel"
+            class="account-telegram-panel"
+            :connected="telegramConnected"
+            :loading="telegramLinkBusy"
+            :error="telegramLinkError"
+            @connect="connectTelegram"
+          />
+        </AppSectionCard>
+
+        <AppSectionCard
+          class="account-section-card"
+          title="امنیت و داده‌ها"
+          :description="securitySectionDescription"
+        >
+          <div class="account-action-grid">
+            <AppActionCard
+              v-for="action in securityActions"
+              :key="action.key"
+              class="hub-action"
+              :title="action.title"
+              :description="action.description"
+              @select="action.action"
+            >
+              <template #icon>
+                <component :is="action.icon" :size="20" />
+              </template>
+            </AppActionCard>
+          </div>
+        </AppSectionCard>
+
+        <AppSectionCard
+          class="account-section-card"
+          title="اعلان‌ها"
+          description="اعلان‌های بازار، معامله و سیستم را از مسیر اختصاصی خود ببینید."
+        >
+          <div class="account-action-grid">
+            <AppActionCard
+              v-for="action in notificationActions"
+              :key="action.key"
+              class="hub-action"
+              :title="action.title"
+              :description="action.description"
+              @select="action.action"
+            >
+              <template #icon>
+                <component :is="action.icon" :size="20" />
+              </template>
+            </AppActionCard>
+          </div>
+        </AppSectionCard>
       </template>
     </AppPage>
   </div>
@@ -350,6 +385,11 @@ onMounted(refreshIdentity)
 .account-status-dot--danger {
   background: var(--ds-danger-600);
   box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.13);
+}
+
+.account-status-dot--warning {
+  background: var(--ds-warning-600);
+  box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.14);
 }
 
 .account-status-badge {

@@ -48,4 +48,17 @@ describe('Stage 3 protected Home market region', () => {
     const duplicate = `${source}\nconst isMarketOpen = computed(() => marketRuntime.value.is_open)`
     expect(() => dashboardMarketRegionEvidence(duplicate)).toThrow(/exactly one anchor/)
   })
+
+  it('does not use removable non-Market handlers as the open-market end anchor', () => {
+    const source = canonicalDashboardSource()
+    const openMarket = extractDashboardMarketSections(source).get('open-market')
+    const withDifferentFollowingHandler = source.replace(
+      openMarket,
+      `${openMarket}\n\nasync function removableNonMarketHandlerFixture() {\n  return true\n}`,
+    )
+    expect(withDifferentFollowingHandler).not.toBe(source)
+    expect(dashboardMarketRegionEvidence(withDifferentFollowingHandler).sha256).toBe(
+      DASHBOARD_MARKET_REGION_SHA256,
+    )
+  })
 })

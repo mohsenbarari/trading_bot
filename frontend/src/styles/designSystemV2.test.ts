@@ -339,8 +339,12 @@ describe('Design System V2 CSS contract', () => {
     if (!focusRule) return
 
     const normalizedSelector = focusRule.selector.split("'").join('"')
-    expect(normalizedSelector).toContain('[data-ui-system="v2"][data-ui-system="v2"]')
-    expect(normalizedSelector).toContain('[data-ui-system="v2-portal"][data-ui-system="v2-portal"]')
+    expect(normalizedSelector).toContain(
+      '[data-ui-system="v2"][data-ui-system="v2"][data-ui-system="v2"]',
+    )
+    expect(normalizedSelector).toContain(
+      '[data-ui-system="v2-portal"][data-ui-system="v2-portal"][data-ui-system="v2-portal"]',
+    )
 
     const declarations = Object.fromEntries(
       focusRule.nodes.filter((node) => node.type === 'decl').map((node) => [node.prop, node.value]),

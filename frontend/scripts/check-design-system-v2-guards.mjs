@@ -87,7 +87,7 @@ if (!fs.existsSync(manifestPath)) {
   findings.push({
     code: 'missing-scope-manifest',
     file: 'src/design-system-v2/scope-manifest.json',
-    detail: 'Stage 3 requires a machine-readable scope manifest',
+    detail: 'Stage 4 requires a machine-readable scope manifest',
   })
 } else {
   try {

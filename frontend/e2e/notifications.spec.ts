@@ -707,8 +707,8 @@ test.describe('Notification regressions', () => {
 
     await page.locator('button.notif-btn[aria-label="اعلان‌ها"]:visible').first().click()
 
-    await expect(page).toHaveURL(/\/notifications$/)
-    await expect(page.locator('.notifications-topbar[aria-label="مرکز اعلانات"]')).toBeVisible()
+    await expect(page).toHaveURL(/\/account\/notifications$/)
+    await expect(page.locator('.notifications-topbar[aria-label="دسته‌بندی مرکز اعلان‌ها"]')).toBeVisible()
   })
 
   test('websocket heartbeat pong does not emit JSON parse errors', async ({ page }) => {
@@ -896,7 +896,7 @@ test.describe('Notification regressions', () => {
     await expect(toast).not.toContainText(fixture.accountantAccountName)
 
     await page.getByRole('button', { name: 'اعلان‌ها' }).click()
-    await expect(page).toHaveURL(/\/notifications$/)
+    await expect(page).toHaveURL(/\/account\/notifications$/)
 
     const notificationRow = page.locator('.notif-item').filter({ hasText: fixture.relationDisplayName }).first()
     await expect(notificationRow).toBeVisible({ timeout: 30000 })

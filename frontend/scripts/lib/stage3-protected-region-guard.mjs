@@ -86,15 +86,7 @@ export function extractDashboardMarketSections(source) {
         'market-computed',
       ),
     ],
-    [
-      'open-market',
-      anchoredSlice(
-        source,
-        'function openMarket() {',
-        '\n\nasync function connectTelegram() {',
-        'open-market',
-      ),
-    ],
+    ['open-market', balancedCssBlock(source, 'function openMarket() {', 'open-market')],
     [
       'template-hero',
       uniqueRegexMatch(

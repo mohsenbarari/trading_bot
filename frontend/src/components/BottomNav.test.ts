@@ -8,7 +8,11 @@ const routeState = reactive({ name: 'home' })
 
 function setViewport(width: number, height: number) {
   Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: width })
-  Object.defineProperty(window, 'innerHeight', { configurable: true, writable: true, value: height })
+  Object.defineProperty(window, 'innerHeight', {
+    configurable: true,
+    writable: true,
+    value: height,
+  })
   window.dispatchEvent(new Event('resize'))
 }
 
@@ -55,14 +59,20 @@ describe('BottomNav.vue', () => {
       v2Wrapper.findAll('.nav-label').length,
     )
     v2Wrapper.unmount()
-  })
+  }, 15_000)
 
-  it('shows the operations entry immediately from the cached role on first mount', async () => {
-    localStorage.setItem('current_user_summary', JSON.stringify({
-      id: 1,
-      role: 'مدیر ارشد',
-      account_name: 'mohsen',
-    }))
+  it('shows the operations entry immediately from an authoritative cached identity', async () => {
+    localStorage.setItem(
+      'current_user_summary',
+      JSON.stringify({
+        id: 1,
+        role: 'مدیر ارشد',
+        account_name: 'mohsen',
+        account_status: 'active',
+        is_accountant: false,
+        is_customer: false,
+      }),
+    )
     apiFetchMock.mockRejectedValue(new Error('temporary network issue'))
 
     const BottomNav = (await import('./BottomNav.vue')).default
@@ -83,12 +93,49 @@ describe('BottomNav.vue', () => {
     wrapper.unmount()
   })
 
+  it('keeps Market and Operations hidden for a role-only cached identity', async () => {
+    localStorage.setItem(
+      'current_user_summary',
+      JSON.stringify({
+        id: 12,
+        role: 'مدیر ارشد',
+        account_name: 'partial-admin',
+      }),
+    )
+    const BottomNav = (await import('./BottomNav.vue')).default
+    const wrapper = mount(BottomNav, {
+      global: {
+        stubs: {
+          'router-link': {
+            template: '<a><slot /></a>',
+          },
+        },
+      },
+    })
+
+    await flushPromises()
+
+    expect(wrapper.text()).not.toContain('بازار')
+    expect(wrapper.text()).not.toContain('عملیات')
+    expect(wrapper.text()).toContain('خانه')
+    expect(wrapper.text()).toContain('پیام‌رسان')
+    expect(wrapper.text()).toContain('حساب')
+    wrapper.unmount()
+  })
+
   it('primes the current user, toggles the FAB menu, collapses on route changes, and renders disabled plus capped unread states', async () => {
     localStorage.setItem('auth_token', 'jwt-token')
     routeState.name = 'market'
     apiFetchMock.mockResolvedValue({
       ok: true,
-      json: async () => ({ id: 2, role: 'عادی', account_name: 'normal-user' }),
+      json: async () => ({
+        id: 2,
+        role: 'عادی',
+        account_name: 'normal-user',
+        account_status: 'active',
+        is_accountant: false,
+        is_customer: false,
+      }),
     })
 
     const currentUserModule = await import('../utils/currentUser')
@@ -111,8 +158,8 @@ describe('BottomNav.vue', () => {
 
     await wrapper.get('.fab-btn').trigger('click')
     expect(wrapper.find('.fab-nav').exists()).toBe(true)
-
-    ;(wrapper.vm as any).navItems[0].disabled = true
+    ;(wrapper.vm as unknown as { navItems: Array<{ disabled: boolean }> }).navItems[0].disabled =
+      true
     const storeModule = await import('../stores/notifications')
     const notificationStore = storeModule.useNotificationStore()
     notificationStore.setChatUnreadCount(120)
@@ -132,13 +179,18 @@ describe('BottomNav.vue', () => {
     wrapper.unmount()
   })
 
-  it('hides the market entry for accountant users from the cached summary', async () => {
-    localStorage.setItem('current_user_summary', JSON.stringify({
-      id: 9,
-      role: 'عادی',
-      account_name: 'accountant9',
-      is_accountant: true,
-    }))
+  it('hides market and the empty operations destination for accountant users', async () => {
+    localStorage.setItem(
+      'current_user_summary',
+      JSON.stringify({
+        id: 9,
+        role: 'عادی',
+        account_name: 'accountant9',
+        account_status: 'active',
+        is_accountant: true,
+        is_customer: false,
+      }),
+    )
     apiFetchMock.mockRejectedValue(new Error('temporary network issue'))
 
     const BottomNav = (await import('./BottomNav.vue')).default
@@ -155,15 +207,88 @@ describe('BottomNav.vue', () => {
     await flushPromises()
 
     expect(wrapper.text()).not.toContain('بازار')
+    expect(wrapper.text()).not.toContain('عملیات')
+    wrapper.unmount()
+  })
+
+  it('hides the empty operations destination for customer users', async () => {
+    localStorage.setItem(
+      'current_user_summary',
+      JSON.stringify({
+        id: 10,
+        role: 'عادی',
+        account_name: 'customer10',
+        account_status: 'active',
+        is_accountant: false,
+        is_customer: true,
+      }),
+    )
+    apiFetchMock.mockRejectedValue(new Error('temporary network issue'))
+
+    const BottomNav = (await import('./BottomNav.vue')).default
+    const wrapper = mount(BottomNav, {
+      global: {
+        stubs: {
+          'router-link': {
+            template: '<a><slot /></a>',
+          },
+        },
+      },
+    })
+
+    await flushPromises()
+
+    expect(wrapper.text()).not.toContain('عملیات')
+    expect(wrapper.text()).toContain('بازار')
+    expect(wrapper.text()).toContain('حساب')
+    wrapper.unmount()
+  })
+
+  it('hides Market for an inactive account while retaining its permitted daily destinations', async () => {
+    localStorage.setItem(
+      'current_user_summary',
+      JSON.stringify({
+        id: 11,
+        role: 'عادی',
+        account_name: 'inactive11',
+        account_status: 'inactive',
+        is_accountant: false,
+        is_customer: false,
+      }),
+    )
+    apiFetchMock.mockRejectedValue(new Error('temporary network issue'))
+
+    const BottomNav = (await import('./BottomNav.vue')).default
+    const wrapper = mount(BottomNav, {
+      global: {
+        stubs: {
+          'router-link': {
+            template: '<a><slot /></a>',
+          },
+        },
+      },
+    })
+
+    await flushPromises()
+
+    expect(wrapper.text()).not.toContain('بازار')
+    expect(wrapper.text()).toContain('عملیات')
+    expect(wrapper.text()).toContain('حساب')
     wrapper.unmount()
   })
 
   it('keeps operations and account tabs active for the new workspace route names', async () => {
-    localStorage.setItem('current_user_summary', JSON.stringify({
-      id: 14,
-      role: 'عادی',
-      account_name: 'route-user',
-    }))
+    localStorage.setItem(
+      'current_user_summary',
+      JSON.stringify({
+        id: 14,
+        role: 'عادی',
+        account_name: 'route-user',
+        account_status: 'active',
+        is_accountant: false,
+        is_customer: false,
+      }),
+    )
     apiFetchMock.mockRejectedValue(new Error('temporary network issue'))
 
     const BottomNav = (await import('./BottomNav.vue')).default
@@ -180,15 +305,21 @@ describe('BottomNav.vue', () => {
 
     routeState.name = 'operations-customers-detail'
     await nextTick()
-    expect(wrapper.findAll('.nav-item.active').some((item) => item.text().includes('عملیات'))).toBe(true)
+    expect(wrapper.findAll('.nav-item.active').some((item) => item.text().includes('عملیات'))).toBe(
+      true,
+    )
 
     routeState.name = 'admin-system'
     await nextTick()
-    expect(wrapper.findAll('.nav-item.active').some((item) => item.text().includes('عملیات'))).toBe(true)
+    expect(wrapper.findAll('.nav-item.active').some((item) => item.text().includes('عملیات'))).toBe(
+      true,
+    )
 
     routeState.name = 'account-storage'
     await nextTick()
-    expect(wrapper.findAll('.nav-item.active').some((item) => item.text().includes('حساب'))).toBe(true)
+    expect(wrapper.findAll('.nav-item.active').some((item) => item.text().includes('حساب'))).toBe(
+      true,
+    )
 
     wrapper.unmount()
   })
@@ -211,7 +342,14 @@ describe('BottomNav.vue', () => {
       if (path === '/api/auth/me') {
         return {
           ok: true,
-          json: async () => ({ id: 3, role: 'عادی', account_name: 'market-user' }),
+          json: async () => ({
+            id: 3,
+            role: 'عادی',
+            account_name: 'market-user',
+            account_status: 'active',
+            is_accountant: false,
+            is_customer: false,
+          }),
         }
       }
       return { ok: true, json: async () => null }
@@ -226,7 +364,8 @@ describe('BottomNav.vue', () => {
         stubs: {
           'router-link': {
             props: ['to'],
-            template: '<a v-bind="$attrs" :href="typeof to === \'string\' ? to : to.path"><slot /></a>',
+            template:
+              '<a v-bind="$attrs" :href="typeof to === \'string\' ? to : to.path"><slot /></a>',
           },
         },
       },
@@ -345,8 +484,8 @@ describe('BottomNav.vue', () => {
     })
 
     await flushPromises()
-
-    ;(wrapper.vm as any).navItems[0].disabled = true
+    ;(wrapper.vm as unknown as { navItems: Array<{ disabled: boolean }> }).navItems[0].disabled =
+      true
     await nextTick()
 
     await wrapper.get('.fab-btn').trigger('click')
@@ -382,7 +521,9 @@ describe('BottomNav.vue', () => {
     await nextTick()
 
     const topRightMenu = wrapper.get('.fab-nav')
-    expect(topRightMenu.classes()).toEqual(expect.arrayContaining(['fab-nav--down', 'fab-nav--left']))
+    expect(topRightMenu.classes()).toEqual(
+      expect.arrayContaining(['fab-nav--down', 'fab-nav--left']),
+    )
     expect(topRightMenu.attributes('style')).toContain('top: 56px;')
     expect(topRightMenu.attributes('style')).toContain('bottom: auto;')
     expect(topRightMenu.attributes('style')).toContain('right: 0')
@@ -408,7 +549,9 @@ describe('BottomNav.vue', () => {
     await nextTick()
 
     const bottomRightMenu = bottomRightWrapper.get('.fab-nav')
-    expect(bottomRightMenu.classes()).toEqual(expect.arrayContaining(['fab-nav--up', 'fab-nav--left']))
+    expect(bottomRightMenu.classes()).toEqual(
+      expect.arrayContaining(['fab-nav--up', 'fab-nav--left']),
+    )
     expect(bottomRightMenu.attributes('style')).toContain('bottom: 56px;')
     expect(bottomRightMenu.attributes('style')).toContain('top: auto;')
     expect(bottomRightMenu.attributes('style')).toContain('right: 0')
@@ -438,7 +581,14 @@ describe('BottomNav.vue', () => {
 
     const fabButton = wrapper.get('.fab-btn')
     await fabButton.trigger('mousedown', { clientX: 10, clientY: 10 })
-    document.dispatchEvent(new MouseEvent('mousemove', { clientX: 4000, clientY: 4000, bubbles: true, cancelable: true }))
+    document.dispatchEvent(
+      new MouseEvent('mousemove', {
+        clientX: 4000,
+        clientY: 4000,
+        bubbles: true,
+        cancelable: true,
+      }),
+    )
     await nextTick()
 
     expect(wrapper.find('.fab-nav').exists()).toBe(false)
@@ -449,8 +599,12 @@ describe('BottomNav.vue', () => {
     const storedPosition = JSON.parse(localStorage.getItem('fab_position') || '{}')
     expect(storedPosition.x).toBe(window.innerWidth - 44)
     expect(storedPosition.y).toBe(window.innerHeight - 44 - 112)
-    expect(wrapper.get('.fab-container').attributes('style')).toContain(`left: ${window.innerWidth - 44}px;`)
-    expect(wrapper.get('.fab-container').attributes('style')).toContain(`top: ${window.innerHeight - 44 - 112}px;`)
+    expect(wrapper.get('.fab-container').attributes('style')).toContain(
+      `left: ${window.innerWidth - 44}px;`,
+    )
+    expect(wrapper.get('.fab-container').attributes('style')).toContain(
+      `top: ${window.innerHeight - 44 - 112}px;`,
+    )
     expect(wrapper.get('.fab-container').classes()).toContain('fab-container--market')
     expect(fabButton.attributes('type')).toBe('button')
     expect(fabButton.attributes('aria-label')).toBe('باز کردن ناوبری')

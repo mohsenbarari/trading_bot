@@ -33,16 +33,45 @@ export interface NotificationPreferences {
   market_offer_push_enabled: boolean
 }
 
+export const WEB_PUSH_SERVICE_WORKER_READY_TIMEOUT_MS = 5_000
+const WEB_PUSH_DELIVERY_GATE_MESSAGE = 'web-push:delivery-gate'
+const WEB_PUSH_SESSION_CHANGED_ERROR = 'push_session_changed'
+
 function hasWindowRuntime(): boolean {
   return typeof window !== 'undefined' && typeof navigator !== 'undefined'
 }
 
+function setWebPushDeliveryGate(enabled: boolean): void {
+  if (!hasWindowRuntime() || !navigator.serviceWorker) return
+
+  const message = { type: WEB_PUSH_DELIVERY_GATE_MESSAGE, enabled }
+  const serviceWorker = navigator.serviceWorker
+  try {
+    if (serviceWorker.controller) {
+      serviceWorker.controller.postMessage(message)
+      return
+    }
+  } catch {
+    // Fall through to an active registration when this page is not controlled.
+  }
+
+  if (typeof serviceWorker.getRegistration !== 'function') return
+  try {
+    void serviceWorker
+      .getRegistration()
+      .then((registration) => registration?.active?.postMessage(message))
+      .catch(() => undefined)
+  } catch {
+    // The in-worker gate defaults closed when messaging is unavailable.
+  }
+}
+
 export function isWebPushRuntimeSupported(): boolean {
   return Boolean(
-    hasWindowRuntime()
-    && 'Notification' in window
-    && 'serviceWorker' in navigator
-    && 'PushManager' in window
+    hasWindowRuntime() &&
+      'Notification' in window &&
+      'serviceWorker' in navigator &&
+      'PushManager' in window,
   )
 }
 
@@ -60,7 +89,8 @@ function urlBase64ToUint8Array(base64String: string): Uint8Array {
 }
 
 function resolvePlatform(): string {
-  const userAgentData = (navigator as any).userAgentData
+  const userAgentData = (navigator as Navigator & { userAgentData?: { platform?: unknown } })
+    .userAgentData
   if (userAgentData?.platform) return String(userAgentData.platform).slice(0, 80)
   return navigator.platform || 'web'
 }
@@ -69,10 +99,24 @@ async function getReadyServiceWorker(): Promise<ServiceWorkerRegistration> {
   if (!('serviceWorker' in navigator)) {
     throw new Error('service_worker_unsupported')
   }
-  return navigator.serviceWorker.ready
+
+  let timeoutId: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      navigator.serviceWorker.ready,
+      new Promise<never>((_resolve, reject) => {
+        timeoutId = setTimeout(() => {
+          reject(new Error('service_worker_ready_timeout'))
+        }, WEB_PUSH_SERVICE_WORKER_READY_TIMEOUT_MS)
+      }),
+    ])
+  } finally {
+    if (timeoutId !== undefined) clearTimeout(timeoutId)
+  }
 }
 
 async function postSubscription(subscription: PushSubscription): Promise<void> {
+  const authTokenAtRequestStart = localStorage.getItem('auth_token')
   const json = subscription.toJSON()
   const endpoint = json.endpoint
   const keys = json.keys
@@ -94,6 +138,14 @@ async function postSubscription(subscription: PushSubscription): Promise<void> {
   if (!response.ok) {
     throw new Error('push_subscription_rejected')
   }
+  if (localStorage.getItem('auth_token') !== authTokenAtRequestStart) {
+    throw new Error(WEB_PUSH_SESSION_CHANGED_ERROR)
+  }
+  setWebPushDeliveryGate(true)
+}
+
+function isWebPushSessionChanged(error: unknown): boolean {
+  return error instanceof Error && error.message === WEB_PUSH_SESSION_CHANGED_ERROR
 }
 
 export async function fetchWebPushPublicConfig(): Promise<WebPushPublicConfig> {
@@ -104,7 +156,8 @@ export async function fetchWebPushPublicConfig(): Promise<WebPushPublicConfig> {
   return response.json()
 }
 
-export async function getWebPushStatus(): Promise<WebPushStatus> {
+async function reconcileWebPushStatus(): Promise<WebPushStatus> {
+  setWebPushDeliveryGate(false)
   if (!isWebPushRuntimeSupported()) {
     return { state: 'unsupported' }
   }
@@ -125,7 +178,62 @@ export async function getWebPushStatus(): Promise<WebPushStatus> {
 
   const registration = await getReadyServiceWorker()
   const subscription = await registration.pushManager.getSubscription()
-  return { state: subscription ? 'subscribed' : 'unsubscribed', config }
+  if (!subscription) {
+    return { state: 'unsubscribed', config }
+  }
+
+  // A browser subscription can outlive the account that created it. Re-posting
+  // it through the authenticated endpoint makes the server binding authoritative
+  // for the current user before the UI reports an active subscription.
+  try {
+    await postSubscription(subscription)
+  } catch (error) {
+    if (isWebPushSessionChanged(error)) throw error
+    await requireSuccessfulUnsubscribe(subscription)
+    throw error
+  }
+  return { state: 'subscribed', config }
+}
+
+let webPushStatusInFlight: {
+  authToken: string | null
+  request: Promise<WebPushStatus>
+} | null = null
+
+function trackWebPushStatusRequest(
+  authToken: string | null,
+  request: Promise<WebPushStatus>,
+): Promise<WebPushStatus> {
+  const trackedRequest = { authToken, request }
+  webPushStatusInFlight = trackedRequest
+  request.then(
+    () => {
+      if (webPushStatusInFlight === trackedRequest) webPushStatusInFlight = null
+    },
+    () => {
+      if (webPushStatusInFlight === trackedRequest) webPushStatusInFlight = null
+    },
+  )
+  return request
+}
+
+export function getWebPushStatus(): Promise<WebPushStatus> {
+  const authToken = localStorage.getItem('auth_token')
+  if (webPushStatusInFlight?.authToken === authToken) {
+    return webPushStatusInFlight.request
+  }
+
+  if (webPushStatusInFlight) {
+    // Do not let a new account share the previous account's authoritative
+    // result. Queue its reconciliation so the final server binding is ordered.
+    setWebPushDeliveryGate(false)
+    const previousRequest = webPushStatusInFlight.request
+    const request = previousRequest.catch(() => undefined).then(() => reconcileWebPushStatus())
+    return trackWebPushStatusRequest(authToken, request)
+  }
+
+  const request = reconcileWebPushStatus()
+  return trackWebPushStatusRequest(authToken, request)
 }
 
 async function subscribeWithKey(
@@ -136,6 +244,19 @@ async function subscribeWithKey(
     userVisibleOnly: true,
     applicationServerKey: urlBase64ToUint8Array(publicKey),
   })
+}
+
+async function requireSuccessfulUnsubscribe(subscription: PushSubscription): Promise<void> {
+  let didUnsubscribe = false
+  try {
+    didUnsubscribe = await subscription.unsubscribe()
+  } catch {
+    // A thrown rejection and a false result both mean the local subscription
+    // may still be active and must not be treated as a successful rollback.
+  }
+  if (!didUnsubscribe) {
+    throw new Error('push_unsubscribe_failed')
+  }
 }
 
 async function subscribeAndRegisterWebPush(config: WebPushPublicConfig): Promise<WebPushStatus> {
@@ -152,15 +273,24 @@ async function subscribeAndRegisterWebPush(config: WebPushPublicConfig): Promise
   try {
     await postSubscription(subscription)
   } catch (error) {
-    await subscription.unsubscribe().catch(() => false)
-    subscription = await subscribeWithKey(registration, config.public_key)
-    await postSubscription(subscription)
+    if (isWebPushSessionChanged(error)) throw error
+    await requireSuccessfulUnsubscribe(subscription)
+    const replacement = await subscribeWithKey(registration, config.public_key)
+    try {
+      await postSubscription(replacement)
+      subscription = replacement
+    } catch (error) {
+      if (isWebPushSessionChanged(error)) throw error
+      await requireSuccessfulUnsubscribe(replacement)
+      throw new Error('push_subscription_rejected')
+    }
   }
 
   return { state: 'subscribed', config }
 }
 
 export async function promptAndEnableWebPushNotifications(): Promise<WebPushStatus> {
+  setWebPushDeliveryGate(false)
   if (!isWebPushRuntimeSupported()) {
     return { state: 'unsupported' }
   }
@@ -176,9 +306,8 @@ export async function promptAndEnableWebPushNotifications(): Promise<WebPushStat
     return { state: 'server-disabled', config }
   }
 
-  const permission = Notification.permission === 'granted'
-    ? 'granted'
-    : await Notification.requestPermission()
+  const permission =
+    Notification.permission === 'granted' ? 'granted' : await Notification.requestPermission()
   if (permission === 'denied') {
     return { state: 'permission-blocked', config }
   }
@@ -190,6 +319,7 @@ export async function promptAndEnableWebPushNotifications(): Promise<WebPushStat
 }
 
 export async function enableWebPushNotifications(): Promise<WebPushStatus> {
+  setWebPushDeliveryGate(false)
   if (!isWebPushRuntimeSupported()) {
     return { state: 'unsupported' }
   }
@@ -201,9 +331,8 @@ export async function enableWebPushNotifications(): Promise<WebPushStatus> {
   if (!config.enabled || !config.public_key) {
     return { state: 'server-disabled', config }
   }
-  const permission = Notification.permission === 'granted'
-    ? 'granted'
-    : await Notification.requestPermission()
+  const permission =
+    Notification.permission === 'granted' ? 'granted' : await Notification.requestPermission()
   if (permission === 'denied') {
     return { state: 'permission-blocked', config }
   }
@@ -215,6 +344,7 @@ export async function enableWebPushNotifications(): Promise<WebPushStatus> {
 }
 
 export async function disableWebPushNotifications(): Promise<WebPushStatus> {
+  setWebPushDeliveryGate(false)
   if (!isWebPushRuntimeSupported()) {
     return { state: 'unsupported' }
   }
@@ -223,7 +353,7 @@ export async function disableWebPushNotifications(): Promise<WebPushStatus> {
   const subscription = await registration.pushManager.getSubscription()
   if (subscription) {
     const endpoint = subscription.endpoint
-    await subscription.unsubscribe().catch(() => false)
+    await requireSuccessfulUnsubscribe(subscription)
     if (endpoint) {
       await apiFetch('/api/notifications/push/subscription', {
         method: 'DELETE',

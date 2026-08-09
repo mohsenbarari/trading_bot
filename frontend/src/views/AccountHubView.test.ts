@@ -10,7 +10,7 @@ const accountHubMocks = vi.hoisted(() => ({
   },
   loadCurrentUserSummaryMock: vi.fn(),
   requestTelegramLinkMock: vi.fn(),
-  openTelegramLinkMock: vi.fn(),
+  openTelegramAccountLinkMock: vi.fn(),
 }))
 
 vi.mock('vue-router', () => ({
@@ -23,11 +23,22 @@ vi.mock('vue-router', () => ({
 vi.mock('../utils/currentUser', () => ({
   currentUserSummary: accountHubMocks.currentUserSummary,
   loadCurrentUserSummary: accountHubMocks.loadCurrentUserSummaryMock,
+  isAuthoritativeCurrentUserSummary: (value: Record<string, unknown> | null | undefined) =>
+    Boolean(
+      value &&
+        typeof value.role === 'string' &&
+        value.role.trim() &&
+        (value.account_status === 'active' || value.account_status === 'inactive') &&
+        typeof value.is_accountant === 'boolean' &&
+        typeof value.is_customer === 'boolean',
+    ),
 }))
 
 vi.mock('../services/telegramLink', () => ({
   requestTelegramLink: accountHubMocks.requestTelegramLinkMock,
-  openTelegramLink: accountHubMocks.openTelegramLinkMock,
+  openTelegramAccountLink: accountHubMocks.openTelegramAccountLinkMock,
+  TELEGRAM_LINK_UNAVAILABLE_MESSAGE: 'لینک اتصال تلگرام آماده نشد.',
+  TELEGRAM_LINK_REQUEST_FAILED_MESSAGE: 'ساخت لینک اتصال تلگرام ناموفق بود.',
 }))
 
 async function mountView() {
@@ -46,7 +57,7 @@ describe('AccountHubView.vue', () => {
     accountHubMocks.routerBackMock.mockReset()
     accountHubMocks.loadCurrentUserSummaryMock.mockReset()
     accountHubMocks.requestTelegramLinkMock.mockReset()
-    accountHubMocks.openTelegramLinkMock.mockReset()
+    accountHubMocks.openTelegramAccountLinkMock.mockReset()
     accountHubMocks.currentUserSummary.value = null
     accountHubMocks.loadCurrentUserSummaryMock.mockImplementation(async () => ({
       state: accountHubMocks.currentUserSummary.value ? 'ready' : 'error',
@@ -64,15 +75,18 @@ describe('AccountHubView.vue', () => {
       account_name: 'mohammad',
       account_status: 'active',
       is_accountant: false,
+      is_customer: false,
     }
 
     const wrapper = await mountView()
 
     expect(accountHubMocks.loadCurrentUserSummaryMock).toHaveBeenCalledWith({ force: true })
+    expect(wrapper.get('h1.account-page-title').text()).toBe('حساب')
     expect(wrapper.findAll('.account-section-card')).toHaveLength(3)
     expect(wrapper.text()).not.toContain('مرکز حساب کاربری')
     expect(wrapper.text()).toContain('محمد')
-    expect(wrapper.text()).toContain('فعال')
+    expect(wrapper.find('.account-status-badge').exists()).toBe(false)
+    expect(wrapper.find('.account-status-dot').exists()).toBe(false)
     expect(wrapper.text()).toContain('نشست‌های فعال')
 
     await findAction(wrapper, 'پروفایل من')!.trigger('click')
@@ -84,24 +98,80 @@ describe('AccountHubView.vue', () => {
     expect(accountHubMocks.routerPushMock).toHaveBeenNthCalledWith(1, { name: 'profile' })
     expect(accountHubMocks.routerPushMock).toHaveBeenNthCalledWith(2, { name: 'account-security' })
     expect(accountHubMocks.routerPushMock).toHaveBeenNthCalledWith(3, { name: 'account-storage' })
-    expect(accountHubMocks.routerPushMock).toHaveBeenNthCalledWith(4, { name: 'account-notifications' })
+    expect(accountHubMocks.routerPushMock).toHaveBeenNthCalledWith(4, {
+      name: 'account-notifications',
+    })
+    expect(
+      new Set(accountHubMocks.routerPushMock.mock.calls.map(([location]) => location.name)).size,
+    ).toBe(4)
     expect(accountHubMocks.routerBackMock).toHaveBeenCalledTimes(1)
   })
 
-  it('keeps accountant session restrictions visible without exposing the sessions action', async () => {
+  it('marks an authoritative cached account as stale while the initial refresh is pending', async () => {
+    let resolveRefresh: ((value: Record<string, unknown>) => void) | null = null
+    accountHubMocks.currentUserSummary.value = {
+      id: 12,
+      role: 'عادی',
+      account_name: 'cached-account',
+      account_status: 'active',
+      is_accountant: false,
+      is_customer: false,
+    }
+    accountHubMocks.loadCurrentUserSummaryMock.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveRefresh = resolve
+        }),
+    )
+
+    const wrapper = await mountView()
+
+    expect(wrapper.get('.account-identity-stale').text()).toContain('نسخه ذخیره‌شده قبلی')
+    expect(findAction(wrapper, 'نشست‌های فعال')?.exists()).toBe(true)
+
+    if (!resolveRefresh) throw new Error('Expected identity refresh resolver')
+    ;(resolveRefresh as (value: Record<string, unknown>) => void)({
+      state: 'ready',
+      source: 'network',
+      user: accountHubMocks.currentUserSummary.value,
+      error: null,
+    })
+    await flushPromises()
+
+    expect(wrapper.find('.account-identity-stale').exists()).toBe(false)
+  })
+
+  it('gives accountants exactly profile, storage and notification destinations without session or logout actions', async () => {
     accountHubMocks.currentUserSummary.value = {
       id: 2,
       role: 'عادی',
       account_name: 'accountant',
+      account_status: 'active',
       is_accountant: true,
+      is_customer: false,
     }
 
     const wrapper = await mountView()
 
-    expect(wrapper.text()).toContain('مدیریت نشست برای حسابدار فعال نیست')
+    expect(wrapper.text()).not.toContain('مدیریت نشست برای حسابدار فعال نیست')
+    expect(wrapper.text()).not.toContain('توسط سرگروه مدیریت')
+    expect(wrapper.text()).not.toContain('نشست‌ها، حافظه')
     expect(findAction(wrapper, 'نشست‌های فعال')).toBeUndefined()
-    expect(findAction(wrapper, 'حافظه و داده‌ها')?.exists()).toBe(true)
-    expect(wrapper.text()).toContain('دسترسی‌های مجاز حسابدار و حافظه دستگاه')
+    expect(wrapper.text()).not.toContain('خروج از حساب')
+    expect(wrapper.findAll('.hub-action').map((action) => action.text())).toEqual([
+      expect.stringContaining('پروفایل من'),
+      expect.stringContaining('حافظه و داده‌ها'),
+      expect.stringContaining('اعلان‌ها'),
+    ])
+
+    for (const label of ['پروفایل من', 'حافظه و داده‌ها', 'اعلان‌ها']) {
+      await findAction(wrapper, label)!.trigger('click')
+    }
+    expect(accountHubMocks.routerPushMock.mock.calls.map(([location]) => location.name)).toEqual([
+      'profile',
+      'account-storage',
+      'account-notifications',
+    ])
   })
 
   it('keeps account guidance removed without reviving the old accordion or summary-card layout', async () => {
@@ -109,7 +179,9 @@ describe('AccountHubView.vue', () => {
       id: 3,
       role: 'عادی',
       account_name: 'user3',
+      account_status: 'active',
       is_accountant: false,
+      is_customer: false,
     }
 
     const wrapper = await mountView()
@@ -127,13 +199,31 @@ describe('AccountHubView.vue', () => {
       account_name: 'blocked-user',
       account_status: 'inactive',
       is_accountant: false,
+      is_customer: false,
     }
 
     const wrapper = await mountView()
 
     expect(wrapper.text()).toContain('blocked-user')
-    expect(wrapper.text()).toContain('غیرفعال')
+    expect(wrapper.get('.account-status-badge').text()).toBe('حساب غیرفعال')
     expect(wrapper.get('.account-status-dot').classes()).toContain('account-status-dot--danger')
+  })
+
+  it('shows a restriction marker without turning normal active state into a positive badge', async () => {
+    accountHubMocks.currentUserSummary.value = {
+      id: 7,
+      role: 'عادی',
+      account_name: 'restricted-user',
+      account_status: 'active',
+      global_web_locked_at: '2026-08-09T11:00:00Z',
+      is_accountant: false,
+      is_customer: false,
+    }
+
+    const wrapper = await mountView()
+
+    expect(wrapper.get('.account-status-badge').text()).toBe('دسترسی محدود')
+    expect(wrapper.get('.account-status-dot').classes()).toContain('account-status-dot--warning')
   })
 
   it('adds Telegram connection to profile settings and disables it after linking', async () => {
@@ -141,25 +231,38 @@ describe('AccountHubView.vue', () => {
       id: 4,
       role: 'عادی',
       account_name: 'telegram-user',
+      account_status: 'active',
       is_accountant: false,
+      is_customer: false,
       can_connect_telegram: true,
       telegram_linked: false,
     }
     accountHubMocks.requestTelegramLinkMock.mockResolvedValue({
       telegram_linked: false,
       can_connect_telegram: true,
+      bot_username: 'example_bot',
       telegram_url: 'https://t.me/example_bot?start=link_token',
+      start_parameter: 'link_token',
     })
+    accountHubMocks.openTelegramAccountLinkMock.mockReturnValueOnce(true)
 
     const wrapper = await mountView()
 
-    expect(wrapper.get('.account-telegram-panel').text()).toContain('برای استفاده از امکانات اپ در بستر تلگرام ضربه بزنید!')
+    expect(wrapper.get('.account-telegram-panel').text()).toContain(
+      'برای استفاده از امکانات اپ در بستر تلگرام ضربه بزنید!',
+    )
 
     await wrapper.get('.telegram-connect-panel').trigger('click')
     await flushPromises()
 
     expect(accountHubMocks.requestTelegramLinkMock).toHaveBeenCalledTimes(1)
-    expect(accountHubMocks.openTelegramLinkMock).toHaveBeenCalledWith('https://t.me/example_bot?start=link_token')
+    expect(accountHubMocks.openTelegramAccountLinkMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bot_username: 'example_bot',
+        telegram_url: 'https://t.me/example_bot?start=link_token',
+        start_parameter: 'link_token',
+      }),
+    )
 
     wrapper.unmount()
     accountHubMocks.requestTelegramLinkMock.mockReset()
@@ -168,7 +271,9 @@ describe('AccountHubView.vue', () => {
       id: 5,
       role: 'عادی',
       account_name: 'linked-user',
+      account_status: 'active',
       is_accountant: false,
+      is_customer: false,
       can_connect_telegram: true,
       telegram_linked: true,
     }
@@ -179,6 +284,41 @@ describe('AccountHubView.vue', () => {
 
     await linkedWrapper.get('.telegram-connect-panel').trigger('click')
     expect(accountHubMocks.requestTelegramLinkMock).not.toHaveBeenCalled()
+  })
+
+  it('keeps hostile Telegram receipt metadata out of the account surface', async () => {
+    accountHubMocks.currentUserSummary.value = {
+      id: 45,
+      role: 'عادی',
+      account_name: 'telegram-receipt-user',
+      account_status: 'active',
+      is_accountant: false,
+      is_customer: false,
+      can_connect_telegram: true,
+      telegram_linked: false,
+    }
+    accountHubMocks.requestTelegramLinkMock.mockResolvedValue({
+      telegram_linked: false,
+      can_connect_telegram: true,
+      bot_username: 'example_bot',
+      telegram_url: 'javascript:alert(1)',
+      start_parameter: 'link_hostile',
+      detail: 'server=iran route=/api/internal/telegram/link',
+    })
+
+    const wrapper = await mountView()
+    await wrapper.get('.telegram-connect-panel').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('.telegram-connect-panel__error').text()).toBe(
+      'لینک اتصال تلگرام آماده نشد.',
+    )
+    expect(wrapper.text()).not.toContain('server=iran')
+    expect(wrapper.text()).not.toContain('/api/internal/telegram/link')
+    expect(wrapper.text()).not.toContain('javascript:alert(1)')
+    expect(accountHubMocks.openTelegramAccountLinkMock).toHaveBeenCalledWith(
+      expect.objectContaining({ telegram_url: 'javascript:alert(1)' }),
+    )
   })
 
   it('does not invent identity or active status when the account request fails', async () => {
@@ -197,13 +337,35 @@ describe('AccountHubView.vue', () => {
     expect(wrapper.text()).not.toContain('فعال')
   })
 
-  it('keeps cached account actions with a stale marker and never assumes a missing status is active', async () => {
+  it('renders no account or session destinations for a role-only cached identity', async () => {
+    accountHubMocks.currentUserSummary.value = {
+      id: 91,
+      role: 'عادی',
+      account_name: 'partial91',
+    }
+    accountHubMocks.loadCurrentUserSummaryMock.mockResolvedValueOnce({
+      state: 'ready',
+      source: 'cache',
+      user: accountHubMocks.currentUserSummary.value,
+      error: null,
+    })
+
+    const wrapper = await mountView()
+
+    expect(wrapper.find('.account-identity-error').exists()).toBe(true)
+    expect(wrapper.findAll('.hub-action')).toHaveLength(0)
+    expect(wrapper.find('.account-compact-header').exists()).toBe(false)
+    expect(wrapper.text()).not.toMatch(/نشست‌های فعال|حافظه و داده‌ها|اعلان‌ها/)
+  })
+
+  it('keeps authoritative cached account actions with a stale marker and no active badge', async () => {
     accountHubMocks.currentUserSummary.value = {
       id: 9,
       role: 'عادی',
       account_name: 'cached9',
-      account_status: null,
+      account_status: 'active',
       is_accountant: false,
+      is_customer: false,
     }
     accountHubMocks.loadCurrentUserSummaryMock.mockResolvedValueOnce({
       state: 'stale',
@@ -215,7 +377,8 @@ describe('AccountHubView.vue', () => {
     const wrapper = await mountView()
 
     expect(wrapper.get('.account-identity-stale').text()).toContain('نسخه ذخیره‌شده قبلی')
-    expect(wrapper.get('.account-status-badge').text()).toBe('نامشخص')
+    expect(wrapper.find('.account-status-badge').exists()).toBe(false)
+    expect(wrapper.find('.account-status-dot').exists()).toBe(false)
     expect(findAction(wrapper, 'نشست‌های فعال')?.exists()).toBe(true)
   })
 })

@@ -41,8 +41,21 @@ function makeJsonResponse(payload: unknown, status = 200, ok = status >= 200 && 
   }
 }
 
+function authoritativeSummary(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 1,
+    role: 'عادی',
+    account_name: 'guard-user',
+    account_status: 'active',
+    is_accountant: false,
+    is_customer: false,
+    ...overrides,
+  }
+}
+
 describe('auth utils', () => {
   let fetchMock: FetchMock
+  let originalServiceWorker: ServiceWorkerContainer | undefined
 
   beforeEach(() => {
     vi.resetModules()
@@ -50,6 +63,11 @@ describe('auth utils', () => {
     sessionStorage.clear()
     fetchMock = vi.fn()
     vi.stubGlobal('fetch', fetchMock)
+    originalServiceWorker = navigator.serviceWorker
+    Object.defineProperty(navigator, 'serviceWorker', {
+      configurable: true,
+      value: undefined,
+    })
     mockLocation()
   })
 
@@ -57,6 +75,10 @@ describe('auth utils', () => {
     vi.useRealTimers()
     vi.restoreAllMocks()
     vi.unstubAllGlobals()
+    Object.defineProperty(navigator, 'serviceWorker', {
+      configurable: true,
+      value: originalServiceWorker,
+    })
     localStorage.clear()
     sessionStorage.clear()
   })
@@ -161,6 +183,13 @@ describe('auth utils', () => {
   })
 
   it('suspendSession and forceLogout clear the expected tokens and redirect to login', async () => {
+    const postMessage = vi.fn(() => {
+      expect(localStorage.getItem('auth_token')).toBe('auth')
+    })
+    Object.defineProperty(navigator, 'serviceWorker', {
+      configurable: true,
+      value: { controller: { postMessage } },
+    })
     localStorage.setItem('auth_token', 'auth')
     localStorage.setItem('refresh_token', 'refresh')
     localStorage.setItem('suspended_refresh_token', 'old-suspended')
@@ -180,6 +209,15 @@ describe('auth utils', () => {
     expect(localStorage.getItem('refresh_token')).toBeNull()
     expect(localStorage.getItem('suspended_refresh_token')).toBeNull()
     expect(location.href).toBe('/login')
+    expect(postMessage).toHaveBeenNthCalledWith(1, {
+      type: 'web-push:cleanup-session',
+      authToken: 'auth',
+    })
+    expect(postMessage).toHaveBeenNthCalledWith(2, {
+      type: 'web-push:cleanup-session',
+      authToken: 'auth',
+    })
+    expect(JSON.stringify(postMessage.mock.calls)).not.toContain('endpoint')
   })
 
   it('logout delegates to forceLogout', async () => {
@@ -200,22 +238,23 @@ describe('auth utils', () => {
 
   it('authGuard redirects according to auth and admin requirements', async () => {
     const { authGuard } = await import(authModulePath)
+    const { cacheCurrentUserSummary } = await import('./currentUser')
 
     const next = vi.fn()
     localStorage.setItem('auth_token', makeJwt(Math.floor(Date.now() / 1000) + 3600))
-    await authGuard({ path: '/login', meta: {} } as any, {} as any, next)
+    await authGuard(authGuardRoute({ path: '/login', meta: {} }), authGuardFromRoute, next)
     expect(next).toHaveBeenLastCalledWith('/')
 
     next.mockClear()
     localStorage.clear()
     await authGuard(
-      {
+      authGuardRoute({
         path: '/chat',
         fullPath: '/chat?user_id=7',
         name: 'messenger',
         meta: { requiresAuth: true },
-      } as any,
-      {} as any,
+      }),
+      authGuardFromRoute,
       next,
     )
     expect(next).toHaveBeenLastCalledWith({ name: 'login' })
@@ -223,28 +262,19 @@ describe('auth utils', () => {
 
     next.mockClear()
     localStorage.setItem('auth_token', makeJwt(Math.floor(Date.now() / 1000) + 3600))
-    localStorage.setItem('current_user_summary', JSON.stringify({ role: 'مدیر میانی' }))
-    await authGuard({ path: '/admin', meta: { requiresAdmin: true } } as any, {} as any, next)
+    cacheCurrentUserSummary(authoritativeSummary({ role: 'مدیر میانی' }))
+    await authGuard(
+      authGuardRoute({ path: '/admin', meta: { requiresAdmin: true } }),
+      authGuardFromRoute,
+      next,
+    )
     expect(next).toHaveBeenLastCalledWith()
 
     next.mockClear()
-    localStorage.setItem('current_user_summary', JSON.stringify({ role: 'عادی' }))
-    await authGuard({ path: '/admin', meta: { requiresAdmin: true } } as any, {} as any, next)
-    expect(next).toHaveBeenLastCalledWith({
-      name: 'system-recovery',
-      params: { pathMatch: ['__system', 'recovery'] },
-      query: { outcome: SYSTEM_RECOVERY_OUTCOME.FORBIDDEN },
-      replace: true,
-    })
-
-    next.mockClear()
-    localStorage.setItem(
-      'current_user_summary',
-      JSON.stringify({ role: 'عادی', account_status: 'inactive' }),
-    )
+    cacheCurrentUserSummary(authoritativeSummary())
     await authGuard(
-      { path: '/market', meta: { requiresAuth: true, requiresMarketAccess: true } } as any,
-      {} as any,
+      authGuardRoute({ path: '/admin', meta: { requiresAdmin: true } }),
+      authGuardFromRoute,
       next,
     )
     expect(next).toHaveBeenLastCalledWith({
@@ -255,13 +285,30 @@ describe('auth utils', () => {
     })
 
     next.mockClear()
-    localStorage.setItem(
-      'current_user_summary',
-      JSON.stringify({ role: 'عادی', account_status: 'active', is_accountant: true }),
-    )
+    cacheCurrentUserSummary(authoritativeSummary({ account_status: 'inactive' }))
     await authGuard(
-      { path: '/market', meta: { requiresAuth: true, requiresMarketAccess: true } } as any,
-      {} as any,
+      authGuardRoute({
+        path: '/market',
+        meta: { requiresAuth: true, requiresMarketAccess: true },
+      }),
+      authGuardFromRoute,
+      next,
+    )
+    expect(next).toHaveBeenLastCalledWith({
+      name: 'system-recovery',
+      params: { pathMatch: ['__system', 'recovery'] },
+      query: { outcome: SYSTEM_RECOVERY_OUTCOME.FORBIDDEN },
+      replace: true,
+    })
+
+    next.mockClear()
+    cacheCurrentUserSummary(authoritativeSummary({ is_accountant: true }))
+    await authGuard(
+      authGuardRoute({
+        path: '/market',
+        meta: { requiresAuth: true, requiresMarketAccess: true },
+      }),
+      authGuardFromRoute,
       next,
     )
     expect(next).toHaveBeenLastCalledWith({
@@ -276,21 +323,26 @@ describe('auth utils', () => {
     const token = makeJwt(Math.floor(Date.now() / 1000) + 3600)
     localStorage.setItem('auth_token', token)
     fetchMock.mockResolvedValueOnce(
-      makeJsonResponse({
-        id: 7,
-        role: 'مدیر میانی',
-        account_name: 'manager7',
-        is_customer: true,
-        customer_tier: 'tier2',
-      }),
+      makeJsonResponse(
+        authoritativeSummary({
+          id: 7,
+          role: 'مدیر میانی',
+          account_name: 'manager7',
+          is_customer: true,
+          customer_tier: 'tier2',
+        }),
+      ),
     )
 
     const { authGuard } = await import(authModulePath)
     const next = vi.fn()
 
     await authGuard(
-      { path: '/admin', meta: { requiresAuth: true, requiresAdmin: true } } as any,
-      {} as any,
+      authGuardRoute({
+        path: '/admin',
+        meta: { requiresAuth: true, requiresAdmin: true },
+      }),
+      authGuardFromRoute,
       next,
     )
 
@@ -313,22 +365,26 @@ describe('auth utils', () => {
     const token = makeJwt(Math.floor(Date.now() / 1000) + 3600)
     localStorage.setItem('auth_token', token)
     fetchMock.mockResolvedValueOnce(
-      makeJsonResponse({
-        id: 9,
-        role: 'عادی',
-        account_name: 'inactive9',
-        account_status: 'inactive',
-        global_lock_grace_expires_at: '2026-05-20T12:00:00Z',
-        global_web_locked_at: null,
-      }),
+      makeJsonResponse(
+        authoritativeSummary({
+          id: 9,
+          account_name: 'inactive9',
+          account_status: 'inactive',
+          global_lock_grace_expires_at: '2026-05-20T12:00:00Z',
+          global_web_locked_at: null,
+        }),
+      ),
     )
 
     const { authGuard } = await import(authModulePath)
     const next = vi.fn()
 
     await authGuard(
-      { path: '/market', meta: { requiresAuth: true, requiresMarketAccess: true } } as any,
-      {} as any,
+      authGuardRoute({
+        path: '/market',
+        meta: { requiresAuth: true, requiresMarketAccess: true },
+      }),
+      authGuardFromRoute,
       next,
     )
 
@@ -349,21 +405,24 @@ describe('auth utils', () => {
     const token = makeJwt(Math.floor(Date.now() / 1000) + 3600)
     localStorage.setItem('auth_token', token)
     fetchMock.mockResolvedValueOnce(
-      makeJsonResponse({
-        id: 11,
-        role: 'عادی',
-        account_name: 'accountant11',
-        account_status: 'active',
-        is_accountant: true,
-      }),
+      makeJsonResponse(
+        authoritativeSummary({
+          id: 11,
+          account_name: 'accountant11',
+          is_accountant: true,
+        }),
+      ),
     )
 
     const { authGuard } = await import(authModulePath)
     const next = vi.fn()
 
     await authGuard(
-      { path: '/market', meta: { requiresAuth: true, requiresMarketAccess: true } } as any,
-      {} as any,
+      authGuardRoute({
+        path: '/market',
+        meta: { requiresAuth: true, requiresMarketAccess: true },
+      }),
+      authGuardFromRoute,
       next,
     )
 
@@ -379,20 +438,78 @@ describe('auth utils', () => {
     })
   })
 
+  it('does not authorize admin or market deep links from partial cached identity', async () => {
+    localStorage.setItem('auth_token', makeJwt(Math.floor(Date.now() / 1000) + 3600))
+    const { authGuard } = await import(authModulePath)
+    const next = vi.fn()
+    const unavailableRecovery = {
+      name: 'system-recovery',
+      params: { pathMatch: ['__system', 'recovery'] },
+      query: { outcome: SYSTEM_RECOVERY_OUTCOME.DEEP_LINK_FAILURE },
+      replace: true,
+    }
+
+    localStorage.setItem('current_user_summary', JSON.stringify({ role: 'مدیر ارشد' }))
+    fetchMock.mockResolvedValueOnce(
+      makeJsonResponse({ detail: 'admin profile unavailable' }, 503, false),
+    )
+    await authGuard(
+      authGuardRoute({
+        path: '/admin/users',
+        meta: { requiresAuth: true, requiresAdmin: true },
+      }),
+      authGuardFromRoute,
+      next,
+    )
+
+    expect(next).toHaveBeenLastCalledWith(unavailableRecovery)
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      '/api/auth/me',
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    )
+
+    next.mockClear()
+    localStorage.setItem(
+      'current_user_summary',
+      JSON.stringify({ role: 'عادی', account_status: 'active' }),
+    )
+    fetchMock.mockResolvedValueOnce(
+      makeJsonResponse({ detail: 'market profile unavailable' }, 503, false),
+    )
+    await authGuard(
+      authGuardRoute({
+        path: '/market',
+        meta: { requiresAuth: true, requiresMarketAccess: true },
+      }),
+      authGuardFromRoute,
+      next,
+    )
+
+    expect(next).toHaveBeenLastCalledWith(unavailableRecovery)
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      '/api/auth/me',
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    )
+  })
+
   it('authGuard distinguishes authoritative denial from unavailable admin and market checks', async () => {
     const token = makeJwt(Math.floor(Date.now() / 1000) + 3600)
     localStorage.setItem('auth_token', token)
     localStorage.setItem('current_user_summary', '{broken-json')
-    fetchMock.mockResolvedValueOnce(
-      makeJsonResponse({ id: 10, role: 'عادی', account_status: 'active' }),
-    )
+    fetchMock.mockResolvedValueOnce(makeJsonResponse(authoritativeSummary({ id: 10 })))
 
     const { authGuard } = await import(authModulePath)
+    const { clearCurrentUserSummary } = await import('./currentUser')
     const next = vi.fn()
 
     await authGuard(
-      { path: '/admin', meta: { requiresAuth: true, requiresAdmin: true } } as any,
-      {} as any,
+      authGuardRoute({
+        path: '/admin',
+        meta: { requiresAuth: true, requiresAdmin: true },
+      }),
+      authGuardFromRoute,
       next,
     )
     expect(next).toHaveBeenLastCalledWith({
@@ -403,11 +520,14 @@ describe('auth utils', () => {
     })
 
     next.mockClear()
-    localStorage.removeItem('current_user_summary')
+    clearCurrentUserSummary()
     fetchMock.mockResolvedValueOnce(makeJsonResponse({}, 400, false))
     await authGuard(
-      { path: '/market', meta: { requiresAuth: true, requiresMarketAccess: true } } as any,
-      {} as any,
+      authGuardRoute({
+        path: '/market',
+        meta: { requiresAuth: true, requiresMarketAccess: true },
+      }),
+      authGuardFromRoute,
       next,
     )
     expect(next).toHaveBeenLastCalledWith({
@@ -418,10 +538,14 @@ describe('auth utils', () => {
     })
 
     next.mockClear()
+    clearCurrentUserSummary()
     fetchMock.mockRejectedValueOnce(new Error('profile unavailable'))
     await authGuard(
-      { path: '/admin', meta: { requiresAuth: true, requiresAdmin: true } } as any,
-      {} as any,
+      authGuardRoute({
+        path: '/admin',
+        meta: { requiresAuth: true, requiresAdmin: true },
+      }),
+      authGuardFromRoute,
       next,
     )
     expect(next).toHaveBeenLastCalledWith({
@@ -432,11 +556,14 @@ describe('auth utils', () => {
     })
 
     next.mockClear()
-    localStorage.removeItem('current_user_summary')
+    clearCurrentUserSummary()
     fetchMock.mockRejectedValueOnce(new Error('market profile unavailable'))
     await authGuard(
-      { path: '/market', meta: { requiresAuth: true, requiresMarketAccess: true } } as any,
-      {} as any,
+      authGuardRoute({
+        path: '/market',
+        meta: { requiresAuth: true, requiresMarketAccess: true },
+      }),
+      authGuardFromRoute,
       next,
     )
     expect(next).toHaveBeenLastCalledWith({
@@ -486,6 +613,89 @@ describe('auth utils', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 
+  it('allows owner workspace deep links only for an active non-customer non-accountant identity', async () => {
+    localStorage.setItem('auth_token', makeJwt(Math.floor(Date.now() / 1000) + 3600))
+    const { authGuard } = await import(authModulePath)
+    const { cacheCurrentUserSummary } = await import('./currentUser')
+    const next = vi.fn()
+    const ownerRoute = authGuardRoute({
+      path: '/operations/customers',
+      meta: { requiresAuth: true, requiresOwnerAccess: true },
+    })
+    const forbiddenRecovery = {
+      name: 'system-recovery',
+      params: { pathMatch: ['__system', 'recovery'] },
+      query: { outcome: SYSTEM_RECOVERY_OUTCOME.FORBIDDEN },
+      replace: true,
+    }
+
+    for (const deniedIdentity of [
+      authoritativeSummary({ is_customer: true }),
+      authoritativeSummary({ is_accountant: true }),
+      authoritativeSummary({ account_status: 'inactive' }),
+    ]) {
+      cacheCurrentUserSummary(deniedIdentity)
+      await authGuard(ownerRoute, authGuardFromRoute, next)
+      expect(next).toHaveBeenLastCalledWith(forbiddenRecovery)
+      next.mockClear()
+    }
+
+    cacheCurrentUserSummary(authoritativeSummary())
+    await authGuard(ownerRoute, authGuardFromRoute, next)
+    expect(next).toHaveBeenLastCalledWith()
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('does not let a late route probe for account A overwrite account B authority', async () => {
+    let resolveAccountA!: (value: unknown) => void
+    const accountAResponse = new Promise((resolve) => {
+      resolveAccountA = resolve
+    })
+    fetchMock
+      .mockReturnValueOnce(accountAResponse)
+      .mockResolvedValueOnce(
+        makeJsonResponse(authoritativeSummary({ id: 202, account_name: 'account-b' })),
+      )
+
+    localStorage.setItem('auth_token', makeJwt(Math.floor(Date.now() / 1000) + 3600))
+    const { authGuard } = await import(authModulePath)
+    const { clearCurrentUserSummary, readCachedCurrentUserSummary } = await import('./currentUser')
+    const nextA = vi.fn()
+    const nextB = vi.fn()
+    const adminRoute = authGuardRoute({
+      path: '/admin',
+      meta: { requiresAuth: true, requiresAdmin: true },
+    })
+
+    const guardA = authGuard(adminRoute, authGuardFromRoute, nextA)
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+
+    localStorage.setItem('auth_token', makeJwt(Math.floor(Date.now() / 1000) + 7200))
+    clearCurrentUserSummary()
+    await authGuard(adminRoute, authGuardFromRoute, nextB)
+    expect(nextB).toHaveBeenLastCalledWith({
+      name: 'system-recovery',
+      params: { pathMatch: ['__system', 'recovery'] },
+      query: { outcome: SYSTEM_RECOVERY_OUTCOME.FORBIDDEN },
+      replace: true,
+    })
+
+    resolveAccountA(
+      makeJsonResponse(
+        authoritativeSummary({ id: 201, role: 'مدیر ارشد', account_name: 'account-a' }),
+      ),
+    )
+    await guardA
+
+    expect(nextA).toHaveBeenLastCalledWith({
+      name: 'system-recovery',
+      params: { pathMatch: ['__system', 'recovery'] },
+      query: { outcome: SYSTEM_RECOVERY_OUTCOME.DEEP_LINK_FAILURE },
+      replace: true,
+    })
+    expect(readCachedCurrentUserSummary()).toMatchObject({ id: 202, account_name: 'account-b' })
+  })
+
   it('aborts hanging admin and market profile probes and resolves both guards as unavailable', async () => {
     vi.useFakeTimers()
     localStorage.setItem('auth_token', makeJwt(Math.floor(Date.now() / 1000) + 3600))
@@ -503,6 +713,7 @@ describe('auth utils', () => {
       { path: '/market', meta: { requiresAuth: true, requiresMarketAccess: true } },
     ]) {
       const guardPromise = authGuard(authGuardRoute(route), authGuardFromRoute, next)
+      await vi.advanceTimersByTimeAsync(0)
       await vi.advanceTimersByTimeAsync(AUTH_ROUTE_GUARD_TIMEOUT_MS)
       await guardPromise
 

@@ -2,9 +2,10 @@ import { ref } from 'vue'
 import type { RouteLocationNormalized, NavigationGuardNext } from 'vue-router'
 import { isAdminRoleValue, readCachedCurrentUserRole } from './adminAccess'
 import {
-  cacheCurrentUserSummary,
   clearCurrentUserSummary,
-  readCachedCurrentUserSummary,
+  isAuthoritativeCurrentUserSummary,
+  loadCurrentUserSummary,
+  type AuthoritativeCurrentUserSummary,
 } from './currentUser'
 import { createHttpErrorFromResponse, type ErrorPolicyContext } from './httpErrorPolicy'
 import {
@@ -157,10 +158,6 @@ export async function isAuthenticated(): Promise<boolean> {
   return (await resolveAuthentication()) === 'authenticated'
 }
 
-function cacheCurrentUserSummaryFromAuthMe(payload: unknown) {
-  cacheCurrentUserSummary(payload)
-}
-
 function isInactiveAccountStatus(status: string | null | undefined): boolean {
   return status === 'inactive'
 }
@@ -170,64 +167,52 @@ export function isAdmin(): boolean {
 }
 
 type AuthoritativeAccessResult = 'allowed' | 'forbidden' | 'unavailable'
-const ROUTE_ACCESS_FETCH_OPTIONS = {
-  retryNetwork: false,
-  trackConnectionState: false,
-} as const
+type RouteAccessSummaryResult =
+  | { state: 'ready'; user: AuthoritativeCurrentUserSummary }
+  | { state: 'forbidden' | 'unavailable'; user: null }
 
-async function ensureAdminAccess(): Promise<AuthoritativeAccessResult> {
-  const cachedRole = readCachedCurrentUserRole()
-  if (cachedRole) {
-    return isAdminRoleValue(cachedRole) ? 'allowed' : 'forbidden'
-  }
-
+async function loadRouteAccessSummary(): Promise<RouteAccessSummaryResult> {
   try {
-    const response = await withAuthRequestTimeout((signal) =>
-      apiFetch('/api/auth/me', { ...ROUTE_ACCESS_FETCH_OPTIONS, signal }),
+    const result = await withAuthRequestTimeout((signal) =>
+      loadCurrentUserSummary({ signal, timeoutMs: AUTH_ROUTE_GUARD_TIMEOUT_MS }),
     )
-    if (!response.ok) {
-      return response.status === 403 ? 'forbidden' : 'unavailable'
+    if (result.state === 'unauthorized') {
+      return {
+        state: result.error?.status === 403 ? 'forbidden' : 'unavailable',
+        user: null,
+      }
     }
-
-    const data = await response.json()
-    if (typeof data?.role !== 'string' || !data.role.trim()) {
-      return 'unavailable'
+    if (result.state !== 'ready' || !isAuthoritativeCurrentUserSummary(result.user)) {
+      return { state: 'unavailable', user: null }
     }
-    cacheCurrentUserSummaryFromAuthMe(data)
-    return isAdminRoleValue(data.role) ? 'allowed' : 'forbidden'
+    return { state: 'ready', user: result.user }
   } catch {
-    return 'unavailable'
+    return { state: 'unavailable', user: null }
   }
 }
 
+async function ensureAdminAccess(): Promise<AuthoritativeAccessResult> {
+  const result = await loadRouteAccessSummary()
+  if (result.state !== 'ready') return result.state
+  return isAdminRoleValue(result.user.role) ? 'allowed' : 'forbidden'
+}
+
 async function ensureMarketAccess(): Promise<AuthoritativeAccessResult> {
-  const cachedSummary = readCachedCurrentUserSummary()
-  if (cachedSummary) {
-    return !isInactiveAccountStatus(cachedSummary.account_status) &&
-      cachedSummary.is_accountant !== true
-      ? 'allowed'
-      : 'forbidden'
-  }
+  const result = await loadRouteAccessSummary()
+  if (result.state !== 'ready') return result.state
+  return !isInactiveAccountStatus(result.user.account_status) && result.user.is_accountant !== true
+    ? 'allowed'
+    : 'forbidden'
+}
 
-  try {
-    const response = await withAuthRequestTimeout((signal) =>
-      apiFetch('/api/auth/me', { ...ROUTE_ACCESS_FETCH_OPTIONS, signal }),
-    )
-    if (!response.ok) {
-      return response.status === 403 ? 'forbidden' : 'unavailable'
-    }
-
-    const data = await response.json()
-    if (typeof data?.role !== 'string' || !data.role.trim()) {
-      return 'unavailable'
-    }
-    cacheCurrentUserSummaryFromAuthMe(data)
-    return !isInactiveAccountStatus(data.account_status) && data.is_accountant !== true
-      ? 'allowed'
-      : 'forbidden'
-  } catch {
-    return 'unavailable'
-  }
+async function ensureOwnerAccess(): Promise<AuthoritativeAccessResult> {
+  const result = await loadRouteAccessSummary()
+  if (result.state !== 'ready') return result.state
+  return !isInactiveAccountStatus(result.user.account_status) &&
+    result.user.is_accountant !== true &&
+    result.user.is_customer !== true
+    ? 'allowed'
+    : 'forbidden'
 }
 
 export async function authGuard(
@@ -269,6 +254,15 @@ export async function authGuard(
       return next(unavailableSystemRecoveryLocation())
     }
   }
+  if (meta.requiresOwnerAccess) {
+    const ownerAccess = await ensureOwnerAccess()
+    if (ownerAccess === 'forbidden') {
+      return next(forbiddenSystemRecoveryLocation())
+    }
+    if (ownerAccess === 'unavailable') {
+      return next(unavailableSystemRecoveryLocation())
+    }
+  }
   if (meta.requiresAdmin) {
     const adminAccess = await ensureAdminAccess()
     if (adminAccess === 'forbidden') {
@@ -306,7 +300,38 @@ export function logout() {
   forceLogout()
 }
 
+const WEB_PUSH_SESSION_CLEANUP_MESSAGE = 'web-push:cleanup-session'
+
+function requestWebPushSessionCleanup(authToken: string | null): void {
+  if (!authToken || typeof navigator === 'undefined' || !navigator.serviceWorker) return
+
+  const message = {
+    type: WEB_PUSH_SESSION_CLEANUP_MESSAGE,
+    authToken,
+  }
+  const serviceWorker = navigator.serviceWorker
+
+  try {
+    if (serviceWorker.controller) {
+      serviceWorker.controller.postMessage(message)
+      return
+    }
+  } catch {
+    // Fall through to an active registration when this page is not controlled.
+  }
+
+  try {
+    void serviceWorker
+      .getRegistration()
+      .then((registration) => registration?.active?.postMessage(message))
+      .catch(() => undefined)
+  } catch {
+    // Logout must still complete when Service Worker messaging is unavailable.
+  }
+}
+
 export function suspendSession() {
+  requestWebPushSessionCleanup(localStorage.getItem('auth_token'))
   const refreshToken = localStorage.getItem('refresh_token')
   if (refreshToken) {
     localStorage.setItem('suspended_refresh_token', refreshToken)
@@ -318,6 +343,7 @@ export function suspendSession() {
 }
 
 export function forceLogout() {
+  requestWebPushSessionCleanup(localStorage.getItem('auth_token'))
   localStorage.removeItem('auth_token')
   localStorage.removeItem('refresh_token')
   localStorage.removeItem('suspended_refresh_token')

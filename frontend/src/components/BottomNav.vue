@@ -2,7 +2,11 @@
 import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { BriefcaseBusiness, Home, MessageCircle, Menu, Store, UserRound, X } from 'lucide-vue-next'
-import { currentUserSummary, primeCurrentUserSummary } from '../utils/currentUser'
+import {
+  currentUserSummary,
+  isAuthoritativeCurrentUserSummary,
+  primeCurrentUserSummary,
+} from '../utils/currentUser'
 import { useNotificationStore } from '../stores/notifications'
 import { isMarketRuntimeClosed, startMarketRuntimeUpdates, stopMarketRuntimeUpdates } from '../composables/useMarketRuntime'
 
@@ -178,6 +182,9 @@ onUnmounted(() => {
 })
 
 const isAccountant = computed(() => currentUserSummary.value?.is_accountant === true)
+const isCustomer = computed(() => currentUserSummary.value?.is_customer === true)
+const isInactiveAccount = computed(() => currentUserSummary.value?.account_status === 'inactive')
+const hasResolvedUser = computed(() => isAuthoritativeCurrentUserSummary(currentUserSummary.value))
 const isMarketClosed = computed(() => isMarketRuntimeClosed.value)
 
 const baseItems = [
@@ -224,7 +231,19 @@ const baseItems = [
 ]
 
 const navItems = computed(() => {
-  return baseItems.filter(item => item.name !== 'market' || !isAccountant.value)
+  return baseItems.filter((item) => {
+    if (
+      item.name === 'market' &&
+      (!hasResolvedUser.value || isAccountant.value || isInactiveAccount.value)
+    )
+      return false
+    if (
+      item.name === 'operations' &&
+      (!hasResolvedUser.value || isAccountant.value || isCustomer.value)
+    )
+      return false
+    return true
+  })
 })
 
 const fabMenuHeight = computed(() => {

@@ -102,6 +102,50 @@ function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
+const FORBIDDEN_NOTIFICATION_METADATA_LABELS = new Set([
+    'مسیر',
+    'route',
+    'api',
+    'backend',
+    'server',
+    'homeserver',
+])
+
+export function isForbiddenNotificationMetadataLabel(value: string): boolean {
+    const label = value.trim()
+    if (!label) return false
+    const lastToken = label.split(/\s+/u).at(-1) || label
+    const normalize = (candidate: string) => candidate.toLowerCase().replace(/[\s_.-]/gu, '')
+    return (
+        FORBIDDEN_NOTIFICATION_METADATA_LABELS.has(normalize(label)) ||
+        FORBIDDEN_NOTIFICATION_METADATA_LABELS.has(normalize(lastToken))
+    )
+}
+
+export function notificationMetadataSeparatorIndex(value: string): number {
+    return value.search(/[:=：＝﹕]/u)
+}
+
+export function sanitizeNotificationBody(value: unknown): string {
+    if (typeof value !== 'string') return ''
+    return value
+        .split(/[\r\n\u2028\u2029]+/u)
+        .filter((line) => {
+            const colonIndex = notificationMetadataSeparatorIndex(line)
+            return (
+                colonIndex === -1 ||
+                !isForbiddenNotificationMetadataLabel(line.slice(0, colonIndex))
+            )
+        })
+        .join('\n')
+        .trim()
+}
+
+export function sanitizeNotificationTitle(value: unknown, fallback = 'اعلان جدید'): string {
+    const sanitized = sanitizeNotificationBody(value)
+    return sanitized.split(/[\r\n\u2028\u2029]+/u).find((line) => line.trim())?.trim() || fallback
+}
+
 export function normalizeNotificationId(value: unknown): number | string {
     if (typeof value === 'number' && Number.isFinite(value)) {
         return value
@@ -153,13 +197,9 @@ export function normalizeAppNotificationPayload(
     }
     const category = normalizeNotificationCategory(source.category)
     const level = normalizeNotificationLevel(source.level)
-    const content = typeof source.content === 'string' && source.content.trim()
-        ? source.content
-        : ''
-    const message = typeof source.message === 'string' && source.message.trim()
-        ? source.message
-        : ''
-    const body = content || message || (typeof source.body === 'string' ? source.body : '')
+    const content = sanitizeNotificationBody(source.content)
+    const message = sanitizeNotificationBody(source.message)
+    const body = content || message || sanitizeNotificationBody(source.body)
 
     return {
         ...source,
@@ -169,9 +209,7 @@ export function normalizeAppNotificationPayload(
         body,
         content: content || body,
         message: message || body,
-        title: typeof source.title === 'string' && source.title.trim()
-            ? source.title
-            : buildNotificationTitle(category),
+        title: sanitizeNotificationTitle(source.title, buildNotificationTitle(category)),
     }
 }
 

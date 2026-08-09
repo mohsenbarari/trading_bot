@@ -64,7 +64,7 @@ describe('UIUX v2 CSS guard', () => {
     expect(findings).toEqual([])
   })
 
-  it('allows only the Stage 3 shell namespaces plus the registered public header', () => {
+  it('allows only registered Stage 3 shell and Stage 4 daily-core namespaces', () => {
     const findings = checkV2Styles(
       [
         {
@@ -78,6 +78,10 @@ describe('UIUX v2 CSS guard', () => {
             '[data-ui-system="v2-portal"] .ui-v2-session-dialog {}',
             '[data-ui-system="v2"] .ui-v2-toast-layer {}',
             '[data-ui-system="v2"] .ui-v2-public-header {}',
+            '[data-ui-system="v2"] .ui-v2-daily-page {}',
+            '[data-ui-system="v2"] .ui-v2-home-header__main {}',
+            '[data-ui-system="v2"] .ui-v2-workspace-adapter__body {}',
+            '[data-ui-system="v2"] .ui-v2-notifications-item {}',
             '[data-ui-system="v2"] .ui-v2-profile-card {}',
           ].join('\n'),
         },
@@ -556,7 +560,7 @@ describe('UIUX v2 catalog boundary', () => {
 })
 
 describe('UIUX v2 route policy guard', () => {
-  it('accepts the Stage 3 fixture contract and the current production router', () => {
+  it('accepts the Stage 4 fixture contract and the current production router', () => {
     expect(
       checkRoutePolicy({
         manifest: cloneManifest(),
@@ -570,7 +574,7 @@ describe('UIUX v2 route policy guard', () => {
     manifest.routes.find(({ path }) => path === '/market').v2Scope = 'section'
 
     expect(findingCodes(checkRoutePolicy({ manifest, routerSource: routerFixture }))).toEqual(
-      expect.arrayContaining(['protected-route-activation', 'stage3-v2-scope-contract-drift']),
+      expect.arrayContaining(['protected-route-activation', 'stage4-v2-scope-contract-drift']),
     )
   })
 
@@ -579,7 +583,7 @@ describe('UIUX v2 route policy guard', () => {
     manifest.routes.find(({ path }) => path === '/admin/messages').v2Scope = 'route'
 
     expect(findingCodes(checkRoutePolicy({ manifest, routerSource: routerFixture }))).toEqual(
-      expect.arrayContaining(['mixed-route-whole-scope', 'stage3-v2-scope-contract-drift']),
+      expect.arrayContaining(['mixed-route-whole-scope', 'stage4-v2-scope-contract-drift']),
     )
   })
 
@@ -590,7 +594,7 @@ describe('UIUX v2 route policy guard', () => {
     manifest.routes.splice(1, 0, displacedCatchAll)
 
     expect(findingCodes(checkRoutePolicy({ manifest, routerSource: routerFixture }))).toEqual(
-      expect.arrayContaining(['stage3-shell-contract-drift', 'recovery-catch-all-order']),
+      expect.arrayContaining(['stage4-shell-contract-drift', 'recovery-catch-all-order']),
     )
   })
 
@@ -758,7 +762,7 @@ describe('UIUX v2 route policy guard', () => {
           ],
         }),
       ),
-    ).toContain('stage3-product-source-activation')
+    ).toContain('stage4-product-source-activation')
   })
 
   it('rejects helper-based product activation without literal scope markup', () => {
@@ -776,7 +780,7 @@ describe('UIUX v2 route policy guard', () => {
             activationSources: [{ path: 'src/components/ProductCard.vue', source }],
           }),
         ),
-      ).toContain('stage3-product-source-activation')
+      ).toContain('stage4-product-source-activation')
     }
   })
 
@@ -809,7 +813,7 @@ describe('UIUX v2 route policy guard', () => {
         expect.arrayContaining([
           source.includes('router')
             ? 'runtime-route-registry-mutation'
-            : 'stage3-product-source-activation',
+            : 'stage4-product-source-activation',
         ]),
       )
     }
@@ -829,7 +833,7 @@ describe('UIUX v2 route policy guard', () => {
           activationSources: [{ path: 'src/views/ProfileView.vue', source }],
         }),
       ),
-    ).toContain('stage3-product-source-activation')
+    ).toContain('stage4-product-source-activation')
   })
 
   it('allows only the audited App and Home-section scope components', () => {
@@ -852,7 +856,14 @@ describe('UIUX v2 route policy guard', () => {
           '<script setup>',
           "import { AppDesignSystemScope } from '../components/ui'",
           '</script>',
-          '<template><AppDesignSystemScope class="ui-v2-pwa-section"><PWAInstallOverlay /></AppDesignSystemScope></template>',
+          '<template>',
+          '<AppDesignSystemScope class="ui-v2-home-top">',
+          '<header class="ui-v2-home-header"><div class="ui-v2-home-header__main"><button class="ui-v2-home-identity" /><button class="ui-v2-home-notifications" /></div><h1 class="ui-v2-home-title">خانه</h1></header>',
+          '<div class="ui-v2-home-alert" />',
+          '</AppDesignSystemScope>',
+          '<MarketHero />',
+          '<AppDesignSystemScope class="ui-v2-pwa-section"><PWAInstallOverlay /></AppDesignSystemScope>',
+          '</template>',
         ].join('\n'),
       },
       {
@@ -895,12 +906,17 @@ describe('UIUX v2 route policy guard', () => {
       {
         path: 'src/views/DashboardView.vue',
         source:
-          '<template><AppDesignSystemScope class="ui-v2-pwa-section"><MarketHero /></AppDesignSystemScope></template>',
+          '<template><AppDesignSystemScope class="ui-v2-home-top"><header class="ui-v2-home-header"><div class="ui-v2-home-header__main"><button class="ui-v2-home-identity" /><button class="ui-v2-home-notifications" /></div><h1 class="ui-v2-home-title">خانه</h1></header><div class="ui-v2-home-alert" /><MarketHero /></AppDesignSystemScope><AppDesignSystemScope class="ui-v2-pwa-section"><PWAInstallOverlay /></AppDesignSystemScope></template>',
       },
       {
         path: 'src/views/DashboardView.vue',
         source:
-          '<template><AppDesignSystemScope class="ui-v2-pwa-section" /><AppDesignSystemScope class="ui-v2-pwa-section" /></template>',
+          '<template><AppDesignSystemScope class="ui-v2-home-top"><header class="ui-v2-home-header"><div class="ui-v2-home-header__main"><button class="ui-v2-home-identity" /><button class="ui-v2-home-notifications" /></div><h1 class="ui-v2-home-title">خانه</h1></header><div class="ui-v2-home-alert" /></AppDesignSystemScope><AppDesignSystemScope class="ui-v2-pwa-section"><MarketHero /></AppDesignSystemScope></template>',
+      },
+      {
+        path: 'src/views/DashboardView.vue',
+        source:
+          '<template><AppDesignSystemScope class="ui-v2-home-top"><header class="ui-v2-home-header"><div class="ui-v2-home-header__main"><button class="ui-v2-home-identity" /><button class="ui-v2-home-notifications" /></div><h1 class="ui-v2-home-title">خانه</h1></header><div class="ui-v2-home-alert" /></AppDesignSystemScope><AppDesignSystemScope class="ui-v2-home-top"><div /></AppDesignSystemScope><AppDesignSystemScope class="ui-v2-pwa-section"><PWAInstallOverlay /></AppDesignSystemScope></template>',
       },
       {
         path: 'src/components/SessionApprovalModal.vue',
@@ -916,8 +932,60 @@ describe('UIUX v2 route policy guard', () => {
             activationSources: [unsafeSource],
           }),
         ),
-      ).toContain('stage3-product-source-activation')
+      ).toContain('stage4-product-source-activation')
     }
+  })
+
+  it('allows only default-off Stage 4 workspace adapter activation', () => {
+    const workspacePaths = [
+      'src/components/workspace/WorkspaceActionTile.vue',
+      'src/components/workspace/WorkspaceDangerZone.vue',
+      'src/components/workspace/WorkspaceNotice.vue',
+      'src/components/workspace/WorkspaceSection.vue',
+      'src/components/workspace/WorkspaceShell.vue',
+      'src/components/workspace/WorkspaceStatTile.vue',
+    ]
+    const activationSources = workspacePaths.map((sourcePath) => ({
+      path: sourcePath,
+      source: fs.readFileSync(path.join(frontendRoot, sourcePath), 'utf8'),
+    }))
+
+    expect(
+      checkRoutePolicy({
+        manifest: cloneManifest(),
+        routerSource: routerFixture,
+        activationSources,
+      }),
+    ).toEqual([])
+
+    for (const activationSource of activationSources) {
+      const defaultOn = activationSource.source.replace('v2Scope: false', 'v2Scope: true')
+      expect(defaultOn).not.toBe(activationSource.source)
+      expect(
+        findingCodes(
+          checkRoutePolicy({
+            manifest: cloneManifest(),
+            routerSource: routerFixture,
+            activationSources: [{ ...activationSource, source: defaultOn }],
+          }),
+        ),
+      ).toContain('stage4-product-source-activation')
+    }
+
+    const helperAdapter = activationSources.find(({ path: sourcePath }) =>
+      sourcePath.endsWith('/WorkspaceActionTile.vue'),
+    )
+    const withoutConditionalScopeClass = helperAdapter.source.replace("'ui-v2-scope': v2Scope,", '')
+    expect(withoutConditionalScopeClass).not.toBe(helperAdapter.source)
+    expect(
+      findingCodes(
+        checkRoutePolicy({
+          manifest: cloneManifest(),
+          routerSource: routerFixture,
+          activationSources: [{ ...helperAdapter, source: withoutConditionalScopeClass }],
+        }),
+      ),
+    ).toContain('stage4-product-source-activation')
   })
 
   it('scans ordinary activation surfaces while excluding only V2 definitions and tests', () => {
@@ -954,7 +1022,7 @@ describe('UIUX v2 route policy guard', () => {
             activationSources: [{ path: 'index.html', source }],
           }),
         ),
-      ).toContain('stage3-product-source-activation')
+      ).toContain('stage4-product-source-activation')
     }
   })
 })

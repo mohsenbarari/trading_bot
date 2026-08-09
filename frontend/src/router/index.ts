@@ -59,25 +59,31 @@ const router = createRouter({
       path: '/operations/customers',
       name: 'operations-customers',
       component: () => import('../views/CustomerWorkspaceView.vue'),
-      meta: routeMeta('operations-customers', { requiresAuth: true }),
+      meta: routeMeta('operations-customers', { requiresAuth: true, requiresOwnerAccess: true }),
     },
     {
       path: '/operations/customers/:relationId',
       name: 'operations-customers-detail',
       component: () => import('../views/CustomerWorkspaceView.vue'),
-      meta: routeMeta('operations-customers-detail', { requiresAuth: true }),
+      meta: routeMeta('operations-customers-detail', {
+        requiresAuth: true,
+        requiresOwnerAccess: true,
+      }),
     },
     {
       path: '/operations/accountants',
       name: 'operations-accountants',
       component: () => import('../views/AccountantWorkspaceView.vue'),
-      meta: routeMeta('operations-accountants', { requiresAuth: true }),
+      meta: routeMeta('operations-accountants', { requiresAuth: true, requiresOwnerAccess: true }),
     },
     {
       path: '/operations/accountants/:relationId',
       name: 'operations-accountants-detail',
       component: () => import('../views/AccountantWorkspaceView.vue'),
-      meta: routeMeta('operations-accountants-detail', { requiresAuth: true }),
+      meta: routeMeta('operations-accountants-detail', {
+        requiresAuth: true,
+        requiresOwnerAccess: true,
+      }),
     },
     {
       path: '/account',
@@ -124,7 +130,7 @@ const router = createRouter({
     {
       path: '/settings',
       name: 'settings',
-      component: () => import('../views/SettingsView.vue'),
+      redirect: { name: 'account-security', query: {}, hash: '' },
       meta: routeMeta('settings', { requiresAuth: true }),
     },
     {
@@ -190,7 +196,7 @@ const router = createRouter({
     {
       path: '/notifications',
       name: 'notifications',
-      component: () => import('../views/NotificationsView.vue'),
+      redirect: { name: 'account-notifications', query: {}, hash: '' },
       meta: routeMeta('notifications', { requiresAuth: true }),
     },
     {

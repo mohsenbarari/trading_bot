@@ -3,7 +3,11 @@
  * Handles permission requests and displaying system-level notifications.
  */
 
-import type { BrowserNotificationClickDetail } from '../types/notifications'
+import {
+    sanitizeNotificationBody,
+    sanitizeNotificationTitle,
+    type BrowserNotificationClickDetail,
+} from '../types/notifications'
 
 export const BROWSER_NOTIFICATION_CLICK_EVENT = 'app-browser-notification-click'
 
@@ -33,14 +37,16 @@ export const showBrowserNotification = (title: string, body: string, options: Ro
     const { route, ...notificationOptions } = options
 
     // Truncate body to 300 characters as requested by user
-    const truncatedBody = body.length > 300 ? body.substring(0, 297) + '...' : body;
+    const safeBody = sanitizeNotificationBody(body)
+    const truncatedBody = safeBody.length > 300 ? safeBody.substring(0, 297) + '...' : safeBody;
 
     try {
-        const notification = new Notification(title, {
+        const notification = new Notification(sanitizeNotificationTitle(title), {
+            ...notificationOptions,
             body: truncatedBody,
-            icon: '/pwa-192x192.png', // Default icon from PWA manifest
-            vibrate: [200, 100, 200], // Vibration pattern for supported devices
-            ...notificationOptions
+            icon: '/pwa-192x192.png',
+            badge: '/pwa-192x192.png',
+            vibrate: [200, 100, 200],
         } as any);
 
         notification.onclick = () => {
@@ -54,8 +60,7 @@ export const showBrowserNotification = (title: string, body: string, options: Ro
         };
         
         return true;
-    } catch (err) {
-        console.error('Failed to show notification:', err);
+    } catch {
         return false;
     }
 };

@@ -6,6 +6,7 @@ import { routeRequestJson } from './routeRequest'
 export interface CurrentUserSummary {
   id?: number
   role: string
+  cached_at?: string | null
   full_name?: string | null
   account_name?: string | null
   account_status?: string | null
@@ -22,6 +23,25 @@ export interface CurrentUserSummary {
   telegram_linked?: boolean
   can_connect_telegram?: boolean
   telegram_link_denial_reason?: string | null
+  trading_restricted_until?: string | null
+}
+
+export type AuthoritativeCurrentUserSummary = CurrentUserSummary & {
+  account_status: 'active' | 'inactive'
+  is_accountant: boolean
+  is_customer: boolean
+}
+
+export function isAuthoritativeCurrentUserSummary(
+  value: CurrentUserSummary | null | undefined,
+): value is AuthoritativeCurrentUserSummary {
+  return Boolean(
+    value &&
+      value.role.trim() &&
+      (value.account_status === 'active' || value.account_status === 'inactive') &&
+      typeof value.is_accountant === 'boolean' &&
+      typeof value.is_customer === 'boolean',
+  )
 }
 
 export type CurrentUserLoadState = 'ready' | 'stale' | 'unauthorized' | 'error'
@@ -55,6 +75,7 @@ function normalizeCurrentUserSummary(raw: unknown): CurrentUserSummary | null {
   return {
     id: typeof user.id === 'number' ? user.id : Number.isFinite(Number(user.id)) ? Number(user.id) : undefined,
     role: user.role,
+    cached_at: typeof user.cached_at === 'string' ? user.cached_at : null,
     full_name: typeof user.full_name === 'string' ? user.full_name : null,
     account_name: typeof user.account_name === 'string' ? user.account_name : null,
     account_status: typeof user.account_status === 'string' ? user.account_status : null,
@@ -62,7 +83,8 @@ function normalizeCurrentUserSummary(raw: unknown): CurrentUserSummary | null {
       typeof user.global_lock_grace_expires_at === 'string' ? user.global_lock_grace_expires_at : null,
     global_web_locked_at:
       typeof user.global_web_locked_at === 'string' ? user.global_web_locked_at : null,
-    is_accountant: user.is_accountant === true,
+    is_accountant:
+      typeof user.is_accountant === 'boolean' ? user.is_accountant : undefined,
     accountant_owner_user_id:
       typeof user.accountant_owner_user_id === 'number'
         ? user.accountant_owner_user_id
@@ -70,7 +92,7 @@ function normalizeCurrentUserSummary(raw: unknown): CurrentUserSummary | null {
           ? Number(user.accountant_owner_user_id)
           : null,
     accountant_owner_account_name: typeof user.accountant_owner_account_name === 'string' ? user.accountant_owner_account_name : null,
-    is_customer: user.is_customer === true,
+    is_customer: typeof user.is_customer === 'boolean' ? user.is_customer : undefined,
     customer_tier: user.customer_tier === 'tier1' || user.customer_tier === 'tier2' ? user.customer_tier : null,
     customer_owner_user_id:
       typeof user.customer_owner_user_id === 'number'
@@ -84,6 +106,8 @@ function normalizeCurrentUserSummary(raw: unknown): CurrentUserSummary | null {
     can_connect_telegram: user.can_connect_telegram === true,
     telegram_link_denial_reason:
       typeof user.telegram_link_denial_reason === 'string' ? user.telegram_link_denial_reason : null,
+    trading_restricted_until:
+      typeof user.trading_restricted_until === 'string' ? user.trading_restricted_until : null,
   }
 }
 
@@ -100,10 +124,29 @@ export function readCachedCurrentUserSummary(): CurrentUserSummary | null {
 }
 
 export const currentUserSummary = ref<CurrentUserSummary | null>(readCachedCurrentUserSummary())
+// A persisted summary is useful as visibly stale content, but it is not
+// authoritative for a newly established auth token until /api/auth/me binds it
+// in this runtime. The token itself is never copied into the cached payload.
+let currentUserSummaryAuthToken: string | null | undefined
+
+function currentAuthToken(): string | null {
+  return hasStorage() ? localStorage.getItem('auth_token') : null
+}
+
+function isCurrentUserSummaryBoundToCurrentAuth(): boolean {
+  return (
+    currentUserSummaryAuthToken !== undefined &&
+    currentUserSummaryAuthToken === currentAuthToken()
+  )
+}
 
 export function cacheCurrentUserSummary(raw: unknown): CurrentUserSummary | null {
-  const normalized = normalizeCurrentUserSummary(raw)
+  const candidate = normalizeCurrentUserSummary(raw)
+  const normalized = candidate
+    ? { ...candidate, cached_at: new Date().toISOString() }
+    : null
   currentUserSummary.value = normalized
+  currentUserSummaryAuthToken = normalized ? currentAuthToken() : undefined
 
   if (hasStorage()) {
     if (normalized) {
@@ -118,6 +161,7 @@ export function cacheCurrentUserSummary(raw: unknown): CurrentUserSummary | null
 
 export function clearCurrentUserSummary() {
   currentUserSummary.value = null
+  currentUserSummaryAuthToken = undefined
   if (hasStorage()) {
     localStorage.removeItem(CURRENT_USER_STORAGE_KEY)
   }
@@ -142,7 +186,7 @@ function currentUserLoadError(error: unknown, errorCode = 'CURRENT_USER_LOAD_ERR
   })
 }
 
-let currentUserStructuredRequestRevision = 0
+let currentUserAuthorityRequestRevision = 0
 
 function supersededCurrentUserResult(): CurrentUserLoadResult {
   const user = currentUserSummary.value
@@ -168,12 +212,16 @@ export async function loadCurrentUserSummary(
   const { force = false, signal, timeoutMs } = options
   const cachedUser = currentUserSummary.value
 
-  if (!force && cachedUser?.role) {
+  if (
+    !force &&
+    isAuthoritativeCurrentUserSummary(cachedUser) &&
+    isCurrentUserSummaryBoundToCurrentAuth()
+  ) {
     return { state: 'ready', source: 'cache', user: cachedUser, error: null }
   }
 
-  const requestAuthToken = hasStorage() ? localStorage.getItem('auth_token') : null
-  const requestRevision = ++currentUserStructuredRequestRevision
+  const requestAuthToken = currentAuthToken()
+  const requestRevision = ++currentUserAuthorityRequestRevision
 
   try {
     const payload = await routeRequestJson<unknown>('/api/auth/me', {
@@ -188,11 +236,11 @@ export async function loadCurrentUserSummary(
       },
     })
 
-    if (requestRevision !== currentUserStructuredRequestRevision) {
+    if (requestRevision !== currentUserAuthorityRequestRevision) {
       return supersededCurrentUserResult()
     }
 
-    if ((hasStorage() ? localStorage.getItem('auth_token') : null) !== requestAuthToken) {
+    if (currentAuthToken() !== requestAuthToken) {
       const error = currentUserLoadError(
         new Error('Authentication context changed while loading the current user.'),
         'CURRENT_USER_CONTEXT_CHANGED',
@@ -223,7 +271,7 @@ export async function loadCurrentUserSummary(
     const user = cacheCurrentUserSummary(normalized)
     return { state: 'ready', source: 'network', user, error: null }
   } catch (caught) {
-    if (requestRevision !== currentUserStructuredRequestRevision) {
+    if (requestRevision !== currentUserAuthorityRequestRevision) {
       return supersededCurrentUserResult()
     }
 
@@ -247,20 +295,28 @@ let currentUserRequest: Promise<CurrentUserSummary | null> | null = null
 let currentUserRequestAuthToken: string | null = null
 
 export async function primeCurrentUserSummary(force = false): Promise<CurrentUserSummary | null> {
-  if (!force && currentUserSummary.value?.role) {
+  if (
+    !force &&
+    isAuthoritativeCurrentUserSummary(currentUserSummary.value) &&
+    isCurrentUserSummaryBoundToCurrentAuth()
+  ) {
     return currentUserSummary.value
   }
 
-  const requestAuthToken = hasStorage() ? localStorage.getItem('auth_token') : null
+  const requestAuthToken = currentAuthToken()
 
   if (currentUserRequest && currentUserRequestAuthToken === requestAuthToken) {
     return currentUserRequest
   }
 
   let request!: Promise<CurrentUserSummary | null>
+  const requestRevision = ++currentUserAuthorityRequestRevision
   request = (async () => {
     try {
       const response = await apiFetch('/api/auth/me')
+      if (requestRevision !== currentUserAuthorityRequestRevision) {
+        return currentUserSummary.value
+      }
       if (!response.ok) {
         if (response.status === 401 || response.status === 403) {
           clearCurrentUserSummary()
@@ -268,12 +324,15 @@ export async function primeCurrentUserSummary(force = false): Promise<CurrentUse
         return currentUserSummary.value
       }
 
-      if ((hasStorage() ? localStorage.getItem('auth_token') : null) !== requestAuthToken) {
+      if (currentAuthToken() !== requestAuthToken) {
         return currentUserSummary.value
       }
 
       return cacheCurrentUserSummary(await response.json())
     } catch {
+      if (requestRevision !== currentUserAuthorityRequestRevision) {
+        return currentUserSummary.value
+      }
       return currentUserSummary.value
     } finally {
       if (currentUserRequest === request) {

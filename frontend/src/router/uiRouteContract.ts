@@ -42,9 +42,9 @@ export interface UiRouteContractEntry {
 
 /**
  * `full` means the complete route is outside the UIUX v2 migration surface.
- * `mixed` means only the named interiors are protected. Stage 3 may activate
- * only the surrounding shell (`section`) on those routes. `v2Scope` cannot
- * become `route` for mixed routes.
+ * `mixed` means only the named interiors are protected. Stage 4 may activate
+ * only explicit surrounding sections on those routes. `v2Scope` cannot become
+ * `route` for mixed routes.
  */
 export const uiRouteContract = [
   {
@@ -90,7 +90,7 @@ export const uiRouteContract = [
     shellClass: UI_ROUTE_SHELL.STANDARD_AUTHENTICATED,
     protection: UI_ROUTE_PROTECTION.NONE,
     protectedInteriors: [],
-    v2Scope: UI_V2_SCOPE.SECTION,
+    v2Scope: UI_V2_SCOPE.ROUTE,
   },
   {
     path: '/operations/customers',
@@ -135,7 +135,7 @@ export const uiRouteContract = [
     shellClass: UI_ROUTE_SHELL.STANDARD_AUTHENTICATED,
     protection: UI_ROUTE_PROTECTION.NONE,
     protectedInteriors: [],
-    v2Scope: UI_V2_SCOPE.SECTION,
+    v2Scope: UI_V2_SCOPE.ROUTE,
   },
   {
     path: '/account/security',
@@ -144,7 +144,7 @@ export const uiRouteContract = [
     shellClass: UI_ROUTE_SHELL.STANDARD_AUTHENTICATED,
     protection: UI_ROUTE_PROTECTION.NONE,
     protectedInteriors: [],
-    v2Scope: UI_V2_SCOPE.SECTION,
+    v2Scope: UI_V2_SCOPE.ROUTE,
   },
   {
     path: '/account/storage',
@@ -153,7 +153,7 @@ export const uiRouteContract = [
     shellClass: UI_ROUTE_SHELL.STANDARD_AUTHENTICATED,
     protection: UI_ROUTE_PROTECTION.NONE,
     protectedInteriors: [],
-    v2Scope: UI_V2_SCOPE.SECTION,
+    v2Scope: UI_V2_SCOPE.ROUTE,
   },
   {
     path: '/account/notifications',
@@ -162,7 +162,7 @@ export const uiRouteContract = [
     shellClass: UI_ROUTE_SHELL.STANDARD_AUTHENTICATED,
     protection: UI_ROUTE_PROTECTION.NONE,
     protectedInteriors: [],
-    v2Scope: UI_V2_SCOPE.SECTION,
+    v2Scope: UI_V2_SCOPE.ROUTE,
   },
   {
     path: '/chat',

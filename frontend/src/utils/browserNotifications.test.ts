@@ -135,4 +135,29 @@ describe('browserNotifications', () => {
     const notifications = await import('./browserNotifications')
     expect(notifications.showBrowserNotification('Messenger', 'Body')).toBe(false)
   })
+
+  it('does not let hostile options override sanitized body or local notification assets', async () => {
+    Object.defineProperty(globalThis, 'Notification', {
+      configurable: true,
+      value: MockNotification,
+    })
+    MockNotification.permission = 'granted'
+
+    const notifications = await import('./browserNotifications')
+    expect(
+      notifications.showBrowserNotification('route: /admin/system', 'server: api-01\nمتن امن', {
+        body: 'backend: raw-host',
+        icon: 'https://tracker.example/icon.png',
+        badge: 'https://tracker.example/badge.png',
+      }),
+    ).toBe(true)
+
+    const created = MockNotification.instances[0]!
+    expect(created.title).toBe('اعلان جدید')
+    expect(created.options.body).toBe('متن امن')
+    expect(created.options.icon).toBe('/pwa-192x192.png')
+    expect(created.options.badge).toBe('/pwa-192x192.png')
+    expect(JSON.stringify(created.options)).not.toContain('tracker.example')
+    expect(JSON.stringify(created.options)).not.toContain('raw-host')
+  })
 })

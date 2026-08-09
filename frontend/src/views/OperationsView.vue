@@ -3,51 +3,58 @@ import { computed, onMounted, ref } from 'vue'
 import type { Component } from 'vue'
 import { useRouter } from 'vue-router'
 import {
-  Bell,
   BriefcaseBusiness,
   Megaphone,
   Package,
   Settings,
   UserPlus,
   Users,
-  WalletCards,
 } from 'lucide-vue-next'
 import {
+  WorkspaceActionTile,
   WorkspaceNotice,
   WorkspaceSection,
   WorkspaceShell,
 } from '../components/workspace'
 import {
-  AppActionCard,
   AppButton,
+  AppEmptyState,
   AppErrorState,
   AppLoadingState,
-  AppStatusBadge,
 } from '../components/ui'
-import { currentUserSummary, isAdminRole, loadCurrentUserSummary } from '../utils/currentUser'
+import {
+  currentUserSummary,
+  isAdminRole,
+  isAuthoritativeCurrentUserSummary,
+  loadCurrentUserSummary,
+} from '../utils/currentUser'
 
 const router = useRouter()
-const identityState = ref<'loading' | 'ready' | 'stale' | 'error'>('loading')
+const identityState = ref<'loading' | 'ready' | 'stale' | 'error'>(
+  isAuthoritativeCurrentUserSummary(currentUserSummary.value) ? 'stale' : 'loading',
+)
 const identityBusy = ref(false)
 
 interface OperationAction {
   key: string
   title: string
-  description: string
   icon: Component
   action: () => void
-  badge?: string
   tone?: 'neutral' | 'primary' | 'success' | 'warning' | 'danger'
-  hidden?: boolean
 }
 
 const user = computed(() => currentUserSummary.value)
-const hasIdentity = computed(() => user.value !== null)
+const hasIdentity = computed(() => isAuthoritativeCurrentUserSummary(user.value))
 const userRole = computed(() => user.value?.role || '')
 const isAdmin = computed(() => isAdminRole(userRole.value))
 const isSuperAdmin = computed(() => userRole.value === 'مدیر ارشد')
 const isCustomer = computed(() => user.value?.is_customer === true)
-const canUseOwnerRelations = computed(() => hasIdentity.value && !isCustomer.value)
+const isAccountant = computed(() => user.value?.is_accountant === true)
+const canUseOwnerRelations = computed(() => (
+  hasIdentity.value
+  && !isCustomer.value
+  && !isAccountant.value
+))
 
 const ownerActions = computed<OperationAction[]>(() => {
   if (!canUseOwnerRelations.value) return []
@@ -55,7 +62,6 @@ const ownerActions = computed<OperationAction[]>(() => {
     {
       key: 'customers',
       title: 'مشتریان',
-      description: 'دعوت، مدیریت، محدودیت و گزارش مشتریان',
       icon: Users,
       tone: 'primary',
       action: () => router.push({ name: 'operations-customers' }),
@@ -63,7 +69,6 @@ const ownerActions = computed<OperationAction[]>(() => {
     {
       key: 'accountants',
       title: 'حسابداران',
-      description: 'دعوت، مدیریت نشست و تنظیمات حسابداران',
       icon: BriefcaseBusiness,
       tone: 'primary',
       action: () => router.push({ name: 'operations-accountants' }),
@@ -78,14 +83,12 @@ const adminActions = computed<OperationAction[]>(() => {
     {
       key: 'create_invitation',
       title: 'ارسال دعوت‌نامه',
-      description: 'ساخت لینک دعوت برای کاربران مجاز',
       icon: UserPlus,
       action: () => router.push({ name: 'admin-invitations' }),
     },
     {
       key: 'manage_users',
       title: 'مدیریت کاربران',
-      description: 'مشاهده، جستجو و تنظیم کاربران پروژه',
       icon: Users,
       action: () => router.push({ name: 'admin-users' }),
     },
@@ -96,21 +99,18 @@ const adminActions = computed<OperationAction[]>(() => {
       {
         key: 'manage_commodities',
         title: 'مدیریت کالاها',
-        description: 'تعریف کالا و aliasهای بازار',
         icon: Package,
         action: () => router.push({ name: 'admin-commodities' }),
       },
       {
         key: 'admin_messages',
         title: 'پیام‌های مدیریت',
-        description: 'مدیریت پیام‌های سراسری و مدیریتی',
         icon: Megaphone,
         action: () => router.push({ name: 'admin-messages' }),
       },
       {
         key: 'settings',
         title: 'تنظیمات سیستم',
-        description: 'تنظیمات حساس بازار و سیستم',
         icon: Settings,
         action: () => router.push({ name: 'admin-system' }),
       },
@@ -119,57 +119,23 @@ const adminActions = computed<OperationAction[]>(() => {
 
   return actions
 })
-
-const relationsEmptyState = computed(() => {
-  if (isCustomer.value) {
-    return {
-      title: 'این بخش برای حساب مشتری فعال نیست',
-      description: 'مدیریت مشتریان و حسابداران از حساب سرگروه انجام می‌شود. دسترسی‌های معاملاتی شما از همان مسیر کنترل می‌شود.',
-    }
-  }
-
-  return {
-    title: 'رابطه کاری فعالی برای نمایش وجود ندارد',
-    description: 'اگر دسترسی شما باید شامل مشتری یا حسابدار باشد، این بخش بعد از همگام‌سازی نقش حساب فعال می‌شود.',
-  }
-})
-
-const managementEmptyState = computed(() => {
-  if (!user.value) {
-    return {
-      title: 'در حال دریافت نقش کاربر',
-      description: 'بعد از شناسایی نقش، ابزارهای مدیریتی مجاز نمایش داده می‌شوند.',
-    }
-  }
-
-  return {
-    title: 'دسترسی مدیریتی فعال نیست',
-    description: 'ابزارهای دعوت‌نامه، مدیریت کاربران، کالاها و تنظیمات سیستم فقط برای مدیران مجاز نمایش داده می‌شوند.',
-  }
-})
-
-const managementNote = computed(() => {
-  if (!isAdmin.value) return ''
-  if (isSuperAdmin.value) return 'دسترسی کامل مدیریتی'
-  return 'دسترسی مدیر میانی؛ تنظیمات سیستم و پیام‌های مدیریت فقط برای مدیر ارشد است.'
-})
-
-const relationAccessLabel = computed(() => (ownerActions.value.length ? `${ownerActions.value.length} مسیر` : 'غیرفعال'))
-const adminAccessLabel = computed(() => (adminActions.value.length ? `${adminActions.value.length} ابزار` : 'ندارد'))
+const hasOperationActions = computed(() => (
+  ownerActions.value.length > 0 || adminActions.value.length > 0
+))
 
 async function refreshIdentity() {
   if (identityBusy.value) return
   identityBusy.value = true
-  if (!user.value) identityState.value = 'loading'
+  if (!hasIdentity.value) identityState.value = 'loading'
   try {
     const result = await loadCurrentUserSummary({ force: true })
-    if (!result.user) {
+    if (!isAuthoritativeCurrentUserSummary(result.user)) {
       identityState.value = 'error'
       return
     }
     identityState.value = result.state === 'stale' ? 'stale' : 'ready'
   } catch {
-    identityState.value = user.value ? 'stale' : 'error'
+    identityState.value = hasIdentity.value ? 'stale' : 'error'
   } finally {
     identityBusy.value = false
   }
@@ -179,147 +145,97 @@ onMounted(refreshIdentity)
 </script>
 
 <template>
-  <div class="ds-page operations-page">
+  <div class="ds-page operations-page ui-v2-daily-page ui-v2-operations-page">
     <WorkspaceShell
       title="عملیات"
-      eyebrow="فضای کاری"
-      description="دسترسی‌های اجرایی، رابطه‌ای و مدیریتی حساب شما در یک مسیر واحد قرار گرفته‌اند."
-      layout="split"
-      show-back
-      @back="router.back()"
+      layout="stack"
+      v2-scope
     >
-      <template #actions>
-        <AppButton variant="secondary" class="operations-header-action" @click="router.push({ name: 'notifications' })">
-          <template #icon>
-            <Bell :size="16" />
-          </template>
-          اعلان‌ها
-        </AppButton>
-      </template>
-
       <AppLoadingState
-        v-if="identityState === 'loading' && !user"
+        v-if="identityState === 'loading' && !hasIdentity"
         class="operations-identity-loading"
-        label="در حال بررسی دسترسی‌ها"
+        label="در حال دریافت عملیات"
       />
       <AppErrorState
-        v-else-if="identityState === 'error' && !user"
+        v-else-if="identityState === 'error' && !hasIdentity"
         class="operations-identity-error"
-        title="دسترسی‌ها مشخص نشد"
-        message="بدون دریافت اطلاعات حساب، هیچ مسیری به‌عنوان مجاز نشان داده نمی‌شود."
+        title="عملیات بارگذاری نشد"
+        message="تا اطلاعات حساب دریافت نشود، اقدامی نمایش داده نمی‌شود."
       >
         <template #actions>
           <AppButton type="button" class="operations-identity-retry" :loading="identityBusy" @click="refreshIdentity">تلاش دوباره</AppButton>
         </template>
       </AppErrorState>
       <WorkspaceNotice
-        v-if="identityState === 'stale' && user"
+        v-if="identityState === 'stale' && hasIdentity"
         class="operations-identity-stale"
         tone="warning"
+        v2-scope
         title="اطلاعات حساب به‌روز نشد"
-        message="دسترسی‌های ذخیره‌شده قبلی نمایش داده شده‌اند."
+        message="اقدام‌های ذخیره‌شده قبلی نمایش داده شده‌اند."
       >
         <AppButton type="button" size="sm" variant="secondary" :loading="identityBusy" @click="refreshIdentity">به‌روزرسانی</AppButton>
       </WorkspaceNotice>
 
       <WorkspaceSection
-        v-if="user"
+        v-if="hasIdentity && ownerActions.length"
         title="روابط کاری"
-        description="مدیریت مشتریان و حسابداران از مسیرهای اختصاصی همین بخش."
         tone="primary"
+        v2-scope
       >
-        <template #actions>
-          <AppStatusBadge :tone="ownerActions.length ? 'primary' : 'neutral'">
-            {{ ownerActions.length ? `${ownerActions.length} مسیر فعال` : 'غیرفعال' }}
-          </AppStatusBadge>
-        </template>
-          <div v-if="ownerActions.length" class="action-grid">
-            <AppActionCard
-              v-for="action in ownerActions"
-              :key="action.key"
-              class="operations-action-tile"
-              :title="action.title"
-              :description="action.description"
-              :badge="action.badge"
-              :tone="action.tone || 'neutral'"
-              @select="action.action"
-            >
-              <template #icon>
-                <component :is="action.icon" :size="20" />
-              </template>
-            </AppActionCard>
-          </div>
-          <WorkspaceNotice
-            v-else
-            tone="warning"
-            :title="relationsEmptyState.title"
-            :message="relationsEmptyState.description"
-          />
+        <div class="action-grid">
+          <WorkspaceActionTile
+            v-for="action in ownerActions"
+            :key="action.key"
+            class="operations-action-tile"
+            :title="action.title"
+            :tone="action.tone || 'neutral'"
+            v2-scope
+            @select="action.action"
+          >
+            <template #icon>
+              <component :is="action.icon" :size="20" />
+            </template>
+          </WorkspaceActionTile>
+        </div>
       </WorkspaceSection>
 
       <WorkspaceSection
-        v-if="user"
+        v-if="hasIdentity && adminActions.length"
         title="مدیریت"
-        :description="managementNote || 'ابزارهای مدیریتی فقط برای نقش‌های مجاز نمایش داده می‌شوند.'"
-        :tone="isAdmin ? 'success' : 'neutral'"
+        tone="success"
+        v2-scope
       >
-        <template #actions>
-          <AppStatusBadge :tone="isAdmin ? 'success' : 'neutral'">
-            {{ adminActions.length ? `${adminActions.length} ابزار فعال` : 'بدون ابزار' }}
-          </AppStatusBadge>
-        </template>
-          <div v-if="adminActions.length" class="action-grid">
-            <AppActionCard
-              v-for="action in adminActions"
-              :key="action.key"
-              class="operations-action-tile"
-              :title="action.title"
-              :description="action.description"
-              tone="success"
-              @select="action.action"
-            >
-              <template #icon>
-                <component :is="action.icon" :size="20" />
-              </template>
-            </AppActionCard>
-          </div>
-          <WorkspaceNotice
-            v-else
-            tone="info"
-            :title="managementEmptyState.title"
-            :message="managementEmptyState.description"
-          />
-      </WorkspaceSection>
-
-      <template #aside>
-        <WorkspaceSection
-          v-if="user"
-          title="وضعیت دسترسی"
-          description="فقط مسیرهای مجاز نقش فعلی شما در این بخش فعال است."
-        >
-          <div class="operations-access-badges" aria-label="خلاصه وضعیت دسترسی">
-            <AppStatusBadge :tone="ownerActions.length ? 'primary' : 'neutral'">
-              روابط کاری: {{ relationAccessLabel }}
-            </AppStatusBadge>
-            <AppStatusBadge :tone="isAdmin ? 'success' : 'neutral'">
-              مدیریت: {{ adminAccessLabel }}
-            </AppStatusBadge>
-          </div>
-
-          <AppButton
-            v-if="isAdmin"
-            variant="secondary"
-            block
-            class="operations-admin-full"
-            @click="router.push({ name: 'admin' })"
+        <div class="action-grid">
+          <WorkspaceActionTile
+            v-for="action in adminActions"
+            :key="action.key"
+            class="operations-action-tile"
+            :title="action.title"
+            tone="success"
+            v2-scope
+            @select="action.action"
           >
             <template #icon>
-              <WalletCards :size="16" />
+              <component :is="action.icon" :size="20" />
             </template>
-            منوی کامل مدیریت
+          </WorkspaceActionTile>
+        </div>
+      </WorkspaceSection>
+
+      <AppEmptyState
+        v-if="hasIdentity && !hasOperationActions"
+        class="operations-empty-state"
+        title="اقدام فعالی در این بخش ندارید"
+        message="برای ادامه کارهای شخصی و تنظیمات، به حساب بروید."
+        tone="info"
+      >
+        <template #actions>
+          <AppButton type="button" @click="router.push({ name: 'account' })">
+            رفتن به حساب
           </AppButton>
-        </WorkspaceSection>
-      </template>
+        </template>
+      </AppEmptyState>
     </WorkspaceShell>
   </div>
 </template>
@@ -327,11 +243,6 @@ onMounted(refreshIdentity)
 <style scoped>
 .operations-page {
   min-height: 100dvh;
-  padding-bottom: calc(var(--ds-bottom-nav-height) + var(--ds-safe-area-bottom) + 5rem);
-}
-
-.operations-header-action {
-  min-width: 116px;
 }
 
 .action-grid {
@@ -345,32 +256,13 @@ onMounted(refreshIdentity)
   font-family: inherit;
 }
 
-.action-grid > .operations-action-tile:last-child {
-  margin-bottom: calc(var(--ds-bottom-nav-height) + var(--ds-safe-area-bottom) + 1rem);
-}
-
-.operations-aside-note {
-  margin-top: 0.75rem;
-}
-
-.operations-access-badges {
-  margin-top: 0.75rem;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-}
-
-.operations-admin-full {
-  margin-top: 0.75rem;
+.operations-empty-state {
+  margin: 0;
 }
 
 @media (min-width: 720px) {
   .action-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .action-grid > .operations-action-tile:last-child {
-    margin-bottom: 0;
   }
 }
 
@@ -378,10 +270,6 @@ onMounted(refreshIdentity)
   .operations-page :deep(.ds-workspace-main),
   .operations-page :deep(.ds-workspace-aside) {
     padding-bottom: calc(var(--ds-bottom-nav-height) + var(--ds-safe-area-bottom) + 1.5rem);
-  }
-
-  .operations-admin-full {
-    margin-bottom: calc(var(--ds-bottom-nav-height) + var(--ds-safe-area-bottom) + 1rem);
   }
 }
 
