@@ -57,4 +57,4 @@ Commit `88f167d8bfe16b410e5a690a4329c202d27dc24d` قراردادهای additive 
 
 ## گیت خروج
 
-گیت Stage 1 با تست‌های fresh، typecheck/build/guard، viewport acceptance، protected source diff صفر و ثبت صریح visual carry-forward پاس شد. Stage 2 مجاز و هنوز شروع‌نشده است.
+گیت Stage 1 با تست‌های fresh، typecheck/build/guard، viewport acceptance، protected source diff صفر و ثبت صریح visual carry-forward پاس شد. Stage 2 در زمان closure این قرارداد مجاز و شروع‌نشده بود؛ اکنون طبق [checkpoint Stage 2](../WEBAPP_UI_UX_REDESIGN_V2_STAGE2_PROTECTED_DESIGN_SYSTEM_CHECKPOINT_20260809.md) با گیت فنی/protected diff، evidence و Sites `complete` است و Stage 3 مجاز اما هنوز شروع‌نشده است.

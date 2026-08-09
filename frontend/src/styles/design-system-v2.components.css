@@ -1,0 +1,41 @@
+/*
+ * Shared V2 behavior is deliberately attached to explicit V2 scope roots.
+ * Product components can opt into the transition helpers below; importing
+ * this stylesheet alone has no effect on legacy or protected DOM.
+ */
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']).ui-v2-scope {
+  color: var(--ui-v2-color-text-primary);
+  font-family: var(--ui-v2-font-family);
+  font-synthesis: none;
+}
+
+[data-ui-system='v2'][data-ui-system='v2']
+  :where(button, input, select, textarea, a[href], [tabindex]):focus-visible,
+[data-ui-system='v2-portal'][data-ui-system='v2-portal']
+  :where(button, input, select, textarea, a[href], [tabindex]):focus-visible {
+  outline: var(--ui-v2-stroke-focus) solid var(--ui-v2-color-border-focus);
+  outline-offset: var(--ui-v2-spacing-2);
+  border-color: var(--ui-v2-color-border-focus);
+  box-shadow: none;
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-motion-micro {
+  transition-duration: var(--ui-v2-motion-micro);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-motion-state {
+  transition-duration: var(--ui-v2-motion-state);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :where([data-ui-system='v2'], [data-ui-system='v2-portal']) [data-ui-v2-motion] {
+    animation-duration: var(--ui-v2-motion-state) !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: var(--ui-v2-motion-state) !important;
+  }
+
+  :where([data-ui-system='v2'], [data-ui-system='v2-portal']) [data-ui-v2-motion='decorative'] {
+    transform: none !important;
+  }
+}

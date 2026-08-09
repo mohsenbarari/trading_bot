@@ -5,6 +5,7 @@ export { default as AppCard } from './AppCard.vue'
 export { default as AppCheckbox } from './AppCheckbox.vue'
 export { default as AppChip } from './AppChip.vue'
 export { default as AppDangerZone } from './AppDangerZone.vue'
+export { default as AppDesignSystemScope } from './AppDesignSystemScope.vue'
 export { default as AppDisclosure } from './AppDisclosure.vue'
 export { default as AppEmptyState } from './AppEmptyState.vue'
 export { default as AppErrorState } from './AppErrorState.vue'
@@ -41,3 +42,17 @@ export { default as AppToolbar } from './AppToolbar.vue'
 export { default as AppTradeActionButton } from './AppTradeActionButton.vue'
 export { default as AppWorkspace } from './AppWorkspace.vue'
 export { default as AppConfirmDialog } from './AppConfirmDialog.vue'
+export {
+  attachUiDesignSystemPortalScope,
+  getUiDesignSystemScopeAttributes,
+  isInsideUiDesignSystemScope,
+  UI_DESIGN_SYSTEM_PORTAL_SCOPE_VALUE,
+  UI_DESIGN_SYSTEM_SCOPE_ATTRIBUTE,
+  UI_DESIGN_SYSTEM_SCOPE_SELECTOR,
+  UI_DESIGN_SYSTEM_SCOPE_VALUE,
+} from './uiDesignSystemScope'
+export type {
+  UiDesignSystemScopeAttributes,
+  UiDesignSystemScopeKind,
+  UiDesignSystemScopeValue,
+} from './uiDesignSystemScope'

@@ -1,0 +1,139 @@
+/*
+ * UIUX Design System V2
+ *
+ * This file is intentionally opt-in. Custom properties only exist on an
+ * explicit product scope or an explicit Teleport portal scope, so importing
+ * this stylesheet cannot restyle legacy or protected surfaces by itself.
+ */
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) {
+  /* canonical-figma-variables:start */
+
+  /* UIUX v2 — Primitives (20) */
+  --ui-v2-neutral-ink-950: #0f233c;
+  --ui-v2-neutral-ink-900: #12314a;
+  --ui-v2-neutral-ink-700: #52697b;
+  --ui-v2-neutral-ink-500: #94a3b8;
+  --ui-v2-neutral-border-300: #8091a3;
+  --ui-v2-neutral-surface-100: #f4f7fa;
+  --ui-v2-neutral-surface-50: #f8fafc;
+  --ui-v2-neutral-white: #ffffff;
+  --ui-v2-brand-action-600: #2f6fed;
+  --ui-v2-brand-text-700: #2353b5;
+  --ui-v2-brand-icon-650: #315da8;
+  --ui-v2-brand-subtle-100: #e8f0ff;
+  --ui-v2-danger-strong: #b4232c;
+  --ui-v2-danger-subtle: #fdecee;
+  --ui-v2-warning-strong: #8a6110;
+  --ui-v2-warning-subtle: #fff4d8;
+  --ui-v2-info-strong: #176b8c;
+  --ui-v2-info-subtle: #e8f5fa;
+  --ui-v2-success-strong: #0f766e;
+  --ui-v2-success-subtle: #eaf8f3;
+
+  /* UIUX v2 — Semantic (26 aliases) */
+  --ui-v2-color-surface-page: var(--ui-v2-neutral-surface-100);
+  --ui-v2-color-surface-card: var(--ui-v2-neutral-white);
+  --ui-v2-color-surface-subtle: var(--ui-v2-neutral-surface-50);
+  --ui-v2-color-surface-brand-soft: var(--ui-v2-brand-subtle-100);
+  --ui-v2-color-text-primary: var(--ui-v2-neutral-ink-900);
+  --ui-v2-color-text-strong: var(--ui-v2-neutral-ink-950);
+  --ui-v2-color-text-secondary: var(--ui-v2-neutral-ink-700);
+  --ui-v2-color-text-placeholder: var(--ui-v2-neutral-ink-700);
+  --ui-v2-color-text-on-action: var(--ui-v2-neutral-white);
+  --ui-v2-color-text-action: var(--ui-v2-brand-text-700);
+  --ui-v2-color-border-default: var(--ui-v2-neutral-border-300);
+  --ui-v2-color-border-focus: var(--ui-v2-brand-action-600);
+  --ui-v2-color-action-primary: var(--ui-v2-brand-action-600);
+  --ui-v2-color-icon-brand: var(--ui-v2-brand-icon-650);
+  --ui-v2-color-status-danger-bg: var(--ui-v2-danger-subtle);
+  --ui-v2-color-status-danger: var(--ui-v2-danger-strong);
+  --ui-v2-color-status-warning-bg: var(--ui-v2-warning-subtle);
+  --ui-v2-color-status-warning: var(--ui-v2-warning-strong);
+  --ui-v2-color-status-info-bg: var(--ui-v2-info-subtle);
+  --ui-v2-color-status-info: var(--ui-v2-info-strong);
+  --ui-v2-color-status-success-bg: var(--ui-v2-success-subtle);
+  --ui-v2-color-status-success: var(--ui-v2-success-strong);
+  --ui-v2-color-action-secondary: var(--ui-v2-neutral-white);
+  --ui-v2-color-action-disabled: var(--ui-v2-neutral-surface-50);
+  --ui-v2-color-action-danger: var(--ui-v2-danger-strong);
+  --ui-v2-color-text-disabled: var(--ui-v2-neutral-ink-500);
+
+  /* UIUX v2 — Dimensions (19) */
+  --ui-v2-spacing-2: 2px;
+  --ui-v2-spacing-4: 4px;
+  --ui-v2-spacing-8: 8px;
+  --ui-v2-spacing-12: 12px;
+  --ui-v2-spacing-16: 16px;
+  --ui-v2-spacing-20: 20px;
+  --ui-v2-spacing-24: 24px;
+  --ui-v2-spacing-32: 32px;
+  --ui-v2-radius-8: 8px;
+  --ui-v2-radius-12: 12px;
+  --ui-v2-radius-14: 14px;
+  --ui-v2-radius-16: 16px;
+  --ui-v2-radius-20: 20px;
+  --ui-v2-radius-full: 9999px;
+  --ui-v2-size-target-min: 44px;
+  --ui-v2-size-cta-min: 48px;
+  --ui-v2-size-bottom-nav: 80px;
+  --ui-v2-stroke-standard: 1px;
+  --ui-v2-stroke-focus: 3px;
+
+  /* canonical-figma-variables:end */
+
+  /* Official radius roles. The numeric variables above remain canonical. */
+  --ui-v2-radius-control: var(--ui-v2-radius-12);
+  --ui-v2-radius-card: var(--ui-v2-radius-14);
+  --ui-v2-radius-panel: var(--ui-v2-radius-20);
+  --ui-v2-radius-compact: var(--ui-v2-radius-8);
+  --ui-v2-radius-container: var(--ui-v2-radius-16);
+
+  /* Approved implementation roles derived from the canonical dimensions. */
+  --ui-v2-icon-size-small: var(--ui-v2-spacing-16);
+  --ui-v2-icon-size-control: var(--ui-v2-spacing-20);
+  --ui-v2-icon-size-large: var(--ui-v2-spacing-24);
+  --ui-v2-layout-content-max: 1280px;
+  --ui-v2-layout-card-min: 220px;
+  --ui-v2-layout-type-label-min: 110px;
+  --ui-v2-layout-reading-max: 72ch;
+
+  /* Typography mirrors the ten local Figma text styles after Stage 2. */
+  --ui-v2-font-family: Vazirmatn, Tahoma, Arial, sans-serif;
+  --ui-v2-font-weight-regular: 400;
+  --ui-v2-font-weight-medium: 500;
+  --ui-v2-font-weight-semibold: 600;
+  --ui-v2-font-weight-bold: 700;
+  --ui-v2-type-page-size: 23px;
+  --ui-v2-type-page-line: 32px;
+  --ui-v2-type-section-size: 18px;
+  --ui-v2-type-section-line: 28px;
+  --ui-v2-type-card-size: 14px;
+  --ui-v2-type-card-line: 24px;
+  --ui-v2-type-body-medium-size: 14px;
+  --ui-v2-type-body-medium-line: 24px;
+  --ui-v2-type-body-small-size: 12px;
+  --ui-v2-type-body-small-line: 20px;
+  --ui-v2-type-label-medium-size: 12px;
+  --ui-v2-type-label-medium-line: 20px;
+  --ui-v2-type-label-small-size: 11px;
+  --ui-v2-type-label-small-line: 18px;
+  --ui-v2-type-action-medium-size: 14px;
+  --ui-v2-type-action-medium-line: 24px;
+  --ui-v2-type-caption-size: 10px;
+  --ui-v2-type-caption-line: 16px;
+  --ui-v2-type-avatar-initial-size: 16px;
+  --ui-v2-type-avatar-initial-line: normal;
+
+  /* Figma effect styles and the approved motion contract. */
+  --ui-v2-effect-card: 0 2px 8px rgba(15, 35, 60, 0.06);
+  --ui-v2-effect-overlay: 0 12px 32px -4px rgba(15, 35, 60, 0.16);
+  --ui-v2-motion-micro: 140ms;
+  --ui-v2-motion-state: 180ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :where([data-ui-system='v2'], [data-ui-system='v2-portal']) {
+    --ui-v2-motion-micro: 1ms;
+    --ui-v2-motion-state: 1ms;
+  }
+}

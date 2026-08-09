@@ -1,8 +1,8 @@
 # Stage 0B-6 — ماتریس traceability تا Stage 8
 
-وضعیت: `stage0b6_complete_stage1_complete_stage2_authorized`؛ Stage 1 `complete` و Stage 2 next authorized اما هنوز شروع‌نشده است
+وضعیت جاری roadmap: `stage0b6_stage1_stage2_complete_stage3_authorized_not_started`
 
-این ماتریس «مالک بعدی هر تعهد» را مشخص می‌کند. مالک در `2026-08-08T20:57:28.073Z` قرارداد و ادامه بی‌وقفه roadmap را بدون نیاز به تأیید جداگانه هر Stage مجاز کرد و closure Sites/source binding در `2026-08-08T21:07:38Z` پاس شد. ثبت تعهد در اینجا جای گیت فنی هر Stage نیست؛ Stage 1 با گیت مستقل بسته شده و وضعیت آن در [checkpoint مستقل](../WEBAPP_UI_UX_REDESIGN_V2_STAGE1_TRUST_CONTINUITY_CHECKPOINT_20260808.md) ثبت می‌شود.
+این ماتریس «مالک بعدی هر تعهد» را مشخص می‌کند. مالک در `2026-08-08T20:57:28.073Z` قرارداد و ادامه بی‌وقفه roadmap را بدون نیاز به تأیید جداگانه هر Stage مجاز کرد و closure Sites/source binding در `2026-08-08T21:07:38Z` پاس شد. ثبت تعهد در اینجا جای گیت فنی هر Stage نیست؛ Stage 1 و Stage 2 با گیت‌های مستقل بسته شده‌اند و Stage 3 مجاز اما هنوز شروع‌نشده است.
 
 ## گیت‌های داخل خود `0B-6`
 
@@ -122,12 +122,16 @@ ownerSystemContractApproval.status = approved
 ownerSystemContractApproval.approvedAt = 2026-08-08T20:57:28.073Z
 continuousProgressionAuthorized = true
 runtimeImplementationAuthorized = true
-nextAuthorizedRuntimeStage = Stage 2
+nextAuthorizedRuntimeStage = Stage 3
 stage1RuntimeWorkStarted = true
 stage1Status = complete
 stage1TechnicalGate = passed
 stage2RuntimeImplementationAuthorized = true
-stage2RuntimeWorkStarted = false
+stage2RuntimeWorkStarted = true
+stage2Status = complete
+stage2TechnicalGate = passed_with_preexisting_full_typecheck_parity
+stage3RuntimeImplementationAuthorized = true
+stage3RuntimeWorkStarted = false
 ```
 
-Stage 1 `complete` است. Stage 2 مرحله بعدی مجاز و هنوز شروع‌نشده است؛ ادامه Stageهای بعدی به گیت فنی خودشان وابسته است، نه تأیید جداگانه مالک، مگر اینکه مالک صریحاً توقف کند.
+Stage 1 و Stage 2 `complete` هستند. Figma، گیت فنی/protected diff، evidence hash-bound و Sites Stage 2 پاس شده‌اند؛ Stage 3 مجاز و شروع‌نشده است. ادامه Stageهای بعدی به گیت فنی خودشان وابسته است، نه تأیید جداگانه مالک، مگر اینکه مالک صریحاً توقف کند.

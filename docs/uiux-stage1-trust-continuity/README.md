@@ -1,15 +1,19 @@
 # Stage 1 — Trust and continuity evidence package
 
-وضعیت: `stage1_complete_stage2_authorized_not_started`
+وضعیت جاری roadmap: `stage1_stage2_complete_stage3_authorized_not_started`
 
 ```text
 continuousProgressionAuthorized = true
 activeRuntimeStage = none
 stage1Status = complete
 stage1TechnicalGate = passed
-nextAuthorizedRuntimeStage = Stage 2
+nextAuthorizedRuntimeStage = Stage 3
 stage2RuntimeImplementationAuthorized = true
-stage2RuntimeWorkStarted = false
+stage2RuntimeWorkStarted = true
+stage2Status = complete
+stage2TechnicalGate = passed_with_preexisting_full_typecheck_parity
+stage3RuntimeImplementationAuthorized = true
+stage3RuntimeWorkStarted = false
 ```
 
 این بسته closure اجرایی Stage 1 را روی baseline `e6dcad4b157c6fad7930ba9709f28f546068f5f8` و runtime head `c5fc56996d7f8fa9c575646d70e8785811564633` ثبت می‌کند. دامنه فقط truth/retry/context/duplicate guard و clearance لازم موبایل بود؛ هیچ design-system migration، shell redesign، Figma/Sites mutation یا تغییر protected interior در این Stage انجام نشد.
@@ -43,4 +47,4 @@ visual comparison نهایی `21/26` و exit code آن `1` بود؛ پنج misma
 
 E2Eهای mutation واقعی به‌دلیل نبود backend disposable، بسته‌بودن port `8000` و unavailable بودن Docker اجرا نشدند؛ mock-only market mutation `2/2` پاس شد.
 
-Stage 2 اکنون next authorized است و در زمان این closure هنوز شروع نشده است.
+در زمان closure این بسته، Stage 2 next authorized و هنوز شروع‌نشده بود. وضعیت جاری در [checkpoint Stage 2](../WEBAPP_UI_UX_REDESIGN_V2_STAGE2_PROTECTED_DESIGN_SYSTEM_CHECKPOINT_20260809.md) ثبت می‌شود: Stage 2 اکنون با گیت فنی/protected diff، evidence و Sites `complete` است؛ Stage 3 مجاز و هنوز شروع‌نشده است.

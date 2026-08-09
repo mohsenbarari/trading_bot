@@ -1,18 +1,22 @@
 # Stage 0B-6 — Final system contract evidence package
 
-وضعیت: `stage0b6_complete_stage1_complete_stage2_authorized`
+وضعیت جاری roadmap: `stage0b6_stage1_stage2_complete_stage3_authorized_not_started`
 
 ```text
 ownerSystemContractApproval.status = approved
 ownerSystemContractApproval.approvedAt = 2026-08-08T20:57:28.073Z
 continuousProgressionAuthorized = true
 runtimeImplementationAuthorized = true
-nextAuthorizedRuntimeStage = Stage 2
+nextAuthorizedRuntimeStage = Stage 3
 stage1RuntimeWorkStarted = true
 stage1Status = complete
 stage1TechnicalGate = passed
 stage2RuntimeImplementationAuthorized = true
-stage2RuntimeWorkStarted = false
+stage2RuntimeWorkStarted = true
+stage2Status = complete
+stage2TechnicalGate = passed_with_preexisting_full_typecheck_parity
+stage3RuntimeImplementationAuthorized = true
+stage3RuntimeWorkStarted = false
 ```
 
 ## هدف بسته
@@ -90,16 +94,20 @@ assertion `known-figma-debt-disposition-complete` در audit مستقیم و م�
 
 ## گیت نهایی
 
-مالک قرارداد و ادامه بی‌وقفه roadmap را تأیید کرده و Sites/provenance نیز پاس شده است. گیت runtime در `2026-08-08T21:07:38Z` به‌شکل زیر بسته شد:
+مالک قرارداد و ادامه بی‌وقفه roadmap را تأیید کرده و Sites/provenance نیز پاس شده است. گیت `0B-6` در `2026-08-08T21:07:38Z` بسته شد؛ وضعیت جاری progression پس از closure Stage 1 و Stage 2 چنین است:
 
 ```text
 runtimeImplementationAuthorized = true
-nextAuthorizedRuntimeStage = Stage 2
+nextAuthorizedRuntimeStage = Stage 3
 stage1RuntimeWorkStarted = true
 stage1Status = complete
 stage1TechnicalGate = passed
 stage2RuntimeImplementationAuthorized = true
-stage2RuntimeWorkStarted = false
+stage2RuntimeWorkStarted = true
+stage2Status = complete
+stage2TechnicalGate = passed_with_preexisting_full_typecheck_parity
+stage3RuntimeImplementationAuthorized = true
+stage3RuntimeWorkStarted = false
 ```
 
-Stage 1 اکنون `complete` است؛ [بسته evidence](../uiux-stage1-trust-continuity/README.md) گیت fresh و مجوز Stage 2 را ثبت می‌کند. Stage 2 next authorized اما شروع‌نشده است. ادامه Stageهای 2 تا 8 نیازمند تأیید جداگانه مالک نیست اما هرکدام گیت فنی، test، protected diff و rollback خود را دارند؛ مگر اینکه مالک صریحاً توقف کند.
+Stage 1 `complete` است؛ [بسته evidence](../uiux-stage1-trust-continuity/README.md) گیت fresh آن را ثبت می‌کند. Stage 2 نیز طبق [checkpoint مستقل](../WEBAPP_UI_UX_REDESIGN_V2_STAGE2_PROTECTED_DESIGN_SYSTEM_CHECKPOINT_20260809.md) با گیت فنی/protected diff، evidence و Sites `complete` است. Stage 3 مجاز و شروع‌نشده است. ادامه Stageهای 3 تا 8 نیازمند تأیید جداگانه مالک نیست اما هرکدام گیت فنی، test، protected diff و rollback خود را دارند؛ مگر اینکه مالک صریحاً توقف کند.

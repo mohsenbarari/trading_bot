@@ -69,7 +69,7 @@ suiteهای real mutation مربوط به market offers/schedule/messenger اج�
 - deep link در error به landing/not-found دروغین redirect نمی‌شود؛
 - protected Market/Messenger و freezeهای Stage 1 source/behavior diff ندارند.
 
-## تصمیم گیت
+## تصمیم گیت در زمان closure Stage 1
 
 ```text
 stage1Status = complete
@@ -80,4 +80,4 @@ stage2RuntimeImplementationAuthorized = true
 stage2RuntimeWorkStarted = false
 ```
 
-Stage 2 مجاز است و در زمان این closure هنوز شروع نشده است.
+این block snapshot زمان closure Stage 1 است. Stage 2 پس از آن آغاز و طبق [checkpoint Stage 2](../WEBAPP_UI_UX_REDESIGN_V2_STAGE2_PROTECTED_DESIGN_SYSTEM_CHECKPOINT_20260809.md) با گیت فنی/protected diff، evidence و Sites `complete` شده است؛ Stage 3 مجاز و هنوز شروع‌نشده است.

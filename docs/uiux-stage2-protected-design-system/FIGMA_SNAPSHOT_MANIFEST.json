@@ -1,0 +1,587 @@
+{
+  "schemaVersion": 1,
+  "stage": "2",
+  "status": "stage2_complete_figma_direct_local_and_sites_passed",
+  "canonicalSource": {
+    "provider": "figma",
+    "fileKey": "z8jgJxST4O2APzWnlyP9gv",
+    "pageId": "208:2",
+    "rootId": "208:3",
+    "frozenAt": "2026-08-09T01:27:37.567Z",
+    "auditedAt": "2026-08-09T01:24:59Z",
+    "rootGeometry": {
+      "width": 1440,
+      "height": 13028
+    }
+  },
+  "sourceBaseline": {
+    "branch": "condidate/webapp-ui-ux-redesign-v2",
+    "comparisonBaseCommit": "8e4cdbf4d1bf23c1b8c159eeaea3544f5fd7cd54",
+    "comparisonHeadCommit": null
+  },
+  "foundations": {
+    "collections": [
+      {
+        "id": "VariableCollectionId:37:2",
+        "name": "UIUX v2 — Primitives",
+        "variableCount": 20
+      },
+      {
+        "id": "VariableCollectionId:37:3",
+        "name": "UIUX v2 — Semantic",
+        "variableCount": 26
+      },
+      {
+        "id": "VariableCollectionId:37:4",
+        "name": "UIUX v2 — Dimensions",
+        "variableCount": 19
+      }
+    ],
+    "variableCount": 65,
+    "semanticAliasCount": 26,
+    "textStyleCount": 10,
+    "effectStyleCount": 2,
+    "webCodeSyntaxPattern": "var(--ui-v2-{slash-delimited-name-as-kebab})",
+    "avatarInitialTextStyle": {
+      "name": "UIUX v2/Avatar/Initial",
+      "id": "S:b2c168d4aaf57efabc1e01386680792f7c983c42,",
+      "boundNodeIds": [
+        "51:16",
+        "51:27"
+      ]
+    },
+    "contrastFacts": {
+      "placeholderHex": "#52697B",
+      "borderDefaultHex": "#8091A3",
+      "placeholderOnWhite": 5.729,
+      "borderDefaultOnWhite": 3.232,
+      "borderDefaultOnPage": 3.006
+    },
+    "iconScale": {
+      "derivation": "spacing variables; no additional canonical variable",
+      "roles": [
+        {
+          "role": "small",
+          "size": 16,
+          "nodeId": "267:24",
+          "variableId": "VariableID:39:28"
+        },
+        {
+          "role": "control",
+          "size": 20,
+          "nodeId": "267:29",
+          "variableId": "VariableID:39:29"
+        },
+        {
+          "role": "large",
+          "size": 24,
+          "nodeId": "267:34",
+          "variableId": "VariableID:39:30"
+        }
+      ]
+    }
+  },
+  "components": {
+    "componentSetCount": 12,
+    "variantCount": 56,
+    "catalogLinkedInstanceCount": 56,
+    "catalogLinkedInstanceCountScope": "top_level",
+    "catalogNestedLinkedReferenceCount": 6,
+    "catalogTotalLinkedReferenceCount": 62,
+    "catalogDetachedInstanceCount": 0,
+    "sets": [
+      {
+        "name": "Button",
+        "id": "48:14",
+        "variantCount": 6
+      },
+      {
+        "name": "Status",
+        "id": "49:14",
+        "variantCount": 4
+      },
+      {
+        "name": "Relation Row",
+        "id": "50:26",
+        "variantCount": 3
+      },
+      {
+        "name": "Authenticated Header",
+        "id": "51:33",
+        "variantCount": 2
+      },
+      {
+        "name": "Bottom Navigation",
+        "id": "52:46",
+        "variantCount": 6
+      },
+      {
+        "name": "Form Field",
+        "id": "77:610",
+        "variantCount": 12
+      },
+      {
+        "name": "Admin User Row",
+        "id": "78:566",
+        "variantCount": 3
+      },
+      {
+        "name": "Standard Invitation Row",
+        "id": "80:574",
+        "variantCount": 2
+      },
+      {
+        "name": "Decision Panel",
+        "id": "81:566",
+        "variantCount": 2
+      },
+      {
+        "name": "Account Action Row",
+        "id": "121:14",
+        "variantCount": 2
+      },
+      {
+        "name": "Session Row",
+        "id": "122:1327",
+        "variantCount": 8
+      },
+      {
+        "name": "Notification Row",
+        "id": "123:1330",
+        "variantCount": 6
+      }
+    ],
+    "bottomNavigation": {
+      "height": 80,
+      "heightVariableId": "VariableID:39:40",
+      "variantIds": [
+        "52:8",
+        "52:29",
+        "127:14",
+        "127:35",
+        "170:14",
+        "170:35"
+      ]
+    },
+    "relationRowVectorReplacements": [
+      "244:2599",
+      "244:2600",
+      "244:2601"
+    ]
+  },
+  "sections": [
+    {
+      "id": "210:2",
+      "role": "cover"
+    },
+    {
+      "id": "211:2",
+      "role": "color-foundations"
+    },
+    {
+      "id": "213:2",
+      "role": "type-geometry-motion",
+      "sectionName": "Section/02 Type Geometry Motion",
+      "width": 1280,
+      "height": 2092
+    },
+    {
+      "id": "215:2",
+      "role": "component-catalog",
+      "childSections": [
+        "215:6",
+        "215:8"
+      ]
+    },
+    {
+      "id": "221:2",
+      "role": "scope-routes-protected"
+    },
+    {
+      "id": "223:2",
+      "role": "responsive-acceptance"
+    },
+    {
+      "id": "226:18",
+      "role": "guard-rollback-evidence"
+    }
+  ],
+  "responsiveProofs": {
+    "mobile": [
+      {
+        "id": "223:7",
+        "width": 360,
+        "height": 620
+      },
+      {
+        "id": "223:31",
+        "width": 375,
+        "height": 620
+      },
+      {
+        "id": "223:55",
+        "width": 390,
+        "height": 620
+      },
+      {
+        "id": "223:80",
+        "width": 414,
+        "height": 620
+      },
+      {
+        "id": "223:104",
+        "width": 430,
+        "height": 620
+      }
+    ],
+    "desktop": {
+      "id": "224:2",
+      "width": 1440,
+      "height": 900
+    }
+  },
+  "accessibilityProof": {
+    "touchTargetCount": 66,
+    "touchTargetFailureCount": 0,
+    "focusExampleCount": 10,
+    "productActivationCount": 0,
+    "protectedInteriorCount": 0,
+    "overflowCount": 0,
+    "clippingCount": 0,
+    "semanticListContract": {
+      "container": "UL",
+      "itemWrapper": "LI",
+      "interactiveItem": "BUTTON",
+      "nonInteractiveItem": "ARTICLE",
+      "roleOverrides": 0
+    }
+  },
+  "routeContract": {
+    "routeCount": 29,
+    "v2ScopeOffCount": 29,
+    "fullProtectedRoutes": [
+      "/market",
+      "/chat",
+      "/share-receive",
+      "/admin/channels"
+    ],
+    "mixedRoutes": [
+      "/",
+      "/admin/messages",
+      "/admin/system"
+    ]
+  },
+  "auditEvidence": {
+    "status": "passed_25_of_25",
+    "freezeMetadataStatus": "figma_frozen_external_evidence_pending",
+    "freezeMetadataStatusInterpretation": "Immutable status-at-freeze retained inside the hash-bound direct audit and local metrics; current external evidence is independently passed by localEvidence and sitesPreview and the Stage 2 gate is complete.",
+    "auditedAt": "2026-08-09T01:24:59.000Z",
+    "preCaptureRereadAt": "2026-08-09T01:31:58.397Z",
+    "postCaptureRereadAt": "2026-08-09T01:36:18.907Z",
+    "inventoryDigestRereadAt": "2026-08-09T01:38:01.728Z",
+    "artifactPath": "assets/figma-stage2-direct-audit.json",
+    "artifactBytes": 12558,
+    "artifactSha256": "7361d43e2f3c9437997663cb313a03b87a5d505f3046f4406d97bd82b6ddacc5",
+    "canonicalTreeBytes": 612614,
+    "canonicalTreeSha256": "4df00cbcb8734865367e41fa28c8936d39a49e1c6578af3d5979f79857365a22",
+    "preCaptureTreeSha256": "4df00cbcb8734865367e41fa28c8936d39a49e1c6578af3d5979f79857365a22",
+    "postCaptureTreeSha256": "4df00cbcb8734865367e41fa28c8936d39a49e1c6578af3d5979f79857365a22",
+    "captureImmutable": true,
+    "inventoryDigestBytes": 78068,
+    "inventoryDigestSha256": "9c9fa984188bee28217a1052f42186b2815ec3a9d91c431c8d0649c8e637c829"
+  },
+  "directExports": {
+    "status": "passed_exact_8_hash_bound",
+    "aggregateSha256": "5af685f38703408f10618a1e87397386dbe98e5a8c6df0f8967cdff6da38dbf5",
+    "expectedSourceNodes": [
+      "208:3",
+      "211:2",
+      "213:2",
+      "215:2",
+      "221:2",
+      "223:2",
+      "224:2",
+      "226:18"
+    ],
+    "files": [
+      {
+        "nodeId": "208:3",
+        "path": "assets/figma-stage2-contract-root.png",
+        "width": 1440,
+        "height": 13028,
+        "bytes": 1065674,
+        "sha256": "b5c0ef30e0a4a0f774613c341b98cbe35bbfa754e9728400c92aa7f876a0e8cf"
+      },
+      {
+        "nodeId": "211:2",
+        "path": "assets/figma-stage2-color-foundations.png",
+        "width": 1280,
+        "height": 1792,
+        "bytes": 139052,
+        "sha256": "60c701a957e15bfed876c8bbbc0acbffd7b60993aa9bc3e6404269a91db8aefc"
+      },
+      {
+        "nodeId": "213:2",
+        "path": "assets/figma-stage2-type-geometry-motion.png",
+        "width": 1280,
+        "height": 2092,
+        "bytes": 221551,
+        "sha256": "87e9f115af5d753cefc9661083231948ad2a2c2da6cfdc49775d7d38b5769b0d"
+      },
+      {
+        "nodeId": "215:2",
+        "path": "assets/figma-stage2-component-state-catalog.png",
+        "width": 1280,
+        "height": 4488,
+        "bytes": 353191,
+        "sha256": "e719d215744e723309fda3eaa45c0f76ad6105ef3c9745a03827d7bccabc6c54"
+      },
+      {
+        "nodeId": "221:2",
+        "path": "assets/figma-stage2-scope-route-contract.png",
+        "width": 1280,
+        "height": 1208,
+        "bytes": 127580,
+        "sha256": "bd8a54b903ae2b161b5bed31c429e57d263d2976a736ebd928fdda86018a0291"
+      },
+      {
+        "nodeId": "223:2",
+        "path": "assets/figma-stage2-responsive-acceptance.png",
+        "width": 1280,
+        "height": 1428,
+        "bytes": 78246,
+        "sha256": "e5badb1aaba8d1d25fc1309dfca98322532193b8fc87677aa3d9d20ded6e1e3b"
+      },
+      {
+        "nodeId": "224:2",
+        "path": "assets/figma-stage2-desktop-catalog-1440x900.png",
+        "width": 1440,
+        "height": 900,
+        "bytes": 62492,
+        "sha256": "6a0830f432a074b70bc543548fd1300cf8b698dc4122e5e8dcbc29a2d4b35a7b"
+      },
+      {
+        "nodeId": "226:18",
+        "path": "assets/figma-stage2-guard-rollback-evidence.png",
+        "width": 1280,
+        "height": 992,
+        "bytes": 99086,
+        "sha256": "37c7f4defe94adbc857063376ae9782eac4e70e16d7c3e16326d3f93507c913f"
+      }
+    ]
+  },
+  "localEvidence": {
+    "status": "passed_secondary_derivative",
+    "runId": "stage2-20260809T022716844Z-19dd7808",
+    "startedAt": "2026-08-09T02:27:16.843Z",
+    "completedAt": "2026-08-09T02:27:35.682Z",
+    "assertions": "25/25 passed",
+    "html": {
+      "path": "stage2-protected-design-system-evidence.html",
+      "bytes": 35371,
+      "sha256": "cfd12b5a97b8dc055bf4001ca7b4441c3c6f169800b6fb549402ab5a5998bf17"
+    },
+    "captureScript": {
+      "path": "capture-evidence.cjs",
+      "bytes": 71379,
+      "sha256": "95f1dd26c7787cfd608d401506171c68b86a6cdae0f059fdcad9623f29a6ef94"
+    },
+    "metrics": {
+      "path": "assets/local-evidence/local-stage2-protected-design-system-validation-metrics.json",
+      "bytes": 39640,
+      "sha256": "4013aa95b5cb16fa4f5f998284786b5be16bd15391cb1eab32813d13ba62e692"
+    },
+    "captures": [
+      {
+        "path": "assets/local-evidence/local-stage2-overview.png",
+        "width": 1440,
+        "height": 902,
+        "bytes": 160117,
+        "sha256": "a7938e55280a48b401f7924fe94bdfe76940b42cc1b1bd299283414565eb75bf"
+      },
+      {
+        "path": "assets/local-evidence/local-stage2-foundations.png",
+        "width": 1440,
+        "height": 762,
+        "bytes": 63473,
+        "sha256": "76062cf7344a49d04844dd46e81ad717bf68229d94628e40c81e0c80e7b56ec0"
+      },
+      {
+        "path": "assets/local-evidence/local-stage2-component-catalog.png",
+        "width": 1440,
+        "height": 921,
+        "bytes": 67789,
+        "sha256": "6561af19cd94354804033427abc3bc00c85b1a83aa7c891a1d9007b4076aa843"
+      },
+      {
+        "path": "assets/local-evidence/local-stage2-scope-routes.png",
+        "width": 1440,
+        "height": 970,
+        "bytes": 97248,
+        "sha256": "4dbd34e2689430fffbe6127f2b6991f6bdf2688b315757eec088fe245f9f2889"
+      },
+      {
+        "path": "assets/local-evidence/local-stage2-responsive.png",
+        "width": 1440,
+        "height": 1415,
+        "bytes": 34327,
+        "sha256": "27e06a068f62c3c484a832bfc8614a69429819c54570cfd3d883870110d9e77f"
+      },
+      {
+        "path": "assets/local-evidence/local-stage2-guard-rollback.png",
+        "width": 1440,
+        "height": 1849,
+        "bytes": 230358,
+        "sha256": "a5b55231195ff0eed3a5a1d88da52d0b44d2e28b46540bbeae6880cb23debe57"
+      }
+    ],
+    "outputPolicy": {
+      "pngCount": 6,
+      "metricsCount": 1,
+      "exact": true,
+      "errors": 0,
+      "residue": 0
+    },
+    "integrity": {
+      "preDomSha256": "51a735f2a7085c1520251d8d6908a359eedd376c2c2ba37659581f493dff8e27",
+      "postDomSha256": "51a735f2a7085c1520251d8d6908a359eedd376c2c2ba37659581f493dff8e27",
+      "domEqual": true,
+      "preAuditSha256": "ea003382e2a3b966d16a042a3c036ec9109c8fe5a22374fe505e356fc355bff2",
+      "postAuditSha256": "ea003382e2a3b966d16a042a3c036ec9109c8fe5a22374fe505e356fc355bff2",
+      "auditEqual": true
+    },
+    "executableSourceAggregateSha256": "46206b37e220ead294598ad142cc657d40f1e804a479c486a26689942858a5a6",
+    "claimBoundary": {
+      "canonical": false,
+      "runtimeBehaviorProven": false,
+      "protectedGitDiffProven": false,
+      "sitesProven": false
+    }
+  },
+  "sitesPreview": {
+    "status": "passed_private_owner_only_source_bound",
+    "provenanceArtifact": {
+      "path": "/tmp/stage2-sites-provenance-final.json",
+      "bytes": 7418,
+      "sha256": "ba33160599a6f65c568bc326b60f43da33e98c52369ac25b0203c3e1b10d07b3"
+    },
+    "project": {
+      "id": "appgprj_6a77e71b6af081918c364e7677286e2c",
+      "slug": "trading-bot-uiux-stage2-design-system",
+      "createdAt": "2026-08-09T02:34:06.676053Z",
+      "updatedAt": "2026-08-09T02:38:43.606163Z",
+      "url": "https://trading-bot-uiux-stage2-design-system.mohsenbarari235.chatgpt.site"
+    },
+    "source": {
+      "repositoryPath": "/tmp/uiux-stage2-protected-design-system-sites-preview",
+      "branch": "main",
+      "preparationCommit": "f320ea674b0d8eb8cd240895ded81b9087fe0dc6",
+      "evidenceCommit": "79e2b7190891398ff7edee8bf6126931841440a1",
+      "finalCommit": "147abdc23c8c94a85c6326b60eac0ef060a89aff",
+      "worktreeClean": true,
+      "configuredGitRemoteCount": 0,
+      "configuredGitUpstream": false,
+      "configuredGitRemotePushApplicable": false,
+      "sitesConnectorSourceBinding": {
+        "commitUploadedAndBound": true,
+        "versionCommit": "147abdc23c8c94a85c6326b60eac0ef060a89aff"
+      },
+      "mainProductWorktreeAltered": false,
+      "evidenceHtmlBytes": 35371,
+      "evidenceHtmlSha256": "cfd12b5a97b8dc055bf4001ca7b4441c3c6f169800b6fb549402ab5a5998bf17"
+    },
+    "build": {
+      "framework": "Next.js 16.3.0 static export",
+      "npmCi": "passed",
+      "npmAuditVulnerabilityCount": 0,
+      "sourceVerify": "passed",
+      "productionBuild": "passed",
+      "distAudit": "passed",
+      "securityCountsAllZero": true,
+      "distFileCount": 36,
+      "distSummedBytes": 3005300,
+      "distTreeSha256": "31005f386b74d70507b2f8785786688c7206fde13c3ed3d2cc3b4f665aed5f02",
+      "localArchivePath": "/tmp/uiux-stage2-protected-design-system-sites-dist.tgz",
+      "localArchiveBytes": 2343548,
+      "localArchiveSha256": "a272e245ddd7344bf8795e669338c5814ff670bf264460adbf34bd3152c6c6d2",
+      "localArchiveFileCount": 36,
+      "normalizedArchiveBytes": 3041280,
+      "normalizedArchiveFileCount": 36,
+      "normalizedArchiveSha256": "d06d25c167ac91e18d4387dbb64d375aa67aa936d2e8bf2272024880bfc3b2fb"
+    },
+    "deployment": {
+      "versionNumber": 1,
+      "versionId": "appgprj_6a77e71b6af081918c364e7677286e2c~appgver_d57bc49b79c08191aa306aa363675158",
+      "versionCommit": "147abdc23c8c94a85c6326b60eac0ef060a89aff",
+      "id": "appgdep_6a77e7ff91f08191ab21329ef59b32d4",
+      "status": "succeeded",
+      "updatedAt": "2026-08-09T02:38:43.513392Z",
+      "provider": "site---6a77e71b6af081918c364e7677286e2c"
+    },
+    "access": {
+      "verifiedBeforeDeploy": true,
+      "verifiedAfterDeploy": true,
+      "policy": "custom",
+      "currentUserRole": "owner",
+      "allowedUserCount": 1,
+      "allowedUserRole": "owner",
+      "workspaceGroupCount": 0,
+      "tenantGroupCount": 0,
+      "externalVisitorCount": 0,
+      "revision": 2,
+      "updatedAt": "2026-08-09T02:34:28.961990Z",
+      "environmentRevision": 0,
+      "environmentEntryCount": 0
+    },
+    "anonymousProbes": {
+      "responseDate": "2026-08-09T02:38:43Z",
+      "requestContext": "no_cookie_no_authorization_no_bypass_no_redirect_follow",
+      "root": {
+        "status": 401,
+        "cacheControl": "no-store",
+        "referrerPolicy": "no-referrer",
+        "title": "Sign in required"
+      },
+      "evidence": {
+        "path": "/docs/uiux-stage2-protected-design-system/stage2-protected-design-system-evidence.html",
+        "status": 401,
+        "cacheControl": "no-store",
+        "referrerPolicy": "no-referrer",
+        "title": "Sign in required"
+      },
+      "bypassAudit": {
+        "generationToolInvokedByWorkflow": false,
+        "usedForDeployByWorkflow": false,
+        "usedForAnonymousProbes": false,
+        "persistedInSourceDistArchiveOrDocs": false,
+        "exposedToUserOrArtifactsByWorkflow": false,
+        "providerManagedNonemptySecretBearingStateObservedByFinalQa": true,
+        "observationRecordedAt": "2026-08-09T03:17:20.428Z",
+        "valueHandling": "redacted_not_echoed_not_written_to_files_or_artifacts",
+        "workflowAttribution": "not_attributed_to_this_workflow"
+      }
+    },
+    "postDeploy": {
+      "workerLogWindowMinutes": 60,
+      "errorLevelOrExceptionCount": 0,
+      "nonBlockingInfoEvent": "automatic favicon request; HTTP 404; outcome ok",
+      "providerScreenshotReviewed": true,
+      "signedInLiveHtmlFetched": false
+    },
+    "claimBoundary": "The Sites source commit belongs to the isolated preview repository, not the product branch. The connector screenshot was reviewed; signed-in live HTML was not fetched."
+  },
+  "evidenceLimits": [
+    "Figma and PNG exports do not prove runtime CSS isolation or route activation state.",
+    "Static artifacts do not prove keyboard behavior, reduced motion, browser overflow, authorization, mutation, delivery, realtime, or rollback.",
+    "Direct and local evidence is hash-bound; Sites publication, access, and source binding were closed by their independent provenance gate."
+  ],
+  "stage2Status": "complete",
+  "stage2RuntimeWorkStarted": true,
+  "stage2FigmaStatus": "frozen",
+  "stage2TechnicalGate": "passed_with_preexisting_full_typecheck_parity",
+  "stage2LocalEvidenceStatus": "passed",
+  "stage2SitesStatus": "passed",
+  "nextAuthorizedRuntimeStage": "Stage 3",
+  "stage3RuntimeImplementationAuthorized": true,
+  "stage3RuntimeWorkStarted": false
+}

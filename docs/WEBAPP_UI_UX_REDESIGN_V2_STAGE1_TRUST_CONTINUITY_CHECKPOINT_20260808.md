@@ -2,7 +2,7 @@
 
 تاریخ: ۲۰۲۶-۰۸-۰۸
 
-وضعیت: **`complete`**. ده commit مستقل و rollback-safe روی شاخه `condidate/webapp-ui-ux-redesign-v2` ثبت شده‌اند، گیت فنی fresh روی runtime head `c5fc56996d7f8fa9c575646d70e8785811564633` بسته است و Stage 2 مرحله بعدی مجاز اما هنوز شروع‌نشده است.
+وضعیت Stage 1: **`complete`**. ده commit مستقل و rollback-safe روی شاخه `condidate/webapp-ui-ux-redesign-v2` ثبت شده‌اند و گیت فنی fresh روی runtime head `c5fc56996d7f8fa9c575646d70e8785811564633` بسته است. وضعیت جاری roadmap: Stage 2 `complete` و Stage 3 `authorized_not_started` است؛ مرجع: [checkpoint Stage 2](WEBAPP_UI_UX_REDESIGN_V2_STAGE2_PROTECTED_DESIGN_SYSTEM_CHECKPOINT_20260809.md).
 
 ## دامنه و مبنا
 
@@ -58,7 +58,7 @@ E2Eهای mutation واقعی market offers/schedule/messenger اجرا نشدن
 
 پنجره ۵۰تایی اعلان بدون total، نبود revision/freshness سروری، inventory نشست local-per-server، receiptهای ناهمگون admin، نبود action مستقل «ارسال هشدار»، enforce نشدن قابل‌اعتماد سهمیه تعدادی «دائمی» و برابر نبودن status دعوت/SMS با delivery receipt در Stage 1 جعل یا پنهان نشدند و به Stageهای مالک خود منتقل می‌شوند.
 
-## تصمیم progression
+## تصمیم progression در زمان closure Stage 1
 
 ```text
 continuousProgressionAuthorized = true
@@ -69,7 +69,7 @@ stage2RuntimeImplementationAuthorized = true
 stage2RuntimeWorkStarted = false
 ```
 
-مجوز پیوسته مالک ثبت شده است؛ برای ورود به Stage 2 تأیید جداگانه لازم نیست، اما Stage 2 باید گیت فنی و protected-diff مستقل خود را داشته باشد.
+این block snapshot دقیق زمان closure Stage 1 است و بازنویسی تاریخی نمی‌شود. Stage 2 پس از آن آغاز و اکنون `complete` شده است؛ Figma، گیت فنی/protected diff، evidence و Sites آن پاس، `stage3RuntimeImplementationAuthorized = true` و `stage3RuntimeWorkStarted = false` است.
 
 ## بسته evidence
 

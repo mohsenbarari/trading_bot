@@ -1,0 +1,243 @@
+{
+  "schemaVersion": 1,
+  "stage": 2,
+  "mode": "opt-in",
+  "scopeSelector": "[data-ui-system=\"v2\"]",
+  "tokenPrefix": "--ui-v2-",
+  "legacyTokenPrefix": "--ds-",
+  "productionCatalogRoute": null,
+  "routes": [
+    {
+      "path": "/",
+      "name": "home",
+      "testId": "route-home",
+      "protection": "mixed",
+      "protectedInteriors": ["home-market-widget"],
+      "v2Scope": "off"
+    },
+    {
+      "path": "/setup-password",
+      "name": "setup-password",
+      "testId": "route-setup-password",
+      "protection": "none",
+      "protectedInteriors": [],
+      "v2Scope": "off"
+    },
+    {
+      "path": "/login",
+      "name": "login",
+      "testId": "route-login",
+      "protection": "none",
+      "protectedInteriors": [],
+      "v2Scope": "off"
+    },
+    {
+      "path": "/market",
+      "name": "market",
+      "testId": "route-market",
+      "protection": "full",
+      "protectedInteriors": [],
+      "v2Scope": "off"
+    },
+    {
+      "path": "/operations",
+      "name": "operations",
+      "testId": "route-operations",
+      "protection": "none",
+      "protectedInteriors": [],
+      "v2Scope": "off"
+    },
+    {
+      "path": "/operations/customers",
+      "name": "operations-customers",
+      "testId": "route-operations-customers",
+      "protection": "none",
+      "protectedInteriors": [],
+      "v2Scope": "off"
+    },
+    {
+      "path": "/operations/customers/:relationId",
+      "name": "operations-customers-detail",
+      "testId": "route-operations-customers-detail",
+      "protection": "none",
+      "protectedInteriors": [],
+      "v2Scope": "off"
+    },
+    {
+      "path": "/operations/accountants",
+      "name": "operations-accountants",
+      "testId": "route-operations-accountants",
+      "protection": "none",
+      "protectedInteriors": [],
+      "v2Scope": "off"
+    },
+    {
+      "path": "/operations/accountants/:relationId",
+      "name": "operations-accountants-detail",
+      "testId": "route-operations-accountants-detail",
+      "protection": "none",
+      "protectedInteriors": [],
+      "v2Scope": "off"
+    },
+    {
+      "path": "/account",
+      "name": "account",
+      "testId": "route-account",
+      "protection": "none",
+      "protectedInteriors": [],
+      "v2Scope": "off"
+    },
+    {
+      "path": "/account/security",
+      "name": "account-security",
+      "testId": "route-account-security",
+      "protection": "none",
+      "protectedInteriors": [],
+      "v2Scope": "off"
+    },
+    {
+      "path": "/account/storage",
+      "name": "account-storage",
+      "testId": "route-account-storage",
+      "protection": "none",
+      "protectedInteriors": [],
+      "v2Scope": "off"
+    },
+    {
+      "path": "/account/notifications",
+      "name": "account-notifications",
+      "testId": "route-account-notifications",
+      "protection": "none",
+      "protectedInteriors": [],
+      "v2Scope": "off"
+    },
+    {
+      "path": "/chat",
+      "name": "messenger",
+      "testId": "route-messenger",
+      "protection": "full",
+      "protectedInteriors": [],
+      "v2Scope": "off"
+    },
+    {
+      "path": "/users/:id",
+      "name": "public-profile",
+      "testId": "route-public-profile",
+      "protection": "none",
+      "protectedInteriors": [],
+      "v2Scope": "off"
+    },
+    {
+      "path": "/profile",
+      "name": "profile",
+      "testId": "route-profile",
+      "protection": "none",
+      "protectedInteriors": [],
+      "v2Scope": "off"
+    },
+    {
+      "path": "/settings",
+      "name": "settings",
+      "testId": "route-settings",
+      "protection": "none",
+      "protectedInteriors": [],
+      "v2Scope": "off"
+    },
+    {
+      "path": "/admin",
+      "name": "admin",
+      "testId": "route-admin",
+      "protection": "none",
+      "protectedInteriors": [],
+      "v2Scope": "off"
+    },
+    {
+      "path": "/admin/invitations",
+      "name": "admin-invitations",
+      "testId": "route-admin-invitations",
+      "protection": "none",
+      "protectedInteriors": [],
+      "v2Scope": "off"
+    },
+    {
+      "path": "/admin/channels",
+      "name": "admin-channels",
+      "testId": "route-admin-channels",
+      "protection": "full",
+      "protectedInteriors": [],
+      "v2Scope": "off"
+    },
+    {
+      "path": "/admin/users",
+      "name": "admin-users",
+      "testId": "route-admin-users",
+      "protection": "none",
+      "protectedInteriors": [],
+      "v2Scope": "off"
+    },
+    {
+      "path": "/admin/users/:id",
+      "name": "admin-user-profile",
+      "testId": "route-admin-user-profile",
+      "protection": "none",
+      "protectedInteriors": [],
+      "v2Scope": "off"
+    },
+    {
+      "path": "/admin/commodities",
+      "name": "admin-commodities",
+      "testId": "route-admin-commodities",
+      "protection": "none",
+      "protectedInteriors": [],
+      "v2Scope": "off"
+    },
+    {
+      "path": "/admin/messages",
+      "name": "admin-messages",
+      "testId": "route-admin-messages",
+      "protection": "mixed",
+      "protectedInteriors": ["admin-messages-market-delivery", "admin-messages-messenger-delivery"],
+      "v2Scope": "off"
+    },
+    {
+      "path": "/admin/system",
+      "name": "admin-system",
+      "testId": "route-admin-system",
+      "protection": "mixed",
+      "protectedInteriors": ["trading-settings-market-controls"],
+      "v2Scope": "off"
+    },
+    {
+      "path": "/i/:code",
+      "name": "invite-landing",
+      "testId": "route-invite-landing",
+      "protection": "none",
+      "protectedInteriors": [],
+      "v2Scope": "off"
+    },
+    {
+      "path": "/register",
+      "name": "web-register",
+      "testId": "route-web-register",
+      "protection": "none",
+      "protectedInteriors": [],
+      "v2Scope": "off"
+    },
+    {
+      "path": "/notifications",
+      "name": "notifications",
+      "testId": "route-notifications",
+      "protection": "none",
+      "protectedInteriors": [],
+      "v2Scope": "off"
+    },
+    {
+      "path": "/share-receive",
+      "name": "share-receive",
+      "testId": "route-share-receive",
+      "protection": "full",
+      "protectedInteriors": [],
+      "v2Scope": "off"
+    }
+  ]
+}

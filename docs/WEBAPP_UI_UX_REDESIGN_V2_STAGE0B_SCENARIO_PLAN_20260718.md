@@ -2,7 +2,7 @@
 
 تاریخ: ۲۰۲۶-۰۷-۱۸
 
-وضعیت: مالک محصول `0B-1..0B-6` را تأیید کرده و در `2026-08-08T20:57:28.073Z` پیشروی بی‌وقفه تا تکمیل roadmap یا توقف صریح را مجاز کرده است. closure فنی/Sites `0B-6` در `2026-08-08T21:07:38Z` پاس شده؛ Stage 1 نیز با گیت فنی مستقل `complete` و Stage 2 next authorized اما هنوز شروع‌نشده است
+وضعیت: مالک محصول `0B-1..0B-6` را تأیید کرده و در `2026-08-08T20:57:28.073Z` پیشروی بی‌وقفه تا تکمیل roadmap یا توقف صریح را مجاز کرده است. closure فنی/Sites `0B-6`، Stage 1 و Stage 2 بسته شده‌اند؛ Stage 3 `authorized_not_started` است.
 
 جهت مصوب: **مالی مدرن**
 
@@ -56,7 +56,7 @@
 
 ### 0B-6 — قرارداد نهایی سیستم و پذیرش
 
-وضعیت: **تکمیل و بسته‌شده.** `ownerSystemContractApproval.status: approved`، `continuousProgressionAuthorized: true` و `runtimeImplementationAuthorized: true` ثبت شده است؛ Stage 1 پس از closure اجرا و بسته شد و Stage 2 مرحله بعدی مجاز است. مرجع نهایی Stage 0: [checkpoint قرارداد نهایی](WEBAPP_UI_UX_REDESIGN_V2_STAGE0B_FINAL_SYSTEM_CONTRACT_CHECKPOINT_20260808.md)؛ مرجع closure بعدی: [checkpoint Stage 1](WEBAPP_UI_UX_REDESIGN_V2_STAGE1_TRUST_CONTINUITY_CHECKPOINT_20260808.md).
+وضعیت: **تکمیل و بسته‌شده.** `ownerSystemContractApproval.status: approved`، `continuousProgressionAuthorized: true` و `runtimeImplementationAuthorized: true` ثبت شده است؛ Stage 1 پس از closure اجرا و بسته شد و Stage 2 پس از آن آغاز شده است. مرجع نهایی Stage 0: [checkpoint قرارداد نهایی](WEBAPP_UI_UX_REDESIGN_V2_STAGE0B_FINAL_SYSTEM_CONTRACT_CHECKPOINT_20260808.md)؛ مرجع Stage 1: [checkpoint Stage 1](WEBAPP_UI_UX_REDESIGN_V2_STAGE1_TRUST_CONTINUITY_CHECKPOINT_20260808.md)؛ وضعیت جاری: [checkpoint Stage 2](WEBAPP_UI_UX_REDESIGN_V2_STAGE2_PROTECTED_DESIGN_SYSTEM_CHECKPOINT_20260809.md).
 
 نمونه‌های تأییدشده کنار هم قرار می‌گیرند تا رنگ، typography، spacing، radius، navigation، stateها و motion در همه آن‌ها یک قرارداد واحد داشته باشد.
 
@@ -73,4 +73,4 @@
 
 ## گام بعدی
 
-Stage 1 — اعتماد و تداوم کار اکنون **`complete`** است. گام بعدی **Stage 2 — Design System V2 محافظت‌شده** است؛ مجاز شده ولی runtime/Figma/Sites آن در زمان closure این سند هنوز شروع نشده است. progression تا تکمیل roadmap یا توقف صریح مالک ادامه می‌یابد.
+Stage 1 — اعتماد و تداوم کار و **Stage 2 — Design System V2 محافظت‌شده** هر دو **`complete`** هستند. `nextAuthorizedRuntimeStage = Stage 3`، `stage3RuntimeImplementationAuthorized = true` و `stage3RuntimeWorkStarted = false` است. progression پس از عبور گیت هر Stage تا تکمیل roadmap یا توقف صریح مالک ادامه می‌یابد.

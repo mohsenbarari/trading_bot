@@ -1,0 +1,250 @@
+{
+  "schema": 3,
+  "stage": "2",
+  "artifactKind": "post-freeze-direct-figma-audit",
+  "status": "passed",
+  "branch": "condidate/webapp-ui-ux-redesign-v2",
+  "fileKey": "z8jgJxST4O2APzWnlyP9gv",
+  "pageId": "208:2",
+  "rootId": "208:3",
+  "frozenAt": "2026-08-09T01:27:37.567Z",
+  "auditedAt": "2026-08-09T01:24:59.000Z",
+  "preCaptureRereadAt": "2026-08-09T01:31:58.397Z",
+  "componentRereadAt": "2026-08-09T01:33:16.159Z",
+  "postCaptureRereadAt": "2026-08-09T01:36:18.907Z",
+  "inventoryDigestRereadAt": "2026-08-09T01:38:01.728Z",
+  "artifactCreatedAt": "2026-08-09T01:38:09.130Z",
+  "figmaAssertionStatus": "25/25 passed",
+  "freezeMetadata": {
+    "namespace": "openai_uiux",
+    "pageKeys": ["stage2_freeze"],
+    "rootKeys": ["stage2_freeze", "contract"],
+    "status": "figma_frozen_external_evidence_pending",
+    "exact": true,
+    "contract": {
+      "stage": "Stage 2",
+      "foundationOnly": true,
+      "optInSelectors": ["[data-ui-system=v2]", "[data-ui-system=v2-portal]"],
+      "runtimeProductActivation": false,
+      "protectedSurfaceDiffRequired": "empty"
+    }
+  },
+  "captureImmutability": {
+    "canonicalization": "stable recursive root projection of id, type, name, geometry, visibility, lock, opacity, boundVariables, text content, typography and ordered children; UTF-8 SHA-256",
+    "pre": {
+      "canonicalBytes": 612614,
+      "sha256": "4df00cbcb8734865367e41fa28c8936d39a49e1c6578af3d5979f79857365a22"
+    },
+    "post": {
+      "canonicalBytes": 612614,
+      "sha256": "4df00cbcb8734865367e41fa28c8936d39a49e1c6578af3d5979f79857365a22"
+    },
+    "equal": true
+  },
+  "inventoryDigests": {
+    "canonicalization": "stable JSON with lexicographically sorted object keys and explicitly sorted inventory rows; UTF-8 SHA-256",
+    "collections": {
+      "bytes": 1544,
+      "sha256": "f54d550a899538028e9271256ca169f48203a03ec6fc966d503f3ff1f86f68d6"
+    },
+    "variables": {
+      "bytes": 15411,
+      "sha256": "5b0ac54c4fd0d19de80eaa6fe1a59f63c88d2b4a59fdb418f178150cd650a18e"
+    },
+    "styles": {
+      "bytes": 3061,
+      "sha256": "c807eabb73ebf4cd69aa8bbe40388702bdee86f58c14a2533f9f82c3e028fa89"
+    },
+    "components": {
+      "bytes": 43102,
+      "sha256": "42b82fed9417542c1b2cfbd832ac6ea2ceab2fc1f01d750580276071cb8479c3"
+    },
+    "catalog": {
+      "bytes": 6157,
+      "sha256": "336db84768a28498450be0176edd2848604defaa716b64bce372ab02b5e8bf8f"
+    },
+    "routes": {
+      "bytes": 7083,
+      "sha256": "61812c92e8250d216462d958333ae01b1b58e92cd75655bb24016982fa184b3e"
+    },
+    "responsive": {
+      "bytes": 443,
+      "sha256": "4b90c93367b0473d802234bef16918064a982aeb4d11abaa0e5073e234e18036"
+    },
+    "icons": {
+      "bytes": 1144,
+      "sha256": "4f04946475e2e1db4d5abf050f090c307a84712e9e433081d2900503df77dd0a"
+    },
+    "combined": {
+      "bytes": 78068,
+      "sha256": "9c9fa984188bee28217a1052f42186b2815ec3a9d91c431c8d0649c8e637c829"
+    }
+  },
+  "metrics": {
+    "root": {
+      "width": 1440,
+      "height": 13028,
+      "sectionIds": ["210:2", "211:2", "213:2", "215:2", "221:2", "223:2", "226:18"],
+      "sections": [
+        {"id": "210:2", "name": "Section/00 Cover", "width": 1280, "height": 348, "x": 80, "y": 80},
+        {"id": "211:2", "name": "Section/01 Color tokens", "width": 1280, "height": 1792, "x": 80, "y": 508},
+        {"id": "213:2", "name": "Section/02 Type Geometry Motion", "width": 1280, "height": 2092, "x": 80, "y": 2380},
+        {"id": "215:2", "name": "Section/03 Component state catalog", "width": 1280, "height": 4488, "x": 80, "y": 4552},
+        {"id": "221:2", "name": "Section/04 Scope routes protected", "width": 1280, "height": 1208, "x": 80, "y": 9120},
+        {"id": "223:2", "name": "Section/05 Responsive acceptance", "width": 1280, "height": 1428, "x": 80, "y": 10408},
+        {"id": "226:18", "name": "Section/06 Guard rollback evidence", "width": 1280, "height": 992, "x": 80, "y": 11916}
+      ]
+    },
+    "foundations": {
+      "collections": [
+        {"id": "VariableCollectionId:37:2", "name": "UIUX v2 — Primitives", "mode": "Value", "variables": 20},
+        {"id": "VariableCollectionId:37:3", "name": "UIUX v2 — Semantic", "mode": "Light", "variables": 26},
+        {"id": "VariableCollectionId:37:4", "name": "UIUX v2 — Dimensions", "mode": "Value", "variables": 19}
+      ],
+      "variables": 65,
+      "semanticAliases": 26,
+      "brokenAliases": 0,
+      "webCodeSyntaxExact": 65,
+      "allScopeViolations": 0,
+      "textStyles": 10,
+      "effectStyles": 2,
+      "avatarInitial": {
+        "styleId": "S:b2c168d4aaf57efabc1e01386680792f7c983c42,",
+        "styleName": "UIUX v2/Avatar/Initial",
+        "boundNodeIds": ["51:16", "51:27"]
+      },
+      "borderDefault": {
+        "variableId": "VariableID:38:6",
+        "hex": "#8091A3",
+        "contrastOnWhite": 3.232,
+        "contrastOnPage": 3.006
+      }
+    },
+    "components": {
+      "sets": 12,
+      "variants": 56,
+      "sourceSets": [
+        {"id": "48:14", "name": "UIUX/Button", "variants": 6},
+        {"id": "49:14", "name": "UIUX/Status", "variants": 4},
+        {"id": "50:26", "name": "UIUX/Relation Row", "variants": 3},
+        {"id": "51:33", "name": "UIUX/Authenticated Header", "variants": 2},
+        {"id": "52:46", "name": "UIUX/Bottom Navigation", "variants": 6},
+        {"id": "77:610", "name": "UIUX/Form Field", "variants": 12},
+        {"id": "78:566", "name": "UIUX/Admin User Row", "variants": 3},
+        {"id": "80:574", "name": "UIUX/Standard Invitation Row", "variants": 2},
+        {"id": "81:566", "name": "UIUX/Decision Panel", "variants": 2},
+        {"id": "121:14", "name": "UIUX/Account Action Row", "variants": 2},
+        {"id": "122:1327", "name": "UIUX/Session Row", "variants": 8},
+        {"id": "123:1330", "name": "UIUX/Notification Row", "variants": 6}
+      ],
+      "catalog": {
+        "nodeId": "215:2",
+        "topLevelReferences": 56,
+        "nestedReferences": 6,
+        "linkedReferences": 62,
+        "detachedReferences": 0,
+        "missingVariantReferences": 0,
+        "duplicateTopLevelReferences": 0
+      },
+      "bottomNavigation": {
+        "setId": "52:46",
+        "variantIds": ["52:8", "52:29", "127:14", "127:35", "170:14", "170:35"],
+        "height": 80,
+        "heightVariableId": "VariableID:39:40",
+        "exactBoundVariantCount": 6
+      }
+    },
+    "iconScale": {
+      "contentId": "267:19",
+      "contentWidth": 1278,
+      "contentHeight": 134,
+      "layoutMode": "HORIZONTAL",
+      "layoutSizingVertical": "HUG",
+      "textGlyphCount": 0,
+      "glyphs": [
+        {"id": "267:24", "type": "ELLIPSE", "size": 16, "sizeVariableId": "VariableID:39:28", "colorVariableId": "VariableID:39:15", "strokeVariableId": "VariableID:39:41"},
+        {"id": "267:29", "type": "ELLIPSE", "size": 20, "sizeVariableId": "VariableID:39:29", "colorVariableId": "VariableID:39:15", "strokeVariableId": "VariableID:39:41"},
+        {"id": "267:34", "type": "ELLIPSE", "size": 24, "sizeVariableId": "VariableID:39:30", "colorVariableId": "VariableID:39:15", "strokeVariableId": "VariableID:39:41"}
+      ]
+    },
+    "routes": {
+      "total": 29,
+      "enabled": 0,
+      "fullProtected": ["/market", "/chat", "/admin/channels", "/share-receive"],
+      "mixedProtected": ["/", "/admin/messages", "/admin/system"],
+      "v2ScopeOff": 29
+    },
+    "responsive": {
+      "mobile": [
+        {"id": "223:7", "width": 360, "height": 620},
+        {"id": "223:31", "width": 375, "height": 620},
+        {"id": "223:55", "width": 390, "height": 620},
+        {"id": "223:80", "width": 414, "height": 620},
+        {"id": "223:104", "width": 430, "height": 620}
+      ],
+      "desktop": {"id": "224:2", "width": 1440, "height": 900}
+    },
+    "qa": {
+      "touchTargetsChecked": 66,
+      "touchTargetFailures": 0,
+      "focusStates": 10,
+      "focusStrokePx": 3,
+      "overflowCount": 0,
+      "clippingCount": 0,
+      "productActivationCount": 0,
+      "protectedInteriorCount": 0,
+      "reviewerResidueCount": 0,
+      "failedDraftCount": 0,
+      "placeholderCount": 0
+    }
+  },
+  "directEvidence": [
+    {"nodeId": "208:3", "path": "figma-stage2-contract-root.png", "width": 1440, "height": 13028, "bytes": 1065674, "sha256": "b5c0ef30e0a4a0f774613c341b98cbe35bbfa754e9728400c92aa7f876a0e8cf", "entropy": 2.329698},
+    {"nodeId": "211:2", "path": "figma-stage2-color-foundations.png", "width": 1280, "height": 1792, "bytes": 139052, "sha256": "60c701a957e15bfed876c8bbbc0acbffd7b60993aa9bc3e6404269a91db8aefc", "entropy": 2.554644},
+    {"nodeId": "213:2", "path": "figma-stage2-type-geometry-motion.png", "width": 1280, "height": 2092, "bytes": 221551, "sha256": "87e9f115af5d753cefc9661083231948ad2a2c2da6cfdc49775d7d38b5769b0d", "entropy": 1.986713},
+    {"nodeId": "215:2", "path": "figma-stage2-component-state-catalog.png", "width": 1280, "height": 4488, "bytes": 353191, "sha256": "e719d215744e723309fda3eaa45c0f76ad6105ef3c9745a03827d7bccabc6c54", "entropy": 1.551923},
+    {"nodeId": "221:2", "path": "figma-stage2-scope-route-contract.png", "width": 1280, "height": 1208, "bytes": 127580, "sha256": "bd8a54b903ae2b161b5bed31c429e57d263d2976a736ebd928fdda86018a0291", "entropy": 1.857534},
+    {"nodeId": "223:2", "path": "figma-stage2-responsive-acceptance.png", "width": 1280, "height": 1428, "bytes": 78246, "sha256": "e5badb1aaba8d1d25fc1309dfca98322532193b8fc87677aa3d9d20ded6e1e3b", "entropy": 2.122881},
+    {"nodeId": "224:2", "path": "figma-stage2-desktop-catalog-1440x900.png", "width": 1440, "height": 900, "bytes": 62492, "sha256": "6a0830f432a074b70bc543548fd1300cf8b698dc4122e5e8dcbc29a2d4b35a7b", "entropy": 2.373797},
+    {"nodeId": "226:18", "path": "figma-stage2-guard-rollback-evidence.png", "width": 1280, "height": 992, "bytes": 99086, "sha256": "37c7f4defe94adbc857063376ae9782eac4e70e16d7c3e16326d3f93507c913f", "entropy": 2.022405}
+  ],
+  "directEvidenceAggregateSha256": "5af685f38703408f10618a1e87397386dbe98e5a8c6df0f8967cdff6da38dbf5",
+  "assertions": [
+    {"order": 1, "id": "freeze-metadata-exact", "status": "passed", "evidence": "openai_uiux stage2_freeze on page/root; exact frozenAt and auditedAt"},
+    {"order": 2, "id": "canonical-tree-pre-post-equal", "status": "passed", "evidence": "612614 bytes; identical SHA-256"},
+    {"order": 3, "id": "root-section-geometry-exact", "status": "passed", "evidence": "1440x13028 root and seven ordered sections"},
+    {"order": 4, "id": "foundation-collections-20-26-19", "status": "passed"},
+    {"order": 5, "id": "variable-inventory-65-web-syntax-exact", "status": "passed"},
+    {"order": 6, "id": "semantic-aliases-26-broken-zero", "status": "passed"},
+    {"order": 7, "id": "variable-scopes-all-scope-zero", "status": "passed"},
+    {"order": 8, "id": "text-styles-10-avatar-bindings-2", "status": "passed"},
+    {"order": 9, "id": "effect-styles-2", "status": "passed"},
+    {"order": 10, "id": "border-default-8091a3-contrast-pass", "status": "passed", "evidence": "3.232 on white; 3.006 on page"},
+    {"order": 11, "id": "component-sets-12-variants-56", "status": "passed"},
+    {"order": 12, "id": "catalog-56-top-6-nested-linked-detached-zero", "status": "passed"},
+    {"order": 13, "id": "bottom-navigation-six-height-80-bound", "status": "passed"},
+    {"order": 14, "id": "icon-scale-16-20-24-token-bound-no-text-glyph", "status": "passed"},
+    {"order": 15, "id": "route-registry-29-all-off", "status": "passed"},
+    {"order": 16, "id": "full-protected-routes-exact", "status": "passed"},
+    {"order": 17, "id": "mixed-protected-routes-exact", "status": "passed"},
+    {"order": 18, "id": "responsive-mobile-360-375-390-414-430", "status": "passed"},
+    {"order": 19, "id": "desktop-proof-1440x900", "status": "passed"},
+    {"order": 20, "id": "accessibility-66-targets-10-focus-zero-failures", "status": "passed"},
+    {"order": 21, "id": "geometry-overflow-clipping-zero", "status": "passed"},
+    {"order": 22, "id": "product-activation-protected-interior-zero", "status": "passed"},
+    {"order": 23, "id": "reviewer-failed-draft-placeholder-zero", "status": "passed"},
+    {"order": 24, "id": "direct-export-set-8-exact-nonblank-hash-bound", "status": "passed"},
+    {"order": 25, "id": "opt-in-selectors-exact", "status": "passed"}
+  ],
+  "passedCount": 25,
+  "failedCount": 0,
+  "blockers": [],
+  "claimBoundary": {
+    "figmaCanonical": true,
+    "localDerivativeCanonical": false,
+    "runtimeBehaviorProven": false,
+    "protectedGitDiffProven": false,
+    "sitesProven": false,
+    "externalTechnicalGatesRequired": true
+  }
+}

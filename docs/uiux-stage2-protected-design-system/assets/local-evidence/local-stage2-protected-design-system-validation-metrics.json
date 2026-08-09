@@ -1,0 +1,1496 @@
+{
+  "schemaVersion": 1,
+  "stage": "2",
+  "status": "passed",
+  "runId": "stage2-20260809T022716844Z-19dd7808",
+  "startedAt": "2026-08-09T02:27:16.843Z",
+  "completedAt": "2026-08-09T02:27:35.682Z",
+  "canonicalFigma": {
+    "fileKey": "z8jgJxST4O2APzWnlyP9gv",
+    "pageId": "208:2",
+    "rootId": "208:3",
+    "frozenAt": "2026-08-09T01:27:37.567Z",
+    "auditedAt": "2026-08-09T01:24:59.000Z",
+    "preCaptureRereadAt": "2026-08-09T01:31:58.397Z",
+    "postCaptureRereadAt": "2026-08-09T01:36:18.907Z",
+    "inventoryDigestRereadAt": "2026-08-09T01:38:01.728Z",
+    "canonicalRole": "primary",
+    "localEvidenceRole": "secondary-derivative",
+    "canonicalTree": {
+      "bytes": 612614,
+      "sha256": "4df00cbcb8734865367e41fa28c8936d39a49e1c6578af3d5979f79857365a22",
+      "prePostEqual": true
+    },
+    "inventoryDigest": {
+      "bytes": 78068,
+      "sha256": "9c9fa984188bee28217a1052f42186b2815ec3a9d91c431c8d0649c8e637c829"
+    }
+  },
+  "directFigma": {
+    "status": "passed",
+    "provenance": "hash-bound post-freeze direct audit and natural-size exports; not inferred by Chromium",
+    "auditJson": {
+      "path": "assets/figma-stage2-direct-audit.json",
+      "bytes": 12558,
+      "sha256": "7361d43e2f3c9437997663cb313a03b87a5d505f3046f4406d97bd82b6ddacc5",
+      "schema": 3,
+      "assertions": "25/25 passed"
+    },
+    "exports": [
+      {
+        "nodeId": "208:3",
+        "path": "figma-stage2-contract-root.png",
+        "width": 1440,
+        "height": 13028,
+        "bytes": 1065674,
+        "sha256": "b5c0ef30e0a4a0f774613c341b98cbe35bbfa754e9728400c92aa7f876a0e8cf",
+        "entropy": 2.329698,
+        "visualStats": {
+          "uniqueColorCount": 257,
+          "changedPixelCount": 12447669
+        },
+        "validated": true
+      },
+      {
+        "nodeId": "211:2",
+        "path": "figma-stage2-color-foundations.png",
+        "width": 1280,
+        "height": 1792,
+        "bytes": 139052,
+        "sha256": "60c701a957e15bfed876c8bbbc0acbffd7b60993aa9bc3e6404269a91db8aefc",
+        "entropy": 2.554644,
+        "visualStats": {
+          "uniqueColorCount": 257,
+          "changedPixelCount": 1519043
+        },
+        "validated": true
+      },
+      {
+        "nodeId": "213:2",
+        "path": "figma-stage2-type-geometry-motion.png",
+        "width": 1280,
+        "height": 2092,
+        "bytes": 221551,
+        "sha256": "87e9f115af5d753cefc9661083231948ad2a2c2da6cfdc49775d7d38b5769b0d",
+        "entropy": 1.986713,
+        "visualStats": {
+          "uniqueColorCount": 257,
+          "changedPixelCount": 1610854
+        },
+        "validated": true
+      },
+      {
+        "nodeId": "215:2",
+        "path": "figma-stage2-component-state-catalog.png",
+        "width": 1280,
+        "height": 4488,
+        "bytes": 353191,
+        "sha256": "e719d215744e723309fda3eaa45c0f76ad6105ef3c9745a03827d7bccabc6c54",
+        "entropy": 1.551923,
+        "visualStats": {
+          "uniqueColorCount": 257,
+          "changedPixelCount": 5111791
+        },
+        "validated": true
+      },
+      {
+        "nodeId": "221:2",
+        "path": "figma-stage2-scope-route-contract.png",
+        "width": 1280,
+        "height": 1208,
+        "bytes": 127580,
+        "sha256": "bd8a54b903ae2b161b5bed31c429e57d263d2976a736ebd928fdda86018a0291",
+        "entropy": 1.857534,
+        "visualStats": {
+          "uniqueColorCount": 257,
+          "changedPixelCount": 1545948
+        },
+        "validated": true
+      },
+      {
+        "nodeId": "223:2",
+        "path": "figma-stage2-responsive-acceptance.png",
+        "width": 1280,
+        "height": 1428,
+        "bytes": 78246,
+        "sha256": "e5badb1aaba8d1d25fc1309dfca98322532193b8fc87677aa3d9d20ded6e1e3b",
+        "entropy": 2.122881,
+        "visualStats": {
+          "uniqueColorCount": 257,
+          "changedPixelCount": 1827548
+        },
+        "validated": true
+      },
+      {
+        "nodeId": "224:2",
+        "path": "figma-stage2-desktop-catalog-1440x900.png",
+        "width": 1440,
+        "height": 900,
+        "bytes": 62492,
+        "sha256": "6a0830f432a074b70bc543548fd1300cf8b698dc4122e5e8dcbc29a2d4b35a7b",
+        "entropy": 2.373797,
+        "visualStats": {
+          "uniqueColorCount": 257,
+          "changedPixelCount": 1054887
+        },
+        "validated": true
+      },
+      {
+        "nodeId": "226:18",
+        "path": "figma-stage2-guard-rollback-evidence.png",
+        "width": 1280,
+        "height": 992,
+        "bytes": 99086,
+        "sha256": "37c7f4defe94adbc857063376ae9782eac4e70e16d7c3e16326d3f93507c913f",
+        "entropy": 2.022405,
+        "visualStats": {
+          "uniqueColorCount": 257,
+          "changedPixelCount": 1269468
+        },
+        "validated": true
+      }
+    ],
+    "exportAggregateSha256": "5af685f38703408f10618a1e87397386dbe98e5a8c6df0f8967cdff6da38dbf5"
+  },
+  "executableGuard": {
+    "status": "passed",
+    "sources": [
+      {
+        "path": "frontend/scripts/lib/design-system-v2-guard.mjs",
+        "bytes": 51914,
+        "sha256": "ef57cf1fd8fdb5bd50da7e67af03e8170e3a3f4bc4b241553899c3cf11bc90d8"
+      },
+      {
+        "path": "frontend/scripts/design-system-v2-guard.test.mjs",
+        "bytes": 30090,
+        "sha256": "36ff408a722bd03c9fe4f939dfba9d80af2b415a21e08e43f67ba6764c705122"
+      },
+      {
+        "path": "frontend/src/design-system-v2/canonical-token-contract.json",
+        "bytes": 7436,
+        "sha256": "a0c3f3560acaa8c4fddc123ec042657d7db73d0599698e49eb172f647227cf66"
+      },
+      {
+        "path": "frontend/scripts/check-design-system-v2-guards.mjs",
+        "bytes": 4326,
+        "sha256": "554a91b4d18842b081493266fcef4dfa0a3058c52dfa0a8aa371a60d289f5dc6"
+      },
+      {
+        "path": "frontend/src/styles/design-system-v2.tokens.css",
+        "bytes": 5522,
+        "sha256": "8dc088a5d4064ee2aa01fbc86e56e436fa557b4fd215c2e726dba7bb21346130"
+      },
+      {
+        "path": "frontend/src/styles/design-system-v2.components.css",
+        "bytes": 1599,
+        "sha256": "47a370be179d2a474c14c55e948236cd62b5cc9717c0e5816dec4ff4aaad9857"
+      },
+      {
+        "path": "frontend/src/components/ui/AppDesignSystemCatalog.vue",
+        "bytes": 42299,
+        "sha256": "0208d421aaf1ebed7bfc6dcc1ef6370ec10bd3d4ac2ba2602dbecc364734486d"
+      }
+    ],
+    "sourceAggregateSha256": "46206b37e220ead294598ad142cc657d40f1e804a479c486a26689942858a5a6",
+    "verification": {
+      "focusedCommand": "npm exec vitest run -- scripts/design-system-v2-guard.test.mjs src/components/ui/AppDesignSystemCatalog.test.ts src/components/ui/AppDesignSystemScope.test.ts src/components/ui/uiDesignSystemScope.test.ts src/router/uiRouteContract.test.ts src/styles/designSystemV2.test.ts",
+      "focusedTestFiles": 6,
+      "focusedTests": 68,
+      "focusedDurationSeconds": 14.27,
+      "focusedExitCode": 0,
+      "focusedStatus": "passed",
+      "guardTests": 39,
+      "guardCommand": "cd frontend && npm run guard:ui",
+      "guardStatus": "passed",
+      "guardCssFiles": 3,
+      "guardRoutes": 29,
+      "serialTestFiles": 41,
+      "serialTests": 452,
+      "serialVitestDurationSeconds": 124.87,
+      "serialWallMs": 126229,
+      "serialExitCode": 0,
+      "guardSourcePrePostStable": true,
+      "canonicalTokens": 65,
+      "implementationTuples": 43,
+      "definitions": 108,
+      "uniqueDefinitions": 106,
+      "browserStatus": "passed",
+      "targetedVueTscStatus": "passed",
+      "targetedVueTscExitCode": 0,
+      "lintStatus": "passed",
+      "prettierStatus": "passed",
+      "buildStatus": "passed",
+      "buildModules": 2153,
+      "buildDurationSeconds": 26.07,
+      "protectedDiffCount": 0,
+      "protectedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "protectedDiffUpstreamStatus": "passed",
+      "localHarnessClaim": false,
+      "provenance": "settled upstream fresh-gate execution; locally hash-bound, not re-inferred from screenshots or rerun by this harness"
+    }
+  },
+  "localEvidence": {
+    "role": "secondary-derivative",
+    "canonical": false,
+    "runtimeBehaviorProven": false,
+    "protectedGitDiffProven": false,
+    "sitesProven": false,
+    "sourceHtml": {
+      "path": "stage2-protected-design-system-evidence.html",
+      "bytes": 35371,
+      "sha256": "cfd12b5a97b8dc055bf4001ca7b4441c3c6f169800b6fb549402ab5a5998bf17"
+    }
+  },
+  "claimBoundary": {
+    "figmaCanonical": true,
+    "localDerivativeCanonical": false,
+    "runtimeBehaviorProven": false,
+    "protectedGitDiffProven": false,
+    "sitesProven": false,
+    "externalTechnicalGatesRequired": true
+  },
+  "recoveryBeforeDependencyResolution": {
+    "action": "removed-strictly-validated-stale-current",
+    "recovered": false,
+    "stale": {
+      "runId": "stage2-20260809T022252765Z-b8cb909b",
+      "completedAt": "2026-08-09T02:23:13.005Z",
+      "recordedHtmlSha256": "c718d281753aa61854f1b12bc2ddc45c2c5f33e3c4aa117670d4a5ff985ae806",
+      "currentHtmlSha256": "cfd12b5a97b8dc055bf4001ca7b4441c3c6f169800b6fb549402ab5a5998bf17",
+      "sourceMtime": "2026-08-09T02:27:03.314Z"
+    }
+  },
+  "dependencies": {
+    "node": "v20.19.5",
+    "platform": "linux-x64",
+    "playwright": "/root/trading-bot/trading_bot/frontend/node_modules/playwright/index.js",
+    "browser": {
+      "engine": "chromium",
+      "version": "147.0.7727.15",
+      "baseViewport": {
+        "width": 1600,
+        "height": 1200
+      },
+      "deviceScaleFactor": 1
+    },
+    "fonts": {
+      "family": "Vazirmatn",
+      "root": "/tmp/trading-bot-webapp-uiux-redesign-v2/frontend/node_modules/vazirmatn/fonts/webfonts",
+      "checks": [
+        {
+          "weight": 400,
+          "loaded": true
+        },
+        {
+          "weight": 500,
+          "loaded": true
+        },
+        {
+          "weight": 600,
+          "loaded": true
+        },
+        {
+          "weight": 700,
+          "loaded": true
+        }
+      ],
+      "files": [
+        {
+          "file": "Vazirmatn-Regular.woff2",
+          "weight": 400,
+          "bytes": 50684,
+          "sha256": "e382101336c6eb32cfb31381c027d02d2e0354bad08f6a395d4088beb3db3d91"
+        },
+        {
+          "file": "Vazirmatn-Medium.woff2",
+          "weight": 500,
+          "bytes": 51128,
+          "sha256": "3333e31188a2b628db8780ca22fd5aad85bc083ccee9beb8d4d52db18cb98d48"
+        },
+        {
+          "file": "Vazirmatn-SemiBold.woff2",
+          "weight": 600,
+          "bytes": 51032,
+          "sha256": "6a39a3c25eb18503cad590527b95bb5d4062b889a7ebbd3f01b0488d239e0499"
+        },
+        {
+          "file": "Vazirmatn-Bold.woff2",
+          "weight": 700,
+          "bytes": 51020,
+          "sha256": "836fae7d42d83faa249bc00e0099592be98a1fa260d22d82f269b6091e585627"
+        }
+      ]
+    }
+  },
+  "integrity": {
+    "preDomSha256": "51a735f2a7085c1520251d8d6908a359eedd376c2c2ba37659581f493dff8e27",
+    "postDomSha256": "51a735f2a7085c1520251d8d6908a359eedd376c2c2ba37659581f493dff8e27",
+    "domEqual": true,
+    "preAuditSha256": "ea003382e2a3b966d16a042a3c036ec9109c8fe5a22374fe505e356fc355bff2",
+    "postAuditSha256": "ea003382e2a3b966d16a042a3c036ec9109c8fe5a22374fe505e356fc355bff2",
+    "auditEqual": true,
+    "postCaptureRemeasurement": true,
+    "consoleErrors": [],
+    "pageErrors": [],
+    "failedRequests": [],
+    "blockedNetworkRequests": []
+  },
+  "assertions": [
+    {
+      "id": "freeze-metadata-exact",
+      "passed": true,
+      "evidence": {
+        "fileKey": "z8jgJxST4O2APzWnlyP9gv",
+        "pageId": "208:2",
+        "rootId": "208:3",
+        "frozenAt": "2026-08-09T01:27:37.567Z",
+        "auditedAt": "2026-08-09T01:24:59.000Z",
+        "status": "figma_frozen_external_evidence_pending",
+        "directAuditSha256": "7361d43e2f3c9437997663cb313a03b87a5d505f3046f4406d97bd82b6ddacc5"
+      }
+    },
+    {
+      "id": "canonical-tree-pre-post-equal",
+      "passed": true,
+      "evidence": {
+        "htmlTreeSha256": "4df00cbcb8734865367e41fa28c8936d39a49e1c6578af3d5979f79857365a22",
+        "expected": "4df00cbcb8734865367e41fa28c8936d39a49e1c6578af3d5979f79857365a22",
+        "canonicalInputsValid": true
+      }
+    },
+    {
+      "id": "root-section-geometry-exact",
+      "passed": true,
+      "evidence": {
+        "width": 1440,
+        "height": 13028,
+        "sections": 7,
+        "captureSections": 6
+      }
+    },
+    {
+      "id": "foundation-collections-20-26-19",
+      "passed": true,
+      "evidence": {
+        "collectionCounts": [
+          20,
+          26,
+          19
+        ]
+      }
+    },
+    {
+      "id": "variable-inventory-65-web-syntax-exact",
+      "passed": true,
+      "evidence": {
+        "variables": 65,
+        "webSyntaxExact": 65
+      }
+    },
+    {
+      "id": "semantic-aliases-26-broken-zero",
+      "passed": true,
+      "evidence": {
+        "semanticAliases": 26,
+        "brokenAliases": 0
+      }
+    },
+    {
+      "id": "variable-scopes-all-scope-zero",
+      "passed": true,
+      "evidence": {
+        "allScopeViolations": 0
+      }
+    },
+    {
+      "id": "text-styles-10-avatar-bindings-2",
+      "passed": true,
+      "evidence": {
+        "textStyles": 10,
+        "styleId": "S:b2c168d4aaf57efabc1e01386680792f7c983c42,",
+        "boundNodeIds": [
+          "51:16",
+          "51:27"
+        ]
+      }
+    },
+    {
+      "id": "effect-styles-2",
+      "passed": true,
+      "evidence": {
+        "effectStyles": 2
+      }
+    },
+    {
+      "id": "border-default-8091a3-contrast-pass",
+      "passed": true,
+      "evidence": {
+        "hex": "#8091A3",
+        "white": 3.232,
+        "page": 3.006
+      }
+    },
+    {
+      "id": "component-sets-12-variants-56",
+      "passed": true,
+      "evidence": {
+        "sets": 12,
+        "variants": 56,
+        "sourceSets": [
+          {
+            "id": "48:14",
+            "variants": 6
+          },
+          {
+            "id": "49:14",
+            "variants": 4
+          },
+          {
+            "id": "50:26",
+            "variants": 3
+          },
+          {
+            "id": "51:33",
+            "variants": 2
+          },
+          {
+            "id": "52:46",
+            "variants": 6
+          },
+          {
+            "id": "77:610",
+            "variants": 12
+          },
+          {
+            "id": "78:566",
+            "variants": 3
+          },
+          {
+            "id": "80:574",
+            "variants": 2
+          },
+          {
+            "id": "81:566",
+            "variants": 2
+          },
+          {
+            "id": "121:14",
+            "variants": 2
+          },
+          {
+            "id": "122:1327",
+            "variants": 8
+          },
+          {
+            "id": "123:1330",
+            "variants": 6
+          }
+        ]
+      }
+    },
+    {
+      "id": "catalog-56-top-6-nested-linked-detached-zero",
+      "passed": true,
+      "evidence": {
+        "top": 56,
+        "nested": 6,
+        "linked": 62,
+        "detached": 0
+      }
+    },
+    {
+      "id": "bottom-navigation-six-height-80-bound",
+      "passed": true,
+      "evidence": {
+        "ids": [
+          "52:8",
+          "52:29",
+          "127:14",
+          "127:35",
+          "170:14",
+          "170:35"
+        ],
+        "height": 80,
+        "variableId": "VariableID:39:40"
+      }
+    },
+    {
+      "id": "icon-scale-16-20-24-token-bound-no-text-glyph",
+      "passed": true,
+      "evidence": {
+        "contentId": "267:19",
+        "contentWidth": 1278,
+        "contentHeight": 134,
+        "layout": "HORIZONTAL",
+        "verticalSizing": "HUG",
+        "textGlyphCount": 0,
+        "glyphs": [
+          {
+            "id": "267:24",
+            "size": 16,
+            "sizeVariableId": "VariableID:39:28",
+            "colorVariableId": "VariableID:39:15",
+            "strokeVariableId": "VariableID:39:41"
+          },
+          {
+            "id": "267:29",
+            "size": 20,
+            "sizeVariableId": "VariableID:39:29",
+            "colorVariableId": "VariableID:39:15",
+            "strokeVariableId": "VariableID:39:41"
+          },
+          {
+            "id": "267:34",
+            "size": 24,
+            "sizeVariableId": "VariableID:39:30",
+            "colorVariableId": "VariableID:39:15",
+            "strokeVariableId": "VariableID:39:41"
+          }
+        ]
+      }
+    },
+    {
+      "id": "route-registry-29-all-off",
+      "passed": true,
+      "evidence": {
+        "declared": 29,
+        "enabled": 0,
+        "off": 29,
+        "routes": [
+          {
+            "path": "/",
+            "protection": "mixed",
+            "scope": "off"
+          },
+          {
+            "path": "/setup-password",
+            "protection": "none",
+            "scope": "off"
+          },
+          {
+            "path": "/login",
+            "protection": "none",
+            "scope": "off"
+          },
+          {
+            "path": "/market",
+            "protection": "full",
+            "scope": "off"
+          },
+          {
+            "path": "/operations",
+            "protection": "none",
+            "scope": "off"
+          },
+          {
+            "path": "/operations/customers",
+            "protection": "none",
+            "scope": "off"
+          },
+          {
+            "path": "/operations/customers/:relationId",
+            "protection": "none",
+            "scope": "off"
+          },
+          {
+            "path": "/operations/accountants",
+            "protection": "none",
+            "scope": "off"
+          },
+          {
+            "path": "/operations/accountants/:relationId",
+            "protection": "none",
+            "scope": "off"
+          },
+          {
+            "path": "/account",
+            "protection": "none",
+            "scope": "off"
+          },
+          {
+            "path": "/account/security",
+            "protection": "none",
+            "scope": "off"
+          },
+          {
+            "path": "/account/storage",
+            "protection": "none",
+            "scope": "off"
+          },
+          {
+            "path": "/account/notifications",
+            "protection": "none",
+            "scope": "off"
+          },
+          {
+            "path": "/chat",
+            "protection": "full",
+            "scope": "off"
+          },
+          {
+            "path": "/users/:id",
+            "protection": "none",
+            "scope": "off"
+          },
+          {
+            "path": "/profile",
+            "protection": "none",
+            "scope": "off"
+          },
+          {
+            "path": "/settings",
+            "protection": "none",
+            "scope": "off"
+          },
+          {
+            "path": "/admin",
+            "protection": "none",
+            "scope": "off"
+          },
+          {
+            "path": "/admin/invitations",
+            "protection": "none",
+            "scope": "off"
+          },
+          {
+            "path": "/admin/channels",
+            "protection": "full",
+            "scope": "off"
+          },
+          {
+            "path": "/admin/users",
+            "protection": "none",
+            "scope": "off"
+          },
+          {
+            "path": "/admin/users/:id",
+            "protection": "none",
+            "scope": "off"
+          },
+          {
+            "path": "/admin/commodities",
+            "protection": "none",
+            "scope": "off"
+          },
+          {
+            "path": "/admin/messages",
+            "protection": "mixed",
+            "scope": "off"
+          },
+          {
+            "path": "/admin/system",
+            "protection": "mixed",
+            "scope": "off"
+          },
+          {
+            "path": "/i/:code",
+            "protection": "none",
+            "scope": "off"
+          },
+          {
+            "path": "/register",
+            "protection": "none",
+            "scope": "off"
+          },
+          {
+            "path": "/notifications",
+            "protection": "none",
+            "scope": "off"
+          },
+          {
+            "path": "/share-receive",
+            "protection": "full",
+            "scope": "off"
+          }
+        ]
+      }
+    },
+    {
+      "id": "full-protected-routes-exact",
+      "passed": true,
+      "evidence": {
+        "full": [
+          "/market",
+          "/chat",
+          "/admin/channels",
+          "/share-receive"
+        ]
+      }
+    },
+    {
+      "id": "mixed-protected-routes-exact",
+      "passed": true,
+      "evidence": {
+        "mixed": [
+          "/",
+          "/admin/messages",
+          "/admin/system"
+        ]
+      }
+    },
+    {
+      "id": "responsive-mobile-360-375-390-414-430",
+      "passed": true,
+      "evidence": {
+        "mobiles": [
+          {
+            "id": "223:7",
+            "width": 360
+          },
+          {
+            "id": "223:31",
+            "width": 375
+          },
+          {
+            "id": "223:55",
+            "width": 390
+          },
+          {
+            "id": "223:80",
+            "width": 414
+          },
+          {
+            "id": "223:104",
+            "width": 430
+          }
+        ],
+        "height": "620"
+      }
+    },
+    {
+      "id": "desktop-proof-1440x900",
+      "passed": true,
+      "evidence": {
+        "id": "224:2",
+        "width": "1440",
+        "height": "900"
+      }
+    },
+    {
+      "id": "accessibility-66-targets-10-focus-zero-failures",
+      "passed": true,
+      "evidence": {
+        "targets": 66,
+        "failures": 0,
+        "focus": 10,
+        "stroke": 3
+      }
+    },
+    {
+      "id": "geometry-overflow-clipping-zero",
+      "passed": true,
+      "evidence": {
+        "overflow": 0,
+        "clipping": 0
+      }
+    },
+    {
+      "id": "product-activation-protected-interior-zero",
+      "passed": true,
+      "evidence": {
+        "productActivation": 0,
+        "declaredProtectedInteriors": 0,
+        "renderedProtectedInteriors": 0,
+        "role": "secondary-derivative",
+        "canonical": "false",
+        "runtimeBehaviorProven": "false",
+        "protectedGitDiffProven": "false",
+        "sitesProven": "false"
+      }
+    },
+    {
+      "id": "reviewer-failed-draft-placeholder-zero",
+      "passed": true,
+      "evidence": {
+        "reviewer": 0,
+        "failedDraft": 0,
+        "placeholder": 0
+      }
+    },
+    {
+      "id": "direct-export-set-8-exact-nonblank-hash-bound",
+      "passed": true,
+      "evidence": {
+        "declaredCount": 8,
+        "aggregate": "5af685f38703408f10618a1e87397386dbe98e5a8c6df0f8967cdff6da38dbf5",
+        "images": [
+          {
+            "file": "figma-stage2-contract-root.png",
+            "complete": true,
+            "naturalWidth": 1440,
+            "naturalHeight": 13028
+          },
+          {
+            "file": "figma-stage2-color-foundations.png",
+            "complete": true,
+            "naturalWidth": 1280,
+            "naturalHeight": 1792
+          },
+          {
+            "file": "figma-stage2-type-geometry-motion.png",
+            "complete": true,
+            "naturalWidth": 1280,
+            "naturalHeight": 2092
+          },
+          {
+            "file": "figma-stage2-component-state-catalog.png",
+            "complete": true,
+            "naturalWidth": 1280,
+            "naturalHeight": 4488
+          },
+          {
+            "file": "figma-stage2-scope-route-contract.png",
+            "complete": true,
+            "naturalWidth": 1280,
+            "naturalHeight": 1208
+          },
+          {
+            "file": "figma-stage2-responsive-acceptance.png",
+            "complete": true,
+            "naturalWidth": 1280,
+            "naturalHeight": 1428
+          },
+          {
+            "file": "figma-stage2-desktop-catalog-1440x900.png",
+            "complete": true,
+            "naturalWidth": 1440,
+            "naturalHeight": 900
+          },
+          {
+            "file": "figma-stage2-guard-rollback-evidence.png",
+            "complete": true,
+            "naturalWidth": 1280,
+            "naturalHeight": 992
+          }
+        ],
+        "canonicalInputsValid": true
+      }
+    },
+    {
+      "id": "opt-in-selectors-exact",
+      "passed": true,
+      "evidence": {
+        "optIn": [
+          "[data-ui-system=v2]",
+          "[data-ui-system=v2-portal]"
+        ],
+        "activatedNodes": 0
+      }
+    }
+  ],
+  "assertionSummary": {
+    "total": 25,
+    "passed": 25,
+    "failed": 0,
+    "exactOrder": true
+  },
+  "measurements": {
+    "root": {
+      "width": 1440,
+      "height": 13028,
+      "sections": 7,
+      "captureSections": 6
+    },
+    "foundations": {
+      "collectionCounts": [
+        20,
+        26,
+        19
+      ],
+      "variables": 65,
+      "sourceSets": [
+        {
+          "id": "48:14",
+          "variants": 6
+        },
+        {
+          "id": "49:14",
+          "variants": 4
+        },
+        {
+          "id": "50:26",
+          "variants": 3
+        },
+        {
+          "id": "51:33",
+          "variants": 2
+        },
+        {
+          "id": "52:46",
+          "variants": 6
+        },
+        {
+          "id": "77:610",
+          "variants": 12
+        },
+        {
+          "id": "78:566",
+          "variants": 3
+        },
+        {
+          "id": "80:574",
+          "variants": 2
+        },
+        {
+          "id": "81:566",
+          "variants": 2
+        },
+        {
+          "id": "121:14",
+          "variants": 2
+        },
+        {
+          "id": "122:1327",
+          "variants": 8
+        },
+        {
+          "id": "123:1330",
+          "variants": 6
+        }
+      ]
+    },
+    "components": {
+      "sets": 12,
+      "variants": 56,
+      "sourceSets": [
+        {
+          "id": "48:14",
+          "variants": 6
+        },
+        {
+          "id": "49:14",
+          "variants": 4
+        },
+        {
+          "id": "50:26",
+          "variants": 3
+        },
+        {
+          "id": "51:33",
+          "variants": 2
+        },
+        {
+          "id": "52:46",
+          "variants": 6
+        },
+        {
+          "id": "77:610",
+          "variants": 12
+        },
+        {
+          "id": "78:566",
+          "variants": 3
+        },
+        {
+          "id": "80:574",
+          "variants": 2
+        },
+        {
+          "id": "81:566",
+          "variants": 2
+        },
+        {
+          "id": "121:14",
+          "variants": 2
+        },
+        {
+          "id": "122:1327",
+          "variants": 8
+        },
+        {
+          "id": "123:1330",
+          "variants": 6
+        }
+      ]
+    },
+    "catalog": {
+      "top": 56,
+      "nested": 6,
+      "linked": 62,
+      "detached": 0
+    },
+    "bottomNavigation": {
+      "ids": [
+        "52:8",
+        "52:29",
+        "127:14",
+        "127:35",
+        "170:14",
+        "170:35"
+      ],
+      "height": 80,
+      "variableId": "VariableID:39:40"
+    },
+    "iconScale": {
+      "contentId": "267:19",
+      "contentWidth": 1278,
+      "contentHeight": 134,
+      "layout": "HORIZONTAL",
+      "verticalSizing": "HUG",
+      "textGlyphCount": 0,
+      "glyphs": [
+        {
+          "id": "267:24",
+          "size": 16,
+          "sizeVariableId": "VariableID:39:28",
+          "colorVariableId": "VariableID:39:15",
+          "strokeVariableId": "VariableID:39:41"
+        },
+        {
+          "id": "267:29",
+          "size": 20,
+          "sizeVariableId": "VariableID:39:29",
+          "colorVariableId": "VariableID:39:15",
+          "strokeVariableId": "VariableID:39:41"
+        },
+        {
+          "id": "267:34",
+          "size": 24,
+          "sizeVariableId": "VariableID:39:30",
+          "colorVariableId": "VariableID:39:15",
+          "strokeVariableId": "VariableID:39:41"
+        }
+      ]
+    },
+    "routes": {
+      "declared": 29,
+      "enabled": 0,
+      "off": 29,
+      "routes": [
+        {
+          "path": "/",
+          "protection": "mixed",
+          "scope": "off"
+        },
+        {
+          "path": "/setup-password",
+          "protection": "none",
+          "scope": "off"
+        },
+        {
+          "path": "/login",
+          "protection": "none",
+          "scope": "off"
+        },
+        {
+          "path": "/market",
+          "protection": "full",
+          "scope": "off"
+        },
+        {
+          "path": "/operations",
+          "protection": "none",
+          "scope": "off"
+        },
+        {
+          "path": "/operations/customers",
+          "protection": "none",
+          "scope": "off"
+        },
+        {
+          "path": "/operations/customers/:relationId",
+          "protection": "none",
+          "scope": "off"
+        },
+        {
+          "path": "/operations/accountants",
+          "protection": "none",
+          "scope": "off"
+        },
+        {
+          "path": "/operations/accountants/:relationId",
+          "protection": "none",
+          "scope": "off"
+        },
+        {
+          "path": "/account",
+          "protection": "none",
+          "scope": "off"
+        },
+        {
+          "path": "/account/security",
+          "protection": "none",
+          "scope": "off"
+        },
+        {
+          "path": "/account/storage",
+          "protection": "none",
+          "scope": "off"
+        },
+        {
+          "path": "/account/notifications",
+          "protection": "none",
+          "scope": "off"
+        },
+        {
+          "path": "/chat",
+          "protection": "full",
+          "scope": "off"
+        },
+        {
+          "path": "/users/:id",
+          "protection": "none",
+          "scope": "off"
+        },
+        {
+          "path": "/profile",
+          "protection": "none",
+          "scope": "off"
+        },
+        {
+          "path": "/settings",
+          "protection": "none",
+          "scope": "off"
+        },
+        {
+          "path": "/admin",
+          "protection": "none",
+          "scope": "off"
+        },
+        {
+          "path": "/admin/invitations",
+          "protection": "none",
+          "scope": "off"
+        },
+        {
+          "path": "/admin/channels",
+          "protection": "full",
+          "scope": "off"
+        },
+        {
+          "path": "/admin/users",
+          "protection": "none",
+          "scope": "off"
+        },
+        {
+          "path": "/admin/users/:id",
+          "protection": "none",
+          "scope": "off"
+        },
+        {
+          "path": "/admin/commodities",
+          "protection": "none",
+          "scope": "off"
+        },
+        {
+          "path": "/admin/messages",
+          "protection": "mixed",
+          "scope": "off"
+        },
+        {
+          "path": "/admin/system",
+          "protection": "mixed",
+          "scope": "off"
+        },
+        {
+          "path": "/i/:code",
+          "protection": "none",
+          "scope": "off"
+        },
+        {
+          "path": "/register",
+          "protection": "none",
+          "scope": "off"
+        },
+        {
+          "path": "/notifications",
+          "protection": "none",
+          "scope": "off"
+        },
+        {
+          "path": "/share-receive",
+          "protection": "full",
+          "scope": "off"
+        }
+      ]
+    },
+    "protectedGroups": [
+      {
+        "kind": "full",
+        "routes": [
+          "/market",
+          "/chat",
+          "/admin/channels",
+          "/share-receive"
+        ]
+      },
+      {
+        "kind": "mixed",
+        "routes": [
+          "/",
+          "/admin/messages",
+          "/admin/system"
+        ]
+      }
+    ],
+    "responsive": {
+      "mobiles": [
+        {
+          "id": "223:7",
+          "width": 360
+        },
+        {
+          "id": "223:31",
+          "width": 375
+        },
+        {
+          "id": "223:55",
+          "width": 390
+        },
+        {
+          "id": "223:80",
+          "width": 414
+        },
+        {
+          "id": "223:104",
+          "width": 430
+        }
+      ],
+      "desktop": {
+        "id": "224:2",
+        "width": 1440,
+        "height": 900
+      }
+    },
+    "qa": {
+      "targets": 66,
+      "failures": 0,
+      "focus": 10,
+      "stroke": 3
+    },
+    "boundary": {
+      "productActivation": 0,
+      "declaredProtectedInteriors": 0,
+      "renderedProtectedInteriors": 0,
+      "role": "secondary-derivative",
+      "canonical": "false",
+      "runtimeBehaviorProven": "false",
+      "protectedGitDiffProven": "false",
+      "sitesProven": "false"
+    },
+    "directExports": {
+      "declaredCount": 8,
+      "aggregate": "5af685f38703408f10618a1e87397386dbe98e5a8c6df0f8967cdff6da38dbf5",
+      "images": [
+        {
+          "file": "figma-stage2-contract-root.png",
+          "complete": true,
+          "naturalWidth": 1440,
+          "naturalHeight": 13028
+        },
+        {
+          "file": "figma-stage2-color-foundations.png",
+          "complete": true,
+          "naturalWidth": 1280,
+          "naturalHeight": 1792
+        },
+        {
+          "file": "figma-stage2-type-geometry-motion.png",
+          "complete": true,
+          "naturalWidth": 1280,
+          "naturalHeight": 2092
+        },
+        {
+          "file": "figma-stage2-component-state-catalog.png",
+          "complete": true,
+          "naturalWidth": 1280,
+          "naturalHeight": 4488
+        },
+        {
+          "file": "figma-stage2-scope-route-contract.png",
+          "complete": true,
+          "naturalWidth": 1280,
+          "naturalHeight": 1208
+        },
+        {
+          "file": "figma-stage2-responsive-acceptance.png",
+          "complete": true,
+          "naturalWidth": 1280,
+          "naturalHeight": 1428
+        },
+        {
+          "file": "figma-stage2-desktop-catalog-1440x900.png",
+          "complete": true,
+          "naturalWidth": 1440,
+          "naturalHeight": 900
+        },
+        {
+          "file": "figma-stage2-guard-rollback-evidence.png",
+          "complete": true,
+          "naturalWidth": 1280,
+          "naturalHeight": 992
+        }
+      ],
+      "canonicalInputsValid": true
+    },
+    "executableGuard": {
+      "sourceCount": 7,
+      "aggregateSha256": "46206b37e220ead294598ad142cc657d40f1e804a479c486a26689942858a5a6",
+      "sources": [
+        {
+          "path": "frontend/scripts/lib/design-system-v2-guard.mjs",
+          "bytes": 51914,
+          "sha256": "ef57cf1fd8fdb5bd50da7e67af03e8170e3a3f4bc4b241553899c3cf11bc90d8"
+        },
+        {
+          "path": "frontend/scripts/design-system-v2-guard.test.mjs",
+          "bytes": 30090,
+          "sha256": "36ff408a722bd03c9fe4f939dfba9d80af2b415a21e08e43f67ba6764c705122"
+        },
+        {
+          "path": "frontend/src/design-system-v2/canonical-token-contract.json",
+          "bytes": 7436,
+          "sha256": "a0c3f3560acaa8c4fddc123ec042657d7db73d0599698e49eb172f647227cf66"
+        },
+        {
+          "path": "frontend/scripts/check-design-system-v2-guards.mjs",
+          "bytes": 4326,
+          "sha256": "554a91b4d18842b081493266fcef4dfa0a3058c52dfa0a8aa371a60d289f5dc6"
+        },
+        {
+          "path": "frontend/src/styles/design-system-v2.tokens.css",
+          "bytes": 5522,
+          "sha256": "8dc088a5d4064ee2aa01fbc86e56e436fa557b4fd215c2e726dba7bb21346130"
+        },
+        {
+          "path": "frontend/src/styles/design-system-v2.components.css",
+          "bytes": 1599,
+          "sha256": "47a370be179d2a474c14c55e948236cd62b5cc9717c0e5816dec4ff4aaad9857"
+        },
+        {
+          "path": "frontend/src/components/ui/AppDesignSystemCatalog.vue",
+          "bytes": 42299,
+          "sha256": "0208d421aaf1ebed7bfc6dcc1ef6370ec10bd3d4ac2ba2602dbecc364734486d"
+        }
+      ],
+      "canonicalTokens": 65,
+      "implementationTuples": 43,
+      "definitions": 108,
+      "uniqueDefinitions": 106,
+      "focusedTestFiles": 6,
+      "focusedTests": 68,
+      "focusedDurationSeconds": 14.27,
+      "focusedExitCode": 0,
+      "guardTests": 39,
+      "guardCssFiles": 3,
+      "guardRoutes": 29,
+      "serialTestFiles": 41,
+      "serialTests": 452,
+      "serialVitestDurationSeconds": 124.87,
+      "serialWallMs": 126229,
+      "serialExitCode": 0,
+      "guardSourcePrePostStable": true,
+      "focusedStatus": "passed",
+      "guardStatus": "passed",
+      "browserStatus": "passed",
+      "targetedVueTscStatus": "passed",
+      "targetedVueTscExitCode": 0,
+      "lintStatus": "passed",
+      "prettierStatus": "passed",
+      "buildStatus": "passed",
+      "buildModules": 2153,
+      "buildDurationSeconds": 26.07,
+      "protectedDiffCount": 0,
+      "protectedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "protectedDiffUpstreamStatus": "passed",
+      "localHarnessClaim": false,
+      "focusedCommand": "npm exec vitest run -- scripts/design-system-v2-guard.test.mjs src/components/ui/AppDesignSystemCatalog.test.ts src/components/ui/AppDesignSystemScope.test.ts src/components/ui/uiDesignSystemScope.test.ts src/router/uiRouteContract.test.ts src/styles/designSystemV2.test.ts",
+      "guardCommand": "cd frontend && npm run guard:ui"
+    }
+  },
+  "captures": [
+    {
+      "file": "local-stage2-overview.png",
+      "selector": "#stage2-overview",
+      "width": 1440,
+      "height": 902,
+      "bytes": 160117,
+      "sha256": "a7938e55280a48b401f7924fe94bdfe76940b42cc1b1bd299283414565eb75bf",
+      "visualStats": {
+        "uniqueColorCount": 257,
+        "changedPixelCount": 1298472
+      }
+    },
+    {
+      "file": "local-stage2-foundations.png",
+      "selector": "#stage2-foundations",
+      "width": 1440,
+      "height": 762,
+      "bytes": 63473,
+      "sha256": "76062cf7344a49d04844dd46e81ad717bf68229d94628e40c81e0c80e7b56ec0",
+      "visualStats": {
+        "uniqueColorCount": 257,
+        "changedPixelCount": 1097265
+      }
+    },
+    {
+      "file": "local-stage2-component-catalog.png",
+      "selector": "#stage2-component-catalog",
+      "width": 1440,
+      "height": 921,
+      "bytes": 67789,
+      "sha256": "6561af19cd94354804033427abc3bc00c85b1a83aa7c891a1d9007b4076aa843",
+      "visualStats": {
+        "uniqueColorCount": 257,
+        "changedPixelCount": 1326209
+      }
+    },
+    {
+      "file": "local-stage2-scope-routes.png",
+      "selector": "#stage2-scope-routes",
+      "width": 1440,
+      "height": 970,
+      "bytes": 97248,
+      "sha256": "4dbd34e2689430fffbe6127f2b6991f6bdf2688b315757eec088fe245f9f2889",
+      "visualStats": {
+        "uniqueColorCount": 257,
+        "changedPixelCount": 1396796
+      }
+    },
+    {
+      "file": "local-stage2-responsive.png",
+      "selector": "#stage2-responsive",
+      "width": 1440,
+      "height": 1415,
+      "bytes": 34327,
+      "sha256": "27e06a068f62c3c484a832bfc8614a69429819c54570cfd3d883870110d9e77f",
+      "visualStats": {
+        "uniqueColorCount": 257,
+        "changedPixelCount": 2037596
+      }
+    },
+    {
+      "file": "local-stage2-guard-rollback.png",
+      "selector": "#stage2-guard-rollback",
+      "width": 1440,
+      "height": 1849,
+      "bytes": 230358,
+      "sha256": "a5b55231195ff0eed3a5a1d88da52d0b44d2e28b46540bbeae6880cb23debe57",
+      "visualStats": {
+        "uniqueColorCount": 257,
+        "changedPixelCount": 2662424
+      }
+    }
+  ],
+  "outputSet": {
+    "policy": "exact",
+    "pngCount": 6,
+    "metricsCount": 1,
+    "files": [
+      "local-stage2-component-catalog.png",
+      "local-stage2-foundations.png",
+      "local-stage2-guard-rollback.png",
+      "local-stage2-overview.png",
+      "local-stage2-protected-design-system-validation-metrics.json",
+      "local-stage2-responsive.png",
+      "local-stage2-scope-routes.png"
+    ]
+  },
+  "publication": {
+    "strategy": "atomic-directory-rename",
+    "partialPromotionAllowed": false,
+    "validationBeforePromotion": true,
+    "validationAfterPromotion": true,
+    "residueAllowed": false
+  }
+}

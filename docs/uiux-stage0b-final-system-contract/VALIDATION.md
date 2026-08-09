@@ -1,18 +1,22 @@
 # Stage 0B-6 — برنامه و وضعیت validation
 
-وضعیت کلی: `stage0b6_complete_stage1_complete_stage2_authorized`
+وضعیت جاری roadmap: `stage0b6_stage1_stage2_complete_stage3_authorized_not_started`
 
 ```text
 ownerSystemContractApproval.status = approved
 ownerSystemContractApproval.approvedAt = 2026-08-08T20:57:28.073Z
 continuousProgressionAuthorized = true
 runtimeImplementationAuthorized = true
-nextAuthorizedRuntimeStage = Stage 2
+nextAuthorizedRuntimeStage = Stage 3
 stage1RuntimeWorkStarted = true
 stage1Status = complete
 stage1TechnicalGate = passed
 stage2RuntimeImplementationAuthorized = true
-stage2RuntimeWorkStarted = false
+stage2RuntimeWorkStarted = true
+stage2Status = complete
+stage2TechnicalGate = passed_with_preexisting_full_typecheck_parity
+stage3RuntimeImplementationAuthorized = true
+stage3RuntimeWorkStarted = false
 ```
 
 ## اصل fail-closed
@@ -81,7 +85,7 @@ stage2RuntimeWorkStarted = false
 - `git diff --check` پاس شد؛
 - runtime diff و protected-surface diff صفر است؛
 - audit مستقیم Figma و harness محلی هر دو `32/32` پاس هستند؛
-- تأیید مالک، Sites خصوصی و source binding ثبت و پاس شده‌اند؛ Stage 1 پس از closure اجرا و با گیت مستقل `complete` شده است و Stage 2 مرحلهٔ بعدی مجاز اما هنوز شروع‌نشده است.
+- تأیید مالک، Sites خصوصی و source binding تاریخی `0B-6` ثبت و پاس شده‌اند؛ Stage 1 و Stage 2 هرکدام با گیت مستقل خود `complete` شده‌اند. passهای تاریخی این سند جایگزین evidence Stage 2 نیستند.
 
 این pass قرارداد و evidence ایستا/خواندنی را نشان می‌دهد؛ رفتار runtime تازه یا مجوز implementation را ثابت نمی‌کند.
 
@@ -168,16 +172,20 @@ baseline نهایی فقط read-only است و suiteهای مرتبط با Auth�
 
 ## شرایط پایان
 
-technical status `0B-6` پس از pass شدن Sites و final source binding در `2026-08-08T21:07:38Z` کامل شد؛ وضعیت جاری ترکیبی `stage0b6_complete_stage1_complete_stage2_authorized` است:
+technical status `0B-6` پس از pass شدن Sites و final source binding در `2026-08-08T21:07:38Z` کامل شد؛ وضعیت جاری ترکیبی `stage0b6_stage1_stage2_complete_stage3_authorized_not_started` است:
 
 ```text
 runtimeImplementationAuthorized = true
-nextAuthorizedRuntimeStage = Stage 2
+nextAuthorizedRuntimeStage = Stage 3
 stage1RuntimeWorkStarted = true
 stage1Status = complete
 stage1TechnicalGate = passed
 stage2RuntimeImplementationAuthorized = true
-stage2RuntimeWorkStarted = false
+stage2RuntimeWorkStarted = true
+stage2Status = complete
+stage2TechnicalGate = passed_with_preexisting_full_typecheck_parity
+stage3RuntimeImplementationAuthorized = true
+stage3RuntimeWorkStarted = false
 ```
 
-Stage 1 پس از Stage `0B-6` اجرا و با evidence fresh خودش `complete` شد؛ baseline این سند نتیجه fresh Stage 1 محسوب نمی‌شود و مرجع آن [بسته Stage 1](../uiux-stage1-trust-continuity/README.md) است. Stage 2 next authorized اما شروع‌نشده است. Stageهای بعدی بدون تأیید جداگانه مالک اما فقط با گیت فنی خودشان ادامه می‌یابند؛ مگر اینکه مالک صریحاً توقف کند.
+Stage 1 پس از Stage `0B-6` اجرا و با evidence fresh خودش `complete` شد؛ baseline این سند نتیجه fresh Stage 1 محسوب نمی‌شود و مرجع آن [بسته Stage 1](../uiux-stage1-trust-continuity/README.md) است. Stage 2 نیز مطابق [checkpoint مستقل](../WEBAPP_UI_UX_REDESIGN_V2_STAGE2_PROTECTED_DESIGN_SYSTEM_CHECKPOINT_20260809.md) با گیت فنی/protected diff، evidence و Sites `complete` شده است. Stage 3 مجاز و شروع‌نشده است؛ Stageهای بعدی بدون تأیید جداگانه مالک اما فقط با گیت فنی خودشان ادامه می‌یابند؛ مگر اینکه مالک صریحاً توقف کند.

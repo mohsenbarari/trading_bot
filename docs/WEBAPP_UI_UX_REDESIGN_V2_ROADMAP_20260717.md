@@ -2,7 +2,7 @@
 
 تاریخ: ۲۰۲۶-۰۷-۱۷
 
-وضعیت: مورد تأیید مالک محصول؛ Stage 0A، `0B-1..0B-6` و Stage 1 بسته شده‌اند. قرارداد و پیشروی بی‌وقفه roadmap در `2026-08-08T20:57:28.073Z` تأیید و closure فنی/Sites در `2026-08-08T21:07:38Z` پاس شده است. گیت فنی Stage 1 روی runtime head `c5fc56996d7f8fa9c575646d70e8785811564633` بسته است؛ Stage 2 مرحله بعدی مجاز و هنوز شروع‌نشده است
+وضعیت: مورد تأیید مالک محصول؛ Stage 0A، `0B-1..0B-6`، Stage 1 و Stage 2 بسته شده‌اند. قرارداد و پیشروی بی‌وقفه roadmap در `2026-08-08T20:57:28.073Z` تأیید شده است. Stage 2 با Figma frozen، گیت فنی/protected diff، evidence hash-bound و Sites خصوصی owner-only `complete` است؛ Stage 3 `authorized_not_started` است.
 
 نوع خروجی: تحلیل و نقشه راه مصوب؛ بدون تغییر کد محصول
 
@@ -299,7 +299,7 @@
 
 مدت پیشنهادی: ۴ تا ۶ روز
 
-وضعیت اجرایی: **`complete`**؛ ده commit rollback-safe ثبت شده و گیت fresh با `413/413` تست متمرکز، `231/231` تست protected، `1255/1255` تست کامل، typecheck/build/guard، viewport `8/8` و protected source diff صفر بسته است. مقایسه تصویری exact برابر `21/26` است و پنج اختلاف شناخته‌شده بدون snapshot update به Stage 2 carry-forward شده‌اند؛ یکی از آن‌ها روی base دست‌نخورده دقیقاً بازتولید شده و چهار مورد دیگر snapshot/fixture قدیمی‌اند. مرجع: [checkpoint Stage 1](WEBAPP_UI_UX_REDESIGN_V2_STAGE1_TRUST_CONTINUITY_CHECKPOINT_20260808.md). Stage 2 مرحله بعدی مجاز و هنوز شروع‌نشده است.
+وضعیت اجرایی: **`complete`**؛ ده commit rollback-safe ثبت شده و گیت fresh با `413/413` تست متمرکز، `231/231` تست protected، `1255/1255` تست کامل، typecheck/build/guard، viewport `8/8` و protected source diff صفر بسته است. مقایسه تصویری exact برابر `21/26` است و پنج اختلاف شناخته‌شده بدون snapshot update به Stage 2 carry-forward شده‌اند؛ یکی از آن‌ها روی base دست‌نخورده دقیقاً بازتولید شده و چهار مورد دیگر snapshot/fixture قدیمی‌اند. مرجع: [checkpoint Stage 1](WEBAPP_UI_UX_REDESIGN_V2_STAGE1_TRUST_CONTINUITY_CHECKPOINT_20260808.md). Stage 2 پس از این closure آغاز شده و وضعیت جاری آن در checkpoint مستقل ثبت می‌شود.
 
 هدف: برطرف کردن مشکلاتی که حتی در UI زیبا نیز تجربه را غیرقابل اعتماد می‌کنند.
 
@@ -320,6 +320,8 @@
 
 مدت پیشنهادی: ۴ تا ۶ روز
 
+وضعیت اجرایی: **`complete`**. منبع Figma با inventory `65` variable (`20/26/19`)، `26` semantic alias، `10` text style، `2` effect و `12 set / 56 variant` frozen است؛ توزیع صحیح Button/Status برابر `6/4` و contract دقیق `29` route همه با `v2Scope: off` ثبت شده است. گیت فنی runtime، protected source/visual boundary، evidence hash-bound و Sites خصوصی source-bound پاس هستند. مرجع closure: [checkpoint Stage 2](WEBAPP_UI_UX_REDESIGN_V2_STAGE2_PROTECTED_DESIGN_SYSTEM_CHECKPOINT_20260809.md) و [بسته governance](uiux-stage2-protected-design-system/README.md).
+
 هدف: ساخت یک مرجع واقعی، بدون تغییر ناخواسته بازار و پیام‌رسان.
 
 خروجی‌ها:
@@ -331,7 +333,7 @@
 - قرارداد صفحه، header، form، list، card، status، feedback و overlay؛
 - component catalog با حالت‌های normal، loading، disabled، error و destructive؛
 - scope بصری V2 فقط روی routeهای مجاز؛
-- تعیین `ui-*` به‌عنوان خانواده مرجع و تبدیل `ds-workspace-*` به adapter موقت؛
+- تعیین `ui-*` به‌عنوان خانواده مرجع و قرارداد carry-forward تبدیل `WorkspaceShell` / `ds-workspace-*` به adapter در Stage 4؛ Stage 2 آن‌ها را تغییر نمی‌دهد؛
 - guard جلوگیری از hard-code و ساخت component محلی تکراری.
 
 گیت پایان: componentهای مرجع در Figma و نمونه اجرایی کوچک، هر دو تأیید شوند و بازار/پیام‌رسان diff بصری نداشته باشند.
@@ -339,6 +341,8 @@
 ### مرحله ۳ — پوسته، ورود و جریان‌های عمومی
 
 مدت پیشنهادی: ۵ تا ۷ روز
+
+وضعیت اجرایی: **`authorized_not_started`**؛ `stage3RuntimeWorkStarted=false`.
 
 صفحه‌ها:
 
@@ -378,6 +382,7 @@
 - خانه بر «وضعیت، اتفاق امروز و اقدام بعدی» متمرکز شود؛
 - وضعیت و اتفاق فقط وقتی نمایش داده شوند که نیازمند توجه یا مؤثر بر اقدام بعدی باشند؛ آمار عمومی و خلاصه‌های بی‌اقدام حذف شوند؛
 - ویجت بازار به‌عنوان module محافظت‌شده حفظ شود؛
+- `WorkspaceShell` و خانواده `ds-workspace-*` فقط در این Stage و با adapter V2 rollback-safe مهاجرت شوند؛ Stage 2 و Stage 3 مجاز به جذب زودهنگام این تغییر نیستند؛
 - عملیات بر اساس نقش شخصی‌سازی شود، شمارنده مسیر/ابزار و توضیح دسترسی تکراری نداشته باشد و برای نقش فاقد اقدام، tab بی‌فایده نسازد؛
 - مرکز حساب مقصدهای تکراری نداشته باشد؛
 - اعلان و تنظیمات URL canonical و back behavior مشترک داشته باشند؛

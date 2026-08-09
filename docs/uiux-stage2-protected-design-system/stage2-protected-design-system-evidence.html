@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Stage 2 — شواهد مشتقِ سیستم طراحی محافظت‌شده</title>
+  <style>
+    :root{color-scheme:light;--page:#f4f7fa;--surface:#fff;--ink:#12314a;--muted:#52697b;--line:#8091a3;--brand:#2f6fed;--brand-soft:#e8f0ff;--danger:#b4232c;--warning:#8a6110;--shadow:0 12px 32px rgba(15,35,60,.09)}
+    *{box-sizing:border-box}
+    html,body{margin:0;background:var(--page);color:var(--ink);font-family:Vazirmatn,Tahoma,Arial,sans-serif;font-size:16px;line-height:1.65}
+    body{padding:32px}
+    main{width:1440px;max-width:100%;margin:0 auto;display:grid;gap:28px}
+    section{width:100%;background:var(--surface);border:2px solid var(--line);border-radius:24px;padding:32px;box-shadow:var(--shadow);overflow:hidden}
+    h1,h2,h3,p{margin-top:0} h1{font-size:38px;line-height:1.3;margin-bottom:12px} h2{font-size:28px;margin-bottom:8px} h3{font-size:18px;margin-bottom:8px}
+    .eyebrow{color:var(--brand);font-weight:700;letter-spacing:.03em}.muted{color:var(--muted)}.ltr{direction:ltr;text-align:left}.mono{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:13px;overflow-wrap:anywhere}
+    .header{display:grid;grid-template-columns:1.4fr .8fr;gap:28px;align-items:start}.status{border:2px solid var(--brand);background:var(--brand-soft);padding:20px;border-radius:18px}.status strong{display:block;font-size:24px;color:var(--brand)}
+    .facts{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px}.fact{border:1px solid #b9c5d1;border-radius:16px;padding:16px;background:#fbfdff}.fact strong{font-size:27px;display:block;direction:ltr;unicode-bidi:isolate}.fact span{color:var(--muted);font-size:14px}
+    .grid-2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}.grid-3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px}.grid-4{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px}
+    .card{border:1px solid #b9c5d1;border-radius:18px;padding:18px;background:#fff}.card ul{margin:8px 0 0;padding-right:22px}.pass{color:var(--brand);font-weight:700}.off{display:inline-flex;align-items:center;justify-content:center;min-width:48px;padding:2px 8px;border-radius:999px;background:#e9eef3;color:#3e5268;font-size:12px;font-weight:700}
+    .source-strip{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-top:20px}.source{border:1px solid #c9d2dc;border-radius:14px;padding:10px;background:#fff;min-width:0}.source img{display:block;width:100%;height:150px;object-fit:cover;object-position:top;border-radius:9px;background:#e9eef3}.source code{display:block;direction:ltr;text-align:left;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:8px}
+    .swatches{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px}.swatch{height:104px;border-radius:14px;padding:12px;display:flex;align-items:flex-end;font-weight:700;border:1px solid #8091a3}.icon-scale{display:flex;align-items:center;justify-content:space-around;min-height:150px;border:1px solid #b9c5d1;border-radius:18px;background:#fbfdff}.glyph{display:grid;place-items:center;border:2px solid var(--brand);border-radius:50%;color:transparent}.glyph.s16{width:16px;height:16px}.glyph.s20{width:20px;height:20px}.glyph.s24{width:24px;height:24px}.glyph-wrap{display:grid;justify-items:center;gap:10px}.glyph-wrap code{direction:ltr;font-size:12px}
+    table{border-collapse:collapse;width:100%;font-size:14px}th,td{border-bottom:1px solid #d5dde5;padding:9px 10px;text-align:right;vertical-align:top}th{background:#edf3f7;color:#34485f;position:sticky;top:0}.routes{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px}.route-table-wrap{max-height:560px;overflow:auto;border:1px solid #b9c5d1;border-radius:14px}#stage2-scope-routes .route-table-wrap{max-height:none;overflow:visible}
+    .frames{display:flex;align-items:flex-end;justify-content:center;gap:16px;min-height:360px;padding:22px;border:1px solid #b9c5d1;border-radius:18px;background:#eef3f7;direction:ltr}.phone{height:310px;border:3px solid #26384d;border-radius:24px;background:#fff;display:flex;flex-direction:column;overflow:hidden}.phone-head{height:50px;background:#e8f0ff;border-bottom:1px solid #8091a3}.phone-body{flex:1;padding:12px;display:grid;align-content:start;gap:10px}.phone-body i{height:12px;border-radius:99px;background:#dce5ec;display:block}.phone-label{direction:ltr;unicode-bidi:isolate;font-size:12px;color:#52697b;margin-top:10px}.phone-foot{height:52px;background:#fff;border-top:1px solid #8091a3}.desktop{width:100%;aspect-ratio:16/10;border:3px solid #26384d;border-radius:16px;background:linear-gradient(90deg,#e8f0ff 0 18%,#fff 18% 100%);position:relative}.desktop:after{content:"1440 × 900";position:absolute;inset:45% auto auto 45%;font-weight:700;color:#52697b;direction:ltr;unicode-bidi:isolate}
+    .guard-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px}.boundary{border:2px dashed var(--danger);border-radius:18px;padding:18px;background:#fff8fa}.boundary strong{color:var(--danger)}
+    .assertions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 18px;margin-top:18px}.assertion{display:flex;gap:10px;align-items:flex-start;border-bottom:1px solid #e1e7ed;padding:7px 0;font-size:13px}.assertion b{color:var(--brand);min-width:22px}.assertion code{direction:ltr;text-align:left;overflow-wrap:anywhere}
+    .capture-note{margin:18px 0 0;padding:12px 16px;border-radius:12px;background:#f0f4f7;color:#465b72;font-size:13px}
+    @media(max-width:900px){body{padding:12px}.header,.grid-2,.grid-3,.grid-4,.routes,.guard-grid{grid-template-columns:1fr}.facts{grid-template-columns:repeat(2,1fr)}.source-strip{grid-template-columns:repeat(2,1fr)}.assertions{grid-template-columns:1fr}.frames{overflow:auto;justify-content:flex-start}}
+  </style>
+</head>
+<body
+  data-evidence-role="secondary-derivative"
+  data-canonical="false"
+  data-runtime-behavior-proven="false"
+  data-protected-git-diff-proven="false"
+  data-sites-proven="false"
+  data-canonical-file-key="z8jgJxST4O2APzWnlyP9gv"
+  data-canonical-page-id="208:2"
+  data-canonical-root-id="208:3"
+  data-frozen-at="2026-08-09T01:27:37.567Z"
+  data-audited-at="2026-08-09T01:24:59.000Z"
+  data-direct-audit-sha256="7361d43e2f3c9437997663cb313a03b87a5d505f3046f4406d97bd82b6ddacc5"
+  data-direct-export-aggregate-sha256="5af685f38703408f10618a1e87397386dbe98e5a8c6df0f8967cdff6da38dbf5"
+  data-canonical-tree-sha256="4df00cbcb8734865367e41fa28c8936d39a49e1c6578af3d5979f79857365a22"
+  data-code-contract-source-count="7"
+  data-code-contract-aggregate-sha256="46206b37e220ead294598ad142cc657d40f1e804a479c486a26689942858a5a6"
+>
+<main>
+  <section id="stage2-overview" data-capture-section="overview" data-root-width="1440" data-root-height="13028" data-section-count="7">
+    <div class="header">
+      <div>
+        <p class="eyebrow">STAGE 2 · PROTECTED DESIGN SYSTEM</p>
+        <h1>بستهٔ شواهد سیستم طراحی محافظت‌شده</h1>
+        <p class="muted">این صفحه فقط مشتق محلیِ قابل‌بازتولید از Figma فریز‌شده است. مرجع canonical همان فایل Figma است و این صفحه هیچ رفتار runtime، diff گیت یا Sites را اثبات نمی‌کند.</p>
+      </div>
+      <div class="status" data-freeze-status="figma_frozen_external_evidence_pending">
+        <strong>Frozen · 25/25</strong>
+        <div class="mono ltr">page 208:2 · root 208:3</div>
+        <div class="mono ltr">2026-08-09T01:27:37.567Z</div>
+      </div>
+    </div>
+    <div class="facts">
+      <div class="fact"><strong>65</strong><span>متغیر؛ 20 / 26 / 19</span></div>
+      <div class="fact"><strong>12 / 56</strong><span>component set / variant</span></div>
+      <div class="fact"><strong>29 OFF</strong><span>routeهای تولید</span></div>
+      <div class="fact"><strong>0</strong><span>فعال‌سازی محصول و protected interior</span></div>
+    </div>
+    <div class="source-strip" data-source-export-count="8">
+      <figure class="source" data-source-export="figma-stage2-contract-root.png"><img src="assets/figma-stage2-contract-root.png" alt="خروجی مستقیم ریشه قرارداد Stage 2"><code>208:3 · 1440×13028</code></figure>
+      <figure class="source" data-source-export="figma-stage2-color-foundations.png"><img src="assets/figma-stage2-color-foundations.png" alt="خروجی مستقیم foundation رنگ"><code>211:2 · 1280×1792</code></figure>
+      <figure class="source" data-source-export="figma-stage2-type-geometry-motion.png"><img src="assets/figma-stage2-type-geometry-motion.png" alt="خروجی مستقیم تایپ و هندسه"><code>213:2 · 1280×2092</code></figure>
+      <figure class="source" data-source-export="figma-stage2-component-state-catalog.png"><img src="assets/figma-stage2-component-state-catalog.png" alt="خروجی مستقیم catalog component"><code>215:2 · 1280×4488</code></figure>
+      <figure class="source" data-source-export="figma-stage2-scope-route-contract.png"><img src="assets/figma-stage2-scope-route-contract.png" alt="خروجی مستقیم قرارداد route"><code>221:2 · 1280×1208</code></figure>
+      <figure class="source" data-source-export="figma-stage2-responsive-acceptance.png"><img src="assets/figma-stage2-responsive-acceptance.png" alt="خروجی مستقیم responsive"><code>223:2 · 1280×1428</code></figure>
+      <figure class="source" data-source-export="figma-stage2-desktop-catalog-1440x900.png"><img src="assets/figma-stage2-desktop-catalog-1440x900.png" alt="خروجی مستقیم desktop"><code>224:2 · 1440×900</code></figure>
+      <figure class="source" data-source-export="figma-stage2-guard-rollback-evidence.png"><img src="assets/figma-stage2-guard-rollback-evidence.png" alt="خروجی مستقیم guard و rollback"><code>226:18 · 1280×992</code></figure>
+    </div>
+    <p class="capture-note">اتصال مستقیم: JSON ممیزی پس از فریز + هشت PNG طبیعی و hash-bound. این بخش نمایش مشتق است، نه جایگزین Figma.</p>
+  </section>
+
+  <section id="stage2-foundations" data-capture-section="foundations" data-variable-count="65" data-text-style-count="10" data-effect-style-count="2" data-broken-alias-count="0" data-web-syntax-exact-count="65" data-all-scope-violation-count="0">
+    <p class="eyebrow">FOUNDATIONS</p><h2>توکن، تایپ، هندسه و آیکن</h2>
+    <div class="grid-3" data-foundation-collection-counts="20,26,19">
+      <article class="card"><h3>Primitives</h3><strong>20</strong><p class="muted mono ltr">VariableCollectionId:37:2 · Value</p></article>
+      <article class="card"><h3>Semantic</h3><strong>26 alias</strong><p class="muted mono ltr">VariableCollectionId:37:3 · Light · broken 0</p></article>
+      <article class="card"><h3>Dimensions</h3><strong>19</strong><p class="muted mono ltr">VariableCollectionId:37:4 · Value</p></article>
+    </div>
+    <div class="swatches" style="margin-top:18px">
+      <div class="swatch" style="background:#12314a;color:#fff">Ink #12314A</div><div class="swatch" style="background:#2f6fed;color:#fff">Action #2F6FED</div><div class="swatch" style="background:#8091a3;color:#12314a" data-border-token="#8091A3">Border #8091A3</div><div class="swatch" style="background:#f4f7fa">Page #F4F7FA</div><div class="swatch" style="background:#fff">Surface #FFFFFF</div>
+    </div>
+    <div class="grid-2" style="margin-top:18px">
+      <article class="card" data-border-contrast-white="3.232" data-border-contrast-page="3.006"><h3>Contrast مرز</h3><p><strong>3.232:1</strong> روی سفید · <strong>3.006:1</strong> روی page</p><p class="muted mono ltr">VariableID:38:6</p></article>
+      <article class="card" data-avatar-style-id="S:b2c168d4aaf57efabc1e01386680792f7c983c42," data-avatar-bound-node-ids="51:16,51:27"><h3>سبک Avatar/Initial</h3><p><strong>10</strong> text style · <strong>2</strong> effect style · <strong>2</strong> binding مستقیم avatar</p></article>
+    </div>
+    <div class="icon-scale" data-icon-content-id="267:19" data-icon-content-width="1278" data-icon-content-height="134" data-icon-layout="HORIZONTAL" data-icon-vertical-sizing="HUG" data-text-glyph-count="0" style="margin-top:18px">
+      <div class="glyph-wrap" data-icon-id="267:24" data-icon-size="16" data-size-variable-id="VariableID:39:28" data-color-variable-id="VariableID:39:15" data-stroke-variable-id="VariableID:39:41"><span class="glyph s16">.</span><code>16 · 267:24</code></div>
+      <div class="glyph-wrap" data-icon-id="267:29" data-icon-size="20" data-size-variable-id="VariableID:39:29" data-color-variable-id="VariableID:39:15" data-stroke-variable-id="VariableID:39:41"><span class="glyph s20">.</span><code>20 · 267:29</code></div>
+      <div class="glyph-wrap" data-icon-id="267:34" data-icon-size="24" data-size-variable-id="VariableID:39:30" data-color-variable-id="VariableID:39:15" data-stroke-variable-id="VariableID:39:41"><span class="glyph s24">.</span><code>24 · 267:34</code></div>
+    </div>
+  </section>
+
+  <section id="stage2-component-catalog" data-capture-section="components" data-component-sets="12" data-component-variants="56" data-catalog-top-level="56" data-catalog-nested="6" data-catalog-linked="62" data-catalog-detached="0">
+    <p class="eyebrow">COMPONENT CATALOG</p><h2>۱۲ set و ۵۶ variant — پیوند کامل</h2>
+    <div class="grid-3" data-component-source-set-count="12">
+      <article class="card" data-component-set-id="48:14" data-variant-count="6"><h3>Button</h3><strong>6</strong> variant</article>
+      <article class="card" data-component-set-id="49:14" data-variant-count="4"><h3>Status</h3><strong>4</strong> variant</article>
+      <article class="card" data-component-set-id="50:26" data-variant-count="3"><h3>Relation Row</h3><strong>3</strong> variant</article>
+      <article class="card" data-component-set-id="51:33" data-variant-count="2"><h3>Authenticated Header</h3><strong>2</strong> variant</article>
+      <article class="card" data-component-set-id="52:46" data-variant-count="6"><h3>Bottom Navigation</h3><strong>6</strong> variant</article>
+      <article class="card" data-component-set-id="77:610" data-variant-count="12"><h3>Form Field</h3><strong>12</strong> variant</article>
+      <article class="card" data-component-set-id="78:566" data-variant-count="3"><h3>Admin User Row</h3><strong>3</strong> variant</article>
+      <article class="card" data-component-set-id="80:574" data-variant-count="2"><h3>Standard Invitation Row</h3><strong>2</strong> variant</article>
+      <article class="card" data-component-set-id="81:566" data-variant-count="2"><h3>Decision Panel</h3><strong>2</strong> variant</article>
+      <article class="card" data-component-set-id="121:14" data-variant-count="2"><h3>Account Action Row</h3><strong>2</strong> variant</article>
+      <article class="card" data-component-set-id="122:1327" data-variant-count="8"><h3>Session Row</h3><strong>8</strong> variant</article>
+      <article class="card" data-component-set-id="123:1330" data-variant-count="6"><h3>Notification Row</h3><strong>6</strong> variant</article>
+    </div>
+    <div class="facts" style="margin-top:18px"><div class="fact"><strong>56</strong><span>reference سطح اول</span></div><div class="fact"><strong>6</strong><span>reference تو‌در‌تو</span></div><div class="fact"><strong>62</strong><span>reference linked</span></div><div class="fact"><strong>0</strong><span>detached / missing / duplicate</span></div></div>
+    <article class="card" style="margin-top:18px" data-bottom-nav-variant-ids="52:8,52:29,127:14,127:35,170:14,170:35" data-bottom-nav-height="80" data-bottom-nav-height-variable-id="VariableID:39:40"><h3>Bottom Navigation</h3><p>شش variant با ارتفاع دقیق <strong>80</strong> و binding مشترک ابعاد.</p><p class="mono ltr">52:8 · 52:29 · 127:14 · 127:35 · 170:14 · 170:35</p></article>
+  </section>
+
+  <section id="stage2-scope-routes" data-capture-section="routes" data-route-count="29" data-route-enabled-count="0" data-v2-scope-off-count="29" data-opt-in-selectors="[data-ui-system=v2]|[data-ui-system=v2-portal]">
+    <p class="eyebrow">SCOPE & ROUTE CONTRACT</p><h2>فعال‌سازی فقط opt-in؛ هر ۲۹ route خاموش</h2>
+    <div class="routes">
+      <div class="route-table-wrap"><table><thead><tr><th>route</th><th>protection</th><th>V2</th></tr></thead><tbody>
+        <tr data-route-path="/" data-route-protection="mixed" data-v2-scope="off"><td class="mono ltr">/</td><td>mixed</td><td><span class="off">OFF</span></td></tr>
+        <tr data-route-path="/setup-password" data-route-protection="none" data-v2-scope="off"><td class="mono ltr">/setup-password</td><td>none</td><td><span class="off">OFF</span></td></tr>
+        <tr data-route-path="/login" data-route-protection="none" data-v2-scope="off"><td class="mono ltr">/login</td><td>none</td><td><span class="off">OFF</span></td></tr>
+        <tr data-route-path="/market" data-route-protection="full" data-v2-scope="off"><td class="mono ltr">/market</td><td>full</td><td><span class="off">OFF</span></td></tr>
+        <tr data-route-path="/operations" data-route-protection="none" data-v2-scope="off"><td class="mono ltr">/operations</td><td>none</td><td><span class="off">OFF</span></td></tr>
+        <tr data-route-path="/operations/customers" data-route-protection="none" data-v2-scope="off"><td class="mono ltr">/operations/customers</td><td>none</td><td><span class="off">OFF</span></td></tr>
+        <tr data-route-path="/operations/customers/:relationId" data-route-protection="none" data-v2-scope="off"><td class="mono ltr">/operations/customers/:relationId</td><td>none</td><td><span class="off">OFF</span></td></tr>
+        <tr data-route-path="/operations/accountants" data-route-protection="none" data-v2-scope="off"><td class="mono ltr">/operations/accountants</td><td>none</td><td><span class="off">OFF</span></td></tr>
+        <tr data-route-path="/operations/accountants/:relationId" data-route-protection="none" data-v2-scope="off"><td class="mono ltr">/operations/accountants/:relationId</td><td>none</td><td><span class="off">OFF</span></td></tr>
+        <tr data-route-path="/account" data-route-protection="none" data-v2-scope="off"><td class="mono ltr">/account</td><td>none</td><td><span class="off">OFF</span></td></tr>
+        <tr data-route-path="/account/security" data-route-protection="none" data-v2-scope="off"><td class="mono ltr">/account/security</td><td>none</td><td><span class="off">OFF</span></td></tr>
+        <tr data-route-path="/account/storage" data-route-protection="none" data-v2-scope="off"><td class="mono ltr">/account/storage</td><td>none</td><td><span class="off">OFF</span></td></tr>
+        <tr data-route-path="/account/notifications" data-route-protection="none" data-v2-scope="off"><td class="mono ltr">/account/notifications</td><td>none</td><td><span class="off">OFF</span></td></tr>
+        <tr data-route-path="/chat" data-route-protection="full" data-v2-scope="off"><td class="mono ltr">/chat</td><td>full</td><td><span class="off">OFF</span></td></tr>
+        <tr data-route-path="/users/:id" data-route-protection="none" data-v2-scope="off"><td class="mono ltr">/users/:id</td><td>none</td><td><span class="off">OFF</span></td></tr>
+      </tbody></table></div>
+      <div class="route-table-wrap"><table><thead><tr><th>route</th><th>protection</th><th>V2</th></tr></thead><tbody>
+        <tr data-route-path="/profile" data-route-protection="none" data-v2-scope="off"><td class="mono ltr">/profile</td><td>none</td><td><span class="off">OFF</span></td></tr>
+        <tr data-route-path="/settings" data-route-protection="none" data-v2-scope="off"><td class="mono ltr">/settings</td><td>none</td><td><span class="off">OFF</span></td></tr>
+        <tr data-route-path="/admin" data-route-protection="none" data-v2-scope="off"><td class="mono ltr">/admin</td><td>none</td><td><span class="off">OFF</span></td></tr>
+        <tr data-route-path="/admin/invitations" data-route-protection="none" data-v2-scope="off"><td class="mono ltr">/admin/invitations</td><td>none</td><td><span class="off">OFF</span></td></tr>
+        <tr data-route-path="/admin/channels" data-route-protection="full" data-v2-scope="off"><td class="mono ltr">/admin/channels</td><td>full</td><td><span class="off">OFF</span></td></tr>
+        <tr data-route-path="/admin/users" data-route-protection="none" data-v2-scope="off"><td class="mono ltr">/admin/users</td><td>none</td><td><span class="off">OFF</span></td></tr>
+        <tr data-route-path="/admin/users/:id" data-route-protection="none" data-v2-scope="off"><td class="mono ltr">/admin/users/:id</td><td>none</td><td><span class="off">OFF</span></td></tr>
+        <tr data-route-path="/admin/commodities" data-route-protection="none" data-v2-scope="off"><td class="mono ltr">/admin/commodities</td><td>none</td><td><span class="off">OFF</span></td></tr>
+        <tr data-route-path="/admin/messages" data-route-protection="mixed" data-v2-scope="off"><td class="mono ltr">/admin/messages</td><td>mixed</td><td><span class="off">OFF</span></td></tr>
+        <tr data-route-path="/admin/system" data-route-protection="mixed" data-v2-scope="off"><td class="mono ltr">/admin/system</td><td>mixed</td><td><span class="off">OFF</span></td></tr>
+        <tr data-route-path="/i/:code" data-route-protection="none" data-v2-scope="off"><td class="mono ltr">/i/:code</td><td>none</td><td><span class="off">OFF</span></td></tr>
+        <tr data-route-path="/register" data-route-protection="none" data-v2-scope="off"><td class="mono ltr">/register</td><td>none</td><td><span class="off">OFF</span></td></tr>
+        <tr data-route-path="/notifications" data-route-protection="none" data-v2-scope="off"><td class="mono ltr">/notifications</td><td>none</td><td><span class="off">OFF</span></td></tr>
+        <tr data-route-path="/share-receive" data-route-protection="full" data-v2-scope="off"><td class="mono ltr">/share-receive</td><td>full</td><td><span class="off">OFF</span></td></tr>
+      </tbody></table></div>
+    </div>
+    <div class="grid-2" style="margin-top:18px">
+      <article class="boundary" data-protected-route-kind="full" data-protected-routes="/market,/chat,/admin/channels,/share-receive"><strong>full protected</strong><p class="mono ltr">/market · /chat · /admin/channels · /share-receive</p></article>
+      <article class="boundary" data-protected-route-kind="mixed" data-protected-routes="/,/admin/messages,/admin/system"><strong>mixed protected</strong><p class="mono ltr">/ · /admin/messages · /admin/system</p></article>
+    </div>
+  </section>
+
+  <section id="stage2-responsive" data-capture-section="responsive" data-mobile-widths="360,375,390,414,430" data-mobile-height="620" data-desktop-width="1440" data-desktop-height="900">
+    <p class="eyebrow">RESPONSIVE ACCEPTANCE</p><h2>پنج عرض موبایل و proof دسکتاپ</h2>
+    <div class="frames">
+      <div class="phone" style="width:180px" data-responsive-node-id="223:7" data-source-width="360"><div class="phone-head"></div><div class="phone-body"><i></i><i></i><i></i><strong class="phone-label">360 × 620</strong></div><div class="phone-foot"></div></div>
+      <div class="phone" style="width:188px" data-responsive-node-id="223:31" data-source-width="375"><div class="phone-head"></div><div class="phone-body"><i></i><i></i><i></i><strong class="phone-label">375 × 620</strong></div><div class="phone-foot"></div></div>
+      <div class="phone" style="width:195px" data-responsive-node-id="223:55" data-source-width="390"><div class="phone-head"></div><div class="phone-body"><i></i><i></i><i></i><strong class="phone-label">390 × 620</strong></div><div class="phone-foot"></div></div>
+      <div class="phone" style="width:207px" data-responsive-node-id="223:80" data-source-width="414"><div class="phone-head"></div><div class="phone-body"><i></i><i></i><i></i><strong class="phone-label">414 × 620</strong></div><div class="phone-foot"></div></div>
+      <div class="phone" style="width:215px" data-responsive-node-id="223:104" data-source-width="430"><div class="phone-head"></div><div class="phone-body"><i></i><i></i><i></i><strong class="phone-label">430 × 620</strong></div><div class="phone-foot"></div></div>
+    </div>
+    <div class="card" style="margin-top:18px"><div class="desktop" data-responsive-node-id="224:2"></div></div>
+  </section>
+
+  <section id="stage2-guard-rollback" data-capture-section="guard" data-touch-targets="66" data-touch-target-failures="0" data-focus-states="10" data-focus-stroke="3" data-overflow-count="0" data-clipping-count="0" data-product-activation-count="0" data-protected-interior-count="0" data-reviewer-residue-count="0" data-failed-draft-count="0" data-placeholder-count="0" data-canonical-token-count="65" data-implementation-tuple-count="43" data-contract-definition-count="108" data-contract-unique-definition-count="106" data-focused-test-file-count="6" data-focused-test-count="68" data-focused-duration-seconds="14.27" data-focused-exit-code="0" data-guard-test-count="39" data-guard-css-file-count="3" data-guard-route-count="29" data-serial-test-file-count="41" data-serial-test-count="452" data-serial-vitest-duration-seconds="124.87" data-serial-wall-ms="126229" data-serial-exit-code="0" data-guard-source-pre-post-stable="true" data-targeted-vue-tsc-status="passed" data-targeted-vue-tsc-exit-code="0" data-build-module-count="2153" data-build-duration-seconds="26.07" data-protected-diff-count="0" data-protected-diff-sha256="e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" data-protected-diff-upstream-status="passed" data-external-gate-local-harness-claim="false" data-focused-tests-status="passed" data-guard-ui-status="passed" data-browser-status="passed" data-lint-status="passed" data-prettier-status="passed" data-build-status="passed" data-focused-command="npm exec vitest run -- scripts/design-system-v2-guard.test.mjs src/components/ui/AppDesignSystemCatalog.test.ts src/components/ui/AppDesignSystemScope.test.ts src/components/ui/uiDesignSystemScope.test.ts src/router/uiRouteContract.test.ts src/styles/designSystemV2.test.ts" data-guard-command="cd frontend &amp;&amp; npm run guard:ui">
+    <p class="eyebrow">GUARD · ROLLBACK · CLAIM BOUNDARY</p><h2>Fail-closed و بدون ادعای فراتر از مدرک</h2>
+    <div class="facts"><div class="fact"><strong>66 / 0</strong><span>touch target / failure</span></div><div class="fact"><strong>10 × 3px</strong><span>focus state / stroke</span></div><div class="fact"><strong>0 / 0</strong><span>overflow / clipping</span></div><div class="fact"><strong>0</strong><span>review residue / draft / placeholder</span></div></div>
+    <div class="guard-grid" style="margin-top:18px">
+      <article class="card"><h3>Opt-in selectors</h3><p class="mono ltr">[data-ui-system=v2]</p><p class="mono ltr">[data-ui-system=v2-portal]</p><p class="pass">هیچ route محصول فعال نشده است.</p></article>
+      <article class="boundary" data-claim-boundary="true"><strong>مرز ادعا</strong><ul><li>Figma canonical: true</li><li>local derivative canonical: false</li><li>runtime behavior proven: false</li><li>protected Git diff proven: false</li><li>Sites proven: false</li></ul></article>
+    </div>
+    <article class="card" style="margin-top:18px" data-executable-guard-contract="settled">
+      <h3>قرارداد اجراییِ hash-bound</h3>
+      <div class="facts"><div class="fact"><strong>65 + 43</strong><span>canonical token + implementation tuple</span></div><div class="fact"><strong>108 / 106</strong><span>definition / unique definition</span></div><div class="fact"><strong>6 / 68</strong><span>focused test file / test پاس</span></div><div class="fact"><strong>39</strong><span>تست اختصاصی guard پاس</span></div></div>
+      <div class="facts" style="margin-top:14px" data-external-technical-gates="upstream-hash-bound"><div class="fact"><strong>41 / 452</strong><span>serial file / test پاس</span></div><div class="fact"><strong>124.87s</strong><span>Vitest · wall 126229ms · exit 0</span></div><div class="fact"><strong>2153 / 26.07s</strong><span>build module / duration پاس</span></div><div class="fact"><strong>0</strong><span>protected diff · SHA-256 e3b0…b855</span></div></div>
+      <p class="capture-note"><span class="pass">PASS</span> · focused 14.27s/exit0 · guard source pre/post stable · <span class="mono ltr">cd frontend &amp;&amp; npm run guard:ui</span> · 3 CSS · 29 routes · targeted vue-tsc / browser / lint / prettier / build PASS · این نتایج upstream و hash-bound هستند؛ local harness مدعی اجرای آن‌ها نیست.</p>
+      <div class="route-table-wrap" style="max-height:none;overflow:visible"><table><thead><tr><th>ورودی اجرایی</th><th>bytes</th><th>SHA-256</th></tr></thead><tbody>
+        <tr data-code-contract-source="frontend/scripts/lib/design-system-v2-guard.mjs" data-source-bytes="51914" data-source-sha256="ef57cf1fd8fdb5bd50da7e67af03e8170e3a3f4bc4b241553899c3cf11bc90d8"><td class="mono ltr">frontend/scripts/lib/design-system-v2-guard.mjs</td><td>51914</td><td class="mono ltr">ef57cf1f…1bc90d8</td></tr>
+        <tr data-code-contract-source="frontend/scripts/design-system-v2-guard.test.mjs" data-source-bytes="30090" data-source-sha256="36ff408a722bd03c9fe4f939dfba9d80af2b415a21e08e43f67ba6764c705122"><td class="mono ltr">frontend/scripts/design-system-v2-guard.test.mjs</td><td>30090</td><td class="mono ltr">36ff408a…705122</td></tr>
+        <tr data-code-contract-source="frontend/src/design-system-v2/canonical-token-contract.json" data-source-bytes="7436" data-source-sha256="a0c3f3560acaa8c4fddc123ec042657d7db73d0599698e49eb172f647227cf66"><td class="mono ltr">frontend/src/design-system-v2/canonical-token-contract.json</td><td>7436</td><td class="mono ltr">a0c3f356…227cf66</td></tr>
+        <tr data-code-contract-source="frontend/scripts/check-design-system-v2-guards.mjs" data-source-bytes="4326" data-source-sha256="554a91b4d18842b081493266fcef4dfa0a3058c52dfa0a8aa371a60d289f5dc6"><td class="mono ltr">frontend/scripts/check-design-system-v2-guards.mjs</td><td>4326</td><td class="mono ltr">554a91b4…9f5dc6</td></tr>
+        <tr data-code-contract-source="frontend/src/styles/design-system-v2.tokens.css" data-source-bytes="5522" data-source-sha256="8dc088a5d4064ee2aa01fbc86e56e436fa557b4fd215c2e726dba7bb21346130"><td class="mono ltr">frontend/src/styles/design-system-v2.tokens.css</td><td>5522</td><td class="mono ltr">8dc088a5…346130</td></tr>
+        <tr data-code-contract-source="frontend/src/styles/design-system-v2.components.css" data-source-bytes="1599" data-source-sha256="47a370be179d2a474c14c55e948236cd62b5cc9717c0e5816dec4ff4aaad9857"><td class="mono ltr">frontend/src/styles/design-system-v2.components.css</td><td>1599</td><td class="mono ltr">47a370be…ad9857</td></tr>
+        <tr data-code-contract-source="frontend/src/components/ui/AppDesignSystemCatalog.vue" data-source-bytes="42299" data-source-sha256="0208d421aaf1ebed7bfc6dcc1ef6370ec10bd3d4ac2ba2602dbecc364734486d"><td class="mono ltr">frontend/src/components/ui/AppDesignSystemCatalog.vue</td><td>42299</td><td class="mono ltr">0208d421…34486d</td></tr>
+      </tbody></table></div>
+    </article>
+    <div class="assertions" data-assertion-registry-count="25">
+      <div class="assertion" data-assertion-id="freeze-metadata-exact"><b>01</b><code>freeze-metadata-exact</code></div>
+      <div class="assertion" data-assertion-id="canonical-tree-pre-post-equal"><b>02</b><code>canonical-tree-pre-post-equal</code></div>
+      <div class="assertion" data-assertion-id="root-section-geometry-exact"><b>03</b><code>root-section-geometry-exact</code></div>
+      <div class="assertion" data-assertion-id="foundation-collections-20-26-19"><b>04</b><code>foundation-collections-20-26-19</code></div>
+      <div class="assertion" data-assertion-id="variable-inventory-65-web-syntax-exact"><b>05</b><code>variable-inventory-65-web-syntax-exact</code></div>
+      <div class="assertion" data-assertion-id="semantic-aliases-26-broken-zero"><b>06</b><code>semantic-aliases-26-broken-zero</code></div>
+      <div class="assertion" data-assertion-id="variable-scopes-all-scope-zero"><b>07</b><code>variable-scopes-all-scope-zero</code></div>
+      <div class="assertion" data-assertion-id="text-styles-10-avatar-bindings-2"><b>08</b><code>text-styles-10-avatar-bindings-2</code></div>
+      <div class="assertion" data-assertion-id="effect-styles-2"><b>09</b><code>effect-styles-2</code></div>
+      <div class="assertion" data-assertion-id="border-default-8091a3-contrast-pass"><b>10</b><code>border-default-8091a3-contrast-pass</code></div>
+      <div class="assertion" data-assertion-id="component-sets-12-variants-56"><b>11</b><code>component-sets-12-variants-56</code></div>
+      <div class="assertion" data-assertion-id="catalog-56-top-6-nested-linked-detached-zero"><b>12</b><code>catalog-56-top-6-nested-linked-detached-zero</code></div>
+      <div class="assertion" data-assertion-id="bottom-navigation-six-height-80-bound"><b>13</b><code>bottom-navigation-six-height-80-bound</code></div>
+      <div class="assertion" data-assertion-id="icon-scale-16-20-24-token-bound-no-text-glyph"><b>14</b><code>icon-scale-16-20-24-token-bound-no-text-glyph</code></div>
+      <div class="assertion" data-assertion-id="route-registry-29-all-off"><b>15</b><code>route-registry-29-all-off</code></div>
+      <div class="assertion" data-assertion-id="full-protected-routes-exact"><b>16</b><code>full-protected-routes-exact</code></div>
+      <div class="assertion" data-assertion-id="mixed-protected-routes-exact"><b>17</b><code>mixed-protected-routes-exact</code></div>
+      <div class="assertion" data-assertion-id="responsive-mobile-360-375-390-414-430"><b>18</b><code>responsive-mobile-360-375-390-414-430</code></div>
+      <div class="assertion" data-assertion-id="desktop-proof-1440x900"><b>19</b><code>desktop-proof-1440x900</code></div>
+      <div class="assertion" data-assertion-id="accessibility-66-targets-10-focus-zero-failures"><b>20</b><code>accessibility-66-targets-10-focus-zero-failures</code></div>
+      <div class="assertion" data-assertion-id="geometry-overflow-clipping-zero"><b>21</b><code>geometry-overflow-clipping-zero</code></div>
+      <div class="assertion" data-assertion-id="product-activation-protected-interior-zero"><b>22</b><code>product-activation-protected-interior-zero</code></div>
+      <div class="assertion" data-assertion-id="reviewer-failed-draft-placeholder-zero"><b>23</b><code>reviewer-failed-draft-placeholder-zero</code></div>
+      <div class="assertion" data-assertion-id="direct-export-set-8-exact-nonblank-hash-bound"><b>24</b><code>direct-export-set-8-exact-nonblank-hash-bound</code></div>
+      <div class="assertion" data-assertion-id="opt-in-selectors-exact"><b>25</b><code>opt-in-selectors-exact</code></div>
+    </div>
+  </section>
+</main>
+</body>
+</html>

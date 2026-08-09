@@ -1,0 +1,193 @@
+{
+  "schemaVersion": 1,
+  "stage": "2",
+  "status": "stage2_complete_stage3_authorized_not_started",
+  "branch": "condidate/webapp-ui-ux-redesign-v2",
+  "comparisonBaseCommit": "8e4cdbf4d1bf23c1b8c159eeaea3544f5fd7cd54",
+  "comparisonHeadCommit": null,
+  "freezePolicy": "Stage 2 is opt-in foundation only: zero source, region, behavior, and new visual drift is allowed in protected Market, Messenger, and shared-shell surfaces.",
+  "expectedDiff": {
+    "changedProtectedPathCount": 0,
+    "changedProtectedPaths": [],
+    "diffSha256IfEmpty": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "snapshotsChanged": false
+  },
+  "protectedRoutes": {
+    "full": [
+      "/market",
+      "/chat",
+      "/share-receive",
+      "/admin/channels"
+    ],
+    "mixed": [
+      {
+        "path": "/",
+        "protectedInteriors": [
+          "home-market-widget"
+        ]
+      },
+      {
+        "path": "/admin/messages",
+        "protectedInteriors": [
+          "admin-messages-market-delivery",
+          "admin-messages-messenger-delivery"
+        ]
+      },
+      {
+        "path": "/admin/system",
+        "protectedInteriors": [
+          "trading-settings-market-controls"
+        ]
+      }
+    ]
+  },
+  "protectedFullFiles": [
+    "frontend/src/views/MarketView.vue",
+    "frontend/src/components/OffersList.vue",
+    "frontend/src/components/OfferPreviewModal.vue",
+    "frontend/src/components/TradeLotSuggestionAlert.vue",
+    "frontend/src/composables/useMarketRuntime.ts",
+    "frontend/src/composables/useOffers.ts",
+    "frontend/src/utils/offerDraftText.ts",
+    "frontend/src/views/MessengerView.vue",
+    "frontend/src/components/ChatView.vue",
+    "frontend/src/views/ShareReceiveView.vue",
+    "frontend/src/components/CreateChannelView.vue"
+  ],
+  "protectedPathPatterns": [
+    "frontend/src/components/ui/AppOffer*.vue",
+    "frontend/src/components/ui/AppSettlementBadge.vue",
+    "frontend/src/components/ui/AppTradeActionButton.vue",
+    "frontend/src/components/chat/**",
+    "frontend/src/components/messenger-v2/**",
+    "frontend/src/composables/chat/**",
+    "frontend/src/services/chat*/**",
+    "frontend/src/services/chat*.ts",
+    "frontend/src/stores/chat/**",
+    "frontend/src/types/chat.ts",
+    "frontend/src/utils/chat*.ts",
+    "frontend/src/utils/messenger*.ts",
+    "frontend/src/styles/messenger-design-tokens.css"
+  ],
+  "sharedShellFullFileFreeze": [
+    "frontend/src/App.vue",
+    "frontend/src/components/AppAuthenticatedShell.vue",
+    "frontend/src/components/BottomNav.vue",
+    "frontend/src/components/AppToasts.vue",
+    "frontend/src/components/PWAInstallOverlay.vue",
+    "frontend/src/assets/main.css"
+  ],
+  "stage4CarryForward": {
+    "component": "frontend/src/components/workspace/WorkspaceShell.vue",
+    "adapterFamily": "ds-workspace-*",
+    "stage2Disposition": "unchanged_no_v2_activation",
+    "implementationOwnerStage": 4,
+    "stage3MayAbsorb": false
+  },
+  "protectedPartialFiles": [
+    {
+      "path": "frontend/src/views/DashboardView.vue",
+      "surface": "embedded Home market module",
+      "baseRegionSha256": "d037fff0e2e27875276fa08a5ed4149abb0a93b1e34d1c9dab73288e0d9371d9",
+      "headRegionSha256": "d037fff0e2e27875276fa08a5ed4149abb0a93b1e34d1c9dab73288e0d9371d9",
+      "regionDiffStatus": "passed_unchanged",
+      "allowedOutsideRegion": "none during Stage 2 foundation work"
+    },
+    {
+      "path": "frontend/src/components/AdminMessagesView.vue",
+      "surface": "market and messenger admin interiors",
+      "baseRegionSha256": "5572589b83a8a07776d5b983777a14a91e2104f9577fa76960df5a54562a431a",
+      "headRegionSha256": "5572589b83a8a07776d5b983777a14a91e2104f9577fa76960df5a54562a431a",
+      "regionDiffStatus": "passed_unchanged",
+      "allowedOutsideRegion": "none during Stage 2 foundation work"
+    },
+    {
+      "path": "frontend/src/components/TradingSettings.vue",
+      "surface": "market settings controls",
+      "baseRegionSha256": "509dd32235e1cb98aa164940cf7722604f16b6518f7387699554bf3a828ecfaa",
+      "headRegionSha256": "509dd32235e1cb98aa164940cf7722604f16b6518f7387699554bf3a828ecfaa",
+      "regionDiffStatus": "passed_unchanged",
+      "allowedOutsideRegion": "none during Stage 2 foundation work"
+    }
+  ],
+  "routeScopeFreeze": {
+    "routeCount": 29,
+    "v2ScopeOffCount": 29,
+    "productionCatalogRoute": null,
+    "scopeManifestPath": "frontend/src/design-system-v2/scope-manifest.json",
+    "routeContractPath": "frontend/src/router/uiRouteContract.ts",
+    "verificationStatus": "passed_exact_29_all_off"
+  },
+  "verification": {
+    "status": "passed",
+    "measuredAt": "2026-08-09T03:04:11.778Z",
+    "evidenceRecordedAt": "2026-08-09T02:27:35.682Z",
+    "sourceDiffStatus": "passed_empty",
+    "changedProtectedPathCount": 0,
+    "changedProtectedPaths": [],
+    "diffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "protectedPartialRegionDiffStatus": "passed_unchanged",
+    "protectedBehaviorRegressionStatus": "passed_41_files_452_tests",
+    "protectedVisualDiffStatus": "no_new_stage2_drift_five_historical_carry_forwards",
+    "visualScenarioCount": 26,
+    "visualExactMatchCount": 21,
+    "snapshotsChanged": false,
+    "artifactPath": "assets/local-evidence/local-stage2-protected-design-system-validation-metrics.json",
+    "artifactBytes": 39640,
+    "artifactSha256": "4013aa95b5cb16fa4f5f998284786b5be16bd15391cb1eab32813d13ba62e692",
+    "evidenceRunId": "stage2-20260809T022716844Z-19dd7808",
+    "claimBoundary": "The local derivative records the settled upstream protected diff; it does not independently infer or prove the Git diff from screenshots."
+  },
+  "stage1VisualCarryForward": {
+    "status": "reaudited_unchanged_historical_carry_forwards",
+    "snapshotUpdatesAllowedWithoutExplicitDisposition": false,
+    "findings": [
+      {
+        "scenario": "mobile-390:market",
+        "stage1PixelDifference": 1725,
+        "stage2Disposition": "historical_carry_forward_unchanged_no_new_stage2_drift"
+      },
+      {
+        "scenario": "mobile-390:customers",
+        "stage1PixelDifference": 2243,
+        "stage2Disposition": "historical_carry_forward_unchanged_no_new_stage2_drift"
+      },
+      {
+        "scenario": "mobile-390:profile",
+        "stage1PixelDifference": 7887,
+        "stage2Disposition": "historical_carry_forward_unchanged_no_new_stage2_drift"
+      },
+      {
+        "scenario": "desktop-1440:profile",
+        "stage1PixelDifference": 9965,
+        "stage2Disposition": "historical_carry_forward_unchanged_no_new_stage2_drift"
+      },
+      {
+        "scenario": "mobile-390:invite-landing",
+        "stage1PixelDifference": 16442,
+        "stage2Disposition": "historical_carry_forward_unchanged_no_new_stage2_drift"
+      }
+    ]
+  },
+  "sitesPreview": {
+    "status": "passed",
+    "projectId": "appgprj_6a77e71b6af081918c364e7677286e2c",
+    "versionId": "appgprj_6a77e71b6af081918c364e7677286e2c~appgver_d57bc49b79c08191aa306aa363675158",
+    "deploymentId": "appgdep_6a77e7ff91f08191ab21329ef59b32d4",
+    "deploymentStatus": "succeeded",
+    "previewSourceCommit": "147abdc23c8c94a85c6326b60eac0ef060a89aff",
+    "accessPolicy": "custom_owner_only",
+    "anonymousRootAndEvidenceStatus": 401,
+    "provenanceBytes": 7418,
+    "provenanceSha256": "ba33160599a6f65c568bc326b60f43da33e98c52369ac25b0203c3e1b10d07b3",
+    "claimBoundary": "Preview source commit is not the product branch head; signed-in live HTML was not fetched."
+  },
+  "stage2Status": "complete",
+  "stage2RuntimeWorkStarted": true,
+  "stage2TechnicalGate": "passed_with_preexisting_full_typecheck_parity",
+  "stage2LocalEvidenceStatus": "passed",
+  "stage2SitesStatus": "passed",
+  "nextAuthorizedRuntimeStage": "Stage 3",
+  "stage3RuntimeImplementationAuthorized": true,
+  "stage3RuntimeWorkStarted": false
+}
