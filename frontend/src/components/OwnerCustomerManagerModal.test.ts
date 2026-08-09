@@ -45,7 +45,6 @@ const activeRelation = {
   max_daily_trades: 5,
   max_daily_commodity_volume: 100,
   status: 'active',
-  invitation_token: 'token-1',
   registration_link: null,
   expires_at: null,
   activated_at: '2026-05-21T12:00:00Z',
@@ -60,7 +59,7 @@ const pendingRelation = {
   customer_account_name: null,
   invitation_account_name: 'pending_customer',
   status: 'pending',
-  registration_link: 'https://example.com/register/token-2',
+  web_short_link: 'https://example.com/i/CUST0012',
   expires_at: '2026-05-28T12:00:00Z',
   activated_at: null,
 }
@@ -499,7 +498,7 @@ describe('OwnerCustomerManagerModal.vue', () => {
     await wrapper.get('.copy-link').trigger('click')
     await flushPromises()
 
-    expect(writeText).toHaveBeenCalledWith('https://example.com/register/token-2')
+    expect(writeText).toHaveBeenCalledWith('https://example.com/i/CUST0012')
     expect(wrapper.get('.copy-link .copy-state--copied').attributes('style') ?? '').not.toContain('display: none')
 
     await vi.advanceTimersByTimeAsync(1800)
@@ -521,7 +520,7 @@ describe('OwnerCustomerManagerModal.vue', () => {
       ...pendingRelation,
       sms_status: 'disabled',
       bot_registration_link: 'https://t.me/bot?start=customer-12',
-      web_registration_link: 'https://example.com/register/customer-12',
+      web_short_link: 'https://example.com/i/CUST0012',
     }]))
 
     const wrapper = mountModal()
@@ -536,7 +535,7 @@ describe('OwnerCustomerManagerModal.vue', () => {
     expect(writeText).toHaveBeenNthCalledWith(1, 'https://t.me/bot?start=customer-12')
     await copyButtons[1]!.trigger('click')
     await flushPromises()
-    expect(writeText).toHaveBeenNthCalledWith(2, 'https://example.com/register/customer-12')
+    expect(writeText).toHaveBeenNthCalledWith(2, 'https://example.com/i/CUST0012')
 
     await (wrapper.vm as any).copyRegistrationLink({ id: 99 }, 'web')
     expect(writeText).toHaveBeenCalledTimes(2)
@@ -804,7 +803,7 @@ describe('OwnerCustomerManagerModal.vue', () => {
     await wrapper.get('.copy-link').trigger('click')
     await flushPromises()
 
-    expect(writeText).toHaveBeenCalledWith('https://example.com/register/token-2')
+    expect(writeText).toHaveBeenCalledWith('https://example.com/i/CUST0012')
     expect(wrapper.text()).toContain('کپی لینک ثبت‌نام ممکن نشد.')
 
     wrapper.unmount()

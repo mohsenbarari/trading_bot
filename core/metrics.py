@@ -42,7 +42,8 @@ def _sanitize_label_value(value: Any, *, fallback: str = "unknown", max_length: 
 
 def normalize_http_route(path: str | None) -> str:
     raw = str(path or "unknown").split("?", 1)[0]
-    return _sanitize_label_value(_HTTP_ROUTE_ID_RE.sub("/{id}", raw), max_length=120)
+    normalized = _sanitize_label_value(_HTTP_ROUTE_ID_RE.sub("/{id}", raw), max_length=120)
+    return re.sub(r"(?<=/)_REDACTED_(?=/|$)", "[REDACTED]", normalized)
 
 
 def normalize_status_class(status_code: int | str | None) -> str:

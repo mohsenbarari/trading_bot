@@ -79,7 +79,7 @@ class BotAdminRoleTests(unittest.IsolatedAsyncioTestCase):
         )
         with patch(
             "bot.handlers.admin.forward_standard_invitation_to_iran",
-            new=AsyncMock(return_value=(201, {"bot_link": "https://t.me/bot?start=tok", "web_link": "https://app/register?token=tok"})),
+            new=AsyncMock(return_value=(201, {"bot_link": "https://t.me/bot?start=tok", "web_link": "https://app/i/INV00001"})),
         ), patch("bot.handlers.admin._return_to_admin_panel", new=AsyncMock()):
             await process_invitation_role(callback, state, user=user, bot=bot)
         self.assertIn("لینک تلگرام", callback.message.answer.await_args.args[0])
@@ -89,7 +89,7 @@ class BotAdminRoleTests(unittest.IsolatedAsyncioTestCase):
         state = FakeState({"account_name": "acc", "mobile_number": "09123456789"})
         with patch(
             "bot.handlers.admin.forward_standard_invitation_to_iran",
-            new=AsyncMock(return_value=(201, {"created": False, "bot_link": "https://t.me/bot?start=tok", "web_link": "https://app/register?token=tok"})),
+            new=AsyncMock(return_value=(201, {"created": False, "bot_link": "https://t.me/bot?start=tok", "web_link": "https://app/i/INV00001"})),
         ), patch("bot.handlers.admin._return_to_admin_panel", new=AsyncMock()):
             await process_invitation_role(callback, state, user=user, bot=bot)
         self.assertIn("لینک تلگرام", callback.message.answer.await_args.args[0])

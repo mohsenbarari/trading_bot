@@ -1,26 +1,28 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { X } from 'lucide-vue-next'
 import { useNotificationStore } from '../stores/notifications'
 import { getNotificationIconComponent } from '../utils/notificationUi'
-import {
-  getNotificationDisplayKind,
-  type ToastNotification,
-} from '../types/notifications'
+import { getNotificationDisplayKind, type ToastNotification } from '../types/notifications'
+import { isSecurityLayerActive } from '../utils/securityLayerState'
 import AppToast from './ui/AppToast.vue'
+
+const props = withDefaults(defineProps<{ v2Scope?: boolean }>(), { v2Scope: false })
 
 const store = useNotificationStore()
 const router = useRouter()
+const toastLayerBlocked = computed(() => props.v2Scope && isSecurityLayerActive.value)
+const transitionName = computed(() => (props.v2Scope ? 'ui-v2-toast' : 'toast'))
 
 // Swipe to dismiss logic
-const dragState = ref<Record<number, { startX: number, currentX: number }>>({})
+const dragState = ref<Record<number, { startX: number; currentX: number }>>({})
 
 const onTouchStart = (e: TouchEvent, id: number) => {
   if (!e.touches[0]) return
   dragState.value[id] = {
     startX: e.touches[0].clientX,
-    currentX: e.touches[0].clientX
+    currentX: e.touches[0].clientX,
   }
 }
 
@@ -31,29 +33,33 @@ const onTouchMove = (e: TouchEvent, id: number) => {
 
 const onTouchEnd = (id: number) => {
   if (!dragState.value[id]) return
-  
+
   const diff = dragState.value[id].currentX - dragState.value[id].startX
   if (Math.abs(diff) > 50) {
     // Swiped enough to dismiss
     store.removeToast(id)
   }
-  
+
   // Clean up
   delete dragState.value[id]
 }
 
 const getToastStyle = (id: number) => {
-  if (!dragState.value[id]) return {
-    transition: 'all 0.5s cubic-bezier(0.16, 1, 0.3, 1)'
-  }
+  if (!dragState.value[id])
+    return {
+      transition: props.v2Scope
+        ? 'opacity var(--ui-v2-motion-state)'
+        : 'all 0.5s cubic-bezier(0.16, 1, 0.3, 1)',
+      animation: props.v2Scope ? 'none' : undefined,
+    }
   const diff = dragState.value[id].currentX - dragState.value[id].startX
   const opacity = Math.max(0, 1 - Math.abs(diff) / 200)
   const scale = Math.max(0.9, 1 - Math.abs(diff) / 1000)
-  
+
   return {
-    transform: `translateX(${diff}px) scale(${scale})`,
+    transform: props.v2Scope ? `translateX(${diff}px)` : `translateX(${diff}px) scale(${scale})`,
     opacity: opacity,
-    transition: 'none'
+    transition: 'none',
   }
 }
 
@@ -80,7 +86,7 @@ const handleToastClick = (toast: ToastNotification) => {
     const diff = Math.abs(state.currentX - state.startX)
     if (diff > 5) return
   }
-  
+
   if (toast.route) {
     void router.push(toast.route)
   }
@@ -89,20 +95,28 @@ const handleToastClick = (toast: ToastNotification) => {
 </script>
 
 <template>
-  <div class="fixed top-6 left-0 right-0 z-[9999] flex flex-col items-center gap-3 pointer-events-none px-6">
-    <transition-group name="toast">
-      <div 
-        v-for="toast in store.activeToasts" 
+  <div
+    class="fixed top-6 left-0 right-0 z-[9999] flex flex-col items-center gap-3 pointer-events-none px-6"
+    :class="{
+      'ui-v2-toast-layer': v2Scope,
+      'ui-v2-toast-layer--blocked': toastLayerBlocked,
+    }"
+    :aria-hidden="toastLayerBlocked ? 'true' : undefined"
+    :inert="toastLayerBlocked ? true : undefined"
+  >
+    <transition-group :name="transitionName">
+      <div
+        v-for="toast in store.activeToasts"
         :key="toast.id"
         class="toast-card-floating pointer-events-auto"
-        :class="`toast-card-floating--${getToastTone(toast)}`"
+        :class="[`toast-card-floating--${getToastTone(toast)}`, { 'ui-v2-toast-item': v2Scope }]"
         :style="getToastStyle(toast.id)"
         @touchstart="onTouchStart($event, toast.id)"
         @touchmove="onTouchMove($event, toast.id)"
         @touchend="onTouchEnd(toast.id)"
         @click="handleToastClick(toast)"
       >
-        <div class="notif-icon-circle">
+        <div class="notif-icon-circle" :class="{ 'ui-v2-toast-icon': v2Scope }">
           <component :is="getNotificationIconComponent(toast)" :size="20" />
         </div>
         <AppToast
@@ -111,7 +125,13 @@ const handleToastClick = (toast: ToastNotification) => {
           :message="toast.body"
           :tone="getToastTone(toast)"
         />
-        <button @click.stop="store.removeToast(toast.id)" class="close-btn-minimal">
+        <button
+          class="close-btn-minimal"
+          :class="{ 'ui-v2-toast-dismiss': v2Scope }"
+          :type="v2Scope ? 'button' : undefined"
+          :aria-label="v2Scope ? 'بستن اعلان' : undefined"
+          @click.stop="store.removeToast(toast.id)"
+        >
           <X :size="16" :stroke-width="2.5" />
         </button>
       </div>

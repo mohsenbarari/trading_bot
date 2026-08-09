@@ -108,7 +108,7 @@ describe('CreateInvitationView.vue', () => {
     createInvitationMocks.apiFetchMock.mockResolvedValue(
       makeJsonResponse({
         link: 'https://t.me/mbmtrading1_bot?start=invite-token',
-        short_link: 'https://coin.gold-trade.ir/invite/abc?foo=1',
+        short_link: 'https://coin.gold-trade.ir/i/Ab12Cd34',
       }),
     )
 
@@ -139,14 +139,14 @@ describe('CreateInvitationView.vue', () => {
     expect(textInputs[0]!.classes()).toContain('ui-input')
     expect(textInputs[1]!.classes()).toContain('ui-input')
     expect((textInputs[0]!.element as HTMLInputElement).value).toBe('https://t.me/mbmtrading1_bot?start=invite-token')
-    expect((textInputs[1]!.element as HTMLInputElement).value).toBe('https://coin.gold-trade.ir/invite/abc?foo=1')
+    expect((textInputs[1]!.element as HTMLInputElement).value).toBe('https://coin.gold-trade.ir/i/Ab12Cd34')
   })
 
   it('prefers explicit v2 links, accepts a Web-only success, and renders the SMS outcome', async () => {
     createInvitationMocks.apiFetchMock.mockResolvedValue(
       makeJsonResponse({
         bot_link: null,
-        web_short_link: 'https://coin.gold-trade.ir/i/V2-CODE',
+        web_short_link: 'https://coin.gold-trade.ir/i/V2CODE01',
         bot_available: false,
         web_available: true,
         state: 'pending',
@@ -166,7 +166,7 @@ describe('CreateInvitationView.vue', () => {
     expect(wrapper.text()).toContain('پیامک دعوت ارسال نشد؛ لینک را دستی ارسال کنید.')
     const inputs = wrapper.findAll('.success-box input[readonly]')
     expect(inputs).toHaveLength(1)
-    expect((inputs[0]!.element as HTMLInputElement).value).toBe('https://coin.gold-trade.ir/i/V2-CODE')
+    expect((inputs[0]!.element as HTMLInputElement).value).toBe('https://coin.gold-trade.ir/i/V2CODE01')
     expect(wrapper.text()).not.toContain('foreign.example')
   })
 
@@ -253,7 +253,7 @@ describe('CreateInvitationView.vue', () => {
     createInvitationMocks.apiFetchMock.mockResolvedValue(
       makeJsonResponse({
         link: 'https://t.me/mbmtrading1_bot?start=invite-token',
-        short_link: 'https://coin.gold-trade.ir/register/short-code',
+        short_link: 'https://coin.gold-trade.ir/i/COPY0001',
       }),
     )
 
@@ -283,7 +283,7 @@ describe('CreateInvitationView.vue', () => {
     createInvitationMocks.apiFetchMock.mockResolvedValue(
       makeJsonResponse({
         link: 'https://t.me/mbmtrading1_bot?start=invite-token',
-        short_link: 'https://coin.gold-trade.ir/invite/route-token',
+        short_link: 'https://coin.gold-trade.ir/i/ROUTE001',
       }),
     )
 
@@ -295,7 +295,7 @@ describe('CreateInvitationView.vue', () => {
     await wrapper.get('.copy-btn.web').trigger('click')
     await flushPromises()
 
-    expect(writeText).toHaveBeenNthCalledWith(1, 'https://coin.gold-trade.ir/invite/route-token')
+    expect(writeText).toHaveBeenNthCalledWith(1, 'https://coin.gold-trade.ir/i/ROUTE001')
     expect(wrapper.get('.copy-btn.web').text()).toBe('کپی شد!')
 
     await vi.advanceTimersByTimeAsync(2000)
@@ -304,14 +304,14 @@ describe('CreateInvitationView.vue', () => {
     await wrapper.get('.copy-btn.web').trigger('click')
     await flushPromises()
 
-    expect(writeText).toHaveBeenNthCalledWith(2, 'https://coin.gold-trade.ir/invite/route-token')
+    expect(writeText).toHaveBeenNthCalledWith(2, 'https://coin.gold-trade.ir/i/ROUTE001')
     expect(wrapper.get('.copy-btn.web').text()).toBe('خطا')
 
     await vi.advanceTimersByTimeAsync(2000)
     expect(wrapper.get('.copy-btn.web').text()).toBe('کپی')
   })
 
-  it('keeps raw short links when the backend returns a non-URL value', async () => {
+  it('fails closed when the backend returns a non-canonical Web link', async () => {
     createInvitationMocks.apiFetchMock.mockResolvedValue(
       makeJsonResponse({
         link: 'https://t.me/mbmtrading1_bot?start=invite-token',
@@ -325,7 +325,8 @@ describe('CreateInvitationView.vue', () => {
     await flushPromises()
 
     const textInputs = wrapper.findAll('.success-box input[readonly]')
-    expect((textInputs[1]!.element as HTMLInputElement).value).toBe('not-a-valid-url')
+    expect(textInputs).toHaveLength(1)
+    expect(wrapper.text()).not.toContain('not-a-valid-url')
   })
 
   it('limits invite role choices for cached middle managers', async () => {
@@ -347,8 +348,7 @@ describe('CreateInvitationView.vue', () => {
             account_name: 'pending-user',
             mobile_number: '09120000000',
             role: 'عادی',
-            web_link: 'https://coin.gold-trade.ir/register?token=INV-PENDING',
-            short_link: 'https://coin.gold-trade.ir/i/SHORT12',
+            short_link: 'https://coin.gold-trade.ir/i/SHORT012',
             expires_at: '2026-06-12T10:00:00',
             created_at: '2026-06-11T10:00:00',
           },
@@ -368,7 +368,7 @@ describe('CreateInvitationView.vue', () => {
     const pendingInputWrapper = wrapper.get('.pending-link-row input[readonly]')
     expect(pendingInputWrapper.classes()).toContain('ui-input')
     const pendingInput = pendingInputWrapper.element as HTMLInputElement
-    expect(pendingInput.value).toBe('https://coin.gold-trade.ir/i/SHORT12')
+    expect(pendingInput.value).toBe('https://coin.gold-trade.ir/i/SHORT012')
   })
 
   it('copies both pending invitation surfaces and tracks each status independently', async () => {
@@ -383,7 +383,7 @@ describe('CreateInvitationView.vue', () => {
         mobile_number: '09120000014',
         role: 'عادی',
         bot_link: 'https://t.me/bot?start=INV-14',
-        web_short_link: 'https://coin.gold-trade.ir/i/INV14',
+        web_short_link: 'https://coin.gold-trade.ir/i/INV00014',
         bot_available: true,
         web_available: true,
         state: 'pending',
@@ -404,7 +404,7 @@ describe('CreateInvitationView.vue', () => {
 
     await buttons[1]!.trigger('click')
     await flushPromises()
-    expect(writeText).toHaveBeenNthCalledWith(2, 'https://coin.gold-trade.ir/i/INV14')
+    expect(writeText).toHaveBeenNthCalledWith(2, 'https://coin.gold-trade.ir/i/INV00014')
     expect(buttons[1]!.text()).toBe('خطا')
 
     await vi.advanceTimersByTimeAsync(2000)
@@ -421,7 +421,7 @@ describe('CreateInvitationView.vue', () => {
         account_name: 'fallback-user',
         mobile_number: '09120000015',
         role: 'عادی',
-        web_short_link: 'https://coin.gold-trade.ir/i/INV15',
+        web_short_link: 'https://coin.gold-trade.ir/i/INV00015',
         web_available: true,
         state: 'pending',
         expires_at: '2026-07-14T10:00:00Z',
@@ -447,7 +447,7 @@ describe('CreateInvitationView.vue', () => {
       mobile_number: '09120000016',
       role: 'عادی',
       bot_link: 'https://t.me/bot?start=INV-16',
-      web_short_link: 'https://coin.gold-trade.ir/i/INV16',
+      web_short_link: 'https://coin.gold-trade.ir/i/INV00016',
       bot_available: true,
       web_available: true,
       state: 'pending',
@@ -478,7 +478,7 @@ describe('CreateInvitationView.vue', () => {
             account_name: 'pending-user',
             mobile_number: '09120000000',
             role: 'عادی',
-            web_link: 'https://coin.gold-trade.ir/register?token=INV-PENDING',
+            web_short_link: 'https://coin.gold-trade.ir/i/PEND0012',
             expires_at: '2026-06-12T10:00:00',
             created_at: '2026-06-11T10:00:00',
           },
@@ -537,7 +537,7 @@ describe('CreateInvitationView.vue', () => {
           account_name: 'kept-user',
           mobile_number: '09120000018',
           role: 'عادی',
-          web_link: 'https://coin.gold-trade.ir/i/INV18',
+          web_short_link: 'https://coin.gold-trade.ir/i/INV00018',
           expires_at: '2026-07-14T10:00:00Z',
         }]))
       }
@@ -616,7 +616,7 @@ describe('CreateInvitationView.vue', () => {
     createInvitationMocks.apiFetchMock.mockResolvedValue(
       makeJsonResponse({
         link: 'https://t.me/mbmtrading1_bot?start=invite-token',
-        short_link: 'https://coin.gold-trade.ir/invite/route-token',
+        short_link: 'https://coin.gold-trade.ir/i/ROUTE001',
       }),
     )
 

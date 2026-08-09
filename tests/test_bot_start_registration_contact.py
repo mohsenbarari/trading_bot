@@ -37,7 +37,7 @@ def make_message(phone="9123334444", contact_user_id=10, from_user_id=10):
 
 class BotStartRegistrationContactTests(unittest.IsolatedAsyncioTestCase):
     async def test_legacy_registration_contact_state_redirects_to_webapp(self):
-        state = FakeState({"mobile_number": "09123334444", "token": "tok"})
+        state = FakeState({"mobile_number": "09123334444", "token": "raw-bearer"})
         message = make_message(contact_user_id=99)
 
         with patch("bot.handlers.start.delete_previous_anchor", new=AsyncMock()), patch(
@@ -51,8 +51,23 @@ class BotStartRegistrationContactTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(state.updated, [])
         self.assertEqual(state.states, [])
         self.assertIn("ثبت‌نام از طریق وب‌اپ انجام می‌شود", message.answer.await_args.args[0])
-        self.assertIn("register?token=tok", message.answer.await_args.args[0])
+        self.assertNotIn("raw-bearer", message.answer.await_args.args[0])
+        self.assertNotIn("register?token=", message.answer.await_args.args[0])
         set_anchor.assert_called_once_with(20, 91)
+
+    async def test_short_code_registration_contact_state_uses_canonical_web_link(self):
+        state = FakeState({"registration_invitation_short_code": "C0DE1234"})
+        message = make_message()
+
+        with patch("bot.handlers.start.delete_previous_anchor", new=AsyncMock()), patch(
+            "bot.handlers.start.set_anchor"
+        ), patch(
+            "bot.handlers.start.public_webapp_url_for_links", return_value="https://app.example"
+        ):
+            await handle_contact(message, state)
+
+        self.assertIn("https://app.example/i/C0DE1234", message.answer.await_args.args[0])
+        self.assertNotIn("register?token=", message.answer.await_args.args[0])
 
 
 if __name__ == "__main__":

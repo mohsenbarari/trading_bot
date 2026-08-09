@@ -25,6 +25,8 @@ engine = create_async_engine(
     max_overflow=settings.db_max_overflow,
     pool_pre_ping=settings.db_pool_pre_ping,
     pool_recycle=settings.db_pool_recycle_seconds,
+    # Never include SQL bind parameters in driver/SQLAlchemy exception text.
+    hide_parameters=True,
     # لاگ کردن کوئری‌ها (فقط برای debug)
     echo=False,
 )

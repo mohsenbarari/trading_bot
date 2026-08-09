@@ -239,14 +239,23 @@ const DESIGN_LENGTH_LITERAL =
 const DESIGN_TIME_LITERAL = /-?(?:\d+\.?\d*|\.\d+)(ms|s)\b/gi
 const CANONICAL_V2_CLASS =
   /^(?:ui-v2-catalog(?:__[-_a-z0-9]+)?|ui-v2-motion-(?:micro|state)|ui-v2-scope)$/
+const STAGE3_PRODUCT_CLASS =
+  /^ui-v2-(?:auth|bottom-nav|connection|pwa|route|session|toast)-[-_a-z0-9]+$/
+const ALLOWED_STAGE3_PRODUCT_CLASSES = new Set([
+  'app-route-v2-scope',
+  'ui-v2-bottom-nav',
+  'ui-v2-public-header',
+])
 const ALLOWED_LEGACY_PRIMITIVE_CLASSES = new Set([
   'ui-button',
   'ui-button--danger',
+  'ui-button--block',
   'ui-button--ghost',
   'ui-button--secondary',
   'ui-button__spinner',
   'ui-card',
   'ui-empty-state',
+  'ui-empty-state--danger',
   'ui-form-field',
   'ui-form-field__error',
   'ui-form-field__label',
@@ -256,10 +265,23 @@ const ALLOWED_LEGACY_PRIMITIVE_CLASSES = new Set([
   'ui-list-item',
   'ui-list-item__copy',
   'ui-list-item__trailing',
+  'ui-section-card',
   'ui-status-badge',
   'ui-status-badge--info',
+  'ui-status-badge--danger',
   'ui-status-badge--success',
+  'ui-textarea',
+  'ui-toast',
+  'ui-toast--danger',
+  'ui-toast--info',
+  'ui-toast--success',
+  'ui-toast--warning',
+  'is-current',
   'is-invalid',
+  'slide-up-enter-active',
+  'slide-up-enter-from',
+  'slide-up-leave-active',
+  'slide-up-leave-to',
 ])
 const TOKEN_SOURCE_PATH = /^src\/styles\/design-system-v2\.tokens\.css$/
 const ALLOWED_MEDIA_QUERIES = new Set([
@@ -382,6 +404,53 @@ const CATALOG_ROUTE =
   /(?:^|\/)(?:design-system(?:-v2)?|ui-v2(?:-catalog)?|component-catalog|catalog|storybook)(?:\/|$)/i
 
 const REQUIRED_FULL_PROTECTED_ROUTES = ['/market', '/chat', '/admin/channels', '/share-receive']
+
+const STAGE3_CATCH_ALL_PATH = '/:pathMatch(.*)*'
+
+const REQUIRED_STAGE3_SCOPE_ROUTES = new Map([
+  ['route', ['/setup-password', '/login', '/i/:code', '/register', STAGE3_CATCH_ALL_PATH]],
+  [
+    'section',
+    [
+      '/',
+      '/operations',
+      '/operations/customers',
+      '/operations/customers/:relationId',
+      '/operations/accountants',
+      '/operations/accountants/:relationId',
+      '/account',
+      '/account/security',
+      '/account/storage',
+      '/account/notifications',
+      '/users/:id',
+      '/profile',
+      '/settings',
+      '/admin',
+      '/admin/invitations',
+      '/admin/users',
+      '/admin/users/:id',
+      '/admin/commodities',
+      '/admin/messages',
+      '/admin/system',
+      '/notifications',
+    ],
+  ],
+  ['off', REQUIRED_FULL_PROTECTED_ROUTES],
+])
+
+const REQUIRED_STAGE3_SHELL_ROUTES = new Map([
+  ['public', ['/login', '/i/:code', '/register']],
+  ['focused-authenticated', ['/setup-password']],
+  ['standard-authenticated', REQUIRED_STAGE3_SCOPE_ROUTES.get('section')],
+  ['protected-legacy', REQUIRED_FULL_PROTECTED_ROUTES],
+  ['system-recovery', [STAGE3_CATCH_ALL_PATH]],
+])
+
+const STAGE3_ACTIVATION_BOUNDARY_PATHS = new Set([
+  'src/App.vue',
+  'src/components/SessionApprovalModal.vue',
+  'src/views/DashboardView.vue',
+])
 
 const REQUIRED_MIXED_INTERIORS = new Map([
   ['/', ['home-market-widget']],
@@ -716,7 +785,12 @@ export function checkV2Styles(styleFiles, { enforceFrozenTokenContract = true } 
         }
 
         for (const match of trimmedSelector.matchAll(/\.([_a-z][-_a-z0-9]*)/gi)) {
-          if (CANONICAL_V2_CLASS.test(match[1]) || ALLOWED_LEGACY_PRIMITIVE_CLASSES.has(match[1]))
+          if (
+            CANONICAL_V2_CLASS.test(match[1]) ||
+            STAGE3_PRODUCT_CLASS.test(match[1]) ||
+            ALLOWED_STAGE3_PRODUCT_CLASSES.has(match[1]) ||
+            ALLOWED_LEGACY_PRIMITIVE_CLASSES.has(match[1])
+          )
             continue
           findings.push(
             violation(
@@ -1168,6 +1242,7 @@ export function isProductActivationSourcePath(repoPath) {
     'src/components/ui/AppDesignSystemCatalog.vue',
     'src/components/ui/uiDesignSystemScope.ts',
     'src/components/ui/index.ts',
+    'src/router/uiRouteContract.ts',
   ]).has(normalized)
 }
 
@@ -1433,6 +1508,77 @@ function sourceActivationEvidence(sourcePath, source) {
   return null
 }
 
+function isApprovedStage3ActivationBoundary({ path: sourcePath, source }) {
+  if (!STAGE3_ACTIVATION_BOUNDARY_PATHS.has(sourcePath)) return false
+
+  if (sourcePath === 'src/components/SessionApprovalModal.vue') {
+    const scopeBindings = [...source.matchAll(/:data-ui-system\s*=\s*["']portalScopeValue["']/g)]
+    const modalRoot =
+      /<div\b(?=[^>]*\bv-if\s*=\s*["']showModal["'])(?=[^>]*:data-ui-system\s*=\s*["']portalScopeValue["'])[^>]*>/.test(
+        source,
+      )
+    const hasRawScope = /\bdata-ui-system\s*=\s*["']v2(?:-portal)?["']/.test(source)
+    if (
+      scopeBindings.length !== 1 ||
+      !modalRoot ||
+      hasRawScope ||
+      !/\bv2Portal\??\s*:\s*boolean\b/.test(source) ||
+      !/\bv2Portal\s*:\s*false\b/.test(source) ||
+      !/\bportalScopeValue\b/.test(source) ||
+      !/\bprops\.v2Portal\b/.test(source) ||
+      !/\bUI_DESIGN_SYSTEM_PORTAL_SCOPE_VALUE\b/.test(source) ||
+      !/from\s+["'][^"']*uiDesignSystemScope["']/.test(source)
+    ) {
+      return false
+    }
+
+    const withoutApprovedPortalBinding = source
+      .replace(/:data-ui-system\s*=\s*["']portalScopeValue["']/g, '')
+      .replace(/\bUI_DESIGN_SYSTEM_PORTAL_SCOPE_VALUE\b/g, '')
+    return sourceActivationEvidence(sourcePath, withoutApprovedPortalBinding) === null
+  }
+
+  if (!/\bAppDesignSystemScope\b/.test(source)) return false
+
+  if (sourcePath === 'src/App.vue') {
+    const openingTags = [...source.matchAll(/<AppDesignSystemScope\b[^>]*>/g)]
+    const scopedBlocks = [
+      ...source.matchAll(/<AppDesignSystemScope\b([^>]*)>([\s\S]*?)<\/AppDesignSystemScope>/g),
+    ]
+    const usesContractResolver =
+      /\broute\.meta\.uiShellClass\b/.test(source) &&
+      /\broute\.meta\.uiV2Scope\b/.test(source) &&
+      /\bUI_ROUTE_SHELL\b/.test(source)
+    if (
+      !usesContractResolver ||
+      !/\bUI_V2_SCOPE\b/.test(source) ||
+      openingTags.length === 0 ||
+      openingTags.length !== scopedBlocks.length ||
+      scopedBlocks.some(
+        (match) => !/\bv-(?:else-)?if\s*=/.test(match[1]) || /<RouterView\b/.test(match[2]),
+      )
+    ) {
+      return false
+    }
+  } else if (sourcePath === 'src/views/DashboardView.vue') {
+    const scopedSections = [
+      ...source.matchAll(/<AppDesignSystemScope\b([^>]*)>([\s\S]*?)<\/AppDesignSystemScope>/g),
+    ]
+    if (
+      scopedSections.length !== 1 ||
+      !/\bclass\s*=\s*["'][^"']*\bui-v2-pwa-section\b[^"']*["']/.test(scopedSections[0][1]) ||
+      !/^\s*<PWAInstallOverlay\b[^>]*\/>\s*$/.test(scopedSections[0][2])
+    ) {
+      return false
+    }
+  }
+
+  // Approved boundaries may compose the audited scope component, but may not
+  // reproduce the raw attribute/helper protocol or activate catalog/portal scope.
+  const withoutScopeComponent = source.replace(/\bAppDesignSystemScope\b/g, '')
+  return sourceActivationEvidence(sourcePath, withoutScopeComponent) === null
+}
+
 export function checkRoutePolicy({ manifest, routerSource, activationSources = [] }) {
   const findings = []
   const routes = Array.isArray(manifest?.routes) ? manifest.routes : []
@@ -1448,17 +1594,17 @@ export function checkRoutePolicy({ manifest, routerSource, activationSources = [
       violation(
         'runtime-route-registry-mutation',
         sourcePath,
-        'Stage 2 requires the exact static 29-route registry; addRoute/removeRoute/clearRoutes are forbidden',
+        'Stage 3 requires the exact static 30-route registry; addRoute/removeRoute/clearRoutes are forbidden',
       ),
     )
   }
 
-  if (manifest?.schemaVersion !== 1 || manifest?.stage !== 2 || manifest?.mode !== 'opt-in') {
+  if (manifest?.schemaVersion !== 2 || manifest?.stage !== 3 || manifest?.mode !== 'opt-in') {
     findings.push(
       violation(
         'invalid-scope-manifest',
         'src/design-system-v2/scope-manifest.json',
-        'Expected schemaVersion 1, Stage 2, opt-in scope manifest',
+        'Expected schemaVersion 2, Stage 3, opt-in scope manifest',
       ),
     )
   }
@@ -1467,7 +1613,7 @@ export function checkRoutePolicy({ manifest, routerSource, activationSources = [
       violation(
         'invalid-scope-contract',
         'src/design-system-v2/scope-manifest.json',
-        'Scope selector and V2 token prefix are immutable in Stage 2',
+        'Scope selector and V2 token prefix are immutable in Stage 3',
       ),
     )
   }
@@ -1489,12 +1635,12 @@ export function checkRoutePolicy({ manifest, routerSource, activationSources = [
       ),
     )
   }
-  if (routes.length !== 29) {
+  if (routes.length !== 30) {
     findings.push(
       violation(
         'route-contract-count',
         'src/design-system-v2/scope-manifest.json',
-        `Expected exactly 29 product routes, found ${routes.length}`,
+        `Expected exactly 30 product routes, found ${routes.length}`,
       ),
     )
   }
@@ -1516,7 +1662,11 @@ export function checkRoutePolicy({ manifest, routerSource, activationSources = [
       typeof route.path !== 'string' ||
       typeof route.name !== 'string' ||
       typeof route.testId !== 'string' ||
-      !/^route-[a-z0-9-]+$/.test(route.testId)
+      !/^route-[a-z0-9-]+$/.test(route.testId) ||
+      !REQUIRED_STAGE3_SHELL_ROUTES.has(route.shellClass) ||
+      !REQUIRED_STAGE3_SCOPE_ROUTES.has(route.v2Scope) ||
+      !['none', 'full', 'mixed'].includes(route.protection) ||
+      !Array.isArray(route.protectedInteriors)
     ) {
       findings.push(
         violation(
@@ -1535,7 +1685,22 @@ export function checkRoutePolicy({ manifest, routerSource, activationSources = [
       violation(
         'route-registry-drift',
         'src/router/index.ts',
-        'Router path/name pairs differ from the Stage 2 scope manifest',
+        'Router path/name pairs differ from the Stage 3 scope manifest',
+      ),
+    )
+  }
+
+  if (
+    routes.at(-1)?.path !== STAGE3_CATCH_ALL_PATH ||
+    routes.at(-1)?.name !== 'system-recovery' ||
+    routerRoutes.at(-1)?.path !== STAGE3_CATCH_ALL_PATH ||
+    routerRoutes.at(-1)?.name !== 'system-recovery'
+  ) {
+    findings.push(
+      violation(
+        'recovery-catch-all-order',
+        'src/router/index.ts',
+        'The eager system-recovery catch-all must be the final manifest and router record',
       ),
     )
   }
@@ -1616,25 +1781,43 @@ export function checkRoutePolicy({ manifest, routerSource, activationSources = [
         ),
       )
     }
-    if (route.v2Scope !== 'off') {
-      findings.push(
-        violation(
-          'stage2-product-route-activation',
-          'src/design-system-v2/scope-manifest.json',
-          `Stage 2 is foundation-only; ${route.path} must keep v2Scope off`,
-        ),
-      )
-    }
+  }
+
+  for (const [scope, expectedPaths] of REQUIRED_STAGE3_SCOPE_ROUTES) {
+    const actualPaths = routes.filter((route) => route.v2Scope === scope).map((route) => route.path)
+    if (sameValues(actualPaths, expectedPaths)) continue
+    findings.push(
+      violation(
+        'stage3-v2-scope-contract-drift',
+        'src/design-system-v2/scope-manifest.json',
+        `Stage 3 ${scope} scope routes changed; expected ${expectedPaths.length}, found ${actualPaths.length}`,
+      ),
+    )
+  }
+
+  for (const [shellClass, expectedPaths] of REQUIRED_STAGE3_SHELL_ROUTES) {
+    const actualPaths = routes
+      .filter((route) => route.shellClass === shellClass)
+      .map((route) => route.path)
+    if (sameValues(actualPaths, expectedPaths)) continue
+    findings.push(
+      violation(
+        'stage3-shell-contract-drift',
+        'src/design-system-v2/scope-manifest.json',
+        `Stage 3 ${shellClass} shell routes changed; expected ${expectedPaths.length}, found ${actualPaths.length}`,
+      ),
+    )
   }
 
   for (const activationSource of activationSources) {
     const evidence = sourceActivationEvidence(activationSource.path, activationSource.source)
     if (!evidence) continue
+    if (isApprovedStage3ActivationBoundary(activationSource)) continue
     findings.push(
       violation(
-        'stage2-product-source-activation',
+        'stage3-product-source-activation',
         activationSource.path,
-        `Product source activates V2 with ${evidence}`,
+        `Product source activates V2 outside an approved Stage 3 boundary with ${evidence}`,
       ),
     )
   }

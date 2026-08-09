@@ -37,7 +37,11 @@ from core.services.invitation_sms_delivery_service import (
     deliver_invitation_sms_once,
     load_invitation_sms_status_map,
 )
-from core.invitation_contract_service import build_invitation_contract_v2
+from core.invitation_contract_service import (
+    build_canonical_invitation_web_link,
+    build_invitation_contract_v2,
+    is_canonical_invitation_short_code,
+)
 from core.registration_contracts import InvitationSMSStatus
 from models.invitation import InvitationKind
 from core.services.session_service import get_active_sessions, logout_session
@@ -58,8 +62,13 @@ CUSTOMER_STATS_PERIOD_DAYS = {1, 3, 7, 30, 90, 180}
 CUSTOMER_COMMISSION_PRICE_UNIT_TOMAN = 1000
 
 
-def build_customer_registration_link(invitation_token: str) -> str | None:
-    return f"{public_webapp_url_for_links()}/register?token={invitation_token}"
+def build_customer_registration_link(invitation_short_code: object) -> str | None:
+    if not is_canonical_invitation_short_code(invitation_short_code):
+        return None
+    return build_canonical_invitation_web_link(
+        invitation_short_code,
+        web_origin=public_webapp_url_for_links(),
+    )
 
 
 def get_loaded_relation_customer_user(relation):
@@ -77,6 +86,10 @@ def serialize_customer_relation(
     customer_user = get_loaded_relation_customer_user(relation)
     relation_status = str(getattr(relation.status, "value", relation.status))
     is_pending = relation_status == CustomerRelationStatus.PENDING.value
+    invitation_matches = (
+        invitation is not None
+        and getattr(invitation, "token", None) == relation.invitation_token
+    )
     contract = (
         build_invitation_contract_v2(
             invitation,
@@ -84,21 +97,21 @@ def serialize_customer_relation(
             sms_status=sms_status or InvitationSMSStatus.AMBIGUOUS,
             customer_tier=relation.customer_tier,
         )
-        if invitation is not None
+        if invitation_matches
         else None
     )
-    web_link = (
-        (contract.web_link or None)
-        if contract is not None
-        else build_customer_registration_link(relation.invitation_token)
-    ) if is_pending else None
+    web_link = (contract.web_link or None) if contract is not None and is_pending else None
     return {
         "id": relation.id,
         "owner_user_id": relation.owner_user_id,
         "customer_user_id": relation.customer_user_id,
         "customer_account_name": getattr(customer_user, "account_name", None),
-        "invitation_account_name": getattr(invitation, "account_name", None),
-        "mobile_number": getattr(invitation, "mobile_number", None),
+        "invitation_account_name": (
+            getattr(invitation, "account_name", None) if invitation_matches else None
+        ),
+        "mobile_number": (
+            getattr(invitation, "mobile_number", None) if invitation_matches else None
+        ),
         "management_name": relation.management_name,
         "customer_tier": relation.customer_tier,
         "commission_rate": relation.commission_rate,
@@ -107,7 +120,7 @@ def serialize_customer_relation(
         "max_daily_trades": relation.max_daily_trades,
         "max_daily_commodity_volume": relation.max_daily_commodity_volume,
         "status": relation.status,
-        "invitation_token": relation.invitation_token,
+        "short_code": getattr(invitation, "short_code", None) if invitation_matches else None,
         "registration_link": web_link,
         "bot_registration_link": contract.bot_link if contract and is_pending else None,
         "web_registration_link": web_link,
@@ -427,7 +440,9 @@ async def create_my_customer(
         await db.refresh(invitation)
         await db.refresh(relation)
 
-    registration_link = build_customer_registration_link(relation.invitation_token)
+    registration_link = build_customer_registration_link(invitation.short_code)
+    if registration_link is None:
+        raise HTTPException(status_code=409, detail="کد کوتاه دعوت مشتری معتبر نیست")
     sms_status = await deliver_invitation_sms_once(
         db,
         invitation_id=invitation.id,
@@ -551,7 +566,9 @@ async def create_owner_customer_internal_from_bot(
         await db.refresh(invitation)
         await db.refresh(relation)
 
-    registration_link = build_customer_registration_link(relation.invitation_token)
+    registration_link = build_customer_registration_link(invitation.short_code)
+    if registration_link is None:
+        raise HTTPException(status_code=409, detail="کد کوتاه دعوت مشتری معتبر نیست")
     sms_status = await deliver_invitation_sms_once(
         db,
         invitation_id=invitation.id,
@@ -590,7 +607,7 @@ async def create_owner_customer_internal_from_bot(
         created=creation.created,
         already_pending=not creation.created,
         relation_id=relation.id,
-        invitation_token=invitation.token,
+        short_code=invitation.short_code,
         sms_sent=sms_sent,
         idempotency_key=expected_idempotency_key,
         reason=("pending invitation already exists" if not creation.created else None),

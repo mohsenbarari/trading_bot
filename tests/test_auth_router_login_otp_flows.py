@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, patch
 from fastapi import HTTPException
 from fastapi.responses import JSONResponse
 
+from api.routers import auth as auth_router
 from api.routers.auth import (
     OTPRequest,
     OTPVerify,
@@ -56,6 +57,7 @@ class FakeRedis:
     async def setex(self, key, ttl, value):
         self.setex_calls.append((key, ttl, value))
         self.values[key] = value
+        self.ttl_map[key] = ttl
 
     async def delete(self, key):
         self.delete_calls.append(key)
@@ -76,8 +78,12 @@ class FakeRedis:
         return True
 
 
-def make_request(headers=None, host="127.0.0.1"):
-    return SimpleNamespace(headers=headers or {}, client=SimpleNamespace(host=host))
+def make_request(headers=None, host="127.0.0.1", cookies=None):
+    return SimpleNamespace(
+        headers=headers or {},
+        client=SimpleNamespace(host=host),
+        cookies=cookies or {},
+    )
 
 
 class AuthRouterLoginOtpFlowTests(unittest.IsolatedAsyncioTestCase):
@@ -690,19 +696,30 @@ class AuthRouterLoginOtpFlowTests(unittest.IsolatedAsyncioTestCase):
             "api.routers.auth._find_pending_invitation_for_mobile",
             new=AsyncMock(return_value=(invitation, None, None)),
         ), patch(
-            "api.routers.auth._store_registration_session",
-            new=AsyncMock(return_value=("REG-token", 600)),
-        ) as store_mock:
+            "api.routers.auth.secrets.token_urlsafe",
+            return_value="opaque-registration-context",
+        ):
             result = await verify_otp(
                 request,
                 raw_request=make_request(),
                 db=FakeDB([FakeExecuteResult(None)]),
             )
 
-        store_mock.assert_awaited_once()
-        self.assertEqual(redis.delete_calls, ["otp:09120000000", "otp_limit:09120000000"])
-        self.assertEqual(result["status"], "registration_required")
-        self.assertEqual(result["registration_token"], "REG-token")
+        self.assertIsInstance(result, JSONResponse)
+        payload = json.loads(result.body)
+        self.assertEqual(payload["status"], "registration_required")
+        self.assertNotIn("registration_token", payload)
+        self.assertEqual(payload["invitation"]["mobile_number"], "0912****000")
+        self.assertNotIn("token", payload["invitation"])
+        self.assertNotIn("INV-REG", str(payload["invitation"]))
+        self.assertNotIn("09120000000", str(payload["invitation"]))
+        self.assertNotIn("opaque-registration-context", result.body.decode())
+        self.assertIn("HttpOnly", result.headers["set-cookie"])
+        self.assertIn("SameSite=strict", result.headers["set-cookie"])
+        self.assertNotIn("reg_verified:INV-REG", redis.values)
+        self.assertFalse(
+            any(key == "reg_verified:INV-REG" for key, _, _ in redis.setex_calls)
+        )
         self.assertEqual(redis.delete_calls, ["otp:09120000000", "otp_limit:09120000000"])
 
         user = SimpleNamespace(id=7, home_server="iran")
@@ -737,6 +754,66 @@ class AuthRouterLoginOtpFlowTests(unittest.IsolatedAsyncioTestCase):
                 await verify_otp(request, raw_request=make_request(), db=FakeDB([FakeExecuteResult(user)]))
         self.assertEqual(exc_info.exception.status_code, 403)
         self.assertEqual(exc_info.exception.detail, "حساب کاربری غیرفعال شده است")
+
+    async def test_verify_otp_resumes_cookie_context_when_registration_response_was_lost(self):
+        mobile = "09120000000"
+        handle = "opaque-login-registration-context"
+        request = OTPVerify(mobile_number=mobile, code="12345")
+        invitation = SimpleNamespace(
+            token="INV-LOGIN-RESPONSE-LOSS",
+            account_name="user1",
+            mobile_number=mobile,
+            role=UserRole.STANDARD,
+            is_used=False,
+            revoked_at=None,
+            kind=auth_router.InvitationKind.STANDARD,
+            expires_at=datetime.utcnow() + timedelta(minutes=5),
+        )
+        redis = FakeRedis({f"otp:{mobile}": "12345"})
+
+        with patch.object(auth_router.settings, "environment", "test"), patch(
+            "api.routers.auth.get_redis", new=AsyncMock(return_value=redis)
+        ), patch(
+            "api.routers.auth._find_pending_invitation_for_mobile",
+            new=AsyncMock(return_value=(invitation, None, None)),
+        ), patch(
+            "api.routers.auth.secrets.token_urlsafe",
+            return_value=handle,
+        ):
+            committed = await verify_otp(
+                request,
+                raw_request=make_request(),
+                db=FakeDB([FakeExecuteResult(None)]),
+            )
+
+        self.assertEqual(json.loads(committed.body)["status"], "registration_required")
+        self.assertNotIn(f"otp:{mobile}", redis.values)
+        self.assertNotIn(f"reg_verified:{invitation.token}", redis.values)
+
+        # The browser processed Set-Cookie but lost the response body. Retrying
+        # the consumed OTP resumes from the authoritative opaque context.
+        with patch.object(auth_router.settings, "environment", "test"), patch(
+            "api.routers.auth.get_redis", new=AsyncMock(return_value=redis)
+        ):
+            recovered = await verify_otp(
+                request,
+                raw_request=make_request(cookies={"web_registration": handle}),
+                db=FakeDB([FakeExecuteResult(invitation)]),
+            )
+        recovered_payload = json.loads(recovered.body)
+        self.assertEqual(recovered_payload["status"], "registration_required")
+        self.assertNotIn("registration_token", recovered_payload)
+        self.assertIn(f"web_registration={handle}", recovered.headers["set-cookie"])
+
+        # If no cookie reached the browser, the consumed OTP fails closed.
+        with patch("api.routers.auth.get_redis", new=AsyncMock(return_value=redis)):
+            with self.assertRaises(HTTPException) as no_cookie:
+                await verify_otp(
+                    request,
+                    raw_request=make_request(),
+                    db=FakeDB(),
+                )
+        self.assertEqual(no_cookie.exception.status_code, 400)
 
     async def test_verify_otp_returns_approval_required_or_tokens(self):
         request = OTPVerify(mobile_number="09120000000", code="12345", suspended_refresh_token="old-refresh")

@@ -1,6 +1,6 @@
 {
-  "schemaVersion": 1,
-  "stage": 2,
+  "schemaVersion": 2,
+  "stage": 3,
   "mode": "opt-in",
   "scopeSelector": "[data-ui-system=\"v2\"]",
   "tokenPrefix": "--ui-v2-",
@@ -11,30 +11,34 @@
       "path": "/",
       "name": "home",
       "testId": "route-home",
+      "shellClass": "standard-authenticated",
       "protection": "mixed",
       "protectedInteriors": ["home-market-widget"],
-      "v2Scope": "off"
+      "v2Scope": "section"
     },
     {
       "path": "/setup-password",
       "name": "setup-password",
       "testId": "route-setup-password",
+      "shellClass": "focused-authenticated",
       "protection": "none",
       "protectedInteriors": [],
-      "v2Scope": "off"
+      "v2Scope": "route"
     },
     {
       "path": "/login",
       "name": "login",
       "testId": "route-login",
+      "shellClass": "public",
       "protection": "none",
       "protectedInteriors": [],
-      "v2Scope": "off"
+      "v2Scope": "route"
     },
     {
       "path": "/market",
       "name": "market",
       "testId": "route-market",
+      "shellClass": "protected-legacy",
       "protection": "full",
       "protectedInteriors": [],
       "v2Scope": "off"
@@ -43,78 +47,88 @@
       "path": "/operations",
       "name": "operations",
       "testId": "route-operations",
+      "shellClass": "standard-authenticated",
       "protection": "none",
       "protectedInteriors": [],
-      "v2Scope": "off"
+      "v2Scope": "section"
     },
     {
       "path": "/operations/customers",
       "name": "operations-customers",
       "testId": "route-operations-customers",
+      "shellClass": "standard-authenticated",
       "protection": "none",
       "protectedInteriors": [],
-      "v2Scope": "off"
+      "v2Scope": "section"
     },
     {
       "path": "/operations/customers/:relationId",
       "name": "operations-customers-detail",
       "testId": "route-operations-customers-detail",
+      "shellClass": "standard-authenticated",
       "protection": "none",
       "protectedInteriors": [],
-      "v2Scope": "off"
+      "v2Scope": "section"
     },
     {
       "path": "/operations/accountants",
       "name": "operations-accountants",
       "testId": "route-operations-accountants",
+      "shellClass": "standard-authenticated",
       "protection": "none",
       "protectedInteriors": [],
-      "v2Scope": "off"
+      "v2Scope": "section"
     },
     {
       "path": "/operations/accountants/:relationId",
       "name": "operations-accountants-detail",
       "testId": "route-operations-accountants-detail",
+      "shellClass": "standard-authenticated",
       "protection": "none",
       "protectedInteriors": [],
-      "v2Scope": "off"
+      "v2Scope": "section"
     },
     {
       "path": "/account",
       "name": "account",
       "testId": "route-account",
+      "shellClass": "standard-authenticated",
       "protection": "none",
       "protectedInteriors": [],
-      "v2Scope": "off"
+      "v2Scope": "section"
     },
     {
       "path": "/account/security",
       "name": "account-security",
       "testId": "route-account-security",
+      "shellClass": "standard-authenticated",
       "protection": "none",
       "protectedInteriors": [],
-      "v2Scope": "off"
+      "v2Scope": "section"
     },
     {
       "path": "/account/storage",
       "name": "account-storage",
       "testId": "route-account-storage",
+      "shellClass": "standard-authenticated",
       "protection": "none",
       "protectedInteriors": [],
-      "v2Scope": "off"
+      "v2Scope": "section"
     },
     {
       "path": "/account/notifications",
       "name": "account-notifications",
       "testId": "route-account-notifications",
+      "shellClass": "standard-authenticated",
       "protection": "none",
       "protectedInteriors": [],
-      "v2Scope": "off"
+      "v2Scope": "section"
     },
     {
       "path": "/chat",
       "name": "messenger",
       "testId": "route-messenger",
+      "shellClass": "protected-legacy",
       "protection": "full",
       "protectedInteriors": [],
       "v2Scope": "off"
@@ -123,46 +137,52 @@
       "path": "/users/:id",
       "name": "public-profile",
       "testId": "route-public-profile",
+      "shellClass": "standard-authenticated",
       "protection": "none",
       "protectedInteriors": [],
-      "v2Scope": "off"
+      "v2Scope": "section"
     },
     {
       "path": "/profile",
       "name": "profile",
       "testId": "route-profile",
+      "shellClass": "standard-authenticated",
       "protection": "none",
       "protectedInteriors": [],
-      "v2Scope": "off"
+      "v2Scope": "section"
     },
     {
       "path": "/settings",
       "name": "settings",
       "testId": "route-settings",
+      "shellClass": "standard-authenticated",
       "protection": "none",
       "protectedInteriors": [],
-      "v2Scope": "off"
+      "v2Scope": "section"
     },
     {
       "path": "/admin",
       "name": "admin",
       "testId": "route-admin",
+      "shellClass": "standard-authenticated",
       "protection": "none",
       "protectedInteriors": [],
-      "v2Scope": "off"
+      "v2Scope": "section"
     },
     {
       "path": "/admin/invitations",
       "name": "admin-invitations",
       "testId": "route-admin-invitations",
+      "shellClass": "standard-authenticated",
       "protection": "none",
       "protectedInteriors": [],
-      "v2Scope": "off"
+      "v2Scope": "section"
     },
     {
       "path": "/admin/channels",
       "name": "admin-channels",
       "testId": "route-admin-channels",
+      "shellClass": "protected-legacy",
       "protection": "full",
       "protectedInteriors": [],
       "v2Scope": "off"
@@ -171,73 +191,91 @@
       "path": "/admin/users",
       "name": "admin-users",
       "testId": "route-admin-users",
+      "shellClass": "standard-authenticated",
       "protection": "none",
       "protectedInteriors": [],
-      "v2Scope": "off"
+      "v2Scope": "section"
     },
     {
       "path": "/admin/users/:id",
       "name": "admin-user-profile",
       "testId": "route-admin-user-profile",
+      "shellClass": "standard-authenticated",
       "protection": "none",
       "protectedInteriors": [],
-      "v2Scope": "off"
+      "v2Scope": "section"
     },
     {
       "path": "/admin/commodities",
       "name": "admin-commodities",
       "testId": "route-admin-commodities",
+      "shellClass": "standard-authenticated",
       "protection": "none",
       "protectedInteriors": [],
-      "v2Scope": "off"
+      "v2Scope": "section"
     },
     {
       "path": "/admin/messages",
       "name": "admin-messages",
       "testId": "route-admin-messages",
+      "shellClass": "standard-authenticated",
       "protection": "mixed",
       "protectedInteriors": ["admin-messages-market-delivery", "admin-messages-messenger-delivery"],
-      "v2Scope": "off"
+      "v2Scope": "section"
     },
     {
       "path": "/admin/system",
       "name": "admin-system",
       "testId": "route-admin-system",
+      "shellClass": "standard-authenticated",
       "protection": "mixed",
       "protectedInteriors": ["trading-settings-market-controls"],
-      "v2Scope": "off"
+      "v2Scope": "section"
     },
     {
       "path": "/i/:code",
       "name": "invite-landing",
       "testId": "route-invite-landing",
+      "shellClass": "public",
       "protection": "none",
       "protectedInteriors": [],
-      "v2Scope": "off"
+      "v2Scope": "route"
     },
     {
       "path": "/register",
       "name": "web-register",
       "testId": "route-web-register",
+      "shellClass": "public",
       "protection": "none",
       "protectedInteriors": [],
-      "v2Scope": "off"
+      "v2Scope": "route"
     },
     {
       "path": "/notifications",
       "name": "notifications",
       "testId": "route-notifications",
+      "shellClass": "standard-authenticated",
       "protection": "none",
       "protectedInteriors": [],
-      "v2Scope": "off"
+      "v2Scope": "section"
     },
     {
       "path": "/share-receive",
       "name": "share-receive",
       "testId": "route-share-receive",
+      "shellClass": "protected-legacy",
       "protection": "full",
       "protectedInteriors": [],
       "v2Scope": "off"
+    },
+    {
+      "path": "/:pathMatch(.*)*",
+      "name": "system-recovery",
+      "testId": "route-system-recovery",
+      "shellClass": "system-recovery",
+      "protection": "none",
+      "protectedInteriors": [],
+      "v2Scope": "route"
     }
   ]
 }

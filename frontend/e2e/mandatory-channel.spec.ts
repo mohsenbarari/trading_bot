@@ -173,33 +173,24 @@ async function createInvitation(request: APIRequestContext): Promise<InvitationF
   })
 
   expect(response.ok()).toBeTruthy()
-  const payload = await response.json() as { token: string; short_link: string | null }
-  const shortLinkPath = payload.short_link
-    ? (() => {
-        const url = new URL(payload.short_link)
-        return `${url.pathname}${url.search}`
-      })()
-    : `/register?token=${payload.token}`
+  const creation = (await response.json()) as { short_link: string | null }
+  expect(creation.short_link).toMatch(/^https?:\/\/[^/]+\/i\/[A-Za-z0-9]{8}$/)
+  const shortLinkUrl = new URL(creation.short_link!)
+  const shortLinkPath = shortLinkUrl.pathname
+  const shortCode = shortLinkPath.slice('/i/'.length)
 
-  execFileSync('docker', [
-    'exec',
-    'trading_bot_redis',
-    'redis-cli',
-    'SETEX',
-    `reg_otp:${payload.token}`,
-    '300',
-    otpCode,
-  ], { encoding: 'utf8' })
-  execFileSync('docker', [
-    'exec',
-    'trading_bot_redis',
-    'redis-cli',
-    'SETEX',
-    `reg_verified:${payload.token}`,
-    '600',
-    '1',
-  ], { encoding: 'utf8' })
+  const lookupResponse = await request.get(
+    `${BACKEND_BASE_URL}/api/invitations/lookup/${shortCode}`,
+  )
+  expect(lookupResponse.ok()).toBeTruthy()
+  const payload = (await lookupResponse.json()) as { token: string }
+  expect(payload.token).toMatch(/^(?:INV|ACCT|CUST)-/)
 
+  execFileSync(
+    'docker',
+    ['exec', 'trading_bot_redis', 'redis-cli', 'SETEX', `reg_otp:${payload.token}`, '300', otpCode],
+    { encoding: 'utf8' },
+  )
   return {
     accountName,
     mobileNumber,
@@ -222,75 +213,88 @@ test.describe('Mandatory channel smoke', () => {
     await loginWithSeededSession(page, fixture)
     await page.goto('/chat')
 
-    const conversationRow = page.locator('.conversation-item').filter({ hasText: fixture.channelTitle })
+    const conversationRow = page
+      .locator('.conversation-item')
+      .filter({ hasText: fixture.channelTitle })
     await expect(conversationRow).toBeVisible()
     await expect(conversationRow).toContainText(fixture.seedMessage)
 
     await conversationRow.click()
 
-    await expect.poll(() => page.url(), { timeout: 30000 }).toContain(`/chat?user_id=-${fixture.channelId}`)
-    await expect(page.locator('.chat-header:visible .header-name').first()).toContainText(fixture.channelTitle)
+    await expect
+      .poll(() => page.url(), { timeout: 30000 })
+      .toContain(`/chat?user_id=-${fixture.channelId}`)
+    await expect(page.locator('.chat-header:visible .header-name').first()).toContainText(
+      fixture.channelTitle,
+    )
     await expect(page.getByText(fixture.seedMessage)).toBeVisible()
   })
 
-  test('freshly activated web user immediately sees the mandatory room in messenger', async ({ page, request }) => {
+  test('freshly activated web user immediately sees the mandatory room in messenger', async ({
+    page,
+    request,
+  }) => {
     await disablePwaRegistration(page)
     const invitation = await createInvitation(request)
-
-    await page.route('**/api/auth/register-otp-request**', async route => {
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({ detail: 'کد تایید ارسال شد', expires_in: 120 }),
-      })
-    })
-    await page.route('**/api/auth/register-otp-verify**', async route => {
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({ detail: 'کد تایید شد' }),
-      })
-    })
 
     await page.goto(invitation.shortLinkPath)
     await page.getByRole('button', { name: /ثبت‌نام از طریق وب/ }).click()
 
-    await expect(page).toHaveURL(new RegExp(`/register\\?token=${invitation.token}$`))
+    await expect(page).toHaveURL(/\/register$/)
+    expect(page.url()).not.toContain(invitation.token)
     await expect(page.getByText(invitation.accountName)).toBeVisible()
-    await expect(page.getByText(invitation.mobileNumber)).toBeVisible()
+    await expect(page.getByText(invitation.mobileNumber)).toHaveCount(0)
+    await expect(
+      page.getByText(
+        `${invitation.mobileNumber.slice(0, 4)}****${invitation.mobileNumber.slice(-3)}`,
+      ),
+    ).toBeVisible()
 
-    const otpResponse = page.waitForResponse((response) =>
-      response.url().includes('/api/auth/register-otp-request') && response.status() === 200,
+    const otpResponse = page.waitForResponse(
+      (response) =>
+        response.url().includes('/api/auth/registration-context/otp/request') &&
+        response.status() === 200,
     )
     await page.getByRole('button', { name: 'ارسال کد تایید' }).click()
     await otpResponse
-    await expect(page.getByText('کد تایید ۵ رقمی را وارد کنید:')).toBeVisible({ timeout: 10000 })
+    await expect(page.getByText('کد تأیید ۵ رقمی را وارد کنید')).toBeVisible({ timeout: 10000 })
 
-    const verifyResponse = page.waitForResponse((response) =>
-      response.url().includes('/api/auth/register-otp-verify') && response.status() === 200,
+    const verifyResponse = page.waitForResponse(
+      (response) =>
+        response.url().includes('/api/auth/registration-context/otp/verify') &&
+        response.status() === 200,
     )
-    await page.locator('.otp-input').fill(invitation.otpCode)
-    await page.getByRole('button', { name: 'تایید کد' }).click()
+    await page.locator('input[autocomplete="one-time-code"]').fill(invitation.otpCode)
+    await page.getByRole('button', { name: 'تأیید کد' }).click()
     await verifyResponse
-    await expect(page.locator('.address-input')).toBeVisible({ timeout: 10000 })
+    await expect(page.locator('textarea[autocomplete="street-address"]')).toBeVisible({
+      timeout: 10000,
+    })
 
-    await page.locator('.address-input').fill('تهران، خیابان تست، پلاک ۱۲، واحد ۳')
+    await page
+      .locator('textarea[autocomplete="street-address"]')
+      .fill('تهران، خیابان تست، پلاک ۱۲، واحد ۳')
     await page.getByRole('button', { name: 'تکمیل ثبت‌نام' }).click()
 
-    await expect.poll(
-      () => page.evaluate(() => Boolean(localStorage.getItem('auth_token'))),
-      { timeout: 30000 },
-    ).toBe(true)
+    await expect
+      .poll(() => page.evaluate(() => Boolean(localStorage.getItem('auth_token'))), {
+        timeout: 30000,
+      })
+      .toBe(true)
 
     await page.goto('/chat')
 
     const mandatoryTitlePattern = 'اطلاع‌رسانی'
-    const conversationRow = page.locator('.conversation-item').filter({ hasText: mandatoryTitlePattern })
+    const conversationRow = page
+      .locator('.conversation-item')
+      .filter({ hasText: mandatoryTitlePattern })
     await expect(conversationRow).toBeVisible()
 
     await conversationRow.click()
 
     await expect.poll(() => page.url(), { timeout: 30000 }).toContain('/chat?user_id=-')
-    await expect(page.locator('.chat-header:visible .header-name').first()).toContainText(mandatoryTitlePattern)
+    await expect(page.locator('.chat-header:visible .header-name').first()).toContainText(
+      mandatoryTitlePattern,
+    )
   })
 })

@@ -2,12 +2,31 @@ import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 import App from './App.vue'
 import router from './router'
+import { decideChunkReload } from './router/chunkRecovery'
+import {
+  createSystemRecoveryLocation,
+  SYSTEM_RECOVERY_FALLBACK_HREF,
+  SYSTEM_RECOVERY_OUTCOME,
+} from './router/systemRecovery'
 import './assets/main.css'
 import 'vazirmatn/Vazirmatn-font-face.css'
 import './utils/pwaInstall'
 
-
 const app = createApp(App)
+
+interface TelegramWebApp {
+  ready(): void
+  expand(): void
+  onEvent(event: 'themeChanged', callback: () => void): void
+}
+
+type TelegramWindow = Window & {
+  Telegram?: { WebApp?: TelegramWebApp }
+  __PLAYWRIGHT_DISABLE_PWA_REGISTRATION__?: boolean
+  __PLAYWRIGHT_ENABLE_PWA_REGISTRATION__?: boolean
+}
+
+const appWindow = window as TelegramWindow
 
 app.use(createPinia())
 app.use(router)
@@ -18,8 +37,20 @@ app.directive('ripple', vRipple)
 // --- Handle Dynamic Import Failures (Vite) ---
 window.addEventListener('vite:preloadError', (event) => {
   event.preventDefault()
-  console.warn('Vite preload error detected. Forcing hard reload...')
-  window.location.reload()
+  const decision = decideChunkReload(window.location.pathname)
+
+  if (decision.kind === 'reload') {
+    console.warn('Vite preload failed; attempting one bounded hard reload')
+    window.location.replace(decision.path)
+    return
+  }
+
+  console.warn('Vite preload failed after the bounded retry; opening system recovery')
+  void router
+    .replace(createSystemRecoveryLocation(SYSTEM_RECOVERY_OUTCOME.DEEP_LINK_FAILURE))
+    .catch(() => {
+      window.location.replace(SYSTEM_RECOVERY_FALLBACK_HREF)
+    })
 })
 
 // --- PWA Service Worker Registration (with iOS error recovery) ---
@@ -43,14 +74,20 @@ function registerPwaWhenStable() {
       onOfflineReady() {
         console.log('App ready to work offline')
       },
-      onRegisterError(error: any) {
-        console.error('SW registration failed:', error)
-        navigator.serviceWorker?.getRegistrations().then(registrations => {
-          registrations.forEach(registration => registration.unregister())
-          console.log('Unregistered broken service workers, reloading...')
-          window.location.reload()
-        })
-      }
+      onRegisterError() {
+        console.error('SW registration failed; removing broken registrations')
+        navigator.serviceWorker
+          ?.getRegistrations()
+          .then((registrations) =>
+            Promise.all(registrations.map((registration) => registration.unregister())),
+          )
+          .then(() => {
+            console.log('Unregistered broken service workers')
+          })
+          .catch(() => {
+            console.error('SW registration cleanup failed')
+          })
+      },
     })
   } catch (error) {
     console.error('SW setup error:', error)
@@ -60,7 +97,7 @@ function registerPwaWhenStable() {
 // --- Telegram WebApp Theme Handling ---
 // Wait briefly for async Telegram script to load
 const initTelegram = () => {
-  const tg = (window as any).Telegram?.WebApp
+  const tg = appWindow.Telegram?.WebApp
   if (!tg) return
   try {
     tg.ready()
@@ -83,7 +120,7 @@ const initTelegram = () => {
 
 // Try immediately, then retry after a short delay (async script may not be ready yet)
 initTelegram()
-if (!(window as any).Telegram?.WebApp) {
+if (!appWindow.Telegram?.WebApp) {
   setTimeout(initTelegram, 500)
 }
 
@@ -97,8 +134,8 @@ try {
 }
 
 const shouldSkipPwaRegistration =
-  Boolean((window as any).__PLAYWRIGHT_DISABLE_PWA_REGISTRATION__) ||
-  (navigator.webdriver === true && !Boolean((window as any).__PLAYWRIGHT_ENABLE_PWA_REGISTRATION__))
+  Boolean(appWindow.__PLAYWRIGHT_DISABLE_PWA_REGISTRATION__) ||
+  (navigator.webdriver === true && !Boolean(appWindow.__PLAYWRIGHT_ENABLE_PWA_REGISTRATION__))
 
 // Register early enough for Android installability/WebAPK evaluation, but keep
 // a small delay so first paint and route bootstrap win the critical path.

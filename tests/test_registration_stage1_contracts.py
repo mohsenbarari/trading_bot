@@ -6,9 +6,11 @@ from uuid import UUID, uuid4
 from pydantic import ValidationError
 
 from core.invitation_contract_service import (
+    build_canonical_invitation_web_link,
     build_invitation_contract_v2,
     build_public_invitation_contract_v2,
     invitation_surface_availability,
+    is_canonical_invitation_short_code,
 )
 from core.invitation_creation_contracts import (
     InternalInvitationCreateRequest,
@@ -462,11 +464,41 @@ class RegistrationStage1ContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(contract.bot_link, "https://t.me/test_bot?start=INV-contract-test")
         self.assertEqual(
             contract.web_link,
-            "https://staging.gold-trade.ir/register?token=INV-contract-test",
+            "https://staging.gold-trade.ir/i/Ab12Cd34",
         )
+        self.assertEqual(contract.short_code, "Ab12Cd34")
+        self.assertNotIn("token", contract.model_dump())
         self.assertEqual(contract.link, contract.bot_link)
         self.assertEqual(contract.short_link, contract.web_short_link)
         self.assertEqual(contract.state.value, "pending")
+
+        self.assertEqual(
+            build_canonical_invitation_web_link(
+                "Ab12Cd34",
+                web_origin="https://staging.gold-trade.ir/",
+            ),
+            "https://staging.gold-trade.ir/i/Ab12Cd34",
+        )
+        for malformed_short_code in (
+            "INV-raw-bearer",
+            " Ab12Cd34",
+            "Ab12Cd34 ",
+            "Ab12Cd3/",
+            "Ab12Cd3?",
+            "Ab12Cd3#",
+            "Ab12Cd%2F",
+            None,
+        ):
+            with self.subTest(malformed_short_code=malformed_short_code):
+                self.assertFalse(
+                    is_canonical_invitation_short_code(malformed_short_code)
+                )
+                self.assertIsNone(
+                    build_canonical_invitation_web_link(
+                        malformed_short_code,
+                        web_origin="https://staging.gold-trade.ir",
+                    )
+                )
 
         invitation.is_used = True
         invitation.registered_user_id = 7

@@ -114,6 +114,9 @@ class JsonLogFormatter(logging.Formatter):
 class TextLogFormatter(logging.Formatter):
     """Human-readable local formatter that still redacts sensitive values."""
 
+    def formatException(self, ei: tuple[type[BaseException], BaseException, Any]) -> str:
+        return str(redact(super().formatException(ei)))
+
     def format(self, record: logging.LogRecord) -> str:
         original_msg = record.msg
         original_args = record.args

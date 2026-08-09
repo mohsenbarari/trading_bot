@@ -1,5 +1,6 @@
 import { flushPromises } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { CHUNK_RELOAD_MARKER_KEY } from './router/chunkRecovery'
 
 const mainMocks = vi.hoisted(() => ({
   appInstance: {
@@ -10,11 +11,12 @@ const mainMocks = vi.hoisted(() => ({
   createApp: vi.fn(),
   createPinia: vi.fn(),
   registerSW: vi.fn(),
-  router: { name: 'router' },
+  router: { name: 'router', replace: vi.fn(() => Promise.resolve()) },
   vRipple: Symbol('ripple'),
   listeners: new Map<string, Array<(event?: any) => void>>(),
   timeouts: [] as Array<{ fn: (...args: any[]) => any; delay?: number }>,
   reloadSpy: vi.fn(),
+  locationReplaceSpy: vi.fn(),
   getRegistrationsMock: vi.fn(),
   unregisterMock: vi.fn(),
   telegram: {
@@ -65,9 +67,7 @@ function setReadyState(state: DocumentReadyState) {
 }
 
 function setTelegram(enabled: boolean) {
-  ;(window as any).Telegram = enabled
-    ? { WebApp: mainMocks.telegram }
-    : undefined
+  ;(window as any).Telegram = enabled ? { WebApp: mainMocks.telegram } : undefined
 }
 
 function getFirstListener(type: string) {
@@ -84,6 +84,13 @@ function getTimeoutByDelay(delay: number) {
   return mainMocks.timeouts.find((entry) => entry.delay === delay)
 }
 
+function getSessionStorageSnapshot() {
+  return Array.from({ length: sessionStorage.length }, (_, index) => {
+    const key = sessionStorage.key(index) ?? ''
+    return [key, sessionStorage.getItem(key)]
+  })
+}
+
 async function importFreshMain() {
   vi.resetModules()
   await import('./main')
@@ -94,10 +101,12 @@ describe('main.ts', () => {
     mainMocks.createApp.mockClear()
     mainMocks.createPinia.mockClear()
     mainMocks.registerSW.mockClear()
+    mainMocks.router.replace.mockClear()
     mainMocks.appInstance.use.mockClear()
     mainMocks.appInstance.directive.mockClear()
     mainMocks.appInstance.mount.mockClear()
     mainMocks.reloadSpy.mockReset()
+    mainMocks.locationReplaceSpy.mockReset()
     mainMocks.unregisterMock.mockReset()
     mainMocks.getRegistrationsMock.mockReset()
     mainMocks.getRegistrationsMock.mockResolvedValue([{ unregister: mainMocks.unregisterMock }])
@@ -106,12 +115,15 @@ describe('main.ts', () => {
     mainMocks.telegram.onEvent.mockReset()
     mainMocks.listeners = new Map()
     mainMocks.timeouts = []
+    window.sessionStorage.clear()
 
-    vi.spyOn(window, 'addEventListener').mockImplementation(((type: string, listener: EventListenerOrEventListenerObject) => {
+    vi.spyOn(window, 'addEventListener').mockImplementation(((
+      type: string,
+      listener: EventListenerOrEventListenerObject,
+    ) => {
       const handlers = mainMocks.listeners.get(type) ?? []
-      const normalized = typeof listener === 'function'
-        ? listener
-        : listener.handleEvent.bind(listener)
+      const normalized =
+        typeof listener === 'function' ? listener : listener.handleEvent.bind(listener)
       handlers.push(normalized)
       mainMocks.listeners.set(type, handlers)
     }) as typeof window.addEventListener)
@@ -129,8 +141,9 @@ describe('main.ts', () => {
     Object.defineProperty(window, 'location', {
       configurable: true,
       value: {
-        ...window.location,
+        pathname: '/',
         reload: mainMocks.reloadSpy,
+        replace: mainMocks.locationReplaceSpy,
       },
     })
 
@@ -154,9 +167,10 @@ describe('main.ts', () => {
     setTelegram(false)
   })
 
-  it('bootstraps the app, handles preload failures, and registers the service worker on stable complete pages', async () => {
+  it('bootstraps the app, bounds a path-only preload retry, and registers the service worker', async () => {
     setReadyState('complete')
     setTelegram(true)
+    window.location.pathname = '/register'
 
     await importFreshMain()
 
@@ -177,21 +191,86 @@ describe('main.ts', () => {
     const preloadEvent = { preventDefault: vi.fn() }
     preloadHandler?.(preloadEvent)
     expect(preloadEvent.preventDefault).toHaveBeenCalled()
-    expect(mainMocks.reloadSpy).toHaveBeenCalledTimes(1)
+    expect(mainMocks.locationReplaceSpy).toHaveBeenCalledWith('/register')
+    expect(JSON.stringify(getSessionStorageSnapshot())).not.toContain('raw-secret-token')
+    expect(mainMocks.reloadSpy).not.toHaveBeenCalled()
+    expect(mainMocks.router.replace).not.toHaveBeenCalled()
 
     getTimeoutByDelay(250)?.fn()
     expect(mainMocks.registerSW).toHaveBeenCalledTimes(1)
 
     const registerOptions = mainMocks.registerSW.mock.calls[0]?.[0]
     registerOptions.onNeedRefresh()
-    expect(mainMocks.reloadSpy).toHaveBeenCalledTimes(1)
+    expect(mainMocks.reloadSpy).not.toHaveBeenCalled()
 
     registerOptions.onRegisterError(new Error('broken sw'))
     await flushPromises()
 
     expect(mainMocks.getRegistrationsMock).toHaveBeenCalled()
     expect(mainMocks.unregisterMock).toHaveBeenCalled()
-    expect(mainMocks.reloadSpy).toHaveBeenCalledTimes(2)
+    expect(mainMocks.reloadSpy).not.toHaveBeenCalled()
+  })
+
+  it('shares the preload bound and opens eager recovery without carrying the failed URL', async () => {
+    setReadyState('complete')
+    window.location.pathname = '/register'
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+
+    await importFreshMain()
+    const preloadHandler = getFirstListener('vite:preloadError')
+
+    preloadHandler?.({ preventDefault: vi.fn() })
+    preloadHandler?.({ preventDefault: vi.fn() })
+    await flushPromises()
+
+    expect(mainMocks.locationReplaceSpy).toHaveBeenCalledWith('/register')
+    expect(mainMocks.router.replace).toHaveBeenCalledTimes(1)
+    expect(mainMocks.router.replace).toHaveBeenCalledWith({
+      name: 'system-recovery',
+      params: { pathMatch: ['__system', 'recovery'] },
+      query: { outcome: 'deep-link-failure' },
+    })
+    expect(JSON.stringify(warnSpy.mock.calls)).not.toContain('raw-secret')
+    expect(JSON.stringify(getSessionStorageSnapshot())).not.toContain('raw-secret')
+
+    warnSpy.mockRestore()
+  })
+
+  it('keeps the incident bound across a successful reboot before the same preload fails again', async () => {
+    setReadyState('complete')
+    window.location.pathname = '/register'
+    sessionStorage.setItem(CHUNK_RELOAD_MARKER_KEY, String(Date.now()))
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+
+    await importFreshMain()
+    getFirstListener('vite:preloadError')?.({ preventDefault: vi.fn() })
+    await flushPromises()
+
+    expect(mainMocks.router.replace).toHaveBeenCalledTimes(1)
+    expect(mainMocks.router.replace).toHaveBeenCalledWith({
+      name: 'system-recovery',
+      params: { pathMatch: ['__system', 'recovery'] },
+      query: { outcome: 'deep-link-failure' },
+    })
+    expect(sessionStorage.getItem(CHUNK_RELOAD_MARKER_KEY)).not.toBeNull()
+    expect(JSON.stringify(warnSpy.mock.calls)).not.toContain('raw-secret')
+
+    warnSpy.mockRestore()
+  })
+
+  it('uses replace for the static recovery fallback when eager recovery navigation fails', async () => {
+    setReadyState('complete')
+    window.location.pathname = '/register'
+    sessionStorage.setItem(CHUNK_RELOAD_MARKER_KEY, String(Date.now()))
+    mainMocks.router.replace.mockRejectedValueOnce(new Error('router unavailable'))
+
+    await importFreshMain()
+    getFirstListener('vite:preloadError')?.({ preventDefault: vi.fn() })
+    await flushPromises()
+
+    expect(mainMocks.locationReplaceSpy).toHaveBeenCalledWith(
+      '/__system/recovery?outcome=deep-link-failure',
+    )
   })
 
   it('retries Telegram init later and still registers the service worker without waiting for window load', async () => {

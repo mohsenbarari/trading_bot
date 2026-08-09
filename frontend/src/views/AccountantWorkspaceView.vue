@@ -853,7 +853,7 @@ onBeforeUnmount(() => {
                     مشاهده پرونده
                   </AppButton>
                   <AppButton
-                    v-if="activeRelation.registration_link"
+                    v-if="invitationRelationLink(activeRelation, 'web')"
                     size="sm"
                     variant="secondary"
                     @click="copyRegistrationLink(activeRelation)"

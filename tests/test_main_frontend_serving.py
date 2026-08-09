@@ -27,15 +27,47 @@ class MainFrontendServingTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIsInstance(static_result, FileResponse)
         self.assertTrue(str(static_result.path).endswith("mini_app_dist/index.html"))
+        self.assertEqual(static_result.headers["referrer-policy"], "no-referrer")
         self.assertIsInstance(fallback_result, FileResponse)
         self.assertTrue(str(fallback_result.path).endswith("mini_app_dist/index.html"))
+        self.assertEqual(fallback_result.headers["referrer-policy"], "no-referrer")
 
-    async def test_serve_frontend_returns_reload_script_for_stale_js_chunk(self):
+    async def test_root_document_uses_the_same_no_referrer_boundary(self):
+        result = await main.root()
+
+        self.assertIsInstance(result, FileResponse)
+        self.assertEqual(result.headers["referrer-policy"], "no-referrer")
+
+    async def test_serve_frontend_returns_non_executable_410_for_stale_js_chunk(self):
         result = await main.serve_frontend("assets/old-chunk.js")
 
         self.assertIsInstance(result, Response)
-        self.assertEqual(result.media_type, "application/javascript")
-        self.assertIn("window.location.reload(true)", result.body.decode())
+        self.assertEqual(result.status_code, 410)
+        self.assertEqual(result.headers["cache-control"], "no-store, no-cache, must-revalidate")
+        self.assertNotIn("window.location.reload", result.body.decode())
+
+
+class MainRoutingPolicyTests(unittest.TestCase):
+    def test_registration_context_isolation_uses_only_exact_cookie_endpoints(self):
+        for path in (
+            "/api/auth/registration-context",
+            "/api/auth/registration-context/exchange",
+            "/api/auth/registration-context/otp/request",
+            "/api/auth/registration-context/otp/verify",
+            "/api/auth/registration-context/complete",
+            "/api/auth/registration-context/clear",
+        ):
+            with self.subTest(path=path):
+                self.assertTrue(main._is_production_test_isolation_public_path(path))
+
+        self.assertFalse(
+            main._is_production_test_isolation_public_path(
+                "/api/auth/registration-context/opaque-handle"
+            )
+        )
+        self.assertFalse(
+            main._is_production_test_isolation_public_path("/api/auth/pending-registration")
+        )
 
 
 if __name__ == "__main__":

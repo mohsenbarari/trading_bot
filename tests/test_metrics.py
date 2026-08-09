@@ -26,6 +26,10 @@ class MetricsTests(unittest.TestCase):
     def test_route_normalization_removes_raw_ids(self):
         self.assertEqual(normalize_http_route("/api/users/123/sessions/abc-def-1234567890"), "/api/users/{id}/sessions/{id}")
         self.assertEqual(normalize_http_route("/api/chat/messages?token=secret"), "/api/chat/messages")
+        self.assertEqual(
+            normalize_http_route(f"/api/auth/pending-registration/REG-{'a' * 32}"),
+            "/api/auth/pending-registration/[REDACTED]",
+        )
 
     def test_prometheus_text_renders_counter_and_histogram(self):
         record_http_request(method="GET", route="/api/users/{user_id}", status_code=404, duration_ms=12.5)

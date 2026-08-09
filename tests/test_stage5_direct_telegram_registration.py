@@ -97,6 +97,7 @@ def invitation(**overrides):
     values = {
         "id": 41,
         "token": "INV-stage5-token",
+        "short_code": "STAGE501",
         "mobile_number": "09121112233",
         "role": UserRole.STANDARD,
         "kind": InvitationKind.STANDARD,
@@ -145,7 +146,7 @@ def callback(state_message=None, *, telegram_id=7001):
 def ready_state_data(inv=None, *, telegram_id=7001, address="Tehran exact address"):
     inv = inv or invitation()
     return {
-        start._REGISTRATION_STATE_TOKEN: inv.token,
+        start._REGISTRATION_STATE_SHORT_CODE: inv.short_code,
         start._REGISTRATION_STATE_MOBILE: "09121112233",
         start._REGISTRATION_STATE_EXPIRES_AT: inv.expires_at.isoformat(),
         start._REGISTRATION_STATE_TELEGRAM_ID: telegram_id,
@@ -393,7 +394,7 @@ class Stage5DirectEntryTests(unittest.IsolatedAsyncioTestCase):
                 invitation=inv,
             )
 
-        self.assertEqual(state.data[start._REGISTRATION_STATE_TOKEN], inv.token)
+        self.assertEqual(state.data[start._REGISTRATION_STATE_SHORT_CODE], inv.short_code)
         self.assertEqual(state.data[start._REGISTRATION_STATE_MOBILE], "09121112233")
         self.assertEqual(state.data[start._REGISTRATION_STATE_TELEGRAM_ID], 7001)
         self.assertEqual(state.states, [Registration.awaiting_contact])
@@ -634,8 +635,12 @@ class Stage5DirectEntryTests(unittest.IsolatedAsyncioTestCase):
                 "evaluate_bot_access",
                 new=AsyncMock(return_value=SimpleNamespace(allowed=True, reason=None)),
             ), patch.object(
-                start, "build_linked_account_panel_message", new=AsyncMock(return_value="panel")
-            ), patch.object(start, "get_persistent_menu_keyboard", return_value="menu"), patch.object(
+                start, "build_returning_account_panel_message", new=AsyncMock(return_value="panel")
+            ), patch.object(
+                start,
+                "build_persistent_navigation_keyboard",
+                new=AsyncMock(return_value="menu"),
+            ), patch.object(
                 start, "_user_facing_webapp_url", return_value="https://app.example"
             ), patch.object(start, "set_anchor"):
                 if command is None:
@@ -760,12 +765,12 @@ class Stage5ContactAndAddressTests(unittest.IsolatedAsyncioTestCase):
             (
                 start.handle_contact,
                 message(),
-                {start._REGISTRATION_STATE_TOKEN: "INV-no-link"},
+                {start._REGISTRATION_STATE_SHORT_CODE: "NOLINK01"},
             ),
             (
                 start.handle_address,
                 message(text="Tehran exact address"),
-                {start._REGISTRATION_STATE_TOKEN: "INV-no-link"},
+                {start._REGISTRATION_STATE_SHORT_CODE: "NOLINK01"},
             ),
         ):
             with self.subTest(handler=handler.__name__, data=data), patch.object(
@@ -1325,7 +1330,9 @@ class Stage5ConfirmationTests(unittest.IsolatedAsyncioTestCase):
                 "build_linked_account_panel_message",
                 new=AsyncMock(return_value="existing panel"),
             ) as build_panel, patch.object(
-                start, "get_persistent_menu_keyboard", return_value="existing menu"
+                start,
+                "build_persistent_navigation_keyboard",
+                new=AsyncMock(return_value="existing menu"),
             ), patch.object(
                 start, "public_webapp_url_for_links", return_value="https://app.example"
             ), patch.object(start, "set_anchor") as set_anchor:
@@ -1613,7 +1620,7 @@ class Stage5RedisTTLTests(unittest.IsolatedAsyncioTestCase):
 
         await start._write_registration_fsm(
             state,
-            data={"registration_invitation_token": "opaque"},
+            data={"registration_invitation_short_code": "ABC12345"},
             next_state=Registration.awaiting_contact,
             expires_at=expiry,
         )

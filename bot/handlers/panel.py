@@ -726,7 +726,7 @@ async def confirm_unlink_user_panel_customer(
 async def _wait_for_customer_invite_projection(
     *,
     owner_user_id: int,
-    invitation_token: str,
+    short_code: str,
     wait_seconds: float = CUSTOMER_INVITE_PROJECTION_GRACE_SECONDS,
     poll_seconds: float = CUSTOMER_INVITE_PROJECTION_POLL_SECONDS,
 ) -> bool:
@@ -740,7 +740,7 @@ async def _wait_for_customer_invite_projection(
                 .join(Invitation, Invitation.token == CustomerRelation.invitation_token)
                 .where(
                     CustomerRelation.owner_user_id == owner_user_id,
-                    CustomerRelation.invitation_token == invitation_token,
+                    Invitation.short_code == short_code,
                     CustomerRelation.customer_user_id.is_(None),
                     CustomerRelation.customer_tier == CustomerTier.TIER_1,
                     CustomerRelation.status == CustomerRelationStatus.PENDING,
@@ -949,12 +949,12 @@ async def confirm_customer_invite_tier1(callback: types.CallbackQuery, state: FS
         return
 
     await state.clear()
-    invitation_token = body.get("invitation_token") if isinstance(body, dict) else None
+    short_code = body.get("short_code") if isinstance(body, dict) else None
     if status_code < 400 and (
-        not invitation_token
+        not short_code
         or not await _wait_for_customer_invite_projection(
             owner_user_id=user.id,
-            invitation_token=str(invitation_token),
+            short_code=str(short_code),
         )
     ):
         await callback.message.answer(

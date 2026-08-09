@@ -96,7 +96,6 @@ describe('CustomerWorkspaceView.vue', () => {
         max_daily_trades: null,
         max_daily_commodity_volume: null,
         status: 'active',
-        invitation_token: null,
         registration_link: null,
         expires_at: null,
         activated_at: '2026-01-02T10:00:00Z',
@@ -118,8 +117,8 @@ describe('CustomerWorkspaceView.vue', () => {
         max_daily_trades: null,
         max_daily_commodity_volume: null,
         status: 'pending',
-        invitation_token: 'token',
         registration_link: null,
+        web_short_link: 'https://example.test/i/CUST0012',
         expires_at: null,
         activated_at: null,
         deleted_at: null,
@@ -180,8 +179,7 @@ describe('CustomerWorkspaceView.vue', () => {
       max_daily_trades: null,
       max_daily_commodity_volume: null,
       status: 'pending',
-      invitation_token: 'new-token',
-      registration_link: 'https://example.test/invite/new-token',
+      web_short_link: 'https://example.test/i/CUST0015',
       expires_at: null,
       activated_at: null,
       deleted_at: null,
@@ -202,7 +200,6 @@ describe('CustomerWorkspaceView.vue', () => {
       max_daily_trades: payload.max_daily_trades == null ? null : Number(payload.max_daily_trades),
       max_daily_commodity_volume: payload.max_daily_commodity_volume == null ? null : Number(payload.max_daily_commodity_volume),
       status: 'active',
-      invitation_token: '',
       registration_link: null,
       expires_at: null,
       activated_at: '2026-01-02T10:00:00Z',
@@ -261,8 +258,7 @@ describe('CustomerWorkspaceView.vue', () => {
       max_daily_trades: null,
       max_daily_commodity_volume: null,
       status: 'pending',
-      invitation_token: 'new-token',
-      registration_link: 'https://example.test/invite/new-token',
+      web_short_link: 'https://example.test/i/CUST0015',
       expires_at: null,
       activated_at: null,
       deleted_at: null,
@@ -304,12 +300,12 @@ describe('CustomerWorkspaceView.vue', () => {
     const relation = {
       id: 12,
       bot_registration_link: 'https://t.me/bot?start=customer12',
-      web_registration_link: 'https://example.test/invite/customer12',
+      web_short_link: 'https://example.test/i/CUST0012',
     }
     await vm.copyRegistrationLink(relation, 'bot')
     await vm.copyRegistrationLink(relation, 'web')
     expect(clipboardWrite).toHaveBeenNthCalledWith(1, relation.bot_registration_link)
-    expect(clipboardWrite).toHaveBeenNthCalledWith(2, relation.web_registration_link)
+    expect(clipboardWrite).toHaveBeenNthCalledWith(2, relation.web_short_link)
     await vi.advanceTimersByTimeAsync(1800)
 
     await vm.copyRegistrationLink({ id: 13 }, 'web')
@@ -336,10 +332,9 @@ describe('CustomerWorkspaceView.vue', () => {
       customer_tier: 'tier1',
       commission_rate: null,
       status: 'pending',
-      invitation_token: 'dual-token',
       registration_link: null,
       bot_registration_link: 'https://t.me/bot?start=dual-token',
-      web_registration_link: 'https://example.test/invite/dual-token',
+      web_short_link: 'https://example.test/i/CUST0020',
       expires_at: null,
       activated_at: null,
       deleted_at: null,
@@ -357,7 +352,7 @@ describe('CustomerWorkspaceView.vue', () => {
     await flushPromises()
     expect(buttons[1]!.text()).toBe('کپی شد')
     expect(clipboardWrite).toHaveBeenNthCalledWith(1, 'https://t.me/bot?start=dual-token')
-    expect(clipboardWrite).toHaveBeenNthCalledWith(2, 'https://example.test/invite/dual-token')
+    expect(clipboardWrite).toHaveBeenNthCalledWith(2, 'https://example.test/i/CUST0020')
     wrapper.unmount()
     vi.useRealTimers()
   })

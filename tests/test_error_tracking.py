@@ -6,6 +6,8 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
+from sqlalchemy.exc import OperationalError
+
 from core.error_tracking import _reset_error_tracking_rate_limiter, capture_exception, error_fingerprint, scrub_sentry_event
 from core.log_redaction import REDACTED
 from core.logging_config import configure_logging
@@ -46,6 +48,19 @@ class ErrorTrackingTests(unittest.TestCase):
         self.assertIn("0912****789", payload["exception_message"])
         self.assertNotIn("hunter2", stream.getvalue())
         self.assertNotIn("unsafe", stream.getvalue())
+
+    def test_capture_exception_redacts_registration_bearers_from_database_errors(self):
+        raw_token = f"INV-{'a' * 32}"
+        stream = io.StringIO()
+        with patch("sys.stdout", stream):
+            configure_logging("error-test")
+
+        exc = OperationalError("SELECT invitation", (raw_token,), RuntimeError("db down"))
+        capture_exception(exc, source="api.registration-context")
+
+        rendered = stream.getvalue()
+        self.assertNotIn(raw_token, rendered)
+        self.assertIn(REDACTED, rendered)
 
     def test_error_fingerprint_is_stable_for_same_exception_site(self):
         try:

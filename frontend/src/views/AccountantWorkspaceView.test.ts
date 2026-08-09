@@ -85,7 +85,6 @@ describe('AccountantWorkspaceView.vue', () => {
         duty_description: 'ثبت معاملات',
         mobile_number: '09121111111',
         status: 'active',
-        invitation_token: null,
         registration_link: null,
         expires_at: null,
         activated_at: '2026-01-02T10:00:00Z',
@@ -102,8 +101,7 @@ describe('AccountantWorkspaceView.vue', () => {
         duty_description: null,
         mobile_number: '09122222222',
         status: 'pending',
-        invitation_token: 'token',
-        registration_link: 'https://example.test/invite/accountant12',
+        web_short_link: 'https://example.test/i/ACCT0012',
         expires_at: null,
         activated_at: null,
         deleted_at: null,
@@ -133,8 +131,7 @@ describe('AccountantWorkspaceView.vue', () => {
       duty_description: 'پیگیری پیشنهادها',
       mobile_number: '09123334444',
       status: 'pending',
-      invitation_token: 'new-token',
-      registration_link: 'https://example.test/invite/accountant15',
+      web_short_link: 'https://example.test/i/ACCT0015',
       expires_at: null,
       activated_at: null,
       deleted_at: null,
@@ -150,7 +147,6 @@ describe('AccountantWorkspaceView.vue', () => {
       duty_description: (payload.duty_description as string | null | undefined) ?? null,
       mobile_number: '09121111111',
       status: 'active',
-      invitation_token: null,
       registration_link: null,
       expires_at: null,
       activated_at: '2026-01-02T10:00:00Z',
@@ -204,8 +200,7 @@ describe('AccountantWorkspaceView.vue', () => {
       duty_description: 'پیگیری پیشنهادها',
       mobile_number: '09123334444',
       status: 'pending',
-      invitation_token: 'new-token',
-      registration_link: 'https://example.test/invite/accountant15',
+      web_short_link: 'https://example.test/i/ACCT0015',
       expires_at: null,
       activated_at: null,
       deleted_at: null,
@@ -247,10 +242,10 @@ describe('AccountantWorkspaceView.vue', () => {
 
     const relation = {
       id: 12,
-      registration_link: 'https://example.test/invite/accountant12',
+      web_short_link: 'https://example.test/i/ACCT0012',
     }
     await vm.copyRegistrationLink(relation)
-    expect(clipboardWrite).toHaveBeenCalledWith(relation.registration_link)
+    expect(clipboardWrite).toHaveBeenCalledWith(relation.web_short_link)
     await vi.advanceTimersByTimeAsync(1800)
 
     await vm.copyRegistrationLink({ id: 13, registration_link: null })

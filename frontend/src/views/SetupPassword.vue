@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, reactive, ref } from 'vue'
+import { computed, nextTick, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { Eye, EyeOff, LockKeyhole, ShieldCheck } from 'lucide-vue-next'
-import { AppButton, AppCard, AppFormField, AppInput, AppPage, AppPageHeader, AppStatusBadge } from '../components/ui'
+import { Eye, EyeOff } from 'lucide-vue-next'
+import { AppButton, AppFormField, AppInput, AppStatusBadge, AuthFlowShell } from '../components/ui'
 import { isAppHttpError } from '../utils/httpErrorPolicy'
+import { assertSuccessfulNavigation } from '../utils/navigationResult'
 import { routeRequestJson } from '../utils/routeRequest'
 
 const router = useRouter()
@@ -11,6 +12,10 @@ const loading = ref(false)
 const error = ref('')
 const showPassword = ref(false)
 const showConfirmPassword = ref(false)
+const passwordDirty = ref(false)
+const successfulSetupReceipt = ref<string | null>(null)
+const passwordInput = ref<{ focus: (options?: FocusOptions) => void } | null>(null)
+const confirmPasswordInput = ref<{ focus: (options?: FocusOptions) => void } | null>(null)
 let submitPending = false
 
 const form = reactive({
@@ -27,6 +32,7 @@ const passwordChecks = computed(() => [
 ])
 
 const isPasswordValid = computed(() => passwordChecks.value.every((rule) => rule.passed))
+const setupSucceeded = computed(() => successfulSetupReceipt.value !== null)
 const passwordError = computed(() => {
   if (!form.password) return ''
   return isPasswordValid.value ? '' : 'الزامات امنیتی رمز عبور رعایت نشده است'
@@ -36,14 +42,35 @@ const confirmError = computed(() => {
   return form.password === form.confirmPassword ? '' : 'رمز عبور و تکرار آن یکسان نیستند'
 })
 
+watch(
+  () => form.password,
+  () => {
+    passwordDirty.value = true
+  },
+)
+
+function passwordRuleTone(passed: boolean) {
+  if (!passwordDirty.value) return 'neutral' as const
+  return passed ? ('success' as const) : ('danger' as const)
+}
+
+function passwordRuleState(passed: boolean) {
+  if (!passwordDirty.value) return 'بررسی‌نشده'
+  return passed ? 'تأیید' : 'نیازمند اصلاح'
+}
+
 async function submitPassword() {
-  if (!isPasswordValid.value) {
+  if (!setupSucceeded.value && !isPasswordValid.value) {
     error.value = 'الزامات امنیتی رمز عبور رعایت نشده است'
+    await nextTick()
+    passwordInput.value?.focus()
     return
   }
 
-  if (form.password !== form.confirmPassword) {
+  if (!setupSucceeded.value && form.password !== form.confirmPassword) {
     error.value = 'رمز عبور و تکرار آن یکسان نیستند'
+    await nextTick()
+    confirmPasswordInput.value?.focus()
     return
   }
 
@@ -54,39 +81,53 @@ async function submitPassword() {
   loading.value = true
 
   try {
-    const data = await routeRequestJson<unknown>('/api/auth/setup-password', {
-      method: 'POST',
-      body: JSON.stringify({ password: form.password }),
-      errorContext: {
-        surface: 'auth',
-        scope: 'form',
-        operation: 'submit',
-        fallbackMessage: 'خطا در ثبت رمز عبور',
-      },
-    })
-    if (
-      !data
-      || typeof data !== 'object'
-      || typeof (data as Record<string, unknown>).detail !== 'string'
-      || !(data as Record<string, string>).detail.trim()
-    ) {
-      throw new Error('پاسخ ثبت رمز عبور کامل نیست.')
+    if (!successfulSetupReceipt.value) {
+      const data = await routeRequestJson<unknown>('/api/auth/setup-password', {
+        method: 'POST',
+        body: JSON.stringify({ password: form.password }),
+        errorContext: {
+          surface: 'auth',
+          scope: 'form',
+          operation: 'submit',
+          fallbackMessage: 'خطا در ثبت رمز عبور',
+        },
+      })
+      const detail =
+        data && typeof data === 'object' ? (data as Record<string, unknown>).detail : null
+      if (typeof detail !== 'string' || !detail.trim()) {
+        throw new Error('پاسخ ثبت رمز عبور کامل نیست.')
+      }
+
+      successfulSetupReceipt.value = detail.trim()
+      showPassword.value = false
+      showConfirmPassword.value = false
     }
 
-    router.replace('/')
+    try {
+      assertSuccessfulNavigation(await router.replace('/'))
+    } catch {
+      error.value = 'رمز عبور ثبت شد، اما ورود به سامانه اکنون ممکن نشد. دوباره تلاش کنید.'
+      return
+    }
+
+    form.password = ''
+    form.confirmPassword = ''
+    successfulSetupReceipt.value = null
   } catch (cause: unknown) {
     if (isAppHttpError(cause) && cause.status === 405) {
-      error.value = 'خطای دسترسی سیستمی: Method Not Allowed. مسیر API درست نیست.'
+      error.value = 'ثبت رمز عبور اکنون ممکن نشد. دوباره تلاش کنید.'
     } else if (isAppHttpError(cause)) {
-      error.value = cause.status !== null && cause.status >= 500
-        ? cause.presentation.message
-        : (cause.detail || 'خطا در ثبت رمز عبور')
+      error.value =
+        cause.status !== null && cause.status >= 500
+          ? cause.presentation.message
+          : cause.detail || 'خطا در ثبت رمز عبور'
     } else if (cause instanceof SyntaxError) {
       error.value = 'ثبت رمز عبور اکنون ممکن نشد. دوباره تلاش کنید.'
     } else {
-      error.value = cause instanceof Error && /^[\u0600-\u06ff]/u.test(cause.message)
-        ? cause.message
-        : 'ثبت رمز عبور اکنون ممکن نشد. دوباره تلاش کنید.'
+      error.value =
+        cause instanceof Error && /^[\u0600-\u06ff]/u.test(cause.message)
+          ? cause.message
+          : 'ثبت رمز عبور اکنون ممکن نشد. دوباره تلاش کنید.'
     }
   } finally {
     submitPending = false
@@ -96,220 +137,99 @@ async function submitPassword() {
 </script>
 
 <template>
-  <AppPage narrow>
-    <div class="setup-password-view">
-      <AppPageHeader
-        eyebrow="امنیت حساب"
-        title="تنظیم رمز عبور مدیر"
-        description="برای ورود امن از دستگاه‌های جدید، یک رمز عبور اختصاصی و قوی برای حساب خود تعریف کنید."
-      />
-
-      <AppCard class="setup-password-card">
-        <div class="setup-password-intro">
-          <span class="setup-password-icon" aria-hidden="true">
-            <ShieldCheck :size="28" />
-          </span>
-          <div class="setup-password-copy">
-            <strong>رمز عبور جدید</strong>
-            <p>این رمز فقط برای ورودهای مدیریتی و نشست‌های جدید استفاده می‌شود.</p>
-          </div>
-        </div>
-
-        <form class="setup-password-form" @submit.prevent="submitPassword">
-          <AppFormField label="رمز عبور جدید" :error="passwordError">
-            <template #default="{ id, describedby, invalid }">
-              <div class="password-field">
-                <AppInput
-                  :id="id"
-                  v-model="form.password"
-                  :invalid="invalid"
-                  :aria-describedby="describedby"
-                  :type="showPassword ? 'text' : 'password'"
-                  dir="ltr"
-                  placeholder="••••••••"
-                />
-                <button
-                  type="button"
-                  class="password-toggle"
-                  :aria-label="showPassword ? 'پنهان کردن رمز عبور' : 'نمایش رمز عبور'"
-                  @click="showPassword = !showPassword"
-                >
-                  <EyeOff v-if="showPassword" :size="18" />
-                  <Eye v-else :size="18" />
-                </button>
-                <span class="password-leading" aria-hidden="true">
-                  <LockKeyhole :size="18" />
-                </span>
-              </div>
-            </template>
-          </AppFormField>
-
-          <div class="password-rules" aria-label="الزامات امنیتی رمز عبور">
-            <AppStatusBadge
-              v-for="rule in passwordChecks"
-              :key="rule.key"
-              :tone="rule.passed ? 'success' : 'neutral'"
+  <AuthFlowShell
+    focused
+    title="تنظیم رمز عبور"
+    description="برای تکمیل گیت امنیتی، یک رمز قوی تعریف کنید. پس از ثبت موفق وارد سامانه می‌شوید."
+  >
+    <form class="ui-v2-auth-password-form" @submit.prevent="submitPassword">
+      <AppFormField label="رمز عبور جدید" :error="passwordError">
+        <template #default="{ id, describedby, invalid }">
+          <div class="ui-v2-auth-password-field">
+            <AppInput
+              ref="passwordInput"
+              :id="id"
+              v-model="form.password"
+              :invalid="invalid"
+              :aria-describedby="describedby"
+              :type="showPassword ? 'text' : 'password'"
+              dir="ltr"
+              placeholder="••••••••"
+              autocomplete="new-password"
+              autofocus
+              :disabled="loading || setupSucceeded"
+            />
+            <button
+              type="button"
+              class="ui-v2-auth-password-toggle"
+              :disabled="loading || setupSucceeded"
+              :aria-label="showPassword ? 'پنهان کردن رمز عبور' : 'نمایش رمز عبور'"
+              @click="showPassword = !showPassword"
             >
-              {{ rule.label }}
-            </AppStatusBadge>
+              <EyeOff v-if="showPassword" :size="18" />
+              <Eye v-else :size="18" />
+            </button>
           </div>
+        </template>
+      </AppFormField>
 
-          <AppFormField label="تکرار رمز عبور جدید" :error="confirmError">
-            <template #default="{ id, describedby, invalid }">
-              <div class="password-field">
-                <AppInput
-                  :id="id"
-                  v-model="form.confirmPassword"
-                  :invalid="invalid"
-                  :aria-describedby="describedby"
-                  :type="showConfirmPassword ? 'text' : 'password'"
-                  dir="ltr"
-                  placeholder="••••••••"
-                />
-                <button
-                  type="button"
-                  class="password-toggle"
-                  :aria-label="showConfirmPassword ? 'پنهان کردن تکرار رمز عبور' : 'نمایش تکرار رمز عبور'"
-                  @click="showConfirmPassword = !showConfirmPassword"
-                >
-                  <EyeOff v-if="showConfirmPassword" :size="18" />
-                  <Eye v-else :size="18" />
-                </button>
-                <span class="password-leading" aria-hidden="true">
-                  <LockKeyhole :size="18" />
-                </span>
-              </div>
-            </template>
-          </AppFormField>
+      <div
+        class="ui-v2-auth-password-rules"
+        aria-label="الزامات امنیتی رمز عبور"
+        aria-live="polite"
+      >
+        <AppStatusBadge
+          v-for="rule in passwordChecks"
+          :key="rule.key"
+          :tone="passwordRuleTone(rule.passed)"
+        >
+          {{ rule.label }} — {{ passwordRuleState(rule.passed) }}
+        </AppStatusBadge>
+      </div>
 
-          <div v-if="error" class="setup-password-error" role="alert">
-            {{ error }}
+      <AppFormField label="تکرار رمز عبور جدید" :error="confirmError">
+        <template #default="{ id, describedby, invalid }">
+          <div class="ui-v2-auth-password-field">
+            <AppInput
+              ref="confirmPasswordInput"
+              :id="id"
+              v-model="form.confirmPassword"
+              :invalid="invalid"
+              :aria-describedby="describedby"
+              :type="showConfirmPassword ? 'text' : 'password'"
+              dir="ltr"
+              placeholder="••••••••"
+              autocomplete="new-password"
+              :disabled="loading || setupSucceeded"
+            />
+            <button
+              type="button"
+              class="ui-v2-auth-password-toggle"
+              :disabled="loading || setupSucceeded"
+              :aria-label="
+                showConfirmPassword ? 'پنهان کردن تکرار رمز عبور' : 'نمایش تکرار رمز عبور'
+              "
+              @click="showConfirmPassword = !showConfirmPassword"
+            >
+              <EyeOff v-if="showConfirmPassword" :size="18" />
+              <Eye v-else :size="18" />
+            </button>
           </div>
+        </template>
+      </AppFormField>
 
-          <AppButton
-            type="submit"
-            block
-            :loading="loading"
-            :disabled="loading || !isPasswordValid || Boolean(confirmError)"
-          >
-            ثبت و ورود
-          </AppButton>
-        </form>
-      </AppCard>
-    </div>
-  </AppPage>
+      <div v-if="error" class="ui-v2-auth-error" role="alert">
+        {{ error }}
+      </div>
+
+      <AppButton
+        type="submit"
+        block
+        :loading="loading"
+        :disabled="loading || (!setupSucceeded && (!isPasswordValid || Boolean(confirmError)))"
+      >
+        {{ setupSucceeded ? 'تلاش دوباره برای ورود' : 'ثبت و ورود' }}
+      </AppButton>
+    </form>
+  </AuthFlowShell>
 </template>
-
-<style scoped>
-.setup-password-view {
-  display: flex;
-  flex-direction: column;
-  gap: var(--ds-section-gap);
-  min-height: 100%;
-}
-
-.setup-password-card {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-}
-
-.setup-password-intro {
-  display: flex;
-  align-items: flex-start;
-  gap: 0.85rem;
-}
-
-.setup-password-icon {
-  width: 3rem;
-  height: 3rem;
-  border-radius: 0.9rem;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--ds-primary-50);
-  color: var(--ds-primary-700);
-  flex: 0 0 auto;
-}
-
-.setup-password-copy {
-  display: grid;
-  gap: 0.2rem;
-}
-
-.setup-password-copy strong {
-  color: var(--ds-text-primary);
-  font-size: var(--ds-font-md);
-  font-weight: 900;
-}
-
-.setup-password-copy p {
-  margin: 0;
-  color: var(--ds-text-secondary);
-  font-size: var(--ds-font-sm);
-  line-height: 1.75;
-}
-
-.setup-password-form {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-}
-
-.password-field {
-  position: relative;
-}
-
-.password-field :deep(.ui-input) {
-  padding-left: 5.25rem;
-  padding-right: 2.75rem;
-  text-align: left;
-}
-
-.password-leading {
-  position: absolute;
-  top: 50%;
-  right: 0.9rem;
-  transform: translateY(-50%);
-  color: var(--ds-text-placeholder);
-  pointer-events: none;
-}
-
-.password-toggle {
-  position: absolute;
-  top: 50%;
-  left: 0.75rem;
-  transform: translateY(-50%);
-  width: 2rem;
-  height: 2rem;
-  border: none;
-  border-radius: 999px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  background: transparent;
-  color: var(--ds-text-muted);
-  cursor: pointer;
-}
-
-.password-toggle:focus-visible {
-  outline: 3px solid rgba(245, 158, 11, 0.22);
-  outline-offset: 2px;
-}
-
-.password-rules {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.45rem;
-}
-
-.setup-password-error {
-  padding: 0.85rem 1rem;
-  border-radius: var(--ds-radius-md);
-  background: var(--ds-danger-50);
-  border: 1px solid var(--ds-danger-200);
-  color: var(--ds-danger-700);
-  font-size: var(--ds-font-sm);
-  line-height: 1.7;
-}
-</style>

@@ -150,8 +150,10 @@ class InvitationsRouterTests(unittest.IsolatedAsyncioTestCase):
                 admin=admin,
             )
 
-        self.assertEqual(result["token"], "INV-EXISTING")
+        self.assertNotIn("token", result)
+        self.assertEqual(result["short_code"], "SHORT123")
         self.assertEqual(result["link"], "https://t.me/test_bot?start=INV-EXISTING")
+        self.assertEqual(result["web_link"], "https://frontend.test/i/SHORT123")
         self.assertEqual(result["short_link"], "https://frontend.test/i/SHORT123")
         db.commit.assert_awaited_once()
         self.assertEqual(db.added, [])
@@ -218,9 +220,10 @@ class InvitationsRouterTests(unittest.IsolatedAsyncioTestCase):
             mobile="09120000000",
             account_name="user1",
             bot_link="https://t.me/test_bot?start=INV-NEW",
-            web_link="https://frontend.test/register?token=INV-NEW",
+            web_link="https://frontend.test/i/SHORTNEW",
         )
-        self.assertEqual(result["token"], "INV-NEW")
+        self.assertNotIn("token", result)
+        self.assertEqual(result["short_code"], "SHORTNEW")
         self.assertEqual(result["link"], "https://t.me/test_bot?start=INV-NEW")
         self.assertEqual(result["short_link"], "https://frontend.test/i/SHORTNEW")
         self.assertEqual(result["expires_at"], expected_expiry)
@@ -234,7 +237,7 @@ class InvitationsRouterTests(unittest.IsolatedAsyncioTestCase):
             role=UserRole.WATCH,
             kind=InvitationKind.STANDARD,
             token="INV-PENDING",
-            short_code="SHORT7",
+            short_code="SHORT007",
             is_used=False,
             expires_at=datetime.utcnow() + timedelta(hours=1),
             created_at=datetime.utcnow(),
@@ -266,8 +269,9 @@ class InvitationsRouterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0]["id"], 7)
         self.assertEqual(result[0]["account_name"], "user1")
-        self.assertEqual(result[0]["web_link"], "https://frontend.test/register?token=INV-PENDING")
-        self.assertEqual(result[0]["short_link"], "https://frontend.test/i/SHORT7")
+        self.assertEqual(result[0]["web_link"], "https://frontend.test/i/SHORT007")
+        self.assertEqual(result[0]["short_link"], "https://frontend.test/i/SHORT007")
+        self.assertNotIn("token", result[0])
         self.assertIsNone(result[0]["bot_link"])
         self.assertFalse(result[0]["bot_available"])
         self.assertTrue(result[0]["web_available"])
@@ -327,7 +331,7 @@ class InvitationsRouterTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_lookup_invitation_handles_error_states_and_success(self):
         with self.assertRaises(HTTPException) as exc_info:
-            await lookup_invitation("SHORT", db=FakeDB([FakeExecuteResult(None)]))
+            await lookup_invitation("SHORT001", db=FakeDB([FakeExecuteResult(None)]))
         self.assertEqual(exc_info.exception.status_code, 404)
         self.assertEqual(
             exc_info.exception.headers["Cache-Control"],
@@ -336,21 +340,27 @@ class InvitationsRouterTests(unittest.IsolatedAsyncioTestCase):
 
         used = SimpleNamespace(is_used=True, expires_at=datetime.utcnow() + timedelta(minutes=5), token="INV")
         with self.assertRaises(HTTPException) as exc_info:
-            await lookup_invitation("SHORT", db=FakeDB([FakeExecuteResult(used)]))
+            await lookup_invitation("SHORT001", db=FakeDB([FakeExecuteResult(used)]))
         self.assertEqual(exc_info.exception.status_code, 400)
         self.assertEqual(exc_info.exception.detail, "Invitation already used")
 
         expired = SimpleNamespace(is_used=False, expires_at=datetime.utcnow() - timedelta(minutes=5), token="INV")
         with self.assertRaises(HTTPException) as exc_info:
-            await lookup_invitation("SHORT", db=FakeDB([FakeExecuteResult(expired)]))
+            await lookup_invitation("SHORT001", db=FakeDB([FakeExecuteResult(expired)]))
         self.assertEqual(exc_info.exception.status_code, 400)
         self.assertEqual(exc_info.exception.detail, "Invitation expired")
 
         valid = SimpleNamespace(is_used=False, expires_at=datetime.utcnow() + timedelta(minutes=5), token="INV-OK")
-        result = await lookup_invitation("SHORT", db=FakeDB([FakeExecuteResult(valid)]))
+        result = await lookup_invitation("SHORT001", db=FakeDB([FakeExecuteResult(valid)]))
         self.assertEqual(result, {"token": "INV-OK"})
 
-    async def test_lookup_and_validate_invitation_respect_accountant_pending_relation(self):
+        invalid_db = FakeDB([FakeExecuteResult(valid)])
+        with self.assertRaises(HTTPException) as exc_info:
+            await lookup_invitation("INV-raw-bearer", db=invalid_db)
+        self.assertEqual(exc_info.exception.status_code, 404)
+        self.assertEqual(len(invalid_db.execute_results), 1)
+
+    async def test_lookup_invitation_respects_accountant_pending_relation(self):
         accountant_invitation = SimpleNamespace(
             is_used=False,
             expires_at=datetime.utcnow() + timedelta(minutes=5),
@@ -365,26 +375,10 @@ class InvitationsRouterTests(unittest.IsolatedAsyncioTestCase):
             new=AsyncMock(return_value=None),
         ):
             with self.assertRaises(HTTPException) as exc_info:
-                await lookup_invitation("SHORT", db=FakeDB([FakeExecuteResult(accountant_invitation)]))
+                await lookup_invitation("ACCT0001", db=FakeDB([FakeExecuteResult(accountant_invitation)]))
         self.assertEqual(exc_info.exception.status_code, 400)
 
-        with patch(
-            "api.routers.invitations.get_pending_accountant_relation_by_invitation_token",
-            new=AsyncMock(return_value=SimpleNamespace(id=1)),
-        ):
-            result = await validate_invitation("ACCT-OK", db=FakeDB([FakeExecuteResult(accountant_invitation)]))
-        self.assertTrue(result["valid"])
-
-        with patch(
-            "api.routers.invitations.get_pending_accountant_relation_by_invitation_token",
-            new=AsyncMock(return_value=None),
-        ):
-            with self.assertRaises(HTTPException) as exc_info:
-                await validate_invitation("ACCT-OK", db=FakeDB([FakeExecuteResult(accountant_invitation)]))
-        self.assertEqual(exc_info.exception.status_code, 400)
-        self.assertEqual(exc_info.exception.detail, "Invitation expired")
-
-    async def test_lookup_and_validate_invitation_respect_customer_pending_relation(self):
+    async def test_lookup_invitation_respects_customer_pending_relation(self):
         customer_invitation = SimpleNamespace(
             is_used=False,
             expires_at=datetime.utcnow() + timedelta(minutes=5),
@@ -399,62 +393,16 @@ class InvitationsRouterTests(unittest.IsolatedAsyncioTestCase):
             new=AsyncMock(return_value=None),
         ):
             with self.assertRaises(HTTPException) as exc_info:
-                await lookup_invitation("SHORT", db=FakeDB([FakeExecuteResult(customer_invitation)]))
+                await lookup_invitation("CUST0001", db=FakeDB([FakeExecuteResult(customer_invitation)]))
         self.assertEqual(exc_info.exception.status_code, 400)
 
-        with patch(
-            "api.routers.invitations.get_pending_customer_relation_by_invitation_token",
-            new=AsyncMock(return_value=SimpleNamespace(id=1)),
-        ):
-            result = await validate_invitation("CUST-OK", db=FakeDB([FakeExecuteResult(customer_invitation)]))
-        self.assertTrue(result["valid"])
-
-        with patch(
-            "api.routers.invitations.get_pending_customer_relation_by_invitation_token",
-            new=AsyncMock(return_value=None),
-        ):
-            with self.assertRaises(HTTPException) as exc_info:
-                await validate_invitation("CUST-OK", db=FakeDB([FakeExecuteResult(customer_invitation)]))
-        self.assertEqual(exc_info.exception.status_code, 400)
-        self.assertEqual(exc_info.exception.detail, "Invitation expired")
-
-    async def test_validate_invitation_handles_error_states_and_success(self):
+    async def test_validate_invitation_is_unconditionally_retired_without_db_access(self):
         with self.assertRaises(HTTPException) as exc_info:
-            await validate_invitation("INV", db=FakeDB([FakeExecuteResult(None)]))
-        self.assertEqual(exc_info.exception.status_code, 404)
+            await validate_invitation("INV-raw-bearer")
+        self.assertEqual(exc_info.exception.status_code, 410)
         self.assertEqual(
             exc_info.exception.headers["Cache-Control"],
             "no-store, max-age=0",
-        )
-
-        used = SimpleNamespace(is_used=True, expires_at=datetime.utcnow() + timedelta(minutes=5))
-        with self.assertRaises(HTTPException) as exc_info:
-            await validate_invitation("INV", db=FakeDB([FakeExecuteResult(used)]))
-        self.assertEqual(exc_info.exception.status_code, 400)
-        self.assertEqual(exc_info.exception.detail, "Invitation already used")
-
-        expired = SimpleNamespace(is_used=False, expires_at=datetime.utcnow() - timedelta(minutes=5))
-        with self.assertRaises(HTTPException) as exc_info:
-            await validate_invitation("INV", db=FakeDB([FakeExecuteResult(expired)]))
-        self.assertEqual(exc_info.exception.status_code, 400)
-        self.assertEqual(exc_info.exception.detail, "Invitation expired")
-
-        valid = SimpleNamespace(
-            is_used=False,
-            expires_at=datetime.utcnow() + timedelta(minutes=5),
-            account_name="user1",
-            mobile_number="09120000000",
-            role=UserRole.WATCH,
-        )
-        result = await validate_invitation("INV", db=FakeDB([FakeExecuteResult(valid)]))
-        self.assertEqual(
-            result,
-            {
-                "valid": True,
-                "account_name": "user1",
-                "mobile_number": "0912****000",
-                "role": UserRole.WATCH,
-            },
         )
 
     async def test_v2_public_contract_is_role_aware_and_masks_pending_identity(self):
@@ -480,8 +428,8 @@ class InvitationsRouterTests(unittest.IsolatedAsyncioTestCase):
             "api.routers.invitations.get_pending_customer_relation_by_invitation_token",
             new=AsyncMock(return_value=relation),
         ):
-            result = await validate_invitation(
-                pending.token,
+            result = await lookup_invitation(
+                "CUST0001",
                 db=FakeDB([FakeExecuteResult(pending)]),
             )
 
@@ -511,23 +459,18 @@ class InvitationsRouterTests(unittest.IsolatedAsyncioTestCase):
             "invitation_contract_v2_enabled",
             True,
         ):
-            lookup = await lookup_invitation(
-                "SHORT-COMPLETED",
-                db=FakeDB([FakeExecuteResult(completed)]),
-            )
-            validation = await validate_invitation(
-                completed.token,
+            result = await lookup_invitation(
+                "DONE0001",
                 db=FakeDB([FakeExecuteResult(completed)]),
             )
 
-        for result in (lookup, validation):
-            self.assertFalse(result["valid"])
-            self.assertEqual(result["state"], "completed")
-            self.assertFalse(result["bot_available"])
-            self.assertFalse(result["web_available"])
-            self.assertIsNone(result["token"])
-            self.assertIsNone(result["account_name"])
-            self.assertIsNone(result["mobile_number"])
+        self.assertFalse(result["valid"])
+        self.assertEqual(result["state"], "completed")
+        self.assertFalse(result["bot_available"])
+        self.assertFalse(result["web_available"])
+        self.assertIsNone(result["token"])
+        self.assertIsNone(result["account_name"])
+        self.assertIsNone(result["mobile_number"])
 
     async def test_v2_expired_invitation_returns_safe_terminal_state(self):
         expired = SimpleNamespace(
@@ -549,7 +492,7 @@ class InvitationsRouterTests(unittest.IsolatedAsyncioTestCase):
             True,
         ):
             result = await lookup_invitation(
-                "SHORT-EXPIRED",
+                "EXPR0001",
                 db=FakeDB([FakeExecuteResult(expired)]),
             )
 

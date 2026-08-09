@@ -102,6 +102,8 @@ class RenderReleaseArtifactsTests(unittest.TestCase):
         self.assertIn('add_header X-Static-Delivery "nginx" always;', nginx)
         self.assertIn('add_header Cache-Control "public, max-age=31536000, immutable" always;', nginx)
         self.assertIn("location @stale_js_chunk", nginx)
+        self.assertIn("return 410;", nginx)
+        self.assertNotIn("window.location.reload", nginx)
         self.assertIn("location /uploads/", nginx)
         self.assertIn("return 404;", nginx)
         self.assertIn("upstream trading_bot_api", nginx)

@@ -17,19 +17,22 @@ function stubMatchMedia(matches: boolean) {
 }
 
 function setStandalone(standalone: boolean) {
-  Object.defineProperty(window.navigator, 'standalone', {
+  Object.defineProperty(window.navigator as Navigator & { standalone?: boolean }, 'standalone', {
     configurable: true,
     value: standalone,
   })
 }
 
-function makeBeforeInstallPromptEvent(outcome: 'accepted' | 'dismissed') {
+function makeBeforeInstallPromptEvent(
+  outcome: 'accepted' | 'dismissed',
+  promptImplementation: () => Promise<void> = () => Promise.resolve(),
+) {
   const event = new Event('beforeinstallprompt') as Event & {
     prompt: ReturnType<typeof vi.fn>
     userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>
     preventDefault: ReturnType<typeof vi.fn>
   }
-  event.prompt = vi.fn()
+  event.prompt = vi.fn(promptImplementation)
   event.userChoice = Promise.resolve({ outcome })
   event.preventDefault = vi.fn()
   return event
@@ -44,7 +47,7 @@ describe('pwaInstall', () => {
   beforeEach(() => {
     stubMatchMedia(false)
     setStandalone(false)
-    delete (window as any).deferredPrompt
+    delete (window as Window & { deferredPrompt?: unknown }).deferredPrompt
   })
 
   it('marks the app as installed immediately when already running standalone', async () => {
@@ -73,12 +76,12 @@ describe('pwaInstall', () => {
     window.dispatchEvent(installEvent)
     expect(installEvent.preventDefault).toHaveBeenCalled()
     expect(pwa.isInstallable.value).toBe(true)
-    expect((window as any).deferredPrompt).toBe(installEvent)
+    expect((window as Window & { deferredPrompt?: unknown }).deferredPrompt).toBe(installEvent)
 
     await expect(pwa.installApp()).resolves.toBe(true)
     expect(installEvent.prompt).toHaveBeenCalledTimes(1)
     expect(pwa.isInstallable.value).toBe(false)
-    expect((window as any).deferredPrompt).toBeNull()
+    expect((window as Window & { deferredPrompt?: unknown }).deferredPrompt).toBeNull()
 
     window.dispatchEvent(new Event('appinstalled'))
     expect(pwa.isInstalled.value).toBe(true)
@@ -107,5 +110,20 @@ describe('pwaInstall', () => {
 
     await expect(pwa.installApp()).resolves.toBe(false)
     expect(installEvent.prompt).toHaveBeenCalledTimes(1)
+  })
+
+  it('contains a rejected browser prompt and clears the single-use event', async () => {
+    const module = await importFreshModule()
+    const pwa = module.usePWAInstall()
+    const installEvent = makeBeforeInstallPromptEvent('accepted', () =>
+      Promise.reject(new Error('browser prompt unavailable')),
+    )
+    window.dispatchEvent(installEvent)
+
+    await expect(pwa.installApp()).resolves.toBe(false)
+
+    expect(installEvent.prompt).toHaveBeenCalledTimes(1)
+    expect(pwa.isInstallable.value).toBe(false)
+    expect((window as Window & { deferredPrompt?: unknown }).deferredPrompt).toBeNull()
   })
 })

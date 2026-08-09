@@ -147,7 +147,7 @@ describe('Design System V2 CSS contract', () => {
 
     expect(selectors.length).toBeGreaterThan(0)
     for (const selector of selectors) {
-      const normalizedSelector = selector.replaceAll("'", '"')
+      const normalizedSelector = selector.split("'").join('"')
       expect(normalizedSelector).toContain('[data-ui-system="v2"]')
       expect(normalizedSelector).toContain('[data-ui-system="v2-portal"]')
     }
@@ -159,7 +159,174 @@ describe('Design System V2 CSS contract', () => {
     expect(tokenCss).toMatch(
       /@media \(prefers-reduced-motion: reduce\)[\s\S]*--ui-v2-motion-micro: 1ms;[\s\S]*--ui-v2-motion-state: 1ms;/,
     )
-    expect(componentCss.replaceAll("'", '"')).toContain('[data-ui-v2-motion="decorative"]')
+    expect(componentCss.split("'").join('"')).toContain('[data-ui-v2-motion="decorative"]')
+  })
+
+  it('keeps Stage 3 route, toast, and security-layer motion on the reduced-motion tokens', () => {
+    const rules: import('postcss').Rule[] = []
+    postcss.parse(componentCss).walkRules((rule) => {
+      rules.push(rule)
+    })
+
+    for (const selectorFragment of [
+      '.app-route-v2-scope.ui-v2-route-fade-enter-active',
+      '.ui-v2-toast-enter-active',
+      '.ui-v2-session-fade-enter-active',
+    ]) {
+      const rule = rules.find((candidate) => candidate.selector.includes(selectorFragment))
+      expect(rule?.type).toBe('rule')
+      const declarations = Object.fromEntries(
+        rule?.nodes.filter((node) => node.type === 'decl').map((node) => [node.prop, node.value]) ??
+          [],
+      )
+      expect(declarations).toMatchObject({
+        'transition-property': 'opacity',
+        'transition-duration': 'var(--ui-v2-motion-state)',
+      })
+    }
+  })
+
+  it('raises V2 bottom-navigation labels and controls to canonical legibility targets', () => {
+    const rules: import('postcss').Rule[] = []
+    postcss.parse(componentCss).walkRules((rule) => {
+      rules.push(rule)
+    })
+
+    const navigationItemRule = rules.find(
+      (rule) =>
+        rule.selector.includes('.ui-v2-bottom-nav-item.ui-v2-bottom-nav-item') &&
+        !rule.selector.includes(':focus'),
+    )
+    const labelRule = rules.find((rule) =>
+      rule.selector.includes('.ui-v2-bottom-nav-label.ui-v2-bottom-nav-label'),
+    )
+    const reducedMotionRule = rules.find(
+      (rule) =>
+        rule.parent?.type === 'atrule' &&
+        rule.parent.params === '(prefers-reduced-motion: reduce)' &&
+        rule.selector.includes('.ui-v2-bottom-nav-item'),
+    )
+
+    const itemDeclarations = Object.fromEntries(
+      navigationItemRule?.nodes
+        .filter((node) => node.type === 'decl')
+        .map((node) => [node.prop, node.value]) ?? [],
+    )
+    const labelDeclarations = Object.fromEntries(
+      labelRule?.nodes
+        .filter((node) => node.type === 'decl')
+        .map((node) => [node.prop, node.value]) ?? [],
+    )
+    const reducedMotionDeclarations = Object.fromEntries(
+      reducedMotionRule?.nodes
+        .filter((node) => node.type === 'decl')
+        .map((node) => [node.prop, node.value]) ?? [],
+    )
+
+    expect(navigationItemRule?.selector.split("'").join('"')).toContain(
+      '[data-ui-system="v2"][data-ui-system="v2"]',
+    )
+    expect(itemDeclarations).toMatchObject({
+      'min-width': 'var(--ui-v2-size-target-min)',
+      'min-height': 'var(--ui-v2-size-target-min)',
+      'transition-duration': 'var(--ui-v2-motion-micro)',
+    })
+    expect(labelDeclarations).toMatchObject({
+      'font-size': 'var(--ui-v2-type-label-small-size)',
+      'line-height': 'var(--ui-v2-type-label-small-line)',
+    })
+    expect(reducedMotionDeclarations).toMatchObject({
+      'transition-duration': 'var(--ui-v2-motion-micro)',
+    })
+  })
+
+  it('keeps PWA completion actions on the canonical 48-pixel CTA target', () => {
+    let actionRule: import('postcss').Rule | undefined
+    postcss.parse(componentCss).walkRules((rule) => {
+      if (!actionRule && rule.selector.includes('.ui-v2-pwa-actions .ui-button')) {
+        actionRule = rule
+      }
+    })
+    const declarations = Object.fromEntries(
+      actionRule?.nodes
+        .filter((node) => node.type === 'decl')
+        .map((node) => [node.prop, node.value]) ?? [],
+    )
+
+    expect(declarations).toMatchObject({
+      'min-height': 'var(--ui-v2-size-cta-min)',
+    })
+  })
+
+  it('removes the empty Home PWA wrapper from flex layout flow', () => {
+    let emptySectionRule: import('postcss').Rule | undefined
+    postcss.parse(componentCss).walkRules((rule) => {
+      if (!emptySectionRule && rule.selector.includes('.ui-v2-pwa-section:empty')) {
+        emptySectionRule = rule
+      }
+    })
+    const declarations = Object.fromEntries(
+      emptySectionRule?.nodes
+        .filter((node) => node.type === 'decl')
+        .map((node) => [node.prop, node.value]) ?? [],
+    )
+
+    expect(emptySectionRule?.selector).toContain('.ui-v2-pwa-section:empty')
+    expect(declarations).toMatchObject({ display: 'none' })
+  })
+
+  it('keeps the V2 security, connection, toast, and navigation layers in contract order', () => {
+    const rules: import('postcss').Rule[] = []
+    postcss.parse(componentCss).walkRules((rule) => {
+      rules.push(rule)
+    })
+
+    const zIndexFor = (selectorFragment: string) => {
+      const rule = rules.find((candidate) => candidate.selector.includes(selectorFragment))
+      const declaration = rule?.nodes.find(
+        (node): node is import('postcss').Declaration =>
+          node.type === 'decl' && node.prop === 'z-index',
+      )
+      return declaration ? Number.parseInt(declaration.value, 10) : Number.NaN
+    }
+
+    const security = zIndexFor('.ui-v2-session-layer')
+    const connection = zIndexFor('.ui-v2-connection-banner')
+    const toast = zIndexFor('.ui-v2-toast-layer')
+
+    expect(Number.isFinite(security)).toBe(true)
+    expect(security).toBeGreaterThan(connection)
+    expect(connection).toBeGreaterThan(toast)
+    expect(toast).toBeGreaterThan(50)
+  })
+
+  it('overrides legacy white header content with readable V2 session tokens', () => {
+    const rules: import('postcss').Rule[] = []
+    postcss.parse(componentCss).walkRules((rule) => {
+      rules.push(rule)
+    })
+
+    const titleRule = rules.find(
+      (rule) =>
+        rule.selector.includes('.ui-v2-session-header.ui-v2-session-header') &&
+        rule.selector.trim().endsWith('h2'),
+    )
+    const iconRule = rules.find((rule) =>
+      rule.selector.includes('.ui-v2-session-icon.ui-v2-session-icon'),
+    )
+    const declarations = (rule: import('postcss').Rule | undefined) =>
+      Object.fromEntries(
+        rule?.nodes.filter((node) => node.type === 'decl').map((node) => [node.prop, node.value]) ??
+          [],
+      )
+
+    expect(declarations(titleRule)).toMatchObject({
+      color: 'var(--ui-v2-color-text-strong)',
+      'font-size': 'var(--ui-v2-type-section-size)',
+    })
+    expect(declarations(iconRule)).toMatchObject({
+      color: 'var(--ui-v2-color-icon-brand)',
+    })
   })
 
   it('wins the legacy focus cascade with an explicit three-pixel V2 ring', () => {
@@ -171,7 +338,7 @@ describe('Design System V2 CSS contract', () => {
     expect(focusRule?.type).toBe('rule')
     if (!focusRule) return
 
-    const normalizedSelector = focusRule.selector.replaceAll("'", '"')
+    const normalizedSelector = focusRule.selector.split("'").join('"')
     expect(normalizedSelector).toContain('[data-ui-system="v2"][data-ui-system="v2"]')
     expect(normalizedSelector).toContain('[data-ui-system="v2-portal"][data-ui-system="v2-portal"]')
 

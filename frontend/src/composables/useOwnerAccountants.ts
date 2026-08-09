@@ -12,10 +12,10 @@ export interface AccountantRelation {
   duty_description: string | null
   mobile_number: string
   status: RelationStatus
-  invitation_token: string
-  registration_link: string | null
+  registration_link?: string | null
   bot_registration_link?: string | null
   web_registration_link?: string | null
+  web_short_link?: string | null
   sms_status?: string | null
   expires_at: string
   activated_at: string | null

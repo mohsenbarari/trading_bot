@@ -44,7 +44,8 @@ class BotStartProfileTokenSuccessTests(unittest.IsolatedAsyncioTestCase):
 
         with patch("bot.handlers.start.public_webapp_url_for_links", return_value="https://app.example"):
             self.assertIn("https://app.example", build_webapp_link_line())
-            self.assertIn("register?token=tok", build_accountant_register_link_line("tok"))
+            self.assertIn("https://app.example/i/ACCT1234", build_accountant_register_link_line("ACCT1234"))
+            self.assertIsNone(build_accountant_register_link_line("ACCT-raw-bearer"))
 
         target_user = SimpleNamespace(id=9)
         profile = SimpleNamespace(target_user=target_user, display_name="target", accountants=())

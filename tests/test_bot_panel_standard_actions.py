@@ -348,9 +348,9 @@ class BotPanelStandardActionsTests(unittest.IsolatedAsyncioTestCase):
                     {
                         "created": True,
                         "sms_sent": False,
-                        "invitation_token": "CUST-test",
+                        "short_code": "CUST0001",
                         "bot_link": "https://t.me/test_bot?start=CUST-test",
-                        "web_link": "https://app.example/register?token=CUST-test",
+                        "web_link": "https://app.example/i/CUST0001",
                     },
                 )
             ),
@@ -375,7 +375,7 @@ class BotPanelStandardActionsTests(unittest.IsolatedAsyncioTestCase):
             },
         )
         self.assertTrue(payload["idempotency_key"].startswith("customer-invite:"))
-        projection_mock.assert_awaited_once_with(owner_user_id=1, invitation_token="CUST-test")
+        projection_mock.assert_awaited_once_with(owner_user_id=1, short_code="CUST0001")
         self.assertTrue(state.cleared)
         result_message = callback.message.answer.await_args_list[0].args[0]
         self.assertIn("لینک تلگرام", result_message)
@@ -403,9 +403,9 @@ class BotPanelStandardActionsTests(unittest.IsolatedAsyncioTestCase):
         response = {
             "created": False,
             "already_pending": True,
-            "invitation_token": "CUST-stale",
+            "short_code": "CUST0002",
             "bot_link": "https://t.me/test_bot?start=CUST-stale",
-            "web_link": "https://app.example/register?token=CUST-stale",
+            "web_link": "https://app.example/i/CUST0002",
         }
 
         with patch("bot.handlers.panel._customer_invite_access_allowed", new=AsyncMock(return_value=(True, None))), patch(

@@ -213,7 +213,7 @@ class CustomersRouterTests(unittest.IsolatedAsyncioTestCase):
             account_name="cust1",
             mobile_number="09120000000",
             token="CUST-token",
-            short_code="SHORTC1",
+            short_code="SHORTC01",
             kind=InvitationKind.CUSTOMER,
             role=UserRole.STANDARD,
             expires_at=relation.expires_at,
@@ -257,10 +257,16 @@ class CustomersRouterTests(unittest.IsolatedAsyncioTestCase):
         ):
             created = await create_my_customer(payload, context=context, db=FakeDB())
 
-        self.assertEqual(created["registration_link"], "https://app.example/register?token=CUST-token")
+        self.assertEqual(created["registration_link"], "https://app.example/i/SHORTC01")
+        self.assertEqual(created["short_code"], "SHORTC01")
+        self.assertNotIn("invitation_token", created)
         self.assertEqual(created["invitation_account_name"], "cust1")
         create_mock.assert_awaited_once()
-        sms_mock.assert_called_once()
+        sms_mock.assert_called_once_with(
+            mobile="09120000000",
+            management_name="مشتری اول",
+            web_link="https://app.example/i/SHORTC01",
+        )
 
         with patch(
             "api.routers.customers.list_owner_customer_relations",
@@ -281,7 +287,9 @@ class CustomersRouterTests(unittest.IsolatedAsyncioTestCase):
             listed = await list_my_customers(context=context, db=FakeDB())
 
         self.assertEqual(len(listed), 1)
-        self.assertEqual(listed[0]["registration_link"], "https://app.example/register?token=CUST-token")
+        self.assertEqual(listed[0]["registration_link"], "https://app.example/i/SHORTC01")
+        self.assertEqual(listed[0]["web_short_link"], "https://app.example/i/SHORTC01")
+        self.assertNotIn("invitation_token", listed[0])
         self.assertEqual(listed[0]["mobile_number"], "09120000000")
         self.assertEqual(listed[0]["sms_status"], InvitationSMSStatus.ACCEPTED)
 
@@ -347,7 +355,7 @@ class CustomersRouterTests(unittest.IsolatedAsyncioTestCase):
         invitation = SimpleNamespace(
             id=31,
             token="CUST-existing",
-            short_code="SHORT31",
+            short_code="SHORT031",
             kind=InvitationKind.CUSTOMER,
             role=UserRole.STANDARD,
             expires_at=datetime.utcnow() + timedelta(days=2),
@@ -387,7 +395,9 @@ class CustomersRouterTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(result.created)
         self.assertTrue(result.already_pending)
         self.assertEqual(result.relation_id, 11)
-        self.assertEqual(result.invitation_token, "CUST-existing")
+        self.assertEqual(result.short_code, "SHORT031")
+        self.assertFalse(hasattr(result, "invitation_token"))
+        self.assertEqual(result.web_link, "https://app.example/i/SHORT031")
         self.assertEqual(existing_relation.sync_version, 5)
         self.assertEqual(invitation.sync_version, 8)
         sms_mock.assert_not_called()
@@ -433,7 +443,7 @@ class CustomersRouterTests(unittest.IsolatedAsyncioTestCase):
         invitation = SimpleNamespace(
             id=32,
             token="CUST-token",
-            short_code="SHORT32",
+            short_code="SHORT032",
             kind=InvitationKind.CUSTOMER,
             role=UserRole.STANDARD,
             expires_at=datetime.utcnow() + timedelta(days=2),
@@ -472,6 +482,8 @@ class CustomersRouterTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result.created)
         self.assertFalse(result.already_pending)
         self.assertFalse(result.sms_sent)
+        self.assertEqual(result.short_code, "SHORT032")
+        self.assertEqual(result.web_link, "https://app.example/i/SHORT032")
         create_mock.assert_awaited_once()
         sms_mock.assert_not_called()
 
@@ -893,7 +905,9 @@ class CustomersRouterTests(unittest.IsolatedAsyncioTestCase):
             "api.routers.customers.public_webapp_url_for_links",
             side_effect=ValueError("invalid public WebApp URL"),
         ), self.assertRaises(ValueError):
-            build_customer_registration_link("token-1")
+            build_customer_registration_link("TOKEN001")
+
+        self.assertIsNone(build_customer_registration_link("CUST-raw-bearer"))
 
         active_relation = SimpleNamespace(
             deleted_at=None,

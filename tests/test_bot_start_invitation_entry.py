@@ -100,7 +100,7 @@ class BotStartInvitationEntryTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIn("نامعتبر یا منقضی", message.answer.await_args.args[0])
 
-        invitation = SimpleNamespace(token="invite-token", mobile_number="09120000000", is_used=False)
+        invitation = SimpleNamespace(token="invite-token", short_code="INVITE01", mobile_number="09120000000", is_used=False)
         message = SimpleNamespace(
             bot=SimpleNamespace(),
             chat=SimpleNamespace(id=13),
@@ -119,9 +119,11 @@ class BotStartInvitationEntryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(state.states, [])
         self.assertIn("لینک دعوت معتبر است", message.answer.await_args.args[0])
         self.assertIn("تکمیل ثبت‌نام در وب اپ", message.answer.await_args.args[0])
+        self.assertIn("https://app.example/i/INVITE01", message.answer.await_args.args[0])
+        self.assertNotIn("invite-token", message.answer.await_args.args[0])
         set_anchor.assert_called_once_with(13, 77)
 
-        used_invitation = SimpleNamespace(token="invite-token", mobile_number="09120000000", is_used=True)
+        used_invitation = SimpleNamespace(token="invite-token", short_code="INVITE01", mobile_number="09120000000", is_used=True)
         message = SimpleNamespace(bot=SimpleNamespace(), chat=SimpleNamespace(id=14), answer=AsyncMock())
         with patch("bot.handlers.start.delete_previous_anchor", new=AsyncMock()), patch(
             "bot.handlers.start.AsyncSessionLocal",
@@ -131,7 +133,7 @@ class BotStartInvitationEntryTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("نامعتبر یا منقضی", message.answer.await_args.args[0])
 
     async def test_handle_start_with_token_redirects_accountant_invitation_to_web_only_flow(self):
-        invitation = SimpleNamespace(token="ACCT-token", mobile_number="09120000000", is_used=False)
+        invitation = SimpleNamespace(token="ACCT-token", short_code="ACCT0001", mobile_number="09120000000", is_used=False)
         message = SimpleNamespace(
             bot=SimpleNamespace(),
             chat=SimpleNamespace(id=13),
@@ -155,6 +157,8 @@ class BotStartInvitationEntryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(state.updated, [])
         self.assertEqual(state.states, [])
         self.assertIn("فقط از طریق وب‌اپ", message.answer.await_args.args[0])
+        self.assertIn("https://app.example/i/ACCT0001", message.answer.await_args.args[0])
+        self.assertNotIn("ACCT-token", message.answer.await_args.args[0])
 
         message = SimpleNamespace(
             bot=SimpleNamespace(),
@@ -172,7 +176,7 @@ class BotStartInvitationEntryTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("نامعتبر یا منقضی", message.answer.await_args.args[0])
 
     async def test_handle_start_with_token_redirects_customer_invitation_to_web_only_flow(self):
-        invitation = SimpleNamespace(token="CUST-token", mobile_number="09120000000", is_used=False)
+        invitation = SimpleNamespace(token="CUST-token", short_code="CUST0001", mobile_number="09120000000", is_used=False)
         message = SimpleNamespace(
             bot=SimpleNamespace(),
             chat=SimpleNamespace(id=16),
@@ -199,6 +203,8 @@ class BotStartInvitationEntryTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("از طریق وب‌اپ", message.answer.await_args.args[0])
         self.assertIn("اتصال تلگرام", message.answer.await_args.args[0])
         self.assertNotIn("دسترسی نخواهد داشت", message.answer.await_args.args[0])
+        self.assertIn("https://app.example/i/CUST0001", message.answer.await_args.args[0])
+        self.assertNotIn("CUST-token", message.answer.await_args.args[0])
 
         message = SimpleNamespace(
             bot=SimpleNamespace(),

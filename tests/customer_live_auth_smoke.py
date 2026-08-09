@@ -252,6 +252,7 @@ def _cleanup_seeded_artifacts(*, token: str, mobile_number: str, owner_account_n
 async def main() -> int:
     seed = _seed_pending_customer_registration()
     token = str(seed['token'])
+    short_code = str(seed['short_code'])
     mobile_number = str(seed['mobile_number'])
     account_name = str(seed['account_name'])
     owner_account_name = str(seed['owner_account_name'])
@@ -263,11 +264,13 @@ async def main() -> int:
         _inject_registration_otp(token)
 
         async with httpx.AsyncClient(base_url=API_BASE_URL, timeout=30.0) as client:
-            validate_response = await client.get(f'/invitations/validate/{token}')
-            validate_response.raise_for_status()
-            validate_payload = validate_response.json()
-            if validate_payload.get('account_name') != account_name:
-                raise AssertionError('Invitation validation returned an unexpected account_name')
+            lookup_response = await client.get(f'/invitations/lookup/{short_code}')
+            lookup_response.raise_for_status()
+            lookup_payload = lookup_response.json()
+            if lookup_payload.get('token') != token:
+                raise AssertionError('Invitation lookup returned an unexpected token')
+            if lookup_payload.get('account_name') != account_name:
+                raise AssertionError('Invitation lookup returned an unexpected account_name')
 
             verify_register_response = await client.post(
                 '/auth/register-otp-verify',

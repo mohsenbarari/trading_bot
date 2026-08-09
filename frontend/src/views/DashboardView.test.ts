@@ -1,12 +1,17 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import DashboardView from './DashboardView.vue'
-import { applyMarketRuntimePatch, resetMarketRuntimeForTests } from '../composables/useMarketRuntime'
+import PWAInstallOverlay from '../components/PWAInstallOverlay.vue'
+import {
+  applyMarketRuntimePatch,
+  resetMarketRuntimeForTests,
+} from '../composables/useMarketRuntime'
 
 const dashboardViewMocks = vi.hoisted(() => ({
   routerPushMock: vi.fn(),
   apiFetchMock: vi.fn(),
   forceLogoutMock: vi.fn(),
+  isAppConnecting: { value: false },
   locationAssignMock: vi.fn(),
   requestTelegramLinkMock: vi.fn(),
   openTelegramLinkMock: vi.fn(),
@@ -28,6 +33,7 @@ vi.mock('../stores/notifications', () => ({
 vi.mock('../utils/auth', () => ({
   apiFetch: dashboardViewMocks.apiFetchMock,
   forceLogout: dashboardViewMocks.forceLogoutMock,
+  isAppConnecting: dashboardViewMocks.isAppConnecting,
 }))
 
 vi.mock('../services/telegramLink', () => ({
@@ -50,30 +56,32 @@ function mockDashboardApi(options: {
   activeSessions?: unknown[]
   failSessionLookup?: boolean
 }) {
-  dashboardViewMocks.apiFetchMock.mockImplementation(async (url: string, requestOptions?: RequestInit) => {
-    if (url === '/api/auth/me') {
-      return makeJsonResponse(options.user)
-    }
-    if (url.startsWith('/api/trades/my?')) {
-      return makeJsonResponse(options.trades || [])
-    }
-    if (url === '/api/commodities/') {
-      return makeJsonResponse(options.commodities || [])
-    }
-    if (url.startsWith('/api/users-public/') && url.includes('/project-users?')) {
-      return makeJsonResponse(options.projectUsers || [])
-    }
-    if (url === '/api/sessions/active') {
-      if (options.failSessionLookup) {
-        throw new Error('session lookup failed')
+  dashboardViewMocks.apiFetchMock.mockImplementation(
+    async (url: string, requestOptions?: RequestInit) => {
+      if (url === '/api/auth/me') {
+        return makeJsonResponse(options.user)
       }
-      return makeJsonResponse(options.activeSessions || [])
-    }
-    if (url.startsWith('/api/sessions/') && requestOptions?.method === 'DELETE') {
-      return makeJsonResponse({ ok: true })
-    }
-    return makeJsonResponse(null)
-  })
+      if (url.startsWith('/api/trades/my?')) {
+        return makeJsonResponse(options.trades || [])
+      }
+      if (url === '/api/commodities/') {
+        return makeJsonResponse(options.commodities || [])
+      }
+      if (url.startsWith('/api/users-public/') && url.includes('/project-users?')) {
+        return makeJsonResponse(options.projectUsers || [])
+      }
+      if (url === '/api/sessions/active') {
+        if (options.failSessionLookup) {
+          throw new Error('session lookup failed')
+        }
+        return makeJsonResponse(options.activeSessions || [])
+      }
+      if (url.startsWith('/api/sessions/') && requestOptions?.method === 'DELETE') {
+        return makeJsonResponse({ ok: true })
+      }
+      return makeJsonResponse(null)
+    },
+  )
 }
 
 async function mountView() {
@@ -89,6 +97,7 @@ describe('DashboardView.vue', () => {
     dashboardViewMocks.routerPushMock.mockReset()
     dashboardViewMocks.apiFetchMock.mockReset()
     dashboardViewMocks.forceLogoutMock.mockReset()
+    dashboardViewMocks.isAppConnecting.value = false
     dashboardViewMocks.locationAssignMock.mockReset()
     dashboardViewMocks.requestTelegramLinkMock.mockReset()
     dashboardViewMocks.openTelegramLinkMock.mockReset()
@@ -104,15 +113,17 @@ describe('DashboardView.vue', () => {
   it('leaves initial loading for a cause-neutral identity error and retries the real request', async () => {
     dashboardViewMocks.apiFetchMock
       .mockRejectedValueOnce(new Error('private transport detail'))
-      .mockResolvedValueOnce(makeJsonResponse({
-        id: 73,
-        full_name: 'کاربر بازیابی‌شده',
-        account_name: 'recovered73',
-        account_status: 'active',
-        global_lock_grace_expires_at: null,
-        global_web_locked_at: null,
-        trading_restricted_until: null,
-      }))
+      .mockResolvedValueOnce(
+        makeJsonResponse({
+          id: 73,
+          full_name: 'کاربر بازیابی‌شده',
+          account_name: 'recovered73',
+          account_status: 'active',
+          global_lock_grace_expires_at: null,
+          global_web_locked_at: null,
+          trading_restricted_until: null,
+        }),
+      )
       .mockResolvedValueOnce(makeJsonResponse([]))
 
     const wrapper = await mountView()
@@ -125,13 +136,110 @@ describe('DashboardView.vue', () => {
     await wrapper.get('.dashboard-identity-retry').trigger('click')
     await flushPromises()
 
-    expect(dashboardViewMocks.apiFetchMock).toHaveBeenNthCalledWith(2, '/api/auth/me', expect.objectContaining({
-      retryNetwork: false,
-      signal: expect.any(AbortSignal),
-      trackConnectionState: false,
-    }))
+    expect(dashboardViewMocks.apiFetchMock).toHaveBeenNthCalledWith(
+      2,
+      '/api/auth/me',
+      expect.objectContaining({
+        retryNetwork: false,
+        signal: expect.any(AbortSignal),
+        trackConnectionState: false,
+      }),
+    )
     expect(wrapper.find('.dashboard-identity-error').exists()).toBe(false)
     expect(wrapper.text()).toContain('کاربر بازیابی‌شده')
+  })
+
+  it('keeps the PWA prompt ineligible until the initial Home activity load succeeds', async () => {
+    let resolveTrades!: (value: ReturnType<typeof makeJsonResponse>) => void
+    dashboardViewMocks.apiFetchMock.mockImplementation((url: string) => {
+      if (url === '/api/auth/me') {
+        return Promise.resolve(
+          makeJsonResponse({
+            id: 91,
+            full_name: 'کاربر سالم',
+            account_name: 'healthy91',
+            account_status: 'active',
+            global_lock_grace_expires_at: null,
+            global_web_locked_at: null,
+            trading_restricted_until: null,
+          }),
+        )
+      }
+      if (url.startsWith('/api/trades/my?')) {
+        return new Promise((resolve) => {
+          resolveTrades = resolve
+        })
+      }
+      return Promise.resolve(makeJsonResponse([]))
+    })
+
+    const wrapper = mount(DashboardView)
+    await flushPromises()
+
+    expect(wrapper.getComponent(PWAInstallOverlay).props('eligible')).toBe(false)
+
+    resolveTrades(makeJsonResponse([]))
+    await flushPromises()
+
+    expect(wrapper.getComponent(PWAInstallOverlay).props('eligible')).toBe(true)
+  })
+
+  it('keeps the PWA prompt ineligible when the initial Home activity load fails', async () => {
+    dashboardViewMocks.apiFetchMock.mockImplementation((url: string) => {
+      if (url === '/api/auth/me') {
+        return Promise.resolve(
+          makeJsonResponse({
+            id: 92,
+            full_name: 'کاربر خطا',
+            account_name: 'failed92',
+            account_status: 'active',
+            global_lock_grace_expires_at: null,
+            global_web_locked_at: null,
+            trading_restricted_until: null,
+          }),
+        )
+      }
+      if (url.startsWith('/api/trades/my?'))
+        return Promise.reject(new Error('activity unavailable'))
+      return Promise.resolve(makeJsonResponse([]))
+    })
+
+    const wrapper = await mountView()
+
+    expect(wrapper.getComponent(PWAInstallOverlay).props('eligible')).toBe(false)
+    expect(wrapper.find('.today-trades-inline-status--error').exists()).toBe(false)
+    expect(wrapper.get('.ui-empty-state--danger').text()).toContain(
+      'دریافت معاملات امروز انجام نشد',
+    )
+  })
+
+  it('keeps the PWA prompt hidden while the shared connection is recovering', async () => {
+    dashboardViewMocks.isAppConnecting.value = true
+    mockDashboardApi({
+      user: {
+        id: 93,
+        full_name: 'کاربر اتصال',
+        account_name: 'connecting93',
+        account_status: 'active',
+        global_lock_grace_expires_at: null,
+        global_web_locked_at: null,
+        trading_restricted_until: null,
+      },
+      trades: [],
+    })
+
+    const wrapper = await mountView()
+    expect(wrapper.getComponent(PWAInstallOverlay).props('eligible')).toBe(false)
+
+    dashboardViewMocks.isAppConnecting.value = false
+    await wrapper.get('.today-trades-refresh').trigger('click')
+    await flushPromises()
+    expect(wrapper.getComponent(PWAInstallOverlay).props('eligible')).toBe(true)
+
+    dashboardViewMocks.isAppConnecting.value = true
+    await wrapper.get('.today-trades-refresh').trigger('click')
+    await flushPromises()
+    expect(wrapper.getComponent(PWAInstallOverlay).props('eligible')).toBe(false)
   })
 
   it('shows the Telegram connect panel only before linking and opens the generated link', async () => {
@@ -156,13 +264,17 @@ describe('DashboardView.vue', () => {
 
     const wrapper = await mountView()
 
-    expect(wrapper.get('.telegram-connect-section').text()).toContain('برای استفاده از امکانات اپ در بستر تلگرام ضربه بزنید!')
+    expect(wrapper.get('.telegram-connect-section').text()).toContain(
+      'برای استفاده از امکانات اپ در بستر تلگرام ضربه بزنید!',
+    )
 
     await wrapper.get('.telegram-connect-panel').trigger('click')
     await flushPromises()
 
     expect(dashboardViewMocks.requestTelegramLinkMock).toHaveBeenCalledTimes(1)
-    expect(dashboardViewMocks.openTelegramLinkMock).toHaveBeenCalledWith('https://t.me/example_bot?start=link_token')
+    expect(dashboardViewMocks.openTelegramLinkMock).toHaveBeenCalledWith(
+      'https://t.me/example_bot?start=link_token',
+    )
 
     wrapper.unmount()
 
@@ -232,18 +344,31 @@ describe('DashboardView.vue', () => {
         },
       ],
       projectUsers: [
-        { id: 31, account_name: 'ali31', mobile_number: '09120000031', created_at: '2026-05-12T07:30:00Z' },
-        { id: 32, account_name: 'zahra32', mobile_number: '09120000032', created_at: '2026-04-20T07:30:00Z' },
+        {
+          id: 31,
+          account_name: 'ali31',
+          mobile_number: '09120000031',
+          created_at: '2026-05-12T07:30:00Z',
+        },
+        {
+          id: 32,
+          account_name: 'zahra32',
+          mobile_number: '09120000032',
+          created_at: '2026-04-20T07:30:00Z',
+        },
       ],
     })
 
     const wrapper = await mountView()
 
-    expect(dashboardViewMocks.apiFetchMock).toHaveBeenCalledWith('/api/auth/me', expect.objectContaining({
-      retryNetwork: false,
-      signal: expect.any(AbortSignal),
-      trackConnectionState: false,
-    }))
+    expect(dashboardViewMocks.apiFetchMock).toHaveBeenCalledWith(
+      '/api/auth/me',
+      expect.objectContaining({
+        retryNetwork: false,
+        signal: expect.any(AbortSignal),
+        trackConnectionState: false,
+      }),
+    )
     expect(dashboardViewMocks.apiFetchMock).toHaveBeenCalledWith(
       '/api/trades/my?from_date=2026-05-14&to_date=2026-05-14&limit=20',
       expect.objectContaining({
@@ -257,13 +382,19 @@ describe('DashboardView.vue', () => {
     expect(wrapper.text()).toContain('رضا محمدی')
     expect(wrapper.get('.avatar').text()).toContain('ر')
     expect(wrapper.get('.user-info-center').element.tagName).toBe('BUTTON')
-    expect(wrapper.get('.user-info-center').attributes('aria-label')).toBe('مشاهده پروفایل رضا محمدی')
+    expect(wrapper.get('.user-info-center').attributes('aria-label')).toBe(
+      'مشاهده پروفایل رضا محمدی',
+    )
     expect(wrapper.find('.notif-dot').exists()).toBe(true)
     expect(wrapper.get('.today-trades-card').text()).toContain('طرف مقابل معامله')
     expect(wrapper.get('.today-trades-card').text()).toContain('حسین رضایی')
     expect(wrapper.get('.today-trades-card').text()).toContain('خرید')
     expect(wrapper.get('.today-trades-card').text()).toContain('فردایی')
-    expect(wrapper.get('.today-trades-card .ui-settlement-badge--tomorrow').attributes('data-settlement-type')).toBe('tomorrow')
+    expect(
+      wrapper
+        .get('.today-trades-card .ui-settlement-badge--tomorrow')
+        .attributes('data-settlement-type'),
+    ).toBe('tomorrow')
     expect(wrapper.get('.today-trades-card').text()).toContain('سکه')
     expect(wrapper.get('.today-trades-card').text()).not.toContain('نباید دیده شود')
     expect(wrapper.find('.dashboard-shortcuts').exists()).toBe(false)
@@ -298,7 +429,9 @@ describe('DashboardView.vue', () => {
     expect(wrapper.get('.dashboard-commodities-card').text()).toContain('امامی')
     expect(wrapper.get('.dashboard-commodities-card').text()).toContain('طرح جدید')
     expect(wrapper.get('.dashboard-commodities-card').text()).toContain('طلای آب‌شده')
-    expect(wrapper.get('.dashboard-commodities-card').text()).toContain('برای این کالا هنوز نام مستعار جداگانه‌ای ثبت نشده است')
+    expect(wrapper.get('.dashboard-commodities-card').text()).toContain(
+      'برای این کالا هنوز نام مستعار جداگانه‌ای ثبت نشده است',
+    )
 
     await wrapper.get('.notif-btn').trigger('click')
     await wrapper.get('.user-info-center').trigger('click')
@@ -332,16 +465,18 @@ describe('DashboardView.vue', () => {
       if (url.startsWith('/api/trades/my?')) {
         tradeRequests += 1
         if (tradeRequests === 1) {
-          return makeJsonResponse([{
-            id: 3301,
-            trade_type: 'buy',
-            offer_user_id: 19,
-            responder_user_id: 33,
-            counterparty_name: 'طرف معتبر قبلی',
-            commodity_name: 'سکه',
-            quantity: 2,
-            price: 100,
-          }])
+          return makeJsonResponse([
+            {
+              id: 3301,
+              trade_type: 'buy',
+              offer_user_id: 19,
+              responder_user_id: 33,
+              counterparty_name: 'طرف معتبر قبلی',
+              commodity_name: 'سکه',
+              quantity: 2,
+              price: 100,
+            },
+          ])
         }
         throw new Error('private refresh failure')
       }
@@ -355,7 +490,9 @@ describe('DashboardView.vue', () => {
     await flushPromises()
 
     expect(wrapper.get('.today-trades-card').text()).toContain('طرف معتبر قبلی')
-    expect(wrapper.get('.today-trades-inline-status--error').text()).toContain('اطلاعات قبلی حفظ شده است')
+    expect(wrapper.get('.today-trades-inline-status--error').text()).toContain(
+      'اطلاعات قبلی حفظ شده است',
+    )
     expect(wrapper.text()).not.toContain('private refresh failure')
     expect(tradeRequests).toBe(2)
   })
@@ -378,7 +515,9 @@ describe('DashboardView.vue', () => {
         throw new Error('private project-user failure')
       }
       if (url.includes('/project-users?')) {
-        return makeJsonResponse([{ id: 3401, account_name: 'همکار معتبر قبلی', mobile_number: '09120003401' }])
+        return makeJsonResponse([
+          { id: 3401, account_name: 'همکار معتبر قبلی', mobile_number: '09120003401' },
+        ])
       }
       return makeJsonResponse([])
     })
@@ -394,7 +533,9 @@ describe('DashboardView.vue', () => {
     await flushPromises()
 
     expect(wrapper.get('.dashboard-project-users-card').text()).toContain('همکار معتبر قبلی')
-    expect(wrapper.get('.dashboard-project-users-inline-status--error').text()).toContain('فهرست قبلی حفظ شده است')
+    expect(wrapper.get('.dashboard-project-users-inline-status--error').text()).toContain(
+      'فهرست قبلی حفظ شده است',
+    )
     expect((searchInput.element as HTMLInputElement).value).toBe('new-query')
     expect(wrapper.text()).not.toContain('private project-user failure')
   })
@@ -478,9 +619,7 @@ describe('DashboardView.vue', () => {
           price: 456000,
         },
       ],
-      projectUsers: [
-        { id: 20, account_name: 'owner-peer', mobile_number: '09120000020' },
-      ],
+      projectUsers: [{ id: 20, account_name: 'owner-peer', mobile_number: '09120000020' }],
     })
 
     const wrapper = await mountView()
@@ -518,9 +657,7 @@ describe('DashboardView.vue', () => {
         trading_restricted_until: null,
       },
       trades: [],
-      commodities: [
-        { id: 1, name: 'سکه', aliases: [{ alias: 'امامی' }] },
-      ],
+      commodities: [{ id: 1, name: 'سکه', aliases: [{ alias: 'امامی' }] }],
     })
 
     const wrapper = await mountView()
@@ -601,7 +738,11 @@ describe('DashboardView.vue', () => {
     )
     expect(dashboardViewMocks.apiFetchMock).toHaveBeenCalledWith(
       '/api/sessions/session-b',
-      expect.objectContaining({ method: 'DELETE', retryNetwork: false, trackConnectionState: false }),
+      expect.objectContaining({
+        method: 'DELETE',
+        retryNetwork: false,
+        trackConnectionState: false,
+      }),
     )
     expect(dashboardViewMocks.forceLogoutMock).toHaveBeenCalledTimes(1)
   })

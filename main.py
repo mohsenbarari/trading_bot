@@ -81,10 +81,15 @@ PRODUCTION_TEST_ISOLATION_PUBLIC_EXACT_PATHS = {
     "/api/auth/register-otp-request",
     "/api/auth/register-otp-verify",
     "/api/auth/register-complete",
+    "/api/auth/registration-context",
+    "/api/auth/registration-context/exchange",
+    "/api/auth/registration-context/otp/request",
+    "/api/auth/registration-context/otp/verify",
+    "/api/auth/registration-context/complete",
+    "/api/auth/registration-context/clear",
     "/api/auth/refresh",
 }
 PRODUCTION_TEST_ISOLATION_PUBLIC_PREFIXES = (
-    "/api/auth/pending-registration/",
     "/api/invitations/lookup/",
     "/api/invitations/validate/",
 )
@@ -547,6 +552,7 @@ async def get_metrics(request: Request):
 # -------------------------------------------------------
 # مسیر بیلد شده Frontend (dist)
 static_dir = Path("mini_app_dist")
+frontend_document_headers = {"Referrer-Policy": "no-referrer"}
 blocked_frontend_probe_paths = {
     "openapi.json",
     "docs",
@@ -568,21 +574,23 @@ if static_dir.exists():
         # اگر فایل استاتیک بود و وجود داشت -> سرو کن (تمام asset ها و عکس ها)
         file_path = static_dir / full_path
         if file_path.is_file():
-            return FileResponse(file_path)
+            return FileResponse(file_path, headers=frontend_document_headers)
         
         # اگر کاربر یک فایل .js از نسخه قدیمی را درخواست کرد (PWA Cache stale):
         if full_path.startswith("assets/") and full_path.endswith(".js"):
-             logger.warning(f"Old JS chunk requested: {full_path}. Forcing PWA reload on client.")
-             js_fallback = "console.warn('Stale PWA chunk requested. Forcing hard reload...'); window.location.reload(true);"
-             return Response(content=js_fallback, media_type="application/javascript")
+             logger.warning("Old JS chunk requested; returning a bounded 410 response.")
+             return Response(
+                 status_code=410,
+                 headers={"Cache-Control": "no-store, no-cache, must-revalidate"},
+             )
              
         # در غیر این صورت -> index.html (برای Vue Router)
-        return FileResponse(static_dir / "index.html")
+        return FileResponse(static_dir / "index.html", headers=frontend_document_headers)
 else:
     logger.warning("⚠️ Frontend build directory not found. Run 'npm run build' first.")
 
 @app.get("/")
 async def root():
     if static_dir.exists():
-        return FileResponse(static_dir / "index.html")
+        return FileResponse(static_dir / "index.html", headers=frontend_document_headers)
     return {"message": "Trading Bot API is running 🚀"}

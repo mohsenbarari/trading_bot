@@ -316,10 +316,11 @@ class AccountantRelationRead(BaseModel):
     duty_description: str | None = None
     mobile_number: str
     status: AccountantRelationStatus
-    invitation_token: str
+    short_code: str | None = None
     registration_link: str | None = None
     bot_registration_link: str | None = None
     web_registration_link: str | None = None
+    web_short_link: str | None = None
     sms_status: InvitationSMSStatus | None = None
     expires_at: datetime
     activated_at: datetime | None = None
@@ -398,7 +399,7 @@ class CustomerRelationRead(BaseModel):
     max_daily_trades: int | None = None
     max_daily_commodity_volume: int | None = None
     status: CustomerRelationStatus
-    invitation_token: str
+    short_code: str | None = None
     registration_link: str | None = None
     bot_registration_link: str | None = None
     web_registration_link: str | None = None
@@ -441,7 +442,7 @@ class InternalCustomerInviteResponse(BaseModel):
     created: bool
     already_pending: bool = False
     relation_id: int | None = None
-    invitation_token: str | None = None
+    short_code: str | None = None
     sms_sent: bool = False
     idempotency_key: str
     error_code: str | None = None

@@ -93,6 +93,10 @@ SENSITIVE_KEY_PARTS = (
 )
 
 _BEARER_RE = re.compile(r"Bearer\s+[A-Za-z0-9._~+/=-]+", re.IGNORECASE)
+_REGISTRATION_BEARER_RE = re.compile(
+    r"(?<![A-Za-z0-9])(?:INV|ACCT|CUST|REG)-[A-Fa-f0-9]{32}(?![A-Fa-f0-9])",
+    re.IGNORECASE,
+)
 _JWT_RE = re.compile(r"\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b")
 _SIGNED_URL_QUERY_RE = re.compile(
     r"(?i)([?&](?:"
@@ -164,6 +168,7 @@ def mask_mobile(value: str) -> str:
 
 def redact_string(value: str) -> str:
     sanitized = _BEARER_RE.sub(f"Bearer {REDACTED}", value)
+    sanitized = _REGISTRATION_BEARER_RE.sub(REDACTED, sanitized)
     sanitized = _TELEGRAM_BOT_URL_RE.sub(rf"\1{REDACTED}", sanitized)
     sanitized = _JWT_RE.sub(REDACTED_JWT, sanitized)
     sanitized = _SIGNED_URL_QUERY_RE.sub(rf"\1{REDACTED_SIGNED_URL_VALUE}", sanitized)

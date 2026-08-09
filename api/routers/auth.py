@@ -6,7 +6,8 @@ from datetime import datetime, timedelta
 import logging
 import math
 from pydantic import BaseModel, field_validator, model_validator
-from typing import Optional
+from typing import Literal, Optional
+from urllib.parse import urlsplit
 import secrets
 import hashlib
 import hmac
@@ -15,7 +16,7 @@ from jose import JWTError, jwt
 from core.db import get_db
 from models.user import User, UserRole
 from models.customer_relation import CustomerTier
-from models.invitation import Invitation, InvitationKind
+from models.invitation import Invitation, InvitationCompletionSurface, InvitationKind
 from core.security import (
     constant_time_secret_equals,
     create_access_token,
@@ -72,6 +73,7 @@ from core.registration_contracts import (
 from core.telegram_account_link_contracts import TelegramAccountLinkCommand
 from core.trade_forwarding import verify_internal_signature
 from core.audit_logger import audit_log
+from core.log_redaction import mask_mobile
 from core.metrics import record_otp_event, record_registration_completion
 from core.services.registration_notification_service import (
     publish_project_user_joined_web_notifications,
@@ -532,7 +534,6 @@ class RegisterOTPVerify(BaseModel):
 
 class RegisterComplete(BaseModel):
     token: str | None = None
-    registration_token: str | None = None
     address: str
 
     @field_validator("address")
@@ -558,12 +559,544 @@ class TelegramLinkTokenResponse(BaseModel):
 
 
 class PendingRegistrationContext(BaseModel):
-    token: str
     account_name: str
     mobile_number: str
     role: UserRole
+    expires_at: datetime | None = None
+
+
+RegistrationContextKind = Literal["invitation", "registration"]
+RegistrationContextProgress = Literal["context_ready", "otp_requested", "otp_verified"]
+
+
+class RegistrationContextAlreadyCompleted(Exception):
+    def __init__(self, handle: str):
+        super().__init__("registration_complete")
+        self.handle = handle
+
+
+class RegistrationContextExchangeRequest(BaseModel):
+    kind: RegistrationContextKind
+    token: str
+    exchange_id: str
+
+    @field_validator("token")
+    @classmethod
+    def validate_token(cls, value: str) -> str:
+        token = value.strip()
+        if not token:
+            raise ValueError("registration handoff is required")
+        return token
+
+    @field_validator("exchange_id")
+    @classmethod
+    def validate_exchange_id(cls, value: str) -> str:
+        exchange_id = value.strip()
+        if not 8 <= len(exchange_id) <= 128 or not all(
+            character.isalnum() or character in {"-", "_"} for character in exchange_id
+        ):
+            raise ValueError("exchange_id is invalid")
+        return exchange_id
+
+
+class RegistrationContextState(BaseModel):
+    version: Literal[1] = 1
+    kind: RegistrationContextKind
+    invitation_token: str
+    progress: RegistrationContextProgress
+    handoff_claim_key: str | None = None
+
+
+class RegistrationHandoffClaim(BaseModel):
+    version: Literal[1] = 1
+    exchange_id: str
+    context_handle: str
+    state: RegistrationContextState
+    terminal: bool = False
+
+
+class RegistrationContextResponse(PendingRegistrationContext):
+    kind: RegistrationContextKind
+    progress: RegistrationContextProgress
+    requires_otp: bool
+
+
+class RegistrationContextOTPVerifyRequest(BaseModel):
+    code: str
+
+
+class RegistrationContextCompleteRequest(BaseModel):
+    address: str
+
+    @field_validator("address")
+    @classmethod
+    def validate_address(cls, value: str) -> str:
+        from core.services.invitation_lifecycle_service import validate_registration_address
+
+        return validate_registration_address(value)
 
 # --- Endpoints ---
+
+REGISTRATION_CONTEXT_TTL_SECONDS = 10 * 60
+REGISTRATION_CONTEXT_COOKIE_PRODUCTION = "__Host-web_registration"
+REGISTRATION_CONTEXT_COOKIE_DEVELOPMENT = "web_registration"
+
+
+def _registration_context_secure_cookie() -> bool:
+    return (settings.environment or "").strip().lower() in {"production", "staging"}
+
+
+def _registration_context_cookie_name() -> str:
+    if _registration_context_secure_cookie():
+        return REGISTRATION_CONTEXT_COOKIE_PRODUCTION
+    return REGISTRATION_CONTEXT_COOKIE_DEVELOPMENT
+
+
+def _registration_context_key(handle: str) -> str:
+    digest = hashlib.sha256(handle.encode("utf-8")).hexdigest()
+    return f"registration_context:{digest}"
+
+
+def _registration_context_completion_key(handle: str) -> str:
+    digest = hashlib.sha256(handle.encode("utf-8")).hexdigest()
+    return f"registration_context_completion:{digest}"
+
+
+def _registration_context_verified_key(handle: str) -> str:
+    digest = hashlib.sha256(handle.encode("utf-8")).hexdigest()
+    return f"registration_context_verified:{digest}"
+
+
+def _registration_handoff_claim_key(token: str) -> str:
+    digest = hashlib.sha256(token.encode("utf-8")).hexdigest()
+    return f"registration_handoff_claim:{digest}"
+
+
+def _set_registration_context_cookie(
+    response: Response,
+    handle: str,
+    *,
+    max_age: int = REGISTRATION_CONTEXT_TTL_SECONDS,
+) -> None:
+    response.set_cookie(
+        key=_registration_context_cookie_name(),
+        value=handle,
+        max_age=max(1, int(max_age)),
+        path="/",
+        secure=_registration_context_secure_cookie(),
+        httponly=True,
+        samesite="strict",
+    )
+
+
+def _clear_registration_context_cookie(response: Response) -> None:
+    response.delete_cookie(
+        key=_registration_context_cookie_name(),
+        path="/",
+        secure=_registration_context_secure_cookie(),
+        httponly=True,
+        samesite="strict",
+    )
+
+
+def _registration_context_clear_cookie_header() -> str:
+    response = Response()
+    _clear_registration_context_cookie(response)
+    return response.headers["set-cookie"]
+
+
+def _registration_no_store_headers(*, clear_cookie: bool = False) -> dict[str, str]:
+    headers = {
+        "Cache-Control": "no-store",
+        "Pragma": "no-cache",
+    }
+    if clear_cookie:
+        headers["Set-Cookie"] = _registration_context_clear_cookie_header()
+    return headers
+
+
+def _assert_registration_context_same_origin(raw_request: Request) -> None:
+    """Reject browser cross-site mutations in addition to SameSite=Strict.
+
+    Non-browser/internal callers may omit Origin and Sec-Fetch-Site. Browsers that
+    identify a cross-site request or supply a foreign Origin fail closed.
+    """
+    fetch_site = (raw_request.headers.get("sec-fetch-site") or "").strip().lower()
+    if fetch_site == "cross-site":
+        raise HTTPException(status_code=403, detail="درخواست ثبت‌نام نامعتبر است")
+
+    origin = (raw_request.headers.get("origin") or "").strip()
+    if not origin:
+        return
+
+    forwarded_proto = (raw_request.headers.get("x-forwarded-proto") or "").split(",", 1)[0].strip()
+    request_scheme = getattr(getattr(raw_request, "url", None), "scheme", "") or "http"
+    allowed_schemes = {request_scheme.lower()}
+    if forwarded_proto.lower() in {"http", "https"}:
+        allowed_schemes.add(forwarded_proto.lower())
+    # Never trust a client-supplied X-Forwarded-Host. Deployment proxies
+    # canonicalize Host before forwarding the request to the application.
+    host = (raw_request.headers.get("host") or "").strip()
+    parsed = urlsplit(origin)
+    if not host or parsed.scheme.lower() not in allowed_schemes or parsed.netloc.lower() != host.lower():
+        raise HTTPException(status_code=403, detail="درخواست ثبت‌نام نامعتبر است")
+
+
+def _registration_context_response(
+    invitation: Invitation,
+    state: RegistrationContextState,
+) -> RegistrationContextResponse:
+    context = _serialize_pending_registration_context(invitation)
+    return RegistrationContextResponse(
+        **context.model_dump(),
+        kind=state.kind,
+        progress=state.progress,
+        requires_otp=state.kind == "invitation",
+    )
+
+
+async def _store_registration_context(
+    redis,
+    state: RegistrationContextState,
+    *,
+    ttl: int = REGISTRATION_CONTEXT_TTL_SECONDS,
+) -> tuple[str, int]:
+    bounded_ttl = max(1, min(REGISTRATION_CONTEXT_TTL_SECONDS, int(ttl)))
+    handle = secrets.token_urlsafe(32)
+    await redis.setex(
+        _registration_context_key(handle),
+        bounded_ttl,
+        state.model_dump_json(),
+    )
+    return handle, bounded_ttl
+
+
+async def _load_registration_handoff_claim(
+    redis,
+    token: str,
+) -> RegistrationHandoffClaim | None:
+    raw_claim = _redis_text(await redis.get(_registration_handoff_claim_key(token)))
+    if not raw_claim:
+        return None
+    try:
+        return RegistrationHandoffClaim.model_validate_json(raw_claim)
+    except (TypeError, ValueError):
+        # Corrupt claim data must never make a bearer replayable.
+        raise HTTPException(
+            status_code=409,
+            detail="این انتقال ثبت‌نام قبلاً استفاده شده است",
+            headers=_registration_no_store_headers(),
+        ) from None
+
+
+async def _claim_registration_handoff(
+    redis,
+    token: str,
+    claim: RegistrationHandoffClaim,
+) -> bool:
+    return bool(
+        await redis.set(
+            _registration_handoff_claim_key(token),
+            claim.model_dump_json(),
+            ex=REGISTRATION_CONTEXT_TTL_SECONDS,
+            nx=True,
+        )
+    )
+
+
+async def _resume_registration_handoff_claim(
+    db: AsyncSession,
+    redis,
+    token: str,
+    claim: RegistrationHandoffClaim,
+) -> tuple[RegistrationContextState, Invitation, int]:
+    if claim.terminal:
+        raise HTTPException(
+            status_code=410,
+            detail="این انتقال ثبت‌نام پایان یافته است",
+            headers=_registration_no_store_headers(clear_cookie=True),
+        )
+    context_key = _registration_context_key(claim.context_handle)
+    if not await redis.get(context_key):
+        remaining = int(await redis.ttl(_registration_handoff_claim_key(token)) or 0)
+        if remaining <= 0:
+            raise HTTPException(
+                status_code=410,
+                detail="جلسه ثبت‌نام در دسترس نیست یا منقضی شده است",
+                headers=_registration_no_store_headers(clear_cookie=True),
+            )
+        try:
+            invitation, _, _ = await _load_valid_invitation_by_token(
+                db,
+                claim.state.invitation_token,
+                missing_detail="دعوت‌نامه نامعتبر است",
+                completed_context_handle=(
+                    claim.context_handle
+                    if claim.state.progress == "otp_verified"
+                    else None
+                ),
+            )
+        except RegistrationContextAlreadyCompleted:
+            await _store_registration_context_completion(
+                redis,
+                claim.context_handle,
+            )
+            await _terminalize_registration_handoff_claim(
+                redis,
+                claim.state.handoff_claim_key,
+            )
+            raise
+        ttl = min(REGISTRATION_CONTEXT_TTL_SECONDS, remaining)
+        await redis.setex(context_key, ttl, claim.state.model_dump_json())
+        return claim.state, invitation, ttl
+
+    state, invitation = await _load_registration_context_by_handle(
+        db,
+        redis,
+        claim.context_handle,
+    )
+    remaining = int(await redis.ttl(context_key) or 0)
+    return state, invitation, max(1, min(REGISTRATION_CONTEXT_TTL_SECONDS, remaining))
+
+
+async def _delete_registration_context(
+    redis,
+    handle: str | None,
+    *,
+    terminal: bool = False,
+) -> None:
+    if not handle:
+        return
+    context_key = _registration_context_key(handle)
+    raw_state = _redis_text(await redis.get(context_key))
+    state = None
+    if raw_state:
+        try:
+            state = RegistrationContextState.model_validate_json(raw_state)
+        except (TypeError, ValueError):
+            state = None
+    if terminal and state:
+        await _terminalize_registration_handoff_claim(
+            redis,
+            state.handoff_claim_key,
+        )
+    await redis.delete(context_key)
+    await redis.delete(_registration_context_verified_key(handle))
+
+
+async def _terminalize_registration_handoff_claim(redis, claim_key: str | None) -> None:
+    if not claim_key:
+        return
+    raw_claim = _redis_text(await redis.get(claim_key))
+    if not raw_claim:
+        return
+    try:
+        claim = RegistrationHandoffClaim.model_validate_json(raw_claim)
+        remaining = int(await redis.ttl(claim_key) or 0)
+        if remaining > 0:
+            await redis.setex(
+                claim_key,
+                min(REGISTRATION_CONTEXT_TTL_SECONDS, remaining),
+                claim.model_copy(update={"terminal": True}).model_dump_json(),
+            )
+    except (TypeError, ValueError):
+        pass
+
+
+async def _registration_context_is_completed(redis, handle: str | None) -> bool:
+    return bool(handle and await redis.get(_registration_context_completion_key(handle)))
+
+
+async def _store_registration_context_completion(redis, handle: str) -> None:
+    await redis.setex(
+        _registration_context_completion_key(handle),
+        REGISTRATION_CONTEXT_TTL_SECONDS,
+        "registration_complete",
+    )
+
+
+def _registration_context_handle(raw_request: Request) -> str | None:
+    cookies = getattr(raw_request, "cookies", {})
+    value = cookies.get(_registration_context_cookie_name())
+    if not isinstance(value, str):
+        return None
+    handle = value.strip()
+    return handle or None
+
+
+async def _load_registration_context(
+    db: AsyncSession,
+    redis,
+    raw_request: Request,
+) -> tuple[str, RegistrationContextState, Invitation]:
+    handle = _registration_context_handle(raw_request)
+    if not handle:
+        raise HTTPException(
+            status_code=410,
+            detail="جلسه ثبت‌نام در دسترس نیست یا منقضی شده است",
+            headers=_registration_no_store_headers(clear_cookie=True),
+        )
+
+    state, invitation = await _load_registration_context_by_handle(db, redis, handle)
+    reconciled_state = state
+    if state.kind == "invitation" and state.progress == "context_ready":
+        if await redis.get(f"reg_otp:{state.invitation_token}"):
+            reconciled_state = state.model_copy(update={"progress": "otp_requested"})
+    if state.kind == "invitation" and state.progress != "otp_verified":
+        if await redis.get(_registration_context_verified_key(handle)):
+            reconciled_state = state.model_copy(update={"progress": "otp_verified"})
+    if reconciled_state != state:
+        await _update_registration_context(redis, handle, reconciled_state)
+        state = reconciled_state
+    return handle, state, invitation
+
+
+async def _load_registration_context_by_handle(
+    db: AsyncSession,
+    redis,
+    handle: str,
+) -> tuple[RegistrationContextState, Invitation]:
+    key = _registration_context_key(handle)
+    raw_state = _redis_text(await redis.get(key))
+    try:
+        state = RegistrationContextState.model_validate_json(raw_state)
+    except (TypeError, ValueError):
+        await redis.delete(key)
+        await redis.delete(_registration_context_verified_key(handle))
+        raise HTTPException(
+            status_code=410,
+            detail="جلسه ثبت‌نام در دسترس نیست یا منقضی شده است",
+            headers=_registration_no_store_headers(clear_cookie=True),
+        ) from None
+
+    try:
+        invitation, _, _ = await _load_valid_invitation_by_token(
+            db,
+            state.invitation_token,
+            missing_detail="دعوت‌نامه نامعتبر است",
+            completed_context_handle=(
+                handle if state.progress == "otp_verified" else None
+            ),
+        )
+    except RegistrationContextAlreadyCompleted:
+        await _store_registration_context_completion(redis, handle)
+        await _delete_registration_context(redis, handle, terminal=True)
+        raise
+    except HTTPException as exc:
+        await redis.delete(key)
+        await redis.delete(_registration_context_verified_key(handle))
+        raise HTTPException(
+            status_code=410,
+            detail=exc.detail,
+            headers=_registration_no_store_headers(clear_cookie=True),
+        ) from None
+    return state, invitation
+
+
+async def _update_registration_context(
+    redis,
+    handle: str,
+    state: RegistrationContextState,
+) -> int:
+    key = _registration_context_key(handle)
+    remaining = int(await redis.ttl(key) or 0)
+    if remaining <= 0:
+        await redis.delete(key)
+        await redis.delete(_registration_context_verified_key(handle))
+        raise HTTPException(
+            status_code=410,
+            detail="جلسه ثبت‌نام در دسترس نیست یا منقضی شده است",
+            headers=_registration_no_store_headers(clear_cookie=True),
+        )
+    bounded_ttl = min(REGISTRATION_CONTEXT_TTL_SECONDS, remaining)
+    await redis.setex(key, bounded_ttl, state.model_dump_json())
+    return bounded_ttl
+
+
+def _registration_context_json_response(
+    payload: BaseModel | dict[str, object],
+    *,
+    status_code: int = 200,
+) -> JSONResponse:
+    content = payload.model_dump(mode="json") if isinstance(payload, BaseModel) else payload
+    return JSONResponse(
+        status_code=status_code,
+        content=content,
+        headers=_registration_no_store_headers(),
+    )
+
+
+def _registration_context_completed_response(handle: str) -> JSONResponse:
+    response = _registration_context_json_response(
+        {"status": "registration_complete"}
+    )
+    _set_registration_context_cookie(response, handle)
+    return response
+
+
+def _registration_required_response(
+    invitation: Invitation,
+    handle: str,
+    expires_in: int,
+) -> JSONResponse:
+    response = _registration_context_json_response(
+        {
+            "status": "registration_required",
+            "expires_in": expires_in,
+            "invitation": _serialize_pending_registration_context(invitation).model_dump(
+                mode="json"
+            ),
+        }
+    )
+    _set_registration_context_cookie(response, handle, max_age=expires_in)
+    return response
+
+
+async def _resume_registration_required_context(
+    db: AsyncSession,
+    redis,
+    raw_request: Request,
+    *,
+    mobile: str,
+) -> JSONResponse | None:
+    """Recover a consumed Login OTP when its registration response was lost."""
+    handle = _registration_context_handle(raw_request)
+    if not handle:
+        return None
+    if await _registration_context_is_completed(redis, handle):
+        return _registration_context_completed_response(handle)
+    try:
+        state, invitation = await _load_registration_context_by_handle(
+            db,
+            redis,
+            handle,
+        )
+    except RegistrationContextAlreadyCompleted as completed:
+        return _registration_context_completed_response(completed.handle)
+    except HTTPException:
+        return None
+    if (
+        state.kind != "registration"
+        or state.progress != "otp_verified"
+        or not constant_time_secret_equals(invitation.mobile_number, mobile)
+    ):
+        return None
+    remaining = int(await redis.ttl(_registration_context_key(handle)) or 0)
+    if remaining <= 0:
+        await _delete_registration_context(redis, handle)
+        return None
+    return _registration_required_response(
+        invitation,
+        handle,
+        min(REGISTRATION_CONTEXT_TTL_SECONDS, remaining),
+    )
+
+
+async def _consume_direct_registration_handoff(
+    redis,
+    registration_token: str,
+) -> None:
+    await redis.delete(_registration_session_key(registration_token))
 
 def _registration_session_key(registration_token: str) -> str:
     return f"registration_session:{registration_token}"
@@ -574,12 +1107,21 @@ async def _load_valid_invitation_by_token(
     token: str,
     *,
     missing_detail: str = "دعوت‌نامه نامعتبر است",
+    completed_context_handle: str | None = None,
 ) -> tuple[Invitation, object | None, object | None]:
     stmt = select(Invitation).where(Invitation.token == token)
     invitation = (await db.execute(stmt)).scalar_one_or_none()
     if not invitation:
         raise HTTPException(status_code=404, detail=missing_detail)
     if invitation.is_used:
+        if (
+            completed_context_handle
+            and getattr(invitation, "registered_user_id", None) is not None
+            and getattr(invitation, "completed_at", None) is not None
+            and getattr(invitation, "completed_via", None)
+            == InvitationCompletionSurface.WEB
+        ):
+            raise RegistrationContextAlreadyCompleted(completed_context_handle)
         raise HTTPException(status_code=400, detail="دعوت‌نامه قبلاً استفاده شده است")
     if getattr(invitation, "revoked_at", None) is not None:
         raise HTTPException(status_code=400, detail="دعوت‌نامه لغو شده است")
@@ -633,10 +1175,10 @@ async def _find_pending_invitation_for_mobile(
 
 def _serialize_pending_registration_context(invitation: Invitation) -> PendingRegistrationContext:
     return PendingRegistrationContext(
-        token=invitation.token,
         account_name=invitation.account_name,
-        mobile_number=invitation.mobile_number,
+        mobile_number=mask_mobile(invitation.mobile_number),
         role=invitation.role,
+        expires_at=getattr(invitation, "expires_at", None),
     )
 
 
@@ -649,19 +1191,6 @@ async def _store_registration_session(
     ttl = max(60, int(settings.invitation_registration_session_ttl_seconds))
     await redis.setex(_registration_session_key(registration_token), ttl, invitation_token)
     return registration_token, ttl
-
-
-async def _load_registration_session_invitation(
-    db: AsyncSession,
-    redis,
-    *,
-    registration_token: str,
-) -> tuple[Invitation, object | None, object | None]:
-    invitation_token = await _load_registration_session_token(
-        redis,
-        registration_token=registration_token,
-    )
-    return await _load_valid_invitation_by_token(db, invitation_token, missing_detail="دعوت‌نامه نامعتبر است")
 
 
 async def _load_registration_session_token(
@@ -848,7 +1377,27 @@ async def update_my_address(
     return schemas.UserAddressUpdateResponse(address=current_user.address)
 
 
-@router.post("/register-otp-request", response_model=dict)
+LEGACY_RAW_REGISTRATION_RETIRED_DETAIL = (
+    "این مسیر ثبت‌نام بازنشسته شده است؛ صفحه را دوباره بارگذاری کنید"
+)
+
+
+def _raise_legacy_raw_registration_retired() -> None:
+    raise HTTPException(
+        status_code=status.HTTP_410_GONE,
+        detail=LEGACY_RAW_REGISTRATION_RETIRED_DETAIL,
+        headers=_registration_no_store_headers(),
+    )
+
+
+@router.post("/register-otp-request", response_model=dict, deprecated=True)
+async def retired_register_otp_request(req: RegisterOTPRequest):
+    """Reject raw-bearer mutation before Redis, DB, OTP, or provider access."""
+    _raise_legacy_raw_registration_retired()
+
+
+# Server-private implementation used only after an opaque context is loaded.
+# It intentionally has no FastAPI decorator.
 async def register_otp_request(
     req: RegisterOTPRequest,
     db: AsyncSession = Depends(get_db)
@@ -879,10 +1428,19 @@ async def register_otp_request(
         await redis.delete(rate_limit_key)
         raise HTTPException(status_code=500, detail="خطا در ارسال پیامک")
 
-@router.post("/register-otp-verify", response_model=dict)
+@router.post("/register-otp-verify", response_model=dict, deprecated=True)
+async def retired_register_otp_verify(req: RegisterOTPVerify):
+    """Reject raw-bearer mutation before proof lookup or OTP consumption."""
+    _raise_legacy_raw_registration_retired()
+
+
+# Server-private implementation used only after an opaque context is loaded.
 async def register_otp_verify(
     req: RegisterOTPVerify,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    *,
+    verification_key: str,
+    verification_ttl: int,
 ):
     redis = await get_redis()
     otp_key = f"reg_otp:{req.token}"
@@ -895,39 +1453,47 @@ async def register_otp_verify(
         await _record_otp_verify_failure(redis, subject=verify_subject, raw_request=None, otp_key=otp_key)
         raise HTTPException(status_code=400, detail="کد تایید نامعتبر یا منقضی شده است")
     
-    # Delete OTP to prevent replay attacks
+    # Persist the verified receipt before consuming the OTP. For the modern
+    # flow this key is handle-bound and no longer than the remaining context;
+    # a crash between these writes can therefore resume safely without giving
+    # the raw invitation bearer completion authority.
+    await redis.setex(
+        verification_key,
+        max(1, min(REGISTRATION_CONTEXT_TTL_SECONDS, int(verification_ttl))),
+        "1",
+    )
+
+    # Delete OTP to prevent replay attacks.
     await redis.delete(otp_key)
     await _clear_otp_verify_subject_failures(redis, subject=verify_subject)
     
-    # Set verified flag — 10 mins to complete registration
-    verify_key = f"reg_verified:{req.token}"
-    await redis.setex(verify_key, 600, "1")
-    
     return {"detail": "کد تایید شد"}
 
-@router.post("/register-complete", response_model=Token)
+@router.post("/register-complete", response_model=Token, deprecated=True)
+async def retired_register_complete(req: RegisterComplete):
+    """Reject raw-bearer completion before proof lookup or durable mutation."""
+    _raise_legacy_raw_registration_retired()
+
+
+# Server-private authoritative completion helper. Modern callers must pass the
+# invitation token taken from the already verified cookie context.
 async def register_complete(
     req: RegisterComplete,
     raw_request: Request,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    *,
+    verified_invitation_token: str,
 ):
-    redis = await get_redis()
-
     invitation_token = (req.token or "").strip()
-    registration_token = (req.registration_token or "").strip()
+    if not invitation_token:
+        raise HTTPException(status_code=400, detail="توکن دعوت الزامی است")
+    if not constant_time_secret_equals(
+        invitation_token,
+        verified_invitation_token,
+    ):
+        raise HTTPException(status_code=409, detail="مرحله ثبت‌نام نامعتبر است")
 
-    if registration_token:
-        invitation_token = await _load_registration_session_token(
-            redis,
-            registration_token=registration_token,
-        )
-        verify_key = None
-    else:
-        if not invitation_token:
-            raise HTTPException(status_code=400, detail="توکن دعوت یا جلسه ثبت‌نام الزامی است")
-        verify_key = f"reg_verified:{invitation_token}"
-        if not await redis.get(verify_key):
-            raise HTTPException(status_code=400, detail="لطفاً ابتدا کد تایید را وارد کنید")
+    redis = await get_redis()
 
     try:
         registration_result = await complete_invitation_registration(
@@ -999,12 +1565,6 @@ async def register_complete(
     cleanup_keys = []
     if invitation_token:
         cleanup_keys.append(("registration_otp", f"reg_otp:{invitation_token}"))
-    if verify_key:
-        cleanup_keys.append(("registration_verification", verify_key))
-    if registration_token:
-        cleanup_keys.append(
-            ("registration_session", _registration_session_key(registration_token))
-        )
     for cleanup_kind, cleanup_key in cleanup_keys:
         try:
             await redis.delete(cleanup_key)
@@ -1025,18 +1585,320 @@ async def register_complete(
     }
 
 
-@router.get("/pending-registration/{registration_token}", response_model=PendingRegistrationContext)
-async def get_pending_registration(
-    registration_token: str,
+@router.post("/registration-context/exchange")
+async def exchange_registration_context(
+    req: RegistrationContextExchangeRequest,
+    raw_request: Request,
     db: AsyncSession = Depends(get_db),
 ):
+    """Consume one raw handoff and replace it with an opaque HttpOnly context."""
+    _assert_registration_context_same_origin(raw_request)
     redis = await get_redis()
-    invitation, _, _ = await _load_registration_session_invitation(
+    old_handle = _registration_context_handle(raw_request)
+    if await _registration_context_is_completed(redis, old_handle):
+        return _registration_context_completed_response(old_handle)
+
+    existing_claim = await _load_registration_handoff_claim(redis, req.token)
+    if existing_claim is not None:
+        if (
+            existing_claim.state.kind != req.kind
+            or (
+                existing_claim.exchange_id != req.exchange_id
+                and old_handle != existing_claim.context_handle
+            )
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="این انتقال ثبت‌نام قبلاً استفاده شده است",
+                headers=_registration_no_store_headers(),
+            )
+        try:
+            state, invitation, ttl = await _resume_registration_handoff_claim(
+                db,
+                redis,
+                req.token,
+                existing_claim,
+            )
+        except RegistrationContextAlreadyCompleted as completed:
+            return _registration_context_completed_response(completed.handle)
+        if state.kind == "registration":
+            await _consume_direct_registration_handoff(
+                redis,
+                req.token,
+            )
+        if old_handle and old_handle != existing_claim.context_handle:
+            await _delete_registration_context(redis, old_handle, terminal=True)
+        response = _registration_context_json_response(
+            _registration_context_response(invitation, state),
+        )
+        _set_registration_context_cookie(
+            response,
+            existing_claim.context_handle,
+            max_age=ttl,
+        )
+        return response
+
+    if req.kind == "registration":
+        invitation_token = await _load_registration_session_token(
+            redis,
+            registration_token=req.token,
+        )
+        progress: RegistrationContextProgress = "otp_verified"
+    else:
+        invitation_token = req.token
+        progress = "context_ready"
+
+    invitation, _, _ = await _load_valid_invitation_by_token(
         db,
-        redis,
-        registration_token=registration_token,
+        invitation_token,
+        missing_detail="دعوت‌نامه نامعتبر است",
     )
-    return _serialize_pending_registration_context(invitation)
+
+    state = RegistrationContextState(
+        kind=req.kind,
+        invitation_token=invitation_token,
+        progress=progress,
+        handoff_claim_key=_registration_handoff_claim_key(req.token),
+    )
+    handle, ttl = await _store_registration_context(redis, state)
+    claim = RegistrationHandoffClaim(
+        exchange_id=req.exchange_id,
+        context_handle=handle,
+        state=state,
+    )
+    if not await _claim_registration_handoff(redis, req.token, claim):
+        await _delete_registration_context(redis, handle)
+        winning_claim = await _load_registration_handoff_claim(redis, req.token)
+        if (
+            winning_claim is None
+            or winning_claim.state.kind != req.kind
+            or (
+                winning_claim.exchange_id != req.exchange_id
+                and old_handle != winning_claim.context_handle
+            )
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="این انتقال ثبت‌نام قبلاً استفاده شده است",
+                headers=_registration_no_store_headers(),
+            )
+        try:
+            state, invitation, ttl = await _resume_registration_handoff_claim(
+                db,
+                redis,
+                req.token,
+                winning_claim,
+            )
+        except RegistrationContextAlreadyCompleted as completed:
+            return _registration_context_completed_response(completed.handle)
+        handle = winning_claim.context_handle
+
+    if req.kind == "registration":
+        # Login OTP already proved ownership of this mobile. The old REG bearer
+        # becomes unusable immediately after the cookie context is established.
+        await _consume_direct_registration_handoff(redis, req.token)
+
+    if old_handle and old_handle != handle:
+        await _delete_registration_context(redis, old_handle, terminal=True)
+
+    response = _registration_context_json_response(
+        _registration_context_response(invitation, state),
+    )
+    _set_registration_context_cookie(response, handle, max_age=ttl)
+    return response
+
+
+@router.post("/registration-context")
+async def read_registration_context(
+    raw_request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    _assert_registration_context_same_origin(raw_request)
+    redis = await get_redis()
+    handle = _registration_context_handle(raw_request)
+    if await _registration_context_is_completed(redis, handle):
+        return _registration_context_completed_response(handle)
+    try:
+        _, state, invitation = await _load_registration_context(db, redis, raw_request)
+    except RegistrationContextAlreadyCompleted as completed:
+        return _registration_context_completed_response(completed.handle)
+    return _registration_context_json_response(
+        _registration_context_response(invitation, state),
+    )
+
+
+@router.post("/registration-context/otp/request")
+async def request_registration_context_otp(
+    raw_request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    _assert_registration_context_same_origin(raw_request)
+    redis = await get_redis()
+    pending_handle = _registration_context_handle(raw_request)
+    if await _registration_context_is_completed(redis, pending_handle):
+        return _registration_context_completed_response(pending_handle)
+    try:
+        handle, state, _ = await _load_registration_context(db, redis, raw_request)
+    except RegistrationContextAlreadyCompleted as completed:
+        return _registration_context_completed_response(completed.handle)
+    if state.kind != "invitation" or state.progress == "otp_verified":
+        raise HTTPException(
+            status_code=409,
+            detail="مرحله ثبت‌نام با این درخواست سازگار نیست",
+            headers=_registration_no_store_headers(),
+        )
+
+    active_otp_key = f"reg_otp:{state.invitation_token}"
+    active_otp = await redis.get(active_otp_key)
+    active_otp_ttl = int(await redis.ttl(active_otp_key) or 0)
+    if active_otp is not None and active_otp_ttl > 0:
+        if state.progress != "otp_requested":
+            state = state.model_copy(update={"progress": "otp_requested"})
+            await _update_registration_context(redis, handle, state)
+        return _registration_context_json_response(
+            {
+                "detail": "کد تایید ارسال شد",
+                "expires_in": active_otp_ttl,
+            }
+        )
+
+    try:
+        receipt = await register_otp_request(
+            RegisterOTPRequest(token=state.invitation_token),
+            db=db,
+        )
+    except HTTPException as exc:
+        exc.headers = {**(exc.headers or {}), **_registration_no_store_headers()}
+        raise
+
+    state = state.model_copy(update={"progress": "otp_requested"})
+    await _update_registration_context(redis, handle, state)
+    return _registration_context_json_response(receipt)
+
+
+@router.post("/registration-context/otp/verify")
+async def verify_registration_context_otp(
+    req: RegistrationContextOTPVerifyRequest,
+    raw_request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    _assert_registration_context_same_origin(raw_request)
+    redis = await get_redis()
+    pending_handle = _registration_context_handle(raw_request)
+    if await _registration_context_is_completed(redis, pending_handle):
+        return _registration_context_completed_response(pending_handle)
+    try:
+        handle, state, _ = await _load_registration_context(db, redis, raw_request)
+    except RegistrationContextAlreadyCompleted as completed:
+        return _registration_context_completed_response(completed.handle)
+    if state.kind != "invitation":
+        raise HTTPException(
+            status_code=409,
+            detail="مرحله ثبت‌نام با این درخواست سازگار نیست",
+            headers=_registration_no_store_headers(),
+        )
+
+    if state.progress == "otp_verified":
+        return _registration_context_json_response({"detail": "کد تایید شد"})
+    if state.progress != "otp_requested":
+        raise HTTPException(
+            status_code=409,
+            detail="مرحله ثبت‌نام با این درخواست سازگار نیست",
+            headers=_registration_no_store_headers(),
+        )
+
+    # If the OTP was consumed but the previous response was lost, only a proof
+    # bound to this opaque cookie handle may recover the verified phase. A raw
+    # invitation bearer must never inherit completion authority.
+    verified_key = _registration_context_verified_key(handle)
+    if await redis.get(verified_key):
+        state = state.model_copy(update={"progress": "otp_verified"})
+        await _update_registration_context(redis, handle, state)
+        return _registration_context_json_response({"detail": "کد تایید شد"})
+
+    remaining = int(await redis.ttl(_registration_context_key(handle)) or 0)
+    if remaining <= 0:
+        await _delete_registration_context(redis, handle, terminal=True)
+        raise HTTPException(
+            status_code=410,
+            detail="جلسه ثبت‌نام در دسترس نیست یا منقضی شده است",
+            headers=_registration_no_store_headers(clear_cookie=True),
+        )
+
+    try:
+        receipt = await register_otp_verify(
+            RegisterOTPVerify(token=state.invitation_token, code=req.code),
+            db=db,
+            verification_key=verified_key,
+            verification_ttl=min(REGISTRATION_CONTEXT_TTL_SECONDS, remaining),
+        )
+    except HTTPException as exc:
+        exc.headers = {**(exc.headers or {}), **_registration_no_store_headers()}
+        raise
+
+    state = state.model_copy(update={"progress": "otp_verified"})
+    await _update_registration_context(redis, handle, state)
+    return _registration_context_json_response(receipt)
+
+
+@router.post("/registration-context/complete")
+async def complete_registration_context(
+    req: RegistrationContextCompleteRequest,
+    raw_request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    _assert_registration_context_same_origin(raw_request)
+    redis = await get_redis()
+    pending_handle = _registration_context_handle(raw_request)
+    if await _registration_context_is_completed(redis, pending_handle):
+        return _registration_context_completed_response(pending_handle)
+    try:
+        handle, state, _ = await _load_registration_context(db, redis, raw_request)
+    except RegistrationContextAlreadyCompleted as completed:
+        return _registration_context_completed_response(completed.handle)
+    if state.progress != "otp_verified":
+        raise HTTPException(
+            status_code=409,
+            detail="لطفاً ابتدا کد تایید را وارد کنید",
+            headers=_registration_no_store_headers(),
+        )
+
+    try:
+        receipt = await register_complete(
+            RegisterComplete(token=state.invitation_token, address=req.address),
+            raw_request=raw_request,
+            db=db,
+            verified_invitation_token=state.invitation_token,
+        )
+    except HTTPException as exc:
+        exc.headers = {**(exc.headers or {}), **_registration_no_store_headers()}
+        raise
+
+    await _store_registration_context_completion(redis, handle)
+    await _delete_registration_context(redis, handle, terminal=True)
+    response = _registration_context_json_response(receipt)
+    # Keep the opaque handle until the client acknowledges the receipt via the
+    # clear endpoint. If headers/body delivery is ambiguous, the bounded
+    # completion marker remains reachable without persisting auth tokens.
+    _set_registration_context_cookie(response, handle)
+    return response
+
+
+@router.post("/registration-context/clear", status_code=204)
+async def clear_registration_context(raw_request: Request):
+    _assert_registration_context_same_origin(raw_request)
+    redis = await get_redis()
+    handle = _registration_context_handle(raw_request)
+    await _delete_registration_context(
+        redis,
+        handle,
+        terminal=True,
+    )
+    if handle:
+        await redis.delete(_registration_context_completion_key(handle))
+    response = Response(status_code=204, headers=_registration_no_store_headers())
+    _clear_registration_context_cookie(response)
+    return response
 
 @router.post("/refresh", response_model=Token)
 async def refresh_access_token(
@@ -1726,6 +2588,19 @@ async def verify_otp(
         mobile = normalize_persian_numerals(request.mobile_number)
     else:
         raise HTTPException(status_code=400, detail="شماره موبایل نامعتبر است")
+
+    # If a prior verify consumed the OTP and committed the opaque registration
+    # cookie but its response body was lost, resume from that server-bound
+    # context before consulting the now-consumed code.
+    resumed_registration = await _resume_registration_required_context(
+        db,
+        redis,
+        raw_request,
+        mobile=mobile,
+    )
+    if resumed_registration is not None:
+        return resumed_registration
+
     code = normalize_persian_numerals(request.code)
 
     otp_key = f"otp:{mobile}"
@@ -1777,16 +2652,17 @@ async def verify_otp(
         await redis.delete(otp_key)
         await redis.delete(f"otp_limit:{mobile}")
         await _clear_otp_verify_subject_failures(redis, subject=mobile)
-        registration_token, expires_in = await _store_registration_session(
-            redis,
+        context_state = RegistrationContextState(
+            kind="registration",
             invitation_token=invitation.token,
+            progress="otp_verified",
         )
-        return {
-            "status": "registration_required",
-            "registration_token": registration_token,
-            "expires_in": expires_in,
-            "invitation": _serialize_pending_registration_context(invitation).model_dump(),
-        }
+        context_handle, expires_in = await _store_registration_context(redis, context_state)
+        return _registration_required_response(
+            invitation,
+            context_handle,
+            expires_in,
+        )
 
     if get_user_account_status(user).value == "inactive":
         await redis.delete(otp_key)

@@ -8,12 +8,8 @@ const apiFetchMock = vi.fn()
 const pushBackStateMock = vi.fn()
 const popBackStateMock = vi.fn()
 const clearBackStackMock = vi.fn()
-const originalMatchMedia = window.matchMedia
-const originalDeferredPrompt = (window as any).deferredPrompt
 const originalOTPCredential = (window as any).OTPCredential
 const originalNavigatorCredentials = navigator.credentials
-const originalNavigatorStandalone = (window.navigator as any).standalone
-const originalNavigatorUserAgent = window.navigator.userAgent
 const originalWindowLocation = window.location
 
 vi.mock('vue-router', () => ({
@@ -42,6 +38,23 @@ function makeJsonResponse(payload: unknown, ok = true, status = ok ? 200 : 400) 
   }
 }
 
+function makeFetchResponse(payload: unknown, ok = true, status = ok ? 200 : 400): Response {
+  return makeJsonResponse(payload, ok, status) as unknown as Response
+}
+
+interface LoginViewTestVm {
+  step:
+    | 'mobile'
+    | 'otp'
+    | 'waiting_approval'
+    | 'recovery_waiting'
+    | 'recovery_identity'
+    | 'recovery_submitted'
+    | 'recovery_approved'
+    | 'recovery_rejected'
+    | 'recovery_expired'
+}
+
 function findButtonByText(wrapper: ReturnType<typeof mount>, text: string) {
   const button = wrapper.findAll('button').find((candidate) => candidate.text().includes(text))
   if (!button) {
@@ -51,7 +64,7 @@ function findButtonByText(wrapper: ReturnType<typeof mount>, text: string) {
 }
 
 async function requestOtpFromMobileStep(wrapper: ReturnType<typeof mount>) {
-  await findButtonByText(wrapper, 'دریافت کد تایید').trigger('click')
+  await findButtonByText(wrapper, 'دریافت کد تأیید').trigger('click')
   await flushPromises()
 }
 
@@ -69,45 +82,30 @@ describe('LoginView.vue', () => {
     sessionStorage.clear()
     vi.stubGlobal('fetch', vi.fn())
     apiFetchMock.mockImplementation((...args: Parameters<typeof fetch>) => fetch(...args) as any)
-    window.matchMedia = vi.fn().mockReturnValue({
-      matches: false,
-      media: '',
-      onchange: null,
-      addListener: vi.fn(),
-      removeListener: vi.fn(),
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
-      dispatchEvent: vi.fn(),
-    }) as any
-    ;(window as any).deferredPrompt = null
   })
 
   afterEach(() => {
     vi.useRealTimers()
     vi.unstubAllGlobals()
     vi.unstubAllEnvs()
-    window.matchMedia = originalMatchMedia
-    ;(window as any).deferredPrompt = originalDeferredPrompt ?? null
-
     if (typeof originalOTPCredential === 'undefined') {
       Reflect.deleteProperty(window as any, 'OTPCredential')
     } else {
-      Object.defineProperty(window, 'OTPCredential', { configurable: true, value: originalOTPCredential })
+      Object.defineProperty(window, 'OTPCredential', {
+        configurable: true,
+        value: originalOTPCredential,
+      })
     }
 
     if (typeof originalNavigatorCredentials === 'undefined') {
       Reflect.deleteProperty(navigator, 'credentials')
     } else {
-      Object.defineProperty(navigator, 'credentials', { configurable: true, value: originalNavigatorCredentials })
+      Object.defineProperty(navigator, 'credentials', {
+        configurable: true,
+        value: originalNavigatorCredentials,
+      })
     }
 
-    if (typeof originalNavigatorStandalone === 'undefined') {
-      Reflect.deleteProperty(window.navigator as any, 'standalone')
-    } else {
-      Object.defineProperty(window.navigator, 'standalone', { configurable: true, value: originalNavigatorStandalone })
-    }
-
-    Object.defineProperty(window.navigator, 'userAgent', { configurable: true, value: originalNavigatorUserAgent })
     Object.defineProperty(window, 'location', { configurable: true, value: originalWindowLocation })
   })
 
@@ -116,7 +114,8 @@ describe('LoginView.vue', () => {
     fetchMock.mockResolvedValueOnce(makeJsonResponse({ method: 'telegram' }) as any)
     const LoginView = (await import('./LoginView.vue')).default
 
-    const wrapper = mount(LoginView)
+    const wrapper = mount(LoginView, { attachTo: document.body })
+    expect(wrapper.findAll('main')).toHaveLength(1)
     await wrapper.get('input[type="tel"]').setValue('09123456789')
     await requestOtpFromMobileStep(wrapper)
 
@@ -125,18 +124,22 @@ describe('LoginView.vue', () => {
       expect.objectContaining({ method: 'POST' }),
     )
     expect(pushBackStateMock).toHaveBeenCalledTimes(1)
-    expect(wrapper.text()).toContain('کد ارسال شده به 09123456789')
+    expect(wrapper.text()).toContain('کد ارسال‌شده را وارد کنید.')
+    expect(wrapper.get('.ui-v2-auth-login-meta bdi').text()).toBe('0912****789')
+    expect(wrapper.html()).not.toContain('09123456789')
     expect(wrapper.text()).toContain('00:30')
     wrapper.unmount()
   }, 10000)
 
   it('accepts the authoritative staging-log OTP delivery receipt', async () => {
     const fetchMock = vi.mocked(fetch)
-    fetchMock.mockResolvedValueOnce(makeJsonResponse({
-      detail: 'کد تایید در لاگ staging ثبت شد',
-      method: 'log',
-      expires_in: 120,
-    }) as any)
+    fetchMock.mockResolvedValueOnce(
+      makeJsonResponse({
+        detail: 'کد تایید در لاگ staging ثبت شد',
+        method: 'log',
+        expires_in: 120,
+      }) as any,
+    )
     const LoginView = (await import('./LoginView.vue')).default
     const wrapper = mount(LoginView)
 
@@ -144,7 +147,8 @@ describe('LoginView.vue', () => {
     await requestOtpFromMobileStep(wrapper)
 
     expect(wrapper.find('input[autocomplete="one-time-code"]').exists()).toBe(true)
-    expect(wrapper.text()).toContain('کد ارسال شده به 09125555555')
+    expect(wrapper.text()).toContain('کد ارسال‌شده را وارد کنید.')
+    expect(wrapper.get('.ui-v2-auth-login-meta bdi').text()).toBe('0912****555')
     expect(wrapper.text()).toContain('02:00 تا ارسال مجدد')
     wrapper.unmount()
   })
@@ -152,14 +156,16 @@ describe('LoginView.vue', () => {
   it('ignores an OTP request response after the submitted mobile context changes', async () => {
     const fetchMock = vi.mocked(fetch)
     let resolveRequest!: (response: unknown) => void
-    fetchMock.mockReturnValueOnce(new Promise((resolve) => {
-      resolveRequest = resolve
-    }) as any)
+    fetchMock.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveRequest = resolve
+      }) as any,
+    )
     const LoginView = (await import('./LoginView.vue')).default
     const wrapper = mount(LoginView)
 
     await wrapper.get('input[type="tel"]').setValue('09121111111')
-    void findButtonByText(wrapper, 'دریافت کد تایید').trigger('click')
+    void findButtonByText(wrapper, 'دریافت کد تأیید').trigger('click')
     await flushPromises()
     expect(fetchMock).toHaveBeenCalledTimes(1)
 
@@ -170,18 +176,20 @@ describe('LoginView.vue', () => {
     expect(wrapper.find('input[autocomplete="one-time-code"]').exists()).toBe(false)
     expect((wrapper.get('input[type="tel"]').element as HTMLInputElement).value).toBe('09122222222')
     expect(pushBackStateMock).not.toHaveBeenCalled()
-    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({ mobile_number: '09121111111' })
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
+      mobile_number: '09121111111',
+    })
     wrapper.unmount()
   })
 
   it('does not apply a pending verify response after edit-number invalidates the OTP context', async () => {
     const fetchMock = vi.mocked(fetch)
     let resolveVerify!: (response: unknown) => void
-    fetchMock
-      .mockResolvedValueOnce(makeJsonResponse({ method: 'sms' }) as any)
-      .mockReturnValueOnce(new Promise((resolve) => {
+    fetchMock.mockResolvedValueOnce(makeJsonResponse({ method: 'sms' }) as any).mockReturnValueOnce(
+      new Promise((resolve) => {
         resolveVerify = resolve
-      }) as any)
+      }) as any,
+    )
     const LoginView = (await import('./LoginView.vue')).default
     const wrapper = mount(LoginView)
 
@@ -192,7 +200,9 @@ describe('LoginView.vue', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2)
 
     await findButtonByText(wrapper, 'ویرایش شماره').trigger('click')
-    resolveVerify(makeJsonResponse({ access_token: 'stale-access', refresh_token: 'stale-refresh' }))
+    resolveVerify(
+      makeJsonResponse({ access_token: 'stale-access', refresh_token: 'stale-refresh' }),
+    )
     await flushPromises()
 
     expect(wrapper.find('input[type="tel"]').exists()).toBe(true)
@@ -215,7 +225,7 @@ describe('LoginView.vue', () => {
       )
 
     const LoginView = (await import('./LoginView.vue')).default
-    const wrapper = mount(LoginView)
+    const wrapper = mount(LoginView, { attachTo: document.body })
 
     await wrapper.get('input[type="tel"]').setValue('09123456789')
     await requestOtpFromMobileStep(wrapper)
@@ -227,8 +237,34 @@ describe('LoginView.vue', () => {
       '/api/auth/verify-otp',
       expect.objectContaining({ method: 'POST' }),
     )
-    expect(wrapper.text()).toContain('در انتظار تایید')
-    expect(wrapper.text()).toContain('درخواست ورود شما به دستگاه اصلی ارسال شد')
+    expect(wrapper.text()).toContain('در انتظار تأیید')
+    expect(wrapper.text()).toContain('درخواست ورود به دستگاه اصلی شما ارسال شد')
+    expect(wrapper.get('[data-auth-status-step]').attributes('tabindex')).toBe('-1')
+    expect(document.activeElement).toBe(wrapper.get('[data-auth-status-step]').element)
+    wrapper.unmount()
+  })
+
+  it('moves focus to every approval and recovery status transition', async () => {
+    const LoginView = (await import('./LoginView.vue')).default
+    const wrapper = mount(LoginView, { attachTo: document.body })
+    const vm = wrapper.vm as unknown as LoginViewTestVm
+
+    for (const status of [
+      'waiting_approval',
+      'recovery_waiting',
+      'recovery_identity',
+      'recovery_submitted',
+      'recovery_approved',
+      'recovery_rejected',
+      'recovery_expired',
+    ]) {
+      vm.step = status
+      await flushPromises()
+      const container = wrapper.get('[data-auth-status-step]')
+      expect(container.attributes('tabindex')).toBe('-1')
+      expect(document.activeElement).toBe(container.element)
+    }
+
     wrapper.unmount()
   })
 
@@ -239,7 +275,6 @@ describe('LoginView.vue', () => {
       .mockResolvedValueOnce(
         makeJsonResponse({
           status: 'registration_required',
-          registration_token: 'REG-123',
         }) as any,
       )
 
@@ -252,8 +287,106 @@ describe('LoginView.vue', () => {
     await flushPromises()
 
     expect(clearBackStackMock).toHaveBeenCalled()
-    expect(routerPushMock).toHaveBeenCalledWith('/register?registration_token=REG-123')
+    expect(routerPushMock).toHaveBeenCalledWith({ name: 'web-register' })
+    expect(String(routerPushMock.mock.calls[0]?.[0])).not.toMatch(/REG-|registration_token/)
+    expect(wrapper.html()).not.toMatch(/REG-|registration_token/)
+    expect(JSON.stringify(sessionStorage)).not.toMatch(/REG-|registration_token/)
+    expect(JSON.stringify(localStorage)).not.toMatch(/REG-|registration_token/)
     expect(localStorage.getItem('auth_token')).toBeNull()
+    wrapper.unmount()
+  })
+
+  it('keeps the OTP context and offers a real retry when registration navigation fails', async () => {
+    routerPushMock
+      .mockRejectedValueOnce(new Error('registration chunk unavailable'))
+      .mockResolvedValueOnce(undefined)
+    const fetchMock = vi.mocked(fetch)
+    fetchMock
+      .mockResolvedValueOnce(makeFetchResponse({ method: 'sms' }))
+      .mockResolvedValueOnce(makeFetchResponse({ status: 'registration_required' }))
+      .mockResolvedValueOnce(makeFetchResponse({ status: 'registration_required' }))
+
+    const LoginView = (await import('./LoginView.vue')).default
+    const wrapper = mount(LoginView)
+
+    await wrapper.get('input[type="tel"]').setValue('09123456789')
+    await requestOtpFromMobileStep(wrapper)
+    const codeInput = wrapper.get('input[autocomplete="one-time-code"]')
+    await codeInput.setValue('12345')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('ادامه ثبت‌نام اکنون ممکن نشد. دوباره تلاش کنید.')
+    expect((codeInput.element as HTMLInputElement).value).toBe('12345')
+    expect(clearBackStackMock).not.toHaveBeenCalled()
+
+    await findButtonByText(wrapper, 'تأیید و ادامه').trigger('click')
+    await flushPromises()
+
+    expect(routerPushMock).toHaveBeenCalledTimes(2)
+    expect(clearBackStackMock).toHaveBeenCalledTimes(1)
+    expect((codeInput.element as HTMLInputElement).value).toBe('')
+    expect(sessionStorage.getItem('login_otp_attempt_v1')).toBeNull()
+    wrapper.unmount()
+  })
+
+  it('recovers a committed registration cookie when the verify response body is lost', async () => {
+    const fetchMock = vi.mocked(fetch)
+    fetchMock
+      .mockResolvedValueOnce(makeFetchResponse({ method: 'sms' }))
+      .mockRejectedValueOnce(new TypeError('response lost'))
+      .mockResolvedValueOnce(
+        makeFetchResponse({
+          kind: 'registration',
+          account_name: 'user1',
+          mobile_number: '0912****789',
+          role: 'عادی',
+          progress: 'otp_verified',
+          requires_otp: false,
+        }),
+      )
+
+    const LoginView = (await import('./LoginView.vue')).default
+    const wrapper = mount(LoginView)
+
+    await wrapper.get('input[type="tel"]').setValue('09123456789')
+    await requestOtpFromMobileStep(wrapper)
+    await wrapper.get('input[autocomplete="one-time-code"]').setValue('54321')
+    await flushPromises()
+    await flushPromises()
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      '/api/auth/registration-context',
+      expect.objectContaining({ method: 'POST', credentials: 'same-origin' }),
+    )
+    expect(routerPushMock).toHaveBeenCalledWith({ name: 'web-register' })
+    expect(clearBackStackMock).toHaveBeenCalled()
+    expect(sessionStorage.getItem('login_otp_attempt_v1')).toBeNull()
+    expect(wrapper.html()).not.toContain('54321')
+    wrapper.unmount()
+  })
+
+  it('fails closed when neither the verify response nor a registration cookie arrived', async () => {
+    const fetchMock = vi.mocked(fetch)
+    fetchMock
+      .mockResolvedValueOnce(makeFetchResponse({ method: 'sms' }))
+      .mockRejectedValueOnce(new TypeError('response lost'))
+      .mockResolvedValueOnce(
+        makeFetchResponse({ detail: 'registration context missing' }, false, 410),
+      )
+
+    const LoginView = (await import('./LoginView.vue')).default
+    const wrapper = mount(LoginView)
+
+    await wrapper.get('input[type="tel"]').setValue('09123456789')
+    await requestOtpFromMobileStep(wrapper)
+    await wrapper.get('input[autocomplete="one-time-code"]').setValue('54321')
+    await flushPromises()
+    await flushPromises()
+
+    expect(routerPushMock).not.toHaveBeenCalledWith({ name: 'web-register' })
+    expect(wrapper.text()).toContain('ارتباط با سرور برقرار نشد.')
+    expect((wrapper.vm as unknown as LoginViewTestVm).step).toBe('otp')
     wrapper.unmount()
   })
 
@@ -300,20 +433,138 @@ describe('LoginView.vue', () => {
     wrapper.unmount()
   })
 
+  it('retains the intended route and OTP state when authenticated navigation fails, then retries without replaying OTP', async () => {
+    sessionStorage.setItem(
+      'auth_intended_route_v1',
+      JSON.stringify({
+        version: 1,
+        path: '/profile?tab=security',
+        createdAt: Date.now(),
+      }),
+    )
+    routerPushMock
+      .mockResolvedValueOnce({ type: 4, to: '/profile?tab=security' })
+      .mockResolvedValueOnce(undefined)
+    const fetchMock = vi.mocked(fetch)
+    fetchMock.mockResolvedValueOnce(makeFetchResponse({ method: 'sms' })).mockResolvedValueOnce(
+      makeFetchResponse({
+        access_token: 'retry-access',
+        refresh_token: 'retry-refresh',
+      }),
+    )
+    apiFetchMock.mockImplementation((url: string, options?: RequestInit) => {
+      if (url === '/api/auth/me') {
+        return Promise.resolve(
+          makeFetchResponse({
+            id: 7,
+            role: 'عادی',
+            full_name: 'کاربر',
+            account_name: 'retry-user',
+          }),
+        )
+      }
+      return fetch(url, options)
+    })
+
+    const LoginView = (await import('./LoginView.vue')).default
+    const wrapper = mount(LoginView)
+
+    await wrapper.get('input[type="tel"]').setValue('09123456789')
+    await requestOtpFromMobileStep(wrapper)
+    const codeInput = wrapper.get('input[autocomplete="one-time-code"]')
+    await codeInput.setValue('12345')
+    await flushPromises()
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('انتقال به صفحه بعد ممکن نشد')
+    expect((codeInput.element as HTMLInputElement).value).toBe('12345')
+    expect(wrapper.get('input[autocomplete="one-time-code"]').attributes('disabled')).toBeDefined()
+    expect(findButtonByText(wrapper, 'ویرایش شماره').attributes('disabled')).toBeDefined()
+    expect(findButtonByText(wrapper, 'ورود با حساب دیگر').exists()).toBe(true)
+    expect(sessionStorage.getItem('auth_intended_route_v1')).not.toBeNull()
+    expect(clearBackStackMock).not.toHaveBeenCalled()
+    expect(setupExpiryTimerMock).not.toHaveBeenCalled()
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+
+    await findButtonByText(wrapper, 'ادامه ورود').trigger('click')
+    await flushPromises()
+    await flushPromises()
+
+    expect(routerPushMock).toHaveBeenNthCalledWith(1, '/profile?tab=security')
+    expect(routerPushMock).toHaveBeenNthCalledWith(2, '/profile?tab=security')
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(sessionStorage.getItem('auth_intended_route_v1')).toBeNull()
+    expect((codeInput.element as HTMLInputElement).value).toBe('')
+    expect(clearBackStackMock).toHaveBeenCalledTimes(1)
+    expect(setupExpiryTimerMock).toHaveBeenCalledTimes(1)
+    wrapper.unmount()
+  })
+
+  it('requires an explicit logout before starting a different identity after navigation fails', async () => {
+    routerPushMock.mockRejectedValueOnce(new Error('home unavailable'))
+    const fetchMock = vi.mocked(fetch)
+    fetchMock
+      .mockResolvedValueOnce(makeFetchResponse({ method: 'sms' }))
+      .mockResolvedValueOnce(
+        makeFetchResponse({ access_token: 'old-access', refresh_token: 'old-refresh' }),
+      )
+      .mockResolvedValueOnce(makeFetchResponse({ method: 'sms' }))
+    apiFetchMock.mockImplementation((url: string, options?: RequestInit) => {
+      if (url === '/api/auth/me') {
+        return Promise.resolve(makeFetchResponse({ id: 8, role: 'عادی', account_name: 'old-user' }))
+      }
+      return fetch(url, options)
+    })
+
+    const LoginView = (await import('./LoginView.vue')).default
+    const wrapper = mount(LoginView)
+    await wrapper.get('input[type="tel"]').setValue('09121111111')
+    await requestOtpFromMobileStep(wrapper)
+    await wrapper.get('input[autocomplete="one-time-code"]').setValue('12345')
+    await flushPromises()
+    await flushPromises()
+
+    expect(localStorage.getItem('auth_token')).toBe('old-access')
+    const physicalBackHandler = pushBackStateMock.mock.calls[0]?.[0] as (() => void) | undefined
+    expect(physicalBackHandler).toBeTypeOf('function')
+    physicalBackHandler?.()
+    await flushPromises()
+    expect(wrapper.find('input[autocomplete="one-time-code"]').exists()).toBe(true)
+    expect(localStorage.getItem('auth_token')).toBe('old-access')
+
+    await findButtonByText(wrapper, 'ورود با حساب دیگر').trigger('click')
+    await flushPromises()
+
+    expect(localStorage.getItem('auth_token')).toBeNull()
+    expect(localStorage.getItem('refresh_token')).toBeNull()
+    expect(localStorage.getItem('current_user_summary')).toBeNull()
+    expect(wrapper.find('input[type="tel"]').exists()).toBe(true)
+
+    await wrapper.get('input[type="tel"]').setValue('09122222222')
+    await requestOtpFromMobileStep(wrapper)
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+    expect(routerPushMock).toHaveBeenCalledTimes(1)
+    wrapper.unmount()
+  })
+
   it('shows validation errors, enters the OTP step on rate limiting, and lets the user go back to the mobile step', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-07-12T02:00:00.000Z'))
     const fetchMock = vi.mocked(fetch)
     fetchMock.mockResolvedValueOnce(
-      makeJsonResponse({
-        detail: 'کد قبلی هنوز معتبر است. لطفاً صبر کنید.',
-        code: 'otp_active',
-        otp_request_id: '23bc1f50-c3ed-49f7-8dc0-c736a968448c',
-        method: 'sms',
-        retry_after: 45,
-        expires_in: 45,
-        expires_at: '2026-07-12T02:00:45.000Z',
-      }, false, 429) as any,
+      makeJsonResponse(
+        {
+          detail: 'کد قبلی هنوز معتبر است. لطفاً صبر کنید.',
+          code: 'otp_active',
+          otp_request_id: '23bc1f50-c3ed-49f7-8dc0-c736a968448c',
+          method: 'sms',
+          retry_after: 45,
+          expires_in: 45,
+          expires_at: '2026-07-12T02:00:45.000Z',
+        },
+        false,
+        429,
+      ) as any,
     )
 
     const LoginView = (await import('./LoginView.vue')).default
@@ -329,7 +580,8 @@ describe('LoginView.vue', () => {
       '/api/auth/request-otp',
       expect.objectContaining({ method: 'POST' }),
     )
-    expect(wrapper.text()).toContain('کد ارسال شده به 09123456789')
+    expect(wrapper.text()).toContain('کد ارسال‌شده را وارد کنید.')
+    expect(wrapper.get('.ui-v2-auth-login-meta bdi').text()).toBe('0912****789')
     expect(wrapper.text()).toContain('00:45')
 
     vi.advanceTimersByTime(1000)
@@ -346,14 +598,16 @@ describe('LoginView.vue', () => {
     vi.useFakeTimers()
     const fetchMock = vi.mocked(fetch)
     fetchMock
-      .mockResolvedValueOnce(makeJsonResponse({
-        otp_request_id: '6afdb938-2061-43a6-a35f-37d5db9d9e2c',
-        method: 'telegram',
-        expires_in: 120,
-        expires_at: new Date(Date.now() + 120_000).toISOString(),
-        sms_fallback_in: 40,
-        sms_fallback_at: new Date(Date.now() + 40_000).toISOString(),
-      }) as any)
+      .mockResolvedValueOnce(
+        makeJsonResponse({
+          otp_request_id: '6afdb938-2061-43a6-a35f-37d5db9d9e2c',
+          method: 'telegram',
+          expires_in: 120,
+          expires_at: new Date(Date.now() + 120_000).toISOString(),
+          sms_fallback_in: 40,
+          sms_fallback_at: new Date(Date.now() + 40_000).toISOString(),
+        }) as any,
+      )
       .mockResolvedValueOnce(
         makeJsonResponse({
           status: 'approval_required',
@@ -382,9 +636,12 @@ describe('LoginView.vue', () => {
     await vi.advanceTimersByTimeAsync(2000)
     await flushPromises()
 
-    expect(fetchMock).toHaveBeenCalledWith('/api/sessions/login-requests/req-2/status', expect.objectContaining({
-      signal: expect.any(AbortSignal),
-    }))
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/sessions/login-requests/req-2/status',
+      expect.objectContaining({
+        signal: expect.any(AbortSignal),
+      }),
+    )
     expect(wrapper.text()).toContain('درخواست ورود شما رد شد.')
     expect(wrapper.find('input[autocomplete="one-time-code"]').exists()).toBe(true)
     wrapper.unmount()
@@ -394,14 +651,18 @@ describe('LoginView.vue', () => {
     vi.useFakeTimers()
     const fetchMock = vi.mocked(fetch)
     fetchMock
-      .mockResolvedValueOnce(makeJsonResponse({
-        method: 'telegram',
-        expires_in: 120,
-      }) as any)
-      .mockResolvedValueOnce(makeJsonResponse({
-        method: 'sms',
-        expires_in: 85,
-      }) as any)
+      .mockResolvedValueOnce(
+        makeJsonResponse({
+          method: 'telegram',
+          expires_in: 120,
+        }) as any,
+      )
+      .mockResolvedValueOnce(
+        makeJsonResponse({
+          method: 'sms',
+          expires_in: 85,
+        }) as any,
+      )
 
     const LoginView = (await import('./LoginView.vue')).default
     const wrapper = mount(LoginView)
@@ -431,14 +692,16 @@ describe('LoginView.vue', () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-07-12T03:00:00.000Z'))
     const fetchMock = vi.mocked(fetch)
-    fetchMock.mockResolvedValueOnce(makeJsonResponse({
-      otp_request_id: '53a42ed0-4165-41db-a98f-4e18b205bca1',
-      method: 'telegram',
-      expires_in: 120,
-      expires_at: '2026-07-12T03:02:00.000Z',
-      sms_fallback_in: 40,
-      sms_fallback_at: '2026-07-12T03:00:40.000Z',
-    }) as any)
+    fetchMock.mockResolvedValueOnce(
+      makeJsonResponse({
+        otp_request_id: '53a42ed0-4165-41db-a98f-4e18b205bca1',
+        method: 'telegram',
+        expires_in: 120,
+        expires_at: '2026-07-12T03:02:00.000Z',
+        sms_fallback_in: 40,
+        sms_fallback_at: '2026-07-12T03:00:40.000Z',
+      }) as any,
+    )
 
     const LoginView = (await import('./LoginView.vue')).default
     const wrapper = mount(LoginView)
@@ -462,12 +725,15 @@ describe('LoginView.vue', () => {
   it('restores an opaque active OTP request after refresh without persisting mobile PII', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-07-12T04:00:00.000Z'))
-    sessionStorage.setItem('login_otp_attempt_v1', JSON.stringify({
-      requestId: '0d5c80cb-f5a6-40e5-b3cb-f71636d94625',
-      method: 'telegram',
-      expiresAt: '2026-07-12T04:02:00.000Z',
-      smsFallbackAt: '2026-07-12T04:00:40.000Z',
-    }))
+    sessionStorage.setItem(
+      'login_otp_attempt_v1',
+      JSON.stringify({
+        requestId: '0d5c80cb-f5a6-40e5-b3cb-f71636d94625',
+        method: 'telegram',
+        expiresAt: '2026-07-12T04:02:00.000Z',
+        smsFallbackAt: '2026-07-12T04:00:40.000Z',
+      }),
+    )
     const fetchMock = vi.mocked(fetch)
     fetchMock.mockResolvedValueOnce(makeJsonResponse({ access_token: 'restored-access' }) as any)
 
@@ -503,11 +769,14 @@ describe('LoginView.vue', () => {
     expect(malformedWrapper.find('input[autocomplete="one-time-code"]').exists()).toBe(false)
     malformedWrapper.unmount()
 
-    sessionStorage.setItem('login_otp_attempt_v1', JSON.stringify({
-      requestId: '',
-      method: 'sms',
-      expiresAt: '2026-07-12T03:59:59.000Z',
-    }))
+    sessionStorage.setItem(
+      'login_otp_attempt_v1',
+      JSON.stringify({
+        requestId: '',
+        method: 'sms',
+        expiresAt: '2026-07-12T03:59:59.000Z',
+      }),
+    )
     const expiredWrapper = mount(LoginView)
     await flushPromises()
     expect(sessionStorage.getItem('login_otp_attempt_v1')).toBeNull()
@@ -518,11 +787,14 @@ describe('LoginView.vue', () => {
   it('keeps OTP timer and browser-storage failures bounded to client state', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-07-12T05:00:00.000Z'))
-    sessionStorage.setItem('login_otp_attempt_v1', JSON.stringify({
-      requestId: 'restored-request',
-      method: 'unknown',
-      expiresAt: '2026-07-12T05:02:00.000Z',
-    }))
+    sessionStorage.setItem(
+      'login_otp_attempt_v1',
+      JSON.stringify({
+        requestId: 'restored-request',
+        method: 'unknown',
+        expiresAt: '2026-07-12T05:02:00.000Z',
+      }),
+    )
     const LoginView = (await import('./LoginView.vue')).default
     const wrapper = mount(LoginView)
     await flushPromises()
@@ -531,8 +803,6 @@ describe('LoginView.vue', () => {
     expect(vm.lastMethod).toBeNull()
     expect(vm.smsFallbackAt).toBeNull()
     vm.startTimerUntil('not-a-date')
-    expect(vm.countdown).toBe(0)
-    vm.startTimer('not-a-number')
     expect(vm.countdown).toBe(0)
     expect(vm.otpDeliveryStatus).toBe('')
     vm.startTimerUntil(Date.now() + 10_000)
@@ -558,13 +828,17 @@ describe('LoginView.vue', () => {
     vi.useFakeTimers()
     const fetchMock = vi.mocked(fetch)
     fetchMock
-      .mockResolvedValueOnce(makeJsonResponse({ detail: { message: 'خطای ساخت‌یافته' } }, false, 400) as any)
-      .mockResolvedValueOnce(makeJsonResponse({
-        otp_request_id: 'automatic-request',
-        method: 'telegram',
-        expires_at: new Date(Date.now() + 120_000).toISOString(),
-        sms_fallback_at: new Date(Date.now() + 40_000).toISOString(),
-      }) as any)
+      .mockResolvedValueOnce(
+        makeJsonResponse({ detail: { message: 'خطای ساخت‌یافته' } }, false, 400) as any,
+      )
+      .mockResolvedValueOnce(
+        makeJsonResponse({
+          otp_request_id: 'automatic-request',
+          method: 'telegram',
+          expires_at: new Date(Date.now() + 120_000).toISOString(),
+          sms_fallback_at: new Date(Date.now() + 40_000).toISOString(),
+        }) as any,
+      )
     const LoginView = (await import('./LoginView.vue')).default
     const wrapper = mount(LoginView)
     await wrapper.get('input[type="tel"]').setValue('09123456789')
@@ -602,15 +876,19 @@ describe('LoginView.vue', () => {
     vi.useFakeTimers()
     const fetchMock = vi.mocked(fetch)
     fetchMock.mockResolvedValueOnce(
-      makeJsonResponse({
-        detail: 'کد قبلی هنوز معتبر است.',
-        code: 'otp_active',
-        delivery_contract: 'legacy',
-        manual_sms_resend: true,
-        legacy_sms_resend_at: new Date(Date.now() + 20_000).toISOString(),
-        expires_in: 73,
-        expires_at: new Date(Date.now() + 73_000).toISOString(),
-      }, false, 429) as any,
+      makeJsonResponse(
+        {
+          detail: 'کد قبلی هنوز معتبر است.',
+          code: 'otp_active',
+          delivery_contract: 'legacy',
+          manual_sms_resend: true,
+          legacy_sms_resend_at: new Date(Date.now() + 20_000).toISOString(),
+          expires_in: 73,
+          expires_at: new Date(Date.now() + 73_000).toISOString(),
+        },
+        false,
+        429,
+      ) as any,
     )
     const LoginView = (await import('./LoginView.vue')).default
     const wrapper = mount(LoginView)
@@ -633,7 +911,7 @@ describe('LoginView.vue', () => {
     const wrapper = mount(LoginView)
 
     expect(wrapper.text()).toContain('ثبت‌نام قبلاً تکمیل شده است')
-    expect(wrapper.text()).toContain('برای ورود به وب‌اپ، کد تایید دریافت کنید.')
+    expect(wrapper.text()).toContain('برای ورود به وب‌اپ، کد تأیید دریافت کنید.')
     expect(wrapper.find('input[type="tel"]').exists()).toBe(true)
     wrapper.unmount()
   })
@@ -660,7 +938,12 @@ describe('LoginView.vue', () => {
     apiFetchMock.mockImplementation((url: string, options?: RequestInit) => {
       if (url === '/api/auth/me') {
         return Promise.resolve(
-          makeJsonResponse({ id: 30, role: 'عادی', full_name: 'کاربر', account_name: 'user' }) as any,
+          makeJsonResponse({
+            id: 30,
+            role: 'عادی',
+            full_name: 'کاربر',
+            account_name: 'user',
+          }) as any,
         )
       }
       return fetch(url, options) as any
@@ -677,9 +960,12 @@ describe('LoginView.vue', () => {
     await flushPromises()
     await flushPromises()
 
-    expect(fetchMock).toHaveBeenCalledWith('/api/sessions/login-requests/req-approved-poll/status', expect.objectContaining({
-      signal: expect.any(AbortSignal),
-    }))
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/sessions/login-requests/req-approved-poll/status',
+      expect.objectContaining({
+        signal: expect.any(AbortSignal),
+      }),
+    )
     expect(localStorage.getItem('auth_token')).toBe('poll-access')
     expect(localStorage.getItem('refresh_token')).toBe('poll-refresh')
     expect(routerPushMock).toHaveBeenCalledWith('/')
@@ -723,19 +1009,25 @@ describe('LoginView.vue', () => {
     await findButtonByText(wrapper, 'به دستگاه قبلی دسترسی ندارم').trigger('click')
     await flushPromises()
 
-    expect(fetchMock).toHaveBeenCalledWith('/api/sessions/login-requests/req-cancel-recovery/recovery', expect.objectContaining({
-      method: 'POST',
-      signal: expect.any(AbortSignal),
-    }))
-    expect(wrapper.text()).toContain('در حال بررسی توسط مدیریت')
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/sessions/login-requests/req-cancel-recovery/recovery',
+      expect.objectContaining({
+        method: 'POST',
+        signal: expect.any(AbortSignal),
+      }),
+    )
+    expect(wrapper.text()).toContain('در حال بررسی مدیریت')
 
     await findButtonByText(wrapper, 'انصراف از درخواست').trigger('click')
     await flushPromises()
 
-    expect(fetchMock).toHaveBeenCalledWith('/api/sessions/login-requests/req-cancel-recovery/recovery/cancel', expect.objectContaining({
-      method: 'POST',
-      signal: expect.any(AbortSignal),
-    }))
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/sessions/login-requests/req-cancel-recovery/recovery/cancel',
+      expect.objectContaining({
+        method: 'POST',
+        signal: expect.any(AbortSignal),
+      }),
+    )
     expect(wrapper.text()).toContain('درخواست بازیابی لغو شد')
     expect(wrapper.find('input[type="tel"]').exists()).toBe(true)
     wrapper.unmount()
@@ -777,14 +1069,16 @@ describe('LoginView.vue', () => {
     await flushPromises()
 
     const hiddenInputs = wrapper.findAll('input[type="file"]')
-    const clickSpies = hiddenInputs.map(input => vi.spyOn(input.element as HTMLInputElement, 'click').mockImplementation(() => {}))
+    const clickSpies = hiddenInputs.map((input) =>
+      vi.spyOn(input.element as HTMLInputElement, 'click').mockImplementation(() => {}),
+    )
 
     await findButtonByText(wrapper, 'گالری').trigger('click')
     await findButtonByText(wrapper, 'دوربین').trigger('click')
     await findButtonByText(wrapper, 'فایل').trigger('click')
-    clickSpies.forEach(spy => expect(spy).toHaveBeenCalledTimes(1))
+    clickSpies.forEach((spy) => expect(spy).toHaveBeenCalledTimes(1))
 
-    await findButtonByText(wrapper, 'ارسال مدارک').trigger('click')
+    await findButtonByText(wrapper, 'ارسال مدرک برای بررسی').trigger('click')
     await flushPromises()
 
     expect(wrapper.text()).toContain('ابتدا تصویر یا فایل مدرک را انتخاب کنید')
@@ -793,7 +1087,7 @@ describe('LoginView.vue', () => {
       expect.anything(),
     )
 
-    clickSpies.forEach(spy => spy.mockRestore())
+    clickSpies.forEach((spy) => spy.mockRestore())
     wrapper.unmount()
   })
 
@@ -848,11 +1142,14 @@ describe('LoginView.vue', () => {
     await findButtonByText(wrapper, 'به دستگاه قبلی دسترسی ندارم').trigger('click')
     await flushPromises()
 
-    expect(fetchMock).toHaveBeenCalledWith('/api/sessions/login-requests/req-recovery/recovery', expect.objectContaining({
-      method: 'POST',
-      signal: expect.any(AbortSignal),
-    }))
-    expect(wrapper.text()).toContain('ارسال مدرک احراز هویت')
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/sessions/login-requests/req-recovery/recovery',
+      expect.objectContaining({
+        method: 'POST',
+        signal: expect.any(AbortSignal),
+      }),
+    )
+    expect(wrapper.text()).toContain('مدرک احراز هویت')
 
     const recoveryFile = new File(['card'], 'card.jpg', { type: 'image/jpeg' })
     const recoveryInput = wrapper.find('input[type="file"][accept="image/*"]')
@@ -862,12 +1159,15 @@ describe('LoginView.vue', () => {
     })
     await recoveryInput.trigger('change')
     await wrapper.get('textarea').setValue('کارت ملی')
-    await findButtonByText(wrapper, 'ارسال مدارک').trigger('click')
+    await findButtonByText(wrapper, 'ارسال مدرک برای بررسی').trigger('click')
     await flushPromises()
 
-    const identityCall = fetchMock.mock.calls.find(([url]) => url === '/api/sessions/login-requests/req-recovery/recovery/identity')
+    const identityCall = fetchMock.mock.calls.find(
+      ([url]) => url === '/api/sessions/login-requests/req-recovery/recovery/identity',
+    )
     expect(identityCall).toBeTruthy()
-    const identityBody = identityCall?.[1] && 'body' in identityCall[1] ? identityCall[1].body as FormData : null
+    const identityBody =
+      identityCall?.[1] && 'body' in identityCall[1] ? (identityCall[1].body as FormData) : null
     expect(identityBody?.get('caption')).toBe('کارت ملی')
     expect(identityBody?.get('file')).toBe(recoveryFile)
     expect(wrapper.text()).toContain('مدرک ارسال شد')
@@ -923,7 +1223,7 @@ describe('LoginView.vue', () => {
     await findButtonByText(wrapper, 'به دستگاه قبلی دسترسی ندارم').trigger('click')
     await flushPromises()
 
-    expect(wrapper.text()).toContain('درخواست شما تایید شد')
+    expect(wrapper.text()).toContain('درخواست شما تأیید شد')
     await findButtonByText(wrapper, 'ورود به سامانه').trigger('click')
     await flushPromises()
     await flushPromises()
@@ -965,11 +1265,14 @@ describe('LoginView.vue', () => {
     await flushPromises()
     await flushPromises()
 
-    expect(fetchMock).toHaveBeenCalledWith('/api/auth/dev-login', expect.objectContaining({
-      method: 'POST',
-      credentials: 'include',
-      signal: expect.any(AbortSignal),
-    }))
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/auth/dev-login',
+      expect.objectContaining({
+        method: 'POST',
+        credentials: 'include',
+        signal: expect.any(AbortSignal),
+      }),
+    )
     expect(localStorage.getItem('auth_token')).toBe('dev-access')
     expect(localStorage.getItem('refresh_token')).toBe('dev-refresh')
     expect(localStorage.getItem('suspended_refresh_token')).toBeNull()
@@ -998,12 +1301,8 @@ describe('LoginView.vue', () => {
     wrapper.unmount()
   })
 
-  it('keeps native-install browsers on the global prompt path and only shows the inline helper for manual-install browsers', async () => {
+  it('keeps public authentication free of local PWA install UI and event ownership', async () => {
     vi.useFakeTimers()
-    Object.defineProperty(window.navigator, 'userAgent', {
-      configurable: true,
-      value: 'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/124.0.0.0 Mobile Safari/537.36',
-    })
     const promptEvent = {
       preventDefault: vi.fn(),
       prompt: vi.fn(),
@@ -1021,30 +1320,12 @@ describe('LoginView.vue', () => {
     window.dispatchEvent(Object.assign(new Event('beforeinstallprompt'), promptEvent))
     await flushPromises()
 
-    expect(promptEvent.preventDefault).toHaveBeenCalled()
+    expect(promptEvent.preventDefault).not.toHaveBeenCalled()
     expect(wrapper.text()).not.toContain('نصب اپلیکیشن')
     expect(promptEvent.prompt).not.toHaveBeenCalled()
+    expect(wrapper.find('[class*="install"]').exists()).toBe(false)
 
     wrapper.unmount()
-    ;(window as any).deferredPrompt = null
-
-    Object.defineProperty(window.navigator, 'userAgent', {
-      configurable: true,
-      value: 'Mozilla/5.0 (X11; Linux x86_64; rv:125.0) Gecko/20100101 Firefox/125.0',
-    })
-
-    const fallbackWrapper = mount(LoginView)
-    await vi.advanceTimersByTimeAsync(4000)
-    await flushPromises()
-    expect(fallbackWrapper.text()).toContain('نصب اپلیکیشن')
-
-    await findButtonByText(fallbackWrapper, 'نصب اپلیکیشن').trigger('click')
-    await flushPromises()
-
-    expect(fallbackWrapper.text()).toContain('راهنمای نصب دستی')
-    expect(fallbackWrapper.text()).toContain('Chrome یا Edge')
-
-    fallbackWrapper.unmount()
   })
 
   it('surfaces request, resend, and verify error branches without leaving the current flow', async () => {
@@ -1062,7 +1343,8 @@ describe('LoginView.vue', () => {
     fetchMock.mockResolvedValueOnce(makeJsonResponse({ method: 'sms' }) as any)
     await wrapper.get('button.ui-button').trigger('click')
     await flushPromises()
-    expect(wrapper.text()).toContain('کد ارسال شده به 09123456789')
+    expect(wrapper.text()).toContain('کد ارسال‌شده را وارد کنید.')
+    expect(wrapper.get('.ui-v2-auth-login-meta bdi').text()).toBe('0912****789')
 
     await wrapper.get('input[autocomplete="one-time-code"]').setValue('12')
     await wrapper.get('button.ui-button').trigger('click')
@@ -1098,8 +1380,10 @@ describe('LoginView.vue', () => {
     await otpInput.setValue('24680')
     await flushPromises()
 
-    expect(wrapper.text()).toContain('پاسخ تایید ورود کامل نیست')
-    expect((wrapper.get('input[autocomplete="one-time-code"]').element as HTMLInputElement).value).toBe('24680')
+    expect(wrapper.text()).toContain('پاسخ تأیید ورود کامل نیست')
+    expect(
+      (wrapper.get('input[autocomplete="one-time-code"]').element as HTMLInputElement).value,
+    ).toBe('24680')
     expect(localStorage.getItem('auth_token')).toBeNull()
     expect(routerPushMock).not.toHaveBeenCalled()
     wrapper.unmount()
@@ -1131,7 +1415,7 @@ describe('LoginView.vue', () => {
       configurable: true,
       value: {
         ...originalWindowLocation,
-        href: 'https://coin.362514.ir/login',
+        href: 'https://coin.362514.ir/login?token=raw-secret&source=sms#otp',
         replace: replaceSpy,
       },
     })
@@ -1145,7 +1429,9 @@ describe('LoginView.vue', () => {
     const recoveryButton = findButtonByText(wrapper, 'پاک‌سازی کش برنامه و بارگذاری مجدد')
     await recoveryButton.trigger('click')
 
-    expect(replaceSpy).toHaveBeenCalledWith(expect.stringContaining('app_recovery='))
+    expect(replaceSpy).toHaveBeenCalledWith(expect.stringMatching(/^\/login\?app_recovery=\d+$/))
+    expect(replaceSpy.mock.calls[0]?.[0]).not.toContain('raw-secret')
+    expect(replaceSpy.mock.calls[0]?.[0]).not.toContain('#otp')
 
     wrapper.unmount()
   })
@@ -1174,7 +1460,7 @@ describe('LoginView.vue', () => {
     await vi.advanceTimersByTimeAsync(1000)
     await flushPromises()
 
-    expect(wrapper.text()).toContain('زمان انتظار تایید به پایان رسید')
+    expect(wrapper.text()).toContain('زمان انتظار تأیید به پایان رسید')
     expect(wrapper.find('input[autocomplete="one-time-code"]').exists()).toBe(true)
     wrapper.unmount()
 
@@ -1316,13 +1602,13 @@ describe('LoginView.vue', () => {
       value: [recoveryFile],
     })
     await recoveryInput.trigger('change')
-    await findButtonByText(errorWrapper, 'ارسال مدارک').trigger('click')
+    await findButtonByText(errorWrapper, 'ارسال مدرک برای بررسی').trigger('click')
     await flushPromises()
     expect(errorWrapper.text()).toContain('ارسال مدرک ممکن نشد')
 
     await vi.advanceTimersByTimeAsync(2000)
     await flushPromises()
-    expect(errorWrapper.text()).toContain('درخواست شما تایید شد')
+    expect(errorWrapper.text()).toContain('درخواست شما تأیید شد')
     await findButtonByText(errorWrapper, 'ورود به سامانه').trigger('click')
     await flushPromises()
     expect(errorWrapper.text()).toContain('دسترسی ورود هنوز آماده نیست')
@@ -1331,19 +1617,23 @@ describe('LoginView.vue', () => {
 
   it('retries a bounded recovery-status request when approval arrives before its login token', async () => {
     const fetchMock = vi.mocked(fetch)
-    fetchMock.mockResolvedValueOnce(makeJsonResponse({
-      status: 'approved',
-      access_token: 'retried-recovery-access',
-      refresh_token: 'retried-recovery-refresh',
-    }) as any)
+    fetchMock.mockResolvedValueOnce(
+      makeJsonResponse({
+        status: 'approved',
+        access_token: 'retried-recovery-access',
+        refresh_token: 'retried-recovery-refresh',
+      }) as any,
+    )
     apiFetchMock.mockImplementation((url: string, options?: RequestInit) => {
       if (url === '/api/auth/me') {
-        return Promise.resolve(makeJsonResponse({
-          id: 51,
-          role: 'عادی',
-          full_name: 'بازیابی',
-          account_name: 'recovered',
-        }) as any)
+        return Promise.resolve(
+          makeJsonResponse({
+            id: 51,
+            role: 'عادی',
+            full_name: 'بازیابی',
+            account_name: 'recovered',
+          }) as any,
+        )
       }
       return fetch(url, options) as any
     })
@@ -1369,12 +1659,14 @@ describe('LoginView.vue', () => {
     wrapper.unmount()
   })
 
-  it('initializes install and WebOTP browser hooks including abort cleanup', async () => {
+  it('initializes WebOTP with abort cleanup without taking ownership of PWA installation', async () => {
     vi.useFakeTimers()
     const fetchMock = vi.mocked(fetch)
     fetchMock
       .mockResolvedValueOnce(makeJsonResponse({ method: 'sms' }) as any)
-      .mockResolvedValueOnce(makeJsonResponse({ access_token: 'otp-access', refresh_token: 'otp-refresh' }) as any)
+      .mockResolvedValueOnce(
+        makeJsonResponse({ access_token: 'otp-access', refresh_token: 'otp-refresh' }) as any,
+      )
     apiFetchMock.mockImplementation((url: string, options?: RequestInit) => {
       if (url === '/api/auth/me') {
         return Promise.resolve(
@@ -1390,22 +1682,16 @@ describe('LoginView.vue', () => {
       abort = abortSpy
     }
     vi.stubGlobal('AbortController', AbortControllerMock)
-    Object.defineProperty(window, 'OTPCredential', { configurable: true, value: function OTPCredential() {} })
+    Object.defineProperty(window, 'OTPCredential', {
+      configurable: true,
+      value: function OTPCredential() {},
+    })
     Object.defineProperty(navigator, 'credentials', {
       configurable: true,
       value: {
         get: vi.fn(async () => ({ code: '12345' })),
       },
     })
-    Object.defineProperty(window.navigator, 'standalone', {
-      configurable: true,
-      value: true,
-    })
-    Object.defineProperty(window.navigator, 'userAgent', {
-      configurable: true,
-      value: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)',
-    })
-
     const LoginView = (await import('./LoginView.vue')).default
     const wrapper = mount(LoginView)
 
@@ -1416,7 +1702,8 @@ describe('LoginView.vue', () => {
     }
     window.dispatchEvent(Object.assign(new Event('beforeinstallprompt'), deferredPrompt))
     await flushPromises()
-    expect(wrapper.text()).not.toContain('برای نصب در iOS')
+    expect(deferredPrompt.preventDefault).not.toHaveBeenCalled()
+    expect(wrapper.text()).not.toContain('نصب اپلیکیشن')
 
     await wrapper.get('input[type="tel"]').setValue('09123456789')
     await requestOtpFromMobileStep(wrapper)
@@ -1425,7 +1712,10 @@ describe('LoginView.vue', () => {
     await flushPromises()
 
     expect(navigator.credentials.get).toHaveBeenCalled()
-    expect(fetchMock).toHaveBeenCalledWith('/api/auth/verify-otp', expect.objectContaining({ method: 'POST' }))
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/auth/verify-otp',
+      expect.objectContaining({ method: 'POST' }),
+    )
 
     wrapper.unmount()
     expect(abortSpy).toHaveBeenCalled()
@@ -1483,7 +1773,9 @@ describe('LoginView.vue', () => {
     await flushPromises()
     expect(approvalVm.step).toBe('recovery_expired')
 
-    expect(approvalVm.parseResponseError({ detail: 'پیام اختصاصی' }, 'fallback')).toBe('پیام اختصاصی')
+    expect(approvalVm.parseResponseError({ detail: 'پیام اختصاصی' }, 'fallback')).toBe(
+      'پیام اختصاصی',
+    )
     expect(approvalVm.parseResponseError({ detail: '   ' }, 'fallback')).toBe('fallback')
 
     approvalVm.recoveryApprovedTokens = { access_token: 'stale', refresh_token: 'old' }
@@ -1507,10 +1799,15 @@ describe('LoginView.vue', () => {
     wrapper.unmount()
   })
 
-  it('hydrates initial install state for iOS and covers WebOTP error plus step-abort cleanup', async () => {
+  it('keeps public auth free of install guidance while covering WebOTP error and step-abort cleanup', async () => {
     vi.useFakeTimers()
     const fetchMock = vi.mocked(fetch)
-    const consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+    const consoleSpies = [
+      vi.spyOn(console, 'log').mockImplementation(() => {}),
+      vi.spyOn(console, 'info').mockImplementation(() => {}),
+      vi.spyOn(console, 'warn').mockImplementation(() => {}),
+      vi.spyOn(console, 'error').mockImplementation(() => {}),
+    ]
     const abortSpy = vi.fn()
 
     class AbortControllerMock {
@@ -1519,54 +1816,42 @@ describe('LoginView.vue', () => {
     }
 
     vi.stubGlobal('AbortController', AbortControllerMock)
-    Object.defineProperty(window, 'OTPCredential', { configurable: true, value: function OTPCredential() {} })
+    Object.defineProperty(window, 'OTPCredential', {
+      configurable: true,
+      value: function OTPCredential() {},
+    })
     Object.defineProperty(navigator, 'credentials', {
       configurable: true,
       value: {
         get: vi.fn(async () => {
-          throw new Error('otp failed')
+          throw new Error('OTP-SENTINEL-90817')
         }),
       },
     })
-    Object.defineProperty(window.navigator, 'standalone', {
-      configurable: true,
-      value: false,
-    })
-    Object.defineProperty(window.navigator, 'userAgent', {
-      configurable: true,
-      value: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)',
-    })
-
-    ;(window as any).deferredPrompt = {
-      prompt: vi.fn(),
-      userChoice: Promise.resolve({ outcome: 'dismissed' }),
-    }
-
     const LoginView = (await import('./LoginView.vue')).default
     const wrapper = mount(LoginView)
     const vm = wrapper.vm as any
 
     await vi.advanceTimersByTimeAsync(4000)
     await flushPromises()
-    expect(wrapper.text()).toContain('نصب اپلیکیشن')
-    await (wrapper.vm as any).$nextTick()
-    expect(wrapper.text()).toContain('راهنمای نصب در آیفون')
-    expect(wrapper.text()).toContain('سایت را در Safari باز کنید')
-    expect(wrapper.text()).toContain('Add to Home Screen')
-    expect(wrapper.text()).toContain('از آیکن Gold روی Home Screen وارد شوید')
+    expect(wrapper.text()).not.toContain('نصب اپلیکیشن')
+    expect(wrapper.text()).not.toContain('راهنمای نصب در آیفون')
+    expect(wrapper.find('[class*="install"]').exists()).toBe(false)
 
     vm.step = 'otp'
     await vi.advanceTimersByTimeAsync(100)
     await flushPromises()
     expect(navigator.credentials.get).toHaveBeenCalled()
-    expect(consoleLogSpy).toHaveBeenCalledWith('Web OTP Error:', expect.any(Error))
+    expect(JSON.stringify(consoleSpies.flatMap((spy) => spy.mock.calls))).not.toContain(
+      'OTP-SENTINEL-90817',
+    )
 
     vm.step = 'mobile'
     await flushPromises()
     expect(abortSpy).toHaveBeenCalled()
 
     wrapper.unmount()
-    consoleLogSpy.mockRestore()
+    consoleSpies.forEach((spy) => spy.mockRestore())
     fetchMock.mockReset()
   })
 })

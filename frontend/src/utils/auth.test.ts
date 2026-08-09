@@ -1,8 +1,19 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { RouteLocationNormalized } from 'vue-router'
+import { SYSTEM_RECOVERY_OUTCOME, readIntendedRoute } from './authNavigation'
 
 type FetchMock = ReturnType<typeof vi.fn>
 
 const authModulePath = './auth'
+
+type AuthGuardRouteFixture = Pick<RouteLocationNormalized, 'path' | 'meta'> &
+  Partial<Omit<RouteLocationNormalized, 'path' | 'meta'>>
+
+function authGuardRoute(route: AuthGuardRouteFixture): RouteLocationNormalized {
+  return route as RouteLocationNormalized
+}
+
+const authGuardFromRoute = {} as unknown as RouteLocationNormalized
 
 function makeJwt(exp: number): string {
   const payload = Buffer.from(JSON.stringify({ exp })).toString('base64url')
@@ -36,15 +47,18 @@ describe('auth utils', () => {
   beforeEach(() => {
     vi.resetModules()
     localStorage.clear()
+    sessionStorage.clear()
     fetchMock = vi.fn()
     vi.stubGlobal('fetch', fetchMock)
     mockLocation()
   })
 
   afterEach(() => {
+    vi.useRealTimers()
     vi.restoreAllMocks()
     vi.unstubAllGlobals()
     localStorage.clear()
+    sessionStorage.clear()
   })
 
   it('tryRefreshToken stores refreshed tokens on success', async () => {
@@ -56,6 +70,7 @@ describe('auth utils', () => {
 
     const { tryRefreshToken } = await import(authModulePath)
     await expect(tryRefreshToken()).resolves.toBe('success')
+    expect(fetchMock.mock.calls[0]?.[1]?.signal).toBeInstanceOf(AbortSignal)
     expect(localStorage.getItem('auth_token')).toBe('new-auth')
     expect(localStorage.getItem('refresh_token')).toBe('new-refresh')
   })
@@ -80,9 +95,11 @@ describe('auth utils', () => {
 
     localStorage.setItem('refresh_token', 'shared-refresh')
     let resolveRefresh!: (value: unknown) => void
-    fetchMock.mockReturnValueOnce(new Promise((resolve) => {
-      resolveRefresh = resolve
-    }))
+    fetchMock.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveRefresh = resolve
+      }),
+    )
 
     const first = tryRefreshToken()
     const second = tryRefreshToken()
@@ -191,8 +208,18 @@ describe('auth utils', () => {
 
     next.mockClear()
     localStorage.clear()
-    await authGuard({ path: '/private', meta: { requiresAuth: true } } as any, {} as any, next)
-    expect(next).toHaveBeenLastCalledWith('/login')
+    await authGuard(
+      {
+        path: '/chat',
+        fullPath: '/chat?user_id=7',
+        name: 'messenger',
+        meta: { requiresAuth: true },
+      } as any,
+      {} as any,
+      next,
+    )
+    expect(next).toHaveBeenLastCalledWith({ name: 'login' })
+    expect(readIntendedRoute()).toBe('/chat?user_id=7')
 
     next.mockClear()
     localStorage.setItem('auth_token', makeJwt(Math.floor(Date.now() / 1000) + 3600))
@@ -203,39 +230,77 @@ describe('auth utils', () => {
     next.mockClear()
     localStorage.setItem('current_user_summary', JSON.stringify({ role: 'عادی' }))
     await authGuard({ path: '/admin', meta: { requiresAdmin: true } } as any, {} as any, next)
-    expect(next).toHaveBeenLastCalledWith('/')
+    expect(next).toHaveBeenLastCalledWith({
+      name: 'system-recovery',
+      params: { pathMatch: ['__system', 'recovery'] },
+      query: { outcome: SYSTEM_RECOVERY_OUTCOME.FORBIDDEN },
+      replace: true,
+    })
 
     next.mockClear()
-    localStorage.setItem('current_user_summary', JSON.stringify({ role: 'عادی', account_status: 'inactive' }))
-    await authGuard({ path: '/market', meta: { requiresAuth: true, requiresMarketAccess: true } } as any, {} as any, next)
-    expect(next).toHaveBeenLastCalledWith('/')
+    localStorage.setItem(
+      'current_user_summary',
+      JSON.stringify({ role: 'عادی', account_status: 'inactive' }),
+    )
+    await authGuard(
+      { path: '/market', meta: { requiresAuth: true, requiresMarketAccess: true } } as any,
+      {} as any,
+      next,
+    )
+    expect(next).toHaveBeenLastCalledWith({
+      name: 'system-recovery',
+      params: { pathMatch: ['__system', 'recovery'] },
+      query: { outcome: SYSTEM_RECOVERY_OUTCOME.FORBIDDEN },
+      replace: true,
+    })
 
     next.mockClear()
-    localStorage.setItem('current_user_summary', JSON.stringify({ role: 'عادی', account_status: 'active', is_accountant: true }))
-    await authGuard({ path: '/market', meta: { requiresAuth: true, requiresMarketAccess: true } } as any, {} as any, next)
-    expect(next).toHaveBeenLastCalledWith('/')
+    localStorage.setItem(
+      'current_user_summary',
+      JSON.stringify({ role: 'عادی', account_status: 'active', is_accountant: true }),
+    )
+    await authGuard(
+      { path: '/market', meta: { requiresAuth: true, requiresMarketAccess: true } } as any,
+      {} as any,
+      next,
+    )
+    expect(next).toHaveBeenLastCalledWith({
+      name: 'system-recovery',
+      params: { pathMatch: ['__system', 'recovery'] },
+      query: { outcome: SYSTEM_RECOVERY_OUTCOME.FORBIDDEN },
+      replace: true,
+    })
   })
 
   it('authGuard fetches /api/auth/me when admin cache is missing', async () => {
     const token = makeJwt(Math.floor(Date.now() / 1000) + 3600)
     localStorage.setItem('auth_token', token)
-    fetchMock.mockResolvedValueOnce(makeJsonResponse({
-      id: 7,
-      role: 'مدیر میانی',
-      account_name: 'manager7',
-      is_customer: true,
-      customer_tier: 'tier2',
-    }))
+    fetchMock.mockResolvedValueOnce(
+      makeJsonResponse({
+        id: 7,
+        role: 'مدیر میانی',
+        account_name: 'manager7',
+        is_customer: true,
+        customer_tier: 'tier2',
+      }),
+    )
 
     const { authGuard } = await import(authModulePath)
     const next = vi.fn()
 
-    await authGuard({ path: '/admin', meta: { requiresAuth: true, requiresAdmin: true } } as any, {} as any, next)
+    await authGuard(
+      { path: '/admin', meta: { requiresAuth: true, requiresAdmin: true } } as any,
+      {} as any,
+      next,
+    )
 
     expect(next).toHaveBeenLastCalledWith()
-    expect(fetchMock).toHaveBeenCalledWith('/api/auth/me', expect.objectContaining({
-      headers: expect.objectContaining({ Authorization: `Bearer ${token}` }),
-    }))
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/auth/me',
+      expect.objectContaining({
+        headers: expect.objectContaining({ Authorization: `Bearer ${token}` }),
+      }),
+    )
     expect(JSON.parse(localStorage.getItem('current_user_summary') || '{}')).toMatchObject({
       role: 'مدیر میانی',
       account_name: 'manager7',
@@ -247,21 +312,32 @@ describe('auth utils', () => {
   it('authGuard fetches /api/auth/me when market access cache is missing and blocks inactive users', async () => {
     const token = makeJwt(Math.floor(Date.now() / 1000) + 3600)
     localStorage.setItem('auth_token', token)
-    fetchMock.mockResolvedValueOnce(makeJsonResponse({
-      id: 9,
-      role: 'عادی',
-      account_name: 'inactive9',
-      account_status: 'inactive',
-      global_lock_grace_expires_at: '2026-05-20T12:00:00Z',
-      global_web_locked_at: null,
-    }))
+    fetchMock.mockResolvedValueOnce(
+      makeJsonResponse({
+        id: 9,
+        role: 'عادی',
+        account_name: 'inactive9',
+        account_status: 'inactive',
+        global_lock_grace_expires_at: '2026-05-20T12:00:00Z',
+        global_web_locked_at: null,
+      }),
+    )
 
     const { authGuard } = await import(authModulePath)
     const next = vi.fn()
 
-    await authGuard({ path: '/market', meta: { requiresAuth: true, requiresMarketAccess: true } } as any, {} as any, next)
+    await authGuard(
+      { path: '/market', meta: { requiresAuth: true, requiresMarketAccess: true } } as any,
+      {} as any,
+      next,
+    )
 
-    expect(next).toHaveBeenLastCalledWith('/')
+    expect(next).toHaveBeenLastCalledWith({
+      name: 'system-recovery',
+      params: { pathMatch: ['__system', 'recovery'] },
+      query: { outcome: SYSTEM_RECOVERY_OUTCOME.FORBIDDEN },
+      replace: true,
+    })
     expect(JSON.parse(localStorage.getItem('current_user_summary') || '{}')).toMatchObject({
       account_status: 'inactive',
       global_lock_grace_expires_at: '2026-05-20T12:00:00Z',
@@ -272,54 +348,276 @@ describe('auth utils', () => {
   it('authGuard blocks accountants from market routes when /api/auth/me resolves accountant context', async () => {
     const token = makeJwt(Math.floor(Date.now() / 1000) + 3600)
     localStorage.setItem('auth_token', token)
-    fetchMock.mockResolvedValueOnce(makeJsonResponse({
-      id: 11,
-      role: 'عادی',
-      account_name: 'accountant11',
-      account_status: 'active',
-      is_accountant: true,
-    }))
+    fetchMock.mockResolvedValueOnce(
+      makeJsonResponse({
+        id: 11,
+        role: 'عادی',
+        account_name: 'accountant11',
+        account_status: 'active',
+        is_accountant: true,
+      }),
+    )
 
     const { authGuard } = await import(authModulePath)
     const next = vi.fn()
 
-    await authGuard({ path: '/market', meta: { requiresAuth: true, requiresMarketAccess: true } } as any, {} as any, next)
+    await authGuard(
+      { path: '/market', meta: { requiresAuth: true, requiresMarketAccess: true } } as any,
+      {} as any,
+      next,
+    )
 
-    expect(next).toHaveBeenLastCalledWith('/')
+    expect(next).toHaveBeenLastCalledWith({
+      name: 'system-recovery',
+      params: { pathMatch: ['__system', 'recovery'] },
+      query: { outcome: SYSTEM_RECOVERY_OUTCOME.FORBIDDEN },
+      replace: true,
+    })
     expect(JSON.parse(localStorage.getItem('current_user_summary') || '{}')).toMatchObject({
       account_status: 'active',
       is_accountant: true,
     })
   })
 
-  it('authGuard tolerates broken cache, failed profile fetches, and non-admin fallback responses', async () => {
+  it('authGuard distinguishes authoritative denial from unavailable admin and market checks', async () => {
     const token = makeJwt(Math.floor(Date.now() / 1000) + 3600)
     localStorage.setItem('auth_token', token)
     localStorage.setItem('current_user_summary', '{broken-json')
-    fetchMock.mockResolvedValueOnce(makeJsonResponse({ id: 10, role: 'عادی', account_status: 'active' }))
+    fetchMock.mockResolvedValueOnce(
+      makeJsonResponse({ id: 10, role: 'عادی', account_status: 'active' }),
+    )
 
     const { authGuard } = await import(authModulePath)
     const next = vi.fn()
 
-    await authGuard({ path: '/admin', meta: { requiresAuth: true, requiresAdmin: true } } as any, {} as any, next)
-    expect(next).toHaveBeenLastCalledWith('/')
+    await authGuard(
+      { path: '/admin', meta: { requiresAuth: true, requiresAdmin: true } } as any,
+      {} as any,
+      next,
+    )
+    expect(next).toHaveBeenLastCalledWith({
+      name: 'system-recovery',
+      params: { pathMatch: ['__system', 'recovery'] },
+      query: { outcome: SYSTEM_RECOVERY_OUTCOME.FORBIDDEN },
+      replace: true,
+    })
 
     next.mockClear()
     localStorage.removeItem('current_user_summary')
     fetchMock.mockResolvedValueOnce(makeJsonResponse({}, 400, false))
-    await authGuard({ path: '/market', meta: { requiresAuth: true, requiresMarketAccess: true } } as any, {} as any, next)
-    expect(next).toHaveBeenLastCalledWith()
+    await authGuard(
+      { path: '/market', meta: { requiresAuth: true, requiresMarketAccess: true } } as any,
+      {} as any,
+      next,
+    )
+    expect(next).toHaveBeenLastCalledWith({
+      name: 'system-recovery',
+      params: { pathMatch: ['__system', 'recovery'] },
+      query: { outcome: SYSTEM_RECOVERY_OUTCOME.DEEP_LINK_FAILURE },
+      replace: true,
+    })
 
     next.mockClear()
     fetchMock.mockRejectedValueOnce(new Error('profile unavailable'))
-    await authGuard({ path: '/admin', meta: { requiresAuth: true, requiresAdmin: true } } as any, {} as any, next)
-    expect(next).toHaveBeenLastCalledWith('/')
+    await authGuard(
+      { path: '/admin', meta: { requiresAuth: true, requiresAdmin: true } } as any,
+      {} as any,
+      next,
+    )
+    expect(next).toHaveBeenLastCalledWith({
+      name: 'system-recovery',
+      params: { pathMatch: ['__system', 'recovery'] },
+      query: { outcome: SYSTEM_RECOVERY_OUTCOME.DEEP_LINK_FAILURE },
+      replace: true,
+    })
 
     next.mockClear()
     localStorage.removeItem('current_user_summary')
     fetchMock.mockRejectedValueOnce(new Error('market profile unavailable'))
-    await authGuard({ path: '/market', meta: { requiresAuth: true, requiresMarketAccess: true } } as any, {} as any, next)
-    expect(next).toHaveBeenLastCalledWith()
+    await authGuard(
+      { path: '/market', meta: { requiresAuth: true, requiresMarketAccess: true } } as any,
+      {} as any,
+      next,
+    )
+    expect(next).toHaveBeenLastCalledWith({
+      name: 'system-recovery',
+      params: { pathMatch: ['__system', 'recovery'] },
+      query: { outcome: SYSTEM_RECOVERY_OUTCOME.DEEP_LINK_FAILURE },
+      replace: true,
+    })
+  })
+
+  it('bounds route access probes and distinguishes HTTP denial from service unavailability', async () => {
+    localStorage.setItem('auth_token', makeJwt(Math.floor(Date.now() / 1000) + 3600))
+    fetchMock.mockResolvedValueOnce(makeJsonResponse({ detail: 'forbidden' }, 403, false))
+
+    const { authGuard } = await import(authModulePath)
+    const next = vi.fn()
+
+    await authGuard(
+      authGuardRoute({ path: '/admin', meta: { requiresAuth: true, requiresAdmin: true } }),
+      authGuardFromRoute,
+      next,
+    )
+    expect(next).toHaveBeenLastCalledWith({
+      name: 'system-recovery',
+      params: { pathMatch: ['__system', 'recovery'] },
+      query: { outcome: SYSTEM_RECOVERY_OUTCOME.FORBIDDEN },
+      replace: true,
+    })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+
+    next.mockClear()
+    fetchMock.mockResolvedValueOnce(makeJsonResponse({ detail: 'unavailable' }, 503, false))
+    await authGuard(
+      authGuardRoute({
+        path: '/market',
+        meta: { requiresAuth: true, requiresMarketAccess: true },
+      }),
+      authGuardFromRoute,
+      next,
+    )
+    expect(next).toHaveBeenLastCalledWith({
+      name: 'system-recovery',
+      params: { pathMatch: ['__system', 'recovery'] },
+      query: { outcome: SYSTEM_RECOVERY_OUTCOME.DEEP_LINK_FAILURE },
+      replace: true,
+    })
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('aborts hanging admin and market profile probes and resolves both guards as unavailable', async () => {
+    vi.useFakeTimers()
+    localStorage.setItem('auth_token', makeJwt(Math.floor(Date.now() / 1000) + 3600))
+    const requestSignals: AbortSignal[] = []
+    fetchMock.mockImplementation((_url, options: RequestInit = {}) => {
+      requestSignals.push(options.signal as AbortSignal)
+      return new Promise(() => undefined)
+    })
+
+    const { AUTH_ROUTE_GUARD_TIMEOUT_MS, authGuard } = await import(authModulePath)
+    const next = vi.fn()
+
+    for (const route of [
+      { path: '/admin', meta: { requiresAuth: true, requiresAdmin: true } },
+      { path: '/market', meta: { requiresAuth: true, requiresMarketAccess: true } },
+    ]) {
+      const guardPromise = authGuard(authGuardRoute(route), authGuardFromRoute, next)
+      await vi.advanceTimersByTimeAsync(AUTH_ROUTE_GUARD_TIMEOUT_MS)
+      await guardPromise
+
+      expect(next).toHaveBeenLastCalledWith({
+        name: 'system-recovery',
+        params: { pathMatch: ['__system', 'recovery'] },
+        query: { outcome: SYSTEM_RECOVERY_OUTCOME.DEEP_LINK_FAILURE },
+        replace: true,
+      })
+      next.mockClear()
+    }
+
+    expect(requestSignals).toHaveLength(2)
+    expect(requestSignals.every((signal) => signal instanceof AbortSignal && signal.aborted)).toBe(
+      true,
+    )
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('aborts a hanging refresh and preserves the session while guard reports unavailable', async () => {
+    vi.useFakeTimers()
+    const expiredToken = makeJwt(Math.floor(Date.now() / 1000) - 60)
+    localStorage.setItem('auth_token', expiredToken)
+    localStorage.setItem('refresh_token', 'still-valid-refresh')
+    let requestSignal: AbortSignal | undefined
+    fetchMock.mockImplementation((_url, options: RequestInit = {}) => {
+      requestSignal = options.signal as AbortSignal
+      return new Promise(() => undefined)
+    })
+
+    const { AUTH_ROUTE_GUARD_TIMEOUT_MS, authGuard } = await import(authModulePath)
+    const next = vi.fn()
+    const guardPromise = authGuard(
+      authGuardRoute({
+        path: '/chat',
+        fullPath: '/chat?user_id=7',
+        name: 'messenger',
+        meta: { requiresAuth: true },
+      }),
+      authGuardFromRoute,
+      next,
+    )
+
+    await vi.advanceTimersByTimeAsync(AUTH_ROUTE_GUARD_TIMEOUT_MS)
+    await guardPromise
+
+    expect(requestSignal).toBeInstanceOf(AbortSignal)
+    expect(requestSignal?.aborted).toBe(true)
+    expect(next).toHaveBeenLastCalledWith({
+      name: 'system-recovery',
+      params: { pathMatch: ['__system', 'recovery'] },
+      query: { outcome: SYSTEM_RECOVERY_OUTCOME.DEEP_LINK_FAILURE },
+      replace: true,
+    })
+    expect(localStorage.getItem('auth_token')).toBe(expiredToken)
+    expect(localStorage.getItem('refresh_token')).toBe('still-valid-refresh')
+    expect(localStorage.getItem('suspended_refresh_token')).toBeNull()
+    expect(readIntendedRoute()).toBeNull()
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('keeps refresh credentials on network unavailability instead of mislabeling the user as guest', async () => {
+    const expiredToken = makeJwt(Math.floor(Date.now() / 1000) - 60)
+    localStorage.setItem('auth_token', expiredToken)
+    localStorage.setItem('refresh_token', 'network-refresh')
+    fetchMock.mockRejectedValueOnce(new TypeError('Failed to fetch'))
+
+    const { authGuard } = await import(authModulePath)
+    const next = vi.fn()
+    await authGuard(
+      authGuardRoute({
+        path: '/chat',
+        fullPath: '/chat?user_id=7',
+        name: 'messenger',
+        meta: { requiresAuth: true },
+      }),
+      authGuardFromRoute,
+      next,
+    )
+
+    expect(next).toHaveBeenLastCalledWith({
+      name: 'system-recovery',
+      params: { pathMatch: ['__system', 'recovery'] },
+      query: { outcome: SYSTEM_RECOVERY_OUTCOME.DEEP_LINK_FAILURE },
+      replace: true,
+    })
+    expect(localStorage.getItem('auth_token')).toBe(expiredToken)
+    expect(localStorage.getItem('refresh_token')).toBe('network-refresh')
+    expect(localStorage.getItem('suspended_refresh_token')).toBeNull()
+    expect(readIntendedRoute()).toBeNull()
+  })
+
+  it('treats an authoritative refresh rejection as unauthenticated and keeps the safe return', async () => {
+    localStorage.setItem('auth_token', makeJwt(Math.floor(Date.now() / 1000) - 60))
+    localStorage.setItem('refresh_token', 'rejected-refresh')
+    fetchMock.mockResolvedValueOnce({ ok: false, status: 401 })
+
+    const { authGuard } = await import(authModulePath)
+    const next = vi.fn()
+    await authGuard(
+      authGuardRoute({
+        path: '/chat',
+        fullPath: '/chat?user_id=7',
+        name: 'messenger',
+        meta: { requiresAuth: true },
+      }),
+      authGuardFromRoute,
+      next,
+    )
+
+    expect(next).toHaveBeenLastCalledWith({ name: 'login' })
+    expect(readIntendedRoute()).toBe('/chat?user_id=7')
+    expect(localStorage.getItem('auth_token')).toBeNull()
+    expect(localStorage.getItem('refresh_token')).toBeNull()
+    expect(localStorage.getItem('suspended_refresh_token')).toBe('rejected-refresh')
   })
 
   it('apiFetch refreshes on 401 and retries the original request with the new token', async () => {
@@ -327,7 +625,9 @@ describe('auth utils', () => {
     localStorage.setItem('refresh_token', 'refresh-token')
     fetchMock
       .mockResolvedValueOnce(makeJsonResponse({}, 401, false))
-      .mockResolvedValueOnce(makeJsonResponse({ access_token: 'new-auth', refresh_token: 'new-refresh' }))
+      .mockResolvedValueOnce(
+        makeJsonResponse({ access_token: 'new-auth', refresh_token: 'new-refresh' }),
+      )
       .mockResolvedValueOnce(makeJsonResponse({ result: 'ok' }))
 
     const { apiFetch } = await import(authModulePath)
@@ -336,9 +636,13 @@ describe('auth utils', () => {
     expect(response.ok).toBe(true)
     expect(fetchMock).toHaveBeenCalledTimes(3)
     expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/test')
-    expect(fetchMock.mock.calls[0]?.[1]?.headers).toMatchObject({ Authorization: 'Bearer old-auth' })
+    expect(fetchMock.mock.calls[0]?.[1]?.headers).toMatchObject({
+      Authorization: 'Bearer old-auth',
+    })
     expect(fetchMock.mock.calls[1]?.[0]).toBe('/api/auth/refresh')
-    expect(fetchMock.mock.calls[2]?.[1]?.headers).toMatchObject({ Authorization: 'Bearer new-auth' })
+    expect(fetchMock.mock.calls[2]?.[1]?.headers).toMatchObject({
+      Authorization: 'Bearer new-auth',
+    })
     expect(localStorage.getItem('auth_token')).toBe('new-auth')
     expect(localStorage.getItem('refresh_token')).toBe('new-refresh')
   })
@@ -347,7 +651,9 @@ describe('auth utils', () => {
     localStorage.setItem('auth_token', 'auth-token')
     const location = mockLocation()
     location.pathname = '/chat'
-    fetchMock.mockResolvedValueOnce(makeJsonResponse({ detail: 'REQUIRES_PASSWORD_CHANGE' }, 403, false))
+    fetchMock.mockResolvedValueOnce(
+      makeJsonResponse({ detail: 'REQUIRES_PASSWORD_CHANGE' }, 403, false),
+    )
 
     const { apiFetch } = await import(authModulePath)
     await expect(apiFetch('/api/private')).rejects.toThrow('شما باید رمز عبور خود را تغییر دهید')
@@ -369,7 +675,9 @@ describe('auth utils', () => {
     localStorage.setItem('refresh_token', 'refresh-token')
     fetchMock
       .mockResolvedValueOnce(makeJsonResponse({}, 401, false))
-      .mockResolvedValueOnce(makeJsonResponse({ access_token: 'new-auth', refresh_token: 'new-refresh' }))
+      .mockResolvedValueOnce(
+        makeJsonResponse({ access_token: 'new-auth', refresh_token: 'new-refresh' }),
+      )
       .mockResolvedValueOnce(makeJsonResponse({}, 401, false))
 
     await expect(apiFetch('/api/private')).rejects.toThrow('Unauthorized')
@@ -400,6 +708,7 @@ describe('auth utils', () => {
 
   it('setupExpiryTimer refreshes soon-expiring tokens and keeps sessions intact on transient refresh failures', async () => {
     vi.useFakeTimers()
+    const setIntervalSpy = vi.spyOn(globalThis, 'setInterval')
     const location = mockLocation()
     const expiringToken = makeJwt(Math.floor(Date.now() / 1000) + 30)
     localStorage.setItem('auth_token', expiringToken)
@@ -408,9 +717,15 @@ describe('auth utils', () => {
 
     const { setupExpiryTimer } = await import(authModulePath)
     setupExpiryTimer()
+    setupExpiryTimer()
+
+    expect(setIntervalSpy.mock.calls.filter(([, delay]) => delay === 30000)).toHaveLength(1)
     await vi.advanceTimersByTimeAsync(30000)
 
-    expect(fetchMock).toHaveBeenCalledWith('/api/auth/refresh', expect.objectContaining({ method: 'POST' }))
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/auth/refresh',
+      expect.objectContaining({ method: 'POST' }),
+    )
     expect(localStorage.getItem('auth_token')).toBe(expiringToken)
     expect(localStorage.getItem('refresh_token')).toBe('refresh-token')
     expect(localStorage.getItem('suspended_refresh_token')).toBeNull()
@@ -449,7 +764,9 @@ describe('auth utils', () => {
 
     const { apiFetch } = await import(authModulePath)
 
-    await expect(apiFetch('/api/private')).rejects.toThrow('نشست شما منقضی شده است. لطفا مجددا وارد شوید')
+    await expect(apiFetch('/api/private')).rejects.toThrow(
+      'نشست شما منقضی شده است. لطفا مجددا وارد شوید',
+    )
     expect(localStorage.getItem('auth_token')).toBeNull()
     expect(localStorage.getItem('refresh_token')).toBeNull()
     expect(localStorage.getItem('suspended_refresh_token')).toBe('refresh-token')
@@ -505,11 +822,13 @@ describe('auth utils', () => {
 
     const { apiFetch, isAppConnecting } = await import(authModulePath)
 
-    await expect(apiFetch('/api/mutation', {
-      method: 'PATCH',
-      body: JSON.stringify({ value: 1 }),
-      retryNetwork: false,
-    })).rejects.toThrow('NetworkError')
+    await expect(
+      apiFetch('/api/mutation', {
+        method: 'PATCH',
+        body: JSON.stringify({ value: 1 }),
+        retryNetwork: false,
+      }),
+    ).rejects.toThrow('NetworkError')
     expect(fetchMock).toHaveBeenCalledTimes(1)
     expect(isAppConnecting.value).toBe(false)
   })
@@ -521,10 +840,12 @@ describe('auth utils', () => {
     const { apiFetch, isAppConnecting } = await import(authModulePath)
     isAppConnecting.value = true
 
-    await expect(apiFetch('/api/bounded-route', {
-      retryNetwork: false,
-      trackConnectionState: false,
-    })).resolves.toMatchObject({ ok: true })
+    await expect(
+      apiFetch('/api/bounded-route', {
+        retryNetwork: false,
+        trackConnectionState: false,
+      }),
+    ).resolves.toMatchObject({ ok: true })
 
     expect(isAppConnecting.value).toBe(true)
   })

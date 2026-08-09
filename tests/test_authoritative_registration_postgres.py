@@ -1602,8 +1602,8 @@ class AuthoritativeRegistrationPostgresTests(unittest.IsolatedAsyncioTestCase):
     async def test_real_web_adapter_issues_session_after_dedicated_notification_failure(self):
         invitation = await self._seed_invitation("real_adapter_notification")
         await self._seed_telegram_recipient("real_adapter_recipient")
-        verify_key = f"reg_verified:{invitation.token}"
-        redis = _RegistrationProofRedis({verify_key: "1"})
+        otp_key = f"reg_otp:{invitation.token}"
+        redis = _RegistrationProofRedis({otp_key: "12345"})
         failure_injected = False
 
         async def get_test_redis():
@@ -1649,12 +1649,14 @@ class AuthoritativeRegistrationPostgresTests(unittest.IsolatedAsyncioTestCase):
                     ),
                     raw_request=_registration_http_request(),
                     db=adapter_session,
+                    verified_invitation_token=invitation.token,
                 )
 
         self.assertTrue(failure_injected)
         self.assertEqual(response["access_token"], "stage2-real-adapter-access")
-        self.assertNotIn(verify_key, redis.values)
-        self.assertIn(verify_key, redis.deleted_keys)
+        self.assertNotIn(otp_key, redis.values)
+        self.assertIn(otp_key, redis.deleted_keys)
+        self.assertFalse(any(key.startswith("reg_verified:") for key in redis.values))
 
         async with self.session_factory() as verification_session:
             stored_invitation = (
@@ -1678,8 +1680,8 @@ class AuthoritativeRegistrationPostgresTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_real_web_adapter_retry_after_session_failure_reuses_committed_user(self):
         invitation = await self._seed_invitation("real_adapter_retry")
-        verify_key = f"reg_verified:{invitation.token}"
-        redis = _RegistrationProofRedis({verify_key: "1"})
+        otp_key = f"reg_otp:{invitation.token}"
+        redis = _RegistrationProofRedis({otp_key: "12345"})
         address = "Real adapter retry address"
 
         async def get_test_redis():
@@ -1716,10 +1718,11 @@ class AuthoritativeRegistrationPostgresTests(unittest.IsolatedAsyncioTestCase):
                         ),
                         raw_request=_registration_http_request(),
                         db=first_adapter_session,
+                        verified_invitation_token=invitation.token,
                     )
 
-        self.assertIn(verify_key, redis.values)
-        self.assertNotIn(verify_key, redis.deleted_keys)
+        self.assertIn(otp_key, redis.values)
+        self.assertNotIn(otp_key, redis.deleted_keys)
 
         with patch.object(auth_router, "get_redis", new=get_test_redis), patch.object(
             auth_router,
@@ -1742,10 +1745,12 @@ class AuthoritativeRegistrationPostgresTests(unittest.IsolatedAsyncioTestCase):
                     ),
                     raw_request=_registration_http_request(),
                     db=retry_adapter_session,
+                    verified_invitation_token=invitation.token,
                 )
 
         self.assertEqual(response["access_token"], "stage2-retry-access")
-        self.assertNotIn(verify_key, redis.values)
+        self.assertNotIn(otp_key, redis.values)
+        self.assertFalse(any(key.startswith("reg_verified:") for key in redis.values))
         async with self.session_factory() as verification_session:
             stored_invitation = (
                 await verification_session.execute(

@@ -19,6 +19,10 @@ from core.db import AsyncSessionLocal
 from core.config import settings
 from core.audit_logger import audit_log
 from core.public_webapp_url import public_webapp_url_for_links, user_facing_webapp_url
+from core.invitation_contract_service import (
+    build_canonical_invitation_web_link,
+    is_canonical_invitation_short_code,
+)
 from core.registration_contracts import (
     REGISTRATION_ADDRESS_MIN_LENGTH,
     REGISTRATION_ADDRESS_MIN_LENGTH_MESSAGE,
@@ -106,7 +110,7 @@ REGISTRATION_CONFIRM_CALLBACK = "telegram_registration_confirm"
 REGISTRATION_EDIT_ADDRESS_CALLBACK = "telegram_registration_edit_address"
 REGISTRATION_HANDOFF_WAIT_SECONDS = 7.0
 REGISTRATION_HANDOFF_POLL_SECONDS = 0.25
-_REGISTRATION_STATE_TOKEN = "registration_invitation_token"
+_REGISTRATION_STATE_SHORT_CODE = "registration_invitation_short_code"
 _REGISTRATION_STATE_MOBILE = "registration_mobile_number"
 _REGISTRATION_STATE_EXPIRES_AT = "registration_invitation_expires_at"
 _REGISTRATION_STATE_TELEGRAM_ID = "registration_telegram_id"
@@ -313,6 +317,7 @@ async def _clear_registration_owned_fsm(state: FSMContext) -> None:
             },
         )
         return
+
     registration_states = {
         Registration.awaiting_contact.state,
         Registration.awaiting_address.state,
@@ -560,6 +565,15 @@ async def _begin_direct_registration(
         )
         return
 
+    if not is_canonical_invitation_short_code(
+        getattr(invitation, "short_code", None)
+    ):
+        await message.answer(
+            _registration_rejection_message("legacy_state_ambiguous"),
+            reply_markup=types.ReplyKeyboardRemove(),
+        )
+        return
+
     await state.clear()
     try:
         normalized_mobile = normalize_registration_mobile_number(
@@ -575,7 +589,7 @@ async def _begin_direct_registration(
         await _write_registration_fsm(
             state,
             data={
-                _REGISTRATION_STATE_TOKEN: invitation.token,
+                _REGISTRATION_STATE_SHORT_CODE: invitation.short_code,
                 _REGISTRATION_STATE_MOBILE: normalized_mobile,
                 _REGISTRATION_STATE_EXPIRES_AT: expires_at.isoformat(),
                 _REGISTRATION_STATE_TELEGRAM_ID: telegram_id,
@@ -660,16 +674,34 @@ def _user_facing_webapp_url() -> str | None:
     return user_facing_webapp_url(settings_obj=settings)
 
 
-def build_register_link_line(token: str) -> str | None:
-    return f"🌐 [تکمیل ثبت‌نام در وب اپ]({public_webapp_url_for_links()}/register?token={token})"
+def build_register_link_line(short_code: object) -> str | None:
+    if not is_canonical_invitation_short_code(short_code):
+        return None
+    link = build_canonical_invitation_web_link(
+        short_code,
+        web_origin=public_webapp_url_for_links(),
+    )
+    return f"🌐 [تکمیل ثبت‌نام در وب اپ]({link})" if link else None
 
 
-def build_accountant_register_link_line(token: str) -> str | None:
-    return f"🌐 [تکمیل ثبت‌نام حسابدار در وب اپ]({public_webapp_url_for_links()}/register?token={token})"
+def build_accountant_register_link_line(short_code: object) -> str | None:
+    if not is_canonical_invitation_short_code(short_code):
+        return None
+    link = build_canonical_invitation_web_link(
+        short_code,
+        web_origin=public_webapp_url_for_links(),
+    )
+    return f"🌐 [تکمیل ثبت‌نام حسابدار در وب اپ]({link})" if link else None
 
 
-def build_customer_register_link_line(token: str) -> str | None:
-    return f"🌐 [تکمیل ثبت‌نام مشتری در وب اپ]({public_webapp_url_for_links()}/register?token={token})"
+def build_customer_register_link_line(short_code: object) -> str | None:
+    if not is_canonical_invitation_short_code(short_code):
+        return None
+    link = build_canonical_invitation_web_link(
+        short_code,
+        web_origin=public_webapp_url_for_links(),
+    )
+    return f"🌐 [تکمیل ثبت‌نام مشتری در وب اپ]({link})" if link else None
 
 
 @router.message(CommandStart(deep_link=True))
@@ -820,7 +852,7 @@ async def handle_start_with_token(message: types.Message, command: CommandObject
                 "✅ دعوت‌نامه حسابدار معتبر است.",
                 "ثبت‌نام حسابدار فقط از طریق وب‌اپ انجام می‌شود و این حساب به ربات تلگرام دسترسی نخواهد داشت.",
             ]
-            register_line = build_accountant_register_link_line(token)
+            register_line = build_accountant_register_link_line(invitation.short_code)
             if register_line:
                 accountant_lines.append(register_line)
             await message.answer(
@@ -879,7 +911,7 @@ async def handle_start_with_token(message: types.Message, command: CommandObject
                     "بعد از تکمیل ثبت‌نام می‌توانید اتصال تلگرام را از داخل وب‌اپ فعال کنید."
                 ),
             ]
-            register_line = build_customer_register_link_line(token)
+            register_line = build_customer_register_link_line(invitation.short_code)
             if register_line:
                 customer_lines.append(register_line)
             await message.answer(
@@ -922,7 +954,7 @@ async def handle_start_with_token(message: types.Message, command: CommandObject
             "✅ لینک دعوت معتبر است.",
             "ثبت‌نام از طریق وب‌اپ انجام می‌شود. پس از تکمیل ثبت‌نام، در صورت مجاز بودن می‌توانید اتصال تلگرام را از داخل وب‌اپ فعال کنید.",
         ]
-        register_line = build_register_link_line(token)
+        register_line = build_register_link_line(invitation.short_code)
         if register_line:
             register_lines.append(register_line)
         anchor_msg = await message.answer(
@@ -988,15 +1020,15 @@ async def handle_contact(message: types.Message, state: FSMContext):
         await message.answer("ثبت‌نام مستقیم تلگرام موقتاً در دسترس نیست. کمی بعد دوباره تلاش کنید.")
         return
     if not _direct_registration_runtime_ready():
-        token = state_data.get("token") or state_data.get(_REGISTRATION_STATE_TOKEN)
+        short_code = state_data.get(_REGISTRATION_STATE_SHORT_CODE)
         await state.clear()
 
         register_lines = [
             "ثبت‌نام از طریق وب‌اپ انجام می‌شود.",
             "بعد از تکمیل ثبت‌نام، اتصال تلگرام را از داخل وب‌اپ فعال کنید.",
         ]
-        if token:
-            register_line = build_register_link_line(token)
+        if short_code:
+            register_line = build_register_link_line(short_code)
             if register_line:
                 register_lines.append(register_line)
         anchor_msg = await message.answer(
@@ -1087,14 +1119,14 @@ async def handle_address(message: types.Message, state: FSMContext):
         await message.answer("ثبت‌نام مستقیم تلگرام موقتاً در دسترس نیست. کمی بعد دوباره تلاش کنید.")
         return
     if not _direct_registration_runtime_ready():
-        token = state_data.get("token") or state_data.get(_REGISTRATION_STATE_TOKEN)
+        short_code = state_data.get(_REGISTRATION_STATE_SHORT_CODE)
         await state.clear()
         register_lines = [
             "این مسیر ثبت‌نام در ربات فعال نیست.",
             "برای تکمیل ثبت‌نام از وب‌اپ استفاده کنید.",
         ]
-        if token:
-            register_line = build_register_link_line(token)
+        if short_code:
+            register_line = build_register_link_line(short_code)
             if register_line:
                 register_lines.append(register_line)
         anchor_msg = await message.answer(
@@ -1232,7 +1264,7 @@ async def handle_registration_confirm(
         await callback.answer("ثبت‌نام مستقیم تلگرام موقتاً در دسترس نیست.", show_alert=True)
         return
     expires_at = _utc_datetime(state_data.get(_REGISTRATION_STATE_EXPIRES_AT))
-    token = state_data.get(_REGISTRATION_STATE_TOKEN)
+    short_code = state_data.get(_REGISTRATION_STATE_SHORT_CODE)
     mobile_number = state_data.get(_REGISTRATION_STATE_MOBILE)
     address = state_data.get(_REGISTRATION_STATE_ADDRESS)
     contact_verified_at = _utc_datetime(
@@ -1243,7 +1275,7 @@ async def handle_registration_confirm(
         not _direct_registration_runtime_ready()
         or expires_at is None
         or expires_at <= utc_now()
-        or not token
+        or not is_canonical_invitation_short_code(short_code)
         or not mobile_number
         or not isinstance(address, str)
         or len(address) < REGISTRATION_ADDRESS_MIN_LENGTH
@@ -1263,7 +1295,7 @@ async def handle_registration_confirm(
         async with AsyncSessionLocal() as session:
             invitation = (
                 await session.execute(
-                    select(Invitation).where(Invitation.token == token)
+                    select(Invitation).where(Invitation.short_code == short_code)
                 )
             ).scalar_one_or_none()
             if (
@@ -1280,6 +1312,8 @@ async def handle_registration_confirm(
                     reply_markup=types.ReplyKeyboardRemove(),
                 )
                 return
+
+            token = invitation.token
 
             current_expiry = _utc_datetime(invitation.expires_at)
             if current_expiry is None or current_expiry <= utc_now():

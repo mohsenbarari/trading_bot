@@ -41,6 +41,7 @@ export { default as AppToast } from './AppToast.vue'
 export { default as AppToolbar } from './AppToolbar.vue'
 export { default as AppTradeActionButton } from './AppTradeActionButton.vue'
 export { default as AppWorkspace } from './AppWorkspace.vue'
+export { default as AuthFlowShell } from '../auth/AuthFlowShell.vue'
 export { default as AppConfirmDialog } from './AppConfirmDialog.vue'
 export {
   attachUiDesignSystemPortalScope,

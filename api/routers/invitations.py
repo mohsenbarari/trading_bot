@@ -23,6 +23,7 @@ from core.sms import send_invitation_sms_result
 from core.invitation_contract_service import (
     build_invitation_contract_v2,
     build_public_invitation_contract_v2,
+    is_canonical_invitation_short_code,
 )
 from core.public_webapp_url import public_webapp_url_for_links
 from core.invitation_creation_contracts import (
@@ -57,7 +58,6 @@ from core.services.invitation_lifecycle_service import (
 from core.services.invitation_transition_lock_service import (
     lock_invitation_for_transition,
 )
-from core.log_redaction import mask_mobile
 from core.services.invitation_public_access_service import (
     enforce_public_invitation_access,
     public_invitation_http_exception,
@@ -71,7 +71,7 @@ class InvitationCreate(BaseModel):
     role: UserRole = UserRole.WATCH
 
 class InvitationResponse(BaseModel):
-    token: str
+    short_code: str | None
     link: str | None
     short_link: str | None
     bot_link: str | None
@@ -91,7 +91,6 @@ class PendingInvitationResponse(BaseModel):
     account_name: str
     mobile_number: str
     role: UserRole
-    token: str
     short_code: str | None
     bot_link: str | None
     web_link: str
@@ -195,6 +194,8 @@ async def _create_standard_invitation(
         bot_username=settings.bot_username,
         sms_status=InvitationSMSStatus.PENDING,
     )
+    if not pre_send_contract.web_link:
+        raise HTTPException(status_code=409, detail="کد کوتاه دعوت‌نامه معتبر نیست")
     sms_status = await deliver_invitation_sms_once(
         db,
         invitation_id=creation.invitation.id,
@@ -230,7 +231,6 @@ def serialize_pending_invitation(
         "account_name": invitation.account_name,
         "mobile_number": invitation.mobile_number,
         "role": invitation.role,
-        "token": invitation.token,
         "short_code": invitation.short_code,
         "bot_link": contract.bot_link,
         "web_link": contract.web_link,
@@ -390,6 +390,9 @@ async def lookup_invitation(
     """
     Lookup full token from short code.
     """
+    if not is_canonical_invitation_short_code(short_code):
+        raise public_invitation_http_exception(status_code=404, detail="Invalid short code")
+
     stmt = select(Invitation).where(Invitation.short_code == short_code)
     inv = (await db.execute(stmt)).scalar_one_or_none()
     
@@ -433,57 +436,14 @@ async def lookup_invitation(
 
 @router.get(
     "/validate/{token}",
-    dependencies=[Depends(enforce_public_invitation_access)],
 )
 async def validate_invitation(
     token: str,
-    db: AsyncSession = Depends(get_db)
 ):
-    """
-    Validate invitation token for web registration.
-    """
-    stmt = select(Invitation).where(Invitation.token == token)
-    inv = (await db.execute(stmt)).scalar_one_or_none()
-    
-    if not inv:
-        raise public_invitation_http_exception(status_code=404, detail="Invalid token")
-        
-    if inv.is_used and not settings.invitation_contract_v2_enabled:
-        raise public_invitation_http_exception(status_code=400, detail="Invitation already used")
-    if getattr(inv, "revoked_at", None) is not None and not settings.invitation_contract_v2_enabled:
-        raise public_invitation_http_exception(status_code=400, detail="Invitation revoked")
-    if getattr(inv, "kind", None) == InvitationKind.LEGACY_UNKNOWN:
-        raise public_invitation_http_exception(status_code=400, detail="Invitation state is ambiguous")
+    """Retired raw-bearer path; canonical Web entry is ``/i/{short_code}``."""
 
-    customer_tier = None
-    state = derive_invitation_state(inv)
-    if state == InvitationDerivedState.PENDING and is_accountant_invitation_token(token):
-        relation = await get_pending_accountant_relation_by_invitation_token(db, token)
-        if not relation:
-            raise public_invitation_http_exception(status_code=400, detail="Invitation expired")
-    elif state == InvitationDerivedState.PENDING and is_customer_invitation_token(token):
-        relation = await get_pending_customer_relation_by_invitation_token(db, token)
-        if not relation:
-            raise public_invitation_http_exception(status_code=400, detail="Invitation expired")
-        customer_tier = getattr(relation, "customer_tier", None)
-        
-    if inv.expires_at < utc_now_naive() and not settings.invitation_contract_v2_enabled:
-        raise public_invitation_http_exception(status_code=400, detail="Invitation expired")
-
-    audit_log(
-        "invitation.opened",
-        target_type="invitation",
-        target_id=getattr(inv, "id", None),
-        extra={"surface": "web", "entry": "token"},
+    del token
+    raise public_invitation_http_exception(
+        status_code=status.HTTP_410_GONE,
+        detail="Raw invitation validation is retired",
     )
-    if settings.invitation_contract_v2_enabled:
-        return build_public_invitation_contract_v2(
-            inv,
-            customer_tier=customer_tier,
-        ).model_dump()
-    return {
-        "valid": True,
-        "account_name": inv.account_name,
-        "mobile_number": mask_mobile(inv.mobile_number),
-        "role": inv.role
-    }

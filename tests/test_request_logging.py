@@ -30,6 +30,10 @@ def make_test_app() -> FastAPI:
     async def token_probe():
         return {"ok": True}
 
+    @app.post("/api/auth/registration-context/exchange")
+    async def registration_context_exchange_probe(payload: dict):
+        return {"token_length": len(str(payload.get("token") or ""))}
+
     @app.get("/api/invitations/accept/{token}")
     async def invitation_accept(token: str):
         return {"token_length": len(token)}
@@ -55,11 +59,12 @@ async def call_app(
     path: str,
     *,
     headers: dict[str, str] | None = None,
+    json_body: dict[str, object] | None = None,
     raise_app_exceptions: bool = True,
 ) -> httpx.Response:
     transport = ASGITransport(app=app, raise_app_exceptions=raise_app_exceptions)
     async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
-        return await client.request(method, path, headers=headers)
+        return await client.request(method, path, headers=headers, json=json_body)
 
 
 class RequestLoggingTests(unittest.TestCase):
@@ -141,6 +146,42 @@ class RequestLoggingTests(unittest.TestCase):
         self.assertEqual(extra["path"], "/api/auth/token")
         self.assertNotIn("password=secret", repr(extra))
         self.assertNotIn("unsafe", repr(extra))
+
+    def test_registration_exchange_bearer_stays_in_post_body_and_out_of_access_logs(self):
+        app = make_test_app()
+        raw_token = "REG-0123456789abcdef0123456789abcdef"
+
+        with patch("core.request_logging._logger") as logger:
+            response = asyncio.run(
+                call_app(
+                    app,
+                    "POST",
+                    "/api/auth/registration-context/exchange",
+                    json_body={"kind": "registration", "token": raw_token},
+                )
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"token_length": len(raw_token)})
+        extra = logger.info.call_args.kwargs["extra"]
+        self.assertTrue(extra["sensitive_route"])
+        self.assertEqual(extra["method"], "POST")
+        self.assertEqual(extra["path"], "/api/auth/registration-context/exchange")
+        self.assertNotIn(raw_token, repr(logger.mock_calls))
+
+    def test_retired_pending_registration_path_is_redacted_if_requested(self):
+        app = make_test_app()
+        raw_token = "REG-0123456789abcdef0123456789abcdef"
+
+        with patch("core.request_logging._logger") as logger:
+            response = asyncio.run(
+                call_app(app, "GET", f"/api/auth/pending-registration/{raw_token}")
+            )
+
+        self.assertEqual(response.status_code, 404)
+        extra = logger.info.call_args.kwargs["extra"]
+        self.assertEqual(extra["path"], "/api/auth/pending-registration/[REDACTED]")
+        self.assertNotIn(raw_token, repr(logger.mock_calls))
 
     def test_token_bearing_sensitive_paths_use_route_template(self):
         app = make_test_app()

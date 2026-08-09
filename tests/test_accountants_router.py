@@ -117,7 +117,7 @@ class AccountantsRouterTests(unittest.IsolatedAsyncioTestCase):
             mobile_number="09120000000",
             duty_description="پیگیری",
         )
-        invitation = SimpleNamespace(id=99, token="ACCT-token")
+        invitation = SimpleNamespace(id=99, token="ACCT-token", short_code="ACCT0001")
 
         with patch(
             "api.routers.accountants.create_or_reuse_owner_accountant_relation",
@@ -137,9 +137,15 @@ class AccountantsRouterTests(unittest.IsolatedAsyncioTestCase):
         ):
             created = await create_my_accountant(payload, context=context, db=FakeDB())
 
-        self.assertEqual(created["registration_link"], "https://app.example/register?token=ACCT-token")
+        self.assertEqual(created["registration_link"], "https://app.example/i/ACCT0001")
+        self.assertEqual(created["short_code"], "ACCT0001")
+        self.assertNotIn("invitation_token", created)
         create_mock.assert_awaited_once()
-        sms_mock.assert_called_once()
+        sms_mock.assert_called_once_with(
+            mobile="09120000000",
+            relation_display_name="حسابدار اول",
+            web_link="https://app.example/i/ACCT0001",
+        )
 
         with patch(
             "api.routers.accountants.list_owner_accountant_relations",
@@ -157,7 +163,9 @@ class AccountantsRouterTests(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertEqual(len(listed), 1)
-        self.assertEqual(listed[0]["registration_link"], "https://app.example/register?token=ACCT-token")
+        self.assertEqual(listed[0]["registration_link"], "https://app.example/i/ACCT0001")
+        self.assertEqual(listed[0]["web_short_link"], "https://app.example/i/ACCT0001")
+        self.assertNotIn("invitation_token", listed[0])
         self.assertEqual(listed[0]["sms_status"], InvitationSMSStatus.ACCEPTED)
 
     async def test_create_owner_accountant_fails_closed_when_public_webapp_url_is_invalid(self):

@@ -39,3 +39,1036 @@
     transform: none !important;
   }
 }
+
+/* Stage 3 public and focused Auth shells. The selector remains opt-in and
+ * cannot affect legacy or protected product routes without an explicit V2
+ * ancestor selected by the route-shell contract. */
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-auth-flow {
+  box-sizing: border-box;
+  width: min(
+    100%,
+    calc(
+      var(--ui-v2-layout-card-min) + (var(--ui-v2-spacing-32) * 5) + var(--ui-v2-spacing-8) +
+        var(--ui-v2-spacing-2)
+    )
+  );
+  max-width: 100%;
+  min-width: 0;
+  min-height: 100%;
+  margin-inline: auto;
+  overflow-x: clip;
+  background: var(--ui-v2-color-surface-page);
+  color: var(--ui-v2-color-text-primary);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-public-header {
+  box-sizing: border-box;
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  height: var(--ui-v2-size-bottom-nav);
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--ui-v2-spacing-16);
+  border-block-end: var(--ui-v2-stroke-standard) solid var(--ui-v2-color-border-default);
+  background: var(--ui-v2-color-surface-card);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-public-header strong {
+  color: var(--ui-v2-color-text-strong);
+  font-size: var(--ui-v2-type-card-size);
+  font-weight: var(--ui-v2-font-weight-semibold);
+  line-height: var(--ui-v2-type-card-line);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-public-header img {
+  width: calc(var(--ui-v2-spacing-24) + var(--ui-v2-spacing-4));
+  height: calc(var(--ui-v2-spacing-24) + var(--ui-v2-spacing-4));
+  flex: 0 0 auto;
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-auth-flow__content {
+  box-sizing: border-box;
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  gap: var(--ui-v2-spacing-12);
+  padding: var(--ui-v2-spacing-20) var(--ui-v2-spacing-16) var(--ui-v2-spacing-32);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-auth-progress {
+  display: flex;
+  min-width: 0;
+  min-height: calc(var(--ui-v2-spacing-24) + var(--ui-v2-spacing-4));
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ui-v2-spacing-12);
+  color: var(--ui-v2-color-text-strong);
+  font-size: var(--ui-v2-type-label-medium-size);
+  font-weight: var(--ui-v2-font-weight-semibold);
+  line-height: var(--ui-v2-type-label-medium-line);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-auth-progress__bars {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--ui-v2-spacing-4) + var(--ui-v2-spacing-2));
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-auth-progress__bars > span {
+  width: calc(var(--ui-v2-spacing-24) + var(--ui-v2-spacing-4));
+  height: var(--ui-v2-spacing-4);
+  border-radius: var(--ui-v2-radius-full);
+  background: var(--ui-v2-color-border-default);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-auth-progress__bars
+  > span.is-current {
+  width: calc(var(--ui-v2-spacing-32) + var(--ui-v2-spacing-8) + var(--ui-v2-spacing-2));
+  background: var(--ui-v2-color-action-primary);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-auth-flow__heading {
+  display: grid;
+  min-width: 0;
+  gap: var(--ui-v2-spacing-4);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-auth-flow__heading h1 {
+  margin: 0;
+  color: var(--ui-v2-color-text-strong);
+  font-size: var(--ui-v2-type-page-size);
+  font-weight: var(--ui-v2-font-weight-bold);
+  line-height: var(--ui-v2-type-page-line);
+  overflow-wrap: anywhere;
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-auth-flow__heading p {
+  margin: 0;
+  color: var(--ui-v2-color-text-primary);
+  font-size: var(--ui-v2-type-body-small-size);
+  line-height: var(--ui-v2-type-body-small-line);
+  overflow-wrap: anywhere;
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-auth-flow .ui-form-field {
+  display: grid;
+  min-width: 0;
+  gap: var(--ui-v2-spacing-4);
+  color: var(--ui-v2-color-text-primary);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-auth-flow .ui-form-field__label {
+  color: var(--ui-v2-color-text-secondary);
+  font-size: var(--ui-v2-type-label-medium-size);
+  font-weight: var(--ui-v2-font-weight-semibold);
+  line-height: var(--ui-v2-type-label-medium-line);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-auth-flow .ui-input,
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-auth-flow .ui-textarea {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  min-height: var(--ui-v2-size-cta-min);
+  padding: var(--ui-v2-spacing-12) var(--ui-v2-spacing-16);
+  border: var(--ui-v2-stroke-standard) solid var(--ui-v2-color-border-default);
+  border-radius: var(--ui-v2-radius-control);
+  background: var(--ui-v2-color-surface-card);
+  color: var(--ui-v2-color-text-primary);
+  font: inherit;
+  font-size: var(--ui-v2-type-body-small-size);
+  line-height: var(--ui-v2-type-body-small-line);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-auth-flow
+  :where(.ui-input, .ui-textarea)::placeholder {
+  color: var(--ui-v2-color-text-placeholder);
+  opacity: 1;
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-auth-flow
+  :where(.ui-input, .ui-textarea).is-invalid {
+  border-color: var(--ui-v2-color-status-danger);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-auth-flow .ui-form-field__error {
+  color: var(--ui-v2-color-status-danger);
+  font-size: var(--ui-v2-type-body-small-size);
+  line-height: var(--ui-v2-type-body-small-line);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-auth-flow .ui-button {
+  box-sizing: border-box;
+  display: inline-flex;
+  width: fit-content;
+  max-width: 100%;
+  min-height: var(--ui-v2-size-cta-min);
+  align-items: center;
+  justify-content: center;
+  gap: var(--ui-v2-spacing-8);
+  padding: var(--ui-v2-spacing-8) var(--ui-v2-spacing-16);
+  border: var(--ui-v2-stroke-standard) solid transparent;
+  border-radius: var(--ui-v2-radius-control);
+  background: var(--ui-v2-color-action-primary);
+  color: var(--ui-v2-color-text-on-action);
+  font: inherit;
+  font-size: var(--ui-v2-type-action-medium-size);
+  font-weight: var(--ui-v2-font-weight-semibold);
+  line-height: var(--ui-v2-type-action-medium-line);
+  cursor: pointer;
+  transition-property: color, background-color, border-color, opacity;
+  transition-duration: var(--ui-v2-motion-micro);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-auth-flow .ui-button--block {
+  width: 100%;
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-auth-flow
+  :where(.ui-button--secondary, .ui-button--ghost) {
+  border-color: var(--ui-v2-color-border-default);
+  background: var(--ui-v2-color-action-secondary);
+  color: var(--ui-v2-color-text-action);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-auth-flow .ui-button--danger {
+  background: var(--ui-v2-color-action-danger);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-auth-flow .ui-button:disabled {
+  border-color: var(--ui-v2-color-border-default);
+  background: var(--ui-v2-color-action-disabled);
+  color: var(--ui-v2-color-text-disabled);
+  cursor: not-allowed;
+  opacity: 1;
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-auth-flow
+  :where(.ui-card, .ui-section-card, .ui-empty-state) {
+  box-sizing: border-box;
+  min-width: 0;
+  padding: var(--ui-v2-spacing-16);
+  border: var(--ui-v2-stroke-standard) solid var(--ui-v2-color-border-default);
+  border-radius: var(--ui-v2-radius-control);
+  background: var(--ui-v2-color-surface-subtle);
+  box-shadow: none;
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-auth-flow
+  .ui-empty-state--danger {
+  border-color: var(--ui-v2-color-status-danger);
+  background: var(--ui-v2-color-status-danger-bg);
+  color: var(--ui-v2-color-status-danger);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-auth-password-form {
+  display: grid;
+  min-width: 0;
+  gap: var(--ui-v2-spacing-16);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-auth-password-field {
+  position: relative;
+  min-width: 0;
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-auth-password-field .ui-input {
+  padding-inline-start: calc(var(--ui-v2-size-target-min) + var(--ui-v2-spacing-8));
+  text-align: start;
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-auth-password-toggle {
+  position: absolute;
+  inset-block-start: var(--ui-v2-spacing-2);
+  inset-inline-start: var(--ui-v2-spacing-2);
+  display: inline-flex;
+  width: var(--ui-v2-size-target-min);
+  height: var(--ui-v2-size-target-min);
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: var(--ui-v2-radius-control);
+  background: transparent;
+  color: var(--ui-v2-color-icon-brand);
+  cursor: pointer;
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-auth-password-rules {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: var(--ui-v2-spacing-8);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-auth-flow .ui-status-badge {
+  display: inline-flex;
+  width: fit-content;
+  max-width: 100%;
+  align-items: center;
+  padding: var(--ui-v2-spacing-2) var(--ui-v2-spacing-8);
+  border-radius: var(--ui-v2-radius-full);
+  background: var(--ui-v2-color-surface-subtle);
+  color: var(--ui-v2-color-text-secondary);
+  font-size: var(--ui-v2-type-caption-size);
+  font-weight: var(--ui-v2-font-weight-bold);
+  line-height: var(--ui-v2-type-caption-line);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-auth-flow
+  .ui-status-badge--success {
+  background: var(--ui-v2-color-status-success-bg);
+  color: var(--ui-v2-color-status-success);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-auth-flow
+  .ui-status-badge--danger {
+  background: var(--ui-v2-color-status-danger-bg);
+  color: var(--ui-v2-color-status-danger);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-auth-error {
+  padding: var(--ui-v2-spacing-12) var(--ui-v2-spacing-16);
+  border: var(--ui-v2-stroke-standard) solid var(--ui-v2-color-status-danger);
+  border-radius: var(--ui-v2-radius-control);
+  background: var(--ui-v2-color-status-danger-bg);
+  color: var(--ui-v2-color-status-danger);
+  font-size: var(--ui-v2-type-body-small-size);
+  line-height: var(--ui-v2-type-body-small-line);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-auth-flow .ui-loading-state {
+  display: flex;
+  min-height: var(--ui-v2-size-cta-min);
+  align-items: center;
+  justify-content: center;
+  gap: var(--ui-v2-spacing-8);
+  padding: var(--ui-v2-spacing-16);
+  border: var(--ui-v2-stroke-standard) solid var(--ui-v2-color-border-default);
+  border-radius: var(--ui-v2-radius-control);
+  background: var(--ui-v2-color-surface-subtle);
+  color: var(--ui-v2-color-text-secondary);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-auth-flow .ui-empty-state {
+  display: grid;
+  justify-items: stretch;
+  gap: var(--ui-v2-spacing-12);
+  text-align: start;
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-auth-flow
+  .ui-empty-state
+  :where(h2, p) {
+  margin: 0;
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-auth-login-step,
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-auth-register-step,
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-auth-invite-actions {
+  display: grid;
+  min-width: 0;
+  gap: var(--ui-v2-spacing-12);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-auth-login-step--status {
+  justify-items: center;
+  text-align: center;
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-auth-login-input--ltr {
+  direction: ltr;
+  text-align: left;
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  :where(.ui-v2-auth-login-input--code, .ui-v2-auth-register-code) {
+  direction: ltr;
+  text-align: center;
+  letter-spacing: var(--ui-v2-spacing-4);
+  font-weight: var(--ui-v2-font-weight-bold);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  :where(
+    .ui-v2-auth-login-guidance,
+    .ui-v2-auth-login-note,
+    .ui-v2-auth-login-delivery,
+    .ui-v2-auth-login-upload,
+    .ui-v2-auth-login-countdown,
+    .ui-v2-auth-login-error,
+    .ui-v2-auth-register-guidance
+  ) {
+  box-sizing: border-box;
+  display: grid;
+  min-width: 0;
+  gap: calc(var(--ui-v2-spacing-4) + var(--ui-v2-spacing-2));
+  padding: var(--ui-v2-spacing-16);
+  border: var(--ui-v2-stroke-standard) solid var(--ui-v2-color-border-default);
+  border-radius: var(--ui-v2-radius-control);
+  background: var(--ui-v2-color-surface-subtle);
+  color: var(--ui-v2-color-text-primary);
+  font-size: var(--ui-v2-type-body-small-size);
+  line-height: var(--ui-v2-type-body-small-line);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  :where(.ui-v2-auth-login-guidance, .ui-v2-auth-login-note, .ui-v2-auth-register-guidance)
+  strong {
+  color: var(--ui-v2-color-text-strong);
+  font-size: var(--ui-v2-type-card-size);
+  font-weight: var(--ui-v2-font-weight-semibold);
+  line-height: var(--ui-v2-type-card-line);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  :where(
+    .ui-v2-auth-login-guidance p,
+    .ui-v2-auth-login-privacy,
+    .ui-v2-auth-register-guidance p,
+    .ui-v2-auth-register-privacy,
+    .ui-v2-auth-invite-privacy
+  ) {
+  margin: 0;
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-auth-login-note--success {
+  border-color: var(--ui-v2-color-status-success);
+  background: var(--ui-v2-color-status-success-bg);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-auth-login-meta {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ui-v2-spacing-8);
+  color: var(--ui-v2-color-text-secondary);
+  font-size: var(--ui-v2-type-body-small-size);
+  line-height: var(--ui-v2-type-body-small-line);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  :where(.ui-v2-auth-login-link, .ui-v2-auth-register-link) {
+  display: inline-flex;
+  width: fit-content;
+  min-width: var(--ui-v2-size-target-min);
+  min-height: var(--ui-v2-size-target-min);
+  align-items: center;
+  justify-content: center;
+  padding: var(--ui-v2-spacing-8);
+  border: 0;
+  border-radius: var(--ui-v2-radius-control);
+  background: transparent;
+  color: var(--ui-v2-color-text-action);
+  font: inherit;
+  font-size: var(--ui-v2-type-action-medium-size);
+  font-weight: var(--ui-v2-font-weight-semibold);
+  line-height: var(--ui-v2-type-action-medium-line);
+  cursor: pointer;
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-auth-login-link--danger {
+  color: var(--ui-v2-color-status-danger);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  :where(.ui-v2-auth-login-timer, .ui-v2-auth-login-delivery, .ui-v2-auth-login-upload) {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-v2-spacing-8);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-auth-login-timer {
+  width: fit-content;
+  color: var(--ui-v2-color-status-warning);
+  font-size: var(--ui-v2-type-label-medium-size);
+  font-weight: var(--ui-v2-font-weight-semibold);
+  line-height: var(--ui-v2-type-label-medium-line);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-auth-login-delivery {
+  background: var(--ui-v2-color-status-info-bg);
+  color: var(--ui-v2-color-status-info);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-auth-login-countdown {
+  justify-items: center;
+  background: var(--ui-v2-color-status-warning-bg);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-auth-login-countdown strong {
+  color: var(--ui-v2-color-status-warning);
+  font-size: var(--ui-v2-type-card-size);
+  line-height: var(--ui-v2-type-card-line);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-auth-login-picker-grid {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--ui-v2-spacing-8);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-auth-login-picker-grid
+  .ui-button {
+  width: 100%;
+  min-width: 0;
+  padding-inline: var(--ui-v2-spacing-8);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-auth-login-upload {
+  overflow-wrap: anywhere;
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  :where(.ui-v2-auth-login-privacy, .ui-v2-auth-register-privacy, .ui-v2-auth-invite-privacy) {
+  color: var(--ui-v2-color-text-secondary);
+  font-size: var(--ui-v2-type-body-small-size);
+  line-height: var(--ui-v2-type-body-small-line);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-auth-login-error {
+  border-color: var(--ui-v2-color-status-danger);
+  background: var(--ui-v2-color-status-danger-bg);
+  color: var(--ui-v2-color-status-danger);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-auth-login-error__actions {
+  display: grid;
+  gap: var(--ui-v2-spacing-8);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-auth-login-spinner {
+  color: var(--ui-v2-color-status-warning);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-auth-login-hidden-input {
+  display: none;
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-auth-invite-valid {
+  box-sizing: border-box;
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ui-v2-spacing-8);
+  padding: var(--ui-v2-spacing-12) var(--ui-v2-spacing-16);
+  border: var(--ui-v2-stroke-standard) solid var(--ui-v2-color-status-success);
+  border-radius: var(--ui-v2-radius-control);
+  background: var(--ui-v2-color-status-success-bg);
+  color: var(--ui-v2-color-status-success);
+  font-size: var(--ui-v2-type-body-small-size);
+  line-height: var(--ui-v2-type-body-small-line);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-auth-invite-route {
+  box-sizing: border-box;
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  min-height: var(--ui-v2-size-cta-min);
+  grid-template-columns: var(--ui-v2-size-target-min) minmax(0, 1fr);
+  align-items: center;
+  gap: var(--ui-v2-spacing-12);
+  padding: var(--ui-v2-spacing-12);
+  border: var(--ui-v2-stroke-standard) solid var(--ui-v2-color-border-default);
+  border-radius: var(--ui-v2-radius-card);
+  background: var(--ui-v2-color-surface-card);
+  color: var(--ui-v2-color-text-primary);
+  font: inherit;
+  text-align: start;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  :where(.ui-v2-auth-invite-route--telegram, .ui-v2-auth-invite-route--only) {
+  border-color: var(--ui-v2-color-border-focus);
+  background: var(--ui-v2-color-surface-brand-soft);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-auth-invite-route__icon {
+  display: inline-flex;
+  width: var(--ui-v2-size-target-min);
+  height: var(--ui-v2-size-target-min);
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--ui-v2-radius-control);
+  background: var(--ui-v2-color-surface-subtle);
+  color: var(--ui-v2-color-icon-brand);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-auth-invite-route__copy {
+  display: grid;
+  min-width: 0;
+  gap: var(--ui-v2-spacing-2);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-auth-invite-route__copy strong {
+  color: var(--ui-v2-color-text-strong);
+  font-size: var(--ui-v2-type-card-size);
+  line-height: var(--ui-v2-type-card-line);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-auth-invite-route__copy small {
+  color: var(--ui-v2-color-text-secondary);
+  font-size: var(--ui-v2-type-body-small-size);
+  line-height: var(--ui-v2-type-body-small-line);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-auth-register-context {
+  display: grid;
+  min-width: 0;
+  padding: var(--ui-v2-spacing-12) var(--ui-v2-spacing-16);
+  border: var(--ui-v2-stroke-standard) solid var(--ui-v2-color-border-default);
+  border-radius: var(--ui-v2-radius-control);
+  background: var(--ui-v2-color-surface-subtle);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-auth-register-context p {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ui-v2-spacing-12);
+  margin: 0;
+  padding-block: var(--ui-v2-spacing-8);
+  color: var(--ui-v2-color-text-secondary);
+  font-size: var(--ui-v2-type-body-small-size);
+  line-height: var(--ui-v2-type-body-small-line);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-auth-register-context p + p {
+  border-block-start: var(--ui-v2-stroke-standard) solid var(--ui-v2-color-border-default);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-auth-register-context strong {
+  color: var(--ui-v2-color-text-strong);
+  text-align: end;
+  overflow-wrap: anywhere;
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-auth-register-address {
+  min-height: calc(var(--ui-v2-size-cta-min) * 2);
+}
+
+/* Stage 3 authenticated shell layers. These selectors are inert on the
+ * protected legacy branch because that branch never receives a V2 scope. */
+:where(
+    [data-ui-system='v2'],
+    [data-ui-system='v2-portal']
+  ).app-route-v2-scope.ui-v2-route-fade-enter-active,
+:where(
+    [data-ui-system='v2'],
+    [data-ui-system='v2-portal']
+  ).app-route-v2-scope.ui-v2-route-fade-leave-active {
+  transition-property: opacity;
+  transition-duration: var(--ui-v2-motion-state);
+}
+
+:where(
+    [data-ui-system='v2'],
+    [data-ui-system='v2-portal']
+  ).app-route-v2-scope.ui-v2-route-fade-enter-from,
+:where(
+    [data-ui-system='v2'],
+    [data-ui-system='v2-portal']
+  ).app-route-v2-scope.ui-v2-route-fade-leave-to {
+  opacity: 0;
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']).ui-v2-connection-banner {
+  position: fixed;
+  z-index: 10020;
+  inset-block-start: 0;
+  inset-inline: 0;
+  display: flex;
+  min-height: var(--ui-v2-size-target-min);
+  align-items: center;
+  justify-content: center;
+  gap: var(--ui-v2-spacing-8);
+  padding: var(--ui-v2-spacing-8) var(--ui-v2-spacing-16);
+  border-block-end: var(--ui-v2-stroke-standard) solid var(--ui-v2-color-status-warning);
+  background: var(--ui-v2-color-status-warning-bg);
+  color: var(--ui-v2-color-status-warning);
+  font-size: var(--ui-v2-type-label-medium-size);
+  font-weight: var(--ui-v2-font-weight-semibold);
+  line-height: var(--ui-v2-type-label-medium-line);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-connection-banner__spinner {
+  width: var(--ui-v2-icon-size-small);
+  height: var(--ui-v2-icon-size-small);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-toast-layer {
+  box-sizing: border-box;
+  z-index: 10010;
+  padding-inline: var(--ui-v2-spacing-16);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-toast-layer.ui-v2-toast-layer--blocked {
+  pointer-events: none;
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-toast-enter-active,
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-toast-leave-active {
+  transition-property: opacity;
+  transition-duration: var(--ui-v2-motion-state);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-toast-enter-from,
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-toast-leave-to {
+  opacity: 0;
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-toast-item {
+  gap: var(--ui-v2-spacing-12);
+  color: var(--ui-v2-color-text-primary);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-toast-item .ui-toast {
+  min-height: var(--ui-v2-size-cta-min);
+  border: var(--ui-v2-stroke-standard) solid var(--ui-v2-color-border-default);
+  border-radius: var(--ui-v2-radius-card);
+  background: var(--ui-v2-color-surface-card);
+  box-shadow: var(--ui-v2-effect-overlay);
+  color: var(--ui-v2-color-text-primary);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-toast-item .ui-toast--success {
+  border-color: var(--ui-v2-color-status-success);
+  background: var(--ui-v2-color-status-success-bg);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-toast-item .ui-toast--warning {
+  border-color: var(--ui-v2-color-status-warning);
+  background: var(--ui-v2-color-status-warning-bg);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-toast-item .ui-toast--danger {
+  border-color: var(--ui-v2-color-status-danger);
+  background: var(--ui-v2-color-status-danger-bg);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-toast-item .ui-toast--info {
+  border-color: var(--ui-v2-color-status-info);
+  background: var(--ui-v2-color-status-info-bg);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-toast-icon {
+  background: var(--ui-v2-color-surface-card);
+  color: var(--ui-v2-color-icon-brand);
+  box-shadow: var(--ui-v2-effect-card);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-toast-dismiss {
+  width: var(--ui-v2-size-target-min);
+  height: var(--ui-v2-size-target-min);
+  color: var(--ui-v2-color-text-secondary);
+  opacity: 1;
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']).ui-v2-session-layer {
+  z-index: 10030;
+  color: var(--ui-v2-color-text-primary);
+  font-family: var(--ui-v2-font-family);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']).ui-v2-session-fade-enter-active,
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']).ui-v2-session-fade-leave-active {
+  transition-property: opacity;
+  transition-duration: var(--ui-v2-motion-state);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']).ui-v2-session-fade-enter-from,
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']).ui-v2-session-fade-leave-to {
+  opacity: 0;
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-session-card.ui-v2-session-card {
+  border: var(--ui-v2-stroke-standard) solid var(--ui-v2-color-border-default);
+  border-radius: var(--ui-v2-radius-panel);
+  background: var(--ui-v2-color-surface-card);
+  box-shadow: var(--ui-v2-effect-overlay);
+  animation: none;
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-session-header.ui-v2-session-header {
+  padding: var(--ui-v2-spacing-20);
+  background: var(--ui-v2-color-surface-brand-soft);
+  color: var(--ui-v2-color-text-strong);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-session-header.ui-v2-session-header
+  h2 {
+  color: var(--ui-v2-color-text-strong);
+  font-size: var(--ui-v2-type-section-size);
+  line-height: var(--ui-v2-type-section-line);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-session-header.ui-v2-session-header
+  .ui-v2-session-icon.ui-v2-session-icon {
+  color: var(--ui-v2-color-icon-brand);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-session-body {
+  padding: var(--ui-v2-spacing-20);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-session-summary.ui-v2-session-summary {
+  padding: var(--ui-v2-spacing-16);
+  border-radius: var(--ui-v2-radius-control);
+  background: var(--ui-v2-color-surface-subtle);
+  color: var(--ui-v2-color-text-primary);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-session-action {
+  box-sizing: border-box;
+  min-height: var(--ui-v2-size-cta-min);
+  padding: var(--ui-v2-spacing-8) var(--ui-v2-spacing-12);
+  border: var(--ui-v2-stroke-standard) solid transparent;
+  border-radius: var(--ui-v2-radius-control);
+  font: inherit;
+  font-size: var(--ui-v2-type-action-medium-size);
+  font-weight: var(--ui-v2-font-weight-semibold);
+  line-height: var(--ui-v2-type-action-medium-line);
+  transition-property: color, background-color, border-color, opacity;
+  transition-duration: var(--ui-v2-motion-micro);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-session-action--primary {
+  background: var(--ui-v2-color-action-primary);
+  color: var(--ui-v2-color-text-on-action);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-session-action--secondary {
+  border-color: var(--ui-v2-color-border-default);
+  background: var(--ui-v2-color-action-secondary);
+  color: var(--ui-v2-color-text-action);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-session-action--danger {
+  background: var(--ui-v2-color-action-danger);
+  color: var(--ui-v2-color-text-on-action);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-session-action--success {
+  background: var(--ui-v2-color-status-success);
+  color: var(--ui-v2-color-text-on-action);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-session-action:disabled {
+  border-color: var(--ui-v2-color-border-default);
+  background: var(--ui-v2-color-action-disabled);
+  color: var(--ui-v2-color-text-disabled);
+  opacity: 1;
+}
+
+/* The standard shell opts its normal navigation into these canonical hooks.
+ * Protected Market and Messenger keep the prop false and retain exact legacy
+ * classes, layout, motion, and visual behavior. */
+[data-ui-system='v2'][data-ui-system='v2'] .ui-v2-bottom-nav.ui-v2-bottom-nav,
+[data-ui-system='v2-portal'][data-ui-system='v2-portal'] .ui-v2-bottom-nav.ui-v2-bottom-nav {
+  padding-inline: var(--ui-v2-spacing-12);
+  padding-block-end: calc(var(--ui-v2-spacing-12) + env(safe-area-inset-bottom, 0px));
+}
+
+[data-ui-system='v2'][data-ui-system='v2'] .ui-v2-bottom-nav-bar.ui-v2-bottom-nav-bar,
+[data-ui-system='v2-portal'][data-ui-system='v2-portal']
+  .ui-v2-bottom-nav-bar.ui-v2-bottom-nav-bar {
+  min-height: var(--ui-v2-size-bottom-nav);
+  gap: var(--ui-v2-spacing-4);
+  padding: var(--ui-v2-spacing-8) var(--ui-v2-spacing-4);
+  border-radius: var(--ui-v2-radius-panel);
+}
+
+[data-ui-system='v2'][data-ui-system='v2'] .ui-v2-bottom-nav-item.ui-v2-bottom-nav-item,
+[data-ui-system='v2-portal'][data-ui-system='v2-portal']
+  .ui-v2-bottom-nav-item.ui-v2-bottom-nav-item {
+  min-width: var(--ui-v2-size-target-min);
+  min-height: var(--ui-v2-size-target-min);
+  gap: var(--ui-v2-spacing-2);
+  padding: var(--ui-v2-spacing-4) var(--ui-v2-spacing-8);
+  border-radius: var(--ui-v2-radius-control);
+  transition-property: color, background-color, border-color, opacity;
+  transition-duration: var(--ui-v2-motion-micro);
+}
+
+[data-ui-system='v2'][data-ui-system='v2']
+  .ui-v2-bottom-nav-item.ui-v2-bottom-nav-item:focus-visible,
+[data-ui-system='v2-portal'][data-ui-system='v2-portal']
+  .ui-v2-bottom-nav-item.ui-v2-bottom-nav-item:focus-visible {
+  outline: var(--ui-v2-stroke-focus) solid var(--ui-v2-color-border-focus);
+  outline-offset: var(--ui-v2-spacing-2);
+  border-color: var(--ui-v2-color-border-focus);
+  box-shadow: none;
+}
+
+[data-ui-system='v2'][data-ui-system='v2'] .ui-v2-bottom-nav-label.ui-v2-bottom-nav-label,
+[data-ui-system='v2-portal'][data-ui-system='v2-portal']
+  .ui-v2-bottom-nav-label.ui-v2-bottom-nav-label,
+[data-ui-system='v2'][data-ui-system='v2'] .ui-v2-bottom-nav-closed.ui-v2-bottom-nav-closed,
+[data-ui-system='v2-portal'][data-ui-system='v2-portal']
+  .ui-v2-bottom-nav-closed.ui-v2-bottom-nav-closed {
+  min-height: var(--ui-v2-type-label-small-line);
+  font-size: var(--ui-v2-type-label-small-size);
+  line-height: var(--ui-v2-type-label-small-line);
+}
+
+[data-ui-system='v2'][data-ui-system='v2']
+  .ui-v2-bottom-nav-label--closed.ui-v2-bottom-nav-label--closed,
+[data-ui-system='v2-portal'][data-ui-system='v2-portal']
+  .ui-v2-bottom-nav-label--closed.ui-v2-bottom-nav-label--closed {
+  gap: var(--ui-v2-spacing-2);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-ui-system='v2'][data-ui-system='v2'] .ui-v2-bottom-nav-item.ui-v2-bottom-nav-item,
+  [data-ui-system='v2-portal'][data-ui-system='v2-portal']
+    .ui-v2-bottom-nav-item.ui-v2-bottom-nav-item,
+  [data-ui-system='v2'][data-ui-system='v2'] .ui-v2-bottom-nav-icon.ui-v2-bottom-nav-icon,
+  [data-ui-system='v2-portal'][data-ui-system='v2-portal']
+    .ui-v2-bottom-nav-icon.ui-v2-bottom-nav-icon {
+    transition-duration: var(--ui-v2-motion-micro);
+  }
+}
+
+/* The PWA prompt is a route-local Home section. It is never a fixed overlay,
+ * never owns navigation space, and remains inert until its eligibility state
+ * is true. */
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']).ui-v2-pwa-section:empty {
+  display: none;
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']).ui-v2-pwa-section,
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-pwa-install {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-pwa-card {
+  box-sizing: border-box;
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: var(--ui-v2-spacing-12);
+  margin: 0;
+  padding: var(--ui-v2-spacing-16);
+  border: var(--ui-v2-stroke-standard) solid var(--ui-v2-color-border-default);
+  border-radius: var(--ui-v2-radius-card);
+  background: var(--ui-v2-color-surface-card);
+  box-shadow: var(--ui-v2-effect-card);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-pwa-icon {
+  width: var(--ui-v2-size-cta-min);
+  height: var(--ui-v2-size-cta-min);
+  overflow: hidden;
+  border-radius: var(--ui-v2-radius-control);
+  background: var(--ui-v2-color-surface-subtle);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-pwa-icon img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-pwa-copy {
+  display: grid;
+  min-width: 0;
+  gap: var(--ui-v2-spacing-2);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-pwa-copy h3,
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-pwa-copy p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-pwa-copy h3 {
+  color: var(--ui-v2-color-text-strong);
+  font-size: var(--ui-v2-type-card-size);
+  font-weight: var(--ui-v2-font-weight-semibold);
+  line-height: var(--ui-v2-type-card-line);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-pwa-copy p {
+  color: var(--ui-v2-color-text-secondary);
+  font-size: var(--ui-v2-type-body-small-size);
+  line-height: var(--ui-v2-type-body-small-line);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-pwa-ios-guide {
+  color: var(--ui-v2-color-text-primary);
+  font-weight: var(--ui-v2-font-weight-semibold);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-pwa-actions {
+  display: flex;
+  grid-column: 1 / -1;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--ui-v2-spacing-8);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-pwa-actions .ui-button {
+  box-sizing: border-box;
+  display: inline-flex;
+  min-height: var(--ui-v2-size-cta-min);
+  align-items: center;
+  justify-content: center;
+  padding: var(--ui-v2-spacing-8) var(--ui-v2-spacing-16);
+  border: var(--ui-v2-stroke-standard) solid transparent;
+  border-radius: var(--ui-v2-radius-control);
+  background: var(--ui-v2-color-action-primary);
+  color: var(--ui-v2-color-text-on-action);
+  font: inherit;
+  font-size: var(--ui-v2-type-action-medium-size);
+  font-weight: var(--ui-v2-font-weight-semibold);
+  line-height: var(--ui-v2-type-action-medium-line);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-pwa-actions
+  :where(.ui-button--secondary, .ui-button--ghost) {
+  border-color: var(--ui-v2-color-border-default);
+  background: var(--ui-v2-color-action-secondary);
+  color: var(--ui-v2-color-text-action);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .slide-up-enter-active,
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .slide-up-leave-active {
+  transition-property: opacity;
+  transition-duration: var(--ui-v2-motion-state);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .slide-up-enter-from,
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .slide-up-leave-to {
+  opacity: 0;
+}

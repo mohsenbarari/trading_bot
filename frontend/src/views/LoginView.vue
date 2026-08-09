@@ -1,13 +1,15 @@
 <script setup lang="ts">
-import { ref, reactive, onMounted, onUnmounted, computed, watch } from 'vue'
+import { ref, reactive, onMounted, onUnmounted, computed, nextTick, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Smartphone, Lock, Loader2, Download, Clock, CheckCircle2, XCircle, ShieldCheck } from 'lucide-vue-next'
+import { Clock, FileCheck2, Loader2 } from 'lucide-vue-next'
 import { setupExpiryTimer } from '../utils/auth'
-import { primeCurrentUserSummary } from '../utils/currentUser'
+import { clearIntendedRoute, readIntendedRoute } from '../utils/authNavigation'
+import { clearCurrentUserSummary, primeCurrentUserSummary } from '../utils/currentUser'
 import { isAppHttpError } from '../utils/httpErrorPolicy'
+import { assertSuccessfulNavigation } from '../utils/navigationResult'
 import { routeRequestJson } from '../utils/routeRequest'
 import { pushBackState, popBackState, clearBackStack } from '../composables/useBackButton'
-import { AppButton, AppFormField, AppInput, AppPage, AppSectionCard, AppStatusBadge, AppTextarea } from '../components/ui'
+import { AppButton, AppFormField, AppInput, AppTextarea, AuthFlowShell } from '../components/ui'
 
 const router = useRouter()
 const route = useRoute()
@@ -23,38 +25,16 @@ type LoginStep =
   | 'recovery_rejected'
   | 'recovery_expired'
 
-function isIOSUserAgent(userAgent: string) {
-  const normalized = userAgent.toLowerCase()
-  return /iphone|ipad|ipod/.test(normalized)
-}
-
-function isInAppBrowser(userAgent: string) {
-  const normalized = userAgent.toLowerCase()
-  return /instagram|fbav|fban|telegram|line|micromessenger|; wv\)/.test(normalized)
-}
-
-function isLikelyBeforeInstallPromptBrowser(userAgent: string) {
-  const normalized = userAgent.toLowerCase()
-  if (isIOSUserAgent(normalized) || isInAppBrowser(normalized)) return false
-  return /chrome|chromium|crmo|edg\/|edga|opr\/|opera|samsungbrowser/.test(normalized)
-}
-
-const initialUserAgent = typeof window !== 'undefined' ? window.navigator.userAgent.toLowerCase() : ''
-
 const step = ref<LoginStep>('mobile')
 const loading = ref(false)
 const error = ref('')
-const isStandalone = ref(false)
-const supportsNativeInstallPrompt = ref(isLikelyBeforeInstallPromptBrowser(initialUserAgent))
-const showManualInstallGuide = ref(isIOSUserAgent(initialUserAgent))
-const isIOS = ref(isIOSUserAgent(initialUserAgent))
-const isInstalled = ref(false)
-const isInstallButtonDelayElapsed = ref(false)
-let installButtonDelayTimer: number | null = null
+const mobileInput = ref<{ focus: (options?: FocusOptions) => void } | null>(null)
+const otpInput = ref<{ focus: (options?: FocusOptions) => void } | null>(null)
+const statusStepContainer = ref<HTMLElement | null>(null)
 
 // OTP Timer State
 const countdown = ref(0)
-let timerInterval: any = null
+let timerInterval: ReturnType<typeof window.setInterval> | null = null
 let countdownDeadlineMs: number | null = null
 const otpRequestId = ref<string | null>(null)
 const otpExpiresAt = ref<string | null>(null)
@@ -65,27 +45,33 @@ const OTP_ATTEMPT_SESSION_KEY = 'login_otp_attempt_v1'
 
 const form = reactive({
   mobile: '',
-  code: ''
+  code: '',
+})
+const maskedMobileForDisplay = computed(() => {
+  const digits = form.mobile.replace(/\D/gu, '')
+  return /^09\d{9}$/u.test(digits) ? `${digits.slice(0, 4)}****${digits.slice(-3)}` : ''
 })
 
 // Session approval state
 const loginRequestId = ref<string | null>(null)
 const approvalExpiresAt = ref<string | null>(null)
 const approvalCountdown = ref(0)
-let approvalTimerInterval: any = null
-let approvalPollInterval: any = null
+let approvalTimerInterval: ReturnType<typeof window.setInterval> | null = null
+let approvalPollInterval: ReturnType<typeof window.setInterval> | null = null
 
 // Recovery flow state
 const recoveryStatus = ref<string | null>(null)
 const recoveryCountdown = ref(0)
 const recoveryFile = ref<File | null>(null)
 const recoveryCaption = ref('')
-const recoveryApprovedTokens = ref<{ access_token: string; refresh_token?: string | null } | null>(null)
+const recoveryApprovedTokens = ref<{ access_token: string; refresh_token?: string | null } | null>(
+  null,
+)
 const recoveryFileInput = ref<HTMLInputElement | null>(null)
 const recoveryCameraInput = ref<HTMLInputElement | null>(null)
 const recoveryDocumentInput = ref<HTMLInputElement | null>(null)
-let recoveryTimerInterval: any = null
-let recoveryPollInterval: any = null
+let recoveryTimerInterval: ReturnType<typeof window.setInterval> | null = null
+let recoveryPollInterval: ReturnType<typeof window.setInterval> | null = null
 type LoginActionKey =
   | 'request-otp'
   | 'resend-otp'
@@ -94,6 +80,7 @@ type LoginActionKey =
   | 'cancel-recovery'
   | 'submit-recovery-identity'
   | 'enter-approved-recovery'
+  | 'complete-login-transition'
   | 'dev-login'
 const activeActions = new Set<LoginActionKey>()
 let approvalPollPending = false
@@ -102,18 +89,23 @@ let loginContextEpoch = 0
 
 type JsonObject = Record<string, unknown>
 type LoginTokenReceipt = JsonObject & { access_token: string; refresh_token?: string | null }
-type VerifyOtpReceipt = LoginTokenReceipt | (
-  JsonObject & {
-    status: 'approval_required' | 'registration_required'
-    login_request_id?: string
-    registration_token?: string
-    expires_at?: string
-  }
-)
+type VerifyOtpReceipt =
+  | LoginTokenReceipt
+  | (JsonObject & {
+      status: 'approval_required' | 'registration_required' | 'registration_complete'
+      login_request_id?: string
+      expires_at?: string
+    })
 type RecoveryReceipt = JsonObject & { status: string }
+const pendingAuthenticatedLogin = ref<LoginTokenReceipt | null>(null)
 
 function isObject(value: unknown): value is JsonObject {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
+function readString(record: JsonObject, key: string): string | null {
+  const value = record[key]
+  return typeof value === 'string' ? value : null
 }
 
 function beginAction(key: LoginActionKey) {
@@ -150,7 +142,9 @@ function invalidateLoginContext() {
   loginContextEpoch += 1
 }
 
-function captureLoginContext(options: { includeCode?: boolean; includeOtpRequestId?: boolean } = {}): LoginContextSnapshot {
+function captureLoginContext(
+  options: { includeCode?: boolean; includeOtpRequestId?: boolean } = {},
+): LoginContextSnapshot {
   return {
     epoch: loginContextEpoch,
     step: step.value,
@@ -161,31 +155,42 @@ function captureLoginContext(options: { includeCode?: boolean; includeOtpRequest
 }
 
 function isLoginContextCurrent(snapshot: LoginContextSnapshot) {
-  return snapshot.epoch === loginContextEpoch
-    && snapshot.step === step.value
-    && snapshot.mobile === form.mobile
-    && (snapshot.code === undefined || snapshot.code === form.code)
-    && (snapshot.otpRequestId === undefined || snapshot.otpRequestId === otpRequestId.value)
+  return (
+    snapshot.epoch === loginContextEpoch &&
+    snapshot.step === step.value &&
+    snapshot.mobile === form.mobile &&
+    (snapshot.code === undefined || snapshot.code === form.code) &&
+    (snapshot.otpRequestId === undefined || snapshot.otpRequestId === otpRequestId.value)
+  )
 }
 
 function hasLoginTokens(value: unknown): value is LoginTokenReceipt {
-  return isObject(value)
-    && typeof value.access_token === 'string'
-    && Boolean(value.access_token.trim())
-    && (value.refresh_token === undefined || value.refresh_token === null || typeof value.refresh_token === 'string')
+  return (
+    isObject(value) &&
+    typeof value.access_token === 'string' &&
+    Boolean(value.access_token.trim()) &&
+    (value.refresh_token === undefined ||
+      value.refresh_token === null ||
+      typeof value.refresh_token === 'string')
+  )
 }
 
 function isOtpDeliveryReceipt(value: unknown): value is JsonObject {
   if (!isObject(value)) return false
   if (value.method === 'log') {
     const hasDetail = typeof value.detail === 'string' && Boolean(value.detail.trim())
-    const hasExpiry = (typeof value.expires_in === 'number' && Number.isFinite(value.expires_in) && value.expires_in > 0)
-      || (typeof value.expires_at === 'string' && Boolean(value.expires_at.trim()))
+    const hasExpiry =
+      (typeof value.expires_in === 'number' &&
+        Number.isFinite(value.expires_in) &&
+        value.expires_in > 0) ||
+      (typeof value.expires_at === 'string' && Boolean(value.expires_at.trim()))
     return hasDetail && hasExpiry
   }
-  return value.method === 'telegram'
-    || value.method === 'sms'
-    || (typeof value.otp_request_id === 'string' && Boolean(value.otp_request_id.trim()))
+  return (
+    value.method === 'telegram' ||
+    value.method === 'sms' ||
+    (typeof value.otp_request_id === 'string' && Boolean(value.otp_request_id.trim()))
+  )
 }
 
 function isVerifyOtpReceipt(value: unknown): value is VerifyOtpReceipt {
@@ -195,9 +200,14 @@ function isVerifyOtpReceipt(value: unknown): value is VerifyOtpReceipt {
     return typeof value.login_request_id === 'string' && Boolean(value.login_request_id.trim())
   }
   if (value.status === 'registration_required') {
-    return typeof value.registration_token === 'string' && Boolean(value.registration_token.trim())
+    return true
   }
+  if (value.status === 'registration_complete') return true
   return false
+}
+
+function isRecoveredDirectRegistrationContext(value: unknown): value is JsonObject {
+  return isObject(value) && value.kind === 'registration' && value.progress === 'otp_verified'
 }
 
 const knownRecoveryStatuses = new Set([
@@ -212,17 +222,23 @@ const knownRecoveryStatuses = new Set([
 ])
 
 function isRecoveryReceipt(value: unknown): value is RecoveryReceipt {
-  return isObject(value)
-    && typeof value.status === 'string'
-    && knownRecoveryStatuses.has(value.status)
+  return (
+    isObject(value) && typeof value.status === 'string' && knownRecoveryStatuses.has(value.status)
+  )
 }
 
-async function completeAuthenticatedLogin(data: { access_token: string; refresh_token?: string | null }) {
+async function completeAuthenticatedLogin(data: {
+  access_token: string
+  refresh_token?: string | null
+}): Promise<boolean> {
   localStorage.setItem('auth_token', data.access_token)
   if (data.refresh_token) {
     localStorage.setItem('refresh_token', data.refresh_token)
   }
-  localStorage.removeItem('suspended_refresh_token')
+  pendingAuthenticatedLogin.value = {
+    access_token: data.access_token,
+    refresh_token: data.refresh_token,
+  }
 
   try {
     await primeCurrentUserSummary(true)
@@ -230,9 +246,35 @@ async function completeAuthenticatedLogin(data: { access_token: string; refresh_
     // Do not block the login transition on a best-effort current-user prefetch.
   }
 
+  const intendedRoute = readIntendedRoute()
+  try {
+    assertSuccessfulNavigation(await router.push(intendedRoute || '/'))
+  } catch {
+    error.value = 'ورود انجام شد، اما انتقال به صفحه بعد ممکن نشد. دوباره تلاش کنید.'
+    return false
+  }
+
+  pendingAuthenticatedLogin.value = null
+  localStorage.removeItem('suspended_refresh_token')
   setupExpiryTimer()
   clearBackStack()
-  router.push('/')
+  clearIntendedRoute()
+  return true
+}
+
+async function retryAuthenticatedLoginTransition() {
+  const pendingTokens = pendingAuthenticatedLogin.value
+  if (!pendingTokens || !beginAction('complete-login-transition')) return
+  error.value = ''
+  try {
+    const completed = await completeAuthenticatedLogin(pendingTokens)
+    if (completed) {
+      clearOtpAttempt()
+      form.code = ''
+    }
+  } finally {
+    finishAction('complete-login-transition')
+  }
 }
 
 function syncCountdown() {
@@ -255,19 +297,18 @@ function startTimerUntil(deadline: string | number) {
   if (countdown.value > 0) timerInterval = setInterval(syncCountdown, 1000)
 }
 
-function startTimer(seconds: number) {
-  startTimerUntil(Date.now() + Math.max(0, Number(seconds) || 0) * 1000)
-}
-
 function persistOtpAttempt() {
   if (!otpRequestId.value || !otpExpiresAt.value) return
   try {
-    sessionStorage.setItem(OTP_ATTEMPT_SESSION_KEY, JSON.stringify({
-      requestId: otpRequestId.value,
-      method: lastMethod.value,
-      expiresAt: otpExpiresAt.value,
-      smsFallbackAt: smsFallbackAt.value,
-    }))
+    sessionStorage.setItem(
+      OTP_ATTEMPT_SESSION_KEY,
+      JSON.stringify({
+        requestId: otpRequestId.value,
+        method: lastMethod.value,
+        expiresAt: otpExpiresAt.value,
+        smsFallbackAt: smsFallbackAt.value,
+      }),
+    )
   } catch {
     // Browser storage is best-effort; backend timing remains authoritative.
   }
@@ -290,30 +331,27 @@ function clearOtpAttempt() {
   }
 }
 
-function applyOtpTiming(data: any) {
-  otpRequestId.value = typeof data?.otp_request_id === 'string' ? data.otp_request_id : null
-  lastMethod.value = data?.method === 'telegram' || data?.method === 'sms' ? data.method : null
-  otpExpiresAt.value = typeof data?.expires_at === 'string'
-    ? data.expires_at
-    : new Date(Date.now() + Math.max(0, Number(data?.expires_in) || 0) * 1000).toISOString()
-  smsFallbackAt.value = typeof data?.sms_fallback_at === 'string'
-    ? data.sms_fallback_at
+function applyOtpTiming(data: JsonObject) {
+  const nextOtpRequestId = readString(data, 'otp_request_id')
+  const method = readString(data, 'method')
+  const expiresAt = readString(data, 'expires_at')
+  const nextSmsFallbackAt = readString(data, 'sms_fallback_at')
+  const nextLegacySmsResendAt = readString(data, 'legacy_sms_resend_at')
+  otpRequestId.value = nextOtpRequestId
+  lastMethod.value = method === 'telegram' || method === 'sms' ? method : null
+  otpExpiresAt.value =
+    expiresAt ||
+    new Date(Date.now() + Math.max(0, Number(data.expires_in) || 0) * 1000).toISOString()
+  smsFallbackAt.value = nextSmsFallbackAt
+  legacyManualSmsResend.value =
+    data.manual_sms_resend === true || (lastMethod.value === 'telegram' && !smsFallbackAt.value)
+  legacySmsResendAt.value = legacyManualSmsResend.value
+    ? nextLegacySmsResendAt || new Date(Date.now() + 30_000).toISOString()
     : null
-  legacyManualSmsResend.value = data?.manual_sms_resend === true || (
-    lastMethod.value === 'telegram' && !smsFallbackAt.value
-  )
-  legacySmsResendAt.value = (
-    legacyManualSmsResend.value
-      ? (
-          typeof data?.legacy_sms_resend_at === 'string'
-            ? data.legacy_sms_resend_at
-            : new Date(Date.now() + 30_000).toISOString()
-        )
-      : null
-  )
-  const displayDeadline = lastMethod.value === 'telegram' && smsFallbackAt.value
-    ? smsFallbackAt.value
-    : (legacySmsResendAt.value || otpExpiresAt.value)
+  const displayDeadline =
+    lastMethod.value === 'telegram' && smsFallbackAt.value
+      ? smsFallbackAt.value
+      : legacySmsResendAt.value || otpExpiresAt.value
   startTimerUntil(displayDeadline)
   persistOtpAttempt()
 }
@@ -335,19 +373,24 @@ function restoreOtpAttempt() {
     legacyManualSmsResend.value = false
     lastMethod.value = saved.method === 'telegram' || saved.method === 'sms' ? saved.method : null
     step.value = 'otp'
-    const displayDeadline = lastMethod.value === 'telegram' && smsFallbackAt.value
-      ? smsFallbackAt.value
-      : otpExpiresAt.value
+    const displayDeadline =
+      lastMethod.value === 'telegram' && smsFallbackAt.value
+        ? smsFallbackAt.value
+        : otpExpiresAt.value
+    if (!displayDeadline) {
+      clearOtpAttempt()
+      return
+    }
     startTimerUntil(displayDeadline)
   } catch {
     clearOtpAttempt()
   }
 }
 
-
-
 const formattedTimer = computed(() => {
-  const m = Math.floor(countdown.value / 60).toString().padStart(2, '0')
+  const m = Math.floor(countdown.value / 60)
+    .toString()
+    .padStart(2, '0')
   const s = (countdown.value % 60).toString().padStart(2, '0')
   return `${m}:${s}`
 })
@@ -378,11 +421,25 @@ const canOfferAppRecovery = computed(() => {
     message.includes('خطا در ارتباط با سرور')
   )
 })
+const mobileFieldError = computed(() =>
+  step.value === 'mobile' && error.value === 'شماره موبایل معتبر نیست' ? error.value : '',
+)
+const otpFieldError = computed(() =>
+  step.value === 'otp' &&
+  error.value &&
+  !canOfferAppRecovery.value &&
+  !pendingAuthenticatedLogin.value
+    ? error.value
+    : '',
+)
+const processError = computed(() =>
+  error.value && !mobileFieldError.value && !otpFieldError.value ? error.value : '',
+)
 
 const lastMethod = ref<'telegram' | 'sms' | null>(null)
-const automaticSmsFallback = computed(() => (
-  lastMethod.value === 'telegram' && Boolean(smsFallbackAt.value)
-))
+const automaticSmsFallback = computed(
+  () => lastMethod.value === 'telegram' && Boolean(smsFallbackAt.value),
+)
 const otpDeliveryStatus = computed(() => {
   if (!automaticSmsFallback.value) {
     return countdown.value > 0 ? `${formattedTimer.value} تا ارسال مجدد` : ''
@@ -395,14 +452,17 @@ const otpDeliveryStatus = computed(() => {
 
 function startAppRecovery() {
   const nextUrl = new URL(window.location.href)
+  nextUrl.search = ''
+  nextUrl.hash = ''
   nextUrl.searchParams.set('app_recovery', Date.now().toString())
-  window.location.replace(nextUrl.toString())
+  window.location.replace(`${nextUrl.pathname}${nextUrl.search}`)
 }
 
 function goToOtpStep() {
   if (step.value === 'otp') return
   step.value = 'otp'
   pushBackState(() => {
+    if (pendingAuthenticatedLogin.value) return
     invalidateLoginContext()
     clearOtpAttempt()
     form.code = ''
@@ -412,11 +472,13 @@ function goToOtpStep() {
 }
 
 async function requestOtp() {
+  if (pendingAuthenticatedLogin.value) return
   if (!form.mobile || form.mobile.length < 10) {
     error.value = 'شماره موبایل معتبر نیست'
+    mobileInput.value?.focus()
     return
   }
-  
+
   if (countdown.value > 0) {
     goToOtpStep()
     return
@@ -425,12 +487,12 @@ async function requestOtp() {
   if (!beginAction('request-otp')) return
   const requestContext = captureLoginContext()
   error.value = ''
-  
+
   try {
     const data = await routeRequestJson<unknown>('/api/auth/request-otp', {
       mode: 'public',
       method: 'POST',
-      headers: {'Content-Type': 'application/json'},
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ mobile_number: requestContext.mobile }),
       errorContext: {
         surface: 'auth',
@@ -443,7 +505,6 @@ async function requestOtp() {
     if (!isOtpDeliveryReceipt(data)) throw new Error('پاسخ ارسال کد کامل نیست.')
     applyOtpTiming(data)
     goToOtpStep()
-    
   } catch (cause: unknown) {
     if (!isLoginContextCurrent(requestContext)) return
     if (isAppHttpError(cause) && cause.status === 429) {
@@ -473,12 +534,12 @@ async function resendOtpSms() {
   if (!beginAction('resend-otp')) return
   const requestContext = captureLoginContext({ includeOtpRequestId: true })
   error.value = ''
-  
+
   try {
     const data = await routeRequestJson<unknown>('/api/auth/resend-otp-sms', {
       mode: 'public',
       method: 'POST',
-      headers: {'Content-Type': 'application/json'},
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ mobile_number: requestContext.mobile }),
       errorContext: {
         surface: 'auth',
@@ -489,11 +550,13 @@ async function resendOtpSms() {
     })
     if (!isLoginContextCurrent(requestContext)) return
     if (!isOtpDeliveryReceipt(data)) throw new Error('پاسخ ارسال پیامک کامل نیست.')
-    
-    // SMS Sent successfully
-    applyOtpTiming({ ...data, method: 'sms', otp_request_id: data.otp_request_id || otpRequestId.value })
 
-    
+    // SMS Sent successfully
+    applyOtpTiming({
+      ...data,
+      method: 'sms',
+      otp_request_id: data.otp_request_id || otpRequestId.value,
+    })
   } catch (cause: unknown) {
     if (!isLoginContextCurrent(requestContext)) return
     error.value = requestErrorMessage(cause, 'خطا در ارسال پیامک')
@@ -503,18 +566,99 @@ async function resendOtpSms() {
 }
 
 function handleResend() {
-    if (automaticSmsFallback.value) return
-    if (legacyManualSmsResend.value || lastMethod.value === 'telegram') {
-        resendOtpSms()
-        return
-    }
-    requestOtp()
+  if (pendingAuthenticatedLogin.value) return
+  if (automaticSmsFallback.value) return
+  if (legacyManualSmsResend.value || lastMethod.value === 'telegram') {
+    resendOtpSms()
+    return
+  }
+  requestOtp()
 }
 
+async function routeToRegistrationContext(): Promise<boolean> {
+  try {
+    assertSuccessfulNavigation(await router.push({ name: 'web-register' }))
+  } catch {
+    error.value = 'ادامه ثبت‌نام اکنون ممکن نشد. دوباره تلاش کنید.'
+    return false
+  }
+  clearOtpAttempt()
+  form.code = ''
+  localStorage.removeItem('suspended_refresh_token')
+  clearBackStack()
+  try {
+    sessionStorage.removeItem('web_registration_progress_v1')
+  } catch {
+    // Non-sensitive flow progress is best-effort only.
+  }
+  return true
+}
+
+async function routeToRecoveredRegistrationCompletion(): Promise<boolean> {
+  try {
+    assertSuccessfulNavigation(
+      await router.push({ name: 'login', query: { registration: 'complete' } }),
+    )
+  } catch {
+    error.value = 'ادامه ثبت‌نام اکنون ممکن نشد. دوباره تلاش کنید.'
+    return false
+  }
+  clearOtpAttempt()
+  form.code = ''
+  localStorage.removeItem('suspended_refresh_token')
+  clearBackStack()
+  try {
+    await routeRequestJson<unknown>('/api/auth/registration-context/clear', {
+      mode: 'public',
+      method: 'POST',
+      credentials: 'same-origin',
+      errorContext: {
+        surface: 'auth',
+        scope: 'action',
+        operation: 'background-refresh',
+      },
+    })
+  } catch {
+    // Completion state remains bounded server-side if acknowledgement is lost.
+  }
+  return true
+}
+
+async function recoverRegistrationContextAfterVerifyFailure(
+  requestContext: LoginContextSnapshot,
+): Promise<boolean> {
+  try {
+    const context = await routeRequestJson<unknown>('/api/auth/registration-context', {
+      mode: 'public',
+      method: 'POST',
+      credentials: 'same-origin',
+      errorContext: {
+        surface: 'auth',
+        scope: 'action',
+        operation: 'background-refresh',
+      },
+    })
+    if (!isLoginContextCurrent(requestContext)) return false
+    if (isObject(context) && context.status === 'registration_complete') {
+      return routeToRecoveredRegistrationCompletion()
+    }
+    if (isRecoveredDirectRegistrationContext(context)) {
+      return routeToRegistrationContext()
+    }
+  } catch {
+    // No authoritative cookie context means the original OTP error remains.
+  }
+  return false
+}
 
 async function verifyOtp() {
+  if (pendingAuthenticatedLogin.value) {
+    await retryAuthenticatedLoginTransition()
+    return
+  }
   if (!form.code || form.code.length < 4) {
     error.value = 'کد احراز هویت نامعتبر است'
+    otpInput.value?.focus()
     return
   }
 
@@ -526,12 +670,12 @@ async function verifyOtp() {
     const data = await routeRequestJson<unknown>('/api/auth/verify-otp', {
       mode: 'public',
       method: 'POST',
-      headers: {'Content-Type': 'application/json'},
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         mobile_number: requestContext.mobile || undefined,
         otp_request_id: requestContext.otpRequestId || undefined,
         code: requestContext.code,
-        suspended_refresh_token: localStorage.getItem("suspended_refresh_token") || undefined,
+        suspended_refresh_token: localStorage.getItem('suspended_refresh_token') || undefined,
       }),
       errorContext: {
         surface: 'auth',
@@ -541,27 +685,43 @@ async function verifyOtp() {
       },
     })
     if (!isLoginContextCurrent(requestContext)) return
-    if (!isVerifyOtpReceipt(data)) throw new Error('پاسخ تایید ورود کامل نیست.')
-    clearOtpAttempt()
-    localStorage.removeItem('suspended_refresh_token')
-
+    if (!isVerifyOtpReceipt(data)) throw new Error('پاسخ تأیید ورود کامل نیست.')
+    const receiptStatus = readString(data, 'status')
     // Session management: check if approval is required
-    if (data.status === 'approval_required') {
-      loginRequestId.value = data.login_request_id
-      approvalExpiresAt.value = data.expires_at
+    if (receiptStatus === 'approval_required') {
+      clearOtpAttempt()
+      form.code = ''
+      localStorage.removeItem('suspended_refresh_token')
+      loginRequestId.value = readString(data, 'login_request_id')
+      approvalExpiresAt.value = readString(data, 'expires_at')
       step.value = 'waiting_approval'
       startApprovalPolling()
       return
     }
 
-    if (data.status === 'registration_required' && data.registration_token) {
-      clearBackStack()
-      router.push(`/register?registration_token=${encodeURIComponent(data.registration_token)}`)
+    if (receiptStatus === 'registration_required') {
+      await routeToRegistrationContext()
       return
     }
-    
-    await completeAuthenticatedLogin(data)
+
+    if (receiptStatus === 'registration_complete') {
+      await routeToRecoveredRegistrationCompletion()
+      return
+    }
+
+    if (!hasLoginTokens(data)) throw new Error('پاسخ تأیید ورود کامل نیست.')
+    if (await completeAuthenticatedLogin(data)) {
+      clearOtpAttempt()
+      form.code = ''
+    }
   } catch (cause: unknown) {
+    if (!isLoginContextCurrent(requestContext)) return
+    if (
+      (!isAppHttpError(cause) || cause.status === null || cause.status >= 500) &&
+      (await recoverRegistrationContextAfterVerifyFailure(requestContext))
+    ) {
+      return
+    }
     if (!isLoginContextCurrent(requestContext)) return
     error.value = requestErrorMessage(cause, 'کد نادرست است')
   } finally {
@@ -570,15 +730,18 @@ async function verifyOtp() {
 }
 
 function startApprovalPolling() {
-  const expiresAtMs = approvalExpiresAt.value ? new Date(approvalExpiresAt.value).getTime() : Date.now() + (120 * 1000)
+  const expiresAtMs = approvalExpiresAt.value
+    ? new Date(approvalExpiresAt.value).getTime()
+    : Date.now() + 120 * 1000
   approvalCountdown.value = Math.max(0, Math.floor((expiresAtMs - Date.now()) / 1000))
   if (approvalTimerInterval) clearInterval(approvalTimerInterval)
   approvalTimerInterval = setInterval(() => {
     approvalCountdown.value--
     if (approvalCountdown.value <= 0) {
-      clearInterval(approvalTimerInterval)
+      const interval = approvalTimerInterval
+      if (interval) clearInterval(interval)
       stopApprovalPolling()
-      error.value = 'زمان انتظار تایید به پایان رسید. لطفاً دوباره تلاش کنید.'
+      error.value = 'زمان انتظار تأیید به پایان رسید. لطفاً دوباره تلاش کنید.'
       step.value = 'otp'
     }
   }, 1000)
@@ -590,14 +753,17 @@ function startApprovalPolling() {
     const requestId = loginRequestId.value
     approvalPollPending = true
     try {
-      const data = await routeRequestJson<unknown>(`/api/sessions/login-requests/${encodeURIComponent(requestId)}/status`, {
-        mode: 'public',
-        errorContext: { surface: 'auth', scope: 'action', operation: 'background-refresh' },
-      })
+      const data = await routeRequestJson<unknown>(
+        `/api/sessions/login-requests/${encodeURIComponent(requestId)}/status`,
+        {
+          mode: 'public',
+          errorContext: { surface: 'auth', scope: 'action', operation: 'background-refresh' },
+        },
+      )
       if (loginRequestId.value !== requestId) return
       if (!isObject(data) || typeof data.status !== 'string') return
       localStorage.removeItem('suspended_refresh_token')
-      
+
       if (data.status === 'approved' && hasLoginTokens(data)) {
         stopApprovalPolling()
         await completeAuthenticatedLogin(data)
@@ -607,7 +773,7 @@ function startApprovalPolling() {
         step.value = 'otp'
       } else if (data.status === 'expired') {
         stopApprovalPolling()
-        error.value = 'زمان انتظار تایید به پایان رسید.'
+        error.value = 'زمان انتظار تأیید به پایان رسید.'
         step.value = 'otp'
       }
     } catch {
@@ -619,16 +785,35 @@ function startApprovalPolling() {
 }
 
 function stopApprovalPolling(preserveRequestId = false) {
-  if (approvalTimerInterval) { clearInterval(approvalTimerInterval); approvalTimerInterval = null }
-  if (approvalPollInterval) { clearInterval(approvalPollInterval); approvalPollInterval = null }
+  if (approvalTimerInterval) {
+    clearInterval(approvalTimerInterval)
+    approvalTimerInterval = null
+  }
+  if (approvalPollInterval) {
+    clearInterval(approvalPollInterval)
+    approvalPollInterval = null
+  }
   if (!preserveRequestId) {
     loginRequestId.value = null
   }
 }
 
+function returnToOtpFromApproval() {
+  if (pendingAuthenticatedLogin.value) return
+  stopApprovalPolling()
+  step.value = 'otp'
+  error.value = ''
+}
+
 function stopRecoveryPolling(preserveRequestId = false) {
-  if (recoveryTimerInterval) { clearInterval(recoveryTimerInterval); recoveryTimerInterval = null }
-  if (recoveryPollInterval) { clearInterval(recoveryPollInterval); recoveryPollInterval = null }
+  if (recoveryTimerInterval) {
+    clearInterval(recoveryTimerInterval)
+    recoveryTimerInterval = null
+  }
+  if (recoveryPollInterval) {
+    clearInterval(recoveryPollInterval)
+    recoveryPollInterval = null
+  }
   recoveryCountdown.value = 0
   if (!preserveRequestId) {
     loginRequestId.value = null
@@ -650,7 +835,10 @@ function startRecoveryCountdown(expiresAt?: string | null) {
 
   const fallbackSeconds = 2 * 60 * 60
   if (expiresAt) {
-    recoveryCountdown.value = Math.max(0, Math.floor((new Date(expiresAt).getTime() - Date.now()) / 1000))
+    recoveryCountdown.value = Math.max(
+      0,
+      Math.floor((new Date(expiresAt).getTime() - Date.now()) / 1000),
+    )
   } else {
     recoveryCountdown.value = fallbackSeconds
   }
@@ -664,7 +852,8 @@ function startRecoveryCountdown(expiresAt?: string | null) {
   recoveryTimerInterval = setInterval(() => {
     recoveryCountdown.value--
     if (recoveryCountdown.value <= 0) {
-      clearInterval(recoveryTimerInterval)
+      const interval = recoveryTimerInterval
+      if (interval) clearInterval(interval)
       recoveryTimerInterval = null
       stopRecoveryPolling(true)
       step.value = 'recovery_expired'
@@ -672,20 +861,20 @@ function startRecoveryCountdown(expiresAt?: string | null) {
   }, 1000)
 }
 
-function parseResponseError(data: any, fallback: string) {
-  if (data && typeof data.detail === 'string' && data.detail.trim()) {
-    return data.detail
+function parseResponseError(data: unknown, fallback: string) {
+  if (isObject(data)) {
+    const detail = readString(data, 'detail')
+    if (detail?.trim()) return detail
   }
   return fallback
 }
 
-function applyRecoveryStatus(data: any) {
-  const nextStatus = typeof data?.status === 'string' ? data.status : null
+function applyRecoveryStatus(data: JsonObject) {
+  const nextStatus = readString(data, 'status')
   recoveryStatus.value = nextStatus
 
-  const expiresAt = typeof data?.chat_action_expires_at === 'string'
-    ? data.chat_action_expires_at
-    : (typeof data?.inline_action_expires_at === 'string' ? data.inline_action_expires_at : null)
+  const expiresAt =
+    readString(data, 'chat_action_expires_at') || readString(data, 'inline_action_expires_at')
 
   if (nextStatus === 'pending_admin_review') {
     step.value = 'recovery_waiting'
@@ -707,10 +896,11 @@ function applyRecoveryStatus(data: any) {
 
   if (nextStatus === 'approved') {
     stopRecoveryPolling(true)
-    recoveryApprovedTokens.value = data?.access_token
+    const accessToken = readString(data, 'access_token')
+    recoveryApprovedTokens.value = accessToken
       ? {
-          access_token: data.access_token,
-          refresh_token: data.refresh_token || null,
+          access_token: accessToken,
+          refresh_token: readString(data, 'refresh_token'),
         }
       : null
     step.value = 'recovery_approved'
@@ -735,7 +925,7 @@ function applyRecoveryStatus(data: any) {
     clearRecoveryDraft()
     form.code = ''
     step.value = 'mobile'
-    error.value = 'درخواست بازیابی لغو شد. برای ادامه دوباره کد تایید دریافت کنید.'
+    error.value = 'درخواست بازیابی لغو شد. برای ادامه دوباره کد تأیید دریافت کنید.'
   }
 }
 
@@ -745,10 +935,13 @@ async function pollRecoveryStatusOnce() {
   recoveryPollPending = true
 
   try {
-    const data = await routeRequestJson<unknown>(`/api/sessions/login-requests/${encodeURIComponent(requestId)}/recovery/status`, {
-      mode: 'public',
-      errorContext: { surface: 'auth', scope: 'action', operation: 'background-refresh' },
-    })
+    const data = await routeRequestJson<unknown>(
+      `/api/sessions/login-requests/${encodeURIComponent(requestId)}/recovery/status`,
+      {
+        mode: 'public',
+        errorContext: { surface: 'auth', scope: 'action', operation: 'background-refresh' },
+      },
+    )
     if (loginRequestId.value !== requestId) return
     if (!isRecoveryReceipt(data)) return
     applyRecoveryStatus(data)
@@ -772,17 +965,21 @@ async function startRecoveryFlow() {
 
   error.value = ''
   try {
-    const data = await routeRequestJson<unknown>(`/api/sessions/login-requests/${encodeURIComponent(loginRequestId.value)}/recovery`, {
-      mode: 'public',
-      method: 'POST',
-      errorContext: {
-        surface: 'auth',
-        scope: 'action',
-        operation: 'submit',
-        fallbackMessage: 'شروع مسیر بازیابی ممکن نشد',
+    const data = await routeRequestJson<unknown>(
+      `/api/sessions/login-requests/${encodeURIComponent(loginRequestId.value)}/recovery`,
+      {
+        mode: 'public',
+        method: 'POST',
+        errorContext: {
+          surface: 'auth',
+          scope: 'action',
+          operation: 'submit',
+          fallbackMessage: 'شروع مسیر بازیابی ممکن نشد',
+        },
       },
-    })
-    if (!isRecoveryReceipt(data) || data.status === 'not_started') throw new Error('پاسخ شروع مسیر بازیابی کامل نیست.')
+    )
+    if (!isRecoveryReceipt(data) || data.status === 'not_started')
+      throw new Error('پاسخ شروع مسیر بازیابی کامل نیست.')
 
     stopApprovalPolling(true)
     applyRecoveryStatus(data)
@@ -799,16 +996,19 @@ async function cancelRecoveryFlow() {
 
   error.value = ''
   try {
-    const data = await routeRequestJson<unknown>(`/api/sessions/login-requests/${encodeURIComponent(loginRequestId.value)}/recovery/cancel`, {
-      mode: 'public',
-      method: 'POST',
-      errorContext: {
-        surface: 'auth',
-        scope: 'action',
-        operation: 'submit',
-        fallbackMessage: 'لغو درخواست بازیابی ممکن نشد',
+    const data = await routeRequestJson<unknown>(
+      `/api/sessions/login-requests/${encodeURIComponent(loginRequestId.value)}/recovery/cancel`,
+      {
+        mode: 'public',
+        method: 'POST',
+        errorContext: {
+          surface: 'auth',
+          scope: 'action',
+          operation: 'submit',
+          fallbackMessage: 'لغو درخواست بازیابی ممکن نشد',
+        },
       },
-    })
+    )
     const recovery = isObject(data) && isRecoveryReceipt(data.recovery) ? data.recovery : data
     if (!isRecoveryReceipt(recovery) || recovery.status !== 'cancelled') {
       throw new Error('پاسخ لغو درخواست بازیابی کامل نیست.')
@@ -819,7 +1019,7 @@ async function cancelRecoveryFlow() {
     clearRecoveryDraft()
     form.code = ''
     step.value = 'mobile'
-    error.value = 'درخواست بازیابی لغو شد. برای ادامه دوباره کد تایید دریافت کنید.'
+    error.value = 'درخواست بازیابی لغو شد. برای ادامه دوباره کد تأیید دریافت کنید.'
   } catch (cause: unknown) {
     error.value = requestErrorMessage(cause, 'لغو درخواست بازیابی ممکن نشد')
   } finally {
@@ -869,17 +1069,20 @@ async function submitRecoveryIdentity() {
       formData.set('caption', trimmedCaption)
     }
 
-    const data = await routeRequestJson<unknown>(`/api/sessions/login-requests/${encodeURIComponent(loginRequestId.value)}/recovery/identity`, {
-      mode: 'public',
-      method: 'POST',
-      body: formData,
-      errorContext: {
-        surface: 'auth',
-        scope: 'form',
-        operation: 'upload',
-        fallbackMessage: 'ارسال مدرک ممکن نشد',
+    const data = await routeRequestJson<unknown>(
+      `/api/sessions/login-requests/${encodeURIComponent(loginRequestId.value)}/recovery/identity`,
+      {
+        mode: 'public',
+        method: 'POST',
+        body: formData,
+        errorContext: {
+          surface: 'auth',
+          scope: 'form',
+          operation: 'upload',
+          fallbackMessage: 'ارسال مدرک ممکن نشد',
+        },
       },
-    })
+    )
     const recovery = isObject(data) && isRecoveryReceipt(data.recovery) ? data.recovery : data
     if (!isRecoveryReceipt(recovery) || recovery.status !== 'identity_submitted') {
       throw new Error('پاسخ ارسال مدرک کامل نیست.')
@@ -905,15 +1108,18 @@ async function enterWithApprovedRecovery() {
       const requestId = loginRequestId.value
       if (!requestId) throw new Error('دسترسی ورود آماده نیست. مسیر ورود را دوباره آغاز کنید.')
 
-      const data = await routeRequestJson<unknown>(`/api/sessions/login-requests/${encodeURIComponent(requestId)}/recovery/status`, {
-        mode: 'public',
-        errorContext: {
-          surface: 'auth',
-          scope: 'action',
-          operation: 'submit',
-          fallbackMessage: 'دریافت دسترسی ورود ممکن نشد.',
+      const data = await routeRequestJson<unknown>(
+        `/api/sessions/login-requests/${encodeURIComponent(requestId)}/recovery/status`,
+        {
+          mode: 'public',
+          errorContext: {
+            surface: 'auth',
+            scope: 'action',
+            operation: 'submit',
+            fallbackMessage: 'دریافت دسترسی ورود ممکن نشد.',
+          },
         },
-      })
+      )
       if (loginRequestId.value !== requestId) return
       if (!isRecoveryReceipt(data) || data.status !== 'approved' || !hasLoginTokens(data)) {
         throw new Error('دسترسی ورود هنوز آماده نیست. دوباره تلاش کنید.')
@@ -932,6 +1138,10 @@ async function enterWithApprovedRecovery() {
 }
 
 function restartLoginFlow() {
+  if (pendingAuthenticatedLogin.value) {
+    cancelPendingAuthenticatedLogin()
+    return
+  }
   invalidateLoginContext()
   stopApprovalPolling()
   stopRecoveryPolling()
@@ -942,46 +1152,81 @@ function restartLoginFlow() {
   step.value = 'mobile'
 }
 
-const shouldShowInstallEntry = computed(() => (
-  isInstallButtonDelayElapsed.value &&
-  !isStandalone.value &&
-  !isInstalled.value &&
-  (isIOS.value || !supportsNativeInstallPrompt.value)
-))
-
-const manualInstallGuideTitle = computed(() => (
-  isIOS.value ? 'راهنمای نصب در آیفون' : 'راهنمای نصب دستی'
-))
-
-async function installPWA() {
-  const deferredPrompt = (window as any).deferredPrompt
-  if (supportsNativeInstallPrompt.value && !isIOS.value && deferredPrompt?.prompt) {
-    showManualInstallGuide.value = false
-    try {
-      deferredPrompt.prompt()
-      const result = await deferredPrompt.userChoice
-      if (result?.outcome === 'accepted') {
-        isInstalled.value = true
-        return
-      }
-    } catch {
-      // Fall back to manual instructions below when the browser prompt fails.
-    } finally {
-      ;(window as any).deferredPrompt = null
-    }
-  }
-
-  showManualInstallGuide.value = true
+function cancelPendingAuthenticatedLogin() {
+  pendingAuthenticatedLogin.value = null
+  localStorage.removeItem('auth_token')
+  localStorage.removeItem('refresh_token')
+  localStorage.removeItem('suspended_refresh_token')
+  clearCurrentUserSummary()
+  clearIntendedRoute()
+  invalidateLoginContext()
+  stopApprovalPolling()
+  stopRecoveryPolling()
+  clearRecoveryDraft()
+  clearOtpAttempt()
+  clearBackStack()
+  form.mobile = ''
+  form.code = ''
+  error.value = ''
+  step.value = 'mobile'
+  void nextTick(() => mobileInput.value?.focus())
 }
 
-const stagingDevLoginFlag = String(import.meta.env.VITE_STAGING_DEV_LOGIN ?? '').trim().toLowerCase()
-const isDevMode = stagingDevLoginFlag === 'true' ||
-                    stagingDevLoginFlag === '1' ||
-                    window.location.hostname === 'localhost' ||
-                    window.location.hostname === '127.0.0.1' ||
-                    window.location.hostname.startsWith('192.168.') ||
-                    window.location.hostname.startsWith('172.') ||
-                    window.location.hostname.startsWith('10.')
+const authFlowTitle = computed(() => {
+  if (step.value === 'mobile') return 'ورود به سامانه'
+  if (step.value === 'otp') return 'کد تأیید را وارد کنید'
+  if (step.value === 'waiting_approval') return 'در انتظار تأیید'
+  if (step.value === 'recovery_waiting') return 'در حال بررسی مدیریت'
+  if (step.value === 'recovery_identity') return 'مدرک احراز هویت'
+  if (step.value === 'recovery_submitted') return 'مدرک ارسال شد'
+  if (step.value === 'recovery_approved') return 'درخواست شما تأیید شد'
+  if (step.value === 'recovery_rejected') return 'درخواست شما رد شد'
+  return 'مهلت درخواست به پایان رسید'
+})
+
+const authFlowDescription = computed(() => {
+  if (step.value === 'mobile') {
+    return 'شماره موبایل ثبت‌شده را وارد کنید تا کد تأیید برای شما ارسال شود.'
+  }
+  if (step.value === 'otp') return 'کد ارسال‌شده را وارد کنید.'
+  if (step.value === 'waiting_approval') {
+    return 'درخواست ورود به دستگاه اصلی شما ارسال شد. نتیجه بدون نیاز به به‌روزرسانی دستی در همین صفحه نمایش داده می‌شود.'
+  }
+  if (step.value === 'recovery_waiting') {
+    return 'نتیجه به‌صورت خودکار در همین صفحه اعلام می‌شود. اگر مدرکی لازم باشد، درخواست آن را همین‌جا می‌بینید.'
+  }
+  if (step.value === 'recovery_identity') {
+    return 'تصویر کارت شناسایی یا فایل مدرک را ارسال کنید.'
+  }
+  if (step.value === 'recovery_submitted') {
+    return 'مدرک برای بررسی ارسال شد و نتیجه به‌صورت خودکار در همین صفحه اعلام می‌شود.'
+  }
+  if (step.value === 'recovery_approved') {
+    return 'نشست قدیمی منقضی شد و اکنون می‌توانید وارد سامانه شوید.'
+  }
+  if (step.value === 'recovery_rejected') {
+    return 'در صورت نیاز می‌توانید دوباره درخواست بازیابی را ثبت کنید.'
+  }
+  return 'در مهلت تعیین‌شده پاسخی ثبت نشد. در صورت نیاز درخواست جدید ثبت کنید.'
+})
+
+const authFlowStep = computed(() => {
+  if (step.value === 'mobile') return 1
+  if (step.value === 'otp') return 2
+  return undefined
+})
+
+const stagingDevLoginFlag = String(import.meta.env.VITE_STAGING_DEV_LOGIN ?? '')
+  .trim()
+  .toLowerCase()
+const isDevMode =
+  stagingDevLoginFlag === 'true' ||
+  stagingDevLoginFlag === '1' ||
+  window.location.hostname === 'localhost' ||
+  window.location.hostname === '127.0.0.1' ||
+  window.location.hostname.startsWith('192.168.') ||
+  window.location.hostname.startsWith('172.') ||
+  window.location.hostname.startsWith('10.')
 
 async function startDevLogin() {
   if (!beginAction('dev-login')) return
@@ -1007,113 +1252,89 @@ async function startDevLogin() {
   }
 }
 
-let beforeInstallPromptHandler: ((event: Event) => void) | null = null
-let pwaInstallReadyHandler: (() => void) | null = null
-let appInstalledHandler: (() => void) | null = null
 let otpVisibilityHandler: (() => void) | null = null
 
 onMounted(() => {
   restoreOtpAttempt()
   otpVisibilityHandler = () => syncCountdown()
   document.addEventListener('visibilitychange', otpVisibilityHandler)
-
-  const isStandaloneDisplay = typeof window.matchMedia === 'function'
-    && window.matchMedia('(display-mode: standalone)').matches
-  if (isStandaloneDisplay || (window.navigator as any).standalone === true) {
-    isStandalone.value = true
-  }
-
-  const userAgent = window.navigator.userAgent.toLowerCase()
-  isIOS.value = isIOSUserAgent(userAgent)
-  supportsNativeInstallPrompt.value = isLikelyBeforeInstallPromptBrowser(userAgent)
-  showManualInstallGuide.value = isIOS.value
-
-  beforeInstallPromptHandler = (e: Event) => {
-    e.preventDefault()
-    ;(window as any).deferredPrompt = e
-    supportsNativeInstallPrompt.value = true
-    showManualInstallGuide.value = false
-  }
-  window.addEventListener('beforeinstallprompt', beforeInstallPromptHandler)
-  
-  pwaInstallReadyHandler = () => {
-    if ((window as any).deferredPrompt && !isIOS.value) {
-      supportsNativeInstallPrompt.value = true
-      showManualInstallGuide.value = false
-    }
-  }
-  window.addEventListener('pwa-install-ready', pwaInstallReadyHandler)
-  
-  appInstalledHandler = () => {
-    isInstalled.value = true
-  }
-  window.addEventListener('appinstalled', appInstalledHandler)
-  
-  if ((window as any).deferredPrompt && !isIOS.value) {
-    supportsNativeInstallPrompt.value = true
-    showManualInstallGuide.value = false
-  }
-
-  installButtonDelayTimer = window.setTimeout(() => {
-    isInstallButtonDelayElapsed.value = true
-  }, 4000)
+  mobileInput.value?.focus()
 })
 
-watch(() => form.code, (newVal, previousValue) => {
-  if (newVal !== previousValue) invalidateLoginContext()
-  if (newVal && newVal.length === 5) {
-    verifyOtp()
-  }
-}, { flush: 'sync' })
+watch(
+  () => form.code,
+  (newVal, previousValue) => {
+    if (newVal !== previousValue) invalidateLoginContext()
+    if (newVal !== previousValue && step.value === 'otp' && error.value) error.value = ''
+    if (newVal && newVal.length === 5) {
+      verifyOtp()
+    }
+  },
+  { flush: 'sync' },
+)
 
-watch(() => form.mobile, (newValue, previousValue) => {
-  if (newValue !== previousValue) invalidateLoginContext()
-}, { flush: 'sync' })
+watch(
+  () => form.mobile,
+  (newValue, previousValue) => {
+    if (newValue !== previousValue) invalidateLoginContext()
+    if (newValue !== previousValue && step.value === 'mobile' && error.value) error.value = ''
+  },
+  { flush: 'sync' },
+)
 
-let ac: AbortController | null = null;
+let ac: AbortController | null = null
+type WebOtpCredential = Credential & { code: string }
+
+function hasWebOtpCode(value: Credential | null): value is WebOtpCredential {
+  return Boolean(value) && typeof (value as { code?: unknown }).code === 'string'
+}
 
 async function initWebOtp() {
   if ('OTPCredential' in window) {
-    if (ac) ac.abort();
-    ac = new AbortController();
-    
+    if (ac) ac.abort()
+    ac = new AbortController()
+
     try {
       const content = await navigator.credentials.get({
         otp: { transport: ['sms'] },
-        signal: ac.signal
-      } as any);
+        signal: ac.signal,
+      } as unknown as CredentialRequestOptions)
 
-      if (content && (content as any).code) {
-        form.code = (content as any).code;
-        verifyOtp();
+      if (hasWebOtpCode(content)) {
+        form.code = content.code
+        verifyOtp()
       }
-    } catch (err) {
-      console.log('Web OTP Error:', err);
+    } catch {
+      // WebOTP cancellation/failure is expected. Never log credential values or
+      // provider errors because they may embed the one-time code.
     }
   }
 }
 
-watch(() => step.value, (newStep) => {
-  if (newStep === 'otp') {
-    // Small delay to ensure view transition
-    setTimeout(() => {
-        initWebOtp();
-    }, 100);
-  } else {
-    if (ac) {
-      ac.abort();
-      ac = null;
+watch(
+  () => step.value,
+  async (newStep) => {
+    await nextTick()
+    if (newStep === 'otp') {
+      otpInput.value?.focus()
+      // Small delay to ensure view transition
+      setTimeout(() => {
+        initWebOtp()
+      }, 100)
+    } else {
+      if (newStep === 'mobile') mobileInput.value?.focus()
+      else statusStepContainer.value?.focus()
+      if (ac) {
+        ac.abort()
+        ac = null
+      }
     }
-  }
-});
+  },
+)
 
 onUnmounted(() => {
-  if (ac) ac.abort();
+  if (ac) ac.abort()
   if (timerInterval) clearInterval(timerInterval)
-  if (installButtonDelayTimer !== null) window.clearTimeout(installButtonDelayTimer)
-  if (beforeInstallPromptHandler) window.removeEventListener('beforeinstallprompt', beforeInstallPromptHandler)
-  if (pwaInstallReadyHandler) window.removeEventListener('pwa-install-ready', pwaInstallReadyHandler)
-  if (appInstalledHandler) window.removeEventListener('appinstalled', appInstalledHandler)
   if (otpVisibilityHandler) document.removeEventListener('visibilitychange', otpVisibilityHandler)
   stopApprovalPolling()
   stopRecoveryPolling()
@@ -1122,6 +1343,7 @@ onUnmounted(() => {
 
 // Back to mobile step (UI-initiated via "ویرایش شماره" button)
 function goBackToMobile() {
+  if (pendingAuthenticatedLogin.value) return
   invalidateLoginContext()
   stopApprovalPolling()
   stopRecoveryPolling()
@@ -1135,444 +1357,347 @@ function goBackToMobile() {
 </script>
 
 <template>
-  <AppPage narrow>
-    <section class="login-view">
-      <AppSectionCard
-        class="login-card"
-        title="ورود به بازار"
-        description="ورود و بازیابی نشست از همین صفحه انجام می‌شود."
+  <AuthFlowShell
+    :title="authFlowTitle"
+    :description="authFlowDescription"
+    :current-step="authFlowStep"
+    :total-steps="authFlowStep ? 2 : undefined"
+  >
+    <transition name="ui-v2-auth-state" mode="out-in">
+      <section
+        v-if="step === 'mobile'"
+        key="mobile"
+        class="ui-v2-auth-login-step"
+        aria-live="polite"
       >
-        <template #actions>
-          <AppStatusBadge tone="warning">نسخه وب</AppStatusBadge>
-        </template>
-
-        <div class="login-brand-mark" aria-hidden="true">
-          <ShieldCheck :size="24" />
+        <div
+          v-if="completedRegistrationNotice"
+          class="ui-v2-auth-login-note ui-v2-auth-login-note--success"
+          role="status"
+        >
+          <strong>ثبت‌نام قبلاً تکمیل شده است</strong>
+          <span>برای ورود به وب‌اپ، کد تأیید دریافت کنید.</span>
         </div>
 
-        <transition name="slide-up" mode="out-in">
-          <div v-if="step === 'mobile'" key="mobile" class="login-step">
-            <div v-if="completedRegistrationNotice" class="login-note-card" role="status">
-              <p class="login-note-title">ثبت‌نام قبلاً تکمیل شده است</p>
-              <p>برای ورود به وب‌اپ، کد تایید دریافت کنید.</p>
-            </div>
-            <AppFormField label="شماره موبایل">
-              <template #default="{ id }">
-                <div class="login-field-shell">
-                  <Smartphone class="login-field-icon" :size="18" />
-                  <AppInput
-                    :id="id"
-                    v-model="form.mobile"
-                    type="tel"
-                    aria-label="شماره موبایل"
-                    dir="ltr"
-                    placeholder="0912..."
-                    autocomplete="tel"
-                    class="login-input login-input--ltr"
-                  />
-                </div>
-              </template>
-            </AppFormField>
+        <AppFormField label="شماره موبایل" :error="mobileFieldError">
+          <template #default="{ id, describedby, invalid }">
+            <AppInput
+              :id="id"
+              ref="mobileInput"
+              v-model="form.mobile"
+              class="ui-v2-auth-login-input--ltr"
+              type="tel"
+              inputmode="tel"
+              dir="ltr"
+              placeholder="0912 345 6789"
+              autocomplete="tel"
+              :aria-describedby="describedby"
+              :invalid="invalid"
+              autofocus
+            />
+          </template>
+        </AppFormField>
 
-            <AppButton
-              block
-              :loading="loading"
-              @click="requestOtp"
-            >
-              {{ countdown > 0 ? 'وارد کردن کد' : 'دریافت کد تایید' }}
-            </AppButton>
+        <AppButton block :loading="loading" @click="requestOtp">
+          {{ countdown > 0 ? 'وارد کردن کد' : 'دریافت کد تأیید' }}
+        </AppButton>
 
-            <div v-if="countdown > 0" class="login-timer">
-              <Clock :size="14" />
-              <bdi>{{ formattedTimer }}</bdi>
-            </div>
+        <div v-if="countdown > 0" class="ui-v2-auth-login-timer" role="status">
+          <Clock :size="16" aria-hidden="true" />
+          <bdi>{{ formattedTimer }}</bdi>
+        </div>
 
-            <div v-if="shouldShowInstallEntry" class="login-install">
-              <AppButton block variant="secondary" @click="installPWA">
-                <template #icon>
-                  <Download :size="16" />
-                </template>
-                نصب اپلیکیشن
-              </AppButton>
+        <div class="ui-v2-auth-login-guidance">
+          <strong>دریافت کد</strong>
+          <p>کد ابتدا در تلگرام و در صورت نیاز به‌صورت خودکار با پیامک ارسال می‌شود.</p>
+        </div>
 
-              <div v-if="showManualInstallGuide" class="login-note-card">
-                <p class="login-note-title">{{ manualInstallGuideTitle }}</p>
-                <template v-if="isIOS">
-                  <p>برای نصب در iPhone یا iPad، سایت را در Safari باز کنید و سپس از منوی Share گزینه Add to Home Screen را بزنید. از آیکن Gold روی Home Screen وارد شوید.</p>
-                </template>
-                <template v-else>
-                  <p>اگر نصب مستقیم فعال نبود، سایت را با Chrome یا Edge باز کنید و از منوی مرورگر گزینه Add to Home Screen یا Install App را بزنید.</p>
-                </template>
-              </div>
-            </div>
-          </div>
+        <AppButton v-if="isDevMode" block size="sm" variant="secondary" @click="startDevLogin">
+          ورود سریع ۱ ساله
+        </AppButton>
+      </section>
 
-          <div v-else-if="step === 'otp'" key="otp" class="login-step">
-            <div class="login-step-meta">
-              <span v-if="form.mobile">کد ارسال شده به {{ form.mobile }}</span>
-              <button type="button" class="login-link-btn" @click="goBackToMobile()">ویرایش شماره</button>
-            </div>
+      <section
+        v-else-if="step === 'otp'"
+        key="otp"
+        class="ui-v2-auth-login-step"
+        aria-live="polite"
+      >
+        <div class="ui-v2-auth-login-meta">
+          <bdi v-if="maskedMobileForDisplay" dir="ltr">{{ maskedMobileForDisplay }}</bdi>
+          <span v-else>تلاش فعال ورود</span>
+          <button
+            type="button"
+            class="ui-v2-auth-login-link"
+            :disabled="Boolean(pendingAuthenticatedLogin)"
+            @click="goBackToMobile"
+          >
+            ویرایش شماره
+          </button>
+        </div>
 
-            <AppFormField label="کد تایید">
-              <template #default="{ id }">
-                <div class="login-field-shell">
-                  <Lock class="login-field-icon" :size="18" />
-                  <AppInput
-                    :id="id"
-                    v-model="form.code"
-                    type="text"
-                    aria-label="کد تایید"
-                    inputmode="numeric"
-                    pattern="[0-9]*"
-                    maxlength="5"
-                    dir="ltr"
-                    autocomplete="one-time-code"
-                    placeholder="_____"
-                    class="login-input login-input--code"
-                    autofocus
-                  />
-                </div>
-              </template>
-            </AppFormField>
+        <AppFormField label="کد تأیید" :error="otpFieldError">
+          <template #default="{ id, describedby, invalid }">
+            <AppInput
+              :id="id"
+              ref="otpInput"
+              v-model="form.code"
+              class="ui-v2-auth-login-input--code"
+              type="text"
+              inputmode="numeric"
+              pattern="[0-9]*"
+              maxlength="5"
+              dir="ltr"
+              autocomplete="one-time-code"
+              placeholder="_____"
+              :aria-describedby="describedby"
+              :invalid="invalid"
+              :disabled="Boolean(pendingAuthenticatedLogin)"
+              autofocus
+            />
+          </template>
+        </AppFormField>
 
-            <AppButton block :loading="loading" @click="verifyOtp">ورود به بازار</AppButton>
+        <div
+          v-if="countdown > 0 || automaticSmsFallback"
+          class="ui-v2-auth-login-delivery"
+          role="status"
+          aria-live="polite"
+        >
+          <Clock :size="16" aria-hidden="true" />
+          <span>{{ otpDeliveryStatus }}</span>
+        </div>
+        <button
+          v-else
+          type="button"
+          class="ui-v2-auth-login-link"
+          :disabled="Boolean(pendingAuthenticatedLogin)"
+          @click="handleResend"
+        >
+          ارسال مجدد کد
+        </button>
 
-            <div class="login-inline-actions">
-              <div v-if="countdown > 0 || automaticSmsFallback" class="login-timer" role="status" aria-live="polite">
-                <Clock :size="14" />
-                <span>{{ otpDeliveryStatus }}</span>
-              </div>
-              <button v-else type="button" class="login-link-btn" @click="handleResend">ارسال مجدد کد</button>
-            </div>
-          </div>
+        <AppButton block :loading="loading" @click="verifyOtp">
+          {{ pendingAuthenticatedLogin ? 'ادامه ورود' : 'تأیید و ادامه' }}
+        </AppButton>
+      </section>
 
-          <div v-else-if="step === 'waiting_approval'" key="waiting" class="login-step login-step--centered">
-            <Loader2 class="spin text-amber-600" :size="28" />
-            <h3>در انتظار تایید</h3>
-            <p>درخواست ورود شما به دستگاه اصلی ارسال شد. تایید را از همان دستگاه انجام دهید.</p>
-            <div v-if="approvalCountdown > 0" class="login-timer">
-              <Clock :size="14" />
-              <span>{{ formattedApprovalTimer }}</span>
-            </div>
-            <div class="login-stack-actions">
-              <AppButton block variant="secondary" :disabled="loading" @click="startRecoveryFlow">به دستگاه قبلی دسترسی ندارم</AppButton>
-              <button type="button" class="login-link-btn" @click="stopApprovalPolling(); step = 'otp'; error = ''">بازگشت به مرحله قبل</button>
-            </div>
-          </div>
+      <section
+        v-else-if="step === 'waiting_approval'"
+        ref="statusStepContainer"
+        key="waiting"
+        data-auth-status-step
+        class="ui-v2-auth-login-step ui-v2-auth-login-step--status"
+        tabindex="-1"
+        aria-live="polite"
+      >
+        <Loader2 class="ui-v2-auth-login-spinner" :size="28" aria-hidden="true" />
+        <div v-if="approvalCountdown > 0" class="ui-v2-auth-login-countdown">
+          <strong>{{ formattedApprovalTimer }}</strong>
+          <span>مهلت باقی‌مانده برای تأیید</span>
+        </div>
+        <AppButton
+          block
+          variant="secondary"
+          :disabled="loading || Boolean(pendingAuthenticatedLogin)"
+          @click="startRecoveryFlow"
+        >
+          به دستگاه قبلی دسترسی ندارم
+        </AppButton>
+        <button
+          type="button"
+          class="ui-v2-auth-login-link"
+          :disabled="Boolean(pendingAuthenticatedLogin)"
+          @click="returnToOtpFromApproval"
+        >
+          بازگشت به مرحله کد تأیید
+        </button>
+      </section>
 
-          <div v-else-if="step === 'recovery_waiting'" key="recovery-waiting" class="login-step login-step--centered">
-            <Loader2 class="spin text-amber-600" :size="28" />
-            <h3>در حال بررسی توسط مدیریت</h3>
-            <p>درخواست بازیابی ثبت شد و نتیجه از همین صفحه اعلام می‌شود.</p>
-            <div v-if="recoveryCountdown > 0" class="login-timer">
-              <Clock :size="14" />
-              <span>{{ formattedRecoveryTimer }}</span>
-            </div>
-            <button type="button" class="login-link-btn" @click="cancelRecoveryFlow">انصراف از درخواست</button>
-          </div>
+      <section
+        v-else-if="step === 'recovery_waiting'"
+        ref="statusStepContainer"
+        key="recovery-waiting"
+        data-auth-status-step
+        class="ui-v2-auth-login-step ui-v2-auth-login-step--status"
+        tabindex="-1"
+        aria-live="polite"
+      >
+        <Loader2 class="ui-v2-auth-login-spinner" :size="28" aria-hidden="true" />
+        <div v-if="recoveryCountdown > 0" class="ui-v2-auth-login-countdown">
+          <strong>{{ formattedRecoveryTimer }}</strong>
+          <span>مهلت بررسی این درخواست</span>
+        </div>
+        <button
+          type="button"
+          class="ui-v2-auth-login-link ui-v2-auth-login-link--danger"
+          @click="cancelRecoveryFlow"
+        >
+          انصراف از درخواست بازیابی
+        </button>
+      </section>
 
-          <div v-else-if="step === 'recovery_identity'" key="recovery-identity" class="login-step">
-            <div class="login-step-copy">
-              <h3>ارسال مدرک احراز هویت</h3>
-              <p>تصویر کارت شناسایی یا فایل مدرک را همراه با توضیح اختیاری ارسال کنید.</p>
-            </div>
+      <section
+        v-else-if="step === 'recovery_identity'"
+        ref="statusStepContainer"
+        key="recovery-identity"
+        data-auth-status-step
+        class="ui-v2-auth-login-step"
+        tabindex="-1"
+        aria-live="polite"
+      >
+        <div v-if="recoveryCountdown > 0" class="ui-v2-auth-login-meta">
+          <span>مهلت ارسال مدرک</span>
+          <strong>{{ formattedRecoveryTimer }}</strong>
+        </div>
 
-            <div v-if="recoveryCountdown > 0" class="login-timer">
-              <Clock :size="14" />
-              <span>{{ formattedRecoveryTimer }}</span>
-            </div>
+        <div class="ui-v2-auth-login-picker-grid" aria-label="انتخاب منبع مدرک">
+          <AppButton variant="secondary" @click="openRecoveryPicker('gallery')">گالری</AppButton>
+          <AppButton variant="secondary" @click="openRecoveryPicker('camera')">دوربین</AppButton>
+          <AppButton variant="secondary" @click="openRecoveryPicker('file')">فایل</AppButton>
+        </div>
 
-            <div class="login-picker-grid">
-              <AppButton variant="secondary" @click="openRecoveryPicker('gallery')">گالری</AppButton>
-              <AppButton variant="secondary" @click="openRecoveryPicker('camera')">دوربین</AppButton>
-              <AppButton variant="secondary" @click="openRecoveryPicker('file')">فایل</AppButton>
-            </div>
+        <div class="ui-v2-auth-login-upload" role="status">
+          <FileCheck2 :size="20" aria-hidden="true" />
+          <span v-if="selectedRecoveryFileName">{{ selectedRecoveryFileName }}</span>
+          <span v-else>هنوز فایلی انتخاب نشده است</span>
+        </div>
 
-            <div class="login-upload-state">
-              <span v-if="selectedRecoveryFileName">{{ selectedRecoveryFileName }}</span>
-              <span v-else>هنوز فایلی انتخاب نشده است</span>
-            </div>
+        <AppFormField label="توضیح اختیاری">
+          <template #default="{ id, describedby }">
+            <AppTextarea
+              :id="id"
+              v-model="recoveryCaption"
+              rows="3"
+              placeholder="توضیح اختیاری"
+              :aria-describedby="describedby"
+            />
+          </template>
+        </AppFormField>
 
-            <AppFormField label="توضیح اختیاری">
-              <template #default="{ id }">
-                <AppTextarea :id="id" v-model="recoveryCaption" rows="3" placeholder="توضیح اختیاری..." />
-              </template>
-            </AppFormField>
+        <p class="ui-v2-auth-login-privacy">
+          مدرک برای بررسی این درخواست در اختیار بررسی‌کنندگان مجاز بازیابی قرار می‌گیرد.
+        </p>
 
-            <div class="login-stack-actions">
-              <AppButton block :loading="loading" @click="submitRecoveryIdentity">ارسال مدارک</AppButton>
-              <button type="button" class="login-link-btn" @click="cancelRecoveryFlow">انصراف از درخواست</button>
-            </div>
-          </div>
+        <AppButton block :loading="loading" @click="submitRecoveryIdentity">
+          ارسال مدرک برای بررسی
+        </AppButton>
+        <button
+          type="button"
+          class="ui-v2-auth-login-link ui-v2-auth-login-link--danger"
+          @click="cancelRecoveryFlow"
+        >
+          انصراف از درخواست بازیابی
+        </button>
+      </section>
 
-          <div v-else-if="step === 'recovery_submitted'" key="recovery-submitted" class="login-step login-step--centered">
-            <Loader2 class="spin text-amber-600" :size="28" />
-            <h3>مدرک ارسال شد</h3>
-            <p>مدارک برای بررسی ارسال شد و نتیجه از همین صفحه اعلام می‌شود.</p>
-            <div v-if="recoveryCountdown > 0" class="login-timer">
-              <Clock :size="14" />
-              <span>{{ formattedRecoveryTimer }}</span>
-            </div>
-          </div>
+      <section
+        v-else-if="step === 'recovery_submitted'"
+        ref="statusStepContainer"
+        key="recovery-submitted"
+        data-auth-status-step
+        class="ui-v2-auth-login-step ui-v2-auth-login-step--status"
+        tabindex="-1"
+        aria-live="polite"
+      >
+        <FileCheck2 :size="32" aria-hidden="true" />
+        <div v-if="recoveryCountdown > 0" class="ui-v2-auth-login-countdown">
+          <strong>{{ formattedRecoveryTimer }}</strong>
+          <span>مهلت بررسی این درخواست</span>
+        </div>
+      </section>
 
-          <div v-else-if="step === 'recovery_approved'" key="recovery-approved" class="login-step login-step--centered">
-            <CheckCircle2 class="text-emerald-600" :size="32" />
-            <h3>درخواست شما تایید شد</h3>
-            <p>نشست قدیمی منقضی شد و اکنون می‌توانید وارد سامانه شوید.</p>
-            <AppButton block :loading="loading" @click="enterWithApprovedRecovery">ورود به سامانه</AppButton>
-          </div>
+      <section
+        v-else-if="step === 'recovery_approved'"
+        ref="statusStepContainer"
+        key="recovery-approved"
+        data-auth-status-step
+        class="ui-v2-auth-login-step ui-v2-auth-login-step--status"
+        tabindex="-1"
+        aria-live="polite"
+      >
+        <FileCheck2 :size="32" aria-hidden="true" />
+        <AppButton block :loading="loading" @click="enterWithApprovedRecovery">
+          ورود به سامانه
+        </AppButton>
+      </section>
 
-          <div v-else-if="step === 'recovery_rejected'" key="recovery-rejected" class="login-step login-step--centered">
-            <XCircle class="text-rose-600" :size="32" />
-            <h3>درخواست شما رد شد</h3>
-            <p>در صورت نیاز می‌توانید دوباره درخواست بازیابی را ثبت کنید.</p>
-            <AppButton block @click="restartLoginFlow">شروع دوباره</AppButton>
-          </div>
+      <section
+        v-else-if="step === 'recovery_rejected'"
+        ref="statusStepContainer"
+        key="recovery-rejected"
+        data-auth-status-step
+        class="ui-v2-auth-login-step ui-v2-auth-login-step--status"
+        tabindex="-1"
+        aria-live="polite"
+      >
+        <AppButton block @click="restartLoginFlow">شروع دوباره</AppButton>
+      </section>
 
-          <div v-else-if="step === 'recovery_expired'" key="recovery-expired" class="login-step login-step--centered">
-            <Clock class="text-slate-500" :size="32" />
-            <h3>مهلت درخواست به پایان رسید</h3>
-            <p>در مهلت تعیین‌شده پاسخی ثبت نشد. در صورت نیاز درخواست جدید ثبت کنید.</p>
-            <AppButton block @click="restartLoginFlow">شروع دوباره</AppButton>
-          </div>
-        </transition>
+      <section
+        v-else
+        ref="statusStepContainer"
+        key="recovery-expired"
+        data-auth-status-step
+        class="ui-v2-auth-login-step ui-v2-auth-login-step--status"
+        tabindex="-1"
+        aria-live="polite"
+      >
+        <Clock :size="32" aria-hidden="true" />
+        <AppButton block @click="restartLoginFlow">شروع دوباره</AppButton>
+      </section>
+    </transition>
 
-        <transition name="fade">
-          <div v-if="error" class="login-error-box" role="alert">
-            <div>{{ error }}</div>
-            <div v-if="canOfferAppRecovery" class="login-error-actions">
-              <span>اگر نسخه قدیمی برنامه یا کش PWA گیر کرده، بازنشانی امن را اجرا کنید.</span>
-              <AppButton variant="danger" size="sm" @click="startAppRecovery">پاک‌سازی کش برنامه و بارگذاری مجدد</AppButton>
-            </div>
-          </div>
-        </transition>
-      </AppSectionCard>
+    <transition name="ui-v2-auth-fade">
+      <div v-if="processError" class="ui-v2-auth-login-error" role="alert">
+        <span>{{ processError }}</span>
+        <AppButton
+          v-if="pendingAuthenticatedLogin && step !== 'otp'"
+          size="sm"
+          :loading="loading"
+          @click="retryAuthenticatedLoginTransition"
+        >
+          ادامه ورود
+        </AppButton>
+        <AppButton
+          v-if="pendingAuthenticatedLogin"
+          variant="secondary"
+          size="sm"
+          :disabled="loading"
+          @click="cancelPendingAuthenticatedLogin"
+        >
+          ورود با حساب دیگر
+        </AppButton>
+        <div v-if="canOfferAppRecovery" class="ui-v2-auth-login-error__actions">
+          <span>اگر بارگذاری برنامه متوقف شده است، بازنشانی امن را اجرا کنید.</span>
+          <AppButton variant="danger" size="sm" @click="startAppRecovery">
+            پاک‌سازی کش برنامه و بارگذاری مجدد
+          </AppButton>
+        </div>
+      </div>
+    </transition>
 
-      <input ref="recoveryFileInput" type="file" accept="image/*" class="hidden" @change="handleRecoveryFileInput" />
-      <input ref="recoveryCameraInput" type="file" accept="image/*" capture="environment" class="hidden" @change="handleRecoveryFileInput" />
-      <input ref="recoveryDocumentInput" type="file" accept="image/*,.pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document" class="hidden" @change="handleRecoveryFileInput" />
-
-      <footer class="login-footer">
-        <span>نسخه ۲.۴.۰</span>
-        <span>ویب‌اپ ویژه معامله‌گران</span>
-        <AppButton v-if="isDevMode" size="sm" variant="secondary" @click="startDevLogin">ورود سریع ۱ ساله</AppButton>
-      </footer>
-    </section>
-  </AppPage>
+    <input
+      ref="recoveryFileInput"
+      type="file"
+      accept="image/*"
+      class="ui-v2-auth-login-hidden-input"
+      @change="handleRecoveryFileInput"
+    />
+    <input
+      ref="recoveryCameraInput"
+      type="file"
+      accept="image/*"
+      capture="environment"
+      class="ui-v2-auth-login-hidden-input"
+      @change="handleRecoveryFileInput"
+    />
+    <input
+      ref="recoveryDocumentInput"
+      type="file"
+      accept="image/*,.pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+      class="ui-v2-auth-login-hidden-input"
+      @change="handleRecoveryFileInput"
+    />
+  </AuthFlowShell>
 </template>
-
-<style scoped>
-.login-view {
-  min-height: 100dvh;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  gap: 1rem;
-  padding: 1.25rem 0;
-}
-
-.login-card {
-  gap: 1rem;
-}
-
-.login-brand-mark {
-  width: 3rem;
-  height: 3rem;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 1rem;
-  background: rgba(245, 158, 11, 0.12);
-  color: #b45309;
-}
-
-.login-step {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-}
-
-.login-step--centered {
-  text-align: center;
-  align-items: center;
-}
-
-.login-step--centered p,
-.login-step-copy p,
-.login-note-card,
-.login-footer {
-  color: var(--ds-text-muted);
-}
-
-.login-field-shell {
-  position: relative;
-}
-
-.login-field-icon {
-  position: absolute;
-  top: 50%;
-  left: 0.95rem;
-  transform: translateY(-50%);
-  color: var(--ds-text-muted);
-  pointer-events: none;
-}
-
-.login-input {
-  width: 100%;
-  min-height: 3rem;
-}
-
-.login-input--ltr {
-  padding-left: 2.75rem;
-  direction: ltr;
-  text-align: left;
-}
-
-.login-input--code {
-  padding-left: 2.75rem;
-  direction: ltr;
-  text-align: center;
-  letter-spacing: 0.4em;
-  font-weight: 800;
-}
-
-.login-timer {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.45rem;
-  align-self: center;
-  border-radius: 999px;
-  padding: 0.35rem 0.75rem;
-  background: rgba(245, 158, 11, 0.08);
-  color: #b45309;
-  font-size: 0.78rem;
-  font-weight: 700;
-}
-
-.login-install,
-.login-stack-actions {
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-}
-
-.login-note-card,
-.login-upload-state,
-.login-error-box {
-  border: 1px solid var(--ds-border-subtle);
-  border-radius: 1rem;
-  padding: 0.85rem 1rem;
-  background: var(--ds-surface-subtle);
-  font-size: 0.82rem;
-  line-height: 1.9;
-}
-
-.login-note-title {
-  color: var(--ds-text-strong);
-  font-weight: 800;
-  margin-bottom: 0.35rem;
-}
-
-.login-step-meta,
-.login-inline-actions {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-  flex-wrap: wrap;
-  font-size: 0.82rem;
-  color: var(--ds-text-muted);
-}
-
-.login-link-btn {
-  border: 0;
-  background: none;
-  padding: 0;
-  color: var(--ds-color-info-700, #0369a1);
-  font-size: 0.82rem;
-  font-weight: 700;
-  cursor: pointer;
-}
-
-.login-link-btn:hover {
-  opacity: 0.85;
-}
-
-.login-picker-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 0.75rem;
-}
-
-.login-upload-state {
-  text-align: center;
-}
-
-.login-step h3 {
-  margin: 0;
-  font-size: 1rem;
-  font-weight: 850;
-  color: var(--ds-text-strong);
-}
-
-.login-step p,
-.login-step-copy {
-  margin: 0;
-  font-size: 0.88rem;
-  line-height: 1.9;
-}
-
-.login-error-box {
-  color: var(--ds-color-danger-700, #b91c1c);
-  border-color: rgba(220, 38, 38, 0.18);
-  background: rgba(254, 242, 242, 0.9);
-}
-
-.login-error-actions {
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-  margin-top: 0.75rem;
-}
-
-.login-footer {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0.4rem;
-  text-align: center;
-  font-size: 0.76rem;
-}
-
-.spin {
-  animation: spin 1s linear infinite;
-}
-
-/* Slide Up Transition */
-.slide-up-enter-active,
-.slide-up-leave-active {
-  transition: all 0.35s cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-.slide-up-enter-from {
-  opacity: 0;
-  transform: translateY(20px) scale(0.98);
-}
-
-.slide-up-leave-to {
-  opacity: 0;
-  transform: translateY(-20px) scale(0.98);
-}
-
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-@media (max-width: 480px) {
-  .login-picker-grid {
-    grid-template-columns: 1fr;
-  }
-}
-</style>

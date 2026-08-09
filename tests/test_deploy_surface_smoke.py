@@ -53,6 +53,30 @@ def resolve_docker_compose_command() -> list[str] | None:
 
 
 class DeploySurfaceSmokeTests(unittest.TestCase):
+    def test_stale_js_fallback_is_a_non_executable_410_in_every_deployable_nginx_source(self):
+        config_paths = (
+            'nginx.conf',
+            'deploy/staging/nginx-staging.conf.template',
+            'deploy/production/nginx-iran-online.conf.template',
+            'deploy/production/nginx-iran-online-https.conf.template',
+            'scripts/setup_iran_nginx.sh',
+            'scripts/setup_foreign_nginx.sh',
+        )
+
+        for relative_path in config_paths:
+            source = (REPO_ROOT / relative_path).read_text(encoding='utf-8')
+            with self.subTest(relative_path=relative_path):
+                block = re.search(
+                    r'location @stale_js_chunk \{(?P<body>.*?)\n    \}',
+                    source,
+                    re.DOTALL,
+                )
+                self.assertIsNotNone(block)
+                body = block.group('body')
+                self.assertIn('return 410;', body)
+                self.assertNotIn('return 200', body)
+                self.assertNotIn('window.location.reload', body)
+
     def test_invitation_bearing_nginx_routes_disable_access_logs(self):
         config_paths = (
             'nginx.conf',

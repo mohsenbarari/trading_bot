@@ -9,8 +9,10 @@ const shellMocks = vi.hoisted(() => ({
   useNotificationRuntime: vi.fn(),
   initChatUploadBackground: vi.fn(async () => {}),
   hasPendingUploadResumeHint: vi.fn(() => false),
+  setUploadResumeHint: vi.fn(),
   initChatDocumentDownloadBackground: vi.fn(async () => {}),
   hasPendingDocumentDownloadResumeHint: vi.fn(() => false),
+  setDocumentDownloadResumeHint: vi.fn(),
   initChatFileDebugOverlay: vi.fn(),
   setupExpiryTimer: vi.fn(),
   apiFetch: vi.fn(async () => ({})),
@@ -37,6 +39,8 @@ vi.mock('../composables/useNotificationRuntime', () => ({
 vi.mock('../services/chatTransferResumeHints', () => ({
   hasPendingDocumentDownloadResumeHint: shellMocks.hasPendingDocumentDownloadResumeHint,
   hasPendingUploadResumeHint: shellMocks.hasPendingUploadResumeHint,
+  setDocumentDownloadResumeHint: shellMocks.setDocumentDownloadResumeHint,
+  setUploadResumeHint: shellMocks.setUploadResumeHint,
 }))
 
 vi.mock('../services/chatUploadBackground', () => ({
@@ -57,8 +61,6 @@ vi.mock('../utils/auth', () => ({
 }))
 
 describe('AppAuthenticatedShell.vue', () => {
-  let installHandler: EventListener | null
-
   beforeEach(() => {
     shellMocks.on.mockReset()
     shellMocks.off.mockReset()
@@ -68,9 +70,11 @@ describe('AppAuthenticatedShell.vue', () => {
     shellMocks.initChatUploadBackground.mockClear()
     shellMocks.hasPendingUploadResumeHint.mockReset()
     shellMocks.hasPendingUploadResumeHint.mockReturnValue(false)
+    shellMocks.setUploadResumeHint.mockReset()
     shellMocks.initChatDocumentDownloadBackground.mockClear()
     shellMocks.hasPendingDocumentDownloadResumeHint.mockReset()
     shellMocks.hasPendingDocumentDownloadResumeHint.mockReturnValue(false)
+    shellMocks.setDocumentDownloadResumeHint.mockReset()
     shellMocks.initChatFileDebugOverlay.mockClear()
     shellMocks.setupExpiryTimer.mockClear()
     shellMocks.apiFetch.mockReset()
@@ -78,7 +82,6 @@ describe('AppAuthenticatedShell.vue', () => {
     shellMocks.route.path = '/'
     Object.defineProperty(document, 'hidden', { configurable: true, value: false })
     localStorage.clear()
-    installHandler = null
   })
 
   afterEach(() => {
@@ -86,7 +89,7 @@ describe('AppAuthenticatedShell.vue', () => {
     delete (window as any).deferredPrompt
   })
 
-  it('skips eager background recovery when no pending transfer hint exists, forwards ensureSessionValidation, and handles the install prompt', async () => {
+  it('skips eager background recovery when no pending transfer hint exists and forwards ensureSessionValidation', async () => {
     localStorage.setItem('auth_token', 'jwt')
     localStorage.setItem('refresh_token', 'refresh-token')
     shellMocks.useNotificationRuntime.mockImplementation(({ ensureSessionValidation }) => {
@@ -95,6 +98,7 @@ describe('AppAuthenticatedShell.vue', () => {
 
     const AppAuthenticatedShell = (await import('./AppAuthenticatedShell.vue')).default
     const wrapper = mount(AppAuthenticatedShell, {
+      props: { v2Scope: true },
       global: {
         stubs: {
           BottomNav: true,
@@ -116,6 +120,8 @@ describe('AppAuthenticatedShell.vue', () => {
     expect(shellMocks.initChatFileDebugOverlay).toHaveBeenCalledTimes(1)
     expect(shellMocks.on).toHaveBeenCalledWith('ws:reconnect', expect.any(Function))
     expect(shellMocks.sendPresenceUpdate).toHaveBeenCalledWith('/', true)
+    expect(wrapper.findComponent({ name: 'SessionApprovalModal' }).props('v2Portal')).toBe(true)
+    expect(wrapper.findComponent({ name: 'BottomNav' }).props('v2Scope')).toBe(true)
 
     const ensureSessionValidation = (shellMocks.useNotificationRuntime as any).capturedEnsure
     await ensureSessionValidation()
@@ -124,17 +130,6 @@ describe('AppAuthenticatedShell.vue', () => {
       body: JSON.stringify({ refresh_token: 'refresh-token' }),
     })
 
-    const readyListener = vi.fn()
-    window.addEventListener('pwa-install-ready', readyListener, { once: true })
-    const preventDefault = vi.fn()
-    const event = new Event('beforeinstallprompt')
-    ;(event as any).preventDefault = preventDefault
-    installHandler = wrapper.vm.$.appContext.app._instance?.vnode.el ? null : null
-    window.dispatchEvent(event)
-
-    expect(preventDefault).toHaveBeenCalled()
-    expect((window as any).deferredPrompt).toBe(event)
-    expect(readyListener).toHaveBeenCalledTimes(1)
     wrapper.unmount()
     expect(shellMocks.off).toHaveBeenCalledWith('ws:reconnect', expect.any(Function))
     expect(shellMocks.sendPresenceUpdate).toHaveBeenLastCalledWith('/', false)
@@ -159,6 +154,24 @@ describe('AppAuthenticatedShell.vue', () => {
       expect(shellMocks.initChatUploadBackground).toHaveBeenCalledTimes(1)
       expect(shellMocks.initChatDocumentDownloadBackground).toHaveBeenCalledTimes(1)
     })
+  })
+
+  it('keeps security layers but omits BottomNav in focused authenticated mode', async () => {
+    const AppAuthenticatedShell = (await import('./AppAuthenticatedShell.vue')).default
+    const wrapper = mount(AppAuthenticatedShell, {
+      props: { v2Scope: true, showDailyNavigation: false },
+      global: {
+        stubs: {
+          BottomNav: true,
+          SessionApprovalModal: true,
+          AppToasts: true,
+        },
+      },
+    })
+
+    expect(wrapper.findComponent({ name: 'BottomNav' }).exists()).toBe(false)
+    expect(wrapper.findComponent({ name: 'SessionApprovalModal' }).props('v2Portal')).toBe(true)
+    expect(wrapper.findComponent({ name: 'AppToasts' }).props('v2Scope')).toBe(true)
   })
 
   it('skips session verification without a refresh token and swallows verification failures', async () => {

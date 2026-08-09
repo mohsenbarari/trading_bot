@@ -181,7 +181,7 @@ class TelegramRegistrationCommandResponse(BaseModel):
 class InvitationContractV2(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    token: str
+    short_code: str | None
     bot_link: str | None
     web_link: str
     web_short_link: str | None

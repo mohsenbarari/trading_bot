@@ -87,7 +87,7 @@ if (!fs.existsSync(manifestPath)) {
   findings.push({
     code: 'missing-scope-manifest',
     file: 'src/design-system-v2/scope-manifest.json',
-    detail: 'Stage 2 requires a machine-readable scope manifest',
+    detail: 'Stage 3 requires a machine-readable scope manifest',
   })
 } else {
   try {
@@ -126,7 +126,7 @@ findings.sort(
 )
 
 if (!findings.length) {
-  console.log(`PASS UIUX v2 scope guard (${styleFiles.length} V2 CSS files, 29 product routes)`)
+  console.log(`PASS UIUX v2 scope guard (${styleFiles.length} V2 CSS files, 30 product routes)`)
 } else {
   console.error(`FAIL UIUX v2 scope guard: ${findings.length} findings`)
   for (const finding of findings) {

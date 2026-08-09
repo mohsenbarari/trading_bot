@@ -154,7 +154,7 @@ server {
         default_type application/javascript;
         add_header Cache-Control "no-store, no-cache, must-revalidate" always;
         add_header X-Static-Delivery "nginx" always;
-        return 200 "console.warn('Stale PWA chunk requested. Forcing hard reload...'); window.location.reload(true);";
+        return 410;
     }
 
     location ~ ^/register(?:/|$) {

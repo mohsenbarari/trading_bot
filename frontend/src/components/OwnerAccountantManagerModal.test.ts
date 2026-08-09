@@ -34,8 +34,7 @@ function makeRelation(overrides: Record<string, unknown> = {}) {
     duty_description: 'پیگیری',
     mobile_number: '09120000000',
     status: 'pending',
-    invitation_token: 'ACCT-token',
-    registration_link: 'https://app.example/register?token=ACCT-token',
+    web_short_link: 'https://app.example/i/ACCT0001',
     expires_at: '2026-01-03T10:00:00',
     activated_at: null,
     deleted_at: null,
@@ -354,7 +353,7 @@ describe('OwnerAccountantManagerModal.vue', () => {
     await wrapper.get('.copy-link').trigger('click')
     await flushPromises()
 
-    expect(clipboardWrite).toHaveBeenCalledWith('https://app.example/register?token=ACCT-token')
+    expect(clipboardWrite).toHaveBeenCalledWith('https://app.example/i/ACCT0001')
     expect(wrapper.text()).toContain('کپی شد')
 
     await vi.advanceTimersByTimeAsync(1800)
@@ -381,7 +380,7 @@ describe('OwnerAccountantManagerModal.vue', () => {
     const copyButton = wrapper.get('.pending-invitations-panel .copy-link')
     await copyButton.trigger('click')
     await flushPromises()
-    expect(clipboardWrite).toHaveBeenCalledWith('https://app.example/register?token=ACCT-token')
+    expect(clipboardWrite).toHaveBeenCalledWith('https://app.example/i/ACCT0001')
     expect(wrapper.get('.pending-invitations-panel .copy-state--copied').attributes('style') ?? '').not.toContain('display: none')
     await (wrapper.vm as any).copyRegistrationLink({ id: 99, registration_link: null })
     expect(clipboardWrite).toHaveBeenCalledTimes(1)

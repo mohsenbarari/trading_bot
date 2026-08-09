@@ -11,6 +11,10 @@ from core.audit_logger import audit_log
 from core.config import settings
 from core.db import get_db
 from core.public_webapp_url import public_webapp_url_for_links
+from core.invitation_contract_service import (
+    build_canonical_invitation_web_link,
+    is_canonical_invitation_short_code,
+)
 from core.services.accountant_relation_service import (
     EffectiveOwnerActor,
     create_or_reuse_owner_accountant_relation,
@@ -34,19 +38,29 @@ from models.user import User
 router = APIRouter()
 
 
-def build_accountant_registration_link(invitation_token: str) -> str | None:
-    return f"{public_webapp_url_for_links()}/register?token={invitation_token}"
+def build_accountant_registration_link(invitation_short_code: object) -> str | None:
+    if not is_canonical_invitation_short_code(invitation_short_code):
+        return None
+    return build_canonical_invitation_web_link(
+        invitation_short_code,
+        web_origin=public_webapp_url_for_links(),
+    )
 
 
 def serialize_accountant_relation(
     relation,
+    invitation=None,
     *,
     sms_status=None,
 ) -> dict:
     relation_status = str(getattr(relation.status, "value", relation.status))
+    invitation_matches = (
+        invitation is not None
+        and getattr(invitation, "token", None) == relation.invitation_token
+    )
     web_link = (
-        build_accountant_registration_link(relation.invitation_token)
-        if relation_status == AccountantRelationStatus.PENDING.value
+        build_accountant_registration_link(getattr(invitation, "short_code", None))
+        if relation_status == AccountantRelationStatus.PENDING.value and invitation_matches
         else None
     )
     return {
@@ -59,10 +73,11 @@ def serialize_accountant_relation(
         "duty_description": relation.duty_description,
         "mobile_number": relation.mobile_number,
         "status": relation.status,
-        "invitation_token": relation.invitation_token,
+        "short_code": getattr(invitation, "short_code", None) if invitation_matches else None,
         "registration_link": web_link,
         "bot_registration_link": None,
         "web_registration_link": web_link,
+        "web_short_link": web_link,
         "sms_status": sms_status,
         "expires_at": relation.expires_at,
         "activated_at": relation.activated_at,
@@ -168,6 +183,7 @@ async def list_my_accountants(
     return [
         serialize_accountant_relation(
             relation,
+            invitation=invitation_map.get(relation.invitation_token),
             sms_status=(
                 sms_statuses.get(invitation_map[relation.invitation_token].id)
                 if relation.invitation_token in invitation_map
@@ -197,7 +213,9 @@ async def create_my_accountant(
     relation = creation.relation
     invitation = creation.invitation
 
-    registration_link = build_accountant_registration_link(relation.invitation_token)
+    registration_link = build_accountant_registration_link(invitation.short_code)
+    if registration_link is None:
+        raise HTTPException(status_code=409, detail="کد کوتاه دعوت حسابدار معتبر نیست")
     sms_status = await deliver_invitation_sms_once(
         db,
         invitation_id=invitation.id,
@@ -223,6 +241,7 @@ async def create_my_accountant(
 
     response = serialize_accountant_relation(
         relation,
+        invitation=invitation,
         sms_status=sms_status,
     )
     return response
@@ -327,6 +346,14 @@ async def update_my_accountant(
         relation_id=relation_id,
         duty_description=payload.duty_description,
     )
+    relation_status = str(getattr(relation.status, "value", relation.status))
+    invitation = None
+    if relation_status == AccountantRelationStatus.PENDING.value:
+        invitation = (
+            await db.execute(
+                select(Invitation).where(Invitation.token == relation.invitation_token)
+            )
+        ).scalar_one_or_none()
     audit_log(
         "accountant.update",
         target_type="accountant_relation",
@@ -334,4 +361,4 @@ async def update_my_accountant(
         after_summary={"updated_fields": ["duty_description"], "status": relation.status},
         **audit_actor_context(context),
     )
-    return serialize_accountant_relation(relation)
+    return serialize_accountant_relation(relation, invitation=invitation)

@@ -52,15 +52,11 @@ class _Redis:
 class InvitationPublicAccessTests(unittest.IsolatedAsyncioTestCase):
     def test_rate_limit_key_uses_route_template_not_raw_secret(self):
         first = _request(
-            "/api/invitations/validate/INV-first-secret",
-            "/api/invitations/validate/{token}",
+            "/api/invitations/lookup/Ab12Cd34",
+            "/api/invitations/lookup/{short_code}",
         )
         second = _request(
-            "/api/invitations/validate/INV-second-secret",
-            "/api/invitations/validate/{token}",
-        )
-        lookup = _request(
-            "/api/invitations/lookup/short-secret",
+            "/api/invitations/lookup/Zy98Xw76",
             "/api/invitations/lookup/{short_code}",
         )
 
@@ -68,19 +64,18 @@ class InvitationPublicAccessTests(unittest.IsolatedAsyncioTestCase):
             "core.services.invitation_public_access_service.client_ip_from_request",
             return_value="203.0.113.10",
         ):
-            validate_key = _rate_limit_key(first)
-            self.assertEqual(validate_key, _rate_limit_key(second))
-            self.assertNotEqual(validate_key, _rate_limit_key(lookup))
+            lookup_key = _rate_limit_key(first)
+            self.assertEqual(lookup_key, _rate_limit_key(second))
 
-        self.assertNotIn("INV-first-secret", validate_key)
-        self.assertNotIn("203.0.113.10", validate_key)
+        self.assertNotIn("Ab12Cd34", lookup_key)
+        self.assertNotIn("203.0.113.10", lookup_key)
 
     async def test_success_sets_no_store_headers_and_one_window(self):
         redis = _Redis(count=1)
         response = Response()
         request = _request(
-            "/api/invitations/validate/INV-secret",
-            "/api/invitations/validate/{token}",
+            "/api/invitations/lookup/Ab12Cd34",
+            "/api/invitations/lookup/{short_code}",
         )
 
         with patch(
@@ -102,7 +97,7 @@ class InvitationPublicAccessTests(unittest.IsolatedAsyncioTestCase):
     async def test_rate_limit_error_preserves_security_and_retry_headers(self):
         response = Response()
         request = _request(
-            "/api/invitations/lookup/secret",
+            "/api/invitations/lookup/Ab12Cd34",
             "/api/invitations/lookup/{short_code}",
         )
         with patch(
@@ -124,8 +119,8 @@ class InvitationPublicAccessTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_missing_or_failed_redis_fails_closed_with_no_store(self):
         request = _request(
-            "/api/invitations/validate/INV-secret",
-            "/api/invitations/validate/{token}",
+            "/api/invitations/lookup/Ab12Cd34",
+            "/api/invitations/lookup/{short_code}",
         )
         providers = [
             RuntimeError("not initialized"),
@@ -150,8 +145,8 @@ class InvitationPublicAccessTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_zero_limit_disables_public_lookup_without_touching_redis(self):
         request = _request(
-            "/api/invitations/validate/INV-secret",
-            "/api/invitations/validate/{token}",
+            "/api/invitations/lookup/Ab12Cd34",
+            "/api/invitations/lookup/{short_code}",
         )
         with patch(
             "core.services.invitation_public_access_service.settings.invitation_public_rate_limit_per_minute",

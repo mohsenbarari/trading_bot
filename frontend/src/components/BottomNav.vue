@@ -6,6 +6,8 @@ import { currentUserSummary, primeCurrentUserSummary } from '../utils/currentUse
 import { useNotificationStore } from '../stores/notifications'
 import { isMarketRuntimeClosed, startMarketRuntimeUpdates, stopMarketRuntimeUpdates } from '../composables/useMarketRuntime'
 
+withDefaults(defineProps<{ v2Scope?: boolean }>(), { v2Scope: false })
+
 const route = useRoute()
 const isExpanded = ref(false)
 const notificationStore = useNotificationStore()
@@ -69,7 +71,7 @@ function loadFabPosition() {
       if (typeof parsed.x === 'number' && typeof parsed.y === 'number') {
         fabPosition.value = clampFabPoint(parsed)
       }
-    } catch(e){}
+    } catch {}
   }
 }
 
@@ -136,7 +138,7 @@ function onDragMove(e: TouchEvent | MouseEvent) {
   }
 }
 
-function onDragEnd(e: Event) {
+function onDragEnd() {
   document.removeEventListener('mousemove', onDragMove)
   document.removeEventListener('mouseup', onDragEnd)
   document.removeEventListener('touchmove', onDragMove)
@@ -308,21 +310,43 @@ const fabButtonLabel = computed(() => (isExpanded.value ? 'بستن ناوبری
 
 <template>
   <!-- ═══ Normal Bottom Nav (non-market, non-messenger pages) ═══ -->
-  <nav v-if="!isMarketPage && !isMessengerPage" class="bottom-nav-wrapper" aria-label="ناوبری اصلی">
-    <div class="bottom-nav-bar">
+  <nav
+    v-if="!isMarketPage && !isMessengerPage"
+    class="bottom-nav-wrapper"
+    :class="{ 'ui-v2-bottom-nav': v2Scope }"
+    aria-label="ناوبری اصلی"
+  >
+    <div class="bottom-nav-bar" :class="{ 'ui-v2-bottom-nav-bar': v2Scope }">
       <template v-for="item in navItems" :key="item.name">
-        <div v-if="item.disabled" class="nav-item disabled">
+        <div
+          v-if="item.disabled"
+          class="nav-item disabled"
+          :class="{ 'ui-v2-bottom-nav-item': v2Scope }"
+        >
           <component :is="item.icon" :size="22" />
-          <span class="nav-label">{{ item.label }}</span>
+          <span class="nav-label" :class="{ 'ui-v2-bottom-nav-label': v2Scope }">{{
+            item.label
+          }}</span>
           <span class="soon-dot"></span>
         </div>
         <router-link
           v-else
           :to="item.path"
           class="nav-item"
-          :class="{ active: isActiveNavItem(item), 'market-closed': item.name === 'market' && isMarketClosed }"
+          :class="{
+            active: isActiveNavItem(item),
+            'market-closed': item.name === 'market' && isMarketClosed,
+            'ui-v2-bottom-nav-item': v2Scope,
+            'ui-v2-bottom-nav-item--closed': v2Scope && item.name === 'market' && isMarketClosed,
+          }"
         >
-          <div class="nav-icon-wrap" :class="{ 'icon-active': isActiveNavItem(item) }">
+          <div
+            class="nav-icon-wrap"
+            :class="{
+              'icon-active': isActiveNavItem(item),
+              'ui-v2-bottom-nav-icon': v2Scope,
+            }"
+          >
             <component :is="item.icon" :size="22" :stroke-width="isActiveNavItem(item) ? 2.5 : 1.8" />
             
             <!-- Unread Badge for Messenger -->
@@ -331,9 +355,21 @@ const fabButtonLabel = computed(() => (isExpanded.value ? 'بستن ناوبری
               {{ notificationStore.chatUnreadCount > 99 ? '99+' : notificationStore.chatUnreadCount }}
             </div>
           </div>
-          <span class="nav-label" :class="{ 'nav-label--market': item.name === 'market' && isMarketClosed }">
+          <span
+            class="nav-label"
+            :class="{
+              'nav-label--market': item.name === 'market' && isMarketClosed,
+              'ui-v2-bottom-nav-label': v2Scope,
+              'ui-v2-bottom-nav-label--closed': v2Scope && item.name === 'market' && isMarketClosed,
+            }"
+          >
             <span>{{ item.label }}</span>
-            <span v-if="item.name === 'market' && isMarketClosed" class="market-closed-text">بسته</span>
+            <span
+              v-if="item.name === 'market' && isMarketClosed"
+              class="market-closed-text"
+              :class="{ 'ui-v2-bottom-nav-closed': v2Scope }"
+              >بسته</span
+            >
           </span>
         </router-link>
       </template>

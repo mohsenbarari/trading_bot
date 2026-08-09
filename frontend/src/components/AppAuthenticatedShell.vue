@@ -13,6 +13,17 @@ import {
 } from '../services/chatTransferResumeHints'
 import { initChatFileDebugOverlay } from '../composables/chat/useChatFileHandler'
 
+withDefaults(
+  defineProps<{
+    v2Scope?: boolean
+    showDailyNavigation?: boolean
+  }>(),
+  {
+    v2Scope: false,
+    showDailyNavigation: true,
+  },
+)
+
 const route = useRoute()
 const { on, off, connect, sendPresenceUpdate } = useWebSocket()
 
@@ -35,7 +46,7 @@ const ensureSessionValidation = async () => {
   try {
     await apiFetch('/api/sessions/verify', {
       method: 'POST',
-      body: JSON.stringify({ refresh_token: refreshToken })
+      body: JSON.stringify({ refresh_token: refreshToken }),
     })
   } catch {
     // If 401, apiFetch will handle logout/suspension centrally.
@@ -55,11 +66,12 @@ onMounted(() => {
   }
 
   if (hasPendingDocumentDownloadResumeHint()) {
-    void import('../services/chatDocumentDownloadBackground').then(({ initChatDocumentDownloadBackground }) =>
-      initChatDocumentDownloadBackground({
-        apiBaseUrl: import.meta.env.VITE_API_BASE_URL || '',
-        getAuthToken: () => localStorage.getItem('auth_token'),
-      }),
+    void import('../services/chatDocumentDownloadBackground').then(
+      ({ initChatDocumentDownloadBackground }) =>
+        initChatDocumentDownloadBackground({
+          apiBaseUrl: import.meta.env.VITE_API_BASE_URL || '',
+          getAuthToken: () => localStorage.getItem('auth_token'),
+        }),
     )
   }
 
@@ -67,12 +79,6 @@ onMounted(() => {
   publishRoutePresence()
   document.addEventListener('visibilitychange', handleVisibilityChange)
   on('ws:reconnect', handleWsReconnect)
-
-  window.addEventListener('beforeinstallprompt', (event) => {
-    event.preventDefault()
-    ;(window as any).deferredPrompt = event
-    window.dispatchEvent(new Event('pwa-install-ready'))
-  })
 })
 
 watch(
@@ -92,7 +98,7 @@ useNotificationRuntime({ connect, on, off, ensureSessionValidation })
 </script>
 
 <template>
-  <BottomNav />
-  <SessionApprovalModal />
-  <AppToasts />
+  <BottomNav v-if="showDailyNavigation" :v2-scope="v2Scope" />
+  <SessionApprovalModal :v2-portal="v2Scope" />
+  <AppToasts :v2-scope="v2Scope" />
 </template>

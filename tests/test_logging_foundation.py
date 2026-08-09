@@ -1,10 +1,14 @@
+import ast
 import io
 import json
 import logging
 import sys
+from pathlib import Path
 import unittest
 from types import ModuleType, SimpleNamespace
 from unittest.mock import patch
+
+from sqlalchemy.exc import OperationalError
 
 from core.log_redaction import (
     REDACTED,
@@ -19,7 +23,7 @@ from core.log_redaction import (
     REDACTED_SIGNED_URL_VALUE,
     redact,
 )
-from core.logging_config import configure_logging
+from core.logging_config import JsonLogFormatter, TextLogFormatter, configure_logging
 from core.request_context import clear_request_context, set_request_context
 
 
@@ -68,6 +72,47 @@ class LoggingFoundationTests(unittest.TestCase):
 
         self.assertEqual(redact(f"token={token}"), f"token={REDACTED}")
         self.assertEqual(redact(f"raw {token}"), f"raw {REDACTED_JWT}")
+
+    def test_sqlalchemy_exception_formatters_hide_registration_bearers(self):
+        raw_tokens = [f"{prefix}-{'a' * 32}" for prefix in ("INV", "ACCT", "CUST", "REG")]
+        try:
+            raise OperationalError("SELECT invitation", tuple(raw_tokens), RuntimeError("db down"))
+        except OperationalError:
+            exc_info = sys.exc_info()
+
+        for formatter in (JsonLogFormatter(), TextLogFormatter("%(message)s")):
+            record = logging.LogRecord(
+                "tests.logging",
+                logging.ERROR,
+                __file__,
+                1,
+                "database lookup failed",
+                (),
+                exc_info,
+            )
+            rendered = formatter.format(record)
+            for raw_token in raw_tokens:
+                self.assertNotIn(raw_token, rendered)
+            self.assertIn(REDACTED, rendered)
+
+    def test_application_engine_hides_sql_bind_parameters(self):
+        db_module = ast.parse(
+            (Path(__file__).resolve().parents[1] / "core" / "db.py").read_text(encoding="utf-8")
+        )
+        engine_calls = [
+            node
+            for node in ast.walk(db_module)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "create_async_engine"
+        ]
+        self.assertEqual(len(engine_calls), 1)
+        hide_parameters = next(
+            (keyword.value for keyword in engine_calls[0].keywords if keyword.arg == "hide_parameters"),
+            None,
+        )
+        self.assertIsInstance(hide_parameters, ast.Constant)
+        self.assertIs(hide_parameters.value, True)
 
     def test_redact_masks_telegram_bot_api_tokens_inside_httpx_messages(self):
         message = (

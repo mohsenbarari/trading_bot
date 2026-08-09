@@ -19,8 +19,7 @@ export interface CustomerRelation {
   max_daily_trades: number | null
   max_daily_commodity_volume: number | null
   status: RelationStatus
-  invitation_token: string
-  registration_link: string | null
+  registration_link?: string | null
   bot_registration_link?: string | null
   web_registration_link?: string | null
   web_short_link?: string | null

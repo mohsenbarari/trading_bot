@@ -3,7 +3,7 @@ import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { Bell, Store, LogOut, AlertTriangle, Ban, ChevronDown, PackageCheck, UsersRound } from 'lucide-vue-next'
 import { useNotificationStore } from '../stores/notifications'
-import { apiFetch, forceLogout } from '../utils/auth'
+import { apiFetch, forceLogout, isAppConnecting } from '../utils/auth'
 import { cacheCurrentUserSummary } from '../utils/currentUser'
 import { routeRequest, routeRequestJson } from '../utils/routeRequest'
 import { formatIranDateTime, getIranHour, IRAN_TIME_ZONE, parseIranDisplayDate } from '../utils/iranTime'
@@ -11,6 +11,7 @@ import { marketRuntime } from '../composables/useMarketRuntime'
 import { openTelegramLink, requestTelegramLink } from '../services/telegramLink'
 import type { SettlementType } from '../utils/settlementType'
 import TelegramConnectPanel from '../components/account/TelegramConnectPanel.vue'
+import PWAInstallOverlay from '../components/PWAInstallOverlay.vue'
 import {
   AppButton,
   AppCard,
@@ -26,6 +27,7 @@ import {
   AppSectionCard,
   AppStatusBadge,
   AppToast,
+  AppDesignSystemScope,
 } from '../components/ui'
 
 interface DashboardTrade {
@@ -60,17 +62,46 @@ interface DashboardProjectUser {
   created_at?: string | null
 }
 
+interface DashboardUser {
+  id?: number | string | null
+  role?: string | null
+  full_name?: string | null
+  account_name?: string | null
+  account_status?: string | null
+  customer_management_name?: string | null
+  customer_tier?: string | null
+  accountant_owner_user_id?: number | string | null
+  is_accountant?: boolean
+  is_customer?: boolean
+  can_connect_telegram?: boolean
+  telegram_linked?: boolean
+  global_lock_grace_expires_at?: string | null
+  global_web_locked_at?: string | null
+  trading_restricted_until?: string | null
+}
+
 const PROJECT_USERS_PAGE_SIZE = 25
 const PROJECT_USER_NEW_WINDOW_MS = 7 * 24 * 60 * 60 * 1000
 
 const router = useRouter()
 const notificationStore = useNotificationStore()
-const user = ref<any>(null)
+const user = ref<DashboardUser | null>(null)
 const loading = ref(true)
 const userError = ref('')
 const todayTrades = ref<DashboardTrade[]>([])
 const todayTradesLoading = ref(false)
 const todayTradesError = ref('')
+const pwaPromptEligible = computed(
+  () =>
+    Boolean(user.value) &&
+    !loading.value &&
+    !userError.value &&
+    !todayTradesLoading.value &&
+    !todayTradesError.value &&
+    !isAppConnecting.value &&
+    !isInactiveAccount.value &&
+    !isRestricted.value,
+)
 const allowedCommodities = ref<DashboardCommodity[]>([])
 const allowedCommoditiesLoading = ref(false)
 const allowedCommoditiesError = ref('')
@@ -369,9 +400,10 @@ async function loadAllowedCommodities() {
           .filter((commodity): commodity is DashboardCommodity => commodity !== null)
       : []
     allowedCommoditiesLoaded.value = true
-  } catch (error: any) {
+  } catch (error: unknown) {
     allowedCommodities.value = []
-    allowedCommoditiesError.value = error?.message || 'دریافت فهرست کالاها ناموفق بود'
+    allowedCommoditiesError.value =
+      (error as { message?: string } | null)?.message || 'دریافت فهرست کالاها ناموفق بود'
     allowedCommoditiesLoaded.value = true
   } finally {
     allowedCommoditiesLoading.value = false
@@ -479,6 +511,9 @@ async function loadProjectUsersDirectory(force = false) {
   }
 }
 
+// Kept for the later directory-lifecycle owner; Stage 3 must not change when
+// this retained-state reset is invoked.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function resetProjectUsersDirectoryState() {
   projectUsers.value = []
   projectUsersLoading.value = false
@@ -539,7 +574,7 @@ async function fetchUser() {
       throw new Error('identity_payload_invalid')
     }
 
-    user.value = payload
+    user.value = payload as DashboardUser
     cacheCurrentUserSummary(user.value)
     void loadTodayTrades()
     // 401 handling is automatic via apiFetch → forceLogout
@@ -563,7 +598,9 @@ async function logout() {
       },
     })
     if (!Array.isArray(activeSessions)) throw new Error('active_sessions_payload_invalid')
-    const currentSession = activeSessions.find((s: any) => s.is_current)
+    const currentSession = (
+      activeSessions as Array<{ id: string | number; is_current?: unknown }>
+    ).find((session) => session.is_current)
     if (currentSession) {
       await routeRequest(`/api/sessions/${currentSession.id}`, {
         method: 'DELETE',
@@ -598,8 +635,9 @@ async function connectTelegram() {
       return
     }
     telegramLinkError.value = payload.detail || 'لینک اتصال تلگرام آماده نشد.'
-  } catch (error: any) {
-    telegramLinkError.value = error?.message || 'ساخت لینک اتصال تلگرام ناموفق بود.'
+  } catch (error: unknown) {
+    telegramLinkError.value =
+      (error as { message?: string } | null)?.message || 'ساخت لینک اتصال تلگرام ناموفق بود.'
   } finally {
     telegramLinkBusy.value = false
   }
@@ -740,6 +778,10 @@ onMounted(fetchUser)
           </div>
           <div class="hero-cta-tail">ورود</div>
         </button>
+
+        <AppDesignSystemScope as="div" class="ui-v2-pwa-section">
+          <PWAInstallOverlay :eligible="pwaPromptEligible" />
+        </AppDesignSystemScope>
 
         <AppSectionCard
           class="today-trades-card"

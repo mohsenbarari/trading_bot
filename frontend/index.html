@@ -3,6 +3,7 @@
 
 <head>
   <meta charset="UTF-8">
+  <meta name="referrer" content="no-referrer">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content">
   
   <!-- PWA Essential Meta Tags -->
@@ -125,7 +126,7 @@
       <div id="boot-loader-spinner"></div>
       <div id="boot-loader-title">در حال بارگذاری</div>
       <div id="boot-loader-note">اگر صفحه بالا نیامد، پاک‌سازی کش برنامه و بارگذاری مجدد را امتحان کنید.</div>
-      <button id="boot-loader-refresh" type="button" onclick="window.__startAppRecovery ? window.__startAppRecovery() : window.location.reload()">پاک‌سازی کش و بارگذاری مجدد</button>
+      <button id="boot-loader-refresh" type="button" onclick="window.__startAppRecovery ? window.__startAppRecovery() : window.location.replace(window.location.pathname || '/')">پاک‌سازی کش و بارگذاری مجدد</button>
     </div>
   </div>
   <div id="app"></div>
@@ -134,6 +135,12 @@
       const root = document.documentElement
       const BOOT_RECOVERY_KEY = 'app_boot_recovery_attempted'
       const currentUrl = new URL(window.location.href)
+
+      function createPathOnlyRecoveryUrl(marker) {
+        const nextUrl = new URL(window.location.pathname || '/', window.location.origin)
+        nextUrl.searchParams.set(marker, Date.now().toString())
+        return `${nextUrl.pathname}${nextUrl.search}`
+      }
 
       async function clearCachesAndServiceWorkers() {
         try {
@@ -147,23 +154,18 @@
             await Promise.all(registrations.map(registration => registration.unregister()))
           }
         } catch (error) {
-          console.warn('Boot recovery cleanup failed', error)
+          console.warn('Boot recovery cleanup failed')
         }
       }
 
       async function runManualRecovery() {
         root.setAttribute('data-app-boot-recovering', '1')
         await clearCachesAndServiceWorkers()
-        const nextUrl = new URL(window.location.href)
-        nextUrl.searchParams.delete('app_recovery')
-        nextUrl.searchParams.set('app_recovered', Date.now().toString())
-        window.location.replace(nextUrl.toString())
+        window.location.replace(createPathOnlyRecoveryUrl('app_recovered'))
       }
 
       window.__startAppRecovery = function () {
-        const nextUrl = new URL(window.location.href)
-        nextUrl.searchParams.set('app_recovery', Date.now().toString())
-        window.location.replace(nextUrl.toString())
+        window.location.replace(createPathOnlyRecoveryUrl('app_recovery'))
       }
 
       if (currentUrl.searchParams.has('app_recovery')) {
@@ -190,7 +192,7 @@
 
           root.setAttribute('data-app-boot-recovering', '1')
           await clearCachesAndServiceWorkers()
-          window.location.reload()
+          window.location.replace(window.location.pathname || '/')
           return
         }
 

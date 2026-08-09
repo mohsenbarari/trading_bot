@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import re
 
 from core.public_webapp_url import public_webapp_url_for_links
 from core.log_redaction import mask_mobile
@@ -22,6 +23,32 @@ from models.invitation import Invitation, InvitationKind
 class InvitationSurfaceAvailability:
     bot: bool
     web: bool
+
+
+_INVITATION_SHORT_CODE_PATTERN = re.compile(r"^[A-Za-z0-9]{8}$")
+
+
+def is_canonical_invitation_short_code(short_code: object) -> bool:
+    return isinstance(short_code, str) and bool(
+        _INVITATION_SHORT_CODE_PATTERN.fullmatch(short_code)
+    )
+
+
+def build_canonical_invitation_web_link(
+    short_code: object,
+    *,
+    settings_obj=None,
+    web_origin: str | None = None,
+) -> str | None:
+    """Build the only active Web invitation URL, failing closed on malformed codes."""
+
+    if not is_canonical_invitation_short_code(short_code):
+        return None
+    normalized_short_code = short_code
+    canonical_origin = web_origin or public_webapp_url_for_links(
+        settings_obj=settings_obj
+    )
+    return f"{canonical_origin.rstrip('/')}/i/{normalized_short_code}"
 
 
 def invitation_surface_availability(
@@ -57,7 +84,6 @@ def build_invitation_contract_v2(
     if settings_obj is None:
         from core.config import settings as settings_obj
 
-    web_origin = public_webapp_url_for_links(settings_obj=settings_obj)
     state = derive_invitation_state(invitation)
     availability = invitation_surface_availability(
         invitation.kind,
@@ -72,18 +98,20 @@ def build_invitation_contract_v2(
         if availability.bot and bot_name
         else None
     )
-    web_link = (
-        f"{web_origin}/register?token={invitation.token}"
+    canonical_web_link = (
+        build_canonical_invitation_web_link(
+            getattr(invitation, "short_code", None),
+            settings_obj=settings_obj,
+        )
         if availability.web
-        else ""
-    )
-    web_short_link = (
-        f"{web_origin}/i/{invitation.short_code}"
-        if availability.web and invitation.short_code
         else None
     )
+    if availability.web and canonical_web_link is None:
+        availability = InvitationSurfaceAvailability(bot=availability.bot, web=False)
+    web_link = canonical_web_link or ""
+    web_short_link = canonical_web_link
     return InvitationContractV2(
-        token=invitation.token,
+        short_code=(invitation.short_code if canonical_web_link else None),
         bot_link=bot_link,
         web_link=web_link,
         web_short_link=web_short_link,

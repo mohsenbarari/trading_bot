@@ -30,6 +30,33 @@ describe('BottomNav.vue', () => {
     setViewport(1024, 768)
   })
 
+  it('adds canonical navigation hooks only for an explicitly scoped V2 shell', async () => {
+    const BottomNav = (await import('./BottomNav.vue')).default
+    const global = {
+      stubs: {
+        'router-link': {
+          props: ['to'],
+          template: '<a v-bind="$attrs"><slot /></a>',
+        },
+      },
+    }
+
+    const legacyWrapper = mount(BottomNav, { global })
+    expect(legacyWrapper.find('[class*="ui-v2-bottom-nav"]').exists()).toBe(false)
+    legacyWrapper.unmount()
+
+    const v2Wrapper = mount(BottomNav, { props: { v2Scope: true }, global })
+    expect(v2Wrapper.get('nav').classes()).toContain('ui-v2-bottom-nav')
+    expect(v2Wrapper.get('.bottom-nav-bar').classes()).toContain('ui-v2-bottom-nav-bar')
+    expect(v2Wrapper.findAll('.ui-v2-bottom-nav-item')).toHaveLength(
+      v2Wrapper.findAll('.nav-item').length,
+    )
+    expect(v2Wrapper.findAll('.ui-v2-bottom-nav-label')).toHaveLength(
+      v2Wrapper.findAll('.nav-label').length,
+    )
+    v2Wrapper.unmount()
+  })
+
   it('shows the operations entry immediately from the cached role on first mount', async () => {
     localStorage.setItem('current_user_summary', JSON.stringify({
       id: 1,
