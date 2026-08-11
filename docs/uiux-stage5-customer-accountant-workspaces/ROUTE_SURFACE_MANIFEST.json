@@ -1,0 +1,205 @@
+{
+  "schemaVersion": 1,
+  "stage": 5,
+  "scope": "customer-accountant-workspaces",
+  "status": "stage5_complete_runtime_browser_figma_sites_proven",
+  "branch": "condidate/webapp-ui-ux-redesign-v2",
+  "recordedDate": "2026-08-11",
+  "comparisonBaseCommit": "646ca6dd83b50e3efd5689e94a241745c030ec9d",
+  "comparisonBaseTree": "1d6adb6b33fb13ddea2966de99f8f3afe3eb92bb",
+  "implementation": {
+    "commit": "08c5ae1ea95b3087893146547bed8a220eb83d2b",
+    "tree": "96e2f32c46668f37a4753ccaee21216a2b500097",
+    "parent": "646ca6dd83b50e3efd5689e94a241745c030ec9d",
+    "exactPathCount": 34,
+    "modifiedCount": 27,
+    "addedCount": 7,
+    "deletedCount": 0,
+    "pathSetSha256": "c739ac017e954522ac8d96a5875e5c954e962c42c010e8e197388c98ecc4656f",
+    "pathContentSha256": "b164a6ca22cd24b3e9d720f27cf2838aa27a41d8ce06102dbdb6be9103b8b8e1"
+  },
+  "routeRegistry": {
+    "count": 30,
+    "v2ScopeCounts": {
+      "route": 10,
+      "section": 16,
+      "off": 4
+    },
+    "shellClassCounts": {
+      "public": 3,
+      "focused-authenticated": 1,
+      "standard-authenticated": 21,
+      "protected-legacy": 4,
+      "system-recovery": 1
+    },
+    "protectionCounts": {
+      "none": 23,
+      "full": 4,
+      "mixed": 3
+    },
+    "scopeManifestPath": "frontend/src/design-system-v2/scope-manifest.json",
+    "scopeManifestSha256": "18c7fa738ec527d39462a964157ff24d4e2cb5093a28060745ca831765ef3fbc",
+    "routeContractPath": "frontend/src/router/uiRouteContract.ts",
+    "routeContractSha256": "8e7495a05dfbf6b36bcc242af1b20919bef56a8bd0ed9458360d36cf79fba144",
+    "routerPath": "frontend/src/router/index.ts",
+    "routerSha256": "a85c2432ff6a4ad0230ee63e58d54dce7aaa5d1a781b50efa3b44d0fcf8c051c"
+  },
+  "stage5Routes": [
+    {
+      "path": "/operations/customers",
+      "name": "operations-customers",
+      "component": "frontend/src/views/CustomerWorkspaceView.vue",
+      "shellClass": "standard-authenticated",
+      "v2Scope": "section",
+      "protection": "none",
+      "requiresAuth": true,
+      "requiresOwnerAccess": true,
+      "surface": "list",
+      "mobileVisibility": "list_only",
+      "desktopVisibility": "master_detail_when_selection_exists"
+    },
+    {
+      "path": "/operations/customers/:relationId",
+      "name": "operations-customers-detail",
+      "component": "frontend/src/views/CustomerWorkspaceView.vue",
+      "shellClass": "standard-authenticated",
+      "v2Scope": "section",
+      "protection": "none",
+      "requiresAuth": true,
+      "requiresOwnerAccess": true,
+      "surface": "detail",
+      "mobileVisibility": "detail_only",
+      "desktopVisibility": "master_detail",
+      "terminalLifecycleReadable": true
+    },
+    {
+      "path": "/operations/accountants",
+      "name": "operations-accountants",
+      "component": "frontend/src/views/AccountantWorkspaceView.vue",
+      "shellClass": "standard-authenticated",
+      "v2Scope": "section",
+      "protection": "none",
+      "requiresAuth": true,
+      "requiresOwnerAccess": true,
+      "surface": "list",
+      "mobileVisibility": "list_only",
+      "desktopVisibility": "master_detail_when_selection_exists"
+    },
+    {
+      "path": "/operations/accountants/:relationId",
+      "name": "operations-accountants-detail",
+      "component": "frontend/src/views/AccountantWorkspaceView.vue",
+      "shellClass": "standard-authenticated",
+      "v2Scope": "section",
+      "protection": "none",
+      "requiresAuth": true,
+      "requiresOwnerAccess": true,
+      "surface": "detail",
+      "mobileVisibility": "detail_only",
+      "desktopVisibility": "master_detail",
+      "terminalLifecycleReadable": true
+    }
+  ],
+  "routeStateContract": {
+    "canonicalQueryKeys": [
+      "q",
+      "filter",
+      "scroll",
+      "tab"
+    ],
+    "legacyAliasesRemovedFromCanonicalQuery": [
+      "listScroll",
+      "panel",
+      "section"
+    ],
+    "responsiveBreakpointPx": 900,
+    "belowBreakpoint": "list_detail_xor",
+    "atOrAboveBreakpoint": "adaptive_master_detail",
+    "listContextPreservedOnDetailRoundTrip": [
+      "query",
+      "filter",
+      "selection",
+      "scroll"
+    ],
+    "queryOnlyTransitionRemountSuppressedForStage5Routes": true,
+    "legacyFullPathKeyPreservedForAllOtherUnscopedRoutes": true,
+    "appPath": "frontend/src/App.vue",
+    "appSha256": "a6143202cb2fdb397947dd01a31430c2b619699455cc487b648c0ed8e488d636",
+    "appRegressionPath": "frontend/src/App.test.ts",
+    "appRegressionSha256": "27893435a57ee80030ad2d0dd7c0ef48b7967b9259b67fb6f12fa9437932e50f"
+  },
+  "apiContract": {
+    "customers": {
+      "list": "GET /api/customers/owner-relations",
+      "detail": "GET /api/customers/owner-relations/{relationId}",
+      "create": "POST /api/customers/owner-relations",
+      "update": "PATCH /api/customers/owner-relations/{relationId}",
+      "delete": "DELETE /api/customers/owner-relations/{relationId}?expected_action={semanticAction}",
+      "sessions": "GET /api/customers/owner-relations/{relationId}/sessions",
+      "terminateSession": "DELETE /api/customers/owner-relations/{relationId}/sessions/{sessionId}",
+      "history": "GET /api/trades/with/{customerUserId}?limit={limit}",
+      "statistics": "GET /api/customers/owner-relations/{relationId}/trade-stats?days={days}"
+    },
+    "accountants": {
+      "list": "GET /api/accountants/owner-relations",
+      "detail": "GET /api/accountants/owner-relations/{relationId}",
+      "create": "POST /api/accountants/owner-relations",
+      "update": "PATCH /api/accountants/owner-relations/{relationId}",
+      "delete": "DELETE /api/accountants/owner-relations/{relationId}?expected_action={semanticAction}",
+      "sessions": "GET /api/accountants/owner-relations/{relationId}/sessions",
+      "terminateSession": "DELETE /api/accountants/owner-relations/{relationId}/sessions/{sessionId}"
+    },
+    "listVisibility": "live_pending_or_active_non_deleted_only",
+    "detailVisibility": "owner_relation_including_terminal_lifecycle",
+    "semanticDeleteActions": [
+      "cancel-pending",
+      "delete-relation",
+      "delete-account"
+    ],
+    "expectedActionRequired": true,
+    "capabilityMismatchStatus": 409,
+    "lockOrder": [
+      "invitation_transition_or_advisory_lock",
+      "relation_row_lock"
+    ],
+    "sideEffectsBeforeCapabilityValidation": 0
+  },
+  "workspaceTasks": {
+    "shared": [
+      "search_open_and_return_with_route_context",
+      "create_and_manage_pending_invitation",
+      "view_and_terminate_selected_session",
+      "semantic_relation_or_account_deletion"
+    ],
+    "customerOnly": [
+      "review_financial_before_after_and_apply_future_only",
+      "view_history_and_statistics_on_demand"
+    ],
+    "accountantOnly": [
+      "edit_single_canonical_duty_description_field"
+    ]
+  },
+  "asyncSafety": {
+    "abortControllers": true,
+    "requestGenerations": true,
+    "capturedContextSentinels": true,
+    "staleResponseMayWriteNewContext": false,
+    "deleteNavigationCanonicalReplaceSuppressed": true,
+    "unmountOrRealRouteChangeSuppressesStaleNavigation": true
+  },
+  "closure": {
+    "technicalGateStatus": "passed_with_inherited_diagnostics_disclosed",
+    "protectedFinalDiffStatus": "passed_zero_unauthorized_drift",
+    "browserStatus": "passed_23_of_23_promotable",
+    "figmaStatus": "passed_runtime_delta_locally_hash_bound",
+    "sitesStatus": "passed_private_owner_only_source_bound",
+    "sitesProvenancePath": "SITES_PROVENANCE.json",
+    "sitesProvenanceSha256": "c51c25ae739ddac84b061764e0b6f3c2bf73404c6eca69f4a649a82e912a230f",
+    "evidenceStatus": "local_evidence_inputs_frozen_historical_sites_unproven_boundary_preserved",
+    "stage5CompleteAuthority": true,
+    "stage6RuntimeImplementationAuthorized": false,
+    "stage6RuntimeWorkStarted": false
+  },
+  "nextAuthorizedRuntimeStage": null,
+  "claimBoundary": "Runtime, protected guards, browser acceptance, the locally hash-bound Figma runtime-delta snapshot, and the private owner-only source-bound Sites evidence preview are passed, so Stage 5 is complete. EVIDENCE_MANIFEST.json remains immutable with its historical sitesProven=false and stageCompleteAuthority=false boundary; completion is proved separately by SITES_PROVENANCE.json. No product, staging or production deployment or runtime activation occurred, and this manifest does not authorize Stage 6."
+}

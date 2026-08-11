@@ -1,0 +1,71 @@
+{
+  "schemaVersion": 1,
+  "stage": 5,
+  "scope": "customer-accountant-workspaces",
+  "status": "passed_runtime_delta",
+  "auditMode": "direct_final_structural_and_contract_audit",
+  "fileKey": "z8jgJxST4O2APzWnlyP9gv",
+  "page": {
+    "id": "297:18",
+    "name": "07 — Stage 5 Customer & Accountant Workspaces"
+  },
+  "root": {
+    "id": "297:19",
+    "name": "F5/Root Stage 5 Customer & Accountant Workspaces",
+    "width": 1584,
+    "height": 8863,
+    "topLevelSectionCount": 7,
+    "nodeCount": 1213
+  },
+  "implementationBinding": {
+    "location": "local_manifest_only",
+    "commit": "08c5ae1ea95b3087893146547bed8a220eb83d2b",
+    "tree": "96e2f32c46668f37a4753ccaee21216a2b500097",
+    "exactGitIdentityWrittenIntoFigmaPayload": false
+  },
+  "sourceClone": {
+    "sourcePageId": "55:2",
+    "sourceRootNodeId": "55:3",
+    "initialSectionCount": 6,
+    "initialCloneStructuralAuditPassed": true,
+    "runtimeDeltaAppendedAfterExplicitUserApproval": true
+  },
+  "runtimeDelta": {
+    "id": "308:556",
+    "name": "F5/06 — Runtime Delta & Recovery",
+    "width": 1488,
+    "height": 1000,
+    "copyCoverageStatus": "passed_exact",
+    "contractCoverage": {
+      "pendingCancelSemanticAction": true,
+      "orphanRelationOnlySemanticAction": true,
+      "fullAccountDeletionSemanticAction": true,
+      "conflictRefreshAndReconfirm": true,
+      "terminalReadOnlyCustomer": true,
+      "terminalReadOnlyAccountant": true,
+      "retainedAsyncRecovery": true
+    },
+    "anonymized": true,
+    "piiHitCount": 0,
+    "internalTokenHitCount": 0,
+    "exactGitOrInternalMetadataPresent": false
+  },
+  "structure": {
+    "nodeCount": 1213,
+    "linkedInstanceCount": 74,
+    "unlinkedInstanceCount": 0,
+    "boundNodeCount": 926,
+    "placeholderCount": 0,
+    "imageFillCount": 0,
+    "fontFamilies": [
+      "Vazirmatn Bold",
+      "Vazirmatn Medium",
+      "Vazirmatn Regular",
+      "Vazirmatn SemiBold"
+    ],
+    "fontOffenderCount": 0
+  },
+  "completionGatePassed": true,
+  "errors": [],
+  "claimBoundary": "This direct audit proves the final seven-section Stage 5 Figma snapshot includes the anonymized runtime-delta/recovery contract. Exact Git identity and security provenance remain local-only and were not written into Figma. Runtime behavior remains proven separately by commit-bound browser and technical artifacts; Sites is not proven here."
+}

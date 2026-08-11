@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "stage": 5,
+  "status": "passed_with_inherited_warnings",
+  "command": "python3 -m pytest tests/test_customer_relation_service.py tests/test_customers_router.py tests/test_accountant_relation_service.py tests/test_accountants_router.py -q",
+  "environment": "explicit non-secret dummy PostgreSQL, Redis, JWT and frontend settings",
+  "modules": [
+    "tests/test_customer_relation_service.py",
+    "tests/test_customers_router.py",
+    "tests/test_accountant_relation_service.py",
+    "tests/test_accountants_router.py"
+  ],
+  "moduleCount": 4,
+  "testCount": 127,
+  "passed": 127,
+  "failed": 0,
+  "warningCount": 76,
+  "warningDisposition": "inherited_deprecation_warnings",
+  "implementationCommit": "08c5ae1ea95b3087893146547bed8a220eb83d2b",
+  "implementationTree": "96e2f32c46668f37a4753ccaee21216a2b500097",
+  "caveats": [
+    "The first collection attempt omitted required environment settings and failed during setup; it was discarded.",
+    "The valid rerun used explicit dummy settings and supersedes the setup-only failure."
+  ],
+  "evidenceOrigin": "final_targeted_backend_execution_summary",
+  "rawPytestLogAvailable": false,
+  "claimBoundary": "This artifact preserves the final observed backend counts and caveats. The original pytest stream was not saved as a standalone raw log."
+}

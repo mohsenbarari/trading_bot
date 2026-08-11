@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "stage": 5,
+  "scope": "customer-accountant-workspaces",
+  "status": "passed",
+  "promotable": true,
+  "diagnosticMode": false,
+  "runId": "uiux-stage5-browser-20260811T100859948Z",
+  "selectedSuites": [
+    "responsive",
+    "customer",
+    "accountant",
+    "history",
+    "create-busy",
+    "accessibility"
+  ],
+  "sourceBindingSha256": "a4555fc55f40541c6f499f4ce5a0e9ddef6f2c9e0cb79d69762a20047d46c938",
+  "sourceIdentical": true,
+  "gitIdentical": true,
+  "harnessIdentical": true,
+  "environmentIdentical": true,
+  "implementationCommit": "08c5ae1ea95b3087893146547bed8a220eb83d2b",
+  "implementationTree": "96e2f32c46668f37a4753ccaee21216a2b500097",
+  "harnessSha256": "a183e21df2e34486d555a4d8a662bda1055d6744a34de68543a49574483057d3",
+  "failure": null
+}

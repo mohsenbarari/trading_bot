@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "stage": 5,
+  "status": "passed",
+  "command": "git diff --check 646ca6dd83b50e3efd5689e94a241745c030ec9d 08c5ae1ea95b3087893146547bed8a220eb83d2b",
+  "exitCode": 0,
+  "stdout": "",
+  "implementationCommit": "08c5ae1ea95b3087893146547bed8a220eb83d2b",
+  "implementationTree": "96e2f32c46668f37a4753ccaee21216a2b500097",
+  "evidenceOrigin": "local_closure_rerun"
+}

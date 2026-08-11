@@ -1,0 +1,117 @@
+{
+  "schemaVersion": 1,
+  "stage": 5,
+  "scope": "customer-accountant-workspaces",
+  "status": "passed_private_owner_only_source_bound",
+  "claimBoundary": "This separate Sites provenance artifact is outside EVIDENCE_MANIFEST.inputs and does not mutate the frozen local evidence tuple. It proves the private owner-only Stage 5 evidence preview and, together with the independently passed implementation, browser, Figma, protected-surface and technical gates, closes Stage 5. It is not a product, staging or production deployment and does not authorize Stage 6.",
+  "localEvidence": {
+    "runId": "stage5-local-20260811T113702070Z",
+    "htmlSha256": "7b645ad4212ec2566ef4857372f1d608db52256dfa5a2a5038a2715d0e39b2e9",
+    "evidenceManifestSha256": "8159b83bd80993cbcfcd4c5badc4dae4615714adfc30f5da18baf5d329e4bf04",
+    "metricsSha256": "1d895cf14769adcc89bf434215c9ba7360e5fbdd4f456776290dcd6b7b7bfcec",
+    "package": {
+      "fileCount": 93,
+      "bytes": 9259772,
+      "aggregateSha256": "66461e40b534aa4ff0a48e11aeefbcd651655c63d0581d286ea3c36df0be1b8f",
+      "contentAndMtimeSha256": "9c370ec1d5b3ff92a271bb2afa70ab7ae8c1c58c24f5fb28c8cf4aa6b49ca89f"
+    },
+    "historicalManifestSitesProven": false,
+    "historicalManifestStageCompleteAuthority": false,
+    "mutatedBySitesClosure": false
+  },
+  "implementation": {
+    "commit": "08c5ae1ea95b3087893146547bed8a220eb83d2b",
+    "tree": "96e2f32c46668f37a4753ccaee21216a2b500097",
+    "parent": "646ca6dd83b50e3efd5689e94a241745c030ec9d",
+    "exactPathCount": 34,
+    "pathSetSha256": "c739ac017e954522ac8d96a5875e5c954e962c42c010e8e197388c98ecc4656f",
+    "pathContentSha256": "b164a6ca22cd24b3e9d720f27cf2838aa27a41d8ce06102dbdb6be9103b8b8e1"
+  },
+  "sitesSource": {
+    "kind": "isolated_stage5_evidence_repository",
+    "branch": "main",
+    "commit": "d06483ceefdeeb26ae0eb47d23bd3718fb01ea5a",
+    "tree": "9c21fe3996e18b1e80ca650b119e1961c0589211",
+    "boundToFrozenLocalEvidence": true
+  },
+  "archives": {
+    "localRelease": {
+      "fileCount": 43,
+      "bytes": 1761912,
+      "sha256": "c623d19f82f11e5925056ad7913fc3920466ae46991de9d868f210e62fa95563"
+    },
+    "providerStored": {
+      "contentHash": "sha256:f2ba4ba4692e0b5fe26fcc245658ef924420064c551e41e5c28dbaa387b80410"
+    }
+  },
+  "sites": {
+    "projectId": "appgprj_6a7b0d76e280819183076ac92b24ff4a",
+    "title": "Trading Bot UI/UX — Stage 5 Customer & Accountant Workspaces",
+    "slug": "tb-uiux-stage5-workspaces",
+    "projectCreatedAt": "2026-08-11T11:54:34.113986+00:00",
+    "savedVersionNumber": 2,
+    "versionSourceCommit": "d06483ceefdeeb26ae0eb47d23bd3718fb01ea5a",
+    "deploymentStatus": "succeeded",
+    "deployedAt": "2026-08-11T12:30:49.897033+00:00",
+    "url": "https://tb-uiux-stage5-workspaces.mohsenbarari235.chatgpt.site",
+    "access": {
+      "status": "passed",
+      "policy": "custom",
+      "effectiveScope": "owner_only",
+      "allowedUserCount": 1,
+      "allowedGroupCount": 0,
+      "externalVisitorCount": 0,
+      "editorCount": 0
+    },
+    "environment": {
+      "revision": 0,
+      "entryCount": 0
+    },
+    "bypass": {
+      "usedByWorkflow": false,
+      "usedByAnonymousProbes": false,
+      "valueRead": false,
+      "persistedInSourceArchiveOrDocs": false
+    },
+    "anonymousProbes": {
+      "requestContext": "anonymous_without_credentials_or_bypass",
+      "root": {
+        "path": "/",
+        "status": 401,
+        "cacheControl": "no-store",
+        "referrerPolicy": "no-referrer"
+      },
+      "evidence": {
+        "path": "/docs/uiux-stage5-customer-accountant-workspaces/stage5-customer-accountant-workspaces-evidence.html",
+        "status": 401,
+        "cacheControl": "no-store",
+        "referrerPolicy": "no-referrer"
+      },
+      "status": "passed"
+    },
+    "postDeployWorkerErrors": {
+      "errorCount": 0,
+      "status": "passed"
+    },
+    "onlineNpmAudit": {
+      "auditLevel": "high",
+      "vulnerabilityCount": 0,
+      "status": "passed"
+    }
+  },
+  "deploymentBoundary": {
+    "evidencePreviewDeployed": true,
+    "productDeployed": false,
+    "stagingDeployed": false,
+    "productionDeployed": false,
+    "runtimeActivationPerformed": false
+  },
+  "governance": {
+    "stage5Status": "stage5_complete",
+    "stage5CompleteAuthority": true,
+    "nextAuthorizedRuntimeStage": null,
+    "stage6RuntimeImplementationAuthorized": false,
+    "stage6RuntimeWorkStarted": false,
+    "workStoppedAfterStage5": true
+  }
+}

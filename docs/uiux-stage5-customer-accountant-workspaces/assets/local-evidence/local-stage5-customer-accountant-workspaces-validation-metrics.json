@@ -1,0 +1,456 @@
+{
+  "schemaVersion": 1,
+  "stage": 5,
+  "scope": "customer-accountant-workspaces",
+  "status": "passed",
+  "localEvidenceStatus": "frozen",
+  "runId": "stage5-local-20260811T113702070Z",
+  "startedAt": "2026-08-11T11:37:02.070Z",
+  "completedAt": "2026-08-11T11:38:52.188Z",
+  "validatedAt": "2026-08-11T11:39:52.776Z",
+  "recordedDate": "2026-08-11",
+  "comparisonBaseCommit": "646ca6dd83b50e3efd5689e94a241745c030ec9d",
+  "claimBoundary": {
+    "localDerivative": true,
+    "stageCompleteAuthority": false,
+    "sitesProven": false,
+    "newFigmaFreezeCreated": true,
+    "figmaAuthoredSnapshot": true,
+    "runtimeEvidenceHashBound": true
+  },
+  "inputs": {
+    "evidenceManifest": {
+      "path": "EVIDENCE_MANIFEST.json",
+      "bytes": 25912,
+      "sha256": "8159b83bd80993cbcfcd4c5badc4dae4615714adfc30f5da18baf5d329e4bf04",
+      "inputCount": 85,
+      "inputBytes": 8386267,
+      "inputProjectionAggregateSha256": "20bbbe2a3386b262823b21f62a109087abd62c24b2cb9f48cbff7a029872e4c6"
+    },
+    "implementation": {
+      "commit": "08c5ae1ea95b3087893146547bed8a220eb83d2b",
+      "tree": "96e2f32c46668f37a4753ccaee21216a2b500097",
+      "parent": "646ca6dd83b50e3efd5689e94a241745c030ec9d",
+      "pathCount": 34,
+      "pathSetSha256": "c739ac017e954522ac8d96a5875e5c954e962c42c010e8e197388c98ecc4656f",
+      "pathContentSha256": "b164a6ca22cd24b3e9d720f27cf2838aa27a41d8ce06102dbdb6be9103b8b8e1"
+    },
+    "html": {
+      "path": "stage5-customer-accountant-workspaces-evidence.html",
+      "bytes": 19710,
+      "sha256": "7b645ad4212ec2566ef4857372f1d608db52256dfa5a2a5038a2715d0e39b2e9"
+    },
+    "script": {
+      "path": "capture-evidence.cjs",
+      "bytes": 30134,
+      "sha256": "042ea8ccae5e31ff56d37e212570ff9144476bb11ca3eacba585aeb379400dc7"
+    },
+    "figma": {
+      "manifest": {
+        "path": "FIGMA_SNAPSHOT_MANIFEST.json",
+        "bytes": 6473,
+        "sha256": "3c9e9a0755da183a43f2ddfd483a6b9e662108fff23a95a98dabb5e022a512d7"
+      },
+      "audit": {
+        "path": "assets/figma/stage5-figma-direct-audit.json",
+        "bytes": 2365,
+        "sha256": "8a4fa20b40c0f2064af3d39cd59663a89b657c91c1a76f42e5a156cdf5b410b0"
+      },
+      "authoritativeCaptureCount": 2,
+      "authoritativeCaptureBytes": 477114,
+      "captureAggregateSha256": "859b032348751c73c36a77ac9dcc6e1f847782078421ab2460842df8363daba6",
+      "inputCount": 9,
+      "inputBytes": 1113189,
+      "inputAggregateSha256": "567c1e09274f20a0bfdda86a7522caa0cf4c75b9284f6504d85bd7d747193678"
+    },
+    "browser": {
+      "metrics": {
+        "path": "assets/browser-evidence/runs/uiux-stage5-browser-20260811T100859948Z/stage5-browser-acceptance-metrics.json",
+        "bytes": 1821899,
+        "sha256": "10d94ed59c9925ebc740d7af6d2d883b5f55a9b15152fcee2dac1a6e441f11ff"
+      },
+      "topManifest": {
+        "path": "assets/browser-evidence/stage5-final-evidence-manifest.json",
+        "bytes": 4448,
+        "sha256": "cd507fce316320deb30fb95c404ce7dc690fad2fe8ef2ac6c01183863c229c86"
+      },
+      "binding": {
+        "path": "assets/browser-evidence/runs/uiux-stage5-browser-20260811T100859948Z/stage5-final-source-binding.json",
+        "bytes": 790,
+        "sha256": "95a1a18b4c4cdaf52a576204f92be451b60cf0b2dc4b5643d1f1f42f0ec9802d"
+      },
+      "harness": {
+        "path": "assets/browser-evidence/stage5-browser-acceptance-harness.mjs",
+        "bytes": 125431,
+        "sha256": "a183e21df2e34486d555a4d8a662bda1055d6744a34de68543a49574483057d3"
+      },
+      "runId": "uiux-stage5-browser-20260811T100859948Z",
+      "assertions": 23,
+      "screenshots": 54,
+      "sourceCount": 393,
+      "sourceBindingSha256": "a4555fc55f40541c6f499f4ce5a0e9ddef6f2c9e0cb79d69762a20047d46c938",
+      "captureAggregateSha256": "ee97d7e560c11ffb3b3bc4d7f9f442ba6467050d6b7158b425ae655273d9d91f"
+    },
+    "runtimeSourceBinding": {
+      "path": "assets/gates/stage5-implementation-git-binding.json",
+      "bytes": 2229,
+      "sha256": "fc944ae473dff08f0a17d7ac8176ac079268a35bd05b4d872314891d1c6121bf"
+    },
+    "gates": {
+      "summary": {
+        "path": "assets/gates/stage5-final-gates-summary.json",
+        "bytes": 7614,
+        "sha256": "3990e07036721cf324145c10a1cf56c634940e50af1cee1f0baa7174616ef621"
+      },
+      "manifest": {
+        "path": "assets/gates/stage5-final-gate-manifest.md",
+        "bytes": 2623,
+        "sha256": "e2193d701e7e194d96b4b4ca01ccc55f7161f0cdcbbacdf43b82c2dedcdbec99"
+      },
+      "fileCount": 14,
+      "fullAggregateSha256": "7d9a3d5cd1008bf4ecf740f87d3ed623a6cfc1213b99df1b2d92b73f7530cb7b"
+    }
+  },
+  "dependencies": {
+    "node": "v20.19.5",
+    "platform": "linux-x64",
+    "playwright": "frontend/node_modules/playwright",
+    "browser": {
+      "engine": "chromium",
+      "version": "147.0.7727.15",
+      "viewport": {
+        "width": 1500,
+        "height": 1200
+      },
+      "deviceScaleFactor": 1
+    },
+    "fonts": {
+      "family": "Vazirmatn",
+      "root": "frontend/node_modules/vazirmatn/fonts/webfonts",
+      "checks": [
+        {
+          "weight": 400,
+          "loaded": true
+        },
+        {
+          "weight": 500,
+          "loaded": true
+        },
+        {
+          "weight": 600,
+          "loaded": true
+        },
+        {
+          "weight": 700,
+          "loaded": true
+        }
+      ],
+      "files": [
+        {
+          "file": "Vazirmatn-Regular.woff2",
+          "weight": 400,
+          "bytes": 50684,
+          "sha256": "e382101336c6eb32cfb31381c027d02d2e0354bad08f6a395d4088beb3db3d91"
+        },
+        {
+          "file": "Vazirmatn-Medium.woff2",
+          "weight": 500,
+          "bytes": 51128,
+          "sha256": "3333e31188a2b628db8780ca22fd5aad85bc083ccee9beb8d4d52db18cb98d48"
+        },
+        {
+          "file": "Vazirmatn-SemiBold.woff2",
+          "weight": 600,
+          "bytes": 51032,
+          "sha256": "6a39a3c25eb18503cad590527b95bb5d4062b889a7ebbd3f01b0488d239e0499"
+        },
+        {
+          "file": "Vazirmatn-Bold.woff2",
+          "weight": 700,
+          "bytes": 51020,
+          "sha256": "836fae7d42d83faa249bc00e0099592be98a1fa260d22d82f269b6091e585627"
+        }
+      ]
+    }
+  },
+  "integrity": {
+    "preDomSha256": "f4664a817820aedcce46e0862e2ae497af8fc751fdd3ac6baaac644d8004b829",
+    "postDomSha256": "f4664a817820aedcce46e0862e2ae497af8fc751fdd3ac6baaac644d8004b829",
+    "domEqual": true,
+    "preAuditSha256": "acf970d3a0e42527ad7e68c8eb082f4743ba9c1896e8f1b44a8c61a616160c3b",
+    "postAuditSha256": "acf970d3a0e42527ad7e68c8eb082f4743ba9c1896e8f1b44a8c61a616160c3b",
+    "auditEqual": true,
+    "postCaptureRemeasurement": true,
+    "consoleErrors": [],
+    "pageErrors": [],
+    "failedRequests": [],
+    "blockedNetworkRequests": []
+  },
+  "assertions": [
+    {
+      "id": "claim-boundary-local-not-stage-or-sites",
+      "passed": true,
+      "details": {
+        "stage": "5",
+        "stageCompleteAuthority": "false",
+        "sitesProven": "false",
+        "previewAccess": "private-owner-only"
+      }
+    },
+    {
+      "id": "implementation-commit-tree-parent-exact",
+      "passed": true,
+      "details": {
+        "commit": "08c5ae1ea95b3087893146547bed8a220eb83d2b",
+        "tree": "96e2f32c46668f37a4753ccaee21216a2b500097",
+        "parent": "646ca6dd83b50e3efd5689e94a241745c030ec9d",
+        "pathCount": 34,
+        "pathSetSha256": "c739ac017e954522ac8d96a5875e5c954e962c42c010e8e197388c98ecc4656f",
+        "pathContentSha256": "b164a6ca22cd24b3e9d720f27cf2838aa27a41d8ce06102dbdb6be9103b8b8e1"
+      }
+    },
+    {
+      "id": "git-thirtyfour-path-binding-exact",
+      "passed": true,
+      "details": {
+        "commit": "08c5ae1ea95b3087893146547bed8a220eb83d2b",
+        "tree": "96e2f32c46668f37a4753ccaee21216a2b500097",
+        "parent": "646ca6dd83b50e3efd5689e94a241745c030ec9d",
+        "pathCount": 34,
+        "pathSetSha256": "c739ac017e954522ac8d96a5875e5c954e962c42c010e8e197388c98ecc4656f",
+        "pathContentSha256": "b164a6ca22cd24b3e9d720f27cf2838aa27a41d8ce06102dbdb6be9103b8b8e1"
+      }
+    },
+    {
+      "id": "figma-final-freeze-identity-exact",
+      "passed": true,
+      "details": {
+        "status": "passed_runtime_delta_locally_hash_bound",
+        "fileKey": "z8jgJxST4O2APzWnlyP9gv",
+        "pageId": "297:18",
+        "rootId": "297:19",
+        "deltaId": "308:556",
+        "captureAggregate": "859b032348751c73c36a77ac9dcc6e1f847782078421ab2460842df8363daba6",
+        "auditPassed": true
+      }
+    },
+    {
+      "id": "figma-runtime-delta-and-exports-hash-bound",
+      "passed": true,
+      "details": {
+        "status": "passed_runtime_delta_locally_hash_bound",
+        "fileKey": "z8jgJxST4O2APzWnlyP9gv",
+        "pageId": "297:18",
+        "rootId": "297:19",
+        "deltaId": "308:556",
+        "captureAggregate": "859b032348751c73c36a77ac9dcc6e1f847782078421ab2460842df8363daba6",
+        "auditPassed": true,
+        "imagesLoaded": true
+      }
+    },
+    {
+      "id": "figma-copy-safe-anonymized-and-structural-audit-passed",
+      "passed": true,
+      "details": {
+        "status": "passed_runtime_delta_locally_hash_bound",
+        "fileKey": "z8jgJxST4O2APzWnlyP9gv",
+        "pageId": "297:18",
+        "rootId": "297:19",
+        "deltaId": "308:556",
+        "captureAggregate": "859b032348751c73c36a77ac9dcc6e1f847782078421ab2460842df8363daba6",
+        "auditPassed": true
+      }
+    },
+    {
+      "id": "browser-run-23-of-23-promotable",
+      "passed": true,
+      "details": {
+        "status": "passed",
+        "promotable": true,
+        "assertions": 23,
+        "screenshots": 54,
+        "sourceCount": 393,
+        "sourceIdentical": true,
+        "sourceAggregate": "a4555fc55f40541c6f499f4ce5a0e9ddef6f2c9e0cb79d69762a20047d46c938"
+      }
+    },
+    {
+      "id": "browser-source-393-pre-post-identical",
+      "passed": true,
+      "details": {
+        "status": "passed",
+        "promotable": true,
+        "assertions": 23,
+        "screenshots": 54,
+        "sourceCount": 393,
+        "sourceIdentical": true,
+        "sourceAggregate": "a4555fc55f40541c6f499f4ce5a0e9ddef6f2c9e0cb79d69762a20047d46c938"
+      }
+    },
+    {
+      "id": "vitest-154-files-310-suites-1663-passed",
+      "passed": true,
+      "details": {
+        "frontendFiles": 154,
+        "frontendSuites": 310,
+        "frontendTests": 1663,
+        "backendModules": 4,
+        "backendTests": 127,
+        "backendWarnings": 76,
+        "eslintAdded": 0,
+        "prettierAdded": 0,
+        "protectedDrift": 0,
+        "protectedDiffSha256": "dede6497fb8cdb06a6d076a0bad81228f965b7c7c067522697527fa364c524bc"
+      }
+    },
+    {
+      "id": "backend-4-modules-127-passed-warnings-disclosed",
+      "passed": true,
+      "details": {
+        "frontendFiles": 154,
+        "frontendSuites": 310,
+        "frontendTests": 1663,
+        "backendModules": 4,
+        "backendTests": 127,
+        "backendWarnings": 76,
+        "eslintAdded": 0,
+        "prettierAdded": 0,
+        "protectedDrift": 0,
+        "protectedDiffSha256": "dede6497fb8cdb06a6d076a0bad81228f965b7c7c067522697527fa364c524bc"
+      }
+    },
+    {
+      "id": "quality-added-zero-and-protected-drift-zero",
+      "passed": true,
+      "details": {
+        "frontendFiles": 154,
+        "frontendSuites": 310,
+        "frontendTests": 1663,
+        "backendModules": 4,
+        "backendTests": 127,
+        "backendWarnings": 76,
+        "eslintAdded": 0,
+        "prettierAdded": 0,
+        "protectedDrift": 0,
+        "protectedDiffSha256": "dede6497fb8cdb06a6d076a0bad81228f965b7c7c067522697527fa364c524bc"
+      }
+    },
+    {
+      "id": "static-evidence-six-sections-thirteen-images-two-attachments",
+      "passed": true,
+      "details": {
+        "sections": 6,
+        "images": 13,
+        "attachments": 2
+      }
+    }
+  ],
+  "assertionSummary": {
+    "total": 12,
+    "passed": 12,
+    "failed": 0,
+    "exactOrder": true
+  },
+  "measurements": {
+    "loadedImageCount": 13,
+    "evidenceAttachmentCount": 2,
+    "captureSectionCount": 6
+  },
+  "captures": [
+    {
+      "file": "local-stage5-overview.png",
+      "selector": "#stage5-overview",
+      "width": 1240,
+      "height": 588,
+      "bytes": 89509,
+      "sha256": "0ec6eebd8c5af4ecf266a86d724ed04ab23b88dbbda939b9a72f4fff56a6c804",
+      "visualStats": {
+        "uniqueColorCount": 2048,
+        "changedPixelCount": 729035
+      }
+    },
+    {
+      "file": "local-stage5-binding.png",
+      "selector": "#stage5-binding",
+      "width": 1240,
+      "height": 489,
+      "bytes": 38013,
+      "sha256": "507423efb6ed7f42378428cd46c080b9d28f278669ec650be6180ae5d659bb2f",
+      "visualStats": {
+        "uniqueColorCount": 2048,
+        "changedPixelCount": 606200
+      }
+    },
+    {
+      "file": "local-stage5-contract.png",
+      "selector": "#stage5-contract",
+      "width": 1240,
+      "height": 603,
+      "bytes": 78860,
+      "sha256": "fed4459bd5832dc26131332b7250e4db6d135a5f1ac408fcc6f0e737575f58d6",
+      "visualStats": {
+        "uniqueColorCount": 2048,
+        "changedPixelCount": 747560
+      }
+    },
+    {
+      "file": "local-stage5-runtime.png",
+      "selector": "#stage5-runtime",
+      "width": 1240,
+      "height": 1827,
+      "bytes": 322778,
+      "sha256": "25f464344698427ca38615a52d9a7cd90ffc1d62411d13fa09ea4ab6cba47673",
+      "visualStats": {
+        "uniqueColorCount": 2048,
+        "changedPixelCount": 2265334
+      }
+    },
+    {
+      "file": "local-stage5-figma.png",
+      "selector": "#stage5-figma",
+      "width": 1240,
+      "height": 2297,
+      "bytes": 273031,
+      "sha256": "7ea59f53c92bdd5a3b288946d189ece250dd2b0b4fe74b0de370db8ae80794df",
+      "visualStats": {
+        "uniqueColorCount": 2048,
+        "changedPixelCount": 2848120
+      }
+    },
+    {
+      "file": "local-stage5-boundary.png",
+      "selector": "#stage5-boundary",
+      "width": 1240,
+      "height": 358,
+      "bytes": 30627,
+      "sha256": "c715320af330dddadcce46313b5ecd7226b182871b0df91a0848a9d586f612e6",
+      "visualStats": {
+        "uniqueColorCount": 1663,
+        "changedPixelCount": 443536
+      }
+    }
+  ],
+  "outputSet": {
+    "policy": "exact",
+    "pngCount": 6,
+    "metricsCount": 1,
+    "files": [
+      "local-stage5-binding.png",
+      "local-stage5-boundary.png",
+      "local-stage5-contract.png",
+      "local-stage5-customer-accountant-workspaces-validation-metrics.json",
+      "local-stage5-figma.png",
+      "local-stage5-overview.png",
+      "local-stage5-runtime.png"
+    ]
+  },
+  "publication": {
+    "strategy": "atomic-directory-rename",
+    "partialPromotionAllowed": false,
+    "validationBeforePromotion": true,
+    "validationAfterPromotion": true,
+    "residueAllowed": false,
+    "binderValidationStatus": "pending_disposable_validation",
+    "sitesInputReady": false
+  }
+}

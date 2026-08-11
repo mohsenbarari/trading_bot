@@ -1,0 +1,165 @@
+{
+  "schemaVersion": 1,
+  "stage": 5,
+  "scope": "customer-accountant-workspaces",
+  "status": "passed_runtime_delta_locally_hash_bound",
+  "recordedDate": "2026-08-11",
+  "stage5FreezeCreated": true,
+  "figmaMutationPerformed": true,
+  "implementation": {
+    "branch": "condidate/webapp-ui-ux-redesign-v2",
+    "comparisonBaseCommit": "646ca6dd83b50e3efd5689e94a241745c030ec9d",
+    "comparisonBaseTree": "1d6adb6b33fb13ddea2966de99f8f3afe3eb92bb",
+    "commit": "08c5ae1ea95b3087893146547bed8a220eb83d2b",
+    "tree": "96e2f32c46668f37a4753ccaee21216a2b500097",
+    "parent": "646ca6dd83b50e3efd5689e94a241745c030ec9d",
+    "pathSetSha256": "c739ac017e954522ac8d96a5875e5c954e962c42c010e8e197388c98ecc4656f",
+    "pathContentSha256": "b164a6ca22cd24b3e9d720f27cf2838aa27a41d8ce06102dbdb6be9103b8b8e1"
+  },
+  "browserBinding": {
+    "runId": "uiux-stage5-browser-20260811T100859948Z",
+    "sourceCount": 393,
+    "sourceBindingSha256": "a4555fc55f40541c6f499f4ce5a0e9ddef6f2c9e0cb79d69762a20047d46c938"
+  },
+  "figma": {
+    "fileKey": "z8jgJxST4O2APzWnlyP9gv",
+    "sourcePageId": "55:2",
+    "sourceRootNodeId": "55:3",
+    "pageId": "297:18",
+    "pageName": "07 — Stage 5 Customer & Accountant Workspaces",
+    "rootNodeId": "297:19",
+    "rootName": "F5/Root Stage 5 Customer & Accountant Workspaces",
+    "rootWidth": 1584,
+    "rootHeight": 8863,
+    "topLevelSectionCount": 7,
+    "nodeCount": 1213,
+    "linkedInstanceCount": 74,
+    "unlinkedInstanceCount": 0,
+    "boundNodeCount": 926,
+    "placeholderCount": 0,
+    "imageFillCount": 0
+  },
+  "runtimeDelta": {
+    "nodeId": "308:556",
+    "name": "F5/06 — Runtime Delta & Recovery",
+    "width": 1488,
+    "height": 1000,
+    "copyCoverageStatus": "passed_exact",
+    "anonymized": true,
+    "piiHitCount": 0,
+    "internalTokenHitCount": 0,
+    "exactGitOrInternalMetadataPresent": false
+  },
+  "directAudit": {
+    "path": "assets/figma/stage5-figma-direct-audit.json",
+    "bytes": 2365,
+    "sha256": "8a4fa20b40c0f2064af3d39cd59663a89b657c91c1a76f42e5a156cdf5b410b0",
+    "status": "passed_runtime_delta",
+    "sectionCount": 7,
+    "linkedInstanceCount": 74,
+    "unlinkedInstanceCount": 0,
+    "errorCount": 0
+  },
+  "authoritativeCaptures": [
+    {
+      "nodeId": "297:19",
+      "label": "Stage 5 final root with runtime delta",
+      "nodeWidth": 1584,
+      "nodeHeight": 8863,
+      "path": "assets/figma/stage5-figma-root.png",
+      "exportWidth": 733,
+      "exportHeight": 4096,
+      "bytes": 335527,
+      "sha256": "0b3a1242cc22004ef48c0de98ec915b8bc5bde7286fe1cbab61b4036f77ac6c4"
+    },
+    {
+      "nodeId": "308:556",
+      "label": "Runtime Delta & Recovery",
+      "nodeWidth": 1488,
+      "nodeHeight": 1000,
+      "path": "assets/figma/stage5-figma-runtime-delta.png",
+      "exportWidth": 1488,
+      "exportHeight": 1000,
+      "bytes": 141587,
+      "sha256": "d95bcd90b61045451a793e0b6b594b873162514226646ad98215d9a44940f295"
+    }
+  ],
+  "authoritativeCaptureAggregate": {
+    "count": 2,
+    "bytes": 477114,
+    "algorithm": "sha256(JSON.stringify(captures projected in manifest order to nodeId,path,nodeWidth,nodeHeight,exportWidth,exportHeight,bytes,sha256))",
+    "sha256": "859b032348751c73c36a77ac9dcc6e1f847782078421ab2460842df8363daba6"
+  },
+  "supportingPreDeltaCaptures": [
+    {
+      "label": "Accountant scenarios reference",
+      "path": "assets/figma/stage5-figma-accountant.png",
+      "exportWidth": 1488,
+      "exportHeight": 1040,
+      "bytes": 79575,
+      "sha256": "90476aa18c2b960f395826bfcb14dac9c6b099958881d3395bfe68c0f5074f10"
+    },
+    {
+      "label": "Contract reference",
+      "path": "assets/figma/stage5-figma-contract.png",
+      "exportWidth": 1488,
+      "exportHeight": 337,
+      "bytes": 45888,
+      "sha256": "997ef6026053cbab0679629a7e3300c44435807c39be2b1be7300c1a120941e2"
+    },
+    {
+      "label": "Customer scenarios reference",
+      "path": "assets/figma/stage5-figma-customer.png",
+      "exportWidth": 1488,
+      "exportHeight": 1040,
+      "bytes": 121449,
+      "sha256": "3ab15a0df40dbc3d0831478bd0d8892062e91a1ee904995efa29536fbb8bbf61"
+    },
+    {
+      "label": "Responsive reference",
+      "path": "assets/figma/stage5-figma-responsive.png",
+      "exportWidth": 1488,
+      "exportHeight": 3012,
+      "bytes": 183188,
+      "sha256": "e53dcbb3c217f0e0c18be4384f238984ba756ec18a32ad1e9ee488c451b0c641"
+    },
+    {
+      "label": "Roles reference",
+      "path": "assets/figma/stage5-figma-roles.png",
+      "exportWidth": 1488,
+      "exportHeight": 1040,
+      "bytes": 77023,
+      "sha256": "ebbcef09a18d5cae0b5be3a752238bbee11ca5b397ccde8c8d29097122b4557d"
+    },
+    {
+      "label": "Sensitive states reference",
+      "path": "assets/figma/stage5-figma-sensitive.png",
+      "exportWidth": 1488,
+      "exportHeight": 1082,
+      "bytes": 126587,
+      "sha256": "69f429a7c17f4a6399fd1859b43ac8a7cba1d52e3dd343e05b86b9e46e9b156f"
+    }
+  ],
+  "supportingPreDeltaCaptureAggregate": {
+    "count": 6,
+    "bytes": 633710,
+    "algorithm": "sha256(JSON.stringify(records in manifest order projected to path,exportWidth,exportHeight,bytes,sha256))",
+    "sha256": "e436ff049476044ff8f25f3c608a2ae457d2666bb4e53d9a249440c43d8912b7",
+    "provenanceLimitation": "These six exports predate the authorized runtime-delta write. Exact target node IDs were not recorded, so they are supporting references only and are excluded from the authoritative capture aggregate."
+  },
+  "inputFileAggregate": {
+    "count": 9,
+    "bytes": 1113189,
+    "algorithm": "sha256(JSON.stringify(records sorted by path; key order path,bytes,sha256))",
+    "sha256": "567c1e09274f20a0bfdda86a7522caa0cf4c75b9284f6504d85bd7d747193678"
+  },
+  "provenance": {
+    "bindingLocation": "local_manifest",
+    "implementationHashesPresentInFigmaPayload": false,
+    "restriction": "Connector policy keeps exact Git/security provenance out of the Figma document; the local manifest is authoritative for exact source identity.",
+    "localBindingIsAuthoritativeForExactGitIdentity": true
+  },
+  "sitesStatus": "pending",
+  "stage5CompleteAuthority": false,
+  "claimBoundary": "The final seven-section Figma snapshot, anonymized runtime-delta section, direct audit and two fresh authoritative exports are locally hash-bound to the implementation. Six earlier exports remain supporting references with explicit node-provenance limitation. This manifest does not prove Sites publication, mark Stage 5 complete or authorize Stage 6."
+}

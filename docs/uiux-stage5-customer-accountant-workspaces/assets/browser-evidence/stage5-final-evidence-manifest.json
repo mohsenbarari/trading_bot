@@ -1,0 +1,131 @@
+{
+  "schemaVersion": 1,
+  "stage": 5,
+  "scope": "customer-accountant-workspaces",
+  "status": "passed",
+  "promotable": true,
+  "diagnosticMode": false,
+  "runId": "uiux-stage5-browser-20260811T100859948Z",
+  "startedAt": "2026-08-11T10:09:01.364Z",
+  "completedAt": "2026-08-11T10:10:47.255Z",
+  "runDirectory": "runs/uiux-stage5-browser-20260811T100859948Z",
+  "selectedSuites": [
+    "responsive",
+    "customer",
+    "accountant",
+    "history",
+    "create-busy",
+    "accessibility"
+  ],
+  "acceptance": {
+    "assertions": {
+      "total": 23,
+      "passed": 23,
+      "failed": 0
+    },
+    "assertionsBySuite": {
+      "responsive": 3,
+      "customer": 6,
+      "accountant": 6,
+      "history": 2,
+      "create-busy": 2,
+      "accessibility": 3,
+      "crossSuiteDiagnostics": 1
+    },
+    "screenshots": {
+      "count": 54,
+      "totalBytes": 3679487,
+      "inventorySource": "runs/uiux-stage5-browser-20260811T100859948Z/stage5-browser-acceptance-metrics.json",
+      "inventorySha256": "ee97d7e560c11ffb3b3bc4d7f9f442ba6467050d6b7158b425ae655273d9d91f",
+      "inventoryDigestFormat": "SHA-256 of UTF-8 lines sorted by filename: <file>\\t<bytes>\\t<sha256>\\n",
+      "allInventoryHashesVerified": true
+    }
+  },
+  "implementation": {
+    "branch": "condidate/webapp-ui-ux-redesign-v2",
+    "commitPre": "08c5ae1ea95b3087893146547bed8a220eb83d2b",
+    "commitPost": "08c5ae1ea95b3087893146547bed8a220eb83d2b",
+    "parentCommit": "646ca6dd83b50e3efd5689e94a241745c030ec9d",
+    "treePre": "96e2f32c46668f37a4753ccaee21216a2b500097",
+    "treePost": "96e2f32c46668f37a4753ccaee21216a2b500097",
+    "trackedCleanPre": true,
+    "trackedCleanPost": true,
+    "gitIdentical": true
+  },
+  "sourceBinding": {
+    "expectedSha256": "a4555fc55f40541c6f499f4ce5a0e9ddef6f2c9e0cb79d69762a20047d46c938",
+    "preSha256": "a4555fc55f40541c6f499f4ce5a0e9ddef6f2c9e0cb79d69762a20047d46c938",
+    "postSha256": "a4555fc55f40541c6f499f4ce5a0e9ddef6f2c9e0cb79d69762a20047d46c938",
+    "fileCount": 393,
+    "identical": true
+  },
+  "harnessBinding": {
+    "path": "stage5-browser-acceptance-harness.mjs",
+    "preSha256": "a183e21df2e34486d555a4d8a662bda1055d6744a34de68543a49574483057d3",
+    "postSha256": "a183e21df2e34486d555a4d8a662bda1055d6744a34de68543a49574483057d3",
+    "bytes": 125431,
+    "identical": true
+  },
+  "environmentBinding": {
+    "identical": true,
+    "forbiddenViteEnvironmentFilesAbsentPreAndPost": [
+      "frontend/.env",
+      "frontend/.env.local",
+      "frontend/.env.development",
+      "frontend/.env.development.local"
+    ]
+  },
+  "diagnostics": {
+    "expectedHttpFailures": [
+      {
+        "suite": "customer-sessions",
+        "method": "GET",
+        "pathname": "/api/customers/owner-relations/5102/sessions",
+        "status": 503,
+        "purpose": "retained-state recovery probe"
+      },
+      {
+        "suite": "accountant-sessions",
+        "method": "GET",
+        "pathname": "/api/accountants/owner-relations/5202/sessions",
+        "status": 503,
+        "purpose": "retained-state recovery probe"
+      }
+    ],
+    "expectedHttpFailureCount": 2,
+    "observedHttpFailureCount": 2,
+    "expectedConsoleErrorCount": 2,
+    "observedConsoleErrorCount": 2,
+    "httpViolationCount": 0,
+    "unexpectedConsoleErrorCount": 0,
+    "pageErrorCount": 0,
+    "unexpectedRequestFailureCount": 0,
+    "externalRequestsBlocked": 61,
+    "externalRequestsAllowed": 0,
+    "unexpectedApiRequestCount": 0,
+    "observedWebSocketCount": 121,
+    "unexpectedWebSocketCount": 0,
+    "observedEventSourceCount": 0,
+    "unexpectedEventSourceCount": 0
+  },
+  "artifacts": {
+    "metrics": {
+      "path": "runs/uiux-stage5-browser-20260811T100859948Z/stage5-browser-acceptance-metrics.json",
+      "bytes": 1821899,
+      "sha256": "10d94ed59c9925ebc740d7af6d2d883b5f55a9b15152fcee2dac1a6e441f11ff"
+    },
+    "finalSourceBinding": {
+      "path": "runs/uiux-stage5-browser-20260811T100859948Z/stage5-final-source-binding.json",
+      "bytes": 790,
+      "sha256": "95a1a18b4c4cdaf52a576204f92be451b60cf0b2dc4b5643d1f1f42f0ec9802d"
+    },
+    "readme": {
+      "path": "README.md",
+      "bytes": 3867,
+      "sha256": "6b6cee9d29dc40aee42fe94f703ef955f7edd65ebe8ef9a2c63043884d818c78"
+    }
+  },
+  "bindingAccepted": true,
+  "failure": null,
+  "notes": "Only this promotable run is frozen as Stage 5 closure evidence. Earlier run directories remain non-promotable diagnostics or failed investigations."
+}

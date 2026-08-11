@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "stage": 5,
+  "status": "passed_with_advisories",
+  "command": "cd frontend && npm run build",
+  "exitCode": 0,
+  "viteModules": 2160,
+  "durationSeconds": 54.28,
+  "advisories": [
+    "Browserslist caniuse-lite age advisory",
+    "Rollup chunk size advisory"
+  ],
+  "implementationCommit": "08c5ae1ea95b3087893146547bed8a220eb83d2b",
+  "implementationTree": "96e2f32c46668f37a4753ccaee21216a2b500097",
+  "evidenceOrigin": "final_production_build_summary",
+  "rawBuildLogAvailable": false
+}

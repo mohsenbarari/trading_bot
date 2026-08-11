@@ -1,0 +1,193 @@
+{
+  "schemaVersion": 1,
+  "stage": 5,
+  "scope": "customer-accountant-workspaces",
+  "status": "passed_with_inherited_diagnostics_disclosed",
+  "recordedDate": "2026-08-11",
+  "implementation": {
+    "branch": "condidate/webapp-ui-ux-redesign-v2",
+    "comparisonBaseCommit": "646ca6dd83b50e3efd5689e94a241745c030ec9d",
+    "comparisonBaseTree": "1d6adb6b33fb13ddea2966de99f8f3afe3eb92bb",
+    "commit": "08c5ae1ea95b3087893146547bed8a220eb83d2b",
+    "tree": "96e2f32c46668f37a4753ccaee21216a2b500097",
+    "parent": "646ca6dd83b50e3efd5689e94a241745c030ec9d",
+    "changedPaths": 34,
+    "modifiedPaths": 27,
+    "addedPaths": 7,
+    "deletedPaths": 0,
+    "pathSetSha256": "c739ac017e954522ac8d96a5875e5c954e962c42c010e8e197388c98ecc4656f",
+    "pathContentSha256": "b164a6ca22cd24b3e9d720f27cf2838aa27a41d8ce06102dbdb6be9103b8b8e1",
+    "bindingArtifactPath": "assets/gates/stage5-implementation-git-binding.json",
+    "bindingArtifactSha256": "fc944ae473dff08f0a17d7ac8176ac079268a35bd05b4d872314891d1c6121bf"
+  },
+  "frontend": {
+    "status": "passed",
+    "files": 154,
+    "suites": 310,
+    "tests": 1663,
+    "passed": 1663,
+    "failed": 0,
+    "durationSeconds": 414.84,
+    "artifactPath": "assets/gates/stage5-final-vitest.json",
+    "artifactSha256": "fa71fb664a682f0153f666d34ad3960facbb92af0397171a9ae0722d92ef1bac",
+    "rawArtifactPath": "assets/gates/stage5-final-vitest-raw.json",
+    "rawArtifactBytes": 766650,
+    "rawArtifactSha256": "15e16ebc06384680e64e25ec10ac69c6b04d9e59a065c384a80b7cd13fc75a0d",
+    "rawArtifactSanitizedMachinePathCount": 0
+  },
+  "backend": {
+    "status": "passed_with_inherited_warnings",
+    "modules": 4,
+    "tests": 127,
+    "passed": 127,
+    "failed": 0,
+    "warnings": 76,
+    "artifactPath": "assets/gates/stage5-final-backend.json",
+    "artifactSha256": "51d3da7373b9b8a4d78c7954b0e01df3bb44ab489125562cf82d4617f6d6fb2b",
+    "rawPytestLogAvailable": false
+  },
+  "typecheck": {
+    "status": "passed",
+    "exitCode": 0,
+    "artifactPath": "assets/gates/stage5-final-typecheck.json",
+    "artifactSha256": "dc212cdcf2b6316480e1cc0efbfc9232deb283a9ce5e0543319c02248d5eb698"
+  },
+  "build": {
+    "status": "passed_with_advisories",
+    "exitCode": 0,
+    "viteModules": 2160,
+    "durationSeconds": 54.28,
+    "artifactPath": "assets/gates/stage5-final-build.json",
+    "artifactSha256": "955eb86825c63bf01d2e2767552082322b925a2f688ea30ca38932de8eb1ded4"
+  },
+  "guard": {
+    "status": "passed",
+    "v2CssFiles": 7,
+    "productRoutes": 30,
+    "protectedUnauthorizedDrift": 0,
+    "artifactPath": "assets/gates/stage5-final-guard-ui.log",
+    "artifactSha256": "49b060d3e9a1c7e3f03afb690bc56be6f9bd92c811c8c19f51b30b3f80593215"
+  },
+  "diffCheck": {
+    "status": "passed",
+    "exitCode": 0,
+    "artifactPath": "assets/gates/stage5-final-diff-check.json",
+    "artifactSha256": "68ad92fb2514ad2ba51edb0c10021312eaef28e836e4e767657d4286fe577e1a"
+  },
+  "playwrightCollection": {
+    "status": "passed_collection",
+    "project": "chromium",
+    "files": 2,
+    "tests": 5,
+    "artifactPath": "assets/gates/stage5-final-playwright-list.json",
+    "artifactSha256": "7ce04b27a1186efff2f05ac852cc385ea845061849a6ae21d6114553a30b7a3b"
+  },
+  "quality": {
+    "status": "passed_delta_clean_only",
+    "changedFrontendPaths": 26,
+    "eslint": {
+      "currentFiles": 22,
+      "baseFiles": 19,
+      "current": {
+        "total": 41,
+        "errors": 41,
+        "warnings": 0
+      },
+      "base": {
+        "total": 55,
+        "errors": 55,
+        "warnings": 0
+      },
+      "inherited": 41,
+      "added": 0,
+      "removed": 14,
+      "rawCurrentExit": 1,
+      "rawBaseExit": 1
+    },
+    "prettier": {
+      "currentFiles": 26,
+      "baseFiles": 19,
+      "currentDirty": 3,
+      "baseDirty": 15,
+      "inherited": 3,
+      "added": 0,
+      "removed": 12,
+      "rawCurrentExit": 1,
+      "rawBaseExit": 1
+    },
+    "deltaArtifactPath": "assets/gates/stage5-quality-delta.json",
+    "deltaArtifactSha256": "f00395ef0071c0e725d0b9909b5fddeb7e7cfe9e12eaea05b9dc562692195365",
+    "eslintCurrentPath": "assets/gates/stage5-eslint-current.json",
+    "eslintCurrentSha256": "f563f11d84a02e9acfaa194cd3f0f721ca2ab6cadcb60e40649ce28deb4ed9b8",
+    "eslintBasePath": "assets/gates/stage5-eslint-base.json",
+    "eslintBaseSha256": "1c611338fe1dc796c54f969076105eaf0495370bbd10dc0260dad41628704217"
+  },
+  "protected": {
+    "status": "passed_zero_unauthorized_drift",
+    "homeMarketSha256": "f25c01dac38db208517047ffc0f2458e2c89868e988a6d7f68749221db106860",
+    "marketSha256": "162e9e618684a24f3db3298eb8ff2c62498b18753cd4e0b6d6b97650d0202058",
+    "messengerSha256": "f66debf9809180d97b2bac98f5195ba24200d3b61b0d8e0e5cd423a8a7b97248",
+    "adminMessagesSha256": "5572589b83a8a07776d5b983777a14a91e2104f9577fa76960df5a54562a431a",
+    "tradingSettingsSha256": "509dd32235e1cb98aa164940cf7722604f16b6518f7387699554bf3a828ecfaa",
+    "routes": {
+      "fullOff": 4,
+      "mixed": 3,
+      "manifestRuntime": "7/7"
+    }
+  },
+  "browser": {
+    "status": "passed_promotable",
+    "runId": "uiux-stage5-browser-20260811T100859948Z",
+    "assertions": "23/23",
+    "screenshots": 54,
+    "screenshotBytes": 3679487,
+    "sourceFiles": 393,
+    "sourceBindingSha256": "a4555fc55f40541c6f499f4ce5a0e9ddef6f2c9e0cb79d69762a20047d46c938",
+    "metricsSha256": "10d94ed59c9925ebc740d7af6d2d883b5f55a9b15152fcee2dac1a6e441f11ff",
+    "finalBindingSha256": "95a1a18b4c4cdaf52a576204f92be451b60cf0b2dc4b5643d1f1f42f0ec9802d",
+    "topManifestSha256": "cd507fce316320deb30fb95c404ce7dc690fad2fe8ef2ac6c01183863c229c86",
+    "unexpectedViolations": 0
+  },
+  "figma": {
+    "status": "passed_runtime_delta_locally_hash_bound",
+    "fileKey": "z8jgJxST4O2APzWnlyP9gv",
+    "pageId": "297:18",
+    "rootNodeId": "297:19",
+    "nodeCount": 1213,
+    "linkedInstances": 74,
+    "unlinkedInstances": 0,
+    "authoritativeCaptures": 2,
+    "authoritativeCaptureBytes": 477114,
+    "authoritativeCaptureAggregateSha256": "859b032348751c73c36a77ac9dcc6e1f847782078421ab2460842df8363daba6",
+    "supportingPreDeltaCaptures": 6,
+    "manifestPath": "FIGMA_SNAPSHOT_MANIFEST.json",
+    "manifestSha256": "3c9e9a0755da183a43f2ddfd483a6b9e662108fff23a95a98dabb5e022a512d7",
+    "directAuditPath": "assets/figma/stage5-figma-direct-audit.json",
+    "directAuditSha256": "8a4fa20b40c0f2064af3d39cd59663a89b657c91c1a76f42e5a156cdf5b410b0",
+    "exactGitHashesWrittenIntoFigmaPayload": false,
+    "runtimeDeltaSectionPresent": true,
+    "runtimeDeltaNodeId": "308:556",
+    "runtimeDeltaCopyCoverage": "passed_exact",
+    "runtimeDeltaPiiHitCount": 0,
+    "runtimeDeltaInternalTokenHitCount": 0,
+    "writeStatus": "completed_after_explicit_user_approval",
+    "mutationOccurred": true
+  },
+  "sites": {
+    "status": "pending"
+  },
+  "evidence": {
+    "status": "local_evidence_inputs_frozen_sites_unproven"
+  },
+  "evidenceQuality": {
+    "vitest": "sanitized_raw_json_reporter_available",
+    "build": "execution_summary_only_raw_stream_not_saved",
+    "backend": "execution_summary_only_raw_stream_not_saved",
+    "guard": "captured_stdout_log_available",
+    "typecheck": "local_rerun_empty_stdout_exit_zero",
+    "diffCheck": "local_rerun_empty_stdout_exit_zero",
+    "playwrightCollection": "local_rerun_structured_test_list"
+  },
+  "stage5CompleteAuthority": false,
+  "claimBoundary": "Local technical gates, protected guards, browser acceptance and the final anonymized Figma runtime-delta snapshot are passed and hash-bound. Local evidence inputs are frozen with sitesProven=false. Sites publication/provenance remains pending, so Stage 5 is not complete."
+}

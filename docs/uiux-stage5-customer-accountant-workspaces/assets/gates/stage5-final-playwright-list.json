@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "stage": 5,
+  "status": "passed_collection",
+  "command": "cd frontend && npx playwright test e2e/customer-owner-flow.spec.ts e2e/accountant-owner-flow.spec.ts --project=chromium --list",
+  "project": "chromium",
+  "fileCount": 2,
+  "testCount": 5,
+  "tests": [
+    "accountant owner lifecycle / owner can create pending accountant, observe activation, view it, and delete its active account",
+    "customer owner lifecycle / owner can create update and delete an active customer account, and super-admin can follow the customer handoff",
+    "customer owner lifecycle / super-admin sees target trade history from the viewed public-profile perspective",
+    "customer owner lifecycle / owner mutual history with third-party shows customer badge and management name",
+    "customer owner lifecycle / third-party mutual history with owner hides customer context"
+  ],
+  "implementationCommit": "08c5ae1ea95b3087893146547bed8a220eb83d2b",
+  "implementationTree": "96e2f32c46668f37a4753ccaee21216a2b500097",
+  "evidenceOrigin": "local_closure_rerun"
+}

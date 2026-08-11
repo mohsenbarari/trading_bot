@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "stage": 5,
+  "status": "passed",
+  "command": "cd frontend && npx vitest run --maxWorkers=1 --minWorkers=1 --reporter=json --outputFile=../docs/uiux-stage5-customer-accountant-workspaces/assets/gates/stage5-final-vitest-raw.json",
+  "reporter": "json",
+  "fileCount": 154,
+  "testCount": 1663,
+  "passed": 1663,
+  "failed": 0,
+  "suiteCount": 310,
+  "durationSeconds": 414.84,
+  "implementationCommit": "08c5ae1ea95b3087893146547bed8a220eb83d2b",
+  "implementationTree": "96e2f32c46668f37a4753ccaee21216a2b500097",
+  "evidenceOrigin": "closure_serial_json_reporter_rerun",
+  "rawReporterArtifactAvailable": true,
+  "rawReporterArtifactPath": "assets/gates/stage5-final-vitest-raw.json",
+  "rawReporterArtifactBytes": 766650,
+  "rawReporterArtifactSha256": "15e16ebc06384680e64e25ec10ac69c6b04d9e59a065c384a80b7cd13fc75a0d",
+  "rawReporterSanitization": "Only the fixed worktree prefix was removed from testResults[].name; counts, statuses, timings and assertions are unchanged.",
+  "claimBoundary": "This deterministic record is backed by the sanitized raw JSON reporter artifact from the closure rerun."
+}

@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "stage": 5,
+  "scope": "customer-accountant-workspaces",
+  "status": "bound_from_git",
+  "branch": "condidate/webapp-ui-ux-redesign-v2",
+  "recordedDate": "2026-08-11",
+  "comparisonBaseCommit": "646ca6dd83b50e3efd5689e94a241745c030ec9d",
+  "comparisonBaseTree": "1d6adb6b33fb13ddea2966de99f8f3afe3eb92bb",
+  "implementationCommit": "08c5ae1ea95b3087893146547bed8a220eb83d2b",
+  "implementationTree": "96e2f32c46668f37a4753ccaee21216a2b500097",
+  "implementationParent": "646ca6dd83b50e3efd5689e94a241745c030ec9d",
+  "exactPathCount": 34,
+  "trackedModifiedCount": 27,
+  "addedCount": 7,
+  "deletedCount": 0,
+  "contentBytes": 1010068,
+  "pathSetAlgorithm": "sha256(sorted changed paths joined by LF plus terminal LF)",
+  "pathSetSha256": "c739ac017e954522ac8d96a5875e5c954e962c42c010e8e197388c98ecc4656f",
+  "pathContentAlgorithm": "sha256(JSON.stringify(records sorted by path; key order path,bytes,sha256))",
+  "pathContentSha256": "b164a6ca22cd24b3e9d720f27cf2838aa27a41d8ce06102dbdb6be9103b8b8e1",
+  "browser": {
+    "runId": "uiux-stage5-browser-20260811T100859948Z",
+    "implementationCommit": "08c5ae1ea95b3087893146547bed8a220eb83d2b",
+    "implementationTree": "96e2f32c46668f37a4753ccaee21216a2b500097",
+    "sourceFileCount": 393,
+    "sourceBindingSha256": "a4555fc55f40541c6f499f4ce5a0e9ddef6f2c9e0cb79d69762a20047d46c938",
+    "finalBindingArtifactSha256": "95a1a18b4c4cdaf52a576204f92be451b60cf0b2dc4b5643d1f1f42f0ec9802d",
+    "status": "passed_promotable"
+  },
+  "figma": {
+    "fileKey": "z8jgJxST4O2APzWnlyP9gv",
+    "pageId": "297:18",
+    "rootNodeId": "297:19",
+    "bindingLocation": "FIGMA_SNAPSHOT_MANIFEST.json",
+    "exactGitHashesWrittenIntoFigmaPayload": false,
+    "status": "passed_runtime_delta_locally_hash_bound"
+  },
+  "sourceFrozenBeforeBrowserRun": true,
+  "implementationCommitStatus": "verified_exact_head_parent_tree_and_34_path_delta",
+  "sitesStatus": "pending",
+  "claimBoundary": "This artifact binds the Stage 5 runtime, browser run and final locally proven Figma runtime-delta snapshot to the exact implementation commit. Exact Git/security provenance was not written into Figma. It does not prove Sites publication or authorize a later runtime stage."
+}

@@ -1,0 +1,129 @@
+{
+  "schemaVersion": 1,
+  "stage": 5,
+  "scope": "customer-accountant-workspaces",
+  "status": "passed_zero_unauthorized_drift",
+  "branch": "condidate/webapp-ui-ux-redesign-v2",
+  "recordedDate": "2026-08-11",
+  "comparisonBaseCommit": "646ca6dd83b50e3efd5689e94a241745c030ec9d",
+  "comparisonBaseTree": "1d6adb6b33fb13ddea2966de99f8f3afe3eb92bb",
+  "implementationCommit": "08c5ae1ea95b3087893146547bed8a220eb83d2b",
+  "implementationTree": "96e2f32c46668f37a4753ccaee21216a2b500097",
+  "implementationParent": "646ca6dd83b50e3efd5689e94a241745c030ec9d",
+  "implementationDelta": {
+    "exactPathCount": 34,
+    "protectedRuntimePathCountChanged": 0,
+    "pathSetSha256": "c739ac017e954522ac8d96a5875e5c954e962c42c010e8e197388c98ecc4656f",
+    "pathContentSha256": "b164a6ca22cd24b3e9d720f27cf2838aa27a41d8ce06102dbdb6be9103b8b8e1"
+  },
+  "guard": {
+    "command": "cd frontend && npm run guard:ui",
+    "status": "passed",
+    "v2CssFileCount": 7,
+    "productRouteCount": 30,
+    "routeProtection": {
+      "fullOffCount": 4,
+      "mixedCount": 3,
+      "manifestRuntime": "7/7"
+    },
+    "artifactPath": "assets/gates/stage5-final-guard-ui.log"
+  },
+  "protectedSurfaces": {
+    "homeMarketInterior": {
+      "contract": "stage3-dashboard-market-region-v1",
+      "path": "frontend/src/views/DashboardView.vue",
+      "sectionCount": 6,
+      "compositeBytes": 4553,
+      "compositeSha256": "f25c01dac38db208517047ffc0f2458e2c89868e988a6d7f68749221db106860",
+      "finalDiffStatus": "passed_equal_to_frozen_baseline"
+    },
+    "marketRuntime": {
+      "contract": "stage4-market-owned-runtime-v1",
+      "fileCount": 19,
+      "contentBytes": 137246,
+      "pathSetSha256": "37aa0b51e20f4ae86f7daf6c3c231d93b3d1f288ade1471490a1f843a57c9589",
+      "aggregateSha256": "162e9e618684a24f3db3298eb8ff2c62498b18753cd4e0b6d6b97650d0202058",
+      "finalDiffStatus": "passed_equal_to_frozen_baseline"
+    },
+    "messengerRuntime": {
+      "contract": "stage4-messenger-owned-runtime-v1",
+      "fileCount": 85,
+      "contentBytes": 1312405,
+      "pathSetSha256": "f6af1f961e45d785ba9c752ee670643571086c6a946843807fe6f581d11aea58",
+      "aggregateSha256": "f66debf9809180d97b2bac98f5195ba24200d3b61b0d8e0e5cd423a8a7b97248",
+      "finalDiffStatus": "passed_equal_to_frozen_baseline"
+    },
+    "adminMessages": {
+      "path": "frontend/src/components/AdminMessagesView.vue",
+      "surface": "admin-messages-market-and-messenger-delivery",
+      "sha256": "5572589b83a8a07776d5b983777a14a91e2104f9577fa76960df5a54562a431a",
+      "finalDiffStatus": "passed_equal_to_frozen_baseline"
+    },
+    "tradingSettings": {
+      "path": "frontend/src/components/TradingSettings.vue",
+      "surface": "trading-settings-market-controls",
+      "sha256": "509dd32235e1cb98aa164940cf7722604f16b6518f7387699554bf3a828ecfaa",
+      "finalDiffStatus": "passed_equal_to_frozen_baseline"
+    }
+  },
+  "sharedChangeDisposition": [
+    {
+      "path": "frontend/src/App.vue",
+      "sha256": "a6143202cb2fdb397947dd01a31430c2b619699455cc487b648c0ed8e488d636",
+      "change": "Path-keyed section route root for exactly four Stage 5 routes",
+      "protectedDefault": "All other SECTION, OFF and protected routes retain legacy fullPath key",
+      "regressionPath": "frontend/src/App.test.ts",
+      "regressionSha256": "27893435a57ee80030ad2d0dd7c0ef48b7967b9259b67fb6f12fa9437932e50f",
+      "status": "passed_scoped_no_protected_behavior_change"
+    },
+    {
+      "path": "frontend/src/components/ui/AppDesignSystemScope.vue",
+      "sha256": "2bf0f1b0416588b60fb978aa46b62aeeb2d1761cc5f8e73f050c276c48403d36",
+      "change": "Stage 5 CSS imports",
+      "protectedDefault": "Stage 5 selectors are workspace-scoped and protected route V2 boundaries remain unchanged",
+      "status": "passed_guard_and_browser"
+    },
+    {
+      "path": "frontend/src/components/ui/AppBottomSheet.vue",
+      "sha256": "3c8bb2e17aaabb4045533d53e314879af9a677df9f619a22899adab3481495a7",
+      "change": "Optional teleport, class and dismiss policy props",
+      "protectedDefault": "Defaults preserve body teleport, close control, backdrop close and Escape close",
+      "status": "passed_default_compatible"
+    },
+    {
+      "path": "frontend/src/components/ui/AppResponsiveDialog.vue",
+      "sha256": "92000e33b0b008c721b99d48f55f9fb292740c3a1519dd411d4a48fc1f3749dc",
+      "change": "Optional teleport target with deferred teleport",
+      "protectedDefault": "Default remains body and existing dismiss policy is unchanged",
+      "status": "passed_default_compatible"
+    }
+  ],
+  "closureExpectations": {
+    "unauthorizedProtectedSourceDriftCount": 0,
+    "unauthorizedProtectedBehaviorDriftCount": 0,
+    "unauthorizedProtectedVisualDriftCount": 0,
+    "protectedPathSetDriftCount": 0,
+    "snapshotUpdatesWithoutDisposition": 0,
+    "finalSourceDiffStatus": "passed_zero_unauthorized_drift",
+    "finalBehaviorDiffStatus": "passed_zero_unauthorized_drift",
+    "finalVisualDiffStatus": "passed_zero_unauthorized_drift"
+  },
+  "browserBinding": {
+    "runId": "uiux-stage5-browser-20260811T100859948Z",
+    "status": "passed_promotable",
+    "assertions": "23/23",
+    "sourceFileCount": 393,
+    "sourceBindingSha256": "a4555fc55f40541c6f499f4ce5a0e9ddef6f2c9e0cb79d69762a20047d46c938",
+    "metricsSha256": "10d94ed59c9925ebc740d7af6d2d883b5f55a9b15152fcee2dac1a6e441f11ff",
+    "finalBindingSha256": "95a1a18b4c4cdaf52a576204f92be451b60cf0b2dc4b5643d1f1f42f0ec9802d",
+    "unexpectedViolationCount": 0
+  },
+  "sitesStatus": "passed_private_owner_only_source_bound",
+  "sitesProvenancePath": "SITES_PROVENANCE.json",
+  "sitesProvenanceSha256": "c51c25ae739ddac84b061764e0b6f3c2bf73404c6eca69f4a649a82e912a230f",
+  "stage5CompleteAuthority": true,
+  "stage6RuntimeImplementationAuthorized": false,
+  "stage6RuntimeWorkStarted": false,
+  "nextAuthorizedRuntimeStage": null,
+  "claimBoundary": "This manifest proves zero unauthorized drift for the frozen Stage 3/4 protected surfaces at the Stage 5 implementation commit. Separate SITES_PROVENANCE.json proves the private owner-only evidence preview and closes Stage 5 without mutating this protected-boundary proof or the historical local evidence freeze. No product, staging or production deployment or runtime activation occurred, and Stage 6 is not authorized."
+}

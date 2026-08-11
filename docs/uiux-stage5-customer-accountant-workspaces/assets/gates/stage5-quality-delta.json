@@ -1,0 +1,305 @@
+{
+  "schemaVersion": 1,
+  "stage": 5,
+  "scope": "customer-accountant-workspaces",
+  "status": "passed_delta_clean_only",
+  "comparisonBaseCommit": "646ca6dd83b50e3efd5689e94a241745c030ec9d",
+  "implementationCommit": "08c5ae1ea95b3087893146547bed8a220eb83d2b",
+  "implementationTree": "96e2f32c46668f37a4753ccaee21216a2b500097",
+  "changedFrontendPaths": [
+    {
+      "status": "M",
+      "path": "frontend/e2e/accountant-owner-flow.spec.ts"
+    },
+    {
+      "status": "M",
+      "path": "frontend/e2e/customer-owner-flow.spec.ts"
+    },
+    {
+      "status": "M",
+      "path": "frontend/src/App.test.ts"
+    },
+    {
+      "status": "M",
+      "path": "frontend/src/App.vue"
+    },
+    {
+      "status": "M",
+      "path": "frontend/src/components/OwnerAccountantManagerModal.test.ts"
+    },
+    {
+      "status": "M",
+      "path": "frontend/src/components/OwnerAccountantManagerModal.vue"
+    },
+    {
+      "status": "M",
+      "path": "frontend/src/components/OwnerCustomerManagerModal.test.ts"
+    },
+    {
+      "status": "M",
+      "path": "frontend/src/components/OwnerCustomerManagerModal.vue"
+    },
+    {
+      "status": "M",
+      "path": "frontend/src/components/ui/AppBottomSheet.vue"
+    },
+    {
+      "status": "M",
+      "path": "frontend/src/components/ui/AppDesignSystemScope.vue"
+    },
+    {
+      "status": "M",
+      "path": "frontend/src/components/ui/AppResponsiveDialog.vue"
+    },
+    {
+      "status": "A",
+      "path": "frontend/src/components/ui/AppWorkspaceOverlayTeleport.test.ts"
+    },
+    {
+      "status": "M",
+      "path": "frontend/src/components/workspace/index.ts"
+    },
+    {
+      "status": "A",
+      "path": "frontend/src/components/workspace/WorkspaceAccountDeletionDialog.test.ts"
+    },
+    {
+      "status": "A",
+      "path": "frontend/src/components/workspace/WorkspaceAccountDeletionDialog.vue"
+    },
+    {
+      "status": "M",
+      "path": "frontend/src/composables/useOwnerAccountants.ts"
+    },
+    {
+      "status": "M",
+      "path": "frontend/src/composables/useOwnerCustomers.ts"
+    },
+    {
+      "status": "M",
+      "path": "frontend/src/composables/useOwnerRelations.test.ts"
+    },
+    {
+      "status": "A",
+      "path": "frontend/src/styles/design-system-v2.stage5-account-deletion.css"
+    },
+    {
+      "status": "A",
+      "path": "frontend/src/styles/design-system-v2.stage5-accountant.css"
+    },
+    {
+      "status": "A",
+      "path": "frontend/src/styles/design-system-v2.stage5-customer.css"
+    },
+    {
+      "status": "A",
+      "path": "frontend/src/styles/design-system-v2.stage5-overlays.css"
+    },
+    {
+      "status": "M",
+      "path": "frontend/src/views/AccountantWorkspaceView.test.ts"
+    },
+    {
+      "status": "M",
+      "path": "frontend/src/views/AccountantWorkspaceView.vue"
+    },
+    {
+      "status": "M",
+      "path": "frontend/src/views/CustomerWorkspaceView.test.ts"
+    },
+    {
+      "status": "M",
+      "path": "frontend/src/views/CustomerWorkspaceView.vue"
+    }
+  ],
+  "eslint": {
+    "currentFileCount": 22,
+    "baseFileCount": 19,
+    "current": {
+      "total": 41,
+      "errors": 41,
+      "warnings": 0
+    },
+    "base": {
+      "total": 55,
+      "errors": 55,
+      "warnings": 0
+    },
+    "inheritedCount": 41,
+    "addedCount": 0,
+    "removedCount": 14,
+    "added": [],
+    "removed": [
+      {
+        "file": "src/views/AccountantWorkspaceView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 216,
+        "column": 30
+      },
+      {
+        "file": "src/views/AccountantWorkspaceView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 357,
+        "column": 30
+      },
+      {
+        "file": "src/views/AccountantWorkspaceView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 389,
+        "column": 30
+      },
+      {
+        "file": "src/views/AccountantWorkspaceView.vue",
+        "ruleId": "@typescript-eslint/no-unused-vars",
+        "severity": 2,
+        "message": "'Users' is defined but never used.",
+        "line": 4,
+        "column": 65
+      },
+      {
+        "file": "src/views/AccountantWorkspaceView.vue",
+        "ruleId": "@typescript-eslint/no-unused-vars",
+        "severity": 2,
+        "message": "'AppMetricCard' is defined but never used.",
+        "line": 20,
+        "column": 3
+      },
+      {
+        "file": "src/views/AccountantWorkspaceView.vue",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 164,
+        "column": 17
+      },
+      {
+        "file": "src/views/AccountantWorkspaceView.vue",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 258,
+        "column": 17
+      },
+      {
+        "file": "src/views/AccountantWorkspaceView.vue",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 290,
+        "column": 17
+      },
+      {
+        "file": "src/views/AccountantWorkspaceView.vue",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 319,
+        "column": 17
+      },
+      {
+        "file": "src/views/AccountantWorkspaceView.vue",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 421,
+        "column": 17
+      },
+      {
+        "file": "src/views/CustomerWorkspaceView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 274,
+        "column": 30
+      },
+      {
+        "file": "src/views/CustomerWorkspaceView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 475,
+        "column": 30
+      },
+      {
+        "file": "src/views/CustomerWorkspaceView.test.ts",
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 2,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 512,
+        "column": 30
+      },
+      {
+        "file": "src/views/CustomerWorkspaceView.vue",
+        "ruleId": "@typescript-eslint/no-unused-vars",
+        "severity": 2,
+        "message": "'BarChart3' is defined but never used.",
+        "line": 4,
+        "column": 10
+      }
+    ]
+  },
+  "prettier": {
+    "currentFileCount": 26,
+    "baseFileCount": 19,
+    "currentDifferent": [
+      "src/components/OwnerAccountantManagerModal.test.ts",
+      "src/components/OwnerCustomerManagerModal.test.ts",
+      "src/composables/useOwnerRelations.test.ts"
+    ],
+    "baseDifferent": [
+      "e2e/accountant-owner-flow.spec.ts",
+      "e2e/customer-owner-flow.spec.ts",
+      "src/components/OwnerAccountantManagerModal.test.ts",
+      "src/components/OwnerAccountantManagerModal.vue",
+      "src/components/OwnerCustomerManagerModal.test.ts",
+      "src/components/OwnerCustomerManagerModal.vue",
+      "src/components/ui/AppBottomSheet.vue",
+      "src/components/ui/AppResponsiveDialog.vue",
+      "src/composables/useOwnerAccountants.ts",
+      "src/composables/useOwnerCustomers.ts",
+      "src/composables/useOwnerRelations.test.ts",
+      "src/views/AccountantWorkspaceView.test.ts",
+      "src/views/AccountantWorkspaceView.vue",
+      "src/views/CustomerWorkspaceView.test.ts",
+      "src/views/CustomerWorkspaceView.vue"
+    ],
+    "inherited": [
+      "src/components/OwnerAccountantManagerModal.test.ts",
+      "src/components/OwnerCustomerManagerModal.test.ts",
+      "src/composables/useOwnerRelations.test.ts"
+    ],
+    "added": [],
+    "removed": [
+      "e2e/accountant-owner-flow.spec.ts",
+      "e2e/customer-owner-flow.spec.ts",
+      "src/components/OwnerAccountantManagerModal.vue",
+      "src/components/OwnerCustomerManagerModal.vue",
+      "src/components/ui/AppBottomSheet.vue",
+      "src/components/ui/AppResponsiveDialog.vue",
+      "src/composables/useOwnerAccountants.ts",
+      "src/composables/useOwnerCustomers.ts",
+      "src/views/AccountantWorkspaceView.test.ts",
+      "src/views/AccountantWorkspaceView.vue",
+      "src/views/CustomerWorkspaceView.test.ts",
+      "src/views/CustomerWorkspaceView.vue"
+    ]
+  },
+  "sourceAudit": {
+    "path": "temporary-stage5-quality-audit.json",
+    "bytes": 8542,
+    "sha256": "6a17562247f1c4788e08b46bca07b32214aa6114f94cd9727cccf50fbbe482b3"
+  },
+  "claimBoundary": "Raw ESLint exits are nonzero because all 41 current errors are inherited. Added ESLint diagnostics and added Prettier-dirty paths are both zero; this is delta-clean, not blanket-clean.",
+  "qualityCapture": {
+    "capturedBeforeImplementationCommit": true,
+    "originalUntrackedMarker": "??",
+    "finalCanonicalization": "All seven pre-commit untracked paths are committed additions and are represented as A in this artifact.",
+    "finalAddedCount": 7
+  }
+}
