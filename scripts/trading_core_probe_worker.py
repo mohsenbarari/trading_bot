@@ -732,6 +732,22 @@ def build_negative_guard_idempotency_key(
     return f"guard:{case_token}:{action_token}:{digest}"[:64]
 
 
+def build_load_offer_creation_idempotency_key(
+    *,
+    prefix: str,
+    user_id: int,
+    index: int,
+    source_surface: OfferSourceSurface,
+) -> str:
+    """Return a stable, bounded idempotency key for a synthetic offer create."""
+    raw = f"{prefix}|{source_surface.value}|{int(user_id)}|{int(index)}"
+    digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:24]
+    surface_token = "".join(
+        ch if ch.isalnum() else "-" for ch in source_surface.value.lower()
+    )[:12] or "surface"
+    return f"load-offer:{surface_token}:{digest}"
+
+
 def _validate_role_result_artifact(raw: Mapping[str, Any]) -> Mapping[str, Any]:
     payload = _require_mapping(raw, "role result")
     if payload.get("schema_version") != DUAL_ROLE_RESULT_SCHEMA_VERSION:
@@ -2682,6 +2698,12 @@ async def create_offer_for_user(
                     lot_sizes=normalized_lot_sizes,
                     notes=f"{prefix} offer {index}",
                     warning_acknowledged=True,
+                    idempotency_key=build_load_offer_creation_idempotency_key(
+                        prefix=prefix,
+                        user_id=int(user.id),
+                        index=index,
+                        source_surface=normalized_source_surface,
+                    ),
                 ),
                 db=db,
                 current_user=user,

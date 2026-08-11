@@ -1238,6 +1238,34 @@ class TradingCoreMixedLoadHelperTests(unittest.TestCase):
             ),
         )
 
+    def test_load_offer_creation_key_is_stable_and_bounded(self):
+        prefix = "telegram-live-matrix-20260811t185130z-live002-" * 3
+        first = worker.build_load_offer_creation_idempotency_key(
+            prefix=prefix,
+            user_id=123456789,
+            index=7,
+            source_surface=worker.OfferSourceSurface.WEBAPP,
+        )
+        second = worker.build_load_offer_creation_idempotency_key(
+            prefix=prefix,
+            user_id=123456789,
+            index=8,
+            source_surface=worker.OfferSourceSurface.WEBAPP,
+        )
+
+        self.assertLessEqual(len(first), 64)
+        self.assertTrue(first.startswith("load-offer:webapp:"))
+        self.assertNotEqual(first, second)
+        self.assertEqual(
+            first,
+            worker.build_load_offer_creation_idempotency_key(
+                prefix=prefix,
+                user_id=123456789,
+                index=7,
+                source_surface=worker.OfferSourceSurface.WEBAPP,
+            ),
+        )
+
     def test_hot_offer_scenario_specs_cover_step_11b3_matrix(self):
         scenarios = worker.build_hot_offer_scenario_specs(
             total_requests=1000,
