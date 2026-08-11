@@ -1,6 +1,6 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { nextTick, reactive } from 'vue'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import AdminView from './AdminView.vue'
 
 function responseOf(payload: unknown, status = 200) {
@@ -25,6 +25,18 @@ const adminViewMocks = vi.hoisted(() => ({
   clearBackStackMock: vi.fn(),
   apiFetchMock: vi.fn(),
 }))
+
+type AdminViewTestVm = {
+  currentSection: string
+  isLoadingRouteUserProfile: boolean
+  handleNavigate: (section: string, data?: unknown) => void
+  syncRouteToSection: () => void
+  handleOpenPublicProfile: (payload?: { id?: number; account_name?: string }) => void
+}
+
+function getAdminViewVm(wrapper: { vm: unknown }): AdminViewTestVm {
+  return wrapper.vm as AdminViewTestVm
+}
 
 vi.mock('vue-router', () => ({
   useRoute: () => adminViewMocks.route,
@@ -60,6 +72,10 @@ describe('AdminView.vue', () => {
     localStorage.setItem('current_user_summary', JSON.stringify({ role: 'مدیر ارشد' }))
   })
 
+  afterEach(() => {
+    document.querySelector('.app-route-scroll')?.remove()
+  })
+
   function mountView() {
     return mount(AdminView, {
       global: {
@@ -81,10 +97,10 @@ describe('AdminView.vue', () => {
           },
           UserManager: {
             name: 'UserManager',
-            props: ['apiBaseUrl', 'jwtToken'],
-            emits: ['navigate'],
+            props: ['apiBaseUrl', 'jwtToken', 'query'],
+            emits: ['navigate', 'query-change', 'loaded', 'settled'],
             template:
-              "<button class=\"user-manager-open-profile\" @click=\"$emit('navigate', 'user_profile', { id: 77, account_name: 'user-77' })\">open user profile</button>",
+              "<div class=\"user-manager-stub\"><span class=\"user-manager-query\">{{ query }}</span><button class=\"user-manager-open-profile\" @click=\"$emit('navigate', 'user_profile', { id: 77, account_name: 'user-77' })\">open user profile</button></div>",
           },
           UserProfile: {
             name: 'UserProfile',
@@ -101,6 +117,29 @@ describe('AdminView.vue', () => {
         },
       },
     })
+  }
+
+  function mountRouteScroll(scrollTop = 0) {
+    const routeScroll = document.createElement('div')
+    routeScroll.className = 'app-route-scroll'
+    routeScroll.scrollTop = scrollTop
+    document.body.append(routeScroll)
+    return routeScroll
+  }
+
+  function mountClampedRouteScroll(maximumScrollTop: number, scrollTop = 0) {
+    const routeScroll = mountRouteScroll()
+    let currentScrollTop = 0
+    Object.defineProperty(routeScroll, 'scrollTop', {
+      configurable: true,
+      get: () => currentScrollTop,
+      set: (value: unknown) => {
+        const normalized = Number(value)
+        currentScrollTop = Math.max(0, Math.min(maximumScrollTop, Number.isFinite(normalized) ? normalized : 0))
+      },
+    })
+    routeScroll.scrollTop = scrollTop
+    return routeScroll
   }
 
   it('renders the real admin panel menu and opens the invitation section with the stored JWT token', async () => {
@@ -128,7 +167,7 @@ describe('AdminView.vue', () => {
     expect(wrapper.get('.admin-panel-container').attributes('aria-label')).toBe('ابزارهای مدیریت')
   })
 
-  it('routes from the users section into the admin user profile view', async () => {
+  it('routes from the users section into the authoritative admin user profile view', async () => {
     const wrapper = mountView()
     await flushPromises()
 
@@ -138,7 +177,10 @@ describe('AdminView.vue', () => {
     expect(usersButton).toBeTruthy()
     await usersButton!.trigger('click')
     await flushPromises()
-    expect(adminViewMocks.routerPushMock).toHaveBeenCalledWith({ name: 'admin-users' })
+    expect(adminViewMocks.routerPushMock).toHaveBeenCalledWith({
+      name: 'admin-users',
+      query: {},
+    })
 
     await wrapper.get('.user-manager-open-profile').trigger('click')
     await flushPromises()
@@ -148,10 +190,245 @@ describe('AdminView.vue', () => {
     expect(adminViewMocks.routerPushMock).toHaveBeenCalledWith({
       name: 'admin-user-profile',
       params: { id: '77' },
-      query: { account_name: 'user-77' },
+      query: {},
     })
     expect(wrapper.text()).toContain('پروفایل کاربر')
-    expect(wrapper.get('.user-profile-stub').text()).toBe('user-77')
+    expect(wrapper.text()).toContain('در حال بارگذاری پروفایل کاربر')
+    expect(wrapper.find('.user-profile-stub').exists()).toBe(false)
+  })
+
+  it('keeps UserManager search state ephemeral and canonicalizes only list scroll in the URL', async () => {
+    adminViewMocks.route.name = 'admin-users'
+    adminViewMocks.route.query = reactive({
+      scroll: '64.9',
+      q: '09120000000',
+      account_name: 'untrusted-route-name',
+    }) as Record<string, string>
+    const routeScroll = mountRouteScroll()
+
+    const wrapper = mountView()
+    await flushPromises()
+
+    const userManager = wrapper.getComponent({ name: 'UserManager' })
+    expect(userManager.props('query')).toBe('')
+    expect(adminViewMocks.routerReplaceMock).toHaveBeenCalledWith({
+      name: 'admin-users',
+      query: { scroll: '64' },
+    })
+
+    adminViewMocks.routerPushMock.mockClear()
+    adminViewMocks.routerReplaceMock.mockClear()
+    userManager.vm.$emit('query-change', '  09120000000  ')
+    await flushPromises()
+
+    expect(userManager.props('query')).toBe('09120000000')
+    expect(wrapper.get('.user-manager-query').text()).toBe('09120000000')
+    expect(adminViewMocks.routerPushMock).not.toHaveBeenCalled()
+    expect(adminViewMocks.routerReplaceMock).not.toHaveBeenCalled()
+
+    userManager.vm.$emit('settled')
+    await flushPromises()
+    expect(routeScroll.scrollTop).toBe(64)
+
+    routeScroll.scrollTop = 88.9
+    routeScroll.dispatchEvent(new Event('scroll'))
+    await flushPromises()
+    expect(adminViewMocks.routerReplaceMock).toHaveBeenCalledWith({
+      name: 'admin-users',
+      query: { scroll: '88' },
+    })
+  })
+
+  it('reads a legacy directory list once, then replaces it with the scroll-only native route', async () => {
+    adminViewMocks.route.query = reactive({
+      section: 'manage_users',
+      scroll: '31.8',
+      q: '09120000000',
+      account_name: 'untrusted-route-name',
+    }) as Record<string, string>
+
+    const wrapper = mountView()
+    await flushPromises()
+
+    expect(wrapper.findComponent({ name: 'UserManager' }).exists()).toBe(true)
+    expect(adminViewMocks.routerReplaceMock).toHaveBeenCalledWith({
+      name: 'admin-users',
+      query: { scroll: '31' },
+    })
+  })
+
+  it('recanonicalizes an in-place raw query mutation even when its key set is unchanged', async () => {
+    adminViewMocks.route.name = 'admin-users'
+    adminViewMocks.route.query = reactive({
+      scroll: '31',
+      q: 'first-sensitive-value',
+    }) as Record<string, string>
+    mountRouteScroll()
+
+    const wrapper = mountView()
+    await flushPromises()
+    expect(adminViewMocks.routerReplaceMock).toHaveBeenCalledWith({
+      name: 'admin-users',
+      query: { scroll: '31' },
+    })
+
+    adminViewMocks.routerReplaceMock.mockClear()
+    adminViewMocks.route.query.q = 'second-sensitive-value'
+    await nextTick()
+    await flushPromises()
+
+    expect(adminViewMocks.routerReplaceMock).toHaveBeenCalledWith({
+      name: 'admin-users',
+      query: { scroll: '31' },
+    })
+    wrapper.unmount()
+  })
+
+  it('returns from the user directory list to the management menu', async () => {
+    adminViewMocks.route.name = 'admin-users'
+    adminViewMocks.route.query = reactive({ scroll: '32' }) as Record<string, string>
+    const routeScroll = mountRouteScroll()
+    const wrapper = mountView()
+    await flushPromises()
+
+    routeScroll.scrollTop = 72.6
+    adminViewMocks.routerPushMock.mockClear()
+    adminViewMocks.routerReplaceMock.mockClear()
+
+    expect(wrapper.get('.admin-subview-return').attributes('aria-label')).toBe(
+      'بازگشت به پنل مدیریت',
+    )
+    await wrapper.get('.admin-subview-return').trigger('click')
+    await flushPromises()
+
+    expect(adminViewMocks.routerReplaceMock).toHaveBeenCalledWith({
+      name: 'admin',
+    })
+    expect(adminViewMocks.routerPushMock).not.toHaveBeenCalled()
+  })
+
+  it('carries only normalized scroll context from the list to detail and back', async () => {
+    adminViewMocks.route.name = 'admin-users'
+    adminViewMocks.route.query = reactive({ scroll: '32' }) as Record<string, string>
+    const routeScroll = mountRouteScroll()
+    const wrapper = mountView()
+    await flushPromises()
+
+    const userManager = wrapper.getComponent({ name: 'UserManager' })
+    userManager.vm.$emit('settled')
+    await flushPromises()
+    userManager.vm.$emit('query-change', '09120000000')
+    routeScroll.scrollTop = 72.6
+    adminViewMocks.routerPushMock.mockClear()
+
+    await wrapper.get('.user-manager-open-profile').trigger('click')
+    await flushPromises()
+
+    expect(adminViewMocks.routerPushMock).toHaveBeenCalledWith({
+      name: 'admin-user-profile',
+      params: { id: '77' },
+      query: { scroll: '72' },
+    })
+    expect(JSON.stringify(adminViewMocks.routerPushMock.mock.calls)).not.toContain('09120000000')
+    expect(JSON.stringify(adminViewMocks.routerPushMock.mock.calls)).not.toContain('account_name')
+
+    const vm = getAdminViewVm(wrapper)
+    vm.handleNavigate('manage_users')
+    await flushPromises()
+
+    expect(adminViewMocks.routerPushMock).toHaveBeenLastCalledWith({
+      name: 'admin-users',
+      query: { scroll: '72' },
+    })
+  })
+
+  it('keeps captured list scroll authoritative while the detail transition emits an intermediate scroll', async () => {
+    adminViewMocks.route.name = 'admin-users'
+    adminViewMocks.route.query = reactive({ scroll: '640' }) as Record<string, string>
+    const routeScroll = mountRouteScroll(640)
+    const wrapper = mountView()
+    await flushPromises()
+
+    adminViewMocks.routerPushMock.mockClear()
+    adminViewMocks.routerReplaceMock.mockClear()
+    await wrapper.get('.user-manager-open-profile').trigger('click')
+    routeScroll.scrollTop = 235
+    routeScroll.dispatchEvent(new Event('scroll'))
+    await nextTick()
+    await flushPromises()
+
+    expect(adminViewMocks.routerPushMock).toHaveBeenCalledWith({
+      name: 'admin-user-profile',
+      params: { id: '77' },
+      query: { scroll: '640' },
+    })
+    expect(adminViewMocks.routerReplaceMock).not.toHaveBeenCalledWith({
+      name: 'admin-users',
+      query: { scroll: '235' },
+    })
+  })
+
+  it('holds UserProfile return scroll until the re-entered directory accepts its list response', async () => {
+    adminViewMocks.route.name = 'admin-users'
+    adminViewMocks.route.query = reactive({ scroll: '640' }) as Record<string, string>
+    const routeScroll = mountRouteScroll(640)
+    const wrapper = mountView()
+    await flushPromises()
+
+    wrapper.getComponent({ name: 'UserManager' }).vm.$emit('settled')
+    await flushPromises()
+    await wrapper.get('.user-manager-open-profile').trigger('click')
+    await flushPromises()
+
+    routeScroll.scrollTop = 235
+    routeScroll.dispatchEvent(new Event('scroll'))
+    await flushPromises()
+    adminViewMocks.routerReplaceMock.mockClear()
+
+    const vm = getAdminViewVm(wrapper)
+    vm.handleNavigate('manage_users')
+    vm.syncRouteToSection()
+    await flushPromises()
+
+    routeScroll.scrollTop = 235
+    routeScroll.dispatchEvent(new Event('scroll'))
+    await flushPromises()
+    expect(adminViewMocks.routerReplaceMock).not.toHaveBeenCalledWith({
+      name: 'admin-users',
+      query: { scroll: '235' },
+    })
+
+    wrapper.getComponent({ name: 'UserManager' }).vm.$emit('settled')
+    await flushPromises()
+    expect(routeScroll.scrollTop).toBe(640)
+  })
+
+  it('releases a clamped directory restore and canonicalizes it to the rendered offset', async () => {
+    adminViewMocks.route.name = 'admin-users'
+    adminViewMocks.route.query = reactive({ scroll: '640' }) as Record<string, string>
+    const routeScroll = mountClampedRouteScroll(235)
+    const wrapper = mountView()
+    await flushPromises()
+
+    adminViewMocks.routerReplaceMock.mockClear()
+    wrapper.getComponent({ name: 'UserManager' }).vm.$emit('settled')
+    await flushPromises()
+
+    expect(routeScroll.scrollTop).toBe(235)
+    expect(adminViewMocks.routerReplaceMock).toHaveBeenCalledWith({
+      name: 'admin-users',
+      query: { scroll: '235' },
+    })
+
+    adminViewMocks.routerReplaceMock.mockClear()
+    routeScroll.scrollTop = 120
+    routeScroll.dispatchEvent(new Event('scroll'))
+    await flushPromises()
+    expect(adminViewMocks.routerReplaceMock).toHaveBeenCalledWith({
+      name: 'admin-users',
+      query: { scroll: '120' },
+    })
+    wrapper.unmount()
   })
 
   it('opens the public profile route from the channel manager payload', async () => {
@@ -169,15 +446,17 @@ describe('AdminView.vue', () => {
     })
   })
 
-  it('loads the admin user profile directly from the route query handoff', async () => {
-    adminViewMocks.route.query = {
+  it('reads a legacy profile handoff once, then canonicalizes to native scroll-only detail', async () => {
+    adminViewMocks.route.query = reactive({
       section: 'user_profile',
       user_id: '91',
-      account_name: 'route-user',
-    }
+      account_name: 'untrusted-route-name',
+      q: '09120000000',
+      scroll: '27.4',
+    }) as Record<string, string>
     adminViewMocks.apiFetchMock.mockResolvedValue({
       ok: true,
-      json: async () => ({ id: 91, account_name: 'route-user' }),
+      json: async () => ({ id: 91, account_name: 'server-authoritative-user' }),
     })
 
     const wrapper = mountView()
@@ -191,7 +470,116 @@ describe('AdminView.vue', () => {
       }),
     )
     expect(wrapper.text()).toContain('پروفایل کاربر')
-    expect(wrapper.get('.user-profile-stub').text()).toBe('route-user')
+    expect(wrapper.get('.user-profile-stub').text()).toBe('server-authoritative-user')
+    expect(wrapper.text()).not.toContain('untrusted-route-name')
+    expect(adminViewMocks.routerPushMock).not.toHaveBeenCalled()
+    expect(adminViewMocks.routerReplaceMock).toHaveBeenCalledWith({
+      name: 'admin-user-profile',
+      params: { id: '91' },
+      query: { scroll: '27' },
+    })
+  })
+
+  it('clears an invalid legacy profile context instead of retaining its query fields', async () => {
+    adminViewMocks.route.query = reactive({
+      section: 'user_profile',
+      user_id: 'not-an-id',
+      q: '09120000000',
+      account_name: 'untrusted-route-name',
+    }) as Record<string, string>
+
+    const wrapper = mountView()
+    await flushPromises()
+
+    expect(wrapper.get('.admin-panel-container').attributes('aria-label')).toBe('ابزارهای مدیریت')
+    expect(adminViewMocks.apiFetchMock).not.toHaveBeenCalled()
+    expect(adminViewMocks.routerReplaceMock).toHaveBeenCalledWith({ name: 'admin' })
+  })
+
+  it('recovers an invalid native profile id to the scroll-only user directory', async () => {
+    adminViewMocks.route.name = 'admin-user-profile'
+    adminViewMocks.route.params = reactive({ id: 'not-an-id' }) as Record<string, string>
+    adminViewMocks.route.query = reactive({
+      scroll: '40.8',
+      q: '09120000000',
+      account_name: 'untrusted-route-name',
+    }) as Record<string, string>
+
+    const wrapper = mountView()
+    await flushPromises()
+
+    expect(adminViewMocks.apiFetchMock).not.toHaveBeenCalled()
+    expect(wrapper.findComponent({ name: 'UserManager' }).exists()).toBe(true)
+    expect(adminViewMocks.routerReplaceMock).toHaveBeenCalledWith({
+      name: 'admin-users',
+      query: { scroll: '40' },
+    })
+  })
+
+  it('canonicalizes direct profile context to scroll only and loads the authoritative payload', async () => {
+    adminViewMocks.route.name = 'admin-user-profile'
+    adminViewMocks.route.params = reactive({ id: '93' }) as Record<string, string>
+    adminViewMocks.route.query = reactive({
+      scroll: '18.6',
+      q: '09120000000',
+      account_name: 'untrusted-route-name',
+    }) as Record<string, string>
+    adminViewMocks.apiFetchMock.mockResolvedValue(
+      responseOf({ id: 93, account_name: 'server-authoritative-user' }),
+    )
+
+    const wrapper = mountView()
+    await flushPromises()
+
+    expect(adminViewMocks.apiFetchMock).toHaveBeenCalledWith('/api/users/93', expect.any(Object))
+    expect(adminViewMocks.routerReplaceMock).toHaveBeenCalledWith({
+      name: 'admin-user-profile',
+      params: { id: '93' },
+      query: { scroll: '18' },
+    })
+    expect(wrapper.get('.user-profile-stub').text()).toBe('server-authoritative-user')
+    expect(wrapper.text()).not.toContain('untrusted-route-name')
+    expect(wrapper.text()).not.toContain('09120000000')
+
+    adminViewMocks.routerPushMock.mockClear()
+    expect(wrapper.get('.admin-subview-return').attributes('aria-label')).toBe(
+      'بازگشت به فهرست کاربران',
+    )
+    await wrapper.get('.admin-subview-return').trigger('click')
+    await flushPromises()
+    expect(adminViewMocks.routerPushMock).toHaveBeenCalledWith({
+      name: 'admin-users',
+      query: { scroll: '18' },
+    })
+  })
+
+  it('returns direct-profile error fallback to the scroll-only user list', async () => {
+    adminViewMocks.route.name = 'admin-user-profile'
+    adminViewMocks.route.params = reactive({ id: '94' }) as Record<string, string>
+    adminViewMocks.route.query = reactive({
+      scroll: '24.7',
+      q: '09120000000',
+      account_name: 'untrusted-route-name',
+    }) as Record<string, string>
+    adminViewMocks.apiFetchMock.mockResolvedValue(responseOf({ detail: 'not found' }, 404))
+
+    const wrapper = mountView()
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('کاربر پیدا نشد')
+    expect(wrapper.get('.admin-subview-return').attributes('aria-label')).toBe(
+      'بازگشت به فهرست کاربران',
+    )
+    adminViewMocks.routerPushMock.mockClear()
+    await wrapper.get('.admin-subview-return').trigger('click')
+    await flushPromises()
+
+    expect(adminViewMocks.routerPushMock).toHaveBeenCalledWith({
+      name: 'admin-users',
+      query: { scroll: '24' },
+    })
+    expect(JSON.stringify(adminViewMocks.routerPushMock.mock.calls)).not.toContain('09120000000')
+    expect(JSON.stringify(adminViewMocks.routerPushMock.mock.calls)).not.toContain('account_name')
   })
 
   it('opens admin sections directly from route names and params', async () => {
@@ -235,7 +623,7 @@ describe('AdminView.vue', () => {
     const wrapper = mountView()
     await flushPromises()
 
-    const vm = wrapper.vm as any
+    const vm = getAdminViewVm(wrapper)
     vm.currentSection = 'user_profile'
     vm.isLoadingRouteUserProfile = true
     await flushPromises()
@@ -321,12 +709,34 @@ describe('AdminView.vue', () => {
     await nextTick()
     await flushPromises()
     expect(wrapper.get('.user-profile-stub').text()).toBe('latest-user')
+    expect((adminViewMocks.apiFetchMock.mock.calls[0][1] as RequestInit).signal?.aborted).toBe(true)
 
     resolveFirst!(responseOf({ id: 61, account_name: 'stale-user' }))
     await flushPromises()
 
     expect(wrapper.get('.user-profile-stub').text()).toBe('latest-user')
     expect(wrapper.text()).not.toContain('stale-user')
+  })
+
+  it('aborts an in-flight detail request before returning to the user directory', async () => {
+    adminViewMocks.route.name = 'admin-user-profile'
+    adminViewMocks.route.params = reactive({ id: '63' }) as Record<string, string>
+    adminViewMocks.apiFetchMock.mockReturnValue(new Promise(() => {}))
+
+    const wrapper = mountView()
+    await flushPromises()
+
+    const detailSignal = (adminViewMocks.apiFetchMock.mock.calls[0][1] as RequestInit).signal
+    const vm = getAdminViewVm(wrapper)
+    vm.handleNavigate('manage_users')
+    await flushPromises()
+
+    expect(detailSignal?.aborted).toBe(true)
+    expect(adminViewMocks.routerPushMock).toHaveBeenCalledWith({
+      name: 'admin-users',
+      query: {},
+    })
+    expect(wrapper.find('.user-profile-stub').exists()).toBe(false)
   })
 
   it('ignores invalid public-profile payloads and invalid route profile ids', async () => {
@@ -341,7 +751,7 @@ describe('AdminView.vue', () => {
     expect(adminViewMocks.apiFetchMock).not.toHaveBeenCalled()
     expect(wrapper.get('.admin-panel-container').attributes('aria-label')).toBe('ابزارهای مدیریت')
 
-    const vm = wrapper.vm as any
+    const vm = getAdminViewVm(wrapper)
     vm.handleOpenPublicProfile()
     vm.handleOpenPublicProfile({ id: 0, account_name: 'bad-user' })
     vm.handleOpenPublicProfile({ id: Number.NaN, account_name: 'bad-user' })
@@ -356,7 +766,7 @@ describe('AdminView.vue', () => {
     const wrapper = mountView()
     await flushPromises()
 
-    const vm = wrapper.vm as any
+    const vm = getAdminViewVm(wrapper)
     vm.handleNavigate('settings')
     await flushPromises()
     vm.handleNavigate('manage_commodities')
@@ -388,7 +798,7 @@ describe('AdminView.vue', () => {
     const wrapper = mountView()
     await flushPromises()
 
-    const vm = wrapper.vm as any
+    const vm = getAdminViewVm(wrapper)
     vm.handleNavigate('settings')
     await flushPromises()
 
@@ -441,7 +851,7 @@ describe('AdminView.vue', () => {
     expect(adminViewMocks.apiFetchMock).toHaveBeenCalledWith('/api/users/92', expect.any(Object))
     expect(wrapper.get('.user-profile-stub').text()).toBe('route-reactive-user')
 
-    const vm = wrapper.vm as any
+    const vm = getAdminViewVm(wrapper)
     vm.handleNavigate('settings')
     await flushPromises()
     const settingsBack = adminViewMocks.pushBackStateMock.mock.lastCall?.[0]

@@ -67,7 +67,9 @@ test.describe('Admin smoke regressions', () => {
       .filter({ hasText: /مدیریت کاربران/ })
       .first()
       .click()
-    await expect(page.locator('.search-toggle-btn:visible').first()).toBeVisible()
+    const userDirectorySearch = page.locator('.user-search-form:visible').first()
+    await expect(userDirectorySearch).toBeVisible()
+    await expect(userDirectorySearch.locator('#user-directory-search')).toBeVisible()
     await expect(page.locator('.users-list:visible').first()).toBeVisible()
   })
 

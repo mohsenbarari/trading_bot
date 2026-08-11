@@ -228,6 +228,66 @@ describe('App.vue', () => {
     )
   })
 
+  it('keeps the shared Stage 6 AdminView mounted across user list, detail, and scroll-only context changes', async () => {
+    appMocks.route.name = 'admin-users'
+    appMocks.route.path = '/admin/users'
+    appMocks.route.fullPath = '/admin/users?scroll=96'
+    appMocks.route.meta = {
+      uiShellClass: 'standard-authenticated',
+      uiV2Scope: 'section',
+    }
+    appMocks.isReadyMock.mockResolvedValueOnce()
+
+    const usersWrapper = mountApp()
+    await flushPromises()
+    expect(usersWrapper.getComponent(RouteComponentStub).vm.$.vnode.key).toBe(
+      'section:admin-user-directory',
+    )
+
+    appMocks.route.fullPath = '/admin/users?scroll=144'
+    await flushPromises()
+    expect(usersWrapper.getComponent(RouteComponentStub).vm.$.vnode.key).toBe(
+      'section:admin-user-directory',
+    )
+
+    appMocks.route.name = 'admin-user-profile'
+    appMocks.route.path = '/admin/users/11'
+    appMocks.route.fullPath = '/admin/users/11?scroll=144'
+    await flushPromises()
+    expect(usersWrapper.getComponent(RouteComponentStub).vm.$.vnode.key).toBe(
+      'section:admin-user-directory',
+    )
+
+    appMocks.route.fullPath = '/admin/users/11?scroll=208'
+    await flushPromises()
+    expect(usersWrapper.getComponent(RouteComponentStub).vm.$.vnode.key).toBe(
+      'section:admin-user-directory',
+    )
+  })
+
+  it('keeps unrelated section routes full-path keyed', async () => {
+    appMocks.route.name = 'admin'
+    appMocks.route.path = '/admin'
+    appMocks.route.fullPath = '/admin?section=users'
+    appMocks.route.meta = {
+      uiShellClass: 'standard-authenticated',
+      uiV2Scope: 'section',
+    }
+    appMocks.isReadyMock.mockResolvedValueOnce()
+
+    const wrapper = mountApp()
+    await flushPromises()
+    expect(wrapper.getComponent(RouteComponentStub).vm.$.vnode.key).toBe(
+      'legacy:/admin?section=users',
+    )
+
+    appMocks.route.fullPath = '/admin?section=users&scroll=96'
+    await flushPromises()
+    expect(wrapper.getComponent(RouteComponentStub).vm.$.vnode.key).toBe(
+      'legacy:/admin?section=users&scroll=96',
+    )
+  })
+
   it('preserves full-path remounting for protected legacy routes', async () => {
     appMocks.route.name = 'market'
     appMocks.route.path = '/market'

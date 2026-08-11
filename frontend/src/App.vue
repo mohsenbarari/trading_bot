@@ -79,13 +79,21 @@ const pathKeyedSectionRouteNames = new Set([
   'operations-accountants',
   'operations-accountants-detail',
 ])
-const unscopedRouteKey = computed(() =>
-  v2Scope.value === UI_V2_SCOPE.SECTION &&
-  typeof route.name === 'string' &&
-  pathKeyedSectionRouteNames.has(route.name)
+const sharedSectionRouteKeyByName = new Map([
+  ['admin-users', 'admin-user-directory'],
+  ['admin-user-profile', 'admin-user-directory'],
+])
+const unscopedRouteKey = computed(() => {
+  if (v2Scope.value !== UI_V2_SCOPE.SECTION || typeof route.name !== 'string') {
+    return `legacy:${route.fullPath}`
+  }
+
+  const sharedKey = sharedSectionRouteKeyByName.get(route.name)
+  if (sharedKey) return `section:${sharedKey}`
+  return pathKeyedSectionRouteNames.has(route.name)
     ? `section:${route.path}`
-    : `legacy:${route.fullPath}`,
-)
+    : `legacy:${route.fullPath}`
+})
 const shouldReserveDailyNavigation = computed(
   () =>
     isStandardAuthenticatedShell.value ||

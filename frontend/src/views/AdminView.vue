@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ChevronLeft } from 'lucide-vue-next'
 import { pushBackState, popBackState, clearBackStack } from '../composables/useBackButton'
@@ -32,6 +32,20 @@ const isLoadingRouteUserProfile = ref(false)
 const routeUserProfileError = ref<{ title: string; message: string } | null>(null)
 let routeUserProfileRequestSequence = 0
 let routeUserProfileAbortController: AbortController | null = null
+let routeUserProfileInFlightId: number | null = null
+let routeUserProfileLoadedId: number | null = null
+// Search terms can match account names and mobile numbers. Keep that state in
+// this component only; route context is deliberately limited to scroll offset.
+const userDirectoryQuery = ref('')
+const userDirectoryScrollTop = ref(0)
+let userDirectoryScrollTarget: HTMLElement | Window | null = null
+let isUserDirectoryScrollCaptureSuppressed = false
+// A route transition can temporarily retain the outgoing view's height. Keep
+// the captured list offset authoritative until UserManager accepts and renders
+// its next response; otherwise that transient clamp can rewrite safe scroll
+// context before the list exists.
+let pendingUserDirectoryRestoreScroll: number | null = null
+let userDirectoryRestoreGeneration = 0
 const canAccessSystemSettings = computed(() => isCachedSuperAdmin())
 const sectionMetaByKey: Record<string, { title: string; description: string }> = {
   menu: {
@@ -68,6 +82,10 @@ const sectionMetaByKey: Record<string, { title: string; description: string }> =
   },
 }
 const currentSectionMeta = computed(() => sectionMetaByKey[currentSection.value] || sectionMetaByKey.menu)
+const isUserDirectoryProfileSubview = computed(() => currentSection.value === 'user_profile')
+const adminSubviewReturnLabel = computed(() =>
+  isUserDirectoryProfileSubview.value ? 'بازگشت به فهرست کاربران' : 'بازگشت به پنل مدیریت',
+)
 const routeAdminSections = new Set([
   'create_invitation',
   'create_channel',
@@ -119,8 +137,257 @@ function canAccessAdminSection(section: string) {
 }
 
 function getAdminRouteForSection(section: string) {
+  if (section === 'manage_users') {
+    return {
+      name: 'admin-users',
+      query: buildUserDirectoryRouteQuery(),
+    }
+  }
+
   const routeName = adminRouteNameBySection[section]
   return routeName ? { name: routeName } : { name: 'admin' }
+}
+
+function isAdminUserDirectoryRoute() {
+  return getRouteName() === 'admin-users'
+}
+
+function isAdminUserProfileRoute() {
+  return getRouteName() === 'admin-user-profile'
+}
+
+function isLegacyAdminUserDirectoryListRoute() {
+  return getRouteName() === 'admin' &&
+    normalizeLegacyAdminSection(getSingleParam(route.query.section)) === 'manage_users'
+}
+
+function isLegacyAdminUserProfileRoute() {
+  return getRouteName() === 'admin' && getSingleParam(route.query.section) === 'user_profile'
+}
+
+function parseUserDirectoryScroll(value: unknown) {
+  const parsed = Number(getSingleParam(value))
+  return Number.isFinite(parsed) && parsed >= 0 ? Math.floor(parsed) : 0
+}
+
+function buildUserDirectoryRouteQuery(scroll = userDirectoryScrollTop.value) {
+  const normalizedScroll = parseUserDirectoryScroll(scroll)
+  return normalizedScroll > 0 ? { scroll: String(normalizedScroll) } : {}
+}
+
+function routeQueryMatches(query: Record<string, string>) {
+  const entries = Object.entries(route.query)
+  const expectedEntries = Object.entries(query)
+  if (entries.length !== expectedEntries.length) return false
+  if (entries.some(([, value]) => Array.isArray(value) || value == null)) return false
+  return expectedEntries.every(([key, value]) => getSingleParam(route.query[key]) === value)
+}
+
+function syncUserDirectoryRouteQuery() {
+  const isListRoute = isAdminUserDirectoryRoute()
+  const isProfileRoute = isAdminUserProfileRoute()
+  if (!isListRoute && !isProfileRoute) return
+
+  const query = buildUserDirectoryRouteQuery()
+  if (routeQueryMatches(query)) return
+
+  if (isListRoute) {
+    void router.replace({ name: 'admin-users', query })
+    return
+  }
+
+  const userId = getRouteUserProfileId()
+  if (userId) {
+    void router.replace({
+      name: 'admin-user-profile',
+      params: { id: String(userId) },
+      query,
+    })
+  }
+}
+
+function resolveUserDirectoryScrollTarget(): HTMLElement | Window | null {
+  if (typeof document !== 'undefined') {
+    const routeScroll = document.querySelector<HTMLElement>('.app-route-scroll')
+    if (routeScroll) return routeScroll
+  }
+  return typeof window !== 'undefined' ? window : null
+}
+
+function readUserDirectoryScrollTop() {
+  const target = userDirectoryScrollTarget ?? resolveUserDirectoryScrollTarget()
+  if (typeof HTMLElement !== 'undefined' && target instanceof HTMLElement) {
+    return target.scrollTop
+  }
+  if (typeof window === 'undefined') return 0
+  return Math.max(
+    window.scrollY,
+    document.documentElement?.scrollTop ?? 0,
+    document.body?.scrollTop ?? 0,
+  )
+}
+
+function hasOverlappingAdminViewRoots() {
+  return typeof document !== 'undefined' && document.querySelectorAll('.admin-view').length > 1
+}
+
+function queueUserDirectoryScrollRestore(scroll = userDirectoryScrollTop.value) {
+  userDirectoryRestoreGeneration += 1
+  pendingUserDirectoryRestoreScroll = parseUserDirectoryScroll(scroll)
+  isUserDirectoryScrollCaptureSuppressed = true
+}
+
+function clearUserDirectoryScrollRestore() {
+  userDirectoryRestoreGeneration += 1
+  pendingUserDirectoryRestoreScroll = null
+  isUserDirectoryScrollCaptureSuppressed = false
+}
+
+function finalizeUserDirectoryScrollRestore(expectedScroll: number) {
+  const actualScroll = parseUserDirectoryScroll(readUserDirectoryScrollTop())
+  userDirectoryScrollTop.value = actualScroll
+  clearUserDirectoryScrollRestore()
+
+  // A previously valid history offset can become unreachable when the current
+  // result set is shorter. Canonicalize to the rendered safe offset rather
+  // than leaving capture suppressed or retaining an impossible scroll value.
+  if (actualScroll !== expectedScroll) {
+    syncUserDirectoryRouteQuery()
+  }
+}
+
+function captureUserDirectoryScroll(syncRoute = true) {
+  if (
+    !isAdminUserDirectoryRoute() ||
+    isUserDirectoryScrollCaptureSuppressed ||
+    hasOverlappingAdminViewRoots()
+  ) return
+  const nextScroll = parseUserDirectoryScroll(readUserDirectoryScrollTop())
+  if (nextScroll === userDirectoryScrollTop.value) return
+
+  userDirectoryScrollTop.value = nextScroll
+  if (syncRoute) syncUserDirectoryRouteQuery()
+}
+
+function restoreUserDirectoryScroll(releaseWhenLoaded = false) {
+  if (!isAdminUserDirectoryRoute()) return
+  const restoreGeneration = userDirectoryRestoreGeneration
+  const pendingScroll = pendingUserDirectoryRestoreScroll
+  const expectedScroll = pendingScroll ?? userDirectoryScrollTop.value
+  let remainingTransitionFrames = 24
+  isUserDirectoryScrollCaptureSuppressed = true
+
+  const applyScroll = () => {
+    if (restoreGeneration !== userDirectoryRestoreGeneration) return
+    if (
+      !isAdminUserDirectoryRoute() ||
+      (pendingScroll === null && expectedScroll !== userDirectoryScrollTop.value) ||
+      (pendingScroll !== null && pendingUserDirectoryRestoreScroll !== pendingScroll)
+    ) {
+      clearUserDirectoryScrollRestore()
+      return
+    }
+
+    const target = userDirectoryScrollTarget ?? resolveUserDirectoryScrollTarget()
+    if (typeof HTMLElement !== 'undefined' && target instanceof HTMLElement) {
+      target.scrollTop = expectedScroll
+    } else if (typeof window !== 'undefined') {
+      window.scrollTo(0, expectedScroll)
+    }
+
+    // A list can be temporarily shorter while the route transition or its
+    // initial data request is in flight. Do not let that clamped intermediate
+    // value overwrite the canonical route context. A pending value stays
+    // locked until UserManager has accepted a response and rendered its rows.
+    if (pendingScroll !== null) {
+      if (releaseWhenLoaded) {
+        finalizeUserDirectoryScrollRestore(pendingScroll)
+      }
+      return
+    }
+
+    if (readUserDirectoryScrollTop() !== expectedScroll) {
+      finalizeUserDirectoryScrollRestore(expectedScroll)
+      return
+    }
+
+    if (
+      hasOverlappingAdminViewRoots() &&
+      remainingTransitionFrames > 0 &&
+      typeof window !== 'undefined' &&
+      typeof window.requestAnimationFrame === 'function'
+    ) {
+      remainingTransitionFrames -= 1
+      window.requestAnimationFrame(applyScroll)
+      return
+    }
+
+    isUserDirectoryScrollCaptureSuppressed = false
+  }
+
+  void nextTick(() => {
+    applyScroll()
+  })
+}
+
+function syncUserDirectoryRouteContext(waitForAcceptedList = false) {
+  const isListRoute = isAdminUserDirectoryRoute()
+  const isProfileRoute = isAdminUserProfileRoute()
+  const isLegacyListRoute = isLegacyAdminUserDirectoryListRoute()
+  const isLegacyProfileRoute = isLegacyAdminUserProfileRoute()
+  if (!isListRoute && !isProfileRoute && !isLegacyListRoute && !isLegacyProfileRoute) return
+
+  const nextScroll = parseUserDirectoryScroll(route.query.scroll)
+  const shouldRestoreScroll = isListRoute && nextScroll !== userDirectoryScrollTop.value
+  userDirectoryScrollTop.value = nextScroll
+
+  // Compatibility URLs are read once, then replaced with the native route. This
+  // both preserves a safe scroll offset and removes query fields that may carry
+  // raw directory search or identity data.
+  if (isLegacyListRoute) {
+    queueUserDirectoryScrollRestore(nextScroll)
+    void router.replace({ name: 'admin-users', query: buildUserDirectoryRouteQuery() })
+    return
+  }
+  if (isLegacyProfileRoute) {
+    const userId = getRouteUserProfileId()
+    if (userId) {
+      void router.replace({
+        name: 'admin-user-profile',
+        params: { id: String(userId) },
+        query: buildUserDirectoryRouteQuery(),
+      })
+    } else {
+      void router.replace({ name: 'admin' })
+    }
+    return
+  }
+
+  if (isProfileRoute && !getRouteUserProfileId()) {
+    queueUserDirectoryScrollRestore(nextScroll)
+    void router.replace({ name: 'admin-users', query: buildUserDirectoryRouteQuery() })
+    return
+  }
+
+  if (isListRoute && waitForAcceptedList) {
+    queueUserDirectoryScrollRestore(nextScroll)
+  }
+  syncUserDirectoryRouteQuery()
+  if (shouldRestoreScroll || (isListRoute && waitForAcceptedList)) {
+    restoreUserDirectoryScroll()
+  }
+}
+
+function handleUserDirectoryQueryChange(query: string) {
+  // The child normalizes before emitting. Keep the copy in memory only, never
+  // mirror it into route state, history, or storage.
+  userDirectoryQuery.value = typeof query === 'string' ? query.trim() : ''
+}
+
+function handleUserDirectorySettled() {
+  if (pendingUserDirectoryRestoreScroll !== null) {
+    restoreUserDirectoryScroll(true)
+  }
 }
 
 function getRouteUserProfileId(): number | null {
@@ -130,18 +397,18 @@ function getRouteUserProfileId(): number | null {
     return Number.isInteger(normalized) && normalized > 0 ? normalized : null
   }
 
-  if (route.query.section !== 'user_profile') {
+  if (getSingleParam(route.query.section) !== 'user_profile') {
     return null
   }
 
-  const normalized = Number(route.query.user_id)
+  const normalized = Number(getSingleParam(route.query.user_id))
   return Number.isInteger(normalized) && normalized > 0 ? normalized : null
 }
 
 function shouldClearRouteUserProfile(): boolean {
   return getRouteName().startsWith('admin-') ||
-    typeof route.query.section === 'string' ||
-    typeof route.query.user_id === 'string'
+    typeof getSingleParam(route.query.section) === 'string' ||
+    typeof getSingleParam(route.query.user_id) === 'string'
 }
 
 function getRouteAdminSection(): string | null {
@@ -150,7 +417,7 @@ function getRouteAdminSection(): string | null {
     return canAccessAdminSection(routeSection) ? routeSection : null
   }
 
-  const section = normalizeLegacyAdminSection(route.query.section)
+  const section = normalizeLegacyAdminSection(getSingleParam(route.query.section))
   if (typeof section !== 'string' || section === 'user_profile' || !canAccessAdminSection(section)) {
     return null
   }
@@ -161,38 +428,93 @@ function getRouteAdminSection(): string | null {
 function syncRouteToSection() {
   const routeUserId = getRouteUserProfileId()
   if (routeUserId) {
+    syncUserDirectoryRouteContext()
     void loadRouteUserProfile(routeUserId)
+    return
+  }
+
+  if (isLegacyAdminUserProfileRoute()) {
+    syncUserDirectoryRouteContext()
+    cancelRouteUserProfileRequest()
+    currentSection.value = 'menu'
+    selectedUserForProfile.value = null
+    routeUserProfileError.value = null
+    return
+  }
+
+  if (isAdminUserProfileRoute()) {
+    syncUserDirectoryRouteContext()
+    cancelRouteUserProfileRequest()
+    currentSection.value = 'manage_users'
+    selectedUserForProfile.value = null
+    routeUserProfileError.value = null
     return
   }
 
   const routeSection = getRouteAdminSection()
   if (routeSection) {
+    const isEnteringUserDirectory =
+      routeSection === 'manage_users' && currentSection.value !== 'manage_users'
+    cancelRouteUserProfileRequest()
+    if (routeSection !== 'manage_users') {
+      clearUserDirectoryScrollRestore()
+    }
     selectedUserForProfile.value = null
+    routeUserProfileError.value = null
     currentSection.value = routeSection
+    if (routeSection === 'manage_users') {
+      syncUserDirectoryRouteContext(isEnteringUserDirectory)
+      restoreUserDirectoryScroll()
+    }
     return
   }
 
+  cancelRouteUserProfileRequest()
+  clearUserDirectoryScrollRestore()
   if (currentSection.value !== 'menu') {
     currentSection.value = 'menu'
     selectedUserForProfile.value = null
   }
 }
 
+function cancelRouteUserProfileRequest() {
+  routeUserProfileRequestSequence += 1
+  routeUserProfileAbortController?.abort()
+  routeUserProfileAbortController = null
+  routeUserProfileInFlightId = null
+  routeUserProfileLoadedId = null
+  isLoadingRouteUserProfile.value = false
+}
+
+function isAbortError(error: unknown) {
+  return error instanceof DOMException
+    ? error.name === 'AbortError'
+    : error instanceof Error && error.name === 'AbortError'
+}
+
 async function loadRouteUserProfile(userId: number) {
-  if (selectedUserForProfile.value?.id === userId && currentSection.value === 'user_profile') {
+  if (
+    currentSection.value === 'user_profile' &&
+    selectedUserForProfile.value?.id === userId &&
+    routeUserProfileLoadedId === userId
+  ) {
     return
   }
+  if (routeUserProfileInFlightId === userId && routeUserProfileAbortController) return
 
   const requestSequence = ++routeUserProfileRequestSequence
   routeUserProfileAbortController?.abort()
-  routeUserProfileAbortController = new AbortController()
+  const controller = new AbortController()
+  routeUserProfileAbortController = controller
+  routeUserProfileInFlightId = userId
+  routeUserProfileLoadedId = null
   currentSection.value = 'user_profile'
   selectedUserForProfile.value = null
   routeUserProfileError.value = null
   isLoadingRouteUserProfile.value = true
   try {
     const user = await routeRequestJson<any>(`/api/users/${userId}`, {
-      signal: routeUserProfileAbortController.signal,
+      signal: controller.signal,
       errorContext: {
         surface: 'admin',
         scope: 'page',
@@ -207,10 +529,11 @@ async function loadRouteUserProfile(userId: number) {
     }
 
     selectedUserForProfile.value = user
+    routeUserProfileLoadedId = userId
     currentSection.value = 'user_profile'
   } catch (error) {
     if (requestSequence !== routeUserProfileRequestSequence || getRouteUserProfileId() !== userId) return
-    if (error instanceof DOMException && error.name === 'AbortError') return
+    if (isAbortError(error)) return
 
     if (isAppHttpError(error) && error.status === 403) {
       routeUserProfileError.value = {
@@ -231,6 +554,12 @@ async function loadRouteUserProfile(userId: number) {
   } finally {
     if (requestSequence === routeUserProfileRequestSequence) {
       isLoadingRouteUserProfile.value = false
+      if (routeUserProfileAbortController === controller) {
+        routeUserProfileAbortController = null
+      }
+      if (routeUserProfileInFlightId === userId) {
+        routeUserProfileInFlightId = null
+      }
     }
   }
 }
@@ -246,17 +575,24 @@ onMounted(() => {
   jwtToken.value = localStorage.getItem('auth_token')
   // Router guard handles redirect to login if token is missing/expired
   syncRouteToSection()
+  void nextTick(() => {
+    userDirectoryScrollTarget = resolveUserDirectoryScrollTarget()
+    userDirectoryScrollTarget?.addEventListener('scroll', captureUserDirectoryScroll, {
+      passive: true,
+    })
+    restoreUserDirectoryScroll()
+  })
 })
 
 watch(
-  () => [route.name, route.params?.id, route.query.section, route.query.user_id],
-  () => syncRouteToSection()
+  () => [route.name, route.params?.id, route.query],
+  () => syncRouteToSection(),
+  { deep: true },
 )
 
 function goToMenu() {
-  routeUserProfileRequestSequence += 1
-  routeUserProfileAbortController?.abort()
-  routeUserProfileAbortController = null
+  cancelRouteUserProfileRequest()
+  clearUserDirectoryScrollRestore()
   currentSection.value = 'menu'
   selectedUserForProfile.value = null
   routeUserProfileError.value = null
@@ -267,6 +603,24 @@ function goToMenu() {
   }
 }
 
+function handleAdminSubviewReturn() {
+  if (!isUserDirectoryProfileSubview.value) {
+    goToMenu()
+    return
+  }
+
+  captureUserDirectoryScroll(false)
+  queueUserDirectoryScrollRestore()
+  cancelRouteUserProfileRequest()
+  selectedUserForProfile.value = null
+  routeUserProfileError.value = null
+  popBackState()
+  void router.push({
+    name: 'admin-users',
+    query: buildUserDirectoryRouteQuery(),
+  })
+}
+
 function handleNavigate(section: string, data?: any) {
   if (routeAdminSections.has(section) && !canAccessAdminSection(section)) {
     goToMenu()
@@ -274,34 +628,69 @@ function handleNavigate(section: string, data?: any) {
   }
   
   if (section === 'user_profile' && data) {
-     const normalizedId = Number(data.id ?? data.user_id)
-     if (!Number.isInteger(normalizedId) || normalizedId <= 0) {
-       return
-     }
-     if (currentSection.value !== 'menu') {
-       // تغییر ساب‌پیج — جایگزینی state قبلی
-       popBackState()
-     }
-     selectedUserForProfile.value = data
-     currentSection.value = 'user_profile'
-     void router.push({
-       name: 'admin-user-profile',
-       params: { id: String(normalizedId) },
-       query: data.account_name ? { account_name: data.account_name } : {},
-     })
-     pushBackState(() => {
-       currentSection.value = 'menu'
-       selectedUserForProfile.value = null
-     })
-     return
+    const normalizedId = Number(data.id ?? data.user_id)
+    if (!Number.isInteger(normalizedId) || normalizedId <= 0) {
+      return
+    }
+    captureUserDirectoryScroll(false)
+    // Vue removes the list before the route change resolves. That can clamp the
+    // shared scroll container and emit an intermediate scroll event; keep the
+    // captured route context authoritative through the transition.
+    queueUserDirectoryScrollRestore()
+    if (currentSection.value !== 'menu') {
+      // تغییر ساب‌پیج — جایگزینی state قبلی
+      popBackState()
+    }
+    cancelRouteUserProfileRequest()
+    selectedUserForProfile.value = null
+    routeUserProfileError.value = null
+    currentSection.value = 'user_profile'
+    isLoadingRouteUserProfile.value = true
+    void router.push({
+      name: 'admin-user-profile',
+      params: { id: String(normalizedId) },
+      query: buildUserDirectoryRouteQuery(),
+    })
+    pushBackState(() => {
+      currentSection.value = 'menu'
+      selectedUserForProfile.value = null
+    })
+    return
   }
   
   if (section === 'admin_panel') {
     goToMenu()
   } else {
+    const isReturningFromUserProfile =
+      section === 'manage_users' && currentSection.value === 'user_profile'
+    if (isReturningFromUserProfile) {
+      // UserProfile can also request the directory return (for example after a
+      // bounded action). Keep its captured list context locked until the
+      // incoming directory has accepted a response, just like the shell back
+      // control above.
+      queueUserDirectoryScrollRestore()
+      popBackState()
+      cancelRouteUserProfileRequest()
+      selectedUserForProfile.value = null
+      routeUserProfileError.value = null
+      void router.push(getAdminRouteForSection(section))
+      pushBackState(() => {
+        currentSection.value = 'menu'
+        selectedUserForProfile.value = null
+      })
+      return
+    }
+    if (currentSection.value === 'user_profile') {
+      clearUserDirectoryScrollRestore()
+    }
     if (currentSection.value !== 'menu') {
       // تغییر ساب‌پیج — جایگزینی state قبلی
       popBackState()
+    }
+    if (currentSection.value === 'user_profile') {
+      cancelRouteUserProfileRequest()
+      selectedUserForProfile.value = null
+      routeUserProfileError.value = null
     }
     currentSection.value = section
     void router.push(getAdminRouteForSection(section))
@@ -335,8 +724,10 @@ function handleOpenPublicProfile(payload?: { id?: number; account_name?: string 
 }
 
 onUnmounted(() => {
-  routeUserProfileRequestSequence += 1
-  routeUserProfileAbortController?.abort()
+  cancelRouteUserProfileRequest()
+  clearUserDirectoryScrollRestore()
+  userDirectoryScrollTarget?.removeEventListener('scroll', captureUserDirectoryScroll)
+  userDirectoryScrollTarget = null
   clearBackStack()
 })
 </script>
@@ -363,8 +754,8 @@ onUnmounted(() => {
             <template #actions>
               <AppIconButton
                 class="admin-subview-return"
-                label="بازگشت به پنل مدیریت"
-                @click="handleNavigate('admin_panel')"
+                :label="adminSubviewReturnLabel"
+                @click="handleAdminSubviewReturn"
               >
                 <ChevronLeft :size="20" />
               </AppIconButton>
@@ -395,7 +786,10 @@ onUnmounted(() => {
                 v-else-if="currentSection === 'manage_users'"
                 :apiBaseUrl="apiBaseUrl"
                 :jwtToken="jwtToken"
+                :query="userDirectoryQuery"
                 @navigate="handleNavigate"
+                @query-change="handleUserDirectoryQueryChange"
+                @settled="handleUserDirectorySettled"
               />
 
               <AdminMessagesView
