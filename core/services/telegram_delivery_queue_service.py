@@ -964,9 +964,22 @@ async def enqueue_telegram_delivery_job(
     ):
         raise TelegramDeliveryQueueValidationError("channel_editor_route_not_allowlisted")
     if bot in TELEGRAM_PUBLISHER_BOT_IDENTITIES and (
-        destination_class != TelegramDestinationClass.CHANNEL
-        or normalized_method not in TELEGRAM_PUBLISHER_OWNER_REQUIRED_METHODS
-        or action not in TELEGRAM_PUBLISHER_OWNED_OFFER_ACTIONS
+        not (
+            (
+                destination_class == TelegramDestinationClass.CHANNEL
+                and normalized_method in TELEGRAM_PUBLISHER_OWNER_REQUIRED_METHODS
+                and action in TELEGRAM_PUBLISHER_OWNED_OFFER_ACTIONS
+            )
+            or (
+                destination_class == TelegramDestinationClass.PRIVATE
+                and normalized_method == "answerCallbackQuery"
+                and action
+                in {
+                    TelegramDeliveryAction.CALLBACK_DEADLINE,
+                    TelegramDeliveryAction.OFFER_EXPIRY_CALLBACK,
+                }
+            )
+        )
     ):
         raise TelegramDeliveryQueueValidationError("publisher_lane_route_not_allowlisted")
     if feeder == TelegramFeederKind.OFFER_EDIT:
@@ -1251,13 +1264,17 @@ async def claim_next_telegram_delivery_job(
     ]
     if lane_identity in TELEGRAM_PUBLISHER_BOT_IDENTITIES:
         claim_filters.append(
-            exists(
-                select(TelegramPublisherDispatchCommand.id).where(
-                    TelegramPublisherDispatchCommand.job_id
-                    == TelegramDeliveryJobRecord.id,
-                    TelegramPublisherDispatchCommand.publisher_bot_identity
-                    == lane_identity,
-                    TelegramPublisherDispatchCommand.state == "acknowledged",
+            or_(
+                TelegramDeliveryJobRecord.destination_class
+                == TelegramDestinationClass.PRIVATE,
+                exists(
+                    select(TelegramPublisherDispatchCommand.id).where(
+                        TelegramPublisherDispatchCommand.job_id
+                        == TelegramDeliveryJobRecord.id,
+                        TelegramPublisherDispatchCommand.publisher_bot_identity
+                        == lane_identity,
+                        TelegramPublisherDispatchCommand.state == "acknowledged",
+                    )
                 )
             )
         )

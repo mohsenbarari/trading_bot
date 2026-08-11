@@ -490,10 +490,16 @@ async def enqueue_current_offer_delivery(
                 publisher_bot_identity=selection.publisher_bot_identity,
             )
         queue_bot_identity = publisher or TELEGRAM_PRIMARY_BOT_IDENTITY
-    elif str(getattr(state, "publisher_bot_identity", "") or "").strip().startswith(
-        "publisher_"
-    ):
-        raise TelegramOfferQueueError("telegram_offer_queue_publisher_lifecycle_pending")
+    else:
+        publisher = str(getattr(state, "publisher_bot_identity", "") or "").strip()
+        if publisher.startswith("publisher_"):
+            if not b2b_dispatch_enabled:
+                raise TelegramOfferQueueError(
+                    "telegram_offer_queue_publisher_lifecycle_requires_b2b"
+                )
+            queue_bot_identity = publisher
+        elif publisher and publisher != TELEGRAM_PRIMARY_BOT_IDENTITY:
+            raise TelegramOfferQueueError("telegram_offer_queue_publisher_identity_invalid")
     feeder = (
         TelegramFeederKind.OFFER_CONTROL
         if is_publish
@@ -538,7 +544,7 @@ async def enqueue_current_offer_delivery(
             else None
         ),
     )
-    if is_publish and queue_bot_identity.startswith("publisher_"):
+    if queue_bot_identity.startswith("publisher_"):
         try:
             await get_or_create_telegram_publisher_dispatch_command(
                 db,

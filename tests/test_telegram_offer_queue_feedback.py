@@ -52,6 +52,7 @@ def make_job(action, **overrides):
         "next_retry_at": None,
         "outcome_reason": None,
         "terminal_at": None,
+        "bot_identity": "primary",
     }
     values.update(overrides)
     return SimpleNamespace(**values)

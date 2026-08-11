@@ -45,6 +45,7 @@ class TelegramDeliveryCallbackContractTests(unittest.IsolatedAsyncioTestCase):
         *,
         action=TelegramDeliveryAction.CALLBACK_DEADLINE,
         callback_query_id="callback-secret-id",
+        bot_identity="primary",
     ):
         now = utc_now()
         payload = build_telegram_callback_answer_payload(
@@ -62,7 +63,7 @@ class TelegramDeliveryCallbackContractTests(unittest.IsolatedAsyncioTestCase):
                 else TelegramFeederKind.DIRECT
             ),
             action_kind=action,
-            bot_identity="primary",
+            bot_identity=bot_identity,
             destination_key=telegram_callback_destination_key(
                 callback_query_id
             ),
@@ -186,6 +187,36 @@ class TelegramDeliveryCallbackContractTests(unittest.IsolatedAsyncioTestCase):
                     expired.outcome,
                     TelegramFreshnessOutcome.EXPIRED_INTERACTION,
                 )
+
+    async def test_publisher_callback_stays_on_the_receiving_publisher_lane(self):
+        received_at = utc_now()
+        expected = SimpleNamespace(created=True)
+        with patch.object(
+            queue_service,
+            "enqueue_telegram_delivery_job",
+            new=AsyncMock(return_value=expected),
+        ) as enqueue:
+            result = await queue_service.enqueue_telegram_callback_answer(
+                object(),
+                current_server="foreign",
+                callback_query_id="cb-publisher",
+                received_at=received_at,
+                action=TelegramDeliveryAction.OFFER_EXPIRY_CALLBACK,
+                bot_identity="publisher_4",
+            )
+
+        self.assertIs(result, expected)
+        self.assertEqual(enqueue.await_args.kwargs["bot_identity"], "publisher_4")
+        decision = await validate_telegram_callback_delivery_freshness(
+            object(),
+            self._job(
+                action=TelegramDeliveryAction.OFFER_EXPIRY_CALLBACK,
+                callback_query_id="cb-publisher",
+                bot_identity="publisher_4",
+            ),
+            utc_now(),
+        )
+        self.assertEqual(decision.outcome, TelegramFreshnessOutcome.SEND)
 
     async def test_tampered_callback_route_is_quarantined_and_guarded(self):
         job = self._job()

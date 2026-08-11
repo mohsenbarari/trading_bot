@@ -315,6 +315,9 @@ class TelegramOfferQueueLifecycleFeedback:
                     message_id=message_id,
                     chat_id=_configured_channel_id(),
                     now=now,
+                    publisher_bot_identity=str(
+                        getattr(job, "bot_identity", "primary") or "primary"
+                    ),
                 )
             else:
                 _mark_edit_success(

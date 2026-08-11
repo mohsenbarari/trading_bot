@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.services.telegram_delivery_queue_service import (
     TELEGRAM_PRIMARY_BOT_IDENTITY,
+    TELEGRAM_PUBLISHER_BOT_IDENTITIES,
     TelegramDeliveryEnqueueResult,
     enqueue_telegram_delivery_job,
 )
@@ -34,8 +35,15 @@ async def enqueue_telegram_callback_answer(
     action: TelegramDeliveryAction = TelegramDeliveryAction.CALLBACK_DEADLINE,
     text: Any = None,
     show_alert: bool = False,
+    bot_identity: str = TELEGRAM_PRIMARY_BOT_IDENTITY,
 ) -> TelegramDeliveryEnqueueResult:
-    """Insert one callback answer directly into the primary M0 queue."""
+    """Insert one callback answer on the bot that received that callback."""
+    owner = str(bot_identity or "").strip()
+    if owner not in {
+        TELEGRAM_PRIMARY_BOT_IDENTITY,
+        *TELEGRAM_PUBLISHER_BOT_IDENTITIES,
+    }:
+        raise ValueError("telegram_callback_bot_identity_invalid")
     payload = build_telegram_callback_answer_payload(
         callback_query_id=callback_query_id,
         text=text,
@@ -50,7 +58,7 @@ async def enqueue_telegram_callback_answer(
         ),
         source_version=1,
         action=action,
-        bot_identity=TELEGRAM_PRIMARY_BOT_IDENTITY,
+        bot_identity=owner,
         destination_key=telegram_callback_destination_key(
             payload["callback_query_id"]
         ),
