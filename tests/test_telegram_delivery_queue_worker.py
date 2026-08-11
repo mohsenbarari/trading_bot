@@ -445,6 +445,51 @@ class TelegramDeliveryQueueWorkerSafetyTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIs(log_error.call_args.args[2], failure)
 
+    async def test_dispatch_marker_retries_postgresql_serialization_before_provider_entry(self):
+        class SerializationError(Exception):
+            sqlstate = "40001"
+
+        db = AsyncMock()
+        context = MagicMock()
+        context.__aenter__ = AsyncMock(return_value=db)
+        context.__aexit__ = AsyncMock(return_value=False)
+        marker = AsyncMock(
+            side_effect=(
+                OperationalError("dispatch marker", {}, SerializationError()),
+                True,
+            )
+        )
+        sleep = AsyncMock()
+        guard = AsyncMock()
+
+        with patch(
+            "core.telegram_delivery_queue_worker.AsyncSessionLocal",
+            return_value=context,
+        ), patch(
+            "core.telegram_delivery_queue_worker.mark_telegram_delivery_dispatch_started",
+            new=marker,
+        ), patch(
+            "core.telegram_delivery_queue_worker.asyncio.sleep",
+            new=sleep,
+        ):
+            marked = await worker._mark_dispatch_started_with_transient_retry(
+                current_server_name="foreign",
+                job_id=71,
+                worker_id="publisher_1-general-0",
+                lease_token=9,
+                dispatch_guard=guard,
+                rate_limit_probe=False,
+                bot_identity="publisher_1",
+            )
+
+        self.assertTrue(marked)
+        self.assertEqual(marker.await_count, 2)
+        self.assertEqual(context.__aenter__.await_count, 2)
+        sleep.assert_awaited_once_with(
+            worker._DISPATCH_MARK_TRANSIENT_RETRY_BASE_SECONDS
+        )
+        db.commit.assert_awaited_once()
+
     async def test_provider_fact_recording_retries_database_outage_beyond_three_attempts(self):
         db = AsyncMock()
         context = MagicMock()

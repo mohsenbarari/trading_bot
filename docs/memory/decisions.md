@@ -2,6 +2,7 @@
 
 Entries are newest first.
 
+- 2026-08-11 | Queue-v1 retries only PostgreSQL serialization/deadlock aborts of the pre-provider dispatch marker, within the same unstarted fenced lease and with a bounded short backoff. Reason: the marker and external Telegram side effect have not occurred, so this preserves SERIALIZABLE authorization safety without wasting the shared channel cadence; all other database failures remain fail-closed.
 - 2026-08-11 | Queue-v1 retains an unstarted, fenced lease only through a short, absolute Redis cadence deadline; longer waits remain durable retries. Reason: re-claiming after `destination_gate` causes DB churn and misses the shared channel cadence, while holding a lease through provider cooldowns would starve lane capacity.
 - 2026-08-11 | Publication-candidate scans exclude an existing non-final `offer_control`/`offer_publish` job for the same offer. Reason: repeatedly deduplicating head rows delays central ingress behind channel delivery and can let queued offers age out before worker admission.
 - 2026-08-11 | Queue-v1 bot-interaction probes model the authenticated inbound message's private chat and positive message identity. Reason: the durable interaction adapter must reject an unanchored or cross-chat reply just as it does in production.
