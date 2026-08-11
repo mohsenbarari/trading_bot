@@ -72,6 +72,21 @@ def make_offer(**overrides):
 
 
 class TelegramOfferPublicationServiceTests(unittest.IsolatedAsyncioTestCase):
+    async def test_multi_publisher_initial_state_is_unassigned_until_feeder_selects_lane(self):
+        self.assertIsNone(
+            publication_service.initial_telegram_publication_publisher_identity(
+                multi_publisher_enabled=True,
+                b2b_dispatch_enabled=True,
+            )
+        )
+        self.assertEqual(
+            publication_service.initial_telegram_publication_publisher_identity(
+                multi_publisher_enabled=False,
+                b2b_dispatch_enabled=True,
+            ),
+            "primary",
+        )
+
     async def test_queue_owner_rejects_legacy_direct_publication_before_side_effects(self):
         offer = make_offer()
         db = FakeDB()

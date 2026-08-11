@@ -61,6 +61,23 @@ SENT_TELEGRAM_PUBLICATION_STATUSES = {
 }
 
 
+def initial_telegram_publication_publisher_identity(
+    *,
+    multi_publisher_enabled: bool,
+    b2b_dispatch_enabled: bool,
+) -> str | None:
+    """Leave a Queue-v1 publication unassigned until its B2B lane is chosen.
+
+    The offer queue feeder chooses and persists exactly one publisher lane for
+    a new multi-publisher publication.  Assigning ``primary`` while the offer
+    is created would bypass that selection and collapse every new post onto
+    the central bot.  Legacy and disabled-B2B routes keep their primary owner.
+    """
+    if bool(multi_publisher_enabled) and bool(b2b_dispatch_enabled):
+        return None
+    return TELEGRAM_PRIMARY_PUBLISHER_BOT_IDENTITY
+
+
 def _assert_legacy_direct_delivery_owner() -> None:
     assert_telegram_provider_execution_authority()
     runtime = configured_telegram_delivery_runtime()

@@ -259,9 +259,10 @@ class BotTradeCreateConfirmSuccessWholesaleTests(unittest.IsolatedAsyncioTestCas
 
         read_session.get = read_get
 
-        async def persist_intent(session, offer):
+        async def persist_intent(session, offer, **kwargs):
             self.assertIs(session, create_session)
             self.assertIs(offer, create_session.added[0])
+            self.assertEqual(kwargs["publisher_bot_identity"], "primary")
             session.events.append("intent")
             return SimpleNamespace(status="pending")
 
@@ -298,6 +299,9 @@ class BotTradeCreateConfirmSuccessWholesaleTests(unittest.IsolatedAsyncioTestCas
         ), patch(
             "bot.handlers.trade_create.configured_telegram_delivery_runtime",
             return_value=runtime,
+        ), patch(
+            "bot.handlers.trade_create.initial_telegram_publication_publisher_identity",
+            return_value="primary",
         ), patch(
             "bot.handlers.trade_create.get_or_create_telegram_publication_state",
             new=AsyncMock(side_effect=persist_intent),

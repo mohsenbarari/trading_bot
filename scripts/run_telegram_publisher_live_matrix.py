@@ -2,10 +2,10 @@
 """Run the approved real-channel Telegram publisher staging matrix.
 
 Unlike the B2B transport matrix, this program creates real offers through the
-bot handler and WebApp router.  Queue-v1's normal feeder, five publisher
-workers, Telegram provider calls, expiry worker, and lifecycle edit feeder do
-the work.  The runner only observes durable records and writes a redacted,
-per-offer timeline to the staging audit volume.
+authoritative bot-confirmation domain path and the WebApp router.  Queue-v1's
+normal feeder, five publisher workers, Telegram provider calls, expiry worker,
+and lifecycle edit feeder do the work.  The runner only observes durable
+records and writes a redacted, per-offer timeline to the staging audit volume.
 
 It is deliberately staging-only and fail-closed.  A crash never deletes test
 offers or queue evidence: operators can inspect the audit artifact and the
@@ -355,7 +355,6 @@ async def _observe_webapp_visibility(timeline: OfferTimeline) -> None:
 async def _create_offer(
     *,
     worker: Any,
-    harness: Any,
     user: Any,
     commodity_id: int,
     commodity_name: str,
@@ -364,15 +363,79 @@ async def _create_offer(
 ) -> None:
     timeline.registration_started_at = _iso(_utcnow())
     if timeline.origin == "bot":
-        offer_id = await worker.create_bot_offer_with_dispatcher(
-            harness=harness,
-            owner=user,
+        # The in-container Aiogram recording harness is intentionally unable
+        # to emulate the production root router ordering.  Exercise the same
+        # atomic persistence half of the real confirmation handler instead:
+        # its parser was already validated by the bot interaction probe below,
+        # and this transaction is the durable offer/publication obligation.
+        from bot.utils.offer_parser import parse_offer_text
+        from core.offer_source import OfferSourceSurface
+        from core.services.offer_creation_service import (
+            OfferCreationCommand,
+            OfferCreationQuotaPolicy,
+            create_authoritative_offer_with_outcome,
+        )
+        from core.services.telegram_offer_publication_service import (
+            get_or_create_telegram_publication_state,
+            initial_telegram_publication_publisher_identity,
+        )
+        from models.offer import OfferStatus, OfferType
+
+        text_value, _marker = worker.build_bot_offer_text(
+            owner_user_id=user.user_id,
             commodity_name=commodity_name,
             prefix=f"{run_id}-{timeline.index:04d}",
             quantity=5,
             price=100000,
             offer_type="sell",
         )
+        parsed, parse_error = await parse_offer_text(text_value)
+        if parsed is None or parse_error is not None:
+            raise LiveMatrixError("live_matrix_bot_offer_parse_failed")
+        trading_settings = await get_trading_settings_async()
+        async with AsyncSessionLocal() as db:
+            outcome = await create_authoritative_offer_with_outcome(
+                db,
+                OfferCreationCommand(
+                    source_surface=OfferSourceSurface.TELEGRAM_BOT,
+                    owner_user_id=user.user_id,
+                    actor_user_id=user.user_id,
+                    offer_type=(
+                        OfferType.BUY if parsed.trade_type == "buy" else OfferType.SELL
+                    ),
+                    settlement_type=parsed.settlement_type,
+                    commodity_id=parsed.commodity_id,
+                    quantity=parsed.quantity,
+                    price=parsed.price,
+                    is_wholesale=parsed.is_wholesale,
+                    lot_sizes=parsed.lot_sizes,
+                    original_lot_sizes=parsed.lot_sizes,
+                    notes=parsed.notes,
+                    status=OfferStatus.ACTIVE,
+                ),
+                commit=False,
+                refresh=False,
+                validate_market=True,
+                enforce_market_admission=True,
+                quota_policy=OfferCreationQuotaPolicy(
+                    max_active_offers=int(trading_settings.max_active_offers),
+                ),
+            )
+            await db.flush()
+            await get_or_create_telegram_publication_state(
+                db,
+                outcome.offer,
+                publisher_bot_identity=initial_telegram_publication_publisher_identity(
+                    multi_publisher_enabled=bool(
+                        getattr(settings, "telegram_multi_publisher_enabled", False)
+                    ),
+                    b2b_dispatch_enabled=bool(
+                        getattr(settings, "telegram_b2b_dispatch_enabled", False)
+                    ),
+                ),
+            )
+            await db.commit()
+            offer_id = int(outcome.offer.id)
     elif timeline.origin == "webapp":
         with override_current_server(SERVER_IRAN):
             offer_id = await worker.create_offer_for_user(
@@ -396,7 +459,6 @@ async def _create_offer(
 async def _run_user_interactions(
     *,
     worker: Any,
-    harness: Any,
     users: Sequence[Any],
     workload: MatrixWorkload,
     started_monotonic: float,
@@ -420,11 +482,20 @@ async def _run_user_interactions(
         user = users[(index - 1) % len(users)]
         try:
             if origin == "bot":
-                result = await worker.execute_bot_market_view_with_dispatcher(
-                    harness=harness,
-                    user=user,
+                _commodity_id, commodity_name = await worker.resolve_commodity()
+                text_value, _marker = worker.build_bot_offer_text(
+                    owner_user_id=user.user_id,
+                    commodity_name=commodity_name,
+                    prefix=f"{run.run_id}-interaction-{index}",
+                    quantity=5,
+                    price=100000,
+                    offer_type="sell",
                 )
-                if result != "success":
+                probe = await worker.run_bot_text_handler_probe(
+                    user_id=user.user_id,
+                    text_value=text_value,
+                )
+                if not bool(probe.get("state_set")):
                     raise LiveMatrixError("live_matrix_bot_interaction_failed")
             else:
                 with override_current_server(SERVER_IRAN):
@@ -584,8 +655,6 @@ async def run_live_matrix(args: argparse.Namespace) -> dict[str, Any]:
         expected_expiry_minutes=MATRIX_OFFER_EXPIRY_MINUTES,
     )
     report_path = _audit_path(run_id)
-    main_harness = None
-    interaction_harness = None
     interaction_task: asyncio.Task[None] | None = None
     visibility_tasks: list[asyncio.Task[None]] = []
     try:
@@ -600,8 +669,6 @@ async def run_live_matrix(args: argparse.Namespace) -> dict[str, Any]:
 
         users = await worker.create_load_fixture_users(run_id, user_count=MATRIX_TOTAL_OFFERS)
         commodity_id, commodity_name = await worker.resolve_commodity()
-        main_harness = worker.AiogramDispatcherHarness()
-        interaction_harness = worker.AiogramDispatcherHarness()
         started_monotonic = time.monotonic()
         started_at = _utcnow()
         run.phase = "ingress"
@@ -609,7 +676,6 @@ async def run_live_matrix(args: argparse.Namespace) -> dict[str, Any]:
             interaction_task = asyncio.create_task(
                 _run_user_interactions(
                     worker=worker,
-                    harness=interaction_harness,
                     users=users,
                     workload=workload,
                     started_monotonic=started_monotonic,
@@ -631,7 +697,6 @@ async def run_live_matrix(args: argparse.Namespace) -> dict[str, Any]:
                 run.timelines.append(timeline)
                 await _create_offer(
                     worker=worker,
-                    harness=main_harness,
                     user=users[index - 1],
                     commodity_id=commodity_id,
                     commodity_name=commodity_name,
@@ -667,10 +732,6 @@ async def run_live_matrix(args: argparse.Namespace) -> dict[str, Any]:
             await asyncio.gather(interaction_task, return_exceptions=True)
         if visibility_tasks:
             await asyncio.gather(*visibility_tasks, return_exceptions=True)
-        if main_harness is not None:
-            await main_harness.close()
-        if interaction_harness is not None:
-            await interaction_harness.close()
         await _hydrate_timelines(run.timelines)
         _write_audit(run)
     payload = _report_payload(run)

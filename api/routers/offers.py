@@ -39,6 +39,7 @@ from core.services.telegram_offer_channel_service import (
 from core.services.telegram_offer_publication_service import (
     TelegramOfferSendResult,
     get_or_create_telegram_publication_state,
+    initial_telegram_publication_publisher_identity,
     publish_offer_to_telegram_channel_once,
     telegram_offer_send_result_from_gateway,
 )
@@ -1487,7 +1488,18 @@ async def create_offer(
             # the same transaction on either home server.  The shared state is
             # then synced; only foreign is allowed to execute Telegram work.
             await db.flush()
-            await get_or_create_telegram_publication_state(db, new_offer)
+            await get_or_create_telegram_publication_state(
+                db,
+                new_offer,
+                publisher_bot_identity=initial_telegram_publication_publisher_identity(
+                    multi_publisher_enabled=bool(
+                        getattr(settings, "telegram_multi_publisher_enabled", False)
+                    ),
+                    b2b_dispatch_enabled=bool(
+                        getattr(settings, "telegram_b2b_dispatch_enabled", False)
+                    ),
+                ),
+            )
             await db.commit()
     except MarketOfferAdmissionError as exc:
         await _raise_market_offer_admission_rejection(
@@ -1542,7 +1554,18 @@ async def create_offer(
         if queue_owns_telegram_delivery:
             # The winner may have committed between this request's insert and
             # rollback.  Ensure its durable intent exists before replaying the
-            await get_or_create_telegram_publication_state(db, existing_offer)
+            await get_or_create_telegram_publication_state(
+                db,
+                existing_offer,
+                publisher_bot_identity=initial_telegram_publication_publisher_identity(
+                    multi_publisher_enabled=bool(
+                        getattr(settings, "telegram_multi_publisher_enabled", False)
+                    ),
+                    b2b_dispatch_enabled=bool(
+                        getattr(settings, "telegram_b2b_dispatch_enabled", False)
+                    ),
+                ),
+            )
             await db.commit()
         from core.trading_settings import get_trading_settings_async
 

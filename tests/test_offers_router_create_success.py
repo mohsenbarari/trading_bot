@@ -861,9 +861,10 @@ class OffersRouterCreateSuccessTests(unittest.IsolatedAsyncioTestCase):
         )
         async_settings = SimpleNamespace(offer_expiry_minutes=30)
 
-        async def persist_intent(intent_db, offer):
+        async def persist_intent(intent_db, offer, **kwargs):
             self.assertIs(intent_db, db)
             self.assertIs(offer, db.added[0])
+            self.assertEqual(kwargs["publisher_bot_identity"], "primary")
             db.events.append("intent")
             return SimpleNamespace(status="pending")
 
@@ -891,6 +892,9 @@ class OffersRouterCreateSuccessTests(unittest.IsolatedAsyncioTestCase):
         ), patch(
             "api.routers.offers.configured_telegram_delivery_producer_mode",
             return_value=TelegramDeliveryRuntimeMode.QUEUE_V1,
+        ), patch(
+            "api.routers.offers.initial_telegram_publication_publisher_identity",
+            return_value="primary",
         ), patch(
             "api.routers.offers.get_or_create_telegram_publication_state",
             new=AsyncMock(side_effect=persist_intent),
