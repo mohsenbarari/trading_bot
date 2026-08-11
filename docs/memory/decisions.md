@@ -2,7 +2,7 @@
 
 Entries are newest first.
 
-- 2026-08-11 | A publisher dispatch command is durably paired 1:1 with its publisher-owned delivery job; database guards make the Telegram publisher and message identity immutable. Reason: retries, sync, and rollback must not reroute a live post to another bot.
+- 2026-08-11 | A publisher dispatch command is durably paired 1:1 with its publisher-owned delivery job; publisher jobs require an acknowledged command, and database guards make owner/message identity immutable. Reason: retries, sync, and rollback must not reroute or prematurely execute a live post.
 - 2026-08-11 | Multi-publisher configuration is all-or-nothing: each of five lanes has a distinct token plus expected bot ID/username and required capabilities; offer lifecycle remains on `primary` until ownership migration. Reason: avoid cross-bot edits and partial lane activation.
 - 2026-08-11 | Telegram channel delivery will evolve to central ingress, a durable internal command record, B2B dispatch/receipt, and a publisher lane fixed at first publish. Reason: recovery/idempotency must remain internal and interactive posts cannot safely cross-edit between bots.
 - 2026-08-11 | Staged project memory is checked by a dependency-free pre-commit guard, and local `.env*.local` files are excluded from Git. Reason: prevent credential-like and personal data from entering durable memory or commits.

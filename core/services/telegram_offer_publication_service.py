@@ -15,6 +15,7 @@ from core.config import settings
 from core.offer_identity import ensure_offer_public_id
 from core.server_routing import SERVER_FOREIGN, current_server
 from core.services.offer_publication_state_service import (
+    TELEGRAM_PRIMARY_PUBLISHER_BOT_IDENTITY,
     apply_publication_state_update,
     build_offer_publication_state,
     canonical_telegram_publication_identity,
@@ -290,6 +291,8 @@ async def load_telegram_publication_state_for_update(
 async def get_or_create_telegram_publication_state(
     db: AsyncSession,
     offer: Any,
+    *,
+    publisher_bot_identity: str | None = TELEGRAM_PRIMARY_PUBLISHER_BOT_IDENTITY,
 ) -> OfferPublicationState:
     state = await load_telegram_publication_state_for_update(db, offer)
     if state is not None:
@@ -299,6 +302,7 @@ async def get_or_create_telegram_publication_state(
         offer,
         OfferPublicationSurface.TELEGRAM_CHANNEL,
         status=OfferPublicationStatus.PENDING,
+        publisher_bot_identity=publisher_bot_identity,
     )
     try:
         async with db.begin_nested():

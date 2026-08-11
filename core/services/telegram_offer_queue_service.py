@@ -15,9 +15,17 @@ from sqlalchemy import and_, case, false, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased, selectinload
 
+from core.config import settings
 from core.server_routing import SERVER_FOREIGN
 from core.services.offer_publication_state_service import (
     canonical_telegram_publication_identity,
+    ensure_telegram_publication_publisher_identity,
+)
+from core.services.telegram_publisher_dispatch_service import (
+    TelegramPublisherDispatchError,
+    get_or_create_telegram_publisher_dispatch_command,
+    healthy_telegram_publisher_lane_identities,
+    select_telegram_publisher_lane_for_job,
 )
 from core.services.telegram_delivery_queue_service import (
     TELEGRAM_PRIMARY_BOT_IDENTITY,
@@ -124,6 +132,13 @@ def configured_offer_edit_bot_identity() -> str:
     ownership is introduced in a later migration stage.
     """
     return TELEGRAM_PRIMARY_BOT_IDENTITY
+
+
+def _telegram_b2b_dispatch_enabled() -> bool:
+    return bool(
+        getattr(settings, "telegram_multi_publisher_enabled", False)
+        and getattr(settings, "telegram_b2b_dispatch_enabled", False)
+    )
 
 
 def _normalized_fresh_success_counts(value: Any) -> dict[int, int]:
@@ -398,8 +413,13 @@ async def enqueue_current_offer_delivery(
     if not offer_public_id or source_version is None:
         raise TelegramOfferQueueError("telegram_offer_queue_source_invalid")
 
+    b2b_dispatch_enabled = _telegram_b2b_dispatch_enabled()
     if state is None:
-        state = await get_or_create_telegram_publication_state(db, offer)
+        state = await get_or_create_telegram_publication_state(
+            db,
+            offer,
+            publisher_bot_identity=None if b2b_dispatch_enabled else TELEGRAM_PRIMARY_BOT_IDENTITY,
+        )
 
     selected_action = action or offer_delivery_action(offer, state)
     if selected_action is None:
@@ -450,6 +470,30 @@ async def enqueue_current_offer_delivery(
         now=current_time,
     )
     is_publish = selected_action in OFFER_PUBLISH_ACTIONS
+    queue_bot_identity = configured_offer_edit_bot_identity()
+    if is_publish:
+        publisher = str(getattr(state, "publisher_bot_identity", "") or "").strip()
+        if not publisher and b2b_dispatch_enabled:
+            try:
+                selection = await select_telegram_publisher_lane_for_job(
+                    db,
+                    healthy_publishers=healthy_telegram_publisher_lane_identities(),
+                    round_robin_sequence=_positive_int(
+                        getattr(offer, "id", None)
+                    )
+                    or source_version,
+                )
+            except TelegramPublisherDispatchError as exc:
+                raise TelegramOfferQueueError(str(exc)) from exc
+            publisher = ensure_telegram_publication_publisher_identity(
+                state,
+                publisher_bot_identity=selection.publisher_bot_identity,
+            )
+        queue_bot_identity = publisher or TELEGRAM_PRIMARY_BOT_IDENTITY
+    elif str(getattr(state, "publisher_bot_identity", "") or "").strip().startswith(
+        "publisher_"
+    ):
+        raise TelegramOfferQueueError("telegram_offer_queue_publisher_lifecycle_pending")
     feeder = (
         TelegramFeederKind.OFFER_CONTROL
         if is_publish
@@ -474,11 +518,7 @@ async def enqueue_current_offer_delivery(
         source_natural_id=offer_public_id,
         source_version=source_version,
         action=selected_action,
-        bot_identity=(
-            TELEGRAM_PRIMARY_BOT_IDENTITY
-            if is_publish
-            else configured_offer_edit_bot_identity()
-        ),
+        bot_identity=queue_bot_identity,
         destination_key=telegram_channel_destination_key(channel_id),
         destination_class=TelegramDestinationClass.CHANNEL,
         method="sendMessage" if is_publish else "editMessageText",
@@ -498,6 +538,17 @@ async def enqueue_current_offer_delivery(
             else None
         ),
     )
+    if is_publish and queue_bot_identity.startswith("publisher_"):
+        try:
+            await get_or_create_telegram_publisher_dispatch_command(
+                db,
+                current_server=current_server,
+                job=queue_result.job,
+                publisher_bot_identity=queue_bot_identity,
+                now=current_time,
+            )
+        except TelegramPublisherDispatchError as exc:
+            raise TelegramOfferQueueError(str(exc)) from exc
     return TelegramOfferQueueHandoffResult(
         offer_public_id=offer_public_id,
         action=selected_action,

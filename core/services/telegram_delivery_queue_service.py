@@ -54,6 +54,7 @@ from core.telegram_multi_publisher_contract import (
 )
 from core.telegram_gateway import TelegramGatewayResult
 from models.telegram_delivery_job import TelegramDeliveryJobRecord
+from models.telegram_publisher_dispatch_command import TelegramPublisherDispatchCommand
 from models.telegram_delivery_feeder_state import TelegramDeliveryFeederState
 from models.telegram_delivery_provider_outcome import (
     TELEGRAM_PROVIDER_OUTCOME_APPLIED,
@@ -1248,6 +1249,18 @@ async def claim_next_telegram_delivery_job(
         ~resume_incomplete,
         ~runtime_gate_blocked,
     ]
+    if lane_identity in TELEGRAM_PUBLISHER_BOT_IDENTITIES:
+        claim_filters.append(
+            exists(
+                select(TelegramPublisherDispatchCommand.id).where(
+                    TelegramPublisherDispatchCommand.job_id
+                    == TelegramDeliveryJobRecord.id,
+                    TelegramPublisherDispatchCommand.publisher_bot_identity
+                    == lane_identity,
+                    TelegramPublisherDispatchCommand.state == "acknowledged",
+                )
+            )
+        )
     if normalized_destination_classes is not None:
         claim_filters.append(
             TelegramDeliveryJobRecord.destination_class.in_(
