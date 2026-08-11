@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 from scripts.run_telegram_publisher_live_matrix import (
     MATRIX_INGRESS_INTERVAL_SECONDS,
+    _initial_publication_complete,
     _is_ignorable_historical_private_job,
     _retail_lot_sizes,
     build_live_matrix_workload,
@@ -94,6 +95,19 @@ class TelegramPublisherLiveMatrixTests(unittest.TestCase):
         self.assertEqual(_retail_lot_sizes(5), (5, 5, 5))
         self.assertEqual(_retail_lot_sizes("7"), (7, 7, 7))
         self.assertEqual(_retail_lot_sizes(None), (1, 1, 1))
+
+    def test_initial_publication_requires_all_posts_before_any_expiry(self):
+        self.assertFalse(
+            _initial_publication_complete(posted_count=999, expired_count=0)
+        )
+        self.assertTrue(
+            _initial_publication_complete(posted_count=1000, expired_count=0)
+        )
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "expired_before_initial_publication",
+        ):
+            _initial_publication_complete(posted_count=999, expired_count=1)
 
 
 if __name__ == "__main__":

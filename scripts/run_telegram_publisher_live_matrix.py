@@ -1110,9 +1110,15 @@ async def _monitor_lifecycle_progress(
     run: MatrixRun,
     stop: asyncio.Event,
 ) -> None:
-    """Keep the redacted audit current while timed lifecycle actions run."""
+    """Checkpoint lifecycle actions without competing with queue workers.
+
+    The durable queue records already hold every timestamp needed for the
+    final per-offer audit.  Hydrating one thousand offers, jobs, publication
+    states, and B2B commands every few seconds adds avoidable read pressure to
+    the same staging database being measured.  Keep the in-memory action
+    checkpoint current here and perform a full hydration at a phase boundary.
+    """
     while not stop.is_set():
-        await _hydrate_timelines(run.timelines)
         _write_audit(run)
         try:
             await asyncio.wait_for(stop.wait(), timeout=MATRIX_PROGRESS_POLL_SECONDS)
@@ -1177,14 +1183,120 @@ async def _run_lifecycle_actions(
         await harness.close()
 
 
-def _progress_snapshot(run: MatrixRun) -> tuple[int, int, int, int]:
-    rows = run.timelines
-    return (
-        sum(item.central_queue_entered_at is not None for item in rows),
-        sum(item.channel_post_state == _SENT_STATE for item in rows),
-        sum(item.offer_status == item.expected_terminal_status for item in rows),
-        sum(item.terminal_edit_state == _SENT_STATE for item in rows),
+def _initial_publication_complete(
+    *,
+    posted_count: int,
+    expired_count: int,
+) -> bool:
+    """Validate the hard no-lifecycle-before-initial-publication boundary."""
+    if int(expired_count) > 0:
+        raise LiveMatrixError("live_matrix_offer_expired_before_initial_publication")
+    return int(posted_count) == MATRIX_TOTAL_OFFERS
+
+
+async def _initial_publication_progress(
+    timelines: Iterable[OfferTimeline],
+) -> tuple[int, int]:
+    """Return lightweight durable counts while the initial channel backlog drains."""
+    public_ids = tuple(
+        str(item.offer_public_id)
+        for item in timelines
+        if item.offer_public_id
     )
+    offer_ids = tuple(int(item.offer_id) for item in timelines if item.offer_id)
+    if not public_ids or not offer_ids:
+        return 0, 0
+    async with AsyncSessionLocal() as db:
+        posted_count = int(
+            await db.scalar(
+                select(func.count(TelegramDeliveryJobRecord.id)).where(
+                    TelegramDeliveryJobRecord.source_natural_id.in_(public_ids),
+                    TelegramDeliveryJobRecord.action_kind == _INITIAL_ACTION,
+                    TelegramDeliveryJobRecord.state == TelegramDeliveryState.SENT,
+                )
+            )
+            or 0
+        )
+        expired_count = int(
+            await db.scalar(
+                select(func.count(Offer.id)).where(
+                    Offer.id.in_(offer_ids),
+                    Offer.status == OfferStatus.EXPIRED,
+                )
+            )
+            or 0
+        )
+    return posted_count, expired_count
+
+
+async def _terminal_progress_snapshot(run: MatrixRun) -> tuple[int, int, int, int]:
+    """Read only the aggregate queue/domain facts needed by the progress loop."""
+    public_ids = tuple(
+        str(item.offer_public_id)
+        for item in run.timelines
+        if item.offer_public_id
+    )
+    completed_ids = tuple(
+        int(item.offer_id)
+        for item in run.timelines
+        if item.offer_id and item.expected_terminal_status == OfferStatus.COMPLETED.value
+    )
+    expired_ids = tuple(
+        int(item.offer_id)
+        for item in run.timelines
+        if item.offer_id and item.expected_terminal_status == OfferStatus.EXPIRED.value
+    )
+    if not public_ids:
+        return 0, 0, 0, 0
+    async with AsyncSessionLocal() as db:
+        queue_count = int(
+            await db.scalar(
+                select(func.count(TelegramDeliveryJobRecord.id)).where(
+                    TelegramDeliveryJobRecord.source_natural_id.in_(public_ids),
+                    TelegramDeliveryJobRecord.action_kind == _INITIAL_ACTION,
+                )
+            )
+            or 0
+        )
+        posted_count = int(
+            await db.scalar(
+                select(func.count(TelegramDeliveryJobRecord.id)).where(
+                    TelegramDeliveryJobRecord.source_natural_id.in_(public_ids),
+                    TelegramDeliveryJobRecord.action_kind == _INITIAL_ACTION,
+                    TelegramDeliveryJobRecord.state == TelegramDeliveryState.SENT,
+                )
+            )
+            or 0
+        )
+        completed_count = int(
+            await db.scalar(
+                select(func.count(Offer.id)).where(
+                    Offer.id.in_(completed_ids or (-1,)),
+                    Offer.status == OfferStatus.COMPLETED,
+                )
+            )
+            or 0
+        )
+        expired_count = int(
+            await db.scalar(
+                select(func.count(Offer.id)).where(
+                    Offer.id.in_(expired_ids or (-1,)),
+                    Offer.status == OfferStatus.EXPIRED,
+                )
+            )
+            or 0
+        )
+        edited_count = int(
+            await db.scalar(
+                select(func.count(TelegramDeliveryJobRecord.id)).where(
+                    TelegramDeliveryJobRecord.source_natural_id.in_(public_ids),
+                    TelegramDeliveryJobRecord.action_kind.in_(tuple(_TERMINAL_ACTIONS)),
+                    TelegramDeliveryJobRecord.state == TelegramDeliveryState.SENT,
+                )
+            )
+            or 0
+        )
+    return queue_count, posted_count, completed_count + expired_count, edited_count
 
 
 async def _wait_for_initial_publication(run: MatrixRun) -> None:
@@ -1192,10 +1304,13 @@ async def _wait_for_initial_publication(run: MatrixRun) -> None:
     last_posted = -1
     last_progress_at = time.monotonic()
     while True:
-        await _hydrate_timelines(run.timelines)
-        _write_audit(run)
-        posted_count = sum(item.channel_post_state == _SENT_STATE for item in run.timelines)
-        if posted_count == MATRIX_TOTAL_OFFERS:
+        posted_count, expired_count = await _initial_publication_progress(run.timelines)
+        if _initial_publication_complete(
+            posted_count=posted_count,
+            expired_count=expired_count,
+        ):
+            await _hydrate_timelines(run.timelines)
+            _write_audit(run)
             return
         if posted_count > last_posted:
             last_posted = posted_count
@@ -1207,12 +1322,10 @@ async def _wait_for_initial_publication(run: MatrixRun) -> None:
 
 async def _wait_for_terminal_lifecycle(run: MatrixRun) -> None:
     """Wait without a wall-clock cap; fail only when an expected active phase stalls."""
-    last_progress = _progress_snapshot(run)
+    last_progress = await _terminal_progress_snapshot(run)
     last_progress_at = time.monotonic()
     while True:
-        await _hydrate_timelines(run.timelines)
-        _write_audit(run)
-        progress = _progress_snapshot(run)
+        progress = await _terminal_progress_snapshot(run)
         if progress != last_progress:
             last_progress = progress
             last_progress_at = time.monotonic()
@@ -1223,6 +1336,7 @@ async def _wait_for_terminal_lifecycle(run: MatrixRun) -> None:
             and terminal_count == MATRIX_TOTAL_OFFERS
             and edited_count == MATRIX_TOTAL_OFFERS
         ):
+            await _hydrate_timelines(run.timelines)
             await asyncio.gather(
                 *[
                     _observe_webapp_visibility(timeline, terminal=True)
@@ -1344,7 +1458,6 @@ async def run_live_matrix(args: argparse.Namespace) -> dict[str, Any]:
                 if delay > 0:
                     await asyncio.sleep(delay)
                 if index % 25 == 0:
-                    await _hydrate_timelines(run.timelines)
                     _write_audit(run)
             await asyncio.gather(*visibility_tasks)
             visibility_tasks = []
