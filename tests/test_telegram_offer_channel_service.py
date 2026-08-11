@@ -1,5 +1,5 @@
 import unittest
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -51,6 +51,20 @@ def make_offer(**overrides):
 
 
 class TelegramOfferChannelServiceTests(unittest.IsolatedAsyncioTestCase):
+    def test_lifecycle_projection_accepts_aware_clock_with_database_offer_timestamp(self):
+        now = datetime(2026, 8, 11, 19, 0, tzinfo=timezone.utc)
+        projection = channel_service.project_offer_channel_lifecycle(
+            make_offer(
+                status=OfferStatus.ACTIVE,
+                created_at=now - timedelta(minutes=3),
+                overtime_minutes_snapshot=0,
+            ),
+            normal_lifetime_minutes=2,
+            as_of=now,
+        )
+
+        self.assertEqual(projection.phase.value, "final_tail")
+
     def test_zero_remaining_quantity_never_builds_trade_buttons(self):
         self.assertIsNone(channel_service.build_offer_channel_reply_markup(make_offer()))
 

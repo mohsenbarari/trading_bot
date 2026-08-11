@@ -200,11 +200,17 @@ def project_offer_channel_lifecycle(
     An ACTIVE offer past the final deadline is treated as final-tail: expiry
     would otherwise have terminalized it already.
     """
-    from datetime import datetime
+    from datetime import datetime, timezone
 
     from core.offer_lifecycle import compute_lifecycle_deadlines, project_offer_lifecycle
 
-    now = as_of if isinstance(as_of, datetime) else datetime.utcnow()
+    now = (
+        as_of
+        if isinstance(as_of, datetime)
+        else datetime.now(timezone.utc).replace(tzinfo=None)
+    )
+    if now.tzinfo is not None and now.utcoffset() is not None:
+        now = now.astimezone(timezone.utc).replace(tzinfo=None)
     _normal_deadline, final_deadline = compute_lifecycle_deadlines(
         getattr(offer, "created_at", None),
         normal_lifetime_minutes=int(normal_lifetime_minutes or 0),
