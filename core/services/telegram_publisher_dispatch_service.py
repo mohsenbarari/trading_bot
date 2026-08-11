@@ -349,12 +349,6 @@ async def record_telegram_publisher_dispatch_result(
         command.last_error_message = None
     command.updated_at = current_time
     await db.flush()
-    metrics_registry.observe(
-        "telegram_publisher_b2b_ack_lag_ms",
-        "Lag from durable B2B command creation to publisher acknowledgement.",
-        max(0.0, (current_time - _utc(command.created_at)).total_seconds() * 1000),
-        lane=publisher,
-    )
     return True
 
 
@@ -477,6 +471,12 @@ async def accept_telegram_publisher_acknowledgement(
     command.next_retry_at = None
     command.updated_at = current_time
     await db.flush()
+    metrics_registry.observe(
+        "telegram_publisher_b2b_ack_lag_ms",
+        "Lag from durable B2B command creation to publisher acknowledgement.",
+        max(0.0, (current_time - _utc(command.created_at)).total_seconds() * 1000),
+        lane=publisher,
+    )
     return True
 
 

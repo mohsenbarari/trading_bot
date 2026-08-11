@@ -2,13 +2,15 @@ from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 import unittest
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 from core.telegram_gateway import TelegramGatewayResult
 from core.services.telegram_publisher_dispatch_service import (
     TelegramPublisherDispatchError,
+    accept_telegram_publisher_acknowledgement,
     accept_telegram_publisher_dispatch,
     dispatch_claimed_telegram_publisher_command,
+    record_telegram_publisher_dispatch_result,
     render_telegram_publisher_dispatch,
     select_telegram_publisher_lane,
     TelegramPublisherDispatchLease,
@@ -51,6 +53,11 @@ def _command(*, state="pending"):
         receipt_received_at=None,
         lease_until=None,
         next_retry_at=None,
+        lease_token=4,
+        attempt_count=0,
+        sent_at=None,
+        last_error_class=None,
+        last_error_message=None,
         updated_at=None,
     )
 
@@ -158,6 +165,66 @@ class TelegramPublisherDispatchServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload["chat_id"], 303)
         self.assertEqual(payload["text"], render_telegram_publisher_dispatch(command))
         self.assertEqual(gateway.await_args.kwargs["idempotency_key"], "telegram-b2b:123e4567-e89b-12d3-a456-426614174000:2")
+
+    async def test_dispatch_result_records_send_without_using_ack_metric(self):
+        command = _command()
+        db = _DB(command)
+        result = TelegramGatewayResult(
+            ok=True,
+            method="sendMessage",
+            status_code=200,
+            response_json={"ok": True, "result": {"message_id": 9}},
+        )
+
+        with patch(
+            "core.services.telegram_publisher_dispatch_service.metrics_registry.observe"
+        ) as observe:
+            recorded = await record_telegram_publisher_dispatch_result(
+                db,
+                current_server="foreign",
+                command_id=command.command_id,
+                lease_token=4,
+                result=result,
+                retry_after_seconds=1,
+                acknowledgement_timeout_seconds=15,
+                now=NOW,
+            )
+
+        self.assertTrue(recorded)
+        self.assertEqual(command.state, "sent")
+        self.assertEqual(command.sent_at, NOW)
+        observe.assert_not_called()
+        db.flush.assert_awaited_once()
+
+    async def test_primary_acknowledgement_records_ack_lag_once(self):
+        command = _command(state="sent")
+        db = _DB(command)
+        text = render_telegram_publisher_b2b_envelope(
+            TelegramPublisherB2BEnvelope(
+                message_type=TelegramPublisherB2BMessageType.ACK,
+                command_id=command.command_id,
+                sequence=command.dispatch_sequence,
+                enqueued_at=NOW,
+                ack_sent_at=NOW,
+            )
+        )
+
+        with patch(
+            "core.services.telegram_publisher_dispatch_service.metrics_registry.observe"
+        ) as observe:
+            accepted = await accept_telegram_publisher_acknowledgement(
+                db,
+                current_server="foreign",
+                sender_bot_id=303,
+                publisher_bot_ids={"publisher_3": 303},
+                text=text,
+                now=NOW,
+            )
+
+        self.assertTrue(accepted)
+        self.assertEqual(command.state, "acknowledged")
+        observe.assert_called_once()
+        self.assertEqual(observe.call_args.kwargs["lane"], "publisher_3")
 
     async def test_worker_rejects_ack_as_a_dispatch_command(self):
         db = _DB(_command())
