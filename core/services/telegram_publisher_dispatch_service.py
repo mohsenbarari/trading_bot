@@ -13,6 +13,7 @@ from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core import telegram_gateway
+from core.metrics import registry as metrics_registry
 from core.server_routing import SERVER_FOREIGN
 from core.telegram_delivery_queue_contract import FINAL_DELIVERY_STATES
 from core.telegram_multi_publisher_contract import (
@@ -335,6 +336,11 @@ async def record_telegram_publisher_dispatch_result(
         command.last_error_class = None
         command.last_error_message = None
     else:
+        metrics_registry.counter(
+            "telegram_publisher_b2b_dispatch_retries_total",
+            "Telegram publisher B2B dispatch retries.",
+            lane=str(command.publisher_bot_identity),
+        )
         command.state = TelegramPublisherDispatchState.RETRY_DUE.value
         command.next_retry_at = current_time + timedelta(
             seconds=_gateway_retry_after_seconds(result, retry_after_seconds)
@@ -343,6 +349,12 @@ async def record_telegram_publisher_dispatch_result(
         command.last_error_message = None
     command.updated_at = current_time
     await db.flush()
+    metrics_registry.observe(
+        "telegram_publisher_b2b_ack_lag_ms",
+        "Lag from durable B2B command creation to publisher acknowledgement.",
+        max(0.0, (current_time - _utc(command.created_at)).total_seconds() * 1000),
+        lane=publisher,
+    )
     return True
 
 
