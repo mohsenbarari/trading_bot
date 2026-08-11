@@ -248,6 +248,7 @@ class TelegramDeliveryQueueCycleReport:
     recovered_count: int
     status_counts: dict[str, int]
     stale_fence_count: int
+    limiter_retry_not_before: datetime | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -266,6 +267,38 @@ def _assert_queue_runtime_owner() -> None:
         raise TelegramDeliveryQueueImplementationIncompleteError(
             "queue_worker_is_not_runtime_owner"
         )
+
+
+def _short_limiter_wait_poll_delay_seconds(
+    report: TelegramDeliveryQueueCycleReport,
+) -> float | None:
+    """Return a local sleep only for a normal, short Redis cadence wait.
+
+    A limiter rejection is already durable: the job has been returned to the
+    queue with its retry deadline.  Re-claiming another channel job immediately
+    after that rejection creates unnecessary PostgreSQL churn while every lane
+    races the same Redis destination gate.  Let a slot wait locally only until
+    the short, absolute Redis deadline.  Longer cooldowns remain durable so a
+    slot never becomes unavailable for an operator pause or a provider 429.
+    """
+    not_before = report.limiter_retry_not_before
+    if not_before is None:
+        return None
+    try:
+        delay_seconds = (not_before - utc_now()).total_seconds()
+        normal_cadence_seconds = max(
+            float(settings.telegram_delivery_queue_bot_min_interval_seconds),
+            float(settings.telegram_delivery_queue_destination_min_interval_seconds),
+        )
+    except (AttributeError, TypeError, ValueError, OverflowError):
+        return None
+    if not math.isfinite(delay_seconds) or not math.isfinite(normal_cadence_seconds):
+        return None
+    if normal_cadence_seconds <= 0 or delay_seconds > normal_cadence_seconds * 2:
+        return None
+    # The defer transaction itself can consume the entire wait.  Yield once in
+    # that case instead of immediately re-entering a hot claim/defer loop.
+    return max(0.01, delay_seconds)
 
 
 def _normalize_lane_identity(bot_identity: str) -> str:
@@ -997,6 +1030,7 @@ async def run_telegram_delivery_queue_cycle(
     status_counts: dict[str, int] = {}
     stale_fence_count = 0
     processed_count = 0
+    limiter_retry_not_before: datetime | None = None
     recovered_count = await _recover_expired_leases() if recover_leases else 0
 
     if _role_provider_fact_blocked(lane_identity):
@@ -1097,6 +1131,10 @@ async def run_telegram_delivery_queue_cycle(
                 )
                 if not deferred:
                     stale_fence_count += 1
+                # ``not_before`` originates from Redis TIME.  It is safe to
+                # use only as a short local poll deadline; the durable defer
+                # above remains authoritative across restarts.
+                limiter_retry_not_before = admission.not_before
                 key = "limiter_wait"
                 status_counts[key] = status_counts.get(key, 0) + 1
                 processed_count += 1
@@ -1404,6 +1442,7 @@ async def run_telegram_delivery_queue_cycle(
         recovered_count=recovered_count,
         status_counts=status_counts,
         stale_fence_count=stale_fence_count,
+        limiter_retry_not_before=limiter_retry_not_before,
     )
 
 
@@ -1497,7 +1536,10 @@ async def _telegram_delivery_queue_lane_slot_loop(
         # cancellable yield also prevents a hot empty/limited database loop and
         # gives shutdown a clean boundary outside connection establishment.
         if report is not None and report.processed_count:
-            await asyncio.sleep(min(0.01, _worker_interval_seconds()))
+            await asyncio.sleep(
+                _short_limiter_wait_poll_delay_seconds(report)
+                or min(0.01, _worker_interval_seconds())
+            )
         else:
             await asyncio.sleep(_worker_interval_seconds())
 

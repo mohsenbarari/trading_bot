@@ -141,6 +141,44 @@ class TelegramDeliveryQueueWorkerSafetyTests(unittest.IsolatedAsyncioTestCase):
             queue_worker_enabled=True,
         )
 
+    def test_short_limiter_wait_uses_absolute_redis_deadline(self):
+        now = worker.utc_now()
+        report = worker.TelegramDeliveryQueueCycleReport(
+            bot_identity="publisher_1",
+            processed_count=1,
+            recovered_count=0,
+            status_counts={"limiter_wait": 1},
+            stale_fence_count=0,
+            limiter_retry_not_before=now + worker.timedelta(seconds=0.8),
+        )
+        with patch(
+            "core.telegram_delivery_queue_worker.utc_now",
+            return_value=now + worker.timedelta(seconds=0.2),
+        ):
+            self.assertAlmostEqual(
+                worker._short_limiter_wait_poll_delay_seconds(report),
+                0.6,
+                places=6,
+            )
+
+    def test_long_limiter_cooldown_stays_durable_not_slot_local(self):
+        now = worker.utc_now()
+        report = worker.TelegramDeliveryQueueCycleReport(
+            bot_identity="publisher_1",
+            processed_count=1,
+            recovered_count=0,
+            status_counts={"limiter_wait": 1},
+            stale_fence_count=0,
+            limiter_retry_not_before=now + worker.timedelta(seconds=30),
+        )
+        with patch(
+            "core.telegram_delivery_queue_worker.utc_now",
+            return_value=now,
+        ):
+            self.assertIsNone(
+                worker._short_limiter_wait_poll_delay_seconds(report)
+            )
+
     @staticmethod
     def _rehydration(
         *,
