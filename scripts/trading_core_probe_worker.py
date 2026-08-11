@@ -3156,8 +3156,16 @@ class FakeState:
 
 
 class FakeMessage:
-    def __init__(self, text_value: str) -> None:
+    def __init__(
+        self,
+        text_value: str,
+        *,
+        message_id: int | None = None,
+        chat_id: int | None = None,
+    ) -> None:
         self.text = text_value
+        self.message_id = message_id
+        self.chat = SimpleNamespace(id=chat_id)
         self.answers: list[dict[str, Any]] = []
 
     async def answer(self, text_value: str, **kwargs: Any) -> None:
@@ -3418,7 +3426,15 @@ async def run_bot_text_handler_probe(*, user_id: int, text_value: str) -> dict[s
     async with AsyncSessionLocal() as db:
         user = await load_user(db, user_id)
         state = FakeState()
-        message = FakeMessage(text_value)
+        # Queue-v1 validates that a private reply is anchored to the incoming
+        # user's own Telegram chat.  The probe invokes a real text handler, so
+        # provide the same immutable inbound facts instead of bypassing that
+        # production guard with an incomplete fake message.
+        message = FakeMessage(
+            text_value,
+            message_id=int(user.id),
+            chat_id=int(user.telegram_id),
+        )
         await bot_trade_create.handle_text_offer(message, state, user, bot=None)
         return {
             "answers": len(message.answers),

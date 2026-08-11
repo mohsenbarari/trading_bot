@@ -7,6 +7,7 @@ import unittest
 from unittest.mock import patch
 
 from scripts.trading_core_probe_worker import (
+    FakeMessage,
     TradingProbeError,
     assert_race_barrier_lateness,
     assert_race_acceptance,
@@ -16,9 +17,23 @@ from scripts.trading_core_probe_worker import (
     run_time_expiry_race_command,
     summarize_samples,
 )
+from bot.telegram_interaction_message import _private_message_identity
 
 
 class TradingCoreProbeWorkerTests(unittest.TestCase):
+    def test_probe_message_has_a_valid_private_runtime_route(self) -> None:
+        user = SimpleNamespace(id=17, telegram_id=8_800_000_017, sync_version=1)
+        message = FakeMessage(
+            "خ ن امام 20 عدد 176000",
+            message_id=17,
+            chat_id=user.telegram_id,
+        )
+
+        self.assertEqual(
+            _private_message_identity(message, user),
+            (17, 8_800_000_017, 1, 17),
+        )
+
     def test_bot_offer_matrix_uses_current_cash_settlement_prefix(self) -> None:
         buy_text, buy_marker = build_bot_offer_text(
             owner_user_id=17,
