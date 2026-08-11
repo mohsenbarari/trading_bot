@@ -907,7 +907,7 @@ async def resume_configured_telegram_channel(
         raise
 
     try:
-        await clear_gate(destination_key)
+        await clear_gate(destination_key, bot_identities=bot_identities)
     except Exception as exc:
         await _record_failure(
             session_factory,

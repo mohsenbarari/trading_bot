@@ -141,7 +141,8 @@ class TelegramDeliveryResumeServiceTests(unittest.IsolatedAsyncioTestCase):
         )
         apply_db.assert_awaited_once()
         limiter.clear_destination_gate_after_database_resume.assert_awaited_once_with(
-            "channel:-100123"
+            "channel:-100123",
+            bot_identities=("primary", "channel_editor"),
         )
         complete.assert_awaited_once()
 

@@ -2,6 +2,7 @@
 
 Entries are newest first.
 
+- 2026-08-11 | Telegram resume clears the shared destination cadence plus only the preflight-approved lane blocks. Reason: recovery must not hard-code lane names or release an unrelated publisher.
 - 2026-08-11 | Every offer publish/edit job must match its persisted publication owner before provider execution; callback acknowledgements stay on the bot that received them. Reason: Telegram cannot safely transfer an interactive post's lifecycle across bot identities.
 
 - 2026-08-11 | A publisher dispatch command is durably paired 1:1 with its publisher-owned delivery job; publisher jobs require an acknowledged command, and database guards make owner/message identity immutable. Reason: retries, sync, and rollback must not reroute or prematurely execute a live post.
