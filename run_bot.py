@@ -37,6 +37,7 @@ from bot.middlewares import (
     TradeContentionGateMiddleware,
 )
 from bot.middlewares.logging_context import BotLoggingContextMiddleware
+from bot.middlewares.telegram_bot_identity import TelegramBotIdentityMiddleware
 from bot.utils.trade_suggestion_messages import listen_trade_suggestion_events
 from core.logging_config import configure_logging
 from core.offer_publication_worker import offer_telegram_publication_loop
@@ -98,6 +99,7 @@ def configured_publisher_b2b_pollers(settings_obj):
     for identity, lane in composition.credential_registry.publisher_lanes.items():
         publisher_bot = Bot(token=lane.credential.token)
         publisher_dp = Dispatcher()
+        publisher_dp.update.outer_middleware(TelegramBotIdentityMiddleware(identity))
         publisher_dp.include_router(
             build_publisher_b2b_router(
                 identity=identity,
