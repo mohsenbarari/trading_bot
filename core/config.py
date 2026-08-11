@@ -114,6 +114,12 @@ class Settings(BaseSettings):
     telegram_delivery_queue_worker_enabled: bool = False
     telegram_delivery_queue_cutover_ready: bool = False
     telegram_delivery_queue_channel_editor_enabled: bool = False
+    # Multi-publisher delivery is intentionally disabled until every staged
+    # migration and staging acceptance gate has passed.  B2B dispatch is a
+    # stricter sub-feature: enabling it without the parent flag is a startup
+    # error rather than a partially active configuration.
+    telegram_multi_publisher_enabled: bool = False
+    telegram_b2b_dispatch_enabled: bool = False
     telegram_delivery_queue_channel_editor_bot_token: SecretStr | None = None
     telegram_delivery_queue_expected_primary_bot_id: int | None = None
     telegram_delivery_queue_expected_channel_editor_bot_id: int | None = None
@@ -205,6 +211,11 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_telegram_delivery_queue_settings(self):
+        if (
+            self.telegram_b2b_dispatch_enabled
+            and not self.telegram_multi_publisher_enabled
+        ):
+            raise ValueError("telegram_b2b_dispatch_requires_multi_publisher")
         producer = str(
             self.telegram_delivery_producer_mode
             or self.telegram_delivery_execution_owner
