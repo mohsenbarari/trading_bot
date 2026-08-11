@@ -11,6 +11,7 @@ from core.services.telegram_callback_queue_service import (
 from core.telegram_callback_receipt_context import (
     current_telegram_callback_received_at,
 )
+from core.telegram_bot_identity_context import current_telegram_callback_bot_identity
 from core.telegram_delivery_runtime_policy import (
     TelegramDeliveryRuntimeMode,
     configured_telegram_delivery_runtime,
@@ -55,6 +56,7 @@ async def answer_callback_query_via_runtime(
             received_at=received_at,
             text=None if text is _UNSET else text,
             show_alert=False if show_alert is _UNSET else show_alert,
+            bot_identity=current_telegram_callback_bot_identity(),
         )
         if commit:
             await db.commit()

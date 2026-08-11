@@ -76,10 +76,11 @@ class BotTelegramCallbackAnswerTests(unittest.IsolatedAsyncioTestCase):
             session,
             current_server="foreign",
             callback_query_id="callback-2",
-            received_at=received_at,
-            text="انجام شد",
-            show_alert=False,
-        )
+                received_at=received_at,
+                text="انجام شد",
+                show_alert=False,
+                bot_identity="primary",
+            )
         session.commit.assert_awaited_once_with()
         callback.answer.assert_not_awaited()
 
