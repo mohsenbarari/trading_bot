@@ -21,7 +21,7 @@ class OfferPublicationPublisherSchemaTests(unittest.TestCase):
             check_constraints,
         )
         self.assertIn(
-            "publisher_bot_identity = 'primary'",
+            "publisher_bot_identity IN ('primary', 'publisher_1'",
             check_constraints[
                 "ck_offer_publication_states_publisher_bot_identity"
             ],

@@ -15,10 +15,10 @@ from core.config import settings
 from core.offer_identity import ensure_offer_public_id
 from core.server_routing import SERVER_FOREIGN, current_server
 from core.services.offer_publication_state_service import (
-    TELEGRAM_PRIMARY_PUBLISHER_BOT_IDENTITY,
     apply_publication_state_update,
     build_offer_publication_state,
     canonical_telegram_publication_identity,
+    ensure_telegram_publication_publisher_identity,
     normalize_publication_status,
     publication_dedupe_key,
 )
@@ -233,14 +233,19 @@ def mark_telegram_publication_success(
     message_id: int,
     chat_id: int | None = None,
     now=None,
+    publisher_bot_identity: str | None = None,
 ) -> None:
+    publisher = ensure_telegram_publication_publisher_identity(
+        state,
+        publisher_bot_identity=publisher_bot_identity,
+    )
     apply_publication_state_update(
         state,
         offer_status=getattr(offer, "status", None),
         offer_version_id=_offer_version_id(offer),
         requested_status=OfferPublicationStatus.SENT,
         now=now or utc_now_naive(),
-        publisher_bot_identity=TELEGRAM_PRIMARY_PUBLISHER_BOT_IDENTITY,
+        publisher_bot_identity=publisher,
         surface_resource_id=str(message_id),
         telegram_chat_id=chat_id,
         telegram_message_id=message_id,

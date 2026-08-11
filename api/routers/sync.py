@@ -1094,6 +1094,21 @@ def _offer_publication_status_rank(expression):
 def _offer_publication_state_upsert_where_clause(model, stmt, data: dict):
     where_clause = None
 
+    if "publisher_bot_identity" in data:
+        current_publisher = getattr(model, "publisher_bot_identity", None)
+        if current_publisher is not None:
+            try:
+                incoming_publisher = stmt.excluded["publisher_bot_identity"]
+            except (AttributeError, KeyError):
+                incoming_publisher = None
+            if incoming_publisher is not None:
+                publisher_clause = (
+                    current_publisher.is_(None)
+                    | incoming_publisher.is_(None)
+                    | (current_publisher == incoming_publisher)
+                )
+                where_clause = publisher_clause
+
     if "offer_version_id" in data:
         current_version = getattr(model, "offer_version_id", None)
         if current_version is not None:
@@ -1102,7 +1117,16 @@ def _offer_publication_state_upsert_where_clause(model, stmt, data: dict):
             except (AttributeError, KeyError):
                 incoming_version = None
             if incoming_version is not None:
-                where_clause = current_version.is_(None) | incoming_version.is_(None) | (current_version <= incoming_version)
+                version_clause = (
+                    current_version.is_(None)
+                    | incoming_version.is_(None)
+                    | (current_version <= incoming_version)
+                )
+                where_clause = (
+                    version_clause
+                    if where_clause is None
+                    else where_clause & version_clause
+                )
 
     if "status" in data:
         current_status = getattr(model, "status", None)
@@ -1196,6 +1220,11 @@ def _build_upsert_stmt(model, table, data):
         return stmt.on_conflict_do_update(index_elements=['trade_number'], set_=set_dict, where=where_clause)
     elif table == "offer_publication_states" and data.get("dedupe_key"):
         set_dict = {key: value for key, value in data.items() if key not in {"id", "dedupe_key"}}
+        if "publisher_bot_identity" in set_dict:
+            set_dict["publisher_bot_identity"] = sa_case(
+                (model.publisher_bot_identity.isnot(None), model.publisher_bot_identity),
+                else_=stmt.excluded["publisher_bot_identity"],
+            )
         where_clause = _offer_publication_state_upsert_where_clause(model, stmt, data)
         if where_clause is None:
             return stmt.on_conflict_do_update(index_elements=['dedupe_key'], set_=set_dict)

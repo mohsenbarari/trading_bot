@@ -82,6 +82,51 @@ class OfferPublicationStateServiceTests(unittest.TestCase):
         self.assertEqual(identity.destination_chat_id, -100123)
         self.assertEqual(identity.message_id, 700)
 
+    def test_telegram_publisher_owner_can_be_assigned_once_and_is_then_immutable(self):
+        state = build_offer_publication_state(
+            make_offer(),
+            OfferPublicationSurface.TELEGRAM_CHANNEL,
+            publisher_bot_identity="publisher_3",
+        )
+
+        self.assertEqual(
+            ensure_telegram_publication_publisher_identity(state),
+            "publisher_3",
+        )
+        with self.assertRaises(CanonicalPublicationIdentityError):
+            ensure_telegram_publication_publisher_identity(
+                state,
+                publisher_bot_identity="publisher_4",
+            )
+
+    def test_unassigned_telegram_publication_requires_owner_before_message(self):
+        state = build_offer_publication_state(
+            make_offer(),
+            OfferPublicationSurface.TELEGRAM_CHANNEL,
+            publisher_bot_identity=None,
+        )
+
+        with self.assertRaises(CanonicalPublicationIdentityError):
+            apply_publication_state_update(
+                state,
+                offer_status="active",
+                offer_version_id=state.offer_version_id,
+                requested_status=OfferPublicationStatus.SENT,
+                telegram_message_id=700,
+            )
+
+        apply_publication_state_update(
+            state,
+            offer_status="active",
+            offer_version_id=state.offer_version_id,
+            requested_status=OfferPublicationStatus.SENT,
+            publisher_bot_identity="publisher_2",
+            telegram_message_id=700,
+            telegram_chat_id=-100123,
+            surface_resource_id="700",
+        )
+        self.assertEqual(state.publisher_bot_identity, "publisher_2")
+
     def test_canonical_telegram_identity_fails_closed_on_missing_or_wrong_fields(self):
         state = build_offer_publication_state(
             make_offer(),

@@ -459,6 +459,12 @@ _FIELD_POLICIES: dict[tuple[str, str], SyncFieldPolicyEntry] = {
         action=SyncFieldAction.DROP,
         reason="local FK; shared publication identity uses offer_public_id and dedupe_key",
     ),
+    ("offer_publication_states", "publisher_bot_identity"): _entry(
+        "offer_publication_states",
+        "publisher_bot_identity",
+        SyncFieldClassification.SYNC,
+        reason="immutable Telegram publication owner shared with the offer lifecycle",
+    ),
     ("offer_publication_states", "surface_resource_id"): _entry(
         "offer_publication_states",
         "surface_resource_id",
