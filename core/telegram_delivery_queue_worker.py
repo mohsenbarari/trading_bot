@@ -64,6 +64,9 @@ from core.services.telegram_delivery_runtime_gate_service import (
     mark_telegram_preflight_gate_active,
     record_telegram_preflight_rate_limit,
 )
+from core.services.telegram_publisher_dispatch_service import (
+    set_telegram_publisher_lane_health,
+)
 from core.telegram_delivery_queue_contract import (
     TelegramDeliveryDecision,
     TelegramDeliveryOutcome,
@@ -1841,6 +1844,19 @@ def _telegram_delivery_lane_start_mode(
     return True, False
 
 
+def _set_publisher_lane_health(
+    lane: TelegramDeliveryQueueLaneSpec,
+    *,
+    healthy: bool,
+) -> None:
+    """Expose only successfully activated publisher lanes to the B2B selector."""
+    if lane.bot_identity in TELEGRAM_PUBLISHER_IDENTITIES:
+        set_telegram_publisher_lane_health(
+            lane.bot_identity,
+            healthy=healthy,
+        )
+
+
 def _assert_preflight_lane_match(
     preflight_report: Any,
     *,
@@ -1868,6 +1884,7 @@ async def _telegram_delivery_deferred_lane_activation_loop(
     """Keep one lane independently supervised until safe activation succeeds."""
     rehydration = initial_rehydration
     retry_delay = _worker_interval_seconds()
+    _set_publisher_lane_health(lane, healthy=False)
     while True:
         try:
             if rehydration is None:
@@ -1880,6 +1897,7 @@ async def _telegram_delivery_deferred_lane_activation_loop(
                 channel_destination_key=channel_destination_key,
             )
             if not may_start:
+                _set_publisher_lane_health(lane, healthy=False)
                 rehydration = None
                 await asyncio.sleep(_worker_interval_seconds())
                 continue
@@ -1887,6 +1905,7 @@ async def _telegram_delivery_deferred_lane_activation_loop(
                 # A Redis probe may have linearized immediately before its
                 # durable dispatch marker. Wait for that owner or its lease;
                 # preflight must never bypass the single-probe gate.
+                _set_publisher_lane_health(lane, healthy=False)
                 rehydration = None
                 await asyncio.sleep(_worker_interval_seconds())
                 continue
@@ -1926,6 +1945,7 @@ async def _telegram_delivery_deferred_lane_activation_loop(
                 bot_identity=lane.bot_identity,
                 report=preflight_report,
             )
+            _set_publisher_lane_health(lane, healthy=True)
             logger.info(
                 "Telegram delivery lane preflight approved",
                 extra={
@@ -1951,10 +1971,13 @@ async def _telegram_delivery_deferred_lane_activation_loop(
                 )
             else:
                 await telegram_delivery_queue_lane_loop(lane)
+            _set_publisher_lane_health(lane, healthy=False)
             rehydration = None
         except asyncio.CancelledError:
+            _set_publisher_lane_health(lane, healthy=False)
             raise
         except TelegramDeliveryPreflightRateLimitedError as exc:
+            _set_publisher_lane_health(lane, healthy=False)
             retry_delay = max(
                 _worker_interval_seconds(),
                 exc.retry_after_seconds + _retry_after_safety_seconds(),
@@ -2001,6 +2024,7 @@ async def _telegram_delivery_deferred_lane_activation_loop(
             await asyncio.sleep(retry_delay)
             retry_delay = _worker_interval_seconds()
         except Exception as exc:
+            _set_publisher_lane_health(lane, healthy=False)
             logger.warning(
                 "Telegram delivery lane activation failed; keeping lane deferred",
                 extra={

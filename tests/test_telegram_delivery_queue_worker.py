@@ -1,7 +1,7 @@
 import asyncio
 from types import SimpleNamespace
 import unittest
-from unittest.mock import ANY, AsyncMock, MagicMock, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, call, patch
 
 from sqlalchemy.exc import OperationalError
 
@@ -1711,6 +1711,48 @@ class TelegramDeliveryQueueWorkerSafetyTests(unittest.IsolatedAsyncioTestCase):
             identity_only_bot_identities=(),
         )
         lane_loop.assert_awaited_once_with(lane)
+
+    async def test_publisher_lane_activation_exposes_only_healthy_lane_to_b2b_selector(self):
+        credentials = self._credentials()
+        lane = worker.TelegramDeliveryQueueLaneSpec(
+            bot_identity="publisher_1",
+            freshness_validator=AsyncMock(),
+            lifecycle_feedback=_NoopLifecycleFeedback(),
+            gateway_call=AsyncMock(),
+            dispatch_limiter=_AllowLimiter(),
+        )
+        rehydrate = AsyncMock(
+            side_effect=(self._rehydration(), self._rehydration())
+        )
+        health = MagicMock()
+        with patch(
+            "core.telegram_delivery_queue_worker.rehydrate_telegram_delivery_limiter_state",
+            new=rehydrate,
+        ), patch(
+            "core.telegram_delivery_queue_worker.run_configured_telegram_delivery_preflight",
+            new=AsyncMock(return_value=self._preflight_report("publisher_1")),
+        ), patch(
+            "core.telegram_delivery_queue_worker.telegram_delivery_queue_lane_loop",
+            new=AsyncMock(side_effect=asyncio.CancelledError),
+        ), patch(
+            "core.telegram_delivery_queue_worker.set_telegram_publisher_lane_health",
+            new=health,
+        ):
+            with self.assertRaises(asyncio.CancelledError):
+                await worker._telegram_delivery_deferred_lane_activation_loop(
+                    lane,
+                    credential_registry=credentials,
+                    channel_destination_key=f"channel:{int(worker.settings.channel_id)}",
+                )
+
+        self.assertEqual(
+            health.call_args_list,
+            [
+                call("publisher_1", healthy=False),
+                call("publisher_1", healthy=True),
+                call("publisher_1", healthy=False),
+            ],
+        )
 
     async def test_lane_activation_rechecks_new_gate_after_preflight(self):
         credentials = self._credentials()
