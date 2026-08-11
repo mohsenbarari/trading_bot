@@ -60,6 +60,7 @@ from core.telegram_delivery_runtime_policy import (
 from core.services.telegram_publisher_dispatch_service import (
     run_telegram_publisher_dispatch_cycle,
 )
+from core.metrics import registry as metrics_registry
 from core.utils import utc_now
 
 # Configure logging
@@ -145,6 +146,16 @@ def configured_publisher_dispatch_worker_factory(
                 acknowledgement_timeout_seconds=15.0,
                 request_timeout_seconds=float(getattr(settings_obj, "telegram_delivery_queue_worker_request_timeout_seconds", 10.0)),
                 now_factory=utc_now,
+            )
+            metrics_registry.counter(
+                "telegram_publisher_b2b_dispatch_cycles_total",
+                "Completed durable Telegram publisher B2B dispatch cycles.",
+                result="sent" if report.sent_count else "idle",
+            )
+            metrics_registry.gauge(
+                "telegram_publisher_b2b_dispatch_cycle_commands",
+                "Commands claimed in the latest Telegram publisher B2B cycle.",
+                report.claimed_count,
             )
             await asyncio.sleep(0.5 if report.claimed_count else 1.0)
 
