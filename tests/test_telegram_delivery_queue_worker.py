@@ -159,6 +159,18 @@ class TelegramDeliveryQueueWorkerSafetyTests(unittest.IsolatedAsyncioTestCase):
                 places=6,
             )
 
+    def test_activation_diagnostic_exposes_only_attribute_identifier(self):
+        try:
+            {}.missing_attribute
+        except AttributeError as exc:
+            self.assertEqual(
+                worker._safe_activation_error_attribute(exc),
+                "missing_attribute",
+            )
+        self.assertIsNone(
+            worker._safe_activation_error_attribute(RuntimeError("redacted"))
+        )
+
     def test_long_limiter_cooldown_stays_durable_not_slot_local(self):
         now = worker.utc_now()
         admission = TelegramDeliveryDispatchAdmission(

@@ -1900,6 +1900,16 @@ def _set_publisher_lane_health(
         )
 
 
+def _safe_activation_error_attribute(exc: BaseException) -> str | None:
+    """Expose only a Python attribute identifier for activation diagnostics."""
+    if not isinstance(exc, AttributeError):
+        return None
+    attribute = getattr(exc, "name", None)
+    if isinstance(attribute, str) and attribute.isidentifier():
+        return attribute
+    return None
+
+
 def _assert_preflight_lane_match(
     preflight_report: Any,
     *,
@@ -2074,6 +2084,7 @@ async def _telegram_delivery_deferred_lane_activation_loop(
                     "event": "telegram_delivery_queue_lane.activation_retry",
                     "bot_role": lane.bot_identity,
                     "error_class": type(exc).__name__,
+                    "error_attribute": _safe_activation_error_attribute(exc),
                     "retry_delay_seconds": retry_delay,
                 },
             )
