@@ -3,6 +3,8 @@ app_logs.txt
 # Build artifacts
 check-dns
 docs/*
+!docs/memory/
+!docs/memory/**
 !docs/AUTOMATED_TEST_CHECKLIST.md
 !docs/CROSS_SERVER_SYNC_PARITY_AUDIT_AND_ROADMAP.md
 !docs/MESSENGER_REFACTORING_ROADMAP.md
@@ -14,6 +16,7 @@ docs/*
 .env.staging
 .env.staging.*
 .env.iran
+**/.env*.local
 # Environments
 frontend/node_modules/
 .idea/
