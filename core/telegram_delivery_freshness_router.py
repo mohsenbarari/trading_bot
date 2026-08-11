@@ -26,6 +26,7 @@ from core.telegram_delivery_repeat_offer_freshness import (
     REPEAT_OFFER_RESPONSE_FRESHNESS_ACTIONS,
 )
 from core.telegram_delivery_offer_freshness import OFFER_FRESHNESS_ACTIONS
+from core.telegram_multi_publisher_contract import TELEGRAM_PUBLISHER_IDENTITIES
 from core.telegram_delivery_trade_freshness import TRADE_RESULT_FRESHNESS_ACTIONS
 from core.telegram_delivery_queue_contract import (
     NON_DURABLE_TELEGRAM_QUEUE_ACTIONS,
@@ -89,6 +90,12 @@ def required_freshness_actions_for_lane(
     identity = _normalize_bot_identity(bot_identity)
     if identity == TELEGRAM_CHANNEL_EDITOR_BOT_IDENTITY:
         return frozenset(CHANNEL_EDITOR_ACTIONS)
+    if identity in TELEGRAM_PUBLISHER_IDENTITIES:
+        # Publisher lanes will only receive offer channel lifecycle work.  The
+        # later owner-aware validator remains the provider-call gate; this
+        # narrower coverage prevents a publisher token from claiming unrelated
+        # private/admin queue traffic.
+        return OFFER_FRESHNESS_ACTIONS
     if identity == TELEGRAM_PRIMARY_BOT_IDENTITY:
         return DURABLE_TELEGRAM_DELIVERY_ACTIONS
     raise TelegramDeliveryFreshnessRoutingError(

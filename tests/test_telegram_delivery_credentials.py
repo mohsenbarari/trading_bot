@@ -6,11 +6,36 @@ from pydantic import SecretStr
 from core.telegram_delivery_credentials import (
     TelegramDeliveryCredentialConfigurationError,
     TelegramDeliveryCredentialRegistry,
+    TelegramPublisherLaneConfiguration,
+    TelegramPublisherLaneHealthState,
 )
 from core.telegram_gateway import TelegramGatewayResult
 
 
 class TelegramDeliveryCredentialRegistryTests(unittest.IsolatedAsyncioTestCase):
+    @staticmethod
+    def _publisher_lanes(**overrides):
+        lanes = {
+            f"publisher_{index}": TelegramPublisherLaneConfiguration(
+                token=f"publisher-{index}-token",
+                expected_bot_id=1_000 + index,
+                expected_username=f"publisher_{index}_bot",
+            )
+            for index in range(1, 6)
+        }
+        for identity, values in overrides.items():
+            existing = lanes[identity]
+            lanes[identity] = TelegramPublisherLaneConfiguration(
+                token=values.get("token", existing.token),
+                expected_bot_id=values.get("expected_bot_id", existing.expected_bot_id),
+                expected_username=values.get(
+                    "expected_username", existing.expected_username
+                ),
+                enabled=values.get("enabled", existing.enabled),
+                capabilities=values.get("capabilities", existing.capabilities),
+            )
+        return lanes
+
     def test_primary_only_registry_has_no_editor_fallback(self):
         registry = TelegramDeliveryCredentialRegistry.from_values(
             primary_token="primary-secret-token",
@@ -92,6 +117,33 @@ class TelegramDeliveryCredentialRegistryTests(unittest.IsolatedAsyncioTestCase):
                 _credential=registry.resolve("channel_editor"),
             )
 
+    async def test_each_publisher_gateway_is_bound_to_its_own_credential(self):
+        registry = TelegramDeliveryCredentialRegistry.from_values(
+            primary_token="primary-token",
+            editor_enabled=False,
+            publisher_lanes=self._publisher_lanes(),
+        )
+        gateway = AsyncMock(
+            side_effect=lambda method, payload, **kwargs: TelegramGatewayResult(
+                ok=True,
+                method=method,
+                status_code=200,
+                response_json={"ok": True, "result": True},
+            )
+        )
+        with patch(
+            "core.telegram_delivery_credentials.telegram_gateway.post_telegram_method",
+            gateway,
+        ):
+            calls = registry.build_gateway_calls()
+            for index in range(1, 6):
+                await calls[f"publisher_{index}"]("getMe", {})
+
+        self.assertEqual(
+            [call.kwargs["bot_token"] for call in gateway.await_args_list],
+            [f"publisher-{index}-token" for index in range(1, 6)],
+        )
+
     def test_unknown_identity_and_missing_primary_fail_closed(self):
         with self.assertRaisesRegex(
             TelegramDeliveryCredentialConfigurationError,
@@ -110,6 +162,50 @@ class TelegramDeliveryCredentialRegistryTests(unittest.IsolatedAsyncioTestCase):
             "telegram_bot_identity_not_allowlisted",
         ):
             registry.resolve("unknown")
+
+    def test_five_publisher_lanes_require_distinct_complete_configuration(self):
+        registry = TelegramDeliveryCredentialRegistry.from_values(
+            primary_token="primary-token",
+            editor_enabled=False,
+            publisher_lanes=self._publisher_lanes(),
+        )
+
+        self.assertEqual(
+            registry.bot_identities,
+            (
+                "primary",
+                "publisher_1",
+                "publisher_2",
+                "publisher_3",
+                "publisher_4",
+                "publisher_5",
+            ),
+        )
+        lane = registry.publisher_lane("publisher_3")
+        self.assertEqual(lane.expected_bot_id, 1_003)
+        self.assertEqual(lane.expected_username, "publisher_3_bot")
+        self.assertEqual(lane.health_state, TelegramPublisherLaneHealthState.UNVERIFIED)
+        self.assertNotIn("publisher-3-token", repr(registry))
+        self.assertNotIn("publisher-3-token", repr(lane))
+
+        cases = (
+            ({"publisher_3": {"enabled": False}}, "lane_disabled:publisher_3"),
+            ({"publisher_3": {"token": "primary-token"}}, "credentials_must_be_distinct"),
+            ({"publisher_3": {"expected_bot_id": 1_002}}, "identity_not_distinct"),
+            ({"publisher_3": {"expected_username": "publisher_2_bot"}}, "identity_not_distinct"),
+            ({"publisher_3": {"expected_username": "bad name"}}, "expected_username_invalid"),
+            ({"publisher_3": {"capabilities": frozenset()}}, "capability_incomplete"),
+        )
+        for overrides, reason in cases:
+            with self.subTest(reason=reason), self.assertRaisesRegex(
+                TelegramDeliveryCredentialConfigurationError,
+                reason,
+            ):
+                TelegramDeliveryCredentialRegistry.from_values(
+                    primary_token="primary-token",
+                    editor_enabled=False,
+                    publisher_lanes=self._publisher_lanes(**overrides),
+                )
 
 
 if __name__ == "__main__":

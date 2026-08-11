@@ -15,13 +15,11 @@ from sqlalchemy import and_, case, false, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased, selectinload
 
-from core.config import settings
 from core.server_routing import SERVER_FOREIGN
 from core.services.offer_publication_state_service import (
     canonical_telegram_publication_identity,
 )
 from core.services.telegram_delivery_queue_service import (
-    TELEGRAM_CHANNEL_EDITOR_BOT_IDENTITY,
     TELEGRAM_PRIMARY_BOT_IDENTITY,
     TelegramDeliveryEnqueueResult,
     enqueue_telegram_delivery_job,
@@ -118,8 +116,13 @@ def _normalized_time(value: datetime) -> datetime:
 
 
 def configured_offer_edit_bot_identity() -> str:
-    if bool(getattr(settings, "telegram_delivery_queue_channel_editor_enabled", False)):
-        return TELEGRAM_CHANNEL_EDITOR_BOT_IDENTITY
+    """Keep legacy offers on their publishing token until lane ownership exists.
+
+    The former channel-editor route could edit a post created by ``primary``.
+    Telegram rejects that active-post lifecycle in practice, so editor enablement
+    must not influence offer publish/edit routing before immutable publisher
+    ownership is introduced in a later migration stage.
+    """
     return TELEGRAM_PRIMARY_BOT_IDENTITY
 
 

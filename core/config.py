@@ -120,6 +120,30 @@ class Settings(BaseSettings):
     # error rather than a partially active configuration.
     telegram_multi_publisher_enabled: bool = False
     telegram_b2b_dispatch_enabled: bool = False
+    # Publisher credentials remain separate to make accidental token reuse and
+    # identity drift fail before a worker can be composed.  They are consumed
+    # only when TELEGRAM_MULTI_PUBLISHER_ENABLED is true.
+    telegram_publisher_1_enabled: bool = False
+    telegram_publisher_1_bot_token: SecretStr | None = None
+    telegram_publisher_1_expected_bot_id: int | None = None
+    telegram_publisher_1_expected_username: str | None = None
+    telegram_publisher_2_enabled: bool = False
+    telegram_publisher_2_bot_token: SecretStr | None = None
+    telegram_publisher_2_expected_bot_id: int | None = None
+    telegram_publisher_2_expected_username: str | None = None
+    telegram_publisher_3_enabled: bool = False
+    telegram_publisher_3_bot_token: SecretStr | None = None
+    telegram_publisher_3_expected_bot_id: int | None = None
+    telegram_publisher_3_expected_username: str | None = None
+    telegram_publisher_4_enabled: bool = False
+    telegram_publisher_4_bot_token: SecretStr | None = None
+    telegram_publisher_4_expected_bot_id: int | None = None
+    telegram_publisher_4_expected_username: str | None = None
+    telegram_publisher_5_enabled: bool = False
+    telegram_publisher_5_bot_token: SecretStr | None = None
+    telegram_publisher_5_expected_bot_id: int | None = None
+    telegram_publisher_5_expected_username: str | None = None
+    telegram_multi_publisher_lane_concurrency: int = 1
     telegram_delivery_queue_channel_editor_bot_token: SecretStr | None = None
     telegram_delivery_queue_expected_primary_bot_id: int | None = None
     telegram_delivery_queue_expected_channel_editor_bot_id: int | None = None
@@ -276,6 +300,7 @@ class Settings(BaseSettings):
             "telegram_delivery_queue_primary_concurrency",
             "telegram_delivery_queue_primary_m0_reserved_concurrency",
             "telegram_delivery_queue_channel_editor_concurrency",
+            "telegram_multi_publisher_lane_concurrency",
             "telegram_offer_queue_feeder_batch_limit",
             "telegram_delivery_queue_limiter_key_ttl_seconds",
         ):

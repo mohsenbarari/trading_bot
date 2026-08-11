@@ -12,8 +12,14 @@ from core.services.telegram_delivery_queue_service import (
     TELEGRAM_CHANNEL_EDITOR_BOT_IDENTITY,
     TELEGRAM_PRIMARY_BOT_IDENTITY,
 )
-from core.telegram_delivery_credentials import TelegramDeliveryCredentialRegistry
+from core.telegram_delivery_credentials import (
+    TelegramDeliveryCredentialConfigurationError,
+    TelegramDeliveryCredentialRegistry,
+    TelegramPublisherLane,
+    normalize_telegram_bot_username,
+)
 from core.telegram_delivery_queue_contract import telegram_retry_after_integer
+from core.telegram_multi_publisher_contract import TELEGRAM_PUBLISHER_IDENTITIES
 
 
 TelegramPreflightGatewayCall = Callable[
@@ -305,6 +311,18 @@ def _validate_permissions(
                 "telegram_preflight_editor_permissions_excessive"
             )
         return
+    if role in TELEGRAM_PUBLISHER_IDENTITIES:
+        required = {
+            "can_manage_chat",
+            "can_post_messages",
+            "can_edit_messages",
+            "can_delete_messages",
+        }
+        if not required.issubset(permissions):
+            raise TelegramDeliveryPreflightFailedError(
+                f"telegram_preflight_publisher_permissions_missing:{role}"
+            )
+        return
     raise TelegramDeliveryPreflightFailedError(
         "telegram_preflight_bot_identity_not_allowlisted"
     )
@@ -318,6 +336,7 @@ async def run_telegram_delivery_preflight(
     expected_primary_bot_id: Any,
     editor_enabled: bool,
     expected_editor_bot_id: Any = None,
+    publisher_lanes: Mapping[str, TelegramPublisherLane] | None = None,
     timeout_seconds: float = 10.0,
     malformed_retry_after_fallback_seconds: float = 1.0,
     gateway_calls: Mapping[str, TelegramPreflightGatewayCall] | None = None,
@@ -341,6 +360,7 @@ async def run_telegram_delivery_preflight(
         reason="telegram_preflight_expected_primary_bot_id_missing",
     )
     expected_ids = {TELEGRAM_PRIMARY_BOT_IDENTITY: primary_bot_id}
+    expected_usernames: dict[str, str] = {}
     if editor_enabled:
         expected_ids[TELEGRAM_CHANNEL_EDITOR_BOT_IDENTITY] = _positive_int(
             expected_editor_bot_id,
@@ -350,6 +370,35 @@ async def run_telegram_delivery_preflight(
             raise TelegramDeliveryPreflightConfigurationError(
                 "telegram_preflight_bot_ids_must_be_distinct"
             )
+    configured_publishers = dict(publisher_lanes or {})
+    if configured_publishers:
+        if set(configured_publishers) != set(TELEGRAM_PUBLISHER_IDENTITIES):
+            raise TelegramDeliveryPreflightConfigurationError(
+                "telegram_preflight_publisher_roles_invalid"
+            )
+        for role in TELEGRAM_PUBLISHER_IDENTITIES:
+            lane = configured_publishers[role]
+            if not isinstance(lane, TelegramPublisherLane) or lane.bot_identity != role:
+                raise TelegramDeliveryPreflightConfigurationError(
+                    "telegram_preflight_publisher_lane_invalid"
+                )
+            expected_ids[role] = _positive_int(
+                lane.expected_bot_id,
+                reason=f"telegram_preflight_expected_publisher_bot_id_missing:{role}",
+            )
+            try:
+                expected_usernames[role] = normalize_telegram_bot_username(
+                    lane.expected_username,
+                    identity=role,
+                )
+            except TelegramDeliveryCredentialConfigurationError as exc:
+                raise TelegramDeliveryPreflightConfigurationError(
+                    f"telegram_preflight_expected_publisher_username_missing:{role}"
+                ) from exc
+    if len(set(expected_ids.values())) != len(expected_ids):
+        raise TelegramDeliveryPreflightConfigurationError(
+            "telegram_preflight_bot_ids_must_be_distinct"
+        )
     expected_roles = tuple(expected_ids)
     if credential_registry.bot_identities != expected_roles:
         raise TelegramDeliveryPreflightConfigurationError(
@@ -419,6 +468,21 @@ async def run_telegram_delivery_preflight(
             raise TelegramDeliveryPreflightFailedError(
                 f"telegram_preflight_bot_identity_mismatch:{role}"
             )
+        expected_username = expected_usernames.get(role)
+        if expected_username is not None:
+            try:
+                actual_username = normalize_telegram_bot_username(
+                    bot.get("username"),
+                    identity=role,
+                )
+            except TelegramDeliveryCredentialConfigurationError as exc:
+                raise TelegramDeliveryPreflightFailedError(
+                    f"telegram_preflight_bot_username_mismatch:{role}"
+                ) from exc
+            if actual_username != expected_username:
+                raise TelegramDeliveryPreflightFailedError(
+                    f"telegram_preflight_bot_username_mismatch:{role}"
+                )
         if actual_bot_id in actual_bot_ids:
             raise TelegramDeliveryPreflightFailedError(
                 "telegram_preflight_duplicate_bot_identity"
@@ -529,6 +593,7 @@ async def run_configured_telegram_delivery_preflight(
             "telegram_delivery_queue_expected_channel_editor_bot_id",
             None,
         ),
+        publisher_lanes=credential_registry.publisher_lanes,
         timeout_seconds=getattr(
             settings,
             "telegram_delivery_queue_preflight_timeout_seconds",

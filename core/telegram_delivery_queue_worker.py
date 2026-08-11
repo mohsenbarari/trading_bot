@@ -82,6 +82,7 @@ from core.telegram_delivery_queue_owner import (
     telegram_delivery_queue_owner_monitor_loop,
 )
 from core.telegram_delivery_credentials import TelegramDeliveryCredentialRegistry
+from core.telegram_multi_publisher_contract import TELEGRAM_PUBLISHER_IDENTITIES
 from core.telegram_delivery_preflight import (
     TelegramDeliveryPreflightRateLimitedError,
     run_configured_telegram_delivery_preflight,
@@ -279,6 +280,8 @@ def configured_telegram_delivery_lane_identities() -> tuple[str, ...]:
         getattr(settings, "telegram_delivery_queue_channel_editor_enabled", False)
     ):
         identities.append(TELEGRAM_CHANNEL_EDITOR_BOT_IDENTITY)
+    if bool(getattr(settings, "telegram_multi_publisher_enabled", False)):
+        identities.extend(TELEGRAM_PUBLISHER_IDENTITIES)
     return tuple(identities)
 
 
@@ -380,6 +383,19 @@ def _lane_slot_plan(bot_identity: str) -> tuple[tuple[str, int | None], ...]:
                 getattr(
                     settings,
                     "telegram_delivery_queue_channel_editor_concurrency",
+                    1,
+                )
+            ),
+        )
+        return tuple((f"general-{index}", None) for index in range(concurrency))
+
+    if identity in TELEGRAM_PUBLISHER_IDENTITIES:
+        concurrency = max(
+            1,
+            int(
+                getattr(
+                    settings,
+                    "telegram_multi_publisher_lane_concurrency",
                     1,
                 )
             ),

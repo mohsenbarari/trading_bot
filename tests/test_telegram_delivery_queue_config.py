@@ -106,6 +106,7 @@ class TelegramDeliveryQueueConfigTests(unittest.TestCase):
             {"telegram_delivery_queue_destination_min_interval_seconds": 0},
             {"telegram_delivery_queue_primary_concurrency": 0},
             {"telegram_delivery_queue_primary_m0_reserved_concurrency": 0},
+            {"telegram_multi_publisher_lane_concurrency": 0},
             {
                 "telegram_delivery_queue_primary_concurrency": 2,
                 "telegram_delivery_queue_primary_m0_reserved_concurrency": 2,

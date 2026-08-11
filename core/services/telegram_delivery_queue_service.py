@@ -47,6 +47,11 @@ from core.telegram_delivery_queue_contract import (
 from core.telegram_delivery_notification_action_contract import (
     TELEGRAM_NOTIFICATION_ACTION_VALUES,
 )
+from core.telegram_multi_publisher_contract import (
+    TELEGRAM_PUBLISHER_IDENTITIES,
+    TELEGRAM_PUBLISHER_OWNER_REQUIRED_METHODS,
+    TELEGRAM_PUBLISHER_OWNED_OFFER_ACTIONS,
+)
 from core.telegram_gateway import TelegramGatewayResult
 from models.telegram_delivery_job import TelegramDeliveryJobRecord
 from models.telegram_delivery_feeder_state import TelegramDeliveryFeederState
@@ -66,8 +71,13 @@ from models.telegram_delivery_runtime_gate import TelegramDeliveryRuntimeGate
 TELEGRAM_DELIVERY_QUEUE_WORKER_ID = "telegram-delivery-queue-v1"
 TELEGRAM_PRIMARY_BOT_IDENTITY = "primary"
 TELEGRAM_CHANNEL_EDITOR_BOT_IDENTITY = "channel_editor"
+TELEGRAM_PUBLISHER_BOT_IDENTITIES = frozenset(TELEGRAM_PUBLISHER_IDENTITIES)
 SUPPORTED_TELEGRAM_BOT_IDENTITIES = frozenset(
-    {TELEGRAM_PRIMARY_BOT_IDENTITY, TELEGRAM_CHANNEL_EDITOR_BOT_IDENTITY}
+    {
+        TELEGRAM_PRIMARY_BOT_IDENTITY,
+        TELEGRAM_CHANNEL_EDITOR_BOT_IDENTITY,
+        *TELEGRAM_PUBLISHER_BOT_IDENTITIES,
+    }
 )
 SUPPORTED_TELEGRAM_QUEUE_METHODS = frozenset(
     {
@@ -952,6 +962,12 @@ async def enqueue_telegram_delivery_job(
         or action not in CHANNEL_EDITOR_ACTIONS
     ):
         raise TelegramDeliveryQueueValidationError("channel_editor_route_not_allowlisted")
+    if bot in TELEGRAM_PUBLISHER_BOT_IDENTITIES and (
+        destination_class != TelegramDestinationClass.CHANNEL
+        or normalized_method not in TELEGRAM_PUBLISHER_OWNER_REQUIRED_METHODS
+        or action not in TELEGRAM_PUBLISHER_OWNED_OFFER_ACTIONS
+    ):
+        raise TelegramDeliveryQueueValidationError("publisher_lane_route_not_allowlisted")
     if feeder == TelegramFeederKind.OFFER_EDIT:
         if (
             not isinstance(source_order_at, datetime)

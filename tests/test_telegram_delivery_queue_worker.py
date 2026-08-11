@@ -937,6 +937,21 @@ class TelegramDeliveryQueueWorkerSafetyTests(unittest.IsolatedAsyncioTestCase):
                 configured_telegram_delivery_lane_identities(),
                 ("primary", "channel_editor"),
             )
+        with patch(
+            "core.telegram_delivery_queue_worker.settings.telegram_multi_publisher_enabled",
+            True,
+        ):
+            self.assertEqual(
+                configured_telegram_delivery_lane_identities(),
+                (
+                    "primary",
+                    "publisher_1",
+                    "publisher_2",
+                    "publisher_3",
+                    "publisher_4",
+                    "publisher_5",
+                ),
+            )
 
     async def test_supervisor_refuses_missing_lane_adapters_before_task_creation(self):
         with patch(
