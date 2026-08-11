@@ -28,6 +28,9 @@ from bot.handlers.telegram_publisher_b2b import (
     build_primary_b2b_router,
     build_publisher_b2b_router,
 )
+from bot.handlers.telegram_publisher_channel_callbacks import (
+    build_publisher_channel_callback_router,
+)
 from core.db import init_db, AsyncSessionLocal
 from core.events import setup_event_listeners
 from bot.middlewares import (
@@ -99,6 +102,9 @@ def configured_publisher_b2b_pollers(settings_obj):
     for identity, lane in composition.credential_registry.publisher_lanes.items():
         publisher_bot = Bot(token=lane.credential.token)
         publisher_dp = Dispatcher()
+        publisher_dp.update.outer_middleware(CallbackReceiptMiddleware())
+        publisher_dp.update.outer_middleware(TradeContentionGateMiddleware())
+        publisher_dp.update.outer_middleware(AuthMiddleware(AsyncSessionLocal))
         publisher_dp.update.outer_middleware(TelegramBotIdentityMiddleware(identity))
         publisher_dp.include_router(
             build_publisher_b2b_router(
@@ -106,6 +112,7 @@ def configured_publisher_b2b_pollers(settings_obj):
                 expected_primary_bot_id=primary_id,
             )
         )
+        publisher_dp.include_router(build_publisher_channel_callback_router())
         bots.append(publisher_bot)
         pollers.append(publisher_dp.start_polling(publisher_bot))
     return tuple(pollers), publisher_ids, tuple(bots)
