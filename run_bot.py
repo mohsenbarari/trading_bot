@@ -57,6 +57,10 @@ from core.telegram_delivery_runtime_policy import (
     TelegramDeliveryRuntimeMode,
     configured_telegram_delivery_runtime,
 )
+from core.services.telegram_publisher_dispatch_service import (
+    run_telegram_publisher_dispatch_cycle,
+)
+from core.utils import utc_now
 
 # Configure logging
 configure_logging("bot")
@@ -107,6 +111,44 @@ def configured_publisher_b2b_pollers(settings_obj):
 async def supervise_pollers(*pollers) -> None:
     """Keep every polling surface alive as one required runtime task."""
     await asyncio.gather(*pollers)
+
+
+def configured_publisher_dispatch_worker_factory(
+    settings_obj,
+    *,
+    publisher_bot_ids=None,
+):
+    """Return the fail-closed central outbox dispatcher, or no worker."""
+    if not (
+        bool(getattr(settings_obj, "telegram_multi_publisher_enabled", False))
+        and bool(getattr(settings_obj, "telegram_b2b_dispatch_enabled", False))
+    ):
+        return None
+    composition = build_configured_telegram_delivery_runtime(settings=settings_obj)
+    if publisher_bot_ids is None:
+        publisher_bot_ids = {
+            identity: lane.expected_bot_id
+            for identity, lane in composition.credential_registry.publisher_lanes.items()
+        }
+    gateway_call = composition.credential_registry.build_gateway_calls()["primary"]
+
+    async def run_dispatcher() -> None:
+        while True:
+            report = await run_telegram_publisher_dispatch_cycle(
+                session_factory=AsyncSessionLocal,
+                current_server=SERVER_FOREIGN,
+                publisher_bot_ids=publisher_bot_ids,
+                gateway_call=gateway_call,
+                limit=1,
+                lease_seconds=float(getattr(settings_obj, "telegram_delivery_queue_worker_lease_seconds", 30.0)),
+                retry_after_seconds=1.0,
+                acknowledgement_timeout_seconds=15.0,
+                request_timeout_seconds=float(getattr(settings_obj, "telegram_delivery_queue_worker_request_timeout_seconds", 10.0)),
+                now_factory=utc_now,
+            )
+            await asyncio.sleep(0.5 if report.claimed_count else 1.0)
+
+    return run_dispatcher
 
 
 async def supervise_bot_runtime(
@@ -286,6 +328,10 @@ async def main():
     )
     if publisher_pollers:
         dp.include_router(build_primary_b2b_router(publisher_bot_ids=publisher_bot_ids))
+    publisher_dispatcher = configured_publisher_dispatch_worker_factory(
+        settings,
+        publisher_bot_ids=publisher_bot_ids,
+    )
     
     # Default router should be last
     dp.include_router(default.router)
@@ -296,6 +342,7 @@ async def main():
             polling_coro=supervise_pollers(dp.start_polling(bot), *publisher_pollers),
             child_coroutines=[
                 listen_trade_suggestion_events(bot),
+                *(() if publisher_dispatcher is None else (publisher_dispatcher(),)),
                 *(
                     worker_factory()
                     for worker_factory in telegram_execution_worker_factories(
