@@ -60,7 +60,7 @@ Discover optional memory without loading it. Entries here are not default loads.
 - None enabled.
 
 ### Enabled areas
-- None enabled.
+- `areas/frontend-uiux.md` — load for Vue/PWA UI/UX refactoring, Design System V2, Figma/Sites evidence, or shared UI changes that can affect protected surfaces.
 
 ## Optional rules
 `rules/` files load only when listed above and the task clearly matches.
