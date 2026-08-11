@@ -144,6 +144,7 @@ def configured_publisher_dispatch_worker_factory(
 
     async def run_dispatcher() -> None:
         while True:
+            cycle_started_at = asyncio.get_running_loop().time()
             report = await run_telegram_publisher_dispatch_cycle(
                 session_factory=AsyncSessionLocal,
                 current_server=SERVER_FOREIGN,
@@ -175,9 +176,30 @@ def configured_publisher_dispatch_worker_factory(
             interval = float(
                 getattr(settings_obj, "telegram_b2b_dispatch_interval_seconds", 0.5)
             )
-            await asyncio.sleep(interval if report.claimed_count else interval * 2)
+            await asyncio.sleep(
+                publisher_b2b_dispatch_cycle_sleep_seconds(
+                    interval_seconds=interval,
+                    claimed_count=report.claimed_count,
+                    elapsed_seconds=(
+                        asyncio.get_running_loop().time() - cycle_started_at
+                    ),
+                )
+            )
 
     return run_dispatcher
+
+
+def publisher_b2b_dispatch_cycle_sleep_seconds(
+    *,
+    interval_seconds: float,
+    claimed_count: int,
+    elapsed_seconds: float,
+) -> float:
+    """Keep B2B cadence measured from cycle start, not after network latency."""
+    interval = max(0.0, float(interval_seconds))
+    elapsed = max(0.0, float(elapsed_seconds))
+    target_period = interval if int(claimed_count) > 0 else interval * 2
+    return max(0.0, target_period - elapsed)
 
 
 async def supervise_bot_runtime(
