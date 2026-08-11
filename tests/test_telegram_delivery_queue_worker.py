@@ -408,6 +408,43 @@ class TelegramDeliveryQueueWorkerSafetyTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(asyncio.CancelledError):
                 await task
 
+    async def test_lane_slot_logs_the_caught_exception_without_stopping_supervision(self):
+        lane = SimpleNamespace(
+            bot_identity="primary",
+            freshness_validator=AsyncMock(),
+            lifecycle_feedback=_NoopLifecycleFeedback(),
+            gateway_call=AsyncMock(),
+            dispatch_limiter=_AllowLimiter(),
+        )
+        failure = RuntimeError("synthetic_delivery_cycle_failure")
+
+        with patch(
+            "core.telegram_delivery_queue_worker.assert_background_job_authority"
+        ), patch(
+            "core.telegram_delivery_queue_worker.configured_telegram_delivery_runtime",
+            return_value=self._queue_runtime(),
+        ), patch(
+            "core.telegram_delivery_queue_worker.run_telegram_delivery_queue_cycle",
+            new=AsyncMock(side_effect=failure),
+        ), patch(
+            "core.telegram_delivery_queue_worker.asyncio.sleep",
+            side_effect=asyncio.CancelledError,
+        ), patch.object(worker._loop_errors, "log") as log_error:
+            with self.assertRaises(asyncio.CancelledError):
+                await worker._telegram_delivery_queue_lane_slot_loop(
+                    lane,
+                    slot_name="general",
+                    slot_index=0,
+                    maximum_effective_priority=None,
+                )
+
+        log_error.assert_called_once()
+        self.assertEqual(
+            log_error.call_args.args[1],
+            "Error in Telegram delivery lane primary: %s",
+        )
+        self.assertIs(log_error.call_args.args[2], failure)
+
     async def test_provider_fact_recording_retries_database_outage_beyond_three_attempts(self):
         db = AsyncMock()
         context = MagicMock()

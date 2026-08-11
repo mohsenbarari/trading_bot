@@ -1524,8 +1524,7 @@ async def _telegram_delivery_queue_lane_slot_loop(
             except Exception as exc:
                 _loop_errors.log(
                     logger,
-                    "Error in Telegram delivery lane %s: %s",
-                    lane.bot_identity,
+                    f"Error in Telegram delivery lane {lane.bot_identity}: %s",
                     exc,
                     job_name=JOB_TELEGRAM_DELIVERY_QUEUE,
                     bot_role=lane.bot_identity,
