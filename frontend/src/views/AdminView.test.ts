@@ -83,7 +83,8 @@ describe('AdminView.vue', () => {
             name: 'UserManager',
             props: ['apiBaseUrl', 'jwtToken'],
             emits: ['navigate'],
-            template: '<button class="user-manager-open-profile" @click="$emit(\'navigate\', \'user_profile\', { id: 77, account_name: \'user-77\' })">open user profile</button>',
+            template:
+              "<button class=\"user-manager-open-profile\" @click=\"$emit('navigate', 'user_profile', { id: 77, account_name: 'user-77' })\">open user profile</button>",
           },
           UserProfile: {
             name: 'UserProfile',
@@ -94,7 +95,8 @@ describe('AdminView.vue', () => {
             name: 'CreateChannelView',
             props: ['apiBaseUrl', 'jwtToken'],
             emits: ['open-public-profile'],
-            template: '<button class="channel-open-public-profile" @click="$emit(\'open-public-profile\', { id: 88, account_name: \'owner-88\' })">open public profile</button>',
+            template:
+              '<button class="channel-open-public-profile" @click="$emit(\'open-public-profile\', { id: 88, account_name: \'owner-88\' })">open public profile</button>',
           },
         },
       },
@@ -114,21 +116,25 @@ describe('AdminView.vue', () => {
     expect(wrapper.text()).toContain('ارسال دعوت‌نامه')
     expect(wrapper.find('.admin-subview-card.ui-section-card').exists()).toBe(true)
     expect(wrapper.get('.admin-subview-return').classes()).toContain('ui-icon-button')
-    expect(wrapper.get('.admin-subview-return').attributes('aria-label')).toBe('بازگشت به پنل مدیریت')
+    expect(wrapper.get('.admin-subview-return').attributes('aria-label')).toBe(
+      'بازگشت به پنل مدیریت',
+    )
     expect(wrapper.get('.create-invitation-stub').text()).toBe('admin-jwt-token')
 
     await wrapper.get('.admin-subview-return').trigger('click')
     await flushPromises()
 
     expect(adminViewMocks.popBackStateMock).toHaveBeenCalledTimes(1)
-    expect(wrapper.text()).toContain('بخش مورد نظر خود را انتخاب کنید')
+    expect(wrapper.get('.admin-panel-container').attributes('aria-label')).toBe('ابزارهای مدیریت')
   })
 
   it('routes from the users section into the admin user profile view', async () => {
     const wrapper = mountView()
     await flushPromises()
 
-    const usersButton = wrapper.findAll('.admin-panel-action').find((button) => button.text().includes('مدیریت کاربران'))
+    const usersButton = wrapper
+      .findAll('.admin-panel-action')
+      .find((button) => button.text().includes('مدیریت کاربران'))
     expect(usersButton).toBeTruthy()
     await usersButton!.trigger('click')
     await flushPromises()
@@ -177,10 +183,13 @@ describe('AdminView.vue', () => {
     const wrapper = mountView()
     await flushPromises()
 
-    expect(adminViewMocks.apiFetchMock).toHaveBeenCalledWith('/api/users/91', expect.objectContaining({
-      retryNetwork: false,
-      trackConnectionState: false,
-    }))
+    expect(adminViewMocks.apiFetchMock).toHaveBeenCalledWith(
+      '/api/users/91',
+      expect.objectContaining({
+        retryNetwork: false,
+        trackConnectionState: false,
+      }),
+    )
     expect(wrapper.text()).toContain('پروفایل کاربر')
     expect(wrapper.get('.user-profile-stub').text()).toBe('route-user')
   })
@@ -239,25 +248,32 @@ describe('AdminView.vue', () => {
     [403, 'دسترسی به پروفایل مجاز نیست', 'مجوز مشاهده این پروفایل را ندارید.'],
     [404, 'کاربر پیدا نشد', 'این کاربر در دسترس نیست یا دیگر وجود ندارد.'],
     [500, 'پروفایل کاربر در دسترس نیست', 'دریافت اطلاعات کاربر انجام نشد. دوباره تلاش کنید.'],
-  ])('keeps the profile deep link in place for HTTP %s and renders its bounded error state', async (status, title, message) => {
-    adminViewMocks.route.name = 'admin-user-profile'
-    adminViewMocks.route.params = reactive({ id: '52' }) as Record<string, string>
-    adminViewMocks.apiFetchMock.mockResolvedValueOnce(responseOf({ detail: 'backend detail' }, status))
+  ])(
+    'keeps the profile deep link in place for HTTP %s and renders its bounded error state',
+    async (status, title, message) => {
+      adminViewMocks.route.name = 'admin-user-profile'
+      adminViewMocks.route.params = reactive({ id: '52' }) as Record<string, string>
+      adminViewMocks.apiFetchMock.mockResolvedValueOnce(
+        responseOf({ detail: 'backend detail' }, status),
+      )
 
-    const wrapper = mountView()
-    await flushPromises()
+      const wrapper = mountView()
+      await flushPromises()
 
-    expect(wrapper.text()).toContain('پروفایل کاربر')
-    expect(wrapper.text()).toContain(title)
-    expect(wrapper.text()).toContain(message)
-    expect(wrapper.text()).toContain('تلاش مجدد')
-    expect(adminViewMocks.routerReplaceMock).not.toHaveBeenCalled()
-  })
+      expect(wrapper.text()).toContain('پروفایل کاربر')
+      expect(wrapper.text()).toContain(title)
+      expect(wrapper.text()).toContain(message)
+      expect(wrapper.text()).toContain('تلاش مجدد')
+      expect(adminViewMocks.routerReplaceMock).not.toHaveBeenCalled()
+    },
+  )
 
   it('treats a mismatched successful profile payload as unavailable instead of rendering a blank detail', async () => {
     adminViewMocks.route.name = 'admin-user-profile'
     adminViewMocks.route.params = reactive({ id: '52' }) as Record<string, string>
-    adminViewMocks.apiFetchMock.mockResolvedValueOnce(responseOf({ id: 99, account_name: 'wrong-user' }))
+    adminViewMocks.apiFetchMock.mockResolvedValueOnce(
+      responseOf({ id: 99, account_name: 'wrong-user' }),
+    )
 
     const wrapper = mountView()
     await flushPromises()
@@ -289,7 +305,9 @@ describe('AdminView.vue', () => {
 
   it('lets the latest route profile response win when requests settle out of order', async () => {
     let resolveFirst: ((value: ReturnType<typeof responseOf>) => void) | undefined
-    const firstResponse = new Promise<ReturnType<typeof responseOf>>((resolve) => { resolveFirst = resolve })
+    const firstResponse = new Promise<ReturnType<typeof responseOf>>((resolve) => {
+      resolveFirst = resolve
+    })
     adminViewMocks.route.name = 'admin-user-profile'
     adminViewMocks.route.params = reactive({ id: '61' }) as Record<string, string>
     adminViewMocks.apiFetchMock
@@ -321,7 +339,7 @@ describe('AdminView.vue', () => {
     await flushPromises()
 
     expect(adminViewMocks.apiFetchMock).not.toHaveBeenCalled()
-    expect(wrapper.text()).toContain('بخش مورد نظر خود را انتخاب کنید')
+    expect(wrapper.get('.admin-panel-container').attributes('aria-label')).toBe('ابزارهای مدیریت')
 
     const vm = wrapper.vm as any
     vm.handleOpenPublicProfile()
@@ -351,7 +369,7 @@ describe('AdminView.vue', () => {
     vm.handleNavigate('admin_panel')
     await flushPromises()
 
-    expect(wrapper.text()).toContain('بخش مورد نظر خود را انتخاب کنید')
+    expect(wrapper.get('.admin-panel-container').attributes('aria-label')).toBe('ابزارهای مدیریت')
     expect(adminViewMocks.popBackStateMock).toHaveBeenCalledTimes(2)
     expect(adminViewMocks.routerReplaceMock).toHaveBeenCalledWith({ name: 'admin' })
   })
@@ -374,7 +392,7 @@ describe('AdminView.vue', () => {
     vm.handleNavigate('settings')
     await flushPromises()
 
-    expect(wrapper.text()).toContain('بخش مورد نظر خود را انتخاب کنید')
+    expect(wrapper.get('.admin-panel-container').attributes('aria-label')).toBe('ابزارهای مدیریت')
     expect(wrapper.find('.trading-settings-stub').exists()).toBe(false)
   })
 
@@ -385,7 +403,7 @@ describe('AdminView.vue', () => {
     const wrapper = mountView()
     await flushPromises()
 
-    expect(wrapper.text()).toContain('بخش مورد نظر خود را انتخاب کنید')
+    expect(wrapper.get('.admin-panel-container').attributes('aria-label')).toBe('ابزارهای مدیریت')
     expect(wrapper.findComponent({ name: 'CreateChannelView' }).exists()).toBe(false)
   })
 
@@ -398,7 +416,7 @@ describe('AdminView.vue', () => {
     const wrapper = mountView()
     await flushPromises()
 
-    expect(wrapper.text()).toContain('بخش مورد نظر خود را انتخاب کنید')
+    expect(wrapper.get('.admin-panel-container').attributes('aria-label')).toBe('ابزارهای مدیریت')
     expect(wrapper.findComponent({ name: 'CreateChannelView' }).exists()).toBe(false)
   })
 
@@ -430,9 +448,11 @@ describe('AdminView.vue', () => {
     expect(typeof settingsBack).toBe('function')
     settingsBack()
     await flushPromises()
-    expect(wrapper.text()).toContain('بخش مورد نظر خود را انتخاب کنید')
+    expect(wrapper.get('.admin-panel-container').attributes('aria-label')).toBe('ابزارهای مدیریت')
 
-    const usersButton = wrapper.findAll('.admin-panel-action').find((button) => button.text().includes('مدیریت کاربران'))
+    const usersButton = wrapper
+      .findAll('.admin-panel-action')
+      .find((button) => button.text().includes('مدیریت کاربران'))
     expect(usersButton).toBeTruthy()
     await usersButton!.trigger('click')
     await flushPromises()
@@ -442,7 +462,7 @@ describe('AdminView.vue', () => {
     expect(typeof profileBack).toBe('function')
     profileBack()
     await flushPromises()
-    expect(wrapper.text()).toContain('بخش مورد نظر خود را انتخاب کنید')
+    expect(wrapper.get('.admin-panel-container').attributes('aria-label')).toBe('ابزارهای مدیریت')
   })
 
   it('keeps legacy system_settings query deep links mapped to the system route', async () => {

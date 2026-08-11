@@ -18,19 +18,22 @@ async function fetchDevLoginTokens(request: APIRequestContext): Promise<AuthToke
 
 async function setAuthTokens(page: Page, tokens: AuthTokens) {
   await page.goto('/login')
-  await page.evaluate(({ accessToken, refreshToken }) => {
-    localStorage.setItem('auth_token', accessToken)
-    localStorage.setItem('refresh_token', refreshToken)
-    localStorage.removeItem('suspended_refresh_token')
-  }, {
-    accessToken: tokens.access_token,
-    refreshToken: tokens.refresh_token,
-  })
+  await page.evaluate(
+    ({ accessToken, refreshToken }) => {
+      localStorage.setItem('auth_token', accessToken)
+      localStorage.setItem('refresh_token', refreshToken)
+      localStorage.removeItem('suspended_refresh_token')
+    },
+    {
+      accessToken: tokens.access_token,
+      refreshToken: tokens.refresh_token,
+    },
+  )
 }
 
 async function openAdmin(page: Page) {
   await page.goto('/admin', { waitUntil: 'domcontentloaded' })
-  await expect(page.getByRole('heading', { name: 'پنل مدیریت' })).toBeVisible({ timeout: 30000 })
+  await expect(page.getByRole('heading', { name: 'مرکز مدیریت' })).toBeVisible({ timeout: 30000 })
 }
 
 test.describe('Admin smoke regressions', () => {
@@ -40,7 +43,11 @@ test.describe('Admin smoke regressions', () => {
     await setAuthTokens(page, tokens)
     await openAdmin(page)
 
-    await page.locator('button:visible').filter({ hasText: /ارسال لینک دعوت/ }).first().click()
+    await page
+      .locator('button:visible')
+      .filter({ hasText: /ارسال لینک دعوت/ })
+      .first()
+      .click()
     const accountNameInput = page.locator('#account_name:visible').first()
     const mobileInput = page.locator('#mobile_number:visible').first()
     const roleSelect = page.locator('#role:visible').first()
@@ -55,7 +62,11 @@ test.describe('Admin smoke regressions', () => {
     await setAuthTokens(page, tokens)
     await openAdmin(page)
 
-    await page.locator('button:visible').filter({ hasText: /مدیریت کاربران/ }).first().click()
+    await page
+      .locator('button:visible')
+      .filter({ hasText: /مدیریت کاربران/ })
+      .first()
+      .click()
     await expect(page.locator('.search-toggle-btn:visible').first()).toBeVisible()
     await expect(page.locator('.users-list:visible').first()).toBeVisible()
   })
@@ -65,8 +76,14 @@ test.describe('Admin smoke regressions', () => {
     await setAuthTokens(page, tokens)
     await openAdmin(page)
 
-    await page.locator('button:visible').filter({ hasText: /تنظیمات سیستم/ }).first().click()
-    const invitationAccordionHeader = page.locator('#trading-settings-invitation-header:visible').first()
+    await page
+      .locator('button:visible')
+      .filter({ hasText: /تنظیمات سیستم/ })
+      .first()
+      .click()
+    const invitationAccordionHeader = page
+      .locator('#trading-settings-invitation-header:visible')
+      .first()
     await expect(invitationAccordionHeader).toBeVisible()
     await expect(invitationAccordionHeader).toHaveAttribute('aria-expanded', 'false')
   })
@@ -80,10 +97,16 @@ test.describe('Admin smoke regressions', () => {
 
     await setAuthTokens(page, tokens)
     await openAdmin(page)
-    await page.locator('button:visible').filter({ hasText: /ساخت کانال/ }).first().click()
+    await page
+      .locator('button:visible')
+      .filter({ hasText: /ساخت کانال/ })
+      .first()
+      .click()
     const channelShell = page.locator('.channel-admin-shell:visible').last()
     await expect(channelShell).toBeVisible()
-    await expect(channelShell.getByRole('heading', { name: 'ساخت کانال جدید' }).first()).toBeVisible()
+    await expect(
+      channelShell.getByRole('heading', { name: 'ساخت کانال جدید' }).first(),
+    ).toBeVisible()
     await expect(channelShell.getByRole('button', { name: /کانال جدید/ }).first()).toBeVisible()
   })
 })
