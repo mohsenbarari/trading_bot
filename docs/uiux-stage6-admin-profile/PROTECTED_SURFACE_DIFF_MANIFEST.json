@@ -1,0 +1,63 @@
+{
+  "schemaVersion": 1,
+  "stage": 6,
+  "scope": "messenger-url-privacy-exact-overlay",
+  "status": "passed_exact_reviewed_overlay",
+  "mutableNarrative": true,
+  "implementation": {
+    "branch": "condidate/webapp-ui-ux-redesign-v2",
+    "commit": "3283a6e38209cb06d352740dae5b05bce5ba9002",
+    "tree": "7284ec4aac1980c0f61201e3346841425f6bcb09"
+  },
+  "guard": {
+    "libraryPath": "frontend/scripts/lib/stage4-protected-surface-guard.mjs",
+    "librarySha256": "ff55a81db09df7d31f733beb37d8fab9d318a2603415f267b9afd841aa2d51c2",
+    "runnerPath": "frontend/scripts/check-stage4-protected-surfaces.mjs",
+    "runnerSha256": "601a79c9cf5e0668d08b23f49f64091b608b70e61c338730418edde1a42409d2",
+    "command": "npm run guard:ui",
+    "result": "passed",
+    "expectedDisposition": "PASS Stage 6 Messenger URL-privacy disposition"
+  },
+  "immutableStage4MessengerBaseline": {
+    "contract": "stage4-messenger-owned-runtime-v1",
+    "count": 85,
+    "contentBytes": 1312405,
+    "pathSetSha256": "f6af1f961e45d785ba9c752ee670643571086c6a946843807fe6f581d11aea58",
+    "sha256": "f66debf9809180d97b2bac98f5195ba24200d3b61b0d8e0e5cd423a8a7b97248"
+  },
+  "stage6PermittedOverlay": {
+    "reason": "public-profile navigation must not serialize PII in URL/history",
+    "exactAllowedFiles": [
+      {
+        "path": "frontend/src/components/ChatView.vue",
+        "sha256": "e03ded196c369871f3ecd6763c09535c5a57efc5c0a767d848b2c5a94994273b"
+      },
+      {
+        "path": "frontend/src/components/CreateChannelView.vue",
+        "sha256": "708cabb84325114d03b35b5db8a0b4add64193f438c1a3375a5e66232034102c"
+      },
+      {
+        "path": "frontend/src/views/MessengerView.vue",
+        "sha256": "1cabee73dc161c456130f131f53274a5b546816ff0652d68a4e6ea290e0f83fb"
+      }
+    ],
+    "evidence": {
+      "count": 85,
+      "contentBytes": 1311100,
+      "pathSetSha256": "f6af1f961e45d785ba9c752ee670643571086c6a946843807fe6f581d11aea58",
+      "sha256": "3089210a77936d29754c9478fcdf40619acd08f35d1e8c64f6266fe8efb1699a"
+    },
+    "failClosed": "any unlisted Messenger-owned file change, missing allowed path, or per-file hash drift fails the guard"
+  },
+  "disposition": {
+    "messengerForwardDiscovery": "unchanged",
+    "allowedChange": "only the exact canonical public-profile route privacy overlay",
+    "protectedSurfaceConclusion": "the guard accepts the reviewed overlay; it does not authorize unrelated Messenger changes"
+  },
+  "completion": {
+    "stage6CompleteAuthority": false,
+    "sitesStarted": false,
+    "stagingOrProductionChanged": false
+  },
+  "claimBoundary": "This is an exact protected-surface disposition, not a blanket protected-surface pass for future edits and not a Stage 6 closure manifest."
+}

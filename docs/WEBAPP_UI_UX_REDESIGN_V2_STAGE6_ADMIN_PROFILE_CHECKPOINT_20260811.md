@@ -2,13 +2,13 @@
 
 تاریخ آغاز: ۲۰۲۶-۰۸-۱۱
 
-وضعیت: **`stage6_phase1_phase2_complete_pii_authority_decision_required`**
+وضعیت: **`stage6_phase1_phase2_phase3_delivered_broader_roadmap_partial_deferred`**
 
 شاخه: `condidate/webapp-ui-ux-redesign-v2`
 
 ## ۱. مجوز و حد آن
 
-دستور صریح کنونی مالک، توقف تاریخی پس از Stage 5 را فقط برای آغاز Stage 6 supersede می‌کند. این مجوز، اجازهٔ انتشار محصول، تغییر staging یا production، فعال‌سازی runtime خارج از branch، یا overwrite کردن preview/evidence Stage 5 نیست.
+دستور صریح مالک، توقف تاریخی پس از Stage 5 را برای Phase 1/2/3 Stage 6 supersede کرد و matrix server-enforced PII/authority را نیز برای Phase 3 تأیید کرد. این مجوز، اجازهٔ انتشار محصول، تغییر staging یا production، فعال‌سازی runtime خارج از branch، یا overwrite کردن preview/evidence Stage 5 نیست.
 
 Stage 6 به‌صورت route-scoped، rollback-safe و با گیت مستقل پیش می‌رود. هر زیرسطح فقط پس از بسته‌شدن گیت فنی زیرسطح قبل وارد کار می‌شود.
 
@@ -22,7 +22,7 @@ Stage 6 به‌صورت route-scoped، rollback-safe و با گیت مستقل �
 4. Figma editable canonical با file key `z8jgJxST4O2APzWnlyP9gv`؛
 5. کد و contractهای backend فعلی، برای authority، permission و outcome واقعی.
 
-صفحهٔ تازهٔ Figma این Stage برابر `08 — Stage 6 Admin & Profile` (`321:18`) است. root فعلی (`321:19`) deltaهای اجرایی Phase 1 و Phase 2 را ثبت می‌کند و هیچ board تأییدشدهٔ `0B-4`، `0B-5` یا Stage 5 را بازنویسی نمی‌کند.
+صفحهٔ Figma این Stage برابر `08 — Stage 6 Admin & Profile` (`321:18`) است. root (`321:19`) Phase 1 و Phase 2 را دارد و section Phase 3 (`381:318`) sibling همان page است. این topology page-level صریحاً افشا می‌شود: هیچ board تأییدشدهٔ `0B-4`، `0B-5` یا Stage 5 بازنویسی نشده و evidence را نباید یک root-bundle nested واحد نامید.
 
 ## ۳. Phase 1 — ورودی مدیریت
 
@@ -37,26 +37,26 @@ Stage 6 به‌صورت route-scoped، rollback-safe و با گیت مستقل �
 
 فایل‌های مجاز این slice فقط `frontend/src/components/AdminPanel.vue`، تست مستقیم آن و در صورت نیاز expectation محدود `AdminView.test.ts` هستند. تغییر child workflow، API، router، route guard، permission یا backend در Phase 1 مجاز نیست.
 
-## ۴. خارج از Phase 2
+## ۴. deferred خارج از Phase 1/2/3 تحویل‌شده
 
 موارد زیر sliceهای مستقل و گیت‌دار بعدی‌اند:
 
 - invitation management و pending invitation؛
-- authority matrix برای self/same-level/middle-manager/super-admin؛
-- PII profile، mask/hide سمت server و تجربهٔ profile self/public؛
 - commodity feedback persistence؛
 - dialogهای sensitive به‌جای `alert`/`confirm`؛
 - هر تغییر در Admin Messages و System Settings غیرمحافظت‌شده.
 
 `/market`، `/chat`، `/share-receive`، `/admin/channels`، interiorهای market/messenger در `AdminMessagesView` و `TradingSettings` و Home Market همچنان protected هستند. هیچ shared CSS/token بدون guard و proof نبود drift تغییر نمی‌کند.
 
-## ۵. قرارداد authority، PII و state
+## ۵. قرارداد authority، PII و state — تصمیم pending با Phase 3 supersede شد
 
-- visibility هرگز جای enforcement backend نیست؛
+- visibility هرگز جای enforcement backend نیست؛ ordinary peer mobile را server-masked می‌گیرد و address، presence، membership، relation و trade detail در projection او نیست.
+- self contact/address موردنیازِ مجاز را حفظ می‌کند؛ administrator فقط projection مجاز server را می‌گیرد و client حق بازسازی فیلد حذف‌شده ندارد.
+- action حساس admin→self، middle→any-admin و super→super-peer server-side `403` است؛ target پایین‌تر فقط پس از check سروری مجاز می‌شود.
 - pending endpoint بدون total معتبر، source count برای KPI یا badge نیست؛
 - success delivery فقط با receipt همان channel اعلام می‌شود؛
 - در evidence و Figma فقط هویت synthetic استفاده می‌شود و URL/token واقعی نمایش داده نمی‌شود؛
-- public profile برای viewer عادی mobile masked/hidden است و هر اصلاح آن باید server-side role matrix داشته باشد؛
+- public profile فقط `/users/:id` است؛ inbound legacy query پیش از navigation canonical می‌شود و account_name/highlight/relation/metadata وارد URL یا history نمی‌شود.
 - loading، error، true empty، unavailable و permission-protected جدا می‌مانند؛ هیچ empty یا success ساختگی جای آن‌ها را نمی‌گیرد.
 
 ## ۶. گیت Phase 1 و rollback
@@ -75,9 +75,9 @@ rollback به revert commit مستقل Phase 1 محدود است؛ پس از rol
 
 ## ۷. Figma، evidence و Sites
 
-Figma منبع اصلی طراحی است. Phase 1 boundary card و proof موبایل ورودی مدیریت را ثبت می‌کند و Phase 2 proofهای directory، desktop، recovery و privacy route-context را به همان صفحه می‌افزاید؛ pending-attention canonical فقط در state دارای دادهٔ واقعی باقی می‌ماند و به runtime نسبت داده نمی‌شود.
+Figma منبع اصلی طراحی است. Phase 1 boundary card و proof موبایل ورودی مدیریت، Phase 2 directory/desktop/recovery و Phase 3 privacy/authority را ثبت می‌کند؛ pending-attention canonical فقط در state دارای دادهٔ واقعی باقی می‌ماند و به runtime نسبت داده نمی‌شود. post-fix read-only audit نشان می‌دهد هر سه Phase label قابل‌دیدنِ `source 3283a6e3` و `دادهٔ synthetic` دارند؛ Phase 3 sibling page-level root است و این caveat مانع از ادعای nested bundle می‌شود.
 
-Sites در Stage 6 هنوز هیچ mutation یا deployment ندارد. فقط پس از بسته‌شدن همهٔ sliceهای Stage 6، browser/Figma evidence نهایی و freeze محلی، یک repo/project تازه و private owner-only برای evidence ساخته می‌شود. آن preview product deployment نیست و هیچ staging/production را تغییر نمی‌دهد.
+Sites در Stage 6 هنوز هیچ mutation، repo/project، preview یا deployment ندارد. اگر و فقط اگر scope گسترده‌تر مجاز و closure جداگانه آغاز شود، ابتدا inputs immutable freeze می‌شوند و سپس یک repo/project تازه و private owner-only برای evidence ساخته می‌شود. آن preview product deployment نیست و هیچ staging/production را تغییر نمی‌دهد.
 
 ## ۸. رسید Phase 1
 
@@ -114,6 +114,35 @@ Phase 2 به directory مدیریت و detail مجاز server-authoritative مح
 
 browser acceptance promotable Phase 2 در run `uiux-stage6-phase2-browser-20260811T173943646Z` روی commit clean بالا، ۱۷/۱۷ assertion و ۱۴ screenshot pass شد: super/middle در ۳۶۰/۳۷۵/۳۹۰/۴۱۴/۴۳۰/۱۴۴۰، privacy sentinel، list/detail scroll، 403/404 recovery، reflow و external blocking را پوشش می‌دهد؛ diagnostic غیرمنتظره صفر است. چهار console notice مربوط به fixtureهای synthetic 403/404 صریحاً expected/classified هستند.
 
-Figma Phase 2 در همان page/root با directory mobile `336:50`، desktop proof `366:138` و recovery/detail proofهای `371:194`، `373:226`، `373:254` و `373:282` به‌روزرسانی شد. annotation قرارداد می‌گوید فقط `scroll` route context است و `q`/`account_name` در URL/history/storage ذخیره نمی‌شوند. تمام هویت‌ها synthetic هستند؛ export/audit/freeze نهایی Figma عمداً تا closure کامل Stage 6 انجام نمی‌شود.
+Figma Phase 2 در همان page/root با directory mobile `336:50`، desktop proof `366:138` و recovery/detail proofهای `371:194`، `373:226`، `373:254` و `373:282` به‌روزرسانی شد. annotation قرارداد می‌گوید فقط `scroll` route context است و `q`/`account_name` در URL/history/storage ذخیره نمی‌شوند. تمام هویت‌ها synthetic هستند. Phase 2 اکنون به source final bind شده است، اما local freeze یا Sites Stage 6 آغاز نشده است.
 
-گیت بعدی و تنها blocker Stage 6: مالک باید matrix server-enforced برای visibility PII و authority actionهای self/same-level/middle/super را صریح تأیید کند. تغییر client-only masking، تغییر PublicProfile، `/users-public/search`، project-users یا Messenger/Forward در این Phase مجاز و انجام‌شده نیست.
+blocker تاریخی Phase 2 برای matrix PII/authority با تأیید مالک و Phase 3 زیر supersede شده است. این supersede، فقط scope تحویل‌شده را می‌بندد؛ broader roadmap و closure Stage 6 همچنان deferred هستند.
+
+## ۱۰. رسید Phase 3 — privacy، authority و route ID-only
+
+Phase 3 در commit `3283a6e38209cb06d352740dae5b05bce5ba9002` (tree `7284ec4aac1980c0f61201e3346841425f6bcb09`) تحویل شد.
+
+- server projection برای peer عادی mobile masked است و address/presence/membership/relation/trade detail را اصلاً برنمی‌گرداند؛ self و administratorِ مجاز فقط فیلدهای لازمِ مجاز را می‌گیرند.
+- action حساس admin→self، middle→any-admin و super→super-peer backend-enforced `403` است؛ UI read-only فقط feedback است، نه enforcement.
+- همهٔ entryهای public profile از direct، notification، toast و browser به `/users/:id` بدون query/hash می‌روند؛ legacy query پیش از navigation canonical می‌شود. Messenger/Forward discovery بدون تغییر باقی مانده است.
+- PublicProfile در 360px reflow شد و controlهای interactive در reduced-motion transition مؤثر ندارند؛ 403/404 recovery عمومی، bounded و بدون detail leak است.
+
+گیت‌های نهایی source:
+
+- frontend serial: `154` file / `1700` test pass در `436.71s`؛ `vue-tsc` (`1.61s`)، build (`32.20s`)، `guard:ui` و diff check pass؛ focused profile برابر `75/75` pass.
+- backend targeted authority/projection/notification: `131` test pass با config dummy محلی؛ warningهای inherited نتیجهٔ محصول نیستند.
+- Playwright collection: `24` test در `4` spec pass. live E2E به علت unavailable بودن `127.0.0.1:8000/api/config` در محیط محلی اجرا نشد؛ هیچ staging/production لمس نشده است.
+
+browser receipt نهایی aggregate `uiux-stage6-aggregate-browser-20260811T203934914Z` promotable/pass است: top-level `17/17` assertion و چهار screenshot؛ child Phase 2 برابر `17/17`/۱۴ screenshot و child Phase 3 برابر `14/14`/۱۲ screenshot است. aggregate source binding برای `560` فایل `6a4ba01a41ce97494ae1b95bdab605b88293b15c368cdb426c235bb358a1b3fd` است و pre/post source/Git/harness/environment identical باقی مانده‌اند. هر دو child هیچ diagnostic غیرمنتظره ندارند: Phase 2 با کلیدهای `expectedProfileResponseConsoleEvents=4` (403/404 fixture) و `externalRequestsBlocked=15` ثبت شده است؛ Phase 3 با کلیدهای مستقل `expectedHttpErrors=4` (403/404) و `externalTrafficIntercepted=13` (Telegram loader local-intercepted). بنابراین counterهای نام‌برده‌شدهٔ Phase 2 به Phase 3 نسبت داده نمی‌شوند.
+
+## ۱۱. Figma post-fix evidence
+
+read-only audit `assets/figma/final-provenance-20260811T204635Z/stage6-final-figma-provenance-audit.json` با SHA-256 `ccdea4bd31124d759c68ed89e16c9ed73290f04e2bb58359b4138e8ed575b89b` در `2026-08-11T20:49:17Z` result `pass_with_documented_page_sibling_topology` دارد.
+
+- labelهای Phase 1/2/3 به‌ترتیب `323:19`، `336:49` و `381:319` visible هستند و هر سه `source 3283a6e3` و `دادهٔ synthetic` دارند.
+- proofهای Phase 1: `326:20` و `347:107`؛ Phase 2: `336:50`، `366:138`، `371:194`، `373:226`، `373:254`، `373:282`؛ Phase 3: `382:556`، `381:330`، `382:573`، `381:393`، `381:341`، `381:359`.
+- render page/root/sectionها clipping یا overlap label ندارد. Phase 1/2 child root `321:19` هستند، اما Phase 3 (`381:318`) sibling همان page `321:18` است؛ پس evidence page-level است.
+
+## ۱۲. مرز closure
+
+Phase 1/2/3 تحویل‌شده‌اند، اما broader roadmap Stage 6 partial/deferred است و **`stage6CompleteAuthority=false`**. هیچ `EVIDENCE_MANIFEST`، local freeze، Sites project/preview، product deployment، staging deployment یا production deployment ساخته یا تغییر داده نشده است. این checkpoint مجوز انجام deferredها یا ادعای complete Stage 6 نیست.

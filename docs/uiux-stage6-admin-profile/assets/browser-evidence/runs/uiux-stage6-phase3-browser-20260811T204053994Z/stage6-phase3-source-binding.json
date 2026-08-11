@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "stage": 6,
+  "phase": 3,
+  "runId": "uiux-stage6-phase3-browser-20260811T204053994Z",
+  "status": "passed",
+  "promotable": true,
+  "sourceBindingSha256": "d4216b636958ac6293b8d481cf79157efe5f2fcb1d978acad25204de245e23e1",
+  "sourceFileCount": 399,
+  "branch": "condidate/webapp-ui-ux-redesign-v2",
+  "commit": "3283a6e38209cb06d352740dae5b05bce5ba9002",
+  "tree": "7284ec4aac1980c0f61201e3346841425f6bcb09",
+  "parent": "63bc6827af63c722e7f1c156b3d47825afc18eae",
+  "sourceIdentical": true,
+  "gitIdentical": true,
+  "harnessIdentical": true,
+  "environmentIdentical": true
+}

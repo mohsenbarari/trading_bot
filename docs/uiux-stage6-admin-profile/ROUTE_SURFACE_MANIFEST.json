@@ -1,0 +1,121 @@
+{
+  "schemaVersion": 1,
+  "stage": 6,
+  "scope": "admin-profile-delivered-phase1-phase2-phase3",
+  "status": "delivered_phase1_phase2_phase3_broader_stage6_partial_deferred",
+  "mutableNarrative": true,
+  "branch": "condidate/webapp-ui-ux-redesign-v2",
+  "implementation": {
+    "commit": "3283a6e38209cb06d352740dae5b05bce5ba9002",
+    "tree": "7284ec4aac1980c0f61201e3346841425f6bcb09",
+    "parent": "63bc6827af63c722e7f1c156b3d47825afc18eae"
+  },
+  "routeContract": {
+    "routerPath": "frontend/src/router/index.ts",
+    "routerSha256": "a85c2432ff6a4ad0230ee63e58d54dce7aaa5d1a781b50efa3b44d0fcf8c051c",
+    "routeContractPath": "frontend/src/router/uiRouteContract.ts",
+    "routeContractSha256": "8e7495a05dfbf6b36bcc242af1b20919bef56a8bd0ed9458360d36cf79fba144",
+    "appPath": "frontend/src/App.vue",
+    "appSha256": "e07321f3e5f70cf33344e0a154339b58da1f94f100e9bf6827f670e726af8560"
+  },
+  "routes": [
+    {
+      "phase": 1,
+      "path": "/admin",
+      "name": "admin",
+      "component": "frontend/src/views/AdminView.vue",
+      "requiresAuth": true,
+      "requiresAdmin": true,
+      "shellClass": "standard-authenticated",
+      "v2Scope": "section",
+      "purpose": "role-aware admin landing",
+      "queryPolicy": "no Stage 6 PII or authority query contract"
+    },
+    {
+      "phase": 2,
+      "path": "/admin/users",
+      "name": "admin-users",
+      "component": "frontend/src/views/AdminView.vue",
+      "requiresAuth": true,
+      "requiresAdmin": true,
+      "shellClass": "standard-authenticated",
+      "v2Scope": "section",
+      "purpose": "server-authorized directory",
+      "queryPolicy": "only normalized non-negative integer scroll; raw q remains session-local"
+    },
+    {
+      "phase": 2,
+      "path": "/admin/users/:id",
+      "name": "admin-user-profile",
+      "component": "frontend/src/views/AdminView.vue",
+      "requiresAuth": true,
+      "requiresAdmin": true,
+      "shellClass": "standard-authenticated",
+      "v2Scope": "section",
+      "purpose": "server-authorized admin detail",
+      "queryPolicy": "only normalized non-negative integer scroll; 403/404 recover generically"
+    },
+    {
+      "phase": 3,
+      "path": "/users/:id",
+      "name": "public-profile",
+      "component": "frontend/src/views/PublicProfileView.vue",
+      "requiresAuth": true,
+      "requiresAdmin": false,
+      "shellClass": "standard-authenticated",
+      "v2Scope": "section",
+      "purpose": "server-projected public profile",
+      "queryPolicy": "ID-only path; no query/hash; legacy query is canonicalized before navigation"
+    },
+    {
+      "phase": 3,
+      "path": "/profile",
+      "name": "profile",
+      "component": "frontend/src/views/ProfileView.vue",
+      "requiresAuth": true,
+      "requiresAdmin": false,
+      "shellClass": "standard-authenticated",
+      "v2Scope": "section",
+      "purpose": "self profile wrapper for the authorized projection",
+      "queryPolicy": "no Stage 6 PII or authority query contract"
+    }
+  ],
+  "stateAndPrivacy": {
+    "adminDirectoryRawSearch": "auth-scoped session-local state only; never URL/history/storage",
+    "adminDirectoryRouteContext": [
+      "scroll"
+    ],
+    "publicProfileCanonicalPath": "/users/:id",
+    "publicProfileRouteCarries": [
+      "validated id"
+    ],
+    "publicProfileRouteMustNotCarry": [
+      "account_name",
+      "highlight",
+      "relation",
+      "presence",
+      "mobile",
+      "other metadata"
+    ],
+    "legacyInboundProfileQuery": "canonicalize before navigation",
+    "queryOnlyAdminListDetailTransition": "shared root and scroll owner; no remount race"
+  },
+  "browserEvidence": {
+    "aggregateRunId": "uiux-stage6-aggregate-browser-20260811T203934914Z",
+    "aggregateSourceBindingSha256": "6a4ba01a41ce97494ae1b95bdab605b88293b15c368cdb426c235bb358a1b3fd",
+    "aggregateSourceFileCount": 560,
+    "phase2RunId": "uiux-stage6-phase2-browser-20260811T204010055Z",
+    "phase3RunId": "uiux-stage6-phase3-browser-20260811T204053994Z",
+    "prePostSourceGitHarnessEnvironmentIdentical": true
+  },
+  "completion": {
+    "phase1": "complete_delivered",
+    "phase2": "complete_delivered",
+    "phase3": "complete_delivered",
+    "broaderStage6": "partial_deferred",
+    "stage6CompleteAuthority": false,
+    "sitesStarted": false,
+    "stagingOrProductionChanged": false
+  },
+  "claimBoundary": "This manifest describes the delivered route/state boundary only. It does not authorize deferred Stage 6 work, prove a live backend, publish Sites, or change staging/production."
+}

@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "stage": 6,
+  "phase": "aggregate",
+  "runId": "uiux-stage6-aggregate-browser-20260811T203934914Z",
+  "status": "passed",
+  "promotable": true,
+  "sourceBindingSha256": "6a4ba01a41ce97494ae1b95bdab605b88293b15c368cdb426c235bb358a1b3fd",
+  "sourceFileCount": 560,
+  "branch": "condidate/webapp-ui-ux-redesign-v2",
+  "commit": "3283a6e38209cb06d352740dae5b05bce5ba9002",
+  "tree": "7284ec4aac1980c0f61201e3346841425f6bcb09",
+  "parent": "63bc6827af63c722e7f1c156b3d47825afc18eae",
+  "sourceIdentical": true,
+  "gitIdentical": true,
+  "harnessesIdentical": true,
+  "environmentIdentical": true,
+  "childRuns": [
+    {
+      "phase": 2,
+      "runId": "uiux-stage6-phase2-browser-20260811T204010055Z",
+      "status": "passed",
+      "promotable": true,
+      "metricsSha256": "cbb67d4d58b1950754b816d9164e0329fc0197bf7137c31e5eb0540ba2c7bdc9",
+      "bindingSha256": "fb2efe36b5d1a01edc0202b60f59f7f8efe699dd6a7f7b522223713ed57106fc"
+    },
+    {
+      "phase": 3,
+      "runId": "uiux-stage6-phase3-browser-20260811T204053994Z",
+      "status": "passed",
+      "promotable": true,
+      "metricsSha256": "94ac04cda36af4a377daa1b4f4626f5b35a1ab5c4994484bcc1d288ac372f261",
+      "bindingSha256": "0ccd1fb2967c305d1237bd847dfa29fee7c1edf56f668e65b945bb390dc6e7f6"
+    }
+  ]
+}

@@ -1,0 +1,162 @@
+{
+  "schema_version": 1,
+  "audit": "stage6-final-figma-provenance-postfix",
+  "captured_at_utc": "2026-08-11T20:49:17Z",
+  "read_only": true,
+  "result": "pass_with_documented_page_sibling_topology",
+  "scope": {
+    "file_key": "z8jgJxST4O2APzWnlyP9gv",
+    "page": {
+      "id": "321:18",
+      "name": "08 — Stage 6 Admin & Profile",
+      "direct_child_count": 2
+    },
+    "canonical_root": {
+      "id": "321:19",
+      "name": "Stage 6 — Admin landing runtime delta",
+      "type": "FRAME",
+      "visible": true,
+      "x": 0,
+      "y": 0,
+      "width": 2640,
+      "height": 4876
+    },
+    "phase3_section": {
+      "id": "381:318",
+      "name": "03 — Public profile · privacy & authority · source 3283a6e3",
+      "type": "FRAME",
+      "visible": true,
+      "x": 24,
+      "y": 2968,
+      "width": 2592,
+      "height": 1876
+    }
+  },
+  "source_at_capture": {
+    "branch": "condidate/webapp-ui-ux-redesign-v2",
+    "commit": "3283a6e38209cb06d352740dae5b05bce5ba9002",
+    "tree": "7284ec4aac1980c0f61201e3346841425f6bcb09",
+    "tracked_worktree_clean": true
+  },
+  "provenance_labels": [
+    {
+      "phase": 1,
+      "id": "323:19",
+      "parent_id": "323:18",
+      "parent_name": "00 — Phase 1 boundary",
+      "visible": true,
+      "text": "Stage 6 · Phase 1 · source 3283a6e3 · دادهٔ synthetic",
+      "contains_expected_short_commit": true,
+      "contains_synthetic_provenance": true
+    },
+    {
+      "phase": 2,
+      "id": "336:49",
+      "parent_id": "336:48",
+      "parent_name": "02 — User directory · local-query route-safe · mobile 390×844",
+      "visible": true,
+      "text": "Stage 6 · Phase 2 · source 3283a6e3 · دادهٔ synthetic · جست‌وجوی فقط‌نشستی؛ URL، history و storage فقط scroll نرمال‌شده دارند · proof موبایل و desktop",
+      "contains_expected_short_commit": true,
+      "contains_synthetic_provenance": true
+    },
+    {
+      "phase": 3,
+      "id": "381:319",
+      "parent_id": "381:318",
+      "parent_name": "03 — Public profile · privacy & authority · source 3283a6e3",
+      "visible": true,
+      "text": "Phase 3 · source 3283a6e3 · دادهٔ synthetic · پروفایل عمومی فقط /users/:id؛ peer با موبایل ماسک‌شده و بدون نشانی، حضور، رابطه یا تاریخچه",
+      "contains_expected_short_commit": true,
+      "contains_synthetic_provenance": true
+    }
+  ],
+  "topology": {
+    "page_direct_children": [
+      {
+        "id": "321:19",
+        "name": "Stage 6 — Admin landing runtime delta",
+        "type": "FRAME"
+      },
+      {
+        "id": "381:318",
+        "name": "03 — Public profile · privacy & authority · source 3283a6e3",
+        "type": "FRAME"
+      }
+    ],
+    "phase1_and_phase2_are_under_root_321_19": true,
+    "phase3_parent_id": "321:18",
+    "phase3_is_page_sibling_of_root_321_19": true,
+    "phase3_is_nested_under_root_321_19": false,
+    "conclusion": "Phase 3 is a page-level sibling of root 321:19. The page-level render shows it as a visually valid lower proof section; its sibling topology is a disclosure, not a visual blocker."
+  },
+  "visual_review": {
+    "method": "Fresh Figma MCP page/root/section renders were visually inspected after the label updates.",
+    "result": "pass",
+    "checks": [
+      "Phase 1 boundary render visibly shows its exact source and synthetic label.",
+      "Phase 2 section render visibly shows its exact source and synthetic label.",
+      "Phase 3 section render visibly shows its exact source and synthetic label.",
+      "The page-level render presents all three phase areas without label clipping or visual overlap."
+    ]
+  },
+  "authoritative_screenshots": [
+    {
+      "relative_path": "figma-page-321-18.png",
+      "figma_node_id": "321:18",
+      "rendered_width": 2218,
+      "rendered_height": 4096,
+      "original_width": 2640,
+      "original_height": 4876,
+      "bytes": 297229,
+      "sha256": "f987fd760c8b7e642f172ef2803e926cfb008454c3fa309cf6efe34e0c2d6d35",
+      "note": "Page-level aggregate proving the visible Phase 3 sibling disposition."
+    },
+    {
+      "relative_path": "figma-root-321-19.png",
+      "figma_node_id": "321:19",
+      "rendered_width": 2218,
+      "rendered_height": 4096,
+      "original_width": 2640,
+      "original_height": 4876,
+      "bytes": 205259,
+      "sha256": "c6ebb0327315e50e3873c0debedb64fa68a6c9c86ca46315a005eea391e03b57",
+      "note": "Root-only render covering Phase 1 and Phase 2."
+    },
+    {
+      "relative_path": "figma-phase1-boundary-323-18.png",
+      "figma_node_id": "323:18",
+      "rendered_width": 2592,
+      "rendered_height": 120,
+      "original_width": 2592,
+      "original_height": 120,
+      "bytes": 13362,
+      "sha256": "1d059c3ce1409b39839b0ebcdc5706b146e7303f2303ee4930747e24ef2b854b"
+    },
+    {
+      "relative_path": "figma-phase2-336-48.png",
+      "figma_node_id": "336:48",
+      "rendered_width": 2592,
+      "rendered_height": 1876,
+      "original_width": 2592,
+      "original_height": 1876,
+      "bytes": 126957,
+      "sha256": "d839ee45a30470fdebd16ca79c6cf1ace1fa75bbf95aff7f39d6059fbd30210d"
+    },
+    {
+      "relative_path": "figma-phase3-381-318.png",
+      "figma_node_id": "381:318",
+      "rendered_width": 2592,
+      "rendered_height": 1876,
+      "original_width": 2592,
+      "original_height": 1876,
+      "bytes": 112943,
+      "sha256": "290d2fa778fe1a64cca011ddcbfebcb5b4173ee7d08b7da4496cb82ab995744c"
+    }
+  ],
+  "claim_boundary": "This audit verifies only static Figma provenance-label visibility and documented topology. It does not independently prove runtime behavior, backend authority, browser accessibility, deployment readiness, Sites publication, staging/production state, or Stage 6 closure.",
+  "boundaries": [
+    "No Figma node was created, edited, reparented, or deleted.",
+    "No source, test, Sites, staging, or production state was changed.",
+    "Short-lived Figma asset URLs are deliberately omitted from this manifest."
+  ]
+}

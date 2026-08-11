@@ -1,0 +1,19 @@
+# Content Necessity Matrix — Stage 6 delivered scope
+
+| سطح/محتوا | نیاز تصمیم یا عمل | وضعیت | مرز privacy/authority |
+| --- | --- | --- | --- |
+| Admin landing destinations | رسیدن به workflow مجاز نقش جاری | نگه‌داری | فقط مقصدهای واقعی؛ role filter موجود حفظ شده است. |
+| synthetic counters/pending badge | هیچ receipt authoritative ندارد | حذف | نباید وضعیت یا authority ساختگی بسازد. |
+| Admin directory list | یافتن user مجاز برای کار مدیریتی | نگه‌داری | list server-authorized و semantic است. |
+| directory search | کاهش هزینهٔ یافتن در نشست جاری | نگه‌داری، local-only | `q` در URL/history/storage نمی‌رود. |
+| `scroll` context | بازگشت قابل‌پیش‌بینی list/detail | نگه‌داری، نرمال‌شده | تنها context route مجاز است. |
+| Admin detail | مشاهدهٔ server-authorized target | نگه‌داری | 403/404 generic recovery دارند. |
+| Public profile identity | تشخیص targetِ مجاز | نگه‌داری | route فقط ID است. |
+| Peer mobile | تماس ضروری بدون افشای کامل | masked | server projection؛ نه mask صرفاً client. |
+| Peer address/presence/membership/relation/trade detail | برای peer عادی ضروری نیست | حذف از projection | مانع PII/relationship leakage. |
+| Self contact/address | ویرایش و مدیریت حساب خود | نگه‌داری | فقط selfِ مجاز؛ address affordance حفظ شده است. |
+| Sensitive admin actions against self/same level | عمل مدیریتی مجاز نیست | read-only/forbidden | server `403` تعیین‌کننده است. |
+| 403/404 state | بازیابی امن پس از عدم دسترسی/عدم وجود | نگه‌داری | جزئیات target و PII نشت نمی‌کند. |
+| Messenger/Forward discovery | در این برش نیاز جدیدی ندارد | بدون تغییر | فقط route entry canonical شد؛ discovery بازطراحی/محدود نشد. |
+
+هر محتوای جدید باید پیش از افزوده‌شدن، یک تصمیم، عمل، state یا risk-prevention مشخص داشته باشد و projection/authority آن را backend تأیید کند.

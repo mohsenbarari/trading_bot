@@ -1,0 +1,118 @@
+{
+  "schemaVersion": 1,
+  "stage": 6,
+  "scope": "delivered-phase1-phase2-phase3-curated-evidence",
+  "status": "curated_scope_evidence_not_full_stage6_freeze",
+  "sourceAtCapture": {
+    "branch": "condidate/webapp-ui-ux-redesign-v2",
+    "commit": "3283a6e38209cb06d352740dae5b05bce5ba9002",
+    "tree": "7284ec4aac1980c0f61201e3346841425f6bcb09",
+    "parent": "63bc6827af63c722e7f1c156b3d47825afc18eae"
+  },
+  "lifecycleBoundary": {
+    "stage6CompleteAuthority": false,
+    "fullStage6EvidenceFreeze": false,
+    "sitesInput": false,
+    "sitesProven": false,
+    "stagingOrProductionChanged": false,
+    "description": "This is a curated, reviewable record of the delivered Phase 1/2/3 evidence only. It does not authorize deferred Stage 6 work, a full-stage immutable freeze, or Sites publication."
+  },
+  "projectionAlgorithm": "SHA-256 over sorted UTF-8 lines: <repo-relative-path>\\t<byte-count>\\t<file-sha256>\\n. Directory projections cover every regular file below that exact directory.",
+  "selectedArtifacts": {
+    "browserHarnesses": [
+      {
+        "path": "docs/uiux-stage6-admin-profile/assets/browser-evidence/stage6-aggregate-browser-harness.mjs",
+        "bytes": 41818,
+        "sha256": "664fb0f15a46e8eb587afe55572665ff4087bbef4d052d33c07e2cffc5fdb4b5"
+      },
+      {
+        "path": "docs/uiux-stage6-admin-profile/assets/browser-evidence/stage6-phase2-admin-directory-browser-harness.mjs",
+        "bytes": 48249,
+        "sha256": "06670f95abd29cd0aac909863773f5c875dd903e514300771fd9fee459fbad0e"
+      },
+      {
+        "path": "docs/uiux-stage6-admin-profile/assets/browser-evidence/stage6-phase3-profile-privacy-authority-browser-harness.mjs",
+        "bytes": 67591,
+        "sha256": "9dab0da98ebb37632f9191e674dbf392f81e5011b3eae7528fa3f91c55d3f396"
+      }
+    ],
+    "artifactDirectories": [
+      {
+        "kind": "browser-aggregate",
+        "path": "docs/uiux-stage6-admin-profile/assets/browser-evidence/runs/uiux-stage6-aggregate-browser-20260811T203934914Z",
+        "fileCount": 6,
+        "bytes": 861154,
+        "projectionSha256": "12c53e74eccfb58fd86abdfc34c4aa132720e907834981cf9a204f130cd6dcf2",
+        "metrics": {
+          "path": "docs/uiux-stage6-admin-profile/assets/browser-evidence/runs/uiux-stage6-aggregate-browser-20260811T203934914Z/stage6-aggregate-browser-metrics.json",
+          "bytes": 232537,
+          "sha256": "29e99fe327070db076cdd4dd3ffe4154f83f1247253c7bee11e0373359fa9bfc"
+        },
+        "binding": {
+          "path": "docs/uiux-stage6-admin-profile/assets/browser-evidence/runs/uiux-stage6-aggregate-browser-20260811T203934914Z/stage6-aggregate-source-binding.json",
+          "bytes": 1298,
+          "sha256": "2f7663e3225775545866fdd9d5cc508623742bac9c407467675a97f8bebd0919"
+        }
+      },
+      {
+        "kind": "browser-phase2",
+        "path": "docs/uiux-stage6-admin-profile/assets/browser-evidence/runs/uiux-stage6-phase2-browser-20260811T204010055Z",
+        "fileCount": 16,
+        "bytes": 1641010,
+        "projectionSha256": "91dd0b69519f6b7aba5b130ef5d7256ec8d63c703b00ce2e843eb303ad2481f0",
+        "metrics": {
+          "path": "docs/uiux-stage6-admin-profile/assets/browser-evidence/runs/uiux-stage6-phase2-browser-20260811T204010055Z/stage6-phase2-admin-directory-metrics.json",
+          "bytes": 211465,
+          "sha256": "cbb67d4d58b1950754b816d9164e0329fc0197bf7137c31e5eb0540ba2c7bdc9"
+        },
+        "binding": {
+          "path": "docs/uiux-stage6-admin-profile/assets/browser-evidence/runs/uiux-stage6-phase2-browser-20260811T204010055Z/stage6-phase2-source-binding.json",
+          "bytes": 604,
+          "sha256": "fb2efe36b5d1a01edc0202b60f59f7f8efe699dd6a7f7b522223713ed57106fc"
+        }
+      },
+      {
+        "kind": "browser-phase3",
+        "path": "docs/uiux-stage6-admin-profile/assets/browser-evidence/runs/uiux-stage6-phase3-browser-20260811T204053994Z",
+        "fileCount": 14,
+        "bytes": 1682011,
+        "projectionSha256": "810a93a866d3abd4832eaa73db7533f8086a6b580bce4302a90c047689fb8559",
+        "metrics": {
+          "path": "docs/uiux-stage6-admin-profile/assets/browser-evidence/runs/uiux-stage6-phase3-browser-20260811T204053994Z/stage6-phase3-profile-privacy-authority-metrics.json",
+          "bytes": 205119,
+          "sha256": "94ac04cda36af4a377daa1b4f4626f5b35a1ab5c4994484bcc1d288ac372f261"
+        },
+        "binding": {
+          "path": "docs/uiux-stage6-admin-profile/assets/browser-evidence/runs/uiux-stage6-phase3-browser-20260811T204053994Z/stage6-phase3-source-binding.json",
+          "bytes": 604,
+          "sha256": "0ccd1fb2967c305d1237bd847dfa29fee7c1edf56f668e65b945bb390dc6e7f6"
+        }
+      },
+      {
+        "kind": "figma-postfix-provenance",
+        "path": "docs/uiux-stage6-admin-profile/assets/figma/final-provenance-20260811T204635Z",
+        "fileCount": 6,
+        "bytes": 761814,
+        "projectionSha256": "885be730476d45e4c09ab45b09c82953d960372eff3cb13adc841cc7cbe13ea7",
+        "audit": {
+          "path": "docs/uiux-stage6-admin-profile/assets/figma/final-provenance-20260811T204635Z/stage6-final-figma-provenance-audit.json",
+          "bytes": 6064,
+          "sha256": "ccdea4bd31124d759c68ed89e16c9ed73290f04e2bb58359b4138e8ed575b89b"
+        }
+      }
+    ]
+  },
+  "integrity": {
+    "selectedFileCount": 45,
+    "selectedBytes": 5103647,
+    "selectedProjectionSha256": "2dce0fceec7f6aac87260b0dfaf3ea34a88c24aaa43435be423c3e535167db75",
+    "verifiedAtSourceCommit": "3283a6e38209cb06d352740dae5b05bce5ba9002"
+  },
+  "exclusions": [
+    "All browser run directories other than the three named final/promotable runs",
+    "Vite caches, temporary worktrees, stdout/stderr captures, and failed diagnostic artifacts",
+    "Earlier Figma audit/export packages superseded by final-provenance-20260811T204635Z",
+    "Mutable narrative files, including README, VALIDATION, checkpoint, and route/content/protected manifests",
+    "Any Sites project, lock, preview, deployment artifact, staging artifact, or production artifact"
+  ]
+}
