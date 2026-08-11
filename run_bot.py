@@ -24,6 +24,10 @@ from bot.handlers import (
     offer_overtime_callbacks,
     default
 )
+from bot.handlers.telegram_publisher_b2b import (
+    build_primary_b2b_router,
+    build_publisher_b2b_router,
+)
 from core.db import init_db, AsyncSessionLocal
 from core.events import setup_event_listeners
 from bot.middlewares import (
@@ -65,6 +69,44 @@ class BotRuntimeSurfaceError(RuntimeError):
 
 class BotRuntimeTaskError(RuntimeError):
     """Raised when a required Bot child task exits before polling shuts down."""
+
+
+def configured_publisher_b2b_pollers(settings_obj):
+    """Build isolated publisher pollers only for the all-or-nothing B2B mode."""
+    if not (
+        bool(getattr(settings_obj, "telegram_multi_publisher_enabled", False))
+        and bool(getattr(settings_obj, "telegram_b2b_dispatch_enabled", False))
+    ):
+        return (), {}, ()
+    composition = build_configured_telegram_delivery_runtime(settings=settings_obj)
+    primary_id = getattr(settings_obj, "telegram_delivery_queue_expected_primary_bot_id", None)
+    if isinstance(primary_id, bool) or not isinstance(primary_id, int) or primary_id <= 0:
+        raise TelegramDeliveryRuntimeConfigurationError(
+            "telegram_b2b_expected_primary_bot_id_missing"
+        )
+    publisher_ids = {
+        identity: lane.expected_bot_id
+        for identity, lane in composition.credential_registry.publisher_lanes.items()
+    }
+    pollers = []
+    bots = []
+    for identity, lane in composition.credential_registry.publisher_lanes.items():
+        publisher_bot = Bot(token=lane.credential.token)
+        publisher_dp = Dispatcher()
+        publisher_dp.include_router(
+            build_publisher_b2b_router(
+                identity=identity,
+                expected_primary_bot_id=primary_id,
+            )
+        )
+        bots.append(publisher_bot)
+        pollers.append(publisher_dp.start_polling(publisher_bot))
+    return tuple(pollers), publisher_ids, tuple(bots)
+
+
+async def supervise_pollers(*pollers) -> None:
+    """Keep every polling surface alive as one required runtime task."""
+    await asyncio.gather(*pollers)
 
 
 async def supervise_bot_runtime(
@@ -239,6 +281,11 @@ async def main():
     dp.include_router(block_manage.router)
     dp.include_router(offer_overtime_preference.router)
     dp.include_router(offer_overtime_callbacks.router)
+    publisher_pollers, publisher_bot_ids, publisher_bots = configured_publisher_b2b_pollers(
+        settings
+    )
+    if publisher_pollers:
+        dp.include_router(build_primary_b2b_router(publisher_bot_ids=publisher_bot_ids))
     
     # Default router should be last
     dp.include_router(default.router)
@@ -246,7 +293,7 @@ async def main():
     logger.info("🤖 Bot started...")
     try:
         await supervise_bot_runtime(
-            polling_coro=dp.start_polling(bot),
+            polling_coro=supervise_pollers(dp.start_polling(bot), *publisher_pollers),
             child_coroutines=[
                 listen_trade_suggestion_events(bot),
                 *(
@@ -259,6 +306,10 @@ async def main():
         )
     finally:
         await bot.session.close()
+        await asyncio.gather(
+            *(publisher_bot.session.close() for publisher_bot in publisher_bots),
+            return_exceptions=True,
+        )
 
 if __name__ == "__main__":
     try:
