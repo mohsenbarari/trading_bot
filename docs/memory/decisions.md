@@ -2,7 +2,7 @@
 
 Entries are newest first.
 
-- 2026-08-11 | Queue-v1 lane slots locally wait only for a short, absolute Redis cadence deadline after their job is durably deferred; longer waits remain durable retries. Reason: immediate re-claiming after `destination_gate` causes DB churn and misses the shared channel cadence, while sleeping through provider cooldowns would starve lane capacity.
+- 2026-08-11 | Queue-v1 retains an unstarted, fenced lease only through a short, absolute Redis cadence deadline; longer waits remain durable retries. Reason: re-claiming after `destination_gate` causes DB churn and misses the shared channel cadence, while holding a lease through provider cooldowns would starve lane capacity.
 - 2026-08-11 | Publication-candidate scans exclude an existing non-final `offer_control`/`offer_publish` job for the same offer. Reason: repeatedly deduplicating head rows delays central ingress behind channel delivery and can let queued offers age out before worker admission.
 - 2026-08-11 | Queue-v1 bot-interaction probes model the authenticated inbound message's private chat and positive message identity. Reason: the durable interaction adapter must reject an unanchored or cross-chat reply just as it does in production.
 - 2026-08-11 | A new Queue-v1 offer leaves its Telegram publication state unassigned only when multi-publisher B2B is enabled; the foreign feeder atomically selects and persists one healthy publisher lane, which owns every later channel edit. Legacy and B2B-disabled routes retain `primary`. Reason: preassigning `primary` at registration bypasses lane selection and collapses all new posts onto the central bot.

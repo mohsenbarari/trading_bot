@@ -143,43 +143,39 @@ class TelegramDeliveryQueueWorkerSafetyTests(unittest.IsolatedAsyncioTestCase):
 
     def test_short_limiter_wait_uses_absolute_redis_deadline(self):
         now = worker.utc_now()
-        report = worker.TelegramDeliveryQueueCycleReport(
-            bot_identity="publisher_1",
-            processed_count=1,
-            recovered_count=0,
-            status_counts={"limiter_wait": 1},
-            stale_fence_count=0,
-            limiter_retry_not_before=now + worker.timedelta(seconds=0.8),
+        admission = TelegramDeliveryDispatchAdmission(
+            allowed=False,
+            retry_after_seconds=0.8,
+            wait_reason="destination_gate",
+            not_before=now + worker.timedelta(seconds=0.8),
         )
         with patch(
             "core.telegram_delivery_queue_worker.utc_now",
             return_value=now + worker.timedelta(seconds=0.2),
         ):
             self.assertAlmostEqual(
-                worker._short_limiter_wait_poll_delay_seconds(report),
+                worker._short_limiter_wait_delay_seconds(admission),
                 0.6,
                 places=6,
             )
 
     def test_long_limiter_cooldown_stays_durable_not_slot_local(self):
         now = worker.utc_now()
-        report = worker.TelegramDeliveryQueueCycleReport(
-            bot_identity="publisher_1",
-            processed_count=1,
-            recovered_count=0,
-            status_counts={"limiter_wait": 1},
-            stale_fence_count=0,
-            limiter_retry_not_before=now + worker.timedelta(seconds=30),
+        admission = TelegramDeliveryDispatchAdmission(
+            allowed=False,
+            retry_after_seconds=30,
+            wait_reason="destination_gate",
+            not_before=now + worker.timedelta(seconds=30),
         )
         with patch(
             "core.telegram_delivery_queue_worker.utc_now",
             return_value=now,
         ):
             self.assertIsNone(
-                worker._short_limiter_wait_poll_delay_seconds(report)
+                worker._short_limiter_wait_delay_seconds(admission)
             )
 
-    async def test_cycle_reports_durable_short_limiter_deadline_to_slot(self):
+    async def test_cycle_keeps_short_limiter_wait_in_the_leased_slot(self):
         now = worker.utc_now()
         deadline = now + worker.timedelta(seconds=0.8)
         job = SimpleNamespace(
@@ -197,14 +193,19 @@ class TelegramDeliveryQueueWorkerSafetyTests(unittest.IsolatedAsyncioTestCase):
         session_context.__aexit__ = AsyncMock(return_value=False)
         limiter = _AllowLimiter()
         limiter.acquire = AsyncMock(
-            return_value=TelegramDeliveryDispatchAdmission(
-                allowed=False,
-                retry_after_seconds=0.8,
-                wait_reason="destination_gate",
-                not_before=deadline,
+            side_effect=(
+                TelegramDeliveryDispatchAdmission(
+                    allowed=False,
+                    retry_after_seconds=0.8,
+                    wait_reason="destination_gate",
+                    not_before=deadline,
+                ),
+                asyncio.CancelledError(),
             )
         )
         defer = AsyncMock(return_value=True)
+        release = AsyncMock(return_value=True)
+        sleep = AsyncMock()
 
         with patch(
             "core.telegram_delivery_queue_worker.assert_background_job_authority"
@@ -226,25 +227,34 @@ class TelegramDeliveryQueueWorkerSafetyTests(unittest.IsolatedAsyncioTestCase):
         ), patch(
             "core.telegram_delivery_queue_worker._defer_for_dispatch_limit",
             new=defer,
+        ), patch(
+            "core.telegram_delivery_queue_worker._release_after_predispatch_error",
+            new=release,
+        ), patch(
+            "core.telegram_delivery_queue_worker.utc_now",
+            return_value=now,
+        ), patch(
+            "core.telegram_delivery_queue_worker.asyncio.sleep",
+            new=sleep,
         ):
-            report = await worker.run_telegram_delivery_queue_cycle(
-                bot_identity="publisher_1",
-                freshness_validator=AsyncMock(return_value=object()),
-                lifecycle_feedback=_NoopLifecycleFeedback(),
-                gateway_call=AsyncMock(),
-                dispatch_limiter=limiter,
-                recover_leases=False,
-                limit=1,
-            )
+            with self.assertRaises(asyncio.CancelledError):
+                await worker.run_telegram_delivery_queue_cycle(
+                    bot_identity="publisher_1",
+                    freshness_validator=AsyncMock(return_value=object()),
+                    lifecycle_feedback=_NoopLifecycleFeedback(),
+                    gateway_call=AsyncMock(),
+                    dispatch_limiter=limiter,
+                    recover_leases=False,
+                    limit=1,
+                )
 
-        self.assertEqual(report.status_counts, {"limiter_wait": 1})
-        self.assertEqual(report.limiter_retry_not_before, deadline)
-        defer.assert_awaited_once_with(
+        defer.assert_not_awaited()
+        sleep.assert_awaited_once_with(0.8)
+        release.assert_awaited_once_with(
             job_id=811,
             worker_id=ANY,
             lease_token=1,
-            retry_seconds=0.8,
-            reason="telegram_limiter_wait:destination_gate",
+            reason="worker_cancelled_before_dispatch",
         )
 
     @staticmethod

@@ -248,7 +248,6 @@ class TelegramDeliveryQueueCycleReport:
     recovered_count: int
     status_counts: dict[str, int]
     stale_fence_count: int
-    limiter_retry_not_before: datetime | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -269,19 +268,17 @@ def _assert_queue_runtime_owner() -> None:
         )
 
 
-def _short_limiter_wait_poll_delay_seconds(
-    report: TelegramDeliveryQueueCycleReport,
+def _short_limiter_wait_delay_seconds(
+    admission: TelegramDeliveryDispatchAdmission,
 ) -> float | None:
-    """Return a local sleep only for a normal, short Redis cadence wait.
+    """Return a lease-local sleep only for a normal, short Redis wait.
 
-    A limiter rejection is already durable: the job has been returned to the
-    queue with its retry deadline.  Re-claiming another channel job immediately
-    after that rejection creates unnecessary PostgreSQL churn while every lane
-    races the same Redis destination gate.  Let a slot wait locally only until
-    the short, absolute Redis deadline.  Longer cooldowns remain durable so a
-    slot never becomes unavailable for an operator pause or a provider 429.
+    Keeping an unstarted lease for one normal cadence avoids a second
+    claim/freshness round-trip after every destination-gate rejection.  The
+    lease still protects crash recovery and is explicitly released to durable
+    retry for any longer provider cooldown or operator pause.
     """
-    not_before = report.limiter_retry_not_before
+    not_before = admission.not_before
     if not_before is None:
         return None
     try:
@@ -1030,7 +1027,6 @@ async def run_telegram_delivery_queue_cycle(
     status_counts: dict[str, int] = {}
     stale_fence_count = 0
     processed_count = 0
-    limiter_retry_not_before: datetime | None = None
     recovered_count = await _recover_expired_leases() if recover_leases else 0
 
     if _role_provider_fact_blocked(lane_identity):
@@ -1114,13 +1110,22 @@ async def run_telegram_delivery_queue_cycle(
 
         admission: TelegramDeliveryDispatchAdmission | None = None
         try:
-            admission = await dispatch_limiter.acquire(job, now=utc_now())
-            if not admission.allowed:
+            while True:
+                admission = await dispatch_limiter.acquire(job, now=utc_now())
+                if admission.allowed:
+                    break
                 retry_seconds = float(admission.retry_after_seconds or 0.0)
                 if not math.isfinite(retry_seconds) or retry_seconds <= 0:
                     raise TelegramDeliveryLimiterUnavailableError(
                         "telegram_limiter_invalid_admission"
                     )
+                short_wait_seconds = _short_limiter_wait_delay_seconds(admission)
+                if short_wait_seconds is not None:
+                    # The job remains unstarted and lease-fenced while it
+                    # waits for the shared Redis cadence.  The final
+                    # freshness check below still runs after admission.
+                    await asyncio.sleep(short_wait_seconds)
+                    continue
                 wait_reason = str(admission.wait_reason or "unspecified")[:80]
                 deferred = await _defer_for_dispatch_limit(
                     job_id=job_id,
@@ -1131,15 +1136,11 @@ async def run_telegram_delivery_queue_cycle(
                 )
                 if not deferred:
                     stale_fence_count += 1
-                if deferred:
-                    # ``not_before`` originates from Redis TIME.  It is safe
-                    # to use only as a short local poll deadline; the durable
-                    # defer above remains authoritative across restarts.
-                    limiter_retry_not_before = admission.not_before
                 key = "limiter_wait"
                 status_counts[key] = status_counts.get(key, 0) + 1
                 processed_count += 1
-                continue
+                admission = None
+                break
         except asyncio.CancelledError:
             await _release_after_predispatch_error(
                 job_id=job_id,
@@ -1166,6 +1167,9 @@ async def run_telegram_delivery_queue_cycle(
                 reason=f"dispatch_limiter:{type(exc).__name__}",
             )
             raise
+
+        if admission is None:
+            continue
 
         # Limiter admission is not a side effect at Telegram, but authoritative
         # business state may have changed while the job waited for admission.
@@ -1443,7 +1447,6 @@ async def run_telegram_delivery_queue_cycle(
         recovered_count=recovered_count,
         status_counts=status_counts,
         stale_fence_count=stale_fence_count,
-        limiter_retry_not_before=limiter_retry_not_before,
     )
 
 
@@ -1537,10 +1540,7 @@ async def _telegram_delivery_queue_lane_slot_loop(
         # cancellable yield also prevents a hot empty/limited database loop and
         # gives shutdown a clean boundary outside connection establishment.
         if report is not None and report.processed_count:
-            await asyncio.sleep(
-                _short_limiter_wait_poll_delay_seconds(report)
-                or min(0.01, _worker_interval_seconds())
-            )
+            await asyncio.sleep(min(0.01, _worker_interval_seconds()))
         else:
             await asyncio.sleep(_worker_interval_seconds())
 
