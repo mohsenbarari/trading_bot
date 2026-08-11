@@ -112,12 +112,20 @@ def _require_live_configuration() -> tuple[int, tuple[str, ...]]:
         getattr(settings, "channel_id", None),
         reason="b2b_harness_channel_missing",
     )
-    expected_channel = _nonzero_int(
-        getattr(settings, "telegram_delivery_queue_expected_channel_id", None),
-        reason="b2b_harness_expected_channel_missing",
+    # Queue-v1's provider preflight owns EXPECTED_CHANNEL_ID.  This transport
+    # probe is also valid while the site remains on legacy execution, where
+    # that optional cutover setting is intentionally absent.  If configured,
+    # it must still agree with the active channel.
+    configured_expected_channel = getattr(
+        settings, "telegram_delivery_queue_expected_channel_id", None
     )
-    if channel_id != expected_channel:
-        raise B2BHarnessError("b2b_harness_channel_identity_mismatch")
+    if configured_expected_channel is not None:
+        expected_channel = _nonzero_int(
+            configured_expected_channel,
+            reason="b2b_harness_expected_channel_invalid",
+        )
+        if channel_id != expected_channel:
+            raise B2BHarnessError("b2b_harness_channel_identity_mismatch")
     lanes: list[str] = []
     for index, identity in enumerate(TELEGRAM_PUBLISHER_IDENTITIES, start=1):
         if not bool(getattr(settings, f"telegram_publisher_{index}_enabled", False)):
