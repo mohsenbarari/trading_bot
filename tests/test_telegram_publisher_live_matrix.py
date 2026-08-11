@@ -1,4 +1,5 @@
 import unittest
+from collections import Counter
 
 from scripts.run_telegram_publisher_live_matrix import (
     MATRIX_INGRESS_INTERVAL_SECONDS,
@@ -20,6 +21,29 @@ class TelegramPublisherLiveMatrixTests(unittest.TestCase):
         self.assertEqual(workload.origins.count("bot"), 600)
         self.assertEqual(workload.origins.count("webapp"), 400)
         self.assertEqual(workload.origins[:10], ("bot",) * 6 + ("webapp",) * 4)
+        self.assertEqual(
+            Counter(workload.scenarios),
+            {
+                "direct_wholesale_trade": 100,
+                "direct_retail_lot_trade": 100,
+                "overtime_approved_trade": 30,
+                "overtime_owner_rejected": 30,
+                "overtime_decision_timeout": 240,
+                "manual_expiry": 100,
+                "natural_expiry": 400,
+            },
+        )
+        for start, stop in (
+            (0, 100),
+            (100, 200),
+            (200, 230),
+            (230, 260),
+            (260, 500),
+            (500, 600),
+            (600, 1000),
+        ):
+            self.assertEqual(workload.origins[start:stop].count("bot"), (stop - start) * 3 // 5)
+            self.assertEqual(workload.origins[start:stop].count("webapp"), (stop - start) * 2 // 5)
         self.assertEqual(workload.interaction_origins, ("bot",) * 6 + ("webapp",) * 4)
         self.assertEqual(len(workload.interaction_offsets_seconds), 10)
         self.assertEqual(

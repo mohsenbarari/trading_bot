@@ -17,7 +17,7 @@ import argparse
 import asyncio
 from collections import Counter
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import json
 import math
 from pathlib import Path
@@ -45,6 +45,7 @@ from models.offer import Offer, OfferStatus
 from models.offer_publication_state import OfferPublicationState, OfferPublicationSurface
 from models.telegram_delivery_job import TelegramDeliveryJobRecord
 from models.telegram_publisher_dispatch_command import TelegramPublisherDispatchCommand
+from models.user import User
 from scripts.run_telegram_publisher_b2b_harness import (
     B2BHarnessError,
     _assert_quiet_outbox,
@@ -64,8 +65,20 @@ MATRIX_PROGRESS_POLL_SECONDS = 5.0
 MATRIX_PROGRESS_STALL_SECONDS = 180.0
 MATRIX_AUDIT_DIRECTORY = Path("/app/audit_trail")
 
+MATRIX_DIRECT_WHOLESALE_TRADES = 100
+MATRIX_DIRECT_RETAIL_TRADES = 100
+MATRIX_OVERTIME_APPROVED_TRADES = 30
+MATRIX_OVERTIME_OWNER_REJECTIONS = 30
+MATRIX_OVERTIME_DECISION_TIMEOUTS = 240
+MATRIX_MANUAL_EXPIRIES = 100
+MATRIX_NATURAL_EXPIRIES = 400
+MATRIX_OVERTIME_MINUTES = 5
+MATRIX_OVERTIME_RECEIPT_SAFETY_SECONDS = 1.0
+
 _INITIAL_ACTION = TelegramDeliveryAction.OFFER_PUBLISH.value
 _EXPIRY_ACTION = TelegramDeliveryAction.EXPIRED_OFFER_EDIT.value
+_TRADED_ACTION = TelegramDeliveryAction.TRADED_OFFER_EDIT.value
+_TERMINAL_ACTIONS = frozenset({_TRADED_ACTION, _EXPIRY_ACTION})
 _SENT_STATE = TelegramDeliveryState.SENT.value
 _FINAL_JOB_STATES = frozenset(
     {
@@ -77,6 +90,26 @@ _FINAL_JOB_STATES = frozenset(
         TelegramDeliveryState.TERMINAL_FAILED.value,
         TelegramDeliveryState.QUARANTINED.value,
     }
+)
+
+_EXPECTED_TERMINAL_STATUS_BY_SCENARIO = {
+    "direct_wholesale_trade": OfferStatus.COMPLETED.value,
+    "direct_retail_lot_trade": OfferStatus.COMPLETED.value,
+    "overtime_approved_trade": OfferStatus.COMPLETED.value,
+    "overtime_owner_rejected": OfferStatus.EXPIRED.value,
+    "overtime_decision_timeout": OfferStatus.EXPIRED.value,
+    "manual_expiry": OfferStatus.EXPIRED.value,
+    "natural_expiry": OfferStatus.EXPIRED.value,
+}
+_OVERTIME_SCENARIOS = frozenset(
+    {
+        "overtime_approved_trade",
+        "overtime_owner_rejected",
+        "overtime_decision_timeout",
+    }
+)
+_DIRECT_TRADE_SCENARIOS = frozenset(
+    {"direct_wholesale_trade", "direct_retail_lot_trade"}
 )
 
 
@@ -103,6 +136,7 @@ class LiveMatrixError(B2BHarnessError):
 @dataclass(frozen=True, slots=True)
 class MatrixWorkload:
     origins: tuple[str, ...]
+    scenarios: tuple[str, ...]
     interaction_origins: tuple[str, ...]
     interaction_offsets_seconds: tuple[float, ...]
 
@@ -111,6 +145,8 @@ class MatrixWorkload:
 class OfferTimeline:
     index: int
     origin: str
+    scenario: str
+    expected_terminal_status: str
     scheduled_at: str
     registration_started_at: str | None = None
     accepted_at: str | None = None
@@ -118,7 +154,11 @@ class OfferTimeline:
     offer_public_id: str | None = None
     offer_created_at: str | None = None
     offer_home_server: str | None = None
+    overtime_minutes_snapshot: int | None = None
+    normal_deadline_at: str | None = None
+    final_deadline_at: str | None = None
     webapp_visible_at: str | None = None
+    webapp_status_at_visibility: str | None = None
     webapp_visibility_error: str | None = None
     central_queue_entered_at: str | None = None
     central_queue_sequence: int | None = None
@@ -134,6 +174,26 @@ class OfferTimeline:
     expiry_edit_provider_started_at: str | None = None
     expiry_edit_posted_at: str | None = None
     expiry_edit_state: str | None = None
+    offer_status: str | None = None
+    terminal_at: str | None = None
+    terminal_edit_queue_entered_at: str | None = None
+    terminal_edit_provider_started_at: str | None = None
+    terminal_edit_posted_at: str | None = None
+    terminal_edit_state: str | None = None
+    webapp_terminal_visible_at: str | None = None
+    webapp_terminal_status: str | None = None
+    webapp_terminal_error: str | None = None
+
+
+@dataclass(slots=True)
+class LifecycleActionTimeline:
+    offer_index: int
+    action: str
+    origin: str
+    scheduled_at: str
+    started_at: str | None = None
+    completed_at: str | None = None
+    status: str | None = None
 
 
 @dataclass(slots=True)
@@ -153,6 +213,7 @@ class MatrixRun:
     expected_expiry_minutes: int
     timelines: list[OfferTimeline] = field(default_factory=list)
     interactions: list[InteractionTimeline] = field(default_factory=list)
+    lifecycle_actions: list[LifecycleActionTimeline] = field(default_factory=list)
     phase: str = "preflight"
     failure_reason: str | None = None
 
@@ -178,14 +239,31 @@ def build_live_matrix_workload(
         abs_tol=0.000_001,
     ):
         raise LiveMatrixError("live_matrix_ingress_must_be_two_per_second")
-    # Ten offers per cycle preserves the requested source ratio at every point
-    # in the run, rather than only in the final aggregate.
-    origins = tuple(("bot",) * 6 + ("webapp",) * 4) * (total_offers // 10)
-    if len(origins) != total_offers:
+    scenario_counts = (
+        ("direct_wholesale_trade", MATRIX_DIRECT_WHOLESALE_TRADES),
+        ("direct_retail_lot_trade", MATRIX_DIRECT_RETAIL_TRADES),
+        ("overtime_approved_trade", MATRIX_OVERTIME_APPROVED_TRADES),
+        ("overtime_owner_rejected", MATRIX_OVERTIME_OWNER_REJECTIONS),
+        ("overtime_decision_timeout", MATRIX_OVERTIME_DECISION_TIMEOUTS),
+        ("manual_expiry", MATRIX_MANUAL_EXPIRIES),
+        ("natural_expiry", MATRIX_NATURAL_EXPIRIES),
+    )
+    if sum(count for _name, count in scenario_counts) != total_offers:
+        raise LiveMatrixError("live_matrix_lifecycle_total_invalid")
+    origin_cycle = ("bot",) * 6 + ("webapp",) * 4
+    origins: list[str] = []
+    scenarios: list[str] = []
+    for scenario, count in scenario_counts:
+        if count % len(origin_cycle):
+            raise LiveMatrixError("live_matrix_lifecycle_source_ratio_invalid")
+        origins.extend(origin_cycle * (count // len(origin_cycle)))
+        scenarios.extend((scenario,) * count)
+    if len(origins) != total_offers or len(scenarios) != total_offers:
         raise LiveMatrixError("live_matrix_origin_cycle_invalid")
     duration = total_offers * float(ingress_interval_seconds)
     return MatrixWorkload(
-        origins=origins,
+        origins=tuple(origins),
+        scenarios=tuple(scenarios),
         interaction_origins=tuple(("bot",) * 6 + ("webapp",) * 4),
         interaction_offsets_seconds=tuple(
             duration * (index + 1) / (interaction_count + 1)
@@ -206,12 +284,21 @@ def _audit_path(run_id: str) -> Path:
 def _report_payload(run: MatrixRun) -> dict[str, Any]:
     timelines = [asdict(item) for item in run.timelines]
     interactions = [asdict(item) for item in run.interactions]
+    lifecycle_actions = [asdict(item) for item in run.lifecycle_actions]
     initial_posted = sum(item["channel_post_state"] == _SENT_STATE for item in timelines)
     expiry_edited = sum(item["expiry_edit_state"] == _SENT_STATE for item in timelines)
+    terminal_edited = sum(item["terminal_edit_state"] == _SENT_STATE for item in timelines)
     expired = sum(item["expiry_at"] is not None for item in timelines)
     queue_entered = sum(item["central_queue_entered_at"] is not None for item in timelines)
     acknowledged = sum(item["worker_acknowledged_at"] is not None for item in timelines)
     lanes = Counter(item["publisher_lane"] for item in timelines if item["publisher_lane"])
+    scenarios = Counter(item["scenario"] for item in timelines)
+    terminal_statuses = Counter(item["offer_status"] for item in timelines if item["offer_status"])
+    lifecycle_statuses = Counter(
+        (item["action"], item["status"])
+        for item in lifecycle_actions
+        if item["status"]
+    )
     queue_wait_seconds = [
         max(
             0.0,
@@ -226,12 +313,17 @@ def _report_payload(run: MatrixRun) -> dict[str, Any]:
         and queue_entered == MATRIX_TOTAL_OFFERS
         and acknowledged == MATRIX_TOTAL_OFFERS
         and initial_posted == MATRIX_TOTAL_OFFERS
-        and expired == MATRIX_TOTAL_OFFERS
-        and expiry_edited == MATRIX_TOTAL_OFFERS
+        and terminal_edited == MATRIX_TOTAL_OFFERS
+        and all(
+            item["offer_status"] == item["expected_terminal_status"]
+            for item in timelines
+        )
+        and all(item["webapp_terminal_status"] == item["expected_terminal_status"] for item in timelines)
         and set(lanes) == set(TELEGRAM_PUBLISHER_IDENTITIES)
         and all(count > 0 for count in lanes.values())
         and len(interactions) == MATRIX_USER_INTERACTIONS
         and all(item["status"] == "success" for item in interactions)
+        and all(item["status"] == "success" for item in lifecycle_actions)
     )
     return {
         "schema_version": 1,
@@ -243,6 +335,16 @@ def _report_payload(run: MatrixRun) -> dict[str, Any]:
             "offer_expiry_minutes": run.expected_expiry_minutes,
             "ingress_interval_seconds": MATRIX_INGRESS_INTERVAL_SECONDS,
             "source_mix": {"bot": MATRIX_BOT_OFFERS, "webapp": MATRIX_WEBAPP_OFFERS},
+            "lifecycle_mix": {
+                "direct_wholesale_trades": MATRIX_DIRECT_WHOLESALE_TRADES,
+                "direct_retail_lot_trades": MATRIX_DIRECT_RETAIL_TRADES,
+                "overtime_approved_trades": MATRIX_OVERTIME_APPROVED_TRADES,
+                "overtime_owner_rejections": MATRIX_OVERTIME_OWNER_REJECTIONS,
+                "overtime_decision_timeouts": MATRIX_OVERTIME_DECISION_TIMEOUTS,
+                "manual_expiries": MATRIX_MANUAL_EXPIRIES,
+                "natural_expiries": MATRIX_NATURAL_EXPIRIES,
+                "overtime_minutes": MATRIX_OVERTIME_MINUTES,
+            },
             "publisher_lanes": list(TELEGRAM_PUBLISHER_IDENTITIES),
             "channel_destination_min_interval_seconds": MATRIX_DESTINATION_MIN_INTERVAL_SECONDS,
         },
@@ -253,8 +355,18 @@ def _report_payload(run: MatrixRun) -> dict[str, Any]:
             "channel_posts_sent": initial_posted,
             "offers_expired": expired,
             "expiry_edits_sent": expiry_edited,
+            "terminal_channel_edits_sent": terminal_edited,
+            "scenarios": dict(sorted(scenarios.items())),
+            "terminal_offer_statuses": dict(sorted(terminal_statuses.items())),
+            "lifecycle_action_statuses": {
+                f"{action}:{status}": count
+                for (action, status), count in sorted(lifecycle_statuses.items())
+            },
             "publisher_lane_counts": dict(sorted(lanes.items())),
             "webapp_visible": sum(item["webapp_visible_at"] is not None for item in timelines),
+            "webapp_terminal_visible": sum(
+                item["webapp_terminal_visible_at"] is not None for item in timelines
+            ),
             "interaction_successes": sum(item["status"] == "success" for item in interactions),
             "queue_to_channel_seconds": {
                 "min": min(queue_wait_seconds, default=None),
@@ -263,6 +375,7 @@ def _report_payload(run: MatrixRun) -> dict[str, Any]:
         },
         "offer_timelines": timelines,
         "user_interactions": interactions,
+        "lifecycle_actions": lifecycle_actions,
         "passed": passed,
     }
 
@@ -319,7 +432,7 @@ async def _assert_live_preflight() -> tuple[int, tuple[str, ...]]:
     return channel_id, lanes
 
 
-async def _load_offer_metadata(offer_id: int) -> tuple[str, str, str]:
+async def _load_offer_metadata(offer_id: int) -> tuple[str, str, str, int]:
     async with AsyncSessionLocal() as db:
         offer = await db.get(Offer, offer_id)
         if offer is None:
@@ -328,13 +441,21 @@ async def _load_offer_metadata(offer_id: int) -> tuple[str, str, str]:
             str(offer.offer_public_id),
             _iso(offer.created_at) or "",
             str(offer.home_server),
+            int(getattr(offer, "overtime_minutes_snapshot", 0) or 0),
         )
 
 
-async def _observe_webapp_visibility(timeline: OfferTimeline) -> None:
+async def _observe_webapp_visibility(
+    timeline: OfferTimeline,
+    *,
+    terminal: bool = False,
+) -> None:
     """Observe the public WebApp offer projection without mutating it."""
     if not timeline.offer_public_id:
-        timeline.webapp_visibility_error = "offer_public_id_missing"
+        if terminal:
+            timeline.webapp_terminal_error = "offer_public_id_missing"
+        else:
+            timeline.webapp_visibility_error = "offer_public_id_missing"
         return
     try:
         from api.routers import offers as offers_router
@@ -347,9 +468,19 @@ async def _observe_webapp_visibility(timeline: OfferTimeline) -> None:
                 )
         if str(getattr(response, "offer_public_id", "")) != timeline.offer_public_id:
             raise LiveMatrixError("webapp_public_projection_identity_mismatch")
-        timeline.webapp_visible_at = _iso(_utcnow())
+        observed_at = _iso(_utcnow())
+        observed_status = _value(getattr(response, "status", None))
+        if terminal:
+            timeline.webapp_terminal_visible_at = observed_at
+            timeline.webapp_terminal_status = observed_status
+        else:
+            timeline.webapp_visible_at = observed_at
+            timeline.webapp_status_at_visibility = observed_status
     except Exception as exc:  # record no internal/provider text in the artifact
-        timeline.webapp_visibility_error = type(exc).__name__
+        if terminal:
+            timeline.webapp_terminal_error = type(exc).__name__
+        else:
+            timeline.webapp_visibility_error = type(exc).__name__
 
 
 async def _create_offer(
@@ -381,6 +512,7 @@ async def _create_offer(
         )
         from models.offer import OfferStatus, OfferType
 
+        is_retail = timeline.scenario == "direct_retail_lot_trade"
         text_value, _marker = worker.build_bot_offer_text(
             owner_user_id=user.user_id,
             commodity_name=commodity_name,
@@ -388,6 +520,8 @@ async def _create_offer(
             quantity=5,
             price=100000,
             offer_type="sell",
+            is_wholesale=not is_retail,
+            lot_sizes=(2, 2, 1) if is_retail else None,
         )
         parsed, parse_error = await parse_offer_text(text_value)
         if parsed is None or parse_error is not None:
@@ -444,6 +578,10 @@ async def _create_offer(
                 prefix=f"{run_id}-{timeline.index:04d}",
                 index=timeline.index,
                 source_surface="webapp",
+                is_wholesale=timeline.scenario != "direct_retail_lot_trade",
+                lot_sizes=(2, 2, 1)
+                if timeline.scenario == "direct_retail_lot_trade"
+                else None,
             )
     else:
         raise LiveMatrixError("live_matrix_origin_invalid")
@@ -453,7 +591,11 @@ async def _create_offer(
         timeline.offer_public_id,
         timeline.offer_created_at,
         timeline.offer_home_server,
+        timeline.overtime_minutes_snapshot,
     ) = await _load_offer_metadata(int(offer_id))
+    expected_overtime = MATRIX_OVERTIME_MINUTES if timeline.scenario in _OVERTIME_SCENARIOS else 0
+    if timeline.overtime_minutes_snapshot != expected_overtime:
+        raise LiveMatrixError("live_matrix_overtime_snapshot_mismatch")
 
 
 async def _run_user_interactions(
@@ -534,7 +676,9 @@ async def _hydrate_timelines(timelines: Iterable[OfferTimeline]) -> None:
                 await db.execute(
                     select(TelegramDeliveryJobRecord).where(
                         TelegramDeliveryJobRecord.source_natural_id.in_(tuple(by_public_id)),
-                        TelegramDeliveryJobRecord.action_kind.in_((_INITIAL_ACTION, _EXPIRY_ACTION)),
+                        TelegramDeliveryJobRecord.action_kind.in_(
+                            (_INITIAL_ACTION, *_TERMINAL_ACTIONS)
+                        ),
                     )
                 )
             ).scalars()
@@ -555,9 +699,26 @@ async def _hydrate_timelines(timelines: Iterable[OfferTimeline]) -> None:
     for offer in offers:
         timeline = by_offer_id.get(int(offer.id))
         if timeline is not None:
+            from core.offer_lifecycle import compute_lifecycle_deadlines
+
             timeline.offer_created_at = _iso(offer.created_at)
             timeline.offer_home_server = str(offer.home_server)
             timeline.expiry_at = _iso(offer.expired_at)
+            timeline.offer_status = _value(offer.status)
+            timeline.overtime_minutes_snapshot = int(
+                getattr(offer, "overtime_minutes_snapshot", 0) or 0
+            )
+            normal_deadline, final_deadline = compute_lifecycle_deadlines(
+                offer.created_at,
+                normal_lifetime_minutes=MATRIX_OFFER_EXPIRY_MINUTES,
+                overtime_minutes_snapshot=timeline.overtime_minutes_snapshot,
+            )
+            timeline.normal_deadline_at = _iso(normal_deadline)
+            timeline.final_deadline_at = _iso(final_deadline)
+            if timeline.offer_status == OfferStatus.EXPIRED.value:
+                timeline.terminal_at = _iso(offer.expired_at) or _iso(offer.updated_at)
+            elif timeline.offer_status == OfferStatus.COMPLETED.value:
+                timeline.terminal_at = _iso(offer.updated_at)
     for state in states:
         timeline = by_public_id.get(str(state.offer_public_id))
         if timeline is not None and not timeline.publisher_lane:
@@ -579,6 +740,15 @@ async def _hydrate_timelines(timelines: Iterable[OfferTimeline]) -> None:
             timeline.expiry_edit_provider_started_at = _iso(job.dispatch_started_at)
             timeline.expiry_edit_posted_at = _iso(job.sent_at)
             timeline.expiry_edit_state = _value(job.state)
+            timeline.terminal_edit_queue_entered_at = _iso(job.created_at)
+            timeline.terminal_edit_provider_started_at = _iso(job.dispatch_started_at)
+            timeline.terminal_edit_posted_at = _iso(job.sent_at)
+            timeline.terminal_edit_state = _value(job.state)
+        elif action == _TRADED_ACTION:
+            timeline.terminal_edit_queue_entered_at = _iso(job.created_at)
+            timeline.terminal_edit_provider_started_at = _iso(job.dispatch_started_at)
+            timeline.terminal_edit_posted_at = _iso(job.sent_at)
+            timeline.terminal_edit_state = _value(job.state)
     for command, job in commands:
         if _value(job.action_kind) != _INITIAL_ACTION:
             continue
@@ -589,14 +759,391 @@ async def _hydrate_timelines(timelines: Iterable[OfferTimeline]) -> None:
             timeline.worker_acknowledged_at = _iso(command.acknowledged_at)
 
 
+def _append_lifecycle_action(
+    run: MatrixRun,
+    *,
+    timeline: OfferTimeline,
+    action: str,
+    origin: str,
+    scheduled_at: datetime,
+) -> LifecycleActionTimeline:
+    entry = LifecycleActionTimeline(
+        offer_index=timeline.index,
+        action=action,
+        origin=origin,
+        scheduled_at=_iso(scheduled_at) or "",
+    )
+    run.lifecycle_actions.append(entry)
+    return entry
+
+
+async def _complete_lifecycle_action(
+    entry: LifecycleActionTimeline,
+    operation: Any,
+) -> None:
+    entry.started_at = _iso(_utcnow())
+    try:
+        outcome = await operation()
+        entry.status = "success" if outcome in (None, "success") else str(outcome)
+    except Exception as exc:
+        entry.status = type(exc).__name__
+    finally:
+        entry.completed_at = _iso(_utcnow())
+    if entry.status != "success":
+        raise LiveMatrixError(f"live_matrix_lifecycle_action_failed:{entry.action}")
+
+
+async def _configure_overtime_preferences(
+    *,
+    users: Sequence[Any],
+    workload: MatrixWorkload,
+) -> None:
+    """Use the Iran-authoritative preference service before offer registration."""
+    overtime_owner_indexes = [
+        index
+        for index, scenario in enumerate(workload.scenarios)
+        if scenario in _OVERTIME_SCENARIOS
+    ]
+    if len(overtime_owner_indexes) != (
+        MATRIX_OVERTIME_APPROVED_TRADES
+        + MATRIX_OVERTIME_OWNER_REJECTIONS
+        + MATRIX_OVERTIME_DECISION_TIMEOUTS
+    ):
+        raise LiveMatrixError("live_matrix_overtime_owner_count_invalid")
+    from core.services.offer_overtime_preference_service import persist_overtime_preference
+
+    with override_current_server(SERVER_IRAN):
+        async with AsyncSessionLocal() as db:
+            for index in overtime_owner_indexes:
+                owner = await db.get(User, int(users[index].user_id))
+                if owner is None:
+                    raise LiveMatrixError("live_matrix_overtime_owner_missing")
+                await persist_overtime_preference(db, owner, MATRIX_OVERTIME_MINUTES)
+            await db.commit()
+
+
+async def _wait_until(target: datetime) -> None:
+    delay = (target - _utcnow()).total_seconds()
+    if delay > 0:
+        await asyncio.sleep(delay)
+
+
+def _taker_for_timeline(users: Sequence[Any], timeline: OfferTimeline) -> Any:
+    taker = users[(timeline.index - 1 + MATRIX_TOTAL_OFFERS // 2) % len(users)]
+    if int(taker.user_id) == int(users[timeline.index - 1].user_id):
+        raise LiveMatrixError("live_matrix_taker_must_differ_from_owner")
+    return taker
+
+
+async def _run_direct_trade(
+    *,
+    worker: Any,
+    harness: Any,
+    users: Sequence[Any],
+    run: MatrixRun,
+    timeline: OfferTimeline,
+) -> None:
+    taker = _taker_for_timeline(users, timeline)
+    amounts = (5,) if timeline.scenario == "direct_wholesale_trade" else (2, 2, 1)
+    action_name = (
+        "direct_wholesale_trade"
+        if timeline.scenario == "direct_wholesale_trade"
+        else "retail_lot_trade"
+    )
+    for lot_index, amount in enumerate(amounts, start=1):
+        entry = _append_lifecycle_action(
+            run,
+            timeline=timeline,
+            action=action_name,
+            origin=timeline.origin,
+            scheduled_at=_utcnow(),
+        )
+
+        async def execute() -> str:
+            offer = await worker.load_offer_snapshot(int(timeline.offer_id))
+            if timeline.origin == "bot":
+                return await worker.execute_bot_trade_with_dispatcher(
+                    harness=harness,
+                    spec=worker.MixedLoadAttemptSpec(
+                        index=timeline.index * 10 + lot_index,
+                        surface="telegram",
+                        user_id=int(taker.user_id),
+                        telegram_id=int(taker.telegram_id),
+                    ),
+                    offer=offer,
+                    amount=amount,
+                    prefix=f"{run.run_id}-direct-{timeline.index:04d}-{lot_index}",
+                )
+            with override_current_server(timeline.offer_home_server or SERVER_IRAN):
+                return await worker.execute_webapp_trade_for_user(
+                    user_id=int(taker.user_id),
+                    offer_id=int(timeline.offer_id),
+                    offer_public_id=timeline.offer_public_id,
+                    quantity=amount,
+                    idempotency_key=(
+                        f"{run.run_id}-direct-{timeline.index:04d}-{lot_index}"
+                    ),
+                )
+
+        await _complete_lifecycle_action(entry, execute)
+
+
+async def _run_manual_expiry(
+    *,
+    worker: Any,
+    harness: Any,
+    users: Sequence[Any],
+    run: MatrixRun,
+    timeline: OfferTimeline,
+) -> None:
+    owner = users[timeline.index - 1]
+    entry = _append_lifecycle_action(
+        run,
+        timeline=timeline,
+        action="manual_expiry",
+        origin=timeline.origin,
+        scheduled_at=_utcnow(),
+    )
+
+    async def execute() -> str | None:
+        if timeline.origin == "bot":
+            return await worker.expire_bot_offer_with_dispatcher(
+                harness=harness,
+                owner=owner,
+                offer_id=int(timeline.offer_id),
+                prefix=run.run_id,
+                index=timeline.index,
+            )
+        with override_current_server(timeline.offer_home_server or SERVER_IRAN):
+            await worker.expire_offer_for_user(
+                user_id=int(owner.user_id),
+                offer_id=int(timeline.offer_id),
+            )
+        return None
+
+    await _complete_lifecycle_action(entry, execute)
+
+
+async def _load_overtime_request_public_id(
+    *,
+    offer_id: int,
+    idempotency_key: str,
+) -> str:
+    from models.offer_request import OfferRequest, OfferRequestWorkflow
+
+    async with AsyncSessionLocal() as db:
+        request = (
+            await db.execute(
+                select(OfferRequest).where(
+                    OfferRequest.local_offer_id == int(offer_id),
+                    OfferRequest.idempotency_key == idempotency_key,
+                    OfferRequest.workflow_kind == OfferRequestWorkflow.OVERTIME,
+                )
+            )
+        ).scalar_one_or_none()
+    if request is None or not getattr(request, "request_public_id", None):
+        raise LiveMatrixError("live_matrix_overtime_request_missing")
+    return str(request.request_public_id)
+
+
+async def _decide_overtime_request_via_webapp(
+    *,
+    worker: Any,
+    owner: Any,
+    request_public_id: str,
+    approve: bool,
+    home_server: str,
+) -> None:
+    from fastapi import BackgroundTasks
+    from api.routers import trades as trades_router
+
+    with override_current_server(home_server):
+        async with AsyncSessionLocal() as db:
+            owner_user = await worker.load_user(db, int(owner.user_id))
+            context = worker.owner_context(owner_user)
+            if approve:
+                background_tasks = BackgroundTasks()
+                response = await trades_router.approve_overtime_request(
+                    request_public_id,
+                    background_tasks=background_tasks,
+                    db=db,
+                    context=context,
+                )
+                await background_tasks()
+                if getattr(response, "status_code", 201) >= 400:
+                    raise LiveMatrixError("live_matrix_overtime_approve_rejected")
+            else:
+                response = await trades_router.reject_overtime_request(
+                    request_public_id,
+                    db=db,
+                    context=context,
+                )
+                if getattr(response, "status_code", 200) >= 400:
+                    raise LiveMatrixError("live_matrix_overtime_reject_failed")
+
+
+async def _run_overtime_lifecycle(
+    *,
+    worker: Any,
+    users: Sequence[Any],
+    run: MatrixRun,
+    timeline: OfferTimeline,
+) -> None:
+    if not timeline.normal_deadline_at:
+        raise LiveMatrixError("live_matrix_overtime_normal_deadline_missing")
+    scheduled = datetime.fromisoformat(timeline.normal_deadline_at) + timedelta(
+        seconds=MATRIX_OVERTIME_RECEIPT_SAFETY_SECONDS
+    )
+    request_entry = _append_lifecycle_action(
+        run,
+        timeline=timeline,
+        action="overtime_request",
+        # A WebApp request keeps the owner-decision state local and observable;
+        # the published offer's ingress surface remains in ``timeline.origin``.
+        origin="webapp",
+        scheduled_at=scheduled,
+    )
+    await _wait_until(scheduled)
+    requester = _taker_for_timeline(users, timeline)
+    idempotency_key = f"{run.run_id}-overtime-{timeline.index:04d}"
+
+    async def request_overtime() -> str:
+        with override_current_server(timeline.offer_home_server or SERVER_IRAN):
+            return await worker.execute_webapp_trade_for_user(
+                user_id=int(requester.user_id),
+                offer_id=int(timeline.offer_id),
+                offer_public_id=timeline.offer_public_id,
+                quantity=5,
+                idempotency_key=idempotency_key,
+            )
+
+    await _complete_lifecycle_action(request_entry, request_overtime)
+    if timeline.scenario == "overtime_decision_timeout":
+        return
+
+    request_public_id = await _load_overtime_request_public_id(
+        offer_id=int(timeline.offer_id),
+        idempotency_key=idempotency_key,
+    )
+    decision = "approve" if timeline.scenario == "overtime_approved_trade" else "reject"
+    decision_entry = _append_lifecycle_action(
+        run,
+        timeline=timeline,
+        action=f"overtime_owner_{decision}",
+        origin="webapp",
+        scheduled_at=_utcnow(),
+    )
+    owner = users[timeline.index - 1]
+    await _complete_lifecycle_action(
+        decision_entry,
+        lambda: _decide_overtime_request_via_webapp(
+            worker=worker,
+            owner=owner,
+            request_public_id=request_public_id,
+            approve=decision == "approve",
+            home_server=timeline.offer_home_server or SERVER_IRAN,
+        ),
+    )
+
+
+async def _monitor_lifecycle_progress(
+    *,
+    run: MatrixRun,
+    stop: asyncio.Event,
+) -> None:
+    """Keep the redacted audit current while timed lifecycle actions run."""
+    while not stop.is_set():
+        await _hydrate_timelines(run.timelines)
+        _write_audit(run)
+        try:
+            await asyncio.wait_for(stop.wait(), timeout=MATRIX_PROGRESS_POLL_SECONDS)
+        except TimeoutError:
+            continue
+
+
+async def _run_lifecycle_actions(
+    *,
+    worker: Any,
+    users: Sequence[Any],
+    run: MatrixRun,
+) -> None:
+    """Drive only authoritative application paths after all initial posts exist."""
+    harness = worker.AiogramDispatcherHarness()
+    overtime_tasks: list[asyncio.Task[None]] = []
+    monitor_stop = asyncio.Event()
+    monitor_task = asyncio.create_task(
+        _monitor_lifecycle_progress(run=run, stop=monitor_stop),
+        name="telegram-live-matrix-lifecycle-monitor",
+    )
+    try:
+        for timeline in run.timelines:
+            if timeline.scenario in _OVERTIME_SCENARIOS:
+                overtime_tasks.append(
+                    asyncio.create_task(
+                        _run_overtime_lifecycle(
+                            worker=worker,
+                            users=users,
+                            run=run,
+                            timeline=timeline,
+                        ),
+                        name=f"telegram-live-matrix-overtime-{timeline.index}",
+                    )
+                )
+            elif timeline.scenario in _DIRECT_TRADE_SCENARIOS:
+                await _run_direct_trade(
+                    worker=worker,
+                    harness=harness,
+                    users=users,
+                    run=run,
+                    timeline=timeline,
+                )
+            elif timeline.scenario == "manual_expiry":
+                await _run_manual_expiry(
+                    worker=worker,
+                    harness=harness,
+                    users=users,
+                    run=run,
+                    timeline=timeline,
+                )
+            elif timeline.scenario != "natural_expiry":
+                raise LiveMatrixError("live_matrix_scenario_invalid")
+        await asyncio.gather(*overtime_tasks)
+    finally:
+        if any(not task.done() for task in overtime_tasks):
+            for task in overtime_tasks:
+                task.cancel()
+            await asyncio.gather(*overtime_tasks, return_exceptions=True)
+        monitor_stop.set()
+        await monitor_task
+        await harness.close()
+
+
 def _progress_snapshot(run: MatrixRun) -> tuple[int, int, int, int]:
     rows = run.timelines
     return (
         sum(item.central_queue_entered_at is not None for item in rows),
         sum(item.channel_post_state == _SENT_STATE for item in rows),
-        sum(item.expiry_at is not None for item in rows),
-        sum(item.expiry_edit_state == _SENT_STATE for item in rows),
+        sum(item.offer_status == item.expected_terminal_status for item in rows),
+        sum(item.terminal_edit_state == _SENT_STATE for item in rows),
     )
+
+
+async def _wait_for_initial_publication(run: MatrixRun) -> None:
+    """Do not begin lifecycle mutations until every initial post reached Telegram."""
+    last_posted = -1
+    last_progress_at = time.monotonic()
+    while True:
+        await _hydrate_timelines(run.timelines)
+        _write_audit(run)
+        posted_count = sum(item.channel_post_state == _SENT_STATE for item in run.timelines)
+        if posted_count == MATRIX_TOTAL_OFFERS:
+            return
+        if posted_count > last_posted:
+            last_posted = posted_count
+            last_progress_at = time.monotonic()
+        elif time.monotonic() - last_progress_at >= MATRIX_PROGRESS_STALL_SECONDS:
+            raise LiveMatrixError("live_matrix_initial_publication_stalled")
+        await asyncio.sleep(MATRIX_PROGRESS_POLL_SECONDS)
 
 
 async def _wait_for_terminal_lifecycle(run: MatrixRun) -> None:
@@ -610,28 +1157,43 @@ async def _wait_for_terminal_lifecycle(run: MatrixRun) -> None:
         if progress != last_progress:
             last_progress = progress
             last_progress_at = time.monotonic()
-        queue_count, posted_count, expired_count, edited_count = progress
+        queue_count, posted_count, terminal_count, edited_count = progress
         if (
             queue_count == MATRIX_TOTAL_OFFERS
             and posted_count == MATRIX_TOTAL_OFFERS
-            and expired_count == MATRIX_TOTAL_OFFERS
+            and terminal_count == MATRIX_TOTAL_OFFERS
             and edited_count == MATRIX_TOTAL_OFFERS
         ):
-            return
-
-        first_created = min(
-            (item.offer_created_at for item in run.timelines if item.offer_created_at),
-            default=None,
+            await asyncio.gather(
+                *[
+                    _observe_webapp_visibility(timeline, terminal=True)
+                    for timeline in run.timelines
+                    if timeline.webapp_terminal_visible_at is None
+                ]
+            )
+            if all(
+                item.webapp_terminal_status == item.expected_terminal_status
+                for item in run.timelines
+            ):
+                _write_audit(run)
+                return
+            raise LiveMatrixError("live_matrix_webapp_terminal_projection_mismatch")
+        now = _utcnow()
+        overdue_terminal = any(
+            item.offer_status != item.expected_terminal_status
+            and item.final_deadline_at is not None
+            and datetime.fromisoformat(item.final_deadline_at) <= now
+            for item in run.timelines
         )
-        expiry_window_open = False
-        if first_created:
-            expiry_window_open = (
-                _utcnow() - datetime.fromisoformat(first_created)
-            ).total_seconds() >= MATRIX_OFFER_EXPIRY_MINUTES * 60
-        delivery_is_due = posted_count < MATRIX_TOTAL_OFFERS or (
-            expiry_window_open and edited_count < MATRIX_TOTAL_OFFERS
+        due_lifecycle_action = any(
+            item.status is None
+            and datetime.fromisoformat(item.scheduled_at) <= now
+            for item in run.lifecycle_actions
         )
-        if delivery_is_due and time.monotonic() - last_progress_at >= MATRIX_PROGRESS_STALL_SECONDS:
+        if (
+            (overdue_terminal or due_lifecycle_action)
+            and time.monotonic() - last_progress_at >= MATRIX_PROGRESS_STALL_SECONDS
+        ):
             raise LiveMatrixError("live_matrix_delivery_progress_stalled")
         await asyncio.sleep(MATRIX_PROGRESS_POLL_SECONDS)
 
@@ -668,6 +1230,7 @@ async def run_live_matrix(args: argparse.Namespace) -> dict[str, Any]:
         from scripts import trading_core_probe_worker as worker
 
         users = await worker.create_load_fixture_users(run_id, user_count=MATRIX_TOTAL_OFFERS)
+        await _configure_overtime_preferences(users=users, workload=workload)
         commodity_id, commodity_name = await worker.resolve_commodity()
         started_monotonic = time.monotonic()
         started_at = _utcnow()
@@ -684,7 +1247,9 @@ async def run_live_matrix(args: argparse.Namespace) -> dict[str, Any]:
                 ),
                 name="telegram-live-matrix-user-interactions",
             )
-            for index, origin in enumerate(workload.origins, start=1):
+            for index, (origin, scenario) in enumerate(
+                zip(workload.origins, workload.scenarios, strict=True), start=1
+            ):
                 scheduled_at = datetime.fromtimestamp(
                     started_at.timestamp() + (index - 1) * MATRIX_INGRESS_INTERVAL_SECONDS,
                     tz=timezone.utc,
@@ -692,6 +1257,8 @@ async def run_live_matrix(args: argparse.Namespace) -> dict[str, Any]:
                 timeline = OfferTimeline(
                     index=index,
                     origin=origin,
+                    scenario=scenario,
+                    expected_terminal_status=_EXPECTED_TERMINAL_STATUS_BY_SCENARIO[scenario],
                     scheduled_at=_iso(scheduled_at) or "",
                 )
                 run.timelines.append(timeline)
@@ -720,6 +1287,10 @@ async def run_live_matrix(args: argparse.Namespace) -> dict[str, Any]:
             visibility_tasks = []
             if interaction_task is not None:
                 await interaction_task
+            run.phase = "awaiting_initial_publication"
+            await _wait_for_initial_publication(run)
+            run.phase = "driving_lifecycle"
+            await _run_lifecycle_actions(worker=worker, users=users, run=run)
             run.phase = "awaiting_terminal_lifecycle"
             await _wait_for_terminal_lifecycle(run)
         run.phase = "complete"
