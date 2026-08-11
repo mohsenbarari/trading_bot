@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from scripts.run_telegram_publisher_live_matrix import (
     MATRIX_INGRESS_INTERVAL_SECONDS,
     _is_ignorable_historical_private_job,
+    _retail_lot_sizes,
     build_live_matrix_workload,
 )
 
@@ -88,6 +89,11 @@ class TelegramPublisherLiveMatrixTests(unittest.TestCase):
             self.assertFalse(
                 _is_ignorable_historical_private_job(SimpleNamespace(**payload))
             )
+
+    def test_retail_lots_always_respect_the_active_minimum(self):
+        self.assertEqual(_retail_lot_sizes(5), (5, 5, 5))
+        self.assertEqual(_retail_lot_sizes("7"), (7, 7, 7))
+        self.assertEqual(_retail_lot_sizes(None), (1, 1, 1))
 
 
 if __name__ == "__main__":

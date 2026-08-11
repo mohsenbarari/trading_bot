@@ -130,6 +130,16 @@ def _is_ignorable_historical_private_job(job: Any) -> bool:
     )
 
 
+def _retail_lot_sizes(lot_min_size: Any) -> tuple[int, int, int]:
+    """Build three valid, equal lots from the active market minimum."""
+    try:
+        minimum = int(lot_min_size)
+    except (TypeError, ValueError, OverflowError):
+        minimum = 1
+    size = max(1, minimum)
+    return (size, size, size)
+
+
 def _value(value: Any) -> str:
     return str(getattr(value, "value", value) or "").strip().lower()
 
@@ -530,6 +540,12 @@ async def _create_offer(
     timeline: OfferTimeline,
 ) -> None:
     timeline.registration_started_at = _iso(_utcnow())
+    trading_settings = await get_trading_settings_async()
+    is_retail = timeline.scenario == "direct_retail_lot_trade"
+    retail_lots = _retail_lot_sizes(
+        getattr(trading_settings, "lot_min_size", None)
+    )
+    quantity = sum(retail_lots) if is_retail else 5
     if timeline.origin == "bot":
         # The in-container Aiogram recording harness is intentionally unable
         # to emulate the production root router ordering.  Exercise the same
@@ -549,21 +565,19 @@ async def _create_offer(
         )
         from models.offer import OfferStatus, OfferType
 
-        is_retail = timeline.scenario == "direct_retail_lot_trade"
         text_value, _marker = worker.build_bot_offer_text(
             owner_user_id=user.user_id,
             commodity_name=commodity_name,
             prefix=f"{run_id}-{timeline.index:04d}",
-            quantity=5,
+            quantity=quantity,
             price=100000,
             offer_type="sell",
             is_wholesale=not is_retail,
-            lot_sizes=(2, 2, 1) if is_retail else None,
+            lot_sizes=retail_lots if is_retail else None,
         )
         parsed, parse_error = await parse_offer_text(text_value)
         if parsed is None or parse_error is not None:
             raise LiveMatrixError("live_matrix_bot_offer_parse_failed")
-        trading_settings = await get_trading_settings_async()
         async with AsyncSessionLocal() as db:
             outcome = await create_authoritative_offer_with_outcome(
                 db,
@@ -615,8 +629,9 @@ async def _create_offer(
                 prefix=f"{run_id}-{timeline.index:04d}",
                 index=timeline.index,
                 source_surface="webapp",
+                quantity=quantity,
                 is_wholesale=timeline.scenario != "direct_retail_lot_trade",
-                lot_sizes=(2, 2, 1)
+                lot_sizes=retail_lots
                 if timeline.scenario == "direct_retail_lot_trade"
                 else None,
             )
@@ -881,13 +896,13 @@ async def _run_direct_trade(
     timeline: OfferTimeline,
 ) -> None:
     taker = _taker_for_timeline(users, timeline)
-    amounts = (5,) if timeline.scenario == "direct_wholesale_trade" else (2, 2, 1)
+    trade_count = 1 if timeline.scenario == "direct_wholesale_trade" else 3
     action_name = (
         "direct_wholesale_trade"
         if timeline.scenario == "direct_wholesale_trade"
         else "retail_lot_trade"
     )
-    for lot_index, amount in enumerate(amounts, start=1):
+    for lot_index in range(1, trade_count + 1):
         entry = _append_lifecycle_action(
             run,
             timeline=timeline,
@@ -898,6 +913,13 @@ async def _run_direct_trade(
 
         async def execute() -> str:
             offer = await worker.load_offer_snapshot(int(timeline.offer_id))
+            if timeline.scenario == "direct_retail_lot_trade":
+                lot_sizes = list(getattr(offer, "lot_sizes", None) or ())
+                if not lot_sizes:
+                    raise LiveMatrixError("live_matrix_retail_lot_missing")
+                amount = int(lot_sizes[0])
+            else:
+                amount = 5
             if timeline.origin == "bot":
                 return await worker.execute_bot_trade_with_dispatcher(
                     harness=harness,
