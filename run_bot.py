@@ -143,7 +143,13 @@ def configured_publisher_dispatch_worker_factory(
                 limit=1,
                 lease_seconds=float(getattr(settings_obj, "telegram_delivery_queue_worker_lease_seconds", 30.0)),
                 retry_after_seconds=1.0,
-                acknowledgement_timeout_seconds=15.0,
+                acknowledgement_timeout_seconds=float(
+                    getattr(
+                        settings_obj,
+                        "telegram_b2b_acknowledgement_timeout_seconds",
+                        15.0,
+                    )
+                ),
                 request_timeout_seconds=float(getattr(settings_obj, "telegram_delivery_queue_worker_request_timeout_seconds", 10.0)),
                 now_factory=utc_now,
             )
@@ -157,7 +163,10 @@ def configured_publisher_dispatch_worker_factory(
                 "Commands claimed in the latest Telegram publisher B2B cycle.",
                 report.claimed_count,
             )
-            await asyncio.sleep(0.5 if report.claimed_count else 1.0)
+            interval = float(
+                getattr(settings_obj, "telegram_b2b_dispatch_interval_seconds", 0.5)
+            )
+            await asyncio.sleep(interval if report.claimed_count else interval * 2)
 
     return run_dispatcher
 

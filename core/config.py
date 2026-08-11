@@ -120,6 +120,8 @@ class Settings(BaseSettings):
     # error rather than a partially active configuration.
     telegram_multi_publisher_enabled: bool = False
     telegram_b2b_dispatch_enabled: bool = False
+    telegram_b2b_dispatch_interval_seconds: float = 0.5
+    telegram_b2b_acknowledgement_timeout_seconds: float = 15.0
     # Publisher credentials remain separate to make accidental token reuse and
     # identity drift fail before a worker can be composed.  They are consumed
     # only when TELEGRAM_MULTI_PUBLISHER_ENABLED is true.
@@ -240,6 +242,13 @@ class Settings(BaseSettings):
             and not self.telegram_multi_publisher_enabled
         ):
             raise ValueError("telegram_b2b_dispatch_requires_multi_publisher")
+        for name in (
+            "telegram_b2b_dispatch_interval_seconds",
+            "telegram_b2b_acknowledgement_timeout_seconds",
+        ):
+            value = float(getattr(self, name))
+            if not math.isfinite(value) or value <= 0:
+                raise ValueError(f"{name}_must_be_positive")
         producer = str(
             self.telegram_delivery_producer_mode
             or self.telegram_delivery_execution_owner
