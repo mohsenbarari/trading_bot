@@ -1131,10 +1131,11 @@ async def run_telegram_delivery_queue_cycle(
                 )
                 if not deferred:
                     stale_fence_count += 1
-                # ``not_before`` originates from Redis TIME.  It is safe to
-                # use only as a short local poll deadline; the durable defer
-                # above remains authoritative across restarts.
-                limiter_retry_not_before = admission.not_before
+                if deferred:
+                    # ``not_before`` originates from Redis TIME.  It is safe
+                    # to use only as a short local poll deadline; the durable
+                    # defer above remains authoritative across restarts.
+                    limiter_retry_not_before = admission.not_before
                 key = "limiter_wait"
                 status_counts[key] = status_counts.get(key, 0) + 1
                 processed_count += 1

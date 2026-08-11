@@ -179,6 +179,74 @@ class TelegramDeliveryQueueWorkerSafetyTests(unittest.IsolatedAsyncioTestCase):
                 worker._short_limiter_wait_poll_delay_seconds(report)
             )
 
+    async def test_cycle_reports_durable_short_limiter_deadline_to_slot(self):
+        now = worker.utc_now()
+        deadline = now + worker.timedelta(seconds=0.8)
+        job = SimpleNamespace(
+            id=811,
+            lease_token=1,
+            method="sendMessage",
+            payload={"chat_id": 1},
+            dedupe_key="limiter-deadline",
+            bot_identity="publisher_1",
+            destination_key="channel:1",
+        )
+        db = AsyncMock()
+        session_context = MagicMock()
+        session_context.__aenter__ = AsyncMock(return_value=db)
+        session_context.__aexit__ = AsyncMock(return_value=False)
+        limiter = _AllowLimiter()
+        limiter.acquire = AsyncMock(
+            return_value=TelegramDeliveryDispatchAdmission(
+                allowed=False,
+                retry_after_seconds=0.8,
+                wait_reason="destination_gate",
+                not_before=deadline,
+            )
+        )
+        defer = AsyncMock(return_value=True)
+
+        with patch(
+            "core.telegram_delivery_queue_worker.assert_background_job_authority"
+        ), patch(
+            "core.telegram_delivery_queue_worker.configured_telegram_delivery_runtime",
+            return_value=self._queue_runtime(),
+        ), patch(
+            "core.telegram_delivery_queue_worker.AsyncSessionLocal",
+            return_value=session_context,
+        ), patch(
+            "core.telegram_delivery_queue_worker.claim_next_telegram_delivery_job",
+            new=AsyncMock(return_value=job),
+        ), patch(
+            "core.telegram_delivery_queue_worker.apply_telegram_delivery_freshness_result",
+            new=AsyncMock(return_value=True),
+        ), patch(
+            "core.telegram_delivery_queue_worker.telegram_delivery_database_now",
+            new=AsyncMock(return_value=now),
+        ), patch(
+            "core.telegram_delivery_queue_worker._defer_for_dispatch_limit",
+            new=defer,
+        ):
+            report = await worker.run_telegram_delivery_queue_cycle(
+                bot_identity="publisher_1",
+                freshness_validator=AsyncMock(return_value=object()),
+                lifecycle_feedback=_NoopLifecycleFeedback(),
+                gateway_call=AsyncMock(),
+                dispatch_limiter=limiter,
+                recover_leases=False,
+                limit=1,
+            )
+
+        self.assertEqual(report.status_counts, {"limiter_wait": 1})
+        self.assertEqual(report.limiter_retry_not_before, deadline)
+        defer.assert_awaited_once_with(
+            job_id=811,
+            worker_id=ANY,
+            lease_token=1,
+            retry_seconds=0.8,
+            reason="telegram_limiter_wait:destination_gate",
+        )
+
     @staticmethod
     def _rehydration(
         *,
