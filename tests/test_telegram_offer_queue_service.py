@@ -284,6 +284,29 @@ class TelegramOfferQueueServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("offers.created_at DESC", sql)
         self.assertLess(sql.index("CASE WHEN"), sql.index("offers.created_at DESC"))
 
+    async def test_publication_candidate_query_skips_in_flight_publish_job(self):
+        db = SimpleNamespace(
+            execute=AsyncMock(return_value=SimpleNamespace(all=lambda: [])),
+        )
+
+        candidates = await service.load_offer_publication_queue_candidates(
+            db,
+            limit=25,
+        )
+
+        self.assertEqual(candidates, [])
+        statement = db.execute.await_args.args[0]
+        sql = str(
+            statement.compile(
+                dialect=postgresql.dialect(),
+                compile_kwargs={"literal_binds": True},
+            )
+        )
+        self.assertIn("NOT (EXISTS", sql)
+        self.assertIn("telegram_delivery_jobs.feeder_kind = 'offer_control'", sql)
+        self.assertIn("telegram_delivery_jobs.action_kind IN ('offer_publish')", sql)
+        self.assertIn("telegram_delivery_jobs.state NOT IN", sql)
+
     async def test_edit_success_counter_is_capped_and_stale_success_resets_rank(self):
         now = utc_now()
         feeder_state = SimpleNamespace(

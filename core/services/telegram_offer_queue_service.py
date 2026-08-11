@@ -51,6 +51,7 @@ from core.telegram_delivery_offer_freshness import (
 from core.telegram_delivery_queue_contract import (
     EDIT_CATCH_UP_FRESH_COUNT,
     EDIT_STALE_AFTER_SECONDS,
+    FINAL_DELIVERY_STATES,
     TelegramDeliveryAction,
     TelegramDeliveryState,
     TelegramDestinationClass,
@@ -568,6 +569,24 @@ async def load_offer_publication_queue_candidates(
     limit: int,
 ) -> list[TelegramOfferQueueCandidate]:
     state = aliased(OfferPublicationState)
+    # A pending publication state intentionally remains pending until its
+    # immutable queue job obtains provider evidence.  Without this exclusion,
+    # the oldest in-flight rows monopolize every feeder batch: each scan only
+    # re-deduplicates those rows instead of admitting later central-ingress
+    # offers.  A final job is deliberately *not* excluded; its state still
+    # needs an explicit retry/recovery path if it did not produce a message.
+    in_flight_publication_job = (
+        select(TelegramDeliveryJobRecord.id)
+        .where(
+            TelegramDeliveryJobRecord.feeder_kind
+            == TelegramFeederKind.OFFER_CONTROL,
+            TelegramDeliveryJobRecord.source_natural_id == Offer.offer_public_id,
+            TelegramDeliveryJobRecord.action_kind.in_(tuple(OFFER_PUBLISH_ACTIONS)),
+            TelegramDeliveryJobRecord.state.notin_(tuple(FINAL_DELIVERY_STATES)),
+        )
+        .correlate(Offer)
+        .exists()
+    )
     rows = (
         await db.execute(
             select(Offer, state)
@@ -595,6 +614,7 @@ async def load_offer_publication_queue_candidates(
                         )
                     ),
                 ),
+                ~in_flight_publication_job,
             )
             .order_by(Offer.created_at.asc(), Offer.id.asc())
             .limit(max(1, int(limit)))
