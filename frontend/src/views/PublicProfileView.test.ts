@@ -1,5 +1,6 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import PublicProfileView from './PublicProfileView.vue'
 
 const publicProfileViewMocks = vi.hoisted(() => ({
   route: {
@@ -8,6 +9,7 @@ const publicProfileViewMocks = vi.hoisted(() => ({
   },
   routerPushMock: vi.fn(),
   routerBackMock: vi.fn(),
+  routerReplaceMock: vi.fn(),
   apiFetchMock: vi.fn(),
 }))
 
@@ -16,11 +18,28 @@ vi.mock('vue-router', () => ({
   useRouter: () => ({
     push: publicProfileViewMocks.routerPushMock,
     back: publicProfileViewMocks.routerBackMock,
+    replace: publicProfileViewMocks.routerReplaceMock,
   }),
 }))
 
 vi.mock('../utils/auth', () => ({
   apiFetch: publicProfileViewMocks.apiFetchMock,
+}))
+
+// This is a view-contract suite. Mocking the large child keeps the first test
+// focused on route/prop wiring instead of paying to compile its full profile UI.
+vi.mock('../components/PublicProfile.vue', () => ({
+  default: {
+    name: 'PublicProfile',
+    props: [
+      'user',
+      'viewerUserId',
+      'apiBaseUrl',
+      'jwtToken',
+    ],
+    emits: ['navigate'],
+    template: '<div class="public-profile-stub"></div>',
+  },
 }))
 
 describe('PublicProfileView.vue', () => {
@@ -29,25 +48,26 @@ describe('PublicProfileView.vue', () => {
     publicProfileViewMocks.route.query = {}
     publicProfileViewMocks.routerPushMock.mockReset()
     publicProfileViewMocks.routerBackMock.mockReset()
+    publicProfileViewMocks.routerReplaceMock.mockReset()
     publicProfileViewMocks.apiFetchMock.mockReset()
     localStorage.setItem('auth_token', 'header.eyJzdWIiOiI3NyJ9.signature')
   })
 
-  it('passes highlight accountant query state into PublicProfile', async () => {
+  it('canonicalizes every public-profile query, including unknown highlight keys', async () => {
     publicProfileViewMocks.route.query = {
       account_name: 'owner-44',
       highlight_accountant_user_id: '91',
       highlight_accountant_relation_display_name: 'حسابدار فروش',
+      highlight_accountant_note: 'legacy-only',
     }
 
-    const PublicProfileView = (await import('./PublicProfileView.vue')).default
     const wrapper = mount(PublicProfileView, {
       global: {
         stubs: {
           PublicProfile: {
             name: 'PublicProfile',
             template: '<div class="public-profile-stub"></div>',
-            props: ['user', 'viewerUserId', 'apiBaseUrl', 'jwtToken', 'highlightAccountantUserId', 'highlightAccountantRelationDisplayName'],
+            props: ['user', 'viewerUserId', 'apiBaseUrl', 'jwtToken'],
           },
         },
       },
@@ -56,10 +76,13 @@ describe('PublicProfileView.vue', () => {
     await flushPromises()
 
     const stub = wrapper.getComponent({ name: 'PublicProfile' })
-    expect(stub.props('user')).toEqual({ id: 44, account_name: 'owner-44' })
+    expect(stub.props('user')).toEqual({ id: 44, account_name: '' })
     expect(stub.props('viewerUserId')).toBe(77)
-    expect(stub.props('highlightAccountantUserId')).toBe(91)
-    expect(stub.props('highlightAccountantRelationDisplayName')).toBe('حسابدار فروش')
+    expect(publicProfileViewMocks.routerReplaceMock).toHaveBeenCalledWith({
+      name: 'public-profile',
+      params: { id: '44' },
+    })
+    expect(publicProfileViewMocks.routerPushMock).not.toHaveBeenCalled()
   })
 
   it('loads viewer id from /api/auth/me when the token does not contain a valid numeric subject', async () => {
@@ -69,7 +92,6 @@ describe('PublicProfileView.vue', () => {
       json: async () => ({ id: 88 }),
     })
 
-    const PublicProfileView = (await import('./PublicProfileView.vue')).default
     const wrapper = mount(PublicProfileView, {
       global: {
         stubs: {
@@ -89,7 +111,7 @@ describe('PublicProfileView.vue', () => {
     expect(stub.props('viewerUserId')).toBe(88)
   })
 
-  it('passes a null user when the route id is invalid and ignores invalid highlight query values', async () => {
+  it('passes a null user for an invalid route id without attempting canonical replacement', async () => {
     publicProfileViewMocks.route.params = { id: 'not-a-number' }
     publicProfileViewMocks.route.query = {
       account_name: 'ignored',
@@ -97,14 +119,13 @@ describe('PublicProfileView.vue', () => {
       highlight_accountant_relation_display_name: 'ignored-title',
     }
 
-    const PublicProfileView = (await import('./PublicProfileView.vue')).default
     const wrapper = mount(PublicProfileView, {
       global: {
         stubs: {
           PublicProfile: {
             name: 'PublicProfile',
             template: '<div class="public-profile-stub"></div>',
-            props: ['user', 'highlightAccountantUserId', 'highlightAccountantRelationDisplayName'],
+            props: ['user'],
           },
         },
       },
@@ -114,12 +135,10 @@ describe('PublicProfileView.vue', () => {
 
     const stub = wrapper.getComponent({ name: 'PublicProfile' })
     expect(stub.props('user')).toBeNull()
-    expect(stub.props('highlightAccountantUserId')).toBeNull()
-    expect(stub.props('highlightAccountantRelationDisplayName')).toBe('ignored-title')
+    expect(publicProfileViewMocks.routerReplaceMock).not.toHaveBeenCalled()
   })
 
   it('routes chat navigation requests through the messenger query contract', async () => {
-    const PublicProfileView = (await import('./PublicProfileView.vue')).default
     const wrapper = mount(PublicProfileView, {
       global: {
         stubs: {
@@ -143,7 +162,6 @@ describe('PublicProfileView.vue', () => {
   })
 
   it('routes owner workspace navigation requests to the operations workspaces', async () => {
-    const PublicProfileView = (await import('./PublicProfileView.vue')).default
     const wrapper = mount(PublicProfileView, {
       global: {
         stubs: {
@@ -168,7 +186,6 @@ describe('PublicProfileView.vue', () => {
   })
 
   it('routes admin settings navigation requests through the admin user-profile route', async () => {
-    const PublicProfileView = (await import('./PublicProfileView.vue')).default
     const wrapper = mount(PublicProfileView, {
       global: {
         stubs: {
@@ -185,14 +202,10 @@ describe('PublicProfileView.vue', () => {
     expect(publicProfileViewMocks.routerPushMock).toHaveBeenCalledWith({
       name: 'admin-user-profile',
       params: { id: '66' },
-      query: {
-        account_name: 'managed66',
-      },
     })
   })
 
-  it('routes nested public-profile navigation requests with accountant highlight query metadata', async () => {
-    const PublicProfileView = (await import('./PublicProfileView.vue')).default
+  it('routes nested public-profile navigation requests with only the profile id', async () => {
     const wrapper = mount(PublicProfileView, {
       global: {
         stubs: {
@@ -209,18 +222,12 @@ describe('PublicProfileView.vue', () => {
     expect(publicProfileViewMocks.routerPushMock).toHaveBeenCalledWith({
       name: 'public-profile',
       params: { id: '71' },
-      query: {
-        account_name: 'owner71',
-        highlight_accountant_user_id: '19',
-        highlight_accountant_relation_display_name: 'حسابدار فروش',
-      },
     })
   })
 
   it('uses router.back for non-chat navigation when browser history has a back entry', async () => {
     window.history.replaceState({ back: '/chat' }, '', '/users/44')
 
-    const PublicProfileView = (await import('./PublicProfileView.vue')).default
     const wrapper = mount(PublicProfileView, {
       global: {
         stubs: {
@@ -241,7 +248,6 @@ describe('PublicProfileView.vue', () => {
   it('falls back to pushing the dashboard when there is no browser back entry', async () => {
     window.history.replaceState({}, '', '/users/44')
 
-    const PublicProfileView = (await import('./PublicProfileView.vue')).default
     const wrapper = mount(PublicProfileView, {
       global: {
         stubs: {
@@ -266,7 +272,6 @@ describe('PublicProfileView.vue', () => {
       json: async () => ({ id: 99 }),
     })
 
-    const PublicProfileView = (await import('./PublicProfileView.vue')).default
     const wrapper = mount(PublicProfileView, {
       global: {
         stubs: {

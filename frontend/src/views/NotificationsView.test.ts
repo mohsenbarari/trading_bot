@@ -42,6 +42,7 @@ describe('NotificationsView.vue', () => {
     }
     routerResolveMock.mockImplementation((path: string) => ({
       name: path.startsWith('/missing') ? 'system-recovery' : 'resolved-notification',
+      fullPath: path,
       matched: path.startsWith('/missing') ? [] : [{ name: 'resolved-notification' }],
     }))
     webPushMocks.getWebPushStatus.mockReset()
@@ -331,7 +332,7 @@ describe('NotificationsView.vue', () => {
     wrapper.unmount()
   })
 
-  it('opens a notification route when the item carries one', async () => {
+  it('canonicalizes a query-bearing public-profile notification route before opening it', async () => {
     const store = useNotificationStore()
     const hostileNotifications: NormalizedAppNotification[] = [
       {
@@ -356,7 +357,7 @@ describe('NotificationsView.vue', () => {
     await wrapper.find('.notification-category-tabs').findAll('[role="tab"]')[0]!.trigger('click')
 
     await wrapper.get('.notif-item').trigger('click')
-    expect(routerPushMock).toHaveBeenCalledWith('/users/19?account_name=owner-19')
+    expect(routerPushMock).toHaveBeenCalledWith('/users/19')
     expect(wrapper.get('.notif-item').element.tagName).toBe('BUTTON')
     expect(wrapper.get('.notif-item').attributes('type')).toBe('button')
   })

@@ -153,32 +153,12 @@ class UserRead(UserBase):
         from_attributes = True
 
 class UserPublicRead(BaseModel):
-    """شمای عمومی کاربر برای نمایش به دیگران"""
+    """حداقل دادهٔ پروفایل عمومی؛ فیلدهای self فقط با projection سمت سرور افزوده می‌شوند."""
     id: int
     account_name: str
     mobile_number: str
-    address: str
     avatar_file_id: str | None = None
-    created_at: datetime
-    trades_count: int = 0
-    last_seen_at: datetime | None = None
-    resolved_from_accountant_id: int | None = None
-    chat_role_kind: str | None = None
-    chat_role_label: str | None = None
-    chat_accountant_owner_name: str | None = None
-    chat_accountant_owner_label: str | None = None
-    highlight_accountant_user_id: int | None = None
-    highlight_accountant_relation_display_name: str | None = None
-    accountant_relations: List['PublicAccountantRelationSummary'] = Field(default_factory=list)
-    customer_owner_user_id: int | None = None
-    customer_owner_account_name: str | None = None
-    customer_management_name: str | None = None
-    customer_tier: CustomerTier | None = None
-    customer_relations: List['PublicCustomerRelationSummary'] = Field(default_factory=list)
-    
-    @computed_field
-    def created_at_jalali(self) -> str | None:
-        return to_jalali_str(self.created_at)
+    address: str | None = None
 
     class Config:
         from_attributes = True
@@ -210,7 +190,6 @@ class ProjectUserDirectoryEntry(BaseModel):
     id: int
     account_name: str
     mobile_number: str
-    created_at: datetime | None = None
 
     class Config:
         from_attributes = True
@@ -326,26 +305,6 @@ class AccountantRelationRead(BaseModel):
     activated_at: datetime | None = None
     deleted_at: datetime | None = None
     created_at: datetime
-
-    class Config:
-        from_attributes = True
-
-
-class PublicAccountantRelationSummary(BaseModel):
-    accountant_user_id: int | None = None
-    accountant_account_name: str | None = None
-    relation_display_name: str
-    duty_description: str | None = None
-
-    class Config:
-        from_attributes = True
-
-
-class PublicCustomerRelationSummary(BaseModel):
-    customer_user_id: int | None = None
-    customer_account_name: str | None = None
-    management_name: str
-    customer_tier: CustomerTier
 
     class Config:
         from_attributes = True

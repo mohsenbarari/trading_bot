@@ -36,7 +36,6 @@ function handleNavigate(view: string, payload?: any) {
     router.push({
       name: 'public-profile',
       params: { id: String(profileId) },
-      query: payload?.account_name ? { account_name: payload.account_name } : {},
     })
   } else if (view === 'home') {
     router.push({ name: 'account' })

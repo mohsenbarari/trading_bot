@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from typing import List, Optional, Dict, Any, Tuple
 from datetime import datetime, timezone
 import asyncio
@@ -230,10 +230,50 @@ def _ensure_actor_can_manage_target(actor, target_user: User):
     if actor is None:
         return None
 
-    if _role_value(actor.role) == UserRole.MIDDLE_MANAGER.value and _is_admin_role(target_user.role):
+    actor_id = getattr(actor, "id", None)
+    target_id = getattr(target_user, "id", None)
+    if (
+        _role_value(actor.role) == UserRole.MIDDLE_MANAGER.value
+        and _is_admin_role(getattr(target_user, "role", None))
+        and (actor_id is None or target_id is None or actor_id != target_id)
+    ):
         raise HTTPException(
             status_code=403,
             detail="مدیر میانی فقط می‌تواند کاربران غیرادمین را مدیریت کند",
+        )
+
+    return actor
+
+
+def _ensure_actor_can_mutate_target(actor, target_user: User):
+    """Enforce the admin action matrix for sensitive user mutations.
+
+    Reads continue to use ``_ensure_actor_can_manage_target``.  Mutations need
+    the stricter rule that an admin may not take a sensitive action against
+    their own account, and a super admin may not take one against another
+    super-admin account.  A ``None`` actor is the existing authenticated
+    service/dev-key identity and deliberately has no human peer relationship.
+    """
+    actor = _normalize_actor(actor)
+    if actor is None:
+        return None
+
+    actor_id = getattr(actor, "id", None)
+    target_id = getattr(target_user, "id", None)
+    if actor_id is not None and target_id is not None and actor_id == target_id:
+        raise HTTPException(
+            status_code=403,
+            detail="مدیر نمی‌تواند عملیات حساس مدیریتی را روی حساب خودش انجام دهد",
+        )
+
+    actor = _ensure_actor_can_manage_target(actor, target_user)
+    actor_role = _role_value(getattr(actor, "role", None))
+    target_role = _role_value(getattr(target_user, "role", None))
+
+    if actor_role == UserRole.SUPER_ADMIN.value and target_role == UserRole.SUPER_ADMIN.value:
+        raise HTTPException(
+            status_code=403,
+            detail="مدیر ارشد نمی‌تواند عملیات حساس مدیریتی را روی حساب مدیر ارشد انجام دهد",
         )
 
     return actor
@@ -258,7 +298,11 @@ async def read_all_users(
         query = query.where(User.is_deleted == False)
 
     if actor is not None and _role_value(actor.role) == UserRole.MIDDLE_MANAGER.value:
-        query = query.where(~User.role.in_([UserRole.SUPER_ADMIN, UserRole.MIDDLE_MANAGER]))
+        non_admin_filter = ~User.role.in_([UserRole.SUPER_ADMIN, UserRole.MIDDLE_MANAGER])
+        actor_id = getattr(actor, "id", None)
+        query = query.where(
+            or_(User.id == actor_id, non_admin_filter) if actor_id is not None else non_admin_filter
+        )
     
     if search:
         search_pattern = f"%{search}%"
@@ -295,7 +339,7 @@ async def update_user(
     user = await db.get(User, user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    actor = _ensure_actor_can_manage_target(actor, user)
+    actor = _ensure_actor_can_mutate_target(actor, user)
     before_summary = _audit_user_summary(user)
     
     update_data = user_update.model_dump(exclude_unset=True)
@@ -415,7 +459,7 @@ async def delete_user(
         raise HTTPException(status_code=404, detail="User not found")
     if user.is_deleted:
         raise HTTPException(status_code=404, detail="User not found")
-    actor = _ensure_actor_can_manage_target(actor, user)
+    actor = _ensure_actor_can_mutate_target(actor, user)
     before_summary = _audit_user_summary(user)
 
     try:
@@ -443,12 +487,15 @@ async def terminate_user_sessions(
     user_id: int,
     db: AsyncSession = Depends(get_db),
     actor = Depends(verify_admin_or_dev_key),
+    _admin_authority: None = Depends(
+        require_shared_admin_write_authority("users", operation="terminate_sessions")
+    ),
 ):
     """پایان دادن فوری به تمام نشست‌های فعال یک کاربر"""
     user = await db.get(User, user_id)
     if not user or user.is_deleted:
         raise HTTPException(status_code=404, detail="User not found")
-    actor = _ensure_actor_can_manage_target(actor, user)
+    actor = _ensure_actor_can_mutate_target(actor, user)
 
     terminated_count = await force_clear_sessions(db, user.id)
     audit_log(

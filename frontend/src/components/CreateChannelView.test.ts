@@ -59,10 +59,10 @@ describe('CreateChannelView.vue', () => {
     uploadAvatarImageMock.mockReset()
     routerPushMock.mockReset()
     routerResolveMock.mockReset()
-    routerResolveMock.mockReturnValue({ href: '/users/2?account_name=member2' })
+    routerResolveMock.mockReturnValue({ href: '/users/2' })
     currentRouteState.value.fullPath = '/chat?user_id=-7'
     routerPushMock.mockImplementation(async () => {
-      currentRouteState.value.fullPath = '/users/2?account_name=member2'
+      currentRouteState.value.fullPath = '/users/2'
     })
   })
 
@@ -163,7 +163,6 @@ describe('CreateChannelView.vue', () => {
     expect(routerPushMock).toHaveBeenCalledWith({
       name: 'public-profile',
       params: { id: '2' },
-      query: { account_name: 'member2' },
     })
   }, 10000)
 
@@ -802,9 +801,9 @@ describe('CreateChannelView.vue', () => {
     expect(avatarClickSpy).toHaveBeenCalledTimes(1)
 
     currentRouteState.value.fullPath = '/chat?user_id=-7'
-    routerResolveMock.mockReturnValueOnce({ href: '/users/4?account_name=member4' })
+    routerResolveMock.mockReturnValueOnce({ href: '/users/4' })
     routerPushMock.mockImplementationOnce(async () => {
-      currentRouteState.value.fullPath = '/users/4?account_name=member4'
+      currentRouteState.value.fullPath = '/users/4'
     })
     vm.openMemberProfile({ user_id: 4, account_name: 'member4' })
     await vi.advanceTimersByTimeAsync(220)

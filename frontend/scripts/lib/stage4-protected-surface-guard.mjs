@@ -31,6 +31,30 @@ export const MESSENGER_RUNTIME_BASELINE = Object.freeze({
   sha256: 'f66debf9809180d97b2bac98f5195ba24200d3b61b0d8e0e5cd423a8a7b97248',
 })
 
+// This is a one-purpose disposition, not a Stage 4 baseline update. It permits
+// only the Stage 6 removal of profile labels from Messenger-originated URLs.
+export const STAGE6_MESSENGER_URL_PRIVACY_ALLOWED_PATHS = Object.freeze([
+  'frontend/src/components/ChatView.vue',
+  'frontend/src/components/CreateChannelView.vue',
+  'frontend/src/views/MessengerView.vue',
+])
+
+export const STAGE6_MESSENGER_URL_PRIVACY_ALLOWED_FILE_SHA256 = Object.freeze({
+  'frontend/src/components/ChatView.vue':
+    'e03ded196c369871f3ecd6763c09535c5a57efc5c0a767d848b2c5a94994273b',
+  'frontend/src/components/CreateChannelView.vue':
+    '708cabb84325114d03b35b5db8a0b4add64193f438c1a3375a5e66232034102c',
+  'frontend/src/views/MessengerView.vue':
+    '1cabee73dc161c456130f131f53274a5b546816ff0652d68a4e6ea290e0f83fb',
+})
+
+export const STAGE6_MESSENGER_URL_PRIVACY_EVIDENCE = Object.freeze({
+  count: 85,
+  contentBytes: 1311100,
+  pathSetSha256: 'f6af1f961e45d785ba9c752ee670643571086c6a946843807fe6f581d11aea58',
+  sha256: '3089210a77936d29754c9478fcdf40619acd08f35d1e8c64f6266fe8efb1699a',
+})
+
 const RUNTIME_SOURCE_EXTENSION = /\.(?:css|[cm]?[jt]sx?|vue)$/
 const TEST_SOURCE = /(?:^|\/)[^/]+\.(?:spec|test)\.[^/]+$/
 
@@ -244,6 +268,69 @@ export function assertProtectedFileSetEvidence(label, actual, expected) {
 
 export function fileSha256(value) {
   return sha256(value)
+}
+
+function assertStage6MessengerUrlPrivacyAllowedFiles(entries) {
+  const entriesByPath = new Map(entries.map((entry) => [entry.path, entry]))
+  for (const repoPath of STAGE6_MESSENGER_URL_PRIVACY_ALLOWED_PATHS) {
+    const entry = entriesByPath.get(repoPath)
+    if (!entry) {
+      throw new Error(`Stage 6 Messenger URL-privacy allowed file is missing: ${repoPath}`)
+    }
+    const actualSha256 = fileSha256(entry.content)
+    const expectedSha256 = STAGE6_MESSENGER_URL_PRIVACY_ALLOWED_FILE_SHA256[repoPath]
+    if (actualSha256 !== expectedSha256) {
+      throw new Error(
+        `Stage 6 Messenger URL-privacy allowed file drift: ${repoPath} ${expectedSha256} -> ${actualSha256}`,
+      )
+    }
+  }
+}
+
+/**
+ * Accepts only the one reviewed Stage 6 Messenger URL-privacy remediation.
+ * The aggregate evidence freezes every other Messenger-owned file, while the
+ * per-file hashes make the three permitted paths independently auditable.
+ */
+export function assertStage6MessengerUrlPrivacyDisposition(entries) {
+  assertStage6MessengerUrlPrivacyAllowedFiles(entries)
+  return assertProtectedFileSetEvidence(
+    'Stage 6 Messenger URL-privacy disposition',
+    protectedFileSetEvidence(entries, MESSENGER_RUNTIME_CONTRACT),
+    STAGE6_MESSENGER_URL_PRIVACY_EVIDENCE,
+  )
+}
+
+/**
+ * Stage 4 remains immutable. If it no longer matches, a separate exact Stage
+ * 6 privacy disposition is the only alternate outcome; all other drift fails.
+ */
+export function resolveMessengerRuntimeDisposition(entries) {
+  const actual = protectedFileSetEvidence(entries, MESSENGER_RUNTIME_CONTRACT)
+  try {
+    return {
+      kind: 'stage4-baseline',
+      evidence: assertProtectedFileSetEvidence(
+        'Messenger runtime',
+        actual,
+        MESSENGER_RUNTIME_BASELINE,
+      ),
+    }
+  } catch (baselineError) {
+    try {
+      return {
+        kind: 'stage6-url-privacy',
+        evidence: assertStage6MessengerUrlPrivacyDisposition(entries),
+      }
+    } catch (dispositionError) {
+      const baselineMessage = baselineError instanceof Error ? baselineError.message : String(baselineError)
+      const dispositionMessage =
+        dispositionError instanceof Error ? dispositionError.message : String(dispositionError)
+      throw new Error(
+        `Messenger runtime rejected after Stage 4 baseline drift (${baselineMessage}); Stage 6 URL-privacy disposition rejected (${dispositionMessage})`,
+      )
+    }
+  }
 }
 
 function sameArray(left, right) {

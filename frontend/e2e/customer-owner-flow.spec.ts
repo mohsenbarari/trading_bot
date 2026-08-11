@@ -791,6 +791,23 @@ async function setAuthTokens(page: Page, session: SessionUser) {
   })
 }
 
+async function expectIdOnlyPublicProfileUrl(page: Page, userId: number) {
+  await expect
+    .poll(() => {
+      const url = new URL(page.url())
+      return {
+        pathname: url.pathname,
+        search: url.search,
+        hash: url.hash,
+      }
+    }, { timeout: 30000 })
+    .toEqual({
+      pathname: `/users/${userId}`,
+      search: '',
+      hash: '',
+    })
+}
+
 async function fetchOwnerCustomerRelations(
   request: APIRequestContext,
   accessToken: string,
@@ -884,34 +901,6 @@ async function waitForActiveOwnerCustomerRelation(
   }
 
   return relation
-}
-
-async function ensureAccordionOpen(root: Locator, sectionSelector: string) {
-  const section = root.locator(sectionSelector).first()
-  await expect(section).toBeVisible({ timeout: 30000 })
-
-  const accordion = section.locator('.ds-accordion').first()
-  if ((await accordion.count()) === 0) {
-    return
-  }
-
-  const className = await accordion.getAttribute('class')
-  if (!className?.includes('open')) {
-    await accordion.locator('.ds-accordion-header').first().click()
-    await expect(accordion).toHaveClass(/open/)
-  }
-}
-
-async function loadPublicProfileTradeHistory(root: Locator, title: string) {
-  const legacyHeader = root.locator('.ds-accordion-header').filter({ hasText: title }).first()
-  if (await legacyHeader.count()) {
-    await legacyHeader.click()
-    return
-  }
-
-  const historySection = root.locator('.history-section-card').filter({ hasText: title }).first()
-  await expect(historySection).toBeVisible({ timeout: 30000 })
-  await historySection.getByRole('button', { name: 'اعمال فیلتر' }).click()
 }
 
 test.describe('customer owner lifecycle', () => {
@@ -1116,20 +1105,17 @@ test.describe('customer owner lifecycle', () => {
 
     await setAuthTokens(page, superAdmin)
     await page.goto(`/users/${owner.userId}`)
+    await expectIdOnlyPublicProfileUrl(page, owner.userId)
     const superAdminOwnerProfileView = page.locator('.public-profile-view:visible').last()
     await expect(superAdminOwnerProfileView.locator('.profile-content')).toBeVisible({
       timeout: 30000,
     })
-    await expect(superAdminOwnerProfileView.locator('.customer-relations-section')).toContainText(
-      managementName,
-      { timeout: 30000 },
-    )
-    await ensureAccordionOpen(superAdminOwnerProfileView, '.customer-relations-section')
-    await superAdminOwnerProfileView
-      .locator('.customer-relations-section .customer-profile-link-btn')
-      .filter({ hasText: managementName })
-      .click()
-    await page.waitForURL(new RegExp(`/users/${activatedCustomerUserId}(?:\\?.*)?$`))
+    await expect(superAdminOwnerProfileView.locator('.customer-relations-section')).toHaveCount(0)
+    await expect(superAdminOwnerProfileView.locator('.history-section-card')).toHaveCount(0)
+    await expect(superAdminOwnerProfileView).not.toContainText(managementName)
+
+    await page.goto(`/users/${activatedCustomerUserId}`)
+    await expectIdOnlyPublicProfileUrl(page, activatedCustomerUserId)
 
     const superAdminCustomerProfileView = page.locator('.public-profile-view:visible').last()
     await expect(superAdminCustomerProfileView.locator('.profile-content')).toBeVisible({
@@ -1224,7 +1210,7 @@ test.describe('customer owner lifecycle', () => {
     await expect(workspace).toContainText('هنوز مشتری ثبت نشده است')
   })
 
-  test('super-admin sees target trade history from the viewed public-profile perspective', async ({
+  test('super-admin nonself public profiles omit customer relations and trade history', async ({
     page,
     request,
   }) => {
@@ -1236,51 +1222,29 @@ test.describe('customer owner lifecycle', () => {
     await setAuthTokens(page, fixture.superAdmin)
 
     await page.goto(`/users/${fixture.ownerUserId}`)
+    await expectIdOnlyPublicProfileUrl(page, fixture.ownerUserId)
     const ownerProfileView = page.locator('.public-profile-view:visible').last()
     await expect(ownerProfileView.locator('.profile-content')).toBeVisible({ timeout: 30000 })
-    await ensureAccordionOpen(ownerProfileView, '.customer-relations-section')
-    await expect(
-      ownerProfileView
-        .locator('.customer-relations-section .customer-profile-link-btn')
-        .filter({ hasText: fixture.customerManagementName }),
-    ).toBeVisible({ timeout: 30000 })
-    await expect(
-      ownerProfileView.getByRole('heading', { name: 'تاریخچه معاملات مشترک' }),
-    ).toHaveCount(0)
+    await expect(ownerProfileView.locator('.customer-relations-section')).toHaveCount(0)
+    await expect(ownerProfileView.locator('.customer-context-banner')).toHaveCount(0)
+    await expect(ownerProfileView.locator('.history-section-card')).toHaveCount(0)
+    await expect(ownerProfileView).not.toContainText(fixture.customerManagementName)
 
-    await loadPublicProfileTradeHistory(ownerProfileView, 'تاریخچه معاملات این کاربر')
-
-    const ownerHistoryCard = ownerProfileView
-      .locator('.history-list .mini-trade-card')
-      .filter({ hasText: '2 عدد' })
-      .first()
-    await expect(ownerHistoryCard).toContainText('خرید')
-    await expect(ownerHistoryCard).toContainText(fixture.customerManagementName)
-    await expect(ownerHistoryCard).toContainText('سطح 2')
-
-    await ownerProfileView
-      .locator('.customer-relations-section .customer-profile-link-btn')
-      .filter({ hasText: fixture.customerManagementName })
-      .click()
-    await page.waitForURL(new RegExp(`/users/${fixture.customerUserId}(?:\\?.*)?$`))
+    await page.goto(`/users/${fixture.customerUserId}`)
+    await expectIdOnlyPublicProfileUrl(page, fixture.customerUserId)
     const customerProfileView = page.locator('.public-profile-view:visible').last()
     await expect(customerProfileView.locator('.profile-content')).toBeVisible({ timeout: 30000 })
     await expect(
-      customerProfileView.getByRole('heading', { name: /مشتری تاریخچه‌ای/ }),
+      customerProfileView.getByRole('heading', { name: fixture.customerAccountName }),
     ).toBeVisible({ timeout: 30000 })
-
-    await loadPublicProfileTradeHistory(customerProfileView, 'تاریخچه معاملات این کاربر')
-
-    const customerHistoryCard = customerProfileView
-      .locator('.history-list .mini-trade-card')
-      .filter({ hasText: '5 عدد' })
-      .first()
-    await expect(customerHistoryCard).toContainText('خرید')
-    await expect(customerHistoryCard).toContainText(`سرگروه ${fixture.ownerAccountName}`)
-    await expect(customerHistoryCard).toContainText('سطح 2')
+    await expect(customerProfileView.locator('.customer-relations-section')).toHaveCount(0)
+    await expect(customerProfileView.locator('.customer-context-banner')).toHaveCount(0)
+    await expect(customerProfileView.locator('.history-section-card')).toHaveCount(0)
+    await expect(customerProfileView).not.toContainText(fixture.customerManagementName)
+    await expect(customerProfileView).not.toContainText(fixture.ownerAccountName)
   })
 
-  test('owner mutual history with third-party shows customer badge and management name', async ({
+  test('owner nonself public profiles omit mutual history and customer context', async ({
     page,
     request,
   }) => {
@@ -1292,26 +1256,19 @@ test.describe('customer owner lifecycle', () => {
     await setAuthTokens(page, fixture.owner)
 
     await page.goto(`/users/${fixture.outsiderUserId}`)
-    await expect(page.locator('.public-profile-view .profile-content')).toBeVisible({
+    await expectIdOnlyPublicProfileUrl(page, fixture.outsiderUserId)
+    const profileView = page.locator('.public-profile-view:visible').last()
+    await expect(profileView.locator('.profile-content')).toBeVisible({
       timeout: 30000,
     })
-
-    await loadPublicProfileTradeHistory(
-      page.locator('.public-profile-view:visible').last(),
-      'تاریخچه معاملات مشترک',
-    )
-
-    const tradeCard = page
-      .locator('.history-list .mini-trade-card')
-      .filter({ hasText: `${fixture.tradeQuantity} عدد` })
-      .first()
-    await expect(tradeCard).toContainText('رابطه:')
-    await expect(tradeCard).toContainText('مشتری')
-    await expect(tradeCard).toContainText(fixture.customerManagementName)
-    await expect(tradeCard).toContainText('سطح 2')
+    await expect(profileView.locator('.history-section-card')).toHaveCount(0)
+    await expect(profileView.locator('.customer-context-banner')).toHaveCount(0)
+    await expect(profileView.locator('.customer-relations-section')).toHaveCount(0)
+    await expect(profileView).not.toContainText(fixture.customerManagementName)
+    await expect(profileView).not.toContainText('رابطه:')
   })
 
-  test('third-party mutual history with owner hides customer context', async ({
+  test('third-party nonself public profiles omit mutual history and customer context', async ({
     page,
     request,
   }) => {
@@ -1323,23 +1280,15 @@ test.describe('customer owner lifecycle', () => {
     await setAuthTokens(page, fixture.outsider)
 
     await page.goto(`/users/${fixture.ownerUserId}`)
-    await expect(page.locator('.public-profile-view .profile-content')).toBeVisible({
+    await expectIdOnlyPublicProfileUrl(page, fixture.ownerUserId)
+    const profileView = page.locator('.public-profile-view:visible').last()
+    await expect(profileView.locator('.profile-content')).toBeVisible({
       timeout: 30000,
     })
-
-    await loadPublicProfileTradeHistory(
-      page.locator('.public-profile-view:visible').last(),
-      'تاریخچه معاملات مشترک',
-    )
-
-    const tradeCard = page
-      .locator('.history-list .mini-trade-card')
-      .filter({ hasText: `${fixture.tradeQuantity} عدد` })
-      .first()
-    await expect(tradeCard).toBeVisible({ timeout: 30000 })
-    await expect(tradeCard.locator('.customer-context-badge')).toHaveCount(0)
-    await expect(tradeCard.locator('.trade-customer-context-value')).toHaveCount(0)
-    await expect(tradeCard).not.toContainText(fixture.customerManagementName)
-    await expect(tradeCard).not.toContainText('رابطه:')
+    await expect(profileView.locator('.history-section-card')).toHaveCount(0)
+    await expect(profileView.locator('.customer-context-banner')).toHaveCount(0)
+    await expect(profileView.locator('.customer-relations-section')).toHaveCount(0)
+    await expect(profileView).not.toContainText(fixture.customerManagementName)
+    await expect(profileView).not.toContainText('رابطه:')
   })
 })

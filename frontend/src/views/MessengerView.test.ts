@@ -187,7 +187,6 @@ describe('MessengerView.vue', () => {
     expect(routerPushMock).toHaveBeenNthCalledWith(1, {
       name: 'public-profile',
       params: { id: '88' },
-      query: { account_name: 'owner-88' },
     })
 
     await wrapper.get('.emit-invalid-navigate').trigger('click')
@@ -197,7 +196,6 @@ describe('MessengerView.vue', () => {
     expect(routerPushMock).toHaveBeenNthCalledWith(2, {
       name: 'public-profile',
       params: { id: '77' },
-      query: undefined,
     })
 
     await wrapper.get('.emit-back').trigger('click')

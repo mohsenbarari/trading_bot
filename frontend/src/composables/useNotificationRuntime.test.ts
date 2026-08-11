@@ -332,6 +332,24 @@ describe('useNotificationRuntime', () => {
     wrapper.unmount()
   })
 
+  it('canonicalizes a query-bearing public-profile browser-click route before navigation', async () => {
+    const wrapper = mountRuntime()
+    await flushPromises()
+
+    window.dispatchEvent(
+      new CustomEvent(BROWSER_NOTIFICATION_CLICK_EVENT, {
+        detail: {
+          route: '/users/19?account_name=owner-19&highlight_accountant_relation_display_name=%D8%AD%D8%B3%D8%A7%D8%A8%D8%AF%D8%A7%D8%B1',
+        },
+      }),
+    )
+    await flushPromises()
+
+    expect(notificationRuntimeMocks.push).toHaveBeenCalledWith('/users/19')
+
+    wrapper.unmount()
+  })
+
   it('fails closed for unsafe, unmatched, and unexpectedly redirected browser-click routes', async () => {
     const wrapper = mountRuntime()
     await flushPromises()

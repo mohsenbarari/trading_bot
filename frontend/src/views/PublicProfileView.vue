@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import PublicProfile from '../components/PublicProfile.vue'
 import { AppPage, AppPageHeader } from '../components/ui'
@@ -31,15 +31,6 @@ function getViewerIdFromToken(token: string | null): number | null {
 
 const viewerUserId = ref<number | null>(getViewerIdFromToken(jwtToken.value))
 
-function getQueryString(value: unknown): string | null {
-  return typeof value === 'string' && value.trim() ? value.trim() : null
-}
-
-function getQueryPositiveInt(value: unknown): number | null {
-  const normalized = Number(value)
-  return Number.isInteger(normalized) && normalized > 0 ? normalized : null
-}
-
 const profileUser = computed(() => {
   const rawId = route.params.id
   const id = Number(rawId)
@@ -47,16 +38,31 @@ const profileUser = computed(() => {
     return null
   }
 
-  const accountName = typeof route.query.account_name === 'string' ? route.query.account_name : ''
   return {
     id,
-    account_name: accountName,
+    // The server is authoritative for the public profile name. Never use a
+    // query-string value as a fallback, because it can retain stale PII.
+    account_name: '',
   }
 })
 
-const highlightAccountantUserId = computed(() => getQueryPositiveInt(route.query.highlight_accountant_user_id))
-const highlightAccountantRelationDisplayName = computed(() => getQueryString(route.query.highlight_accountant_relation_display_name))
-const profileViewKey = computed(() => `${profileUser.value?.id || 'invalid-profile'}:${highlightAccountantUserId.value || 'no-highlight'}`)
+const profileViewKey = computed(() => String(profileUser.value?.id || 'invalid-profile'))
+const hasUnsafePublicProfileQuery = computed(() => (
+  profileUser.value !== null
+  && Object.keys(route.query).length > 0
+))
+
+function canonicalizeUnsafePublicProfileQuery() {
+  if (!hasUnsafePublicProfileQuery.value || !profileUser.value) return
+  void router.replace({
+    name: 'public-profile',
+    params: { id: String(profileUser.value.id) },
+  })
+}
+
+watch(hasUnsafePublicProfileQuery, (shouldCanonicalize) => {
+  if (shouldCanonicalize) canonicalizeUnsafePublicProfileQuery()
+}, { immediate: true })
 
 function handleNavigate(
   view: string,
@@ -65,9 +71,6 @@ function handleNavigate(
     userName?: string
     id?: number
     user_id?: number
-    account_name?: string
-    highlight_accountant_user_id?: number | null
-    highlight_accountant_relation_display_name?: string | null
   },
 ) {
   if (view === 'chat' && payload?.userId) {
@@ -96,13 +99,6 @@ function handleNavigate(
     router.push({
       name: 'public-profile',
       params: { id: String(profileId) },
-      query: {
-        ...(payload?.account_name ? { account_name: payload.account_name } : {}),
-        ...(payload?.highlight_accountant_user_id ? { highlight_accountant_user_id: String(payload.highlight_accountant_user_id) } : {}),
-        ...(payload?.highlight_accountant_relation_display_name
-          ? { highlight_accountant_relation_display_name: payload.highlight_accountant_relation_display_name }
-          : {}),
-      },
     })
     return
   }
@@ -111,9 +107,6 @@ function handleNavigate(
     router.push({
       name: 'admin-user-profile',
       params: { id: String(payload.userId) },
-      query: {
-        ...(payload.userName ? { account_name: payload.userName } : {}),
-      },
     })
     return
   }
@@ -152,7 +145,7 @@ onMounted(async () => {
       <AppPageHeader
         eyebrow="پروفایل عمومی"
         title="مشاهده پروفایل"
-        description="اطلاعات عمومی، ارتباط‌های پروژه و سابقه فعالیت کاربر را از این صفحه دنبال کنید."
+        description="اطلاعات عمومی و راه‌های ارتباطی مجاز این کاربر را از این صفحه دنبال کنید."
       />
       <PublicProfile
         :key="profileViewKey"
@@ -160,8 +153,6 @@ onMounted(async () => {
         :viewerUserId="viewerUserId"
         :apiBaseUrl="apiBaseUrl"
         :jwtToken="jwtToken"
-        :highlightAccountantUserId="highlightAccountantUserId"
-        :highlightAccountantRelationDisplayName="highlightAccountantRelationDisplayName"
         @navigate="handleNavigate"
       />
     </div>

@@ -2,6 +2,7 @@ import unittest
 from types import SimpleNamespace
 
 from api.routers.users import read_all_users
+from core.enums import UserRole
 
 
 def make_user(**overrides):
@@ -66,6 +67,19 @@ class UsersRouterReadAllTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("lower(users.mobile_number) like lower", stmt_text)
         self.assertIn("customer_relations", stmt_text)
         self.assertIn("accountant_relations", stmt_text)
+
+    async def test_middle_manager_list_includes_self_but_excludes_other_admins(self):
+        rows = [make_user(id=7, role=UserRole.MIDDLE_MANAGER)]
+        db = FakeDB(FakeExecuteResult(rows))
+        actor = SimpleNamespace(id=7, role=UserRole.MIDDLE_MANAGER)
+
+        result = await read_all_users(skip=0, limit=50, search=None, db=db, actor=actor)
+
+        self.assertEqual([item.id for item in result], [7])
+        statement = db.statements[0].compile(compile_kwargs={"literal_binds": True})
+        stmt_text = str(statement).lower()
+        self.assertIn("users.id = 7", stmt_text)
+        self.assertIn("users.role not in", stmt_text)
 
 
 if __name__ == "__main__":

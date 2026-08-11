@@ -127,6 +127,13 @@ function isPublicAuthPath(pathname: string): boolean {
   )
 }
 
+function canonicalPublicProfilePath(pathname: string): string | null | undefined {
+  if (pathname !== '/users' && !pathname.startsWith('/users/')) return undefined
+
+  const match = /^\/users\/([1-9]\d*)$/u.exec(pathname)
+  return match ? `/users/${match[1]}` : null
+}
+
 export function validateIntendedRoute(candidate: IntendedRouteCandidate): string | null {
   if (typeof candidate.name === 'string' && PUBLIC_AUTH_ROUTE_NAMES.has(candidate.name)) {
     return null
@@ -152,6 +159,9 @@ export function validateIntendedRoute(candidate: IntendedRouteCandidate): string
       if (isSensitiveQueryKey(key)) return null
       if (containsUnsafeNestedQueryValue(value)) return null
     }
+
+    const publicProfilePath = canonicalPublicProfilePath(decodedPath)
+    if (publicProfilePath !== undefined) return publicProfilePath
 
     return `${url.pathname}${url.search}`
   } catch {

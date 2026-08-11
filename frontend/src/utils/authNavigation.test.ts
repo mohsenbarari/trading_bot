@@ -70,6 +70,24 @@ describe('auth navigation policy', () => {
     expect(validateIntendedRoute({ fullPath })).toBeNull()
   })
 
+  it.each([
+    '/users/19?account_name=owner-19',
+    '/users/19?highlight_accountant_user_id=55&highlight_accountant_relation_display_name=%D8%AD%D8%B3%D8%A7%D8%A8%D8%AF%D8%A7%D8%B1',
+    '/users/19?source=notification',
+  ])('canonicalizes query-bearing public profiles before navigation: %s', (fullPath) => {
+    expect(validateIntendedRoute({ fullPath })).toBe('/users/19')
+  })
+
+  it.each([
+    '/users',
+    '/users/0',
+    '/users/not-a-number',
+    '/users/19/',
+    '/users/19?token=secret',
+  ])('rejects non-canonical public-profile routes: %s', (fullPath) => {
+    expect(validateIntendedRoute({ fullPath })).toBeNull()
+  })
+
   it('rejects forbidden recovery outcomes so a consumed return cannot loop', () => {
     expect(
       validateIntendedRoute({

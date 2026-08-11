@@ -17,8 +17,9 @@ import {
 } from 'lucide-vue-next';
 import { ActionContractError, useActionState } from '../composables/useActionState';
 import { useUserProfileTiming } from '../composables/useUserProfileTiming';
-import { isCachedMiddleManager } from '../utils/adminAccess';
-import { normalizeErrorPresentation } from '../utils/httpErrorPolicy';
+import { MIDDLE_MANAGER_ROLE, SUPER_ADMIN_ROLE } from '../utils/adminAccess';
+import { currentUserSummary } from '../utils/currentUser';
+import { isAppHttpError, normalizeErrorPresentation } from '../utils/httpErrorPolicy';
 import { formatIranDateTime } from '../utils/iranTime';
 import { routeRequest } from '../utils/routeRequest';
 import CustomerNameWithBadge from './CustomerNameWithBadge.vue';
@@ -62,6 +63,8 @@ const props = defineProps<{
   isAdminView?: boolean;
   apiBaseUrl?: string;
   jwtToken?: string | null;
+  viewerUserId?: number | null;
+  viewerRole?: string | null;
 }>();
 
 const emit = defineEmits(['navigate']);
@@ -118,6 +121,41 @@ const confirmationBusy = computed(() => {
   return key ? userActions.states.value[key]?.status === 'busy' : false;
 });
 
+function normalizedPositiveId(value: unknown): number | null {
+  const id = Number(value);
+  return Number.isInteger(id) && id > 0 ? id : null;
+}
+
+const effectiveViewerUserId = computed(() => (
+  normalizedPositiveId(props.viewerUserId) ?? normalizedPositiveId(currentUserSummary.value?.id)
+));
+const effectiveViewerRole = computed(() => {
+  const propRole = typeof props.viewerRole === 'string' && props.viewerRole.trim()
+    ? props.viewerRole
+    : null;
+  return propRole || currentUserSummary.value?.role || null;
+});
+const isAdminSelfTarget = computed(() => (
+  effectiveViewerUserId.value !== null
+  && effectiveViewerUserId.value === normalizedPositiveId(props.user?.id)
+));
+const isSuperAdminPeerTarget = computed(() => (
+  effectiveViewerRole.value === SUPER_ADMIN_ROLE
+  && props.user?.role === SUPER_ADMIN_ROLE
+));
+const isSensitiveAdminTargetReadOnly = computed(() => (
+  Boolean(props.isAdminView) && (isAdminSelfTarget.value || isSuperAdminPeerTarget.value)
+));
+const adminReadOnlyMessage = computed(() => {
+  if (isAdminSelfTarget.value) {
+    return 'تنظیمات حساس حساب خودتان فقط برای مشاهده است؛ تغییر آن از این مسیر مجاز نیست.';
+  }
+  return 'تنظیمات حساس مدیر ارشد هم‌سطح فقط برای مشاهده است؛ تغییر آن از این مسیر مجاز نیست.';
+});
+const canPerformSensitiveAdminActions = computed(() => (
+  Boolean(props.isAdminView) && !isSensitiveAdminTargetReadOnly.value
+));
+
 function actionKey(action: string) {
   return `user:${props.user?.id ?? 'unknown'}:${action}`;
 }
@@ -127,7 +165,27 @@ function isActionBusy(action: string) {
   return activeUserMutationKey.value === key || userActions.states.value[key]?.status === 'busy';
 }
 
+function errorHttpStatus(error: unknown): number | null {
+  if (isAppHttpError(error)) return error.status;
+  if (error instanceof ActionContractError) return error.response.status;
+
+  // Test/module boundaries can duplicate error constructors. Trust only the
+  // structured status, never the server detail, for this recovery wording.
+  if (!error || typeof error !== 'object') return null;
+  const directStatus = Number((error as { status?: unknown }).status);
+  if (Number.isInteger(directStatus) && directStatus >= 100 && directStatus <= 599) {
+    return directStatus;
+  }
+  const responseStatus = Number((error as { response?: { status?: unknown } }).response?.status);
+  return Number.isInteger(responseStatus) && responseStatus >= 100 && responseStatus <= 599
+    ? responseStatus
+    : null;
+}
+
 function errorMessage(error: unknown, fallback: string) {
+  if (errorHttpStatus(error) === 403) {
+    return 'اجازه تغییر این تنظیم حساس را ندارید. اطلاعات بدون تغییر باقی ماند.';
+  }
   if (error instanceof ActionContractError) return fallback;
   return normalizeErrorPresentation(error, {
     surface: 'admin',
@@ -216,6 +274,11 @@ async function runJsonAction(options: {
 }) {
   const key = actionKey(options.action);
   const context = { userId: props.user.id, action: options.action };
+  if (props.isAdminView && !canPerformSensitiveAdminActions.value) {
+    const error = new Error(adminReadOnlyMessage.value);
+    actionFeedback.value = { tone: 'error', message: adminReadOnlyMessage.value };
+    return { outcome: 'error' as const, key, context, error, response: null };
+  }
   if (activeUserMutationKey.value !== null) {
     return { outcome: 'duplicate' as const, key, context };
   }
@@ -307,7 +370,10 @@ const userDisplayName = computed(() => {
     : '';
   return customerName || props.user?.account_name || '---';
 });
-const canEditRole = !isCachedMiddleManager();
+const canEditRole = computed(() => (
+  effectiveViewerRole.value !== MIDDLE_MANAGER_ROLE
+  && canPerformSensitiveAdminActions.value
+));
 const hasFixedSingleSessionLimit = computed(() => (
   props.user?.is_accountant === true
   || props.user?.role === 'مدیر ارشد'
@@ -377,6 +443,18 @@ watch(
     accountStatus.value = value ?? 'active';
   }
 );
+
+watch(isSensitiveAdminTargetReadOnly, (readOnly) => {
+  if (!readOnly) return;
+  showSettings.value = false;
+  isEditingRole.value = false;
+  showBlockModal.value = false;
+  showLimitationsModal.value = false;
+  showBlockDateModal.value = false;
+  showLimitDateModal.value = false;
+  pendingConfirmation.value = null;
+  confirmationError.value = '';
+});
 
 function initDatePicker(currentValue: string) {
     pickerStep.value = 1;
@@ -558,7 +636,7 @@ const accountStatusDetailText = computed(() => {
 });
 
 async function saveRole() {
-  if (!canEditRole) return;
+  if (!canEditRole.value) return;
   if (!props.jwtToken || isUserMutationBusy.value) return;
   roleError.value = '';
   const result = await runUserUpdate({
@@ -576,7 +654,7 @@ async function saveRole() {
 }
 
 function openConfirmation(confirmation: Omit<PendingConfirmation, 'key'> & { action: string }) {
-  if (isUserMutationBusy.value) return;
+  if (!canPerformSensitiveAdminActions.value || isUserMutationBusy.value) return;
   const { action, ...pending } = confirmation;
   pendingConfirmation.value = { ...pending, key: actionKey(action) };
   confirmationError.value = '';
@@ -589,7 +667,7 @@ function closeConfirmation() {
 }
 
 function toggleAccountStatus() {
-  if (!props.jwtToken) return;
+  if (!props.jwtToken || !canPerformSensitiveAdminActions.value) return;
   const targetStatus = isAccountInactive.value ? 'active' : 'inactive';
   const verb = targetStatus === 'active' ? 'فعال' : 'غیرفعال';
   const message = targetStatus === 'inactive'
@@ -607,7 +685,7 @@ function toggleAccountStatus() {
 }
 
 async function blockUser(minutes: number) {
-  if (!props.jwtToken) return;
+  if (!props.jwtToken || !canPerformSensitiveAdminActions.value) return;
 
   if (minutes === -1) {
       customDate.value = ''; // Reset custom date
@@ -631,6 +709,7 @@ async function blockUser(minutes: number) {
 }
 
 async function blockUserCustom() {
+  if (!canPerformSensitiveAdminActions.value) return;
   if (!customDate.value) {
     blockError.value = 'لطفاً یک تاریخ معتبر انتخاب کنید.';
     return;
@@ -666,7 +745,7 @@ async function sendBlockRequest(restrictedUntil: string) {
 }
 
 async function saveLimitations() {
-  if (!props.jwtToken || isUserMutationBusy.value) return;
+  if (!props.jwtToken || !canPerformSensitiveAdminActions.value || isUserMutationBusy.value) return;
   limitationsError.value = '';
   let expireAt: string | null = null;
   if (limitDurationMinutes.value === -1) {
@@ -713,7 +792,7 @@ async function saveLimitations() {
 }
 
 function openLimitationsModal() {
-    if (isUserMutationBusy.value) return;
+    if (!canPerformSensitiveAdminActions.value || isUserMutationBusy.value) return;
     limitMaxTrades.value = props.user.max_daily_trades;
     limitMaxCommodities.value = props.user.max_active_commodities;
     limitMaxRequests.value = props.user.max_daily_requests;
@@ -730,7 +809,7 @@ function closeLimitationsModal() {
 }
 
 function openBlockModal() {
-  if (isUserMutationBusy.value) return;
+  if (!canPerformSensitiveAdminActions.value || isUserMutationBusy.value) return;
   blockError.value = '';
   showBlockModal.value = true;
 }
@@ -743,7 +822,7 @@ function closeBlockModal() {
 
 
 function unblockUser() {
-  if (!props.jwtToken) return;
+  if (!props.jwtToken || !canPerformSensitiveAdminActions.value) return;
   openConfirmation({
     kind: 'unblock',
     action: 'unblock',
@@ -762,7 +841,7 @@ const hasLimitations = computed(() => {
 });
 
 function removeLimitations() {
-  if (!props.jwtToken) return;
+  if (!props.jwtToken || !canPerformSensitiveAdminActions.value) return;
   openConfirmation({
     kind: 'remove-limitations',
     action: 'remove-limitations',
@@ -774,7 +853,7 @@ function removeLimitations() {
 }
 
 async function saveMaxSessions() {
-  if (isUserMutationBusy.value) return;
+  if (!canPerformSensitiveAdminActions.value || isUserMutationBusy.value) return;
   quotaFeedback.value = null;
   const requestedValue = hasFixedSingleSessionLimit.value ? 1 : editMaxSessions.value;
   editMaxSessions.value = requestedValue;
@@ -798,7 +877,7 @@ function handleMaxSessionsSelect(value: string) {
 }
 
 async function saveMaxAccountants() {
-  if (isUserMutationBusy.value) return;
+  if (!canPerformSensitiveAdminActions.value || isUserMutationBusy.value) return;
   const normalizedValue = Number.isFinite(editMaxAccountants.value)
     ? Math.max(0, Math.trunc(editMaxAccountants.value))
     : 0;
@@ -818,7 +897,7 @@ async function saveMaxAccountants() {
 }
 
 async function saveMaxCustomers() {
-  if (isUserMutationBusy.value) return;
+  if (!canPerformSensitiveAdminActions.value || isUserMutationBusy.value) return;
   const normalizedValue = Number.isFinite(editMaxCustomers.value)
     ? Math.max(0, Math.trunc(editMaxCustomers.value))
     : 0;
@@ -838,7 +917,7 @@ async function saveMaxCustomers() {
 }
 
 async function toggleBlockCapability() {
-  if (isUserMutationBusy.value) return;
+  if (!canPerformSensitiveAdminActions.value || isUserMutationBusy.value) return;
   const nextValue = !canBlockUsers.value;
   quotaFeedback.value = null;
   const result = await runUserUpdate({
@@ -856,7 +935,7 @@ async function toggleBlockCapability() {
 }
 
 async function saveMaxBlockedUsers() {
-  if (isUserMutationBusy.value) return;
+  if (!canPerformSensitiveAdminActions.value || isUserMutationBusy.value) return;
   const normalizedValue = Number.isFinite(editMaxBlockedUsers.value)
     ? Math.min(100, Math.max(1, Math.trunc(editMaxBlockedUsers.value)))
     : 10;
@@ -876,6 +955,7 @@ async function saveMaxBlockedUsers() {
 }
 
 function terminateAllSessions() {
+  if (!canPerformSensitiveAdminActions.value) return;
   openConfirmation({
     kind: 'terminate-sessions',
     action: 'terminate-sessions',
@@ -887,6 +967,7 @@ function terminateAllSessions() {
 }
 
 function handleAdminSessionClick() {
+  if (!canPerformSensitiveAdminActions.value) return;
   if (hasFixedSingleSessionLimit.value) {
     quotaFeedback.value = {
       tone: 'error',
@@ -896,7 +977,7 @@ function handleAdminSessionClick() {
 }
 
 function deleteUser() {
-  if (!props.jwtToken) return;
+  if (!props.jwtToken || !canPerformSensitiveAdminActions.value) return;
   openConfirmation({
     kind: 'delete-user',
     action: 'delete-user',
@@ -909,7 +990,7 @@ function deleteUser() {
 
 async function confirmPendingAction() {
   const confirmation = pendingConfirmation.value;
-  if (!confirmation || isUserMutationBusy.value) return;
+  if (!confirmation || !canPerformSensitiveAdminActions.value || isUserMutationBusy.value) return;
   confirmationError.value = '';
 
   if (confirmation.kind === 'account-status' && confirmation.targetStatus) {
@@ -1123,6 +1204,15 @@ async function confirmPendingAction() {
           </div>
 
       <p
+        v-if="isAdminView && isSensitiveAdminTargetReadOnly"
+        class="admin-sensitive-readonly"
+        role="status"
+        aria-live="polite"
+      >
+        {{ adminReadOnlyMessage }}
+      </p>
+
+      <p
         v-if="actionFeedback"
         class="user-action-feedback"
         :class="`user-action-feedback--${actionFeedback.tone}`"
@@ -1133,7 +1223,7 @@ async function confirmPendingAction() {
       </p>
 
       <!-- تنظیمات نشست -->
-      <div v-if="isAdminView" class="sessions-config-box">
+      <div v-if="isAdminView && canPerformSensitiveAdminActions" class="sessions-config-box">
         <div class="detail-item">
           <span class="label">حداکثر نشست همزمان</span>
           <div class="inline-edit" @click="handleAdminSessionClick">
@@ -1245,29 +1335,33 @@ async function confirmPendingAction() {
 
       <!-- منوی مدیریت (فقط ادمین) -->
       <template v-if="isAdminView">
-        <div v-if="!showSettings" class="main-actions profile-menu-card card-with-help">
+        <div v-if="!showSettings || !canPerformSensitiveAdminActions" class="main-actions profile-menu-card card-with-help">
             <HelpPopover
               floating
               button-test="user-profile-admin-menu-help"
               note-test="user-profile-admin-menu-help-note"
               label="راهنمای منوی مدیریت کاربر"
-              text="عملیات این بخش فقط روی همین کاربر اعمال می‌شود. حذف کاربر، نشست‌ها و دسترسی‌های فعال او را هم مدیریت می‌کند."
+              :text="canPerformSensitiveAdminActions
+                ? 'عملیات این بخش فقط روی همین کاربر اعمال می‌شود. حذف کاربر، نشست‌ها و دسترسی‌های فعال او را هم مدیریت می‌کند.'
+                : 'اطلاعات این حساب برای مشاهده نمایش داده می‌شود؛ عملیات حساس مدیریتی از این مسیر مجاز نیست.'"
             />
-            <button @click="showSettings = true" class="profile-control settings-btn">
-              <span class="profile-control__icon" aria-hidden="true"><Settings :size="18" /></span>
-              <span class="profile-control__label">تنظیمات کاربر</span>
-            </button>
-            <button @click="deleteUser" :disabled="isUserMutationBusy" class="profile-control delete-btn">
-              <span class="profile-control__icon" aria-hidden="true"><Trash2 :size="18" /></span>
-              <span class="profile-control__label">حذف کاربر</span>
-            </button>
+            <template v-if="canPerformSensitiveAdminActions">
+              <button @click="showSettings = true" class="profile-control settings-btn">
+                <span class="profile-control__icon" aria-hidden="true"><Settings :size="18" /></span>
+                <span class="profile-control__label">تنظیمات کاربر</span>
+              </button>
+              <button @click="deleteUser" :disabled="isUserMutationBusy" class="profile-control delete-btn">
+                <span class="profile-control__icon" aria-hidden="true"><Trash2 :size="18" /></span>
+                <span class="profile-control__label">حذف کاربر</span>
+              </button>
+            </template>
             <button @click="$emit('navigate', 'manage_users')" class="profile-control back-btn">
               <span class="profile-control__icon" aria-hidden="true"><ChevronLeft :size="18" /></span>
               <span class="profile-control__label">بازگشت به لیست</span>
             </button>
         </div>
 
-        <div v-else class="settings-menu profile-menu-card card-with-help">
+        <div v-else-if="canPerformSensitiveAdminActions" class="settings-menu profile-menu-card card-with-help">
           <HelpPopover
             floating
             button-test="user-profile-settings-menu-help"
@@ -1312,7 +1406,7 @@ async function confirmPendingAction() {
 
     <!-- مودال انتخاب مدت زمان مسدودیت -->
     <AppResponsiveDialog
-      :open="showBlockModal"
+      :open="showBlockModal && canPerformSensitiveAdminActions"
       title="مدت زمان مسدودیت"
       backdrop-class="modal-overlay"
       panel-class="modal-content"
@@ -1358,7 +1452,7 @@ async function confirmPendingAction() {
 
     <!-- مودال اعمال محدودیت -->
     <AppResponsiveDialog
-      :open="showLimitationsModal"
+      :open="showLimitationsModal && canPerformSensitiveAdminActions"
       title="اعمال محدودیت"
       backdrop-class="modal-overlay"
       panel-class="modal-content"
@@ -1435,7 +1529,7 @@ async function confirmPendingAction() {
 
     <!-- Moved Block Date Modal -->
     <AppResponsiveDialog
-      :open="showBlockDateModal"
+      :open="showBlockDateModal && canPerformSensitiveAdminActions"
       :title="pickerStep === 1 ? 'انتخاب تاریخ' : 'انتخاب ساعت'"
       backdrop-class="modal-overlay date-modal-overlay"
       panel-class="modal-content date-modal-content"
@@ -1477,7 +1571,7 @@ async function confirmPendingAction() {
 
     <!-- Moved Limit Date Modal -->
     <AppResponsiveDialog
-      :open="showLimitDateModal"
+      :open="showLimitDateModal && canPerformSensitiveAdminActions"
       :title="pickerStep === 1 ? 'انتخاب تاریخ' : 'انتخاب ساعت'"
       backdrop-class="modal-overlay date-modal-overlay"
       panel-class="modal-content date-modal-content"
@@ -1518,8 +1612,8 @@ async function confirmPendingAction() {
     </AppResponsiveDialog>
 
     <AppConfirmDialog
-      v-if="pendingConfirmation"
-      :open="Boolean(pendingConfirmation)"
+      v-if="pendingConfirmation && canPerformSensitiveAdminActions"
+      :open="Boolean(pendingConfirmation && canPerformSensitiveAdminActions)"
       :title="pendingConfirmation.title"
       :message="pendingConfirmation.message"
       :confirm-label="pendingConfirmation.confirmLabel"
@@ -2131,6 +2225,16 @@ input[type="number"].form-input::-webkit-inner-spin-button {
   border: 1px solid #bbf7d0;
   border-radius: 0.75rem;
 }
+.admin-sensitive-readonly {
+  margin: 0.75rem 0;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid #bfdbfe;
+  border-radius: 0.75rem;
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-size: 0.8rem;
+  line-height: 1.75;
+}
 .user-action-feedback {
   margin: 0.75rem 0;
   padding: 0.65rem 0.75rem;
@@ -2207,6 +2311,18 @@ input[type="number"].form-input::-webkit-inner-spin-button {
 }
 .terminate-sessions-row {
   align-items: flex-start;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .form-select,
+  .form-input,
+  .save-btn,
+  .cancel-btn,
+  .profile-control,
+  .duration-btn,
+  .custom-date-trigger {
+    transition: none;
+  }
 }
 </style><style scoped>
 .admin-lock-note {

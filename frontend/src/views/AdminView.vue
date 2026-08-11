@@ -719,7 +719,6 @@ function handleOpenPublicProfile(payload?: { id?: number; account_name?: string 
   void router.push({
     name: 'public-profile',
     params: { id: String(normalizedId) },
-    query: payload?.account_name ? { account_name: payload.account_name } : undefined,
   })
 }
 

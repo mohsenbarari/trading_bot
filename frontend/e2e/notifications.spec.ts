@@ -82,6 +82,23 @@ async function gotoWithWebKitRetry(page: Page, url: string) {
   }
 }
 
+async function expectIdOnlyPublicProfileUrl(page: Page, userId: number) {
+  await expect
+    .poll(() => {
+      const url = new URL(page.url())
+      return {
+        pathname: url.pathname,
+        search: url.search,
+        hash: url.hash,
+      }
+    }, { timeout: 30000 })
+    .toEqual({
+      pathname: `/users/${userId}`,
+      search: '',
+      hash: '',
+    })
+}
+
 function seedPrimarySession(label: string): SeededSessionFixture {
   return runPythonInApp<SeededSessionFixture>(`
 import asyncio
@@ -880,7 +897,7 @@ test.describe('Notification regressions', () => {
     await expect(headerStatus).not.toContainText(fixture.accountant.accountName)
   })
 
-  test('trade notifications opened from the notification center keep the owner-resolved route and highlight', async ({
+  test('trade notifications opened from the notification center use an ID-only owner profile route', async ({
     page,
     request,
   }) => {
@@ -904,10 +921,11 @@ test.describe('Notification regressions', () => {
 
     await notificationRow.click()
 
-    await expect(page).toHaveURL(new RegExp(`/users/${fixture.ownerUserId}`))
-    await expect(page).toHaveURL(new RegExp(`highlight_accountant_user_id=${fixture.accountantUserId}`))
-    await expect(page.getByText('نمایش پروفایل مالک اصلی')).toBeVisible()
-    await expect(page.locator('.accountant-resolution-banner')).toContainText(fixture.relationDisplayName)
-    await expect(page.locator('.public-profile-view').getByRole('heading', { name: fixture.ownerAccountName }).first()).toBeVisible()
+    await expectIdOnlyPublicProfileUrl(page, fixture.ownerUserId)
+    const profileView = page.locator('.public-profile-view')
+    await expect(profileView.locator('.accountant-resolution-banner')).toHaveCount(0)
+    await expect(profileView).not.toContainText('نمایش پروفایل مالک اصلی')
+    await expect(profileView).not.toContainText(fixture.relationDisplayName)
+    await expect(profileView.getByRole('heading', { name: fixture.ownerAccountName }).first()).toBeVisible()
   })
 })

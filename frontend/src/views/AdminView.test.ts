@@ -442,7 +442,6 @@ describe('AdminView.vue', () => {
     expect(adminViewMocks.routerPushMock).toHaveBeenCalledWith({
       name: 'public-profile',
       params: { id: '88' },
-      query: { account_name: 'owner-88' },
     })
   })
 

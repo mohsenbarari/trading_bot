@@ -639,7 +639,7 @@ class TradesRouterHelperTests(unittest.IsolatedAsyncioTestCase):
         profile_route = trades._build_trade_profile_route_from_payload('offer_user', event_payload)
         self.assertEqual(
             profile_route,
-            '/users/71?account_name=owner-71&highlight_accountant_user_id=11&highlight_accountant_relation_display_name=%D8%AD%D8%B3%D8%A7%D8%A8%D8%AF%D8%A7%D8%B1+%D9%81%D8%B1%D9%88%D8%B4',
+            '/users/71',
         )
 
         notification_payload = trades._build_trade_notification_extra_payload(

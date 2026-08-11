@@ -1,5 +1,4 @@
 import unittest
-from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -64,13 +63,14 @@ class UsersPublicProjectUsersTests(unittest.IsolatedAsyncioTestCase):
         accountant_lookup.assert_not_awaited()
         self.assertEqual([row.id for row in result], [8, 9])
         self.assertEqual(result[0].account_name, "acct8")
-        self.assertEqual(result[0].mobile_number, "09120000008")
+        self.assertEqual(result[0].mobile_number, "0912****008")
         self.assertEqual(result[0].model_dump(), {
             "id": 8,
             "account_name": "acct8",
-            "mobile_number": "09120000008",
-            "created_at": None,
+            "mobile_number": "0912****008",
         })
+        self.assertNotIn("09120000008", str(result[0].model_dump()))
+        self.assertNotIn("created_at", result[0].model_dump())
 
         stmt_text = str(db.stmts[0]).lower()
         self.assertIn("users.role in", stmt_text)
@@ -91,7 +91,6 @@ class UsersPublicProjectUsersTests(unittest.IsolatedAsyncioTestCase):
                     id=20,
                     account_name="owner20",
                     mobile_number="09120000020",
-                    created_at=datetime(2026, 5, 14, 8, 0, tzinfo=timezone.utc),
                 ),
                 make_user(id=9, account_name="manager9", role=UserRole.MIDDLE_MANAGER, mobile_number="09120000009"),
             ])
@@ -113,7 +112,9 @@ class UsersPublicProjectUsersTests(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertEqual([row.id for row in result], [20, 9])
-        self.assertEqual(result[0].created_at, datetime(2026, 5, 14, 8, 0, tzinfo=timezone.utc))
+        self.assertEqual(result[0].mobile_number, "0912****020")
+        self.assertNotIn("09120000020", str(result[0].model_dump()))
+        self.assertNotIn("created_at", result[0].model_dump())
 
     async def test_list_project_users_directory_denies_unrelated_requests(self):
         db = FakeDB([])

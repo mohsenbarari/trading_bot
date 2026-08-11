@@ -14,7 +14,6 @@ from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
 from types import SimpleNamespace
 from typing import List, Optional, Mapping
-from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query, BackgroundTasks, Request
 from fastapi.responses import FileResponse, JSONResponse
@@ -1422,27 +1421,6 @@ def _build_trade_profile_route_from_payload(
     profile_user_id = _coerce_trade_user_id(participant_payload.get(f"{field_prefix}_profile_user_id"))
     if profile_user_id is None:
         return None
-
-    query_params: dict[str, str] = {}
-    profile_account_name = participant_payload.get(f"{field_prefix}_profile_account_name")
-    if isinstance(profile_account_name, str) and profile_account_name.strip():
-        query_params["account_name"] = profile_account_name
-
-    highlight_accountant_user_id = _coerce_trade_user_id(
-        participant_payload.get(f"{field_prefix}_highlight_accountant_user_id")
-    )
-    if highlight_accountant_user_id is not None:
-        query_params["highlight_accountant_user_id"] = str(highlight_accountant_user_id)
-
-    highlight_relation_display_name = participant_payload.get(
-        f"{field_prefix}_highlight_accountant_relation_display_name"
-    )
-    if isinstance(highlight_relation_display_name, str) and highlight_relation_display_name.strip():
-        query_params["highlight_accountant_relation_display_name"] = highlight_relation_display_name
-
-    query_string = urlencode(query_params)
-    if query_string:
-        return f"/users/{profile_user_id}?{query_string}"
     return f"/users/{profile_user_id}"
 
 

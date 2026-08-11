@@ -6,11 +6,10 @@ from typing import List, Optional
 
 from models.accountant_relation import AccountantRelation, AccountantRelationStatus
 from core.db import get_db
-from core.services.accountant_relation_service import get_active_accountant_relation_for_accountant, list_active_accountants_for_owner
+from core.services.accountant_relation_service import get_active_accountant_relation_for_accountant
 from core.services.customer_relation_service import (
     build_allowed_customer_chat_targets,
     get_active_customer_relation_for_customer,
-    list_active_customers_for_owner,
 )
 from core.services.chat_role_badge_service import (
     CHAT_ROLE_ACCOUNTANT,
@@ -18,6 +17,7 @@ from core.services.chat_role_badge_service import (
     CHAT_ROLE_CUSTOMER,
     CHAT_ROLE_LABELS,
 )
+from core.log_redaction import mask_mobile
 from models.customer_relation import CustomerRelation, CustomerRelationStatus
 from models.user import User, UserRole
 from api.deps import get_current_user
@@ -37,78 +37,38 @@ PROJECT_DIRECTORY_ROLES = (
     UserRole.SUPER_ADMIN,
 )
 
-_LAST_SEEN_UNSET = object()
-
-
 def _serialize_public_user(
     user: User,
     *,
-    resolved_from_accountant_id: int | None = None,
-    chat_role_kind: str | None = None,
-    chat_role_label: str | None = None,
-    chat_accountant_owner_name: str | None = None,
-    chat_accountant_owner_label: str | None = None,
-    highlight_accountant_user_id: int | None = None,
-    highlight_accountant_relation_display_name: str | None = None,
-    accountant_relations: list[schemas.PublicAccountantRelationSummary] | None = None,
-    customer_owner_user_id: int | None = None,
-    customer_owner_account_name: str | None = None,
-    customer_management_name: str | None = None,
-    customer_tier=None,
-    customer_relations: list[schemas.PublicCustomerRelationSummary] | None = None,
-    last_seen_at=_LAST_SEEN_UNSET,
+    include_self_details: bool = False,
 ) -> schemas.UserPublicRead:
-    public_user = schemas.UserPublicRead.model_validate(user, from_attributes=True)
-    updates = {
-        "resolved_from_accountant_id": resolved_from_accountant_id,
-        "chat_role_kind": chat_role_kind,
-        "chat_role_label": chat_role_label,
-        "chat_accountant_owner_name": chat_accountant_owner_name,
-        "chat_accountant_owner_label": chat_accountant_owner_label,
-        "highlight_accountant_user_id": highlight_accountant_user_id,
-        "highlight_accountant_relation_display_name": highlight_accountant_relation_display_name,
-        "accountant_relations": accountant_relations or [],
-        "customer_owner_user_id": customer_owner_user_id,
-        "customer_owner_account_name": customer_owner_account_name,
-        "customer_management_name": customer_management_name,
-        "customer_tier": customer_tier,
-        "customer_relations": customer_relations or [],
+    """Return an explicit allow-list projection for the public-profile endpoint.
+
+    A public-profile request is not an admin-detail grant.  Only an exact self
+    request can include the user's full mobile number and address; all other
+    viewers receive the same minimal projection, regardless of role.
+    """
+    payload = {
+        "id": user.id,
+        "account_name": user.account_name,
+        "avatar_file_id": getattr(user, "avatar_file_id", None),
+        "mobile_number": (
+            user.mobile_number
+            if include_self_details
+            else mask_mobile(user.mobile_number)
+        ),
     }
-    if last_seen_at is not _LAST_SEEN_UNSET:
-        updates["last_seen_at"] = last_seen_at
-    return public_user.model_copy(update=updates)
-
-
-def _serialize_public_accountant_relation(
-    relation: AccountantRelation,
-) -> schemas.PublicAccountantRelationSummary | None:
-    accountant_user = getattr(relation, "accountant_user", None)
-    if accountant_user is None or accountant_user.is_deleted:
-        return None
-    return schemas.PublicAccountantRelationSummary(
-        accountant_user_id=accountant_user.id,
-        accountant_account_name=accountant_user.account_name,
-        relation_display_name=relation.relation_display_name,
-        duty_description=relation.duty_description,
-    )
-
-
-def _serialize_public_customer_relation(
-    relation: CustomerRelation,
-) -> schemas.PublicCustomerRelationSummary | None:
-    customer_user = getattr(relation, "customer_user", None)
-    if customer_user is None or customer_user.is_deleted:
-        return None
-    return schemas.PublicCustomerRelationSummary(
-        customer_user_id=customer_user.id,
-        customer_account_name=customer_user.account_name,
-        management_name=relation.management_name,
-        customer_tier=relation.customer_tier,
-    )
+    if include_self_details:
+        payload["address"] = getattr(user, "address", None)
+    return schemas.UserPublicRead(**payload)
 
 
 def _serialize_project_user_directory_entry(user: User) -> schemas.ProjectUserDirectoryEntry:
-    return schemas.ProjectUserDirectoryEntry.model_validate(user, from_attributes=True)
+    return schemas.ProjectUserDirectoryEntry(
+        id=user.id,
+        account_name=user.account_name,
+        mobile_number=mask_mobile(user.mobile_number),
+    )
 
 
 def _serialize_public_search_result(
@@ -144,10 +104,6 @@ def _serialize_public_search_result(
 
 def _is_super_admin(user: User) -> bool:
     return getattr(user, "role", None) == UserRole.SUPER_ADMIN
-
-
-def _can_view_owner_customer_list(current_user: User, owner_user_id: int) -> bool:
-    return current_user.id == owner_user_id or _is_super_admin(current_user)
 
 
 def _can_view_project_users_directory(
@@ -360,24 +316,6 @@ def _build_project_user_directory_stmt(
         )
 
     return stmt.order_by(User.created_at.desc().nulls_last(), User.id.desc()).offset(offset).limit(limit)
-
-
-async def _load_public_accountant_relation_summaries(
-    db: AsyncSession,
-    owner_user_id: int,
-) -> list[schemas.PublicAccountantRelationSummary]:
-    relations = await list_active_accountants_for_owner(db, owner_user_id)
-    serialized = [_serialize_public_accountant_relation(relation) for relation in relations]
-    return [relation for relation in serialized if relation is not None]
-
-
-async def _load_public_customer_relation_summaries(
-    db: AsyncSession,
-    owner_user_id: int,
-) -> list[schemas.PublicCustomerRelationSummary]:
-    relations = await list_active_customers_for_owner(db, owner_user_id)
-    serialized = [_serialize_public_customer_relation(relation) for relation in relations]
-    return [relation for relation in serialized if relation is not None]
 
 
 async def _resolve_public_search_rows(
@@ -622,7 +560,11 @@ async def list_project_users_directory(
     rows = (await db.execute(stmt)).scalars().all()
     return [_serialize_project_user_directory_entry(user) for user in rows]
 
-@router.get("/{user_id}", response_model=schemas.UserPublicRead)
+@router.get(
+    "/{user_id}",
+    response_model=schemas.UserPublicRead,
+    response_model_exclude_none=True,
+)
 async def read_public_user(
     user_id: int,
     db: AsyncSession = Depends(get_db),
@@ -665,22 +607,16 @@ async def read_public_user(
             allowed_target_ids=await get_customer_allowed_target_ids(),
         )
 
+    # The requested identity, not any later accountant->owner resolution,
+    # defines self visibility.  This prevents an owner opening an accountant
+    # target from receiving the owner's full self projection by accident.
+    if user_id == current_user.id:
+        return _serialize_public_user(current_user, include_self_details=True)
+
     relation = await get_active_accountant_relation_for_accountant(db, user_id)
     if relation and relation.owner_user and not relation.owner_user.is_deleted:
         await ensure_customer_viewer_can_access_target(user_id)
-        accountant_relations = await _load_public_accountant_relation_summaries(db, relation.owner_user.id)
-        customer_relations = []
-        if _can_view_owner_customer_list(current_user, relation.owner_user.id):
-            customer_relations = await _load_public_customer_relation_summaries(db, relation.owner_user.id)
-        return _serialize_public_user(
-            relation.owner_user,
-            resolved_from_accountant_id=user_id,
-            highlight_accountant_user_id=user_id,
-            highlight_accountant_relation_display_name=relation.relation_display_name,
-            accountant_relations=accountant_relations,
-            customer_relations=customer_relations,
-            last_seen_at=getattr(getattr(relation, "accountant_user", None), "last_seen_at", None),
-        )
+        return _serialize_public_user(relation.owner_user)
 
     customer_relation = await get_active_customer_relation_for_customer(db, user_id)
     if customer_relation:
@@ -699,21 +635,10 @@ async def read_public_user(
         ):
             raise HTTPException(status_code=404, detail="User not found")
 
-        owner_user = customer_relation.owner_user
-        return _serialize_public_user(
-            customer_user,
-            customer_owner_user_id=owner_user.id if owner_user and not owner_user.is_deleted else None,
-            customer_owner_account_name=owner_user.account_name if owner_user and not owner_user.is_deleted else None,
-            customer_management_name=customer_relation.management_name,
-            customer_tier=customer_relation.customer_tier,
-        )
+        return _serialize_public_user(customer_user)
 
     user = await db.get(User, user_id)
     if not user or user.is_deleted:
         raise HTTPException(status_code=404, detail="User not found")
     await ensure_customer_viewer_can_access_target(user_id)
-    accountant_relations = await _load_public_accountant_relation_summaries(db, user.id)
-    customer_relations = []
-    if _can_view_owner_customer_list(current_user, user.id):
-        customer_relations = await _load_public_customer_relation_summaries(db, user.id)
-    return _serialize_public_user(user, accountant_relations=accountant_relations, customer_relations=customer_relations)
+    return _serialize_public_user(user)

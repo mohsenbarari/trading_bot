@@ -86,6 +86,19 @@ def channel(recipient, channel_name: str):
 
 
 class TradeNotificationAudienceServiceTests(unittest.IsolatedAsyncioTestCase):
+    def test_profile_route_is_id_only_when_payload_contains_legacy_identity_metadata(self):
+        route = service._build_trade_profile_route_from_payload(
+            "offer_user",
+            {
+                "offer_user_profile_user_id": 71,
+                "offer_user_profile_account_name": "owner-71",
+                "offer_user_highlight_accountant_user_id": 11,
+                "offer_user_highlight_accountant_relation_display_name": "حسابدار فروش",
+            },
+        )
+
+        self.assertEqual(route, "/users/71")
+
     async def build_audience(
         self,
         trade,

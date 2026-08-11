@@ -222,7 +222,7 @@ function resolveNotificationRoute(notification: NormalizedAppNotification): stri
   try {
     const resolved = router.resolve(safePath)
     if (!resolved.matched.length || resolved.name === 'system-recovery') return null
-    return safePath
+    return validateIntendedRoute({ fullPath: resolved.fullPath })
   } catch {
     return null
   }

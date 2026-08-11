@@ -364,7 +364,6 @@ function openMemberProfile(member: { user_id: number; account_name: string }) {
   const target = {
     name: 'public-profile',
     params: { id: String(normalizedId) },
-    query: member.account_name ? { account_name: member.account_name } : undefined,
   } as const
 
   const currentFullPath = router.currentRoute.value.fullPath

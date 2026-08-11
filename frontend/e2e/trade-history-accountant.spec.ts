@@ -742,6 +742,23 @@ async function loginWithSeededSession(page: Page, session: SessionUser) {
   await primeAuthSession(page, session.accessToken, session.refreshToken)
 }
 
+async function expectIdOnlyPublicProfileUrl(page: Page, userId: number) {
+  await expect
+    .poll(() => {
+      const url = new URL(page.url())
+      return {
+        pathname: url.pathname,
+        search: url.search,
+        hash: url.hash,
+      }
+    }, { timeout: 30000 })
+    .toEqual({
+      pathname: `/users/${userId}`,
+      search: '',
+      hash: '',
+    })
+}
+
 async function waitForRealtimeConnection(page: Page, navigate: () => Promise<unknown>) {
   const realtimeConnected = page.waitForEvent('console', (message) => (
     message.type() === 'log' && message.text().includes('✅ WebSocket Connected')
@@ -770,25 +787,6 @@ async function setHistoryDatePicker(page: Page, triggerTestId: string, gregorian
     .first()
     .click()
   await expect(page.getByTestId(triggerTestId)).toHaveClass(/has-value/)
-}
-
-async function selectOptionByText(locator: Locator, optionText: string) {
-  await expect(locator).toBeVisible({ timeout: 30000 })
-  await expect
-    .poll(async () => locator.evaluate((select, text) => {
-      return Array.from((select as HTMLSelectElement).options).some((option) => option.textContent?.trim() === text)
-    }, optionText), { timeout: 30000 })
-    .toBe(true)
-
-  await locator.evaluate((select, text) => {
-    const element = select as HTMLSelectElement
-    const option = Array.from(element.options).find((entry) => entry.textContent?.trim() === text)
-    if (!option) {
-      throw new Error(`Could not find select option: ${text}`)
-    }
-    element.value = option.value
-    element.dispatchEvent(new Event('change', { bubbles: true }))
-  }, optionText)
 }
 
 async function loadPublicProfileTradeHistory(root: Locator, title: string) {
@@ -821,12 +819,13 @@ async function executeTrade(request: APIRequestContext, accessToken: string, off
 }
 
 test.describe('Trade history accountant context', () => {
-  test('own public profile history resolves accountant counterpart rows to the owner profile', async ({ page, request }) => {
+  test('own public profile history resolves accountant counterpart rows to an ID-only peer profile', async ({ page, request }) => {
     await waitForBackendReady(request)
     const fixture = seedTradeHistoryFixture('public_profile_history')
 
     await loginWithSeededSession(page, fixture.viewer)
-    await page.goto(`/users/${fixture.viewer.userId}?account_name=${encodeURIComponent(fixture.viewer.accountName)}`)
+    await page.goto(`/users/${fixture.viewer.userId}`)
+    await expectIdOnlyPublicProfileUrl(page, fixture.viewer.userId)
 
     const profileView = page.locator('.public-profile-view:visible').last()
     await expect(profileView).toContainText(fixture.viewer.accountName)
@@ -839,10 +838,11 @@ test.describe('Trade history accountant context', () => {
 
     await counterpartyLink.click()
 
-    await expect(page).toHaveURL(new RegExp(`/users/${fixture.counterpartyOwnerId}`))
-    await expect(page).toHaveURL(new RegExp(`highlight_accountant_user_id=${fixture.counterpartyAccountantId}`))
-    await expect(profileView).toContainText('نمایش پروفایل مالک اصلی')
-    await expect(profileView).toContainText(fixture.relationDisplayName)
+    await expectIdOnlyPublicProfileUrl(page, fixture.counterpartyOwnerId)
+    await expect(profileView.locator('.accountant-resolution-banner')).toHaveCount(0)
+    await expect(profileView).not.toContainText('نمایش پروفایل مالک اصلی')
+    await expect(profileView).not.toContainText(fixture.relationDisplayName)
+    await expect(profileView.locator('.history-section-card')).toHaveCount(0)
     await expect(profileView).toContainText(fixture.counterpartyOwnerAccountName)
   })
 
@@ -852,8 +852,9 @@ test.describe('Trade history accountant context', () => {
 
     await loginWithSeededSession(page, fixture.viewer)
     await waitForRealtimeConnection(page, () => (
-      page.goto(`/users/${fixture.viewer.userId}?account_name=${encodeURIComponent(fixture.viewer.accountName)}`)
+      page.goto(`/users/${fixture.viewer.userId}`)
     ))
+    await expectIdOnlyPublicProfileUrl(page, fixture.viewer.userId)
 
     await executeTrade(request, fixture.viewer.accessToken, fixture.offerId, fixture.offerQuantity)
 
@@ -899,64 +900,36 @@ test.describe('Trade history accountant context', () => {
 
     await counterpartyLink.click()
 
-    await expect(page).toHaveURL(new RegExp(`/users/${fixture.counterpartyOwnerId}`))
-    await expect(page).toHaveURL(new RegExp(`highlight_accountant_user_id=${fixture.counterpartyAccountantId}`))
-    await expect(profileView).toContainText('نمایش پروفایل مالک اصلی')
-    await expect(profileView).toContainText(fixture.relationDisplayName)
+    await expectIdOnlyPublicProfileUrl(page, fixture.counterpartyOwnerId)
+    await expect(profileView.locator('.accountant-resolution-banner')).toHaveCount(0)
+    await expect(profileView).not.toContainText('نمایش پروفایل مالک اصلی')
+    await expect(profileView).not.toContainText(fixture.relationDisplayName)
+    await expect(profileView.locator('.history-section-card')).toHaveCount(0)
     await expect(profileView).toContainText(fixture.counterpartyOwnerAccountName)
   })
 
-  test('mutual public-profile history applies date and commodity filters and reuses the same query state for Excel export', async ({ page, request }) => {
+  test('ordinary peer profiles canonicalize legacy URLs and omit mutual history', async ({ page, request }) => {
     await waitForBackendReady(request)
     const fixture = seedPublicProfileHistoryFilterFixture('mutual_filter_export')
+    const peerHistoryRequests: string[] = []
+
+    page.on('request', (request) => {
+      const url = new URL(request.url())
+      if (url.pathname.startsWith(`/api/trades/with/${fixture.targetUserId}`)) {
+        peerHistoryRequests.push(url.pathname)
+      }
+    })
 
     await loginWithSeededSession(page, fixture.viewer)
     await page.goto(`/users/${fixture.targetUserId}?account_name=${encodeURIComponent(fixture.targetAccountName)}`)
+    await expectIdOnlyPublicProfileUrl(page, fixture.targetUserId)
 
     const profileView = page.locator('.public-profile-view:visible').last()
     await expect(profileView).toContainText(fixture.targetAccountName)
-
-    await loadPublicProfileTradeHistory(profileView, 'تاریخچه معاملات مشترک')
-
-    await expect.poll(async () => page.locator('.mini-trade-card').count(), { timeout: 30000 }).toBe(3)
-    await expect(profileView).toContainText(`#${fixture.recentMutualTradeNumber}`)
-    await expect(profileView).toContainText(`#${fixture.mediumMutualTradeNumber}`)
-    await expect(profileView).toContainText(`#${fixture.oldMutualTradeNumber}`)
-
-    const commodityInput = page.locator('.history-filter-field').filter({ hasText: 'کالا' }).locator('select')
-
-    await setHistoryDatePicker(page, 'history-from-date', fixture.narrowFromDate)
-    await setHistoryDatePicker(page, 'history-to-date', fixture.narrowToDate)
-    await selectOptionByText(commodityInput, fixture.goldCommodityName)
-
-    const filteredResponsePromise = page.waitForResponse((response) => {
-      if (!response.ok()) return false
-      const url = new URL(response.url())
-      return url.pathname === `/api/trades/with/${fixture.targetUserId}` && url.searchParams.get('commodity_query') === fixture.goldCommodityName
-    })
-    await page.getByRole('button', { name: 'اعمال فیلتر' }).click()
-    const filteredResponse = await filteredResponsePromise
-    const filteredUrl = new URL(filteredResponse.url())
-    expect(filteredUrl.searchParams.get('from_date')).toBe(fixture.narrowFromDate)
-    expect(filteredUrl.searchParams.get('to_date')).toBe(fixture.narrowToDate)
-    expect(filteredUrl.searchParams.get('commodity_query')).toBe(fixture.goldCommodityName)
-
-    await expect.poll(async () => page.locator('.mini-trade-card').count(), { timeout: 30000 }).toBe(1)
-    await expect(profileView).toContainText(`#${fixture.recentMutualTradeNumber}`)
-    await expect(profileView).not.toContainText(`#${fixture.mediumMutualTradeNumber}`)
-    await expect(profileView).not.toContainText(`#${fixture.oldMutualTradeNumber}`)
-
-    const exportResponsePromise = page.waitForResponse((response) => {
-      if (!response.ok()) return false
-      const url = new URL(response.url())
-      return url.pathname === `/api/trades/with/${fixture.targetUserId}/export` && url.searchParams.get('format') === 'excel'
-    })
-    await page.getByRole('button', { name: 'خروجی Excel' }).click()
-    const exportResponse = await exportResponsePromise
-    const exportUrl = new URL(exportResponse.url())
-    expect(exportUrl.searchParams.get('from_date')).toBe(fixture.narrowFromDate)
-    expect(exportUrl.searchParams.get('to_date')).toBe(fixture.narrowToDate)
-    expect(exportUrl.searchParams.get('commodity_query')).toBe(fixture.goldCommodityName)
+    await expect(profileView).toContainText('آدرس، وضعیت حضور، عضویت و جزئیات معاملات این کاربر در پروفایل عمومی نمایش داده نمی‌شود.')
+    await expect(profileView.locator('.history-section-card')).toHaveCount(0)
+    await expect(profileView.locator('.mini-trade-card')).toHaveCount(0)
+    expect(peerHistoryRequests).toEqual([])
   })
 
   test('self public-profile history preset and custom date ranges drive the same export query state', async ({ page, request }) => {
@@ -964,7 +937,8 @@ test.describe('Trade history accountant context', () => {
     const fixture = seedPublicProfileHistoryFilterFixture('self_preset_export')
 
     await loginWithSeededSession(page, fixture.viewer)
-    await page.goto(`/users/${fixture.viewer.userId}?account_name=${encodeURIComponent(fixture.viewer.accountName)}`)
+    await page.goto(`/users/${fixture.viewer.userId}`)
+    await expectIdOnlyPublicProfileUrl(page, fixture.viewer.userId)
 
     const profileView = page.locator('.public-profile-view:visible').last()
     await expect(profileView).toContainText(fixture.viewer.accountName)
@@ -1022,33 +996,30 @@ test.describe('Trade history accountant context', () => {
     expect(customExportUrl.searchParams.get('to_date')).toBe(fixture.wideToDate)
   })
 
-  test('public profile presence renders online and last-seen states from the shared presence contract', async ({ page, request }) => {
+  test('ordinary peer profiles omit online and last-seen presence', async ({ page, request }) => {
     test.setTimeout(90000)
     await waitForBackendReady(request)
     const fixture = seedPublicProfilePresenceFixture('presence_rendering')
 
     await loginWithSeededSession(page, fixture.viewer)
 
-    await page.goto(`/users/${fixture.onlineTargetUserId}?account_name=${encodeURIComponent(fixture.onlineTargetAccountName)}`, {
+    await page.goto(`/users/${fixture.onlineTargetUserId}`, {
       waitUntil: 'domcontentloaded',
     })
+    await expectIdOnlyPublicProfileUrl(page, fixture.onlineTargetUserId)
     const onlineProfileView = page.locator('.public-profile-view:visible').last()
     await expect(onlineProfileView).toContainText(fixture.onlineTargetAccountName, { timeout: 30000 })
 
-    const onlinePresence = onlineProfileView.locator('.profile-presence-status')
-    await expect(onlinePresence).toHaveText('آنلاین')
-    await expect(onlinePresence).toHaveClass(/online/)
+    await expect(onlineProfileView.locator('.profile-presence-status')).toHaveCount(0)
 
-    await page.goto(`/users/${fixture.offlineTargetUserId}?account_name=${encodeURIComponent(fixture.offlineTargetAccountName)}`, {
+    await page.goto(`/users/${fixture.offlineTargetUserId}`, {
       waitUntil: 'domcontentloaded',
     })
+    await expectIdOnlyPublicProfileUrl(page, fixture.offlineTargetUserId)
     const offlineProfileView = page.locator('.public-profile-view:visible').last()
     await expect(offlineProfileView).toContainText(fixture.offlineTargetAccountName, { timeout: 30000 })
 
-    const offlinePresence = offlineProfileView.locator('.profile-presence-status')
-    await expect(offlinePresence).toContainText('آخرین بازدید')
-    await expect(offlinePresence).toContainText('دقیقه پیش')
-    await expect(offlinePresence).not.toHaveClass(/online/)
+    await expect(offlineProfileView.locator('.profile-presence-status')).toHaveCount(0)
   })
 
   test('blocking a user from public profile keeps market trade execution errors generic', async ({ page, request }) => {
@@ -1056,7 +1027,8 @@ test.describe('Trade history accountant context', () => {
     const fixture = seedPublicProfileBlockedMarketFixture('blocked_market_generic')
 
     await loginWithSeededSession(page, fixture.viewer)
-    await page.goto(`/users/${fixture.targetUserId}?account_name=${encodeURIComponent(fixture.targetAccountName)}`)
+    await page.goto(`/users/${fixture.targetUserId}`)
+    await expectIdOnlyPublicProfileUrl(page, fixture.targetUserId)
     await expect(page.locator('.public-profile-view')).toContainText(fixture.targetAccountName)
 
     const blockButton = page.getByRole('button', { name: /بلاک کاربر/ }).first()

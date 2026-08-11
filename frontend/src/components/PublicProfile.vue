@@ -34,7 +34,7 @@ import {
   AppStatusBadge,
   AppTextarea,
 } from './ui';
-import { isAdminRoleValue, readCachedCurrentUserRole, SUPER_ADMIN_ROLE } from '../utils/adminAccess';
+import { isAdminRoleValue, readCachedCurrentUserRole } from '../utils/adminAccess';
 import { resolveTradeParticipantProfileTarget } from '../utils/accountantChatIdentity';
 import { apiFetch } from '../utils/auth';
 import { buildChatFileUrl, getAvatarInitial, uploadAvatarImage } from '../utils/chatFiles';
@@ -49,8 +49,6 @@ const props = defineProps<{
   viewerUserId?: number | null;
   apiBaseUrl: string;
   jwtToken: string | null;
-  highlightAccountantUserId?: number | null;
-  highlightAccountantRelationDisplayName?: string | null;
   initialOwnerWorkspace?: 'customers' | 'accountants' | null;
   hideBackButton?: boolean;
 }>();
@@ -61,14 +59,11 @@ interface PublicUser {
   id: number;
   account_name: string;
   avatar_file_id?: string | null;
-  mobile_number: string;
-  address: string;
+  mobile_number?: string | null;
+  address?: string | null;
   last_seen_at?: string | null;
-  created_at_jalali: string;
-  trades_count: number;
-  resolved_from_accountant_id?: number | null;
-  highlight_accountant_user_id?: number | null;
-  highlight_accountant_relation_display_name?: string | null;
+  created_at_jalali?: string | null;
+  trades_count?: number | null;
   accountant_relations?: PublicAccountantRelationSummary[];
   customer_owner_user_id?: number | null;
   customer_owner_account_name?: string | null;
@@ -94,7 +89,7 @@ interface PublicCustomerRelationSummary {
 interface ProjectUserDirectoryEntry {
   id: number;
   account_name: string;
-  mobile_number: string;
+  mobile_number?: string | null;
 }
 
 const PROJECT_USERS_PAGE_SIZE = 25;
@@ -107,22 +102,14 @@ interface MutualTradePreview {
   offer_user_name?: string;
   offer_user_profile_user_id?: number | null;
   offer_user_profile_account_name?: string | null;
-  offer_user_resolved_from_accountant_id?: number | null;
-  offer_user_highlight_accountant_user_id?: number | null;
-  offer_user_highlight_accountant_relation_display_name?: string | null;
   responder_user_id: number;
   responder_user_name?: string;
   responder_user_profile_user_id?: number | null;
   responder_user_profile_account_name?: string | null;
-  responder_user_resolved_from_accountant_id?: number | null;
-  responder_user_highlight_accountant_user_id?: number | null;
-  responder_user_highlight_accountant_relation_display_name?: string | null;
   counterparty_user_id?: number | null;
   counterparty_name?: string | null;
   counterparty_profile_user_id?: number | null;
   counterparty_profile_account_name?: string | null;
-  counterparty_highlight_accountant_user_id?: number | null;
-  counterparty_highlight_accountant_relation_display_name?: string | null;
   customer_context_visible?: boolean;
   customer_context_user_id?: number | null;
   customer_context_management_name?: string | null;
@@ -218,12 +205,71 @@ const lastLoadedProjectUsersQuery = ref('');
 const projectUsersOffset = ref(0);
 const projectUsersHasMore = ref(false);
 const viewerRole = computed(() => readCachedCurrentUserRole());
+const requestedProfileUserId = computed(() => {
+  const profileUserId = Number(props.user?.id);
+  return Number.isInteger(profileUserId) && profileUserId > 0 ? profileUserId : null;
+});
+const isRequestedProfileOwnedByViewer = computed(() => {
+  const profileUserId = requestedProfileUserId.value;
+  const viewerUserId = Number(props.viewerUserId);
+  return profileUserId !== null
+    && Number.isInteger(viewerUserId)
+    && viewerUserId > 0
+    && profileUserId === viewerUserId;
+});
+
+function asTrimmedString(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function asSafeMaskedMobile(value: unknown): string | null {
+  const mobile = asTrimmedString(value);
+  if (!mobile) return null;
+
+  // Never accept a fully readable number as a "masked" value. The server may
+  // use ASCII or Persian digits, but a valid public projection must contain
+  // enough masking characters to make the disclosure non-reversible here.
+  const isAllowedShape = /^[0-9۰-۹٠-٩+()\-\s*＊•●xX]+$/.test(mobile);
+  const maskingCharacters = mobile.match(/[＊*•●xX]/g)?.length || 0;
+  const digitCharacters = mobile.match(/[0-9۰-۹٠-٩]/g)?.length || 0;
+  return isAllowedShape && maskingCharacters >= 2 && digitCharacters >= 2
+    ? mobile
+    : null;
+}
+
+function normalizePublicProfile(payload: PublicUser, isRequestedSelfProfile: boolean): PublicUser {
+  const id = Number(payload.id);
+  const commonProfile: PublicUser = {
+    id,
+    account_name: asTrimmedString(payload.account_name) || '',
+    avatar_file_id: asTrimmedString(payload.avatar_file_id),
+  };
+
+  // Public-profile projections are intentionally minimal for everybody except
+  // the account owner. This defensive normalization keeps an older or
+  // over-broad response from becoming a client-side fallback for PII.
+  if (!isRequestedSelfProfile) {
+    return {
+      ...commonProfile,
+      mobile_number: asSafeMaskedMobile(payload.mobile_number),
+    };
+  }
+
+  return {
+    ...payload,
+    ...commonProfile,
+    mobile_number: asTrimmedString(payload.mobile_number),
+    address: asTrimmedString(payload.address),
+    last_seen_at: asTrimmedString(payload.last_seen_at),
+    created_at_jalali: asTrimmedString(payload.created_at_jalali),
+    trades_count: Number.isFinite(Number(payload.trades_count)) ? Number(payload.trades_count) : null,
+  };
+}
+
 const isOwnProfile = computed(() => {
-  if (!profileData.value) return false;
-  return Number(profileData.value.id) === Number(props.viewerUserId);
+  return profileData.value !== null && isRequestedProfileOwnedByViewer.value;
 });
 const viewerIsAdmin = computed(() => isAdminRoleValue(viewerRole.value));
-const viewerIsSuperAdmin = computed(() => viewerRole.value === SUPER_ADMIN_ROLE);
 const showVisitorSections = computed(() => !isOwnProfile.value);
 const showOwnerSections = computed(() => isOwnProfile.value);
 const showAdminSections = computed(() => !isOwnProfile.value && viewerIsAdmin.value);
@@ -233,42 +279,37 @@ const viewerIsCustomer = computed(() => {
 const viewerIsAccountant = computed(() => currentUserSummary.value?.is_accountant === true);
 const profileAvatarUrl = computed(() => buildChatFileUrl(profileData.value?.avatar_file_id ?? null, props.apiBaseUrl));
 const profileDisplayName = computed(() => (
-  profileData.value?.customer_management_name?.trim()
+  (isOwnProfile.value && asTrimmedString(profileData.value?.customer_management_name))
   || profileData.value?.account_name
   || ''
 ));
-const profilePresenceStatus = computed(() => formatLastSeenStatus(profileData.value?.last_seen_at, { emptyText: null }));
-const profileIsOnline = computed(() => isPresenceOnline(profileData.value?.last_seen_at));
+const profilePresenceStatus = computed(() => (
+  isOwnProfile.value
+    ? formatLastSeenStatus(profileData.value?.last_seen_at, { emptyText: null })
+    : null
+));
+const profileIsOnline = computed(() => (
+  isOwnProfile.value && isPresenceOnline(profileData.value?.last_seen_at)
+));
+const profileMobileNumber = computed(() => {
+  if (!isOwnProfile.value) return asSafeMaskedMobile(profileData.value?.mobile_number) || '••••••••';
+  return asTrimmedString(profileData.value?.mobile_number) || 'ثبت نشده';
+});
+function projectUserMobileLabel(user: ProjectUserDirectoryEntry) {
+  return asSafeMaskedMobile(user.mobile_number) || '••••••••';
+}
 const accountantRelations = computed<PublicAccountantRelationSummary[]>(() => {
-  return Array.isArray(profileData.value?.accountant_relations) ? profileData.value!.accountant_relations! : [];
+  return isOwnProfile.value && Array.isArray(profileData.value?.accountant_relations)
+    ? profileData.value!.accountant_relations!
+    : [];
 });
 const customerRelations = computed<PublicCustomerRelationSummary[]>(() => {
-  return Array.isArray(profileData.value?.customer_relations) ? profileData.value!.customer_relations! : [];
-});
-const highlightedAccountantUserId = computed(() => {
-  const profileValue = Number(profileData.value?.highlight_accountant_user_id);
-  if (Number.isInteger(profileValue) && profileValue > 0) {
-    return profileValue;
-  }
-
-  const propValue = Number(props.highlightAccountantUserId);
-  return Number.isInteger(propValue) && propValue > 0 ? propValue : null;
-});
-const resolvedAccountantContext = computed(() => {
-  if (!highlightedAccountantUserId.value && !profileData.value?.resolved_from_accountant_id) {
-    return null;
-  }
-
-  const relationDisplayName = profileData.value?.highlight_accountant_relation_display_name?.trim()
-    || props.highlightAccountantRelationDisplayName?.trim()
-    || null;
-  return {
-    relationDisplayName,
-    accountantUserId: highlightedAccountantUserId.value,
-  };
+  return isOwnProfile.value && Array.isArray(profileData.value?.customer_relations)
+    ? profileData.value!.customer_relations!
+    : [];
 });
 const customerProfileContext = computed(() => {
-  if (!profileData.value?.customer_management_name || !profileData.value?.customer_tier) {
+  if (!isOwnProfile.value || !profileData.value?.customer_management_name || !profileData.value?.customer_tier) {
     return null;
   }
 
@@ -279,7 +320,7 @@ const customerProfileContext = computed(() => {
   };
 });
 const showCustomerTierInProfileBanner = computed(() => {
-  return customerProfileContext.value !== null && !isOwnProfile.value && !viewerIsCustomer.value;
+  return false;
 });
 const shouldHideCustomerTradeRelationshipDetails = computed(() => {
   return viewerIsCustomer.value || (isOwnProfile.value && customerProfileContext.value !== null);
@@ -291,10 +332,7 @@ const tradeHistoryHelpText = computed(() => {
   return 'در تاریخچه خودتان می‌توانید طرف دیگر معامله را از میان همکاران پروژه انتخاب کنید و کالا را از فهرست کالاهای ثبت‌شده محدود کنید. خروجی‌ها همین فیلترها را رعایت می‌کنند.';
 });
 const showTargetTradeHistory = computed(() => {
-  if (!profileData.value) return false;
-  if (isOwnProfile.value) return true;
-  if (viewerIsSuperAdmin.value) return true;
-  return customerProfileContext.value !== null;
+  return isOwnProfile.value;
 });
 const tradeHistoryPerspectiveUserId = computed(() => {
   if (showTargetTradeHistory.value) {
@@ -440,27 +478,12 @@ const targetCustomerHistoryContext = computed(() => {
   };
 });
 const showCustomerListSection = computed(() => {
-  return !isOwnProfile.value && customerProfileContext.value === null && customerRelations.value.length > 0 && viewerIsSuperAdmin.value;
-});
-const viewerIsDisplayedOwnerAccountant = computed(() => {
-  const viewerUserId = Number(props.viewerUserId);
-  if (!Number.isInteger(viewerUserId) || viewerUserId <= 0) {
-    return false;
-  }
-
-  const resolvedFromAccountantId = Number(profileData.value?.resolved_from_accountant_id);
-  if (Number.isInteger(resolvedFromAccountantId) && resolvedFromAccountantId === viewerUserId) {
-    return true;
-  }
-
-  return accountantRelations.value.some(
-    (relation) => Number(relation.accountant_user_id) === viewerUserId,
-  );
+  return false;
 });
 const showProjectUsersSection = computed(() => {
   if (!profileData.value) return false;
   if (customerProfileContext.value !== null) return false;
-  return isOwnProfile.value || viewerIsDisplayedOwnerAccountant.value;
+  return isOwnProfile.value;
 });
 const hasLoadedProjectUsersOnce = computed(() => projectUsersLoaded.value || projectUsersLoading.value || projectUsersLoadingMore.value || Boolean(projectUsersError.value));
 const showPublicBlockAction = computed(() => {
@@ -494,20 +517,21 @@ const publicBlockActionLabel = computed(() => {
   return 'بلاک / رفع بلاک';
 });
 const sharedStatCards = computed<ProfileStatCard[]>(() => {
-  if (!profileData.value) return [];
+  if (!isOwnProfile.value || !profileData.value) return [];
 
-  return [
-    {
-      key: 'member-since',
-      label: 'عضویت',
-      value: profileData.value.created_at_jalali,
-    },
-    {
+  const cards: ProfileStatCard[] = [];
+  const membershipDate = asTrimmedString(profileData.value.created_at_jalali);
+  if (membershipDate) {
+    cards.push({ key: 'member-since', label: 'عضویت', value: membershipDate });
+  }
+  if (Number.isFinite(Number(profileData.value.trades_count))) {
+    cards.push({
       key: 'trade-count',
       label: 'تعداد معاملات',
-      value: Number(profileData.value.trades_count || 0).toLocaleString('fa-IR'),
-    },
-  ];
+      value: Number(profileData.value.trades_count).toLocaleString('fa-IR'),
+    });
+  }
+  return cards;
 });
 const visitorActionCards = computed<ProfileActionCard[]>(() => {
   if (!showVisitorSections.value) return [];
@@ -599,8 +623,10 @@ async function loadProfile() {
     if (!payload || typeof payload !== 'object' || Array.isArray(payload) || !Number.isInteger(Number(payload.id))) {
       throw new Error('پاسخ پروفایل معتبر نیست.');
     }
-    profileData.value = payload;
-    addressDraft.value = profileData.value?.address || '';
+    // The requested route target, rather than a potentially resolved owner id
+    // in the payload, defines whether this is the viewer's own profile.
+    profileData.value = normalizePublicProfile(payload, isRequestedProfileOwnedByViewer.value);
+    addressDraft.value = isOwnProfile.value ? profileData.value.address || '' : '';
     if (showPublicBlockAction.value) {
       await refreshPublicBlockUiState();
     } else {
@@ -608,9 +634,6 @@ async function loadProfile() {
       publicBlockStatus.value = null;
     }
     applyInitialOwnerWorkspace();
-    if (showProjectUsersSection.value) {
-      await loadProjectUsersDirectory(true);
-    }
   } catch (e: any) {
     if (requestRevision !== profileRequestRevision) return;
     error.value = e.message || 'خطا در برقراری ارتباط';
@@ -648,6 +671,15 @@ watch(
 watch(
   () => profileData.value?.id,
   () => applyInitialOwnerWorkspace()
+);
+
+watch(
+  () => props.viewerUserId,
+  (nextViewerUserId, previousViewerUserId) => {
+    if (Number(nextViewerUserId) !== Number(previousViewerUserId)) {
+      void loadProfile();
+    }
+  },
 );
 
 function parseApiError(payload: unknown, fallback: string) {
@@ -773,7 +805,7 @@ function normalizeCommodityOptions(payload: unknown): CommodityFilterOption[] {
 }
 
 async function loadHistoryCommodityOptions() {
-  if (!props.jwtToken || historyCommodityOptionsLoading.value || historyCommodityOptionsLoaded.value) {
+  if (!isOwnProfile.value || !props.jwtToken || historyCommodityOptionsLoading.value || historyCommodityOptionsLoaded.value) {
     return;
   }
 
@@ -798,7 +830,20 @@ async function loadHistoryCommodityOptions() {
 }
 
 function formatProjectUserLabel(user: ProjectUserDirectoryEntry) {
-  return user.mobile_number ? `${user.account_name} - ${user.mobile_number}` : user.account_name;
+  return user.account_name;
+}
+
+function normalizeProjectUserDirectoryEntry(value: unknown): ProjectUserDirectoryEntry | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const candidate = value as Record<string, unknown>;
+  const id = Number(candidate.id);
+  const accountName = asTrimmedString(candidate.account_name);
+  if (!Number.isInteger(id) || id <= 0 || !accountName) return null;
+  return {
+    id,
+    account_name: accountName,
+    mobile_number: asSafeMaskedMobile(candidate.mobile_number),
+  };
 }
 
 async function loadHistoryCounterpartyOptions() {
@@ -835,8 +880,9 @@ async function loadHistoryCounterpartyOptions() {
       throw new Error('پاسخ اعضای پروژه معتبر نیست.');
     }
 
-    historyCounterpartyOptions.value = (payload as ProjectUserDirectoryEntry[])
-      .filter((user) => Number(user.id) !== targetProfileUserId);
+    historyCounterpartyOptions.value = payload
+      .map(normalizeProjectUserDirectoryEntry)
+      .filter((user): user is ProjectUserDirectoryEntry => user !== null && Number(user.id) !== targetProfileUserId);
     historyCounterpartyOptionsLoaded.value = true;
   } catch (e: any) {
     historyCounterpartyError.value = e?.message || 'خطا در دریافت اعضای پروژه';
@@ -895,7 +941,7 @@ function resolveDownloadFilename(headerValue: string | null, fallback: string) {
 }
 
 async function downloadHistoryExport(format: 'excel' | 'pdf') {
-  if (!profileData.value || !props.jwtToken || historyExportingFormat.value) return;
+  if (!isOwnProfile.value || !profileData.value || !props.jwtToken || historyExportingFormat.value) return;
 
   const validationError = validateHistoryFilters();
   if (validationError) {
@@ -972,7 +1018,7 @@ function cancelAddressEdit() {
 }
 
 async function saveOwnAddress() {
-  if (!props.jwtToken || !profileData.value || addressBusy.value) return;
+  if (!isOwnProfile.value || !props.jwtToken || !profileData.value || addressBusy.value) return;
 
   const normalizedAddress = addressDraft.value.trim();
   if (normalizedAddress.length < 5) {
@@ -1041,7 +1087,7 @@ function mergeTradeHistoryRows(current: MutualTradePreview[], incoming: MutualTr
 }
 
 async function loadMutualTrades(force = false, append = false) {
-  if (!profileData.value) return;
+  if (!isOwnProfile.value || !profileData.value) return;
   if (append && (isHistoryLoading.value || isHistoryLoadingMore.value)) return;
   if (!append && !force && (isHistoryLoading.value || isHistoryLoadingMore.value)) return;
 
@@ -1193,8 +1239,11 @@ async function loadProjectUsersDirectory(force = false) {
       throw new Error('پاسخ فهرست کاربران پروژه معتبر نیست.');
     }
 
-    const rawRows = payload as ProjectUserDirectoryEntry[];
-    const nextRows = rawRows.filter((user) => Number(user.id) !== targetProfileUserId);
+    const rawRows = payload as unknown[];
+    const normalizedRows = rawRows
+      .map(normalizeProjectUserDirectoryEntry)
+      .filter((user): user is ProjectUserDirectoryEntry => user !== null);
+    const nextRows = normalizedRows.filter((user) => Number(user.id) !== targetProfileUserId);
     if (isLoadMore) {
       const existingIds = new Set(projectUsers.value.map((user) => user.id));
       projectUsers.value = [
@@ -1206,8 +1255,8 @@ async function loadProjectUsersDirectory(force = false) {
     }
     projectUsersLoaded.value = true;
     lastLoadedProjectUsersQuery.value = normalizedQuery;
-    projectUsersHasMore.value = rawRows.length === PROJECT_USERS_PAGE_SIZE;
-    projectUsersOffset.value = requestOffset + rawRows.length;
+    projectUsersHasMore.value = normalizedRows.length === PROJECT_USERS_PAGE_SIZE;
+    projectUsersOffset.value = requestOffset + normalizedRows.length;
   } catch (e: any) {
     if (requestRevision !== projectUsersRequestRevision) return;
     projectUsersError.value = e?.message || 'خطا در دریافت لیست کاربران پروژه';
@@ -1246,10 +1295,16 @@ async function openAdminUserManager() {
 
   adminUserLoading.value = true;
   adminUserError.value = '';
+  adminUserData.value = null;
+  showAdminUserManager.value = false;
   try {
     const response = await apiFetch(`/api/users/${profileData.value.id}`);
     const payload = await response.json().catch(() => null);
     if (!response.ok) {
+      if (response.status === 403) {
+        adminUserError.value = 'دسترسی به تنظیمات حساس این کاربر برای نقش فعلی شما مجاز نیست. پروفایل عمومی بدون تغییر باقی ماند.';
+        return;
+      }
       throw new Error(parseApiError(payload, 'خطا در دریافت تنظیمات کاربر'));
     }
 
@@ -1442,10 +1497,6 @@ function getActionButtonClass(action: ProfileActionCard) {
   return 'settings-btn';
 }
 
-function isHighlightedAccountant(relation: PublicAccountantRelationSummary) {
-  return Number(relation.accountant_user_id) > 0 && Number(relation.accountant_user_id) === Number(highlightedAccountantUserId.value);
-}
-
 function getCustomerTierLabel(tier: PublicCustomerRelationSummary['customer_tier'] | PublicUser['customer_tier']) {
   if (tier === 'tier2') return 'سطح 2';
   if (tier === 'tier1') return 'سطح 1';
@@ -1510,21 +1561,14 @@ function getTradeCounterpartyProfileTarget(trade: MutualTradePreview) {
   ) {
     return {
       id: Number(trade.counterparty_profile_user_id),
-      account_name: trade.counterparty_profile_account_name,
-      highlight_accountant_user_id: Number.isInteger(trade.counterparty_highlight_accountant_user_id)
-        ? Number(trade.counterparty_highlight_accountant_user_id)
-        : null,
-      highlight_accountant_relation_display_name:
-        typeof trade.counterparty_highlight_accountant_relation_display_name === 'string'
-          ? trade.counterparty_highlight_accountant_relation_display_name
-          : null,
     };
   }
 
-  return resolveTradeParticipantProfileTarget(
+  const resolvedTarget = resolveTradeParticipantProfileTarget(
     trade,
     Number(trade.responder_user_id) === Number(profileData.value.id) ? 'offer_user' : 'responder_user',
   );
+  return resolvedTarget ? { id: resolvedTarget.id } : null;
 }
 
 function showTradeCustomerContext(trade: MutualTradePreview) {
@@ -1570,14 +1614,12 @@ function openOwnerCustomerProfile(relation: PublicCustomerRelationSummary) {
 
   emit('navigate', 'public_profile', {
     id: relation.customer_user_id,
-    account_name: relation.customer_account_name,
   });
 }
 
 function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
   emit('navigate', 'public_profile', {
     id: user.id,
-    account_name: user.account_name,
   });
 }
 
@@ -1618,12 +1660,9 @@ function handleHistoryPresetChipChange(value: string) {
             <template v-else>{{ getAvatarInitial(profileDisplayName) }}</template>
           </div>
           <p
-            v-if="profilePresenceStatus"
-            class="profile-presence-status"
-            :class="[
-              showOwnerSections ? 'profile-presence-status--own' : 'profile-presence-status--header',
-              { online: profileIsOnline },
-            ]"
+            v-if="showOwnerSections && profilePresenceStatus"
+            class="profile-presence-status profile-presence-status--own"
+            :class="{ online: profileIsOnline }"
           >
             {{ profilePresenceStatus }}
           </p>
@@ -1665,17 +1704,7 @@ function handleHistoryPresetChipChange(value: string) {
 
     <div v-else-if="profileData" class="profile-content" :class="{ 'profile-content--own': showOwnerSections }">
       <section class="profile-section shared-profile-section">
-        <div v-if="resolvedAccountantContext" class="accountant-resolution-banner">
-          <div class="accountant-resolution-title">نمایش پروفایل مالک اصلی</div>
-          <p class="accountant-resolution-copy">
-            این صفحه از مسیر حسابدار باز شده است و اطلاعات مالک اصلی را نشان می‌دهد.
-            <span v-if="resolvedAccountantContext.relationDisplayName">
-              عنوان این رابطه: «{{ resolvedAccountantContext.relationDisplayName }}»
-            </span>
-          </p>
-        </div>
-
-        <div v-if="customerProfileContext" class="customer-context-banner">
+        <div v-if="showOwnerSections && customerProfileContext" class="customer-context-banner">
           <div class="customer-context-title">پروفایل مشتری</div>
           <p class="customer-context-copy">
             <CustomerNameWithBadge :name="customerProfileContext.managementName" compact />
@@ -1684,7 +1713,7 @@ function handleHistoryPresetChipChange(value: string) {
           </p>
         </div>
 
-        <section class="profile-stats-grid" aria-label="خلاصه وضعیت پروفایل">
+        <section v-if="sharedStatCards.length > 0" class="profile-stats-grid" aria-label="خلاصه وضعیت پروفایل">
           <AppMetricCard
             v-for="stat in sharedStatCards"
             :key="stat.key"
@@ -1694,23 +1723,34 @@ function handleHistoryPresetChipChange(value: string) {
           />
         </section>
 
-        <AppSectionCard class="profile-section-card mt-4 card-with-help" title="اطلاعات شخصی" description="شماره تماس و آدرس ثبت‌شده این کاربر در این بخش نمایش داده می‌شود.">
+        <AppSectionCard
+          class="profile-section-card mt-4 card-with-help"
+          title="اطلاعات شخصی"
+          :description="isOwnProfile
+            ? 'شماره تماس و آدرس ثبت‌شده شما در این بخش نمایش داده می‌شود.'
+            : 'برای حفظ حریم خصوصی، فقط شماره تماس ماسک‌شده در پروفایل عمومی نمایش داده می‌شود.'"
+        >
           <template #actions>
             <HelpPopover
               button-test="public-profile-info-help"
               note-test="public-profile-info-help-note"
               label="راهنمای اطلاعات پروفایل"
-              text="در این بخش شماره تماس و آدرس ثبت‌شده نمایش داده می‌شود. در پروفایل خودتان می‌توانید آدرس را مستقیم از همین قسمت ویرایش کنید."
+              :text="isOwnProfile
+                ? 'در این بخش شماره تماس و آدرس ثبت‌شده شما نمایش داده می‌شود و می‌توانید آدرس را مستقیم از همین قسمت ویرایش کنید.'
+                : 'در پروفایل عمومی، شماره تماس ماسک‌شده است و آدرس، وضعیت حضور، عضویت و جزئیات معاملات نمایش داده نمی‌شود.'"
             />
           </template>
           
           <div class="profile-section-card__body">
             <div class="info-section">
               <div class="info-row">
-                  <span class="label">شماره تماس</span>
-                  <span class="value">{{ profileData.mobile_number }}</span>
+                <span class="label">شماره تماس</span>
+                <span class="value" dir="ltr">{{ profileMobileNumber }}</span>
               </div>
-              <div class="info-row address-row">
+              <p v-if="!isOwnProfile" class="profile-privacy-note">
+                آدرس، وضعیت حضور، عضویت و جزئیات معاملات این کاربر در پروفایل عمومی نمایش داده نمی‌شود.
+              </p>
+              <div v-if="isOwnProfile" class="info-row address-row">
                   <span class="label">آدرس</span>
                   <div v-if="!addressEditing" class="address-display-frame" :class="{ editable: isOwnProfile }">
                     <span class="value address-value">{{ profileData.address }}</span>
@@ -1725,7 +1765,7 @@ function handleHistoryPresetChipChange(value: string) {
                       <Pencil :size="16" />
                     </button>
                   </div>
-                <form v-else-if="isOwnProfile" class="address-edit-form" @submit.prevent="saveOwnAddress">
+                <form v-else class="address-edit-form" @submit.prevent="saveOwnAddress">
                   <AppFormField label="آدرس" :error="addressError || undefined">
                     <template #default="{ id, describedby, invalid }">
                       <AppTextarea
@@ -1794,13 +1834,13 @@ function handleHistoryPresetChipChange(value: string) {
                   v-for="projectUser in projectUsers"
                   :key="projectUser.id"
                   :title="projectUser.account_name"
-                  :description="projectUser.mobile_number"
+                  :description="projectUserMobileLabel(projectUser)"
                   interactive
                   class="project-user-card"
                   @select="openProjectUserProfile(projectUser)"
                 >
                   <template #trailing>
-                    <span class="project-user-mobile" dir="ltr">{{ projectUser.mobile_number }}</span>
+                    <span class="project-user-mobile" dir="ltr">{{ projectUserMobileLabel(projectUser) }}</span>
                   </template>
                 </AppListItem>
               </div>
@@ -1819,8 +1859,8 @@ function handleHistoryPresetChipChange(value: string) {
         </AppSectionCard>
       </section>
 
-      <section v-if="accountantRelations.length > 0" class="profile-section accountant-relations-section">
-        <AppSectionCard class="profile-section-card card-with-help" :title="showOwnerSections ? 'لیست حسابداران' : 'حسابداران این مالک'" description="عنوان هر ردیف همان نام نمایشی رابطه است و توضیح وظیفه، در صورت ثبت، زیر آن می‌آید.">
+      <section v-if="showOwnerSections && accountantRelations.length > 0" class="profile-section accountant-relations-section">
+        <AppSectionCard class="profile-section-card card-with-help" title="لیست حسابداران" description="عنوان هر ردیف همان نام نمایشی رابطه است و توضیح وظیفه، در صورت ثبت، زیر آن می‌آید.">
           <template #actions>
             <HelpPopover
               button-test="public-profile-accountants-help"
@@ -1836,14 +1876,12 @@ function handleHistoryPresetChipChange(value: string) {
                 v-for="relation in accountantRelations"
                 :key="`${relation.accountant_user_id || 'relation'}-${relation.relation_display_name}`"
                 class="public-accountant-card profile-relation-card profile-relation-card--accountant"
-                :class="{ highlighted: isHighlightedAccountant(relation) }"
               >
                 <div class="public-accountant-card-head">
                   <div>
                     <h4>{{ relation.relation_display_name }}</h4>
                     <p class="public-accountant-handle">@{{ relation.accountant_account_name || 'unknown' }}</p>
                   </div>
-                  <AppStatusBadge v-if="isHighlightedAccountant(relation)" tone="warning">مسیر فعلی</AppStatusBadge>
                 </div>
                 <p v-if="relation.duty_description" class="public-accountant-duty">{{ relation.duty_description }}</p>
               </article>
@@ -1960,7 +1998,7 @@ function handleHistoryPresetChipChange(value: string) {
         </AppSectionCard>
       </section>
 
-      <section class="profile-section">
+      <section v-if="showOwnerSections" class="profile-section">
         <AppSectionCard class="profile-section-card card-with-help history-section-card" :title="tradeHistoryTitle" description="فیلترها و خروجی‌ها دقیقاً روی همین بازه و کالا اعمال می‌شوند.">
           <template #actions>
             <HelpPopover
@@ -2189,6 +2227,8 @@ function handleHistoryPresetChipChange(value: string) {
         :isAdminView="true"
         :apiBaseUrl="props.apiBaseUrl"
         :jwtToken="props.jwtToken"
+        :viewerUserId="props.viewerUserId"
+        :viewerRole="viewerRole"
         @navigate="handleAdminUserManagerNavigate"
       />
     </AppResponsiveDialog>
@@ -2228,15 +2268,28 @@ function handleHistoryPresetChipChange(value: string) {
 }
 
 .profile-header-row {
-  grid-template-columns: 88px 1fr 88px;
+  /*
+   * Keep the title track explicitly shrinkable. A bare `1fr` has an automatic
+   * minimum, so a long account name could widen the whole route at 360px and
+   * push the back control outside the viewport.
+   */
+  grid-template-columns: minmax(4rem, 5.5rem) minmax(0, 1fr) minmax(2.75rem, 5.5rem);
   align-items: center;
+  min-width: 0;
   padding-bottom: 24px;
+}
+
+.profile-header-row > * {
+  min-width: 0;
 }
 
 .profile-nav-back {
   justify-self: end;
-  width: 2.5rem;
-  height: 2.5rem;
+  box-sizing: border-box;
+  inline-size: 2.75rem;
+  block-size: 2.75rem;
+  min-inline-size: 2.75rem;
+  min-block-size: 2.75rem;
   border: 1px solid var(--ds-border-medium);
   border-radius: var(--ds-radius-full);
   display: inline-flex;
@@ -2383,33 +2436,6 @@ function handleHistoryPresetChipChange(value: string) {
 
 .profile-presence-status.online {
   color: #f59e0b;
-}
-
-.accountant-resolution-banner {
-  width: 100%;
-  max-width: min(100%, 520px);
-  margin: 0 auto;
-  padding: 12px 14px;
-  border-radius: 16px;
-  border: 1px solid rgba(245, 158, 11, 0.28);
-  background:
-    linear-gradient(135deg, rgba(255, 251, 235, 0.96), rgba(255, 247, 237, 0.96));
-  box-shadow: 0 10px 28px rgba(245, 158, 11, 0.12);
-  text-align: right;
-}
-
-.accountant-resolution-title {
-  margin-bottom: 6px;
-  font-size: 0.94rem;
-  font-weight: 800;
-  color: #b45309;
-}
-
-.accountant-resolution-copy {
-  margin: 0;
-  font-size: 0.86rem;
-  line-height: 1.7;
-  color: #78350f;
 }
 
 .customer-context-banner {
@@ -2661,6 +2687,13 @@ function handleHistoryPresetChipChange(value: string) {
   border-bottom: none;
 }
 
+.profile-privacy-note {
+  margin: 10px 0 0;
+  color: var(--ds-text-secondary);
+  font-size: 0.86rem;
+  line-height: 1.8;
+}
+
 .address-row {
   flex-direction: column;
   align-items: flex-start;
@@ -2777,6 +2810,14 @@ function handleHistoryPresetChipChange(value: string) {
 
 .profile-action-card:active {
   transform: scale(0.98);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .profile-nav-back,
+  .address-edit-trigger,
+  .profile-action-card {
+    transition: none;
+  }
 }
 
 .profile-action-card:disabled,
@@ -3037,11 +3078,6 @@ function handleHistoryPresetChipChange(value: string) {
   box-shadow: var(--ds-shadow-sm);
 }
 
-.public-accountant-card.highlighted {
-  border-color: rgba(245, 158, 11, 0.34);
-  box-shadow: 0 0 0 1px rgba(245, 158, 11, 0.12), var(--ds-shadow-md);
-}
-
 .public-accountant-card-head,
 .public-customer-card-head {
   position: relative;
@@ -3086,16 +3122,6 @@ function handleHistoryPresetChipChange(value: string) {
   text-align: right;
 }
 
-.public-accountant-highlight-badge {
-  flex-shrink: 0;
-  padding: 4px 10px;
-  border-radius: 999px;
-  background: rgba(245, 158, 11, 0.12);
-  color: var(--ds-primary-700);
-  font-size: var(--ds-font-badge);
-  font-weight: 700;
-}
-
 .public-customer-tier-badge {
   flex-shrink: 0;
   padding: 4px 10px;
@@ -3124,6 +3150,12 @@ function handleHistoryPresetChipChange(value: string) {
 
 .mini-trade-card:active {
   transform: scale(0.98);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mini-trade-card {
+    transition: none;
+  }
 }
 
 .trade-row {

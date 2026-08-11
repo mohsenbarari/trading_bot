@@ -116,7 +116,7 @@ class RegistrationNotificationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(first_call.args[3], NotificationLevel.INFO)
         self.assertEqual(first_call.args[4], NotificationCategory.SYSTEM)
         self.assertEqual(first_call.kwargs["extra_payload"]["title"], "پیام مدیریت")
-        self.assertEqual(first_call.kwargs["extra_payload"]["route"], "/users/9?account_name=final_test")
+        self.assertEqual(first_call.kwargs["extra_payload"]["route"], "/users/9")
         db.commit.assert_not_awaited()
 
     async def test_project_registration_telegram_outbox_is_unique_transactional_enqueue(self):

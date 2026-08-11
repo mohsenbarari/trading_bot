@@ -1,10 +1,16 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import JalaliDatePicker from './JalaliDatePicker.vue'
 import { currentUserSummary } from '../utils/currentUser'
 
 const buildChatFileUrlMock = vi.fn(() => '')
 const uploadAvatarImageMock = vi.fn()
+const publicProfileSource = readFileSync(
+  resolve(process.cwd(), 'src/components/PublicProfile.vue'),
+  'utf8',
+)
 
 vi.mock('../utils/chatFiles', () => ({
   buildChatFileUrl: buildChatFileUrlMock,
@@ -66,6 +72,12 @@ async function setHistoryDate(wrapper: ReturnType<typeof mount>, index: number, 
   await flushPromises()
 }
 
+// Compile the large SFC before individual test timeouts begin. Each case still
+// imports the cached module independently, preserving its existing isolation.
+beforeAll(async () => {
+  await import('./PublicProfile.vue')
+})
+
 describe('PublicProfile.vue', () => {
   beforeEach(() => {
     buildChatFileUrlMock.mockClear()
@@ -85,7 +97,54 @@ describe('PublicProfile.vue', () => {
     localStorage.setItem('auth_token', 'token')
   })
 
-  it('shows owner-resolution context when the public profile resolves from an accountant', async () => {
+  it('keeps profile-header tracks shrinkable on narrow devices', () => {
+    const headerRule = publicProfileSource.match(/\.profile-header-row\s*\{([\s\S]*?)\n\}/)?.[1]
+
+    expect(headerRule).toContain(
+      'grid-template-columns: minmax(4rem, 5.5rem) minmax(0, 1fr) minmax(2.75rem, 5.5rem);',
+    )
+    expect(headerRule).toContain('min-width: 0;')
+    expect(publicProfileSource).toMatch(/\.profile-header-row\s*>\s*\*\s*\{\s*min-width:\s*0;/)
+  })
+
+  it('reserves a visible 44px back-navigation target', () => {
+    const backRule = publicProfileSource.match(/\.profile-nav-back\s*\{([\s\S]*?)\n\}/)?.[1]
+
+    expect(backRule).toContain('box-sizing: border-box;')
+    expect(backRule).toContain('inline-size: 2.75rem;')
+    expect(backRule).toContain('block-size: 2.75rem;')
+    expect(backRule).toContain('min-inline-size: 2.75rem;')
+    expect(backRule).toContain('min-block-size: 2.75rem;')
+  })
+
+  it('preserves ordinary profile-control motion while disabling every local control transition for reduced motion', () => {
+    const backRule = publicProfileSource.match(/\.profile-nav-back\s*\{([\s\S]*?)\n\}/)?.[1]
+    const addressEditRule = publicProfileSource.match(/\.address-edit-trigger\s*\{([\s\S]*?)\n\}/)?.[1]
+    const actionCardRule = publicProfileSource.match(/\.profile-action-card\s*\{([\s\S]*?)\n\}/)?.[1]
+    const miniTradeRule = Array.from(
+      publicProfileSource.matchAll(/\.mini-trade-card\s*\{([\s\S]*?)\n\}/g),
+    ).find(([, rule]) => rule.includes('transition: transform 0.15s;'))
+    const miniTradeReducedMotionRule = publicProfileSource.match(
+      /@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{\s*\.mini-trade-card\s*\{\s*transition:\s*none;\s*\}\s*\}/,
+    )?.[0]
+
+    expect(backRule).toContain('transition: background 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease;')
+    expect(addressEditRule).toContain('transition: color 0.18s ease, background 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;')
+    expect(actionCardRule).toContain('transition: all 0.2s;')
+    expect(miniTradeRule?.[1]).toContain('transition: transform 0.15s;')
+    expect(publicProfileSource).toMatch(/\.profile-nav-back:active\s*\{\s*transform:\s*translateY\(1px\);/)
+    expect(publicProfileSource).toMatch(/\.profile-action-card:active\s*\{\s*transform:\s*scale\(0\.98\);/)
+    expect(publicProfileSource).toMatch(/\.mini-trade-card:active\s*\{\s*transform:\s*scale\(0\.98\);/)
+    expect(publicProfileSource).toMatch(
+      /@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{\s*\.profile-nav-back,\s*\.address-edit-trigger,\s*\.profile-action-card\s*\{\s*transition:\s*none;\s*\}/,
+    )
+    expect(miniTradeReducedMotionRule).toBeTruthy()
+    expect(publicProfileSource.indexOf(miniTradeReducedMotionRule!)).toBeGreaterThan(
+      publicProfileSource.indexOf(miniTradeRule![0]),
+    )
+  })
+
+  it('sanitizes an over-broad legacy public response for an ordinary peer', async () => {
     const fetchMock = vi.mocked(fetch)
     fetchMock.mockResolvedValueOnce(makeResponse({
       id: 20,
@@ -108,6 +167,16 @@ describe('PublicProfile.vue', () => {
         },
       ],
     }))
+    fetchMock.mockResolvedValueOnce(makeResponse({
+      can_block: true,
+      can_block_now: true,
+      max_blocked: 10,
+      current_blocked: 0,
+      remaining: 10,
+      reason_code: null,
+      reason_message: null,
+    }))
+    fetchMock.mockResolvedValueOnce(makeResponse({ is_blocked_by_me: false }))
 
     const PublicProfile = (await import('./PublicProfile.vue')).default
     const wrapper = mount(PublicProfile, {
@@ -132,10 +201,13 @@ describe('PublicProfile.vue', () => {
         Authorization: 'Bearer token',
       }),
     }))
-    expect(wrapper.text()).toContain('نمایش پروفایل مالک اصلی')
-    expect(wrapper.text()).toContain('حسابدار فروش')
     expect(wrapper.text()).toContain('owner20')
-    expect(wrapper.text()).toContain('آنلاین')
+    expect(wrapper.text()).toContain('••••••••')
+    expect(wrapper.text()).not.toContain('09124444444')
+    expect(wrapper.text()).not.toContain('مشهد')
+    expect(wrapper.text()).not.toContain('حسابدار فروش')
+    expect(wrapper.text()).not.toContain('نمایش پروفایل مالک اصلی')
+    expect(wrapper.text()).not.toContain('تاریخچه معاملات')
   })
   
   it('applies preset history ranges and renders partial filter summaries for one-sided dates', async () => {
@@ -156,16 +228,6 @@ describe('PublicProfile.vue', () => {
       highlight_accountant_relation_display_name: null,
       accountant_relations: [],
     }))
-    fetchMock.mockResolvedValueOnce(makeResponse({
-      can_block: true,
-      can_block_now: true,
-      max_blocked: 10,
-      current_blocked: 0,
-      remaining: 10,
-      reason_code: null,
-      reason_message: null,
-    }))
-    fetchMock.mockResolvedValueOnce(makeResponse({ is_blocked_by_me: false }))
     fetchMock.mockResolvedValueOnce(makeResponse([]))
     fetchMock.mockResolvedValueOnce(makeResponse([{ id: 1, name: 'سکه', aliases: [] }]))
     fetchMock.mockResolvedValueOnce(makeResponse([]))
@@ -175,7 +237,7 @@ describe('PublicProfile.vue', () => {
     const wrapper = mount(PublicProfile, {
       props: {
         user: { id: 50, account_name: 'owner50' },
-        viewerUserId: 99,
+        viewerUserId: 50,
         apiBaseUrl: '',
         jwtToken: 'token',
       },
@@ -194,7 +256,7 @@ describe('PublicProfile.vue', () => {
     await presetButton!.trigger('click')
     await flushPromises()
 
-    const presetFetchCalls = fetchMock.mock.calls.filter(([url]) => typeof url === 'string' && url.startsWith('/api/trades/with/50/page?'))
+    const presetFetchCalls = fetchMock.mock.calls.filter(([url]) => typeof url === 'string' && url.startsWith('/api/trades/my/page?'))
     expect(presetFetchCalls.length).toBeGreaterThanOrEqual(1)
     expect(presetFetchCalls.at(-1)?.[0]).toContain('from_date=2026-02-28')
     expect(presetFetchCalls.at(-1)?.[0]).toContain('to_date=2026-05-28')
@@ -219,7 +281,7 @@ describe('PublicProfile.vue', () => {
     vi.useRealTimers()
   })
 
-  it('falls back to generic api error text for malformed block and export responses', async () => {
+  it('falls back to generic api error text for malformed self-history exports', async () => {
     const fetchMock = vi.mocked(fetch)
     fetchMock.mockResolvedValueOnce(makeResponse({
       id: 30,
@@ -234,15 +296,11 @@ describe('PublicProfile.vue', () => {
       highlight_accountant_relation_display_name: null,
       accountant_relations: [],
     }))
-    fetchMock.mockResolvedValueOnce(makeResponse({ can_block: true, can_block_now: true, max_blocked: 3, current_blocked: 0, remaining: 3, reason_code: null, reason_message: null }))
-    fetchMock.mockResolvedValueOnce(makeResponse({ is_blocked_by_me: false }))
-    fetchMock.mockResolvedValueOnce(new Response('bad gateway', { status: 400, headers: { 'Content-Type': 'text/plain' } }))
-
     const PublicProfile = (await import('./PublicProfile.vue')).default
     const wrapper = mount(PublicProfile, {
       props: {
         user: { id: 30, account_name: 'plain30' },
-        viewerUserId: 99,
+        viewerUserId: 30,
         apiBaseUrl: '',
         jwtToken: 'token',
       },
@@ -256,12 +314,6 @@ describe('PublicProfile.vue', () => {
     })
 
     await flushPromises()
-
-    const blockButton = wrapper.findAll('button').find((button) => button.text().includes('بلاک کاربر'))
-    expect(blockButton).toBeTruthy()
-    await blockButton!.trigger('click')
-    await flushPromises()
-    expect(vi.mocked(window.alert)).toHaveBeenCalledWith('بلاک کاربر ناموفق بود.')
 
     fetchMock.mockResolvedValueOnce(new Response('server exploded', { status: 400, headers: { 'Content-Type': 'text/plain' } }))
 
@@ -288,16 +340,6 @@ describe('PublicProfile.vue', () => {
       highlight_accountant_relation_display_name: null,
       accountant_relations: [],
     }))
-    fetchMock.mockResolvedValueOnce(makeResponse({
-      can_block: true,
-      can_block_now: true,
-      max_blocked: 10,
-      current_blocked: 0,
-      remaining: 10,
-      reason_code: null,
-      reason_message: null,
-    }))
-    fetchMock.mockResolvedValueOnce(makeResponse({ is_blocked_by_me: false }))
     fetchMock.mockResolvedValueOnce(makeResponse([
       {
         id: 11,
@@ -323,7 +365,7 @@ describe('PublicProfile.vue', () => {
     const wrapper = mount(PublicProfile, {
       props: {
         user: { id: 50, account_name: 'owner50' },
-        viewerUserId: 99,
+        viewerUserId: 50,
         apiBaseUrl: '',
         jwtToken: 'token',
       },
@@ -369,7 +411,7 @@ describe('PublicProfile.vue', () => {
     const wrapper = mount(PublicProfile, {
       props: {
         user: { id: 30, account_name: 'plain30' },
-        viewerUserId: 99,
+        viewerUserId: 30,
         apiBaseUrl: '',
         jwtToken: 'token',
       },
@@ -797,7 +839,7 @@ describe('PublicProfile.vue', () => {
         return {
           id: 61,
           account_name: 'manager61',
-          mobile_number: '09121110000',
+          mobile_number: '0912****100',
         }
       }
       const userId = 60 + index
@@ -857,18 +899,22 @@ describe('PublicProfile.vue', () => {
 
     await flushPromises()
 
+    await wrapper.get('.project-users-search').trigger('submit')
+    await flushPromises()
+
     expect(fetchMock.mock.calls.some(([url]) => (
       url === '/api/users-public/44/project-users?limit=25&offset=0'
     ))).toBe(true)
     expect(wrapper.text()).toContain('manager61')
-    expect(wrapper.text()).toContain('09121110000')
+    expect(wrapper.text()).toContain('0912****100')
+    expect(wrapper.text()).toContain('••••••••')
+    expect(wrapper.text()).not.toContain('09121110000')
 
     await wrapper.findAll('.ui-list-item').find((item) => item.text().includes('manager61'))!.trigger('click')
     expect(wrapper.emitted('navigate')?.at(-1)).toEqual([
       'public_profile',
       {
         id: 61,
-        account_name: 'manager61',
       },
     ])
 
@@ -892,7 +938,7 @@ describe('PublicProfile.vue', () => {
     expect(wrapper.text()).toContain('manager61')
   })
 
-  it('shows the project users directory on accountant self profiles resolved to the owner', async () => {
+  it('does not treat a resolved accountant target as the owner\'s self profile', async () => {
     const fetchMock = vi.mocked(fetch)
     fetchMock.mockResolvedValueOnce(makeResponse({
       id: 20,
@@ -936,7 +982,9 @@ describe('PublicProfile.vue', () => {
     const wrapper = mount(PublicProfile, {
       props: {
         user: { id: 44, account_name: 'acct44' },
-        viewerUserId: 44,
+        // The requested target is accountant 44, but the server resolves the
+        // payload to owner 20. Self must be based on the requested target.
+        viewerUserId: 20,
         apiBaseUrl: '',
         jwtToken: 'token',
       },
@@ -952,9 +1000,17 @@ describe('PublicProfile.vue', () => {
     await flushPromises()
 
     expect(fetchMock.mock.calls.some(([url]) => (
-      url === '/api/users-public/20/project-users?limit=25&offset=0'
-    ))).toBe(true)
+      typeof url === 'string' && url.includes('/project-users?')
+    ))).toBe(false)
     expect(wrapper.text()).toContain('owner20')
+    expect(wrapper.text()).toContain('••••••••')
+    expect(wrapper.text()).not.toContain('09124444444')
+    expect(wrapper.text()).not.toContain('مشهد')
+    expect(wrapper.text()).not.toContain('حسابدار فروش')
+    expect(wrapper.text()).not.toContain('لیست همکاران')
+    expect(wrapper.text()).not.toContain('تنظیمات کاربری')
+    expect(wrapper.text()).not.toContain('تاریخچه معاملات من')
+    expect(wrapper.find('.address-row').exists()).toBe(false)
   })
 
   it('shows project-users fetch errors and lets the owner retry with a new search', async () => {
@@ -998,6 +1054,9 @@ describe('PublicProfile.vue', () => {
       },
     })
 
+    await flushPromises()
+
+    await wrapper.get('.project-users-search').trigger('submit')
     await flushPromises()
 
     expect(wrapper.text()).toContain('دریافت کاربران پروژه ممکن نشد')
@@ -1063,6 +1122,9 @@ describe('PublicProfile.vue', () => {
         },
       },
     })
+    await flushPromises()
+
+    await wrapper.get('.project-users-search').trigger('submit')
     await flushPromises()
 
     expect(wrapper.text()).toContain('preserved61')
@@ -1218,7 +1280,7 @@ describe('PublicProfile.vue', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
-  it('hides the block toggle on customer public profiles', async () => {
+  it('does not disclose customer membership while server-side block policy remains authoritative', async () => {
     const fetchMock = vi.mocked(fetch)
     fetchMock.mockResolvedValueOnce(makeResponse({
       id: 91,
@@ -1258,7 +1320,10 @@ describe('PublicProfile.vue', () => {
 
     await flushPromises()
 
-    expect(wrapper.findAll('button').some((button) => button.text().includes('بلاک'))).toBe(false)
+    expect(wrapper.findAll('button').some((button) => button.text().includes('بلاک'))).toBe(true)
+    expect(wrapper.text()).not.toContain('مشتری ویژه')
+    expect(wrapper.text()).not.toContain('owner20')
+    expect(wrapper.text()).not.toContain('09127777777')
   })
 
   it('opens a local admin user manager for admin viewers on other profiles', async () => {
@@ -1510,14 +1575,14 @@ describe('PublicProfile.vue', () => {
     await flushPromises()
 
     expect(wrapper.find('[data-test="profile-avatar-readonly"]').exists()).toBe(true)
-    expect(wrapper.find('.profile-presence-status--header').exists()).toBe(true)
+    expect(wrapper.find('.profile-presence-status--header').exists()).toBe(false)
     expect(wrapper.find('.profile-hero').exists()).toBe(false)
     expect(wrapper.find('.profile-menu-card').exists()).toBe(true)
     expect(wrapper.text()).toContain('اقدام‌های عمومی')
     expect(wrapper.text()).toContain('ارسال پیام')
   })
 
-  it('renders the standardized customer context banner and public menu on customer profiles', async () => {
+  it('keeps customer context out of the public profile while preserving public actions', async () => {
     const fetchMock = vi.mocked(fetch)
     fetchMock.mockResolvedValueOnce(makeResponse({
       id: 91,
@@ -1557,9 +1622,9 @@ describe('PublicProfile.vue', () => {
 
     await flushPromises()
 
-    expect(wrapper.find('.customer-context-banner').exists()).toBe(true)
-    expect(wrapper.text()).toContain('پروفایل مشتری')
-    expect(wrapper.text()).toContain('سرگروه: owner20')
+    expect(wrapper.find('.customer-context-banner').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('پروفایل مشتری')
+    expect(wrapper.text()).not.toContain('سرگروه: owner20')
     expect(wrapper.text()).not.toContain('مالک: owner20')
     expect(wrapper.find('.profile-menu-card').exists()).toBe(true)
     expect(wrapper.text()).toContain('ارسال پیام')
@@ -1843,7 +1908,7 @@ describe('PublicProfile.vue', () => {
     expect(wrapper.emitted('navigate')?.[2]).toEqual(['operations_accountants'])
   })
 
-  it('loads mutual trade history for direct profiles and reuses loaded results on reopen', async () => {
+  it('does not render or request trade history for direct public profiles', async () => {
     const fetchMock = vi.mocked(fetch)
     fetchMock.mockResolvedValueOnce(makeResponse({
       id: 50,
@@ -1932,39 +1997,12 @@ describe('PublicProfile.vue', () => {
 
     await flushPromises()
 
-    const applyButtonAfterInvalidRange = wrapper.findAll('button').find((node) => node.text().includes('اعمال فیلتر'))
-    expect(applyButtonAfterInvalidRange).toBeTruthy()
-    await applyButtonAfterInvalidRange!.trigger('click')
-    await flushPromises()
-
-    const historyCalls = fetchMock.mock.calls.filter(([url]) => typeof url === 'string' && url.startsWith('/api/trades/with/50/page?'))
-    expect(historyCalls).toHaveLength(1)
-    expect(wrapper.text()).toContain('خرید')
-    expect(wrapper.text()).toContain('فروش')
-    expect(wrapper.text()).toContain('بیننده')
-    expect(wrapper.text()).toContain('مالک ↔ مشتری سطح ۲')
-    expect(wrapper.text()).toContain('مالک ↔ مشتری سطح ۱')
-    expect(wrapper.text()).toContain('حسابدار فروش')
-    expect(wrapper.text()).toContain('مشتری واسط')
-    expect(wrapper.text()).toContain('سطح 1')
-
-    const accountantLink = wrapper.findAll('.profile-link-btn').find((node) => node.text().includes('حسابدار فروش'))
-    expect(accountantLink).toBeTruthy()
-    await accountantLink!.trigger('click')
-    expect(wrapper.emitted('navigate')?.[0]).toEqual([
-      'public_profile',
-      {
-        id: 70,
-        account_name: 'owner-70',
-        highlight_accountant_user_id: 61,
-        highlight_accountant_relation_display_name: 'حسابدار فروش',
-      },
-    ])
-
-    expect(fetchMock.mock.calls.filter(([url]) => typeof url === 'string' && url.startsWith('/api/trades/with/50/page?'))).toHaveLength(1)
+    expect(wrapper.findAll('button').some((node) => node.text().includes('اعمال فیلتر'))).toBe(false)
+    expect(wrapper.text()).not.toContain('تاریخچه معاملات')
+    expect(fetchMock.mock.calls.some(([url]) => typeof url === 'string' && url.includes('/api/trades/'))).toBe(false)
   })
 
-  it('renders target-user history from the viewed profile perspective for super-admin viewers', async () => {
+  it('does not render target trade history for super-admin public viewers', async () => {
     localStorage.setItem('current_user_summary', JSON.stringify({ role: 'مدیر ارشد' }))
 
     const fetchMock = vi.mocked(fetch)
@@ -2019,16 +2057,10 @@ describe('PublicProfile.vue', () => {
 
     await flushPromises()
 
-    const applyButtonInvalidRange = wrapper.findAll('button').find((node) => node.text().includes('اعمال فیلتر'))
-    expect(applyButtonInvalidRange).toBeTruthy()
-    await applyButtonInvalidRange!.trigger('click')
-    await flushPromises()
-
-    expect(fetchMock.mock.calls.filter(([url]) => typeof url === 'string' && url.startsWith('/api/trades/with/60/page?'))).toHaveLength(1)
-    expect(wrapper.text()).toContain('خرید')
-    expect(wrapper.text()).toContain('سرگروه owner15')
-    expect(wrapper.text()).toContain('سطح 2')
-    expect(wrapper.text()).not.toContain('هیچ معامله مشترکی یافت نشد.')
+    expect(wrapper.findAll('button').some((node) => node.text().includes('اعمال فیلتر'))).toBe(false)
+    expect(wrapper.text()).not.toContain('تاریخچه معاملات')
+    expect(wrapper.text()).not.toContain('سرگروه owner15')
+    expect(fetchMock.mock.calls.some(([url]) => typeof url === 'string' && url.includes('/api/trades/'))).toBe(false)
   })
 
   it('loads own trade history from the self endpoint and shows the empty state', async () => {
@@ -2228,6 +2260,10 @@ describe('PublicProfile.vue', () => {
             offer_user_name: 'owner51',
             responder_user_id: 90,
             responder_user_name: 'partner90',
+            counterparty_profile_user_id: 90,
+            counterparty_profile_account_name: 'partner90',
+            counterparty_highlight_accountant_user_id: 61,
+            counterparty_highlight_accountant_relation_display_name: 'حسابدار فروش',
           },
         ]))
       }
@@ -2268,8 +2304,15 @@ describe('PublicProfile.vue', () => {
 
     const filteredCall = fetchMock.mock.calls.find(([url]) => typeof url === 'string' && url.startsWith('/api/trades/with/90/page?'))
     expect(filteredCall).toBeTruthy()
-    expect(wrapper.text()).toContain('طرف دیگر: partner90 - 09120000090')
+    expect(wrapper.text()).toContain('طرف دیگر: partner90')
+    expect(wrapper.text()).not.toContain('09120000090')
     expect(wrapper.text()).toContain('partner90')
+
+    await wrapper.get('.mini-trade-card .trade-counterparty .profile-link-btn').trigger('click')
+    expect(wrapper.emitted('navigate')?.at(-1)).toEqual([
+      'public_profile',
+      { id: 90 },
+    ])
   })
 
   it('applies history filters and exports with the same query state', async () => {
@@ -2287,16 +2330,6 @@ describe('PublicProfile.vue', () => {
       highlight_accountant_relation_display_name: null,
       accountant_relations: [],
     }))
-    fetchMock.mockResolvedValueOnce(makeResponse({
-      can_block: true,
-      can_block_now: true,
-      max_blocked: 10,
-      current_blocked: 0,
-      remaining: 10,
-      reason_code: null,
-      reason_message: null,
-    }))
-    fetchMock.mockResolvedValueOnce(makeResponse({ is_blocked_by_me: false }))
     fetchMock.mockResolvedValueOnce(makeResponse([]))
     fetchMock.mockResolvedValueOnce(makeResponse([{ id: 1, name: 'سکه', aliases: [{ alias: 'امامی' }] }]))
     fetchMock.mockResolvedValueOnce(makeResponse([]))
@@ -2318,7 +2351,7 @@ describe('PublicProfile.vue', () => {
     const wrapper = mount(PublicProfile, {
       props: {
         user: { id: 50, account_name: 'owner50' },
-        viewerUserId: 99,
+        viewerUserId: 50,
         apiBaseUrl: '',
         jwtToken: 'token',
       },
@@ -2355,7 +2388,7 @@ describe('PublicProfile.vue', () => {
 
     const filteredCall = fetchMock.mock.calls.find(([url]) => (
       typeof url === 'string'
-      && url.includes('/api/trades/with/50/page?')
+      && url.includes('/api/trades/my/page?')
       && url.includes('from_date=2026-05-01')
     ))
     expect(filteredCall?.[0]).toContain('from_date=2026-05-01')
@@ -2369,7 +2402,7 @@ describe('PublicProfile.vue', () => {
     await pdfButton!.trigger('click')
     await flushPromises()
 
-    const exportCall = fetchMock.mock.calls.find(([url]) => typeof url === 'string' && url.includes('/api/trades/with/50/export?'))
+    const exportCall = fetchMock.mock.calls.find(([url]) => typeof url === 'string' && url.includes('/api/trades/my/export?'))
     expect(exportCall?.[0]).toContain('format=pdf')
     expect(exportCall?.[0]).toContain('from_date=2026-05-01')
     expect(exportCall?.[0]).toContain('to_date=2026-05-31')
@@ -2424,14 +2457,14 @@ describe('PublicProfile.vue', () => {
           accountant_relations: [],
         }))
       }
-      if (url.startsWith('/api/trades/with/50/page?') && url.includes('cursor=cursor-50')) {
+      if (url.startsWith('/api/trades/my/page?') && url.includes('cursor=cursor-50')) {
         loadMoreAttempts += 1
         if (loadMoreAttempts === 1) {
           return Promise.resolve(makeResponse({ detail: 'ارتباط موقتاً قطع شد.' }, false, 503))
         }
         return Promise.resolve(makeHistoryPage(secondPage))
       }
-      if (url.startsWith('/api/trades/with/50/page?')) {
+      if (url.startsWith('/api/trades/my/page?')) {
         return Promise.resolve(makeHistoryPage(firstPage, 'cursor-50', true))
       }
       return defaultFetchResponse(url)
@@ -2441,7 +2474,7 @@ describe('PublicProfile.vue', () => {
     const wrapper = mount(PublicProfile, {
       props: {
         user: { id: 50, account_name: 'owner50' },
-        viewerUserId: 99,
+        viewerUserId: 50,
         apiBaseUrl: '',
         jwtToken: 'token',
       },
@@ -2455,7 +2488,7 @@ describe('PublicProfile.vue', () => {
     await flushPromises()
 
     const historySelects = wrapper.findAll('.history-filter-field select')
-    expect(historySelects).toHaveLength(3)
+    expect(historySelects).toHaveLength(4)
     await historySelects[1]!.setValue('buy')
     await historySelects[2]!.setValue('cash')
     const applyButton = wrapper.findAll('button').find((node) => node.text().includes('اعمال فیلتر'))
@@ -2465,7 +2498,7 @@ describe('PublicProfile.vue', () => {
 
     const firstPageCall = fetchMock.mock.calls.find(([url]) => (
       typeof url === 'string'
-      && url.startsWith('/api/trades/with/50/page?')
+      && url.startsWith('/api/trades/my/page?')
       && url.includes('trade_type=buy')
     ))
     expect(firstPageCall?.[0]).toContain('settlement_type=cash')
@@ -2524,10 +2557,10 @@ describe('PublicProfile.vue', () => {
           accountant_relations: [],
         }))
       }
-      if (url.startsWith('/api/trades/with/50/page?') && url.includes('trade_type=sell')) {
+      if (url.startsWith('/api/trades/my/page?') && url.includes('trade_type=sell')) {
         return Promise.resolve(makeResponse({ detail: 'بازخوانی تاریخچه ناموفق بود' }, false, 400))
       }
-      if (url.startsWith('/api/trades/with/50/page?')) {
+      if (url.startsWith('/api/trades/my/page?')) {
         return Promise.resolve(makeHistoryPage([preservedTrade]))
       }
       return defaultFetchResponse(url)
@@ -2537,7 +2570,7 @@ describe('PublicProfile.vue', () => {
     const wrapper = mount(PublicProfile, {
       props: {
         user: { id: 50, account_name: 'owner50' },
-        viewerUserId: 99,
+        viewerUserId: 50,
         apiBaseUrl: '',
         jwtToken: 'token',
       },
@@ -2606,10 +2639,10 @@ describe('PublicProfile.vue', () => {
           accountant_relations: [],
         }))
       }
-      if (url.startsWith('/api/trades/with/50/page?') && url.includes('trade_type=buy')) {
+      if (url.startsWith('/api/trades/my/page?') && url.includes('trade_type=buy')) {
         return new Promise<Response>((resolve) => { resolveBuy = resolve })
       }
-      if (url.startsWith('/api/trades/with/50/page?') && url.includes('trade_type=sell')) {
+      if (url.startsWith('/api/trades/my/page?') && url.includes('trade_type=sell')) {
         return new Promise<Response>((resolve) => { resolveSell = resolve })
       }
       return defaultFetchResponse(url)
@@ -2619,7 +2652,7 @@ describe('PublicProfile.vue', () => {
     const wrapper = mount(PublicProfile, {
       props: {
         user: { id: 50, account_name: 'owner50' },
-        viewerUserId: 99,
+        viewerUserId: 50,
         apiBaseUrl: '',
         jwtToken: 'token',
       },
@@ -2667,16 +2700,6 @@ describe('PublicProfile.vue', () => {
       highlight_accountant_relation_display_name: null,
       accountant_relations: [],
     }))
-    fetchMock.mockResolvedValueOnce(makeResponse({
-      can_block: true,
-      can_block_now: true,
-      max_blocked: 10,
-      current_blocked: 0,
-      remaining: 10,
-      reason_code: null,
-      reason_message: null,
-    }))
-    fetchMock.mockResolvedValueOnce(makeResponse({ is_blocked_by_me: false }))
     fetchMock.mockResolvedValueOnce(makeResponse([]))
     fetchMock.mockResolvedValueOnce(makeResponse([{ id: 1, name: 'سکه', aliases: [{ alias: 'امامی' }] }]))
 
@@ -2684,7 +2707,7 @@ describe('PublicProfile.vue', () => {
     const wrapper = mount(PublicProfile, {
       props: {
         user: { id: 50, account_name: 'owner50' },
-        viewerUserId: 99,
+        viewerUserId: 50,
         apiBaseUrl: '',
         jwtToken: 'token',
       },
@@ -2712,14 +2735,14 @@ describe('PublicProfile.vue', () => {
     await flushPromises()
 
     expect(wrapper.text()).toContain('بازه زمانی انتخاب‌شده معتبر نیست.')
-    expect(fetchMock.mock.calls.filter(([url]) => typeof url === 'string' && url.startsWith('/api/trades/with/50/page?'))).toHaveLength(1)
+    expect(fetchMock.mock.calls.filter(([url]) => typeof url === 'string' && url.startsWith('/api/trades/my/page?'))).toHaveLength(1)
 
     const pdfButton = wrapper.findAll('button').find((node) => node.text().includes('خروجی PDF'))
     expect(pdfButton).toBeTruthy()
     await pdfButton!.trigger('click')
     await flushPromises()
 
-    expect(fetchMock.mock.calls.some(([url]) => typeof url === 'string' && url.includes('/api/trades/with/50/export?'))).toBe(false)
+    expect(fetchMock.mock.calls.some(([url]) => typeof url === 'string' && url.includes('/api/trades/my/export?'))).toBe(false)
     expect(wrapper.text()).toContain('بازه زمانی انتخاب‌شده معتبر نیست.')
   })
 
@@ -2750,7 +2773,7 @@ describe('PublicProfile.vue', () => {
     expect(wrapper.emitted('navigate')?.[0]).toEqual(['home'])
   })
 
-  it('opens and highlights the accountant section when the owner profile is reached through route query state', async () => {
+  it('does not render accountant route-context details for a public peer', async () => {
     const fetchMock = vi.mocked(fetch)
     fetchMock.mockResolvedValueOnce(makeResponse({
       id: 20,
@@ -2799,17 +2822,13 @@ describe('PublicProfile.vue', () => {
 
     await flushPromises()
 
-    expect(wrapper.text()).toContain('نمایش پروفایل مالک اصلی')
-    expect(wrapper.text()).toContain('حسابداران این مالک')
-    expect(wrapper.find('.public-accountant-card.profile-relation-card.highlighted').exists()).toBe(true)
-    expect(wrapper.find('.public-accountant-card.highlighted').text()).toContain('acct44')
-    expect(wrapper.find('.public-accountant-card.highlighted').text()).toContain('مسیر فعلی')
-
-    expect(wrapper.text()).toContain('حسابداران این مالک')
+    expect(wrapper.text()).not.toContain('نمایش پروفایل مالک اصلی')
+    expect(wrapper.text()).not.toContain('حسابداران این مالک')
+    expect(wrapper.find('.public-accountant-card.profile-relation-card').exists()).toBe(false)
     expect(wrapper.find('.profile-accordion').exists()).toBe(false)
   })
 
-  it('renders the standardized customer context banner on customer profiles without legacy copy', async () => {
+  it('does not render customer context on a customer public profile', async () => {
     const fetchMock = vi.mocked(fetch)
     fetchMock.mockResolvedValueOnce(makeResponse({
       id: 91,
@@ -2848,17 +2867,17 @@ describe('PublicProfile.vue', () => {
 
     await flushPromises()
 
-    expect(wrapper.find('.customer-context-banner').exists()).toBe(true)
-    expect(wrapper.text()).toContain('پروفایل مشتری')
-    expect(wrapper.text()).toContain('مشتری ویژه')
-    expect(wrapper.text()).toContain('سرگروه: owner20')
-    expect(wrapper.text()).toContain('سطح 2')
+    expect(wrapper.find('.customer-context-banner').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('پروفایل مشتری')
+    expect(wrapper.text()).not.toContain('مشتری ویژه')
+    expect(wrapper.text()).not.toContain('سرگروه: owner20')
+    expect(wrapper.text()).not.toContain('سطح 2')
     expect(wrapper.text()).not.toContain('مالک: owner20')
     expect(wrapper.text()).not.toContain('نمای مشتری')
     expect(wrapper.text()).not.toContain('زیرمجموعه مالک')
   })
 
-  it('shows owner customer list for super-admin viewers', async () => {
+  it('does not show owner customer membership for super-admin public viewers', async () => {
     localStorage.setItem('current_user_summary', JSON.stringify({ role: 'مدیر ارشد' }))
 
     const fetchMock = vi.mocked(fetch)
@@ -2906,20 +2925,11 @@ describe('PublicProfile.vue', () => {
 
     await flushPromises()
 
-    expect(wrapper.text()).toContain('مشتریان این مالک')
-    expect(wrapper.find('.public-customer-card.profile-relation-card').exists()).toBe(true)
-    expect(wrapper.text()).toContain('مشتری ویژه')
-    expect(wrapper.text()).toContain('customer91')
-    expect(wrapper.text()).toContain('سطح 1')
-
-    await wrapper.get('.customer-profile-link-btn').trigger('click')
-    expect(wrapper.emitted('navigate')?.[0]).toEqual([
-      'public_profile',
-      {
-        id: 91,
-        account_name: 'customer91',
-      },
-    ])
+    expect(wrapper.text()).not.toContain('مشتریان این مالک')
+    expect(wrapper.find('.public-customer-card.profile-relation-card').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('مشتری ویژه')
+    expect(wrapper.text()).not.toContain('customer91')
+    expect(wrapper.text()).not.toContain('سطح 1')
   })
 
   it('does not show owner customer list for middle-manager viewers', async () => {

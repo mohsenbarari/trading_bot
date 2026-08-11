@@ -8,8 +8,7 @@ import {
   ADMIN_MESSAGES_SHA256,
   MARKET_RUNTIME_BASELINE,
   MARKET_RUNTIME_CONTRACT,
-  MESSENGER_RUNTIME_BASELINE,
-  MESSENGER_RUNTIME_CONTRACT,
+  STAGE6_MESSENGER_URL_PRIVACY_ALLOWED_PATHS,
   STAGE4_BASE_COMMIT,
   STAGE4_BASE_TREE,
   STAGE4_ROUTE_CONTRACT_PATH,
@@ -23,6 +22,7 @@ import {
   fileSha256,
   protectedFileSetEvidence,
   readFileEntries,
+  resolveMessengerRuntimeDisposition,
 } from './lib/stage4-protected-surface-guard.mjs'
 import {
   DASHBOARD_MARKET_REGION_PATH,
@@ -52,13 +52,8 @@ try {
     protectedFileSetEvidence(readFileEntries(repoRoot, ownedPaths.market), MARKET_RUNTIME_CONTRACT),
     MARKET_RUNTIME_BASELINE,
   )
-  const messenger = assertProtectedFileSetEvidence(
-    'Messenger runtime',
-    protectedFileSetEvidence(
-      readFileEntries(repoRoot, ownedPaths.messenger),
-      MESSENGER_RUNTIME_CONTRACT,
-    ),
-    MESSENGER_RUNTIME_BASELINE,
+  const messenger = resolveMessengerRuntimeDisposition(
+    readFileEntries(repoRoot, ownedPaths.messenger),
   )
 
   const dashboard = dashboardMarketRegionEvidence(
@@ -86,13 +81,19 @@ try {
     readRepoFile(STAGE4_ROUTE_CONTRACT_PATH, 'utf8'),
   )
 
-  console.log(`PASS Stage 4 protected baseline (${STAGE4_BASE_COMMIT}, tree ${STAGE4_BASE_TREE})`)
+  console.log(`PASS protected checkpoint anchor (${STAGE4_BASE_COMMIT}, tree ${STAGE4_BASE_TREE})`)
   console.log(
     `PASS Stage 4 Market runtime (${market.count} files, ${market.contentBytes} bytes, ${market.pathSetSha256}, ${market.sha256})`,
   )
-  console.log(
-    `PASS Stage 4 Messenger runtime (${messenger.count} files, ${messenger.contentBytes} bytes, ${messenger.pathSetSha256}, ${messenger.sha256})`,
-  )
+  if (messenger.kind === 'stage4-baseline') {
+    console.log(
+      `PASS Stage 4 Messenger runtime baseline (${messenger.evidence.count} files, ${messenger.evidence.contentBytes} bytes, ${messenger.evidence.pathSetSha256}, ${messenger.evidence.sha256})`,
+    )
+  } else {
+    console.log(
+      `PASS Stage 6 Messenger URL-privacy disposition (exact ${STAGE6_MESSENGER_URL_PRIVACY_ALLOWED_PATHS.length}-file overlay; ${messenger.evidence.count} files, ${messenger.evidence.contentBytes} bytes, ${messenger.evidence.pathSetSha256}, ${messenger.evidence.sha256})`,
+    )
+  }
   console.log(
     `PASS Stage 4 Home market interior (${dashboard.sections.length} sections, ${dashboard.bytes} bytes, ${dashboard.sha256})`,
   )
@@ -111,7 +112,7 @@ try {
   }
 } catch (error) {
   console.error(
-    `FAIL Stage 4 protected baseline: ${error instanceof Error ? error.message : String(error)}`,
+    `FAIL protected-surface guard: ${error instanceof Error ? error.message : String(error)}`,
   )
   process.exitCode = 1
 }

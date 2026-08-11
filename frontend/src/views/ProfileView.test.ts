@@ -124,7 +124,6 @@ describe('ProfileView.vue', () => {
     expect(routerPushMock).toHaveBeenNthCalledWith(5, {
       name: 'public-profile',
       params: { id: '99' },
-      query: { account_name: 'project-user' },
     })
     expect(routerPushMock).toHaveBeenNthCalledWith(6, { name: 'account' })
   })

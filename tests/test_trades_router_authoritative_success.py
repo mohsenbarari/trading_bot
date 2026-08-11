@@ -313,7 +313,7 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
                 "level": NotificationLevel.SUCCESS,
                 "category": NotificationCategory.TRADE,
                 "extra_payload": {
-                    "route": "/users/9?account_name=seller",
+                    "route": "/users/9",
                     "trade_number": 10000,
                     "settlement_type": "tomorrow",
                     "counterparty_profile_user_id": 9,
@@ -2448,7 +2448,7 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("حسابدار فروش", responder_notification)
         self.assertEqual(
             notif_mock.await_args_list[0].kwargs['extra_payload']['route'],
-            '/users/19?account_name=seller_owner&highlight_accountant_user_id=77&highlight_accountant_relation_display_name=%D8%AD%D8%B3%D8%A7%D8%A8%D8%AF%D8%A7%D8%B1+%D9%81%D8%B1%D9%88%D8%B4',
+            '/users/19',
         )
 
         trade_created_payload = self._private_trade_payload_for_user(owner_user.id)

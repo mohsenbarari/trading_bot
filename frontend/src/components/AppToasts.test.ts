@@ -33,6 +33,7 @@ describe('AppToasts.vue', () => {
     routerResolveMock.mockReset()
     routerResolveMock.mockImplementation((path: string) => ({
       name: path.startsWith('/missing') ? 'system-recovery' : 'resolved-toast',
+      fullPath: path,
       matched: path.startsWith('/missing') ? [] : [{ name: 'resolved-toast' }],
     }))
     routerCurrentRouteMock.value = { name: 'home', fullPath: '/' }
@@ -70,6 +71,31 @@ describe('AppToasts.vue', () => {
 
     expect(routerPushMock).toHaveBeenCalledWith('/notifications')
     expect(removeToastSpy).toHaveBeenCalledWith(1)
+  })
+
+  it('canonicalizes a query-bearing public-profile toast route before navigation', async () => {
+    const store = useNotificationStore()
+    store.activeToasts = [
+      {
+        id: 2,
+        title: 'پروفایل',
+        body: 'متن اعلان',
+        route: '/users/19?account_name=owner-19&highlight_accountant_user_id=55',
+        kind: 'app',
+      },
+    ]
+
+    const wrapper = mount(AppToasts, {
+      global: {
+        stubs: {
+          teleport: true,
+        },
+      },
+    })
+
+    await wrapper.get('.toast-card-floating__action--interactive').trigger('click')
+
+    expect(routerPushMock).toHaveBeenCalledWith('/users/19')
   })
 
   it('dismisses the toast when the close button is pressed', async () => {

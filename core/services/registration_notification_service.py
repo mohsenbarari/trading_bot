@@ -5,7 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 import logging
 from typing import Any, Callable
-from urllib.parse import quote
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -46,9 +45,7 @@ def project_user_joined_message(user: User | object) -> str:
 
 
 def project_user_profile_route(user: User | object) -> str:
-    account_name = (getattr(user, "account_name", "") or "").strip()
-    suffix = f"?account_name={quote(account_name)}" if account_name else ""
-    return f"/users/{user.id}{suffix}"
+    return f"/users/{user.id}"
 
 
 async def enqueue_project_user_joined_telegram_outbox(

@@ -744,7 +744,6 @@ describe('ChatView.vue', () => {
     expect(chatViewMocks.routerPushMock).toHaveBeenCalledWith({
       name: 'public-profile',
       params: { id: '91' },
-      query: { account_name: 'owner-91' },
     })
     hooks.handleTypingForCurrentRoom()
 
@@ -919,7 +918,6 @@ describe('ChatView.vue', () => {
     expect(chatViewMocks.routerPushMock).toHaveBeenCalledWith({
       name: 'public-profile',
       params: { id: '91' },
-      query: { account_name: 'owner-91' },
     })
 
     wrapper.unmount()
@@ -1207,11 +1205,6 @@ describe('ChatView.vue', () => {
     expect(chatViewMocks.routerPushMock).toHaveBeenCalledWith({
       name: 'public-profile',
       params: { id: '99' },
-      query: {
-        account_name: 'owner-99',
-        highlight_accountant_user_id: '55',
-        highlight_accountant_relation_display_name: 'حسابدار فروش',
-      },
     })
 
     wrapper.unmount()
@@ -3891,7 +3884,6 @@ describe('ChatView.vue', () => {
     expect(chatViewMocks.routerPushMock).toHaveBeenCalledWith({
       name: 'public-profile',
       params: { id: '7' },
-      query: undefined,
     })
 
     chatViewMocks.routerPushMock.mockClear()
@@ -3903,7 +3895,6 @@ describe('ChatView.vue', () => {
     expect(chatViewMocks.routerPushMock).toHaveBeenCalledWith({
       name: 'public-profile',
       params: { id: '77' },
-      query: { account_name: 'managed-user' },
     })
 
     wrapper.unmount()
@@ -3937,7 +3928,6 @@ describe('ChatView.vue', () => {
     expect(chatViewMocks.routerPushMock).toHaveBeenCalledWith({
       name: 'public-profile',
       params: { id: '55' },
-      query: { account_name: 'مخاطب مستقیم' },
     })
 
     wrapper.unmount()

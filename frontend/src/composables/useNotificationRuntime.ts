@@ -317,7 +317,8 @@ export function useNotificationRuntime({
     try {
       const resolved = router.resolve(safePath)
       if (!resolved.matched.length || resolved.name === 'system-recovery') return null
-      return validateIntendedRoute({ fullPath: resolved.fullPath })
+      const canonicalResolvedPath = validateIntendedRoute({ fullPath: resolved.fullPath })
+      return canonicalResolvedPath
     } catch {
       return null
     }

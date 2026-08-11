@@ -1,8 +1,14 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { nextTick } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 
 const routeRequestMock = vi.fn()
+const userProfileSource = readFileSync(
+  resolve(process.cwd(), 'src/components/UserProfile.vue'),
+  'utf8',
+)
 const userProfileTimingMocks = vi.hoisted(() => ({
   parseJalaliToIranISOMock: vi.fn(),
 }))
@@ -154,6 +160,28 @@ describe('UserProfile.vue authoritative admin actions', () => {
     routeRequestMock.mockReset()
     userProfileTimingMocks.parseJalaliToIranISOMock.mockReset()
     localStorage.clear()
+  })
+
+  it('preserves ordinary profile-control motion while disabling UserProfile action transitions for reduced motion', () => {
+    const profileControlRule = userProfileSource.match(/\.profile-control\s*\{([\s\S]*?)\n\}/)?.[1]
+    const reducedMotionRule = userProfileSource.match(
+      /@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{([\s\S]*?)\n\}/,
+    )?.[1]
+
+    expect(profileControlRule).toContain('transition: all 0.2s;')
+    expect(reducedMotionRule).toBeDefined()
+    for (const selector of [
+      '.form-select',
+      '.form-input',
+      '.save-btn',
+      '.cancel-btn',
+      '.profile-control',
+      '.duration-btn',
+      '.custom-date-trigger',
+    ]) {
+      expect(reducedMotionRule).toContain(selector)
+    }
+    expect(reducedMotionRule).toContain('transition: none;')
   })
 
   it('saves a role once, applies only the returned user, and never opens native dialogs', async () => {
@@ -828,5 +856,61 @@ describe('UserProfile.vue authoritative admin actions', () => {
     expect(user.max_sessions).toBe(1)
     expect(vm.editMaxSessions).toBe(1)
     expect(wrapper.get('.quota-feedback').attributes('role')).toBe('status')
+  })
+
+  it('shows a middle-manager self profile as read-only and never sends a sensitive mutation', async () => {
+    const wrapper = await mountProfile(makeUser({ id: 12, role: 'مدیر میانی' }), {
+      viewerUserId: 12,
+      viewerRole: 'مدیر میانی',
+    })
+
+    expect(wrapper.get('.admin-sensitive-readonly').text()).toContain('حساب خودتان')
+    expect(wrapper.find('.sessions-config-box').exists()).toBe(false)
+    expect(wrapper.find('.settings-btn').exists()).toBe(false)
+    expect(wrapper.find('.delete-btn').exists()).toBe(false)
+
+    const vm = wrapper.vm as unknown as { saveMaxSessions: () => Promise<void> }
+    await vm.saveMaxSessions()
+    expect(routeRequestMock).not.toHaveBeenCalled()
+  })
+
+  it('shows a super-admin peer profile as read-only and keeps the directory return available', async () => {
+    const wrapper = await mountProfile(makeUser({ id: 12, role: 'مدیر ارشد' }), {
+      viewerUserId: 99,
+      viewerRole: 'مدیر ارشد',
+    })
+
+    expect(wrapper.get('.admin-sensitive-readonly').text()).toContain('مدیر ارشد هم‌سطح')
+    expect(wrapper.find('.sessions-config-box').exists()).toBe(false)
+    expect(wrapper.find('.settings-btn').exists()).toBe(false)
+    expect(wrapper.find('.delete-btn').exists()).toBe(false)
+
+    await wrapper.get('.back-btn').trigger('click')
+    expect(wrapper.emitted('navigate')).toEqual([['manage_users']])
+  })
+
+  it('recovers from a server-authoritative 403 without mutating the displayed user', async () => {
+    const user = makeUser()
+    const wrapper = await mountProfile(user, {
+      viewerUserId: 99,
+      viewerRole: 'مدیر ارشد',
+    })
+    // A preceding regression intentionally resets the module graph. Use the
+    // class instance from this mounted component's runtime module graph.
+    const { AppHttpError } = await import('../utils/httpErrorPolicy')
+    routeRequestMock.mockRejectedValueOnce(new AppHttpError({
+      status: 403,
+      detail: 'اجازه ندارید',
+    }))
+
+    await openSettings(wrapper)
+    await findButtonByText(wrapper, 'ویرایش نقش').trigger('click')
+    await wrapper.get('.edit-section .form-select').setValue('پلیس')
+    await wrapper.get('.edit-section .save-btn').trigger('click')
+    await flushPromises()
+
+    expect(user.role).toBe('عادی')
+    expect(wrapper.get('.edit-section [role="alert"]').text()).toContain('اجازه تغییر این تنظیم حساس را ندارید')
+    expect(wrapper.find('.ui-confirm-dialog').exists()).toBe(false)
   })
 })

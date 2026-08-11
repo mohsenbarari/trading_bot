@@ -238,9 +238,26 @@ async function openMessenger(page: Page) {
   await expect(page.locator('.chat-header')).toBeVisible({ timeout: 30000 })
 }
 
+async function expectIdOnlyPublicProfileUrl(page: Page, userId: number) {
+  await expect
+    .poll(() => {
+      const url = new URL(page.url())
+      return {
+        pathname: url.pathname,
+        search: url.search,
+        hash: url.hash,
+      }
+    }, { timeout: 30000 })
+    .toEqual({
+      pathname: `/users/${userId}`,
+      search: '',
+      hash: '',
+    })
+}
+
 async function expectPublicProfileForUser(page: Page, userId: number, accountName: string) {
   const expectedProfileUrl = new RegExp(`/users/${userId}`)
-  const canonicalProfilePath = `/users/${userId}?account_name=${encodeURIComponent(accountName)}`
+  const publicProfilePath = `/users/${userId}`
   const profileView = page.locator('.public-profile-view')
   await page.waitForURL(expectedProfileUrl, { timeout: 7000 }).catch(() => {})
 
@@ -249,7 +266,7 @@ async function expectPublicProfileForUser(page: Page, userId: number, accountNam
 
   if (!hasLoadedProfile) {
     try {
-      await page.goto(canonicalProfilePath, { waitUntil: 'domcontentloaded' })
+      await page.goto(publicProfilePath, { waitUntil: 'domcontentloaded' })
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       if (!/ERR_ABORTED|interrupted by another navigation/i.test(message)) {
@@ -259,7 +276,7 @@ async function expectPublicProfileForUser(page: Page, userId: number, accountNam
     }
   }
 
-  await expect(page).toHaveURL(expectedProfileUrl, { timeout: 30000 })
+  await expectIdOnlyPublicProfileUrl(page, userId)
   await expect(profileView).toContainText(accountName, { timeout: 30000 })
 }
 
@@ -925,7 +942,7 @@ test.describe('Messenger room manager and public profile flows', () => {
     await openConversationListMenu(page)
     await page.locator('.header-dropdown-menu .header-menu-item').filter({ hasText: 'پروفایل عمومی من' }).click()
 
-    await expect(page).toHaveURL(new RegExp(`/users/${owner.userId}`))
+    await expectIdOnlyPublicProfileUrl(page, owner.userId)
     await expect(page.locator('.public-profile-view .profile-content')).toBeVisible({ timeout: 30000 })
 
     const profileInput = page.locator('.public-profile-view input.hidden-avatar-input')
@@ -966,7 +983,7 @@ test.describe('Messenger room manager and public profile flows', () => {
     await openConversationListMenu(page)
     await page.locator('.header-dropdown-menu .header-menu-item').filter({ hasText: 'پروفایل عمومی من' }).click()
 
-    await expect(page).toHaveURL(new RegExp(`/users/${owner.userId}`))
+    await expectIdOnlyPublicProfileUrl(page, owner.userId)
     await expect(page.locator('.public-profile-view .profile-content')).toBeVisible({ timeout: 30000 })
 
     const profileInput = page.locator('.public-profile-view input.hidden-avatar-input')
@@ -981,7 +998,7 @@ test.describe('Messenger room manager and public profile flows', () => {
     await openDirectConversationFromRoute(page, peer.userId, peer.accountName)
     await page.locator('.chat-header .header-user-info').last().click()
 
-    await expect(page).toHaveURL(new RegExp(`/users/${peer.userId}`))
+    await expectIdOnlyPublicProfileUrl(page, peer.userId)
     await expect(page.locator('.public-profile-view')).toContainText(peer.accountName)
 
     await page.goBack()

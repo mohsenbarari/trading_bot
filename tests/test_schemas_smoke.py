@@ -47,7 +47,7 @@ class SchemaSmokeTests(unittest.TestCase):
         self.assertEqual(token_pair.token_type, 'bearer')
         self.assertEqual(token_pair.expires_in, 1800)
 
-    def test_user_read_and_public_read_expose_jalali_helpers(self):
+    def test_user_read_exposes_jalali_helpers_and_public_read_stays_minimal(self):
         created_at = datetime(2026, 5, 1, 10, 30, 0)
         restricted_until = datetime(2026, 5, 2, 11, 45, 0)
         limitations_expire_at = datetime(2026, 5, 3, 12, 15, 0)
@@ -83,12 +83,8 @@ class SchemaSmokeTests(unittest.TestCase):
         public_user = UserPublicRead(
             id=1,
             account_name='demo-user',
-            role=UserRole.STANDARD,
             mobile_number='09123456789',
             address='Tehran',
-            created_at=created_at,
-            trades_count=7,
-            last_seen_at=None,
         )
 
         self.assertEqual(user.created_at_jalali, to_jalali_str(created_at))
@@ -96,7 +92,13 @@ class SchemaSmokeTests(unittest.TestCase):
         self.assertEqual(user.global_web_locked_at, locked_at)
         self.assertEqual(user.trading_restricted_until_jalali, to_jalali_str(restricted_until))
         self.assertEqual(user.limitations_expire_at_jalali, to_jalali_str(limitations_expire_at))
-        self.assertEqual(public_user.created_at_jalali, to_jalali_str(created_at))
+        self.assertEqual(public_user.model_dump(exclude_none=True), {
+            'id': 1,
+            'account_name': 'demo-user',
+            'mobile_number': '09123456789',
+            'address': 'Tehran',
+        })
+        self.assertNotIn('created_at_jalali', public_user.model_dump())
 
     def test_notification_read_exposes_level_category_and_jalali_helper(self):
         created_at = datetime(2026, 5, 4, 8, 0, 0)

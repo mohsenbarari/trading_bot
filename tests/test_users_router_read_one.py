@@ -84,6 +84,35 @@ class UsersRouterReadOneTests(unittest.IsolatedAsyncioTestCase):
             await read_user(7, db=FakeDB(None))
         self.assertEqual(exc_info.exception.status_code, 404)
 
+    async def test_middle_manager_can_read_own_admin_record(self):
+        user = make_user(id=7, role=UserRole.MIDDLE_MANAGER)
+        actor = SimpleNamespace(id=7, role=UserRole.MIDDLE_MANAGER)
+
+        result = await read_user(7, db=FakeDB(user), actor=actor)
+
+        self.assertEqual(result.id, 7)
+        self.assertEqual(result.role, UserRole.MIDDLE_MANAGER)
+
+    async def test_middle_manager_cannot_read_another_admin_record(self):
+        user = make_user(id=8, role=UserRole.MIDDLE_MANAGER)
+        actor = SimpleNamespace(id=7, role=UserRole.MIDDLE_MANAGER)
+
+        with self.assertRaises(HTTPException) as exc_info:
+            await read_user(8, db=FakeDB(user), actor=actor)
+
+        self.assertEqual(exc_info.exception.status_code, 403)
+        self.assertEqual(exc_info.exception.detail, "مدیر میانی فقط می‌تواند کاربران غیرادمین را مدیریت کند")
+
+    async def test_super_admin_can_read_self_and_super_admin_peer_records(self):
+        actor = SimpleNamespace(id=7, role=UserRole.SUPER_ADMIN)
+
+        for target_id in (7, 8):
+            with self.subTest(target_id=target_id):
+                user = make_user(id=target_id, role=UserRole.SUPER_ADMIN)
+                result = await read_user(target_id, db=FakeDB(user), actor=actor)
+                self.assertEqual(result.id, target_id)
+                self.assertEqual(result.role, UserRole.SUPER_ADMIN)
+
     async def test_read_user_enriches_customer_context_when_target_is_active_customer(self):
         owner_user = SimpleNamespace(id=20, account_name="owner20", is_deleted=False)
         relation = SimpleNamespace(

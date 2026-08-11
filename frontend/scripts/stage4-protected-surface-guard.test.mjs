@@ -10,6 +10,9 @@ import {
   MESSENGER_OMITTED_DIRECT_RUNTIME_PATHS,
   MESSENGER_RUNTIME_BASELINE,
   MESSENGER_RUNTIME_CONTRACT,
+  STAGE6_MESSENGER_URL_PRIVACY_ALLOWED_FILE_SHA256,
+  STAGE6_MESSENGER_URL_PRIVACY_ALLOWED_PATHS,
+  STAGE6_MESSENGER_URL_PRIVACY_EVIDENCE,
   STAGE4_BASE_COMMIT,
   STAGE4_BASE_TREE,
   STAGE4_ROUTE_CONTRACT_PATH,
@@ -25,6 +28,7 @@ import {
   isMessengerOwnedRuntimePath,
   protectedFileSetEvidence,
   readFileEntries,
+  resolveMessengerRuntimeDisposition,
 } from './lib/stage4-protected-surface-guard.mjs'
 import {
   DASHBOARD_MARKET_REGION_PATH,
@@ -63,17 +67,41 @@ describe('Stage 4 protected surface baseline', () => {
     ).toMatchObject(MARKET_RUNTIME_BASELINE)
   })
 
-  it('binds the complete Messenger runtime and every formerly omitted direct dependency', () => {
+  it('keeps the immutable Stage 4 Messenger baseline and every formerly omitted direct dependency', () => {
     for (const repoPath of MESSENGER_OMITTED_DIRECT_RUNTIME_PATHS) {
       expect(ownedPaths.messenger).toContain(repoPath)
     }
-    expect(
-      assertProtectedFileSetEvidence(
-        'Messenger runtime',
-        currentEvidence(ownedPaths.messenger, MESSENGER_RUNTIME_CONTRACT),
-        MESSENGER_RUNTIME_BASELINE,
-      ),
-    ).toMatchObject(MESSENGER_RUNTIME_BASELINE)
+    expect(MESSENGER_RUNTIME_BASELINE).toEqual({
+      count: 85,
+      contentBytes: 1312405,
+      pathSetSha256: 'f6af1f961e45d785ba9c752ee670643571086c6a946843807fe6f581d11aea58',
+      sha256: 'f66debf9809180d97b2bac98f5195ba24200d3b61b0d8e0e5cd423a8a7b97248',
+    })
+    expect(Object.isFrozen(MESSENGER_RUNTIME_BASELINE)).toBe(true)
+  })
+
+  it('permits only the exact Stage 6 Messenger URL-privacy disposition', () => {
+    const entries = readFileEntries(repoRoot, ownedPaths.messenger)
+    const actual = currentEvidence(ownedPaths.messenger, MESSENGER_RUNTIME_CONTRACT)
+    const disposition = resolveMessengerRuntimeDisposition(entries)
+
+    expect(actual).not.toMatchObject(MESSENGER_RUNTIME_BASELINE)
+    expect(disposition).toMatchObject({
+      kind: 'stage6-url-privacy',
+      evidence: STAGE6_MESSENGER_URL_PRIVACY_EVIDENCE,
+    })
+    expect(STAGE6_MESSENGER_URL_PRIVACY_ALLOWED_PATHS).toEqual([
+      'frontend/src/components/ChatView.vue',
+      'frontend/src/components/CreateChannelView.vue',
+      'frontend/src/views/MessengerView.vue',
+    ])
+    for (const entry of entries.filter(({ path: repoPath }) =>
+      STAGE6_MESSENGER_URL_PRIVACY_ALLOWED_PATHS.includes(repoPath),
+    )) {
+      expect(fileSha256(entry.content)).toBe(
+        STAGE6_MESSENGER_URL_PRIVACY_ALLOWED_FILE_SHA256[entry.path],
+      )
+    }
   })
 
   it('fails closed for protected runtime content and path-set drift', () => {
@@ -98,6 +126,46 @@ describe('Stage 4 protected surface baseline', () => {
         MESSENGER_RUNTIME_CONTRACT,
       ),
     ).toThrow(/duplicates/)
+  })
+
+  it('fails closed if an allowed Stage 6 privacy file changes by even one byte', () => {
+    const entries = readFileEntries(repoRoot, ownedPaths.messenger)
+    const mutationPath = 'frontend/src/components/ChatView.vue'
+    const mutated = entries.map((entry) =>
+      entry.path === mutationPath
+        ? { ...entry, content: Buffer.concat([entry.content, Buffer.from('\n// drift')]) }
+        : entry,
+    )
+
+    expect(() => resolveMessengerRuntimeDisposition(mutated)).toThrow(
+      /Stage 6 Messenger URL-privacy allowed file drift: frontend\/src\/components\/ChatView\.vue/,
+    )
+  })
+
+  it('fails closed if an unlisted Stage 6 Messenger file changes or appears', () => {
+    const entries = readFileEntries(repoRoot, ownedPaths.messenger)
+    const unlistedPath = entries.find(
+      ({ path: repoPath }) => !STAGE6_MESSENGER_URL_PRIVACY_ALLOWED_PATHS.includes(repoPath),
+    ).path
+    const changedUnlisted = entries.map((entry) =>
+      entry.path === unlistedPath
+        ? { ...entry, content: Buffer.concat([entry.content, Buffer.from('\n// drift')]) }
+        : entry,
+    )
+    const addedUnlisted = [
+      ...entries,
+      {
+        path: 'frontend/src/components/chat/Stage6UnlistedPrivacyDrift.vue',
+        content: Buffer.from('<template />'),
+      },
+    ]
+
+    expect(() => resolveMessengerRuntimeDisposition(changedUnlisted)).toThrow(
+      /Stage 6 URL-privacy disposition rejected .*contentBytes drift/,
+    )
+    expect(() => resolveMessengerRuntimeDisposition(addedUnlisted)).toThrow(
+      /Stage 6 URL-privacy disposition rejected .*count drift/,
+    )
   })
 
   it('discovers new owned files while leaving unrelated Stage 4 files outside the full freeze', () => {
