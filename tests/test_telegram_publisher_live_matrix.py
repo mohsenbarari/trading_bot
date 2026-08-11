@@ -1,8 +1,10 @@
 import unittest
 from collections import Counter
+from types import SimpleNamespace
 
 from scripts.run_telegram_publisher_live_matrix import (
     MATRIX_INGRESS_INTERVAL_SECONDS,
+    _is_ignorable_historical_private_job,
     build_live_matrix_workload,
 )
 
@@ -59,6 +61,32 @@ class TelegramPublisherLiveMatrixTests(unittest.TestCase):
                 webapp_offers=400,
                 interaction_count=10,
                 ingress_interval_seconds=0.51,
+            )
+
+    def test_ignores_only_unclaimable_legacy_private_repeat_jobs(self):
+        allowed = SimpleNamespace(
+            state="ambiguous_unresolved",
+            action_kind="offer_repeat_response",
+            destination_class="private",
+            destination_key="private:user:123",
+        )
+        self.assertTrue(_is_ignorable_historical_private_job(allowed))
+
+        for changed in (
+            {"state": "pending_retry"},
+            {"action_kind": "trade_response"},
+            {"destination_class": "channel"},
+            {"destination_key": "admin:123"},
+        ):
+            payload = {
+                "state": "ambiguous_unresolved",
+                "action_kind": "offer_repeat_response",
+                "destination_class": "private",
+                "destination_key": "private:user:123",
+            }
+            payload.update(changed)
+            self.assertFalse(
+                _is_ignorable_historical_private_job(SimpleNamespace(**payload))
             )
 
 

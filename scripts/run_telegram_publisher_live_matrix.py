@@ -29,12 +29,16 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, select
 
 from core.config import settings
 from core.db import AsyncSessionLocal
 from core.server_routing import SERVER_FOREIGN, SERVER_IRAN, current_server, override_current_server
-from core.telegram_delivery_queue_contract import TelegramDeliveryAction, TelegramDeliveryState
+from core.telegram_delivery_queue_contract import (
+    TelegramDeliveryAction,
+    TelegramDeliveryState,
+    TelegramDestinationClass,
+)
 from core.telegram_delivery_runtime_policy import (
     TelegramDeliveryRuntimeMode,
     configured_telegram_delivery_runtime,
@@ -111,6 +115,19 @@ _OVERTIME_SCENARIOS = frozenset(
 _DIRECT_TRADE_SCENARIOS = frozenset(
     {"direct_wholesale_trade", "direct_retail_lot_trade"}
 )
+
+
+def _is_ignorable_historical_private_job(job: Any) -> bool:
+    """Narrow staging-only exception for unclaimable legacy probe artifacts."""
+    return (
+        _value(getattr(job, "state", None))
+        == TelegramDeliveryState.AMBIGUOUS_UNRESOLVED.value
+        and _value(getattr(job, "action_kind", None))
+        == TelegramDeliveryAction.OFFER_REPEAT_RESPONSE.value
+        and _value(getattr(job, "destination_class", None))
+        == TelegramDestinationClass.PRIVATE.value
+        and str(getattr(job, "destination_key", "")).startswith("private:user:")
+    )
 
 
 def _value(value: Any) -> str:
@@ -214,6 +231,7 @@ class MatrixRun:
     timelines: list[OfferTimeline] = field(default_factory=list)
     interactions: list[InteractionTimeline] = field(default_factory=list)
     lifecycle_actions: list[LifecycleActionTimeline] = field(default_factory=list)
+    ignored_historical_private_job_count: int = 0
     phase: str = "preflight"
     failure_reason: str | None = None
 
@@ -347,6 +365,7 @@ def _report_payload(run: MatrixRun) -> dict[str, Any]:
             },
             "publisher_lanes": list(TELEGRAM_PUBLISHER_IDENTITIES),
             "channel_destination_min_interval_seconds": MATRIX_DESTINATION_MIN_INTERVAL_SECONDS,
+            "ignored_historical_private_job_count": run.ignored_historical_private_job_count,
         },
         "summary": {
             "offers_created": len(timelines),
@@ -390,7 +409,7 @@ def _write_audit(run: MatrixRun) -> Path:
     return path
 
 
-async def _assert_live_preflight() -> tuple[int, tuple[str, ...]]:
+async def _assert_live_preflight() -> tuple[int, tuple[str, ...], int]:
     if str(getattr(settings, "environment", "")).strip().lower() != "staging":
         raise LiveMatrixError("live_matrix_requires_staging_environment")
     if current_server() != SERVER_FOREIGN:
@@ -416,10 +435,28 @@ async def _assert_live_preflight() -> tuple[int, tuple[str, ...]]:
             await db.scalar(select(func.count(Offer.id)).where(Offer.status == OfferStatus.ACTIVE))
             or 0
         )
+        legacy_private_probe_job = and_(
+            TelegramDeliveryJobRecord.state
+            == TelegramDeliveryState.AMBIGUOUS_UNRESOLVED,
+            TelegramDeliveryJobRecord.action_kind
+            == TelegramDeliveryAction.OFFER_REPEAT_RESPONSE,
+            TelegramDeliveryJobRecord.destination_class
+            == TelegramDestinationClass.PRIVATE,
+            TelegramDeliveryJobRecord.destination_key.like("private:user:%"),
+        )
         active_jobs = int(
             await db.scalar(
                 select(func.count(TelegramDeliveryJobRecord.id)).where(
-                    TelegramDeliveryJobRecord.state.notin_(tuple(_FINAL_JOB_STATES))
+                    TelegramDeliveryJobRecord.state.notin_(tuple(_FINAL_JOB_STATES)),
+                    ~legacy_private_probe_job,
+                )
+            )
+            or 0
+        )
+        ignored_historical_private_job_count = int(
+            await db.scalar(
+                select(func.count(TelegramDeliveryJobRecord.id)).where(
+                    legacy_private_probe_job
                 )
             )
             or 0
@@ -429,7 +466,7 @@ async def _assert_live_preflight() -> tuple[int, tuple[str, ...]]:
     if active_jobs:
         raise LiveMatrixError("live_matrix_active_delivery_jobs_must_be_empty")
     await _assert_quiet_outbox()
-    return channel_id, lanes
+    return channel_id, lanes, ignored_historical_private_job_count
 
 
 async def _load_offer_metadata(offer_id: int) -> tuple[str, str, str, int]:
@@ -1220,7 +1257,11 @@ async def run_live_matrix(args: argparse.Namespace) -> dict[str, Any]:
     interaction_task: asyncio.Task[None] | None = None
     visibility_tasks: list[asyncio.Task[None]] = []
     try:
-        _channel_id, _lanes = await _assert_live_preflight()
+        (
+            _channel_id,
+            _lanes,
+            run.ignored_historical_private_job_count,
+        ) = await _assert_live_preflight()
         run.phase = "preflight_passed"
         _write_audit(run)
         if args.preflight_only:
