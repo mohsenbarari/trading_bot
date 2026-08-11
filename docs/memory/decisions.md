@@ -2,6 +2,8 @@
 
 Entries are newest first.
 
+- 2026-08-11 | Publication-candidate scans exclude an existing non-final `offer_control`/`offer_publish` job for the same offer. Reason: repeatedly deduplicating head rows delays central ingress behind channel delivery and can let queued offers age out before worker admission.
+- 2026-08-11 | Queue-v1 bot-interaction probes model the authenticated inbound message's private chat and positive message identity. Reason: the durable interaction adapter must reject an unanchored or cross-chat reply just as it does in production.
 - 2026-08-11 | A new Queue-v1 offer leaves its Telegram publication state unassigned only when multi-publisher B2B is enabled; the foreign feeder atomically selects and persists one healthy publisher lane, which owns every later channel edit. Legacy and B2B-disabled routes retain `primary`. Reason: preassigning `primary` at registration bypasses lane selection and collapses all new posts onto the central bot.
 - 2026-08-11 | Telegram resume clears the shared destination cadence plus only the preflight-approved lane blocks. Reason: recovery must not hard-code lane names or release an unrelated publisher.
 - 2026-08-11 | Every offer publish/edit job must match its persisted publication owner before provider execution; callback acknowledgements stay on the bot that received them. Reason: Telegram cannot safely transfer an interactive post's lifecycle across bot identities.
