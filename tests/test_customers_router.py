@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from fastapi import HTTPException
+from fastapi import FastAPI, HTTPException
 
 import schemas
 from api.routers.customers import (
@@ -13,6 +13,7 @@ from api.routers.customers import (
     create_my_customer,
     get_active_customer_session,
     get_active_owner_customer_relation,
+    get_my_customer_relation,
     get_my_customer_trade_stats,
     list_my_customers,
     list_my_customer_sessions,
@@ -20,6 +21,7 @@ from api.routers.customers import (
     terminate_my_customer_session,
     unlink_my_customer,
     update_my_customer,
+    router as customers_router,
 )
 from core.customer_invite import build_customer_invite_idempotency_key
 from core.registration_contracts import InvitationSMSStatus
@@ -95,6 +97,20 @@ class LazyCustomerRelation(SimpleNamespace):
 
 
 class CustomersRouterTests(unittest.IsolatedAsyncioTestCase):
+    def test_unlink_owner_customer_requires_validated_expected_action_query(self):
+        app = FastAPI()
+        app.include_router(customers_router)
+        operation = app.openapi()["paths"]["/owner-relations/{relation_id}"]["delete"]
+        parameter = next(
+            item for item in operation["parameters"] if item["name"] == "expected_action"
+        )
+        schema = parameter["schema"]
+        self.assertTrue(parameter["required"])
+        self.assertEqual(
+            set(schema["enum"]),
+            {"cancel-pending", "delete-relation", "delete-account"},
+        )
+
     async def test_internal_bot_customer_invite_maps_requester_resolution_failures(self):
         payload = schemas.InternalCustomerInviteRequest(
             owner_identity={
@@ -513,18 +529,67 @@ class CustomersRouterTests(unittest.IsolatedAsyncioTestCase):
         with patch(
             "api.routers.customers.unlink_owner_customer_relation",
             new=AsyncMock(return_value=relation),
-        ), patch(
+        ) as unlink_mock, patch(
             "api.routers.customers.load_customer_relation_invitation_map",
             new=AsyncMock(return_value={}),
         ), patch(
             "api.routers.customers.public_webapp_url_for_links",
             return_value="https://app.example",
         ):
-            result = await unlink_my_customer(9, context=context, db=FakeDB())
+            result = await unlink_my_customer(
+                9,
+                "cancel-pending",
+                context=context,
+                db=FakeDB(),
+            )
 
         self.assertEqual(result["id"], 9)
         self.assertIsNone(result["registration_link"])
         self.assertIsNone(result["web_registration_link"])
+        unlink_mock.assert_awaited_once_with(
+            unittest.mock.ANY,
+            owner_user_id=7,
+            relation_id=9,
+            expected_action="cancel-pending",
+        )
+
+    async def test_get_owner_customer_relation_returns_terminal_relation_for_owner(self):
+        relation = SimpleNamespace(
+            id=19,
+            owner_user_id=7,
+            customer_user_id=12,
+            customer_user=SimpleNamespace(account_name="cust-terminal"),
+            management_name="مشتری پایان‌یافته",
+            customer_tier=CustomerTier.TIER_1,
+            commission_rate=None,
+            min_trade_quantity=None,
+            max_trade_quantity=None,
+            max_daily_trades=None,
+            max_daily_commodity_volume=None,
+            status=CustomerRelationStatus.DELETED,
+            invitation_token="CUST-terminal",
+            expires_at=datetime.utcnow() - timedelta(days=2),
+            activated_at=datetime.utcnow() - timedelta(days=3),
+            deleted_at=datetime.utcnow() - timedelta(days=1),
+            created_at=datetime.utcnow() - timedelta(days=4),
+        )
+        context = SimpleNamespace(is_accountant_context=False, owner_user=SimpleNamespace(id=7))
+
+        with patch(
+            "api.routers.customers.get_owner_customer_relation",
+            new=AsyncMock(return_value=relation),
+        ) as get_mock, patch(
+            "api.routers.customers.load_customer_relation_invitation_map",
+            new=AsyncMock(return_value={}),
+        ), patch(
+            "api.routers.customers.public_webapp_url_for_links",
+            return_value="https://app.example",
+        ):
+            result = await get_my_customer_relation(19, context=context, db=FakeDB())
+
+        get_mock.assert_awaited_once_with(unittest.mock.ANY, owner_user_id=7, relation_id=19)
+        self.assertEqual(result["status"], CustomerRelationStatus.DELETED)
+        self.assertEqual(result["id"], 19)
 
     async def test_update_owner_customer_returns_serialized_relation(self):
         stale_relation = SimpleNamespace(

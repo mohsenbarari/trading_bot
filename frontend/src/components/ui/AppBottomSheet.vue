@@ -3,15 +3,36 @@ import { computed, ref, toRef } from 'vue'
 import AppButton from './AppButton.vue'
 import { useOverlayA11y } from './useOverlayA11y'
 
-const props = withDefaults(defineProps<{
-  open: boolean
-  title: string
-  description?: string
-  closeLabel?: string
-}>(), {
-  description: '',
-  closeLabel: 'بستن',
-})
+type ClassValue = string | string[] | Record<string, boolean>
+
+const props = withDefaults(
+  defineProps<{
+    open: boolean
+    title: string
+    description?: string
+    closeLabel?: string
+    showClose?: boolean
+    closeOnBackdrop?: boolean
+    closeOnEscape?: boolean
+    teleportTo?: string | HTMLElement
+    backdropClass?: ClassValue
+    panelClass?: ClassValue
+    bodyClass?: ClassValue
+    actionsClass?: ClassValue
+  }>(),
+  {
+    description: '',
+    closeLabel: 'بستن',
+    showClose: true,
+    closeOnBackdrop: true,
+    closeOnEscape: true,
+    teleportTo: 'body',
+    backdropClass: '',
+    panelClass: '',
+    bodyClass: '',
+    actionsClass: '',
+  },
+)
 
 const emit = defineEmits<{
   close: []
@@ -24,15 +45,28 @@ const { titleId, descriptionId, ariaDescriptionId } = useOverlayA11y({
   description: computed(() => props.description || undefined),
   containerRef,
   close: () => emit('close'),
+  closeOnEscape: toRef(props, 'closeOnEscape'),
 })
+
+function handleBackdropClick() {
+  if (props.closeOnBackdrop) {
+    emit('close')
+  }
+}
 </script>
 
 <template>
-  <Teleport to="body">
-    <div v-if="open" class="ui-sheet-backdrop" @click.self="$emit('close')">
+  <Teleport :to="teleportTo" defer>
+    <div
+      v-if="open"
+      class="ui-sheet-backdrop"
+      :class="backdropClass"
+      @click.self="handleBackdropClick"
+    >
       <section
         ref="containerRef"
         class="ui-bottom-sheet"
+        :class="panelClass"
         role="dialog"
         aria-modal="true"
         :aria-labelledby="titleId"
@@ -44,12 +78,14 @@ const { titleId, descriptionId, ariaDescriptionId } = useOverlayA11y({
             <h2 :id="titleId">{{ title }}</h2>
             <p v-if="description" :id="descriptionId">{{ description }}</p>
           </div>
-          <AppButton variant="ghost" size="sm" @click="$emit('close')">{{ closeLabel }}</AppButton>
+          <AppButton v-if="showClose" variant="ghost" size="sm" @click="$emit('close')">{{
+            closeLabel
+          }}</AppButton>
         </header>
-        <div class="ui-bottom-sheet__body">
+        <div class="ui-bottom-sheet__body" :class="bodyClass">
           <slot />
         </div>
-        <footer v-if="$slots.actions" class="ui-bottom-sheet__actions">
+        <footer v-if="$slots.actions" class="ui-bottom-sheet__actions" :class="actionsClass">
           <slot name="actions" />
         </footer>
       </section>

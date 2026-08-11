@@ -1,6 +1,14 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
-import { BarChart3, ChevronLeft, ReceiptText, ShieldCheck, SlidersHorizontal, UserPlus, Users } from 'lucide-vue-next'
+import {
+  BarChart3,
+  ChevronLeft,
+  ReceiptText,
+  ShieldCheck,
+  SlidersHorizontal,
+  UserPlus,
+  Users,
+} from 'lucide-vue-next'
 import {
   buildCustomerPayload,
   createOwnerCustomerRelation,
@@ -29,15 +37,18 @@ import { tradeSettlementLabel } from '../utils/settlementType'
 import CustomerNameWithBadge from './CustomerNameWithBadge.vue'
 import HelpPopover from './HelpPopover.vue'
 
-const props = withDefaults(defineProps<{
-  presentation?: 'modal' | 'workspace'
-  initialRelationId?: string | number | null
-  initialPanel?: string | null
-}>(), {
-  presentation: 'modal',
-  initialRelationId: null,
-  initialPanel: null,
-})
+const props = withDefaults(
+  defineProps<{
+    presentation?: 'modal' | 'workspace'
+    initialRelationId?: string | number | null
+    initialPanel?: string | null
+  }>(),
+  {
+    presentation: 'modal',
+    initialRelationId: null,
+    initialPanel: null,
+  },
+)
 
 const emit = defineEmits<{
   (e: 'close'): void
@@ -45,7 +56,12 @@ const emit = defineEmits<{
   (e: 'back-to-list'): void
 }>()
 
-type DetailSection = 'detailOverview' | 'detailTrades' | 'detailStats' | 'detailSessions' | 'detailDanger'
+type DetailSection =
+  | 'detailOverview'
+  | 'detailTrades'
+  | 'detailStats'
+  | 'detailSessions'
+  | 'detailDanger'
 
 function makeEmptyCreateForm() {
   return makeEmptyCustomerCreateForm()
@@ -128,12 +144,13 @@ function showViewportToast(type: 'success' | 'error' | 'info', text: string, tim
   if (viewportToastTimer !== null && typeof window !== 'undefined') {
     window.clearTimeout(viewportToastTimer)
   }
-  viewportToastTimer = typeof window !== 'undefined'
-    ? window.setTimeout(() => {
-        viewportToast.value = null
-        viewportToastTimer = null
-      }, timeoutMs)
-    : null
+  viewportToastTimer =
+    typeof window !== 'undefined'
+      ? window.setTimeout(() => {
+          viewportToast.value = null
+          viewportToastTimer = null
+        }, timeoutMs)
+      : null
 }
 
 function clearViewportToast() {
@@ -156,12 +173,12 @@ const selectedRelation = computed(() => {
 
 const selectedRelationTrades = computed(() => {
   const relationId = selectedRelation.value?.id
-  return relationId == null ? [] : tradesByRelationId.value[relationId] ?? []
+  return relationId == null ? [] : (tradesByRelationId.value[relationId] ?? [])
 })
 
 const selectedRelationStats = computed(() => {
   const relationId = selectedRelation.value?.id
-  return relationId == null ? null : statsByRelationId.value[relationId] ?? null
+  return relationId == null ? null : (statsByRelationId.value[relationId] ?? null)
 })
 
 function formatDateTime(value: string | null) {
@@ -241,18 +258,21 @@ function formatCommissionRate(value: string | number | null | undefined) {
 }
 
 function getCommissionPreviewText(value: string | number | null | undefined) {
-  const amount = 100_000_000 * normalizeCommissionRate(value) / 100
+  const amount = (100_000_000 * normalizeCommissionRate(value)) / 100
   return `نرخ کمیسیون شما به ازای هر ۱۰۰ میلیون ${formatMoneyToman(amount)} می‌باشد.`
 }
 
 const createCommissionPreview = computed(() => getCommissionPreviewText(createForm.commission_rate))
 
 function adjustCreateCommission(delta: number) {
-  createForm.commission_rate = formatCommissionRate(normalizeCommissionRate(createForm.commission_rate) + delta)
+  createForm.commission_rate = formatCommissionRate(
+    normalizeCommissionRate(createForm.commission_rate) + delta,
+  )
 }
 
 function adjustDetailCommission(delta: number) {
-  const baseValue = detailEditForm.commission_rate || selectedRelation.value?.commission_rate || '0.50'
+  const baseValue =
+    detailEditForm.commission_rate || selectedRelation.value?.commission_rate || '0.50'
   detailEditForm.commission_rate = formatCommissionRate(normalizeCommissionRate(baseValue) + delta)
 }
 
@@ -323,13 +343,15 @@ function stopCountdownTimer() {
 }
 
 function statusLabel(status: RelationStatus) {
-  return {
-    pending: 'در انتظار ثبت‌نام',
-    active: 'فعال',
-    expired: 'منقضی‌شده',
-    revoked: 'لغوشده',
-    deleted: 'حذف‌شده',
-  }[status] || status
+  return (
+    {
+      pending: 'در انتظار ثبت‌نام',
+      active: 'فعال',
+      expired: 'منقضی‌شده',
+      revoked: 'لغوشده',
+      deleted: 'حذف‌شده',
+    }[status] || status
+  )
 }
 
 const orderedRelations = computed(() => {
@@ -345,9 +367,13 @@ const orderedRelations = computed(() => {
   })
 })
 
-const pendingInvitationRelations = computed(() => orderedRelations.value.filter((relation) => relation.status === 'pending'))
+const pendingInvitationRelations = computed(() =>
+  orderedRelations.value.filter((relation) => relation.status === 'pending'),
+)
 
-const manageableRelations = computed(() => orderedRelations.value.filter((relation) => relation.status !== 'pending'))
+const manageableRelations = computed(() =>
+  orderedRelations.value.filter((relation) => relation.status !== 'pending'),
+)
 
 async function loadRelations() {
   isLoading.value = true
@@ -391,7 +417,10 @@ async function toggleSessionPanel(relation: CustomerRelation) {
   await loadSessionsForRelation(relation.id)
 }
 
-async function terminateCustomerSession(relation: CustomerRelation, session: CustomerSessionSummary) {
+async function terminateCustomerSession(
+  relation: CustomerRelation,
+  session: CustomerSessionSummary,
+) {
   if (terminatingSessionId.value === session.id) return
   if (!window.confirm(`نشست «${session.device_name || 'دستگاه مشتری'}» پایان یابد؟`)) return
 
@@ -454,7 +483,9 @@ function buildDetailUpdatePayload(relation: CustomerRelation) {
 function applyRelationsSnapshot(snapshot: CustomerRelation[]) {
   relations.value = snapshot
   if (openSessionsRelationId.value !== null) {
-    const openRelation = relations.value.find((relation) => relation.id === openSessionsRelationId.value)
+    const openRelation = relations.value.find(
+      (relation) => relation.id === openSessionsRelationId.value,
+    )
     if (!openRelation || openRelation.status !== 'active' || !openRelation.customer_user_id) {
       openSessionsRelationId.value = null
     }
@@ -490,7 +521,11 @@ function applyInitialRouteState() {
   if (props.initialPanel === 'create') {
     openSections.create = true
     openSections.relations = false
-  } else if (props.initialPanel === 'pending' || props.initialPanel === 'manage' || props.initialPanel === 'relations') {
+  } else if (
+    props.initialPanel === 'pending' ||
+    props.initialPanel === 'manage' ||
+    props.initialPanel === 'relations'
+  ) {
     openSections.relations = true
   }
 }
@@ -499,7 +534,10 @@ async function fetchRelationsSnapshot(options: { retryNetwork?: boolean } = {}) 
   return fetchOwnerCustomerRelations(options)
 }
 
-function relationMatchesDetailPayload(relation: CustomerRelation, payload: ReturnType<typeof buildDetailUpdatePayload>) {
+function relationMatchesDetailPayload(
+  relation: CustomerRelation,
+  payload: ReturnType<typeof buildDetailUpdatePayload>,
+) {
   return Object.entries(payload).every(([key, expected]) => {
     const current = relation[key as keyof CustomerRelation]
     if (expected == null) {
@@ -513,12 +551,17 @@ function relationMatchesDetailPayload(relation: CustomerRelation, payload: Retur
 }
 
 function isNetworkMutationError(err: any) {
-  return err?.message === 'NetworkError' ||
+  return (
+    err?.message === 'NetworkError' ||
     err?.message === 'خطا در ارتباط با سرور.' ||
     err?.message?.toLowerCase?.().includes('network')
+  )
 }
 
-async function recoverSavedDetailAfterNetworkError(relationId: number, payload: ReturnType<typeof buildDetailUpdatePayload>) {
+async function recoverSavedDetailAfterNetworkError(
+  relationId: number,
+  payload: ReturnType<typeof buildDetailUpdatePayload>,
+) {
   const snapshot = await fetchRelationsSnapshot({ retryNetwork: false })
   applyRelationsSnapshot(snapshot)
   const updated = snapshot.find((relation) => relation.id === relationId)
@@ -565,9 +608,10 @@ async function saveDetailEdit() {
   notice.value = ''
   detailSaveNotice.value = ''
   const abortController = typeof AbortController !== 'undefined' ? new AbortController() : null
-  const timeoutId = typeof window !== 'undefined' && abortController
-    ? window.setTimeout(() => abortController.abort(), 15000)
-    : null
+  const timeoutId =
+    typeof window !== 'undefined' && abortController
+      ? window.setTimeout(() => abortController.abort(), 15000)
+      : null
 
   try {
     const updated = await updateOwnerCustomerRelation(relation.id, payload, {
@@ -596,11 +640,12 @@ async function saveDetailEdit() {
         // The mutation result could not be verified; keep the visible message concise below.
       }
     }
-    error.value = err?.name === 'AbortError'
-      ? 'ذخیره تنظیمات بیش از حد انتظار طول کشید. اگر تغییرات اعمال شده‌اند، صفحه مشتری را دوباره باز کنید.'
-      : isNetworkMutationError(err)
-        ? 'ارتباط با سرور هنگام تأیید ذخیره قطع شد. تغییرات را دوباره بررسی کنید.'
-        : err?.message || 'ویرایش مشتری ناموفق بود.'
+    error.value =
+      err?.name === 'AbortError'
+        ? 'ذخیره تنظیمات بیش از حد انتظار طول کشید. اگر تغییرات اعمال شده‌اند، صفحه مشتری را دوباره باز کنید.'
+        : isNetworkMutationError(err)
+          ? 'ارتباط با سرور هنگام تأیید ذخیره قطع شد. تغییرات را دوباره بررسی کنید.'
+          : err?.message || 'ویرایش مشتری ناموفق بود.'
     showViewportToast('error', error.value)
   } finally {
     if (timeoutId !== null) {
@@ -623,14 +668,26 @@ async function unlinkRelation(relation: CustomerRelation) {
   error.value = ''
   notice.value = ''
   try {
-    await deleteOwnerCustomerRelation(relation.id, isPending ? 'لغو دعوت مشتری ناموفق بود.' : 'قطع ارتباط مشتری ناموفق بود.')
+    const expectedAction = isPending
+      ? 'cancel-pending'
+      : relation.customer_user_id
+        ? 'delete-account'
+        : 'delete-relation'
+    await deleteOwnerCustomerRelation(
+      relation.id,
+      expectedAction,
+      isPending ? 'لغو دعوت مشتری ناموفق بود.' : 'قطع ارتباط مشتری ناموفق بود.',
+    )
     relations.value = relations.value.filter((item) => item.id !== relation.id)
     if (openSessionsRelationId.value === relation.id) {
       openSessionsRelationId.value = null
     }
-    notice.value = isPending ? 'دعوت مشتری لغو شد.' : 'ارتباط مشتری قطع شد و دسترسی او غیرفعال گردید.'
+    notice.value = isPending
+      ? 'دعوت مشتری لغو شد.'
+      : 'ارتباط مشتری قطع شد و دسترسی او غیرفعال گردید.'
   } catch (err: any) {
-    error.value = err?.message || (isPending ? 'لغو دعوت مشتری ناموفق بود.' : 'قطع ارتباط مشتری ناموفق بود.')
+    error.value =
+      err?.message || (isPending ? 'لغو دعوت مشتری ناموفق بود.' : 'قطع ارتباط مشتری ناموفق بود.')
   }
 }
 
@@ -699,7 +756,8 @@ async function loadCustomerTrades(relationId: number, options?: { force?: boolea
 async function loadCustomerStats(relationId: number, options?: { force?: boolean }) {
   const relation = relations.value.find((item) => item.id === relationId)
   if (!relation?.customer_user_id) return
-  if (!options?.force && statsByRelationId.value[relationId]?.period_days === statsPeriodDays.value) return
+  if (!options?.force && statsByRelationId.value[relationId]?.period_days === statsPeriodDays.value)
+    return
   loadingStatsRelationId.value = relationId
   error.value = ''
   try {
@@ -725,7 +783,11 @@ async function toggleDetailSection(section: DetailSection) {
     await loadCustomerTrades(relation.id)
   } else if (section === 'detailStats') {
     await loadCustomerStats(relation.id)
-  } else if (section === 'detailSessions' && relation.status === 'active' && relation.customer_user_id) {
+  } else if (
+    section === 'detailSessions' &&
+    relation.status === 'active' &&
+    relation.customer_user_id
+  ) {
     openSessionsRelationId.value = relation.id
     await loadSessionsForRelation(relation.id)
   }
@@ -792,7 +854,12 @@ onBeforeUnmount(() => {
         :class="{ 'customer-manager-shell--workspace': isWorkspace }"
       >
         <div v-if="!isWorkspace" class="customer-owner-header">
-          <button type="button" class="customer-manager-back" aria-label="بازگشت" @click="closeManager">
+          <button
+            type="button"
+            class="customer-manager-back"
+            aria-label="بازگشت"
+            @click="closeManager"
+          >
             <ChevronLeft :size="24" />
           </button>
           <div class="customer-manager-title">
@@ -806,7 +873,10 @@ onBeforeUnmount(() => {
 
         <section class="customer-panel customer-panel--accordion">
           <div class="customer-accordion-panel" :class="{ open: openSections.create }">
-            <div class="customer-accordion-header customer-main-menu-header" @click="toggleSection('create')">
+            <div
+              class="customer-accordion-header customer-main-menu-header"
+              @click="toggleSection('create')"
+            >
               <div class="customer-accordion-header-info customer-menu-title">
                 <UserPlus :size="18" class="customer-section-icon" />
                 <h4>افزودن مشتری جدید</h4>
@@ -821,7 +891,10 @@ onBeforeUnmount(() => {
                 <ChevronLeft :size="20" class="customer-accordion-chevron" />
               </div>
             </div>
-            <div v-show="openSections.create" class="customer-accordion-body-shell customer-accordion-body">
+            <div
+              v-show="openSections.create"
+              class="customer-accordion-body-shell customer-accordion-body"
+            >
               <div class="customer-form-sections customer-form-sections--stacked">
                 <section class="form-subpanel">
                   <div class="form-subpanel-head">
@@ -831,15 +904,30 @@ onBeforeUnmount(() => {
                   <div class="customer-form-grid create-main-grid">
                     <label class="field-block">
                       <span>نام مشتری</span>
-                      <input v-model.trim="createForm.management_name" class="customer-input create-management-name" type="text" placeholder="مثلاً علی رضایی" />
+                      <input
+                        v-model.trim="createForm.management_name"
+                        class="customer-input create-management-name"
+                        type="text"
+                        placeholder="مثلاً علی رضایی"
+                      />
                     </label>
                     <label class="field-block">
                       <span>شماره موبایل</span>
-                      <input v-model.trim="createForm.mobile_number" class="customer-input create-mobile-number" type="tel" inputmode="numeric" placeholder="0912xxxxxxx" />
+                      <input
+                        v-model.trim="createForm.mobile_number"
+                        class="customer-input create-mobile-number"
+                        type="tel"
+                        inputmode="numeric"
+                        placeholder="0912xxxxxxx"
+                      />
                     </label>
                     <label class="field-block">
                       <span>سطح مشتری</span>
-                      <select v-model="createForm.customer_tier" class="customer-input create-tier-select" @change="handleCreateTierChange">
+                      <select
+                        v-model="createForm.customer_tier"
+                        class="customer-input create-tier-select"
+                        @change="handleCreateTierChange"
+                      >
                         <option value="tier1">سطح 1</option>
                         <option value="tier2">سطح 2</option>
                       </select>
@@ -889,8 +977,14 @@ onBeforeUnmount(() => {
                 </section>
 
                 <section class="form-subpanel form-subpanel--accordion">
-                  <div class="customer-accordion-panel" :class="{ open: openSections.createLimits }">
-                    <div class="customer-accordion-header" @click.stop="toggleSection('createLimits')">
+                  <div
+                    class="customer-accordion-panel"
+                    :class="{ open: openSections.createLimits }"
+                  >
+                    <div
+                      class="customer-accordion-header"
+                      @click.stop="toggleSection('createLimits')"
+                    >
                       <div class="customer-accordion-header-info">
                         <SlidersHorizontal :size="16" class="customer-subsection-icon" />
                         <div>
@@ -904,22 +998,52 @@ onBeforeUnmount(() => {
                       <div class="customer-form-grid">
                         <label class="field-block">
                           <span>حداقل مقدار معامله</span>
-                          <input v-model.trim="createForm.min_trade_quantity" class="customer-input create-min-trade" type="number" min="0" step="1" placeholder="اختیاری" />
+                          <input
+                            v-model.trim="createForm.min_trade_quantity"
+                            class="customer-input create-min-trade"
+                            type="number"
+                            min="0"
+                            step="1"
+                            placeholder="اختیاری"
+                          />
                           <small>کمترین تعداد قابل معامله برای این مشتری در هر معامله.</small>
                         </label>
                         <label class="field-block">
                           <span>حداکثر مقدار معامله</span>
-                          <input v-model.trim="createForm.max_trade_quantity" class="customer-input create-max-trade" type="number" min="0" step="1" placeholder="اختیاری" />
+                          <input
+                            v-model.trim="createForm.max_trade_quantity"
+                            class="customer-input create-max-trade"
+                            type="number"
+                            min="0"
+                            step="1"
+                            placeholder="اختیاری"
+                          />
                           <small>بیشترین تعداد مجاز در هر معامله تکی.</small>
                         </label>
                         <label class="field-block">
                           <span>سقف معاملات روزانه</span>
-                          <input v-model.trim="createForm.max_daily_trades" class="customer-input create-max-daily-trades" type="number" min="0" step="1" placeholder="اختیاری" />
-                          <small>حداکثر تعداد معامله‌ای که مشتری در یک روز می‌تواند انجام دهد.</small>
+                          <input
+                            v-model.trim="createForm.max_daily_trades"
+                            class="customer-input create-max-daily-trades"
+                            type="number"
+                            min="0"
+                            step="1"
+                            placeholder="اختیاری"
+                          />
+                          <small
+                            >حداکثر تعداد معامله‌ای که مشتری در یک روز می‌تواند انجام دهد.</small
+                          >
                         </label>
                         <label class="field-block">
                           <span>سقف حجم روزانه</span>
-                          <input v-model.trim="createForm.max_daily_commodity_volume" class="customer-input create-max-daily-volume" type="number" min="0" step="1" placeholder="اختیاری" />
+                          <input
+                            v-model.trim="createForm.max_daily_commodity_volume"
+                            class="customer-input create-max-daily-volume"
+                            type="number"
+                            min="0"
+                            step="1"
+                            placeholder="اختیاری"
+                          />
                           <small>حداکثر مجموع تعداد کالا در معاملات روزانه مشتری.</small>
                         </label>
                       </div>
@@ -929,8 +1053,20 @@ onBeforeUnmount(() => {
               </div>
 
               <div class="panel-actions">
-                <button type="button" class="customer-secondary-control" :disabled="isSubmitting" @click="resetCreateForm">پاک کردن فرم</button>
-                <button type="button" class="customer-primary-control submit-create" :disabled="isSubmitting" @click="createRelation">
+                <button
+                  type="button"
+                  class="customer-secondary-control"
+                  :disabled="isSubmitting"
+                  @click="resetCreateForm"
+                >
+                  پاک کردن فرم
+                </button>
+                <button
+                  type="button"
+                  class="customer-primary-control submit-create"
+                  :disabled="isSubmitting"
+                  @click="createRelation"
+                >
                   {{ isSubmitting ? 'در حال ثبت...' : 'ثبت مشتری' }}
                 </button>
               </div>
@@ -940,7 +1076,10 @@ onBeforeUnmount(() => {
 
         <section class="customer-panel customer-panel--accordion">
           <div class="customer-accordion-panel" :class="{ open: openSections.relations }">
-            <div class="customer-accordion-header customer-main-menu-header" @click="toggleSection('relations')">
+            <div
+              class="customer-accordion-header customer-main-menu-header"
+              @click="toggleSection('relations')"
+            >
               <div class="customer-accordion-header-info customer-menu-title">
                 <Users :size="18" class="customer-section-icon" />
                 <h4>مدیریت مشتریان</h4>
@@ -955,18 +1094,33 @@ onBeforeUnmount(() => {
                 <ChevronLeft :size="20" class="customer-accordion-chevron" />
               </div>
             </div>
-            <div v-show="openSections.relations" class="customer-accordion-body-shell customer-accordion-body">
+            <div
+              v-show="openSections.relations"
+              class="customer-accordion-body-shell customer-accordion-body"
+            >
               <div v-if="selectedRelation" class="customer-detail-page">
                 <div class="customer-detail-topbar">
-                  <button type="button" class="ghost-btn ghost-btn--inline" @click="backToCustomerList">بازگشت به لیست</button>
+                  <button
+                    type="button"
+                    class="ghost-btn ghost-btn--inline"
+                    @click="backToCustomerList"
+                  >
+                    بازگشت به لیست
+                  </button>
                   <div>
                     <h4><CustomerNameWithBadge :name="selectedRelation.management_name" /></h4>
                     <p>{{ getRelationStateText(selectedRelation) }}</p>
                   </div>
                 </div>
 
-                <div class="detail-accordion customer-accordion-panel" :class="{ open: openSections.detailOverview }">
-                  <div class="customer-accordion-header" @click="toggleDetailSection('detailOverview')">
+                <div
+                  class="detail-accordion customer-accordion-panel"
+                  :class="{ open: openSections.detailOverview }"
+                >
+                  <div
+                    class="customer-accordion-header"
+                    @click="toggleDetailSection('detailOverview')"
+                  >
                     <div class="customer-accordion-header-info">
                       <SlidersHorizontal :size="18" class="customer-section-icon" />
                       <div>
@@ -976,22 +1130,41 @@ onBeforeUnmount(() => {
                     </div>
                     <ChevronLeft :size="20" class="customer-accordion-chevron" />
                   </div>
-                  <div v-show="openSections.detailOverview" class="customer-accordion-body-shell customer-accordion-body">
+                  <div
+                    v-show="openSections.detailOverview"
+                    class="customer-accordion-body-shell customer-accordion-body"
+                  >
                     <div class="form-subpanel">
                       <div class="form-subpanel-head">
                         <h5>ویرایش سریع</h5>
-                        <p>مقادیر فعلی به صورت placeholder نمایش داده شده‌اند؛ فقط فیلدهای تغییر یافته ذخیره می‌شوند.</p>
+                        <p>
+                          مقادیر فعلی به صورت placeholder نمایش داده شده‌اند؛ فقط فیلدهای تغییر
+                          یافته ذخیره می‌شوند.
+                        </p>
                       </div>
                       <div class="customer-form-grid compact-grid">
                         <label class="field-block">
                           <span>سطح مشتری</span>
-                          <select v-model="detailEditForm.customer_tier" class="customer-input edit-tier-select">
-                            <option value="">بدون تغییر ({{ getCustomerTierLabel(selectedRelation.customer_tier) }})</option>
+                          <select
+                            v-model="detailEditForm.customer_tier"
+                            class="customer-input edit-tier-select"
+                          >
+                            <option value="">
+                              بدون تغییر ({{
+                                getCustomerTierLabel(selectedRelation.customer_tier)
+                              }})
+                            </option>
                             <option value="tier1">سطح 1</option>
                             <option value="tier2">سطح 2</option>
                           </select>
                         </label>
-                        <label v-if="(detailEditForm.customer_tier || selectedRelation.customer_tier) === 'tier2'" class="field-block">
+                        <label
+                          v-if="
+                            (detailEditForm.customer_tier || selectedRelation.customer_tier) ===
+                            'tier2'
+                          "
+                          class="field-block"
+                        >
                           <span>درصد کمیسیون</span>
                           <div class="commission-input-shell">
                             <button
@@ -1027,38 +1200,94 @@ onBeforeUnmount(() => {
                               +
                             </button>
                           </div>
-                          <small class="commission-preview compact">{{ getCommissionPreviewText(detailEditForm.commission_rate || selectedRelation.commission_rate || '0.50') }}</small>
+                          <small class="commission-preview compact">{{
+                            getCommissionPreviewText(
+                              detailEditForm.commission_rate ||
+                                selectedRelation.commission_rate ||
+                                '0.50',
+                            )
+                          }}</small>
                         </label>
                         <label class="field-block">
                           <span>حداقل مقدار معامله</span>
-                          <input v-model.trim="detailEditForm.min_trade_quantity" class="customer-input edit-min-trade" type="number" min="0" step="1" :placeholder="getLimitPlaceholder(selectedRelation.min_trade_quantity)" />
+                          <input
+                            v-model.trim="detailEditForm.min_trade_quantity"
+                            class="customer-input edit-min-trade"
+                            type="number"
+                            min="0"
+                            step="1"
+                            :placeholder="getLimitPlaceholder(selectedRelation.min_trade_quantity)"
+                          />
                         </label>
                         <label class="field-block">
                           <span>حداکثر مقدار معامله</span>
-                          <input v-model.trim="detailEditForm.max_trade_quantity" class="customer-input edit-max-trade" type="number" min="0" step="1" :placeholder="getLimitPlaceholder(selectedRelation.max_trade_quantity)" />
+                          <input
+                            v-model.trim="detailEditForm.max_trade_quantity"
+                            class="customer-input edit-max-trade"
+                            type="number"
+                            min="0"
+                            step="1"
+                            :placeholder="getLimitPlaceholder(selectedRelation.max_trade_quantity)"
+                          />
                         </label>
                         <label class="field-block">
                           <span>سقف معاملات روزانه</span>
-                          <input v-model.trim="detailEditForm.max_daily_trades" class="customer-input edit-max-daily-trades" type="number" min="0" step="1" :placeholder="getLimitPlaceholder(selectedRelation.max_daily_trades)" />
+                          <input
+                            v-model.trim="detailEditForm.max_daily_trades"
+                            class="customer-input edit-max-daily-trades"
+                            type="number"
+                            min="0"
+                            step="1"
+                            :placeholder="getLimitPlaceholder(selectedRelation.max_daily_trades)"
+                          />
                         </label>
                         <label class="field-block">
                           <span>سقف حجم روزانه</span>
-                          <input v-model.trim="detailEditForm.max_daily_commodity_volume" class="customer-input edit-max-daily-volume" type="number" min="0" step="1" :placeholder="getLimitPlaceholder(selectedRelation.max_daily_commodity_volume)" />
+                          <input
+                            v-model.trim="detailEditForm.max_daily_commodity_volume"
+                            class="customer-input edit-max-daily-volume"
+                            type="number"
+                            min="0"
+                            step="1"
+                            :placeholder="
+                              getLimitPlaceholder(selectedRelation.max_daily_commodity_volume)
+                            "
+                          />
                         </label>
                       </div>
                       <div class="panel-actions compact">
-                        <button type="button" class="customer-secondary-control" :disabled="isSavingEdit" @click="clearDetailEditState">پاک کردن تغییرات</button>
-                        <button type="button" class="customer-primary-control save-edit" :disabled="isSavingEdit" @click="saveDetailEdit">
+                        <button
+                          type="button"
+                          class="customer-secondary-control"
+                          :disabled="isSavingEdit"
+                          @click="clearDetailEditState"
+                        >
+                          پاک کردن تغییرات
+                        </button>
+                        <button
+                          type="button"
+                          class="customer-primary-control save-edit"
+                          :disabled="isSavingEdit"
+                          @click="saveDetailEdit"
+                        >
                           {{ isSavingEdit ? 'در حال ذخیره...' : 'ذخیره تغییرات' }}
                         </button>
                       </div>
-                      <p v-if="detailSaveNotice" class="detail-save-feedback success">{{ detailSaveNotice }}</p>
+                      <p v-if="detailSaveNotice" class="detail-save-feedback success">
+                        {{ detailSaveNotice }}
+                      </p>
                     </div>
                   </div>
                 </div>
 
-                <div class="detail-accordion customer-accordion-panel" :class="{ open: openSections.detailTrades }">
-                  <div class="customer-accordion-header" @click="toggleDetailSection('detailTrades')">
+                <div
+                  class="detail-accordion customer-accordion-panel"
+                  :class="{ open: openSections.detailTrades }"
+                >
+                  <div
+                    class="customer-accordion-header"
+                    @click="toggleDetailSection('detailTrades')"
+                  >
                     <div class="customer-accordion-header-info">
                       <ReceiptText :size="18" class="customer-section-icon" />
                       <div>
@@ -1068,15 +1297,35 @@ onBeforeUnmount(() => {
                     </div>
                     <ChevronLeft :size="20" class="customer-accordion-chevron" />
                   </div>
-                  <div v-show="openSections.detailTrades" class="customer-accordion-body-shell customer-accordion-body">
-                    <div v-if="!selectedRelation.customer_user_id" class="customer-empty">این دعوت هنوز به کاربر فعال وصل نشده است.</div>
-                    <div v-else-if="loadingTradesRelationId === selectedRelation.id" class="customer-loading">در حال دریافت معاملات...</div>
-                    <div v-else-if="selectedRelationTrades.length === 0" class="customer-empty">معامله‌ای برای این مشتری ثبت نشده است.</div>
+                  <div
+                    v-show="openSections.detailTrades"
+                    class="customer-accordion-body-shell customer-accordion-body"
+                  >
+                    <div v-if="!selectedRelation.customer_user_id" class="customer-empty">
+                      این دعوت هنوز به کاربر فعال وصل نشده است.
+                    </div>
+                    <div
+                      v-else-if="loadingTradesRelationId === selectedRelation.id"
+                      class="customer-loading"
+                    >
+                      در حال دریافت معاملات...
+                    </div>
+                    <div v-else-if="selectedRelationTrades.length === 0" class="customer-empty">
+                      معامله‌ای برای این مشتری ثبت نشده است.
+                    </div>
                     <div v-else class="trade-list">
-                      <article v-for="trade in selectedRelationTrades" :key="trade.id" class="trade-row">
+                      <article
+                        v-for="trade in selectedRelationTrades"
+                        :key="trade.id"
+                        class="trade-row"
+                      >
                         <div>
                           <strong>#{{ trade.trade_number }} - {{ trade.commodity_name }}</strong>
-                          <p>{{ formatTradeType(trade.trade_type) }} · {{ tradeSettlementLabel(trade.settlement_type) }} · {{ formatTradeStatus(trade.status) }} · {{ trade.created_at }}</p>
+                          <p>
+                            {{ formatTradeType(trade.trade_type) }} ·
+                            {{ tradeSettlementLabel(trade.settlement_type) }} ·
+                            {{ formatTradeStatus(trade.status) }} · {{ trade.created_at }}
+                          </p>
                         </div>
                         <div class="trade-row-values">
                           <span>{{ trade.quantity.toLocaleString('fa-IR') }} عدد</span>
@@ -1085,15 +1334,26 @@ onBeforeUnmount(() => {
                       </article>
                     </div>
                     <div class="panel-actions compact">
-                      <button type="button" class="ghost-btn refresh-trades" :disabled="loadingTradesRelationId === selectedRelation.id" @click="loadCustomerTrades(selectedRelation.id, { force: true })">
+                      <button
+                        type="button"
+                        class="ghost-btn refresh-trades"
+                        :disabled="loadingTradesRelationId === selectedRelation.id"
+                        @click="loadCustomerTrades(selectedRelation.id, { force: true })"
+                      >
                         نوسازی معاملات
                       </button>
                     </div>
                   </div>
                 </div>
 
-                <div class="detail-accordion customer-accordion-panel" :class="{ open: openSections.detailStats }">
-                  <div class="customer-accordion-header" @click="toggleDetailSection('detailStats')">
+                <div
+                  class="detail-accordion customer-accordion-panel"
+                  :class="{ open: openSections.detailStats }"
+                >
+                  <div
+                    class="customer-accordion-header"
+                    @click="toggleDetailSection('detailStats')"
+                  >
                     <div class="customer-accordion-header-info">
                       <BarChart3 :size="18" class="customer-section-icon" />
                       <div>
@@ -1103,36 +1363,81 @@ onBeforeUnmount(() => {
                     </div>
                     <ChevronLeft :size="20" class="customer-accordion-chevron" />
                   </div>
-                  <div v-show="openSections.detailStats" class="customer-accordion-body-shell customer-accordion-body">
+                  <div
+                    v-show="openSections.detailStats"
+                    class="customer-accordion-body-shell customer-accordion-body"
+                  >
                     <div class="stats-periods">
-                      <button v-for="days in [1, 3, 7, 30, 90, 180]" :key="days" type="button" class="history-chip" :class="{ active: statsPeriodDays === days }" @click="setStatsPeriod(days)">
-                        {{ days === 1 ? '۱ روز' : days === 3 ? '۳ روز' : days === 7 ? '۱ هفته' : days === 30 ? '۱ ماه' : days === 90 ? '۳ ماه' : '۶ ماه' }}
+                      <button
+                        v-for="days in [1, 3, 7, 30, 90, 180]"
+                        :key="days"
+                        type="button"
+                        class="history-chip"
+                        :class="{ active: statsPeriodDays === days }"
+                        @click="setStatsPeriod(days)"
+                      >
+                        {{
+                          days === 1
+                            ? '۱ روز'
+                            : days === 3
+                              ? '۳ روز'
+                              : days === 7
+                                ? '۱ هفته'
+                                : days === 30
+                                  ? '۱ ماه'
+                                  : days === 90
+                                    ? '۳ ماه'
+                                    : '۶ ماه'
+                        }}
                       </button>
                     </div>
-                    <div v-if="!selectedRelation.customer_user_id" class="customer-empty">این دعوت هنوز به کاربر فعال وصل نشده است.</div>
-                    <div v-else-if="loadingStatsRelationId === selectedRelation.id" class="customer-loading">در حال محاسبه آمار...</div>
-                    <div v-else-if="!selectedRelationStats" class="customer-empty">برای مشاهده آمار، یک بازه را انتخاب کنید.</div>
+                    <div v-if="!selectedRelation.customer_user_id" class="customer-empty">
+                      این دعوت هنوز به کاربر فعال وصل نشده است.
+                    </div>
+                    <div
+                      v-else-if="loadingStatsRelationId === selectedRelation.id"
+                      class="customer-loading"
+                    >
+                      در حال محاسبه آمار...
+                    </div>
+                    <div v-else-if="!selectedRelationStats" class="customer-empty">
+                      برای مشاهده آمار، یک بازه را انتخاب کنید.
+                    </div>
                     <div v-else class="stats-report">
                       <div class="customer-meta-grid detail-metric-grid">
                         <div class="meta-item metric-card">
                           <span class="meta-label">تعداد معاملات</span>
-                          <span class="meta-value">{{ selectedRelationStats.trade_count.toLocaleString('fa-IR') }}</span>
+                          <span class="meta-value">{{
+                            selectedRelationStats.trade_count.toLocaleString('fa-IR')
+                          }}</span>
                         </div>
                         <div class="meta-item metric-card">
                           <span class="meta-label">مجموع تعداد کالا</span>
-                          <span class="meta-value">{{ selectedRelationStats.total_quantity.toLocaleString('fa-IR') }}</span>
+                          <span class="meta-value">{{
+                            selectedRelationStats.total_quantity.toLocaleString('fa-IR')
+                          }}</span>
                         </div>
                         <div class="meta-item metric-card profit-card">
                           <span class="meta-label">سود کمیسیون</span>
-                          <span class="meta-value">{{ formatMoneyToman(selectedRelationStats.commission_profit_toman) }}</span>
+                          <span class="meta-value">{{
+                            formatMoneyToman(selectedRelationStats.commission_profit_toman)
+                          }}</span>
                         </div>
                       </div>
                       <div class="commodity-breakdown">
                         <h5>جزئیات کالاها</h5>
-                        <p v-if="selectedRelationStats.commodities.length === 0">در این بازه معامله‌ای ثبت نشده است.</p>
-                        <div v-for="commodity in selectedRelationStats.commodities" :key="commodity.commodity_id" class="commodity-row">
+                        <p v-if="selectedRelationStats.commodities.length === 0">
+                          در این بازه معامله‌ای ثبت نشده است.
+                        </p>
+                        <div
+                          v-for="commodity in selectedRelationStats.commodities"
+                          :key="commodity.commodity_id"
+                          class="commodity-row"
+                        >
                           <span>{{ commodity.commodity_name }}</span>
-                          <strong>{{ commodity.total_quantity.toLocaleString('fa-IR') }} عدد</strong>
+                          <strong
+                            >{{ commodity.total_quantity.toLocaleString('fa-IR') }} عدد</strong
+                          >
                         </div>
                       </div>
                       <p class="stats-note">{{ selectedRelationStats.profit_calculation_note }}</p>
@@ -1140,8 +1445,14 @@ onBeforeUnmount(() => {
                   </div>
                 </div>
 
-                <div class="detail-accordion customer-accordion-panel" :class="{ open: openSections.detailSessions }">
-                  <div class="customer-accordion-header" @click="toggleDetailSection('detailSessions')">
+                <div
+                  class="detail-accordion customer-accordion-panel"
+                  :class="{ open: openSections.detailSessions }"
+                >
+                  <div
+                    class="customer-accordion-header"
+                    @click="toggleDetailSection('detailSessions')"
+                  >
                     <div class="customer-accordion-header-info">
                       <ShieldCheck :size="18" class="customer-section-icon" />
                       <div>
@@ -1151,19 +1462,49 @@ onBeforeUnmount(() => {
                     </div>
                     <ChevronLeft :size="20" class="customer-accordion-chevron" />
                   </div>
-                  <div v-show="openSections.detailSessions" class="customer-accordion-body-shell customer-accordion-body">
-                    <div v-if="selectedRelation.status !== 'active' || !selectedRelation.customer_user_id" class="customer-empty">نشست فقط برای مشتری فعال قابل مدیریت است.</div>
-                    <div v-else-if="loadingSessionsRelationId === selectedRelation.id" class="customer-loading session-loading">در حال دریافت نشست‌های مشتری...</div>
-                    <div v-else-if="!getRelationSessions(selectedRelation.id).length" class="customer-empty session-empty">در حال حاضر نشست فعالی برای این مشتری ثبت نشده است.</div>
+                  <div
+                    v-show="openSections.detailSessions"
+                    class="customer-accordion-body-shell customer-accordion-body"
+                  >
+                    <div
+                      v-if="
+                        selectedRelation.status !== 'active' || !selectedRelation.customer_user_id
+                      "
+                      class="customer-empty"
+                    >
+                      نشست فقط برای مشتری فعال قابل مدیریت است.
+                    </div>
+                    <div
+                      v-else-if="loadingSessionsRelationId === selectedRelation.id"
+                      class="customer-loading session-loading"
+                    >
+                      در حال دریافت نشست‌های مشتری...
+                    </div>
+                    <div
+                      v-else-if="!getRelationSessions(selectedRelation.id).length"
+                      class="customer-empty session-empty"
+                    >
+                      در حال حاضر نشست فعالی برای این مشتری ثبت نشده است.
+                    </div>
                     <ul v-else class="session-list">
-                      <li v-for="session in getRelationSessions(selectedRelation.id)" :key="session.id" class="session-item">
+                      <li
+                        v-for="session in getRelationSessions(selectedRelation.id)"
+                        :key="session.id"
+                        class="session-item"
+                      >
                         <div class="session-item-main">
                           <div class="session-item-top">
                             <strong>{{ session.device_name || 'دستگاه ناشناس' }}</strong>
                             <div class="session-badges">
-                              <span v-if="session.is_primary" class="session-badge primary">primary</span>
-                              <span class="session-badge neutral">{{ formatSessionPlatform(session.platform) }}</span>
-                              <span class="session-badge neutral">{{ formatHomeServer(session.home_server) }}</span>
+                              <span v-if="session.is_primary" class="session-badge primary"
+                                >primary</span
+                              >
+                              <span class="session-badge neutral">{{
+                                formatSessionPlatform(session.platform)
+                              }}</span>
+                              <span class="session-badge neutral">{{
+                                formatHomeServer(session.home_server)
+                              }}</span>
                             </div>
                           </div>
                           <div class="session-item-meta">
@@ -1172,19 +1513,44 @@ onBeforeUnmount(() => {
                             <span v-if="session.device_ip">IP: {{ session.device_ip }}</span>
                           </div>
                         </div>
-                        <button type="button" class="danger-btn terminate-session" :disabled="terminatingSessionId === session.id" @click="terminateCustomerSession(selectedRelation, session)">
-                          {{ terminatingSessionId === session.id ? 'در حال پایان...' : 'پایان نشست' }}
+                        <button
+                          type="button"
+                          class="danger-btn terminate-session"
+                          :disabled="terminatingSessionId === session.id"
+                          @click="terminateCustomerSession(selectedRelation, session)"
+                        >
+                          {{
+                            terminatingSessionId === session.id ? 'در حال پایان...' : 'پایان نشست'
+                          }}
                         </button>
                       </li>
                     </ul>
-                    <div v-if="selectedRelation.status === 'active' && selectedRelation.customer_user_id" class="panel-actions compact">
-                      <button type="button" class="ghost-btn refresh-sessions" :disabled="loadingSessionsRelationId === selectedRelation.id" @click="loadSessionsForRelation(selectedRelation.id)">نوسازی نشست‌ها</button>
+                    <div
+                      v-if="
+                        selectedRelation.status === 'active' && selectedRelation.customer_user_id
+                      "
+                      class="panel-actions compact"
+                    >
+                      <button
+                        type="button"
+                        class="ghost-btn refresh-sessions"
+                        :disabled="loadingSessionsRelationId === selectedRelation.id"
+                        @click="loadSessionsForRelation(selectedRelation.id)"
+                      >
+                        نوسازی نشست‌ها
+                      </button>
                     </div>
                   </div>
                 </div>
 
-                <div class="detail-accordion customer-accordion-panel danger-accordion" :class="{ open: openSections.detailDanger }">
-                  <div class="customer-accordion-header" @click="toggleDetailSection('detailDanger')">
+                <div
+                  class="detail-accordion customer-accordion-panel danger-accordion"
+                  :class="{ open: openSections.detailDanger }"
+                >
+                  <div
+                    class="customer-accordion-header"
+                    @click="toggleDetailSection('detailDanger')"
+                  >
                     <div class="customer-accordion-header-info">
                       <Users :size="18" class="customer-section-icon" />
                       <div>
@@ -1194,17 +1560,41 @@ onBeforeUnmount(() => {
                     </div>
                     <ChevronLeft :size="20" class="customer-accordion-chevron" />
                   </div>
-                  <div v-show="openSections.detailDanger" class="customer-accordion-body-shell customer-accordion-body">
-                    <p class="danger-copy">این عملیات رابطه این مشتری را غیرفعال می‌کند و باید فقط در صورت اطمینان انجام شود.</p>
-                    <button v-if="selectedRelation.status === 'active'" type="button" class="danger-btn unlink-active" @click="unlinkRelation(selectedRelation)">قطع ارتباط با مشتری</button>
-                    <button v-else-if="selectedRelation.status === 'pending'" type="button" class="danger-btn cancel-pending" @click="unlinkRelation(selectedRelation)">لغو دعوت مشتری</button>
+                  <div
+                    v-show="openSections.detailDanger"
+                    class="customer-accordion-body-shell customer-accordion-body"
+                  >
+                    <p class="danger-copy">
+                      این عملیات رابطه این مشتری را غیرفعال می‌کند و باید فقط در صورت اطمینان انجام
+                      شود.
+                    </p>
+                    <button
+                      v-if="selectedRelation.status === 'active'"
+                      type="button"
+                      class="danger-btn unlink-active"
+                      @click="unlinkRelation(selectedRelation)"
+                    >
+                      قطع ارتباط با مشتری
+                    </button>
+                    <button
+                      v-else-if="selectedRelation.status === 'pending'"
+                      type="button"
+                      class="danger-btn cancel-pending"
+                      @click="unlinkRelation(selectedRelation)"
+                    >
+                      لغو دعوت مشتری
+                    </button>
                     <div v-else class="customer-empty">این رابطه در وضعیت قابل قطع نیست.</div>
                   </div>
                 </div>
               </div>
 
-              <div v-else-if="isLoading" class="customer-loading">در حال دریافت لیست مشتریان...</div>
-              <div v-else-if="orderedRelations.length === 0" class="customer-empty">هنوز مشتری فعالی یا دعوت در انتظار ثبت نشده است.</div>
+              <div v-else-if="isLoading" class="customer-loading">
+                در حال دریافت لیست مشتریان...
+              </div>
+              <div v-else-if="orderedRelations.length === 0" class="customer-empty">
+                هنوز مشتری فعالی یا دعوت در انتظار ثبت نشده است.
+              </div>
 
               <div v-else class="customer-management-stack">
                 <section v-if="pendingInvitationRelations.length" class="pending-invitations-panel">
@@ -1221,20 +1611,54 @@ onBeforeUnmount(() => {
                     class="pending-invitation-card"
                   >
                     <div class="pending-invitation-main">
-                      <strong><CustomerNameWithBadge :name="relation.management_name" compact /></strong>
+                      <strong
+                        ><CustomerNameWithBadge :name="relation.management_name" compact
+                      /></strong>
                       <p>{{ getRelationStateText(relation) }}</p>
-                      <p v-if="invitationSmsStatusMessage(relation.sms_status)">{{ invitationSmsStatusMessage(relation.sms_status) }}</p>
+                      <p v-if="invitationSmsStatusMessage(relation.sms_status)">
+                        {{ invitationSmsStatusMessage(relation.sms_status) }}
+                      </p>
                     </div>
                     <div class="pending-invitation-actions">
-                      <button v-if="invitationRelationLink(relation, 'bot')" type="button" class="customer-secondary-control copy-link" @click="copyRegistrationLink(relation, 'bot')">
-                        <span v-show="copiedInvitationKey !== `${relation.id}:bot`" class="copy-state--idle">کپی لینک تلگرام</span>
-                        <span v-show="copiedInvitationKey === `${relation.id}:bot`" class="copy-state--copied">کپی شد</span>
+                      <button
+                        v-if="invitationRelationLink(relation, 'bot')"
+                        type="button"
+                        class="customer-secondary-control copy-link"
+                        @click="copyRegistrationLink(relation, 'bot')"
+                      >
+                        <span
+                          v-show="copiedInvitationKey !== `${relation.id}:bot`"
+                          class="copy-state--idle"
+                          >کپی لینک تلگرام</span
+                        >
+                        <span
+                          v-show="copiedInvitationKey === `${relation.id}:bot`"
+                          class="copy-state--copied"
+                          >کپی شد</span
+                        >
                       </button>
-                      <button v-if="invitationRelationLink(relation, 'web')" type="button" class="customer-secondary-control copy-link" @click="copyRegistrationLink(relation, 'web')">
-                        <span v-show="copiedInvitationKey !== `${relation.id}:web`" class="copy-state--idle">کپی لینک وب</span>
-                        <span v-show="copiedInvitationKey === `${relation.id}:web`" class="copy-state--copied">کپی شد</span>
+                      <button
+                        v-if="invitationRelationLink(relation, 'web')"
+                        type="button"
+                        class="customer-secondary-control copy-link"
+                        @click="copyRegistrationLink(relation, 'web')"
+                      >
+                        <span
+                          v-show="copiedInvitationKey !== `${relation.id}:web`"
+                          class="copy-state--idle"
+                          >کپی لینک وب</span
+                        >
+                        <span
+                          v-show="copiedInvitationKey === `${relation.id}:web`"
+                          class="copy-state--copied"
+                          >کپی شد</span
+                        >
                       </button>
-                      <button type="button" class="danger-btn cancel-pending expire-pending-invitation" @click="unlinkRelation(relation)">
+                      <button
+                        type="button"
+                        class="danger-btn cancel-pending expire-pending-invitation"
+                        @click="unlinkRelation(relation)"
+                      >
                         منقضی کردن دعوت
                       </button>
                     </div>
@@ -1242,52 +1666,69 @@ onBeforeUnmount(() => {
                 </section>
 
                 <div v-if="manageableRelations.length" class="customer-list">
-                <article
-                  v-for="relation in manageableRelations"
-                  :key="relation.id"
-                  class="customer-card profile-relation-card profile-relation-card--customer"
-                >
-                  <div class="customer-card-head customer-card-head--manage">
-                    <div class="customer-card-main">
-                      <div class="customer-card-title-row">
-                        <div class="customer-identity-block">
-                          <h5><CustomerNameWithBadge :name="relation.management_name" compact /></h5>
+                  <article
+                    v-for="relation in manageableRelations"
+                    :key="relation.id"
+                    class="customer-card profile-relation-card profile-relation-card--customer"
+                  >
+                    <div class="customer-card-head customer-card-head--manage">
+                      <div class="customer-card-main">
+                        <div class="customer-card-title-row">
+                          <div class="customer-identity-block">
+                            <h5>
+                              <CustomerNameWithBadge :name="relation.management_name" compact />
+                            </h5>
+                          </div>
+                          <div class="customer-card-head-side">
+                            <span
+                              class="customer-status-badge"
+                              :class="`status-${relation.status}`"
+                              >{{ statusLabel(relation.status) }}</span
+                            >
+                            <span
+                              class="customer-tier-pill"
+                              :class="`tier-${relation.customer_tier}`"
+                              >{{ getCustomerTierLabel(relation.customer_tier) }}</span
+                            >
+                          </div>
                         </div>
-                        <div class="customer-card-head-side">
-                          <span class="customer-status-badge" :class="`status-${relation.status}`">{{ statusLabel(relation.status) }}</span>
-                          <span class="customer-tier-pill" :class="`tier-${relation.customer_tier}`">{{ getCustomerTierLabel(relation.customer_tier) }}</span>
+                        <div class="customer-card-meta-pills">
+                          <span
+                            v-if="relation.mobile_number"
+                            class="customer-info-pill customer-mobile-number"
+                          >
+                            <span>موبایل</span>
+                            <strong>{{ relation.mobile_number }}</strong>
+                          </span>
+                          <span class="customer-info-pill">
+                            <span>کمیسیون</span>
+                            <strong>{{ formatMaybeNumber(relation.commission_rate, '%') }}</strong>
+                          </span>
+                          <span class="customer-info-pill">
+                            <span>حداقل</span>
+                            <strong>{{ formatMaybeNumber(relation.min_trade_quantity) }}</strong>
+                          </span>
+                          <span class="customer-info-pill">
+                            <span>حداکثر</span>
+                            <strong>{{ formatMaybeNumber(relation.max_trade_quantity) }}</strong>
+                          </span>
+                          <span class="customer-info-pill">
+                            <span>سقف روزانه</span>
+                            <strong>{{ formatMaybeNumber(relation.max_daily_trades) }}</strong>
+                          </span>
                         </div>
-                      </div>
-                      <div class="customer-card-meta-pills">
-                        <span v-if="relation.mobile_number" class="customer-info-pill customer-mobile-number">
-                          <span>موبایل</span>
-                          <strong>{{ relation.mobile_number }}</strong>
-                        </span>
-                        <span class="customer-info-pill">
-                          <span>کمیسیون</span>
-                          <strong>{{ formatMaybeNumber(relation.commission_rate, '%') }}</strong>
-                        </span>
-                        <span class="customer-info-pill">
-                          <span>حداقل</span>
-                          <strong>{{ formatMaybeNumber(relation.min_trade_quantity) }}</strong>
-                        </span>
-                        <span class="customer-info-pill">
-                          <span>حداکثر</span>
-                          <strong>{{ formatMaybeNumber(relation.max_trade_quantity) }}</strong>
-                        </span>
-                        <span class="customer-info-pill">
-                          <span>سقف روزانه</span>
-                          <strong>{{ formatMaybeNumber(relation.max_daily_trades) }}</strong>
-                        </span>
-                      </div>
-                      <div class="customer-card-footer">
-                        <button type="button" class="customer-primary-control customer-settings-btn" @click="openCustomerDetail(relation)">
-                          تنظیمات مشتری
-                        </button>
+                        <div class="customer-card-footer">
+                          <button
+                            type="button"
+                            class="customer-primary-control customer-settings-btn"
+                            @click="openCustomerDetail(relation)"
+                          >
+                            تنظیمات مشتری
+                          </button>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                </article>
+                  </article>
                 </div>
               </div>
             </div>
@@ -1320,7 +1761,12 @@ onBeforeUnmount(() => {
   max-height: 100%;
   overflow: auto;
   border-radius: 28px;
-  background: linear-gradient(180deg, rgba(255, 251, 235, 0.98) 0%, rgba(255, 255, 255, 0.98) 26%, rgba(248, 250, 252, 0.98) 100%);
+  background: linear-gradient(
+    180deg,
+    rgba(255, 251, 235, 0.98) 0%,
+    rgba(255, 255, 255, 0.98) 26%,
+    rgba(248, 250, 252, 0.98) 100%
+  );
   box-shadow: 0 26px 80px rgba(15, 23, 42, 0.24);
   border: 1px solid rgba(245, 158, 11, 0.14);
   padding: 22px;

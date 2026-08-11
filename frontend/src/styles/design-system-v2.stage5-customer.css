@@ -1,0 +1,558 @@
+/* Stage 5 customer workspace — route-local V2 presentation. */
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-workspace-customer-relation-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-v2-spacing-12);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-workspace-customer-detail-tabs
+  > button,
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-workspace-customer-filter-chips
+  > button {
+  min-block-size: var(--ui-v2-size-target-min);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-workspace-customer-layout {
+  display: grid;
+  min-inline-size: 0;
+  gap: var(--ui-v2-spacing-16);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-workspace-customer-summary-badges {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--ui-v2-spacing-8);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-workspace-customer-list-controls,
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-workspace-customer-detail-shell,
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-workspace-customer-detail-list {
+  display: grid;
+  gap: var(--ui-v2-spacing-12);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-workspace-customer-list-group {
+  display: grid;
+  gap: var(--ui-v2-spacing-8);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-workspace-customer-list-group
+  h3 {
+  margin: 0;
+  color: var(--ui-v2-color-text-secondary);
+  font-size: var(--ui-v2-type-label-medium-size);
+  font-weight: var(--ui-v2-font-weight-semibold);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-workspace-customer-list-badges,
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-workspace-customer-detail-badges {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--ui-v2-spacing-4);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-workspace-customer-detail-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: var(--ui-v2-spacing-12);
+  padding: var(--ui-v2-spacing-16);
+  border: var(--ui-v2-stroke-standard) solid var(--ui-v2-color-border-default);
+  border-radius: var(--ui-v2-radius-card);
+  background: var(--ui-v2-color-surface-card);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-workspace-customer-detail-header
+  h2,
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-workspace-customer-detail-header
+  p {
+  margin: 0;
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-workspace-customer-detail-header
+  h2 {
+  color: var(--ui-v2-color-text-strong);
+  font-size: var(--ui-v2-type-section-size);
+  font-weight: var(--ui-v2-font-weight-bold);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-workspace-customer-detail-header
+  p {
+  margin-block-start: var(--ui-v2-spacing-4);
+  color: var(--ui-v2-color-text-secondary);
+  font-size: var(--ui-v2-type-body-small-size);
+  line-height: var(--ui-v2-type-body-small-line);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-workspace-customer-detail-grid,
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-workspace-customer-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--ui-v2-spacing-8);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-workspace-customer-meta-label {
+  display: block;
+  margin-block-end: var(--ui-v2-spacing-4);
+  color: var(--ui-v2-color-text-secondary);
+  font-size: var(--ui-v2-type-label-small-size);
+  font-weight: var(--ui-v2-font-weight-medium);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-workspace-customer-detail-grid
+  strong,
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-workspace-customer-stats-commodities
+  strong {
+  color: var(--ui-v2-color-text-primary);
+  font-size: var(--ui-v2-type-card-size);
+  font-weight: var(--ui-v2-font-weight-semibold);
+  word-break: break-word;
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-workspace-customer-detail-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ui-v2-spacing-12);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-workspace-customer-detail-toolbar
+  strong {
+  color: var(--ui-v2-color-text-primary);
+  font-size: var(--ui-v2-type-card-size);
+  font-weight: var(--ui-v2-font-weight-semibold);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-workspace-customer-period-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ui-v2-spacing-8);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-workspace-customer-period-tab {
+  min-block-size: var(--ui-v2-size-target-min);
+  padding: var(--ui-v2-spacing-8) var(--ui-v2-spacing-12);
+  border: var(--ui-v2-stroke-standard) solid var(--ui-v2-color-border-default);
+  border-radius: var(--ui-v2-radius-full);
+  background: var(--ui-v2-color-surface-card);
+  color: var(--ui-v2-color-text-secondary);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--ui-v2-type-label-medium-size);
+  font-weight: var(--ui-v2-font-weight-semibold);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-workspace-customer-period-tab--active {
+  border-color: var(--ui-v2-color-border-focus);
+  background: var(--ui-v2-color-surface-brand-soft);
+  color: var(--ui-v2-color-text-action);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-workspace-customer-stats-commodities {
+  grid-column: 1 / -1;
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-workspace-customer-stats-commodities
+  ul {
+  display: grid;
+  gap: var(--ui-v2-spacing-8);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-workspace-customer-stats-commodities
+  li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ui-v2-spacing-12);
+  color: var(--ui-v2-color-text-secondary);
+  font-size: var(--ui-v2-type-body-small-size);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-workspace-customer-danger-card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: var(--ui-v2-spacing-12);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-workspace-customer-danger-card
+  strong,
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-workspace-customer-danger-card
+  p {
+  margin: 0;
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-workspace-customer-danger-card
+  strong {
+  color: var(--ui-v2-color-text-primary);
+  font-size: var(--ui-v2-type-card-size);
+  font-weight: var(--ui-v2-font-weight-semibold);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-workspace-customer-danger-card
+  p {
+  margin-block-start: var(--ui-v2-spacing-4);
+  color: var(--ui-v2-color-text-secondary);
+  font-size: var(--ui-v2-type-body-small-size);
+  line-height: var(--ui-v2-type-body-small-line);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-workspace-customer-edit-card,
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-workspace-customer-financial-review,
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-workspace-customer-create-panel,
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-workspace-customer-create-fieldset,
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-workspace-customer-generated-account {
+  display: grid;
+  gap: var(--ui-v2-spacing-12);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-workspace-customer-create-fieldset {
+  min-inline-size: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-workspace-customer-create-fieldset
+  legend {
+  padding: 0;
+  color: var(--ui-v2-color-text-primary);
+  font-size: var(--ui-v2-type-card-size);
+  font-weight: var(--ui-v2-font-weight-semibold);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-workspace-customer-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--ui-v2-spacing-12);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-workspace-customer-inline-actions,
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-workspace-customer-session-actions,
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-workspace-customer-pending-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ui-v2-spacing-8);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-workspace-customer-pending-header
+  p {
+  margin: var(--ui-v2-spacing-4) 0 0;
+  color: var(--ui-v2-color-text-secondary);
+  font-size: var(--ui-v2-type-body-small-size);
+  line-height: var(--ui-v2-type-body-small-line);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-workspace-customer-pending-card,
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-workspace-customer-pending-detail,
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-workspace-customer-pending-actions,
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-workspace-customer-financial-actions {
+  display: grid;
+  gap: var(--ui-v2-spacing-8);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-workspace-customer-pending-deadline {
+  margin: 0;
+  color: var(--ui-v2-color-text-primary);
+  font-size: var(--ui-v2-type-label-medium-size);
+  font-weight: var(--ui-v2-font-weight-medium);
+  line-height: var(--ui-v2-type-label-medium-line);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-workspace-customer-pending-danger {
+  padding-block-start: var(--ui-v2-spacing-12);
+  border-block-start: var(--ui-v2-stroke-standard) solid var(--ui-v2-color-border-default);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-workspace-customer-financial-review
+  > p {
+  margin: 0;
+  color: var(--ui-v2-color-text-secondary);
+  font-size: var(--ui-v2-type-body-small-size);
+  line-height: var(--ui-v2-type-body-small-line);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-workspace-customer-financial-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ui-v2-spacing-8);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-workspace-customer-financial-table {
+  border: var(--ui-v2-stroke-standard) solid var(--ui-v2-color-border-default);
+  border-spacing: 0;
+  border-radius: var(--ui-v2-radius-container);
+  background: var(--ui-v2-color-surface-card);
+  table-layout: fixed;
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-workspace-customer-financial-caption {
+  margin-block-end: var(--ui-v2-spacing-8);
+  color: var(--ui-v2-color-text-secondary);
+  font-size: var(--ui-v2-type-label-small-size);
+  font-weight: var(--ui-v2-font-weight-medium);
+  text-align: start;
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-workspace-customer-financial-table
+  th,
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-workspace-customer-financial-table
+  td {
+  padding: var(--ui-v2-spacing-8) var(--ui-v2-spacing-12);
+  text-align: start;
+  vertical-align: middle;
+  font-size: var(--ui-v2-type-label-small-size);
+  line-height: var(--ui-v2-type-label-small-line);
+  overflow-wrap: anywhere;
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-workspace-customer-financial-table
+  thead
+  th {
+  background: var(--ui-v2-color-surface-subtle);
+  color: var(--ui-v2-color-text-secondary);
+  font-weight: var(--ui-v2-font-weight-medium);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-workspace-customer-financial-table
+  tbody
+  tr
+  + tr
+  th,
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-workspace-customer-financial-table
+  tbody
+  tr
+  + tr
+  td {
+  border-block-start: var(--ui-v2-stroke-standard) solid var(--ui-v2-color-border-default);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-workspace-customer-financial-table
+  tbody
+  th {
+  color: var(--ui-v2-color-text-primary);
+  font-weight: var(--ui-v2-font-weight-semibold);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-workspace-customer-financial-table
+  tbody
+  td:last-child {
+  background: var(--ui-v2-color-surface-brand-soft);
+  color: var(--ui-v2-color-text-action);
+  font-weight: var(--ui-v2-font-weight-semibold);
+}
+
+@media (max-width: 430px) {
+  :where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-workspace-customer-detail-grid,
+  :where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-workspace-customer-stats-grid,
+  :where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-workspace-customer-form-grid,
+  :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+    .ui-v2-workspace-customer-detail-header,
+  :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+    .ui-v2-workspace-customer-inline-actions {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+    .ui-v2-workspace-customer-inline-actions {
+    display: grid;
+  }
+
+  :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+    .ui-v2-workspace-customer-detail-badges,
+  :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+    .ui-v2-workspace-customer-list-badges {
+    justify-content: flex-start;
+  }
+
+  :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+    .ui-v2-workspace-customer-financial-table {
+    display: block;
+    border: 0;
+    background: transparent;
+    table-layout: auto;
+  }
+
+  :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+    .ui-v2-workspace-customer-financial-table
+    thead {
+    position: absolute;
+    overflow: hidden;
+    inline-size: var(--ui-v2-stroke-standard);
+    block-size: var(--ui-v2-stroke-standard);
+    white-space: nowrap;
+  }
+
+  :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+    .ui-v2-workspace-customer-financial-table
+    tbody {
+    display: grid;
+    gap: var(--ui-v2-spacing-8);
+  }
+
+  :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+    .ui-v2-workspace-customer-financial-table
+    tbody
+    tr {
+    display: grid;
+    overflow: hidden;
+    border: var(--ui-v2-stroke-standard) solid var(--ui-v2-color-border-default);
+    border-radius: var(--ui-v2-radius-compact);
+    background: var(--ui-v2-color-surface-card);
+  }
+
+  :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+    .ui-v2-workspace-customer-financial-table
+    tbody
+    tr
+    + tr
+    th,
+  :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+    .ui-v2-workspace-customer-financial-table
+    tbody
+    tr
+    + tr
+    td {
+    border-block-start: 0;
+  }
+
+  :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+    .ui-v2-workspace-customer-financial-table
+    tbody
+    td {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: var(--ui-v2-spacing-8);
+  }
+
+  :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+    .ui-v2-workspace-customer-financial-table
+    tbody
+    td
+    + td {
+    border-block-start: var(--ui-v2-stroke-standard) solid var(--ui-v2-color-border-default);
+  }
+
+  :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+    .ui-v2-workspace-customer-financial-table
+    tbody
+    td::before {
+    content: attr(data-label);
+    color: var(--ui-v2-color-text-secondary);
+    font-weight: var(--ui-v2-font-weight-medium);
+  }
+}
+
+@media (min-width: 900px) {
+  :where(
+      [data-ui-system='v2'],
+      [data-ui-system='v2-portal']
+    ).ui-v2-workspace-customer-root.ui-v2-workspace-adapter
+    .ui-v2-workspace-adapter__body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+    .ui-v2-workspace-customer-layout--detail {
+    grid-template-columns:
+      minmax(
+        var(--ui-v2-layout-card-min),
+        calc(
+          var(--ui-v2-layout-card-min) + var(--ui-v2-spacing-32) + var(--ui-v2-spacing-32) +
+            var(--ui-v2-spacing-32) + var(--ui-v2-spacing-32) + var(--ui-v2-spacing-32)
+        )
+      )
+      minmax(0, 1fr);
+    align-items: start;
+  }
+
+  :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+    .ui-v2-workspace-customer-layout--detail
+    .ui-v2-workspace-customer-list-section {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+    .ui-v2-workspace-customer-layout--detail
+    .ui-v2-workspace-customer-detail-section {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+    .ui-v2-workspace-customer-layout--detail
+    .ui-v2-workspace-customer-relation-list {
+    max-block-size: calc(
+      var(--ui-v2-layout-card-min) + var(--ui-v2-layout-card-min) + var(--ui-v2-layout-card-min) +
+        var(--ui-v2-spacing-20)
+    );
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :where([data-ui-system='v2'], [data-ui-system='v2-portal']).ui-v2-workspace-customer-root
+    .ui-v2-workspace-adapter__back {
+    transition: none;
+  }
+}

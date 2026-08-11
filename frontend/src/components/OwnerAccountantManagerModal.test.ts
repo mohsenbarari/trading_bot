@@ -226,7 +226,7 @@ describe('OwnerAccountantManagerModal.vue', () => {
     await wrapper.get('.cancel-pending').trigger('click')
     await flushPromises()
 
-    expect(apiFetchMock).toHaveBeenCalledWith('/api/accountants/owner-relations/1', boundedRequestOptions({
+    expect(apiFetchMock).toHaveBeenCalledWith('/api/accountants/owner-relations/1?expected_action=cancel-pending', boundedRequestOptions({
       method: 'DELETE',
     }))
     expect(wrapper.text()).toContain('دعوت حسابدار لغو شد.')
@@ -256,7 +256,7 @@ describe('OwnerAccountantManagerModal.vue', () => {
     await wrapper.get('.unlink-active').trigger('click')
     await flushPromises()
 
-    expect(apiFetchMock).toHaveBeenCalledWith('/api/accountants/owner-relations/8', boundedRequestOptions({
+    expect(apiFetchMock).toHaveBeenCalledWith('/api/accountants/owner-relations/8?expected_action=delete-account', boundedRequestOptions({
       method: 'DELETE',
     }))
     expect(wrapper.text()).toContain('ارتباط حسابدار قطع شد')
@@ -397,6 +397,10 @@ describe('OwnerAccountantManagerModal.vue', () => {
       relation_display_name: 'حسابدار فعال',
     })
     await flushPromises()
+    expect(apiFetchMock).toHaveBeenLastCalledWith(
+      '/api/accountants/owner-relations/98?expected_action=delete-relation',
+      boundedRequestOptions({ method: 'DELETE' }),
+    )
     expect(wrapper.text()).toContain('قطع ارتباط حسابدار ناموفق بود.')
   })
 

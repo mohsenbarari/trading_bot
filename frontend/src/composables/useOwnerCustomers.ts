@@ -3,6 +3,7 @@ import { routeRequestJson } from '../utils/routeRequest'
 
 export type RelationStatus = 'pending' | 'active' | 'expired' | 'revoked' | 'deleted' | string
 export type CustomerTier = 'tier1' | 'tier2'
+export type OwnerRelationDeleteAction = 'cancel-pending' | 'delete-relation' | 'delete-account'
 
 export interface CustomerRelation {
   id: number
@@ -124,16 +125,29 @@ export function normalizeLatinDigits(value: string) {
 
 export function normalizeOptionalNumber(value: string | number | null | undefined) {
   if (value == null) return null
-  const cleaned = String(value).trim()
+  const cleaned = normalizeLatinDigits(String(value))
+    .trim()
+    .replace(/\u066C/g, '')
+    .replace(/[\u066B,]/g, '.')
   if (!cleaned) return null
   const normalized = Number(cleaned)
   return Number.isFinite(normalized) ? normalized : null
 }
 
 export function normalizeCommissionRate(value: string | number | null | undefined) {
-  const normalized = Number(normalizeLatinDigits(String(value ?? '')).replace(',', '.'))
-  if (!Number.isFinite(normalized)) return 0
+  const normalized = normalizeOptionalNumber(value)
+  if (normalized === null) return 0
   return Math.min(100, Math.max(0, normalized))
+}
+
+function parseCustomerOptionalNumber(value: string | number | null | undefined, label: string) {
+  const rawValue = String(value ?? '').trim()
+  if (!rawValue) return null
+  const normalized = normalizeOptionalNumber(rawValue)
+  if (normalized === null) {
+    throw new Error(`مقدار «${label}» باید یک عدد معتبر باشد.`)
+  }
+  return normalized
 }
 
 export function buildCustomerPayload(form: {
@@ -146,11 +160,17 @@ export function buildCustomerPayload(form: {
 }) {
   return {
     customer_tier: form.customer_tier,
-    commission_rate: form.customer_tier === 'tier2' ? normalizeOptionalNumber(form.commission_rate) : null,
-    min_trade_quantity: normalizeOptionalNumber(form.min_trade_quantity),
-    max_trade_quantity: normalizeOptionalNumber(form.max_trade_quantity),
-    max_daily_trades: normalizeOptionalNumber(form.max_daily_trades),
-    max_daily_commodity_volume: normalizeOptionalNumber(form.max_daily_commodity_volume),
+    commission_rate:
+      form.customer_tier === 'tier2'
+        ? parseCustomerOptionalNumber(form.commission_rate, 'درصد کمیسیون مشتری')
+        : null,
+    min_trade_quantity: parseCustomerOptionalNumber(form.min_trade_quantity, 'حداقل مقدار معامله'),
+    max_trade_quantity: parseCustomerOptionalNumber(form.max_trade_quantity, 'حداکثر مقدار معامله'),
+    max_daily_trades: parseCustomerOptionalNumber(form.max_daily_trades, 'حداکثر تعداد روزانه'),
+    max_daily_commodity_volume: parseCustomerOptionalNumber(
+      form.max_daily_commodity_volume,
+      'حداکثر حجم روزانه',
+    ),
   }
 }
 
@@ -167,8 +187,14 @@ export function buildCustomerDetailUpdatePayload(
 
   const commissionInput = String(detailEditForm.commission_rate || '').trim()
   if (nextTier === 'tier2' && commissionInput) {
-    payload.commission_rate = normalizeCommissionRate(commissionInput)
-  } else if (requestedTier === 'tier1') {
+    if (normalizeOptionalNumber(commissionInput) === null) {
+      throw new Error('مقدار «درصد کمیسیون مشتری» باید یک عدد معتبر باشد.')
+    }
+    const nextCommissionRate = normalizeCommissionRate(commissionInput)
+    if (nextCommissionRate !== relation.commission_rate) {
+      payload.commission_rate = nextCommissionRate
+    }
+  } else if (requestedTier === 'tier1' && relation.commission_rate !== null) {
     payload.commission_rate = null
   }
 
@@ -178,10 +204,27 @@ export function buildCustomerDetailUpdatePayload(
     'max_daily_trades',
     'max_daily_commodity_volume',
   ] as const
+  const numericFieldLabels: Record<(typeof numericFields)[number], string> = {
+    min_trade_quantity: 'حداقل مقدار معامله',
+    max_trade_quantity: 'حداکثر مقدار معامله',
+    max_daily_trades: 'حداکثر تعداد روزانه',
+    max_daily_commodity_volume: 'حداکثر حجم روزانه',
+  }
   for (const field of numericFields) {
-    const rawValue = String(detailEditForm[field] || '').trim()
-    if (rawValue) {
-      payload[field] = normalizeOptionalNumber(rawValue)
+    const rawValue = String(detailEditForm[field] ?? '').trim()
+    if (!rawValue) {
+      if (relation[field] !== null) {
+        payload[field] = null
+      }
+      continue
+    }
+
+    const nextValue = normalizeOptionalNumber(rawValue)
+    if (nextValue === null) {
+      throw new Error(`مقدار «${numericFieldLabels[field]}» باید یک عدد معتبر باشد.`)
+    }
+    if (nextValue !== relation[field]) {
+      payload[field] = nextValue
     }
   }
 
@@ -198,6 +241,11 @@ function requireArrayPayload<T>(payload: unknown, fallback: string): T[] {
   return payload as T[]
 }
 
+function requireObjectPayload<T>(payload: unknown, fallback: string): T {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw new Error(fallback)
+  return payload as T
+}
+
 export async function fetchOwnerCustomerRelations(options: OwnerCustomerRequestOptions = {}) {
   const payload = await routeRequestJson<unknown>('/api/customers/owner-relations', {
     ...(options.signal ? { signal: options.signal } : {}),
@@ -208,6 +256,21 @@ export async function fetchOwnerCustomerRelations(options: OwnerCustomerRequestO
     },
   })
   return requireArrayPayload<CustomerRelation>(payload, 'پاسخ لیست مشتریان معتبر نبود.')
+}
+
+export async function fetchOwnerCustomerRelation(
+  relationId: number,
+  options: OwnerCustomerRequestOptions = {},
+) {
+  const payload = await routeRequestJson<unknown>(`/api/customers/owner-relations/${relationId}`, {
+    ...(options.signal ? { signal: options.signal } : {}),
+    errorContext: {
+      scope: 'panel',
+      operation: 'load-detail',
+      fallbackMessage: 'دریافت پرونده مشتری ناموفق بود.',
+    },
+  })
+  return requireObjectPayload<CustomerRelation>(payload, 'پاسخ پرونده مشتری معتبر نبود.')
 }
 
 export async function createOwnerCustomerRelation(
@@ -247,34 +310,41 @@ export async function updateOwnerCustomerRelation(
 
 export async function deleteOwnerCustomerRelation(
   relationId: number,
+  expectedAction: OwnerRelationDeleteAction,
   fallback: string,
   options: OwnerCustomerRequestOptions = {},
 ) {
-  return routeRequestJson<CustomerRelation>(`/api/customers/owner-relations/${relationId}`, {
-    method: 'DELETE',
-    ...(options.signal ? { signal: options.signal } : {}),
-    errorContext: {
-      scope: 'action',
-      operation: 'delete',
-      userInitiated: true,
-      fallbackMessage: fallback,
+  return routeRequestJson<CustomerRelation>(
+    `/api/customers/owner-relations/${relationId}?expected_action=${encodeURIComponent(expectedAction)}`,
+    {
+      method: 'DELETE',
+      ...(options.signal ? { signal: options.signal } : {}),
+      errorContext: {
+        scope: 'action',
+        operation: 'delete',
+        userInitiated: true,
+        fallbackMessage: fallback,
+      },
     },
-  })
+  )
 }
 
 export async function fetchOwnerCustomerSessions(
   relationId: number,
   options: OwnerCustomerRequestOptions = {},
 ) {
-  const payload = await routeRequestJson<unknown>(`/api/customers/owner-relations/${relationId}/sessions`, {
-    method: 'GET',
-    ...(options.signal ? { signal: options.signal } : {}),
-    errorContext: {
-      scope: 'list',
-      operation: 'load-detail',
-      fallbackMessage: 'دریافت نشست‌های مشتری ناموفق بود.',
+  const payload = await routeRequestJson<unknown>(
+    `/api/customers/owner-relations/${relationId}/sessions`,
+    {
+      method: 'GET',
+      ...(options.signal ? { signal: options.signal } : {}),
+      errorContext: {
+        scope: 'list',
+        operation: 'load-detail',
+        fallbackMessage: 'دریافت نشست‌های مشتری ناموفق بود.',
+      },
     },
-  })
+  )
   return requireArrayPayload<CustomerSessionSummary>(payload, 'پاسخ نشست‌های مشتری معتبر نبود.')
 }
 
@@ -283,30 +353,36 @@ export async function terminateOwnerCustomerSession(
   sessionId: string,
   options: OwnerCustomerRequestOptions = {},
 ) {
-  return routeRequestJson<CustomerSessionTerminateResponse>(`/api/customers/owner-relations/${relationId}/sessions/${sessionId}`, {
-    method: 'DELETE',
-    ...(options.signal ? { signal: options.signal } : {}),
-    errorContext: {
-      scope: 'action',
-      operation: 'delete',
-      userInitiated: true,
-      fallbackMessage: 'پایان دادن نشست مشتری ناموفق بود.',
+  return routeRequestJson<CustomerSessionTerminateResponse>(
+    `/api/customers/owner-relations/${relationId}/sessions/${sessionId}`,
+    {
+      method: 'DELETE',
+      ...(options.signal ? { signal: options.signal } : {}),
+      errorContext: {
+        scope: 'action',
+        operation: 'delete',
+        userInitiated: true,
+        fallbackMessage: 'پایان دادن نشست مشتری ناموفق بود.',
+      },
     },
-  })
+  )
 }
 
 export async function fetchOwnerCustomerTrades(
   customerUserId: number,
   options: OwnerCustomerRequestOptions & { limit?: number } = {},
 ) {
-  const payload = await routeRequestJson<unknown>(`/api/trades/with/${customerUserId}?limit=${options.limit ?? 20}`, {
-    ...(options.signal ? { signal: options.signal } : {}),
-    errorContext: {
-      scope: 'list',
-      operation: 'load-detail',
-      fallbackMessage: 'دریافت معاملات مشتری ناموفق بود.',
+  const payload = await routeRequestJson<unknown>(
+    `/api/trades/with/${customerUserId}?limit=${options.limit ?? 20}`,
+    {
+      ...(options.signal ? { signal: options.signal } : {}),
+      errorContext: {
+        scope: 'list',
+        operation: 'load-detail',
+        fallbackMessage: 'دریافت معاملات مشتری ناموفق بود.',
+      },
     },
-  })
+  )
   return requireArrayPayload<CustomerTradeSummary>(payload, 'پاسخ معاملات مشتری معتبر نبود.')
 }
 
@@ -315,14 +391,17 @@ export async function fetchOwnerCustomerTradeStats(
   days: number,
   options: OwnerCustomerRequestOptions = {},
 ) {
-  const payload = await routeRequestJson<unknown>(`/api/customers/owner-relations/${relationId}/trade-stats?days=${days}`, {
-    ...(options.signal ? { signal: options.signal } : {}),
-    errorContext: {
-      scope: 'panel',
-      operation: 'load-detail',
-      fallbackMessage: 'دریافت آمار مشتری ناموفق بود.',
+  const payload = await routeRequestJson<unknown>(
+    `/api/customers/owner-relations/${relationId}/trade-stats?days=${days}`,
+    {
+      ...(options.signal ? { signal: options.signal } : {}),
+      errorContext: {
+        scope: 'panel',
+        operation: 'load-detail',
+        fallbackMessage: 'دریافت آمار مشتری ناموفق بود.',
+      },
     },
-  })
+  )
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     throw new Error('پاسخ آمار مشتری معتبر نبود.')
   }
@@ -348,8 +427,12 @@ export function useOwnerCustomers() {
     })
   })
 
-  const pendingInvitationRelations = computed(() => orderedRelations.value.filter((relation) => relation.status === 'pending'))
-  const manageableRelations = computed(() => orderedRelations.value.filter((relation) => relation.status !== 'pending'))
+  const pendingInvitationRelations = computed(() =>
+    orderedRelations.value.filter((relation) => relation.status === 'pending'),
+  )
+  const manageableRelations = computed(() =>
+    orderedRelations.value.filter((relation) => relation.status !== 'pending'),
+  )
   const selectedRelation = computed(() => {
     if (selectedRelationId.value == null) return null
     return relations.value.find((relation) => relation.id === selectedRelationId.value) ?? null

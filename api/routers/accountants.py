@@ -16,8 +16,10 @@ from core.invitation_contract_service import (
     is_canonical_invitation_short_code,
 )
 from core.services.accountant_relation_service import (
+    AccountantRelationDeletionAction,
     EffectiveOwnerActor,
     create_or_reuse_owner_accountant_relation,
+    get_owner_accountant_relation,
     list_owner_accountant_relations,
     unlink_owner_accountant_relation,
     update_owner_accountant_relation,
@@ -194,6 +196,34 @@ async def list_my_accountants(
     ]
 
 
+@router.get("/owner-relations/{relation_id}", response_model=schemas.AccountantRelationRead)
+async def get_my_accountant(
+    relation_id: int,
+    context: EffectiveOwnerActor = Depends(get_effective_owner_actor_context),
+    db: AsyncSession = Depends(get_db),
+):
+    await ensure_owner_context(context, db)
+    relation = await get_owner_accountant_relation(
+        db,
+        owner_user_id=context.owner_user.id,
+        relation_id=relation_id,
+    )
+    invitation = (
+        await db.execute(
+            select(Invitation).where(Invitation.token == relation.invitation_token)
+        )
+    ).scalar_one_or_none()
+    sms_status = None
+    if invitation is not None:
+        sms_statuses = await load_invitation_sms_status_map(db, [invitation.id])
+        sms_status = sms_statuses.get(invitation.id)
+    return serialize_accountant_relation(
+        relation,
+        invitation=invitation,
+        sms_status=sms_status,
+    )
+
+
 @router.post("/owner-relations", response_model=schemas.AccountantRelationRead)
 async def create_my_accountant(
     payload: schemas.AccountantRelationCreate,
@@ -308,6 +338,7 @@ async def terminate_my_accountant_session(
 @router.delete("/owner-relations/{relation_id}", response_model=schemas.AccountantRelationRead)
 async def cancel_my_pending_accountant(
     relation_id: int,
+    expected_action: AccountantRelationDeletionAction,
     context: EffectiveOwnerActor = Depends(get_effective_owner_actor_context),
     db: AsyncSession = Depends(get_db),
 ):
@@ -316,6 +347,7 @@ async def cancel_my_pending_accountant(
         db,
         owner_user_id=context.owner_user.id,
         relation_id=relation_id,
+        expected_action=expected_action,
     )
     audit_log(
         "accountant.unlink",

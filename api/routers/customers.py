@@ -1,5 +1,6 @@
 import uuid
 from datetime import datetime, timedelta, timezone
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import and_, or_, select
@@ -29,6 +30,7 @@ from core.services.customer_relation_service import (
     list_owner_customer_relations,
     load_customer_relation_invitation_map,
     mark_customer_invitation_for_authoritative_replay,
+    OwnerCustomerRelationDeleteAction,
     sweep_expired_pending_customer_relations,
     unlink_owner_customer_relation,
     update_owner_customer_relation,
@@ -619,9 +621,29 @@ async def create_owner_customer_internal_from_bot(
     )
 
 
+@router.get("/owner-relations/{relation_id}", response_model=schemas.CustomerRelationRead)
+async def get_my_customer_relation(
+    relation_id: int,
+    context: EffectiveOwnerActor = Depends(get_effective_owner_actor_context),
+    db: AsyncSession = Depends(get_db),
+):
+    await ensure_owner_context(context, db)
+    relation = await get_owner_customer_relation(
+        db,
+        owner_user_id=context.owner_user.id,
+        relation_id=relation_id,
+    )
+    invitation_map = await load_customer_relation_invitation_map(db, [relation.invitation_token])
+    return serialize_customer_relation(relation, invitation=invitation_map.get(relation.invitation_token))
+
+
 @router.delete("/owner-relations/{relation_id}", response_model=schemas.CustomerRelationRead)
 async def unlink_my_customer(
     relation_id: int,
+    expected_action: Annotated[
+        OwnerCustomerRelationDeleteAction,
+        Query(description="Required semantic precondition for the destructive action."),
+    ],
     context: EffectiveOwnerActor = Depends(get_effective_owner_actor_context),
     db: AsyncSession = Depends(get_db),
 ):
@@ -630,6 +652,7 @@ async def unlink_my_customer(
         db,
         owner_user_id=context.owner_user.id,
         relation_id=relation_id,
+        expected_action=expected_action,
     )
     invitation_map = await load_customer_relation_invitation_map(db, [relation.invitation_token])
     audit_log(

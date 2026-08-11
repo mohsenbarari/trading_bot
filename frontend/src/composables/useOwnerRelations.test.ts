@@ -3,11 +3,14 @@ import {
   buildCustomerDetailUpdatePayload,
   buildCustomerPayload,
   createOwnerCustomerRelation,
+  deleteOwnerCustomerRelation,
+  fetchOwnerCustomerRelation,
   fetchOwnerCustomerRelations,
   fetchOwnerCustomerTradeStats,
   fetchOwnerCustomerTrades,
   normalizeCommissionRate,
   normalizeLatinDigits,
+  normalizeOptionalNumber,
   terminateOwnerCustomerSession,
   updateOwnerCustomerRelation,
   useOwnerCustomers,
@@ -15,6 +18,8 @@ import {
 } from './useOwnerCustomers'
 import {
   createOwnerAccountantRelation,
+  deleteOwnerAccountantRelation,
+  fetchOwnerAccountantRelation,
   fetchOwnerAccountantRelations,
   normalizeDutyDescription,
   terminateOwnerAccountantSession,
@@ -73,6 +78,10 @@ describe('owner relation composables', () => {
     expect(normalizeLatinDigits('۰۹١٢')).toBe('0912')
     expect(normalizeCommissionRate('۱.۲۳')).toBe(1.23)
     expect(normalizeCommissionRate('200')).toBe(100)
+    expect(normalizeOptionalNumber('۱۲,۵')).toBe(12.5)
+    expect(normalizeOptionalNumber('١٢,٥')).toBe(12.5)
+    expect(normalizeOptionalNumber('۱٬۲۳۴٫۵')).toBe(1234.5)
+    expect(normalizeOptionalNumber('١٬٢٣٤٫٥')).toBe(1234.5)
 
     expect(buildCustomerPayload({
       customer_tier: 'tier2',
@@ -114,6 +123,68 @@ describe('owner relation composables', () => {
     expect(state.pendingInvitationRelations.value.map(relation => relation.id)).toEqual([2])
     expect(state.manageableRelations.value.map(relation => relation.id)).toEqual([1, 3])
     expect(state.selectedRelation.value?.id).toBe(1)
+  })
+
+  it('emits only changed customer detail values and sends null for an explicitly cleared limit', () => {
+    const detailPayload = buildCustomerDetailUpdatePayload(makeCustomer({
+      commission_rate: 0.5,
+      min_trade_quantity: 1,
+      max_trade_quantity: 20,
+      max_daily_trades: 3,
+      max_daily_commodity_volume: 100,
+    }), {
+      customer_tier: 'tier2',
+      commission_rate: '۰,۵',
+      min_trade_quantity: '۱',
+      max_trade_quantity: '',
+      max_daily_trades: '٤',
+      max_daily_commodity_volume: '۱۰۰,۰',
+    })
+
+    expect(detailPayload).toEqual({
+      max_trade_quantity: null,
+      max_daily_trades: 4,
+    })
+  })
+
+  it('rejects invalid non-empty customer detail numbers instead of silently omitting them', () => {
+    expect(() => buildCustomerDetailUpdatePayload(makeCustomer(), {
+      customer_tier: 'tier2',
+      commission_rate: 'عدد نامعتبر',
+      min_trade_quantity: '',
+      max_trade_quantity: '',
+      max_daily_trades: '',
+      max_daily_commodity_volume: '',
+    })).toThrow('مقدار «درصد کمیسیون مشتری» باید یک عدد معتبر باشد.')
+
+    expect(() => buildCustomerDetailUpdatePayload(makeCustomer(), {
+      customer_tier: 'tier2',
+      commission_rate: '۰٫۵',
+      min_trade_quantity: '',
+      max_trade_quantity: '۱۲٫۵ نامعتبر',
+      max_daily_trades: '',
+      max_daily_commodity_volume: '',
+    })).toThrow('مقدار «حداکثر مقدار معامله» باید یک عدد معتبر باشد.')
+  })
+
+  it('rejects invalid non-empty customer create numbers instead of clearing them', () => {
+    expect(() => buildCustomerPayload({
+      customer_tier: 'tier2',
+      commission_rate: 'درصد نامعتبر',
+      min_trade_quantity: '',
+      max_trade_quantity: '',
+      max_daily_trades: '',
+      max_daily_commodity_volume: '',
+    })).toThrow('مقدار «درصد کمیسیون مشتری» باید یک عدد معتبر باشد.')
+
+    expect(() => buildCustomerPayload({
+      customer_tier: 'tier1',
+      commission_rate: 'این فیلد در پایه نادیده است',
+      min_trade_quantity: '',
+      max_trade_quantity: '۱۲٫۵ نامعتبر',
+      max_daily_trades: '',
+      max_daily_commodity_volume: '',
+    })).toThrow('مقدار «حداکثر مقدار معامله» باید یک عدد معتبر باشد.')
   })
 
   it('routes customer API calls through the extracted data layer', async () => {
@@ -244,6 +315,58 @@ describe('owner relation composables', () => {
     }))
   })
 
+  it('requires explicit delete semantics and exposes terminal-capable owner detail requests', async () => {
+    const customer = makeCustomer({ status: 'deleted', deleted_at: '2026-01-03T10:00:00Z' })
+    const accountant = {
+      id: 8,
+      owner_user_id: 7,
+      accountant_user_id: 18,
+      accountant_account_name: 'acc-terminal',
+      global_account_name: 'acc-terminal',
+      relation_display_name: 'حسابدار پایان‌یافته',
+      duty_description: null,
+      mobile_number: '09120000000',
+      status: 'deleted',
+      expires_at: '2026-01-03T10:00:00Z',
+      activated_at: '2026-01-02T10:00:00Z',
+      deleted_at: '2026-01-04T10:00:00Z',
+      created_at: '2026-01-01T10:00:00Z',
+    }
+    apiFetchMock
+      .mockResolvedValueOnce(makeResponse(customer))
+      .mockResolvedValueOnce(makeResponse({ ...customer, status: 'revoked' }))
+      .mockResolvedValueOnce(makeResponse(accountant))
+      .mockResolvedValueOnce(makeResponse(accountant))
+
+    expect(await fetchOwnerCustomerRelation(1)).toEqual(customer)
+    expect(apiFetchMock).toHaveBeenNthCalledWith(1, '/api/customers/owner-relations/1', expect.objectContaining({
+      retryNetwork: false,
+      signal: expect.any(AbortSignal),
+      trackConnectionState: false,
+    }))
+
+    await deleteOwnerCustomerRelation(1, 'cancel-pending', 'لغو مشتری ناموفق بود.')
+    expect(apiFetchMock).toHaveBeenNthCalledWith(
+      2,
+      '/api/customers/owner-relations/1?expected_action=cancel-pending',
+      expect.objectContaining({ method: 'DELETE' }),
+    )
+
+    expect(await fetchOwnerAccountantRelation(8)).toEqual(accountant)
+    expect(apiFetchMock).toHaveBeenNthCalledWith(3, '/api/accountants/owner-relations/8', expect.objectContaining({
+      retryNetwork: false,
+      signal: expect.any(AbortSignal),
+      trackConnectionState: false,
+    }))
+
+    await deleteOwnerAccountantRelation(8, 'delete-account', 'حذف حسابدار ناموفق بود.')
+    expect(apiFetchMock).toHaveBeenNthCalledWith(
+      4,
+      '/api/accountants/owner-relations/8?expected_action=delete-account',
+      expect.objectContaining({ method: 'DELETE' }),
+    )
+  })
+
   it('rejects invalid relation-list payloads instead of converting failures to true empty lists', async () => {
     apiFetchMock
       .mockResolvedValueOnce(makeResponse({ detail: 'not-an-array' }))
@@ -251,5 +374,14 @@ describe('owner relation composables', () => {
 
     await expect(fetchOwnerCustomerRelations()).rejects.toThrow('پاسخ لیست مشتریان معتبر نبود.')
     await expect(fetchOwnerAccountantRelations()).rejects.toThrow('پاسخ لیست حسابداران معتبر نبود.')
+  })
+
+  it('rejects invalid owner relation detail payloads', async () => {
+    apiFetchMock
+      .mockResolvedValueOnce(makeResponse([]))
+      .mockResolvedValueOnce(makeResponse(null))
+
+    await expect(fetchOwnerCustomerRelation(1)).rejects.toThrow('پاسخ پرونده مشتری معتبر نبود.')
+    await expect(fetchOwnerAccountantRelation(8)).rejects.toThrow('پاسخ پرونده حسابدار معتبر نبود.')
   })
 })

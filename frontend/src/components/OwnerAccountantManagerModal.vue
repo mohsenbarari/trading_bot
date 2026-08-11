@@ -19,15 +19,18 @@ import { formatIranDateTime, parseIranDisplayDate } from '../utils/iranTime'
 import { invitationRelationLink, invitationSmsStatusMessage } from '../utils/invitationContract'
 import HelpPopover from './HelpPopover.vue'
 
-const props = withDefaults(defineProps<{
-  presentation?: 'modal' | 'workspace'
-  initialRelationId?: string | number | null
-  initialPanel?: string | null
-}>(), {
-  presentation: 'modal',
-  initialRelationId: null,
-  initialPanel: null,
-})
+const props = withDefaults(
+  defineProps<{
+    presentation?: 'modal' | 'workspace'
+    initialRelationId?: string | number | null
+    initialPanel?: string | null
+  }>(),
+  {
+    presentation: 'modal',
+    initialRelationId: null,
+    initialPanel: null,
+  },
+)
 
 const emit = defineEmits<{
   (e: 'close'): void
@@ -107,12 +110,13 @@ function showViewportToast(type: 'success' | 'error' | 'info', text: string, tim
   if (viewportToastTimer !== null && typeof window !== 'undefined') {
     window.clearTimeout(viewportToastTimer)
   }
-  viewportToastTimer = typeof window !== 'undefined'
-    ? window.setTimeout(() => {
-        viewportToast.value = null
-        viewportToastTimer = null
-      }, timeoutMs)
-    : null
+  viewportToastTimer =
+    typeof window !== 'undefined'
+      ? window.setTimeout(() => {
+          viewportToast.value = null
+          viewportToastTimer = null
+        }, timeoutMs)
+      : null
 }
 
 function clearViewportToast() {
@@ -222,13 +226,15 @@ function stopCountdownTimer() {
 }
 
 function statusLabel(status: RelationStatus) {
-  return {
-    pending: 'در انتظار ثبت‌نام',
-    active: 'فعال',
-    expired: 'منقضی‌شده',
-    revoked: 'لغوشده',
-    deleted: 'حذف‌شده',
-  }[status] || status
+  return (
+    {
+      pending: 'در انتظار ثبت‌نام',
+      active: 'فعال',
+      expired: 'منقضی‌شده',
+      revoked: 'لغوشده',
+      deleted: 'حذف‌شده',
+    }[status] || status
+  )
 }
 
 const orderedRelations = computed(() => {
@@ -244,9 +250,13 @@ const orderedRelations = computed(() => {
   })
 })
 
-const pendingInvitationRelations = computed(() => orderedRelations.value.filter((relation) => relation.status === 'pending'))
+const pendingInvitationRelations = computed(() =>
+  orderedRelations.value.filter((relation) => relation.status === 'pending'),
+)
 
-const manageableRelations = computed(() => orderedRelations.value.filter((relation) => relation.status !== 'pending'))
+const manageableRelations = computed(() =>
+  orderedRelations.value.filter((relation) => relation.status !== 'pending'),
+)
 
 function openDefaultDetailSections() {
   openSections.detailOverview = true
@@ -278,7 +288,11 @@ function applyInitialRouteState() {
   if (props.initialPanel === 'create') {
     openSections.create = true
     openSections.relations = false
-  } else if (props.initialPanel === 'pending' || props.initialPanel === 'manage' || props.initialPanel === 'relations') {
+  } else if (
+    props.initialPanel === 'pending' ||
+    props.initialPanel === 'manage' ||
+    props.initialPanel === 'relations'
+  ) {
     openSections.relations = true
   }
 }
@@ -290,12 +304,17 @@ async function loadRelations() {
   try {
     relations.value = await fetchOwnerAccountantRelations()
     if (openSessionsRelationId.value !== null) {
-      const openRelation = relations.value.find((relation) => relation.id === openSessionsRelationId.value)
+      const openRelation = relations.value.find(
+        (relation) => relation.id === openSessionsRelationId.value,
+      )
       if (!openRelation || openRelation.status !== 'active' || !openRelation.accountant_user_id) {
         openSessionsRelationId.value = null
       }
     }
-    if (selectedRelationId.value !== null && !relations.value.some((relation) => relation.id === selectedRelationId.value)) {
+    if (
+      selectedRelationId.value !== null &&
+      !relations.value.some((relation) => relation.id === selectedRelationId.value)
+    ) {
       selectedRelationId.value = null
       clearEditState()
     }
@@ -326,7 +345,10 @@ async function loadSessionsForRelation(relationId: number) {
   }
 }
 
-async function terminateAccountantSession(relation: AccountantRelation, session: AccountantSessionSummary) {
+async function terminateAccountantSession(
+  relation: AccountantRelation,
+  session: AccountantSessionSummary,
+) {
   if (terminatingSessionId.value === session.id) return
   if (!window.confirm(`نشست «${session.device_name || 'دستگاه حسابدار'}» پایان یابد؟`)) return
 
@@ -409,7 +431,16 @@ async function unlinkRelation(relation: AccountantRelation) {
   error.value = ''
   notice.value = ''
   try {
-    await deleteOwnerAccountantRelation(relation.id, isPending ? 'لغو دعوت حسابدار ناموفق بود.' : 'قطع ارتباط حسابدار ناموفق بود.')
+    const expectedAction = isPending
+      ? 'cancel-pending'
+      : relation.accountant_user_id
+        ? 'delete-account'
+        : 'delete-relation'
+    await deleteOwnerAccountantRelation(
+      relation.id,
+      expectedAction,
+      isPending ? 'لغو دعوت حسابدار ناموفق بود.' : 'قطع ارتباط حسابدار ناموفق بود.',
+    )
     relations.value = relations.value.filter((item) => item.id !== relation.id)
     if (selectedRelationId.value === relation.id) {
       selectedRelationId.value = null
@@ -418,9 +449,13 @@ async function unlinkRelation(relation: AccountantRelation) {
     if (openSessionsRelationId.value === relation.id) {
       openSessionsRelationId.value = null
     }
-    notice.value = isPending ? 'دعوت حسابدار لغو شد.' : 'ارتباط حسابدار قطع شد و دسترسی او غیرفعال گردید.'
+    notice.value = isPending
+      ? 'دعوت حسابدار لغو شد.'
+      : 'ارتباط حسابدار قطع شد و دسترسی او غیرفعال گردید.'
   } catch (err: any) {
-    error.value = err?.message || (isPending ? 'لغو دعوت حسابدار ناموفق بود.' : 'قطع ارتباط حسابدار ناموفق بود.')
+    error.value =
+      err?.message ||
+      (isPending ? 'لغو دعوت حسابدار ناموفق بود.' : 'قطع ارتباط حسابدار ناموفق بود.')
   }
 }
 
@@ -508,7 +543,12 @@ onBeforeUnmount(() => {
         :class="{ 'accountant-manager-shell--workspace': isWorkspace }"
       >
         <div v-if="!isWorkspace" class="accountant-owner-header">
-          <button type="button" class="accountant-manager-back" aria-label="بازگشت" @click="closeManager">
+          <button
+            type="button"
+            class="accountant-manager-back"
+            aria-label="بازگشت"
+            @click="closeManager"
+          >
             <ChevronLeft :size="24" />
           </button>
           <div class="accountant-manager-title">
@@ -522,7 +562,10 @@ onBeforeUnmount(() => {
 
         <section class="accountant-panel accountant-panel--accordion">
           <div class="accountant-accordion-panel" :class="{ open: openSections.create }">
-            <div class="accountant-accordion-header accountant-main-menu-header" @click="toggleSection('create')">
+            <div
+              class="accountant-accordion-header accountant-main-menu-header"
+              @click="toggleSection('create')"
+            >
               <div class="accountant-accordion-header-info accountant-menu-title">
                 <UserPlus :size="18" class="accountant-section-icon" />
                 <h4>افزودن حسابدار جدید</h4>
@@ -538,7 +581,10 @@ onBeforeUnmount(() => {
               </div>
             </div>
 
-            <div v-show="openSections.create" class="accountant-accordion-body-shell accountant-accordion-body">
+            <div
+              v-show="openSections.create"
+              class="accountant-accordion-body-shell accountant-accordion-body"
+            >
               <div class="accountant-form-sections accountant-form-sections--stacked">
                 <section class="form-subpanel">
                   <div class="form-subpanel-head">
@@ -548,22 +594,44 @@ onBeforeUnmount(() => {
                   <div class="accountant-form-grid">
                     <label class="field-block">
                       <span>نام کاربری جهانی</span>
-                      <input v-model.trim="createForm.account_name" class="accountant-input create-account-name" type="text" placeholder="accountant_01" />
+                      <input
+                        v-model.trim="createForm.account_name"
+                        class="accountant-input create-account-name"
+                        type="text"
+                        placeholder="accountant_01"
+                      />
                     </label>
                     <label class="field-block">
                       <span>نام نمایشی رابطه</span>
-                      <input v-model.trim="createForm.relation_display_name" class="accountant-input create-display-name" type="text" placeholder="حسابدار فروش" />
+                      <input
+                        v-model.trim="createForm.relation_display_name"
+                        class="accountant-input create-display-name"
+                        type="text"
+                        placeholder="حسابدار فروش"
+                      />
                     </label>
                     <label class="field-block">
                       <span>شماره موبایل</span>
-                      <input v-model.trim="createForm.mobile_number" class="accountant-input create-mobile-number" type="tel" inputmode="numeric" placeholder="09120000000" />
+                      <input
+                        v-model.trim="createForm.mobile_number"
+                        class="accountant-input create-mobile-number"
+                        type="tel"
+                        inputmode="numeric"
+                        placeholder="09120000000"
+                      />
                     </label>
                   </div>
                 </section>
 
                 <section class="form-subpanel form-subpanel--accordion">
-                  <div class="accountant-accordion-panel" :class="{ open: openSections.createDuty }">
-                    <div class="accountant-accordion-header" @click.stop="toggleSection('createDuty')">
+                  <div
+                    class="accountant-accordion-panel"
+                    :class="{ open: openSections.createDuty }"
+                  >
+                    <div
+                      class="accountant-accordion-header"
+                      @click.stop="toggleSection('createDuty')"
+                    >
                       <div class="accountant-accordion-header-info">
                         <SlidersHorizontal :size="16" class="accountant-subsection-icon" />
                         <div>
@@ -576,7 +644,12 @@ onBeforeUnmount(() => {
                     <div v-show="openSections.createDuty" class="accountant-accordion-body-shell">
                       <label class="field-block">
                         <span>شرح وظیفه</span>
-                        <textarea v-model="createForm.duty_description" class="accountant-input accountant-textarea create-duty-description" rows="3" placeholder="مثلاً پیگیری پیشنهادها و ثبت معاملات روزانه"></textarea>
+                        <textarea
+                          v-model="createForm.duty_description"
+                          class="accountant-input accountant-textarea create-duty-description"
+                          rows="3"
+                          placeholder="مثلاً پیگیری پیشنهادها و ثبت معاملات روزانه"
+                        ></textarea>
                       </label>
                     </div>
                   </div>
@@ -584,8 +657,20 @@ onBeforeUnmount(() => {
               </div>
 
               <div class="panel-actions">
-                <button type="button" class="accountant-secondary-control" :disabled="isSubmitting" @click="resetCreateForm">پاک کردن</button>
-                <button type="button" class="accountant-primary-control submit-create" :disabled="isSubmitting" @click="createRelation">
+                <button
+                  type="button"
+                  class="accountant-secondary-control"
+                  :disabled="isSubmitting"
+                  @click="resetCreateForm"
+                >
+                  پاک کردن
+                </button>
+                <button
+                  type="button"
+                  class="accountant-primary-control submit-create"
+                  :disabled="isSubmitting"
+                  @click="createRelation"
+                >
                   {{ isSubmitting ? 'در حال ثبت...' : 'ثبت حسابدار' }}
                 </button>
               </div>
@@ -595,7 +680,10 @@ onBeforeUnmount(() => {
 
         <section class="accountant-panel accountant-panel--accordion">
           <div class="accountant-accordion-panel" :class="{ open: openSections.relations }">
-            <div class="accountant-accordion-header accountant-main-menu-header" @click="toggleSection('relations')">
+            <div
+              class="accountant-accordion-header accountant-main-menu-header"
+              @click="toggleSection('relations')"
+            >
               <div class="accountant-accordion-header-info accountant-menu-title">
                 <Users :size="18" class="accountant-section-icon" />
                 <h4>مدیریت حسابداران</h4>
@@ -611,18 +699,33 @@ onBeforeUnmount(() => {
               </div>
             </div>
 
-            <div v-show="openSections.relations" class="accountant-accordion-body-shell accountant-accordion-body">
+            <div
+              v-show="openSections.relations"
+              class="accountant-accordion-body-shell accountant-accordion-body"
+            >
               <div v-if="selectedRelation" class="accountant-detail-page">
                 <div class="accountant-detail-topbar">
-                  <button type="button" class="ghost-btn ghost-btn--inline" @click="backToAccountantList">بازگشت به لیست</button>
+                  <button
+                    type="button"
+                    class="ghost-btn ghost-btn--inline"
+                    @click="backToAccountantList"
+                  >
+                    بازگشت به لیست
+                  </button>
                   <div>
                     <h4>{{ selectedRelation.relation_display_name }}</h4>
                     <p>@{{ selectedRelation.global_account_name }}</p>
                   </div>
                 </div>
 
-                <div class="detail-accordion accountant-accordion-panel" :class="{ open: openSections.detailOverview }">
-                  <div class="accountant-accordion-header" @click="toggleDetailSection('detailOverview')">
+                <div
+                  class="detail-accordion accountant-accordion-panel"
+                  :class="{ open: openSections.detailOverview }"
+                >
+                  <div
+                    class="accountant-accordion-header"
+                    @click="toggleDetailSection('detailOverview')"
+                  >
                     <div class="accountant-accordion-header-info">
                       <SlidersHorizontal :size="18" class="accountant-section-icon" />
                       <div>
@@ -632,7 +735,10 @@ onBeforeUnmount(() => {
                     </div>
                     <ChevronLeft :size="20" class="accountant-accordion-chevron" />
                   </div>
-                  <div v-show="openSections.detailOverview" class="accountant-accordion-body-shell accountant-accordion-body">
+                  <div
+                    v-show="openSections.detailOverview"
+                    class="accountant-accordion-body-shell accountant-accordion-body"
+                  >
                     <div class="accountant-meta-grid">
                       <div class="meta-item">
                         <span class="meta-label">وضعیت</span>
@@ -640,26 +746,42 @@ onBeforeUnmount(() => {
                       </div>
                       <div class="meta-item">
                         <span class="meta-label">کاربر لینک‌شده</span>
-                        <span class="meta-value">{{ selectedRelation.accountant_account_name || 'هنوز ثبت‌نام نشده' }}</span>
+                        <span class="meta-value">{{
+                          selectedRelation.accountant_account_name || 'هنوز ثبت‌نام نشده'
+                        }}</span>
                       </div>
                       <div class="meta-item">
                         <span class="meta-label">موبایل</span>
-                        <span class="meta-value accountant-mobile-value">{{ selectedRelation.mobile_number }}</span>
+                        <span class="meta-value accountant-mobile-value">{{
+                          selectedRelation.mobile_number
+                        }}</span>
                       </div>
                       <div class="meta-item">
                         <span class="meta-label">ایجاد</span>
-                        <span class="meta-value">{{ formatDateTime(selectedRelation.created_at) }}</span>
+                        <span class="meta-value">{{
+                          formatDateTime(selectedRelation.created_at)
+                        }}</span>
                       </div>
                       <div class="meta-item">
                         <span class="meta-label">فعال‌سازی</span>
-                        <span class="meta-value">{{ formatDateTime(selectedRelation.activated_at) }}</span>
+                        <span class="meta-value">{{
+                          formatDateTime(selectedRelation.activated_at)
+                        }}</span>
                       </div>
                       <div v-if="selectedRelation.status === 'pending'" class="meta-item">
                         <span class="meta-label">انقضا</span>
-                        <span class="meta-value">{{ formatDateTime(selectedRelation.expires_at) }}</span>
+                        <span class="meta-value">{{
+                          formatDateTime(selectedRelation.expires_at)
+                        }}</span>
                       </div>
                     </div>
-                    <p v-if="getRelationStateText(selectedRelation)" class="accountant-state-copy" :class="`status-${selectedRelation.status}`">{{ getRelationStateText(selectedRelation) }}</p>
+                    <p
+                      v-if="getRelationStateText(selectedRelation)"
+                      class="accountant-state-copy"
+                      :class="`status-${selectedRelation.status}`"
+                    >
+                      {{ getRelationStateText(selectedRelation) }}
+                    </p>
                     <div class="form-subpanel">
                       <div class="form-subpanel-head">
                         <h5>ویرایش شرح وظیفه</h5>
@@ -667,21 +789,51 @@ onBeforeUnmount(() => {
                       </div>
                       <label class="field-block">
                         <span>شرح وظیفه</span>
-                        <textarea v-model="editForm.duty_description" class="accountant-input accountant-textarea edit-duty-description" rows="3" :placeholder="selectedRelation.duty_description || 'مثلاً پیگیری پیشنهادها و ثبت معاملات روزانه'"></textarea>
+                        <textarea
+                          v-model="editForm.duty_description"
+                          class="accountant-input accountant-textarea edit-duty-description"
+                          rows="3"
+                          :placeholder="
+                            selectedRelation.duty_description ||
+                            'مثلاً پیگیری پیشنهادها و ثبت معاملات روزانه'
+                          "
+                        ></textarea>
                       </label>
                       <div class="panel-actions compact">
-                        <button type="button" class="accountant-secondary-control" :disabled="isSavingEdit" @click="editForm.duty_description = selectedRelation.duty_description || ''">بازنشانی</button>
-                        <button type="button" class="accountant-primary-control save-edit" :disabled="isSavingEdit" @click="saveDetailEdit">
+                        <button
+                          type="button"
+                          class="accountant-secondary-control"
+                          :disabled="isSavingEdit"
+                          @click="
+                            editForm.duty_description = selectedRelation.duty_description || ''
+                          "
+                        >
+                          بازنشانی
+                        </button>
+                        <button
+                          type="button"
+                          class="accountant-primary-control save-edit"
+                          :disabled="isSavingEdit"
+                          @click="saveDetailEdit"
+                        >
                           {{ isSavingEdit ? 'در حال ذخیره...' : 'ذخیره تغییرات' }}
                         </button>
                       </div>
-                      <p v-if="detailSaveNotice" class="detail-save-feedback success">{{ detailSaveNotice }}</p>
+                      <p v-if="detailSaveNotice" class="detail-save-feedback success">
+                        {{ detailSaveNotice }}
+                      </p>
                     </div>
                   </div>
                 </div>
 
-                <div class="detail-accordion accountant-accordion-panel" :class="{ open: openSections.detailSessions }">
-                  <div class="accountant-accordion-header" @click="toggleDetailSection('detailSessions')">
+                <div
+                  class="detail-accordion accountant-accordion-panel"
+                  :class="{ open: openSections.detailSessions }"
+                >
+                  <div
+                    class="accountant-accordion-header"
+                    @click="toggleDetailSection('detailSessions')"
+                  >
                     <div class="accountant-accordion-header-info">
                       <ShieldCheck :size="18" class="accountant-section-icon" />
                       <div>
@@ -691,19 +843,49 @@ onBeforeUnmount(() => {
                     </div>
                     <ChevronLeft :size="20" class="accountant-accordion-chevron" />
                   </div>
-                  <div v-show="openSections.detailSessions" class="accountant-accordion-body-shell accountant-accordion-body">
-                    <div v-if="selectedRelation.status !== 'active' || !selectedRelation.accountant_user_id" class="accountant-empty">نشست فقط برای حسابدار فعال قابل مدیریت است.</div>
-                    <div v-else-if="loadingSessionsRelationId === selectedRelation.id" class="accountant-loading session-loading">در حال دریافت نشست‌های حسابدار...</div>
-                    <div v-else-if="!getRelationSessions(selectedRelation.id).length" class="accountant-empty session-empty">در حال حاضر نشست فعالی برای این حسابدار ثبت نشده است.</div>
+                  <div
+                    v-show="openSections.detailSessions"
+                    class="accountant-accordion-body-shell accountant-accordion-body"
+                  >
+                    <div
+                      v-if="
+                        selectedRelation.status !== 'active' || !selectedRelation.accountant_user_id
+                      "
+                      class="accountant-empty"
+                    >
+                      نشست فقط برای حسابدار فعال قابل مدیریت است.
+                    </div>
+                    <div
+                      v-else-if="loadingSessionsRelationId === selectedRelation.id"
+                      class="accountant-loading session-loading"
+                    >
+                      در حال دریافت نشست‌های حسابدار...
+                    </div>
+                    <div
+                      v-else-if="!getRelationSessions(selectedRelation.id).length"
+                      class="accountant-empty session-empty"
+                    >
+                      در حال حاضر نشست فعالی برای این حسابدار ثبت نشده است.
+                    </div>
                     <ul v-else class="session-list">
-                      <li v-for="session in getRelationSessions(selectedRelation.id)" :key="session.id" class="session-item">
+                      <li
+                        v-for="session in getRelationSessions(selectedRelation.id)"
+                        :key="session.id"
+                        class="session-item"
+                      >
                         <div class="session-item-main">
                           <div class="session-item-top">
                             <strong>{{ session.device_name || 'دستگاه ناشناس' }}</strong>
                             <div class="session-badges">
-                              <span v-if="session.is_primary" class="session-badge primary">primary</span>
-                              <span class="session-badge neutral">{{ formatSessionPlatform(session.platform) }}</span>
-                              <span class="session-badge neutral">{{ formatHomeServer(session.home_server) }}</span>
+                              <span v-if="session.is_primary" class="session-badge primary"
+                                >primary</span
+                              >
+                              <span class="session-badge neutral">{{
+                                formatSessionPlatform(session.platform)
+                              }}</span>
+                              <span class="session-badge neutral">{{
+                                formatHomeServer(session.home_server)
+                              }}</span>
                             </div>
                           </div>
                           <div class="session-item-meta">
@@ -712,19 +894,44 @@ onBeforeUnmount(() => {
                             <span v-if="session.device_ip">IP: {{ session.device_ip }}</span>
                           </div>
                         </div>
-                        <button type="button" class="danger-btn terminate-session" :disabled="terminatingSessionId === session.id" @click="terminateAccountantSession(selectedRelation, session)">
-                          {{ terminatingSessionId === session.id ? 'در حال پایان...' : 'پایان نشست' }}
+                        <button
+                          type="button"
+                          class="danger-btn terminate-session"
+                          :disabled="terminatingSessionId === session.id"
+                          @click="terminateAccountantSession(selectedRelation, session)"
+                        >
+                          {{
+                            terminatingSessionId === session.id ? 'در حال پایان...' : 'پایان نشست'
+                          }}
                         </button>
                       </li>
                     </ul>
-                    <div v-if="selectedRelation.status === 'active' && selectedRelation.accountant_user_id" class="panel-actions compact">
-                      <button type="button" class="ghost-btn refresh-sessions" :disabled="loadingSessionsRelationId === selectedRelation.id" @click="loadSessionsForRelation(selectedRelation.id)">نوسازی نشست‌ها</button>
+                    <div
+                      v-if="
+                        selectedRelation.status === 'active' && selectedRelation.accountant_user_id
+                      "
+                      class="panel-actions compact"
+                    >
+                      <button
+                        type="button"
+                        class="ghost-btn refresh-sessions"
+                        :disabled="loadingSessionsRelationId === selectedRelation.id"
+                        @click="loadSessionsForRelation(selectedRelation.id)"
+                      >
+                        نوسازی نشست‌ها
+                      </button>
                     </div>
                   </div>
                 </div>
 
-                <div class="detail-accordion accountant-accordion-panel danger-accordion" :class="{ open: openSections.detailDanger }">
-                  <div class="accountant-accordion-header" @click="toggleDetailSection('detailDanger')">
+                <div
+                  class="detail-accordion accountant-accordion-panel danger-accordion"
+                  :class="{ open: openSections.detailDanger }"
+                >
+                  <div
+                    class="accountant-accordion-header"
+                    @click="toggleDetailSection('detailDanger')"
+                  >
                     <div class="accountant-accordion-header-info">
                       <Users :size="18" class="accountant-section-icon" />
                       <div>
@@ -734,17 +941,41 @@ onBeforeUnmount(() => {
                     </div>
                     <ChevronLeft :size="20" class="accountant-accordion-chevron" />
                   </div>
-                  <div v-show="openSections.detailDanger" class="accountant-accordion-body-shell accountant-accordion-body">
-                    <p class="danger-copy">این عملیات رابطه حسابدار را غیرفعال می‌کند و نشست‌های مربوط به او باید جداگانه مدیریت شوند.</p>
-                    <button v-if="selectedRelation.status === 'active'" type="button" class="danger-btn unlink-active" @click="unlinkRelation(selectedRelation)">قطع ارتباط با حسابدار</button>
-                    <button v-else-if="selectedRelation.status === 'pending'" type="button" class="danger-btn cancel-pending" @click="unlinkRelation(selectedRelation)">لغو دعوت حسابدار</button>
+                  <div
+                    v-show="openSections.detailDanger"
+                    class="accountant-accordion-body-shell accountant-accordion-body"
+                  >
+                    <p class="danger-copy">
+                      این عملیات رابطه حسابدار را غیرفعال می‌کند و نشست‌های مربوط به او باید جداگانه
+                      مدیریت شوند.
+                    </p>
+                    <button
+                      v-if="selectedRelation.status === 'active'"
+                      type="button"
+                      class="danger-btn unlink-active"
+                      @click="unlinkRelation(selectedRelation)"
+                    >
+                      قطع ارتباط با حسابدار
+                    </button>
+                    <button
+                      v-else-if="selectedRelation.status === 'pending'"
+                      type="button"
+                      class="danger-btn cancel-pending"
+                      @click="unlinkRelation(selectedRelation)"
+                    >
+                      لغو دعوت حسابدار
+                    </button>
                     <div v-else class="accountant-empty">این رابطه در وضعیت قابل قطع نیست.</div>
                   </div>
                 </div>
               </div>
 
-              <div v-else-if="isLoading" class="accountant-loading">در حال دریافت لیست حسابداران...</div>
-              <div v-else-if="orderedRelations.length === 0" class="accountant-empty">هنوز حسابداری برای این مالک ثبت نشده است.</div>
+              <div v-else-if="isLoading" class="accountant-loading">
+                در حال دریافت لیست حسابداران...
+              </div>
+              <div v-else-if="orderedRelations.length === 0" class="accountant-empty">
+                هنوز حسابداری برای این مالک ثبت نشده است.
+              </div>
 
               <div v-else class="accountant-management-stack">
                 <section v-if="pendingInvitationRelations.length" class="pending-invitations-panel">
@@ -755,19 +986,38 @@ onBeforeUnmount(() => {
                     </div>
                     <span>{{ pendingInvitationRelations.length.toLocaleString('fa-IR') }}</span>
                   </div>
-                  <article v-for="relation in pendingInvitationRelations" :key="`pending-${relation.id}`" class="pending-invitation-card">
+                  <article
+                    v-for="relation in pendingInvitationRelations"
+                    :key="`pending-${relation.id}`"
+                    class="pending-invitation-card"
+                  >
                     <div class="pending-invitation-main">
                       <strong>{{ relation.relation_display_name }}</strong>
                       <span>@{{ relation.global_account_name }}</span>
                       <p>{{ getRelationStateText(relation) }}</p>
-                      <p v-if="invitationSmsStatusMessage(relation.sms_status)">{{ invitationSmsStatusMessage(relation.sms_status) }}</p>
+                      <p v-if="invitationSmsStatusMessage(relation.sms_status)">
+                        {{ invitationSmsStatusMessage(relation.sms_status) }}
+                      </p>
                     </div>
                     <div class="pending-invitation-actions">
-                      <button v-if="invitationRelationLink(relation, 'web')" type="button" class="accountant-secondary-control copy-link" @click="copyRegistrationLink(relation)">
-                        <span v-show="copiedRelationId !== relation.id" class="copy-state--idle">کپی لینک وب</span>
-                        <span v-show="copiedRelationId === relation.id" class="copy-state--copied">کپی شد</span>
+                      <button
+                        v-if="invitationRelationLink(relation, 'web')"
+                        type="button"
+                        class="accountant-secondary-control copy-link"
+                        @click="copyRegistrationLink(relation)"
+                      >
+                        <span v-show="copiedRelationId !== relation.id" class="copy-state--idle"
+                          >کپی لینک وب</span
+                        >
+                        <span v-show="copiedRelationId === relation.id" class="copy-state--copied"
+                          >کپی شد</span
+                        >
                       </button>
-                      <button type="button" class="danger-btn cancel-pending expire-pending-invitation" @click="unlinkRelation(relation)">
+                      <button
+                        type="button"
+                        class="danger-btn cancel-pending expire-pending-invitation"
+                        @click="unlinkRelation(relation)"
+                      >
                         منقضی کردن دعوت
                       </button>
                     </div>
@@ -775,15 +1025,25 @@ onBeforeUnmount(() => {
                 </section>
 
                 <div v-if="manageableRelations.length" class="accountant-list">
-                  <article v-for="relation in manageableRelations" :key="relation.id" class="accountant-card profile-relation-card profile-relation-card--accountant">
+                  <article
+                    v-for="relation in manageableRelations"
+                    :key="relation.id"
+                    class="accountant-card profile-relation-card profile-relation-card--accountant"
+                  >
                     <div class="accountant-card-head accountant-card-head--manage">
                       <div class="accountant-card-main">
                         <div class="accountant-card-title-row">
                           <div class="accountant-identity-block">
                             <h5>{{ relation.relation_display_name }}</h5>
-                            <p class="accountant-global-name">@{{ relation.global_account_name }}</p>
+                            <p class="accountant-global-name">
+                              @{{ relation.global_account_name }}
+                            </p>
                           </div>
-                          <span class="accountant-status-badge" :class="`status-${relation.status}`">{{ statusLabel(relation.status) }}</span>
+                          <span
+                            class="accountant-status-badge"
+                            :class="`status-${relation.status}`"
+                            >{{ statusLabel(relation.status) }}</span
+                          >
                         </div>
                         <div class="accountant-card-meta-pills">
                           <span class="accountant-info-pill accountant-mobile-number">
@@ -792,7 +1052,9 @@ onBeforeUnmount(() => {
                           </span>
                           <span class="accountant-info-pill">
                             <span>کاربر لینک‌شده</span>
-                            <strong>{{ relation.accountant_account_name || 'ثبت‌نام نشده' }}</strong>
+                            <strong>{{
+                              relation.accountant_account_name || 'ثبت‌نام نشده'
+                            }}</strong>
                           </span>
                           <span class="accountant-info-pill">
                             <span>ایجاد</span>
@@ -803,9 +1065,15 @@ onBeforeUnmount(() => {
                             <strong>{{ formatDateTime(relation.activated_at) }}</strong>
                           </span>
                         </div>
-                        <p v-if="relation.duty_description" class="accountant-duty compact-duty">{{ relation.duty_description }}</p>
+                        <p v-if="relation.duty_description" class="accountant-duty compact-duty">
+                          {{ relation.duty_description }}
+                        </p>
                         <div class="accountant-card-footer">
-                          <button type="button" class="accountant-primary-control accountant-settings-btn" @click="openAccountantDetail(relation)">
+                          <button
+                            type="button"
+                            class="accountant-primary-control accountant-settings-btn"
+                            @click="openAccountantDetail(relation)"
+                          >
                             تنظیمات حسابدار
                           </button>
                         </div>
@@ -844,7 +1112,12 @@ onBeforeUnmount(() => {
   max-height: 100%;
   overflow: auto;
   border-radius: 28px;
-  background: linear-gradient(180deg, rgba(255, 251, 235, 0.98) 0%, rgba(255, 255, 255, 0.98) 26%, rgba(248, 250, 252, 0.98) 100%);
+  background: linear-gradient(
+    180deg,
+    rgba(255, 251, 235, 0.98) 0%,
+    rgba(255, 255, 255, 0.98) 26%,
+    rgba(248, 250, 252, 0.98) 100%
+  );
   box-shadow: 0 26px 80px rgba(15, 23, 42, 0.24);
   border: 1px solid rgba(245, 158, 11, 0.14);
   padding: 22px;

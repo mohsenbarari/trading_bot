@@ -73,6 +73,19 @@ const shouldRenderAuthenticatedShell = computed(
 const shouldScopeRoute = computed(
   () => isFirstRouteReady.value && v2Scope.value === UI_V2_SCOPE.ROUTE,
 )
+const pathKeyedSectionRouteNames = new Set([
+  'operations-customers',
+  'operations-customers-detail',
+  'operations-accountants',
+  'operations-accountants-detail',
+])
+const unscopedRouteKey = computed(() =>
+  v2Scope.value === UI_V2_SCOPE.SECTION &&
+  typeof route.name === 'string' &&
+  pathKeyedSectionRouteNames.has(route.name)
+    ? `section:${route.path}`
+    : `legacy:${route.fullPath}`,
+)
 const shouldReserveDailyNavigation = computed(
   () =>
     isStandardAuthenticatedShell.value ||
@@ -177,7 +190,7 @@ watch(
           >
             <component :is="Component" />
           </AppDesignSystemScope>
-          <component v-else :is="Component" :key="`legacy:${route.fullPath}`" />
+          <component v-else :is="Component" :key="unscopedRouteKey" />
         </transition>
       </RouterView>
     </div>

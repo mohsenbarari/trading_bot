@@ -354,19 +354,38 @@ class CustomerRelationServiceTests(unittest.IsolatedAsyncioTestCase):
         relation = SimpleNamespace(
             id=14,
             owner_user_id=7,
+            customer_user_id=81,
             customer_user=customer_user,
             status=CustomerRelationStatus.ACTIVE,
             deleted_at=None,
+            invitation_token="CUST-delete-account",
         )
-        db = FakeDB(execute_results=[FakeExecuteResult(scalar_one_value=relation)])
+        invitation = SimpleNamespace(token=relation.invitation_token)
+        db = FakeDB(execute_results=[
+            FakeExecuteResult(scalar_one_value=relation.invitation_token),
+            FakeExecuteResult(scalar_one_value=relation),
+        ])
 
-        with patch("core.services.user_deletion_service.delete_user_account", new=AsyncMock()) as delete_mock:
-            result = await unlink_owner_customer_relation(db, owner_user_id=7, relation_id=14)
+        with patch(
+            "core.services.customer_relation_service.lock_invitation_for_transition",
+            new=AsyncMock(return_value=invitation),
+        ) as lock_mock, patch(
+            "core.services.user_deletion_service.delete_user_account",
+            new=AsyncMock(),
+        ) as delete_mock:
+            result = await unlink_owner_customer_relation(
+                db,
+                owner_user_id=7,
+                relation_id=14,
+                expected_action="delete-account",
+            )
 
         self.assertIs(result, relation)
+        lock_mock.assert_awaited_once_with(db, invitation_token=relation.invitation_token)
         delete_mock.assert_awaited_once_with(db, customer_user)
         self.assertEqual(relation.status, CustomerRelationStatus.DELETED)
         self.assertIsNotNone(relation.deleted_at)
+        self.assertIsNotNone(db.executed_statements[1]._for_update_arg)
         db.commit.assert_awaited_once()
         db.refresh.assert_awaited_once_with(relation)
 
@@ -588,54 +607,9 @@ class CustomerRelationServiceTests(unittest.IsolatedAsyncioTestCase):
                 FakeDB(execute_results=[FakeExecuteResult(scalar_one_value=None)]),
                 owner_user_id=7,
                 relation_id=3,
+                expected_action="cancel-pending",
             )
         self.assertEqual(unlink_missing_exc.exception.detail, "رابطه مشتری یافت نشد")
-
-        closed_relation = SimpleNamespace(
-            id=4,
-            owner_user_id=7,
-            status=CustomerRelationStatus.EXPIRED,
-            deleted_at=None,
-            customer_user=None,
-        )
-        with self.assertRaises(HTTPException) as unlink_closed_exc:
-            await unlink_owner_customer_relation(
-                FakeDB(execute_results=[FakeExecuteResult(scalar_one_value=closed_relation)]),
-                owner_user_id=7,
-                relation_id=4,
-            )
-        self.assertEqual(unlink_closed_exc.exception.detail, "این رابطه قبلاً بسته شده است")
-
-        pending_relation = SimpleNamespace(
-            id=5,
-            owner_user_id=7,
-            status=CustomerRelationStatus.PENDING,
-            deleted_at=None,
-            customer_user=None,
-        )
-        pending_db = FakeDB(execute_results=[FakeExecuteResult(scalar_one_value=pending_relation)])
-        with patch(
-            "core.services.customer_relation_service.cancel_pending_customer_relation",
-            new=AsyncMock(return_value="cancelled"),
-        ) as cancel_mock:
-            result = await unlink_owner_customer_relation(pending_db, owner_user_id=7, relation_id=5)
-        self.assertEqual(result, "cancelled")
-        cancel_mock.assert_awaited_once_with(pending_db, owner_user_id=7, relation_id=5)
-
-        invalid_active_state = SimpleNamespace(
-            id=6,
-            owner_user_id=7,
-            status="unexpected",
-            deleted_at=None,
-            customer_user=None,
-        )
-        with self.assertRaises(HTTPException) as unlink_invalid_exc:
-            await unlink_owner_customer_relation(
-                FakeDB(execute_results=[FakeExecuteResult(scalar_one_value=invalid_active_state)]),
-                owner_user_id=7,
-                relation_id=6,
-            )
-        self.assertEqual(unlink_invalid_exc.exception.detail, "فقط مشتری pending یا active قابل قطع ارتباط است")
 
         with self.assertRaises(HTTPException) as update_missing_exc:
             await update_owner_customer_relation(
@@ -660,6 +634,259 @@ class CustomerRelationServiceTests(unittest.IsolatedAsyncioTestCase):
                 update_data={},
             )
         self.assertEqual(update_closed_exc.exception.detail, "فقط مشتری pending یا active قابل ویرایش است")
+
+    async def test_unlink_owner_customer_relation_accepts_cancel_pending_and_relation_only(self):
+        pending_relation = SimpleNamespace(
+            id=21,
+            owner_user_id=7,
+            customer_user_id=None,
+            customer_user=None,
+            status=CustomerRelationStatus.PENDING,
+            deleted_at=None,
+            invitation_token="CUST-cancel-explicit",
+        )
+        pending_invitation = SimpleNamespace(
+            id=91,
+            token=pending_relation.invitation_token,
+            is_used=False,
+            registered_user_id=None,
+            completed_at=None,
+            completed_via=None,
+            revoked_at=None,
+            expires_at=datetime.utcnow() + timedelta(days=1),
+        )
+        pending_db = FakeDB(execute_results=[
+            FakeExecuteResult(scalar_one_value=pending_relation.invitation_token),
+            FakeExecuteResult(scalar_one_value=pending_relation),
+        ])
+
+        with patch(
+            "core.services.customer_relation_service.lock_invitation_for_transition",
+            new=AsyncMock(return_value=pending_invitation),
+        ), patch(
+            "core.services.customer_relation_service.release_invitation_identity",
+            new=AsyncMock(),
+        ) as release_pending_mock, patch(
+            "core.services.user_deletion_service.delete_user_account",
+            new=AsyncMock(),
+        ) as delete_mock:
+            cancelled = await unlink_owner_customer_relation(
+                pending_db,
+                owner_user_id=7,
+                relation_id=pending_relation.id,
+                expected_action="cancel-pending",
+            )
+
+        self.assertIs(cancelled, pending_relation)
+        self.assertEqual(cancelled.status, CustomerRelationStatus.REVOKED)
+        self.assertIsNotNone(pending_invitation.revoked_at)
+        release_pending_mock.assert_awaited_once_with(pending_db, invitation_id=pending_invitation.id)
+        delete_mock.assert_not_awaited()
+        pending_db.commit.assert_awaited_once()
+
+        orphan_relation = SimpleNamespace(
+            id=22,
+            owner_user_id=7,
+            customer_user_id=None,
+            customer_user=None,
+            status=CustomerRelationStatus.ACTIVE,
+            deleted_at=None,
+            invitation_token="CUST-orphan-explicit",
+        )
+        orphan_db = FakeDB(execute_results=[
+            FakeExecuteResult(scalar_one_value=orphan_relation.invitation_token),
+            FakeExecuteResult(scalar_one_value=orphan_relation),
+        ])
+
+        with patch(
+            "core.services.customer_relation_service.lock_invitation_for_transition",
+            new=AsyncMock(return_value=SimpleNamespace(token=orphan_relation.invitation_token)),
+        ), patch(
+            "core.services.customer_relation_service.release_invitation_identities_for_tokens",
+            new=AsyncMock(),
+        ) as release_orphan_mock, patch(
+            "core.services.user_deletion_service.delete_user_account",
+            new=AsyncMock(),
+        ) as delete_mock:
+            deleted_relation = await unlink_owner_customer_relation(
+                orphan_db,
+                owner_user_id=7,
+                relation_id=orphan_relation.id,
+                expected_action="delete-relation",
+            )
+
+        self.assertIs(deleted_relation, orphan_relation)
+        self.assertEqual(deleted_relation.status, CustomerRelationStatus.DELETED)
+        release_orphan_mock.assert_awaited_once_with(
+            orphan_db,
+            invitation_tokens=[orphan_relation.invitation_token],
+        )
+        delete_mock.assert_not_awaited()
+        orphan_db.commit.assert_awaited_once()
+
+    async def test_unlink_owner_customer_relation_rejects_every_action_state_mismatch_before_effects(self):
+        state_factories = {
+            "pending": lambda token: SimpleNamespace(
+                id=31,
+                owner_user_id=7,
+                customer_user_id=None,
+                customer_user=None,
+                status=CustomerRelationStatus.PENDING,
+                deleted_at=None,
+                invitation_token=token,
+            ),
+            "orphan": lambda token: SimpleNamespace(
+                id=32,
+                owner_user_id=7,
+                customer_user_id=None,
+                customer_user=None,
+                status=CustomerRelationStatus.ACTIVE,
+                deleted_at=None,
+                invitation_token=token,
+            ),
+            "live": lambda token: SimpleNamespace(
+                id=33,
+                owner_user_id=7,
+                customer_user_id=83,
+                customer_user=SimpleNamespace(id=83, is_deleted=False),
+                status=CustomerRelationStatus.ACTIVE,
+                deleted_at=None,
+                invitation_token=token,
+            ),
+        }
+        mismatches = [
+            ("cancel-pending", "orphan"),
+            ("cancel-pending", "live"),
+            ("delete-relation", "pending"),
+            ("delete-relation", "live"),
+            ("delete-account", "pending"),
+            ("delete-account", "orphan"),
+        ]
+
+        for expected_action, state_name in mismatches:
+            with self.subTest(expected_action=expected_action, state=state_name):
+                token = f"CUST-mismatch-{expected_action}-{state_name}"
+                relation = state_factories[state_name](token)
+                invitation = SimpleNamespace(
+                    id=99,
+                    token=token,
+                    is_used=False,
+                    registered_user_id=None,
+                    completed_at=None,
+                    completed_via=None,
+                    revoked_at=None,
+                    expires_at=datetime.utcnow() + timedelta(days=1),
+                )
+                db = FakeDB(execute_results=[
+                    FakeExecuteResult(scalar_one_value=token),
+                    FakeExecuteResult(scalar_one_value=relation),
+                ])
+
+                with patch(
+                    "core.services.customer_relation_service.lock_invitation_for_transition",
+                    new=AsyncMock(return_value=invitation),
+                ), patch(
+                    "core.services.customer_relation_service.release_invitation_identity",
+                    new=AsyncMock(),
+                ) as release_pending_mock, patch(
+                    "core.services.customer_relation_service.release_invitation_identities_for_tokens",
+                    new=AsyncMock(),
+                ) as release_orphan_mock, patch(
+                    "core.services.user_deletion_service.delete_user_account",
+                    new=AsyncMock(),
+                ) as delete_mock, self.assertRaises(HTTPException) as exc_info:
+                    await unlink_owner_customer_relation(
+                        db,
+                        owner_user_id=7,
+                        relation_id=relation.id,
+                        expected_action=expected_action,
+                    )
+
+                self.assertEqual(exc_info.exception.status_code, 409)
+                self.assertEqual(
+                    exc_info.exception.detail,
+                    customer_relation_service.OWNER_CUSTOMER_RELATION_DELETE_CONFLICT_DETAIL,
+                )
+                release_pending_mock.assert_not_awaited()
+                release_orphan_mock.assert_not_awaited()
+                delete_mock.assert_not_awaited()
+                db.commit.assert_not_awaited()
+                self.assertIsNone(relation.deleted_at)
+
+    async def test_unlink_owner_customer_relation_requires_genuinely_pending_invitation(self):
+        now = datetime.utcnow()
+        invalid_invitations = {
+            "missing": None,
+            "expired": SimpleNamespace(
+                id=101,
+                is_used=False,
+                revoked_at=None,
+                expires_at=now - timedelta(seconds=1),
+            ),
+            "used": SimpleNamespace(
+                id=102,
+                is_used=True,
+                registered_user_id=82,
+                completed_at=now,
+                completed_via="web",
+                revoked_at=None,
+                expires_at=now + timedelta(days=1),
+            ),
+            "revoked": SimpleNamespace(
+                id=103,
+                is_used=False,
+                revoked_at=now,
+                expires_at=now + timedelta(days=1),
+            ),
+        }
+
+        for case, invitation in invalid_invitations.items():
+            with self.subTest(case=case):
+                token = f"CUST-invalid-{case}"
+                relation = SimpleNamespace(
+                    id=41,
+                    owner_user_id=7,
+                    customer_user_id=None,
+                    customer_user=None,
+                    status=CustomerRelationStatus.PENDING,
+                    deleted_at=None,
+                    invitation_token=token,
+                )
+                db = FakeDB(execute_results=[
+                    FakeExecuteResult(scalar_one_value=token),
+                    FakeExecuteResult(scalar_one_value=relation),
+                ])
+
+                with patch(
+                    "core.services.customer_relation_service.lock_invitation_for_transition",
+                    new=AsyncMock(return_value=invitation),
+                ), patch(
+                    "core.services.customer_relation_service.soft_revoke_invitation",
+                ) as revoke_mock, patch(
+                    "core.services.customer_relation_service.release_invitation_identity",
+                    new=AsyncMock(),
+                ) as release_mock, patch(
+                    "core.services.user_deletion_service.delete_user_account",
+                    new=AsyncMock(),
+                ) as delete_mock, self.assertRaises(HTTPException) as exc_info:
+                    await unlink_owner_customer_relation(
+                        db,
+                        owner_user_id=7,
+                        relation_id=relation.id,
+                        expected_action="cancel-pending",
+                    )
+
+                self.assertEqual(exc_info.exception.status_code, 409)
+                self.assertEqual(
+                    exc_info.exception.detail,
+                    customer_relation_service.OWNER_CUSTOMER_RELATION_DELETE_CONFLICT_DETAIL,
+                )
+                revoke_mock.assert_not_called()
+                release_mock.assert_not_awaited()
+                delete_mock.assert_not_awaited()
+                db.commit.assert_not_awaited()
+                self.assertEqual(relation.status, CustomerRelationStatus.PENDING)
+                self.assertIsNone(relation.deleted_at)
 
     async def test_update_owner_customer_relation_updates_limits_and_clears_commission_for_tier1(self):
         relation = SimpleNamespace(

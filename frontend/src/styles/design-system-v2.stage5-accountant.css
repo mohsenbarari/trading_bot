@@ -1,0 +1,281 @@
+/* Stage 5 Accountant workspace. Loaded centrally with the canonical V2 styles. */
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-workspace-accountant-layout {
+  display: grid;
+  grid-template-areas: 'master';
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--ui-v2-spacing-16);
+  align-items: start;
+  min-width: 0;
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-workspace-accountant-list-section,
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-workspace-accountant-detail-section {
+  grid-area: master;
+  min-width: 0;
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-workspace-accountant-relation-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-v2-spacing-12);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-workspace-accountant-detail-tabs
+  > button,
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-workspace-accountant-filter-chips
+  > button {
+  min-block-size: var(--ui-v2-size-target-min);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-workspace-accountant-summary-badges {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--ui-v2-spacing-8);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-workspace-accountant-list-controls,
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-workspace-accountant-detail-shell,
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-workspace-accountant-detail-list {
+  display: grid;
+  gap: var(--ui-v2-spacing-12);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-workspace-accountant-list-group {
+  display: grid;
+  gap: var(--ui-v2-spacing-8);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-workspace-accountant-list-group
+  h3 {
+  margin: 0;
+  color: var(--ui-v2-color-text-secondary);
+  font-size: var(--ui-v2-type-label-medium-size);
+  line-height: var(--ui-v2-type-label-medium-line);
+  font-weight: var(--ui-v2-font-weight-bold);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-workspace-accountant-list-badges,
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-workspace-accountant-detail-badges {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-start;
+  gap: var(--ui-v2-spacing-4);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-workspace-accountant-detail-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+  gap: var(--ui-v2-spacing-12);
+  padding: var(--ui-v2-spacing-16);
+  border: var(--ui-v2-stroke-standard) solid var(--ui-v2-color-border-default);
+  border-radius: var(--ui-v2-radius-card);
+  background: var(--ui-v2-color-surface-subtle);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-workspace-accountant-detail-header
+  h2,
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-workspace-accountant-detail-header
+  p {
+  margin: 0;
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-workspace-accountant-detail-header
+  h2 {
+  color: var(--ui-v2-color-text-strong);
+  font-size: var(--ui-v2-type-section-size);
+  line-height: var(--ui-v2-type-section-line);
+  font-weight: var(--ui-v2-font-weight-bold);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-workspace-accountant-detail-header
+  p {
+  margin-top: var(--ui-v2-spacing-4);
+  color: var(--ui-v2-color-text-secondary);
+  font-size: var(--ui-v2-type-body-small-size);
+  line-height: var(--ui-v2-type-body-small-line);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-workspace-accountant-detail-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--ui-v2-spacing-8);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-workspace-accountant-meta-label {
+  display: block;
+  margin-bottom: var(--ui-v2-spacing-4);
+  color: var(--ui-v2-color-text-secondary);
+  font-size: var(--ui-v2-type-label-small-size);
+  line-height: var(--ui-v2-type-label-small-line);
+  font-weight: var(--ui-v2-font-weight-semibold);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-workspace-accountant-detail-grid
+  strong,
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-workspace-accountant-detail-list
+  strong {
+  color: var(--ui-v2-color-text-primary);
+  font-size: var(--ui-v2-type-body-medium-size);
+  line-height: var(--ui-v2-type-body-medium-line);
+  font-weight: var(--ui-v2-font-weight-bold);
+  word-break: break-word;
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-workspace-accountant-detail-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ui-v2-spacing-12);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-workspace-accountant-detail-toolbar
+  strong {
+  color: var(--ui-v2-color-text-primary);
+  font-size: var(--ui-v2-type-body-medium-size);
+  line-height: var(--ui-v2-type-body-medium-line);
+  font-weight: var(--ui-v2-font-weight-bold);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-workspace-accountant-danger-card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--ui-v2-spacing-12);
+  align-items: start;
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-workspace-accountant-danger-card
+  strong,
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-workspace-accountant-danger-card
+  p {
+  margin: 0;
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-workspace-accountant-danger-card
+  strong {
+  color: var(--ui-v2-color-text-primary);
+  font-size: var(--ui-v2-type-body-medium-size);
+  line-height: var(--ui-v2-type-body-medium-line);
+  font-weight: var(--ui-v2-font-weight-bold);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-workspace-accountant-danger-card
+  p {
+  margin-top: var(--ui-v2-spacing-4);
+  color: var(--ui-v2-color-text-secondary);
+  font-size: var(--ui-v2-type-body-small-size);
+  line-height: var(--ui-v2-type-body-small-line);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-workspace-accountant-edit-form-card,
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-workspace-accountant-create-panel,
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-workspace-accountant-generated-account {
+  display: grid;
+  gap: var(--ui-v2-spacing-12);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-workspace-accountant-inline-actions,
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-workspace-accountant-session-actions,
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-workspace-accountant-pending-card-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ui-v2-spacing-8);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-workspace-accountant-pending-card-header
+  p {
+  margin: var(--ui-v2-spacing-4) 0 0;
+  color: var(--ui-v2-color-text-secondary);
+  font-size: var(--ui-v2-type-body-small-size);
+  line-height: var(--ui-v2-type-body-small-line);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-workspace-accountant-pending-deadline,
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-workspace-accountant-pending-sms-status {
+  margin: var(--ui-v2-spacing-8) 0 0;
+  color: var(--ui-v2-color-text-secondary);
+  font-size: var(--ui-v2-type-label-small-size);
+  line-height: var(--ui-v2-type-label-small-line);
+}
+
+@media (min-width: 900px) {
+  :where(
+      [data-ui-system='v2'],
+      [data-ui-system='v2-portal']
+    ).ui-v2-workspace-accountant-root.ui-v2-workspace-adapter
+    .ui-v2-workspace-adapter__body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  :where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-workspace-accountant-layout {
+    grid-template-areas: 'master detail';
+    grid-template-columns: minmax(var(--ui-v2-layout-card-min), 4fr) minmax(0, 6fr);
+  }
+
+  :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+    .ui-v2-workspace-accountant-detail-section {
+    grid-area: detail;
+  }
+
+  :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+    .ui-v2-workspace-accountant-detail-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+    .ui-v2-workspace-accountant-detail-header {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+    .ui-v2-workspace-accountant-detail-badges,
+  :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+    .ui-v2-workspace-accountant-list-badges {
+    justify-content: flex-end;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :where([data-ui-system='v2'], [data-ui-system='v2-portal']).ui-v2-workspace-accountant-root
+    .ui-v2-workspace-adapter__back {
+    transition: none;
+  }
+}

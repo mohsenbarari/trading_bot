@@ -2,7 +2,11 @@
 
 import { expect, test, type APIRequestContext, type Locator, type Page } from '@playwright/test'
 
-import { getE2EBackendBaseUrl, runPythonInApp as runPythonInConfiguredApp, runRedisCli } from './helpers/mutationRuntime'
+import {
+  getE2EBackendBaseUrl,
+  runPythonInApp as runPythonInConfiguredApp,
+  runRedisCli,
+} from './helpers/mutationRuntime'
 import { primeAuthSession } from './helpers/auth'
 
 const BACKEND_BASE_URL = getE2EBackendBaseUrl()
@@ -51,6 +55,31 @@ interface DeletedCustomerPayload {
   userDeleted: boolean | null
 }
 
+interface CancelledCustomerRelationState {
+  relationStatus: string | null
+  relationDeleted: boolean
+  invitationRevoked: boolean
+  identityReservationReleased: boolean
+}
+
+interface CustomerDeletionCascadeFixture {
+  sessionId: string
+  offerId: number
+  invitationId: number
+  linkedRelationId: number
+  tradeId: number
+}
+
+interface CustomerDeletionCascadeState {
+  sessionActive: boolean | null
+  offerStatus: string | null
+  offerExpireReason: string | null
+  invitationRevoked: boolean
+  linkedRelationStatus: string | null
+  linkedRelationDeleted: boolean
+  tradeRetained: boolean
+}
+
 interface AdminHistoryFixture {
   superAdmin: SessionUser
   ownerUserId: number
@@ -73,7 +102,10 @@ function runPythonInApp<T>(script: string): T {
   return runPythonInConfiguredApp<T>(script, 'customer flow helper')
 }
 
-function seedSessionUser(label: string, roleTag: 'standard' | 'super_admin' = 'standard'): SessionUser {
+function seedSessionUser(
+  label: string,
+  roleTag: 'standard' | 'super_admin' = 'standard',
+): SessionUser {
   return runPythonInApp<SessionUser>(`
 import asyncio
 import json
@@ -168,6 +200,217 @@ async def main():
         'relationStatus': getattr(relation.status, 'value', None) if relation else None,
         'relationDeletedAt': relation.deleted_at.isoformat() if relation and relation.deleted_at else None,
         'userDeleted': getattr(user, 'is_deleted', None),
+    }))
+
+asyncio.run(main())
+`)
+}
+
+function inspectCancelledCustomerRelation(relationId: number): CancelledCustomerRelationState {
+  return runPythonInApp<CancelledCustomerRelationState>(`
+import asyncio
+import json
+
+from sqlalchemy import select
+
+from core.db import AsyncSessionLocal
+from models.customer_relation import CustomerRelation
+from models.invitation import Invitation
+from models.invitation_identity_reservation import InvitationIdentityReservation
+
+relation_id = ${JSON.stringify(relationId)}
+
+async def main():
+    async with AsyncSessionLocal() as db:
+        relation = await db.get(CustomerRelation, relation_id)
+        invitation = None
+        identity_reservation = None
+        if relation is not None:
+            invitation = (await db.execute(
+                select(Invitation).where(Invitation.token == relation.invitation_token)
+            )).scalar_one_or_none()
+        if invitation is not None:
+            identity_reservation = (await db.execute(
+                select(InvitationIdentityReservation.id).where(
+                    InvitationIdentityReservation.invitation_id == invitation.id
+                )
+            )).scalar_one_or_none()
+
+    print(json.dumps({
+        'relationStatus': getattr(relation.status, 'value', None) if relation else None,
+        'relationDeleted': bool(relation and relation.deleted_at),
+        'invitationRevoked': bool(invitation and invitation.revoked_at),
+        'identityReservationReleased': identity_reservation is None,
+    }))
+
+asyncio.run(main())
+`)
+}
+
+function seedCustomerDeletionCascadeFixture(
+  customerUserId: number,
+): CustomerDeletionCascadeFixture {
+  return runPythonInApp<CustomerDeletionCascadeFixture>(`
+import asyncio
+import json
+import uuid
+from datetime import datetime, timedelta, timezone
+
+from core.db import AsyncSessionLocal
+from core.enums import UserRole
+from models.accountant_relation import AccountantRelation, AccountantRelationStatus
+from models.commodity import Commodity
+from models.invitation import Invitation, InvitationKind
+from models.offer import Offer, OfferStatus, OfferType
+from models.session import Platform, UserSession
+from models.trade import Trade, TradeStatus, TradeType
+from models.user import User
+
+customer_user_id = ${JSON.stringify(customerUserId)}
+
+def random_mobile():
+    mobile_seed = int(uuid.uuid4().hex[:9], 16) % 1000000000
+    return f"09{mobile_seed:09d}"
+
+async def main():
+    suffix = uuid.uuid4().hex[:10]
+    async with AsyncSessionLocal() as db:
+        customer = await db.get(User, customer_user_id)
+        if customer is None:
+            raise RuntimeError('Customer deletion target was not found')
+
+        linked_owner = User(
+            account_name=f"pw_customer_delete_link_owner_{suffix}",
+            mobile_number=random_mobile(),
+            full_name='Playwright Customer Deletion Link Owner',
+            address='Playwright Customer Deletion Link Owner',
+            role=UserRole.STANDARD,
+            has_bot_access=True,
+            max_sessions=1,
+        )
+        commodity = Commodity(name=f"PW Customer Deletion Commodity {suffix}")
+        db.add_all([linked_owner, commodity])
+        await db.flush()
+
+        session = UserSession(
+            user_id=customer.id,
+            device_name='Playwright Customer Deletion Session',
+            device_ip='127.0.0.1',
+            platform=Platform.WEB,
+            refresh_token_hash=f"pw-delete-{uuid.uuid4().hex}",
+            is_primary=True,
+            is_active=True,
+            expires_at=None,
+        )
+        offer = Offer(
+            user_id=customer.id,
+            actor_user_id=customer.id,
+            home_server='iran',
+            offer_type=OfferType.SELL,
+            commodity_id=commodity.id,
+            quantity=3,
+            remaining_quantity=3,
+            price=543210,
+            is_wholesale=True,
+            lot_sizes=None,
+            original_lot_sizes=None,
+            status=OfferStatus.ACTIVE,
+            notes='Playwright customer deletion active offer',
+        )
+        invitation = Invitation(
+            account_name=customer.account_name,
+            mobile_number=customer.mobile_number,
+            token=f"pw-customer-delete-inv-{uuid.uuid4().hex}",
+            short_code=uuid.uuid4().hex[:8],
+            role=UserRole.STANDARD,
+            kind=InvitationKind.STANDARD,
+            created_by_id=linked_owner.id,
+            is_used=False,
+            expires_at=datetime.utcnow() + timedelta(days=1),
+        )
+        linked_relation = AccountantRelation(
+            owner_user_id=linked_owner.id,
+            accountant_user_id=customer.id,
+            created_by_user_id=linked_owner.id,
+            invitation_token=f"pw-customer-delete-accountant-{uuid.uuid4().hex}",
+            global_account_name=customer.account_name,
+            relation_display_name=f"حسابدار لینک‌شده {suffix[:4]}",
+            duty_description='Playwright deletion cascade relation',
+            mobile_number=customer.mobile_number,
+            status=AccountantRelationStatus.ACTIVE,
+            expires_at=datetime.now(timezone.utc) + timedelta(days=30),
+            activated_at=datetime.now(timezone.utc),
+        )
+        trade = Trade(
+            trade_number=1000000000 + customer.id,
+            offer_id=None,
+            offer_user_id=customer.id,
+            offer_user_mobile=customer.mobile_number,
+            responder_user_id=linked_owner.id,
+            responder_user_mobile=linked_owner.mobile_number,
+            actor_user_id=customer.id,
+            commodity_id=commodity.id,
+            trade_type=TradeType.BUY,
+            quantity=2,
+            price=654321,
+            status=TradeStatus.COMPLETED,
+            created_at=datetime.now(timezone.utc),
+        )
+        db.add_all([session, offer, invitation, linked_relation, trade])
+        await db.flush()
+
+        fixture = {
+            'sessionId': str(session.id),
+            'offerId': offer.id,
+            'invitationId': invitation.id,
+            'linkedRelationId': linked_relation.id,
+            'tradeId': trade.id,
+        }
+        await db.commit()
+
+    print(json.dumps(fixture))
+
+asyncio.run(main())
+`)
+}
+
+function inspectCustomerDeletionCascadeFixture(
+  fixture: CustomerDeletionCascadeFixture,
+): CustomerDeletionCascadeState {
+  return runPythonInApp<CustomerDeletionCascadeState>(`
+import asyncio
+import json
+import uuid
+
+from core.db import AsyncSessionLocal
+from models.accountant_relation import AccountantRelation
+from models.invitation import Invitation
+from models.offer import Offer
+from models.session import UserSession
+from models.trade import Trade
+
+session_id = ${JSON.stringify(fixture.sessionId)}
+offer_id = ${JSON.stringify(fixture.offerId)}
+invitation_id = ${JSON.stringify(fixture.invitationId)}
+linked_relation_id = ${JSON.stringify(fixture.linkedRelationId)}
+trade_id = ${JSON.stringify(fixture.tradeId)}
+
+async def main():
+    async with AsyncSessionLocal() as db:
+        session = await db.get(UserSession, uuid.UUID(session_id))
+        offer = await db.get(Offer, offer_id)
+        invitation = await db.get(Invitation, invitation_id)
+        linked_relation = await db.get(AccountantRelation, linked_relation_id)
+        trade = await db.get(Trade, trade_id)
+
+    print(json.dumps({
+        'sessionActive': session.is_active if session else None,
+        'offerStatus': getattr(offer.status, 'value', None) if offer else None,
+        'offerExpireReason': offer.expire_reason if offer else None,
+        'invitationRevoked': bool(invitation and invitation.revoked_at),
+        'linkedRelationStatus': getattr(linked_relation.status, 'value', None) if linked_relation else None,
+        'linkedRelationDeleted': bool(linked_relation and linked_relation.deleted_at),
+        'tradeRetained': trade is not None,
     }))
 
 asyncio.run(main())
@@ -505,24 +748,25 @@ function toRelativeRegistrationPath(registrationLink: string): string {
 }
 
 function seedRegistrationVerified(token: string) {
-  runRedisCli([
-    'SETEX',
-    `reg_verified:${token}`,
-    '600',
-    '1',
-  ], 'customer registration Redis verification helper')
+  runRedisCli(
+    ['SETEX', `reg_verified:${token}`, '600', '1'],
+    'customer registration Redis verification helper',
+  )
 }
 
 async function waitForBackendReady(request: APIRequestContext) {
   await expect
-    .poll(async () => {
-      try {
-        const response = await request.get(`${BACKEND_BASE_URL}/api/config`)
-        return response.ok()
-      } catch {
-        return false
-      }
-    }, { timeout: 60000 })
+    .poll(
+      async () => {
+        try {
+          const response = await request.get(`${BACKEND_BASE_URL}/api/config`)
+          return response.ok()
+        } catch {
+          return false
+        }
+      },
+      { timeout: 60000 },
+    )
     .toBe(true)
 }
 
@@ -547,7 +791,10 @@ async function setAuthTokens(page: Page, session: SessionUser) {
   })
 }
 
-async function fetchOwnerCustomerRelations(request: APIRequestContext, accessToken: string): Promise<OwnerCustomerRelationPayload[]> {
+async function fetchOwnerCustomerRelations(
+  request: APIRequestContext,
+  accessToken: string,
+): Promise<OwnerCustomerRelationPayload[]> {
   const response = await request.get(`${BACKEND_BASE_URL}/api/customers/owner-relations`, {
     headers: authHeaders(accessToken),
   })
@@ -568,12 +815,12 @@ function isPendingOwnerCustomerRelation(
   relation: OwnerCustomerRelationPayload | null | undefined,
 ): relation is PendingOwnerCustomerRelation {
   return Boolean(
-    relation
-      && relation.status === 'pending'
-      && typeof relation.invitation_token === 'string'
-      && relation.invitation_token.length > 0
-      && typeof relation.registration_link === 'string'
-      && relation.registration_link.length > 0,
+    relation &&
+      relation.status === 'pending' &&
+      typeof relation.invitation_token === 'string' &&
+      relation.invitation_token.length > 0 &&
+      typeof relation.registration_link === 'string' &&
+      relation.registration_link.length > 0,
   )
 }
 
@@ -581,9 +828,7 @@ function isActiveOwnerCustomerRelation(
   relation: OwnerCustomerRelationPayload | null | undefined,
 ): relation is ActiveOwnerCustomerRelation {
   return Boolean(
-    relation
-      && relation.status === 'active'
-      && typeof relation.customer_user_id === 'number',
+    relation && relation.status === 'active' && typeof relation.customer_user_id === 'number',
   )
 }
 
@@ -593,7 +838,13 @@ async function waitForPendingOwnerCustomerRelation(
   predicate: (relation: OwnerCustomerRelationPayload) => boolean,
 ): Promise<PendingOwnerCustomerRelation> {
   await expect
-    .poll(async () => isPendingOwnerCustomerRelation(await findOwnerCustomerRelation(request, accessToken, predicate)), { timeout: 30000 })
+    .poll(
+      async () =>
+        isPendingOwnerCustomerRelation(
+          await findOwnerCustomerRelation(request, accessToken, predicate),
+        ),
+      { timeout: 30000 },
+    )
     .toBe(true)
 
   const relation = await findOwnerCustomerRelation(request, accessToken, predicate)
@@ -610,12 +861,24 @@ async function waitForActiveOwnerCustomerRelation(
   relationId: number,
 ): Promise<ActiveOwnerCustomerRelation> {
   await expect
-    .poll(async () => isActiveOwnerCustomerRelation(
-      await findOwnerCustomerRelation(request, accessToken, (relation) => relation.id === relationId),
-    ), { timeout: 30000 })
+    .poll(
+      async () =>
+        isActiveOwnerCustomerRelation(
+          await findOwnerCustomerRelation(
+            request,
+            accessToken,
+            (relation) => relation.id === relationId,
+          ),
+        ),
+      { timeout: 30000 },
+    )
     .toBe(true)
 
-  const relation = await findOwnerCustomerRelation(request, accessToken, (item) => item.id === relationId)
+  const relation = await findOwnerCustomerRelation(
+    request,
+    accessToken,
+    (item) => item.id === relationId,
+  )
   if (!isActiveOwnerCustomerRelation(relation)) {
     throw new Error('Activated customer relation was not found')
   }
@@ -628,7 +891,7 @@ async function ensureAccordionOpen(root: Locator, sectionSelector: string) {
   await expect(section).toBeVisible({ timeout: 30000 })
 
   const accordion = section.locator('.ds-accordion').first()
-  if (await accordion.count() === 0) {
+  if ((await accordion.count()) === 0) {
     return
   }
 
@@ -652,7 +915,10 @@ async function loadPublicProfileTradeHistory(root: Locator, title: string) {
 }
 
 test.describe('customer owner lifecycle', () => {
-  test('owner can create update and unlink a customer, and super-admin can follow the customer handoff', async ({ page, request }) => {
+  test('owner can create update and delete an active customer account, and super-admin can follow the customer handoff', async ({
+    page,
+    request,
+  }) => {
     test.setTimeout(180000)
 
     const owner = seedSessionUser('customer_owner_flow_owner')
@@ -661,20 +927,72 @@ test.describe('customer owner lifecycle', () => {
     const managementName = `مشتری تست ${suffix}`
     const mobileNumber = `09${String(suffix).slice(-9)}`
     const customerAccountName = `customer_${mobileNumber}`
+    const cancelledManagementName = `مشتری لغوشونده ${suffix}`
+    const cancelledMobileNumber = `09${String(suffix + 1).slice(-9)}`
 
     await waitForBackendReady(request)
     await setAuthTokens(page, owner)
 
     await page.goto(`/users/${owner.userId}`)
-    await expect(page.locator('.public-profile-view .profile-content')).toBeVisible({ timeout: 30000 })
+    await expect(page.locator('.public-profile-view .profile-content')).toBeVisible({
+      timeout: 30000,
+    })
 
-    await page.locator('.owner-profile-section .settings-btn').filter({ hasText: 'مشتریان' }).click()
+    await page
+      .locator('.owner-profile-section .settings-btn')
+      .filter({ hasText: 'مشتریان' })
+      .click()
     await page.waitForURL(/\/operations\/customers(?:\?.*)?$/)
     const workspace = page.locator('.customer-workspace-view')
     await expect(workspace).toBeVisible({ timeout: 30000 })
 
     await workspace.getByRole('button', { name: 'افزودن مشتری' }).first().click()
     const createPanel = page.locator('.customer-create-panel')
+    await expect(createPanel).toBeVisible({ timeout: 30000 })
+
+    await createPanel.getByLabel('نام مدیریتی').fill(cancelledManagementName)
+    await createPanel.getByLabel('شماره موبایل').fill(cancelledMobileNumber)
+    await createPanel.getByLabel('سطح مشتری').selectOption('tier1')
+    await createPanel.getByRole('button', { name: 'ثبت دعوت مشتری', exact: true }).click()
+
+    const cancelledPendingRelation = await waitForPendingOwnerCustomerRelation(
+      request,
+      owner.accessToken,
+      (relation) => relation.management_name === cancelledManagementName,
+    )
+    expect(
+      inspectCancelledCustomerRelation(cancelledPendingRelation.id).identityReservationReleased,
+    ).toBe(false)
+    const cancelledPendingCard = workspace
+      .locator('.customer-pending-card')
+      .filter({ hasText: cancelledManagementName })
+    await expect(cancelledPendingCard).toContainText('دعوت', { timeout: 30000 })
+    await cancelledPendingCard.getByRole('button', { name: 'لغو دعوت', exact: true }).click()
+
+    const cancellationDialog = page.getByRole('dialog', {
+      name: 'لغو رابطه در انتظار و دعوت مشتری',
+      exact: true,
+    })
+    await expect(cancellationDialog).toBeVisible()
+    await expect(
+      cancellationDialog.getByText(
+        `رابطه در انتظار و دعوت «${cancelledManagementName}» لغو شوند؟ لینک دعوت و رزرو هویت این دعوت لغو می‌شوند؛ چون حسابی فعال نشده است، هیچ آبشار حذف حساب فعالی اجرا نمی‌شود.`,
+        { exact: true },
+      ),
+    ).toBeVisible()
+    await cancellationDialog.getByRole('button', { name: 'لغو رابطه و دعوت', exact: true }).click()
+
+    await expect
+      .poll(() => inspectCancelledCustomerRelation(cancelledPendingRelation.id), { timeout: 30000 })
+      .toEqual({
+        relationStatus: 'revoked',
+        relationDeleted: true,
+        invitationRevoked: true,
+        identityReservationReleased: true,
+      })
+    await expect(cancelledPendingCard).toBeHidden({ timeout: 30000 })
+
+    await workspace.getByRole('button', { name: 'افزودن مشتری' }).first().click()
     await expect(createPanel).toBeVisible({ timeout: 30000 })
 
     await createPanel.getByLabel('نام مدیریتی').fill(managementName)
@@ -685,7 +1003,7 @@ test.describe('customer owner lifecycle', () => {
     await createPanel.getByLabel('حداکثر مقدار معامله').fill('8')
     await createPanel.getByLabel('حداکثر تعداد روزانه').fill('3')
     await createPanel.getByLabel('حداکثر حجم روزانه').fill('40')
-    await page.getByRole('button', { name: 'ثبت دعوت مشتری' }).click()
+    await createPanel.getByRole('button', { name: 'ثبت دعوت مشتری', exact: true }).click()
 
     const confirmedPendingRelation = await waitForPendingOwnerCustomerRelation(
       request,
@@ -697,7 +1015,9 @@ test.describe('customer owner lifecycle', () => {
     const registrationLink = confirmedPendingRelation.registration_link
 
     expect(registrationLink).toContain('/register')
-    await expect(workspace.locator('.customer-pending-card').filter({ hasText: managementName })).toContainText('دعوت')
+    await expect(
+      workspace.locator('.customer-pending-card').filter({ hasText: managementName }),
+    ).toContainText('دعوت')
 
     seedRegistrationVerified(registrationToken)
 
@@ -724,49 +1044,101 @@ test.describe('customer owner lifecycle', () => {
 
     await page.reload()
     await expect(workspace).toBeVisible({ timeout: 30000 })
-    const activeCard = workspace.locator('.ui-list-item').filter({ hasText: managementName }).first()
+    const activeCard = workspace
+      .locator('.ui-list-item')
+      .filter({ hasText: managementName })
+      .first()
     await expect(activeCard).toContainText('فعال')
     await expect(activeCard).toContainText('سطح ۲')
 
     await activeCard.click()
     await page.waitForURL(new RegExp(`/operations/customers/${pendingRelationId}(?:\\?.*)?$`))
     await workspace.getByRole('tab', { name: 'محدودیت‌ها' }).click()
-    await workspace.locator('.customer-detail-shell input[aria-label="درصد کمیسیون مشتری"]').fill('2.50')
+    await workspace
+      .locator('.customer-detail-shell input[aria-label="درصد کمیسیون مشتری"]')
+      .fill('2.50')
     await workspace.getByLabel('حداکثر مقدار معامله').fill('12')
     await workspace.getByLabel('حداکثر تعداد روزانه').fill('5')
-    await workspace.getByRole('button', { name: 'ذخیره تغییرات' }).click()
+    await workspace.getByRole('button', { name: 'مرور تغییرات', exact: true }).click()
+
+    await expect(workspace.getByText('مرور تغییرات', { exact: true })).toBeVisible()
+    await expect(workspace.getByText('قبل', { exact: true })).toBeVisible()
+    await expect(workspace.getByText('بعد', { exact: true })).toBeVisible()
+
+    const commissionReviewRow = workspace.getByText('کمیسیون', { exact: true }).locator('..')
+    await expect(commissionReviewRow.getByText('۱٫۲۵٪', { exact: true })).toBeVisible()
+    await expect(commissionReviewRow.getByText('۲٫۵٪', { exact: true })).toBeVisible()
+
+    const maxTradeReviewRow = workspace.getByText('حداکثر هر معامله', { exact: true }).locator('..')
+    await expect(maxTradeReviewRow.getByText('۸', { exact: true })).toBeVisible()
+    await expect(maxTradeReviewRow.getByText('۱۲', { exact: true })).toBeVisible()
+
+    const dailyTradesReviewRow = workspace.getByText('تعداد روزانه', { exact: true }).locator('..')
+    await expect(dailyTradesReviewRow.getByText('۳', { exact: true })).toBeVisible()
+    await expect(dailyTradesReviewRow.getByText('۵', { exact: true })).toBeVisible()
+    await expect(
+      workspace.getByText(
+        'این تغییرها فقط روی معاملات آینده اثر دارند؛ تاریخچه تکمیل‌شده عوض نمی‌شود.',
+        { exact: true },
+      ),
+    ).toBeVisible()
+
+    await workspace.getByRole('button', { name: 'ثبت تغییرات', exact: true }).click()
 
     await expect
-      .poll(async () => {
-        const relations = await fetchOwnerCustomerRelations(request, owner.accessToken)
-        const updated = relations.find((relation) => relation.id === pendingRelationId)
-        return JSON.stringify({
-          commission_rate: updated?.commission_rate,
-          max_trade_quantity: updated?.max_trade_quantity,
-          max_daily_trades: updated?.max_daily_trades,
-        })
-      }, { timeout: 30000 })
-      .toBe(JSON.stringify({
-        commission_rate: 2.5,
-        max_trade_quantity: 12,
-        max_daily_trades: 5,
-      }))
+      .poll(
+        async () => {
+          const relations = await fetchOwnerCustomerRelations(request, owner.accessToken)
+          const updated = relations.find((relation) => relation.id === pendingRelationId)
+          return JSON.stringify({
+            commission_rate: updated?.commission_rate,
+            max_trade_quantity: updated?.max_trade_quantity,
+            max_daily_trades: updated?.max_daily_trades,
+          })
+        },
+        { timeout: 30000 },
+      )
+      .toBe(
+        JSON.stringify({
+          commission_rate: 2.5,
+          max_trade_quantity: 12,
+          max_daily_trades: 5,
+        }),
+      )
 
     await page.goto(`/users/${activatedCustomerUserId}`)
-    await expect(page.locator('.public-profile-view:visible').last().getByRole('heading', { name: new RegExp(managementName) })).toBeVisible({ timeout: 30000 })
+    await expect(
+      page
+        .locator('.public-profile-view:visible')
+        .last()
+        .getByRole('heading', { name: new RegExp(managementName) }),
+    ).toBeVisible({ timeout: 30000 })
 
     await setAuthTokens(page, superAdmin)
     await page.goto(`/users/${owner.userId}`)
     const superAdminOwnerProfileView = page.locator('.public-profile-view:visible').last()
-    await expect(superAdminOwnerProfileView.locator('.profile-content')).toBeVisible({ timeout: 30000 })
-    await expect(superAdminOwnerProfileView.locator('.customer-relations-section')).toContainText(managementName, { timeout: 30000 })
+    await expect(superAdminOwnerProfileView.locator('.profile-content')).toBeVisible({
+      timeout: 30000,
+    })
+    await expect(superAdminOwnerProfileView.locator('.customer-relations-section')).toContainText(
+      managementName,
+      { timeout: 30000 },
+    )
     await ensureAccordionOpen(superAdminOwnerProfileView, '.customer-relations-section')
-    await superAdminOwnerProfileView.locator('.customer-relations-section .customer-profile-link-btn').filter({ hasText: managementName }).click()
+    await superAdminOwnerProfileView
+      .locator('.customer-relations-section .customer-profile-link-btn')
+      .filter({ hasText: managementName })
+      .click()
     await page.waitForURL(new RegExp(`/users/${activatedCustomerUserId}(?:\\?.*)?$`))
 
     const superAdminCustomerProfileView = page.locator('.public-profile-view:visible').last()
-    await expect(superAdminCustomerProfileView.locator('.profile-content')).toBeVisible({ timeout: 30000 })
-    await superAdminCustomerProfileView.locator('.owner-profile-section .settings-btn:visible').filter({ hasText: 'تنظیمات کاربر' }).click()
+    await expect(superAdminCustomerProfileView.locator('.profile-content')).toBeVisible({
+      timeout: 30000,
+    })
+    await superAdminCustomerProfileView
+      .locator('.owner-profile-section .settings-btn:visible')
+      .filter({ hasText: 'تنظیمات کاربر' })
+      .click()
     const adminModal = page.locator('.admin-user-modal:visible')
     await expect(adminModal).toBeVisible({ timeout: 30000 })
     await expect(adminModal.locator('.customer-context-box')).toContainText(managementName)
@@ -778,12 +1150,55 @@ test.describe('customer owner lifecycle', () => {
     await setAuthTokens(page, owner)
     await page.goto(`/operations/customers/${pendingRelationId}?tab=danger`)
     await expect(workspace).toBeVisible({ timeout: 30000 })
+    const deletionCascadeFixture = seedCustomerDeletionCascadeFixture(activatedCustomerUserId)
 
-    await workspace.getByRole('button', { name: 'قطع ارتباط مشتری' }).click()
-    await page.locator('.ui-confirm-dialog:visible').getByRole('button', { name: 'قطع ارتباط', exact: true }).click()
+    await workspace.getByRole('button', { name: 'بررسی و حذف حساب', exact: true }).click()
+
+    const deletionDialog = page.getByRole('dialog', {
+      name: `حذف حساب ${managementName}`,
+      exact: true,
+    })
+    await expect(deletionDialog).toBeVisible()
+    await expect(
+      deletionDialog.getByText('این اقدام فقط قطع یک رابطه نیست و بازگشت خودکار ندارد.', {
+        exact: true,
+      }),
+    ).toBeVisible()
+
+    const deletionConsequences = [
+      'دسترسی وب‌اپ و ربات قطع می‌شود.',
+      'همه نشست‌های فعال پایان می‌یابند.',
+      'آفرهای فعال منقضی می‌شوند.',
+      'دعوت‌های در انتظار مرتبط لغو می‌شوند.',
+      'همه روابط باز مشتری و حسابدارِ متعلق یا لینک‌شده بسته می‌شوند.',
+      'حساب‌های فعال وابسته‌ای که این کاربر مالک آن‌هاست ممکن است به‌صورت بازگشتی حذف شوند.',
+      'سوابق معاملات حذف نمی‌شوند.',
+    ]
+    for (const consequence of deletionConsequences) {
+      await expect(deletionDialog.getByText(consequence, { exact: true })).toBeVisible()
+    }
+
+    const confirmDeletionButton = deletionDialog.getByRole('button', {
+      name: 'حذف حساب و قطع ارتباط',
+      exact: true,
+    })
+    await expect(confirmDeletionButton).toBeDisabled()
+    await deletionDialog
+      .getByRole('textbox', {
+        name: `برای تأیید، نام نمایش‌داده‌شده «${managementName}» را وارد کنید.`,
+        exact: true,
+      })
+      .fill(managementName)
+    await deletionDialog
+      .getByRole('checkbox', { name: 'پیامدهای بالا را خواندم و تأیید می‌کنم.', exact: true })
+      .check()
+    await expect(confirmDeletionButton).toBeEnabled()
+    await confirmDeletionButton.click()
 
     await expect
-      .poll(async () => (await fetchOwnerCustomerRelations(request, owner.accessToken)).length, { timeout: 30000 })
+      .poll(async () => (await fetchOwnerCustomerRelations(request, owner.accessToken)).length, {
+        timeout: 30000,
+      })
       .toBe(0)
 
     await expect
@@ -793,11 +1208,26 @@ test.describe('customer owner lifecycle', () => {
         userDeleted: true,
       })
 
+    await expect
+      .poll(() => inspectCustomerDeletionCascadeFixture(deletionCascadeFixture), { timeout: 30000 })
+      .toEqual({
+        sessionActive: false,
+        offerStatus: 'expired',
+        offerExpireReason: 'user_deleted',
+        invitationRevoked: true,
+        linkedRelationStatus: 'deleted',
+        linkedRelationDeleted: true,
+        tradeRetained: true,
+      })
+
     await page.goto('/operations/customers')
     await expect(workspace).toContainText('هنوز مشتری ثبت نشده است')
   })
 
-  test('super-admin sees target trade history from the viewed public-profile perspective', async ({ page, request }) => {
+  test('super-admin sees target trade history from the viewed public-profile perspective', async ({
+    page,
+    request,
+  }) => {
     test.setTimeout(180000)
 
     const fixture = seedAdminHistoryFixture('public_profile_history')
@@ -809,31 +1239,51 @@ test.describe('customer owner lifecycle', () => {
     const ownerProfileView = page.locator('.public-profile-view:visible').last()
     await expect(ownerProfileView.locator('.profile-content')).toBeVisible({ timeout: 30000 })
     await ensureAccordionOpen(ownerProfileView, '.customer-relations-section')
-    await expect(ownerProfileView.locator('.customer-relations-section .customer-profile-link-btn').filter({ hasText: fixture.customerManagementName })).toBeVisible({ timeout: 30000 })
-    await expect(ownerProfileView.getByRole('heading', { name: 'تاریخچه معاملات مشترک' })).toHaveCount(0)
+    await expect(
+      ownerProfileView
+        .locator('.customer-relations-section .customer-profile-link-btn')
+        .filter({ hasText: fixture.customerManagementName }),
+    ).toBeVisible({ timeout: 30000 })
+    await expect(
+      ownerProfileView.getByRole('heading', { name: 'تاریخچه معاملات مشترک' }),
+    ).toHaveCount(0)
 
     await loadPublicProfileTradeHistory(ownerProfileView, 'تاریخچه معاملات این کاربر')
 
-    const ownerHistoryCard = ownerProfileView.locator('.history-list .mini-trade-card').filter({ hasText: '2 عدد' }).first()
+    const ownerHistoryCard = ownerProfileView
+      .locator('.history-list .mini-trade-card')
+      .filter({ hasText: '2 عدد' })
+      .first()
     await expect(ownerHistoryCard).toContainText('خرید')
     await expect(ownerHistoryCard).toContainText(fixture.customerManagementName)
     await expect(ownerHistoryCard).toContainText('سطح 2')
 
-    await ownerProfileView.locator('.customer-relations-section .customer-profile-link-btn').filter({ hasText: fixture.customerManagementName }).click()
+    await ownerProfileView
+      .locator('.customer-relations-section .customer-profile-link-btn')
+      .filter({ hasText: fixture.customerManagementName })
+      .click()
     await page.waitForURL(new RegExp(`/users/${fixture.customerUserId}(?:\\?.*)?$`))
     const customerProfileView = page.locator('.public-profile-view:visible').last()
     await expect(customerProfileView.locator('.profile-content')).toBeVisible({ timeout: 30000 })
-    await expect(customerProfileView.getByRole('heading', { name: /مشتری تاریخچه‌ای/ })).toBeVisible({ timeout: 30000 })
+    await expect(
+      customerProfileView.getByRole('heading', { name: /مشتری تاریخچه‌ای/ }),
+    ).toBeVisible({ timeout: 30000 })
 
     await loadPublicProfileTradeHistory(customerProfileView, 'تاریخچه معاملات این کاربر')
 
-    const customerHistoryCard = customerProfileView.locator('.history-list .mini-trade-card').filter({ hasText: '5 عدد' }).first()
+    const customerHistoryCard = customerProfileView
+      .locator('.history-list .mini-trade-card')
+      .filter({ hasText: '5 عدد' })
+      .first()
     await expect(customerHistoryCard).toContainText('خرید')
     await expect(customerHistoryCard).toContainText(`سرگروه ${fixture.ownerAccountName}`)
     await expect(customerHistoryCard).toContainText('سطح 2')
   })
 
-  test('owner mutual history with third-party shows customer badge and management name', async ({ page, request }) => {
+  test('owner mutual history with third-party shows customer badge and management name', async ({
+    page,
+    request,
+  }) => {
     test.setTimeout(180000)
 
     const fixture = seedMutualHistoryFixture('owner_mutual_history')
@@ -842,18 +1292,29 @@ test.describe('customer owner lifecycle', () => {
     await setAuthTokens(page, fixture.owner)
 
     await page.goto(`/users/${fixture.outsiderUserId}`)
-    await expect(page.locator('.public-profile-view .profile-content')).toBeVisible({ timeout: 30000 })
+    await expect(page.locator('.public-profile-view .profile-content')).toBeVisible({
+      timeout: 30000,
+    })
 
-    await loadPublicProfileTradeHistory(page.locator('.public-profile-view:visible').last(), 'تاریخچه معاملات مشترک')
+    await loadPublicProfileTradeHistory(
+      page.locator('.public-profile-view:visible').last(),
+      'تاریخچه معاملات مشترک',
+    )
 
-    const tradeCard = page.locator('.history-list .mini-trade-card').filter({ hasText: `${fixture.tradeQuantity} عدد` }).first()
+    const tradeCard = page
+      .locator('.history-list .mini-trade-card')
+      .filter({ hasText: `${fixture.tradeQuantity} عدد` })
+      .first()
     await expect(tradeCard).toContainText('رابطه:')
     await expect(tradeCard).toContainText('مشتری')
     await expect(tradeCard).toContainText(fixture.customerManagementName)
     await expect(tradeCard).toContainText('سطح 2')
   })
 
-  test('third-party mutual history with owner hides customer context', async ({ page, request }) => {
+  test('third-party mutual history with owner hides customer context', async ({
+    page,
+    request,
+  }) => {
     test.setTimeout(180000)
 
     const fixture = seedMutualHistoryFixture('third_party_mutual_history')
@@ -862,11 +1323,19 @@ test.describe('customer owner lifecycle', () => {
     await setAuthTokens(page, fixture.outsider)
 
     await page.goto(`/users/${fixture.ownerUserId}`)
-    await expect(page.locator('.public-profile-view .profile-content')).toBeVisible({ timeout: 30000 })
+    await expect(page.locator('.public-profile-view .profile-content')).toBeVisible({
+      timeout: 30000,
+    })
 
-    await loadPublicProfileTradeHistory(page.locator('.public-profile-view:visible').last(), 'تاریخچه معاملات مشترک')
+    await loadPublicProfileTradeHistory(
+      page.locator('.public-profile-view:visible').last(),
+      'تاریخچه معاملات مشترک',
+    )
 
-    const tradeCard = page.locator('.history-list .mini-trade-card').filter({ hasText: `${fixture.tradeQuantity} عدد` }).first()
+    const tradeCard = page
+      .locator('.history-list .mini-trade-card')
+      .filter({ hasText: `${fixture.tradeQuantity} عدد` })
+      .first()
     await expect(tradeCard).toBeVisible({ timeout: 30000 })
     await expect(tradeCard.locator('.customer-context-badge')).toHaveCount(0)
     await expect(tradeCard.locator('.trade-customer-context-value')).toHaveCount(0)

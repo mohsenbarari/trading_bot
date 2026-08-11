@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import enum
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import secrets
@@ -10,7 +11,7 @@ import string
 from fastapi import HTTPException
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import joinedload
+from sqlalchemy.orm import joinedload, selectinload
 
 from core.utils import normalize_account_name, normalize_persian_numerals, unique_user_ids, utc_now
 from core.server_routing import SERVER_IRAN, current_server
@@ -22,10 +23,14 @@ from core.services.invitation_identity_reservation_service import (
     release_invitation_identities_for_tokens,
     release_invitation_identity,
 )
-from core.services.invitation_lifecycle_service import soft_revoke_invitation
+from core.services.invitation_lifecycle_service import (
+    derive_invitation_state,
+    soft_revoke_invitation,
+)
 from core.services.invitation_transition_lock_service import lock_invitation_for_transition
 from core.invitation_sms_policy import invitation_sms_enabled
 from core.services.invitation_sms_delivery_service import prepare_invitation_sms_delivery
+from core.registration_contracts import InvitationDerivedState
 from models.invitation import Invitation, InvitationKind
 from models.accountant_relation import AccountantRelation, AccountantRelationStatus
 from models.user import User, UserRole
@@ -38,6 +43,15 @@ CAPACITY_TRACKED_RELATION_STATUSES = (
 ACCOUNTANT_INVITATION_PREFIX = "ACCT-"
 # Deprecated compatibility constant. New invitations use core.trading_settings.
 ACCOUNTANT_PENDING_LIFETIME = None
+ACCOUNTANT_RELATION_DELETE_PRECONDITION_DETAIL = (
+    "وضعیت رابطه تغییر کرده است. اطلاعات را تازه‌سازی و حذف را دوباره تأیید کنید"
+)
+
+
+class AccountantRelationDeletionAction(str, enum.Enum):
+    CANCEL_PENDING = "cancel-pending"
+    DELETE_RELATION = "delete-relation"
+    DELETE_ACCOUNT = "delete-account"
 
 
 @dataclass(frozen=True)
@@ -299,6 +313,27 @@ async def list_owner_accountant_relations(
     return list((await db.execute(stmt)).scalars().all())
 
 
+async def get_owner_accountant_relation(
+    db: AsyncSession,
+    *,
+    owner_user_id: int,
+    relation_id: int,
+) -> AccountantRelation:
+    """Return one owner relation without hiding terminal lifecycle states."""
+    stmt = (
+        select(AccountantRelation)
+        .options(joinedload(AccountantRelation.accountant_user))
+        .where(
+            AccountantRelation.id == relation_id,
+            AccountantRelation.owner_user_id == owner_user_id,
+        )
+    )
+    relation = (await db.execute(stmt)).scalar_one_or_none()
+    if relation is None:
+        raise HTTPException(status_code=404, detail="رابطه حسابدار یافت نشد")
+    return relation
+
+
 async def build_trade_notification_audience_user_ids(
     db: AsyncSession,
     owner_user_ids: list[object],
@@ -555,46 +590,106 @@ async def unlink_owner_accountant_relation(
     *,
     owner_user_id: int,
     relation_id: int,
+    expected_action: AccountantRelationDeletionAction,
 ) -> AccountantRelation:
-    stmt = (
+    expected_action = AccountantRelationDeletionAction(expected_action)
+
+    candidate_stmt = select(AccountantRelation.invitation_token).where(
+        AccountantRelation.id == relation_id,
+        AccountantRelation.owner_user_id == owner_user_id,
+    )
+    invitation_token = (await db.execute(candidate_stmt)).scalar_one_or_none()
+    if invitation_token is None:
+        raise HTTPException(status_code=404, detail="رابطه حسابدار یافت نشد")
+
+    # Invitation transition/advisory locks must precede the relation row lock;
+    # registration, expiry, cancellation and account deletion use this order.
+    invitation = await lock_invitation_for_transition(
+        db,
+        invitation_token=invitation_token,
+    )
+    relation_stmt = (
         select(AccountantRelation)
-        .options(joinedload(AccountantRelation.accountant_user))
+        .options(selectinload(AccountantRelation.accountant_user))
         .where(
             AccountantRelation.id == relation_id,
             AccountantRelation.owner_user_id == owner_user_id,
         )
+        .with_for_update(of=AccountantRelation)
+        .execution_options(populate_existing=True)
     )
-    relation = (await db.execute(stmt)).scalar_one_or_none()
-    if not relation:
+    relation = (await db.execute(relation_stmt)).scalar_one_or_none()
+    if relation is None:
         raise HTTPException(status_code=404, detail="رابطه حسابدار یافت نشد")
-
-    if relation.deleted_at is not None or relation.status in (
-        AccountantRelationStatus.EXPIRED,
-        AccountantRelationStatus.REVOKED,
-        AccountantRelationStatus.DELETED,
-    ):
-        raise HTTPException(status_code=400, detail="این رابطه قبلاً بسته شده است")
-
-    if relation.status == AccountantRelationStatus.PENDING:
-        return await cancel_pending_accountant_relation(
-            db,
-            owner_user_id=owner_user_id,
-            relation_id=relation_id,
+    if relation.invitation_token != invitation_token:
+        raise HTTPException(
+            status_code=409,
+            detail=ACCOUNTANT_RELATION_DELETE_PRECONDITION_DETAIL,
         )
 
-    if relation.status != AccountantRelationStatus.ACTIVE:
-        raise HTTPException(status_code=400, detail="فقط حسابدار pending یا active قابل قطع ارتباط است")
-
-    # Import lazily to avoid service-layer circular imports at module load time.
-    from core.services.user_deletion_service import delete_user_account
-
     accountant_user = relation.accountant_user
-    if accountant_user and not accountant_user.is_deleted:
-        await delete_user_account(db, accountant_user)
+    has_live_linked_user = bool(
+        getattr(relation, "accountant_user_id", None) is not None
+        and accountant_user is not None
+        and not getattr(accountant_user, "is_deleted", False)
+    )
+    is_open = relation.deleted_at is None
+    invitation_is_pending = bool(
+        invitation is not None
+        and not bool(getattr(invitation, "is_used", False))
+        and getattr(invitation, "revoked_at", None) is None
+        and derive_invitation_state(invitation) == InvitationDerivedState.PENDING
+    )
+    capability_matches = {
+        AccountantRelationDeletionAction.CANCEL_PENDING: (
+            is_open
+            and relation.status == AccountantRelationStatus.PENDING
+            and not has_live_linked_user
+            and invitation_is_pending
+        ),
+        AccountantRelationDeletionAction.DELETE_RELATION: (
+            is_open
+            and relation.status == AccountantRelationStatus.ACTIVE
+            and not has_live_linked_user
+        ),
+        AccountantRelationDeletionAction.DELETE_ACCOUNT: (
+            is_open
+            and relation.status == AccountantRelationStatus.ACTIVE
+            and has_live_linked_user
+        ),
+    }
+    if not capability_matches[expected_action]:
+        raise HTTPException(
+            status_code=409,
+            detail=ACCOUNTANT_RELATION_DELETE_PRECONDITION_DETAIL,
+        )
 
     now = _utcnow_naive()
-    relation.status = AccountantRelationStatus.DELETED
-    relation.deleted_at = now
+    if expected_action == AccountantRelationDeletionAction.CANCEL_PENDING:
+        relation.status = AccountantRelationStatus.REVOKED
+        relation.deleted_at = now
+        soft_revoke_invitation(invitation, revoked_at=now)
+        if getattr(invitation, "id", None) is not None:
+            await release_invitation_identity(db, invitation_id=invitation.id)
+        else:
+            await release_invitation_identities_for_tokens(
+                db,
+                invitation_tokens=[invitation_token],
+            )
+    elif expected_action == AccountantRelationDeletionAction.DELETE_RELATION:
+        relation.status = AccountantRelationStatus.DELETED
+        relation.deleted_at = now
+        await release_invitation_identities_for_tokens(
+            db,
+            invitation_tokens=[invitation_token],
+        )
+    else:
+        # Import lazily to avoid service-layer circular imports at module load time.
+        from core.services.user_deletion_service import delete_user_account
+
+        await delete_user_account(db, accountant_user)
+        relation.status = AccountantRelationStatus.DELETED
+        relation.deleted_at = now
 
     await db.commit()
     await db.refresh(relation)

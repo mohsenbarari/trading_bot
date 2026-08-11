@@ -7,13 +7,13 @@ from datetime import datetime, time as datetime_time, timedelta, timezone
 from decimal import Decimal, InvalidOperation, ROUND_CEILING, ROUND_FLOOR
 import secrets
 import string
-from typing import Mapping
+from typing import Literal, Mapping
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import HTTPException
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import aliased, joinedload
+from sqlalchemy.orm import aliased, joinedload, selectinload
 
 from core.enums import ChatMembershipStatus, ChatType
 from core.server_routing import SERVER_IRAN, current_server
@@ -26,11 +26,12 @@ from core.services.invitation_identity_reservation_service import (
     release_invitation_identities_for_tokens,
     release_invitation_identity,
 )
-from core.services.invitation_lifecycle_service import soft_revoke_invitation
+from core.services.invitation_lifecycle_service import derive_invitation_state, soft_revoke_invitation
 from core.services.invitation_transition_lock_service import lock_invitation_for_transition
 from core.invitation_sms_policy import invitation_sms_enabled
 from core.services.invitation_sms_delivery_service import prepare_invitation_sms_delivery
 from core.utils import normalize_account_name, normalize_persian_numerals, utc_now
+from core.registration_contracts import InvitationDerivedState
 from models.accountant_relation import AccountantRelation, AccountantRelationStatus
 from models.chat import Chat
 from models.chat_member import ChatMember
@@ -49,6 +50,10 @@ CUSTOMER_INVITATION_PREFIX = "CUST-"
 # Deprecated compatibility constant. New invitations use core.trading_settings.
 CUSTOMER_PENDING_LIFETIME = None
 PRICE_ROUNDING_UNIT = Decimal("100")
+OwnerCustomerRelationDeleteAction = Literal["cancel-pending", "delete-relation", "delete-account"]
+OWNER_CUSTOMER_RELATION_DELETE_CONFLICT_DETAIL = (
+    "وضعیت رابطه تغییر کرده است؛ فهرست را تازه‌سازی کنید و اقدام را دوباره تأیید کنید."
+)
 
 CUSTOMER_TRADE_LIMIT_DETAILS = {
     "relation_required": "Customer relation is required",
@@ -729,46 +734,117 @@ async def cancel_pending_customer_relation(
     return relation
 
 
+async def _lock_owner_customer_relation_delete_transition(
+    db: AsyncSession,
+    *,
+    owner_user_id: int,
+    relation_id: int,
+) -> tuple[Invitation | None, CustomerRelation]:
+    candidate_stmt = select(CustomerRelation.invitation_token).where(
+        CustomerRelation.id == relation_id,
+        CustomerRelation.owner_user_id == owner_user_id,
+    )
+    invitation_token = (await db.execute(candidate_stmt)).scalar_one_or_none()
+    if invitation_token is None:
+        raise HTTPException(status_code=404, detail="رابطه مشتری یافت نشد")
+
+    invitation = await lock_invitation_for_transition(
+        db,
+        invitation_token=invitation_token,
+    )
+    relation_stmt = (
+        select(CustomerRelation)
+        .options(selectinload(CustomerRelation.customer_user))
+        .where(
+            CustomerRelation.id == relation_id,
+            CustomerRelation.owner_user_id == owner_user_id,
+        )
+        .with_for_update(of=CustomerRelation)
+        .execution_options(populate_existing=True)
+    )
+    relation = (await db.execute(relation_stmt)).scalar_one_or_none()
+    if relation is None:
+        raise HTTPException(status_code=404, detail="رابطه مشتری یافت نشد")
+    if relation.invitation_token != invitation_token:
+        raise HTTPException(status_code=409, detail=OWNER_CUSTOMER_RELATION_DELETE_CONFLICT_DETAIL)
+    return invitation, relation
+
+
+def _customer_relation_has_live_linked_account(relation: CustomerRelation) -> bool:
+    customer_user = getattr(relation, "customer_user", None)
+    return bool(
+        getattr(relation, "customer_user_id", None) is not None
+        and customer_user is not None
+        and not getattr(customer_user, "is_deleted", False)
+    )
+
+
+def _raise_customer_relation_delete_conflict() -> None:
+    raise HTTPException(status_code=409, detail=OWNER_CUSTOMER_RELATION_DELETE_CONFLICT_DETAIL)
+
+
 async def unlink_owner_customer_relation(
     db: AsyncSession,
     *,
     owner_user_id: int,
     relation_id: int,
+    expected_action: OwnerCustomerRelationDeleteAction,
 ) -> CustomerRelation:
-    stmt = (
-        select(CustomerRelation)
-        .options(joinedload(CustomerRelation.customer_user))
-        .where(
-            CustomerRelation.id == relation_id,
-            CustomerRelation.owner_user_id == owner_user_id,
-        )
+    invitation, relation = await _lock_owner_customer_relation_delete_transition(
+        db,
+        owner_user_id=owner_user_id,
+        relation_id=relation_id,
     )
-    relation = (await db.execute(stmt)).scalar_one_or_none()
-    if not relation:
-        raise HTTPException(status_code=404, detail="رابطه مشتری یافت نشد")
+    has_live_linked_account = _customer_relation_has_live_linked_account(relation)
+    is_open = relation.deleted_at is None
 
-    if relation.deleted_at is not None or relation.status in (
-        CustomerRelationStatus.EXPIRED,
-        CustomerRelationStatus.REVOKED,
-        CustomerRelationStatus.DELETED,
-    ):
-        raise HTTPException(status_code=400, detail="این رابطه قبلاً بسته شده است")
-
-    if relation.status == CustomerRelationStatus.PENDING:
-        return await cancel_pending_customer_relation(
-            db,
-            owner_user_id=owner_user_id,
-            relation_id=relation_id,
+    if expected_action == "cancel-pending":
+        invitation_is_pending = bool(
+            invitation is not None
+            and not getattr(invitation, "is_used", False)
+            and getattr(invitation, "revoked_at", None) is None
+            and derive_invitation_state(invitation, now=utc_now()) == InvitationDerivedState.PENDING
         )
+        if not (
+            is_open
+            and relation.status == CustomerRelationStatus.PENDING
+            and not has_live_linked_account
+            and invitation_is_pending
+        ):
+            _raise_customer_relation_delete_conflict()
 
-    if relation.status != CustomerRelationStatus.ACTIVE:
-        raise HTTPException(status_code=400, detail="فقط مشتری pending یا active قابل قطع ارتباط است")
+        now = _utcnow_naive()
+        relation.status = CustomerRelationStatus.REVOKED
+        relation.deleted_at = now
+        soft_revoke_invitation(invitation, revoked_at=now)
+        await release_invitation_identity(db, invitation_id=invitation.id)
+        await db.commit()
+        await db.refresh(relation)
+        return relation
 
-    from core.services.user_deletion_service import delete_user_account
+    if expected_action == "delete-relation":
+        if not (
+            is_open
+            and relation.status == CustomerRelationStatus.ACTIVE
+            and not has_live_linked_account
+        ):
+            _raise_customer_relation_delete_conflict()
+        await release_invitation_identities_for_tokens(
+            db,
+            invitation_tokens=[relation.invitation_token],
+        )
+    elif expected_action == "delete-account":
+        if not (
+            is_open
+            and relation.status == CustomerRelationStatus.ACTIVE
+            and has_live_linked_account
+        ):
+            _raise_customer_relation_delete_conflict()
+        from core.services.user_deletion_service import delete_user_account
 
-    customer_user = relation.customer_user
-    if customer_user and not customer_user.is_deleted:
-        await delete_user_account(db, customer_user)
+        await delete_user_account(db, relation.customer_user)
+    else:
+        _raise_customer_relation_delete_conflict()
 
     now = _utcnow_naive()
     relation.status = CustomerRelationStatus.DELETED

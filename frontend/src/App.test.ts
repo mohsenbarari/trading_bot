@@ -43,14 +43,15 @@ vi.mock('./utils/pwaInstall', () => ({
   usePWAInstall: appMocks.usePWAInstallMock,
 }))
 
+const RouteComponentStub = defineComponent({
+  name: 'RouteComponentStub',
+  template: '<div data-test="route-component">route content</div>',
+})
+
 const RouterViewStub = defineComponent({
   name: 'RouterView',
   setup(_, { slots }) {
-    const RouteComponent = defineComponent({
-      name: 'RouteComponentStub',
-      template: '<div data-test="route-component">route content</div>',
-    })
-    return () => slots.default?.({ Component: RouteComponent })
+    return () => slots.default?.({ Component: RouteComponentStub })
   },
 })
 
@@ -193,6 +194,58 @@ describe('App.vue', () => {
     expect(wrapper.find('[data-test="auth-shell"]').exists()).toBe(true)
     expect(wrapper.get('.app-route-scroll').classes()).not.toContain(
       'app-route-scroll--no-daily-nav',
+    )
+  })
+
+  it('keeps Stage 5 workspaces mounted across canonical query changes and remounts on path changes', async () => {
+    appMocks.route.name = 'operations-customers-detail'
+    appMocks.route.path = '/operations/customers/11'
+    appMocks.route.fullPath = '/operations/customers/11?section=sessions'
+    appMocks.route.meta = {
+      uiShellClass: 'standard-authenticated',
+      uiV2Scope: 'section',
+    }
+    appMocks.isReadyMock.mockResolvedValueOnce()
+
+    const wrapper = mountApp()
+    await flushPromises()
+    expect(wrapper.getComponent(RouteComponentStub).vm.$.vnode.key).toBe(
+      'section:/operations/customers/11',
+    )
+
+    appMocks.route.fullPath = '/operations/customers/11?tab=sessions&scroll=96'
+    await flushPromises()
+    expect(wrapper.getComponent(RouteComponentStub).vm.$.vnode.key).toBe(
+      'section:/operations/customers/11',
+    )
+
+    appMocks.route.name = 'operations-customers'
+    appMocks.route.path = '/operations/customers'
+    appMocks.route.fullPath = '/operations/customers?scroll=96'
+    await flushPromises()
+    expect(wrapper.getComponent(RouteComponentStub).vm.$.vnode.key).toBe(
+      'section:/operations/customers',
+    )
+  })
+
+  it('preserves full-path remounting for protected legacy routes', async () => {
+    appMocks.route.name = 'market'
+    appMocks.route.path = '/market'
+    appMocks.route.fullPath = '/market'
+    appMocks.route.meta = {
+      uiShellClass: 'protected-legacy',
+      uiV2Scope: 'off',
+    }
+    appMocks.isReadyMock.mockResolvedValueOnce()
+
+    const wrapper = mountApp()
+    await flushPromises()
+    expect(wrapper.getComponent(RouteComponentStub).vm.$.vnode.key).toBe('legacy:/market')
+
+    appMocks.route.fullPath = '/market?view=history'
+    await flushPromises()
+    expect(wrapper.getComponent(RouteComponentStub).vm.$.vnode.key).toBe(
+      'legacy:/market?view=history',
     )
   })
 

@@ -1,6 +1,6 @@
 import { computed, reactive, ref } from 'vue'
 import { routeRequestJson } from '../utils/routeRequest'
-import { type RelationStatus } from './useOwnerCustomers'
+import { type OwnerRelationDeleteAction, type RelationStatus } from './useOwnerCustomers'
 
 export interface AccountantRelation {
   id: number
@@ -70,6 +70,11 @@ function requireArrayPayload<T>(payload: unknown, fallback: string): T[] {
   return payload as T[]
 }
 
+function requireObjectPayload<T>(payload: unknown, fallback: string): T {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw new Error(fallback)
+  return payload as T
+}
+
 export async function fetchOwnerAccountantRelations(options: OwnerAccountantRequestOptions = {}) {
   const payload = await routeRequestJson<unknown>('/api/accountants/owner-relations', {
     ...(options.signal ? { signal: options.signal } : {}),
@@ -80,6 +85,24 @@ export async function fetchOwnerAccountantRelations(options: OwnerAccountantRequ
     },
   })
   return requireArrayPayload<AccountantRelation>(payload, 'پاسخ لیست حسابداران معتبر نبود.')
+}
+
+export async function fetchOwnerAccountantRelation(
+  relationId: number,
+  options: OwnerAccountantRequestOptions = {},
+) {
+  const payload = await routeRequestJson<unknown>(
+    `/api/accountants/owner-relations/${relationId}`,
+    {
+      ...(options.signal ? { signal: options.signal } : {}),
+      errorContext: {
+        scope: 'panel',
+        operation: 'load-detail',
+        fallbackMessage: 'دریافت پرونده حسابدار ناموفق بود.',
+      },
+    },
+  )
+  return requireObjectPayload<AccountantRelation>(payload, 'پاسخ پرونده حسابدار معتبر نبود.')
 }
 
 export async function createOwnerAccountantRelation(
@@ -119,34 +142,41 @@ export async function updateOwnerAccountantRelation(
 
 export async function deleteOwnerAccountantRelation(
   relationId: number,
+  expectedAction: OwnerRelationDeleteAction,
   fallback: string,
   options: OwnerAccountantRequestOptions = {},
 ) {
-  return routeRequestJson<AccountantRelation>(`/api/accountants/owner-relations/${relationId}`, {
-    method: 'DELETE',
-    ...(options.signal ? { signal: options.signal } : {}),
-    errorContext: {
-      scope: 'action',
-      operation: 'delete',
-      userInitiated: true,
-      fallbackMessage: fallback,
+  return routeRequestJson<AccountantRelation>(
+    `/api/accountants/owner-relations/${relationId}?expected_action=${encodeURIComponent(expectedAction)}`,
+    {
+      method: 'DELETE',
+      ...(options.signal ? { signal: options.signal } : {}),
+      errorContext: {
+        scope: 'action',
+        operation: 'delete',
+        userInitiated: true,
+        fallbackMessage: fallback,
+      },
     },
-  })
+  )
 }
 
 export async function fetchOwnerAccountantSessions(
   relationId: number,
   options: OwnerAccountantRequestOptions = {},
 ) {
-  const payload = await routeRequestJson<unknown>(`/api/accountants/owner-relations/${relationId}/sessions`, {
-    method: 'GET',
-    ...(options.signal ? { signal: options.signal } : {}),
-    errorContext: {
-      scope: 'list',
-      operation: 'load-detail',
-      fallbackMessage: 'دریافت نشست‌های حسابدار ناموفق بود.',
+  const payload = await routeRequestJson<unknown>(
+    `/api/accountants/owner-relations/${relationId}/sessions`,
+    {
+      method: 'GET',
+      ...(options.signal ? { signal: options.signal } : {}),
+      errorContext: {
+        scope: 'list',
+        operation: 'load-detail',
+        fallbackMessage: 'دریافت نشست‌های حسابدار ناموفق بود.',
+      },
     },
-  })
+  )
   return requireArrayPayload<AccountantSessionSummary>(payload, 'پاسخ نشست‌های حسابدار معتبر نبود.')
 }
 
@@ -155,16 +185,19 @@ export async function terminateOwnerAccountantSession(
   sessionId: string,
   options: OwnerAccountantRequestOptions = {},
 ) {
-  return routeRequestJson<AccountantSessionTerminateResponse>(`/api/accountants/owner-relations/${relationId}/sessions/${sessionId}`, {
-    method: 'DELETE',
-    ...(options.signal ? { signal: options.signal } : {}),
-    errorContext: {
-      scope: 'action',
-      operation: 'delete',
-      userInitiated: true,
-      fallbackMessage: 'پایان دادن نشست حسابدار ناموفق بود.',
+  return routeRequestJson<AccountantSessionTerminateResponse>(
+    `/api/accountants/owner-relations/${relationId}/sessions/${sessionId}`,
+    {
+      method: 'DELETE',
+      ...(options.signal ? { signal: options.signal } : {}),
+      errorContext: {
+        scope: 'action',
+        operation: 'delete',
+        userInitiated: true,
+        fallbackMessage: 'پایان دادن نشست حسابدار ناموفق بود.',
+      },
     },
-  })
+  )
 }
 
 export function useOwnerAccountants() {
@@ -186,8 +219,12 @@ export function useOwnerAccountants() {
     })
   })
 
-  const pendingInvitationRelations = computed(() => orderedRelations.value.filter((relation) => relation.status === 'pending'))
-  const manageableRelations = computed(() => orderedRelations.value.filter((relation) => relation.status !== 'pending'))
+  const pendingInvitationRelations = computed(() =>
+    orderedRelations.value.filter((relation) => relation.status === 'pending'),
+  )
+  const manageableRelations = computed(() =>
+    orderedRelations.value.filter((relation) => relation.status !== 'pending'),
+  )
   const selectedRelation = computed(() => {
     if (selectedRelationId.value == null) return null
     return relations.value.find((relation) => relation.id === selectedRelationId.value) ?? null

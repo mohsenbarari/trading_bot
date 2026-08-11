@@ -552,6 +552,10 @@ describe('OwnerCustomerManagerModal.vue', () => {
       management_name: 'مشتری فعال',
     })
     await flushPromises()
+    expect(apiFetchMock).toHaveBeenLastCalledWith(
+      '/api/customers/owner-relations/98?expected_action=delete-relation',
+      boundedRequestOptions({ method: 'DELETE' }),
+    )
     expect(wrapper.text()).toContain('قطع ارتباط مشتری ناموفق بود.')
     wrapper.unmount()
   })
@@ -563,7 +567,7 @@ describe('OwnerCustomerManagerModal.vue', () => {
       if (url === '/api/customers/owner-relations' && !options?.method) {
         return makeResponse([pendingRelation])
       }
-      if (url === '/api/customers/owner-relations/12' && options?.method === 'DELETE') {
+      if (url === '/api/customers/owner-relations/12?expected_action=cancel-pending' && options?.method === 'DELETE') {
         return makeResponse({ detail: 'ok' })
       }
       throw new Error(`Unexpected apiFetch call: ${url}`)
@@ -578,7 +582,7 @@ describe('OwnerCustomerManagerModal.vue', () => {
 
     expect(confirmMock).toHaveBeenCalledWith('دعوت مشتری ویژه لغو شود؟')
     expect(apiFetchMock).toHaveBeenCalledWith(
-      '/api/customers/owner-relations/12',
+      '/api/customers/owner-relations/12?expected_action=cancel-pending',
       boundedRequestOptions({ method: 'DELETE' }),
     )
     expect(wrapper.text()).toContain('دعوت مشتری لغو شد.')
@@ -597,7 +601,7 @@ describe('OwnerCustomerManagerModal.vue', () => {
       if (url === '/api/customers/owner-relations/11/sessions' && options?.method === 'GET') {
         return makeResponse([])
       }
-      if (url === '/api/customers/owner-relations/11' && options?.method === 'DELETE') {
+      if (url === '/api/customers/owner-relations/11?expected_action=delete-account' && options?.method === 'DELETE') {
         return makeResponse({ detail: 'ok' })
       }
       throw new Error(`Unexpected apiFetch call: ${url}`)
@@ -618,7 +622,7 @@ describe('OwnerCustomerManagerModal.vue', () => {
 
     expect(confirmMock).toHaveBeenCalledWith('ارتباط مشتری مشتری ویژه قطع شود؟ این عملیات دسترسی مشتری را کامل غیرفعال می‌کند.')
     expect(apiFetchMock).toHaveBeenCalledWith(
-      '/api/customers/owner-relations/11',
+      '/api/customers/owner-relations/11?expected_action=delete-account',
       boundedRequestOptions({ method: 'DELETE' }),
     )
     expect(wrapper.text()).toContain('ارتباط مشتری قطع شد و دسترسی او غیرفعال گردید.')
@@ -825,7 +829,7 @@ describe('OwnerCustomerManagerModal.vue', () => {
       if (url === '/api/customers/owner-relations' && options?.method === 'POST') {
         return makeResponse({ detail: 'ایجاد مشتری ناموفق بود.' }, false, 400)
       }
-      if (url === '/api/customers/owner-relations/12' && options?.method === 'DELETE') {
+      if (url === '/api/customers/owner-relations/12?expected_action=cancel-pending' && options?.method === 'DELETE') {
         return makeResponse({}, false, 500)
       }
       throw new Error(`Unexpected apiFetch call: ${url}`)

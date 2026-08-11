@@ -1,23 +1,26 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { BriefcaseBusiness, Clock, Copy, ShieldAlert, UserPlus, Users } from 'lucide-vue-next'
-import OwnerAccountantManagerModal from '../components/OwnerAccountantManagerModal.vue'
-import { WorkspaceNotice, WorkspaceSection, WorkspaceShell } from '../components/workspace'
+import { BriefcaseBusiness, Clock, Copy, ShieldAlert, UserPlus } from 'lucide-vue-next'
 import {
-  AppActionCard,
+  WorkspaceAccountDeletionDialog,
+  WorkspaceNotice,
+  WorkspaceSection,
+  WorkspaceShell,
+} from '../components/workspace'
+import {
   AppBottomSheet,
   AppButton,
   AppCard,
   AppConfirmDialog,
   AppDangerZone,
   AppEmptyState,
+  AppErrorState,
   AppFilterChips,
   AppFormField,
   AppInput,
   AppListItem,
-  AppMasterDetail,
-  AppMetricCard,
+  AppLoadingState,
   AppResponsiveDialog,
   AppSearchField,
   AppStatusBadge,
@@ -27,6 +30,7 @@ import {
 import {
   createOwnerAccountantRelation,
   deleteOwnerAccountantRelation,
+  fetchOwnerAccountantRelation,
   fetchOwnerAccountantRelations,
   fetchOwnerAccountantSessions,
   normalizeDutyDescription,
@@ -44,10 +48,8 @@ const accountantState = useOwnerAccountants()
 const isLoading = ref(false)
 const isRefreshingRelations = ref(false)
 const hasLoadedRelations = ref(false)
-const isMobile = ref(false)
+const isMobile = ref(typeof window !== 'undefined' ? window.innerWidth < 900 : false)
 const error = ref('')
-const isCompatibilityManagerOpen = ref(false)
-const compatibilityPanel = ref<string | null>(null)
 const isCreatePanelOpen = ref(false)
 const isCreateSubmitting = ref(false)
 const createError = ref('')
@@ -56,19 +58,46 @@ const isSavingDuty = ref(false)
 const dutyError = ref('')
 const dutyNotice = ref('')
 const copiedRelationId = ref<number | null>(null)
+const relationFeedback = ref<Record<number, { tone: 'success' | 'danger'; message: string }>>({})
+const listActionNotice = ref('')
+const sessionActionNotice = ref('')
 const isConfirmDialogOpen = ref(false)
 const confirmTitle = ref('')
 const confirmMessage = ref('')
-const confirmAction = ref<'terminate-session' | 'cancel-invitation' | 'unlink-relation' | null>(null)
+type ConfirmAction =
+  | 'terminate-session'
+  | 'cancel-invitation'
+  | 'delete-relation'
+  | 'delete-account'
+const confirmAction = ref<ConfirmAction | null>(null)
 const confirmRelation = ref<AccountantRelation | null>(null)
 const confirmSession = ref<AccountantSessionSummary | null>(null)
 const isConfirmBusy = ref(false)
 const confirmError = ref('')
-const searchQuery = ref('')
-const relationFilter = ref('all')
+const searchQuery = ref(normalizeSearchQuery(routeQueryValue('q')))
+const relationFilter = ref(relationFilterOptionsValue(routeQueryValue('filter')))
+const listScrollTop = ref(
+  parseListScroll(routeQueryValue('scroll') ?? routeQueryValue('listScroll')),
+)
 const detailSessions = ref<AccountantSessionSummary[]>([])
 const detailSessionsLoading = ref(false)
 const detailSessionsError = ref('')
+const detailSessionsLoadedKey = ref<string | null>(null)
+let relationsRequestController: AbortController | null = null
+let relationsRequestGeneration = 0
+let relationsMutationRevision = 0
+let detailSessionsController: AbortController | null = null
+let detailSessionsRequestKey: string | null = null
+let detailSessionsRequestGeneration = 0
+let createRequestGeneration = 0
+let createDraftRevision = 0
+let dutyRequestGeneration = 0
+let dutyDraftRevision = 0
+let confirmRequestGeneration = 0
+let confirmRouteGeneration = 0
+let isApplyingRouteContext = false
+let routeScrollTarget: HTMLElement | Window | null = null
+let isDeleteNavigationPending = false
 
 const relationFilterOptions = [
   { key: 'all', label: 'همه' },
@@ -76,6 +105,25 @@ const relationFilterOptions = [
   { key: 'pending', label: 'دعوت‌ها' },
   { key: 'inactive', label: 'غیرفعال' },
 ]
+
+function routeQueryValue(key: string) {
+  const value = route.query[key]
+  return Array.isArray(value) ? (value[0] ?? null) : (value ?? null)
+}
+
+function normalizeSearchQuery(value: unknown) {
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+function relationFilterOptionsValue(value: unknown) {
+  const normalized = typeof value === 'string' ? value : ''
+  return ['all', 'active', 'pending', 'inactive'].includes(normalized) ? normalized : 'all'
+}
+
+function parseListScroll(value: unknown) {
+  const normalized = Number(value)
+  return Number.isFinite(normalized) && normalized > 0 ? Math.floor(normalized) : 0
+}
 
 const detailTabOptions = [
   { key: 'profile', label: 'مشخصات' },
@@ -86,7 +134,7 @@ const detailTabOptions = [
 
 const relationId = computed(() => {
   const value = route.params.relationId
-  return Array.isArray(value) ? value[0] ?? null : value ?? null
+  return Array.isArray(value) ? (value[0] ?? null) : (value ?? null)
 })
 
 const relationIdNumber = computed(() => {
@@ -95,10 +143,13 @@ const relationIdNumber = computed(() => {
   return Number.isInteger(normalized) && normalized > 0 ? normalized : null
 })
 
-const initialPanel = computed(() => {
-  const value = route.query.panel ?? route.query.section
-  return Array.isArray(value) ? value[0] ?? null : value ?? null
-})
+const hasDetailRoute = computed(() => relationId.value != null && relationId.value !== '')
+
+const legacyRouteValues = computed(() =>
+  [routeQueryValue('panel'), routeQueryValue('section')].filter(
+    (value): value is string => typeof value === 'string' && Boolean(value),
+  ),
+)
 
 const activeRelation = computed(() => {
   const id = relationIdNumber.value
@@ -106,22 +157,67 @@ const activeRelation = computed(() => {
   return accountantState.relations.value.find((relation) => relation.id === id) ?? null
 })
 const activeRelationId = computed(() => activeRelation.value?.id ?? null)
+const isActiveRelation = computed(() => activeRelation.value?.status === 'active')
+const isPendingRelation = computed(() => activeRelation.value?.status === 'pending')
+const activeAccountantUserId = computed(() => getLiveAccountantUserId(activeRelation.value))
+const hasLiveAccount = computed(
+  () => isActiveRelation.value && activeAccountantUserId.value != null,
+)
+const isOrphanActiveRelation = computed(() => isActiveRelation.value && !hasLiveAccount.value)
+const isTerminalRelation = computed(
+  () => Boolean(activeRelation.value) && !isActiveRelation.value && !isPendingRelation.value,
+)
+const availableDetailTabOptions = computed(() => {
+  if (!hasLoadedRelations.value || !activeRelation.value) return detailTabOptions
+  if (hasLiveAccount.value) return detailTabOptions
+  if (isOrphanActiveRelation.value) {
+    return detailTabOptions.filter((option) => option.key !== 'sessions')
+  }
+  if (isPendingRelation.value) {
+    return detailTabOptions.filter((option) => option.key === 'profile' || option.key === 'danger')
+  }
+  return detailTabOptions.filter((option) => option.key === 'profile')
+})
 
-const activeCount = computed(() => accountantState.relations.value.filter((relation) => relation.status === 'active').length)
-const inactiveCount = computed(() => accountantState.relations.value.filter((relation) => relation.status !== 'active' && relation.status !== 'pending').length)
+function getLiveAccountantUserId(relation: AccountantRelation | null | undefined) {
+  const id = Number(relation?.accountant_user_id)
+  return Number.isInteger(id) && id > 0 ? id : null
+}
+
+function requestedDetailTabFromRoute() {
+  const canonicalTab = routeQueryValue('tab')
+  if (detailTabOptions.some((option) => option.key === canonicalTab)) return canonicalTab
+  const legacyTab = legacyRouteValues.value.find((value) =>
+    detailTabOptions.some((option) => option.key === value),
+  )
+  return legacyTab || canonicalTab
+}
+
+function normalizedDetailTab(value: unknown) {
+  const normalized = Array.isArray(value) ? value[0] : value
+  if (typeof normalized !== 'string') return 'profile'
+  if (!detailTabOptions.some((option) => option.key === normalized)) return 'profile'
+  if (
+    hasLoadedRelations.value &&
+    activeRelation.value &&
+    !availableDetailTabOptions.value.some((option) => option.key === normalized)
+  ) {
+    return 'profile'
+  }
+  if (hasLoadedRelations.value && hasDetailRoute.value && !activeRelation.value) return 'profile'
+  return normalized
+}
 
 const detailTab = computed({
   get() {
-    const value = route.query.tab
-    const normalized = Array.isArray(value) ? value[0] : value
-    return detailTabOptions.some((option) => option.key === normalized) ? normalized as string : 'profile'
+    return normalizedDetailTab(requestedDetailTabFromRoute())
   },
   set(tab: string) {
-    if (!detailTabOptions.some((option) => option.key === tab)) return
+    if (!availableDetailTabOptions.value.some((option) => option.key === tab)) return
     router.push({
       name: relationId.value ? 'operations-accountants-detail' : 'operations-accountants',
       params: relationId.value ? { relationId: String(relationId.value) } : {},
-      query: { ...route.query, tab },
+      query: buildCanonicalQuery({ tab }),
     })
   },
 })
@@ -132,7 +228,8 @@ const filteredRelations = computed(() => {
     const filter = relationFilter.value
     if (filter === 'active' && relation.status !== 'active') return false
     if (filter === 'pending' && relation.status !== 'pending') return false
-    if (filter === 'inactive' && (relation.status === 'active' || relation.status === 'pending')) return false
+    if (filter === 'inactive' && (relation.status === 'active' || relation.status === 'pending'))
+      return false
     if (!query) return true
     const haystack = [
       relation.relation_display_name,
@@ -141,31 +238,104 @@ const filteredRelations = computed(() => {
       relation.mobile_number,
       relation.duty_description,
       relation.status,
-    ].filter(Boolean).join(' ').toLocaleLowerCase('fa-IR')
+    ]
+      .filter(Boolean)
+      .join(' ')
+      .toLocaleLowerCase('fa-IR')
     return haystack.includes(query)
   })
 })
 
-const visiblePendingRelations = computed(() => filteredRelations.value.filter((relation) => relation.status === 'pending'))
-const visibleManageableRelations = computed(() => filteredRelations.value.filter((relation) => relation.status !== 'pending'))
+const visiblePendingRelations = computed(() =>
+  filteredRelations.value.filter((relation) => relation.status === 'pending'),
+)
+const visibleManageableRelations = computed(() =>
+  filteredRelations.value.filter((relation) => relation.status !== 'pending'),
+)
 
 const generatedGlobalAccountName = computed(() => accountantState.createForm.account_name.trim())
 
-async function loadRelations() {
-  if (isLoading.value || isRefreshingRelations.value) return
+function abortRelationsRequest() {
+  relationsRequestGeneration += 1
+  relationsRequestController?.abort()
+  relationsRequestController = null
+  isLoading.value = false
+  isRefreshingRelations.value = false
+}
+
+function invalidateRelationsSnapshot() {
+  relationsMutationRevision += 1
+  abortRelationsRequest()
+}
+
+function isNotFoundError(error: unknown) {
+  return Boolean(error && typeof error === 'object' && 'status' in error && error.status === 404)
+}
+
+async function loadRelations(force = false) {
+  if ((isLoading.value || isRefreshingRelations.value) && !force) return
   const isInitialLoad = !hasLoadedRelations.value
+  abortRelationsRequest()
+  const requestGeneration = relationsRequestGeneration
+  const capturedMutationRevision = relationsMutationRevision
+  const capturedDetailId = relationIdNumber.value
+  const controller = new AbortController()
+  relationsRequestController = controller
   if (isInitialLoad) isLoading.value = true
   else isRefreshingRelations.value = true
   error.value = ''
   try {
-    const relations = await fetchOwnerAccountantRelations()
+    const relations = await fetchOwnerAccountantRelations({ signal: controller.signal })
+    if (
+      requestGeneration !== relationsRequestGeneration ||
+      capturedMutationRevision !== relationsMutationRevision ||
+      capturedDetailId !== relationIdNumber.value
+    )
+      return
+    if (capturedDetailId && !relations.some((relation) => relation.id === capturedDetailId)) {
+      try {
+        const detailRelation = await fetchOwnerAccountantRelation(capturedDetailId, {
+          signal: controller.signal,
+        })
+        if (
+          requestGeneration !== relationsRequestGeneration ||
+          capturedMutationRevision !== relationsMutationRevision ||
+          capturedDetailId !== relationIdNumber.value
+        )
+          return
+        if (detailRelation.id !== capturedDetailId) {
+          throw new Error('پاسخ پرونده حسابدار معتبر نبود.')
+        }
+        relations.unshift(detailRelation)
+      } catch (err: unknown) {
+        if (
+          isAbortError(err) ||
+          requestGeneration !== relationsRequestGeneration ||
+          capturedMutationRevision !== relationsMutationRevision ||
+          capturedDetailId !== relationIdNumber.value
+        )
+          return
+        if (!isNotFoundError(err)) throw err
+      }
+    }
     accountantState.relations.value = relations
     hasLoadedRelations.value = true
-  } catch (err: any) {
-    error.value = err?.message || 'دریافت لیست حسابداران ناموفق بود.'
+  } catch (err: unknown) {
+    if (
+      isAbortError(err) ||
+      requestGeneration !== relationsRequestGeneration ||
+      capturedMutationRevision !== relationsMutationRevision ||
+      capturedDetailId !== relationIdNumber.value
+    )
+      return
+    error.value =
+      err instanceof Error && err.message ? err.message : 'دریافت لیست حسابداران ناموفق بود.'
   } finally {
-    isLoading.value = false
-    isRefreshingRelations.value = false
+    if (requestGeneration === relationsRequestGeneration) {
+      isLoading.value = false
+      isRefreshingRelations.value = false
+      if (relationsRequestController === controller) relationsRequestController = null
+    }
   }
 }
 
@@ -173,26 +343,108 @@ function goToOperations() {
   router.push({ name: 'operations' })
 }
 
+function buildCanonicalQuery(options: { tab?: string; includeTab?: boolean } = {}) {
+  const query: Record<string, string> = {}
+  const normalizedSearch = searchQuery.value.trim()
+  if (normalizedSearch) query.q = normalizedSearch
+  if (relationFilter.value !== 'all') query.filter = relationFilter.value
+  if (listScrollTop.value > 0) query.scroll = String(listScrollTop.value)
+  const shouldIncludeTab = options.includeTab ?? hasDetailRoute.value
+  const tab = options.tab ?? detailTab.value
+  if (shouldIncludeTab && tab !== 'profile') query.tab = tab
+  return query
+}
+
+function currentQueryIsCanonical(query: Record<string, string>) {
+  const currentEntries = Object.entries(route.query)
+  const expectedEntries = Object.entries(query)
+  if (currentEntries.length !== expectedEntries.length) return false
+  if (currentEntries.some(([, value]) => Array.isArray(value))) return false
+  return expectedEntries.every(([key, value]) => routeQueryValue(key) === value)
+}
+
+function replaceCanonicalRouteQuery() {
+  if (isDeleteNavigationPending) return
+  const query = buildCanonicalQuery()
+  if (currentQueryIsCanonical(query)) return
+  const name = hasDetailRoute.value ? 'operations-accountants-detail' : 'operations-accountants'
+  void router.replace({
+    name,
+    params: hasDetailRoute.value ? { relationId: String(relationId.value) } : {},
+    query,
+  })
+}
+
+function syncRouteContextFromQuery() {
+  const nextSearch = normalizeSearchQuery(routeQueryValue('q'))
+  const canonicalFilter = routeQueryValue('filter')
+  const hasValidCanonicalFilter =
+    typeof canonicalFilter === 'string' &&
+    ['all', 'active', 'pending', 'inactive'].includes(canonicalFilter)
+  const nextFilter =
+    !hasValidCanonicalFilter && legacyRouteValues.value.includes('pending')
+      ? 'pending'
+      : relationFilterOptionsValue(canonicalFilter)
+  const nextScroll = parseListScroll(routeQueryValue('scroll') ?? routeQueryValue('listScroll'))
+  isApplyingRouteContext = true
+  searchQuery.value = nextSearch
+  relationFilter.value = nextFilter
+  listScrollTop.value = nextScroll
+  if (legacyRouteValues.value.includes('create')) openCreatePanel()
+  void nextTick(() => {
+    isApplyingRouteContext = false
+  })
+  void restorePageScroll()
+  replaceCanonicalRouteQuery()
+}
+
+function capturePageScroll() {
+  if (typeof window === 'undefined') return
+  if (hasDetailRoute.value) return
+  const scrollTop =
+    routeScrollTarget instanceof HTMLElement
+      ? routeScrollTarget.scrollTop
+      : window.scrollY || document.documentElement.scrollTop || document.body.scrollTop || 0
+  listScrollTop.value = Math.max(0, Math.floor(scrollTop))
+}
+
+async function restorePageScroll() {
+  if (hasDetailRoute.value && isMobile.value) return
+  await nextTick()
+  if (routeScrollTarget instanceof HTMLElement) {
+    routeScrollTarget.scrollTop = listScrollTop.value
+    return
+  }
+  if (typeof window !== 'undefined') window.scrollTo(0, listScrollTop.value)
+}
+
+function resolveRouteScrollTarget() {
+  if (typeof document === 'undefined') return null
+  return document.querySelector<HTMLElement>('.app-route-scroll') || window
+}
+
 function openRelation(relationId: number) {
+  capturePageScroll()
   router.push({
     name: 'operations-accountants-detail',
     params: { relationId: String(relationId) },
-    query: route.query,
+    query: buildCanonicalQuery({ includeTab: false }),
   })
 }
 
-function backToList() {
-  router.push({
+async function backToList() {
+  await router.push({
     name: 'operations-accountants',
-    query: route.query,
+    query: buildCanonicalQuery({ includeTab: false }),
   })
+  if (routeScrollTarget instanceof HTMLElement) {
+    routeScrollTarget.scrollTop = listScrollTop.value
+  } else if (typeof window !== 'undefined') {
+    window.scrollTo(0, listScrollTop.value)
+  }
 }
 
 function handleBack() {
-  if (isCompatibilityManagerOpen.value) {
-    closeCompatibilityManager()
-    return
-  }
   if (relationId.value) {
     backToList()
     return
@@ -200,29 +452,24 @@ function handleBack() {
   goToOperations()
 }
 
-function openCompatibilityManager(panel: string | null = null) {
-  compatibilityPanel.value = panel
-  isCompatibilityManagerOpen.value = true
-}
-
-function closeCompatibilityManager() {
-  isCompatibilityManagerOpen.value = false
-  compatibilityPanel.value = null
-  void loadRelations()
-}
-
 function updateIsMobile() {
   if (typeof window === 'undefined') return
-  isMobile.value = window.innerWidth < 768
+  isMobile.value = window.innerWidth < 900
 }
 
 function openCreatePanel() {
+  if (isCreateSubmitting.value) return
   isCreatePanelOpen.value = true
   createError.value = ''
   createNotice.value = ''
 }
 
 function closeCreatePanel() {
+  if (isCreateSubmitting.value) return
+  isCreatePanelOpen.value = false
+}
+
+function completeCreatePanel() {
   isCreatePanelOpen.value = false
 }
 
@@ -235,7 +482,10 @@ function resetCreateForm() {
   })
 }
 
-function seedEditForm(relation: AccountantRelation | null, options: { resetFeedback?: boolean } = {}) {
+function seedEditForm(
+  relation: AccountantRelation | null,
+  options: { resetFeedback?: boolean } = {},
+) {
   const { resetFeedback = true } = options
   accountantState.editForm.duty_description = relation?.duty_description || ''
   if (resetFeedback) {
@@ -244,59 +494,183 @@ function seedEditForm(relation: AccountantRelation | null, options: { resetFeedb
   }
 }
 
+function isAbortError(error: unknown) {
+  return error instanceof DOMException
+    ? error.name === 'AbortError'
+    : Boolean(error && typeof error === 'object' && 'name' in error && error.name === 'AbortError')
+}
+
+function abortDetailSessionsRequest() {
+  detailSessionsRequestGeneration += 1
+  detailSessionsController?.abort()
+  detailSessionsController = null
+  detailSessionsRequestKey = null
+  detailSessionsLoading.value = false
+}
+
+function isCurrentActiveRelation(relationId: number) {
+  return activeRelation.value?.id === relationId && activeRelation.value.status === 'active'
+}
+
+function isCurrentLiveRelation(relationId: number, accountantUserId: number) {
+  return isCurrentActiveRelation(relationId) && activeAccountantUserId.value === accountantUserId
+}
+
+function sessionRelationKey(relationId: number, accountantUserId: number) {
+  return `${relationId}:${accountantUserId}`
+}
+
 async function loadDetailSessions(force = false) {
   const relation = activeRelation.value
-  if (!relation || relation.status !== 'active' || !relation.accountant_user_id) {
+  const accountantUserId = getLiveAccountantUserId(relation)
+  if (!relation || relation.status !== 'active' || accountantUserId == null) {
+    abortDetailSessionsRequest()
     detailSessions.value = []
+    detailSessionsLoadedKey.value = null
+    detailSessionsError.value = ''
     return
   }
-  if (!force && detailSessions.value.length) return
+  const capturedRelationId = relation.id
+  const capturedAccountantUserId = accountantUserId
+  const requestKey = sessionRelationKey(capturedRelationId, capturedAccountantUserId)
+  if (!force && detailSessionsLoadedKey.value === requestKey) return
+  if (!force && detailSessionsLoading.value && detailSessionsRequestKey === requestKey) return
+  abortDetailSessionsRequest()
+  const requestGeneration = detailSessionsRequestGeneration
+  const controller = new AbortController()
+  detailSessionsController = controller
+  detailSessionsRequestKey = requestKey
   detailSessionsLoading.value = true
   detailSessionsError.value = ''
   try {
-    detailSessions.value = await fetchOwnerAccountantSessions(relation.id)
-  } catch (err: any) {
-    detailSessionsError.value = err?.message || 'دریافت نشست‌های حسابدار ناموفق بود.'
+    const sessions = await fetchOwnerAccountantSessions(capturedRelationId, {
+      signal: controller.signal,
+    })
+    if (
+      requestGeneration !== detailSessionsRequestGeneration ||
+      !isCurrentLiveRelation(capturedRelationId, capturedAccountantUserId)
+    )
+      return
+    detailSessions.value = sessions
+    detailSessionsLoadedKey.value = requestKey
+  } catch (error: unknown) {
+    if (
+      isAbortError(error) ||
+      requestGeneration !== detailSessionsRequestGeneration ||
+      !isCurrentLiveRelation(capturedRelationId, capturedAccountantUserId)
+    )
+      return
+    detailSessionsError.value =
+      error instanceof Error && error.message
+        ? error.message
+        : 'دریافت نشست‌های حسابدار ناموفق بود.'
   } finally {
-    detailSessionsLoading.value = false
+    if (
+      requestGeneration === detailSessionsRequestGeneration &&
+      isCurrentLiveRelation(capturedRelationId, capturedAccountantUserId)
+    ) {
+      detailSessionsLoading.value = false
+      if (detailSessionsController === controller) {
+        detailSessionsController = null
+        detailSessionsRequestKey = null
+      }
+    }
   }
 }
 
 function refreshCurrentDetailTab() {
   if (detailTab.value === 'sessions') {
-    void loadDetailSessions(true)
+    void loadDetailSessions(false)
+    return
   }
+  abortDetailSessionsRequest()
+}
+
+function createDraftPayload() {
+  return {
+    account_name: normalizeIdentityText(accountantState.createForm.account_name),
+    relation_display_name: accountantState.createForm.relation_display_name.trim(),
+    mobile_number: normalizeIdentityText(accountantState.createForm.mobile_number),
+    duty_description: normalizeDutyDescription(accountantState.createForm.duty_description),
+  }
+}
+
+function normalizeIdentityText(value: unknown) {
+  if (typeof value !== 'string') return ''
+  const persianDigits = '۰۱۲۳۴۵۶۷۸۹'
+  const arabicDigits = '٠١٢٣٤٥٦٧٨٩'
+  return value
+    .replace(/[۰-۹]/g, (digit) => String(persianDigits.indexOf(digit)))
+    .replace(/[٠-٩]/g, (digit) => String(arabicDigits.indexOf(digit)))
+    .trim()
+    .toLocaleLowerCase('en-US')
+}
+
+function isValidCreateReceipt(
+  created: AccountantRelation | null | undefined,
+  payload: ReturnType<typeof createDraftPayload>,
+) {
+  if (!created || !Number.isInteger(created.id) || created.id <= 0 || created.status !== 'pending')
+    return false
+  const receiptAccountName = created.global_account_name || created.accountant_account_name
+  if (normalizeIdentityText(receiptAccountName) !== normalizeIdentityText(payload.account_name))
+    return false
+  if (
+    normalizeIdentityText(created.relation_display_name) !==
+    normalizeIdentityText(payload.relation_display_name)
+  )
+    return false
+  if (normalizeIdentityText(created.mobile_number) !== normalizeIdentityText(payload.mobile_number))
+    return false
+  return normalizeDutyDescription(created.duty_description || '') === payload.duty_description
 }
 
 async function createRelation() {
   if (isCreateSubmitting.value) return
+  const payload = createDraftPayload()
+  const capturedDraftRevision = createDraftRevision
+  const requestGeneration = ++createRequestGeneration
   isCreateSubmitting.value = true
   createError.value = ''
   createNotice.value = ''
   try {
-    const created = await createOwnerAccountantRelation({
-      account_name: accountantState.createForm.account_name,
-      relation_display_name: accountantState.createForm.relation_display_name,
-      mobile_number: accountantState.createForm.mobile_number,
-      duty_description: normalizeDutyDescription(accountantState.createForm.duty_description),
-    })
-    if (!created || !Number.isInteger(created.id) || created.id <= 0) {
+    const created = await createOwnerAccountantRelation(payload)
+    if (requestGeneration !== createRequestGeneration) return
+    if (!isValidCreateReceipt(created, payload)) {
       throw new Error('پاسخ ایجاد حسابدار معتبر نبود.')
     }
-    accountantState.relations.value = [created, ...accountantState.relations.value.filter((item) => item.id !== created.id)]
-    createNotice.value = invitationSmsStatusMessage(created.sms_status) || 'دعوت حسابدار با موفقیت ثبت شد.'
-    resetCreateForm()
-    closeCreatePanel()
-  } catch (err: any) {
-    createError.value = err?.message || 'ایجاد حسابدار ناموفق بود.'
+    invalidateRelationsSnapshot()
+    accountantState.relations.value = [
+      created,
+      ...accountantState.relations.value.filter((item) => item.id !== created.id),
+    ]
+    hasLoadedRelations.value = true
+    error.value = ''
+    createNotice.value =
+      invitationSmsStatusMessage(created.sms_status) || 'دعوت حسابدار با موفقیت ثبت شد.'
+    if (capturedDraftRevision === createDraftRevision) {
+      resetCreateForm()
+      completeCreatePanel()
+    }
+  } catch (err: unknown) {
+    if (
+      requestGeneration !== createRequestGeneration ||
+      capturedDraftRevision !== createDraftRevision
+    )
+      return
+    createError.value =
+      err instanceof Error && err.message ? err.message : 'ایجاد حسابدار ناموفق بود.'
   } finally {
-    isCreateSubmitting.value = false
+    if (requestGeneration === createRequestGeneration) isCreateSubmitting.value = false
   }
 }
 
 async function saveDuty() {
   const relation = activeRelation.value
-  if (!relation || isSavingDuty.value) return
+  if (!relation || relation.status !== 'active' || isSavingDuty.value) return
+  const capturedRelationId = relation.id
+  const capturedDraftRevision = dutyDraftRevision
+  const requestGeneration = ++dutyRequestGeneration
   const normalizedDuty = normalizeDutyDescription(accountantState.editForm.duty_description)
   const currentDuty = normalizeDutyDescription(relation.duty_description || '')
   if (normalizedDuty === currentDuty) {
@@ -310,16 +684,37 @@ async function saveDuty() {
     const updated = await updateOwnerAccountantRelation(relation.id, {
       duty_description: normalizedDuty,
     })
-    if (!updated || updated.id !== relation.id) {
+    if (requestGeneration !== dutyRequestGeneration || !isCurrentActiveRelation(capturedRelationId))
+      return
+    if (
+      !updated ||
+      updated.id !== relation.id ||
+      normalizeDutyDescription(updated.duty_description || '') !== normalizedDuty
+    ) {
       throw new Error('پاسخ ویرایش حسابدار معتبر نبود.')
     }
-    accountantState.relations.value = accountantState.relations.value.map((item) => (item.id === updated.id ? updated : item))
-    seedEditForm(updated, { resetFeedback: false })
-    dutyNotice.value = 'شرح وظیفه حسابدار ذخیره شد.'
-  } catch (err: any) {
-    dutyError.value = err?.message || 'ذخیره شرح وظیفه ناموفق بود.'
+    invalidateRelationsSnapshot()
+    accountantState.relations.value = accountantState.relations.value.map((item) =>
+      item.id === updated.id ? updated : item,
+    )
+    if (capturedDraftRevision === dutyDraftRevision) {
+      seedEditForm(updated, { resetFeedback: false })
+      dutyNotice.value = 'شرح وظیفه ذخیره شد.'
+    } else {
+      dutyNotice.value = 'تغییر قبلی ذخیره شد؛ پیش‌نویس جدید هنوز ذخیره نشده است.'
+    }
+  } catch (error: unknown) {
+    if (requestGeneration !== dutyRequestGeneration || !isCurrentActiveRelation(capturedRelationId))
+      return
+    dutyError.value =
+      error instanceof Error && error.message ? error.message : 'ذخیره شرح وظیفه ناموفق بود.'
   } finally {
-    isSavingDuty.value = false
+    if (
+      requestGeneration === dutyRequestGeneration &&
+      isCurrentActiveRelation(capturedRelationId)
+    ) {
+      isSavingDuty.value = false
+    }
   }
 }
 
@@ -329,37 +724,82 @@ async function copyRegistrationLink(relation: AccountantRelation) {
   try {
     await navigator.clipboard.writeText(link)
     copiedRelationId.value = relation.id
+    relationFeedback.value = {
+      ...relationFeedback.value,
+      [relation.id]: { tone: 'success', message: 'لینک دعوت کپی شد.' },
+    }
     if (typeof window !== 'undefined') {
       window.setTimeout(() => {
         if (copiedRelationId.value === relation.id) copiedRelationId.value = null
       }, 1800)
     }
   } catch {
-    dutyError.value = 'کپی لینک ثبت‌نام ممکن نشد.'
+    relationFeedback.value = {
+      ...relationFeedback.value,
+      [relation.id]: { tone: 'danger', message: 'کپی لینک دعوت ممکن نشد؛ دوباره تلاش کنید.' },
+    }
   }
 }
 
 function openConfirmDialog(
-  kind: 'terminate-session' | 'cancel-invitation' | 'unlink-relation',
+  kind: ConfirmAction,
   relation: AccountantRelation,
   session: AccountantSessionSummary | null = null,
 ) {
   if (isConfirmBusy.value) return
+  if (kind === 'cancel-invitation' && relation.status !== 'pending') return
+  const relationAccountantUserId = getLiveAccountantUserId(relation)
+  if (
+    (kind === 'terminate-session' || kind === 'delete-account') &&
+    (relationAccountantUserId == null ||
+      !isCurrentLiveRelation(relation.id, relationAccountantUserId))
+  )
+    return
+  if (
+    kind === 'delete-relation' &&
+    (!isCurrentActiveRelation(relation.id) || relationAccountantUserId != null)
+  )
+    return
   confirmAction.value = kind
   confirmRelation.value = relation
   confirmSession.value = session
   confirmError.value = ''
-  confirmTitle.value = kind === 'terminate-session'
-    ? 'پایان نشست'
-    : kind === 'cancel-invitation'
-      ? 'لغو دعوت حسابدار'
-      : 'قطع ارتباط حسابدار'
-  confirmMessage.value = kind === 'terminate-session'
-    ? `نشست «${session?.device_name || 'دستگاه حسابدار'}» پایان یابد؟`
-    : kind === 'cancel-invitation'
-      ? `دعوت «${relation.relation_display_name}» لغو شود؟`
-      : `ارتباط «${relation.relation_display_name}» قطع شود؟ این عملیات دسترسی حسابدار را غیرفعال می‌کند.`
+  confirmTitle.value =
+    kind === 'terminate-session'
+      ? 'پایان نشست'
+      : kind === 'cancel-invitation'
+        ? 'لغو رابطه و دعوت حسابدار'
+        : kind === 'delete-relation'
+          ? `حذف رابطه ${getRelationTitle(relation)}`
+          : `حذف حساب ${getRelationTitle(relation)}`
+  confirmMessage.value =
+    kind === 'terminate-session'
+      ? `نشست «${session?.device_name || 'دستگاه حسابدار'}» پایان یابد؟ فقط دسترسی همین نشست قطع می‌شود؛ نشست‌های دیگر باقی می‌مانند و در صورت نیاز قدیمی‌ترین نشست فعال به‌عنوان نشست اصلی انتخاب می‌شود.`
+      : kind === 'cancel-invitation'
+        ? `رابطه و دعوت در انتظار «${getRelationTitle(relation)}» لغو شود؟ لینک ثبت‌نام بی‌اعتبار و رزرو هویت و نام کاربری آزاد می‌شود. چون حسابی فعال نشده، حذف زنجیره‌ای حساب، نشست، آفر یا روابط فعال اجرا نمی‌شود.`
+        : kind === 'delete-relation'
+          ? `رابطه «${getRelationTitle(relation)}» حذف شود؟ این رابطه به حساب کاربری فعالی متصل نیست؛ فقط همین رابطه حذف می‌شود و حذف زنجیره‌ای حساب، نشست، آفر، دعوت یا سایر روابط اجرا نمی‌شود.`
+          : `با حذف حساب «${getRelationTitle(relation)}»، دسترسی وب و ربات پایان می‌یابد؛ همه نشست‌های فعال بسته و آفرهای فعال منقضی می‌شوند؛ دعوت‌های در انتظار مرتبط لغو و همه روابط باز مشتری یا حسابدارِ متعلق یا متصل بسته می‌شوند؛ حساب‌های وابسته فعالِ متعلق به این کاربر ممکن است به‌صورت بازگشتی حذف شوند. سابقه معاملات حفظ می‌شود.`
   isConfirmDialogOpen.value = true
+}
+
+function isCurrentConfirmOperation(
+  generation: number,
+  action: ConfirmAction,
+  relationId: number,
+  accountantUserId: number | null,
+) {
+  if (generation !== confirmRequestGeneration) return false
+  if (confirmAction.value !== action || confirmRelation.value?.id !== relationId) return false
+  if (action === 'cancel-invitation') {
+    return accountantState.relations.value.some(
+      (relation) => relation.id === relationId && relation.status === 'pending',
+    )
+  }
+  if (action === 'delete-relation') {
+    return isCurrentActiveRelation(relationId) && activeAccountantUserId.value == null
+  }
+  return accountantUserId != null && isCurrentLiveRelation(relationId, accountantUserId)
 }
 
 function closeConfirmDialog() {
@@ -380,6 +820,15 @@ async function handleConfirmAction() {
   if (!relation || !confirmAction.value || isConfirmBusy.value) return
   const action = confirmAction.value
   const session = confirmSession.value
+  const capturedRelationId = relation.id
+  const capturedAccountantUserId = getLiveAccountantUserId(relation)
+  const capturedConfirmRouteGeneration = confirmRouteGeneration
+  const capturedRouteRelationId = relationIdNumber.value
+  const shouldReturnToList = capturedRouteRelationId === capturedRelationId
+  const requestGeneration = ++confirmRequestGeneration
+  const shouldHoldCanonicalSync = action !== 'terminate-session' && shouldReturnToList
+  if (shouldHoldCanonicalSync) isDeleteNavigationPending = true
+
   isConfirmBusy.value = true
   confirmError.value = ''
 
@@ -387,6 +836,15 @@ async function handleConfirmAction() {
     if (action === 'terminate-session') {
       if (!session) throw new Error('نشست حسابدار برای پایان دادن در دسترس نیست.')
       const receipt = await terminateOwnerAccountantSession(relation.id, session.id)
+      if (
+        !isCurrentConfirmOperation(
+          requestGeneration,
+          action,
+          capturedRelationId,
+          capturedAccountantUserId,
+        )
+      )
+        return
       if (!receipt || receipt.terminated_session_id !== session.id) {
         throw new Error('پاسخ پایان نشست حسابدار معتبر نبود.')
       }
@@ -396,38 +854,93 @@ async function handleConfirmAction() {
           ...item,
           is_primary: receipt.promoted_primary_session_id === item.id ? true : item.is_primary,
         }))
+      detailSessionsLoadedKey.value = sessionRelationKey(
+        capturedRelationId,
+        capturedAccountantUserId!,
+      )
+      sessionActionNotice.value = `نشست «${session.device_name || 'دستگاه حسابدار'}» پایان یافت.`
       isConfirmBusy.value = false
       resetConfirmDialog()
       return
     }
 
+    const expectedAction =
+      action === 'cancel-invitation'
+        ? 'cancel-pending'
+        : action === 'delete-relation'
+          ? 'delete-relation'
+          : 'delete-account'
     const receipt = await deleteOwnerAccountantRelation(
       relation.id,
-      action === 'cancel-invitation' ? 'لغو دعوت حسابدار ناموفق بود.' : 'قطع ارتباط حسابدار ناموفق بود.',
+      expectedAction,
+      action === 'cancel-invitation'
+        ? 'لغو رابطه و دعوت حسابدار ناموفق بود.'
+        : action === 'delete-relation'
+          ? 'حذف رابطه حسابدار ناموفق بود.'
+          : 'حذف حساب حسابدار ناموفق بود.',
     )
     const expectedStatus = action === 'cancel-invitation' ? 'revoked' : 'deleted'
     if (!receipt || receipt.id !== relation.id || receipt.status !== expectedStatus) {
-      throw new Error(action === 'cancel-invitation'
-        ? 'پاسخ لغو دعوت حسابدار معتبر نبود.'
-        : 'پاسخ قطع ارتباط حسابدار معتبر نبود.')
+      throw new Error(
+        action === 'cancel-invitation'
+          ? 'پاسخ لغو رابطه و دعوت حسابدار معتبر نبود.'
+          : action === 'delete-relation'
+            ? 'پاسخ حذف رابطه حسابدار معتبر نبود.'
+            : 'پاسخ حذف حساب حسابدار معتبر نبود.',
+      )
     }
-    const wasActiveRelation = activeRelation.value?.id === relation.id
-    accountantState.relations.value = accountantState.relations.value.filter((item) => item.id !== relation.id)
+    const shouldApplyContext =
+      capturedConfirmRouteGeneration === confirmRouteGeneration &&
+      relationIdNumber.value === capturedRouteRelationId
+    invalidateRelationsSnapshot()
+    accountantState.relations.value = accountantState.relations.value.filter(
+      (item) => item.id !== relation.id,
+    )
+    if (!shouldApplyContext) return
+    listActionNotice.value =
+      action === 'cancel-invitation'
+        ? `رابطه و دعوت «${getRelationTitle(relation)}» لغو و رزرو هویت آزاد شد.`
+        : action === 'delete-relation'
+          ? `رابطه «${getRelationTitle(relation)}» حذف شد.`
+          : `حساب «${getRelationTitle(relation)}» حذف شد.`
     isConfirmBusy.value = false
     resetConfirmDialog()
-    if (wasActiveRelation) {
-      backToList()
+    if (shouldReturnToList) {
+      await backToList()
     }
-  } catch (err: any) {
-    confirmError.value = err?.message
-      || (action === 'cancel-invitation' ? 'لغو دعوت حسابدار ناموفق بود.' : 'قطع ارتباط حسابدار ناموفق بود.')
+  } catch (error: unknown) {
+    if (
+      !isCurrentConfirmOperation(
+        requestGeneration,
+        action,
+        capturedRelationId,
+        capturedAccountantUserId,
+      )
+    )
+      return
+    confirmError.value =
+      error instanceof Error && error.message
+        ? error.message
+        : action === 'terminate-session'
+          ? 'پایان دادن نشست حسابدار ناموفق بود.'
+          : action === 'cancel-invitation'
+            ? 'لغو رابطه و دعوت حسابدار ناموفق بود.'
+            : action === 'delete-relation'
+              ? 'حذف رابطه حسابدار ناموفق بود.'
+              : 'حذف حساب حسابدار ناموفق بود.'
   } finally {
-    isConfirmBusy.value = false
+    if (shouldHoldCanonicalSync) isDeleteNavigationPending = false
+    if (requestGeneration === confirmRequestGeneration) isConfirmBusy.value = false
   }
 }
 
 function getRelationTitle(relation: AccountantRelation) {
-  return relation.relation_display_name || relation.accountant_account_name || relation.global_account_name || 'حسابدار'
+  return (
+    relation.relation_display_name ||
+    relation.accountant_account_name ||
+    relation.global_account_name ||
+    'حسابدار'
+  )
 }
 
 function getRelationDescription(relation: AccountantRelation) {
@@ -463,50 +976,164 @@ function formatDate(value: string | null | undefined) {
   }
 }
 
-function getDutyText(relation: AccountantRelation) {
-  return relation.duty_description || 'شرح وظیفه‌ای ثبت نشده است.'
+function invitationDeadlineText(relation: AccountantRelation) {
+  return relation.expires_at
+    ? `مهلت استفاده تا ${formatDate(relation.expires_at)}`
+    : 'مهلت استفاده برای این دعوت ثبت نشده است.'
 }
 
-watch(initialPanel, (panel) => {
-  if (panel === 'create') {
-    openCreatePanel()
-    return
-  }
-  if (panel === 'pending') {
-    relationFilter.value = 'pending'
-    return
-  }
-  if (panel === 'legacy') {
-    openCompatibilityManager(panel)
-  }
-}, { immediate: true })
+function sessionPlatformLabel(platform: string | null | undefined) {
+  if (platform === 'web') return 'وب'
+  if (platform === 'telegram') return 'ربات'
+  if (platform === 'mobile') return 'موبایل'
+  return 'دستگاه حسابدار'
+}
 
-watch([activeRelationId, detailTab], ([nextRelationId], [previousRelationId]) => {
-  if (nextRelationId !== previousRelationId) {
+function clearListContext() {
+  searchQuery.value = ''
+  relationFilter.value = 'all'
+  listScrollTop.value = 0
+  if (routeScrollTarget instanceof HTMLElement) {
+    routeScrollTarget.scrollTop = 0
+  } else if (typeof window !== 'undefined') {
+    window.scrollTo(0, 0)
+  }
+}
+
+watch(
+  [
+    relationId,
+    activeRelationId,
+    () => activeRelation.value?.status ?? null,
+    activeAccountantUserId,
+  ],
+  (
+    [nextRawId, nextRelationId, nextStatus, nextUserId],
+    [previousRawId, previousRelationId, previousStatus, previousUserId],
+  ) => {
+    if (
+      nextRawId === previousRawId &&
+      nextRelationId === previousRelationId &&
+      nextStatus === previousStatus &&
+      nextUserId === previousUserId
+    )
+      return
+    abortDetailSessionsRequest()
     detailSessions.value = []
+    detailSessionsLoadedKey.value = null
     detailSessionsError.value = ''
-  }
-  refreshCurrentDetailTab()
-}, { flush: 'post' })
+    sessionActionNotice.value = ''
+    dutyRequestGeneration += 1
+    isSavingDuty.value = false
+    confirmRequestGeneration += 1
+    isConfirmBusy.value = false
+    if (isConfirmDialogOpen.value) resetConfirmDialog()
+    refreshCurrentDetailTab()
+  },
+  { flush: 'post' },
+)
 
-watch(activeRelation, (relation, previousRelation) => {
-  if (relation?.id === previousRelation?.id) return
-  seedEditForm(relation, {
-    resetFeedback: relation?.id !== previousRelation?.id,
-  })
-}, { immediate: true })
+watch(
+  detailTab,
+  () => {
+    refreshCurrentDetailTab()
+  },
+  { flush: 'post' },
+)
+
+watch(relationIdNumber, (nextRelationId, previousRelationId) => {
+  if (nextRelationId === previousRelationId) return
+  abortRelationsRequest()
+  if (!nextRelationId) return
+  if (accountantState.relations.value.some((relation) => relation.id === nextRelationId)) return
+  void loadRelations(true)
+})
+
+watch(relationId, (nextRelationId, previousRelationId) => {
+  if (nextRelationId !== previousRelationId) confirmRouteGeneration += 1
+})
+
+watch(
+  [
+    relationId,
+    () => route.query.q,
+    () => route.query.filter,
+    () => route.query.scroll,
+    () => route.query.listScroll,
+    () => route.query.tab,
+    () => route.query.panel,
+    () => route.query.section,
+    hasLoadedRelations,
+    () => activeRelation.value?.status ?? null,
+    activeAccountantUserId,
+  ],
+  () => syncRouteContextFromQuery(),
+  { immediate: true },
+)
+
+watch([searchQuery, relationFilter, listScrollTop], () => {
+  if (!isApplyingRouteContext) replaceCanonicalRouteQuery()
+})
+
+watch(hasLoadedRelations, (loaded) => {
+  if (loaded) void restorePageScroll()
+})
+
+watch(
+  () => [
+    accountantState.createForm.account_name,
+    accountantState.createForm.relation_display_name,
+    accountantState.createForm.mobile_number,
+    accountantState.createForm.duty_description,
+  ],
+  () => {
+    createDraftRevision += 1
+  },
+  { flush: 'sync' },
+)
+
+watch(
+  () => accountantState.editForm.duty_description,
+  () => {
+    dutyDraftRevision += 1
+  },
+  { flush: 'sync' },
+)
+
+watch(
+  activeRelation,
+  (relation, previousRelation) => {
+    if (relation?.id === previousRelation?.id) return
+    seedEditForm(relation, {
+      resetFeedback: relation?.id !== previousRelation?.id,
+    })
+  },
+  { immediate: true },
+)
 
 onMounted(() => {
   updateIsMobile()
   if (typeof window !== 'undefined') {
     window.addEventListener('resize', updateIsMobile)
+    routeScrollTarget = resolveRouteScrollTarget()
+    routeScrollTarget?.addEventListener('scroll', capturePageScroll, { passive: true })
   }
   void loadRelations()
+  void restorePageScroll()
 })
 
 onBeforeUnmount(() => {
+  abortRelationsRequest()
+  abortDetailSessionsRequest()
+  createRequestGeneration += 1
+  dutyRequestGeneration += 1
+  confirmRequestGeneration += 1
+  confirmRouteGeneration += 1
+  isDeleteNavigationPending = false
   if (typeof window !== 'undefined') {
     window.removeEventListener('resize', updateIsMobile)
+    routeScrollTarget?.removeEventListener('scroll', capturePageScroll)
+    routeScrollTarget = null
   }
 })
 </script>
@@ -514,18 +1141,17 @@ onBeforeUnmount(() => {
 <template>
   <div class="ds-page accountant-workspace-view">
     <WorkspaceShell
+      class="ui-v2-workspace-accountant-root"
       title="حسابداران"
       eyebrow="عملیات"
       description="افزودن، مرور و تنظیم روابط حسابداران در یک فضای کاری یکپارچه."
       layout="split"
+      v2-scope
       show-back
       back-label="بازگشت"
       @back="handleBack"
     >
       <template #actions>
-        <AppButton variant="secondary" class="accountant-workspace-action" @click="goToOperations">
-          عملیات
-        </AppButton>
         <AppButton variant="primary" class="accountant-workspace-create" @click="openCreatePanel">
           <template #icon>
             <UserPlus :size="16" />
@@ -534,149 +1160,308 @@ onBeforeUnmount(() => {
         </AppButton>
       </template>
 
-      <section v-if="isCompatibilityManagerOpen" class="workspace-compatibility-panel">
-        <OwnerAccountantManagerModal
-          presentation="workspace"
-          :initial-relation-id="relationId"
-          :initial-panel="compatibilityPanel || initialPanel"
-          @close="closeCompatibilityManager"
-          @open-relation="openRelation"
-          @back-to-list="backToList"
-        />
-      </section>
+      <WorkspaceNotice
+        v-if="createNotice"
+        class="accountant-global-create-notice"
+        v2-scope
+        tone="success"
+        title="دعوت حسابدار ثبت شد"
+        :message="createNotice"
+      />
 
-      <template v-else>
+      <WorkspaceNotice
+        v-if="error && hasLoadedRelations"
+        class="accountant-global-refresh-error"
+        v2-scope
+        tone="danger"
+        role="alert"
+        title="به‌روزرسانی حسابداران انجام نشد"
+        :message="error"
+      >
+        <AppButton
+          class="accountant-list-retry"
+          size="sm"
+          variant="secondary"
+          :loading="isRefreshingRelations"
+          @click="loadRelations"
+        >
+          تلاش دوباره
+        </AppButton>
+      </WorkspaceNotice>
+
+      <div class="accountant-stage5-layout ui-v2-workspace-accountant-layout">
         <WorkspaceSection
-          v-if="relationIdNumber"
+          v-if="!isMobile || hasDetailRoute"
+          class="accountant-detail-section ui-v2-workspace-accountant-detail-section"
           title="پرونده حسابدار"
           description="مشخصات، شرح وظیفه، نشست‌ها و اقدامات حساس در یک نمای یکپارچه."
+          v2-scope
         >
-          <WorkspaceNotice
-            v-if="!hasLoadedRelations && error"
-            tone="danger"
-            role="alert"
+          <AppEmptyState
+            v-if="!hasDetailRoute"
+            title="حسابداری انتخاب نشده است"
+            message="برای دیدن پرونده و تنظیمات، یکی از حسابداران را از فهرست انتخاب کنید."
+          />
+          <AppErrorState
+            v-else-if="!hasLoadedRelations && error"
             title="دریافت پرونده حسابدار ممکن نشد"
             :message="error"
           >
-            <AppButton class="accountant-detail-retry" size="sm" variant="secondary" :loading="isLoading" @click="loadRelations">
-              تلاش دوباره
-            </AppButton>
-          </WorkspaceNotice>
-          <WorkspaceNotice
+            <template #actions>
+              <AppButton
+                class="accountant-detail-retry"
+                size="sm"
+                variant="secondary"
+                :loading="isLoading"
+                @click="loadRelations"
+              >
+                تلاش دوباره
+              </AppButton>
+              <AppButton size="sm" variant="secondary" @click="backToList">
+                بازگشت به فهرست
+              </AppButton>
+            </template>
+          </AppErrorState>
+          <AppLoadingState
             v-else-if="!hasLoadedRelations && isLoading"
-            tone="info"
-            title="در حال دریافت پرونده حسابدار"
-            message="لطفاً چند لحظه صبر کنید."
+            class="accountant-detail-loading"
+            label="در حال ساخت پرونده حسابدار"
           />
-          <WorkspaceNotice
+          <AppEmptyState
             v-else-if="!activeRelation && hasLoadedRelations"
-            tone="warning"
             title="حسابدار پیدا نشد"
-            message="این رابطه در لیست فعلی وجود ندارد یا هنوز همگام‌سازی نشده است."
-          />
-          <div v-else-if="activeRelation" class="accountant-detail-shell">
-            <header class="accountant-detail-header">
+            message="این رابطه دیگر در دسترس نیست. به فهرست برگردید و یک حسابدار معتبر انتخاب کنید."
+            tone="warning"
+          >
+            <template #actions>
+              <AppButton size="sm" variant="secondary" @click="backToList"
+                >بازگشت به فهرست</AppButton
+              >
+            </template>
+          </AppEmptyState>
+          <div
+            v-else-if="activeRelation"
+            class="accountant-detail-shell ui-v2-workspace-accountant-detail-shell"
+          >
+            <header class="accountant-detail-header ui-v2-workspace-accountant-detail-header">
               <div>
                 <h2>{{ getRelationTitle(activeRelation) }}</h2>
                 <p>{{ getRelationDescription(activeRelation) }}</p>
               </div>
-              <div class="accountant-detail-badges">
+              <div class="accountant-detail-badges ui-v2-workspace-accountant-detail-badges">
                 <AppStatusBadge :tone="getStatusTone(activeRelation.status)">
                   {{ getStatusLabel(activeRelation.status) }}
                 </AppStatusBadge>
               </div>
             </header>
 
-            <AppTabs v-model="detailTab" label="بخش‌های پرونده حسابدار" :options="detailTabOptions" />
+            <WorkspaceNotice
+              v-if="isTerminalRelation"
+              v2-scope
+              tone="info"
+              title="این رابطه پایان یافته است"
+              message="اطلاعات برای مراجعه نمایش داده می‌شود و اقدام مدیریتی دیگری روی این رابطه ممکن نیست."
+            />
+            <WorkspaceNotice
+              v-else-if="isPendingRelation"
+              v2-scope
+              tone="warning"
+              title="دعوت هنوز فعال نشده است"
+              message="تا پیش از ثبت‌نام فقط مشخصات دعوت و امکان لغو آن در دسترس است."
+            />
+            <WorkspaceNotice
+              v-else-if="isOrphanActiveRelation"
+              v2-scope
+              tone="warning"
+              title="حساب کاربری متصل در دسترس نیست"
+              message="این رابطه فعال ثبت شده اما به حساب کاربری زنده‌ای متصل نیست؛ نشست‌ها و حذف زنجیره‌ای حساب در دسترس نیستند."
+            />
 
-            <div v-if="detailTab === 'profile'" class="accountant-detail-grid">
+            <AppTabs
+              class="ui-v2-workspace-accountant-detail-tabs"
+              v-model="detailTab"
+              label="بخش‌های پرونده حسابدار"
+              :options="availableDetailTabOptions"
+            />
+
+            <div
+              v-if="detailTab === 'profile'"
+              class="accountant-detail-grid ui-v2-workspace-accountant-detail-grid"
+            >
               <AppCard>
-                <span class="accountant-meta-label">نام نمایشی</span>
+                <span class="accountant-meta-label ui-v2-workspace-accountant-meta-label"
+                  >نام نمایشی</span
+                >
                 <strong>{{ activeRelation.relation_display_name || 'ثبت نشده' }}</strong>
               </AppCard>
               <AppCard>
-                <span class="accountant-meta-label">شماره موبایل</span>
+                <span class="accountant-meta-label ui-v2-workspace-accountant-meta-label"
+                  >شماره موبایل</span
+                >
                 <strong>{{ activeRelation.mobile_number || 'ثبت نشده' }}</strong>
               </AppCard>
               <AppCard>
-                <span class="accountant-meta-label">حساب کاربری</span>
-                <strong>{{ activeRelation.accountant_account_name || activeRelation.global_account_name || 'در انتظار ثبت‌نام' }}</strong>
+                <span class="accountant-meta-label ui-v2-workspace-accountant-meta-label"
+                  >حساب کاربری</span
+                >
+                <strong>{{
+                  activeRelation.accountant_account_name ||
+                  activeRelation.global_account_name ||
+                  'در انتظار ثبت‌نام'
+                }}</strong>
               </AppCard>
               <AppCard>
-                <span class="accountant-meta-label">نام کاربری جهانی</span>
+                <span class="accountant-meta-label ui-v2-workspace-accountant-meta-label"
+                  >نام کاربری جهانی</span
+                >
                 <strong>@{{ activeRelation.global_account_name || 'ثبت نشده' }}</strong>
               </AppCard>
               <AppCard>
-                <span class="accountant-meta-label">فعال‌سازی</span>
+                <span class="accountant-meta-label ui-v2-workspace-accountant-meta-label"
+                  >فعال‌سازی</span
+                >
                 <strong>{{ formatDate(activeRelation.activated_at) }}</strong>
               </AppCard>
               <AppCard>
-                <span class="accountant-meta-label">ایجاد رابطه</span>
+                <span class="accountant-meta-label ui-v2-workspace-accountant-meta-label"
+                  >ایجاد رابطه</span
+                >
                 <strong>{{ formatDate(activeRelation.created_at) }}</strong>
               </AppCard>
             </div>
 
-            <div v-else-if="detailTab === 'duty'" class="accountant-detail-list">
-              <AppCard class="accountant-edit-form-card">
-                <span class="accountant-meta-label">شرح وظیفه فعلی</span>
-                <strong>{{ getDutyText(activeRelation) }}</strong>
-              </AppCard>
-
-              <AppCard class="accountant-edit-form-card">
-                <AppFormField label="ویرایش شرح وظیفه" hint="این توضیح برای تفکیک نقش حسابدار در فضای کاری شما استفاده می‌شود.">
+            <div
+              v-else-if="detailTab === 'duty' && isActiveRelation"
+              class="accountant-detail-list ui-v2-workspace-accountant-detail-list"
+            >
+              <AppCard class="accountant-edit-form-card ui-v2-workspace-accountant-edit-form-card">
+                <AppFormField
+                  label="شرح وظیفه"
+                  hint="یک توضیح کوتاه برای تفکیک مسئولیت این حسابدار بنویسید."
+                >
                   <template #default="{ id }">
                     <AppTextarea
                       :id="id"
                       v-model="accountantState.editForm.duty_description"
                       rows="4"
-                      :placeholder="activeRelation.duty_description || 'مثلاً پیگیری پیشنهادها و ثبت معاملات روزانه'"
+                      :disabled="isSavingDuty"
+                      :placeholder="
+                        activeRelation.duty_description ||
+                        'مثلاً پیگیری پیشنهادها و ثبت معاملات روزانه'
+                      "
                     />
                   </template>
                 </AppFormField>
 
-                <WorkspaceNotice v-if="dutyError" tone="danger" title="ذخیره شرح وظیفه ناموفق بود" :message="dutyError" />
-                <WorkspaceNotice v-else-if="dutyNotice" tone="success" title="شرح وظیفه ذخیره شد" :message="dutyNotice" />
+                <WorkspaceNotice
+                  v-if="dutyError"
+                  v2-scope
+                  tone="danger"
+                  title="ذخیره شرح وظیفه ناموفق بود"
+                  :message="dutyError"
+                />
+                <WorkspaceNotice
+                  v-else-if="dutyNotice"
+                  v2-scope
+                  tone="success"
+                  title="وضعیت شرح وظیفه"
+                  :message="dutyNotice"
+                />
 
-                <div class="accountant-inline-actions">
-                  <AppButton variant="secondary" @click="accountantState.editForm.duty_description = activeRelation.duty_description || ''">
+                <div class="accountant-inline-actions ui-v2-workspace-accountant-inline-actions">
+                  <AppButton
+                    variant="secondary"
+                    :disabled="isSavingDuty"
+                    @click="
+                      accountantState.editForm.duty_description =
+                        activeRelation.duty_description || ''
+                    "
+                  >
                     بازنشانی
                   </AppButton>
-                  <AppButton variant="primary" :loading="isSavingDuty" @click="saveDuty">
+                  <AppButton
+                    variant="primary"
+                    :loading="isSavingDuty"
+                    :disabled="isSavingDuty"
+                    @click="saveDuty"
+                  >
                     ذخیره تغییرات
                   </AppButton>
                 </div>
               </AppCard>
             </div>
 
-            <div v-else-if="detailTab === 'sessions'" class="accountant-detail-list">
-              <div class="accountant-detail-toolbar">
+            <div
+              v-else-if="detailTab === 'sessions' && hasLiveAccount"
+              class="accountant-detail-list ui-v2-workspace-accountant-detail-list"
+            >
+              <div class="accountant-detail-toolbar ui-v2-workspace-accountant-detail-toolbar">
                 <strong>نشست‌های فعال حسابدار</strong>
-                <AppButton size="sm" variant="secondary" :loading="detailSessionsLoading" @click="loadDetailSessions(true)">
+                <AppButton
+                  size="sm"
+                  variant="secondary"
+                  :loading="detailSessionsLoading"
+                  @click="loadDetailSessions(true)"
+                >
                   نوسازی
                 </AppButton>
               </div>
-              <WorkspaceNotice v-if="detailSessionsError" tone="danger" role="alert" title="خطا در دریافت نشست‌ها" :message="detailSessionsError">
-                <AppButton size="sm" variant="secondary" :loading="detailSessionsLoading" @click="loadDetailSessions(true)">تلاش دوباره</AppButton>
+              <WorkspaceNotice
+                v-if="sessionActionNotice"
+                v2-scope
+                tone="success"
+                title="نشست پایان یافت"
+                :message="sessionActionNotice"
+              />
+              <WorkspaceNotice
+                v-if="detailSessionsError"
+                v2-scope
+                tone="danger"
+                role="alert"
+                title="خطا در دریافت نشست‌ها"
+                :message="detailSessionsError"
+              >
+                <AppButton
+                  size="sm"
+                  variant="secondary"
+                  :loading="detailSessionsLoading"
+                  @click="loadDetailSessions(true)"
+                  >تلاش دوباره</AppButton
+                >
               </WorkspaceNotice>
-              <WorkspaceNotice v-if="activeRelation.status !== 'active' || !activeRelation.accountant_user_id" tone="info" title="نشست قابل نمایش نیست" message="نشست‌ها فقط برای حسابدار فعال نمایش داده می‌شوند." />
-              <WorkspaceNotice v-else-if="detailSessionsLoading && !detailSessions.length" tone="info" title="در حال دریافت نشست‌ها" message="لطفاً چند لحظه صبر کنید." />
-              <WorkspaceNotice v-else-if="!detailSessionsError && !detailSessions.length" tone="info" title="نشست فعالی وجود ندارد" message="برای این حسابدار نشست فعالی ثبت نشده است." />
+              <AppLoadingState
+                v-if="detailSessionsLoading && !detailSessions.length"
+                label="در حال ساخت فهرست نشست‌ها"
+              />
+              <AppEmptyState
+                v-else-if="!detailSessionsError && !detailSessions.length"
+                title="نشست فعالی وجود ندارد"
+                message="برای این حسابدار نشست فعالی ثبت نشده است."
+              />
               <template v-if="detailSessions.length">
                 <AppListItem
                   v-for="session in detailSessions"
                   :key="session.id"
                   :title="session.device_name || session.platform || 'دستگاه بدون نام'"
-                  :description="`${session.home_server || 'سرور نامشخص'} · آخرین فعالیت ${formatDate(session.last_active_at)}`"
+                  :description="`${sessionPlatformLabel(session.platform)} · آخرین فعالیت ${formatDate(session.last_active_at)}`"
                 >
                   <template #leading>
                     <Clock :size="18" />
                   </template>
                   <template #trailing>
-                    <div class="accountant-session-actions">
+                    <div
+                      class="accountant-session-actions ui-v2-workspace-accountant-session-actions"
+                    >
                       <AppStatusBadge :tone="session.is_primary ? 'primary' : 'neutral'">
                         {{ session.is_primary ? 'اصلی' : 'فرعی' }}
                       </AppStatusBadge>
-                      <AppButton size="sm" variant="secondary" @click.stop="openConfirmDialog('terminate-session', activeRelation, session)">
+                      <AppButton
+                        size="sm"
+                        variant="secondary"
+                        @click.stop="
+                          openConfirmDialog('terminate-session', activeRelation, session)
+                        "
+                      >
                         پایان نشست
                       </AppButton>
                     </div>
@@ -685,30 +1470,70 @@ onBeforeUnmount(() => {
               </template>
             </div>
 
-            <div v-else class="accountant-detail-list">
+            <div
+              v-else-if="detailTab === 'danger' && (isActiveRelation || isPendingRelation)"
+              class="accountant-detail-list ui-v2-workspace-accountant-detail-list"
+            >
               <AppDangerZone
-                title="اقدامات حساس حسابدار"
-                :description="activeRelation.status === 'pending'
-                  ? 'دعوت ثبت‌شده را لغو کنید یا قبل از فعال‌سازی آن را متوقف نگه دارید.'
-                  : 'در این بخش می‌توانید دسترسی حسابدار را به‌طور کامل قطع کنید.'"
+                :title="
+                  isPendingRelation
+                    ? 'لغو رابطه و دعوت حسابدار'
+                    : isOrphanActiveRelation
+                      ? 'حذف رابطه حسابدار'
+                      : 'حذف حساب حسابدار'
+                "
+                :description="
+                  activeRelation.status === 'pending'
+                    ? 'رابطه و دعوت در انتظار را لغو و رزرو هویت را آزاد کنید.'
+                    : isOrphanActiveRelation
+                      ? 'این رابطه حساب کاربری زنده‌ای ندارد و بدون حذف زنجیره‌ای حساب برداشته می‌شود.'
+                      : 'حذف حساب یک اقدام بازگشت‌ناپذیر با پیامدهای امنیتی و تجاری است.'
+                "
               >
-                <div class="accountant-danger-card">
+                <div class="accountant-danger-card ui-v2-workspace-accountant-danger-card">
                   <ShieldAlert :size="22" />
                   <div>
-                    <strong>{{ activeRelation.status === 'pending' ? 'لغو دعوت حسابدار' : 'قطع ارتباط حسابدار' }}</strong>
+                    <strong>
+                      {{
+                        activeRelation.status === 'pending'
+                          ? 'لغو رابطه و دعوت حسابدار'
+                          : isOrphanActiveRelation
+                            ? `حذف رابطه ${getRelationTitle(activeRelation)}`
+                            : `حذف حساب ${getRelationTitle(activeRelation)}`
+                      }}
+                    </strong>
                     <p>
-                      {{ activeRelation.status === 'pending'
-                        ? 'لغو دعوت، لینک ثبت‌نام را بی‌اعتبار می‌کند.'
-                        : 'قطع ارتباط، دسترسی حسابدار به حساب فعلی را غیرفعال می‌کند.' }}
+                      {{
+                        activeRelation.status === 'pending'
+                          ? 'رابطه و دعوت در انتظار لغو، لینک ثبت‌نام بی‌اعتبار و رزرو هویت و نام کاربری آزاد می‌شود. چون حسابی فعال نشده، حذف زنجیره‌ای حساب، نشست، آفر یا روابط فعال اجرا نمی‌شود.'
+                          : isOrphanActiveRelation
+                            ? 'فقط همین رابطه حذف می‌شود؛ حساب، نشست، آفر، دعوت یا روابط دیگری به‌صورت زنجیره‌ای حذف نمی‌شوند.'
+                            : 'دسترسی وب و ربات پایان می‌یابد؛ همه نشست‌های فعال پایان می‌یابند؛ آفرهای فعال منقضی و دعوت‌های در انتظار مرتبط لغو می‌شوند؛ همه روابط باز مشتری یا حسابدارِ متعلق یا متصل بسته می‌شوند؛ حساب‌های وابسته فعالِ متعلق ممکن است به‌صورت بازگشتی حذف شوند و سابقه معاملات حفظ می‌شود.'
+                      }}
                     </p>
                   </div>
                 </div>
-                <div class="accountant-inline-actions">
+                <div class="accountant-inline-actions ui-v2-workspace-accountant-inline-actions">
                   <AppButton
                     variant="danger"
-                    @click="openConfirmDialog(activeRelation.status === 'pending' ? 'cancel-invitation' : 'unlink-relation', activeRelation)"
+                    @click="
+                      openConfirmDialog(
+                        activeRelation.status === 'pending'
+                          ? 'cancel-invitation'
+                          : isOrphanActiveRelation
+                            ? 'delete-relation'
+                            : 'delete-account',
+                        activeRelation,
+                      )
+                    "
                   >
-                    {{ activeRelation.status === 'pending' ? 'لغو دعوت حسابدار' : 'قطع ارتباط حسابدار' }}
+                    {{
+                      activeRelation.status === 'pending'
+                        ? 'لغو رابطه و دعوت'
+                        : isOrphanActiveRelation
+                          ? 'حذف رابطه'
+                          : 'حذف حساب'
+                    }}
                   </AppButton>
                 </div>
               </AppDangerZone>
@@ -717,186 +1542,225 @@ onBeforeUnmount(() => {
         </WorkspaceSection>
 
         <WorkspaceSection
+          v-if="!isMobile || !hasDetailRoute"
+          class="accountant-list-section ui-v2-workspace-accountant-list-section"
           title="لیست حسابداران"
           description="جستجو، فیلتر و انتخاب حسابدار با دسترسی مستقیم به دعوت‌ها و پرونده‌های فعال."
+          v2-scope
         >
           <template #actions>
-            <div v-if="hasLoadedRelations" class="workspace-summary-badges">
-              <AppStatusBadge tone="primary">{{ accountantState.relations.value.length.toLocaleString('fa-IR') }} رابطه</AppStatusBadge>
-              <AppStatusBadge v-if="activeCount" tone="success">{{ activeCount.toLocaleString('fa-IR') }} فعال</AppStatusBadge>
-              <AppStatusBadge v-if="accountantState.pendingInvitationRelations.value.length" tone="warning">
-                {{ accountantState.pendingInvitationRelations.value.length.toLocaleString('fa-IR') }} دعوت
+            <div
+              v-if="hasLoadedRelations && accountantState.pendingInvitationRelations.value.length"
+              class="workspace-summary-badges ui-v2-workspace-accountant-summary-badges"
+            >
+              <AppStatusBadge tone="warning">
+                {{
+                  accountantState.pendingInvitationRelations.value.length.toLocaleString('fa-IR')
+                }}
+                دعوت نیازمند اقدام
               </AppStatusBadge>
-              <AppStatusBadge v-if="inactiveCount" tone="neutral">{{ inactiveCount.toLocaleString('fa-IR') }} غیرفعال</AppStatusBadge>
             </div>
           </template>
-          <div class="accountant-list-controls">
+          <div class="accountant-list-controls ui-v2-workspace-accountant-list-controls">
             <AppSearchField
               v-model="searchQuery"
               label="جستجوی حسابدار"
               placeholder="نام، شماره موبایل، حساب یا شرح وظیفه را جستجو کنید."
             />
-            <AppFilterChips v-model="relationFilter" label="فیلتر حسابداران" :options="relationFilterOptions" />
+            <AppFilterChips
+              class="ui-v2-workspace-accountant-filter-chips"
+              v-model="relationFilter"
+              label="فیلتر حسابداران"
+              :options="relationFilterOptions"
+            />
           </div>
 
           <WorkspaceNotice
-            v-if="createNotice"
+            v-if="listActionNotice"
+            v2-scope
             tone="success"
-            title="دعوت حسابدار ثبت شد"
-            :message="createNotice"
+            title="اقدام حسابدار انجام شد"
+            :message="listActionNotice"
           />
 
-          <WorkspaceNotice
-            v-if="error && (!relationIdNumber || hasLoadedRelations)"
-            tone="danger"
-            role="alert"
-            title="خطا در دریافت حسابداران"
+          <AppErrorState
+            v-if="error && !hasLoadedRelations"
+            title="دریافت حسابداران ممکن نشد"
             :message="error"
           >
-            <AppButton class="accountant-list-retry" size="sm" variant="secondary" :loading="isLoading || isRefreshingRelations" @click="loadRelations">
-              تلاش دوباره
-            </AppButton>
-          </WorkspaceNotice>
-          <WorkspaceNotice
-            v-if="isLoading && !relationIdNumber"
-            tone="info"
-            title="در حال دریافت حسابداران"
-            message="لطفاً چند لحظه صبر کنید."
+            <template #actions>
+              <AppButton
+                class="accountant-list-retry"
+                size="sm"
+                variant="secondary"
+                :loading="isLoading"
+                @click="loadRelations"
+              >
+                تلاش دوباره
+              </AppButton>
+            </template>
+          </AppErrorState>
+          <AppLoadingState
+            v-if="isLoading && !hasLoadedRelations"
+            class="accountant-list-loading"
+            label="در حال ساخت فهرست حسابداران"
           />
-          <WorkspaceNotice
+          <AppEmptyState
             v-if="hasLoadedRelations && !accountantState.orderedRelations.value.length"
-            tone="info"
             title="هنوز حسابداری ثبت نشده است"
             message="برای شروع، از دکمه افزودن حسابدار استفاده کنید."
-          />
-          <WorkspaceNotice
-            v-else-if="hasLoadedRelations && !filteredRelations.length"
-            tone="info"
-            title="نتیجه‌ای پیدا نشد"
-            message="فیلتر یا عبارت جستجو را تغییر دهید."
-          />
-          <AppMasterDetail v-if="hasLoadedRelations && accountantState.orderedRelations.value.length" class="accountant-master-detail-grid">
-            <template #master>
-              <div class="workspace-relation-list">
-                <div v-if="visiblePendingRelations.length" class="accountant-list-group">
-                  <h3>دعوت‌های در انتظار</h3>
-                  <AppCard
-                    v-for="relation in visiblePendingRelations"
-                    :key="relation.id"
-                    tone="warning"
-                    class="accountant-pending-card"
-                  >
-                    <div class="accountant-pending-card__header">
-                      <div>
-                        <strong>{{ getRelationTitle(relation) }}</strong>
-                        <p>{{ getRelationDescription(relation) }}</p>
-                      </div>
-                      <AppStatusBadge tone="warning">دعوت</AppStatusBadge>
-                    </div>
-                    <div class="accountant-inline-actions">
-                      <AppButton
-                        v-if="invitationRelationLink(relation, 'web')"
-                        size="sm"
-                        variant="secondary"
-                        @click="copyRegistrationLink(relation)"
-                      >
-                        <template #icon>
-                          <Copy :size="16" />
-                        </template>
-                        {{ copiedRelationId === relation.id ? 'کپی شد' : 'کپی لینک وب' }}
-                      </AppButton>
-                      <AppButton size="sm" variant="danger" @click="openConfirmDialog('cancel-invitation', relation)">
-                        لغو دعوت
-                      </AppButton>
-                    </div>
-                    <p v-if="invitationSmsStatusMessage(relation.sms_status)" class="accountant-pending-sms-status">{{ invitationSmsStatusMessage(relation.sms_status) }}</p>
-                  </AppCard>
-                </div>
-
-                <div v-if="visibleManageableRelations.length" class="accountant-list-group">
-                  <h3>حسابداران قابل مدیریت</h3>
-                  <AppListItem
-                    v-for="relation in visibleManageableRelations"
-                    :key="relation.id"
-                    :title="getRelationTitle(relation)"
-                    :description="getRelationDescription(relation)"
-                    interactive
-                    @select="openRelation(relation.id)"
-                  >
-                    <template #leading>
-                      <BriefcaseBusiness :size="18" />
-                    </template>
-                    <template #trailing>
-                      <div class="accountant-list-badges">
-                        <AppStatusBadge :tone="activeRelation?.id === relation.id ? 'primary' : getStatusTone(relation.status)">
-                          {{ activeRelation?.id === relation.id ? 'انتخاب‌شده' : getStatusLabel(relation.status) }}
-                        </AppStatusBadge>
-                      </div>
-                    </template>
-                  </AppListItem>
-                </div>
-              </div>
+          >
+            <template #actions>
+              <AppButton size="sm" variant="primary" @click="openCreatePanel"
+                >افزودن حسابدار</AppButton
+              >
             </template>
-
-            <template #detail>
-              <AppEmptyState
-                v-if="!activeRelation"
-                title="حسابداری انتخاب نشده است"
-                message="برای دیدن پرونده و تنظیمات، یکی از حسابداران فعال را از لیست انتخاب کنید."
-              />
-              <AppCard v-else tone="primary" class="accountant-selection-card">
-                <span class="accountant-meta-label">حسابدار انتخاب‌شده</span>
-                <strong>{{ getRelationTitle(activeRelation) }}</strong>
-                <p>{{ getRelationDescription(activeRelation) }}</p>
-                <div class="accountant-inline-actions">
-                  <AppButton size="sm" variant="secondary" @click="openRelation(activeRelation.id)">
-                    مشاهده پرونده
-                  </AppButton>
+          </AppEmptyState>
+          <AppEmptyState
+            v-else-if="hasLoadedRelations && !filteredRelations.length"
+            title="نتیجه‌ای پیدا نشد"
+            message="فیلتر یا عبارت جستجو را پاک کنید تا فهرست کامل برگردد."
+          >
+            <template #actions>
+              <AppButton size="sm" variant="secondary" @click="clearListContext"
+                >پاک‌کردن جستجو و فیلتر</AppButton
+              >
+            </template>
+          </AppEmptyState>
+          <div
+            v-if="hasLoadedRelations && filteredRelations.length"
+            class="workspace-relation-list accountant-scroll-restoration-region ui-v2-workspace-accountant-relation-list ui-v2-workspace-accountant-scroll-region"
+          >
+            <div
+              v-if="visiblePendingRelations.length"
+              class="accountant-list-group ui-v2-workspace-accountant-list-group"
+            >
+              <h3>دعوت‌های در انتظار</h3>
+              <AppCard
+                v-for="relation in visiblePendingRelations"
+                :key="relation.id"
+                tone="warning"
+                class="accountant-pending-card"
+              >
+                <div
+                  class="accountant-pending-card__header ui-v2-workspace-accountant-pending-card-header"
+                >
+                  <div>
+                    <strong>{{ getRelationTitle(relation) }}</strong>
+                    <p>{{ getRelationDescription(relation) }}</p>
+                  </div>
+                  <AppStatusBadge tone="warning">دعوت</AppStatusBadge>
+                </div>
+                <p class="accountant-pending-deadline ui-v2-workspace-accountant-pending-deadline">
+                  {{ invitationDeadlineText(relation) }}
+                </p>
+                <div class="accountant-inline-actions ui-v2-workspace-accountant-inline-actions">
                   <AppButton
-                    v-if="invitationRelationLink(activeRelation, 'web')"
+                    v-if="invitationRelationLink(relation, 'web')"
                     size="sm"
                     variant="secondary"
-                    @click="copyRegistrationLink(activeRelation)"
+                    @click="copyRegistrationLink(relation)"
                   >
-                    {{ copiedRelationId === activeRelation.id ? 'کپی شد' : 'کپی لینک ثبت‌نام' }}
+                    <template #icon>
+                      <Copy :size="16" />
+                    </template>
+                    {{ copiedRelationId === relation.id ? 'کپی شد' : 'کپی لینک وب' }}
+                  </AppButton>
+                  <AppButton
+                    size="sm"
+                    variant="danger"
+                    @click="openConfirmDialog('cancel-invitation', relation)"
+                  >
+                    لغو دعوت
                   </AppButton>
                 </div>
+                <p
+                  v-if="invitationSmsStatusMessage(relation.sms_status)"
+                  class="accountant-pending-sms-status ui-v2-workspace-accountant-pending-sms-status"
+                >
+                  {{ invitationSmsStatusMessage(relation.sms_status) }}
+                </p>
+                <WorkspaceNotice
+                  v-if="relationFeedback[relation.id]"
+                  v2-scope
+                  :tone="relationFeedback[relation.id]?.tone"
+                  :title="
+                    relationFeedback[relation.id]?.tone === 'success' ? 'انجام شد' : 'کپی انجام نشد'
+                  "
+                  :message="relationFeedback[relation.id]?.message"
+                />
               </AppCard>
-            </template>
-          </AppMasterDetail>
-        </WorkspaceSection>
-      </template>
+            </div>
 
-      <template #aside>
-        <WorkspaceSection
-          v-if="!isCompatibilityManagerOpen"
-          title="میانبرهای حسابدار"
-          description="دعوت‌های در انتظار و پرونده حسابداران از همین فضای کاری قابل مدیریت است."
-        >
-          <div class="workspace-side-actions">
-            <AppActionCard
-              title="دعوت‌های در انتظار"
-              :description="`${accountantState.pendingInvitationRelations.value.length.toLocaleString('fa-IR')} دعوت در وضعیت انتظار`"
-              tone="warning"
-              @select="relationFilter = 'pending'"
+            <div
+              v-if="visibleManageableRelations.length"
+              class="accountant-list-group ui-v2-workspace-accountant-list-group"
             >
-              <template #icon>
-                <Clock :size="18" />
-              </template>
-            </AppActionCard>
-            <AppActionCard
-              title="افزودن حسابدار"
-              description="دعوت حسابدار جدید با نام کاربری، شماره و شرح وظیفه"
-              tone="primary"
-              @select="openCreatePanel"
-            >
-              <template #icon>
-                <UserPlus :size="18" />
-              </template>
-            </AppActionCard>
+              <h3>روابط ثبت‌شده</h3>
+              <AppListItem
+                v-for="relation in visibleManageableRelations"
+                :key="relation.id"
+                :title="getRelationTitle(relation)"
+                :description="getRelationDescription(relation)"
+                interactive
+                @select="openRelation(relation.id)"
+              >
+                <template #leading>
+                  <BriefcaseBusiness :size="18" />
+                </template>
+                <template #trailing>
+                  <div class="accountant-list-badges ui-v2-workspace-accountant-list-badges">
+                    <AppStatusBadge
+                      :tone="
+                        activeRelation?.id === relation.id
+                          ? 'primary'
+                          : getStatusTone(relation.status)
+                      "
+                    >
+                      {{
+                        activeRelation?.id === relation.id
+                          ? 'انتخاب‌شده'
+                          : getStatusLabel(relation.status)
+                      }}
+                    </AppStatusBadge>
+                  </div>
+                </template>
+              </AppListItem>
+            </div>
           </div>
         </WorkspaceSection>
-      </template>
+      </div>
+
+      <div id="accountant-workspace-overlay-host" class="ui-v2-workspace-overlay-host" />
+
+      <AppConfirmDialog
+        class="ui-v2-workspace-confirm-backdrop"
+        :open="isConfirmDialogOpen && confirmAction !== 'delete-account'"
+        :title="confirmTitle"
+        :message="confirmMessage"
+        :confirm-label="
+          confirmAction === 'terminate-session'
+            ? 'پایان نشست'
+            : confirmAction === 'cancel-invitation'
+              ? 'لغو رابطه و دعوت'
+              : 'حذف رابطه'
+        "
+        :tone="confirmAction === 'terminate-session' ? 'warning' : 'danger'"
+        :busy="isConfirmBusy"
+        :error="confirmError"
+        :confirm-disabled="isConfirmBusy"
+        @cancel="closeConfirmDialog"
+        @confirm="handleConfirmAction"
+      />
+
+      <WorkspaceAccountDeletionDialog
+        :open="isConfirmDialogOpen && confirmAction === 'delete-account'"
+        :subject-name="confirmRelation ? getRelationTitle(confirmRelation) : ''"
+        :busy="isConfirmBusy"
+        :error="confirmError"
+        @cancel="closeConfirmDialog"
+        @confirm="handleConfirmAction"
+      />
     </WorkspaceShell>
 
     <component
@@ -904,24 +1768,56 @@ onBeforeUnmount(() => {
       :open="isCreatePanelOpen"
       title="افزودن حسابدار"
       description="اطلاعات اولیه حسابدار و شرح وظیفه را ثبت کنید."
+      teleport-to="#accountant-workspace-overlay-host"
+      backdrop-class="ui-v2-workspace-overlay-backdrop"
+      panel-class="ui-v2-workspace-overlay-panel"
+      body-class="ui-v2-workspace-overlay-body"
+      actions-class="ui-v2-workspace-overlay-actions"
+      :show-close="!isCreateSubmitting"
+      :close-on-backdrop="!isCreateSubmitting"
+      :close-on-escape="!isCreateSubmitting"
       @close="closeCreatePanel"
     >
-      <div class="accountant-create-panel">
-        <AppFormField label="نام کاربری جهانی" hint="این نام برای ساخت دعوت و ورود حسابدار استفاده می‌شود.">
+      <div
+        class="accountant-create-panel ui-v2-workspace-accountant-create-panel"
+        :aria-busy="isCreateSubmitting ? 'true' : undefined"
+      >
+        <AppFormField
+          label="نام کاربری جهانی"
+          hint="این نام برای ساخت دعوت و ورود حسابدار استفاده می‌شود."
+        >
           <template #default="{ id }">
-            <AppInput :id="id" v-model="accountantState.createForm.account_name" placeholder="مثلاً accountant_01" />
+            <AppInput
+              :id="id"
+              v-model="accountantState.createForm.account_name"
+              :disabled="isCreateSubmitting"
+              placeholder="مثلاً accountant_01"
+            />
           </template>
         </AppFormField>
 
         <AppFormField label="نام نمایشی رابطه" hint="نامی که در فضای کاری خودتان می‌بینید.">
           <template #default="{ id }">
-            <AppInput :id="id" v-model="accountantState.createForm.relation_display_name" placeholder="مثلاً حسابدار فروش" />
+            <AppInput
+              :id="id"
+              v-model="accountantState.createForm.relation_display_name"
+              :disabled="isCreateSubmitting"
+              placeholder="مثلاً حسابدار فروش"
+            />
           </template>
         </AppFormField>
 
-        <AppFormField label="شماره موبایل" hint="برای ثبت دعوت و ساخت لینک مخصوص حسابدار استفاده می‌شود.">
+        <AppFormField
+          label="شماره موبایل"
+          hint="برای ثبت دعوت و ساخت لینک مخصوص حسابدار استفاده می‌شود."
+        >
           <template #default="{ id }">
-            <AppInput :id="id" v-model="accountantState.createForm.mobile_number" placeholder="0912xxxxxxx" />
+            <AppInput
+              :id="id"
+              v-model="accountantState.createForm.mobile_number"
+              :disabled="isCreateSubmitting"
+              placeholder="0912xxxxxxx"
+            />
           </template>
         </AppFormField>
 
@@ -931,240 +1827,44 @@ onBeforeUnmount(() => {
               :id="id"
               v-model="accountantState.createForm.duty_description"
               rows="4"
+              :disabled="isCreateSubmitting"
               placeholder="مثلاً پیگیری پیشنهادها و ثبت معاملات روزانه"
             />
           </template>
         </AppFormField>
 
-        <AppCard v-if="generatedGlobalAccountName" class="accountant-generated-account">
-          <span class="accountant-meta-label">نام کاربری دعوتی</span>
+        <AppCard
+          v-if="generatedGlobalAccountName"
+          class="accountant-generated-account ui-v2-workspace-accountant-generated-account"
+        >
+          <span class="accountant-meta-label ui-v2-workspace-accountant-meta-label"
+            >نام کاربری دعوتی</span
+          >
           <strong>@{{ generatedGlobalAccountName }}</strong>
         </AppCard>
 
-        <WorkspaceNotice v-if="createError" tone="danger" title="ثبت دعوت ناموفق بود" :message="createError" />
-        <WorkspaceNotice v-else-if="createNotice" tone="success" title="دعوت ثبت شد" :message="createNotice" />
+        <WorkspaceNotice
+          v-if="createError"
+          v2-scope
+          tone="danger"
+          title="ثبت دعوت ناموفق بود"
+          :message="createError"
+        />
       </div>
 
       <template #actions>
-        <AppButton variant="secondary" @click="closeCreatePanel">
+        <AppButton variant="secondary" :disabled="isCreateSubmitting" @click="closeCreatePanel">
           انصراف
         </AppButton>
-        <AppButton variant="primary" :loading="isCreateSubmitting" @click="createRelation">
+        <AppButton
+          variant="primary"
+          :loading="isCreateSubmitting"
+          :disabled="isCreateSubmitting"
+          @click="createRelation"
+        >
           ثبت دعوت حسابدار
         </AppButton>
       </template>
     </component>
-
-    <AppConfirmDialog
-      :open="isConfirmDialogOpen"
-      :title="confirmTitle"
-      :message="confirmMessage"
-      :confirm-label="confirmAction === 'terminate-session' ? 'پایان نشست' : confirmAction === 'cancel-invitation' ? 'لغو دعوت' : 'قطع ارتباط'"
-      :tone="confirmAction === 'terminate-session' ? 'warning' : 'danger'"
-      :busy="isConfirmBusy"
-      :error="confirmError"
-      :confirm-disabled="isConfirmBusy"
-      @cancel="closeConfirmDialog"
-      @confirm="handleConfirmAction"
-    />
   </div>
 </template>
-
-<style scoped>
-.accountant-workspace-view {
-  min-height: 100%;
-}
-
-.workspace-relation-list,
-.workspace-side-actions {
-  display: flex;
-  flex-direction: column;
-  gap: 0.65rem;
-}
-
-.workspace-summary-badges {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 0.5rem;
-}
-
-.accountant-list-controls,
-.accountant-detail-shell,
-.accountant-detail-list {
-  display: grid;
-  gap: 0.85rem;
-}
-
-.accountant-master-detail-grid {
-  min-width: 0;
-}
-
-.accountant-list-group {
-  display: grid;
-  gap: 0.55rem;
-}
-
-.accountant-list-group h3 {
-  margin: 0;
-  color: var(--ds-text-muted);
-  font-size: var(--ds-font-xs);
-  font-weight: 900;
-}
-
-.accountant-list-badges,
-.accountant-detail-badges {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 0.35rem;
-}
-
-.accountant-detail-header {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: start;
-  gap: 0.8rem;
-  padding: 0.95rem;
-  border: 1px solid var(--ds-border);
-  border-radius: var(--ds-radius-lg);
-  background: linear-gradient(135deg, var(--ds-surface), var(--ds-surface-soft));
-}
-
-.accountant-detail-header h2,
-.accountant-detail-header p {
-  margin: 0;
-}
-
-.accountant-detail-header h2 {
-  color: var(--ds-text-primary);
-  font-size: var(--ds-font-xl);
-  font-weight: 950;
-}
-
-.accountant-detail-header p {
-  margin-top: 0.25rem;
-  color: var(--ds-text-muted);
-  font-size: var(--ds-font-sm);
-  line-height: 1.8;
-}
-
-.accountant-detail-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 0.65rem;
-}
-
-.accountant-meta-label {
-  display: block;
-  margin-bottom: 0.35rem;
-  color: var(--ds-text-muted);
-  font-size: var(--ds-font-xs);
-  font-weight: 800;
-}
-
-.accountant-detail-grid strong,
-.accountant-detail-list strong {
-  color: var(--ds-text-primary);
-  font-size: var(--ds-font-sm);
-  font-weight: 900;
-  word-break: break-word;
-}
-
-.accountant-detail-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-}
-
-.accountant-detail-toolbar strong {
-  color: var(--ds-text-primary);
-  font-size: var(--ds-font-sm);
-  font-weight: 900;
-}
-
-.accountant-danger-card {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: 0.75rem;
-  align-items: start;
-}
-
-.accountant-danger-card strong,
-.accountant-danger-card p {
-  margin: 0;
-}
-
-.accountant-danger-card strong {
-  color: var(--ds-text-primary);
-  font-size: var(--ds-font-sm);
-  font-weight: 900;
-}
-
-.accountant-danger-card p {
-  margin-top: 0.25rem;
-  color: var(--ds-text-muted);
-  font-size: var(--ds-font-sm);
-  line-height: 1.8;
-}
-
-.workspace-compatibility-panel {
-  min-width: 0;
-}
-
-.accountant-edit-form-card,
-.accountant-create-panel,
-.accountant-generated-account,
-.accountant-selection-card {
-  display: grid;
-  gap: 0.85rem;
-}
-
-.accountant-inline-actions,
-.accountant-session-actions,
-.accountant-pending-card__header {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.65rem;
-}
-
-.accountant-selection-card p,
-.accountant-pending-card__header p {
-  margin: 0.2rem 0 0;
-  color: var(--ds-text-muted);
-  font-size: var(--ds-font-sm);
-  line-height: 1.8;
-}
-
-.accountant-pending-sms-status {
-  margin: 0.65rem 0 0;
-  color: var(--ds-text-muted);
-  font-size: var(--ds-font-xs);
-  line-height: 1.8;
-}
-
-@media (max-width: 520px) {
-  .accountant-detail-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .accountant-detail-header {
-    grid-template-columns: 1fr;
-  }
-
-  .accountant-detail-badges,
-  .accountant-list-badges {
-    justify-content: flex-start;
-  }
-}
-
-@media (max-width: 767px) {
-  .accountant-workspace-view :deep(.ds-workspace-main),
-  .accountant-workspace-view :deep(.ds-workspace-aside) {
-    padding-bottom: calc(var(--ds-bottom-nav-height) + var(--ds-safe-area-bottom) + 2.25rem);
-  }
-}
-</style>

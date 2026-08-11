@@ -1,21 +1,24 @@
 import unittest
 from datetime import datetime, timedelta
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import ANY, AsyncMock, patch
 
-from fastapi import HTTPException
+from fastapi import FastAPI, HTTPException
 
 import schemas
 from core.registration_contracts import InvitationSMSStatus
 from api.routers.accountants import (
     cancel_my_pending_accountant,
     create_my_accountant,
+    get_my_accountant,
     list_my_accountant_sessions,
     list_my_accountants,
+    router,
     serialize_accountant_relation,
     terminate_my_accountant_session,
     update_my_accountant,
 )
+from core.services.accountant_relation_service import AccountantRelationDeletionAction
 from models.accountant_relation import AccountantRelationStatus
 
 
@@ -44,6 +47,24 @@ class FakeExecuteResult:
 
 
 class AccountantsRouterTests(unittest.IsolatedAsyncioTestCase):
+    def test_delete_route_requires_validated_expected_action_query(self):
+        app = FastAPI()
+        app.include_router(router)
+
+        operation = app.openapi()["paths"]["/owner-relations/{relation_id}"]["delete"]
+        parameter = next(
+            item for item in operation["parameters"] if item["name"] == "expected_action"
+        )
+        schema = parameter["schema"]
+        if "$ref" in schema:
+            schema = app.openapi()["components"]["schemas"][schema["$ref"].rsplit("/", 1)[-1]]
+
+        self.assertTrue(parameter["required"])
+        self.assertEqual(
+            set(schema["enum"]),
+            {"cancel-pending", "delete-relation", "delete-account"},
+        )
+
     def test_active_accountant_relation_does_not_expose_a_dead_registration_link(self):
         relation = SimpleNamespace(
             id=1,
@@ -168,6 +189,56 @@ class AccountantsRouterTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("invitation_token", listed[0])
         self.assertEqual(listed[0]["sms_status"], InvitationSMSStatus.ACCEPTED)
 
+    async def test_owner_gets_terminal_accountant_relation_without_list_filtering(self):
+        relation = SimpleNamespace(
+            id=17,
+            owner_user_id=7,
+            accountant_user_id=12,
+            accountant_user=SimpleNamespace(account_name="acc-terminal"),
+            global_account_name="acc-terminal",
+            relation_display_name="حسابدار سابق",
+            duty_description=None,
+            mobile_number="09120000000",
+            status=AccountantRelationStatus.DELETED,
+            invitation_token="ACCT-terminal",
+            expires_at=datetime.utcnow() + timedelta(days=2),
+            activated_at=datetime.utcnow(),
+            deleted_at=datetime.utcnow(),
+            created_at=datetime.utcnow(),
+        )
+        context = SimpleNamespace(is_accountant_context=False, owner_user=SimpleNamespace(id=7))
+
+        with patch(
+            "api.routers.accountants.get_owner_accountant_relation",
+            new=AsyncMock(return_value=relation),
+        ) as detail_mock:
+            result = await get_my_accountant(
+                17,
+                context=context,
+                db=FakeDB([FakeExecuteResult(None)]),
+            )
+
+        detail_mock.assert_awaited_once_with(
+            ANY,
+            owner_user_id=7,
+            relation_id=17,
+        )
+        self.assertEqual(result["id"], 17)
+        self.assertEqual(result["status"], AccountantRelationStatus.DELETED)
+        self.assertIsNone(result["registration_link"])
+
+    async def test_accountant_context_cannot_get_owner_accountant_relation(self):
+        context = SimpleNamespace(is_accountant_context=True, owner_user=SimpleNamespace(id=7))
+
+        with patch(
+            "api.routers.accountants.get_owner_accountant_relation",
+            new=AsyncMock(),
+        ) as detail_mock, self.assertRaises(HTTPException) as exc_info:
+            await get_my_accountant(17, context=context, db=FakeDB())
+
+        self.assertEqual(exc_info.exception.status_code, 403)
+        detail_mock.assert_not_awaited()
+
     async def test_create_owner_accountant_fails_closed_when_public_webapp_url_is_invalid(self):
         relation = SimpleNamespace(
             id=19,
@@ -228,12 +299,23 @@ class AccountantsRouterTests(unittest.IsolatedAsyncioTestCase):
         with patch(
             "api.routers.accountants.unlink_owner_accountant_relation",
             new=AsyncMock(return_value=relation),
-        ), patch(
+        ) as unlink_mock, patch(
             "api.routers.accountants.public_webapp_url_for_links",
             return_value="https://app.example",
         ):
-            result = await cancel_my_pending_accountant(9, context=context, db=FakeDB())
+            result = await cancel_my_pending_accountant(
+                9,
+                expected_action=AccountantRelationDeletionAction.CANCEL_PENDING,
+                context=context,
+                db=FakeDB(),
+            )
 
+        unlink_mock.assert_awaited_once_with(
+            ANY,
+            owner_user_id=7,
+            relation_id=9,
+            expected_action=AccountantRelationDeletionAction.CANCEL_PENDING,
+        )
         self.assertEqual(result["id"], 9)
         self.assertIsNone(result["registration_link"])
         self.assertIsNone(result["web_registration_link"])
@@ -264,9 +346,19 @@ class AccountantsRouterTests(unittest.IsolatedAsyncioTestCase):
             "api.routers.accountants.public_webapp_url_for_links",
             return_value="https://app.example",
         ):
-            result = await cancel_my_pending_accountant(11, context=context, db=FakeDB())
+            result = await cancel_my_pending_accountant(
+                11,
+                expected_action=AccountantRelationDeletionAction.DELETE_ACCOUNT,
+                context=context,
+                db=FakeDB(),
+            )
 
-        unlink_mock.assert_awaited_once()
+        unlink_mock.assert_awaited_once_with(
+            ANY,
+            owner_user_id=7,
+            relation_id=11,
+            expected_action=AccountantRelationDeletionAction.DELETE_ACCOUNT,
+        )
         self.assertEqual(result["status"], "deleted")
 
     async def test_update_owner_accountant_returns_serialized_relation(self):

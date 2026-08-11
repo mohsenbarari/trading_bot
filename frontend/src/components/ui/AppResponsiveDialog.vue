@@ -5,29 +5,34 @@ import { useOverlayA11y } from './useOverlayA11y'
 
 type ClassValue = string | string[] | Record<string, boolean>
 
-const props = withDefaults(defineProps<{
-  open: boolean
-  title: string
-  description?: string
-  closeLabel?: string
-  showClose?: boolean
-  closeOnBackdrop?: boolean
-  closeOnEscape?: boolean
-  backdropClass?: ClassValue
-  panelClass?: ClassValue
-  bodyClass?: ClassValue
-  actionsClass?: ClassValue
-}>(), {
-  description: '',
-  closeLabel: 'بستن',
-  showClose: true,
-  closeOnBackdrop: true,
-  closeOnEscape: true,
-  backdropClass: '',
-  panelClass: '',
-  bodyClass: '',
-  actionsClass: '',
-})
+const props = withDefaults(
+  defineProps<{
+    open: boolean
+    title: string
+    description?: string
+    closeLabel?: string
+    showClose?: boolean
+    closeOnBackdrop?: boolean
+    closeOnEscape?: boolean
+    teleportTo?: string | HTMLElement
+    backdropClass?: ClassValue
+    panelClass?: ClassValue
+    bodyClass?: ClassValue
+    actionsClass?: ClassValue
+  }>(),
+  {
+    description: '',
+    closeLabel: 'بستن',
+    showClose: true,
+    closeOnBackdrop: true,
+    closeOnEscape: true,
+    teleportTo: 'body',
+    backdropClass: '',
+    panelClass: '',
+    bodyClass: '',
+    actionsClass: '',
+  },
+)
 
 const emit = defineEmits<{
   close: []
@@ -51,7 +56,7 @@ function handleBackdropClick() {
 </script>
 
 <template>
-  <Teleport to="body">
+  <Teleport :to="teleportTo" defer>
     <div
       v-if="open"
       class="ui-responsive-dialog-backdrop"
@@ -73,7 +78,9 @@ function handleBackdropClick() {
             <h2 :id="titleId">{{ title }}</h2>
             <p v-if="description" :id="descriptionId">{{ description }}</p>
           </div>
-          <AppButton v-if="showClose" variant="ghost" size="sm" @click="$emit('close')">{{ closeLabel }}</AppButton>
+          <AppButton v-if="showClose" variant="ghost" size="sm" @click="$emit('close')">{{
+            closeLabel
+          }}</AppButton>
         </header>
         <div class="ui-responsive-dialog__body" :class="bodyClass">
           <slot />

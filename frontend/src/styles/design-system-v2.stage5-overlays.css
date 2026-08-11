@@ -1,0 +1,87 @@
+/* Stage 5 workspace overlays stay inside their section scope through a local Teleport host. */
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  :where(.ui-v2-workspace-overlay-backdrop, .ui-v2-workspace-confirm-backdrop) {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  box-sizing: border-box;
+  padding: calc(var(--ui-v2-spacing-16) + env(safe-area-inset-top)) var(--ui-v2-spacing-16)
+    calc(var(--ui-v2-spacing-16) + env(safe-area-inset-bottom));
+  background: var(--ui-v2-color-surface-page);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  :where(.ui-v2-workspace-overlay-panel, .ui-v2-workspace-confirm-backdrop > section) {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: var(--ui-v2-layout-reading-max);
+  max-height: 100%;
+  overflow: hidden;
+  border: var(--ui-v2-stroke-standard) solid var(--ui-v2-color-border-default);
+  border-radius: var(--ui-v2-radius-panel);
+  background: var(--ui-v2-color-surface-card);
+  box-shadow: var(--ui-v2-effect-overlay);
+  color: var(--ui-v2-color-text-primary);
+  font-family: var(--ui-v2-font-family);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  :where(
+    .ui-v2-workspace-overlay-panel,
+    .ui-v2-workspace-confirm-backdrop > section
+  ):focus-visible {
+  outline: var(--ui-v2-stroke-focus) solid var(--ui-v2-color-border-focus);
+  outline-offset: var(--ui-v2-spacing-2);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-workspace-overlay-body {
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--ui-v2-spacing-16);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  :where(.ui-v2-workspace-overlay-actions, .ui-v2-workspace-confirm-backdrop > section > footer) {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--ui-v2-spacing-8);
+  padding: var(--ui-v2-spacing-16);
+  border-block-start: var(--ui-v2-stroke-standard) solid var(--ui-v2-color-border-default);
+  background: var(--ui-v2-color-surface-card);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  :where(.ui-v2-workspace-overlay-actions, .ui-v2-workspace-confirm-backdrop > section > footer)
+  .ui-button {
+  min-height: var(--ui-v2-size-cta-min);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-workspace-confirm-backdrop
+  > section
+  > header {
+  padding: var(--ui-v2-spacing-16);
+  border-block-end: var(--ui-v2-stroke-standard) solid var(--ui-v2-color-border-default);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-workspace-confirm-backdrop
+  > section
+  > header
+  h2 {
+  color: var(--ui-v2-color-text-strong);
+  font-size: var(--ui-v2-type-section-size);
+  font-weight: var(--ui-v2-font-weight-bold);
+  line-height: var(--ui-v2-type-section-line);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-workspace-confirm-backdrop
+  > section
+  > header
+  p {
+  color: var(--ui-v2-color-text-secondary);
+  font-size: var(--ui-v2-type-body-small-size);
+  line-height: var(--ui-v2-type-body-small-line);
+}
