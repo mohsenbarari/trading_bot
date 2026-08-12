@@ -159,17 +159,26 @@ class TelegramOfferQueueFeedbackTests(unittest.IsolatedAsyncioTestCase):
             feedback_module,
             "mark_telegram_publication_success",
         ) as mark_success:
-            await self.feedback.apply_delivery_result(
-                self.db,
-                job,
-                decision,
-                utc_now(),
-            )
+            with patch.object(
+                feedback_module,
+                "apply_publication_state_update",
+            ) as update_state:
+                await self.feedback.apply_delivery_result(
+                    self.db,
+                    job,
+                    decision,
+                    utc_now(),
+                )
 
         mark_success.assert_called_once()
         self.assertEqual(mark_success.call_args.kwargs["message_id"], 901)
         self.assertEqual(mark_success.call_args.kwargs["chat_id"], -100)
-        self.db.flush.assert_awaited_once()
+        update_state.assert_called_once()
+        # The publication callback writes Offer.channel_message_id first;
+        # its version is only authoritative after the first flush.  Feedback
+        # then advances the rendered state to that version, preventing a
+        # redundant active-message edit.
+        self.assertEqual(self.db.flush.await_count, 2)
 
     async def test_publish_success_without_message_id_rolls_back_feedback(self):
         job = make_job(TelegramDeliveryAction.OFFER_PUBLISH)
@@ -301,6 +310,10 @@ class TelegramOfferQueueFeedbackTests(unittest.IsolatedAsyncioTestCase):
             new=self.load,
         ), patch.object(
             feedback_module,
+            "_delivered_replacement_exists",
+            new=AsyncMock(return_value=False),
+        ), patch.object(
+            feedback_module,
             "enqueue_current_offer_delivery",
             new=AsyncMock(return_value=enqueue_result),
         ) as enqueue, patch.object(
@@ -324,6 +337,46 @@ class TelegramOfferQueueFeedbackTests(unittest.IsolatedAsyncioTestCase):
             TelegramDeliveryAction.TRADED_OFFER_EDIT,
         )
         self.assertEqual(job.state, TelegramDeliveryState.SUPERSEDED)
+        self.assertIsNotNone(job.terminal_at)
+        self.db.flush.assert_awaited_once()
+
+    async def test_reclassify_supersedes_when_replacement_was_already_delivered(self):
+        job = make_job(
+            TelegramDeliveryAction.OTHER_ACTIVE_OFFER_EDIT,
+            source_version=2,
+        )
+        decision = TelegramFreshnessDecision(
+            TelegramFreshnessOutcome.RECLASSIFY,
+            replacement_action=TelegramDeliveryAction.TRADED_OFFER_EDIT,
+            reason="active_became_terminal",
+        )
+        with patch.object(
+            feedback_module,
+            "_load_offer_and_state_for_update",
+            new=self.load,
+        ), patch.object(
+            feedback_module,
+            "_delivered_replacement_exists",
+            new=AsyncMock(return_value=True),
+        ) as delivered, patch.object(
+            feedback_module,
+            "enqueue_current_offer_delivery",
+            new=AsyncMock(),
+        ) as enqueue:
+            await self.feedback.apply_freshness(
+                self.db,
+                job,
+                decision,
+                utc_now(),
+            )
+
+        delivered.assert_awaited_once()
+        enqueue.assert_not_awaited()
+        self.assertEqual(job.state, TelegramDeliveryState.SUPERSEDED)
+        self.assertEqual(
+            job.outcome_reason,
+            "active_became_terminal:replacement_already_delivered",
+        )
         self.assertIsNotNone(job.terminal_at)
         self.db.flush.assert_awaited_once()
 

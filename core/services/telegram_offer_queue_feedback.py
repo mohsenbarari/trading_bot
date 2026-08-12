@@ -141,6 +141,41 @@ async def _load_offer_and_state_for_update(
     return offer, state
 
 
+async def _delivered_replacement_exists(
+    db: AsyncSession,
+    *,
+    old_job: TelegramDeliveryJobRecord,
+    offer: Offer,
+    replacement_action: TelegramDeliveryAction,
+) -> bool:
+    """Prove an immutable replacement already reached a delivered terminal state."""
+
+    source_version = _positive_int(getattr(offer, "version_id", None))
+    old_job_id = _positive_int(getattr(old_job, "id", None))
+    offer_public_id = str(getattr(offer, "offer_public_id", "") or "").strip()
+    if source_version is None or old_job_id is None or not offer_public_id:
+        return False
+    replacement_id = (
+        await db.execute(
+            select(TelegramDeliveryJobRecord.id)
+            .where(
+                TelegramDeliveryJobRecord.id != old_job_id,
+                TelegramDeliveryJobRecord.source_natural_id == offer_public_id,
+                TelegramDeliveryJobRecord.source_version == source_version,
+                TelegramDeliveryJobRecord.action_kind == replacement_action,
+                TelegramDeliveryJobRecord.state.in_(
+                    (
+                        TelegramDeliveryState.SENT,
+                        TelegramDeliveryState.SENT_NOOP,
+                    )
+                ),
+            )
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    return replacement_id is not None
+
+
 def _mark_terminal_without_publication(
     state: OfferPublicationState,
     offer: Offer,
@@ -240,6 +275,18 @@ class TelegramOfferQueueLifecycleFeedback:
             replacement = decision.replacement_action
             if replacement is None:
                 return
+            if await _delivered_replacement_exists(
+                db,
+                old_job=job,
+                offer=offer,
+                replacement_action=replacement,
+            ):
+                job.state = TelegramDeliveryState.SUPERSEDED
+                job.next_retry_at = None
+                job.outcome_reason = f"{reason}:replacement_already_delivered"[:160]
+                job.terminal_at = now
+                await db.flush()
+                return
             try:
                 result = await enqueue_current_offer_delivery(
                     db,
@@ -319,6 +366,24 @@ class TelegramOfferQueueLifecycleFeedback:
                     now=now,
                     publisher_bot_identity=str(
                         getattr(job, "bot_identity", "primary") or "primary"
+                    ),
+                )
+                # ``mark_telegram_publication_success`` stores the canonical
+                # channel message id on ``offer``.  That database mutation
+                # advances Offer.version_id at flush time.  Persist it before
+                # recording the rendered source version; otherwise the state
+                # is permanently one version behind and the edit feeder emits
+                # a needless ``other_active_offer_edit`` for every publish.
+                # Those no-op edits still consume a public Telegram request.
+                await db.flush()
+                apply_publication_state_update(
+                    state,
+                    offer_status=getattr(offer, "status", None),
+                    offer_version_id=getattr(offer, "version_id", None),
+                    requested_status=OfferPublicationStatus.SENT,
+                    now=now,
+                    telegram_message_id=_positive_int(
+                        getattr(state, "telegram_message_id", None)
                     ),
                 )
             else:
