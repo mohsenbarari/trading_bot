@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue';
+import { onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import { routeRequest, routeRequestJson } from '../utils/routeRequest';
+import { AppHttpError } from '../utils/httpErrorPolicy';
 import { useActionState } from '../composables/useActionState';
 import { getInvitableRoleOptions } from '../utils/adminAccess';
 import { formatIranDateTime } from '../utils/iranTime';
 import { invitationSmsStatusMessage, normalizeInvitationContract, type InvitationSmsStatus } from '../utils/invitationContract';
-import { AppButton, AppEmptyState, AppErrorState, AppFormField, AppInput, AppLoadingState, AppSelect } from './ui';
+import { AppButton, AppConfirmDialog, AppEmptyState, AppErrorState, AppFormField, AppInput, AppLoadingState, AppSelect } from './ui';
 
 const props = defineProps<{
   apiBaseUrl: string;
@@ -45,13 +46,16 @@ const resultMessage = ref('');
 const isLoading = ref(false);
 const inviteLink = ref('');
 const webLink = ref('');
-const createdContract = ref(false);
+const hasInvitationResult = ref(false);
+const invitationCreated = ref<boolean | null>(null);
+const invitationExpiresAt = ref('');
 const smsStatusMessage = ref('');
 const copyMessage = ref('');
 const webCopyMessage = ref('');
 const pendingInvitations = ref<PendingInvitation[]>([]);
 const pendingLoading = ref(false);
 const pendingError = ref('');
+const pendingNotice = ref('');
 const pendingHasLoaded = ref(false);
 const pendingDeleteId = ref<number | null>(null);
 const pendingDeleteCandidate = ref<PendingInvitation | null>(null);
@@ -59,89 +63,63 @@ const pendingDeleteError = ref('');
 const pendingCopyState = reactive<Record<string, string>>({});
 const pendingDeleteActions = useActionState<{ invitationId: number }, null>();
 
+let isPendingViewActive = true;
+let pendingRequestRevision = 0;
+let pendingRequestController: AbortController | null = null;
+
 onMounted(() => {
   if (props.jwtToken) {
     void loadPendingInvitations();
   }
 });
 
-function resetForm() {
-  invite.account_name = '';
-  invite.mobile_number = '';
-  invite.role = defaultInviteRole;
+onBeforeUnmount(() => {
+  isPendingViewActive = false;
+  invalidatePendingInvitationLoad();
+});
+
+function clearInvitationResult() {
   resultMessage.value = '';
   inviteLink.value = '';
   webLink.value = '';
-  createdContract.value = false;
+  hasInvitationResult.value = false;
+  invitationCreated.value = null;
+  invitationExpiresAt.value = '';
   smsStatusMessage.value = '';
   copyMessage.value = '';
   webCopyMessage.value = '';
 }
 
-function fallbackCopyTextToClipboard(text: string, isWeb: boolean = false) {
-  const textArea = document.createElement("textarea");
-  textArea.value = text;
-  
-  // Avoid scrolling to bottom
-  textArea.style.top = "0";
-  textArea.style.left = "0";
-  textArea.style.position = "fixed";
+function resetForm() {
+  invite.account_name = '';
+  invite.mobile_number = '';
+  invite.role = defaultInviteRole;
+  clearInvitationResult();
+}
 
-  document.body.appendChild(textArea);
-  textArea.focus();
-  textArea.select();
+function setCopyMessage(setter: (message: string) => void, message: string) {
+  setter(message);
+  setTimeout(() => setter(''), 2000);
+}
 
-  try {
-    const successful = document.execCommand('copy');
-    const msg = successful ? 'کپی شد!' : 'خطا';
-    if (isWeb) {
-      webCopyMessage.value = msg;
-      setTimeout(() => { webCopyMessage.value = ''; }, 2000);
-    } else {
-      copyMessage.value = msg;
-      setTimeout(() => { copyMessage.value = ''; }, 2000);
-    }
-  } catch (err) {
-    if (isWeb) {
-      webCopyMessage.value = 'خطا';
-      setTimeout(() => { webCopyMessage.value = ''; }, 2000);
-    } else {
-      copyMessage.value = 'خطا';
-      setTimeout(() => { copyMessage.value = ''; }, 2000);
-    }
+function copyLink(link: string, setter: (message: string) => void) {
+  if (!navigator.clipboard?.writeText) {
+    setCopyMessage(setter, 'کپی نشد؛ دوباره تلاش کنید.');
+    return;
   }
 
-  document.body.removeChild(textArea);
+  void navigator.clipboard.writeText(link).then(
+    () => setCopyMessage(setter, 'کپی شد!'),
+    () => setCopyMessage(setter, 'کپی نشد؛ دوباره تلاش کنید.'),
+  );
 }
 
 function copyToClipboard() {
-  if (!inviteLink.value) return;
-  if (!navigator.clipboard) {
-    fallbackCopyTextToClipboard(inviteLink.value, false);
-    return;
-  }
-  navigator.clipboard.writeText(inviteLink.value).then(function() {
-    copyMessage.value = 'کپی شد!';
-    setTimeout(() => { copyMessage.value = ''; }, 2000);
-  }, function(err) {
-    copyMessage.value = 'خطا';
-    setTimeout(() => { copyMessage.value = ''; }, 2000);
-  });
+  if (inviteLink.value) copyLink(inviteLink.value, (message) => { copyMessage.value = message; });
 }
 
 function copyWebLink() {
-  if (!webLink.value) return;
-  if (!navigator.clipboard) {
-    fallbackCopyTextToClipboard(webLink.value, true);
-    return;
-  }
-  navigator.clipboard.writeText(webLink.value).then(function() {
-    webCopyMessage.value = 'کپی شد!';
-    setTimeout(() => { webCopyMessage.value = ''; }, 2000);
-  }, function(err) {
-    webCopyMessage.value = 'خطا';
-    setTimeout(() => { webCopyMessage.value = ''; }, 2000);
-  });
+  if (webLink.value) copyLink(webLink.value, (message) => { webCopyMessage.value = message; });
 }
 
 function formatDateTime(value: string | null | undefined): string {
@@ -155,31 +133,83 @@ function formatDateTime(value: string | null | undefined): string {
   }) || value;
 }
 
-async function loadPendingInvitations() {
+function invalidatePendingInvitationLoad() {
+  pendingRequestRevision += 1;
+  pendingRequestController?.abort();
+  pendingRequestController = null;
+  if (isPendingViewActive) pendingLoading.value = false;
+}
+
+function clearPendingInvitationDataForForbidden() {
+  invalidatePendingInvitationLoad();
+  clearInvitationResult();
+  pendingInvitations.value = [];
+  pendingHasLoaded.value = false;
+  pendingDeleteCandidate.value = null;
+  pendingDeleteId.value = null;
+  pendingDeleteError.value = '';
+  pendingNotice.value = '';
+  for (const key of Object.keys(pendingCopyState)) delete pendingCopyState[key];
+  pendingError.value = 'دسترسی شما به فهرست دعوت‌نامه‌ها تأیید نشد. برای دریافت وضعیت تازه دوباره تلاش کنید.';
+}
+
+function isCurrentPendingRequest(revision: number, controller: AbortController) {
+  return isPendingViewActive
+    && revision === pendingRequestRevision
+    && controller === pendingRequestController;
+}
+
+async function loadPendingInvitations(): Promise<boolean> {
   if (!props.jwtToken) {
-    pendingInvitations.value = [];
-    return;
+    invalidatePendingInvitationLoad();
+    if (isPendingViewActive) {
+      pendingInvitations.value = [];
+      pendingHasLoaded.value = false;
+    }
+    return false;
   }
+
+  pendingRequestRevision += 1;
+  const revision = pendingRequestRevision;
+  pendingRequestController?.abort();
+  const controller = new AbortController();
+  pendingRequestController = controller;
+  const preserveExistingData = pendingHasLoaded.value;
 
   pendingLoading.value = true;
   pendingError.value = '';
+  pendingNotice.value = '';
   try {
     const data = await routeRequestJson<unknown>('/api/invitations/pending', {
+      cache: 'no-store',
+      signal: controller.signal,
       errorContext: {
         surface: 'admin',
         scope: 'list',
-        operation: pendingHasLoaded.value ? 'background-refresh' : 'load-list',
-        preserveExistingData: pendingHasLoaded.value,
+        operation: preserveExistingData ? 'background-refresh' : 'load-list',
+        preserveExistingData,
         fallbackMessage: 'دریافت دعوت‌نامه‌ها ممکن نشد.',
       },
     });
+    if (!isCurrentPendingRequest(revision, controller)) return false;
     if (!Array.isArray(data)) throw new Error('invalid_pending_invitations_payload');
+
     pendingInvitations.value = data as PendingInvitation[];
     pendingHasLoaded.value = true;
-  } catch {
+    return true;
+  } catch (error) {
+    if (!isCurrentPendingRequest(revision, controller) || controller.signal.aborted) return false;
+    if (actionErrorStatus(error) === 403) {
+      clearPendingInvitationDataForForbidden();
+      return false;
+    }
     pendingError.value = 'دریافت دعوت‌نامه‌ها ممکن نشد. دوباره تلاش کنید.';
+    return false;
   } finally {
-    pendingLoading.value = false;
+    if (isCurrentPendingRequest(revision, controller)) {
+      pendingLoading.value = false;
+      pendingRequestController = null;
+    }
   }
 }
 
@@ -187,55 +217,47 @@ function pendingCopyKey(invitationId: number, surface: 'bot' | 'web') {
   return `${invitationId}:${surface}`;
 }
 
-function fallbackCopyPendingLink(text: string, copyKey: string) {
-  const textArea = document.createElement('textarea');
-  textArea.value = text;
-  textArea.style.top = '0';
-  textArea.style.left = '0';
-  textArea.style.position = 'fixed';
-  document.body.appendChild(textArea);
-  textArea.focus();
-  textArea.select();
-
-  try {
-    pendingCopyState[copyKey] = document.execCommand('copy') ? 'کپی شد!' : 'خطا';
-  } catch {
-    pendingCopyState[copyKey] = 'خطا';
-  }
-
-  document.body.removeChild(textArea);
-  setTimeout(() => { pendingCopyState[copyKey] = ''; }, 2000);
-}
-
 function copyPendingLink(invitation: PendingInvitation, surface: 'bot' | 'web') {
   const contract = normalizeInvitationContract(invitation);
   const link = surface === 'bot' ? contract.botLink : contract.webLink;
   if (!link) return;
-  const copyKey = pendingCopyKey(invitation.id, surface);
-  if (!navigator.clipboard) {
-    fallbackCopyPendingLink(link, copyKey);
-    return;
-  }
 
-  navigator.clipboard.writeText(link).then(() => {
-    pendingCopyState[copyKey] = 'کپی شد!';
-    setTimeout(() => { pendingCopyState[copyKey] = ''; }, 2000);
-  }, () => {
-    pendingCopyState[copyKey] = 'خطا';
-    setTimeout(() => { pendingCopyState[copyKey] = ''; }, 2000);
-  });
+  const copyKey = pendingCopyKey(invitation.id, surface);
+  copyLink(link, (message) => { pendingCopyState[copyKey] = message; });
 }
 
 function requestPendingInvitationDelete(invitation: PendingInvitation) {
-  if (pendingDeleteId.value !== null) return;
+  if (pendingDeleteId.value !== null || pendingDeleteCandidate.value) return;
   pendingDeleteCandidate.value = invitation;
   pendingDeleteError.value = '';
+  pendingNotice.value = '';
 }
 
 function cancelPendingInvitationDelete() {
   if (pendingDeleteId.value !== null) return;
   pendingDeleteCandidate.value = null;
   pendingDeleteError.value = '';
+}
+
+function actionErrorStatus(error: unknown): number | null {
+  return error instanceof AppHttpError ? error.status : null;
+}
+
+async function reconcileNoLongerPendingInvitation(invitation: PendingInvitation) {
+  const refreshed = await loadPendingInvitations();
+  if (!isPendingViewActive) return;
+
+  const invitationStillListed = pendingInvitations.value.some((item) => item.id === invitation.id);
+  if (refreshed && !invitationStillListed) {
+    pendingDeleteCandidate.value = null;
+    pendingDeleteError.value = '';
+    pendingNotice.value = 'دعوت‌نامه دیگر در انتظار نیست؛ فهرست به‌روز شد.';
+    return;
+  }
+
+  pendingDeleteError.value = refreshed
+    ? 'وضعیت دعوت‌نامه به‌روز شد؛ حذف آن در این لحظه تأیید نشد.'
+    : 'وضعیت تازهٔ دعوت‌نامه دریافت نشد؛ دوباره تلاش کنید.';
 }
 
 async function confirmPendingInvitationDelete() {
@@ -253,6 +275,7 @@ async function confirmPendingInvitationDelete() {
     action: async () => {
       const response = await routeRequest(`/api/invitations/pending/${invitation.id}`, {
         method: 'DELETE',
+        cache: 'no-store',
         errorContext: {
           surface: 'admin',
           scope: 'action',
@@ -267,13 +290,28 @@ async function confirmPendingInvitationDelete() {
   });
 
   if (result.outcome === 'success') {
+    invalidatePendingInvitationLoad();
     pendingInvitations.value = pendingInvitations.value.filter((item) => item.id !== invitation.id);
     pendingDeleteCandidate.value = null;
     pendingDeleteError.value = '';
+    pendingNotice.value = 'دعوت‌نامه از فهرست حذف شد.';
   } else if (result.outcome === 'error') {
-    pendingDeleteError.value = 'حذف دعوت‌نامه انجام نشد. دعوت‌نامه تغییری نکرده است.';
+    const status = actionErrorStatus(result.error);
+    if (status === 400 || status === 404) {
+      await reconcileNoLongerPendingInvitation(invitation);
+    } else if (status === 403) {
+      clearPendingInvitationDataForForbidden();
+    } else {
+      pendingDeleteError.value = 'حذف دعوت‌نامه انجام نشد؛ وضعیت آن از سرور تأیید نشد.';
+    }
   }
   pendingDeleteId.value = null;
+}
+
+function invitationOutcomeMessage(created: boolean | null): string {
+  if (created === true) return 'دعوت‌نامهٔ تازه ساخته شد.';
+  if (created === false) return 'دعوت‌نامهٔ فعال قبلی بازیابی شد.';
+  return 'دعوت‌نامهٔ فعال آماده است.';
 }
 
 async function createInvite() {
@@ -287,18 +325,14 @@ async function createInvite() {
     resultMessage.value = '❌ شماره موبایل نامعتبر است. فرمت: 09xxxxxxxxx (فارسی یا انگلیسی)';
     return;
   }
-  
+
   isLoading.value = true;
-  resultMessage.value = '';
-  inviteLink.value = '';
-  webLink.value = '';
-  createdContract.value = false;
-  smsStatusMessage.value = '';
-  copyMessage.value = '';
+  clearInvitationResult();
 
   try {
-    const data = await routeRequestJson<unknown>(`/api/invitations/`, {
+    const data = await routeRequestJson<unknown>('/api/invitations/', {
       method: 'POST',
+      cache: 'no-store',
       body: JSON.stringify({ ...invite, mobile_number: normalizedMobile }),
       errorContext: {
         surface: 'admin',
@@ -312,21 +346,19 @@ async function createInvite() {
     const contract = normalizeInvitationContract(data);
     if (contract.state !== 'pending' || (!contract.botLink && !contract.webLink)) {
       resultMessage.value = '❌ لینک قابل استفاده‌ای برای این دعوت‌نامه آماده نشد.';
-      throw new Error('لینک قابل استفاده‌ای برای این دعوت‌نامه آماده نشد.');
+      throw new Error('unusable_invitation_contract');
     }
+
     inviteLink.value = contract.botLink;
     webLink.value = contract.webLink;
+    invitationCreated.value = contract.created;
+    invitationExpiresAt.value = contract.expiresAt;
     smsStatusMessage.value = invitationSmsStatusMessage(contract.smsStatus);
-    createdContract.value = true;
-    
-    resultMessage.value = '✅ لینک دعوت با موفقیت ایجاد شد.';
-    await loadPendingInvitations();
-    
-    // emit('invite-created', plainTextMessage); // (حذف شد)
-    
+    hasInvitationResult.value = true;
+    void loadPendingInvitations();
   } catch {
     if (!resultMessage.value.startsWith('❌')) {
-       resultMessage.value = '❌ ساخت دعوت‌نامه انجام نشد. اطلاعات واردشده حفظ شده است؛ دوباره تلاش کنید.';
+      resultMessage.value = '❌ ساخت دعوت‌نامه انجام نشد. اطلاعات واردشده حفظ شده است؛ دوباره تلاش کنید.';
     }
   } finally {
     isLoading.value = false;
@@ -358,33 +390,32 @@ function normalizeMobile(mobile: string): string {
         <AppSelect v-model="invite.role" id="role" :options="availableRoles" />
       </AppFormField>
       <div class="form-actions">
-        <AppButton type="submit" :loading="isLoading">
+        <AppButton type="submit" :loading="isLoading" :disabled="pendingDeleteId !== null">
           {{ isLoading ? 'در حال ساخت...' : 'ارسال لینک دعوت' }}
         </AppButton>
-        <AppButton type="button" class="secondary" variant="secondary" :disabled="isLoading" @click="resetForm">
+        <AppButton type="button" class="secondary" variant="secondary" :disabled="isLoading || pendingDeleteId !== null" @click="resetForm">
           بازنشانی
         </AppButton>
       </div>
     </form>
 
-    <div v-if="resultMessage && !createdContract" class="result-box error" role="alert">
+    <div v-if="resultMessage && !hasInvitationResult" class="result-box error" role="alert">
       {{ resultMessage }}
     </div>
 
-    <div v-if="createdContract" class="success-box">
-      <div class="result-message">✅ لینک دعوت با موفقیت ایجاد شد:</div>
-      <div v-if="inviteLink" class="link-label">🔵 لینک تلگرام:</div>
+    <div v-if="hasInvitationResult" class="success-box" role="status">
+      <div class="result-message">{{ invitationOutcomeMessage(invitationCreated) }}</div>
+      <p class="invitation-expiry">مهلت دعوت: {{ formatDateTime(invitationExpiresAt) }}</p>
+      <div v-if="inviteLink" class="link-label">لینک تلگرام آماده است.</div>
       <div v-if="inviteLink" class="copy-container">
-        <AppInput type="text" :model-value="inviteLink" @click="copyToClipboard" readonly />
         <AppButton type="button" @click="copyToClipboard" class="copy-btn">
-          {{ copyMessage ? copyMessage : 'کپی' }}
+          {{ copyMessage || 'کپی لینک تلگرام' }}
         </AppButton>
       </div>
-      <div v-if="webLink" class="link-label" style="margin-top: 0.75rem;">🌐 لینک وب:</div>
+      <div v-if="webLink" class="link-label" style="margin-top: 0.75rem;">لینک وب آماده است.</div>
       <div v-if="webLink" class="copy-container">
-        <AppInput type="text" :model-value="webLink" @click="copyWebLink" readonly />
         <AppButton type="button" @click="copyWebLink" class="copy-btn web">
-          {{ webCopyMessage ? webCopyMessage : 'کپی' }}
+          {{ webCopyMessage || 'کپی لینک وب' }}
         </AppButton>
       </div>
       <p v-if="smsStatusMessage" class="sms-status" role="status">{{ smsStatusMessage }}</p>
@@ -393,13 +424,15 @@ function normalizeMobile(mobile: string): string {
     <section class="pending-section" aria-labelledby="pending-invitations-title">
       <div class="pending-header">
         <div>
-          <h3 id="pending-invitations-title">دعوت‌نامه‌های pending</h3>
-          <p>{{ pendingInvitations.length }} دعوت‌نامه فعال</p>
+          <h3 id="pending-invitations-title">دعوت‌نامه‌های در انتظار</h3>
+          <p>فهرست دعوت‌های در انتظار</p>
         </div>
-        <AppButton type="button" class="pending-refresh-btn" variant="secondary" :loading="pendingLoading" @click="loadPendingInvitations">
+        <AppButton type="button" class="pending-refresh-btn" variant="secondary" :loading="pendingLoading" :disabled="pendingDeleteId !== null" @click="loadPendingInvitations">
           {{ pendingLoading ? 'در حال دریافت...' : 'به‌روزرسانی' }}
         </AppButton>
       </div>
+
+      <p v-if="pendingNotice" class="pending-notice" role="status">{{ pendingNotice }}</p>
 
       <AppErrorState
         v-if="pendingError && !pendingHasLoaded"
@@ -425,7 +458,7 @@ function normalizeMobile(mobile: string): string {
       <AppEmptyState
         v-else-if="pendingHasLoaded && !pendingInvitations.length"
         class="pending-state empty"
-        title="دعوت‌نامه pending وجود ندارد."
+        title="دعوت‌نامه‌ای در انتظار وجود ندارد."
       />
       <div v-else class="pending-list">
         <div v-for="pending in pendingInvitations" :key="pending.id" class="pending-row">
@@ -437,13 +470,11 @@ function normalizeMobile(mobile: string): string {
               <span>انقضا: {{ formatDateTime(pending.expires_at) }}</span>
             </div>
             <div v-if="normalizeInvitationContract(pending).botLink" class="pending-link-row">
-              <AppInput type="text" :model-value="normalizeInvitationContract(pending).botLink" readonly @click="copyPendingLink(pending, 'bot')" />
               <AppButton type="button" class="pending-copy-btn" @click="copyPendingLink(pending, 'bot')">
                 {{ pendingCopyState[pendingCopyKey(pending.id, 'bot')] || 'کپی لینک تلگرام' }}
               </AppButton>
             </div>
             <div v-if="normalizeInvitationContract(pending).webLink" class="pending-link-row">
-              <AppInput type="text" :model-value="normalizeInvitationContract(pending).webLink" readonly @click="copyPendingLink(pending, 'web')" />
               <AppButton type="button" class="pending-copy-btn" @click="copyPendingLink(pending, 'web')">
                 {{ pendingCopyState[pendingCopyKey(pending.id, 'web')] || 'کپی لینک وب' }}
               </AppButton>
@@ -455,33 +486,27 @@ function normalizeMobile(mobile: string): string {
             class="delete-pending-btn"
             variant="danger"
             :loading="pendingDeleteId === pending.id"
-            :disabled="pendingDeleteId !== null"
+            :disabled="pendingDeleteId !== null || pendingDeleteCandidate !== null"
             @click="requestPendingInvitationDelete(pending)"
           >
             {{ pendingDeleteId === pending.id ? 'در حال حذف...' : 'حذف' }}
           </AppButton>
-          <div
-            v-if="pendingDeleteCandidate?.id === pending.id"
-            class="pending-delete-confirm"
-            role="alertdialog"
-            aria-modal="false"
-            :aria-labelledby="`pending-delete-title-${pending.id}`"
-          >
-            <strong :id="`pending-delete-title-${pending.id}`">حذف دعوت‌نامه {{ pending.account_name }}؟</strong>
-            <p>دعوت‌نامه فقط پس از تأیید پاسخ سرور از فهرست حذف می‌شود.</p>
-            <p v-if="pendingDeleteError" class="pending-delete-error" role="alert">{{ pendingDeleteError }}</p>
-            <div class="pending-delete-actions">
-              <AppButton type="button" variant="danger" :loading="pendingDeleteId === pending.id" @click="confirmPendingInvitationDelete">
-                تأیید حذف
-              </AppButton>
-              <AppButton type="button" variant="secondary" :disabled="pendingDeleteId !== null" @click="cancelPendingInvitationDelete">
-                انصراف
-              </AppButton>
-            </div>
-          </div>
         </div>
       </div>
     </section>
+
+    <AppConfirmDialog
+      :open="Boolean(pendingDeleteCandidate)"
+      :title="pendingDeleteCandidate ? `حذف دعوت‌نامه ${pendingDeleteCandidate.account_name}؟` : 'حذف دعوت‌نامه'"
+      message="دعوت‌نامه فقط پس از تأیید پاسخ سرور از فهرست حذف می‌شود."
+      confirm-label="تأیید حذف"
+      cancel-label="انصراف"
+      tone="danger"
+      :busy="pendingDeleteId !== null"
+      :error="pendingDeleteError || undefined"
+      @confirm="confirmPendingInvitationDelete"
+      @cancel="cancelPendingInvitationDelete"
+    />
 
   </div>
 </template>
@@ -542,13 +567,7 @@ input:focus, select:focus {
 .copy-container {
   display: flex;
   gap: 0.5rem;
-}
-.copy-container input[type="text"] {
-  width: 0; flex: 1 1 0;
-  direction: ltr; font-family: monospace; font-size: 0.8rem;
-  background: white; color: #166534;
-  border: 1px solid #bbf7d0; cursor: pointer;
-  border-radius: 0.625rem; padding: 0.5rem 0.75rem;
+  flex-wrap: wrap;
 }
 .copy-container .copy-btn {
   flex: 0 0 auto; width: auto;
@@ -564,6 +583,12 @@ input:focus, select:focus {
 .link-label {
   font-size: 0.78rem; font-weight: 700; color: #374151;
   margin-bottom: 0.375rem;
+}
+.invitation-expiry {
+  margin: 0 0 0.75rem;
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-font-xs);
+  line-height: 1.8;
 }
 .sms-status {
   margin: 0.75rem 0 0;
@@ -627,10 +652,17 @@ input:focus, select:focus {
   color: var(--ds-danger-800);
   font-size: 0.78rem;
 }
-.pending-refresh-error,
-.pending-delete-confirm {
+.pending-notice {
+  margin: 0 0 0.75rem;
+  padding: 0.625rem 0.75rem;
+  border: 1px solid var(--ds-success-100);
+  border-radius: var(--ds-radius-md);
+  background: var(--ds-success-50);
+  color: var(--ds-success-800);
+  font-size: var(--ds-font-xs);
+}
+.pending-refresh-error {
   display: flex;
-  flex-direction: column;
   gap: 0.6rem;
   margin-bottom: 0.75rem;
   padding: 0.75rem;
@@ -641,23 +673,8 @@ input:focus, select:focus {
   font-size: var(--ds-font-xs);
 }
 .pending-refresh-error {
-  flex-direction: row;
   align-items: center;
   justify-content: space-between;
-}
-.pending-delete-confirm {
-  grid-column: 1 / -1;
-  margin: 0;
-}
-.pending-delete-confirm p {
-  margin: 0;
-}
-.pending-delete-actions {
-  display: flex;
-  gap: 0.5rem;
-}
-.pending-delete-error {
-  font-weight: 700;
 }
 .pending-state {
   padding: 0.875rem;
@@ -699,15 +716,6 @@ input:focus, select:focus {
   gap: 0.5rem;
   margin-top: 0.625rem;
 }
-.pending-link-row input[type="text"] {
-  width: 0;
-  flex: 1 1 0;
-  direction: ltr;
-  font-family: monospace;
-  font-size: 0.76rem;
-  border-radius: 0.625rem;
-  padding: 0.5rem 0.75rem;
-}
 .pending-copy-btn {
   background: linear-gradient(135deg, var(--ds-info-500), var(--ds-telegram-700));
   color: white;
@@ -734,6 +742,18 @@ input:focus, select:focus {
   }
   .pending-link-row {
     flex-direction: column;
+  }
+  .pending-copy-btn {
+    width: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card,
+  .card * {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
   }
 }
 </style>

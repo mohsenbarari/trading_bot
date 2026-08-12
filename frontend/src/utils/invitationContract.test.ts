@@ -16,6 +16,7 @@ describe('invitationContract', () => {
       }),
     ).toMatchObject({
       token: 'legacy',
+      created: null,
       botLink: 'https://t.me/test_bot?start=INV-legacy',
       webLink: '/i/LEGACY01',
       botAvailable: true,
@@ -36,12 +37,39 @@ describe('invitationContract', () => {
         sms_status: 'disabled',
       }),
     ).toMatchObject({
+      created: null,
       botLink: '',
       webLink: 'https://example.test/i/V2CODE01',
       botAvailable: false,
       webAvailable: true,
       smsStatus: 'disabled',
     })
+  })
+
+  it('preserves the server-owned created versus recovered result without inventing it for queue payloads', () => {
+    expect(
+      normalizeInvitationContract({
+        created: true,
+        state: 'pending',
+        web_short_link: '/i/CREATE01',
+      }),
+    ).toMatchObject({ created: true })
+
+    expect(
+      normalizeInvitationContract({
+        created: false,
+        state: 'pending',
+        web_short_link: '/i/REUSED01',
+      }),
+    ).toMatchObject({ created: false })
+
+    expect(
+      normalizeInvitationContract({
+        created: 'false' as unknown as boolean,
+        state: 'pending',
+        web_short_link: '/i/UNKNOWN1',
+      }),
+    ).toMatchObject({ created: null })
   })
 
   it('removes all actions and tokens from terminal UI state', () => {

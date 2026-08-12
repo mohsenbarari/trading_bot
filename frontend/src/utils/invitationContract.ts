@@ -9,6 +9,8 @@ export type InvitationSmsStatus =
 
 export interface InvitationContractPayload {
   token?: string | null
+  /** Present only on the standard-invitation create response. */
+  created?: boolean | null
   valid?: boolean
   bot_link?: string | null
   web_link?: string | null
@@ -24,6 +26,12 @@ export interface InvitationContractPayload {
 
 export interface NormalizedInvitationContract {
   token: string
+  /**
+   * `true` means the server created a new invitation, `false` means it
+   * recovered the still-pending canonical invitation, and `null` means the
+   * payload did not make that claim (for example a queue/lookup response).
+   */
+  created: boolean | null
   botLink: string
   webLink: string
   botAvailable: boolean
@@ -98,6 +106,7 @@ export function normalizeInvitationContract(
 
   return {
     token: pending ? payload.token || '' : '',
+    created: typeof payload.created === 'boolean' ? payload.created : null,
     botLink: pending && payload.bot_available !== false ? botLink : '',
     webLink: pending && payload.web_available !== false ? webLink : '',
     botAvailable: pending && payload.bot_available !== false,

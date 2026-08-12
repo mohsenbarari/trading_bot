@@ -14,8 +14,15 @@ function makeJsonResponse(payload: unknown, ok = true, status = ok ? 200 : 400) 
   return {
     ok,
     status,
+    headers: { get: () => 'application/json' },
     json: async () => payload,
   }
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((resolvePromise) => { resolve = resolvePromise })
+  return { promise, resolve }
 }
 
 function installClipboard(writeText?: ReturnType<typeof vi.fn>) {
@@ -25,19 +32,21 @@ function installClipboard(writeText?: ReturnType<typeof vi.fn>) {
   })
 }
 
-function installExecCommand(result: boolean | Error) {
-  const execCommand = vi.fn(() => {
-    if (result instanceof Error) {
-      throw result
-    }
-    return result
-  })
-  Object.defineProperty(document, 'execCommand', {
-    configurable: true,
-    value: execCommand,
-  })
-  return execCommand
+function pendingInvitation(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 12,
+    account_name: 'pending-user',
+    mobile_number: '09120000000',
+    role: 'عادی',
+    web_short_link: 'https://coin.gold-trade.ir/i/PEND0012',
+    web_available: true,
+    state: 'pending',
+    expires_at: '2026-06-12T10:00:00Z',
+    ...overrides,
+  }
 }
+
+const mountedWrappers: Array<{ unmount: () => void }> = []
 
 async function mountView(
   props: Partial<{ apiBaseUrl: string; jwtToken: string | null }> = {},
@@ -50,10 +59,9 @@ async function mountView(
       ...props,
     },
   })
+  mountedWrappers.push(wrapper)
   await flushPromises()
-  if (options.clearInitialFetch !== false) {
-    createInvitationMocks.apiFetchMock.mockClear()
-  }
+  if (options.clearInitialFetch !== false) createInvitationMocks.apiFetchMock.mockClear()
   return wrapper
 }
 
@@ -63,29 +71,33 @@ async function fillInviteForm(wrapper: ReturnType<typeof mount>, mobile = '09123
   await wrapper.get('#role').setValue('مدیر میانی')
 }
 
+async function openDeleteDialog(wrapper: ReturnType<typeof mount>) {
+  await wrapper.get('.delete-pending-btn').trigger('click')
+  await flushPromises()
+  return wrapper.get('.ui-confirm-dialog')
+}
+
 describe('CreateInvitationView.vue', () => {
   beforeEach(() => {
     createInvitationMocks.apiFetchMock.mockReset()
     createInvitationMocks.apiFetchMock.mockImplementation((url: string) => {
-      if (url === '/api/invitations/pending') {
-        return Promise.resolve(makeJsonResponse([]))
-      }
+      if (url === '/api/invitations/pending') return Promise.resolve(makeJsonResponse([]))
       return Promise.reject(new Error(`Unexpected API call: ${url}`))
     })
     vi.useFakeTimers()
     installClipboard(vi.fn().mockResolvedValue(undefined))
-    Object.defineProperty(window, 'confirm', {
-      configurable: true,
-      value: vi.fn(() => true),
-    })
     localStorage.clear()
   })
 
   afterEach(() => {
+    while (mountedWrappers.length) mountedWrappers.pop()?.unmount()
+    delete document.body.dataset.uiOverlayLockCount
+    document.body.classList.remove('ui-overlay-open')
+    document.documentElement.classList.remove('ui-overlay-open')
     vi.useRealTimers()
   })
 
-  it('blocks invite creation when the admin is not authenticated', async () => {
+  it('blocks invitation creation before any request when authentication is missing', async () => {
     const wrapper = await mountView({ jwtToken: null })
 
     await wrapper.get('form').trigger('submit.prevent')
@@ -94,7 +106,7 @@ describe('CreateInvitationView.vue', () => {
     expect(wrapper.text()).toContain('❌ خطا: شما احراز هویت نشده‌اید.')
   })
 
-  it('rejects invalid mobile numbers before calling the API', async () => {
+  it('normalizes Persian digits and rejects an invalid mobile number before calling the API', async () => {
     const wrapper = await mountView()
     await fillInviteForm(wrapper, '۰۹۱۲۳')
 
@@ -104,28 +116,34 @@ describe('CreateInvitationView.vue', () => {
     expect(wrapper.text()).toContain('❌ شماره موبایل نامعتبر است.')
   })
 
-  it('normalizes Persian digits and preserves the canonical Web link from the contract', async () => {
-    createInvitationMocks.apiFetchMock.mockResolvedValue(
-      makeJsonResponse({
-        link: 'https://t.me/mbmtrading1_bot?start=invite-token',
-        short_link: 'https://coin.gold-trade.ir/i/Ab12Cd34',
-      }),
-    )
+  it('renders a new invitation truthfully with expiry and copy-only controls, never raw URLs', async () => {
+    const botLink = 'https://t.me/mbmtrading1_bot?start=INV-create'
+    const webLink = 'https://coin.gold-trade.ir/i/Ab12Cd34'
+    createInvitationMocks.apiFetchMock.mockImplementation((url: string) => {
+      if (url === '/api/invitations/pending') return Promise.resolve(makeJsonResponse([]))
+      if (url === '/api/invitations/') {
+        return Promise.resolve(makeJsonResponse({
+          created: true,
+          state: 'pending',
+          bot_link: botLink,
+          web_short_link: webLink,
+          bot_available: true,
+          web_available: true,
+          expires_at: '2026-07-14T10:00:00Z',
+          sms_status: 'accepted',
+        }))
+      }
+      return Promise.reject(new Error(`Unexpected API call: ${url}`))
+    })
 
     const wrapper = await mountView()
     await fillInviteForm(wrapper, '۰۹۱۲۳۴۵۶۷۸۹')
-
-    expect(wrapper.findAll('.form-group.ui-form-field')).toHaveLength(3)
-    expect(wrapper.get('#account_name').classes()).toContain('ui-input')
-    expect(wrapper.get('#role').classes()).toEqual(expect.arrayContaining(['ui-input', 'ui-select']))
-    expect(wrapper.get('button[type="submit"]').classes()).toContain('ui-button')
-    expect(wrapper.get('button.secondary').classes()).toContain('ui-button--secondary')
-
     await wrapper.get('form').trigger('submit.prevent')
     await flushPromises()
 
     expect(createInvitationMocks.apiFetchMock).toHaveBeenCalledWith('/api/invitations/', expect.objectContaining({
       method: 'POST',
+      cache: 'no-store',
       body: JSON.stringify({
         account_name: 'alireza',
         mobile_number: '09123456789',
@@ -134,51 +152,58 @@ describe('CreateInvitationView.vue', () => {
       retryNetwork: false,
       trackConnectionState: false,
     }))
-    const textInputs = wrapper.findAll('.success-box input[readonly]')
-    expect(wrapper.text()).toContain('✅ لینک دعوت با موفقیت ایجاد شد:')
-    expect(textInputs[0]!.classes()).toContain('ui-input')
-    expect(textInputs[1]!.classes()).toContain('ui-input')
-    expect((textInputs[0]!.element as HTMLInputElement).value).toBe('https://t.me/mbmtrading1_bot?start=invite-token')
-    expect((textInputs[1]!.element as HTMLInputElement).value).toBe('https://coin.gold-trade.ir/i/Ab12Cd34')
+    expect(wrapper.get('.success-box').text()).toContain('دعوت‌نامهٔ تازه ساخته شد.')
+    expect(wrapper.get('.invitation-expiry').text()).toContain('مهلت دعوت:')
+    expect(wrapper.text()).toContain('پیامک دعوت ارسال شد.')
+    expect(wrapper.findAll('.success-box .copy-btn')).toHaveLength(2)
+    expect(wrapper.findAll('.success-box input')).toHaveLength(0)
+    expect(wrapper.html()).not.toContain(botLink)
+    expect(wrapper.html()).not.toContain(webLink)
   })
 
-  it('prefers explicit v2 links, accepts a Web-only success, and renders the SMS outcome', async () => {
-    createInvitationMocks.apiFetchMock.mockResolvedValue(
-      makeJsonResponse({
-        bot_link: null,
-        web_short_link: 'https://coin.gold-trade.ir/i/V2CODE01',
-        bot_available: false,
-        web_available: true,
-        state: 'pending',
-        sms_status: 'disabled',
-        link: 'https://t.me/legacy_bot?start=must-not-render',
-        short_link: 'https://foreign.example/i/must-not-render',
-      }),
-    )
+  it('distinguishes a recovered active invitation and only offers its available channel', async () => {
+    const webLink = 'https://coin.gold-trade.ir/i/V2CODE01'
+    createInvitationMocks.apiFetchMock.mockImplementation((url: string) => {
+      if (url === '/api/invitations/pending') return Promise.resolve(makeJsonResponse([]))
+      if (url === '/api/invitations/') {
+        return Promise.resolve(makeJsonResponse({
+          created: false,
+          state: 'pending',
+          bot_link: null,
+          web_short_link: webLink,
+          bot_available: false,
+          web_available: true,
+          expires_at: '2026-07-14T10:00:00Z',
+          sms_status: 'disabled',
+        }))
+      }
+      return Promise.reject(new Error(`Unexpected API call: ${url}`))
+    })
 
     const wrapper = await mountView()
     await fillInviteForm(wrapper)
     await wrapper.get('form').trigger('submit.prevent')
     await flushPromises()
 
-    expect(wrapper.find('.success-box').exists()).toBe(true)
-    expect(wrapper.find('.telegram-btn').exists()).toBe(false)
+    expect(wrapper.get('.success-box').text()).toContain('دعوت‌نامهٔ فعال قبلی بازیابی شد.')
     expect(wrapper.text()).toContain('پیامک دعوت ارسال نشد؛ لینک را دستی ارسال کنید.')
-    const inputs = wrapper.findAll('.success-box input[readonly]')
-    expect(inputs).toHaveLength(1)
-    expect((inputs[0]!.element as HTMLInputElement).value).toBe('https://coin.gold-trade.ir/i/V2CODE01')
-    expect(wrapper.text()).not.toContain('foreign.example')
+    expect(wrapper.findAll('.success-box .copy-btn')).toHaveLength(1)
+    expect(wrapper.get('.success-box .copy-btn').text()).toBe('کپی لینک وب')
+    expect(wrapper.html()).not.toContain(webLink)
   })
 
-  it('fails closed when a successful response contains no usable registration link', async () => {
-    createInvitationMocks.apiFetchMock.mockResolvedValue(
-      makeJsonResponse({
-        state: 'pending',
-        bot_available: false,
-        web_available: false,
-        sms_status: 'disabled',
-      }),
-    )
+  it('fails closed when a successful create response contains no usable registration link', async () => {
+    createInvitationMocks.apiFetchMock.mockImplementation((url: string) => {
+      if (url === '/api/invitations/pending') return Promise.resolve(makeJsonResponse([]))
+      if (url === '/api/invitations/') {
+        return Promise.resolve(makeJsonResponse({
+          state: 'pending',
+          bot_available: false,
+          web_available: false,
+        }))
+      }
+      return Promise.reject(new Error(`Unexpected API call: ${url}`))
+    })
 
     const wrapper = await mountView()
     await fillInviteForm(wrapper)
@@ -189,147 +214,81 @@ describe('CreateInvitationView.vue', () => {
     expect(wrapper.text()).toContain('لینک قابل استفاده‌ای برای این دعوت‌نامه آماده نشد.')
   })
 
-  it('keeps the draft and renders a cause-neutral message when invite creation is rejected', async () => {
-    createInvitationMocks.apiFetchMock.mockResolvedValue(
-      makeJsonResponse({ detail: 'خطا **مهم**' }, false, 409),
-    )
+  it('keeps the invitation draft and hides backend detail when creation is rejected', async () => {
+    createInvitationMocks.apiFetchMock.mockImplementation((url: string) => {
+      if (url === '/api/invitations/pending') return Promise.resolve(makeJsonResponse([]))
+      return Promise.resolve(makeJsonResponse({ detail: 'حساس **جزئیات**' }, false, 409))
+    })
 
     const wrapper = await mountView()
     await fillInviteForm(wrapper)
-
     await wrapper.get('form').trigger('submit.prevent')
     await flushPromises()
 
     expect(wrapper.get('.result-box.error').text()).toContain('ساخت دعوت‌نامه انجام نشد.')
-    expect(wrapper.get('.result-box.error').text()).not.toContain('خطا مهم')
+    expect(wrapper.text()).not.toContain('جزئیات')
     expect((wrapper.get('#account_name').element as HTMLInputElement).value).toBe('alireza')
     expect((wrapper.get('#mobile_number').element as HTMLInputElement).value).toBe('09123456789')
-    expect((wrapper.get('#role').element as HTMLSelectElement).value).toBe('مدیر میانی')
   })
 
-  it('shows thrown request errors when the API call itself fails', async () => {
-    createInvitationMocks.apiFetchMock.mockRejectedValue(new Error('network down'))
-
-    const wrapper = await mountView()
-    await fillInviteForm(wrapper)
-
-    await wrapper.get('form').trigger('submit.prevent')
-    await flushPromises()
-
-    expect(wrapper.text()).toContain('❌ ساخت دعوت‌نامه انجام نشد.')
-    expect(wrapper.text()).not.toContain('network down')
-  })
-
-  it('copies the Telegram invite link through navigator.clipboard and clears the toast after the timeout', async () => {
+  it('uses Clipboard API for links and leaves the raw bearer outside the rendered DOM', async () => {
     const writeText = vi.fn().mockResolvedValue(undefined)
     installClipboard(writeText)
-    createInvitationMocks.apiFetchMock.mockResolvedValue(
-      makeJsonResponse({
-        link: 'https://t.me/mbmtrading1_bot?start=invite-token',
-        short_link: '',
-      }),
-    )
+    const botLink = 'https://t.me/mbmtrading1_bot?start=INV-copy'
+    createInvitationMocks.apiFetchMock.mockImplementation((url: string) => {
+      if (url === '/api/invitations/pending') return Promise.resolve(makeJsonResponse([]))
+      return Promise.resolve(makeJsonResponse({
+        created: true,
+        state: 'pending',
+        bot_link: botLink,
+        bot_available: true,
+        web_available: false,
+        expires_at: '2026-07-14T10:00:00Z',
+      }))
+    })
 
     const wrapper = await mountView()
     await fillInviteForm(wrapper)
     await wrapper.get('form').trigger('submit.prevent')
     await flushPromises()
-
     await wrapper.get('.copy-btn').trigger('click')
     await flushPromises()
 
-    expect(wrapper.get('.copy-btn').classes()).toContain('ui-button')
-    expect(writeText).toHaveBeenCalledWith('https://t.me/mbmtrading1_bot?start=invite-token')
+    expect(writeText).toHaveBeenCalledWith(botLink)
     expect(wrapper.get('.copy-btn').text()).toBe('کپی شد!')
-
+    expect(wrapper.html()).not.toContain(botLink)
     await vi.advanceTimersByTimeAsync(2000)
-
-    expect(wrapper.get('.copy-btn').text()).toBe('کپی')
+    expect(wrapper.get('.copy-btn').text()).toBe('کپی لینک تلگرام')
   })
 
-  it('falls back to execCommand copy for the web link and resets the form state on demand', async () => {
+  it('reports clipboard unavailability without putting a fallback textarea or link in the DOM', async () => {
     installClipboard(undefined)
-    const execCommand = installExecCommand(true)
-    createInvitationMocks.apiFetchMock.mockResolvedValue(
-      makeJsonResponse({
-        link: 'https://t.me/mbmtrading1_bot?start=invite-token',
-        short_link: 'https://coin.gold-trade.ir/i/COPY0001',
-      }),
-    )
+    const webLink = 'https://coin.gold-trade.ir/i/COPY0001'
+    createInvitationMocks.apiFetchMock.mockImplementation((url: string) => {
+      if (url === '/api/invitations/pending') return Promise.resolve(makeJsonResponse([]))
+      return Promise.resolve(makeJsonResponse({
+        created: true,
+        state: 'pending',
+        web_short_link: webLink,
+        bot_available: false,
+        web_available: true,
+        expires_at: '2026-07-14T10:00:00Z',
+      }))
+    })
 
     const wrapper = await mountView()
     await fillInviteForm(wrapper)
     await wrapper.get('form').trigger('submit.prevent')
     await flushPromises()
-
     await wrapper.get('.copy-btn.web').trigger('click')
     await flushPromises()
 
-    expect(execCommand).toHaveBeenCalledWith('copy')
-    expect(wrapper.get('.copy-btn.web').text()).toBe('کپی شد!')
-
-    await wrapper.get('button.secondary').trigger('click')
-
-    expect((wrapper.get('#account_name').element as HTMLInputElement).value).toBe('')
-    expect((wrapper.get('#mobile_number').element as HTMLInputElement).value).toBe('')
-    expect(wrapper.find('.success-box').exists()).toBe(false)
+    expect(wrapper.get('.copy-btn.web').text()).toContain('کپی نشد')
+    expect(wrapper.html()).not.toContain(webLink)
+    expect(document.querySelectorAll('textarea')).toHaveLength(0)
   })
 
-  it('copies the derived web link through navigator.clipboard and surfaces clipboard failures', async () => {
-    const writeText = vi.fn()
-      .mockResolvedValueOnce(undefined)
-      .mockRejectedValueOnce(new Error('clipboard denied'))
-    installClipboard(writeText)
-    createInvitationMocks.apiFetchMock.mockResolvedValue(
-      makeJsonResponse({
-        link: 'https://t.me/mbmtrading1_bot?start=invite-token',
-        short_link: 'https://coin.gold-trade.ir/i/ROUTE001',
-      }),
-    )
-
-    const wrapper = await mountView()
-    await fillInviteForm(wrapper)
-    await wrapper.get('form').trigger('submit.prevent')
-    await flushPromises()
-
-    await wrapper.get('.copy-btn.web').trigger('click')
-    await flushPromises()
-
-    expect(writeText).toHaveBeenNthCalledWith(1, 'https://coin.gold-trade.ir/i/ROUTE001')
-    expect(wrapper.get('.copy-btn.web').text()).toBe('کپی شد!')
-
-    await vi.advanceTimersByTimeAsync(2000)
-    expect(wrapper.get('.copy-btn.web').text()).toBe('کپی')
-
-    await wrapper.get('.copy-btn.web').trigger('click')
-    await flushPromises()
-
-    expect(writeText).toHaveBeenNthCalledWith(2, 'https://coin.gold-trade.ir/i/ROUTE001')
-    expect(wrapper.get('.copy-btn.web').text()).toBe('خطا')
-
-    await vi.advanceTimersByTimeAsync(2000)
-    expect(wrapper.get('.copy-btn.web').text()).toBe('کپی')
-  })
-
-  it('fails closed when the backend returns a non-canonical Web link', async () => {
-    createInvitationMocks.apiFetchMock.mockResolvedValue(
-      makeJsonResponse({
-        link: 'https://t.me/mbmtrading1_bot?start=invite-token',
-        short_link: 'not-a-valid-url',
-      }),
-    )
-
-    const wrapper = await mountView()
-    await fillInviteForm(wrapper)
-    await wrapper.get('form').trigger('submit.prevent')
-    await flushPromises()
-
-    const textInputs = wrapper.findAll('.success-box input[readonly]')
-    expect(textInputs).toHaveLength(1)
-    expect(wrapper.text()).not.toContain('not-a-valid-url')
-  })
-
-  it('limits invite role choices for cached middle managers', async () => {
+  it('limits invite role choices for cached middle managers without replacing server authority', async () => {
     localStorage.setItem('current_user_summary', JSON.stringify({ role: 'مدیر میانی' }))
 
     const wrapper = await mountView()
@@ -339,298 +298,283 @@ describe('CreateInvitationView.vue', () => {
     expect((wrapper.get('#role').element as HTMLSelectElement).value).toBe('عادی')
   })
 
-  it('loads pending invitations and renders their direct web registration links', async () => {
-    createInvitationMocks.apiFetchMock.mockImplementation((url: string) => {
-      if (url === '/api/invitations/pending') {
-        return Promise.resolve(makeJsonResponse([
-          {
-            id: 12,
-            account_name: 'pending-user',
-            mobile_number: '09120000000',
-            role: 'عادی',
-            short_link: 'https://coin.gold-trade.ir/i/SHORT012',
-            expires_at: '2026-06-12T10:00:00',
-            created_at: '2026-06-11T10:00:00',
-          },
-        ]))
-      }
-      return Promise.reject(new Error(`Unexpected API call: ${url}`))
-    })
-
-    const wrapper = await mountView({}, { clearInitialFetch: false })
-
-    expect(createInvitationMocks.apiFetchMock).toHaveBeenCalledWith('/api/invitations/pending', expect.any(Object))
-    expect(wrapper.text()).toContain('pending-user')
-    expect(wrapper.text()).toContain('09120000000')
-    expect(wrapper.get('.pending-refresh-btn').classes()).toContain('ui-button')
-    expect(wrapper.get('.pending-copy-btn').classes()).toContain('ui-button')
-    expect(wrapper.get('.delete-pending-btn').classes()).toContain('ui-button')
-    const pendingInputWrapper = wrapper.get('.pending-link-row input[readonly]')
-    expect(pendingInputWrapper.classes()).toContain('ui-input')
-    const pendingInput = pendingInputWrapper.element as HTMLInputElement
-    expect(pendingInput.value).toBe('https://coin.gold-trade.ir/i/SHORT012')
-  })
-
-  it('copies both pending invitation surfaces and tracks each status independently', async () => {
-    const writeText = vi.fn()
-      .mockResolvedValueOnce(undefined)
-      .mockRejectedValueOnce(new Error('clipboard denied'))
+  it('loads pending invitations with no-store, no total, and copy-only channel controls', async () => {
+    const botLink = 'https://t.me/bot?start=INV-queue'
+    const webLink = 'https://coin.gold-trade.ir/i/QUEUE001'
+    const writeText = vi.fn().mockResolvedValue(undefined)
     installClipboard(writeText)
     createInvitationMocks.apiFetchMock.mockResolvedValue(makeJsonResponse([
-      {
-        id: 14,
-        account_name: 'dual-surface-user',
-        mobile_number: '09120000014',
-        role: 'عادی',
-        bot_link: 'https://t.me/bot?start=INV-14',
-        web_short_link: 'https://coin.gold-trade.ir/i/INV00014',
-        bot_available: true,
-        web_available: true,
-        state: 'pending',
-        sms_status: 'disabled',
-        expires_at: '2026-07-14T10:00:00Z',
-      },
+      pendingInvitation({ bot_link: botLink, web_short_link: webLink, bot_available: true }),
     ]))
 
     const wrapper = await mountView({}, { clearInitialFetch: false })
-    const buttons = wrapper.findAll('.pending-copy-btn')
-    expect(buttons).toHaveLength(2)
+    const pendingRequest = createInvitationMocks.apiFetchMock.mock.calls.find(([url]) => url === '/api/invitations/pending')
 
-    await buttons[0]!.trigger('click')
+    expect(pendingRequest?.[1]).toEqual(expect.objectContaining({
+      cache: 'no-store',
+      retryNetwork: false,
+      trackConnectionState: false,
+      signal: expect.any(AbortSignal),
+    }))
+    expect(wrapper.get('.pending-header p').text()).toBe('فهرست دعوت‌های در انتظار')
+    expect(wrapper.text()).not.toContain('دعوت‌نامه فعال')
+    expect(wrapper.findAll('.pending-copy-btn')).toHaveLength(2)
+    expect(wrapper.findAll('.pending-link-row input')).toHaveLength(0)
+    expect(wrapper.html()).not.toContain(botLink)
+    expect(wrapper.html()).not.toContain(webLink)
+
+    const copyButtons = wrapper.findAll('.pending-copy-btn')
+    await copyButtons[0]!.trigger('click')
+    await copyButtons[1]!.trigger('click')
     await flushPromises()
-    expect(writeText).toHaveBeenNthCalledWith(1, 'https://t.me/bot?start=INV-14')
-    expect(buttons[0]!.text()).toBe('کپی شد!')
-    expect(buttons[1]!.text()).toBe('کپی لینک وب')
-
-    await buttons[1]!.trigger('click')
-    await flushPromises()
-    expect(writeText).toHaveBeenNthCalledWith(2, 'https://coin.gold-trade.ir/i/INV00014')
-    expect(buttons[1]!.text()).toBe('خطا')
-
-    await vi.advanceTimersByTimeAsync(2000)
-    expect(buttons[0]!.text()).toBe('کپی لینک تلگرام')
-    expect(buttons[1]!.text()).toBe('کپی لینک وب')
+    expect(writeText).toHaveBeenNthCalledWith(1, botLink)
+    expect(writeText).toHaveBeenNthCalledWith(2, webLink)
   })
 
-  it('uses the fallback copy path for a pending invitation surface', async () => {
-    installClipboard(undefined)
-    const execCommand = installExecCommand(true)
-    createInvitationMocks.apiFetchMock.mockResolvedValue(makeJsonResponse([
-      {
-        id: 15,
-        account_name: 'fallback-user',
-        mobile_number: '09120000015',
-        role: 'عادی',
-        web_short_link: 'https://coin.gold-trade.ir/i/INV00015',
-        web_available: true,
-        state: 'pending',
-        expires_at: '2026-07-14T10:00:00Z',
-      },
-    ]))
+  it('preserves loaded pending invitations when a background refresh fails', async () => {
+    let pendingCalls = 0
+    createInvitationMocks.apiFetchMock.mockImplementation((url: string) => {
+      if (url !== '/api/invitations/pending') return Promise.reject(new Error(`Unexpected API call: ${url}`))
+      pendingCalls += 1
+      return Promise.resolve(pendingCalls === 1
+        ? makeJsonResponse([pendingInvitation()])
+        : makeJsonResponse({ detail: 'private failure' }, false, 500))
+    })
 
     const wrapper = await mountView({}, { clearInitialFetch: false })
-    await wrapper.get('.pending-copy-btn').trigger('click')
+    await wrapper.get('.pending-refresh-btn').trigger('click')
     await flushPromises()
 
-    expect(execCommand).toHaveBeenCalledWith('copy')
-    expect(wrapper.get('.pending-copy-btn').text()).toBe('کپی شد!')
-    await vi.advanceTimersByTimeAsync(2000)
-    expect(wrapper.get('.pending-copy-btn').text()).toBe('کپی لینک وب')
+    expect(wrapper.text()).toContain('pending-user')
+    expect(wrapper.get('.pending-refresh-error').text()).toContain('دریافت دعوت‌نامه‌ها ممکن نشد.')
+    expect(wrapper.text()).not.toContain('private failure')
   })
 
-  it('reports both bounded fallback-copy failures for pending invitation links', async () => {
-    installClipboard(undefined)
-    const execCommand = installExecCommand(false)
-    createInvitationMocks.apiFetchMock.mockResolvedValue(makeJsonResponse([{
-      id: 16,
-      account_name: 'fallback-error-user',
-      mobile_number: '09120000016',
-      role: 'عادی',
-      bot_link: 'https://t.me/bot?start=INV-16',
-      web_short_link: 'https://coin.gold-trade.ir/i/INV00016',
-      bot_available: true,
-      web_available: true,
-      state: 'pending',
-      expires_at: '2026-07-14T10:00:00Z',
-    }]))
+  it('clears loaded pending invitation data when a refresh reports 403', async () => {
+    let pendingCalls = 0
+    createInvitationMocks.apiFetchMock.mockImplementation((url: string) => {
+      if (url !== '/api/invitations/pending') return Promise.reject(new Error(`Unexpected API call: ${url}`))
+      pendingCalls += 1
+      return Promise.resolve(pendingCalls === 1
+        ? makeJsonResponse([pendingInvitation()])
+        : makeJsonResponse({ detail: 'private access policy' }, false, 403))
+    })
 
     const wrapper = await mountView({}, { clearInitialFetch: false })
-    const inputs = wrapper.findAll('.pending-link-row input[readonly]')
-    await inputs[0]!.trigger('click')
-    expect(execCommand).toHaveBeenCalledWith('copy')
-    expect(wrapper.findAll('.pending-copy-btn')[0]!.text()).toBe('خطا')
+    await wrapper.get('.pending-refresh-btn').trigger('click')
+    await flushPromises()
 
-    execCommand.mockImplementation(() => { throw new Error('copy unavailable') })
-    await inputs[1]!.trigger('click')
-    expect(wrapper.findAll('.pending-copy-btn')[1]!.text()).toBe('خطا')
-
-    await vi.advanceTimersByTimeAsync(2000)
-    expect(wrapper.findAll('.pending-copy-btn')[0]!.text()).toBe('کپی لینک تلگرام')
-    expect(wrapper.findAll('.pending-copy-btn')[1]!.text()).toBe('کپی لینک وب')
+    expect(wrapper.text()).not.toContain('pending-user')
+    expect(wrapper.get('.pending-error').text()).toContain('دسترسی شما به فهرست دعوت‌نامه‌ها تأیید نشد.')
+    expect(wrapper.text()).not.toContain('private access policy')
   })
 
-  it('deletes a pending invitation after confirmation and removes it from the list', async () => {
-    createInvitationMocks.apiFetchMock.mockImplementation((url: string, init?: RequestInit) => {
+  it('ignores an aborted stale pending response after a newer refresh wins', async () => {
+    const first = deferred<ReturnType<typeof makeJsonResponse>>()
+    const second = deferred<ReturnType<typeof makeJsonResponse>>()
+    let pendingCalls = 0
+    createInvitationMocks.apiFetchMock.mockImplementation((url: string) => {
       if (url === '/api/invitations/pending') {
-        return Promise.resolve(makeJsonResponse([
-          {
-            id: 12,
-            account_name: 'pending-user',
-            mobile_number: '09120000000',
-            role: 'عادی',
-            web_short_link: 'https://coin.gold-trade.ir/i/PEND0012',
-            expires_at: '2026-06-12T10:00:00',
-            created_at: '2026-06-11T10:00:00',
-          },
-        ]))
+        pendingCalls += 1
+        return pendingCalls === 1 ? first.promise : second.promise
       }
-      if (url === '/api/invitations/pending/12' && init?.method === 'DELETE') {
-        return Promise.resolve(makeJsonResponse({}, true, 204))
+      if (url === '/api/invitations/') {
+        return Promise.resolve(makeJsonResponse({
+          created: true,
+          state: 'pending',
+          web_short_link: 'https://coin.gold-trade.ir/i/STALE001',
+          bot_available: false,
+          web_available: true,
+          expires_at: '2026-07-14T10:00:00Z',
+        }))
       }
       return Promise.reject(new Error(`Unexpected API call: ${url}`))
     })
 
     const wrapper = await mountView({}, { clearInitialFetch: false })
+    await fillInviteForm(wrapper)
+    await wrapper.get('form').trigger('submit.prevent')
+    await flushPromises()
+    expect(pendingCalls).toBe(2)
+    second.resolve(makeJsonResponse([pendingInvitation({ account_name: 'fresh-user', id: 22 })]))
+    await flushPromises()
+    expect(wrapper.text()).toContain('fresh-user')
 
-    expect(wrapper.text()).toContain('pending-user')
+    first.resolve(makeJsonResponse([pendingInvitation({ account_name: 'stale-user', id: 23 })]))
+    await flushPromises()
+    expect(wrapper.text()).toContain('fresh-user')
+    expect(wrapper.text()).not.toContain('stale-user')
+  })
 
-    await wrapper.get('.delete-pending-btn').trigger('click')
+  it('aborts an in-flight pending request when the component unmounts', async () => {
+    const request = deferred<ReturnType<typeof makeJsonResponse>>()
+    createInvitationMocks.apiFetchMock.mockReturnValue(request.promise)
+
+    const wrapper = await mountView({}, { clearInitialFetch: false })
+    wrapper.unmount()
+    const wrapperIndex = mountedWrappers.indexOf(wrapper)
+    if (wrapperIndex >= 0) mountedWrappers.splice(wrapperIndex, 1)
+    request.resolve(makeJsonResponse([pendingInvitation()]))
     await flushPromises()
 
-    expect(wrapper.get('.pending-delete-confirm').text()).toContain('حذف دعوت‌نامه pending-user؟')
+    expect(wrapper.exists()).toBe(false)
+  })
+
+  it('uses the shared modal dialog and removes a pending invitation only after a 204 receipt', async () => {
+    createInvitationMocks.apiFetchMock.mockImplementation((url: string, init?: RequestInit) => {
+      if (url === '/api/invitations/pending') return Promise.resolve(makeJsonResponse([pendingInvitation()]))
+      if (url === '/api/invitations/pending/12' && init?.method === 'DELETE') return Promise.resolve(makeJsonResponse({}, true, 204))
+      return Promise.reject(new Error(`Unexpected API call: ${url}`))
+    })
+
+    const wrapper = await mountView({}, { clearInitialFetch: false })
+    const dialog = await openDeleteDialog(wrapper)
+    expect(dialog.attributes('role')).toBe('dialog')
+    expect(dialog.attributes('aria-modal')).toBe('true')
+    expect(dialog.text()).toContain('حذف دعوت‌نامه pending-user؟')
     expect(createInvitationMocks.apiFetchMock).not.toHaveBeenCalledWith('/api/invitations/pending/12', expect.anything())
 
-    await wrapper.get('.pending-delete-confirm .ui-button--danger').trigger('click')
+    await dialog.get('.ui-button--danger').trigger('click')
     await flushPromises()
 
     expect(createInvitationMocks.apiFetchMock).toHaveBeenCalledWith('/api/invitations/pending/12', expect.objectContaining({
       method: 'DELETE',
+      cache: 'no-store',
       retryNetwork: false,
       trackConnectionState: false,
     }))
     expect(wrapper.text()).not.toContain('pending-user')
-    expect(wrapper.get('.pending-state.empty').classes()).toContain('ui-empty-state')
-    expect(wrapper.text()).toContain('دعوت‌نامه pending وجود ندارد.')
+    expect(wrapper.get('.pending-notice').text()).toContain('دعوت‌نامه از فهرست حذف شد.')
+    expect(wrapper.find('.ui-confirm-dialog').exists()).toBe(false)
   })
 
-  it('renders pending invitation load failures with the shared error state', async () => {
-    createInvitationMocks.apiFetchMock.mockResolvedValue(
-      makeJsonResponse({ detail: 'pending down' }, false, 500),
-    )
-
-    const wrapper = await mountView({}, { clearInitialFetch: false })
-
-    const pendingError = wrapper.get('.pending-error')
-    expect(pendingError.classes()).toContain('ui-empty-state')
-    expect(pendingError.attributes('role')).toBe('alert')
-    expect(pendingError.text()).toContain('دریافت دعوت‌نامه‌ها ممکن نشد. دوباره تلاش کنید.')
-    expect(pendingError.text()).not.toContain('pending down')
-  })
-
-  it('keeps the invitation and controlled confirmation open after a failed delete and ignores duplicate confirms', async () => {
-    let resolveDelete: ((value: ReturnType<typeof makeJsonResponse>) => void) | undefined
-    const deleteResponse = new Promise<ReturnType<typeof makeJsonResponse>>((resolve) => { resolveDelete = resolve })
+  it('does not treat a non-204 success response as a successful revoke', async () => {
     createInvitationMocks.apiFetchMock.mockImplementation((url: string, init?: RequestInit) => {
-      if (url === '/api/invitations/pending') {
-        return Promise.resolve(makeJsonResponse([{
-          id: 18,
-          account_name: 'kept-user',
-          mobile_number: '09120000018',
-          role: 'عادی',
-          web_short_link: 'https://coin.gold-trade.ir/i/INV00018',
-          expires_at: '2026-07-14T10:00:00Z',
-        }]))
-      }
-      if (url === '/api/invitations/pending/18' && init?.method === 'DELETE') return deleteResponse
+      if (url === '/api/invitations/pending') return Promise.resolve(makeJsonResponse([pendingInvitation()]))
+      if (url === '/api/invitations/pending/12' && init?.method === 'DELETE') return Promise.resolve(makeJsonResponse({}, true, 200))
       return Promise.reject(new Error(`Unexpected API call: ${url}`))
     })
 
     const wrapper = await mountView({}, { clearInitialFetch: false })
-    await wrapper.get('.delete-pending-btn').trigger('click')
-    const confirmButton = wrapper.get('.pending-delete-confirm .ui-button--danger')
-    await confirmButton.trigger('click')
-    await confirmButton.trigger('click')
-
-    expect(createInvitationMocks.apiFetchMock.mock.calls.filter(([url]) => url === '/api/invitations/pending/18')).toHaveLength(1)
-    resolveDelete!(makeJsonResponse({ detail: 'server detail' }, false, 500))
+    const dialog = await openDeleteDialog(wrapper)
+    await dialog.get('.ui-button--danger').trigger('click')
     await flushPromises()
 
-    expect(wrapper.text()).toContain('kept-user')
-    expect(wrapper.find('.pending-delete-confirm').exists()).toBe(true)
-    expect(wrapper.get('.pending-delete-error').text()).toContain('دعوت‌نامه تغییری نکرده است.')
+    expect(wrapper.text()).toContain('pending-user')
+    expect(wrapper.find('.ui-confirm-dialog').exists()).toBe(true)
+    expect(wrapper.text()).toContain('وضعیت آن از سرور تأیید نشد.')
+  })
+
+  it.each([400, 404])('reconciles a terminal %s revoke response with one fresh pending list', async (status) => {
+    let pendingCalls = 0
+    createInvitationMocks.apiFetchMock.mockImplementation((url: string, init?: RequestInit) => {
+      if (url === '/api/invitations/pending') {
+        pendingCalls += 1
+        return Promise.resolve(makeJsonResponse(pendingCalls === 1 ? [pendingInvitation()] : []))
+      }
+      if (url === '/api/invitations/pending/12' && init?.method === 'DELETE') {
+        return Promise.resolve(makeJsonResponse({ detail: 'private lifecycle detail' }, false, status))
+      }
+      return Promise.reject(new Error(`Unexpected API call: ${url}`))
+    })
+
+    const wrapper = await mountView({}, { clearInitialFetch: false })
+    const dialog = await openDeleteDialog(wrapper)
+    await dialog.get('.ui-button--danger').trigger('click')
+    await flushPromises()
+
+    expect(pendingCalls).toBe(2)
+    expect(wrapper.text()).not.toContain('pending-user')
+    expect(wrapper.get('.pending-notice').text()).toContain('دعوت‌نامه دیگر در انتظار نیست؛ فهرست به‌روز شد.')
+    expect(wrapper.find('.ui-confirm-dialog').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('private lifecycle detail')
+  })
+
+  it('clears sensitive pending data on a permission denial without disclosing server policy detail', async () => {
+    let pendingCalls = 0
+    createInvitationMocks.apiFetchMock.mockImplementation((url: string, init?: RequestInit) => {
+      if (url === '/api/invitations/pending') {
+        pendingCalls += 1
+        return Promise.resolve(makeJsonResponse([pendingInvitation()]))
+      }
+      if (url === '/api/invitations/pending/12' && init?.method === 'DELETE') {
+        return Promise.resolve(makeJsonResponse({ detail: 'foreign invitation policy' }, false, 403))
+      }
+      return Promise.reject(new Error(`Unexpected API call: ${url}`))
+    })
+
+    const wrapper = await mountView({}, { clearInitialFetch: false })
+    const dialog = await openDeleteDialog(wrapper)
+    await dialog.get('.ui-button--danger').trigger('click')
+    await flushPromises()
+
+    expect(pendingCalls).toBe(1)
+    expect(wrapper.text()).not.toContain('pending-user')
+    expect(wrapper.find('.ui-confirm-dialog').exists()).toBe(false)
+    expect(wrapper.get('.pending-error').text()).toContain('دسترسی شما به فهرست دعوت‌نامه‌ها تأیید نشد.')
+    expect(wrapper.text()).not.toContain('foreign invitation policy')
+  })
+
+  it('clears an in-memory create link when a later pending refresh is forbidden', async () => {
+    let pendingCalls = 0
+    const botLink = 'https://t.me/mbmtrading1_bot?start=INV-forbidden-clear'
+    createInvitationMocks.apiFetchMock.mockImplementation((url: string) => {
+      if (url === '/api/invitations/pending') {
+        pendingCalls += 1
+        return Promise.resolve(pendingCalls === 3
+          ? makeJsonResponse({ detail: 'foreign invitation policy' }, false, 403)
+          : makeJsonResponse([pendingInvitation()]))
+      }
+      if (url === '/api/invitations/') {
+        return Promise.resolve(makeJsonResponse({
+          created: true,
+          state: 'pending',
+          bot_link: botLink,
+          bot_available: true,
+          web_available: false,
+          expires_at: '2026-07-14T10:00:00Z',
+        }))
+      }
+      return Promise.reject(new Error(`Unexpected API call: ${url}`))
+    })
+
+    const wrapper = await mountView({}, { clearInitialFetch: false })
+    await fillInviteForm(wrapper)
+    await wrapper.get('form').trigger('submit.prevent')
+    await flushPromises()
+    expect(wrapper.find('.success-box').exists()).toBe(true)
+
+    await wrapper.get('.pending-refresh-btn').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('.success-box').exists()).toBe(false)
+    expect(wrapper.findAll('.success-box .copy-btn')).toHaveLength(0)
+    expect(wrapper.text()).not.toContain('pending-user')
+    expect(wrapper.html()).not.toContain(botLink)
+    expect(wrapper.get('.pending-error').text()).toContain('دسترسی شما به فهرست دعوت‌نامه‌ها تأیید نشد.')
+  })
+
+  it('keeps one controlled confirmation after a generic delete failure and ignores duplicate confirms', async () => {
+    const deleteResponse = deferred<ReturnType<typeof makeJsonResponse>>()
+    createInvitationMocks.apiFetchMock.mockImplementation((url: string, init?: RequestInit) => {
+      if (url === '/api/invitations/pending') return Promise.resolve(makeJsonResponse([pendingInvitation()]))
+      if (url === '/api/invitations/pending/12' && init?.method === 'DELETE') return deleteResponse.promise
+      return Promise.reject(new Error(`Unexpected API call: ${url}`))
+    })
+
+    const wrapper = await mountView({}, { clearInitialFetch: false })
+    const dialog = await openDeleteDialog(wrapper)
+    const confirmButton = dialog.get('.ui-button--danger')
+    await confirmButton.trigger('click')
+    await confirmButton.trigger('click')
+    expect(createInvitationMocks.apiFetchMock.mock.calls.filter(([url]) => url === '/api/invitations/pending/12')).toHaveLength(1)
+
+    deleteResponse.resolve(makeJsonResponse({ detail: 'server detail' }, false, 500))
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('pending-user')
+    expect(wrapper.find('.ui-confirm-dialog').exists()).toBe(true)
+    expect(wrapper.text()).toContain('وضعیت آن از سرور تأیید نشد.')
     expect(wrapper.text()).not.toContain('server detail')
-  })
-
-  it('shows a fallback copy error for the Telegram link when execCommand returns false', async () => {
-    installClipboard(undefined)
-    installExecCommand(false)
-    createInvitationMocks.apiFetchMock.mockResolvedValue(
-      makeJsonResponse({
-        link: 'https://t.me/mbmtrading1_bot?start=invite-token',
-        short_link: '',
-      }),
-    )
-
-    const wrapper = await mountView()
-    await fillInviteForm(wrapper)
-    await wrapper.get('form').trigger('submit.prevent')
-    await flushPromises()
-
-    await wrapper.get('.copy-btn').trigger('click')
-    await flushPromises()
-
-    expect(wrapper.get('.copy-btn').text()).toBe('خطا')
-
-    await vi.advanceTimersByTimeAsync(2000)
-    expect(wrapper.get('.copy-btn').text()).toBe('کپی')
-  })
-
-  it('surfaces Telegram clipboard write failures without using the fallback textarea path', async () => {
-    const writeText = vi.fn().mockRejectedValue(new Error('clipboard denied'))
-    installClipboard(writeText)
-    createInvitationMocks.apiFetchMock.mockResolvedValue(
-      makeJsonResponse({
-        link: 'https://t.me/mbmtrading1_bot?start=invite-token',
-        short_link: '',
-      }),
-    )
-
-    const wrapper = await mountView()
-    await fillInviteForm(wrapper)
-    await wrapper.get('form').trigger('submit.prevent')
-    await flushPromises()
-
-    await wrapper.get('.copy-btn').trigger('click')
-    await flushPromises()
-
-    expect(writeText).toHaveBeenCalledWith('https://t.me/mbmtrading1_bot?start=invite-token')
-    expect(wrapper.get('.copy-btn').text()).toBe('خطا')
-
-    await vi.advanceTimersByTimeAsync(2000)
-    expect(wrapper.get('.copy-btn').text()).toBe('کپی')
-  })
-
-  it('shows a fallback copy error for the web link when execCommand throws', async () => {
-    installClipboard(undefined)
-    installExecCommand(new Error('copy failed'))
-    createInvitationMocks.apiFetchMock.mockResolvedValue(
-      makeJsonResponse({
-        link: 'https://t.me/mbmtrading1_bot?start=invite-token',
-        short_link: 'https://coin.gold-trade.ir/i/ROUTE001',
-      }),
-    )
-
-    const wrapper = await mountView()
-    await fillInviteForm(wrapper)
-    await wrapper.get('form').trigger('submit.prevent')
-    await flushPromises()
-
-    await wrapper.get('.copy-btn.web').trigger('click')
-    await flushPromises()
-
-    expect(wrapper.get('.copy-btn.web').text()).toBe('خطا')
-
-    await vi.advanceTimersByTimeAsync(2000)
-    expect(wrapper.get('.copy-btn.web').text()).toBe('کپی')
   })
 })
