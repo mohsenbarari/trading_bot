@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "stage": 6,
-  "scope": "historical-phase1-phase2-phase3-static-figma-provenance-with-live-editable-phase4-phase5-phase6-phase7-phase8-phase9-phase10-phase11-references",
+  "scope": "historical-phase1-phase2-phase3-static-figma-provenance-with-live-editable-phase4-phase5-phase6-phase7-phase8-phase9-phase10-phase11-phase12-references",
   "status": "pass_with_documented_page_sibling_topology",
   "mutableNarrative": true,
   "historicalStaticAudit": {
@@ -22,7 +22,7 @@
       "id": "321:18",
       "name": "08 — Stage 6 Admin & Profile",
       "directChildCountAtHistoricalAudit": 2,
-      "directChildCountCurrent": 10
+      "directChildCountCurrent": 11
     },
     "canonicalRoot": {
       "id": "321:19",
@@ -106,9 +106,72 @@
       ]
     }
   ],
-  "liveEditablePhase4To11": {
+  "topologyDisclosure": {
+    "phase1AndPhase2UnderRoot32119": true,
+    "phase3ParentId": "321:18",
+    "phase3IsPageSiblingOfRoot32119": true,
+    "phase3IsNestedUnderRoot32119": false,
+    "conclusion": "Coverage is page-level. Do not call this a single nested root bundle under 321:19.",
+    "phase4To12ParentId": "321:18",
+    "phase4To12ArePageSiblingsOfRoot32119": true
+  },
+  "authoritativeScreenshots": [
+    {
+      "path": "assets/figma/final-provenance-20260811T204635Z/figma-page-321-18.png",
+      "figmaNodeId": "321:18",
+      "bytes": 297229,
+      "sha256": "f987fd760c8b7e642f172ef2803e926cfb008454c3fa309cf6efe34e0c2d6d35"
+    },
+    {
+      "path": "assets/figma/final-provenance-20260811T204635Z/figma-root-321-19.png",
+      "figmaNodeId": "321:19",
+      "bytes": 205259,
+      "sha256": "c6ebb0327315e50e3873c0debedb64fa68a6c9c86ca46315a005eea391e03b57"
+    },
+    {
+      "path": "assets/figma/final-provenance-20260811T204635Z/figma-phase1-boundary-323-18.png",
+      "figmaNodeId": "323:18",
+      "bytes": 13362,
+      "sha256": "1d059c3ce1409b39839b0ebcdc5706b146e7303f2303ee4930747e24ef2b854b"
+    },
+    {
+      "path": "assets/figma/final-provenance-20260811T204635Z/figma-phase2-336-48.png",
+      "figmaNodeId": "336:48",
+      "bytes": 126957,
+      "sha256": "d839ee45a30470fdebd16ca79c6cf1ace1fa75bbf95aff7f39d6059fbd30210d"
+    },
+    {
+      "path": "assets/figma/final-provenance-20260811T204635Z/figma-phase3-381-318.png",
+      "figmaNodeId": "381:318",
+      "bytes": 112943,
+      "sha256": "290d2fa778fe1a64cca011ddcbfebcb5b4173ee7d08b7da4496cb82ab995744c"
+    }
+  ],
+  "staticAudit": {
+    "provenanceLabelsVisible": true,
+    "fontFamily": "Vazirmatn",
+    "postfixVisualReview": "pass; no label clipping or visual overlap in page-level render",
+    "syntheticDataProvenance": "visible for Phase 1, Phase 2 and Phase 3"
+  },
+  "boundaries": {
+    "historicalStaticAuditDidNotMutateFigmaOrSource": true,
+    "sitesStarted": false,
+    "stagingOrProductionChanged": false,
+    "stage6CompleteAuthority": false,
+    "doesNotIndependentlyProve": [
+      "runtime behavior",
+      "backend authority",
+      "browser accessibility",
+      "deployment readiness",
+      "Sites publication",
+      "Stage 6 closure"
+    ],
+    "phase4To12FigmaEditsWereExplicitlyAuthorized": true,
+    "phase4To12ReferencesAreLiveEditableNotFrozen": true
+  },
+  "liveEditablePhase4To12": {
     "status": "authoritative_live_design_references_not_local_screenshot_or_hash_freeze",
-    "sourceBoundary": "Phase 4–11 Figma updates were explicitly authorized. These references describe the current editable page and must not be conflated with historicalStaticAudit or authoritativeScreenshots.",
+    "sourceBoundary": "Phase 4–12 Figma updates were explicitly authorized. These references describe the current editable page and must not be conflated with historicalStaticAudit or authoritativeScreenshots.",
     "phase4": {
       "source": {
         "commit": "7ac46a36a2ba968246bd285c357bc362a328cdd2",
@@ -527,69 +590,76 @@
           "retry": "Danger"
         }
       }
+    },
+    "phase12": {
+      "source": {
+        "commit": "61e4e70f16735166ac4e26ed978580ddb1311624",
+        "tree": "78ae43c1ab0227691b5bc5c9f92f57f93f70877b"
+      },
+      "section": {
+        "id": "468:1026",
+        "name": "12 — Account storage local clear · confirmation & safe recovery · source 61e4e70f",
+        "width": 2592,
+        "height": 1804
+      },
+      "provenanceLabel": {
+        "id": "468:1027",
+        "visibleText": "Phase 12 · پاک‌سازی حافظه محلی · source 61e4e70f · دادهٔ synthetic"
+      },
+      "proofFrames": [
+        {
+          "id": "468:1028",
+          "name": "W1 — Account storage local clear · confirmation · mobile 390×844",
+          "width": 390,
+          "height": 844
+        },
+        {
+          "id": "468:1051",
+          "name": "W2 — Account storage local clear · safe recovery · mobile 390×844",
+          "width": 390,
+          "height": 844
+        }
+      ],
+      "geometry": {
+        "backdrop": {
+          "id": "468:1043",
+          "x": 0,
+          "y": 0,
+          "width": 390,
+          "height": 844
+        },
+        "dialog": {
+          "id": "468:1044",
+          "x": 16,
+          "y": 278,
+          "width": 358,
+          "height": 288,
+          "fullyInsideMobileViewport": true
+        }
+      },
+      "liveAudit": {
+        "allTextFontFamily": "Vazirmatn",
+        "textNodeCount": 37,
+        "linkedInstanceCount": 9,
+        "sensitiveTextScan": {
+          "urls": 0,
+          "emails": 0,
+          "phoneLike": 0,
+          "rawServerErrorOrReceipt": 0,
+          "cacheInternalNameInDialog": 0
+        },
+        "linkedInstanceFamilies": [
+          "Header",
+          "Navigation",
+          "Button"
+        ],
+        "accountStorageActionVariants": {
+          "open": "Danger",
+          "confirm": "Danger",
+          "cancel": "Secondary",
+          "sizeRetry": "Secondary"
+        }
+      }
     }
-  },
-  "topologyDisclosure": {
-    "phase1AndPhase2UnderRoot32119": true,
-    "phase3ParentId": "321:18",
-    "phase3IsPageSiblingOfRoot32119": true,
-    "phase3IsNestedUnderRoot32119": false,
-    "conclusion": "Coverage is page-level. Do not call this a single nested root bundle under 321:19.",
-    "phase4To11ParentId": "321:18",
-    "phase4To11ArePageSiblingsOfRoot32119": true
-  },
-  "authoritativeScreenshots": [
-    {
-      "path": "assets/figma/final-provenance-20260811T204635Z/figma-page-321-18.png",
-      "figmaNodeId": "321:18",
-      "bytes": 297229,
-      "sha256": "f987fd760c8b7e642f172ef2803e926cfb008454c3fa309cf6efe34e0c2d6d35"
-    },
-    {
-      "path": "assets/figma/final-provenance-20260811T204635Z/figma-root-321-19.png",
-      "figmaNodeId": "321:19",
-      "bytes": 205259,
-      "sha256": "c6ebb0327315e50e3873c0debedb64fa68a6c9c86ca46315a005eea391e03b57"
-    },
-    {
-      "path": "assets/figma/final-provenance-20260811T204635Z/figma-phase1-boundary-323-18.png",
-      "figmaNodeId": "323:18",
-      "bytes": 13362,
-      "sha256": "1d059c3ce1409b39839b0ebcdc5706b146e7303f2303ee4930747e24ef2b854b"
-    },
-    {
-      "path": "assets/figma/final-provenance-20260811T204635Z/figma-phase2-336-48.png",
-      "figmaNodeId": "336:48",
-      "bytes": 126957,
-      "sha256": "d839ee45a30470fdebd16ca79c6cf1ace1fa75bbf95aff7f39d6059fbd30210d"
-    },
-    {
-      "path": "assets/figma/final-provenance-20260811T204635Z/figma-phase3-381-318.png",
-      "figmaNodeId": "381:318",
-      "bytes": 112943,
-      "sha256": "290d2fa778fe1a64cca011ddcbfebcb5b4173ee7d08b7da4496cb82ab995744c"
-    }
-  ],
-  "staticAudit": {
-    "provenanceLabelsVisible": true,
-    "fontFamily": "Vazirmatn",
-    "postfixVisualReview": "pass; no label clipping or visual overlap in page-level render",
-    "syntheticDataProvenance": "visible for Phase 1, Phase 2 and Phase 3"
-  },
-  "boundaries": {
-    "historicalStaticAuditDidNotMutateFigmaOrSource": true,
-    "sitesStarted": false,
-    "stagingOrProductionChanged": false,
-    "stage6CompleteAuthority": false,
-    "doesNotIndependentlyProve": [
-      "runtime behavior",
-      "backend authority",
-      "browser accessibility",
-      "deployment readiness",
-      "Sites publication",
-      "Stage 6 closure"
-    ],
-    "phase4To11FigmaEditsWereExplicitlyAuthorized": true,
-    "phase4To11ReferencesAreLiveEditableNotFrozen": true
   }
 }

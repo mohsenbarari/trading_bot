@@ -2,7 +2,7 @@
 
 تاریخ آغاز: ۲۰۲۶-۰۸-۱۱
 
-وضعیت: **`stage6_phase1_phase2_phase3_phase4_phase5_phase6_phase7_phase8_phase9_phase10_phase11_delivered_broader_roadmap_partial_deferred`**
+وضعیت: **`stage6_phase1_phase2_phase3_phase4_phase5_phase6_phase7_phase8_phase9_phase10_phase11_phase12_delivered_broader_roadmap_partial_deferred`**
 
 شاخه: `condidate/webapp-ui-ux-redesign-v2`
 
@@ -22,7 +22,7 @@ Stage 6 به‌صورت route-scoped، rollback-safe و با گیت مستقل �
 4. Figma editable canonical با file key `z8jgJxST4O2APzWnlyP9gv`؛
 5. کد و contractهای backend فعلی، برای authority، permission و outcome واقعی.
 
-صفحهٔ Figma این Stage برابر `08 — Stage 6 Admin & Profile` (`321:18`) است. root (`321:19`) Phase 1 و Phase 2 را دارد و sectionهای Phase 3 (`381:318`)، Phase 4 (`398:504`)، Phase 5 (`413:571`)، Phase 6 (`422:636`)، Phase 7 (`442:701`)، Phase 8 (`451:766`)، Phase 9 (`455:831`)، Phase 10 (`464:896`) و Phase 11 (`466:961`) sibling همان page هستند. این topology page-level صریحاً افشا می‌شود: هیچ board تأییدشدهٔ `0B-4`، `0B-5` یا Stage 5 بازنویسی نشده و evidence را نباید یک root-bundle nested واحد نامید.
+صفحهٔ Figma این Stage برابر `08 — Stage 6 Admin & Profile` (`321:18`) است. root (`321:19`) Phase 1 و Phase 2 را دارد و sectionهای Phase 3 (`381:318`)، Phase 4 (`398:504`)، Phase 5 (`413:571`)، Phase 6 (`422:636`)، Phase 7 (`442:701`)، Phase 8 (`451:766`)، Phase 9 (`455:831`)، Phase 10 (`464:896`)، Phase 11 (`466:961`) و Phase 12 (`468:1026`) sibling همان page هستند. این topology page-level صریحاً افشا می‌شود: هیچ board تأییدشدهٔ `0B-4`، `0B-5` یا Stage 5 بازنویسی نشده و evidence را نباید یک root-bundle nested واحد نامید.
 
 ## ۳. Phase 1 — ورودی مدیریت
 
@@ -73,7 +73,7 @@ rollback به revert commit مستقل Phase 1 محدود است؛ پس از rol
 
 ## ۷. Figma، evidence و Sites
 
-Figma منبع اصلی طراحی است. Phase 1 boundary card و proof موبایل ورودی مدیریت، Phase 2 directory/desktop/recovery، Phase 3 privacy/authority، Phase 4 invitation management، Phase 5 block confirmation، Phase 6 workspace account deletion، Phase 7 session-termination safe recovery، Phase 8 relation-mutation safe recovery، Phase 9 commodity deletion exact-receipt safe recovery، Phase 10 admin user deletion exact-receipt safe recovery و Phase 11 account-security session exact-receipt safe recovery را ثبت می‌کند؛ pending-attention canonical فقط در state دارای دادهٔ واقعی باقی می‌ماند و به runtime نسبت داده نمی‌شود. Phaseهای 3 تا 11 siblingهای page-level root هستند؛ این caveat مانع از ادعای nested bundle می‌شود.
+Figma منبع اصلی طراحی است. Phase 1 boundary card و proof موبایل ورودی مدیریت، Phase 2 directory/desktop/recovery، Phase 3 privacy/authority، Phase 4 invitation management، Phase 5 block confirmation، Phase 6 workspace account deletion، Phase 7 session-termination safe recovery، Phase 8 relation-mutation safe recovery، Phase 9 commodity deletion exact-receipt safe recovery، Phase 10 admin user deletion exact-receipt safe recovery، Phase 11 account-security session exact-receipt safe recovery و Phase 12 account-storage local-clear confirmation را ثبت می‌کند؛ pending-attention canonical فقط در state دارای دادهٔ واقعی باقی می‌ماند و به runtime نسبت داده نمی‌شود. Phaseهای 3 تا 12 siblingهای page-level root هستند؛ این caveat مانع از ادعای nested bundle می‌شود.
 
 Sites در Stage 6 هنوز هیچ mutation، repo/project، preview یا deployment ندارد. اگر و فقط اگر scope گسترده‌تر مجاز و closure جداگانه آغاز شود، ابتدا inputs immutable freeze می‌شوند و سپس یک repo/project تازه و private owner-only برای evidence ساخته می‌شود. آن preview product deployment نیست و هیچ staging/production را تغییر نمی‌دهد.
 
@@ -255,6 +255,20 @@ browser receipt promotable در run `uiux-stage6-phase11-account-security-202608
 
 Figma Phase 11 در page `321:18`، sibling section `466:961` ثبت شد: W1=`466:963` confirmation و W2=`466:986` safe recovery، هر دو `390×844`. backdrop=`466:978` در `(0,0,390,844)` و dialog=`466:979` در `(16,278,358,288)` کامل داخل viewport هستند. label `466:962` دقیقاً `Phase 11 · نشست‌های امن حساب · source 7be4c830 · دادهٔ synthetic` است؛ audit live، 37 text node با familyهای Vazirmatn، 9 linked instance و unsafe scan خالی را تأیید کرد. این reference live/editable است و freeze یا screenshot hash مستقل نیست.
 
-## ۲۰. مرز closure
+## ۲۰. رسید Phase 12 — پاک‌سازی حافظه محلی حساب
 
-Phase 1/2/3/4/5/6/7/8/9/10/11 تحویل‌شده‌اند، اما broader roadmap Stage 6 partial/deferred است و **`stage6CompleteAuthority=false`**. هیچ `EVIDENCE_MANIFEST`، local freeze، Sites project/preview، product deployment، staging deployment یا production deployment ساخته یا تغییر داده نشده است. این checkpoint مجوز انجام deferredها یا ادعای complete Stage 6 نیست.
+Phase 12 در commit `61e4e70f16735166ac4e26ed978580ddb1311624` (tree `78ae43c1ab0227691b5bc5c9f92f57f93f70877b`) تحویل شد و فقط `SettingsView.vue` و test مستقیم آن را تغییر می‌دهد.
+
+- این slice مسیر موجود `/account/storage` را سخت می‌کند؛ backend، router، query contract، composable حافظه، مسیر `/account/security` و protected Market/Messenger surface تغییر نکرده‌اند.
+- پاک‌سازی فقط پس از تأیید، فایل‌های محلی همین دستگاه را حذف می‌کند؛ موفقیت اندازه را `0.00 MB` می‌کند و reload محلی را یک‌بار صدا می‌زند. شکست اندازه و فایل‌ها را حفظ می‌کند و علت خام را نمایش نمی‌دهد.
+- تأیید با `AppConfirmDialog` body-teleported انجام می‌شود؛ متن دیالوگ نام فروشگاه داخلی یا جزئیات حافظه ندارد؛ cancel یا Escape هیچ پاک‌سازی یا reload نمی‌دهد. شکست محلی دیالوگ، اندازه و مسیر را با copy ثابت امن نگه می‌دارد.
+
+گیت‌های source: focused `SettingsView.test.ts` برابر **28/28** pass، `npm run guard:ui` و `git diff --check` pass هستند؛ `vue-tsc --noEmit` خطای تازه‌ای روی `SettingsView` ندارد.
+
+browser receipt promotable در run `uiux-stage6-phase12-account-storage-20260812T192405395Z` با **6** assertion و **6** screenshot روی source binding 393 فایل pass شد. source binding SHA-256 `84b24039432882fdea3fd47ba53597fbd30341dade71880fe2457d49eb2bd877`، metrics `stage6-phase12-account-storage-metrics.json` با SHA-256 `a2a0ee567c2ecb4181a0724e6d8d6e52ef536dc670d6779cd0f9067790f4d76b`، binding `126996f74083dfe1700516a34cf5293c46916afc93d30535d31d9ca78174de93` و harness `4abcecc37ffd9e239b5d14fbc30f2956996cda59e422b300224b7609b78b7bd3` هستند. diagnostics غیرمنتظره صفر است. این receipt local/ephemeral است و انتخاب، copy یا freeze نشده است.
+
+Figma Phase 12 در page `321:18`، sibling section `468:1026` ثبت شد: W1=`468:1028` confirmation و W2=`468:1051` safe recovery، هر دو `390×844`. backdrop=`468:1043` در `(0,0,390,844)` و dialog=`468:1044` در `(16,278,358,288)` کامل داخل viewport هستند. label `468:1027` دقیقاً `Phase 12 · پاک‌سازی حافظه محلی · source 61e4e70f · دادهٔ synthetic` است؛ audit live، 37 text node با familyهای Vazirmatn، 9 linked instance و unsafe scan خالی را تأیید کرد. این reference live/editable است و freeze یا screenshot hash مستقل نیست.
+
+## ۲۱. مرز closure
+
+Phase 1/2/3/4/5/6/7/8/9/10/11/12 تحویل‌شده‌اند، اما broader roadmap Stage 6 partial/deferred است و **`stage6CompleteAuthority=false`**. هیچ `EVIDENCE_MANIFEST`، local freeze، Sites project/preview، product deployment، staging deployment یا production deployment ساخته یا تغییر داده نشده است. این checkpoint مجوز انجام deferredها یا ادعای complete Stage 6 نیست.

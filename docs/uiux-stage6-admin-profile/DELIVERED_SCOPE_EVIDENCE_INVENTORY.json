@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "stage": 6,
-  "scope": "historical-phase1-phase2-phase3-curated-evidence-with-phase4-phase5-phase6-phase7-phase8-phase9-phase10-phase11-supplemental-receipts",
+  "scope": "historical-phase1-phase2-phase3-curated-evidence-with-phase4-phase5-phase6-phase7-phase8-phase9-phase10-phase11-phase12-supplemental-receipts",
   "status": "curated_scope_evidence_not_full_stage6_freeze",
   "sourceAtCapture": {
     "branch": "condidate/webapp-ui-ux-redesign-v2",
@@ -15,7 +15,7 @@
     "sitesInput": false,
     "sitesProven": false,
     "stagingOrProductionChanged": false,
-    "description": "selectedArtifacts is a curated, reviewable record of delivered Phase 1/2/3 evidence only; supplementalPhase4To11Receipts is metadata-only and non-selected. Neither authorizes deferred Stage 6 work, a full-stage immutable freeze, or Sites publication."
+    "description": "selectedArtifacts is a curated, reviewable record of delivered Phase 1/2/3 evidence only; supplementalPhase4To12Receipts is metadata-only and non-selected. Neither authorizes deferred Stage 6 work, a full-stage immutable freeze, or Sites publication."
   },
   "projectionAlgorithm": "SHA-256 over sorted UTF-8 lines: <repo-relative-path>\\t<byte-count>\\t<file-sha256>\\n. Directory projections cover every regular file below that exact directory.",
   "selectedArtifacts": {
@@ -108,7 +108,14 @@
     "selectedProjectionSha256": "2dce0fceec7f6aac87260b0dfaf3ea34a88c24aaa43435be423c3e535167db75",
     "verifiedAtSourceCommit": "3283a6e38209cb06d352740dae5b05bce5ba9002"
   },
-  "supplementalPhase4To11Receipts": {
+  "exclusions": [
+    "All browser run directories other than the three named historical Phase 1–3 runs are excluded from selectedArtifacts; Phase 4–12 paths appear only as metadata-only supplemental receipts",
+    "Vite caches, temporary worktrees, stdout/stderr captures, and failed diagnostic artifacts",
+    "Earlier Figma audit/export packages superseded by final-provenance-20260811T204635Z",
+    "Mutable narrative files, including README, VALIDATION, checkpoint, and route/content/protected manifests",
+    "Any Sites project, lock, preview, deployment artifact, staging artifact, or production artifact"
+  ],
+  "supplementalPhase4To12Receipts": {
     "status": "reviewable_receipts_not_allowlisted_or_frozen",
     "description": "These later receipts are intentionally outside the immutable Phase 1–3 selectedArtifacts projection. They must not be treated as a new aggregate, Sites input, or Stage 6 closure freeze.",
     "phase4": {
@@ -256,13 +263,25 @@
         "bindingSha256": "5a99061f227420c0e63268bc547088d9bcaeb5a25849172c6dbed1bb3dd68159",
         "harnessSha256": "80beb81575093cb300cba2aeece66651fcf045eb8fe845382d3339cd1b5d99c1"
       }
+    },
+    "phase12": {
+      "source": {
+        "commit": "61e4e70f16735166ac4e26ed978580ddb1311624",
+        "tree": "78ae43c1ab0227691b5bc5c9f92f57f93f70877b"
+      },
+      "browser": {
+        "runId": "uiux-stage6-phase12-account-storage-20260812T192405395Z",
+        "status": "passed",
+        "promotable": true,
+        "assertionCount": 6,
+        "screenshotCount": 6,
+        "artifactLocation": "local ephemeral receipt; intentionally not selected, copied, or frozen",
+        "metricsFile": "stage6-phase12-account-storage-metrics.json",
+        "metricsSha256": "a2a0ee567c2ecb4181a0724e6d8d6e52ef536dc670d6779cd0f9067790f4d76b",
+        "bindingFile": "stage6-phase12-account-storage-source-binding.json",
+        "bindingSha256": "126996f74083dfe1700516a34cf5293c46916afc93d30535d31d9ca78174de93",
+        "harnessSha256": "4abcecc37ffd9e239b5d14fbc30f2956996cda59e422b300224b7609b78b7bd3"
+      }
     }
-  },
-  "exclusions": [
-    "All browser run directories other than the three named historical Phase 1–3 runs are excluded from selectedArtifacts; Phase 4–11 paths appear only as metadata-only supplemental receipts",
-    "Vite caches, temporary worktrees, stdout/stderr captures, and failed diagnostic artifacts",
-    "Earlier Figma audit/export packages superseded by final-provenance-20260811T204635Z",
-    "Mutable narrative files, including README, VALIDATION, checkpoint, and route/content/protected manifests",
-    "Any Sites project, lock, preview, deployment artifact, staging artifact, or production artifact"
-  ]
+  }
 }

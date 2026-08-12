@@ -1,4 +1,4 @@
-# Stage 6 Runtime Contract — delivered Phase 1–11
+# Stage 6 Runtime Contract — delivered Phase 1–12
 
 ## اصول غیرقابل‌جایگزین
 
@@ -120,12 +120,21 @@
 
 | سطح | قرارداد تحویل‌شده |
 | --- | --- |
-| route فعال | `/account/security`، همان route موجود `SettingsView`؛ API، router و query contract تازه‌ای ایجاد نشده است. مسیر `/account/storage` خارج از این slice است. |
+| route فعال | `/account/security`، همان route موجود `SettingsView`؛ API، router و query contract تازه‌ای ایجاد نشده است. |
 | پایان یک نشست | فقط پاسخ `200` با متن ثابت `نشست با موفقیت پایان یافت` همان نشست غیرجاری را از فهرست برمی‌دارد؛ `detail` خام نمایش داده نمی‌شود. |
 | خروج از نشست‌های دیگر | فقط پاسخ `200` با `detail` مطابق الگوی عدد به‌علاوه «نشست پایان یافت» پذیرفته می‌شود؛ نشست جاری حفظ می‌شود و `detail` خام نمایش داده نمی‌شود. |
 | تأیید | `AppConfirmDialog` body-teleported، trap-focus، Escape، restore-focus و scroll-lock را حفظ می‌کند؛ متن دیالوگ نام دستگاه ندارد؛ cancel یا Escape هیچ درخواستی نمی‌فرستد. |
 | recovery | 400/403/404، malformed یا network، فهرست نشست‌ها، مسیر و دیالوگ را نگه می‌دارند و فقط copy ثابت امن می‌دهند؛ detail خام سرور وارد UI، URL، history یا storage نمی‌شود. |
 
+## Phase 12 — پاک‌سازی حافظه محلی حساب
+
+| سطح | قرارداد تحویل‌شده |
+| --- | --- |
+| route فعال | `/account/storage`، همان route موجود `SettingsView`؛ API، router، query contract و composable حافظه تازه‌ای ایجاد نشده است. مسیر `/account/security` خارج از این slice است. |
+| پاک‌سازی | فقط پس از تأیید، `clearStorageFileCache` اجرا می‌شود؛ موفقیت اندازه را `0.00 MB` می‌کند و reload محلی را یک‌بار صدا می‌زند. |
+| تأیید | `AppConfirmDialog` body-teleported، trap-focus، Escape، restore-focus و scroll-lock را حفظ می‌کند؛ متن دیالوگ جزئیات داخلی حافظه ندارد؛ cancel یا Escape هیچ پاک‌سازی یا reload نمی‌دهد. |
+| recovery | شکست محلی دیالوگ، اندازه نمایش‌داده‌شده و مسیر را نگه می‌دارد و فقط copy ثابت امن می‌دهد؛ علت خام پاک‌سازی وارد UI، URL، history یا storage نمی‌شود. |
+
 ## مرزهای صریح
 
-این contract تا source تحویل‌شدهٔ Phase 11 در commit `7be4c830e0f476b3c56f82fd37d1ad9bc37652f4` را توصیف می‌کند. persistenceهای دیگر، protected Messenger internals، Sites، staging، production و closure کلی Stage 6 را authorize یا اثبات نمی‌کند.
+این contract تا source تحویل‌شدهٔ Phase 12 در commit `61e4e70f16735166ac4e26ed978580ddb1311624` را توصیف می‌کند. persistenceهای دیگر، protected Messenger internals، Sites، staging، production و closure کلی Stage 6 را authorize یا اثبات نمی‌کند.
