@@ -100,6 +100,18 @@ class TradingProbeError(RuntimeError):
     pass
 
 
+def _synthetic_callback_id(*parts: object) -> str:
+    """Build a deterministic, Telegram-valid callback-query id for the harness.
+
+    Aiogram validates Telegram's 64-character callback-query-id limit before
+    dispatching an update.  Benchmark run prefixes intentionally carry enough
+    entropy to exceed that bound, so preserve their uniqueness in a digest
+    rather than embedding them in the synthetic update.
+    """
+    material = "\x1f".join(str(part) for part in parts)
+    return f"probe-{hashlib.sha256(material.encode('utf-8')).hexdigest()[:32]}"
+
+
 DUAL_ROLE_PLAN_SCHEMA_VERSION = "bot_webapp_mixed_load_role_plan_v1"
 DUAL_ROLE_RESULT_SCHEMA_VERSION = "bot_webapp_mixed_load_role_result_v1"
 DUAL_ROLE_MERGED_RESULT_SCHEMA_VERSION = "bot_webapp_mixed_load_merged_result_v1"
@@ -3495,7 +3507,9 @@ async def execute_bot_offer_creation_for_user(
         callback_answer = await harness.feed_private_callback(
             telegram_id=user.telegram_id,
             callback_data=TextOfferActionCallback(action="confirm").pack(),
-            callback_id=f"{prefix}bot-create-confirm-{user.user_id}",
+            callback_id=_synthetic_callback_id(
+                prefix, "bot-create-confirm", user.user_id
+            ),
         )
         sent_messages = list(harness.telegram.sent_messages)
     except Exception as exc:
@@ -4904,7 +4918,9 @@ async def create_bot_offer_with_dispatcher(
     await harness.feed_private_callback(
         telegram_id=owner.telegram_id,
         callback_data=TextOfferActionCallback(action="confirm").pack(),
-        callback_id=f"{prefix}bot-create-confirm-{owner.user_id}",
+        callback_id=_synthetic_callback_id(
+            prefix, "bot-create-confirm", owner.user_id
+        ),
     )
     async with AsyncSessionLocal() as db:
         offer = (
@@ -5059,8 +5075,8 @@ async def execute_bot_trade_with_dispatcher(
         amount=amount,
     )
     channel_message_id = int(getattr(offer, "channel_message_id", None) or getattr(offer, "id", 0) or 1)
-    first_callback_id = f"{prefix}tap1-{spec.index}"
-    second_callback_id = f"{prefix}tap2-{spec.index}"
+    first_callback_id = _synthetic_callback_id(prefix, "trade-tap-1", spec.index)
+    second_callback_id = _synthetic_callback_id(prefix, "trade-tap-2", spec.index)
     recorder_token = None
     forward_recorder_token = None
     forward_records: list[dict[str, Any]] = []
@@ -5136,7 +5152,9 @@ async def expire_bot_offer_with_dispatcher(
         answer = await harness.feed_private_callback(
             telegram_id=owner.telegram_id,
             callback_data=ExpireOfferCallback(offer_id=offer_id).pack(),
-            callback_id=f"{prefix}bot-expire-{owner.user_id}-{index}",
+            callback_id=_synthetic_callback_id(
+                prefix, "bot-expire", owner.user_id, index
+            ),
         )
     except Exception as exc:
         if error_details is not None:

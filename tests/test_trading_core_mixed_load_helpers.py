@@ -13,6 +13,18 @@ from scripts import trading_core_probe_worker as worker
 
 
 class TradingCoreMixedLoadHelperTests(unittest.TestCase):
+    def test_synthetic_callback_ids_are_short_and_deterministic(self):
+        long_run_prefix = "telegram-live-matrix-20260812t005017z-0123456789ab"
+        first = worker._synthetic_callback_id(long_run_prefix, "trade-tap-1", 11)
+        second = worker._synthetic_callback_id(long_run_prefix, "trade-tap-2", 11)
+
+        self.assertLessEqual(len(first), 64)
+        self.assertEqual(
+            first,
+            worker._synthetic_callback_id(long_run_prefix, "trade-tap-1", 11),
+        )
+        self.assertNotEqual(first, second)
+
     def test_dual_role_users_artifact_round_trip_is_iran_authoritative(self):
         users = [
             worker.LoadUserRef(user_id=10, telegram_id=9010),
