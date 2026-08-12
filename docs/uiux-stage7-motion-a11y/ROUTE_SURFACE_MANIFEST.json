@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "stage": 7,
+  "scope": "motion-a11y-copy-keyboard-zoom-reduced-motion-phase1",
+  "status": "delivered_phase1_broader_dead_css_deferred",
+  "mutableNarrative": true,
+  "branch": "condidate/webapp-ui-ux-redesign-v2",
+  "implementation": {
+    "commit": "ab0834aac3383e3c790c5865170ab9f007db235c",
+    "tree": "93e0c5cb0f8485a804b698d784cd3803a896081e",
+    "parent": "704ab7d50352a2af22f0565eb3df26ba9363c80c"
+  },
+  "routeContract": {
+    "appPath": "frontend/src/App.vue",
+    "appSha256": "e86825ff25a482c45b484a7c526f60f2727fcb13cdd5c085fec65158f9d4a845",
+    "routeContractPath": "frontend/src/router/uiRouteContract.ts",
+    "routeContractSha256": "8e7495a05dfbf6b36bcc242af1b20919bef56a8bd0ed9458360d36cf79fba144",
+    "mainCssPath": "frontend/src/assets/main.css",
+    "mainCssSha256": "2168eae05207eecf39d4ee39257633e63a5a4aee63752ef4d16250036fc279e0",
+    "v2ComponentsPath": "frontend/src/styles/design-system-v2.components.css",
+    "v2ComponentsSha256": "35955daa3ba5be45e7ea87ca3e605e8472e6c2f765573b8378c634b13a09828b",
+    "appTabsPath": "frontend/src/components/ui/AppTabs.vue",
+    "appTabsSha256": "dace73c50b6f20c014dfd903329f80860782394bafa623494342284e38b8ab5e"
+  },
+  "copyPolicy": {
+    "optInClass": "app-copyable-info",
+    "excludedRouteNames": ["market", "messenger", "admin-channels", "share-receive", "admin-messages", "admin-system"],
+    "globalUserSelectNonePreserved": true
+  }
+}

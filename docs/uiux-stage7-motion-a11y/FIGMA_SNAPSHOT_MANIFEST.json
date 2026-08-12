@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "stage": 7,
+  "phase": 1,
+  "mutableNarrative": true,
+  "fileKey": "z8jgJxST4O2APzWnlyP9gv",
+  "page": {
+    "id": "486:1455",
+    "name": "09 — Stage 7 Motion & A11y"
+  },
+  "section": {
+    "id": "487:18",
+    "name": "1 — Copy, keyboard, zoom · source ab0834aa",
+    "labelId": "487:19"
+  },
+  "windows": [
+    { "id": "487:20", "name": "W1 — Copy + keyboard · 390×844", "width": 390, "height": 844 },
+    { "id": "487:39", "name": "W2 — Zoom 200% + reduced-motion · 390×844", "width": 390, "height": 844 }
+  ],
+  "audit": {
+    "font": "Vazirmatn",
+    "unsafeMatches": []
+  },
+  "untouchedPriorPages": ["321:18", "297:18", "283:18"]
+}

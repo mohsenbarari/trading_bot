@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "stage": 7,
+  "phase": 1,
+  "mutableNarrative": true,
+  "freeze": false,
+  "source": {
+    "commit": "ab0834aac3383e3c790c5865170ab9f007db235c",
+    "tree": "93e0c5cb0f8485a804b698d784cd3803a896081e",
+    "bindingSha256": "3578f342b90d11f3aaef8402bcdfb7c0af27dc7ccaca5c63d14c5daf8ea529f6",
+    "fileCount": 393
+  },
+  "browser": {
+    "runId": "uiux-stage7-phase1-motion-a11y-20260812T224044165Z",
+    "status": "passed",
+    "promotable": true,
+    "assertionCount": 7,
+    "screenshotCount": 5,
+    "metricsSha256": "fd9e514637b4ac887d5a2f3e536b12eac0d1f4cefa99e7ef3875e43a5f5e993c",
+    "harnessSha256": "fd239418e1755923fda4e210b8eca288e15b33cf79c54840c3b2142ca81e580e",
+    "harnessPath": "/tmp/stage7-phase1-motion-a11y-browser-harness.mjs",
+    "outputDir": "/tmp/uiux-stage7-phase1-motion-a11y-browser/uiux-stage7-phase1-motion-a11y-20260812T224044165Z"
+  },
+  "figma": {
+    "pageId": "486:1455",
+    "sectionId": "487:18"
+  }
+}
