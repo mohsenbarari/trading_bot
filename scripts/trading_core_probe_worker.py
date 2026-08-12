@@ -5229,6 +5229,14 @@ async def expire_bot_offer_with_dispatcher(
         if error_details is not None:
             error_details.append(f"{type(exc).__name__}: {exc}")
         return "error"
+    offer = await load_offer_snapshot(offer_id)
+    offer_status = getattr(getattr(offer, "status", None), "value", getattr(offer, "status", None))
+    if str(offer_status or "").strip().lower() == OfferStatus.EXPIRED.value:
+        # Queue-v1 acknowledges the callback with an intentionally blank M0
+        # receipt, then enqueues the user-facing confirmation separately.  The
+        # authoritative offer transition is therefore the only correct success
+        # signal for this synthetic dispatcher boundary.
+        return "success"
     answer_text = str((answer or {}).get("text") or "")
     if "منقضی شد" in answer_text:
         return "success"

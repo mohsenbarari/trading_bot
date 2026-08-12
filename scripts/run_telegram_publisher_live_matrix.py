@@ -980,20 +980,26 @@ async def _run_manual_expiry(
     )
 
     async def execute() -> str | None:
+        error_details: list[str] = []
         if timeline.origin == "bot":
-            return await worker.expire_bot_offer_with_dispatcher(
+            outcome = await worker.expire_bot_offer_with_dispatcher(
                 harness=harness,
                 owner=owner,
                 offer_id=int(timeline.offer_id),
                 prefix=run.run_id,
                 index=timeline.index,
+                error_details=error_details,
             )
-        with override_current_server(timeline.offer_home_server or SERVER_IRAN):
-            await worker.expire_offer_for_user(
-                user_id=int(owner.user_id),
-                offer_id=int(timeline.offer_id),
-            )
-        return None
+        else:
+            with override_current_server(timeline.offer_home_server or SERVER_IRAN):
+                await worker.expire_offer_for_user(
+                    user_id=int(owner.user_id),
+                    offer_id=int(timeline.offer_id),
+                )
+            outcome = "success"
+        if outcome != "success" and error_details:
+            entry.failure_class = error_details[0].partition(":")[0].strip() or None
+        return outcome
 
     await _complete_lifecycle_action(entry, execute)
 

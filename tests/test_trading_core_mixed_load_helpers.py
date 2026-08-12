@@ -46,6 +46,32 @@ class TradingCoreMixedLoadHelperTests(unittest.TestCase):
 
         asyncio.run(run_probe())
 
+    def test_bot_manual_expiry_uses_authoritative_terminal_state(self):
+        async def run_probe():
+            harness = SimpleNamespace(
+                feed_private_callback=AsyncMock(return_value={"text": None})
+            )
+            with patch.object(
+                worker,
+                "load_offer_snapshot",
+                new=AsyncMock(return_value=SimpleNamespace(status="expired")),
+            ):
+                outcome = await worker.expire_bot_offer_with_dispatcher(
+                    harness=harness,
+                    owner=worker.LoadUserRef(user_id=1, telegram_id=2),
+                    offer_id=42,
+                    prefix="telegram-live-matrix-unit",
+                    index=1,
+                )
+
+            self.assertEqual(outcome, "success")
+            self.assertLessEqual(
+                len(harness.feed_private_callback.await_args.kwargs["callback_id"]),
+                64,
+            )
+
+        asyncio.run(run_probe())
+
     def test_dual_role_users_artifact_round_trip_is_iran_authoritative(self):
         users = [
             worker.LoadUserRef(user_id=10, telegram_id=9010),
