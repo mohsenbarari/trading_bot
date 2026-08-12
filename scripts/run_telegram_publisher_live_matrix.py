@@ -96,7 +96,10 @@ MATRIX_OVERTIME_MAX_CONCURRENT_OPERATIONS = 20
 # response.  Keep that observation bounded; the matrix later verifies the
 # durable terminal outbox and WebApp projection for every offer.
 MATRIX_BACKGROUND_TASKS_MAX_WAIT_SECONDS = 15.0
-MATRIX_WEBAPP_TERMINAL_OBSERVATION_MAX_CONCURRENT = 20
+# The staging bot uses a 5+5 SQLAlchemy pool while it also continues normal
+# queue work.  Keep verification deliberately below the base pool instead of
+# merely below its overflow ceiling.
+MATRIX_WEBAPP_TERMINAL_OBSERVATION_MAX_CONCURRENT = 2
 MATRIX_AUDIT_DIRECTORY = Path("/app/audit_trail")
 
 MATRIX_DIRECT_WHOLESALE_TRADES = 50

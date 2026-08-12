@@ -98,6 +98,7 @@ class TelegramPublisherLiveMatrixTests(unittest.TestCase):
         ]
         original_limit = matrix.MATRIX_WEBAPP_TERMINAL_OBSERVATION_MAX_CONCURRENT
         original_observer = matrix._observe_webapp_visibility
+        self.assertEqual(original_limit, 2)
         matrix.MATRIX_WEBAPP_TERMINAL_OBSERVATION_MAX_CONCURRENT = 3
         matrix._observe_webapp_visibility = fake_observe
         try:
