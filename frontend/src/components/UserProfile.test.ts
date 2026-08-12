@@ -322,6 +322,9 @@ describe('UserProfile.vue authoritative admin actions', () => {
     expect(wrapper.get('.ui-confirm-dialog').text()).toContain('غیرفعال')
     expect(wrapper.get('.ui-confirm-dialog').text()).toContain('خروج کاربر از کانال تلگرام مورد انتظار است')
     expect(wrapper.get('.ui-confirm-dialog').text()).toContain('مهلت دو روزه')
+    expect(wrapper.get('.ui-confirm-dialog').text()).toContain('لغو یا Escape هیچ تغییری ایجاد نمی‌کند')
+    expect(wrapper.get('.ui-confirm-dialog').text()).not.toContain('owner12')
+    expect(wrapper.get('.ui-confirm-dialog').text()).not.toContain('09120000000')
 
     await confirmDialog(wrapper)
     await flushPromises()
@@ -340,6 +343,72 @@ describe('UserProfile.vue authoritative admin actions', () => {
     expect(wrapper.find('.ui-confirm-dialog').exists()).toBe(false)
     expect(wrapper.text()).toContain('حساب غیرفعال شد. مهلت فعال‌سازی تا')
     expectMutationCall(3, '/api/users/12', 'PUT', { account_status: 'inactive' }, 'تغییر وضعیت حساب ناموفق بود.')
+  })
+
+  it('keeps account-status, unblock, and remove-limitations at zero mutation on Escape or cancel', async () => {
+    const { AppHttpError } = await import('../utils/httpErrorPolicy')
+    const rawStatusDetail = 'raw-status-detail: account=owner12; mobile=09120000000'
+    const limitedUser = makeUser({
+      max_daily_trades: 5,
+      max_active_commodities: 6,
+      max_daily_requests: 7,
+    })
+    const wrapper = await mountProfile(limitedUser)
+    await openSettings(wrapper)
+
+    await findButtonByText(wrapper, 'تغییر وضعیت حساب').trigger('click')
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    await flushPromises()
+    expect(wrapper.find('.ui-confirm-dialog').exists()).toBe(false)
+    expect(routeRequestMock).not.toHaveBeenCalled()
+    expect(limitedUser.account_status).toBe('active')
+
+    await findButtonByText(wrapper, 'تغییر وضعیت حساب').trigger('click')
+    await cancelDialog(wrapper)
+    expect(routeRequestMock).not.toHaveBeenCalled()
+    expect(limitedUser.account_status).toBe('active')
+
+    routeRequestMock
+      .mockRejectedValueOnce(new AppHttpError({ status: 403, detail: rawStatusDetail }))
+      .mockRejectedValueOnce(new AppHttpError({ status: 404, detail: rawStatusDetail }))
+    await findButtonByText(wrapper, 'تغییر وضعیت حساب').trigger('click')
+    await confirmDialog(wrapper)
+    await flushPromises()
+    expect(limitedUser.account_status).toBe('active')
+    expect(wrapper.get('.ui-confirm-dialog [role="alert"]').text()).toContain('اجازه این اقدام را ندارید')
+    expect(wrapper.get('.ui-confirm-dialog').text()).not.toContain(rawStatusDetail)
+    expect(wrapper.get('.ui-confirm-dialog').text()).not.toContain('owner12')
+    await confirmDialog(wrapper)
+    await flushPromises()
+    expect(limitedUser.account_status).toBe('active')
+    expect(wrapper.get('.ui-confirm-dialog [role="alert"]').text()).toContain('این کاربر دیگر در دسترس نیست')
+    expect(wrapper.get('.ui-confirm-dialog').text()).not.toContain(rawStatusDetail)
+    await cancelDialog(wrapper)
+    wrapper.unmount()
+
+    const blockedUser = makeUser({
+      trading_restricted_until: '2031-03-21T08:15:00Z',
+      trading_restricted_until_jalali: '۱۴۰۹/۰۱/۰۱',
+    })
+    const blockedWrapper = await mountProfile(blockedUser)
+    await openSettings(blockedWrapper)
+    await blockedWrapper.get('.unblock-btn').trigger('click')
+    expect(blockedWrapper.get('.ui-confirm-dialog').text()).toContain('لغو یا Escape هیچ تغییری ایجاد نمی‌کند')
+    expect(blockedWrapper.get('.ui-confirm-dialog').text()).not.toContain('owner12')
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    await flushPromises()
+    expect(blockedWrapper.find('.ui-confirm-dialog').exists()).toBe(false)
+    expect(blockedUser.trading_restricted_until).toBe('2031-03-21T08:15:00Z')
+    expect(routeRequestMock).toHaveBeenCalledTimes(2)
+    blockedWrapper.unmount()
+
+    const limitsWrapper = await mountProfile(limitedUser)
+    await openSettings(limitsWrapper)
+    await limitsWrapper.get('.unlimit-btn').trigger('click')
+    await cancelDialog(limitsWrapper)
+    expect(limitedUser.max_daily_trades).toBe(5)
+    expect(routeRequestMock).toHaveBeenCalledTimes(2)
+    limitsWrapper.unmount()
   })
 
   it('accepts activation only after both global-lock fields are authoritatively cleared', async () => {
@@ -469,6 +538,8 @@ describe('UserProfile.vue authoritative admin actions', () => {
 
     await wrapper.get('.unlimit-btn').trigger('click')
     expect(wrapper.get('.ui-confirm-dialog').text()).toContain('رفع محدودیت‌ها')
+    expect(wrapper.get('.ui-confirm-dialog').text()).toContain('لغو یا Escape هیچ تغییری ایجاد نمی‌کند')
+    expect(wrapper.get('.ui-confirm-dialog').text()).not.toContain('owner12')
     await confirmDialog(wrapper)
     await flushPromises()
     expect(user.max_daily_trades).toBeNull()
@@ -804,6 +875,8 @@ describe('UserProfile.vue authoritative admin actions', () => {
     const wrapper = await mountProfile(user)
     await openSettings(wrapper)
     await wrapper.get('.unblock-btn').trigger('click')
+    expect(wrapper.get('.ui-confirm-dialog').text()).toContain('لغو یا Escape هیچ تغییری ایجاد نمی‌کند')
+    expect(wrapper.get('.ui-confirm-dialog').text()).not.toContain('owner12')
 
     await confirmDialog(wrapper)
     await flushPromises()

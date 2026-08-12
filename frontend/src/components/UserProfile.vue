@@ -203,6 +203,7 @@ const confirmationSafeCopy: Record<ConfirmationKind, string> = {
   'terminate-sessions': 'پایان نشست‌ها تأیید نشد. اطلاعات نمایش‌داده‌شده تغییری نکرده است؛ وضعیت را دوباره بررسی کنید.',
   'delete-user': 'حذف کاربر تأیید نشد. اطلاعات نمایش‌داده‌شده تغییری نکرده است؛ وضعیت را دوباره بررسی کنید.',
 };
+const ZERO_MUTATION_HINT = ' لغو یا Escape هیچ تغییری ایجاد نمی‌کند.';
 
 function getSafeConfirmationError(kind: ConfirmationKind, error: unknown): string {
   const status = errorHttpStatus(error);
@@ -692,8 +693,8 @@ function toggleAccountStatus() {
   const targetStatus = isAccountInactive.value ? 'active' : 'inactive';
   const verb = targetStatus === 'active' ? 'فعال' : 'غیرفعال';
   const message = targetStatus === 'inactive'
-    ? 'فوری: بازار بسته می‌شود. خروج کاربر از کانال تلگرام مورد انتظار است؛ نتیجه آن در این صفحه قابل‌تأیید نیست. اگر حساب تا پایان مهلت دو روزه دوباره فعال نشود، دسترسی وب و پیام‌رسان قفل و نشست‌ها لغو می‌شوند.'
-    : 'این حساب دوباره فعال شود؟ دسترسی‌های مجاز فقط پس از پاسخ معتبر سرور بازمی‌گردند.';
+    ? `فوری: بازار بسته می‌شود. خروج کاربر از کانال تلگرام مورد انتظار است؛ نتیجه آن در این صفحه قابل‌تأیید نیست. اگر حساب تا پایان مهلت دو روزه دوباره فعال نشود، دسترسی وب و پیام‌رسان قفل و نشست‌ها لغو می‌شوند.${ZERO_MUTATION_HINT}`
+    : `این حساب دوباره فعال شود؟ دسترسی‌های مجاز فقط پس از پاسخ معتبر سرور بازمی‌گردند.${ZERO_MUTATION_HINT}`;
   openConfirmation({
     kind: 'account-status',
     action: 'account-status',
@@ -848,7 +849,7 @@ function unblockUser() {
     kind: 'unblock',
     action: 'unblock',
     title: 'تأیید رفع مسدودیت',
-    message: 'مسدودیت معاملاتی این کاربر برداشته شود؟',
+    message: `مسدودیت معاملاتی این کاربر برداشته شود؟${ZERO_MUTATION_HINT}`,
     confirmLabel: 'رفع مسدودیت',
     tone: 'warning',
   });
@@ -867,7 +868,7 @@ function removeLimitations() {
     kind: 'remove-limitations',
     action: 'remove-limitations',
     title: 'تأیید رفع محدودیت‌ها',
-    message: 'همه محدودیت‌های ثبت‌شده برای این کاربر برداشته شود؟',
+    message: `همه محدودیت‌های ثبت‌شده برای این کاربر برداشته شود؟${ZERO_MUTATION_HINT}`,
     confirmLabel: 'رفع محدودیت‌ها',
     tone: 'warning',
   });
