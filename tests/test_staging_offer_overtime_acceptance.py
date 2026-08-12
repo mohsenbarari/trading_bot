@@ -108,6 +108,89 @@ class StagingOfferOvertimeAcceptanceTests(unittest.TestCase):
             self.assertEqual(code, 2)
             self.assertEqual(summary["status"], "execute_blocked")
 
+    def test_all_fifteen_scenarios_have_wired_drivers(self):
+        catalog = {item["id"] for item in runner.SCENARIOS}
+        wired = set(runner.WIRED_DRIVER_SCENARIOS)
+
+        self.assertEqual(len(catalog), 15)
+        self.assertEqual(wired, catalog)
+        self.assertIn("OT-TG-B2B-RECEIPT", wired)
+        self.assertNotIn("OT-TG-RETRY", wired)
+
+    def test_remote_driver_argv_quotes_each_argument_without_local_shell(self):
+        env = {
+            "STAGING_IRAN_SSH_HOST": "staging.example",
+            "STAGING_IRAN_SSH_PORT": "2222",
+            "STAGING_IRAN_APP_CONTAINER": "safe;container",
+        }
+        with patch.dict(os.environ, env, clear=True):
+            argv = runner.iran_driver_argv(
+                "OT-PREF-WEBAPP-SAVE",
+                "OTACC_safe",
+                4,
+                extra_args=("--phase", "run"),
+            )
+
+        self.assertIsNotNone(argv)
+        self.assertEqual(argv[0], "ssh")
+        self.assertNotIn("bash", argv)
+        self.assertIn("'safe;container'", argv[-1])
+
+    def test_local_foreign_driver_preserves_structured_arguments(self):
+        env = {"STAGING_FOREIGN_APP_CONTAINER": "foreign-app"}
+        with patch.dict(os.environ, env, clear=True):
+            argv = runner.foreign_driver_argv(
+                "OT-QUEUE-ORDER",
+                "OTACC_safe",
+                5,
+                extra_args=("--phase", "run", "--no-cleanup-after"),
+            )
+
+        self.assertEqual(argv[:3], ["docker", "exec", "foreign-app"])
+        self.assertEqual(argv[-3:], ["--phase", "run", "--no-cleanup-after"])
+        self.assertNotIn("bash", argv)
+
+    def test_execute_blocks_when_driver_transports_are_unavailable(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            args = runner.parse_args(
+                ["--mode", "execute", "--artifact-dir", str(Path(tmp) / "run")]
+            )
+            env = {
+                runner.EXECUTION_CONFIRM_ENV: runner.EXECUTION_CONFIRM_VALUE,
+                "STAGING_FOREIGN_DRIVER_DISABLE": "true",
+            }
+            with patch.dict(os.environ, env, clear=True), patch.object(
+                runner,
+                "run_preflight",
+                return_value=({"status": "preflight_passed"}, 0),
+            ):
+                summary, code = runner.run_execute(args)
+
+        self.assertEqual(code, 3)
+        self.assertEqual(summary["status"], "execute_blocked")
+        self.assertEqual(len(summary["wired_driver_results"]), 15)
+
+    def test_execute_passes_only_when_every_wired_result_passes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            args = runner.parse_args(
+                ["--mode", "execute", "--artifact-dir", str(Path(tmp) / "run")]
+            )
+            results = [
+                {"id": scenario["id"], "status": "passed"}
+                for scenario in runner.SCENARIOS
+            ]
+            env = {runner.EXECUTION_CONFIRM_ENV: runner.EXECUTION_CONFIRM_VALUE}
+            with patch.dict(os.environ, env, clear=True), patch.object(
+                runner,
+                "run_preflight",
+                return_value=({"status": "preflight_passed"}, 0),
+            ), patch.object(runner, "run_wired_drivers", return_value=results):
+                summary, code = runner.run_execute(args)
+
+        self.assertEqual(code, 0)
+        self.assertEqual(summary["status"], "execute_passed")
+        self.assertEqual(summary["unwired_scenarios"], [])
+
     def test_preflight_fails_on_wrong_branch(self):
         with tempfile.TemporaryDirectory() as tmp:
             artifact_dir = Path(tmp) / "preflight-run"

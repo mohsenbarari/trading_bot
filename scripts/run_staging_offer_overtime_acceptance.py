@@ -2,9 +2,9 @@
 """Plan/preflight/execute the Stage 16 offer-overtime staging acceptance matrix.
 
 `plan` and `preflight` are non-mutating. `execute` remains fail-closed until the
-confirm env is set and topology preflight is green. Scenario drivers that mutate
-staging data are intentionally not wired yet; execute records a blocked status
-when drivers are unavailable so the contract stays honest.
+confirm env is set, topology preflight is green, and every driver transport is
+available. Fourteen domain scenarios run in staging app containers; the Telegram
+axis delegates to the channel-safe B2B command/receipt harness.
 
 This runner stays free of `core.db` / production-matrix imports so it can load
 under staging env files that use sync database URLs.
@@ -14,8 +14,10 @@ from __future__ import annotations
 
 import argparse
 import base64
+import hashlib
 import json
 import os
+import shlex
 import socket
 import ssl
 import subprocess
@@ -61,9 +63,38 @@ SCENARIOS = [
     {"id": "OT-FINAL-TAIL", "surface": "both", "requires": ["final_tail"]},
     {"id": "OT-CHANNEL-MARKER", "surface": "foreign", "requires": ["channel_queue", "overtime_channel_edit"]},
     {"id": "OT-SYNC-RECOVERY", "surface": "both", "requires": ["sync_workers", "reconciliation"]},
-    {"id": "OT-TG-RETRY", "surface": "foreign", "requires": ["telegram_queue_retry"]},
+    {
+        "id": "OT-TG-B2B-RECEIPT",
+        "surface": "foreign",
+        "requires": ["telegram_b2b_command_receipt", "immutable_publisher_owner"],
+    },
     {"id": "OT-UI-RECONNECT", "surface": "webapp", "requires": ["webapp_poll_reconnect"]},
 ]
+
+WIRED_IRAN_DRIVER_SCENARIOS = (
+    "OT-PREF-WEBAPP-SAVE",
+    "OT-PREF-BOT-SAVE",
+    "OT-PREF-DISABLED-REGRESSION",
+    "OT-OFFER-WEBAPP-ORIGIN",
+    "OT-REQ-IRAN-TO-IRAN",
+    "OT-CANCEL-REQUESTER",
+    "OT-QUEUE-ORDER",
+    "OT-FINAL-TAIL",
+    "OT-UI-RECONNECT",
+)
+WIRED_FOREIGN_DRIVER_SCENARIOS = (
+    "OT-OFFER-BOT-ORIGIN",
+    "OT-REQ-FOREIGN-TO-FOREIGN",
+    "OT-REQ-CROSS-FORWARD",
+    "OT-CHANNEL-MARKER",
+    "OT-SYNC-RECOVERY",
+)
+WIRED_B2B_DRIVER_SCENARIOS = ("OT-TG-B2B-RECEIPT",)
+WIRED_DRIVER_SCENARIOS = (
+    WIRED_IRAN_DRIVER_SCENARIOS
+    + WIRED_FOREIGN_DRIVER_SCENARIOS
+    + WIRED_B2B_DRIVER_SCENARIOS
+)
 
 
 @dataclass
@@ -507,6 +538,840 @@ def run_preflight(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
     return summary, 0 if not failed else 1
 
 
+def _parse_driver_stdout(stdout: str, stderr: str) -> dict[str, Any]:
+    text = (stdout or "").strip()
+    try:
+        return json.loads(text.splitlines()[-1]) if text else {}
+    except json.JSONDecodeError:
+        return {
+            "passed": False,
+            "error": "driver stdout was not JSON",
+        }
+
+
+def iran_driver_argv(
+    scenario: str,
+    run_prefix: str,
+    minutes: int,
+    *,
+    extra_args: tuple[str, ...] = (),
+) -> list[str] | None:
+    """Build a shell-quoted remote Iran command from validated argv fields."""
+    host = (os.getenv("STAGING_IRAN_SSH_HOST") or "").strip()
+    if not host:
+        return None
+    if host.startswith("-") or not all(
+        character.isalnum() or character in ".:-" for character in host
+    ):
+        raise ValueError("invalid STAGING_IRAN_SSH_HOST")
+    port = (os.getenv("STAGING_IRAN_SSH_PORT") or "22").strip()
+    if not port.isdigit() or not 1 <= int(port) <= 65535:
+        raise ValueError("invalid STAGING_IRAN_SSH_PORT")
+    container = (
+        os.getenv("STAGING_IRAN_APP_CONTAINER") or "trading_bot_staging_iran-app-1"
+    ).strip()
+    driver_args = [
+        "docker",
+        "exec",
+        container,
+        "python",
+        "scripts/staging_overtime_scenario_driver.py",
+        "--scenario",
+        scenario,
+        "--run-prefix",
+        run_prefix,
+        "--minutes",
+        str(minutes),
+        *extra_args,
+    ]
+    remote = " ".join(shlex.quote(value) for value in driver_args)
+    return [
+        "ssh",
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "ConnectTimeout=15",
+        "-p",
+        port,
+        f"root@{host}",
+        remote,
+    ]
+
+
+def foreign_driver_argv(
+    scenario: str,
+    run_prefix: str,
+    minutes: int,
+    *,
+    extra_args: tuple[str, ...] = (),
+) -> list[str] | None:
+    """Build the local foreign-container argv without a command shell."""
+    if (os.getenv("STAGING_FOREIGN_DRIVER_DISABLE") or "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+    }:
+        return None
+    container = (
+        os.getenv("STAGING_FOREIGN_APP_CONTAINER") or "trading_bot_staging-foreign_app-1"
+    ).strip()
+    return [
+        "docker",
+        "exec",
+        container,
+        "python",
+        "scripts/staging_overtime_scenario_driver.py",
+        "--scenario",
+        scenario,
+        "--run-prefix",
+        run_prefix,
+        "--minutes",
+        str(minutes),
+        *extra_args,
+    ]
+
+
+def _run_argv(argv: list[str]) -> tuple[subprocess.CompletedProcess[str], float]:
+    started = time.time()
+    try:
+        completed = subprocess.run(
+            argv,
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=900,
+        )
+    except subprocess.TimeoutExpired:
+        completed = subprocess.CompletedProcess(
+            args=argv,
+            returncode=124,
+            stdout="",
+            stderr="driver_timeout",
+        )
+    return completed, round(time.time() - started, 3)
+
+
+def iran_cleanup_argv(run_prefix: str) -> list[str] | None:
+    return iran_driver_argv(
+        SCENARIOS[0]["id"],
+        run_prefix,
+        0,
+        extra_args=("--mode", "cleanup"),
+    )
+
+
+def run_two_peer_foreign_driver(
+    *,
+    scenario: str,
+    run_prefix: str,
+    minutes: int,
+    foreign_extra_from_seed,
+) -> dict[str, Any]:
+    """Seed on Iran, mutate on foreign, retire on Iran (registration sync v2)."""
+    seed_argv = iran_driver_argv(
+        scenario,
+        run_prefix,
+        minutes,
+        extra_args=("--phase", "seed", "--no-cleanup-after"),
+    )
+    foreign_probe = foreign_driver_argv(
+        scenario,
+        run_prefix,
+        minutes,
+        extra_args=(
+            "--phase",
+            "run",
+            "--owner-user-id",
+            "0",
+            "--no-cleanup-after",
+        ),
+    )
+    if seed_argv is None or foreign_probe is None:
+        return {
+            "id": scenario,
+            "status": "blocked",
+            "detail": (
+                "set STAGING_IRAN_SSH_HOST for seed/cleanup and ensure the foreign "
+                "app container is reachable"
+            ),
+            "run_prefix": run_prefix,
+        }
+
+    seed_completed, seed_elapsed = _run_argv(seed_argv)
+    seed_payload = _parse_driver_stdout(seed_completed.stdout, seed_completed.stderr)
+    if not (seed_payload.get("passed") and seed_completed.returncode == 0):
+        return {
+            "id": scenario,
+            "status": "failed",
+            "elapsed_seconds": seed_elapsed,
+            "run_prefix": run_prefix,
+            "phase": "seed",
+            "returncode": seed_completed.returncode,
+            "payload": seed_payload,
+        }
+
+    run_argv = foreign_driver_argv(
+        scenario,
+        run_prefix,
+        minutes,
+        extra_args=foreign_extra_from_seed(seed_payload),
+    )
+    assert run_argv is not None
+    run_completed, run_elapsed = _run_argv(run_argv)
+    run_payload = _parse_driver_stdout(run_completed.stdout, run_completed.stderr)
+
+    cleanup_argv = iran_cleanup_argv(run_prefix)
+    if cleanup_argv is not None:
+        cleanup_completed, cleanup_elapsed = _run_argv(cleanup_argv)
+        cleanup_payload = _parse_driver_stdout(
+            cleanup_completed.stdout, cleanup_completed.stderr
+        )
+    else:
+        cleanup_elapsed = 0.0
+        cleanup_payload = {"passed": False, "error": "cleanup transport unavailable"}
+
+    passed = (
+        bool(run_payload.get("passed"))
+        and run_completed.returncode == 0
+        and bool(cleanup_payload.get("passed"))
+    )
+    return {
+        "id": scenario,
+        "status": "passed" if passed else "failed",
+        "elapsed_seconds": round(seed_elapsed + run_elapsed + cleanup_elapsed, 3),
+        "run_prefix": run_prefix,
+        "seed": seed_payload,
+        "run": run_payload,
+        "cleanup": cleanup_payload,
+    }
+
+
+def run_offer_bot_origin_driver(args: argparse.Namespace, run_prefix: str) -> dict[str, Any]:
+    del args
+    return run_two_peer_foreign_driver(
+        scenario="OT-OFFER-BOT-ORIGIN",
+        run_prefix=run_prefix,
+        minutes=5,
+        foreign_extra_from_seed=lambda seed: (
+            "--phase",
+            "run",
+            "--owner-user-id",
+            str(int(seed["owner_user_id"])),
+            "--no-cleanup-after",
+        ),
+    )
+
+
+def run_req_foreign_to_foreign_driver(
+    args: argparse.Namespace, run_prefix: str
+) -> dict[str, Any]:
+    del args
+    return run_two_peer_foreign_driver(
+        scenario="OT-REQ-FOREIGN-TO-FOREIGN",
+        run_prefix=run_prefix,
+        minutes=5,
+        foreign_extra_from_seed=lambda seed: (
+            "--phase",
+            "run",
+            "--owner-user-id",
+            str(int(seed["owner_user_id"])),
+            "--requester-user-id",
+            str(int(seed["requester_user_id"])),
+            "--no-cleanup-after",
+        ),
+    )
+
+
+def run_channel_marker_driver(
+    args: argparse.Namespace, run_prefix: str
+) -> dict[str, Any]:
+    del args
+    return run_two_peer_foreign_driver(
+        scenario="OT-CHANNEL-MARKER",
+        run_prefix=run_prefix,
+        minutes=5,
+        foreign_extra_from_seed=lambda seed: (
+            "--phase",
+            "run",
+            "--owner-user-id",
+            str(int(seed["owner_user_id"])),
+            "--no-cleanup-after",
+        ),
+    )
+
+
+def run_b2b_receipt_driver(
+    args: argparse.Namespace, run_prefix: str
+) -> dict[str, Any]:
+    """Exercise real command/ACK transport without a possible channel post."""
+    del args
+    if (os.getenv("STAGING_FOREIGN_DRIVER_DISABLE") or "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+    }:
+        return {
+            "id": "OT-TG-B2B-RECEIPT",
+            "status": "blocked",
+            "detail": "foreign staging driver is disabled",
+            "run_prefix": run_prefix,
+        }
+    container = (
+        os.getenv("STAGING_FOREIGN_APP_CONTAINER")
+        or "trading_bot_staging-foreign_app-1"
+    ).strip()
+    digest = hashlib.sha256(run_prefix.encode("utf-8")).hexdigest()[:16]
+    argv = [
+        "docker",
+        "exec",
+        container,
+        "python",
+        "scripts/run_telegram_publisher_b2b_harness.py",
+        "--authorize-live-staging",
+        "--run-id",
+        f"b2b-light-overtime-{digest}",
+        "--messages-per-lane",
+        "2",
+    ]
+    completed, elapsed = _run_argv(argv)
+    payload = _parse_driver_stdout(completed.stdout, completed.stderr)
+    passed = bool(payload.get("passed")) and completed.returncode == 0
+    return {
+        "id": "OT-TG-B2B-RECEIPT",
+        "status": "passed" if passed else "failed",
+        "elapsed_seconds": elapsed,
+        "run_prefix": run_prefix,
+        "returncode": completed.returncode,
+        "payload": payload,
+    }
+
+
+def _sync_worker_containers() -> tuple[str, str]:
+    iran = (
+        os.getenv("STAGING_IRAN_SYNC_CONTAINER")
+        or "trading_bot_staging_iran-sync_worker-1"
+    ).strip()
+    foreign = (
+        os.getenv("STAGING_FOREIGN_SYNC_CONTAINER")
+        or "trading_bot_staging-foreign_sync_worker-1"
+    ).strip()
+    return iran, foreign
+
+
+def _iran_docker_argv(*docker_args: str) -> list[str] | None:
+    host = (os.getenv("STAGING_IRAN_SSH_HOST") or "").strip()
+    if not host:
+        return None
+    if host.startswith("-") or not all(
+        character.isalnum() or character in ".:-" for character in host
+    ):
+        raise ValueError("invalid STAGING_IRAN_SSH_HOST")
+    port = (os.getenv("STAGING_IRAN_SSH_PORT") or "22").strip()
+    if not port.isdigit() or not 1 <= int(port) <= 65535:
+        raise ValueError("invalid STAGING_IRAN_SSH_PORT")
+    return [
+        "ssh",
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "ConnectTimeout=15",
+        "-p",
+        port,
+        f"root@{host}",
+        " ".join(shlex.quote(value) for value in ("docker", *docker_args)),
+    ]
+
+
+def stop_staging_sync_workers() -> dict[str, Any]:
+    iran_container, foreign_container = _sync_worker_containers()
+    iran_argv = _iran_docker_argv("stop", iran_container)
+    foreign_argv = ["docker", "stop", foreign_container]
+    details: dict[str, Any] = {}
+    if iran_argv is None:
+        return {"ok": False, "detail": "STAGING_IRAN_SSH_HOST unset for sync stop"}
+    iran_done, iran_elapsed = _run_argv(iran_argv)
+    foreign_done, foreign_elapsed = _run_argv(foreign_argv)
+    details["iran"] = {
+        "returncode": iran_done.returncode,
+        "elapsed_seconds": iran_elapsed,
+    }
+    details["foreign"] = {
+        "returncode": foreign_done.returncode,
+        "elapsed_seconds": foreign_elapsed,
+    }
+    details["ok"] = iran_done.returncode == 0 and foreign_done.returncode == 0
+    return details
+
+
+def start_staging_sync_workers() -> dict[str, Any]:
+    iran_container, foreign_container = _sync_worker_containers()
+    iran_argv = _iran_docker_argv("start", iran_container)
+    foreign_argv = ["docker", "start", foreign_container]
+    details: dict[str, Any] = {}
+    if iran_argv is None:
+        return {"ok": False, "detail": "STAGING_IRAN_SSH_HOST unset for sync start"}
+    iran_done, iran_elapsed = _run_argv(iran_argv)
+    foreign_done, foreign_elapsed = _run_argv(foreign_argv)
+    details["iran"] = {
+        "returncode": iran_done.returncode,
+        "elapsed_seconds": iran_elapsed,
+    }
+    details["foreign"] = {
+        "returncode": foreign_done.returncode,
+        "elapsed_seconds": foreign_elapsed,
+    }
+    details["ok"] = iran_done.returncode == 0 and foreign_done.returncode == 0
+    return details
+
+
+def run_sync_recovery_driver(
+    args: argparse.Namespace, run_prefix: str
+) -> dict[str, Any]:
+    """Interrupt sync workers, mutate under partition, then prove converge."""
+    del args
+    minutes = 5
+    seed_argv = iran_driver_argv(
+        "OT-SYNC-RECOVERY",
+        run_prefix,
+        minutes,
+        extra_args=("--phase", "seed", "--no-cleanup-after"),
+    )
+    foreign_probe = foreign_driver_argv(
+        "OT-SYNC-RECOVERY",
+        run_prefix,
+        minutes,
+        extra_args=(
+            "--phase",
+            "assert_mirror",
+            "--request-a-public-id",
+            "x",
+            "--no-cleanup-after",
+        ),
+    )
+    if seed_argv is None or foreign_probe is None:
+        return {
+            "id": "OT-SYNC-RECOVERY",
+            "status": "blocked",
+            "detail": (
+                "set STAGING_IRAN_SSH_HOST for seed/cleanup and ensure the foreign "
+                "app container is reachable"
+            ),
+            "run_prefix": run_prefix,
+        }
+
+    phases: dict[str, Any] = {}
+    workers_stopped = False
+    restart_required = False
+    try:
+        seed_completed, seed_elapsed = _run_argv(seed_argv)
+        seed_payload = _parse_driver_stdout(seed_completed.stdout, seed_completed.stderr)
+        phases["seed"] = seed_payload
+        if not (seed_payload.get("passed") and seed_completed.returncode == 0):
+            return {
+                "id": "OT-SYNC-RECOVERY",
+                "status": "failed",
+                "elapsed_seconds": seed_elapsed,
+                "run_prefix": run_prefix,
+                "phase": "seed",
+                "phases": phases,
+            }
+
+        request_a = str(seed_payload["request_a_public_id"])
+        owner_id = int(seed_payload["owner_user_id"])
+        offer_public_id = str(seed_payload["offer_public_id"])
+
+        mirror_argv = foreign_driver_argv(
+            "OT-SYNC-RECOVERY",
+            run_prefix,
+            minutes,
+            extra_args=(
+                "--phase",
+                "assert_mirror",
+                "--request-a-public-id",
+                request_a,
+                "--no-cleanup-after",
+            ),
+        )
+        assert mirror_argv is not None
+        mirror_completed, mirror_elapsed = _run_argv(mirror_argv)
+        mirror_payload = _parse_driver_stdout(
+            mirror_completed.stdout, mirror_completed.stderr
+        )
+        phases["assert_mirror"] = mirror_payload
+        if not (mirror_payload.get("passed") and mirror_completed.returncode == 0):
+            return {
+                "id": "OT-SYNC-RECOVERY",
+                "status": "failed",
+                "elapsed_seconds": round(seed_elapsed + mirror_elapsed, 3),
+                "run_prefix": run_prefix,
+                "phase": "assert_mirror",
+                "phases": phases,
+            }
+
+        restart_required = True
+        stop_details = stop_staging_sync_workers()
+        phases["stop_sync_workers"] = stop_details
+        workers_stopped = bool(stop_details.get("ok"))
+        if not workers_stopped:
+            return {
+                "id": "OT-SYNC-RECOVERY",
+                "status": "failed",
+                "elapsed_seconds": round(seed_elapsed + mirror_elapsed, 3),
+                "run_prefix": run_prefix,
+                "phase": "stop_sync_workers",
+                "phases": phases,
+            }
+
+        mutate_argv = iran_driver_argv(
+            "OT-SYNC-RECOVERY",
+            run_prefix,
+            minutes,
+            extra_args=(
+                "--phase",
+                "partition_mutate",
+                "--request-a-public-id",
+                request_a,
+                "--no-cleanup-after",
+            ),
+        )
+        assert mutate_argv is not None
+        mutate_completed, mutate_elapsed = _run_argv(mutate_argv)
+        mutate_payload = _parse_driver_stdout(
+            mutate_completed.stdout, mutate_completed.stderr
+        )
+        phases["partition_mutate"] = mutate_payload
+        if not (mutate_payload.get("passed") and mutate_completed.returncode == 0):
+            return {
+                "id": "OT-SYNC-RECOVERY",
+                "status": "failed",
+                "elapsed_seconds": round(
+                    seed_elapsed + mirror_elapsed + mutate_elapsed, 3
+                ),
+                "run_prefix": run_prefix,
+                "phase": "partition_mutate",
+                "phases": phases,
+            }
+
+        request_b = str(mutate_payload["request_b_public_id"])
+        skew_argv = foreign_driver_argv(
+            "OT-SYNC-RECOVERY",
+            run_prefix,
+            minutes,
+            extra_args=(
+                "--phase",
+                "assert_skew",
+                "--request-a-public-id",
+                request_a,
+                "--request-b-public-id",
+                request_b,
+                "--no-cleanup-after",
+            ),
+        )
+        assert skew_argv is not None
+        skew_completed, skew_elapsed = _run_argv(skew_argv)
+        skew_payload = _parse_driver_stdout(skew_completed.stdout, skew_completed.stderr)
+        phases["assert_skew"] = skew_payload
+        if not (skew_payload.get("passed") and skew_completed.returncode == 0):
+            return {
+                "id": "OT-SYNC-RECOVERY",
+                "status": "failed",
+                "elapsed_seconds": round(
+                    seed_elapsed + mirror_elapsed + mutate_elapsed + skew_elapsed, 3
+                ),
+                "run_prefix": run_prefix,
+                "phase": "assert_skew",
+                "phases": phases,
+            }
+    finally:
+        # Restart after every stop attempt, including a partial stop. Never
+        # start workers that the operator had already stopped before this run.
+        phases["start_sync_workers"] = (
+            start_staging_sync_workers()
+            if restart_required
+            else {"ok": True, "skipped": "stop_not_attempted"}
+        )
+
+    # Give workers a brief moment to reconnect before converge polls.
+    time.sleep(3)
+    request_b = str(phases.get("partition_mutate", {}).get("request_b_public_id") or "")
+    request_a = str(phases.get("seed", {}).get("request_a_public_id") or "")
+    owner_id = int(phases.get("seed", {}).get("owner_user_id") or 0)
+    offer_public_id = str(phases.get("seed", {}).get("offer_public_id") or "")
+
+    converge_extra = (
+        "--phase",
+        "assert_converge",
+        "--owner-user-id",
+        str(owner_id),
+        "--offer-public-id",
+        offer_public_id,
+        "--request-a-public-id",
+        request_a,
+        "--request-b-public-id",
+        request_b,
+        "--no-cleanup-after",
+    )
+    foreign_converge_argv = foreign_driver_argv(
+        "OT-SYNC-RECOVERY", run_prefix, minutes, extra_args=converge_extra
+    )
+    iran_converge_argv = iran_driver_argv(
+        "OT-SYNC-RECOVERY", run_prefix, minutes, extra_args=converge_extra
+    )
+    assert foreign_converge_argv is not None and iran_converge_argv is not None
+
+    foreign_converge_completed, foreign_converge_elapsed = _run_argv(foreign_converge_argv)
+    foreign_converge = _parse_driver_stdout(
+        foreign_converge_completed.stdout, foreign_converge_completed.stderr
+    )
+    phases["assert_converge_foreign"] = foreign_converge
+
+    iran_converge_completed, iran_converge_elapsed = _run_argv(iran_converge_argv)
+    iran_converge = _parse_driver_stdout(
+        iran_converge_completed.stdout, iran_converge_completed.stderr
+    )
+    phases["assert_converge_iran"] = iran_converge
+
+    cleanup_argv = iran_cleanup_argv(run_prefix)
+    if cleanup_argv is not None:
+        cleanup_completed, cleanup_elapsed = _run_argv(cleanup_argv)
+        cleanup_payload = _parse_driver_stdout(
+            cleanup_completed.stdout, cleanup_completed.stderr
+        )
+    else:
+        cleanup_elapsed = 0.0
+        cleanup_payload = {"passed": False, "error": "cleanup transport unavailable"}
+    phases["cleanup"] = cleanup_payload
+
+    passed = (
+        bool(foreign_converge.get("passed"))
+        and foreign_converge_completed.returncode == 0
+        and bool(iran_converge.get("passed"))
+        and iran_converge_completed.returncode == 0
+        and bool(cleanup_payload.get("passed"))
+        and bool(phases.get("assert_skew", {}).get("passed"))
+        and bool(phases.get("start_sync_workers", {}).get("ok"))
+    )
+    return {
+        "id": "OT-SYNC-RECOVERY",
+        "status": "passed" if passed else "failed",
+        "elapsed_seconds": round(
+            foreign_converge_elapsed + iran_converge_elapsed + cleanup_elapsed, 3
+        ),
+        "run_prefix": run_prefix,
+        "phases": phases,
+    }
+
+
+def run_req_cross_forward_driver(
+    args: argparse.Namespace, run_prefix: str
+) -> dict[str, Any]:
+    """Seed on Iran, re-pin overtime, mutate on foreign, retire on Iran."""
+    del args
+    minutes = 5
+    seed_argv = iran_driver_argv(
+        "OT-REQ-CROSS-FORWARD",
+        run_prefix,
+        minutes,
+        extra_args=("--phase", "seed", "--no-cleanup-after"),
+    )
+    foreign_probe = foreign_driver_argv(
+        "OT-REQ-CROSS-FORWARD",
+        run_prefix,
+        minutes,
+        extra_args=(
+            "--phase",
+            "run",
+            "--owner-user-id",
+            "0",
+            "--no-cleanup-after",
+        ),
+    )
+    if seed_argv is None or foreign_probe is None:
+        return {
+            "id": "OT-REQ-CROSS-FORWARD",
+            "status": "blocked",
+            "detail": (
+                "set STAGING_IRAN_SSH_HOST for seed/cleanup and ensure the foreign "
+                "app container is reachable"
+            ),
+            "run_prefix": run_prefix,
+        }
+
+    seed_completed, seed_elapsed = _run_argv(seed_argv)
+    seed_payload = _parse_driver_stdout(seed_completed.stdout, seed_completed.stderr)
+    if not (seed_payload.get("passed") and seed_completed.returncode == 0):
+        return {
+            "id": "OT-REQ-CROSS-FORWARD",
+            "status": "failed",
+            "elapsed_seconds": seed_elapsed,
+            "run_prefix": run_prefix,
+            "phase": "seed",
+            "returncode": seed_completed.returncode,
+            "payload": seed_payload,
+        }
+
+    offer_public_id = str(seed_payload["offer_public_id"])
+    rebackdate_argv = iran_driver_argv(
+        "OT-REQ-CROSS-FORWARD",
+        run_prefix,
+        minutes,
+        extra_args=(
+            "--phase",
+            "rebackdate",
+            "--offer-public-id",
+            offer_public_id,
+            "--no-cleanup-after",
+        ),
+    )
+    assert rebackdate_argv is not None
+    rebackdate_completed, rebackdate_elapsed = _run_argv(rebackdate_argv)
+    rebackdate_payload = _parse_driver_stdout(
+        rebackdate_completed.stdout, rebackdate_completed.stderr
+    )
+    if not (rebackdate_payload.get("passed") and rebackdate_completed.returncode == 0):
+        cleanup_argv = iran_cleanup_argv(run_prefix)
+        cleanup_payload = {"passed": False}
+        if cleanup_argv is not None:
+            cleanup_completed, _ = _run_argv(cleanup_argv)
+            cleanup_payload = _parse_driver_stdout(
+                cleanup_completed.stdout, cleanup_completed.stderr
+            )
+        return {
+            "id": "OT-REQ-CROSS-FORWARD",
+            "status": "failed",
+            "elapsed_seconds": round(seed_elapsed + rebackdate_elapsed, 3),
+            "run_prefix": run_prefix,
+            "phase": "rebackdate",
+            "seed": seed_payload,
+            "rebackdate": rebackdate_payload,
+            "cleanup": cleanup_payload,
+        }
+
+    run_argv = foreign_driver_argv(
+        "OT-REQ-CROSS-FORWARD",
+        run_prefix,
+        minutes,
+        extra_args=(
+            "--phase",
+            "run",
+            "--owner-user-id",
+            str(int(seed_payload["owner_user_id"])),
+            "--requester-user-id",
+            str(int(seed_payload["requester_user_id"])),
+            "--offer-public-id",
+            offer_public_id,
+            "--no-cleanup-after",
+        ),
+    )
+    assert run_argv is not None
+    run_completed, run_elapsed = _run_argv(run_argv)
+    run_payload = _parse_driver_stdout(run_completed.stdout, run_completed.stderr)
+
+    cleanup_argv = iran_cleanup_argv(run_prefix)
+    if cleanup_argv is not None:
+        cleanup_completed, cleanup_elapsed = _run_argv(cleanup_argv)
+        cleanup_payload = _parse_driver_stdout(
+            cleanup_completed.stdout, cleanup_completed.stderr
+        )
+    else:
+        cleanup_elapsed = 0.0
+        cleanup_payload = {"passed": False, "error": "cleanup transport unavailable"}
+
+    passed = (
+        bool(run_payload.get("passed"))
+        and run_completed.returncode == 0
+        and bool(cleanup_payload.get("passed"))
+    )
+    return {
+        "id": "OT-REQ-CROSS-FORWARD",
+        "status": "passed" if passed else "failed",
+        "elapsed_seconds": round(
+            seed_elapsed + rebackdate_elapsed + run_elapsed + cleanup_elapsed, 3
+        ),
+        "run_prefix": run_prefix,
+        "seed": seed_payload,
+        "rebackdate": rebackdate_payload,
+        "run": run_payload,
+        "cleanup": cleanup_payload,
+    }
+
+
+def run_wired_drivers(args: argparse.Namespace) -> list[dict[str, Any]]:
+    """Execute the wired Iran and foreign overtime drivers."""
+    results: list[dict[str, Any]] = []
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+    for index, scenario in enumerate(WIRED_IRAN_DRIVER_SCENARIOS):
+        run_prefix = f"OTACC_{stamp}_{index:02d}"
+        minutes = (
+            5
+            if scenario
+            in {
+                "OT-OFFER-WEBAPP-ORIGIN",
+                "OT-REQ-IRAN-TO-IRAN",
+                "OT-CANCEL-REQUESTER",
+                "OT-QUEUE-ORDER",
+                "OT-FINAL-TAIL",
+                "OT-UI-RECONNECT",
+            }
+            else 4
+        )
+        argv = iran_driver_argv(scenario, run_prefix, minutes)
+        if argv is None:
+            results.append(
+                {
+                    "id": scenario,
+                    "status": "blocked",
+                    "detail": (
+                        "set STAGING_IRAN_SSH_HOST (and optional STAGING_IRAN_SSH_PORT / "
+                        "STAGING_IRAN_APP_CONTAINER)"
+                    ),
+                }
+            )
+            continue
+        completed, elapsed = _run_argv(argv)
+        payload = _parse_driver_stdout(completed.stdout, completed.stderr)
+        passed = bool(payload.get("passed")) and completed.returncode == 0
+        result = {
+            "id": scenario,
+            "status": "passed" if passed else "failed",
+            "elapsed_seconds": elapsed,
+            "run_prefix": run_prefix,
+            "returncode": completed.returncode,
+            "payload": payload,
+        }
+        results.append(result)
+        write_json(args.artifact_dir / f"driver-{scenario}.json", result)
+
+    for index, scenario in enumerate(WIRED_FOREIGN_DRIVER_SCENARIOS):
+        run_prefix = f"OTACC_{stamp}_F{index:02d}"
+        if scenario == "OT-OFFER-BOT-ORIGIN":
+            result = run_offer_bot_origin_driver(args, run_prefix)
+        elif scenario == "OT-REQ-FOREIGN-TO-FOREIGN":
+            result = run_req_foreign_to_foreign_driver(args, run_prefix)
+        elif scenario == "OT-REQ-CROSS-FORWARD":
+            result = run_req_cross_forward_driver(args, run_prefix)
+        elif scenario == "OT-CHANNEL-MARKER":
+            result = run_channel_marker_driver(args, run_prefix)
+        elif scenario == "OT-SYNC-RECOVERY":
+            result = run_sync_recovery_driver(args, run_prefix)
+        else:
+            result = {
+                "id": scenario,
+                "status": "blocked",
+                "detail": "no foreign orchestration implemented",
+                "run_prefix": run_prefix,
+            }
+        results.append(result)
+        write_json(args.artifact_dir / f"driver-{scenario}.json", result)
+
+    for index, scenario in enumerate(WIRED_B2B_DRIVER_SCENARIOS):
+        run_prefix = f"OTACC_{stamp}_B{index:02d}"
+        result = run_b2b_receipt_driver(args, run_prefix)
+        results.append(result)
+        write_json(args.artifact_dir / f"driver-{scenario}.json", result)
+    return results
+
 def run_execute(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
     if os.getenv(EXECUTION_CONFIRM_ENV) != EXECUTION_CONFIRM_VALUE:
         summary = write_artifact_bundle(
@@ -527,18 +1392,52 @@ def run_execute(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
         write_json(args.artifact_dir / "summary.json", summary)
         return summary, 1
 
+    args.artifact_dir.mkdir(parents=True, exist_ok=True)
+    driver_results = run_wired_drivers(args)
+    write_json(args.artifact_dir / "driver-results.json", {"results": driver_results})
+
+    wired_failed = [item for item in driver_results if item["status"] == "failed"]
+    wired_blocked = [item for item in driver_results if item["status"] == "blocked"]
+    wired_passed = [item for item in driver_results if item["status"] == "passed"]
+    unwired = [
+        item["id"] for item in SCENARIOS if item["id"] not in WIRED_DRIVER_SCENARIOS
+    ]
+
+    if wired_failed:
+        status = "execute_failed"
+        detail = f"{len(wired_failed)} wired overtime drivers failed"
+        exit_code = 1
+    elif wired_blocked:
+        status = "execute_blocked"
+        detail = (
+            "topology preflight passed, but driver transport is incomplete; "
+            f"{len(WIRED_DRIVER_SCENARIOS)} drivers are implemented"
+        )
+        exit_code = 3
+    elif unwired:
+        status = "execute_partial"
+        detail = (
+            f"{len(wired_passed)}/{len(SCENARIOS)} scenarios passed via wired drivers; "
+            f"{len(unwired)} remain unwired"
+        )
+        exit_code = 4
+    else:
+        status = "execute_passed"
+        detail = "all overtime acceptance scenarios passed"
+        exit_code = 0
+
     summary = write_artifact_bundle(
         args.artifact_dir,
         mode="execute",
         manifest=build_manifest(args),
         checks=None,
-        status="execute_blocked",
-        detail=(
-            "topology preflight passed, but mutating overtime scenario drivers "
-            "are not wired yet; deploy migration-first code and add drivers next"
-        ),
+        status=status,
+        detail=detail,
     )
-    return summary, 3
+    summary["wired_driver_results"] = driver_results
+    summary["unwired_scenarios"] = unwired
+    write_json(args.artifact_dir / "summary.json", summary)
+    return summary, exit_code
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
