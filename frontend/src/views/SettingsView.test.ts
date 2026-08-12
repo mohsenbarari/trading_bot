@@ -163,6 +163,9 @@ describe('SettingsView.vue', () => {
   afterEach(() => {
     vi.restoreAllMocks()
     document.body.innerHTML = ''
+    document.body.classList.remove('ui-overlay-open')
+    document.documentElement.classList.remove('ui-overlay-open')
+    delete document.body.dataset.uiOverlayLockCount
   })
 
   it('renders only Security on its canonical route and keeps the session list server-local', async () => {
@@ -580,23 +583,30 @@ describe('SettingsView.vue', () => {
       'پیام‌ها، تنظیمات حساب و فایل‌های روی سرور تغییر نمی‌کنند',
     )
     await wrapper.get('.storage-clear-btn').trigger('click')
-    expect(document.activeElement).toBe(wrapper.get('.storage-clear-confirm').element)
     expect(settingsViewMocks.clearStorageFileCacheMock).not.toHaveBeenCalled()
-    expect(wrapper.get('.storage-inline-confirm').text()).toContain('روی همین دستگاه')
+    const dialog = bodyConfirmDialog()
+    expect(dialog.contains(document.activeElement)).toBe(true)
+    expect(dialog.textContent).toContain('روی همین دستگاه')
+    expect(dialog.textContent).toContain('لغو یا Escape هیچ تغییری ایجاد نمی‌کند')
+    expect(dialog.textContent).not.toContain('trading-bot-chat-files')
+    expect(dialog.textContent).not.toContain('localforage')
 
-    await buttonWithText(wrapper, 'انصراف')!.trigger('click')
+    await cancelBodyDialog()
+    expect(document.body.querySelector('.ui-confirm-dialog')).toBeNull()
     expect(document.activeElement).toBe(wrapper.get('.storage-clear-btn').element)
     await wrapper.get('.storage-clear-btn').trigger('click')
 
-    const confirmButton = wrapper.get('.storage-clear-confirm')
-    await confirmButton.trigger('click')
-    await confirmButton.trigger('click')
+    const confirmButton = bodyConfirmButtons().confirm
+    confirmButton.click()
+    confirmButton.click()
+    await flushPromises()
     expect(settingsViewMocks.clearStorageFileCacheMock).toHaveBeenCalledTimes(1)
 
     if (!resolveClear) throw new Error('Expected clear-cache resolver')
     ;(resolveClear as () => void)()
     await flushPromises()
 
+    expect(document.body.querySelector('.ui-confirm-dialog')).toBeNull()
     expect(wrapper.get('.storage-value').text()).toBe('0.00 MB')
     expect(wrapper.get('.storage-feedback').text()).toContain(
       'فقط فایل‌های ذخیره‌شده پیام‌رسان روی همین دستگاه حذف شدند',
@@ -604,18 +614,38 @@ describe('SettingsView.vue', () => {
     expect(settingsViewMocks.reloadAfterStorageCacheClearMock).toHaveBeenCalledTimes(1)
   })
 
-  it('keeps cache-clear failure cause-neutral and local without console error output', async () => {
+  it('keeps Escape and cancel at zero mutation for local cache clear', async () => {
+    const wrapper = await mountSettingsView('account-storage')
+
+    await wrapper.get('.storage-clear-btn').trigger('click')
+    await pressEscape()
+    expect(document.body.querySelector('.ui-confirm-dialog')).toBeNull()
+    expect(settingsViewMocks.clearStorageFileCacheMock).not.toHaveBeenCalled()
+    expect(settingsViewMocks.reloadAfterStorageCacheClearMock).not.toHaveBeenCalled()
+    expect(wrapper.get('.storage-value').text()).toBe('12.50 MB')
+
+    await wrapper.get('.storage-clear-btn').trigger('click')
+    await cancelBodyDialog()
+    expect(settingsViewMocks.clearStorageFileCacheMock).not.toHaveBeenCalled()
+    expect(settingsViewMocks.reloadAfterStorageCacheClearMock).not.toHaveBeenCalled()
+    expect(wrapper.get('.storage-value').text()).toBe('12.50 MB')
+    expect(wrapper.find('.storage-feedback').exists()).toBe(false)
+  })
+
+  it('keeps cache-clear failure cause-neutral, retains the dialog, and skips reload', async () => {
     const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
     settingsViewMocks.clearStorageFileCacheMock.mockRejectedValueOnce(new Error('raw-clear-cause'))
     const wrapper = await mountSettingsView('account-storage')
 
     await wrapper.get('.storage-clear-btn').trigger('click')
-    await wrapper.get('.storage-clear-confirm').trigger('click')
-    await flushPromises()
+    await confirmBodyDialog()
 
-    expect(wrapper.get('.storage-feedback').text()).toContain(
-      'فایل‌های محلی این دستگاه تغییر نکردند',
+    expect(wrapper.get('.storage-value').text()).toBe('12.50 MB')
+    expect(wrapper.find('.storage-feedback').exists()).toBe(false)
+    expect(bodyConfirmDialog().querySelector('[role="alert"]')?.textContent).toContain(
+      'پاک‌سازی تأیید نشد',
     )
+    expect(bodyConfirmDialog().textContent).not.toContain('raw-clear-cause')
     expect(wrapper.text()).not.toContain('raw-clear-cause')
     expect(settingsViewMocks.reloadAfterStorageCacheClearMock).not.toHaveBeenCalled()
     expect(consoleSpy).not.toHaveBeenCalled()

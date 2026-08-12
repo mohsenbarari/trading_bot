@@ -54,6 +54,8 @@ type SecurityConfirmationKind = 'terminate-session' | 'logout-others' | 'local-l
 
 const TERMINATE_SESSION_DETAIL = 'نشست با موفقیت پایان یافت'
 const LOGOUT_OTHERS_DETAIL = /^\d+ نشست پایان یافت$/
+const STORAGE_CLEAR_SAFE_COPY =
+  'پاک‌سازی تأیید نشد. فایل‌های محلی این دستگاه تغییری نکرده است؛ می‌توانید دوباره تلاش کنید.'
 
 const securitySafeCopy: Record<SecurityConfirmationKind, string> = {
   'terminate-session':
@@ -126,6 +128,7 @@ const cacheSizeLoading = ref(false)
 const cacheSizeError = ref<string | null>(null)
 const cacheClearConfirming = ref(false)
 const cacheClearBusy = ref(false)
+const storageConfirmationError = ref('')
 const cacheClearFeedback = ref<ActionFeedback | null>(consumeStorageClearReceipt())
 
 function consumeStorageClearReceipt(): ActionFeedback | null {
@@ -220,6 +223,7 @@ const securityDialogConfirmLabel = computed(() => {
   if (pendingSecurityConfirmation.value === 'local-logout') return 'تأیید خروج'
   return 'تأیید'
 })
+const storageDialogOpen = computed(() => cacheClearConfirming.value && isStorageRoute.value)
 
 const cacheSizeLabel = computed(() => {
   if (cacheSizeLoading.value && cacheSize.value === null) return 'در حال محاسبه'
@@ -286,15 +290,16 @@ async function refreshCacheSize() {
 }
 
 function requestCacheClear() {
-  if (cacheClearBusy.value) return
+  if (cacheClearBusy.value || cacheClearConfirming.value) return
   cacheClearFeedback.value = null
+  storageConfirmationError.value = ''
   cacheClearConfirming.value = true
-  focusAfterRender('.storage-clear-confirm')
 }
 
 function cancelCacheClear() {
   if (cacheClearBusy.value) return
   cacheClearConfirming.value = false
+  storageConfirmationError.value = ''
   focusAfterRender('.storage-clear-btn')
 }
 
@@ -302,6 +307,7 @@ async function confirmCacheClear() {
   if (cacheClearBusy.value) return
   cacheClearBusy.value = true
   cacheClearFeedback.value = null
+  storageConfirmationError.value = ''
   try {
     await clearStorageFileCache()
     cacheSize.value = '0.00 MB'
@@ -319,11 +325,7 @@ async function confirmCacheClear() {
       // The persistent cache is already cleared and inline feedback remains.
     }
   } catch {
-    cacheClearFeedback.value = {
-      tone: 'danger',
-      title: 'پاک‌سازی انجام نشد',
-      message: 'فایل‌های محلی این دستگاه تغییر نکردند. می‌توانید دوباره تلاش کنید.',
-    }
+    storageConfirmationError.value = STORAGE_CLEAR_SAFE_COPY
   } finally {
     cacheClearBusy.value = false
   }
@@ -564,6 +566,7 @@ function resetSectionActions() {
   logoutOthersFeedback.value = null
   localLogoutFeedback.value = null
   cacheClearConfirming.value = false
+  storageConfirmationError.value = ''
   cacheClearFeedback.value = null
 }
 
@@ -884,12 +887,11 @@ watch(
             />
 
             <AppButton
-              v-if="!cacheClearConfirming"
               type="button"
               class="storage-clear-btn"
               variant="danger"
               block
-              :disabled="cacheClearBusy"
+              :disabled="cacheClearBusy || cacheClearConfirming"
               @click="requestCacheClear"
             >
               <template #icon>
@@ -897,36 +899,6 @@ watch(
               </template>
               پاک‌کردن فایل‌های محلی
             </AppButton>
-
-            <div
-              v-else
-              class="settings-inline-confirm storage-inline-confirm"
-              role="group"
-              aria-label="تأیید پاک‌سازی فایل‌های محلی"
-            >
-              <p>فقط فایل‌های ذخیره‌شده پیام‌رسان روی همین دستگاه حذف می‌شوند.</p>
-              <div class="settings-inline-actions settings-inline-actions--compact">
-                <AppButton
-                  type="button"
-                  size="sm"
-                  variant="ghost"
-                  :disabled="cacheClearBusy"
-                  @click="cancelCacheClear"
-                >
-                  انصراف
-                </AppButton>
-                <AppButton
-                  type="button"
-                  size="sm"
-                  variant="danger"
-                  class="storage-clear-confirm"
-                  :loading="cacheClearBusy"
-                  @click="confirmCacheClear"
-                >
-                  تأیید پاک‌سازی
-                </AppButton>
-              </div>
-            </div>
           </AppCard>
         </AppSectionCard>
       </template>
@@ -944,6 +916,20 @@ watch(
       :confirm-disabled="securityDialogBusy"
       @cancel="closeSecurityConfirmation"
       @confirm="confirmPendingSecurityAction"
+    />
+    <AppConfirmDialog
+      v-if="storageDialogOpen"
+      :open="storageDialogOpen"
+      title="پاک‌کردن فایل‌های محلی"
+      message="فقط فایل‌های ذخیره‌شده پیام‌رسان روی همین دستگاه حذف می‌شوند. پیام‌ها، تنظیمات حساب و فایل‌های روی سرور تغییر نمی‌کنند. لغو یا Escape هیچ تغییری ایجاد نمی‌کند."
+      confirm-label="تأیید پاک‌سازی"
+      cancel-label="انصراف"
+      tone="danger"
+      :busy="cacheClearBusy"
+      :error="storageConfirmationError || undefined"
+      :confirm-disabled="cacheClearBusy"
+      @cancel="cancelCacheClear"
+      @confirm="confirmCacheClear"
     />
   </div>
 </template>
@@ -969,13 +955,11 @@ watch(
 .local-logout-feedback,
 .storage-size-error,
 .storage-feedback,
-.storage-clear-btn,
-.settings-inline-confirm {
+.storage-clear-btn {
   margin-top: 0.75rem;
 }
 
-.sessions-list,
-.settings-inline-actions {
+.sessions-list {
   display: grid;
   gap: 0.75rem;
 }
@@ -1031,8 +1015,7 @@ watch(
 
 .session-meta,
 .storage-copy,
-.storage-label,
-.settings-inline-confirm p {
+.storage-label {
   color: var(--ds-text-muted);
   font-size: var(--ds-font-sm);
   line-height: 1.8;
@@ -1043,24 +1026,8 @@ watch(
   margin-left: 0.45rem;
 }
 
-.settings-inline-confirm {
-  padding: 0.75rem;
-  border: 1px solid var(--ds-border-subtle);
-  border-radius: var(--ds-radius-md);
-  background: var(--ds-bg-subtle);
-}
-
-.settings-inline-confirm p,
 .storage-copy {
   margin: 0;
-}
-
-.settings-inline-actions--compact {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  margin-top: 0.65rem;
-}
-
-.storage-copy {
   margin-top: 0.25rem;
 }
 
