@@ -1,4 +1,4 @@
-import { flushPromises, mount } from '@vue/test-utils'
+import { DOMWrapper, flushPromises, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import CreateInvitationView from './CreateInvitationView.vue'
 
@@ -74,7 +74,13 @@ async function fillInviteForm(wrapper: ReturnType<typeof mount>, mobile = '09123
 async function openDeleteDialog(wrapper: ReturnType<typeof mount>) {
   await wrapper.get('.delete-pending-btn').trigger('click')
   await flushPromises()
-  return wrapper.get('.ui-confirm-dialog')
+  const dialog = document.body.querySelector<HTMLElement>('.ui-confirm-dialog')
+  if (!dialog) throw new Error('confirm_dialog_not_mounted')
+  return new DOMWrapper(dialog)
+}
+
+function hasMountedConfirmDialog() {
+  return Boolean(document.body.querySelector('.ui-confirm-dialog'))
 }
 
 describe('CreateInvitationView.vue', () => {
@@ -445,7 +451,7 @@ describe('CreateInvitationView.vue', () => {
     }))
     expect(wrapper.text()).not.toContain('pending-user')
     expect(wrapper.get('.pending-notice').text()).toContain('دعوت‌نامه از فهرست حذف شد.')
-    expect(wrapper.find('.ui-confirm-dialog').exists()).toBe(false)
+    expect(hasMountedConfirmDialog()).toBe(false)
   })
 
   it('does not treat a non-204 success response as a successful revoke', async () => {
@@ -461,8 +467,8 @@ describe('CreateInvitationView.vue', () => {
     await flushPromises()
 
     expect(wrapper.text()).toContain('pending-user')
-    expect(wrapper.find('.ui-confirm-dialog').exists()).toBe(true)
-    expect(wrapper.text()).toContain('وضعیت آن از سرور تأیید نشد.')
+    expect(hasMountedConfirmDialog()).toBe(true)
+    expect(document.body.textContent).toContain('وضعیت آن از سرور تأیید نشد.')
   })
 
   it.each([400, 404])('reconciles a terminal %s revoke response with one fresh pending list', async (status) => {
@@ -486,7 +492,7 @@ describe('CreateInvitationView.vue', () => {
     expect(pendingCalls).toBe(2)
     expect(wrapper.text()).not.toContain('pending-user')
     expect(wrapper.get('.pending-notice').text()).toContain('دعوت‌نامه دیگر در انتظار نیست؛ فهرست به‌روز شد.')
-    expect(wrapper.find('.ui-confirm-dialog').exists()).toBe(false)
+    expect(hasMountedConfirmDialog()).toBe(false)
     expect(wrapper.text()).not.toContain('private lifecycle detail')
   })
 
@@ -510,7 +516,7 @@ describe('CreateInvitationView.vue', () => {
 
     expect(pendingCalls).toBe(1)
     expect(wrapper.text()).not.toContain('pending-user')
-    expect(wrapper.find('.ui-confirm-dialog').exists()).toBe(false)
+    expect(hasMountedConfirmDialog()).toBe(false)
     expect(wrapper.get('.pending-error').text()).toContain('دسترسی شما به فهرست دعوت‌نامه‌ها تأیید نشد.')
     expect(wrapper.text()).not.toContain('foreign invitation policy')
   })
@@ -573,8 +579,8 @@ describe('CreateInvitationView.vue', () => {
     await flushPromises()
 
     expect(wrapper.text()).toContain('pending-user')
-    expect(wrapper.find('.ui-confirm-dialog').exists()).toBe(true)
-    expect(wrapper.text()).toContain('وضعیت آن از سرور تأیید نشد.')
-    expect(wrapper.text()).not.toContain('server detail')
+    expect(hasMountedConfirmDialog()).toBe(true)
+    expect(document.body.textContent).toContain('وضعیت آن از سرور تأیید نشد.')
+    expect(document.body.textContent).not.toContain('server detail')
   })
 })

@@ -41,44 +41,46 @@ const { titleId, descriptionId, ariaDescriptionId } = useOverlayA11y({
 </script>
 
 <template>
-  <div v-if="open" class="ui-dialog-backdrop">
-    <section
-      ref="containerRef"
-      class="ui-confirm-dialog"
-      :class="`ui-confirm-dialog--${tone}`"
-      role="dialog"
-      aria-modal="true"
-      :aria-labelledby="titleId"
-      :aria-describedby="ariaDescriptionId"
-      tabindex="-1"
-    >
-      <header class="ui-confirm-dialog__header">
-        <p class="ui-confirm-dialog__eyebrow">{{ toneLabel }}</p>
-        <h2 :id="titleId">{{ title }}</h2>
-        <p v-if="message" :id="descriptionId">{{ message }}</p>
-        <p
-          v-if="error"
-          :id="message ? undefined : descriptionId"
-          class="ui-form-field__error"
-          role="alert"
-        >
-          {{ error }}
-        </p>
-      </header>
-      <footer class="ui-confirm-dialog__actions">
-        <AppButton variant="secondary" :disabled="busy" @click="$emit('cancel')">
-          {{ cancelLabel }}
-        </AppButton>
-        <AppButton
-          :variant="tone === 'danger' ? 'danger' : 'primary'"
-          :loading="busy"
-          :disabled="confirmDisabled"
-          :aria-busy="busy ? 'true' : undefined"
-          @click="$emit('confirm')"
-        >
-          {{ confirmLabel }}
-        </AppButton>
-      </footer>
-    </section>
-  </div>
+  <Teleport to="body" defer>
+    <div v-if="open" class="ui-dialog-backdrop">
+      <section
+        ref="containerRef"
+        class="ui-confirm-dialog"
+        :class="`ui-confirm-dialog--${tone}`"
+        role="dialog"
+        aria-modal="true"
+        :aria-labelledby="titleId"
+        :aria-describedby="ariaDescriptionId"
+        tabindex="-1"
+      >
+        <header class="ui-confirm-dialog__header">
+          <p class="ui-confirm-dialog__eyebrow">{{ toneLabel }}</p>
+          <h2 :id="titleId">{{ title }}</h2>
+          <p v-if="message" :id="descriptionId">{{ message }}</p>
+          <p
+            v-if="error"
+            :id="message ? undefined : descriptionId"
+            class="ui-form-field__error"
+            role="alert"
+          >
+            {{ error }}
+          </p>
+        </header>
+        <footer class="ui-confirm-dialog__actions">
+          <AppButton variant="secondary" :disabled="busy" @click="$emit('cancel')">
+            {{ cancelLabel }}
+          </AppButton>
+          <AppButton
+            :variant="tone === 'danger' ? 'danger' : 'primary'"
+            :loading="busy"
+            :disabled="confirmDisabled"
+            :aria-busy="busy ? 'true' : undefined"
+            @click="$emit('confirm')"
+          >
+            {{ confirmLabel }}
+          </AppButton>
+        </footer>
+      </section>
+    </div>
+  </Teleport>
 </template>
