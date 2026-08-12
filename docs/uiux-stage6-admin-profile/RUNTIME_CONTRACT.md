@@ -1,4 +1,4 @@
-# Stage 6 Runtime Contract — delivered Phase 1–13
+# Stage 6 Runtime Contract — delivered Phase 1–14
 
 ## اصول غیرقابل‌جایگزین
 
@@ -145,6 +145,15 @@
 | تأیید | `AppConfirmDialog` body-teleported است؛ متن دیالوگ نام حساب یا موبایل ندارد و جملهٔ لغو/Escape را دارد؛ cancel یا Escape هیچ درخواستی نمی‌فرستد. |
 | recovery | 403/404، malformed یا network، کاربر نمایش‌داده‌شده، مسیر و دیالوگ را نگه می‌دارند و فقط copy ثابت امن می‌دهند؛ detail خام سرور وارد UI، URL، history یا storage نمی‌شود. |
 
+## Phase 14 — یکپارچگی ظاهر مدیریت کاربر
+
+| سطح | قرارداد تحویل‌شده |
+| --- | --- |
+| route فعال | `/admin/users/:id`، همان `UserProfile` موجود؛ API، router و query contract تازه‌ای ایجاد نشده است. |
+| منوی تنظیمات | اقدام‌های مدیریت با `AppActionCard` و کلاس‌های قبلی تست نمایش داده می‌شوند؛ ظاهر از `ui-action-card` و رنگ `--ds-*` می‌آید. |
+| فرم مسدودیت و محدودیت | همان `AppResponsiveDialog` مانده و به confirm تبدیل نشده است؛ ورودی‌ها `AppInput`/`AppSelect` و دکمه‌ها `AppButton` هستند. |
+| mutation | قرارداد Phase 10 و Phase 13 برای receipt، cancel/Escape و copy امن ثابت مانده است. |
+
 ## مرزهای صریح
 
-این contract تا source تحویل‌شدهٔ Phase 13 در commit `b4c8fec657bb78d848ddfb0c5be2b33812c80a64` را توصیف می‌کند. persistenceهای دیگر، protected Messenger internals، Sites، staging، production و closure کلی Stage 6 را authorize یا اثبات نمی‌کند.
+این contract تا source تحویل‌شدهٔ Phase 14 در commit `f33d7fce3513386c05083573f93be31f9d1d7219` را توصیف می‌کند. persistenceهای دیگر، protected Messenger internals، Sites، staging، production و closure کلی Stage 6 را authorize یا اثبات نمی‌کند.

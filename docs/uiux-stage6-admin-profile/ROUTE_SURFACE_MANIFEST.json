@@ -1,14 +1,14 @@
 {
   "schemaVersion": 1,
   "stage": 6,
-  "scope": "admin-profile-workspace-commodities-admin-user-account-security-account-storage-admin-account-status-delivered-phase1-phase2-phase3-phase4-phase5-phase6-phase7-phase8-phase9-phase10-phase11-phase12-phase13",
-  "status": "delivered_phase1_phase2_phase3_phase4_phase5_phase6_phase7_phase8_phase9_phase10_phase11_phase12_phase13_broader_stage6_partial_deferred",
+  "scope": "admin-profile-workspace-commodities-admin-user-account-security-account-storage-admin-account-status-admin-user-chrome-delivered-phase1-phase2-phase3-phase4-phase5-phase6-phase7-phase8-phase9-phase10-phase11-phase12-phase13-phase14",
+  "status": "delivered_phase1_phase2_phase3_phase4_phase5_phase6_phase7_phase8_phase9_phase10_phase11_phase12_phase13_phase14_broader_stage6_partial_deferred",
   "mutableNarrative": true,
   "branch": "condidate/webapp-ui-ux-redesign-v2",
   "implementation": {
-    "commit": "b4c8fec657bb78d848ddfb0c5be2b33812c80a64",
-    "tree": "e313defd57d42476ff68be08e3128233229dd2dd",
-    "parent": "08ec74302b34b2da72b2c25e37d69c232ebdf8d5"
+    "commit": "f33d7fce3513386c05083573f93be31f9d1d7219",
+    "tree": "b622300eb559af6161f8001c1e50aa90aa2ea136",
+    "parent": "1420076aece41d064649573e44891b7b3df145ee"
   },
   "routeContract": {
     "routerPath": "frontend/src/router/index.ts",
@@ -180,7 +180,8 @@
     "adminUserDeletion": "admin-only /admin/users/:id keeps confirmation and receipt state local; delete requires HTTP 200 plus the exact message receipt then navigate manage_users; terminate-all requires HTTP 200 plus integer terminated_sessions >= 0 without displaying raw detail; cancel/Escape send no request; 400/403/404/malformed/network retain context with fixed safe copy and no account_name/mobile in the dialog",
     "accountSecuritySessions": "existing /account/security keeps confirmation and receipt state local; terminate one other session requires HTTP 200 plus the exact Persian success detail then removes only that session; logout-others requires HTTP 200 plus a digit-prefixed ended-sessions detail without displaying raw detail; cancel/Escape send no request; 400/403/404/malformed/network retain the dialog and session list with fixed safe copy and no device name in the dialog",
     "accountStorageLocalClear": "existing /account/storage keeps confirmation and local receipt state on-device; cancel/Escape perform no clear or reload; success sets displayed size to 0.00 MB and records one local reload; local failure retains the dialog and displayed size with fixed safe copy and no cache-store internals in the dialog",
-    "adminAccountStatus": "admin-only /admin/users/:id keeps account-status, unblock and remove-limitations confirmation local; deactivate requires HTTP 200 plus inactive status with a valid grace timestamp and null web-lock; cancel/Escape send no request; 403/404/malformed/network retain the dialog and displayed user with fixed safe copy, Escape hint, and no account_name/mobile in the confirmation"
+    "adminAccountStatus": "admin-only /admin/users/:id keeps account-status, unblock and remove-limitations confirmation local; deactivate requires HTTP 200 plus inactive status with a valid grace timestamp and null web-lock; cancel/Escape send no request; 403/404/malformed/network retain the dialog and displayed user with fixed safe copy, Escape hint, and no account_name/mobile in the confirmation",
+    "adminUserChrome": "existing /admin/users/:id keeps mutation receipts; settings actions use shared ui-action-card chrome and block/limitations remain form dialogs with ui-input/ui-button; no account_name/mobile is added to overlays"
   },
   "phaseReceiptContracts": {
     "phase4": {
@@ -245,6 +246,12 @@
         "admin-user-profile"
       ],
       "contract": "admin account-status, unblock and remove-limitations reuse the existing /admin/users/:id route; deactivate applies only after HTTP 200 plus inactive status with a valid grace timestamp and null web-lock; cancel/Escape send no request; 403/404/malformed/network retain the dialog and displayed user with fixed safe copy, an Escape hint, and no account_name/mobile in the confirmation"
+    },
+    "phase14": {
+      "routeNames": [
+        "admin-user-profile"
+      ],
+      "contract": "admin user settings menu and block/limitations forms reuse the existing /admin/users/:id route; action rows use shared ui-action-card chrome, form dialogs stay AppResponsiveDialog with ui-input/ui-button, mutation/Escape receipts from phases 10 and 13 are unchanged, and no account_name/mobile is added to overlays"
     }
   },
   "browserEvidence": {
@@ -271,7 +278,9 @@
     "phase12RunId": "uiux-stage6-phase12-account-storage-20260812T192405395Z",
     "phase12SourceBindingSha256": "84b24039432882fdea3fd47ba53597fbd30341dade71880fe2457d49eb2bd877",
     "phase13RunId": "uiux-stage6-phase13-admin-account-status-20260812T194220288Z",
-    "phase13SourceBindingSha256": "97b87be3eeb324c6a18931d857ce01725a791e932072eac6acde1c418331bec4"
+    "phase13SourceBindingSha256": "97b87be3eeb324c6a18931d857ce01725a791e932072eac6acde1c418331bec4",
+    "phase14RunId": "uiux-stage6-phase14-admin-user-chrome-20260812T200513178Z",
+    "phase14SourceBindingSha256": "66422fc458a1de597fc91612bc08d1bbb046ce417dd0321deb523d3fa67a6c6c"
   },
   "completion": {
     "phase1": "complete_delivered",
@@ -290,7 +299,8 @@
     "sitesStarted": false,
     "stagingOrProductionChanged": false,
     "phase12": "complete_delivered",
-    "phase13": "complete_delivered"
+    "phase13": "complete_delivered",
+    "phase14": "complete_delivered"
   },
   "claimBoundary": "This manifest describes the delivered route/state boundary only. It does not authorize deferred Stage 6 work, prove a live backend, publish Sites, or change staging/production."
 }

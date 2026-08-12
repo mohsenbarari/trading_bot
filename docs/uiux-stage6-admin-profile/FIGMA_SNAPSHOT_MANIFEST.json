@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "stage": 6,
-  "scope": "historical-phase1-phase2-phase3-static-figma-provenance-with-live-editable-phase4-phase5-phase6-phase7-phase8-phase9-phase10-phase11-phase12-phase13-references",
+  "scope": "historical-phase1-phase2-phase3-static-figma-provenance-with-live-editable-phase4-phase5-phase6-phase7-phase8-phase9-phase10-phase11-phase12-phase13-phase14-references",
   "status": "pass_with_documented_page_sibling_topology",
   "mutableNarrative": true,
   "historicalStaticAudit": {
@@ -22,7 +22,7 @@
       "id": "321:18",
       "name": "08 — Stage 6 Admin & Profile",
       "directChildCountAtHistoricalAudit": 2,
-      "directChildCountCurrent": 12
+      "directChildCountCurrent": 13
     },
     "canonicalRoot": {
       "id": "321:19",
@@ -112,8 +112,8 @@
     "phase3IsPageSiblingOfRoot32119": true,
     "phase3IsNestedUnderRoot32119": false,
     "conclusion": "Coverage is page-level. Do not call this a single nested root bundle under 321:19.",
-    "phase4To13ParentId": "321:18",
-    "phase4To13ArePageSiblingsOfRoot32119": true
+    "phase4To14ParentId": "321:18",
+    "phase4To14ArePageSiblingsOfRoot32119": true
   },
   "authoritativeScreenshots": [
     {
@@ -166,12 +166,12 @@
       "Sites publication",
       "Stage 6 closure"
     ],
-    "phase4To13FigmaEditsWereExplicitlyAuthorized": true,
-    "phase4To13ReferencesAreLiveEditableNotFrozen": true
+    "phase4To14FigmaEditsWereExplicitlyAuthorized": true,
+    "phase4To14ReferencesAreLiveEditableNotFrozen": true
   },
-  "liveEditablePhase4To13": {
+  "liveEditablePhase4To14": {
     "status": "authoritative_live_design_references_not_local_screenshot_or_hash_freeze",
-    "sourceBoundary": "Phase 4–13 Figma updates were explicitly authorized. These references describe the current editable page and must not be conflated with historicalStaticAudit or authoritativeScreenshots.",
+    "sourceBoundary": "Phase 4–14 Figma updates were explicitly authorized. These references describe the current editable page and must not be conflated with historicalStaticAudit or authoritativeScreenshots.",
     "phase4": {
       "source": {
         "commit": "7ac46a36a2ba968246bd285c357bc362a328cdd2",
@@ -728,6 +728,78 @@
           "confirm": "Danger",
           "cancel": "Secondary",
           "retry": "Danger"
+        }
+      }
+    },
+    "phase14": {
+      "source": {
+        "commit": "f33d7fce3513386c05083573f93be31f9d1d7219",
+        "tree": "b622300eb559af6161f8001c1e50aa90aa2ea136"
+      },
+      "section": {
+        "id": "472:1156",
+        "name": "14 — Admin user chrome · shared ui primitives · source f33d7fce",
+        "width": 2592,
+        "height": 1804
+      },
+      "provenanceLabel": {
+        "id": "472:1157",
+        "visibleText": "Phase 14 · یکپارچگی ظاهر مدیریت کاربر · source f33d7fce · دادهٔ synthetic"
+      },
+      "proofFrames": [
+        {
+          "id": "472:1158",
+          "name": "W1 — Admin user settings menu · action cards · mobile 390×844",
+          "width": 390,
+          "height": 844
+        },
+        {
+          "id": "472:1181",
+          "name": "W2 — Admin limitations form · V2 dialog · mobile 390×844",
+          "width": 390,
+          "height": 844
+        }
+      ],
+      "geometry": {
+        "backdrop": {
+          "id": "473:4996",
+          "x": 0,
+          "y": 0,
+          "width": 390,
+          "height": 844
+        },
+        "dialog": {
+          "id": "473:4997",
+          "x": 16,
+          "y": 162,
+          "width": 358,
+          "height": 520,
+          "fullyInsideMobileViewport": true
+        }
+      },
+      "liveAudit": {
+        "allTextFontFamily": "Vazirmatn",
+        "textNodeCount": 50,
+        "linkedInstanceCount": 14,
+        "sensitiveTextScan": {
+          "urls": 0,
+          "emails": 0,
+          "phoneLike": 0,
+          "rawServerErrorOrReceipt": 0,
+          "accountNameOrMobileInDialog": 0
+        },
+        "linkedInstanceFamilies": [
+          "Header",
+          "Navigation",
+          "Button"
+        ],
+        "adminUserChromeActionVariants": {
+          "accountStatus": "Primary",
+          "editRole": "Secondary",
+          "applyLimits": "Primary",
+          "block": "Danger",
+          "save": "Primary",
+          "cancel": "Secondary"
         }
       }
     }

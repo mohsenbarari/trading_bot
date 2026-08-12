@@ -4,6 +4,7 @@ Load for Vue/PWA refactoring, Design System V2, Figma/Sites evidence, or shared 
 
 ## Decisions
 
+- 2026-08-12 | Live admin user chrome on `/admin/users/:id` uses shared `ui-action-card` / `ui-button` / `ui-input` and `--ds-*` tokens; block and limitations stay form dialogs, not confirms. Reason: visual unity with Admin landing and Account hub without changing mutation receipts.
 - 2026-08-12 | Admin account-status, unblock, and remove-limitations confirmations stay generic, mention Escape, and keep zero mutation on cancel; 403/404 retain the dialog with fixed safe copy. Reason: remaining UserProfile confirms lacked Escape coverage and must not leak account_name/mobile or raw detail.
 - 2026-08-12 | Local storage-cache clear on `/account/storage` uses a body-teleported confirmation; cancel/Escape leave files and size unchanged, and local failures keep the dialog with fixed safe copy. Reason: inline confirm lacked Escape/portal, and raw cache-clear causes must not leak.
 - 2026-08-12 | Account-security session mutations accept only exact HTTP 200 receipts; confirmation copy stays generic without device names and failures retain the session list. Reason: raw server detail and device names must not leak from the `/account/security` dialog.
