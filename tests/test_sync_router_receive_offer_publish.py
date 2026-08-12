@@ -8,6 +8,7 @@ from api.routers.sync import (
     receive_sync_data,
 )
 from core.enums import SettlementType
+from core.telegram_delivery_runtime_policy import TelegramDeliveryRuntimeMode
 
 
 class FakeOfferExecuteResult:
@@ -185,6 +186,38 @@ class SyncRouterReceiveOfferPublishTests(unittest.IsolatedAsyncioTestCase):
             send_offer_to_channel=ANY,
         )
         self.assertEqual(offer.channel_message_id, 555)
+        self.assertEqual(result, {"status": "success", "processed": 1})
+
+    async def test_receive_sync_data_defers_foreign_offer_to_queue_v1(self):
+        offer = make_offer()
+        db = FakeDB([FakeOfferExecuteResult(offer)])
+        items = [{"table": "offers", "operation": "INSERT", "id": 7, "data": {"price": 11}}]
+
+        async def fake_apply_item(
+            db_arg, table, operation, record_id, data, model, new_offers, terminal_offers=None, **_kwargs
+        ):
+            new_offers.append(record_id)
+            return "ok"
+
+        with patch("api.routers.sync._apply_item", new=AsyncMock(side_effect=fake_apply_item)), patch(
+            "api.routers.sync.settings.server_mode", "foreign"
+        ), patch("api.routers.sync.select", return_value=FakeSelect()), patch(
+            "sqlalchemy.orm.selectinload", side_effect=lambda *args, **kwargs: object()
+        ), patch(
+            "api.routers.sync.configured_telegram_delivery_runtime",
+            return_value=SimpleNamespace(
+                mode=TelegramDeliveryRuntimeMode.QUEUE_V1,
+                queue_worker_enabled=True,
+            ),
+        ), patch(
+            "core.services.telegram_offer_publication_service.publish_offer_to_telegram_channel_once",
+            new=AsyncMock(),
+        ) as publish_mock, patch(
+            "api.routers.sync.active_publication_is_gated", new=AsyncMock(return_value=False)
+        ):
+            result = await receive_sync_data(items=items, request=SimpleNamespace(), db=db, _=None)
+
+        publish_mock.assert_not_awaited()
         self.assertEqual(result, {"status": "success", "processed": 1})
 
     async def test_receive_sync_data_skips_already_published_or_none_message_id(self):

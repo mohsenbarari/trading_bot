@@ -54,6 +54,10 @@ from core.sync_protocol import (
 )
 from core.sync_registry import SyncPolicy, get_sync_registry_entry
 from core.sync_transport import assert_runtime_sync_transport_allowed, runtime_sync_tls_verify_setting
+from core.telegram_delivery_runtime_policy import (
+    TelegramDeliveryRuntimeMode,
+    configured_telegram_delivery_runtime,
+)
 from core.security import constant_time_secret_equals
 from core.registration_identity import normalize_account_name, normalize_mobile_number
 from core.services.cross_server_recovery_service import active_publication_is_gated, load_active_publication_gate
@@ -4145,8 +4149,28 @@ async def receive_sync_data(
         # (same sync item may arrive via both direct-push and sync_worker)
         if settings.server_mode != "iran" and new_offers:
             try:
+                telegram_runtime = configured_telegram_delivery_runtime()
+                queue_owns_publication = (
+                    telegram_runtime.mode == TelegramDeliveryRuntimeMode.QUEUE_V1
+                    and telegram_runtime.queue_worker_enabled
+                )
                 telegram_publication_gated = await _active_publication_gated_for_sync_receive("telegram_channel")
-                if telegram_publication_gated:
+                if queue_owns_publication:
+                    # Queue V1 is the sole Telegram provider owner.  The
+                    # offer publication state is already persisted by the
+                    # sync apply above; the queue feeder will hand it off to
+                    # the durable delivery queue.  Calling the legacy direct
+                    # sender here would only raise the runtime-owner guard
+                    # and could obscure a successful cross-server sync.
+                    logger.info(
+                        "Deferring synced offer publication to Queue V1 feeder",
+                        extra={
+                            "event": "sync.synced_offer_publication_deferred_to_queue",
+                            "offer_count": len(set(new_offers)),
+                            "publication_gated": telegram_publication_gated,
+                        },
+                    )
+                elif telegram_publication_gated:
                     logger.info(
                         "Synced active offer Telegram publication is gated",
                         extra={
