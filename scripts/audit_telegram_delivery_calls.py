@@ -122,6 +122,7 @@ REMAINING_DISPOSITION_BUDGETS = {
     "remaining_memory_timer": 0,
 }
 EXPECTED_RUNTIME_INVENTORY_COUNTS = {
+    "b2b_control": 1,
     "durable_exempt": 4,
     # Includes Stage 8/9 overtime requester/owner status legacy branches that
     # are gated by configured_telegram_delivery_runtime().
@@ -133,7 +134,7 @@ EXPECTED_RUNTIME_INVENTORY_COUNTS = {
     "queue_execution": 1,
 }
 EXPECTED_RUNTIME_INVENTORY_SHA256 = (
-    "df92331e6fe055e95e772d7b2b025266f193023d3dae8b5d860e9df8c4ea6105"
+    "0aabfb657a5b6248c6a61ffc4d2a0a62358ffc25ac26d0ca1200b98493d50363"
 )
 
 
@@ -698,6 +699,17 @@ def _classify(
         return "queue_execution", "shared queue credential-bound gateway"
     if path in OTP_EXEMPT_FILES:
         return "durable_exempt", "OTP stays on the signed short-lived transport"
+    if (
+        path == "bot/handlers/telegram_publisher_b2b.py"
+        and scope.endswith("receive_dispatch")
+        and callee == "message.answer"
+        and "accept_publisher_b2b_dispatch" in scope_text
+        and "result.acknowledgement_text" in scope_text
+    ):
+        return (
+            "b2b_control",
+            "validated payload-free publisher receipt uses the dedicated B2B control plane",
+        )
     if (
         path == "core/notifications.py"
         and scope.endswith("send_telegram_message")

@@ -146,6 +146,24 @@ class TelegramDeliveryCallsiteInventoryTests(unittest.TestCase):
             },
         )
 
+    def test_publisher_ack_is_the_only_direct_b2b_control_message(self):
+        b2b_calls = [
+            item for item in self.inventory if item.disposition == "b2b_control"
+        ]
+        self.assertEqual(len(b2b_calls), 1)
+        self.assertEqual(
+            (
+                b2b_calls[0].path,
+                b2b_calls[0].scope,
+                b2b_calls[0].callee,
+            ),
+            (
+                "bot/handlers/telegram_publisher_b2b.py",
+                "build_publisher_b2b_router.receive_dispatch",
+                "message.answer",
+            ),
+        )
+
     def test_business_delivery_boundaries_are_all_owned_or_strictly_exempt(self):
         remaining = [
             item
