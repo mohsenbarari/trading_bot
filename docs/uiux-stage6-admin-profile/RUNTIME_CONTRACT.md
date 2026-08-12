@@ -1,4 +1,4 @@
-# Stage 6 Runtime Contract — delivered Phase 1–8
+# Stage 6 Runtime Contract — delivered Phase 1–9
 
 ## اصول غیرقابل‌جایگزین
 
@@ -96,6 +96,16 @@
 | receipt | cancel فقط با `id` همان relation و `status=revoked`، و close/delete فقط با `id` همان relation و `status=deleted` reconciliation یا navigation را فعال می‌کند. |
 | recovery | 400/403/404، wrong-id/wrong-status، malformed یا network dialog، relation، route و query را نگه می‌دارند و فقط متن ثابت امن می‌دهند؛ `detail`/`message` خام سرور در UI، URL، history یا storage نمی‌رود. |
 
+## Phase 9 — mutationهای کالا و نام مستعار با receipt دقیق
+
+| سطح | قرارداد تحویل‌شده |
+| --- | --- |
+| route فعال | `/admin/commodities`، همان route admin-only موجود از `AdminView` به `CommodityManager`؛ API، router و query contract تازه‌ای ایجاد نشده است. |
+| create/update receipt | create کالا فقط `201` + Commodity معتبر با نام درخواست‌شده، edit کالا فقط `200` + همان `id`، create alias فقط `201` + alias درخواست‌شده با parent یکسان، و edit alias فقط `200` + همان alias/parent را می‌پذیرد. |
+| حذف | delete کالا یا alias فقط با `204` و body خالی تغییر محلی را اعمال می‌کند. |
+| تأیید | `AppConfirmDialog` body-teleported، trap-focus، Escape، restore-focus و scroll-lock را حفظ می‌کند؛ cancel یا Escape هیچ DELETE نمی‌فرستد. |
+| recovery | 400/403/404، malformed/mismatch یا network، form/list/selected context و dialog را نگه می‌دارند و فقط feedback ثابت امن می‌دهند؛ detail/message خام سرور وارد UI، URL، history یا storage نمی‌شود. stale detail refresh هنگام بازگشت abort/ignore می‌شود. |
+
 ## مرزهای صریح
 
-این contract تا source تحویل‌شدهٔ Phase 8 در commit `4165ddd5280d2d5485b77ca194d3592e4d239f8b` را توصیف می‌کند. persistenceهای دیگر، protected Messenger internals، Sites، staging، production و closure کلی Stage 6 را authorize یا اثبات نمی‌کند.
+این contract تا source تحویل‌شدهٔ Phase 9 در commit `2aa32c6d48a8b693de8ff37c310d995a4748efa8` را توصیف می‌کند. persistenceهای دیگر، protected Messenger internals، Sites، staging، production و closure کلی Stage 6 را authorize یا اثبات نمی‌کند.

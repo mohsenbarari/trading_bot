@@ -1,14 +1,14 @@
 {
   "schemaVersion": 1,
   "stage": 6,
-  "scope": "admin-profile-workspace-delivered-phase1-phase2-phase3-phase4-phase5-phase6-phase7-phase8",
-  "status": "delivered_phase1_phase2_phase3_phase4_phase5_phase6_phase7_phase8_broader_stage6_partial_deferred",
+  "scope": "admin-profile-workspace-commodities-delivered-phase1-phase2-phase3-phase4-phase5-phase6-phase7-phase8-phase9",
+  "status": "delivered_phase1_phase2_phase3_phase4_phase5_phase6_phase7_phase8_phase9_broader_stage6_partial_deferred",
   "mutableNarrative": true,
   "branch": "condidate/webapp-ui-ux-redesign-v2",
   "implementation": {
-    "commit": "4165ddd5280d2d5485b77ca194d3592e4d239f8b",
-    "tree": "ebead37b3116be33c20645a284c8a40bf093cd23",
-    "parent": "c6c902fd80b3ffd4570a46f96a43d7c47c4dca2b"
+    "commit": "2aa32c6d48a8b693de8ff37c310d995a4748efa8",
+    "tree": "81e1111a3ab74731da91aee71d3f477afd92e598",
+    "parent": "4553c70530bfc4f51006c3e361738a1775f994b9"
   },
   "routeContract": {
     "routerPath": "frontend/src/router/index.ts",
@@ -92,6 +92,18 @@
       "queryPolicy": "invitation token/link never serializes into URL, history, hash or storage"
     },
     {
+      "phase": 9,
+      "path": "/admin/commodities",
+      "name": "admin-commodities",
+      "component": "frontend/src/views/AdminView.vue",
+      "requiresAuth": true,
+      "requiresAdmin": true,
+      "shellClass": "standard-authenticated",
+      "v2Scope": "section",
+      "purpose": "admin commodity and alias mutation confirmation with receipt-safe recovery",
+      "queryPolicy": "no new commodity-mutation query contract; form, confirmation and receipt state stay local"
+    },
+    {
       "phase": 6,
       "path": "/operations/customers/:relationId",
       "name": "operations-customers-detail",
@@ -139,7 +151,8 @@
     "publicProfileBlockReceipt": "only JSON object success:true flips local blocked state; failures retain state with fixed safe receipt",
     "workspaceAccountDeletion": "body-teleported V2 portal; typed name plus acknowledgement; exact expected_action=delete-account; only same-relation deleted receipt navigates; failures retain route/relation with fixed safe message",
     "workspaceSessionTermination": "existing body-teleported confirmation; cancel/Escape does not DELETE; only exact terminated_session_id changes local sessions; 400/403/404/malformed/network retain route/relation/displayed session with fixed safe copy",
-    "workspaceRelationMutation": "existing body-teleported confirmation; cancel/Escape does not DELETE; only same-relation revoked/deleted receipts reconcile; 400/403/404/wrong-id/wrong-status/malformed/network retain dialog, relation, route and query with fixed safe copy"
+    "workspaceRelationMutation": "existing body-teleported confirmation; cancel/Escape does not DELETE; only same-relation revoked/deleted receipts reconcile; 400/403/404/wrong-id/wrong-status/malformed/network retain dialog, relation, route and query with fixed safe copy",
+    "commodityMutation": "admin-only /admin/commodities keeps form, confirmation and receipt state local; create/update require exact status plus target identity/parent receipt, commodity/alias deletion requires 204 with an empty receipt, and mismatch/error/stale detail retains context with fixed safe feedback"
   },
   "phaseReceiptContracts": {
     "phase4": {
@@ -174,6 +187,12 @@
         "operations-accountants-detail"
       ],
       "contract": "reuses existing workspace confirmation for customer cancel-invitation/close-relation and accountant cancel-invitation/delete-relation; only same-relation revoked/deleted receipts reconcile, while failures retain dialog, relation, route and query with fixed safe copy"
+    },
+    "phase9": {
+      "routeNames": [
+        "admin-commodities"
+      ],
+      "contract": "commodity create/update accepts only exact status and identity/parent receipts; commodity or alias deletion uses body-teleported confirmation and applies local removal only for a 204 empty receipt, while mismatch/error/stale detail retains local context with fixed safe feedback"
     }
   },
   "browserEvidence": {
@@ -190,6 +209,8 @@
     "phase7SourceBindingSha256": "6fde9fb1b0f53fd2820c932b14165a7a9d98fd35fb3b7719aa41f61602f62354",
     "phase8RunId": "uiux-stage6-relation-browser-20260812T125450Z",
     "phase8SourceBindingSha256": "83d0089b7987e08e42755e8a014bc089fff4da661573e2d853a9bc7dc9531a46",
+    "phase9RunId": "uiux-stage6-phase9-commodity-delete-20260812T141257269Z",
+    "phase9SourceBindingSha256": "5c1b01f0cff45fca67ccf463878c63214cd7e2ad187e573f7acb7de91e530ac1",
     "prePostSourceGitHarnessEnvironmentIdentical": true
   },
   "completion": {
@@ -201,6 +222,7 @@
     "phase6": "complete_delivered",
     "phase7": "complete_delivered",
     "phase8": "complete_delivered",
+    "phase9": "complete_delivered",
     "broaderStage6": "partial_deferred",
     "stage6CompleteAuthority": false,
     "sitesStarted": false,

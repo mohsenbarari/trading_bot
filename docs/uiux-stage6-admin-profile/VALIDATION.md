@@ -1,4 +1,4 @@
-# Validation — Stage 6 delivered Phase 1–8 scope
+# Validation — Stage 6 delivered Phase 1–9 scope
 
 ## Historical Phase 1–3 source binding
 
@@ -45,7 +45,7 @@ post-fix read-only audit: `assets/figma/final-provenance-20260811T204635Z/stage6
 - پنج render از page/root/Phase 1/2/3 پس از اصلاح بازبینی شده‌اند؛ clipping/overlap label دیده نشد.
 - Phase 3 sibling صفحهٔ root `321:19` است، نه child آن؛ این disclosure است و ادعای یک bundle nested واحد مجاز نیست.
 
-جزئیات ID/hash در `FIGMA_SNAPSHOT_MANIFEST.json` ثبت شده است؛ همان manifest، referenceهای live/editable Phase 4–8 را بدون ادعای screenshot hash/freeze جدید ثبت می‌کند.
+جزئیات ID/hash در `FIGMA_SNAPSHOT_MANIFEST.json` ثبت شده است؛ همان manifest، referenceهای live/editable Phase 4–9 را بدون ادعای screenshot hash/freeze جدید ثبت می‌کند.
 
 ## Phase 4 و Phase 5 — supplemental receipts، نه freeze
 
@@ -104,6 +104,21 @@ post-fix read-only audit: `assets/figma/final-provenance-20260811T204635Z/stage6
 - Figma live/editable در page `321:18`، sibling section `451:766` ثبت شد: W1=`451:768` confirmation و W2=`451:791` safe recovery، هر دو `390×844`. dialog=`451:784` در `(16,278,358,288)` داخل viewport است؛ label `451:767` شامل `source 4165ddd5 · دادهٔ synthetic` است. audit همهٔ 37 text node را Vazirmatn و scan URL/email/phone/raw-server-error-or-receipt را clean ثبت کرد.
 
 این receipt محلی، mutable و supplemental است؛ evidence artifactهای آن عمداً به `selectedArtifacts` تاریخی Phase 1–3 افزوده یا freeze نشده‌اند.
+
+## Phase 9 — حذف کالا و نام مستعار با receipt دقیق
+
+| field | value |
+| --- | --- |
+| source commit | `2aa32c6d48a8b693de8ff37c310d995a4748efa8` |
+| source tree | `81e1111a3ab74731da91aee71d3f477afd92e598` |
+| parent | `4553c70530bfc4f51006c3e361738a1775f994b9` |
+| source binding | `5c1b01f0cff45fca67ccf463878c63214cd7e2ad187e573f7acb7de91e530ac1` (393 files) |
+
+- `npm run build`: pass (`52.90s`). اجرای serial کامل با timeout پیش‌فرض 10s برابر **153/154** file و **1713/1714** test بود؛ تنها موردِ باقی‌مانده یک timing flake بازتولیدپذیر و source-unrelated در `ChatView` است. rerunهای مربوط و اجرای timeout 30s برابر **109/109** pass شدند؛ بنابراین این مورد به‌صورت qualified ثبت می‌شود، نه pass کامل serial در 10s.
+- browser receipt: `uiux-stage6-phase9-commodity-delete-20260812T141257269Z`، `passed`/`promotable=true`، **21** assertion و **20** screenshot. metrics `stage6-phase9-commodity-delete-metrics.json` SHA-256 `c382eb97d3b57d91de371969dbf20e2b7d2a3ee2bfcd52b1933501a5f303f845`؛ binding SHA-256 `439a9098daef9f44845badb80043db9854b997ae05849863844888d851060c4d`؛ harness SHA-256 `8539fbff4303841d457d22db859d6d628e6e97cf615070caa051ea0672041f58`.
+- Figma live/editable در page `321:18`، sibling section `455:831` است: W1=`455:833` و W2=`455:856`، هر دو `390×844`. backdrop=`455:848` در `(0,0,390,844)` و dialog=`455:849` در `(16,278,358,288)` کاملاً داخل viewport هستند؛ label `455:832` دقیقاً `Phase 9 · حذف امن کالا و نام مستعار · source 2aa32c6d · دادهٔ synthetic` است. audit همهٔ 37 text node را Vazirmatn، 9 instance را linked و unsafe scan را empty ثبت کرد.
+
+این receipt محلی، mutable و supplemental است؛ artifactهای آن عمداً به `selectedArtifacts` تاریخی Phase 1–3 افزوده یا freeze نشده‌اند و رفتار live backend را مستقل اثبات نمی‌کنند.
 
 ## Closure boundary
 

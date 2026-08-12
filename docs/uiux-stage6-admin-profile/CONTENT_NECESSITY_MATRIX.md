@@ -24,5 +24,7 @@
 | خطای پایان نشست workspace | recovery قابل بازبینی پس از خطا یا receipt نامعتبر | نگه‌داری | dialog، route، relation و اطلاعات نمایش‌داده‌شدهٔ نشست ثابت می‌مانند؛ raw server detail نمایش داده نمی‌شود. |
 | mutationهای رابطهٔ workspace | لغو دعوت یا بستن/حذف همان رابطه پس از تصمیم آگاهانه | نگه‌داری، receipt-bound | فقط `id` همان relation با `revoked` یا `deleted` reconciliation/navigation را فعال می‌کند. |
 | خطای mutation رابطهٔ workspace | بازبینی و retry بدون از دست‌دادن context | نگه‌داری | 400/403/404، receipt نادرست یا network dialog، relation، route و query را نگه می‌دارند؛ raw detail/message نمایش یا serialize نمی‌شود. |
+| mutation کالا و نام مستعار | ایجاد/ویرایش کالا و alias فقط با outcome قابل‌نسبت‌دادن به درخواست | نگه‌داری، receipt-bound | create/edit فقط status و identity/parent مطابق receipt را می‌پذیرد؛ mismatch یا payload نامعتبر context را تغییر نمی‌دهد. |
+| حذف کالا یا نام مستعار | جلوگیری از DELETE ناخواسته و بازیابی قابل‌بازبینی | نگه‌داری، confirm + receipt-bound | dialog body-teleported است؛ cancel/Escape بدون DELETE و فقط `204` خالی اعمال می‌شود؛ خطا یا receipt نامعتبر selected/form/list را با copy امن نگه می‌دارد. |
 
 هر محتوای جدید باید پیش از افزوده‌شدن، یک تصمیم، عمل، state یا risk-prevention مشخص داشته باشد و projection/authority آن را backend تأیید کند.

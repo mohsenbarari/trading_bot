@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "stage": 6,
-  "scope": "historical-phase1-phase2-phase3-static-figma-provenance-with-live-editable-phase4-phase5-phase6-phase7-phase8-references",
+  "scope": "historical-phase1-phase2-phase3-static-figma-provenance-with-live-editable-phase4-phase5-phase6-phase7-phase8-phase9-references",
   "status": "pass_with_documented_page_sibling_topology",
   "mutableNarrative": true,
   "historicalStaticAudit": {
@@ -22,7 +22,7 @@
       "id": "321:18",
       "name": "08 — Stage 6 Admin & Profile",
       "directChildCountAtHistoricalAudit": 2,
-      "directChildCountCurrent": 7
+      "directChildCountCurrent": 8
     },
     "canonicalRoot": {
       "id": "321:19",
@@ -106,9 +106,9 @@
       ]
     }
   ],
-  "liveEditablePhase4To8": {
+  "liveEditablePhase4To9": {
     "status": "authoritative_live_design_references_not_local_screenshot_or_hash_freeze",
-    "sourceBoundary": "Phase 4–8 Figma updates were explicitly authorized. These references describe the current editable page and must not be conflated with historicalStaticAudit or authoritativeScreenshots.",
+    "sourceBoundary": "Phase 4–9 Figma updates were explicitly authorized. These references describe the current editable page and must not be conflated with historicalStaticAudit or authoritativeScreenshots.",
     "phase4": {
       "source": {
         "commit": "7ac46a36a2ba968246bd285c357bc362a328cdd2",
@@ -318,6 +318,75 @@
           "cancel": "Secondary"
         }
       }
+    },
+    "phase9": {
+      "source": {
+        "commit": "2aa32c6d48a8b693de8ff37c310d995a4748efa8",
+        "tree": "81e1111a3ab74731da91aee71d3f477afd92e598"
+      },
+      "section": {
+        "id": "455:831",
+        "name": "09 — Commodity deletion · exact receipt & safe recovery · source 2aa32c6d",
+        "width": 2592,
+        "height": 1804
+      },
+      "provenanceLabel": {
+        "id": "455:832",
+        "visibleText": "Phase 9 · حذف امن کالا و نام مستعار · source 2aa32c6d · دادهٔ synthetic"
+      },
+      "proofFrames": [
+        {
+          "id": "455:833",
+          "name": "W1 — Commodity deletion · confirmation · mobile 390×844",
+          "width": 390,
+          "height": 844
+        },
+        {
+          "id": "455:856",
+          "name": "W2 — Commodity deletion · safe recovery · mobile 390×844",
+          "width": 390,
+          "height": 844
+        }
+      ],
+      "geometry": {
+        "backdrop": {
+          "id": "455:848",
+          "x": 0,
+          "y": 0,
+          "width": 390,
+          "height": 844
+        },
+        "dialog": {
+          "id": "455:849",
+          "x": 16,
+          "y": 278,
+          "width": 358,
+          "height": 288,
+          "fullyInsideMobileViewport": true
+        }
+      },
+      "liveAudit": {
+        "allTextFontFamily": "Vazirmatn",
+        "textNodeCount": 37,
+        "linkedInstanceCount": 9,
+        "sensitiveTextScan": {
+          "urls": 0,
+          "emails": 0,
+          "phoneLike": 0,
+          "rawServerErrorOrReceipt": 0
+        },
+        "linkedInstanceFamilies": [
+          "Header",
+          "Navigation",
+          "Button"
+        ],
+        "commodityDeletionActionVariants": {
+          "open": "Danger",
+          "confirm": "Danger",
+          "cancel": "Secondary",
+          "retry": "Danger"
+        }
+      }
     }
   },
   "topologyDisclosure": {
@@ -325,8 +394,8 @@
     "phase3ParentId": "321:18",
     "phase3IsPageSiblingOfRoot32119": true,
     "phase3IsNestedUnderRoot32119": false,
-    "phase4To8ParentId": "321:18",
-    "phase4To8ArePageSiblingsOfRoot32119": true,
+    "phase4To9ParentId": "321:18",
+    "phase4To9ArePageSiblingsOfRoot32119": true,
     "conclusion": "Coverage is page-level. Do not call this a single nested root bundle under 321:19."
   },
   "authoritativeScreenshots": [
@@ -369,8 +438,8 @@
   },
   "boundaries": {
     "historicalStaticAuditDidNotMutateFigmaOrSource": true,
-    "phase4To8FigmaEditsWereExplicitlyAuthorized": true,
-    "phase4To8ReferencesAreLiveEditableNotFrozen": true,
+    "phase4To9FigmaEditsWereExplicitlyAuthorized": true,
+    "phase4To9ReferencesAreLiveEditableNotFrozen": true,
     "sitesStarted": false,
     "stagingOrProductionChanged": false,
     "stage6CompleteAuthority": false,

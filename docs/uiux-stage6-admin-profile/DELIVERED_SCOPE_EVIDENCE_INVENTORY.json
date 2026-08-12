@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "stage": 6,
-  "scope": "historical-phase1-phase2-phase3-curated-evidence-with-phase4-phase5-phase6-phase7-phase8-supplemental-receipts",
+  "scope": "historical-phase1-phase2-phase3-curated-evidence-with-phase4-phase5-phase6-phase7-phase8-phase9-supplemental-receipts",
   "status": "curated_scope_evidence_not_full_stage6_freeze",
   "sourceAtCapture": {
     "branch": "condidate/webapp-ui-ux-redesign-v2",
@@ -15,7 +15,7 @@
     "sitesInput": false,
     "sitesProven": false,
     "stagingOrProductionChanged": false,
-    "description": "selectedArtifacts is a curated, reviewable record of delivered Phase 1/2/3 evidence only; supplementalPhase4To8Receipts is metadata-only and non-selected. Neither authorizes deferred Stage 6 work, a full-stage immutable freeze, or Sites publication."
+    "description": "selectedArtifacts is a curated, reviewable record of delivered Phase 1/2/3 evidence only; supplementalPhase4To9Receipts is metadata-only and non-selected. Neither authorizes deferred Stage 6 work, a full-stage immutable freeze, or Sites publication."
   },
   "projectionAlgorithm": "SHA-256 over sorted UTF-8 lines: <repo-relative-path>\\t<byte-count>\\t<file-sha256>\\n. Directory projections cover every regular file below that exact directory.",
   "selectedArtifacts": {
@@ -108,7 +108,7 @@
     "selectedProjectionSha256": "2dce0fceec7f6aac87260b0dfaf3ea34a88c24aaa43435be423c3e535167db75",
     "verifiedAtSourceCommit": "3283a6e38209cb06d352740dae5b05bce5ba9002"
   },
-  "supplementalPhase4To8Receipts": {
+  "supplementalPhase4To9Receipts": {
     "status": "reviewable_receipts_not_allowlisted_or_frozen",
     "description": "These later receipts are intentionally outside the immutable Phase 1–3 selectedArtifacts projection. They must not be treated as a new aggregate, Sites input, or Stage 6 closure freeze.",
     "phase4": {
@@ -199,10 +199,29 @@
         "bindingSha256": "7c1d78badf989f24d71641ca6ad843bc0c098a3a9d2bb4117bcbb5ec15add9cf",
         "harnessSha256": "cd3dc40be39b3c4a227356e3c90aca0561a392b102b511b2e0a92a6e5e262339"
       }
+    },
+    "phase9": {
+      "source": {
+        "commit": "2aa32c6d48a8b693de8ff37c310d995a4748efa8",
+        "tree": "81e1111a3ab74731da91aee71d3f477afd92e598"
+      },
+      "browser": {
+        "runId": "uiux-stage6-phase9-commodity-delete-20260812T141257269Z",
+        "status": "passed",
+        "promotable": true,
+        "assertionCount": 21,
+        "screenshotCount": 20,
+        "artifactLocation": "local ephemeral receipt; intentionally not selected, copied, or frozen",
+        "metricsFile": "stage6-phase9-commodity-delete-metrics.json",
+        "metricsSha256": "c382eb97d3b57d91de371969dbf20e2b7d2a3ee2bfcd52b1933501a5f303f845",
+        "bindingFile": "source-binding.json",
+        "bindingSha256": "439a9098daef9f44845badb80043db9854b997ae05849863844888d851060c4d",
+        "harnessSha256": "8539fbff4303841d457d22db859d6d628e6e97cf615070caa051ea0672041f58"
+      }
     }
   },
   "exclusions": [
-    "All browser run directories other than the three named historical Phase 1–3 runs are excluded from selectedArtifacts; Phase 4–8 paths appear only as metadata-only supplemental receipts",
+    "All browser run directories other than the three named historical Phase 1–3 runs are excluded from selectedArtifacts; Phase 4–9 paths appear only as metadata-only supplemental receipts",
     "Vite caches, temporary worktrees, stdout/stderr captures, and failed diagnostic artifacts",
     "Earlier Figma audit/export packages superseded by final-provenance-20260811T204635Z",
     "Mutable narrative files, including README, VALIDATION, checkpoint, and route/content/protected manifests",

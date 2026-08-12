@@ -1,13 +1,13 @@
 # Stage 6 — Admin & Profile
 
-این پوشه یک بستهٔ توضیحیِ **mutable** برای برش تحویل‌شدهٔ Phase 1 تا Phase 8 است؛ freeze، `EVIDENCE_MANIFEST.json` یا مجوز closure کل Stage 6 نیست.
+این پوشه یک بستهٔ توضیحیِ **mutable** برای برش تحویل‌شدهٔ Phase 1 تا Phase 9 است؛ freeze، `EVIDENCE_MANIFEST.json` یا مجوز closure کل Stage 6 نیست.
 
 ## وضعیت دقیق
 
 - branch: `condidate/webapp-ui-ux-redesign-v2`
-- latest implementation: `4165ddd5280d2d5485b77ca194d3592e4d239f8b`
-- latest tree: `ebead37b3116be33c20645a284c8a40bf093cd23`
-- delivered: Phase 1 (Admin landing)، Phase 2 (Admin user directory/detail)، Phase 3 (public-profile privacy/authority)، Phase 4 (invitation management)، Phase 5 (public-profile block/unblock)، Phase 6 (workspace account deletion)، Phase 7 (safe recovery برای پایان یک نشست workspace) و Phase 8 (safe recovery برای mutationهای رابطهٔ workspace).
+- latest implementation: `2aa32c6d48a8b693de8ff37c310d995a4748efa8`
+- latest tree: `81e1111a3ab74731da91aee71d3f477afd92e598`
+- delivered: Phase 1 (Admin landing)، Phase 2 (Admin user directory/detail)، Phase 3 (public-profile privacy/authority)، Phase 4 (invitation management)، Phase 5 (public-profile block/unblock)، Phase 6 (workspace account deletion)، Phase 7 (safe recovery برای پایان یک نشست workspace)، Phase 8 (safe recovery برای mutationهای رابطهٔ workspace) و Phase 9 (receipt-safe commodity/alias mutations).
 - authority: `stage6CompleteAuthority=false`.
 - broader Stage 6 roadmap: partial/deferred؛ این بسته فقط واقعیت برش تحویل‌شده را ثبت می‌کند.
 
@@ -25,23 +25,23 @@
 8. حذف حساب workspace در دو route فعال Customer/Accountant با dialog Teleport‌شده به `body`، تایپ نام synthetic/نمایشی و acknowledgement انجام می‌شود؛ خطای 400/403/404/malformed/network فقط متن امن ثابت می‌دهد و relation/route را حفظ می‌کند.
 9. پایان یک نشست workspace در همان دو route زنده با `AppConfirmDialog` انجام می‌شود؛ فقط receipt با شناسهٔ دقیق نشست state محلی را تغییر می‌دهد و 400/403/404/malformed/network فقط پیام ثابت امن می‌دهند، بدون raw detail و بدون تغییر route/relation/session نمایش‌داده‌شده.
 10. چهار mutation رابطهٔ workspace فقط با receipt دقیق همان relation (`revoked` یا `deleted`) اعمال می‌شوند؛ 400/403/404/wrong-id/wrong-status/malformed/network dialog، relation، route و query را نگه می‌دارند و raw detail/message را نمایش یا serialize نمی‌کنند.
+11. `/admin/commodities` برای create/edit کالا و alias status/identity receipt دقیق می‌خواهد و حذف کالا/alias فقط با `204` خالی اعمال می‌شود؛ dialog body-teleported، cancel/Escape بدون DELETE و failure/mismatch با context و copy امن ثابت می‌مانند.
 
 ## نقشهٔ این بسته
 
 - [RUNTIME_CONTRACT.md](RUNTIME_CONTRACT.md): privacy، authority، route و recovery contract.
 - [CONTENT_NECESSITY_MATRIX.md](CONTENT_NECESSITY_MATRIX.md): هر سطح باقی‌مانده و علت آن.
-- [ROUTE_SURFACE_MANIFEST.json](ROUTE_SURFACE_MANIFEST.json): route/state boundary for the delivered Phase 1–8 slices.
+- [ROUTE_SURFACE_MANIFEST.json](ROUTE_SURFACE_MANIFEST.json): route/state boundary for the delivered Phase 1–9 slices.
 - [PROTECTED_SURFACE_DIFF_MANIFEST.json](PROTECTED_SURFACE_DIFF_MANIFEST.json): disposition دقیق Messenger protected surface.
-- [FIGMA_SNAPSHOT_MANIFEST.json](FIGMA_SNAPSHOT_MANIFEST.json): historical Phase 1–3 static Figma audit plus live editable references for Phase 4–8.
-- [DELIVERED_SCOPE_EVIDENCE_INVENTORY.json](DELIVERED_SCOPE_EVIDENCE_INVENTORY.json): historical allowlist/hash inventory for Phase 1–3 plus non-freeze supplemental receipts for Phase 4–8.
+- [FIGMA_SNAPSHOT_MANIFEST.json](FIGMA_SNAPSHOT_MANIFEST.json): historical Phase 1–3 static Figma audit plus live editable references for Phase 4–9.
+- [DELIVERED_SCOPE_EVIDENCE_INVENTORY.json](DELIVERED_SCOPE_EVIDENCE_INVENTORY.json): historical allowlist/hash inventory for Phase 1–3 plus non-freeze supplemental receipts for Phase 4–9.
 - [VALIDATION.md](VALIDATION.md): receiptهای source/browser/Figma و محدودیت‌هایشان.
 
-artifactهای allowlisted زیر `assets/` برای review تاریخیِ Phase 1–3 curated هستند؛ receiptهای Phase 4–8 هم در validation/checkpoint ثبت شده‌اند اما هنوز allowlist یا aggregate جدیدی ندارند. این فایل‌های narrative عمداً mutable باقی می‌مانند؛ هیچ‌کدام `EVIDENCE_MANIFEST` یا freeze کل Stage 6 نیست. یک freeze آینده باید فقط inputs immutable را انتخاب کند و این متن‌ها را داخل aggregate خودش قرار ندهد.
+artifactهای allowlisted زیر `assets/` برای review تاریخیِ Phase 1–3 curated هستند؛ receiptهای Phase 4–9 هم در validation/checkpoint ثبت شده‌اند اما هنوز allowlist یا aggregate جدیدی ندارند. این فایل‌های narrative عمداً mutable باقی می‌مانند؛ هیچ‌کدام `EVIDENCE_MANIFEST` یا freeze کل Stage 6 نیست. یک freeze آینده باید فقط inputs immutable را انتخاب کند و این متن‌ها را داخل aggregate خودش قرار ندهد.
 
 ## Deferred، نه بسته‌شده
 
-- commodity feedback persistence؛
-- dialogهای حساسِ باقی‌مانده خارج از PublicProfile، workspace deletion، پایان نشست workspace و mutationهای رابطهٔ workspace؛
+- dialogهای حساسِ باقی‌مانده خارج از PublicProfile، workspace deletion، پایان نشست workspace، mutationهای رابطهٔ workspace و حذف کالا/نام مستعار در `/admin/commodities`؛
 - تغییر مستقل Admin Messages/System Settings؛
 - closure/freeze/Sites evidence Stage 6؛
 - هر ادعای live backend، staging یا production acceptance.
