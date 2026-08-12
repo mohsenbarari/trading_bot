@@ -1,14 +1,14 @@
 {
   "schemaVersion": 1,
   "stage": 6,
-  "scope": "admin-profile-workspace-delivered-phase1-phase2-phase3-phase4-phase5-phase6-phase7",
-  "status": "delivered_phase1_phase2_phase3_phase4_phase5_phase6_phase7_broader_stage6_partial_deferred",
+  "scope": "admin-profile-workspace-delivered-phase1-phase2-phase3-phase4-phase5-phase6-phase7-phase8",
+  "status": "delivered_phase1_phase2_phase3_phase4_phase5_phase6_phase7_phase8_broader_stage6_partial_deferred",
   "mutableNarrative": true,
   "branch": "condidate/webapp-ui-ux-redesign-v2",
   "implementation": {
-    "commit": "24a8d0f500e798c70eb94764045ee9ed90151b99",
-    "tree": "c611f9612ce45ac698d5a76589b5a2474e0860e5",
-    "parent": "5a1ac968e07f94442174b1e39e96b97a2f7d620e"
+    "commit": "4165ddd5280d2d5485b77ca194d3592e4d239f8b",
+    "tree": "ebead37b3116be33c20645a284c8a40bf093cd23",
+    "parent": "c6c902fd80b3ffd4570a46f96a43d7c47c4dca2b"
   },
   "routeContract": {
     "routerPath": "frontend/src/router/index.ts",
@@ -101,7 +101,7 @@
       "shellClass": "standard-authenticated",
       "v2Scope": "section",
       "purpose": "customer workspace destructive confirmation and receipt-safe recovery",
-      "queryPolicy": "no new deletion or session-termination query contract; confirmation and receipt state stay local"
+      "queryPolicy": "no new deletion, session-termination, or relation-mutation query contract; confirmation and receipt state stay local"
     },
     {
       "phase": 6,
@@ -113,7 +113,7 @@
       "shellClass": "standard-authenticated",
       "v2Scope": "section",
       "purpose": "accountant workspace destructive confirmation and receipt-safe recovery",
-      "queryPolicy": "no new deletion or session-termination query contract; confirmation and receipt state stay local"
+      "queryPolicy": "no new deletion, session-termination, or relation-mutation query contract; confirmation and receipt state stay local"
     }
   ],
   "stateAndPrivacy": {
@@ -138,7 +138,8 @@
     "invitationBearer": "copy-only/in-memory; never DOM URL history hash or storage",
     "publicProfileBlockReceipt": "only JSON object success:true flips local blocked state; failures retain state with fixed safe receipt",
     "workspaceAccountDeletion": "body-teleported V2 portal; typed name plus acknowledgement; exact expected_action=delete-account; only same-relation deleted receipt navigates; failures retain route/relation with fixed safe message",
-    "workspaceSessionTermination": "existing body-teleported confirmation; cancel/Escape does not DELETE; only exact terminated_session_id changes local sessions; 400/403/404/malformed/network retain route/relation/displayed session with fixed safe copy"
+    "workspaceSessionTermination": "existing body-teleported confirmation; cancel/Escape does not DELETE; only exact terminated_session_id changes local sessions; 400/403/404/malformed/network retain route/relation/displayed session with fixed safe copy",
+    "workspaceRelationMutation": "existing body-teleported confirmation; cancel/Escape does not DELETE; only same-relation revoked/deleted receipts reconcile; 400/403/404/wrong-id/wrong-status/malformed/network retain dialog, relation, route and query with fixed safe copy"
   },
   "phaseReceiptContracts": {
     "phase4": {
@@ -166,6 +167,13 @@
         "operations-accountants-detail"
       ],
       "contract": "reuses the existing workspace confirmation dialog for one session; only exact terminated_session_id applies local removal/promotion, while any failure retains dialog, route, relation and displayed session with fixed safe copy"
+    },
+    "phase8": {
+      "routeNames": [
+        "operations-customers-detail",
+        "operations-accountants-detail"
+      ],
+      "contract": "reuses existing workspace confirmation for customer cancel-invitation/close-relation and accountant cancel-invitation/delete-relation; only same-relation revoked/deleted receipts reconcile, while failures retain dialog, relation, route and query with fixed safe copy"
     }
   },
   "browserEvidence": {
@@ -180,6 +188,8 @@
     "phase6SourceBindingSha256": "fcf977ab478b6c2c38fe4f719e90b2302f48039774b72e9fcb9da8a8aa1eb63e",
     "phase7RunId": "uiux-stage6-session-browser-20260812T121245634Z",
     "phase7SourceBindingSha256": "6fde9fb1b0f53fd2820c932b14165a7a9d98fd35fb3b7719aa41f61602f62354",
+    "phase8RunId": "uiux-stage6-relation-browser-20260812T125450Z",
+    "phase8SourceBindingSha256": "83d0089b7987e08e42755e8a014bc089fff4da661573e2d853a9bc7dc9531a46",
     "prePostSourceGitHarnessEnvironmentIdentical": true
   },
   "completion": {
@@ -190,6 +200,7 @@
     "phase5": "complete_delivered",
     "phase6": "complete_delivered",
     "phase7": "complete_delivered",
+    "phase8": "complete_delivered",
     "broaderStage6": "partial_deferred",
     "stage6CompleteAuthority": false,
     "sitesStarted": false,

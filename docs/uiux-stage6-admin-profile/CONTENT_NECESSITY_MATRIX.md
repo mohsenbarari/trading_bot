@@ -22,5 +22,7 @@
 | workspace deletion error | بازیابی امن بدون پنهان‌کردن context | نگه‌داری | 400/403/404/malformed/network relation و route را نگه می‌دارند؛ فقط پیام ثابت امن نشان می‌دهند. |
 | پایان یک نشست workspace | قطع دسترسی همان نشست بدون حذف رابطه یا نشست‌های دیگر | نگه‌داری، receipt-bound | فقط `terminated_session_id` دقیقاً برابر نشست انتخابی state محلی را تغییر می‌دهد. |
 | خطای پایان نشست workspace | recovery قابل بازبینی پس از خطا یا receipt نامعتبر | نگه‌داری | dialog، route، relation و اطلاعات نمایش‌داده‌شدهٔ نشست ثابت می‌مانند؛ raw server detail نمایش داده نمی‌شود. |
+| mutationهای رابطهٔ workspace | لغو دعوت یا بستن/حذف همان رابطه پس از تصمیم آگاهانه | نگه‌داری، receipt-bound | فقط `id` همان relation با `revoked` یا `deleted` reconciliation/navigation را فعال می‌کند. |
+| خطای mutation رابطهٔ workspace | بازبینی و retry بدون از دست‌دادن context | نگه‌داری | 400/403/404، receipt نادرست یا network dialog، relation، route و query را نگه می‌دارند؛ raw detail/message نمایش یا serialize نمی‌شود. |
 
 هر محتوای جدید باید پیش از افزوده‌شدن، یک تصمیم، عمل، state یا risk-prevention مشخص داشته باشد و projection/authority آن را backend تأیید کند.

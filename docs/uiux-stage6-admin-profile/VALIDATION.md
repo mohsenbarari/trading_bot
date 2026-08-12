@@ -1,4 +1,4 @@
-# Validation — Stage 6 delivered Phase 1–7 scope
+# Validation — Stage 6 delivered Phase 1–8 scope
 
 ## Historical Phase 1–3 source binding
 
@@ -45,7 +45,7 @@ post-fix read-only audit: `assets/figma/final-provenance-20260811T204635Z/stage6
 - پنج render از page/root/Phase 1/2/3 پس از اصلاح بازبینی شده‌اند؛ clipping/overlap label دیده نشد.
 - Phase 3 sibling صفحهٔ root `321:19` است، نه child آن؛ این disclosure است و ادعای یک bundle nested واحد مجاز نیست.
 
-جزئیات ID/hash در `FIGMA_SNAPSHOT_MANIFEST.json` ثبت شده است؛ همان manifest، referenceهای live/editable Phase 4–7 را بدون ادعای screenshot hash/freeze جدید ثبت می‌کند.
+جزئیات ID/hash در `FIGMA_SNAPSHOT_MANIFEST.json` ثبت شده است؛ همان manifest، referenceهای live/editable Phase 4–8 را بدون ادعای screenshot hash/freeze جدید ثبت می‌کند.
 
 ## Phase 4 و Phase 5 — supplemental receipts، نه freeze
 
@@ -85,6 +85,23 @@ post-fix read-only audit: `assets/figma/final-provenance-20260811T204635Z/stage6
 - browser receipt: `uiux-stage6-session-browser-20260812T121245634Z`، `passed`/`promotable=true`، **18/18** assertion و **16** screenshot. metrics SHA-256 `e7a558edd7c4d55972fe9ee279d8925cf02f999aa26d9186d0252035f932b28d`؛ binding SHA-256 `24022d531dfba3349f729f9945debf2eb0968ea315a584306b93b74f1023fd38`؛ harness SHA-256 `e2a6d6781f9024b02fa67fd61cafd192af8a4387d0cfa758a9fb60e48df50402`.
 - matrix synthetic Customer/Accountant را در 360/390/1440 برای focus-trap، Escape/cancel بدون DELETE، receipt صحیح، و 400/403/404/malformed/network با dialog/route/relation/session ثابت و بدون raw payload پوشش می‌دهد. diagnostics غیرمنتظره صفر است؛ 6 HTTP fixture، 2 network console/failure fixture و 17 loader خارجی locally intercepted صریحاً expected/classified هستند.
 - Figma live reference در page `321:18`، sibling section `442:701` است: W1=`442:703` و W2=`442:733`، هر دو `390×844`. dialog=`442:719` در `(16,278,358,288)` داخل viewport است؛ label `442:702` شامل `source 24a8d0f5 · دادهٔ synthetic` است. audit همهٔ فونت‌ها را Vazirmatn، CTAهای open/cancel را Secondary و CTA تأیید را Primary، و scan phone/email/URL/raw-error را clean ثبت کرد.
+
+این receipt محلی، mutable و supplemental است؛ evidence artifactهای آن عمداً به `selectedArtifacts` تاریخی Phase 1–3 افزوده یا freeze نشده‌اند.
+
+## Phase 8 — بازیابی امن mutation رابطهٔ workspace
+
+| field | value |
+| --- | --- |
+| source commit | `4165ddd5280d2d5485b77ca194d3592e4d239f8b` |
+| source tree | `ebead37b3116be33c20645a284c8a40bf093cd23` |
+| parent | `c6c902fd80b3ffd4570a46f96a43d7c47c4dca2b` |
+| source binding | `83d0089b7987e08e42755e8a014bc089fff4da661573e2d853a9bc7dc9531a46` (389 files) |
+
+- Customer/Accountant workspace focused suite: **80/80** pass؛ `vue-tsc --noEmit`، `npm run guard:ui` و `git diff --check`: pass.
+- browser receipt: `uiux-stage6-relation-browser-20260812T125450Z`، `passed`/`promotable=true`، **540** assertion، **36** screenshot و 36 context ایزوله. metrics SHA-256 `f2a07d11799200a97da00aeee1c1f0732092546696f2c89bc3d55d2b2c3f4ce6`؛ binding SHA-256 `7c1d78badf989f24d71641ca6ad843bc0c098a3a9d2bb4117bcbb5ec15add9cf`؛ harness SHA-256 `cd3dc40be39b3c4a227356e3c90aca0561a392b102b511b2e0a92a6e5e262339`.
+- matrix synthetic چهار action Customer cancel/close و Accountant cancel/delete را پوشش می‌دهد: در 360 dialog/focus/Escape/cancel بدون DELETE؛ در 390، 400/403/404/wrong-id/wrong-status/network با dialog/relation/path/query ثابت و safe copy؛ و در 390/1440 فقط receipt دقیق همان relation با `revoked` یا `deleted` target را حذف و navigation مجاز را فعال می‌کند.
+- 32 DELETE محلیِ fixture (24 failure و 8 success) صریحاً expected هستند؛ DELETE ناشی از Escape/cancel، traffic خارجی، console/page error غیرمنتظره، native dialog یا source/Git/env delta صفر است. raw detail/message در DOM، URL/history یا storage دیده نشد.
+- Figma live/editable در page `321:18`، sibling section `451:766` ثبت شد: W1=`451:768` confirmation و W2=`451:791` safe recovery، هر دو `390×844`. dialog=`451:784` در `(16,278,358,288)` داخل viewport است؛ label `451:767` شامل `source 4165ddd5 · دادهٔ synthetic` است. audit همهٔ 37 text node را Vazirmatn و scan URL/email/phone/raw-server-error-or-receipt را clean ثبت کرد.
 
 این receipt محلی، mutable و supplemental است؛ evidence artifactهای آن عمداً به `selectedArtifacts` تاریخی Phase 1–3 افزوده یا freeze نشده‌اند.
 

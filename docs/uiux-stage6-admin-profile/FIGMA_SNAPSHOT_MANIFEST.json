@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "stage": 6,
-  "scope": "historical-phase1-phase2-phase3-static-figma-provenance-with-live-editable-phase4-phase5-phase6-phase7-references",
+  "scope": "historical-phase1-phase2-phase3-static-figma-provenance-with-live-editable-phase4-phase5-phase6-phase7-phase8-references",
   "status": "pass_with_documented_page_sibling_topology",
   "mutableNarrative": true,
   "historicalStaticAudit": {
@@ -22,7 +22,7 @@
       "id": "321:18",
       "name": "08 — Stage 6 Admin & Profile",
       "directChildCountAtHistoricalAudit": 2,
-      "directChildCountCurrent": 6
+      "directChildCountCurrent": 7
     },
     "canonicalRoot": {
       "id": "321:19",
@@ -106,9 +106,9 @@
       ]
     }
   ],
-  "liveEditablePhase4To7": {
+  "liveEditablePhase4To8": {
     "status": "authoritative_live_design_references_not_local_screenshot_or_hash_freeze",
-    "sourceBoundary": "Phase 4–7 Figma updates were explicitly authorized. These references describe the current editable page and must not be conflated with historicalStaticAudit or authoritativeScreenshots.",
+    "sourceBoundary": "Phase 4–8 Figma updates were explicitly authorized. These references describe the current editable page and must not be conflated with historicalStaticAudit or authoritativeScreenshots.",
     "phase4": {
       "source": {
         "commit": "7ac46a36a2ba968246bd285c357bc362a328cdd2",
@@ -258,6 +258,66 @@
           "cancel": "Secondary"
         }
       }
+    },
+    "phase8": {
+      "source": {
+        "commit": "4165ddd5280d2d5485b77ca194d3592e4d239f8b",
+        "tree": "ebead37b3116be33c20645a284c8a40bf093cd23"
+      },
+      "section": {
+        "id": "451:766",
+        "name": "08 — Workspace relation mutation · safe recovery · source 4165ddd5",
+        "width": 2592,
+        "height": 1804
+      },
+      "provenanceLabel": {
+        "id": "451:767",
+        "visibleText": "Phase 8 · بازیابی امن mutation رابطهٔ workspace · source 4165ddd5 · دادهٔ synthetic"
+      },
+      "proofFrames": [
+        {
+          "id": "451:768",
+          "name": "W1 — Workspace relation mutation · confirmation · mobile 390×844",
+          "width": 390,
+          "height": 844
+        },
+        {
+          "id": "451:791",
+          "name": "W2 — Workspace relation mutation · safe recovery · mobile 390×844",
+          "width": 390,
+          "height": 844
+        }
+      ],
+      "geometry": {
+        "dialog": {
+          "id": "451:784",
+          "x": 16,
+          "y": 278,
+          "width": 358,
+          "height": 288,
+          "fullyInsideMobileViewport": true
+        }
+      },
+      "liveAudit": {
+        "allTextFontFamily": "Vazirmatn",
+        "textNodeCount": 37,
+        "sensitiveTextScan": {
+          "urls": 0,
+          "emails": 0,
+          "phoneLike": 0,
+          "rawServerErrorOrReceipt": 0
+        },
+        "linkedInstanceFamilies": [
+          "Header",
+          "Navigation",
+          "Button"
+        ],
+        "relationActionVariants": {
+          "open": "Secondary",
+          "confirm": "Primary",
+          "cancel": "Secondary"
+        }
+      }
     }
   },
   "topologyDisclosure": {
@@ -265,8 +325,8 @@
     "phase3ParentId": "321:18",
     "phase3IsPageSiblingOfRoot32119": true,
     "phase3IsNestedUnderRoot32119": false,
-    "phase4To7ParentId": "321:18",
-    "phase4To7ArePageSiblingsOfRoot32119": true,
+    "phase4To8ParentId": "321:18",
+    "phase4To8ArePageSiblingsOfRoot32119": true,
     "conclusion": "Coverage is page-level. Do not call this a single nested root bundle under 321:19."
   },
   "authoritativeScreenshots": [
@@ -309,8 +369,8 @@
   },
   "boundaries": {
     "historicalStaticAuditDidNotMutateFigmaOrSource": true,
-    "phase4To7FigmaEditsWereExplicitlyAuthorized": true,
-    "phase4To7ReferencesAreLiveEditableNotFrozen": true,
+    "phase4To8FigmaEditsWereExplicitlyAuthorized": true,
+    "phase4To8ReferencesAreLiveEditableNotFrozen": true,
     "sitesStarted": false,
     "stagingOrProductionChanged": false,
     "stage6CompleteAuthority": false,
