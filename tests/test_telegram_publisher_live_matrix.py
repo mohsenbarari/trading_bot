@@ -108,32 +108,50 @@ class TelegramPublisherLiveMatrixTests(unittest.TestCase):
         self.assertEqual(_retail_lot_sizes("7"), (7, 7, 7))
         self.assertEqual(_retail_lot_sizes(None), (1, 1, 1))
 
-    def test_initial_publication_requires_all_posts_before_any_expiry(self):
+    def test_initial_publication_requires_all_posts_before_any_unpublished_expiry(self):
         self.assertFalse(
-            _initial_publication_complete(posted_count=999, expired_count=0)
+            _initial_publication_complete(
+                posted_count=999,
+                expired_before_initial_publication_count=0,
+            )
         )
         self.assertTrue(
-            _initial_publication_complete(posted_count=1000, expired_count=0)
+            _initial_publication_complete(
+                posted_count=1000,
+                expired_before_initial_publication_count=0,
+            )
         )
         with self.assertRaisesRegex(
             RuntimeError,
             "expired_before_initial_publication",
         ):
-            _initial_publication_complete(posted_count=999, expired_count=1)
+            _initial_publication_complete(
+                posted_count=999,
+                expired_before_initial_publication_count=1,
+            )
 
     def test_initial_publication_gate_accepts_a_complete_lifecycle_cohort(self):
         self.assertTrue(
             _initial_publication_complete(
                 posted_count=200,
-                expired_count=0,
+                expired_before_initial_publication_count=0,
                 expected_count=200,
             )
         )
         self.assertTrue(
             _initial_publication_complete(
                 posted_count=200,
-                expired_count=1,
+                expired_before_initial_publication_count=1,
                 expected_count=200,
+            )
+        )
+
+    def test_initial_publication_gate_allows_published_manual_expiry_while_others_wait(self):
+        self.assertFalse(
+            _initial_publication_complete(
+                posted_count=694,
+                expired_before_initial_publication_count=0,
+                expected_count=1000,
             )
         )
 
@@ -144,7 +162,7 @@ class TelegramPublisherLiveMatrixTests(unittest.TestCase):
         ):
             _initial_publication_complete(
                 posted_count=199,
-                expired_count=1,
+                expired_before_initial_publication_count=1,
                 expected_count=200,
             )
 

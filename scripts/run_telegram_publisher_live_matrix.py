@@ -1330,13 +1330,13 @@ async def _run_lifecycle_actions(
 def _initial_publication_complete(
     *,
     posted_count: int,
-    expired_count: int,
+    expired_before_initial_publication_count: int,
     expected_count: int = MATRIX_TOTAL_OFFERS,
 ) -> bool:
     """Validate a publication gate before the selected lifecycle cohort."""
     if int(posted_count) >= int(expected_count):
         return True
-    if int(expired_count) > 0:
+    if int(expired_before_initial_publication_count) > 0:
         raise LiveMatrixError("live_matrix_offer_expired_before_initial_publication")
     return False
 
@@ -1344,7 +1344,12 @@ def _initial_publication_complete(
 async def _initial_publication_progress(
     timelines: Iterable[OfferTimeline],
 ) -> tuple[int, int]:
-    """Return lightweight durable counts while the initial channel backlog drains."""
+    """Return initial posts and terminal offers lacking initial-post evidence.
+
+    Manual expiry is an intended lifecycle scenario.  It must not poison the
+    later whole-matrix gate once its own initial post was durably sent; only an
+    offer that is terminal *without* such proof is unsafe to continue.
+    """
     public_ids = tuple(
         str(item.offer_public_id)
         for item in timelines
@@ -1364,16 +1369,24 @@ async def _initial_publication_progress(
             )
             or 0
         )
-        expired_count = int(
+        initially_posted_public_ids = select(
+            TelegramDeliveryJobRecord.source_natural_id
+        ).where(
+            TelegramDeliveryJobRecord.source_natural_id.in_(public_ids),
+            TelegramDeliveryJobRecord.action_kind == _INITIAL_ACTION,
+            TelegramDeliveryJobRecord.state == TelegramDeliveryState.SENT,
+        )
+        expired_before_initial_publication_count = int(
             await db.scalar(
                 select(func.count(Offer.id)).where(
                     Offer.id.in_(offer_ids),
                     Offer.status == OfferStatus.EXPIRED,
+                    Offer.offer_public_id.not_in(initially_posted_public_ids),
                 )
             )
             or 0
         )
-    return posted_count, expired_count
+    return posted_count, expired_before_initial_publication_count
 
 
 async def _worker_acknowledgement_progress(
@@ -1513,10 +1526,13 @@ async def _wait_for_initial_publication(
     last_posted = -1
     last_progress_at = time.monotonic()
     while True:
-        posted_count, expired_count = await _initial_publication_progress(selected_timelines)
+        (
+            posted_count,
+            expired_before_initial_publication_count,
+        ) = await _initial_publication_progress(selected_timelines)
         if _initial_publication_complete(
             posted_count=posted_count,
-            expired_count=expired_count,
+            expired_before_initial_publication_count=expired_before_initial_publication_count,
             expected_count=expected_count,
         ):
             await _hydrate_timelines(selected_timelines)
@@ -1532,10 +1548,13 @@ async def _wait_for_initial_publication(
 
 async def _assert_timeline_initial_publication(timeline: OfferTimeline) -> None:
     """Fail closed if a delayed lifecycle task reaches an unpublished offer."""
-    posted_count, expired_count = await _initial_publication_progress((timeline,))
+    (
+        posted_count,
+        expired_before_initial_publication_count,
+    ) = await _initial_publication_progress((timeline,))
     if not _initial_publication_complete(
         posted_count=posted_count,
-        expired_count=expired_count,
+        expired_before_initial_publication_count=expired_before_initial_publication_count,
         expected_count=1,
     ):
         raise LiveMatrixError("live_matrix_lifecycle_before_initial_publication")
