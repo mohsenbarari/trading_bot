@@ -1087,16 +1087,18 @@ describe('CustomerWorkspaceView.vue', () => {
   })
 
   it('closes an active relation without a live account through relation-only copy and receipt semantics', async () => {
+    const safeError =
+      'بستن رابطه تأیید نشد. اطلاعات نمایش‌داده‌شدهٔ رابطه در این صفحه بدون تغییر باقی ماند؛ وضعیت را دوباره بررسی کنید.'
+    const rawServerDetail = 'raw-server-detail: customer relation=13'
     const relationOnly = makeCustomerRelation({
       customer_user_id: null,
       customer_account_name: null,
       invitation_account_name: 'reserved13',
     })
     customerWorkspaceMocks.fetchOwnerCustomerRelationsMock.mockResolvedValueOnce([relationOnly])
-    customerWorkspaceMocks.deleteOwnerCustomerRelationMock.mockResolvedValueOnce({
-      id: 13,
-      status: 'deleted',
-    })
+    customerWorkspaceMocks.deleteOwnerCustomerRelationMock
+      .mockRejectedValueOnce(Object.assign(new Error(rawServerDetail), { status: 403 }))
+      .mockResolvedValueOnce({ id: 13, status: 'deleted' })
     customerWorkspaceMocks.routeState.params = { relationId: '13' }
     customerWorkspaceMocks.routeState.query = { tab: 'danger' }
 
@@ -1117,6 +1119,18 @@ describe('CustomerWorkspaceView.vue', () => {
     expect(dialog.text()).toContain('رزرو هویت مرتبط با این رابطه آزاد می‌شود')
     expect(dialog.text()).toContain('هیچ آبشار حذف حساب، نشست، پیشنهاد یا تاریخچه‌ای اجرا نمی‌شود')
     await dialog.get('.ui-button--danger').trigger('click')
+    await flushPromises()
+
+    expect(hasBodyDialog('.ui-confirm-dialog')).toBe(true)
+    expect(confirmDialog().get('[role="alert"]').text()).toBe(safeError)
+    expect(document.body.textContent).not.toContain(rawServerDetail)
+    expect(vm.customerState.relations.value.some((item: { id: number }) => item.id === 13)).toBe(
+      true,
+    )
+    expect(customerWorkspaceMocks.routerPushMock).not.toHaveBeenCalled()
+    expect(customerWorkspaceMocks.routerReplaceMock).not.toHaveBeenCalled()
+
+    await confirmDialog().get('.ui-button--danger').trigger('click')
     await flushPromises()
 
     expect(customerWorkspaceMocks.deleteOwnerCustomerRelationMock).toHaveBeenCalledWith(

@@ -879,6 +879,9 @@ describe('AccountantWorkspaceView.vue', () => {
   })
 
   it('keeps relation confirmation errors in-dialog and removes only the relation named by the expected receipt', async () => {
+    const safeError =
+      'لغو رابطه و دعوت تأیید نشد. اطلاعات نمایش‌داده‌شدهٔ رابطه در این صفحه بدون تغییر باقی ماند؛ وضعیت را دوباره بررسی کنید.'
+    const rawServerDetail = 'raw-server-detail: accountant relation=12'
     const wrapper = mount(AccountantWorkspaceView)
     await flushPromises()
     await wrapper.get('.accountant-pending-card .ui-button--danger').trigger('click')
@@ -892,19 +895,40 @@ describe('AccountantWorkspaceView.vue', () => {
     expect(confirmDialog().text()).not.toContain('آفرهای فعال')
     expect(confirmDialog().text()).not.toContain('سابقه معاملات')
 
+    const pushCallsBeforeFailure = accountantWorkspaceMocks.routerPushMock.mock.calls.length
+    const replaceCallsBeforeFailure = accountantWorkspaceMocks.routerReplaceMock.mock.calls.length
+    accountantWorkspaceMocks.deleteOwnerAccountantRelationMock.mockRejectedValueOnce(
+      Object.assign(new Error(rawServerDetail), { status: 403 }),
+    )
+    await vm.handleConfirmAction()
+    await flushPromises()
+
+    expect(hasBodyDialog('.ui-confirm-dialog')).toBe(true)
+    expect(confirmDialog().get('[role="alert"]').text()).toBe(safeError)
+    expect(document.body.textContent).not.toContain(rawServerDetail)
+    expect(vm.detailSessionsError).toBe('')
+    expect(wrapper.text()).toContain('دعوت حسابدار')
+    expect(vm.accountantState.relations.value.some((item: { id: number }) => item.id === 12)).toBe(
+      true,
+    )
+    expect(accountantWorkspaceMocks.routerPushMock.mock.calls).toHaveLength(pushCallsBeforeFailure)
+    expect(accountantWorkspaceMocks.routerReplaceMock.mock.calls).toHaveLength(
+      replaceCallsBeforeFailure,
+    )
+
     accountantWorkspaceMocks.deleteOwnerAccountantRelationMock.mockResolvedValueOnce({
-      ...vm.accountantState.relations.value.find((relation: { id: number }) => relation.id === 12),
+      detail: 'raw-mismatched-receipt: accountant relation=12',
+      id: 12,
       status: 'pending',
     })
     await vm.handleConfirmAction()
     await flushPromises()
 
-    expect(hasBodyDialog('.ui-confirm-dialog')).toBe(true)
-    expect(confirmDialog().text()).toContain(
-      'پاسخ لغو رابطه و دعوت حسابدار معتبر نبود.',
+    expect(confirmDialog().get('[role="alert"]').text()).toBe(safeError)
+    expect(confirmDialog().text()).not.toContain('raw-mismatched-receipt')
+    expect(vm.accountantState.relations.value.some((item: { id: number }) => item.id === 12)).toBe(
+      true,
     )
-    expect(vm.detailSessionsError).toBe('')
-    expect(wrapper.text()).toContain('دعوت حسابدار')
 
     const pendingDelete = deferred<Record<string, unknown>>()
     accountantWorkspaceMocks.deleteOwnerAccountantRelationMock.mockReturnValueOnce(
@@ -912,7 +936,7 @@ describe('AccountantWorkspaceView.vue', () => {
     )
     const firstAttempt = vm.handleConfirmAction()
     const duplicateAttempt = vm.handleConfirmAction()
-    expect(accountantWorkspaceMocks.deleteOwnerAccountantRelationMock).toHaveBeenCalledTimes(2)
+    expect(accountantWorkspaceMocks.deleteOwnerAccountantRelationMock).toHaveBeenCalledTimes(3)
     expect(hasBodyDialog('.ui-confirm-dialog')).toBe(true)
 
     const relation = vm.accountantState.relations.value.find(

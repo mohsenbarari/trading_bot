@@ -815,6 +815,12 @@ function getSafeSessionTerminationError() {
   return 'پایان نشست تأیید نشد. اطلاعات نمایش‌داده‌شدهٔ نشست در این صفحه بدون تغییر باقی ماند؛ وضعیت را دوباره بررسی کنید.'
 }
 
+function getSafeRelationConfirmationError(action: 'cancel-invitation' | 'delete-relation') {
+  return action === 'cancel-invitation'
+    ? 'لغو رابطه و دعوت تأیید نشد. اطلاعات نمایش‌داده‌شدهٔ رابطه در این صفحه بدون تغییر باقی ماند؛ وضعیت را دوباره بررسی کنید.'
+    : 'حذف رابطه تأیید نشد. اطلاعات نمایش‌داده‌شدهٔ رابطه در این صفحه بدون تغییر باقی ماند؛ وضعیت را دوباره بررسی کنید.'
+}
+
 function resetConfirmDialog() {
   isConfirmDialogOpen.value = false
   confirmAction.value = null
@@ -916,7 +922,7 @@ async function handleConfirmAction() {
     if (shouldReturnToList) {
       await backToList()
     }
-  } catch (error: unknown) {
+  } catch {
     if (
       !isCurrentConfirmOperation(
         requestGeneration,
@@ -926,18 +932,13 @@ async function handleConfirmAction() {
       )
     )
       return
-    confirmError.value =
-      action === 'delete-account'
-        ? getSafeAccountDeletionError()
-        : action === 'terminate-session'
-          ? getSafeSessionTerminationError()
-        : error instanceof Error && error.message
-          ? error.message
-          : action === 'cancel-invitation'
-            ? 'لغو رابطه و دعوت حسابدار ناموفق بود.'
-            : action === 'delete-relation'
-              ? 'حذف رابطه حسابدار ناموفق بود.'
-              : getSafeAccountDeletionError()
+    if (action === 'delete-account') {
+      confirmError.value = getSafeAccountDeletionError()
+    } else if (action === 'terminate-session') {
+      confirmError.value = getSafeSessionTerminationError()
+    } else {
+      confirmError.value = getSafeRelationConfirmationError(action)
+    }
   } finally {
     if (shouldHoldCanonicalSync) isDeleteNavigationPending = false
     if (requestGeneration === confirmRequestGeneration) isConfirmBusy.value = false
