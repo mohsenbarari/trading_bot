@@ -43,10 +43,12 @@ sys.path.insert(0, str(COLLECTOR_ROOT))
 sys.path.insert(0, str(COLLECTOR_DEPS))
 
 from coin_estimator import (  # noqa: E402
+    DEFAULT_CALIBRATION_DB,
     DEFAULT_CONVERSATION_DB,
     DEFAULT_MARKET_DB,
     DEFAULT_MODEL,
     COMMODITY_SPECS,
+    GROUP_ANCHOR_WINDOW_SECONDS,
     NO_DATA_TOKEN,
     apply_low_date_family_band_separation,
     enforce_cash_tomorrow_term_structure,
@@ -259,10 +261,125 @@ def ensure_manual_entry_schema(conversation_db: Path) -> None:
                 "ALTER TABLE manual_coin_offers "
                 "ADD COLUMN raw_offer_text TEXT"
             )
-        ensure_online_schema(connection)
         connection.commit()
     finally:
         connection.close()
+
+
+_CALIBRATION_TABLES = (
+    "coin_estimate_predictions",
+    "coin_online_residual_state",
+)
+
+
+def _table_columns(connection: sqlite3.Connection, table: str) -> tuple[str, ...]:
+    return tuple(
+        str(row[1]) for row in connection.execute(f'PRAGMA table_info("{table}")')
+    )
+
+
+def prepare_calibration_store(
+    calibration_db: Path,
+    conversation_db: Path,
+) -> dict[str, Any]:
+    """Create the mutable ledger outside the promotion-owned input database.
+
+    Older deployments kept residual state and prediction rows beside the
+    imported conversation data.  Copy those two runtime-only tables once into
+    the sidecar so enabling the isolation neither loses learning history nor
+    keeps rewriting the conversation database on every estimate refresh.
+    """
+
+    calibration_db.parent.mkdir(parents=True, exist_ok=True)
+    if calibration_db.resolve() == conversation_db.resolve():
+        raise ValueError(
+            "COIN_RATE_ESTIMATOR_CALIBRATION_DB must differ from COIN_CONVERSATION_DB"
+        )
+
+    target = sqlite3.connect(calibration_db)
+    target.row_factory = sqlite3.Row
+    source: sqlite3.Connection | None = None
+    copied: dict[str, int] = {}
+    try:
+        ensure_online_schema(target)
+        source = sqlite3.connect(
+            f"file:{conversation_db.resolve()}?mode=ro", uri=True
+        )
+        source.row_factory = sqlite3.Row
+        source_tables = {
+            str(row[0])
+            for row in source.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            )
+        }
+        for table in _CALIBRATION_TABLES:
+            if table not in source_tables:
+                copied[table] = 0
+                continue
+            if int(target.execute(f'SELECT COUNT(*) FROM "{table}"').fetchone()[0]):
+                copied[table] = 0
+                continue
+            source_columns = set(_table_columns(source, table))
+            columns = tuple(
+                column
+                for column in _table_columns(target, table)
+                if column in source_columns
+            )
+            if not columns:
+                copied[table] = 0
+                continue
+            quoted_columns = ", ".join(f'"{column}"' for column in columns)
+            placeholders = ", ".join("?" for _ in columns)
+            rows = source.execute(
+                f'SELECT {quoted_columns} FROM "{table}" ORDER BY rowid'
+            )
+            copied[table] = 0
+            batch: list[tuple[Any, ...]] = []
+            for row in rows:
+                batch.append(tuple(row[column] for column in columns))
+                if len(batch) >= 1_000:
+                    target.executemany(
+                        f'INSERT OR IGNORE INTO "{table}" ({quoted_columns}) '
+                        f"VALUES ({placeholders})",
+                        batch,
+                    )
+                    copied[table] += len(batch)
+                    batch.clear()
+            if batch:
+                target.executemany(
+                    f'INSERT OR IGNORE INTO "{table}" ({quoted_columns}) '
+                    f"VALUES ({placeholders})",
+                    batch,
+                )
+                copied[table] += len(batch)
+        target.commit()
+    except Exception:
+        target.rollback()
+        raise
+    finally:
+        if source is not None:
+            source.close()
+        target.close()
+    return {"status": "READY", "copied_rows": copied}
+
+
+def open_calibration_connection(calibration_db: Path) -> sqlite3.Connection:
+    """Open the isolated mutable calibration store with its schema ready."""
+
+    connection = sqlite3.connect(calibration_db)
+    connection.row_factory = sqlite3.Row
+    ensure_online_schema(connection)
+    return connection
+
+
+def open_conversation_read_connection(conversation_db: Path) -> sqlite3.Connection:
+    """Open group observations read-only so calibration cannot race promotion."""
+
+    connection = sqlite3.connect(
+        f"file:{conversation_db.resolve()}?mode=ro", uri=True
+    )
+    connection.row_factory = sqlite3.Row
+    return connection
 
 
 def read_or_create_write_token(path: Path) -> str:
@@ -890,12 +1007,36 @@ def render_live_rows(items: list[dict[str, Any]], *, kind: str) -> str:
 
 def render_group_activity_fragment(conversation_db: Path) -> str:
     activity = read_recent_group_activity(conversation_db)
+    def freshness(group: str) -> str:
+        rows = list(activity.get(f"{group}_offers", [])) + list(
+            activity.get(f"{group}_trades", [])
+        )
+        observed: list[datetime] = []
+        for row in rows:
+            try:
+                observed.append(parse_datetime(str(row.get("event_time_utc") or "")))
+            except (TypeError, ValueError):
+                continue
+        if not observed:
+            return "<small class='activity-freshness stale'>بدون رویداد ثبت‌شده</small>"
+        latest = max(observed)
+        age_seconds = max(
+            0,
+            int((datetime.now(timezone.utc) - latest).total_seconds()),
+        )
+        fresh = age_seconds <= GROUP_ANCHOR_WINDOW_SECONDS
+        status = "تازه برای مدل" if fresh else "منقضی برای مدل"
+        return (
+            f"<small class='activity-freshness {'fresh' if fresh else 'stale'}'>"
+            f"{status} · آخرین رویداد: {fa_datetime(iso_utc(latest))} "
+            f"({fa_number(age_seconds // 60)} دقیقه پیش)</small>"
+        )
     return f"""<section><div class="section-head"><h2>آخرین فعالیت گروه‌های معاملاتی</h2><span class="badge">داده‌های ثبت‌شده</span></div>
       <div class="group-grid">
-        <article class="feed-card"><h3>۵ آفر آخر — گروه ۱</h3><ul>{render_live_rows(activity.get('group_1_offers', []), kind='offer')}</ul></article>
-        <article class="feed-card"><h3>۵ آفر آخر — گروه ۲</h3><ul>{render_live_rows(activity.get('group_2_offers', []), kind='offer')}</ul></article>
-        <article class="feed-card"><h3>۳ معاملهٔ آخر — گروه ۱</h3><ul>{render_live_rows(activity.get('group_1_trades', []), kind='trade')}</ul></article>
-        <article class="feed-card"><h3>۳ معاملهٔ آخر — گروه ۲</h3><ul>{render_live_rows(activity.get('group_2_trades', []), kind='trade')}</ul></article>
+        <article class="feed-card"><h3>۵ آفر آخر — گروه ۱</h3>{freshness('group_1')}<ul>{render_live_rows(activity.get('group_1_offers', []), kind='offer')}</ul></article>
+        <article class="feed-card"><h3>۵ آفر آخر — گروه ۲</h3>{freshness('group_2')}<ul>{render_live_rows(activity.get('group_2_offers', []), kind='offer')}</ul></article>
+        <article class="feed-card"><h3>۳ معاملهٔ آخر — گروه ۱</h3>{freshness('group_1')}<ul>{render_live_rows(activity.get('group_1_trades', []), kind='trade')}</ul></article>
+        <article class="feed-card"><h3>۳ معاملهٔ آخر — گروه ۲</h3>{freshness('group_2')}<ul>{render_live_rows(activity.get('group_2_trades', []), kind='trade')}</ul></article>
       </div>
     </section>"""
 
@@ -2515,8 +2656,15 @@ def render_page(
         </div>
       </section>
     """
+    freshness_section = f"""
+      <div class="meta-time">
+        بروزرسانی: {generated}<br>
+        بازه داده: {window_start} تا {window_end}
+      </div>
+    """
     if estimate_fragment:
         return f"""
+        <div id="freshness-fragment">{freshness_section}</div>
         <div id="ticker-fragment">
           <div class="top-ticker">
             {ticker_cards}
@@ -3176,6 +3324,13 @@ button:disabled, input:disabled, select:disabled, textarea:disabled {{
   color: var(--text-sub);
   font-size: 11px;
 }}
+.activity-freshness {{
+  display: block;
+  margin: -3px 0 6px;
+  font-size: 11px;
+}}
+.activity-freshness.fresh {{ color: var(--accent-emerald); }}
+.activity-freshness.stale {{ color: var(--accent-rose); }}
 footer {{
   color: var(--text-sub);
   font-size: 12px;
@@ -3227,10 +3382,7 @@ footer code {{
       </div>
     </div>
     <div class="meta">
-      <div class="meta-time">
-        بروزرسانی: {generated}<br>
-        بازه داده: {window_start} تا {window_end}
-      </div>
+      <div id="freshness-content">{freshness_section}</div>
       {navigation}
     </div>
   </header>
@@ -3250,6 +3402,10 @@ async function refreshEstimateView() {{
     const doc = parser.parseFromString(html, "text/html");
     const newTicker = doc.getElementById("ticker-fragment");
     const newTable = doc.getElementById("table-fragment");
+    const newFreshness = doc.getElementById("freshness-fragment");
+    if (newFreshness && document.getElementById("freshness-content")) {{
+      document.getElementById("freshness-content").innerHTML = newFreshness.innerHTML;
+    }}
     if (newTicker && document.getElementById("ticker-content")) {{
       document.getElementById("ticker-content").innerHTML = newTicker.innerHTML;
     }}
@@ -4613,6 +4769,7 @@ def refresh_estimate(
     state_path: Path,
     state: StateStore,
     *,
+    calibration_db: Path | None = None,
     end: datetime | None = None,
     group_live_control: GroupLiveInputControl | None = None,
     shadow_model_path: Path | None = None,
@@ -4623,6 +4780,11 @@ def refresh_estimate(
     ml_shadow_state_path: Path | None = None,
 ) -> dict[str, Any]:
     effective_end = (end or datetime.now(timezone.utc)).astimezone(timezone.utc).replace(microsecond=0)
+    effective_calibration_db = calibration_db or DEFAULT_CALIBRATION_DB
+    if effective_calibration_db.resolve() == conversation_db.resolve():
+        raise ValueError(
+            "calibration_db must differ from the promotion-owned conversation_db"
+        )
     control = group_live_control.get() if group_live_control else {
         "enabled": True,
         "disabled_since_utc": None,
@@ -4644,8 +4806,8 @@ def refresh_estimate(
             reconnect_at = None
     # Reconcile first so observations that arrived while the group gate was
     # disconnected can calibrate this very estimate after reconnection.
-    calibration_connection = sqlite3.connect(conversation_db)
-    calibration_connection.row_factory = sqlite3.Row
+    calibration_connection = open_calibration_connection(effective_calibration_db)
+    observation_connection = open_conversation_read_connection(conversation_db)
     try:
         reconciliation = (
             reconcile_predictions(
@@ -4653,6 +4815,7 @@ def refresh_estimate(
                 now=effective_end,
                 live_group_enabled=True,
                 reconnect_at=reconnect_at,
+                observation_connection=observation_connection,
             )
             if enabled
             else {
@@ -4671,6 +4834,8 @@ def refresh_estimate(
         calibration_connection.rollback()
         calibration_connection.close()
         raise
+    finally:
+        observation_connection.close()
     calibration_connection.close()
     estimate = estimate_rates(
         model,
@@ -4685,8 +4850,7 @@ def refresh_estimate(
     # main model's learned online calibration.
     ml_structural_estimate = deepcopy(estimate)
     finalization = {"term_structure_fixes": [], "low_date_rows": 0, "band_widened": 0}
-    calibration_connection = sqlite3.connect(conversation_db)
-    calibration_connection.row_factory = sqlite3.Row
+    calibration_connection = open_calibration_connection(effective_calibration_db)
     try:
         online_metadata = apply_snapshot_calibration(
             calibration_connection,
@@ -4861,8 +5025,7 @@ def refresh_estimate(
             )
             for model_id, model_version, book in comparison_books
         )
-    calibration_connection = sqlite3.connect(conversation_db)
-    calibration_connection.row_factory = sqlite3.Row
+    calibration_connection = open_calibration_connection(effective_calibration_db)
     try:
         ensure_online_schema(calibration_connection)
         predictions_recorded = 0
@@ -4934,6 +5097,7 @@ async def estimation_loop(
     model: dict[str, Any],
     market_db: Path,
     conversation_db: Path,
+    calibration_db: Path,
     state_path: Path,
     state: StateStore,
     group_live_control: GroupLiveInputControl,
@@ -4958,6 +5122,7 @@ async def estimation_loop(
                     conversation_db,
                     state_path,
                     state,
+                    calibration_db=calibration_db,
                     end=end,
                     group_live_control=group_live_control,
                     shadow_model_path=shadow_model_path,
@@ -5244,6 +5409,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--conversation-db", type=Path, default=DEFAULT_CONVERSATION_DB
     )
+    parser.add_argument(
+        "--calibration-db", type=Path, default=DEFAULT_CALIBRATION_DB,
+        help="Mutable prediction ledger kept outside the promoted conversation input.",
+    )
     parser.add_argument("--state", type=Path, default=DEFAULT_STATE)
     parser.add_argument(
         "--group-live-control",
@@ -5277,6 +5446,7 @@ async def async_main(
                 model,
                 args.market_db,
                 args.conversation_db,
+                args.calibration_db,
                 args.state,
                 state,
                 group_live_control,
@@ -5319,6 +5489,7 @@ async def async_main(
 def main() -> int:
     args = build_parser().parse_args()
     ensure_manual_entry_schema(args.conversation_db)
+    prepare_calibration_store(args.calibration_db, args.conversation_db)
     model = load_model(args.model)
     state = StateStore()
     group_live_control = GroupLiveInputControl(args.group_live_control)
@@ -5336,6 +5507,7 @@ def main() -> int:
             args.conversation_db,
             args.state,
             state,
+            calibration_db=args.calibration_db,
             group_live_control=group_live_control,
             shadow_model_path=args.shadow_model,
             shadow_state_path=args.shadow_state,

@@ -187,6 +187,14 @@ def _melted_point(connection: sqlite3.Connection, *, as_of: datetime, settlement
             ("MELTED_GOLD_AGGREGATE", ("UNKNOWN",), ("PHYSICAL",), "PUBLIC_PHYSICAL_UNSPECIFIED", False, 900),
             ("MELTED_GOLD_PRIVATE", ("TODAY",), ("PAPER_NORMAL",), "PRIVATE_PAPER_TODAY", True, 180),
             ("MELTED_GOLD_FLOW", ("TODAY",), ("PAPER_NORMAL",), "PUBLIC_PAPER_TODAY", True, 180),
+            # After bank hours the cash book can go quiet while the tomorrow
+            # paper market remains active.  Treat the latter as an explicit,
+            # low-confidence *cash bridge*, not as a physical quote.  A
+            # same-settlement cash coin anchor carries the cash/paper basis;
+            # this preserves a useful range instead of abstaining until the
+            # next physical offer arrives.
+            ("MELTED_GOLD_PRIVATE", ("TOMORROW",), ("PAPER_NORMAL",), "PRIVATE_PAPER_TOMORROW_CASH_BRIDGE", True, 180),
+            ("MELTED_GOLD_FLOW", ("TOMORROW",), ("PAPER_NORMAL",), "PUBLIC_PAPER_TOMORROW_CASH_BRIDGE", True, 180),
         )
     else:
         policies = (
@@ -299,7 +307,14 @@ def _coin_anchor(connection: sqlite3.Connection, *, as_of: datetime, code: str, 
     )
     if not rows:
         return None
-    row = min(rows, key=lambda item: (0 if str(item["event_type"]) == "TRADE" else 1, -int(item["id"])))
+    # ``_rows`` is already ordered by economic event time, then id.  Prefer a
+    # confirmed trade over an offer, but keep that chronological ordering
+    # within the selected evidence type.  An older backfilled trade can have a
+    # larger SQLite id and must not displace the newer market anchor.
+    row = next(
+        (item for item in rows if str(item["event_type"]) == "TRADE"),
+        rows[0],
+    )
     event_time = _utc(str(row["event_time_utc"]), name="coin_anchor_event_time_utc")
     age = max(0.0, (as_of - event_time).total_seconds())
     if age > _MAX_ANCHOR_AGE_SECONDS:

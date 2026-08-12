@@ -137,6 +137,67 @@ class OnlineRecalibrationTests(unittest.TestCase):
         self.assertEqual(state["sample_count"], 1)
         self.assertGreater(state["residual_mean"], 0)
 
+    def test_reconciliation_reads_from_a_separate_observation_store(self) -> None:
+        calibration = sqlite3.connect(":memory:")
+        calibration.row_factory = sqlite3.Row
+        observations = sqlite3.connect(":memory:")
+        observations.row_factory = sqlite3.Row
+        try:
+            ensure_schema(calibration)
+            record_predictions(
+                calibration,
+                prediction_time=datetime(2026, 8, 5, 10, 0, tzinfo=UTC),
+                settlement="CASH",
+                rates=[
+                    {
+                        "commodity_name": "امام",
+                        "estimated_price_toman": 180_000_000,
+                    }
+                ],
+                group_live_enabled=True,
+            )
+            observations.executescript(
+                """
+                CREATE TABLE confirmed_trades (
+                    id INTEGER PRIMARY KEY,
+                    event_time_utc TEXT NOT NULL,
+                    commodity TEXT NOT NULL,
+                    price INTEGER NOT NULL,
+                    quantity INTEGER,
+                    settlement TEXT NOT NULL,
+                    trade_form TEXT NOT NULL,
+                    confidence REAL NOT NULL,
+                    training_eligible INTEGER NOT NULL DEFAULT 1
+                );
+                INSERT INTO confirmed_trades(
+                    event_time_utc,commodity,price,settlement,trade_form,confidence
+                ) VALUES ('2026-08-05T10:01:00Z','امام',181000,'CASH','PHYSICAL',0.99);
+                """
+            )
+            result = reconcile_predictions(
+                calibration,
+                now=datetime(2026, 8, 5, 10, 2, tzinfo=UTC),
+                live_group_enabled=True,
+                observation_connection=observations,
+            )
+            self.assertEqual(result["evaluated"], 1)
+            self.assertEqual(
+                calibration.execute(
+                    "SELECT actual_price_toman FROM coin_estimate_predictions"
+                ).fetchone()[0],
+                181_000_000,
+            )
+            self.assertEqual(
+                observations.execute(
+                    "SELECT COUNT(*) FROM sqlite_master "
+                    "WHERE type='table' AND name='coin_estimate_predictions'"
+                ).fetchone()[0],
+                0,
+            )
+        finally:
+            observations.close()
+            calibration.close()
+
     def test_old_normal_prediction_is_not_requeried_but_is_retained(self) -> None:
         self._record("2026-08-05T10:00:00Z", 180_000_000, enabled=True)
         result = reconcile_predictions(

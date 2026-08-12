@@ -583,6 +583,7 @@ def reconcile_predictions(
     live_group_enabled: bool,
     reconnect_at: datetime | None = None,
     learning_model_id: str = MAIN_MODEL_ID,
+    observation_connection: sqlite3.Connection | None = None,
 ) -> dict[str, Any]:
     """Match predictions to later trusted prices and update residual state.
 
@@ -591,6 +592,12 @@ def reconcile_predictions(
     trusted event after the reconnect, and only when it was made while the
     group input was disconnected.  This prevents hours of stale predictions
     from being falsely paired with every new event.
+
+    ``connection`` owns the mutable prediction ledger and residual state.
+    When it is a dedicated calibration store, ``observation_connection`` is
+    the read-only conversation database containing offers and trades.  Keeping
+    those roles separate prevents a calibration refresh from mutating the
+    ingestion database that a live-group promotion is about to replace.
     """
 
     now = now.astimezone(timezone.utc)
@@ -663,8 +670,10 @@ def reconcile_predictions(
     context_start_candidates = [normal_cutoff]
     if reconnect_at is not None:
         context_start_candidates.append(reconnect_at - timedelta(seconds=1))
+    observations = observation_connection or connection
+    observations.row_factory = sqlite3.Row
     actual_context = _load_trusted_actual_context(
-        connection,
+        observations,
         start=min(context_start_candidates),
         end=now,
     )

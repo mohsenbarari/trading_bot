@@ -182,7 +182,7 @@ def build_parser() -> argparse.ArgumentParser:
     publish.add_argument(
         "--force",
         action="store_true",
-        help="rebuild even when the hot-store input watermark is unchanged",
+        help="compatibility option; snapshots are always rebuilt because freshness is time-dependent",
     )
     publish.set_defaults(handler=_publish)
 

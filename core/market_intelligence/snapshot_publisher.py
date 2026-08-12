@@ -22,7 +22,7 @@ from .market_store import (
 )
 
 
-SNAPSHOT_PUBLISHER_VERSION = "market-snapshot-publisher-v2"
+SNAPSHOT_PUBLISHER_VERSION = "market-snapshot-publisher-v3"
 
 
 class MarketSnapshotPublisherError(RuntimeError):
@@ -57,16 +57,6 @@ def _default_watermark_path(snapshot_path: Path) -> Path:
     return snapshot_path.with_name(f".{snapshot_path.name}.input-watermark.json")
 
 
-def _load_watermark(path: Path) -> dict[str, object] | None:
-    if not path.is_file():
-        return None
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None
-    return payload if isinstance(payload, dict) else None
-
-
 def _save_watermark(path: Path, watermark: dict[str, int | str], *, snapshot_digest: str) -> None:
     temporary = path.with_suffix(path.suffix + ".tmp")
     payload = {
@@ -95,8 +85,11 @@ def publish_rate_ready_snapshot(
     Market Store read-only, never creates a store, and preserves a previous
     valid Snapshot if upstream evidence is empty or not rate-ready.
 
-    When the hot-store watermark is unchanged and a previous Snapshot exists,
-    the rebuild is skipped (``UNCHANGED``) unless ``force`` is true.
+    Snapshot content is time-dependent even when the input rows are unchanged:
+    source ages, freshness states, and ``generated_at_utc`` must advance on
+    every scheduled invocation.  The input watermark is therefore audit
+    metadata only; it must never suppress a rebuild.  ``force`` remains an
+    accepted compatibility argument for older callers.
     """
 
     _distinct_paths(market_store_path, snapshot_path)
@@ -112,27 +105,6 @@ def publish_rate_ready_snapshot(
         connection = connect_market_store_read_only(market_store_path)
         verify_market_store_read_only(connection)
         watermark = snapshot_input_watermark(connection)
-        previous = _load_watermark(mark_path)
-        previous_mark = previous.get("watermark") if previous else None
-        if (
-            not force
-            and snapshot_file.is_file()
-            and isinstance(previous_mark, dict)
-            and int(previous_mark.get("max_id") or -1) == int(watermark["max_id"])
-            and int(previous_mark.get("eligible_row_count") or -1)
-            == int(watermark["eligible_row_count"])
-            and str(previous_mark.get("max_event_time_utc") or "")
-            == str(watermark["max_event_time_utc"])
-        ):
-            return MarketSnapshotPublishResult(
-                status="UNCHANGED",
-                snapshot_digest=str(previous.get("snapshot_digest") or "") or None,
-                generated_at_utc=None,
-                estimated_rate_count=0,
-                no_data_rate_count=0,
-                reason="INPUT_WATERMARK_UNCHANGED",
-                input_watermark=watermark,
-            )
         snapshot = build_market_snapshot(
             connection,
             as_of_utc=as_of_utc or _utc_now(),

@@ -5,7 +5,7 @@
 به‌صراحت برچسب می‌خورد. intrinsic بر حسب واحد پروژه چنین است:
 
 ```text
-project_melted = IRT_PER_MESGHAL_750 / 10,000
+project_melted = TOMAN_PER_MESGHAL_750 / 1,000
 full = project_melted × 2.253
 half = full / 2
 quarter = full / 4

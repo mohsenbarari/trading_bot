@@ -59,6 +59,23 @@ def _abs_pct(estimate: float, truth: float) -> float:
     return abs(float(estimate) - float(truth)) / max(abs(float(truth)), 1.0)
 
 
+def _write_candidate_artifacts(
+    *,
+    candidate_path: Path,
+    runtime_candidate_path: Path,
+    text: str,
+    stage_runtime_artifacts: bool,
+) -> bool:
+    """Write research output and stage runtime only after explicit opt-in."""
+
+    candidate_path.write_text(text, encoding="utf-8")
+    if not stage_runtime_artifacts:
+        return False
+    if runtime_candidate_path.resolve() != candidate_path.resolve():
+        runtime_candidate_path.write_text(text, encoding="utf-8")
+    return True
+
+
 def evaluate_model_on_days(
     *,
     model: dict[str, Any],
@@ -444,12 +461,12 @@ def main() -> int:
     candidate_path = args.output_dir / "model.morning-reopen.candidate.json"
     runtime_candidate = args.live_model.parent / "model.morning-reopen.candidate.json"
     text = json.dumps(candidate, ensure_ascii=False, indent=2)
-    candidate_path.write_text(text, encoding="utf-8")
-    runtime_staged = False
-    if args.stage_runtime_artifacts:
-        if runtime_candidate.resolve() != candidate_path.resolve():
-            runtime_candidate.write_text(text, encoding="utf-8")
-        runtime_staged = True
+    runtime_staged = _write_candidate_artifacts(
+        candidate_path=candidate_path,
+        runtime_candidate_path=runtime_candidate,
+        text=text,
+        stage_runtime_artifacts=bool(args.stage_runtime_artifacts),
+    )
 
     report = {
         "status": "OK",
@@ -560,7 +577,6 @@ def main() -> int:
             live_group_events_enabled=False,
             group_live_events_before=datetime.now(timezone.utc),
         )
-        # Persist candidate path as the research shadow model file.
         research_model_path = runtime_candidate if runtime_staged else candidate_path
         run_shadow_parallel(
             live_estimate=live_now,

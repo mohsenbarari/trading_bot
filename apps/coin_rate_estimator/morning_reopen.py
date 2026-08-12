@@ -592,6 +592,11 @@ def _select_reopen_cash_tomorrow_ratio_uncached(
             qhat = abs_err[index]
             break
     qhat = max(0.0025, min(0.012, qhat))
+    latest_reopen = tehran_clock_utc(
+        max(row["day"] for row in filtered),
+        10,
+        15,
+    )
     return {
         "status": "OBSERVED",
         "ratio": float(center),
@@ -600,14 +605,10 @@ def _select_reopen_cash_tomorrow_ratio_uncached(
         "day_count": len(filtered),
         "scope": "COMMODITY_PREVIOUS_REOPENS",
         "selection": "PREVIOUS_REOPEN_CASH_TOMORROW_SPREAD_REGIME_WEIGHTED",
-        "latest_pair_utc": tehran_clock_utc(filtered[0]["day"], 10, 15)
-        .isoformat()
-        .replace("+00:00", "Z"),
+        "latest_pair_utc": latest_reopen.isoformat().replace("+00:00", "Z"),
         "age_seconds": max(
             0.0,
-            (
-                end - tehran_clock_utc(min(row["day"] for row in filtered), 10, 15)
-            ).total_seconds(),
+            (end - latest_reopen).total_seconds(),
         ),
         "current_regime_score": current_regime_score,
         "sample_days": [

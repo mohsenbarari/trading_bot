@@ -33,7 +33,13 @@ class SnapshotPublisherTests(unittest.TestCase):
         self.connection.close()
         self.tempdir.cleanup()
 
-    def _write_physical_gold(self, identity: str, at: datetime) -> None:
+    def _write_physical_gold(
+        self,
+        identity: str,
+        at: datetime,
+        *,
+        price: int = 80_300_000,
+    ) -> None:
         upsert_observation(
             self.connection,
             MarketObservation(
@@ -48,7 +54,7 @@ class SnapshotPublisherTests(unittest.TestCase):
                 trade_form="PHYSICAL",
                 event_type="QUOTE",
                 side="MID",
-                price=80_300_000,
+                price=price,
                 price_unit="TOMAN_PER_MESGHAL_750",
                 currency="TOMAN",
                 parse_confidence=1.0,
@@ -72,6 +78,62 @@ class SnapshotPublisherTests(unittest.TestCase):
             ("PUBLISHED", 64, 3),
         )
         self.assertEqual(loaded["generated_at_utc"], "2026-08-04T10:00:00Z")
+
+    def test_unchanged_input_still_refreshes_time_dependent_snapshot(self) -> None:
+        self._write_physical_gold("quiet-market", self.now - timedelta(seconds=20))
+        first = publish_rate_ready_snapshot(
+            market_store_path=self.store_path,
+            snapshot_path=self.snapshot_path,
+            as_of_utc=self.now,
+        )
+        later = self.now + timedelta(seconds=60)
+        second = publish_rate_ready_snapshot(
+            market_store_path=self.store_path,
+            snapshot_path=self.snapshot_path,
+            as_of_utc=later,
+        )
+
+        loaded = AtomicMarketSnapshotProvider(self.snapshot_path).load()
+        self.assertEqual((first.status, second.status), ("PUBLISHED", "PUBLISHED"))
+        self.assertNotEqual(first.snapshot_digest, second.snapshot_digest)
+        self.assertEqual(second.generated_at_utc, "2026-08-04T10:01:00Z")
+        self.assertEqual(loaded["generated_at_utc"], "2026-08-04T10:01:00Z")
+
+    def test_same_key_price_correction_is_not_hidden_by_watermark(self) -> None:
+        at = self.now - timedelta(seconds=20)
+        self._write_physical_gold("edited-price", at, price=80_300_000)
+        first = publish_rate_ready_snapshot(
+            market_store_path=self.store_path,
+            snapshot_path=self.snapshot_path,
+            as_of_utc=self.now,
+        )
+        first_snapshot = AtomicMarketSnapshotProvider(self.snapshot_path).load()
+        first_bahar = next(
+            item
+            for item in first_snapshot["rates"]["items"]
+            if item["commodity_code"] == "BAHAR" and item["settlement_term"] == "CASH"
+        )
+
+        self._write_physical_gold("edited-price", at, price=81_000_000)
+        second = publish_rate_ready_snapshot(
+            market_store_path=self.store_path,
+            snapshot_path=self.snapshot_path,
+            as_of_utc=self.now,
+        )
+        second_snapshot = AtomicMarketSnapshotProvider(self.snapshot_path).load()
+        second_bahar = next(
+            item
+            for item in second_snapshot["rates"]["items"]
+            if item["commodity_code"] == "BAHAR" and item["settlement_term"] == "CASH"
+        )
+
+        self.assertEqual((first.status, second.status), ("PUBLISHED", "PUBLISHED"))
+        self.assertEqual(first.input_watermark, second.input_watermark)
+        self.assertNotEqual(first.snapshot_digest, second.snapshot_digest)
+        self.assertNotEqual(
+            first_bahar["estimated_project_price"],
+            second_bahar["estimated_project_price"],
+        )
 
     def test_empty_store_does_not_replace_the_last_valid_snapshot(self) -> None:
         self._write_physical_gold("initial", self.now - timedelta(seconds=20))

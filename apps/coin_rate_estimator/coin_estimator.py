@@ -84,6 +84,12 @@ DEFAULT_GROUP_OFFERS = Path(
 DEFAULT_CONVERSATION_DB = Path(
     os.environ.get("COIN_CONVERSATION_DB", RUNTIME_ROOT / "conversation_events.sqlite3")
 ).expanduser()
+DEFAULT_CALIBRATION_DB = Path(
+    os.environ.get(
+        "COIN_RATE_ESTIMATOR_CALIBRATION_DB",
+        RUNTIME_ROOT / "online_calibration.sqlite3",
+    )
+).expanduser()
 DEFAULT_REVIEW_DECISIONS_DB = Path(
     os.environ.get(
         "COIN_REVIEW_DECISIONS_DB",
@@ -6666,6 +6672,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--conversation-db", type=Path, default=DEFAULT_CONVERSATION_DB
     )
     ledger_parser.add_argument(
+        "--calibration-db", type=Path, default=DEFAULT_CALIBRATION_DB,
+        help="Mutable prediction ledger; separate from the read-only conversation input.",
+    )
+    ledger_parser.add_argument(
         "--outcome-retention-days",
         type=int,
         default=LEDGER_OUTCOME_RETENTION_DAYS,
@@ -6738,7 +6748,7 @@ def main() -> int:
         return 0
 
     if args.command == "ledger":
-        connection = sqlite3.connect(args.conversation_db)
+        connection = sqlite3.connect(args.calibration_db)
         connection.row_factory = sqlite3.Row
         try:
             ensure_online_schema(connection)

@@ -46,6 +46,50 @@ class MorningReopenTests(unittest.TestCase):
         self.assertEqual(raw.call_count, 1)
         self.assertEqual(second["sample_days"], [{"day": "x"}])
 
+    def test_reopen_ratio_age_matches_latest_reported_day(self) -> None:
+        reopen_module._REOPEN_RATIO_SNAPSHOT_CACHE.clear()
+        with tempfile.TemporaryDirectory() as tmp:
+            db = Path(tmp) / "conversation.sqlite3"
+            connection = sqlite3.connect(db)
+            connection.execute(
+                """
+                CREATE TABLE confirmed_trades(
+                  id INTEGER PRIMARY KEY, event_time_utc TEXT, commodity TEXT,
+                  price REAL, settlement TEXT, trade_form TEXT,
+                  confidence REAL, training_eligible INTEGER
+                )
+                """
+            )
+            identifier = 1
+            for day in ("2026-08-07", "2026-08-08", "2026-08-09"):
+                stamp = tehran_clock_utc(day, 10, 5).isoformat().replace("+00:00", "Z")
+                connection.executemany(
+                    "INSERT INTO confirmed_trades VALUES (?,?,?,?,?,?,?,?)",
+                    (
+                        (identifier, stamp, "امام", 180_000, "CASH", "PHYSICAL", 0.95, 1),
+                        (identifier + 1, stamp, "امام", 181_800, "TOMORROW", "PHYSICAL", 0.95, 1),
+                    ),
+                )
+                identifier += 2
+            connection.commit()
+            connection.close()
+
+            end = tehran_clock_utc("2026-08-10", 10, 0)
+            result = select_reopen_cash_tomorrow_ratio(
+                db,
+                commodity="امام",
+                end=end,
+                lookback_days=3,
+            )
+
+        latest = tehran_clock_utc("2026-08-09", 10, 15)
+        self.assertEqual(result["status"], "OBSERVED")
+        self.assertEqual(
+            result["latest_pair_utc"],
+            latest.isoformat().replace("+00:00", "Z"),
+        )
+        self.assertEqual(result["age_seconds"], (end - latest).total_seconds())
+
     def test_window_requires_explicit_enable(self) -> None:
         end = tehran_clock_utc("2026-08-05", 10, 0)
         self.assertFalse(is_morning_reopen_window(end, model={}))

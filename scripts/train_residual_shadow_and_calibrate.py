@@ -99,6 +99,23 @@ HYPERPARAMS = (
 )
 
 
+def _write_shadow_artifacts(
+    *,
+    artifact: dict[str, Any],
+    output_path: Path,
+    runtime_path: Path,
+    stage_runtime_artifact: bool,
+) -> bool:
+    """Write research output and stage runtime only after explicit opt-in."""
+
+    joblib.dump(artifact, output_path)
+    if not stage_runtime_artifact:
+        return False
+    if runtime_path.resolve() != output_path.resolve():
+        joblib.dump(artifact, runtime_path)
+    return True
+
+
 def _utc(value: datetime | str) -> datetime:
     if isinstance(value, str):
         value = parse_datetime(value)
@@ -385,7 +402,7 @@ def main() -> int:
         default=None,
         help=(
             "Optional explicit runtime destination; used only together with "
-            "--stage-runtime-artifact."
+            "--stage-runtime-artifact; defaults beside --live-model."
         ),
     )
     args = parser.parse_args()
@@ -461,12 +478,12 @@ def main() -> int:
     }
     model_path = args.output_dir / "residual_shadow_hgb.joblib"
     runtime_shadow = args.runtime_shadow_path or (args.live_model.parent / "residual_shadow_hgb.joblib")
-    joblib.dump(artifact, model_path)
-    runtime_staged = False
-    if args.stage_runtime_artifact:
-        if runtime_shadow.resolve() != model_path.resolve():
-            joblib.dump(artifact, runtime_shadow)
-        runtime_staged = True
+    runtime_staged = _write_shadow_artifacts(
+        artifact=artifact,
+        output_path=model_path,
+        runtime_path=runtime_shadow,
+        stage_runtime_artifact=bool(args.stage_runtime_artifact),
+    )
     report_path = args.output_dir / "residual_shadow_report.json"
     report["runtime_staging"] = {
         "requested": bool(args.stage_runtime_artifact),

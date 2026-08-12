@@ -1,7 +1,7 @@
 # قرارداد Market Store برای تشخیص کالا
 
 **Contract version:** `1`
-**SQLite schema version:** `2`
+**SQLite schema version:** `3`
 **وضعیت:** P1 — قرارداد ذخیره‌سازی؛ هنوز هیچ collector، worker یا API محصولی
 را فعال نمی‌کند.
 
@@ -31,8 +31,10 @@ raw staging فقط برای adapterهای P2 است، حداکثر سه روز �
 مقادیر قرارداد fail-closed هستند. `PAPER_*` و `PHYSICAL` جدا هستند؛ برای
 اونس `SPOT`/`NOT_APPLICABLE` نیز صریح است. unit سازگار با instrument باید
 صریح باشد. برای مثال `USD_HERAT` فقط
-`IRT_PER_USD`، `USDT_IRT` فقط `IRT_PER_USDT` و `MELTED_GOLD*` فقط
-`IRT_PER_MESGHAL_750` می‌پذیرند. هیچ conversion یا جایگزینی پنهان (از جمله
+`TOMAN_PER_USD`، `USDT_IRT` فقط `TOMAN_PER_USDT` و `MELTED_GOLD*` فقط
+`TOMAN_PER_MESGHAL_750` می‌پذیرند. adapterهای legacy تبدیل Rial/Toman را
+پیش از ساخت observation و با provenance صریح انجام می‌دهند؛ هیچ conversion
+یا جایگزینی پنهان در خود قرارداد (از جمله
 تتر به‌جای هرات) در این لایه انجام نمی‌شود.
 
 ## schema و سازگاری legacy
@@ -60,6 +62,10 @@ Schema `2` فقط جدول عملیاتی `market_source_checkpoints` را اض�
 نگه می‌دارد؛ این شناسه در observation/model row ذخیره نمی‌شود. upgrade `1`
 به `2` additive است، هیچ fact موجودی را بازنویسی نمی‌کند و فقط در زمان باز
 شدن Store انجام می‌شود.
+
+Schema `3` indexهای متناسب با Snapshot و جدول cold archive را اضافه می‌کند.
+upgrade `2` به `3` نیز هیچ fact یا مقیاس قیمتی را بازنویسی نمی‌کند؛ اصلاح
+داده‌ی legacy با مقیاس نادرست باید از مسیر audit/repair صریح انجام شود.
 
 ## خارج از P1
 

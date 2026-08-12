@@ -2,12 +2,16 @@
 
 Entries are newest first.
 
-- 2026-08-12 | The staging bot mounts the shared audit volume; if a historical matrix artifact is nonetheless unavailable, terminal verification reconstructs only immutable offer/queue provenance and labels transient full-matrix assertions unverified. Reason: preserve evidence across bot recreation without fabricating fake private-transport or in-process interaction evidence.
-- 2026-08-12 | Staging live matrix uses 500 seeded 60/40 Bot/WebApp offers with random 0.8–4-second ingress; private delivery uses a fake transport. Direct WebApp skips post-response tasks, overtime is ordered at ≤20 operations, terminal WebApp observations at ≤2 reads, a blank active bot callback retries ≤2 times with a fresh callback identity, lifecycle task failures abort before another offer, and audit retains redacted failure class/code plus attempts. Reason: reproducible evidence without invalid-run growth, timer/connection-pool pressure, or synthetic private delivery.
+- 2026-08-12 | Live estimator calibration stays in a sidecar, reads conversations read-only and imports legacy state only when empty; dashboard metadata refreshes with estimates and marks activity stale beyond the anchor. Reason: protect inputs/history and align displayed freshness with eligibility.
+- 2026-08-12 | Product coin inference consumes canonical-Toman Market Store data; adapters normalize once. Reason: prevent drift and double conversion.
+- 2026-08-12 | Snapshots rebuild atomically on every invocation, regardless of watermark. Reason: freshness, age and same-key corrections are time/content dependent.
+- 2026-08-12 | Confirmed trades outrank offers for coin anchors; id breaks only equal-time ties. Reason: backfills must not displace later events.
+- 2026-08-12 | Staging audits use shared volumes; missing history may reconstruct only immutable provenance and must label transient facts unverified. Reason: never fabricate evidence.
+- 2026-08-12 | The 500-offer matrix uses 60/40 Bot/WebApp origin, random 0.8–4-second ingress, fake private transport, bounded lifecycle work, fail-fast tasks and redacted audits. Reason: reproducible evidence without pool pressure.
 - 2026-08-11 | Queue-v1 retries only serialization/deadlock aborts before provider dispatch, inside the same bounded unstarted lease. Reason: no external effect occurred; other DB failures fail closed.
 - 2026-08-11 | Queue-v1 retains an unstarted fenced lease only through a short absolute Redis cadence deadline; longer waits are durable retries. Reason: re-claiming causes DB churn, but long leases starve a lane.
 - 2026-08-11 | Publication scans exclude offers with an existing non-final control/publish job. Reason: repeated deduplication delays central ingress and can age queued offers before worker admission.
-- 2026-08-11 | Queue-v1 interaction probes model the authenticated private chat and positive message identity. Reason: the durable adapter must reject unanchored or cross-chat replies as production does.
+- 2026-08-11 | Queue-v1 interaction probes model authenticated private chat and positive message identity. Reason: reject unanchored or cross-chat replies.
 - 2026-08-11 | With multi-publisher B2B enabled, foreign feeder atomically persists one healthy publisher lane at first publication; legacy/B2B-disabled routes retain `primary`. Reason: preassigning primary bypasses selection and concentrates traffic.
 - 2026-08-11 | Telegram resume clears shared destination cadence and only preflight-approved lane blocks. Reason: recovery must not release unrelated publishers.
 - 2026-08-11 | Publish/edit jobs match their persisted owner before provider execution; callbacks stay on the receiving bot. Reason: Telegram cannot transfer interactive posts across bot identities.

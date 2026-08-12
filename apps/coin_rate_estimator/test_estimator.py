@@ -43,6 +43,7 @@ from live_server import (
     list_open_manual_offers,
     parse_offer_text,
     persist_message,
+    render_group_activity_fragment,
     render_page,
 )
 
@@ -1399,6 +1400,8 @@ class EstimatorTests(unittest.TestCase):
         self.assertIn(NO_DATA_TOKEN, body)
         self.assertIn("توصیه خرید یا فروش نیست", body)
         self.assertIn("پایش موازی یکپارچه", body)
+        self.assertIn('id="freshness-content"', body)
+        self.assertIn('getElementById("freshness-fragment")', body)
 
     def test_page_exposes_group_live_toggle_without_hiding_activity_contract(self) -> None:
         body = render_page(
@@ -1419,6 +1422,20 @@ class EstimatorTests(unittest.TestCase):
         self.assertIn("اتصال و اعمال رویدادهای صف‌شده", body)
         self.assertIn("رویدادها همچنان ذخیره و نمایش داده می", body)
         self.assertIn('name="action" value="connect"', body)
+
+    def test_group_activity_marks_expired_records_as_unavailable_to_the_model(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            conversation_path = Path(directory) / "conversation.sqlite3"
+            make_conversation_db(conversation_path)
+            connection = sqlite3.connect(conversation_path)
+            try:
+                connection.execute("ALTER TABLE messages ADD COLUMN source_html_file TEXT")
+                connection.execute("UPDATE messages SET source_html_file='group_1'")
+                connection.commit()
+            finally:
+                connection.close()
+            body = render_group_activity_fragment(conversation_path)
+        self.assertIn("منقضی برای مدل", body)
 
     def test_estimate_fragment_includes_top_ticker_cards(self) -> None:
         fragment = render_page(
@@ -1444,6 +1461,7 @@ class EstimatorTests(unittest.TestCase):
         self.assertIn("اونس جهانی", fragment)
         self.assertIn("دلار هرات", fragment)
         self.assertIn("لیست نرخ سکه و مسکوکات", fragment)
+        self.assertIn('id="freshness-fragment"', fragment)
 
     def test_analytics_query_and_render(self) -> None:
         from live_server import parse_shamsi_to_utc_iso, query_user_analytics, render_analytics_page

@@ -37,6 +37,13 @@ class CoinRateEngineTests(unittest.TestCase):
     def rate(self, code: str, settlement: str):
         return next(item for item in build_coin_rate_estimates(self.connection, as_of_utc="2026-08-04T10:10:00Z") if item.commodity_code == code and item.settlement_term == settlement)
 
+    def rate_at(self, code: str, settlement: str, *, at: str):
+        return next(
+            item
+            for item in build_coin_rate_estimates(self.connection, as_of_utc=at)
+            if item.commodity_code == code and item.settlement_term == settlement
+        )
+
     def test_low_date_uses_physical_melted_without_any_coin_offer(self) -> None:
         self.add("gold", instrument="MELTED_GOLD_PRIVATE", price=80_300_000, unit="TOMAN_PER_MESGHAL_750", at="2026-08-04T10:09:30Z", settlement="TODAY", form="PHYSICAL")
         self.connection.commit()
@@ -66,6 +73,20 @@ class CoinRateEngineTests(unittest.TestCase):
         self.assertEqual((imam.status, imam.method, imam.estimated_project_price), ("ESTIMATED", "SAME_SETTLEMENT_COIN_ANCHOR_TRANSFER", 188_500))
         self.assertLess(imam.upper_project_price - imam.lower_project_price, 6_000)
 
+    def test_newest_trade_time_wins_over_later_inserted_backfill(self) -> None:
+        self.add("gold-old", instrument="MELTED_GOLD_PRIVATE", price=80_300_000, unit="TOMAN_PER_MESGHAL_750", at="2026-08-04T10:00:00Z", settlement="TODAY", form="PHYSICAL")
+        self.add("newer-trade", instrument="COIN_IMAM", price=186_900, unit="PROJECT_THOUSAND_TOMAN", at="2026-08-04T10:05:00Z", settlement="CASH", form="PHYSICAL", event_type="TRADE")
+        # Backfill is inserted later (larger id) but represents an older event.
+        self.add("older-backfill", instrument="COIN_IMAM", price=180_000, unit="PROJECT_THOUSAND_TOMAN", at="2026-08-04T10:01:00Z", settlement="CASH", form="PHYSICAL", event_type="TRADE")
+        self.add("gold-now", instrument="MELTED_GOLD_PRIVATE", price=81_000_000, unit="TOMAN_PER_MESGHAL_750", at="2026-08-04T10:09:30Z", settlement="TODAY", form="PHYSICAL")
+        self.connection.commit()
+
+        imam = self.rate("IMAM", "CASH")
+
+        self.assertEqual(imam.method, "SAME_SETTLEMENT_COIN_ANCHOR_TRANSFER")
+        self.assertEqual(imam.anchor_age_seconds, 300.0)
+        self.assertEqual(imam.estimated_project_price, 188_500)
+
     def test_paper_fallback_is_visible_and_no_high_coin_anchor_abstains(self) -> None:
         self.add("paper", instrument="MELTED_GOLD_PRIVATE", price=80_500_000, unit="TOMAN_PER_MESGHAL_750", at="2026-08-04T10:09:30Z", settlement="TOMORROW", form="PAPER_NORMAL")
         self.connection.commit()
@@ -73,6 +94,21 @@ class CoinRateEngineTests(unittest.TestCase):
         high = self.rate("IMAM", "TOMORROW")
         self.assertEqual((low.status, low.confidence), ("ESTIMATED", "LOW_PAPER_FALLBACK"))
         self.assertEqual((high.status, high.reason), ("NO_DATA", "NO_SAFE_SAME_COMMODITY_ANCHOR"))
+
+    def test_fresh_tomorrow_paper_bridges_quiet_cash_book(self) -> None:
+        """Cash must not go blank after physical quotes age out post-bank-hours."""
+
+        self.add("cash-physical", instrument="MELTED_GOLD_PRIVATE", price=80_300_000, unit="TOMAN_PER_MESGHAL_750", at="2026-08-04T10:00:00Z", settlement="TODAY", form="PHYSICAL")
+        self.add("cash-imam", instrument="COIN_IMAM", price=186_900, unit="PROJECT_THOUSAND_TOMAN", at="2026-08-04T10:01:00Z", settlement="CASH", form="PHYSICAL", event_type="TRADE")
+        self.add("tomorrow-paper", instrument="MELTED_GOLD_PRIVATE", price=81_000_000, unit="TOMAN_PER_MESGHAL_750", at="2026-08-04T10:19:30Z", settlement="TOMORROW", form="PAPER_NORMAL")
+        self.connection.commit()
+
+        imam = self.rate_at("IMAM", "CASH", at="2026-08-04T10:20:00Z")
+
+        self.assertEqual((imam.status, imam.confidence), ("ESTIMATED", "LOW_PAPER_FALLBACK"))
+        self.assertEqual(imam.underlying_source, "PRIVATE_PAPER_TOMORROW_CASH_BRIDGE")
+        self.assertEqual(imam.estimated_project_price, 188_500)
+        self.assertNotEqual(imam.reason, "NO_FRESH_MELTED")
 
     def test_paper_up_regime_only_widens_positive_side_with_a_bounded_interval(self) -> None:
         for index, price in enumerate((80_000_000, 80_020_000, 80_100_000, 80_400_000), start=6):
