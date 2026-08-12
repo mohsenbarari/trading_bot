@@ -7,6 +7,8 @@ import AppButton from './ui/AppButton.vue';
 import AppEmptyState from './ui/AppEmptyState.vue';
 import AppErrorState from './ui/AppErrorState.vue';
 import AppInput from './ui/AppInput.vue';
+import AppListItem from './ui/AppListItem.vue';
+import AppStatusBadge from './ui/AppStatusBadge.vue';
 import { routeRequestJson } from '../utils/routeRequest';
 import { isAppHttpError } from '../utils/httpErrorPolicy';
 
@@ -154,6 +156,21 @@ function getUserDisplayName(user: User) {
   return user.customer_management_name?.trim() || user.account_name || 'کاربر';
 }
 
+function userHasRelationTags(user: User) {
+  return Boolean(
+    user.customer_owner_account_name
+    || user.is_accountant
+    || user.accountant_owner_account_name,
+  );
+}
+
+function roleBadgeTone(role: string): 'neutral' | 'primary' | 'success' | 'info' {
+  if (role === 'مدیر') return 'primary';
+  if (role === 'پلیس') return 'info';
+  if (role === 'عادی') return 'success';
+  return 'neutral';
+}
+
 watch(
   () => props.query,
   (nextQueryValue) => {
@@ -244,17 +261,19 @@ onUnmounted(() => {
 
         <ul v-else class="users-list" aria-label="فهرست کاربران">
           <li v-for="user in users" :key="user.id" class="users-list-item">
-            <button
-              type="button"
+            <AppListItem
               class="user-item"
+              interactive
+              :title="getUserDisplayName(user)"
+              :description="user.mobile_number"
               :aria-label="`باز کردن پروفایل ${getUserDisplayName(user)}`"
-              @click="selectUser(user)"
+              @select="selectUser(user)"
             >
-              <span class="user-main-info">
-                <span class="user-avatar" aria-hidden="true">
-                  {{ getUserDisplayName(user)[0] || '?' }}
-                </span>
-                <span class="user-details">
+              <template #leading>
+                {{ getUserDisplayName(user)[0] || '?' }}
+              </template>
+              <template #title>
+                <span class="user-title-block">
                   <span class="user-name" dir="auto">
                     <CustomerNameWithBadge
                       v-if="user.is_customer || user.customer_management_name"
@@ -263,10 +282,7 @@ onUnmounted(() => {
                     />
                     <template v-else>{{ getUserDisplayName(user) }}</template>
                   </span>
-                  <span
-                    v-if="user.customer_owner_account_name || user.is_accountant || user.accountant_owner_account_name"
-                    class="user-relation-tags"
-                  >
+                  <span v-if="userHasRelationTags(user)" class="user-relation-tags">
                     <span v-if="user.customer_owner_account_name" class="relation-badge relation-badge--owner">
                       سرگروه: {{ user.customer_owner_account_name }}
                     </span>
@@ -277,17 +293,24 @@ onUnmounted(() => {
                       سرگروه: {{ user.accountant_owner_account_name }}
                     </span>
                   </span>
-                  <span class="user-subtext ltr">{{ user.mobile_number }}</span>
                 </span>
-              </span>
-              <span class="user-meta">
-                <span v-if="user.account_status === 'inactive'" class="user-account-status">
-                  حساب غیرفعال
+              </template>
+              <template #trailing>
+                <span class="user-meta">
+                  <AppStatusBadge
+                    v-if="user.account_status === 'inactive'"
+                    class="user-account-status"
+                    tone="danger"
+                  >
+                    حساب غیرفعال
+                  </AppStatusBadge>
+                  <AppStatusBadge class="role-badge" :class="user.role" :tone="roleBadgeTone(user.role)">
+                    {{ user.role }}
+                  </AppStatusBadge>
+                  <ChevronLeft class="chevron-icon" :size="20" aria-hidden="true" />
                 </span>
-                <span class="role-badge" :class="user.role">{{ user.role }}</span>
-                <ChevronLeft class="chevron-icon" :size="20" aria-hidden="true" />
-              </span>
-            </button>
+              </template>
+            </AppListItem>
           </li>
         </ul>
       </div>
@@ -369,61 +392,35 @@ onUnmounted(() => {
 }
 
 .user-item {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
   width: 100%;
-  min-width: 0;
-  align-items: center;
-  gap: 0.75rem;
-  padding: 0.75rem 1rem;
-  border: 1px solid var(--ds-border-light);
-  border-radius: var(--ds-radius-lg);
-  background: var(--ds-bg-card);
-  color: inherit;
-  cursor: pointer;
-  font: inherit;
-  text-align: right;
   appearance: none;
-  transition: border-color 0.18s ease, box-shadow 0.18s ease, background-color 0.18s ease;
 }
 
-.user-item:hover {
-  border-color: var(--ds-primary-300);
-  background: var(--ds-bg-hover);
-}
-
-.user-item:focus-visible {
-  outline: 0;
-  border-color: var(--ds-primary-500);
-  box-shadow: var(--ds-focus-ring);
-}
-
-.user-main-info {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  gap: 0.75rem;
-}
-
-.user-avatar {
-  display: flex;
+.user-item :deep(.ui-list-item__leading) {
   width: 44px;
   height: 44px;
-  flex: 0 0 44px;
-  align-items: center;
-  justify-content: center;
-  border-radius: var(--ds-radius-md);
   background: var(--ds-gradient-primary);
   color: var(--ds-bg-card);
   font-size: 1.2rem;
   font-weight: 800;
 }
 
-.user-details {
+.user-item :deep(.ui-list-item__copy > span) {
+  direction: ltr;
+  unicode-bidi: isolate;
+  font-family: var(--ds-font-mono);
+  color: var(--ds-text-placeholder);
+}
+
+.user-item :deep(.ui-list-item__trailing) {
+  color: inherit;
+}
+
+.user-title-block {
   display: flex;
   min-width: 0;
-  flex: 1 1 auto;
   flex-direction: column;
+  gap: 0.2rem;
 }
 
 .user-name {
@@ -444,24 +441,17 @@ onUnmounted(() => {
   margin-top: 0.25rem;
 }
 
-.relation-badge,
-.role-badge,
-.user-account-status {
+.relation-badge {
   display: inline-flex;
   min-width: 0;
   align-items: center;
-  border-radius: var(--ds-radius-sm);
-  font-weight: 800;
-  line-height: 1.25;
-  overflow-wrap: anywhere;
-}
-
-.relation-badge {
   min-height: 18px;
   padding: 1px 7px;
   border-radius: 999px;
   font-size: 0.62rem;
   font-weight: 900;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
 }
 
 .relation-badge--owner {
@@ -476,46 +466,15 @@ onUnmounted(() => {
   color: var(--ds-primary-800);
 }
 
-.user-subtext {
-  margin-top: 0.1rem;
-  color: var(--ds-text-placeholder);
-  font-family: var(--ds-font-mono);
-  font-size: 0.75rem;
-  overflow-wrap: anywhere;
-}
-
 .user-meta {
   display: flex;
   min-width: 0;
-  max-width: 45%;
   align-items: center;
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 0.4rem;
   text-align: left;
 }
-
-.role-badge,
-.user-account-status {
-  padding: 0.25rem 0.6rem;
-  font-size: 0.7rem;
-}
-
-.role-badge {
-  background: var(--ds-bg-inset);
-  color: var(--ds-text-muted);
-}
-
-.user-account-status {
-  border: 1px solid var(--ds-danger-100);
-  background: var(--ds-danger-50);
-  color: var(--ds-danger-700);
-}
-
-.role-badge.مدیر { background: var(--ds-primary-100); color: var(--ds-primary-800); }
-.role-badge.پلیس { background: var(--ds-info-50); color: var(--ds-info-700); }
-.role-badge.عادی { background: var(--ds-success-100); color: var(--ds-success-800); }
-.role-badge.تماشا { background: var(--ds-bg-inset); color: var(--ds-text-muted); }
 
 .chevron-icon {
   flex: 0 0 auto;
@@ -534,28 +493,9 @@ onUnmounted(() => {
   border: 0;
 }
 
-.ltr {
-  direction: ltr;
-}
-
 @media (max-width: 420px) {
-  .user-item {
-    gap: 0.5rem;
-    padding: 0.75rem;
-  }
-
-  .user-main-info {
-    gap: 0.625rem;
-  }
-
   .user-meta {
     gap: 0.25rem;
-  }
-
-  .role-badge,
-  .user-account-status {
-    padding: 0.2rem 0.45rem;
-    font-size: 0.66rem;
   }
 }
 

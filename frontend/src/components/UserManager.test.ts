@@ -59,7 +59,7 @@ describe('UserManager.vue', () => {
     userManagerMocks.apiFetchMock.mockReset()
   })
 
-  it('loads users into semantic native-button rows and emits the selected profile navigation payload', async () => {
+  it('loads users into shared list-item rows and emits the selected profile navigation payload', async () => {
     const user = makeUser({ account_status: 'inactive' })
     const customer = makeUser({
       id: 2,
@@ -93,6 +93,8 @@ describe('UserManager.vue', () => {
 
     const row = wrapper.get('.users-list > li > button.user-item')
     expect(row.element.tagName).toBe('BUTTON')
+    expect(row.classes()).toContain('ui-list-item')
+    expect(row.classes()).toContain('ui-list-item--interactive')
     expect(row.attributes('type')).toBe('button')
     expect(row.attributes('aria-label')).toContain('alireza')
 
