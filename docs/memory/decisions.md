@@ -2,10 +2,7 @@
 
 Entries are newest first.
 
-- 2026-08-12 | Staging matrix private-message traffic renders the production recipient/message contracts but acknowledges via an in-process fake transport. Reason: synthetic fixture Telegram IDs must never create real Bot API calls or permanent delivery failures; the audit labels this boundary explicitly.
-- 2026-08-12 | The staging live publisher matrix uses 500 offers with an exact 60/40 Bot/WebApp mix in every lifecycle cohort and seeded random 0.8–4-second ingress. Reason: it models varied arrival pressure while retaining reproducible, auditable source and lifecycle proportions.
-- 2026-08-12 | Matrix publication gates count only terminal offers lacking sent initial-post evidence; an intentional, already-published manual expiry cannot block the global gate. Reason: manual expiry is an approved lifecycle scenario.
-- 2026-08-12 | Matrix direct WebApp calls skip post-response BackgroundTasks; overtime deadlines are launched by one ordered scheduler with at most 20 concurrent operations, and final audit requires terminal delivery/WebApp projection. Reason: direct calls lack an ASGI boundary and a large timer/DB wave can starve late tasks.
+- 2026-08-12 | Staging live matrix uses 500 seeded 60/40 Bot/WebApp offers with random 0.8–4-second ingress; synthetic private delivery uses an in-process fake transport. Direct WebApp skips post-response tasks, overtime is ordered at ≤20 operations, lifecycle task failures abort before another offer, and audit retains only HTTP class/code. Reason: reproducible redacted real-channel evidence without invalid-run growth or timer pressure.
 - 2026-08-11 | Queue-v1 retries only serialization/deadlock aborts before provider dispatch, inside the same bounded unstarted lease. Reason: no external effect occurred; other DB failures fail closed.
 - 2026-08-11 | Queue-v1 retains an unstarted fenced lease only through a short absolute Redis cadence deadline; longer waits are durable retries. Reason: re-claiming causes DB churn, but long leases starve a lane.
 - 2026-08-11 | Publication scans exclude offers with an existing non-final control/publish job. Reason: repeated deduplication delays central ingress and can age queued offers before worker admission.

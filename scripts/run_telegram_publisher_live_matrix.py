@@ -31,6 +31,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from fastapi import HTTPException
 from sqlalchemy import and_, func, select
 from sqlalchemy.orm import selectinload
 
@@ -75,6 +76,11 @@ MATRIX_PROGRESS_STALL_SECONDS = 180.0
 MATRIX_WEBAPP_OPERATION_TIMEOUT_SECONDS = 20.0
 MATRIX_WEBAPP_OPERATION_RETRY_ATTEMPTS = 2
 MATRIX_WEBAPP_OPERATION_RETRY_DELAY_SECONDS = 1.0
+# A 409 is the only retryable direct-WebApp response used by this matrix. The
+# expiry gate and a row-level NOWAIT lock both return it before the requested
+# terminal transition. Other responses are deterministic contract failures
+# and must remain visible in the audit rather than being retried.
+MATRIX_WEBAPP_RETRYABLE_STATUS_CODES = frozenset({409})
 # The matrix can schedule all 150 overtime actions within a narrow deadline
 # window.  Keep the direct router/database work bounded so the last tasks are
 # actually scheduled instead of starving behind an exhausted connection pool.
@@ -266,6 +272,7 @@ class LifecycleActionTimeline:
     completed_at: str | None = None
     status: str | None = None
     failure_class: str | None = None
+    failure_status_code: int | None = None
 
 
 @dataclass(slots=True)
@@ -1136,6 +1143,7 @@ async def _complete_lifecycle_action(
     timeout_seconds: float | None = None,
     retry_attempts: int = 0,
     retry_delay_seconds: float = 0.0,
+    retryable_status_codes: frozenset[int] = frozenset(),
 ) -> None:
     entry.started_at = _iso(_utcnow())
     try:
@@ -1155,6 +1163,16 @@ async def _complete_lifecycle_action(
                 if attempt + 1 >= total_attempts:
                     raise
                 await asyncio.sleep(max(0.0, float(retry_delay_seconds)))
+            except HTTPException as exc:
+                status_code = int(exc.status_code)
+                if (
+                    status_code in retryable_status_codes
+                    and attempt + 1 < total_attempts
+                ):
+                    await asyncio.sleep(max(0.0, float(retry_delay_seconds)))
+                    continue
+                entry.failure_status_code = status_code
+                raise
         entry.status = "success" if outcome in (None, "success") else str(outcome)
     except Exception as exc:
         entry.status = type(exc).__name__
@@ -1339,7 +1357,26 @@ async def _run_manual_expiry(
             entry.failure_class = error_details[0].partition(":")[0].strip() or None
         return outcome
 
-    await _complete_lifecycle_action(entry, execute)
+    await _complete_lifecycle_action(
+        entry,
+        execute,
+        timeout_seconds=(
+            MATRIX_WEBAPP_OPERATION_TIMEOUT_SECONDS
+            if timeline.origin == "webapp"
+            else None
+        ),
+        retry_attempts=(
+            MATRIX_WEBAPP_OPERATION_RETRY_ATTEMPTS
+            if timeline.origin == "webapp"
+            else 0
+        ),
+        retry_delay_seconds=MATRIX_WEBAPP_OPERATION_RETRY_DELAY_SECONDS,
+        retryable_status_codes=(
+            MATRIX_WEBAPP_RETRYABLE_STATUS_CODES
+            if timeline.origin == "webapp"
+            else frozenset()
+        ),
+    )
 
 
 async def _select_random_published_active_timeline(
@@ -1689,6 +1726,21 @@ async def _run_overtime_schedule(
                 task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
         raise
+
+
+def _raise_if_background_task_failed(
+    task: asyncio.Task[None] | None,
+    *,
+    task_name: str,
+) -> None:
+    """Surface a failed concurrent matrix path before adding more offers."""
+    if task is None or not task.done():
+        return
+    if task.cancelled():
+        raise LiveMatrixError(f"live_matrix_{task_name}_cancelled")
+    error = task.exception()
+    if error is not None:
+        raise LiveMatrixError(f"live_matrix_{task_name}_failed") from error
 
 
 def _assert_lifecycle_monitor_healthy(monitor_task: asyncio.Task[None]) -> None:
@@ -2201,6 +2253,18 @@ async def run_live_matrix(args: argparse.Namespace) -> dict[str, Any]:
                     commodity_name=commodity_name,
                     run_id=run_id,
                     timeline=timeline,
+                )
+                _raise_if_background_task_failed(
+                    active_lifecycle_task,
+                    task_name="active_lifecycle",
+                )
+                _raise_if_background_task_failed(
+                    interaction_task,
+                    task_name="user_interactions",
+                )
+                _raise_if_background_task_failed(
+                    management_message_task,
+                    task_name="management_messages",
                 )
                 visibility_tasks.append(
                     asyncio.create_task(

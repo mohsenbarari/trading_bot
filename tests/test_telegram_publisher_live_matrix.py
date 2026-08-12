@@ -3,6 +3,8 @@ import unittest
 from collections import Counter
 from types import SimpleNamespace
 
+from fastapi import HTTPException
+
 from scripts.run_telegram_publisher_live_matrix import (
     MATRIX_BACKGROUND_TASKS_MAX_WAIT_SECONDS,
     MATRIX_INGRESS_MAX_INTERVAL_SECONDS,
@@ -22,6 +24,7 @@ from scripts.run_telegram_publisher_live_matrix import (
     _simulate_private_telegram_send,
     _report_payload,
     _assert_lifecycle_monitor_healthy,
+    _raise_if_background_task_failed,
     _wait_for_worker_acknowledgement,
     _timeline_terminal_follows_initial_publication,
     build_live_matrix_workload,
@@ -283,6 +286,25 @@ class TelegramPublisherLiveMatrixTests(unittest.TestCase):
 
         self.assertEqual(entry.status, "ValueError")
         self.assertEqual(entry.failure_class, "ValueError")
+        self.assertIsNone(entry.failure_status_code)
+
+    def test_lifecycle_action_records_only_http_status_code_not_detail(self):
+        entry = LifecycleActionTimeline(
+            offer_index=1,
+            action="manual_expiry",
+            origin="webapp",
+            scheduled_at="2026-08-12T00:00:00+00:00",
+        )
+
+        async def fail() -> None:
+            raise HTTPException(status_code=403, detail="private diagnostic")
+
+        with self.assertRaisesRegex(RuntimeError, "lifecycle_action_failed"):
+            asyncio.run(_complete_lifecycle_action(entry, fail))
+
+        self.assertEqual(entry.status, "HTTPException")
+        self.assertEqual(entry.failure_class, "HTTPException")
+        self.assertEqual(entry.failure_status_code, 403)
 
     def test_lifecycle_action_retries_a_bounded_webapp_timeout(self):
         entry = LifecycleActionTimeline(
@@ -312,6 +334,51 @@ class TelegramPublisherLiveMatrixTests(unittest.TestCase):
 
         self.assertEqual(calls, 2)
         self.assertEqual(entry.status, "success")
+
+    def test_lifecycle_action_retries_only_an_allowed_http_status(self):
+        entry = LifecycleActionTimeline(
+            offer_index=1,
+            action="manual_expiry",
+            origin="webapp",
+            scheduled_at="2026-08-12T00:00:00+00:00",
+        )
+        calls = 0
+
+        async def eventually_succeeds() -> str:
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                raise HTTPException(status_code=409, detail="must not persist")
+            return "success"
+
+        asyncio.run(
+            _complete_lifecycle_action(
+                entry,
+                eventually_succeeds,
+                retry_attempts=1,
+                retry_delay_seconds=0,
+                retryable_status_codes=frozenset({409}),
+            )
+        )
+
+        self.assertEqual(calls, 2)
+        self.assertEqual(entry.status, "success")
+        self.assertIsNone(entry.failure_status_code)
+
+    def test_background_task_failure_stops_ingress(self):
+        async def fail() -> None:
+            raise ValueError("private diagnostic")
+
+        async def check() -> None:
+            task = asyncio.create_task(fail())
+            await asyncio.gather(task, return_exceptions=True)
+            with self.assertRaisesRegex(RuntimeError, "active_lifecycle_failed"):
+                _raise_if_background_task_failed(
+                    task,
+                    task_name="active_lifecycle",
+                )
+
+        asyncio.run(check())
 
     def test_lifecycle_monitor_must_not_stop_silently(self):
         async def stopped_monitor() -> None:
