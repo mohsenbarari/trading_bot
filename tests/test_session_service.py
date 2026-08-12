@@ -440,6 +440,7 @@ class ApproveAndRevocationTests(unittest.IsolatedAsyncioTestCase):
     async def test_approve_login_request_rejects_expired_pending_request(self):
         login_req = SimpleNamespace(
             id=uuid.uuid4(),
+            user_id=40,
             status=LoginRequestStatus.PENDING,
             expires_at=datetime.utcnow() - timedelta(seconds=5),
         )
@@ -447,7 +448,7 @@ class ApproveAndRevocationTests(unittest.IsolatedAsyncioTestCase):
             execute=AsyncMock(return_value=scalar_one_or_none_result(login_req)),
             commit=AsyncMock(),
         )
-        approver_session = SimpleNamespace(id=uuid.uuid4())
+        approver_session = SimpleNamespace(id=uuid.uuid4(), user_id=40)
 
         result = await session_service.approve_login_request(db, login_req.id, approver_session, "refresh-6")
 
@@ -468,7 +469,7 @@ class ApproveAndRevocationTests(unittest.IsolatedAsyncioTestCase):
             execute=AsyncMock(side_effect=[scalar_one_or_none_result(login_req), scalar_one_or_none_result(inactive_user)]),
             commit=AsyncMock(),
         )
-        approver_session = SimpleNamespace(id=uuid.uuid4())
+        approver_session = SimpleNamespace(id=uuid.uuid4(), user_id=41)
 
         result = await session_service.approve_login_request(db, request_id, approver_session, "refresh-inactive")
 
@@ -496,7 +497,7 @@ class ApproveAndRevocationTests(unittest.IsolatedAsyncioTestCase):
             execute=AsyncMock(side_effect=[scalar_one_or_none_result(login_req), scalar_one_or_none_result(user)]),
             commit=AsyncMock(),
         )
-        approver_session = SimpleNamespace(id=uuid.uuid4())
+        approver_session = SimpleNamespace(id=uuid.uuid4(), user_id=41)
 
         with patch("core.services.session_service.get_active_sessions", AsyncMock(return_value=[primary, newest_non_primary])), \
              patch("core.services.session_service.deactivate_session", AsyncMock()) as deactivate_session, \
@@ -673,7 +674,7 @@ class SessionServiceAdditionalCoverageTests(unittest.IsolatedAsyncioTestCase):
             self.assertIsNone(await session_service.promote_next_primary(SimpleNamespace(flush=AsyncMock()), 22))
 
     async def test_approve_login_request_handles_missing_processed_and_primary_eviction(self):
-        approver_session = SimpleNamespace(id=uuid.uuid4())
+        approver_session = SimpleNamespace(id=uuid.uuid4(), user_id=41)
         request_id = uuid.uuid4()
 
         db = SimpleNamespace(execute=AsyncMock(return_value=scalar_one_or_none_result(None)), commit=AsyncMock())
@@ -684,6 +685,7 @@ class SessionServiceAdditionalCoverageTests(unittest.IsolatedAsyncioTestCase):
 
         processed_request = SimpleNamespace(
             id=request_id,
+            user_id=41,
             status=LoginRequestStatus.REJECTED,
             expires_at=datetime.utcnow() + timedelta(seconds=30),
         )
@@ -762,7 +764,7 @@ class SessionServiceAdditionalCoverageTests(unittest.IsolatedAsyncioTestCase):
                 raise AssertionError("remove should not be called when list is drained before eviction")
 
         request_id = uuid.uuid4()
-        approver_session = SimpleNamespace(id=uuid.uuid4())
+        approver_session = SimpleNamespace(id=uuid.uuid4(), user_id=42)
         pending_request = SimpleNamespace(
             id=request_id,
             user_id=42,
@@ -805,7 +807,7 @@ class SessionServiceAdditionalCoverageTests(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_reject_logout_and_revocation_failure_paths(self):
-        approver_session = SimpleNamespace(id=uuid.uuid4())
+        approver_session = SimpleNamespace(id=uuid.uuid4(), user_id=52)
         request_id = uuid.uuid4()
 
         db = SimpleNamespace(execute=AsyncMock(return_value=scalar_one_or_none_result(None)), commit=AsyncMock())
@@ -814,7 +816,7 @@ class SessionServiceAdditionalCoverageTests(unittest.IsolatedAsyncioTestCase):
             {"error": "درخواست یافت نشد"},
         )
 
-        processed_request = SimpleNamespace(id=request_id, status=LoginRequestStatus.APPROVED)
+        processed_request = SimpleNamespace(id=request_id, user_id=52, status=LoginRequestStatus.APPROVED)
         db = SimpleNamespace(execute=AsyncMock(return_value=scalar_one_or_none_result(processed_request)), commit=AsyncMock())
         self.assertEqual(
             await session_service.reject_login_request(db, request_id, approver_session),
