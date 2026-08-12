@@ -1,5 +1,5 @@
 import { flushPromises, mount } from '@vue/test-utils'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const commodityManagerMocks = vi.hoisted(() => ({
   apiFetchMock: vi.fn(),
@@ -19,12 +19,44 @@ function responseOf(data: unknown, ok = true, status = ok ? 200 : 400) {
 
 async function mountCommodityManager() {
   const CommodityManager = (await import('./CommodityManager.vue')).default
-  return mount(CommodityManager, {
+  const wrapper = mount(CommodityManager, {
+    attachTo: document.body,
     props: {
       apiBaseUrl: '',
       jwtToken: 'jwt-token',
     },
   })
+  mountedWrappers.add(wrapper)
+  return wrapper
+}
+
+const mountedWrappers = new Set<{ unmount: () => void }>()
+
+function disposeWrapper(wrapper: { unmount: () => void }) {
+  wrapper.unmount()
+  mountedWrappers.delete(wrapper)
+}
+
+function bodyConfirmDialog() {
+  const dialog = document.body.querySelector<HTMLElement>('.ui-confirm-dialog')
+  if (!dialog) throw new Error('Expected the confirmation dialog to be teleported to document.body.')
+  return dialog
+}
+
+function bodyConfirmButtons() {
+  const buttons = bodyConfirmDialog().querySelectorAll<HTMLButtonElement>('button')
+  if (buttons.length !== 2) throw new Error('Expected exactly cancel and confirm buttons in the confirmation dialog.')
+  return { cancel: buttons[0]!, confirm: buttons[1]! }
+}
+
+async function confirmBodyDialog() {
+  bodyConfirmButtons().confirm.click()
+  await flushPromises()
+}
+
+async function cancelBodyDialog() {
+  bodyConfirmButtons().cancel.click()
+  await flushPromises()
 }
 
 describe('CommodityManager.vue', () => {
@@ -93,7 +125,7 @@ describe('CommodityManager.vue', () => {
         if (!commodity) return responseOf({ detail: 'not found' }, false, 404)
         const newAlias = { id: aliasId++, alias: payload.alias, commodity_id: id }
         commodity.aliases.push(newAlias)
-        return responseOf(newAlias)
+        return responseOf(newAlias, true, 201)
       }
 
       if (path.startsWith('/api/commodities/aliases/') && method === 'PUT') {
@@ -131,6 +163,14 @@ describe('CommodityManager.vue', () => {
     })
   })
 
+  afterEach(() => {
+    for (const wrapper of mountedWrappers) wrapper.unmount()
+    mountedWrappers.clear()
+    document.body.replaceChildren()
+    document.body.classList.remove('ui-overlay-open')
+    delete document.body.dataset.uiOverlayLockCount
+  })
+
   it('loads the commodity list, opens alias management, and returns to the list', async () => {
     const wrapper = await mountCommodityManager()
     await flushPromises()
@@ -150,7 +190,7 @@ describe('CommodityManager.vue', () => {
 
     expect(wrapper.text()).toContain('افزودن کالا')
 
-    wrapper.unmount()
+    disposeWrapper(wrapper)
   }, 15000)
 
   it('adds a commodity with aliases and refreshes the list', async () => {
@@ -175,7 +215,7 @@ describe('CommodityManager.vue', () => {
     }))
     expect(wrapper.text()).toContain('طلای آب‌شده')
 
-    wrapper.unmount()
+    disposeWrapper(wrapper)
   })
 
   it('keeps alias management available for canonical Imam but hides rename and delete actions', async () => {
@@ -190,7 +230,7 @@ describe('CommodityManager.vue', () => {
     expect(wrapper.find('.commodity-action.danger-soft').exists()).toBe(false)
     expect(wrapper.find('.commodity-action.primary-soft').exists()).toBe(true)
 
-    wrapper.unmount()
+    disposeWrapper(wrapper)
   })
 
   it('edits the commodity name and performs alias add, edit, and delete flows', async () => {
@@ -232,14 +272,13 @@ describe('CommodityManager.vue', () => {
 
     await wrapper.find('.commodity-icon-control.delete').trigger('click')
     await flushPromises()
-    await wrapper.find('.ui-button--danger').trigger('click')
-    await flushPromises()
+    await confirmBodyDialog()
 
     const aliasTexts = wrapper.findAll('.alias-text').map((node) => node.text())
     expect(aliasTexts).not.toContain('بهار آزادی')
     expect(aliasTexts).toContain('طرح قدیم')
 
-    wrapper.unmount()
+    disposeWrapper(wrapper)
   })
 
   it('deletes a commodity from the confirmation flow and returns to the list', async () => {
@@ -250,14 +289,14 @@ describe('CommodityManager.vue', () => {
     await flushPromises()
     await wrapper.find('.commodity-action.danger-soft').trigger('click')
     await flushPromises()
-    await wrapper.find('.ui-button--danger').trigger('click')
-    await flushPromises()
+    expect(bodyConfirmDialog().closest('.ui-dialog-backdrop')?.parentElement).toBe(document.body)
+    await confirmBodyDialog()
 
     expect(wrapper.findAll('.list-item-btn').map((item) => item.text()).join(' ')).not.toContain('بهار')
     expect(wrapper.text()).toContain('کالا «بهار» با موفقیت حذف شد.')
     expect(wrapper.text()).toContain('امام')
 
-    wrapper.unmount()
+    disposeWrapper(wrapper)
   })
 
   it('renders fetch and manage-alias failures with readable error details', async () => {
@@ -271,7 +310,7 @@ describe('CommodityManager.vue', () => {
     await wrapper.get('.commodity-list-retry').trigger('click')
     await flushPromises()
     expect(wrapper.findAll('.list-item-btn')).toHaveLength(commoditiesState.length)
-    wrapper.unmount()
+    disposeWrapper(wrapper)
 
     commodityManagerMocks.apiFetchMock.mockImplementation(async (path: string, options?: RequestInit) => {
       if (path === '/api/commodities/' && !options?.method) return responseOf(commoditiesState)
@@ -287,7 +326,7 @@ describe('CommodityManager.vue', () => {
     expect(manageWrapper.text()).toContain('دریافت اطلاعات کالا ممکن نشد. اطلاعات فعلی حفظ شده است.')
     expect(manageWrapper.text()).toContain('افزودن کالا')
 
-    manageWrapper.unmount()
+    disposeWrapper(manageWrapper)
   })
 
   it('keeps add/edit forms open when APIs return structured validation errors', async () => {
@@ -341,7 +380,7 @@ describe('CommodityManager.vue', () => {
     expect(editErrorAlert.text()).not.toContain('too short')
     expect(wrapper.text()).toContain('ویرایش نام کالا')
 
-    wrapper.unmount()
+    disposeWrapper(wrapper)
   })
 
   it('validates alias input and reports partial alias add failures', async () => {
@@ -364,7 +403,7 @@ describe('CommodityManager.vue', () => {
       if (path === '/api/commodities/1/aliases' && method === 'POST') {
         const payload = JSON.parse(options!.body as string)
         if (payload.alias === 'خراب') return responseOf({ detail: 'تکراری' }, false, 409)
-        return responseOf({ id: aliasId++, alias: payload.alias, commodity_id: 1 })
+        return responseOf({ id: aliasId++, alias: payload.alias, commodity_id: 1 }, true, 201)
       }
       return responseOf(commoditiesState)
     })
@@ -387,46 +426,140 @@ describe('CommodityManager.vue', () => {
     expect(aliasErrorAlert.text()).not.toContain('تکراری')
     expect(wrapper.text()).toContain('افزودن نام مستعار')
 
-    wrapper.unmount()
+    disposeWrapper(wrapper)
   })
 
-  it('returns to alias management when delete operations fail', async () => {
+  it('rejects mismatched detail targets and alias creation receipts without changing the selected context', async () => {
+    const wrapper = await mountCommodityManager()
+    await flushPromises()
+
+    const rawWrongDetailName = 'wrong-detail-target-raw'
+    commodityManagerMocks.apiFetchMock.mockImplementation(async (path: string, options?: RequestInit) => {
+      const method = options?.method || 'GET'
+      if (path === '/api/commodities/' && method === 'GET') return responseOf(commoditiesState)
+      if (path === '/api/commodities/2' && method === 'GET') {
+        return responseOf({
+          id: 1,
+          name: rawWrongDetailName,
+          aliases: [{ id: 11, alias: 'نام نادرست', commodity_id: 1 }],
+        })
+      }
+      return responseOf({ detail: 'unexpected' }, false, 500)
+    })
+
+    await wrapper.findAll('.list-item-btn')[1]!.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('دریافت اطلاعات کالا ممکن نشد. اطلاعات فعلی حفظ شده است.')
+    expect(wrapper.text()).toContain('بهار')
+    expect(wrapper.text()).not.toContain(rawWrongDetailName)
+
+    commodityManagerMocks.apiFetchMock.mockImplementation(async (path: string, options?: RequestInit) => {
+      const method = options?.method || 'GET'
+      if (path === '/api/commodities/' && method === 'GET') return responseOf(commoditiesState)
+      if (path === '/api/commodities/2' && method === 'GET') return responseOf(commoditiesState[1])
+      if (path === '/api/commodities/2/aliases' && method === 'POST') {
+        const { alias } = JSON.parse(options!.body as string) as { alias: string }
+        if (alias === 'وضعیت ۲۰۰') return responseOf({ id: 31, alias, commodity_id: 2 }, true, 200)
+        return responseOf({ id: 32, alias: 'نام پاسخ متفاوت', commodity_id: 2 }, true, 201)
+      }
+      return responseOf({ detail: 'unexpected' }, false, 500)
+    })
+
+    await wrapper.findAll('.list-item-btn')[1]!.trigger('click')
+    await flushPromises()
+    await wrapper.findAll('.commodity-action')[0]!.trigger('click')
+    await flushPromises()
+    await wrapper.find('input').setValue('وضعیت ۲۰۰ - نام درخواست‌شده')
+    await wrapper.find('form').trigger('submit.prevent')
+    await flushPromises()
+
+    const alert = wrapper.find('.commodity-feedback--error[role="alert"]')
+    expect(alert.text()).toContain('ثبت نام‌های «وضعیت ۲۰۰، نام درخواست‌شده» انجام نشد.')
+    expect(wrapper.text()).toContain('افزودن نام مستعار')
+    expect(wrapper.text()).not.toContain('نام پاسخ متفاوت')
+    expect(wrapper.text()).not.toContain('unexpected')
+    expect(commoditiesState[1]!.aliases).toEqual([{ id: 21, alias: 'بهار جدید', commodity_id: 2 }])
+
+    disposeWrapper(wrapper)
+  })
+
+  it('keeps delete confirmation safe and selected data intact after failed receipts, then allows an alias retry', async () => {
     const wrapper = await mountCommodityManager()
     await flushPromises()
 
     await wrapper.findAll('.list-item-btn')[1]!.trigger('click')
     await flushPromises()
 
+    const rawCommodityDetail = 'commodity-delete-server-detail-403'
+    const rawAliasDetail = 'alias-delete-unexpected-receipt'
+    let aliasDeleteAttempts = 0
     commodityManagerMocks.apiFetchMock.mockImplementation(async (path: string, options?: RequestInit) => {
       const method = options?.method || 'GET'
       if (path === '/api/commodities/2' && method === 'GET') return responseOf(commoditiesState[1])
-      if (path === '/api/commodities/2' && method === 'DELETE') return responseOf({ detail: 'کالا وابسته است' }, false, 400)
-      if (path === '/api/commodities/aliases/21' && method === 'DELETE') return responseOf({ detail: 'نام مستعار وابسته است' }, false, 400)
+      if (path === '/api/commodities/2' && method === 'DELETE') return responseOf({ detail: rawCommodityDetail }, false, 403)
+      if (path === '/api/commodities/aliases/21' && method === 'DELETE') {
+        aliasDeleteAttempts += 1
+        if (aliasDeleteAttempts === 1) return responseOf({ detail: rawAliasDetail }, true, 200)
+        commoditiesState[1]!.aliases = []
+        return responseOf(null, true, 204)
+      }
       return responseOf(commoditiesState)
     })
 
     await wrapper.find('.commodity-action.danger-soft').trigger('click')
     await flushPromises()
-    await wrapper.find('.ui-button--danger').trigger('click')
-    await flushPromises()
+    await confirmBodyDialog()
 
     expect(commodityManagerMocks.apiFetchMock).toHaveBeenCalledWith('/api/commodities/2', expect.objectContaining({ method: 'DELETE' }))
     expect(wrapper.text()).toContain('بهار')
-    expect(wrapper.text()).toContain('صفحهٔ تأیید تغییری نکرده‌اند')
+    expect(bodyConfirmDialog().textContent).toContain('حذف کالا تأیید نشد. اطلاعات نمایش‌داده‌شده تغییری نکرده است؛ وضعیت را دوباره بررسی کنید.')
+    expect(document.body.textContent).not.toContain(rawCommodityDetail)
 
-    await wrapper.find('.ui-button--secondary').trigger('click')
-    await flushPromises()
+    await cancelBodyDialog()
+    expect(document.body.querySelector('.ui-confirm-dialog')).toBeNull()
 
     await wrapper.find('.commodity-icon-control.delete').trigger('click')
     await flushPromises()
-    await wrapper.find('.ui-button--danger').trigger('click')
-    await flushPromises()
+    await confirmBodyDialog()
 
     expect(commodityManagerMocks.apiFetchMock).toHaveBeenCalledWith('/api/commodities/aliases/21', expect.objectContaining({ method: 'DELETE' }))
     expect(wrapper.text()).toContain('بهار جدید')
-    expect(wrapper.text()).toContain('نام و صفحهٔ تأیید تغییری نکرده‌اند')
+    expect(bodyConfirmDialog().textContent).toContain('حذف نام مستعار تأیید نشد. اطلاعات نمایش‌داده‌شده تغییری نکرده است؛ وضعیت را دوباره بررسی کنید.')
+    expect(document.body.textContent).not.toContain(rawAliasDetail)
 
-    wrapper.unmount()
+    await confirmBodyDialog()
+    expect(document.body.querySelector('.ui-confirm-dialog')).toBeNull()
+    expect(wrapper.findAll('.alias-text').map((node) => node.text())).not.toContain('بهار جدید')
+
+    disposeWrapper(wrapper)
+  })
+
+  it('uses its body-teleported delete dialog so Escape and cancel never send a DELETE', async () => {
+    const wrapper = await mountCommodityManager()
+    await flushPromises()
+
+    await wrapper.findAll('.list-item-btn')[1]!.trigger('click')
+    await flushPromises()
+
+    await wrapper.find('.commodity-action.danger-soft').trigger('click')
+    await flushPromises()
+    expect(bodyConfirmDialog().closest('.ui-dialog-backdrop')?.parentElement).toBe(document.body)
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    await flushPromises()
+    expect(document.body.querySelector('.ui-confirm-dialog')).toBeNull()
+
+    await wrapper.find('.commodity-icon-control.delete').trigger('click')
+    await flushPromises()
+    await cancelBodyDialog()
+    expect(document.body.querySelector('.ui-confirm-dialog')).toBeNull()
+
+    const deleteCalls = commodityManagerMocks.apiFetchMock.mock.calls.filter(([, options]) => (
+      (options as RequestInit | undefined)?.method === 'DELETE'
+    ))
+    expect(deleteCalls).toHaveLength(0)
+    expect(wrapper.text()).toContain('بهار')
+    expect(wrapper.text()).toContain('بهار جدید')
   })
 
   it('guards duplicate creates and keeps the optimistic list plus success receipt when authoritative refresh fails', async () => {
@@ -498,6 +631,52 @@ describe('CommodityManager.vue', () => {
     expect(wrapper.text()).toContain('بهار جدید')
   })
 
+  it('aborts and ignores an out-of-order detail refresh when the user returns to the commodity list', async () => {
+    const wrapper = await mountCommodityManager()
+    await flushPromises()
+    await wrapper.findAll('.list-item-btn')[1]!.trigger('click')
+    await flushPromises()
+    await wrapper.find('.commodity-action.secondary-soft').trigger('click')
+    await wrapper.find('input').setValue('بهار تازه')
+
+    let resolveDetailRefresh: ((value: ReturnType<typeof responseOf>) => void) | undefined
+    let detailRefreshSignal: AbortSignal | null | undefined
+    const detailRefresh = new Promise<ReturnType<typeof responseOf>>((resolve) => {
+      resolveDetailRefresh = resolve
+    })
+    commodityManagerMocks.apiFetchMock.mockImplementation((path: string, options?: RequestInit) => {
+      const method = options?.method || 'GET'
+      if (path === '/api/commodities/2' && method === 'PUT') {
+        return Promise.resolve(responseOf({ ...commoditiesState[1], name: 'بهار تازه' }))
+      }
+      if (path === '/api/commodities/2' && method === 'GET') {
+        detailRefreshSignal = options?.signal
+        return detailRefresh
+      }
+      return Promise.resolve(responseOf({ detail: 'unexpected' }, false, 500))
+    })
+
+    await wrapper.find('form').trigger('submit.prevent')
+    await flushPromises()
+    expect(detailRefreshSignal).toBeTruthy()
+    expect(wrapper.text()).toContain('بهار تازه')
+
+    await wrapper.find('.commodity-back-control').trigger('click')
+    await flushPromises()
+    expect(detailRefreshSignal?.aborted).toBe(true)
+
+    resolveDetailRefresh!(responseOf({
+      id: 2,
+      name: 'جزئیات قدیمی',
+      aliases: [{ id: 21, alias: 'نام قدیمی', commodity_id: 2 }],
+    }))
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('افزودن کالا')
+    expect(wrapper.text()).toContain('بهار تازه')
+    expect(wrapper.text()).not.toContain('جزئیات قدیمی')
+  })
+
   it('guards duplicate deletes and retains the updated list plus receipt when list refresh fails', async () => {
     const wrapper = await mountCommodityManager()
     await flushPromises()
@@ -514,8 +693,10 @@ describe('CommodityManager.vue', () => {
       return Promise.resolve(responseOf({ detail: 'unexpected' }, false, 500))
     })
 
-    await wrapper.find('.ui-button--danger').trigger('click')
-    await wrapper.find('.ui-button--danger').trigger('click')
+    await flushPromises()
+    bodyConfirmButtons().confirm.click()
+    bodyConfirmButtons().confirm.click()
+    await flushPromises()
     expect(commodityManagerMocks.apiFetchMock.mock.calls.filter(([path, options]) => (
       path === '/api/commodities/2' && (options as RequestInit | undefined)?.method === 'DELETE'
     ))).toHaveLength(1)
