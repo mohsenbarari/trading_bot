@@ -10,6 +10,7 @@ import {
 import {
   AppButton,
   AppCard,
+  AppConfirmDialog,
   AppEmptyState,
   AppErrorState,
   AppLoadingState,
@@ -27,7 +28,8 @@ import {
 } from '../utils/currentUser'
 import { formatIranDateTime } from '../utils/iranTime'
 import { storeLocalLogoutReceipt, type LocalLogoutOutcome } from '../utils/localLogoutReceipt'
-import { routeRequestJson } from '../utils/routeRequest'
+import { isAppHttpError } from '../utils/httpErrorPolicy'
+import { routeRequest, routeRequestJson } from '../utils/routeRequest'
 
 interface AccountSession {
   id: string
@@ -48,6 +50,53 @@ interface SessionActionFeedback extends ActionFeedback {
   sessionId: string
 }
 
+type SecurityConfirmationKind = 'terminate-session' | 'logout-others' | 'local-logout'
+
+const TERMINATE_SESSION_DETAIL = 'نشست با موفقیت پایان یافت'
+const LOGOUT_OTHERS_DETAIL = /^\d+ نشست پایان یافت$/
+
+const securitySafeCopy: Record<SecurityConfirmationKind, string> = {
+  'terminate-session':
+    'پایان نشست تأیید نشد. اطلاعات نمایش‌داده‌شده تغییری نکرده است؛ وضعیت را دوباره بررسی کنید.',
+  'logout-others':
+    'خروج از نشست‌های دیگر تأیید نشد. اطلاعات نمایش‌داده‌شده تغییری نکرده است؛ وضعیت را دوباره بررسی کنید.',
+  'local-logout':
+    'تأیید سرور دریافت نشد. اطلاعات ورود این دستگاه به‌صورت محلی پاک می‌شود.',
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
+function isExactTerminateReceipt(receipt: unknown): boolean {
+  return isRecord(receipt) && receipt.detail === TERMINATE_SESSION_DETAIL
+}
+
+function isExactLogoutOthersReceipt(receipt: unknown): boolean {
+  return isRecord(receipt)
+    && typeof receipt.detail === 'string'
+    && LOGOUT_OTHERS_DETAIL.test(receipt.detail)
+}
+
+async function parseJsonReceipt(response: Response) {
+  try {
+    return await response.json()
+  } catch {
+    throw new Error('invalid_json_receipt')
+  }
+}
+
+function getSafeSessionError(kind: SecurityConfirmationKind, error: unknown): string {
+  const status = isAppHttpError(error) ? error.status : null
+  if (status === 403) {
+    return 'اجازه این اقدام را ندارید. اطلاعات نمایش‌داده‌شده تغییری نکرده است.'
+  }
+  if (status === 404) {
+    return 'این نشست دیگر در دسترس نیست. اطلاعات نمایش‌داده‌شده تغییری نکرده است.'
+  }
+  return securitySafeCopy[kind]
+}
+
 const router = useRouter()
 const route = useRoute()
 const settingsPageRoot = ref<HTMLElement | null>(null)
@@ -63,12 +112,12 @@ const sessionsLoading = ref(false)
 const sessionsError = ref<string | null>(null)
 const sessionBusyIds = ref<string[]>([])
 const terminateConfirmationId = ref<string | null>(null)
+const pendingSecurityConfirmation = ref<SecurityConfirmationKind | null>(null)
+const securityConfirmationError = ref('')
 const sessionActionFeedback = ref<SessionActionFeedback | null>(null)
 
-const logoutOthersConfirming = ref(false)
 const logoutOthersBusy = ref(false)
 const logoutOthersFeedback = ref<ActionFeedback | null>(null)
-const localLogoutConfirming = ref(false)
 const localLogoutBusy = ref(false)
 const localLogoutFeedback = ref<ActionFeedback | null>(null)
 
@@ -138,6 +187,40 @@ const sessionAuthority = computed<ActionFeedback>(() => {
   }
 })
 
+const securityDialogOpen = computed(() => pendingSecurityConfirmation.value !== null)
+const securityDialogBusy = computed(() => {
+  if (pendingSecurityConfirmation.value === 'terminate-session' && terminateConfirmationId.value) {
+    return isSessionBusy(terminateConfirmationId.value)
+  }
+  if (pendingSecurityConfirmation.value === 'logout-others') return logoutOthersBusy.value
+  if (pendingSecurityConfirmation.value === 'local-logout') return localLogoutBusy.value
+  return false
+})
+const securityDialogTitle = computed(() => {
+  if (pendingSecurityConfirmation.value === 'terminate-session') return 'پایان این نشست'
+  if (pendingSecurityConfirmation.value === 'logout-others') return 'خروج از نشست‌های دیگر'
+  if (pendingSecurityConfirmation.value === 'local-logout') return 'خروج از این دستگاه'
+  return ''
+})
+const securityDialogMessage = computed(() => {
+  if (pendingSecurityConfirmation.value === 'terminate-session') {
+    return 'این نشست در همین سرور پایان یابد؟ لغو یا Escape هیچ تغییری ایجاد نمی‌کند.'
+  }
+  if (pendingSecurityConfirmation.value === 'logout-others') {
+    return 'همه نشست‌های دیگر این سرور پایان می‌یابند؛ نشست فعلی این دستگاه باز می‌ماند. لغو یا Escape هیچ تغییری ایجاد نمی‌کند.'
+  }
+  if (pendingSecurityConfirmation.value === 'local-logout') {
+    return 'از حساب روی همین دستگاه خارج می‌شوید. نشست‌های دیگر تغییر نمی‌کنند. لغو یا Escape هیچ تغییری ایجاد نمی‌کند.'
+  }
+  return ''
+})
+const securityDialogConfirmLabel = computed(() => {
+  if (pendingSecurityConfirmation.value === 'terminate-session') return 'تأیید پایان نشست'
+  if (pendingSecurityConfirmation.value === 'logout-others') return 'تأیید خروج دیگران'
+  if (pendingSecurityConfirmation.value === 'local-logout') return 'تأیید خروج'
+  return 'تأیید'
+})
+
 const cacheSizeLabel = computed(() => {
   if (cacheSizeLoading.value && cacheSize.value === null) return 'در حال محاسبه'
   if (cacheSizeError.value) return 'نامشخص'
@@ -185,15 +268,6 @@ function returnToAccount() {
 
 function focusAfterRender(selector: string) {
   void nextTick(() => settingsPageRoot.value?.querySelector<HTMLElement>(selector)?.focus())
-}
-
-function focusSessionTrigger(sessionId: string) {
-  void nextTick(() => {
-    const trigger = Array.from(
-      settingsPageRoot.value?.querySelectorAll<HTMLElement>('.session-delete-btn') ?? [],
-    ).find((element) => element.dataset.sessionId === sessionId)
-    trigger?.focus()
-  })
 }
 
 async function refreshCacheSize() {
@@ -280,33 +354,36 @@ async function fetchSessions() {
   }
 }
 
+function closeSecurityConfirmation() {
+  if (securityDialogBusy.value) return
+  pendingSecurityConfirmation.value = null
+  securityConfirmationError.value = ''
+  terminateConfirmationId.value = null
+}
+
 function requestTerminateSession(session: AccountSession) {
   if (!canTerminateSession(session) || isSessionBusy(session.id) || logoutOthersBusy.value) return
   terminateConfirmationId.value = session.id
+  pendingSecurityConfirmation.value = 'terminate-session'
+  securityConfirmationError.value = ''
   sessionActionFeedback.value = null
-  logoutOthersConfirming.value = false
-  focusAfterRender('.session-terminate-confirm')
-}
-
-function cancelTerminateSession(sessionId: string) {
-  if (isSessionBusy(sessionId)) return
-  if (terminateConfirmationId.value === sessionId) {
-    terminateConfirmationId.value = null
-    focusSessionTrigger(sessionId)
-  }
+  logoutOthersFeedback.value = null
 }
 
 async function confirmTerminateSession(session: AccountSession) {
   if (
-    terminateConfirmationId.value !== session.id ||
-    isSessionBusy(session.id) ||
-    logoutOthersBusy.value
-  )
+    pendingSecurityConfirmation.value !== 'terminate-session'
+    || terminateConfirmationId.value !== session.id
+    || isSessionBusy(session.id)
+    || logoutOthersBusy.value
+  ) {
     return
+  }
   sessionBusyIds.value = [...sessionBusyIds.value, session.id]
   sessionActionFeedback.value = null
+  securityConfirmationError.value = ''
   try {
-    const receipt = await routeRequestJson<{ detail?: unknown }>(`/api/sessions/${session.id}`, {
+    const response = await routeRequest(`/api/sessions/${session.id}`, {
       method: 'DELETE',
       errorContext: {
         surface: 'settings',
@@ -316,9 +393,12 @@ async function confirmTerminateSession(session: AccountSession) {
         fallbackMessage: 'پایان دادن به این نشست انجام نشد.',
       },
     })
-    const detail = typeof receipt?.detail === 'string' ? receipt.detail.trim() : ''
-    if (!detail) throw new Error('invalid_terminate_session_receipt')
+    if (response.status !== 200) throw new Error('invalid_terminate_session_receipt')
+    const receipt = await parseJsonReceipt(response)
+    if (!isExactTerminateReceipt(receipt)) throw new Error('invalid_terminate_session_receipt')
     sessions.value = sessions.value.filter((item) => item.id !== session.id)
+    pendingSecurityConfirmation.value = null
+    securityConfirmationError.value = ''
     terminateConfirmationId.value = null
     sessionActionFeedback.value = {
       sessionId: session.id,
@@ -327,13 +407,8 @@ async function confirmTerminateSession(session: AccountSession) {
       message: 'نشست انتخاب‌شده در همین سرور پایان یافت.',
     }
     focusAfterRender('.session-mutation-feedback')
-  } catch {
-    sessionActionFeedback.value = {
-      sessionId: session.id,
-      tone: 'danger',
-      title: 'پایان نشست انجام نشد',
-      message: 'این نشست در فهرست باقی ماند. می‌توانید دوباره تلاش کنید.',
-    }
+  } catch (error) {
+    securityConfirmationError.value = getSafeSessionError('terminate-session', error)
   } finally {
     sessionBusyIds.value = sessionBusyIds.value.filter((id) => id !== session.id)
   }
@@ -343,24 +418,24 @@ function requestLogoutOthers() {
   if (!canLogoutOtherSessions.value || logoutOthersBusy.value || sessionBusyIds.value.length > 0)
     return
   logoutOthersFeedback.value = null
-  logoutOthersConfirming.value = true
+  securityConfirmationError.value = ''
   terminateConfirmationId.value = null
-  focusAfterRender('.logout-others-confirm')
-}
-
-function cancelLogoutOthers() {
-  if (logoutOthersBusy.value) return
-  logoutOthersConfirming.value = false
-  focusAfterRender('.logout-all-btn')
+  pendingSecurityConfirmation.value = 'logout-others'
 }
 
 async function confirmLogoutOthers() {
-  if (!logoutOthersConfirming.value || !canLogoutOtherSessions.value || logoutOthersBusy.value)
+  if (
+    pendingSecurityConfirmation.value !== 'logout-others'
+    || !canLogoutOtherSessions.value
+    || logoutOthersBusy.value
+  ) {
     return
+  }
   logoutOthersBusy.value = true
   logoutOthersFeedback.value = null
+  securityConfirmationError.value = ''
   try {
-    const receipt = await routeRequestJson<{ detail?: unknown }>('/api/sessions/logout-all', {
+    const response = await routeRequest('/api/sessions/logout-all', {
       method: 'POST',
       errorContext: {
         surface: 'settings',
@@ -370,10 +445,12 @@ async function confirmLogoutOthers() {
         fallbackMessage: 'خروج از نشست‌های دیگر انجام نشد.',
       },
     })
-    const detail = typeof receipt?.detail === 'string' ? receipt.detail.trim() : ''
-    if (!detail) throw new Error('invalid_logout_others_receipt')
+    if (response.status !== 200) throw new Error('invalid_logout_others_receipt')
+    const receipt = await parseJsonReceipt(response)
+    if (!isExactLogoutOthersReceipt(receipt)) throw new Error('invalid_logout_others_receipt')
     sessions.value = sessions.value.filter((session) => session.isCurrent)
-    logoutOthersConfirming.value = false
+    pendingSecurityConfirmation.value = null
+    securityConfirmationError.value = ''
     logoutOthersFeedback.value = {
       tone: 'success',
       title: 'نشست‌های دیگر پایان یافتند',
@@ -381,12 +458,8 @@ async function confirmLogoutOthers() {
     }
     await fetchSessions()
     focusAfterRender('.logout-others-feedback')
-  } catch {
-    logoutOthersFeedback.value = {
-      tone: 'danger',
-      title: 'خروج از نشست‌های دیگر انجام نشد',
-      message: 'فهرست فعلی حفظ شده است. می‌توانید دوباره تلاش کنید.',
-    }
+  } catch (error) {
+    securityConfirmationError.value = getSafeSessionError('logout-others', error)
   } finally {
     logoutOthersBusy.value = false
   }
@@ -395,25 +468,19 @@ async function confirmLogoutOthers() {
 function requestLocalLogout() {
   if (localLogoutBusy.value) return
   localLogoutFeedback.value = null
-  localLogoutConfirming.value = true
-  focusAfterRender('.local-logout-confirm')
-}
-
-function cancelLocalLogout() {
-  if (localLogoutBusy.value) return
-  localLogoutConfirming.value = false
-  focusAfterRender('.logout-btn')
+  securityConfirmationError.value = ''
+  pendingSecurityConfirmation.value = 'local-logout'
 }
 
 async function confirmLocalLogout() {
-  if (!localLogoutConfirming.value || localLogoutBusy.value) return
+  if (pendingSecurityConfirmation.value !== 'local-logout' || localLogoutBusy.value) return
   localLogoutBusy.value = true
   localLogoutFeedback.value = null
   let logoutOutcome: LocalLogoutOutcome = 'local-only'
   const session = currentSession.value
   if (session) {
     try {
-      const receipt = await routeRequestJson<{ detail?: unknown }>(`/api/sessions/${session.id}`, {
+      const response = await routeRequest(`/api/sessions/${session.id}`, {
         method: 'DELETE',
         errorContext: {
           surface: 'settings',
@@ -423,8 +490,9 @@ async function confirmLocalLogout() {
           fallbackMessage: 'پایان نشست فعلی روی سرور تأیید نشد.',
         },
       })
-      const detail = typeof receipt?.detail === 'string' ? receipt.detail.trim() : ''
-      if (!detail) throw new Error('invalid_local_logout_receipt')
+      if (response.status !== 200) throw new Error('invalid_local_logout_receipt')
+      const receipt = await parseJsonReceipt(response)
+      if (!isExactTerminateReceipt(receipt)) throw new Error('invalid_local_logout_receipt')
       logoutOutcome = 'server-confirmed'
       localLogoutFeedback.value = {
         tone: 'success',
@@ -439,10 +507,30 @@ async function confirmLocalLogout() {
       }
     }
   }
-  localLogoutConfirming.value = false
+  pendingSecurityConfirmation.value = null
+  securityConfirmationError.value = ''
   localLogoutBusy.value = false
   storeLocalLogoutReceipt(logoutOutcome)
   forceLogout()
+}
+
+async function confirmPendingSecurityAction() {
+  if (pendingSecurityConfirmation.value === 'terminate-session') {
+    const session = sessions.value.find((item) => item.id === terminateConfirmationId.value)
+    if (!session) {
+      closeSecurityConfirmation()
+      return
+    }
+    await confirmTerminateSession(session)
+    return
+  }
+  if (pendingSecurityConfirmation.value === 'logout-others') {
+    await confirmLogoutOthers()
+    return
+  }
+  if (pendingSecurityConfirmation.value === 'local-logout') {
+    await confirmLocalLogout()
+  }
 }
 
 async function loadIdentityAndSection() {
@@ -469,11 +557,11 @@ async function loadIdentityAndSection() {
 }
 
 function resetSectionActions() {
+  pendingSecurityConfirmation.value = null
+  securityConfirmationError.value = ''
   terminateConfirmationId.value = null
   sessionActionFeedback.value = null
-  logoutOthersConfirming.value = false
   logoutOthersFeedback.value = null
-  localLogoutConfirming.value = false
   localLogoutFeedback.value = null
   cacheClearConfirming.value = false
   cacheClearFeedback.value = null
@@ -671,12 +759,12 @@ watch(
                   </div>
 
                   <AppButton
-                    v-if="canTerminateSession(session) && terminateConfirmationId !== session.id"
+                    v-if="canTerminateSession(session)"
                     class="session-delete-btn"
                     :data-session-id="session.id"
                     variant="ghost"
                     size="sm"
-                    :disabled="logoutOthersBusy"
+                    :disabled="logoutOthersBusy || securityDialogBusy"
                     @click="requestTerminateSession(session)"
                   >
                     <template #icon>
@@ -684,36 +772,6 @@ watch(
                     </template>
                     پایان نشست
                   </AppButton>
-                </div>
-
-                <div
-                  v-if="terminateConfirmationId === session.id"
-                  class="session-inline-confirm"
-                  role="group"
-                  aria-label="تأیید پایان نشست"
-                >
-                  <p>نشست «{{ session.deviceName }}» در همین سرور پایان یابد؟</p>
-                  <div class="settings-inline-actions settings-inline-actions--compact">
-                    <AppButton
-                      type="button"
-                      size="sm"
-                      variant="ghost"
-                      :disabled="isSessionBusy(session.id)"
-                      @click="cancelTerminateSession(session.id)"
-                    >
-                      انصراف
-                    </AppButton>
-                    <AppButton
-                      type="button"
-                      size="sm"
-                      variant="danger"
-                      class="session-terminate-confirm"
-                      :loading="isSessionBusy(session.id)"
-                      @click="confirmTerminateSession(session)"
-                    >
-                      تأیید پایان نشست
-                    </AppButton>
-                  </div>
                 </div>
 
                 <WorkspaceNotice
@@ -742,45 +800,16 @@ watch(
               :message="logoutOthersFeedback.message"
             />
             <AppButton
-              v-if="canLogoutOtherSessions && !logoutOthersConfirming"
+              v-if="canLogoutOtherSessions"
               class="logout-all-btn"
               type="button"
               variant="danger"
               block
-              :disabled="sessionBusyIds.length > 0"
+              :disabled="sessionBusyIds.length > 0 || securityDialogBusy"
               @click="requestLogoutOthers"
             >
               خروج از نشست‌های دیگر
             </AppButton>
-            <div
-              v-if="logoutOthersConfirming"
-              class="settings-inline-confirm"
-              role="group"
-              aria-label="تأیید خروج از نشست‌های دیگر"
-            >
-              <p>همه نشست‌های دیگر این سرور پایان می‌یابند؛ نشست فعلی این دستگاه باز می‌ماند.</p>
-              <div class="settings-inline-actions settings-inline-actions--compact">
-                <AppButton
-                  type="button"
-                  size="sm"
-                  variant="ghost"
-                  :disabled="logoutOthersBusy"
-                  @click="cancelLogoutOthers"
-                >
-                  انصراف
-                </AppButton>
-                <AppButton
-                  type="button"
-                  size="sm"
-                  variant="danger"
-                  class="logout-others-confirm"
-                  :loading="logoutOthersBusy"
-                  @click="confirmLogoutOthers"
-                >
-                  تأیید خروج دیگران
-                </AppButton>
-              </div>
-            </div>
           </AppSectionCard>
 
           <AppSectionCard
@@ -797,10 +826,10 @@ watch(
               :message="localLogoutFeedback.message"
             />
             <AppButton
-              v-if="!localLogoutConfirming"
               variant="danger"
               block
               class="logout-btn"
+              :disabled="localLogoutBusy || securityDialogBusy"
               @click="requestLocalLogout"
             >
               <template #icon>
@@ -808,35 +837,6 @@ watch(
               </template>
               خروج از این دستگاه
             </AppButton>
-            <div
-              v-else
-              class="settings-inline-confirm"
-              role="group"
-              aria-label="تأیید خروج از این دستگاه"
-            >
-              <p>از حساب روی همین دستگاه خارج می‌شوید. نشست‌های دیگر تغییر نمی‌کنند.</p>
-              <div class="settings-inline-actions settings-inline-actions--compact">
-                <AppButton
-                  type="button"
-                  size="sm"
-                  variant="ghost"
-                  :disabled="localLogoutBusy"
-                  @click="cancelLocalLogout"
-                >
-                  انصراف
-                </AppButton>
-                <AppButton
-                  type="button"
-                  size="sm"
-                  variant="danger"
-                  class="local-logout-confirm"
-                  :loading="localLogoutBusy"
-                  @click="confirmLocalLogout"
-                >
-                  تأیید خروج
-                </AppButton>
-              </div>
-            </div>
           </AppSectionCard>
         </template>
 
@@ -931,6 +931,20 @@ watch(
         </AppSectionCard>
       </template>
     </AppPage>
+    <AppConfirmDialog
+      v-if="securityDialogOpen"
+      :open="securityDialogOpen"
+      :title="securityDialogTitle"
+      :message="securityDialogMessage"
+      :confirm-label="securityDialogConfirmLabel"
+      cancel-label="انصراف"
+      tone="danger"
+      :busy="securityDialogBusy"
+      :error="securityConfirmationError || undefined"
+      :confirm-disabled="securityDialogBusy"
+      @cancel="closeSecurityConfirmation"
+      @confirm="confirmPendingSecurityAction"
+    />
   </div>
 </template>
 

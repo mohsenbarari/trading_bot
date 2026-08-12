@@ -56,9 +56,10 @@ const sessionsFixture = [
   },
 ]
 
-function responseOf(data: unknown, ok = true) {
+function responseOf(data: unknown, ok = true, status = ok ? 200 : 400) {
   return {
     ok,
+    status,
     json: async () => data,
   }
 }
@@ -91,6 +92,36 @@ function buttonWithText(wrapper: VueWrapper, text: string) {
 
 function requestsFor(path: string) {
   return settingsViewMocks.apiFetchMock.mock.calls.filter(([requestPath]) => requestPath === path)
+}
+
+function bodyConfirmDialog() {
+  const dialog = document.body.querySelector<HTMLElement>('.ui-confirm-dialog')
+  if (!dialog) throw new Error('Expected the confirmation dialog to be teleported to document.body.')
+  return dialog
+}
+
+function bodyConfirmButtons() {
+  const buttons = bodyConfirmDialog().querySelectorAll<HTMLButtonElement>('button')
+  if (buttons.length !== 2) {
+    throw new Error('Expected exactly cancel and confirm buttons in the confirmation dialog.')
+  }
+  return { cancel: buttons[0]!, confirm: buttons[1]! }
+}
+
+async function confirmBodyDialog() {
+  bodyConfirmButtons().confirm.click()
+  await flushPromises()
+}
+
+async function cancelBodyDialog() {
+  bodyConfirmButtons().cancel.click()
+  await flushPromises()
+}
+
+async function pressEscape() {
+  await flushPromises()
+  document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+  await flushPromises()
 }
 
 describe('SettingsView.vue', () => {
@@ -213,28 +244,30 @@ describe('SettingsView.vue', () => {
     expect(wrapper.find('.logout-all-btn').exists()).toBe(false)
   })
 
-  it('requires inline confirmation before ending one session and keeps the receipt local to the list', async () => {
+  it('requires body-teleported confirmation before ending one session and keeps the receipt local to the list', async () => {
     const wrapper = await mountSettingsView()
 
     await wrapper.get('.session-delete-btn').trigger('click')
-    expect(wrapper.get('.session-inline-confirm').text()).toContain('Android')
-    expect(document.activeElement).toBe(wrapper.get('.session-terminate-confirm').element)
+    const dialog = bodyConfirmDialog()
+    expect(dialog.textContent).toContain('این نشست در همین سرور پایان یابد')
+    expect(dialog.textContent).not.toContain('Android')
+    expect(dialog.textContent).not.toContain('Chrome')
     expect(requestsFor('/api/sessions/session-secondary')).toHaveLength(0)
 
-    await buttonWithText(wrapper, 'انصراف')!.trigger('click')
-    expect(wrapper.find('.session-inline-confirm').exists()).toBe(false)
-    expect(document.activeElement).toBe(wrapper.get('.session-delete-btn').element)
+    await cancelBodyDialog()
+    expect(document.body.querySelector('.ui-confirm-dialog')).toBeNull()
+    expect(requestsFor('/api/sessions/session-secondary')).toHaveLength(0)
+    expect(wrapper.text()).toContain('Android')
 
     await wrapper.get('.session-delete-btn').trigger('click')
-    await wrapper.get('.session-terminate-confirm').trigger('click')
-    await flushPromises()
+    await confirmBodyDialog()
 
     expect(requestsFor('/api/sessions/session-secondary')).toHaveLength(1)
     expect(wrapper.text()).not.toContain('Android')
     expect(wrapper.get('.session-mutation-feedback').text()).toContain(
       'نشست انتخاب‌شده در همین سرور پایان یافت',
     )
-    expect(document.activeElement).toBe(wrapper.get('.session-mutation-feedback').element)
+    expect(wrapper.text()).not.toContain('نشست با موفقیت پایان یافت')
   })
 
   it('keeps a session row and shows a cause-neutral local failure when termination fails', async () => {
@@ -252,12 +285,11 @@ describe('SettingsView.vue', () => {
     const wrapper = await mountSettingsView()
 
     await wrapper.get('.session-delete-btn').trigger('click')
-    await wrapper.get('.session-terminate-confirm').trigger('click')
-    await flushPromises()
+    await confirmBodyDialog()
 
     expect(wrapper.text()).toContain('Android')
-    expect(wrapper.get('.session-mutation-feedback').text()).toContain(
-      'این نشست در فهرست باقی ماند',
+    expect(bodyConfirmDialog().querySelector('[role="alert"]')?.textContent).toContain(
+      'پایان نشست تأیید نشد',
     )
     expect(wrapper.text()).not.toContain('raw-sensitive-cause')
     expect(consoleSpy).not.toHaveBeenCalled()
@@ -278,9 +310,9 @@ describe('SettingsView.vue', () => {
     const wrapper = await mountSettingsView()
 
     await wrapper.get('.session-delete-btn').trigger('click')
-    const confirmButton = wrapper.get('.session-terminate-confirm')
-    await confirmButton.trigger('click')
-    await confirmButton.trigger('click')
+    const confirmButton = bodyConfirmButtons().confirm
+    confirmButton.click()
+    confirmButton.click()
 
     expect(requestsFor('/api/sessions/session-secondary')).toHaveLength(1)
     if (!resolveTerminate) throw new Error('Expected terminate resolver')
@@ -290,7 +322,7 @@ describe('SettingsView.vue', () => {
     await flushPromises()
   })
 
-  it('uses other-session copy, inline confirmation and preserves the current session after logout-all', async () => {
+  it('uses other-session copy, body-teleported confirmation and preserves the current session after logout-all', async () => {
     let activeCalls = 0
     settingsViewMocks.apiFetchMock.mockImplementation(
       async (path: string, options?: RequestInit) => {
@@ -311,14 +343,10 @@ describe('SettingsView.vue', () => {
       'نشست فعلی این دستگاه را حفظ می‌کند',
     )
     await wrapper.get('.logout-all-btn').trigger('click')
-    expect(document.activeElement).toBe(wrapper.get('.logout-others-confirm').element)
-    expect(wrapper.get('[aria-label="تأیید خروج از نشست‌های دیگر"]').text()).toContain(
-      'نشست فعلی این دستگاه باز می‌ماند',
-    )
+    expect(bodyConfirmDialog().textContent).toContain('نشست فعلی این دستگاه باز می‌ماند')
     expect(requestsFor('/api/sessions/logout-all')).toHaveLength(0)
 
-    await wrapper.get('.logout-others-confirm').trigger('click')
-    await flushPromises()
+    await confirmBodyDialog()
 
     expect(requestsFor('/api/sessions/logout-all')).toHaveLength(1)
     expect(wrapper.get('.logout-others-feedback').text()).toContain('نشست فعلی این دستگاه حفظ شد')
@@ -346,8 +374,7 @@ describe('SettingsView.vue', () => {
     const wrapper = await mountSettingsView()
 
     await wrapper.get('.logout-all-btn').trigger('click')
-    await wrapper.get('.logout-others-confirm').trigger('click')
-    await flushPromises()
+    await confirmBodyDialog()
 
     expect(requestsFor('/api/sessions/active')).toHaveLength(2)
     expect(wrapper.get('.logout-others-feedback').text()).toContain('نشست فعلی این دستگاه حفظ شد')
@@ -370,16 +397,17 @@ describe('SettingsView.vue', () => {
     const wrapper = await mountSettingsView()
 
     await wrapper.get('.logout-all-btn').trigger('click')
-    await wrapper.get('.logout-others-confirm').trigger('click')
-    await flushPromises()
+    await confirmBodyDialog()
 
-    expect(wrapper.get('.logout-others-feedback').text()).toContain('فهرست فعلی حفظ شده است')
+    expect(bodyConfirmDialog().querySelector('[role="alert"]')?.textContent).toContain(
+      'خروج از نشست‌های دیگر تأیید نشد',
+    )
     expect(wrapper.text()).toContain('Chrome')
     expect(wrapper.text()).toContain('Android')
     expect(wrapper.text()).not.toContain('raw-cause')
   })
 
-  it('uses hostile terminate and logout-others receipts only as proof', async () => {
+  it('rejects hostile terminate and logout-others receipts without mutating the list', async () => {
     const hostileTerminateReceipt = 'server=iran route=/api/internal/session-secondary'
     const hostileLogoutOthersReceipt = 'backend=foreign api=/api/internal/logout-all'
     settingsViewMocks.apiFetchMock.mockImplementation(
@@ -398,37 +426,35 @@ describe('SettingsView.vue', () => {
     const wrapper = await mountSettingsView()
 
     await wrapper.get('.logout-all-btn').trigger('click')
-    await wrapper.get('.logout-others-confirm').trigger('click')
-    await flushPromises()
+    await confirmBodyDialog()
 
-    expect(wrapper.get('.logout-others-feedback').text()).toContain(
-      'نشست‌های دیگر این سرور پایان یافتند',
+    expect(bodyConfirmDialog().querySelector('[role="alert"]')?.textContent).toContain(
+      'خروج از نشست‌های دیگر تأیید نشد',
     )
+    expect(wrapper.text()).toContain('Android')
     expect(wrapper.text()).not.toContain(hostileLogoutOthersReceipt)
 
+    await cancelBodyDialog()
     await wrapper.get('.session-delete-btn').trigger('click')
-    await wrapper.get('.session-terminate-confirm').trigger('click')
-    await flushPromises()
+    await confirmBodyDialog()
 
-    expect(wrapper.get('.session-mutation-feedback').text()).toContain(
-      'نشست انتخاب‌شده در همین سرور پایان یافت',
+    expect(bodyConfirmDialog().querySelector('[role="alert"]')?.textContent).toContain(
+      'پایان نشست تأیید نشد',
     )
+    expect(wrapper.text()).toContain('Android')
     expect(wrapper.text()).not.toContain(hostileTerminateReceipt)
     expect(wrapper.text()).not.toContain('server=iran')
     expect(wrapper.text()).not.toContain('/api/internal')
   })
 
-  it('confirms logout inline, ends the reported current session, then clears local auth', async () => {
+  it('confirms logout in a body-teleported dialog, ends the reported current session, then clears local auth', async () => {
     const wrapper = await mountSettingsView()
 
     await wrapper.get('.logout-btn').trigger('click')
-    expect(wrapper.get('[aria-label="تأیید خروج از این دستگاه"]').text()).toContain(
-      'نشست‌های دیگر تغییر نمی‌کنند',
-    )
+    expect(bodyConfirmDialog().textContent).toContain('نشست‌های دیگر تغییر نمی‌کنند')
     expect(settingsViewMocks.forceLogoutMock).not.toHaveBeenCalled()
 
-    await wrapper.get('.local-logout-confirm').trigger('click')
-    await flushPromises()
+    await confirmBodyDialog()
 
     expect(requestsFor('/api/sessions/session-current')).toHaveLength(1)
     expect(settingsViewMocks.forceLogoutMock).toHaveBeenCalledTimes(1)
@@ -450,8 +476,7 @@ describe('SettingsView.vue', () => {
     const wrapper = await mountSettingsView()
 
     await wrapper.get('.logout-btn').trigger('click')
-    await wrapper.get('.local-logout-confirm').trigger('click')
-    await flushPromises()
+    await confirmBodyDialog()
 
     expect(settingsViewMocks.forceLogoutMock).toHaveBeenCalledTimes(1)
     expect(wrapper.get('.local-logout-feedback').text()).toContain(
@@ -474,13 +499,33 @@ describe('SettingsView.vue', () => {
     const wrapper = await mountSettingsView()
 
     await wrapper.get('.logout-btn').trigger('click')
-    await wrapper.get('.local-logout-confirm').trigger('click')
-    await flushPromises()
+    await confirmBodyDialog()
 
     expect(settingsViewMocks.forceLogoutMock).toHaveBeenCalledTimes(1)
     expect(wrapper.get('.local-logout-feedback').text()).toContain('تأیید سرور دریافت نشد')
     expect(sessionStorage.getItem('stage4_local_logout_result_v1')).toBe('local-only')
     expect(wrapper.get('.local-logout-feedback').text()).not.toContain('خروج این دستگاه ثبت شد')
+  })
+
+  it('does not claim server-confirmed logout for a hostile detail receipt', async () => {
+    settingsViewMocks.apiFetchMock.mockImplementation(
+      async (path: string, options?: RequestInit) => {
+        if (path === '/api/auth/me') return responseOf(authoritativeUser())
+        if (path === '/api/sessions/active') return responseOf(sessionsFixture)
+        if (path === '/api/sessions/session-current' && options?.method === 'DELETE') {
+          return responseOf({ detail: 'token=abc.def.ghi host=iran' })
+        }
+        return responseOf({})
+      },
+    )
+    const wrapper = await mountSettingsView()
+
+    await wrapper.get('.logout-btn').trigger('click')
+    await confirmBodyDialog()
+
+    expect(settingsViewMocks.forceLogoutMock).toHaveBeenCalledTimes(1)
+    expect(sessionStorage.getItem('stage4_local_logout_result_v1')).toBe('local-only')
+    expect(wrapper.text()).not.toContain('token=abc.def.ghi')
   })
 
   it('keeps accountant Security restricted while allowing the separate Storage route', async () => {
@@ -676,12 +721,49 @@ describe('SettingsView.vue', () => {
     const wrapper = await mountSettingsView()
 
     await wrapper.get('.session-delete-btn').trigger('click')
-    await wrapper.get('.session-terminate-confirm').trigger('click')
-    await flushPromises()
+    await confirmBodyDialog()
 
     expect(wrapper.text()).toContain('Android')
-    expect(wrapper.get('.session-mutation-feedback').text()).toContain(
-      'این نشست در فهرست باقی ماند',
+    expect(bodyConfirmDialog().querySelector('[role="alert"]')?.textContent).toContain(
+      'پایان نشست تأیید نشد',
     )
+  })
+
+  it('keeps Escape and cancel at zero mutation for session termination', async () => {
+    const wrapper = await mountSettingsView()
+
+    await wrapper.get('.session-delete-btn').trigger('click')
+    await pressEscape()
+    expect(document.body.querySelector('.ui-confirm-dialog')).toBeNull()
+    expect(requestsFor('/api/sessions/session-secondary')).toHaveLength(0)
+    expect(wrapper.text()).toContain('Android')
+
+    await wrapper.get('.session-delete-btn').trigger('click')
+    await cancelBodyDialog()
+    expect(requestsFor('/api/sessions/session-secondary')).toHaveLength(0)
+    expect(wrapper.text()).toContain('Android')
+  })
+
+  it('rejects 403/404 terminate failures with fixed copy and retains the selected session', async () => {
+    settingsViewMocks.apiFetchMock.mockImplementation(
+      async (path: string, options?: RequestInit) => {
+        if (path === '/api/auth/me') return responseOf(authoritativeUser())
+        if (path === '/api/sessions/active') return responseOf(sessionsFixture)
+        if (path === '/api/sessions/session-secondary' && options?.method === 'DELETE') {
+          return responseOf({ detail: 'raw-forbidden-session' }, false, 403)
+        }
+        return responseOf({})
+      },
+    )
+    const wrapper = await mountSettingsView()
+
+    await wrapper.get('.session-delete-btn').trigger('click')
+    await confirmBodyDialog()
+
+    expect(wrapper.text()).toContain('Android')
+    expect(bodyConfirmDialog().querySelector('[role="alert"]')?.textContent).toContain(
+      'اجازه این اقدام را ندارید',
+    )
+    expect(wrapper.text()).not.toContain('raw-forbidden-session')
   })
 })
