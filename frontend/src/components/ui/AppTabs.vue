@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { nextTick } from 'vue'
+
 interface AppTabOption {
   key: string
   label: string
@@ -42,7 +44,13 @@ function handleKeydown(event: KeyboardEvent, index: number) {
   }
 
   event.preventDefault()
-  emit('update:modelValue', enabledOptions[nextIndex]!.key)
+  const nextOption = enabledOptions[nextIndex]!
+  const currentButton = event.currentTarget as HTMLButtonElement | null
+  emit('update:modelValue', nextOption.key)
+  void nextTick(() => {
+    const tabs = currentButton?.parentElement?.querySelectorAll<HTMLButtonElement>('[role="tab"]')
+    tabs?.[nextOption.optionIndex]?.focus()
+  })
 }
 </script>
 

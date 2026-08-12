@@ -191,6 +191,7 @@ describe('ui primitives', () => {
           { key: 'pending', label: 'دعوت‌ها' },
         ],
       },
+      attachTo: document.body,
     })
 
     expect(wrapper.attributes('role')).toBe('tablist')
@@ -198,8 +199,16 @@ describe('ui primitives', () => {
     await wrapper.findAll('[role="tab"]')[1]!.trigger('click')
     expect(wrapper.emitted('update:modelValue')?.[0]).toEqual(['active'])
 
-    await wrapper.findAll('[role="tab"]')[0]!.trigger('keydown', { key: 'ArrowLeft' })
+    const tabButtons = wrapper.findAll<HTMLButtonElement>('[role="tab"]')
+    tabButtons[0]!.element.focus()
+    await tabButtons[0]!.trigger('keydown', { key: 'ArrowLeft' })
+    await nextTick()
     expect(wrapper.emitted('update:modelValue')?.[1]).toEqual(['active'])
+    expect(document.activeElement).toBe(tabButtons[1]!.element)
+    await tabButtons[1]!.trigger('keydown', { key: 'Home' })
+    await nextTick()
+    expect(document.activeElement).toBe(tabButtons[0]!.element)
+    wrapper.unmount()
   })
 
   it('connects form fields to inputs and exposes validation state', async () => {
@@ -306,6 +315,7 @@ describe('ui primitives', () => {
       props: { title: 'موردی وجود ندارد', message: 'بعد از ایجاد، اینجا نمایش داده می‌شود.' },
       slots: { actions: '<button>افزودن</button>' },
     })
+    expect(empty.attributes('role')).toBe('status')
     expect(empty.text()).toContain('افزودن')
 
     const loading = mount(AppLoadingState, { props: { label: 'در حال دریافت مشتریان' } })

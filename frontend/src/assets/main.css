@@ -247,6 +247,28 @@
   .app-route-scroll :is(button, a[href], input, textarea, select, [role="button"], [tabindex]) {
     scroll-margin-bottom: calc(var(--ds-bottom-nav-height) + var(--ds-safe-area-bottom) + 4rem);
   }
+
+  .app-copyable-info .app-route-scroll {
+    -webkit-user-select: text;
+    user-select: text;
+    -webkit-touch-callout: default;
+  }
+
+  .app-copyable-info .app-route-scroll :is(
+    button,
+    nav,
+    [role="tab"],
+    [role="tablist"],
+    .ui-bottom-nav,
+    .ui-icon-button,
+    .ui-button,
+    .ui-tabs,
+    .ui-filter-chips,
+    .ui-action-card
+  ) {
+    -webkit-user-select: none;
+    user-select: none;
+  }
 }
 
 
@@ -259,6 +281,13 @@
 .fade-enter-from,
 .fade-leave-to {
   opacity: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fade-enter-active,
+  .fade-leave-active {
+    transition: none;
+  }
 }
 /* Base Ripple Setup */
 .ripple-container {
@@ -890,6 +919,7 @@
     font-size: var(--ds-font-2xl);
     font-weight: 950;
     line-height: 1.55;
+    overflow-wrap: anywhere;
   }
 
   .ui-page-header p {
@@ -897,6 +927,7 @@
     color: var(--ds-text-muted);
     font-size: var(--ds-font-sm);
     line-height: 1.8;
+    overflow-wrap: anywhere;
   }
 
   .ui-page-header__actions {
@@ -1256,6 +1287,7 @@
     font-size: var(--ds-font-lg);
     font-weight: 900;
     line-height: 1.55;
+    overflow-wrap: anywhere;
   }
 
   .ui-section-card__copy p,
@@ -1265,6 +1297,7 @@
     color: var(--ds-text-muted);
     font-size: var(--ds-font-sm);
     line-height: 1.85;
+    overflow-wrap: anywhere;
   }
 
   .ui-section-card__body,
@@ -1321,12 +1354,14 @@
     color: var(--ds-text-primary);
     font-size: var(--ds-font-md);
     line-height: 1.6;
+    overflow-wrap: anywhere;
   }
 
   .ui-action-card__description {
     color: var(--ds-text-muted);
     font-size: var(--ds-font-sm);
     line-height: 1.75;
+    overflow-wrap: anywhere;
   }
 
   .ui-action-card__badge,
@@ -1741,6 +1776,7 @@
     color: var(--ds-text-primary);
     font-size: var(--ds-font-md);
     line-height: 1.6;
+    overflow-wrap: anywhere;
   }
 
   .ui-list-item__copy span,
@@ -1748,6 +1784,7 @@
     color: var(--ds-text-muted);
     font-size: var(--ds-font-sm);
     line-height: 1.7;
+    overflow-wrap: anywhere;
   }
 
   .ui-dialog-backdrop {

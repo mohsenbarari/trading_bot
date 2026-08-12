@@ -90,4 +90,23 @@ describe('JalaliDatePicker.vue', () => {
     expect(wrapper.emitted('update:modelValue')?.at(-1)).toEqual([''])
     expect(wrapper.emitted('change')?.at(-1)).toEqual([''])
   })
+
+  it('moves calendar-day focus with arrow keys without emitting a new value', async () => {
+    const wrapper = mount(JalaliDatePicker, {
+      props: {
+        modelValue: '2026-05-30',
+        valueType: 'gregorian',
+        inline: true,
+      },
+      attachTo: document.body,
+    })
+
+    const selectedDay = findDay(wrapper, '۹')
+    selectedDay.element.focus()
+    await selectedDay.trigger('keydown', { key: 'ArrowLeft' })
+
+    expect(document.activeElement).toBe(findDay(wrapper, '۱۰').element)
+    expect(wrapper.emitted('update:modelValue')).toBeUndefined()
+    wrapper.unmount()
+  })
 })

@@ -2235,6 +2235,7 @@ onBeforeUnmount(() => {
               class="ui-v2-workspace-customer-filter-chips"
               v-model="relationFilter"
               label="فیلتر مشتریان"
+              focus-selection-on-keyboard
               :options="relationFilterOptions"
             />
           </div>

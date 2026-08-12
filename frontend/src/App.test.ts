@@ -195,6 +195,7 @@ describe('App.vue', () => {
     expect(wrapper.get('.app-route-scroll').classes()).not.toContain(
       'app-route-scroll--no-daily-nav',
     )
+    expect(wrapper.get('.app-shell').classes()).not.toContain('app-copyable-info')
   })
 
   it('keeps Stage 5 workspaces mounted across canonical query changes and remounts on path changes', async () => {
@@ -458,5 +459,50 @@ describe('App.vue', () => {
 
     expect(wrapper.getComponent(AppDesignSystemScope).vm.$.vnode.key).toBe('v2:/register')
     expect(wrapper.html()).not.toContain('legacy-secret')
+  })
+
+  it('allows informational copy on V2 product routes and keeps protected shells unselectable', async () => {
+    appMocks.isReadyMock.mockResolvedValue()
+
+    const homeWrapper = mountApp()
+    await flushPromises()
+    expect(homeWrapper.get('.app-shell').classes()).toContain('app-copyable-info')
+    homeWrapper.unmount()
+
+    appMocks.route.name = 'account'
+    appMocks.route.path = '/account'
+    appMocks.route.fullPath = '/account'
+    appMocks.route.meta = {
+      uiShellClass: 'standard-authenticated',
+      uiV2Scope: 'route',
+    }
+    const accountWrapper = mountApp()
+    await flushPromises()
+    expect(accountWrapper.get('.app-shell').classes()).toContain('app-copyable-info')
+    accountWrapper.unmount()
+
+    appMocks.route.name = 'admin-messages'
+    appMocks.route.path = '/admin/messages'
+    appMocks.route.fullPath = '/admin/messages'
+    appMocks.route.meta = {
+      uiShellClass: 'standard-authenticated',
+      uiV2Scope: 'section',
+    }
+    const messagesWrapper = mountApp()
+    await flushPromises()
+    expect(messagesWrapper.get('.app-shell').classes()).not.toContain('app-copyable-info')
+    messagesWrapper.unmount()
+
+    appMocks.route.name = 'admin-system'
+    appMocks.route.path = '/admin/system'
+    appMocks.route.fullPath = '/admin/system'
+    appMocks.route.meta = {
+      uiShellClass: 'standard-authenticated',
+      uiV2Scope: 'section',
+    }
+    const systemWrapper = mountApp()
+    await flushPromises()
+    expect(systemWrapper.get('.app-shell').classes()).not.toContain('app-copyable-info')
+    systemWrapper.unmount()
   })
 })

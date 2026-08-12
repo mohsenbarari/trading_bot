@@ -230,6 +230,36 @@ function handleKeydown(event: KeyboardEvent) {
   }
 }
 
+function focusCalendarDay(date: JalaliMoment) {
+  const key = date.format('jYYYY/jMM/jDD')
+  void nextTick(() => {
+    rootRef.value
+      ?.querySelector<HTMLButtonElement>(`.jalali-calendar-day[data-day-key="${key}"]`)
+      ?.focus()
+  })
+}
+
+function handleDayKeydown(event: KeyboardEvent, date: JalaliMoment | null) {
+  if (!date || props.disabled) return
+
+  let delta = 0
+  if (event.key === 'ArrowRight') delta = -1
+  else if (event.key === 'ArrowLeft') delta = 1
+  else if (event.key === 'ArrowUp') delta = -7
+  else if (event.key === 'ArrowDown') delta = 7
+  else return
+
+  event.preventDefault()
+  const nextDate = date.clone().add(delta, 'day')
+  if (
+    nextDate.jMonth() !== visibleMonth.value.jMonth() ||
+    nextDate.jYear() !== visibleMonth.value.jYear()
+  ) {
+    visibleMonth.value = nextDate.clone()
+  }
+  focusCalendarDay(nextDate)
+}
+
 onMounted(() => {
   document.addEventListener('pointerdown', handleDocumentPointerDown)
 })
@@ -298,8 +328,10 @@ watch(isOpen, async (opened) => {
           type="button"
           class="jalali-calendar-day"
           :class="{ 'is-empty': !cell.date, 'is-selected': cell.isSelected, 'is-today': cell.isToday }"
+          :data-day-key="cell.date ? cell.key : undefined"
           :disabled="!cell.date"
           @click="selectDate(cell.date)"
+          @keydown="handleDayKeydown($event, cell.date)"
         >
           {{ cell.label }}
         </button>

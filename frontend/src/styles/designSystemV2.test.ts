@@ -153,6 +153,35 @@ describe('Design System V2 CSS contract', () => {
     }
   })
 
+  it('allows informational text selection inside V2 scope without selecting chrome controls', () => {
+    const rules: import('postcss').Rule[] = []
+    postcss.parse(componentCss).walkRules((rule) => {
+      rules.push(rule)
+    })
+
+    const scopeRule = rules.find(
+      (rule) => rule.selector.includes('.ui-v2-scope') && !rule.selector.includes('app-route-v2-scope'),
+    )
+    const chromeRule = rules.find((rule) => /\[role=['"]tablist['"]\]/.test(rule.selector))
+    const scopeDeclarations = Object.fromEntries(
+      scopeRule?.nodes
+        .filter((node) => node.type === 'decl')
+        .map((node) => [node.prop, node.value]) ?? [],
+    )
+    const chromeDeclarations = Object.fromEntries(
+      chromeRule?.nodes
+        .filter((node) => node.type === 'decl')
+        .map((node) => [node.prop, node.value]) ?? [],
+    )
+
+    expect(scopeDeclarations).toMatchObject({
+      'user-select': 'text',
+    })
+    expect(chromeDeclarations).toMatchObject({
+      'user-select': 'none',
+    })
+  })
+
   it('uses the approved motion durations and collapses them for reduced motion', () => {
     expect(tokenCss).toContain('--ui-v2-motion-micro: 140ms')
     expect(tokenCss).toContain('--ui-v2-motion-state: 180ms')

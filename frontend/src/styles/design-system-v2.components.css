@@ -7,6 +7,14 @@
   color: var(--ui-v2-color-text-primary);
   font-family: var(--ui-v2-font-family);
   font-synthesis: none;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  :where(button, nav, [role='tab'], [role='tablist']) {
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 [data-ui-system='v2'][data-ui-system='v2'][data-ui-system='v2']

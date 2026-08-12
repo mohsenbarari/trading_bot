@@ -2168,6 +2168,7 @@ function handleHistoryPresetChipChange(value: string) {
                 :model-value="historyPresetChipValue"
                 :options="historyPresetChipOptions"
                 label="بازه‌های آماده تاریخچه معاملات"
+                focus-selection-on-keyboard
                 @update:model-value="handleHistoryPresetChipChange"
               />
 

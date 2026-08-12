@@ -73,6 +73,16 @@ const shouldRenderAuthenticatedShell = computed(
 const shouldScopeRoute = computed(
   () => isFirstRouteReady.value && v2Scope.value === UI_V2_SCOPE.ROUTE,
 )
+const informationalCopyExcludedRouteNames = new Set(['admin-messages', 'admin-system'])
+const allowsInformationalCopy = computed(() => {
+  if (!isFirstRouteReady.value) return false
+  if (isProtectedLegacyShell.value) return false
+  if (v2Scope.value === UI_V2_SCOPE.OFF) return false
+  if (typeof route.name === 'string' && informationalCopyExcludedRouteNames.has(route.name)) {
+    return false
+  }
+  return true
+})
 const pathKeyedSectionRouteNames = new Set([
   'operations-customers',
   'operations-customers-detail',
@@ -123,6 +133,7 @@ watch(
 <template>
   <div
     class="app-shell h-full flex flex-col font-sans text-gray-900 antialiased selection:bg-primary-500 selection:text-white overflow-hidden"
+    :class="{ 'app-copyable-info': allowsInformationalCopy }"
   >
     <!-- Global Connecting State -->
     <AppDesignSystemScope
@@ -254,5 +265,12 @@ watch(
 .fade-enter-from,
 .fade-leave-to {
   opacity: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fade-enter-active,
+  .fade-leave-active {
+    transition: none;
+  }
 }
 </style>

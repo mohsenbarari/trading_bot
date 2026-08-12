@@ -1582,6 +1582,7 @@ onBeforeUnmount(() => {
               class="ui-v2-workspace-accountant-filter-chips"
               v-model="relationFilter"
               label="فیلتر حسابداران"
+              focus-selection-on-keyboard
               :options="relationFilterOptions"
             />
           </div>
