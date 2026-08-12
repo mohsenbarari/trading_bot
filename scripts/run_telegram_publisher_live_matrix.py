@@ -1335,6 +1335,10 @@ async def _wait_for_worker_acknowledgement(run: MatrixRun) -> None:
     while True:
         acknowledged_count = await _worker_acknowledgement_progress(run.timelines)
         if acknowledged_count == expected_count:
+            # Overtime tasks start from each offer's durable normal deadline.
+            # This one phase-boundary hydration records those deadlines without
+            # reintroducing a global channel-publication barrier.
+            await _hydrate_timelines(run.timelines)
             _write_audit(run)
             return
         if acknowledged_count > last_acknowledged:

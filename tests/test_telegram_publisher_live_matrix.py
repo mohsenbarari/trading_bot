@@ -15,6 +15,7 @@ from scripts.run_telegram_publisher_live_matrix import (
     _retail_lot_sizes,
     _run_post_response_background_tasks,
     _run_direct_trade,
+    _wait_for_worker_acknowledgement,
     _timeline_terminal_follows_initial_publication,
     build_live_matrix_workload,
 )
@@ -140,6 +141,15 @@ class TelegramPublisherLiveMatrixTests(unittest.TestCase):
         self.assertTrue(_timeline_terminal_follows_initial_publication(timeline))
         timeline.terminal_at = "2026-08-12T00:00:59+00:00"
         self.assertFalse(_timeline_terminal_follows_initial_publication(timeline))
+
+    def test_worker_acknowledgement_requires_the_full_matrix(self):
+        run = MatrixRun(
+            run_id="telegram-live-matrix-unit",
+            started_at="2026-08-12T00:00:00+00:00",
+            expected_expiry_minutes=25,
+        )
+        with self.assertRaisesRegex(RuntimeError, "worker_ack_offer_count_invalid"):
+            asyncio.run(_wait_for_worker_acknowledgement(run))
 
     def test_lifecycle_action_records_only_the_failure_class(self):
         entry = LifecycleActionTimeline(
