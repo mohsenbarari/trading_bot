@@ -2651,25 +2651,8 @@ function handleHistoryPresetChipChange(value: string) {
 
 .project-users-search-input:focus {
   outline: none;
-  border-color: rgba(245, 158, 11, 0.48);
-  box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.16);
-}
-
-.project-users-search-submit {
-  border: 0;
-  border-radius: 14px;
-  min-height: 42px;
-  padding: 0 16px;
-  background: linear-gradient(135deg, #f59e0b, #f97316);
-  color: #fff;
-  font-size: 0.88rem;
-  font-weight: 700;
-  cursor: pointer;
-}
-
-.project-users-search-submit:disabled {
-  cursor: wait;
-  opacity: 0.72;
+  border-color: color-mix(in srgb, var(--ds-primary-500) 48%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ds-primary-500) 16%, transparent);
 }
 
 .project-users-list {
@@ -2995,8 +2978,8 @@ function handleHistoryPresetChipChange(value: string) {
 }
 
 .profile-action-card:hover {
-  border-color: rgba(245, 158, 11, 0.3);
-  background: #fffbeb;
+  border-color: color-mix(in srgb, var(--ds-primary-500) 30%, transparent);
+  background: var(--ds-primary-50);
 }
 
 .profile-action-card:active {
@@ -3054,42 +3037,42 @@ function handleHistoryPresetChipChange(value: string) {
 }
 
 .message-menu-btn {
-  background: linear-gradient(135deg, rgba(239, 246, 255, 0.96), rgba(224, 242, 254, 0.98)) !important;
-  color: #075985 !important;
-  border-color: rgba(14, 165, 233, 0.22) !important;
+  background: linear-gradient(135deg, var(--ds-info-50), color-mix(in srgb, var(--ds-info-50) 98%, var(--ds-info-500))) !important;
+  color: var(--ds-info-700) !important;
+  border-color: color-mix(in srgb, var(--ds-info-500) 22%, transparent) !important;
 }
 
 .message-menu-btn .profile-action-card__icon {
-  background: rgba(14, 165, 233, 0.14);
-  color: #0369a1;
+  background: color-mix(in srgb, var(--ds-info-500) 14%, transparent);
+  color: var(--ds-info-700);
 }
 
 .settings-btn {
-  background: linear-gradient(135deg, #fffbeb, #fef3c7) !important;
-  color: #92400e !important;
-  border-color: rgba(245, 158, 11, 0.2) !important;
+  background: linear-gradient(135deg, var(--ds-primary-50), var(--ds-primary-100)) !important;
+  color: var(--ds-primary-800) !important;
+  border-color: color-mix(in srgb, var(--ds-primary-500) 20%, transparent) !important;
 }
 
 .block-btn {
-  background: #fef2f2 !important;
-  color: #991b1b !important;
-  border-color: #fecaca !important;
+  background: var(--ds-danger-50) !important;
+  color: var(--ds-danger-800) !important;
+  border-color: var(--ds-danger-200) !important;
 }
 
 .block-btn .profile-action-card__icon {
-  background: rgba(239, 68, 68, 0.12);
-  color: #b91c1c;
+  background: color-mix(in srgb, var(--ds-danger-500) 12%, transparent);
+  color: var(--ds-danger-700);
 }
 
 .unblock-btn {
-  background: #f0fdf4 !important;
-  color: #166534 !important;
-  border-color: #bbf7d0 !important;
+  background: var(--ds-success-50) !important;
+  color: var(--ds-success-800) !important;
+  border-color: var(--ds-success-100) !important;
 }
 
 .unblock-btn .profile-action-card__icon {
-  background: rgba(34, 197, 94, 0.14);
-  color: #166534;
+  background: color-mix(in srgb, var(--ds-success-500) 14%, transparent);
+  color: var(--ds-success-800);
 }
 
 .retry-btn {

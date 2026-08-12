@@ -197,6 +197,10 @@ describe('PublicProfile.vue', () => {
     expect(publicProfileSource).toMatch(/\.trade-counterparty \.profile-link-btn\s*\{[\s\S]*?color:\s*var\(--ds-success-700\)/)
     expect(publicProfileSource).toMatch(/background:\s*linear-gradient\(135deg,\s*var\(--ds-telegram-500\),\s*var\(--ds-info-500\) 58%,\s*var\(--ds-primary-500\) 100%\)/)
     expect(publicProfileSource).toMatch(/\.profile-avatar-button--editable\s*\{[\s\S]*?box-shadow:\s*var\(--ds-shadow-lg\)/)
+    expect(publicProfileSource).toMatch(/\.settings-btn\s*\{[\s\S]*?var\(--ds-primary-50\)/)
+    expect(publicProfileSource).toMatch(/\.block-btn\s*\{[\s\S]*?var\(--ds-danger-50\)/)
+    expect(publicProfileSource).toMatch(/\.unblock-btn\s*\{[\s\S]*?var\(--ds-success-50\)/)
+    expect(publicProfileSource).not.toMatch(/\.project-users-search-submit/)
   })
 
   it('sanitizes an over-broad legacy public response for an ordinary peer', async () => {
