@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "stage": 6,
-  "scope": "historical-phase1-phase2-phase3-static-figma-provenance-with-live-editable-phase4-phase5-phase6-phase7-phase8-phase9-phase10-phase11-phase12-phase13-phase14-references",
+  "scope": "historical-phase1-phase2-phase3-static-figma-provenance-with-live-editable-phase4-phase5-phase6-phase7-phase8-phase9-phase10-phase11-phase12-phase13-phase14-phase15-references",
   "status": "pass_with_documented_page_sibling_topology",
   "mutableNarrative": true,
   "historicalStaticAudit": {
@@ -22,7 +22,7 @@
       "id": "321:18",
       "name": "08 — Stage 6 Admin & Profile",
       "directChildCountAtHistoricalAudit": 2,
-      "directChildCountCurrent": 13
+      "directChildCountCurrent": 14
     },
     "canonicalRoot": {
       "id": "321:19",
@@ -112,8 +112,8 @@
     "phase3IsPageSiblingOfRoot32119": true,
     "phase3IsNestedUnderRoot32119": false,
     "conclusion": "Coverage is page-level. Do not call this a single nested root bundle under 321:19.",
-    "phase4To14ParentId": "321:18",
-    "phase4To14ArePageSiblingsOfRoot32119": true
+    "phase4To15ParentId": "321:18",
+    "phase4To15ArePageSiblingsOfRoot32119": true
   },
   "authoritativeScreenshots": [
     {
@@ -166,12 +166,12 @@
       "Sites publication",
       "Stage 6 closure"
     ],
-    "phase4To14FigmaEditsWereExplicitlyAuthorized": true,
-    "phase4To14ReferencesAreLiveEditableNotFrozen": true
+    "phase4To15FigmaEditsWereExplicitlyAuthorized": true,
+    "phase4To15ReferencesAreLiveEditableNotFrozen": true
   },
-  "liveEditablePhase4To14": {
+  "liveEditablePhase4To15": {
     "status": "authoritative_live_design_references_not_local_screenshot_or_hash_freeze",
-    "sourceBoundary": "Phase 4–14 Figma updates were explicitly authorized. These references describe the current editable page and must not be conflated with historicalStaticAudit or authoritativeScreenshots.",
+    "sourceBoundary": "Phase 4–15 Figma updates were explicitly authorized. These references describe the current editable page and must not be conflated with historicalStaticAudit or authoritativeScreenshots.",
     "phase4": {
       "source": {
         "commit": "7ac46a36a2ba968246bd285c357bc362a328cdd2",
@@ -800,6 +800,64 @@
           "block": "Danger",
           "save": "Primary",
           "cancel": "Secondary"
+        }
+      }
+    },
+    "phase15": {
+      "source": {
+        "commit": "e4a234106e132c2b4758f856d54a1836ec7bb9f7",
+        "tree": "5c16e550acb28afdc928161047fb766713fca205"
+      },
+      "section": {
+        "id": "474:1223",
+        "name": "15 — Admin user directory · shared list items · source e4a23410",
+        "width": 2592,
+        "height": 1804
+      },
+      "provenanceLabel": {
+        "id": "474:1224",
+        "visibleText": "Phase 15 · یکپارچگی ظاهر فهرست کاربران · source e4a23410 · دادهٔ synthetic"
+      },
+      "proofFrames": [
+        {
+          "id": "474:1225",
+          "name": "W1 — Admin user directory · shared list items · mobile 390×844",
+          "width": 390,
+          "height": 844
+        },
+        {
+          "id": "474:1251",
+          "name": "W2 — Admin user directory · local search · mobile 390×844",
+          "width": 390,
+          "height": 844
+        }
+      ],
+      "geometry": {
+        "overlaysHidden": true,
+        "w1BackdropVisible": false,
+        "w2BackdropVisible": false,
+        "w2DialogVisible": false
+      },
+      "liveAudit": {
+        "allTextFontFamily": "Vazirmatn",
+        "textNodeCount": 64,
+        "linkedInstanceCount": 10,
+        "sensitiveTextScan": {
+          "urls": 0,
+          "emails": 0,
+          "phoneLike": 0,
+          "rawServerErrorOrReceipt": 0,
+          "accountNameOrMobileInDialog": 0
+        },
+        "linkedInstanceFamilies": [
+          "Header",
+          "Navigation",
+          "Button"
+        ],
+        "adminUserDirectoryChrome": {
+          "rowPrimitive": "ui-list-item",
+          "searchStaysLocal": true,
+          "statusBadge": "ui-status-badge"
         }
       }
     }

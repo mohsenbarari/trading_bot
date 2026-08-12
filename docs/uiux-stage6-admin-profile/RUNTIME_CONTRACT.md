@@ -154,6 +154,15 @@
 | فرم مسدودیت و محدودیت | همان `AppResponsiveDialog` مانده و به confirm تبدیل نشده است؛ ورودی‌ها `AppInput`/`AppSelect` و دکمه‌ها `AppButton` هستند. |
 | mutation | قرارداد Phase 10 و Phase 13 برای receipt، cancel/Escape و copy امن ثابت مانده است. |
 
+## Phase 15 — یکپارچگی ظاهر فهرست کاربران مدیریت
+
+| سطح | قرارداد تحویل‌شده |
+| --- | --- |
+| route فعال | `/admin/users`، همان `UserManager` موجود؛ API، router و query contract تازه‌ای ایجاد نشده است. |
+| ردیف فهرست | هر کاربر با `AppListItem` تعاملی و کلاس قبلی `.user-item` نمایش داده می‌شود؛ ظاهر از `ui-list-item` و نشان `--ds-*` می‌آید. |
+| جستجو | همان فرم session-local مانده است؛ `q` وارد URL/history/storage نمی‌شود. |
+| navigation | انتخاب ردیف همان `user_profile` را emit می‌کند؛ قرارداد Phase 2 حفظ شده است. |
+
 ## مرزهای صریح
 
-این contract تا source تحویل‌شدهٔ Phase 14 در commit `f33d7fce3513386c05083573f93be31f9d1d7219` را توصیف می‌کند. persistenceهای دیگر، protected Messenger internals، Sites، staging، production و closure کلی Stage 6 را authorize یا اثبات نمی‌کند.
+این contract تا source تحویل‌شدهٔ Phase 15 در commit `e4a234106e132c2b4758f856d54a1836ec7bb9f7` را توصیف می‌کند. persistenceهای دیگر، protected Messenger internals، Sites، staging، production و closure کلی Stage 6 را authorize یا اثبات نمی‌کند.

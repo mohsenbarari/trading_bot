@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "stage": 6,
-  "scope": "historical-phase1-phase2-phase3-curated-evidence-with-phase4-phase5-phase6-phase7-phase8-phase9-phase10-phase11-phase12-phase13-phase14-supplemental-receipts",
+  "scope": "historical-phase1-phase2-phase3-curated-evidence-with-phase4-phase5-phase6-phase7-phase8-phase9-phase10-phase11-phase12-phase13-phase14-phase15-supplemental-receipts",
   "status": "curated_scope_evidence_not_full_stage6_freeze",
   "sourceAtCapture": {
     "branch": "condidate/webapp-ui-ux-redesign-v2",
@@ -15,7 +15,7 @@
     "sitesInput": false,
     "sitesProven": false,
     "stagingOrProductionChanged": false,
-    "description": "selectedArtifacts is a curated, reviewable record of delivered Phase 1/2/3 evidence only; supplementalPhase4To14Receipts is metadata-only and non-selected. Neither authorizes deferred Stage 6 work, a full-stage immutable freeze, or Sites publication."
+    "description": "selectedArtifacts is a curated, reviewable record of delivered Phase 1/2/3 evidence only; supplementalPhase4To15Receipts is metadata-only and non-selected. Neither authorizes deferred Stage 6 work, a full-stage immutable freeze, or Sites publication."
   },
   "projectionAlgorithm": "SHA-256 over sorted UTF-8 lines: <repo-relative-path>\\t<byte-count>\\t<file-sha256>\\n. Directory projections cover every regular file below that exact directory.",
   "selectedArtifacts": {
@@ -115,7 +115,7 @@
     "Mutable narrative files, including README, VALIDATION, checkpoint, and route/content/protected manifests",
     "Any Sites project, lock, preview, deployment artifact, staging artifact, or production artifact"
   ],
-  "supplementalPhase4To14Receipts": {
+  "supplementalPhase4To15Receipts": {
     "status": "reviewable_receipts_not_allowlisted_or_frozen",
     "description": "These later receipts are intentionally outside the immutable Phase 1–3 selectedArtifacts projection. They must not be treated as a new aggregate, Sites input, or Stage 6 closure freeze.",
     "phase4": {
@@ -319,6 +319,25 @@
         "bindingFile": "stage6-phase14-admin-user-chrome-source-binding.json",
         "bindingSha256": "616ab1bb5f37db30445dbcf6de0d046ceb83952b2c76aa4b78ed41e38571b93e",
         "harnessSha256": "02c9d1af8f22578045ae9573642ff0a776374357ebd8c6e04bba7f9337352c2f"
+      }
+    },
+    "phase15": {
+      "source": {
+        "commit": "e4a234106e132c2b4758f856d54a1836ec7bb9f7",
+        "tree": "5c16e550acb28afdc928161047fb766713fca205"
+      },
+      "browser": {
+        "runId": "uiux-stage6-phase15-admin-user-directory-20260812T202011978Z",
+        "status": "passed",
+        "promotable": true,
+        "assertionCount": 6,
+        "screenshotCount": 4,
+        "artifactLocation": "local ephemeral receipt; intentionally not selected, copied, or frozen",
+        "metricsFile": "stage6-phase15-admin-user-directory-metrics.json",
+        "metricsSha256": "1ebf36ddfab4575907cf65ed67356affd8b10a902b60cef18d2523de58ba1c7f",
+        "bindingFile": "stage6-phase15-admin-user-directory-source-binding.json",
+        "bindingSha256": "612135acf4959e4deff40c8835e45f0e24a13dbe18525ff68297c350dc483fd7",
+        "harnessSha256": "cb83f0e02028d735d625ee60c5cf93fc1b0e0d4a52bb669958662273a8fa9118"
       }
     }
   }
