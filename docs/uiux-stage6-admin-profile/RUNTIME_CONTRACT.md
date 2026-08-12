@@ -1,4 +1,4 @@
-# Stage 6 Runtime Contract — delivered Phase 1–16
+# Stage 6 Runtime Contract — delivered Phase 1–17
 
 ## اصول غیرقابل‌جایگزین
 
@@ -172,6 +172,15 @@
 | تلاش دوباره | همان هوک `.retry-btn` با `AppButton` secondary؛ بازیابی بدون mutation است. |
 | ویرایش آدرس | همان هوک `.address-edit-trigger` با `AppIconButton` و رنگ `--ds-success-*`؛ قرارداد ذخیره آدرس عوض نشده است. |
 
+## Phase 17 — یکپارچگی ظاهر انتخاب تاریخ سفارشی مدیریت
+
+| سطح | قرارداد تحویل‌شده |
+| --- | --- |
+| route فعال | `/admin/users/:id`، همان `UserProfile` موجود؛ API، router و query contract تازه‌ای ایجاد نشده است. |
+| تاریخ سفارشی محدودیت | همان هوک `.custom-date-trigger` با `AppButton` secondary؛ ظاهر از `ui-button` می‌آید. |
+| تاریخ سفارشی مسدودیت | انتخاب «زمان دلخواه» فقط ورودی تاریخ را نشان می‌دهد و mutation نمی‌فرستد. |
+| Jalali | منطق انتخاب تاریخ و مودال تقویم عوض نشده است. |
+
 ## مرزهای صریح
 
-این contract تا source تحویل‌شدهٔ Phase 16 در commit `208edb374eeaecf6dea50f58ed3f86d7bb3b019a` را توصیف می‌کند. persistenceهای دیگر، protected Messenger internals، Sites، staging، production و closure کلی Stage 6 را authorize یا اثبات نمی‌کند.
+این contract تا source تحویل‌شدهٔ Phase 17 در commit `d0d756fe9a8fe8d359c039f6e9d346f28f292999` را توصیف می‌کند. persistenceهای دیگر، protected Messenger internals، Sites، staging، production و closure کلی Stage 6 را authorize یا اثبات نمی‌کند.

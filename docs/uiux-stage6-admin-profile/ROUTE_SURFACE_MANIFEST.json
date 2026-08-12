@@ -1,14 +1,14 @@
 {
   "schemaVersion": 1,
   "stage": 6,
-  "scope": "admin-profile-workspace-commodities-admin-user-account-security-account-storage-admin-account-status-admin-user-chrome-admin-user-directory-public-profile-chrome-delivered-phase1-phase2-phase3-phase4-phase5-phase6-phase7-phase8-phase9-phase10-phase11-phase12-phase13-phase14-phase15-phase16",
-  "status": "delivered_phase1_phase2_phase3_phase4_phase5_phase6_phase7_phase8_phase9_phase10_phase11_phase12_phase13_phase14_phase15_phase16_broader_stage6_partial_deferred",
+  "scope": "admin-profile-workspace-commodities-admin-user-account-security-account-storage-admin-account-status-admin-user-chrome-admin-user-directory-public-profile-chrome-admin-custom-date-delivered-phase1-phase2-phase3-phase4-phase5-phase6-phase7-phase8-phase9-phase10-phase11-phase12-phase13-phase14-phase15-phase16-phase17",
+  "status": "delivered_phase1_phase2_phase3_phase4_phase5_phase6_phase7_phase8_phase9_phase10_phase11_phase12_phase13_phase14_phase15_phase16_phase17_broader_stage6_partial_deferred",
   "mutableNarrative": true,
   "branch": "condidate/webapp-ui-ux-redesign-v2",
   "implementation": {
-    "commit": "208edb374eeaecf6dea50f58ed3f86d7bb3b019a",
-    "tree": "36ced6afe032e442ac72cc73bdf9e8405a671f94",
-    "parent": "8f44adaea48820a7069162ce1c0e636d6c1749f2"
+    "commit": "d0d756fe9a8fe8d359c039f6e9d346f28f292999",
+    "tree": "8eb80e24681e7753441e1fd6d74e9695d2a3e200",
+    "parent": "172c242ad26a8c0899dd51189792d3cc55a5a6e2"
   },
   "routeContract": {
     "routerPath": "frontend/src/router/index.ts",
@@ -183,7 +183,8 @@
     "adminAccountStatus": "admin-only /admin/users/:id keeps account-status, unblock and remove-limitations confirmation local; deactivate requires HTTP 200 plus inactive status with a valid grace timestamp and null web-lock; cancel/Escape send no request; 403/404/malformed/network retain the dialog and displayed user with fixed safe copy, Escape hint, and no account_name/mobile in the confirmation",
     "adminUserChrome": "existing /admin/users/:id keeps mutation receipts; settings actions use shared ui-action-card chrome and block/limitations remain form dialogs with ui-input/ui-button; no account_name/mobile is added to overlays",
     "adminUserDirectoryChrome": "existing /admin/users keeps session-local search; directory rows use shared ui-list-item chrome and ui-status-badge; navigation still emits user_profile; no confirm conversion",
-    "publicProfileChrome": "existing /users/:id and /profile keep privacy/authority receipts; back and address-edit use shared ui-icon-button chrome; retry uses shared ui-button; class hooks and reduced-motion contracts remain"
+    "publicProfileChrome": "existing /users/:id and /profile keep privacy/authority receipts; back and address-edit use shared ui-icon-button chrome; retry uses shared ui-button; class hooks and reduced-motion contracts remain",
+    "adminCustomDateChrome": "existing /admin/users/:id keeps mutation receipts; custom-date triggers use shared ui-button chrome with previous class hooks; Jalali picker logic is unchanged"
   },
   "phaseReceiptContracts": {
     "phase4": {
@@ -267,6 +268,12 @@
         "profile"
       ],
       "contract": "public-profile remaining chrome reuses the existing /users/:id and /profile routes; back and address-edit use shared ui-icon-button with previous class hooks; retry uses shared ui-button; privacy/authority and address mutation receipts are unchanged"
+    },
+    "phase17": {
+      "routeNames": [
+        "admin-user-profile"
+      ],
+      "contract": "admin custom-date triggers reuse the existing /admin/users/:id route; limitations and block custom-date controls use shared ui-button with previous custom-date-trigger hooks; Jalali picker and mutation receipts are unchanged"
     }
   },
   "browserEvidence": {
@@ -299,7 +306,9 @@
     "phase15RunId": "uiux-stage6-phase15-admin-user-directory-20260812T202011978Z",
     "phase15SourceBindingSha256": "8e93b61ffabf9d357d03cd5a7a55a1b02208d82b8e250dc1a4b7402fcf2667e0",
     "phase16RunId": "uiux-stage6-phase16-public-profile-chrome-20260812T205426458Z",
-    "phase16SourceBindingSha256": "40e4238ea6fa62d065b56859754791dc02c03325c283b6bf514b162b681ecc12"
+    "phase16SourceBindingSha256": "40e4238ea6fa62d065b56859754791dc02c03325c283b6bf514b162b681ecc12",
+    "phase17RunId": "uiux-stage6-phase17-admin-custom-date-20260812T210602968Z",
+    "phase17SourceBindingSha256": "20fdeaac75a5732e783fecbe0bfa2511c615cfdc999b827f81584b8580af45e1"
   },
   "completion": {
     "phase1": "complete_delivered",
@@ -321,7 +330,8 @@
     "phase13": "complete_delivered",
     "phase14": "complete_delivered",
     "phase15": "complete_delivered",
-    "phase16": "complete_delivered"
+    "phase16": "complete_delivered",
+    "phase17": "complete_delivered"
   },
   "claimBoundary": "This manifest describes the delivered route/state boundary only. It does not authorize deferred Stage 6 work, prove a live backend, publish Sites, or change staging/production."
 }

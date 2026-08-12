@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "stage": 6,
-  "scope": "historical-phase1-phase2-phase3-static-figma-provenance-with-live-editable-phase4-phase5-phase6-phase7-phase8-phase9-phase10-phase11-phase12-phase13-phase14-phase15-phase16-references",
+  "scope": "historical-phase1-phase2-phase3-static-figma-provenance-with-live-editable-phase4-phase5-phase6-phase7-phase8-phase9-phase10-phase11-phase12-phase13-phase14-phase15-phase16-phase17-references",
   "status": "pass_with_documented_page_sibling_topology",
   "mutableNarrative": true,
   "historicalStaticAudit": {
@@ -22,7 +22,7 @@
       "id": "321:18",
       "name": "08 — Stage 6 Admin & Profile",
       "directChildCountAtHistoricalAudit": 2,
-      "directChildCountCurrent": 15
+      "directChildCountCurrent": 16
     },
     "canonicalRoot": {
       "id": "321:19",
@@ -112,8 +112,8 @@
     "phase3IsPageSiblingOfRoot32119": true,
     "phase3IsNestedUnderRoot32119": false,
     "conclusion": "Coverage is page-level. Do not call this a single nested root bundle under 321:19.",
-    "phase4To16ParentId": "321:18",
-    "phase4To16ArePageSiblingsOfRoot32119": true
+    "phase4To17ParentId": "321:18",
+    "phase4To17ArePageSiblingsOfRoot32119": true
   },
   "authoritativeScreenshots": [
     {
@@ -166,12 +166,12 @@
       "Sites publication",
       "Stage 6 closure"
     ],
-    "phase4To16FigmaEditsWereExplicitlyAuthorized": true,
-    "phase4To16ReferencesAreLiveEditableNotFrozen": true
+    "phase4To17FigmaEditsWereExplicitlyAuthorized": true,
+    "phase4To17ReferencesAreLiveEditableNotFrozen": true
   },
-  "liveEditablePhase4To16": {
+  "liveEditablePhase4To17": {
     "status": "authoritative_live_design_references_not_local_screenshot_or_hash_freeze",
-    "sourceBoundary": "Phase 4–16 Figma updates were explicitly authorized. These references describe the current editable page and must not be conflated with historicalStaticAudit or authoritativeScreenshots.",
+    "sourceBoundary": "Phase 4–17 Figma updates were explicitly authorized. These references describe the current editable page and must not be conflated with historicalStaticAudit or authoritativeScreenshots.",
     "phase4": {
       "source": {
         "commit": "7ac46a36a2ba968246bd285c357bc362a328cdd2",
@@ -919,6 +919,65 @@
           "backNodeId": "480:1348",
           "addressEditNodeId": "480:1371",
           "retryNodeId": "480:1392"
+        }
+      }
+    },
+    "phase17": {
+      "source": {
+        "commit": "d0d756fe9a8fe8d359c039f6e9d346f28f292999",
+        "tree": "8eb80e24681e7753441e1fd6d74e9695d2a3e200"
+      },
+      "section": {
+        "id": "481:1327",
+        "name": "17 — Admin custom-date triggers · source d0d756fe",
+        "width": 2592,
+        "height": 1804
+      },
+      "provenanceLabel": {
+        "id": "481:1328",
+        "visibleText": "Phase 17 · یکپارچگی ظاهر انتخاب تاریخ سفارشی مدیریت · source d0d756fe · دادهٔ synthetic"
+      },
+      "proofFrames": [
+        {
+          "id": "481:1329",
+          "name": "W1 — Limitations custom-date trigger · shared button · mobile 390×844",
+          "width": 390,
+          "height": 844
+        },
+        {
+          "id": "481:1376",
+          "name": "W2 — Block custom-date trigger · shared button · mobile 390×844",
+          "width": 390,
+          "height": 844
+        }
+      ],
+      "geometry": {
+        "overlaysHidden": false,
+        "w1BackdropVisible": true,
+        "w2BackdropVisible": true,
+        "customDateTriggerIds": [
+          "482:1390",
+          "482:1402"
+        ]
+      },
+      "liveAudit": {
+        "allTextFontFamily": "Vazirmatn",
+        "textNodeCount": 66,
+        "linkedInstanceCount": 14,
+        "sensitiveTextScan": {
+          "urls": 0,
+          "emails": 0,
+          "phoneLike": 0,
+          "rawServerErrorOrReceipt": 0,
+          "accountNameOrMobileInDialog": 0
+        },
+        "linkedInstanceFamilies": [
+          "Button",
+          "Navigation"
+        ],
+        "adminCustomDateChrome": {
+          "triggerPrimitive": "ui-button",
+          "jalaliLogicUnchanged": true
         }
       }
     }
