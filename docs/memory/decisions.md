@@ -2,6 +2,7 @@
 
 Entries are newest first.
 
+- 2026-08-12 | Fresh Iran offers get one bounded post-commit attempt through signed sync; only full ACK marks the outbox delivered, while age/backoff fences and the regular worker recover. Reason: prompt foreign-queue handoff without a second protocol.
 - 2026-08-12 | Canonical Alembic restores the deployed `f9b` merge before `f9c`; `fb1` validates complete coin schema, repairs only all-absent `fa0`, and rejects partial state. Reason: one revision had diverged parents.
 - 2026-08-12 | Live estimator calibration stays in a sidecar, reads conversations read-only and imports legacy state only when empty; dashboard metadata refreshes with estimates and marks activity stale beyond the anchor. Reason: protect inputs/history and align displayed freshness with eligibility.
 - 2026-08-12 | Product coin inference consumes canonical-Toman Market Store data; adapters normalize once. Reason: prevent drift and double conversion.
