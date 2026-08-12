@@ -1,4 +1,4 @@
-# Stage 6 Runtime Contract — delivered Phase 1–18
+# Stage 6 Runtime Contract — delivered Phase 1–19
 
 ## اصول غیرقابل‌جایگزین
 
@@ -189,6 +189,14 @@
 | آواتار | همان هوک `data-test="profile-avatar-trigger"` به‌صورت دکمهٔ specialized با توکن `--ds-*`؛ آپلود confirm نشده است. |
 | لینک طرف معامله | همان هوک `.profile-link-btn` با رنگ `--ds-success-700` حتی روی `.value`؛ navigation فقط `{ id }` است. |
 
+## Phase 19 — یکپارچگی ظاهر کارت اقدام پروفایل عمومی
+
+| سطح | قرارداد تحویل‌شده |
+| --- | --- |
+| route فعال | `/users/:id` و `/profile`، همان `PublicProfile` موجود؛ API، router و query contract تازه‌ای ایجاد نشده است. |
+| کارت اقدام | همان `AppActionCard` با کلاس‌های قبلی و رنگ `--ds-*`؛ تنظیمات همان `settings` را emit می‌کند. |
+| CSS مرده | هوک `.project-users-search-submit` حذف شد چون جستجو از قبل `AppButton` است. |
+
 ## مرزهای صریح
 
-این contract تا source تحویل‌شدهٔ Phase 18 در commit `b3f0fe00d451c6e2dd82b1a9f8c306a88e954953` را توصیف می‌کند. persistenceهای دیگر، protected Messenger internals، Sites، staging، production و closure کلی Stage 6 را authorize یا اثبات نمی‌کند.
+این contract تا source تحویل‌شدهٔ Phase 19 در commit `92e30fef4d414e7144eca995fc12a075c042aa0b` را توصیف می‌کند. persistenceهای دیگر، protected Messenger internals، Sites، staging، production و closure کلی Stage 6 را authorize یا اثبات نمی‌کند.

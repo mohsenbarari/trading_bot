@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "stage": 6,
-  "scope": "historical-phase1-phase2-phase3-curated-evidence-with-phase4-phase5-phase6-phase7-phase8-phase9-phase10-phase11-phase12-phase13-phase14-phase15-phase16-phase17-phase18-supplemental-receipts",
+  "scope": "historical-phase1-phase2-phase3-curated-evidence-with-phase4-phase5-phase6-phase7-phase8-phase9-phase10-phase11-phase12-phase13-phase14-phase15-phase16-phase17-phase18-phase19-supplemental-receipts",
   "status": "curated_scope_evidence_not_full_stage6_freeze",
   "sourceAtCapture": {
     "branch": "condidate/webapp-ui-ux-redesign-v2",
@@ -15,7 +15,7 @@
     "sitesInput": false,
     "sitesProven": false,
     "stagingOrProductionChanged": false,
-    "description": "selectedArtifacts is a curated, reviewable record of delivered Phase 1/2/3 evidence only; supplementalPhase4To18Receipts is metadata-only and non-selected. Neither authorizes deferred Stage 6 work, a full-stage immutable freeze, or Sites publication."
+    "description": "selectedArtifacts is a curated, reviewable record of delivered Phase 1/2/3 evidence only; supplementalPhase4To19Receipts is metadata-only and non-selected. Neither authorizes deferred Stage 6 work, a full-stage immutable freeze, or Sites publication."
   },
   "projectionAlgorithm": "SHA-256 over sorted UTF-8 lines: <repo-relative-path>\\t<byte-count>\\t<file-sha256>\\n. Directory projections cover every regular file below that exact directory.",
   "selectedArtifacts": {
@@ -115,7 +115,7 @@
     "Mutable narrative files, including README, VALIDATION, checkpoint, and route/content/protected manifests",
     "Any Sites project, lock, preview, deployment artifact, staging artifact, or production artifact"
   ],
-  "supplementalPhase4To18Receipts": {
+  "supplementalPhase4To19Receipts": {
     "status": "reviewable_receipts_not_allowlisted_or_frozen",
     "description": "These later receipts are intentionally outside the immutable Phase 1–3 selectedArtifacts projection. They must not be treated as a new aggregate, Sites input, or Stage 6 closure freeze.",
     "phase4": {
@@ -395,6 +395,25 @@
         "bindingFile": "stage6-phase18-public-profile-remaining-chrome-source-binding.json",
         "bindingSha256": "3d6bcb96d673b661bbec9ac0833073e4afed5e286ea1d7d9e8e64396f5043a14",
         "harnessSha256": "1412401f20d1dbaa19579131d1bc15a7dff60441fb8b8a463b30246cf5888eb2"
+      }
+    },
+    "phase19": {
+      "source": {
+        "commit": "92e30fef4d414e7144eca995fc12a075c042aa0b",
+        "tree": "a1b86940a9e1e96cf87af18eb4a57cdd977deece"
+      },
+      "browser": {
+        "runId": "uiux-stage6-phase19-public-profile-action-cards-20260812T212620735Z",
+        "status": "passed",
+        "promotable": true,
+        "assertionCount": 6,
+        "screenshotCount": 4,
+        "artifactLocation": "local ephemeral receipt; intentionally not selected, copied, or frozen",
+        "metricsFile": "stage6-phase19-public-profile-action-cards-metrics.json",
+        "metricsSha256": "7a2f6e6a39cf5681ceb15de288e0160371f6be3d7dfb0afc6bc9c4f45ab5077c",
+        "bindingFile": "stage6-phase19-public-profile-action-cards-source-binding.json",
+        "bindingSha256": "b00a0dee736a03b5e020f9d1aefcfd34361897fa376e4ac940f0a9f9c021610e",
+        "harnessSha256": "3fa192d58cac1b344b1e804f701b21c2548e6eaba84f40b7966ae59f7646f8ee"
       }
     }
   }

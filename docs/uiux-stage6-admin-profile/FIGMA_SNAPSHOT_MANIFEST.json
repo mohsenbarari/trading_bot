@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "stage": 6,
-  "scope": "historical-phase1-phase2-phase3-static-figma-provenance-with-live-editable-phase4-phase5-phase6-phase7-phase8-phase9-phase10-phase11-phase12-phase13-phase14-phase15-phase16-phase17-phase18-references",
+  "scope": "historical-phase1-phase2-phase3-static-figma-provenance-with-live-editable-phase4-phase5-phase6-phase7-phase8-phase9-phase10-phase11-phase12-phase13-phase14-phase15-phase16-phase17-phase18-phase19-references",
   "status": "pass_with_documented_page_sibling_topology",
   "mutableNarrative": true,
   "historicalStaticAudit": {
@@ -22,7 +22,7 @@
       "id": "321:18",
       "name": "08 — Stage 6 Admin & Profile",
       "directChildCountAtHistoricalAudit": 2,
-      "directChildCountCurrent": 17
+      "directChildCountCurrent": 18
     },
     "canonicalRoot": {
       "id": "321:19",
@@ -112,8 +112,8 @@
     "phase3IsPageSiblingOfRoot32119": true,
     "phase3IsNestedUnderRoot32119": false,
     "conclusion": "Coverage is page-level. Do not call this a single nested root bundle under 321:19.",
-    "phase4To18ParentId": "321:18",
-    "phase4To18ArePageSiblingsOfRoot32119": true
+    "phase4To19ParentId": "321:18",
+    "phase4To19ArePageSiblingsOfRoot32119": true
   },
   "authoritativeScreenshots": [
     {
@@ -166,12 +166,12 @@
       "Sites publication",
       "Stage 6 closure"
     ],
-    "phase4To18FigmaEditsWereExplicitlyAuthorized": true,
-    "phase4To18ReferencesAreLiveEditableNotFrozen": true
+    "phase4To19FigmaEditsWereExplicitlyAuthorized": true,
+    "phase4To19ReferencesAreLiveEditableNotFrozen": true
   },
-  "liveEditablePhase4To18": {
+  "liveEditablePhase4To19": {
     "status": "authoritative_live_design_references_not_local_screenshot_or_hash_freeze",
-    "sourceBoundary": "Phase 4–18 Figma updates were explicitly authorized. These references describe the current editable page and must not be conflated with historicalStaticAudit or authoritativeScreenshots.",
+    "sourceBoundary": "Phase 4–19 Figma updates were explicitly authorized. These references describe the current editable page and must not be conflated with historicalStaticAudit or authoritativeScreenshots.",
     "phase4": {
       "source": {
         "commit": "7ac46a36a2ba968246bd285c357bc362a328cdd2",
@@ -1040,6 +1040,64 @@
           "avatarUsesDesignTokens": true,
           "profileLinkUsesSuccess700": true,
           "avatarUploadNotConvertedToConfirm": true
+        }
+      }
+    },
+    "phase19": {
+      "source": {
+        "commit": "92e30fef4d414e7144eca995fc12a075c042aa0b",
+        "tree": "a1b86940a9e1e96cf87af18eb4a57cdd977deece"
+      },
+      "section": {
+        "id": "485:1414",
+        "name": "19 — Public profile action cards · source 92e30fef",
+        "width": 2592,
+        "height": 1804
+      },
+      "provenanceLabel": {
+        "id": "485:1415",
+        "visibleText": "Phase 19 · یکپارچگی ظاهر کارت اقدام پروفایل عمومی · source 92e30fef · دادهٔ synthetic"
+      },
+      "proofFrames": [
+        {
+          "id": "485:1416",
+          "name": "W1 — Public profile own action cards · design tokens · mobile 390×844",
+          "width": 390,
+          "height": 844
+        },
+        {
+          "id": "485:1465",
+          "name": "W2 — Public profile settings action · design tokens · mobile 390×844",
+          "width": 390,
+          "height": 844
+        }
+      ],
+      "geometry": {
+        "overlaysHidden": true,
+        "w1BackdropVisible": false,
+        "w2BackdropVisible": false,
+        "settingsCardNodeId": "485:5226"
+      },
+      "liveAudit": {
+        "allTextFontFamily": "Vazirmatn",
+        "textNodeCount": 70,
+        "linkedInstanceCount": 10,
+        "sensitiveTextScan": {
+          "urls": 0,
+          "emails": 0,
+          "phoneLike": 0,
+          "rawServerErrorOrReceipt": 0,
+          "accountNameOrMobileInDialog": 0
+        },
+        "linkedInstanceFamilies": [
+          "Header",
+          "Navigation",
+          "Button"
+        ],
+        "publicProfileActionCards": {
+          "primitive": "ui-action-card",
+          "usesDesignTokens": true,
+          "settingsNavigatesWithoutMutation": true
         }
       }
     }
