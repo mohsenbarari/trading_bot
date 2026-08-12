@@ -187,6 +187,12 @@ describe('PublicProfile.vue', () => {
     )
   })
 
+  it('renders remaining public-profile chrome with shared icon and button primitives', () => {
+    expect(publicProfileSource).toMatch(/<AppIconButton class="profile-nav-back"/)
+    expect(publicProfileSource).toMatch(/<AppButton class="retry-btn"/)
+    expect(publicProfileSource).toMatch(/<AppIconButton\s+v-if="isOwnProfile"\s+class="address-edit-trigger"/)
+  })
+
   it('sanitizes an over-broad legacy public response for an ordinary peer', async () => {
     const fetchMock = vi.mocked(fetch)
     fetchMock.mockResolvedValueOnce(makeResponse({
@@ -594,6 +600,7 @@ describe('PublicProfile.vue', () => {
     }))
     fetchMock.mockResolvedValueOnce(makeResponse({ is_blocked_by_me: false }))
 
+    expect(wrapper.get('.retry-btn').classes()).toContain('ui-button')
     await wrapper.get('.retry-btn').trigger('click')
     await flushPromises()
 
@@ -1899,6 +1906,7 @@ describe('PublicProfile.vue', () => {
 
     await flushPromises()
 
+    expect(wrapper.get('.address-edit-trigger').classes()).toContain('ui-icon-button')
     await wrapper.get('.address-edit-trigger').trigger('click')
     expect(wrapper.get('.address-edit-textarea').classes()).toContain('ui-textarea')
     await wrapper.get('.address-edit-textarea').setValue('بازار تهران، پلاک ۱۲')
@@ -2894,6 +2902,7 @@ describe('PublicProfile.vue', () => {
     await flushPromises()
 
     expect(wrapper.text()).toContain('دریافت پروفایل ناموفق بود')
+    expect(wrapper.get('.profile-nav-back').classes()).toContain('ui-icon-button')
     await wrapper.get('.profile-nav-back').trigger('click')
     expect(wrapper.emitted('navigate')?.[0]).toEqual(['home'])
   })

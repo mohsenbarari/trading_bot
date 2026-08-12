@@ -26,6 +26,7 @@ import {
   AppErrorState,
   AppFilterChips,
   AppFormField,
+  AppIconButton,
   AppInput,
   AppListItem,
   AppMetricCard,
@@ -1823,7 +1824,9 @@ function handleHistoryPresetChipChange(value: string) {
          </h2>
          <h2 v-else>پروفایل</h2>
       </div>
-      <button class="profile-nav-back" type="button" aria-label="بازگشت" @click="$emit('navigate', 'home')"><ChevronLeft :size="20" /></button>
+      <AppIconButton class="profile-nav-back" label="بازگشت" @click="$emit('navigate', 'home')">
+        <ChevronLeft :size="20" />
+      </AppIconButton>
     </div>
 
     <div v-if="isLoading" class="loading-state-skeleton">
@@ -1839,7 +1842,7 @@ function handleHistoryPresetChipChange(value: string) {
 
     <AppErrorState v-else-if="error" title="دریافت پروفایل انجام نشد" :message="error" class="error-state">
       <template #actions>
-        <button class="retry-btn" type="button" :disabled="isLoading" @click="loadProfile">تلاش دوباره</button>
+        <AppButton class="retry-btn" type="button" variant="secondary" :disabled="isLoading" @click="loadProfile">تلاش دوباره</AppButton>
       </template>
     </AppErrorState>
 
@@ -1895,16 +1898,16 @@ function handleHistoryPresetChipChange(value: string) {
                   <span class="label">آدرس</span>
                   <div v-if="!addressEditing" class="address-display-frame" :class="{ editable: isOwnProfile }">
                     <span class="value address-value">{{ profileData.address }}</span>
-                    <button
+                    <AppIconButton
                       v-if="isOwnProfile"
-                      type="button"
                       class="address-edit-trigger"
-                      aria-label="ویرایش آدرس"
+                      label="ویرایش آدرس"
                       title="ویرایش آدرس"
+                      size="sm"
                       @click.stop="startAddressEdit"
                     >
                       <Pencil :size="16" />
-                    </button>
+                    </AppIconButton>
                   </div>
                 <form v-else class="address-edit-form" @submit.prevent="saveOwnAddress">
                   <AppFormField label="آدرس" :error="addressError || undefined">
@@ -2809,24 +2812,26 @@ function handleHistoryPresetChipChange(value: string) {
   transform: translateY(-50%);
   width: 32px;
   height: 32px;
+  min-width: 32px;
+  min-height: 32px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border: 1px solid rgba(15, 118, 110, 0.18);
+  border: 1px solid var(--ds-success-100);
   border-radius: 999px;
-  background: rgba(240, 253, 250, 0.94);
-  color: #0f766e;
+  background: var(--ds-success-50);
+  color: var(--ds-success-700);
   cursor: pointer;
-  box-shadow: 0 8px 16px rgba(15, 118, 110, 0.08);
+  box-shadow: var(--ds-shadow-sm);
   transition: color 0.18s ease, background 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
 }
 
 .address-edit-trigger:hover,
 .address-edit-trigger:focus-visible {
-  color: #fff;
-  border-color: rgba(15, 118, 110, 0.2);
-  background: #0f766e;
-  box-shadow: 0 10px 20px rgba(15, 118, 110, 0.16);
+  color: var(--ds-bg-card);
+  border-color: var(--ds-success-100);
+  background: var(--ds-success-600);
+  box-shadow: var(--ds-shadow-md);
   outline: none;
 }
 
@@ -3089,14 +3094,6 @@ function handleHistoryPresetChipChange(value: string) {
 
 .retry-btn {
   min-height: 2.75rem;
-  padding: 0.7rem 1rem;
-  border: 1px solid var(--ds-border-light);
-  border-radius: var(--ds-radius-md);
-  background: var(--ds-bg-card);
-  color: var(--ds-text-primary);
-  font: inherit;
-  font-weight: 700;
-  cursor: pointer;
 }
 
 
