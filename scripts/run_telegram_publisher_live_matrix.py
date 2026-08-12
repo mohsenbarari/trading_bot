@@ -1343,6 +1343,7 @@ async def _run_manual_expiry(
     scheduled_at: datetime | None = None,
 ) -> None:
     owner = users[timeline.index - 1]
+    bot_callback_attempt = 0
     entry = _append_lifecycle_action(
         run,
         timeline=timeline,
@@ -1352,13 +1353,15 @@ async def _run_manual_expiry(
     )
 
     async def execute() -> str | None:
+        nonlocal bot_callback_attempt
         error_details: list[str] = []
         if timeline.origin == "bot":
+            bot_callback_attempt += 1
             outcome = await worker.expire_bot_offer_with_dispatcher(
                 harness=harness,
                 owner=owner,
                 offer_id=int(timeline.offer_id),
-                prefix=run.run_id,
+                prefix=f"{run.run_id}-retry-{bot_callback_attempt}",
                 index=timeline.index,
                 error_details=error_details,
             )

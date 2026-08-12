@@ -20,6 +20,7 @@ from scripts.run_telegram_publisher_live_matrix import (
     _retail_lot_sizes,
     _run_post_response_background_tasks,
     _run_direct_trade,
+    _run_manual_expiry,
     _run_overtime_lifecycle,
     _run_overtime_schedule,
     _simulate_private_telegram_send,
@@ -399,6 +400,50 @@ class TelegramPublisherLiveMatrixTests(unittest.TestCase):
         self.assertEqual(calls, 2)
         self.assertEqual(entry.status, "success")
         self.assertEqual(entry.attempt_count, 2)
+
+    def test_bot_manual_expiry_retry_uses_a_fresh_callback_identity(self):
+        class FakeWorker:
+            def __init__(self) -> None:
+                self.prefixes: list[str] = []
+
+            async def expire_bot_offer_with_dispatcher(self, **kwargs):
+                self.prefixes.append(str(kwargs["prefix"]))
+                return "rejected" if len(self.prefixes) == 1 else "success"
+
+        worker = FakeWorker()
+        run = MatrixRun(
+            run_id="telegram-live-matrix-unit",
+            started_at="2026-08-12T00:00:00+00:00",
+            expected_expiry_minutes=25,
+        )
+        timeline = OfferTimeline(
+            index=1,
+            origin="bot",
+            scenario="manual_expiry",
+            expected_terminal_status="expired",
+            scheduled_at="2026-08-12T00:00:00+00:00",
+            offer_id=1,
+        )
+        import scripts.run_telegram_publisher_live_matrix as matrix
+
+        original_delay = matrix.MATRIX_BOT_CALLBACK_RETRY_DELAY_SECONDS
+        matrix.MATRIX_BOT_CALLBACK_RETRY_DELAY_SECONDS = 0
+        try:
+            asyncio.run(
+                _run_manual_expiry(
+                    worker=worker,
+                    harness=object(),
+                    users=[SimpleNamespace(user_id=1)],
+                    run=run,
+                    timeline=timeline,
+                )
+            )
+        finally:
+            matrix.MATRIX_BOT_CALLBACK_RETRY_DELAY_SECONDS = original_delay
+
+        self.assertEqual(len(worker.prefixes), 2)
+        self.assertNotEqual(*worker.prefixes)
+        self.assertEqual(run.lifecycle_actions[0].attempt_count, 2)
 
     def test_background_task_failure_stops_ingress(self):
         async def fail() -> None:

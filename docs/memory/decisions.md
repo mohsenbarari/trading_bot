@@ -2,7 +2,7 @@
 
 Entries are newest first.
 
-- 2026-08-12 | Staging live matrix uses 500 seeded 60/40 Bot/WebApp offers with random 0.8–4-second ingress; private delivery uses a fake transport. Direct WebApp skips post-response tasks, overtime is ordered at ≤20 operations, a blank active bot callback retries ≤2 times, lifecycle task failures abort before another offer, and audit retains redacted failure class/code plus attempts. Reason: reproducible evidence without invalid-run growth, timer pressure, or synthetic private delivery.
+- 2026-08-12 | Staging live matrix uses 500 seeded 60/40 Bot/WebApp offers with random 0.8–4-second ingress; private delivery uses a fake transport. Direct WebApp skips post-response tasks, overtime is ordered at ≤20 operations, a blank active bot callback retries ≤2 times with a fresh callback identity, lifecycle task failures abort before another offer, and audit retains redacted failure class/code plus attempts. Reason: reproducible evidence without invalid-run growth, timer pressure, or synthetic private delivery.
 - 2026-08-11 | Queue-v1 retries only serialization/deadlock aborts before provider dispatch, inside the same bounded unstarted lease. Reason: no external effect occurred; other DB failures fail closed.
 - 2026-08-11 | Queue-v1 retains an unstarted fenced lease only through a short absolute Redis cadence deadline; longer waits are durable retries. Reason: re-claiming causes DB churn, but long leases starve a lane.
 - 2026-08-11 | Publication scans exclude offers with an existing non-final control/publish job. Reason: repeated deduplication delays central ingress and can age queued offers before worker admission.
