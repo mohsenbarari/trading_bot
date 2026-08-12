@@ -2,7 +2,7 @@
 
 تاریخ آغاز: ۲۰۲۶-۰۸-۱۱
 
-وضعیت: **`stage6_phase1_phase2_phase3_phase4_phase5_phase6_delivered_broader_roadmap_partial_deferred`**
+وضعیت: **`stage6_phase1_phase2_phase3_phase4_phase5_phase6_phase7_delivered_broader_roadmap_partial_deferred`**
 
 شاخه: `condidate/webapp-ui-ux-redesign-v2`
 
@@ -22,7 +22,7 @@ Stage 6 به‌صورت route-scoped، rollback-safe و با گیت مستقل �
 4. Figma editable canonical با file key `z8jgJxST4O2APzWnlyP9gv`؛
 5. کد و contractهای backend فعلی، برای authority، permission و outcome واقعی.
 
-صفحهٔ Figma این Stage برابر `08 — Stage 6 Admin & Profile` (`321:18`) است. root (`321:19`) Phase 1 و Phase 2 را دارد و sectionهای Phase 3 (`381:318`)، Phase 4 (`398:504`)، Phase 5 (`413:571`) و Phase 6 (`422:636`) sibling همان page هستند. این topology page-level صریحاً افشا می‌شود: هیچ board تأییدشدهٔ `0B-4`، `0B-5` یا Stage 5 بازنویسی نشده و evidence را نباید یک root-bundle nested واحد نامید.
+صفحهٔ Figma این Stage برابر `08 — Stage 6 Admin & Profile` (`321:18`) است. root (`321:19`) Phase 1 و Phase 2 را دارد و sectionهای Phase 3 (`381:318`)، Phase 4 (`398:504`)، Phase 5 (`413:571`)، Phase 6 (`422:636`) و Phase 7 (`442:701`) sibling همان page هستند. این topology page-level صریحاً افشا می‌شود: هیچ board تأییدشدهٔ `0B-4`، `0B-5` یا Stage 5 بازنویسی نشده و evidence را نباید یک root-bundle nested واحد نامید.
 
 ## ۳. Phase 1 — ورودی مدیریت
 
@@ -37,12 +37,12 @@ Stage 6 به‌صورت route-scoped، rollback-safe و با گیت مستقل �
 
 فایل‌های مجاز این slice فقط `frontend/src/components/AdminPanel.vue`، تست مستقیم آن و در صورت نیاز expectation محدود `AdminView.test.ts` هستند. تغییر child workflow، API، router، route guard، permission یا backend در Phase 1 مجاز نیست.
 
-## ۴. deferred خارج از Phase 1/2/3/4/5/6 تحویل‌شده
+## ۴. deferred خارج از Phase 1/2/3/4/5/6/7 تحویل‌شده
 
 موارد زیر sliceهای مستقل و گیت‌دار بعدی‌اند:
 
 - commodity feedback persistence؛
-- dialogهای sensitive خارج از PublicProfile block/unblock و workspace deletion؛
+- dialogهای sensitive خارج از PublicProfile block/unblock، workspace deletion و پایان نشست workspace؛
 - هر تغییر در Admin Messages و System Settings غیرمحافظت‌شده.
 
 `/market`، `/chat`، `/share-receive`، `/admin/channels`، interiorهای market/messenger در `AdminMessagesView` و `TradingSettings` و Home Market همچنان protected هستند. هیچ shared CSS/token بدون guard و proof نبود drift تغییر نمی‌کند.
@@ -74,7 +74,7 @@ rollback به revert commit مستقل Phase 1 محدود است؛ پس از rol
 
 ## ۷. Figma، evidence و Sites
 
-Figma منبع اصلی طراحی است. Phase 1 boundary card و proof موبایل ورودی مدیریت، Phase 2 directory/desktop/recovery، Phase 3 privacy/authority، Phase 4 invitation management، Phase 5 block confirmation و Phase 6 workspace account deletion را ثبت می‌کند؛ pending-attention canonical فقط در state دارای دادهٔ واقعی باقی می‌ماند و به runtime نسبت داده نمی‌شود. Phaseهای 3 تا 6 siblingهای page-level root هستند؛ این caveat مانع از ادعای nested bundle می‌شود.
+Figma منبع اصلی طراحی است. Phase 1 boundary card و proof موبایل ورودی مدیریت، Phase 2 directory/desktop/recovery، Phase 3 privacy/authority، Phase 4 invitation management، Phase 5 block confirmation، Phase 6 workspace account deletion و Phase 7 session-termination safe recovery را ثبت می‌کند؛ pending-attention canonical فقط در state دارای دادهٔ واقعی باقی می‌ماند و به runtime نسبت داده نمی‌شود. Phaseهای 3 تا 7 siblingهای page-level root هستند؛ این caveat مانع از ادعای nested bundle می‌شود.
 
 Sites در Stage 6 هنوز هیچ mutation، repo/project، preview یا deployment ندارد. اگر و فقط اگر scope گسترده‌تر مجاز و closure جداگانه آغاز شود، ابتدا inputs immutable freeze می‌شوند و سپس یک repo/project تازه و private owner-only برای evidence ساخته می‌شود. آن preview product deployment نیست و هیچ staging/production را تغییر نمی‌دهد.
 
@@ -186,6 +186,20 @@ browser receipt promotable در run `uiux-stage6-phase6-account-delete-20260812T
 
 Figma Phase 6 در page `321:18`، sibling section `422:636` ثبت شد: W1=`422:638` body-portal confirmation و W2=`422:661` safe-error recovery، هر دو `390×844`. label `422:637` دقیقاً `source 06579e2b · دادهٔ synthetic` دارد؛ backdrop `422:653` تمام viewport و dialog `422:654` کاملاً در viewport است. audit live Vazirmatn، linked Button/Header/Nav، bindingهای input/acknowledgement و نبود URL/email/phone/raw-detail را تأیید کرد.
 
-## ۱۵. مرز closure
+## ۱۵. رسید Phase 7 — پایان امن یک نشست workspace
 
-Phase 1/2/3/4/5/6 تحویل‌شده‌اند، اما broader roadmap Stage 6 partial/deferred است و **`stage6CompleteAuthority=false`**. هیچ `EVIDENCE_MANIFEST`، local freeze، Sites project/preview، product deployment، staging deployment یا production deployment ساخته یا تغییر داده نشده است. این checkpoint مجوز انجام deferredها یا ادعای complete Stage 6 نیست.
+Phase 7 در commit `24a8d0f500e798c70eb94764045ee9ed90151b99` (tree `c611f9612ce45ac698d5a76589b5a2474e0860e5`) تحویل شد و فقط چهار فایل مستقیم Customer/Accountant workspace و testهایشان را تغییر می‌دهد.
+
+- این slice فقط مسیرهای زندهٔ `/operations/customers/:relationId` و `/operations/accountants/:relationId` را سخت می‌کند؛ modalهای compatibility مالک runtime نیستند و تغییر داده نشدند.
+- cancel یا Escape هیچ DELETE نمی‌فرستد. فقط receipt با `terminated_session_id` دقیقاً برابر نشست انتخاب‌شده همان نشست را از state محلی حذف می‌کند و در صورت receipt معتبر، نشست باقی‌مانده را primary می‌سازد.
+- 400/403/404، network یا receipt malformed، dialog، route، relation و اطلاعات نمایش‌داده‌شدهٔ نشست را حفظ می‌کنند؛ فقط پیام ثابت امن نشان داده می‌شود و `detail`/`message` یا شناسهٔ raw سرور نمایش یا serialize نمی‌شود.
+
+گیت‌های source: serial Customer/Accountant workspace برابر **80/80** test pass، `vue-tsc --noEmit`، `npm run guard:ui` و `git diff --check` pass هستند.
+
+browser receipt promotable در run `uiux-stage6-session-browser-20260812T121245634Z` روی source clean بالا با **18/18** assertion و **16** screenshot pass شد. Customer و Accountant را برای 360 focus/cancel، پنج failure mode در 390، و receipt صحیح در 390/1440 پوشش می‌دهد. source binding SHA-256 `6fde9fb1b0f53fd2820c932b14165a7a9d98fd35fb3b7719aa41f61602f62354` برای 393 فایل، metrics `e7a558edd7c4d55972fe9ee279d8925cf02f999aa26d9186d0252035f932b28d` و binding `24022d531dfba3349f729f9945debf2eb0968ea315a584306b93b74f1023fd38` است؛ harness SHA-256 `e2a6d6781f9024b02fa67fd61cafd192af8a4387d0cfa758a9fb60e48df50402`. diagnostic غیرمنتظره صفر است؛ فقط شش HTTP fixture، دو network console/failure fixture و 17 loader خارجی locally intercepted به‌طور صریح classified هستند.
+
+Figma Phase 7 در page `321:18`، sibling section `442:701` ثبت شد: W1=`442:703` confirmation و W2=`442:733` safe recovery، هر دو `390×844`. dialog=`442:719` در `(16,278,358,288)` کامل داخل viewport است. label شامل `source 24a8d0f5 · دادهٔ synthetic` است؛ audit Vazirmatn، Button/Header/Nav linked، CTA secondary/primary درست و نبود phone/email/URL/raw error را تأیید کرد. این reference live/editable است و freeze یا screenshot hash مستقل نیست.
+
+## ۱۶. مرز closure
+
+Phase 1/2/3/4/5/6/7 تحویل‌شده‌اند، اما broader roadmap Stage 6 partial/deferred است و **`stage6CompleteAuthority=false`**. هیچ `EVIDENCE_MANIFEST`، local freeze، Sites project/preview، product deployment، staging deployment یا production deployment ساخته یا تغییر داده نشده است. این checkpoint مجوز انجام deferredها یا ادعای complete Stage 6 نیست.

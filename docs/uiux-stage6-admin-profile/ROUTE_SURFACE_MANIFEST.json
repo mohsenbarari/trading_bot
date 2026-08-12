@@ -1,14 +1,14 @@
 {
   "schemaVersion": 1,
   "stage": 6,
-  "scope": "admin-profile-workspace-delivered-phase1-phase2-phase3-phase4-phase5-phase6",
-  "status": "delivered_phase1_phase2_phase3_phase4_phase5_phase6_broader_stage6_partial_deferred",
+  "scope": "admin-profile-workspace-delivered-phase1-phase2-phase3-phase4-phase5-phase6-phase7",
+  "status": "delivered_phase1_phase2_phase3_phase4_phase5_phase6_phase7_broader_stage6_partial_deferred",
   "mutableNarrative": true,
   "branch": "condidate/webapp-ui-ux-redesign-v2",
   "implementation": {
-    "commit": "06579e2bbccbb2b8a33bd9a92bc55a851e8a2329",
-    "tree": "bcdb89069aec2619cc8e7e7da6c0126bf9b22986",
-    "parent": "7ff647f370ab83c0893403f6ec6b8362140a0939"
+    "commit": "24a8d0f500e798c70eb94764045ee9ed90151b99",
+    "tree": "c611f9612ce45ac698d5a76589b5a2474e0860e5",
+    "parent": "5a1ac968e07f94442174b1e39e96b97a2f7d620e"
   },
   "routeContract": {
     "routerPath": "frontend/src/router/index.ts",
@@ -100,8 +100,8 @@
       "requiresOwnerAccess": true,
       "shellClass": "standard-authenticated",
       "v2Scope": "section",
-      "purpose": "customer workspace account-deletion confirmation and safe recovery",
-      "queryPolicy": "no new deletion query contract; typed confirmation, acknowledgement and receipt state stay local"
+      "purpose": "customer workspace destructive confirmation and receipt-safe recovery",
+      "queryPolicy": "no new deletion or session-termination query contract; confirmation and receipt state stay local"
     },
     {
       "phase": 6,
@@ -112,8 +112,8 @@
       "requiresOwnerAccess": true,
       "shellClass": "standard-authenticated",
       "v2Scope": "section",
-      "purpose": "accountant workspace account-deletion confirmation and safe recovery",
-      "queryPolicy": "no new deletion query contract; typed confirmation, acknowledgement and receipt state stay local"
+      "purpose": "accountant workspace destructive confirmation and receipt-safe recovery",
+      "queryPolicy": "no new deletion or session-termination query contract; confirmation and receipt state stay local"
     }
   ],
   "stateAndPrivacy": {
@@ -137,7 +137,8 @@
     "queryOnlyAdminListDetailTransition": "shared root and scroll owner; no remount race",
     "invitationBearer": "copy-only/in-memory; never DOM URL history hash or storage",
     "publicProfileBlockReceipt": "only JSON object success:true flips local blocked state; failures retain state with fixed safe receipt",
-    "workspaceAccountDeletion": "body-teleported V2 portal; typed name plus acknowledgement; exact expected_action=delete-account; only same-relation deleted receipt navigates; failures retain route/relation with fixed safe message"
+    "workspaceAccountDeletion": "body-teleported V2 portal; typed name plus acknowledgement; exact expected_action=delete-account; only same-relation deleted receipt navigates; failures retain route/relation with fixed safe message",
+    "workspaceSessionTermination": "existing body-teleported confirmation; cancel/Escape does not DELETE; only exact terminated_session_id changes local sessions; 400/403/404/malformed/network retain route/relation/displayed session with fixed safe copy"
   },
   "phaseReceiptContracts": {
     "phase4": {
@@ -158,6 +159,13 @@
         "operations-accountants-detail"
       ],
       "contract": "body-teleported V2 account-deletion portal requires typed confirmation plus acknowledgement; expected_action is delete-account; only same-relation deleted receipt navigates"
+    },
+    "phase7": {
+      "routeNames": [
+        "operations-customers-detail",
+        "operations-accountants-detail"
+      ],
+      "contract": "reuses the existing workspace confirmation dialog for one session; only exact terminated_session_id applies local removal/promotion, while any failure retains dialog, route, relation and displayed session with fixed safe copy"
     }
   },
   "browserEvidence": {
@@ -170,6 +178,8 @@
     "phase5RunId": "uiux-stage6-phase5-public-block-20260812T062238392Z",
     "phase6RunId": "uiux-stage6-phase6-account-delete-20260812T075056249Z",
     "phase6SourceBindingSha256": "fcf977ab478b6c2c38fe4f719e90b2302f48039774b72e9fcb9da8a8aa1eb63e",
+    "phase7RunId": "uiux-stage6-session-browser-20260812T121245634Z",
+    "phase7SourceBindingSha256": "6fde9fb1b0f53fd2820c932b14165a7a9d98fd35fb3b7719aa41f61602f62354",
     "prePostSourceGitHarnessEnvironmentIdentical": true
   },
   "completion": {
@@ -179,6 +189,7 @@
     "phase4": "complete_delivered",
     "phase5": "complete_delivered",
     "phase6": "complete_delivered",
+    "phase7": "complete_delivered",
     "broaderStage6": "partial_deferred",
     "stage6CompleteAuthority": false,
     "sitesStarted": false,

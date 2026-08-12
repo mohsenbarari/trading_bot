@@ -20,5 +20,7 @@
 | public block/unblock confirmation | جلوگیری از mutation ناخواسته | نگه‌داری | فقط `success:true` state را flip می‌کند؛ failure raw payload ندارد. |
 | workspace account deletion | حذف حساب فقط پس از تصمیم آگاهانه | نگه‌داری، double-confirm | نام نمایش‌داده‌شده + acknowledgement؛ receipt همان relation و `deleted` تنها مسیر navigation است. |
 | workspace deletion error | بازیابی امن بدون پنهان‌کردن context | نگه‌داری | 400/403/404/malformed/network relation و route را نگه می‌دارند؛ فقط پیام ثابت امن نشان می‌دهند. |
+| پایان یک نشست workspace | قطع دسترسی همان نشست بدون حذف رابطه یا نشست‌های دیگر | نگه‌داری، receipt-bound | فقط `terminated_session_id` دقیقاً برابر نشست انتخابی state محلی را تغییر می‌دهد. |
+| خطای پایان نشست workspace | recovery قابل بازبینی پس از خطا یا receipt نامعتبر | نگه‌داری | dialog، route، relation و اطلاعات نمایش‌داده‌شدهٔ نشست ثابت می‌مانند؛ raw server detail نمایش داده نمی‌شود. |
 
 هر محتوای جدید باید پیش از افزوده‌شدن، یک تصمیم، عمل، state یا risk-prevention مشخص داشته باشد و projection/authority آن را backend تأیید کند.

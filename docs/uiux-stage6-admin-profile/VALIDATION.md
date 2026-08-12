@@ -1,4 +1,4 @@
-# Validation — Stage 6 delivered Phase 1–6 scope
+# Validation — Stage 6 delivered Phase 1–7 scope
 
 ## Historical Phase 1–3 source binding
 
@@ -45,7 +45,7 @@ post-fix read-only audit: `assets/figma/final-provenance-20260811T204635Z/stage6
 - پنج render از page/root/Phase 1/2/3 پس از اصلاح بازبینی شده‌اند؛ clipping/overlap label دیده نشد.
 - Phase 3 sibling صفحهٔ root `321:19` است، نه child آن؛ این disclosure است و ادعای یک bundle nested واحد مجاز نیست.
 
-جزئیات ID/hash در `FIGMA_SNAPSHOT_MANIFEST.json` ثبت شده است؛ همان manifest، referenceهای live/editable Phase 4–6 را بدون ادعای screenshot hash/freeze جدید ثبت می‌کند.
+جزئیات ID/hash در `FIGMA_SNAPSHOT_MANIFEST.json` ثبت شده است؛ همان manifest، referenceهای live/editable Phase 4–7 را بدون ادعای screenshot hash/freeze جدید ثبت می‌کند.
 
 ## Phase 4 و Phase 5 — supplemental receipts، نه freeze
 
@@ -71,6 +71,22 @@ post-fix read-only audit: `assets/figma/final-provenance-20260811T204635Z/stage6
 - synthetic browser matrix Customer/Accountant را در 360، 390 و 1440 پوشش می‌دهد: portal full viewport، focus trap، Escape/cancel بدون DELETE، API با `expected_action=delete-account`، receipt صحیح `id/status=deleted`، و recoveryهای 400/403/404/malformed/network با dialog/relation/route پایدار و پیام ثابت امن.
 - diagnostics غیرمنتظره صفر است. فقط شش HTTP 400/403/404 و دو network-failure fixture دقیقاً برای DELETE synthetic expected/classified هستند؛ 17 loader خارجی قبل از transport محلی intercepted شده‌اند.
 - Figma live evidence در page `321:18`، sibling section `422:636` ثبت شد: W1=`422:638` و W2=`422:661`، هر دو `390×844`. backdrop=`422:653` دقیقاً `390×844` است و dialog=`422:654` در `(16,74,358,696)` کاملاً داخل viewport می‌ماند. typography Vazirmatn و input/acknowledgement variable-bound هستند؛ label قابل‌دیدن `422:637` شامل `source 06579e2b · دادهٔ synthetic` است و audit URL/email/phone/raw-server-detail نیافت.
+
+## Phase 7 — پایان امن یک نشست workspace
+
+| field | value |
+| --- | --- |
+| source commit | `24a8d0f500e798c70eb94764045ee9ed90151b99` |
+| source tree | `c611f9612ce45ac698d5a76589b5a2474e0860e5` |
+| parent | `5a1ac968e07f94442174b1e39e96b97a2f7d620e` |
+| source binding | `6fde9fb1b0f53fd2820c932b14165a7a9d98fd35fb3b7719aa41f61602f62354` (393 files) |
+
+- Customer/Accountant workspace serial suite: **80/80** pass؛ `vue-tsc --noEmit`، `npm run guard:ui` و `git diff --check`: pass.
+- browser receipt: `uiux-stage6-session-browser-20260812T121245634Z`، `passed`/`promotable=true`، **18/18** assertion و **16** screenshot. metrics SHA-256 `e7a558edd7c4d55972fe9ee279d8925cf02f999aa26d9186d0252035f932b28d`؛ binding SHA-256 `24022d531dfba3349f729f9945debf2eb0968ea315a584306b93b74f1023fd38`؛ harness SHA-256 `e2a6d6781f9024b02fa67fd61cafd192af8a4387d0cfa758a9fb60e48df50402`.
+- matrix synthetic Customer/Accountant را در 360/390/1440 برای focus-trap، Escape/cancel بدون DELETE، receipt صحیح، و 400/403/404/malformed/network با dialog/route/relation/session ثابت و بدون raw payload پوشش می‌دهد. diagnostics غیرمنتظره صفر است؛ 6 HTTP fixture، 2 network console/failure fixture و 17 loader خارجی locally intercepted صریحاً expected/classified هستند.
+- Figma live reference در page `321:18`، sibling section `442:701` است: W1=`442:703` و W2=`442:733`، هر دو `390×844`. dialog=`442:719` در `(16,278,358,288)` داخل viewport است؛ label `442:702` شامل `source 24a8d0f5 · دادهٔ synthetic` است. audit همهٔ فونت‌ها را Vazirmatn، CTAهای open/cancel را Secondary و CTA تأیید را Primary، و scan phone/email/URL/raw-error را clean ثبت کرد.
+
+این receipt محلی، mutable و supplemental است؛ evidence artifactهای آن عمداً به `selectedArtifacts` تاریخی Phase 1–3 افزوده یا freeze نشده‌اند.
 
 ## Closure boundary
 

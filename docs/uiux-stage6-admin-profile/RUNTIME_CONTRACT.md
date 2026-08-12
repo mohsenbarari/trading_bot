@@ -1,4 +1,4 @@
-# Stage 6 Runtime Contract — delivered Phase 1–6
+# Stage 6 Runtime Contract — delivered Phase 1–7
 
 ## اصول غیرقابل‌جایگزین
 
@@ -77,6 +77,15 @@
 | receipt | فقط receipt همان relation با `status: deleted` navigation/local reconciliation مجاز را فعال می‌کند. |
 | recovery | 400/403/404، malformed یا network dialog/relation/route را نگه می‌دارند و فقط متن امن ثابت نمایش می‌دهند؛ raw server detail/message وارد UI نمی‌شود. |
 
+## Phase 7 — پایان امن یک نشست workspace
+
+| سطح | قرارداد تحویل‌شده |
+| --- | --- |
+| route فعال | همان `/operations/customers/:relationId` و `/operations/accountants/:relationId`؛ API و route contract جدیدی ایجاد نشده است. |
+| تأیید | `AppConfirmDialog` body-teleported موجود، trap-focus، Escape، restore-focus و scroll-lock را حفظ می‌کند؛ cancel یا Escape هیچ DELETE نمی‌فرستد. |
+| receipt | فقط `terminated_session_id` دقیقاً برابر نشست انتخابی، حذف همان نشست و promotion مجاز نشست باقی‌مانده را فعال می‌کند. |
+| recovery | 400/403/404، malformed یا network dialog، route، relation و اطلاعات نمایش‌داده‌شدهٔ نشست را حفظ می‌کنند و فقط پیام ثابت امن نشان می‌دهند؛ `detail`/`message` خام سرور وارد UI، URL، history یا storage نمی‌شود. |
+
 ## مرزهای صریح
 
-این contract تا source تحویل‌شدهٔ Phase 6 در commit `06579e2bbccbb2b8a33bd9a92bc55a851e8a2329` را توصیف می‌کند. persistenceهای دیگر، protected Messenger internals، Sites، staging، production و closure کلی Stage 6 را authorize یا اثبات نمی‌کند.
+این contract تا source تحویل‌شدهٔ Phase 7 در commit `24a8d0f500e798c70eb94764045ee9ed90151b99` را توصیف می‌کند. persistenceهای دیگر، protected Messenger internals، Sites، staging، production و closure کلی Stage 6 را authorize یا اثبات نمی‌کند.
