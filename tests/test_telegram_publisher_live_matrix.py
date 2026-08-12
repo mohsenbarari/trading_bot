@@ -5,7 +5,8 @@ from types import SimpleNamespace
 
 from scripts.run_telegram_publisher_live_matrix import (
     MATRIX_BACKGROUND_TASKS_MAX_WAIT_SECONDS,
-    MATRIX_INGRESS_INTERVAL_SECONDS,
+    MATRIX_INGRESS_MAX_INTERVAL_SECONDS,
+    MATRIX_INGRESS_MIN_INTERVAL_SECONDS,
     MatrixRun,
     OfferTimeline,
     LifecycleActionTimeline,
@@ -25,57 +26,79 @@ from scripts.run_telegram_publisher_live_matrix import (
 
 
 class TelegramPublisherLiveMatrixTests(unittest.TestCase):
-    def test_builds_exact_source_ratio_and_interaction_mix(self):
+    def test_builds_exact_randomized_source_ratio_and_interaction_mix(self):
         workload = build_live_matrix_workload(
-            total_offers=1000,
-            bot_offers=600,
-            webapp_offers=400,
+            total_offers=500,
+            bot_offers=300,
+            webapp_offers=200,
             interaction_count=10,
-            ingress_interval_seconds=MATRIX_INGRESS_INTERVAL_SECONDS,
+            ingress_min_interval_seconds=MATRIX_INGRESS_MIN_INTERVAL_SECONDS,
+            ingress_max_interval_seconds=MATRIX_INGRESS_MAX_INTERVAL_SECONDS,
+            random_seed=43,
         )
 
-        self.assertEqual(len(workload.origins), 1000)
-        self.assertEqual(workload.origins.count("bot"), 600)
-        self.assertEqual(workload.origins.count("webapp"), 400)
-        self.assertEqual(workload.origins[:10], ("bot",) * 6 + ("webapp",) * 4)
+        self.assertEqual(len(workload.origins), 500)
+        self.assertEqual(workload.origins.count("bot"), 300)
+        self.assertEqual(workload.origins.count("webapp"), 200)
         self.assertEqual(
             Counter(workload.scenarios),
             {
-                "direct_wholesale_trade": 100,
-                "direct_retail_lot_trade": 100,
-                "overtime_approved_trade": 30,
-                "overtime_owner_rejected": 30,
-                "overtime_decision_timeout": 240,
-                "manual_expiry": 100,
-                "natural_expiry": 400,
+                "direct_wholesale_trade": 50,
+                "direct_retail_lot_trade": 50,
+                "overtime_approved_trade": 15,
+                "overtime_owner_rejected": 15,
+                "overtime_decision_timeout": 120,
+                "manual_expiry": 50,
+                "natural_expiry": 200,
             },
         )
-        for start, stop in (
-            (0, 100),
-            (100, 200),
-            (200, 230),
-            (230, 260),
-            (260, 500),
-            (500, 600),
-            (600, 1000),
-        ):
-            self.assertEqual(workload.origins[start:stop].count("bot"), (stop - start) * 3 // 5)
-            self.assertEqual(workload.origins[start:stop].count("webapp"), (stop - start) * 2 // 5)
-        self.assertEqual(workload.interaction_origins, ("bot",) * 6 + ("webapp",) * 4)
+        for scenario, count in Counter(workload.scenarios).items():
+            origins = [
+                origin
+                for origin, candidate in zip(workload.origins, workload.scenarios, strict=True)
+                if candidate == scenario
+            ]
+            self.assertEqual(len(origins), count)
+            self.assertEqual(origins.count("bot"), count * 3 // 5)
+            self.assertEqual(origins.count("webapp"), count * 2 // 5)
+        self.assertEqual(workload.interaction_origins.count("bot"), 6)
+        self.assertEqual(workload.interaction_origins.count("webapp"), 4)
         self.assertEqual(len(workload.interaction_offsets_seconds), 10)
         self.assertEqual(
             tuple(sorted(workload.interaction_offsets_seconds)),
             workload.interaction_offsets_seconds,
         )
+        self.assertEqual(len(workload.management_message_offsets_seconds), 5)
+        self.assertEqual(
+            tuple(sorted(workload.management_message_offsets_seconds)),
+            workload.management_message_offsets_seconds,
+        )
+        ingress_gaps = [
+            current - previous
+            for previous, current in zip(
+                workload.ingress_offsets_seconds,
+                workload.ingress_offsets_seconds[1:],
+            )
+        ]
+        self.assertEqual(len(ingress_gaps), 499)
+        self.assertTrue(
+            all(
+                MATRIX_INGRESS_MIN_INTERVAL_SECONDS <= gap <= MATRIX_INGRESS_MAX_INTERVAL_SECONDS
+                for gap in ingress_gaps
+            )
+        )
+        self.assertEqual(workload.random_seed, 43)
 
-    def test_rejects_any_non_two_per_second_rate(self):
-        with self.assertRaisesRegex(RuntimeError, "two_per_second"):
+    def test_rejects_any_non_approved_random_ingress_range(self):
+        with self.assertRaisesRegex(RuntimeError, "random_0_8_to_4_seconds"):
             build_live_matrix_workload(
-                total_offers=1000,
-                bot_offers=600,
-                webapp_offers=400,
+                total_offers=500,
+                bot_offers=300,
+                webapp_offers=200,
                 interaction_count=10,
-                ingress_interval_seconds=0.51,
+                ingress_min_interval_seconds=0.8,
+                ingress_max_interval_seconds=3.99,
+                random_seed=43,
             )
 
     def test_ignores_only_unclaimable_legacy_private_repeat_jobs(self):
@@ -112,13 +135,13 @@ class TelegramPublisherLiveMatrixTests(unittest.TestCase):
     def test_initial_publication_requires_all_posts_before_any_unpublished_expiry(self):
         self.assertFalse(
             _initial_publication_complete(
-                posted_count=999,
+                posted_count=499,
                 expired_before_initial_publication_count=0,
             )
         )
         self.assertTrue(
             _initial_publication_complete(
-                posted_count=1000,
+                posted_count=500,
                 expired_before_initial_publication_count=0,
             )
         )
@@ -127,7 +150,7 @@ class TelegramPublisherLiveMatrixTests(unittest.TestCase):
             "expired_before_initial_publication",
         ):
             _initial_publication_complete(
-                posted_count=999,
+                posted_count=499,
                 expired_before_initial_publication_count=1,
             )
 
@@ -150,9 +173,9 @@ class TelegramPublisherLiveMatrixTests(unittest.TestCase):
     def test_initial_publication_gate_allows_published_manual_expiry_while_others_wait(self):
         self.assertFalse(
             _initial_publication_complete(
-                posted_count=694,
+                posted_count=349,
                 expired_before_initial_publication_count=0,
-                expected_count=1000,
+                expected_count=500,
             )
         )
 

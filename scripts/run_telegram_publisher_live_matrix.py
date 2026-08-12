@@ -18,9 +18,11 @@ import asyncio
 from collections import Counter
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta, timezone
+import hashlib
 import json
 import math
 from pathlib import Path
+import random
 import sys
 import time
 from typing import Any, Iterable, Sequence
@@ -58,11 +60,12 @@ from scripts.run_telegram_publisher_b2b_harness import (
 )
 
 
-MATRIX_TOTAL_OFFERS = 1_000
-MATRIX_BOT_OFFERS = 600
-MATRIX_WEBAPP_OFFERS = 400
+MATRIX_TOTAL_OFFERS = 500
+MATRIX_BOT_OFFERS = 300
+MATRIX_WEBAPP_OFFERS = 200
 MATRIX_USER_INTERACTIONS = 10
-MATRIX_INGRESS_INTERVAL_SECONDS = 0.5
+MATRIX_INGRESS_MIN_INTERVAL_SECONDS = 0.8
+MATRIX_INGRESS_MAX_INTERVAL_SECONDS = 4.0
 MATRIX_OFFER_EXPIRY_MINUTES = 25
 MATRIX_DESTINATION_MIN_INTERVAL_SECONDS = 1.05
 MATRIX_PROGRESS_POLL_SECONDS = 5.0
@@ -70,7 +73,7 @@ MATRIX_PROGRESS_STALL_SECONDS = 180.0
 MATRIX_WEBAPP_OPERATION_TIMEOUT_SECONDS = 20.0
 MATRIX_WEBAPP_OPERATION_RETRY_ATTEMPTS = 2
 MATRIX_WEBAPP_OPERATION_RETRY_DELAY_SECONDS = 1.0
-# The matrix can schedule all 300 overtime actions within a narrow deadline
+# The matrix can schedule all 150 overtime actions within a narrow deadline
 # window.  Keep the direct router/database work bounded so the last tasks are
 # actually scheduled instead of starving behind an exhausted connection pool.
 MATRIX_OVERTIME_MAX_CONCURRENT_OPERATIONS = 20
@@ -82,15 +85,17 @@ MATRIX_OVERTIME_MAX_CONCURRENT_OPERATIONS = 20
 MATRIX_BACKGROUND_TASKS_MAX_WAIT_SECONDS = 15.0
 MATRIX_AUDIT_DIRECTORY = Path("/app/audit_trail")
 
-MATRIX_DIRECT_WHOLESALE_TRADES = 100
-MATRIX_DIRECT_RETAIL_TRADES = 100
-MATRIX_OVERTIME_APPROVED_TRADES = 30
-MATRIX_OVERTIME_OWNER_REJECTIONS = 30
-MATRIX_OVERTIME_DECISION_TIMEOUTS = 240
-MATRIX_MANUAL_EXPIRIES = 100
-MATRIX_NATURAL_EXPIRIES = 400
+MATRIX_DIRECT_WHOLESALE_TRADES = 50
+MATRIX_DIRECT_RETAIL_TRADES = 50
+MATRIX_OVERTIME_APPROVED_TRADES = 15
+MATRIX_OVERTIME_OWNER_REJECTIONS = 15
+MATRIX_OVERTIME_DECISION_TIMEOUTS = 120
+MATRIX_MANUAL_EXPIRIES = 50
+MATRIX_NATURAL_EXPIRIES = 200
 MATRIX_OVERTIME_MINUTES = 5
 MATRIX_OVERTIME_RECEIPT_SAFETY_SECONDS = 1.0
+MATRIX_MANAGEMENT_MESSAGE_CAMPAIGNS = 5
+MATRIX_MANAGEMENT_MESSAGE_RECIPIENTS_PER_CAMPAIGN = 10
 
 _INITIAL_ACTION = TelegramDeliveryAction.OFFER_PUBLISH.value
 _EXPIRY_ACTION = TelegramDeliveryAction.EXPIRED_OFFER_EDIT.value
@@ -169,6 +174,14 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _workload_seed(run_id: str, explicit_seed: int | None) -> int:
+    """Derive a redacted reproducibility seed when none was requested."""
+    if explicit_seed is not None:
+        return int(explicit_seed)
+    digest = hashlib.sha256(str(run_id).encode("utf-8")).digest()
+    return int.from_bytes(digest[:8], byteorder="big", signed=False)
+
+
 class LiveMatrixError(B2BHarnessError):
     """The real staging matrix cannot safely continue."""
 
@@ -177,8 +190,11 @@ class LiveMatrixError(B2BHarnessError):
 class MatrixWorkload:
     origins: tuple[str, ...]
     scenarios: tuple[str, ...]
+    ingress_offsets_seconds: tuple[float, ...]
     interaction_origins: tuple[str, ...]
     interaction_offsets_seconds: tuple[float, ...]
+    management_message_offsets_seconds: tuple[float, ...]
+    random_seed: int
 
 
 @dataclass(slots=True)
@@ -252,6 +268,7 @@ class MatrixRun:
     run_id: str
     started_at: str
     expected_expiry_minutes: int
+    random_seed: int | None = None
     timelines: list[OfferTimeline] = field(default_factory=list)
     interactions: list[InteractionTimeline] = field(default_factory=list)
     lifecycle_actions: list[LifecycleActionTimeline] = field(default_factory=list)
@@ -266,21 +283,26 @@ def build_live_matrix_workload(
     bot_offers: int,
     webapp_offers: int,
     interaction_count: int,
-    ingress_interval_seconds: float,
+    ingress_min_interval_seconds: float,
+    ingress_max_interval_seconds: float,
+    random_seed: int,
 ) -> MatrixWorkload:
-    """Build the exact 6:4 source mix without hiding ingress-rate drift."""
+    """Build a reproducible mixed workload without hiding ingress-rate drift."""
     if total_offers != MATRIX_TOTAL_OFFERS:
-        raise LiveMatrixError("live_matrix_total_offers_must_equal_1000")
+        raise LiveMatrixError("live_matrix_total_offers_must_equal_500")
     if bot_offers != MATRIX_BOT_OFFERS or webapp_offers != MATRIX_WEBAPP_OFFERS:
-        raise LiveMatrixError("live_matrix_source_mix_must_be_600_bot_400_webapp")
+        raise LiveMatrixError("live_matrix_source_mix_must_be_300_bot_200_webapp")
     if interaction_count != MATRIX_USER_INTERACTIONS:
         raise LiveMatrixError("live_matrix_interactions_must_equal_10")
-    if not math.isclose(
-        float(ingress_interval_seconds),
-        MATRIX_INGRESS_INTERVAL_SECONDS,
-        abs_tol=0.000_001,
+    ingress_minimum = float(ingress_min_interval_seconds)
+    ingress_maximum = float(ingress_max_interval_seconds)
+    if (
+        not math.isclose(ingress_minimum, MATRIX_INGRESS_MIN_INTERVAL_SECONDS, abs_tol=0.000_001)
+        or not math.isclose(ingress_maximum, MATRIX_INGRESS_MAX_INTERVAL_SECONDS, abs_tol=0.000_001)
     ):
-        raise LiveMatrixError("live_matrix_ingress_must_be_two_per_second")
+        raise LiveMatrixError("live_matrix_ingress_must_be_random_0_8_to_4_seconds")
+    if not math.isfinite(float(random_seed)):
+        raise LiveMatrixError("live_matrix_random_seed_invalid")
     scenario_counts = (
         ("direct_wholesale_trade", MATRIX_DIRECT_WHOLESALE_TRADES),
         ("direct_retail_lot_trade", MATRIX_DIRECT_RETAIL_TRADES),
@@ -292,25 +314,44 @@ def build_live_matrix_workload(
     )
     if sum(count for _name, count in scenario_counts) != total_offers:
         raise LiveMatrixError("live_matrix_lifecycle_total_invalid")
-    origin_cycle = ("bot",) * 6 + ("webapp",) * 4
-    origins: list[str] = []
-    scenarios: list[str] = []
+    rng = random.Random(int(random_seed))
+    workload_pairs: list[tuple[str, str]] = []
     for scenario, count in scenario_counts:
-        if count % len(origin_cycle):
+        if count % 5:
             raise LiveMatrixError("live_matrix_lifecycle_source_ratio_invalid")
-        origins.extend(origin_cycle * (count // len(origin_cycle)))
-        scenarios.extend((scenario,) * count)
+        workload_pairs.extend(("bot", scenario) for _ in range(count * 3 // 5))
+        workload_pairs.extend(("webapp", scenario) for _ in range(count * 2 // 5))
+    rng.shuffle(workload_pairs)
+    origins = [origin for origin, _scenario in workload_pairs]
+    scenarios = [scenario for _origin, scenario in workload_pairs]
     if len(origins) != total_offers or len(scenarios) != total_offers:
         raise LiveMatrixError("live_matrix_origin_cycle_invalid")
-    duration = total_offers * float(ingress_interval_seconds)
+    ingress_offsets = [0.0]
+    for _ in range(total_offers - 1):
+        ingress_offsets.append(
+            ingress_offsets[-1] + rng.uniform(ingress_minimum, ingress_maximum)
+        )
+    duration = ingress_offsets[-1]
+    interaction_origins = ["bot"] * 6 + ["webapp"] * 4
+    rng.shuffle(interaction_origins)
     return MatrixWorkload(
         origins=tuple(origins),
         scenarios=tuple(scenarios),
-        interaction_origins=tuple(("bot",) * 6 + ("webapp",) * 4),
+        ingress_offsets_seconds=tuple(ingress_offsets),
+        interaction_origins=tuple(interaction_origins),
         interaction_offsets_seconds=tuple(
-            duration * (index + 1) / (interaction_count + 1)
-            for index in range(interaction_count)
+            sorted(
+                rng.uniform(duration * 0.1, duration * 0.9)
+                for _ in range(interaction_count)
+            )
         ),
+        management_message_offsets_seconds=tuple(
+            sorted(
+                rng.uniform(duration * 0.15, duration * 0.85)
+                for _ in range(MATRIX_MANAGEMENT_MESSAGE_CAMPAIGNS)
+            )
+        ),
+        random_seed=int(random_seed),
     )
 
 
@@ -380,7 +421,10 @@ def _report_payload(run: MatrixRun) -> dict[str, Any]:
         "failure_reason": run.failure_reason,
         "configuration": {
             "offer_expiry_minutes": run.expected_expiry_minutes,
-            "ingress_interval_seconds": MATRIX_INGRESS_INTERVAL_SECONDS,
+            "ingress_interval_seconds": {
+                "minimum": MATRIX_INGRESS_MIN_INTERVAL_SECONDS,
+                "maximum": MATRIX_INGRESS_MAX_INTERVAL_SECONDS,
+            },
             "source_mix": {"bot": MATRIX_BOT_OFFERS, "webapp": MATRIX_WEBAPP_OFFERS},
             "lifecycle_mix": {
                 "direct_wholesale_trades": MATRIX_DIRECT_WHOLESALE_TRADES,
@@ -394,6 +438,11 @@ def _report_payload(run: MatrixRun) -> dict[str, Any]:
             },
             "publisher_lanes": list(TELEGRAM_PUBLISHER_IDENTITIES),
             "channel_destination_min_interval_seconds": MATRIX_DESTINATION_MIN_INTERVAL_SECONDS,
+            "management_message_simulation": {
+                "campaigns": MATRIX_MANAGEMENT_MESSAGE_CAMPAIGNS,
+                "recipients_per_campaign": MATRIX_MANAGEMENT_MESSAGE_RECIPIENTS_PER_CAMPAIGN,
+            },
+            "random_seed": run.random_seed,
             "ignored_historical_private_job_count": run.ignored_historical_private_job_count,
         },
         "summary": {
@@ -1310,7 +1359,7 @@ async def _run_lifecycle_actions(
     Channel publication is deliberately slower than central ingress. Direct
     and manual mutations retain their own publication gates so early offers do
     not consume their 25-minute lifetime off-screen. Overtime tasks are only
-    created after the full initial publication barrier: all 300 later actions
+    created after the full initial publication barrier: all 150 later actions
     then share one durable proof instead of re-querying the same post state at
     their deadline. Final audit still proves every terminal event followed its
     own initial channel post.
@@ -1483,7 +1532,7 @@ async def _worker_acknowledgement_progress(
 
 
 async def _wait_for_worker_acknowledgement(run: MatrixRun) -> None:
-    """Require all 1,000 central dispatches to reach publisher workers first."""
+    """Require all 500 central dispatches to reach publisher workers first."""
     expected_count = len(run.timelines)
     if expected_count != MATRIX_TOTAL_OFFERS:
         raise LiveMatrixError("live_matrix_worker_ack_offer_count_invalid")
@@ -1697,17 +1746,21 @@ async def run_live_matrix(args: argparse.Namespace) -> dict[str, Any]:
     run_id = args.run_id or _new_run_id().replace("b2b-light-", "telegram-live-matrix-", 1)
     if not run_id.startswith("telegram-live-matrix-"):
         raise LiveMatrixError("live_matrix_run_id_invalid")
+    random_seed = _workload_seed(run_id, args.random_seed)
     workload = build_live_matrix_workload(
         total_offers=args.total_offers,
         bot_offers=args.bot_offers,
         webapp_offers=args.webapp_offers,
         interaction_count=args.user_interactions,
-        ingress_interval_seconds=args.ingress_interval_seconds,
+        ingress_min_interval_seconds=args.ingress_min_interval_seconds,
+        ingress_max_interval_seconds=args.ingress_max_interval_seconds,
+        random_seed=random_seed,
     )
     run = MatrixRun(
         run_id=run_id,
         started_at=_iso(_utcnow()) or "",
         expected_expiry_minutes=MATRIX_OFFER_EXPIRY_MINUTES,
+        random_seed=workload.random_seed,
     )
     report_path = _audit_path(run_id)
     interaction_task: asyncio.Task[None] | None = None
@@ -1749,8 +1802,9 @@ async def run_live_matrix(args: argparse.Namespace) -> dict[str, Any]:
             for index, (origin, scenario) in enumerate(
                 zip(workload.origins, workload.scenarios, strict=True), start=1
             ):
+                ingress_offset = workload.ingress_offsets_seconds[index - 1]
                 scheduled_at = datetime.fromtimestamp(
-                    started_at.timestamp() + (index - 1) * MATRIX_INGRESS_INTERVAL_SECONDS,
+                    started_at.timestamp() + ingress_offset,
                     tz=timezone.utc,
                 )
                 timeline = OfferTimeline(
@@ -1775,10 +1829,11 @@ async def run_live_matrix(args: argparse.Namespace) -> dict[str, Any]:
                         name=f"telegram-live-matrix-webapp-observe-{index}",
                     )
                 )
-                due_at = started_monotonic + index * MATRIX_INGRESS_INTERVAL_SECONDS
-                delay = due_at - time.monotonic()
-                if delay > 0:
-                    await asyncio.sleep(delay)
+                if index < len(workload.ingress_offsets_seconds):
+                    due_at = started_monotonic + workload.ingress_offsets_seconds[index]
+                    delay = due_at - time.monotonic()
+                    if delay > 0:
+                        await asyncio.sleep(delay)
                 if index % 25 == 0:
                     _write_audit(run)
             await asyncio.gather(*visibility_tasks)
@@ -1829,7 +1884,17 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--bot-offers", type=int, default=MATRIX_BOT_OFFERS)
     parser.add_argument("--webapp-offers", type=int, default=MATRIX_WEBAPP_OFFERS)
     parser.add_argument("--user-interactions", type=int, default=MATRIX_USER_INTERACTIONS)
-    parser.add_argument("--ingress-interval-seconds", type=float, default=MATRIX_INGRESS_INTERVAL_SECONDS)
+    parser.add_argument(
+        "--ingress-min-interval-seconds",
+        type=float,
+        default=MATRIX_INGRESS_MIN_INTERVAL_SECONDS,
+    )
+    parser.add_argument(
+        "--ingress-max-interval-seconds",
+        type=float,
+        default=MATRIX_INGRESS_MAX_INTERVAL_SECONDS,
+    )
+    parser.add_argument("--random-seed", type=int)
     return parser
 
 
