@@ -1,9 +1,12 @@
+import asyncio
 import unittest
 from collections import Counter
 from types import SimpleNamespace
 
 from scripts.run_telegram_publisher_live_matrix import (
     MATRIX_INGRESS_INTERVAL_SECONDS,
+    LifecycleActionTimeline,
+    _complete_lifecycle_action,
     _initial_publication_complete,
     _is_ignorable_historical_private_job,
     _retail_lot_sizes,
@@ -108,6 +111,23 @@ class TelegramPublisherLiveMatrixTests(unittest.TestCase):
             "expired_before_initial_publication",
         ):
             _initial_publication_complete(posted_count=999, expired_count=1)
+
+    def test_lifecycle_action_records_only_the_failure_class(self):
+        entry = LifecycleActionTimeline(
+            offer_index=1,
+            action="direct_wholesale_trade",
+            origin="bot",
+            scheduled_at="2026-08-12T00:00:00+00:00",
+        )
+
+        async def fail() -> None:
+            raise ValueError("internal diagnostic must not be persisted")
+
+        with self.assertRaisesRegex(RuntimeError, "lifecycle_action_failed"):
+            asyncio.run(_complete_lifecycle_action(entry, fail))
+
+        self.assertEqual(entry.status, "ValueError")
+        self.assertEqual(entry.failure_class, "ValueError")
 
 
 if __name__ == "__main__":

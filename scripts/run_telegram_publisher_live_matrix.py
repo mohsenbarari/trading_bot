@@ -221,6 +221,7 @@ class LifecycleActionTimeline:
     started_at: str | None = None
     completed_at: str | None = None
     status: str | None = None
+    failure_class: str | None = None
 
 
 @dataclass(slots=True)
@@ -839,8 +840,11 @@ async def _complete_lifecycle_action(
         entry.status = "success" if outcome in (None, "success") else str(outcome)
     except Exception as exc:
         entry.status = type(exc).__name__
+        entry.failure_class = type(exc).__name__
     finally:
         entry.completed_at = _iso(_utcnow())
+    if entry.status != "success" and entry.failure_class is None:
+        entry.failure_class = f"operation_returned_{entry.status or 'unknown'}"
     if entry.status != "success":
         raise LiveMatrixError(f"live_matrix_lifecycle_action_failed:{entry.action}")
 
@@ -912,6 +916,7 @@ async def _run_direct_trade(
         )
 
         async def execute() -> str:
+            error_details: list[str] = []
             offer = await worker.load_offer_snapshot(int(timeline.offer_id))
             if timeline.scenario == "direct_retail_lot_trade":
                 lot_sizes = list(getattr(offer, "lot_sizes", None) or ())
@@ -921,7 +926,7 @@ async def _run_direct_trade(
             else:
                 amount = 5
             if timeline.origin == "bot":
-                return await worker.execute_bot_trade_with_dispatcher(
+                outcome = await worker.execute_bot_trade_with_dispatcher(
                     harness=harness,
                     spec=worker.MixedLoadAttemptSpec(
                         index=timeline.index * 10 + lot_index,
@@ -932,17 +937,23 @@ async def _run_direct_trade(
                     offer=offer,
                     amount=amount,
                     prefix=f"{run.run_id}-direct-{timeline.index:04d}-{lot_index}",
+                    error_details=error_details,
                 )
-            with override_current_server(timeline.offer_home_server or SERVER_IRAN):
-                return await worker.execute_webapp_trade_for_user(
-                    user_id=int(taker.user_id),
-                    offer_id=int(timeline.offer_id),
-                    offer_public_id=timeline.offer_public_id,
-                    quantity=amount,
-                    idempotency_key=(
-                        f"{run.run_id}-direct-{timeline.index:04d}-{lot_index}"
-                    ),
-                )
+            else:
+                with override_current_server(timeline.offer_home_server or SERVER_IRAN):
+                    outcome = await worker.execute_webapp_trade_for_user(
+                        user_id=int(taker.user_id),
+                        offer_id=int(timeline.offer_id),
+                        offer_public_id=timeline.offer_public_id,
+                        quantity=amount,
+                        idempotency_key=(
+                            f"{run.run_id}-direct-{timeline.index:04d}-{lot_index}"
+                        ),
+                        error_details=error_details,
+                    )
+            if outcome != "success" and error_details:
+                entry.failure_class = error_details[0].partition(":")[0].strip() or None
+            return outcome
 
         await _complete_lifecycle_action(entry, execute)
 
