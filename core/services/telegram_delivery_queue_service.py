@@ -411,6 +411,14 @@ async def _assert_durable_dispatch_gate(
                                 and_(
                                     TelegramDeliveryJobRecord.state
                                     == TelegramDeliveryState.LEASED,
+                                    # An unstarted lease is only a local
+                                    # contender: it has not crossed the
+                                    # provider side-effect boundary and must
+                                    # not turn its full recovery lease (often
+                                    # 30s) into a destination cooldown.  The
+                                    # Redis admission plus this transaction's
+                                    # advisory lock still serialize the next
+                                    # real provider dispatch.
                                     TelegramDeliveryJobRecord.dispatch_started_at.is_not(
                                         None
                                     ),
@@ -475,6 +483,13 @@ async def _assert_durable_dispatch_gate(
         return
 
     retry_until = now + timedelta(seconds=0.1)
+    # PostgreSQL is the authoritative exclusion fence for an in-flight
+    # provider call.  Do not mirror that call's full recovery lease into
+    # Redis: a second marker that races the short provider/persistence window
+    # would otherwise extend the shared channel cadence by up to the entire
+    # lease (30s), despite no Telegram rate-limit evidence.  Durable 429s,
+    # unresolved outcomes, and explicit pauses still extend the fast-path.
+    cooldown_until: datetime | None = None
     reason_state = TelegramDeliveryState.LEASED
     reason_scope = "destination"
     for blocker in blockers:
@@ -482,6 +497,7 @@ async def _assert_durable_dispatch_gate(
         candidate_until = now + timedelta(seconds=30.0)
         candidate_reason = blocker_state.value
         candidate_scope = "destination"
+        candidate_requires_limiter_cooldown = True
         if blocker_state == TelegramDeliveryState.BLOCKED_BOT:
             candidate_scope = "bot"
         elif blocker_state == TelegramDeliveryState.BLOCKED_GATEWAY:
@@ -499,9 +515,15 @@ async def _assert_durable_dispatch_gate(
             and blocker.lease_until is not None
             and blocker.lease_until > now
         ):
-            candidate_until = blocker.lease_until
+            # The provider call is already durably fenced by this exact
+            # blocker row and the claim query.  Retry its neighbour promptly
+            # after result persistence instead of turning a recovery lease
+            # into a destination-wide Redis cooldown.
+            candidate_until = now + timedelta(seconds=0.1)
+            candidate_requires_limiter_cooldown = False
         elif blocker_state == TelegramDeliveryState.LEASED:
-            candidate_until = now + timedelta(seconds=1.0)
+            candidate_until = now + timedelta(seconds=0.1)
+            candidate_requires_limiter_cooldown = False
         if (
             blocker.bot_identity == record.bot_identity
             and blocker.bot_cooldown_until is not None
@@ -510,15 +532,19 @@ async def _assert_durable_dispatch_gate(
             candidate_until = blocker.bot_cooldown_until
             candidate_reason = "bot_cooldown"
             candidate_scope = "bot"
+            candidate_requires_limiter_cooldown = True
         if candidate_until > retry_until:
             retry_until = candidate_until
             reason_state = candidate_reason
             reason_scope = candidate_scope
+            cooldown_until = (
+                candidate_until if candidate_requires_limiter_cooldown else None
+            )
 
     raise TelegramDeliveryDispatchDeferredError(
         retry_after_seconds=max(0.1, (retry_until - now).total_seconds()),
         reason=f"durable_dispatch_gate:{getattr(reason_state, 'value', reason_state)}",
-        cooldown_until=retry_until,
+        cooldown_until=cooldown_until,
         scope=reason_scope,
     )
 
