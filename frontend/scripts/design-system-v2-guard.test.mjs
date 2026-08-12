@@ -877,6 +877,13 @@ describe('UIUX v2 route policy guard', () => {
           '<template><Teleport to="body"><div v-if="showModal" :data-ui-system="portalScopeValue" /></Teleport></template>',
         ].join('\n'),
       },
+      {
+        path: 'src/components/workspace/WorkspaceAccountDeletionDialog.vue',
+        source: fs.readFileSync(
+          path.join(frontendRoot, 'src/components/workspace/WorkspaceAccountDeletionDialog.vue'),
+          'utf8',
+        ),
+      },
     ]
 
     expect(
@@ -922,6 +929,11 @@ describe('UIUX v2 route policy guard', () => {
         path: 'src/components/SessionApprovalModal.vue',
         source:
           '<script>const props = withDefaults(defineProps<{ v2Portal?: boolean }>(), { v2Portal: false }); const portalScopeValue = computed(() => props.v2Portal ? UI_DESIGN_SYSTEM_PORTAL_SCOPE_VALUE : undefined)</script><template><div :data-ui-system="portalScopeValue" /></template>',
+      },
+      {
+        path: 'src/components/workspace/WorkspaceAccountDeletionDialog.vue',
+        source:
+          '<script setup>import { computed, ref } from "vue"; import { UI_DESIGN_SYSTEM_PORTAL_SCOPE_VALUE } from "../ui/uiDesignSystemScope"; import { useOverlayA11y } from "../ui/useOverlayA11y"; const open = ref(true); const containerRef = ref(); const portalScopeValue = computed(() => UI_DESIGN_SYSTEM_PORTAL_SCOPE_VALUE); useOverlayA11y({ containerRef })</script><template><div v-if="open" :data-ui-system="portalScopeValue" /></template>',
       },
     ]) {
       expect(

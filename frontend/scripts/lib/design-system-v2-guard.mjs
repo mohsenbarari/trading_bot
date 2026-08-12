@@ -532,6 +532,7 @@ const STAGE4_ACTIVATION_BOUNDARY_PATHS = new Set([
   'src/App.vue',
   'src/components/SessionApprovalModal.vue',
   'src/components/workspace/WorkspaceActionTile.vue',
+  'src/components/workspace/WorkspaceAccountDeletionDialog.vue',
   'src/components/workspace/WorkspaceDangerZone.vue',
   'src/components/workspace/WorkspaceNotice.vue',
   'src/components/workspace/WorkspaceSection.vue',
@@ -1643,6 +1644,34 @@ function isApprovedStage4WorkspaceBoundary(sourcePath, source) {
 
 function isApprovedStage4ActivationBoundary({ path: sourcePath, source }) {
   if (!STAGE4_ACTIVATION_BOUNDARY_PATHS.has(sourcePath)) return false
+
+  if (sourcePath === 'src/components/workspace/WorkspaceAccountDeletionDialog.vue') {
+    const scopeBindings = [...source.matchAll(/:data-ui-system\s*=\s*["']portalScopeValue["']/g)]
+    const portalRoot =
+      /<Teleport\b(?=[^>]*\bto\s*=\s*["']body["'])[^>]*>[\s\S]*?<div\b(?=[^>]*\bv-if\s*=\s*["']open["'])(?=[^>]*:data-ui-system\s*=\s*["']portalScopeValue["'])/.test(
+        source,
+      )
+    const hasRawScope = /\bdata-ui-system\s*=\s*["']v2(?:-portal)?["']/.test(source)
+    if (
+      scopeBindings.length !== 1 ||
+      !portalRoot ||
+      hasRawScope ||
+      !/\bportalScopeValue\s*=\s*computed\s*\(\s*\(\s*\)\s*=>\s*UI_DESIGN_SYSTEM_PORTAL_SCOPE_VALUE\s*\)/.test(
+        source,
+      ) ||
+      !/\buseOverlayA11y\b/.test(source) ||
+      !/\bcontainerRef\b/.test(source) ||
+      !/\bUI_DESIGN_SYSTEM_PORTAL_SCOPE_VALUE\b/.test(source) ||
+      !/from\s+["'][^"']*uiDesignSystemScope["']/.test(source)
+    ) {
+      return false
+    }
+
+    const withoutApprovedPortalBinding = source
+      .replace(/:data-ui-system\s*=\s*["']portalScopeValue["']/g, '')
+      .replace(/\bUI_DESIGN_SYSTEM_PORTAL_SCOPE_VALUE\b/g, '')
+    return sourceActivationEvidence(sourcePath, withoutApprovedPortalBinding) === null
+  }
 
   if (sourcePath.startsWith('src/components/workspace/')) {
     return isApprovedStage4WorkspaceBoundary(sourcePath, source)

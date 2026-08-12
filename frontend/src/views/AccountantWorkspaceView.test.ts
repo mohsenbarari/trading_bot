@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs'
-import { enableAutoUnmount, flushPromises, mount as mountVue } from '@vue/test-utils'
+import { DOMWrapper, enableAutoUnmount, flushPromises, mount as mountVue } from '@vue/test-utils'
 import type { Ref } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type {
@@ -17,6 +17,24 @@ enableAutoUnmount(afterEach)
 
 function mount(component: typeof AccountantWorkspaceView, options: Record<string, unknown> = {}) {
   return mountVue(component, { attachTo: document.body, ...options })
+}
+
+function bodyDialog(selector: string) {
+  const element = document.body.querySelector<HTMLElement>(selector)
+  if (!element) throw new Error(`Expected ${selector} to be mounted in document.body.`)
+  return new DOMWrapper(element)
+}
+
+function accountDeletionDialog() {
+  return bodyDialog('.ui-v2-workspace-account-deletion-dialog')
+}
+
+function confirmDialog() {
+  return bodyDialog('.ui-confirm-dialog')
+}
+
+function hasBodyDialog(selector: string) {
+  return document.body.querySelector(selector) !== null
 }
 
 type AccountantConfirmAction =
@@ -659,11 +677,11 @@ describe('AccountantWorkspaceView.vue', () => {
     await flushPromises()
 
     await wrapper.get('.accountant-session-actions .ui-button').trigger('click')
-    expect(wrapper.get('.ui-confirm-dialog').text()).toContain('Chrome')
-    expect(wrapper.get('.ui-confirm-dialog').text()).toContain('فقط دسترسی همین نشست قطع می‌شود')
-    expect(wrapper.get('.ui-confirm-dialog').text()).toContain('نشست‌های دیگر باقی می‌مانند')
+    expect(confirmDialog().text()).toContain('Chrome')
+    expect(confirmDialog().text()).toContain('فقط دسترسی همین نشست قطع می‌شود')
+    expect(confirmDialog().text()).toContain('نشست‌های دیگر باقی می‌مانند')
 
-    await wrapper.get('.ui-confirm-dialog .ui-button--primary').trigger('click')
+    await confirmDialog().get('.ui-button--primary').trigger('click')
     await flushPromises()
 
     expect(accountantWorkspaceMocks.terminateOwnerAccountantSessionMock).toHaveBeenCalledWith(
@@ -802,13 +820,13 @@ describe('AccountantWorkspaceView.vue', () => {
     await wrapper.get('.accountant-pending-card .ui-button--danger').trigger('click')
     const vm = viewVm(wrapper)
 
-    expect(wrapper.get('.ui-confirm-dialog').text()).toContain('لغو رابطه و دعوت حسابدار')
-    expect(wrapper.get('.ui-confirm-dialog').text()).toContain('رابطه و دعوت در انتظار')
-    expect(wrapper.get('.ui-confirm-dialog').text()).toContain('رزرو هویت و نام کاربری آزاد می‌شود')
-    expect(wrapper.get('.ui-confirm-dialog').text()).toContain('حذف زنجیره‌ای حساب')
-    expect(wrapper.get('.ui-confirm-dialog').text()).toContain('اجرا نمی‌شود')
-    expect(wrapper.get('.ui-confirm-dialog').text()).not.toContain('آفرهای فعال')
-    expect(wrapper.get('.ui-confirm-dialog').text()).not.toContain('سابقه معاملات')
+    expect(confirmDialog().text()).toContain('لغو رابطه و دعوت حسابدار')
+    expect(confirmDialog().text()).toContain('رابطه و دعوت در انتظار')
+    expect(confirmDialog().text()).toContain('رزرو هویت و نام کاربری آزاد می‌شود')
+    expect(confirmDialog().text()).toContain('حذف زنجیره‌ای حساب')
+    expect(confirmDialog().text()).toContain('اجرا نمی‌شود')
+    expect(confirmDialog().text()).not.toContain('آفرهای فعال')
+    expect(confirmDialog().text()).not.toContain('سابقه معاملات')
 
     accountantWorkspaceMocks.deleteOwnerAccountantRelationMock.mockResolvedValueOnce({
       ...vm.accountantState.relations.value.find((relation: { id: number }) => relation.id === 12),
@@ -817,8 +835,8 @@ describe('AccountantWorkspaceView.vue', () => {
     await vm.handleConfirmAction()
     await flushPromises()
 
-    expect(wrapper.find('.ui-confirm-dialog').exists()).toBe(true)
-    expect(wrapper.get('.ui-confirm-dialog').text()).toContain(
+    expect(hasBodyDialog('.ui-confirm-dialog')).toBe(true)
+    expect(confirmDialog().text()).toContain(
       'پاسخ لغو رابطه و دعوت حسابدار معتبر نبود.',
     )
     expect(vm.detailSessionsError).toBe('')
@@ -831,7 +849,7 @@ describe('AccountantWorkspaceView.vue', () => {
     const firstAttempt = vm.handleConfirmAction()
     const duplicateAttempt = vm.handleConfirmAction()
     expect(accountantWorkspaceMocks.deleteOwnerAccountantRelationMock).toHaveBeenCalledTimes(2)
-    expect(wrapper.find('.ui-confirm-dialog').exists()).toBe(true)
+    expect(hasBodyDialog('.ui-confirm-dialog')).toBe(true)
 
     const relation = vm.accountantState.relations.value.find(
       (item: { id: number }) => item.id === 12,
@@ -845,7 +863,7 @@ describe('AccountantWorkspaceView.vue', () => {
       'cancel-pending',
       'لغو رابطه و دعوت حسابدار ناموفق بود.',
     )
-    expect(wrapper.find('.ui-confirm-dialog').exists()).toBe(false)
+    expect(hasBodyDialog('.ui-confirm-dialog')).toBe(false)
     expect(vm.accountantState.relations.value.some((item: { id: number }) => item.id === 12)).toBe(
       false,
     )
@@ -869,7 +887,7 @@ describe('AccountantWorkspaceView.vue', () => {
 
     await wrapper.get('.accountant-detail-list .ui-button--danger').trigger('click')
 
-    const dialog = wrapper.get('.ui-v2-workspace-account-deletion-dialog')
+    const dialog = accountDeletionDialog()
     expect(dialog.text()).toContain('حذف حساب حسابدار تست')
     expect(dialog.text()).toContain('دسترسی وب‌اپ و ربات قطع می‌شود')
     expect(dialog.text()).toContain('آفرهای فعال منقضی می‌شوند')
@@ -888,11 +906,35 @@ describe('AccountantWorkspaceView.vue', () => {
       'delete-account',
       'حذف حساب حسابدار ناموفق بود.',
     )
-    expect(wrapper.find('.ui-v2-workspace-account-deletion-dialog').exists()).toBe(false)
+    expect(hasBodyDialog('.ui-v2-workspace-account-deletion-dialog')).toBe(false)
     expect(accountantWorkspaceMocks.routerPushMock).toHaveBeenCalledWith({
       name: 'operations-accountants',
       query: {},
     })
+  })
+
+  it('keeps account deletion open on a failed receipt without exposing server detail or changing the relation', async () => {
+    accountantWorkspaceMocks.routeState.params = { relationId: '11' }
+    accountantWorkspaceMocks.routeState.query = { tab: 'danger' }
+    accountantWorkspaceMocks.deleteOwnerAccountantRelationMock.mockRejectedValueOnce(
+      Object.assign(new Error('raw-server-detail: accountant_11'), { status: 404 }),
+    )
+
+    const wrapper = mount(AccountantWorkspaceView)
+    await flushPromises()
+    const vm = viewVm(wrapper)
+    await wrapper.get('.accountant-detail-list .ui-button--danger').trigger('click')
+    const dialog = accountDeletionDialog()
+    await dialog.get('input:not([type="checkbox"])').setValue('حسابدار تست')
+    await dialog.get('input[type="checkbox"]').setValue(true)
+    await dialog.get('.ui-button--danger').trigger('click')
+    await flushPromises()
+
+    const retainedDialog = accountDeletionDialog()
+    expect(retainedDialog.text()).toContain('حذف حساب انجام نشد. لطفاً دوباره تلاش کنید.')
+    expect(retainedDialog.text()).not.toContain('raw-server-detail')
+    expect(vm.accountantState.relations.value.some((item: { id: number }) => item.id === 11)).toBe(true)
+    expect(accountantWorkspaceMocks.routerPushMock).not.toHaveBeenCalled()
   })
 
   it('returns from a deleted detail when refresh reconciliation wins the receipt race', async () => {
@@ -1007,7 +1049,7 @@ describe('AccountantWorkspaceView.vue', () => {
     expect(pendingWrapper.text()).toContain('لغو رابطه و دعوت حسابدار')
     expect(pendingWrapper.text()).not.toContain('نشست‌های فعال حسابدار')
     expect(pendingWrapper.find('textarea').exists()).toBe(false)
-    expect(pendingWrapper.find('.ui-v2-workspace-account-deletion-dialog').exists()).toBe(false)
+    expect(hasBodyDialog('.ui-v2-workspace-account-deletion-dialog')).toBe(false)
     pendingWrapper.unmount()
 
     accountantWorkspaceMocks.routeState.params = { relationId: '13' }
@@ -1428,10 +1470,10 @@ describe('AccountantWorkspaceView.vue', () => {
     expect(wrapper.text()).toContain('فقط همین رابطه حذف می‌شود')
     expect(wrapper.text()).not.toContain('آفرهای فعال منقضی')
     await wrapper.get('.accountant-detail-list .ui-button--danger').trigger('click')
-    expect(wrapper.find('.ui-v2-workspace-account-deletion-dialog').exists()).toBe(false)
-    expect(wrapper.get('.ui-confirm-dialog').text()).toContain('حذف رابطه رابطه بدون حساب')
-    expect(wrapper.get('.ui-confirm-dialog').text()).toContain('حذف زنجیره‌ای')
-    expect(wrapper.get('.ui-confirm-dialog').text()).toContain('اجرا نمی‌شود')
+    expect(hasBodyDialog('.ui-v2-workspace-account-deletion-dialog')).toBe(false)
+    expect(confirmDialog().text()).toContain('حذف رابطه رابطه بدون حساب')
+    expect(confirmDialog().text()).toContain('حذف زنجیره‌ای')
+    expect(confirmDialog().text()).toContain('اجرا نمی‌شود')
 
     await viewVm(wrapper).handleConfirmAction()
     await flushPromises()

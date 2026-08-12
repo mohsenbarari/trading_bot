@@ -807,6 +807,10 @@ function closeConfirmDialog() {
   resetConfirmDialog()
 }
 
+function getSafeAccountDeletionError() {
+  return 'حذف حساب تأیید نشد. اطلاعات رابطه بدون تغییر باقی ماند؛ وضعیت را دوباره بررسی کنید.'
+}
+
 function resetConfirmDialog() {
   isConfirmDialogOpen.value = false
   confirmAction.value = null
@@ -919,15 +923,17 @@ async function handleConfirmAction() {
     )
       return
     confirmError.value =
-      error instanceof Error && error.message
-        ? error.message
-        : action === 'terminate-session'
+      action === 'delete-account'
+        ? getSafeAccountDeletionError()
+        : error instanceof Error && error.message
+          ? error.message
+          : action === 'terminate-session'
           ? 'پایان دادن نشست حسابدار ناموفق بود.'
           : action === 'cancel-invitation'
             ? 'لغو رابطه و دعوت حسابدار ناموفق بود.'
             : action === 'delete-relation'
               ? 'حذف رابطه حسابدار ناموفق بود.'
-              : 'حذف حساب حسابدار ناموفق بود.'
+              : getSafeAccountDeletionError()
   } finally {
     if (shouldHoldCanonicalSync) isDeleteNavigationPending = false
     if (requestGeneration === confirmRequestGeneration) isConfirmBusy.value = false

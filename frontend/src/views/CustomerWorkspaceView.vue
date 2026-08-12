@@ -1158,6 +1158,10 @@ function closeConfirmDialog() {
   resetConfirmDialog()
 }
 
+function getSafeAccountDeletionError() {
+  return 'حذف حساب تأیید نشد. اطلاعات رابطه بدون تغییر باقی ماند؛ وضعیت را دوباره بررسی کنید.'
+}
+
 function resetConfirmDialog() {
   confirmOperationGeneration += 1
   isConfirmDialogOpen.value = false
@@ -1188,7 +1192,10 @@ async function handleConfirmAction() {
     (action === 'delete-account' &&
       (currentRelation.status !== 'active' || !currentRelation.customer_user_id))
   ) {
-    confirmError.value = 'این اقدام دیگر برای وضعیت فعلی رابطه در دسترس نیست.'
+    confirmError.value =
+      action === 'delete-account'
+        ? getSafeAccountDeletionError()
+        : 'این اقدام دیگر برای وضعیت فعلی رابطه در دسترس نیست.'
     return
   }
   const operationGeneration = ++confirmOperationGeneration
@@ -1275,16 +1282,18 @@ async function handleConfirmAction() {
     }
   } catch (err: unknown) {
     if (!isCurrentOperation()) return
-    const errorMessage = err instanceof Error ? err.message : ''
     confirmError.value =
-      errorMessage ||
-      (action === 'terminate-session'
+      action === 'delete-account'
+        ? getSafeAccountDeletionError()
+        : err instanceof Error && err.message
+          ? err.message
+          : action === 'terminate-session'
         ? 'پایان دادن نشست مشتری ناموفق بود.'
         : action === 'cancel-invitation'
           ? 'لغو رابطه در انتظار و دعوت مشتری ناموفق بود.'
           : action === 'close-relation'
             ? 'بستن رابطه مشتری ناموفق بود.'
-            : 'حذف حساب مشتری ناموفق بود.')
+            : getSafeAccountDeletionError()
   } finally {
     if (shouldHoldCanonicalSync) isDeleteNavigationPending = false
     if (operationGeneration === confirmOperationGeneration) isConfirmBusy.value = false

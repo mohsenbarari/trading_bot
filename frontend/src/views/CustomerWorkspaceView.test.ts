@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs'
-import { enableAutoUnmount, flushPromises, mount as mountComponent } from '@vue/test-utils'
+import { DOMWrapper, enableAutoUnmount, flushPromises, mount as mountComponent } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type {
   CustomerRelation,
@@ -19,6 +19,24 @@ function mount(
   options: Parameters<typeof mountComponent>[1] = {},
 ) {
   return mountComponent(component, { attachTo: document.body, ...options })
+}
+
+function bodyDialog(selector: string) {
+  const element = document.body.querySelector<HTMLElement>(selector)
+  if (!element) throw new Error(`Expected ${selector} to be mounted in document.body.`)
+  return new DOMWrapper(element)
+}
+
+function accountDeletionDialog() {
+  return bodyDialog('.ui-v2-workspace-account-deletion-dialog')
+}
+
+function confirmDialog() {
+  return bodyDialog('.ui-confirm-dialog')
+}
+
+function hasBodyDialog(selector: string) {
+  return document.body.querySelector(selector) !== null
 }
 
 function deferred<T>() {
@@ -976,7 +994,7 @@ describe('CustomerWorkspaceView.vue', () => {
     await flushPromises()
     await wrapper.get('.ui-danger-zone .ui-button--danger').trigger('click')
 
-    const dialog = wrapper.get('.ui-v2-workspace-account-deletion-dialog')
+    const dialog = accountDeletionDialog()
     expect(dialog.text()).toContain('حذف حساب مشتری تست')
     expect(dialog.text()).toContain('دعوت‌های در انتظار مرتبط لغو می‌شوند')
     expect(dialog.text()).toContain('سوابق معاملات حذف نمی‌شوند')
@@ -993,11 +1011,35 @@ describe('CustomerWorkspaceView.vue', () => {
       'delete-account',
       'حذف حساب مشتری ناموفق بود.',
     )
-    expect(wrapper.find('.ui-v2-workspace-account-deletion-dialog').exists()).toBe(false)
+    expect(hasBodyDialog('.ui-v2-workspace-account-deletion-dialog')).toBe(false)
     expect(customerWorkspaceMocks.routerPushMock).toHaveBeenCalledWith({
       name: 'operations-customers',
       query: {},
     })
+  })
+
+  it('keeps account deletion open on a failed receipt without exposing server detail or changing the relation', async () => {
+    customerWorkspaceMocks.routeState.params = { relationId: '11' }
+    customerWorkspaceMocks.routeState.query = { tab: 'danger' }
+    customerWorkspaceMocks.deleteOwnerCustomerRelationMock.mockRejectedValueOnce(
+      Object.assign(new Error('raw-server-detail: customer_11'), { status: 403 }),
+    )
+
+    const wrapper = mount(CustomerWorkspaceView)
+    await flushPromises()
+    const vm = getCustomerWorkspaceVm(wrapper)
+    await wrapper.get('.ui-danger-zone .ui-button--danger').trigger('click')
+    const dialog = accountDeletionDialog()
+    await dialog.get('input:not([type="checkbox"])').setValue('مشتری تست')
+    await dialog.get('input[type="checkbox"]').setValue(true)
+    await dialog.get('.ui-button--danger').trigger('click')
+    await flushPromises()
+
+    const retainedDialog = accountDeletionDialog()
+    expect(retainedDialog.text()).toContain('حذف حساب انجام نشد. لطفاً دوباره تلاش کنید.')
+    expect(retainedDialog.text()).not.toContain('raw-server-detail')
+    expect(vm.customerState.relations.value.some((item: { id: number }) => item.id === 11)).toBe(true)
+    expect(customerWorkspaceMocks.routerPushMock).not.toHaveBeenCalled()
   })
 
   it('returns from a deleted detail even when a concurrent refresh removes it before the receipt', async () => {
@@ -1067,10 +1109,10 @@ describe('CustomerWorkspaceView.vue', () => {
       'danger',
     ])
     expect(wrapper.text()).toContain('بستن رابطه بدون حذف حساب')
-    expect(wrapper.find('.ui-v2-workspace-account-deletion-dialog').exists()).toBe(false)
+    expect(hasBodyDialog('.ui-v2-workspace-account-deletion-dialog')).toBe(false)
     await wrapper.get('.ui-danger-zone .ui-button--danger').trigger('click')
 
-    const dialog = wrapper.get('.ui-confirm-dialog')
+    const dialog = confirmDialog()
     expect(dialog.text()).toContain('فقط رابطه «مشتری دوم» بسته شود؟')
     expect(dialog.text()).toContain('رزرو هویت مرتبط با این رابطه آزاد می‌شود')
     expect(dialog.text()).toContain('هیچ آبشار حذف حساب، نشست، پیشنهاد یا تاریخچه‌ای اجرا نمی‌شود')
@@ -1109,11 +1151,11 @@ describe('CustomerWorkspaceView.vue', () => {
     const vm = getCustomerWorkspaceVm(wrapper)
     await wrapper.get('.customer-pending-detail .ui-button--danger').trigger('click')
 
-    const dialog = wrapper.get('.ui-confirm-dialog')
+    const dialog = confirmDialog()
     expect(dialog.text()).toContain('رابطه در انتظار و دعوت «دعوت چهاردهم» لغو شوند؟')
     expect(dialog.text()).toContain('لینک دعوت و رزرو هویت این دعوت لغو می‌شوند')
     expect(dialog.text()).toContain('هیچ آبشار حذف حساب فعالی اجرا نمی‌شود')
-    expect(wrapper.find('.ui-v2-workspace-account-deletion-dialog').exists()).toBe(false)
+    expect(hasBodyDialog('.ui-v2-workspace-account-deletion-dialog')).toBe(false)
     await dialog.get('.ui-button--danger').trigger('click')
     await flushPromises()
 
@@ -1145,14 +1187,14 @@ describe('CustomerWorkspaceView.vue', () => {
     const firstAttempt = vm.handleConfirmAction()
     const duplicateAttempt = vm.handleConfirmAction()
     expect(customerWorkspaceMocks.terminateOwnerCustomerSessionMock).toHaveBeenCalledTimes(1)
-    expect(wrapper.find('.ui-confirm-dialog').exists()).toBe(true)
+    expect(hasBodyDialog('.ui-confirm-dialog')).toBe(true)
 
     pendingTermination.reject(new Error('پایان نشست انجام نشد.'))
     await Promise.all([firstAttempt, duplicateAttempt])
     await flushPromises()
 
-    expect(wrapper.find('.ui-confirm-dialog').exists()).toBe(true)
-    expect(wrapper.get('.ui-confirm-dialog').text()).toContain('پایان نشست انجام نشد.')
+    expect(hasBodyDialog('.ui-confirm-dialog')).toBe(true)
+    expect(confirmDialog().text()).toContain('پایان نشست انجام نشد.')
     expect(vm.detailSessionsError).toBe('')
     expect(wrapper.text()).toContain('Chrome')
 
@@ -1163,8 +1205,8 @@ describe('CustomerWorkspaceView.vue', () => {
     })
     await vm.handleConfirmAction()
     await flushPromises()
-    expect(wrapper.find('.ui-confirm-dialog').exists()).toBe(true)
-    expect(wrapper.get('.ui-confirm-dialog').text()).toContain('پاسخ پایان نشست مشتری معتبر نبود.')
+    expect(hasBodyDialog('.ui-confirm-dialog')).toBe(true)
+    expect(confirmDialog().text()).toContain('پاسخ پایان نشست مشتری معتبر نبود.')
     expect(wrapper.text()).toContain('Chrome')
 
     customerWorkspaceMocks.terminateOwnerCustomerSessionMock.mockResolvedValueOnce({
@@ -1175,7 +1217,7 @@ describe('CustomerWorkspaceView.vue', () => {
     await vm.handleConfirmAction()
     await flushPromises()
 
-    expect(wrapper.find('.ui-confirm-dialog').exists()).toBe(false)
+    expect(hasBodyDialog('.ui-confirm-dialog')).toBe(false)
     expect(wrapper.find('.customer-session-actions').exists()).toBe(false)
     expect(wrapper.text()).toContain('نشست «Chrome» پایان یافت.')
     expect(wrapper.text()).not.toContain('iran')
