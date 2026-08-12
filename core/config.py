@@ -346,9 +346,9 @@ class Settings(BaseSettings):
         return self
     
     class Config:
-        # Defaults to the deployment file. Tests point this at ``.env.test`` so
-        # they read code defaults instead of whatever a machine happens to have
-        # configured; see ``tests/__init__.py``.
+        # Defaults to the deployment file. The unit-test target points this at
+        # ``config/unit-test.env.example`` so tests read code defaults instead
+        # of whatever a developer machine happens to have configured.
         env_file = os.getenv("APP_ENV_FILE", ".env")
 
 settings = Settings()
