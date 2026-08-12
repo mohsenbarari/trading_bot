@@ -116,6 +116,40 @@ _SYNC_REGISTRY: dict[str, SyncRegistryEntry] = {
         "single-writer iran admin authority; commodity names are natural-idempotency guards only",
         "commodity cache invalidation",
     ),
+    "coin_intelligence_inference_audits": _entry(
+        "coin_intelligence_inference_audits",
+        SyncPolicy.NO_SYNC,
+        ("coin_intelligence_shadow",),
+        "each server owns the audit of the decision it computed",
+        "no cross-server merge; append-only local evidence",
+        "shadow-only inference audit",
+        notes=(
+            "Each peer runs its own snapshot and reaches its own decision, so copying "
+            "rows would attribute one server's shadow decision to the other."
+        ),
+    ),
+    "coin_intelligence_inference_outcomes": _entry(
+        "coin_intelligence_inference_outcomes",
+        SyncPolicy.NO_SYNC,
+        ("coin_intelligence_shadow",),
+        "local outcome ledger of the local audit row",
+        "no cross-server merge; append-only local evidence",
+        "shadow-only inference outcome",
+        notes="Bound to a local audit row, so it cannot be interpreted on the peer.",
+    ),
+    "coin_intelligence_market_outbox": _entry(
+        "coin_intelligence_market_outbox",
+        SyncPolicy.NO_SYNC,
+        ("offer_lifecycle_listener", "trade_lifecycle_listener"),
+        "local projection of locally committed Offer/Trade transitions",
+        "no cross-server merge; the authoritative Offer/Trade rows already sync",
+        "market-intelligence projection feed",
+        notes=(
+            "The transactional listener writes one row per locally committed Offer or "
+            "Trade transition. Syncing it would double-count the same market event once "
+            "the authoritative row itself arrives on the peer."
+        ),
+    ),
     "commodity_aliases": _entry(
         "commodity_aliases",
         SyncPolicy.SYNC,
@@ -393,6 +427,18 @@ _SYNC_REGISTRY: dict[str, SyncRegistryEntry] = {
         notes=(
             "Domain intent syncs through its authoritative table. This execution table is local to foreign "
             "and must never be copied to Iran."
+        ),
+    ),
+    "telegram_publisher_dispatch_commands": _entry(
+        "telegram_publisher_dispatch_commands",
+        SyncPolicy.NO_SYNC,
+        ("telegram_delivery_queue", "telegram_publisher_b2b"),
+        "foreign local Telegram publisher dispatch owner",
+        "never cross-sync publisher commands, leases, receipts, or retry state",
+        "Foreign-only B2B control-plane execution and audit",
+        notes=(
+            "The command is paired with a foreign-local delivery job; syncing it "
+            "would duplicate dispatch ownership and invalidate its local lease fence."
         ),
     ),
     "telegram_delivery_provider_outcomes": _entry(
