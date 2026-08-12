@@ -2,7 +2,7 @@
 
 Entries are newest first.
 
-- 2026-08-12 | If a staging matrix audit artifact is unavailable, terminal verification reconstructs only immutable offer/queue provenance and labels transient full-matrix assertions unverified. Reason: do not fabricate fake private-transport or in-process interaction evidence.
+- 2026-08-12 | The staging bot mounts the shared audit volume; if a historical matrix artifact is nonetheless unavailable, terminal verification reconstructs only immutable offer/queue provenance and labels transient full-matrix assertions unverified. Reason: preserve evidence across bot recreation without fabricating fake private-transport or in-process interaction evidence.
 - 2026-08-12 | Staging live matrix uses 500 seeded 60/40 Bot/WebApp offers with random 0.8–4-second ingress; private delivery uses a fake transport. Direct WebApp skips post-response tasks, overtime is ordered at ≤20 operations, terminal WebApp observations at ≤20 reads, a blank active bot callback retries ≤2 times with a fresh callback identity, lifecycle task failures abort before another offer, and audit retains redacted failure class/code plus attempts. Reason: reproducible evidence without invalid-run growth, timer/connection-pool pressure, or synthetic private delivery.
 - 2026-08-11 | Queue-v1 retries only serialization/deadlock aborts before provider dispatch, inside the same bounded unstarted lease. Reason: no external effect occurred; other DB failures fail closed.
 - 2026-08-11 | Queue-v1 retains an unstarted fenced lease only through a short absolute Redis cadence deadline; longer waits are durable retries. Reason: re-claiming causes DB churn, but long leases starve a lane.
