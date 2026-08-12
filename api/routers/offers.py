@@ -113,6 +113,16 @@ from core.services.offer_republish_service import (
     list_repeatable_offers,
     lock_repeatable_offer,
 )
+from core.market_intelligence.coin_inference_shadow import observe_coin_inference_shadow
+from core.market_intelligence.coin_inference_selection import (
+    CoinInferenceSelectionRejected,
+    revalidate_coin_inference_selection,
+)
+from core.market_intelligence.coin_inference_outcome import (
+    CoinInferenceAcceptedSelection,
+    append_coin_inference_accepted_selection,
+)
+from core.market_intelligence.coin_inference import COIN_INFERENCE_CANDIDATE_SCOPE_LOW_DATE_ONLY
 from core import telegram_gateway
 from core.trade_forwarding import verify_internal_signature
 from core.trading_observability import log_trading_event
@@ -226,6 +236,12 @@ router = APIRouter(
 
 # --- Pydantic Schemas ---
 
+class CommodityInferenceSelectionInput(BaseModel):
+    """Opaque receipt plus the commodity chosen in the preceding preview."""
+
+    decision_key: str = Field(..., pattern=r"^[a-f0-9]{64}$")
+    selected_commodity_id: int = Field(..., gt=0)
+
 class OfferCreate(BaseModel):
     """ایجاد لفظ جدید"""
     offer_type: str = Field(..., pattern="^(buy|sell)$", description="نوع: buy یا sell")
@@ -243,6 +259,10 @@ class OfferCreate(BaseModel):
         description="شناسه عمومی لفظ منبع برای تکرار",
     )
     warning_acknowledged: bool = Field(default=False, description="آیا هشدار قیمت غیرعادی توسط کاربر تایید شده است")
+    commodity_inference: Optional[CommodityInferenceSelectionInput] = Field(
+        default=None,
+        description="رسید تشخیص قیمت‌محور کالا؛ فقط برای انتخاب انجام‌شده از پیش‌نمایش",
+    )
     idempotency_key: str = Field(
         ...,
         min_length=8,
@@ -250,6 +270,298 @@ class OfferCreate(BaseModel):
         pattern=r"^[A-Za-z0-9][A-Za-z0-9:._-]{7,63}$",
         description="شناسه یکتای پایدار تلاش ثبت لفظ",
     )
+
+
+class CoinInferencePreviewRequest(BaseModel):
+    """Shadow-only product inference request; it cannot create an offer."""
+
+    price: int = Field(..., gt=0, description="قیمت در واحد پروژه (هزار تومان)")
+    settlement_type: str = Field(
+        default="cash",
+        pattern="^(cash|tomorrow)$",
+        description="نقدی یا فردایی",
+    )
+
+
+class CoinInferencePreviewCandidateResponse(BaseModel):
+    commodity_id: int
+    commodity_code: str
+    commodity_name: str
+    center_project_price: int
+    lower_project_price: int
+    upper_project_price: int
+    confidence: str
+    distance_to_center_relative: float
+
+
+class CoinInferencePreviewResponse(BaseModel):
+    status: str
+    decision_key: str
+    settlement_type: str
+    snapshot_generated_at_utc: str | None
+    snapshot_receipt: str | None
+    reason: str | None
+    candidates: list[CoinInferencePreviewCandidateResponse]
+
+
+def _coin_inference_preview_path_or_error() -> str:
+    if not settings.coin_intelligence_inference_preview_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="قابلیت آزمایشی تشخیص کالا فعال نیست.",
+        )
+    snapshot_path = (settings.coin_intelligence_inference_snapshot_path or "").strip()
+    if not snapshot_path:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="snapshot محلی تشخیص کالا آماده نیست.",
+        )
+    return snapshot_path
+
+
+def _coin_inference_selection_path_or_error() -> str:
+    if not settings.coin_intelligence_inference_selection_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="انتخاب قیمت‌محور کالا در حال حاضر فعال نیست.",
+        )
+    snapshot_path = (settings.coin_intelligence_inference_snapshot_path or "").strip()
+    if not snapshot_path:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="دادهٔ محلی تشخیص کالا آماده نیست؛ نام کالا را وارد کنید.",
+        )
+    return snapshot_path
+
+
+def _catalog_inference_shadow_payload(
+    decision: object,
+    *,
+    decision_key: str,
+    mode: str = "SHADOW_ONLY",
+) -> dict[str, object]:
+    candidates = []
+    for item in getattr(decision, "candidates", ()):
+        candidates.append(
+            {
+                "commodity_id": int(item.commodity_id),
+                "commodity_code": str(item.commodity_code),
+                "commodity_name": str(item.commodity_name),
+                "center_project_price": int(item.center_project_price),
+                "lower_project_price": int(item.lower_project_price),
+                "upper_project_price": int(item.upper_project_price),
+                "confidence": str(item.confidence),
+                "distance_to_center_relative": float(item.distance_to_center_relative),
+            }
+        )
+    return {
+        "mode": mode,
+        "status": str(getattr(decision, "status", "ABSTAIN")),
+        "decision_key": decision_key,
+        "snapshot_generated_at_utc": getattr(decision, "snapshot_generated_at_utc", None),
+        "snapshot_receipt": getattr(decision, "snapshot_receipt", None),
+        "reason": getattr(decision, "reason", None),
+        "candidates": candidates,
+    }
+
+
+async def _shadow_inference_for_implicit_commodity(
+    db: AsyncSession,
+    *,
+    price: int,
+    settlement_type: str,
+) -> dict[str, object] | None:
+    """Observe a missing-name parse without changing its legacy commodity."""
+
+    if not settings.coin_intelligence_inference_preview_enabled:
+        return None
+    snapshot_path = (settings.coin_intelligence_inference_snapshot_path or "").strip()
+    if not snapshot_path:
+        return {
+            "mode": "SHADOW_ONLY",
+            "status": "ABSTAIN",
+            "decision_key": None,
+            "snapshot_generated_at_utc": None,
+            "snapshot_receipt": None,
+            "reason": "SNAPSHOT_PATH_UNCONFIGURED",
+            "candidates": [],
+        }
+    settlement = "CASH" if settlement_type == "cash" else "TOMORROW"
+    try:
+        observation = await observe_coin_inference_shadow(
+            db,
+            snapshot_path=snapshot_path,
+            submitted_project_price=price,
+            settlement_term=settlement,
+            source_surface="WEBAPP",
+            now_utc=datetime.now(timezone.utc),
+        )
+        await db.commit()
+        return _catalog_inference_shadow_payload(
+            observation.decision,
+            decision_key=observation.decision_key,
+        )
+    except Exception as exc:
+        await db.rollback()
+        log_trading_event(
+            logger,
+            "coin_inference_parse_shadow.unavailable",
+            level="warning",
+            action="coin_inference_parse_shadow",
+            result="abstained",
+            error_class=type(exc).__name__,
+        )
+        return {
+            "mode": "SHADOW_ONLY",
+            "status": "ABSTAIN",
+            "decision_key": None,
+            "snapshot_generated_at_utc": None,
+            "snapshot_receipt": None,
+            "reason": "INFERENCE_UNAVAILABLE",
+            "candidates": [],
+        }
+
+
+async def _selection_inference_for_missing_commodity(
+    db: AsyncSession,
+    *,
+    price: int,
+    settlement_type: str,
+    low_date_hint: bool,
+) -> dict[str, object]:
+    """Create a selectable, audited decision without creating an Offer."""
+
+    snapshot_path = (settings.coin_intelligence_inference_snapshot_path or "").strip()
+    if not snapshot_path:
+        return {
+            "mode": "SELECTABLE",
+            "status": "ABSTAIN",
+            "decision_key": None,
+            "snapshot_generated_at_utc": None,
+            "snapshot_receipt": None,
+            "reason": "SNAPSHOT_PATH_UNCONFIGURED",
+            "candidates": [],
+        }
+    settlement = "CASH" if settlement_type == "cash" else "TOMORROW"
+    candidate_scope = (
+        COIN_INFERENCE_CANDIDATE_SCOPE_LOW_DATE_ONLY if low_date_hint else "ALL"
+    )
+    try:
+        observation = await observe_coin_inference_shadow(
+            db,
+            snapshot_path=snapshot_path,
+            submitted_project_price=price,
+            settlement_term=settlement,
+            source_surface="WEBAPP",
+            now_utc=datetime.now(timezone.utc),
+            candidate_scope=candidate_scope,
+            force_confirmation=not bool(
+                getattr(settings, "coin_intelligence_inference_auto_selection_enabled", False)
+            ),
+        )
+        await db.commit()
+        return _catalog_inference_shadow_payload(
+            observation.decision,
+            decision_key=observation.decision_key,
+            mode="SELECTABLE",
+        )
+    except Exception as exc:
+        await db.rollback()
+        log_trading_event(
+            logger,
+            "coin_inference_parse_selection.unavailable",
+            level="warning",
+            action="coin_inference_parse_selection",
+            result="abstained",
+            error_class=type(exc).__name__,
+        )
+        return {
+            "mode": "SELECTABLE",
+            "status": "ABSTAIN",
+            "decision_key": None,
+            "snapshot_generated_at_utc": None,
+            "snapshot_receipt": None,
+            "reason": "INFERENCE_UNAVAILABLE",
+            "candidates": [],
+        }
+
+
+async def _revalidate_webapp_commodity_inference(
+    db: AsyncSession,
+    *,
+    offer_data: OfferCreate,
+) -> object | None:
+    """Reject an inferred commodity unless it is still valid at submit time."""
+
+    selection = offer_data.commodity_inference
+    if selection is None:
+        return None
+    if int(selection.selected_commodity_id) != int(offer_data.commodity_id):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="کالای انتخاب‌شده با پیش‌نمایش تشخیص کالا یکسان نیست.",
+        )
+    snapshot_path = _coin_inference_selection_path_or_error()
+    settlement = "CASH" if offer_data.settlement_type == "cash" else "TOMORROW"
+    try:
+        return await revalidate_coin_inference_selection(
+            db,
+            snapshot_path=snapshot_path,
+            decision_key=selection.decision_key,
+            selected_commodity_id=selection.selected_commodity_id,
+            submitted_project_price=offer_data.price,
+            settlement_term=settlement,
+            source_surface="WEBAPP",
+            now_utc=datetime.now(timezone.utc),
+        )
+    except CoinInferenceSelectionRejected as exc:
+        log_trading_event(
+            logger,
+            "coin_inference_offer_submit.rejected",
+            level="info",
+            action="coin_inference_offer_submit",
+            result="rejected",
+            reason=exc.reason,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="نتیجهٔ تشخیص کالا تغییر کرده یا دیگر معتبر نیست؛ متن آفر را دوباره بررسی کنید.",
+        ) from exc
+
+
+async def _record_webapp_inference_accepted_selection(
+    db: AsyncSession,
+    *,
+    revalidation: object | None,
+    offer_data: OfferCreate,
+) -> None:
+    """Record post-acceptance telemetry without changing Offer success semantics."""
+
+    if revalidation is None or offer_data.commodity_inference is None:
+        return
+    try:
+        await append_coin_inference_accepted_selection(
+            db,
+            CoinInferenceAcceptedSelection(
+                decision_key=offer_data.commodity_inference.decision_key,
+                source_surface="WEBAPP",
+                candidate=revalidation.candidate,
+            ),
+        )
+        await db.commit()
+    except Exception as exc:
+        # The Offer has already been accepted.  P7 telemetry must never turn a
+        # successful user action into an error if its own append-only ledger is
+        # temporarily unavailable.
+        await db.rollback()
+        log_trading_event(
+            logger,
+            "coin_inference_outcome.webapp_unavailable",
+            level="warning",
+            action="coin_inference_outcome",
+            result="not_recorded",
+            error_class=type(exc).__name__,
+        )
 
 
 def _build_webapp_offer_creation_command(
@@ -1219,6 +1531,64 @@ async def _forward_offer_expiry_if_remote_home(
 
 # --- Endpoints ---
 
+@router.post("/inference-preview", response_model=CoinInferencePreviewResponse)
+async def preview_coin_commodity_inference(
+    payload: CoinInferencePreviewRequest,
+    db: AsyncSession = Depends(get_db),
+    _current_user: User = Depends(get_current_user),
+):
+    """Return a shadow inference decision without changing an Offer."""
+
+    snapshot_path = _coin_inference_preview_path_or_error()
+    settlement = "CASH" if payload.settlement_type == "cash" else "TOMORROW"
+    try:
+        observation = await observe_coin_inference_shadow(
+            db,
+            snapshot_path=snapshot_path,
+            submitted_project_price=payload.price,
+            settlement_term=settlement,
+            source_surface="WEBAPP",
+            now_utc=datetime.now(timezone.utc),
+        )
+        await db.commit()
+    except HTTPException:
+        raise
+    except Exception as exc:
+        await db.rollback()
+        log_trading_event(
+            logger,
+            "coin_inference_preview.unavailable",
+            level="warning",
+            action="coin_inference_preview",
+            result="abstained",
+            error_class=type(exc).__name__,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="پیش‌نمایش تشخیص کالا در حال حاضر در دسترس نیست.",
+        ) from exc
+    return CoinInferencePreviewResponse(
+        status=observation.decision.status,
+        decision_key=observation.decision_key,
+        settlement_type=payload.settlement_type,
+        snapshot_generated_at_utc=observation.decision.snapshot_generated_at_utc,
+        snapshot_receipt=observation.decision.snapshot_receipt,
+        reason=observation.decision.reason,
+        candidates=[
+            CoinInferencePreviewCandidateResponse(
+                commodity_id=item.commodity_id,
+                commodity_code=item.commodity_code,
+                commodity_name=item.commodity_name,
+                center_project_price=item.center_project_price,
+                lower_project_price=item.lower_project_price,
+                upper_project_price=item.upper_project_price,
+                confidence=item.confidence,
+                distance_to_center_relative=item.distance_to_center_relative,
+            )
+            for item in observation.decision.candidates
+        ],
+    )
+
 @router.post("/", response_model=OfferResponse, status_code=status.HTTP_201_CREATED)
 async def create_offer(
     offer_data: OfferCreate,
@@ -1273,6 +1643,8 @@ async def create_offer(
                 include_owner_identity=True,
             )
         )[0]
+
+    inference_revalidation = await _revalidate_webapp_commodity_inference(db, offer_data=offer_data)
     
     # بررسی نقش
     if owner_user.role == UserRole.WATCH:
@@ -1620,6 +1992,12 @@ async def create_offer(
                 include_owner_identity=True,
             )
         )[0]
+
+    await _record_webapp_inference_accepted_selection(
+        db,
+        revalidation=inference_revalidation,
+        offer_data=offer_data,
+    )
 
     # بارگذاری روابط
     result = await db.execute(
@@ -2680,6 +3058,7 @@ async def cancel_all_active_offers(
 async def parse_offer_text(
     request: ParseOfferRequest,
     context: EffectiveOwnerActor = Depends(get_effective_owner_actor_context),
+    db: AsyncSession = Depends(get_db),
 ):
     """
     پارس متن لفظ با parser مشترک بات و وب اپ.
@@ -2687,7 +3066,16 @@ async def parse_offer_text(
     _ensure_accountant_market_access_allowed(context)
     from bot.utils.offer_parser import parse_offer_text as parser
     
-    result, error = await parser(request.text)
+    if (
+        settings.coin_intelligence_inference_preview_enabled
+        or settings.coin_intelligence_inference_selection_enabled
+    ):
+        result, error = await parser(
+            request.text,
+            capture_commodity_resolution=True,
+        )
+    else:
+        result, error = await parser(request.text)
     
     if error:
         return ParseOfferResponse(success=False, error=error.message)
@@ -2695,17 +3083,43 @@ async def parse_offer_text(
     if result is None:
         return ParseOfferResponse(success=False, error="متن قابل تشخیص نیست.")
     
-    return ParseOfferResponse(
-        success=True,
-        data={
-            "trade_type": result.trade_type,
-            "settlement_type": settlement_type_value(getattr(result, "settlement_type", None)),
-            "commodity_id": result.commodity_id,
-            "commodity_name": result.commodity_name,
-            "quantity": result.quantity,
-            "price": result.price,
-            "is_wholesale": result.is_wholesale,
-            "lot_sizes": result.lot_sizes,
-            "notes": result.notes
-        }
-    )
+    parsed_data = {
+        "trade_type": result.trade_type,
+        "settlement_type": settlement_type_value(getattr(result, "settlement_type", None)),
+        "commodity_id": result.commodity_id,
+        "commodity_name": result.commodity_name,
+        "commodity_resolution": getattr(result, "commodity_resolution", "UNKNOWN"),
+        "low_date_hint": bool(getattr(result, "low_date_hint", False)),
+        "quantity": result.quantity,
+        "price": result.price,
+        "is_wholesale": result.is_wholesale,
+        "lot_sizes": result.lot_sizes,
+        "notes": result.notes,
+    }
+    missing_commodity = getattr(result, "commodity_resolution", None) in {
+        "OMITTED",
+        "LOW_DATE_HINT",
+    }
+    if missing_commodity and settings.coin_intelligence_inference_selection_enabled:
+        selection = await _selection_inference_for_missing_commodity(
+            db,
+            price=result.price,
+            settlement_type=parsed_data["settlement_type"],
+            low_date_hint=bool(getattr(result, "low_date_hint", False)),
+        )
+        parsed_data["commodity_inference"] = selection
+        candidates = selection.get("candidates") or []
+        if selection.get("status") == "AUTO_SELECT" and len(candidates) == 1:
+            selected = candidates[0]
+            parsed_data["commodity_id"] = int(selected["commodity_id"])
+            parsed_data["commodity_name"] = str(selected["commodity_name"])
+            parsed_data["commodity_resolution"] = "INFERRED"
+    elif getattr(result, "commodity_resolution", None) == "OMITTED":
+        shadow = await _shadow_inference_for_implicit_commodity(
+            db,
+            price=result.price,
+            settlement_type=parsed_data["settlement_type"],
+        )
+        if shadow is not None:
+            parsed_data["commodity_inference"] = shadow
+    return ParseOfferResponse(success=True, data=parsed_data)

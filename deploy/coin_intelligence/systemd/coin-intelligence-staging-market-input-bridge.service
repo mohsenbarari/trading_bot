@@ -1,0 +1,16 @@
+[Unit]
+Description=Project existing market and group inputs into the staging Market Store
+Wants=network-online.target
+After=network-online.target coin-intelligence-staging-public-telegram.service coin-live-group-sync.service trading-bot-private-gold-collector.service
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=/root/trading-bot/coin-commodity-inference-promotion
+ExecStart=/usr/bin/flock --exclusive --timeout 300 /srv/trading-bot/production-data/coin-intelligence/private-gold-live/staging/.market-store-writer.lock /usr/bin/python3 /root/trading-bot/coin-commodity-inference-promotion/scripts/bridge_staging_market_inputs.py --runtime-root /srv/trading-bot/production-data/coin-intelligence/private-gold-live --market-store market/market.sqlite3 --state-file staging/market-input-bridge.state.json --lock-file staging/.market-input-bridge.lock --legacy-market-db /srv/trading-bot-three-site-staging-data/coin-intelligence/apps/telegram-price-poc/data/market_prices.sqlite3 --external-market-db /srv/trading-bot-three-site-staging-data/coin-intelligence/apps/telegram-price-poc/data/market_prices.sqlite3 --conversation-db /srv/trading-bot-three-site-staging-data/coin-intelligence/apps/coin-intelligence/data/conversation_events.sqlite3
+TimeoutStartSec=900
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=read-only
+ProtectSystem=strict
+ReadWritePaths=/srv/trading-bot/production-data/coin-intelligence/private-gold-live/market /srv/trading-bot/production-data/coin-intelligence/private-gold-live/staging

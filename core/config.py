@@ -45,6 +45,17 @@ class Settings(BaseSettings):
     sync_watermark_strict_mode: bool = False
     environment: str = "production"
     release_sha: str | None = None
+    # Product inference stays opt-in until its local atomic Snapshot publisher
+    # and replay gates are deployed. This flag never starts a collector.
+    coin_intelligence_inference_preview_enabled: bool = False
+    # Separate from the passive preview switch.  This authorizes an inferred
+    # commodity to enter a real offer only after final-submit revalidation.
+    coin_intelligence_inference_selection_enabled: bool = False
+    # Even when selection is enabled for a constrained staging rollout, keep
+    # a unique model result as an explicit user confirmation until an owner
+    # promotes eligible cells.  This must never default to automatic choice.
+    coin_intelligence_inference_auto_selection_enabled: bool = False
+    coin_intelligence_inference_snapshot_path: str | None = None
     log_level: str = "INFO"
     log_format: str = "json"
     error_tracking_dsn: str | None = None

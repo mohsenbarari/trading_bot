@@ -54,9 +54,9 @@ class TradingCoreProbeWorkerTests(unittest.TestCase):
             lot_sizes=[30, 10],
         )
 
-        self.assertEqual(buy_text, "خ ن امام 20 عدد 176000: matrix_ bot hot 17")
+        self.assertEqual(buy_text, "خ امام 20 عدد 176000: matrix_ bot hot 17")
         self.assertEqual(buy_marker, "matrix_ bot hot 17")
-        self.assertEqual(sell_text, "ف ن ربع 40 عدد 178000 30 10: matrix_ bot hot 18")
+        self.assertEqual(sell_text, "ف ربع 40 عدد 178000 30 10: matrix_ bot hot 18")
         self.assertEqual(sell_marker, "matrix_ bot hot 18")
 
     def test_summarize_samples_reports_tail_latency(self) -> None:

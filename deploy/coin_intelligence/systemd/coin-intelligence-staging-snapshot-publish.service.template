@@ -1,0 +1,10 @@
+[Unit]
+Description=Publish the local coin-intelligence staging Snapshot
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+# The publisher has no network access and only writes the atomic Snapshot and
+# its lock under the protected runtime root. It never starts a collector.
+ExecStart=/usr/bin/docker run --rm --network none --read-only -v @RUNTIME_ROOT@:/runtime:rw @IMAGE@ python scripts/publish_coin_intelligence_snapshot.py publish --runtime-root /runtime --market-store market/market.sqlite3 --snapshot staging/coin-rates.json
