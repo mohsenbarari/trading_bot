@@ -76,6 +76,15 @@ class TelegramOfferChannelServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             channel_service.get_offer_channel_history_tag(
                 make_offer(
+                    status=OfferStatus.COMPLETED,
+                    overtime_trade_committed=True,
+                )
+            ),
+            "🤝 ✅⏳",
+        )
+        self.assertEqual(
+            channel_service.get_offer_channel_history_tag(
+                make_offer(
                     status=OfferStatus.EXPIRED,
                     expire_reason="time_limit",
                     quantity=30,
@@ -327,7 +336,7 @@ class TelegramOfferChannelServiceTests(unittest.IsolatedAsyncioTestCase):
             )
         )
 
-    def test_terminal_marker_retained_only_when_overtime_trade_committed(self):
+    def test_terminal_overtime_trade_tag_is_atomic_and_expiry_replaces_marker(self):
         traded = make_offer(
             status=OfferStatus.COMPLETED,
             overtime_trade_committed=True,
@@ -340,17 +349,16 @@ class TelegramOfferChannelServiceTests(unittest.IsolatedAsyncioTestCase):
         )
         traded_message = channel_service.build_offer_channel_message(
             traded,
-            history_tag="🤝 ✅",
+            history_tag=channel_service.get_offer_channel_history_tag(traded),
         )
         plain_message = channel_service.build_offer_channel_message(
             plain,
             history_tag="❌",
         )
-        self.assertIn(channel_service.TELEGRAM_OFFER_OVERTIME_MARKER, traded_message)
-        self.assertIn("🤝 ✅", traded_message)
-        self.assertTrue(
-            traded_message.index(channel_service.TELEGRAM_OFFER_OVERTIME_MARKER)
-            < traded_message.index("🤝 ✅")
+        self.assertIn("🤝 ✅⏳", traded_message)
+        self.assertNotIn(
+            f"\n{channel_service.TELEGRAM_OFFER_OVERTIME_MARKER}\n",
+            traded_message,
         )
         self.assertNotIn(channel_service.TELEGRAM_OFFER_OVERTIME_MARKER, plain_message)
         self.assertIn("❌", plain_message)
@@ -367,8 +375,11 @@ class TelegramOfferChannelServiceTests(unittest.IsolatedAsyncioTestCase):
             offer,
             history_tag=channel_service.get_offer_channel_history_tag(offer),
         )
-        self.assertIn(channel_service.TELEGRAM_OFFER_OVERTIME_MARKER, message)
-        self.assertIn("🤝 20 تا ✅", message)
+        self.assertIn("🤝 20 تا ✅⏳", message)
+        self.assertNotIn(
+            f"\n{channel_service.TELEGRAM_OFFER_OVERTIME_MARKER}\n",
+            message,
+        )
 
     async def test_apply_active_overtime_uses_edit_message_text_with_marker(self):
         response = SimpleNamespace(status_code=200, text="")

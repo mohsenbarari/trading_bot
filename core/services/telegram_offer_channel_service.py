@@ -30,6 +30,9 @@ TELEGRAM_OFFER_FULLY_TRADED_TAG = "🤝 ✅"
 TELEGRAM_OFFER_EXPIRED_TAG = "❌"
 # Inventory M38 — channel overtime marker; never replaces trade history tags.
 TELEGRAM_OFFER_OVERTIME_MARKER = "⏳"
+TELEGRAM_OFFER_OVERTIME_FULLY_TRADED_TAG = (
+    f"{TELEGRAM_OFFER_FULLY_TRADED_TAG}{TELEGRAM_OFFER_OVERTIME_MARKER}"
+)
 CHANNEL_LIFECYCLE_METADATA_KEY = "channel_lifecycle_phase"
 
 
@@ -178,14 +181,23 @@ def get_offer_channel_history_tag(offer: Any, traded_quantity: Optional[int] = N
     """Return the terminal Telegram emoji tag for channel history posts."""
     status = _status_value(getattr(offer, "status", None))
     if status == OfferStatus.COMPLETED.value:
-        return TELEGRAM_OFFER_FULLY_TRADED_TAG
+        return (
+            TELEGRAM_OFFER_OVERTIME_FULLY_TRADED_TAG
+            if bool(getattr(offer, "overtime_trade_committed", False))
+            else TELEGRAM_OFFER_FULLY_TRADED_TAG
+        )
 
     if status != OfferStatus.EXPIRED.value:
         return None
 
     quantity = traded_quantity if traded_quantity is not None else infer_traded_quantity_from_offer(offer)
     if quantity and quantity > 0:
-        return f"🤝 {quantity:,} تا ✅"
+        tag = f"🤝 {quantity:,} تا ✅"
+        return (
+            f"{tag}{TELEGRAM_OFFER_OVERTIME_MARKER}"
+            if bool(getattr(offer, "overtime_trade_committed", False))
+            else tag
+        )
     return TELEGRAM_OFFER_EXPIRED_TAG
 
 
@@ -237,8 +249,9 @@ def offer_channel_overtime_marker_visible(
 ) -> bool:
     """Whether the channel post should include inventory M38 ``⏳``.
 
-    Active overtime/final-tail keep the marker. Terminal posts keep it only when
-    an overtime request committed a trade.
+    Active overtime/final-tail keep the marker. Terminal posts carry overtime
+    context inside their final trade tag (``🤝 ✅⏳``), so a later terminal
+    expiry always replaces a standalone ``⏳`` with ``❌``.
     """
     status = _status_value(getattr(offer, "status", None))
     if status in {
@@ -246,7 +259,7 @@ def offer_channel_overtime_marker_visible(
         OfferStatus.EXPIRED.value,
         OfferStatus.CANCELLED.value,
     }:
-        return bool(getattr(offer, "overtime_trade_committed", False))
+        return False
     phase = str(lifecycle_phase or "").strip().lower()
     return phase in {"overtime", "final_tail"}
 
