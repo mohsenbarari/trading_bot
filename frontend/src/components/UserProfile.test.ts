@@ -200,6 +200,21 @@ describe('UserProfile.vue authoritative admin actions', () => {
     expect(reducedMotionRule).toContain('transition: none;')
   })
 
+  it('renders admin chrome with shared ui action cards and form primitives', async () => {
+    const wrapper = await mountProfile(makeUser())
+    expect(wrapper.get('.settings-btn').classes()).toContain('ui-action-card')
+    expect(wrapper.get('.delete-btn').classes()).toContain('ui-action-card')
+
+    await openSettings(wrapper)
+    expect(wrapper.get('.block-btn').classes()).toContain('ui-action-card')
+    await findButtonByText(wrapper, 'اعمال محدودیت').trigger('click')
+
+    expect(wrapper.get('.modal-content .form-input').classes()).toContain('ui-input')
+    expect(wrapper.get('.modal-content .form-select').classes()).toContain('ui-select')
+    expect(wrapper.get('.modal-content .save-btn').classes()).toContain('ui-button')
+    expect(wrapper.get('.modal-content .cancel-btn').classes()).toContain('ui-button')
+  })
+
   it('saves a role once, applies only the returned user, and never opens native dialogs', async () => {
     const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => {})
     const confirmSpy = vi.spyOn(window, 'confirm').mockImplementation(() => true)

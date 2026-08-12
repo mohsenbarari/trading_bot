@@ -25,7 +25,16 @@ import { routeRequest } from '../utils/routeRequest';
 import CustomerNameWithBadge from './CustomerNameWithBadge.vue';
 import HelpPopover from './HelpPopover.vue';
 import JalaliDatePicker from './JalaliDatePicker.vue';
-import { AppConfirmDialog, AppResponsiveDialog, AppSelect } from './ui';
+import {
+  AppActionCard,
+  AppButton,
+  AppConfirmDialog,
+  AppFormField,
+  AppIconButton,
+  AppInput,
+  AppResponsiveDialog,
+  AppSelect,
+} from './ui';
 
 type UserProfileUser = {
   id: number;
@@ -1130,13 +1139,20 @@ async function confirmPendingAction() {
 </script>
 
 <template>
-  <div class="card">
+  <div class="card admin-user-profile">
     <div class="header-row">
         <div class="header-spacer"></div>
         <div class="header-title">
             <h2>{{ isAdminView ? 'مدیریت کاربر' : 'پروفایل کاربری' }}</h2>
         </div>
-        <button v-if="isAdminView" class="profile-nav-back" @click="$emit('navigate', 'manage_users')"><ChevronLeft :size="24" /></button>
+        <AppIconButton
+          v-if="isAdminView"
+          class="profile-nav-back"
+          label="بازگشت به لیست کاربران"
+          @click="$emit('navigate', 'manage_users')"
+        >
+          <ChevronLeft :size="20" />
+        </AppIconButton>
     </div>
 
     <div class="profile-details">
@@ -1262,7 +1278,7 @@ async function confirmPendingAction() {
         <div class="detail-item owner-limit-row">
           <span class="label">حداکثر حسابداران مجاز</span>
           <div class="inline-edit">
-            <input
+            <AppInput
               v-model.number="editMaxAccountants"
               type="number"
               min="0"
@@ -1276,7 +1292,7 @@ async function confirmPendingAction() {
         <div class="detail-item owner-limit-row">
           <span class="label">حداکثر مشتریان مجاز</span>
           <div class="inline-edit">
-            <input
+            <AppInput
               v-model.number="editMaxCustomers"
               type="number"
               min="0"
@@ -1290,21 +1306,23 @@ async function confirmPendingAction() {
         <div class="detail-item owner-limit-row">
           <span class="label">حق بلاک‌کردن دیگران</span>
           <div class="inline-edit">
-            <button
+            <AppButton
               type="button"
               class="inline-control toggle-block-capability-btn"
               :class="{ 'is-disabled': !canBlockUsers }"
+              variant="secondary"
+              size="sm"
               :disabled="isUserMutationBusy"
               @click="toggleBlockCapability"
             >
               {{ canBlockUsers ? 'فعال' : 'غیرفعال' }}
-            </button>
+            </AppButton>
           </div>
         </div>
         <div class="detail-item owner-limit-row">
           <span class="label">سقف کاربران قابل بلاک</span>
           <div class="inline-edit">
-            <input
+            <AppInput
               v-model.number="editMaxBlockedUsers"
               type="number"
               min="1"
@@ -1319,14 +1337,16 @@ async function confirmPendingAction() {
         <div class="detail-item owner-limit-row terminate-sessions-row">
           <span class="label">نشست‌های فعال کاربر</span>
           <div class="inline-edit">
-            <button
+            <AppButton
               type="button"
               class="inline-control danger-inline-btn terminate-sessions-btn"
+              variant="danger"
+              size="sm"
               :disabled="isUserMutationBusy"
               @click="terminateAllSessions"
             >
               {{ isTerminatingSessions ? 'در حال قطع...' : 'پایان فوری همه نشست‌ها' }}
-            </button>
+            </AppButton>
           </div>
         </div>
         <p
@@ -1342,16 +1362,15 @@ async function confirmPendingAction() {
 
       <!-- ویرایش نقش (مودال داخلی) -->
       <div v-if="isEditingRole && canEditRole" class="edit-section">
-        <div class="form-group">
-            <label>انتخاب نقش جدید:</label>
-            <AppSelect v-model="selectedRole" class="form-select" :options="roles" :disabled="isUserMutationBusy" />
-        </div>
+        <AppFormField v-slot="{ id }" label="انتخاب نقش جدید:">
+          <AppSelect :id="id" v-model="selectedRole" class="form-select" :options="roles" :disabled="isUserMutationBusy" />
+        </AppFormField>
         <p v-if="roleError" class="user-action-feedback user-action-feedback--error" role="alert">{{ roleError }}</p>
         <div class="action-buttons">
-            <button @click="saveRole" :disabled="isUserMutationBusy" class="save-btn">
-              {{ isActionBusy('role') ? 'در حال ذخیره...' : 'ذخیره' }}
-            </button>
-            <button @click="isEditingRole = false" :disabled="isUserMutationBusy" class="cancel-btn">انصراف</button>
+            <AppButton class="save-btn" variant="primary" :disabled="isUserMutationBusy" :loading="isActionBusy('role')" @click="saveRole">
+              ذخیره
+            </AppButton>
+            <AppButton class="cancel-btn" variant="secondary" :disabled="isUserMutationBusy" @click="isEditingRole = false">انصراف</AppButton>
         </div>
       </div>
 
@@ -1368,19 +1387,34 @@ async function confirmPendingAction() {
                 : 'اطلاعات این حساب برای مشاهده نمایش داده می‌شود؛ عملیات حساس مدیریتی از این مسیر مجاز نیست.'"
             />
             <template v-if="canPerformSensitiveAdminActions">
-              <button @click="showSettings = true" class="profile-control settings-btn">
-                <span class="profile-control__icon" aria-hidden="true"><Settings :size="18" /></span>
-                <span class="profile-control__label">تنظیمات کاربر</span>
-              </button>
-              <button @click="deleteUser" :disabled="isUserMutationBusy" class="profile-control delete-btn">
-                <span class="profile-control__icon" aria-hidden="true"><Trash2 :size="18" /></span>
-                <span class="profile-control__label">حذف کاربر</span>
-              </button>
+              <AppActionCard
+                class="profile-control settings-btn"
+                title="تنظیمات کاربر"
+                description="وضعیت، نقش، محدودیت و مسدودیت"
+                tone="primary"
+                @select="showSettings = true"
+              >
+                <template #icon><Settings :size="20" /></template>
+              </AppActionCard>
+              <AppActionCard
+                class="profile-control delete-btn"
+                title="حذف کاربر"
+                description="قطع دسترسی وب و پیام‌رسان"
+                tone="danger"
+                :disabled="isUserMutationBusy"
+                @select="deleteUser"
+              >
+                <template #icon><Trash2 :size="20" /></template>
+              </AppActionCard>
             </template>
-            <button @click="$emit('navigate', 'manage_users')" class="profile-control back-btn">
-              <span class="profile-control__icon" aria-hidden="true"><ChevronLeft :size="18" /></span>
-              <span class="profile-control__label">بازگشت به لیست</span>
-            </button>
+            <AppActionCard
+              class="profile-control back-btn"
+              title="بازگشت به لیست"
+              tone="neutral"
+              @select="$emit('navigate', 'manage_users')"
+            >
+              <template #icon><ChevronLeft :size="20" /></template>
+            </AppActionCard>
         </div>
 
         <div v-else-if="canPerformSensitiveAdminActions" class="settings-menu profile-menu-card card-with-help">
@@ -1391,37 +1425,75 @@ async function confirmPendingAction() {
             label="راهنمای زیرمنوی تنظیمات کاربر"
             text="این زیرمنو برای تغییر وضعیت حساب، نقش، محدودیت و مسدودیت کاربر است. گزینه‌های حذف یا بازگشت در منوی قبلی قرار دارند."
           />
-          <button @click="toggleAccountStatus" :disabled="isUserMutationBusy" class="profile-control">
-            <span class="profile-control__icon" aria-hidden="true"><RotateCcw :size="18" /></span>
-            <span class="profile-control__label">تغییر وضعیت حساب ({{ isAccountInactive ? 'غیرفعال' : 'فعال' }})</span>
-            </button>
-            <button v-if="canEditRole" @click="roleError = ''; isEditingRole = true" :disabled="isUserMutationBusy" class="profile-control">
-              <span class="profile-control__icon" aria-hidden="true"><Pencil :size="18" /></span>
-              <span class="profile-control__label">ویرایش نقش</span>
-            </button>
+          <AppActionCard
+            class="profile-control"
+            :title="`تغییر وضعیت حساب (${isAccountInactive ? 'غیرفعال' : 'فعال'})`"
+            tone="warning"
+            :disabled="isUserMutationBusy"
+            @select="toggleAccountStatus"
+          >
+            <template #icon><RotateCcw :size="20" /></template>
+          </AppActionCard>
+            <AppActionCard
+              v-if="canEditRole"
+              class="profile-control"
+              title="ویرایش نقش"
+              :disabled="isUserMutationBusy"
+              @select="roleError = ''; isEditingRole = true"
+            >
+              <template #icon><Pencil :size="20" /></template>
+            </AppActionCard>
 
-            <button v-if="!hasLimitations" @click="openLimitationsModal" :disabled="isUserMutationBusy" class="profile-control">
-              <span class="profile-control__icon" aria-hidden="true"><AlertTriangle :size="18" /></span>
-              <span class="profile-control__label">اعمال محدودیت</span>
-            </button>
-            <button v-else @click="removeLimitations" :disabled="isUserMutationBusy" class="profile-control unlimit-btn">
-                <span class="profile-control__icon" aria-hidden="true"><Check :size="18" /></span>
-                <span class="profile-control__label">رفع محدودیت</span>
-            </button>
+            <AppActionCard
+              v-if="!hasLimitations"
+              class="profile-control"
+              title="اعمال محدودیت"
+              tone="warning"
+              :disabled="isUserMutationBusy"
+              @select="openLimitationsModal"
+            >
+              <template #icon><AlertTriangle :size="20" /></template>
+            </AppActionCard>
+            <AppActionCard
+              v-else
+              class="profile-control unlimit-btn"
+              title="رفع محدودیت"
+              tone="success"
+              :disabled="isUserMutationBusy"
+              @select="removeLimitations"
+            >
+              <template #icon><Check :size="20" /></template>
+            </AppActionCard>
 
-            <button v-if="!isRestricted" @click="openBlockModal" :disabled="isUserMutationBusy" class="profile-control block-btn">
-                <span class="profile-control__icon" aria-hidden="true"><Ban :size="18" /></span>
-                <span class="profile-control__label">مسدود کردن</span>
-            </button>
-            <button v-else @click="unblockUser" :disabled="isUserMutationBusy" class="profile-control unblock-btn">
-                <span class="profile-control__icon" aria-hidden="true"><Undo2 :size="18" /></span>
-                <span class="profile-control__label">رفع مسدودیت</span>
-            </button>
+            <AppActionCard
+              v-if="!isRestricted"
+              class="profile-control block-btn"
+              title="مسدود کردن"
+              tone="danger"
+              :disabled="isUserMutationBusy"
+              @select="openBlockModal"
+            >
+              <template #icon><Ban :size="20" /></template>
+            </AppActionCard>
+            <AppActionCard
+              v-else
+              class="profile-control unblock-btn"
+              title="رفع مسدودیت"
+              tone="success"
+              :disabled="isUserMutationBusy"
+              @select="unblockUser"
+            >
+              <template #icon><Undo2 :size="20" /></template>
+            </AppActionCard>
 
-            <button @click="showSettings = false" class="profile-control back-btn">
-              <span class="profile-control__icon" aria-hidden="true"><ChevronLeft :size="18" /></span>
-              <span class="profile-control__label">بازگشت</span>
-            </button>
+            <AppActionCard
+              class="profile-control back-btn"
+              title="بازگشت"
+              :disabled="isUserMutationBusy"
+              @select="showSettings = false"
+            >
+              <template #icon><ChevronLeft :size="20" /></template>
+            </AppActionCard>
         </div>
       </template>
     </div>
@@ -1436,40 +1508,50 @@ async function confirmPendingAction() {
     >
       <div v-if="!showCustomDateInput">
         <div class="duration-list">
-          <button v-for="duration in blockDurations" :key="duration.minutes"
-                  :disabled="isUserMutationBusy"
-                  @click="blockUser(duration.minutes)" class="duration-btn">
+          <AppButton
+            v-for="duration in blockDurations"
+            :key="duration.minutes"
+            class="duration-btn"
+            variant="secondary"
+            size="sm"
+            :disabled="isUserMutationBusy"
+            @click="blockUser(duration.minutes)"
+          >
             {{ duration.label }}
-          </button>
+          </AppButton>
         </div>
       </div>
 
       <div v-else class="custom-date-section">
-        <label>تاریخ و زمان پایان مسدودیت:</label>
-        <div
+        <span class="custom-date-label">تاریخ و زمان پایان مسدودیت:</span>
+        <button
+          type="button"
           class="custom-date-trigger"
+          :disabled="isUserMutationBusy"
           @click="initDatePicker(customDate); showBlockDateModal = true"
         >
           {{ customDate || 'انتخاب تاریخ...' }}
-        </div>
-
-        <div class="action-buttons">
-          <button @click="blockUserCustom" :disabled="isUserMutationBusy" class="save-btn">
-            {{ isActionBusy('block') ? 'در حال ثبت...' : 'تایید نهایی' }}
-          </button>
-          <button @click="showCustomDateInput = false" :disabled="isUserMutationBusy" class="cancel-btn">بازگشت</button>
-        </div>
+        </button>
       </div>
 
       <p v-if="blockError" class="user-action-feedback user-action-feedback--error" role="alert">{{ blockError }}</p>
-      <button
-        v-if="!showCustomDateInput"
-        @click="closeBlockModal"
-        :disabled="isUserMutationBusy"
-        class="cancel-btn full-width"
-      >
-        انصراف
-      </button>
+      <template #actions>
+        <template v-if="showCustomDateInput">
+          <AppButton class="save-btn" variant="primary" :disabled="isUserMutationBusy" :loading="isActionBusy('block')" @click="blockUserCustom">
+            تایید نهایی
+          </AppButton>
+          <AppButton class="cancel-btn" variant="secondary" :disabled="isUserMutationBusy" @click="showCustomDateInput = false">بازگشت</AppButton>
+        </template>
+        <AppButton
+          v-else
+          class="cancel-btn full-width"
+          variant="secondary"
+          :disabled="isUserMutationBusy"
+          @click="closeBlockModal"
+        >
+          انصراف
+        </AppButton>
+      </template>
     </AppResponsiveDialog>
 
     <!-- مودال اعمال محدودیت -->
@@ -1480,47 +1562,48 @@ async function confirmPendingAction() {
       panel-class="modal-content"
       @close="closeLimitationsModal"
     >
-      <div class="form-group">
-        <label>مجموع تعداد معاملات:</label>
-        <input type="number" v-model.number="limitMaxTrades" class="form-input" min="0" placeholder="نامحدود (خالی)" :disabled="isUserMutationBusy" />
-      </div>
-      <div class="form-group">
-        <label>مجموع تعداد کالای معامله شده:</label>
-        <input type="number" v-model.number="limitMaxCommodities" class="form-input" min="0" placeholder="نامحدود (خالی)" :disabled="isUserMutationBusy" />
-      </div>
-      <div class="form-group">
-        <label>مجموع ارسال لفظ در کانال:</label>
-        <input type="number" v-model.number="limitMaxRequests" class="form-input" min="0" placeholder="نامحدود (خالی)" :disabled="isUserMutationBusy" />
-      </div>
+      <div class="limitations-form">
+      <AppFormField v-slot="{ id }" label="مجموع تعداد معاملات:">
+        <AppInput :id="id" v-model.number="limitMaxTrades" class="form-input" type="number" min="0" placeholder="نامحدود (خالی)" :disabled="isUserMutationBusy" />
+      </AppFormField>
+      <AppFormField v-slot="{ id }" label="مجموع تعداد کالای معامله شده:">
+        <AppInput :id="id" v-model.number="limitMaxCommodities" class="form-input" type="number" min="0" placeholder="نامحدود (خالی)" :disabled="isUserMutationBusy" />
+      </AppFormField>
+      <AppFormField v-slot="{ id }" label="مجموع ارسال لفظ در کانال:">
+        <AppInput :id="id" v-model.number="limitMaxRequests" class="form-input" type="number" min="0" placeholder="نامحدود (خالی)" :disabled="isUserMutationBusy" />
+      </AppFormField>
 
-      <div class="form-group">
-        <label>مدت زمان محدودیت:</label>
+      <AppFormField v-slot="{ id }" label="مدت زمان محدودیت:">
         <AppSelect
+          :id="id"
           :model-value="limitDurationSelectValue"
           class="form-select"
           :options="limitDurationOptions"
           :disabled="isUserMutationBusy"
           @update:modelValue="setLimitDurationValue"
         />
+      </AppFormField>
       </div>
 
       <div v-if="limitDurationMinutes === -1" class="custom-date-section">
-        <label>تاریخ پایان:</label>
-        <div
+        <span class="custom-date-label">تاریخ پایان:</span>
+        <button
+          type="button"
           class="custom-date-trigger"
+          :disabled="isUserMutationBusy"
           @click="initDatePicker(customLimitDate); showLimitDateModal = true"
         >
           {{ customLimitDate || 'انتخاب تاریخ...' }}
-        </div>
+        </button>
       </div>
 
       <p v-if="limitationsError" class="user-action-feedback user-action-feedback--error" role="alert">{{ limitationsError }}</p>
-      <div class="action-buttons">
-        <button @click="saveLimitations" :disabled="isUserMutationBusy" class="save-btn">
-          {{ isActionBusy('limitations') ? 'در حال ذخیره...' : 'ذخیره' }}
-        </button>
-        <button @click="closeLimitationsModal" :disabled="isUserMutationBusy" class="cancel-btn">انصراف</button>
-      </div>
+      <template #actions>
+        <AppButton class="save-btn" variant="primary" :disabled="isUserMutationBusy" :loading="isActionBusy('limitations')" @click="saveLimitations">
+          ذخیره
+        </AppButton>
+        <AppButton class="cancel-btn" variant="secondary" :disabled="isUserMutationBusy" @click="closeLimitationsModal">انصراف</AppButton>
+      </template>
     </AppResponsiveDialog>
 
     <template v-if="!isAdminView">
@@ -1532,19 +1615,22 @@ async function confirmPendingAction() {
           label="راهنمای پنل کاربری"
           text="از این بخش به پیام‌های سیستمی و تنظیمات مجاز همین حساب دسترسی داری. گزینه‌های مدیریتی فقط برای ادمین‌ها نمایش داده می‌شود."
         />
-        <button class="profile-control notification-btn" @click="emit('navigate', 'notifications')">
-          <span class="profile-control__icon" aria-hidden="true"><Bell :size="18" /></span>
-          <span class="profile-control__label">صندوق پیام‌ها</span>
-        </button>
-        <!-- دکمه تنظیمات فقط برای نقش‌های غیر عادی -->
-        <button
+        <AppActionCard
+          class="profile-control notification-btn"
+          title="صندوق پیام‌ها"
+          @select="emit('navigate', 'notifications')"
+        >
+          <template #icon><Bell :size="20" /></template>
+        </AppActionCard>
+        <AppActionCard
           v-if="user.role !== 'عادی'"
           class="profile-control settings-btn"
-          @click="emit('navigate', 'user_settings')"
+          title="تنظیمات"
+          tone="primary"
+          @select="emit('navigate', 'user_settings')"
         >
-          <span class="profile-control__icon" aria-hidden="true"><Settings :size="18" /></span>
-          <span class="profile-control__label">تنظیمات</span>
-        </button>
+          <template #icon><Settings :size="20" /></template>
+        </AppActionCard>
       </div>
     </template>
   </div>
@@ -1584,10 +1670,9 @@ async function confirmPendingAction() {
       </div>
       <!-- Footer moved outside wrapper to ensure visibility -->
       <div class="integrated-footer">
-        <button @click="showBlockDateModal = false" class="integrated-cancel-btn">انصراف</button>
-
-        <button v-if="pickerStep === 1" @click="handleNextStep" class="integrated-save-btn">ادامه</button>
-        <button v-if="pickerStep === 2" @click="handleFinalSubmit" class="integrated-save-btn">تایید نهایی</button>
+        <AppButton class="integrated-cancel-btn cancel-btn" variant="secondary" @click="showBlockDateModal = false">انصراف</AppButton>
+        <AppButton v-if="pickerStep === 1" class="integrated-save-btn save-btn" variant="primary" @click="handleNextStep">ادامه</AppButton>
+        <AppButton v-if="pickerStep === 2" class="integrated-save-btn save-btn" variant="primary" @click="handleFinalSubmit">تایید نهایی</AppButton>
       </div>
     </AppResponsiveDialog>
 
@@ -1626,10 +1711,9 @@ async function confirmPendingAction() {
       </div>
       <!-- Footer moved outside wrapper to ensure visibility -->
       <div class="integrated-footer">
-        <button @click="showLimitDateModal = false" class="integrated-cancel-btn">انصراف</button>
-
-        <button v-if="pickerStep === 1" @click="handleNextStep" class="integrated-save-btn">ادامه</button>
-        <button v-if="pickerStep === 2" @click="handleFinalSubmit" class="integrated-save-btn">تایید نهایی</button>
+        <AppButton class="integrated-cancel-btn cancel-btn" variant="secondary" @click="showLimitDateModal = false">انصراف</AppButton>
+        <AppButton v-if="pickerStep === 1" class="integrated-save-btn save-btn" variant="primary" @click="handleNextStep">ادامه</AppButton>
+        <AppButton v-if="pickerStep === 2" class="integrated-save-btn save-btn" variant="primary" @click="handleFinalSubmit">تایید نهایی</AppButton>
       </div>
     </AppResponsiveDialog>
 
@@ -1653,42 +1737,22 @@ async function confirmPendingAction() {
 .integrated-footer {
     width: 100%;
     max-width: 320px;
-    padding: 10px;
-    border-top: 1px solid #eee;
-    background: #fff;
+    padding: 0.75rem;
+    border-top: 1px solid var(--ds-border-light);
+    background: var(--ds-bg-card);
     text-align: center;
-    border-bottom-left-radius: 8px;
-    border-bottom-right-radius: 8px;
-    margin-top: -5px; /* Pull it up slightly to connect with picker */
+    border-bottom-left-radius: var(--ds-radius-md);
+    border-bottom-right-radius: var(--ds-radius-md);
+    margin-top: -5px;
     z-index: 10;
     display: flex;
     justify-content: space-between;
-    gap: 10px;
+    gap: 0.625rem;
 }
 
-.integrated-save-btn {
-    flex: 1;
-    background: linear-gradient(135deg, #f59e0b, #d97706);
-    color: white;
-    border: none;
-    padding: 10px;
-    border-radius: 10px;
-    font-size: 15px;
-    font-weight: bold;
-    cursor: pointer;
-    box-shadow: 0 4px 12px rgba(245, 158, 11, 0.25);
-}
-
+.integrated-save-btn,
 .integrated-cancel-btn {
     flex: 1;
-    background-color: white;
-    color: #6b7280;
-    border: 1px solid rgba(245, 158, 11, 0.15);
-    padding: 10px;
-    border-radius: 10px;
-    font-size: 15px;
-    font-weight: bold;
-    cursor: pointer;
 }
 
 /* Native time picker styles */
@@ -1696,35 +1760,35 @@ async function confirmPendingAction() {
     display: flex;
     flex-direction: column;
     align-items: center;
-    padding: 20px;
-    background: #f8f9fa;
-    border-radius: 12px;
-    margin: 10px 0;
+    padding: 1.25rem;
+    background: var(--ds-bg-inset);
+    border-radius: var(--ds-radius-md);
+    margin: 0.625rem 0;
 }
 
 .native-time-picker label {
-    font-size: 18px;
-    font-weight: bold;
-    color: #333;
-    margin-bottom: 15px;
+    font-size: var(--ds-font-lg);
+    font-weight: 800;
+    color: var(--ds-text-primary);
+    margin-bottom: 0.875rem;
 }
 
 .native-time-picker .time-input {
-    font-size: 32px;
-    padding: 15px 25px;
-    border: 2px solid #f59e0b;
-    border-radius: 12px;
+    font-size: 2rem;
+    padding: 0.875rem 1.5rem;
+    border: 1px solid var(--ds-border-medium);
+    border-radius: var(--ds-radius-md);
     text-align: center;
-    background: white;
-    color: #1f2937;
+    background: var(--ds-bg-card);
+    color: var(--ds-text-primary);
     width: auto;
     min-width: 150px;
 }
 
 .native-time-picker .time-input:focus {
     outline: none;
-    border-color: #d97706;
-    box-shadow: 0 0 10px rgba(245, 158, 11, 0.3);
+    border-color: var(--ds-primary-500);
+    box-shadow: var(--ds-focus-ring);
 }
 
 
@@ -1848,26 +1912,27 @@ async function confirmPendingAction() {
 .custom-date-trigger {
     display: block;
     width: 100%;
-    padding: 0.375rem 0.75rem; /* Match Bootstrap/form-select padding */
-    font-size: 1rem;
-    font-weight: 400;
+    min-height: var(--ds-touch-target);
+    padding: 0.625rem 0.75rem;
+    font: inherit;
+    font-size: var(--ds-font-base);
+    font-weight: 600;
     line-height: 1.5;
-    color: #212529;
-    background-color: #fff;
-    background-clip: padding-box;
-    border: 1px solid #ced4da;
-    border-radius: 0.25rem;
+    color: var(--ds-text-primary);
+    background-color: var(--ds-bg-card);
+    border: 1px solid var(--ds-border-medium);
+    border-radius: var(--ds-radius-md);
     cursor: pointer;
     user-select: none;
     -webkit-user-select: none;
     -webkit-tap-highlight-color: transparent;
-    transition: border-color .15s ease-in-out,box-shadow .15s ease-in-out;
-    text-align: center; /* Center text for better mobile look */
+    transition: all 0.2s;
+    text-align: center;
 }
 
 .custom-date-trigger:active {
-    background-color: #f8f9fa;
-    border-color: #86b7fe;
+    background-color: var(--ds-bg-inset);
+    border-color: var(--ds-primary-400);
 }
 
 .date-picker-wrapper {
@@ -1879,88 +1944,82 @@ async function confirmPendingAction() {
 
 <style scoped>
 .card {
-  background: rgba(255, 255, 255, 0.7);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border: 1px solid rgba(245, 158, 11, 0.1);
-  border-radius: 1.25rem;
-  padding: 1.25rem;
-  box-shadow: 0 4px 16px rgba(0,0,0,0.04);
+  background: var(--ds-bg-card);
+  border: 1px solid var(--ds-border-medium);
+  border-radius: var(--ds-radius-xl);
+  padding: var(--ds-card-padding);
+  box-shadow: var(--ds-shadow-md);
+  min-width: 0;
+}
+.admin-user-profile {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-section-gap);
+}
+.admin-user-profile > .header-row {
+  padding: 0 0 0.25rem;
+  background: transparent;
+  max-width: none;
+}
+.profile-nav-back {
+  justify-self: end;
 }
 h2 {
-  margin-top: 0;
-  margin-bottom: 1.25rem;
-  font-size: 1rem;
+  margin: 0;
+  font-size: var(--ds-font-lg);
   font-weight: 800;
-  color: #1f2937;
+  color: var(--ds-text-primary);
 }
 .profile-details {
   display: grid;
   gap: 0.625rem;
-  margin-bottom: 1.25rem;
+  min-width: 0;
 }
 .detail-item {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 0.75rem;
+  min-width: 0;
   padding: 0.75rem 0.875rem;
-  background: white;
-  border: 1px solid rgba(245, 158, 11, 0.08);
-  border-radius: 0.875rem;
+  background: var(--ds-bg-card);
+  border: 1px solid var(--ds-border-light);
+  border-radius: var(--ds-radius-md);
 }
 .label {
   font-weight: 700;
-  color: #9ca3af;
-  font-size: 0.75rem;
+  color: var(--ds-text-placeholder);
+  font-size: var(--ds-font-sm);
 }
 .value {
   font-weight: 700;
-  color: #1f2937;
-  font-size: 0.85rem;
+  color: var(--ds-text-primary);
+  font-size: var(--ds-font-base);
+  min-width: 0;
+  text-align: left;
 }
 .value.code {
   direction: ltr;
-  font-family: monospace;
+  font-family: var(--ds-font-mono);
 }
-
-
-
 
 .edit-section {
-  background: linear-gradient(135deg, #fffbeb, #fef3c7);
+  background: var(--ds-primary-50);
   padding: 1rem;
-  border-radius: 1rem;
-  border: 1px solid rgba(245, 158, 11, 0.15);
-  margin-top: 0.875rem;
+  border-radius: var(--ds-radius-lg);
+  border: 1px solid rgba(245, 158, 11, 0.18);
+  margin-top: 0.25rem;
+  display: grid;
+  gap: 0.75rem;
 }
-.form-group {
-  margin-bottom: 0.75rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.375rem;
-}
-.form-group label {
-  font-size: 0.75rem;
-  font-weight: 700;
-  color: #6b7280;
-}
-.form-select, .form-input {
-  padding: 0.625rem;
-  border-radius: 0.75rem;
-  border: 1px solid rgba(245, 158, 11, 0.15);
-  background: white;
-  font-family: inherit;
-  font-size: 0.85rem;
+.form-select,
+.form-input {
   width: 100%;
   box-sizing: border-box;
-  outline: none;
   transition: all 0.2s;
 }
-.form-select:focus, .form-input:focus {
-  border-color: #f59e0b;
-  box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.1);
-}
-input[type="number"].form-select, input[type="number"].form-input {
+input[type="number"].form-select,
+input[type="number"].form-input {
   -moz-appearance: textfield;
   appearance: textfield;
   cursor: text;
@@ -1977,263 +2036,156 @@ input[type="number"].form-input::-webkit-inner-spin-button {
 .action-buttons {
   display: flex;
   gap: 0.625rem;
-  margin-top: 1rem;
 }
-.save-btn {
-  flex: 1;
-  padding: 0.625rem;
-  background: linear-gradient(135deg, #f59e0b, #d97706);
-  color: white;
-  border: none;
-  border-radius: 0.75rem;
-  cursor: pointer;
-  font-weight: 700;
-  font-size: 0.85rem;
-  transition: all 0.2s;
-  -webkit-tap-highlight-color: transparent;
-}
-.save-btn:active { transform: scale(0.98); }
+.save-btn,
 .cancel-btn {
   flex: 1;
-  padding: 0.625rem;
-  background: white;
-  color: #6b7280;
-  border: 1px solid rgba(245, 158, 11, 0.15);
-  border-radius: 0.75rem;
-  cursor: pointer;
-  font-weight: 700;
-  font-size: 0.85rem;
+  min-width: 0;
   transition: all 0.2s;
-  -webkit-tap-highlight-color: transparent;
 }
-.cancel-btn:active { background: #f9fafb; }
 
 .profile-menu-card {
   position: relative;
-  margin-top: 0.875rem;
+  margin-top: 0.25rem;
   padding: 1rem;
   padding-left: 3.8rem;
-  border: 1px solid rgba(15, 23, 42, 0.06);
-  border-radius: 1.25rem;
-  background: linear-gradient(135deg, rgba(255, 251, 235, 0.72), rgba(255, 255, 255, 0.96));
-  box-shadow: 0 14px 32px rgba(15, 23, 42, 0.07);
+  border: 1px solid var(--ds-border-medium);
+  border-radius: var(--ds-radius-xl);
+  background: var(--ds-bg-card);
+  box-shadow: var(--ds-shadow-md);
   display: flex;
   flex-direction: column;
-  gap: 0.625rem;
+  gap: 0.65rem;
+  min-width: 0;
 }
 
 .profile-user-actions {
-  margin-top: 1rem;
+  margin-top: 0.25rem;
 }
 
 .profile-control {
   width: 100%;
-  min-height: 3.15rem;
-  padding: 0.72rem 0.8rem;
-  font-size: 0.85rem;
-  font-weight: 850;
-  background: rgba(255, 255, 255, 0.94);
-  color: #1f2937;
-  border: 1px solid rgba(15, 23, 42, 0.07);
-  border-radius: 1rem;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: flex-start;
-  gap: 0.72rem;
   transition: all 0.2s;
-  text-align: right;
-  -webkit-tap-highlight-color: transparent;
-}
-.profile-control:hover {
-  border-color: rgba(245, 158, 11, 0.3);
-  background: #fffbeb;
-}
-.profile-control:active {
-  transform: scale(0.98);
-}
-.profile-control__icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 2rem;
-  height: 2rem;
-  border-radius: 0.8rem;
-  background: rgba(245, 158, 11, 0.12);
-  color: #92400e;
-  font-size: 0.95rem;
-  line-height: 1;
-  flex: 0 0 auto;
 }
 
-.profile-control__label {
-  flex: 1;
-  min-width: 0;
-}
+.text-red { color: var(--ds-danger-600); font-weight: 800; }
 
-.text-red { color: #ef4444; font-weight: bold; }
-
-.block-btn {
-  background: #fef2f2 !important;
-  color: #991b1b !important;
-  border-color: #fecaca !important;
-}
-.block-btn .profile-control__icon,
-.delete-btn .profile-control__icon {
-  background: rgba(239, 68, 68, 0.12);
-  color: #b91c1c;
-}
-.unblock-btn {
-  background: #f0fdf4 !important;
-  color: #166534 !important;
-  border-color: #bbf7d0 !important;
-}
-.unlimit-btn {
-  background: #f0fdf4 !important;
-  color: #166534 !important;
-  border-color: #bbf7d0 !important;
-}
-.unblock-btn .profile-control__icon,
-.unlimit-btn .profile-control__icon {
-  background: rgba(34, 197, 94, 0.14);
-  color: #166534;
-}
-.settings-btn {
-  background: linear-gradient(135deg, #fffbeb, #fef3c7) !important;
-  color: #92400e !important;
-  border-color: rgba(245, 158, 11, 0.2) !important;
-}
-.delete-btn {
-  background: #fef2f2 !important;
-  color: #dc2626 !important;
-  border-color: #fecaca !important;
-}
-.back-btn {
-  background: white !important;
-  color: #6b7280 !important;
-  border-color: rgba(245, 158, 11, 0.12) !important;
-}
-
-/* Modal Styles */
-.modal-overlay {
-  position: fixed;
-  top: 0; left: 0; right: 0; bottom: 0;
-  background: rgba(0,0,0,0.5);
-  backdrop-filter: blur(4px);
-  display: flex;
-  z-index: 1000;
-  padding: 1.25rem;
-  overflow-y: auto;
-}
 .modal-content {
-  background: white;
-  border-radius: 1.5rem;
-  padding: 1.25rem;
-  width: 100%;
-  max-width: 320px;
-  min-height: 420px;
-  box-shadow: 0 16px 40px rgba(0,0,0,0.15);
-  text-align: center;
-  margin: auto;
-}
-.modal-content h3 {
-  margin-top: 0;
-  margin-bottom: 1rem;
-  font-size: 1rem;
-  font-weight: 800;
-  color: #1f2937;
+  text-align: right;
 }
 .duration-list {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 0.5rem;
-  margin-bottom: 1rem;
+  margin-bottom: 0.25rem;
 }
 .duration-btn {
-  padding: 0.75rem;
-  border: 1px solid rgba(245, 158, 11, 0.15);
-  border-radius: 0.875rem;
-  background: white;
-  color: #1f2937;
-  cursor: pointer;
-  font-size: 0.8rem;
-  font-weight: 600;
+  width: 100%;
+  white-space: normal;
   transition: all 0.2s;
-  -webkit-tap-highlight-color: transparent;
 }
-.duration-btn:hover {
-  background: #fffbeb;
-  border-color: rgba(245, 158, 11, 0.3);
-  color: #92400e;
+.duration-list .duration-btn:last-child {
+  grid-column: 1 / -1;
 }
-.duration-btn:active { transform: scale(0.95); }
 .full-width { width: 100%; }
 .custom-date-section {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
-  margin-bottom: 1rem;
+  margin-bottom: 0.25rem;
   text-align: right;
+}
+.custom-date-label {
+  font-size: var(--ds-font-sm);
+  font-weight: 700;
+  color: var(--ds-text-secondary);
+}
+.limitations-form {
+  display: grid;
+  gap: 0.75rem;
 }
 
 .limitations-box {
-  background: linear-gradient(135deg, #fffbeb, #fff7ed);
-  border: 1px solid #fed7aa;
-  border-radius: 0.875rem;
+  background: var(--ds-warning-50);
+  border: 1px solid rgba(245, 158, 11, 0.22);
+  border-radius: var(--ds-radius-md);
   padding: 0.75rem;
-  margin-top: 0.5rem;
 }
 .limitations-box h4 {
   margin: 0 0 0.5rem 0;
-  font-size: 0.8rem;
-  font-weight: 700;
-  color: #c2410c;
+  font-size: var(--ds-font-base);
+  font-weight: 800;
+  color: var(--ds-warning-700);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
 }
 .limit-item {
-  display: flex; justify-content: space-between;
-  font-size: 0.75rem; margin-bottom: 0.25rem; color: #9a3412;
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  font-size: var(--ds-font-sm);
+  margin-bottom: 0.25rem;
+  color: var(--ds-warning-700);
 }
 .limit-expiry {
-  margin-top: 0.5rem; padding-top: 0.5rem;
-  border-top: 1px dashed #fed7aa;
-  font-size: 0.7rem; color: #ea580c;
-  display: flex; justify-content: space-between;
+  margin-top: 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px dashed rgba(245, 158, 11, 0.35);
+  font-size: var(--ds-font-xs);
+  color: var(--ds-warning-600);
+  display: flex;
+  justify-content: space-between;
 }
 .usage-ratio {
   font-family: 'Vazirmatn', tahoma, sans-serif;
-  font-weight: 700; color: #c2410c; direction: ltr;
+  font-weight: 700;
+  color: var(--ds-warning-700);
+  direction: ltr;
 }
 
-/* Countdown Timer Styles */
 .countdown-box {
-  display: flex; align-items: center; gap: 0.5rem;
-  padding: 0.75rem 1rem; border-radius: 0.875rem; margin: 0.75rem 0;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem;
+  border-radius: var(--ds-radius-md);
   animation: pulse 2s infinite;
 }
 .restriction-countdown {
-  background: linear-gradient(135deg, #fef2f2, #fee2e2);
-  border: 1px solid #fecaca;
+  background: var(--ds-danger-50);
+  border: 1px solid var(--ds-danger-200);
 }
 .countdown-icon { font-size: 1rem; }
-.countdown-label { font-size: 0.75rem; color: #7f1d1d; }
+.countdown-label { font-size: var(--ds-font-sm); color: var(--ds-danger-800); }
 .countdown-value {
-  font-family: 'Vazirmatn', monospace;
-  font-size: 0.8rem; font-weight: 700; color: #dc2626;
-  background: rgba(255,255,255,0.7);
-  padding: 0.25rem 0.625rem; border-radius: 0.5rem;
-  margin-right: auto; direction: ltr;
+  font-family: 'Vazirmatn', var(--ds-font-mono);
+  font-size: var(--ds-font-base);
+  font-weight: 700;
+  color: var(--ds-danger-600);
+  background: var(--ds-bg-card);
+  padding: 0.25rem 0.625rem;
+  border-radius: var(--ds-radius-sm);
+  margin-right: auto;
+  direction: ltr;
 }
 .countdown-inline {
-  display: flex; align-items: center; gap: 0.375rem;
-  margin-top: 0.625rem; padding-top: 0.625rem;
-  border-top: 1px dashed #fbbf24;
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  margin-top: 0.625rem;
+  padding-top: 0.625rem;
+  border-top: 1px dashed var(--ds-primary-300);
 }
 .countdown-inline .countdown-icon { font-size: 0.8rem; }
-.countdown-inline .countdown-label { font-size: 0.7rem; color: #92400e; }
+.countdown-inline .countdown-label { font-size: var(--ds-font-xs); color: var(--ds-primary-800); }
 .countdown-inline .countdown-value {
-  font-size: 0.75rem; font-weight: 700; color: #d97706;
-  background: rgba(254, 243, 199, 0.8);
-  padding: 0.15rem 0.5rem; border-radius: 0.375rem;
+  font-size: var(--ds-font-sm);
+  font-weight: 700;
+  color: var(--ds-primary-600);
+  background: var(--ds-primary-100);
+  padding: 0.15rem 0.5rem;
+  border-radius: var(--ds-radius-sm);
 }
 @keyframes pulse {
   0%, 100% { opacity: 1; }
@@ -2241,40 +2193,42 @@ input[type="number"].form-input::-webkit-inner-spin-button {
 }
 
 .sessions-config-box {
-  margin: 0.75rem 0;
+  margin: 0.25rem 0;
   padding: 0.75rem;
-  background: #f0fdf4;
-  border: 1px solid #bbf7d0;
-  border-radius: 0.75rem;
+  background: var(--ds-success-50);
+  border: 1px solid rgba(16, 185, 129, 0.22);
+  border-radius: var(--ds-radius-md);
+  display: grid;
+  gap: 0.5rem;
 }
 .admin-sensitive-readonly {
-  margin: 0.75rem 0;
+  margin: 0.25rem 0;
   padding: 0.7rem 0.8rem;
-  border: 1px solid #bfdbfe;
-  border-radius: 0.75rem;
-  background: #eff6ff;
-  color: #1d4ed8;
-  font-size: 0.8rem;
+  border: 1px solid rgba(14, 165, 233, 0.28);
+  border-radius: var(--ds-radius-md);
+  background: var(--ds-info-50);
+  color: var(--ds-info-700);
+  font-size: var(--ds-font-base);
   line-height: 1.75;
 }
 .user-action-feedback {
-  margin: 0.75rem 0;
+  margin: 0.25rem 0;
   padding: 0.65rem 0.75rem;
   border: 1px solid;
-  border-radius: 0.75rem;
-  font-size: 0.78rem;
+  border-radius: var(--ds-radius-md);
+  font-size: var(--ds-font-sm);
   line-height: 1.7;
   text-align: right;
 }
 .user-action-feedback--success {
-  color: #166534;
-  background: #f0fdf4;
-  border-color: #bbf7d0;
+  color: var(--ds-success-800);
+  background: var(--ds-success-50);
+  border-color: rgba(16, 185, 129, 0.28);
 }
 .user-action-feedback--error {
-  color: #991b1b;
-  background: #fef2f2;
-  border-color: #fecaca;
+  color: var(--ds-danger-800);
+  background: var(--ds-danger-50);
+  border-color: var(--ds-danger-200);
 }
 .quota-feedback {
   margin-bottom: 0;
@@ -2283,56 +2237,35 @@ input[type="number"].form-input::-webkit-inner-spin-button {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  background: var(--ds-bg-card);
 }
 .owner-limit-row {
-  margin-top: 0.5rem;
+  margin-top: 0;
 }
 .inline-edit {
   display: flex;
   align-items: center;
+  min-width: 0;
 }
 .form-select-sm {
-  padding: 0.25rem 0.5rem;
-  border-radius: 0.5rem;
-  border: 1px solid #d1d5db;
-  font-size: 0.8rem;
-  background: white;
+  min-width: 4.5rem;
 }
 .form-input-sm {
   width: 4.5rem;
-  padding: 0.25rem 0.5rem;
-  border-radius: 0.5rem;
-  border: 1px solid #d1d5db;
-  font-size: 0.8rem;
-  background: white;
   text-align: center;
 }
-.inline-control {
-  border: 1px solid #cbd5e1;
-  background: white;
-  color: #0f172a;
-  border-radius: 0.625rem;
-  padding: 0.4rem 0.75rem;
-  font-size: 0.8rem;
-  font-weight: 700;
-  cursor: pointer;
-}
 .inline-control.is-disabled {
-  color: #991b1b;
-  background: #fef2f2;
-  border-color: #fecaca;
-}
-.danger-inline-btn {
-  color: #b91c1c;
-  background: #fff1f2;
-  border-color: #fecdd3;
-}
-.danger-inline-btn:disabled {
-  opacity: 0.7;
-  cursor: wait;
+  color: var(--ds-danger-800);
+  background: var(--ds-danger-50);
+  border-color: var(--ds-danger-200);
 }
 .terminate-sessions-row {
   align-items: flex-start;
+}
+.admin-lock-note {
+  font-size: var(--ds-font-sm);
+  color: var(--ds-text-muted);
+  margin-right: 0.5rem;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -2345,11 +2278,8 @@ input[type="number"].form-input::-webkit-inner-spin-button {
   .custom-date-trigger {
     transition: none;
   }
-}
-</style><style scoped>
-.admin-lock-note {
-  font-size: 0.75rem;
-  color: #8f9296;
-  margin-right: 0.5rem;
+  .countdown-box {
+    animation: none;
+  }
 }
 </style>
