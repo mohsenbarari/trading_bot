@@ -206,6 +206,52 @@ class TelegramDeliveryOfferFreshnessTests(unittest.IsolatedAsyncioTestCase):
             )
         )
 
+    async def test_active_edit_reclassifies_when_wall_clock_phase_advanced(self):
+        job = make_job(action=TelegramDeliveryAction.OTHER_ACTIVE_OFFER_EDIT)
+        projection = SimpleNamespace(phase=SimpleNamespace(value="overtime"))
+
+        with patch.object(
+            freshness,
+            "_channel_lifecycle_for_payload",
+            return_value=projection,
+        ):
+            decision = await self.decide(
+                job,
+                offer=make_offer(),
+                state=make_state(),
+            )
+
+        self.assertEqual(decision.outcome, TelegramFreshnessOutcome.RECLASSIFY)
+        self.assertEqual(
+            decision.replacement_action,
+            TelegramDeliveryAction.OVERTIME_CHANNEL_EDIT,
+        )
+        self.assertEqual(
+            decision.reason,
+            "offer_freshness_lifecycle_phase_changed",
+        )
+
+    async def test_lifecycle_edit_reclassifies_if_phase_returns_to_normal(self):
+        job = make_job(action=TelegramDeliveryAction.OVERTIME_CHANNEL_EDIT)
+        projection = SimpleNamespace(phase=SimpleNamespace(value="normal"))
+
+        with patch.object(
+            freshness,
+            "_channel_lifecycle_for_payload",
+            return_value=projection,
+        ):
+            decision = await self.decide(
+                job,
+                offer=make_offer(),
+                state=make_state(),
+            )
+
+        self.assertEqual(decision.outcome, TelegramFreshnessOutcome.RECLASSIFY)
+        self.assertEqual(
+            decision.replacement_action,
+            TelegramDeliveryAction.OTHER_ACTIVE_OFFER_EDIT,
+        )
+
     async def test_every_current_offer_action_accepts_only_its_canonical_payload(self):
         statuses = {
             TelegramDeliveryAction.OFFER_PUBLISH: OfferStatus.ACTIVE,

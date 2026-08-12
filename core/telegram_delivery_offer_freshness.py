@@ -69,6 +69,11 @@ _TERMINAL_ACTION_BY_STATUS = {
     OfferStatus.EXPIRED.value: TelegramDeliveryAction.EXPIRED_OFFER_EDIT,
     OfferStatus.CANCELLED.value: TelegramDeliveryAction.CANCELLED_OFFER_EDIT,
 }
+_LIFECYCLE_ACTION_BY_PHASE = {
+    "overtime": TelegramDeliveryAction.OVERTIME_CHANNEL_EDIT,
+    "final_tail": TelegramDeliveryAction.FINAL_TAIL_CHANNEL_EDIT,
+}
+_LIFECYCLE_EDIT_ACTIONS = frozenset(_LIFECYCLE_ACTION_BY_PHASE.values())
 
 
 class TelegramOfferFreshnessConfigurationError(ValueError):
@@ -238,6 +243,39 @@ def _terminal_reclassification(
     )
 
 
+def _active_lifecycle_reclassification(
+    offer: Offer,
+    *,
+    action: TelegramDeliveryAction,
+    now: datetime,
+) -> TelegramFreshnessDecision | None:
+    """Rebuild a validly-enqueued edit when only wall-clock phase changed.
+
+    Offer versions do not advance at the normal/overtime/final-tail boundary.
+    A payload that was canonical when queued can therefore differ from the
+    renderer by dispatch time.  Route that expected drift through the existing
+    immutable replacement path; arbitrary same-phase payload drift remains a
+    quarantine signal.
+    """
+
+    projection = _channel_lifecycle_for_payload(offer, as_of=now)
+    phase = _enum_value(getattr(projection, "phase", None))
+    replacement = _LIFECYCLE_ACTION_BY_PHASE.get(phase)
+    if replacement is not None and action != replacement:
+        return _decision(
+            TelegramFreshnessOutcome.RECLASSIFY,
+            replacement_action=replacement,
+            reason="offer_freshness_lifecycle_phase_changed",
+        )
+    if phase == "normal" and action in _LIFECYCLE_EDIT_ACTIONS:
+        return _decision(
+            TelegramFreshnessOutcome.RECLASSIFY,
+            replacement_action=TelegramDeliveryAction.OTHER_ACTIVE_OFFER_EDIT,
+            reason="offer_freshness_lifecycle_phase_changed",
+        )
+    return None
+
+
 def _publication_identity_shape_decision(
     state: OfferPublicationState | None,
     *,
@@ -285,7 +323,11 @@ def _publication_identity_shape_decision(
     return None
 
 
-def _channel_lifecycle_for_payload(offer: Offer):
+def _channel_lifecycle_for_payload(
+    offer: Offer,
+    *,
+    as_of: datetime | None = None,
+):
     from core.trading_settings import get_trading_settings
 
     return project_offer_channel_lifecycle(
@@ -293,6 +335,7 @@ def _channel_lifecycle_for_payload(offer: Offer):
         normal_lifetime_minutes=int(
             getattr(get_trading_settings(), "offer_expiry_minutes", 0) or 0
         ),
+        as_of=as_of,
     )
 
 
@@ -302,8 +345,9 @@ def build_authoritative_offer_delivery_payload(
     action: TelegramDeliveryAction,
     expected_channel_id: int,
     message_id: int | None = None,
+    as_of: datetime | None = None,
 ) -> dict[str, Any]:
-    projection = _channel_lifecycle_for_payload(offer)
+    projection = _channel_lifecycle_for_payload(offer, as_of=as_of)
     phase = projection.phase.value
     if action in OFFER_PUBLISH_ACTIONS:
         payload: dict[str, Any] = {
@@ -347,6 +391,7 @@ def _authoritative_payload_decision(
     *,
     action: TelegramDeliveryAction,
     expected_channel_id: int,
+    now: datetime,
 ) -> TelegramFreshnessDecision | None:
     payload = job.payload
     try:
@@ -369,6 +414,7 @@ def _authoritative_payload_decision(
         action=action,
         expected_channel_id=expected_channel_id,
         message_id=message_id,
+        as_of=now,
     )
     if normalized_payload != expected_payload:
         return _quarantined("offer_freshness_payload_not_authoritative")
@@ -532,6 +578,7 @@ async def validate_offer_telegram_delivery_freshness(
             offer,
             action=action,
             expected_channel_id=channel_id,
+            now=now,
         )
         if payload_decision is not None:
             return payload_decision
@@ -549,6 +596,13 @@ async def validate_offer_telegram_delivery_freshness(
     )
     if identity_decision is not None:
         return identity_decision
+    lifecycle_decision = _active_lifecycle_reclassification(
+        offer,
+        action=action,
+        now=now,
+    )
+    if lifecycle_decision is not None:
+        return lifecycle_decision
     version_decision = _source_version_decision(job, offer, action=action)
     if version_decision is not None:
         return version_decision
@@ -557,6 +611,7 @@ async def validate_offer_telegram_delivery_freshness(
         offer,
         action=action,
         expected_channel_id=channel_id,
+        now=now,
     )
     if payload_decision is not None:
         return payload_decision
