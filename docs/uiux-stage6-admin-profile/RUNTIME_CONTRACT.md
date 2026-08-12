@@ -1,4 +1,4 @@
-# Stage 6 Runtime Contract — delivered Phase 1–14
+# Stage 6 Runtime Contract — delivered Phase 1–16
 
 ## اصول غیرقابل‌جایگزین
 
@@ -163,6 +163,15 @@
 | جستجو | همان فرم session-local مانده است؛ `q` وارد URL/history/storage نمی‌شود. |
 | navigation | انتخاب ردیف همان `user_profile` را emit می‌کند؛ قرارداد Phase 2 حفظ شده است. |
 
+## Phase 16 — یکپارچگی ظاهر پوسته پروفایل عمومی
+
+| سطح | قرارداد تحویل‌شده |
+| --- | --- |
+| route فعال | `/users/:id` و `/profile`، همان `PublicProfile` موجود؛ API، router و query contract تازه‌ای ایجاد نشده است. |
+| بازگشت | همان هوک `.profile-nav-back` با `AppIconButton` و هدف ۴۴ پیکسل؛ ظاهر از `ui-icon-button` می‌آید. |
+| تلاش دوباره | همان هوک `.retry-btn` با `AppButton` secondary؛ بازیابی بدون mutation است. |
+| ویرایش آدرس | همان هوک `.address-edit-trigger` با `AppIconButton` و رنگ `--ds-success-*`؛ قرارداد ذخیره آدرس عوض نشده است. |
+
 ## مرزهای صریح
 
-این contract تا source تحویل‌شدهٔ Phase 15 در commit `e4a234106e132c2b4758f856d54a1836ec7bb9f7` را توصیف می‌کند. persistenceهای دیگر، protected Messenger internals، Sites، staging، production و closure کلی Stage 6 را authorize یا اثبات نمی‌کند.
+این contract تا source تحویل‌شدهٔ Phase 16 در commit `208edb374eeaecf6dea50f58ed3f86d7bb3b019a` را توصیف می‌کند. persistenceهای دیگر، protected Messenger internals، Sites، staging، production و closure کلی Stage 6 را authorize یا اثبات نمی‌کند.

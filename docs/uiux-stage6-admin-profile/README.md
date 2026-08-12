@@ -1,13 +1,13 @@
 # Stage 6 — Admin & Profile
 
-این پوشه یک بستهٔ توضیحیِ **mutable** برای برش تحویل‌شدهٔ Phase 1 تا Phase 15 است؛ freeze، `EVIDENCE_MANIFEST.json` یا مجوز closure کل Stage 6 نیست.
+این پوشه یک بستهٔ توضیحیِ **mutable** برای برش تحویل‌شدهٔ Phase 1 تا Phase 16 است؛ freeze، `EVIDENCE_MANIFEST.json` یا مجوز closure کل Stage 6 نیست.
 
 ## وضعیت دقیق
 
 - branch: `condidate/webapp-ui-ux-redesign-v2`
-- latest implementation: `e4a234106e132c2b4758f856d54a1836ec7bb9f7`
-- latest tree: `5c16e550acb28afdc928161047fb766713fca205`
-- delivered: Phase 1 (Admin landing)، Phase 2 (Admin user directory/detail)، Phase 3 (public-profile privacy/authority)، Phase 4 (invitation management)، Phase 5 (public-profile block/unblock)، Phase 6 (workspace account deletion)، Phase 7 (safe recovery برای پایان یک نشست workspace)، Phase 8 (safe recovery برای mutationهای رابطهٔ workspace)، Phase 9 (receipt-safe commodity/alias mutations)، Phase 10 (حذف امن کاربر مدیریت و پایان نشست‌ها)، Phase 11 (نشست‌های امن حساب)، Phase 12 (پاک‌سازی حافظه محلی حساب)، Phase 13 (تأیید امن تغییر وضعیت حساب، رفع مسدودیت و رفع محدودیت)، Phase 14 (یکپارچگی ظاهر مدیریت کاربر) و Phase 15 (یکپارچگی ظاهر فهرست کاربران مدیریت).
+- latest implementation: `208edb374eeaecf6dea50f58ed3f86d7bb3b019a`
+- latest tree: `36ced6afe032e442ac72cc73bdf9e8405a671f94`
+- delivered: Phase 1 (Admin landing)، Phase 2 (Admin user directory/detail)، Phase 3 (public-profile privacy/authority)، Phase 4 (invitation management)، Phase 5 (public-profile block/unblock)، Phase 6 (workspace account deletion)، Phase 7 (safe recovery برای پایان یک نشست workspace)، Phase 8 (safe recovery برای mutationهای رابطهٔ workspace)، Phase 9 (receipt-safe commodity/alias mutations)، Phase 10 (حذف امن کاربر مدیریت و پایان نشست‌ها)، Phase 11 (نشست‌های امن حساب)، Phase 12 (پاک‌سازی حافظه محلی حساب)، Phase 13 (تأیید امن تغییر وضعیت حساب، رفع مسدودیت و رفع محدودیت)، Phase 14 (یکپارچگی ظاهر مدیریت کاربر)، Phase 15 (یکپارچگی ظاهر فهرست کاربران مدیریت) و Phase 16 (یکپارچگی ظاهر پوسته پروفایل عمومی).
 - authority: `stage6CompleteAuthority=false`.
 - broader Stage 6 roadmap: partial/deferred؛ این بسته فقط واقعیت برش تحویل‌شده را ثبت می‌کند.
 
@@ -32,18 +32,19 @@
 15. `/admin/users/:id` تغییر وضعیت حساب، رفع مسدودیت و رفع محدودیت را فقط پس از پاسخ `200` با فیلدهای دقیق همان اقدام اعمال می‌کند؛ دیالوگ نام حساب یا موبایل ندارد، جملهٔ لغو/Escape دارد، cancel/Escape درخواستی نمی‌فرستد و خطا فقط copy ثابت امن می‌دهد.
 16. `/admin/users/:id` منوی تنظیمات و فرم مسدودیت/محدودیت را با primitiveهای مشترک `ui-*` و رنگ `--ds-*` نشان می‌دهد؛ فرم‌ها confirm نشده‌اند و قرارداد mutation عوض نشده است.
 17. `/admin/users` ردیف‌های فهرست را با `ui-list-item` و نشان وضعیت مشترک نشان می‌دهد؛ جستجو session-local مانده و قرارداد navigation عوض نشده است.
+18. `/users/:id` و `/profile` بازگشت، تلاش دوباره و ویرایش آدرس را با `ui-icon-button` و `ui-button` نشان می‌دهند؛ هوک کلاس تست و قرارداد privacy/authority حفظ شده است.
 
 ## نقشهٔ این بسته
 
 - [RUNTIME_CONTRACT.md](RUNTIME_CONTRACT.md): privacy، authority، route و recovery contract.
 - [CONTENT_NECESSITY_MATRIX.md](CONTENT_NECESSITY_MATRIX.md): هر سطح باقی‌مانده و علت آن.
-- [ROUTE_SURFACE_MANIFEST.json](ROUTE_SURFACE_MANIFEST.json): route/state boundary for the delivered Phase 1–15 slices.
+- [ROUTE_SURFACE_MANIFEST.json](ROUTE_SURFACE_MANIFEST.json): route/state boundary for the delivered Phase 1–16 slices.
 - [PROTECTED_SURFACE_DIFF_MANIFEST.json](PROTECTED_SURFACE_DIFF_MANIFEST.json): disposition دقیق Messenger protected surface.
-- [FIGMA_SNAPSHOT_MANIFEST.json](FIGMA_SNAPSHOT_MANIFEST.json): historical Phase 1–3 static Figma audit plus live editable references for Phase 4–15.
-- [DELIVERED_SCOPE_EVIDENCE_INVENTORY.json](DELIVERED_SCOPE_EVIDENCE_INVENTORY.json): historical allowlist/hash inventory for Phase 1–3 plus non-freeze supplemental receipts for Phase 4–15.
+- [FIGMA_SNAPSHOT_MANIFEST.json](FIGMA_SNAPSHOT_MANIFEST.json): historical Phase 1–3 static Figma audit plus live editable references for Phase 4–16.
+- [DELIVERED_SCOPE_EVIDENCE_INVENTORY.json](DELIVERED_SCOPE_EVIDENCE_INVENTORY.json): historical allowlist/hash inventory for Phase 1–3 plus non-freeze supplemental receipts for Phase 4–16.
 - [VALIDATION.md](VALIDATION.md): receiptهای source/browser/Figma و محدودیت‌هایشان.
 
-artifactهای allowlisted زیر `assets/` برای review تاریخیِ Phase 1–3 curated هستند؛ receiptهای Phase 4–15 هم در validation/checkpoint ثبت شده‌اند اما هنوز allowlist یا aggregate جدیدی ندارند. این فایل‌های narrative عمداً mutable باقی می‌مانند؛ هیچ‌کدام `EVIDENCE_MANIFEST` یا freeze کل Stage 6 نیست. یک freeze آینده باید فقط inputs immutable را انتخاب کند و این متن‌ها را داخل aggregate خودش قرار ندهد.
+artifactهای allowlisted زیر `assets/` برای review تاریخیِ Phase 1–3 curated هستند؛ receiptهای Phase 4–16 هم در validation/checkpoint ثبت شده‌اند اما هنوز allowlist یا aggregate جدیدی ندارند. این فایل‌های narrative عمداً mutable باقی می‌مانند؛ هیچ‌کدام `EVIDENCE_MANIFEST` یا freeze کل Stage 6 نیست. یک freeze آینده باید فقط inputs immutable را انتخاب کند و این متن‌ها را داخل aggregate خودش قرار ندهد.
 
 ## Deferred، نه بسته‌شده
 

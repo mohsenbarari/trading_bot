@@ -2,7 +2,7 @@
 
 تاریخ آغاز: ۲۰۲۶-۰۸-۱۱
 
-وضعیت: **`stage6_phase1_phase2_phase3_phase4_phase5_phase6_phase7_phase8_phase9_phase10_phase11_phase12_phase13_phase14_phase15_delivered_broader_roadmap_partial_deferred`**
+وضعیت: **`stage6_phase1_phase2_phase3_phase4_phase5_phase6_phase7_phase8_phase9_phase10_phase11_phase12_phase13_phase14_phase15_phase16_delivered_broader_roadmap_partial_deferred`**
 
 شاخه: `condidate/webapp-ui-ux-redesign-v2`
 
@@ -22,7 +22,7 @@ Stage 6 به‌صورت route-scoped، rollback-safe و با گیت مستقل �
 4. Figma editable canonical با file key `z8jgJxST4O2APzWnlyP9gv`؛
 5. کد و contractهای backend فعلی، برای authority، permission و outcome واقعی.
 
-صفحهٔ Figma این Stage برابر `08 — Stage 6 Admin & Profile` (`321:18`) است. root (`321:19`) Phase 1 و Phase 2 را دارد و sectionهای Phase 3 (`381:318`)، Phase 4 (`398:504`)، Phase 5 (`413:571`)، Phase 6 (`422:636`)، Phase 7 (`442:701`)، Phase 8 (`451:766`)، Phase 9 (`455:831`)، Phase 10 (`464:896`)، Phase 11 (`466:961`)، Phase 12 (`468:1026`)، Phase 13 (`470:1091`)، Phase 14 (`472:1156`) و Phase 15 (`474:1223`) sibling همان page هستند. این topology page-level صریحاً افشا می‌شود: هیچ board تأییدشدهٔ `0B-4`، `0B-5` یا Stage 5 بازنویسی نشده و evidence را نباید یک root-bundle nested واحد نامید.
+صفحهٔ Figma این Stage برابر `08 — Stage 6 Admin & Profile` (`321:18`) است. root (`321:19`) Phase 1 و Phase 2 را دارد و sectionهای Phase 3 (`381:318`)، Phase 4 (`398:504`)، Phase 5 (`413:571`)، Phase 6 (`422:636`)، Phase 7 (`442:701`)، Phase 8 (`451:766`)، Phase 9 (`455:831`)، Phase 10 (`464:896`)، Phase 11 (`466:961`)، Phase 12 (`468:1026`)، Phase 13 (`470:1091`)، Phase 14 (`472:1156`)، Phase 15 (`474:1223`) و Phase 16 (`477:1285`) sibling همان page هستند. این topology page-level صریحاً افشا می‌شود: هیچ board تأییدشدهٔ `0B-4`، `0B-5` یا Stage 5 بازنویسی نشده و evidence را نباید یک root-bundle nested واحد نامید.
 
 ## ۳. Phase 1 — ورودی مدیریت
 
@@ -37,7 +37,7 @@ Stage 6 به‌صورت route-scoped، rollback-safe و با گیت مستقل �
 
 فایل‌های مجاز این slice فقط `frontend/src/components/AdminPanel.vue`، تست مستقیم آن و در صورت نیاز expectation محدود `AdminView.test.ts` هستند. تغییر child workflow، API، router، route guard، permission یا backend در Phase 1 مجاز نیست.
 
-## ۴. deferred خارج از Phase 1/2/3/4/5/6/7/8/9/10/11/12/13/14/15 تحویل‌شده
+## ۴. deferred خارج از Phase 1/2/3/4/5/6/7/8/9/10/11/12/13/14/15/16 تحویل‌شده
 
 موارد زیر sliceهای مستقل و گیت‌دار بعدی‌اند:
 
@@ -73,7 +73,7 @@ rollback به revert commit مستقل Phase 1 محدود است؛ پس از rol
 
 ## ۷. Figma، evidence و Sites
 
-Figma منبع اصلی طراحی است. Phase 1 boundary card و proof موبایل ورودی مدیریت، Phase 2 directory/desktop/recovery، Phase 3 privacy/authority، Phase 4 invitation management، Phase 5 block confirmation، Phase 6 workspace account deletion، Phase 7 session-termination safe recovery، Phase 8 relation-mutation safe recovery، Phase 9 commodity deletion exact-receipt safe recovery، Phase 10 admin user deletion exact-receipt safe recovery، Phase 11 account-security session exact-receipt safe recovery، Phase 12 account-storage local-clear confirmation، Phase 13 admin account-status confirmation، Phase 14 admin user chrome unification و Phase 15 admin user directory list unification را ثبت می‌کند؛ pending-attention canonical فقط در state دارای دادهٔ واقعی باقی می‌ماند و به runtime نسبت داده نمی‌شود. Phaseهای 3 تا 15 siblingهای page-level root هستند؛ این caveat مانع از ادعای nested bundle می‌شود.
+Figma منبع اصلی طراحی است. Phase 1 boundary card و proof موبایل ورودی مدیریت، Phase 2 directory/desktop/recovery، Phase 3 privacy/authority، Phase 4 invitation management، Phase 5 block confirmation، Phase 6 workspace account deletion، Phase 7 session-termination safe recovery، Phase 8 relation-mutation safe recovery، Phase 9 commodity deletion exact-receipt safe recovery، Phase 10 admin user deletion exact-receipt safe recovery، Phase 11 account-security session exact-receipt safe recovery، Phase 12 account-storage local-clear confirmation، Phase 13 admin account-status confirmation، Phase 14 admin user chrome unification، Phase 15 admin user directory list unification و Phase 16 public-profile remaining chrome unification را ثبت می‌کند؛ pending-attention canonical فقط در state دارای دادهٔ واقعی باقی می‌ماند و به runtime نسبت داده نمی‌شود. Phaseهای 3 تا 16 siblingهای page-level root هستند؛ این caveat مانع از ادعای nested bundle می‌شود.
 
 Sites در Stage 6 هنوز هیچ mutation، repo/project، preview یا deployment ندارد. اگر و فقط اگر scope گسترده‌تر مجاز و closure جداگانه آغاز شود، ابتدا inputs immutable freeze می‌شوند و سپس یک repo/project تازه و private owner-only برای evidence ساخته می‌شود. آن preview product deployment نیست و هیچ staging/production را تغییر نمی‌دهد.
 
@@ -311,6 +311,20 @@ browser receipt promotable در run `uiux-stage6-phase15-admin-user-directory-20
 
 Figma Phase 15 در page `321:18`، sibling section `474:1223` ثبت شد: W1=`474:1225` فهرست کارت‌های `ui-list-item` و W2=`474:1251` جستجوی محلی، هر دو `390×844`. overlayهای کلون‌شده مخفی ماندند. label `474:1224` دقیقاً `Phase 15 · یکپارچگی ظاهر فهرست کاربران · source e4a23410 · دادهٔ synthetic` است؛ audit live، 64 text node با familyهای Vazirmatn، 10 linked instance و unsafe scan خالی را تأیید کرد. این reference live/editable است و freeze یا screenshot hash مستقل نیست.
 
-## ۲۴. مرز closure
+## ۲۴. رسید Phase 16 — یکپارچگی ظاهر پوسته پروفایل عمومی
 
-Phase 1/2/3/4/5/6/7/8/9/10/11/12/13/14/15 تحویل‌شده‌اند، اما broader roadmap Stage 6 partial/deferred است و **`stage6CompleteAuthority=false`**. هیچ `EVIDENCE_MANIFEST`، local freeze، Sites project/preview، product deployment، staging deployment یا production deployment ساخته یا تغییر داده نشده است. این checkpoint مجوز انجام deferredها یا ادعای complete Stage 6 نیست.
+Phase 16 در commit `208edb374eeaecf6dea50f58ed3f86d7bb3b019a` (tree `36ced6afe032e442ac72cc73bdf9e8405a671f94`) تحویل شد و فقط `PublicProfile.vue` و test مستقیم آن را تغییر می‌دهد.
+
+- این slice ظاهر مسیرهای موجود `/users/:id` و `/profile` را با primitiveهای مشترک `ui-icon-button` و `ui-button` یکی می‌کند؛ backend، router، query contract، mutation آدرس و protected Market/Messenger surface تغییر نکرده‌اند.
+- بازگشت، تلاش دوباره و ویرایش آدرس همان هوک کلاس تست را نگه می‌دارند. قرارداد حرکت و reduced-motion حفظ شده است.
+- فرم confirm تازه‌ای ساخته نشده و قرارداد privacy/authority Phase 3 حفظ شده است.
+
+گیت‌های source: focused `PublicProfile.test.ts` برابر **56/56** pass، `npm run guard:ui` و `git diff --check` pass هستند.
+
+browser receipt promotable در run `uiux-stage6-phase16-public-profile-chrome-20260812T205426458Z` با **6** assertion و **4** screenshot روی source binding 393 فایل pass شد. source binding SHA-256 `40e4238ea6fa62d065b56859754791dc02c03325c283b6bf514b162b681ecc12`، metrics `stage6-phase16-public-profile-chrome-metrics.json` با SHA-256 `d41663cb395cea687f1688b346cbd3334ca84636c9977f62f4c5bed376d623d9`، binding `20ea694968d6e3867110df7a3a319e847cdf9a85533d9c5d8d749e1420093024` و harness `4ef35faf944ae58d575efe573bddaa70c1acb378e2fac79cfb3d489a60f69c63` هستند. diagnostics غیرمنتظره صفر است. این receipt local/ephemeral است و انتخاب، copy یا freeze نشده است.
+
+Figma Phase 16 در page `321:18`، sibling section `477:1285` ثبت شد: W1=`477:1287` پوستهٔ پروفایل خود و W2=`477:1345` بازیابی خطا، هر دو `390×844`. overlayهای کلون‌شده مخفی ماندند. label `477:1286` دقیقاً `Phase 16 · یکپارچگی ظاهر پوسته پروفایل عمومی · source 208edb37 · دادهٔ synthetic` است؛ audit live، 49 text node با familyهای Vazirmatn، 10 linked instance و unsafe scan خالی را تأیید کرد. این reference live/editable است و freeze یا screenshot hash مستقل نیست.
+
+## ۲۵. مرز closure
+
+Phase 1/2/3/4/5/6/7/8/9/10/11/12/13/14/15/16 تحویل‌شده‌اند، اما broader roadmap Stage 6 partial/deferred است و **`stage6CompleteAuthority=false`**. هیچ `EVIDENCE_MANIFEST`، local freeze، Sites project/preview، product deployment، staging deployment یا production deployment ساخته یا تغییر داده نشده است. این checkpoint مجوز انجام deferredها یا ادعای complete Stage 6 نیست.

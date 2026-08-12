@@ -4,6 +4,7 @@ Load for Vue/PWA refactoring, Design System V2, Figma/Sites evidence, or shared 
 
 ## Decisions
 
+- 2026-08-12 | Remaining public-profile chrome on `/users/:id` and `/profile` uses shared `ui-icon-button` / `ui-button` and `--ds-*` tokens; back, retry, and address-edit keep test class hooks and do not become confirms. Reason: visual unity with admin chrome without changing privacy, authority, or address-mutation receipts.
 - 2026-08-12 | Admin user directory rows on `/admin/users` use shared `ui-list-item` / `ui-status-badge` and `--ds-*` tokens; search stays session-local and does not become a confirm. Reason: visual unity with public-profile colleague rows and workspace lists without changing directory query or navigation receipts.
 - 2026-08-12 | Live admin user chrome on `/admin/users/:id` uses shared `ui-action-card` / `ui-button` / `ui-input` and `--ds-*` tokens; block and limitations stay form dialogs, not confirms. Reason: visual unity with Admin landing and Account hub without changing mutation receipts.
 - 2026-08-12 | Admin account-status, unblock, and remove-limitations confirmations stay generic, mention Escape, and keep zero mutation on cancel; 403/404 retain the dialog with fixed safe copy. Reason: remaining UserProfile confirms lacked Escape coverage and must not leak account_name/mobile or raw detail.
