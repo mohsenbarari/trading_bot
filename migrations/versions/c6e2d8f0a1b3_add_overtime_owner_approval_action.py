@@ -19,10 +19,13 @@ depends_on: Union[str, Sequence[str], None] = None
 def upgrade() -> None:
     # Enum values remain on downgrade for forward-compatible application
     # rollback; PostgreSQL cannot safely remove used enum values in place.
-    op.execute(
-        "ALTER TYPE telegramdeliveryaction ADD VALUE IF NOT EXISTS "
-        "'overtime_owner_approval'"
-    )
+    # PostgreSQL requires a commit before a new enum value can be referenced by
+    # a later migration in the same Alembic invocation.
+    with op.get_context().autocommit_block():
+        op.execute(
+            "ALTER TYPE telegramdeliveryaction ADD VALUE IF NOT EXISTS "
+            "'overtime_owner_approval'"
+        )
 
 
 def downgrade() -> None:

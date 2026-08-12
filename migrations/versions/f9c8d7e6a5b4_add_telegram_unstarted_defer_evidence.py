@@ -1,7 +1,7 @@
 """retain the latest unstarted Telegram queue deferral for audit evidence
 
 Revision ID: f9c8d7e6a5b4
-Revises: e8a4b5c6d7e9
+Revises: f9b0c1d2e3a4
 """
 from typing import Sequence, Union
 
@@ -10,7 +10,7 @@ import sqlalchemy as sa
 
 
 revision: str = "f9c8d7e6a5b4"
-down_revision: Union[str, Sequence[str], None] = "e8a4b5c6d7e9"
+down_revision: Union[str, Sequence[str], None] = "f9b0c1d2e3a4"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
