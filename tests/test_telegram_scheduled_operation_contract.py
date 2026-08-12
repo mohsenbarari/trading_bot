@@ -9,10 +9,12 @@ from core.telegram_delivery_queue_contract import (
     TelegramDeliveryAction,
     TelegramDeliveryJob,
     TelegramDeliveryOutcome,
+    TelegramDeliveryPriority,
     TelegramDeliveryState,
     TelegramDestinationClass,
     TelegramFeederKind,
     apply_gateway_result,
+    priority_and_rank_for_action,
 )
 from core.telegram_delivery_scheduled_operation_freshness import (
     SCHEDULED_OPERATION_FRESHNESS_ACTIONS,
@@ -70,6 +72,22 @@ class TelegramScheduledOperationContractTests(unittest.TestCase):
     def test_scheduled_source_table_is_foreign_local_no_sync(self):
         entry = get_sync_registry_entry("telegram_scheduled_operations")
         self.assertEqual(entry.policy, SyncPolicy.NO_SYNC)
+
+    def test_preauth_registration_responses_use_reserved_urgent_lane(self):
+        """A new user's /start flow must not be delayed by offer traffic."""
+        expected = (TelegramDeliveryPriority.M0, 1)
+        self.assertEqual(
+            priority_and_rank_for_action(
+                TelegramDeliveryAction.PREAUTH_INTERACTION
+            ),
+            expected,
+        )
+        self.assertEqual(
+            priority_and_rank_for_action(
+                TelegramDeliveryAction.PREAUTH_INTERACTION_EDIT
+            ),
+            expected,
+        )
 
     def test_delete_of_already_absent_message_is_successful_noop(self):
         now = datetime.now(timezone.utc)

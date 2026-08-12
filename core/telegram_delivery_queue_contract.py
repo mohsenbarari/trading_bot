@@ -259,8 +259,14 @@ _ACTION_PRIORITY_AND_RANK: dict[TelegramDeliveryAction, tuple[TelegramDeliveryPr
     TelegramDeliveryAction.TRADE_ALTERNATIVE: (TelegramDeliveryPriority.M1, 3),
     TelegramDeliveryAction.TRADE_UNAVAILABLE: (TelegramDeliveryPriority.M1, 3),
     TelegramDeliveryAction.GENERAL_IMMEDIATE: (TelegramDeliveryPriority.M1, 4),
-    TelegramDeliveryAction.PREAUTH_INTERACTION: (TelegramDeliveryPriority.M1, 4),
-    TelegramDeliveryAction.PREAUTH_INTERACTION_EDIT: (TelegramDeliveryPriority.M1, 4),
+    # Registration and account-link prompts are the first interactive response
+    # a prospective user sees.  They must not wait behind a busy offer/channel
+    # lane: once Telegram has delivered /start, keep the dialogue responsive by
+    # reserving the same urgent lane used for other deadline-sensitive private
+    # interactions.  Rank 1 deliberately keeps callback acknowledgements at
+    # rank 0 while placing onboarding ahead of offer publication (rank 2).
+    TelegramDeliveryAction.PREAUTH_INTERACTION: (TelegramDeliveryPriority.M0, 1),
+    TelegramDeliveryAction.PREAUTH_INTERACTION_EDIT: (TelegramDeliveryPriority.M0, 1),
     TelegramDeliveryAction.PARTIAL_OFFER_EDIT: (TelegramDeliveryPriority.M2, 0),
     TelegramDeliveryAction.NEW_USER_MEMBERSHIP: (TelegramDeliveryPriority.M2, 1),
     TelegramDeliveryAction.TRADED_OFFER_EDIT: (TelegramDeliveryPriority.M3, 0),
