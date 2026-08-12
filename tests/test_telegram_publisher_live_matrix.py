@@ -265,6 +265,68 @@ class TelegramPublisherLiveMatrixTests(unittest.TestCase):
         self.assertFalse(completed)
         self.assertGreater(MATRIX_BACKGROUND_TASKS_MAX_WAIT_SECONDS, 0)
 
+    def test_overtime_requests_are_limited_before_the_direct_webapp_operation(self):
+        active_operations = 0
+        maximum_active_operations = 0
+
+        class FakeWorker:
+            async def execute_webapp_trade_for_user(self, **_kwargs):
+                nonlocal active_operations, maximum_active_operations
+                active_operations += 1
+                maximum_active_operations = max(
+                    maximum_active_operations,
+                    active_operations,
+                )
+                try:
+                    await asyncio.sleep(0.001)
+                    return "success"
+                finally:
+                    active_operations -= 1
+
+        run = MatrixRun(
+            run_id="telegram-live-matrix-unit",
+            started_at="2026-08-12T00:00:00+00:00",
+            expected_expiry_minutes=25,
+        )
+        users = [SimpleNamespace(user_id=index) for index in range(1, 1_001)]
+        base = {
+            "origin": "webapp",
+            "scenario": "overtime_decision_timeout",
+            "expected_terminal_status": "expired",
+            "scheduled_at": "2026-08-12T00:00:00+00:00",
+            "offer_home_server": "iran",
+            "normal_deadline_at": "2026-08-12T00:00:00+00:00",
+        }
+        first = OfferTimeline(index=1, offer_id=1, offer_public_id="first", **base)
+        second = OfferTimeline(index=2, offer_id=2, offer_public_id="second", **base)
+
+        async def run_bounded_requests() -> None:
+            semaphore = asyncio.Semaphore(1)
+            await asyncio.gather(
+                _run_overtime_lifecycle(
+                    worker=FakeWorker(),
+                    users=users,
+                    run=run,
+                    timeline=first,
+                    operation_semaphore=semaphore,
+                ),
+                _run_overtime_lifecycle(
+                    worker=FakeWorker(),
+                    users=users,
+                    run=run,
+                    timeline=second,
+                    operation_semaphore=semaphore,
+                ),
+            )
+
+        asyncio.run(run_bounded_requests())
+
+        self.assertEqual(maximum_active_operations, 1)
+        self.assertEqual(
+            [entry.status for entry in run.lifecycle_actions],
+            ["success", "success"],
+        )
+
     def test_bot_lifecycle_uses_the_publishing_lane_for_the_callback(self):
         observed = []
 

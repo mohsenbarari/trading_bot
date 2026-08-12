@@ -70,6 +70,10 @@ MATRIX_PROGRESS_STALL_SECONDS = 180.0
 MATRIX_WEBAPP_OPERATION_TIMEOUT_SECONDS = 20.0
 MATRIX_WEBAPP_OPERATION_RETRY_ATTEMPTS = 2
 MATRIX_WEBAPP_OPERATION_RETRY_DELAY_SECONDS = 1.0
+# The matrix can schedule all 300 overtime actions within a narrow deadline
+# window.  Keep the direct router/database work bounded so the last tasks are
+# actually scheduled instead of starving behind an exhausted connection pool.
+MATRIX_OVERTIME_MAX_CONCURRENT_OPERATIONS = 20
 # A direct router invocation has no ASGI response boundary: calling
 # ``BackgroundTasks`` inline would otherwise make the lifecycle driver wait on
 # best-effort work that a real WebApp client receives *after* its successful
@@ -1136,9 +1140,14 @@ async def _run_overtime_lifecycle(
     users: Sequence[Any],
     run: MatrixRun,
     timeline: OfferTimeline,
+    operation_semaphore: asyncio.Semaphore | None = None,
 ) -> None:
     if not timeline.normal_deadline_at:
         raise LiveMatrixError("live_matrix_overtime_normal_deadline_missing")
+    if operation_semaphore is None:
+        operation_semaphore = asyncio.Semaphore(
+            MATRIX_OVERTIME_MAX_CONCURRENT_OPERATIONS
+        )
     scheduled = datetime.fromisoformat(timeline.normal_deadline_at) + timedelta(
         seconds=MATRIX_OVERTIME_RECEIPT_SAFETY_SECONDS
     )
@@ -1168,39 +1177,40 @@ async def _run_overtime_lifecycle(
                 run_background_tasks=False,
             )
 
-    await _complete_lifecycle_action(
-        request_entry,
-        request_overtime,
-        timeout_seconds=MATRIX_WEBAPP_OPERATION_TIMEOUT_SECONDS,
-        retry_attempts=MATRIX_WEBAPP_OPERATION_RETRY_ATTEMPTS,
-        retry_delay_seconds=MATRIX_WEBAPP_OPERATION_RETRY_DELAY_SECONDS,
-    )
-    if timeline.scenario == "overtime_decision_timeout":
-        return
+    async with operation_semaphore:
+        await _complete_lifecycle_action(
+            request_entry,
+            request_overtime,
+            timeout_seconds=MATRIX_WEBAPP_OPERATION_TIMEOUT_SECONDS,
+            retry_attempts=MATRIX_WEBAPP_OPERATION_RETRY_ATTEMPTS,
+            retry_delay_seconds=MATRIX_WEBAPP_OPERATION_RETRY_DELAY_SECONDS,
+        )
+        if timeline.scenario == "overtime_decision_timeout":
+            return
 
-    request_public_id = await _load_overtime_request_public_id(
-        offer_id=int(timeline.offer_id),
-        idempotency_key=idempotency_key,
-    )
-    decision = "approve" if timeline.scenario == "overtime_approved_trade" else "reject"
-    decision_entry = _append_lifecycle_action(
-        run,
-        timeline=timeline,
-        action=f"overtime_owner_{decision}",
-        origin="webapp",
-        scheduled_at=_utcnow(),
-    )
-    owner = users[timeline.index - 1]
-    await _complete_lifecycle_action(
-        decision_entry,
-        lambda: _decide_overtime_request_via_webapp(
-            worker=worker,
-            owner=owner,
-            request_public_id=request_public_id,
-            approve=decision == "approve",
-            home_server=timeline.offer_home_server or SERVER_IRAN,
-        ),
-    )
+        request_public_id = await _load_overtime_request_public_id(
+            offer_id=int(timeline.offer_id),
+            idempotency_key=idempotency_key,
+        )
+        decision = "approve" if timeline.scenario == "overtime_approved_trade" else "reject"
+        decision_entry = _append_lifecycle_action(
+            run,
+            timeline=timeline,
+            action=f"overtime_owner_{decision}",
+            origin="webapp",
+            scheduled_at=_utcnow(),
+        )
+        owner = users[timeline.index - 1]
+        await _complete_lifecycle_action(
+            decision_entry,
+            lambda: _decide_overtime_request_via_webapp(
+                worker=worker,
+                owner=owner,
+                request_public_id=request_public_id,
+                approve=decision == "approve",
+                home_server=timeline.offer_home_server or SERVER_IRAN,
+            ),
+        )
 
 
 def _assert_lifecycle_monitor_healthy(monitor_task: asyncio.Task[None]) -> None:
@@ -1254,6 +1264,9 @@ async def _run_lifecycle_actions(
     """
     harness = worker.AiogramDispatcherHarness()
     overtime_tasks: list[asyncio.Task[None]] = []
+    overtime_operation_semaphore = asyncio.Semaphore(
+        MATRIX_OVERTIME_MAX_CONCURRENT_OPERATIONS
+    )
     monitor_stop = asyncio.Event()
     monitor_task = asyncio.create_task(
         _monitor_lifecycle_progress(run=run, stop=monitor_stop),
@@ -1303,6 +1316,7 @@ async def _run_lifecycle_actions(
                         users=users,
                         run=run,
                         timeline=timeline,
+                        operation_semaphore=overtime_operation_semaphore,
                     ),
                     name=f"telegram-live-matrix-overtime-{timeline.index}",
                 )
