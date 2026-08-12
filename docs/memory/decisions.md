@@ -3,7 +3,7 @@
 Entries are newest first.
 
 - 2026-08-12 | Matrix publication gates count only terminal offers lacking sent initial-post evidence; an intentional, already-published manual expiry cannot block the global gate. Reason: manual expiry is an approved lifecycle scenario.
-- 2026-08-12 | Matrix direct WebApp calls skip post-response BackgroundTasks and cap concurrent overtime operations at 20; final audit requires terminal delivery and WebApp projection. Reason: direct calls lack an ASGI boundary and 300 concurrent database operations can starve late tasks.
+- 2026-08-12 | Matrix direct WebApp calls skip post-response BackgroundTasks; overtime deadlines are launched by one ordered scheduler with at most 20 concurrent operations, and final audit requires terminal delivery/WebApp projection. Reason: direct calls lack an ASGI boundary and a large timer/DB wave can starve late tasks.
 - 2026-08-11 | Queue-v1 retries only serialization/deadlock aborts before provider dispatch, inside the same bounded unstarted lease. Reason: no external effect occurred; other DB failures fail closed.
 - 2026-08-11 | Queue-v1 retains an unstarted fenced lease only through a short absolute Redis cadence deadline; longer waits are durable retries. Reason: re-claiming causes DB churn, but long leases starve a lane.
 - 2026-08-11 | Publication scans exclude offers with an existing non-final control/publish job. Reason: repeated deduplication delays central ingress and can age queued offers before worker admission.

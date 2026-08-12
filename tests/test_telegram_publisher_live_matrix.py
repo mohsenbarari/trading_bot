@@ -16,6 +16,7 @@ from scripts.run_telegram_publisher_live_matrix import (
     _run_post_response_background_tasks,
     _run_direct_trade,
     _run_overtime_lifecycle,
+    _run_overtime_schedule,
     _assert_lifecycle_monitor_healthy,
     _wait_for_worker_acknowledgement,
     _timeline_terminal_follows_initial_publication,
@@ -322,6 +323,67 @@ class TelegramPublisherLiveMatrixTests(unittest.TestCase):
         asyncio.run(run_bounded_requests())
 
         self.assertEqual(maximum_active_operations, 1)
+        self.assertEqual(
+            [entry.status for entry in run.lifecycle_actions],
+            ["success", "success"],
+        )
+
+    def test_overtime_scheduler_launches_each_deadline_without_timer_fanout(self):
+        observed_schedules = []
+
+        class FakeWorker:
+            async def execute_webapp_trade_for_user(self, **_kwargs):
+                return "success"
+
+        import scripts.run_telegram_publisher_live_matrix as matrix
+
+        run = MatrixRun(
+            run_id="telegram-live-matrix-unit",
+            started_at="2026-08-12T00:00:00+00:00",
+            expected_expiry_minutes=25,
+        )
+        users = [SimpleNamespace(user_id=index) for index in range(1, 1_001)]
+        base = {
+            "origin": "webapp",
+            "scenario": "overtime_decision_timeout",
+            "expected_terminal_status": "expired",
+            "scheduled_at": "2026-08-12T00:00:00+00:00",
+            "offer_home_server": "iran",
+        }
+        first = OfferTimeline(
+            index=2,
+            offer_id=2,
+            offer_public_id="second",
+            normal_deadline_at="2026-08-12T00:00:02+00:00",
+            **base,
+        )
+        second = OfferTimeline(
+            index=1,
+            offer_id=1,
+            offer_public_id="first",
+            normal_deadline_at="2026-08-12T00:00:01+00:00",
+            **base,
+        )
+
+        async def no_wait(target):
+            observed_schedules.append(target)
+
+        original_wait = matrix._wait_until
+        matrix._wait_until = no_wait
+        try:
+            asyncio.run(
+                _run_overtime_schedule(
+                    worker=FakeWorker(),
+                    users=users,
+                    run=run,
+                    timelines=(first, second),
+                    operation_semaphore=asyncio.Semaphore(1),
+                )
+            )
+        finally:
+            matrix._wait_until = original_wait
+
+        self.assertEqual(observed_schedules, sorted(observed_schedules))
         self.assertEqual(
             [entry.status for entry in run.lifecycle_actions],
             ["success", "success"],

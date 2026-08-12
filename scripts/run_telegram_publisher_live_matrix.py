@@ -1141,6 +1141,8 @@ async def _run_overtime_lifecycle(
     run: MatrixRun,
     timeline: OfferTimeline,
     operation_semaphore: asyncio.Semaphore | None = None,
+    scheduled_at: datetime | None = None,
+    wait_for_schedule: bool = True,
 ) -> None:
     if not timeline.normal_deadline_at:
         raise LiveMatrixError("live_matrix_overtime_normal_deadline_missing")
@@ -1148,9 +1150,7 @@ async def _run_overtime_lifecycle(
         operation_semaphore = asyncio.Semaphore(
             MATRIX_OVERTIME_MAX_CONCURRENT_OPERATIONS
         )
-    scheduled = datetime.fromisoformat(timeline.normal_deadline_at) + timedelta(
-        seconds=MATRIX_OVERTIME_RECEIPT_SAFETY_SECONDS
-    )
+    scheduled = scheduled_at or _overtime_scheduled_at(timeline)
     request_entry = _append_lifecycle_action(
         run,
         timeline=timeline,
@@ -1160,7 +1160,8 @@ async def _run_overtime_lifecycle(
         origin="webapp",
         scheduled_at=scheduled,
     )
-    await _wait_until(scheduled)
+    if wait_for_schedule:
+        await _wait_until(scheduled)
     # ``_run_lifecycle_actions`` has already completed the full durable
     # initial-publication barrier before it creates overtime tasks.
     requester = _taker_for_timeline(users, timeline)
@@ -1213,6 +1214,58 @@ async def _run_overtime_lifecycle(
         )
 
 
+def _overtime_scheduled_at(timeline: OfferTimeline) -> datetime:
+    if not timeline.normal_deadline_at:
+        raise LiveMatrixError("live_matrix_overtime_normal_deadline_missing")
+    return datetime.fromisoformat(timeline.normal_deadline_at) + timedelta(
+        seconds=MATRIX_OVERTIME_RECEIPT_SAFETY_SECONDS
+    )
+
+
+async def _run_overtime_schedule(
+    *,
+    worker: Any,
+    users: Sequence[Any],
+    run: MatrixRun,
+    timelines: Sequence[OfferTimeline],
+    operation_semaphore: asyncio.Semaphore,
+) -> None:
+    """Launch deadline actions in order instead of arming 300 timers at once.
+
+    A deadline cohort spans only 150 seconds, but a timer per offer can leave
+    late callbacks unscheduled while the event loop drains the previous wave.
+    One scheduler launches each operation at its timestamp; the semaphore still
+    bounds direct WebApp/database pressure once it begins.
+    """
+    tasks: list[asyncio.Task[None]] = []
+    try:
+        for timeline in sorted(timelines, key=_overtime_scheduled_at):
+            scheduled = _overtime_scheduled_at(timeline)
+            await _wait_until(scheduled)
+            tasks.append(
+                asyncio.create_task(
+                    _run_overtime_lifecycle(
+                        worker=worker,
+                        users=users,
+                        run=run,
+                        timeline=timeline,
+                        operation_semaphore=operation_semaphore,
+                        scheduled_at=scheduled,
+                        wait_for_schedule=False,
+                    ),
+                    name=f"telegram-live-matrix-overtime-{timeline.index}",
+                )
+            )
+        if tasks:
+            await asyncio.gather(*tasks)
+    except BaseException:
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        raise
+
+
 def _assert_lifecycle_monitor_healthy(monitor_task: asyncio.Task[None]) -> None:
     """Fail fast if the lightweight checkpoint task ever stops."""
     if not monitor_task.done():
@@ -1263,7 +1316,7 @@ async def _run_lifecycle_actions(
     own initial channel post.
     """
     harness = worker.AiogramDispatcherHarness()
-    overtime_tasks: list[asyncio.Task[None]] = []
+    overtime_completion: asyncio.Task[None] | None = None
     overtime_operation_semaphore = asyncio.Semaphore(
         MATRIX_OVERTIME_MAX_CONCURRENT_OPERATIONS
     )
@@ -1309,33 +1362,29 @@ async def _run_lifecycle_actions(
         if overtime_timelines:
             await _wait_for_initial_publication(run)
             _assert_lifecycle_monitor_healthy(monitor_task)
-            overtime_tasks = [
-                asyncio.create_task(
-                    _run_overtime_lifecycle(
-                        worker=worker,
-                        users=users,
-                        run=run,
-                        timeline=timeline,
-                        operation_semaphore=overtime_operation_semaphore,
-                    ),
-                    name=f"telegram-live-matrix-overtime-{timeline.index}",
-                )
-                for timeline in overtime_timelines
-            ]
-        overtime_completion = asyncio.gather(*overtime_tasks)
-        while not overtime_completion.done():
-            await asyncio.wait(
-                (overtime_completion, monitor_task),
-                timeout=MATRIX_PROGRESS_POLL_SECONDS,
-                return_when=asyncio.FIRST_COMPLETED,
+            overtime_completion = asyncio.create_task(
+                _run_overtime_schedule(
+                    worker=worker,
+                    users=users,
+                    run=run,
+                    timelines=overtime_timelines,
+                    operation_semaphore=overtime_operation_semaphore,
+                ),
+                name="telegram-live-matrix-overtime-scheduler",
             )
-            _assert_lifecycle_monitor_healthy(monitor_task)
-        await overtime_completion
+        if overtime_completion is not None:
+            while not overtime_completion.done():
+                await asyncio.wait(
+                    (overtime_completion, monitor_task),
+                    timeout=MATRIX_PROGRESS_POLL_SECONDS,
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                _assert_lifecycle_monitor_healthy(monitor_task)
+            await overtime_completion
     finally:
-        if any(not task.done() for task in overtime_tasks):
-            for task in overtime_tasks:
-                task.cancel()
-            await asyncio.gather(*overtime_tasks, return_exceptions=True)
+        if overtime_completion is not None and not overtime_completion.done():
+            overtime_completion.cancel()
+            await asyncio.gather(overtime_completion, return_exceptions=True)
         monitor_stop.set()
         await monitor_task
         await harness.close()
