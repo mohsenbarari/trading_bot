@@ -2020,6 +2020,29 @@ async def create_offer(
             new_offer.channel_message_id = publish_result.message_id
             await db.commit()
 
+    # On Iran, the persisted Offer must reach the foreign Telegram publisher
+    # before normal best-effort replication traffic can consume its short
+    # lifetime.  This is deliberately post-commit and non-fatal: the same
+    # change_log row remains the durable recovery path on any network failure.
+    if queue_owns_telegram_delivery:
+        try:
+            from core.offer_priority_sync import dispatch_offer_priority_sync_once
+
+            await dispatch_offer_priority_sync_once(
+                db,
+                offer_public_id=getattr(new_offer, "offer_public_id", None),
+            )
+        except Exception as exc:
+            log_trading_event(
+                logger,
+                "offer_priority_sync.dispatch_error",
+                level="warning",
+                action="offer_priority_sync",
+                result="deferred",
+                offer_id=getattr(new_offer, "id", None),
+                error_class=type(exc).__name__,
+            )
+
     log_trading_event(
         logger,
         "offer_create.accepted",

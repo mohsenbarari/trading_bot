@@ -39,6 +39,16 @@ class Settings(BaseSettings):
     public_webapp_url: str | None = None
     sync_api_key: str | None = None
     sync_direct_push_cooldown_seconds: float = 90.0
+    # Active offers created on the Iran WebApp must reach the foreign Telegram
+    # publisher before their short market lifetime is consumed by unrelated
+    # replication work.  This is a committed-outbox acceleration only: the
+    # normal sync worker remains the durable reconciliation path.
+    offer_priority_sync_enabled: bool = True
+    offer_priority_sync_timeout_seconds: float = 2.0
+    # Recovery remains the regular change-log worker.  This bounded fast lane
+    # is deliberately for just-committed market state, never historical
+    # backlog replay after a deploy or outage.
+    offer_priority_sync_max_change_age_seconds: float = 45.0
     sync_verify_tls: bool = True
     sync_ca_bundle: str | None = None
     sync_parity_status_max_age_seconds: int = 900

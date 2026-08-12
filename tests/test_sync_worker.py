@@ -130,6 +130,21 @@ class SendSyncItemTests(unittest.IsolatedAsyncioTestCase):
             },
         )
 
+    async def test_send_sync_item_honors_bounded_caller_timeout(self):
+        client = AsyncMock()
+        client.post.return_value = object()
+
+        await sync_worker.send_sync_item(
+            client,
+            {"hash": "priority", "table": "offers"},
+            "https://peer.example",
+            "secret-key",
+            timeout_seconds=2.0,
+        )
+
+        _, kwargs = client.post.await_args
+        self.assertEqual(kwargs["timeout"], 2.0)
+
 
 class PeerResponsePolicyTests(unittest.TestCase):
     def test_terminal_source_authority_tables_share_receiver_authority_set(self):
