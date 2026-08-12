@@ -1524,14 +1524,15 @@ async function confirmPendingAction() {
 
       <div v-else class="custom-date-section">
         <span class="custom-date-label">تاریخ و زمان پایان مسدودیت:</span>
-        <button
+        <AppButton
           type="button"
           class="custom-date-trigger"
+          variant="secondary"
           :disabled="isUserMutationBusy"
           @click="initDatePicker(customDate); showBlockDateModal = true"
         >
           {{ customDate || 'انتخاب تاریخ...' }}
-        </button>
+        </AppButton>
       </div>
 
       <p v-if="blockError" class="user-action-feedback user-action-feedback--error" role="alert">{{ blockError }}</p>
@@ -1587,14 +1588,15 @@ async function confirmPendingAction() {
 
       <div v-if="limitDurationMinutes === -1" class="custom-date-section">
         <span class="custom-date-label">تاریخ پایان:</span>
-        <button
+        <AppButton
           type="button"
           class="custom-date-trigger"
+          variant="secondary"
           :disabled="isUserMutationBusy"
           @click="initDatePicker(customLimitDate); showLimitDateModal = true"
         >
           {{ customLimitDate || 'انتخاب تاریخ...' }}
-        </button>
+        </AppButton>
       </div>
 
       <p v-if="limitationsError" class="user-action-feedback user-action-feedback--error" role="alert">{{ limitationsError }}</p>
@@ -1913,19 +1915,6 @@ async function confirmPendingAction() {
     display: block;
     width: 100%;
     min-height: var(--ds-touch-target);
-    padding: 0.625rem 0.75rem;
-    font: inherit;
-    font-size: var(--ds-font-base);
-    font-weight: 600;
-    line-height: 1.5;
-    color: var(--ds-text-primary);
-    background-color: var(--ds-bg-card);
-    border: 1px solid var(--ds-border-medium);
-    border-radius: var(--ds-radius-md);
-    cursor: pointer;
-    user-select: none;
-    -webkit-user-select: none;
-    -webkit-tap-highlight-color: transparent;
     transition: all 0.2s;
     text-align: center;
 }

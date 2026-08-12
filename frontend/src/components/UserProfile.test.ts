@@ -213,6 +213,8 @@ describe('UserProfile.vue authoritative admin actions', () => {
     expect(wrapper.get('.modal-content .form-select').classes()).toContain('ui-select')
     expect(wrapper.get('.modal-content .save-btn').classes()).toContain('ui-button')
     expect(wrapper.get('.modal-content .cancel-btn').classes()).toContain('ui-button')
+    await wrapper.get('.modal-content .form-select').setValue('-1')
+    expect(wrapper.get('.custom-date-trigger').classes()).toContain('ui-button')
   })
 
   it('saves a role once, applies only the returned user, and never opens native dialogs', async () => {
