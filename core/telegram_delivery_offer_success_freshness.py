@@ -311,7 +311,14 @@ def build_telegram_offer_success_snapshot(
         {
             "offer_version": offer_version,
             "payload_hash": payload_hash,
-            "user_sync_version": user_sync_version,
+            # The recipient route is already fenced by the immutable Telegram
+            # id captured in the outbox and checked against the current user.
+            # Using the *current* aggregate user sync_version here makes an
+            # unrelated later interaction (for example, creating another
+            # offer) reclassify this already-authoritative success edit.  Keep
+            # the version fence tied to the source event that created this
+            # outbox; relinks still fail the explicit Telegram-id check above.
+            "user_sync_version": source.expected_user_sync_version,
         },
         sort_keys=True,
         separators=(",", ":"),

@@ -5250,6 +5250,27 @@ async def expire_bot_offer_with_dispatcher(
     answer_text = str((answer or {}).get("text") or "")
     if "منقضی شد" in answer_text:
         return "success"
+    # Queue-v1 acknowledges the callback through the durable M0 queue, so the
+    # synthetic CallbackQuery has no immediate success text.  The authoritative
+    # Offer mutation is committed before the handler returns; use that durable
+    # business state as the acceptance oracle instead of misclassifying every
+    # successful queue-owned expiry as rejected.
+    try:
+        async with AsyncSessionLocal() as db:
+            offer = await db.get(Offer, int(offer_id))
+            persisted_status = str(
+                getattr(
+                    getattr(offer, "status", None),
+                    "value",
+                    getattr(offer, "status", ""),
+                )
+                or ""
+            )
+        if persisted_status == OfferStatus.EXPIRED.value:
+            return "success"
+    except Exception as exc:
+        if error_details is not None:
+            error_details.append(f"bot_expire_state_probe:{type(exc).__name__}: {exc}")
     if answer_text and error_details is not None:
         error_details.append(f"bot_expire_rejected: {answer_text}")
     return "rejected"

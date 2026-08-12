@@ -134,6 +134,43 @@ class TelegramDeliveryOfferSuccessContractTests(
         self.assertEqual(snapshot.payload["parse_mode"], "Markdown")
         self.assertTrue(telegram_offer_success_source_natural_id(outbox))
 
+    def test_snapshot_ignores_unrelated_later_user_version_changes(self):
+        outbox = self._outbox()
+        offer = SimpleNamespace(
+            id=19,
+            user_id=7,
+            offer_public_id="ofr_success_1",
+            version_id=1,
+            status="active",
+            offer_type="buy",
+            settlement_type=None,
+            commodity=SimpleNamespace(name="سکه"),
+            quantity=12,
+            remaining_quantity=12,
+            price=123456,
+            notes=None,
+        )
+        outbox.text = build_offer_success_text(
+            success_copy=OFFER_SUCCESS_COPY_LEGACY,
+            offer_text=build_offer_channel_message(offer),
+        )
+        original = build_telegram_offer_success_snapshot(
+            outbox,
+            SimpleNamespace(id=7, telegram_id=7007, sync_version=3),
+            offer,
+        )
+        after_another_interaction = build_telegram_offer_success_snapshot(
+            outbox,
+            SimpleNamespace(id=7, telegram_id=7007, sync_version=19),
+            offer,
+        )
+
+        self.assertEqual(original.payload, after_another_interaction.payload)
+        self.assertEqual(
+            original.source_version,
+            after_another_interaction.source_version,
+        )
+
     def test_runtime_coverage_is_complete_after_scheduled_sources(self):
         freshness = configured_telegram_delivery_freshness_registry(
             channel_id=-1001234567890
