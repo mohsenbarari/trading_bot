@@ -49,7 +49,12 @@ from bot.callbacks import ExpireOfferCallback, TextOfferActionCallback
 from bot.handlers import trade_execute as bot_trade_execute
 from bot.handlers import trade_create as bot_trade_create
 from bot.handlers import trade_manage as bot_trade_manage
-from bot.middlewares import AuthMiddleware, TradeContentionGateMiddleware
+from bot.middlewares import (
+    AuthMiddleware,
+    CallbackReceiptMiddleware,
+    TradeContentionGateMiddleware,
+)
+from bot.middlewares import trade_contention_gate as bot_trade_contention_gate
 from bot.middlewares.trade_contention_gate import (
     ParsedTelegramTradeCallback,
     claim_telegram_trade_confirmation,
@@ -69,6 +74,10 @@ from core.offer_source import OfferSourceSurface, normalize_offer_source_surface
 from core.offer_quantity import coalesce_offer_remaining_quantity
 from core.server_routing import SERVER_FOREIGN, SERVER_IRAN, current_server, normalize_server, override_current_server
 from core.telegram_trade_callbacks import build_channel_trade_callback_data
+from core.telegram_bot_identity_context import (
+    bind_telegram_callback_bot_identity,
+    reset_telegram_callback_bot_identity,
+)
 from core.utils import create_user_notification
 from core import offer_expiry as offer_expiry_worker
 from models.accountant_relation import AccountantRelation
@@ -98,6 +107,18 @@ from models.user_block import UserBlock
 
 class TradingProbeError(RuntimeError):
     pass
+
+
+def _synthetic_callback_id(*parts: object) -> str:
+    """Build a deterministic, Telegram-valid callback-query id for the harness.
+
+    Aiogram validates Telegram's 64-character callback-query-id limit before
+    dispatching an update.  Benchmark run prefixes intentionally carry enough
+    entropy to exceed that bound, so preserve their uniqueness in a digest
+    rather than embedding them in the synthetic update.
+    """
+    material = "\x1f".join(str(part) for part in parts)
+    return f"probe-{hashlib.sha256(material.encode('utf-8')).hexdigest()[:32]}"
 
 
 DUAL_ROLE_PLAN_SCHEMA_VERSION = "bot_webapp_mixed_load_role_plan_v1"
@@ -730,6 +751,22 @@ def build_negative_guard_idempotency_key(
     case_token = "".join(ch if ch.isalnum() else "-" for ch in case_id.lower())[:20] or "case"
     action_token = "".join(ch if ch.isalnum() else "-" for ch in action.lower())[:8] or "action"
     return f"guard:{case_token}:{action_token}:{digest}"[:64]
+
+
+def build_load_offer_creation_idempotency_key(
+    *,
+    prefix: str,
+    user_id: int,
+    index: int,
+    source_surface: OfferSourceSurface,
+) -> str:
+    """Return a stable, bounded idempotency key for a synthetic offer create."""
+    raw = f"{prefix}|{source_surface.value}|{int(user_id)}|{int(index)}"
+    digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:24]
+    surface_token = "".join(
+        ch if ch.isalnum() else "-" for ch in source_surface.value.lower()
+    )[:12] or "surface"
+    return f"load-offer:{surface_token}:{digest}"
 
 
 def _validate_role_result_artifact(raw: Mapping[str, Any]) -> Mapping[str, Any]:
@@ -2283,7 +2320,10 @@ def noop_schedule_web_push(*_args: Any, **_kwargs: Any) -> None:
 
 
 @asynccontextmanager
-async def patched_trading_boundaries():
+async def patched_trading_boundaries(
+    *,
+    emulate_callback_answers: bool = False,
+):
     import core.services.trade_service as trade_service
     import core.web_push as web_push
 
@@ -2307,6 +2347,8 @@ async def patched_trading_boundaries():
         "schedule_notification_web_push": web_push.schedule_notification_web_push,
         "validate_competitive_price": trade_service.validate_competitive_price,
         "detect_offer_price_warning": trade_service.detect_offer_price_warning,
+        "bot_trade_answer_callback": bot_trade_execute.answer_callback_query_via_runtime,
+        "bot_gate_answer_callback": bot_trade_contention_gate.answer_callback_query_via_runtime,
     }
 
     async def always_valid_price(**_kwargs: Any) -> tuple[bool, str]:
@@ -2314,6 +2356,31 @@ async def patched_trading_boundaries():
 
     async def no_price_warning(**_kwargs: Any) -> None:
         return None
+
+    callback_answer_unset = object()
+
+    async def record_synthetic_callback_answer(
+        callback: Any,
+        text: Any = callback_answer_unset,
+        *,
+        show_alert: Any = callback_answer_unset,
+        **_kwargs: Any,
+    ) -> Any:
+        """Answer a harness-only callback without queuing a fake Telegram id.
+
+        Synthetic dispatcher updates have no Telegram-issued callback receipt,
+        so their acknowledgement cannot be delivered by the real queue.  The
+        business handler and all durable offer/terminal-publication paths still
+        run unchanged; only this impossible external acknowledgement is
+        recorded by the in-memory Telegram adapter.
+        """
+        args = () if text is callback_answer_unset else (text,)
+        kwargs = (
+            {}
+            if show_alert is callback_answer_unset
+            else {"show_alert": show_alert}
+        )
+        return await callback.answer(*args, **kwargs)
 
     async def local_forward_trade_to_home_server(
         _target_server: str,
@@ -2484,6 +2551,13 @@ async def patched_trading_boundaries():
     web_push.schedule_notification_web_push = noop_schedule_web_push
     trade_service.validate_competitive_price = always_valid_price
     trade_service.detect_offer_price_warning = no_price_warning
+    if emulate_callback_answers:
+        bot_trade_execute.answer_callback_query_via_runtime = (
+            record_synthetic_callback_answer
+        )
+        bot_trade_contention_gate.answer_callback_query_via_runtime = (
+            record_synthetic_callback_answer
+        )
     try:
         yield
     finally:
@@ -2506,6 +2580,12 @@ async def patched_trading_boundaries():
         web_push.schedule_notification_web_push = original["schedule_notification_web_push"]
         trade_service.validate_competitive_price = original["validate_competitive_price"]
         trade_service.detect_offer_price_warning = original["detect_offer_price_warning"]
+        bot_trade_execute.answer_callback_query_via_runtime = original[
+            "bot_trade_answer_callback"
+        ]
+        bot_trade_contention_gate.answer_callback_query_via_runtime = original[
+            "bot_gate_answer_callback"
+        ]
 
 
 @asynccontextmanager
@@ -2682,6 +2762,12 @@ async def create_offer_for_user(
                     lot_sizes=normalized_lot_sizes,
                     notes=f"{prefix} offer {index}",
                     warning_acknowledged=True,
+                    idempotency_key=build_load_offer_creation_idempotency_key(
+                        prefix=prefix,
+                        user_id=int(user.id),
+                        index=index,
+                        source_surface=normalized_source_surface,
+                    ),
                 ),
                 db=db,
                 current_user=user,
@@ -3134,8 +3220,16 @@ class FakeState:
 
 
 class FakeMessage:
-    def __init__(self, text_value: str) -> None:
+    def __init__(
+        self,
+        text_value: str,
+        *,
+        message_id: int | None = None,
+        chat_id: int | None = None,
+    ) -> None:
         self.text = text_value
+        self.message_id = message_id
+        self.chat = SimpleNamespace(id=chat_id)
         self.answers: list[dict[str, Any]] = []
 
     async def answer(self, text_value: str, **kwargs: Any) -> None:
@@ -3269,6 +3363,10 @@ class AiogramDispatcherHarness:
     def __init__(self) -> None:
         self.telegram = RecordingTelegramBot()
         self.dp = Dispatcher(storage=MemoryStorage())
+        # Keep the synthetic envelope aligned with the production polling
+        # boundary: queue-v1 callback acknowledgement requires the captured
+        # receipt timestamp before the contention gate or handler executes.
+        self.dp.update.outer_middleware(CallbackReceiptMiddleware())
         self.dp.update.outer_middleware(TradeContentionGateMiddleware())
         self.dp.update.outer_middleware(AuthMiddleware(AsyncSessionLocal))
         self.dp.update.outer_middleware(BotLoggingContextMiddleware())
@@ -3320,6 +3418,7 @@ class AiogramDispatcherHarness:
         callback_data: str,
         callback_id: str,
         channel_message_id: int,
+        bot_identity: str = "primary",
     ) -> dict[str, Any] | None:
         now = int(time.time())
         channel_id = settings.channel_id or -1000000000000
@@ -3345,7 +3444,11 @@ class AiogramDispatcherHarness:
             },
             context={"bot": self.telegram.bot},
         )
-        await self.dp.feed_update(self.telegram.bot, update)
+        identity_token = bind_telegram_callback_bot_identity(bot_identity)
+        try:
+            await self.dp.feed_update(self.telegram.bot, update)
+        finally:
+            reset_telegram_callback_bot_identity(identity_token)
         return self.telegram.callback_answers.get(callback_id)
 
     async def feed_private_callback(
@@ -3354,6 +3457,7 @@ class AiogramDispatcherHarness:
         telegram_id: int,
         callback_data: str,
         callback_id: str,
+        bot_identity: str = "primary",
     ) -> dict[str, Any] | None:
         now = int(time.time())
         update = Update.model_validate(
@@ -3378,7 +3482,11 @@ class AiogramDispatcherHarness:
             },
             context={"bot": self.telegram.bot},
         )
-        await self.dp.feed_update(self.telegram.bot, update)
+        identity_token = bind_telegram_callback_bot_identity(bot_identity)
+        try:
+            await self.dp.feed_update(self.telegram.bot, update)
+        finally:
+            reset_telegram_callback_bot_identity(identity_token)
         return self.telegram.callback_answers.get(callback_id)
 
     async def close(self) -> None:
@@ -3396,7 +3504,15 @@ async def run_bot_text_handler_probe(*, user_id: int, text_value: str) -> dict[s
     async with AsyncSessionLocal() as db:
         user = await load_user(db, user_id)
         state = FakeState()
-        message = FakeMessage(text_value)
+        # Queue-v1 validates that a private reply is anchored to the incoming
+        # user's own Telegram chat.  The probe invokes a real text handler, so
+        # provide the same immutable inbound facts instead of bypassing that
+        # production guard with an incomplete fake message.
+        message = FakeMessage(
+            text_value,
+            message_id=int(user.id),
+            chat_id=int(user.telegram_id),
+        )
         await bot_trade_create.handle_text_offer(message, state, user, bot=None)
         return {
             "answers": len(message.answers),
@@ -3457,7 +3573,9 @@ async def execute_bot_offer_creation_for_user(
         callback_answer = await harness.feed_private_callback(
             telegram_id=user.telegram_id,
             callback_data=TextOfferActionCallback(action="confirm").pack(),
-            callback_id=f"{prefix}bot-create-confirm-{user.user_id}",
+            callback_id=_synthetic_callback_id(
+                prefix, "bot-create-confirm", user.user_id
+            ),
         )
         sent_messages = list(harness.telegram.sent_messages)
     except Exception as exc:
@@ -3494,6 +3612,7 @@ async def execute_webapp_trade_for_user(
     contention_lease: TradeContentionLease | None = None,
     error_details: list[str] | None = None,
     phase_details: dict[str, Any] | None = None,
+    run_background_tasks: bool = True,
 ) -> str:
     background_tasks = BackgroundTasks()
     create_started = time.perf_counter()
@@ -3540,10 +3659,19 @@ async def execute_webapp_trade_for_user(
             elif hasattr(response, "model_dump"):
                 phase_details["response_status_code"] = 201
                 phase_details["response_body"] = json_safe(response.model_dump(mode="json"))
-        background_started = time.perf_counter()
-        await background_tasks()
-        if phase_details is not None:
-            phase_details["background_tasks_ms"] = round((time.perf_counter() - background_started) * 1000.0, 3)
+        if run_background_tasks:
+            background_started = time.perf_counter()
+            await background_tasks()
+            if phase_details is not None:
+                phase_details["background_tasks_ms"] = round(
+                    (time.perf_counter() - background_started) * 1000.0,
+                    3,
+                )
+        elif phase_details is not None:
+            # A direct router probe has no ASGI response boundary.  Callers
+            # that audit durable side effects independently may explicitly
+            # omit best-effort post-response work.
+            phase_details["background_tasks_skipped"] = True
     except HTTPException as exc:
         status_code = int(exc.status_code or 500)
         if status_code >= 500 and error_details is not None:
@@ -4866,7 +4994,9 @@ async def create_bot_offer_with_dispatcher(
     await harness.feed_private_callback(
         telegram_id=owner.telegram_id,
         callback_data=TextOfferActionCallback(action="confirm").pack(),
-        callback_id=f"{prefix}bot-create-confirm-{owner.user_id}",
+        callback_id=_synthetic_callback_id(
+            prefix, "bot-create-confirm", owner.user_id
+        ),
     )
     async with AsyncSessionLocal() as db:
         offer = (
@@ -5014,6 +5144,7 @@ async def execute_bot_trade_with_dispatcher(
     error_details: list[str] | None = None,
     phase_details: dict[str, Any] | None = None,
     preconfirmed: bool = False,
+    callback_bot_identity: str = "primary",
 ) -> str:
     callback_data = build_channel_trade_callback_data(
         offer_id=offer.id,
@@ -5021,8 +5152,8 @@ async def execute_bot_trade_with_dispatcher(
         amount=amount,
     )
     channel_message_id = int(getattr(offer, "channel_message_id", None) or getattr(offer, "id", 0) or 1)
-    first_callback_id = f"{prefix}tap1-{spec.index}"
-    second_callback_id = f"{prefix}tap2-{spec.index}"
+    first_callback_id = _synthetic_callback_id(prefix, "trade-tap-1", spec.index)
+    second_callback_id = _synthetic_callback_id(prefix, "trade-tap-2", spec.index)
     recorder_token = None
     forward_recorder_token = None
     forward_records: list[dict[str, Any]] = []
@@ -5041,6 +5172,7 @@ async def execute_bot_trade_with_dispatcher(
                 callback_data=callback_data,
                 callback_id=first_callback_id,
                 channel_message_id=channel_message_id,
+                bot_identity=callback_bot_identity,
             )
             telegram_update_count += 1
             if phase_details is not None:
@@ -5053,6 +5185,7 @@ async def execute_bot_trade_with_dispatcher(
             callback_data=callback_data,
             callback_id=second_callback_id,
             channel_message_id=channel_message_id,
+            bot_identity=callback_bot_identity,
         )
         telegram_update_count += 1
         if phase_details is not None:
@@ -5098,12 +5231,22 @@ async def expire_bot_offer_with_dispatcher(
         answer = await harness.feed_private_callback(
             telegram_id=owner.telegram_id,
             callback_data=ExpireOfferCallback(offer_id=offer_id).pack(),
-            callback_id=f"{prefix}bot-expire-{owner.user_id}-{index}",
+            callback_id=_synthetic_callback_id(
+                prefix, "bot-expire", owner.user_id, index
+            ),
         )
     except Exception as exc:
         if error_details is not None:
             error_details.append(f"{type(exc).__name__}: {exc}")
         return "error"
+    offer = await load_offer_snapshot(offer_id)
+    offer_status = getattr(getattr(offer, "status", None), "value", getattr(offer, "status", None))
+    if str(offer_status or "").strip().lower() == OfferStatus.EXPIRED.value:
+        # Queue-v1 acknowledges the callback with an intentionally blank M0
+        # receipt, then enqueues the user-facing confirmation separately.  The
+        # authoritative offer transition is therefore the only correct success
+        # signal for this synthetic dispatcher boundary.
+        return "success"
     answer_text = str((answer or {}).get("text") or "")
     if "منقضی شد" in answer_text:
         return "success"

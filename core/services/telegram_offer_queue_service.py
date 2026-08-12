@@ -19,13 +19,23 @@ from core.config import settings
 from core.server_routing import SERVER_FOREIGN
 from core.services.offer_publication_state_service import (
     canonical_telegram_publication_identity,
+    ensure_telegram_publication_publisher_identity,
+)
+from core.services.telegram_publisher_dispatch_service import (
+    TelegramPublisherDispatchError,
+    get_or_create_telegram_publisher_dispatch_command,
+    healthy_telegram_publisher_lane_identities,
+    select_telegram_publisher_lane_for_job,
 )
 from core.services.telegram_delivery_queue_service import (
-    TELEGRAM_CHANNEL_EDITOR_BOT_IDENTITY,
     TELEGRAM_PRIMARY_BOT_IDENTITY,
     TelegramDeliveryEnqueueResult,
     enqueue_telegram_delivery_job,
     telegram_delivery_database_now,
+)
+from core.services.telegram_offer_channel_service import (
+    CHANNEL_LIFECYCLE_METADATA_KEY,
+    project_offer_channel_lifecycle,
 )
 from core.services.telegram_offer_publication_service import (
     get_or_create_telegram_publication_state,
@@ -41,6 +51,7 @@ from core.telegram_delivery_offer_freshness import (
 from core.telegram_delivery_queue_contract import (
     EDIT_CATCH_UP_FRESH_COUNT,
     EDIT_STALE_AFTER_SECONDS,
+    FINAL_DELIVERY_STATES,
     TelegramDeliveryAction,
     TelegramDeliveryState,
     TelegramDestinationClass,
@@ -114,9 +125,21 @@ def _normalized_time(value: datetime) -> datetime:
 
 
 def configured_offer_edit_bot_identity() -> str:
-    if bool(getattr(settings, "telegram_delivery_queue_channel_editor_enabled", False)):
-        return TELEGRAM_CHANNEL_EDITOR_BOT_IDENTITY
+    """Keep legacy offers on their publishing token until lane ownership exists.
+
+    The former channel-editor route could edit a post created by ``primary``.
+    Telegram rejects that active-post lifecycle in practice, so editor enablement
+    must not influence offer publish/edit routing before immutable publisher
+    ownership is introduced in a later migration stage.
+    """
     return TELEGRAM_PRIMARY_BOT_IDENTITY
+
+
+def _telegram_b2b_dispatch_enabled() -> bool:
+    return bool(
+        getattr(settings, "telegram_multi_publisher_enabled", False)
+        and getattr(settings, "telegram_b2b_dispatch_enabled", False)
+    )
 
 
 def _normalized_fresh_success_counts(value: Any) -> dict[int, int]:
@@ -268,16 +291,23 @@ def offer_publication_freshness_deadline(
     *,
     offer_expiry_minutes: int,
 ) -> datetime:
+    from core.offer_lifecycle import publication_freshness_deadline_at, read_overtime_minutes_snapshot
+
     created_at = getattr(offer, "created_at", None)
     if not isinstance(created_at, datetime):
         raise TelegramOfferQueueError("telegram_offer_queue_created_at_invalid")
     expiry_minutes = int(offer_expiry_minutes)
     if expiry_minutes <= 0:
         raise TelegramOfferQueueError("telegram_offer_queue_expiry_invalid")
-    return _normalized_time(created_at) + timedelta(
-        minutes=expiry_minutes,
-        seconds=-OFFER_PUBLICATION_DEADLINE_SAFETY_SECONDS,
-    )
+    try:
+        return publication_freshness_deadline_at(
+            created_at,
+            normal_lifetime_minutes=expiry_minutes,
+            overtime_minutes_snapshot=read_overtime_minutes_snapshot(offer),
+            safety_seconds=OFFER_PUBLICATION_DEADLINE_SAFETY_SECONDS,
+        )
+    except ValueError as exc:
+        raise TelegramOfferQueueError("telegram_offer_queue_expiry_invalid") from exc
 
 
 async def _supersede_obsolete_offer_jobs(
@@ -384,8 +414,13 @@ async def enqueue_current_offer_delivery(
     if not offer_public_id or source_version is None:
         raise TelegramOfferQueueError("telegram_offer_queue_source_invalid")
 
+    b2b_dispatch_enabled = _telegram_b2b_dispatch_enabled()
     if state is None:
-        state = await get_or_create_telegram_publication_state(db, offer)
+        state = await get_or_create_telegram_publication_state(
+            db,
+            offer,
+            publisher_bot_identity=None if b2b_dispatch_enabled else TELEGRAM_PRIMARY_BOT_IDENTITY,
+        )
 
     selected_action = action or offer_delivery_action(offer, state)
     if selected_action is None:
@@ -436,6 +471,36 @@ async def enqueue_current_offer_delivery(
         now=current_time,
     )
     is_publish = selected_action in OFFER_PUBLISH_ACTIONS
+    queue_bot_identity = configured_offer_edit_bot_identity()
+    if is_publish:
+        publisher = str(getattr(state, "publisher_bot_identity", "") or "").strip()
+        if not publisher and b2b_dispatch_enabled:
+            try:
+                selection = await select_telegram_publisher_lane_for_job(
+                    db,
+                    healthy_publishers=healthy_telegram_publisher_lane_identities(),
+                    round_robin_sequence=_positive_int(
+                        getattr(offer, "id", None)
+                    )
+                    or source_version,
+                )
+            except TelegramPublisherDispatchError as exc:
+                raise TelegramOfferQueueError(str(exc)) from exc
+            publisher = ensure_telegram_publication_publisher_identity(
+                state,
+                publisher_bot_identity=selection.publisher_bot_identity,
+            )
+        queue_bot_identity = publisher or TELEGRAM_PRIMARY_BOT_IDENTITY
+    else:
+        publisher = str(getattr(state, "publisher_bot_identity", "") or "").strip()
+        if publisher.startswith("publisher_"):
+            if not b2b_dispatch_enabled:
+                raise TelegramOfferQueueError(
+                    "telegram_offer_queue_publisher_lifecycle_requires_b2b"
+                )
+            queue_bot_identity = publisher
+        elif publisher and publisher != TELEGRAM_PRIMARY_BOT_IDENTITY:
+            raise TelegramOfferQueueError("telegram_offer_queue_publisher_identity_invalid")
     feeder = (
         TelegramFeederKind.OFFER_CONTROL
         if is_publish
@@ -460,11 +525,7 @@ async def enqueue_current_offer_delivery(
         source_natural_id=offer_public_id,
         source_version=source_version,
         action=selected_action,
-        bot_identity=(
-            TELEGRAM_PRIMARY_BOT_IDENTITY
-            if is_publish
-            else configured_offer_edit_bot_identity()
-        ),
+        bot_identity=queue_bot_identity,
         destination_key=telegram_channel_destination_key(channel_id),
         destination_class=TelegramDestinationClass.CHANNEL,
         method="sendMessage" if is_publish else "editMessageText",
@@ -484,6 +545,17 @@ async def enqueue_current_offer_delivery(
             else None
         ),
     )
+    if queue_bot_identity.startswith("publisher_"):
+        try:
+            await get_or_create_telegram_publisher_dispatch_command(
+                db,
+                current_server=current_server,
+                job=queue_result.job,
+                publisher_bot_identity=queue_bot_identity,
+                now=current_time,
+            )
+        except TelegramPublisherDispatchError as exc:
+            raise TelegramOfferQueueError(str(exc)) from exc
     return TelegramOfferQueueHandoffResult(
         offer_public_id=offer_public_id,
         action=selected_action,
@@ -497,6 +569,24 @@ async def load_offer_publication_queue_candidates(
     limit: int,
 ) -> list[TelegramOfferQueueCandidate]:
     state = aliased(OfferPublicationState)
+    # A pending publication state intentionally remains pending until its
+    # immutable queue job obtains provider evidence.  Without this exclusion,
+    # the oldest in-flight rows monopolize every feeder batch: each scan only
+    # re-deduplicates those rows instead of admitting later central-ingress
+    # offers.  A final job is deliberately *not* excluded; its state still
+    # needs an explicit retry/recovery path if it did not produce a message.
+    in_flight_publication_job = (
+        select(TelegramDeliveryJobRecord.id)
+        .where(
+            TelegramDeliveryJobRecord.feeder_kind
+            == TelegramFeederKind.OFFER_CONTROL,
+            TelegramDeliveryJobRecord.source_natural_id == Offer.offer_public_id,
+            TelegramDeliveryJobRecord.action_kind.in_(tuple(OFFER_PUBLISH_ACTIONS)),
+            TelegramDeliveryJobRecord.state.notin_(tuple(FINAL_DELIVERY_STATES)),
+        )
+        .correlate(Offer)
+        .exists()
+    )
     rows = (
         await db.execute(
             select(Offer, state)
@@ -524,6 +614,7 @@ async def load_offer_publication_queue_candidates(
                         )
                     ),
                 ),
+                ~in_flight_publication_job,
             )
             .order_by(Offer.created_at.asc(), Offer.id.asc())
             .limit(max(1, int(limit)))
@@ -623,3 +714,105 @@ async def load_offer_edit_queue_candidates(
         )
     ).all()
     return [TelegramOfferQueueCandidate(offer=row[0], state=row[1]) for row in rows]
+
+
+_LIFECYCLE_CHANNEL_EDIT_ACTIONS = {
+    "overtime": TelegramDeliveryAction.OVERTIME_CHANNEL_EDIT,
+    "final_tail": TelegramDeliveryAction.FINAL_TAIL_CHANNEL_EDIT,
+}
+
+
+def _publication_metadata_dict(state: OfferPublicationState | None) -> dict[str, Any]:
+    raw = getattr(state, "state_metadata", None) if state is not None else None
+    if not isinstance(raw, dict):
+        return {}
+    return dict(raw)
+
+
+async def enqueue_offer_lifecycle_channel_handoffs(
+    db: AsyncSession,
+    *,
+    current_server: str,
+    expected_channel_id: int,
+    offer_expiry_minutes: int | None,
+    limit: int,
+    now: datetime | None = None,
+) -> list[TelegramOfferQueueHandoffResult]:
+    """Enqueue ACTIVE channel edits when wall-clock overtime/final-tail changes.
+
+    Pure phase transitions do not bump ``Offer.version_id``, so the normal edit
+    feeder cannot observe them. Track the last rendered phase on
+    ``OfferPublicationState.state_metadata`` and enqueue dedicated lifecycle
+    actions that share the current offer version (freshness-safe) while keeping
+    distinct dedupe keys per phase.
+    """
+    if offer_expiry_minutes is None or int(offer_expiry_minutes) <= 0:
+        return []
+
+    results: list[TelegramOfferQueueHandoffResult] = []
+    clock = _normalized_time(
+        now if now is not None else await telegram_delivery_database_now(db)
+    )
+    channel_id = _nonzero_int(
+        expected_channel_id,
+        reason="telegram_offer_queue_channel_invalid",
+    )
+    rows = (
+        await db.execute(
+            select(Offer, OfferPublicationState)
+            .join(
+                OfferPublicationState,
+                and_(
+                    OfferPublicationState.offer_public_id == Offer.offer_public_id,
+                    OfferPublicationState.surface
+                    == OfferPublicationSurface.TELEGRAM_CHANNEL,
+                ),
+            )
+            .options(selectinload(Offer.commodity))
+            .where(
+                Offer.status == OfferStatus.ACTIVE,
+                Offer.version_id.is_not(None),
+                OfferPublicationState.telegram_message_id.is_not(None),
+                OfferPublicationState.telegram_chat_id == channel_id,
+            )
+            .order_by(
+                func.coalesce(Offer.updated_at, Offer.created_at).asc(),
+                Offer.id.asc(),
+            )
+            .limit(max(1, int(limit)))
+            .with_for_update(of=Offer, skip_locked=True)
+        )
+    ).all()
+
+    for offer, state in rows:
+        projection = project_offer_channel_lifecycle(
+            offer,
+            normal_lifetime_minutes=int(offer_expiry_minutes),
+            as_of=clock,
+        )
+        phase = projection.phase.value
+        action = _LIFECYCLE_CHANNEL_EDIT_ACTIONS.get(phase)
+        if action is None:
+            continue
+        metadata = _publication_metadata_dict(state)
+        if str(metadata.get(CHANNEL_LIFECYCLE_METADATA_KEY) or "") == phase:
+            continue
+        try:
+            handoff = await enqueue_current_offer_delivery(
+                db,
+                current_server=current_server,
+                offer=offer,
+                state=state,
+                expected_channel_id=channel_id,
+                offer_expiry_minutes=offer_expiry_minutes,
+                action=action,
+                now=clock,
+            )
+        except TelegramOfferQueueError:
+            continue
+        if handoff.queue_result is not None and handoff.skipped_reason is None:
+            metadata[CHANNEL_LIFECYCLE_METADATA_KEY] = phase
+            state.state_metadata = metadata
+            await db.flush()
+        results.append(handoff)
+    return results

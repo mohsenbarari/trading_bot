@@ -62,6 +62,7 @@ from .telegram_notification_outbox import (
     TelegramNotificationOutboxStatus,
 )
 from .telegram_delivery_job import TelegramDeliveryJobRecord
+from .telegram_publisher_dispatch_command import TelegramPublisherDispatchCommand
 from .telegram_delivery_provider_outcome import TelegramDeliveryProviderOutcomeRecord
 from .telegram_delivery_reconciliation_evidence import (
     TelegramDeliveryReconciliationEvidence,
@@ -152,6 +153,7 @@ __all__ = [
     "TelegramNotificationOutbox",
     "TelegramNotificationOutboxStatus",
     "TelegramDeliveryJobRecord",
+    "TelegramPublisherDispatchCommand",
     "TelegramDeliveryProviderOutcomeRecord",
     "TelegramDeliveryReconciliationEvidence",
     "TelegramDeliveryRuntimeGate",

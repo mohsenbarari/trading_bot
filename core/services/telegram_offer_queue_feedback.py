@@ -6,6 +6,7 @@ from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from core.config import settings
 from core.server_routing import current_server
@@ -115,6 +116,7 @@ async def _load_offer_and_state_for_update(
     offer = (
         await db.execute(
             select(Offer)
+            .options(selectinload(Offer.commodity))
             .where(Offer.offer_public_id == offer_public_id)
             .with_for_update()
         )
@@ -315,6 +317,9 @@ class TelegramOfferQueueLifecycleFeedback:
                     message_id=message_id,
                     chat_id=_configured_channel_id(),
                     now=now,
+                    publisher_bot_identity=str(
+                        getattr(job, "bot_identity", "primary") or "primary"
+                    ),
                 )
             else:
                 _mark_edit_success(

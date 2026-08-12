@@ -83,7 +83,15 @@ VOLATILE_FIELDS_BY_TABLE: dict[str, set[str]] = {
 LOCAL_ONLY_FIELDS_BY_TABLE: dict[str, set[str]] = {
     "commodity_aliases": {"commodity_id"},
     "offers": {"channel_message_id", "commodity_id", "republished_offer_id"},
-    "offer_requests": {"local_offer_id", "resulting_trade_id", "customer_relation_id"},
+    # ``telegram_delivery_job_id`` points at a per-server delivery queue row, so
+    # the two peers legitimately hold different values and must not be compared.
+    "offer_requests": {
+        "local_offer_id",
+        "resulting_trade_id",
+        "customer_relation_id",
+        "telegram_delivery_job_id",
+        "requester_status_outbox_id",
+    },
     "trades": {"offer_id", "commodity_id"},
     "offer_publication_states": {
         "id",

@@ -33,6 +33,7 @@ from core.services.telegram_callback_queue_service import (
     enqueue_telegram_callback_answer,
 )
 from core.telegram_delivery_queue_contract import TelegramDeliveryAction
+from core.telegram_bot_identity_context import current_telegram_callback_bot_identity
 from core.telegram_delivery_runtime_policy import (
     TelegramDeliveryRuntimeMode,
     configured_telegram_delivery_runtime,
@@ -92,6 +93,7 @@ async def _answer_offer_expiry_callback(
             received_at=received_at,
             action=TelegramDeliveryAction.OFFER_EXPIRY_CALLBACK,
             text=text,
+            bot_identity=current_telegram_callback_bot_identity(),
         )
         if commit:
             await db.commit()

@@ -30,6 +30,10 @@ class Offer(Base):
         CheckConstraint('quantity > 0', name='ck_offers_quantity_positive'),
         CheckConstraint('price > 0', name='ck_offers_price_positive'),
         CheckConstraint('remaining_quantity >= 0', name='ck_offers_remaining_nonnegative'),
+        CheckConstraint(
+            'overtime_minutes_snapshot BETWEEN 0 AND 10',
+            name='ck_offers_overtime_minutes_snapshot_range',
+        ),
         # ایندکس ترکیبی برای کوئری‌های رایج: WHERE status='active' AND commodity_id=X
         Index('ix_offers_status_commodity', 'status', 'commodity_id'),
     )
@@ -85,6 +89,13 @@ class Offer(Base):
     # لیست اولیه بخش‌ها برای تاریخچه؛ تکرار فقط از مانده و lot_sizes فعلی استفاده می‌کند
     original_lot_sizes = Column(JSON, nullable=True)
     
+    # وقت اضافه - مقدار تثبیت‌شده مالک اقتصادی در لحظه ثبت لفظ
+    # این مقدار پس از ایجاد تغییر نمی‌کند؛ تغییر تنظیم کاربر فقط روی لفظ‌های بعدی اثر دارد.
+    overtime_minutes_snapshot = Column(Integer, nullable=False, default=0, server_default='0')
+
+    # آیا در وقت اضافه این لفظ معامله‌ای قطعی شد؟ مبنای نمایش نشان تاریخی است.
+    overtime_trade_committed = Column(Boolean, nullable=False, default=False, server_default='false')
+
     # وضعیت لفظ
     status = Column(Enum(OfferStatus), nullable=False, default=OfferStatus.ACTIVE)
     

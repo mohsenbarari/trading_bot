@@ -160,11 +160,16 @@ class _ResumeLimiter:
     def __init__(self, *, fail_clears: int = 0, on_clear=None):
         self.fail_clears = fail_clears
         self.on_clear = on_clear
-        self.clear_calls: list[str] = []
+        self.clear_calls: list[tuple[str, tuple[str, ...]]] = []
         self.bot_cooldowns = []
 
-    async def clear_destination_gate_after_database_resume(self, destination_key):
-        self.clear_calls.append(destination_key)
+    async def clear_destination_gate_after_database_resume(
+        self,
+        destination_key,
+        *,
+        bot_identities,
+    ):
+        self.clear_calls.append((destination_key, tuple(bot_identities)))
         if self.fail_clears > 0:
             self.fail_clears -= 1
             raise RuntimeError("synthetic redis outage")
@@ -289,7 +294,7 @@ class TelegramDeliveryResumePostgresTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(report.resumed_job_ids, (job_id,))
         self.assertTrue(replay.idempotent_replay)
         self.assertEqual(calls, 1)
-        self.assertEqual(limiter.clear_calls, [DESTINATION_KEY])
+        self.assertEqual(limiter.clear_calls, [(DESTINATION_KEY, ("primary",))])
         async with self.Session() as db:
             job = await db.get(TelegramDeliveryJobRecord, job_id)
             operation = (
@@ -412,7 +417,10 @@ class TelegramDeliveryResumePostgresTests(unittest.IsolatedAsyncioTestCase):
             preflight_runner=preflight,
         )
         self.assertEqual(report.state, TELEGRAM_RESUME_COMPLETED)
-        self.assertEqual(limiter.clear_calls, [DESTINATION_KEY, DESTINATION_KEY])
+        self.assertEqual(
+            limiter.clear_calls,
+            [(DESTINATION_KEY, ("primary",)), (DESTINATION_KEY, ("primary",))],
+        )
         self.assertGreater(pending_id, 0)
 
     async def test_new_pause_during_preflight_forces_another_full_preflight(self):

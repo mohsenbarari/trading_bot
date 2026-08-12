@@ -2,7 +2,10 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from core.telegram_delivery_credentials import TelegramDeliveryCredentialRegistry
+from core.telegram_delivery_credentials import (
+    TelegramDeliveryCredentialRegistry,
+    TelegramPublisherLaneConfiguration,
+)
 from core.telegram_delivery_preflight import (
     TelegramDeliveryPreflightConfigurationError,
     TelegramDeliveryPreflightFailedError,
@@ -15,14 +18,29 @@ from core.telegram_gateway import TelegramGatewayResult
 
 PRIMARY_BOT_ID = 111_111_111
 EDITOR_BOT_ID = 222_222_222
+PUBLISHER_BOT_IDS = {
+    f"publisher_{index}": 333_333_330 + index for index in range(1, 6)
+}
 CHANNEL_ID = -100_333_333_333
 
 
-def _registry(*, editor=False):
+def _publisher_lanes():
+    return {
+        identity: TelegramPublisherLaneConfiguration(
+            token=f"{identity}-secret-token",
+            expected_bot_id=bot_id,
+            expected_username=f"{identity}_bot",
+        )
+        for identity, bot_id in PUBLISHER_BOT_IDS.items()
+    }
+
+
+def _registry(*, editor=False, publishers=False):
     return TelegramDeliveryCredentialRegistry.from_values(
         primary_token="primary-secret-token",
         editor_enabled=editor,
         editor_token="editor-secret-token" if editor else None,
+        publisher_lanes=_publisher_lanes() if publishers else None,
     )
 
 
@@ -38,6 +56,7 @@ class _ReadbackGateway:
         is_anonymous=False,
         is_bot=True,
         member_bot_id=None,
+        username=None,
         permissions=None,
         override_results=None,
     ):
@@ -49,10 +68,11 @@ class _ReadbackGateway:
         self.is_anonymous = is_anonymous
         self.is_bot = is_bot
         self.member_bot_id = bot_id if member_bot_id is None else member_bot_id
+        self.username = username or f"{role}_bot"
         default_permissions = {
             "can_be_edited": False,
             "can_manage_chat": True,
-            "can_delete_messages": False,
+            "can_delete_messages": role.startswith("publisher_"),
             "can_manage_video_chats": False,
             "can_restrict_members": role == "primary",
             "can_promote_members": False,
@@ -61,7 +81,7 @@ class _ReadbackGateway:
             "can_post_stories": False,
             "can_edit_stories": False,
             "can_delete_stories": False,
-            "can_post_messages": role == "primary",
+            "can_post_messages": role == "primary" or role.startswith("publisher_"),
             "can_edit_messages": True,
         }
         default_permissions.update(permissions or {})
@@ -84,7 +104,12 @@ class _ReadbackGateway:
         if override is not None:
             return override
         if method == "getMe":
-            result = {"id": self.bot_id, "is_bot": self.is_bot, "first_name": self.role}
+            result = {
+                "id": self.bot_id,
+                "is_bot": self.is_bot,
+                "first_name": self.role,
+                "username": self.username,
+            }
         elif method == "getChat":
             result = {
                 "id": self.channel_id,
@@ -108,7 +133,15 @@ class _ReadbackGateway:
         )
 
 
-async def _run(*, editor=False, primary=None, editor_gateway=None, **overrides):
+async def _run(
+    *,
+    editor=False,
+    publishers=False,
+    primary=None,
+    editor_gateway=None,
+    publisher_gateways=None,
+    **overrides,
+):
     primary_gateway = primary or _ReadbackGateway(
         role="primary",
         bot_id=PRIMARY_BOT_ID,
@@ -119,8 +152,16 @@ async def _run(*, editor=False, primary=None, editor_gateway=None, **overrides):
             role="channel_editor",
             bot_id=EDITOR_BOT_ID,
         )
+    if publishers:
+        calls.update(
+            publisher_gateways
+            or {
+                identity: _ReadbackGateway(role=identity, bot_id=bot_id)
+                for identity, bot_id in PUBLISHER_BOT_IDS.items()
+            }
+        )
     values = {
-        "credential_registry": _registry(editor=editor),
+        "credential_registry": _registry(editor=editor, publishers=publishers),
         "channel_id": CHANNEL_ID,
         "expected_channel_id": CHANNEL_ID,
         "expected_primary_bot_id": PRIMARY_BOT_ID,
@@ -128,6 +169,9 @@ async def _run(*, editor=False, primary=None, editor_gateway=None, **overrides):
         "expected_editor_bot_id": EDITOR_BOT_ID if editor else None,
         "timeout_seconds": 7.5,
         "gateway_calls": calls,
+        "publisher_lanes": _registry(publishers=True).publisher_lanes
+        if publishers
+        else None,
     }
     values.update(overrides)
     return await run_telegram_delivery_preflight(**values)
@@ -687,6 +731,90 @@ class TelegramDeliveryPreflightTests(unittest.IsolatedAsyncioTestCase):
             )
         self.assertEqual(report.approved_bot_identities, ("primary",))
         self.assertTrue(all(call[2] == 5.0 for call in gateway.calls))
+
+    async def test_publishers_require_each_expected_identity_username_and_permissions(self):
+        report = await _run(publishers=True)
+        self.assertEqual(
+            report.approved_bot_identities,
+            (
+                "primary",
+                "publisher_1",
+                "publisher_2",
+                "publisher_3",
+                "publisher_4",
+                "publisher_5",
+            ),
+        )
+        self.assertEqual(
+            tuple(identity.bot_identity for identity in report.identities[1:]),
+            ("publisher_1", "publisher_2", "publisher_3", "publisher_4", "publisher_5"),
+        )
+        self.assertTrue(
+            all(
+                {
+                    "can_manage_chat",
+                    "can_post_messages",
+                    "can_edit_messages",
+                    "can_delete_messages",
+                }.issubset(identity.effective_permissions)
+                for identity in report.identities[1:]
+            )
+        )
+
+        mismatched_username = {
+            identity: _ReadbackGateway(
+                role=identity,
+                bot_id=bot_id,
+                username=("wrong_publisher_bot" if identity == "publisher_3" else None),
+                permissions={
+                    "can_post_messages": True,
+                    "can_delete_messages": True,
+                },
+            )
+            for identity, bot_id in PUBLISHER_BOT_IDS.items()
+        }
+        with self.assertRaisesRegex(
+            TelegramDeliveryPreflightFailedError,
+            "bot_username_mismatch:publisher_3",
+        ):
+            await _run(
+                publishers=True,
+                publisher_gateways=mismatched_username,
+            )
+
+        mismatched_bot_id = {
+            identity: _ReadbackGateway(
+                role=identity,
+                bot_id=(999_999 if identity == "publisher_2" else bot_id),
+                permissions={
+                    "can_post_messages": True,
+                    "can_delete_messages": True,
+                },
+            )
+            for identity, bot_id in PUBLISHER_BOT_IDS.items()
+        }
+        with self.assertRaisesRegex(
+            TelegramDeliveryPreflightFailedError,
+            "bot_identity_mismatch:publisher_2",
+        ):
+            await _run(publishers=True, publisher_gateways=mismatched_bot_id)
+
+        missing_delete = {
+            identity: _ReadbackGateway(
+                role=identity,
+                bot_id=bot_id,
+                permissions={
+                    "can_post_messages": True,
+                    "can_delete_messages": identity != "publisher_4",
+                },
+            )
+            for identity, bot_id in PUBLISHER_BOT_IDS.items()
+        }
+        with self.assertRaisesRegex(
+            TelegramDeliveryPreflightFailedError,
+            "publisher_permissions_missing:publisher_4",
+        ):
+            await _run(publishers=True, publisher_gateways=missing_delete)
 
 
 if __name__ == "__main__":

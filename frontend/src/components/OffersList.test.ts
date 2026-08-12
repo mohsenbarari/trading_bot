@@ -1271,4 +1271,107 @@ describe('OffersList.vue', () => {
     expect(paginatedWrapper.emitted('retry-active')).toHaveLength(1)
     expect(paginatedWrapper.find('.active-load-more-btn').exists()).toBe(false)
   })
+
+  it('restarts a green overtime timer ring and animates the hourglass beside relative time', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-08-05T12:05:00Z'))
+    const nowSec = Date.now() / 1000
+
+    const wrapper = await mountOffersList({
+      expiryMinutes: 2,
+      offers: [
+        buildTradeOffer({
+          id: 101,
+          commodity_name: 'لفظ وقت اضافه',
+          lifecycle_phase: 'overtime',
+          normal_deadline_ts: nowSec - 60,
+          final_deadline_ts: nowSec + 240,
+          expires_at_ts: nowSec + 240,
+          timer_total_seconds: 300,
+          accepts_new_public_interaction: true,
+          accepts_overtime_request: true,
+          accepts_automatic_trade: false,
+        }),
+      ],
+    })
+
+    const card = wrapper.get('.offer-card-wrap')
+    expect(card.classes()).toContain('has-timer')
+    expect(card.classes()).toContain('timer-overtime')
+    expect(card.classes()).not.toContain('timer-critical')
+    expect(card.attributes('style')).toContain('--t-pct')
+
+    const marker = wrapper.get('.overtime-marker')
+    expect(marker.text()).toBe('⏳')
+    expect(marker.classes()).toContain('overtime-marker--animated')
+    expect(wrapper.find('.offer-meta-end').exists()).toBe(true)
+    expect(wrapper.find('.trade-btn').exists()).toBe(true)
+
+    wrapper.unmount()
+    vi.useRealTimers()
+  })
+
+  it('keeps final-tail cards visible, static-marked, and without trade controls', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-08-05T12:10:00Z'))
+    const nowSec = Date.now() / 1000
+
+    const wrapper = await mountOffersList({
+      offers: [
+        buildTradeOffer({
+          id: 102,
+          commodity_name: 'لفظ دم نهایی',
+          lifecycle_phase: 'final_tail',
+          expires_at_ts: nowSec - 5,
+          final_deadline_ts: nowSec - 5,
+          timer_total_seconds: 0,
+          accepts_new_public_interaction: false,
+          accepts_overtime_request: false,
+          accepts_automatic_trade: false,
+        }),
+      ],
+    })
+
+    expect(wrapper.text()).toContain('لفظ دم نهایی')
+    const card = wrapper.get('.offer-card-wrap')
+    expect(card.classes()).not.toContain('has-timer')
+    expect(wrapper.get('.overtime-marker').classes()).toContain('overtime-marker--static')
+    expect(wrapper.find('.trade-btn').exists()).toBe(false)
+    expect(wrapper.find('.cancel-own-offer-btn').exists()).toBe(false)
+
+    wrapper.unmount()
+    vi.useRealTimers()
+  })
+
+  it('keeps a static history hourglass only when overtime_trade_committed is true', async () => {
+    const wrapper = await mountOffersList({
+      offers: [
+        buildTradeOffer({
+          id: 103,
+          commodity_name: 'تاریخچه با معامله وقت اضافه',
+          status: 'completed',
+          history_state: 'traded',
+          is_read_only: true,
+          overtime_trade_committed: true,
+          traded_quantity: 4,
+        }),
+        buildTradeOffer({
+          id: 104,
+          commodity_name: 'تاریخچه بدون معامله وقت اضافه',
+          status: 'expired',
+          history_state: 'expired',
+          is_read_only: true,
+          overtime_trade_committed: false,
+        }),
+      ],
+    })
+
+    const cards = wrapper.findAll('.offer-card-wrap')
+    expect(cards).toHaveLength(2)
+    expect(cards[0]!.find('.overtime-marker').exists()).toBe(true)
+    expect(cards[0]!.find('.overtime-marker').classes()).toContain('overtime-marker--static')
+    expect(cards[1]!.find('.overtime-marker').exists()).toBe(false)
+
+    wrapper.unmount()
+  })
 })

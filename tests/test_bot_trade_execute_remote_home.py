@@ -253,7 +253,8 @@ class BotTradeExecuteRemoteHomeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(schedule_recovery_mock.call_args.kwargs["fallback_chat_id"], 300)
         self.assertEqual(schedule_recovery_mock.call_args.kwargs["offer_snapshot"]["notes"], "تحویل فوری")
         bot.send_message.assert_not_awaited()
-        self.assertIn("درخواست معامله ارسال شد", callback.answer.await_args.args[0])
+        # Stage 7 ambiguous/pending forward ack uses inventory M18.
+        self.assertIn("⏳ در حال بررسی درخواست...", callback.answer.await_args.args[0])
         self.assertEqual(callback.answer.await_args.kwargs, {"show_alert": False})
 
         bot.send_message.reset_mock()
@@ -266,7 +267,7 @@ class BotTradeExecuteRemoteHomeTests(unittest.IsolatedAsyncioTestCase):
             await handle_channel_trade(callback, SimpleNamespace(offer_id=7, amount=2), user=user, bot=bot)
         schedule_recovery_mock.assert_called_once()
         bot.send_message.assert_not_awaited()
-        self.assertIn("درخواست معامله ارسال شد", callback.answer.await_args.args[0])
+        self.assertIn("⏳ در حال بررسی درخواست...", callback.answer.await_args.args[0])
         self.assertEqual(callback.answer.await_args.kwargs, {"show_alert": False})
 
         callback = make_callback()

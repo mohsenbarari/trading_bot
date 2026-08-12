@@ -2,6 +2,7 @@ import { ref } from 'vue';
 import { useWebSocket } from './useWebSocket.ts';
 import { apiFetch } from '../utils/auth';
 import { createHttpErrorFromResponse, getUserFacingErrorMessage } from '../utils/httpErrorPolicy';
+import { isActiveLifecycleVisible } from '../utils/offerLifecycle';
 
 const offers = ref<any[]>([]);
 const isLoading = ref(false);
@@ -151,7 +152,7 @@ export function useOffers() {
 
     function activeRows(rows: any[]): any[] {
         const nowSec = Date.now() / 1000;
-        return rows.filter((offer: any) => !offer.expires_at_ts || offer.expires_at_ts > nowSec);
+        return rows.filter((offer: any) => isActiveLifecycleVisible(offer, nowSec));
     }
 
     async function readOfferPage(response: Response): Promise<{

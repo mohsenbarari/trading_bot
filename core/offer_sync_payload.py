@@ -52,4 +52,13 @@ def build_offer_sync_payload(offer: Any) -> dict[str, Any]:
         ),
         "idempotency_fingerprint": getattr(offer, "idempotency_fingerprint", None),
         "archived": offer.archived,
+        # Frozen at creation from the owner's Iran-authoritative preference.
+        # Included as soon as Stage 2 starts writing nonzero snapshots so offer
+        # sync cannot converge on the column default of 0.
+        "overtime_minutes_snapshot": int(
+            getattr(offer, "overtime_minutes_snapshot", 0) or 0
+        ),
+        "overtime_trade_committed": bool(
+            getattr(offer, "overtime_trade_committed", False)
+        ),
     }

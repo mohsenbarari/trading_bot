@@ -15,6 +15,11 @@ class CustomerInvite(StatesGroup):
     awaiting_mobile_number = State()
     awaiting_confirmation = State()
 
+
+class OfferOvertimePreference(StatesGroup):
+    awaiting_value = State()
+    awaiting_confirmation = State()
+
 class CommodityManagement(StatesGroup):
     # FSM افزودن کالا (بدون تغییر)
     awaiting_add_name = State()

@@ -86,6 +86,12 @@ class SyncFieldPolicyTests(unittest.TestCase):
         self.assertEqual(sanitized["surface"], "telegram_channel")
         self.assertEqual(sanitized["publication_owner_server"], "foreign")
         self.assertEqual(sanitized["publisher_bot_identity"], "primary")
+        publisher_entry = get_sync_field_policy_entry(
+            "offer_publication_states",
+            "publisher_bot_identity",
+        )
+        self.assertIsNotNone(publisher_entry)
+        self.assertEqual(publisher_entry.classification, SyncFieldClassification.SYNC)
         self.assertEqual(sanitized["status"], "sent")
         self.assertEqual(sanitized["dedupe_key"], "offer-publication:telegram_channel:ofr_1")
         self.assertEqual(sanitized["offer_version_id"], 4)

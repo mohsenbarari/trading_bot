@@ -125,6 +125,15 @@ class OffersPublicRoutesTests(unittest.IsolatedAsyncioTestCase):
             "expires_at_ts",
             "safe_public_state_label",
             "interaction_available",
+            # Stage 3/10 lifecycle projection (no identity).
+            "normal_deadline_ts",
+            "final_deadline_ts",
+            "lifecycle_phase",
+            "overtime_minutes_snapshot",
+            "timer_total_seconds",
+            "accepts_automatic_trade",
+            "accepts_overtime_request",
+            "overtime_trade_committed",
         }
         forbidden_keys = {
             "user_id",

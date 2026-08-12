@@ -12,6 +12,7 @@ from sqlalchemy.orm import selectinload
 from core.services.offer_publication_state_service import (
     CanonicalPublicationIdentityError,
     canonical_telegram_publication_identity,
+    normalize_telegram_publication_publisher_identity,
     publication_dedupe_key,
 )
 from core.services.telegram_delivery_queue_service import (
@@ -22,6 +23,7 @@ from core.services.telegram_offer_channel_service import (
     build_offer_channel_message,
     build_offer_channel_reply_markup,
     get_offer_channel_history_tag,
+    project_offer_channel_lifecycle,
 )
 from core.telegram_delivery_queue_contract import (
     TelegramDeliveryAction,
@@ -29,6 +31,7 @@ from core.telegram_delivery_queue_contract import (
     TelegramFreshnessDecision,
     TelegramFreshnessOutcome,
 )
+from core.telegram_multi_publisher_contract import TELEGRAM_PUBLISHER_IDENTITIES
 from models.offer import Offer, OfferStatus
 from models.offer_publication_state import (
     OfferPublicationState,
@@ -42,6 +45,8 @@ OFFER_ACTIVE_EDIT_ACTIONS = frozenset(
     {
         TelegramDeliveryAction.PARTIAL_OFFER_EDIT,
         TelegramDeliveryAction.OTHER_ACTIVE_OFFER_EDIT,
+        TelegramDeliveryAction.OVERTIME_CHANNEL_EDIT,
+        TelegramDeliveryAction.FINAL_TAIL_CHANNEL_EDIT,
         TelegramDeliveryAction.INVALID_ACTION_BUTTON_EDIT,
         TelegramDeliveryAction.RECONCILIATION_EDIT,
     }
@@ -138,17 +143,15 @@ def _validate_static_route(
 
     method = str(job.method or "")
     bot_identity = str(job.bot_identity or "")
+    publisher_identities = {"primary", *TELEGRAM_PUBLISHER_IDENTITIES}
     if action in OFFER_PUBLISH_ACTIONS:
-        if method != "sendMessage" or bot_identity != "primary":
+        if method != "sendMessage" or bot_identity not in publisher_identities:
             return _quarantined("offer_freshness_publish_route_mismatch")
         if payload.get("message_id") is not None:
             return _quarantined("offer_freshness_publish_message_id_forbidden")
         return None
 
-    if method != "editMessageText" or bot_identity not in {
-        "primary",
-        "channel_editor",
-    }:
+    if method != "editMessageText" or bot_identity not in publisher_identities:
         return _quarantined("offer_freshness_edit_route_mismatch")
     if _strict_payload_int(payload.get("message_id")) is None:
         return _quarantined("offer_freshness_edit_message_id_missing")
@@ -238,6 +241,7 @@ def _terminal_reclassification(
 def _publication_identity_shape_decision(
     state: OfferPublicationState | None,
     *,
+    job_bot_identity: str,
     expected_channel_id: int,
 ) -> TelegramFreshnessDecision | None:
     if state is None:
@@ -245,10 +249,16 @@ def _publication_identity_shape_decision(
     if (
         _enum_value(getattr(state, "surface", None))
         != OfferPublicationSurface.TELEGRAM_CHANNEL.value
-        or str(getattr(state, "publisher_bot_identity", "") or "").strip()
-        != "primary"
     ):
         return _quarantined("offer_freshness_publisher_identity_invalid")
+    try:
+        publisher = normalize_telegram_publication_publisher_identity(
+            getattr(state, "publisher_bot_identity", None)
+        )
+    except CanonicalPublicationIdentityError:
+        return _quarantined("offer_freshness_publisher_identity_invalid")
+    if publisher != str(job_bot_identity or "").strip():
+        return _quarantined("offer_freshness_cross_owner_lifecycle")
 
     raw_chat_id = getattr(state, "telegram_chat_id", None)
     if (
@@ -275,6 +285,17 @@ def _publication_identity_shape_decision(
     return None
 
 
+def _channel_lifecycle_for_payload(offer: Offer):
+    from core.trading_settings import get_trading_settings
+
+    return project_offer_channel_lifecycle(
+        offer,
+        normal_lifetime_minutes=int(
+            getattr(get_trading_settings(), "offer_expiry_minutes", 0) or 0
+        ),
+    )
+
+
 def build_authoritative_offer_delivery_payload(
     offer: Offer,
     *,
@@ -282,15 +303,30 @@ def build_authoritative_offer_delivery_payload(
     expected_channel_id: int,
     message_id: int | None = None,
 ) -> dict[str, Any]:
+    projection = _channel_lifecycle_for_payload(offer)
+    phase = projection.phase.value
     if action in OFFER_PUBLISH_ACTIONS:
         payload: dict[str, Any] = {
             "chat_id": expected_channel_id,
-            "text": build_offer_channel_message(offer),
+            "text": build_offer_channel_message(offer, lifecycle_phase=phase),
         }
-        reply_markup = build_offer_channel_reply_markup(offer)
+        reply_markup = build_offer_channel_reply_markup(
+            offer,
+            accepts_new_public_interaction=projection.accepts_new_public_interaction,
+        )
         if reply_markup is not None:
             payload["reply_markup"] = reply_markup
         return payload
+
+    if action in OFFER_TERMINAL_EDIT_ACTIONS:
+        reply_markup: dict[str, Any] | None = {"inline_keyboard": []}
+    else:
+        reply_markup = build_offer_channel_reply_markup(
+            offer,
+            accepts_new_public_interaction=projection.accepts_new_public_interaction,
+        )
+        if reply_markup is None:
+            reply_markup = {"inline_keyboard": []}
 
     payload = {
         "chat_id": expected_channel_id,
@@ -298,12 +334,9 @@ def build_authoritative_offer_delivery_payload(
         "text": build_offer_channel_message(
             offer,
             history_tag=get_offer_channel_history_tag(offer),
+            lifecycle_phase=phase,
         ),
-        "reply_markup": (
-            {"inline_keyboard": []}
-            if action in OFFER_TERMINAL_EDIT_ACTIONS
-            else build_offer_channel_reply_markup(offer)
-        ),
+        "reply_markup": reply_markup,
     }
     return payload
 
@@ -352,6 +385,7 @@ def _canonical_edit_identity_decision(
 ) -> TelegramFreshnessDecision | None:
     shape_decision = _publication_identity_shape_decision(
         state,
+        job_bot_identity=str(getattr(job, "bot_identity", "") or ""),
         expected_channel_id=expected_channel_id,
     )
     if shape_decision is not None:
@@ -449,6 +483,7 @@ async def validate_offer_telegram_delivery_freshness(
     if action in OFFER_PUBLISH_ACTIONS:
         shape_decision = _publication_identity_shape_decision(
             state,
+            job_bot_identity=str(getattr(job, "bot_identity", "") or ""),
             expected_channel_id=channel_id,
         )
         if shape_decision is not None:

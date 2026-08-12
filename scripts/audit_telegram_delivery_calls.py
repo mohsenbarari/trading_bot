@@ -123,7 +123,9 @@ REMAINING_DISPOSITION_BUDGETS = {
 }
 EXPECTED_RUNTIME_INVENTORY_COUNTS = {
     "durable_exempt": 4,
-    "legacy_mode_guarded": 68,
+    # Includes Stage 8/9 overtime requester/owner status legacy branches that
+    # are gated by configured_telegram_delivery_runtime().
+    "legacy_mode_guarded": 72,
     "legacy_owner_guarded": 13,
     "legacy_parameter_guarded": 2,
     "non_delivery_timer": 5,
@@ -131,7 +133,7 @@ EXPECTED_RUNTIME_INVENTORY_COUNTS = {
     "queue_execution": 1,
 }
 EXPECTED_RUNTIME_INVENTORY_SHA256 = (
-    "51fdc4c1e2ae9779d7c8139854477deecee85657992a173cdced4f59c6112032"
+    "df92331e6fe055e95e772d7b2b025266f193023d3dae8b5d860e9df8c4ea6105"
 )
 
 

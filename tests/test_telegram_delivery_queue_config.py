@@ -64,6 +64,21 @@ class TelegramDeliveryQueueConfigTests(unittest.TestCase):
         )
         self.assertEqual(api.telegram_delivery_producer_mode, "queue-v1")
 
+    def test_b2b_dispatch_is_fail_closed_behind_multi_publisher_flag(self):
+        defaults = _settings()
+        self.assertFalse(defaults.telegram_multi_publisher_enabled)
+        self.assertFalse(defaults.telegram_b2b_dispatch_enabled)
+
+        with self.assertRaises(ValidationError):
+            _settings(telegram_b2b_dispatch_enabled=True)
+
+        configured = _settings(
+            telegram_multi_publisher_enabled=True,
+            telegram_b2b_dispatch_enabled=True,
+        )
+        self.assertTrue(configured.telegram_multi_publisher_enabled)
+        self.assertTrue(configured.telegram_b2b_dispatch_enabled)
+
     def test_nonfinite_negative_and_inverted_retry_config_fail_startup(self):
         invalid = (
             {"telegram_delivery_queue_retry_base_seconds": float("nan")},
@@ -91,6 +106,7 @@ class TelegramDeliveryQueueConfigTests(unittest.TestCase):
             {"telegram_delivery_queue_destination_min_interval_seconds": 0},
             {"telegram_delivery_queue_primary_concurrency": 0},
             {"telegram_delivery_queue_primary_m0_reserved_concurrency": 0},
+            {"telegram_multi_publisher_lane_concurrency": 0},
             {
                 "telegram_delivery_queue_primary_concurrency": 2,
                 "telegram_delivery_queue_primary_m0_reserved_concurrency": 2,

@@ -2,7 +2,19 @@
 
 Entries are newest first.
 
-- 2026-08-11 | Staged project memory is checked by a dependency-free pre-commit guard, and local `.env*.local` files are excluded from Git. Reason: prevent credential-like and personal data from entering durable memory or commits.
-- 2026-08-10 | Project memory uses MemoryCustodian as reviewed, repo-native Markdown under `docs/memory/`; keep `AGENTS.md` as a thin bootstrap and load only files routed by `manifest.md`. Reason: preserve cross-session context without automatic full-history or vector-store injection.
-- 2026-08-10 | The implemented runtime in `api/`, `bot/`, and `models/` remains authoritative while `src/` is migrated incrementally under Clean Architecture. Reason: replacing runtime paths wholesale would risk production behavior.
-- 2026-08-10 | The product has three first-class surfaces: FastAPI API, Telegram bot, and Vue PWA. Reason: a feature change must consider its relevant surface contracts rather than assuming a web-only application.
+- 2026-08-12 | The staging bot mounts the shared audit volume; if a historical matrix artifact is nonetheless unavailable, terminal verification reconstructs only immutable offer/queue provenance and labels transient full-matrix assertions unverified. Reason: preserve evidence across bot recreation without fabricating fake private-transport or in-process interaction evidence.
+- 2026-08-12 | Staging live matrix uses 500 seeded 60/40 Bot/WebApp offers with random 0.8–4-second ingress; private delivery uses a fake transport. Direct WebApp skips post-response tasks, overtime is ordered at ≤20 operations, terminal WebApp observations at ≤2 reads, a blank active bot callback retries ≤2 times with a fresh callback identity, lifecycle task failures abort before another offer, and audit retains redacted failure class/code plus attempts. Reason: reproducible evidence without invalid-run growth, timer/connection-pool pressure, or synthetic private delivery.
+- 2026-08-11 | Queue-v1 retries only serialization/deadlock aborts before provider dispatch, inside the same bounded unstarted lease. Reason: no external effect occurred; other DB failures fail closed.
+- 2026-08-11 | Queue-v1 retains an unstarted fenced lease only through a short absolute Redis cadence deadline; longer waits are durable retries. Reason: re-claiming causes DB churn, but long leases starve a lane.
+- 2026-08-11 | Publication scans exclude offers with an existing non-final control/publish job. Reason: repeated deduplication delays central ingress and can age queued offers before worker admission.
+- 2026-08-11 | Queue-v1 interaction probes model the authenticated private chat and positive message identity. Reason: the durable adapter must reject unanchored or cross-chat replies as production does.
+- 2026-08-11 | With multi-publisher B2B enabled, foreign feeder atomically persists one healthy publisher lane at first publication; legacy/B2B-disabled routes retain `primary`. Reason: preassigning primary bypasses selection and concentrates traffic.
+- 2026-08-11 | Telegram resume clears shared destination cadence and only preflight-approved lane blocks. Reason: recovery must not release unrelated publishers.
+- 2026-08-11 | Publish/edit jobs match their persisted owner before provider execution; callbacks stay on the receiving bot. Reason: Telegram cannot transfer interactive posts across bot identities.
+- 2026-08-11 | A publisher dispatch command is paired 1:1 with its publisher-owned job; owner/message identity is immutable. Reason: retries and recovery must not reroute or prematurely execute a live post.
+- 2026-08-11 | Multi-publisher configuration is all-or-nothing: five distinct, capability-checked identities. Reason: avoid cross-bot edits and partial activation.
+- 2026-08-11 | Telegram delivery evolves through central ingress, durable B2B command/receipt, and a lane fixed at first publish. Reason: recovery/idempotency stay internal and interactive posts cannot cross-edit.
+- 2026-08-11 | Project memory is reviewed Markdown with a dependency-free pre-commit guard; local `.env*.local` files stay untracked. Reason: prevent credentials and personal data entering commits.
+- 2026-08-10 | MemoryCustodian is the project memory source; `AGENTS.md` stays a thin bootstrap and loads only routed files. Reason: preserve cross-session context without automatic full-history injection.
+- 2026-08-10 | Runtime `api/`, `bot/`, and `models/` remain authoritative while `src/` migrates incrementally. Reason: wholesale replacement risks production behavior.
+- 2026-08-10 | FastAPI API, Telegram bot, and Vue PWA are first-class surfaces. Reason: relevant surface contracts must all be considered.

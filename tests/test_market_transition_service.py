@@ -894,7 +894,10 @@ class MarketTransitionServiceTests(unittest.IsolatedAsyncioTestCase):
             new=AsyncMock(),
         ) as decr_mock, patch(
             "core.services.market_transition_service.publish_event_sync"
-        ) as publish_mock:
+        ) as publish_mock, patch(
+            "core.services.offer_expiry_service._invalidate_overtime_after_offer_expiry",
+            new=AsyncMock(),
+        ):
             result = await market_transition_service.apply_market_schedule_transition(
                 db,
                 evaluation,
@@ -1065,7 +1068,10 @@ class MarketTransitionServiceTests(unittest.IsolatedAsyncioTestCase):
             market_transition_service,
             "reconcile_market_channel_notice_for_state",
             new=AsyncMock(),
-        ) as notice_mock:
+        ) as notice_mock, patch(
+            "core.services.offer_expiry_service._invalidate_overtime_after_offer_expiry",
+            new=AsyncMock(),
+        ):
             result = await market_transition_service.reconcile_market_runtime_side_effects_for_state(
                 db,
                 state,
@@ -1692,7 +1698,16 @@ class MarketTransitionServiceTests(unittest.IsolatedAsyncioTestCase):
         ), patch(
             "core.services.market_transition_service.publish_event_sync",
             side_effect=RuntimeError("event down"),
-        ), patch("core.services.market_transition_service.logger") as logger:
+        ), patch("core.services.market_transition_service.logger") as logger, patch(
+            "core.services.offer_expiry_service._invalidate_overtime_after_offer_expiry",
+            new=AsyncMock(),
+        ), patch(
+            "core.services.offer_expiry_service.current_server",
+            return_value="iran",
+        ), patch(
+            "core.trading_settings.get_trading_settings_async",
+            new=AsyncMock(return_value=SimpleNamespace(offer_expiry_minutes=15)),
+        ):
             result = await market_transition_service._apply_market_closed_transition(db, state)
 
         self.assertTrue(result.changed)

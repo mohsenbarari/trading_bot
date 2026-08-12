@@ -280,6 +280,13 @@ observability-gate:
 audit-log-export:
 	@python3 scripts/export_audit_logs.py $${ARGS}
 
+test-unit:
+	@# Run the suite against the defaults declared in core/config.py rather than
+	@# whatever .env this machine has. CI sets its variables explicitly and has
+	@# no .env, so only local runs need this. Narrow the run with MODULES=...,
+	@# e.g. MODULES="tests.test_offer_overtime_data_model".
+	@APP_ENV_FILE=.env.test python3 -m unittest $${MODULES:-discover -s tests -t . -p 'test_*.py'}
+
 test-report:
 	@/bin/python3 ./scripts/report_test_matrix.py
 

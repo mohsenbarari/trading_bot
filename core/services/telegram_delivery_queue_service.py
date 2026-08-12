@@ -47,8 +47,14 @@ from core.telegram_delivery_queue_contract import (
 from core.telegram_delivery_notification_action_contract import (
     TELEGRAM_NOTIFICATION_ACTION_VALUES,
 )
+from core.telegram_multi_publisher_contract import (
+    TELEGRAM_PUBLISHER_IDENTITIES,
+    TELEGRAM_PUBLISHER_OWNER_REQUIRED_METHODS,
+    TELEGRAM_PUBLISHER_OWNED_OFFER_ACTIONS,
+)
 from core.telegram_gateway import TelegramGatewayResult
 from models.telegram_delivery_job import TelegramDeliveryJobRecord
+from models.telegram_publisher_dispatch_command import TelegramPublisherDispatchCommand
 from models.telegram_delivery_feeder_state import TelegramDeliveryFeederState
 from models.telegram_delivery_provider_outcome import (
     TELEGRAM_PROVIDER_OUTCOME_APPLIED,
@@ -66,8 +72,13 @@ from models.telegram_delivery_runtime_gate import TelegramDeliveryRuntimeGate
 TELEGRAM_DELIVERY_QUEUE_WORKER_ID = "telegram-delivery-queue-v1"
 TELEGRAM_PRIMARY_BOT_IDENTITY = "primary"
 TELEGRAM_CHANNEL_EDITOR_BOT_IDENTITY = "channel_editor"
+TELEGRAM_PUBLISHER_BOT_IDENTITIES = frozenset(TELEGRAM_PUBLISHER_IDENTITIES)
 SUPPORTED_TELEGRAM_BOT_IDENTITIES = frozenset(
-    {TELEGRAM_PRIMARY_BOT_IDENTITY, TELEGRAM_CHANNEL_EDITOR_BOT_IDENTITY}
+    {
+        TELEGRAM_PRIMARY_BOT_IDENTITY,
+        TELEGRAM_CHANNEL_EDITOR_BOT_IDENTITY,
+        *TELEGRAM_PUBLISHER_BOT_IDENTITIES,
+    }
 )
 SUPPORTED_TELEGRAM_QUEUE_METHODS = frozenset(
     {
@@ -89,6 +100,8 @@ CHANNEL_EDITOR_ACTIONS = frozenset(
         TelegramDeliveryAction.EXPIRED_OFFER_EDIT,
         TelegramDeliveryAction.CANCELLED_OFFER_EDIT,
         TelegramDeliveryAction.OTHER_ACTIVE_OFFER_EDIT,
+        TelegramDeliveryAction.OVERTIME_CHANNEL_EDIT,
+        TelegramDeliveryAction.FINAL_TAIL_CHANNEL_EDIT,
         TelegramDeliveryAction.INVALID_ACTION_BUTTON_EDIT,
         TelegramDeliveryAction.RECONCILIATION_EDIT,
     }
@@ -398,6 +411,14 @@ async def _assert_durable_dispatch_gate(
                                 and_(
                                     TelegramDeliveryJobRecord.state
                                     == TelegramDeliveryState.LEASED,
+                                    # An unstarted lease is only a local
+                                    # contender: it has not crossed the
+                                    # provider side-effect boundary and must
+                                    # not turn its full recovery lease (often
+                                    # 30s) into a destination cooldown.  The
+                                    # Redis admission plus this transaction's
+                                    # advisory lock still serialize the next
+                                    # real provider dispatch.
                                     TelegramDeliveryJobRecord.dispatch_started_at.is_not(
                                         None
                                     ),
@@ -462,6 +483,13 @@ async def _assert_durable_dispatch_gate(
         return
 
     retry_until = now + timedelta(seconds=0.1)
+    # PostgreSQL is the authoritative exclusion fence for an in-flight
+    # provider call.  Do not mirror that call's full recovery lease into
+    # Redis: a second marker that races the short provider/persistence window
+    # would otherwise extend the shared channel cadence by up to the entire
+    # lease (30s), despite no Telegram rate-limit evidence.  Durable 429s,
+    # unresolved outcomes, and explicit pauses still extend the fast-path.
+    cooldown_until: datetime | None = None
     reason_state = TelegramDeliveryState.LEASED
     reason_scope = "destination"
     for blocker in blockers:
@@ -469,6 +497,7 @@ async def _assert_durable_dispatch_gate(
         candidate_until = now + timedelta(seconds=30.0)
         candidate_reason = blocker_state.value
         candidate_scope = "destination"
+        candidate_requires_limiter_cooldown = True
         if blocker_state == TelegramDeliveryState.BLOCKED_BOT:
             candidate_scope = "bot"
         elif blocker_state == TelegramDeliveryState.BLOCKED_GATEWAY:
@@ -486,9 +515,15 @@ async def _assert_durable_dispatch_gate(
             and blocker.lease_until is not None
             and blocker.lease_until > now
         ):
-            candidate_until = blocker.lease_until
+            # The provider call is already durably fenced by this exact
+            # blocker row and the claim query.  Retry its neighbour promptly
+            # after result persistence instead of turning a recovery lease
+            # into a destination-wide Redis cooldown.
+            candidate_until = now + timedelta(seconds=0.1)
+            candidate_requires_limiter_cooldown = False
         elif blocker_state == TelegramDeliveryState.LEASED:
-            candidate_until = now + timedelta(seconds=1.0)
+            candidate_until = now + timedelta(seconds=0.1)
+            candidate_requires_limiter_cooldown = False
         if (
             blocker.bot_identity == record.bot_identity
             and blocker.bot_cooldown_until is not None
@@ -497,15 +532,19 @@ async def _assert_durable_dispatch_gate(
             candidate_until = blocker.bot_cooldown_until
             candidate_reason = "bot_cooldown"
             candidate_scope = "bot"
+            candidate_requires_limiter_cooldown = True
         if candidate_until > retry_until:
             retry_until = candidate_until
             reason_state = candidate_reason
             reason_scope = candidate_scope
+            cooldown_until = (
+                candidate_until if candidate_requires_limiter_cooldown else None
+            )
 
     raise TelegramDeliveryDispatchDeferredError(
         retry_after_seconds=max(0.1, (retry_until - now).total_seconds()),
         reason=f"durable_dispatch_gate:{getattr(reason_state, 'value', reason_state)}",
-        cooldown_until=retry_until,
+        cooldown_until=cooldown_until,
         scope=reason_scope,
     )
 
@@ -950,6 +989,25 @@ async def enqueue_telegram_delivery_job(
         or action not in CHANNEL_EDITOR_ACTIONS
     ):
         raise TelegramDeliveryQueueValidationError("channel_editor_route_not_allowlisted")
+    if bot in TELEGRAM_PUBLISHER_BOT_IDENTITIES and (
+        not (
+            (
+                destination_class == TelegramDestinationClass.CHANNEL
+                and normalized_method in TELEGRAM_PUBLISHER_OWNER_REQUIRED_METHODS
+                and action in TELEGRAM_PUBLISHER_OWNED_OFFER_ACTIONS
+            )
+            or (
+                destination_class == TelegramDestinationClass.PRIVATE
+                and normalized_method == "answerCallbackQuery"
+                and action
+                in {
+                    TelegramDeliveryAction.CALLBACK_DEADLINE,
+                    TelegramDeliveryAction.OFFER_EXPIRY_CALLBACK,
+                }
+            )
+        )
+    ):
+        raise TelegramDeliveryQueueValidationError("publisher_lane_route_not_allowlisted")
     if feeder == TelegramFeederKind.OFFER_EDIT:
         if (
             not isinstance(source_order_at, datetime)
@@ -1230,6 +1288,22 @@ async def claim_next_telegram_delivery_job(
         ~resume_incomplete,
         ~runtime_gate_blocked,
     ]
+    if lane_identity in TELEGRAM_PUBLISHER_BOT_IDENTITIES:
+        claim_filters.append(
+            or_(
+                TelegramDeliveryJobRecord.destination_class
+                == TelegramDestinationClass.PRIVATE,
+                exists(
+                    select(TelegramPublisherDispatchCommand.id).where(
+                        TelegramPublisherDispatchCommand.job_id
+                        == TelegramDeliveryJobRecord.id,
+                        TelegramPublisherDispatchCommand.publisher_bot_identity
+                        == lane_identity,
+                        TelegramPublisherDispatchCommand.state == "acknowledged",
+                    )
+                )
+            )
+        )
     if normalized_destination_classes is not None:
         claim_filters.append(
             TelegramDeliveryJobRecord.destination_class.in_(

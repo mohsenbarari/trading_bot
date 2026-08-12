@@ -1,0 +1,90 @@
+from pathlib import Path
+import unittest
+
+from models.telegram_publisher_dispatch_command import (
+    TelegramPublisherDispatchCommand,
+)
+
+
+class TelegramPublisherDispatchSchemaTests(unittest.TestCase):
+    def test_model_has_durable_command_identity_receipt_and_lease_fields(self):
+        columns = TelegramPublisherDispatchCommand.__table__.columns
+        self.assertTrue(
+            {
+                "command_id",
+                "job_id",
+                "publisher_bot_identity",
+                "dispatch_sequence",
+                "state",
+                "attempt_count",
+                "next_retry_at",
+                "lease_token",
+                "lease_until",
+                "sent_at",
+                "acknowledged_at",
+                "receipt_sequence",
+                "receipt_received_at",
+                "last_error_class",
+                "last_error_message",
+            }.issubset(columns.keys())
+        )
+        constraint_names = {
+            constraint.name
+            for constraint in TelegramPublisherDispatchCommand.__table__.constraints
+            if constraint.__class__.__name__ == "CheckConstraint"
+        }
+        self.assertTrue(
+            {
+                "ck_telegram_publisher_dispatch_commands_publisher",
+                "ck_telegram_publisher_dispatch_commands_state",
+                "ck_telegram_publisher_dispatch_commands_counters",
+                "ck_telegram_publisher_dispatch_commands_acknowledged_at",
+                "ck_telegram_publisher_dispatch_commands_receipt_sequence",
+                "ck_telegram_publisher_dispatch_commands_receipt_timestamp",
+            }.issubset(constraint_names)
+        )
+        index_names = {
+            index.name for index in TelegramPublisherDispatchCommand.__table__.indexes
+        }
+        self.assertTrue(
+            {
+                "ix_telegram_publisher_dispatch_commands_claim",
+                "ix_telegram_publisher_dispatch_commands_lease_recovery",
+                "ix_telegram_publisher_dispatch_commands_lane_state",
+            }.issubset(index_names)
+        )
+
+    def test_migration_backfills_legacy_owner_and_fails_closed_on_downgrade(self):
+        source = Path(
+            "migrations/versions/"
+            "f9a0b1c2d3e4_add_telegram_publisher_dispatch_outbox.py"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn('revision: str = "f9a0b1c2d3e4"', source)
+        self.assertIn(
+            'down_revision: Union[str, Sequence[str], None] = "e8a4b5c6d7e9"',
+            source,
+        )
+        self.assertIn('SET publisher_bot_identity = \'primary\'', source)
+        self.assertIn('WHERE surface = \'telegram_channel\'', source)
+        self.assertIn('"telegram_publisher_dispatch_commands"', source)
+        self.assertIn(
+            "enforce_offer_publication_telegram_owner_immutable",
+            source,
+        )
+        self.assertIn(
+            "enforce_telegram_publisher_dispatch_command_owner",
+            source,
+        )
+        self.assertIn(
+            "enforce_telegram_delivery_job_dispatch_owner_immutable",
+            source,
+        )
+        downgrade_guard = source.rindex("multi-publisher Telegram evidence")
+        drop_table = source.rindex('op.drop_table("telegram_publisher_dispatch_commands")')
+        self.assertLess(downgrade_guard, drop_table)
+        self.assertIn("RAISE EXCEPTION", source[downgrade_guard - 300 : downgrade_guard + 300])
+
+
+if __name__ == "__main__":
+    unittest.main()

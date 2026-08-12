@@ -2368,7 +2368,7 @@ class TelegramDeliveryQueuePostgresTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaisesRegex(
                 TelegramDeliveryDispatchDeferredError,
                 "durable_dispatch_gate:leased",
-            ):
+            ) as raised:
                 await mark_telegram_delivery_dispatch_started(
                     db,
                     current_server="foreign",
@@ -2378,6 +2378,8 @@ class TelegramDeliveryQueuePostgresTests(unittest.IsolatedAsyncioTestCase):
                     now=now + timedelta(milliseconds=20),
                 )
             await db.rollback()
+        self.assertIsNone(raised.exception.cooldown_until)
+        self.assertAlmostEqual(raised.exception.retry_after_seconds, 0.1, places=5)
 
         async with self.Session() as db:
             decision = await resolve_telegram_delivery_result(
@@ -2463,6 +2465,54 @@ class TelegramDeliveryQueuePostgresTests(unittest.IsolatedAsyncioTestCase):
                 )
             )
         self.assertEqual(marker_count, 1)
+
+    async def test_unstarted_same_destination_lease_does_not_create_cooldown(self):
+        await self._enqueue(
+            "unstarted-gate-first",
+            destination="private:unstarted-gate",
+        )
+        await self._enqueue(
+            "unstarted-gate-second",
+            destination="private:unstarted-gate",
+        )
+        now = utc_now()
+        first = await self._claim("unstarted-gate-worker-1", now=now)
+
+        async with self.Session() as db:
+            second = (
+                await db.execute(
+                    select(TelegramDeliveryJobRecord)
+                    .where(
+                        TelegramDeliveryJobRecord.source_natural_id
+                        == "unstarted-gate-second"
+                    )
+                    .with_for_update()
+                )
+            ).scalar_one()
+            second.state = TelegramDeliveryState.LEASED
+            second.worker_id = "unstarted-gate-worker-2"
+            second.lease_token = 1
+            second.lease_until = now + timedelta(seconds=30)
+            second.attempt_count = 1
+            await db.commit()
+
+        async with self.Session() as db:
+            marked = await mark_telegram_delivery_dispatch_started(
+                db,
+                current_server="foreign",
+                job_id=second.id,
+                worker_id=second.worker_id,
+                lease_token=second.lease_token,
+                now=now + timedelta(milliseconds=1),
+            )
+            await db.commit()
+
+        self.assertTrue(marked)
+        async with self.Session() as db:
+            persisted_first = await db.get(TelegramDeliveryJobRecord, first.id)
+            persisted_second = await db.get(TelegramDeliveryJobRecord, second.id)
+        self.assertIsNone(persisted_first.dispatch_started_at)
+        self.assertIsNotNone(persisted_second.dispatch_started_at)
 
     async def test_durable_bot_probe_blocks_same_bot_until_probe_result_persists(self):
         await self._enqueue("probe-gate-first", destination="private:probe-a")

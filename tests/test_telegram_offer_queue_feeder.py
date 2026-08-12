@@ -114,23 +114,30 @@ class TelegramOfferQueueFeederTests(unittest.IsolatedAsyncioTestCase):
             feeder,
             "enqueue_current_offer_delivery",
             new=AsyncMock(side_effect=results),
-        ) as enqueue:
+        ) as enqueue, patch.object(
+            feeder,
+            "enqueue_offer_lifecycle_channel_handoffs",
+            new=AsyncMock(return_value=[]),
+        ) as lifecycle_enqueue:
             report = await feeder.run_telegram_offer_queue_handoff_cycle()
 
         self.assertEqual(report.publication_handoffs, 1)
         self.assertEqual(report.edit_handoffs, 0)
+        self.assertEqual(report.lifecycle_handoffs, 0)
         self.assertEqual(report.deduplicated, 1)
         self.assertFalse(report.publication_gated)
         self.assertEqual(enqueue.await_count, 2)
+        lifecycle_enqueue.assert_awaited_once()
         self.assertTrue(
             all(
                 call.kwargs["now"] == self.database_now
                 for call in enqueue.await_args_list
             )
         )
-        self.assertEqual(self.database_clock.await_count, 2)
-        self.assertEqual(session.commit.await_count, 2)
-        self.assertEqual(session.savepoint_entries, 2)
+        # publication + edit + lifecycle database clocks
+        self.assertEqual(self.database_clock.await_count, 3)
+        self.assertEqual(session.commit.await_count, 3)
+        self.assertEqual(session.savepoint_entries, 3)
         session.rollback.assert_not_awaited()
         load_publication.assert_awaited_once()
         load_edit_counts.assert_awaited_once()
@@ -190,18 +197,24 @@ class TelegramOfferQueueFeederTests(unittest.IsolatedAsyncioTestCase):
                     skipped_reason=None,
                 )
             ),
+        ), patch.object(
+            feeder,
+            "enqueue_offer_lifecycle_channel_handoffs",
+            new=AsyncMock(return_value=[]),
         ):
             report = await feeder.run_telegram_offer_queue_handoff_cycle()
 
         self.assertTrue(report.publication_gated)
         self.assertEqual(report.publication_handoffs, 0)
         self.assertEqual(report.edit_handoffs, 1)
+        self.assertEqual(report.lifecycle_handoffs, 0)
         load_publication.assert_not_awaited()
         load_edits.assert_awaited_once()
         self.assertEqual(
             load_edits.await_args.kwargs["now"], self.database_now
         )
-        self.database_clock.assert_awaited_once()
+        # edit + lifecycle clocks while publication is gated
+        self.assertEqual(self.database_clock.await_count, 2)
 
     async def test_invalid_candidate_rolls_back_and_next_candidate_continues(self):
         session = FakeSession()

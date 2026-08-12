@@ -38,6 +38,7 @@ def make_user(**overrides):
         'max_sessions': 1,
         'max_accountants': 3,
         'max_customers': 5,
+        'offer_overtime_minutes': 0,
     }
     data.update(overrides)
     return SimpleNamespace(**data)
@@ -64,6 +65,7 @@ class AuthRouterCurrentUserContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(result.is_customer)
         self.assertIsNone(result.customer_tier)
         self.assertEqual(result.account_name, "ali")
+        self.assertEqual(result.offer_overtime_minutes, 0)
         self.assertEqual(result.global_lock_grace_expires_at, user.messenger_grace_expires_at)
         self.assertEqual(result.global_web_locked_at, user.messenger_blocked_at)
 

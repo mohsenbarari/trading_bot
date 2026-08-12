@@ -288,6 +288,36 @@ class TelegramDeliveryQueueLimiterTests(unittest.IsolatedAsyncioTestCase):
             editor["destination_block"],
         )
 
+    async def test_database_resume_clears_only_the_approved_publisher_lanes(self):
+        redis = _FakeRedis()
+        limiter = _limiter(redis)
+        await limiter.clear_destination_gate_after_database_resume(
+            "channel:-100",
+            bot_identities=("publisher_2", "publisher_5"),
+        )
+
+        self.assertEqual(len(redis.delete_calls), 1)
+        deleted = redis.delete_calls[0]
+        self.assertEqual(len(deleted), 3)
+        self.assertIn(":bot:publisher_2:destination:", deleted[0])
+        self.assertIn(":bot:publisher_5:destination:", deleted[1])
+        self.assertIn(":destination:", deleted[2])
+        self.assertNotIn(":bot:primary:destination:", repr(deleted))
+        self.assertNotIn(":bot:channel_editor:destination:", repr(deleted))
+
+    async def test_database_resume_rejects_an_empty_or_unknown_lane_scope(self):
+        limiter = _limiter(_FakeRedis())
+        for identities in ((), ("unknown",)):
+            with self.subTest(identities=identities):
+                with self.assertRaisesRegex(
+                    TelegramDeliveryLimiterUnavailableError,
+                    "telegram_limiter_bot_identity_not_allowlisted",
+                ):
+                    await limiter.clear_destination_gate_after_database_resume(
+                        "channel:-100",
+                        bot_identities=identities,
+                    )
+
     async def test_resume_validates_scope_and_only_clears_local_block_after_redis_success(self):
         redis = _FakeRedis()
         limiter = _limiter(redis)

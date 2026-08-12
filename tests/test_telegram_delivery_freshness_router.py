@@ -61,11 +61,14 @@ class TelegramDeliveryFreshnessRouterTests(unittest.IsolatedAsyncioTestCase):
     def test_lane_requirements_exclude_otp_and_bound_editor_scope(self):
         primary = required_freshness_actions_for_lane("primary")
         editor = required_freshness_actions_for_lane("channel_editor")
+        publisher = required_freshness_actions_for_lane("publisher_1")
 
         self.assertEqual(primary, DURABLE_TELEGRAM_DELIVERY_ACTIONS)
         self.assertNotIn(TelegramDeliveryAction.OTP_DEADLINE, primary)
         self.assertEqual(editor, CHANNEL_EDITOR_ACTIONS)
         self.assertNotIn(TelegramDeliveryAction.OFFER_PUBLISH, editor)
+        self.assertEqual(publisher, OFFER_FRESHNESS_ACTIONS)
+        self.assertNotIn(TelegramDeliveryAction.ADMIN_BROADCAST, publisher)
 
     def test_offer_registry_reports_exact_remaining_lane_coverage(self):
         validator = send_validator()
@@ -75,6 +78,7 @@ class TelegramDeliveryFreshnessRouterTests(unittest.IsolatedAsyncioTestCase):
 
         primary = registry.coverage("primary")
         editor = registry.coverage("channel_editor")
+        publisher = registry.coverage("publisher_5")
 
         self.assertFalse(primary.complete)
         self.assertEqual(
@@ -87,6 +91,8 @@ class TelegramDeliveryFreshnessRouterTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertTrue(editor.complete)
         self.assertEqual(editor.missing_actions, ())
+        self.assertTrue(publisher.complete)
+        self.assertEqual(publisher.missing_actions, ())
 
     def test_offer_and_market_routes_report_remaining_primary_coverage(self):
         validator = send_validator()

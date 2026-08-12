@@ -4,6 +4,7 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeybo
 from core.enums import UserRole, UserAccountStatus
 from core.config import settings
 from bot.utils.customer_display import user_display_name
+from core.offer_overtime_bot_copy import M1_OVERTIME_PREFERENCE_BUTTON
 from math import ceil
 
 
@@ -45,6 +46,7 @@ def get_user_panel_keyboard(
     *,
     standard_actions: bool = False,
     show_support: bool = False,
+    show_overtime_preference: bool = False,
 ) -> ReplyKeyboardMarkup:
     keyboard_layout = []
     if user_role in (UserRole.STANDARD, UserRole.MIDDLE_MANAGER, UserRole.SUPER_ADMIN) and standard_actions:
@@ -60,6 +62,8 @@ def get_user_panel_keyboard(
             ])
         else:
             keyboard_layout.append([KeyboardButton(text="🚫 کاربران مسدود شده")])
+        if show_overtime_preference:
+            keyboard_layout.append([KeyboardButton(text=M1_OVERTIME_PREFERENCE_BUTTON)])
         keyboard_layout.append([KeyboardButton(text="🔙 بازگشت")])
         return ReplyKeyboardMarkup(
             keyboard=keyboard_layout,
@@ -78,6 +82,8 @@ def get_user_panel_keyboard(
         ])
     else:
         keyboard_layout.append([KeyboardButton(text="📊 تاریخچه معاملات من")])
+    if show_overtime_preference:
+        keyboard_layout.append([KeyboardButton(text=M1_OVERTIME_PREFERENCE_BUTTON)])
     keyboard_layout.append([KeyboardButton(text="🔙 بازگشت")])
     return ReplyKeyboardMarkup(
         keyboard=keyboard_layout,

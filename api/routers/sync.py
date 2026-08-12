@@ -6,6 +6,7 @@ from core.config import settings
 from core.audit_logger import audit_log
 from core.metrics import (
     record_offer_publication_health,
+    record_overtime_reconciliation_health,
     record_sync_conflict,
     record_sync_health,
     record_sync_parity_summary,
@@ -58,6 +59,7 @@ from core.registration_identity import normalize_account_name, normalize_mobile_
 from core.services.cross_server_recovery_service import active_publication_is_gated, load_active_publication_gate
 from core.services.market_transition_service import reconcile_market_runtime_side_effects_for_current_state
 from core.services.offer_publication_reconciliation_service import publication_observability_summary
+from core.services.offer_overtime_reconciliation_service import overtime_observability_summary
 from core.services.telegram_notification_outbox_service import (
     TelegramNotificationRecipient,
     enqueue_account_deletion_telegram_notification_once,
@@ -225,6 +227,14 @@ TERMINAL_OFFER_REQUEST_STATUSES = {
     "completed_trade",
     "duplicate_replay",
     "failed_internal",
+    # Overtime terminals. Nonterminal overtime rows may still UPDATE across
+    # sync with monotonic version_id; these statuses are immutable once applied.
+    "overtime_rejected_by_owner",
+    "overtime_decision_expired",
+    "overtime_cancelled_by_requester",
+    "overtime_invalidated",
+    "overtime_delivery_expired",
+    "overtime_rejected_requester_limit",
 }
 RELATION_LINK_FIELDS = {
     "accountant_relations": "accountant_user_id",
@@ -296,8 +306,21 @@ async def _publish_terminal_offer_realtime_after_sync(db: AsyncSession, terminal
         status_value = _enum_value(getattr(offer, "status", None))
         offer_public_id = getattr(offer, "offer_public_id", None)
         try:
+            marker_fields = {
+                "overtime_trade_committed": bool(
+                    getattr(offer, "overtime_trade_committed", False)
+                ),
+                "overtime_minutes_snapshot": int(
+                    getattr(offer, "overtime_minutes_snapshot", 0) or 0
+                ),
+                "lifecycle_phase": None,
+            }
             if status_value == OfferStatus.EXPIRED.value:
-                realtime_payload = {"id": offer.id}
+                realtime_payload = {
+                    "id": offer.id,
+                    "status": status_value,
+                    **marker_fields,
+                }
                 if offer_public_id:
                     realtime_payload["offer_public_id"] = offer_public_id
                 await publish_event(
@@ -311,6 +334,7 @@ async def _publish_terminal_offer_realtime_after_sync(db: AsyncSession, terminal
                     "status": status_value,
                     "remaining_quantity": getattr(offer, "remaining_quantity", None),
                     "lot_sizes": getattr(offer, "lot_sizes", None),
+                    **marker_fields,
                 }
                 if offer_public_id:
                     realtime_payload["offer_public_id"] = offer_public_id
@@ -384,15 +408,33 @@ async def _publish_synced_offer_created_realtime_after_sync(db: AsyncSession, of
         if status_value != OfferStatus.ACTIVE.value:
             continue
 
-        expires_at_ts = None
+        lifecycle_fields = {}
         if trading_settings is not None:
             try:
-                expires_at_ts = int(
-                    offer.created_at.timestamp()
-                    + int(getattr(trading_settings, "offer_expiry_minutes", 0) or 0) * 60
+                from core.offer_lifecycle import project_offer_lifecycle
+
+                projection = project_offer_lifecycle(
+                    offer,
+                    normal_lifetime_minutes=int(
+                        getattr(trading_settings, "offer_expiry_minutes", 0) or 0
+                    ),
                 )
+                lifecycle_fields = {
+                    "expires_at_ts": projection.expires_at_ts,
+                    "normal_deadline_ts": projection.normal_deadline_ts,
+                    "final_deadline_ts": projection.final_deadline_ts,
+                    "lifecycle_phase": projection.phase.value,
+                    "overtime_minutes_snapshot": projection.overtime_minutes_snapshot,
+                    "timer_total_seconds": projection.timer_total_seconds,
+                    "accepts_new_public_interaction": projection.accepts_new_public_interaction,
+                    "accepts_automatic_trade": projection.accepts_automatic_trade,
+                    "accepts_overtime_request": projection.accepts_overtime_request,
+                    "overtime_trade_committed": bool(
+                        getattr(offer, "overtime_trade_committed", False)
+                    ),
+                }
             except Exception:
-                expires_at_ts = None
+                lifecycle_fields = {"expires_at_ts": None}
 
         offer_public_id = ensure_offer_public_id(offer)
         commodity = getattr(offer, "commodity", None)
@@ -419,7 +461,7 @@ async def _publish_synced_offer_created_realtime_after_sync(db: AsyncSession, of
             "is_wholesale": getattr(offer, "is_wholesale", True),
             "lot_sizes": getattr(offer, "lot_sizes", None),
             "original_lot_sizes": getattr(offer, "original_lot_sizes", None),
-            "expires_at_ts": expires_at_ts,
+            **lifecycle_fields,
         }
 
         try:
@@ -1052,6 +1094,21 @@ def _offer_publication_status_rank(expression):
 def _offer_publication_state_upsert_where_clause(model, stmt, data: dict):
     where_clause = None
 
+    if "publisher_bot_identity" in data:
+        current_publisher = getattr(model, "publisher_bot_identity", None)
+        if current_publisher is not None:
+            try:
+                incoming_publisher = stmt.excluded["publisher_bot_identity"]
+            except (AttributeError, KeyError):
+                incoming_publisher = None
+            if incoming_publisher is not None:
+                publisher_clause = (
+                    current_publisher.is_(None)
+                    | incoming_publisher.is_(None)
+                    | (current_publisher == incoming_publisher)
+                )
+                where_clause = publisher_clause
+
     if "offer_version_id" in data:
         current_version = getattr(model, "offer_version_id", None)
         if current_version is not None:
@@ -1060,7 +1117,16 @@ def _offer_publication_state_upsert_where_clause(model, stmt, data: dict):
             except (AttributeError, KeyError):
                 incoming_version = None
             if incoming_version is not None:
-                where_clause = current_version.is_(None) | incoming_version.is_(None) | (current_version <= incoming_version)
+                version_clause = (
+                    current_version.is_(None)
+                    | incoming_version.is_(None)
+                    | (current_version <= incoming_version)
+                )
+                where_clause = (
+                    version_clause
+                    if where_clause is None
+                    else where_clause & version_clause
+                )
 
     if "status" in data:
         current_status = getattr(model, "status", None)
@@ -1154,6 +1220,11 @@ def _build_upsert_stmt(model, table, data):
         return stmt.on_conflict_do_update(index_elements=['trade_number'], set_=set_dict, where=where_clause)
     elif table == "offer_publication_states" and data.get("dedupe_key"):
         set_dict = {key: value for key, value in data.items() if key not in {"id", "dedupe_key"}}
+        if "publisher_bot_identity" in set_dict:
+            set_dict["publisher_bot_identity"] = sa_case(
+                (model.publisher_bot_identity.isnot(None), model.publisher_bot_identity),
+                else_=stmt.excluded["publisher_bot_identity"],
+            )
         where_clause = _offer_publication_state_upsert_where_clause(model, stmt, data)
         if where_clause is None:
             return stmt.on_conflict_do_update(index_elements=['dedupe_key'], set_=set_dict)
@@ -4601,6 +4672,33 @@ async def get_sync_health(
                 **_summarize_exception(exc),
             },
         )
+    try:
+        overtime_reconciliation = await overtime_observability_summary(
+            db,
+            server_mode=settings.server_mode,
+        )
+        record_overtime_reconciliation_health(
+            server_mode=settings.server_mode,
+            status_counts=overtime_reconciliation.get("status_counts"),
+            finding_counts=overtime_reconciliation.get("finding_counts"),
+            silent_owner_count=int(
+                overtime_reconciliation.get("silent_owner_count") or 0
+            ),
+        )
+    except Exception as exc:
+        overtime_reconciliation = {
+            "status": "error",
+            "error_type": type(exc).__name__,
+        }
+        logger.warning(
+            "Could not collect overtime reconciliation health",
+            extra={
+                "event": "sync.health.overtime_reconciliation_error",
+                "log_class": "integration",
+                "server_mode": settings.server_mode,
+                **_summarize_exception(exc),
+            },
+        )
     if redis_ok:
         registration_jobs = await dual_platform_registration_health(
             redis_client,
@@ -4628,6 +4726,7 @@ async def get_sync_health(
         },
         "active_publication_gate": active_publication_gate,
         "publication_reconciliation": publication_reconciliation,
+        "overtime_reconciliation": overtime_reconciliation,
         "parity_status": _parity_status_payload(latest_parity_summary),
         "registration_sync": registration_sync_capabilities(settings),
         "registration_jobs": registration_jobs,
@@ -4657,6 +4756,9 @@ async def get_sync_health(
             "active_publication_gate_enabled": active_publication_gate.get("enabled"),
             "publication_reconciliation_status": publication_reconciliation.get("status"),
             "publication_reconciliation_findings": publication_reconciliation.get("finding_counts"),
+            "overtime_reconciliation_status": overtime_reconciliation.get("status"),
+            "overtime_reconciliation_findings": overtime_reconciliation.get("finding_counts"),
+            "overtime_silent_owner_count": overtime_reconciliation.get("silent_owner_count"),
             **registration_health_log_fields(registration_jobs),
         },
     )

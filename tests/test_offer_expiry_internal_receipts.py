@@ -134,6 +134,9 @@ class OfferExpiryInternalReceiptTests(unittest.IsolatedAsyncioTestCase):
         ), patch(
             "api.routers.offers.enforce_manual_offer_expire_limits",
             new=defaults.get("limits", AsyncMock()),
+        ), patch(
+            "core.services.offer_expiry_service._invalidate_overtime_after_offer_expiry",
+            new=AsyncMock(),
         ):
             return await expire_offer_internal(payload, make_request(), db=db)
 

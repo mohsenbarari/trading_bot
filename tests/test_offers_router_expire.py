@@ -71,6 +71,16 @@ class FakeDB:
 
 
 class OffersRouterExpireTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        # Stage 6 expiry invalidates nonterminal overtime rows; FakeDB fixtures
+        # do not mock that select, so stub the call for router-focused tests.
+        overtime_patcher = patch(
+            "core.services.offer_overtime_request_service.invalidate_overtime_requests_for_offer",
+            new=AsyncMock(return_value=[]),
+        )
+        overtime_patcher.start()
+        self.addCleanup(overtime_patcher.stop)
+
     async def test_expire_offer_rejects_rate_limited_or_daily_limit_requests(self):
         current_user = SimpleNamespace(id=5)
         offer = SimpleNamespace(id=1, user_id=5, status=OfferStatus.ACTIVE, home_server="iran", channel_message_id=None)
@@ -221,7 +231,14 @@ class OffersRouterExpireTests(unittest.IsolatedAsyncioTestCase):
         db.commit.assert_awaited_once()
         publish_mock.assert_awaited_once_with(
             "offer:expired",
-            {"id": 7, "offer_public_id": "ofr_api_7"},
+            {
+                "id": 7,
+                "status": "expired",
+                "overtime_trade_committed": False,
+                "overtime_minutes_snapshot": 0,
+                "lifecycle_phase": None,
+                "offer_public_id": "ofr_api_7",
+            },
         )
         set_count_mock.assert_awaited_once_with(5, 0)
 
@@ -404,7 +421,14 @@ class OffersRouterExpireTests(unittest.IsolatedAsyncioTestCase):
         db.commit.assert_awaited_once()
         publish_mock.assert_awaited_once_with(
             "offer:expired",
-            {"id": 21, "offer_public_id": "ofr_internal_21"},
+            {
+                "id": 21,
+                "status": "expired",
+                "overtime_trade_committed": False,
+                "overtime_minutes_snapshot": 0,
+                "lifecycle_phase": None,
+                "offer_public_id": "ofr_internal_21",
+            },
         )
         set_count_mock.assert_awaited_once_with(5, 0)
 

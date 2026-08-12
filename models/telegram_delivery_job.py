@@ -31,6 +31,10 @@ from core.telegram_delivery_queue_contract import (
     TelegramDestinationClass,
     TelegramFeederKind,
 )
+from core.telegram_multi_publisher_contract import (
+    TELEGRAM_PUBLISHER_IDENTITIES,
+    TELEGRAM_PUBLISHER_OWNED_OFFER_ACTIONS,
+)
 
 from .database import Base
 
@@ -40,6 +44,15 @@ def _enum_values(enum_cls):
 
 
 telegram_delivery_jobs_enqueued_seq = Sequence("telegram_delivery_jobs_enqueued_seq_seq")
+_PUBLISHER_IDENTITY_SQL = ", ".join(
+    f"'{identity}'" for identity in TELEGRAM_PUBLISHER_IDENTITIES
+)
+_PUBLISHER_OFFER_ACTION_SQL = ", ".join(
+    f"'{action.value}'" for action in sorted(
+        TELEGRAM_PUBLISHER_OWNED_OFFER_ACTIONS,
+        key=lambda action: action.value,
+    )
+)
 
 
 class TelegramDeliveryJobRecord(Base):
@@ -65,7 +78,8 @@ class TelegramDeliveryJobRecord(Base):
         ),
         CheckConstraint("lease_token >= 0", name="ck_telegram_delivery_jobs_lease_token"),
         CheckConstraint(
-            "bot_identity IN ('primary', 'channel_editor')",
+            "bot_identity IN ('primary', 'channel_editor', "
+            f"{_PUBLISHER_IDENTITY_SQL})",
             name="ck_telegram_delivery_jobs_bot_identity",
         ),
         CheckConstraint(
@@ -76,13 +90,24 @@ class TelegramDeliveryJobRecord(Base):
             name="ck_telegram_delivery_jobs_retention_hold",
         ),
         CheckConstraint(
-            "bot_identity = 'primary' OR ("
+            "bot_identity = 'primary' OR "
+            "(bot_identity = 'channel_editor' AND "
             "destination_class = 'channel' AND "
             "method IN ('editMessageText', 'editMessageReplyMarkup') AND "
             "action_kind IN ('partial_offer_edit', 'traded_offer_edit', "
             "'expired_offer_edit', 'cancelled_offer_edit', 'other_active_offer_edit', "
-            "'invalid_action_button_edit', 'reconciliation_edit'))",
-            name="ck_telegram_delivery_jobs_editor_route",
+            "'overtime_channel_edit', 'final_tail_channel_edit', "
+            "'invalid_action_button_edit', 'reconciliation_edit')) OR "
+            f"(bot_identity IN ({_PUBLISHER_IDENTITY_SQL}) AND (("
+            "destination_class = 'channel' AND "
+            "action_kind IN ("
+            f"{_PUBLISHER_OFFER_ACTION_SQL}) AND "
+            "method IN ('sendMessage', 'editMessageText', "
+            "'editMessageReplyMarkup', 'deleteMessage')) OR "
+            "(destination_class = 'private' AND "
+            "action_kind IN ('callback_deadline', 'offer_expiry_callback') AND "
+            "method = 'answerCallbackQuery')))",
+            name="ck_telegram_delivery_jobs_lane_route",
         ),
         Index(
             "ix_telegram_delivery_jobs_claim",

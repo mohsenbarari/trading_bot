@@ -559,6 +559,15 @@ class OffersRouterCreateSuccessTests(unittest.IsolatedAsyncioTestCase):
                 "lot_sizes": None,
                 "original_lot_sizes": None,
                 "expires_at_ts": int(reloaded_offer.created_at.timestamp() + 15 * 60),
+                "normal_deadline_ts": int(reloaded_offer.created_at.timestamp() + 15 * 60),
+                "final_deadline_ts": int(reloaded_offer.created_at.timestamp() + 15 * 60),
+                "lifecycle_phase": "expired",
+                "overtime_minutes_snapshot": 0,
+                "timer_total_seconds": 0,
+                "accepts_new_public_interaction": False,
+                "accepts_automatic_trade": False,
+                "accepts_overtime_request": False,
+                "overtime_trade_committed": False,
             },
         )
         response_mock.assert_called_once_with(
@@ -679,6 +688,15 @@ class OffersRouterCreateSuccessTests(unittest.IsolatedAsyncioTestCase):
                 "lot_sizes": None,
                 "original_lot_sizes": None,
                 "expires_at_ts": None,
+                "normal_deadline_ts": None,
+                "final_deadline_ts": None,
+                "lifecycle_phase": None,
+                "overtime_minutes_snapshot": 0,
+                "timer_total_seconds": None,
+                "accepts_new_public_interaction": False,
+                "accepts_automatic_trade": False,
+                "accepts_overtime_request": False,
+                "overtime_trade_committed": False,
             },
         )
         self.assertEqual(result, {"id": 99})
@@ -843,9 +861,10 @@ class OffersRouterCreateSuccessTests(unittest.IsolatedAsyncioTestCase):
         )
         async_settings = SimpleNamespace(offer_expiry_minutes=30)
 
-        async def persist_intent(intent_db, offer):
+        async def persist_intent(intent_db, offer, **kwargs):
             self.assertIs(intent_db, db)
             self.assertIs(offer, db.added[0])
+            self.assertEqual(kwargs["publisher_bot_identity"], "primary")
             db.events.append("intent")
             return SimpleNamespace(status="pending")
 
@@ -873,6 +892,9 @@ class OffersRouterCreateSuccessTests(unittest.IsolatedAsyncioTestCase):
         ), patch(
             "api.routers.offers.configured_telegram_delivery_producer_mode",
             return_value=TelegramDeliveryRuntimeMode.QUEUE_V1,
+        ), patch(
+            "api.routers.offers.initial_telegram_publication_publisher_identity",
+            return_value="primary",
         ), patch(
             "api.routers.offers.get_or_create_telegram_publication_state",
             new=AsyncMock(side_effect=persist_intent),

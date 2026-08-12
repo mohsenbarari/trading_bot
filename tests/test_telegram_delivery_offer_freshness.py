@@ -74,7 +74,7 @@ def make_job(action=TelegramDeliveryAction.OFFER_PUBLISH, **overrides):
         "payload": payload,
         "payload_hash": payload_hash,
         "method": "sendMessage" if is_publish else "editMessageText",
-        "bot_identity": "primary" if is_publish else "channel_editor",
+        "bot_identity": "primary",
         "source_natural_id": "ofr_freshness_1",
         "source_version": 3,
         "freshness_deadline_at": NOW + timedelta(minutes=2),
@@ -151,6 +151,33 @@ class TelegramDeliveryOfferFreshnessTests(unittest.IsolatedAsyncioTestCase):
                     TelegramFreshnessOutcome.QUARANTINED,
                 )
 
+    async def test_publisher_owner_must_match_for_publish_and_edit(self):
+        publisher_state = make_state(publisher_bot_identity="publisher_2")
+        publish = make_job(bot_identity="publisher_2")
+        edit = make_job(
+            TelegramDeliveryAction.PARTIAL_OFFER_EDIT,
+            bot_identity="publisher_2",
+        )
+
+        self.assertEqual(
+            (await self.decide(publish, offer=make_offer(), state=make_state(
+                publisher_bot_identity="publisher_2",
+                telegram_message_id=None,
+            ))).outcome,
+            TelegramFreshnessOutcome.SEND,
+        )
+        self.assertEqual(
+            (await self.decide(edit, offer=make_offer(), state=publisher_state)).outcome,
+            TelegramFreshnessOutcome.SEND,
+        )
+        mismatch = await self.decide(
+            make_job(TelegramDeliveryAction.PARTIAL_OFFER_EDIT, bot_identity="publisher_3"),
+            offer=make_offer(),
+            state=publisher_state,
+        )
+        self.assertEqual(mismatch.outcome, TelegramFreshnessOutcome.QUARANTINED)
+        self.assertEqual(mismatch.reason, "offer_freshness_cross_owner_lifecycle")
+
     async def test_payload_must_match_hash_and_authoritative_renderer(self):
         hash_mismatch = make_job(payload_hash="0" * 64)
         stale_payload = dict(make_job().payload)
@@ -184,6 +211,8 @@ class TelegramDeliveryOfferFreshnessTests(unittest.IsolatedAsyncioTestCase):
             TelegramDeliveryAction.OFFER_PUBLISH: OfferStatus.ACTIVE,
             TelegramDeliveryAction.PARTIAL_OFFER_EDIT: OfferStatus.ACTIVE,
             TelegramDeliveryAction.OTHER_ACTIVE_OFFER_EDIT: OfferStatus.ACTIVE,
+            TelegramDeliveryAction.OVERTIME_CHANNEL_EDIT: OfferStatus.ACTIVE,
+            TelegramDeliveryAction.FINAL_TAIL_CHANNEL_EDIT: OfferStatus.ACTIVE,
             TelegramDeliveryAction.INVALID_ACTION_BUTTON_EDIT: OfferStatus.ACTIVE,
             TelegramDeliveryAction.RECONCILIATION_EDIT: OfferStatus.ACTIVE,
             TelegramDeliveryAction.TRADED_OFFER_EDIT: OfferStatus.COMPLETED,

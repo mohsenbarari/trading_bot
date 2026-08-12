@@ -127,7 +127,7 @@ class TelegramDeliveryJobSchemaTests(unittest.TestCase):
         self.assertTrue(
             {
                 "ck_telegram_delivery_jobs_bot_identity",
-                "ck_telegram_delivery_jobs_editor_route",
+                "ck_telegram_delivery_jobs_lane_route",
             }.issubset(check_names)
         )
 

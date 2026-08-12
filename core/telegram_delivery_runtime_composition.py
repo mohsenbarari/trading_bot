@@ -12,6 +12,9 @@ from core.services.telegram_admin_broadcast_queue_feedback import (
 from core.services.telegram_callback_queue_feedback import (
     TelegramCallbackQueueLifecycleFeedback,
 )
+from core.services.telegram_overtime_owner_approval_queue_feedback import (
+    TelegramOvertimeOwnerApprovalQueueLifecycleFeedback,
+)
 from core.services.telegram_market_notice_queue_feedback import (
     TelegramMarketNoticeQueueLifecycleFeedback,
 )
@@ -50,6 +53,13 @@ from core.telegram_delivery_freshness_router import (
 from core.telegram_delivery_callback_contract import CALLBACK_FRESHNESS_ACTIONS
 from core.telegram_delivery_callback_freshness import (
     TelegramCallbackDeliveryFreshnessValidator,
+)
+from core.telegram_delivery_overtime_owner_approval_contract import (
+    OVERTIME_OWNER_APPROVAL_FRESHNESS_ACTIONS,
+)
+from core.telegram_delivery_overtime_owner_approval_freshness import (
+    OvertimeOwnerApprovalTelegramDeliveryFreshnessValidator,
+    overtime_owner_approval_freshness_routes,
 )
 from core.telegram_delivery_notification_action_freshness import (
     NOTIFICATION_ACTION_FRESHNESS_ACTIONS,
@@ -212,6 +222,12 @@ def configured_telegram_delivery_freshness_registry(
     )
     _merge_unique(
         routes,
+        overtime_owner_approval_freshness_routes(
+            OvertimeOwnerApprovalTelegramDeliveryFreshnessValidator()
+        ),
+    )
+    _merge_unique(
+        routes,
         notification_action_freshness_routes(
             SCHEDULED_OPERATION_FRESHNESS_ACTIONS,
             ScheduledOperationTelegramDeliveryFreshnessValidator(
@@ -245,6 +261,7 @@ def configured_telegram_delivery_lifecycle_registry(
     admin_feedback = TelegramAdminBroadcastQueueLifecycleFeedback()
     notification_feedback = TelegramNotificationOutboxQueueLifecycleFeedback()
     callback_feedback = TelegramCallbackQueueLifecycleFeedback()
+    overtime_approval_feedback = TelegramOvertimeOwnerApprovalQueueLifecycleFeedback()
     scheduled_feedback = TelegramScheduledOperationQueueLifecycleFeedback(
         expected_channel_id=expected_channel_id
     )
@@ -262,6 +279,7 @@ def configured_telegram_delivery_lifecycle_registry(
         (NOTIFICATION_ACTION_FRESHNESS_ACTIONS, notification_feedback),
         (OFFER_SUCCESS_FRESHNESS_ACTIONS, notification_feedback),
         (CALLBACK_FRESHNESS_ACTIONS, callback_feedback),
+        (OVERTIME_OWNER_APPROVAL_FRESHNESS_ACTIONS, overtime_approval_feedback),
         (SCHEDULED_OPERATION_FRESHNESS_ACTIONS, scheduled_feedback),
         (CHANNEL_MEMBERSHIP_FRESHNESS_ACTIONS, membership_feedback),
     ):

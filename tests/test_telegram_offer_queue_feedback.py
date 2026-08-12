@@ -1,6 +1,8 @@
 import unittest
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
+
+from sqlalchemy.orm import selectinload
 
 from core.services import telegram_offer_queue_feedback as feedback_module
 from core.telegram_delivery_queue_contract import (
@@ -52,6 +54,7 @@ def make_job(action, **overrides):
         "next_retry_at": None,
         "outcome_reason": None,
         "terminal_at": None,
+        "bot_identity": "primary",
     }
     values.update(overrides)
     return SimpleNamespace(**values)
@@ -64,6 +67,29 @@ class TelegramOfferQueueFeedbackTests(unittest.IsolatedAsyncioTestCase):
         self.state = make_state()
         self.load = AsyncMock(return_value=(self.offer, self.state))
         self.feedback = feedback_module.TelegramOfferQueueLifecycleFeedback()
+
+    async def test_locked_offer_load_eager_loads_commodity_for_reclassification(self):
+        offer_result = MagicMock()
+        offer_result.scalar_one_or_none.return_value = self.offer
+        state_result = MagicMock()
+        state_result.scalar_one_or_none.return_value = self.state
+        db = SimpleNamespace(
+            execute=AsyncMock(side_effect=(offer_result, state_result)),
+        )
+
+        with patch.object(
+            feedback_module,
+            "selectinload",
+            wraps=selectinload,
+        ) as eager_load:
+            loaded_offer, loaded_state = await feedback_module._load_offer_and_state_for_update(
+                db,
+                job=make_job(TelegramDeliveryAction.PARTIAL_OFFER_EDIT),
+            )
+
+        eager_load.assert_called_once_with(feedback_module.Offer.commodity)
+        self.assertIs(loaded_offer, self.offer)
+        self.assertIs(loaded_state, self.state)
 
     async def test_dispatch_guard_requires_authoritative_send_decision(self):
         job = make_job(TelegramDeliveryAction.OFFER_PUBLISH)

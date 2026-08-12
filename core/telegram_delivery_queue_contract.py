@@ -68,6 +68,11 @@ class TelegramDeliveryAction(str, Enum):
     # on the signed, short-lived Redis transport and are forbidden at durable
     # queue enqueue boundaries.
     OTP_DEADLINE = "otp_deadline"
+    # Private overtime owner-approval prompt. Static (M0, 1): after rank-0
+    # callback/expiry work, before offer publication (M0, 2). Shares rank 1
+    # with dynamically promoted overdue TRADE_RESULT; tie-break is
+    # delivery_deadline_at then created_sequence.
+    OVERTIME_OWNER_APPROVAL = "overtime_owner_approval"
     OFFER_PUBLISH = "offer_publish"
     OFFER_SUCCESS = "offer_success"
     OFFER_VALIDATION_RESPONSE = "offer_validation_response"
@@ -86,6 +91,12 @@ class TelegramDeliveryAction(str, Enum):
     EXPIRED_OFFER_EDIT = "expired_offer_edit"
     CANCELLED_OFFER_EDIT = "cancelled_offer_edit"
     OTHER_ACTIVE_OFFER_EDIT = "other_active_offer_edit"
+    # Wall-clock overtime / final-tail channel edits. Distinct actions so each
+    # phase can enqueue at the same Offer.version_id without colliding with
+    # OTHER_ACTIVE / RECONCILIATION dedupe keys or failing freshness
+    # source_version == offer.version_id checks.
+    OVERTIME_CHANNEL_EDIT = "overtime_channel_edit"
+    FINAL_TAIL_CHANNEL_EDIT = "final_tail_channel_edit"
     INVALID_ACTION_BUTTON_EDIT = "invalid_action_button_edit"
     RECONCILIATION_EDIT = "reconciliation_edit"
     NEW_USER_MEMBERSHIP = "new_user_membership"
@@ -238,6 +249,7 @@ _ACTION_PRIORITY_AND_RANK: dict[TelegramDeliveryAction, tuple[TelegramDeliveryPr
     TelegramDeliveryAction.CALLBACK_DEADLINE: (TelegramDeliveryPriority.M0, 0),
     TelegramDeliveryAction.OTP_DEADLINE: (TelegramDeliveryPriority.M0, 0),
     TelegramDeliveryAction.OFFER_EXPIRY_CALLBACK: (TelegramDeliveryPriority.M0, 0),
+    TelegramDeliveryAction.OVERTIME_OWNER_APPROVAL: (TelegramDeliveryPriority.M0, 1),
     TelegramDeliveryAction.OFFER_PUBLISH: (TelegramDeliveryPriority.M0, 2),
     TelegramDeliveryAction.OFFER_SUCCESS: (TelegramDeliveryPriority.M1, 0),
     TelegramDeliveryAction.TRADE_RESULT: (TelegramDeliveryPriority.M1, 1),
@@ -264,6 +276,8 @@ _ACTION_PRIORITY_AND_RANK: dict[TelegramDeliveryAction, tuple[TelegramDeliveryPr
     TelegramDeliveryAction.DELAYED_RESTRICTION: (TelegramDeliveryPriority.M5, 0),
     TelegramDeliveryAction.TARGETED_ADMIN_MESSAGE: (TelegramDeliveryPriority.M5, 1),
     TelegramDeliveryAction.OTHER_ACTIVE_OFFER_EDIT: (TelegramDeliveryPriority.M5, 2),
+    TelegramDeliveryAction.OVERTIME_CHANNEL_EDIT: (TelegramDeliveryPriority.M5, 2),
+    TelegramDeliveryAction.FINAL_TAIL_CHANNEL_EDIT: (TelegramDeliveryPriority.M5, 2),
     TelegramDeliveryAction.TRADE_NONCRITICAL: (TelegramDeliveryPriority.M5, 3),
     TelegramDeliveryAction.ADMIN_BROADCAST: (TelegramDeliveryPriority.M6, 0),
     TelegramDeliveryAction.GENERAL_ANNOUNCEMENT: (TelegramDeliveryPriority.M6, 1),
@@ -288,6 +302,8 @@ _FEEDER_INTERNAL_RANK: dict[
     (TelegramFeederKind.OFFER_EDIT, TelegramDeliveryAction.EXPIRED_OFFER_EDIT): 2,
     (TelegramFeederKind.OFFER_EDIT, TelegramDeliveryAction.CANCELLED_OFFER_EDIT): 3,
     (TelegramFeederKind.OFFER_EDIT, TelegramDeliveryAction.OTHER_ACTIVE_OFFER_EDIT): 4,
+    (TelegramFeederKind.OFFER_EDIT, TelegramDeliveryAction.OVERTIME_CHANNEL_EDIT): 4,
+    (TelegramFeederKind.OFFER_EDIT, TelegramDeliveryAction.FINAL_TAIL_CHANNEL_EDIT): 4,
     (TelegramFeederKind.OFFER_EDIT, TelegramDeliveryAction.RECONCILIATION_EDIT): 5,
     (TelegramFeederKind.TRADE, TelegramDeliveryAction.TRADE_RESULT): 0,
     (TelegramFeederKind.TRADE, TelegramDeliveryAction.TRADE_RESPONSE): 1,
@@ -313,6 +329,7 @@ _FEEDER_INTERNAL_RANK: dict[
     (TelegramFeederKind.TIMED_BOT, TelegramDeliveryAction.COSMETIC_CLEANUP): 4,
     (TelegramFeederKind.DIRECT, TelegramDeliveryAction.CALLBACK_DEADLINE): 0,
     (TelegramFeederKind.DIRECT, TelegramDeliveryAction.GENERAL_IMMEDIATE): 0,
+    (TelegramFeederKind.DIRECT, TelegramDeliveryAction.OVERTIME_OWNER_APPROVAL): 0,
     (TelegramFeederKind.DIRECT, TelegramDeliveryAction.PREAUTH_INTERACTION): 1,
     (TelegramFeederKind.DIRECT, TelegramDeliveryAction.PREAUTH_INTERACTION_EDIT): 2,
 }

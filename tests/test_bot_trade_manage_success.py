@@ -6,10 +6,21 @@ from bot.handlers.trade_manage import handle_expire_offer
 from models.offer import OfferStatus
 
 
+class _EmptyScalars:
+    def all(self):
+        return []
+
+
+class _EmptyExecuteResult:
+    def scalars(self):
+        return _EmptyScalars()
+
+
 class FakeSession:
     def __init__(self, offer=None):
         self.offer = offer
         self.commits = 0
+        self.execute = AsyncMock(return_value=_EmptyExecuteResult())
 
     async def scalar(self, stmt):
         return 1
@@ -19,6 +30,9 @@ class FakeSession:
 
     async def commit(self):
         self.commits += 1
+
+    async def flush(self):
+        return None
 
 
 class FakeSessionFactory:
@@ -78,6 +92,12 @@ class BotTradeManageSuccessTests(unittest.IsolatedAsyncioTestCase):
         ), patch("bot.handlers.trade_manage.current_server", return_value="foreign"), patch(
             "core.services.offer_expiry_service.current_server",
             return_value="foreign",
+        ), patch(
+            "core.trading_settings.get_trading_settings_async",
+            new=AsyncMock(return_value=SimpleNamespace(offer_expiry_minutes=15)),
+        ), patch(
+            "core.services.offer_expiry_service._invalidate_overtime_after_offer_expiry",
+            new=AsyncMock(),
         ), patch("bot.handlers.trade_manage.apply_offer_channel_state", new=AsyncMock()) as apply_offer_channel_state, patch(
             "bot.handlers.trade_manage.build_persistent_navigation_keyboard",
             new=AsyncMock(return_value="MENU"),
@@ -112,6 +132,12 @@ class BotTradeManageSuccessTests(unittest.IsolatedAsyncioTestCase):
         ), patch("bot.handlers.trade_manage.current_server", return_value="foreign"), patch(
             "core.services.offer_expiry_service.current_server",
             return_value="foreign",
+        ), patch(
+            "core.trading_settings.get_trading_settings_async",
+            new=AsyncMock(return_value=SimpleNamespace(offer_expiry_minutes=15)),
+        ), patch(
+            "core.services.offer_expiry_service._invalidate_overtime_after_offer_expiry",
+            new=AsyncMock(),
         ), patch(
             "bot.handlers.trade_manage.apply_offer_channel_state",
             new=AsyncMock(side_effect=RuntimeError("edit failed")),
@@ -160,6 +186,12 @@ class BotTradeManageSuccessTests(unittest.IsolatedAsyncioTestCase):
         ), patch(
             "core.services.offer_expiry_service.current_server",
             return_value="foreign",
+        ), patch(
+            "core.trading_settings.get_trading_settings_async",
+            new=AsyncMock(return_value=SimpleNamespace(offer_expiry_minutes=15)),
+        ), patch(
+            "core.services.offer_expiry_service._invalidate_overtime_after_offer_expiry",
+            new=AsyncMock(),
         ), patch(
             "bot.handlers.trade_manage.configured_telegram_delivery_runtime",
             return_value=SimpleNamespace(mode="queue-v1"),

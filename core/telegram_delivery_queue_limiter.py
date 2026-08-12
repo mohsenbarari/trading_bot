@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 import hashlib
 import math
-from typing import Any, Protocol
+from typing import Any, Iterable, Protocol
 
 from core.services.telegram_delivery_queue_service import SUPPORTED_TELEGRAM_BOT_IDENTITIES
 from core.telegram_delivery_queue_contract import (
@@ -227,6 +227,8 @@ class TelegramDeliveryDispatchLimiter(Protocol):
     async def clear_destination_gate_after_database_resume(
         self,
         destination_key: str,
+        *,
+        bot_identities: Iterable[str],
     ) -> None: ...
 
 
@@ -642,24 +644,41 @@ class RedisTelegramDeliveryLimiter:
     async def clear_destination_gate_after_database_resume(
         self,
         destination_key: str,
+        *,
+        bot_identities: Iterable[str] = SUPPORTED_TELEGRAM_BOT_IDENTITIES,
     ) -> None:
         destination = str(destination_key or "").strip()
         if not destination:
             raise TelegramDeliveryLimiterUnavailableError(
                 "telegram_limiter_destination_missing"
             )
+        identities = tuple(
+            dict.fromkeys(str(value or "").strip() for value in bot_identities)
+        )
+        if not identities or any(
+            identity not in SUPPORTED_TELEGRAM_BOT_IDENTITIES
+            for identity in identities
+        ):
+            raise TelegramDeliveryLimiterUnavailableError(
+                "telegram_limiter_bot_identity_not_allowlisted"
+            )
         digest = _destination_digest(destination)
-        primary_keys = self._keys("primary", digest)
-        editor_keys = self._keys("channel_editor", digest)
+        destination_keys = self._keys(identities[0], digest)
+        scoped_blocks = tuple(
+            self._keys(identity, digest)["destination_block"]
+            for identity in identities
+        )
         await self._resume_delete(
-            primary_keys["destination_block"],
-            editor_keys["destination_block"],
-            primary_keys["destination_next"],
+            *scoped_blocks,
+            destination_keys["destination_next"],
         )
 
     async def resume_destination(self, destination_key: str) -> None:
         """Compatibility primitive; this alone never authorizes activation."""
-        await self.clear_destination_gate_after_database_resume(destination_key)
+        await self.clear_destination_gate_after_database_resume(
+            destination_key,
+            bot_identities=SUPPORTED_TELEGRAM_BOT_IDENTITIES,
+        )
 
     async def resume_gateway(self) -> None:
         keys = self._keys("primary", "unused")

@@ -59,6 +59,7 @@ from core.services.trade_service import (
 from core.services.telegram_offer_channel_service import apply_offer_channel_state
 from core.services.telegram_offer_publication_service import (
     get_or_create_telegram_publication_state,
+    initial_telegram_publication_publisher_identity,
     publish_offer_to_telegram_channel_once,
 )
 from core.services.telegram_callback_queue_service import (
@@ -1371,7 +1372,18 @@ async def _handle_trade_confirm_core(
                 # here means no accepted Offer is exposed to the user and no
                 # Telegram obligation is lost.
                 await session.flush()
-                await get_or_create_telegram_publication_state(session, new_offer)
+                await get_or_create_telegram_publication_state(
+                    session,
+                    new_offer,
+                    publisher_bot_identity=initial_telegram_publication_publisher_identity(
+                        multi_publisher_enabled=bool(
+                            getattr(settings, "telegram_multi_publisher_enabled", False)
+                        ),
+                        b2b_dispatch_enabled=bool(
+                            getattr(settings, "telegram_b2b_dispatch_enabled", False)
+                        ),
+                    ),
+                )
                 success_commodity_name = await _canonical_commodity_name_from_session(
                     session,
                     getattr(new_offer, "commodity_id", None) or commodity_id,

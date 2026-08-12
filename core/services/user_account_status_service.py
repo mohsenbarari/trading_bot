@@ -200,6 +200,29 @@ async def _notify_user_and_optional_telegram(
         )
 
 
+async def _invalidate_overtime_for_inactive_user(
+    db: AsyncSession,
+    user: User,
+    *,
+    now,
+) -> None:
+    """Clear nonterminal overtime rows when an account loses market access."""
+    from core.services.offer_overtime_request_service import (
+        invalidate_overtime_requests_for_user,
+    )
+    from core.trading_settings import get_trading_settings_async
+
+    ts = await get_trading_settings_async()
+    await invalidate_overtime_requests_for_user(
+        db,
+        user_id=int(user.id),
+        reason="account_inactive",
+        request_home_server=current_server(),
+        now=now,
+        normal_lifetime_minutes=int(getattr(ts, "offer_expiry_minutes", 0) or 0),
+    )
+
+
 async def transition_user_account_status(
     db: AsyncSession,
     user: User,
@@ -223,6 +246,8 @@ async def transition_user_account_status(
         user.deactivated_at = now
         user.messenger_grace_expires_at = now + INACTIVE_GLOBAL_LOCK_GRACE_PERIOD
         user.messenger_blocked_at = None
+
+        await _invalidate_overtime_for_inactive_user(db, user, now=now)
 
         await _notify_user_and_optional_telegram(
             db,

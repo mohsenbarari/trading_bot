@@ -551,6 +551,14 @@ class SyncRouterApplyItemSuccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("CASE WHEN (excluded.status =", compiled)
         self.assertIn("CASE WHEN (offer_publication_states.status =", compiled)
         self.assertIn("publisher_bot_identity", compiled)
+        self.assertIn(
+            "offer_publication_states.publisher_bot_identity IS NULL",
+            compiled,
+        )
+        self.assertIn(
+            "offer_publication_states.publisher_bot_identity = excluded.publisher_bot_identity",
+            compiled,
+        )
 
     async def test_user_block_uses_pair_identity_for_upsert_and_delete_resolution(self):
         stmt = _build_upsert_stmt(

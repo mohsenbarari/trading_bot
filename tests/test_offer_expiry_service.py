@@ -17,7 +17,10 @@ class OfferExpiryServiceTests(unittest.IsolatedAsyncioTestCase):
         db = SimpleNamespace(commit=AsyncMock())
         offer = SimpleNamespace(id=1, status=OfferStatus.ACTIVE, home_server="iran")
 
-        with patch("core.services.offer_expiry_service.current_server", return_value="iran"):
+        with patch("core.services.offer_expiry_service.current_server", return_value="iran"), patch(
+            "core.services.offer_expiry_service._invalidate_overtime_after_offer_expiry",
+            new=AsyncMock(),
+        ):
             result = await expire_offer_authoritatively(
                 db,
                 offer,
@@ -66,7 +69,10 @@ class OfferExpiryServiceTests(unittest.IsolatedAsyncioTestCase):
         db = SimpleNamespace(commit=AsyncMock())
         offer = SimpleNamespace(id=3, status=OfferStatus.ACTIVE, home_server="foreign")
 
-        with patch("core.services.offer_expiry_service.current_server", return_value="foreign"):
+        with patch("core.services.offer_expiry_service.current_server", return_value="foreign"), patch(
+            "core.services.offer_expiry_service._invalidate_overtime_after_offer_expiry",
+            new=AsyncMock(),
+        ):
             await expire_offer_authoritatively(
                 db,
                 offer,

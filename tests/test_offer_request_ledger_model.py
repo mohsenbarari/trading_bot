@@ -46,6 +46,17 @@ class OfferRequestLedgerModelTests(unittest.TestCase):
                 "completed_trade",
                 "duplicate_replay",
                 "failed_internal",
+                # Overtime workflow. Success reuses "completed_trade" so there
+                # is one meaning of a committed trade across both workflows.
+                "overtime_queued",
+                "overtime_delivering",
+                "overtime_presented",
+                "overtime_rejected_by_owner",
+                "overtime_decision_expired",
+                "overtime_cancelled_by_requester",
+                "overtime_invalidated",
+                "overtime_delivery_expired",
+                "overtime_rejected_requester_limit",
             },
         )
         self.assertEqual(

@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Mapping
 
 from core.services.telegram_delivery_queue_service import (
+    TELEGRAM_PUBLISHER_BOT_IDENTITIES,
     TelegramDeliveryQueueValidationError,
     canonical_telegram_delivery_payload,
 )
@@ -75,7 +76,10 @@ def validate_telegram_callback_job_contract(
         )
     if str(job.method or "") != "answerCallbackQuery":
         return _quarantined("telegram_callback_freshness_method_mismatch")
-    if str(job.bot_identity or "") != "primary":
+    if str(job.bot_identity or "") not in {
+        "primary",
+        *TELEGRAM_PUBLISHER_BOT_IDENTITIES,
+    }:
         return _quarantined("telegram_callback_freshness_bot_identity_mismatch")
     if str(job.template_version or "") != telegram_callback_template_version(action):
         return _quarantined("telegram_callback_freshness_template_mismatch")

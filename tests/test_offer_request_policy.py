@@ -47,12 +47,17 @@ class OfferRequestPolicyTests(unittest.TestCase):
     def test_owner_and_admin_audit_visibility_are_explicitly_gated(self):
         payload = {
             "offer_public_id": "ofr_public",
+            "workflow_kind": "direct",
+            "result_status": "completed_trade",
             "requester_user_id": 5,
             "request_source_surface": "telegram_bot",
             "request_source_server": "foreign",
             "customer_relation_id": 7,
             "internal_failure_code": "db_timeout",
             "internal_failure_context": {"trace": "redacted"},
+            "decided_by_user_id": 9,
+            "telegram_message_id": 1001,
+            "telegram_delivery_job_id": 44,
         }
 
         owner_payload = sanitize_offer_request_payload(payload, OfferRequestVisibility.OWNER)
@@ -62,8 +67,44 @@ class OfferRequestPolicyTests(unittest.TestCase):
         self.assertEqual(owner_payload["request_source_server"], "foreign")
         self.assertEqual(owner_payload["customer_relation_id"], 7)
         self.assertNotIn("internal_failure_context", owner_payload)
+        self.assertNotIn("telegram_delivery_job_id", owner_payload)
         self.assertEqual(admin_payload["internal_failure_code"], "db_timeout")
         self.assertEqual(admin_payload["internal_failure_context"], {"trace": "redacted"})
+        self.assertEqual(admin_payload["decided_by_user_id"], 9)
+        self.assertEqual(admin_payload["telegram_message_id"], 1001)
+        self.assertEqual(admin_payload["telegram_delivery_job_id"], 44)
+
+    def test_owner_pre_trade_overtime_hides_requester_identity(self):
+        payload = {
+            "offer_public_id": "ofr_public",
+            "workflow_kind": "overtime",
+            "result_status": "overtime_presented",
+            "requester_user_id": 5,
+            "actor_user_id": 6,
+            "customer_relation_id": 7,
+            "customer_management_name_snapshot": "VIP",
+            "request_source_server": "foreign",
+            "terminal_reason": None,
+        }
+        owner_payload = sanitize_offer_request_payload(payload, OfferRequestVisibility.OWNER)
+        self.assertNotIn("requester_user_id", owner_payload)
+        self.assertNotIn("actor_user_id", owner_payload)
+        self.assertNotIn("customer_relation_id", owner_payload)
+        self.assertNotIn("customer_management_name_snapshot", owner_payload)
+        self.assertEqual(owner_payload["request_source_server"], "foreign")
+        self.assertEqual(owner_payload["workflow_kind"], "overtime")
+
+    def test_owner_completed_overtime_trade_keeps_requester_identity(self):
+        payload = {
+            "offer_public_id": "ofr_public",
+            "workflow_kind": "overtime",
+            "result_status": "completed_trade",
+            "requester_user_id": 5,
+            "customer_relation_id": 7,
+        }
+        owner_payload = sanitize_offer_request_payload(payload, OfferRequestVisibility.OWNER)
+        self.assertEqual(owner_payload["requester_user_id"], 5)
+        self.assertEqual(owner_payload["customer_relation_id"], 7)
 
     def test_legacy_expire_reason_mapping_does_not_fabricate_missing_metadata(self):
         self.assertEqual(map_legacy_expire_reason("time_limit").normalized_category, "lifetime_expiry")

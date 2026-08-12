@@ -19,6 +19,7 @@ from core.services.offer_publication_state_service import (
     apply_publication_state_update,
     build_offer_publication_state,
     canonical_telegram_publication_identity,
+    ensure_telegram_publication_publisher_identity,
     normalize_publication_status,
     publication_dedupe_key,
 )
@@ -58,6 +59,23 @@ SENT_TELEGRAM_PUBLICATION_STATUSES = {
     OfferPublicationStatus.SENT,
     OfferPublicationStatus.VISIBLE,
 }
+
+
+def initial_telegram_publication_publisher_identity(
+    *,
+    multi_publisher_enabled: bool,
+    b2b_dispatch_enabled: bool,
+) -> str | None:
+    """Leave a Queue-v1 publication unassigned until its B2B lane is chosen.
+
+    The offer queue feeder chooses and persists exactly one publisher lane for
+    a new multi-publisher publication.  Assigning ``primary`` while the offer
+    is created would bypass that selection and collapse every new post onto
+    the central bot.  Legacy and disabled-B2B routes keep their primary owner.
+    """
+    if bool(multi_publisher_enabled) and bool(b2b_dispatch_enabled):
+        return None
+    return TELEGRAM_PRIMARY_PUBLISHER_BOT_IDENTITY
 
 
 def _assert_legacy_direct_delivery_owner() -> None:
@@ -233,14 +251,19 @@ def mark_telegram_publication_success(
     message_id: int,
     chat_id: int | None = None,
     now=None,
+    publisher_bot_identity: str | None = None,
 ) -> None:
+    publisher = ensure_telegram_publication_publisher_identity(
+        state,
+        publisher_bot_identity=publisher_bot_identity,
+    )
     apply_publication_state_update(
         state,
         offer_status=getattr(offer, "status", None),
         offer_version_id=_offer_version_id(offer),
         requested_status=OfferPublicationStatus.SENT,
         now=now or utc_now_naive(),
-        publisher_bot_identity=TELEGRAM_PRIMARY_PUBLISHER_BOT_IDENTITY,
+        publisher_bot_identity=publisher,
         surface_resource_id=str(message_id),
         telegram_chat_id=chat_id,
         telegram_message_id=message_id,
@@ -285,6 +308,8 @@ async def load_telegram_publication_state_for_update(
 async def get_or_create_telegram_publication_state(
     db: AsyncSession,
     offer: Any,
+    *,
+    publisher_bot_identity: str | None = TELEGRAM_PRIMARY_PUBLISHER_BOT_IDENTITY,
 ) -> OfferPublicationState:
     state = await load_telegram_publication_state_for_update(db, offer)
     if state is not None:
@@ -294,6 +319,7 @@ async def get_or_create_telegram_publication_state(
         offer,
         OfferPublicationSurface.TELEGRAM_CHANNEL,
         status=OfferPublicationStatus.PENDING,
+        publisher_bot_identity=publisher_bot_identity,
     )
     try:
         async with db.begin_nested():

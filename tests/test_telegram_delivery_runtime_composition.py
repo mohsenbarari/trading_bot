@@ -44,6 +44,52 @@ class TelegramDeliveryRuntimeCompositionTests(unittest.TestCase):
         self.assertEqual(adapters.freshness.bot_identity, "channel_editor")
         self.assertEqual(adapters.lifecycle.bot_identity, "channel_editor")
 
+    def test_multi_publisher_runtime_composes_one_adapter_per_configured_token(self):
+        values = {
+            "bot_token": "primary:test-token",
+            "telegram_delivery_queue_channel_editor_enabled": False,
+            "channel_id": -1001234567890,
+            "telegram_multi_publisher_enabled": True,
+        }
+        for index in range(1, 6):
+            prefix = f"telegram_publisher_{index}"
+            values.update(
+                {
+                    f"{prefix}_enabled": True,
+                    f"{prefix}_bot_token": f"publisher-{index}:test-token",
+                    f"{prefix}_expected_bot_id": 9000 + index,
+                    f"{prefix}_expected_username": f"publisher_{index}_bot",
+                }
+            )
+        runtime = build_configured_telegram_delivery_runtime(
+            settings=SimpleNamespace(**values)
+        )
+
+        self.assertEqual(
+            runtime.bot_identities,
+            (
+                "primary",
+                "publisher_1",
+                "publisher_2",
+                "publisher_3",
+                "publisher_4",
+                "publisher_5",
+            ),
+        )
+        self.assertEqual(
+            runtime.credential_registry.publisher_bot_identities,
+            runtime.bot_identities[1:],
+        )
+        for identity in runtime.credential_registry.publisher_bot_identities:
+            self.assertEqual(
+                runtime.freshness_validators[identity].bot_identity,
+                identity,
+            )
+            self.assertEqual(
+                runtime.lifecycle_feedbacks[identity].bot_identity,
+                identity,
+            )
+
     def test_primary_freshness_and_lifecycle_are_complete(self):
         freshness = configured_telegram_delivery_freshness_registry(
             channel_id=-1001234567890

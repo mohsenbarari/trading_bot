@@ -6,6 +6,7 @@
 تمام مقادیر از فایل .env خوانده می‌شوند.
 """
 import math
+import os
 
 from pydantic import SecretStr, model_validator
 from pydantic_settings import BaseSettings
@@ -113,6 +114,38 @@ class Settings(BaseSettings):
     telegram_delivery_queue_worker_enabled: bool = False
     telegram_delivery_queue_cutover_ready: bool = False
     telegram_delivery_queue_channel_editor_enabled: bool = False
+    # Multi-publisher delivery is intentionally disabled until every staged
+    # migration and staging acceptance gate has passed.  B2B dispatch is a
+    # stricter sub-feature: enabling it without the parent flag is a startup
+    # error rather than a partially active configuration.
+    telegram_multi_publisher_enabled: bool = False
+    telegram_b2b_dispatch_enabled: bool = False
+    telegram_b2b_dispatch_interval_seconds: float = 0.5
+    telegram_b2b_acknowledgement_timeout_seconds: float = 15.0
+    # Publisher credentials remain separate to make accidental token reuse and
+    # identity drift fail before a worker can be composed.  They are consumed
+    # only when TELEGRAM_MULTI_PUBLISHER_ENABLED is true.
+    telegram_publisher_1_enabled: bool = False
+    telegram_publisher_1_bot_token: SecretStr | None = None
+    telegram_publisher_1_expected_bot_id: int | None = None
+    telegram_publisher_1_expected_username: str | None = None
+    telegram_publisher_2_enabled: bool = False
+    telegram_publisher_2_bot_token: SecretStr | None = None
+    telegram_publisher_2_expected_bot_id: int | None = None
+    telegram_publisher_2_expected_username: str | None = None
+    telegram_publisher_3_enabled: bool = False
+    telegram_publisher_3_bot_token: SecretStr | None = None
+    telegram_publisher_3_expected_bot_id: int | None = None
+    telegram_publisher_3_expected_username: str | None = None
+    telegram_publisher_4_enabled: bool = False
+    telegram_publisher_4_bot_token: SecretStr | None = None
+    telegram_publisher_4_expected_bot_id: int | None = None
+    telegram_publisher_4_expected_username: str | None = None
+    telegram_publisher_5_enabled: bool = False
+    telegram_publisher_5_bot_token: SecretStr | None = None
+    telegram_publisher_5_expected_bot_id: int | None = None
+    telegram_publisher_5_expected_username: str | None = None
+    telegram_multi_publisher_lane_concurrency: int = 1
     telegram_delivery_queue_channel_editor_bot_token: SecretStr | None = None
     telegram_delivery_queue_expected_primary_bot_id: int | None = None
     telegram_delivery_queue_expected_channel_editor_bot_id: int | None = None
@@ -204,6 +237,18 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_telegram_delivery_queue_settings(self):
+        if (
+            self.telegram_b2b_dispatch_enabled
+            and not self.telegram_multi_publisher_enabled
+        ):
+            raise ValueError("telegram_b2b_dispatch_requires_multi_publisher")
+        for name in (
+            "telegram_b2b_dispatch_interval_seconds",
+            "telegram_b2b_acknowledgement_timeout_seconds",
+        ):
+            value = float(getattr(self, name))
+            if not math.isfinite(value) or value <= 0:
+                raise ValueError(f"{name}_must_be_positive")
         producer = str(
             self.telegram_delivery_producer_mode
             or self.telegram_delivery_execution_owner
@@ -264,6 +309,7 @@ class Settings(BaseSettings):
             "telegram_delivery_queue_primary_concurrency",
             "telegram_delivery_queue_primary_m0_reserved_concurrency",
             "telegram_delivery_queue_channel_editor_concurrency",
+            "telegram_multi_publisher_lane_concurrency",
             "telegram_offer_queue_feeder_batch_limit",
             "telegram_delivery_queue_limiter_key_ttl_seconds",
         ):
@@ -279,6 +325,9 @@ class Settings(BaseSettings):
         return self
     
     class Config:
-        env_file = ".env"
+        # Defaults to the deployment file. Tests point this at ``.env.test`` so
+        # they read code defaults instead of whatever a machine happens to have
+        # configured; see ``tests/__init__.py``.
+        env_file = os.getenv("APP_ENV_FILE", ".env")
 
 settings = Settings()
