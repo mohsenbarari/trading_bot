@@ -4,6 +4,7 @@ Load for Vue/PWA refactoring, Design System V2, Figma/Sites evidence, or shared 
 
 ## Decisions
 
+- 2026-08-12 | Stage 6 invitation queue uses copy-only in-memory links, no queue total, no-store abort-safe loading, 204-only revoke, 400/404 refresh reconciliation, and 403 sensitive-state clearing; shared confirms teleport to `body`. Reason: prevent bearer leakage and clipped destructive confirmation on mobile.
 - 2026-08-11 | Stage 6 Phase 1–3 are recorded as delivered scope; broader Stage 6 remains partial/deferred and scoped evidence is not a full freeze or Sites input. Reason: prevent slice closure from authorizing deployment or unfinished roadmap work.
 - 2026-08-11 | Ordinary peers get server-masked mobile only; address, presence, membership and trade detail are omitted. Self/admin retain needed fields; self/super-peer actions are read-only; Messenger/Forward discovery is unchanged. Reason: no client-only PII or authority.
 - 2026-08-11 | Public-profile routes are ID-only across direct, notification, toast and browser entries; canonicalize legacy query before navigation. Reason: URL/history exposes PII.
