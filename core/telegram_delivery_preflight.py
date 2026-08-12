@@ -105,10 +105,24 @@ class TelegramDeliveryPreflightIdentityReport:
 
 
 @dataclass(frozen=True, slots=True)
+class TelegramDeliveryChannelThrottleFacts:
+    """Non-authoritative channel attributes retained for pacing diagnostics."""
+
+    chat_type: str
+    has_linked_chat: bool
+    linked_chat_fingerprint: str | None
+    is_public: bool
+    is_forum: bool
+    slow_mode_delay: int | None
+    has_protected_content: bool
+
+
+@dataclass(frozen=True, slots=True)
 class TelegramDeliveryPreflightReport:
     approved_bot_identities: tuple[str, ...]
     channel_fingerprint: str
     identities: tuple[TelegramDeliveryPreflightIdentityReport, ...]
+    channel_throttle_facts: TelegramDeliveryChannelThrottleFacts | None = None
 
 
 def _positive_int(value: Any, *, reason: str) -> int:
@@ -150,6 +164,34 @@ def _provider_int(value: Any, *, role: str, field: str) -> int:
 def _fingerprint(kind: str, value: int) -> str:
     material = f"telegram-preflight-v1:{kind}:{value}".encode("utf-8")
     return hashlib.sha256(material).hexdigest()[:16]
+
+
+def _channel_throttle_facts(
+    chat: Mapping[str, Any],
+) -> TelegramDeliveryChannelThrottleFacts:
+    """Capture observable destination shape without treating it as rate policy."""
+
+    linked_chat_id = chat.get("linked_chat_id")
+    linked_chat_fingerprint = (
+        _fingerprint("linked_chat", linked_chat_id)
+        if isinstance(linked_chat_id, int) and not isinstance(linked_chat_id, bool)
+        else None
+    )
+    slow_mode_delay = chat.get("slow_mode_delay")
+    return TelegramDeliveryChannelThrottleFacts(
+        chat_type=str(chat.get("type") or ""),
+        has_linked_chat=linked_chat_fingerprint is not None,
+        linked_chat_fingerprint=linked_chat_fingerprint,
+        is_public=bool(str(chat.get("username") or "").strip()),
+        is_forum=chat.get("is_forum") is True,
+        slow_mode_delay=(
+            int(slow_mode_delay)
+            if isinstance(slow_mode_delay, int)
+            and not isinstance(slow_mode_delay, bool)
+            else None
+        ),
+        has_protected_content=chat.get("has_protected_content") is True,
+    )
 
 
 def _result_payload(
@@ -451,6 +493,7 @@ async def run_telegram_delivery_preflight(
 
     channel_fingerprint = _fingerprint("channel", approved_channel_id)
     identity_reports: list[TelegramDeliveryPreflightIdentityReport] = []
+    throttle_facts: TelegramDeliveryChannelThrottleFacts | None = None
     actual_bot_ids: set[int] = set()
     for role in selected_roles:
         expected_bot_id = expected_ids[role]
@@ -516,6 +559,8 @@ async def run_telegram_delivery_preflight(
             raise TelegramDeliveryPreflightFailedError(
                 f"telegram_preflight_channel_identity_mismatch:{role}"
             )
+        if throttle_facts is None:
+            throttle_facts = _channel_throttle_facts(chat)
 
         member = await _readback(
             call,
@@ -561,6 +606,7 @@ async def run_telegram_delivery_preflight(
         approved_bot_identities=selected_roles,
         channel_fingerprint=channel_fingerprint,
         identities=tuple(identity_reports),
+        channel_throttle_facts=throttle_facts,
     )
 
 

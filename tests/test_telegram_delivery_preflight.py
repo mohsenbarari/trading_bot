@@ -58,6 +58,7 @@ class _ReadbackGateway:
         member_bot_id=None,
         username=None,
         permissions=None,
+        chat_attributes=None,
         override_results=None,
     ):
         self.role = role
@@ -86,6 +87,7 @@ class _ReadbackGateway:
         }
         default_permissions.update(permissions or {})
         self.permissions = default_permissions
+        self.chat_attributes = dict(chat_attributes or {})
         self.override_results = dict(override_results or {})
         self.calls = []
 
@@ -115,6 +117,7 @@ class _ReadbackGateway:
                 "id": self.channel_id,
                 "type": self.channel_type,
                 "title": "redacted-test-channel",
+                **self.chat_attributes,
             }
         elif method == "getChatMember":
             result = {
@@ -209,6 +212,31 @@ class TelegramDeliveryPreflightTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn(str(PRIMARY_BOT_ID), rendered)
         self.assertNotIn(str(CHANNEL_ID), rendered)
         self.assertNotIn("primary-secret-token", rendered)
+
+    async def test_preflight_retains_redacted_channel_throttle_facts(self):
+        gateway = _ReadbackGateway(
+            role="primary",
+            bot_id=PRIMARY_BOT_ID,
+            chat_attributes={
+                "linked_chat_id": -100_444_444_444,
+                "username": "public_channel",
+                "is_forum": True,
+                "slow_mode_delay": 15,
+                "has_protected_content": True,
+            },
+        )
+
+        report = await _run(primary=gateway)
+
+        facts = report.channel_throttle_facts
+        self.assertIsNotNone(facts)
+        self.assertEqual(facts.chat_type, "channel")
+        self.assertTrue(facts.has_linked_chat)
+        self.assertTrue(facts.is_public)
+        self.assertTrue(facts.is_forum)
+        self.assertEqual(facts.slow_mode_delay, 15)
+        self.assertTrue(facts.has_protected_content)
+        self.assertNotIn("-100444444444", repr(report))
 
     async def test_editor_preflight_requires_distinct_identity_and_minimal_permissions(self):
         report = await _run(editor=True)
