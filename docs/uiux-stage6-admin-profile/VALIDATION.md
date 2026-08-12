@@ -1,4 +1,4 @@
-# Validation — Stage 6 delivered Phase 1–17 scope
+# Validation — Stage 6 delivered Phase 1–18 scope
 
 ## Historical Phase 1–3 source binding
 
@@ -245,6 +245,22 @@ post-fix read-only audit: `assets/figma/final-provenance-20260811T204635Z/stage6
 - browser receipt: `uiux-stage6-phase17-admin-custom-date-20260812T210602968Z`، `passed`/`promotable=true`، **6** assertion و **4** screenshot. metrics `stage6-phase17-admin-custom-date-metrics.json` SHA-256 `3b562d2e7f2f0e14ee83c371e7481361fc8dad61bbe79cfea318d0dcc088d10c`؛ binding SHA-256 `345bb62707945af672489e31cf805b4700628eb4acbe0cf4cf0d16b1ee918c90`؛ harness SHA-256 `1497cf4e70b6303c76036d0c43b95905e8dc3c5a6c7ce277806dafec5b2784c7`.
 - matrix synthetic مسیر `/admin/users/:id` را پوشش می‌دهد: ماشهٔ تاریخ سفارشی محدودیت در 360، 390 و 1440 داخل viewport با `ui-button`؛ ماشهٔ تاریخ سفارشی مسدودیت در 390 بدون mutation. diagnostics غیرمنتظره صفر است و mutation زنده رخ نداده است.
 - Figma live/editable در page `321:18`، sibling section `481:1327` است: W1=`481:1329` و W2=`481:1376`، هر دو `390×844`. backdrop برای اثبات overlay دیده می‌شود؛ label `481:1328` دقیقاً `Phase 17 · یکپارچگی ظاهر انتخاب تاریخ سفارشی مدیریت · source d0d756fe · دادهٔ synthetic` است. audit همهٔ 66 text node را Vazirmatn، 14 instance را linked و unsafe scan را empty ثبت کرد.
+
+این receipt محلی، mutable و supplemental است؛ artifactهای آن عمداً به `selectedArtifacts` تاریخی Phase 1–3 افزوده یا freeze نشده‌اند و رفتار live backend را مستقل اثبات نمی‌کنند.
+
+## Phase 18 — یکپارچگی ظاهر پوسته باقی‌مانده پروفایل عمومی
+
+| field | value |
+| --- | --- |
+| source commit | `b3f0fe00d451c6e2dd82b1a9f8c306a88e954953` |
+| source tree | `ce5f2e5fd3973a12ed555af9d605c6dbcae7b24d` |
+| parent | `4eb96c19d6b4b18b78fcec36edc2ad809b3a64a4` |
+| source binding | `8e982de690fabbe3d41809c789dc5d06fffdf9ff9b4bd57e06ab1050d62ee64a` (393 files) |
+
+- focused `PublicProfile.test.ts`: **56/56** pass؛ `npm run guard:ui` و `git diff --check`: pass.
+- browser receipt: `uiux-stage6-phase18-public-profile-remaining-chrome-20260812T211745381Z`، `passed`/`promotable=true`، **6** assertion و **4** screenshot. metrics `stage6-phase18-public-profile-remaining-chrome-metrics.json` SHA-256 `f1b6d296362d46e246477566340f31e3de06ddca1aa3357edc2e0a67e7a22fb1`؛ binding SHA-256 `3d6bcb96d673b661bbec9ac0833073e4afed5e286ea1d7d9e8e64396f5043a14`؛ harness SHA-256 `1412401f20d1dbaa19579131d1bc15a7dff60441fb8b8a463b30246cf5888eb2`.
+- matrix synthetic مسیر `/users/:id` و `/profile` را پوشش می‌دهد: آواتار توکن‌دار در 360، 390 و 1440 بدون overflow افقی؛ لینک طرف معامله در 390 با رنگ `--ds-success-700` و navigation فقط `{ id }` بدون mutation. diagnostics غیرمنتظره صفر است و mutation زنده رخ نداده است.
+- Figma live/editable در page `321:18`، sibling section `483:1373` است: W1=`483:1375` و W2=`483:1422`، هر دو `390×844`. overlay کلون‌شده مخفی است؛ label `483:1374` دقیقاً `Phase 18 · یکپارچگی ظاهر پوسته باقی‌مانده پروفایل عمومی · source b3f0fe00 · دادهٔ synthetic` است. audit همهٔ 56 text node را Vazirmatn، 10 instance را linked و unsafe scan را empty ثبت کرد.
 
 این receipt محلی، mutable و supplemental است؛ artifactهای آن عمداً به `selectedArtifacts` تاریخی Phase 1–3 افزوده یا freeze نشده‌اند و رفتار live backend را مستقل اثبات نمی‌کنند.
 

@@ -1,4 +1,4 @@
-# Stage 6 Runtime Contract — delivered Phase 1–17
+# Stage 6 Runtime Contract — delivered Phase 1–18
 
 ## اصول غیرقابل‌جایگزین
 
@@ -181,6 +181,14 @@
 | تاریخ سفارشی مسدودیت | انتخاب «زمان دلخواه» فقط ورودی تاریخ را نشان می‌دهد و mutation نمی‌فرستد. |
 | Jalali | منطق انتخاب تاریخ و مودال تقویم عوض نشده است. |
 
+## Phase 18 — یکپارچگی ظاهر پوسته باقی‌مانده پروفایل عمومی
+
+| سطح | قرارداد تحویل‌شده |
+| --- | --- |
+| route فعال | `/users/:id` و `/profile`، همان `PublicProfile` موجود؛ API، router و query contract تازه‌ای ایجاد نشده است. |
+| آواتار | همان هوک `data-test="profile-avatar-trigger"` به‌صورت دکمهٔ specialized با توکن `--ds-*`؛ آپلود confirm نشده است. |
+| لینک طرف معامله | همان هوک `.profile-link-btn` با رنگ `--ds-success-700` حتی روی `.value`؛ navigation فقط `{ id }` است. |
+
 ## مرزهای صریح
 
-این contract تا source تحویل‌شدهٔ Phase 17 در commit `d0d756fe9a8fe8d359c039f6e9d346f28f292999` را توصیف می‌کند. persistenceهای دیگر، protected Messenger internals، Sites، staging، production و closure کلی Stage 6 را authorize یا اثبات نمی‌کند.
+این contract تا source تحویل‌شدهٔ Phase 18 در commit `b3f0fe00d451c6e2dd82b1a9f8c306a88e954953` را توصیف می‌کند. persistenceهای دیگر، protected Messenger internals، Sites، staging، production و closure کلی Stage 6 را authorize یا اثبات نمی‌کند.
