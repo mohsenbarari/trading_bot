@@ -1,0 +1,1512 @@
+{
+  "schemaVersion": 1,
+  "stage": 8,
+  "status": "documented_matrix_not_production_acceptance",
+  "branch": "condidate/webapp-ui-ux-redesign-v2",
+  "sourceCommit": "ab0834aac3383e3c790c5865170ab9f007db235c",
+  "roles": [
+    {
+      "id": "guest",
+      "label": "مهمان"
+    },
+    {
+      "id": "member",
+      "label": "عضو"
+    },
+    {
+      "id": "customer",
+      "label": "مشتری"
+    },
+    {
+      "id": "accountant",
+      "label": "حسابدار"
+    },
+    {
+      "id": "group-lead",
+      "label": "سرگروه"
+    },
+    {
+      "id": "middle-admin",
+      "label": "مدیر میانی"
+    },
+    {
+      "id": "senior-admin",
+      "label": "مدیر ارشد"
+    }
+  ],
+  "viewports": {
+    "mobile": [
+      360,
+      375,
+      390,
+      414,
+      430
+    ],
+    "adaptive": [
+      768,
+      1024,
+      1440
+    ]
+  },
+  "states": [
+    "loading",
+    "empty",
+    "normal",
+    "dense",
+    "error",
+    "slow",
+    "offline",
+    "stale"
+  ],
+  "interactions": [
+    "touch",
+    "keyboard",
+    "zoom-200",
+    "reduced-motion"
+  ],
+  "environments": [
+    "mobile-browser",
+    "pwa",
+    "telegram-webview-non-messenger"
+  ],
+  "claimBoundary": "This matrix maps required acceptance dimensions to existing staged evidence. It does not replace owner visual review and does not authorize merge or production.",
+  "routes": [
+    {
+      "path": "/",
+      "name": "home",
+      "protection": "mixed",
+      "inScopeRedesign": true,
+      "roles": [
+        "guest",
+        "member",
+        "customer",
+        "accountant",
+        "group-lead",
+        "middle-admin",
+        "senior-admin"
+      ],
+      "viewports": {
+        "mobile": [
+          360,
+          375,
+          390,
+          414,
+          430
+        ],
+        "adaptive": [
+          768,
+          1024,
+          1440
+        ]
+      },
+      "states": [
+        "loading",
+        "empty",
+        "normal",
+        "dense",
+        "error",
+        "slow",
+        "offline",
+        "stale"
+      ],
+      "interactions": [
+        "touch",
+        "keyboard",
+        "zoom-200",
+        "reduced-motion"
+      ],
+      "evidence": [
+        "stage4-daily-core",
+        "stage7-copy-excluded-for-market-widget-via-button-unselect"
+      ],
+      "humanAestheticAcceptance": "pending-owner",
+      "copyable": false
+    },
+    {
+      "path": "/setup-password",
+      "name": "setup-password",
+      "protection": "none",
+      "inScopeRedesign": true,
+      "roles": [
+        "guest",
+        "member",
+        "customer",
+        "accountant",
+        "group-lead",
+        "middle-admin",
+        "senior-admin"
+      ],
+      "viewports": {
+        "mobile": [
+          360,
+          375,
+          390,
+          414,
+          430
+        ],
+        "adaptive": [
+          768,
+          1024,
+          1440
+        ]
+      },
+      "states": [
+        "loading",
+        "empty",
+        "normal",
+        "dense",
+        "error",
+        "slow",
+        "offline",
+        "stale"
+      ],
+      "interactions": [
+        "touch",
+        "keyboard",
+        "zoom-200",
+        "reduced-motion"
+      ],
+      "evidence": [
+        "stage3-auth"
+      ],
+      "humanAestheticAcceptance": "pending-owner",
+      "copyable": true
+    },
+    {
+      "path": "/login",
+      "name": "login",
+      "protection": "none",
+      "inScopeRedesign": true,
+      "roles": [
+        "guest",
+        "member",
+        "customer",
+        "accountant",
+        "group-lead",
+        "middle-admin",
+        "senior-admin"
+      ],
+      "viewports": {
+        "mobile": [
+          360,
+          375,
+          390,
+          414,
+          430
+        ],
+        "adaptive": [
+          768,
+          1024,
+          1440
+        ]
+      },
+      "states": [
+        "loading",
+        "empty",
+        "normal",
+        "dense",
+        "error",
+        "slow",
+        "offline",
+        "stale"
+      ],
+      "interactions": [
+        "touch",
+        "keyboard",
+        "zoom-200",
+        "reduced-motion"
+      ],
+      "evidence": [
+        "stage3-auth"
+      ],
+      "humanAestheticAcceptance": "pending-owner",
+      "copyable": true
+    },
+    {
+      "path": "/market",
+      "name": "market",
+      "protection": "full",
+      "inScopeRedesign": false,
+      "roles": [
+        "guest",
+        "member",
+        "customer",
+        "accountant",
+        "group-lead",
+        "middle-admin",
+        "senior-admin"
+      ],
+      "viewports": {
+        "mobile": [
+          360,
+          375,
+          390,
+          414,
+          430
+        ],
+        "adaptive": [
+          768,
+          1024,
+          1440
+        ]
+      },
+      "states": [
+        "loading",
+        "empty",
+        "normal",
+        "dense",
+        "error",
+        "slow",
+        "offline",
+        "stale"
+      ],
+      "interactions": [
+        "touch"
+      ],
+      "evidence": [
+        "stage4-protected-hash-freeze"
+      ],
+      "humanAestheticAcceptance": "pending-owner",
+      "copyable": false
+    },
+    {
+      "path": "/operations",
+      "name": "operations",
+      "protection": "none",
+      "inScopeRedesign": true,
+      "roles": [
+        "guest",
+        "member",
+        "customer",
+        "accountant",
+        "group-lead",
+        "middle-admin",
+        "senior-admin"
+      ],
+      "viewports": {
+        "mobile": [
+          360,
+          375,
+          390,
+          414,
+          430
+        ],
+        "adaptive": [
+          768,
+          1024,
+          1440
+        ]
+      },
+      "states": [
+        "loading",
+        "empty",
+        "normal",
+        "dense",
+        "error",
+        "slow",
+        "offline",
+        "stale"
+      ],
+      "interactions": [
+        "touch",
+        "keyboard",
+        "zoom-200",
+        "reduced-motion"
+      ],
+      "evidence": [
+        "stage4-daily-core"
+      ],
+      "humanAestheticAcceptance": "pending-owner",
+      "copyable": true
+    },
+    {
+      "path": "/operations/customers",
+      "name": "operations-customers",
+      "protection": "none",
+      "inScopeRedesign": true,
+      "roles": [
+        "guest",
+        "member",
+        "customer",
+        "accountant",
+        "group-lead",
+        "middle-admin",
+        "senior-admin"
+      ],
+      "viewports": {
+        "mobile": [
+          360,
+          375,
+          390,
+          414,
+          430
+        ],
+        "adaptive": [
+          768,
+          1024,
+          1440
+        ]
+      },
+      "states": [
+        "loading",
+        "empty",
+        "normal",
+        "dense",
+        "error",
+        "slow",
+        "offline",
+        "stale"
+      ],
+      "interactions": [
+        "touch",
+        "keyboard",
+        "zoom-200",
+        "reduced-motion"
+      ],
+      "evidence": [
+        "stage5-customer"
+      ],
+      "humanAestheticAcceptance": "pending-owner",
+      "copyable": true
+    },
+    {
+      "path": "/operations/customers/:relationId",
+      "name": "operations-customers-detail",
+      "protection": "none",
+      "inScopeRedesign": true,
+      "roles": [
+        "guest",
+        "member",
+        "customer",
+        "accountant",
+        "group-lead",
+        "middle-admin",
+        "senior-admin"
+      ],
+      "viewports": {
+        "mobile": [
+          360,
+          375,
+          390,
+          414,
+          430
+        ],
+        "adaptive": [
+          768,
+          1024,
+          1440
+        ]
+      },
+      "states": [
+        "loading",
+        "empty",
+        "normal",
+        "dense",
+        "error",
+        "slow",
+        "offline",
+        "stale"
+      ],
+      "interactions": [
+        "touch",
+        "keyboard",
+        "zoom-200",
+        "reduced-motion"
+      ],
+      "evidence": [
+        "stage5-customer",
+        "stage6-workspace-mutations"
+      ],
+      "humanAestheticAcceptance": "pending-owner",
+      "copyable": true
+    },
+    {
+      "path": "/operations/accountants",
+      "name": "operations-accountants",
+      "protection": "none",
+      "inScopeRedesign": true,
+      "roles": [
+        "guest",
+        "member",
+        "customer",
+        "accountant",
+        "group-lead",
+        "middle-admin",
+        "senior-admin"
+      ],
+      "viewports": {
+        "mobile": [
+          360,
+          375,
+          390,
+          414,
+          430
+        ],
+        "adaptive": [
+          768,
+          1024,
+          1440
+        ]
+      },
+      "states": [
+        "loading",
+        "empty",
+        "normal",
+        "dense",
+        "error",
+        "slow",
+        "offline",
+        "stale"
+      ],
+      "interactions": [
+        "touch",
+        "keyboard",
+        "zoom-200",
+        "reduced-motion"
+      ],
+      "evidence": [
+        "stage5-accountant"
+      ],
+      "humanAestheticAcceptance": "pending-owner",
+      "copyable": true
+    },
+    {
+      "path": "/operations/accountants/:relationId",
+      "name": "operations-accountants-detail",
+      "protection": "none",
+      "inScopeRedesign": true,
+      "roles": [
+        "guest",
+        "member",
+        "customer",
+        "accountant",
+        "group-lead",
+        "middle-admin",
+        "senior-admin"
+      ],
+      "viewports": {
+        "mobile": [
+          360,
+          375,
+          390,
+          414,
+          430
+        ],
+        "adaptive": [
+          768,
+          1024,
+          1440
+        ]
+      },
+      "states": [
+        "loading",
+        "empty",
+        "normal",
+        "dense",
+        "error",
+        "slow",
+        "offline",
+        "stale"
+      ],
+      "interactions": [
+        "touch",
+        "keyboard",
+        "zoom-200",
+        "reduced-motion"
+      ],
+      "evidence": [
+        "stage5-accountant",
+        "stage6-workspace-mutations"
+      ],
+      "humanAestheticAcceptance": "pending-owner",
+      "copyable": true
+    },
+    {
+      "path": "/account",
+      "name": "account",
+      "protection": "none",
+      "inScopeRedesign": true,
+      "roles": [
+        "guest",
+        "member",
+        "customer",
+        "accountant",
+        "group-lead",
+        "middle-admin",
+        "senior-admin"
+      ],
+      "viewports": {
+        "mobile": [
+          360,
+          375,
+          390,
+          414,
+          430
+        ],
+        "adaptive": [
+          768,
+          1024,
+          1440
+        ]
+      },
+      "states": [
+        "loading",
+        "empty",
+        "normal",
+        "dense",
+        "error",
+        "slow",
+        "offline",
+        "stale"
+      ],
+      "interactions": [
+        "touch",
+        "keyboard",
+        "zoom-200",
+        "reduced-motion"
+      ],
+      "evidence": [
+        "stage4-daily-core"
+      ],
+      "humanAestheticAcceptance": "pending-owner",
+      "copyable": true
+    },
+    {
+      "path": "/account/security",
+      "name": "account-security",
+      "protection": "none",
+      "inScopeRedesign": true,
+      "roles": [
+        "guest",
+        "member",
+        "customer",
+        "accountant",
+        "group-lead",
+        "middle-admin",
+        "senior-admin"
+      ],
+      "viewports": {
+        "mobile": [
+          360,
+          375,
+          390,
+          414,
+          430
+        ],
+        "adaptive": [
+          768,
+          1024,
+          1440
+        ]
+      },
+      "states": [
+        "loading",
+        "empty",
+        "normal",
+        "dense",
+        "error",
+        "slow",
+        "offline",
+        "stale"
+      ],
+      "interactions": [
+        "touch",
+        "keyboard",
+        "zoom-200",
+        "reduced-motion"
+      ],
+      "evidence": [
+        "stage4-daily-core",
+        "stage6-phase11"
+      ],
+      "humanAestheticAcceptance": "pending-owner",
+      "copyable": true
+    },
+    {
+      "path": "/account/storage",
+      "name": "account-storage",
+      "protection": "none",
+      "inScopeRedesign": true,
+      "roles": [
+        "guest",
+        "member",
+        "customer",
+        "accountant",
+        "group-lead",
+        "middle-admin",
+        "senior-admin"
+      ],
+      "viewports": {
+        "mobile": [
+          360,
+          375,
+          390,
+          414,
+          430
+        ],
+        "adaptive": [
+          768,
+          1024,
+          1440
+        ]
+      },
+      "states": [
+        "loading",
+        "empty",
+        "normal",
+        "dense",
+        "error",
+        "slow",
+        "offline",
+        "stale"
+      ],
+      "interactions": [
+        "touch",
+        "keyboard",
+        "zoom-200",
+        "reduced-motion"
+      ],
+      "evidence": [
+        "stage4-daily-core",
+        "stage6-phase12"
+      ],
+      "humanAestheticAcceptance": "pending-owner",
+      "copyable": true
+    },
+    {
+      "path": "/account/notifications",
+      "name": "account-notifications",
+      "protection": "none",
+      "inScopeRedesign": true,
+      "roles": [
+        "guest",
+        "member",
+        "customer",
+        "accountant",
+        "group-lead",
+        "middle-admin",
+        "senior-admin"
+      ],
+      "viewports": {
+        "mobile": [
+          360,
+          375,
+          390,
+          414,
+          430
+        ],
+        "adaptive": [
+          768,
+          1024,
+          1440
+        ]
+      },
+      "states": [
+        "loading",
+        "empty",
+        "normal",
+        "dense",
+        "error",
+        "slow",
+        "offline",
+        "stale"
+      ],
+      "interactions": [
+        "touch",
+        "keyboard",
+        "zoom-200",
+        "reduced-motion"
+      ],
+      "evidence": [
+        "stage4-daily-core"
+      ],
+      "humanAestheticAcceptance": "pending-owner",
+      "copyable": true
+    },
+    {
+      "path": "/chat",
+      "name": "messenger",
+      "protection": "full",
+      "inScopeRedesign": false,
+      "roles": [
+        "guest",
+        "member",
+        "customer",
+        "accountant",
+        "group-lead",
+        "middle-admin",
+        "senior-admin"
+      ],
+      "viewports": {
+        "mobile": [
+          360,
+          375,
+          390,
+          414,
+          430
+        ],
+        "adaptive": [
+          768,
+          1024,
+          1440
+        ]
+      },
+      "states": [
+        "loading",
+        "empty",
+        "normal",
+        "dense",
+        "error",
+        "slow",
+        "offline",
+        "stale"
+      ],
+      "interactions": [
+        "touch"
+      ],
+      "evidence": [
+        "stage4-protected-hash-freeze"
+      ],
+      "humanAestheticAcceptance": "pending-owner",
+      "copyable": false
+    },
+    {
+      "path": "/users/:id",
+      "name": "public-profile",
+      "protection": "none",
+      "inScopeRedesign": true,
+      "roles": [
+        "guest",
+        "member",
+        "customer",
+        "accountant",
+        "group-lead",
+        "middle-admin",
+        "senior-admin"
+      ],
+      "viewports": {
+        "mobile": [
+          360,
+          375,
+          390,
+          414,
+          430
+        ],
+        "adaptive": [
+          768,
+          1024,
+          1440
+        ]
+      },
+      "states": [
+        "loading",
+        "empty",
+        "normal",
+        "dense",
+        "error",
+        "slow",
+        "offline",
+        "stale"
+      ],
+      "interactions": [
+        "touch",
+        "keyboard",
+        "zoom-200",
+        "reduced-motion"
+      ],
+      "evidence": [
+        "stage6-phase3-to-19"
+      ],
+      "humanAestheticAcceptance": "pending-owner",
+      "copyable": true
+    },
+    {
+      "path": "/profile",
+      "name": "profile",
+      "protection": "none",
+      "inScopeRedesign": true,
+      "roles": [
+        "guest",
+        "member",
+        "customer",
+        "accountant",
+        "group-lead",
+        "middle-admin",
+        "senior-admin"
+      ],
+      "viewports": {
+        "mobile": [
+          360,
+          375,
+          390,
+          414,
+          430
+        ],
+        "adaptive": [
+          768,
+          1024,
+          1440
+        ]
+      },
+      "states": [
+        "loading",
+        "empty",
+        "normal",
+        "dense",
+        "error",
+        "slow",
+        "offline",
+        "stale"
+      ],
+      "interactions": [
+        "touch",
+        "keyboard",
+        "zoom-200",
+        "reduced-motion"
+      ],
+      "evidence": [
+        "stage6-phase3-to-19"
+      ],
+      "humanAestheticAcceptance": "pending-owner",
+      "copyable": true
+    },
+    {
+      "path": "/settings",
+      "name": "settings",
+      "protection": "none",
+      "inScopeRedesign": true,
+      "roles": [
+        "guest",
+        "member",
+        "customer",
+        "accountant",
+        "group-lead",
+        "middle-admin",
+        "senior-admin"
+      ],
+      "viewports": {
+        "mobile": [
+          360,
+          375,
+          390,
+          414,
+          430
+        ],
+        "adaptive": [
+          768,
+          1024,
+          1440
+        ]
+      },
+      "states": [
+        "loading",
+        "empty",
+        "normal",
+        "dense",
+        "error",
+        "slow",
+        "offline",
+        "stale"
+      ],
+      "interactions": [
+        "touch",
+        "keyboard",
+        "zoom-200",
+        "reduced-motion"
+      ],
+      "evidence": [
+        "stage4-daily-core"
+      ],
+      "humanAestheticAcceptance": "pending-owner",
+      "copyable": true
+    },
+    {
+      "path": "/admin",
+      "name": "admin",
+      "protection": "none",
+      "inScopeRedesign": true,
+      "roles": [
+        "guest",
+        "member",
+        "customer",
+        "accountant",
+        "group-lead",
+        "middle-admin",
+        "senior-admin"
+      ],
+      "viewports": {
+        "mobile": [
+          360,
+          375,
+          390,
+          414,
+          430
+        ],
+        "adaptive": [
+          768,
+          1024,
+          1440
+        ]
+      },
+      "states": [
+        "loading",
+        "empty",
+        "normal",
+        "dense",
+        "error",
+        "slow",
+        "offline",
+        "stale"
+      ],
+      "interactions": [
+        "touch",
+        "keyboard",
+        "zoom-200",
+        "reduced-motion"
+      ],
+      "evidence": [
+        "stage6-phase1"
+      ],
+      "humanAestheticAcceptance": "pending-owner",
+      "copyable": true
+    },
+    {
+      "path": "/admin/invitations",
+      "name": "admin-invitations",
+      "protection": "none",
+      "inScopeRedesign": true,
+      "roles": [
+        "guest",
+        "member",
+        "customer",
+        "accountant",
+        "group-lead",
+        "middle-admin",
+        "senior-admin"
+      ],
+      "viewports": {
+        "mobile": [
+          360,
+          375,
+          390,
+          414,
+          430
+        ],
+        "adaptive": [
+          768,
+          1024,
+          1440
+        ]
+      },
+      "states": [
+        "loading",
+        "empty",
+        "normal",
+        "dense",
+        "error",
+        "slow",
+        "offline",
+        "stale"
+      ],
+      "interactions": [
+        "touch",
+        "keyboard",
+        "zoom-200",
+        "reduced-motion"
+      ],
+      "evidence": [
+        "stage6-phase4"
+      ],
+      "humanAestheticAcceptance": "pending-owner",
+      "copyable": true
+    },
+    {
+      "path": "/admin/channels",
+      "name": "admin-channels",
+      "protection": "full",
+      "inScopeRedesign": false,
+      "roles": [
+        "guest",
+        "member",
+        "customer",
+        "accountant",
+        "group-lead",
+        "middle-admin",
+        "senior-admin"
+      ],
+      "viewports": {
+        "mobile": [
+          360,
+          375,
+          390,
+          414,
+          430
+        ],
+        "adaptive": [
+          768,
+          1024,
+          1440
+        ]
+      },
+      "states": [
+        "loading",
+        "empty",
+        "normal",
+        "dense",
+        "error",
+        "slow",
+        "offline",
+        "stale"
+      ],
+      "interactions": [
+        "touch"
+      ],
+      "evidence": [
+        "stage4-protected-hash-freeze"
+      ],
+      "humanAestheticAcceptance": "pending-owner",
+      "copyable": false
+    },
+    {
+      "path": "/admin/users",
+      "name": "admin-users",
+      "protection": "none",
+      "inScopeRedesign": true,
+      "roles": [
+        "guest",
+        "member",
+        "customer",
+        "accountant",
+        "group-lead",
+        "middle-admin",
+        "senior-admin"
+      ],
+      "viewports": {
+        "mobile": [
+          360,
+          375,
+          390,
+          414,
+          430
+        ],
+        "adaptive": [
+          768,
+          1024,
+          1440
+        ]
+      },
+      "states": [
+        "loading",
+        "empty",
+        "normal",
+        "dense",
+        "error",
+        "slow",
+        "offline",
+        "stale"
+      ],
+      "interactions": [
+        "touch",
+        "keyboard",
+        "zoom-200",
+        "reduced-motion"
+      ],
+      "evidence": [
+        "stage6-phase2-phase15"
+      ],
+      "humanAestheticAcceptance": "pending-owner",
+      "copyable": true
+    },
+    {
+      "path": "/admin/users/:id",
+      "name": "admin-user-profile",
+      "protection": "none",
+      "inScopeRedesign": true,
+      "roles": [
+        "guest",
+        "member",
+        "customer",
+        "accountant",
+        "group-lead",
+        "middle-admin",
+        "senior-admin"
+      ],
+      "viewports": {
+        "mobile": [
+          360,
+          375,
+          390,
+          414,
+          430
+        ],
+        "adaptive": [
+          768,
+          1024,
+          1440
+        ]
+      },
+      "states": [
+        "loading",
+        "empty",
+        "normal",
+        "dense",
+        "error",
+        "slow",
+        "offline",
+        "stale"
+      ],
+      "interactions": [
+        "touch",
+        "keyboard",
+        "zoom-200",
+        "reduced-motion"
+      ],
+      "evidence": [
+        "stage6-phase2-phase10-phase13-phase14-phase17"
+      ],
+      "humanAestheticAcceptance": "pending-owner",
+      "copyable": true
+    },
+    {
+      "path": "/admin/commodities",
+      "name": "admin-commodities",
+      "protection": "none",
+      "inScopeRedesign": true,
+      "roles": [
+        "guest",
+        "member",
+        "customer",
+        "accountant",
+        "group-lead",
+        "middle-admin",
+        "senior-admin"
+      ],
+      "viewports": {
+        "mobile": [
+          360,
+          375,
+          390,
+          414,
+          430
+        ],
+        "adaptive": [
+          768,
+          1024,
+          1440
+        ]
+      },
+      "states": [
+        "loading",
+        "empty",
+        "normal",
+        "dense",
+        "error",
+        "slow",
+        "offline",
+        "stale"
+      ],
+      "interactions": [
+        "touch",
+        "keyboard",
+        "zoom-200",
+        "reduced-motion"
+      ],
+      "evidence": [
+        "stage6-phase9"
+      ],
+      "humanAestheticAcceptance": "pending-owner",
+      "copyable": true
+    },
+    {
+      "path": "/admin/messages",
+      "name": "admin-messages",
+      "protection": "mixed",
+      "inScopeRedesign": false,
+      "roles": [
+        "guest",
+        "member",
+        "customer",
+        "accountant",
+        "group-lead",
+        "middle-admin",
+        "senior-admin"
+      ],
+      "viewports": {
+        "mobile": [
+          360,
+          375,
+          390,
+          414,
+          430
+        ],
+        "adaptive": [
+          768,
+          1024,
+          1440
+        ]
+      },
+      "states": [
+        "loading",
+        "empty",
+        "normal",
+        "dense",
+        "error",
+        "slow",
+        "offline",
+        "stale"
+      ],
+      "interactions": [
+        "touch"
+      ],
+      "evidence": [
+        "stage4-admin-messages-file-freeze"
+      ],
+      "humanAestheticAcceptance": "pending-owner",
+      "copyable": false
+    },
+    {
+      "path": "/admin/system",
+      "name": "admin-system",
+      "protection": "mixed",
+      "inScopeRedesign": false,
+      "roles": [
+        "guest",
+        "member",
+        "customer",
+        "accountant",
+        "group-lead",
+        "middle-admin",
+        "senior-admin"
+      ],
+      "viewports": {
+        "mobile": [
+          360,
+          375,
+          390,
+          414,
+          430
+        ],
+        "adaptive": [
+          768,
+          1024,
+          1440
+        ]
+      },
+      "states": [
+        "loading",
+        "empty",
+        "normal",
+        "dense",
+        "error",
+        "slow",
+        "offline",
+        "stale"
+      ],
+      "interactions": [
+        "touch"
+      ],
+      "evidence": [
+        "stage4-trading-settings-file-freeze"
+      ],
+      "humanAestheticAcceptance": "pending-owner",
+      "copyable": false
+    },
+    {
+      "path": "/i/:code",
+      "name": "invite-landing",
+      "protection": "none",
+      "inScopeRedesign": true,
+      "roles": [
+        "guest",
+        "member",
+        "customer",
+        "accountant",
+        "group-lead",
+        "middle-admin",
+        "senior-admin"
+      ],
+      "viewports": {
+        "mobile": [
+          360,
+          375,
+          390,
+          414,
+          430
+        ],
+        "adaptive": [
+          768,
+          1024,
+          1440
+        ]
+      },
+      "states": [
+        "loading",
+        "empty",
+        "normal",
+        "dense",
+        "error",
+        "slow",
+        "offline",
+        "stale"
+      ],
+      "interactions": [
+        "touch",
+        "keyboard",
+        "zoom-200",
+        "reduced-motion"
+      ],
+      "evidence": [
+        "stage3-auth"
+      ],
+      "humanAestheticAcceptance": "pending-owner",
+      "copyable": true
+    },
+    {
+      "path": "/register",
+      "name": "web-register",
+      "protection": "none",
+      "inScopeRedesign": true,
+      "roles": [
+        "guest",
+        "member",
+        "customer",
+        "accountant",
+        "group-lead",
+        "middle-admin",
+        "senior-admin"
+      ],
+      "viewports": {
+        "mobile": [
+          360,
+          375,
+          390,
+          414,
+          430
+        ],
+        "adaptive": [
+          768,
+          1024,
+          1440
+        ]
+      },
+      "states": [
+        "loading",
+        "empty",
+        "normal",
+        "dense",
+        "error",
+        "slow",
+        "offline",
+        "stale"
+      ],
+      "interactions": [
+        "touch",
+        "keyboard",
+        "zoom-200",
+        "reduced-motion"
+      ],
+      "evidence": [
+        "stage3-auth"
+      ],
+      "humanAestheticAcceptance": "pending-owner",
+      "copyable": true
+    },
+    {
+      "path": "/notifications",
+      "name": "notifications",
+      "protection": "none",
+      "inScopeRedesign": true,
+      "roles": [
+        "guest",
+        "member",
+        "customer",
+        "accountant",
+        "group-lead",
+        "middle-admin",
+        "senior-admin"
+      ],
+      "viewports": {
+        "mobile": [
+          360,
+          375,
+          390,
+          414,
+          430
+        ],
+        "adaptive": [
+          768,
+          1024,
+          1440
+        ]
+      },
+      "states": [
+        "loading",
+        "empty",
+        "normal",
+        "dense",
+        "error",
+        "slow",
+        "offline",
+        "stale"
+      ],
+      "interactions": [
+        "touch",
+        "keyboard",
+        "zoom-200",
+        "reduced-motion"
+      ],
+      "evidence": [
+        "stage4-daily-core"
+      ],
+      "humanAestheticAcceptance": "pending-owner",
+      "copyable": true
+    },
+    {
+      "path": "/share-receive",
+      "name": "share-receive",
+      "protection": "full",
+      "inScopeRedesign": false,
+      "roles": [
+        "guest",
+        "member",
+        "customer",
+        "accountant",
+        "group-lead",
+        "middle-admin",
+        "senior-admin"
+      ],
+      "viewports": {
+        "mobile": [
+          360,
+          375,
+          390,
+          414,
+          430
+        ],
+        "adaptive": [
+          768,
+          1024,
+          1440
+        ]
+      },
+      "states": [
+        "loading",
+        "empty",
+        "normal",
+        "dense",
+        "error",
+        "slow",
+        "offline",
+        "stale"
+      ],
+      "interactions": [
+        "touch"
+      ],
+      "evidence": [
+        "stage4-protected-hash-freeze"
+      ],
+      "humanAestheticAcceptance": "pending-owner",
+      "copyable": false
+    }
+  ]
+}

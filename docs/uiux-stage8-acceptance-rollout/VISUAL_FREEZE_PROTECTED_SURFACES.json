@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "stage": 8,
+  "checkedAtSource": "ab0834aac3383e3c790c5865170ab9f007db235c",
+  "guardCommand": "cd frontend && npm run guard:ui",
+  "result": "pass",
+  "rewritten": false,
+  "surfaces": {
+    "homeMarketInterior": {
+      "sections": 6,
+      "bytes": 4553,
+      "sha256": "f25c01dac38db208517047ffc0f2458e2c89868e988a6d7f68749221db106860"
+    },
+    "marketRuntime": {
+      "files": 19,
+      "bytes": 137246,
+      "contentSha256": "37aa0b51e20f4ae86f7daf6c3c231d93b3d1f288ade1471490a1f843a57c9589",
+      "pathSetSha256": "162e9e618684a24f3db3298eb8ff2c62498b18753cd4e0b6d6b97650d0202058"
+    },
+    "messenger": {
+      "files": 85,
+      "bytes": 1311100,
+      "contentSha256": "f6af1f961e45d785ba9c752ee670643571086c6a946843807fe6f581d11aea58",
+      "pathSetSha256": "3089210a77936d29754c9478fcdf40619acd08f35d1e8c64f6266fe8efb1699a",
+      "disposition": "exact-3-file-overlay-from-stage6-url-privacy"
+    },
+    "adminMessagesFile": {
+      "path": "frontend/src/components/AdminMessagesView.vue",
+      "sha256": "5572589b83a8a07776d5b983777a14a91e2104f9577fa76960df5a54562a431a"
+    },
+    "tradingSettingsFile": {
+      "path": "frontend/src/components/TradingSettings.vue",
+      "sha256": "509dd32235e1cb98aa164940cf7722604f16b6518f7387699554bf3a828ecfaa"
+    },
+    "checkpointAnchor": {
+      "commit": "9dfa961000832c830729ce67e8a54357915c716a",
+      "tree": "1540c2534d8052a3a8cfcffcdc2f65e4b85fc874"
+    }
+  }
+}
