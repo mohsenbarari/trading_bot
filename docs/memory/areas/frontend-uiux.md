@@ -4,6 +4,7 @@ Load for Vue/PWA refactoring, Design System V2, Figma/Sites evidence, or shared 
 
 ## Decisions
 
+- 2026-08-12 | Admin account-status, unblock, and remove-limitations confirmations stay generic, mention Escape, and keep zero mutation on cancel; 403/404 retain the dialog with fixed safe copy. Reason: remaining UserProfile confirms lacked Escape coverage and must not leak account_name/mobile or raw detail.
 - 2026-08-12 | Local storage-cache clear on `/account/storage` uses a body-teleported confirmation; cancel/Escape leave files and size unchanged, and local failures keep the dialog with fixed safe copy. Reason: inline confirm lacked Escape/portal, and raw cache-clear causes must not leak.
 - 2026-08-12 | Account-security session mutations accept only exact HTTP 200 receipts; confirmation copy stays generic without device names and failures retain the session list. Reason: raw server detail and device names must not leak from the `/account/security` dialog.
 - 2026-08-12 | Admin user deletion and terminate-all accept only exact HTTP 200 receipts; confirmation copy stays generic and failures retain context. Reason: account_name/mobile and raw server detail must not leak from the admin user dialog.

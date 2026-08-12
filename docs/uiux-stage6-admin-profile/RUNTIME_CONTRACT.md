@@ -1,4 +1,4 @@
-# Stage 6 Runtime Contract — delivered Phase 1–12
+# Stage 6 Runtime Contract — delivered Phase 1–13
 
 ## اصول غیرقابل‌جایگزین
 
@@ -135,6 +135,16 @@
 | تأیید | `AppConfirmDialog` body-teleported، trap-focus، Escape، restore-focus و scroll-lock را حفظ می‌کند؛ متن دیالوگ جزئیات داخلی حافظه ندارد؛ cancel یا Escape هیچ پاک‌سازی یا reload نمی‌دهد. |
 | recovery | شکست محلی دیالوگ، اندازه نمایش‌داده‌شده و مسیر را نگه می‌دارد و فقط copy ثابت امن می‌دهد؛ علت خام پاک‌سازی وارد UI، URL، history یا storage نمی‌شود. |
 
+## Phase 13 — تأیید امن تغییر وضعیت حساب، رفع مسدودیت و رفع محدودیت
+
+| سطح | قرارداد تحویل‌شده |
+| --- | --- |
+| route فعال | `/admin/users/:id`، همان `UserProfile` موجود؛ API، router و query contract تازه‌ای ایجاد نشده است. حذف کاربر و پایان همهٔ نشست‌ها خارج از این slice مانده‌اند. |
+| تغییر وضعیت حساب | غیرفعال‌سازی فقط پس از پاسخ `200` با `account_status=inactive`، مهلت معتبر و `global_web_locked_at=null` اعمال می‌شود. |
+| رفع مسدودیت / رفع محدودیت | فقط پس از پاسخ `200` با فیلدهای دقیق همان اقدام، state محلی تغییر می‌کند. |
+| تأیید | `AppConfirmDialog` body-teleported است؛ متن دیالوگ نام حساب یا موبایل ندارد و جملهٔ لغو/Escape را دارد؛ cancel یا Escape هیچ درخواستی نمی‌فرستد. |
+| recovery | 403/404، malformed یا network، کاربر نمایش‌داده‌شده، مسیر و دیالوگ را نگه می‌دارند و فقط copy ثابت امن می‌دهند؛ detail خام سرور وارد UI، URL، history یا storage نمی‌شود. |
+
 ## مرزهای صریح
 
-این contract تا source تحویل‌شدهٔ Phase 12 در commit `61e4e70f16735166ac4e26ed978580ddb1311624` را توصیف می‌کند. persistenceهای دیگر، protected Messenger internals، Sites، staging، production و closure کلی Stage 6 را authorize یا اثبات نمی‌کند.
+این contract تا source تحویل‌شدهٔ Phase 13 در commit `b4c8fec657bb78d848ddfb0c5be2b33812c80a64` را توصیف می‌کند. persistenceهای دیگر، protected Messenger internals، Sites، staging، production و closure کلی Stage 6 را authorize یا اثبات نمی‌کند.
