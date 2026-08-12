@@ -1152,7 +1152,8 @@ async def _run_overtime_lifecycle(
         scheduled_at=scheduled,
     )
     await _wait_until(scheduled)
-    await _assert_timeline_initial_publication(timeline)
+    # ``_run_lifecycle_actions`` has already completed the full durable
+    # initial-publication barrier before it creates overtime tasks.
     requester = _taker_for_timeline(users, timeline)
     idempotency_key = f"{run.run_id}-overtime-{timeline.index:04d}"
 
@@ -1243,11 +1244,13 @@ async def _run_lifecycle_actions(
 ) -> None:
     """Drive authoritative paths after workers receive the full matrix.
 
-    Channel publication is deliberately slower than central ingress.  Waiting
-    for the thousandth channel post before acting on the first one would make
-    an early offer consume most of its real 25-minute lifetime off-screen.  A
-    direct/manual mutation therefore waits for its own post; final audit still
-    proves every terminal event followed that offer's initial channel post.
+    Channel publication is deliberately slower than central ingress. Direct
+    and manual mutations retain their own publication gates so early offers do
+    not consume their 25-minute lifetime off-screen. Overtime tasks are only
+    created after the full initial publication barrier: all 300 later actions
+    then share one durable proof instead of re-querying the same post state at
+    their deadline. Final audit still proves every terminal event followed its
+    own initial channel post.
     """
     harness = worker.AiogramDispatcherHarness()
     overtime_tasks: list[asyncio.Task[None]] = []
@@ -1258,19 +1261,10 @@ async def _run_lifecycle_actions(
     )
     try:
         manual_timelines: list[OfferTimeline] = []
+        overtime_timelines: list[OfferTimeline] = []
         for timeline in run.timelines:
             if timeline.scenario in _OVERTIME_SCENARIOS:
-                overtime_tasks.append(
-                    asyncio.create_task(
-                        _run_overtime_lifecycle(
-                            worker=worker,
-                            users=users,
-                            run=run,
-                            timeline=timeline,
-                        ),
-                        name=f"telegram-live-matrix-overtime-{timeline.index}",
-                    )
-                )
+                overtime_timelines.append(timeline)
             elif timeline.scenario in _DIRECT_TRADE_SCENARIOS:
                 await _run_direct_trade(
                     worker=worker,
@@ -1295,6 +1289,25 @@ async def _run_lifecycle_actions(
                     timeline=timeline,
                 )
                 _assert_lifecycle_monitor_healthy(monitor_task)
+        # The strict global barrier is still before the earliest normal
+        # deadline at the approved 57/minute cadence. It prevents a large
+        # cohort of deadline tasks from contending for the same read-only
+        # connection only to establish identical initial-post evidence.
+        if overtime_timelines:
+            await _wait_for_initial_publication(run)
+            _assert_lifecycle_monitor_healthy(monitor_task)
+            overtime_tasks = [
+                asyncio.create_task(
+                    _run_overtime_lifecycle(
+                        worker=worker,
+                        users=users,
+                        run=run,
+                        timeline=timeline,
+                    ),
+                    name=f"telegram-live-matrix-overtime-{timeline.index}",
+                )
+                for timeline in overtime_timelines
+            ]
         overtime_completion = asyncio.gather(*overtime_tasks)
         while not overtime_completion.done():
             await asyncio.wait(

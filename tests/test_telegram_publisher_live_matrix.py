@@ -137,6 +137,17 @@ class TelegramPublisherLiveMatrixTests(unittest.TestCase):
             )
         )
 
+    def test_initial_publication_gate_rejects_terminal_state_without_post_evidence(self):
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "expired_before_initial_publication",
+        ):
+            _initial_publication_complete(
+                posted_count=199,
+                expired_count=1,
+                expected_count=200,
+            )
+
     def test_terminal_audit_requires_initial_post_to_precede_terminal_state(self):
         timeline = OfferTimeline(
             index=1,
@@ -359,13 +370,8 @@ class TelegramPublisherLiveMatrixTests(unittest.TestCase):
         async def no_wait(_target):
             return None
 
-        async def published(_timeline):
-            return None
-
         original_wait = matrix._wait_until
-        original_publication = matrix._assert_timeline_initial_publication
         matrix._wait_until = no_wait
-        matrix._assert_timeline_initial_publication = published
         try:
             asyncio.run(
                 _run_overtime_lifecycle(
@@ -377,7 +383,6 @@ class TelegramPublisherLiveMatrixTests(unittest.TestCase):
             )
         finally:
             matrix._wait_until = original_wait
-            matrix._assert_timeline_initial_publication = original_publication
 
         self.assertEqual(len(observed), 1)
         self.assertFalse(observed[0]["run_background_tasks"])
