@@ -101,7 +101,11 @@ class OvertimeOwnerApprovalContractTests(unittest.TestCase):
             parse_overtime_owner_approval_callback_data(reject),
             (public_id, "reject"),
         )
-        self.assertNotIn("42", approve)
+        # The opaque random token may legitimately contain the digits "42";
+        # prove that the callback round-trips the public identity and rejects
+        # the sequential database id instead of making a probabilistic string
+        # assertion.
+        self.assertNotEqual(public_id, "42")
         self.assertIsNone(
             parse_overtime_owner_approval_callback_data(f"ota:not-a-req:approve")
         )
