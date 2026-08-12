@@ -1,13 +1,13 @@
 # Stage 6 — Admin & Profile
 
-این پوشه یک بستهٔ توضیحیِ **mutable** برای برش تحویل‌شدهٔ Phase 1/2/3 است؛ freeze، `EVIDENCE_MANIFEST.json` یا مجوز closure کل Stage 6 نیست.
+این پوشه یک بستهٔ توضیحیِ **mutable** برای برش تحویل‌شدهٔ Phase 1 تا Phase 6 است؛ freeze، `EVIDENCE_MANIFEST.json` یا مجوز closure کل Stage 6 نیست.
 
 ## وضعیت دقیق
 
 - branch: `condidate/webapp-ui-ux-redesign-v2`
-- implementation: `3283a6e38209cb06d352740dae5b05bce5ba9002`
-- tree: `7284ec4aac1980c0f61201e3346841425f6bcb09`
-- delivered: Phase 1 (Admin landing)، Phase 2 (Admin user directory/detail) و Phase 3 (public-profile privacy/authority).
+- latest implementation: `06579e2bbccbb2b8a33bd9a92bc55a851e8a2329`
+- latest tree: `bcdb89069aec2619cc8e7e7da6c0126bf9b22986`
+- delivered: Phase 1 (Admin landing)، Phase 2 (Admin user directory/detail)، Phase 3 (public-profile privacy/authority)، Phase 4 (invitation management)، Phase 5 (public-profile block/unblock) و Phase 6 (workspace account deletion).
 - authority: `stage6CompleteAuthority=false`.
 - broader Stage 6 roadmap: partial/deferred؛ این بسته فقط واقعیت برش تحویل‌شده را ثبت می‌کند.
 
@@ -20,24 +20,26 @@
 3. profile عمومی با projection server-authoritative: peer عادی فقط mobile masked می‌بیند و address/presence/membership/relation/trade detail دریافت نمی‌کند؛ self و administratorِ مجاز فقط دادهٔ موردنیازِ مجاز را می‌گیرند.
 4. actionهای حساسِ self/same-level در backend read-only/forbidden هستند؛ visibility یا disabled UI جای enforcement نیست.
 5. همهٔ ورودهای public profile به `/users/:id` canonical می‌شوند؛ query تاریخی پیش از navigation حذف می‌شود. Messenger/Forward discovery بازطراحی یا محدود نشده است.
+6. invitation فقط copy-only/in-memory است؛ `204` حذف را receipt می‌کند، `400/404` reconcile می‌شوند و `403` state حساس/copy را پاک می‌کند.
+7. block/unblock عمومی و حذف حساب workspace، native confirm/alert ندارند: cancel/Escape mutation نمی‌دهد و فقط receipt معتبرِ همان contract state یا navigation را تغییر می‌دهد.
+8. حذف حساب workspace در دو route فعال Customer/Accountant با dialog Teleport‌شده به `body`، تایپ نام synthetic/نمایشی و acknowledgement انجام می‌شود؛ خطای 400/403/404/malformed/network فقط متن امن ثابت می‌دهد و relation/route را حفظ می‌کند.
 
 ## نقشهٔ این بسته
 
 - [RUNTIME_CONTRACT.md](RUNTIME_CONTRACT.md): privacy، authority، route و recovery contract.
 - [CONTENT_NECESSITY_MATRIX.md](CONTENT_NECESSITY_MATRIX.md): هر سطح باقی‌مانده و علت آن.
-- [ROUTE_SURFACE_MANIFEST.json](ROUTE_SURFACE_MANIFEST.json): route/state boundary.
+- [ROUTE_SURFACE_MANIFEST.json](ROUTE_SURFACE_MANIFEST.json): route/state boundary for the delivered Phase 1–6 slices.
 - [PROTECTED_SURFACE_DIFF_MANIFEST.json](PROTECTED_SURFACE_DIFF_MANIFEST.json): disposition دقیق Messenger protected surface.
-- [FIGMA_SNAPSHOT_MANIFEST.json](FIGMA_SNAPSHOT_MANIFEST.json): Figma evidence با topology و caveatهایش.
-- [DELIVERED_SCOPE_EVIDENCE_INVENTORY.json](DELIVERED_SCOPE_EVIDENCE_INVENTORY.json): allowlist، hash و مرز دقیق artifactهای نهاییِ این برش.
+- [FIGMA_SNAPSHOT_MANIFEST.json](FIGMA_SNAPSHOT_MANIFEST.json): historical Phase 1–3 static Figma audit plus live editable references for Phase 4–6.
+- [DELIVERED_SCOPE_EVIDENCE_INVENTORY.json](DELIVERED_SCOPE_EVIDENCE_INVENTORY.json): historical allowlist/hash inventory for Phase 1–3 plus non-freeze supplemental receipts for Phase 4–6.
 - [VALIDATION.md](VALIDATION.md): receiptهای source/browser/Figma و محدودیت‌هایشان.
 
-artifactهای allowlisted زیر `assets/` برای review این برش curated هستند. این فایل‌های narrative عمداً mutable باقی می‌مانند؛ inventory هم `EVIDENCE_MANIFEST` یا freeze کل Stage 6 نیست. یک freeze آینده باید فقط inputs immutable را انتخاب کند و این متن‌ها را داخل aggregate خودش قرار ندهد.
+artifactهای allowlisted زیر `assets/` برای review تاریخیِ Phase 1–3 curated هستند؛ receiptهای Phase 4–6 هم در validation/checkpoint ثبت شده‌اند اما هنوز allowlist یا aggregate جدیدی ندارند. این فایل‌های narrative عمداً mutable باقی می‌مانند؛ هیچ‌کدام `EVIDENCE_MANIFEST` یا freeze کل Stage 6 نیست. یک freeze آینده باید فقط inputs immutable را انتخاب کند و این متن‌ها را داخل aggregate خودش قرار ندهد.
 
 ## Deferred، نه بسته‌شده
 
-- invitation management و pending-invitation flow؛
 - commodity feedback persistence؛
-- sensitive dialog migration؛
+- dialogهای حساسِ باقی‌مانده خارج از PublicProfile و workspace deletion؛
 - تغییر مستقل Admin Messages/System Settings؛
 - closure/freeze/Sites evidence Stage 6؛
 - هر ادعای live backend، staging یا production acceptance.

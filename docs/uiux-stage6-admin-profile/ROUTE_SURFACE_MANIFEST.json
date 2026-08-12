@@ -1,14 +1,14 @@
 {
   "schemaVersion": 1,
   "stage": 6,
-  "scope": "admin-profile-delivered-phase1-phase2-phase3",
-  "status": "delivered_phase1_phase2_phase3_broader_stage6_partial_deferred",
+  "scope": "admin-profile-workspace-delivered-phase1-phase2-phase3-phase4-phase5-phase6",
+  "status": "delivered_phase1_phase2_phase3_phase4_phase5_phase6_broader_stage6_partial_deferred",
   "mutableNarrative": true,
   "branch": "condidate/webapp-ui-ux-redesign-v2",
   "implementation": {
-    "commit": "3283a6e38209cb06d352740dae5b05bce5ba9002",
-    "tree": "7284ec4aac1980c0f61201e3346841425f6bcb09",
-    "parent": "63bc6827af63c722e7f1c156b3d47825afc18eae"
+    "commit": "06579e2bbccbb2b8a33bd9a92bc55a851e8a2329",
+    "tree": "bcdb89069aec2619cc8e7e7da6c0126bf9b22986",
+    "parent": "7ff647f370ab83c0893403f6ec6b8362140a0939"
   },
   "routeContract": {
     "routerPath": "frontend/src/router/index.ts",
@@ -78,6 +78,42 @@
       "v2Scope": "section",
       "purpose": "self profile wrapper for the authorized projection",
       "queryPolicy": "no Stage 6 PII or authority query contract"
+    },
+    {
+      "phase": 4,
+      "path": "/admin/invitations",
+      "name": "admin-invitations",
+      "component": "frontend/src/views/AdminView.vue",
+      "requiresAuth": true,
+      "requiresAdmin": true,
+      "shellClass": "standard-authenticated",
+      "v2Scope": "section",
+      "purpose": "pending invitation management with copy-only bearer handling",
+      "queryPolicy": "invitation token/link never serializes into URL, history, hash or storage"
+    },
+    {
+      "phase": 6,
+      "path": "/operations/customers/:relationId",
+      "name": "operations-customers-detail",
+      "component": "frontend/src/views/CustomerWorkspaceView.vue",
+      "requiresAuth": true,
+      "requiresOwnerAccess": true,
+      "shellClass": "standard-authenticated",
+      "v2Scope": "section",
+      "purpose": "customer workspace account-deletion confirmation and safe recovery",
+      "queryPolicy": "no new deletion query contract; typed confirmation, acknowledgement and receipt state stay local"
+    },
+    {
+      "phase": 6,
+      "path": "/operations/accountants/:relationId",
+      "name": "operations-accountants-detail",
+      "component": "frontend/src/views/AccountantWorkspaceView.vue",
+      "requiresAuth": true,
+      "requiresOwnerAccess": true,
+      "shellClass": "standard-authenticated",
+      "v2Scope": "section",
+      "purpose": "accountant workspace account-deletion confirmation and safe recovery",
+      "queryPolicy": "no new deletion query contract; typed confirmation, acknowledgement and receipt state stay local"
     }
   ],
   "stateAndPrivacy": {
@@ -98,7 +134,31 @@
       "other metadata"
     ],
     "legacyInboundProfileQuery": "canonicalize before navigation",
-    "queryOnlyAdminListDetailTransition": "shared root and scroll owner; no remount race"
+    "queryOnlyAdminListDetailTransition": "shared root and scroll owner; no remount race",
+    "invitationBearer": "copy-only/in-memory; never DOM URL history hash or storage",
+    "publicProfileBlockReceipt": "only JSON object success:true flips local blocked state; failures retain state with fixed safe receipt",
+    "workspaceAccountDeletion": "body-teleported V2 portal; typed name plus acknowledgement; exact expected_action=delete-account; only same-relation deleted receipt navigates; failures retain route/relation with fixed safe message"
+  },
+  "phaseReceiptContracts": {
+    "phase4": {
+      "routeNames": [
+        "admin-invitations"
+      ],
+      "contract": "pending invitation bearer is copy-only/in-memory; revoke is body-teleported confirmation; 204 receipt removes, 400/404 reconcile, and 403 clears sensitive state"
+    },
+    "phase5": {
+      "routeNames": [
+        "public-profile"
+      ],
+      "contract": "block/unblock reuses canonical ID-only public-profile route; dialog/receipt stay local; only success:true flips state and failure copy is fixed/safe"
+    },
+    "phase6": {
+      "routeNames": [
+        "operations-customers-detail",
+        "operations-accountants-detail"
+      ],
+      "contract": "body-teleported V2 account-deletion portal requires typed confirmation plus acknowledgement; expected_action is delete-account; only same-relation deleted receipt navigates"
+    }
   },
   "browserEvidence": {
     "aggregateRunId": "uiux-stage6-aggregate-browser-20260811T203934914Z",
@@ -106,12 +166,19 @@
     "aggregateSourceFileCount": 560,
     "phase2RunId": "uiux-stage6-phase2-browser-20260811T204010055Z",
     "phase3RunId": "uiux-stage6-phase3-browser-20260811T204053994Z",
+    "phase4RunId": "uiux-stage6-phase4-invitations-20260812T052926717Z",
+    "phase5RunId": "uiux-stage6-phase5-public-block-20260812T062238392Z",
+    "phase6RunId": "uiux-stage6-phase6-account-delete-20260812T075056249Z",
+    "phase6SourceBindingSha256": "fcf977ab478b6c2c38fe4f719e90b2302f48039774b72e9fcb9da8a8aa1eb63e",
     "prePostSourceGitHarnessEnvironmentIdentical": true
   },
   "completion": {
     "phase1": "complete_delivered",
     "phase2": "complete_delivered",
     "phase3": "complete_delivered",
+    "phase4": "complete_delivered",
+    "phase5": "complete_delivered",
+    "phase6": "complete_delivered",
     "broaderStage6": "partial_deferred",
     "stage6CompleteAuthority": false,
     "sitesStarted": false,

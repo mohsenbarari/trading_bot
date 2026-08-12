@@ -15,5 +15,10 @@
 | Sensitive admin actions against self/same level | عمل مدیریتی مجاز نیست | read-only/forbidden | server `403` تعیین‌کننده است. |
 | 403/404 state | بازیابی امن پس از عدم دسترسی/عدم وجود | نگه‌داری | جزئیات target و PII نشت نمی‌کند. |
 | Messenger/Forward discovery | در این برش نیاز جدیدی ندارد | بدون تغییر | فقط route entry canonical شد؛ discovery بازطراحی/محدود نشد. |
+| invitation bearer/link | فقط اقدام صریح copy برای کار عملیاتی | in-memory/copy-only | DOM/URL/history/storage حامل token نیستند؛ 403 دادهٔ حساس را پاک می‌کند. |
+| revoke confirmation | جلوگیری از mutation ناخواسته | نگه‌داری | confirm Teleport‌شده؛ cancel/Escape بدون DELETE است. |
+| public block/unblock confirmation | جلوگیری از mutation ناخواسته | نگه‌داری | فقط `success:true` state را flip می‌کند؛ failure raw payload ندارد. |
+| workspace account deletion | حذف حساب فقط پس از تصمیم آگاهانه | نگه‌داری، double-confirm | نام نمایش‌داده‌شده + acknowledgement؛ receipt همان relation و `deleted` تنها مسیر navigation است. |
+| workspace deletion error | بازیابی امن بدون پنهان‌کردن context | نگه‌داری | 400/403/404/malformed/network relation و route را نگه می‌دارند؛ فقط پیام ثابت امن نشان می‌دهند. |
 
 هر محتوای جدید باید پیش از افزوده‌شدن، یک تصمیم، عمل، state یا risk-prevention مشخص داشته باشد و projection/authority آن را backend تأیید کند.

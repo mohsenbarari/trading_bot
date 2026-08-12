@@ -1,4 +1,4 @@
-# Stage 6 Runtime Contract — delivered Phase 1/2/3
+# Stage 6 Runtime Contract — delivered Phase 1–6
 
 ## اصول غیرقابل‌جایگزین
 
@@ -55,6 +55,28 @@
 - interactive controlهای profile در `prefers-reduced-motion: reduce` transition مؤثر ندارند.
 - browser receipt، focus، overflow، reduced-motion، desktop/mobile و recovery را برای fixtureهای synthetic پوشش می‌دهد؛ این اثبات live backend نیست.
 
+## Phase 4 — invitation management
+
+- invitation URL/token فقط in-memory و با clipboard action صریح است؛ در DOM، URL، history یا storage serialize/render نمی‌شود.
+- queue count/KPI ساختگی ندارد؛ `204` receipt حذف row است، `400/404` reconciliation می‌گیرد و `403` queue/dialog/copy state حساس را پاک می‌کند.
+- revoke فقط پس از confirm Teleport‌شده به `body` انجام می‌شود؛ focus، Escape، restore-focus و scroll-lock حفظ می‌شوند.
+
+## Phase 5 — public-profile block/unblock
+
+- `window.confirm` و `window.alert` در flow بلاک/رفع‌بلاک وجود ندارند؛ cancel/Escape هیچ mutation ندارد.
+- فقط JSON object با `success === true` پس از `POST` یا `DELETE` دقیق `/api/blocks/:id` state محلی را تغییر می‌دهد.
+- 400/403/404، network و payload نامعتبر state را حفظ و فقط receipt ثابت، بدون account name/detail/message خام سرور، نشان می‌دهند.
+
+## Phase 6 — workspace account deletion
+
+| سطح | قرارداد تحویل‌شده |
+| --- | --- |
+| route فعال | فقط `/operations/customers/:relationId` و `/operations/accountants/:relationId`؛ API deletion همچنان `expected_action=delete-account` دقیق دارد. |
+| تأیید | dialog به `body` Teleport می‌شود؛ trap-focus، Escape، restore-focus و scroll-lock حفظ می‌شوند؛ نام نمایش‌داده‌شده و acknowledgement لازم‌اند. |
+| cancel | cancel یا Escape هیچ DELETE نمی‌فرستد. |
+| receipt | فقط receipt همان relation با `status: deleted` navigation/local reconciliation مجاز را فعال می‌کند. |
+| recovery | 400/403/404، malformed یا network dialog/relation/route را نگه می‌دارند و فقط متن امن ثابت نمایش می‌دهند؛ raw server detail/message وارد UI نمی‌شود. |
+
 ## مرزهای صریح
 
-این contract فقط behavior تحویل‌شده در commit `3283a6e38209cb06d352740dae5b05bce5ba9002` را توصیف می‌کند. invitation management، persistenceهای دیگر، protected Messenger internals، Sites، staging، production و closure کلی Stage 6 را authorize یا اثبات نمی‌کند.
+این contract تا source تحویل‌شدهٔ Phase 6 در commit `06579e2bbccbb2b8a33bd9a92bc55a851e8a2329` را توصیف می‌کند. persistenceهای دیگر، protected Messenger internals، Sites، staging، production و closure کلی Stage 6 را authorize یا اثبات نمی‌کند.
