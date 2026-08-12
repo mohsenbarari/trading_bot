@@ -16,6 +16,7 @@ from scripts.run_telegram_publisher_live_matrix import (
     _run_post_response_background_tasks,
     _run_direct_trade,
     _run_overtime_lifecycle,
+    _assert_lifecycle_monitor_healthy,
     _wait_for_worker_acknowledgement,
     _timeline_terminal_follows_initial_publication,
     build_live_matrix_workload,
@@ -168,6 +169,47 @@ class TelegramPublisherLiveMatrixTests(unittest.TestCase):
 
         self.assertEqual(entry.status, "ValueError")
         self.assertEqual(entry.failure_class, "ValueError")
+
+    def test_lifecycle_action_retries_a_bounded_webapp_timeout(self):
+        entry = LifecycleActionTimeline(
+            offer_index=1,
+            action="overtime_request",
+            origin="webapp",
+            scheduled_at="2026-08-12T00:00:00+00:00",
+        )
+        calls = 0
+
+        async def eventually_succeeds() -> str:
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                await asyncio.Future()
+            return "success"
+
+        asyncio.run(
+            _complete_lifecycle_action(
+                entry,
+                eventually_succeeds,
+                timeout_seconds=0.001,
+                retry_attempts=1,
+                retry_delay_seconds=0,
+            )
+        )
+
+        self.assertEqual(calls, 2)
+        self.assertEqual(entry.status, "success")
+
+    def test_lifecycle_monitor_must_not_stop_silently(self):
+        async def stopped_monitor() -> None:
+            return None
+
+        async def check() -> None:
+            task = asyncio.create_task(stopped_monitor())
+            await task
+            with self.assertRaisesRegex(RuntimeError, "monitor_stopped"):
+                _assert_lifecycle_monitor_healthy(task)
+
+        asyncio.run(check())
 
     def test_post_response_background_tasks_are_bounded(self):
         async def never_finishes() -> None:

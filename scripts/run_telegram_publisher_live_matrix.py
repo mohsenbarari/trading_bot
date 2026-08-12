@@ -67,6 +67,9 @@ MATRIX_OFFER_EXPIRY_MINUTES = 25
 MATRIX_DESTINATION_MIN_INTERVAL_SECONDS = 1.05
 MATRIX_PROGRESS_POLL_SECONDS = 5.0
 MATRIX_PROGRESS_STALL_SECONDS = 180.0
+MATRIX_WEBAPP_OPERATION_TIMEOUT_SECONDS = 20.0
+MATRIX_WEBAPP_OPERATION_RETRY_ATTEMPTS = 2
+MATRIX_WEBAPP_OPERATION_RETRY_DELAY_SECONDS = 1.0
 # A direct router invocation has no ASGI response boundary: calling
 # ``BackgroundTasks`` inline would otherwise make the lifecycle driver wait on
 # best-effort work that a real WebApp client receives *after* its successful
@@ -845,10 +848,29 @@ def _append_lifecycle_action(
 async def _complete_lifecycle_action(
     entry: LifecycleActionTimeline,
     operation: Any,
+    *,
+    timeout_seconds: float | None = None,
+    retry_attempts: int = 0,
+    retry_delay_seconds: float = 0.0,
 ) -> None:
     entry.started_at = _iso(_utcnow())
     try:
-        outcome = await operation()
+        total_attempts = max(1, int(retry_attempts) + 1)
+        outcome: Any = None
+        for attempt in range(total_attempts):
+            try:
+                if timeout_seconds is None:
+                    outcome = await operation()
+                else:
+                    outcome = await asyncio.wait_for(
+                        operation(),
+                        timeout=max(0.001, float(timeout_seconds)),
+                    )
+                break
+            except TimeoutError:
+                if attempt + 1 >= total_attempts:
+                    raise
+                await asyncio.sleep(max(0.0, float(retry_delay_seconds)))
         entry.status = "success" if outcome in (None, "success") else str(outcome)
     except Exception as exc:
         entry.status = type(exc).__name__
@@ -972,7 +994,21 @@ async def _run_direct_trade(
                 entry.failure_class = error_details[0].partition(":")[0].strip() or None
             return outcome
 
-        await _complete_lifecycle_action(entry, execute)
+        await _complete_lifecycle_action(
+            entry,
+            execute,
+            timeout_seconds=(
+                MATRIX_WEBAPP_OPERATION_TIMEOUT_SECONDS
+                if timeline.origin == "webapp"
+                else None
+            ),
+            retry_attempts=(
+                MATRIX_WEBAPP_OPERATION_RETRY_ATTEMPTS
+                if timeline.origin == "webapp"
+                else 0
+            ),
+            retry_delay_seconds=MATRIX_WEBAPP_OPERATION_RETRY_DELAY_SECONDS,
+        )
 
 
 async def _run_manual_expiry(
@@ -1131,7 +1167,13 @@ async def _run_overtime_lifecycle(
                 run_background_tasks=False,
             )
 
-    await _complete_lifecycle_action(request_entry, request_overtime)
+    await _complete_lifecycle_action(
+        request_entry,
+        request_overtime,
+        timeout_seconds=MATRIX_WEBAPP_OPERATION_TIMEOUT_SECONDS,
+        retry_attempts=MATRIX_WEBAPP_OPERATION_RETRY_ATTEMPTS,
+        retry_delay_seconds=MATRIX_WEBAPP_OPERATION_RETRY_DELAY_SECONDS,
+    )
     if timeline.scenario == "overtime_decision_timeout":
         return
 
@@ -1158,6 +1200,18 @@ async def _run_overtime_lifecycle(
             home_server=timeline.offer_home_server or SERVER_IRAN,
         ),
     )
+
+
+def _assert_lifecycle_monitor_healthy(monitor_task: asyncio.Task[None]) -> None:
+    """Fail fast if the lightweight checkpoint task ever stops."""
+    if not monitor_task.done():
+        return
+    if monitor_task.cancelled():
+        raise LiveMatrixError("live_matrix_lifecycle_monitor_cancelled")
+    error = monitor_task.exception()
+    if error is not None:
+        raise LiveMatrixError("live_matrix_lifecycle_monitor_failed") from error
+    raise LiveMatrixError("live_matrix_lifecycle_monitor_stopped")
 
 
 async def _monitor_lifecycle_progress(
@@ -1225,6 +1279,7 @@ async def _run_lifecycle_actions(
                     run=run,
                     timeline=timeline,
                 )
+                _assert_lifecycle_monitor_healthy(monitor_task)
             elif timeline.scenario == "manual_expiry":
                 manual_timelines.append(timeline)
             elif timeline.scenario != "natural_expiry":
@@ -1239,7 +1294,16 @@ async def _run_lifecycle_actions(
                     run=run,
                     timeline=timeline,
                 )
-        await asyncio.gather(*overtime_tasks)
+                _assert_lifecycle_monitor_healthy(monitor_task)
+        overtime_completion = asyncio.gather(*overtime_tasks)
+        while not overtime_completion.done():
+            await asyncio.wait(
+                (overtime_completion, monitor_task),
+                timeout=MATRIX_PROGRESS_POLL_SECONDS,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            _assert_lifecycle_monitor_healthy(monitor_task)
+        await overtime_completion
     finally:
         if any(not task.done() for task in overtime_tasks):
             for task in overtime_tasks:
