@@ -4,6 +4,7 @@ from collections import Counter
 from types import SimpleNamespace
 
 from scripts.run_telegram_publisher_live_matrix import (
+    MATRIX_BACKGROUND_TASKS_MAX_WAIT_SECONDS,
     MATRIX_INGRESS_INTERVAL_SECONDS,
     MatrixRun,
     OfferTimeline,
@@ -12,6 +13,7 @@ from scripts.run_telegram_publisher_live_matrix import (
     _initial_publication_complete,
     _is_ignorable_historical_private_job,
     _retail_lot_sizes,
+    _run_post_response_background_tasks,
     _run_direct_trade,
     build_live_matrix_workload,
 )
@@ -131,6 +133,24 @@ class TelegramPublisherLiveMatrixTests(unittest.TestCase):
 
         self.assertEqual(entry.status, "ValueError")
         self.assertEqual(entry.failure_class, "ValueError")
+
+    def test_post_response_background_tasks_are_bounded(self):
+        async def never_finishes() -> None:
+            await asyncio.Future()
+
+        import scripts.run_telegram_publisher_live_matrix as matrix
+
+        original_timeout = matrix.MATRIX_BACKGROUND_TASKS_MAX_WAIT_SECONDS
+        matrix.MATRIX_BACKGROUND_TASKS_MAX_WAIT_SECONDS = 0.001
+        try:
+            completed = asyncio.run(
+                _run_post_response_background_tasks(never_finishes)
+            )
+        finally:
+            matrix.MATRIX_BACKGROUND_TASKS_MAX_WAIT_SECONDS = original_timeout
+
+        self.assertFalse(completed)
+        self.assertGreater(MATRIX_BACKGROUND_TASKS_MAX_WAIT_SECONDS, 0)
 
     def test_bot_lifecycle_uses_the_publishing_lane_for_the_callback(self):
         observed = []

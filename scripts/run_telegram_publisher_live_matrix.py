@@ -67,6 +67,12 @@ MATRIX_OFFER_EXPIRY_MINUTES = 25
 MATRIX_DESTINATION_MIN_INTERVAL_SECONDS = 1.05
 MATRIX_PROGRESS_POLL_SECONDS = 5.0
 MATRIX_PROGRESS_STALL_SECONDS = 180.0
+# A direct router invocation has no ASGI response boundary: calling
+# ``BackgroundTasks`` inline would otherwise make the lifecycle driver wait on
+# best-effort work that a real WebApp client receives *after* its successful
+# response.  Keep that observation bounded; the matrix later verifies the
+# durable terminal outbox and WebApp projection for every offer.
+MATRIX_BACKGROUND_TASKS_MAX_WAIT_SECONDS = 15.0
 MATRIX_AUDIT_DIRECTORY = Path("/app/audit_trail")
 
 MATRIX_DIRECT_WHOLESALE_TRADES = 100
@@ -1049,9 +1055,9 @@ async def _decide_overtime_request_via_webapp(
                     db=db,
                     context=context,
                 )
-                await background_tasks()
                 if getattr(response, "status_code", 201) >= 400:
                     raise LiveMatrixError("live_matrix_overtime_approve_rejected")
+                await _run_post_response_background_tasks(background_tasks)
             else:
                 response = await trades_router.reject_overtime_request(
                     request_public_id,
@@ -1060,6 +1066,25 @@ async def _decide_overtime_request_via_webapp(
                 )
                 if getattr(response, "status_code", 200) >= 400:
                     raise LiveMatrixError("live_matrix_overtime_reject_failed")
+
+
+async def _run_post_response_background_tasks(background_tasks: Any) -> bool:
+    """Bound harness-only post-response work without weakening final checks.
+
+    FastAPI runs these tasks after the HTTP response, whereas this matrix calls
+    a router directly.  An individual best-effort task must not hold a committed
+    overtime approval hostage.  The terminal phase still requires the durable
+    channel edit and WebApp projection, so a missing side effect remains a test
+    failure rather than being silently accepted here.
+    """
+    try:
+        await asyncio.wait_for(
+            background_tasks(),
+            timeout=MATRIX_BACKGROUND_TASKS_MAX_WAIT_SECONDS,
+        )
+    except TimeoutError:
+        return False
+    return True
 
 
 async def _run_overtime_lifecycle(
