@@ -1996,7 +1996,7 @@ class TelegramDeliveryQueuePostgresTests(unittest.IsolatedAsyncioTestCase):
             ],
         )
 
-    async def test_claim_order_promotes_overdue_trade_without_overriding_callback(self):
+    async def test_claim_order_keeps_live_offer_ahead_of_overdue_trade(self):
         now = utc_now()
         await self._enqueue(
             "offer-publish",
@@ -2022,7 +2022,7 @@ class TelegramDeliveryQueuePostgresTests(unittest.IsolatedAsyncioTestCase):
         claimed = [await self._claim(f"worker-{index}", now=now) for index in range(3)]
         self.assertEqual(
             [job.source_natural_id for job in claimed],
-            ["callback", "trade-overdue", "offer-publish"],
+            ["callback", "offer-publish", "trade-overdue"],
         )
 
     async def test_reserved_claim_only_takes_effective_m0_work(self):

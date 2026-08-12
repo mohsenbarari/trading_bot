@@ -69,9 +69,7 @@ class TelegramDeliveryAction(str, Enum):
     # queue enqueue boundaries.
     OTP_DEADLINE = "otp_deadline"
     # Private overtime owner-approval prompt. Static (M0, 1): after rank-0
-    # callback/expiry work, before offer publication (M0, 2). Shares rank 1
-    # with dynamically promoted overdue TRADE_RESULT; tie-break is
-    # delivery_deadline_at then created_sequence.
+    # callback/expiry work, before a private offer publication (M0, 2).
     OVERTIME_OWNER_APPROVAL = "overtime_owner_approval"
     OFFER_PUBLISH = "offer_publish"
     OFFER_SUCCESS = "offer_success"
@@ -264,7 +262,7 @@ _ACTION_PRIORITY_AND_RANK: dict[TelegramDeliveryAction, tuple[TelegramDeliveryPr
     # lane: once Telegram has delivered /start, keep the dialogue responsive by
     # reserving the same urgent lane used for other deadline-sensitive private
     # interactions.  Rank 1 deliberately keeps callback acknowledgements at
-    # rank 0 while placing onboarding ahead of offer publication (rank 2).
+    # rank 0 while placing onboarding ahead of private offer publication.
     TelegramDeliveryAction.PREAUTH_INTERACTION: (TelegramDeliveryPriority.M0, 1),
     TelegramDeliveryAction.PREAUTH_INTERACTION_EDIT: (TelegramDeliveryPriority.M0, 1),
     TelegramDeliveryAction.PARTIAL_OFFER_EDIT: (TelegramDeliveryPriority.M2, 0),
@@ -361,7 +359,17 @@ def priority_and_rank_for_action(
     *,
     now: datetime | None = None,
     delivery_deadline_at: datetime | None = None,
+    destination_class: TelegramDestinationClass | None = None,
 ) -> tuple[TelegramDeliveryPriority, int]:
+    # New channel offers must not be starved by deadline-promoted channel
+    # trade edits.  Private M0 work has separate worker slots and retains the
+    # historical rank order above, so this exception is intentionally scoped
+    # to the channel destination only.
+    if (
+        action == TelegramDeliveryAction.OFFER_PUBLISH
+        and destination_class == TelegramDestinationClass.CHANNEL
+    ):
+        return TelegramDeliveryPriority.M0, 0
     if (
         action == TelegramDeliveryAction.TRADE_RESULT
         and now is not None
@@ -479,6 +487,7 @@ def delivery_order_key(job: TelegramDeliveryJob, *, now: datetime) -> tuple[int,
         job.action,
         now=now,
         delivery_deadline_at=job.delivery_deadline_at,
+        destination_class=job.destination_class,
     )
     deadline = (
         job.delivery_deadline_at.timestamp()

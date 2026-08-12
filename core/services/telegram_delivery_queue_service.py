@@ -1027,6 +1027,7 @@ async def enqueue_telegram_delivery_job(
     priority, priority_rank = priority_and_rank_for_action(
         action,
         delivery_deadline_at=delivery_deadline_at,
+        destination_class=destination_class,
     )
     dedupe_key = build_delivery_dedupe_key(
         feeder=feeder,

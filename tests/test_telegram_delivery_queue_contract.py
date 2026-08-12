@@ -243,13 +243,15 @@ class TelegramDeliveryQueueContractTests(unittest.IsolatedAsyncioTestCase):
         claimed = [(await self.claim(queue, worker=f"w-{i}")).action for i in range(8)]
         self.assertEqual(claimed, [action for _feeder, action in reversed(specs)])
 
-    async def test_m0_tie_order_is_callback_overdue_trade_then_offer_publish(self):
+    async def test_channel_offer_stays_ahead_of_overdue_trade(self):
         queue = InMemoryTelegramDeliveryQueue()
         publish = await self.enqueue(
             queue,
             "publish",
             feeder=TelegramFeederKind.OFFER_CONTROL,
             action=TelegramDeliveryAction.OFFER_PUBLISH,
+            destination="channel:market",
+            destination_class=TelegramDestinationClass.CHANNEL,
         )
         trade = await self.enqueue(
             queue,
@@ -266,11 +268,11 @@ class TelegramDeliveryQueueContractTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertIs(await self.claim(queue, worker="a"), callback)
-        self.assertIs(await self.claim(queue, worker="b"), trade)
-        self.assertIs(await self.claim(queue, worker="c"), publish)
+        self.assertIs(await self.claim(queue, worker="b"), publish)
+        self.assertIs(await self.claim(queue, worker="c"), trade)
 
-    async def test_m0_order_is_callback_then_overtime_approval_then_publish(self):
-        """Decision #38: overtime approval is M0/rank 1, after rank 0, before publish."""
+    async def test_private_m0_order_is_callback_then_overtime_approval_then_publish(self):
+        """Private M0 work keeps its historical callback/approval ordering."""
         from core.telegram_delivery_queue_contract import priority_and_rank_for_action
 
         self.assertEqual(
@@ -354,6 +356,35 @@ class TelegramDeliveryQueueContractTests(unittest.IsolatedAsyncioTestCase):
             TelegramDeliveryPriority.M0,
         )
         self.assertEqual(first.state, TelegramDeliveryState.SENT)
+
+    async def test_channel_offer_publish_outranks_other_m0_work(self):
+        from core.telegram_delivery_queue_contract import priority_and_rank_for_action
+
+        self.assertEqual(
+            priority_and_rank_for_action(
+                TelegramDeliveryAction.OFFER_PUBLISH,
+                destination_class=TelegramDestinationClass.CHANNEL,
+            ),
+            (TelegramDeliveryPriority.M0, 0),
+        )
+        queue = InMemoryTelegramDeliveryQueue()
+        publish = await self.enqueue(
+            queue,
+            "publish",
+            feeder=TelegramFeederKind.OFFER_CONTROL,
+            action=TelegramDeliveryAction.OFFER_PUBLISH,
+            destination="channel:market",
+            destination_class=TelegramDestinationClass.CHANNEL,
+        )
+        overdue_trade = await self.enqueue(
+            queue,
+            "trade",
+            feeder=TelegramFeederKind.TRADE,
+            action=TelegramDeliveryAction.TRADE_RESULT,
+            delivery_deadline_at=NOW - timedelta(seconds=1),
+        )
+        self.assertIs(await self.claim(queue, worker="a"), publish)
+        self.assertIs(await self.claim(queue, worker="b"), overdue_trade)
 
     def test_all_six_feeder_rank_matrices_match_roadmap(self):
         matrices = {
