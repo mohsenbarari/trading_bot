@@ -2507,8 +2507,8 @@ function handleHistoryPresetChipChange(value: string) {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, #3390ec, #0ea5e9 58%, var(--ds-primary-500) 100%);
-  color: #fff;
+  background: linear-gradient(135deg, var(--ds-telegram-500), var(--ds-info-500) 58%, var(--ds-primary-500) 100%);
+  color: var(--ds-bg-card);
   font-size: 2rem;
   font-weight: 900;
   flex-shrink: 0;
@@ -2532,11 +2532,11 @@ function handleHistoryPresetChipChange(value: string) {
 }
 
 .profile-avatar-button--editable {
-  box-shadow: 0 14px 32px rgba(51, 144, 236, 0.18);
+  box-shadow: var(--ds-shadow-lg);
 }
 
 .profile-avatar--readonly {
-  box-shadow: 0 10px 24px rgba(51, 144, 236, 0.14);
+  box-shadow: var(--ds-shadow-md);
 }
 
 .profile-avatar-edit-indicator {
@@ -2551,9 +2551,9 @@ function handleHistoryPresetChipChange(value: string) {
   align-items: center;
   justify-content: center;
   background: rgba(15, 23, 42, 0.86);
-  color: #fff;
+  color: var(--ds-bg-card);
   border: 1px solid rgba(255, 255, 255, 0.85);
-  box-shadow: 0 6px 14px rgba(15, 23, 42, 0.22);
+  box-shadow: var(--ds-shadow-md);
 }
 
 .profile-avatar-image {
@@ -2569,7 +2569,7 @@ function handleHistoryPresetChipChange(value: string) {
   align-items: center;
   justify-content: center;
   background: rgba(15, 23, 42, 0.38);
-  color: #fff;
+  color: var(--ds-bg-card);
   font-size: 0.72rem;
   font-weight: 700;
 }
@@ -3435,7 +3435,7 @@ function handleHistoryPresetChipChange(value: string) {
   background: none;
   border: 0;
   padding: 0;
-  color: #0f766e;
+  color: var(--ds-success-700);
   font: inherit;
   font-weight: 700;
   cursor: pointer;
