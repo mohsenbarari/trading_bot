@@ -1,4 +1,4 @@
-# Validation — Stage 6 delivered Phase 1–9 scope
+# Validation — Stage 6 delivered Phase 1–10 scope
 
 ## Historical Phase 1–3 source binding
 
@@ -45,7 +45,7 @@ post-fix read-only audit: `assets/figma/final-provenance-20260811T204635Z/stage6
 - پنج render از page/root/Phase 1/2/3 پس از اصلاح بازبینی شده‌اند؛ clipping/overlap label دیده نشد.
 - Phase 3 sibling صفحهٔ root `321:19` است، نه child آن؛ این disclosure است و ادعای یک bundle nested واحد مجاز نیست.
 
-جزئیات ID/hash در `FIGMA_SNAPSHOT_MANIFEST.json` ثبت شده است؛ همان manifest، referenceهای live/editable Phase 4–9 را بدون ادعای screenshot hash/freeze جدید ثبت می‌کند.
+جزئیات ID/hash در `FIGMA_SNAPSHOT_MANIFEST.json` ثبت شده است؛ همان manifest، referenceهای live/editable Phase 4–10 را بدون ادعای screenshot hash/freeze جدید ثبت می‌کند.
 
 ## Phase 4 و Phase 5 — supplemental receipts، نه freeze
 
@@ -117,6 +117,22 @@ post-fix read-only audit: `assets/figma/final-provenance-20260811T204635Z/stage6
 - `npm run build`: pass (`52.90s`). اجرای serial کامل با timeout پیش‌فرض 10s برابر **153/154** file و **1713/1714** test بود؛ تنها موردِ باقی‌مانده یک timing flake بازتولیدپذیر و source-unrelated در `ChatView` است. rerunهای مربوط و اجرای timeout 30s برابر **109/109** pass شدند؛ بنابراین این مورد به‌صورت qualified ثبت می‌شود، نه pass کامل serial در 10s.
 - browser receipt: `uiux-stage6-phase9-commodity-delete-20260812T141257269Z`، `passed`/`promotable=true`، **21** assertion و **20** screenshot. metrics `stage6-phase9-commodity-delete-metrics.json` SHA-256 `c382eb97d3b57d91de371969dbf20e2b7d2a3ee2bfcd52b1933501a5f303f845`؛ binding SHA-256 `439a9098daef9f44845badb80043db9854b997ae05849863844888d851060c4d`؛ harness SHA-256 `8539fbff4303841d457d22db859d6d628e6e97cf615070caa051ea0672041f58`.
 - Figma live/editable در page `321:18`، sibling section `455:831` است: W1=`455:833` و W2=`455:856`، هر دو `390×844`. backdrop=`455:848` در `(0,0,390,844)` و dialog=`455:849` در `(16,278,358,288)` کاملاً داخل viewport هستند؛ label `455:832` دقیقاً `Phase 9 · حذف امن کالا و نام مستعار · source 2aa32c6d · دادهٔ synthetic` است. audit همهٔ 37 text node را Vazirmatn، 9 instance را linked و unsafe scan را empty ثبت کرد.
+
+این receipt محلی، mutable و supplemental است؛ artifactهای آن عمداً به `selectedArtifacts` تاریخی Phase 1–3 افزوده یا freeze نشده‌اند و رفتار live backend را مستقل اثبات نمی‌کنند.
+
+## Phase 10 — حذف امن کاربر مدیریت و پایان نشست‌ها
+
+| field | value |
+| --- | --- |
+| source commit | `0839eb091b20438e603e265f5c9b9a6cbe5ae19b` |
+| source tree | `f466bfde632bc8663334b5bcbc1aa411e011c2bc` |
+| parent | `64d3bb97fb9d7aee46b32b456d4d1e438c5f360d` |
+| source binding | `0476f7801b46a7f53cbf43ebf05d252dc9b46798b02113bc9da5e6997af81bd3` (393 files) |
+
+- focused `UserProfile.test.ts`: **27/27** pass؛ `vue-tsc --noEmit`، `npm run guard:ui` و `git diff --check`: pass.
+- browser receipt: `uiux-stage6-phase10-admin-user-delete-20260812T173239804Z`، `passed`/`promotable=true`، **13** assertion و **14** screenshot. metrics `stage6-phase10-admin-user-delete-metrics.json` SHA-256 `c402634eee20b818f455c0a1c1a7d3681ae1304769d951da172e74dc5bdd8d74`؛ binding SHA-256 `683197885b66b6e11472e9c73db38d15d997672fd4bf4d5fa6d2e541a72d19a0`؛ harness SHA-256 `5f63cdc208d6260c2de14d3676d56a3aaa1905d63faeae71aa2a9ab898febb5a`.
+- matrix synthetic مسیر `/admin/users/:id` را پوشش می‌دهد: در 360 geometry/focus/Escape/cancel بدون mutation برای حذف و پایان نشست‌ها؛ در 390/1440 فقط receipt دقیق `200` حذف را به فهرست برمی‌گرداند و پایان نشست‌ها را با عدد صحیح می‌پذیرد؛ 400/403/404/malformed/network دیالوگ، کاربر نمایش‌داده‌شده و مسیر را با copy ثابت امن نگه می‌دارند. diagnostics غیرمنتظره صفر است؛ 4 HTTP fixture، 1 network failure و 1 network console error صریحاً expected/classified هستند.
+- Figma live/editable در page `321:18`، sibling section `464:896` است: W1=`464:898` و W2=`464:921`، هر دو `390×844`. backdrop=`464:913` در `(0,0,390,844)` و dialog=`464:914` در `(16,278,358,288)` کاملاً داخل viewport هستند؛ label `464:897` دقیقاً `Phase 10 · حذف امن کاربر مدیریت و پایان نشست‌ها · source 0839eb09 · دادهٔ synthetic` است. audit همهٔ 37 text node را Vazirmatn، 9 instance را linked و unsafe scan شامل account_name/موبایل/receipt انگلیسی را empty ثبت کرد.
 
 این receipt محلی، mutable و supplemental است؛ artifactهای آن عمداً به `selectedArtifacts` تاریخی Phase 1–3 افزوده یا freeze نشده‌اند و رفتار live backend را مستقل اثبات نمی‌کنند.
 

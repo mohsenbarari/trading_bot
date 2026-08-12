@@ -1,4 +1,4 @@
-# Stage 6 Runtime Contract — delivered Phase 1–9
+# Stage 6 Runtime Contract — delivered Phase 1–10
 
 ## اصول غیرقابل‌جایگزین
 
@@ -106,6 +106,16 @@
 | تأیید | `AppConfirmDialog` body-teleported، trap-focus، Escape، restore-focus و scroll-lock را حفظ می‌کند؛ cancel یا Escape هیچ DELETE نمی‌فرستد. |
 | recovery | 400/403/404، malformed/mismatch یا network، form/list/selected context و dialog را نگه می‌دارند و فقط feedback ثابت امن می‌دهند؛ detail/message خام سرور وارد UI، URL، history یا storage نمی‌شود. stale detail refresh هنگام بازگشت abort/ignore می‌شود. |
 
+## Phase 10 — حذف امن کاربر مدیریت و پایان نشست‌ها
+
+| سطح | قرارداد تحویل‌شده |
+| --- | --- |
+| route فعال | `/admin/users/:id`، همان route admin-only موجود از `AdminView` به `UserProfile`؛ API، router و query contract تازه‌ای ایجاد نشده است. |
+| حذف | فقط پاسخ `200` با پیام ثابت موفقیت، navigation به فهرست کاربران را فعال می‌کند؛ پیام انگلیسی receipt در UI نمایش داده نمی‌شود. |
+| پایان نشست‌ها | فقط پاسخ `200` با عدد صحیح `terminated_sessions >= 0` پذیرفته می‌شود؛ `detail` خام نمایش داده نمی‌شود. |
+| تأیید | `AppConfirmDialog` body-teleported، trap-focus، Escape، restore-focus و scroll-lock را حفظ می‌کند؛ متن دیالوگ نام حساب یا موبایل ندارد؛ cancel یا Escape هیچ درخواستی نمی‌فرستد. |
+| recovery | 400/403/404، malformed یا network، کاربر نمایش‌داده‌شده، مسیر و دیالوگ را نگه می‌دارند و فقط copy ثابت امن می‌دهند؛ detail/message خام سرور وارد UI، URL، history یا storage نمی‌شود. |
+
 ## مرزهای صریح
 
-این contract تا source تحویل‌شدهٔ Phase 9 در commit `2aa32c6d48a8b693de8ff37c310d995a4748efa8` را توصیف می‌کند. persistenceهای دیگر، protected Messenger internals، Sites، staging، production و closure کلی Stage 6 را authorize یا اثبات نمی‌کند.
+این contract تا source تحویل‌شدهٔ Phase 10 در commit `0839eb091b20438e603e265f5c9b9a6cbe5ae19b` را توصیف می‌کند. persistenceهای دیگر، protected Messenger internals، Sites، staging، production و closure کلی Stage 6 را authorize یا اثبات نمی‌کند.

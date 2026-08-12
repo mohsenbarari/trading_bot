@@ -26,5 +26,8 @@
 | خطای mutation رابطهٔ workspace | بازبینی و retry بدون از دست‌دادن context | نگه‌داری | 400/403/404، receipt نادرست یا network dialog، relation، route و query را نگه می‌دارند؛ raw detail/message نمایش یا serialize نمی‌شود. |
 | mutation کالا و نام مستعار | ایجاد/ویرایش کالا و alias فقط با outcome قابل‌نسبت‌دادن به درخواست | نگه‌داری، receipt-bound | create/edit فقط status و identity/parent مطابق receipt را می‌پذیرد؛ mismatch یا payload نامعتبر context را تغییر نمی‌دهد. |
 | حذف کالا یا نام مستعار | جلوگیری از DELETE ناخواسته و بازیابی قابل‌بازبینی | نگه‌داری، confirm + receipt-bound | dialog body-teleported است؛ cancel/Escape بدون DELETE و فقط `204` خالی اعمال می‌شود؛ خطا یا receipt نامعتبر selected/form/list را با copy امن نگه می‌دارد. |
+| حذف کاربر مدیریت | قطع دسترسی حساب فقط پس از تأیید صریح و receipt دقیق | نگه‌داری، confirm + receipt-bound | دیالوگ نام حساب/موبایل ندارد؛ cancel/Escape بدون درخواست است؛ فقط `200` با پیام ثابت موفقیت navigation می‌دهد. |
+| پایان همه نشست‌های کاربر مدیریت | قطع نشست‌های فعال همان کاربر بدون نشت detail | نگه‌داری، confirm + receipt-bound | فقط `200` با عدد صحیح `terminated_sessions` پذیرفته می‌شود؛ `detail` خام نمایش داده نمی‌شود. |
+| خطای حذف یا پایان نشست کاربر مدیریت | بازبینی و retry بدون از دست‌دادن context | نگه‌داری | 400/403/404، receipt نامعتبر یا network دیالوگ، کاربر نمایش‌داده‌شده و مسیر را نگه می‌دارند؛ raw detail نمایش یا serialize نمی‌شود. |
 
 هر محتوای جدید باید پیش از افزوده‌شدن، یک تصمیم، عمل، state یا risk-prevention مشخص داشته باشد و projection/authority آن را backend تأیید کند.
