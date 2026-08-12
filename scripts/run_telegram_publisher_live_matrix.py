@@ -1321,9 +1321,11 @@ def _initial_publication_complete(
     expected_count: int = MATRIX_TOTAL_OFFERS,
 ) -> bool:
     """Validate a publication gate before the selected lifecycle cohort."""
+    if int(posted_count) >= int(expected_count):
+        return True
     if int(expired_count) > 0:
         raise LiveMatrixError("live_matrix_offer_expired_before_initial_publication")
-    return int(posted_count) == int(expected_count)
+    return False
 
 
 async def _initial_publication_progress(

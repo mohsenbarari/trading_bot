@@ -129,6 +129,13 @@ class TelegramPublisherLiveMatrixTests(unittest.TestCase):
                 expected_count=200,
             )
         )
+        self.assertTrue(
+            _initial_publication_complete(
+                posted_count=200,
+                expired_count=1,
+                expected_count=200,
+            )
+        )
 
     def test_terminal_audit_requires_initial_post_to_precede_terminal_state(self):
         timeline = OfferTimeline(
