@@ -1171,7 +1171,9 @@ describe('CustomerWorkspaceView.vue', () => {
     expect(vm.listActionNotice).toContain('هیچ حساب فعالی حذف نشد')
   })
 
-  it('keeps a sensitive session confirmation in context, suppresses duplicates, and closes only for the expected receipt', async () => {
+  it('keeps a sensitive session confirmation in context, suppresses duplicates, and exposes only a safe error before the expected receipt', async () => {
+    const safeSessionTerminationMessage =
+      'پایان نشست تأیید نشد. اطلاعات نمایش‌داده‌شدهٔ نشست در این صفحه بدون تغییر باقی ماند؛ وضعیت را دوباره بررسی کنید.'
     customerWorkspaceMocks.routeState.params = { relationId: '11' }
     customerWorkspaceMocks.routeState.query = { tab: 'sessions' }
     const pendingTermination = deferred<never>()
@@ -1188,26 +1190,63 @@ describe('CustomerWorkspaceView.vue', () => {
     const duplicateAttempt = vm.handleConfirmAction()
     expect(customerWorkspaceMocks.terminateOwnerCustomerSessionMock).toHaveBeenCalledTimes(1)
     expect(hasBodyDialog('.ui-confirm-dialog')).toBe(true)
+    const pushCallsBeforeFailure = customerWorkspaceMocks.routerPushMock.mock.calls.length
+    const replaceCallsBeforeFailure = customerWorkspaceMocks.routerReplaceMock.mock.calls.length
 
-    pendingTermination.reject(new Error('پایان نشست انجام نشد.'))
+    pendingTermination.reject(
+      Object.assign(new Error('raw-server-detail: customer_11 / Chrome'), { status: 403 }),
+    )
     await Promise.all([firstAttempt, duplicateAttempt])
     await flushPromises()
 
     expect(hasBodyDialog('.ui-confirm-dialog')).toBe(true)
-    expect(confirmDialog().text()).toContain('پایان نشست انجام نشد.')
+    expect(confirmDialog().text()).toContain(safeSessionTerminationMessage)
+    expect(confirmDialog().text()).not.toContain('raw-server-detail')
+    expect(confirmDialog().text()).not.toContain('customer_11')
     expect(vm.detailSessionsError).toBe('')
     expect(wrapper.text()).toContain('Chrome')
+    expect(vm.activeRelation?.id).toBe(11)
+    expect(vm.detailSessions.map((session: { id: string }) => session.id)).toContain('session-1')
+    expect(customerWorkspaceMocks.routerPushMock.mock.calls).toHaveLength(pushCallsBeforeFailure)
+    expect(customerWorkspaceMocks.routerReplaceMock.mock.calls).toHaveLength(
+      replaceCallsBeforeFailure,
+    )
+
+    customerWorkspaceMocks.terminateOwnerCustomerSessionMock.mockRejectedValueOnce(
+      new TypeError('network failure: session-1'),
+    )
+    await vm.handleConfirmAction()
+    await flushPromises()
+
+    expect(hasBodyDialog('.ui-confirm-dialog')).toBe(true)
+    expect(confirmDialog().text()).toContain(safeSessionTerminationMessage)
+    expect(confirmDialog().text()).not.toContain('network failure')
+    expect(confirmDialog().text()).not.toContain('session-1')
+    expect(vm.activeRelation?.id).toBe(11)
+    expect(vm.detailSessions.map((session: { id: string }) => session.id)).toContain('session-1')
+    expect(customerWorkspaceMocks.routerPushMock.mock.calls).toHaveLength(pushCallsBeforeFailure)
+    expect(customerWorkspaceMocks.routerReplaceMock.mock.calls).toHaveLength(
+      replaceCallsBeforeFailure,
+    )
 
     customerWorkspaceMocks.terminateOwnerCustomerSessionMock.mockResolvedValueOnce({
-      detail: 'done',
+      detail: 'raw-receipt-detail',
       terminated_session_id: 'different-session',
       promoted_primary_session_id: null,
     })
     await vm.handleConfirmAction()
     await flushPromises()
     expect(hasBodyDialog('.ui-confirm-dialog')).toBe(true)
-    expect(confirmDialog().text()).toContain('پاسخ پایان نشست مشتری معتبر نبود.')
+    expect(confirmDialog().text()).toContain(safeSessionTerminationMessage)
+    expect(confirmDialog().text()).not.toContain('raw-receipt-detail')
+    expect(confirmDialog().text()).not.toContain('different-session')
     expect(wrapper.text()).toContain('Chrome')
+    expect(vm.activeRelation?.id).toBe(11)
+    expect(vm.detailSessions.map((session: { id: string }) => session.id)).toContain('session-1')
+    expect(customerWorkspaceMocks.routerPushMock.mock.calls).toHaveLength(pushCallsBeforeFailure)
+    expect(customerWorkspaceMocks.routerReplaceMock.mock.calls).toHaveLength(
+      replaceCallsBeforeFailure,
+    )
 
     customerWorkspaceMocks.terminateOwnerCustomerSessionMock.mockResolvedValueOnce({
       detail: 'done',

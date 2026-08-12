@@ -692,6 +692,70 @@ describe('AccountantWorkspaceView.vue', () => {
     expect(wrapper.text()).not.toContain('iran')
   })
 
+  it('keeps accountant session termination recoverable with one safe error for raw failures and malformed receipts', async () => {
+    const safeError =
+      'پایان نشست تأیید نشد. اطلاعات نمایش‌داده‌شدهٔ نشست در این صفحه بدون تغییر باقی ماند؛ وضعیت را دوباره بررسی کنید.'
+    const rawServerDetail = 'raw-server-detail: accountant=11; session=session-1'
+    const rawMismatchedReceipt = 'raw-mismatched-receipt: accountant=11; session=different-session'
+    accountantWorkspaceMocks.routeState.params = { relationId: '11' }
+    accountantWorkspaceMocks.routeState.query = { tab: 'sessions' }
+    accountantWorkspaceMocks.terminateOwnerAccountantSessionMock.mockRejectedValueOnce(
+      Object.assign(new Error(rawServerDetail), { status: 403 }),
+    )
+
+    const wrapper = mount(AccountantWorkspaceView)
+    await flushPromises()
+    await flushPromises()
+    const vm = viewVm(wrapper)
+    await wrapper.get('.accountant-session-actions .ui-button').trigger('click')
+    const pushCallsBeforeFailure = accountantWorkspaceMocks.routerPushMock.mock.calls.length
+    const replaceCallsBeforeFailure = accountantWorkspaceMocks.routerReplaceMock.mock.calls.length
+
+    await confirmDialog().get('.ui-button--primary').trigger('click')
+    await flushPromises()
+
+    expect(hasBodyDialog('.ui-confirm-dialog')).toBe(true)
+    expect(confirmDialog().get('[role="alert"]').text()).toBe(safeError)
+    expect(document.body.textContent).not.toContain(rawServerDetail)
+    expect(vm.detailSessions.map((session) => session.id)).toEqual(['session-1'])
+    expect(vm.accountantState.relations.value.some((relation) => relation.id === 11)).toBe(true)
+    expect(accountantWorkspaceMocks.routerPushMock.mock.calls).toHaveLength(pushCallsBeforeFailure)
+    expect(accountantWorkspaceMocks.routerReplaceMock.mock.calls).toHaveLength(
+      replaceCallsBeforeFailure,
+    )
+
+    accountantWorkspaceMocks.terminateOwnerAccountantSessionMock.mockResolvedValueOnce({
+      detail: rawMismatchedReceipt,
+      terminated_session_id: 'different-session',
+      promoted_primary_session_id: null,
+    })
+    await confirmDialog().get('.ui-button--primary').trigger('click')
+    await flushPromises()
+
+    expect(hasBodyDialog('.ui-confirm-dialog')).toBe(true)
+    expect(confirmDialog().get('[role="alert"]').text()).toBe(safeError)
+    expect(confirmDialog().text()).not.toContain(rawMismatchedReceipt)
+    expect(confirmDialog().text()).not.toContain('different-session')
+    expect(confirmDialog().text()).not.toContain('پاسخ پایان نشست حسابدار معتبر نبود.')
+    expect(vm.detailSessions.map((session) => session.id)).toEqual(['session-1'])
+    expect(vm.accountantState.relations.value.some((relation) => relation.id === 11)).toBe(true)
+    expect(accountantWorkspaceMocks.routerPushMock.mock.calls).toHaveLength(pushCallsBeforeFailure)
+    expect(accountantWorkspaceMocks.routerReplaceMock.mock.calls).toHaveLength(
+      replaceCallsBeforeFailure,
+    )
+
+    accountantWorkspaceMocks.terminateOwnerAccountantSessionMock.mockResolvedValueOnce({
+      terminated_session_id: 'session-1',
+      promoted_primary_session_id: null,
+    })
+    await confirmDialog().get('.ui-button--primary').trigger('click')
+    await flushPromises()
+
+    expect(hasBodyDialog('.ui-confirm-dialog')).toBe(false)
+    expect(vm.detailSessions).toEqual([])
+    expect(wrapper.text()).toContain('نشست «Chrome» پایان یافت.')
+  })
+
   it('saves duty through the route-native detail form', async () => {
     accountantWorkspaceMocks.routeState.params = { relationId: '11' }
     accountantWorkspaceMocks.routeState.query = { tab: 'duty' }

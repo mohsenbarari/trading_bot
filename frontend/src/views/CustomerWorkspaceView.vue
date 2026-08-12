@@ -1162,6 +1162,10 @@ function getSafeAccountDeletionError() {
   return 'حذف حساب تأیید نشد. اطلاعات رابطه بدون تغییر باقی ماند؛ وضعیت را دوباره بررسی کنید.'
 }
 
+function getSafeSessionTerminationError() {
+  return 'پایان نشست تأیید نشد. اطلاعات نمایش‌داده‌شدهٔ نشست در این صفحه بدون تغییر باقی ماند؛ وضعیت را دوباره بررسی کنید.'
+}
+
 function resetConfirmDialog() {
   confirmOperationGeneration += 1
   isConfirmDialogOpen.value = false
@@ -1193,9 +1197,11 @@ async function handleConfirmAction() {
       (currentRelation.status !== 'active' || !currentRelation.customer_user_id))
   ) {
     confirmError.value =
-      action === 'delete-account'
-        ? getSafeAccountDeletionError()
-        : 'این اقدام دیگر برای وضعیت فعلی رابطه در دسترس نیست.'
+      action === 'terminate-session'
+        ? getSafeSessionTerminationError()
+        : action === 'delete-account'
+          ? getSafeAccountDeletionError()
+          : 'این اقدام دیگر برای وضعیت فعلی رابطه در دسترس نیست.'
     return
   }
   const operationGeneration = ++confirmOperationGeneration
@@ -1223,10 +1229,10 @@ async function handleConfirmAction() {
 
   try {
     if (action === 'terminate-session') {
-      if (!session) throw new Error('نشست مشتری برای پایان دادن در دسترس نیست.')
+      if (!session) throw new Error(getSafeSessionTerminationError())
       const receipt = await terminateOwnerCustomerSession(relation.id, session.id)
       if (!receipt || receipt.terminated_session_id !== session.id) {
-        throw new Error('پاسخ پایان نشست مشتری معتبر نبود.')
+        throw new Error(getSafeSessionTerminationError())
       }
       if (!isCurrentOperation() || activeRelationId.value !== relation.id) return
       detailSessions.value = detailSessions.value
@@ -1283,17 +1289,17 @@ async function handleConfirmAction() {
   } catch (err: unknown) {
     if (!isCurrentOperation()) return
     confirmError.value =
-      action === 'delete-account'
-        ? getSafeAccountDeletionError()
-        : err instanceof Error && err.message
-          ? err.message
-          : action === 'terminate-session'
-        ? 'پایان دادن نشست مشتری ناموفق بود.'
-        : action === 'cancel-invitation'
-          ? 'لغو رابطه در انتظار و دعوت مشتری ناموفق بود.'
-          : action === 'close-relation'
-            ? 'بستن رابطه مشتری ناموفق بود.'
-            : getSafeAccountDeletionError()
+      action === 'terminate-session'
+        ? getSafeSessionTerminationError()
+        : action === 'delete-account'
+          ? getSafeAccountDeletionError()
+          : err instanceof Error && err.message
+            ? err.message
+            : action === 'cancel-invitation'
+              ? 'لغو رابطه در انتظار و دعوت مشتری ناموفق بود.'
+              : action === 'close-relation'
+                ? 'بستن رابطه مشتری ناموفق بود.'
+                : getSafeAccountDeletionError()
   } finally {
     if (shouldHoldCanonicalSync) isDeleteNavigationPending = false
     if (operationGeneration === confirmOperationGeneration) isConfirmBusy.value = false

@@ -811,6 +811,10 @@ function getSafeAccountDeletionError() {
   return 'حذف حساب تأیید نشد. اطلاعات رابطه بدون تغییر باقی ماند؛ وضعیت را دوباره بررسی کنید.'
 }
 
+function getSafeSessionTerminationError() {
+  return 'پایان نشست تأیید نشد. اطلاعات نمایش‌داده‌شدهٔ نشست در این صفحه بدون تغییر باقی ماند؛ وضعیت را دوباره بررسی کنید.'
+}
+
 function resetConfirmDialog() {
   isConfirmDialogOpen.value = false
   confirmAction.value = null
@@ -838,7 +842,7 @@ async function handleConfirmAction() {
 
   try {
     if (action === 'terminate-session') {
-      if (!session) throw new Error('نشست حسابدار برای پایان دادن در دسترس نیست.')
+      if (!session) throw new Error(getSafeSessionTerminationError())
       const receipt = await terminateOwnerAccountantSession(relation.id, session.id)
       if (
         !isCurrentConfirmOperation(
@@ -850,7 +854,7 @@ async function handleConfirmAction() {
       )
         return
       if (!receipt || receipt.terminated_session_id !== session.id) {
-        throw new Error('پاسخ پایان نشست حسابدار معتبر نبود.')
+        throw new Error(getSafeSessionTerminationError())
       }
       detailSessions.value = detailSessions.value
         .filter((item) => item.id !== receipt.terminated_session_id)
@@ -925,10 +929,10 @@ async function handleConfirmAction() {
     confirmError.value =
       action === 'delete-account'
         ? getSafeAccountDeletionError()
+        : action === 'terminate-session'
+          ? getSafeSessionTerminationError()
         : error instanceof Error && error.message
           ? error.message
-          : action === 'terminate-session'
-          ? 'پایان دادن نشست حسابدار ناموفق بود.'
           : action === 'cancel-invitation'
             ? 'لغو رابطه و دعوت حسابدار ناموفق بود.'
             : action === 'delete-relation'
