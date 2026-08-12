@@ -10,6 +10,7 @@ from scripts.run_telegram_publisher_live_matrix import (
     MATRIX_INGRESS_MAX_INTERVAL_SECONDS,
     MATRIX_INGRESS_MIN_INTERVAL_SECONDS,
     MatrixRun,
+    RetryableBotCallbackReceiptAbsent,
     OfferTimeline,
     LifecycleActionTimeline,
     PrivateMessageSimulationTimeline,
@@ -287,6 +288,7 @@ class TelegramPublisherLiveMatrixTests(unittest.TestCase):
         self.assertEqual(entry.status, "ValueError")
         self.assertEqual(entry.failure_class, "ValueError")
         self.assertIsNone(entry.failure_status_code)
+        self.assertEqual(entry.attempt_count, 1)
 
     def test_lifecycle_action_records_only_http_status_code_not_detail(self):
         entry = LifecycleActionTimeline(
@@ -305,6 +307,7 @@ class TelegramPublisherLiveMatrixTests(unittest.TestCase):
         self.assertEqual(entry.status, "HTTPException")
         self.assertEqual(entry.failure_class, "HTTPException")
         self.assertEqual(entry.failure_status_code, 403)
+        self.assertEqual(entry.attempt_count, 1)
 
     def test_lifecycle_action_retries_a_bounded_webapp_timeout(self):
         entry = LifecycleActionTimeline(
@@ -334,6 +337,7 @@ class TelegramPublisherLiveMatrixTests(unittest.TestCase):
 
         self.assertEqual(calls, 2)
         self.assertEqual(entry.status, "success")
+        self.assertEqual(entry.attempt_count, 2)
 
     def test_lifecycle_action_retries_only_an_allowed_http_status(self):
         entry = LifecycleActionTimeline(
@@ -364,6 +368,37 @@ class TelegramPublisherLiveMatrixTests(unittest.TestCase):
         self.assertEqual(calls, 2)
         self.assertEqual(entry.status, "success")
         self.assertIsNone(entry.failure_status_code)
+        self.assertEqual(entry.attempt_count, 2)
+
+    def test_lifecycle_action_retries_a_missing_bot_callback_receipt(self):
+        entry = LifecycleActionTimeline(
+            offer_index=1,
+            action="manual_expiry",
+            origin="bot",
+            scheduled_at="2026-08-12T00:00:00+00:00",
+        )
+        calls = 0
+
+        async def eventually_succeeds() -> str:
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                raise RetryableBotCallbackReceiptAbsent
+            return "success"
+
+        asyncio.run(
+            _complete_lifecycle_action(
+                entry,
+                eventually_succeeds,
+                retry_attempts=1,
+                retry_delay_seconds=0,
+                retryable_exception_types=(RetryableBotCallbackReceiptAbsent,),
+            )
+        )
+
+        self.assertEqual(calls, 2)
+        self.assertEqual(entry.status, "success")
+        self.assertEqual(entry.attempt_count, 2)
 
     def test_background_task_failure_stops_ingress(self):
         async def fail() -> None:

@@ -81,6 +81,11 @@ MATRIX_WEBAPP_OPERATION_RETRY_DELAY_SECONDS = 1.0
 # terminal transition. Other responses are deterministic contract failures
 # and must remain visible in the audit rather than being retried.
 MATRIX_WEBAPP_RETRYABLE_STATUS_CODES = frozenset({409})
+# Queue-v1 acknowledges a bot callback asynchronously. A synthetic callback
+# that is still active and has no immediate receipt therefore models a user
+# retry after a transient lock, never an accepted terminal transition.
+MATRIX_BOT_CALLBACK_RETRY_ATTEMPTS = 2
+MATRIX_BOT_CALLBACK_RETRY_DELAY_SECONDS = 1.0
 # The matrix can schedule all 150 overtime actions within a narrow deadline
 # window.  Keep the direct router/database work bounded so the last tasks are
 # actually scheduled instead of starving behind an exhausted connection pool.
@@ -200,6 +205,10 @@ class LiveMatrixError(B2BHarnessError):
     """The real staging matrix cannot safely continue."""
 
 
+class RetryableBotCallbackReceiptAbsent(LiveMatrixError):
+    """A synthetic bot callback remained active without a synchronous receipt."""
+
+
 @dataclass(frozen=True, slots=True)
 class MatrixWorkload:
     origins: tuple[str, ...]
@@ -273,6 +282,7 @@ class LifecycleActionTimeline:
     status: str | None = None
     failure_class: str | None = None
     failure_status_code: int | None = None
+    attempt_count: int = 0
 
 
 @dataclass(slots=True)
@@ -1144,12 +1154,14 @@ async def _complete_lifecycle_action(
     retry_attempts: int = 0,
     retry_delay_seconds: float = 0.0,
     retryable_status_codes: frozenset[int] = frozenset(),
+    retryable_exception_types: tuple[type[Exception], ...] = (),
 ) -> None:
     entry.started_at = _iso(_utcnow())
     try:
         total_attempts = max(1, int(retry_attempts) + 1)
         outcome: Any = None
         for attempt in range(total_attempts):
+            entry.attempt_count = attempt + 1
             try:
                 if timeout_seconds is None:
                     outcome = await operation()
@@ -1173,6 +1185,10 @@ async def _complete_lifecycle_action(
                     continue
                 entry.failure_status_code = status_code
                 raise
+            except retryable_exception_types:
+                if attempt + 1 >= total_attempts:
+                    raise
+                await asyncio.sleep(max(0.0, float(retry_delay_seconds)))
         entry.status = "success" if outcome in (None, "success") else str(outcome)
     except Exception as exc:
         entry.status = type(exc).__name__
@@ -1355,6 +1371,8 @@ async def _run_manual_expiry(
             outcome = "success"
         if outcome != "success" and error_details:
             entry.failure_class = error_details[0].partition(":")[0].strip() or None
+        if timeline.origin == "bot" and outcome == "rejected" and not error_details:
+            raise RetryableBotCallbackReceiptAbsent
         return outcome
 
     await _complete_lifecycle_action(
@@ -1368,13 +1386,22 @@ async def _run_manual_expiry(
         retry_attempts=(
             MATRIX_WEBAPP_OPERATION_RETRY_ATTEMPTS
             if timeline.origin == "webapp"
-            else 0
+            else MATRIX_BOT_CALLBACK_RETRY_ATTEMPTS
         ),
-        retry_delay_seconds=MATRIX_WEBAPP_OPERATION_RETRY_DELAY_SECONDS,
+        retry_delay_seconds=(
+            MATRIX_WEBAPP_OPERATION_RETRY_DELAY_SECONDS
+            if timeline.origin == "webapp"
+            else MATRIX_BOT_CALLBACK_RETRY_DELAY_SECONDS
+        ),
         retryable_status_codes=(
             MATRIX_WEBAPP_RETRYABLE_STATUS_CODES
             if timeline.origin == "webapp"
             else frozenset()
+        ),
+        retryable_exception_types=(
+            (RetryableBotCallbackReceiptAbsent,)
+            if timeline.origin == "bot"
+            else ()
         ),
     )
 
