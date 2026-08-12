@@ -16,7 +16,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 from collections import Counter
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
@@ -96,6 +96,7 @@ MATRIX_OVERTIME_MAX_CONCURRENT_OPERATIONS = 20
 # response.  Keep that observation bounded; the matrix later verifies the
 # durable terminal outbox and WebApp projection for every offer.
 MATRIX_BACKGROUND_TASKS_MAX_WAIT_SECONDS = 15.0
+MATRIX_WEBAPP_TERMINAL_OBSERVATION_MAX_CONCURRENT = 20
 MATRIX_AUDIT_DIRECTORY = Path("/app/audit_trail")
 
 MATRIX_DIRECT_WHOLESALE_TRADES = 50
@@ -702,6 +703,135 @@ async def _observe_webapp_visibility(
             timeline.webapp_terminal_error = type(exc).__name__
         else:
             timeline.webapp_visibility_error = type(exc).__name__
+
+
+async def _observe_webapp_terminal_projections(
+    timelines: Iterable[OfferTimeline],
+) -> None:
+    """Bound final public reads below the shared staging DB pool capacity."""
+    semaphore = asyncio.Semaphore(MATRIX_WEBAPP_TERMINAL_OBSERVATION_MAX_CONCURRENT)
+
+    async def observe(timeline: OfferTimeline) -> None:
+        async with semaphore:
+            timeline.webapp_terminal_error = None
+            await _observe_webapp_visibility(timeline, terminal=True)
+
+    await asyncio.gather(
+        *[
+            observe(timeline)
+            for timeline in timelines
+            if timeline.webapp_terminal_visible_at is None
+        ]
+    )
+
+
+def _restore_audit_dataclass(
+    cls: type[Any],
+    payload: Any,
+) -> Any:
+    """Restore a redacted audit entry, rejecting malformed verification input."""
+    if not isinstance(payload, dict):
+        raise LiveMatrixError("live_matrix_terminal_verification_audit_invalid")
+    allowed_fields = {item.name for item in fields(cls)}
+    values = {key: value for key, value in payload.items() if key in allowed_fields}
+    try:
+        return cls(**values)
+    except TypeError as exc:
+        raise LiveMatrixError("live_matrix_terminal_verification_audit_invalid") from exc
+
+
+def _restore_terminal_projection_verification_run(run_id: str) -> MatrixRun:
+    """Load only an eligible failed terminal-projection audit for read-only repair."""
+    try:
+        payload = json.loads(_audit_path(run_id).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise LiveMatrixError("live_matrix_terminal_verification_audit_unavailable") from exc
+    if not isinstance(payload, dict):
+        raise LiveMatrixError("live_matrix_terminal_verification_audit_invalid")
+    configuration = payload.get("configuration")
+    timelines_payload = payload.get("offer_timelines")
+    if (
+        payload.get("run_id") != run_id
+        or payload.get("phase") != "failed"
+        or payload.get("failure_reason")
+        != "live_matrix_webapp_terminal_projection_mismatch"
+        or not isinstance(configuration, dict)
+        or int(configuration.get("offer_expiry_minutes", 0) or 0)
+        != MATRIX_OFFER_EXPIRY_MINUTES
+        or not isinstance(timelines_payload, list)
+        or len(timelines_payload) != MATRIX_TOTAL_OFFERS
+    ):
+        raise LiveMatrixError("live_matrix_terminal_verification_not_eligible")
+    run = MatrixRun(
+        run_id=run_id,
+        started_at=str(payload.get("started_at") or ""),
+        expected_expiry_minutes=MATRIX_OFFER_EXPIRY_MINUTES,
+        random_seed=configuration.get("random_seed"),
+        ignored_historical_private_job_count=int(
+            configuration.get("ignored_historical_private_job_count", 0) or 0
+        ),
+        phase="terminal_projection_verifying",
+    )
+    run.timelines = [
+        _restore_audit_dataclass(OfferTimeline, item) for item in timelines_payload
+    ]
+    run.interactions = [
+        _restore_audit_dataclass(InteractionTimeline, item)
+        for item in payload.get("user_interactions", [])
+    ]
+    run.private_message_simulations = [
+        _restore_audit_dataclass(PrivateMessageSimulationTimeline, item)
+        for item in payload.get("private_message_simulations", [])
+    ]
+    run.lifecycle_actions = [
+        _restore_audit_dataclass(LifecycleActionTimeline, item)
+        for item in payload.get("lifecycle_actions", [])
+    ]
+    if not all(
+        item.offer_status == item.expected_terminal_status
+        and item.channel_post_state == _SENT_STATE
+        and item.terminal_edit_state == _SENT_STATE
+        for item in run.timelines
+    ):
+        raise LiveMatrixError("live_matrix_terminal_verification_not_eligible")
+    return run
+
+
+async def _verify_terminal_projection_run(run_id: str) -> dict[str, Any]:
+    """Re-observe an eligible run's public terminal projections without writes."""
+    if str(getattr(settings, "environment", "")).strip().lower() != "staging":
+        raise LiveMatrixError("live_matrix_requires_staging_environment")
+    if current_server() != SERVER_FOREIGN:
+        raise LiveMatrixError("live_matrix_requires_foreign_execution_server")
+    run = _restore_terminal_projection_verification_run(run_id)
+    await _hydrate_timelines(run.timelines)
+    await _observe_webapp_terminal_projections(run.timelines)
+    if not all(
+        item.webapp_terminal_status == item.expected_terminal_status
+        for item in run.timelines
+    ):
+        raise LiveMatrixError("live_matrix_webapp_terminal_projection_mismatch")
+    run.phase = "terminal_projection_verified"
+    payload = _report_payload(run)
+    verification_path = _audit_path(
+        f"{run_id}-terminal-projection-verification"
+    )
+    payload["verification"] = {
+        "mode": "read_only_terminal_public_projection",
+        "source_run_id": run_id,
+        "verified_at": _iso(_utcnow()),
+    }
+    verification_path.parent.mkdir(parents=True, exist_ok=True)
+    verification_path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    return {
+        "passed": bool(payload["passed"]),
+        "report_path": str(verification_path),
+        "run_id": run_id,
+        "verification_only": True,
+    }
 
 
 async def _create_offer(
@@ -2145,13 +2275,7 @@ async def _wait_for_terminal_lifecycle(run: MatrixRun) -> None:
                 for item in run.timelines
             ):
                 raise LiveMatrixError("live_matrix_terminal_before_initial_publication")
-            await asyncio.gather(
-                *[
-                    _observe_webapp_visibility(timeline, terminal=True)
-                    for timeline in run.timelines
-                    if timeline.webapp_terminal_visible_at is None
-                ]
-            )
+            await _observe_webapp_terminal_projections(run.timelines)
             if all(
                 item.webapp_terminal_status == item.expected_terminal_status
                 for item in run.timelines
@@ -2182,6 +2306,9 @@ async def _wait_for_terminal_lifecycle(run: MatrixRun) -> None:
 async def run_live_matrix(args: argparse.Namespace) -> dict[str, Any]:
     if not args.authorize_live_staging:
         raise LiveMatrixError("live_matrix_live_confirmation_required")
+    verification_run_id = getattr(args, "verify_terminal_run_id", None)
+    if verification_run_id:
+        return await _verify_terminal_projection_run(str(verification_run_id))
     run_id = args.run_id or _new_run_id().replace("b2b-light-", "telegram-live-matrix-", 1)
     if not run_id.startswith("telegram-live-matrix-"):
         raise LiveMatrixError("live_matrix_run_id_invalid")
@@ -2362,6 +2489,7 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run the real Telegram publisher staging matrix.")
     parser.add_argument("--authorize-live-staging", action="store_true")
     parser.add_argument("--preflight-only", action="store_true")
+    parser.add_argument("--verify-terminal-run-id")
     parser.add_argument("--run-id")
     parser.add_argument("--total-offers", type=int, default=MATRIX_TOTAL_OFFERS)
     parser.add_argument("--bot-offers", type=int, default=MATRIX_BOT_OFFERS)

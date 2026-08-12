@@ -34,6 +34,47 @@ from scripts.run_telegram_publisher_live_matrix import (
 
 
 class TelegramPublisherLiveMatrixTests(unittest.TestCase):
+    def test_terminal_webapp_observation_is_bounded(self):
+        import scripts.run_telegram_publisher_live_matrix as matrix
+
+        active = 0
+        maximum_active = 0
+        observed = 0
+
+        async def fake_observe(timeline, *, terminal=False):
+            nonlocal active, maximum_active, observed
+            self.assertTrue(terminal)
+            active += 1
+            maximum_active = max(maximum_active, active)
+            await asyncio.sleep(0)
+            timeline.webapp_terminal_visible_at = "2026-08-12T00:00:00+00:00"
+            timeline.webapp_terminal_status = timeline.expected_terminal_status
+            observed += 1
+            active -= 1
+
+        timelines = [
+            OfferTimeline(
+                index=index,
+                origin="bot",
+                scenario="natural_expiry",
+                expected_terminal_status="expired",
+                scheduled_at="2026-08-12T00:00:00+00:00",
+            )
+            for index in range(1, 51)
+        ]
+        original_limit = matrix.MATRIX_WEBAPP_TERMINAL_OBSERVATION_MAX_CONCURRENT
+        original_observer = matrix._observe_webapp_visibility
+        matrix.MATRIX_WEBAPP_TERMINAL_OBSERVATION_MAX_CONCURRENT = 3
+        matrix._observe_webapp_visibility = fake_observe
+        try:
+            asyncio.run(matrix._observe_webapp_terminal_projections(timelines))
+        finally:
+            matrix.MATRIX_WEBAPP_TERMINAL_OBSERVATION_MAX_CONCURRENT = original_limit
+            matrix._observe_webapp_visibility = original_observer
+
+        self.assertEqual(observed, 50)
+        self.assertLessEqual(maximum_active, 3)
+
     def test_builds_exact_randomized_source_ratio_and_interaction_mix(self):
         workload = build_live_matrix_workload(
             total_offers=500,
