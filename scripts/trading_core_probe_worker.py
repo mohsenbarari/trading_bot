@@ -3612,6 +3612,7 @@ async def execute_webapp_trade_for_user(
     contention_lease: TradeContentionLease | None = None,
     error_details: list[str] | None = None,
     phase_details: dict[str, Any] | None = None,
+    run_background_tasks: bool = True,
 ) -> str:
     background_tasks = BackgroundTasks()
     create_started = time.perf_counter()
@@ -3658,10 +3659,19 @@ async def execute_webapp_trade_for_user(
             elif hasattr(response, "model_dump"):
                 phase_details["response_status_code"] = 201
                 phase_details["response_body"] = json_safe(response.model_dump(mode="json"))
-        background_started = time.perf_counter()
-        await background_tasks()
-        if phase_details is not None:
-            phase_details["background_tasks_ms"] = round((time.perf_counter() - background_started) * 1000.0, 3)
+        if run_background_tasks:
+            background_started = time.perf_counter()
+            await background_tasks()
+            if phase_details is not None:
+                phase_details["background_tasks_ms"] = round(
+                    (time.perf_counter() - background_started) * 1000.0,
+                    3,
+                )
+        elif phase_details is not None:
+            # A direct router probe has no ASGI response boundary.  Callers
+            # that audit durable side effects independently may explicitly
+            # omit best-effort post-response work.
+            phase_details["background_tasks_skipped"] = True
     except HTTPException as exc:
         status_code = int(exc.status_code or 500)
         if status_code >= 500 and error_details is not None:

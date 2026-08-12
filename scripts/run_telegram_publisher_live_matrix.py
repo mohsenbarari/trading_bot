@@ -966,6 +966,7 @@ async def _run_direct_trade(
                             f"{run.run_id}-direct-{timeline.index:04d}-{lot_index}"
                         ),
                         error_details=error_details,
+                        run_background_tasks=False,
                     )
             if outcome != "success" and error_details:
                 entry.failure_class = error_details[0].partition(":")[0].strip() or None
@@ -1127,6 +1128,7 @@ async def _run_overtime_lifecycle(
                 offer_public_id=timeline.offer_public_id,
                 quantity=5,
                 idempotency_key=idempotency_key,
+                run_background_tasks=False,
             )
 
     await _complete_lifecycle_action(request_entry, request_overtime)

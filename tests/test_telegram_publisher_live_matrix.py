@@ -15,6 +15,7 @@ from scripts.run_telegram_publisher_live_matrix import (
     _retail_lot_sizes,
     _run_post_response_background_tasks,
     _run_direct_trade,
+    _run_overtime_lifecycle,
     _wait_for_worker_acknowledgement,
     _timeline_terminal_follows_initial_publication,
     build_live_matrix_workload,
@@ -230,6 +231,107 @@ class TelegramPublisherLiveMatrixTests(unittest.TestCase):
 
         self.assertEqual(observed, ["publisher_3"])
         self.assertEqual(run.lifecycle_actions[0].status, "success")
+
+    def test_webapp_direct_trade_omits_inline_background_tasks(self):
+        observed = []
+
+        class FakeWorker:
+            async def load_offer_snapshot(self, _offer_id):
+                return SimpleNamespace(id=42, offer_public_id="ofr_42")
+
+            async def execute_webapp_trade_for_user(self, **kwargs):
+                observed.append(kwargs)
+                return "success"
+
+        timeline = OfferTimeline(
+            index=1,
+            origin="webapp",
+            scenario="direct_wholesale_trade",
+            expected_terminal_status="completed",
+            scheduled_at="2026-08-12T00:00:00+00:00",
+            offer_id=42,
+            offer_public_id="ofr_42",
+            offer_home_server="iran",
+        )
+        run = MatrixRun(
+            run_id="telegram-live-matrix-unit",
+            started_at="2026-08-12T00:00:00+00:00",
+            expected_expiry_minutes=25,
+        )
+        users = [
+            SimpleNamespace(user_id=index, telegram_id=100_000 + index)
+            for index in range(1, 1_001)
+        ]
+
+        asyncio.run(
+            _run_direct_trade(
+                worker=FakeWorker(),
+                harness=object(),
+                users=users,
+                run=run,
+                timeline=timeline,
+            )
+        )
+
+        self.assertEqual(len(observed), 1)
+        self.assertFalse(observed[0]["run_background_tasks"])
+
+    def test_overtime_request_omits_inline_background_tasks(self):
+        observed = []
+
+        class FakeWorker:
+            async def execute_webapp_trade_for_user(self, **kwargs):
+                observed.append(kwargs)
+                return "success"
+
+        import scripts.run_telegram_publisher_live_matrix as matrix
+
+        timeline = OfferTimeline(
+            index=1,
+            origin="bot",
+            scenario="overtime_decision_timeout",
+            expected_terminal_status="expired",
+            scheduled_at="2026-08-12T00:00:00+00:00",
+            offer_id=42,
+            offer_public_id="ofr_42",
+            offer_home_server="iran",
+            normal_deadline_at="2026-08-12T00:00:00+00:00",
+        )
+        run = MatrixRun(
+            run_id="telegram-live-matrix-unit",
+            started_at="2026-08-12T00:00:00+00:00",
+            expected_expiry_minutes=25,
+        )
+        users = [
+            SimpleNamespace(user_id=index, telegram_id=100_000 + index)
+            for index in range(1, 1_001)
+        ]
+
+        async def no_wait(_target):
+            return None
+
+        async def published(_timeline):
+            return None
+
+        original_wait = matrix._wait_until
+        original_publication = matrix._assert_timeline_initial_publication
+        matrix._wait_until = no_wait
+        matrix._assert_timeline_initial_publication = published
+        try:
+            asyncio.run(
+                _run_overtime_lifecycle(
+                    worker=FakeWorker(),
+                    users=users,
+                    run=run,
+                    timeline=timeline,
+                )
+            )
+        finally:
+            matrix._wait_until = original_wait
+            matrix._assert_timeline_initial_publication = original_publication
+
+        self.assertEqual(len(observed), 1)
+        self.assertFalse(observed[0]["run_background_tasks"])
 
 
 if __name__ == "__main__":
