@@ -797,29 +797,163 @@ def _restore_terminal_projection_verification_run(run_id: str) -> MatrixRun:
     return run
 
 
+async def _reconstruct_terminal_projection_verification_run(run_id: str) -> MatrixRun:
+    """Rebuild a lost staging audit from immutable offer provenance only.
+
+    This intentionally excludes the fake private transport and transient user
+    interaction assertions.  They are not durable facts and must not be
+    recreated as if they were observed in a previous process.
+    """
+    random_seed = _workload_seed(run_id, None)
+    workload = build_live_matrix_workload(
+        total_offers=MATRIX_TOTAL_OFFERS,
+        bot_offers=MATRIX_BOT_OFFERS,
+        webapp_offers=MATRIX_WEBAPP_OFFERS,
+        interaction_count=MATRIX_USER_INTERACTIONS,
+        ingress_min_interval_seconds=MATRIX_INGRESS_MIN_INTERVAL_SECONDS,
+        ingress_max_interval_seconds=MATRIX_INGRESS_MAX_INTERVAL_SECONDS,
+        random_seed=random_seed,
+    )
+    note_prefix = f"{run_id}-"
+    async with AsyncSessionLocal() as db:
+        offers = list(
+            (
+                await db.execute(
+                    select(Offer).where(Offer.notes.like(f"{note_prefix}%"))
+                )
+            ).scalars()
+        )
+    indexed_offers: dict[int, Offer] = {}
+    observed_origins: dict[int, str] = {}
+    for offer in offers:
+        note = str(getattr(offer, "notes", "") or "")
+        suffix = note.removeprefix(note_prefix)
+        index_text, separator, remainder = suffix.partition(" ")
+        if (
+            not separator
+            or len(index_text) != 4
+            or not index_text.isdigit()
+            or not remainder
+        ):
+            raise LiveMatrixError("live_matrix_terminal_reconstruction_provenance_invalid")
+        index = int(index_text)
+        origin = (
+            "bot"
+            if remainder.startswith("bot hot ")
+            else "webapp"
+            if remainder.startswith("offer ")
+            else None
+        )
+        if origin is None or index in indexed_offers:
+            raise LiveMatrixError("live_matrix_terminal_reconstruction_provenance_invalid")
+        indexed_offers[index] = offer
+        observed_origins[index] = origin
+    expected_indexes = set(range(1, MATRIX_TOTAL_OFFERS + 1))
+    if set(indexed_offers) != expected_indexes:
+        raise LiveMatrixError("live_matrix_terminal_reconstruction_not_eligible")
+    run = MatrixRun(
+        run_id=run_id,
+        started_at=_iso(min(item.created_at for item in indexed_offers.values())) or "",
+        expected_expiry_minutes=MATRIX_OFFER_EXPIRY_MINUTES,
+        random_seed=random_seed,
+        phase="terminal_projection_reconstructing",
+    )
+    for index, (origin, scenario) in enumerate(
+        zip(workload.origins, workload.scenarios, strict=True), start=1
+    ):
+        offer = indexed_offers[index]
+        expected_overtime_minutes = (
+            MATRIX_OVERTIME_MINUTES if scenario in _OVERTIME_SCENARIOS else 0
+        )
+        if (
+            observed_origins[index] != origin
+            or int(getattr(offer, "overtime_minutes_snapshot", 0) or 0)
+            != expected_overtime_minutes
+        ):
+            raise LiveMatrixError("live_matrix_terminal_reconstruction_provenance_mismatch")
+        created_at = _iso(offer.created_at) or ""
+        run.timelines.append(
+            OfferTimeline(
+                index=index,
+                origin=origin,
+                scenario=scenario,
+                expected_terminal_status=_EXPECTED_TERMINAL_STATUS_BY_SCENARIO[scenario],
+                scheduled_at=created_at,
+                registration_started_at=created_at,
+                accepted_at=created_at,
+                offer_id=int(offer.id),
+                offer_public_id=str(offer.offer_public_id),
+                offer_created_at=created_at,
+                offer_home_server=str(offer.home_server),
+                overtime_minutes_snapshot=int(
+                    getattr(offer, "overtime_minutes_snapshot", 0) or 0
+                ),
+            )
+        )
+    return run
+
+
+def _terminal_projection_verification_passed(run: MatrixRun) -> bool:
+    return (
+        len(run.timelines) == MATRIX_TOTAL_OFFERS
+        and all(
+            item.offer_status == item.expected_terminal_status
+            and item.central_queue_entered_at is not None
+            and item.worker_acknowledged_at is not None
+            and item.channel_post_state == _SENT_STATE
+            and item.terminal_edit_state == _SENT_STATE
+            and item.webapp_terminal_status == item.expected_terminal_status
+            for item in run.timelines
+        )
+        and set(
+            item.publisher_lane for item in run.timelines if item.publisher_lane
+        )
+        == set(TELEGRAM_PUBLISHER_IDENTITIES)
+    )
+
+
 async def _verify_terminal_projection_run(run_id: str) -> dict[str, Any]:
     """Re-observe an eligible run's public terminal projections without writes."""
     if str(getattr(settings, "environment", "")).strip().lower() != "staging":
         raise LiveMatrixError("live_matrix_requires_staging_environment")
     if current_server() != SERVER_FOREIGN:
         raise LiveMatrixError("live_matrix_requires_foreign_execution_server")
-    run = _restore_terminal_projection_verification_run(run_id)
+    try:
+        run = _restore_terminal_projection_verification_run(run_id)
+        audit_backed = True
+    except LiveMatrixError as exc:
+        if str(exc) != "live_matrix_terminal_verification_audit_unavailable":
+            raise
+        run = await _reconstruct_terminal_projection_verification_run(run_id)
+        audit_backed = False
     await _hydrate_timelines(run.timelines)
     await _observe_webapp_terminal_projections(run.timelines)
-    if not all(
-        item.webapp_terminal_status == item.expected_terminal_status
-        for item in run.timelines
-    ):
+    if not _terminal_projection_verification_passed(run):
         raise LiveMatrixError("live_matrix_webapp_terminal_projection_mismatch")
-    run.phase = "terminal_projection_verified"
+    run.phase = (
+        "terminal_projection_verified"
+        if audit_backed
+        else "terminal_projection_reconstructed_verified"
+    )
     payload = _report_payload(run)
+    matrix_passed = bool(payload["passed"])
+    payload["passed"] = (
+        matrix_passed if audit_backed else True
+    )
     verification_path = _audit_path(
         f"{run_id}-terminal-projection-verification"
     )
     payload["verification"] = {
-        "mode": "read_only_terminal_public_projection",
+        "mode": (
+            "read_only_terminal_public_projection"
+            if audit_backed
+            else "read_only_terminal_public_projection_reconstructed_from_provenance"
+        ),
         "source_run_id": run_id,
         "verified_at": _iso(_utcnow()),
+        "source_matrix_audit_available": audit_backed,
+        "full_matrix_assertions_revalidated": audit_backed,
+        "full_matrix_assertions_from_report": matrix_passed,
     }
     verification_path.parent.mkdir(parents=True, exist_ok=True)
     verification_path.write_text(

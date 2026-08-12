@@ -29,11 +29,45 @@ from scripts.run_telegram_publisher_live_matrix import (
     _raise_if_background_task_failed,
     _wait_for_worker_acknowledgement,
     _timeline_terminal_follows_initial_publication,
+    _terminal_projection_verification_passed,
     build_live_matrix_workload,
 )
 
 
 class TelegramPublisherLiveMatrixTests(unittest.TestCase):
+    def test_terminal_projection_verification_requires_every_durable_stage(self):
+        import scripts.run_telegram_publisher_live_matrix as matrix
+
+        run = MatrixRun(
+            run_id="telegram-live-matrix-unit",
+            started_at="2026-08-12T00:00:00+00:00",
+            expected_expiry_minutes=25,
+        )
+        for index in range(1, 501):
+            status = "completed" if index <= 115 else "expired"
+            run.timelines.append(
+                OfferTimeline(
+                    index=index,
+                    origin="bot",
+                    scenario="reconstructed",
+                    expected_terminal_status=status,
+                    scheduled_at="2026-08-12T00:00:00+00:00",
+                    offer_status=status,
+                    central_queue_entered_at="2026-08-12T00:00:00+00:00",
+                    worker_acknowledged_at="2026-08-12T00:00:00+00:00",
+                    channel_post_state="sent",
+                    terminal_edit_state="sent",
+                    webapp_terminal_status=status,
+                    publisher_lane=matrix.TELEGRAM_PUBLISHER_IDENTITIES[
+                        (index - 1) % len(matrix.TELEGRAM_PUBLISHER_IDENTITIES)
+                    ],
+                )
+            )
+
+        self.assertTrue(_terminal_projection_verification_passed(run))
+        run.timelines[-1].worker_acknowledged_at = None
+        self.assertFalse(_terminal_projection_verification_passed(run))
+
     def test_terminal_webapp_observation_is_bounded(self):
         import scripts.run_telegram_publisher_live_matrix as matrix
 
