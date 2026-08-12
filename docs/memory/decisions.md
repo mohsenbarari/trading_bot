@@ -2,6 +2,7 @@
 
 Entries are newest first.
 
+- 2026-08-12 | Staging matrix private-message traffic renders the production recipient/message contracts but acknowledges via an in-process fake transport. Reason: synthetic fixture Telegram IDs must never create real Bot API calls or permanent delivery failures; the audit labels this boundary explicitly.
 - 2026-08-12 | The staging live publisher matrix uses 500 offers with an exact 60/40 Bot/WebApp mix in every lifecycle cohort and seeded random 0.8–4-second ingress. Reason: it models varied arrival pressure while retaining reproducible, auditable source and lifecycle proportions.
 - 2026-08-12 | Matrix publication gates count only terminal offers lacking sent initial-post evidence; an intentional, already-published manual expiry cannot block the global gate. Reason: manual expiry is an approved lifecycle scenario.
 - 2026-08-12 | Matrix direct WebApp calls skip post-response BackgroundTasks; overtime deadlines are launched by one ordered scheduler with at most 20 concurrent operations, and final audit requires terminal delivery/WebApp projection. Reason: direct calls lack an ASGI boundary and a large timer/DB wave can starve late tasks.

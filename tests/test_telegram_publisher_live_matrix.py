@@ -10,6 +10,7 @@ from scripts.run_telegram_publisher_live_matrix import (
     MatrixRun,
     OfferTimeline,
     LifecycleActionTimeline,
+    PrivateMessageSimulationTimeline,
     _complete_lifecycle_action,
     _initial_publication_complete,
     _is_ignorable_historical_private_job,
@@ -18,6 +19,8 @@ from scripts.run_telegram_publisher_live_matrix import (
     _run_direct_trade,
     _run_overtime_lifecycle,
     _run_overtime_schedule,
+    _simulate_private_telegram_send,
+    _report_payload,
     _assert_lifecycle_monitor_healthy,
     _wait_for_worker_acknowledgement,
     _timeline_terminal_follows_initial_publication,
@@ -88,6 +91,18 @@ class TelegramPublisherLiveMatrixTests(unittest.TestCase):
             )
         )
         self.assertEqual(workload.random_seed, 43)
+        self.assertEqual(
+            Counter(event.scenario for event in workload.active_lifecycle_events),
+            {
+                "direct_wholesale_trade": 50,
+                "direct_retail_lot_trade": 50,
+                "manual_expiry": 50,
+            },
+        )
+        self.assertEqual(
+            tuple(event.scheduled_offset_seconds for event in workload.active_lifecycle_events),
+            tuple(sorted(event.scheduled_offset_seconds for event in workload.active_lifecycle_events)),
+        )
 
     def test_rejects_any_non_approved_random_ingress_range(self):
         with self.assertRaisesRegex(RuntimeError, "random_0_8_to_4_seconds"):
@@ -131,6 +146,45 @@ class TelegramPublisherLiveMatrixTests(unittest.TestCase):
         self.assertEqual(_retail_lot_sizes(5), (5, 5, 5))
         self.assertEqual(_retail_lot_sizes("7"), (7, 7, 7))
         self.assertEqual(_retail_lot_sizes(None), (1, 1, 1))
+
+    def test_private_message_simulation_rejects_invalid_payloads_without_network(self):
+        asyncio.run(
+            _simulate_private_telegram_send(
+                telegram_id=1,
+                text="پیام آزمایشی",
+            )
+        )
+        with self.assertRaisesRegex(RuntimeError, "private_message_payload_invalid"):
+            asyncio.run(
+                _simulate_private_telegram_send(
+                    telegram_id=0,
+                    text="",
+                )
+            )
+
+    def test_private_message_audit_is_aggregate_and_redacted(self):
+        run = MatrixRun(
+            run_id="telegram-live-matrix-unit",
+            started_at="2026-08-12T00:00:00+00:00",
+            expected_expiry_minutes=25,
+        )
+        run.private_message_simulations.append(
+            PrivateMessageSimulationTimeline(
+                kind="management",
+                campaign_index=1,
+                scheduled_at="2026-08-12T00:00:00+00:00",
+                recipient_count=10,
+                message_count=10,
+                status="success",
+            )
+        )
+
+        payload = _report_payload(run)
+
+        simulation = payload["summary"]["private_message_simulation"]
+        self.assertEqual(simulation["transport"], "in_process_fake_private_transport")
+        self.assertEqual(simulation["message_count"], 10)
+        self.assertNotIn("telegram_id", str(payload))
 
     def test_initial_publication_requires_all_posts_before_any_unpublished_expiry(self):
         self.assertFalse(

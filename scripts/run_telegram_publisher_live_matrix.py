@@ -32,6 +32,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from sqlalchemy import and_, func, select
+from sqlalchemy.orm import selectinload
 
 from core.config import settings
 from core.db import AsyncSessionLocal
@@ -51,6 +52,7 @@ from models.offer import Offer, OfferStatus
 from models.offer_publication_state import OfferPublicationState, OfferPublicationSurface
 from models.telegram_delivery_job import TelegramDeliveryJobRecord
 from models.telegram_publisher_dispatch_command import TelegramPublisherDispatchCommand
+from models.trade import Trade, TradeStatus
 from models.user import User
 from scripts.run_telegram_publisher_b2b_harness import (
     B2BHarnessError,
@@ -96,6 +98,12 @@ MATRIX_OVERTIME_MINUTES = 5
 MATRIX_OVERTIME_RECEIPT_SAFETY_SECONDS = 1.0
 MATRIX_MANAGEMENT_MESSAGE_CAMPAIGNS = 5
 MATRIX_MANAGEMENT_MESSAGE_RECIPIENTS_PER_CAMPAIGN = 10
+MATRIX_ACTIVE_LIFECYCLE_MIN_AGE_SECONDS = 30.0
+MATRIX_TRADE_MESSAGE_SIMULATION_EVENTS = (
+    MATRIX_DIRECT_WHOLESALE_TRADES
+    + MATRIX_DIRECT_RETAIL_TRADES
+    + MATRIX_OVERTIME_APPROVED_TRADES
+)
 
 _INITIAL_ACTION = TelegramDeliveryAction.OFFER_PUBLISH.value
 _EXPIRY_ACTION = TelegramDeliveryAction.EXPIRED_OFFER_EDIT.value
@@ -191,10 +199,17 @@ class MatrixWorkload:
     origins: tuple[str, ...]
     scenarios: tuple[str, ...]
     ingress_offsets_seconds: tuple[float, ...]
+    active_lifecycle_events: tuple["ActiveLifecycleEvent", ...]
     interaction_origins: tuple[str, ...]
     interaction_offsets_seconds: tuple[float, ...]
     management_message_offsets_seconds: tuple[float, ...]
     random_seed: int
+
+
+@dataclass(frozen=True, slots=True)
+class ActiveLifecycleEvent:
+    scenario: str
+    scheduled_offset_seconds: float
 
 
 @dataclass(slots=True)
@@ -264,6 +279,20 @@ class InteractionTimeline:
 
 
 @dataclass(slots=True)
+class PrivateMessageSimulationTimeline:
+    kind: str
+    scheduled_at: str
+    offer_index: int | None = None
+    campaign_index: int | None = None
+    started_at: str | None = None
+    completed_at: str | None = None
+    recipient_count: int = 0
+    message_count: int = 0
+    status: str | None = None
+    failure_class: str | None = None
+
+
+@dataclass(slots=True)
 class MatrixRun:
     run_id: str
     started_at: str
@@ -271,6 +300,9 @@ class MatrixRun:
     random_seed: int | None = None
     timelines: list[OfferTimeline] = field(default_factory=list)
     interactions: list[InteractionTimeline] = field(default_factory=list)
+    private_message_simulations: list[PrivateMessageSimulationTimeline] = field(
+        default_factory=list
+    )
     lifecycle_actions: list[LifecycleActionTimeline] = field(default_factory=list)
     ignored_historical_private_job_count: int = 0
     phase: str = "preflight"
@@ -332,12 +364,32 @@ def build_live_matrix_workload(
             ingress_offsets[-1] + rng.uniform(ingress_minimum, ingress_maximum)
         )
     duration = ingress_offsets[-1]
+    active_scenarios = [
+        *("direct_wholesale_trade",) * MATRIX_DIRECT_WHOLESALE_TRADES,
+        *("direct_retail_lot_trade",) * MATRIX_DIRECT_RETAIL_TRADES,
+        *("manual_expiry",) * MATRIX_MANUAL_EXPIRIES,
+    ]
+    rng.shuffle(active_scenarios)
+    active_offsets = sorted(
+        rng.uniform(
+            max(MATRIX_ACTIVE_LIFECYCLE_MIN_AGE_SECONDS, duration * 0.05),
+            duration * 0.9,
+        )
+        for _ in active_scenarios
+    )
     interaction_origins = ["bot"] * 6 + ["webapp"] * 4
     rng.shuffle(interaction_origins)
     return MatrixWorkload(
         origins=tuple(origins),
         scenarios=tuple(scenarios),
         ingress_offsets_seconds=tuple(ingress_offsets),
+        active_lifecycle_events=tuple(
+            ActiveLifecycleEvent(
+                scenario=scenario,
+                scheduled_offset_seconds=offset,
+            )
+            for scenario, offset in zip(active_scenarios, active_offsets, strict=True)
+        ),
         interaction_origins=tuple(interaction_origins),
         interaction_offsets_seconds=tuple(
             sorted(
@@ -367,6 +419,9 @@ def _audit_path(run_id: str) -> Path:
 def _report_payload(run: MatrixRun) -> dict[str, Any]:
     timelines = [asdict(item) for item in run.timelines]
     interactions = [asdict(item) for item in run.interactions]
+    private_message_simulations = [
+        asdict(item) for item in run.private_message_simulations
+    ]
     lifecycle_actions = [asdict(item) for item in run.lifecycle_actions]
     initial_posted = sum(item["channel_post_state"] == _SENT_STATE for item in timelines)
     expiry_edited = sum(item["expiry_edit_state"] == _SENT_STATE for item in timelines)
@@ -382,6 +437,21 @@ def _report_payload(run: MatrixRun) -> dict[str, Any]:
         for item in lifecycle_actions
         if item["status"]
     )
+    private_message_statuses = Counter(
+        (item["kind"], item["status"])
+        for item in private_message_simulations
+        if item["status"]
+    )
+    trade_message_simulations = [
+        item
+        for item in private_message_simulations
+        if item["kind"] == "trade_completion"
+    ]
+    management_message_simulations = [
+        item
+        for item in private_message_simulations
+        if item["kind"] == "management"
+    ]
     queue_wait_seconds = [
         max(
             0.0,
@@ -411,6 +481,10 @@ def _report_payload(run: MatrixRun) -> dict[str, Any]:
         and all(count > 0 for count in lanes.values())
         and len(interactions) == MATRIX_USER_INTERACTIONS
         and all(item["status"] == "success" for item in interactions)
+        and len(trade_message_simulations) == MATRIX_TRADE_MESSAGE_SIMULATION_EVENTS
+        and len(management_message_simulations) == MATRIX_MANAGEMENT_MESSAGE_CAMPAIGNS
+        and all(item["status"] == "success" for item in private_message_simulations)
+        and all(int(item["message_count"] or 0) > 0 for item in private_message_simulations)
         and all(item["status"] == "success" for item in lifecycle_actions)
     )
     return {
@@ -466,6 +540,19 @@ def _report_payload(run: MatrixRun) -> dict[str, Any]:
                 item["webapp_terminal_visible_at"] is not None for item in timelines
             ),
             "interaction_successes": sum(item["status"] == "success" for item in interactions),
+            "private_message_simulation": {
+                "transport": "in_process_fake_private_transport",
+                "trade_completion_events": len(trade_message_simulations),
+                "management_campaigns": len(management_message_simulations),
+                "message_count": sum(
+                    int(item["message_count"] or 0)
+                    for item in private_message_simulations
+                ),
+                "statuses": {
+                    f"{kind}:{status}": count
+                    for (kind, status), count in sorted(private_message_statuses.items())
+                },
+            },
             "queue_to_channel_seconds": {
                 "min": min(queue_wait_seconds, default=None),
                 "max": max(queue_wait_seconds, default=None),
@@ -473,6 +560,7 @@ def _report_payload(run: MatrixRun) -> dict[str, Any]:
         },
         "offer_timelines": timelines,
         "user_interactions": interactions,
+        "private_message_simulations": private_message_simulations,
         "lifecycle_actions": lifecycle_actions,
         "passed": passed,
     }
@@ -770,6 +858,149 @@ async def _run_user_interactions(
             timeline.completed_at = _iso(_utcnow())
 
 
+async def _simulate_private_telegram_send(*, telegram_id: int, text: str) -> None:
+    """Validate a private send without exposing synthetic users to Telegram.
+
+    Fixture Telegram identities deliberately do not belong to real people. The
+    live matrix therefore exercises the production audience/message builders,
+    then records a successful in-process transport acknowledgement instead of
+    generating permanent ``chat not found`` failures in staging.
+    """
+    if int(telegram_id) <= 0 or not str(text or "").strip():
+        raise LiveMatrixError("live_matrix_private_message_payload_invalid")
+    await asyncio.sleep(0)
+
+
+async def _simulate_trade_completion_messages(
+    *,
+    run: MatrixRun,
+    timeline: OfferTimeline,
+) -> None:
+    """Render and simulate the private completion messages for one offer."""
+    entry = PrivateMessageSimulationTimeline(
+        kind="trade_completion",
+        offer_index=timeline.index,
+        scheduled_at=_iso(_utcnow()) or "",
+    )
+    run.private_message_simulations.append(entry)
+    entry.started_at = _iso(_utcnow())
+    try:
+        if timeline.offer_id is None:
+            raise LiveMatrixError("live_matrix_trade_message_offer_missing")
+        from core.services.trade_notification_audience_service import (
+            build_trade_completion_notification_audience,
+        )
+
+        async with AsyncSessionLocal() as db:
+            trades = list(
+                (
+                    await db.execute(
+                        select(Trade)
+                        .options(
+                            selectinload(Trade.offer),
+                            selectinload(Trade.offer_user),
+                            selectinload(Trade.responder_user),
+                            selectinload(Trade.commodity),
+                        )
+                        .where(
+                            Trade.offer_id == int(timeline.offer_id),
+                            Trade.status == TradeStatus.COMPLETED,
+                        )
+                        .order_by(Trade.id.asc())
+                    )
+                ).scalars()
+            )
+            if not trades:
+                raise LiveMatrixError("live_matrix_trade_message_trade_missing")
+            recipient_ids: set[int] = set()
+            for trade in trades:
+                audience = await build_trade_completion_notification_audience(db, trade)
+                if audience.skipped_reason:
+                    raise LiveMatrixError("live_matrix_trade_message_audience_invalid")
+                for recipient in audience.recipients:
+                    for requirement in recipient.channel_requirements:
+                        if (
+                            _value(requirement.channel) != "telegram"
+                            or not bool(requirement.required)
+                        ):
+                            continue
+                        telegram_id = getattr(requirement, "telegram_id", None)
+                        message = getattr(requirement, "message", None)
+                        if telegram_id is None or message is None:
+                            raise LiveMatrixError("live_matrix_trade_message_requirement_invalid")
+                        await _simulate_private_telegram_send(
+                            telegram_id=int(telegram_id),
+                            text=str(message),
+                        )
+                        entry.message_count += 1
+                        recipient_ids.add(int(recipient.recipient_user_id))
+            entry.recipient_count = len(recipient_ids)
+        if entry.message_count <= 0:
+            raise LiveMatrixError("live_matrix_trade_message_empty")
+        entry.status = "success"
+    except Exception as exc:
+        entry.status = type(exc).__name__
+        entry.failure_class = type(exc).__name__
+        raise
+    finally:
+        entry.completed_at = _iso(_utcnow())
+
+
+async def _run_management_message_simulation(
+    *,
+    users: Sequence[Any],
+    workload: MatrixWorkload,
+    started_monotonic: float,
+    started_at: datetime,
+    run: MatrixRun,
+) -> None:
+    """Simulate selected-recipient management notices during live ingress."""
+    if len(users) < MATRIX_MANAGEMENT_MESSAGE_RECIPIENTS_PER_CAMPAIGN:
+        raise LiveMatrixError("live_matrix_management_message_user_pool_too_small")
+    rng = random.Random(workload.random_seed ^ 0x5A5A_A5A5)
+    from core.services.telegram_admin_broadcast_service import (
+        validate_telegram_admin_broadcast_content,
+    )
+
+    for index, offset in enumerate(workload.management_message_offsets_seconds, start=1):
+        scheduled_at = datetime.fromtimestamp(
+            started_at.timestamp() + offset,
+            tz=timezone.utc,
+        )
+        entry = PrivateMessageSimulationTimeline(
+            kind="management",
+            campaign_index=index,
+            scheduled_at=_iso(scheduled_at) or "",
+        )
+        run.private_message_simulations.append(entry)
+        delay = started_monotonic + offset - time.monotonic()
+        if delay > 0:
+            await asyncio.sleep(delay)
+        entry.started_at = _iso(_utcnow())
+        try:
+            message = validate_telegram_admin_broadcast_content(
+                f"پیام مدیریتی آزمایشی {run.run_id} #{index}"
+            )
+            recipients = rng.sample(
+                list(users),
+                MATRIX_MANAGEMENT_MESSAGE_RECIPIENTS_PER_CAMPAIGN,
+            )
+            for user in recipients:
+                await _simulate_private_telegram_send(
+                    telegram_id=int(user.telegram_id),
+                    text=message,
+                )
+                entry.message_count += 1
+            entry.recipient_count = len(recipients)
+            entry.status = "success"
+        except Exception as exc:
+            entry.status = type(exc).__name__
+            entry.failure_class = type(exc).__name__
+            raise
+        finally:
+            entry.completed_at = _iso(_utcnow())
+
+
 async def _hydrate_timelines(timelines: Iterable[OfferTimeline]) -> None:
     rows = [item for item in timelines if item.offer_id and item.offer_public_id]
     if not rows:
@@ -985,6 +1216,8 @@ async def _run_direct_trade(
     users: Sequence[Any],
     run: MatrixRun,
     timeline: OfferTimeline,
+    scheduled_at: datetime | None = None,
+    simulate_private_messages: bool = False,
 ) -> None:
     taker = _taker_for_timeline(users, timeline)
     trade_count = 1 if timeline.scenario == "direct_wholesale_trade" else 3
@@ -999,7 +1232,7 @@ async def _run_direct_trade(
             timeline=timeline,
             action=action_name,
             origin=timeline.origin,
-            scheduled_at=_utcnow(),
+            scheduled_at=scheduled_at or _utcnow(),
         )
 
         async def execute() -> str:
@@ -1062,6 +1295,8 @@ async def _run_direct_trade(
             ),
             retry_delay_seconds=MATRIX_WEBAPP_OPERATION_RETRY_DELAY_SECONDS,
         )
+    if simulate_private_messages:
+        await _simulate_trade_completion_messages(run=run, timeline=timeline)
 
 
 async def _run_manual_expiry(
@@ -1071,6 +1306,7 @@ async def _run_manual_expiry(
     users: Sequence[Any],
     run: MatrixRun,
     timeline: OfferTimeline,
+    scheduled_at: datetime | None = None,
 ) -> None:
     owner = users[timeline.index - 1]
     entry = _append_lifecycle_action(
@@ -1078,7 +1314,7 @@ async def _run_manual_expiry(
         timeline=timeline,
         action="manual_expiry",
         origin=timeline.origin,
-        scheduled_at=_utcnow(),
+        scheduled_at=scheduled_at or _utcnow(),
     )
 
     async def execute() -> str | None:
@@ -1104,6 +1340,141 @@ async def _run_manual_expiry(
         return outcome
 
     await _complete_lifecycle_action(entry, execute)
+
+
+async def _select_random_published_active_timeline(
+    *,
+    timelines: Iterable[OfferTimeline],
+    scenario: str,
+    rng: random.Random,
+) -> OfferTimeline | None:
+    """Choose one already-visible active offer for an in-ingress action."""
+    candidates = [
+        item
+        for item in timelines
+        if (
+            item.scenario == scenario
+            and item.offer_id is not None
+            and item.offer_public_id is not None
+        )
+    ]
+    if not candidates:
+        return None
+    by_offer_id = {int(item.offer_id): item for item in candidates if item.offer_id}
+    public_ids = tuple(str(item.offer_public_id) for item in candidates if item.offer_public_id)
+    if not by_offer_id or not public_ids:
+        return None
+    minimum_created_at = _utcnow() - timedelta(
+        seconds=MATRIX_ACTIVE_LIFECYCLE_MIN_AGE_SECONDS
+    )
+    async with AsyncSessionLocal() as db:
+        rows = list(
+            (
+                await db.execute(
+                    select(Offer.id, TelegramDeliveryJobRecord.bot_identity)
+                    .join(
+                        TelegramDeliveryJobRecord,
+                        TelegramDeliveryJobRecord.source_natural_id
+                        == Offer.offer_public_id,
+                    )
+                    .where(
+                        Offer.id.in_(tuple(by_offer_id)),
+                        Offer.status == OfferStatus.ACTIVE,
+                        Offer.created_at <= minimum_created_at,
+                        TelegramDeliveryJobRecord.source_natural_id.in_(public_ids),
+                        TelegramDeliveryJobRecord.action_kind == _INITIAL_ACTION,
+                        TelegramDeliveryJobRecord.state == TelegramDeliveryState.SENT,
+                    )
+                )
+            ).all()
+        )
+    if not rows:
+        return None
+    available: list[OfferTimeline] = []
+    for offer_id, publisher_lane in rows:
+        timeline = by_offer_id.get(int(offer_id))
+        if timeline is None:
+            continue
+        timeline.publisher_lane = str(publisher_lane or "") or None
+        available.append(timeline)
+    return rng.choice(available) if available else None
+
+
+async def _wait_for_active_lifecycle_candidate(
+    *,
+    run: MatrixRun,
+    scenario: str,
+    rng: random.Random,
+) -> OfferTimeline:
+    """Wait only for one planned action's own published, active candidate."""
+    last_available_count = -1
+    last_progress_at = time.monotonic()
+    while True:
+        selected = await _select_random_published_active_timeline(
+            timelines=run.timelines,
+            scenario=scenario,
+            rng=rng,
+        )
+        if selected is not None:
+            return selected
+        candidate_count = sum(
+            item.scenario == scenario and item.offer_id is not None
+            for item in run.timelines
+        )
+        if candidate_count > last_available_count:
+            last_available_count = candidate_count
+            last_progress_at = time.monotonic()
+        elif time.monotonic() - last_progress_at >= MATRIX_PROGRESS_STALL_SECONDS:
+            raise LiveMatrixError("live_matrix_active_lifecycle_candidate_stalled")
+        await asyncio.sleep(MATRIX_PROGRESS_POLL_SECONDS)
+
+
+async def _run_active_lifecycle_stream(
+    *,
+    worker: Any,
+    users: Sequence[Any],
+    workload: MatrixWorkload,
+    started_at: datetime,
+    run: MatrixRun,
+) -> None:
+    """Run trades and manual expiry during ingress against prior live posts."""
+    rng = random.Random(workload.random_seed ^ 0xA5A5_5A5A)
+    harness = worker.AiogramDispatcherHarness()
+    try:
+        for event in workload.active_lifecycle_events:
+            scheduled_at = datetime.fromtimestamp(
+                started_at.timestamp() + event.scheduled_offset_seconds,
+                tz=timezone.utc,
+            )
+            await _wait_until(scheduled_at)
+            timeline = await _wait_for_active_lifecycle_candidate(
+                run=run,
+                scenario=event.scenario,
+                rng=rng,
+            )
+            if event.scenario in _DIRECT_TRADE_SCENARIOS:
+                await _run_direct_trade(
+                    worker=worker,
+                    harness=harness,
+                    users=users,
+                    run=run,
+                    timeline=timeline,
+                    scheduled_at=scheduled_at,
+                    simulate_private_messages=True,
+                )
+            elif event.scenario == "manual_expiry":
+                await _run_manual_expiry(
+                    worker=worker,
+                    harness=harness,
+                    users=users,
+                    run=run,
+                    timeline=timeline,
+                    scheduled_at=scheduled_at,
+                )
+            else:
+                raise LiveMatrixError("live_matrix_active_lifecycle_scenario_invalid")
+    finally:
+        await harness.close()
 
 
 async def _load_overtime_request_public_id(
@@ -1192,6 +1563,7 @@ async def _run_overtime_lifecycle(
     operation_semaphore: asyncio.Semaphore | None = None,
     scheduled_at: datetime | None = None,
     wait_for_schedule: bool = True,
+    simulate_private_messages: bool = False,
 ) -> None:
     if not timeline.normal_deadline_at:
         raise LiveMatrixError("live_matrix_overtime_normal_deadline_missing")
@@ -1261,6 +1633,8 @@ async def _run_overtime_lifecycle(
                 home_server=timeline.offer_home_server or SERVER_IRAN,
             ),
         )
+        if simulate_private_messages and decision == "approve":
+            await _simulate_trade_completion_messages(run=run, timeline=timeline)
 
 
 def _overtime_scheduled_at(timeline: OfferTimeline) -> datetime:
@@ -1278,8 +1652,9 @@ async def _run_overtime_schedule(
     run: MatrixRun,
     timelines: Sequence[OfferTimeline],
     operation_semaphore: asyncio.Semaphore,
+    simulate_private_messages: bool = False,
 ) -> None:
-    """Launch deadline actions in order instead of arming 300 timers at once.
+    """Launch deadline actions in order instead of arming 150 timers at once.
 
     A deadline cohort spans only 150 seconds, but a timer per offer can leave
     late callbacks unscheduled while the event loop drains the previous wave.
@@ -1301,6 +1676,7 @@ async def _run_overtime_schedule(
                         operation_semaphore=operation_semaphore,
                         scheduled_at=scheduled,
                         wait_for_schedule=False,
+                        simulate_private_messages=simulate_private_messages,
                     ),
                     name=f"telegram-live-matrix-overtime-{timeline.index}",
                 )
@@ -1354,17 +1730,13 @@ async def _run_lifecycle_actions(
     users: Sequence[Any],
     run: MatrixRun,
 ) -> None:
-    """Drive authoritative paths after workers receive the full matrix.
+    """Drive the deadline-only paths after ingress has completed.
 
-    Channel publication is deliberately slower than central ingress. Direct
-    and manual mutations retain their own publication gates so early offers do
-    not consume their 25-minute lifetime off-screen. Overtime tasks are only
-    created after the full initial publication barrier: all 150 later actions
-    then share one durable proof instead of re-querying the same post state at
-    their deadline. Final audit still proves every terminal event followed its
-    own initial channel post.
+    Direct trades and manual expiries are driven by the ingress-time scheduler
+    against randomly selected, already-published offers. Overtime remains tied
+    to the immutable registration deadline, so its ordered scheduler is only
+    started after all initial publications are durable.
     """
-    harness = worker.AiogramDispatcherHarness()
     overtime_completion: asyncio.Task[None] | None = None
     overtime_operation_semaphore = asyncio.Semaphore(
         MATRIX_OVERTIME_MAX_CONCURRENT_OPERATIONS
@@ -1375,35 +1747,20 @@ async def _run_lifecycle_actions(
         name="telegram-live-matrix-lifecycle-monitor",
     )
     try:
-        manual_timelines: list[OfferTimeline] = []
-        overtime_timelines: list[OfferTimeline] = []
-        for timeline in run.timelines:
-            if timeline.scenario in _OVERTIME_SCENARIOS:
-                overtime_timelines.append(timeline)
-            elif timeline.scenario in _DIRECT_TRADE_SCENARIOS:
-                await _run_direct_trade(
-                    worker=worker,
-                    harness=harness,
-                    users=users,
-                    run=run,
-                    timeline=timeline,
-                )
-                _assert_lifecycle_monitor_healthy(monitor_task)
-            elif timeline.scenario == "manual_expiry":
-                manual_timelines.append(timeline)
-            elif timeline.scenario != "natural_expiry":
-                raise LiveMatrixError("live_matrix_scenario_invalid")
-        if manual_timelines:
-            await _wait_for_initial_publication(run, timelines=manual_timelines)
-            for timeline in manual_timelines:
-                await _run_manual_expiry(
-                    worker=worker,
-                    harness=harness,
-                    users=users,
-                    run=run,
-                    timeline=timeline,
-                )
-                _assert_lifecycle_monitor_healthy(monitor_task)
+        overtime_timelines = [
+            timeline
+            for timeline in run.timelines
+            if timeline.scenario in _OVERTIME_SCENARIOS
+        ]
+        unexpected = [
+            timeline.scenario
+            for timeline in run.timelines
+            if timeline.scenario not in _OVERTIME_SCENARIOS
+            and timeline.scenario not in _DIRECT_TRADE_SCENARIOS
+            and timeline.scenario not in {"manual_expiry", "natural_expiry"}
+        ]
+        if unexpected:
+            raise LiveMatrixError("live_matrix_scenario_invalid")
         # The strict global barrier is still before the earliest normal
         # deadline at the approved 57/minute cadence. It prevents a large
         # cohort of deadline tasks from contending for the same read-only
@@ -1418,6 +1775,7 @@ async def _run_lifecycle_actions(
                     run=run,
                     timelines=overtime_timelines,
                     operation_semaphore=overtime_operation_semaphore,
+                    simulate_private_messages=True,
                 ),
                 name="telegram-live-matrix-overtime-scheduler",
             )
@@ -1436,7 +1794,6 @@ async def _run_lifecycle_actions(
             await asyncio.gather(overtime_completion, return_exceptions=True)
         monitor_stop.set()
         await monitor_task
-        await harness.close()
 
 
 def _initial_publication_complete(
@@ -1764,6 +2121,8 @@ async def run_live_matrix(args: argparse.Namespace) -> dict[str, Any]:
     )
     report_path = _audit_path(run_id)
     interaction_task: asyncio.Task[None] | None = None
+    active_lifecycle_task: asyncio.Task[None] | None = None
+    management_message_task: asyncio.Task[None] | None = None
     visibility_tasks: list[asyncio.Task[None]] = []
     try:
         (
@@ -1798,6 +2157,26 @@ async def run_live_matrix(args: argparse.Namespace) -> dict[str, Any]:
                     run=run,
                 ),
                 name="telegram-live-matrix-user-interactions",
+            )
+            active_lifecycle_task = asyncio.create_task(
+                _run_active_lifecycle_stream(
+                    worker=worker,
+                    users=users,
+                    workload=workload,
+                    started_at=started_at,
+                    run=run,
+                ),
+                name="telegram-live-matrix-active-lifecycle",
+            )
+            management_message_task = asyncio.create_task(
+                _run_management_message_simulation(
+                    users=users,
+                    workload=workload,
+                    started_monotonic=started_monotonic,
+                    started_at=started_at,
+                    run=run,
+                ),
+                name="telegram-live-matrix-management-messages",
             )
             for index, (origin, scenario) in enumerate(
                 zip(workload.origins, workload.scenarios, strict=True), start=1
@@ -1840,6 +2219,10 @@ async def run_live_matrix(args: argparse.Namespace) -> dict[str, Any]:
             visibility_tasks = []
             if interaction_task is not None:
                 await interaction_task
+            if active_lifecycle_task is not None:
+                await active_lifecycle_task
+            if management_message_task is not None:
+                await management_message_task
             run.phase = "awaiting_worker_acknowledgement"
             await _wait_for_worker_acknowledgement(run)
             run.phase = "awaiting_direct_initial_publication"
@@ -1863,6 +2246,12 @@ async def run_live_matrix(args: argparse.Namespace) -> dict[str, Any]:
         if interaction_task is not None and not interaction_task.done():
             interaction_task.cancel()
             await asyncio.gather(interaction_task, return_exceptions=True)
+        if active_lifecycle_task is not None and not active_lifecycle_task.done():
+            active_lifecycle_task.cancel()
+            await asyncio.gather(active_lifecycle_task, return_exceptions=True)
+        if management_message_task is not None and not management_message_task.done():
+            management_message_task.cancel()
+            await asyncio.gather(management_message_task, return_exceptions=True)
         if visibility_tasks:
             await asyncio.gather(*visibility_tasks, return_exceptions=True)
         await _hydrate_timelines(run.timelines)
