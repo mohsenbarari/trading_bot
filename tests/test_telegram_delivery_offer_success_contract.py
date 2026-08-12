@@ -171,6 +171,38 @@ class TelegramDeliveryOfferSuccessContractTests(
             after_another_interaction.source_version,
         )
 
+    def test_snapshot_ignores_publication_only_offer_version_change(self):
+        outbox = self._outbox()
+        offer = SimpleNamespace(
+            id=19,
+            user_id=7,
+            offer_public_id="ofr_success_1",
+            version_id=1,
+            status="active",
+            offer_type="buy",
+            settlement_type=None,
+            commodity=SimpleNamespace(name="سکه"),
+            quantity=12,
+            remaining_quantity=12,
+            price=123456,
+            notes=None,
+        )
+        outbox.text = build_offer_success_text(
+            success_copy=OFFER_SUCCESS_COPY_LEGACY,
+            offer_text=build_offer_channel_message(offer),
+        )
+        user = SimpleNamespace(id=7, telegram_id=7007, sync_version=3)
+        original = build_telegram_offer_success_snapshot(outbox, user, offer)
+        offer.version_id = 2
+        after_publication = build_telegram_offer_success_snapshot(
+            outbox,
+            user,
+            offer,
+        )
+
+        self.assertEqual(original.payload, after_publication.payload)
+        self.assertEqual(original.source_version, after_publication.source_version)
+
     def test_runtime_coverage_is_complete_after_scheduled_sources(self):
         freshness = configured_telegram_delivery_freshness_registry(
             channel_id=-1001234567890

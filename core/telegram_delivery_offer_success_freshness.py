@@ -309,7 +309,15 @@ def build_telegram_offer_success_snapshot(
     )
     version_snapshot = json.dumps(
         {
-            "offer_version": offer_version,
+            # Publication bookkeeping (most notably channel_message_id) bumps
+            # the aggregate Offer version after this immutable success outbox
+            # has been created, without changing the private preview payload.
+            # Binding the queue identity to that later aggregate version makes
+            # a delayed job reclassify itself merely because its own public
+            # publication completed.  Keep the fence tied to the source event;
+            # actual business changes remain protected by the active-state and
+            # authoritative-text checks above.
+            "offer_version": source.expected_offer_version,
             "payload_hash": payload_hash,
             # The recipient route is already fenced by the immutable Telegram
             # id captured in the outbox and checked against the current user.
