@@ -15,6 +15,7 @@ from scripts.run_telegram_publisher_live_matrix import (
     _retail_lot_sizes,
     _run_post_response_background_tasks,
     _run_direct_trade,
+    _timeline_terminal_follows_initial_publication,
     build_live_matrix_workload,
 )
 
@@ -116,6 +117,29 @@ class TelegramPublisherLiveMatrixTests(unittest.TestCase):
             "expired_before_initial_publication",
         ):
             _initial_publication_complete(posted_count=999, expired_count=1)
+
+    def test_initial_publication_gate_accepts_a_complete_lifecycle_cohort(self):
+        self.assertTrue(
+            _initial_publication_complete(
+                posted_count=200,
+                expired_count=0,
+                expected_count=200,
+            )
+        )
+
+    def test_terminal_audit_requires_initial_post_to_precede_terminal_state(self):
+        timeline = OfferTimeline(
+            index=1,
+            origin="bot",
+            scenario="manual_expiry",
+            expected_terminal_status="expired",
+            scheduled_at="2026-08-12T00:00:00+00:00",
+            channel_posted_at="2026-08-12T00:01:00+00:00",
+            terminal_at="2026-08-12T00:02:00+00:00",
+        )
+        self.assertTrue(_timeline_terminal_follows_initial_publication(timeline))
+        timeline.terminal_at = "2026-08-12T00:00:59+00:00"
+        self.assertFalse(_timeline_terminal_follows_initial_publication(timeline))
 
     def test_lifecycle_action_records_only_the_failure_class(self):
         entry = LifecycleActionTimeline(

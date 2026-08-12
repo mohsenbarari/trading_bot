@@ -342,6 +342,10 @@ def _report_payload(run: MatrixRun) -> dict[str, Any]:
         for item in timelines
         if item["channel_posted_at"] and item["central_queue_entered_at"]
     ]
+    terminal_after_initial_publication = all(
+        _timeline_terminal_follows_initial_publication(item)
+        for item in run.timelines
+    )
     passed = (
         run.failure_reason is None
         and len(timelines) == MATRIX_TOTAL_OFFERS
@@ -349,6 +353,7 @@ def _report_payload(run: MatrixRun) -> dict[str, Any]:
         and acknowledged == MATRIX_TOTAL_OFFERS
         and initial_posted == MATRIX_TOTAL_OFFERS
         and terminal_edited == MATRIX_TOTAL_OFFERS
+        and terminal_after_initial_publication
         and all(
             item["offer_status"] == item["expected_terminal_status"]
             for item in timelines
@@ -392,6 +397,7 @@ def _report_payload(run: MatrixRun) -> dict[str, Any]:
             "offers_expired": expired,
             "expiry_edits_sent": expiry_edited,
             "terminal_channel_edits_sent": terminal_edited,
+            "terminal_events_after_initial_publication": terminal_after_initial_publication,
             "scenarios": dict(sorted(scenarios.items())),
             "terminal_offer_statuses": dict(sorted(terminal_statuses.items())),
             "lifecycle_action_statuses": {
@@ -1109,6 +1115,7 @@ async def _run_overtime_lifecycle(
         scheduled_at=scheduled,
     )
     await _wait_until(scheduled)
+    await _assert_timeline_initial_publication(timeline)
     requester = _taker_for_timeline(users, timeline)
     idempotency_key = f"{run.run_id}-overtime-{timeline.index:04d}"
 
@@ -1178,7 +1185,14 @@ async def _run_lifecycle_actions(
     users: Sequence[Any],
     run: MatrixRun,
 ) -> None:
-    """Drive only authoritative application paths after all initial posts exist."""
+    """Drive authoritative paths after workers receive the full matrix.
+
+    Channel publication is deliberately slower than central ingress.  Waiting
+    for the thousandth channel post before acting on the first one would make
+    an early offer consume most of its real 25-minute lifetime off-screen.  A
+    direct/manual mutation therefore waits for its own post; final audit still
+    proves every terminal event followed that offer's initial channel post.
+    """
     harness = worker.AiogramDispatcherHarness()
     overtime_tasks: list[asyncio.Task[None]] = []
     monitor_stop = asyncio.Event()
@@ -1187,6 +1201,7 @@ async def _run_lifecycle_actions(
         name="telegram-live-matrix-lifecycle-monitor",
     )
     try:
+        manual_timelines: list[OfferTimeline] = []
         for timeline in run.timelines:
             if timeline.scenario in _OVERTIME_SCENARIOS:
                 overtime_tasks.append(
@@ -1209,6 +1224,12 @@ async def _run_lifecycle_actions(
                     timeline=timeline,
                 )
             elif timeline.scenario == "manual_expiry":
+                manual_timelines.append(timeline)
+            elif timeline.scenario != "natural_expiry":
+                raise LiveMatrixError("live_matrix_scenario_invalid")
+        if manual_timelines:
+            await _wait_for_initial_publication(run, timelines=manual_timelines)
+            for timeline in manual_timelines:
                 await _run_manual_expiry(
                     worker=worker,
                     harness=harness,
@@ -1216,8 +1237,6 @@ async def _run_lifecycle_actions(
                     run=run,
                     timeline=timeline,
                 )
-            elif timeline.scenario != "natural_expiry":
-                raise LiveMatrixError("live_matrix_scenario_invalid")
         await asyncio.gather(*overtime_tasks)
     finally:
         if any(not task.done() for task in overtime_tasks):
@@ -1233,11 +1252,12 @@ def _initial_publication_complete(
     *,
     posted_count: int,
     expired_count: int,
+    expected_count: int = MATRIX_TOTAL_OFFERS,
 ) -> bool:
-    """Validate the hard no-lifecycle-before-initial-publication boundary."""
+    """Validate a publication gate before the selected lifecycle cohort."""
     if int(expired_count) > 0:
         raise LiveMatrixError("live_matrix_offer_expired_before_initial_publication")
-    return int(posted_count) == MATRIX_TOTAL_OFFERS
+    return int(posted_count) == int(expected_count)
 
 
 async def _initial_publication_progress(
@@ -1273,6 +1293,56 @@ async def _initial_publication_progress(
             or 0
         )
     return posted_count, expired_count
+
+
+async def _worker_acknowledgement_progress(
+    timelines: Iterable[OfferTimeline],
+) -> int:
+    """Count worker receipts without hydrating the thousand-offer audit."""
+    public_ids = tuple(
+        str(item.offer_public_id)
+        for item in timelines
+        if item.offer_public_id
+    )
+    if not public_ids:
+        return 0
+    async with AsyncSessionLocal() as db:
+        return int(
+            await db.scalar(
+                select(func.count(TelegramPublisherDispatchCommand.id))
+                .join(
+                    TelegramDeliveryJobRecord,
+                    TelegramPublisherDispatchCommand.job_id
+                    == TelegramDeliveryJobRecord.id,
+                )
+                .where(
+                    TelegramDeliveryJobRecord.source_natural_id.in_(public_ids),
+                    TelegramDeliveryJobRecord.action_kind == _INITIAL_ACTION,
+                    TelegramPublisherDispatchCommand.acknowledged_at.is_not(None),
+                )
+            )
+            or 0
+        )
+
+
+async def _wait_for_worker_acknowledgement(run: MatrixRun) -> None:
+    """Require all 1,000 central dispatches to reach publisher workers first."""
+    expected_count = len(run.timelines)
+    if expected_count != MATRIX_TOTAL_OFFERS:
+        raise LiveMatrixError("live_matrix_worker_ack_offer_count_invalid")
+    last_acknowledged = -1
+    last_progress_at = time.monotonic()
+    while True:
+        acknowledged_count = await _worker_acknowledgement_progress(run.timelines)
+        if acknowledged_count == expected_count:
+            _write_audit(run)
+            return
+        if acknowledged_count > last_acknowledged:
+            last_acknowledged = acknowledged_count
+            last_progress_at = time.monotonic()
+        elif time.monotonic() - last_progress_at >= MATRIX_PROGRESS_STALL_SECONDS:
+            raise LiveMatrixError("live_matrix_worker_acknowledgement_stalled")
+        await asyncio.sleep(MATRIX_PROGRESS_POLL_SECONDS)
 
 
 async def _terminal_progress_snapshot(run: MatrixRun) -> tuple[int, int, int, int]:
@@ -1345,17 +1415,26 @@ async def _terminal_progress_snapshot(run: MatrixRun) -> tuple[int, int, int, in
     return queue_count, posted_count, completed_count + expired_count, edited_count
 
 
-async def _wait_for_initial_publication(run: MatrixRun) -> None:
-    """Do not begin lifecycle mutations until every initial post reached Telegram."""
+async def _wait_for_initial_publication(
+    run: MatrixRun,
+    *,
+    timelines: Iterable[OfferTimeline] | None = None,
+) -> None:
+    """Wait for a lifecycle cohort's own initial posts, never a global barrier."""
+    selected_timelines = list(timelines if timelines is not None else run.timelines)
+    expected_count = len(selected_timelines)
+    if not expected_count:
+        return
     last_posted = -1
     last_progress_at = time.monotonic()
     while True:
-        posted_count, expired_count = await _initial_publication_progress(run.timelines)
+        posted_count, expired_count = await _initial_publication_progress(selected_timelines)
         if _initial_publication_complete(
             posted_count=posted_count,
             expired_count=expired_count,
+            expected_count=expected_count,
         ):
-            await _hydrate_timelines(run.timelines)
+            await _hydrate_timelines(selected_timelines)
             _write_audit(run)
             return
         if posted_count > last_posted:
@@ -1364,6 +1443,29 @@ async def _wait_for_initial_publication(run: MatrixRun) -> None:
         elif time.monotonic() - last_progress_at >= MATRIX_PROGRESS_STALL_SECONDS:
             raise LiveMatrixError("live_matrix_initial_publication_stalled")
         await asyncio.sleep(MATRIX_PROGRESS_POLL_SECONDS)
+
+
+async def _assert_timeline_initial_publication(timeline: OfferTimeline) -> None:
+    """Fail closed if a delayed lifecycle task reaches an unpublished offer."""
+    posted_count, expired_count = await _initial_publication_progress((timeline,))
+    if not _initial_publication_complete(
+        posted_count=posted_count,
+        expired_count=expired_count,
+        expected_count=1,
+    ):
+        raise LiveMatrixError("live_matrix_lifecycle_before_initial_publication")
+
+
+def _timeline_terminal_follows_initial_publication(timeline: OfferTimeline) -> bool:
+    """Keep the final audit strict even though lifecycle starts per-offer."""
+    if not timeline.channel_posted_at or not timeline.terminal_at:
+        return False
+    try:
+        return datetime.fromisoformat(timeline.channel_posted_at) <= datetime.fromisoformat(
+            timeline.terminal_at
+        )
+    except (TypeError, ValueError):
+        return False
 
 
 async def _wait_for_terminal_lifecycle(run: MatrixRun) -> None:
@@ -1383,6 +1485,11 @@ async def _wait_for_terminal_lifecycle(run: MatrixRun) -> None:
             and edited_count == MATRIX_TOTAL_OFFERS
         ):
             await _hydrate_timelines(run.timelines)
+            if not all(
+                _timeline_terminal_follows_initial_publication(item)
+                for item in run.timelines
+            ):
+                raise LiveMatrixError("live_matrix_terminal_before_initial_publication")
             await asyncio.gather(
                 *[
                     _observe_webapp_visibility(timeline, terminal=True)
@@ -1511,8 +1618,17 @@ async def run_live_matrix(args: argparse.Namespace) -> dict[str, Any]:
             visibility_tasks = []
             if interaction_task is not None:
                 await interaction_task
-            run.phase = "awaiting_initial_publication"
-            await _wait_for_initial_publication(run)
+            run.phase = "awaiting_worker_acknowledgement"
+            await _wait_for_worker_acknowledgement(run)
+            run.phase = "awaiting_direct_initial_publication"
+            await _wait_for_initial_publication(
+                run,
+                timelines=(
+                    item
+                    for item in run.timelines
+                    if item.scenario in _DIRECT_TRADE_SCENARIOS
+                ),
+            )
             run.phase = "driving_lifecycle"
             await _run_lifecycle_actions(worker=worker, users=users, run=run)
             run.phase = "awaiting_terminal_lifecycle"
