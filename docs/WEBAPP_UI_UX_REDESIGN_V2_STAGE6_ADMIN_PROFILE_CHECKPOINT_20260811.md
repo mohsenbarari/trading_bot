@@ -2,7 +2,7 @@
 
 تاریخ آغاز: ۲۰۲۶-۰۸-۱۱
 
-وضعیت: **`stage6_phase1_phase2_phase3_phase4_delivered_broader_roadmap_partial_deferred`**
+وضعیت: **`stage6_phase1_phase2_phase3_phase4_phase5_delivered_broader_roadmap_partial_deferred`**
 
 شاخه: `condidate/webapp-ui-ux-redesign-v2`
 
@@ -37,12 +37,12 @@ Stage 6 به‌صورت route-scoped، rollback-safe و با گیت مستقل �
 
 فایل‌های مجاز این slice فقط `frontend/src/components/AdminPanel.vue`، تست مستقیم آن و در صورت نیاز expectation محدود `AdminView.test.ts` هستند. تغییر child workflow، API، router، route guard، permission یا backend در Phase 1 مجاز نیست.
 
-## ۴. deferred خارج از Phase 1/2/3/4 تحویل‌شده
+## ۴. deferred خارج از Phase 1/2/3/4/5 تحویل‌شده
 
 موارد زیر sliceهای مستقل و گیت‌دار بعدی‌اند:
 
 - commodity feedback persistence؛
-- dialogهای sensitive به‌جای `alert`/`confirm`؛
+- dialogهای sensitive خارج از PublicProfile block/unblock؛
 - هر تغییر در Admin Messages و System Settings غیرمحافظت‌شده.
 
 `/market`، `/chat`، `/share-receive`، `/admin/channels`، interiorهای market/messenger در `AdminMessagesView` و `TradingSettings` و Home Market همچنان protected هستند. هیچ shared CSS/token بدون guard و proof نبود drift تغییر نمی‌کند.
@@ -157,6 +157,20 @@ browser receipt promotable در run `uiux-stage6-phase4-invitations-20260812T052
 
 Figma Phase 4 در page `321:18`، section `398:504`، با دو mobile screen و scope card ثبت شده است. label `402:504` دقیقاً `source 7ac46a36 · دادهٔ synthetic` است؛ نمونهٔ دعوت فقط synthetic است و audit raw URL/token/phone را نیافت.
 
-## ۱۳. مرز closure
+## ۱۳. رسید Phase 5 — تأیید و receipt امن بلاک عمومی
 
-Phase 1/2/3/4 تحویل‌شده‌اند، اما broader roadmap Stage 6 partial/deferred است و **`stage6CompleteAuthority=false`**. هیچ `EVIDENCE_MANIFEST`، local freeze، Sites project/preview، product deployment، staging deployment یا production deployment ساخته یا تغییر داده نشده است. این checkpoint مجوز انجام deferredها یا ادعای complete Stage 6 نیست.
+Phase 5 در commit `5ca7d00120c693c8c8507656dbe203dd530396a5` (tree `9776550334dfc45a563e1b5fd221d63156334c36`) تحویل شد و فقط `PublicProfile.vue` و تست مستقیم آن را تغییر می‌دهد.
+
+- `window.confirm` و `window.alert` از flow بلاک/رفع‌بلاک حذف شدند؛ `AppConfirmDialog` موجود با Teleport، focus-trap، Escape، restore-focus و scroll-lock استفاده می‌شود.
+- بازکردن و لغو dialog هیچ mutation ندارد. فقط `{ success: true }` معتبر، پس از `POST` یا `DELETE` دقیق `/api/blocks/:id`، state محلی را تغییر می‌دهد؛ رفع‌بلاک حتی وقتی block جدید مجاز نیست در دسترس می‌ماند.
+- ۴۰۰/۴۰۳/۴۰۴، network و payload نامعتبر state را حفظ می‌کنند و فقط receipt ثابت می‌دهند؛ account name، detail/message یا payload خام سرور در dialog، feedback، URL، history یا storage وارد نمی‌شود.
+
+گیت‌های source: focused `PublicProfile` + `AppPrimitives` برابر `65/65` pass، `vue-tsc --noEmit`، `npm run guard:ui` و `git diff --check` pass هستند.
+
+browser receipt promotable در run `uiux-stage6-phase5-public-block-20260812T062238392Z` روی commit clean بالا با `7/7` assertion و ۶ screenshot pass شد: dialog/focus/scroll-lock/cancel در `360×740`، POST و receipt امن در `390×844`، DELETE رفع‌بلاک در `1440×900` و ۴۰۳/۴۰۴/malformed بدون state flip یا raw-detail را پوشش می‌دهد. source binding `4b153ba3d9cd7fdeab262f89e48286f7ecfa592cd5cff5d3a30f2f7d4a671451` (393 files)، metrics SHA-256 `5a88e7c01641738d7ba667a188b354386e786d2200a8511b7556b1e25dc9a70e` و binding SHA-256 `b91ac618e35f1582ebb316a711ceb541c1758615a6b16ea8a13b2175a9ad1ab0` است؛ diagnostic غیرمنتظره صفر و traffic خارجی فقط locally intercepted بوده است.
+
+Figma Phase 5 در page `321:18`، section `413:571` ثبت شد: confirmation screen `413:4241` و fixed receipt/error screen `416:605` هر دو `390×844` هستند. label `413:4240` شامل `source 5ca7d001 · دادهٔ synthetic` است؛ همهٔ textها Vazirmatn، Button/Header/Nav instanceهای design-system موجود و card/dialog token-bound هستند. independent audit clipping، PII، URL یا raw server payload نیافت.
+
+## ۱۴. مرز closure
+
+Phase 1/2/3/4/5 تحویل‌شده‌اند، اما broader roadmap Stage 6 partial/deferred است و **`stage6CompleteAuthority=false`**. هیچ `EVIDENCE_MANIFEST`، local freeze، Sites project/preview، product deployment، staging deployment یا production deployment ساخته یا تغییر داده نشده است. این checkpoint مجوز انجام deferredها یا ادعای complete Stage 6 نیست.
