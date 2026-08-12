@@ -21,6 +21,7 @@ import JalaliDatePicker from './JalaliDatePicker.vue';
 import {
   AppButton,
   AppActionCard,
+  AppConfirmDialog,
   AppEmptyState,
   AppErrorState,
   AppFilterChips,
@@ -152,6 +153,18 @@ interface PublicBlockStatus {
   reason_message?: string | null;
 }
 
+type PublicBlockActionKind = 'block' | 'unblock';
+
+interface PendingPublicBlockAction {
+  kind: PublicBlockActionKind;
+  targetUserId: number;
+}
+
+interface PublicBlockFeedback {
+  tone: 'success' | 'error';
+  message: string;
+}
+
 const profileData = ref<PublicUser | null>(null);
 const mutualTrades = ref<MutualTradePreview[]>([]);
 const isLoading = ref(true);
@@ -190,6 +203,9 @@ const addressError = ref('');
 const publicBlockBusy = ref(false);
 const publicBlockState = ref<boolean | null>(null);
 const publicBlockStatus = ref<PublicBlockStatus | null>(null);
+const pendingPublicBlockAction = ref<PendingPublicBlockAction | null>(null);
+const publicBlockDialogError = ref('');
+const publicBlockFeedback = ref<PublicBlockFeedback | null>(null);
 const showAdminUserManager = ref(false);
 const adminUserData = ref<any>(null);
 const adminUserLoading = ref(false);
@@ -502,11 +518,21 @@ const publicBlockActionDescription = computed(() => {
   if (publicBlockState.value === true) {
     return null;
   }
-  return publicBlockStatus.value?.reason_message || null;
+  if (!publicBlockStatus.value) return null;
+  if (!publicBlockStatus.value.can_block) {
+    return 'قابلیت بلاک برای نقش فعلی شما فعال نیست.';
+  }
+  if (!publicBlockStatus.value.can_block_now) {
+    return 'ظرفیت بلاک شما تکمیل است.';
+  }
+  return null;
 });
 const publicBlockActionLabel = computed(() => {
   if (publicBlockBusy.value) {
-    return 'در حال بررسی...';
+    return 'در حال ثبت...';
+  }
+  if (pendingPublicBlockAction.value) {
+    return 'در انتظار تأیید...';
   }
   if (publicBlockState.value === true) {
     return 'رفع بلاک';
@@ -515,6 +541,22 @@ const publicBlockActionLabel = computed(() => {
     return 'بلاک کاربر';
   }
   return 'بلاک / رفع بلاک';
+});
+const pendingPublicBlockConfirmation = computed(() => {
+  const pendingAction = pendingPublicBlockAction.value;
+  if (!pendingAction) return null;
+
+  const isUnblock = pendingAction.kind === 'unblock';
+  return {
+    title: isUnblock
+      ? 'رفع بلاک کاربر؟'
+      : 'بلاک کاربر؟',
+    message: isUnblock
+      ? 'پس از تأیید، وضعیت فقط با پاسخ معتبر سرور به‌روزرسانی می‌شود.'
+      : 'با تأیید شما، درخواست بلاک ارسال می‌شود و وضعیت فقط با پاسخ معتبر سرور به‌روزرسانی می‌شود.',
+    confirmLabel: isUnblock ? 'تأیید رفع بلاک' : 'تأیید بلاک',
+    tone: isUnblock ? 'warning' as const : 'danger' as const,
+  };
 });
 const sharedStatCards = computed<ProfileStatCard[]>(() => {
   if (!isOwnProfile.value || !profileData.value) return [];
@@ -548,7 +590,7 @@ const visitorActionCards = computed<ProfileActionCard[]>(() => {
       key: 'block_toggle',
       label: publicBlockActionLabel.value,
       description: publicBlockActionDescription.value,
-      disabled: publicBlockBusy.value || publicBlockActionDisabled.value,
+      disabled: publicBlockBusy.value || pendingPublicBlockAction.value !== null || publicBlockActionDisabled.value,
     });
   }
 
@@ -601,6 +643,7 @@ async function loadProfile() {
   const requestRevision = ++profileRequestRevision;
   isLoading.value = true;
   error.value = '';
+  resetPublicBlockActionUi();
   if (!props.user?.id || !props.jwtToken) {
     error.value = 'اطلاعات کاربر نامعتبر است.';
     isLoading.value = false;
@@ -1331,10 +1374,19 @@ async function getCurrentPublicBlockState() {
   const response = await apiFetch(`/api/blocks/check/${profileData.value.id}`);
   const payload = await response.json().catch(() => null);
   if (!response.ok) {
-    throw new Error(parseApiError(payload, 'خطا در بررسی وضعیت بلاک کاربر'));
+    throw new Error(getSafePublicBlockReadError(response.status, 'خطا در بررسی وضعیت بلاک کاربر'));
   }
 
-  return Boolean((payload as { is_blocked_by_me?: unknown } | null)?.is_blocked_by_me);
+  if (
+    !payload
+    || typeof payload !== 'object'
+    || Array.isArray(payload)
+    || typeof (payload as { is_blocked_by_me?: unknown }).is_blocked_by_me !== 'boolean'
+  ) {
+    throw new Error('پاسخ وضعیت بلاک کاربر معتبر نیست.');
+  }
+
+  return (payload as { is_blocked_by_me: boolean }).is_blocked_by_me;
 }
 
 function normalizePublicBlockStatus(payload: Partial<PublicBlockStatus> | null | undefined): PublicBlockStatus {
@@ -1390,10 +1442,13 @@ async function getPublicBlockStatus() {
   const response = await apiFetch('/api/blocks/status');
   const payload = await response.json().catch(() => null);
   if (!response.ok) {
-    throw new Error(parseApiError(payload, 'خطا در دریافت وضعیت بلاک کاربر'));
+    throw new Error(getSafePublicBlockReadError(response.status, 'خطا در دریافت وضعیت بلاک کاربر'));
+  }
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    throw new Error('پاسخ وضعیت بلاک کاربر معتبر نیست.');
   }
 
-  return normalizePublicBlockStatus(payload as Partial<PublicBlockStatus> | null);
+  return normalizePublicBlockStatus(payload as Partial<PublicBlockStatus>);
 }
 
 async function refreshPublicBlockUiState() {
@@ -1412,50 +1467,136 @@ async function refreshPublicBlockUiState() {
   publicBlockState.value = blockedByMe;
 }
 
-async function togglePublicProfileBlock() {
-  if (!showPublicBlockAction.value || !profileData.value || !props.jwtToken || publicBlockBusy.value) return;
+function resetPublicBlockActionUi() {
+  pendingPublicBlockAction.value = null;
+  publicBlockDialogError.value = '';
+  publicBlockFeedback.value = null;
+}
+
+function setPublicBlockFeedback(tone: PublicBlockFeedback['tone'], message: string) {
+  publicBlockFeedback.value = { tone, message };
+}
+
+function getSafePublicBlockReadError(status: number, fallback: string) {
+  if (status === 403) return 'دسترسی به وضعیت بلاک این کاربر برای نقش فعلی شما مجاز نیست.';
+  if (status === 404) return 'اطلاعات بلاک این کاربر دیگر در دسترس نیست.';
+  return fallback;
+}
+
+function getSafePublicBlockMutationError(status: number, action: PublicBlockActionKind) {
+  if (status === 403) {
+    return 'دسترسی شما برای تغییر وضعیت بلاک این کاربر مجاز نیست. وضعیت بلاک تغییر نکرد.';
+  }
+  if (status === 404) {
+    return 'این کاربر دیگر در دسترس نیست. وضعیت بلاک تغییر نکرد.';
+  }
+  return action === 'unblock'
+    ? 'رفع بلاک کاربر انجام نشد. وضعیت بلاک تغییر نکرد.'
+    : 'بلاک کاربر انجام نشد. وضعیت بلاک تغییر نکرد.';
+}
+
+function isValidatedPublicBlockMutation(payload: unknown): payload is { success: true } {
+  return Boolean(
+    payload
+    && typeof payload === 'object'
+    && !Array.isArray(payload)
+    && (payload as { success?: unknown }).success === true,
+  );
+}
+
+function reportPublicBlockActionError(message: string) {
+  publicBlockDialogError.value = message;
+  setPublicBlockFeedback('error', message);
+}
+
+function requestPublicProfileBlockToggle() {
+  if (
+    !showPublicBlockAction.value
+    || !profileData.value
+    || !props.jwtToken
+    || publicBlockBusy.value
+    || pendingPublicBlockAction.value
+  ) {
+    return;
+  }
+
+  publicBlockDialogError.value = '';
+  publicBlockFeedback.value = null;
+
+  if (publicBlockState.value === null || publicBlockStatus.value === null) {
+    setPublicBlockFeedback('error', 'وضعیت بلاک هنوز آماده نیست. لطفاً چند لحظه دیگر دوباره تلاش کنید.');
+    return;
+  }
+
+  if (!publicBlockState.value && !publicBlockStatus.value.can_block_now) {
+    setPublicBlockFeedback(
+      'error',
+      'امکان بلاک کاربر در حال حاضر وجود ندارد.',
+    );
+    return;
+  }
+
+  pendingPublicBlockAction.value = {
+    kind: publicBlockState.value ? 'unblock' : 'block',
+    targetUserId: profileData.value.id,
+  };
+}
+
+function cancelPendingPublicBlockAction() {
+  if (publicBlockBusy.value) return;
+  pendingPublicBlockAction.value = null;
+  publicBlockDialogError.value = '';
+}
+
+async function confirmPublicProfileBlockAction() {
+  const pendingAction = pendingPublicBlockAction.value;
+  if (!pendingAction || publicBlockBusy.value) return;
+
+  if (
+    !showPublicBlockAction.value
+    || !profileData.value
+    || !props.jwtToken
+    || profileData.value.id !== pendingAction.targetUserId
+  ) {
+    reportPublicBlockActionError('این پروفایل تغییر کرده است. وضعیت بلاک بدون تغییر باقی ماند.');
+    return;
+  }
 
   publicBlockBusy.value = true;
+  publicBlockDialogError.value = '';
+  publicBlockFeedback.value = null;
   try {
-    if (publicBlockState.value === null || publicBlockStatus.value === null) {
-      await refreshPublicBlockUiState();
-    }
-
-    const isBlocked = publicBlockState.value === true;
-    if (!isBlocked && publicBlockStatus.value && !publicBlockStatus.value.can_block_now) {
-      window.alert(publicBlockStatus.value.reason_message || 'امکان بلاک کاربر در حال حاضر وجود ندارد.');
-      return;
-    }
-
-    const shouldUnblock = isBlocked;
-    const confirmed = window.confirm(
-      shouldUnblock
-        ? `آیا از رفع بلاک کاربر ${profileDisplayName.value} اطمینان دارید؟`
-        : `آیا از بلاک کاربر ${profileDisplayName.value} اطمینان دارید؟`
-    );
-    if (!confirmed) {
-      return;
-    }
-
-    const response = await apiFetch(`/api/blocks/${profileData.value.id}`, {
-      method: shouldUnblock ? 'DELETE' : 'POST',
+    const response = await apiFetch(`/api/blocks/${pendingAction.targetUserId}`, {
+      method: pendingAction.kind === 'unblock' ? 'DELETE' : 'POST',
     });
     const payload = await response.json().catch(() => null);
     if (!response.ok) {
-      throw new Error(parseApiError(payload, shouldUnblock ? 'رفع بلاک کاربر ناموفق بود.' : 'بلاک کاربر ناموفق بود.'));
+      reportPublicBlockActionError(getSafePublicBlockMutationError(response.status, pendingAction.kind));
+      return;
+    }
+    if (!isValidatedPublicBlockMutation(payload)) {
+      reportPublicBlockActionError('پاسخ معتبر از سرور دریافت نشد. وضعیت بلاک تغییر نکرد.');
+      return;
+    }
+    if (profileData.value?.id !== pendingAction.targetUserId) {
+      pendingPublicBlockAction.value = null;
+      setPublicBlockFeedback('success', 'تغییر وضعیت ثبت شد. برای بررسی وضعیت جدید، پروفایل کاربر را دوباره باز کنید.');
+      return;
     }
 
-    publicBlockState.value = !shouldUnblock;
+    const isNowBlocked = pendingAction.kind === 'block';
+    publicBlockState.value = isNowBlocked;
     if (publicBlockStatus.value) {
-      const nextBlockedCount = publicBlockStatus.value.current_blocked + (shouldUnblock ? -1 : 1);
+      const nextBlockedCount = publicBlockStatus.value.current_blocked + (isNowBlocked ? 1 : -1);
       publicBlockStatus.value = derivePublicBlockStatus(publicBlockStatus.value, nextBlockedCount);
     }
-    const successMessage = typeof (payload as { message?: unknown } | null)?.message === 'string'
-      ? (payload as { message: string }).message
-      : (shouldUnblock ? 'رفع بلاک کاربر انجام شد.' : 'کاربر با موفقیت بلاک شد.');
-    window.alert(successMessage);
-  } catch (e: any) {
-    window.alert(e?.message || 'خطا در اجرای عملیات بلاک کاربر.');
+    pendingPublicBlockAction.value = null;
+    setPublicBlockFeedback(
+      'success',
+      isNowBlocked ? 'کاربر با موفقیت بلاک شد.' : 'رفع بلاک کاربر انجام شد.',
+    );
+  } catch {
+    reportPublicBlockActionError('ارتباط با سرور برای تغییر وضعیت بلاک برقرار نشد. وضعیت بلاک تغییر نکرد.');
   } finally {
     publicBlockBusy.value = false;
   }
@@ -1476,7 +1617,7 @@ function handleActionClick(action: ProfileActionCard) {
   if (action.key === 'message') {
     emit('navigate', 'chat', { userId: profileData.value.id, userName: profileData.value.account_name });
   } else if (action.key === 'block_toggle') {
-    void togglePublicProfileBlock();
+    requestPublicProfileBlockToggle();
   } else if (action.key === 'settings') {
     emit('navigate', 'settings');
   } else if (action.key === 'admin_settings') {
@@ -1962,6 +2103,15 @@ function handleHistoryPresetChipChange(value: string) {
             </template>
           </AppActionCard>
           </div>
+          <p
+            v-if="publicBlockFeedback"
+            class="public-block-feedback"
+            :class="`public-block-feedback--${publicBlockFeedback.tone}`"
+            :role="publicBlockFeedback.tone === 'error' ? 'alert' : 'status'"
+            data-test="public-block-feedback"
+          >
+            {{ publicBlockFeedback.message }}
+          </p>
         </AppSectionCard>
       </section>
 
@@ -2232,6 +2382,20 @@ function handleHistoryPresetChipChange(value: string) {
         @navigate="handleAdminUserManagerNavigate"
       />
     </AppResponsiveDialog>
+
+    <AppConfirmDialog
+      :open="Boolean(pendingPublicBlockConfirmation)"
+      :title="pendingPublicBlockConfirmation?.title || 'تأیید عملیات'"
+      :message="pendingPublicBlockConfirmation?.message"
+      :confirm-label="pendingPublicBlockConfirmation?.confirmLabel || 'تأیید'"
+      cancel-label="انصراف"
+      :tone="pendingPublicBlockConfirmation?.tone || 'warning'"
+      :busy="publicBlockBusy"
+      :error="publicBlockDialogError || undefined"
+      :confirm-disabled="!pendingPublicBlockConfirmation"
+      @cancel="cancelPendingPublicBlockAction"
+      @confirm="confirmPublicProfileBlockAction"
+    />
   </div>
 </template>
 
@@ -2552,6 +2716,28 @@ function handleHistoryPresetChipChange(value: string) {
   color: var(--ds-danger-600, #dc2626);
   font-size: 0.88rem;
   text-align: center;
+}
+
+.public-block-feedback {
+  margin: 0.9rem 0 0;
+  padding: 0.72rem 0.84rem;
+  border-radius: var(--ds-radius-md);
+  font-size: var(--ds-font-sm);
+  font-weight: 700;
+  line-height: 1.7;
+  text-align: right;
+}
+
+.public-block-feedback--success {
+  border: 1px solid var(--ds-success-100);
+  background: var(--ds-success-50);
+  color: var(--ds-success-700);
+}
+
+.public-block-feedback--error {
+  border: 1px solid var(--ds-danger-200);
+  background: var(--ds-danger-50);
+  color: var(--ds-danger-700);
 }
 
 .admin-user-modal-overlay {

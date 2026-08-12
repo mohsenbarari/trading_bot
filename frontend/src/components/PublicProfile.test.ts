@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
+import { nextTick } from 'vue'
 import JalaliDatePicker from './JalaliDatePicker.vue'
 import { currentUserSummary } from '../utils/currentUser'
 
@@ -34,6 +35,48 @@ function makeHistoryPage(items: unknown[], nextCursor: string | null = null, has
     has_more: hasMore,
     page_size: items.length,
   })
+}
+
+function makePublicPeerProfile(id = 30, accountName = 'plain30') {
+  return {
+    id,
+    account_name: accountName,
+    avatar_file_id: null,
+    mobile_number: '09125555555',
+    address: 'تهران',
+    created_at_jalali: '۱۴۰۵/۰۱/۰۳',
+    trades_count: 4,
+    resolved_from_accountant_id: null,
+    highlight_accountant_user_id: null,
+    highlight_accountant_relation_display_name: null,
+    accountant_relations: [],
+  }
+}
+
+function makePublicBlockStatus(overrides: Record<string, unknown> = {}) {
+  return {
+    can_block: true,
+    can_block_now: true,
+    max_blocked: 3,
+    current_blocked: 1,
+    remaining: 2,
+    reason_code: null,
+    reason_message: null,
+    ...overrides,
+  }
+}
+
+async function getPublicBlockDialog() {
+  await nextTick()
+  await nextTick()
+  const dialog = document.body.querySelector<HTMLElement>('.ui-confirm-dialog')
+  expect(dialog).toBeTruthy()
+  return dialog!
+}
+
+function getDialogButton(dialog: HTMLElement, label: string) {
+  return Array.from(dialog.querySelectorAll<HTMLButtonElement>('button'))
+    .find((button) => button.textContent?.includes(label))
 }
 
 function defaultFetchResponse(input: string): Promise<Response> {
@@ -80,6 +123,7 @@ beforeAll(async () => {
 
 describe('PublicProfile.vue', () => {
   beforeEach(() => {
+    document.body.replaceChildren()
     buildChatFileUrlMock.mockClear()
     uploadAvatarImageMock.mockReset()
     vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL) => {
@@ -91,7 +135,6 @@ describe('PublicProfile.vue', () => {
       return defaultFetchResponse(url)
     }))
     vi.stubGlobal('alert', vi.fn())
-    vi.stubGlobal('confirm', vi.fn(() => true))
     currentUserSummary.value = null
     localStorage.clear()
     localStorage.setItem('auth_token', 'token')
@@ -635,35 +678,15 @@ describe('PublicProfile.vue', () => {
     expect(wrapper.findAll('button').some((button) => button.text().includes('ارسال پیام'))).toBe(false)
   })
 
-  it('shows a block toggle next to the message action for non-customer profiles', async () => {
+  it('opens a block confirmation and lets cancel leave the state and API untouched', async () => {
     const fetchMock = vi.mocked(fetch)
-    fetchMock.mockResolvedValueOnce(makeResponse({
-      id: 30,
-      account_name: 'plain30',
-      avatar_file_id: null,
-      mobile_number: '09125555555',
-      address: 'تهران',
-      created_at_jalali: '۱۴۰۵/۰۱/۰۳',
-      trades_count: 4,
-      resolved_from_accountant_id: null,
-      highlight_accountant_user_id: null,
-      highlight_accountant_relation_display_name: null,
-      accountant_relations: [],
-    }))
-    fetchMock.mockResolvedValueOnce(makeResponse({
-      can_block: true,
-      can_block_now: true,
-      max_blocked: 3,
-      current_blocked: 1,
-      remaining: 2,
-      reason_code: null,
-      reason_message: null,
-    }))
+    fetchMock.mockResolvedValueOnce(makeResponse(makePublicPeerProfile()))
+    fetchMock.mockResolvedValueOnce(makeResponse(makePublicBlockStatus()))
     fetchMock.mockResolvedValueOnce(makeResponse({ is_blocked_by_me: false }))
-    fetchMock.mockResolvedValueOnce(makeResponse({ success: true, message: 'کاربر با موفقیت بلاک شد.' }))
 
     const PublicProfile = (await import('./PublicProfile.vue')).default
     const wrapper = mount(PublicProfile, {
+      attachTo: document.body,
       props: {
         user: { id: 30, account_name: 'plain30' },
         viewerUserId: 99,
@@ -683,55 +706,79 @@ describe('PublicProfile.vue', () => {
 
     const blockButton = wrapper.findAll('button').find((button) => button.text().includes('بلاک کاربر'))
     expect(blockButton).toBeTruthy()
-
     await blockButton!.trigger('click')
+
+    const dialog = await getPublicBlockDialog()
+    expect(dialog.textContent).toContain('بلاک کاربر؟')
+    expect(dialog.textContent).not.toContain('plain30')
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+
+    const cancelButton = getDialogButton(dialog, 'انصراف')
+    expect(cancelButton).toBeTruthy()
+    cancelButton!.click()
     await flushPromises()
 
-    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/blocks/status', expect.objectContaining({
-      headers: expect.objectContaining({
-        Authorization: 'Bearer token',
-      }),
-    }))
-    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/blocks/check/30', expect.objectContaining({
-      headers: expect.objectContaining({
-        Authorization: 'Bearer token',
-      }),
-    }))
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+    expect(document.body.querySelector('.ui-confirm-dialog')).toBeNull()
+    expect(wrapper.findAll('button').some((button) => button.text().includes('رفع بلاک'))).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('confirms block only after an explicit dialog action and renders a fixed success receipt', async () => {
+    const fetchMock = vi.mocked(fetch)
+    fetchMock.mockResolvedValueOnce(makeResponse(makePublicPeerProfile()))
+    fetchMock.mockResolvedValueOnce(makeResponse(makePublicBlockStatus()))
+    fetchMock.mockResolvedValueOnce(makeResponse({ is_blocked_by_me: false }))
+    fetchMock.mockResolvedValueOnce(makeResponse({ success: true, message: 'متن پاسخ سرور نباید دیده شود' }))
+
+    const PublicProfile = (await import('./PublicProfile.vue')).default
+    const wrapper = mount(PublicProfile, {
+      attachTo: document.body,
+      props: {
+        user: { id: 30, account_name: 'plain30' },
+        viewerUserId: 99,
+        apiBaseUrl: '',
+        jwtToken: 'token',
+      },
+      global: {
+        stubs: {
+          LoadingSkeleton: true,
+          OwnerAccountantManagerModal: true,
+          OwnerCustomerManagerModal: true,
+        },
+      },
+    })
+
+    await flushPromises()
+    const blockButton = wrapper.findAll('button').find((button) => button.text().includes('بلاک کاربر'))
+    await blockButton!.trigger('click')
+    const dialog = await getPublicBlockDialog()
+    const confirmButton = getDialogButton(dialog, 'تأیید بلاک')
+    expect(confirmButton).toBeTruthy()
+    confirmButton!.click()
+    await flushPromises()
+
     expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/blocks/30', expect.objectContaining({
       method: 'POST',
-      headers: expect.objectContaining({
-        Authorization: 'Bearer token',
-      }),
+      headers: expect.objectContaining({ Authorization: 'Bearer token' }),
     }))
-    expect(vi.mocked(window.confirm)).toHaveBeenCalledWith('آیا از بلاک کاربر plain30 اطمینان دارید؟')
-    expect(vi.mocked(window.alert)).toHaveBeenCalledWith('کاربر با موفقیت بلاک شد.')
+    expect(wrapper.get('[data-test="public-block-feedback"]').text()).toBe('کاربر با موفقیت بلاک شد.')
+    expect(wrapper.text()).not.toContain('متن پاسخ سرور نباید دیده شود')
     expect(wrapper.findAll('button').some((button) => button.text().includes('رفع بلاک'))).toBe(true)
+    wrapper.unmount()
   })
 
   it('disables the block action with a capability-aware reason when new blocks are not allowed', async () => {
     const fetchMock = vi.mocked(fetch)
-    fetchMock.mockResolvedValueOnce(makeResponse({
-      id: 30,
-      account_name: 'plain30',
-      avatar_file_id: null,
-      mobile_number: '09125555555',
-      address: 'تهران',
-      created_at_jalali: '۱۴۰۵/۰۱/۰۳',
-      trades_count: 4,
-      resolved_from_accountant_id: null,
-      highlight_accountant_user_id: null,
-      highlight_accountant_relation_display_name: null,
-      accountant_relations: [],
-    }))
-    fetchMock.mockResolvedValueOnce(makeResponse({
-      can_block: true,
+    fetchMock.mockResolvedValueOnce(makeResponse(makePublicPeerProfile()))
+    fetchMock.mockResolvedValueOnce(makeResponse(makePublicBlockStatus({
       can_block_now: false,
       max_blocked: 1,
       current_blocked: 1,
       remaining: 0,
       reason_code: 'limit_reached',
-      reason_message: 'ظرفیت بلاک شما تکمیل است. حداکثر 1 کاربر را می‌توانید بلاک کنید.',
-    }))
+      reason_message: 'متن اختصاصی سرور نباید دیده شود',
+    })))
     fetchMock.mockResolvedValueOnce(makeResponse({ is_blocked_by_me: false }))
 
     const PublicProfile = (await import('./PublicProfile.vue')).default
@@ -757,35 +804,22 @@ describe('PublicProfile.vue', () => {
     expect(blockButton).toBeTruthy()
     expect(blockButton!.attributes('disabled')).toBeDefined()
     expect(wrapper.text()).toContain('ظرفیت بلاک شما تکمیل است')
+    expect(wrapper.text()).not.toContain('متن اختصاصی سرور نباید دیده شود')
     await blockButton!.trigger('click')
-    expect(vi.mocked(window.confirm)).not.toHaveBeenCalled()
     expect(fetchMock).toHaveBeenCalledTimes(3)
   })
 
   it('keeps unblock available even when new blocks are globally disabled for the viewer', async () => {
     const fetchMock = vi.mocked(fetch)
-    fetchMock.mockResolvedValueOnce(makeResponse({
-      id: 30,
-      account_name: 'plain30',
-      avatar_file_id: null,
-      mobile_number: '09125555555',
-      address: 'تهران',
-      created_at_jalali: '۱۴۰۵/۰۱/۰۳',
-      trades_count: 4,
-      resolved_from_accountant_id: null,
-      highlight_accountant_user_id: null,
-      highlight_accountant_relation_display_name: null,
-      accountant_relations: [],
-    }))
-    fetchMock.mockResolvedValueOnce(makeResponse({
+    fetchMock.mockResolvedValueOnce(makeResponse(makePublicPeerProfile()))
+    fetchMock.mockResolvedValueOnce(makeResponse(makePublicBlockStatus({
       can_block: false,
       can_block_now: false,
-      max_blocked: 3,
       current_blocked: 1,
       remaining: 0,
       reason_code: 'capability_disabled',
-      reason_message: 'قابلیت بلاک برای شما غیرفعال است.',
-    }))
+      reason_message: 'متن اختصاصی سرور نباید دیده شود',
+    })))
     fetchMock.mockResolvedValueOnce(makeResponse({ is_blocked_by_me: true }))
     fetchMock.mockResolvedValueOnce(makeResponse({ success: true, message: 'رفع بلاک انجام شد.' }))
 
@@ -813,6 +847,10 @@ describe('PublicProfile.vue', () => {
     expect(unblockButton!.attributes('disabled')).toBeUndefined()
 
     await unblockButton!.trigger('click')
+    const dialog = await getPublicBlockDialog()
+    const confirmButton = getDialogButton(dialog, 'تأیید رفع بلاک')
+    expect(confirmButton).toBeTruthy()
+    confirmButton!.click()
     await flushPromises()
 
     expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/blocks/30', expect.objectContaining({
@@ -821,8 +859,95 @@ describe('PublicProfile.vue', () => {
         Authorization: 'Bearer token',
       }),
     }))
-    expect(vi.mocked(window.confirm)).toHaveBeenCalledWith('آیا از رفع بلاک کاربر plain30 اطمینان دارید؟')
-    expect(vi.mocked(window.alert)).toHaveBeenCalledWith('رفع بلاک انجام شد.')
+    expect(wrapper.get('[data-test="public-block-feedback"]').text()).toBe('رفع بلاک کاربر انجام شد.')
+    expect(wrapper.text()).not.toContain('متن اختصاصی سرور نباید دیده شود')
+  })
+
+  it.each([
+    [400, { detail: 'جزئیات اعتبارسنجی حساس سرور' }, 'بلاک کاربر انجام نشد. وضعیت بلاک تغییر نکرد.'],
+    [403, { detail: 'جزئیات دسترسی حساس سرور' }, 'دسترسی شما برای تغییر وضعیت بلاک این کاربر مجاز نیست. وضعیت بلاک تغییر نکرد.'],
+    [404, { detail: 'جزئیات نبودن حساس سرور' }, 'این کاربر دیگر در دسترس نیست. وضعیت بلاک تغییر نکرد.'],
+  ])('keeps the block state unchanged and hides raw server detail after a %s response', async (status, payload, safeMessage) => {
+    const fetchMock = vi.mocked(fetch)
+    fetchMock.mockResolvedValueOnce(makeResponse(makePublicPeerProfile()))
+    fetchMock.mockResolvedValueOnce(makeResponse(makePublicBlockStatus()))
+    fetchMock.mockResolvedValueOnce(makeResponse({ is_blocked_by_me: false }))
+    fetchMock.mockResolvedValueOnce(makeResponse(payload, false, status))
+
+    const PublicProfile = (await import('./PublicProfile.vue')).default
+    const wrapper = mount(PublicProfile, {
+      attachTo: document.body,
+      props: {
+        user: { id: 30, account_name: 'plain30' },
+        viewerUserId: 99,
+        apiBaseUrl: '',
+        jwtToken: 'token',
+      },
+      global: {
+        stubs: {
+          LoadingSkeleton: true,
+          OwnerAccountantManagerModal: true,
+          OwnerCustomerManagerModal: true,
+        },
+      },
+    })
+
+    await flushPromises()
+    const blockButton = wrapper.findAll('button').find((button) => button.text().includes('بلاک کاربر'))
+    await blockButton!.trigger('click')
+    const dialog = await getPublicBlockDialog()
+    getDialogButton(dialog, 'تأیید بلاک')!.click()
+    await flushPromises()
+
+    expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/blocks/30', expect.objectContaining({ method: 'POST' }))
+    expect(wrapper.get('[data-test="public-block-feedback"]').text()).toBe(safeMessage)
+    expect(dialog.textContent).toContain(safeMessage)
+    expect(wrapper.text()).not.toContain((payload as { detail: string }).detail)
+    expect(wrapper.findAll('button').some((button) => button.text().includes('رفع بلاک'))).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('rejects malformed successful block responses without flipping state or exposing payload text', async () => {
+    const fetchMock = vi.mocked(fetch)
+    fetchMock.mockResolvedValueOnce(makeResponse(makePublicPeerProfile()))
+    fetchMock.mockResolvedValueOnce(makeResponse(makePublicBlockStatus()))
+    fetchMock.mockResolvedValueOnce(makeResponse({ is_blocked_by_me: false }))
+    fetchMock.mockResolvedValueOnce(makeResponse({ success: false, message: 'جزئیات نامعتبر سرور' }))
+
+    const PublicProfile = (await import('./PublicProfile.vue')).default
+    const wrapper = mount(PublicProfile, {
+      attachTo: document.body,
+      props: {
+        user: { id: 30, account_name: 'plain30' },
+        viewerUserId: 99,
+        apiBaseUrl: '',
+        jwtToken: 'token',
+      },
+      global: {
+        stubs: {
+          LoadingSkeleton: true,
+          OwnerAccountantManagerModal: true,
+          OwnerCustomerManagerModal: true,
+        },
+      },
+    })
+
+    await flushPromises()
+    const blockButton = wrapper.findAll('button').find((button) => button.text().includes('بلاک کاربر'))
+    await blockButton!.trigger('click')
+    const dialog = await getPublicBlockDialog()
+    getDialogButton(dialog, 'تأیید بلاک')!.click()
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="public-block-feedback"]').text()).toBe('پاسخ معتبر از سرور دریافت نشد. وضعیت بلاک تغییر نکرد.')
+    expect(dialog.textContent).toContain('پاسخ معتبر از سرور دریافت نشد. وضعیت بلاک تغییر نکرد.')
+    expect(wrapper.text()).not.toContain('جزئیات نامعتبر سرور')
+    expect(wrapper.findAll('button').some((button) => button.text().includes('رفع بلاک'))).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('contains no native confirm or alert path for public block mutations', () => {
+    expect(publicProfileSource).not.toMatch(/window\.(?:confirm|alert)\s*\(/)
   })
 
   it('loads the project users directory for self profiles and navigates through result rows', async () => {
