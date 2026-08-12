@@ -194,6 +194,7 @@ describe('PublicProfile.vue', () => {
     expect(publicProfileSource).toMatch(/data-test="profile-avatar-trigger"/)
     expect(publicProfileSource).toMatch(/<button\s+v-if="showOwnerSections"[\s\S]*?class="profile-avatar profile-avatar-button profile-avatar-button--editable"/)
     expect(publicProfileSource).toMatch(/\.profile-link-btn\s*\{[\s\S]*?color:\s*var\(--ds-success-700\)/)
+    expect(publicProfileSource).toMatch(/\.trade-counterparty \.profile-link-btn\s*\{[\s\S]*?color:\s*var\(--ds-success-700\)/)
     expect(publicProfileSource).toMatch(/background:\s*linear-gradient\(135deg,\s*var\(--ds-telegram-500\),\s*var\(--ds-info-500\) 58%,\s*var\(--ds-primary-500\) 100%\)/)
     expect(publicProfileSource).toMatch(/\.profile-avatar-button--editable\s*\{[\s\S]*?box-shadow:\s*var\(--ds-shadow-lg\)/)
   })

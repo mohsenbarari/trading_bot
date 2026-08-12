@@ -3441,6 +3441,10 @@ function handleHistoryPresetChipChange(value: string) {
   cursor: pointer;
 }
 
+.trade-counterparty .profile-link-btn {
+  color: var(--ds-success-700);
+}
+
 .profile-link-btn:hover,
 .profile-link-btn:focus-visible {
   text-decoration: underline;
