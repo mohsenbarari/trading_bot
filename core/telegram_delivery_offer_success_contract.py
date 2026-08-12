@@ -15,6 +15,7 @@ OFFER_SUCCESS_ALLOWED_COPIES = frozenset(
         OFFER_SUCCESS_COPY_TEXT,
     }
 )
+_MARKDOWN_V1_LITERAL_CHARACTERS = ("_", "*", "[", "`")
 
 
 def validate_offer_success_copy(value: Any) -> str:
@@ -24,12 +25,24 @@ def validate_offer_success_copy(value: Any) -> str:
     return normalized
 
 
+def escape_offer_success_markdown_text(value: Any) -> str:
+    """Escape dynamic offer text embedded below the trusted Markdown heading."""
+
+    escaped = str(value or "").replace("\\", "\\\\")
+    for character in _MARKDOWN_V1_LITERAL_CHARACTERS:
+        escaped = escaped.replace(character, f"\\{character}")
+    return escaped
+
+
 def build_offer_success_text(*, success_copy: Any, offer_text: Any) -> str:
     copy = validate_offer_success_copy(success_copy)
     normalized_offer_text = str(offer_text or "").strip()
     if not normalized_offer_text:
         raise ValueError("offer_success_offer_text_invalid")
-    return f"{copy}\n\n**لفظ شما:**\n\n{normalized_offer_text}"
+    return (
+        f"{copy}\n\n**لفظ شما:**\n\n"
+        f"{escape_offer_success_markdown_text(normalized_offer_text)}"
+    )
 
 
 def build_offer_success_reply_markup(offer_id: Any) -> dict[str, Any]:

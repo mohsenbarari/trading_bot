@@ -120,6 +120,7 @@ from core.services.telegram_notification_outbox_service import (
     enqueue_offer_success_preview_notification_once,
 )
 from core.telegram_delivery_queue_contract import TelegramDeliveryAction
+from core.telegram_delivery_offer_success_contract import build_offer_success_text
 from core.market_intelligence.coin_inference_shadow import observe_coin_inference_shadow
 from core.market_intelligence.coin_inference_selection import (
     CoinInferenceSelectionRejected,
@@ -1816,7 +1817,10 @@ async def _handle_trade_confirm_core(
 
         if not queue_owns_telegram_delivery:
             await edit_callback_message_via_runtime(callback, user,
-                f"{success_message_text}\n\n**لفظ شما:**\n\n{published_channel_message}",
+                build_offer_success_text(
+                    success_copy=success_message_text,
+                    offer_text=published_channel_message,
+                ),
                 parse_mode="Markdown",
                 reply_markup=InlineKeyboardMarkup(
                     inline_keyboard=[

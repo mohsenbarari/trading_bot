@@ -68,6 +68,15 @@ class TelegramDeliveryOfferSuccessContractTests(
         with self.assertRaisesRegex(ValueError, "copy_invalid"):
             build_offer_success_text(success_copy="success", offer_text="لفظ")
 
+    def test_dynamic_offer_text_is_escaped_for_markdown_v1(self):
+        text = build_offer_success_text(
+            success_copy=OFFER_SUCCESS_COPY_TEXT,
+            offer_text=r"توضیحات: group_name * [test] `code` C:\temp",
+        )
+
+        self.assertIn("**لفظ شما:**", text)
+        self.assertIn(r"group\_name \* \[test] \`code\` C:\\temp", text)
+
     async def test_producer_stamps_immutable_offer_preview_contract(self):
         expected = SimpleNamespace(created=True)
         recipient = outbox_service.TelegramNotificationRecipient(
