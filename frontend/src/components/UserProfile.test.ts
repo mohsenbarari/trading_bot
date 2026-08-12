@@ -135,6 +135,22 @@ async function confirmDialog(wrapper: VueWrapper) {
   await button.trigger('click')
 }
 
+async function cancelDialog(wrapper: VueWrapper) {
+  const dialog = wrapper.get('.ui-confirm-dialog')
+  const button = dialog.findAll('button').at(0)
+  if (!button) throw new Error('Cancel button not found')
+  await button.trigger('click')
+}
+
+function expectDialogKeepsSafeCopy(wrapper: VueWrapper, rawDetail: string) {
+  const dialog = wrapper.get('.ui-confirm-dialog')
+  expect(dialog.exists()).toBe(true)
+  expect(dialog.text()).toContain('تأیید نشد')
+  expect(dialog.text()).not.toContain(rawDetail)
+  expect(dialog.text()).not.toContain('owner12')
+  expect(dialog.text()).not.toContain('09120000000')
+}
+
 function expectMutationCall(
   callNumber: number,
   url: string,
@@ -311,7 +327,7 @@ describe('UserProfile.vue authoritative admin actions', () => {
     await flushPromises()
     expect(user.account_status).toBe('active')
     expect(wrapper.find('.ui-confirm-dialog').exists()).toBe(true)
-    expect(wrapper.get('.ui-confirm-dialog [role="alert"]').text()).toContain('ناموفق')
+    expect(wrapper.get('.ui-confirm-dialog [role="alert"]').text()).toContain('تأیید نشد')
 
     await confirmDialog(wrapper)
     await flushPromises()
@@ -675,7 +691,7 @@ describe('UserProfile.vue authoritative admin actions', () => {
     await confirmDialog(wrapper)
     await flushPromises()
     expect(wrapper.find('.ui-confirm-dialog').exists()).toBe(true)
-    expect(wrapper.get('.ui-confirm-dialog [role="alert"]').text()).toContain('ناموفق')
+    expect(wrapper.get('.ui-confirm-dialog [role="alert"]').text()).toContain('تأیید نشد')
 
     const pending = deferred<Response>()
     routeRequestMock.mockReturnValueOnce(pending.promise)
@@ -708,13 +724,17 @@ describe('UserProfile.vue authoritative admin actions', () => {
     const wrapper = await mountProfile(user)
 
     await wrapper.get('.delete-btn').trigger('click')
-    expect(wrapper.get('.ui-confirm-dialog').text()).toContain('آفرهای فعال را منقضی')
-    expect(wrapper.get('.ui-confirm-dialog').text()).toContain('دعوت‌های در انتظار را لغو')
-    expect(wrapper.get('.ui-confirm-dialog').text()).toContain('روابط مشتری/حسابدار')
+    const dialogText = wrapper.get('.ui-confirm-dialog').text()
+    expect(dialogText).toContain('آفرهای فعال را منقضی')
+    expect(dialogText).toContain('دعوت‌های در انتظار را لغو')
+    expect(dialogText).toContain('روابط مشتری/حسابدار')
+    expect(dialogText).not.toContain('owner12')
+    expect(dialogText).not.toContain('Owner Twelve')
+    expect(dialogText).not.toContain('09120000000')
     for (let attempt = 0; attempt < 3; attempt += 1) {
       await confirmDialog(wrapper)
       await flushPromises()
-      expect(wrapper.find('.ui-confirm-dialog').exists()).toBe(true)
+      expectDialogKeepsSafeCopy(wrapper, 'deleted maybe')
       expect(wrapper.emitted('navigate')).toBeUndefined()
     }
 
@@ -723,6 +743,54 @@ describe('UserProfile.vue authoritative admin actions', () => {
     expect(wrapper.find('.ui-confirm-dialog').exists()).toBe(false)
     expect(wrapper.emitted('navigate')).toEqual([['manage_users']])
     expectMutationCall(4, '/api/users/18', 'DELETE', undefined, 'حذف کاربر ناموفق بود.')
+  })
+
+  it('keeps delete and terminate-all confirmation on cancel, Escape, and raw HTTP failures', async () => {
+    const { AppHttpError } = await import('../utils/httpErrorPolicy')
+    const rawDeleteDetail = 'raw-delete-detail: user=18; email=owner12@example.test'
+    const rawTerminateDetail = 'raw-terminate-detail: sessions=chrome-token-xyz'
+    const user = makeUser({ id: 18, account_name: 'owner12', mobile_number: '09120000000' })
+
+    const wrapper = await mountProfile(user)
+    await wrapper.get('.delete-btn').trigger('click')
+    await cancelDialog(wrapper)
+    expect(wrapper.find('.ui-confirm-dialog').exists()).toBe(false)
+
+    await wrapper.get('.delete-btn').trigger('click')
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    await flushPromises()
+    expect(wrapper.find('.ui-confirm-dialog').exists()).toBe(false)
+    expect(routeRequestMock).not.toHaveBeenCalled()
+
+    routeRequestMock
+      .mockRejectedValueOnce(new AppHttpError({ status: 400, detail: rawDeleteDetail }))
+      .mockRejectedValueOnce(new AppHttpError({ status: 403, detail: rawDeleteDetail }))
+      .mockRejectedValueOnce(new AppHttpError({ status: 404, detail: rawDeleteDetail }))
+      .mockRejectedValueOnce(new TypeError('Failed to fetch'))
+    await wrapper.get('.delete-btn').trigger('click')
+    for (const expectedCopy of [
+      'تأیید نشد',
+      'اجازه این اقدام را ندارید',
+      'این کاربر دیگر در دسترس نیست',
+      'تأیید نشد',
+    ]) {
+      await confirmDialog(wrapper)
+      await flushPromises()
+      const dialog = wrapper.get('.ui-confirm-dialog')
+      expect(dialog.text()).toContain(expectedCopy)
+      expect(dialog.text()).not.toContain(rawDeleteDetail)
+      expect(dialog.text()).not.toContain('owner12@example.test')
+      expect(wrapper.emitted('navigate')).toBeUndefined()
+    }
+
+    await cancelDialog(wrapper)
+    routeRequestMock.mockRejectedValueOnce(new AppHttpError({ status: 400, detail: rawTerminateDetail }))
+    await wrapper.get('.terminate-sessions-btn').trigger('click')
+    await confirmDialog(wrapper)
+    await flushPromises()
+    expectDialogKeepsSafeCopy(wrapper, rawTerminateDetail)
+    expect(wrapper.text()).not.toContain(rawTerminateDetail)
+    expect(routeRequestMock).toHaveBeenCalledTimes(5)
   })
 
   it('confirms unblock and mutates the restriction only from the returned user', async () => {

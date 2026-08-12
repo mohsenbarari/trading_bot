@@ -196,6 +196,25 @@ function errorMessage(error: unknown, fallback: string) {
   }).message || fallback;
 }
 
+const confirmationSafeCopy: Record<ConfirmationKind, string> = {
+  'account-status': 'تغییر وضعیت حساب تأیید نشد. اطلاعات نمایش‌داده‌شده تغییری نکرده است؛ وضعیت را دوباره بررسی کنید.',
+  unblock: 'رفع مسدودیت تأیید نشد. اطلاعات نمایش‌داده‌شده تغییری نکرده است؛ وضعیت را دوباره بررسی کنید.',
+  'remove-limitations': 'رفع محدودیت‌ها تأیید نشد. اطلاعات نمایش‌داده‌شده تغییری نکرده است؛ وضعیت را دوباره بررسی کنید.',
+  'terminate-sessions': 'پایان نشست‌ها تأیید نشد. اطلاعات نمایش‌داده‌شده تغییری نکرده است؛ وضعیت را دوباره بررسی کنید.',
+  'delete-user': 'حذف کاربر تأیید نشد. اطلاعات نمایش‌داده‌شده تغییری نکرده است؛ وضعیت را دوباره بررسی کنید.',
+};
+
+function getSafeConfirmationError(kind: ConfirmationKind, error: unknown): string {
+  const status = errorHttpStatus(error);
+  if (status === 403) {
+    return 'اجازه این اقدام را ندارید. اطلاعات نمایش‌داده‌شده تغییری نکرده است.';
+  }
+  if (status === 404) {
+    return 'این کاربر دیگر در دسترس نیست. اطلاعات نمایش‌داده‌شده تغییری نکرده است.';
+  }
+  return confirmationSafeCopy[kind];
+}
+
 function isRecord(value: unknown): value is UserRecord {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
@@ -303,7 +322,9 @@ async function runJsonAction(options: {
         });
         return { response, receipt: await parseReceipt(response) };
       },
-      validateReceipt: options.validate,
+      validateReceipt: (receipt, _context, response) => (
+        response.status === 200 && options.validate(receipt)
+      ),
     });
   } finally {
     if (activeUserMutationKey.value === key) activeUserMutationKey.value = null;
@@ -982,7 +1003,7 @@ function deleteUser() {
     kind: 'delete-user',
     action: 'delete-user',
     title: 'حذف کاربر',
-    message: `حذف حساب «${userDisplayName.value}» دسترسی وب‌اپ و بات را غیرفعال می‌کند، همه نشست‌ها را پایان می‌دهد، آفرهای فعال را منقضی و دعوت‌های در انتظار را لغو می‌کند و روابط مشتری/حسابدار متعلق یا لینک‌شده را به‌صورت بازگشتی می‌بندد. این اقدام بازگشت‌پذیر نیست.`,
+    message: 'حذف این حساب دسترسی وب‌اپ و بات را غیرفعال می‌کند، همه نشست‌ها را پایان می‌دهد، آفرهای فعال را منقضی و دعوت‌های در انتظار را لغو می‌کند و روابط مشتری/حسابدار متعلق یا لینک‌شده را به‌صورت بازگشتی می‌بندد. این اقدام بازگشت‌پذیر نیست.',
     confirmLabel: 'حذف کاربر',
     tone: 'danger',
   });
@@ -1023,7 +1044,7 @@ async function confirmPendingAction() {
       }
       closeConfirmation();
     } else if (result.outcome === 'error') {
-      confirmationError.value = errorMessage(result.error, 'تغییر وضعیت حساب ناموفق بود.');
+      confirmationError.value = getSafeConfirmationError(confirmation.kind, result.error);
     }
     return;
   }
@@ -1040,7 +1061,7 @@ async function confirmPendingAction() {
       setActionSuccess('رفع مسدودیت انجام شد.');
       closeConfirmation();
     } else if (result.outcome === 'error') {
-      confirmationError.value = errorMessage(result.error, 'رفع مسدودیت ناموفق بود.');
+      confirmationError.value = getSafeConfirmationError(confirmation.kind, result.error);
     }
     return;
   }
@@ -1062,7 +1083,7 @@ async function confirmPendingAction() {
       setActionSuccess('محدودیت‌ها برداشته شد.');
       closeConfirmation();
     } else if (result.outcome === 'error') {
-      confirmationError.value = errorMessage(result.error, 'رفع محدودیت‌ها ناموفق بود.');
+      confirmationError.value = getSafeConfirmationError(confirmation.kind, result.error);
     }
     return;
   }
@@ -1084,7 +1105,7 @@ async function confirmPendingAction() {
         : 'نشست فعالی برای پایان دادن وجود نداشت.');
       closeConfirmation();
     } else if (result.outcome === 'error') {
-      confirmationError.value = errorMessage(result.error, 'پایان دادن به نشست‌های فعال ناموفق بود.');
+      confirmationError.value = getSafeConfirmationError(confirmation.kind, result.error);
     }
     return;
   }
@@ -1101,7 +1122,7 @@ async function confirmPendingAction() {
       closeConfirmation();
       emit('navigate', 'manage_users');
     } else if (result.outcome === 'error') {
-      confirmationError.value = errorMessage(result.error, 'حذف کاربر ناموفق بود.');
+      confirmationError.value = getSafeConfirmationError(confirmation.kind, result.error);
     }
   }
 }
