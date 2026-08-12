@@ -32,13 +32,12 @@ from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCHEMA_VERSION = "staging_offer_overtime_acceptance_v1"
-DEFAULT_EXPECTED_BRANCH = "candidate/offer-overtime"
+DEFAULT_EXPECTED_BRANCH = "main"
 DEFAULT_IRAN_BASE_URL = "https://staging.gold-trade.ir"
 DEFAULT_FOREIGN_BASE_URL = "https://staging.362514.ir"
 DEFAULT_ARTIFACT_ROOT = REPO_ROOT / "tmp" / "staging-offer-overtime-acceptance"
 EXECUTION_CONFIRM_ENV = "STAGING_OFFER_OVERTIME_ACCEPTANCE_CONFIRM"
 EXECUTION_CONFIRM_VALUE = "execute-staging-offer-overtime-acceptance"
-EXPECTED_ALEMBIC_HEAD = "e8a4b5c6d7e9"
 FORBIDDEN_PRODUCTION_HOSTS = frozenset(
     {
         "gold-trade.ir",
@@ -88,6 +87,21 @@ class CheckResult:
 def default_run_id() -> str:
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     return f"OT-ACC-{stamp}"
+
+
+def alembic_heads() -> list[str]:
+    """Return the checkout's current migration heads.
+
+    Acceptance must validate the migration graph it is about to exercise,
+    rather than pinning a head that becomes stale whenever an independently
+    reviewed migration line is merged.
+    """
+    from alembic.config import Config
+    from alembic.script import ScriptDirectory
+
+    config = Config(str(REPO_ROOT / "alembic.ini"))
+    config.set_main_option("script_location", str(REPO_ROOT / "migrations"))
+    return list(ScriptDirectory.from_config(config).get_heads())
 
 
 def host_of(url: str) -> str:
@@ -308,6 +322,7 @@ def check_internal_ingress_without_basic_auth(name: str, url: str) -> CheckResul
 
 
 def build_manifest(args: argparse.Namespace) -> dict[str, Any]:
+    heads = alembic_heads()
     return {
         "schema_version": SCHEMA_VERSION,
         "environment": "staging_two_server",
@@ -316,7 +331,8 @@ def build_manifest(args: argparse.Namespace) -> dict[str, Any]:
         "mutates_production": False,
         "expected_branch": args.expected_branch,
         "expected_release_sha": args.expected_release_sha or run_git_value(["rev-parse", "HEAD"]),
-        "expected_alembic_head": EXPECTED_ALEMBIC_HEAD,
+        "expected_alembic_head": heads[0] if len(heads) == 1 else None,
+        "alembic_heads": sorted(heads),
         "iran_base_url": args.iran_base_url,
         "foreign_base_url": args.foreign_base_url,
         "scenarios": SCENARIOS,
@@ -339,6 +355,7 @@ def basic_auth_from_args(args: argparse.Namespace) -> tuple[str, str] | None:
 
 def preflight_checks(args: argparse.Namespace) -> list[CheckResult]:
     auth = basic_auth_from_args(args)
+    heads = alembic_heads()
     current_branch = run_git_value(["branch", "--show-current"])
     current_commit = run_git_value(["rev-parse", "HEAD"])
     expected_release = args.expected_release_sha or current_commit
@@ -366,10 +383,14 @@ def preflight_checks(args: argparse.Namespace) -> list[CheckResult]:
             payload={"scenario_ids": [item["id"] for item in SCENARIOS]},
         ),
         CheckResult(
-            "expected_alembic_head",
-            "passed",
-            f"acceptance expects alembic head {EXPECTED_ALEMBIC_HEAD}",
-            payload={"expected_alembic_head": EXPECTED_ALEMBIC_HEAD},
+            "single_alembic_head",
+            "passed" if len(heads) == 1 else "failed",
+            (
+                f"acceptance resolved migration head {heads[0]}"
+                if len(heads) == 1
+                else f"acceptance requires one migration head, found {sorted(heads)}"
+            ),
+            payload={"alembic_heads": sorted(heads)},
         ),
         validate_staging_url("iran_url_identity", args.iran_base_url, expected_host=host_of(DEFAULT_IRAN_BASE_URL)),
         validate_staging_url(

@@ -346,6 +346,28 @@ def expected_release_sha(args: argparse.Namespace) -> str | None:
     return run_git_value(["rev-parse", "--short=12", "HEAD"])
 
 
+def release_sha_matches_expected(*, expected: object, actual: object) -> bool:
+    """Compare full or safely abbreviated immutable Git object names.
+
+    Exact labels remain valid for existing controlled fixtures. Prefix
+    matching is restricted to hexadecimal object names with at least twelve
+    characters, preventing an unrelated or overly short release label from
+    satisfying the staging identity gate.
+    """
+    expected_value = str(expected or "").strip().lower()
+    actual_value = str(actual or "").strip().lower()
+    if not expected_value or not actual_value:
+        return False
+    if expected_value == actual_value:
+        return True
+    if not re.fullmatch(r"[0-9a-f]{12,64}", expected_value):
+        return False
+    if not re.fullmatch(r"[0-9a-f]{12,64}", actual_value):
+        return False
+    shorter, longer = sorted((expected_value, actual_value), key=len)
+    return longer.startswith(shorter)
+
+
 def host_of(url: str) -> str:
     parsed = urllib.parse.urlparse(url)
     return (parsed.hostname or "").strip().lower()
@@ -931,7 +953,10 @@ def check_container_runtime_identity(
         failures.append("ENVIRONMENT is not staging")
     if str(payload.get("server_mode") or "").lower() != expected_server_mode:
         failures.append("SERVER_MODE mismatch")
-    if expected_release and str(payload.get("release_sha") or "") != expected_release:
+    if not release_sha_matches_expected(
+        expected=expected_release,
+        actual=payload.get("release_sha"),
+    ):
         failures.append("RELEASE_SHA does not match expected candidate SHA")
     if expected_server_mode == "iran" and payload.get("bot_token_configured"):
         failures.append("Iran staging app has Telegram bot token configured")
@@ -1256,10 +1281,20 @@ def preflight_checks(args: argparse.Namespace, manifest: dict[str, Any]) -> list
     checks.append(
         CheckResult(
             "release_commit_binding",
-            "passed" if expected_release and expected_release == current_commit else "failed",
+            (
+                "passed"
+                if release_sha_matches_expected(
+                    expected=expected_release,
+                    actual=current_commit,
+                )
+                else "failed"
+            ),
             (
                 "expected staging release is bound to the current immutable commit"
-                if expected_release and expected_release == current_commit
+                if release_sha_matches_expected(
+                    expected=expected_release,
+                    actual=current_commit,
+                )
                 else "expected staging release SHA is missing or differs from current commit"
             ),
             payload={"expected_release_sha": expected_release, "current_commit": current_commit},

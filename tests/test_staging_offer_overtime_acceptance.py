@@ -8,9 +8,51 @@ from scripts import run_staging_offer_overtime_acceptance as runner
 
 
 class StagingOfferOvertimeAcceptanceTests(unittest.TestCase):
-    def test_default_branch_is_offer_overtime_candidate(self):
+    def test_default_branch_is_integrated_main(self):
         args = runner.parse_args([])
-        self.assertEqual(args.expected_branch, "candidate/offer-overtime")
+        self.assertEqual(args.expected_branch, "main")
+
+    def test_manifest_resolves_the_current_single_alembic_head(self):
+        args = runner.parse_args(["--expected-branch", "main"])
+        with patch.object(runner, "alembic_heads", return_value=["fb1c2d3e4f5a"]):
+            manifest = runner.build_manifest(args)
+
+        self.assertEqual(manifest["expected_alembic_head"], "fb1c2d3e4f5a")
+        self.assertEqual(manifest["alembic_heads"], ["fb1c2d3e4f5a"])
+
+    def test_preflight_rejects_multiple_alembic_heads(self):
+        args = runner.parse_args(
+            [
+                "--expected-branch",
+                "main",
+                "--expected-release-sha",
+                "deadbeef",
+            ]
+        )
+        with patch.object(runner, "alembic_heads", return_value=["head-b", "head-a"]), patch.object(
+            runner, "run_git_value"
+        ) as git_value, patch.object(
+            runner, "check_tls", return_value=runner.CheckResult("tls", "passed", "ok")
+        ), patch.object(
+            runner, "check_http_json", return_value=runner.CheckResult("http", "passed", "ok")
+        ), patch.object(
+            runner,
+            "check_foreign_public_surface_guard",
+            return_value=runner.CheckResult("guard", "passed", "ok"),
+        ), patch.object(
+            runner,
+            "check_internal_ingress_without_basic_auth",
+            return_value=runner.CheckResult("ingress", "passed", "ok"),
+        ):
+            git_value.side_effect = lambda command: {
+                ("branch", "--show-current"): "main",
+                ("rev-parse", "HEAD"): "deadbeef",
+            }.get(tuple(command), "")
+            checks = runner.preflight_checks(args)
+
+        head_check = next(item for item in checks if item.name == "single_alembic_head")
+        self.assertEqual(head_check.status, "failed")
+        self.assertEqual(head_check.payload["alembic_heads"], ["head-a", "head-b"])
 
     def test_catalog_covers_stage16_required_axes(self):
         ids = {item["id"] for item in runner.SCENARIOS}
