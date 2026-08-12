@@ -1,4 +1,4 @@
-# Validation — Stage 6 delivered Phase 1–10 scope
+# Validation — Stage 6 delivered Phase 1–11 scope
 
 ## Historical Phase 1–3 source binding
 
@@ -45,7 +45,7 @@ post-fix read-only audit: `assets/figma/final-provenance-20260811T204635Z/stage6
 - پنج render از page/root/Phase 1/2/3 پس از اصلاح بازبینی شده‌اند؛ clipping/overlap label دیده نشد.
 - Phase 3 sibling صفحهٔ root `321:19` است، نه child آن؛ این disclosure است و ادعای یک bundle nested واحد مجاز نیست.
 
-جزئیات ID/hash در `FIGMA_SNAPSHOT_MANIFEST.json` ثبت شده است؛ همان manifest، referenceهای live/editable Phase 4–10 را بدون ادعای screenshot hash/freeze جدید ثبت می‌کند.
+جزئیات ID/hash در `FIGMA_SNAPSHOT_MANIFEST.json` ثبت شده است؛ همان manifest، referenceهای live/editable Phase 4–11 را بدون ادعای screenshot hash/freeze جدید ثبت می‌کند.
 
 ## Phase 4 و Phase 5 — supplemental receipts، نه freeze
 
@@ -133,6 +133,22 @@ post-fix read-only audit: `assets/figma/final-provenance-20260811T204635Z/stage6
 - browser receipt: `uiux-stage6-phase10-admin-user-delete-20260812T173239804Z`، `passed`/`promotable=true`، **13** assertion و **14** screenshot. metrics `stage6-phase10-admin-user-delete-metrics.json` SHA-256 `c402634eee20b818f455c0a1c1a7d3681ae1304769d951da172e74dc5bdd8d74`؛ binding SHA-256 `683197885b66b6e11472e9c73db38d15d997672fd4bf4d5fa6d2e541a72d19a0`؛ harness SHA-256 `5f63cdc208d6260c2de14d3676d56a3aaa1905d63faeae71aa2a9ab898febb5a`.
 - matrix synthetic مسیر `/admin/users/:id` را پوشش می‌دهد: در 360 geometry/focus/Escape/cancel بدون mutation برای حذف و پایان نشست‌ها؛ در 390/1440 فقط receipt دقیق `200` حذف را به فهرست برمی‌گرداند و پایان نشست‌ها را با عدد صحیح می‌پذیرد؛ 400/403/404/malformed/network دیالوگ، کاربر نمایش‌داده‌شده و مسیر را با copy ثابت امن نگه می‌دارند. diagnostics غیرمنتظره صفر است؛ 4 HTTP fixture، 1 network failure و 1 network console error صریحاً expected/classified هستند.
 - Figma live/editable در page `321:18`، sibling section `464:896` است: W1=`464:898` و W2=`464:921`، هر دو `390×844`. backdrop=`464:913` در `(0,0,390,844)` و dialog=`464:914` در `(16,278,358,288)` کاملاً داخل viewport هستند؛ label `464:897` دقیقاً `Phase 10 · حذف امن کاربر مدیریت و پایان نشست‌ها · source 0839eb09 · دادهٔ synthetic` است. audit همهٔ 37 text node را Vazirmatn، 9 instance را linked و unsafe scan شامل account_name/موبایل/receipt انگلیسی را empty ثبت کرد.
+
+این receipt محلی، mutable و supplemental است؛ artifactهای آن عمداً به `selectedArtifacts` تاریخی Phase 1–3 افزوده یا freeze نشده‌اند و رفتار live backend را مستقل اثبات نمی‌کنند.
+
+## Phase 11 — نشست‌های امن حساب
+
+| field | value |
+| --- | --- |
+| source commit | `7be4c830e0f476b3c56f82fd37d1ad9bc37652f4` |
+| source tree | `4aeb347f799f72a254179c5977a668bc805cddbd` |
+| parent | `5d7008f17704437e975f8d128adc3a08f83fd2bb` |
+| source binding | `383dfc6234e24c76c08b5417537f228f9d345fa622517b1e2584006b27dbf48d` (393 files) |
+
+- focused `SettingsView.test.ts`: **27/27** pass؛ `vue-tsc --noEmit`، `npm run guard:ui` و `git diff --check`: pass.
+- browser receipt: `uiux-stage6-phase11-account-security-20260812T184803019Z`، `passed`/`promotable=true`، **13** assertion و **14** screenshot. metrics `stage6-phase11-account-security-metrics.json` SHA-256 `8d01ae58a9928a804b2b1eaa727eb432cd28be570cd6660bf5dfaa13fda3d63c`؛ binding SHA-256 `5a99061f227420c0e63268bc547088d9bcaeb5a25849172c6dbed1bb3dd68159`؛ harness SHA-256 `80beb81575093cb300cba2aeece66651fcf045eb8fe845382d3339cd1b5d99c1`.
+- matrix synthetic مسیر `/account/security` را پوشش می‌دهد: در 360 geometry/focus/Escape/cancel بدون mutation برای پایان نشست و خروج از نشست‌های دیگر؛ در 390/1440 فقط receipt دقیق `200` پایان نشست را اعمال می‌کند و خروج دیگران را با الگوی عددی می‌پذیرد؛ 400/403/404/malformed/network دیالوگ، فهرست نشست‌ها و مسیر را با copy ثابت امن نگه می‌دارند. diagnostics غیرمنتظره صفر است؛ 4 HTTP fixture، 1 network failure و 1 network console error صریحاً expected/classified هستند.
+- Figma live/editable در page `321:18`، sibling section `466:961` است: W1=`466:963` و W2=`466:986`، هر دو `390×844`. backdrop=`466:978` در `(0,0,390,844)` و dialog=`466:979` در `(16,278,358,288)` کاملاً داخل viewport هستند؛ label `466:962` دقیقاً `Phase 11 · نشست‌های امن حساب · source 7be4c830 · دادهٔ synthetic` است. audit همهٔ 37 text node را Vazirmatn، 9 instance را linked و unsafe scan شامل نام دستگاه/receipt خام را empty ثبت کرد.
 
 این receipt محلی، mutable و supplemental است؛ artifactهای آن عمداً به `selectedArtifacts` تاریخی Phase 1–3 افزوده یا freeze نشده‌اند و رفتار live backend را مستقل اثبات نمی‌کنند.
 

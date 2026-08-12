@@ -1,14 +1,14 @@
 {
   "schemaVersion": 1,
   "stage": 6,
-  "scope": "admin-profile-workspace-commodities-admin-user-delivered-phase1-phase2-phase3-phase4-phase5-phase6-phase7-phase8-phase9-phase10",
-  "status": "delivered_phase1_phase2_phase3_phase4_phase5_phase6_phase7_phase8_phase9_phase10_broader_stage6_partial_deferred",
+  "scope": "admin-profile-workspace-commodities-admin-user-account-security-delivered-phase1-phase2-phase3-phase4-phase5-phase6-phase7-phase8-phase9-phase10-phase11",
+  "status": "delivered_phase1_phase2_phase3_phase4_phase5_phase6_phase7_phase8_phase9_phase10_phase11_broader_stage6_partial_deferred",
   "mutableNarrative": true,
   "branch": "condidate/webapp-ui-ux-redesign-v2",
   "implementation": {
-    "commit": "0839eb091b20438e603e265f5c9b9a6cbe5ae19b",
-    "tree": "f466bfde632bc8663334b5bcbc1aa411e011c2bc",
-    "parent": "64d3bb97fb9d7aee46b32b456d4d1e438c5f360d"
+    "commit": "7be4c830e0f476b3c56f82fd37d1ad9bc37652f4",
+    "tree": "4aeb347f799f72a254179c5977a668bc805cddbd",
+    "parent": "5d7008f17704437e975f8d128adc3a08f83fd2bb"
   },
   "routeContract": {
     "routerPath": "frontend/src/router/index.ts",
@@ -126,6 +126,18 @@
       "v2Scope": "section",
       "purpose": "accountant workspace destructive confirmation and receipt-safe recovery",
       "queryPolicy": "no new deletion, session-termination, or relation-mutation query contract; confirmation and receipt state stay local"
+    },
+    {
+      "phase": 11,
+      "path": "/account/security",
+      "name": "account-security",
+      "component": "frontend/src/views/SettingsView.vue",
+      "requiresAuth": true,
+      "requiresAdmin": false,
+      "shellClass": "standard-authenticated",
+      "v2Scope": "section",
+      "purpose": "account security session termination and logout-others with exact receipts",
+      "queryPolicy": "no new session-mutation query contract; confirmation and receipt state stay local"
     }
   ],
   "stateAndPrivacy": {
@@ -153,7 +165,8 @@
     "workspaceSessionTermination": "existing body-teleported confirmation; cancel/Escape does not DELETE; only exact terminated_session_id changes local sessions; 400/403/404/malformed/network retain route/relation/displayed session with fixed safe copy",
     "workspaceRelationMutation": "existing body-teleported confirmation; cancel/Escape does not DELETE; only same-relation revoked/deleted receipts reconcile; 400/403/404/wrong-id/wrong-status/malformed/network retain dialog, relation, route and query with fixed safe copy",
     "commodityMutation": "admin-only /admin/commodities keeps form, confirmation and receipt state local; create/update require exact status plus target identity/parent receipt, commodity/alias deletion requires 204 with an empty receipt, and mismatch/error/stale detail retains context with fixed safe feedback",
-    "adminUserDeletion": "admin-only /admin/users/:id keeps confirmation and receipt state local; delete requires HTTP 200 plus the exact message receipt then navigate manage_users; terminate-all requires HTTP 200 plus integer terminated_sessions >= 0 without displaying raw detail; cancel/Escape send no request; 400/403/404/malformed/network retain context with fixed safe copy and no account_name/mobile in the dialog"
+    "adminUserDeletion": "admin-only /admin/users/:id keeps confirmation and receipt state local; delete requires HTTP 200 plus the exact message receipt then navigate manage_users; terminate-all requires HTTP 200 plus integer terminated_sessions >= 0 without displaying raw detail; cancel/Escape send no request; 400/403/404/malformed/network retain context with fixed safe copy and no account_name/mobile in the dialog",
+    "accountSecuritySessions": "existing /account/security keeps confirmation and receipt state local; terminate one other session requires HTTP 200 plus the exact Persian success detail then removes only that session; logout-others requires HTTP 200 plus a digit-prefixed ended-sessions detail without displaying raw detail; cancel/Escape send no request; 400/403/404/malformed/network retain the dialog and session list with fixed safe copy and no device name in the dialog"
   },
   "phaseReceiptContracts": {
     "phase4": {
@@ -200,6 +213,12 @@
         "admin-user-profile"
       ],
       "contract": "admin user deletion and terminate-all reuse the existing /admin/users/:id route; delete applies navigation only after HTTP 200 plus the exact success message receipt, terminate-all accepts only HTTP 200 plus integer terminated_sessions >= 0, cancel/Escape send no request, and 400/403/404/malformed/network retain the dialog and displayed user with fixed safe copy and no account_name/mobile in the confirmation"
+    },
+    "phase11": {
+      "routeNames": [
+        "account-security"
+      ],
+      "contract": "account-security session mutations reuse the existing /account/security route; terminate applies local removal only after HTTP 200 plus the exact success detail, logout-others accepts only HTTP 200 plus a digit-prefixed ended-sessions detail, cancel/Escape send no request, and 400/403/404/malformed/network retain the dialog and session list with fixed safe copy and no device name in the confirmation"
     }
   },
   "browserEvidence": {
@@ -220,6 +239,8 @@
     "phase9SourceBindingSha256": "5c1b01f0cff45fca67ccf463878c63214cd7e2ad187e573f7acb7de91e530ac1",
     "phase10RunId": "uiux-stage6-phase10-admin-user-delete-20260812T173239804Z",
     "phase10SourceBindingSha256": "0476f7801b46a7f53cbf43ebf05d252dc9b46798b02113bc9da5e6997af81bd3",
+    "phase11RunId": "uiux-stage6-phase11-account-security-20260812T184803019Z",
+    "phase11SourceBindingSha256": "383dfc6234e24c76c08b5417537f228f9d345fa622517b1e2584006b27dbf48d",
     "prePostSourceGitHarnessEnvironmentIdentical": true
   },
   "completion": {
@@ -233,6 +254,7 @@
     "phase8": "complete_delivered",
     "phase9": "complete_delivered",
     "phase10": "complete_delivered",
+    "phase11": "complete_delivered",
     "broaderStage6": "partial_deferred",
     "stage6CompleteAuthority": false,
     "sitesStarted": false,

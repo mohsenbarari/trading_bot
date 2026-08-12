@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "stage": 6,
-  "scope": "historical-phase1-phase2-phase3-static-figma-provenance-with-live-editable-phase4-phase5-phase6-phase7-phase8-phase9-phase10-references",
+  "scope": "historical-phase1-phase2-phase3-static-figma-provenance-with-live-editable-phase4-phase5-phase6-phase7-phase8-phase9-phase10-phase11-references",
   "status": "pass_with_documented_page_sibling_topology",
   "mutableNarrative": true,
   "historicalStaticAudit": {
@@ -22,7 +22,7 @@
       "id": "321:18",
       "name": "08 — Stage 6 Admin & Profile",
       "directChildCountAtHistoricalAudit": 2,
-      "directChildCountCurrent": 9
+      "directChildCountCurrent": 10
     },
     "canonicalRoot": {
       "id": "321:19",
@@ -106,9 +106,9 @@
       ]
     }
   ],
-  "liveEditablePhase4To10": {
+  "liveEditablePhase4To11": {
     "status": "authoritative_live_design_references_not_local_screenshot_or_hash_freeze",
-    "sourceBoundary": "Phase 4–10 Figma updates were explicitly authorized. These references describe the current editable page and must not be conflated with historicalStaticAudit or authoritativeScreenshots.",
+    "sourceBoundary": "Phase 4–11 Figma updates were explicitly authorized. These references describe the current editable page and must not be conflated with historicalStaticAudit or authoritativeScreenshots.",
     "phase4": {
       "source": {
         "commit": "7ac46a36a2ba968246bd285c357bc362a328cdd2",
@@ -457,6 +457,76 @@
           "retry": "Danger"
         }
       }
+    },
+    "phase11": {
+      "source": {
+        "commit": "7be4c830e0f476b3c56f82fd37d1ad9bc37652f4",
+        "tree": "4aeb347f799f72a254179c5977a668bc805cddbd"
+      },
+      "section": {
+        "id": "466:961",
+        "name": "11 — Account security session receipts · exact receipt & safe recovery · source 7be4c830",
+        "width": 2592,
+        "height": 1804
+      },
+      "provenanceLabel": {
+        "id": "466:962",
+        "visibleText": "Phase 11 · نشست‌های امن حساب · source 7be4c830 · دادهٔ synthetic"
+      },
+      "proofFrames": [
+        {
+          "id": "466:963",
+          "name": "W1 — Account security terminate · confirmation · mobile 390×844",
+          "width": 390,
+          "height": 844
+        },
+        {
+          "id": "466:986",
+          "name": "W2 — Account security terminate · safe recovery · mobile 390×844",
+          "width": 390,
+          "height": 844
+        }
+      ],
+      "geometry": {
+        "backdrop": {
+          "id": "466:978",
+          "x": 0,
+          "y": 0,
+          "width": 390,
+          "height": 844
+        },
+        "dialog": {
+          "id": "466:979",
+          "x": 16,
+          "y": 278,
+          "width": 358,
+          "height": 288,
+          "fullyInsideMobileViewport": true
+        }
+      },
+      "liveAudit": {
+        "allTextFontFamily": "Vazirmatn",
+        "textNodeCount": 37,
+        "linkedInstanceCount": 9,
+        "sensitiveTextScan": {
+          "urls": 0,
+          "emails": 0,
+          "phoneLike": 0,
+          "rawServerErrorOrReceipt": 0,
+          "deviceNameInDialog": 0
+        },
+        "linkedInstanceFamilies": [
+          "Header",
+          "Navigation",
+          "Button"
+        ],
+        "accountSecurityActionVariants": {
+          "open": "Danger",
+          "confirm": "Danger",
+          "cancel": "Secondary",
+          "retry": "Danger"
+        }
+      }
     }
   },
   "topologyDisclosure": {
@@ -464,9 +534,9 @@
     "phase3ParentId": "321:18",
     "phase3IsPageSiblingOfRoot32119": true,
     "phase3IsNestedUnderRoot32119": false,
-    "phase4To10ParentId": "321:18",
-    "phase4To10ArePageSiblingsOfRoot32119": true,
-    "conclusion": "Coverage is page-level. Do not call this a single nested root bundle under 321:19."
+    "conclusion": "Coverage is page-level. Do not call this a single nested root bundle under 321:19.",
+    "phase4To11ParentId": "321:18",
+    "phase4To11ArePageSiblingsOfRoot32119": true
   },
   "authoritativeScreenshots": [
     {
@@ -508,8 +578,6 @@
   },
   "boundaries": {
     "historicalStaticAuditDidNotMutateFigmaOrSource": true,
-    "phase4To10FigmaEditsWereExplicitlyAuthorized": true,
-    "phase4To10ReferencesAreLiveEditableNotFrozen": true,
     "sitesStarted": false,
     "stagingOrProductionChanged": false,
     "stage6CompleteAuthority": false,
@@ -520,6 +588,8 @@
       "deployment readiness",
       "Sites publication",
       "Stage 6 closure"
-    ]
+    ],
+    "phase4To11FigmaEditsWereExplicitlyAuthorized": true,
+    "phase4To11ReferencesAreLiveEditableNotFrozen": true
   }
 }

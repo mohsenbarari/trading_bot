@@ -4,6 +4,7 @@ Load for Vue/PWA refactoring, Design System V2, Figma/Sites evidence, or shared 
 
 ## Decisions
 
+- 2026-08-12 | Account-security session mutations accept only exact HTTP 200 receipts; confirmation copy stays generic without device names and failures retain the session list. Reason: raw server detail and device names must not leak from the `/account/security` dialog.
 - 2026-08-12 | Admin user deletion and terminate-all accept only exact HTTP 200 receipts; confirmation copy stays generic and failures retain context. Reason: account_name/mobile and raw server detail must not leak from the admin user dialog.
 - 2026-08-12 | Admin commodity/alias mutations require exact status/identity receipts; body-teleported deletion failures retain context. Reason: malformed/raw responses cannot mutate state or leak details.
 - 2026-08-12 | Workspace relation mutations accept matching `revoked`/`deleted` receipts; failures retain context with fixed safe copy. Reason: prevent raw-detail leaks and stale reconciliation.
