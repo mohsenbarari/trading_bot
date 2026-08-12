@@ -2,12 +2,13 @@
 
 Entries are newest first.
 
-- 2026-08-12 | Fresh Iran offers get one bounded post-commit attempt through signed sync; only full ACK marks the outbox delivered, while age/backoff fences and the regular worker recover. Reason: prompt foreign-queue handoff without a second protocol.
-- 2026-08-12 | Canonical Alembic restores the deployed `f9b` merge before `f9c`; `fb1` validates complete coin schema, repairs only all-absent `fa0`, and rejects partial state. Reason: one revision had diverged parents.
-- 2026-08-12 | Live estimator calibration stays in a sidecar, reads conversations read-only and imports legacy state only when empty; dashboard metadata refreshes with estimates and marks activity stale beyond the anchor. Reason: protect inputs/history and align displayed freshness with eligibility.
-- 2026-08-12 | Product coin inference consumes canonical-Toman Market Store data; adapters normalize once. Reason: prevent drift and double conversion.
-- 2026-08-12 | Snapshots rebuild atomically on every invocation, regardless of watermark. Reason: freshness, age and same-key corrections are time/content dependent.
-- 2026-08-12 | Confirmed trades outrank offers for coin anchors; id breaks only equal-time ties. Reason: backfills must not displace later events.
+- 2026-08-12 | Relationship shadow research reads verified canonical Market Store hot/archive at `available_at_utc`; labels use only eligible nonconditional confirmed coin trades, artifacts stay outside the repo, and no scheduler/auto-promotion ships.
+- 2026-08-12 | Fresh Iran offers get one bounded signed-sync attempt after commit; only full ACK marks delivery, while age/backoff fences and the regular worker recover.
+- 2026-08-12 | Canonical Alembic restores deployed merge `f9b` before `f9c`; `fb1` validates complete coin schema, repairs only all-absent `fa0`, and rejects partial state.
+- 2026-08-12 | Estimator calibration stays in a sidecar, reads conversations read-only, imports legacy state only when empty, and refreshes dashboard freshness with estimates.
+- 2026-08-12 | Coin inference consumes canonical-Toman Market Store data; adapters normalize once to prevent drift and double conversion.
+- 2026-08-12 | Snapshots rebuild atomically every invocation because freshness, age and same-key corrections are time/content dependent.
+- 2026-08-12 | Confirmed trades outrank offers for coin anchors; id breaks only equal-time ties so backfills cannot displace later events.
 - 2026-08-12 | Staging audits use shared volumes; missing history may reconstruct only immutable provenance and must label transient facts unverified. Reason: never fabricate evidence.
 - 2026-08-12 | The 500-offer matrix uses 60/40 Bot/WebApp origin, random 0.8–4-second ingress, fake private transport, bounded lifecycle work, fail-fast tasks and redacted audits. Reason: reproducible evidence without pool pressure.
 - 2026-08-11 | Queue-v1 retries only serialization/deadlock aborts before provider dispatch, inside the same bounded unstarted lease. Reason: no external effect occurred; other DB failures fail closed.
