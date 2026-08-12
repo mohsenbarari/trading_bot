@@ -5,11 +5,14 @@ from types import SimpleNamespace
 
 from scripts.run_telegram_publisher_live_matrix import (
     MATRIX_INGRESS_INTERVAL_SECONDS,
+    MatrixRun,
+    OfferTimeline,
     LifecycleActionTimeline,
     _complete_lifecycle_action,
     _initial_publication_complete,
     _is_ignorable_historical_private_job,
     _retail_lot_sizes,
+    _run_direct_trade,
     build_live_matrix_workload,
 )
 
@@ -128,6 +131,51 @@ class TelegramPublisherLiveMatrixTests(unittest.TestCase):
 
         self.assertEqual(entry.status, "ValueError")
         self.assertEqual(entry.failure_class, "ValueError")
+
+    def test_bot_lifecycle_uses_the_publishing_lane_for_the_callback(self):
+        observed = []
+
+        class FakeWorker:
+            MixedLoadAttemptSpec = SimpleNamespace
+
+            async def load_offer_snapshot(self, _offer_id):
+                return SimpleNamespace(lot_sizes=None)
+
+            async def execute_bot_trade_with_dispatcher(self, **kwargs):
+                observed.append(kwargs["callback_bot_identity"])
+                return "success"
+
+        users = [
+            SimpleNamespace(user_id=index, telegram_id=100_000 + index)
+            for index in range(1, 1001)
+        ]
+        timeline = OfferTimeline(
+            index=1,
+            origin="bot",
+            scenario="direct_wholesale_trade",
+            expected_terminal_status="completed",
+            scheduled_at="2026-08-12T00:00:00+00:00",
+            offer_id=42,
+            publisher_lane="publisher_3",
+        )
+        run = MatrixRun(
+            run_id="telegram-live-matrix-unit",
+            started_at="2026-08-12T00:00:00+00:00",
+            expected_expiry_minutes=25,
+        )
+
+        asyncio.run(
+            _run_direct_trade(
+                worker=FakeWorker(),
+                harness=object(),
+                users=users,
+                run=run,
+                timeline=timeline,
+            )
+        )
+
+        self.assertEqual(observed, ["publisher_3"])
+        self.assertEqual(run.lifecycle_actions[0].status, "success")
 
 
 if __name__ == "__main__":

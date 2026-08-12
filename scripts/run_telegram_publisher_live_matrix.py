@@ -926,6 +926,9 @@ async def _run_direct_trade(
             else:
                 amount = 5
             if timeline.origin == "bot":
+                publisher_identity = str(timeline.publisher_lane or "").strip()
+                if publisher_identity not in TELEGRAM_PUBLISHER_IDENTITIES:
+                    raise LiveMatrixError("live_matrix_publisher_callback_identity_missing")
                 outcome = await worker.execute_bot_trade_with_dispatcher(
                     harness=harness,
                     spec=worker.MixedLoadAttemptSpec(
@@ -938,6 +941,7 @@ async def _run_direct_trade(
                     amount=amount,
                     prefix=f"{run.run_id}-direct-{timeline.index:04d}-{lot_index}",
                     error_details=error_details,
+                    callback_bot_identity=publisher_identity,
                 )
             else:
                 with override_current_server(timeline.offer_home_server or SERVER_IRAN):
@@ -1423,7 +1427,9 @@ async def run_live_matrix(args: argparse.Namespace) -> dict[str, Any]:
         started_monotonic = time.monotonic()
         started_at = _utcnow()
         run.phase = "ingress"
-        async with worker.patched_trading_boundaries():
+        async with worker.patched_trading_boundaries(
+            emulate_callback_answers=True
+        ):
             interaction_task = asyncio.create_task(
                 _run_user_interactions(
                     worker=worker,

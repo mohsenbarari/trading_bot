@@ -49,7 +49,12 @@ from bot.callbacks import ExpireOfferCallback, TextOfferActionCallback
 from bot.handlers import trade_execute as bot_trade_execute
 from bot.handlers import trade_create as bot_trade_create
 from bot.handlers import trade_manage as bot_trade_manage
-from bot.middlewares import AuthMiddleware, TradeContentionGateMiddleware
+from bot.middlewares import (
+    AuthMiddleware,
+    CallbackReceiptMiddleware,
+    TradeContentionGateMiddleware,
+)
+from bot.middlewares import trade_contention_gate as bot_trade_contention_gate
 from bot.middlewares.trade_contention_gate import (
     ParsedTelegramTradeCallback,
     claim_telegram_trade_confirmation,
@@ -69,6 +74,10 @@ from core.offer_source import OfferSourceSurface, normalize_offer_source_surface
 from core.offer_quantity import coalesce_offer_remaining_quantity
 from core.server_routing import SERVER_FOREIGN, SERVER_IRAN, current_server, normalize_server, override_current_server
 from core.telegram_trade_callbacks import build_channel_trade_callback_data
+from core.telegram_bot_identity_context import (
+    bind_telegram_callback_bot_identity,
+    reset_telegram_callback_bot_identity,
+)
 from core.utils import create_user_notification
 from core import offer_expiry as offer_expiry_worker
 from models.accountant_relation import AccountantRelation
@@ -2311,7 +2320,10 @@ def noop_schedule_web_push(*_args: Any, **_kwargs: Any) -> None:
 
 
 @asynccontextmanager
-async def patched_trading_boundaries():
+async def patched_trading_boundaries(
+    *,
+    emulate_callback_answers: bool = False,
+):
     import core.services.trade_service as trade_service
     import core.web_push as web_push
 
@@ -2335,6 +2347,8 @@ async def patched_trading_boundaries():
         "schedule_notification_web_push": web_push.schedule_notification_web_push,
         "validate_competitive_price": trade_service.validate_competitive_price,
         "detect_offer_price_warning": trade_service.detect_offer_price_warning,
+        "bot_trade_answer_callback": bot_trade_execute.answer_callback_query_via_runtime,
+        "bot_gate_answer_callback": bot_trade_contention_gate.answer_callback_query_via_runtime,
     }
 
     async def always_valid_price(**_kwargs: Any) -> tuple[bool, str]:
@@ -2342,6 +2356,31 @@ async def patched_trading_boundaries():
 
     async def no_price_warning(**_kwargs: Any) -> None:
         return None
+
+    callback_answer_unset = object()
+
+    async def record_synthetic_callback_answer(
+        callback: Any,
+        text: Any = callback_answer_unset,
+        *,
+        show_alert: Any = callback_answer_unset,
+        **_kwargs: Any,
+    ) -> Any:
+        """Answer a harness-only callback without queuing a fake Telegram id.
+
+        Synthetic dispatcher updates have no Telegram-issued callback receipt,
+        so their acknowledgement cannot be delivered by the real queue.  The
+        business handler and all durable offer/terminal-publication paths still
+        run unchanged; only this impossible external acknowledgement is
+        recorded by the in-memory Telegram adapter.
+        """
+        args = () if text is callback_answer_unset else (text,)
+        kwargs = (
+            {}
+            if show_alert is callback_answer_unset
+            else {"show_alert": show_alert}
+        )
+        return await callback.answer(*args, **kwargs)
 
     async def local_forward_trade_to_home_server(
         _target_server: str,
@@ -2512,6 +2551,13 @@ async def patched_trading_boundaries():
     web_push.schedule_notification_web_push = noop_schedule_web_push
     trade_service.validate_competitive_price = always_valid_price
     trade_service.detect_offer_price_warning = no_price_warning
+    if emulate_callback_answers:
+        bot_trade_execute.answer_callback_query_via_runtime = (
+            record_synthetic_callback_answer
+        )
+        bot_trade_contention_gate.answer_callback_query_via_runtime = (
+            record_synthetic_callback_answer
+        )
     try:
         yield
     finally:
@@ -2534,6 +2580,12 @@ async def patched_trading_boundaries():
         web_push.schedule_notification_web_push = original["schedule_notification_web_push"]
         trade_service.validate_competitive_price = original["validate_competitive_price"]
         trade_service.detect_offer_price_warning = original["detect_offer_price_warning"]
+        bot_trade_execute.answer_callback_query_via_runtime = original[
+            "bot_trade_answer_callback"
+        ]
+        bot_trade_contention_gate.answer_callback_query_via_runtime = original[
+            "bot_gate_answer_callback"
+        ]
 
 
 @asynccontextmanager
@@ -3311,6 +3363,10 @@ class AiogramDispatcherHarness:
     def __init__(self) -> None:
         self.telegram = RecordingTelegramBot()
         self.dp = Dispatcher(storage=MemoryStorage())
+        # Keep the synthetic envelope aligned with the production polling
+        # boundary: queue-v1 callback acknowledgement requires the captured
+        # receipt timestamp before the contention gate or handler executes.
+        self.dp.update.outer_middleware(CallbackReceiptMiddleware())
         self.dp.update.outer_middleware(TradeContentionGateMiddleware())
         self.dp.update.outer_middleware(AuthMiddleware(AsyncSessionLocal))
         self.dp.update.outer_middleware(BotLoggingContextMiddleware())
@@ -3362,6 +3418,7 @@ class AiogramDispatcherHarness:
         callback_data: str,
         callback_id: str,
         channel_message_id: int,
+        bot_identity: str = "primary",
     ) -> dict[str, Any] | None:
         now = int(time.time())
         channel_id = settings.channel_id or -1000000000000
@@ -3387,7 +3444,11 @@ class AiogramDispatcherHarness:
             },
             context={"bot": self.telegram.bot},
         )
-        await self.dp.feed_update(self.telegram.bot, update)
+        identity_token = bind_telegram_callback_bot_identity(bot_identity)
+        try:
+            await self.dp.feed_update(self.telegram.bot, update)
+        finally:
+            reset_telegram_callback_bot_identity(identity_token)
         return self.telegram.callback_answers.get(callback_id)
 
     async def feed_private_callback(
@@ -3396,6 +3457,7 @@ class AiogramDispatcherHarness:
         telegram_id: int,
         callback_data: str,
         callback_id: str,
+        bot_identity: str = "primary",
     ) -> dict[str, Any] | None:
         now = int(time.time())
         update = Update.model_validate(
@@ -3420,7 +3482,11 @@ class AiogramDispatcherHarness:
             },
             context={"bot": self.telegram.bot},
         )
-        await self.dp.feed_update(self.telegram.bot, update)
+        identity_token = bind_telegram_callback_bot_identity(bot_identity)
+        try:
+            await self.dp.feed_update(self.telegram.bot, update)
+        finally:
+            reset_telegram_callback_bot_identity(identity_token)
         return self.telegram.callback_answers.get(callback_id)
 
     async def close(self) -> None:
@@ -5068,6 +5134,7 @@ async def execute_bot_trade_with_dispatcher(
     error_details: list[str] | None = None,
     phase_details: dict[str, Any] | None = None,
     preconfirmed: bool = False,
+    callback_bot_identity: str = "primary",
 ) -> str:
     callback_data = build_channel_trade_callback_data(
         offer_id=offer.id,
@@ -5095,6 +5162,7 @@ async def execute_bot_trade_with_dispatcher(
                 callback_data=callback_data,
                 callback_id=first_callback_id,
                 channel_message_id=channel_message_id,
+                bot_identity=callback_bot_identity,
             )
             telegram_update_count += 1
             if phase_details is not None:
@@ -5107,6 +5175,7 @@ async def execute_bot_trade_with_dispatcher(
             callback_data=callback_data,
             callback_id=second_callback_id,
             channel_message_id=channel_message_id,
+            bot_identity=callback_bot_identity,
         )
         telegram_update_count += 1
         if phase_details is not None:

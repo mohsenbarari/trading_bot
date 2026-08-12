@@ -25,6 +25,27 @@ class TradingCoreMixedLoadHelperTests(unittest.TestCase):
         )
         self.assertNotEqual(first, second)
 
+    def test_boundary_patch_records_synthetic_callback_acknowledgements(self):
+        async def run_probe():
+            callback = SimpleNamespace(answer=AsyncMock(return_value=True))
+            original = worker.bot_trade_execute.answer_callback_query_via_runtime
+            async with worker.patched_trading_boundaries(
+                emulate_callback_answers=True
+            ):
+                self.assertIsNot(
+                    worker.bot_trade_execute.answer_callback_query_via_runtime,
+                    original,
+                )
+                await worker.bot_trade_execute.answer_callback_query_via_runtime(
+                    callback,
+                    "acknowledged",
+                    show_alert=False,
+                )
+            self.assertIs(worker.bot_trade_execute.answer_callback_query_via_runtime, original)
+            callback.answer.assert_awaited_once_with("acknowledged", show_alert=False)
+
+        asyncio.run(run_probe())
+
     def test_dual_role_users_artifact_round_trip_is_iran_authoritative(self):
         users = [
             worker.LoadUserRef(user_id=10, telegram_id=9010),
