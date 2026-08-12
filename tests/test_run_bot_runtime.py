@@ -107,7 +107,7 @@ class RunBotRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIs(fake_dp.update.outer_middleware.call_args_list[1].args[0], trade_gate_middleware)
         self.assertIs(fake_dp.update.outer_middleware.call_args_list[2].args[0], auth_middleware)
         self.assertIs(fake_dp.update.outer_middleware.call_args_list[4].args[0], navigation_middleware)
-        self.assertEqual(fake_dp.include_router.call_count, 14)
+        self.assertEqual(fake_dp.include_router.call_count, 16)
         fake_dp.start_polling.assert_awaited_once_with(fake_bot)
         fake_bot.session.close.assert_awaited_once()
 

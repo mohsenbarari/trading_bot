@@ -77,6 +77,9 @@ class BotPanelStandardActionsTests(unittest.IsolatedAsyncioTestCase):
         ), patch(
             "core.services.accountant_relation_service.is_user_accountant", new=AsyncMock(return_value=False)
         ), patch("bot.handlers.panel.AsyncSessionLocal", return_value=FakeSessionContext()), patch(
+            "bot.handlers.panel._user_panel_show_overtime_preference",
+            new=AsyncMock(return_value=False),
+        ), patch(
             "bot.handlers.panel.build_user_panel_navigation_keyboard",
             new=AsyncMock(
                 return_value=get_user_panel_keyboard(
@@ -187,6 +190,9 @@ class BotPanelStandardActionsTests(unittest.IsolatedAsyncioTestCase):
         ), patch(
             "bot.handlers.panel.attach_customer_management_names",
             new=AsyncMock(),
+        ), patch(
+            "bot.handlers.panel._user_panel_show_overtime_preference",
+            new=AsyncMock(return_value=False),
         ), patch(
             "bot.handlers.panel.build_user_panel_navigation_keyboard",
             new=AsyncMock(

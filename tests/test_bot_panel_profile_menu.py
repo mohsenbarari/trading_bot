@@ -42,6 +42,9 @@ class BotPanelProfileMenuTests(unittest.IsolatedAsyncioTestCase):
         ), patch(
             "bot.handlers.panel.build_user_panel_navigation_keyboard",
             new=AsyncMock(return_value="KB"),
+        ), patch(
+            "bot.handlers.panel._user_panel_show_overtime_preference",
+            new=AsyncMock(return_value=False),
         ), patch("bot.handlers.panel.set_anchor") as set_anchor, patch(
             "bot.handlers.panel.settings", SimpleNamespace(bot_username="botname")
         ):

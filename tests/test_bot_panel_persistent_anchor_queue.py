@@ -83,6 +83,10 @@ class BotPanelPersistentAnchorQueueTests(unittest.IsolatedAsyncioTestCase):
                 new=AsyncMock(),
             ),
             patch(
+                "bot.handlers.panel._user_panel_show_overtime_preference",
+                new=AsyncMock(return_value=False),
+            ),
+            patch(
                 "bot.handlers.panel.settings",
                 SimpleNamespace(bot_username="botname"),
             ),

@@ -133,7 +133,11 @@ class AccountStatusLifecycleSmokeTests(unittest.IsolatedAsyncioTestCase):
             'api.routers.users.send_limitation_notification', new=AsyncMock()
         ), patch('api.routers.users.asyncio.create_task'), patch.object(
             status_service, '_utcnow_naive', return_value=deactivated_at
-        ), patch(
+        ), patch.object(
+            status_service,
+            '_invalidate_overtime_for_inactive_user',
+            new=AsyncMock(),
+        ) as invalidate_overtime, patch(
             'core.services.user_account_status_service.create_user_notification', new=AsyncMock()
         ) as create_notification, patch(
             'core.services.user_account_status_service.send_telegram_notification', new=AsyncMock()
@@ -160,6 +164,11 @@ class AccountStatusLifecycleSmokeTests(unittest.IsolatedAsyncioTestCase):
         create_notification.assert_awaited_once()
         send_telegram.assert_not_awaited()
         remove_from_channel.assert_not_awaited()
+        invalidate_overtime.assert_awaited_once_with(
+            user_db,
+            user,
+            now=deactivated_at,
+        )
         self.assertEqual(self.enqueue_account_notice.await_count, 1)
 
         lock_db = FakeLockDB([user])
