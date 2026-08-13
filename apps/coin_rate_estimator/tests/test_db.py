@@ -128,6 +128,40 @@ class DatabaseTests(unittest.TestCase):
         self.assertEqual(event_row["tehran_weekday_name"], "دوشنبه")
         self.assertEqual(event_row["source_text"], "4500.10")
 
+    def test_herat_abbreviation_uses_only_prior_same_book_temporal_range(self) -> None:
+        def store(message_id: int, second: int, price: int) -> None:
+            timestamp = f"2026-07-20T10:00:{second:02d}Z"
+            raw_post_id = self._post(
+                message_id, timestamp, str(price), source_code="USD_HERAT"
+            )
+            replace_price_events(
+                self.connection,
+                raw_post_id=raw_post_id,
+                event_time_utc=timestamp,
+                events=[
+                    PriceEvent(
+                        instrument="USD_HERAT",
+                        market_label="دلار هرات فردایی کاغذی",
+                        price=Decimal(price),
+                        currency="TOMAN",
+                        price_unit="TOMAN_PER_USD",
+                        settlement_term="TOMORROW",
+                        trade_form="PAPER",
+                        parser_version="rules-test",
+                    )
+                ],
+            )
+
+        store(1, 1, 185_200)
+        store(2, 2, 185_350)
+        store(3, 3, 185_500)
+        store(4, 4, 85_600)
+        row = self.connection.execute(
+            "SELECT price_value, parser_version FROM price_events ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        self.assertEqual(row["price_value"], "185600")
+        self.assertIn("herat-temporal-range-v1", row["parser_version"])
+
 
 if __name__ == "__main__":
     unittest.main()

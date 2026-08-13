@@ -16,6 +16,11 @@ from core.market_intelligence.market_store import (
     observation_event_time,
     upsert_observation,
 )
+from core.market_intelligence.herat_price_normalization import (
+    HERAT_LOOKBACK_SECONDS,
+    HERAT_TEMPORAL_RANGE_VERSION,
+    normalize_herat_price,
+)
 
 from .parser import PARSER_VERSION, parse_public_message, should_ignore_public_message
 from .sources import source_for_code
@@ -182,6 +187,46 @@ def ingest_public_message(
     compact_older_message_ignored = False
     stored = 0
     for index, parsed in enumerate(parsed_events):
+        normalized_price = parsed.price
+        normalized_confidence = parsed.parse_confidence
+        parser_version = PARSER_VERSION
+        if parsed.instrument == "USD_HERAT":
+            prior = connection.execute(
+                """
+                SELECT price_value
+                FROM market_observations
+                WHERE source_code = ?
+                  AND instrument = 'USD_HERAT'
+                  AND settlement_term = ?
+                  AND trade_form = ?
+                  AND quality_state = 'ELIGIBLE'
+                  AND event_time_utc < ?
+                  AND available_at_utc <= ?
+                  AND (julianday(?) - julianday(event_time_utc)) * 86400.0
+                      BETWEEN 0 AND ?
+                ORDER BY event_time_utc DESC, id DESC
+                LIMIT 32
+                """,
+                (
+                    source.code,
+                    parsed.settlement_term,
+                    parsed.trade_form,
+                    event_time_utc,
+                    available_at_utc,
+                    event_time_utc,
+                    HERAT_LOOKBACK_SECONDS,
+                ),
+            ).fetchall()
+            decision = normalize_herat_price(
+                parsed.price,
+                strictly_prior_same_book_prices=reversed(
+                    [row["price_value"] for row in prior]
+                ),
+            )
+            if decision.adjusted:
+                normalized_price = decision.price
+                normalized_confidence = min(parsed.parse_confidence, 0.96)
+                parser_version += "+" + HERAT_TEMPORAL_RANGE_VERSION
         event_key = _event_key(
             source_code=source.code,
             message_id=message.message_id,
@@ -208,13 +253,13 @@ def ingest_public_message(
                 trade_form=parsed.trade_form,
                 event_type=parsed.event_type,
                 side=parsed.side,
-                price=parsed.price,
+                price=normalized_price,
                 price_unit=parsed.price_unit,
                 currency=parsed.currency,
                 quantity=parsed.quantity,
                 quantity_unit=parsed.quantity_unit,
-                parse_confidence=parsed.parse_confidence,
-                parser_version=PARSER_VERSION,
+                parse_confidence=normalized_confidence,
+                parser_version=parser_version,
                 quality_state="ELIGIBLE",
                 quality_policy_version="public-market-v1",
                 attributes=parsed.attributes or {},

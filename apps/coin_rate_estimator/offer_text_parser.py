@@ -283,21 +283,29 @@ def detect_settlement(text: str, side: str | None) -> tuple[str, str]:
         re.search(r"(?:^|\s)[خف]\s*ت(?=\s|$)", text)
         and not date_low_short
     )
+    compact_future = bool(
+        # Historical syntax: ``خ ن ف`` / ``ف ن ف``.  Current syntax:
+        # ``خ ف`` / ``ف ف``.  The last ف is the delivery marker and therefore
+        # wins over the older intermediate cash/payment marker.
+        re.search(r"(?:^|\s)[خف]\s*(?:ن\s*)?ف(?=\s|\d|$)", text)
+    )
+    if any(marker in text for marker in TOMORROW_MARKERS) or compact_future:
+        return "TOMORROW", "EXPLICIT_TOMORROW"
     if (
         any(marker in text for marker in CASH_MARKERS)
+        or re.search(r"(?<![آ-ی])نق(?![آ-ی])", text)
         or CASH_N_MARKER.search(text)
         or re.search(r"[خف]\s*ن(?=\s|\d|$)", text)
         or cash_t_short
         or "تک حساب تک فیش" in text
     ):
         return "CASH", "EXPLICIT_CASH"
-    if any(marker in text for marker in TOMORROW_MARKERS):
-        return "TOMORROW", "EXPLICIT_TOMORROW"
-    if side == "BUY" and SELL_MARKER.search(text):
-        return "TOMORROW", "BUY_PLUS_TRAILING_F"
-    # In the reviewed group corpus, a coin offer is tomorrow unless cash/today
-    # is explicit. This is intentionally different from dollar/melted parsing.
-    return "TOMORROW", "GROUP_DEFAULT_TOMORROW"
+    # Current group syntax makes a single side marker cash (خ / ف).  Tomorrow
+    # requires the second ف above.  Text without a reliable side remains on the
+    # conservative historical default and is not promoted by this function.
+    if side in {"BUY", "SELL"}:
+        return "CASH", "CURRENT_SIDE_ONLY_CASH"
+    return "TOMORROW", "GROUP_UNRESOLVED_DEFAULT_TOMORROW"
 
 
 def detect_trade_form(text: str) -> tuple[str, str]:

@@ -195,6 +195,22 @@ class PublicTelegramIngestionTests(unittest.TestCase):
         )
         self.assertEqual(read_source_checkpoint(self.connection, "USD_HERAT"), 50)
 
+    def test_herat_abbreviation_is_reconstructed_from_strictly_prior_same_book_range(self) -> None:
+        self.ingest("USD_HERAT", 1, "2026-08-04T05:35:01Z", "هرات فردایی 185,200 خرید")
+        self.ingest("USD_HERAT", 2, "2026-08-04T05:35:02Z", "هرات فردایی 185,350 خرید")
+        self.ingest("USD_HERAT", 3, "2026-08-04T05:35:03Z", "هرات فردایی 185,500 خرید")
+        self.ingest("USD_HERAT", 4, "2026-08-04T05:35:04Z", "هرات فردایی 85,600 خرید")
+        row = self.connection.execute(
+            """
+            SELECT price_value, parser_version
+            FROM market_observations
+            ORDER BY event_time_utc DESC
+            LIMIT 1
+            """
+        ).fetchone()
+        self.assertEqual(row["price_value"], "185600")
+        self.assertIn("herat-temporal-range-v1", row["parser_version"])
+
     def test_melted_flow_trade_gets_only_a_strictly_prior_matching_side(self) -> None:
         self.ingest(
             "MELTED_FLOW",

@@ -226,6 +226,29 @@ async def collect_history(
                             )
 
                     connection.commit()
+                    if source_code == "USD_HERAT":
+                        # History arrives newest-first.  Reparse this source in
+                        # event-time order so temporal normalization can use
+                        # only the strictly-prior 15-minute range.
+                        historical_rows = connection.execute(
+                            """
+                            SELECT id, raw_text, published_at_utc
+                            FROM raw_posts
+                            WHERE source_code = 'USD_HERAT'
+                            ORDER BY published_at_utc, id
+                            """
+                        ).fetchall()
+                        for historical in historical_rows:
+                            historical_events = parse_message(
+                                canonical_username, historical["raw_text"]
+                            )
+                            replace_price_events(
+                                connection,
+                                raw_post_id=int(historical["id"]),
+                                event_time_utc=historical["published_at_utc"],
+                                events=historical_events,
+                            )
+                        connection.commit()
                     if canonical_username.lower() == "naghdp":
                         side_links = infer_naghdp_trade_sides(connection)
                         connection.commit()

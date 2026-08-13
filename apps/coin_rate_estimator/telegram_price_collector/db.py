@@ -1,13 +1,27 @@
 from __future__ import annotations
 
 import sqlite3
+from dataclasses import replace
 from decimal import Decimal
 from datetime import datetime, timezone
 from pathlib import Path
+import sys
 from typing import Iterable
 from zoneinfo import ZoneInfo
 
 from .models import ExternalMarketObservation, PriceEvent, RawPost
+
+# The operator app is intentionally runnable from its own directory.  Resolve
+# the repository-owned normalization policy explicitly instead of requiring an
+# ambient PYTHONPATH or maintaining a divergent copy inside the legacy app.
+_REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
+if (_REPOSITORY_ROOT / "core").is_dir() and str(_REPOSITORY_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPOSITORY_ROOT))
+from core.market_intelligence.herat_price_normalization import (
+    HERAT_LOOKBACK_SECONDS,
+    HERAT_TEMPORAL_RANGE_VERSION,
+    normalize_herat_price,
+)
 
 
 SCHEMA = """
@@ -507,6 +521,58 @@ def replace_price_events(
     ).fetchone()
     if raw_post_exists is None:
         raise RuntimeError("Raw post does not exist")
+
+    source = connection.execute(
+        "SELECT source_code FROM raw_posts WHERE id = ?", (raw_post_id,)
+    ).fetchone()
+    if source is None:
+        raise RuntimeError("Raw post does not exist")
+
+    normalized_events: list[PriceEvent] = []
+    for event in event_list:
+        if event.instrument != "USD_HERAT":
+            normalized_events.append(event)
+            continue
+        prior = connection.execute(
+            """
+            SELECT price.price_value
+            FROM price_events AS price
+            JOIN raw_posts AS post ON post.id = price.raw_post_id
+            WHERE post.source_code = ?
+              AND price.instrument = 'USD_HERAT'
+              AND price.settlement_term = ?
+              AND price.trade_form = ?
+              AND price.event_time_utc < ?
+              AND (julianday(?) - julianday(price.event_time_utc)) * 86400.0
+                  BETWEEN 0 AND ?
+            ORDER BY price.event_time_utc DESC, price.id DESC
+            LIMIT 32
+            """,
+            (
+                source["source_code"],
+                event.settlement_term,
+                event.trade_form,
+                event_time_utc,
+                event_time_utc,
+                HERAT_LOOKBACK_SECONDS,
+            ),
+        ).fetchall()
+        decision = normalize_herat_price(
+            event.price,
+            strictly_prior_same_book_prices=reversed(
+                [row["price_value"] for row in prior]
+            ),
+        )
+        if decision.adjusted:
+            event = replace(
+                event,
+                price=decision.price,
+                parse_method=f"{event.parse_method}+TEMPORAL_RANGE",
+                parse_confidence=min(event.parse_confidence, 0.96),
+                parser_version=f"{event.parser_version}+{HERAT_TEMPORAL_RANGE_VERSION}",
+            )
+        normalized_events.append(event)
+    event_list = normalized_events
 
     for index, event in enumerate(event_list):
         connection.execute(

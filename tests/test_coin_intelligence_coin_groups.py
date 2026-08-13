@@ -8,6 +8,7 @@ import unittest
 
 from core.market_intelligence.coin_groups import (
     CoinGroupMessageInput,
+    coin_group_settlement_conflict_reason,
     coin_group_offer_observations,
     parse_coin_group_offers,
 )
@@ -64,7 +65,32 @@ class CoinGroupParserTests(unittest.TestCase):
             (parsed[0].commodity_code, parsed[0].price_project_thousand_toman),
             ("QUARTER_LOW_DATE", 45_800),
         )
-        self.assertEqual(parsed[0].settlement_term, "TOMORROW")
+        self.assertEqual(parsed[0].settlement_term, "CASH")
+
+    def test_old_and_new_settlement_syntax_and_nagh_are_distinguished(self) -> None:
+        cases = {
+            "خ ن ف امام 10 تا 183000": "TOMORROW",
+            "خ ن امام 10 تا 183000": "CASH",
+            "خن امام 10 تا 183000": "CASH",
+            "خ ف امام 10 تا 183000": "TOMORROW",
+            "خنف امام 10 تا 183000": "TOMORROW",
+            "خ امام 10 تا 183000": "CASH",
+            "10 تا نق خ 183000 امام": "CASH",
+        }
+        for text, expected in cases.items():
+            with self.subTest(text=text):
+                parsed = parse_coin_group_offers(self.source(text))
+                self.assertEqual(len(parsed), 1)
+                self.assertEqual(parsed[0].settlement_term, expected)
+
+        self.assertEqual(
+            coin_group_settlement_conflict_reason("خ ن ف امام 10 تا 183000", "CASH"),
+            "SETTLEMENT_LABEL_CASH_BUT_TEXT_TOMORROW",
+        )
+        self.assertEqual(
+            coin_group_settlement_conflict_reason("10 تا نق خ 183000", "TOMORROW"),
+            "SETTLEMENT_LABEL_TOMORROW_BUT_TEXT_CASH",
+        )
 
     def test_year_403_404_and_thursday_cashier_offers_are_ignored(self) -> None:
         self.assertEqual(

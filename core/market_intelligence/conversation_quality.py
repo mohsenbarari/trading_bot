@@ -23,10 +23,21 @@ import math
 import os
 import sqlite3
 import statistics
+import sys
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterable, Sequence
+
+try:
+    from .coin_groups import coin_group_settlement_conflict_reason
+except ImportError:  # Preserve the existing direct-script operator entrypoint.
+    _REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
+    if str(_REPOSITORY_ROOT) not in sys.path:
+        sys.path.insert(0, str(_REPOSITORY_ROOT))
+    from core.market_intelligence.coin_groups import (  # type: ignore[no-redef]
+        coin_group_settlement_conflict_reason,
+    )
 
 
 OFFER_LIVE_SECONDS = 5 * 60
@@ -45,6 +56,15 @@ AMBIGUOUS_PRICE_METHODS = {
     "contextual_tail_unrounded",
     "reply_contextual_tail",
 }
+NEGOTIATED_TAIL_METHODS = {
+    "reply_contextual_tail",
+    "negotiated_offer_tail",
+}
+ANCHORED_OFFER_PRICE_METHODS = {
+    "full",
+    "expanded_shorthand",
+}
+NEGOTIATED_TAIL_MAX_ABS_DELTA = 5_000
 AMBIGUOUS_PRICE_REASON = "AMBIGUOUS_CONTEXTUAL_TAIL_WITHOUT_CURRENT_MARKET_RANGE"
 EXTREME_PRICE_REASON = "EXTREME_STRICTLY_PRIOR_LOCAL_PRICE_DISCONTINUITY"
 EXTREME_LINKED_TRADE_REASON = (
@@ -72,6 +92,22 @@ def iso_utc(value: datetime) -> str:
     return value.astimezone(timezone.utc).isoformat(timespec="seconds").replace(
         "+00:00", "Z"
     )
+
+
+def negotiated_tail_on_anchored_offer(
+    trade: dict[str, Any],
+    linked: dict[str, Any] | None,
+) -> bool:
+    """A linked negotiated tail is auditable; an orphan tail remains unsafe."""
+
+    if linked is None or str(trade.get("price_method") or "") not in NEGOTIATED_TAIL_METHODS:
+        return False
+    if str(linked.get("price_method") or "") not in ANCHORED_OFFER_PRICE_METHODS:
+        return False
+    try:
+        return abs(int(trade["price"]) - int(linked["price"])) <= NEGOTIATED_TAIL_MAX_ABS_DELTA
+    except (KeyError, TypeError, ValueError):
+        return False
 
 
 def offer_lifecycle_weights(
@@ -568,19 +604,24 @@ def annotate_database(conversation_db: Path, market_db: Path) -> dict[str, Any]:
             """
         )
         offer_columns = _table_columns(conversation, "offers")
+        message_columns = _table_columns(conversation, "messages")
         offer_price_method = (
             "o.price_method" if "price_method" in offer_columns else "NULL"
         )
+        offer_source_text = (
+            "o.source_text" if "source_text" in offer_columns else "NULL"
+        )
+        message_text = "m.text" if "text" in message_columns else "NULL"
         offers = [
             dict(row)
             for row in conversation.execute(
                 f"""
                 SELECT o.id, o.import_id, o.message_id, o.offer_index,
                        o.commodity, o.price, o.quantity, o.side, o.settlement,
-                       o.trade_form, o.confidence,
+                       o.trade_form, o.confidence, {offer_source_text} AS source_text,
                        {offer_price_method} AS price_method,
                        m.event_time_utc,
-                       m.sender_hash
+                       m.sender_hash, {message_text} AS message_text
                 FROM offers AS o
                 JOIN messages AS m
                   ON m.import_id=o.import_id AND m.message_id=o.message_id
@@ -673,10 +714,15 @@ def annotate_database(conversation_db: Path, market_db: Path) -> dict[str, Any]:
                 str(row.get("price_method") or "") in AMBIGUOUS_PRICE_METHODS
             )
             extreme_price = bool(discontinuity["extreme"])
+            settlement_mismatch = coin_group_settlement_conflict_reason(
+                str(row.get("message_text") or row.get("source_text") or ""),
+                str(row.get("settlement") or ""),
+            )
             eligible = (
                 bool(decision["eligible"])
                 and not ambiguous_price
                 and not extreme_price
+                and settlement_mismatch is None
             )
             quality = {
                 "offer_id": int(row["id"]),
@@ -694,12 +740,16 @@ def annotate_database(conversation_db: Path, market_db: Path) -> dict[str, Any]:
                 "regime_confidence": float(regime.get("confidence") or 0.0),
                 "regime_volatility_percent": regime.get("volatility_percent"),
                 "exclusion_reason": (
-                    AMBIGUOUS_PRICE_REASON
-                    if ambiguous_price
+                    settlement_mismatch
+                    if settlement_mismatch is not None
                     else (
-                        EXTREME_PRICE_REASON
-                        if extreme_price
-                        else decision["exclusion_reason"]
+                        AMBIGUOUS_PRICE_REASON
+                        if ambiguous_price
+                        else (
+                            EXTREME_PRICE_REASON
+                            if extreme_price
+                            else decision["exclusion_reason"]
+                        )
                     )
                 ),
             }
@@ -763,22 +813,41 @@ def annotate_database(conversation_db: Path, market_db: Path) -> dict[str, Any]:
                 linked_quality
                 and linked_quality["cross_state"] == "CROSSED_EXCLUDED"
             )
+            negotiated_on_offer = negotiated_tail_on_anchored_offer(trade, linked)
             ambiguous_price = (
                 str(trade.get("price_method") or "") in AMBIGUOUS_PRICE_METHODS
-                or bool(
-                    linked_quality
-                    and linked_quality["exclusion_reason"] == AMBIGUOUS_PRICE_REASON
-                )
+                and not negotiated_on_offer
+            ) or bool(
+                linked_quality
+                and linked_quality["exclusion_reason"] == AMBIGUOUS_PRICE_REASON
+                and not negotiated_on_offer
             )
             extreme_price = bool(
                 linked_quality
                 and linked_quality["exclusion_reason"] == EXTREME_PRICE_REASON
             )
+            offer_text = (
+                str(linked.get("message_text") or linked.get("source_text") or "")
+                if linked is not None
+                else ""
+            )
+            settlement_mismatch = coin_group_settlement_conflict_reason(
+                offer_text, str(trade.get("settlement") or "")
+            )
+            if (
+                settlement_mismatch is None
+                and linked_quality
+                and str(linked_quality.get("exclusion_reason") or "").startswith(
+                    "SETTLEMENT_LABEL_"
+                )
+            ):
+                settlement_mismatch = str(linked_quality["exclusion_reason"])
             eligible = (
                 bool(trade["base_training_eligible"])
                 and not excluded_cross
                 and not ambiguous_price
                 and not extreme_price
+                and settlement_mismatch is None
             )
             regime = regime_at(str(trade["event_time_utc"]), str(trade["settlement"]))
             trade_quality.append(
@@ -790,6 +859,7 @@ def annotate_database(conversation_db: Path, market_db: Path) -> dict[str, Any]:
                         not excluded_cross
                         and not ambiguous_price
                         and not extreme_price
+                        and settlement_mismatch is None
                     ),
                     "training_weight": (
                         CONFIRMED_TRADE_TRAINING_WEIGHT if eligible else 0.0
@@ -803,18 +873,22 @@ def annotate_database(conversation_db: Path, market_db: Path) -> dict[str, Any]:
                         else "UNLINKED_TRADE"
                     ),
                     "exclusion_reason": (
-                        "TRADE_LINKED_TO_CROSSED_OFFER_IN_NORMAL_MARKET"
-                        if excluded_cross
+                        settlement_mismatch
+                        if settlement_mismatch is not None
                         else (
-                            AMBIGUOUS_PRICE_REASON
-                            if ambiguous_price
+                            "TRADE_LINKED_TO_CROSSED_OFFER_IN_NORMAL_MARKET"
+                            if excluded_cross
                             else (
-                                EXTREME_LINKED_TRADE_REASON
-                                if extreme_price
+                                AMBIGUOUS_PRICE_REASON
+                                if ambiguous_price
                                 else (
-                                    "BASE_TRAINING_INELIGIBLE"
-                                    if not bool(trade["base_training_eligible"])
-                                    else None
+                                    EXTREME_LINKED_TRADE_REASON
+                                    if extreme_price
+                                    else (
+                                        "BASE_TRAINING_INELIGIBLE"
+                                        if not bool(trade["base_training_eligible"])
+                                        else None
+                                    )
                                 )
                             )
                         )
@@ -883,6 +957,10 @@ def annotate_database(conversation_db: Path, market_db: Path) -> dict[str, Any]:
                 row["exclusion_reason"] == EXTREME_PRICE_REASON
                 for row in quality_by_offer.values()
             ),
+            "offers_settlement_mismatch_excluded": sum(
+                str(row["exclusion_reason"] or "").startswith("SETTLEMENT_LABEL_")
+                for row in quality_by_offer.values()
+            ),
             "offers_superseded_by_trade": len(completed_offer_ids),
             "offers_training_eligible": sum(
                 bool(row["training_eligible"]) for row in quality_by_offer.values()
@@ -902,6 +980,10 @@ def annotate_database(conversation_db: Path, market_db: Path) -> dict[str, Any]:
                 row["exclusion_reason"] == EXTREME_LINKED_TRADE_REASON
                 for row in trade_quality
             ),
+            "trades_settlement_mismatch_excluded": sum(
+                str(row["exclusion_reason"] or "").startswith("SETTLEMENT_LABEL_")
+                for row in trade_quality
+            ),
             "regime_cache_entries": len(regime_cache),
             "policy": {
                 "active_offer_live_weight": OFFER_ACTIVE_LIVE_WEIGHT,
@@ -912,6 +994,8 @@ def annotate_database(conversation_db: Path, market_db: Path) -> dict[str, Any]:
                 "normal_market_outlier_rule": NORMAL_MARKET_OUTLIER_RULE,
                 "opposite_book_reference": OPPOSITE_BOOK_REFERENCE,
                 "contextual_tail_without_current_market_range": "EXCLUDED",
+                "linked_negotiated_tail_near_anchored_offer": "ELIGIBLE",
+                "settlement_text_label_mismatch": "EXCLUDED",
                 "extreme_strictly_prior_local_price_discontinuity": "EXCLUDED",
                 "regime_inputs_exclude_coin_offers": True,
                 "usdt_weight_exceeds_ime_weight": True,

@@ -173,6 +173,7 @@ async def collect_public_market_telegram(
             )
             message_count = event_count = ignored_count = linked_count = 0
             try:
+                pending_messages: list[PublicTelegramMessage] = []
                 async for message in client.iter_messages(
                     entity,
                     min_id=minimum_id,
@@ -185,16 +186,23 @@ async def collect_public_market_telegram(
                         published = published.replace(tzinfo=timezone.utc)
                     if published.astimezone(timezone.utc) < cutoff:
                         break
-                    result = ingest_public_message(
-                        connection,
-                        source_code=source.code,
-                        message=PublicTelegramMessage(
+                    pending_messages.append(
+                        PublicTelegramMessage(
                             message_id=int(message.id),
                             published_at_utc=_iso_utc(published),
                             available_at_utc=datetime.now(timezone.utc),
                             text=str(getattr(message, "message", None) or ""),
                             is_forwarded=getattr(message, "fwd_from", None) is not None,
-                        ),
+                        )
+                    )
+                # Telethon history is newest-first.  Causal range decisions and
+                # checkpoints must be built oldest-first; future quotes cannot
+                # repair an older message.
+                for public_message in reversed(pending_messages):
+                    result = ingest_public_message(
+                        connection,
+                        source_code=source.code,
+                        message=public_message,
                     )
                     message_count += 1
                     event_count += result.event_count

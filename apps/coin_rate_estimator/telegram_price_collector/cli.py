@@ -87,7 +87,7 @@ def command_reparse() -> int:
             """
             SELECT id, raw_text, published_at_utc, source_code
             FROM raw_posts
-            ORDER BY id
+            ORDER BY published_at_utc, id
             """
         )
         for row in rows:

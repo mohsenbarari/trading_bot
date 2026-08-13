@@ -49,7 +49,7 @@ class SupervisedOfferParserTests(unittest.TestCase):
     def test_attached_sell_and_quantity_are_extracted(self) -> None:
         parsed = self.parser.parse("180600ف20")
         self.assertEqual(parsed["side"], "SELL")
-        self.assertEqual(parsed["settlement"], "TOMORROW")
+        self.assertEqual(parsed["settlement"], "CASH")
         self.assertEqual(parsed["price"], 180600)
         self.assertEqual(parsed["quantity"], 20)
 
@@ -70,16 +70,32 @@ class SupervisedOfferParserTests(unittest.TestCase):
         self.assertEqual(quarter["commodity"], "ربع بهار")
         self.assertEqual(quarter["price"], 51200)
 
-    def test_cash_requires_explicit_cash_marker(self) -> None:
+    def test_current_single_side_marker_is_cash(self) -> None:
         cash = self.parser.parse("25 تا نقدی 179500 ف")
-        tomorrow = self.parser.parse("25 تا 180500 ف")
+        current_cash = self.parser.parse("25 تا 180500 ف")
+        tomorrow = self.parser.parse("25 تا 180500 ف ف")
         self.assertEqual(cash["settlement"], "CASH")
+        self.assertEqual(current_cash["settlement"], "CASH")
         self.assertEqual(tomorrow["settlement"], "TOMORROW")
+
+    def test_historical_and_current_settlement_shorthand_are_both_understood(self) -> None:
+        cases = {
+            "خ ن ف امام 10 تا 183000": "TOMORROW",
+            "خ ن امام 10 تا 183000": "CASH",
+            "خن امام 10 تا 183000": "CASH",
+            "خ ف امام 10 تا 183000": "TOMORROW",
+            "خنف امام 10 تا 183000": "TOMORROW",
+            "خ امام 10 تا 183000": "CASH",
+            "10 تا نق خ 183000": "CASH",
+        }
+        for text, expected in cases.items():
+            with self.subTest(text=text):
+                self.assertEqual(self.parser.parse(text)["settlement"], expected)
 
     def test_clipped_ta_does_not_become_cash(self) -> None:
         clipped_ta = self.parser.parse("20 ت خ 184200")
         compact_today = self.parser.parse("178500 خ ت 4تا")
-        self.assertEqual(clipped_ta["settlement"], "TOMORROW")
+        self.assertEqual(clipped_ta["settlement"], "CASH")
         self.assertEqual(compact_today["settlement"], "CASH")
 
     def test_compact_cash_side_and_recent_group_spellings(self) -> None:
@@ -94,7 +110,7 @@ class SupervisedOfferParserTests(unittest.TestCase):
         self.assertEqual(low_date["commodity"], "ربع تاریخ پایین")
         self.assertEqual(low_date["price"], 45500)
         self.assertEqual(date_low_full["commodity"], "بهار")
-        self.assertEqual(date_low_full["settlement"], "TOMORROW")
+        self.assertEqual(date_low_full["settlement"], "CASH")
         self.assertEqual(quarter_typo["commodity"], "ربع بهار")
         self.assertEqual(quarter_typo["side"], "SELL")
         self.assertEqual(attached_half_buy["side"], "BUY")

@@ -40,7 +40,7 @@ def anchor(code: str, price: int, at: str, **changes: object) -> CoinPriceAnchor
 class CoinGroupResolutionTests(unittest.TestCase):
     def test_explicit_name_requires_and_passes_same_book_prior_context(self) -> None:
         result = resolve_coin_group_offers(
-            source("امام فروش 186,900 / 5 تا"),
+            source("امام فروش فردا 186,900 / 5 تا"),
             anchors=(
                 anchor("IMAM", 186_700, "2026-08-04T10:08:00Z"),
                 anchor("IMAM", 186_800, "2026-08-04T10:09:00Z"),
@@ -53,7 +53,7 @@ class CoinGroupResolutionTests(unittest.TestCase):
 
     def test_named_typo_is_rejected_not_silently_relabelled(self) -> None:
         result = resolve_coin_group_offers(
-            source("امام خرید 181,900 / 5 تا"),
+            source("امام خرید فردا 181,900 / 5 تا"),
             anchors=(
                 anchor("IMAM", 186_500, "2026-08-04T10:08:00Z"),
                 anchor("IMAM", 186_700, "2026-08-04T10:09:00Z"),
@@ -91,7 +91,7 @@ class CoinGroupResolutionTests(unittest.TestCase):
 
     def test_resolved_fact_waits_until_reconciliation_is_available_and_has_no_private_fields(self) -> None:
         observations = resolved_coin_group_observations(
-            source("بهار فروش 181,900 / 5 تا"),
+            source("بهار فروش فردا 181,900 / 5 تا"),
             anchors=(
                 anchor("BAHAR", 181_700, "2026-08-04T10:08:00Z"),
                 anchor("BAHAR", 181_800, "2026-08-04T10:09:00Z"),

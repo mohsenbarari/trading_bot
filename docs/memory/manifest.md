@@ -60,7 +60,8 @@ Discover optional memory without loading it. Entries here are not default loads.
 - None enabled.
 
 ### Enabled areas
-- None enabled.
+- `areas/coin-market-intelligence.md`: load for estimator, Market Store,
+  coin-group parsing/trade linking, and public market ingestion work.
 
 ## Optional rules
 `rules/` files load only when listed above and the task clearly matches.

@@ -76,7 +76,7 @@ class CoinGroupPipelineTests(unittest.TestCase):
         self._anchor(1, 186_700, "2026-08-04T09:50:00Z")
         self._anchor(2, 186_800, "2026-08-04T09:55:00Z")
         self.market.commit()
-        self._stage(1, "امام فروش 186,900 / 5 تا", sender="offerer", at="2026-08-04T10:00:00Z")
+        self._stage(1, "امام فروش فردا 186,900 / 5 تا", sender="offerer", at="2026-08-04T10:00:00Z")
         self._stage(2, "ب5 تا186800", sender="buyer", reply=1, at="2026-08-04T10:00:02Z")
         self._stage(3, "برکت", sender="offerer", reply=2, at="2026-08-04T10:00:04Z")
         self.staging.commit()
@@ -98,7 +98,7 @@ class CoinGroupPipelineTests(unittest.TestCase):
         self.assertEqual(self.market.execute("SELECT COUNT(*) FROM market_observations WHERE source_code = 'GROUP_1'").fetchone()[0], 2)
 
     def test_without_prior_anchors_offer_and_trade_stay_out_of_model(self) -> None:
-        self._stage(1, "امام فروش 186,900 / 5 تا", sender="offerer")
+        self._stage(1, "امام فروش فردا 186,900 / 5 تا", sender="offerer")
         self._stage(2, "ب5 تا186800", sender="buyer", reply=1, at="2026-08-04T10:00:02Z")
         self._stage(3, "برکت", sender="offerer", reply=2, at="2026-08-04T10:00:04Z")
         self.staging.commit()
@@ -117,7 +117,7 @@ class CoinGroupPipelineTests(unittest.TestCase):
             "UPDATE market_observations SET price_num = 186800.5 WHERE source_code = 'TEST_ANCHOR'"
         )
         self.market.commit()
-        self._stage(1, "امام فروش 186,900 / 5 تا", sender="offerer")
+        self._stage(1, "امام فروش فردا 186,900 / 5 تا", sender="offerer")
         self.staging.commit()
         report = process_coin_group_staging(
             self.staging, self.market, as_of_utc="2026-08-04T10:01:00Z"

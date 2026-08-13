@@ -17,7 +17,7 @@ from typing import Iterable
 from .market_contracts import MarketObservation, derive_event_key, normalize_utc
 
 
-COIN_GROUP_PARSER_VERSION = "coin-group-rules-v1"
+COIN_GROUP_PARSER_VERSION = "coin-group-rules-v2-settlement-syntax"
 _DIGITS = str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789")
 # `/` frequently separates price from quantity in group posts (for example
 # `186,900 / 5 تا`), so it must never join the two numeric fields.  Thousand
@@ -99,6 +99,11 @@ def _commodity(text: str) -> str | None:
 
 
 def _side(text: str) -> str | None:
+    compact_historical = re.search(
+        r"(?:^|\s)([خف])ن(?:ف)?(?=\s|\d|$)", text
+    )
+    if compact_historical is not None:
+        return "BUY" if compact_historical.group(1) == "خ" else "SELL"
     match = _SIDE.search(text)
     if match is None:
         return None
@@ -159,19 +164,69 @@ def _price(text: str, quantity_spans: Iterable[tuple[int, int]], commodity: str 
     return winner
 
 
+def coin_group_settlement_markers(text: str) -> tuple[bool, bool]:
+    """Return explicit cash/future markers for old and current group syntax."""
+
+    normalized = _text(text)
+    explicit_tomorrow = bool(
+        re.search(r"فردا|فردایی", normalized)
+        or re.search(
+            r"(?:^|\s)[خف]\s*(?:ن\s*)?ف(?=\s|\d|$)", normalized
+        )
+    )
+    explicit_cash = bool(
+        re.search(
+            r"نقدی|نقد|(?<![آ-ی])نق(?![آ-ی])|امروز|حاضر|(?:^|\s)ن(?=\s|\d|$)",
+            normalized,
+        )
+        or re.search(r"[خف]\s*ن(?=\s|\d|$)", normalized)
+    )
+    return explicit_cash, explicit_tomorrow
+
+
+def resolve_coin_group_settlement(text: str) -> str:
+    """Resolve delivery book; future wins over the old intermediate ن."""
+
+    normalized = _text(text)
+    explicit_cash, explicit_tomorrow = coin_group_settlement_markers(normalized)
+    if explicit_tomorrow:
+        return "TOMORROW"
+    if explicit_cash:
+        return "CASH"
+    # Current syntax: a single خ/ف (or full side word) is cash.
+    return "CASH" if _side(normalized) is not None else "TOMORROW"
+
+
+def coin_group_settlement_conflict_reason(text: str, settlement: str) -> str | None:
+    """Return a deterministic exclusion reason for an opposite stored book."""
+
+    normalized = _text(text)
+    if not normalized:
+        return None
+    label = str(settlement or "").strip().upper()
+    if label not in {"CASH", "TOMORROW"}:
+        return None
+    resolved = resolve_coin_group_settlement(normalized)
+    if resolved == label:
+        return None
+    return (
+        "SETTLEMENT_LABEL_CASH_BUT_TEXT_TOMORROW"
+        if label == "CASH"
+        else "SETTLEMENT_LABEL_TOMORROW_BUT_TEXT_CASH"
+    )
+
+
 def _dimensions(text: str) -> tuple[str, str]:
     paper = bool(re.search(r"کاغذی|حواله|غیررسمی", text))
-    tomorrow = bool(re.search(r"فردا|فردایی", text))
-    cash = bool(re.search(r"نقدی|نقد|امروز|حاضر|(?:^|\s)ن(?=\s|\d|$)", text))
+    settlement = resolve_coin_group_settlement(text)
+    tomorrow = settlement == "TOMORROW"
     if paper:
         if "معکوس" in text:
-            return "PAPER_REVERSE", "TOMORROW" if tomorrow else "TODAY" if cash else "TOMORROW"
+            return "PAPER_REVERSE", "TOMORROW" if tomorrow else "TODAY"
         if "شنا" in text:
-            return "PAPER_SWIM", "TOMORROW" if tomorrow else "TODAY" if cash else "TOMORROW"
-        return "PAPER_NORMAL", "TOMORROW" if tomorrow else "TODAY" if cash else "TOMORROW"
-    # Group policy: an absent settlement marker is tomorrow, never silently
-    # cash.  This prevents mixing visibly different live price books.
-    return "PHYSICAL", "TOMORROW" if tomorrow or not cash else "CASH"
+            return "PAPER_SWIM", "TOMORROW" if tomorrow else "TODAY"
+        return "PAPER_NORMAL", "TOMORROW" if tomorrow else "TODAY"
+    return "PHYSICAL", settlement
 
 
 def parse_coin_group_offers(source: CoinGroupMessageInput) -> list[ParsedCoinGroupOffer]:

@@ -71,6 +71,63 @@ class CoinGroupTradeTests(unittest.TestCase):
         trades = link_coin_group_trades(rows, [offer_record()])
         self.assertEqual([(item.quantity, item.price_project_thousand_toman) for item in trades], [(3, 183_100)])
 
+    def test_final_negotiated_price_and_quantity_come_from_the_full_reply_branch(self) -> None:
+        rows = [
+            message(1, OWNER, "20 تا ف 177100", at_second=0),
+            message(2, BUYER_ONE, "300", reply=1, at_second=2),
+            message(3, BUYER_ONE, "ب 10", reply=2, at_second=3),
+            message(4, OWNER, "ب", reply=3, at_second=4),
+        ]
+        trades = link_coin_group_trades(rows, [offer_record(price=177_100, quantity=20)])
+        self.assertEqual(
+            [(item.price_project_thousand_toman, item.quantity) for item in trades],
+            [(177_300, 10)],
+        )
+
+    def test_latest_counterparty_quantity_overrides_an_earlier_owner_counter(self) -> None:
+        rows = [
+            message(1, OWNER, "35 تا ف 183100", at_second=0),
+            message(2, OWNER, "25", reply=1, at_second=2),
+            message(3, BUYER_ONE, "9ب", reply=2, at_second=3),
+            message(4, OWNER, "ب", reply=3, at_second=4),
+        ]
+        trades = link_coin_group_trades(rows, [offer_record(quantity=35)])
+        self.assertEqual([item.quantity for item in trades], [9])
+
+    def test_multi_user_negotiation_uses_only_the_confirmed_reply_path(self) -> None:
+        rows = [
+            message(1, OWNER, "20 تا ف 183100", at_second=0),
+            message(2, BUYER_ONE, "3 تا 182900", reply=1, at_second=2),
+            message(3, BUYER_TWO, "5 تا 182700", reply=1, at_second=3),
+            message(4, OWNER, "برکت", reply=2, at_second=4),
+        ]
+        trades = link_coin_group_trades(rows, [offer_record(quantity=20)])
+        self.assertEqual(
+            [(item.price_project_thousand_toman, item.quantity) for item in trades],
+            [(182_900, 3)],
+        )
+
+    def test_counterparty_can_confirm_an_owner_counter_only_after_prior_participation(self) -> None:
+        valid = [
+            message(1, OWNER, "20 تا ف 183100", at_second=0),
+            message(2, BUYER_ONE, "182900", reply=1, at_second=2),
+            message(3, OWNER, "182800", reply=2, at_second=3),
+            message(4, BUYER_ONE, "ب", reply=3, at_second=4),
+        ]
+        trades = link_coin_group_trades(valid, [offer_record(quantity=20)])
+        self.assertEqual(
+            [(item.price_project_thousand_toman, item.confirmation_kind) for item in trades],
+            [(182_800, "RECIPROCAL_COUNTERPARTY_CONFIRMATION")],
+        )
+
+        third_party_jump = valid[:-1] + [
+            message(4, BUYER_TWO, "ب", reply=3, at_second=4)
+        ]
+        self.assertEqual(
+            link_coin_group_trades(third_party_jump, [offer_record(quantity=20)]),
+            [],
+        )
+
     def test_multiple_confirmed_partial_branches_stay_separate_and_bounded(self) -> None:
         rows = [
             message(1, OWNER, "10 تا ف 183100", at_second=0),
@@ -87,6 +144,19 @@ class CoinGroupTradeTests(unittest.TestCase):
     def test_unconfirmed_buy_request_is_not_a_trade(self) -> None:
         rows = [message(1, OWNER, "10 تا ف 183100"), message(2, BUYER_ONE, "ب10 تا182900", reply=1, at_second=2)]
         self.assertEqual(link_coin_group_trades(rows, [offer_record()]), [])
+
+    def test_counterparty_declaration_and_owner_confirmation_are_one_fill(self) -> None:
+        rows = [
+            message(1, OWNER, "10 تا ف 183100", at_second=0),
+            message(2, BUYER_ONE, "5 تا خریدم", reply=1, at_second=2),
+            message(3, OWNER, "برکت", reply=2, at_second=4),
+        ]
+        trades = link_coin_group_trades(rows, [offer_record()])
+        self.assertEqual(len(trades), 1)
+        self.assertEqual(
+            (trades[0].quantity, trades[0].confirmation_kind),
+            (5, "RECIPROCAL_OFFERER_CONFIRMATION"),
+        )
 
     def test_missing_transient_identity_cannot_confirm_a_trade(self) -> None:
         rows = [

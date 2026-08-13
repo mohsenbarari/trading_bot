@@ -17,12 +17,13 @@ from .coin_group_staging import StagedCoinGroupMessage
 from .market_contracts import MarketObservation, derive_event_key
 
 
-COIN_GROUP_TRADE_LINKER_VERSION = "coin-group-trade-link-v1"
+COIN_GROUP_TRADE_LINKER_VERSION = "coin-group-trade-link-v2-branch-terms"
 MAX_REPLY_DEPTH = 12
 MAX_REPLY_AGE_SECONDS = 2 * 60 * 60
 _DIGITS = str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789")
 _QTY = re.compile(r"(?<!\d)(\d{1,3})\s*(?:د?تا|عدد)\b")
 _NUMBER = re.compile(r"(?<!\d)(\d{1,3}(?:[٬،,]\d{3})+|\d{2,7})(?!\d)")
+_SMALL_NUMBER = re.compile(r"(?<!\d)(\d{1,3})(?!\d)")
 _CANCEL = re.compile(r"کنسل|لغو|منتفی|پاس|حذف|نشد|ندارم|تمام\s*شد|اشتباه|عذر")
 _EXPLICIT_TRADE = re.compile(
     r"معامله|مع\s+با|مع\s+شد|انجام\s*شد|خریدم|فروختم|برداشتم|مال\s+من|"
@@ -87,10 +88,27 @@ def _signal(text: str) -> str:
 
 def _quantity_and_spans(text: str) -> tuple[int | None, list[tuple[int, int]]]:
     match = _QTY.search(text)
-    if match is None:
-        return None, []
-    value = int(match.group(1))
-    return (value if 1 <= value <= 100 else None), [match.span(1)]
+    if match is not None:
+        value = int(match.group(1))
+        return (value if 1 <= value <= 100 else None), [match.span(1)]
+    # Negotiation replies commonly omit «تا» (``ب ۱۰``, ``۹ب``, or a bare
+    # ``۲۵``).  Accept one small integer only when the rest of the message is
+    # an acceptance/question/quantity-shaped phrase; a three-digit price tail
+    # such as ``۳۰۰`` must not become quantity.
+    candidates = [
+        item
+        for item in _SMALL_NUMBER.finditer(text)
+        if 1 <= int(re.sub(r"\D", "", item.group(1))) <= 100
+    ]
+    if len(candidates) == 1 and (
+        _BUY_MARKER.search(text)
+        or "؟" in text
+        or "?" in text
+        or re.fullmatch(r"\s*\d{1,3}\s*", text)
+    ):
+        candidate = candidates[0]
+        return int(re.sub(r"\D", "", candidate.group(1))), [candidate.span(1)]
+    return None, []
 
 
 def _overlap(span: tuple[int, int], spans: Iterable[tuple[int, int]]) -> bool:
@@ -120,8 +138,9 @@ def _negotiated_price(text: str, *, offer_price: int, quantity_spans: Iterable[t
                 candidates.append(value)
     if not candidates:
         return None
-    winner = min(candidates, key=lambda item: (abs(item - offer_price), item))
-    if sum(1 for item in set(candidates) if item != winner) > 1:
+    ranked = sorted(set(candidates), key=lambda item: (abs(item - offer_price), item))
+    winner = ranked[0]
+    if len(ranked) > 1 and abs(ranked[0] - offer_price) == abs(ranked[1] - offer_price):
         return None
     return winner
 
@@ -160,6 +179,34 @@ def _root_offer(
     return None
 
 
+def _branch_from_root(
+    message: StagedCoinGroupMessage,
+    *,
+    root: CoinGroupOfferRecord,
+    messages: Mapping[tuple[int, int], StagedCoinGroupMessage],
+) -> list[StagedCoinGroupMessage]:
+    """Return exactly one reply path, excluding sibling/user branches."""
+
+    reverse_path: list[StagedCoinGroupMessage] = []
+    current = message
+    seen: set[int] = set()
+    for _ in range(MAX_REPLY_DEPTH):
+        if current.message_id in seen:
+            return []
+        seen.add(current.message_id)
+        reverse_path.append(current)
+        if current.message_id == root.message_id:
+            return list(reversed(reverse_path))
+        parent_id = current.reply_to_message_id
+        if parent_id is None:
+            return []
+        parent = messages.get((current.group_number, parent_id))
+        if parent is None:
+            return []
+        current = parent
+    return []
+
+
 def _age_seconds(later: str, earlier: str) -> float:
     from datetime import datetime
 
@@ -170,7 +217,7 @@ def _trade_from_confirmation(
     message: StagedCoinGroupMessage,
     *,
     root: CoinGroupOfferRecord,
-    parent: StagedCoinGroupMessage | None,
+    messages: Mapping[tuple[int, int], StagedCoinGroupMessage],
 ) -> LinkedCoinGroupTrade | None:
     offer = root.offer
     if offer.quality_state != "ELIGIBLE" or offer.commodity_code is None:
@@ -185,33 +232,81 @@ def _trade_from_confirmation(
     signal = _signal(message.text)
     if signal in {"REJECT", "QUESTION", "NEGOTIATION"}:
         return None
+    branch = _branch_from_root(message, root=root, messages=messages)
+    if len(branch) < 2:
+        return None
+    parent = branch[-2]
     owner_confirmation = message.sender_digest is not None and message.sender_digest == root.offerer_digest
-    direct_to_root = parent is not None and parent.message_id == root.message_id
+    direct_to_root = parent.message_id == root.message_id
+    counterparty_digest: bytes | None = None
     if owner_confirmation:
         if direct_to_root and signal != "EXPLICIT_TRADE":
             return None
         if not direct_to_root and signal not in {"ACCEPT", "EXPLICIT_TRADE"}:
             return None
-        evidence_text = message.text if direct_to_root else parent.text if parent is not None else message.text
+        for branch_message in reversed(branch[1:-1]):
+            if (
+                branch_message.sender_digest is not None
+                and branch_message.sender_digest != root.offerer_digest
+            ):
+                counterparty_digest = branch_message.sender_digest
+                break
+        if not direct_to_root and counterparty_digest is None:
+            return None
         kind = "OWNER_EXPLICIT_AGGREGATE_REPLY_TRADE" if direct_to_root else "RECIPROCAL_OFFERER_CONFIRMATION"
     else:
         # A counterparty's direct «خریدم/برداشتم/معامله شد» reply is recorded
-        # as a lower-confidence confirmed declaration; bare buy requests are
-        # never trades until the offer owner confirms them.
-        if signal != "EXPLICIT_TRADE":
+        # as a lower-confidence declaration.  A later bare acceptance is valid
+        # only when that same counterparty already participated in this exact
+        # branch and replies to an owner counter-offer.
+        counterparty_digest = message.sender_digest
+        prior_counterparty_turn = any(
+            item.sender_digest == counterparty_digest for item in branch[1:-1]
+        )
+        if direct_to_root:
+            if signal != "EXPLICIT_TRADE":
+                return None
+        elif not (
+            signal in {"ACCEPT", "EXPLICIT_TRADE"}
+            and parent.sender_digest == root.offerer_digest
+            and prior_counterparty_turn
+        ):
             return None
-        evidence_text = message.text
-        kind = "COUNTERPARTY_EXPLICIT_REPLY_TRADE"
-    normalized = _text(evidence_text)
-    quantity, spans = _quantity_and_spans(normalized)
+        kind = (
+            "COUNTERPARTY_EXPLICIT_REPLY_TRADE"
+            if signal == "EXPLICIT_TRADE"
+            else "RECIPROCAL_COUNTERPARTY_CONFIRMATION"
+        )
+
+    participants = {root.offerer_digest}
+    if counterparty_digest is not None:
+        participants.add(counterparty_digest)
+    evidence = [
+        item for item in branch[1:] if item.sender_digest in participants
+    ]
+    quantity: int | None = None
+    price: int | None = None
+    for evidence_message in evidence:
+        normalized = _text(evidence_message.text)
+        candidate_quantity, spans = _quantity_and_spans(normalized)
+        if candidate_quantity is not None:
+            quantity = candidate_quantity
+        candidate_price = _negotiated_price(
+            normalized,
+            offer_price=offer.price_project_thousand_toman,
+            quantity_spans=spans,
+        )
+        if candidate_price is not None:
+            price = candidate_price
     if quantity is None:
         if kind == "OWNER_EXPLICIT_AGGREGATE_REPLY_TRADE":
             return None
         quantity = offer.quantity
-    price = _negotiated_price(normalized, offer_price=offer.price_project_thousand_toman, quantity_spans=spans)
     if price is None:
         price = offer.price_project_thousand_toman
-    is_aggregate = kind == "OWNER_EXPLICIT_AGGREGATE_REPLY_TRADE" and bool(_CUMULATIVE.search(normalized))
+    is_aggregate = kind == "OWNER_EXPLICIT_AGGREGATE_REPLY_TRADE" and bool(
+        _CUMULATIVE.search(_text(message.text))
+    )
     quality = "PENDING_REVIEW" if is_aggregate and quantity > offer.quantity else "ELIGIBLE"
     return LinkedCoinGroupTrade(
         group_number=root.group_number,
@@ -244,19 +339,71 @@ def link_coin_group_trades(
         for offer in offers
         if offer.offer.quality_state == "ELIGIBLE" and offer.offer.commodity_code is not None
     }
-    filled: dict[tuple[int, int], int] = {}
-    trades: list[LinkedCoinGroupTrade] = []
+    candidates: list[tuple[LinkedCoinGroupTrade, frozenset[int]]] = []
     for message in sorted(message_by_key.values(), key=lambda item: (item.event_time_utc, item.message_id)):
         if message.reply_to_message_id is None:
             continue
         root = _root_offer(message, messages=message_by_key, offers=offer_by_key)
         if root is None or message.message_id == root.message_id:
             continue
-        parent = message_by_key.get((message.group_number, message.reply_to_message_id))
-        trade = _trade_from_confirmation(message, root=root, parent=parent)
+        trade = _trade_from_confirmation(message, root=root, messages=message_by_key)
         if trade is None:
             continue
-        root_key = (root.group_number, root.message_id)
+        branch_ids = frozenset(
+            item.message_id
+            for item in _branch_from_root(message, root=root, messages=message_by_key)
+        )
+        candidates.append((trade, branch_ids))
+
+    # One conversational branch can contain both a counterparty declaration
+    # and the owner's later confirmation.  They are two pieces of evidence for
+    # one fill, not two fills.  Prefer owner evidence, then the later terminal
+    # confirmation; sibling reply branches remain independent.
+    authority = {
+        "OWNER_EXPLICIT_AGGREGATE_REPLY_TRADE": 3,
+        "RECIPROCAL_OFFERER_CONFIRMATION": 3,
+        "COUNTERPARTY_EXPLICIT_REPLY_TRADE": 2,
+        "RECIPROCAL_COUNTERPARTY_CONFIRMATION": 2,
+    }
+    selected: list[LinkedCoinGroupTrade] = []
+    for candidate, candidate_branch in candidates:
+        superseded = False
+        for other, other_branch in candidates:
+            if other is candidate:
+                continue
+            same_root = (
+                other.group_number == candidate.group_number
+                and other.root_offer_message_id == candidate.root_offer_message_id
+            )
+            same_reply_path = (
+                candidate.confirmation_message_id in other_branch
+                or other.confirmation_message_id in candidate_branch
+            )
+            if not same_root or not same_reply_path:
+                continue
+            candidate_rank = (
+                authority.get(candidate.confirmation_kind, 0),
+                candidate.event_time_utc,
+                candidate.confirmation_message_id,
+            )
+            other_rank = (
+                authority.get(other.confirmation_kind, 0),
+                other.event_time_utc,
+                other.confirmation_message_id,
+            )
+            if other_rank > candidate_rank:
+                superseded = True
+                break
+        if not superseded:
+            selected.append(candidate)
+
+    filled: dict[tuple[int, int], int] = {}
+    trades: list[LinkedCoinGroupTrade] = []
+    for trade in sorted(
+        selected, key=lambda item: (item.event_time_utc, item.confirmation_message_id)
+    ):
+        root_key = (trade.group_number, trade.root_offer_message_id)
+        root = offer_by_key[root_key]
         if not trade.is_aggregate:
             remaining = root.offer.quantity - filled.get(root_key, 0)
             if trade.quantity > remaining:
