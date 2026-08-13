@@ -1,5 +1,12 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+
+const adminPanelSource = readFileSync(
+  resolve(process.cwd(), 'src/components/AdminPanel.vue'),
+  'utf8',
+)
 
 const adminPanelMocks = vi.hoisted(() => ({
   isCachedMiddleManagerMock: vi.fn(),
@@ -16,6 +23,15 @@ describe('AdminPanel.vue', () => {
     vi.resetModules()
     adminPanelMocks.isCachedMiddleManagerMock.mockReset()
     adminPanelMocks.isCachedSuperAdminMock.mockReset()
+  })
+
+  it('keeps Persian typography local to the admin-panel root and its action-card hierarchy', () => {
+    expect(adminPanelSource).toMatch(
+      /\.admin-panel-container\s*\{[\s\S]*?min-width:\s*0;[\s\S]*?font-family:\s*Vazirmatn,\s*Tahoma,\s*Arial,\s*sans-serif;[\s\S]*?font-synthesis:\s*none;/,
+    )
+    expect(adminPanelSource).toMatch(
+      /<nav class="admin-panel-container" aria-label="ابزارهای مدیریت">\s*<ul class="admin-action-list">\s*<li v-for="action in actions" :key="action.key" class="admin-action-list__item">\s*<AppActionCard[\s\S]*?class="admin-panel-action hub-action"/,
+    )
   })
 
   it('shows a flat, content-minimal action list for middle managers and emits the existing navigation key', async () => {

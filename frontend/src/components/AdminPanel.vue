@@ -132,6 +132,8 @@ const actions = computed<AdminAction[]>(() => {
 <style scoped>
 .admin-panel-container {
   min-width: 0;
+  font-family: Vazirmatn, Tahoma, Arial, sans-serif;
+  font-synthesis: none;
 }
 
 .admin-action-list {
