@@ -1,6 +1,14 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { DOMWrapper, flushPromises, mount } from '@vue/test-utils'
+import { nextTick } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import CreateInvitationView from './CreateInvitationView.vue'
+
+const createInvitationViewSource = readFileSync(
+  resolve(process.cwd(), 'src/components/CreateInvitationView.vue'),
+  'utf8',
+)
 
 const createInvitationMocks = vi.hoisted(() => ({
   apiFetchMock: vi.fn(),
@@ -50,9 +58,10 @@ const mountedWrappers: Array<{ unmount: () => void }> = []
 
 async function mountView(
   props: Partial<{ apiBaseUrl: string; jwtToken: string | null }> = {},
-  options: { clearInitialFetch?: boolean } = {},
+  options: { clearInitialFetch?: boolean; attachToBody?: boolean } = {},
 ) {
   const wrapper = mount(CreateInvitationView, {
+    attachTo: options.attachToBody ? document.body : undefined,
     props: {
       apiBaseUrl: '',
       jwtToken: 'jwt-token',
@@ -97,10 +106,31 @@ describe('CreateInvitationView.vue', () => {
 
   afterEach(() => {
     while (mountedWrappers.length) mountedWrappers.pop()?.unmount()
+    document.body.replaceChildren()
     delete document.body.dataset.uiOverlayLockCount
     document.body.classList.remove('ui-overlay-open')
     document.documentElement.classList.remove('ui-overlay-open')
     vi.useRealTimers()
+  })
+
+  it('keeps invitation presentation local to the existing admin section card', () => {
+    expect(createInvitationViewSource).toMatch(
+      /<div class="invitation-manager">\s*<form class="invitation-form" @submit\.prevent="createInvite" autocomplete="off">/,
+    )
+    expect(createInvitationViewSource).toMatch(
+      /\.invitation-manager\s*\{[\s\S]*?min-width:\s*0;[\s\S]*?font-family:\s*Vazirmatn,\s*Tahoma,\s*Arial,\s*sans-serif;[\s\S]*?font-synthesis:\s*none;/,
+    )
+    expect(createInvitationViewSource).toContain('<AppConfirmDialog')
+    expect(createInvitationViewSource).toMatch(/<AppEmptyState[\s\S]*?role="status"/)
+    expect(createInvitationViewSource).toContain('class="copy-btn web"')
+    expect(createInvitationViewSource).not.toMatch(/(?:background|box-shadow):\s*linear-gradient\(/)
+    expect(createInvitationViewSource).toMatch(
+      /@media \(max-width: 540px\) \{[\s\S]*?\.form-actions \.ui-button:first-child \{ flex: 0 0 auto; \}/,
+    )
+    expect(createInvitationViewSource).toMatch(
+      /@media \(prefers-reduced-motion: reduce\) \{[\s\S]*?\.invitation-manager :deep\(\.ui-button__spinner\),[\s\S]*?\.invitation-manager :deep\(\.ui-loading-state__spinner\)[\s\S]*?animation-duration: 0\.01ms !important;[\s\S]*?animation-iteration-count: 1 !important;/,
+    )
+    expect(createInvitationViewSource).toMatch(/\.pending-title\s*\{\s*overflow-wrap:\s*anywhere;\s*\}/)
   })
 
   it('blocks invitation creation before any request when authentication is missing', async () => {
@@ -162,6 +192,8 @@ describe('CreateInvitationView.vue', () => {
     expect(wrapper.get('.invitation-expiry').text()).toContain('مهلت دعوت:')
     expect(wrapper.text()).toContain('پیامک دعوت ارسال شد.')
     expect(wrapper.findAll('.success-box .copy-btn')).toHaveLength(2)
+    expect(wrapper.get('.success-box .copy-btn').classes()).toContain('ui-button--secondary')
+    expect(wrapper.get('.success-box .copy-btn.web').classes()).toContain('ui-button--primary')
     expect(wrapper.findAll('.success-box input')).toHaveLength(0)
     expect(wrapper.html()).not.toContain(botLink)
     expect(wrapper.html()).not.toContain(webLink)
@@ -195,6 +227,7 @@ describe('CreateInvitationView.vue', () => {
     expect(wrapper.text()).toContain('پیامک دعوت ارسال نشد؛ لینک را دستی ارسال کنید.')
     expect(wrapper.findAll('.success-box .copy-btn')).toHaveLength(1)
     expect(wrapper.get('.success-box .copy-btn').text()).toBe('کپی لینک وب')
+    expect(wrapper.get('.success-box .copy-btn').classes()).toContain('ui-button--primary')
     expect(wrapper.html()).not.toContain(webLink)
   })
 
@@ -325,6 +358,8 @@ describe('CreateInvitationView.vue', () => {
     expect(wrapper.get('.pending-header p').text()).toBe('فهرست دعوت‌های در انتظار')
     expect(wrapper.text()).not.toContain('دعوت‌نامه فعال')
     expect(wrapper.findAll('.pending-copy-btn')).toHaveLength(2)
+    expect(wrapper.findAll('.pending-copy-btn')[0]!.classes()).toContain('ui-button--secondary')
+    expect(wrapper.findAll('.pending-copy-btn')[1]!.classes()).toContain('ui-button--primary')
     expect(wrapper.findAll('.pending-link-row input')).toHaveLength(0)
     expect(wrapper.html()).not.toContain(botLink)
     expect(wrapper.html()).not.toContain(webLink)
@@ -452,6 +487,39 @@ describe('CreateInvitationView.vue', () => {
     expect(wrapper.text()).not.toContain('pending-user')
     expect(wrapper.get('.pending-notice').text()).toContain('دعوت‌نامه از فهرست حذف شد.')
     expect(hasMountedConfirmDialog()).toBe(false)
+  })
+
+  it('returns focus to the pending-delete trigger after Escape or cancel without issuing a delete', async () => {
+    createInvitationMocks.apiFetchMock.mockImplementation((url: string) => {
+      if (url === '/api/invitations/pending') return Promise.resolve(makeJsonResponse([pendingInvitation()]))
+      return Promise.reject(new Error(`Unexpected API call: ${url}`))
+    })
+
+    const wrapper = await mountView({}, { clearInitialFetch: false, attachToBody: true })
+    const deleteButton = wrapper.get<HTMLButtonElement>('.delete-pending-btn')
+
+    deleteButton.element.focus()
+    await deleteButton.trigger('click')
+    await flushPromises()
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+    await nextTick()
+    await flushPromises()
+
+    expect(document.activeElement).toBe(deleteButton.element)
+    expect(wrapper.text()).toContain('pending-user')
+    expect(createInvitationMocks.apiFetchMock.mock.calls.filter(([url]) => url === '/api/invitations/pending/12')).toHaveLength(0)
+
+    await deleteButton.trigger('click')
+    await flushPromises()
+    const dialog = document.body.querySelector<HTMLElement>('.ui-confirm-dialog')
+    if (!dialog) throw new Error('confirm_dialog_not_mounted')
+    ;(dialog.querySelector('.ui-button--secondary') as HTMLButtonElement).click()
+    await nextTick()
+    await flushPromises()
+
+    expect(document.activeElement).toBe(deleteButton.element)
+    expect(wrapper.text()).toContain('pending-user')
+    expect(createInvitationMocks.apiFetchMock.mock.calls.filter(([url]) => url === '/api/invitations/pending/12')).toHaveLength(0)
   })
 
   it('does not treat a non-204 success response as a successful revoke', async () => {

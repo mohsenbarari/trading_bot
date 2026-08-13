@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, reactive, ref } from 'vue';
+import { nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import { routeRequest, routeRequestJson } from '../utils/routeRequest';
 import { AppHttpError } from '../utils/httpErrorPolicy';
 import { useActionState } from '../composables/useActionState';
@@ -60,6 +60,7 @@ const pendingHasLoaded = ref(false);
 const pendingDeleteId = ref<number | null>(null);
 const pendingDeleteCandidate = ref<PendingInvitation | null>(null);
 const pendingDeleteError = ref('');
+const pendingDeleteTrigger = ref<HTMLElement | null>(null);
 const pendingCopyState = reactive<Record<string, string>>({});
 const pendingDeleteActions = useActionState<{ invitationId: number }, null>();
 
@@ -148,6 +149,7 @@ function clearPendingInvitationDataForForbidden() {
   pendingDeleteCandidate.value = null;
   pendingDeleteId.value = null;
   pendingDeleteError.value = '';
+  pendingDeleteTrigger.value = null;
   pendingNotice.value = '';
   for (const key of Object.keys(pendingCopyState)) delete pendingCopyState[key];
   pendingError.value = 'دسترسی شما به فهرست دعوت‌نامه‌ها تأیید نشد. برای دریافت وضعیت تازه دوباره تلاش کنید.';
@@ -226,8 +228,9 @@ function copyPendingLink(invitation: PendingInvitation, surface: 'bot' | 'web') 
   copyLink(link, (message) => { pendingCopyState[copyKey] = message; });
 }
 
-function requestPendingInvitationDelete(invitation: PendingInvitation) {
+function requestPendingInvitationDelete(invitation: PendingInvitation, event: MouseEvent) {
   if (pendingDeleteId.value !== null || pendingDeleteCandidate.value) return;
+  pendingDeleteTrigger.value = event.currentTarget instanceof HTMLElement ? event.currentTarget : null;
   pendingDeleteCandidate.value = invitation;
   pendingDeleteError.value = '';
   pendingNotice.value = '';
@@ -237,6 +240,13 @@ function cancelPendingInvitationDelete() {
   if (pendingDeleteId.value !== null) return;
   pendingDeleteCandidate.value = null;
   pendingDeleteError.value = '';
+  const trigger = pendingDeleteTrigger.value;
+  pendingDeleteTrigger.value = null;
+  void nextTick()
+    .then(() => nextTick())
+    .then(() => {
+      if (trigger?.isConnected && !trigger.matches(':disabled')) trigger.focus();
+    });
 }
 
 function actionErrorStatus(error: unknown): number | null {
@@ -251,6 +261,7 @@ async function reconcileNoLongerPendingInvitation(invitation: PendingInvitation)
   if (refreshed && !invitationStillListed) {
     pendingDeleteCandidate.value = null;
     pendingDeleteError.value = '';
+    pendingDeleteTrigger.value = null;
     pendingNotice.value = 'دعوت‌نامه دیگر در انتظار نیست؛ فهرست به‌روز شد.';
     return;
   }
@@ -294,6 +305,7 @@ async function confirmPendingInvitationDelete() {
     pendingInvitations.value = pendingInvitations.value.filter((item) => item.id !== invitation.id);
     pendingDeleteCandidate.value = null;
     pendingDeleteError.value = '';
+    pendingDeleteTrigger.value = null;
     pendingNotice.value = 'دعوت‌نامه از فهرست حذف شد.';
   } else if (result.outcome === 'error') {
     const status = actionErrorStatus(result.error);
@@ -378,8 +390,8 @@ function normalizeMobile(mobile: string): string {
 </script>
 
 <template>
-  <div class="card">
-    <form @submit.prevent="createInvite" autocomplete="off">
+  <div class="invitation-manager">
+    <form class="invitation-form" @submit.prevent="createInvite" autocomplete="off">
       <AppFormField class="form-group" id="account_name" label="نام کاربری (Account Name)">
         <AppInput v-model="invite.account_name" id="account_name" type="text" placeholder="مثلاً alireza" required />
       </AppFormField>
@@ -408,11 +420,11 @@ function normalizeMobile(mobile: string): string {
       <p class="invitation-expiry">مهلت دعوت: {{ formatDateTime(invitationExpiresAt) }}</p>
       <div v-if="inviteLink" class="link-label">لینک تلگرام آماده است.</div>
       <div v-if="inviteLink" class="copy-container">
-        <AppButton type="button" @click="copyToClipboard" class="copy-btn">
+        <AppButton type="button" variant="secondary" @click="copyToClipboard" class="copy-btn">
           {{ copyMessage || 'کپی لینک تلگرام' }}
         </AppButton>
       </div>
-      <div v-if="webLink" class="link-label" style="margin-top: 0.75rem;">لینک وب آماده است.</div>
+      <div v-if="webLink" class="link-label link-label--spaced">لینک وب آماده است.</div>
       <div v-if="webLink" class="copy-container">
         <AppButton type="button" @click="copyWebLink" class="copy-btn web">
           {{ webCopyMessage || 'کپی لینک وب' }}
@@ -471,7 +483,7 @@ function normalizeMobile(mobile: string): string {
               <span>انقضا: {{ formatDateTime(pending.expires_at) }}</span>
             </div>
             <div v-if="normalizeInvitationContract(pending).botLink" class="pending-link-row">
-              <AppButton type="button" class="pending-copy-btn" @click="copyPendingLink(pending, 'bot')">
+              <AppButton type="button" class="pending-copy-btn" variant="secondary" @click="copyPendingLink(pending, 'bot')">
                 {{ pendingCopyState[pendingCopyKey(pending.id, 'bot')] || 'کپی لینک تلگرام' }}
               </AppButton>
             </div>
@@ -488,7 +500,7 @@ function normalizeMobile(mobile: string): string {
             variant="danger"
             :loading="pendingDeleteId === pending.id"
             :disabled="pendingDeleteId !== null || pendingDeleteCandidate !== null"
-            @click="requestPendingInvitationDelete(pending)"
+            @click="requestPendingInvitationDelete(pending, $event)"
           >
             {{ pendingDeleteId === pending.id ? 'در حال حذف...' : 'حذف' }}
           </AppButton>
@@ -513,248 +525,221 @@ function normalizeMobile(mobile: string): string {
 </template>
 
 <style scoped>
-.card {
-  background: rgba(255, 255, 255, 0.7);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border: 1px solid rgba(245, 158, 11, 0.1);
-  border-radius: 1.25rem;
-  padding: 1.25rem;
-  box-shadow: 0 4px 16px rgba(0,0,0,0.04);
+.invitation-manager {
+  display: grid;
+  gap: var(--ds-section-gap);
+  min-width: 0;
+  color: var(--ds-text-primary);
+  font-family: Vazirmatn, Tahoma, Arial, sans-serif;
+  font-synthesis: none;
 }
-.form-group { margin-bottom: 1rem; }
-label { display: block; margin-bottom: 0.375rem; font-weight: 700; font-size: 0.78rem; color: #6b7280; }
-input, select {
-  width: 100%; padding: 0.625rem 0.875rem; border-radius: 0.75rem;
-  border: 1px solid rgba(245, 158, 11, 0.15); background: white;
-  font-size: 0.9rem; font-family: inherit; outline: none;
-  transition: all 0.2s;
+
+.invitation-form {
+  display: grid;
+  gap: var(--ds-section-gap);
 }
-input:focus, select:focus {
-  border-color: #f59e0b; background: white;
-  box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.1);
+
+.form-group { margin: 0; }
+
+.form-actions,
+.copy-container {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ds-section-gap);
 }
-.form-actions { display: flex; gap: 0.75rem; margin-top: 1.5rem; }
-.form-actions button {
-  flex-grow: 1; background: linear-gradient(135deg, #f59e0b, #d97706);
-  color: white; border: none; cursor: pointer; font-weight: 700;
-  transition: all 0.2s; padding: 0.75rem; border-radius: 0.75rem;
-  font-size: 0.9rem; -webkit-tap-highlight-color: transparent;
-  box-shadow: 0 4px 12px rgba(245, 158, 11, 0.25);
+
+.form-actions .ui-button:first-child {
+  flex: 1 1 12rem;
 }
-.form-actions button:active { transform: scale(0.98); }
-.form-actions button:disabled { background: #d1d5db; box-shadow: none; cursor: not-allowed; color: white; }
-.form-actions button.secondary {
-  background: white; color: #6b7280; box-shadow: none;
-  border: 1px solid rgba(245, 158, 11, 0.15); flex-grow: 0;
+
+.form-actions .secondary {
+  flex: 0 1 auto;
 }
-.form-actions button.secondary:active { background: #f9fafb; }
+
+.result-box.error,
+.success-box,
+.pending-notice,
+.pending-refresh-error,
+.pending-state,
+.pending-row {
+  border: 1px solid var(--ds-border-medium);
+  border-radius: var(--ds-radius-md);
+  background: var(--ds-bg-card);
+}
+
+.result-box.error,
+.pending-refresh-error {
+  border-color: var(--ds-danger-200);
+  background: var(--ds-danger-50);
+  color: var(--ds-danger-800);
+}
 
 .result-box.error {
-  margin-top: 1.25rem; padding: 0.75rem; border-radius: 0.75rem;
-  background: var(--ds-danger-50); color: var(--ds-danger-800); border: 1px solid var(--ds-danger-200);
-  font-size: 0.8rem; word-break: break-all;
+  padding: 1rem;
+  font-size: var(--ds-font-sm);
+  line-height: 1.75;
+  overflow-wrap: anywhere;
 }
+
 .result-box :deep(strong) { color: var(--ds-danger-600); }
 
 .success-box {
-  margin-top: 1.25rem; padding: 1rem; border-radius: 1rem;
-  background: linear-gradient(135deg, #f0fdf4, #dcfce7);
-  border: 1px solid #bbf7d0;
+  display: grid;
+  gap: var(--ds-section-gap);
+  padding: 1rem;
 }
-.result-message {
-  color: #166534; font-size: 0.8rem; font-weight: 700; margin-bottom: 0.75rem;
+
+.result-message,
+.pending-title {
+  color: var(--ds-text-primary);
+  font-size: var(--ds-font-sm);
+  font-weight: 700;
+  line-height: 1.7;
 }
-.copy-container {
-  display: flex;
-  gap: 0.5rem;
-  flex-wrap: wrap;
-}
-.copy-container .copy-btn {
-  flex: 0 0 auto; width: auto;
-  font-weight: 700; font-size: 0.8rem; padding: 0.5rem 0.875rem;
-  background: linear-gradient(135deg, #f59e0b, #d97706); color: white;
-  border-radius: 0.625rem;
-}
-.copy-container .copy-btn:disabled { background: #d1d5db; }
-.copy-container .copy-btn.web {
-  background: linear-gradient(135deg, var(--ds-info-500), var(--ds-telegram-700));
-  box-shadow: 0 4px 12px var(--ds-telegram-shadow);
-}
+
+.pending-title { overflow-wrap: anywhere; }
+
 .link-label {
-  font-size: 0.78rem; font-weight: 700; color: #374151;
-  margin-bottom: 0.375rem;
-}
-.invitation-expiry {
-  margin: 0 0 0.75rem;
   color: var(--ds-text-secondary);
   font-size: var(--ds-font-xs);
-  line-height: 1.8;
+  font-weight: 600;
+  line-height: 1.7;
 }
+
+.link-label--spaced { margin-top: 0.25rem; }
+
+.copy-container .copy-btn {
+  flex: 1 1 10rem;
+}
+
+.invitation-expiry,
 .sms-status {
-  margin: 0.75rem 0 0;
+  margin: 0;
   color: var(--ds-text-secondary);
   font-size: var(--ds-font-xs);
   line-height: 1.8;
 }
 
 .pending-section {
-  margin-top: 1.5rem;
-  padding-top: 1rem;
-  border-top: 1px solid rgba(245, 158, 11, 0.16);
+  display: grid;
+  gap: var(--ds-section-gap);
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--ds-border-light);
 }
+
 .pending-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 0.75rem;
-  margin-bottom: 0.875rem;
+  gap: var(--ds-section-gap);
 }
+
 .pending-header h3 {
   margin: 0;
-  color: #1f2937;
-  font-size: 0.95rem;
-  font-weight: 800;
+  color: var(--ds-text-primary);
+  font-size: var(--ds-font-md, 1rem);
+  font-weight: 700;
+  line-height: 1.6;
 }
+
 .pending-header p {
   margin: 0.25rem 0 0;
-  color: #6b7280;
-  font-size: 0.75rem;
+  color: var(--ds-text-muted);
+  font-size: var(--ds-font-xs);
+  line-height: 1.7;
 }
-.pending-refresh-btn,
-.delete-pending-btn,
-.pending-copy-btn {
-  border: 0;
-  border-radius: 0.625rem;
-  cursor: pointer;
-  font-family: inherit;
-  font-size: 0.78rem;
-  font-weight: 800;
-  padding: 0.5rem 0.75rem;
-  white-space: nowrap;
+
+.pending-refresh-btn { flex: 0 0 auto; }
+
+.pending-error { margin: 0; }
+
+.pending-notice,
+.pending-refresh-error,
+.pending-state {
+  margin: 0;
+  padding: 0.75rem;
+  font-size: var(--ds-font-xs);
+  line-height: 1.7;
 }
-.pending-refresh-btn {
-  background: white;
-  color: #374151;
-  border: 1px solid rgba(245, 158, 11, 0.18);
-}
-.pending-refresh-btn:disabled,
-.delete-pending-btn:disabled,
-.pending-copy-btn:disabled {
-  cursor: not-allowed;
-  opacity: 0.65;
-}
-.pending-error {
-  margin-bottom: 0.75rem;
-  padding: 0.625rem 0.75rem;
-  border-radius: 0.75rem;
-  background: var(--ds-danger-50);
-  border: 1px solid var(--ds-danger-200);
-  color: var(--ds-danger-800);
-  font-size: 0.78rem;
-}
+
 .pending-notice {
-  margin: 0 0 0.75rem;
-  padding: 0.625rem 0.75rem;
-  border: 1px solid var(--ds-success-100);
-  border-radius: var(--ds-radius-md);
+  border-color: var(--ds-success-100);
   background: var(--ds-success-50);
   color: var(--ds-success-800);
-  font-size: var(--ds-font-xs);
 }
+
 .pending-refresh-error {
   display: flex;
-  gap: 0.6rem;
-  margin-bottom: 0.75rem;
-  padding: 0.75rem;
-  border: 1px solid var(--ds-danger-200);
-  border-radius: var(--ds-radius-md);
-  background: var(--ds-danger-50);
-  color: var(--ds-danger-800);
-  font-size: var(--ds-font-xs);
-}
-.pending-refresh-error {
   align-items: center;
   justify-content: space-between;
+  gap: var(--ds-section-gap);
 }
+
 .pending-state {
-  padding: 0.875rem;
-  border-radius: var(--ds-radius-md);
   background: var(--ds-bg-inset);
   color: var(--ds-text-muted);
-  font-size: 0.8rem;
   text-align: center;
 }
+
 .pending-list {
   display: grid;
-  gap: 0.75rem;
+  gap: var(--ds-section-gap);
 }
+
 .pending-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: 0.75rem;
+  gap: var(--ds-section-gap);
   align-items: start;
-  padding: 0.875rem;
-  border: 1px solid var(--ds-border-accent);
-  border-radius: var(--ds-radius-md);
-  background: var(--ds-bg-card);
+  padding: 1rem;
 }
-.pending-title {
-  color: var(--ds-text-primary);
-  font-size: 0.9rem;
-  font-weight: 800;
-}
+
+.pending-main { min-width: 0; }
+
 .pending-meta {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.375rem 0.625rem;
-  margin-top: 0.35rem;
+  gap: 0.25rem var(--ds-section-gap);
+  margin-top: 0.25rem;
   color: var(--ds-text-muted);
-  font-size: 0.74rem;
+  font-size: var(--ds-font-xs);
+  line-height: 1.7;
 }
+
 .pending-link-row {
   display: flex;
-  gap: 0.5rem;
-  margin-top: 0.625rem;
+  margin-top: var(--ds-section-gap);
 }
-.pending-copy-btn {
-  background: linear-gradient(135deg, var(--ds-info-500), var(--ds-telegram-700));
-  color: white;
-}
+
+.pending-copy-btn { width: 100%; }
+
 .delete-pending-btn {
-  background: var(--ds-danger-50);
-  color: var(--ds-danger-700);
-  border: 1px solid var(--ds-danger-200);
+  min-width: max-content;
 }
 
 @media (max-width: 540px) {
+  .form-actions,
   .pending-header {
-    align-items: stretch;
     flex-direction: column;
+    align-items: stretch;
   }
-  .pending-refresh-btn {
-    width: 100%;
-  }
-  .pending-row {
-    grid-template-columns: 1fr;
-  }
+
+  .pending-row { grid-template-columns: 1fr; }
+
+  .form-actions .ui-button,
+  .pending-refresh-btn,
   .delete-pending-btn {
     width: 100%;
   }
-  .pending-link-row {
-    flex-direction: column;
-  }
-  .pending-copy-btn {
-    width: 100%;
-  }
+
+  .form-actions .ui-button:first-child { flex: 0 0 auto; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .card,
-  .card * {
+  .invitation-manager :deep(.ui-button__spinner),
+  .invitation-manager :deep(.ui-loading-state__spinner) {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
   }
 }
 </style>
