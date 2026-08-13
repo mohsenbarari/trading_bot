@@ -86,6 +86,15 @@ describe('Stage 4 protected surface baseline', () => {
     })
   })
 
+  it('allows the Stage 8B route-local typography marker without widening reduced-motion eligibility', () => {
+    const appSource = readRepoFile('frontend/src/App.vue', 'utf8')
+    expect(appSource).toContain(':class="[reducedMotionRouteClass, persianTypographyRouteClass]"')
+    expect(appSource).toContain("'app-route--persian-typography'")
+    expect(assertStage4SharedDependencyIsolation(currentSharedDependencySources())).toMatchObject({
+      reducedMotionSources: 2,
+    })
+  })
+
   it('fails closed for shared dependency default or call-site opt-in drift', () => {
     const sources = currentSharedDependencySources()
 

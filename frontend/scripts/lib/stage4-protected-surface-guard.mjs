@@ -391,7 +391,7 @@ export function assertStage4SharedDependencyIsolation(sources) {
       "allowsReducedMotionRouteTransition.value ? 'app-reduced-motion-route' : undefined",
     ) ||
     !appSource.includes('<transition :name="routeTransitionName">') ||
-    !appSource.includes(':class="reducedMotionRouteClass"')
+    !appSource.includes(':class="[reducedMotionRouteClass, persianTypographyRouteClass]"')
   ) {
     throw new Error(
       'App route transition is not isolated behind the unprotected-section opt-in contract',

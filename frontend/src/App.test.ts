@@ -221,8 +221,147 @@ describe('App.vue', () => {
       'app-route-scroll--no-daily-nav',
     )
     expect(wrapper.get('.app-shell').classes()).not.toContain('app-copyable-info')
+    expect(wrapper.get('[data-test="route-component"]').classes()).not.toContain(
+      'app-route--persian-typography',
+    )
     expect(wrapper.get('[data-test="route-transition"]').attributes('data-transition-name')).toBe(
       'fade',
+    )
+  })
+
+  it('applies the Persian typography marker only to NONE route vnodes', async () => {
+    appMocks.isReadyMock.mockResolvedValue()
+
+    const routeCases = [
+      {
+        name: 'login',
+        path: '/login',
+        fullPath: '/login',
+        meta: { uiShellClass: 'public', uiV2Scope: 'route' },
+        expected: true,
+      },
+      {
+        name: 'admin-invitations',
+        path: '/admin/invitations',
+        fullPath: '/admin/invitations',
+        meta: { uiShellClass: 'standard-authenticated', uiV2Scope: 'section' },
+        expected: true,
+      },
+      {
+        name: 'system-recovery',
+        path: '/missing',
+        fullPath: '/missing',
+        meta: { uiShellClass: 'system-recovery', uiV2Scope: 'route' },
+        expected: true,
+      },
+      {
+        name: 'home',
+        path: '/',
+        fullPath: '/',
+        meta: { uiShellClass: 'standard-authenticated', uiV2Scope: 'section' },
+        expected: false,
+      },
+      {
+        name: 'market',
+        path: '/market',
+        fullPath: '/market',
+        meta: { uiShellClass: 'protected-legacy', uiV2Scope: 'off' },
+        expected: false,
+      },
+      {
+        name: 'messenger',
+        path: '/chat',
+        fullPath: '/chat',
+        meta: { uiShellClass: 'protected-legacy', uiV2Scope: 'off' },
+        expected: false,
+      },
+      {
+        name: 'admin-channels',
+        path: '/admin/channels',
+        fullPath: '/admin/channels',
+        meta: { uiShellClass: 'protected-legacy', uiV2Scope: 'off' },
+        expected: false,
+      },
+      {
+        name: 'share-receive',
+        path: '/share-receive',
+        fullPath: '/share-receive',
+        meta: { uiShellClass: 'protected-legacy', uiV2Scope: 'off' },
+        expected: false,
+      },
+      {
+        name: 'admin-messages',
+        path: '/admin/messages',
+        fullPath: '/admin/messages',
+        meta: { uiShellClass: 'standard-authenticated', uiV2Scope: 'section' },
+        expected: false,
+      },
+      {
+        name: 'admin-system',
+        path: '/admin/system',
+        fullPath: '/admin/system',
+        meta: { uiShellClass: 'standard-authenticated', uiV2Scope: 'section' },
+        expected: false,
+      },
+      {
+        name: 'unknown-route',
+        path: '/unknown',
+        fullPath: '/unknown',
+        meta: { uiShellClass: 'system-recovery', uiV2Scope: 'route' },
+        expected: false,
+      },
+    ] as const
+
+    for (const routeCase of routeCases) {
+      appMocks.route.name = routeCase.name
+      appMocks.route.path = routeCase.path
+      appMocks.route.fullPath = routeCase.fullPath
+      appMocks.route.meta = routeCase.meta
+
+      const wrapper = mountApp()
+      await flushPromises()
+
+      expect(wrapper.get('.app-shell').classes()).toContain('font-sans')
+      const routeRoot = routeCase.meta.uiV2Scope === 'route'
+        ? wrapper.get('.app-route-v2-scope')
+        : wrapper.get('[data-test="route-component"]')
+      expect(routeRoot.classes().includes('app-route--persian-typography')).toBe(routeCase.expected)
+      wrapper.unmount()
+    }
+  })
+
+  it('keeps the typography marker with its route vnode across a protection boundary', async () => {
+    appMocks.isReadyMock.mockResolvedValueOnce()
+    appMocks.route.name = 'market'
+    appMocks.route.path = '/market'
+    appMocks.route.fullPath = '/market'
+    appMocks.route.meta = { uiShellClass: 'protected-legacy', uiV2Scope: 'off' }
+
+    const wrapper = mountApp()
+    await flushPromises()
+    const protectedVNode = wrapper.getComponent(RouteComponentStub).vm.$.vnode
+    expect(protectedVNode.props?.class ?? '').not.toContain('app-route--persian-typography')
+
+    appMocks.route.name = 'public-profile'
+    appMocks.route.path = '/users/12'
+    appMocks.route.fullPath = '/users/12'
+    appMocks.route.meta = { uiShellClass: 'standard-authenticated', uiV2Scope: 'section' }
+    await flushPromises()
+    const allowedVNode = wrapper.getComponent(RouteComponentStub).vm.$.vnode
+
+    expect(protectedVNode.props?.class ?? '').not.toContain('app-route--persian-typography')
+    expect(allowedVNode.props?.class ?? '').toContain('app-route--persian-typography')
+
+    appMocks.route.name = 'market'
+    appMocks.route.path = '/market'
+    appMocks.route.fullPath = '/market'
+    appMocks.route.meta = { uiShellClass: 'protected-legacy', uiV2Scope: 'off' }
+    await flushPromises()
+    const returningProtectedVNode = wrapper.getComponent(RouteComponentStub).vm.$.vnode
+
+    expect(allowedVNode.props?.class ?? '').toContain('app-route--persian-typography')
+    expect(returningProtectedVNode.props?.class ?? '').not.toContain(
+      'app-route--persian-typography',
     )
   })
 

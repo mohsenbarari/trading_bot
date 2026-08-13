@@ -94,6 +94,16 @@ const allowsReducedMotionRouteTransition = computed(
     getUiRouteContractByName(route.name)?.protection === UI_ROUTE_PROTECTION.NONE &&
     v2Scope.value === UI_V2_SCOPE.SECTION,
 )
+// Typography unification is intentionally opt-in by the immutable route
+// contract. The marker is bound to the individual route vnode, rather than
+// the shared shell, so a concurrently leaving FULL/MIXED route never inherits
+// the entering NONE route's typography during the legacy fade.
+const usesApprovedPersianTypography = computed(
+  () => getUiRouteContractByName(route.name)?.protection === UI_ROUTE_PROTECTION.NONE,
+)
+const persianTypographyRouteClass = computed(() =>
+  usesApprovedPersianTypography.value ? 'app-route--persian-typography' : undefined,
+)
 const routeTransitionName = computed(() =>
   shouldScopeRoute.value ? 'ui-v2-route-fade' : 'fade',
 )
@@ -222,7 +232,7 @@ watch(
             v-if="shouldScopeRoute"
             :key="`v2:${route.path}`"
             as="div"
-            class="app-route-v2-scope"
+            :class="['app-route-v2-scope', persianTypographyRouteClass]"
           >
             <component :is="Component" />
           </AppDesignSystemScope>
@@ -230,7 +240,7 @@ watch(
             v-else
             :is="Component"
             :key="unscopedRouteKey"
-            :class="reducedMotionRouteClass"
+            :class="[reducedMotionRouteClass, persianTypographyRouteClass]"
           />
         </transition>
       </RouterView>
@@ -258,6 +268,14 @@ watch(
 <style>
 .app-shell {
   background: var(--ds-app-background);
+}
+
+/* Bound to each route vnode so concurrent leave/enter fades retain the old
+ * typography on protected routes. Mono and LTR descendants retain their own
+ * explicit font/direction declarations. */
+.app-route--persian-typography {
+  font-family: Vazirmatn, Tahoma, Arial, sans-serif;
+  font-synthesis: none;
 }
 
 .app-route-v2-scope {
