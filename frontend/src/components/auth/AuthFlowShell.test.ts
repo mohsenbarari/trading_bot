@@ -24,6 +24,7 @@ describe('AuthFlowShell', () => {
     )
     expect(wrapper.find('nav').exists()).toBe(false)
     expect(wrapper.find('.ui-v2-auth-progress').exists()).toBe(false)
+    expect(wrapper.classes('ui-v2-auth-flow--viewport-fill')).toBe(false)
   })
 
   it('renders an exact bounded progress model for real multi-step flows', () => {
@@ -51,5 +52,16 @@ describe('AuthFlowShell', () => {
     })
 
     expect(wrapper.find('.ui-v2-auth-progress').exists()).toBe(false)
+  })
+
+  it('enables viewport fill only when a caller explicitly opts in', () => {
+    const wrapper = mount(AuthFlowShell, {
+      props: {
+        title: 'ورود به سامانه',
+        fillViewport: true,
+      },
+    })
+
+    expect(wrapper.classes('ui-v2-auth-flow--viewport-fill')).toBe(true)
   })
 })

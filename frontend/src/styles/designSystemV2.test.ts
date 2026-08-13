@@ -191,6 +191,29 @@ describe('Design System V2 CSS contract', () => {
     expect(componentCss.split("'").join('"')).toContain('[data-ui-v2-motion="decorative"]')
   })
 
+  it('keeps the opt-in auth viewport fallback ordered and isolated from recovery', () => {
+    const rules: import('postcss').Rule[] = []
+    postcss.parse(componentCss).walkRules((rule) => {
+      rules.push(rule)
+    })
+
+    const viewportFillRule = rules.find(
+      (rule) => rule.selector.trim().endsWith('.ui-v2-auth-flow--viewport-fill'),
+    )
+    const declarations =
+      viewportFillRule?.nodes
+        .filter((node): node is import('postcss').Declaration => node.type === 'decl')
+        .map((node) => [node.prop, node.value]) ?? []
+
+    expect(viewportFillRule?.selector).toBe(
+      ":where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-auth-flow--viewport-fill",
+    )
+    expect(declarations).toEqual([
+      ['min-height', '100vh'],
+      ['min-height', '100dvh'],
+    ])
+  })
+
   it('keeps Stage 3 route, toast, and security-layer motion on the reduced-motion tokens', () => {
     const rules: import('postcss').Rule[] = []
     postcss.parse(componentCss).walkRules((rule) => {

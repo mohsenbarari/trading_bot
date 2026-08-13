@@ -139,6 +139,7 @@ async function submitPassword() {
 <template>
   <AuthFlowShell
     focused
+    fill-viewport
     title="تنظیم رمز عبور"
     description="برای تکمیل گیت امنیتی، یک رمز قوی تعریف کنید. پس از ثبت موفق وارد سامانه می‌شوید."
   >

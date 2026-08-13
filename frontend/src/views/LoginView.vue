@@ -1360,6 +1360,7 @@ function goBackToMobile() {
 
 <template>
   <AuthFlowShell
+    fill-viewport
     :title="authFlowTitle"
     :description="authFlowDescription"
     :current-step="authFlowStep"

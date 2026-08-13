@@ -192,6 +192,37 @@ describe('UIUX v2 CSS guard', () => {
     )
   })
 
+  it('allows the viewport fallback only on the exact opt-in auth-flow modifier', () => {
+    const findings = checkV2Styles(
+      [
+        {
+          path: 'src/styles/design-system-v2.components.css',
+          source: [
+            ":where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-auth-flow--viewport-fill {",
+            '  min-height: 100vh;',
+            '  min-height: 100dvh;',
+            '}',
+          ].join('\n'),
+        },
+      ],
+      { enforceFrozenTokenContract: false },
+    )
+
+    expect(findingCodes(findings)).not.toContain('hardcoded-v2-design-length')
+
+    const rejected = checkV2Styles(
+      [
+        {
+          path: 'src/styles/design-system-v2.components.css',
+          source: "[data-ui-system='v2'] .ui-v2-auth-flow--viewport-fill { min-height: 100dvh; }",
+        },
+      ],
+      { enforceFrozenTokenContract: false },
+    )
+
+    expect(findingCodes(rejected)).toContain('hardcoded-v2-design-length')
+  })
+
   it('rejects imported/global CSS and unapproved media queries', () => {
     const findings = checkV2Styles([
       {

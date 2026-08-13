@@ -768,6 +768,26 @@ function hasHardcodedDesignValue(property, value) {
   return false
 }
 
+function isApprovedAuthFlowViewportFallback(declaration, stylePath) {
+  if (
+    stylePath !== 'src/styles/design-system-v2.components.css' ||
+    declaration.prop.toLowerCase() !== 'min-height' ||
+    !['100vh', '100dvh'].includes(declaration.value.trim())
+  ) {
+    return false
+  }
+
+  const parent = declaration.parent
+  if (parent?.type !== 'rule' || parent.selectors?.length !== 1) return false
+
+  return (
+    parent.selectors[0]
+      .replace(/\s+/g, ' ')
+      .trim() ===
+    ":where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-auth-flow--viewport-fill"
+  )
+}
+
 function hasHardcodedMotionValue(value) {
   DESIGN_TIME_LITERAL.lastIndex = 0
   return [...value.matchAll(DESIGN_TIME_LITERAL)].some((match) => Number.parseFloat(match[0]) !== 0)
@@ -997,7 +1017,8 @@ export function checkV2Styles(styleFiles, { enforceFrozenTokenContract = true } 
         }
         if (
           !declaration.prop.startsWith('--') &&
-          hasHardcodedDesignValue(declaration.prop, declaration.value)
+          hasHardcodedDesignValue(declaration.prop, declaration.value) &&
+          !isApprovedAuthFlowViewportFallback(declaration, styleFile.path)
         ) {
           findings.push(
             violation(

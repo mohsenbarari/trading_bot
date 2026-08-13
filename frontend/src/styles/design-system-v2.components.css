@@ -69,6 +69,14 @@
   color: var(--ui-v2-color-text-primary);
 }
 
+/* Only explicit public/focused auth flows fill the route viewport. System
+ * recovery can reserve authenticated daily navigation, so it remains on the
+ * base content-height contract. */
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-auth-flow--viewport-fill {
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+
 :where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-public-header {
   box-sizing: border-box;
   display: flex;

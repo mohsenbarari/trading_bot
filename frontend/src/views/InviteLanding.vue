@@ -263,7 +263,7 @@ function goToTelegramRegister() {
 </script>
 
 <template>
-  <AuthFlowShell :title="inviteTitle" :description="inviteDescription">
+  <AuthFlowShell fill-viewport :title="inviteTitle" :description="inviteDescription">
     <AppLoadingState
       v-if="loading || redirecting"
       :label="redirecting ? 'در حال انتقال به ورود' : 'در حال بررسی دعوت‌نامه'"

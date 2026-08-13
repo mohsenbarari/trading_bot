@@ -617,6 +617,7 @@ async function skipTelegramConnect() {
 
 <template>
   <AuthFlowShell
+    fill-viewport
     title="تکمیل ثبت‌نام"
     :description="authDescription"
     :current-step="requiredProgressStep"

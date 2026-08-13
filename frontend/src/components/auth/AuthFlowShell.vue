@@ -8,12 +8,14 @@ const props = withDefaults(
     currentStep?: number
     totalSteps?: number
     focused?: boolean
+    fillViewport?: boolean
   }>(),
   {
     description: '',
     currentStep: undefined,
     totalSteps: undefined,
     focused: false,
+    fillViewport: false,
   },
 )
 
@@ -41,7 +43,13 @@ const progressLabel = computed(() =>
 </script>
 
 <template>
-  <main class="ui-v2-auth-flow" :class="{ 'ui-v2-auth-flow--focused': focused }">
+  <main
+    class="ui-v2-auth-flow"
+    :class="{
+      'ui-v2-auth-flow--focused': focused,
+      'ui-v2-auth-flow--viewport-fill': fillViewport,
+    }"
+  >
     <header class="ui-v2-public-header">
       <strong>سامانه معاملات</strong>
       <img src="/uiux-v2-brand-mark.svg" width="28" height="28" alt="" aria-hidden="true" />
