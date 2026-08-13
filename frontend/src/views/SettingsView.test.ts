@@ -159,6 +159,14 @@ describe('SettingsView.vue', () => {
   })
 
   it('opens account route sections from route names without legacy query handoff', async () => {
+    currentUserSummary.value = {
+      id: 10,
+      role: 'عادی',
+      account_name: 'settings-user',
+      is_accountant: false,
+      offer_overtime_minutes: 3,
+    }
+
     settingsViewMocks.route.name = 'account-storage'
     const storageWrapper = await mountSettingsView()
     await flushPromises()
@@ -166,6 +174,7 @@ describe('SettingsView.vue', () => {
     expect(storageWrapper.text()).toContain('حافظه و داده‌ها')
     expect(storageWrapper.find('.settings-page').exists()).toBe(true)
     expect(storageWrapper.findAll('.settings-section-card').length).toBeGreaterThanOrEqual(2)
+    expect(storageWrapper.find('.settings-overtime-panel').exists()).toBe(false)
 
     settingsViewMocks.route.name = 'account-security'
     const securityWrapper = await mountSettingsView()
@@ -174,6 +183,19 @@ describe('SettingsView.vue', () => {
     expect(securityWrapper.text()).toContain('امنیت حساب')
     expect(securityWrapper.find('.settings-page').exists()).toBe(true)
     expect(securityWrapper.findAll('.settings-section-card').length).toBeGreaterThanOrEqual(3)
+    expect(securityWrapper.find('.settings-overtime-panel').exists()).toBe(false)
+
+    settingsViewMocks.route.name = 'settings'
+    const settingsWrapper = await mountSettingsView()
+    await flushPromises()
+
+    expect(settingsWrapper.text()).toContain('تنظیمات حساب')
+    expect(settingsWrapper.text()).toContain('وقت اضافه لفظ‌ها')
+    expect(settingsWrapper.find('.settings-overtime-panel').exists()).toBe(true)
+
+    storageWrapper.unmount()
+    securityWrapper.unmount()
+    settingsWrapper.unmount()
   })
 
   it('does not render the blocked-users management section or call block APIs', async () => {

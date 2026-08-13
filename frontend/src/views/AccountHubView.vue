@@ -58,9 +58,9 @@ const profileActions = computed<AccountAction[]>(() => [
   {
     key: 'settings',
     title: 'تنظیمات کاربری',
-    description: isAccountant.value ? 'دسترسی‌های مجاز حسابدار و حافظه دستگاه' : 'امنیت حساب، حافظه دستگاه و خروج',
+    description: isAccountant.value ? 'دسترسی‌های مجاز حسابدار و حافظه دستگاه' : 'وقت اضافه لفظ‌ها، اتصال تلگرام، امنیت حساب، حافظه دستگاه و خروج',
     icon: Settings,
-    action: () => router.push({ name: 'account-storage' }),
+    action: () => router.push({ name: 'settings' }),
   },
 ])
 

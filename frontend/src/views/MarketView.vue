@@ -9,8 +9,7 @@ import OfferPreviewModal from '../components/OfferPreviewModal.vue'
 import CommodityInferenceSelectionModal from '../components/CommodityInferenceSelectionModal.vue'
 import { AppEmptyState, AppFilterChips, AppIconButton, AppLoadingState, AppStatusBadge } from '../components/ui'
 import { apiFetch, apiFetchJson } from '../utils/auth'
-import OfferOvertimePreferencePanel from '../components/OfferOvertimePreferencePanel.vue'
-import { cacheCurrentUserSummary, canEditOfferOvertimePreference, currentUserSummary } from '../utils/currentUser'
+import { cacheCurrentUserSummary, currentUserSummary } from '../utils/currentUser'
 import { createHttpErrorFromResponse, getUserFacingErrorMessage } from '../utils/httpErrorPolicy'
 import { buildOfferDraftText } from '../utils/offerDraftText'
 import { normalizeSettlementType, offerSettlementLabel, type SettlementType } from '../utils/settlementType'
@@ -142,7 +141,6 @@ const currentUserId = ref<number | undefined>(initialCurrentUserSummary?.id)
 const currentUserCustomerTier = ref<CustomerTierValue>(normalizeCustomerTier(initialCurrentUserSummary?.customer_tier))
 const currentUserIsAccountant = ref(initialCurrentUserSummary?.is_accountant === true)
 const currentUserLoaded = ref(Boolean(initialCurrentUserSummary))
-const showOvertimePreference = computed(() => canEditOfferOvertimePreference(currentUserSummary.value))
 const marketHistoryOffers = ref<any[]>([])
 const marketHistoryOffersLoading = ref(false)
 const marketHistoryOffersRefreshQueued = ref(false)
@@ -1117,12 +1115,6 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <OfferOvertimePreferencePanel
-      v-if="showOvertimePreference"
-      class="market-overtime-pref"
-      compact
-    />
-
     <transition name="fade">
       <div
         v-if="showMarketNotice"
@@ -1326,10 +1318,6 @@ onUnmounted(() => {
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   border-bottom: 1px solid var(--ds-border-light);
-}
-
-.market-overtime-pref {
-  margin: 0.75rem 1rem 0;
 }
 
 .header-controls {

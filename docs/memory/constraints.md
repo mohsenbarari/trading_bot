@@ -11,3 +11,4 @@
 - Offer `created_at` remains the immutable registration-time lifetime anchor; staging matrices must never rewrite it. Record central-queue entry separately in evidence. Production registration is expected to hand off directly to central ingress, while a test backlog is handled with an approved staging lifetime rather than a schema change.
 - Noncanonical trade-delivery intents may keep `offer_id` null, but enqueue and repair must carry the source offer notes/home context explicitly.
 - Silent first-page offer refresh replaces the authoritative snapshot; merge only when additional pages are already loaded.
+- Web offer-overtime preference belongs under Account/Settings; never render it in the Market feed.

@@ -326,6 +326,8 @@ describe('MarketView.vue', () => {
     const wrapper = await mountMarketView()
     await flushPromises()
 
+    expect(wrapper.find('.market-overtime-pref').exists()).toBe(false)
+
     expect(marketViewMocks.fetchOffersMock).toHaveBeenCalled()
     expect(marketViewMocks.startPollingMock).toHaveBeenCalled()
     expect(marketViewMocks.setFiltersMock).toHaveBeenCalledWith({

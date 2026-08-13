@@ -50,7 +50,7 @@ describe('AccountHubView.vue', () => {
     accountHubMocks.currentUserSummary.value = null
   })
 
-  it('renders account sections and routes normal users to profile, sessions, storage and notifications', async () => {
+  it('renders account sections and routes normal users to profile, settings, sessions, storage and notifications', async () => {
     accountHubMocks.currentUserSummary.value = {
       id: 1,
       role: 'عادی',
@@ -67,17 +67,20 @@ describe('AccountHubView.vue', () => {
     expect(wrapper.text()).toContain('محمد')
     expect(wrapper.text()).toContain('فعال')
     expect(wrapper.text()).toContain('نشست‌های فعال')
+    expect(findAction(wrapper, 'تنظیمات کاربری')?.text()).toContain('وقت اضافه لفظ‌ها')
 
     await findAction(wrapper, 'پروفایل من')!.trigger('click')
+    await findAction(wrapper, 'تنظیمات کاربری')!.trigger('click')
     await findAction(wrapper, 'نشست‌های فعال')!.trigger('click')
     await findAction(wrapper, 'حافظه و داده‌ها')!.trigger('click')
     await findAction(wrapper, 'اعلان‌ها')!.trigger('click')
     await wrapper.get('.account-return-control').trigger('click')
 
     expect(accountHubMocks.routerPushMock).toHaveBeenNthCalledWith(1, { name: 'profile' })
-    expect(accountHubMocks.routerPushMock).toHaveBeenNthCalledWith(2, { name: 'account-security' })
-    expect(accountHubMocks.routerPushMock).toHaveBeenNthCalledWith(3, { name: 'account-storage' })
-    expect(accountHubMocks.routerPushMock).toHaveBeenNthCalledWith(4, { name: 'account-notifications' })
+    expect(accountHubMocks.routerPushMock).toHaveBeenNthCalledWith(2, { name: 'settings' })
+    expect(accountHubMocks.routerPushMock).toHaveBeenNthCalledWith(3, { name: 'account-security' })
+    expect(accountHubMocks.routerPushMock).toHaveBeenNthCalledWith(4, { name: 'account-storage' })
+    expect(accountHubMocks.routerPushMock).toHaveBeenNthCalledWith(5, { name: 'account-notifications' })
     expect(accountHubMocks.routerBackMock).toHaveBeenCalledTimes(1)
   })
 

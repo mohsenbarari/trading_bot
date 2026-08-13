@@ -43,7 +43,6 @@ const telegramLinkBusy = ref(false)
 const telegramLinkError = ref<string | null>(null)
 
 const isAccountant = computed(() => currentUserSummary.value?.is_accountant === true)
-const showOvertimePreference = computed(() => canEditOfferOvertimePreference(currentUserSummary.value))
 const telegramConnected = computed(() => currentUserSummary.value?.telegram_linked === true)
 const showTelegramConnectSection = computed(() => (
   !isAccountant.value
@@ -58,6 +57,10 @@ const routeSection = computed<'sessions' | 'storage' | null>(() => {
   const section = route.query.section
   return section === 'sessions' || section === 'storage' ? section : null
 })
+const showOvertimePreference = computed(() => (
+  routeSection.value === null
+  && canEditOfferOvertimePreference(currentUserSummary.value)
+))
 
 const pageTitle = computed(() => {
   if (routeSection.value === 'sessions') return 'امنیت حساب'
@@ -68,7 +71,7 @@ const pageTitle = computed(() => {
 const settingsDescription = computed(() => {
   if (routeSection.value === 'sessions') return 'نشست‌های فعال و دسترسی‌های ورود از این بخش مدیریت می‌شوند.'
   if (routeSection.value === 'storage') return 'فایل‌های محلی و داده‌های دانلود شده از این بخش مدیریت می‌شوند.'
-  return 'امنیت حساب، حافظه دستگاه و خروج از حساب را از یک مرکز تنظیمات روشن مدیریت کنید.'
+  return 'وقت اضافه لفظ‌ها، اتصال تلگرام، امنیت حساب، حافظه دستگاه و خروج را از یک مرکز تنظیمات روشن مدیریت کنید.'
 })
 
 async function refreshCacheSize() {
