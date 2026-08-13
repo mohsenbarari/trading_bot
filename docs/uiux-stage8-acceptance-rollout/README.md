@@ -15,11 +15,12 @@
 - current bounded public/focused auth viewport-containment source: `55f00218295d7aa6f52f75b664544318684d2826` (evidence-only)
 - current bounded directory/profile rebaseline source: `601b4005d80ef265afaaa6a06a43b48c44c7ca90` (evidence-only)
 - current bounded workspace roving-focus postcommit source: `d1e8ecd5a524a03c73b67e531edab363479a32b0` (evidence-only)
+- current bounded account long-text wrapping source: `8082d8dd6352154b52e86ca6511e27464e072b13` (evidence-only)
 - authority: `stage8CompleteAuthority=false`
 - matrix status: `partial-browser-slice-executed-full-acceptance-pending`
 - expected-access coverage: ۳۰ مسیر × ۹ پروفایل دقیق = ۲۷۰ outcome صریح
 - full matrix execution: صفر سلول؛ viewport/state/interaction/environment هنوز فقط requirement هستند
-- partial synthetic evidence: چهار slice 8A، یک slice 8B typography، یک slice مستقل auth-containment با ۱۴ scenario، یک rebaseline مستقل directory/profile با ۴۰ scenario و یک slice postcommit roving-focus با ۸ scenario ثبت شده‌اند؛ هیچ‌کدام به full matrix افزوده نمی‌شوند
+- partial synthetic evidence: چهار slice 8A، یک slice 8B typography، یک slice مستقل auth-containment با ۱۴ scenario، یک rebaseline مستقل directory/profile با ۴۰ scenario، یک slice postcommit roving-focus با ۸ scenario و یک slice long-text wrapping حساب با ۱۲ scenario ثبت شده‌اند؛ هیچ‌کدام به full matrix افزوده نمی‌شوند
 - owner aesthetic acceptance: انجام نشده
 - merge: انجام نشده
 - production/staging/Sites: انجام نشده
@@ -40,7 +41,7 @@ guard فعلی علاوه بر نقش از `account_status`، `is_customer` و `
 هویت شیء پارامتری، حالت inactive/unavailable و پذیرش بصری باید جداگانه اجرا و evidence-bound
 شوند. هیچ cross-product ساختگی یا ادعای ۵۱٬۹۶۸ سلول در این بسته وجود ندارد.
 
-## شواهد محدود 8A، 8B، auth-containment، directory/profile و roving-focus
+## شواهد محدود 8A، 8B، auth-containment، directory/profile، roving-focus و long-text-wrap
 
 [STAGE8A_EXECUTION_RECEIPTS.json](STAGE8A_EXECUTION_RECEIPTS.json) تنها count، hash و
 source-revisionهای redacted چهار اجرای local/synthetic را نگه می‌دارد؛ screenshot، diagnostic،
@@ -102,6 +103,16 @@ API غیرمنتظره صفر و requestهای local/synthetic موردانتظ�
 نشده است. این slice full matrix، همهٔ کلیدهای keyboard، همهٔ route/stateها یا پذیرش نهایی را
 attest نمی‌کند و به full matrix افزوده نمی‌شود.
 
+[STAGE8_SETTINGS_NOTIFICATIONS_WRAP_EXECUTION_RECEIPT.json](STAGE8_SETTINGS_NOTIFICATIONS_WRAP_EXECUTION_RECEIPT.json)
+یک aggregation redacted از سه browser report مستقل و source-bound به `8082d8dd` است: ۱۲ scenario
+برای account security و account notifications در `360×740`، `390×844`، `414×896`، `430×932` و
+`1440×900`، به‌همراه یک probe CDP visual-scale 2 برای هر family، همگی گذشتند. ۲۸۲ اندازه‌گیری
+direct-target/ancestor و ۵۴ assertion متن DOM/accessibility، نبود overflow افقی و حفظ متن
+synthetic را تأیید کردند. console/page error/request failure/blocked external صفر، API محلیِ
+موردانتظار `131/131` و unknown API صفر بود؛ ۱۲ screenshot فقط خارج repository ماندند. این
+aggregation اجرای browser تازه‌ای نیست و فقط این scope محدود را ثبت می‌کند؛ CDP 2× جایگزین همهٔ
+پیاده‌سازی‌های zoom بومی نیست و این slice به full matrix افزوده نمی‌شود.
+
 مرجع Figma اختیاریِ generic roving-focus، DRAFT زنده/قابل‌ویرایش با section `603:18` و board
 `603:19` است؛ frameهای mobile `390×844` و desktop `1440×900` clip دارند. audit آن ۴۴ text
 Vazirmatn، ۱۶/۱۶ linked instance، zero overflow/crop/overlap، حداقل contrast متن `4.55:1`،
@@ -145,6 +156,7 @@ audit geometry و contrast آن pass و محتوایش عاری از دادهٔ 
 - [STAGE8_AUTH_VIEWPORT_CONTAINMENT_EXECUTION_RECEIPT.json](STAGE8_AUTH_VIEWPORT_CONTAINMENT_EXECUTION_RECEIPT.json)
 - [STAGE8_DIRECTORY_PROFILE_REBASELINE_EXECUTION_RECEIPT.json](STAGE8_DIRECTORY_PROFILE_REBASELINE_EXECUTION_RECEIPT.json)
 - [STAGE8_ROVING_WORKSPACE_FOCUS_EXECUTION_RECEIPT.json](STAGE8_ROVING_WORKSPACE_FOCUS_EXECUTION_RECEIPT.json)
+- [STAGE8_SETTINGS_NOTIFICATIONS_WRAP_EXECUTION_RECEIPT.json](STAGE8_SETTINGS_NOTIFICATIONS_WRAP_EXECUTION_RECEIPT.json)
 - [VISUAL_FREEZE_PROTECTED_SURFACES.json](VISUAL_FREEZE_PROTECTED_SURFACES.json)
 - [ROLLOUT_PLAN.md](ROLLOUT_PLAN.md)
 - [VALIDATION.md](VALIDATION.md)

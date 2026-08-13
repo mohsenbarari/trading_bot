@@ -1,0 +1,147 @@
+{
+  "schemaVersion": 1,
+  "stage": "8A-settings-notifications-long-text-wrap",
+  "status": "passed-promotable-bounded-local-synthetic-production-browser-evidence-not-acceptance",
+  "branch": "condidate/webapp-ui-ux-redesign-v2",
+  "runId": "settings-wrap-browser-final-redacted-aggregate-202608132331",
+  "aggregation": {
+    "aggregationOnly": true,
+    "newBrowserRunPerformedForAggregation": false,
+    "aggregateReceiptSha256": "9bf816ed9a22afdd44401f071a8985b68f10a5b5ce06de2a9259bb57d3074dd1",
+    "inputReceiptCount": 3,
+    "inputReceipts": [
+      {
+        "runId": "settings-wrap-browser-20260813232911627",
+        "reportSha256": "30f02bc8c4467cee89e8bd38119a9abbf57a5db3e713ec9eb1cb0fee927f04ba",
+        "scope": "account security at five normal viewports plus one CDP visual-scale 2 probe",
+        "executedScenarioCount": 6,
+        "passedScenarioCount": 6,
+        "directTargetAndAncestorMeasurements": 78,
+        "exactDomAndAccessibilityTextAssertions": 12,
+        "expectedLocalSyntheticApiRequests": 61
+      },
+      {
+        "runId": "settings-wrap-browser-20260813233132762",
+        "reportSha256": "0a6c9272da57c7048f233ff3731eea6520cc1e5af737065fe54fc2ca71cee959",
+        "scope": "account notifications at five normal viewports",
+        "executedScenarioCount": 5,
+        "passedScenarioCount": 5,
+        "directTargetAndAncestorMeasurements": 170,
+        "exactDomAndAccessibilityTextAssertions": 35,
+        "expectedLocalSyntheticApiRequests": 58
+      },
+      {
+        "runId": "settings-wrap-browser-20260813233101867",
+        "reportSha256": "e0bbfee7bd8449a4369da8c0c488f9a75b300c3c01446fe9e7000457b29bc75e",
+        "scope": "account notifications CDP visual-scale 2 probe",
+        "executedScenarioCount": 1,
+        "passedScenarioCount": 1,
+        "directTargetAndAncestorMeasurements": 34,
+        "exactDomAndAccessibilityTextAssertions": 7,
+        "expectedLocalSyntheticApiRequests": 12
+      }
+    ]
+  },
+  "implementation": {
+    "title": "Account settings and notifications long-text wrapping local-synthetic browser receipt",
+    "sourceSnapshot": {
+      "commit": "8082d8dd6352154b52e86ca6511e27464e072b13",
+      "tree": "7969b02a8cd49c0abe39dd660a7c01e5203df2ff",
+      "allInputPreAndPostWorktreesClean": true,
+      "allInputSourceBindingsUnchanged": true,
+      "sourceHashes": {
+        "frontend/src/views/SettingsView.vue": "7217e097bd916c6cda0a8989b1dd3d5a3c0ca58734c9b705e88326df62413e5d",
+        "frontend/src/views/NotificationsView.vue": "7eccbbea7f58cd89308763a1ad8ad747e15dafe58d170359d44deb4db567ab10",
+        "frontend/src/views/SettingsView.test.ts": "fa4f8f1fadc742e4655a2cfdab9b71780793d86cd3d19587b09cb3b8ab981b0a",
+        "frontend/src/views/NotificationsView.test.ts": "9441db9b5849e3b92833aa09312ca934ec1bbe3174163964c40114bff90e0a93"
+      }
+    },
+    "distSnapshot": {
+      "sha256": "102b8bbf0885e14b5e4f52ddb3a475dd10b306a838c34744711ebdc9c146e881",
+      "fileCount": 169,
+      "unchangedAcrossAllInputPreAndPostSnapshots": true
+    }
+  },
+  "validation": {
+    "sourceBinding": "All three input browser reports recorded the same clean product commit, tree, changed-source hashes, and production-build dist snapshot before and after their runs.",
+    "browserReportVerdict": "passed-promotable-bounded-local-synthetic-production-browser-evidence",
+    "subsequentFullRegression": {
+      "commit": "c454692e607e215b71aa325ee709f3d5336c4846",
+      "tree": "c4403ccf7f258938f9bb11ded4b5f2f9c20026bc",
+      "scope": "A later test-only UserProfile stabilization commit; it does not change the product browser binding above.",
+      "unitTestFilesPassed": 155,
+      "unitTestsPassed": 1767,
+      "productionBuild": "passed",
+      "vueTsc": "passed",
+      "protectedUiGuard": "passed"
+    }
+  },
+  "browserReceipt": {
+    "environment": "local-synthetic production-build browser with external network disabled",
+    "executedScenarioCount": 12,
+    "passedScenarioCount": 12,
+    "failedScenarioCount": 0,
+    "coverage": {
+      "routeFamilies": [
+        "account security",
+        "account notifications"
+      ],
+      "normalViewportsCssPx": [
+        {
+          "width": 360,
+          "height": 740
+        },
+        {
+          "width": 390,
+          "height": 844
+        },
+        {
+          "width": 414,
+          "height": 896
+        },
+        {
+          "width": 430,
+          "height": 932
+        },
+        {
+          "width": 1440,
+          "height": 900
+        }
+      ],
+      "zoomEquivalent": "one CDP visual-scale 2 probe at 390x844 per route family",
+      "fixtureContentBoundary": "Synthetic deliberately unbroken and structured text with normal Persian control copy.",
+      "assertionContract": "Every direct target and measured ancestor had scrollWidth no greater than clientWidth plus one CSS pixel, remained within the viewport, preserved exact synthetic DOM and accessibility text, and left document, application, and route horizontally contained."
+    },
+    "result": {
+      "directTargetAndAncestorMeasurements": 282,
+      "exactDomAndAccessibilityTextAssertions": 54,
+      "documentApplicationAndRouteHorizontalContainment": "passed"
+    },
+    "diagnostics": {
+      "unexpectedConsoleDiagnosticCount": 0,
+      "runtimePageErrorCount": 0,
+      "requestFailureCount": 0,
+      "blockedExternalRequestCount": 0,
+      "externalNetworkPermitted": false,
+      "expectedLocalSyntheticApiRequestCount": 131,
+      "observedLocalSyntheticApiRequestCount": 131,
+      "unknownSyntheticApiCount": 0,
+      "boundary": "These zero counts describe only the twelve covered local/synthetic scenarios; they do not establish a clean-console or network conclusion beyond this receipt."
+    },
+    "artifactAccounting": {
+      "reportedScreenshotArtifactCount": 12,
+      "rawArtifactsRetainedInRepository": false,
+      "rawArtifactsRetainedOnlyOutsideRepository": true
+    },
+    "limitations": [
+      "This is a bounded local/synthetic production-build browser receipt, not a complete role-by-route, state, interaction, or environment matrix execution.",
+      "The CDP visual-scale probes do not certify every native-browser zoom implementation.",
+      "The notification visual-scale probe used normal keyboard tab activation rather than pointer coordinates because visual scale invalidates Playwright pointer hit-testing; the same scoped text and containment assertions passed.",
+      "This is a redacted aggregation of independently source-bound reports, not a new browser run, and it does not alter those reports or create final acceptance authority.",
+      "No raw screenshot, trace, console log, network log, local path, local URL, fixture payload, or user data is retained in this repository receipt."
+    ]
+  },
+  "countsTowardFullMatrixAcceptance": false,
+  "claimBoundary": "This bounded source-bound local/synthetic long-text wrapping receipt does not alter prior historical receipts, protected-surface freeze, full Stage 8 acceptance, owner aesthetic sign-off, a visual freeze, merge authority, Figma authority, Sites authority, staging authority, or production authority.",
+  "retention": "Only redacted counts, source revisions, source hashes, dist/report hashes, validation totals, and claim boundaries are retained."
+}

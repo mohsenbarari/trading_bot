@@ -93,7 +93,8 @@
       "stage8b-typography-execution-receipt",
       "stage8-auth-viewport-containment-execution-receipt",
       "stage8-directory-profile-current-rebaseline-execution-receipt",
-      "stage8-roving-workspace-focus-execution-receipt"
+      "stage8-roving-workspace-focus-execution-receipt",
+      "stage8-settings-notifications-wrap-execution-receipt"
     ]
   },
   "cellAccounting": {
@@ -102,8 +103,8 @@
     "enumeratedExpectedAccessCells": 270,
     "viewportStateInteractionEnvironmentExpansionPerformed": false,
     "executedFullMatrixCellCount": 0,
-    "partialSyntheticBrowserSliceCount": 8,
-    "partialSyntheticBrowserScenarioCellCount": 132,
+    "partialSyntheticBrowserSliceCount": 9,
+    "partialSyntheticBrowserScenarioCellCount": 144,
     "partialSyntheticBrowserCellsCountTowardFullMatrix": false
   },
   "partialSyntheticBrowserSlices": [
@@ -429,6 +430,66 @@
         "It covers only customer and accountant workspace filter/detail strips, the End key, and the two recorded viewports; it does not certify all keyboard inputs, routes, or workspace states.",
         "Two intended tablist-only mobile scroll changes are recorded; this does not claim a global no-scroll behavior outside the visible strip contract.",
         "It creates no aesthetic sign-off, visual freeze, merge, Sites, staging, or production authority."
+      ]
+    },
+    {
+      "id": "stage8-settings-notifications-long-text-wrap",
+      "receiptId": "settings-wrap-browser-final-redacted-aggregate-202608132331",
+      "evidenceRef": "stage8-settings-notifications-wrap-execution-receipt",
+      "sourceEvidenceRef": "stage8-settings-notifications-wrap-runtime-and-test",
+      "sourceCommit": "8082d8dd6352154b52e86ca6511e27464e072b13",
+      "sourceTree": "7969b02a8cd49c0abe39dd660a7c01e5203df2ff",
+      "evidenceStatus": "passed-promotable-bounded-local-synthetic-production-browser-evidence",
+      "countsTowardFullMatrixAcceptance": false,
+      "scope": {
+        "environment": "local-synthetic-production-build-browser",
+        "routeFamilies": [
+          "account security",
+          "account notifications"
+        ],
+        "normalViewportsCssPx": [
+          {
+            "width": 360,
+            "height": 740
+          },
+          {
+            "width": 390,
+            "height": 844
+          },
+          {
+            "width": 414,
+            "height": 896
+          },
+          {
+            "width": 430,
+            "height": 932
+          },
+          {
+            "width": 1440,
+            "height": 900
+          }
+        ],
+        "zoomEquivalent": "one CDP visual-scale 2 probe at 390x844 per route family",
+        "executedScenarioCount": 12
+      },
+      "result": {
+        "passedScenarioCount": 12,
+        "failedScenarioCount": 0,
+        "directTargetAndAncestorMeasurements": 282,
+        "exactDomAndAccessibilityTextAssertions": 54,
+        "horizontalContainment": "all measured direct targets and ancestors remained within the viewport and document/app/route containment held",
+        "unexpectedConsoleDiagnosticCount": 0,
+        "runtimePageErrorCount": 0,
+        "requestFailureCount": 0,
+        "blockedExternalRequestCount": 0,
+        "observedExpectedLocalSyntheticApiRequests": "131/131",
+        "unknownSyntheticApiCount": 0
+      },
+      "limitations": [
+        "This is a bounded local/synthetic production-build browser receipt, not a complete role-by-route, state, interaction, or environment matrix execution.",
+        "The two CDP visual-scale probes do not certify every native-browser zoom implementation.",
+        "The notification visual-scale probe used keyboard activation because that scale invalidates pointer hit-testing; the same scoped text and containment assertions passed.",
+        "It is a redacted aggregation of three independently source-bound browser reports and creates no aesthetic sign-off, visual freeze, merge, Figma, Sites, staging, or production authority."
       ]
     }
   ],
@@ -1019,6 +1080,46 @@
       "kind": "curated-evidence-only",
       "path": "docs/uiux-stage8-acceptance-rollout/STAGE8_ROVING_WORKSPACE_FOCUS_EXECUTION_RECEIPT.json",
       "claim": "One bounded current local/synthetic postcommit workspace roving-focus slice; it is not full Stage 8 acceptance or release authority."
+    },
+    "stage8-settings-notifications-wrap-runtime-and-test": {
+      "id": "stage8-settings-notifications-wrap-runtime-and-test",
+      "kind": "runtime-and-test-source",
+      "sourceSnapshot": {
+        "commit": "8082d8dd6352154b52e86ca6511e27464e072b13",
+        "tree": "7969b02a8cd49c0abe39dd660a7c01e5203df2ff"
+      },
+      "distSnapshot": {
+        "sha256": "102b8bbf0885e14b5e4f52ddb3a475dd10b306a838c34744711ebdc9c146e881",
+        "fileCount": 169
+      },
+      "sources": [
+        {
+          "path": "frontend/src/views/SettingsView.vue",
+          "sha256": "7217e097bd916c6cda0a8989b1dd3d5a3c0ca58734c9b705e88326df62413e5d",
+          "claim": "Scopes unbroken session-name wrapping to account settings content."
+        },
+        {
+          "path": "frontend/src/views/NotificationsView.vue",
+          "sha256": "7eccbbea7f58cd89308763a1ad8ad747e15dafe58d170359d44deb4db567ab10",
+          "claim": "Scopes unbroken notification title, body, and structured-line wrapping to notification content."
+        },
+        {
+          "path": "frontend/src/views/SettingsView.test.ts",
+          "sha256": "fa4f8f1fadc742e4655a2cfdab9b71780793d86cd3d19587b09cb3b8ab981b0a",
+          "claim": "Locks exact synthetic session text and the local wrapping contract."
+        },
+        {
+          "path": "frontend/src/views/NotificationsView.test.ts",
+          "sha256": "9441db9b5849e3b92833aa09312ca934ec1bbe3174163964c40114bff90e0a93",
+          "claim": "Locks exact synthetic notification text and the local wrapping contract."
+        }
+      ]
+    },
+    "stage8-settings-notifications-wrap-execution-receipt": {
+      "id": "stage8-settings-notifications-wrap-execution-receipt",
+      "kind": "curated-evidence-only",
+      "path": "docs/uiux-stage8-acceptance-rollout/STAGE8_SETTINGS_NOTIFICATIONS_WRAP_EXECUTION_RECEIPT.json",
+      "claim": "One bounded redacted aggregation of three source-bound local/synthetic production-build browser reports for account-security and account-notifications long-text containment; it is not full Stage 8 acceptance or release authority."
     },
     "stage3-evidence-manifest": {
       "id": "stage3-evidence-manifest",
