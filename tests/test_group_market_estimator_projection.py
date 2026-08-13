@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 from decimal import Decimal
+import json
 from pathlib import Path
 import sqlite3
 from tempfile import TemporaryDirectory
@@ -10,7 +11,7 @@ from core.market_intelligence.market_store import (
     initialize_market_store,
     upsert_observation,
 )
-from scripts.project_group_market_to_estimator import project
+from scripts.project_group_market_to_estimator import main, project
 
 
 _CONVERSATION_SCHEMA = """
@@ -87,3 +88,28 @@ def test_projection_uses_opaque_ids_and_removes_later_ineligible_fact() -> None:
         connection = sqlite3.connect(conversation_path)
         assert connection.execute("SELECT COUNT(*) FROM offers").fetchone()[0] == 0
         connection.close()
+
+
+def test_projection_command_records_failure_heartbeat() -> None:
+    with TemporaryDirectory() as directory:
+        root = Path(directory)
+        conversation_path = root / "conversation.sqlite3"
+        conversation_path.touch()
+        health_path = root / "group-health.json"
+
+        result = main(
+            [
+                "--market-store",
+                str(root / "missing-market.sqlite3"),
+                "--conversation-db",
+                str(conversation_path),
+                "--health-state",
+                str(health_path),
+            ]
+        )
+        health = json.loads(health_path.read_text(encoding="utf-8"))
+
+    assert result == 2
+    source = health["sources"]["COIN_GROUP_PROJECTION"]
+    assert source["status"] == "FAILED"
+    assert source["error_code"] == "GROUP_PROJECTION_PROJECTIONERROR"

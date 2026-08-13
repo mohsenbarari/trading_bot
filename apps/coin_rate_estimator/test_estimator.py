@@ -38,6 +38,7 @@ from coin_estimator import (
 from live_server import (
     GroupLiveInputControl,
     ensure_manual_entry_schema,
+    health_response,
     insert_manual_entry,
     insert_manual_trade_for_open_offer,
     list_open_manual_offers,
@@ -1407,6 +1408,53 @@ class EstimatorTests(unittest.TestCase):
         self.assertNotIn("سایه ۱ — مدل قبلی", body)
         self.assertIn('id="freshness-content"', body)
         self.assertIn('getElementById("freshness-fragment")', body)
+
+    def test_page_renders_end_to_end_input_health(self) -> None:
+        body = render_page(
+            {
+                "service_status": "DEGRADED",
+                "generated_at_utc": "2026-08-13T17:00:00Z",
+                "window_start_utc": "2026-08-13T16:59:00Z",
+                "window_end_utc": "2026-08-13T17:00:00Z",
+                "settlements": {},
+                "input_health": {
+                    "status": "DEGRADED",
+                    "reason_codes": ["WALLEX_PUBLIC_API_COLLECTOR_REPORTED_FAILURE"],
+                    "collectors": {
+                        "public_market_telegram": {"status": "HEALTHY", "heartbeat_age_seconds": 4},
+                        "wallex_public_api": {"status": "DEGRADED", "heartbeat_age_seconds": 2},
+                        "coin_group_projection": {"status": "HEALTHY", "heartbeat_age_seconds": 8},
+                    },
+                    "model_inputs": {},
+                },
+            }
+        ).decode("utf-8")
+        self.assertIn("سلامت ورودی‌های مدل", body)
+        self.assertIn("تلگرام بازار عمومی", body)
+        self.assertIn("نیازمند توجه", body)
+
+    def test_health_response_is_unavailable_for_critical_inputs(self) -> None:
+        status, payload = health_response(
+            {
+                "service_status": "INPUT_CRITICAL",
+                "generated_at_utc": "2026-08-13T17:00:00Z",
+                "input_health": {
+                    "status": "CRITICAL",
+                    "reason_codes": ["MODEL_INPUT_XAUUSD_NO_DATA"],
+                    "collectors": {},
+                    "model_inputs": {
+                        "xauusd": {
+                            "status": "NO_DATA",
+                            "importance": "CRITICAL",
+                            "settlements": {"CASH": "NO_DATA", "TOMORROW": "NO_DATA"},
+                        }
+                    },
+                },
+            }
+        )
+        self.assertEqual(status.value, 503)
+        self.assertEqual(payload["status"], "CRITICAL")
+        self.assertNotIn("latest_observation_utc", payload["model_inputs"]["xauusd"])
 
     def test_shadow_models_render_only_on_the_dedicated_polished_page(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

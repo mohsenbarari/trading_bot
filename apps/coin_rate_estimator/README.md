@@ -335,6 +335,14 @@ export COIN_RATE_ESTIMATOR_PATH='choose-a-new-operator-route'
 ./run_live.sh
 ```
 
+`/healthz` is input-driven. It returns collector heartbeat state separately
+from model-input availability, reports explicit reason codes, and returns HTTP
+503 only when a critical collector or critical model input is unavailable.
+Quiet optional feeds such as coin-group order flow remain distinguishable from
+a stopped collector. Runtime heartbeat JSON files are stored beside the public
+market and conversation databases; they contain operational counters only and
+never raw Telegram text or credentials.
+
 Direct IME polling is disabled in the normal foreign-host deployment path.
 Any future relay or Object Storage transfer must be designed from the current
 architecture as a separate reviewed change.  This application must fail closed

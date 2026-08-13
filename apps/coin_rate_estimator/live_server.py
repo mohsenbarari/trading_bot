@@ -76,6 +76,11 @@ from telegram_price_collector.db import (  # noqa: E402
     upsert_external_observations,
     upsert_raw_post,
 )
+from core.market_intelligence.input_health import (  # noqa: E402
+    InputHealthConfig,
+    build_estimator_input_health,
+    update_probe_state,
+)
 from telegram_price_collector.external_collectors import (  # noqa: E402
     ExternalSourceError,
     fetch_ime_live,
@@ -147,6 +152,9 @@ DEFAULT_ML_SHADOW_STATE_PATH = Path(
 DEFAULT_WRITE_TOKEN_FILE = RUNTIME_ROOT / "manual-entry.token"
 DEFAULT_GROUP_LIVE_CONTROL = RUNTIME_ROOT / "group-live-input-control.json"
 DEFAULT_DASHBOARD_CREDENTIALS_FILE = RUNTIME_ROOT / "dashboard-credentials.json"
+PUBLIC_COLLECTOR_HEALTH_NAME = "public-telegram-health.json"
+EXTERNAL_MARKET_HEALTH_NAME = "external-market-health.json"
+GROUP_PROJECTION_HEALTH_NAME = "group-event-health.json"
 MAX_MANUAL_FORM_BYTES = 16_384
 PERSIAN_DIGITS = str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789")
 
@@ -169,6 +177,46 @@ def estimate_refresh_seconds() -> int:
         except ValueError:
             pass
     return 30 if shadow_light_mode() else 5
+
+
+def input_health_config(
+    market_db: Path,
+    conversation_db: Path,
+) -> InputHealthConfig:
+    """Resolve sidecar heartbeat paths without embedding host-specific roots."""
+
+    return InputHealthConfig(
+        public_telegram_state=Path(
+            os.environ.get(
+                "COIN_RATE_ESTIMATOR_PUBLIC_TELEGRAM_HEALTH",
+                market_db.parent / PUBLIC_COLLECTOR_HEALTH_NAME,
+            )
+        ).expanduser(),
+        external_market_state=Path(
+            os.environ.get(
+                "COIN_RATE_ESTIMATOR_EXTERNAL_MARKET_HEALTH",
+                market_db.parent / EXTERNAL_MARKET_HEALTH_NAME,
+            )
+        ).expanduser(),
+        group_projection_state=Path(
+            os.environ.get(
+                "COIN_RATE_ESTIMATOR_GROUP_PROJECTION_HEALTH",
+                conversation_db.parent / GROUP_PROJECTION_HEALTH_NAME,
+            )
+        ).expanduser(),
+        public_telegram_max_age_seconds=max(
+            30,
+            int(os.environ.get("COIN_RATE_ESTIMATOR_PUBLIC_HEARTBEAT_MAX_AGE", "60")),
+        ),
+        wallex_max_age_seconds=max(
+            20,
+            int(os.environ.get("COIN_RATE_ESTIMATOR_WALLEX_HEARTBEAT_MAX_AGE", "45")),
+        ),
+        group_projection_max_age_seconds=max(
+            45,
+            int(os.environ.get("COIN_RATE_ESTIMATOR_GROUP_HEARTBEAT_MAX_AGE", "90")),
+        ),
+    )
 
 
 def load_dashboard_credentials() -> tuple[str, str]:
@@ -1697,6 +1745,89 @@ def render_input_cards(inputs: dict[str, dict[str, Any]]) -> str:
     return "".join(cards)
 
 
+def render_input_health_panel(input_health: object) -> str:
+    if not isinstance(input_health, dict):
+        return ""
+    aggregate = str(input_health.get("status") or "UNKNOWN").upper()
+    status_fa = {
+        "HEALTHY": "سالم",
+        "DEGRADED": "نیازمند توجه",
+        "CRITICAL": "بحرانی",
+        "DISABLED": "غیرفعال",
+        "AVAILABLE": "در دسترس",
+        "QUIET_OR_NO_DATA": "بازار ساکت / بدون داده",
+        "NO_DATA": "بدون داده",
+        "STALE": "کهنه",
+    }
+    collector_labels = {
+        "public_market_telegram": "تلگرام بازار عمومی",
+        "wallex_public_api": "API تتر",
+        "coin_group_projection": "گروه‌ها تا مدل",
+    }
+    input_labels = {
+        "melted_gold": "آب‌شده",
+        "xauusd": "اونس",
+        "usd": "دلار هرات",
+        "usdt": "تتر",
+        "generic_coin": "سکه عمومی",
+        "order_flow": "جریان سفارش",
+        "market_regime": "رژیم بازار",
+    }
+    cards: list[str] = []
+    collectors = input_health.get("collectors")
+    if isinstance(collectors, dict):
+        for key, label in collector_labels.items():
+            payload = collectors.get(key)
+            payload = payload if isinstance(payload, dict) else {}
+            status = str(payload.get("status") or "UNKNOWN").upper()
+            age = payload.get("heartbeat_age_seconds")
+            detail = (
+                "heartbeat دریافت نشده"
+                if age is None
+                else f"heartbeat: {fa_number(age)} ثانیه پیش"
+            )
+            cards.append(
+                f"<article class='health-card health-{html.escape(status.lower())}'>"
+                f"<span>{html.escape(label)}</span>"
+                f"<strong>{html.escape(status_fa.get(status, status))}</strong>"
+                f"<small>{html.escape(detail)}</small></article>"
+            )
+    model_inputs = input_health.get("model_inputs")
+    if isinstance(model_inputs, dict):
+        for key in ("melted_gold", "xauusd", "usd", "usdt", "generic_coin", "order_flow"):
+            payload = model_inputs.get(key)
+            payload = payload if isinstance(payload, dict) else {}
+            status = str(payload.get("status") or "UNKNOWN").upper()
+            settlements = payload.get("settlements")
+            settlements = settlements if isinstance(settlements, dict) else {}
+            detail = "نقدی: {cash} · فردایی: {tomorrow}".format(
+                cash=settlements.get("CASH", "NO_DATA"),
+                tomorrow=settlements.get("TOMORROW", "NO_DATA"),
+            )
+            cards.append(
+                f"<article class='health-card health-{html.escape(status.lower())}'>"
+                f"<span>ورودی {html.escape(input_labels.get(key, key))}</span>"
+                f"<strong>{html.escape(status_fa.get(status, status))}</strong>"
+                f"<small>{html.escape(detail)}</small></article>"
+            )
+    reason_count = len(input_health.get("reason_codes") or [])
+    subtitle = (
+        "heartbeat جمع‌آورها و تازگی ورودی‌های واقعی مستقل پایش می‌شوند."
+        if aggregate == "HEALTHY"
+        else f"{fa_number(reason_count)} علت فعال؛ جزئیات ماشینی در healthz و data.json"
+    )
+    return f"""
+    <section class="input-health-panel health-{html.escape(aggregate.lower())}" aria-label="سلامت ورودی‌های مدل">
+      <div class="input-health-head">
+        <div><span class="section-kicker">پایش انتها‌به‌انتها</span><h3>سلامت ورودی‌های مدل</h3></div>
+        <span class="health-summary">{html.escape(status_fa.get(aggregate, aggregate))}</span>
+      </div>
+      <p>{html.escape(subtitle)}</p>
+      <div class="health-grid">{''.join(cards)}</div>
+    </section>
+    """
+
+
 def render_manual_effect(state: dict[str, Any]) -> str:
     cards = []
     for settlement, payload in state.get("settlements", {}).items():
@@ -2958,6 +3089,56 @@ section,
   background: linear-gradient(155deg, rgba(245, 158, 11, 0.09), rgba(7, 17, 31, 0.52));
 }
 .input-card.no-data { border-style: dashed; }
+.input-health-panel {
+  margin-top: 4px;
+  padding: 16px;
+  border-radius: 17px;
+  background: rgba(5, 14, 27, 0.52);
+  box-shadow: none;
+}
+.input-health-panel.health-healthy { border-color: rgba(52, 211, 153, 0.22); }
+.input-health-panel.health-degraded { border-color: rgba(251, 191, 36, 0.3); }
+.input-health-panel.health-critical { border-color: rgba(251, 113, 133, 0.38); }
+.input-health-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+.input-health-head h3 { margin: 2px 0 0; font-size: 15px; }
+.input-health-panel > p { margin: 6px 0 12px; color: var(--text-sub); font-size: 11px; }
+.health-summary {
+  padding: 5px 10px;
+  border-radius: 999px;
+  color: #6ee7b7;
+  background: rgba(16, 185, 129, 0.1);
+  border: 1px solid rgba(52, 211, 153, 0.22);
+  font-size: 11px;
+  font-weight: 800;
+}
+.health-degraded > .input-health-head .health-summary {
+  color: #fde68a; background: rgba(245, 158, 11, 0.1); border-color: rgba(251, 191, 36, 0.24);
+}
+.health-critical > .input-health-head .health-summary {
+  color: #fda4af; background: rgba(225, 29, 72, 0.1); border-color: rgba(251, 113, 133, 0.28);
+}
+.health-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(145px, 1fr)); gap: 8px; }
+.health-card {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 10px 11px;
+  border: 1px solid rgba(148, 163, 184, 0.1);
+  border-radius: 12px;
+  background: rgba(15, 29, 48, 0.62);
+}
+.health-card span, .health-card small { color: var(--text-sub); font-size: 10px; }
+.health-card strong { color: #6ee7b7; font-size: 12px; }
+.health-card.health-degraded strong,
+.health-card.health-quiet_or_no_data strong { color: #fde68a; }
+.health-card.health-critical strong,
+.health-card.health-no_data strong,
+.health-card.health-stale strong { color: #fda4af; }
 .group-control-card {
   position: relative;
   padding: 18px 20px;
@@ -3299,7 +3480,10 @@ def render_page(
         f"<small>{fa_number(value.get('sample_count', 0))} رویداد</small></article>"
         for form, value in melted.items()
     )
-    ticker_cards = f"<div class='inputs'>{render_input_cards(inputs)}{melted_cards}</div>"
+    ticker_cards = (
+        f"<div class='inputs'>{render_input_cards(inputs)}{melted_cards}</div>"
+        f"{render_input_health_panel(state.get('input_health'))}"
+    )
     table_section = f"""
       <section class="table-section surface-panel">
         <div class='section-head'>
@@ -4748,6 +4932,47 @@ document.addEventListener("keydown", (e) => {{
     return document.encode("utf-8")
 
 
+def health_response(state: dict[str, Any]) -> tuple[HTTPStatus, dict[str, Any]]:
+    input_health = state.get("input_health")
+    input_health = input_health if isinstance(input_health, dict) else {}
+    aggregate = str(input_health.get("status") or "").upper()
+    service_status = str(state.get("service_status", "UNKNOWN")).upper()
+    if not aggregate:
+        aggregate = "HEALTHY" if service_status in {"RUNNING", "READY", "OK"} else "CRITICAL"
+    collectors = input_health.get("collectors")
+    collectors = collectors if isinstance(collectors, dict) else {}
+    model_inputs = input_health.get("model_inputs")
+    model_inputs = model_inputs if isinstance(model_inputs, dict) else {}
+    payload = {
+        "status": aggregate,
+        "service_status": service_status,
+        "generated_at_utc": state.get("generated_at_utc"),
+        "evaluated_at_utc": input_health.get("evaluated_at_utc"),
+        "reason_codes": list(input_health.get("reason_codes") or []),
+        "collectors": {
+            str(name): {
+                "status": value.get("status"),
+                "heartbeat_age_seconds": value.get("heartbeat_age_seconds"),
+                "max_age_seconds": value.get("max_age_seconds"),
+                "reason_code": value.get("reason_code"),
+            }
+            for name, value in collectors.items()
+            if isinstance(value, dict)
+        },
+        "model_inputs": {
+            str(name): {
+                "status": value.get("status"),
+                "importance": value.get("importance"),
+                "settlements": value.get("settlements"),
+            }
+            for name, value in model_inputs.items()
+            if isinstance(value, dict)
+        },
+    }
+    status = HTTPStatus.SERVICE_UNAVAILABLE if aggregate == "CRITICAL" else HTTPStatus.OK
+    return status, payload
+
+
 def handler_factory(
     route: str,
     state_store: StateStore,
@@ -4827,14 +5052,9 @@ def handler_factory(
             state = state_store.get()
 
             if path == health_path:
-                body = json.dumps(
-                    {
-                        "status": state.get("service_status", "UNKNOWN"),
-                        "generated_at_utc": state.get("generated_at_utc"),
-                    },
-                    ensure_ascii=False,
-                ).encode("utf-8")
-                self._headers(HTTPStatus.OK, "application/json; charset=utf-8", len(body))
+                health_status, health_payload = health_response(state)
+                body = json.dumps(health_payload, ensure_ascii=False).encode("utf-8")
+                self._headers(health_status, "application/json; charset=utf-8", len(body))
                 self.wfile.write(body)
                 return
 
@@ -5068,17 +5288,6 @@ def handler_factory(
                 return
             if path == data_path:
                 body = json.dumps(state, ensure_ascii=False, indent=2).encode("utf-8")
-                self._headers(HTTPStatus.OK, "application/json; charset=utf-8", len(body))
-                self.wfile.write(body)
-                return
-            if path == health_path:
-                body = json.dumps(
-                    {
-                        "status": state.get("service_status", "UNKNOWN"),
-                        "generated_at_utc": state.get("generated_at_utc"),
-                    },
-                    ensure_ascii=False,
-                ).encode("utf-8")
                 self._headers(HTTPStatus.OK, "application/json; charset=utf-8", len(body))
                 self.wfile.write(body)
                 return
@@ -5395,6 +5604,7 @@ def refresh_estimate(
     research_shadow_state_path: Path | None = None,
     ml_shadow_model_path: Path | None = None,
     ml_shadow_state_path: Path | None = None,
+    health_config: InputHealthConfig | None = None,
 ) -> dict[str, Any]:
     effective_end = (end or datetime.now(timezone.utc)).astimezone(timezone.utc).replace(microsecond=0)
     effective_calibration_db = calibration_db or DEFAULT_CALIBRATION_DB
@@ -5705,6 +5915,18 @@ def refresh_estimate(
         "automatic_model_weight_promotion": False,
         "deterministic_finalization": finalization,
     }
+    if health_config is not None:
+        health = build_estimator_input_health(
+            estimate,
+            as_of=effective_end,
+            config=health_config,
+        )
+        estimate["input_health"] = health
+        estimate["service_status"] = {
+            "HEALTHY": "RUNNING",
+            "DEGRADED": "DEGRADED",
+            "CRITICAL": "INPUT_CRITICAL",
+        }.get(str(health.get("status") or "CRITICAL"), "INPUT_CRITICAL")
     state.set(estimate)
     write_json_atomic(state_path, estimate, mode=0o644)
     return estimate
@@ -5719,6 +5941,7 @@ async def estimation_loop(
     state: StateStore,
     group_live_control: GroupLiveInputControl,
     *,
+    health_config: InputHealthConfig | None = None,
     shadow_model_path: Path | None = None,
     shadow_state_path: Path | None = None,
     research_shadow_model_path: Path | None = None,
@@ -5748,6 +5971,7 @@ async def estimation_loop(
                     research_shadow_state_path=research_shadow_state_path,
                     ml_shadow_model_path=ml_shadow_model_path,
                     ml_shadow_state_path=ml_shadow_state_path,
+                    health_config=health_config,
                 )
                 print(
                     json.dumps(
@@ -5755,6 +5979,12 @@ async def estimation_loop(
                             "event": "estimate_complete",
                             "window_end_utc": estimate["window_end_utc"],
                             "settlements": list(estimate["settlements"]),
+                            "input_health_status": (
+                                estimate.get("input_health") or {}
+                            ).get("status"),
+                            "input_health_reason_codes": (
+                                estimate.get("input_health") or {}
+                            ).get("reason_codes", []),
                         },
                         ensure_ascii=False,
                     ),
@@ -5777,34 +6007,69 @@ async def estimation_loop(
         await asyncio.sleep(1)
 
 
-async def live_collection_loop(
-    market_db: Path, backfill_minutes: int, channels: tuple[str, ...]
+async def _public_collector_heartbeat(
+    client: object,
+    health_path: Path,
+    *,
+    channel_count: int,
 ) -> None:
-    try:
-        from telethon import TelegramClient, events
-    except ImportError as exc:
-        raise RuntimeError("Telethon is unavailable in collector .deps") from exc
+    while True:
+        connected = bool(client.is_connected())  # type: ignore[attr-defined]
+        update_probe_state(
+            health_path,
+            source="PUBLIC_MARKET_TELEGRAM",
+            status="HEALTHY" if connected else "FAILED",
+            successful=connected,
+            error_code=None if connected else "TELEGRAM_DISCONNECTED",
+            details={"connected": connected, "channel_count": channel_count},
+        )
+        if not connected:
+            raise RuntimeError("public_market_telegram_disconnected")
+        await asyncio.sleep(15)
 
-    settings = Settings.with_interactive_credentials()
-    connection = connect(market_db)
-    initialize(connection)
-    client = TelegramClient(
-        str(settings.session_path),
-        settings.api_id,
-        settings.api_hash,
-        flood_sleep_threshold=60,
-        sequential_updates=True,
+
+async def live_collection_loop(
+    market_db: Path,
+    backfill_minutes: int,
+    channels: tuple[str, ...],
+    *,
+    health_state_path: Path | None = None,
+) -> None:
+    health_path = health_state_path or market_db.parent / PUBLIC_COLLECTOR_HEALTH_NAME
+    update_probe_state(
+        health_path,
+        source="PUBLIC_MARKET_TELEGRAM",
+        status="STARTING",
+        successful=None,
+        details={"configured_channel_count": len(channels)},
     )
-    await client.connect()
-    if not await client.is_user_authorized():
-        if not settings.phone:
-            raise RuntimeError(
-                "Telegram session is not authorised and TELEGRAM_PHONE is not configured"
-            )
-        await client.start(phone=settings.phone)
-    entities = []
-    channel_by_peer: dict[int, tuple[str, str, str]] = {}
+    connection = None
+    client = None
     try:
+        try:
+            from telethon import TelegramClient, events
+        except ImportError as exc:
+            raise RuntimeError("Telethon is unavailable in collector .deps") from exc
+
+        settings = Settings.with_interactive_credentials()
+        connection = connect(market_db)
+        initialize(connection)
+        client = TelegramClient(
+            str(settings.session_path),
+            settings.api_id,
+            settings.api_hash,
+            flood_sleep_threshold=60,
+            sequential_updates=True,
+        )
+        await client.connect()
+        if not await client.is_user_authorized():
+            if not settings.phone:
+                raise RuntimeError(
+                    "Telegram session is not authorised and TELEGRAM_PHONE is not configured"
+                )
+            await client.start(phone=settings.phone)
+        entities = []
+        channel_by_peer: dict[int, tuple[str, str, str]] = {}
         for requested in channels:
             entity = await client.get_entity(requested)
             username = getattr(entity, "username", None) or requested
@@ -5888,10 +6153,44 @@ async def live_collection_loop(
             ),
             flush=True,
         )
-        await client.run_until_disconnected()
+        update_probe_state(
+            health_path,
+            source="PUBLIC_MARKET_TELEGRAM",
+            status="HEALTHY",
+            successful=True,
+            details={"connected": True, "channel_count": len(entities)},
+        )
+        await asyncio.gather(
+            client.run_until_disconnected(),
+            _public_collector_heartbeat(
+                client,
+                health_path,
+                channel_count=len(entities),
+            ),
+        )
+    except asyncio.CancelledError:
+        update_probe_state(
+            health_path,
+            source="PUBLIC_MARKET_TELEGRAM",
+            status="STOPPED",
+            successful=None,
+            error_code="COLLECTOR_CANCELLED",
+        )
+        raise
+    except BaseException as exc:
+        update_probe_state(
+            health_path,
+            source="PUBLIC_MARKET_TELEGRAM",
+            status="FAILED",
+            successful=False,
+            error_code=f"TELEGRAM_{type(exc).__name__.upper()}",
+        )
+        raise
     finally:
-        await client.disconnect()
-        connection.close()
+        if client is not None:
+            await client.disconnect()
+        if connection is not None:
+            connection.close()
 
 
 async def external_collection_loop(
@@ -5900,6 +6199,7 @@ async def external_collection_loop(
     wallex_interval: int,
     ime_interval: int,
     ime_timeout: float,
+    health_state_path: Path | None = None,
 ) -> None:
     if wallex_interval <= 0 or ime_interval < 0:
         raise ValueError(
@@ -5907,13 +6207,34 @@ async def external_collection_loop(
         )
     connection = connect(market_db)
     initialize(connection)
+    health_path = health_state_path or market_db.parent / EXTERNAL_MARKET_HEALTH_NAME
     last_ime_attempt: datetime | None = None
+    if ime_interval == 0:
+        update_probe_state(
+            health_path,
+            source="IME_REALTIME_BOARD",
+            status="DISABLED",
+            successful=True,
+            details={"configured_interval_seconds": 0},
+        )
     try:
         while True:
             cycle_started = datetime.now(timezone.utc)
             try:
                 wallex_rows = await asyncio.to_thread(fetch_wallex_live)
+                if not wallex_rows:
+                    raise ExternalSourceError("wallex_empty_snapshot")
                 upsert_external_observations(connection, wallex_rows)
+                update_probe_state(
+                    health_path,
+                    source="WALLEX_PUBLIC_API",
+                    status="HEALTHY",
+                    successful=True,
+                    details={
+                        "observation_count": len(wallex_rows),
+                        "configured_interval_seconds": wallex_interval,
+                    },
+                )
                 print(
                     json.dumps(
                         {
@@ -5928,6 +6249,14 @@ async def external_collection_loop(
                 )
             except Exception as exc:
                 connection.rollback()
+                update_probe_state(
+                    health_path,
+                    source="WALLEX_PUBLIC_API",
+                    status="FAILED",
+                    successful=False,
+                    error_code=f"WALLEX_{type(exc).__name__.upper()}",
+                    details={"configured_interval_seconds": wallex_interval},
+                )
                 print(
                     json.dumps(
                         {
@@ -5948,7 +6277,19 @@ async def external_collection_loop(
                 last_ime_attempt = cycle_started
                 try:
                     ime_rows = await fetch_ime_live(timeout=ime_timeout)
+                    if not ime_rows:
+                        raise ExternalSourceError("ime_empty_snapshot")
                     upsert_external_observations(connection, ime_rows)
+                    update_probe_state(
+                        health_path,
+                        source="IME_REALTIME_BOARD",
+                        status="HEALTHY",
+                        successful=True,
+                        details={
+                            "observation_count": len(ime_rows),
+                            "configured_interval_seconds": ime_interval,
+                        },
+                    )
                     print(
                         json.dumps(
                             {
@@ -5963,6 +6304,14 @@ async def external_collection_loop(
                     )
                 except (ExternalSourceError, OSError, TimeoutError, sqlite3.DatabaseError) as exc:
                     connection.rollback()
+                    update_probe_state(
+                        health_path,
+                        source="IME_REALTIME_BOARD",
+                        status="FAILED",
+                        successful=False,
+                        error_code=f"IME_{type(exc).__name__.upper()}",
+                        details={"configured_interval_seconds": ime_interval},
+                    )
                     print(
                         json.dumps(
                             {
@@ -6056,6 +6405,7 @@ async def async_main(
     state: StateStore,
     model: dict[str, Any],
     group_live_control: GroupLiveInputControl,
+    health_config: InputHealthConfig,
 ) -> None:
     tasks = [
         asyncio.create_task(
@@ -6067,6 +6417,7 @@ async def async_main(
                 args.state,
                 state,
                 group_live_control,
+                health_config=health_config,
                 shadow_model_path=args.shadow_model,
                 shadow_state_path=args.shadow_state,
                 research_shadow_model_path=args.research_shadow_model,
@@ -6084,6 +6435,7 @@ async def async_main(
                     args.market_db,
                     args.backfill_minutes,
                     tuple(args.channel or DEFAULT_CHANNELS),
+                    health_state_path=health_config.public_telegram_state,
                 ),
                 name="telegram",
             )
@@ -6096,6 +6448,7 @@ async def async_main(
                     wallex_interval=args.wallex_interval,
                     ime_interval=args.ime_interval,
                     ime_timeout=args.ime_timeout,
+                    health_state_path=health_config.external_market_state,
                 ),
                 name="external-markets",
             )
@@ -6110,6 +6463,7 @@ def main() -> int:
     model = load_model(args.model)
     state = StateStore()
     group_live_control = GroupLiveInputControl(args.group_live_control)
+    health_config = input_health_config(args.market_db, args.conversation_db)
     route = "/" + args.path.strip("/")
     write_token = (
         None
@@ -6132,6 +6486,7 @@ def main() -> int:
             research_shadow_state_path=args.research_shadow_state,
             ml_shadow_model_path=args.ml_shadow_model,
             ml_shadow_state_path=args.ml_shadow_state,
+            health_config=health_config,
         )
 
     server = start_web_server(
@@ -6164,7 +6519,7 @@ def main() -> int:
         flush=True,
     )
     try:
-        asyncio.run(async_main(args, state, model, group_live_control))
+        asyncio.run(async_main(args, state, model, group_live_control, health_config))
     except KeyboardInterrupt:
         return 130
     finally:

@@ -16,8 +16,16 @@ import hashlib
 import json
 from pathlib import Path
 import sqlite3
+import sys
 from typing import Sequence
 from zoneinfo import ZoneInfo
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from core.market_intelligence.input_health import update_probe_state
 
 
 PROJECTION_VERSION = "canonical-group-estimator-projection-v1"
@@ -410,15 +418,49 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--market-store", type=Path, required=True)
     parser.add_argument("--conversation-db", type=Path, required=True)
+    parser.add_argument(
+        "--health-state",
+        type=Path,
+        help="Heartbeat JSON; defaults beside the estimator conversation database.",
+    )
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    health_state = args.health_state or args.conversation_db.parent / "group-event-health.json"
     try:
-        print(json.dumps(project(args.market_store, args.conversation_db), sort_keys=True), flush=True)
+        update_probe_state(
+            health_state,
+            source="COIN_GROUP_PROJECTION",
+            status="RUNNING",
+            successful=None,
+        )
+        result = project(args.market_store, args.conversation_db)
+        update_probe_state(
+            health_state,
+            source="COIN_GROUP_PROJECTION",
+            status="HEALTHY",
+            successful=True,
+            details={
+                "eligible_offers": int(result["eligible_offers"]),
+                "eligible_trades": int(result["eligible_trades"]),
+                "ineligible_removed": int(result["ineligible_removed"]),
+            },
+        )
+        print(json.dumps(result, sort_keys=True), flush=True)
         return 0
     except (OSError, ProjectionError, sqlite3.Error, ValueError) as exc:
+        try:
+            update_probe_state(
+                health_state,
+                source="COIN_GROUP_PROJECTION",
+                status="FAILED",
+                successful=False,
+                error_code=f"GROUP_PROJECTION_{type(exc).__name__.upper()}",
+            )
+        except OSError:
+            pass
         print(json.dumps({"status": "FAILED", "reason": str(exc)}, sort_keys=True), flush=True)
         return 2
 
