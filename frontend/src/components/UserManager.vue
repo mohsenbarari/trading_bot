@@ -359,6 +359,12 @@ onUnmounted(() => {
   margin: 0;
   padding: 0;
   list-style: none;
+  /*
+   * The directory also renders inside the deliberately narrow desktop PWA
+   * column. Use the list's inline size rather than the viewport so metadata
+   * never squeezes the account name into a third, unreadable grid column.
+   */
+  container: user-directory / inline-size;
 }
 
 .users-list-item {
@@ -493,7 +499,66 @@ onUnmounted(() => {
   border: 0;
 }
 
-@media (max-width: 480px) {
+@container user-directory (max-width: 34rem) {
+  .user-item {
+    grid-template-columns: 44px minmax(0, 1fr);
+    grid-template-areas:
+      'leading copy'
+      'leading trailing';
+    align-items: start;
+    column-gap: 0.75rem;
+    row-gap: 0.5rem;
+  }
+
+  .user-item :deep(.ui-list-item__leading) {
+    grid-area: leading;
+  }
+
+  .user-item :deep(.ui-list-item__copy) {
+    grid-area: copy;
+    min-width: 0;
+  }
+
+  .user-item :deep(.ui-list-item__trailing) {
+    grid-area: trailing;
+    min-width: 0;
+  }
+
+  .user-item :deep(.ui-list-item__copy > strong),
+  .user-item :deep(.ui-list-item__copy > span),
+  .user-title-block,
+  .user-name {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .user-item :deep(.ui-list-item__copy > span),
+  .user-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .user-relation-tags {
+    max-width: 100%;
+  }
+
+  .relation-badge {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    overflow-wrap: normal;
+  }
+
+  .user-meta {
+    justify-content: flex-start;
+    gap: 0.25rem;
+  }
+}
+
+/* Preserve the established narrow-viewport layout in older engines. */
+@supports not (container-type: inline-size) {
   .user-item {
     grid-template-columns: 44px minmax(0, 1fr);
     grid-template-areas:

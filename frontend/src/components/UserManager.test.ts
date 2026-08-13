@@ -139,7 +139,7 @@ describe('UserManager.vue', () => {
     expect(wrapper.text()).toContain('ali-search')
   })
 
-  it('keeps narrow directory row copy readable by placing metadata below it', async () => {
+  it('reflows constrained directory rows by their local list width, with a narrow-viewport fallback', async () => {
     userManagerMocks.apiFetchMock.mockResolvedValue(makeJsonResponse([
       makeUser({
         account_name: 'directory-user-with-a-deliberately-long-name',
@@ -159,10 +159,13 @@ describe('UserManager.vue', () => {
     expect(row.get('.user-meta').text()).toContain('حساب غیرفعال')
     expect(row.get('.role-badge').text()).toContain('مدیر ارشد')
     expect(userManagerSource).toMatch(
-      /@media \(max-width: 480px\) \{[\s\S]*?grid-template-columns:\s*44px minmax\(0, 1fr\);[\s\S]*?grid-template-areas:\s*'leading copy'\s*'leading trailing';/,
+      /\.users-list\s*\{[\s\S]*?container:\s*user-directory\s*\/\s*inline-size;/,
     )
     expect(userManagerSource).toMatch(
-      /\.user-item :deep\(\.ui-list-item__trailing\)\s*\{[\s\S]*?grid-area:\s*trailing;/,
+      /@container user-directory \(max-width:\s*34rem\)\s*\{[\s\S]*?grid-template-columns:\s*44px minmax\(0, 1fr\);[\s\S]*?grid-template-areas:\s*'leading copy'\s*'leading trailing';/,
+    )
+    expect(userManagerSource).toMatch(
+      /@supports not \(container-type:\s*inline-size\)\s*\{[\s\S]*?grid-template-areas:\s*'leading copy'\s*'leading trailing';/,
     )
     expect(userManagerSource).toMatch(
       /\.user-item :deep\(\.ui-list-item__copy > span\),\s*\.user-name\s*\{[\s\S]*?text-overflow:\s*ellipsis;[\s\S]*?white-space:\s*nowrap;/,
