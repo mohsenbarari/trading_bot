@@ -98,8 +98,8 @@
     "enumeratedExpectedAccessCells": 270,
     "viewportStateInteractionEnvironmentExpansionPerformed": false,
     "executedFullMatrixCellCount": 0,
-    "partialSyntheticBrowserSliceCount": 2,
-    "partialSyntheticBrowserScenarioCellCount": 48,
+    "partialSyntheticBrowserSliceCount": 3,
+    "partialSyntheticBrowserScenarioCellCount": 52,
     "partialSyntheticBrowserCellsCountTowardFullMatrix": false
   },
   "partialSyntheticBrowserSlices": [
@@ -163,6 +163,41 @@
         "This is a focused visual and accessibility recovery slice, not a role-by-route execution of the full matrix.",
         "The rendered evidence is local and synthetic; no screenshot asset or live deployment is stored or implied.",
         "A subsequent local P1 change exists outside this source commit; its validation is pending, so this receipt makes no current-working-tree product claim."
+      ]
+    },
+    {
+      "id": "stage8a-admin-directory-route-first-transition",
+      "receiptId": "stage8a-admin-directory-route-first-transition",
+      "evidenceRef": "stage8a-execution-receipts",
+      "sourceEvidenceRef": "admin-directory-route-first-runtime-and-test",
+      "sourceCommit": "31c69d5a5d2fb1e2c08d9647473d3612b9d85629",
+      "sourceTree": "6b2a30464916f6d1734280852aeabb4c445e4551",
+      "countsTowardFullMatrixAcceptance": false,
+      "scope": {
+        "environment": "local-synthetic-production-browser",
+        "delayedUserListResponseMs": 550,
+        "routeTransitionScenarioCount": 4,
+        "directoryTransitionScenarioCount": 3,
+        "assertionCount": 33
+      },
+      "result": {
+        "passedRouteTransitionScenarioCount": 4,
+        "exactCompletedNonAbortedUserListRequestsPerDirectoryScenario": 1,
+        "maximumObservedOutgoingRootUserManagerCount": 0,
+        "maximumVisibleUserManagerOrDirectoryListCount": 1,
+        "middleAdminDeniedCommodityDeepLinkCanonicalPath": "/admin",
+        "maximumObservedCommodityManagerCount": 0,
+        "commodityApiRequestCount": 0,
+        "pageErrorCount": 0,
+        "httpStatusAtLeast400Count": 0,
+        "unexpectedConsoleCount": 0,
+        "telegramProbeInterceptedLocally": true,
+        "externalTransportObserved": false
+      },
+      "limitations": [
+        "This is a bounded local synthetic production-browser route-transition behavioral slice, not a full role-by-route matrix cell.",
+        "It does not expand or pass the required viewport, state, interaction, or environment dimensions.",
+        "It is evidence-only and creates no full acceptance, aesthetic sign-off, visual freeze, merge, Sites, staging, or production authority."
       ]
     }
   ],
@@ -436,11 +471,41 @@
       "claim": "Middle-admin denied deep-link canonicalization and no-forbidden-interior test source.",
       "sha256": "c4d72ba4a353390c95752788431efe6831fde7451830aeef7780b8bdeb62ab57"
     },
+    "admin-directory-route-first-runtime-and-test": {
+      "id": "admin-directory-route-first-runtime-and-test",
+      "kind": "runtime-and-test-source",
+      "sourceSnapshot": {
+        "commit": "31c69d5a5d2fb1e2c08d9647473d3612b9d85629",
+        "tree": "6b2a30464916f6d1734280852aeabb4c445e4551"
+      },
+      "sources": [
+        {
+          "path": "frontend/src/views/AdminView.vue",
+          "sha256": "b69c3b6c1d34788449f40c1394dbc8981f63597044ad37c24268d76f5f385c0a",
+          "claim": "Route-first suppression keeps the outgoing admin-menu root from mounting UserManager while the keyed native directory route commits."
+        },
+        {
+          "path": "frontend/src/views/AdminView.test.ts",
+          "sha256": "b1ac1f1d57390a0b79e44030660acb96867b9c40858ee8cd1af50e699969a231",
+          "claim": "Regression tests cover pending, committed, rejected, and retry route-first directory navigation."
+        },
+        {
+          "path": "frontend/src/App.vue",
+          "sha256": "f415162132ed860ac7f6863f3ba51d77964757ffcb98b705b7c943ed89df853f",
+          "claim": "Keyed application route-transition boundary bound for the observed lifecycle context."
+        },
+        {
+          "path": "frontend/src/components/UserManager.vue",
+          "sha256": "6f59e0a3f5d776892b535620943218bf40e52bc26ed05ec11b04a8d4058da078",
+          "claim": "Directory mount and user-list request boundary bound for the observed lifecycle context."
+        }
+      ]
+    },
     "stage8a-execution-receipts": {
       "id": "stage8a-execution-receipts",
       "kind": "curated-evidence-only",
       "path": "docs/uiux-stage8-acceptance-rollout/STAGE8A_EXECUTION_RECEIPTS.json",
-      "claim": "Two bounded local synthetic browser slices and one live editable Figma reference; none is full Stage 8 acceptance or release authority."
+      "claim": "Three bounded local synthetic browser slices and one live editable Figma reference; none is full Stage 8 acceptance or release authority."
     },
     "stage3-evidence-manifest": {
       "id": "stage3-evidence-manifest",

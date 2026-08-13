@@ -29,6 +29,20 @@ router برای مدیر میانی چهار مسیر `/admin/channels`، `/admi
 deep-linkهای denied را با `router.replace({ name: 'admin' })` به `/admin` canonical می‌کند.
 این یک outcome کامپوننتی ثبت‌شده است؛ نه router-record redirect و نه forbidden recovery.
 
+## Route-first directory-transition source binding
+
+`31c69d5a5d2fb1e2c08d9647473d3612b9d85629` / tree
+`6b2a30464916f6d1734280852aeabb4c445e4551`، source/testهای route-first زیر را bind می‌کند:
+
+- `frontend/src/views/AdminView.vue` — `b69c3b6c1d34788449f40c1394dbc8981f63597044ad37c24268d76f5f385c0a`
+- `frontend/src/views/AdminView.test.ts` — `b1ac1f1d57390a0b79e44030660acb96867b9c40858ee8cd1af50e699969a231`
+- `frontend/src/App.vue` — `f415162132ed860ac7f6863f3ba51d77964757ffcb98b705b7c943ed89df853f`
+- `frontend/src/components/UserManager.vue` — `6f59e0a3f5d776892b535620943218bf40e52bc26ed05ec11b04a8d4058da078`
+
+این binding مستقل از snapshot تاریخی `7588d9c20b995244197d8de09392dd6a5f61b195` برای
+canonicalization مدیر میانی است و hashهای تاریخی آن را جایگزین نمی‌کند. فقط رفتار lifecycle
+گذار `/admin` به `/admin/users` و مرز mount directory را برای receipt محدود جدید توصیف می‌کند.
+
 ## What is validated by this correction
 
 - JSON schema 3 parse می‌شود.
@@ -36,7 +50,7 @@ deep-linkهای denied را با `router.replace({ name: 'admin' })` به `/admi
 - ۹ access profile دقیق تعریف شده و هر route برای هر profile یک outcome و `evidenceRefs` دارد.
 - تعداد واقعی outcomeهای موردانتظار ۲۷۰ است.
 - چهار component canonical outcome مدیر میانی به source/test `AdminView` متصل‌اند.
-- `executedFullMatrixCellCount=0` است؛ دو partial synthetic slice جداگانه ثبت شده‌اند اما
+- `executedFullMatrixCellCount=0` است؛ سه partial synthetic slice جداگانه ثبت شده‌اند اما
   به full matrix یا viewport/state/interaction/environment expansion افزوده نشده‌اند.
 - نقش‌های واقعی از contextهای customer/accountant/owner جدا شده‌اند.
 
@@ -54,12 +68,21 @@ deep-linkهای denied را با `router.replace({ name: 'admin' })` به `/admi
 - `npm run test:unit:run -- --no-file-parallelism --maxWorkers=1 src/components/UserManager.test.ts src/components/PublicProfile.test.ts`:
   ۶۶/۶۶ pass؛ `npx vue-tsc --noEmit` و `npm run guard:ui` نیز pass.
 
-[STAGE8A_EXECUTION_RECEIPTS.json](STAGE8A_EXECUTION_RECEIPTS.json) دو slice redacted را
-ثبت می‌کند: ۴۸/۴۸ scenario cell دسترسی/shell در `390×844` و recovery محدود directory/profile
-در viewportهای `360/390/414/430/1440`. slice دوم فقط evidence تاریخی source `4415b743` است؛
-پس از آن یک تغییر محلی P1 ایجاد شده و validation آن pending است. خروجی‌های browser فقط
+[STAGE8A_EXECUTION_RECEIPTS.json](STAGE8A_EXECUTION_RECEIPTS.json) سه slice redacted را
+ثبت می‌کند: ۴۸/۴۸ scenario cell دسترسی/shell در `390×844`، recovery محدود directory/profile
+در viewportهای `360/390/414/430/1440`، و slice رفتاری route-first در source `31c69d5a`.
+slice دوم فقط evidence تاریخی source `4415b743` است؛ پس از آن یک تغییر محلی P1 ایجاد شده و
+validation آن pending است. slice جدید با delayed response `550ms`، چهار scenario (pointer/Enter در ۳۹۰، pointer در ۱۴۴۰،
+و deep-link مدیر میانی) و ۳۳ assertion اجرا شد: هر سه گذار directory دقیقاً یک `GET /api/users/`
+با ۲۰۰ کامل/non-aborted، صفر requestfailed/`ERR_ABORTED`، و حداکثر یک UserManager/list مرئی
+داشتند؛ deep-link denied به `/admin` canonical شد و CommodityManager یا commodity API نداشت.
+Telegram probe محلی intercept شد و هیچ external transport مشاهده نشد. خروجی‌های browser فقط
 local/synthetic بودند و artifact یا diagnostic خام در repository نگه‌داری نشده است. این receiptها
-هیچ سلول full Stage 8 را pass نمی‌کنند و دربارهٔ working tree جاری ادعایی ندارند.
+هیچ سلول full Stage 8 را pass نمی‌کنند و پذیرش کامل یا aesthetic sign-off ایجاد نمی‌کنند.
+
+- focused route-first validation: ۵۵/۵۵ test pass.
+- سپس full serial validation: ۱۵۴ فایل / ۱۷۴۶ test pass؛ production build، type check،
+  `guard:ui` و diff check نیز pass.
 
 ## Live Figma reference, separately bounded
 

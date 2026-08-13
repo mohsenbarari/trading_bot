@@ -3,7 +3,7 @@
   "stage": "8A",
   "status": "curated-evidence-only-not-full-acceptance",
   "branch": "condidate/webapp-ui-ux-redesign-v2",
-  "claimBoundary": "These are two bounded local synthetic-browser receipts and one live editable Figma reference. They do not create full Stage 8 acceptance, owner aesthetic sign-off, a visual freeze, merge authority, staging authority, Sites authority, or production authority.",
+  "claimBoundary": "These are three bounded local synthetic-browser receipts and one live editable Figma reference. They do not create full Stage 8 acceptance, owner aesthetic sign-off, a visual freeze, merge authority, staging authority, Sites authority, or production authority.",
   "retention": "Only redacted counts, content hashes, and source revisions are retained. Original local browser artifacts, screenshots, diagnostics, and network traces are intentionally not stored in this repository.",
   "receipts": [
     {
@@ -117,6 +117,101 @@
         "The evidence is synthetic and local; screenshot assets and raw diagnostics are not retained here.",
         "Subsequent local P1 validation is pending; do not use this historical receipt as final product evidence for the current working tree.",
         "It is not a visual freeze, owner aesthetic sign-off, live deployment, or release gate."
+      ]
+    },
+    {
+      "id": "stage8a-admin-directory-route-first-transition",
+      "executedOn": "2026-08-13",
+      "status": "passed-bounded-route-transition-slice-not-acceptance",
+      "sourceSnapshot": {
+        "commit": "31c69d5a5d2fb1e2c08d9647473d3612b9d85629",
+        "tree": "6b2a30464916f6d1734280852aeabb4c445e4551",
+        "runtimeSourceHashes": {
+          "frontend/src/views/AdminView.vue": "b69c3b6c1d34788449f40c1394dbc8981f63597044ad37c24268d76f5f385c0a",
+          "frontend/src/App.vue": "f415162132ed860ac7f6863f3ba51d77964757ffcb98b705b7c943ed89df853f",
+          "frontend/src/components/UserManager.vue": "6f59e0a3f5d776892b535620943218bf40e52bc26ed05ec11b04a8d4058da078"
+        },
+        "testSourceHashes": {
+          "frontend/src/views/AdminView.test.ts": "b1ac1f1d57390a0b79e44030660acb96867b9c40858ee8cd1af50e699969a231"
+        }
+      },
+      "harnessSha256": "21f27b1714980bdea6f93323c6749523a5040624c6a22c715df0506c581d69b0",
+      "receiptSha256": "bac5adcae26c4b99be474382196a3fe1c7c82535224fec76e343c4d2fa224b38",
+      "bindingSha256": "77278478c214dca632f4b9cf294afed3dcc7b54e8d7e5eb22f0036d89ad35a63",
+      "scope": {
+        "environment": "local-synthetic-production-browser",
+        "delayedUserListResponseMs": 550,
+        "scenarios": [
+          {
+            "id": "directory-pointer-390",
+            "trigger": "pointer",
+            "viewportWidthCssPx": 390
+          },
+          {
+            "id": "directory-keyboard-enter-390",
+            "trigger": "keyboard-enter",
+            "viewportWidthCssPx": 390
+          },
+          {
+            "id": "directory-pointer-1440",
+            "trigger": "pointer",
+            "viewportWidthCssPx": 1440
+          },
+          {
+            "id": "middle-admin-denied-commodities-390",
+            "initialPath": "/admin/commodities",
+            "viewportWidthCssPx": 390
+          }
+        ],
+        "executedScenarioCount": 4,
+        "assertionCount": 33
+      },
+      "result": {
+        "passedScenarioCount": 4,
+        "directoryRouteTransition": {
+          "scenarioCount": 3,
+          "userListRequest": {
+            "method": "GET",
+            "path": "/api/users/",
+            "exactCompletedNonAbortedCountPerScenario": 1,
+            "status": 200,
+            "requestFailedCount": 0,
+            "errAbortedCount": 0
+          },
+          "outgoingRoot": {
+            "postCommitSampleCountRangePerDirectoryScenario": [
+              155,
+              158
+            ],
+            "maximumObservedUserManagerCount": 0
+          },
+          "maximumVisibleUserManagerOrDirectoryListCount": 1
+        },
+        "middleAdminDeniedCommodityDeepLink": {
+          "canonicalPath": "/admin",
+          "maximumObservedCommodityManagerCount": 0,
+          "commodityApiRequestCount": 0
+        },
+        "pageErrorCount": 0,
+        "httpStatusAtLeast400Count": 0,
+        "unexpectedConsoleCount": 0,
+        "telegramProbe": {
+          "interceptedLocally": true,
+          "externalTransportObserved": false
+        },
+        "validation": {
+          "focusedTests": "55/55 passed",
+          "fullSerialUnitTests": "154 files / 1746 tests passed",
+          "productionBuild": "passed",
+          "typeCheck": "passed",
+          "protectedUiGuard": "passed",
+          "diffCheck": "passed"
+        }
+      },
+      "limitations": [
+        "This is a four-scenario route-transition behavioral slice, not a full role-by-route matrix cell or full Stage 8 acceptance.",
+        "It does not expand or pass the required viewport, state, interaction, or environment dimensions.",
+        "It does not create owner aesthetic sign-off, a visual freeze, merge authority, Sites authority, staging authority, or production authority."
       ]
     }
   ],

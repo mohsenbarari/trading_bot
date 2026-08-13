@@ -2,7 +2,7 @@
 
 این سند برنامه است، نه دستور اجرا. هیچ staging یا productionای از روی آن شروع نمی‌شود.
 `ACCEPTANCE_MATRIX.json` اکنون ۲۷۰ outcome موردانتظار guard و چهار canonicalization
-کامپوننتی را رهگیری می‌کند. دو slice local/synthetic در
+کامپوننتی را رهگیری می‌کند. سه slice local/synthetic در
 `STAGE8A_EXECUTION_RECEIPTS.json` ثبت شده‌اند، اما هیچ‌کدام نتیجهٔ اجرای پذیرش تیمی یا
 authority عرضه نیستند.
 

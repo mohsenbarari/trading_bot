@@ -9,11 +9,12 @@
 - access-policy snapshot: `8eccdd2177ea5e2b21710b3a8863eace40092c35`
 - component canonicalization snapshot: `7588d9c20b995244197d8de09392dd6a5f61b195`
 - historical bounded visual-recovery source: `4415b7431a6b67965d24c44f6f9f0e59e48ed422` (subsequent local P1 validation pending)
+- current bounded route-transition source: `31c69d5a5d2fb1e2c08d9647473d3612b9d85629` (evidence-only)
 - authority: `stage8CompleteAuthority=false`
 - matrix status: `partial-browser-slice-executed-full-acceptance-pending`
 - expected-access coverage: ۳۰ مسیر × ۹ پروفایل دقیق = ۲۷۰ outcome صریح
 - full matrix execution: صفر سلول؛ viewport/state/interaction/environment هنوز فقط requirement هستند
-- partial synthetic evidence: یک slice دسترسی/shell با ۴۸/۴۸ scenario cell و یک slice محدود directory/profile ثبت شده‌اند؛ هیچ‌کدام به full matrix افزوده نمی‌شوند
+- partial synthetic evidence: یک slice دسترسی/shell با ۴۸/۴۸ scenario cell، یک slice تاریخی محدود directory/profile، و یک slice رفتاری route-transition با ۴/۴ scenario ثبت شده‌اند؛ هیچ‌کدام به full matrix افزوده نمی‌شوند
 - owner aesthetic acceptance: انجام نشده
 - merge: انجام نشده
 - production/staging/Sites: انجام نشده
@@ -37,7 +38,7 @@ guard فعلی علاوه بر نقش از `account_status`، `is_customer` و `
 ## شواهد محدود 8A
 
 [STAGE8A_EXECUTION_RECEIPTS.json](STAGE8A_EXECUTION_RECEIPTS.json) تنها count، hash و
-source-revisionهای redacted دو اجرای local/synthetic را نگه می‌دارد؛ screenshot، diagnostic،
+source-revisionهای redacted سه اجرای local/synthetic را نگه می‌دارد؛ screenshot، diagnostic،
 trace یا مسیر محلی در repository ذخیره نشده است.
 
 - slice دسترسی/shell در `390×844`: شش profile × هشت scenario، ۴۸/۴۸ cell و ۵۰ assertion؛
@@ -45,6 +46,10 @@ trace یا مسیر محلی در repository ذخیره نشده است.
 - slice بازیابی directory/profile در source تاریخی `4415b743`: مسیرهای `/profile`، `/users/:id`،
   `/admin/users` و `/admin/users/:id` در viewportهای محدود بررسی شده‌اند؛ این اجرا full
   role×route acceptance نیست و validation تغییر محلی P1 پس از آن pending است.
+- slice رفتاری route-first directory در source `31c69d5a`: چهار scenario local/synthetic production
+  browser (pointer و Enter در ۳۹۰، pointer در ۱۴۴۰، و deep-link مدیر میانی) با ۳۳ assertion ثبت
+  شده‌اند؛ ۳ گذار directory هرکدام دقیقاً یک `GET /api/users/` کامل و non-aborted داشته‌اند.
+  این اجرا full role×route acceptance نیست و به full matrix افزوده نمی‌شود.
 
 مرجع Figma زنده و قابل‌ویرایش در file `z8jgJxST4O2APzWnlyP9gv`، page `486:1455`، section
 `508:95` و frame `508:96` (`390×844`) ثبت شده است. audit محدود آن ۲۷ text با Vazirmatn،

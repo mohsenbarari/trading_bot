@@ -11,7 +11,11 @@ source اصلاح shared-dependency: `82cb016e`
 source canonicalization کامپوننتی: `7588d9c20b995244197d8de09392dd6a5f61b195`
 
 source تاریخی بازیابی محدود directory/profile: `4415b7431a6b67965d24c44f6f9f0e59e48ed422`
+
 (validation تغییر محلی P1 پس از آن pending است)
+
+source محدود route-first directory-transition: `31c69d5a5d2fb1e2c08d9647473d3612b9d85629`
+(evidence-only؛ بدون افزایش full matrix)
 
 ## ۱. مجوز و حد آن
 
@@ -49,14 +53,20 @@ requirement هستند و به cell-level evidence کامل متصل نشده‌
 - slice تاریخی directory/profile محلی و synthetic در source `4415b743`: `/profile`، `/users/:id`،
   `/admin/users` و `/admin/users/:id` در ۳۶۰/۳۹۰/۴۱۴/۴۳۰/۱۴۴۰ بررسی شدند؛ این مورد full
   role×route acceptance نیست و validation تغییر محلی P1 پس از آن pending است.
+- slice رفتاری route-first directory در source `31c69d5a`: چهار scenario local/synthetic production
+  browser (pointer و Enter در ۳۹۰، pointer در ۱۴۴۰، و `/admin/commodities` برای مدیر میانی) با
+  ۳۳ assertion اجرا شد. سه گذار directory هرکدام دقیقاً یک `GET /api/users/` با پاسخ ۲۰۰ کامل و
+  non-aborted، صفر requestfailed/`ERR_ABORTED` و حداکثر یک UserManager/list مرئی داشتند؛ deep-link
+  denied به `/admin` canonical شد و CommodityManager یا commodity API نداشت. Telegram probe محلی
+  intercept شد و external transport مشاهده نشد. این slice evidence-only است و cell پذیرش کامل نیست.
 - Figma: file `z8jgJxST4O2APzWnlyP9gv`، page `486:1455`، section `508:95`، frame `508:96`
   (`390×844`) و provenance `511:151`. audit محدود: ۲۷ text با Vazirmatn، ۷ instance UIUX،
   ۴۹ node token-bound و صفر phone/email/URL/query ناایمن؛ review بصری بدون crop/overlap.
 
-هر سه مورد live/editable یا local/synthetic هستند؛ screenshot/hash-freeze، runtime accessibility
-acceptance، sign-off زیبایی مالک، یا release authority نیستند. receipt/reference مبتنی بر `4415b743`
-تا validation P1 ادعایی دربارهٔ working tree جاری ندارند. artifact خام browser در repository ذخیره
-نشده و هیچ Sites action انجام نشده است.
+این سه receipt و مرجع Figma live/editable یا local/synthetic هستند؛ screenshot/hash-freeze، runtime
+accessibility acceptance، sign-off زیبایی مالک، یا release authority نیستند. receipt/reference مبتنی
+بر `4415b743` تا validation P1 ادعایی دربارهٔ working tree جاری ندارند. artifact خام browser در
+repository ذخیره نشده و هیچ Sites action انجام نشده است.
 
 ## ۴. رکورد تاریخی protected surfaces بازار و پیام‌رسان
 
@@ -82,7 +92,7 @@ Sites و production در این Stage شروع نشده‌اند.
 ## ۶. گیت بعدی (فنی و بصری)
 
 - ۲۷۰ نتیجهٔ موردانتظار مسیر×پروفایل به source متصل است؛
-- canonicalization مدیر میانی و دو slice محدود source-bound ثبت شده‌اند، اما full matrix همچنان صفر است؛
+- canonicalization مدیر میانی و سه slice محدود source-bound ثبت شده‌اند، اما full matrix همچنان صفر است؛
 - protected-surface hashهای تاریخی overwrite نشده‌اند؛
 - اجرای واقعی viewport/state/interaction/environment و sign-off زیبایی مالک هنوز pending است؛
 - عرضه فقط به‌صورت مدل تیمی و rollback-safe توصیف شده و شروع نشده است؛
