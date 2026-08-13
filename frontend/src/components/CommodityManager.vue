@@ -726,7 +726,6 @@ onUnmounted(() => {
                 </div>
               </template>
             </AppListItem>
-            <span class="alias-text">{{ alias.alias }}</span>
           </div>
         </div>
       </AppSectionCard>

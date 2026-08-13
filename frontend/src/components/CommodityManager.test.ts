@@ -193,6 +193,26 @@ describe('CommodityManager.vue', () => {
     disposeWrapper(wrapper)
   }, 15000)
 
+  it('renders each alias title once through its AppListItem without a duplicate detail text node', async () => {
+    const wrapper = await mountCommodityManager()
+    await flushPromises()
+
+    await wrapper.findAll('.list-item-btn')[0]!.trigger('click')
+    await flushPromises()
+
+    const aliasRows = wrapper.findAll('.alias-row')
+    expect(aliasRows).toHaveLength(2)
+    expect(aliasRows.map((row) => row.get('.ui-list-item__copy > strong').text())).toEqual(['امامی', 'سکه جدید'])
+    for (const row of aliasRows) {
+      const aliasTitle = row.get('.ui-list-item__copy > strong').text()
+      expect(row.findAll('.ui-list-item__copy > strong')).toHaveLength(1)
+      expect(row.text().split(aliasTitle)).toHaveLength(2)
+      expect(row.find('.alias-text').exists()).toBe(false)
+    }
+
+    disposeWrapper(wrapper)
+  })
+
   it('adds a commodity with aliases and refreshes the list', async () => {
     const wrapper = await mountCommodityManager()
     await flushPromises()
@@ -274,9 +294,9 @@ describe('CommodityManager.vue', () => {
     await flushPromises()
     await confirmBodyDialog()
 
-    const aliasTexts = wrapper.findAll('.alias-text').map((node) => node.text())
-    expect(aliasTexts).not.toContain('بهار آزادی')
-    expect(aliasTexts).toContain('طرح قدیم')
+    const aliasTitles = wrapper.findAll('.alias-row .ui-list-item__copy > strong').map((node) => node.text())
+    expect(aliasTitles).not.toContain('بهار آزادی')
+    expect(aliasTitles).toContain('طرح قدیم')
 
     disposeWrapper(wrapper)
   })
@@ -530,7 +550,7 @@ describe('CommodityManager.vue', () => {
 
     await confirmBodyDialog()
     expect(document.body.querySelector('.ui-confirm-dialog')).toBeNull()
-    expect(wrapper.findAll('.alias-text').map((node) => node.text())).not.toContain('بهار جدید')
+    expect(wrapper.findAll('.alias-row .ui-list-item__copy > strong').map((node) => node.text())).not.toContain('بهار جدید')
 
     disposeWrapper(wrapper)
   })
