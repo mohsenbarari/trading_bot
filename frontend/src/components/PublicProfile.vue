@@ -1776,7 +1776,7 @@ function handleHistoryPresetChipChange(value: string) {
 </script>
 
 <template>
-  <div class="card">
+  <div class="card public-profile-typography">
     <input ref="avatarInput" type="file" accept="image/*" class="hidden-avatar-input" @change="handleAvatarSelected" />
     <div class="header-row profile-header-row">
       <div class="header-spacer">
@@ -2412,6 +2412,11 @@ function handleHistoryPresetChipChange(value: string) {
 </template>
 
 <style scoped>
+.public-profile-typography {
+  font-family: Vazirmatn, Tahoma, Arial, sans-serif;
+  font-synthesis: none;
+}
+
 .loading-state, .error-state {
   text-align: center;
   padding: 40px;

@@ -200,6 +200,22 @@ describe('UserProfile.vue authoritative admin actions', () => {
     expect(reducedMotionRule).toContain('transition: none;')
   })
 
+  it('keeps admin-profile typography locally aligned with the Figma Persian card scale', () => {
+    expect(userProfileSource).toMatch(/<div class="card admin-user-profile">/)
+    expect(userProfileSource).toMatch(
+      /\.admin-user-profile\s*\{[\s\S]*?font-family:\s*Vazirmatn,\s*Tahoma,\s*Arial,\s*sans-serif;[\s\S]*?font-synthesis:\s*none;/,
+    )
+    expect(userProfileSource).toMatch(
+      /\.value\.code\s*\{[\s\S]*?direction:\s*ltr;[\s\S]*?font-family:\s*var\(--ds-font-mono\);/,
+    )
+    expect(userProfileSource).toMatch(
+      /\.usage-ratio\s*\{[\s\S]*?font-family:\s*'Vazirmatn',\s*tahoma,\s*sans-serif;[\s\S]*?direction:\s*ltr;/,
+    )
+    expect(userProfileSource).toMatch(
+      /\.countdown-value\s*\{[\s\S]*?font-family:\s*'Vazirmatn',\s*var\(--ds-font-mono\);[\s\S]*?direction:\s*ltr;/,
+    )
+  })
+
   it('renders admin chrome with shared ui action cards and form primitives', async () => {
     const wrapper = await mountProfile(makeUser())
     expect(wrapper.get('.settings-btn').classes()).toContain('ui-action-card')

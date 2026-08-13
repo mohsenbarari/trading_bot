@@ -1946,6 +1946,8 @@ async function confirmPendingAction() {
   display: flex;
   flex-direction: column;
   gap: var(--ds-section-gap);
+  font-family: Vazirmatn, Tahoma, Arial, sans-serif;
+  font-synthesis: none;
 }
 .admin-user-profile > .header-row {
   padding: 0 0 0.25rem;

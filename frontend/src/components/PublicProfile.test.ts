@@ -150,6 +150,17 @@ describe('PublicProfile.vue', () => {
     expect(publicProfileSource).toMatch(/\.profile-header-row\s*>\s*\*\s*\{\s*min-width:\s*0;/)
   })
 
+  it('keeps public-profile typography locally aligned with the Figma Persian card scale', () => {
+    expect(publicProfileSource).toMatch(/<div class="card public-profile-typography">/)
+    expect(publicProfileSource).toMatch(
+      /\.public-profile-typography\s*\{[\s\S]*?font-family:\s*Vazirmatn,\s*Tahoma,\s*Arial,\s*sans-serif;[\s\S]*?font-synthesis:\s*none;/,
+    )
+    expect(publicProfileSource).toMatch(/<span class="project-user-mobile" dir="ltr">/)
+    expect(publicProfileSource).toMatch(
+      /\.project-user-mobile\s*\{[\s\S]*?direction:\s*ltr;[\s\S]*?text-align:\s*left;/,
+    )
+  })
+
   it('reserves a visible 44px back-navigation target', () => {
     const backRule = publicProfileSource.match(/\.profile-nav-back\s*\{([\s\S]*?)\n\}/)?.[1]
 
