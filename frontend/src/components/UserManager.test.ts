@@ -165,7 +165,7 @@ describe('UserManager.vue', () => {
       /@container user-directory \(max-width:\s*34rem\)\s*\{[\s\S]*?grid-template-columns:\s*44px minmax\(0, 1fr\);[\s\S]*?grid-template-areas:\s*'leading copy'\s*'leading trailing';/,
     )
     expect(userManagerSource).toMatch(
-      /@supports not \(container-type:\s*inline-size\)\s*\{[\s\S]*?grid-template-areas:\s*'leading copy'\s*'leading trailing';/,
+      /@supports not \(container-type:\s*inline-size\)\s*\{[\s\S]*?@media \(max-width:\s*480px\)\s*\{[\s\S]*?grid-template-areas:\s*'leading copy'\s*'leading trailing';/,
     )
     expect(userManagerSource).toMatch(
       /\.user-item :deep\(\.ui-list-item__copy > span\),\s*\.user-name\s*\{[\s\S]*?text-overflow:\s*ellipsis;[\s\S]*?white-space:\s*nowrap;/,
