@@ -324,6 +324,9 @@ onUnmounted(() => {
   flex-direction: column;
   gap: 1rem;
   min-width: 0;
+  /* Local bridge to the Figma Persian type scale; do not widen V2 scope. */
+  font-family: Vazirmatn, Tahoma, Arial, sans-serif;
+  font-synthesis: none;
 }
 
 .user-search-form {
@@ -436,8 +439,9 @@ onUnmounted(() => {
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--ds-text-primary);
-  font-size: 0.95rem;
-  font-weight: 700;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 24px;
 }
 
 .user-relation-tags {

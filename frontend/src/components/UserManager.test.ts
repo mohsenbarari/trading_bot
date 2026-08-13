@@ -172,6 +172,18 @@ describe('UserManager.vue', () => {
     )
   })
 
+  it('keeps the directory typography locally aligned with the Figma Persian card scale', () => {
+    expect(userManagerSource).toMatch(
+      /\.user-manager\s*\{[\s\S]*?font-family:\s*Vazirmatn,\s*Tahoma,\s*Arial,\s*sans-serif;[\s\S]*?font-synthesis:\s*none;/,
+    )
+    expect(userManagerSource).toMatch(
+      /\.user-item :deep\(\.ui-list-item__copy > span\)\s*\{[\s\S]*?font-family:\s*var\(--ds-font-mono\);/,
+    )
+    expect(userManagerSource).toMatch(
+      /\.user-name\s*\{[\s\S]*?font-size:\s*14px;[\s\S]*?font-weight:\s*600;[\s\S]*?line-height:\s*24px;/,
+    )
+  })
+
   it('clears a committed search only from the explicit clear action and reloads the base list', async () => {
     userManagerMocks.apiFetchMock
       .mockResolvedValueOnce(makeJsonResponse([makeUser({ account_name: 'base-user' })]))
