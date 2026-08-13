@@ -1012,6 +1012,7 @@ watch(
   color: var(--ds-text-primary);
   font-size: var(--ds-font-sm);
   font-weight: 900;
+  overflow-wrap: anywhere;
 }
 
 .session-meta,

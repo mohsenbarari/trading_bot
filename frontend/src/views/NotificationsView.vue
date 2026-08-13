@@ -711,6 +711,7 @@ onMounted(async () => {
   font-size: var(--ds-font-md);
   font-weight: 700;
   color: var(--ds-text-primary);
+  overflow-wrap: anywhere;
 }
 
 .notif-text {
@@ -718,6 +719,7 @@ onMounted(async () => {
   font-size: var(--ds-font-sm);
   color: var(--ds-text-secondary);
   line-height: 1.5;
+  overflow-wrap: anywhere;
   white-space: pre-line;
   unicode-bidi: plaintext;
 }
@@ -792,6 +794,7 @@ onMounted(async () => {
   font-size: var(--ds-font-xs);
   font-weight: 700;
   color: var(--ds-text-primary);
+  overflow-wrap: anywhere;
 }
 
 .notif-line-separator {
@@ -804,6 +807,7 @@ onMounted(async () => {
   min-width: 0;
   line-height: 1.45;
   color: var(--ds-text-secondary);
+  overflow-wrap: anywhere;
 }
 
 .notif-line-value {

@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { flushPromises, mount } from '@vue/test-utils'
@@ -437,6 +439,60 @@ describe('NotificationsView.vue', () => {
 
     await wrapper.get('.notif-item').trigger('click')
     expect(routerPushMock).not.toHaveBeenCalled()
+  })
+
+  it('renders unbroken synthetic notification text in plain and structured local targets', async () => {
+    const unbrokenText = `token-${'x'.repeat(384)}`
+    const tradeBody = [unbrokenText, `${unbrokenText}: ${unbrokenText}`].join('\n')
+    const store = useNotificationStore()
+    store.appNotifications = [
+      {
+        id: 81,
+        title: `عنوان-${unbrokenText}`,
+        body: unbrokenText,
+        content: unbrokenText,
+        message: unbrokenText,
+        level: 'info',
+        category: 'system',
+        is_read: true,
+      },
+      {
+        id: 82,
+        title: 'اعلان معامله',
+        body: tradeBody,
+        content: tradeBody,
+        message: tradeBody,
+        level: 'info',
+        category: 'trade',
+        is_read: true,
+      },
+    ]
+    vi.spyOn(store, 'openNotificationCenter').mockResolvedValue()
+
+    const wrapper = mount(NotificationsView)
+    await flushPromises()
+
+    await wrapper.find('.notification-category-tabs').findAll('[role="tab"]')[0]!.trigger('click')
+    expect(wrapper.get('.notif-line-text').text()).toBe(unbrokenText)
+    expect(wrapper.get('.notif-line-label').text()).toBe(unbrokenText)
+    expect(wrapper.get('.notif-line-value').text()).toBe(unbrokenText)
+
+    await wrapper.find('.notification-category-tabs').findAll('[role="tab"]')[1]!.trigger('click')
+    expect(wrapper.get('.notif-title').text()).toBe(`عنوان-${unbrokenText}`)
+    expect(wrapper.get('.notif-text').text()).toBe(unbrokenText)
+  })
+
+  it('keeps long-text wrapping contracts scoped to notification content', () => {
+    const source = readFileSync(resolve(process.cwd(), 'src/views/NotificationsView.vue'), 'utf8')
+    const styleSource = source.slice(source.indexOf('<style scoped>'))
+
+    expect(styleSource).toMatch(/\.notif-title\s*\{[^}]*overflow-wrap:\s*anywhere\s*;/)
+    expect(styleSource).toMatch(/\.notif-text\s*\{[^}]*overflow-wrap:\s*anywhere\s*;/)
+    expect(styleSource).toMatch(/\.notif-line-label\s*\{[^}]*overflow-wrap:\s*anywhere\s*;/)
+    expect(styleSource).toMatch(
+      /\.notif-line-value,\s*\.notif-line-text\s*\{[^}]*overflow-wrap:\s*anywhere\s*;/,
+    )
+    expect(styleSource).not.toMatch(/word-break:\s*break-all\s*;/)
   })
 
   it('fails closed for external, sensitive, and unmatched notification routes', async () => {

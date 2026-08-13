@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { currentUserSummary } from '../utils/currentUser'
@@ -181,6 +183,30 @@ describe('SettingsView.vue', () => {
     expect(wrapper.text()).not.toContain('foreign')
     expect(wrapper.text()).not.toContain('iran')
   }, 15_000)
+
+  it('renders an unbroken synthetic session name without changing its contents', async () => {
+    const unbrokenDeviceName = 'x'.repeat(255)
+    settingsViewMocks.apiFetchMock.mockImplementation(async (path: string) => {
+      if (path === '/api/auth/me') return responseOf(authoritativeUser())
+      if (path === '/api/sessions/active') {
+        return responseOf([{ ...sessionsFixture[0], device_name: unbrokenDeviceName }])
+      }
+      return responseOf({})
+    })
+
+    const wrapper = await mountSettingsView()
+
+    expect(wrapper.findAll('.session-name')).toHaveLength(1)
+    expect(wrapper.get('.session-name').text()).toBe(unbrokenDeviceName)
+  })
+
+  it('keeps the session-name wrapping contract local to Settings', () => {
+    const source = readFileSync(resolve(process.cwd(), 'src/views/SettingsView.vue'), 'utf8')
+    const styleSource = source.slice(source.indexOf('<style scoped>'))
+
+    expect(styleSource).toMatch(/\.session-name\s*\{[^}]*overflow-wrap:\s*anywhere\s*;/)
+    expect(styleSource).not.toMatch(/word-break:\s*break-all\s*;/)
+  })
 
   it('renders only Storage on its canonical route without loading sessions or Telegram', async () => {
     const wrapper = await mountSettingsView('account-storage')
