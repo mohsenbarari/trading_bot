@@ -2,15 +2,21 @@
 
 تاریخ: ۲۰۲۶-۰۸-۱۳
 
-وضعیت: **`stage8_expected_access_traceability_draft_no_executed_acceptance_no_production`**
+وضعیت: **`stage8_partial_synthetic_browser_slices_evidence_only_no_full_acceptance_no_production`**
 
 شاخه: `condidate/webapp-ui-ux-redesign-v2`
 
-آخرین source اصلاح shared-dependency: `82cb016e`
+source اصلاح shared-dependency: `82cb016e`
+
+source canonicalization کامپوننتی: `7588d9c20b995244197d8de09392dd6a5f61b195`
+
+source تاریخی بازیابی محدود directory/profile: `4415b7431a6b67965d24c44f6f9f0e59e48ed422`
+(validation تغییر محلی P1 پس از آن pending است)
 
 ## ۱. مجوز و حد آن
 
-دستور مالک برای ادامهٔ Stage 8، نوشتن رهگیری دسترسی موردانتظار، بازخوانی freeze بازار/پیام‌رسان، و مدل عرضهٔ محدود تیمی را مجاز کرد.
+دستور مالک برای ادامهٔ Stage 8، یکپارچگی و زیباسازی UI/UX با کنترل ایمنی، و ثبت رهگیری
+دسترسی/شواهد محدود را مجاز کرد.
 
 این مجوز **merge به main، staging deploy، production deploy، یا Sites محصول** نیست.
 
@@ -28,9 +34,31 @@
 - تعامل: touch، keyboard، zoom، reduced-motion
 - محیط هدف بعدی: مرورگر موبایل، PWA، Telegram WebView غیرپیام‌رسان
 
-نسخهٔ ۲ فقط ۳۰ × ۹ = ۲۷۰ نتیجهٔ normal-case دسترسی را از source رهگیری می‌کند. تعداد سلول‌های پذیرش کامل اجراشده صفر است؛ viewport، state، interaction و environment هنوز requirement هستند و به cell-level evidence متصل نشده‌اند. بازار/پیام‌رسان فقط freeze hash دارند، نه redesign.
+نسخهٔ ۳، ۳۰ × ۹ = ۲۷۰ نتیجهٔ normal-case router/guard را از source رهگیری می‌کند و چهار
+deep-link denied مدیر میانی (`/admin/channels`، `/admin/commodities`، `/admin/messages` و
+`/admin/system`) را نیز به canonicalization کامپوننتی `AdminView → /admin` متصل می‌کند.
+تعداد سلول‌های پذیرش کامل اجراشده صفر است؛ viewport، state، interaction و environment هنوز
+requirement هستند و به cell-level evidence کامل متصل نشده‌اند. بازار/پیام‌رسان redesign نشده‌اند.
 
-## ۳. Visual freeze بازار و پیام‌رسان
+## ۳. شواهد محدود 8A و مرجع طراحی
+
+منبع redacted: `docs/uiux-stage8-acceptance-rollout/STAGE8A_EXECUTION_RECEIPTS.json`
+
+- slice دسترسی/shell محلی و synthetic در `390×844`: شش profile × هشت scenario، ۴۸/۴۸ cell و
+  ۵۰ assertion؛ این مورد full matrix نیست و به `executedFullMatrixCellCount` افزوده نمی‌شود.
+- slice تاریخی directory/profile محلی و synthetic در source `4415b743`: `/profile`، `/users/:id`،
+  `/admin/users` و `/admin/users/:id` در ۳۶۰/۳۹۰/۴۱۴/۴۳۰/۱۴۴۰ بررسی شدند؛ این مورد full
+  role×route acceptance نیست و validation تغییر محلی P1 پس از آن pending است.
+- Figma: file `z8jgJxST4O2APzWnlyP9gv`، page `486:1455`، section `508:95`، frame `508:96`
+  (`390×844`) و provenance `511:151`. audit محدود: ۲۷ text با Vazirmatn، ۷ instance UIUX،
+  ۴۹ node token-bound و صفر phone/email/URL/query ناایمن؛ review بصری بدون crop/overlap.
+
+هر سه مورد live/editable یا local/synthetic هستند؛ screenshot/hash-freeze، runtime accessibility
+acceptance، sign-off زیبایی مالک، یا release authority نیستند. receipt/reference مبتنی بر `4415b743`
+تا validation P1 ادعایی دربارهٔ working tree جاری ندارند. artifact خام browser در repository ذخیره
+نشده و هیچ Sites action انجام نشده است.
+
+## ۴. رکورد تاریخی protected surfaces بازار و پیام‌رسان
 
 پس از Stage 7 source، `guard:ui` دوباره pass شد و hashها با checkpoint Stage 4/6 یکی است:
 
@@ -40,21 +68,22 @@
 - AdminMessages: `5572589b83a8a07776d5b983777a14a91e2104f9577fa76960df5a54562a431a`
 - TradingSettings: `509dd32235e1cb98aa164940cf7722604f16b6518f7387699554bf3a828ecfaa`
 
-این hashها بازنویسی نشده‌اند.
+این hashها از رکورد قبلی‌اند و در این update بازنویسی یا freeze جدیدی ساخته نشده است.
 
-## ۴. مدل عرضه
+## ۵. مدل عرضه
 
-1. فعال‌سازی محدود روی همین branch برای تیم/نقش آزمایشی؛
-2. مشاهدهٔ خطا و بازخورد چند روزه **بدون** production؛
+1. تکمیل evidence قابل‌تکرار role×route و dimensionهای لازم روی همین branch؛
+2. مشاهدهٔ خطا و بازخورد چند روزه فقط پس از اجازهٔ جداگانه و **بدون** production؛
 3. گسترش مرحله‌ای فقط پس از اجازهٔ صریح مالک؛
 4. حذف adapter قدیمی فقط پس از rollback اثبات‌شده.
 
 Sites و production در این Stage شروع نشده‌اند.
 
-## ۵. گیت بعدی (فنی و بصری)
+## ۶. گیت بعدی (فنی و بصری)
 
 - ۲۷۰ نتیجهٔ موردانتظار مسیر×پروفایل به source متصل است؛
-- freeze بازار/پیام‌رسان با hash زنده تأیید شد؛
+- canonicalization مدیر میانی و دو slice محدود source-bound ثبت شده‌اند، اما full matrix همچنان صفر است؛
+- protected-surface hashهای تاریخی overwrite نشده‌اند؛
 - اجرای واقعی viewport/state/interaction/environment و sign-off زیبایی مالک هنوز pending است؛
 - عرضه فقط به‌صورت مدل تیمی و rollback-safe توصیف شده و شروع نشده است؛
-- merge/production انجام نشده و مجاز نیست تا مالک جداگانه بگوید.
+- merge/staging/production/Sites انجام نشده و مجاز نیست تا مالک جداگانه بگوید.

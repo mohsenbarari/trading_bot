@@ -1,0 +1,154 @@
+{
+  "schemaVersion": 1,
+  "stage": "8A",
+  "status": "curated-evidence-only-not-full-acceptance",
+  "branch": "condidate/webapp-ui-ux-redesign-v2",
+  "claimBoundary": "These are two bounded local synthetic-browser receipts and one live editable Figma reference. They do not create full Stage 8 acceptance, owner aesthetic sign-off, a visual freeze, merge authority, staging authority, Sites authority, or production authority.",
+  "retention": "Only redacted counts, content hashes, and source revisions are retained. Original local browser artifacts, screenshots, diagnostics, and network traces are intentionally not stored in this repository.",
+  "receipts": [
+    {
+      "id": "stage8a-access-shell-390",
+      "executedOn": "2026-08-13",
+      "status": "passed-bounded-slice-not-acceptance",
+      "sourceSnapshot": {
+        "commit": "7588d9c20b995244197d8de09392dd6a5f61b195",
+        "tree": "10d0af9a9d9ecf54e359a9c61d6093e9ed955876",
+        "runtimeSourceBindingSha256": "e5aac257c5073f4e2381287d39ed161e3cf7e171d9e7a23ac04352ccc641f2c1"
+      },
+      "harnessSha256Prefix": "a9689965",
+      "metricsSha256Prefix": "0a50bb",
+      "bindingSha256Prefix": "c453",
+      "scope": {
+        "environment": "local-synthetic-browser",
+        "viewportCssPx": {
+          "width": 390,
+          "height": 844
+        },
+        "accessProfiles": [
+          "guest",
+          "member",
+          "customer",
+          "accountant",
+          "middle-admin",
+          "senior-admin"
+        ],
+        "routeScenarios": [
+          "login",
+          "home",
+          "market",
+          "messenger",
+          "operations-customers",
+          "settings",
+          "admin",
+          "admin-messages"
+        ],
+        "executedScenarioCellCount": 48,
+        "assertionCount": 50
+      },
+      "result": {
+        "passedScenarioCellCount": 48,
+        "unexpectedDiagnostics": 0,
+        "unexpectedMutationTraffic": 0,
+        "blockedExternalProbeCount": 48
+      },
+      "limitations": [
+        "Six profiles and eight scenarios at one synthetic local viewport do not equal the thirty-route by nine-profile matrix.",
+        "It does not pass or expand the required state, interaction, environment, or full responsive dimensions.",
+        "It does not supply live backend, PWA field, Telegram WebView, owner aesthetic, or deployment evidence."
+      ]
+    },
+    {
+      "id": "stage8a-profile-admin-directory-recovery",
+      "executedOn": "2026-08-13",
+      "status": "historical-passed-bounded-slice-subsequent-local-p1-validation-pending",
+      "sourceSnapshot": {
+        "commit": "4415b7431a6b67965d24c44f6f9f0e59e48ed422",
+        "tree": "fd2dcf3eaea22131b0bfd913c550d49f1aea2645"
+      },
+      "currentWorkingTreeBoundary": "A subsequent local P1 change exists outside this historical source snapshot. Its validation is pending; this receipt does not assert current-working-tree behavior.",
+      "harnessSha256": "d302153fc8cf132304c3e1703315f4e16d2c0fade10fe1300c0b9fa18781b70a",
+      "metricsSha256": "29985761d7e4ca3b6e1018b529567d37243e7e925c673d28304dc081c06bdf5e",
+      "bindingSha256": "4afeea19cac25d1c26c47de5c3f49bc235809ca4c9ab9fd046dc4538cd071e94",
+      "scope": {
+        "environment": "local-synthetic-browser",
+        "routes": [
+          "/profile",
+          "/users/:id",
+          "/admin/users",
+          "/admin/users/:id"
+        ],
+        "viewportsCssPx": [
+          360,
+          390,
+          414,
+          430,
+          1440
+        ],
+        "syntheticScreenshotCount": 17
+      },
+      "result": {
+        "unexpectedDiagnosticsOrNetworkFailures": 0,
+        "mobileHorizontalOverflowObserved": false,
+        "denseDirectory": {
+          "minimumAvailableCopyWidthCssPx": 220.8125,
+          "maximumObservedRowBlockHeightCssPx": 155.625,
+          "singleLineTitleMinimumAvailableWidthCssPx": 25.84,
+          "singleLineDescriptionMinimumAvailableWidthCssPx": 20.39
+        },
+        "desktopBaseline": {
+          "viewportCssPx": 1440,
+          "byteIdenticalToPrepatchBaseline": true,
+          "sha256": "01dfa55acda9dc21ee6ac91bcf4f071f3351fcf0fe2f0d24f6387440ef36e47f"
+        },
+        "focusedChecks": {
+          "unitTests": "66/66 passed",
+          "typeCheck": "passed",
+          "protectedUiGuard": "passed"
+        },
+        "additionalFocusedChecks": [
+          "Help popover trigger received a keyboard-focus check.",
+          "Jalali arrow keyboard interaction changed the displayed date without mutation.",
+          "200% zoom and reduced-motion checks reported no focused overflow or unexpected animation.",
+          "Synthetic 500/404 recovery was captured with safe content."
+        ]
+      },
+      "limitations": [
+        "This is a focused directory/profile visual and accessibility recovery slice, not a full role-by-route execution.",
+        "The evidence is synthetic and local; screenshot assets and raw diagnostics are not retained here.",
+        "Subsequent local P1 validation is pending; do not use this historical receipt as final product evidence for the current working tree.",
+        "It is not a visual freeze, owner aesthetic sign-off, live deployment, or release gate."
+      ]
+    }
+  ],
+  "liveFigmaReference": {
+    "status": "reviewed-live-editable-reference-not-acceptance",
+    "fileKey": "z8jgJxST4O2APzWnlyP9gv",
+    "pageNodeId": "486:1455",
+    "sectionNodeId": "508:95",
+    "sectionName": "3 — Compact directory recovery · source 4415b743",
+    "referenceFrameNodeId": "508:96",
+    "referenceFrameCssPx": {
+      "width": 390,
+      "height": 844
+    },
+    "provenanceCardNodeId": "511:151",
+    "contentBoundary": "Synthetic content bound to historical source 4415b743; no sensitive raw data was used. A subsequent local P1 change requires separate validation before this reference can describe the current working tree.",
+    "review": {
+      "textNodeCount": 27,
+      "allTextUses": "Vazirmatn",
+      "linkedUiuxInstanceCount": 7,
+      "localTokenBoundNodeCount": 49,
+      "sensitiveContentScan": {
+        "phone": 0,
+        "email": 0,
+        "url": 0,
+        "unsafePublicProfileQuery": 0
+      },
+      "visualReview": "pass: no crop or overlap observed"
+    },
+    "limitations": [
+      "The section is live and editable, not a screenshot or hash-based freeze.",
+      "Its design review is not runtime accessibility evidence and does not create final Stage 8 acceptance."
+    ]
+  }
+}

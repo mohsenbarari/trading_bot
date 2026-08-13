@@ -1,7 +1,7 @@
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "stage": 8,
-  "status": "traceability-draft-expected-access-not-executed-acceptance",
+  "status": "partial-browser-slice-executed-full-acceptance-pending",
   "branch": "condidate/webapp-ui-ux-redesign-v2",
   "acceptanceAuthority": false,
   "sourceSnapshot": {
@@ -16,7 +16,15 @@
       "models/user.py": "f3cf8930175d5d7ea8d57bc063e3fc0f17f1bc6d8659d5cd8184246c774bb18b"
     }
   },
-  "claimBoundary": "This file enumerates normal-case expected route-guard outcomes from checked-in source. It is not a record of executing every role/route/viewport/state cell, not owner aesthetic acceptance, and not merge or deployment authority.",
+  "componentCanonicalizationSnapshot": {
+    "commit": "7588d9c20b995244197d8de09392dd6a5f61b195",
+    "tree": "10d0af9a9d9ecf54e359a9c61d6093e9ed955876",
+    "sourceHashes": {
+      "frontend/src/views/AdminView.vue": "a1f3e16dbc1957b61bc61a3bfea21fce27cf966cbf3cc268aaeb505d74b91323",
+      "frontend/src/views/AdminView.test.ts": "c4d72ba4a353390c95752788431efe6831fde7451830aeef7780b8bdeb62ab57"
+    }
+  },
+  "claimBoundary": "This file enumerates normal-case source-derived route and component canonicalization outcomes. The separately recorded partial synthetic browser slices do not execute every role/route/viewport/state cell, do not create owner aesthetic acceptance, and are not merge, staging, Sites, or production authority.",
   "dimensionCorrection": {
     "previousProblem": "The prior schema treated customer, accountant, and group-lead as UserRole values and attached every profile to every route without an expected outcome.",
     "currentModel": "Access profiles combine authentication, the persisted role, account status, and customer/accountant relationship flags because the route guard uses all of those inputs.",
@@ -41,10 +49,10 @@
     "guest has neither an access token nor a refresh token.",
     "authenticated profiles have a valid token and the exact active authoritative identity shown in accessProfiles.",
     "/api/auth/me authority lookup is ready when an access-specific guard needs it.",
-    "Parameterized route IDs are syntactically valid; component/API-level ownership and object authorization are outside this router-only matrix."
+    "Parameterized route IDs are syntactically valid; component/API-level ownership and object authorization are outside this route-level matrix except for the explicitly listed AdminView canonicalization outcomes."
   ],
   "acceptanceDimensions": {
-    "status": "requirements-only-not-expanded-or-verified-by-this-matrix",
+    "status": "requirements-not-expanded; limited synthetic browser slices are recorded separately and do not satisfy full-matrix acceptance",
     "viewports": {
       "mobile": [
         360,
@@ -80,21 +88,153 @@
       "pwa",
       "telegram-webview-non-messenger"
     ],
-    "executionEvidenceRefs": []
+    "executionEvidenceRefs": [
+      "stage8a-execution-receipts"
+    ]
   },
   "cellAccounting": {
     "routeCount": 30,
     "accessProfileCount": 9,
     "enumeratedExpectedAccessCells": 270,
     "viewportStateInteractionEnvironmentExpansionPerformed": false,
-    "executedFullMatrixCellCount": 0
+    "executedFullMatrixCellCount": 0,
+    "partialSyntheticBrowserSliceCount": 2,
+    "partialSyntheticBrowserScenarioCellCount": 48,
+    "partialSyntheticBrowserCellsCountTowardFullMatrix": false
   },
+  "partialSyntheticBrowserSlices": [
+    {
+      "id": "stage8a-access-shell-390",
+      "receiptId": "stage8a-access-shell-390",
+      "evidenceRef": "stage8a-execution-receipts",
+      "sourceCommit": "7588d9c20b995244197d8de09392dd6a5f61b195",
+      "scope": {
+        "environment": "local-synthetic-browser",
+        "viewportCssPx": {
+          "width": 390,
+          "height": 844
+        },
+        "accessProfileCount": 6,
+        "routeScenarioCount": 8,
+        "executedScenarioCellCount": 48,
+        "assertionCount": 50
+      },
+      "result": {
+        "passedScenarioCellCount": 48,
+        "unexpectedDiagnostics": 0,
+        "unexpectedMutationTraffic": 0,
+        "blockedExternalProbeCount": 48
+      },
+      "countsTowardFullMatrixAcceptance": false,
+      "limitations": [
+        "Synthetic local browser evidence only; it does not cover all nine profiles or all thirty routes.",
+        "It does not expand or pass the required viewport, state, interaction, or environment dimensions."
+      ]
+    },
+    {
+      "id": "stage8a-profile-admin-directory-recovery",
+      "receiptId": "stage8a-profile-admin-directory-recovery",
+      "evidenceRef": "stage8a-execution-receipts",
+    "sourceCommit": "4415b7431a6b67965d24c44f6f9f0e59e48ed422",
+    "evidenceStatus": "historical-source-bound; subsequent-local-p1-validation-pending",
+    "countsTowardFullMatrixAcceptance": false,
+    "scope": {
+        "environment": "local-synthetic-browser",
+        "routes": [
+          "/profile",
+          "/users/:id",
+          "/admin/users",
+          "/admin/users/:id"
+        ],
+        "viewportsCssPx": [
+          360,
+          390,
+          414,
+          430,
+          1440
+        ],
+        "syntheticScreenshotCount": 17
+      },
+      "result": {
+        "unexpectedDiagnosticsOrNetworkFailures": 0,
+        "countsTowardFullMatrixAcceptance": false
+      },
+      "limitations": [
+        "This is a focused visual and accessibility recovery slice, not a role-by-route execution of the full matrix.",
+        "The rendered evidence is local and synthetic; no screenshot asset or live deployment is stored or implied.",
+        "A subsequent local P1 change exists outside this source commit; its validation is pending, so this receipt makes no current-working-tree product claim."
+      ]
+    }
+  ],
+  "componentCanonicalOutcomes": [
+    {
+      "path": "/admin/channels",
+      "accessProfileId": "middle-admin",
+      "routerGuardOutcome": "render-route",
+      "componentOutcome": {
+        "kind": "redirect-component-canonical",
+        "targetName": "admin",
+        "targetPath": "/admin",
+        "component": "AdminView",
+        "evidenceRefs": [
+          "admin-view-runtime",
+          "admin-view-tests"
+        ]
+      }
+    },
+    {
+      "path": "/admin/commodities",
+      "accessProfileId": "middle-admin",
+      "routerGuardOutcome": "render-route",
+      "componentOutcome": {
+        "kind": "redirect-component-canonical",
+        "targetName": "admin",
+        "targetPath": "/admin",
+        "component": "AdminView",
+        "evidenceRefs": [
+          "admin-view-runtime",
+          "admin-view-tests"
+        ]
+      }
+    },
+    {
+      "path": "/admin/messages",
+      "accessProfileId": "middle-admin",
+      "routerGuardOutcome": "render-route",
+      "componentOutcome": {
+        "kind": "redirect-component-canonical",
+        "targetName": "admin",
+        "targetPath": "/admin",
+        "component": "AdminView",
+        "evidenceRefs": [
+          "admin-view-runtime",
+          "admin-view-tests"
+        ]
+      }
+    },
+    {
+      "path": "/admin/system",
+      "accessProfileId": "middle-admin",
+      "routerGuardOutcome": "render-route",
+      "componentOutcome": {
+        "kind": "redirect-component-canonical",
+        "targetName": "admin",
+        "targetPath": "/admin",
+        "component": "AdminView",
+        "evidenceRefs": [
+          "admin-view-runtime",
+          "admin-view-tests"
+        ]
+      }
+    }
+  ],
   "accessOutcomeDefinitions": {
     "render-route": "The guard calls next() for the stated normal-case profile.",
     "redirect-login": "The authenticated route stores a safe intended route and redirects to the named login route.",
     "redirect-home": "An authenticated visit to /login redirects to /.",
     "redirect-canonical": "The router record redirects to its named canonical route; the target guard still applies.",
-    "redirect-forbidden-recovery": "An authoritative access-specific denial redirects with the forbidden recovery outcome."
+    "redirect-forbidden-recovery": "An authoritative access-specific denial redirects with the forbidden recovery outcome.",
+    "redirect-component-canonical": "The router permits the route, then the named component canonicalizes a denied subsection to the stated target; this is neither a router-record redirect nor a forbidden recovery."
   },
   "accessProfiles": [
     {
@@ -281,6 +421,26 @@
       "path": "frontend/src/utils/auth.test.ts",
       "claim": "Guard policy tests for login, admin, market, owner, forbidden, and unavailable outcomes.",
       "sha256": "cbc773d2db0e82ab48b2ed79b544d85e646cda2f2fe1bcaa924eec68982fb8e6"
+    },
+    "admin-view-runtime": {
+      "id": "admin-view-runtime",
+      "kind": "runtime-source",
+      "path": "frontend/src/views/AdminView.vue",
+      "claim": "Middle-admin denied subsection canonicalization to the admin menu source.",
+      "sha256": "a1f3e16dbc1957b61bc61a3bfea21fce27cf966cbf3cc268aaeb505d74b91323"
+    },
+    "admin-view-tests": {
+      "id": "admin-view-tests",
+      "kind": "test-source",
+      "path": "frontend/src/views/AdminView.test.ts",
+      "claim": "Middle-admin denied deep-link canonicalization and no-forbidden-interior test source.",
+      "sha256": "c4d72ba4a353390c95752788431efe6831fde7451830aeef7780b8bdeb62ab57"
+    },
+    "stage8a-execution-receipts": {
+      "id": "stage8a-execution-receipts",
+      "kind": "curated-evidence-only",
+      "path": "docs/uiux-stage8-acceptance-rollout/STAGE8A_EXECUTION_RECEIPTS.json",
+      "claim": "Two bounded local synthetic browser slices and one live editable Figma reference; none is full Stage 8 acceptance or release authority."
     },
     "stage3-evidence-manifest": {
       "id": "stage3-evidence-manifest",

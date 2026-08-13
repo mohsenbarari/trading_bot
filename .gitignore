@@ -5,6 +5,9 @@ check-dns
 docs/*
 !docs/memory/
 !docs/memory/**
+!docs/uiux-stage8-acceptance-rollout/
+docs/uiux-stage8-acceptance-rollout/*
+!docs/uiux-stage8-acceptance-rollout/STAGE8A_EXECUTION_RECEIPTS.json
 !docs/AUTOMATED_TEST_CHECKLIST.md
 !docs/CROSS_SERVER_SYNC_PARITY_AUDIT_AND_ROADMAP.md
 !docs/MESSENGER_REFACTORING_ROADMAP.md

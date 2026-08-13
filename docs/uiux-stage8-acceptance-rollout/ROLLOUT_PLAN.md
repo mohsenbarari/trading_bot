@@ -1,8 +1,10 @@
 # مدل عرضهٔ محدود تیمی — Stage 8
 
 این سند برنامه است، نه دستور اجرا. هیچ staging یا productionای از روی آن شروع نمی‌شود.
-`ACCEPTANCE_MATRIX.json` نیز فقط draft رهگیری outcomeهای موردانتظار guard است و نتیجهٔ
-اجرای پذیرش تیمی محسوب نمی‌شود.
+`ACCEPTANCE_MATRIX.json` اکنون ۲۷۰ outcome موردانتظار guard و چهار canonicalization
+کامپوننتی را رهگیری می‌کند. دو slice local/synthetic در
+`STAGE8A_EXECUTION_RECEIPTS.json` ثبت شده‌اند، اما هیچ‌کدام نتیجهٔ اجرای پذیرش تیمی یا
+authority عرضه نیستند.
 
 ## پیش‌شرط تبدیل draft به پذیرش
 
@@ -10,14 +12,19 @@
   مشخص داشته باشد.
 - هر outcome اجراشده باید `evidenceRef` پایدار و source binding همان اجرا را ثبت کند.
 - ارجاع به evidence مراحل قبلی فقط traceability است و به‌تنهایی سلول Stage 8 را pass نمی‌کند.
+- evidence محدود 8A باید با شناسهٔ خود باقی بماند و هرگز به `executedFullMatrixCellCount` یا
+  sign-off مالک تبدیل نشود.
+- مرجع Figma زنده فقط برای هم‌راستایی design است؛ پیش از اجرای browser قابل‌تکرار، شاهد runtime
+  یا visual freeze نیست.
 - زیبایی و یکپارچگی UI/UX باید با sign-off صریح مالک ثبت شود؛ سبز بودن test فنی جای آن نیست.
 
 ## ترتیب
 
-1. **تیم آزمایشی روی همین branch**
-   فقط access profileهای داخلی مشخص‌شده توسط مالک. runtime محصول عمومی عوض نمی‌شود.
+1. **تکمیل evidence قابل‌تکرار روی همین branch**
+   اول ۳۰ مسیر × ۹ profile و dimensionهای لازم با receipt مستقل، سپس فقط access profileهای
+   داخلی مشخص‌شده توسط مالک. runtime محصول عمومی عوض نمی‌شود.
 
-2. **مشاهده چند روزه**
+2. **مشاهده چند روزه پس از اجازهٔ جداگانه**
    خطا، بازیابی، کیبورد، zoom، copy اطلاعات، و عدم نشت به بازار/پیام‌رسان ثبت می‌شود.
 
 3. **گسترش مرحله‌ای**
