@@ -15,6 +15,7 @@ function responseOf(payload: unknown, status = 200) {
 const adminViewMocks = vi.hoisted(() => ({
   route: {
     name: 'admin' as string,
+    path: '/admin',
     params: {} as Record<string, string>,
     query: {} as Record<string, string>,
   },
@@ -58,11 +59,23 @@ vi.mock('../composables/useBackButton', () => ({
 
 describe('AdminView.vue', () => {
   beforeEach(() => {
-    adminViewMocks.route.name = 'admin'
-    adminViewMocks.route.params = reactive({}) as Record<string, string>
-    adminViewMocks.route.query = reactive({}) as Record<string, string>
+    adminViewMocks.route = reactive({
+      name: 'admin' as string,
+      path: '/admin',
+      params: {} as Record<string, string>,
+      query: {} as Record<string, string>,
+    })
     adminViewMocks.routerPushMock.mockReset()
     adminViewMocks.routerReplaceMock.mockReset()
+    adminViewMocks.routerReplaceMock.mockImplementation((location: unknown) => {
+      const target = location as { name?: unknown }
+      if (target?.name !== 'admin') return
+
+      adminViewMocks.route.name = 'admin'
+      adminViewMocks.route.path = '/admin'
+      adminViewMocks.route.params = reactive({}) as Record<string, string>
+      adminViewMocks.route.query = reactive({}) as Record<string, string>
+    })
     adminViewMocks.pushBackStateMock.mockReset()
     adminViewMocks.popBackStateMock.mockReset()
     adminViewMocks.clearBackStackMock.mockReset()
@@ -94,6 +107,10 @@ describe('AdminView.vue', () => {
             name: 'TradingSettings',
             props: ['apiBaseUrl', 'jwtToken'],
             template: '<div class="trading-settings-stub">settings</div>',
+          },
+          AdminMessagesView: {
+            name: 'AdminMessagesView',
+            template: '<div class="admin-messages-stub">messages</div>',
           },
           UserManager: {
             name: 'UserManager',
@@ -814,6 +831,51 @@ describe('AdminView.vue', () => {
 
     expect(wrapper.get('.admin-panel-container').attributes('aria-label')).toBe('ابزارهای مدیریت')
     expect(wrapper.findComponent({ name: 'CreateChannelView' }).exists()).toBe(false)
+    expect(adminViewMocks.routerReplaceMock).toHaveBeenCalledWith({ name: 'admin' })
+  })
+
+  it('canonicalizes denied admin messages routes to the menu for middle managers', async () => {
+    localStorage.setItem('current_user_summary', JSON.stringify({ role: 'مدیر میانی' }))
+    adminViewMocks.route.name = 'admin-messages'
+
+    const wrapper = mountView()
+    await flushPromises()
+
+    expect(wrapper.get('.admin-panel-container').attributes('aria-label')).toBe('ابزارهای مدیریت')
+    expect(wrapper.findComponent({ name: 'AdminMessagesView' }).exists()).toBe(false)
+    expect(adminViewMocks.routerReplaceMock).toHaveBeenCalledWith({ name: 'admin' })
+    expect(adminViewMocks.route.path).toBe('/admin')
+  })
+
+  it('canonicalizes a denied admin messages route exactly once after mount for middle managers', async () => {
+    localStorage.setItem('current_user_summary', JSON.stringify({ role: 'مدیر میانی' }))
+    const wrapper = mountView()
+    await flushPromises()
+
+    expect(adminViewMocks.routerReplaceMock).not.toHaveBeenCalled()
+
+    adminViewMocks.route.name = 'admin-messages'
+    adminViewMocks.route.path = '/admin/messages'
+    await nextTick()
+    await flushPromises()
+
+    expect(wrapper.get('.admin-panel-container').attributes('aria-label')).toBe('ابزارهای مدیریت')
+    expect(wrapper.findComponent({ name: 'AdminMessagesView' }).exists()).toBe(false)
+    expect(adminViewMocks.routerReplaceMock).toHaveBeenCalledTimes(1)
+    expect(adminViewMocks.routerReplaceMock).toHaveBeenCalledWith({ name: 'admin' })
+    expect(adminViewMocks.route).toMatchObject({ name: 'admin', path: '/admin', query: {} })
+  })
+
+  it('keeps the admin messages route and content for senior admins', async () => {
+    adminViewMocks.route.name = 'admin-messages'
+    adminViewMocks.route.path = '/admin/messages'
+
+    const wrapper = mountView()
+    await flushPromises()
+
+    expect(wrapper.findComponent({ name: 'AdminMessagesView' }).exists()).toBe(true)
+    expect(adminViewMocks.routerReplaceMock).not.toHaveBeenCalled()
+    expect(adminViewMocks.route).toMatchObject({ name: 'admin-messages', path: '/admin/messages' })
   })
 
   it('blocks legacy section query deep links that are not allowed for middle managers', async () => {
@@ -827,6 +889,22 @@ describe('AdminView.vue', () => {
 
     expect(wrapper.get('.admin-panel-container').attributes('aria-label')).toBe('ابزارهای مدیریت')
     expect(wrapper.findComponent({ name: 'CreateChannelView' }).exists()).toBe(false)
+    expect(adminViewMocks.routerReplaceMock).toHaveBeenCalledWith({ name: 'admin' })
+  })
+
+  it('canonicalizes denied legacy admin messages queries to the menu for middle managers', async () => {
+    localStorage.setItem('current_user_summary', JSON.stringify({ role: 'مدیر میانی' }))
+    adminViewMocks.route.query = {
+      section: 'admin_messages',
+    }
+
+    const wrapper = mountView()
+    await flushPromises()
+
+    expect(wrapper.get('.admin-panel-container').attributes('aria-label')).toBe('ابزارهای مدیریت')
+    expect(wrapper.findComponent({ name: 'AdminMessagesView' }).exists()).toBe(false)
+    expect(adminViewMocks.routerReplaceMock).toHaveBeenCalledWith({ name: 'admin' })
+    expect(adminViewMocks.route.path).toBe('/admin')
   })
 
   it('reacts to route query changes after mount and executes stored back callbacks', async () => {

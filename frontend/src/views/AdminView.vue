@@ -425,6 +425,25 @@ function getRouteAdminSection(): string | null {
   return section
 }
 
+function getDeniedRouteAdminSection(): string | null {
+  const routeSection = adminRouteSectionByName[getRouteName()]
+  if (routeSection) {
+    return canAccessAdminSection(routeSection) ? null : routeSection
+  }
+
+  const section = normalizeLegacyAdminSection(getSingleParam(route.query.section))
+  if (
+    typeof section !== 'string' ||
+    section === 'user_profile' ||
+    !routeAdminSections.has(section) ||
+    canAccessAdminSection(section)
+  ) {
+    return null
+  }
+
+  return section
+}
+
 function syncRouteToSection() {
   const routeUserId = getRouteUserProfileId()
   if (routeUserId) {
@@ -448,6 +467,16 @@ function syncRouteToSection() {
     currentSection.value = 'manage_users'
     selectedUserForProfile.value = null
     routeUserProfileError.value = null
+    return
+  }
+
+  if (getDeniedRouteAdminSection()) {
+    cancelRouteUserProfileRequest()
+    clearUserDirectoryScrollRestore()
+    currentSection.value = 'menu'
+    selectedUserForProfile.value = null
+    routeUserProfileError.value = null
+    void router.replace({ name: 'admin' })
     return
   }
 
