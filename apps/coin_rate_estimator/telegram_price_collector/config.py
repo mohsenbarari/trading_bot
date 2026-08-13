@@ -13,7 +13,9 @@ DEFAULT_CHANNELS = (
     "ToofanHarirodOfficial",
     "qheimat_ounce",
 )
-DEFAULT_PHONE = os.getenv("TELEGRAM_PHONE", "").strip()
+DEFAULT_PHONE = os.getenv(
+    "TELEGRAM_PHONE", os.getenv("COIN_MARKET_TELEGRAM_PHONE", "")
+).strip()
 SOURCE_CODES = {
     "abshdh": "MELTED_AGGREGATE",
     "naghdp": "MELTED_FLOW",
@@ -66,10 +68,14 @@ class Settings:
                 raise ValueError("Telegram credentials file must contain a JSON object")
             file_credentials = loaded
 
-        raw_api_id = os.getenv("TELEGRAM_API_ID", "").strip()
+        raw_api_id = os.getenv(
+            "TELEGRAM_API_ID", os.getenv("COIN_MARKET_TELEGRAM_API_ID", "")
+        ).strip()
         if not raw_api_id and file_credentials.get("api_id") is not None:
             raw_api_id = str(file_credentials["api_id"]).strip()
-        api_hash = os.getenv("TELEGRAM_API_HASH", "").strip()
+        api_hash = os.getenv(
+            "TELEGRAM_API_HASH", os.getenv("COIN_MARKET_TELEGRAM_API_HASH", "")
+        ).strip()
         if not api_hash and file_credentials.get("api_hash") is not None:
             api_hash = str(file_credentials["api_hash"]).strip()
 

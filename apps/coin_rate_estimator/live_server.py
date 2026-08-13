@@ -1042,10 +1042,18 @@ def render_group_activity_fragment(conversation_db: Path) -> str:
 
 
 def find_analytics_db(conversation_db: Path) -> Path | None:
-    snapshots = sorted(glob.glob("/srv/trading-bot-three-site-staging-data/coin-intelligence/private-channel-ingest/pipeline/training-snapshots/group-training-*.sqlite3"))
+    analytics_root = Path(
+        os.environ.get(
+            "COIN_RATE_ESTIMATOR_ANALYTICS_DIR",
+            str(RUNTIME_ROOT / "analytics"),
+        )
+    ).expanduser()
+    snapshots = sorted(
+        glob.glob(str(analytics_root / "training-snapshots" / "group-training-*.sqlite3"))
+    )
     if snapshots:
         return Path(snapshots[-1])
-    shadow = Path("/srv/trading-bot-three-site-staging-data/coin-intelligence/private-channel-ingest/pipeline/group_training_dataset_shadow.sqlite3")
+    shadow = analytics_root / "group_training_dataset_shadow.sqlite3"
     if shadow.exists():
         return shadow
     if conversation_db.exists():

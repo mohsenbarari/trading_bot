@@ -10,6 +10,8 @@ def test_live_units_do_not_reference_retired_worktrees() -> None:
     retired_paths = (
         "/root/trading-bot/coin-commodity-inference-promotion",
         "/root/trading-bot/combined-staging-overtime-coin",
+        "/srv/trading-bot-three-site-staging-data",
+        "/srv/trading-bot-three-site",
     )
     for path in SYSTEMD_ROOT.rglob("*"):
         if not path.is_file():

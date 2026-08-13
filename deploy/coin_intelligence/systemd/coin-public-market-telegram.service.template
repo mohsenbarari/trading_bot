@@ -1,0 +1,25 @@
+[Unit]
+Description=Coin estimator public-market Telegram collector
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=@CODE_ROOT@
+EnvironmentFile=@MARKET_ENV@
+Environment=COIN_RATE_ESTIMATOR_RUNTIME_DIR=@RUNTIME_ROOT@
+Environment=TELEGRAM_PRICE_DB=@RUNTIME_ROOT@/public-market/market_prices.sqlite3
+Environment=TELEGRAM_SESSION_PATH=@RUNTIME_ROOT@/public-market/telegram_reader
+Environment=PYTHONPATH=@PYTHON_PACKAGES@
+ExecStart=/usr/bin/python3 @CODE_ROOT@/scripts/run_coin_estimator_public_collector.py
+Restart=always
+RestartSec=15
+TimeoutStopSec=30
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=read-only
+ReadWritePaths=@RUNTIME_ROOT@/public-market
+
+[Install]
+WantedBy=multi-user.target

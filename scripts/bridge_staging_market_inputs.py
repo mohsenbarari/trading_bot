@@ -632,7 +632,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     counts = {"legacy_public": 0, "external": 0, "group": 0, "archived": 0}
     last_legacy = int(state.get("legacy_price_event_id") or 0)
     last_external = int(state.get("external_observation_id") or 0)
-    group_skipped = False
+    group_skipped = not bool(args.conversation_db)
     with _lock(lock_path):
         destination = connect_market_store(market_path)
         try:
@@ -704,7 +704,9 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             "updated_at_utc": _now(),
             "legacy_price_event_id": last_legacy,
             "external_observation_id": last_external,
-            "last_group_refresh_at_utc": _now(),
+            "last_group_refresh_at_utc": (
+                _now() if args.conversation_db else state.get("last_group_refresh_at_utc")
+            ),
             "group_refresh_skipped": group_skipped,
         })
         _save_state(state_path, state)

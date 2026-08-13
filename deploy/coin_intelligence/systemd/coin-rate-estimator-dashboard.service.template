@@ -1,0 +1,35 @@
+[Unit]
+Description=Coin rate estimator operator dashboard
+Wants=network-online.target
+After=network-online.target coin-public-market-telegram.service coin-group-event-telegram.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=@CODE_ROOT@
+EnvironmentFile=@RUNTIME_ROOT@/dashboard.env
+Environment=COIN_RATE_ESTIMATOR_RUNTIME_DIR=@RUNTIME_ROOT@/runtime
+Environment=COIN_RATE_ESTIMATOR_MARKET_DB=@RUNTIME_ROOT@/public-market/market_prices.sqlite3
+Environment=COIN_CONVERSATION_DB=@RUNTIME_ROOT@/conversation/conversation_events.sqlite3
+Environment=COIN_RATE_ESTIMATOR_CALIBRATION_DB=@RUNTIME_ROOT@/runtime/online_calibration.sqlite3
+Environment=COIN_RATE_ESTIMATOR_MODEL=@RUNTIME_ROOT@/runtime/model.json
+Environment=COIN_RATE_ESTIMATOR_SHADOW_MODEL=@RUNTIME_ROOT@/runtime/model.shadow-previous-live.json
+Environment=COIN_RATE_ESTIMATOR_SHADOW_STATE=@RUNTIME_ROOT@/runtime/state.shadow.json
+Environment=COIN_RATE_ESTIMATOR_ANALYTICS_DIR=@RUNTIME_ROOT@/analytics
+Environment=COIN_ESTIMATOR_DASHBOARD_CREDENTIALS_FILE=@RUNTIME_ROOT@/runtime/dashboard-credentials.json
+Environment=COIN_RATE_ESTIMATOR_NO_TELEGRAM=1
+Environment=COIN_RATE_ESTIMATOR_SHADOW_LIGHT=1
+Environment=COIN_RATE_ESTIMATOR_ESTIMATE_REFRESH_SECONDS=30
+Environment=COIN_RATE_ESTIMATOR_SHADOW_CROSS_CAL_APPLY=0
+Environment=PYTHONPATH=@PYTHON_PACKAGES@
+ExecStart=/usr/bin/bash @CODE_ROOT@/apps/coin_rate_estimator/run_live.sh
+Restart=always
+RestartSec=5
+TimeoutStopSec=30
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=read-only
+ReadWritePaths=@RUNTIME_ROOT@
+
+[Install]
+WantedBy=multi-user.target
