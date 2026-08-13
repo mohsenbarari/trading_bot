@@ -366,24 +366,24 @@ def main() -> int:
         "--market-db",
         type=Path,
         default=Path(
-            "/srv/trading-bot-three-site-staging-data/coin-intelligence/"
-            "apps/telegram-price-poc/data/market_prices.sqlite3"
+            "/srv/trading-bot/production-data/coin-intelligence/"
+            "estimator-live/public-market/market_prices.sqlite3"
         ),
     )
     parser.add_argument(
         "--conversation-db",
         type=Path,
         default=Path(
-            "/srv/trading-bot-three-site-staging-data/coin-intelligence/"
-            "apps/coin-intelligence/data/conversation_events.sqlite3"
+            "/srv/trading-bot/production-data/coin-intelligence/"
+            "estimator-live/conversation/conversation_events.sqlite3"
         ),
     )
     parser.add_argument(
         "--live-model",
         type=Path,
         default=Path(
-            "/srv/trading-bot-three-site-staging-data/coin-intelligence/"
-            "apps/coin-rate-estimator/runtime/model.json"
+            "/srv/trading-bot/production-data/coin-intelligence/"
+            "estimator-live/runtime/model.json"
         ),
     )
     parser.add_argument(

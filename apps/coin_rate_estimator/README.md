@@ -8,11 +8,9 @@ This source was migrated from the former external runtime into
 SQLite databases, Telegram session, credentials, generated state, logs and
 manual-entry token are intentionally excluded from Git.
 
-It is not yet wired into the production WebApp, bot, scheduler, deployment or
-three-site data plane.  The current product priority remains the integrated
-coin-estimation Shadow work under `core/market_intelligence`; this application
-is preserved here so that its page and its supporting estimator source do not
-remain an unversioned server-only dependency.
+It is not wired into the production WebApp or bot.  Its operator dashboard and
+collectors run from the canonical `main` checkout while every mutable artifact
+lives below the protected coin-intelligence data root.
 
 The application contains:
 
@@ -338,7 +336,6 @@ export COIN_RATE_ESTIMATOR_PATH='choose-a-new-operator-route'
 ```
 
 Direct IME polling is disabled in the normal foreign-host deployment path.
-Any future Iran relay and Object Storage transfer must follow the repository's
-three-site policy and be implemented as a separate reviewed change.  This
-application must fail closed when an exchange observation is absent; it must
-not manufacture a current value.
+Any future relay or Object Storage transfer must be designed from the current
+architecture as a separate reviewed change.  This application must fail closed
+when an exchange observation is absent; it must not manufacture a current value.

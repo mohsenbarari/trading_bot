@@ -31,10 +31,10 @@ MARKET_STORE = Path(
     "/srv/trading-bot/production-data/coin-intelligence/private-gold-live/market/market.sqlite3"
 )
 LEGACY_DB = Path(
-    "/srv/trading-bot-three-site-staging-data/coin-intelligence/apps/telegram-price-poc/data/market_prices.sqlite3"
+    "/srv/trading-bot/production-data/coin-intelligence/estimator-live/public-market/market_prices.sqlite3"
 )
 RUNTIME = Path(
-    "/srv/trading-bot-three-site-staging-data/coin-intelligence/apps/coin-rate-estimator/runtime"
+    "/srv/trading-bot/production-data/coin-intelligence/estimator-live/runtime"
 )
 
 
