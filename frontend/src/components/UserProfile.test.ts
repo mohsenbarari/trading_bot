@@ -3,8 +3,11 @@ import { resolve } from 'node:path'
 import { defineComponent, h, nextTick, ref, Transition } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
+import UserProfile from './UserProfile.vue'
 
-const routeRequestMock = vi.fn()
+const { routeRequestMock } = vi.hoisted(() => ({
+  routeRequestMock: vi.fn(),
+}))
 const userProfileSource = readFileSync(
   resolve(process.cwd(), 'src/components/UserProfile.vue'),
   'utf8',
@@ -217,7 +220,6 @@ describe('UserProfile.vue authoritative admin actions', () => {
   })
 
   it('keeps one element root when rendered by a route transition', async () => {
-    const UserProfile = (await import('./UserProfile.vue')).default
     const transitionWarning = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const TransitionHost = defineComponent({
       setup() {
