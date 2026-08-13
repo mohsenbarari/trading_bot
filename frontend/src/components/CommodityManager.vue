@@ -912,6 +912,8 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   gap: var(--ds-section-gap);
+  font-family: Vazirmatn, Tahoma, Arial, sans-serif;
+  font-synthesis: none;
 }
 
 .commodity-feedback {

@@ -1,5 +1,12 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+const commodityManagerSource = readFileSync(
+  resolve(process.cwd(), 'src/components/CommodityManager.vue'),
+  'utf8',
+)
 
 const commodityManagerMocks = vi.hoisted(() => ({
   apiFetchMock: vi.fn(),
@@ -169,6 +176,19 @@ describe('CommodityManager.vue', () => {
     document.body.replaceChildren()
     document.body.classList.remove('ui-overlay-open')
     delete document.body.dataset.uiOverlayLockCount
+  })
+
+  it('keeps Persian typography scoped to the commodity-manager root without changing text metrics', () => {
+    const rootStyle = commodityManagerSource.match(/\.commodity-manager\s*\{([^}]*)\}/)?.[1]
+
+    expect(commodityManagerSource).toMatch(/<div class="commodity-manager ds-page-content">/)
+    expect(commodityManagerSource).toMatch(
+      /<style scoped>[\s\S]*?\.commodity-manager\s*\{[\s\S]*?font-family:\s*Vazirmatn,\s*Tahoma,\s*Arial,\s*sans-serif;[\s\S]*?font-synthesis:\s*none;/,
+    )
+    expect(commodityManagerSource.match(/font-family:\s*Vazirmatn,\s*Tahoma,\s*Arial,\s*sans-serif;/g) ?? []).toHaveLength(1)
+    expect(commodityManagerSource.match(/font-synthesis:\s*none;/g) ?? []).toHaveLength(1)
+    expect(rootStyle).toBeDefined()
+    expect(rootStyle).not.toMatch(/(?:font-size|font-weight|line-height)\s*:/)
   })
 
   it('loads the commodity list, opens alias management, and returns to the list', async () => {
