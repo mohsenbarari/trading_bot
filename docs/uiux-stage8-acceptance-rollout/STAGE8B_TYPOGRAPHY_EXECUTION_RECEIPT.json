@@ -1,0 +1,127 @@
+{
+  "schemaVersion": 1,
+  "stage": "8B",
+  "status": "passed-bounded-route-local-typography-slice-not-acceptance",
+  "branch": "condidate/webapp-ui-ux-redesign-v2",
+  "runId": "stage8b-route-local-typography-2026-08-13-r1",
+  "implementation": {
+    "title": "Route-vnode-local Vazirmatn with font-synthesis:none",
+    "baselineSnapshot": {
+      "commit": "ec1cc82f429187f3fbbdfeedb0cefad794255854"
+    },
+    "sourceSnapshot": {
+      "commit": "338918d56f57f7cb974a501b1c43cc22d6afc2b5",
+      "tree": "5e7648e47e3bd74d3b281d0d9b043d71cecdc744",
+      "sourceHashes": {
+        "frontend/package.json": "962814c374ccaab1e3a5426bf9a8b067f0672fb91c834c1cba917df9b958c28a",
+        "frontend/src/App.vue": "99abfc56129f2689240375bc47dc1d337946d298cf480b4a189d47bf52b2f21d",
+        "frontend/src/App.test.ts": "6e33896c11e0453149020f93aa556de239c322a42f3cb0827d3c012157826b32",
+        "frontend/scripts/check-stage8b-typography.mjs": "140c237f8ea94c810323f827298b40414f10e4a45f08a54ceb6bae0ed2dbe741",
+        "frontend/scripts/lib/stage8b-typography-guard.mjs": "4c22dff4b620967743cf03c33f085b4d3b4ccc3d1c76382ebdf3730801348862",
+        "frontend/scripts/stage8b-typography-guard.test.mjs": "b390e18eb69dc0a43693ed853998e92a3b61c022e67a1191a33b9f1e03229df7",
+        "frontend/scripts/lib/stage4-protected-surface-guard.mjs": "658dc26fb6e3816362ff0d30ee4c9d14e5121a1c7d195feb710e2a5dfb42ae60",
+        "frontend/scripts/stage4-protected-surface-guard.test.mjs": "5c3cde4a152d5623c5dc23c8359b251752722004bf7078f57ccad8eb823cad56"
+      }
+    },
+    "routeProtectionBoundary": {
+      "eligibility": "getUiRouteContractByName(route.name)?.protection === UI_ROUTE_PROTECTION.NONE",
+      "placement": "route vnode only",
+      "family": "Vazirmatn, Tahoma, Arial, sans-serif",
+      "fontSynthesis": "none",
+      "legacyBaseClass": "font-sans retained",
+      "protectedBoundary": "FULL and MIXED routes remain unchanged, including concurrent leave/enter fade typography."
+    }
+  },
+  "validation": {
+    "focusedTests": "40/40 passed",
+    "fullSerialUnitTests": "155 files / 1759 tests passed / 0 failed",
+    "productionBuild": "passed",
+    "vueTsc": "passed",
+    "uiGuard": "passed"
+  },
+  "browserReceipt": {
+    "environment": "local-synthetic-production-browser",
+    "routeTypographySampleCount": 12,
+    "crossBoundaryProbeCount": 4,
+    "executedScenarioCount": 16,
+    "runtimePageErrorCount": 0,
+    "coverage": {
+      "noneRoutes": {
+        "paths": [
+          "/login",
+          "/admin/invitations"
+        ],
+        "viewportsCssPx": [
+          390,
+          1440
+        ],
+        "marker": 1,
+        "computedTypography": "Vazirmatn / none",
+        "horizontalOverflowObserved": false
+      },
+      "fullRoutes": {
+        "paths": [
+          "/market",
+          "/chat",
+          "/admin/channels",
+          "/share-receive"
+        ],
+        "marker": 0,
+        "computedTypography": "legacy system sans"
+      },
+      "mixedRoutes": {
+        "paths": [
+          "/",
+          "/admin/messages",
+          "/admin/system"
+        ],
+        "marker": 0,
+        "computedTypography": "legacy system sans"
+      },
+      "ltrMonoException": {
+        "path": "/admin/users",
+        "result": "LTR mono sample retained"
+      },
+      "crossBoundary": {
+        "boundaries": [
+          "Market to PublicProfile",
+          "Home to AdminInvitations"
+        ],
+        "result": "overlap retained the marker only on the NONE route vnode"
+      }
+    },
+    "fixtureOnlyDiagnostics": [
+      "Telegram block",
+      "local WebSocket 403",
+      "simplified Market offers"
+    ],
+    "limitations": [
+      "The diagnostics are fixture-only and this is not full browser acceptance.",
+      "This local synthetic receipt does not expand the role, viewport, state, interaction, or environment matrix dimensions.",
+      "No raw screenshot, trace, diagnostic, or local artifact is retained in the repository."
+    ]
+  },
+  "figmaReference": {
+    "status": "live-editable-draft-protected-baseline-pending-not-freeze-not-final-acceptance",
+    "fileKey": "z8jgJxST4O2APzWnlyP9gv",
+    "pageNodeId": "321:18",
+    "sectionNodeId": "549:1549",
+    "boardNodeId": "549:1550",
+    "provenance": {
+      "baselineCommit": "ec1cc82f429187f3fbbdfeedb0cefad794255854",
+      "implementationCommit": "338918d56f57f7cb974a501b1c43cc22d6afc2b5"
+    },
+    "audit": {
+      "geometry": "pass",
+      "contrast": "pass",
+      "sensitiveData": "none observed"
+    },
+    "limitations": [
+      "This Figma draft is live and editable; it is neither a visual freeze nor final acceptance.",
+      "Its design audit is not runtime, browser, accessibility, owner-sign-off, merge, Sites, staging, or production authority."
+    ]
+  },
+  "countsTowardFullMatrixAcceptance": false,
+  "claimBoundary": "This bounded source-bound local/synthetic typography receipt does not create full Stage 8 acceptance, owner aesthetic sign-off, a visual freeze, merge authority, Sites authority, staging authority, or production authority.",
+  "retention": "Only redacted counts, source revisions, and content hashes are retained."
+}

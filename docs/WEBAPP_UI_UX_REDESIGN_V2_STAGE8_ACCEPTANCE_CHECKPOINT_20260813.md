@@ -20,6 +20,9 @@ source محدود route-first directory-transition: `31c69d5a5d2fb1e2c08d9647473
 source محدود invitation-presentation: `4beeade2f3aae4964f1964dedc00f47dfbcd0c05`
 (evidence-only و nonpromotable؛ بدون افزایش full matrix)
 
+source محدود NONE-route typography: `338918d56f57f7cb974a501b1c43cc22d6afc2b5`
+(evidence-only؛ بدون افزایش full matrix)
+
 ## ۱. مجوز و حد آن
 
 دستور مالک برای ادامهٔ Stage 8، یکپارچگی و زیباسازی UI/UX با کنترل ایمنی، و ثبت رهگیری
@@ -47,7 +50,7 @@ deep-link denied مدیر میانی (`/admin/channels`، `/admin/commodities`،
 تعداد سلول‌های پذیرش کامل اجراشده صفر است؛ viewport، state، interaction و environment هنوز
 requirement هستند و به cell-level evidence کامل متصل نشده‌اند. بازار/پیام‌رسان redesign نشده‌اند.
 
-## ۳. شواهد محدود 8A و مرجع طراحی
+## ۳. شواهد محدود 8A/8B و مرجع طراحی
 
 منبع redacted: `docs/uiux-stage8-acceptance-rollout/STAGE8A_EXECUTION_RECEIPTS.json`
 
@@ -66,6 +69,12 @@ requirement هستند و به cell-level evidence کامل متصل نشده‌
   برای بازگشت focus پس از Cancel/Escape، overflow، copy و end-state حذف mock اجرا شد و ۲/۲
   viewport-flow گذشت. DELETE روی transport mock بود و artifact paired Chromium abort دیده شد؛
   بنابراین این receipt nonpromotable است و هیچ completion سرور واقعی را attest نمی‌کند.
+- slice typography در source `338918d5`: Vazirmatn و `font-synthesis:none` فقط روی route vnode
+  با `protection=NONE` اعمال شدند؛ base `font-sans` و FULL/MIXED، از جمله concurrent fade، تغییر
+  نکردند. ۱۲ sample مسیر و ۴ probe cross-boundary (جمعاً ۱۶ scenario) با صفر page error،
+  focused `40/40` و full serial `155 files / 1759 tests / 0 failed` ثبت شد. این browser receipt
+  local/synthetic است؛ Telegram block، WebSocket 403 محلی و Market offers ساده‌شده fixture-only
+  هستند و این مورد full browser یا full matrix acceptance نیست.
 - Figma: file `z8jgJxST4O2APzWnlyP9gv`، page `486:1455`، section `508:95`، frame `508:96`
   (`390×844`) و provenance `511:151`. audit محدود: ۲۷ text با Vazirmatn، ۷ instance UIUX،
   ۴۹ node token-bound و صفر phone/email/URL/query ناایمن؛ review بصری بدون crop/overlap.
@@ -73,8 +82,12 @@ requirement هستند و به cell-level evidence کامل متصل نشده‌
   `535:1455` و board `535:1456`. این target زنده/قابل‌ویرایش و مورد تأیید مالک است، اما freeze
   یا پذیرش نهایی نیست؛ audit آن ۴۸ text Vazirmatn، ۱۸/۱۸ instance متصل، صفر phone/URL/token
   ناایمن و بدون crop را ثبت کرده است.
+- Figma typography: file `z8jgJxST4O2APzWnlyP9gv`، page `321:18`، section `549:1549` و board
+  `549:1550`، DRAFT زنده/قابل‌ویرایش با baseline `ec1cc82f` و implementation `338918d5` است.
+  geometry و contrast pass و دادهٔ حساس مشاهده نشده، اما protected-baseline-pending است و نه
+  owner-approved، نه freeze و نه final acceptance محسوب می‌شود.
 
-این چهار receipt و مرجع‌های Figma live/editable یا local/synthetic هستند؛ screenshot/hash-freeze، runtime
+این پنج slice محدود و مرجع‌های Figma live/editable یا local/synthetic هستند؛ screenshot/hash-freeze، runtime
 accessibility acceptance، sign-off زیبایی مالک، یا release authority نیستند. receipt/reference مبتنی
 بر `4415b743` تا validation P1 ادعایی دربارهٔ working tree جاری ندارند. artifact خام browser در
 repository ذخیره نشده و هیچ Sites action انجام نشده است.
@@ -103,7 +116,7 @@ Sites و production در این Stage شروع نشده‌اند.
 ## ۶. گیت بعدی (فنی و بصری)
 
 - ۲۷۰ نتیجهٔ موردانتظار مسیر×پروفایل به source متصل است؛
-- canonicalization مدیر میانی و چهار slice محدود source-bound ثبت شده‌اند، اما full matrix همچنان صفر است؛
+- canonicalization مدیر میانی و پنج slice محدود source-bound ثبت شده‌اند، اما full matrix همچنان صفر است؛
 - protected-surface hashهای تاریخی overwrite نشده‌اند؛
 - اجرای واقعی viewport/state/interaction/environment و sign-off زیبایی مالک هنوز pending است؛
 - عرضه فقط به‌صورت مدل تیمی و rollback-safe توصیف شده و شروع نشده است؛

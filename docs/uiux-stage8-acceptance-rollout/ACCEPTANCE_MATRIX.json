@@ -89,7 +89,8 @@
       "telegram-webview-non-messenger"
     ],
     "executionEvidenceRefs": [
-      "stage8a-execution-receipts"
+      "stage8a-execution-receipts",
+      "stage8b-typography-execution-receipt"
     ]
   },
   "cellAccounting": {
@@ -98,8 +99,8 @@
     "enumeratedExpectedAccessCells": 270,
     "viewportStateInteractionEnvironmentExpansionPerformed": false,
     "executedFullMatrixCellCount": 0,
-    "partialSyntheticBrowserSliceCount": 4,
-    "partialSyntheticBrowserScenarioCellCount": 54,
+    "partialSyntheticBrowserSliceCount": 5,
+    "partialSyntheticBrowserScenarioCellCount": 70,
     "partialSyntheticBrowserCellsCountTowardFullMatrix": false
   },
   "partialSyntheticBrowserSlices": [
@@ -238,6 +239,54 @@
         "The local Vite symlink filesystem-allow boundary blocked Vazirmatn binary-asset delivery verification in this environment.",
         "It does not expand or pass the required access-profile, viewport, state, interaction, or environment matrix dimensions.",
         "It is evidence-only and creates no full acceptance, aesthetic sign-off, visual freeze, merge, Sites, staging, or production authority."
+      ]
+    },
+    {
+      "id": "stage8b-none-route-typography",
+      "receiptId": "stage8b-route-local-typography-2026-08-13-r1",
+      "evidenceRef": "stage8b-typography-execution-receipt",
+      "sourceEvidenceRef": "stage8b-route-local-typography-runtime-and-guards",
+      "sourceCommit": "338918d56f57f7cb974a501b1c43cc22d6afc2b5",
+      "sourceTree": "5e7648e47e3bd74d3b281d0d9b043d71cecdc744",
+      "countsTowardFullMatrixAcceptance": false,
+      "scope": {
+        "environment": "local-synthetic-production-browser",
+        "routeTypographySampleCount": 12,
+        "crossBoundaryProbeCount": 4,
+        "executedScenarioCount": 16,
+        "noneRoutes": [
+          "/login",
+          "/admin/invitations"
+        ],
+        "fullRoutes": [
+          "/market",
+          "/chat",
+          "/admin/channels",
+          "/share-receive"
+        ],
+        "mixedRoutes": [
+          "/",
+          "/admin/messages",
+          "/admin/system"
+        ]
+      },
+      "result": {
+        "focusedTests": "40/40 passed",
+        "fullSerialUnitTests": "155 files / 1759 tests passed / 0 failed",
+        "productionBuild": "passed",
+        "vueTsc": "passed",
+        "protectedUiGuard": "passed",
+        "runtimePageErrorCount": 0,
+        "noneRouteMarkerAndTypography": "marker=1; Vazirmatn; font-synthesis none; no horizontal overflow at 390 and 1440",
+        "fullAndMixedRouteBoundary": "marker=0; legacy system sans retained",
+        "ltrMonoException": "/admin/users retained",
+        "crossBoundaryOverlap": "Market to PublicProfile and Home to AdminInvitations preserved the marker only on the NONE route vnode"
+      },
+      "limitations": [
+        "This is a bounded local/synthetic typography slice, not full browser or full Stage 8 acceptance.",
+        "Fixture-only diagnostics included Telegram block, local WebSocket 403, and simplified Market offers.",
+        "It does not expand or pass the required access-profile, viewport, state, interaction, or environment dimensions.",
+        "It creates no aesthetic sign-off, visual freeze, merge, Sites, staging, or production authority."
       ]
     }
   ],
@@ -566,6 +615,62 @@
       "kind": "curated-evidence-only",
       "path": "docs/uiux-stage8-acceptance-rollout/STAGE8A_EXECUTION_RECEIPTS.json",
       "claim": "Four bounded local synthetic browser slices and two live editable Figma references; none is full Stage 8 acceptance or release authority."
+    },
+    "stage8b-route-local-typography-runtime-and-guards": {
+      "id": "stage8b-route-local-typography-runtime-and-guards",
+      "kind": "runtime-and-guard-source",
+      "sourceSnapshot": {
+        "commit": "338918d56f57f7cb974a501b1c43cc22d6afc2b5",
+        "tree": "5e7648e47e3bd74d3b281d0d9b043d71cecdc744"
+      },
+      "sources": [
+        {
+          "path": "frontend/package.json",
+          "sha256": "962814c374ccaab1e3a5426bf9a8b067f0672fb91c834c1cba917df9b958c28a",
+          "claim": "Registers the bounded Stage 8B typography guard with the UI guard command."
+        },
+        {
+          "path": "frontend/src/App.vue",
+          "sha256": "99abfc56129f2689240375bc47dc1d337946d298cf480b4a189d47bf52b2f21d",
+          "claim": "Binds Vazirmatn and font-synthesis none only to NONE-protection route vnodes while preserving the legacy shell base."
+        },
+        {
+          "path": "frontend/src/App.test.ts",
+          "sha256": "6e33896c11e0453149020f93aa556de239c322a42f3cb0827d3c012157826b32",
+          "claim": "Tests NONE-only route markers, protected boundaries, and vnode-local transition behavior."
+        },
+        {
+          "path": "frontend/scripts/check-stage8b-typography.mjs",
+          "sha256": "140c237f8ea94c810323f827298b40414f10e4a45f08a54ceb6bae0ed2dbe741",
+          "claim": "Runs the bounded typography source guard."
+        },
+        {
+          "path": "frontend/scripts/lib/stage8b-typography-guard.mjs",
+          "sha256": "4c22dff4b620967743cf03c33f085b4d3b4ccc3d1c76382ebdf3730801348862",
+          "claim": "Fails closed on protected-cascade, root typography, or exception-boundary drift."
+        },
+        {
+          "path": "frontend/scripts/stage8b-typography-guard.test.mjs",
+          "sha256": "b390e18eb69dc0a43693ed853998e92a3b61c022e67a1191a33b9f1e03229df7",
+          "claim": "Exercises negative guard fixtures for the bounded typography contract."
+        },
+        {
+          "path": "frontend/scripts/lib/stage4-protected-surface-guard.mjs",
+          "sha256": "658dc26fb6e3816362ff0d30ee4c9d14e5121a1c7d195feb710e2a5dfb42ae60",
+          "claim": "Allows the route-local marker without widening protected reduced-motion eligibility."
+        },
+        {
+          "path": "frontend/scripts/stage4-protected-surface-guard.test.mjs",
+          "sha256": "5c3cde4a152d5623c5dc23c8359b251752722004bf7078f57ccad8eb823cad56",
+          "claim": "Keeps the Stage 4 protected-surface guard compatibility test bound."
+        }
+      ]
+    },
+    "stage8b-typography-execution-receipt": {
+      "id": "stage8b-typography-execution-receipt",
+      "kind": "curated-evidence-only",
+      "path": "docs/uiux-stage8-acceptance-rollout/STAGE8B_TYPOGRAPHY_EXECUTION_RECEIPT.json",
+      "claim": "One bounded local/synthetic NONE-route typography slice and a live editable Figma draft; neither is full Stage 8 acceptance or release authority."
     },
     "stage3-evidence-manifest": {
       "id": "stage3-evidence-manifest",

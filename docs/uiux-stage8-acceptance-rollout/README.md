@@ -11,11 +11,12 @@
 - historical bounded visual-recovery source: `4415b7431a6b67965d24c44f6f9f0e59e48ed422` (subsequent local P1 validation pending)
 - current bounded route-transition source: `31c69d5a5d2fb1e2c08d9647473d3612b9d85629` (evidence-only)
 - current bounded invitation-presentation source: `4beeade2f3aae4964f1964dedc00f47dfbcd0c05` (evidence-only and nonpromotable)
+- current bounded NONE-route typography source: `338918d56f57f7cb974a501b1c43cc22d6afc2b5` (evidence-only)
 - authority: `stage8CompleteAuthority=false`
 - matrix status: `partial-browser-slice-executed-full-acceptance-pending`
 - expected-access coverage: ۳۰ مسیر × ۹ پروفایل دقیق = ۲۷۰ outcome صریح
 - full matrix execution: صفر سلول؛ viewport/state/interaction/environment هنوز فقط requirement هستند
-- partial synthetic evidence: یک slice دسترسی/shell با ۴۸/۴۸ scenario cell، یک slice تاریخی محدود directory/profile، یک slice رفتاری route-transition با ۴/۴ scenario، و یک slice invitation-presentation با ۲/۲ viewport-flow ثبت شده‌اند؛ هیچ‌کدام به full matrix افزوده نمی‌شوند
+- partial synthetic evidence: چهار slice 8A و یک slice 8B شامل typography با ۱۶ scenario ثبت شده‌اند؛ هیچ‌کدام به full matrix افزوده نمی‌شوند
 - owner aesthetic acceptance: انجام نشده
 - merge: انجام نشده
 - production/staging/Sites: انجام نشده
@@ -36,7 +37,7 @@ guard فعلی علاوه بر نقش از `account_status`، `is_customer` و `
 هویت شیء پارامتری، حالت inactive/unavailable و پذیرش بصری باید جداگانه اجرا و evidence-bound
 شوند. هیچ cross-product ساختگی یا ادعای ۵۱٬۹۶۸ سلول در این بسته وجود ندارد.
 
-## شواهد محدود 8A
+## شواهد محدود 8A و 8B
 
 [STAGE8A_EXECUTION_RECEIPTS.json](STAGE8A_EXECUTION_RECEIPTS.json) تنها count، hash و
 source-revisionهای redacted چهار اجرای local/synthetic را نگه می‌دارد؛ screenshot، diagnostic،
@@ -56,6 +57,13 @@ trace یا مسیر محلی در repository ذخیره نشده است.
   mock بود و artifact paired Chromium abort دیده شد؛ بنابراین این slice nonpromotable است، تکمیل
   server را attest نمی‌کند و به full matrix افزوده نمی‌شود.
 
+[STAGE8B_TYPOGRAPHY_EXECUTION_RECEIPT.json](STAGE8B_TYPOGRAPHY_EXECUTION_RECEIPT.json) یک
+slice جداگانهٔ local/synthetic و source-bound به `338918d5` است: Vazirmatn و
+`font-synthesis:none` فقط روی route vnode با `protection=NONE` اعمال می‌شوند؛ base
+`font-sans` و مسیرهای FULL/MIXED، حتی هنگام fade هم‌زمان، بدون تغییر می‌مانند. ۱۲ sample مسیر
+و ۴ probe مرزی (جمعاً ۱۶ scenario) با صفر page error ثبت شده‌اند؛ این اجرا full browser یا
+full matrix نیست و هیچ سلول پذیرش را pass نمی‌کند.
+
 مرجع Figma زنده و قابل‌ویرایش در file `z8jgJxST4O2APzWnlyP9gv`، page `486:1455`، section
 `508:95` و frame `508:96` (`390×844`) ثبت شده است. audit محدود آن ۲۷ text با Vazirmatn،
 ۷ instance متصل UIUX، ۴۹ node token-bound، و صفر phone/email/URL/query ناایمن گزارش کرده است.
@@ -67,10 +75,16 @@ P1، منبع تاریخی `4415b743` را نشان می‌دهد و ادعای�
 text با Vazirmatn، ۱۸/۱۸ instance متصل، صفر phone/URL/token ناایمن و بدون crop را ثبت کرده است؛
 این هم evidence runtime، پذیرش کامل یا authority عرضه نیست.
 
+مرجع typography در همان file، page `321:18`، section `549:1549` و board `549:1550`، یک
+DRAFT زنده و قابل‌ویرایش است که baseline `ec1cc82f` و implementation `338918d5` را ثبت می‌کند.
+audit geometry و contrast آن pass و محتوایش عاری از دادهٔ حساس است، اما protected-baseline-pending
+است و نه freeze، نه final acceptance، و نه owner-approved محسوب می‌شود.
+
 ## محتوا
 
 - [ACCEPTANCE_MATRIX.json](ACCEPTANCE_MATRIX.json)
 - [STAGE8A_EXECUTION_RECEIPTS.json](STAGE8A_EXECUTION_RECEIPTS.json)
+- [STAGE8B_TYPOGRAPHY_EXECUTION_RECEIPT.json](STAGE8B_TYPOGRAPHY_EXECUTION_RECEIPT.json)
 - [VISUAL_FREEZE_PROTECTED_SURFACES.json](VISUAL_FREEZE_PROTECTED_SURFACES.json)
 - [ROLLOUT_PLAN.md](ROLLOUT_PLAN.md)
 - [VALIDATION.md](VALIDATION.md)

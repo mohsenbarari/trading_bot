@@ -1,4 +1,4 @@
-# Validation — Stage 8 traceability and bounded 8A evidence
+# Validation — Stage 8 traceability and bounded 8A/8B evidence
 
 ## Access-policy source binding
 
@@ -56,6 +56,18 @@ canonicalization مدیر میانی است و hashهای تاریخی آن را
 این binding فقط source-bound presentation و regression محلی focus Cancel/Escape را توصیف
 می‌کند؛ نه receipt تکمیل DELETE روی سرور واقعی.
 
+## NONE-route typography source binding
+
+`338918d56f57f7cb974a501b1c43cc22d6afc2b5` / tree
+`5e7648e47e3bd74d3b281d0d9b043d71cecdc744`، با baseline
+`ec1cc82f429187f3fbbdfeedb0cefad794255854`، bridge محدود typography را bind می‌کند.
+`frontend/src/App.vue` فقط وقتی
+`getUiRouteContractByName(route.name)?.protection === UI_ROUTE_PROTECTION.NONE` است،
+Vazirmatn و `font-synthesis:none` را بر route vnode می‌گذارد. `font-sans` در shell باقی
+می‌ماند و FULL/MIXED، شامل concurrent fade، تغییر نمی‌کنند. hash همهٔ source/test/guardهای
+مرتبط در [STAGE8B_TYPOGRAPHY_EXECUTION_RECEIPT.json](STAGE8B_TYPOGRAPHY_EXECUTION_RECEIPT.json)
+ثبت شده‌اند؛ این binding protected freeze را جایگزین نمی‌کند.
+
 ## What is validated by this correction
 
 - JSON schema 3 parse می‌شود.
@@ -63,7 +75,7 @@ canonicalization مدیر میانی است و hashهای تاریخی آن را
 - ۹ access profile دقیق تعریف شده و هر route برای هر profile یک outcome و `evidenceRefs` دارد.
 - تعداد واقعی outcomeهای موردانتظار ۲۷۰ است.
 - چهار component canonical outcome مدیر میانی به source/test `AdminView` متصل‌اند.
-- `executedFullMatrixCellCount=0` است؛ چهار partial synthetic slice جداگانه ثبت شده‌اند اما
+- `executedFullMatrixCellCount=0` است؛ پنج partial synthetic slice جداگانه ثبت شده‌اند اما
   به full matrix یا viewport/state/interaction/environment expansion افزوده نشده‌اند.
 - نقش‌های واقعی از contextهای customer/accountant/owner جدا شده‌اند.
 
@@ -72,7 +84,7 @@ canonicalization مدیر میانی است و hashهای تاریخی آن را
 ## Focused checks and bounded browser receipts on 2026-08-13
 
 - `jq` parse/invariant check روی `ACCEPTANCE_MATRIX.json`: ۳۰ route، ۹ profile،
-  ۲۷۰ outcome دارای `evidenceRefs` معتبر، چهار component outcome، و صفر full-acceptance cell.
+  ۲۷۰ outcome دارای `evidenceRefs` معتبر، چهار component outcome، پنج slice محدود، و صفر full-acceptance cell.
   Evidence: [ACCEPTANCE_MATRIX.json](ACCEPTANCE_MATRIX.json).
 - `npm run test:unit:run -- src/router/index.test.ts src/utils/auth.test.ts`: pass؛
   ۲ فایل و ۴۲ تست. Evidence source:
@@ -105,6 +117,18 @@ API mock بود و artifact paired Chromium abort مانع ادعای clean netw
 - سپس full serial validation: ۱۵۴ فایل / ۱۷۴۶ test pass؛ production build، type check،
   `guard:ui` و diff check نیز pass.
 
+receipt پنجم در [STAGE8B_TYPOGRAPHY_EXECUTION_RECEIPT.json](STAGE8B_TYPOGRAPHY_EXECUTION_RECEIPT.json)
+به source `338918d5` bind است: focused `40/40`، full serial `155 files / 1759 tests / 0 failed`،
+production build، `vue-tsc` و `guard:ui` همگی pass شدند. browser local/synthetic، ۱۲ sample
+route typography و ۴ probe واقعی cross-boundary (جمعاً ۱۶ scenario) را با صفر page error پوشش
+داد: `/login` و `/admin/invitations` در ۳۹۰/۱۴۴۰ marker=1، Vazirmatn و `font-synthesis:none`
+بدون overflow؛ FULL `/market`، `/chat`، `/admin/channels` و `/share-receive` و MIXED `/`،
+`/admin/messages` و `/admin/system` marker=0 و legacy system sans باقی ماندند؛ sample LTR mono
+`/admin/users` نیز حفظ شد. overlapهای Market↔PublicProfile و Home↔AdminInvitations فقط vnode
+NONE را marker‌دار نگه داشتند. Telegram block، WebSocket 403 محلی و Market offers ساده‌شده
+diagnosticهای fixture-only هستند؛ این receipt full browser acceptance نیست و به full matrix
+افزوده نمی‌شود.
+
 ## Live Figma reference, separately bounded
 
 مرجع live/editable در file `z8jgJxST4O2APzWnlyP9gv`، page `486:1455`، section `508:95` و
@@ -119,6 +143,12 @@ frame `508:96` (`390×844`) audit محدود گذرانده است: ۲۷ text ه
 متصل، صفر phone/URL/token ناایمن و بدون crop را ثبت کرده است. این target مورد تأیید مالک اما
 live/editable و غیر-freeze است؛ review طراحی آن evidence runtime، transport، پذیرش کامل یا
 authority عرضه نیست.
+
+مرجع typography در همان file، page `321:18`، section `549:1549` و board `549:1550` با
+provenance baseline `ec1cc82f` و implementation `338918d5` ثبت شده است. این DRAFT زنده و
+قابل‌ویرایش، protected-baseline-pending است؛ audit geometry و contrast آن pass و دادهٔ حساس
+مشاهده نشده است. این مرجع نه owner-approved، نه visual freeze، و نه final acceptance یا evidence
+runtime/browser است.
 
 ## Historical technical records referenced, not overwritten or promoted here
 
