@@ -459,6 +459,7 @@ function normalizeMobile(mobile: string): string {
         v-else-if="pendingHasLoaded && !pendingInvitations.length"
         class="pending-state empty"
         title="دعوت‌نامه‌ای در انتظار وجود ندارد."
+        role="status"
       />
       <div v-else class="pending-list">
         <div v-for="pending in pendingInvitations" :key="pending.id" class="pending-row">

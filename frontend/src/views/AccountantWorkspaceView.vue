@@ -1212,6 +1212,7 @@ onBeforeUnmount(() => {
             v-if="!hasDetailRoute"
             title="حسابداری انتخاب نشده است"
             message="برای دیدن پرونده و تنظیمات، یکی از حسابداران را از فهرست انتخاب کنید."
+            role="status"
           />
           <AppErrorState
             v-else-if="!hasLoadedRelations && error"
@@ -1243,6 +1244,7 @@ onBeforeUnmount(() => {
             title="حسابدار پیدا نشد"
             message="این رابطه دیگر در دسترس نیست. به فهرست برگردید و یک حسابدار معتبر انتخاب کنید."
             tone="warning"
+            role="status"
           >
             <template #actions>
               <AppButton size="sm" variant="secondary" @click="backToList"
@@ -1448,6 +1450,7 @@ onBeforeUnmount(() => {
                 v-else-if="!detailSessionsError && !detailSessions.length"
                 title="نشست فعالی وجود ندارد"
                 message="برای این حسابدار نشست فعالی ثبت نشده است."
+                role="status"
               />
               <template v-if="detailSessions.length">
                 <AppListItem
@@ -1621,6 +1624,7 @@ onBeforeUnmount(() => {
             v-if="hasLoadedRelations && !accountantState.orderedRelations.value.length"
             title="هنوز حسابداری ثبت نشده است"
             message="برای شروع، از دکمه افزودن حسابدار استفاده کنید."
+            role="status"
           >
             <template #actions>
               <AppButton size="sm" variant="primary" @click="openCreatePanel"
@@ -1632,6 +1636,7 @@ onBeforeUnmount(() => {
             v-else-if="hasLoadedRelations && !filteredRelations.length"
             title="نتیجه‌ای پیدا نشد"
             message="فیلتر یا عبارت جستجو را پاک کنید تا فهرست کامل برگردد."
+            role="status"
           >
             <template #actions>
               <AppButton size="sm" variant="secondary" @click="clearListContext"

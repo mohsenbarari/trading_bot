@@ -366,6 +366,7 @@ onMounted(async () => {
             title="هیچ اعلانی یافت نشد"
             message="در آخرین اعلان‌های دریافت‌شده موردی برای نمایش وجود ندارد."
             tone="info"
+            role="status"
           >
             <template #icon>
               <Bell :size="48" />
@@ -411,6 +412,7 @@ onMounted(async () => {
               title="اعلانی در این فیلتر وجود ندارد"
               :message="activeCategory === 'trade' ? 'اعلان معاملاتی برای نمایش وجود ندارد.' : 'اعلانی در دسته سایر برای نمایش وجود ندارد.'"
               tone="neutral"
+              role="status"
             >
               <template #icon>
                 <Bell :size="40" />

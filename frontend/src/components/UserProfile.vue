@@ -1656,6 +1656,7 @@ async function confirmPendingAction() {
           v-model="tempDatePart"
           inline
           value-type="jalali"
+          arrow-key-navigation
           :clearable="false"
           :auto-close="false"
           @change="updateDatePart"
@@ -1697,6 +1698,7 @@ async function confirmPendingAction() {
           v-model="tempDatePart"
           inline
           value-type="jalali"
+          arrow-key-navigation
           :clearable="false"
           :auto-close="false"
           @change="updateDatePart"

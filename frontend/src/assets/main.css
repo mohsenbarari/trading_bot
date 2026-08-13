@@ -283,12 +283,6 @@
   opacity: 0;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .fade-enter-active,
-  .fade-leave-active {
-    transition: none;
-  }
-}
 /* Base Ripple Setup */
 .ripple-container {
   position: relative;

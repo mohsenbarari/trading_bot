@@ -229,6 +229,7 @@ onMounted(refreshIdentity)
         title="اقدام فعالی در این بخش ندارید"
         message="برای ادامه کارهای شخصی و تنظیمات، به حساب بروید."
         tone="info"
+        role="status"
       >
         <template #actions>
           <AppButton type="button" @click="router.push({ name: 'account' })">

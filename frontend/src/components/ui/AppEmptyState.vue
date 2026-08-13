@@ -3,13 +3,14 @@ withDefaults(defineProps<{
   title: string
   message?: string
   tone?: 'neutral' | 'info' | 'warning' | 'danger'
+  role?: 'status' | 'alert'
 }>(), {
   tone: 'neutral',
 })
 </script>
 
 <template>
-  <section class="ui-empty-state" :class="`ui-empty-state--${tone}`" role="status">
+  <section class="ui-empty-state" :class="`ui-empty-state--${tone}`" :role="role">
     <div v-if="$slots.icon" class="ui-empty-state__icon" aria-hidden="true">
       <slot name="icon" />
     </div>

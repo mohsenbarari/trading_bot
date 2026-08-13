@@ -253,7 +253,7 @@ onUnmounted(() => {
           <AppButton type="button" size="sm" variant="ghost" :loading="isLoading" @click="retryUsers">تلاش مجدد</AppButton>
         </div>
 
-        <AppEmptyState v-if="users.length === 0" class="no-results" title="کاربری یافت نشد.">
+        <AppEmptyState v-if="users.length === 0" class="no-results" title="کاربری یافت نشد." role="status">
           <template #icon>
             <Search :size="24" />
           </template>

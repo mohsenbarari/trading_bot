@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { mount } from '@vue/test-utils'
 import { defineComponent, nextTick, ref } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
@@ -44,6 +46,26 @@ import {
   AppTradeActionButton,
   AppWorkspace,
 } from './index'
+
+const protectedEmptyStateConsumerSources = [
+  'src/views/MarketView.vue',
+  'src/components/CreateChannelView.vue',
+].map((sourcePath) => readFileSync(resolve(process.cwd(), sourcePath), 'utf8'))
+const stage7EmptyStateConsumerSources = [
+  'src/views/NotificationsView.vue',
+  'src/views/CustomerWorkspaceView.vue',
+  'src/views/SettingsView.vue',
+  'src/views/OperationsView.vue',
+  'src/views/AccountantWorkspaceView.vue',
+  'src/components/PublicProfile.vue',
+  'src/components/CommodityManager.vue',
+  'src/components/UserManager.vue',
+  'src/components/CreateInvitationView.vue',
+].map((sourcePath) => readFileSync(resolve(process.cwd(), sourcePath), 'utf8'))
+
+function emptyStateTags(source: string) {
+  return [...source.matchAll(/<AppEmptyState\b[^>]*>/g)].map((match) => match[0])
+}
 
 describe('ui primitives', () => {
   it('renders buttons, action cards, metrics, badges, chips, and sections with stable contracts', async () => {
@@ -315,8 +337,13 @@ describe('ui primitives', () => {
       props: { title: 'موردی وجود ندارد', message: 'بعد از ایجاد، اینجا نمایش داده می‌شود.' },
       slots: { actions: '<button>افزودن</button>' },
     })
-    expect(empty.attributes('role')).toBe('status')
+    expect(empty.attributes('role')).toBeUndefined()
     expect(empty.text()).toContain('افزودن')
+
+    const announcedEmpty = mount(AppEmptyState, {
+      props: { title: 'نتیجه‌ای پیدا نشد', role: 'status' },
+    })
+    expect(announcedEmpty.attributes('role')).toBe('status')
 
     const loading = mount(AppLoadingState, { props: { label: 'در حال دریافت مشتریان' } })
     expect(loading.attributes('role')).toBe('status')
@@ -331,6 +358,24 @@ describe('ui primitives', () => {
       slots: { default: '<button>قطع رابطه</button>' },
     })
     expect(danger.text()).toContain('قطع رابطه')
+  })
+
+  it('keeps protected empty-state consumers inert while Stage 7 consumers opt in explicitly', () => {
+    for (const source of protectedEmptyStateConsumerSources) {
+      const tags = emptyStateTags(source)
+      expect(tags.length).toBeGreaterThan(0)
+      for (const tag of tags) {
+        expect(tag).not.toMatch(/\srole=/)
+      }
+    }
+
+    for (const source of stage7EmptyStateConsumerSources) {
+      const tags = emptyStateTags(source)
+      expect(tags.length).toBeGreaterThan(0)
+      for (const tag of tags) {
+        expect(tag).toMatch(/\srole="(?:status|alert)"/)
+      }
+    }
   })
 
   it('renders list items and confirm dialogs with action events', async () => {

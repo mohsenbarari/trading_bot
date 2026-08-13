@@ -14,6 +14,48 @@ export const TRADING_SETTINGS_PATH = 'frontend/src/components/TradingSettings.vu
 export const TRADING_SETTINGS_SHA256 =
   '509dd32235e1cb98aa164940cf7722604f16b6518f7387699554bf3a828ecfaa'
 
+export const STAGE4_SHARED_DEPENDENCY_ISOLATION_PATHS = Object.freeze([
+  'frontend/src/App.vue',
+  'frontend/src/assets/main.css',
+  'frontend/src/components/JalaliDatePicker.vue',
+  'frontend/src/components/ui/AppEmptyState.vue',
+  TRADING_SETTINGS_PATH,
+  'frontend/src/components/UserProfile.vue',
+  'frontend/src/components/PublicProfile.vue',
+  'frontend/src/views/MarketView.vue',
+  'frontend/src/components/CreateChannelView.vue',
+  'frontend/src/views/NotificationsView.vue',
+  'frontend/src/views/CustomerWorkspaceView.vue',
+  'frontend/src/views/SettingsView.vue',
+  'frontend/src/views/OperationsView.vue',
+  'frontend/src/views/AccountantWorkspaceView.vue',
+  'frontend/src/components/CommodityManager.vue',
+  'frontend/src/components/UserManager.vue',
+  'frontend/src/components/CreateInvitationView.vue',
+])
+
+const STAGE7_JALALI_CONSUMER_PATHS = Object.freeze([
+  'frontend/src/components/UserProfile.vue',
+  'frontend/src/components/PublicProfile.vue',
+])
+
+const PROTECTED_EMPTY_STATE_CONSUMER_PATHS = Object.freeze([
+  'frontend/src/views/MarketView.vue',
+  'frontend/src/components/CreateChannelView.vue',
+])
+
+const STAGE7_EMPTY_STATE_CONSUMER_PATHS = Object.freeze([
+  'frontend/src/views/NotificationsView.vue',
+  'frontend/src/views/CustomerWorkspaceView.vue',
+  'frontend/src/views/SettingsView.vue',
+  'frontend/src/views/OperationsView.vue',
+  'frontend/src/views/AccountantWorkspaceView.vue',
+  'frontend/src/components/PublicProfile.vue',
+  'frontend/src/components/CommodityManager.vue',
+  'frontend/src/components/UserManager.vue',
+  'frontend/src/components/CreateInvitationView.vue',
+])
+
 export const MARKET_RUNTIME_CONTRACT = 'stage4-market-owned-runtime-v1'
 export const MESSENGER_RUNTIME_CONTRACT = 'stage4-messenger-owned-runtime-v1'
 
@@ -270,6 +312,180 @@ export function fileSha256(value) {
   return sha256(value)
 }
 
+function requiredTextSource(sources, repoPath) {
+  const value = sources instanceof Map ? sources.get(repoPath) : sources?.[repoPath]
+  if (typeof value !== 'string') {
+    throw new Error(`shared dependency source is missing: ${repoPath}`)
+  }
+  return value
+}
+
+function componentTags(source, componentName) {
+  const expression = new RegExp(`<${componentName}\\b[^>]*>`, 'g')
+  return [...source.matchAll(expression)].map((match) => match[0])
+}
+
+function styleBlocks(source) {
+  const blocks = [...source.matchAll(/<style(?:\s[^>]*)?>([\s\S]*?)<\/style>/g)].map(
+    (match) => match[1],
+  )
+  return blocks.length ? blocks.join('\n') : source
+}
+
+function mediaBlockBodies(source, params) {
+  const bodies = []
+  let searchFrom = 0
+  while (searchFrom < source.length) {
+    const mediaIndex = source.indexOf(`@media ${params}`, searchFrom)
+    if (mediaIndex === -1) break
+    const openBrace = source.indexOf('{', mediaIndex)
+    if (openBrace === -1) throw new Error(`${params}: media block is malformed`)
+
+    let depth = 1
+    let cursor = openBrace + 1
+    while (cursor < source.length && depth > 0) {
+      if (source[cursor] === '{') depth += 1
+      else if (source[cursor] === '}') depth -= 1
+      cursor += 1
+    }
+    if (depth !== 0) throw new Error(`${params}: media block is malformed`)
+    bodies.push(source.slice(openBrace + 1, cursor - 1))
+    searchFrom = cursor
+  }
+  return bodies
+}
+
+function assertNoBareFadeReducedMotion(label, source) {
+  const reducedMotionBlocks = mediaBlockBodies(
+    styleBlocks(source),
+    '(prefers-reduced-motion: reduce)',
+  )
+  for (const block of reducedMotionBlocks) {
+    if (/(?:^|[},])\s*\.fade-(?:enter|leave)-active(?=\s*[,\{])/m.test(block)) {
+      throw new Error(`${label}: bare fade reduced-motion selector bypasses protected routes`)
+    }
+  }
+  return reducedMotionBlocks
+}
+
+/**
+ * Protects shared dependencies by behavior instead of rebasing immutable
+ * whole-file hashes. Defaults must remain inert for protected consumers;
+ * Stage 7 behavior is allowed only through explicit call-site opt-ins.
+ */
+export function assertStage4SharedDependencyIsolation(sources) {
+  const appSource = requiredTextSource(sources, 'frontend/src/App.vue')
+  const mainCssSource = requiredTextSource(sources, 'frontend/src/assets/main.css')
+  const appStyleSource = styleBlocks(appSource)
+  const reducedMotionEligibilityBlock = appSource.match(
+    /const allowsReducedMotionRouteTransition = computed\(([\s\S]*?)\n\)/,
+  )?.[1]
+  if (
+    !appSource.includes('getUiRouteContractByName,') ||
+    !appSource.includes('UI_ROUTE_PROTECTION,') ||
+    !reducedMotionEligibilityBlock?.includes('getUiRouteContractByName(route.name)?.protection') ||
+    !reducedMotionEligibilityBlock.includes('UI_ROUTE_PROTECTION.NONE') ||
+    !reducedMotionEligibilityBlock.includes('v2Scope.value === UI_V2_SCOPE.SECTION') ||
+    !appSource.includes("shouldScopeRoute.value ? 'ui-v2-route-fade' : 'fade'") ||
+    !appSource.includes(
+      "allowsReducedMotionRouteTransition.value ? 'app-reduced-motion-route' : undefined",
+    ) ||
+    !appSource.includes('<transition :name="routeTransitionName">') ||
+    !appSource.includes(':class="reducedMotionRouteClass"')
+  ) {
+    throw new Error(
+      'App route transition is not isolated behind the unprotected-section opt-in contract',
+    )
+  }
+
+  for (const [label, source] of [
+    ['App.vue', appSource],
+    ['main.css', mainCssSource],
+  ]) {
+    assertNoBareFadeReducedMotion(label, source)
+  }
+  const appReducedMotion = mediaBlockBodies(appStyleSource, '(prefers-reduced-motion: reduce)')
+  if (
+    !appReducedMotion.some(
+      (block) =>
+        block.includes('.app-reduced-motion-route.fade-enter-active') &&
+        block.includes('.app-reduced-motion-route.fade-leave-active') &&
+        block.includes('transition: none;'),
+    )
+  ) {
+    throw new Error('App V2 route reduced-motion opt-in is missing')
+  }
+
+  const jalaliSource = requiredTextSource(sources, 'frontend/src/components/JalaliDatePicker.vue')
+  if (
+    !jalaliSource.includes('arrowKeyNavigation?: boolean') ||
+    !jalaliSource.includes('arrowKeyNavigation: false') ||
+    !jalaliSource.includes('if (!props.arrowKeyNavigation || !date || props.disabled) return')
+  ) {
+    throw new Error('JalaliDatePicker arrow navigation must remain default-off and guarded')
+  }
+
+  const protectedJalaliTags = componentTags(
+    requiredTextSource(sources, TRADING_SETTINGS_PATH),
+    'JalaliDatePicker',
+  )
+  if (!protectedJalaliTags.length) {
+    throw new Error('TradingSettings JalaliDatePicker consumer is missing')
+  }
+  if (protectedJalaliTags.some((tag) => tag.includes('arrow-key-navigation'))) {
+    throw new Error('TradingSettings must not opt in to Jalali arrow navigation')
+  }
+
+  let stage7JalaliOptIns = 0
+  for (const repoPath of STAGE7_JALALI_CONSUMER_PATHS) {
+    const tags = componentTags(requiredTextSource(sources, repoPath), 'JalaliDatePicker')
+    if (!tags.length || tags.some((tag) => !tag.includes('arrow-key-navigation'))) {
+      throw new Error(`${repoPath}: Stage 7 Jalali consumer lacks explicit arrow opt-in`)
+    }
+    stage7JalaliOptIns += tags.length
+  }
+
+  const emptyStateSource = requiredTextSource(
+    sources,
+    'frontend/src/components/ui/AppEmptyState.vue',
+  )
+  if (
+    !emptyStateSource.includes("role?: 'status' | 'alert'") ||
+    !emptyStateSource.includes(':role="role"') ||
+    /\brole\s*:\s*['"]status['"]/.test(emptyStateSource) ||
+    /<section\b[^>]*\srole=['"]status['"]/.test(emptyStateSource)
+  ) {
+    throw new Error('AppEmptyState role must remain opt-in with no default status semantics')
+  }
+
+  let protectedEmptyStateConsumers = 0
+  for (const repoPath of PROTECTED_EMPTY_STATE_CONSUMER_PATHS) {
+    const tags = componentTags(requiredTextSource(sources, repoPath), 'AppEmptyState')
+    if (!tags.length) throw new Error(`${repoPath}: protected AppEmptyState consumer is missing`)
+    if (tags.some((tag) => /\s:?role\s*=/.test(tag))) {
+      throw new Error(`${repoPath}: protected AppEmptyState consumer must use the inert default`)
+    }
+    protectedEmptyStateConsumers += tags.length
+  }
+
+  let stage7EmptyStateOptIns = 0
+  for (const repoPath of STAGE7_EMPTY_STATE_CONSUMER_PATHS) {
+    const tags = componentTags(requiredTextSource(sources, repoPath), 'AppEmptyState')
+    if (!tags.length || tags.some((tag) => !/\srole="(?:status|alert)"/.test(tag))) {
+      throw new Error(`${repoPath}: Stage 7 empty state lacks an explicit semantic role`)
+    }
+    stage7EmptyStateOptIns += tags.length
+  }
+
+  return {
+    reducedMotionSources: 2,
+    protectedJalaliConsumers: protectedJalaliTags.length,
+    stage7JalaliOptIns,
+    protectedEmptyStateConsumers,
+    stage7EmptyStateOptIns,
+  }
+}
+
 function assertStage6MessengerUrlPrivacyAllowedFiles(entries) {
   const entriesByPath = new Map(entries.map((entry) => [entry.path, entry]))
   for (const repoPath of STAGE6_MESSENGER_URL_PRIVACY_ALLOWED_PATHS) {
@@ -323,7 +539,8 @@ export function resolveMessengerRuntimeDisposition(entries) {
         evidence: assertStage6MessengerUrlPrivacyDisposition(entries),
       }
     } catch (dispositionError) {
-      const baselineMessage = baselineError instanceof Error ? baselineError.message : String(baselineError)
+      const baselineMessage =
+        baselineError instanceof Error ? baselineError.message : String(baselineError)
       const dispositionMessage =
         dispositionError instanceof Error ? dispositionError.message : String(dispositionError)
       throw new Error(

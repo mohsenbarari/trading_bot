@@ -1966,11 +1966,13 @@ function handleHistoryPresetChipChange(value: string) {
               v-else-if="!projectUsersError && !hasLoadedProjectUsersOnce"
               title="فهرست همکاران آماده نمایش نیست"
               message="در صورت بروز مشکل می‌توانید دوباره جستجو یا بارگذاری را تکرار کنید."
+              role="status"
             />
             <AppEmptyState
               v-else-if="!projectUsersError && !projectUsersLoading && projectUsers.length === 0"
               title="همکاری برای نمایش پیدا نشد"
               :message="projectUsersQuery.trim() ? 'همکاری با این جستجو پیدا نشد.' : 'همکاری برای نمایش وجود ندارد.'"
+              role="status"
             />
             <template v-if="projectUsers.length > 0">
               <div class="project-users-list">
@@ -2177,6 +2179,7 @@ function handleHistoryPresetChipChange(value: string) {
                   <JalaliDatePicker
                     v-model="historyFromDate"
                     value-type="gregorian"
+                    arrow-key-navigation
                     placeholder="انتخاب تاریخ شروع"
                     trigger-test-id="history-from-date"
                     @change="handleHistoryDateInput"
@@ -2186,6 +2189,7 @@ function handleHistoryPresetChipChange(value: string) {
                   <JalaliDatePicker
                     v-model="historyToDate"
                     value-type="gregorian"
+                    arrow-key-navigation
                     placeholder="انتخاب تاریخ پایان"
                     trigger-test-id="history-to-date"
                     @change="handleHistoryDateInput"
@@ -2258,11 +2262,13 @@ function handleHistoryPresetChipChange(value: string) {
               v-else-if="!hasLoadedHistoryOnce"
               title="تاریخچه هنوز بارگذاری نشده است"
               message="بازه دلخواه را انتخاب کنید و فیلترها را اعمال کنید."
+              role="status"
             />
             <AppEmptyState
               v-else-if="mutualTrades.length === 0"
               title="نتیجه‌ای پیدا نشد"
               :message="tradeHistoryEmptyText"
+              role="status"
             />
             <div v-else class="history-list">
                 <div v-for="trade in mutualTrades" :key="trade.id" class="mini-trade-card">

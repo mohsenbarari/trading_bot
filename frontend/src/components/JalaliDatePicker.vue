@@ -15,6 +15,7 @@ const props = withDefaults(defineProps<{
   inline?: boolean
   autoClose?: boolean
   triggerTestId?: string
+  arrowKeyNavigation?: boolean
 }>(), {
   modelValue: '',
   valueType: 'gregorian',
@@ -24,6 +25,7 @@ const props = withDefaults(defineProps<{
   inline: false,
   autoClose: true,
   triggerTestId: undefined,
+  arrowKeyNavigation: false,
 })
 
 const emit = defineEmits<{
@@ -240,7 +242,7 @@ function focusCalendarDay(date: JalaliMoment) {
 }
 
 function handleDayKeydown(event: KeyboardEvent, date: JalaliMoment | null) {
-  if (!date || props.disabled) return
+  if (!props.arrowKeyNavigation || !date || props.disabled) return
 
   let delta = 0
   if (event.key === 'ArrowRight') delta = -1

@@ -12,12 +12,14 @@ import {
   STAGE4_BASE_COMMIT,
   STAGE4_BASE_TREE,
   STAGE4_ROUTE_CONTRACT_PATH,
+  STAGE4_SHARED_DEPENDENCY_ISOLATION_PATHS,
   STAGE4_SCOPE_MANIFEST_PATH,
   TRADING_SETTINGS_PATH,
   TRADING_SETTINGS_SHA256,
   assertProtectedFileSetEvidence,
   assertStage4RouteProtection,
   assertStage4RuntimeRouteProtection,
+  assertStage4SharedDependencyIsolation,
   discoverStage4OwnedRuntimePaths,
   fileSha256,
   protectedFileSetEvidence,
@@ -80,6 +82,14 @@ try {
   const runtimeRoutes = assertStage4RuntimeRouteProtection(
     readRepoFile(STAGE4_ROUTE_CONTRACT_PATH, 'utf8'),
   )
+  const sharedDependencies = assertStage4SharedDependencyIsolation(
+    new Map(
+      STAGE4_SHARED_DEPENDENCY_ISOLATION_PATHS.map((repoPath) => [
+        repoPath,
+        readRepoFile(repoPath, 'utf8'),
+      ]),
+    ),
+  )
 
   console.log(`PASS protected checkpoint anchor (${STAGE4_BASE_COMMIT}, tree ${STAGE4_BASE_TREE})`)
   console.log(
@@ -102,6 +112,9 @@ try {
   )
   console.log(
     `PASS Stage 4 route protection (${manifestRoutes.full} full/off, ${manifestRoutes.mixed} mixed; manifest + runtime ${runtimeRoutes.count}/${manifestRoutes.count})`,
+  )
+  console.log(
+    `PASS shared dependency isolation (${sharedDependencies.reducedMotionSources} motion roots; ${sharedDependencies.protectedJalaliConsumers}/${sharedDependencies.stage7JalaliOptIns} protected/opt-in Jalali consumers; ${sharedDependencies.protectedEmptyStateConsumers}/${sharedDependencies.stage7EmptyStateOptIns} protected/opt-in empty states)`,
   )
 
   if (process.argv.includes('--list')) {

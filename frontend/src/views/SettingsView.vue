@@ -732,6 +732,7 @@ watch(
               title="نشستی در این سرور گزارش نشد"
               message="این نتیجه فقط به همین سرور مربوط است."
               tone="info"
+              role="status"
             />
 
             <div v-if="sessions.length > 0" class="sessions-list">

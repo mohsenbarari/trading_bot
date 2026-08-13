@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+import postcss from 'postcss'
 import { defineComponent, reactive } from 'vue'
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -61,6 +64,25 @@ const AuthenticatedShellStub = defineComponent({
   template: '<div data-test="auth-shell">authenticated shell</div>',
 })
 
+const TransitionStub = defineComponent({
+  name: 'TransitionStub',
+  props: { name: String },
+  template:
+    '<div data-test="route-transition" :data-transition-name="name"><slot /></div>',
+})
+
+const appSource = readFileSync(resolve(process.cwd(), 'src/App.vue'), 'utf8')
+const mainCssSource = readFileSync(resolve(process.cwd(), 'src/assets/main.css'), 'utf8')
+
+function reducedMotionSelectors(source: string) {
+  const selectors: string[] = []
+  postcss.parse(source).walkAtRules('media', (rule) => {
+    if (rule.params !== '(prefers-reduced-motion: reduce)') return
+    rule.walkRules((nestedRule) => selectors.push(...nestedRule.selectors))
+  })
+  return selectors
+}
+
 type AppBootTestWindow = Window & { __appBootTimeoutId?: unknown }
 
 function createDeferred() {
@@ -77,7 +99,7 @@ function mountApp() {
       stubs: {
         RouterView: RouterViewStub,
         AuthenticatedShell: AuthenticatedShellStub,
-        transition: false,
+        transition: TransitionStub,
       },
     },
   })
@@ -153,6 +175,9 @@ describe('App.vue', () => {
     expect(wrapper.find('[data-test="auth-shell"]').exists()).toBe(false)
     expect(wrapper.get('.app-route-v2-scope').attributes('data-ui-system')).toBe('v2')
     expect(wrapper.getComponent(AppDesignSystemScope).vm.$.vnode.key).toBe('v2:/login')
+    expect(wrapper.get('[data-test="route-transition"]').attributes('data-transition-name')).toBe(
+      'ui-v2-route-fade',
+    )
     expect(wrapper.get('.app-route-scroll').classes()).toContain('app-route-scroll--no-daily-nav')
   })
 
@@ -196,6 +221,9 @@ describe('App.vue', () => {
       'app-route-scroll--no-daily-nav',
     )
     expect(wrapper.get('.app-shell').classes()).not.toContain('app-copyable-info')
+    expect(wrapper.get('[data-test="route-transition"]').attributes('data-transition-name')).toBe(
+      'fade',
+    )
   })
 
   it('keeps Stage 5 workspaces mounted across canonical query changes and remounts on path changes', async () => {
@@ -467,7 +495,33 @@ describe('App.vue', () => {
     const homeWrapper = mountApp()
     await flushPromises()
     expect(homeWrapper.get('.app-shell').classes()).toContain('app-copyable-info')
+    expect(
+      homeWrapper.get('[data-test="route-transition"]').attributes('data-transition-name'),
+    ).toBe('fade')
+    expect(homeWrapper.get('[data-test="route-component"]').classes()).not.toContain(
+      'app-reduced-motion-route',
+    )
     homeWrapper.unmount()
+
+    appMocks.route.name = 'public-profile'
+    appMocks.route.path = '/users/12'
+    appMocks.route.fullPath = '/users/12'
+    appMocks.route.meta = {
+      uiShellClass: 'standard-authenticated',
+      uiV2Scope: 'section',
+    }
+    const publicProfileWrapper = mountApp()
+    await flushPromises()
+    expect(publicProfileWrapper.get('.app-shell').classes()).toContain('app-copyable-info')
+    expect(
+      publicProfileWrapper
+        .get('[data-test="route-transition"]')
+        .attributes('data-transition-name'),
+    ).toBe('fade')
+    expect(publicProfileWrapper.get('[data-test="route-component"]').classes()).toContain(
+      'app-reduced-motion-route',
+    )
+    publicProfileWrapper.unmount()
 
     appMocks.route.name = 'account'
     appMocks.route.path = '/account'
@@ -491,6 +545,12 @@ describe('App.vue', () => {
     const messagesWrapper = mountApp()
     await flushPromises()
     expect(messagesWrapper.get('.app-shell').classes()).not.toContain('app-copyable-info')
+    expect(
+      messagesWrapper.get('[data-test="route-transition"]').attributes('data-transition-name'),
+    ).toBe('fade')
+    expect(messagesWrapper.get('[data-test="route-component"]').classes()).not.toContain(
+      'app-reduced-motion-route',
+    )
     messagesWrapper.unmount()
 
     appMocks.route.name = 'admin-system'
@@ -503,6 +563,61 @@ describe('App.vue', () => {
     const systemWrapper = mountApp()
     await flushPromises()
     expect(systemWrapper.get('.app-shell').classes()).not.toContain('app-copyable-info')
+    expect(
+      systemWrapper.get('[data-test="route-transition"]').attributes('data-transition-name'),
+    ).toBe('fade')
+    expect(systemWrapper.get('[data-test="route-component"]').classes()).not.toContain(
+      'app-reduced-motion-route',
+    )
     systemWrapper.unmount()
+  })
+
+  it('binds reduced-motion eligibility to each route vnode instead of a destination transition name', async () => {
+    appMocks.isReadyMock.mockResolvedValueOnce()
+    appMocks.route.name = 'market'
+    appMocks.route.path = '/market'
+    appMocks.route.fullPath = '/market'
+    appMocks.route.meta = { uiShellClass: 'protected-legacy', uiV2Scope: 'off' }
+
+    const wrapper = mountApp()
+    await flushPromises()
+    const protectedVNode = wrapper.getComponent(RouteComponentStub).vm.$.vnode
+    expect(protectedVNode.props?.class ?? '').not.toContain('app-reduced-motion-route')
+
+    appMocks.route.name = 'public-profile'
+    appMocks.route.path = '/users/12'
+    appMocks.route.fullPath = '/users/12'
+    appMocks.route.meta = { uiShellClass: 'standard-authenticated', uiV2Scope: 'section' }
+    await flushPromises()
+    const allowedVNode = wrapper.getComponent(RouteComponentStub).vm.$.vnode
+
+    expect(protectedVNode.props?.class ?? '').not.toContain('app-reduced-motion-route')
+    expect(allowedVNode.props?.class ?? '').toContain('app-reduced-motion-route')
+    expect(wrapper.get('[data-test="route-transition"]').attributes('data-transition-name')).toBe(
+      'fade',
+    )
+
+    appMocks.route.name = 'market'
+    appMocks.route.path = '/market'
+    appMocks.route.fullPath = '/market'
+    appMocks.route.meta = { uiShellClass: 'protected-legacy', uiV2Scope: 'off' }
+    await flushPromises()
+    const returningProtectedVNode = wrapper.getComponent(RouteComponentStub).vm.$.vnode
+
+    expect(allowedVNode.props?.class ?? '').toContain('app-reduced-motion-route')
+    expect(returningProtectedVNode.props?.class ?? '').not.toContain(
+      'app-reduced-motion-route',
+    )
+  })
+
+  it('collapses route fades only on the eligible route vnode marker', () => {
+    const styleSource = appSource.match(/<style>([\s\S]*?)<\/style>/)?.[1]
+    expect(styleSource).toBeDefined()
+
+    const selectors = reducedMotionSelectors(`${styleSource}\n${mainCssSource}`)
+    expect(selectors).toContain('.app-reduced-motion-route.fade-enter-active')
+    expect(selectors).toContain('.app-reduced-motion-route.fade-leave-active')
+    expect(selectors).not.toContain('.fade-enter-active')
+    expect(selectors).not.toContain('.fade-leave-active')
   })
 })

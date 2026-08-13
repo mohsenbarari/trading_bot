@@ -16,12 +16,14 @@ import {
   STAGE4_BASE_COMMIT,
   STAGE4_BASE_TREE,
   STAGE4_ROUTE_CONTRACT_PATH,
+  STAGE4_SHARED_DEPENDENCY_ISOLATION_PATHS,
   STAGE4_SCOPE_MANIFEST_PATH,
   TRADING_SETTINGS_PATH,
   TRADING_SETTINGS_SHA256,
   assertProtectedFileSetEvidence,
   assertStage4RouteProtection,
   assertStage4RuntimeRouteProtection,
+  assertStage4SharedDependencyIsolation,
   discoverStage4OwnedRuntimePaths,
   fileSha256,
   isMarketOwnedRuntimePath,
@@ -48,12 +50,116 @@ function currentEvidence(paths, contract) {
   return protectedFileSetEvidence(readFileEntries(repoRoot, paths), contract)
 }
 
+function currentSharedDependencySources() {
+  return new Map(
+    STAGE4_SHARED_DEPENDENCY_ISOLATION_PATHS.map((repoPath) => [
+      repoPath,
+      readRepoFile(repoPath, 'utf8'),
+    ]),
+  )
+}
+
+function withSharedDependencyMutation(sources, repoPath, mutate) {
+  const mutated = new Map(sources)
+  const source = mutated.get(repoPath)
+  const nextSource = mutate(source)
+  if (nextSource === source) throw new Error(`test mutation did not change ${repoPath}`)
+  mutated.set(repoPath, nextSource)
+  return mutated
+}
+
 describe('Stage 4 protected surface baseline', () => {
   const ownedPaths = discoverStage4OwnedRuntimePaths(repoRoot)
 
   it('binds the clean Stage 4 checkpoint commit and tree', () => {
     expect(STAGE4_BASE_COMMIT).toBe('9dfa961000832c830729ce67e8a54357915c716a')
     expect(STAGE4_BASE_TREE).toBe('1540c2534d8052a3a8cfcffcdc2f65e4b85fc874')
+  })
+
+  it('isolates protected surfaces from opt-in shared dependency behavior', () => {
+    expect(assertStage4SharedDependencyIsolation(currentSharedDependencySources())).toEqual({
+      reducedMotionSources: 2,
+      protectedJalaliConsumers: 1,
+      stage7JalaliOptIns: 4,
+      protectedEmptyStateConsumers: 4,
+      stage7EmptyStateOptIns: 21,
+    })
+  })
+
+  it('fails closed for shared dependency default or call-site opt-in drift', () => {
+    const sources = currentSharedDependencySources()
+
+    const globalReducedMotion = withSharedDependencyMutation(
+      sources,
+      'frontend/src/assets/main.css',
+      (source) =>
+        `${source}\n@media (prefers-reduced-motion: reduce) {\n  .fade-enter-active { transition: none; }\n}\n`,
+    )
+    expect(() => assertStage4SharedDependencyIsolation(globalReducedMotion)).toThrow(
+      /bare fade reduced-motion selector/,
+    )
+
+    const mixedRouteMotionOptIn = withSharedDependencyMutation(
+      sources,
+      'frontend/src/App.vue',
+      (source) =>
+        source.replace(
+          'getUiRouteContractByName(route.name)?.protection === UI_ROUTE_PROTECTION.NONE',
+          'getUiRouteContractByName(route.name)?.protection !== UI_ROUTE_PROTECTION.FULL',
+        ),
+    )
+    expect(() => assertStage4SharedDependencyIsolation(mixedRouteMotionOptIn)).toThrow(
+      /unprotected-section opt-in contract/,
+    )
+
+    const jalaliDefaultOn = withSharedDependencyMutation(
+      sources,
+      'frontend/src/components/JalaliDatePicker.vue',
+      (source) => source.replace('arrowKeyNavigation: false', 'arrowKeyNavigation: true'),
+    )
+    expect(() => assertStage4SharedDependencyIsolation(jalaliDefaultOn)).toThrow(
+      /default-off and guarded/,
+    )
+
+    const protectedJalaliOptIn = withSharedDependencyMutation(
+      sources,
+      TRADING_SETTINGS_PATH,
+      (source) =>
+        source.replace(
+          '<JalaliDatePicker\n',
+          '<JalaliDatePicker\n                arrow-key-navigation\n',
+        ),
+    )
+    expect(() => assertStage4SharedDependencyIsolation(protectedJalaliOptIn)).toThrow(
+      /TradingSettings must not opt in/,
+    )
+
+    const emptyStateDefaultOn = withSharedDependencyMutation(
+      sources,
+      'frontend/src/components/ui/AppEmptyState.vue',
+      (source) => source.replace(':role="role"', 'role="status"'),
+    )
+    expect(() => assertStage4SharedDependencyIsolation(emptyStateDefaultOn)).toThrow(
+      /role must remain opt-in/,
+    )
+
+    const protectedEmptyStateOptIn = withSharedDependencyMutation(
+      sources,
+      'frontend/src/views/MarketView.vue',
+      (source) => source.replace('<AppEmptyState\n', '<AppEmptyState\n            role="status"\n'),
+    )
+    expect(() => assertStage4SharedDependencyIsolation(protectedEmptyStateOptIn)).toThrow(
+      /protected AppEmptyState consumer must use the inert default/,
+    )
+
+    const missingStage7Role = withSharedDependencyMutation(
+      sources,
+      'frontend/src/views/NotificationsView.vue',
+      (source) => source.replace('            role="status"\n', ''),
+    )
+    expect(() => assertStage4SharedDependencyIsolation(missingStage7Role)).toThrow(
+      /Stage 7 empty state lacks an explicit semantic role/,
+    )
   })
 
   it('binds the complete Market runtime, including settlement type', () => {

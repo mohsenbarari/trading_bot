@@ -2,7 +2,12 @@
 import { useRoute, useRouter } from 'vue-router'
 import { computed, defineAsyncComponent, ref, watch } from 'vue'
 import AppDesignSystemScope from './components/ui/AppDesignSystemScope.vue'
-import { UI_ROUTE_SHELL, UI_V2_SCOPE } from './router/uiRouteContract'
+import {
+  getUiRouteContractByName,
+  UI_ROUTE_PROTECTION,
+  UI_ROUTE_SHELL,
+  UI_V2_SCOPE,
+} from './router/uiRouteContract'
 import { isAppConnecting } from './utils/auth'
 import { usePWAInstall } from './utils/pwaInstall'
 
@@ -83,6 +88,18 @@ const allowsInformationalCopy = computed(() => {
   }
   return true
 })
+const allowsReducedMotionRouteTransition = computed(
+  () =>
+    isFirstRouteReady.value &&
+    getUiRouteContractByName(route.name)?.protection === UI_ROUTE_PROTECTION.NONE &&
+    v2Scope.value === UI_V2_SCOPE.SECTION,
+)
+const routeTransitionName = computed(() =>
+  shouldScopeRoute.value ? 'ui-v2-route-fade' : 'fade',
+)
+const reducedMotionRouteClass = computed(() =>
+  allowsReducedMotionRouteTransition.value ? 'app-reduced-motion-route' : undefined,
+)
 const pathKeyedSectionRouteNames = new Set([
   'operations-customers',
   'operations-customers-detail',
@@ -200,7 +217,7 @@ watch(
         ></div>
       </div>
       <RouterView v-else v-slot="{ Component }">
-        <transition :name="shouldScopeRoute ? 'ui-v2-route-fade' : 'fade'">
+        <transition :name="routeTransitionName">
           <AppDesignSystemScope
             v-if="shouldScopeRoute"
             :key="`v2:${route.path}`"
@@ -209,7 +226,12 @@ watch(
           >
             <component :is="Component" />
           </AppDesignSystemScope>
-          <component v-else :is="Component" :key="unscopedRouteKey" />
+          <component
+            v-else
+            :is="Component"
+            :key="unscopedRouteKey"
+            :class="reducedMotionRouteClass"
+          />
         </transition>
       </RouterView>
     </div>
@@ -268,8 +290,8 @@ watch(
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .fade-enter-active,
-  .fade-leave-active {
+  .app-reduced-motion-route.fade-enter-active,
+  .app-reduced-motion-route.fade-leave-active {
     transition: none;
   }
 }

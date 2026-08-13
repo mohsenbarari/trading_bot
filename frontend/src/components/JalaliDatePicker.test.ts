@@ -1,7 +1,23 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { mount } from '@vue/test-utils'
+import { nextTick } from 'vue'
 import { describe, expect, it } from 'vitest'
 import moment from 'moment-jalaali'
 import JalaliDatePicker from './JalaliDatePicker.vue'
+
+const protectedTradingSettingsSource = readFileSync(
+  resolve(process.cwd(), 'src/components/TradingSettings.vue'),
+  'utf8',
+)
+const stage7ConsumerSources = [
+  readFileSync(resolve(process.cwd(), 'src/components/UserProfile.vue'), 'utf8'),
+  readFileSync(resolve(process.cwd(), 'src/components/PublicProfile.vue'), 'utf8'),
+]
+
+function jalaliDatePickerTags(source: string) {
+  return [...source.matchAll(/<JalaliDatePicker\b[^>]*>/g)].map((match) => match[0])
+}
 
 function findDay(wrapper: ReturnType<typeof mount>, label: string) {
   const day = wrapper
@@ -83,7 +99,9 @@ describe('JalaliDatePicker.vue', () => {
     })
 
     await wrapper.get('.jalali-date-trigger').trigger('click')
-    const clearButton = wrapper.findAll('.jalali-calendar-link').find((node) => node.text().includes('پاک کردن'))
+    const clearButton = wrapper
+      .findAll('.jalali-calendar-link')
+      .find((node) => node.text().includes('پاک کردن'))
     expect(clearButton).toBeTruthy()
     await clearButton!.trigger('click')
 
@@ -91,12 +109,39 @@ describe('JalaliDatePicker.vue', () => {
     expect(wrapper.emitted('change')?.at(-1)).toEqual([''])
   })
 
-  it('moves calendar-day focus with arrow keys without emitting a new value', async () => {
+  it('leaves arrow keys untouched by default for protected legacy consumers', async () => {
+    const wrapper = mount(JalaliDatePicker, {
+      props: {
+        modelValue: '1405/03/09',
+        valueType: 'jalali',
+        inline: true,
+      },
+      attachTo: document.body,
+    })
+
+    const selectedDay = findDay(wrapper, '۹')
+    selectedDay.element.focus()
+    const event = new KeyboardEvent('keydown', {
+      key: 'ArrowLeft',
+      bubbles: true,
+      cancelable: true,
+    })
+    selectedDay.element.dispatchEvent(event)
+    await nextTick()
+
+    expect(event.defaultPrevented).toBe(false)
+    expect(document.activeElement).toBe(selectedDay.element)
+    expect(wrapper.emitted('update:modelValue')).toBeUndefined()
+    wrapper.unmount()
+  })
+
+  it('moves calendar-day focus with arrow keys only when explicitly enabled', async () => {
     const wrapper = mount(JalaliDatePicker, {
       props: {
         modelValue: '2026-05-30',
         valueType: 'gregorian',
         inline: true,
+        arrowKeyNavigation: true,
       },
       attachTo: document.body,
     })
@@ -108,5 +153,42 @@ describe('JalaliDatePicker.vue', () => {
     expect(document.activeElement).toBe(findDay(wrapper, '۱۰').element)
     expect(wrapper.emitted('update:modelValue')).toBeUndefined()
     wrapper.unmount()
+  })
+
+  it('moves focus across a Jalali month boundary when arrow navigation is enabled', async () => {
+    const wrapper = mount(JalaliDatePicker, {
+      props: {
+        modelValue: '1405/03/01',
+        valueType: 'jalali',
+        inline: true,
+        arrowKeyNavigation: true,
+      },
+      attachTo: document.body,
+    })
+
+    const selectedDay = findDay(wrapper, '۱')
+    selectedDay.element.focus()
+    await selectedDay.trigger('keydown', { key: 'ArrowRight' })
+    await nextTick()
+    await nextTick()
+
+    expect(wrapper.get('.jalali-calendar-title').attributes('aria-label')).toBe('اردیبهشت ۱۴۰۵')
+    expect((document.activeElement as HTMLElement | null)?.dataset.dayKey).toBe('1405/02/31')
+    expect(wrapper.emitted('update:modelValue')).toBeUndefined()
+    wrapper.unmount()
+  })
+
+  it('keeps the protected TradingSettings dependency on the inert default and opts in Stage 7 consumers', () => {
+    const protectedTags = jalaliDatePickerTags(protectedTradingSettingsSource)
+    expect(protectedTags).toHaveLength(1)
+    for (const tag of protectedTags) {
+      expect(tag).not.toContain('arrow-key-navigation')
+    }
+
+    const stage7Tags = stage7ConsumerSources.flatMap(jalaliDatePickerTags)
+    expect(stage7Tags).toHaveLength(4)
+    for (const tag of stage7Tags) {
+      expect(tag).toContain('arrow-key-navigation')
+    }
   })
 })

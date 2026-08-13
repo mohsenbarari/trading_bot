@@ -643,6 +643,7 @@ onUnmounted(() => {
         v-else-if="hasLoadedList && commodities.length === 0"
         title="هنوز کالایی ثبت نشده است"
         message="ابتدا کالای اصلی را ثبت کنید و سپس نام‌های مستعار آن را مدیریت کنید."
+        role="status"
       >
         <template #icon>
           <Package :size="18" />
@@ -692,6 +693,7 @@ onUnmounted(() => {
           v-if="selectedCommodity.aliases.length === 0"
           title="نام مستعاری برای این کالا ثبت نشده است"
           message="می‌توانید یک یا چند نام مستعار جدید به این کالا اضافه کنید."
+          role="status"
         >
           <template #icon>
             <Tag :size="18" />

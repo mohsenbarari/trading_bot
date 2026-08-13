@@ -1582,6 +1582,7 @@ onBeforeUnmount(() => {
             tone="warning"
             title="مشتری پیدا نشد"
             message="این رابطه در لیست فعلی وجود ندارد یا هنوز همگام‌سازی نشده است."
+            role="status"
           >
             <template #actions>
               <AppButton variant="secondary" @click="backToList">بازگشت به فهرست مشتریان</AppButton>
@@ -2274,6 +2275,7 @@ onBeforeUnmount(() => {
             tone="info"
             title="هنوز مشتری ثبت نشده است"
             message="برای شروع، از دکمه افزودن مشتری استفاده کنید."
+            role="status"
           >
             <template #actions>
               <AppButton variant="primary" @click="openCreatePanel">افزودن مشتری</AppButton>
@@ -2284,6 +2286,7 @@ onBeforeUnmount(() => {
             tone="info"
             title="نتیجه‌ای پیدا نشد"
             message="فیلتر یا عبارت جستجو را تغییر دهید."
+            role="status"
           >
             <template #actions>
               <AppButton variant="secondary" @click="clearCustomerSearch"
