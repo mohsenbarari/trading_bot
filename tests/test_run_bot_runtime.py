@@ -48,6 +48,8 @@ class RunBotRuntimeTests(unittest.IsolatedAsyncioTestCase):
     async def test_main_initializes_and_registers_all_routers(self):
         fake_bot = MagicMock()
         fake_bot.session.close = AsyncMock()
+        fake_bot.set_my_commands = AsyncMock(return_value=True)
+        fake_bot.set_chat_menu_button = AsyncMock(return_value=True)
         fake_dp = MagicMock()
         fake_dp.include_router = MagicMock()
         fake_dp.start_polling = AsyncMock()
@@ -108,12 +110,16 @@ class RunBotRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIs(fake_dp.update.outer_middleware.call_args_list[2].args[0], auth_middleware)
         self.assertIs(fake_dp.update.outer_middleware.call_args_list[4].args[0], navigation_middleware)
         self.assertEqual(fake_dp.include_router.call_count, 16)
+        fake_bot.set_my_commands.assert_awaited_once()
+        fake_bot.set_chat_menu_button.assert_awaited_once()
         fake_dp.start_polling.assert_awaited_once_with(fake_bot)
         fake_bot.session.close.assert_awaited_once()
 
     async def test_main_propagates_polling_errors_and_still_closes_bot(self):
         fake_bot = MagicMock()
         fake_bot.session.close = AsyncMock()
+        fake_bot.set_my_commands = AsyncMock(return_value=True)
+        fake_bot.set_chat_menu_button = AsyncMock(return_value=True)
         fake_dp = MagicMock()
         fake_dp.include_router = MagicMock()
         fake_dp.start_polling = AsyncMock(side_effect=RuntimeError('boom'))

@@ -41,6 +41,7 @@ from bot.middlewares import (
 )
 from bot.middlewares.logging_context import BotLoggingContextMiddleware
 from bot.middlewares.telegram_bot_identity import TelegramBotIdentityMiddleware
+from bot.telegram_command_menu import configure_interactive_bot_command_menu
 from bot.utils.trade_suggestion_messages import listen_trade_suggestion_events
 from core.logging_config import configure_logging
 from core.offer_publication_worker import offer_telegram_publication_loop
@@ -387,8 +388,9 @@ async def main():
     # Default router should be last
     dp.include_router(default.router)
 
-    logger.info("🤖 Bot started...")
     try:
+        await configure_interactive_bot_command_menu(bot)
+        logger.info("🤖 Bot started...")
         await supervise_bot_runtime(
             polling_coro=supervise_pollers(dp.start_polling(bot), *publisher_pollers),
             child_coroutines=[

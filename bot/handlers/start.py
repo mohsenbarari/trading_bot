@@ -965,6 +965,7 @@ async def handle_start_with_token(message: types.Message, command: CommandObject
 @router.message(CommandStart(deep_link=False))
 async def handle_start_without_token(message: types.Message, state: FSMContext, user: Optional[User]):
 
+    await state.clear()
     await delete_previous_anchor(message.bot, message.chat.id, delay=DeleteDelay.DEFAULT.value)
 
     if user:
