@@ -23,6 +23,9 @@ source محدود invitation-presentation: `4beeade2f3aae4964f1964dedc00f47dfbcd
 source محدود NONE-route typography: `338918d56f57f7cb974a501b1c43cc22d6afc2b5`
 (evidence-only؛ بدون افزایش full matrix)
 
+source محدود public/focused auth viewport-containment: `55f00218295d7aa6f52f75b664544318684d2826`
+(evidence-only؛ بدون افزایش full matrix)
+
 ## ۱. مجوز و حد آن
 
 دستور مالک برای ادامهٔ Stage 8، یکپارچگی و زیباسازی UI/UX با کنترل ایمنی، و ثبت رهگیری
@@ -50,7 +53,7 @@ deep-link denied مدیر میانی (`/admin/channels`، `/admin/commodities`،
 تعداد سلول‌های پذیرش کامل اجراشده صفر است؛ viewport، state، interaction و environment هنوز
 requirement هستند و به cell-level evidence کامل متصل نشده‌اند. بازار/پیام‌رسان redesign نشده‌اند.
 
-## ۳. شواهد محدود 8A/8B و مرجع طراحی
+## ۳. شواهد محدود 8A/8B/auth-containment و مرجع طراحی
 
 منبع redacted: `docs/uiux-stage8-acceptance-rollout/STAGE8A_EXECUTION_RECEIPTS.json`
 
@@ -75,6 +78,15 @@ requirement هستند و به cell-level evidence کامل متصل نشده‌
   focused `40/40` و full serial `155 files / 1759 tests / 0 failed` ثبت شد. این browser receipt
   local/synthetic است؛ Telegram block، WebSocket 403 محلی و Market offers ساده‌شده fixture-only
   هستند و این مورد full browser یا full matrix acceptance نیست.
+- slice auth-containment در source `55f00218`: `AuthFlowShell` فقط با opt-in صریح در Login،
+  invitation، web-register و setup-password، `100vh` سپس `100dvh` می‌گیرد. ۱۴ scenario
+  local/synthetic شامل چهار flow در `390×844` و `1440×900`، همان چهار flow در reduced-motion
+  `390×844`، و SystemRecovery credentialed در هر دو viewport است. چهار opt-in viewport را پر
+  کردند، focus-visible/نبود overflow گذشت و page error صفر بود؛ SystemRecovery modifier نگرفت و
+  daily navigation بدون collision ماند. The 14-case capture recorded 10 WebSocket-related fixture
+  console diagnostics (6 setup-password; 4 credentialed SystemRecovery) with no backend; excluded
+  from layout/interaction conclusions and no clean-console claim. این slice evidence-only است و
+  full matrix یا protected behavior را attest نمی‌کند.
 - Figma: file `z8jgJxST4O2APzWnlyP9gv`، page `486:1455`، section `508:95`، frame `508:96`
   (`390×844`) و provenance `511:151`. audit محدود: ۲۷ text با Vazirmatn، ۷ instance UIUX،
   ۴۹ node token-bound و صفر phone/email/URL/query ناایمن؛ review بصری بدون crop/overlap.
@@ -86,8 +98,13 @@ requirement هستند و به cell-level evidence کامل متصل نشده‌
   `549:1550`، DRAFT زنده/قابل‌ویرایش با baseline `ec1cc82f` و implementation `338918d5` است.
   geometry و contrast pass و دادهٔ حساس مشاهده نشده، اما protected-baseline-pending است و نه
   owner-approved، نه freeze و نه final acceptance محسوب می‌شود.
+- Figma generic auth-containment: file `z8jgJxST4O2APzWnlyP9gv`، section
+  `567:1561` و board `567:1562` با frameهای `390×844` و `1440×900`، DRAFT زنده/قابل‌ویرایش
+  است. textها Vazirmatn، escape/crop/overlap صفر و حداقل contrast نمایش‌داده‌شدهٔ white/action
+  `4.55:1` است. board عمداً generic و بدون provenance داخلی، route/hash/test/harness/local-path/
+  URL/token/deploy/Sites است؛ نه freeze، نه final acceptance و نه evidence runtime/browser است.
 
-این پنج slice محدود و مرجع‌های Figma live/editable یا local/synthetic هستند؛ screenshot/hash-freeze، runtime
+این شش slice محدود و مرجع‌های Figma live/editable یا local/synthetic هستند؛ screenshot/hash-freeze، runtime
 accessibility acceptance، sign-off زیبایی مالک، یا release authority نیستند. receipt/reference مبتنی
 بر `4415b743` تا validation P1 ادعایی دربارهٔ working tree جاری ندارند. artifact خام browser در
 repository ذخیره نشده و هیچ Sites action انجام نشده است.
@@ -116,7 +133,7 @@ Sites و production در این Stage شروع نشده‌اند.
 ## ۶. گیت بعدی (فنی و بصری)
 
 - ۲۷۰ نتیجهٔ موردانتظار مسیر×پروفایل به source متصل است؛
-- canonicalization مدیر میانی و پنج slice محدود source-bound ثبت شده‌اند، اما full matrix همچنان صفر است؛
+- canonicalization مدیر میانی و شش slice محدود source-bound ثبت شده‌اند، اما full matrix همچنان صفر است؛
 - protected-surface hashهای تاریخی overwrite نشده‌اند؛
 - اجرای واقعی viewport/state/interaction/environment و sign-off زیبایی مالک هنوز pending است؛
 - عرضه فقط به‌صورت مدل تیمی و rollback-safe توصیف شده و شروع نشده است؛

@@ -2,9 +2,10 @@
 
 این سند برنامه است، نه دستور اجرا. هیچ staging یا productionای از روی آن شروع نمی‌شود.
 `ACCEPTANCE_MATRIX.json` اکنون ۲۷۰ outcome موردانتظار guard و چهار canonicalization
-کامپوننتی را رهگیری می‌کند. چهار slice 8A در `STAGE8A_EXECUTION_RECEIPTS.json` و یک slice
-8B در `STAGE8B_TYPOGRAPHY_EXECUTION_RECEIPT.json` ثبت شده‌اند، اما هیچ‌کدام نتیجهٔ اجرای
-پذیرش تیمی یا authority عرضه نیستند.
+کامپوننتی را رهگیری می‌کند. چهار slice 8A در `STAGE8A_EXECUTION_RECEIPTS.json`، یک slice
+8B در `STAGE8B_TYPOGRAPHY_EXECUTION_RECEIPT.json` و یک slice مستقل auth-containment در
+`STAGE8_AUTH_VIEWPORT_CONTAINMENT_EXECUTION_RECEIPT.json` ثبت شده‌اند، اما هیچ‌کدام نتیجهٔ
+اجرای پذیرش تیمی یا authority عرضه نیستند.
 
 ## پیش‌شرط تبدیل draft به پذیرش
 
@@ -19,6 +20,9 @@
 - receipt 8B typography فقط bridge route-vnode با `protection=NONE` را توصیف می‌کند؛ base
   `font-sans` و FULL/MIXED را تغییر نمی‌دهد و هرگز به `executedFullMatrixCellCount` یا sign-off
   مالک تبدیل نمی‌شود.
+- receipt auth-containment فقط opt-in صریحِ public/focused `AuthFlowShell` را توصیف می‌کند؛
+  SystemRecovery credentialed بدون modifier و با daily navigation می‌ماند. این receipt هرگز
+  routeهای FULL/MIXED، root/global cascade یا `executedFullMatrixCellCount` را گسترش نمی‌دهد.
 - مرجع Figma زنده فقط برای هم‌راستایی design است؛ پیش از اجرای browser قابل‌تکرار، شاهد runtime
   یا visual freeze نیست.
 - زیبایی و یکپارچگی UI/UX باید با sign-off صریح مالک ثبت شود؛ سبز بودن test فنی جای آن نیست.

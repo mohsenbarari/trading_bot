@@ -90,7 +90,8 @@
     ],
     "executionEvidenceRefs": [
       "stage8a-execution-receipts",
-      "stage8b-typography-execution-receipt"
+      "stage8b-typography-execution-receipt",
+      "stage8-auth-viewport-containment-execution-receipt"
     ]
   },
   "cellAccounting": {
@@ -99,8 +100,8 @@
     "enumeratedExpectedAccessCells": 270,
     "viewportStateInteractionEnvironmentExpansionPerformed": false,
     "executedFullMatrixCellCount": 0,
-    "partialSyntheticBrowserSliceCount": 5,
-    "partialSyntheticBrowserScenarioCellCount": 70,
+    "partialSyntheticBrowserSliceCount": 6,
+    "partialSyntheticBrowserScenarioCellCount": 84,
     "partialSyntheticBrowserCellsCountTowardFullMatrix": false
   },
   "partialSyntheticBrowserSlices": [
@@ -286,6 +287,42 @@
         "This is a bounded local/synthetic typography slice, not full browser or full Stage 8 acceptance.",
         "Fixture-only diagnostics included Telegram block, local WebSocket 403, and simplified Market offers.",
         "It does not expand or pass the required access-profile, viewport, state, interaction, or environment dimensions.",
+        "It creates no aesthetic sign-off, visual freeze, merge, Sites, staging, or production authority."
+      ]
+    },
+    {
+      "id": "stage8-auth-public-viewport-containment",
+      "receiptId": "auth-public-viewport-containment-2026-08-13-r1",
+      "evidenceRef": "stage8-auth-viewport-containment-execution-receipt",
+      "sourceEvidenceRef": "stage8-auth-viewport-containment-runtime-and-guards",
+      "sourceCommit": "55f00218295d7aa6f52f75b664544318684d2826",
+      "sourceTree": "cd37c89d082d1062fc83b8520b75326bc7ac74d3",
+      "countsTowardFullMatrixAcceptance": false,
+      "scope": {
+        "environment": "local-synthetic-production-browser",
+        "explicitOptInPaths": [
+          "/login",
+          "/i/:code",
+          "/register",
+          "/setup-password"
+        ],
+        "normalMotionViewportFlowCount": 8,
+        "reducedMotion390FlowCount": 4,
+        "credentialedSystemRecoveryRegressionFlowCount": 2,
+        "executedScenarioCount": 14
+      },
+      "result": {
+        "passedScenarioCount": 14,
+        "runtimePageErrorCount": 0,
+        "explicitAuthFlowContainment": "all four explicit opt-ins filled the viewport at 390x844 and 1440x900 without document or route horizontal overflow",
+        "focusVisible": "passed",
+        "reducedMotion": "passed at 390x844 for all four explicit opt-ins",
+        "credentialedSystemRecoveryBoundary": "modifier absent; base height and reserved daily navigation retained without collision",
+        "fixtureConsoleDiagnostics": "The 14-case capture recorded 10 WebSocket-related fixture console diagnostics (6 setup-password; 4 credentialed SystemRecovery) with no backend; excluded from layout/interaction conclusions and no clean-console claim."
+      },
+      "limitations": [
+        "This is a bounded local/synthetic browser slice, not a full role-by-route, viewport, state, interaction, or environment matrix execution.",
+        "It verifies only the explicit public/focused AuthFlowShell opt-ins and a credentialed SystemRecovery regression; it does not establish all NONE routes or protected-surface behavior.",
         "It creates no aesthetic sign-off, visual freeze, merge, Sites, staging, or production authority."
       ]
     }
@@ -671,6 +708,87 @@
       "kind": "curated-evidence-only",
       "path": "docs/uiux-stage8-acceptance-rollout/STAGE8B_TYPOGRAPHY_EXECUTION_RECEIPT.json",
       "claim": "One bounded local/synthetic NONE-route typography slice and a live editable Figma draft; neither is full Stage 8 acceptance or release authority."
+    },
+    "stage8-auth-viewport-containment-runtime-and-guards": {
+      "id": "stage8-auth-viewport-containment-runtime-and-guards",
+      "kind": "runtime-and-guard-source",
+      "sourceSnapshot": {
+        "commit": "55f00218295d7aa6f52f75b664544318684d2826",
+        "tree": "cd37c89d082d1062fc83b8520b75326bc7ac74d3"
+      },
+      "sources": [
+        {
+          "path": "frontend/src/components/auth/AuthFlowShell.vue",
+          "sha256": "160ebeadc667adadf3f428662f060c3062d6d9c7bc1f2e10805ac9f93b8711bf",
+          "claim": "Defaults viewport fill off and adds the modifier only for an explicit caller."
+        },
+        {
+          "path": "frontend/src/components/auth/AuthFlowShell.test.ts",
+          "sha256": "b3209edb2acf64c779d3d595775bfb71f402f6a1bfd85bd90431603bf8d7be13",
+          "claim": "Covers the default-off and explicit-opt-in modifier contract."
+        },
+        {
+          "path": "frontend/src/views/LoginView.vue",
+          "sha256": "b1d00d1742bb0764c905aaf44a1277cce8d9ace6745111a3095c0f2025ee53e2",
+          "claim": "Explicit public login opt-in source."
+        },
+        {
+          "path": "frontend/src/views/InviteLanding.vue",
+          "sha256": "4f19b786e7b9a5759f5f7336f02c5ecdbeba9431b9eeabce80f2cdc439fdf395",
+          "claim": "Explicit public invitation opt-in source."
+        },
+        {
+          "path": "frontend/src/views/WebRegister.vue",
+          "sha256": "86ea18e963ac7e2af6db9c0e339da2aac24170dadad6e84b6d5f6b2b4e7568bf",
+          "claim": "Explicit public registration opt-in source."
+        },
+        {
+          "path": "frontend/src/views/SetupPassword.vue",
+          "sha256": "26493b98960331f91e48470447d402c6a32287b00aab398f961aabffbd501b88",
+          "claim": "Explicit focused authenticated opt-in source."
+        },
+        {
+          "path": "frontend/src/views/SystemRecoveryView.vue",
+          "sha256": "b8df279237ee88819a6c53f4d9793f68ee27b785f8adda132acf7bd4ea70e6d1",
+          "claim": "Remains unmodified by the opt-in so its credentialed daily-navigation reservation is retained."
+        },
+        {
+          "path": "frontend/src/App.vue",
+          "sha256": "99abfc56129f2689240375bc47dc1d337946d298cf480b4a189d47bf52b2f21d",
+          "claim": "Binds credentialed SystemRecovery to the authenticated shell and daily-navigation reservation context."
+        },
+        {
+          "path": "frontend/src/router/uiRouteContract.ts",
+          "sha256": "8e7495a05dfbf6b36bcc242af1b20919bef56a8bd0ed9458360d36cf79fba144",
+          "claim": "Binds the public, focused authenticated, and system-recovery shell classes without changing route protection."
+        },
+        {
+          "path": "frontend/src/styles/design-system-v2.components.css",
+          "sha256": "0952573ea9e61408ed47b6ae0ba3384b09f67c9b820bede7d366377c7989f01f",
+          "claim": "Contains the exact scoped 100vh then 100dvh modifier and keeps base auth flow content-height behavior."
+        },
+        {
+          "path": "frontend/src/styles/designSystemV2.test.ts",
+          "sha256": "624d21e8104b5662186e3097c81ec2848a2073b5702c5225809c428be29a0459",
+          "claim": "Locks the modifier selector and fallback declaration order."
+        },
+        {
+          "path": "frontend/scripts/lib/design-system-v2-guard.mjs",
+          "sha256": "4a2e059964685f3b5ad619d704b1e8baa849aa98768ef74eedf287c31ad53845",
+          "claim": "Allows viewport lengths only on the exact opt-in modifier under the V2 scope."
+        },
+        {
+          "path": "frontend/scripts/design-system-v2-guard.test.mjs",
+          "sha256": "c3822d8fcfc2cc7d5fae0a17a000e14c26cf3436f6471e0e493ffcb4045ff236",
+          "claim": "Covers the exact allowed modifier and rejects selector drift."
+        }
+      ]
+    },
+    "stage8-auth-viewport-containment-execution-receipt": {
+      "id": "stage8-auth-viewport-containment-execution-receipt",
+      "kind": "curated-evidence-only",
+      "path": "docs/uiux-stage8-acceptance-rollout/STAGE8_AUTH_VIEWPORT_CONTAINMENT_EXECUTION_RECEIPT.json",
+      "claim": "One bounded local/synthetic public/focused auth viewport-containment slice and a generic live editable Figma draft; neither is full Stage 8 acceptance or release authority."
     },
     "stage3-evidence-manifest": {
       "id": "stage3-evidence-manifest",

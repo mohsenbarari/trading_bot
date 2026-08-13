@@ -1,0 +1,161 @@
+{
+  "schemaVersion": 1,
+  "stage": "8-auth-viewport-containment",
+  "status": "passed-bounded-public-focused-auth-viewport-containment-slice-not-acceptance",
+  "branch": "condidate/webapp-ui-ux-redesign-v2",
+  "runId": "auth-public-viewport-containment-2026-08-13-r1",
+  "implementation": {
+    "title": "Explicit public/focused AuthFlowShell viewport fill",
+    "sourceSnapshot": {
+      "commit": "55f00218295d7aa6f52f75b664544318684d2826",
+      "tree": "cd37c89d082d1062fc83b8520b75326bc7ac74d3",
+      "sourceHashes": {
+        "frontend/src/components/auth/AuthFlowShell.vue": "160ebeadc667adadf3f428662f060c3062d6d9c7bc1f2e10805ac9f93b8711bf",
+        "frontend/src/components/auth/AuthFlowShell.test.ts": "b3209edb2acf64c779d3d595775bfb71f402f6a1bfd85bd90431603bf8d7be13",
+        "frontend/src/views/LoginView.vue": "b1d00d1742bb0764c905aaf44a1277cce8d9ace6745111a3095c0f2025ee53e2",
+        "frontend/src/views/InviteLanding.vue": "4f19b786e7b9a5759f5f7336f02c5ecdbeba9431b9eeabce80f2cdc439fdf395",
+        "frontend/src/views/WebRegister.vue": "86ea18e963ac7e2af6db9c0e339da2aac24170dadad6e84b6d5f6b2b4e7568bf",
+        "frontend/src/views/SetupPassword.vue": "26493b98960331f91e48470447d402c6a32287b00aab398f961aabffbd501b88",
+        "frontend/src/views/SystemRecoveryView.vue": "b8df279237ee88819a6c53f4d9793f68ee27b785f8adda132acf7bd4ea70e6d1",
+        "frontend/src/App.vue": "99abfc56129f2689240375bc47dc1d337946d298cf480b4a189d47bf52b2f21d",
+        "frontend/src/router/uiRouteContract.ts": "8e7495a05dfbf6b36bcc242af1b20919bef56a8bd0ed9458360d36cf79fba144",
+        "frontend/src/styles/design-system-v2.components.css": "0952573ea9e61408ed47b6ae0ba3384b09f67c9b820bede7d366377c7989f01f",
+        "frontend/src/styles/designSystemV2.test.ts": "624d21e8104b5662186e3097c81ec2848a2073b5702c5225809c428be29a0459",
+        "frontend/scripts/lib/design-system-v2-guard.mjs": "4a2e059964685f3b5ad619d704b1e8baa849aa98768ef74eedf287c31ad53845",
+        "frontend/scripts/design-system-v2-guard.test.mjs": "c3822d8fcfc2cc7d5fae0a17a000e14c26cf3436f6471e0e493ffcb4045ff236"
+      }
+    },
+    "containment": {
+      "activation": "AuthFlowShell fillViewport defaults false and adds the modifier only when an explicit caller opts in.",
+      "viewportFallback": "The exact scoped modifier uses min-height 100vh followed by 100dvh.",
+      "optInSurfaces": [
+        "/login",
+        "/i/:code",
+        "/register",
+        "/setup-password"
+      ],
+      "exclusion": "SystemRecoveryView remains without the modifier because its credentialed shell can reserve daily navigation.",
+      "protectedBoundary": "No FULL or MIXED route, global root, route contract, or authenticated daily-navigation behavior is widened by this slice."
+    }
+  },
+  "validation": {
+    "fullSerialUnitTests": "155 files / 1762 tests passed / 0 failed",
+    "productionBuild": "passed; 2159 modules and 160 PWA entries",
+    "vueTsc": "passed",
+    "uiGuard": "passed",
+    "diffCheck": "passed"
+  },
+  "browserReceipt": {
+    "environment": "local-synthetic-production-browser",
+    "receiptSha256": "dbdbd2bbb59d4c816cff9dfb41d8b9b968ab01e7d531cc791b1dce8229c8e421",
+    "harnessSha256": "f0dbbc2a502b320efaa2ce38a22e600faca63be8e4519a760342c5556d50511f",
+    "executedScenarioCount": 14,
+    "runtimePageErrorCount": 0,
+    "coverage": {
+      "explicitOptInFlows": {
+        "paths": [
+          "/login",
+          "/i/:code",
+          "/register",
+          "/setup-password"
+        ],
+        "normalMotionViewportFlowCount": 8,
+        "viewportsCssPx": [
+          {
+            "width": 390,
+            "height": 844
+          },
+          {
+            "width": 1440,
+            "height": 900
+          }
+        ],
+        "reducedMotion390FlowCount": 4,
+        "result": "Each explicit flow filled the viewport; focus-visible and document/route horizontal-overflow checks passed."
+      },
+      "credentialedSystemRecovery": {
+        "viewportFlowCount": 2,
+        "viewportsCssPx": [
+          {
+            "width": 390,
+            "height": 844
+          },
+          {
+            "width": 1440,
+            "height": 900
+          }
+        ],
+        "result": "The modifier remained absent, base content height was retained, and reserved daily navigation did not collide."
+      }
+    },
+    "fixtureConsoleDiagnostics": {
+      "captureCount": 10,
+      "bySurface": {
+        "setupPassword": 6,
+        "credentialedSystemRecovery": 4
+      },
+      "summary": "The 14-case capture recorded 10 WebSocket-related fixture console diagnostics (6 setup-password; 4 credentialed SystemRecovery) with no backend; excluded from layout/interaction conclusions and no clean-console claim."
+    },
+    "limitations": [
+      "This is a bounded local/synthetic browser receipt, not a full role-by-route, viewport, state, interaction, or environment matrix execution.",
+      "The four public/focused flows and credentialed SystemRecovery regression do not establish behavior for every NONE route or any protected surface.",
+      "No raw screenshot, trace, diagnostic, local path, or local URL is retained in the repository."
+    ]
+  },
+  "figmaReference": {
+    "status": "live-editable-generic-draft-not-final-acceptance",
+    "fileKey": "z8jgJxST4O2APzWnlyP9gv",
+    "sectionNodeId": "567:1561",
+    "boardNodeId": "567:1562",
+    "scopePanelNodeId": "567:1566",
+    "mobileFrameNodeId": "567:1569",
+    "desktopFrameNodeId": "567:1571",
+    "contentBoundary": "A sanitized generic public/focused-auth visual target. It intentionally contains no repository provenance, route identifiers, hashes, test counts, harness details, local paths, URLs, tokens, deployment, or Sites information.",
+    "audit": {
+      "boardAndViewportClipping": "pass",
+      "boardDescendantCount": 42,
+      "boardTextNodeCount": 25,
+      "mobile": {
+        "cssPx": {
+          "width": 390,
+          "height": 844
+        },
+        "descendantCount": 15,
+        "textNodeCount": 9
+      },
+      "desktop": {
+        "cssPx": {
+          "width": 1440,
+          "height": 900
+        },
+        "descendantCount": 17,
+        "textNodeCount": 10,
+        "linkedInstanceCount": 2,
+        "linkedInstanceDescriptions": [
+          "Form Field",
+          "primary Button"
+        ]
+      },
+      "allRenderedText": "Vazirmatn Regular, Medium, SemiBold, or Bold",
+      "mixedOrNonVazirmatnTextCount": 0,
+      "visibleBoundaryEscapeCount": 0,
+      "sensitiveInternalTextScan": "0 matches",
+      "tokenBindings": "existing semantic variables/styles are bound to fills, strokes, spacing, and radii",
+      "contrastRatios": {
+        "strongOnCard": 15.84,
+        "primaryOnCard": 13.43,
+        "secondaryOnCard": 5.73,
+        "whiteOnAction": 4.55,
+        "warningOnWarningBackground": 5.05
+      },
+      "visualReview": "pass: coherent, no crop or overlap observed"
+    },
+    "limitations": [
+      "The board is live and editable; it is neither a visual freeze nor final acceptance.",
+      "This generic Figma target is deliberately not source-bound and is not runtime, browser, accessibility, owner-sign-off, merge, Sites, staging, or production authority."
+    ]
+  },
+  "countsTowardFullMatrixAcceptance": false,
+  "claimBoundary": "This bounded source-bound local/synthetic auth-containment receipt does not create full Stage 8 acceptance, owner aesthetic sign-off, a visual freeze, merge authority, Sites authority, staging authority, or production authority.",
+  "retention": "Only redacted counts, source revisions, source hashes, and receipt hashes are retained."
+}

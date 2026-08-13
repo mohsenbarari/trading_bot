@@ -1,4 +1,4 @@
-# Validation — Stage 8 traceability and bounded 8A/8B evidence
+# Validation — Stage 8 traceability and bounded 8A/8B/auth-containment evidence
 
 ## Access-policy source binding
 
@@ -68,6 +68,21 @@ Vazirmatn و `font-synthesis:none` را بر route vnode می‌گذارد. `fon
 مرتبط در [STAGE8B_TYPOGRAPHY_EXECUTION_RECEIPT.json](STAGE8B_TYPOGRAPHY_EXECUTION_RECEIPT.json)
 ثبت شده‌اند؛ این binding protected freeze را جایگزین نمی‌کند.
 
+## Public/focused auth viewport-containment source binding
+
+`55f00218295d7aa6f52f75b664544318684d2826` / tree
+`cd37c89d082d1062fc83b8520b75326bc7ac74d3`، modifier جداگانه و صریحِ
+`AuthFlowShell` را bind می‌کند. `fillViewport` به‌طور پیش‌فرض false است؛ فقط Login،
+InviteLanding، WebRegister و SetupPassword آن را opt-in می‌کنند. CSS scoped دقیقاً
+`min-height: 100vh` و سپس `min-height: 100dvh` دارد. SystemRecovery modifier نمی‌گیرد تا
+در حالت credentialed، رزرو daily navigationِ shell دست‌نخورده بماند.
+
+hash source/test/guardهای مرتبط، از جمله `AuthFlowShell`، چهار caller،
+`SystemRecoveryView`، `App.vue`، UI route contract و CSS guard در
+[STAGE8_AUTH_VIEWPORT_CONTAINMENT_EXECUTION_RECEIPT.json](STAGE8_AUTH_VIEWPORT_CONTAINMENT_EXECUTION_RECEIPT.json)
+ثبت شده‌اند. این binding مسیرهای FULL/MIXED، root/global cascade یا protected freeze را تغییر
+نمی‌دهد.
+
 ## What is validated by this correction
 
 - JSON schema 3 parse می‌شود.
@@ -75,7 +90,7 @@ Vazirmatn و `font-synthesis:none` را بر route vnode می‌گذارد. `fon
 - ۹ access profile دقیق تعریف شده و هر route برای هر profile یک outcome و `evidenceRefs` دارد.
 - تعداد واقعی outcomeهای موردانتظار ۲۷۰ است.
 - چهار component canonical outcome مدیر میانی به source/test `AdminView` متصل‌اند.
-- `executedFullMatrixCellCount=0` است؛ پنج partial synthetic slice جداگانه ثبت شده‌اند اما
+- `executedFullMatrixCellCount=0` است؛ شش partial synthetic slice جداگانه ثبت شده‌اند اما
   به full matrix یا viewport/state/interaction/environment expansion افزوده نشده‌اند.
 - نقش‌های واقعی از contextهای customer/accountant/owner جدا شده‌اند.
 
@@ -84,7 +99,7 @@ Vazirmatn و `font-synthesis:none` را بر route vnode می‌گذارد. `fon
 ## Focused checks and bounded browser receipts on 2026-08-13
 
 - `jq` parse/invariant check روی `ACCEPTANCE_MATRIX.json`: ۳۰ route، ۹ profile،
-  ۲۷۰ outcome دارای `evidenceRefs` معتبر، چهار component outcome، پنج slice محدود، و صفر full-acceptance cell.
+  ۲۷۰ outcome دارای `evidenceRefs` معتبر، چهار component outcome، شش slice محدود، و صفر full-acceptance cell.
   Evidence: [ACCEPTANCE_MATRIX.json](ACCEPTANCE_MATRIX.json).
 - `npm run test:unit:run -- src/router/index.test.ts src/utils/auth.test.ts`: pass؛
   ۲ فایل و ۴۲ تست. Evidence source:
@@ -129,6 +144,18 @@ NONE را marker‌دار نگه داشتند. Telegram block، WebSocket 403 م
 diagnosticهای fixture-only هستند؛ این receipt full browser acceptance نیست و به full matrix
 افزوده نمی‌شود.
 
+receipt ششم در [STAGE8_AUTH_VIEWPORT_CONTAINMENT_EXECUTION_RECEIPT.json](STAGE8_AUTH_VIEWPORT_CONTAINMENT_EXECUTION_RECEIPT.json)
+به source `55f00218` bind است: full serial `155 files / 1762 tests / 0 failed`، production build
+(`2159` module و `160` PWA entry)، `vue-tsc`، `guard:ui` و diff check همگی pass شدند. browser
+local/synthetic ۱۴ scenario را پوشش داد: چهار opt-in public/focused auth flow در `390×844` و
+`1440×900` (۸ flow)، همان چهار flow در reduced-motion `390×844` (۴ flow)، و SystemRecovery
+credentialed در هر دو viewport (۲ flow). چهار opt-in viewport را پر کردند، focus-visible و
+document/route overflow نداشتند و page error صفر بود؛ SystemRecovery modifier ندارد و daily nav
+بدون collision ماند. The 14-case capture recorded 10 WebSocket-related fixture console diagnostics
+(6 setup-password; 4 credentialed SystemRecovery) with no backend; excluded from layout/interaction
+conclusions and no clean-console claim. این receipt full browser یا full matrix acceptance نیست و به
+full matrix افزوده نمی‌شود.
+
 ## Live Figma reference, separately bounded
 
 مرجع live/editable در file `z8jgJxST4O2APzWnlyP9gv`، page `486:1455`، section `508:95` و
@@ -149,6 +176,14 @@ provenance baseline `ec1cc82f` و implementation `338918d5` ثبت شده است
 قابل‌ویرایش، protected-baseline-pending است؛ audit geometry و contrast آن pass و دادهٔ حساس
 مشاهده نشده است. این مرجع نه owner-approved، نه visual freeze، و نه final acceptance یا evidence
 runtime/browser است.
+
+مرجع generic auth-containment در همان file، section `567:1561` و board
+`567:1562` با frameهای `390×844` و `1440×900` DRAFT زنده/قابل‌ویرایش است. هر دو frame و board
+clip دارند؛ textها Vazirmatn Regular/Medium/SemiBold/Bold، escape مرئی صفر، و review بصری بدون
+crop/overlap است. دو instance desktop به Form Field و primary Button متصل‌اند و کمترین contrast
+نمایش‌داده‌شدهٔ white/action `4.55:1` است. به‌دلیل policy، board فقط محتوای generic امن دارد و
+عمداً commit/tree/hash/route/test/harness/local-path/URL/token/deploy/Sites را نگه نمی‌دارد. این
+مرجع source-bound نیست و نه freeze، نه final acceptance و نه evidence runtime/browser است.
 
 ## Historical technical records referenced, not overwritten or promoted here
 
