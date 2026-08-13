@@ -1,4 +1,4 @@
-# Validation — Stage 8 traceability and bounded 8A/8B/auth-containment evidence
+# Validation — Stage 8 traceability and bounded 8A/8B/auth-containment/directory-profile evidence
 
 ## Access-policy source binding
 
@@ -83,6 +83,20 @@ hash source/test/guardهای مرتبط، از جمله `AuthFlowShell`، چها
 ثبت شده‌اند. این binding مسیرهای FULL/MIXED، root/global cascade یا protected freeze را تغییر
 نمی‌دهد.
 
+## Current directory/profile rebaseline source binding
+
+`601b4005d80ef265afaaa6a06a43b48c44c7ca90` / tree
+`9d3eedd65a01a190bd1899364ebd7a4a8b060ce5`، source manifest و dist snapshot اجرای browser
+محدود جاری را bind می‌کند. این source binding شامل `App.vue`، router/index و UI route contract،
+`AdminView`، view/componentهای profile و directory، `AppListItem` و CSSهای V2 است؛ SHA-256 هر
+۱۲ source در [STAGE8_DIRECTORY_PROFILE_REBASELINE_EXECUTION_RECEIPT.json](STAGE8_DIRECTORY_PROFILE_REBASELINE_EXECUTION_RECEIPT.json)
+ثبت شده است. report همین commit/tree، همان hashهای source و dist `169` فایلی را پیش و پس از run
+یکسان و clean ثبت کرد.
+
+این receipt مستقل از و بعد از record تاریخی `4415b743` است. فایل
+[STAGE8A_EXECUTION_RECEIPTS.json](STAGE8A_EXECUTION_RECEIPTS.json)، source/tree/hashهای تاریخی آن
+و freeze protected surfaces در این rebaseline تغییر، overwrite یا promote نشده‌اند.
+
 ## What is validated by this correction
 
 - JSON schema 3 parse می‌شود.
@@ -90,7 +104,7 @@ hash source/test/guardهای مرتبط، از جمله `AuthFlowShell`، چها
 - ۹ access profile دقیق تعریف شده و هر route برای هر profile یک outcome و `evidenceRefs` دارد.
 - تعداد واقعی outcomeهای موردانتظار ۲۷۰ است.
 - چهار component canonical outcome مدیر میانی به source/test `AdminView` متصل‌اند.
-- `executedFullMatrixCellCount=0` است؛ شش partial synthetic slice جداگانه ثبت شده‌اند اما
+- `executedFullMatrixCellCount=0` است؛ هفت partial synthetic slice جداگانه ثبت شده‌اند اما
   به full matrix یا viewport/state/interaction/environment expansion افزوده نشده‌اند.
 - نقش‌های واقعی از contextهای customer/accountant/owner جدا شده‌اند.
 
@@ -99,7 +113,7 @@ hash source/test/guardهای مرتبط، از جمله `AuthFlowShell`، چها
 ## Focused checks and bounded browser receipts on 2026-08-13
 
 - `jq` parse/invariant check روی `ACCEPTANCE_MATRIX.json`: ۳۰ route، ۹ profile،
-  ۲۷۰ outcome دارای `evidenceRefs` معتبر، چهار component outcome، شش slice محدود، و صفر full-acceptance cell.
+  ۲۷۰ outcome دارای `evidenceRefs` معتبر، چهار component outcome، هفت slice محدود، و صفر full-acceptance cell.
   Evidence: [ACCEPTANCE_MATRIX.json](ACCEPTANCE_MATRIX.json).
 - `npm run test:unit:run -- src/router/index.test.ts src/utils/auth.test.ts`: pass؛
   ۲ فایل و ۴۲ تست. Evidence source:
@@ -111,8 +125,8 @@ hash source/test/guardهای مرتبط، از جمله `AuthFlowShell`، چها
 [STAGE8A_EXECUTION_RECEIPTS.json](STAGE8A_EXECUTION_RECEIPTS.json) چهار slice redacted را
 ثبت می‌کند: ۴۸/۴۸ scenario cell دسترسی/shell در `390×844`، recovery محدود directory/profile
 در viewportهای `360/390/414/430/1440`، و slice رفتاری route-first در source `31c69d5a`.
-slice دوم فقط evidence تاریخی source `4415b743` است؛ پس از آن یک تغییر محلی P1 ایجاد شده و
-validation آن pending است. slice جدید با delayed response `550ms`، چهار scenario (pointer/Enter در ۳۹۰، pointer در ۱۴۴۰،
+slice دوم فقط evidence تاریخی source `4415b743` است؛ qualifier pending در receipt تاریخی همان
+زمان را ثبت می‌کند و با rebaseline مستقل جاری جایگزین یا promote نشده است. slice جدید با delayed response `550ms`، چهار scenario (pointer/Enter در ۳۹۰، pointer در ۱۴۴۰،
 و deep-link مدیر میانی) و ۳۳ assertion اجرا شد: هر سه گذار directory دقیقاً یک `GET /api/users/`
 با ۲۰۰ کامل/non-aborted، صفر requestfailed/`ERR_ABORTED`، و حداکثر یک UserManager/list مرئی
 داشتند؛ deep-link denied به `/admin` canonical شد و CommodityManager یا commodity API نداشت.
@@ -156,14 +170,36 @@ document/route overflow نداشتند و page error صفر بود؛ SystemRecov
 conclusions and no clean-console claim. این receipt full browser یا full matrix acceptance نیست و به
 full matrix افزوده نمی‌شود.
 
+receipt هفتم در [STAGE8_DIRECTORY_PROFILE_REBASELINE_EXECUTION_RECEIPT.json](STAGE8_DIRECTORY_PROFILE_REBASELINE_EXECUTION_RECEIPT.json)
+به source clean `601b4005` / tree `9d3eedd` bind است: ۴۰ scenario شامل ۲۰ route×viewport
+normal، ۸ loading/error recovery، ۲ lifecycle، ۱ keyboard journey، ۴ reduced-motion، ۴ CDP
+2× و ۱ container-threshold harness-only اجرا شد. route templateهای `/profile`، `/users/:id`،
+`/admin/users` و `/admin/users/:id` در viewportهای `360×740`، `390×844`، `414×896`،
+`430×932` و `1440×900` پوشش داشتند. source/tree/hash و dist `169` فایلی پیش و پس از run
+یکسان و clean بودند؛ overflow document/app، control مرئی بدون نام، page error، request failure،
+external request و unknown API غیرمنتظره صفر بود. lifecycle حداکثر یک UserManager
+mounted/visible، صفر root outgoing و دقیقاً یک user-list request کامل/non-aborted در هر گذار
+directory پوشیده‌شده داشت؛ keyboard return focus نیز روی control دارای label ماند. شش console
+diagnostic موردانتظار فقط از fixtureهای deliberate `404/500` recovery (از جمله retry warning)
+آمدند، جداگانه طبقه‌بندی و از نتیجهٔ layout/interaction کنار گذاشته شده‌اند؛ بنابراین این receipt
+ادعای clean-console ندارد. 2× فقط CDP visual-scale و probe threshold فقط harness-only است. هیچ
+artifact خام یا local path/URL در repository نگه‌داری نشده و این slice full
+matrix یا protected-surface behavior را attest نمی‌کند.
+
+مرجع Figma اختیاریِ generic directory/profile برای همین rebaseline، section `583:146`، scope
+`584:146`، mobile directory `584:147`، desktop rail `584:148` و mobile profile `584:149` است.
+این DRAFT زنده/قابل‌ویرایش محتوای synthetic/sanitized دارد؛ audit آن ۱۷ linked instance، ۶۳ text
+Vazirmatn، صفر visible overflow، حداقل contrast `5.01:1` و privacy review clear را ثبت می‌کند.
+نه visual freeze یا پذیرش نهایی است و نه evidence runtime/browser/accessibility.
+
 ## Live Figma reference, separately bounded
 
 مرجع live/editable در file `z8jgJxST4O2APzWnlyP9gv`، page `486:1455`، section `508:95` و
 frame `508:96` (`390×844`) audit محدود گذرانده است: ۲۷ text همگی Vazirmatn، ۷ UIUX instance
 متصل، ۴۹ node token-bound، صفر phone/email/URL/query ناایمن، و review بصری بدون crop/overlap.
-این فقط clean design reference با محتوای synthetic و source تاریخی `4415b743` است؛ تا validation
-محلی P1، هیچ claim دربارهٔ working tree جاری، runtime accessibility، screenshot freeze یا پذیرش
-نهایی از آن نتیجه نمی‌شود.
+این فقط clean design reference با محتوای synthetic و source تاریخی `4415b743` است؛ هیچ claim
+دربارهٔ working tree جاری، runtime accessibility، screenshot freeze یا پذیرش نهایی از آن نتیجه
+نمی‌شود. receipt جداگانهٔ جاری `601b4005` این board تاریخی را reuse یا promote نمی‌کند.
 
 مرجع invitation-presentation در همان file، page `321:18`، section `535:1455` و board
 `535:1456` به source `4beeade2` مربوط است. audit نهایی آن ۴۸ text Vazirmatn، ۱۸/۱۸ instance

@@ -8,16 +8,17 @@
 - branch: `condidate/webapp-ui-ux-redesign-v2`
 - access-policy snapshot: `8eccdd2177ea5e2b21710b3a8863eace40092c35`
 - component canonicalization snapshot: `7588d9c20b995244197d8de09392dd6a5f61b195`
-- historical bounded visual-recovery source: `4415b7431a6b67965d24c44f6f9f0e59e48ed422` (subsequent local P1 validation pending)
+- historical bounded visual-recovery source: `4415b7431a6b67965d24c44f6f9f0e59e48ed422` (historical record; not rewritten or promoted)
 - current bounded route-transition source: `31c69d5a5d2fb1e2c08d9647473d3612b9d85629` (evidence-only)
 - current bounded invitation-presentation source: `4beeade2f3aae4964f1964dedc00f47dfbcd0c05` (evidence-only and nonpromotable)
 - current bounded NONE-route typography source: `338918d56f57f7cb974a501b1c43cc22d6afc2b5` (evidence-only)
 - current bounded public/focused auth viewport-containment source: `55f00218295d7aa6f52f75b664544318684d2826` (evidence-only)
+- current bounded directory/profile rebaseline source: `601b4005d80ef265afaaa6a06a43b48c44c7ca90` (evidence-only)
 - authority: `stage8CompleteAuthority=false`
 - matrix status: `partial-browser-slice-executed-full-acceptance-pending`
 - expected-access coverage: ۳۰ مسیر × ۹ پروفایل دقیق = ۲۷۰ outcome صریح
 - full matrix execution: صفر سلول؛ viewport/state/interaction/environment هنوز فقط requirement هستند
-- partial synthetic evidence: چهار slice 8A، یک slice 8B typography و یک slice مستقل auth-containment با ۱۴ scenario ثبت شده‌اند؛ هیچ‌کدام به full matrix افزوده نمی‌شوند
+- partial synthetic evidence: چهار slice 8A، یک slice 8B typography، یک slice مستقل auth-containment با ۱۴ scenario و یک rebaseline مستقل directory/profile با ۴۰ scenario ثبت شده‌اند؛ هیچ‌کدام به full matrix افزوده نمی‌شوند
 - owner aesthetic acceptance: انجام نشده
 - merge: انجام نشده
 - production/staging/Sites: انجام نشده
@@ -38,7 +39,7 @@ guard فعلی علاوه بر نقش از `account_status`، `is_customer` و `
 هویت شیء پارامتری، حالت inactive/unavailable و پذیرش بصری باید جداگانه اجرا و evidence-bound
 شوند. هیچ cross-product ساختگی یا ادعای ۵۱٬۹۶۸ سلول در این بسته وجود ندارد.
 
-## شواهد محدود 8A، 8B و auth-containment
+## شواهد محدود 8A، 8B، auth-containment و directory/profile
 
 [STAGE8A_EXECUTION_RECEIPTS.json](STAGE8A_EXECUTION_RECEIPTS.json) تنها count، hash و
 source-revisionهای redacted چهار اجرای local/synthetic را نگه می‌دارد؛ screenshot، diagnostic،
@@ -48,7 +49,8 @@ trace یا مسیر محلی در repository ذخیره نشده است.
   این اجرا full matrix نیست.
 - slice بازیابی directory/profile در source تاریخی `4415b743`: مسیرهای `/profile`، `/users/:id`،
   `/admin/users` و `/admin/users/:id` در viewportهای محدود بررسی شده‌اند؛ این اجرا full
-  role×route acceptance نیست و validation تغییر محلی P1 پس از آن pending است.
+  role×route acceptance نیست و فقط یک record تاریخی است. rebaseline جاریِ جداگانه در source
+  `601b4005` این receipt تاریخی را تغییر، جایگزین یا promote نمی‌کند.
 - slice رفتاری route-first directory در source `31c69d5a`: چهار scenario local/synthetic production
   browser (pointer و Enter در ۳۹۰، pointer در ۱۴۴۰، و deep-link مدیر میانی) با ۳۳ assertion ثبت
   شده‌اند؛ ۳ گذار directory هرکدام دقیقاً یک `GET /api/users/` کامل و non-aborted داشته‌اند.
@@ -75,11 +77,31 @@ credentialed عمداً modifier نگرفت؛ base-height و daily navigation ب
 WebSocket-related fixture console diagnostics (6 setup-password; 4 credentialed SystemRecovery)
 with no backend; excluded from layout/interaction conclusions and no clean-console claim.
 
+[STAGE8_DIRECTORY_PROFILE_REBASELINE_EXECUTION_RECEIPT.json](STAGE8_DIRECTORY_PROFILE_REBASELINE_EXECUTION_RECEIPT.json)
+یک receipt مستقل local/synthetic و source-bound به `601b4005` است: ۴۰ scenario شامل ۲۰
+route×viewport عادی، ۸ loading/error recovery، دو lifecycle، یک keyboard journey، چهار
+reduced-motion، چهار CDP 2× و یک container-threshold harness-only اجرا شد. چهار route template
+directory/profile در scope بودند؛ source/tree/hash و dist پیش و پس از run یکسان و clean ثبت شده‌اند.
+overflow document/app، control مرئیِ بدون نام، page error، failed/external request و unknown API
+غیرمنتظره صفر بودند؛ lifecycle حداکثر یک UserManager مرئی/mounted و یک درخواست کامل user-list
+در هر گذار پوشیده‌شده داشت و focus بازگشت keyboard روی کنترل دارای label ماند. شش console
+diagnostic موردانتظار از fixtureهای injected 404/500 (از جمله retry warning) جداگانه طبقه‌بندی
+شده‌اند و از نتیجهٔ layout/interaction کنار گذاشته می‌شوند؛ این receipt هیچ ادعای clean-console
+ندارد. raw screenshot/trace/console/network artifact در repository ذخیره نشده و این slice به
+full matrix افزوده نمی‌شود.
+
+مرجع Figma اختیاریِ generic برای همین rebaseline، DRAFT زنده/قابل‌ویرایش با section `583:146`،
+scope `584:146`، mobile directory `584:147`، desktop rail `584:148` و mobile profile `584:149`
+است. محتوای synthetic/sanitized آن ۱۷ linked instance، ۶۳ text Vazirmatn، صفر visible overflow،
+حداقل contrast `5.01:1` و privacy review clear دارد. این مرجع نه visual freeze یا پذیرش نهایی
+است و نه evidence runtime/browser/accessibility.
+
 مرجع Figma زنده و قابل‌ویرایش در file `z8jgJxST4O2APzWnlyP9gv`، page `486:1455`، section
 `508:95` و frame `508:96` (`390×844`) ثبت شده است. audit محدود آن ۲۷ text با Vazirmatn،
 ۷ instance متصل UIUX، ۴۹ node token-bound، و صفر phone/email/URL/query ناایمن گزارش کرده است.
-این مرجع نه screenshot/hash-freeze است، نه evidence اجرای runtime، و نه پذیرش نهایی؛ تا validation
-P1، منبع تاریخی `4415b743` را نشان می‌دهد و ادعایی دربارهٔ working tree جاری ندارد.
+این مرجع نه screenshot/hash-freeze است، نه evidence اجرای runtime، و نه پذیرش نهایی؛ فقط منبع
+تاریخی `4415b743` را نشان می‌دهد و ادعایی دربارهٔ working tree جاری ندارد. receipt جداگانهٔ
+`601b4005` این board تاریخی را به مرجع جاری یا visual freeze تبدیل نمی‌کند.
 
 مرجع invitation-presentation در همان file، page `321:18`، section `535:1455` و board `535:1456`
 به source `4beeade2` متصل و توسط مالک تأیید شده، اما live/editable و غیر-freeze است. audit آن ۴۸
@@ -103,6 +125,7 @@ audit geometry و contrast آن pass و محتوایش عاری از دادهٔ 
 - [STAGE8A_EXECUTION_RECEIPTS.json](STAGE8A_EXECUTION_RECEIPTS.json)
 - [STAGE8B_TYPOGRAPHY_EXECUTION_RECEIPT.json](STAGE8B_TYPOGRAPHY_EXECUTION_RECEIPT.json)
 - [STAGE8_AUTH_VIEWPORT_CONTAINMENT_EXECUTION_RECEIPT.json](STAGE8_AUTH_VIEWPORT_CONTAINMENT_EXECUTION_RECEIPT.json)
+- [STAGE8_DIRECTORY_PROFILE_REBASELINE_EXECUTION_RECEIPT.json](STAGE8_DIRECTORY_PROFILE_REBASELINE_EXECUTION_RECEIPT.json)
 - [VISUAL_FREEZE_PROTECTED_SURFACES.json](VISUAL_FREEZE_PROTECTED_SURFACES.json)
 - [ROLLOUT_PLAN.md](ROLLOUT_PLAN.md)
 - [VALIDATION.md](VALIDATION.md)

@@ -12,7 +12,7 @@ source canonicalization کامپوننتی: `7588d9c20b995244197d8de09392dd6a5f6
 
 source تاریخی بازیابی محدود directory/profile: `4415b7431a6b67965d24c44f6f9f0e59e48ed422`
 
-(validation تغییر محلی P1 پس از آن pending است)
+(record تاریخیِ untouched است؛ rebaseline جاریِ مستقل زیر ثبت شده است)
 
 source محدود route-first directory-transition: `31c69d5a5d2fb1e2c08d9647473d3612b9d85629`
 (evidence-only؛ بدون افزایش full matrix)
@@ -25,6 +25,9 @@ source محدود NONE-route typography: `338918d56f57f7cb974a501b1c43cc22d6afc2
 
 source محدود public/focused auth viewport-containment: `55f00218295d7aa6f52f75b664544318684d2826`
 (evidence-only؛ بدون افزایش full matrix)
+
+source rebaseline جاری directory/profile: `601b4005d80ef265afaaa6a06a43b48c44c7ca90`
+(evidence-only؛ مستقل از receipt تاریخی `4415b743` و بدون افزایش full matrix)
 
 ## ۱. مجوز و حد آن
 
@@ -53,7 +56,7 @@ deep-link denied مدیر میانی (`/admin/channels`، `/admin/commodities`،
 تعداد سلول‌های پذیرش کامل اجراشده صفر است؛ viewport، state، interaction و environment هنوز
 requirement هستند و به cell-level evidence کامل متصل نشده‌اند. بازار/پیام‌رسان redesign نشده‌اند.
 
-## ۳. شواهد محدود 8A/8B/auth-containment و مرجع طراحی
+## ۳. شواهد محدود 8A/8B/auth-containment/directory-profile و مرجع طراحی
 
 منبع redacted: `docs/uiux-stage8-acceptance-rollout/STAGE8A_EXECUTION_RECEIPTS.json`
 
@@ -61,7 +64,8 @@ requirement هستند و به cell-level evidence کامل متصل نشده‌
   ۵۰ assertion؛ این مورد full matrix نیست و به `executedFullMatrixCellCount` افزوده نمی‌شود.
 - slice تاریخی directory/profile محلی و synthetic در source `4415b743`: `/profile`، `/users/:id`،
   `/admin/users` و `/admin/users/:id` در ۳۶۰/۳۹۰/۴۱۴/۴۳۰/۱۴۴۰ بررسی شدند؛ این مورد full
-  role×route acceptance نیست و validation تغییر محلی P1 پس از آن pending است.
+  role×route acceptance نیست و یک record تاریخیِ untouched است. rebaseline جاری در `601b4005`
+  receipt مستقل دارد و این record را overwrite، replace یا promote نمی‌کند.
 - slice رفتاری route-first directory در source `31c69d5a`: چهار scenario local/synthetic production
   browser (pointer و Enter در ۳۹۰، pointer در ۱۴۴۰، و `/admin/commodities` برای مدیر میانی) با
   ۳۳ assertion اجرا شد. سه گذار directory هرکدام دقیقاً یک `GET /api/users/` با پاسخ ۲۰۰ کامل و
@@ -87,6 +91,22 @@ requirement هستند و به cell-level evidence کامل متصل نشده‌
   console diagnostics (6 setup-password; 4 credentialed SystemRecovery) with no backend; excluded
   from layout/interaction conclusions and no clean-console claim. این slice evidence-only است و
   full matrix یا protected behavior را attest نمی‌کند.
+- rebaseline جاری directory/profile در source `601b4005`: ۴۰ scenario local/synthetic شامل ۲۰
+  route×viewport normal، هشت loading/error recovery، دو lifecycle، یک keyboard journey، چهار
+  reduced-motion، چهار CDP 2× و یک probe harness-only اجرا شد. `/profile`، `/users/:id`،
+  `/admin/users` و `/admin/users/:id` در `360×740`، `390×844`، `414×896`، `430×932` و
+  `1440×900` پوشش داشتند؛ source/tree/hash و dist پیش/پس از run یکسان و clean بودند. overflow
+  document/app، control بدون نام، page error، failed/external request و unknown API غیرمنتظره
+  صفر بود؛ lifecycle حداکثر یک UserManager مرئی/mounted و یک user-list request کامل/non-aborted
+  در هر گذار پوشیده‌شده داشت و keyboard return focus روی control دارای label ماند. شش console
+diagnostic موردانتظار از fixtureهای injected 404/500، شامل retry warning، طبقه‌بندی و از
+نتیجهٔ layout/interaction کنار گذاشته شده‌اند؛ این receipt ادعای clean-console ندارد. raw
+artifact ثبت نشده و این slice evidence-only است.
+- Figma اختیاری generic directory/profile: section `583:146`، scope `584:146`، mobile directory
+  `584:147`، desktop rail `584:148` و mobile profile `584:149`، یک DRAFT زنده/قابل‌ویرایش با
+  محتوای synthetic/sanitized است. audit: ۱۷ linked instance، ۶۳ text Vazirmatn، صفر visible
+  overflow، حداقل contrast `5.01:1` و privacy review clear. این target نه visual freeze یا
+  پذیرش نهایی است و نه evidence runtime/browser/accessibility.
 - Figma: file `z8jgJxST4O2APzWnlyP9gv`، page `486:1455`، section `508:95`، frame `508:96`
   (`390×844`) و provenance `511:151`. audit محدود: ۲۷ text با Vazirmatn، ۷ instance UIUX،
   ۴۹ node token-bound و صفر phone/email/URL/query ناایمن؛ review بصری بدون crop/overlap.
@@ -104,10 +124,10 @@ requirement هستند و به cell-level evidence کامل متصل نشده‌
   `4.55:1` است. board عمداً generic و بدون provenance داخلی، route/hash/test/harness/local-path/
   URL/token/deploy/Sites است؛ نه freeze، نه final acceptance و نه evidence runtime/browser است.
 
-این شش slice محدود و مرجع‌های Figma live/editable یا local/synthetic هستند؛ screenshot/hash-freeze، runtime
+این هفت slice محدود و مرجع‌های Figma live/editable یا local/synthetic هستند؛ screenshot/hash-freeze، runtime
 accessibility acceptance، sign-off زیبایی مالک، یا release authority نیستند. receipt/reference مبتنی
-بر `4415b743` تا validation P1 ادعایی دربارهٔ working tree جاری ندارند. artifact خام browser در
-repository ذخیره نشده و هیچ Sites action انجام نشده است.
+بر `4415b743` فقط historical هستند و ادعایی دربارهٔ working tree جاری ندارند. artifact خام browser
+در repository ذخیره نشده و هیچ Sites action انجام نشده است.
 
 ## ۴. رکورد تاریخی protected surfaces بازار و پیام‌رسان
 
@@ -133,7 +153,7 @@ Sites و production در این Stage شروع نشده‌اند.
 ## ۶. گیت بعدی (فنی و بصری)
 
 - ۲۷۰ نتیجهٔ موردانتظار مسیر×پروفایل به source متصل است؛
-- canonicalization مدیر میانی و شش slice محدود source-bound ثبت شده‌اند، اما full matrix همچنان صفر است؛
+- canonicalization مدیر میانی و هفت slice محدود source-bound ثبت شده‌اند، اما full matrix همچنان صفر است؛
 - protected-surface hashهای تاریخی overwrite نشده‌اند؛
 - اجرای واقعی viewport/state/interaction/environment و sign-off زیبایی مالک هنوز pending است؛
 - عرضه فقط به‌صورت مدل تیمی و rollback-safe توصیف شده و شروع نشده است؛

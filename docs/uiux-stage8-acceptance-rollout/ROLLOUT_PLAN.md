@@ -3,9 +3,10 @@
 این سند برنامه است، نه دستور اجرا. هیچ staging یا productionای از روی آن شروع نمی‌شود.
 `ACCEPTANCE_MATRIX.json` اکنون ۲۷۰ outcome موردانتظار guard و چهار canonicalization
 کامپوننتی را رهگیری می‌کند. چهار slice 8A در `STAGE8A_EXECUTION_RECEIPTS.json`، یک slice
-8B در `STAGE8B_TYPOGRAPHY_EXECUTION_RECEIPT.json` و یک slice مستقل auth-containment در
-`STAGE8_AUTH_VIEWPORT_CONTAINMENT_EXECUTION_RECEIPT.json` ثبت شده‌اند، اما هیچ‌کدام نتیجهٔ
-اجرای پذیرش تیمی یا authority عرضه نیستند.
+8B در `STAGE8B_TYPOGRAPHY_EXECUTION_RECEIPT.json`، یک slice مستقل auth-containment در
+`STAGE8_AUTH_VIEWPORT_CONTAINMENT_EXECUTION_RECEIPT.json` و یک rebaseline مستقل current
+directory/profile در `STAGE8_DIRECTORY_PROFILE_REBASELINE_EXECUTION_RECEIPT.json` ثبت شده‌اند؛
+هیچ‌کدام نتیجهٔ اجرای پذیرش تیمی یا authority عرضه نیستند.
 
 ## پیش‌شرط تبدیل draft به پذیرش
 
@@ -23,6 +24,9 @@
 - receipt auth-containment فقط opt-in صریحِ public/focused `AuthFlowShell` را توصیف می‌کند؛
   SystemRecovery credentialed بدون modifier و با daily navigation می‌ماند. این receipt هرگز
   routeهای FULL/MIXED، root/global cascade یا `executedFullMatrixCellCount` را گسترش نمی‌دهد.
+- rebaseline current directory/profile فقط receipt جداگانهٔ source-bound `601b4005` است؛ receipt
+  تاریخی `4415b743` را overwrite، promote یا به acceptance تبدیل نمی‌کند. ۴۰ scenario محدود آن
+  و diagnosticهای recovery طبقه‌بندی‌شده به `executedFullMatrixCellCount` افزوده نمی‌شوند.
 - مرجع Figma زنده فقط برای هم‌راستایی design است؛ پیش از اجرای browser قابل‌تکرار، شاهد runtime
   یا visual freeze نیست.
 - زیبایی و یکپارچگی UI/UX باید با sign-off صریح مالک ثبت شود؛ سبز بودن test فنی جای آن نیست.

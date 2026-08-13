@@ -1,0 +1,145 @@
+{
+  "schemaVersion": 1,
+  "stage": "8A-directory-profile-current-rebaseline",
+  "status": "passed-promotable-bounded-current-directory-profile-rebaseline-not-acceptance",
+  "branch": "condidate/webapp-ui-ux-redesign-v2",
+  "runId": "directory-profile-current-revalidation-2026-08-13T213346622Z",
+  "implementation": {
+    "title": "Current directory/profile local-synthetic browser rebaseline",
+    "sourceSnapshot": {
+      "commit": "601b4005d80ef265afaaa6a06a43b48c44c7ca90",
+      "tree": "9d3eedd65a01a190bd1899364ebd7a4a8b060ce5",
+      "sourceHashes": {
+        "frontend/src/App.vue": "99abfc56129f2689240375bc47dc1d337946d298cf480b4a189d47bf52b2f21d",
+        "frontend/src/router/index.ts": "a85c2432ff6a4ad0230ee63e58d54dce7aaa5d1a781b50efa3b44d0fcf8c051c",
+        "frontend/src/router/uiRouteContract.ts": "8e7495a05dfbf6b36bcc242af1b20919bef56a8bd0ed9458360d36cf79fba144",
+        "frontend/src/views/AdminView.vue": "b69c3b6c1d34788449f40c1394dbc8981f63597044ad37c24268d76f5f385c0a",
+        "frontend/src/views/ProfileView.vue": "f1e6bae7901a5dc134427b32154ea631413ed65c7235c8d18cffe01e2555fce6",
+        "frontend/src/views/PublicProfileView.vue": "30bc4ea5262f5aa48c1e9d4db3a0f71a08c129a32f115afb64fab86a919993a3",
+        "frontend/src/components/UserManager.vue": "6f59e0a3f5d776892b535620943218bf40e52bc26ed05ec11b04a8d4058da078",
+        "frontend/src/components/UserProfile.vue": "520567e309445711706cd0e9d6f4fdee5d953d314fbd101fbd15e49dd56c30cd",
+        "frontend/src/components/PublicProfile.vue": "57a1e1a77c4b05bfb86940d1460aaf7c1f6fef6edd6de27bf82b67d99f0b9bf8",
+        "frontend/src/components/ui/AppListItem.vue": "c7074fd219cc79f04591c807e25b99604352a20893726acb8aed59a1a77076ab",
+        "frontend/src/assets/main.css": "a0188ce01a74150799cae2b5d4696391586892bc8ddd8eccc76aff6918634111",
+        "frontend/src/styles/design-system-v2.components.css": "0952573ea9e61408ed47b6ae0ba3384b09f67c9b820bede7d366377c7989f01f"
+      }
+    },
+    "distSnapshot": {
+      "sha256": "f9000aa35293ecf9ab6259b9e06ca2be2d8ddd257f651f1c65ea8c9e4c641096",
+      "fileCount": 169
+    }
+  },
+  "validation": {
+    "sourceBinding": "The supplied browser report recorded the same clean commit, tree, source hashes, and dist snapshot before and after the run.",
+    "browserReportVerdict": "PASS-promotable-bounded-synthetic-browser-evidence"
+  },
+  "browserReceipt": {
+    "environment": "local-synthetic-browser with a direct static-and-API server and no production network",
+    "reportSha256": "5063bdd4252b1531601fec9babcc9f243e91caf9e29f66d77f8ed34f08be8b3d",
+    "executedScenarioCount": 40,
+    "scenarioAccounting": {
+      "normalRouteViewportScenarios": 20,
+      "loadingAndErrorRecoveryScenarios": 8,
+      "lifecycleScenarios": 2,
+      "keyboardJourneyScenarios": 1,
+      "reducedMotionScenarios": 4,
+      "zoom200Scenarios": 4,
+      "containerThresholdProbeScenarios": 1
+    },
+    "coverage": {
+      "routeTemplates": [
+        "/profile",
+        "/users/:id",
+        "/admin/users",
+        "/admin/users/:id"
+      ],
+      "normalViewportsCssPx": [
+        {
+          "width": 360,
+          "height": 740
+        },
+        {
+          "width": 390,
+          "height": 844
+        },
+        {
+          "width": 414,
+          "height": 896
+        },
+        {
+          "width": 430,
+          "height": 932
+        },
+        {
+          "width": 1440,
+          "height": 900
+        }
+      ],
+      "recoveryCoverage": "Four loading and four injected 404/500 recovery scenarios across the scoped route templates.",
+      "lifecycleCoverage": "Pointer menu-to-directory at 390x844 and keyboard Enter menu-to-directory with reduced motion at 1440x900.",
+      "keyboardJourneyCoverage": "Keyboard directory-to-profile-to-directory return focus check.",
+      "reducedMotionCoverage": "All four scoped route templates at 390x844.",
+      "zoom200Coverage": "All four scoped route templates at CDP visual scale 2 on 390x844.",
+      "containerThresholdCoverage": "One harness-only CSS threshold probe; it is not a production-layout claim."
+    },
+    "result": {
+      "documentOrAppHorizontalOverflowObserved": false,
+      "unnamedVisibleControlsObserved": false,
+      "computedRouteTypography": "Vazirmatn, Tahoma, Arial, sans-serif; 16px/24px; font-synthesis none",
+      "lifecycleMaximumMountedOrVisibleUserManagerCount": 1,
+      "lifecycleMaximumOutgoingRootUserManagerCount": 0,
+      "lifecycleCompletedNonAbortedUserListRequestsPerDirectoryTransition": 1,
+      "keyboardReturnFocus": "A valid labeled button remained focused after the covered return journey.",
+      "reducedMotionAndZoom200OverflowObserved": false
+    },
+    "diagnostics": {
+      "runtimePageErrorCount": 0,
+      "unexpectedConsoleDiagnosticCount": 0,
+      "unexpectedRequestFailedCount": 0,
+      "unexpectedExternalRequestCount": 0,
+      "unknownSyntheticApiCount": 0,
+      "expectedRecoveryConsoleDiagnosticCount": 6,
+      "expectedRecoveryConsoleDiagnosticByScenario": {
+        "directory500": 1,
+        "detail404": 1,
+        "profile500": 3,
+        "publicProfile404": 1
+      },
+      "boundary": "The six expected console diagnostics came from deliberately injected 404/500 recovery fixtures, including one expected retry warning. They are explicitly classified and excluded from the layout/interaction conclusion; this receipt makes no clean-console claim."
+    },
+    "artifactAccounting": {
+      "reportedScreenshotArtifactCount": 30,
+      "rawArtifactsRetainedInRepository": false
+    },
+    "limitations": [
+      "This is a bounded local/synthetic browser receipt, not a full role-by-route, viewport, state, interaction, or environment matrix execution.",
+      "It covers only the four scoped directory/profile route templates and expressly excludes the report's FULL and MIXED route set.",
+      "The 200% check uses CDP visual scale and does not certify every native-browser zoom implementation.",
+      "The container-threshold check uses harness-only CSS injection and is not a production-layout claim.",
+      "No raw screenshot, trace, console log, network log, local path, local URL, or fixture payload is retained in this repository receipt."
+    ]
+  },
+  "figmaReference": {
+    "status": "optional-live-editable-generic-draft-not-final-or-runtime-evidence",
+    "sectionNodeId": "583:146",
+    "scopeNodeId": "584:146",
+    "mobileDirectoryFrameNodeId": "584:147",
+    "desktopRailFrameNodeId": "584:148",
+    "mobileProfileFrameNodeId": "584:149",
+    "contentBoundary": "A synthetic generic directory/profile visual target with sanitized content.",
+    "audit": {
+      "linkedInstanceCount": 17,
+      "vazirmatnTextNodeCount": 63,
+      "visibleOverflowCount": 0,
+      "minimumContrastRatio": 5.01,
+      "privacyReview": "clear"
+    },
+    "limitations": [
+      "The board is live and editable DRAFT; it is not a final visual freeze or acceptance.",
+      "The generic synthetic visual target is not runtime, browser, accessibility, owner-sign-off, merge, Sites, staging, or production authority."
+    ]
+  },
+  "countsTowardFullMatrixAcceptance": false,
+  "claimBoundary": "This bounded source-bound current directory/profile rebaseline does not alter the historical 4415b743 receipt, create full Stage 8 acceptance, owner aesthetic sign-off, a visual freeze, merge authority, Sites authority, staging authority, or production authority.",
+  "retention": "Only redacted counts, source revisions, source hashes, dist/report hashes, claim boundaries, and safe generic Figma node IDs/audit counts are retained."
+}

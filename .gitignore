@@ -10,6 +10,7 @@ docs/uiux-stage8-acceptance-rollout/*
 !docs/uiux-stage8-acceptance-rollout/STAGE8A_EXECUTION_RECEIPTS.json
 !docs/uiux-stage8-acceptance-rollout/STAGE8B_TYPOGRAPHY_EXECUTION_RECEIPT.json
 !docs/uiux-stage8-acceptance-rollout/STAGE8_AUTH_VIEWPORT_CONTAINMENT_EXECUTION_RECEIPT.json
+!docs/uiux-stage8-acceptance-rollout/STAGE8_DIRECTORY_PROFILE_REBASELINE_EXECUTION_RECEIPT.json
 !docs/AUTOMATED_TEST_CHECKLIST.md
 !docs/CROSS_SERVER_SYNC_PARITY_AUDIT_AND_ROADMAP.md
 !docs/MESSENGER_REFACTORING_ROADMAP.md

@@ -91,7 +91,8 @@
     "executionEvidenceRefs": [
       "stage8a-execution-receipts",
       "stage8b-typography-execution-receipt",
-      "stage8-auth-viewport-containment-execution-receipt"
+      "stage8-auth-viewport-containment-execution-receipt",
+      "stage8-directory-profile-current-rebaseline-execution-receipt"
     ]
   },
   "cellAccounting": {
@@ -100,8 +101,8 @@
     "enumeratedExpectedAccessCells": 270,
     "viewportStateInteractionEnvironmentExpansionPerformed": false,
     "executedFullMatrixCellCount": 0,
-    "partialSyntheticBrowserSliceCount": 6,
-    "partialSyntheticBrowserScenarioCellCount": 84,
+    "partialSyntheticBrowserSliceCount": 7,
+    "partialSyntheticBrowserScenarioCellCount": 124,
     "partialSyntheticBrowserCellsCountTowardFullMatrix": false
   },
   "partialSyntheticBrowserSlices": [
@@ -323,6 +324,54 @@
       "limitations": [
         "This is a bounded local/synthetic browser slice, not a full role-by-route, viewport, state, interaction, or environment matrix execution.",
         "It verifies only the explicit public/focused AuthFlowShell opt-ins and a credentialed SystemRecovery regression; it does not establish all NONE routes or protected-surface behavior.",
+        "It creates no aesthetic sign-off, visual freeze, merge, Sites, staging, or production authority."
+      ]
+    },
+    {
+      "id": "stage8-directory-profile-current-rebaseline",
+      "receiptId": "directory-profile-current-revalidation-2026-08-13T213346622Z",
+      "evidenceRef": "stage8-directory-profile-current-rebaseline-execution-receipt",
+      "sourceEvidenceRef": "stage8-directory-profile-current-rebaseline-runtime",
+      "sourceCommit": "601b4005d80ef265afaaa6a06a43b48c44c7ca90",
+      "sourceTree": "9d3eedd65a01a190bd1899364ebd7a4a8b060ce5",
+      "evidenceStatus": "passed-promotable-bounded-synthetic-browser-evidence",
+      "countsTowardFullMatrixAcceptance": false,
+      "scope": {
+        "environment": "local-synthetic-browser-direct-static-and-api-server",
+        "routeTemplates": [
+          "/profile",
+          "/users/:id",
+          "/admin/users",
+          "/admin/users/:id"
+        ],
+        "normalViewportCount": 5,
+        "normalRouteViewportScenarioCount": 20,
+        "loadingAndErrorRecoveryScenarioCount": 8,
+        "lifecycleScenarioCount": 2,
+        "keyboardJourneyScenarioCount": 1,
+        "reducedMotionScenarioCount": 4,
+        "zoom200ScenarioCount": 4,
+        "containerThresholdProbeScenarioCount": 1,
+        "executedScenarioCount": 40
+      },
+      "result": {
+        "runtimePageErrorCount": 0,
+        "unexpectedConsoleDiagnosticCount": 0,
+        "unexpectedRequestFailedCount": 0,
+        "unexpectedExternalRequestCount": 0,
+        "unknownSyntheticApiCount": 0,
+        "expectedRecoveryConsoleDiagnosticCount": 6,
+        "horizontalOverflowObserved": false,
+        "unnamedVisibleControlsObserved": false,
+        "lifecycleUserManagerBoundary": "maximum mounted/visible=1; outgoing root maximum=0; one completed non-aborted user-list request per covered directory transition",
+        "keyboardReturnFocus": "passed on a valid labeled control",
+        "reducedMotionAndZoom200OverflowObserved": false
+      },
+      "limitations": [
+        "This is a bounded current local/synthetic browser rebaseline, not a full role-by-route, viewport, state, interaction, or environment matrix execution.",
+        "It is distinct from and does not alter or promote the historical 4415b743 directory/profile receipt.",
+        "Six expected console diagnostics from injected 404/500 recovery fixtures are classified separately; this slice makes no clean-console claim.",
+        "The CDP 200% visual-scale and harness-only container-threshold probes do not certify every native-browser zoom or production-layout condition.",
         "It creates no aesthetic sign-off, visual freeze, merge, Sites, staging, or production authority."
       ]
     }
@@ -789,6 +838,86 @@
       "kind": "curated-evidence-only",
       "path": "docs/uiux-stage8-acceptance-rollout/STAGE8_AUTH_VIEWPORT_CONTAINMENT_EXECUTION_RECEIPT.json",
       "claim": "One bounded local/synthetic public/focused auth viewport-containment slice and a generic live editable Figma draft; neither is full Stage 8 acceptance or release authority."
+    },
+    "stage8-directory-profile-current-rebaseline-runtime": {
+      "id": "stage8-directory-profile-current-rebaseline-runtime",
+      "kind": "runtime-source-manifest",
+      "sourceSnapshot": {
+        "commit": "601b4005d80ef265afaaa6a06a43b48c44c7ca90",
+        "tree": "9d3eedd65a01a190bd1899364ebd7a4a8b060ce5"
+      },
+      "distSnapshot": {
+        "sha256": "f9000aa35293ecf9ab6259b9e06ca2be2d8ddd257f651f1c65ea8c9e4c641096",
+        "fileCount": 169
+      },
+      "sources": [
+        {
+          "path": "frontend/src/App.vue",
+          "sha256": "99abfc56129f2689240375bc47dc1d337946d298cf480b4a189d47bf52b2f21d",
+          "claim": "Included in the supplied browser report's stable source manifest for this bounded observed slice."
+        },
+        {
+          "path": "frontend/src/router/index.ts",
+          "sha256": "a85c2432ff6a4ad0230ee63e58d54dce7aaa5d1a781b50efa3b44d0fcf8c051c",
+          "claim": "Included in the supplied browser report's stable source manifest for this bounded observed slice."
+        },
+        {
+          "path": "frontend/src/router/uiRouteContract.ts",
+          "sha256": "8e7495a05dfbf6b36bcc242af1b20919bef56a8bd0ed9458360d36cf79fba144",
+          "claim": "Included in the supplied browser report's stable source manifest for this bounded observed slice."
+        },
+        {
+          "path": "frontend/src/views/AdminView.vue",
+          "sha256": "b69c3b6c1d34788449f40c1394dbc8981f63597044ad37c24268d76f5f385c0a",
+          "claim": "Included in the supplied browser report's stable source manifest for this bounded observed slice."
+        },
+        {
+          "path": "frontend/src/views/ProfileView.vue",
+          "sha256": "f1e6bae7901a5dc134427b32154ea631413ed65c7235c8d18cffe01e2555fce6",
+          "claim": "Included in the supplied browser report's stable source manifest for this bounded observed slice."
+        },
+        {
+          "path": "frontend/src/views/PublicProfileView.vue",
+          "sha256": "30bc4ea5262f5aa48c1e9d4db3a0f71a08c129a32f115afb64fab86a919993a3",
+          "claim": "Included in the supplied browser report's stable source manifest for this bounded observed slice."
+        },
+        {
+          "path": "frontend/src/components/UserManager.vue",
+          "sha256": "6f59e0a3f5d776892b535620943218bf40e52bc26ed05ec11b04a8d4058da078",
+          "claim": "Included in the supplied browser report's stable source manifest for this bounded observed slice."
+        },
+        {
+          "path": "frontend/src/components/UserProfile.vue",
+          "sha256": "520567e309445711706cd0e9d6f4fdee5d953d314fbd101fbd15e49dd56c30cd",
+          "claim": "Included in the supplied browser report's stable source manifest for this bounded observed slice."
+        },
+        {
+          "path": "frontend/src/components/PublicProfile.vue",
+          "sha256": "57a1e1a77c4b05bfb86940d1460aaf7c1f6fef6edd6de27bf82b67d99f0b9bf8",
+          "claim": "Included in the supplied browser report's stable source manifest for this bounded observed slice."
+        },
+        {
+          "path": "frontend/src/components/ui/AppListItem.vue",
+          "sha256": "c7074fd219cc79f04591c807e25b99604352a20893726acb8aed59a1a77076ab",
+          "claim": "Included in the supplied browser report's stable source manifest for this bounded observed slice."
+        },
+        {
+          "path": "frontend/src/assets/main.css",
+          "sha256": "a0188ce01a74150799cae2b5d4696391586892bc8ddd8eccc76aff6918634111",
+          "claim": "Included in the supplied browser report's stable source manifest for this bounded observed slice."
+        },
+        {
+          "path": "frontend/src/styles/design-system-v2.components.css",
+          "sha256": "0952573ea9e61408ed47b6ae0ba3384b09f67c9b820bede7d366377c7989f01f",
+          "claim": "Included in the supplied browser report's stable source manifest for this bounded observed slice."
+        }
+      ]
+    },
+    "stage8-directory-profile-current-rebaseline-execution-receipt": {
+      "id": "stage8-directory-profile-current-rebaseline-execution-receipt",
+      "kind": "curated-evidence-only",
+      "path": "docs/uiux-stage8-acceptance-rollout/STAGE8_DIRECTORY_PROFILE_REBASELINE_EXECUTION_RECEIPT.json",
+      "claim": "One bounded current local/synthetic directory/profile rebaseline slice and an optional generic live editable Figma DRAFT; neither is full Stage 8 acceptance or release authority."
     },
     "stage3-evidence-manifest": {
       "id": "stage3-evidence-manifest",
