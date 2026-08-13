@@ -1,1512 +1,3262 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "stage": 8,
-  "status": "documented_matrix_not_production_acceptance",
+  "status": "traceability-draft-expected-access-not-executed-acceptance",
   "branch": "condidate/webapp-ui-ux-redesign-v2",
-  "sourceCommit": "ab0834aac3383e3c790c5865170ab9f007db235c",
-  "roles": [
+  "acceptanceAuthority": false,
+  "sourceSnapshot": {
+    "commit": "8eccdd2177ea5e2b21710b3a8863eace40092c35",
+    "tree": "6cba83c9c2a87672b2741d4a52500c7c6c4f197b",
+    "runtimeSourcesMatchCommit": true,
+    "runtimeSourceBindingSha256": "b140e9992c8b9e2e6f94db03236015e6975a55e2aa2d0b5155c4429537ba2e52",
+    "runtimeSourceHashes": {
+      "frontend/src/router/index.ts": "a85c2432ff6a4ad0230ee63e58d54dce7aaa5d1a781b50efa3b44d0fcf8c051c",
+      "frontend/src/router/uiRouteContract.ts": "8e7495a05dfbf6b36bcc242af1b20919bef56a8bd0ed9458360d36cf79fba144",
+      "frontend/src/utils/auth.ts": "f151144a8d18fe8fa1af78e9cbee72a7b35e512d2e8266454adc5f57a0873caa",
+      "models/user.py": "f3cf8930175d5d7ea8d57bc063e3fc0f17f1bc6d8659d5cd8184246c774bb18b"
+    }
+  },
+  "claimBoundary": "This file enumerates normal-case expected route-guard outcomes from checked-in source. It is not a record of executing every role/route/viewport/state cell, not owner aesthetic acceptance, and not merge or deployment authority.",
+  "dimensionCorrection": {
+    "previousProblem": "The prior schema treated customer, accountant, and group-lead as UserRole values and attached every profile to every route without an expected outcome.",
+    "currentModel": "Access profiles combine authentication, the persisted role, account status, and customer/accountant relationship flags because the route guard uses all of those inputs.",
+    "authoritativeUserRoles": [
+      "تماشا",
+      "عادی",
+      "پلیس",
+      "مدیر میانی",
+      "مدیر ارشد"
+    ],
+    "relationshipContextsAreNotRoles": [
+      "customer",
+      "accountant",
+      "owner"
+    ],
+    "evidenceRefs": [
+      "authoritative-role-domain",
+      "auth-guard-runtime"
+    ]
+  },
+  "normalCaseAssumptions": [
+    "guest has neither an access token nor a refresh token.",
+    "authenticated profiles have a valid token and the exact active authoritative identity shown in accessProfiles.",
+    "/api/auth/me authority lookup is ready when an access-specific guard needs it.",
+    "Parameterized route IDs are syntactically valid; component/API-level ownership and object authorization are outside this router-only matrix."
+  ],
+  "acceptanceDimensions": {
+    "status": "requirements-only-not-expanded-or-verified-by-this-matrix",
+    "viewports": {
+      "mobile": [
+        360,
+        375,
+        390,
+        414,
+        430
+      ],
+      "adaptive": [
+        768,
+        1024,
+        1440
+      ]
+    },
+    "states": [
+      "loading",
+      "empty",
+      "normal",
+      "dense",
+      "error",
+      "slow",
+      "offline",
+      "stale"
+    ],
+    "interactions": [
+      "touch",
+      "keyboard",
+      "zoom-200",
+      "reduced-motion"
+    ],
+    "environments": [
+      "mobile-browser",
+      "pwa",
+      "telegram-webview-non-messenger"
+    ],
+    "executionEvidenceRefs": []
+  },
+  "cellAccounting": {
+    "routeCount": 30,
+    "accessProfileCount": 9,
+    "enumeratedExpectedAccessCells": 270,
+    "viewportStateInteractionEnvironmentExpansionPerformed": false,
+    "executedFullMatrixCellCount": 0
+  },
+  "accessOutcomeDefinitions": {
+    "render-route": "The guard calls next() for the stated normal-case profile.",
+    "redirect-login": "The authenticated route stores a safe intended route and redirects to the named login route.",
+    "redirect-home": "An authenticated visit to /login redirects to /.",
+    "redirect-canonical": "The router record redirects to its named canonical route; the target guard still applies.",
+    "redirect-forbidden-recovery": "An authoritative access-specific denial redirects with the forbidden recovery outcome."
+  },
+  "accessProfiles": [
     {
       "id": "guest",
-      "label": "مهمان"
+      "label": "مهمان",
+      "authenticated": false,
+      "accountStatus": null,
+      "role": null,
+      "isCustomer": null,
+      "isAccountant": null,
+      "relationshipContext": null
+    },
+    {
+      "id": "watch",
+      "label": "تماشا",
+      "authenticated": true,
+      "accountStatus": "active",
+      "role": "تماشا",
+      "isCustomer": false,
+      "isAccountant": false,
+      "relationshipContext": null
     },
     {
       "id": "member",
-      "label": "عضو"
+      "label": "عادی",
+      "authenticated": true,
+      "accountStatus": "active",
+      "role": "عادی",
+      "isCustomer": false,
+      "isAccountant": false,
+      "relationshipContext": null
+    },
+    {
+      "id": "police",
+      "label": "پلیس",
+      "authenticated": true,
+      "accountStatus": "active",
+      "role": "پلیس",
+      "isCustomer": false,
+      "isAccountant": false,
+      "relationshipContext": null
     },
     {
       "id": "customer",
-      "label": "مشتری"
+      "label": "مشتری فعال (زمینهٔ رابطه‌ای)",
+      "authenticated": true,
+      "accountStatus": "active",
+      "role": "عادی",
+      "isCustomer": true,
+      "isAccountant": false,
+      "relationshipContext": "customer"
     },
     {
       "id": "accountant",
-      "label": "حسابدار"
+      "label": "حسابدار فعال (زمینهٔ رابطه‌ای)",
+      "authenticated": true,
+      "accountStatus": "active",
+      "role": "عادی",
+      "isCustomer": false,
+      "isAccountant": true,
+      "relationshipContext": "accountant"
     },
     {
-      "id": "group-lead",
-      "label": "سرگروه"
+      "id": "owner-context",
+      "label": "سرگروه/مالک فعال (پروفایل رابطه‌ای)",
+      "authenticated": true,
+      "accountStatus": "active",
+      "role": "عادی",
+      "isCustomer": false,
+      "isAccountant": false,
+      "relationshipContext": "owner",
+      "guardNote": "The current route guard has no owner flag; this profile is intentionally access-equivalent to member."
     },
     {
       "id": "middle-admin",
-      "label": "مدیر میانی"
+      "label": "مدیر میانی",
+      "authenticated": true,
+      "accountStatus": "active",
+      "role": "مدیر میانی",
+      "isCustomer": false,
+      "isAccountant": false,
+      "relationshipContext": null
     },
     {
       "id": "senior-admin",
-      "label": "مدیر ارشد"
+      "label": "مدیر ارشد",
+      "authenticated": true,
+      "accountStatus": "active",
+      "role": "مدیر ارشد",
+      "isCustomer": false,
+      "isAccountant": false,
+      "relationshipContext": null
     }
   ],
-  "viewports": {
-    "mobile": [
-      360,
-      375,
-      390,
-      414,
-      430
-    ],
-    "adaptive": [
-      768,
-      1024,
-      1440
-    ]
+  "nonProfileEdgeConditions": [
+    {
+      "condition": "Authentication refresh/check is temporarily unavailable on /login or any requiresAuth route.",
+      "expectedOutcome": {
+        "kind": "redirect-unavailable-recovery",
+        "targetName": "system-recovery",
+        "recoveryOutcome": "deep-link-failure"
+      },
+      "evidenceRefs": [
+        "auth-guard-runtime",
+        "auth-guard-tests"
+      ]
+    },
+    {
+      "condition": "An access-specific /api/auth/me probe is unavailable, malformed, non-authoritative, or times out.",
+      "expectedOutcome": {
+        "kind": "redirect-unavailable-recovery",
+        "targetName": "system-recovery",
+        "recoveryOutcome": "deep-link-failure"
+      },
+      "evidenceRefs": [
+        "auth-guard-runtime",
+        "auth-guard-tests"
+      ]
+    },
+    {
+      "condition": "An access-specific /api/auth/me probe returns HTTP 403.",
+      "expectedOutcome": {
+        "kind": "redirect-forbidden-recovery",
+        "targetName": "system-recovery",
+        "recoveryOutcome": "forbidden"
+      },
+      "evidenceRefs": [
+        "auth-guard-runtime",
+        "auth-guard-tests"
+      ]
+    },
+    {
+      "condition": "An authoritative identity is inactive on a requiresMarketAccess or requiresOwnerAccess route.",
+      "expectedOutcome": {
+        "kind": "redirect-forbidden-recovery",
+        "targetName": "system-recovery",
+        "recoveryOutcome": "forbidden"
+      },
+      "evidenceRefs": [
+        "auth-guard-runtime",
+        "auth-guard-tests"
+      ]
+    }
+  ],
+  "evidenceCatalog": {
+    "router-runtime": {
+      "id": "router-runtime",
+      "kind": "runtime-source",
+      "path": "frontend/src/router/index.ts",
+      "claim": "Route path, name, redirect, and access metadata source.",
+      "sha256": "a85c2432ff6a4ad0230ee63e58d54dce7aaa5d1a781b50efa3b44d0fcf8c051c"
+    },
+    "ui-route-contract": {
+      "id": "ui-route-contract",
+      "kind": "runtime-source",
+      "path": "frontend/src/router/uiRouteContract.ts",
+      "claim": "UI protection, shell, and V2 scope source.",
+      "sha256": "8e7495a05dfbf6b36bcc242af1b20919bef56a8bd0ed9458360d36cf79fba144"
+    },
+    "auth-guard-runtime": {
+      "id": "auth-guard-runtime",
+      "kind": "runtime-source",
+      "path": "frontend/src/utils/auth.ts",
+      "claim": "Authentication, admin, market, owner, forbidden, and unavailable outcomes source.",
+      "sha256": "f151144a8d18fe8fa1af78e9cbee72a7b35e512d2e8266454adc5f57a0873caa"
+    },
+    "authoritative-role-domain": {
+      "id": "authoritative-role-domain",
+      "kind": "runtime-source",
+      "path": "models/user.py",
+      "claim": "Persisted UserRole values source; customer/accountant/owner are not additional UserRole values.",
+      "sha256": "f3cf8930175d5d7ea8d57bc063e3fc0f17f1bc6d8659d5cd8184246c774bb18b"
+    },
+    "router-contract-tests": {
+      "id": "router-contract-tests",
+      "kind": "test-source",
+      "path": "frontend/src/router/index.test.ts",
+      "claim": "Route registration, metadata, canonical redirects, and catch-all ordering tests.",
+      "sha256": "0508ad94c1b5654ffafdfe726fdd147c35cfd6a13373941e36a1ad5fa7a5b87e"
+    },
+    "auth-guard-tests": {
+      "id": "auth-guard-tests",
+      "kind": "test-source",
+      "path": "frontend/src/utils/auth.test.ts",
+      "claim": "Guard policy tests for login, admin, market, owner, forbidden, and unavailable outcomes.",
+      "sha256": "cbc773d2db0e82ab48b2ed79b544d85e646cda2f2fe1bcaa924eec68982fb8e6"
+    },
+    "stage3-evidence-manifest": {
+      "id": "stage3-evidence-manifest",
+      "kind": "historical-evidence",
+      "path": "docs/uiux-stage3-shell-auth-public-flows/EVIDENCE_MANIFEST.json",
+      "claim": "Prior Stage 3 evidence inventory; reference only, not Stage 8 acceptance.",
+      "sha256": "74c7e50643c1e5a739be5df95011c46098a2429d0cda1abbba8e9db1f069c820"
+    },
+    "stage4-evidence-manifest": {
+      "id": "stage4-evidence-manifest",
+      "kind": "historical-evidence",
+      "path": "docs/uiux-stage4-daily-core/EVIDENCE_MANIFEST.json",
+      "claim": "Prior Stage 4 evidence inventory; reference only, not Stage 8 acceptance.",
+      "sha256": "7a1a4a7da5c82f7c3744fba2f94adf0402dc6e6d5b47944234d2c0b266efdda8"
+    },
+    "stage5-evidence-manifest": {
+      "id": "stage5-evidence-manifest",
+      "kind": "historical-evidence",
+      "path": "docs/uiux-stage5-customer-accountant-workspaces/EVIDENCE_MANIFEST.json",
+      "claim": "Prior Stage 5 evidence inventory; reference only, not Stage 8 acceptance.",
+      "sha256": "8159b83bd80993cbcfcd4c5badc4dae4615714adfc30f5da18baf5d329e4bf04"
+    },
+    "stage6-evidence-inventory": {
+      "id": "stage6-evidence-inventory",
+      "kind": "historical-evidence",
+      "path": "docs/uiux-stage6-admin-profile/DELIVERED_SCOPE_EVIDENCE_INVENTORY.json",
+      "claim": "Curated Stage 6 scope inventory; explicitly not a full Stage 6 freeze or Stage 8 acceptance.",
+      "sha256": "eceb46ce0514db2d076a2121cd43df9a9978d7e66acc5886815381e88b130a94"
+    },
+    "stage7-evidence-inventory": {
+      "id": "stage7-evidence-inventory",
+      "kind": "historical-evidence",
+      "path": "docs/uiux-stage7-motion-a11y/DELIVERED_SCOPE_EVIDENCE_INVENTORY.json",
+      "claim": "Stage 7 primitive/harness evidence inventory; not integrated role-by-route execution.",
+      "sha256": "6b6d6047771e5d748783670068ec5918f8ceb6164c360cfe4985a427c0eb5e2f"
+    },
+    "protected-surface-freeze": {
+      "id": "protected-surface-freeze",
+      "kind": "stage8-technical-record",
+      "path": "docs/uiux-stage8-acceptance-rollout/VISUAL_FREEZE_PROTECTED_SURFACES.json",
+      "claim": "Recorded protected-surface hashes; not aesthetic or role-route acceptance.",
+      "sha256": "6f4e20121b8d950c42f87a0670c44e9eabc436d88cbf30370c49225afc35c82a"
+    }
   },
-  "states": [
-    "loading",
-    "empty",
-    "normal",
-    "dense",
-    "error",
-    "slow",
-    "offline",
-    "stale"
-  ],
-  "interactions": [
-    "touch",
-    "keyboard",
-    "zoom-200",
-    "reduced-motion"
-  ],
-  "environments": [
-    "mobile-browser",
-    "pwa",
-    "telegram-webview-non-messenger"
-  ],
-  "claimBoundary": "This matrix maps required acceptance dimensions to existing staged evidence. It does not replace owner visual review and does not authorize merge or production.",
   "routes": [
     {
       "path": "/",
       "name": "home",
-      "protection": "mixed",
-      "inScopeRedesign": true,
-      "roles": [
-        "guest",
-        "member",
-        "customer",
-        "accountant",
-        "group-lead",
-        "middle-admin",
-        "senior-admin"
-      ],
-      "viewports": {
-        "mobile": [
-          360,
-          375,
-          390,
-          414,
-          430
-        ],
-        "adaptive": [
-          768,
-          1024,
-          1440
-        ]
+      "routerKind": "component",
+      "redirectTargetName": null,
+      "routeMeta": {
+        "requiresAuth": true,
+        "requiresMarketAccess": false,
+        "requiresOwnerAccess": false,
+        "requiresAdmin": false
       },
-      "states": [
-        "loading",
-        "empty",
-        "normal",
-        "dense",
-        "error",
-        "slow",
-        "offline",
-        "stale"
-      ],
-      "interactions": [
-        "touch",
-        "keyboard",
-        "zoom-200",
-        "reduced-motion"
-      ],
-      "evidence": [
-        "stage4-daily-core",
-        "stage7-copy-excluded-for-market-widget-via-button-unselect"
-      ],
-      "humanAestheticAcceptance": "pending-owner",
-      "copyable": false
+      "uiContract": {
+        "path": "/",
+        "name": "home",
+        "shellClass": "standard-authenticated",
+        "protection": "mixed",
+        "protectedInteriors": [
+          "home-market-widget"
+        ],
+        "v2Scope": "section"
+      },
+      "expectedAccess": {
+        "guest": {
+          "kind": "redirect-login",
+          "targetName": "login",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "watch": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "member": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "police": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "customer": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "accountant": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "owner-context": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "middle-admin": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "senior-admin": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        }
+      },
+      "uiTraceability": {
+        "status": "prior-stage-reference-only",
+        "evidenceRefs": [
+          "stage4-evidence-manifest"
+        ],
+        "stage8AcceptanceClaim": "none",
+        "humanAestheticAcceptance": "pending-owner"
+      }
     },
     {
       "path": "/setup-password",
       "name": "setup-password",
-      "protection": "none",
-      "inScopeRedesign": true,
-      "roles": [
-        "guest",
-        "member",
-        "customer",
-        "accountant",
-        "group-lead",
-        "middle-admin",
-        "senior-admin"
-      ],
-      "viewports": {
-        "mobile": [
-          360,
-          375,
-          390,
-          414,
-          430
-        ],
-        "adaptive": [
-          768,
-          1024,
-          1440
-        ]
+      "routerKind": "component",
+      "redirectTargetName": null,
+      "routeMeta": {
+        "requiresAuth": true,
+        "requiresMarketAccess": false,
+        "requiresOwnerAccess": false,
+        "requiresAdmin": false
       },
-      "states": [
-        "loading",
-        "empty",
-        "normal",
-        "dense",
-        "error",
-        "slow",
-        "offline",
-        "stale"
-      ],
-      "interactions": [
-        "touch",
-        "keyboard",
-        "zoom-200",
-        "reduced-motion"
-      ],
-      "evidence": [
-        "stage3-auth"
-      ],
-      "humanAestheticAcceptance": "pending-owner",
-      "copyable": true
+      "uiContract": {
+        "path": "/setup-password",
+        "name": "setup-password",
+        "shellClass": "focused-authenticated",
+        "protection": "none",
+        "protectedInteriors": [],
+        "v2Scope": "route"
+      },
+      "expectedAccess": {
+        "guest": {
+          "kind": "redirect-login",
+          "targetName": "login",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "watch": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "member": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "police": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "customer": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "accountant": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "owner-context": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "middle-admin": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "senior-admin": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        }
+      },
+      "uiTraceability": {
+        "status": "prior-stage-reference-only",
+        "evidenceRefs": [
+          "stage3-evidence-manifest"
+        ],
+        "stage8AcceptanceClaim": "none",
+        "humanAestheticAcceptance": "pending-owner"
+      }
     },
     {
       "path": "/login",
       "name": "login",
-      "protection": "none",
-      "inScopeRedesign": true,
-      "roles": [
-        "guest",
-        "member",
-        "customer",
-        "accountant",
-        "group-lead",
-        "middle-admin",
-        "senior-admin"
-      ],
-      "viewports": {
-        "mobile": [
-          360,
-          375,
-          390,
-          414,
-          430
-        ],
-        "adaptive": [
-          768,
-          1024,
-          1440
-        ]
+      "routerKind": "component",
+      "redirectTargetName": null,
+      "routeMeta": {
+        "requiresAuth": false,
+        "requiresMarketAccess": false,
+        "requiresOwnerAccess": false,
+        "requiresAdmin": false
       },
-      "states": [
-        "loading",
-        "empty",
-        "normal",
-        "dense",
-        "error",
-        "slow",
-        "offline",
-        "stale"
-      ],
-      "interactions": [
-        "touch",
-        "keyboard",
-        "zoom-200",
-        "reduced-motion"
-      ],
-      "evidence": [
-        "stage3-auth"
-      ],
-      "humanAestheticAcceptance": "pending-owner",
-      "copyable": true
+      "uiContract": {
+        "path": "/login",
+        "name": "login",
+        "shellClass": "public",
+        "protection": "none",
+        "protectedInteriors": [],
+        "v2Scope": "route"
+      },
+      "expectedAccess": {
+        "guest": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "watch": {
+          "kind": "redirect-home",
+          "targetPath": "/",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "member": {
+          "kind": "redirect-home",
+          "targetPath": "/",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "police": {
+          "kind": "redirect-home",
+          "targetPath": "/",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "customer": {
+          "kind": "redirect-home",
+          "targetPath": "/",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "accountant": {
+          "kind": "redirect-home",
+          "targetPath": "/",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "owner-context": {
+          "kind": "redirect-home",
+          "targetPath": "/",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "middle-admin": {
+          "kind": "redirect-home",
+          "targetPath": "/",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "senior-admin": {
+          "kind": "redirect-home",
+          "targetPath": "/",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        }
+      },
+      "uiTraceability": {
+        "status": "prior-stage-reference-only",
+        "evidenceRefs": [
+          "stage3-evidence-manifest"
+        ],
+        "stage8AcceptanceClaim": "none",
+        "humanAestheticAcceptance": "pending-owner"
+      }
     },
     {
       "path": "/market",
       "name": "market",
-      "protection": "full",
-      "inScopeRedesign": false,
-      "roles": [
-        "guest",
-        "member",
-        "customer",
-        "accountant",
-        "group-lead",
-        "middle-admin",
-        "senior-admin"
-      ],
-      "viewports": {
-        "mobile": [
-          360,
-          375,
-          390,
-          414,
-          430
-        ],
-        "adaptive": [
-          768,
-          1024,
-          1440
-        ]
+      "routerKind": "component",
+      "redirectTargetName": null,
+      "routeMeta": {
+        "requiresAuth": true,
+        "requiresMarketAccess": true,
+        "requiresOwnerAccess": false,
+        "requiresAdmin": false
       },
-      "states": [
-        "loading",
-        "empty",
-        "normal",
-        "dense",
-        "error",
-        "slow",
-        "offline",
-        "stale"
-      ],
-      "interactions": [
-        "touch"
-      ],
-      "evidence": [
-        "stage4-protected-hash-freeze"
-      ],
-      "humanAestheticAcceptance": "pending-owner",
-      "copyable": false
+      "uiContract": {
+        "path": "/market",
+        "name": "market",
+        "shellClass": "protected-legacy",
+        "protection": "full",
+        "protectedInteriors": [],
+        "v2Scope": "off"
+      },
+      "expectedAccess": {
+        "guest": {
+          "kind": "redirect-login",
+          "targetName": "login",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "watch": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "member": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "police": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "customer": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "accountant": {
+          "kind": "redirect-forbidden-recovery",
+          "targetName": "system-recovery",
+          "recoveryOutcome": "forbidden",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "owner-context": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "middle-admin": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "senior-admin": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        }
+      },
+      "uiTraceability": {
+        "status": "prior-stage-reference-only",
+        "evidenceRefs": [
+          "protected-surface-freeze"
+        ],
+        "stage8AcceptanceClaim": "none",
+        "humanAestheticAcceptance": "pending-owner"
+      }
     },
     {
       "path": "/operations",
       "name": "operations",
-      "protection": "none",
-      "inScopeRedesign": true,
-      "roles": [
-        "guest",
-        "member",
-        "customer",
-        "accountant",
-        "group-lead",
-        "middle-admin",
-        "senior-admin"
-      ],
-      "viewports": {
-        "mobile": [
-          360,
-          375,
-          390,
-          414,
-          430
-        ],
-        "adaptive": [
-          768,
-          1024,
-          1440
-        ]
+      "routerKind": "component",
+      "redirectTargetName": null,
+      "routeMeta": {
+        "requiresAuth": true,
+        "requiresMarketAccess": false,
+        "requiresOwnerAccess": false,
+        "requiresAdmin": false
       },
-      "states": [
-        "loading",
-        "empty",
-        "normal",
-        "dense",
-        "error",
-        "slow",
-        "offline",
-        "stale"
-      ],
-      "interactions": [
-        "touch",
-        "keyboard",
-        "zoom-200",
-        "reduced-motion"
-      ],
-      "evidence": [
-        "stage4-daily-core"
-      ],
-      "humanAestheticAcceptance": "pending-owner",
-      "copyable": true
+      "uiContract": {
+        "path": "/operations",
+        "name": "operations",
+        "shellClass": "standard-authenticated",
+        "protection": "none",
+        "protectedInteriors": [],
+        "v2Scope": "route"
+      },
+      "expectedAccess": {
+        "guest": {
+          "kind": "redirect-login",
+          "targetName": "login",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "watch": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "member": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "police": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "customer": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "accountant": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "owner-context": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "middle-admin": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "senior-admin": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        }
+      },
+      "uiTraceability": {
+        "status": "prior-stage-reference-only",
+        "evidenceRefs": [
+          "stage4-evidence-manifest"
+        ],
+        "stage8AcceptanceClaim": "none",
+        "humanAestheticAcceptance": "pending-owner"
+      }
     },
     {
       "path": "/operations/customers",
       "name": "operations-customers",
-      "protection": "none",
-      "inScopeRedesign": true,
-      "roles": [
-        "guest",
-        "member",
-        "customer",
-        "accountant",
-        "group-lead",
-        "middle-admin",
-        "senior-admin"
-      ],
-      "viewports": {
-        "mobile": [
-          360,
-          375,
-          390,
-          414,
-          430
-        ],
-        "adaptive": [
-          768,
-          1024,
-          1440
-        ]
+      "routerKind": "component",
+      "redirectTargetName": null,
+      "routeMeta": {
+        "requiresAuth": true,
+        "requiresMarketAccess": false,
+        "requiresOwnerAccess": true,
+        "requiresAdmin": false
       },
-      "states": [
-        "loading",
-        "empty",
-        "normal",
-        "dense",
-        "error",
-        "slow",
-        "offline",
-        "stale"
-      ],
-      "interactions": [
-        "touch",
-        "keyboard",
-        "zoom-200",
-        "reduced-motion"
-      ],
-      "evidence": [
-        "stage5-customer"
-      ],
-      "humanAestheticAcceptance": "pending-owner",
-      "copyable": true
+      "uiContract": {
+        "path": "/operations/customers",
+        "name": "operations-customers",
+        "shellClass": "standard-authenticated",
+        "protection": "none",
+        "protectedInteriors": [],
+        "v2Scope": "section"
+      },
+      "expectedAccess": {
+        "guest": {
+          "kind": "redirect-login",
+          "targetName": "login",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "watch": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "member": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "police": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "customer": {
+          "kind": "redirect-forbidden-recovery",
+          "targetName": "system-recovery",
+          "recoveryOutcome": "forbidden",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "accountant": {
+          "kind": "redirect-forbidden-recovery",
+          "targetName": "system-recovery",
+          "recoveryOutcome": "forbidden",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "owner-context": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "middle-admin": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "senior-admin": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        }
+      },
+      "uiTraceability": {
+        "status": "prior-stage-reference-only",
+        "evidenceRefs": [
+          "stage5-evidence-manifest"
+        ],
+        "stage8AcceptanceClaim": "none",
+        "humanAestheticAcceptance": "pending-owner"
+      }
     },
     {
       "path": "/operations/customers/:relationId",
       "name": "operations-customers-detail",
-      "protection": "none",
-      "inScopeRedesign": true,
-      "roles": [
-        "guest",
-        "member",
-        "customer",
-        "accountant",
-        "group-lead",
-        "middle-admin",
-        "senior-admin"
-      ],
-      "viewports": {
-        "mobile": [
-          360,
-          375,
-          390,
-          414,
-          430
-        ],
-        "adaptive": [
-          768,
-          1024,
-          1440
-        ]
+      "routerKind": "component",
+      "redirectTargetName": null,
+      "routeMeta": {
+        "requiresAuth": true,
+        "requiresMarketAccess": false,
+        "requiresOwnerAccess": true,
+        "requiresAdmin": false
       },
-      "states": [
-        "loading",
-        "empty",
-        "normal",
-        "dense",
-        "error",
-        "slow",
-        "offline",
-        "stale"
-      ],
-      "interactions": [
-        "touch",
-        "keyboard",
-        "zoom-200",
-        "reduced-motion"
-      ],
-      "evidence": [
-        "stage5-customer",
-        "stage6-workspace-mutations"
-      ],
-      "humanAestheticAcceptance": "pending-owner",
-      "copyable": true
+      "uiContract": {
+        "path": "/operations/customers/:relationId",
+        "name": "operations-customers-detail",
+        "shellClass": "standard-authenticated",
+        "protection": "none",
+        "protectedInteriors": [],
+        "v2Scope": "section"
+      },
+      "expectedAccess": {
+        "guest": {
+          "kind": "redirect-login",
+          "targetName": "login",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "watch": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "member": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "police": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "customer": {
+          "kind": "redirect-forbidden-recovery",
+          "targetName": "system-recovery",
+          "recoveryOutcome": "forbidden",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "accountant": {
+          "kind": "redirect-forbidden-recovery",
+          "targetName": "system-recovery",
+          "recoveryOutcome": "forbidden",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "owner-context": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "middle-admin": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "senior-admin": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        }
+      },
+      "uiTraceability": {
+        "status": "prior-stage-reference-only",
+        "evidenceRefs": [
+          "stage5-evidence-manifest"
+        ],
+        "stage8AcceptanceClaim": "none",
+        "humanAestheticAcceptance": "pending-owner"
+      }
     },
     {
       "path": "/operations/accountants",
       "name": "operations-accountants",
-      "protection": "none",
-      "inScopeRedesign": true,
-      "roles": [
-        "guest",
-        "member",
-        "customer",
-        "accountant",
-        "group-lead",
-        "middle-admin",
-        "senior-admin"
-      ],
-      "viewports": {
-        "mobile": [
-          360,
-          375,
-          390,
-          414,
-          430
-        ],
-        "adaptive": [
-          768,
-          1024,
-          1440
-        ]
+      "routerKind": "component",
+      "redirectTargetName": null,
+      "routeMeta": {
+        "requiresAuth": true,
+        "requiresMarketAccess": false,
+        "requiresOwnerAccess": true,
+        "requiresAdmin": false
       },
-      "states": [
-        "loading",
-        "empty",
-        "normal",
-        "dense",
-        "error",
-        "slow",
-        "offline",
-        "stale"
-      ],
-      "interactions": [
-        "touch",
-        "keyboard",
-        "zoom-200",
-        "reduced-motion"
-      ],
-      "evidence": [
-        "stage5-accountant"
-      ],
-      "humanAestheticAcceptance": "pending-owner",
-      "copyable": true
+      "uiContract": {
+        "path": "/operations/accountants",
+        "name": "operations-accountants",
+        "shellClass": "standard-authenticated",
+        "protection": "none",
+        "protectedInteriors": [],
+        "v2Scope": "section"
+      },
+      "expectedAccess": {
+        "guest": {
+          "kind": "redirect-login",
+          "targetName": "login",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "watch": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "member": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "police": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "customer": {
+          "kind": "redirect-forbidden-recovery",
+          "targetName": "system-recovery",
+          "recoveryOutcome": "forbidden",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "accountant": {
+          "kind": "redirect-forbidden-recovery",
+          "targetName": "system-recovery",
+          "recoveryOutcome": "forbidden",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "owner-context": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "middle-admin": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "senior-admin": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        }
+      },
+      "uiTraceability": {
+        "status": "prior-stage-reference-only",
+        "evidenceRefs": [
+          "stage5-evidence-manifest"
+        ],
+        "stage8AcceptanceClaim": "none",
+        "humanAestheticAcceptance": "pending-owner"
+      }
     },
     {
       "path": "/operations/accountants/:relationId",
       "name": "operations-accountants-detail",
-      "protection": "none",
-      "inScopeRedesign": true,
-      "roles": [
-        "guest",
-        "member",
-        "customer",
-        "accountant",
-        "group-lead",
-        "middle-admin",
-        "senior-admin"
-      ],
-      "viewports": {
-        "mobile": [
-          360,
-          375,
-          390,
-          414,
-          430
-        ],
-        "adaptive": [
-          768,
-          1024,
-          1440
-        ]
+      "routerKind": "component",
+      "redirectTargetName": null,
+      "routeMeta": {
+        "requiresAuth": true,
+        "requiresMarketAccess": false,
+        "requiresOwnerAccess": true,
+        "requiresAdmin": false
       },
-      "states": [
-        "loading",
-        "empty",
-        "normal",
-        "dense",
-        "error",
-        "slow",
-        "offline",
-        "stale"
-      ],
-      "interactions": [
-        "touch",
-        "keyboard",
-        "zoom-200",
-        "reduced-motion"
-      ],
-      "evidence": [
-        "stage5-accountant",
-        "stage6-workspace-mutations"
-      ],
-      "humanAestheticAcceptance": "pending-owner",
-      "copyable": true
+      "uiContract": {
+        "path": "/operations/accountants/:relationId",
+        "name": "operations-accountants-detail",
+        "shellClass": "standard-authenticated",
+        "protection": "none",
+        "protectedInteriors": [],
+        "v2Scope": "section"
+      },
+      "expectedAccess": {
+        "guest": {
+          "kind": "redirect-login",
+          "targetName": "login",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "watch": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "member": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "police": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "customer": {
+          "kind": "redirect-forbidden-recovery",
+          "targetName": "system-recovery",
+          "recoveryOutcome": "forbidden",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "accountant": {
+          "kind": "redirect-forbidden-recovery",
+          "targetName": "system-recovery",
+          "recoveryOutcome": "forbidden",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "owner-context": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "middle-admin": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "senior-admin": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        }
+      },
+      "uiTraceability": {
+        "status": "prior-stage-reference-only",
+        "evidenceRefs": [
+          "stage5-evidence-manifest"
+        ],
+        "stage8AcceptanceClaim": "none",
+        "humanAestheticAcceptance": "pending-owner"
+      }
     },
     {
       "path": "/account",
       "name": "account",
-      "protection": "none",
-      "inScopeRedesign": true,
-      "roles": [
-        "guest",
-        "member",
-        "customer",
-        "accountant",
-        "group-lead",
-        "middle-admin",
-        "senior-admin"
-      ],
-      "viewports": {
-        "mobile": [
-          360,
-          375,
-          390,
-          414,
-          430
-        ],
-        "adaptive": [
-          768,
-          1024,
-          1440
-        ]
+      "routerKind": "component",
+      "redirectTargetName": null,
+      "routeMeta": {
+        "requiresAuth": true,
+        "requiresMarketAccess": false,
+        "requiresOwnerAccess": false,
+        "requiresAdmin": false
       },
-      "states": [
-        "loading",
-        "empty",
-        "normal",
-        "dense",
-        "error",
-        "slow",
-        "offline",
-        "stale"
-      ],
-      "interactions": [
-        "touch",
-        "keyboard",
-        "zoom-200",
-        "reduced-motion"
-      ],
-      "evidence": [
-        "stage4-daily-core"
-      ],
-      "humanAestheticAcceptance": "pending-owner",
-      "copyable": true
+      "uiContract": {
+        "path": "/account",
+        "name": "account",
+        "shellClass": "standard-authenticated",
+        "protection": "none",
+        "protectedInteriors": [],
+        "v2Scope": "route"
+      },
+      "expectedAccess": {
+        "guest": {
+          "kind": "redirect-login",
+          "targetName": "login",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "watch": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "member": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "police": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "customer": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "accountant": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "owner-context": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "middle-admin": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "senior-admin": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        }
+      },
+      "uiTraceability": {
+        "status": "prior-stage-reference-only",
+        "evidenceRefs": [
+          "stage4-evidence-manifest"
+        ],
+        "stage8AcceptanceClaim": "none",
+        "humanAestheticAcceptance": "pending-owner"
+      }
     },
     {
       "path": "/account/security",
       "name": "account-security",
-      "protection": "none",
-      "inScopeRedesign": true,
-      "roles": [
-        "guest",
-        "member",
-        "customer",
-        "accountant",
-        "group-lead",
-        "middle-admin",
-        "senior-admin"
-      ],
-      "viewports": {
-        "mobile": [
-          360,
-          375,
-          390,
-          414,
-          430
-        ],
-        "adaptive": [
-          768,
-          1024,
-          1440
-        ]
+      "routerKind": "component",
+      "redirectTargetName": null,
+      "routeMeta": {
+        "requiresAuth": true,
+        "requiresMarketAccess": false,
+        "requiresOwnerAccess": false,
+        "requiresAdmin": false
       },
-      "states": [
-        "loading",
-        "empty",
-        "normal",
-        "dense",
-        "error",
-        "slow",
-        "offline",
-        "stale"
-      ],
-      "interactions": [
-        "touch",
-        "keyboard",
-        "zoom-200",
-        "reduced-motion"
-      ],
-      "evidence": [
-        "stage4-daily-core",
-        "stage6-phase11"
-      ],
-      "humanAestheticAcceptance": "pending-owner",
-      "copyable": true
+      "uiContract": {
+        "path": "/account/security",
+        "name": "account-security",
+        "shellClass": "standard-authenticated",
+        "protection": "none",
+        "protectedInteriors": [],
+        "v2Scope": "route"
+      },
+      "expectedAccess": {
+        "guest": {
+          "kind": "redirect-login",
+          "targetName": "login",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "watch": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "member": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "police": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "customer": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "accountant": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "owner-context": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "middle-admin": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "senior-admin": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        }
+      },
+      "uiTraceability": {
+        "status": "prior-stage-reference-only",
+        "evidenceRefs": [
+          "stage4-evidence-manifest"
+        ],
+        "stage8AcceptanceClaim": "none",
+        "humanAestheticAcceptance": "pending-owner"
+      }
     },
     {
       "path": "/account/storage",
       "name": "account-storage",
-      "protection": "none",
-      "inScopeRedesign": true,
-      "roles": [
-        "guest",
-        "member",
-        "customer",
-        "accountant",
-        "group-lead",
-        "middle-admin",
-        "senior-admin"
-      ],
-      "viewports": {
-        "mobile": [
-          360,
-          375,
-          390,
-          414,
-          430
-        ],
-        "adaptive": [
-          768,
-          1024,
-          1440
-        ]
+      "routerKind": "component",
+      "redirectTargetName": null,
+      "routeMeta": {
+        "requiresAuth": true,
+        "requiresMarketAccess": false,
+        "requiresOwnerAccess": false,
+        "requiresAdmin": false
       },
-      "states": [
-        "loading",
-        "empty",
-        "normal",
-        "dense",
-        "error",
-        "slow",
-        "offline",
-        "stale"
-      ],
-      "interactions": [
-        "touch",
-        "keyboard",
-        "zoom-200",
-        "reduced-motion"
-      ],
-      "evidence": [
-        "stage4-daily-core",
-        "stage6-phase12"
-      ],
-      "humanAestheticAcceptance": "pending-owner",
-      "copyable": true
+      "uiContract": {
+        "path": "/account/storage",
+        "name": "account-storage",
+        "shellClass": "standard-authenticated",
+        "protection": "none",
+        "protectedInteriors": [],
+        "v2Scope": "route"
+      },
+      "expectedAccess": {
+        "guest": {
+          "kind": "redirect-login",
+          "targetName": "login",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "watch": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "member": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "police": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "customer": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "accountant": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "owner-context": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "middle-admin": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "senior-admin": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        }
+      },
+      "uiTraceability": {
+        "status": "prior-stage-reference-only",
+        "evidenceRefs": [
+          "stage4-evidence-manifest"
+        ],
+        "stage8AcceptanceClaim": "none",
+        "humanAestheticAcceptance": "pending-owner"
+      }
     },
     {
       "path": "/account/notifications",
       "name": "account-notifications",
-      "protection": "none",
-      "inScopeRedesign": true,
-      "roles": [
-        "guest",
-        "member",
-        "customer",
-        "accountant",
-        "group-lead",
-        "middle-admin",
-        "senior-admin"
-      ],
-      "viewports": {
-        "mobile": [
-          360,
-          375,
-          390,
-          414,
-          430
-        ],
-        "adaptive": [
-          768,
-          1024,
-          1440
-        ]
+      "routerKind": "component",
+      "redirectTargetName": null,
+      "routeMeta": {
+        "requiresAuth": true,
+        "requiresMarketAccess": false,
+        "requiresOwnerAccess": false,
+        "requiresAdmin": false
       },
-      "states": [
-        "loading",
-        "empty",
-        "normal",
-        "dense",
-        "error",
-        "slow",
-        "offline",
-        "stale"
-      ],
-      "interactions": [
-        "touch",
-        "keyboard",
-        "zoom-200",
-        "reduced-motion"
-      ],
-      "evidence": [
-        "stage4-daily-core"
-      ],
-      "humanAestheticAcceptance": "pending-owner",
-      "copyable": true
+      "uiContract": {
+        "path": "/account/notifications",
+        "name": "account-notifications",
+        "shellClass": "standard-authenticated",
+        "protection": "none",
+        "protectedInteriors": [],
+        "v2Scope": "route"
+      },
+      "expectedAccess": {
+        "guest": {
+          "kind": "redirect-login",
+          "targetName": "login",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "watch": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "member": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "police": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "customer": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "accountant": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "owner-context": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "middle-admin": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "senior-admin": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        }
+      },
+      "uiTraceability": {
+        "status": "prior-stage-reference-only",
+        "evidenceRefs": [
+          "stage4-evidence-manifest"
+        ],
+        "stage8AcceptanceClaim": "none",
+        "humanAestheticAcceptance": "pending-owner"
+      }
     },
     {
       "path": "/chat",
       "name": "messenger",
-      "protection": "full",
-      "inScopeRedesign": false,
-      "roles": [
-        "guest",
-        "member",
-        "customer",
-        "accountant",
-        "group-lead",
-        "middle-admin",
-        "senior-admin"
-      ],
-      "viewports": {
-        "mobile": [
-          360,
-          375,
-          390,
-          414,
-          430
-        ],
-        "adaptive": [
-          768,
-          1024,
-          1440
-        ]
+      "routerKind": "component",
+      "redirectTargetName": null,
+      "routeMeta": {
+        "requiresAuth": true,
+        "requiresMarketAccess": false,
+        "requiresOwnerAccess": false,
+        "requiresAdmin": false
       },
-      "states": [
-        "loading",
-        "empty",
-        "normal",
-        "dense",
-        "error",
-        "slow",
-        "offline",
-        "stale"
-      ],
-      "interactions": [
-        "touch"
-      ],
-      "evidence": [
-        "stage4-protected-hash-freeze"
-      ],
-      "humanAestheticAcceptance": "pending-owner",
-      "copyable": false
+      "uiContract": {
+        "path": "/chat",
+        "name": "messenger",
+        "shellClass": "protected-legacy",
+        "protection": "full",
+        "protectedInteriors": [],
+        "v2Scope": "off"
+      },
+      "expectedAccess": {
+        "guest": {
+          "kind": "redirect-login",
+          "targetName": "login",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "watch": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "member": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "police": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "customer": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "accountant": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "owner-context": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "middle-admin": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "senior-admin": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        }
+      },
+      "uiTraceability": {
+        "status": "prior-stage-reference-only",
+        "evidenceRefs": [
+          "protected-surface-freeze"
+        ],
+        "stage8AcceptanceClaim": "none",
+        "humanAestheticAcceptance": "pending-owner"
+      }
     },
     {
       "path": "/users/:id",
       "name": "public-profile",
-      "protection": "none",
-      "inScopeRedesign": true,
-      "roles": [
-        "guest",
-        "member",
-        "customer",
-        "accountant",
-        "group-lead",
-        "middle-admin",
-        "senior-admin"
-      ],
-      "viewports": {
-        "mobile": [
-          360,
-          375,
-          390,
-          414,
-          430
-        ],
-        "adaptive": [
-          768,
-          1024,
-          1440
-        ]
+      "routerKind": "component",
+      "redirectTargetName": null,
+      "routeMeta": {
+        "requiresAuth": true,
+        "requiresMarketAccess": false,
+        "requiresOwnerAccess": false,
+        "requiresAdmin": false
       },
-      "states": [
-        "loading",
-        "empty",
-        "normal",
-        "dense",
-        "error",
-        "slow",
-        "offline",
-        "stale"
-      ],
-      "interactions": [
-        "touch",
-        "keyboard",
-        "zoom-200",
-        "reduced-motion"
-      ],
-      "evidence": [
-        "stage6-phase3-to-19"
-      ],
-      "humanAestheticAcceptance": "pending-owner",
-      "copyable": true
+      "uiContract": {
+        "path": "/users/:id",
+        "name": "public-profile",
+        "shellClass": "standard-authenticated",
+        "protection": "none",
+        "protectedInteriors": [],
+        "v2Scope": "section"
+      },
+      "expectedAccess": {
+        "guest": {
+          "kind": "redirect-login",
+          "targetName": "login",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "watch": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "member": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "police": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "customer": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "accountant": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "owner-context": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "middle-admin": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "senior-admin": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        }
+      },
+      "uiTraceability": {
+        "status": "prior-stage-reference-only",
+        "evidenceRefs": [
+          "stage6-evidence-inventory"
+        ],
+        "stage8AcceptanceClaim": "none",
+        "humanAestheticAcceptance": "pending-owner"
+      }
     },
     {
       "path": "/profile",
       "name": "profile",
-      "protection": "none",
-      "inScopeRedesign": true,
-      "roles": [
-        "guest",
-        "member",
-        "customer",
-        "accountant",
-        "group-lead",
-        "middle-admin",
-        "senior-admin"
-      ],
-      "viewports": {
-        "mobile": [
-          360,
-          375,
-          390,
-          414,
-          430
-        ],
-        "adaptive": [
-          768,
-          1024,
-          1440
-        ]
+      "routerKind": "component",
+      "redirectTargetName": null,
+      "routeMeta": {
+        "requiresAuth": true,
+        "requiresMarketAccess": false,
+        "requiresOwnerAccess": false,
+        "requiresAdmin": false
       },
-      "states": [
-        "loading",
-        "empty",
-        "normal",
-        "dense",
-        "error",
-        "slow",
-        "offline",
-        "stale"
-      ],
-      "interactions": [
-        "touch",
-        "keyboard",
-        "zoom-200",
-        "reduced-motion"
-      ],
-      "evidence": [
-        "stage6-phase3-to-19"
-      ],
-      "humanAestheticAcceptance": "pending-owner",
-      "copyable": true
+      "uiContract": {
+        "path": "/profile",
+        "name": "profile",
+        "shellClass": "standard-authenticated",
+        "protection": "none",
+        "protectedInteriors": [],
+        "v2Scope": "section"
+      },
+      "expectedAccess": {
+        "guest": {
+          "kind": "redirect-login",
+          "targetName": "login",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "watch": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "member": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "police": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "customer": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "accountant": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "owner-context": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "middle-admin": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "senior-admin": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        }
+      },
+      "uiTraceability": {
+        "status": "prior-stage-reference-only",
+        "evidenceRefs": [
+          "stage6-evidence-inventory"
+        ],
+        "stage8AcceptanceClaim": "none",
+        "humanAestheticAcceptance": "pending-owner"
+      }
     },
     {
       "path": "/settings",
       "name": "settings",
-      "protection": "none",
-      "inScopeRedesign": true,
-      "roles": [
-        "guest",
-        "member",
-        "customer",
-        "accountant",
-        "group-lead",
-        "middle-admin",
-        "senior-admin"
-      ],
-      "viewports": {
-        "mobile": [
-          360,
-          375,
-          390,
-          414,
-          430
-        ],
-        "adaptive": [
-          768,
-          1024,
-          1440
-        ]
+      "routerKind": "redirect",
+      "redirectTargetName": "account-security",
+      "routeMeta": {
+        "requiresAuth": true,
+        "requiresMarketAccess": false,
+        "requiresOwnerAccess": false,
+        "requiresAdmin": false
       },
-      "states": [
-        "loading",
-        "empty",
-        "normal",
-        "dense",
-        "error",
-        "slow",
-        "offline",
-        "stale"
-      ],
-      "interactions": [
-        "touch",
-        "keyboard",
-        "zoom-200",
-        "reduced-motion"
-      ],
-      "evidence": [
-        "stage4-daily-core"
-      ],
-      "humanAestheticAcceptance": "pending-owner",
-      "copyable": true
+      "uiContract": {
+        "path": "/settings",
+        "name": "settings",
+        "shellClass": "standard-authenticated",
+        "protection": "none",
+        "protectedInteriors": [],
+        "v2Scope": "section"
+      },
+      "expectedAccess": {
+        "guest": {
+          "kind": "redirect-login",
+          "targetName": "login",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "watch": {
+          "kind": "redirect-canonical",
+          "targetName": "account-security",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "member": {
+          "kind": "redirect-canonical",
+          "targetName": "account-security",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "police": {
+          "kind": "redirect-canonical",
+          "targetName": "account-security",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "customer": {
+          "kind": "redirect-canonical",
+          "targetName": "account-security",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "accountant": {
+          "kind": "redirect-canonical",
+          "targetName": "account-security",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "owner-context": {
+          "kind": "redirect-canonical",
+          "targetName": "account-security",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "middle-admin": {
+          "kind": "redirect-canonical",
+          "targetName": "account-security",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "senior-admin": {
+          "kind": "redirect-canonical",
+          "targetName": "account-security",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        }
+      },
+      "uiTraceability": {
+        "status": "prior-stage-reference-only",
+        "evidenceRefs": [
+          "stage4-evidence-manifest"
+        ],
+        "stage8AcceptanceClaim": "none",
+        "humanAestheticAcceptance": "pending-owner"
+      }
     },
     {
       "path": "/admin",
       "name": "admin",
-      "protection": "none",
-      "inScopeRedesign": true,
-      "roles": [
-        "guest",
-        "member",
-        "customer",
-        "accountant",
-        "group-lead",
-        "middle-admin",
-        "senior-admin"
-      ],
-      "viewports": {
-        "mobile": [
-          360,
-          375,
-          390,
-          414,
-          430
-        ],
-        "adaptive": [
-          768,
-          1024,
-          1440
-        ]
+      "routerKind": "component",
+      "redirectTargetName": null,
+      "routeMeta": {
+        "requiresAuth": true,
+        "requiresMarketAccess": false,
+        "requiresOwnerAccess": false,
+        "requiresAdmin": true
       },
-      "states": [
-        "loading",
-        "empty",
-        "normal",
-        "dense",
-        "error",
-        "slow",
-        "offline",
-        "stale"
-      ],
-      "interactions": [
-        "touch",
-        "keyboard",
-        "zoom-200",
-        "reduced-motion"
-      ],
-      "evidence": [
-        "stage6-phase1"
-      ],
-      "humanAestheticAcceptance": "pending-owner",
-      "copyable": true
+      "uiContract": {
+        "path": "/admin",
+        "name": "admin",
+        "shellClass": "standard-authenticated",
+        "protection": "none",
+        "protectedInteriors": [],
+        "v2Scope": "section"
+      },
+      "expectedAccess": {
+        "guest": {
+          "kind": "redirect-login",
+          "targetName": "login",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "watch": {
+          "kind": "redirect-forbidden-recovery",
+          "targetName": "system-recovery",
+          "recoveryOutcome": "forbidden",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "member": {
+          "kind": "redirect-forbidden-recovery",
+          "targetName": "system-recovery",
+          "recoveryOutcome": "forbidden",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "police": {
+          "kind": "redirect-forbidden-recovery",
+          "targetName": "system-recovery",
+          "recoveryOutcome": "forbidden",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "customer": {
+          "kind": "redirect-forbidden-recovery",
+          "targetName": "system-recovery",
+          "recoveryOutcome": "forbidden",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "accountant": {
+          "kind": "redirect-forbidden-recovery",
+          "targetName": "system-recovery",
+          "recoveryOutcome": "forbidden",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "owner-context": {
+          "kind": "redirect-forbidden-recovery",
+          "targetName": "system-recovery",
+          "recoveryOutcome": "forbidden",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "middle-admin": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "senior-admin": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        }
+      },
+      "uiTraceability": {
+        "status": "prior-stage-reference-only",
+        "evidenceRefs": [
+          "stage6-evidence-inventory"
+        ],
+        "stage8AcceptanceClaim": "none",
+        "humanAestheticAcceptance": "pending-owner"
+      }
     },
     {
       "path": "/admin/invitations",
       "name": "admin-invitations",
-      "protection": "none",
-      "inScopeRedesign": true,
-      "roles": [
-        "guest",
-        "member",
-        "customer",
-        "accountant",
-        "group-lead",
-        "middle-admin",
-        "senior-admin"
-      ],
-      "viewports": {
-        "mobile": [
-          360,
-          375,
-          390,
-          414,
-          430
-        ],
-        "adaptive": [
-          768,
-          1024,
-          1440
-        ]
+      "routerKind": "component",
+      "redirectTargetName": null,
+      "routeMeta": {
+        "requiresAuth": true,
+        "requiresMarketAccess": false,
+        "requiresOwnerAccess": false,
+        "requiresAdmin": true
       },
-      "states": [
-        "loading",
-        "empty",
-        "normal",
-        "dense",
-        "error",
-        "slow",
-        "offline",
-        "stale"
-      ],
-      "interactions": [
-        "touch",
-        "keyboard",
-        "zoom-200",
-        "reduced-motion"
-      ],
-      "evidence": [
-        "stage6-phase4"
-      ],
-      "humanAestheticAcceptance": "pending-owner",
-      "copyable": true
+      "uiContract": {
+        "path": "/admin/invitations",
+        "name": "admin-invitations",
+        "shellClass": "standard-authenticated",
+        "protection": "none",
+        "protectedInteriors": [],
+        "v2Scope": "section"
+      },
+      "expectedAccess": {
+        "guest": {
+          "kind": "redirect-login",
+          "targetName": "login",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "watch": {
+          "kind": "redirect-forbidden-recovery",
+          "targetName": "system-recovery",
+          "recoveryOutcome": "forbidden",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "member": {
+          "kind": "redirect-forbidden-recovery",
+          "targetName": "system-recovery",
+          "recoveryOutcome": "forbidden",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "police": {
+          "kind": "redirect-forbidden-recovery",
+          "targetName": "system-recovery",
+          "recoveryOutcome": "forbidden",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "customer": {
+          "kind": "redirect-forbidden-recovery",
+          "targetName": "system-recovery",
+          "recoveryOutcome": "forbidden",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "accountant": {
+          "kind": "redirect-forbidden-recovery",
+          "targetName": "system-recovery",
+          "recoveryOutcome": "forbidden",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "owner-context": {
+          "kind": "redirect-forbidden-recovery",
+          "targetName": "system-recovery",
+          "recoveryOutcome": "forbidden",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "middle-admin": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "senior-admin": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        }
+      },
+      "uiTraceability": {
+        "status": "prior-stage-reference-only",
+        "evidenceRefs": [
+          "stage6-evidence-inventory"
+        ],
+        "stage8AcceptanceClaim": "none",
+        "humanAestheticAcceptance": "pending-owner"
+      }
     },
     {
       "path": "/admin/channels",
       "name": "admin-channels",
-      "protection": "full",
-      "inScopeRedesign": false,
-      "roles": [
-        "guest",
-        "member",
-        "customer",
-        "accountant",
-        "group-lead",
-        "middle-admin",
-        "senior-admin"
-      ],
-      "viewports": {
-        "mobile": [
-          360,
-          375,
-          390,
-          414,
-          430
-        ],
-        "adaptive": [
-          768,
-          1024,
-          1440
-        ]
+      "routerKind": "component",
+      "redirectTargetName": null,
+      "routeMeta": {
+        "requiresAuth": true,
+        "requiresMarketAccess": false,
+        "requiresOwnerAccess": false,
+        "requiresAdmin": true
       },
-      "states": [
-        "loading",
-        "empty",
-        "normal",
-        "dense",
-        "error",
-        "slow",
-        "offline",
-        "stale"
-      ],
-      "interactions": [
-        "touch"
-      ],
-      "evidence": [
-        "stage4-protected-hash-freeze"
-      ],
-      "humanAestheticAcceptance": "pending-owner",
-      "copyable": false
+      "uiContract": {
+        "path": "/admin/channels",
+        "name": "admin-channels",
+        "shellClass": "protected-legacy",
+        "protection": "full",
+        "protectedInteriors": [],
+        "v2Scope": "off"
+      },
+      "expectedAccess": {
+        "guest": {
+          "kind": "redirect-login",
+          "targetName": "login",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "watch": {
+          "kind": "redirect-forbidden-recovery",
+          "targetName": "system-recovery",
+          "recoveryOutcome": "forbidden",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "member": {
+          "kind": "redirect-forbidden-recovery",
+          "targetName": "system-recovery",
+          "recoveryOutcome": "forbidden",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "police": {
+          "kind": "redirect-forbidden-recovery",
+          "targetName": "system-recovery",
+          "recoveryOutcome": "forbidden",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "customer": {
+          "kind": "redirect-forbidden-recovery",
+          "targetName": "system-recovery",
+          "recoveryOutcome": "forbidden",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "accountant": {
+          "kind": "redirect-forbidden-recovery",
+          "targetName": "system-recovery",
+          "recoveryOutcome": "forbidden",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "owner-context": {
+          "kind": "redirect-forbidden-recovery",
+          "targetName": "system-recovery",
+          "recoveryOutcome": "forbidden",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "middle-admin": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "senior-admin": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        }
+      },
+      "uiTraceability": {
+        "status": "prior-stage-reference-only",
+        "evidenceRefs": [
+          "protected-surface-freeze"
+        ],
+        "stage8AcceptanceClaim": "none",
+        "humanAestheticAcceptance": "pending-owner"
+      }
     },
     {
       "path": "/admin/users",
       "name": "admin-users",
-      "protection": "none",
-      "inScopeRedesign": true,
-      "roles": [
-        "guest",
-        "member",
-        "customer",
-        "accountant",
-        "group-lead",
-        "middle-admin",
-        "senior-admin"
-      ],
-      "viewports": {
-        "mobile": [
-          360,
-          375,
-          390,
-          414,
-          430
-        ],
-        "adaptive": [
-          768,
-          1024,
-          1440
-        ]
+      "routerKind": "component",
+      "redirectTargetName": null,
+      "routeMeta": {
+        "requiresAuth": true,
+        "requiresMarketAccess": false,
+        "requiresOwnerAccess": false,
+        "requiresAdmin": true
       },
-      "states": [
-        "loading",
-        "empty",
-        "normal",
-        "dense",
-        "error",
-        "slow",
-        "offline",
-        "stale"
-      ],
-      "interactions": [
-        "touch",
-        "keyboard",
-        "zoom-200",
-        "reduced-motion"
-      ],
-      "evidence": [
-        "stage6-phase2-phase15"
-      ],
-      "humanAestheticAcceptance": "pending-owner",
-      "copyable": true
+      "uiContract": {
+        "path": "/admin/users",
+        "name": "admin-users",
+        "shellClass": "standard-authenticated",
+        "protection": "none",
+        "protectedInteriors": [],
+        "v2Scope": "section"
+      },
+      "expectedAccess": {
+        "guest": {
+          "kind": "redirect-login",
+          "targetName": "login",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "watch": {
+          "kind": "redirect-forbidden-recovery",
+          "targetName": "system-recovery",
+          "recoveryOutcome": "forbidden",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "member": {
+          "kind": "redirect-forbidden-recovery",
+          "targetName": "system-recovery",
+          "recoveryOutcome": "forbidden",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "police": {
+          "kind": "redirect-forbidden-recovery",
+          "targetName": "system-recovery",
+          "recoveryOutcome": "forbidden",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "customer": {
+          "kind": "redirect-forbidden-recovery",
+          "targetName": "system-recovery",
+          "recoveryOutcome": "forbidden",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "accountant": {
+          "kind": "redirect-forbidden-recovery",
+          "targetName": "system-recovery",
+          "recoveryOutcome": "forbidden",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "owner-context": {
+          "kind": "redirect-forbidden-recovery",
+          "targetName": "system-recovery",
+          "recoveryOutcome": "forbidden",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "middle-admin": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "senior-admin": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        }
+      },
+      "uiTraceability": {
+        "status": "prior-stage-reference-only",
+        "evidenceRefs": [
+          "stage6-evidence-inventory"
+        ],
+        "stage8AcceptanceClaim": "none",
+        "humanAestheticAcceptance": "pending-owner"
+      }
     },
     {
       "path": "/admin/users/:id",
       "name": "admin-user-profile",
-      "protection": "none",
-      "inScopeRedesign": true,
-      "roles": [
-        "guest",
-        "member",
-        "customer",
-        "accountant",
-        "group-lead",
-        "middle-admin",
-        "senior-admin"
-      ],
-      "viewports": {
-        "mobile": [
-          360,
-          375,
-          390,
-          414,
-          430
-        ],
-        "adaptive": [
-          768,
-          1024,
-          1440
-        ]
+      "routerKind": "component",
+      "redirectTargetName": null,
+      "routeMeta": {
+        "requiresAuth": true,
+        "requiresMarketAccess": false,
+        "requiresOwnerAccess": false,
+        "requiresAdmin": true
       },
-      "states": [
-        "loading",
-        "empty",
-        "normal",
-        "dense",
-        "error",
-        "slow",
-        "offline",
-        "stale"
-      ],
-      "interactions": [
-        "touch",
-        "keyboard",
-        "zoom-200",
-        "reduced-motion"
-      ],
-      "evidence": [
-        "stage6-phase2-phase10-phase13-phase14-phase17"
-      ],
-      "humanAestheticAcceptance": "pending-owner",
-      "copyable": true
+      "uiContract": {
+        "path": "/admin/users/:id",
+        "name": "admin-user-profile",
+        "shellClass": "standard-authenticated",
+        "protection": "none",
+        "protectedInteriors": [],
+        "v2Scope": "section"
+      },
+      "expectedAccess": {
+        "guest": {
+          "kind": "redirect-login",
+          "targetName": "login",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "watch": {
+          "kind": "redirect-forbidden-recovery",
+          "targetName": "system-recovery",
+          "recoveryOutcome": "forbidden",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "member": {
+          "kind": "redirect-forbidden-recovery",
+          "targetName": "system-recovery",
+          "recoveryOutcome": "forbidden",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "police": {
+          "kind": "redirect-forbidden-recovery",
+          "targetName": "system-recovery",
+          "recoveryOutcome": "forbidden",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "customer": {
+          "kind": "redirect-forbidden-recovery",
+          "targetName": "system-recovery",
+          "recoveryOutcome": "forbidden",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "accountant": {
+          "kind": "redirect-forbidden-recovery",
+          "targetName": "system-recovery",
+          "recoveryOutcome": "forbidden",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "owner-context": {
+          "kind": "redirect-forbidden-recovery",
+          "targetName": "system-recovery",
+          "recoveryOutcome": "forbidden",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "middle-admin": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "senior-admin": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        }
+      },
+      "uiTraceability": {
+        "status": "prior-stage-reference-only",
+        "evidenceRefs": [
+          "stage6-evidence-inventory"
+        ],
+        "stage8AcceptanceClaim": "none",
+        "humanAestheticAcceptance": "pending-owner"
+      }
     },
     {
       "path": "/admin/commodities",
       "name": "admin-commodities",
-      "protection": "none",
-      "inScopeRedesign": true,
-      "roles": [
-        "guest",
-        "member",
-        "customer",
-        "accountant",
-        "group-lead",
-        "middle-admin",
-        "senior-admin"
-      ],
-      "viewports": {
-        "mobile": [
-          360,
-          375,
-          390,
-          414,
-          430
-        ],
-        "adaptive": [
-          768,
-          1024,
-          1440
-        ]
+      "routerKind": "component",
+      "redirectTargetName": null,
+      "routeMeta": {
+        "requiresAuth": true,
+        "requiresMarketAccess": false,
+        "requiresOwnerAccess": false,
+        "requiresAdmin": true
       },
-      "states": [
-        "loading",
-        "empty",
-        "normal",
-        "dense",
-        "error",
-        "slow",
-        "offline",
-        "stale"
-      ],
-      "interactions": [
-        "touch",
-        "keyboard",
-        "zoom-200",
-        "reduced-motion"
-      ],
-      "evidence": [
-        "stage6-phase9"
-      ],
-      "humanAestheticAcceptance": "pending-owner",
-      "copyable": true
+      "uiContract": {
+        "path": "/admin/commodities",
+        "name": "admin-commodities",
+        "shellClass": "standard-authenticated",
+        "protection": "none",
+        "protectedInteriors": [],
+        "v2Scope": "section"
+      },
+      "expectedAccess": {
+        "guest": {
+          "kind": "redirect-login",
+          "targetName": "login",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "watch": {
+          "kind": "redirect-forbidden-recovery",
+          "targetName": "system-recovery",
+          "recoveryOutcome": "forbidden",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "member": {
+          "kind": "redirect-forbidden-recovery",
+          "targetName": "system-recovery",
+          "recoveryOutcome": "forbidden",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "police": {
+          "kind": "redirect-forbidden-recovery",
+          "targetName": "system-recovery",
+          "recoveryOutcome": "forbidden",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "customer": {
+          "kind": "redirect-forbidden-recovery",
+          "targetName": "system-recovery",
+          "recoveryOutcome": "forbidden",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "accountant": {
+          "kind": "redirect-forbidden-recovery",
+          "targetName": "system-recovery",
+          "recoveryOutcome": "forbidden",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "owner-context": {
+          "kind": "redirect-forbidden-recovery",
+          "targetName": "system-recovery",
+          "recoveryOutcome": "forbidden",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "middle-admin": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "senior-admin": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        }
+      },
+      "uiTraceability": {
+        "status": "prior-stage-reference-only",
+        "evidenceRefs": [
+          "stage6-evidence-inventory"
+        ],
+        "stage8AcceptanceClaim": "none",
+        "humanAestheticAcceptance": "pending-owner"
+      }
     },
     {
       "path": "/admin/messages",
       "name": "admin-messages",
-      "protection": "mixed",
-      "inScopeRedesign": false,
-      "roles": [
-        "guest",
-        "member",
-        "customer",
-        "accountant",
-        "group-lead",
-        "middle-admin",
-        "senior-admin"
-      ],
-      "viewports": {
-        "mobile": [
-          360,
-          375,
-          390,
-          414,
-          430
-        ],
-        "adaptive": [
-          768,
-          1024,
-          1440
-        ]
+      "routerKind": "component",
+      "redirectTargetName": null,
+      "routeMeta": {
+        "requiresAuth": true,
+        "requiresMarketAccess": false,
+        "requiresOwnerAccess": false,
+        "requiresAdmin": true
       },
-      "states": [
-        "loading",
-        "empty",
-        "normal",
-        "dense",
-        "error",
-        "slow",
-        "offline",
-        "stale"
-      ],
-      "interactions": [
-        "touch"
-      ],
-      "evidence": [
-        "stage4-admin-messages-file-freeze"
-      ],
-      "humanAestheticAcceptance": "pending-owner",
-      "copyable": false
+      "uiContract": {
+        "path": "/admin/messages",
+        "name": "admin-messages",
+        "shellClass": "standard-authenticated",
+        "protection": "mixed",
+        "protectedInteriors": [
+          "admin-messages-market-delivery",
+          "admin-messages-messenger-delivery"
+        ],
+        "v2Scope": "section"
+      },
+      "expectedAccess": {
+        "guest": {
+          "kind": "redirect-login",
+          "targetName": "login",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "watch": {
+          "kind": "redirect-forbidden-recovery",
+          "targetName": "system-recovery",
+          "recoveryOutcome": "forbidden",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "member": {
+          "kind": "redirect-forbidden-recovery",
+          "targetName": "system-recovery",
+          "recoveryOutcome": "forbidden",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "police": {
+          "kind": "redirect-forbidden-recovery",
+          "targetName": "system-recovery",
+          "recoveryOutcome": "forbidden",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "customer": {
+          "kind": "redirect-forbidden-recovery",
+          "targetName": "system-recovery",
+          "recoveryOutcome": "forbidden",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "accountant": {
+          "kind": "redirect-forbidden-recovery",
+          "targetName": "system-recovery",
+          "recoveryOutcome": "forbidden",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "owner-context": {
+          "kind": "redirect-forbidden-recovery",
+          "targetName": "system-recovery",
+          "recoveryOutcome": "forbidden",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "middle-admin": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "senior-admin": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        }
+      },
+      "uiTraceability": {
+        "status": "prior-stage-reference-only",
+        "evidenceRefs": [
+          "protected-surface-freeze"
+        ],
+        "stage8AcceptanceClaim": "none",
+        "humanAestheticAcceptance": "pending-owner"
+      }
     },
     {
       "path": "/admin/system",
       "name": "admin-system",
-      "protection": "mixed",
-      "inScopeRedesign": false,
-      "roles": [
-        "guest",
-        "member",
-        "customer",
-        "accountant",
-        "group-lead",
-        "middle-admin",
-        "senior-admin"
-      ],
-      "viewports": {
-        "mobile": [
-          360,
-          375,
-          390,
-          414,
-          430
-        ],
-        "adaptive": [
-          768,
-          1024,
-          1440
-        ]
+      "routerKind": "component",
+      "redirectTargetName": null,
+      "routeMeta": {
+        "requiresAuth": true,
+        "requiresMarketAccess": false,
+        "requiresOwnerAccess": false,
+        "requiresAdmin": true
       },
-      "states": [
-        "loading",
-        "empty",
-        "normal",
-        "dense",
-        "error",
-        "slow",
-        "offline",
-        "stale"
-      ],
-      "interactions": [
-        "touch"
-      ],
-      "evidence": [
-        "stage4-trading-settings-file-freeze"
-      ],
-      "humanAestheticAcceptance": "pending-owner",
-      "copyable": false
+      "uiContract": {
+        "path": "/admin/system",
+        "name": "admin-system",
+        "shellClass": "standard-authenticated",
+        "protection": "mixed",
+        "protectedInteriors": [
+          "trading-settings-market-controls"
+        ],
+        "v2Scope": "section"
+      },
+      "expectedAccess": {
+        "guest": {
+          "kind": "redirect-login",
+          "targetName": "login",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "watch": {
+          "kind": "redirect-forbidden-recovery",
+          "targetName": "system-recovery",
+          "recoveryOutcome": "forbidden",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "member": {
+          "kind": "redirect-forbidden-recovery",
+          "targetName": "system-recovery",
+          "recoveryOutcome": "forbidden",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "police": {
+          "kind": "redirect-forbidden-recovery",
+          "targetName": "system-recovery",
+          "recoveryOutcome": "forbidden",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "customer": {
+          "kind": "redirect-forbidden-recovery",
+          "targetName": "system-recovery",
+          "recoveryOutcome": "forbidden",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "accountant": {
+          "kind": "redirect-forbidden-recovery",
+          "targetName": "system-recovery",
+          "recoveryOutcome": "forbidden",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "owner-context": {
+          "kind": "redirect-forbidden-recovery",
+          "targetName": "system-recovery",
+          "recoveryOutcome": "forbidden",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "middle-admin": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "senior-admin": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        }
+      },
+      "uiTraceability": {
+        "status": "prior-stage-reference-only",
+        "evidenceRefs": [
+          "protected-surface-freeze"
+        ],
+        "stage8AcceptanceClaim": "none",
+        "humanAestheticAcceptance": "pending-owner"
+      }
     },
     {
       "path": "/i/:code",
       "name": "invite-landing",
-      "protection": "none",
-      "inScopeRedesign": true,
-      "roles": [
-        "guest",
-        "member",
-        "customer",
-        "accountant",
-        "group-lead",
-        "middle-admin",
-        "senior-admin"
-      ],
-      "viewports": {
-        "mobile": [
-          360,
-          375,
-          390,
-          414,
-          430
-        ],
-        "adaptive": [
-          768,
-          1024,
-          1440
-        ]
+      "routerKind": "component",
+      "redirectTargetName": null,
+      "routeMeta": {
+        "requiresAuth": false,
+        "requiresMarketAccess": false,
+        "requiresOwnerAccess": false,
+        "requiresAdmin": false
       },
-      "states": [
-        "loading",
-        "empty",
-        "normal",
-        "dense",
-        "error",
-        "slow",
-        "offline",
-        "stale"
-      ],
-      "interactions": [
-        "touch",
-        "keyboard",
-        "zoom-200",
-        "reduced-motion"
-      ],
-      "evidence": [
-        "stage3-auth"
-      ],
-      "humanAestheticAcceptance": "pending-owner",
-      "copyable": true
+      "uiContract": {
+        "path": "/i/:code",
+        "name": "invite-landing",
+        "shellClass": "public",
+        "protection": "none",
+        "protectedInteriors": [],
+        "v2Scope": "route"
+      },
+      "expectedAccess": {
+        "guest": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime"
+          ]
+        },
+        "watch": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime"
+          ]
+        },
+        "member": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime"
+          ]
+        },
+        "police": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime"
+          ]
+        },
+        "customer": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime"
+          ]
+        },
+        "accountant": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime"
+          ]
+        },
+        "owner-context": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime"
+          ]
+        },
+        "middle-admin": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime"
+          ]
+        },
+        "senior-admin": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime"
+          ]
+        }
+      },
+      "uiTraceability": {
+        "status": "prior-stage-reference-only",
+        "evidenceRefs": [
+          "stage3-evidence-manifest"
+        ],
+        "stage8AcceptanceClaim": "none",
+        "humanAestheticAcceptance": "pending-owner"
+      }
     },
     {
       "path": "/register",
       "name": "web-register",
-      "protection": "none",
-      "inScopeRedesign": true,
-      "roles": [
-        "guest",
-        "member",
-        "customer",
-        "accountant",
-        "group-lead",
-        "middle-admin",
-        "senior-admin"
-      ],
-      "viewports": {
-        "mobile": [
-          360,
-          375,
-          390,
-          414,
-          430
-        ],
-        "adaptive": [
-          768,
-          1024,
-          1440
-        ]
+      "routerKind": "component",
+      "redirectTargetName": null,
+      "routeMeta": {
+        "requiresAuth": false,
+        "requiresMarketAccess": false,
+        "requiresOwnerAccess": false,
+        "requiresAdmin": false
       },
-      "states": [
-        "loading",
-        "empty",
-        "normal",
-        "dense",
-        "error",
-        "slow",
-        "offline",
-        "stale"
-      ],
-      "interactions": [
-        "touch",
-        "keyboard",
-        "zoom-200",
-        "reduced-motion"
-      ],
-      "evidence": [
-        "stage3-auth"
-      ],
-      "humanAestheticAcceptance": "pending-owner",
-      "copyable": true
+      "uiContract": {
+        "path": "/register",
+        "name": "web-register",
+        "shellClass": "public",
+        "protection": "none",
+        "protectedInteriors": [],
+        "v2Scope": "route"
+      },
+      "expectedAccess": {
+        "guest": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime"
+          ]
+        },
+        "watch": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime"
+          ]
+        },
+        "member": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime"
+          ]
+        },
+        "police": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime"
+          ]
+        },
+        "customer": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime"
+          ]
+        },
+        "accountant": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime"
+          ]
+        },
+        "owner-context": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime"
+          ]
+        },
+        "middle-admin": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime"
+          ]
+        },
+        "senior-admin": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime"
+          ]
+        }
+      },
+      "uiTraceability": {
+        "status": "prior-stage-reference-only",
+        "evidenceRefs": [
+          "stage3-evidence-manifest"
+        ],
+        "stage8AcceptanceClaim": "none",
+        "humanAestheticAcceptance": "pending-owner"
+      }
     },
     {
       "path": "/notifications",
       "name": "notifications",
-      "protection": "none",
-      "inScopeRedesign": true,
-      "roles": [
-        "guest",
-        "member",
-        "customer",
-        "accountant",
-        "group-lead",
-        "middle-admin",
-        "senior-admin"
-      ],
-      "viewports": {
-        "mobile": [
-          360,
-          375,
-          390,
-          414,
-          430
-        ],
-        "adaptive": [
-          768,
-          1024,
-          1440
-        ]
+      "routerKind": "redirect",
+      "redirectTargetName": "account-notifications",
+      "routeMeta": {
+        "requiresAuth": true,
+        "requiresMarketAccess": false,
+        "requiresOwnerAccess": false,
+        "requiresAdmin": false
       },
-      "states": [
-        "loading",
-        "empty",
-        "normal",
-        "dense",
-        "error",
-        "slow",
-        "offline",
-        "stale"
-      ],
-      "interactions": [
-        "touch",
-        "keyboard",
-        "zoom-200",
-        "reduced-motion"
-      ],
-      "evidence": [
-        "stage4-daily-core"
-      ],
-      "humanAestheticAcceptance": "pending-owner",
-      "copyable": true
+      "uiContract": {
+        "path": "/notifications",
+        "name": "notifications",
+        "shellClass": "standard-authenticated",
+        "protection": "none",
+        "protectedInteriors": [],
+        "v2Scope": "section"
+      },
+      "expectedAccess": {
+        "guest": {
+          "kind": "redirect-login",
+          "targetName": "login",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "watch": {
+          "kind": "redirect-canonical",
+          "targetName": "account-notifications",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "member": {
+          "kind": "redirect-canonical",
+          "targetName": "account-notifications",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "police": {
+          "kind": "redirect-canonical",
+          "targetName": "account-notifications",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "customer": {
+          "kind": "redirect-canonical",
+          "targetName": "account-notifications",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "accountant": {
+          "kind": "redirect-canonical",
+          "targetName": "account-notifications",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "owner-context": {
+          "kind": "redirect-canonical",
+          "targetName": "account-notifications",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "middle-admin": {
+          "kind": "redirect-canonical",
+          "targetName": "account-notifications",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "senior-admin": {
+          "kind": "redirect-canonical",
+          "targetName": "account-notifications",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        }
+      },
+      "uiTraceability": {
+        "status": "prior-stage-reference-only",
+        "evidenceRefs": [
+          "stage4-evidence-manifest"
+        ],
+        "stage8AcceptanceClaim": "none",
+        "humanAestheticAcceptance": "pending-owner"
+      }
     },
     {
       "path": "/share-receive",
       "name": "share-receive",
-      "protection": "full",
-      "inScopeRedesign": false,
-      "roles": [
-        "guest",
-        "member",
-        "customer",
-        "accountant",
-        "group-lead",
-        "middle-admin",
-        "senior-admin"
-      ],
-      "viewports": {
-        "mobile": [
-          360,
-          375,
-          390,
-          414,
-          430
-        ],
-        "adaptive": [
-          768,
-          1024,
-          1440
-        ]
+      "routerKind": "component",
+      "redirectTargetName": null,
+      "routeMeta": {
+        "requiresAuth": true,
+        "requiresMarketAccess": false,
+        "requiresOwnerAccess": false,
+        "requiresAdmin": false
       },
-      "states": [
-        "loading",
-        "empty",
-        "normal",
-        "dense",
-        "error",
-        "slow",
-        "offline",
-        "stale"
-      ],
-      "interactions": [
-        "touch"
-      ],
-      "evidence": [
-        "stage4-protected-hash-freeze"
-      ],
-      "humanAestheticAcceptance": "pending-owner",
-      "copyable": false
+      "uiContract": {
+        "path": "/share-receive",
+        "name": "share-receive",
+        "shellClass": "protected-legacy",
+        "protection": "full",
+        "protectedInteriors": [],
+        "v2Scope": "off"
+      },
+      "expectedAccess": {
+        "guest": {
+          "kind": "redirect-login",
+          "targetName": "login",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "watch": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "member": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "police": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "customer": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "accountant": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "owner-context": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "middle-admin": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        },
+        "senior-admin": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime",
+            "auth-guard-runtime"
+          ]
+        }
+      },
+      "uiTraceability": {
+        "status": "prior-stage-reference-only",
+        "evidenceRefs": [
+          "protected-surface-freeze"
+        ],
+        "stage8AcceptanceClaim": "none",
+        "humanAestheticAcceptance": "pending-owner"
+      }
+    },
+    {
+      "path": "/:pathMatch(.*)*",
+      "name": "system-recovery",
+      "routerKind": "component",
+      "redirectTargetName": null,
+      "routeMeta": {
+        "requiresAuth": false,
+        "requiresMarketAccess": false,
+        "requiresOwnerAccess": false,
+        "requiresAdmin": false
+      },
+      "uiContract": {
+        "path": "/:pathMatch(.*)*",
+        "name": "system-recovery",
+        "shellClass": "system-recovery",
+        "protection": "none",
+        "protectedInteriors": [],
+        "v2Scope": "route"
+      },
+      "expectedAccess": {
+        "guest": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime"
+          ]
+        },
+        "watch": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime"
+          ]
+        },
+        "member": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime"
+          ]
+        },
+        "police": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime"
+          ]
+        },
+        "customer": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime"
+          ]
+        },
+        "accountant": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime"
+          ]
+        },
+        "owner-context": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime"
+          ]
+        },
+        "middle-admin": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime"
+          ]
+        },
+        "senior-admin": {
+          "kind": "render-route",
+          "evidenceRefs": [
+            "router-runtime"
+          ]
+        }
+      },
+      "uiTraceability": {
+        "status": "not-indexed-no-acceptance-claim",
+        "evidenceRefs": [],
+        "stage8AcceptanceClaim": "none",
+        "humanAestheticAcceptance": "pending-owner"
+      }
     }
   ]
 }

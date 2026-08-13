@@ -4,7 +4,7 @@ Load for Vue/PWA refactoring, Design System V2, Figma/Sites evidence, or shared 
 
 ## Decisions
 
-- 2026-08-13 | Stage 8 documents role×route×viewport×state acceptance and reconfirms Market/Messenger freeze hashes without merge or production. Reason: finish the V2 roadmap evidence path while keeping release authority with the owner.
+- 2026-08-13 | Stage 8 records 270 expected access outcomes for 30 routes × 9 exact profiles, but zero full viewport/state/interaction acceptance cells; owner aesthetic sign-off, merge, Sites, staging and production remain pending. Reason: static route traceability and direct-file hashes cannot stand in for integrated visual acceptance.
 - 2026-08-13 | Informational copy, AppTabs keyboard focus, Jalali day-focus arrows, empty-state `role="status"`, long-text wrap, and reduced-motion collapse are Stage 7 Phase 1; Market FilterChips and mixed admin interiors stay excluded. Reason: a11y polish must not change protected Market/Messenger behavior.
 - 2026-08-12 | Admin custom-date triggers on `/admin/users/:id` use shared `ui-button` while keeping `.custom-date-trigger` hooks and Jalali picker logic. Reason: finish admin chrome unification without converting date selection into a confirm or changing mutation receipts.
 - 2026-08-12 | Public-profile owner action cards on `/users/:id` and `/profile` keep `ui-action-card` chrome but use `--ds-*` tokens; settings still navigates and is not a confirm. Reason: finish visual unity of leftover profile actions without changing privacy, authority, or navigation receipts.

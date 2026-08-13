@@ -1,32 +1,34 @@
-# Stage 8 — پذیرش نهایی و عرضه مرحله‌ای
+# Stage 8 — پیش‌نویس رهگیری پذیرش و عرضهٔ مرحله‌ای
 
 تاریخ: ۲۰۲۶-۰۸-۱۳
 
-وضعیت: **`stage8_acceptance_matrix_and_team_rollout_documented_no_production`**
+وضعیت: **`stage8_expected_access_traceability_draft_no_executed_acceptance_no_production`**
 
 شاخه: `condidate/webapp-ui-ux-redesign-v2`
 
+آخرین source اصلاح shared-dependency: `82cb016e`
+
 ## ۱. مجوز و حد آن
 
-دستور مالک برای ادامه تا پایان Stage 8، نوشتن ماتریس پذیرش، تأیید freeze تصویری بازار/پیام‌رسان، و مدل عرضهٔ محدود تیمی را مجاز کرد.
+دستور مالک برای ادامهٔ Stage 8، نوشتن رهگیری دسترسی موردانتظار، بازخوانی freeze بازار/پیام‌رسان، و مدل عرضهٔ محدود تیمی را مجاز کرد.
 
 این مجوز **merge به main، staging deploy، production deploy، یا Sites محصول** نیست.
 
-`stage8CompleteAuthority=false`. سبز بودن تست به‌تنهایی پذیرش زیبایی نیست؛ بازبینی انسانی مالک هنوز لازم است.
+`stage8CompleteAuthority=false`. این checkpoint نه پذیرش کامل است و نه پایان roadmap؛ سبز بودن تست به‌تنهایی پذیرش زیبایی نیست و بازبینی انسانی مالک هنوز لازم است.
 
 ## ۲. ماتریس پذیرش
 
 منبع: `docs/uiux-stage8-acceptance-rollout/ACCEPTANCE_MATRIX.json`
 
-- نقش: مهمان، عضو، مشتری، حسابدار، سرگروه، مدیر میانی، مدیر ارشد
-- مسیر: تمام routeهای `uiRouteContract` به‌جز catch-all recovery به‌عنوان سطح محصول
+- پروفایل دسترسی: مهمان، تماشا، عادی، پلیس، مشتری، حسابدار، مالک/سرگروه، مدیر میانی و مدیر ارشد
+- مسیر: هر ۳۰ route واقعی، شامل catch-all `system-recovery`
 - viewport موبایل: ۳۶۰، ۳۷۵، ۳۹۰، ۴۱۴، ۴۳۰
 - viewport تطبیقی: ۷۶۸، ۱۰۲۴، ۱۴۴۰
 - state: loading، empty، normal، dense، error، slow، offline، stale
 - تعامل: touch، keyboard، zoom، reduced-motion
 - محیط هدف بعدی: مرورگر موبایل، PWA، Telegram WebView غیرپیام‌رسان
 
-پوشش evidence موجود از Stage 3–7 به هر سلول نگاشته شده است. سلول‌های بازار/پیام‌رسان فقط freeze hash دارند، نه redesign.
+نسخهٔ ۲ فقط ۳۰ × ۹ = ۲۷۰ نتیجهٔ normal-case دسترسی را از source رهگیری می‌کند. تعداد سلول‌های پذیرش کامل اجراشده صفر است؛ viewport، state، interaction و environment هنوز requirement هستند و به cell-level evidence متصل نشده‌اند. بازار/پیام‌رسان فقط freeze hash دارند، نه redesign.
 
 ## ۳. Visual freeze بازار و پیام‌رسان
 
@@ -49,9 +51,10 @@
 
 Sites و production در این Stage شروع نشده‌اند.
 
-## ۵. گیت پایان roadmap (فنی، نه زیبایی)
+## ۵. گیت بعدی (فنی و بصری)
 
-- ماتریس نقش×مسیر×viewport×state مکتوب است؛
+- ۲۷۰ نتیجهٔ موردانتظار مسیر×پروفایل به source متصل است؛
 - freeze بازار/پیام‌رسان با hash زنده تأیید شد؛
-- عرضه فقط تیمی و rollback-safe توصیف شده است؛
+- اجرای واقعی viewport/state/interaction/environment و sign-off زیبایی مالک هنوز pending است؛
+- عرضه فقط به‌صورت مدل تیمی و rollback-safe توصیف شده و شروع نشده است؛
 - merge/production انجام نشده و مجاز نیست تا مالک جداگانه بگوید.
