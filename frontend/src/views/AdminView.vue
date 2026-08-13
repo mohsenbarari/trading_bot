@@ -46,6 +46,7 @@ let isUserDirectoryScrollCaptureSuppressed = false
 // context before the list exists.
 let pendingUserDirectoryRestoreScroll: number | null = null
 let userDirectoryRestoreGeneration = 0
+let isMenuUserDirectoryNavigationPending = false
 const canAccessSystemSettings = computed(() => isCachedSuperAdmin())
 const sectionMetaByKey: Record<string, { title: string; description: string }> = {
   menu: {
@@ -445,6 +446,13 @@ function getDeniedRouteAdminSection(): string | null {
 }
 
 function syncRouteToSection() {
+  // This is the outgoing /admin instance during the route transition. Keep it
+  // on the menu until unmount so only the freshly keyed /admin/users instance
+  // can create the directory and its first request.
+  if (isMenuUserDirectoryNavigationPending && isAdminUserDirectoryRoute()) {
+    return
+  }
+
   const routeUserId = getRouteUserProfileId()
   if (routeUserId) {
     syncUserDirectoryRouteContext()
@@ -690,6 +698,31 @@ function handleNavigate(section: string, data?: any) {
   if (section === 'admin_panel') {
     goToMenu()
   } else {
+    const isEnteringUserDirectoryFromMenu =
+      section === 'manage_users' && currentSection.value === 'menu'
+    if (isEnteringUserDirectoryFromMenu) {
+      if (isMenuUserDirectoryNavigationPending) return
+      isMenuUserDirectoryNavigationPending = true
+      // Let the native destination own the first UserManager mount. Rendering
+      // the list while /admin is still active can overlap the outgoing and
+      // incoming AdminView instances during the route transition.
+      void Promise.resolve(router.push(getAdminRouteForSection(section))).then(
+        () => {
+          if (!isAdminUserDirectoryRoute()) {
+            isMenuUserDirectoryNavigationPending = false
+          }
+        },
+        () => {
+          isMenuUserDirectoryNavigationPending = false
+        },
+      )
+      pushBackState(() => {
+        currentSection.value = 'menu'
+        selectedUserForProfile.value = null
+      })
+      return
+    }
+
     const isReturningFromUserProfile =
       section === 'manage_users' && currentSection.value === 'user_profile'
     if (isReturningFromUserProfile) {
@@ -752,6 +785,7 @@ function handleOpenPublicProfile(payload?: { id?: number; account_name?: string 
 }
 
 onUnmounted(() => {
+  isMenuUserDirectoryNavigationPending = false
   cancelRouteUserProfileRequest()
   clearUserDirectoryScrollRestore()
   userDirectoryScrollTarget?.removeEventListener('scroll', captureUserDirectoryScroll)

@@ -25,6 +25,7 @@ const adminViewMocks = vi.hoisted(() => ({
   popBackStateMock: vi.fn(),
   clearBackStackMock: vi.fn(),
   apiFetchMock: vi.fn(),
+  userManagerMountedMock: vi.fn(),
 }))
 
 type AdminViewTestVm = {
@@ -80,6 +81,7 @@ describe('AdminView.vue', () => {
     adminViewMocks.popBackStateMock.mockReset()
     adminViewMocks.clearBackStackMock.mockReset()
     adminViewMocks.apiFetchMock.mockReset()
+    adminViewMocks.userManagerMountedMock.mockReset()
     localStorage.clear()
     localStorage.setItem('auth_token', 'admin-jwt-token')
     localStorage.setItem('current_user_summary', JSON.stringify({ role: 'مدیر ارشد' }))
@@ -116,6 +118,9 @@ describe('AdminView.vue', () => {
             name: 'UserManager',
             props: ['apiBaseUrl', 'jwtToken', 'query'],
             emits: ['navigate', 'query-change', 'loaded', 'settled'],
+            mounted() {
+              adminViewMocks.userManagerMountedMock()
+            },
             template:
               "<div class=\"user-manager-stub\"><span class=\"user-manager-query\">{{ query }}</span><button class=\"user-manager-open-profile\" @click=\"$emit('navigate', 'user_profile', { id: 77, account_name: 'user-77' })\">open user profile</button></div>",
           },
@@ -159,6 +164,13 @@ describe('AdminView.vue', () => {
     return routeScroll
   }
 
+  function commitNativeUserDirectoryRoute(query: Record<string, string> = {}) {
+    adminViewMocks.route.name = 'admin-users'
+    adminViewMocks.route.path = '/admin/users'
+    adminViewMocks.route.params = reactive({}) as Record<string, string>
+    adminViewMocks.route.query = reactive(query) as Record<string, string>
+  }
+
   it('renders the real admin panel menu and opens the invitation section with the stored JWT token', async () => {
     const wrapper = mountView()
     await flushPromises()
@@ -185,6 +197,11 @@ describe('AdminView.vue', () => {
   })
 
   it('routes from the users section into the authoritative admin user profile view', async () => {
+    let resolveUserDirectoryPush: (() => void) | undefined
+    const pendingUserDirectoryPush = new Promise<void>((resolve) => {
+      resolveUserDirectoryPush = resolve
+    })
+    adminViewMocks.routerPushMock.mockImplementationOnce(() => pendingUserDirectoryPush)
     const wrapper = mountView()
     await flushPromises()
 
@@ -199,7 +216,17 @@ describe('AdminView.vue', () => {
       query: {},
     })
 
-    await wrapper.get('.user-manager-open-profile').trigger('click')
+    commitNativeUserDirectoryRoute()
+    resolveUserDirectoryPush?.()
+    await nextTick()
+    await flushPromises()
+
+    expect(wrapper.findComponent({ name: 'UserManager' }).exists()).toBe(false)
+    wrapper.unmount()
+
+    const destinationWrapper = mountView()
+    await flushPromises()
+    await destinationWrapper.get('.user-manager-open-profile').trigger('click')
     await flushPromises()
 
     expect(adminViewMocks.pushBackStateMock).toHaveBeenCalledTimes(2)
@@ -209,9 +236,119 @@ describe('AdminView.vue', () => {
       params: { id: '77' },
       query: {},
     })
-    expect(wrapper.text()).toContain('پروفایل کاربر')
-    expect(wrapper.text()).toContain('در حال بارگذاری پروفایل کاربر')
-    expect(wrapper.find('.user-profile-stub').exists()).toBe(false)
+    expect(destinationWrapper.text()).toContain('پروفایل کاربر')
+    expect(destinationWrapper.text()).toContain('در حال بارگذاری پروفایل کاربر')
+    expect(destinationWrapper.find('.user-profile-stub').exists()).toBe(false)
+  })
+
+  it('waits for the native users route before mounting UserManager from the menu', async () => {
+    let resolveUserDirectoryPush: (() => void) | undefined
+    const pendingUserDirectoryPush = new Promise<void>((resolve) => {
+      resolveUserDirectoryPush = resolve
+    })
+    adminViewMocks.routerPushMock.mockImplementationOnce(() => pendingUserDirectoryPush)
+
+    const wrapper = mountView()
+    await flushPromises()
+
+    const usersButton = wrapper
+      .findAll('.admin-panel-action')
+      .find((button) => button.text().includes('مدیریت کاربران'))
+    expect(usersButton).toBeTruthy()
+    await usersButton!.trigger('click')
+    await usersButton!.trigger('click')
+    await nextTick()
+
+    expect(adminViewMocks.routerPushMock).toHaveBeenCalledWith({
+      name: 'admin-users',
+      query: {},
+    })
+    expect(adminViewMocks.routerPushMock).toHaveBeenCalledTimes(1)
+    expect(adminViewMocks.pushBackStateMock).toHaveBeenCalledTimes(1)
+    const backToMenu = adminViewMocks.pushBackStateMock.mock.calls[0]?.[0]
+    expect(typeof backToMenu).toBe('function')
+    expect(adminViewMocks.popBackStateMock).not.toHaveBeenCalled()
+    expect(getAdminViewVm(wrapper).currentSection).toBe('menu')
+    expect(wrapper.findComponent({ name: 'UserManager' }).exists()).toBe(false)
+    expect(adminViewMocks.userManagerMountedMock).not.toHaveBeenCalled()
+
+    commitNativeUserDirectoryRoute()
+    resolveUserDirectoryPush?.()
+    await nextTick()
+    await flushPromises()
+
+    expect(getAdminViewVm(wrapper).currentSection).toBe('menu')
+    expect(wrapper.findComponent({ name: 'UserManager' }).exists()).toBe(false)
+    expect(adminViewMocks.userManagerMountedMock).not.toHaveBeenCalled()
+
+    backToMenu?.()
+    await nextTick()
+    expect(getAdminViewVm(wrapper).currentSection).toBe('menu')
+
+    wrapper.unmount()
+    adminViewMocks.userManagerMountedMock.mockClear()
+    const destinationWrapper = mountView()
+    await flushPromises()
+
+    expect(getAdminViewVm(destinationWrapper).currentSection).toBe('manage_users')
+    expect(destinationWrapper.findComponent({ name: 'UserManager' }).exists()).toBe(true)
+    expect(adminViewMocks.userManagerMountedMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('releases a rejected menu-to-directory navigation so a retry can await the native route', async () => {
+    adminViewMocks.routerPushMock.mockRejectedValueOnce(new Error('navigation blocked'))
+    const wrapper = mountView()
+    await flushPromises()
+
+    const usersButton = wrapper
+      .findAll('.admin-panel-action')
+      .find((button) => button.text().includes('مدیریت کاربران'))
+    expect(usersButton).toBeTruthy()
+    await usersButton!.trigger('click')
+    await flushPromises()
+
+    expect(adminViewMocks.routerPushMock).toHaveBeenCalledTimes(1)
+    expect(adminViewMocks.routerPushMock).toHaveBeenLastCalledWith({
+      name: 'admin-users',
+      query: {},
+    })
+    expect(getAdminViewVm(wrapper).currentSection).toBe('menu')
+    expect(wrapper.findComponent({ name: 'UserManager' }).exists()).toBe(false)
+    expect(adminViewMocks.userManagerMountedMock).not.toHaveBeenCalled()
+
+    let resolveUserDirectoryPush: (() => void) | undefined
+    const pendingUserDirectoryPush = new Promise<void>((resolve) => {
+      resolveUserDirectoryPush = resolve
+    })
+    adminViewMocks.routerPushMock.mockImplementationOnce(() => pendingUserDirectoryPush)
+    await usersButton!.trigger('click')
+    await nextTick()
+
+    expect(adminViewMocks.routerPushMock).toHaveBeenCalledTimes(2)
+    expect(adminViewMocks.routerPushMock).toHaveBeenLastCalledWith({
+      name: 'admin-users',
+      query: {},
+    })
+    expect(getAdminViewVm(wrapper).currentSection).toBe('menu')
+    expect(wrapper.findComponent({ name: 'UserManager' }).exists()).toBe(false)
+
+    commitNativeUserDirectoryRoute()
+    resolveUserDirectoryPush?.()
+    await nextTick()
+    await flushPromises()
+
+    expect(getAdminViewVm(wrapper).currentSection).toBe('menu')
+    expect(wrapper.findComponent({ name: 'UserManager' }).exists()).toBe(false)
+    expect(adminViewMocks.userManagerMountedMock).not.toHaveBeenCalled()
+
+    wrapper.unmount()
+    adminViewMocks.userManagerMountedMock.mockClear()
+    const destinationWrapper = mountView()
+    await flushPromises()
+
+    expect(getAdminViewVm(destinationWrapper).currentSection).toBe('manage_users')
+    expect(destinationWrapper.findComponent({ name: 'UserManager' }).exists()).toBe(true)
+    expect(adminViewMocks.userManagerMountedMock).toHaveBeenCalledTimes(1)
   })
 
   it('keeps UserManager search state ephemeral and canonicalizes only list scroll in the URL', async () => {
@@ -941,15 +1078,29 @@ describe('AdminView.vue', () => {
       .findAll('.admin-panel-action')
       .find((button) => button.text().includes('مدیریت کاربران'))
     expect(usersButton).toBeTruthy()
+    let resolveUserDirectoryPush: (() => void) | undefined
+    const pendingUserDirectoryPush = new Promise<void>((resolve) => {
+      resolveUserDirectoryPush = resolve
+    })
+    adminViewMocks.routerPushMock.mockImplementationOnce(() => pendingUserDirectoryPush)
     await usersButton!.trigger('click')
     await flushPromises()
-    await wrapper.get('.user-manager-open-profile').trigger('click')
+    commitNativeUserDirectoryRoute()
+    resolveUserDirectoryPush?.()
+    await nextTick()
+    await flushPromises()
+    expect(wrapper.findComponent({ name: 'UserManager' }).exists()).toBe(false)
+    wrapper.unmount()
+
+    const destinationWrapper = mountView()
+    await flushPromises()
+    await destinationWrapper.get('.user-manager-open-profile').trigger('click')
     await flushPromises()
     const profileBack = adminViewMocks.pushBackStateMock.mock.lastCall?.[0]
     expect(typeof profileBack).toBe('function')
     profileBack()
     await flushPromises()
-    expect(wrapper.get('.admin-panel-container').attributes('aria-label')).toBe('ابزارهای مدیریت')
+    expect(destinationWrapper.get('.admin-panel-container').attributes('aria-label')).toBe('ابزارهای مدیریت')
   })
 
   it('keeps legacy system_settings query deep links mapped to the system route', async () => {
