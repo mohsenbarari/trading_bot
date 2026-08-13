@@ -45,6 +45,7 @@ from live_server import (
     persist_message,
     render_group_activity_fragment,
     render_page,
+    render_shadow_page,
 )
 
 
@@ -1399,9 +1400,60 @@ class EstimatorTests(unittest.TestCase):
         ).decode("utf-8")
         self.assertIn(NO_DATA_TOKEN, body)
         self.assertIn("توصیه خرید یا فروش نیست", body)
-        self.assertIn("پایش موازی یکپارچه", body)
+        self.assertIn("نبض بازار", body)
+        self.assertIn('class="market-pulse surface-panel"', body)
+        self.assertIn("مدل‌های سایه", body)
+        self.assertNotIn("پایش موازی یکپارچه", body)
+        self.assertNotIn("سایه ۱ — مدل قبلی", body)
         self.assertIn('id="freshness-content"', body)
         self.assertIn('getElementById("freshness-fragment")', body)
+
+    def test_shadow_models_render_only_on_the_dedicated_polished_page(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            body = render_shadow_page(
+                {
+                    "service_status": "RUNNING",
+                    "generated_at_utc": "2026-07-20T10:00:00Z",
+                    "window_end_utc": "2026-07-20T10:00:00Z",
+                    "settlements": {},
+                },
+                home_path="/rates/",
+                shadow_path="/rates/shadow",
+                shadow_data_path="/rates/shadow.json",
+                shadow_estimate_path="/rates/shadow.html",
+                shadow_state_path=root / "shadow-1.json",
+                research_shadow_state_path=root / "shadow-2.json",
+                ml_shadow_state_path=root / "shadow-3.json",
+            ).decode("utf-8")
+
+        self.assertIn('class="shadow-hero"', body)
+        self.assertIn('class="shadow-panel comparison-panel"', body)
+        self.assertIn('class="shadow-panel outcome-panel"', body)
+        self.assertIn("سایه ۱ — مدل قبلی", body)
+        self.assertIn("سایه ۲ — بازگشایی صبح", body)
+        self.assertIn("سایه ۳ — یادگیری ماشین", body)
+        self.assertIn("تنها معیار معتبر برای ارتقای یک سایه", body)
+        self.assertIn("@media (max-width: 680px)", body)
+
+    def test_main_dashboard_does_not_read_shadow_model_state(self) -> None:
+        with patch(
+            "live_server.load_shadow_dashboard_payload",
+            side_effect=AssertionError("shadow state belongs to the dedicated page"),
+        ):
+            body = render_page(
+                {
+                    "service_status": "RUNNING",
+                    "generated_at_utc": "2026-07-20T10:00:00Z",
+                    "window_start_utc": "2026-07-20T09:59:00Z",
+                    "window_end_utc": "2026-07-20T10:00:00Z",
+                    "settlements": {},
+                },
+                shadow_path="/rates/shadow",
+            ).decode("utf-8")
+
+        self.assertIn("href='/rates/shadow'", body)
+        self.assertNotIn("جدول مقایسهٔ یکپارچه", body)
 
     def test_page_exposes_group_live_toggle_without_hiding_activity_contract(self) -> None:
         body = render_page(

@@ -23,3 +23,6 @@
 - Current private-group Market Store facts may be projected into the estimator's
   compatibility conversation store using opaque identifiers and normalized
   fields; do not revive the retired legacy group parser or its data plane.
+- The estimator home dashboard shows only primary-model output plus live market
+  inputs/activity. Shadow status, comparison and realised-outcome data belong
+  exclusively to `/shadow`; home may expose navigation to that page only.

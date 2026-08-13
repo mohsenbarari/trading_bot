@@ -1657,6 +1657,13 @@ def render_input_cards(inputs: dict[str, dict[str, Any]]) -> str:
         "usd": "دلار هرات",
         "usdt": "تتر / تومان",
     }
+    icons = {
+        "melted_gold": "◆",
+        "generic_coin": "●",
+        "xauusd": "◎",
+        "usd": "$",
+        "usdt": "₮",
+    }
     cards = []
     for key, label in labels.items():
         value = inputs.get(key, {})
@@ -1682,9 +1689,10 @@ def render_input_cards(inputs: dict[str, dict[str, Any]]) -> str:
         else:
             detail = f"تعداد رویداد: {samples}"
         cards.append(
-            f"<div class='input-card {css}'>"
-            f"<span>{label}</span><strong>{rendered}</strong>"
-            f"<small>{detail}</small></div>"
+            f"<article class='input-card {css}' data-source='{html.escape(key)}'>"
+            f"<div class='input-card-head'><span class='input-icon' aria-hidden='true'>"
+            f"{icons[key]}</span><span>{label}</span></div>"
+            f"<strong>{rendered}</strong><small>{detail}</small></article>"
         )
     return "".join(cards)
 
@@ -2226,12 +2234,12 @@ def _shadow_status_card(
     status = html.escape(str(payload.get("status") or "UNKNOWN"))
     window_end = fa_datetime(estimate.get("window_end_utc") or payload.get("generated_at_utc"))
     return f"""
-    <div class="input-card observed" style="border-color:{accent}">
-      <span>{html.escape(title)}</span>
+    <article class="input-card model-status-card" style="--model-accent:{accent}">
+      <span class="model-label">{html.escape(title)}</span>
       <strong>{status}</strong>
       <small>میانگین اختلاف با اصلی: {mean_text}</small>
       <small>پنجره: {html.escape(window_end)}</small>
-    </div>
+    </article>
     """
 
 
@@ -2372,7 +2380,7 @@ def render_model_outcome_panel(live_state: dict[str, Any]) -> str:
             else ""
         )
     return f"""
-    <section class="shadow-panel" style="border-color:rgba(16,185,129,0.55)">
+    <section class="shadow-panel outcome-panel">
       <div class="section-head">
         <div>
           <h2>دقت واقعی در برابر معاملهٔ انجام‌شده</h2>
@@ -2401,6 +2409,641 @@ def render_model_outcome_panel(live_state: dict[str, Any]) -> str:
       {footnote}
     </section>
     """
+
+
+SHADOW_DASHBOARD_POLISH_CSS = """
+html {
+  color-scheme: dark;
+}
+body {
+  overflow-x: hidden;
+  background:
+    radial-gradient(circle at 9% 8%, rgba(37, 99, 235, 0.18), transparent 28rem),
+    radial-gradient(circle at 92% 4%, rgba(13, 148, 136, 0.13), transparent 26rem),
+    linear-gradient(155deg, #07111f 0%, #0a1425 45%, #080f1c 100%);
+}
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.18;
+  background-image:
+    linear-gradient(rgba(148, 163, 184, 0.055) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(148, 163, 184, 0.055) 1px, transparent 1px);
+  background-size: 42px 42px;
+  mask-image: linear-gradient(to bottom, black, transparent 76%);
+}
+.wrap {
+  position: relative;
+  width: min(1580px, calc(100% - 40px));
+  margin: 24px auto 48px;
+}
+.shadow-hero {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  min-height: 142px;
+  padding: 24px 26px;
+  border: 1px solid rgba(96, 165, 250, 0.2);
+  border-radius: 24px;
+  background:
+    linear-gradient(112deg, rgba(15, 31, 52, 0.98), rgba(12, 24, 43, 0.9)),
+    var(--bg-surface);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.28), inset 0 1px rgba(255, 255, 255, 0.04);
+}
+.shadow-hero::after {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  width: 360px;
+  height: 360px;
+  inset: -235px auto auto -70px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(45, 212, 191, 0.25), transparent 68%);
+}
+.shadow-brand {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-width: 310px;
+}
+.logo-badge {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 58px;
+  height: 58px;
+  border: 1px solid rgba(94, 234, 212, 0.35);
+  border-radius: 18px;
+  color: #5eead4;
+  background: linear-gradient(145deg, rgba(13, 148, 136, 0.22), rgba(37, 99, 235, 0.2));
+  box-shadow: 0 16px 34px rgba(8, 145, 178, 0.14);
+  font-size: 30px;
+}
+.eyebrow {
+  display: block;
+  margin-bottom: 3px;
+  color: #5eead4;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+.shadow-hero h1 {
+  font-size: clamp(20px, 2vw, 28px);
+  line-height: 1.3;
+}
+.shadow-hero p {
+  max-width: 690px;
+  line-height: 1.75;
+}
+.shadow-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.user-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 7px 11px;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  border-radius: 12px;
+  color: var(--text-sub);
+  background: rgba(7, 17, 31, 0.42);
+  font-size: 12px;
+}
+.user-label strong { color: var(--text-main); }
+.user-avatar { color: #5eead4; font-size: 10px; }
+.nav-btn {
+  min-height: 36px;
+  padding: 8px 13px;
+  border-radius: 11px;
+  background: linear-gradient(135deg, #0f766e, #155e75);
+  border-color: rgba(94, 234, 212, 0.22);
+  box-shadow: 0 10px 24px rgba(8, 145, 178, 0.14);
+  transition: transform 160ms ease, border-color 160ms ease, background 160ms ease;
+}
+.nav-btn.secondary {
+  background: rgba(15, 31, 52, 0.72);
+  border-color: rgba(148, 163, 184, 0.16);
+}
+.nav-btn:hover {
+  transform: translateY(-1px);
+  border-color: rgba(94, 234, 212, 0.5);
+}
+.nav-btn:focus-visible {
+  outline: 3px solid rgba(45, 212, 191, 0.24);
+  outline-offset: 2px;
+}
+#estimate-content {
+  display: grid;
+  gap: 18px;
+}
+.shadow-panel {
+  position: relative;
+  overflow: hidden;
+  margin: 0;
+  padding: 22px;
+  border: 1px solid rgba(148, 163, 184, 0.13);
+  border-radius: 22px;
+  background: linear-gradient(155deg, rgba(17, 31, 51, 0.94), rgba(12, 24, 42, 0.94));
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.22), inset 0 1px rgba(255, 255, 255, 0.035);
+}
+.comparison-panel { border-top-color: rgba(96, 165, 250, 0.45); }
+.outcome-panel { border-top-color: rgba(52, 211, 153, 0.45); }
+.section-head {
+  align-items: center;
+  margin-bottom: 16px;
+}
+.section-head h2 {
+  font-size: 18px;
+  line-height: 1.5;
+}
+.shadow-subtitle {
+  margin-top: 4px;
+  font-size: 12px;
+  line-height: 1.7;
+}
+.badge {
+  flex: 0 0 auto;
+  padding: 5px 11px;
+  color: #93c5fd;
+  border-color: rgba(96, 165, 250, 0.25);
+  background: rgba(37, 99, 235, 0.11);
+}
+.inputs {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 18px;
+}
+.model-status-card {
+  position: relative;
+  overflow: hidden;
+  min-height: 126px;
+  padding: 15px 16px 14px;
+  border: 1px solid rgba(148, 163, 184, 0.13);
+  background: rgba(7, 17, 31, 0.48);
+  box-shadow: inset 0 1px rgba(255, 255, 255, 0.025);
+}
+.model-status-card::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: 3px;
+  background: var(--model-accent);
+  box-shadow: 0 0 22px var(--model-accent);
+}
+.model-status-card .model-label {
+  min-height: 34px;
+  color: #cbd5e1;
+  font-size: 12px;
+  font-weight: 750;
+  line-height: 1.6;
+}
+.model-status-card strong {
+  margin: 2px 0 4px;
+  color: var(--model-accent);
+  font-size: 19px;
+}
+.model-status-card small {
+  line-height: 1.65;
+  white-space: normal;
+}
+.table-wrap {
+  overflow: auto;
+  border-color: rgba(148, 163, 184, 0.12);
+  border-radius: 14px;
+  background: rgba(6, 14, 26, 0.4);
+  scrollbar-color: rgba(94, 234, 212, 0.38) rgba(15, 23, 42, 0.45);
+  scrollbar-width: thin;
+}
+.comparison-panel .compare-table { min-width: 1220px; }
+.outcome-panel .compare-table { min-width: 760px; }
+th, td {
+  padding: 12px 14px;
+  border-bottom-color: rgba(148, 163, 184, 0.1);
+}
+th {
+  top: 0;
+  color: #aebed2;
+  background: rgba(8, 19, 34, 0.98);
+  backdrop-filter: blur(12px);
+}
+tbody tr:nth-child(even) td { background: rgba(148, 163, 184, 0.018); }
+tbody tr:hover td { background: rgba(94, 234, 212, 0.035); }
+.comparison-panel .compare-table th:nth-child(3),
+.comparison-panel .compare-table td:nth-child(3) { background-color: rgba(246, 196, 83, 0.045); }
+.comparison-panel .compare-table th:nth-child(4),
+.comparison-panel .compare-table td:nth-child(4),
+.comparison-panel .compare-table th:nth-child(5),
+.comparison-panel .compare-table td:nth-child(5) { background-color: rgba(245, 158, 11, 0.035); }
+.comparison-panel .compare-table th:nth-child(6),
+.comparison-panel .compare-table td:nth-child(6),
+.comparison-panel .compare-table th:nth-child(7),
+.comparison-panel .compare-table td:nth-child(7) { background-color: rgba(34, 211, 238, 0.035); }
+.comparison-panel .compare-table th:nth-child(8),
+.comparison-panel .compare-table td:nth-child(8),
+.comparison-panel .compare-table th:nth-child(9),
+.comparison-panel .compare-table td:nth-child(9) { background-color: rgba(52, 211, 153, 0.035); }
+.rate-cell strong { font-size: 15px; }
+.rate-cell small {
+  max-width: 160px;
+  line-height: 1.45;
+}
+.diff-cell {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
+}
+.comparison-notes {
+  display: grid;
+  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
+  gap: 10px;
+  margin-top: 14px;
+}
+.comparison-notes .shadow-path,
+.outcome-panel > .shadow-path {
+  margin: 0;
+  padding: 11px 13px;
+  border: 1px solid rgba(148, 163, 184, 0.1);
+  border-radius: 12px;
+  background: rgba(7, 17, 31, 0.38);
+  line-height: 1.75;
+  word-break: normal;
+}
+footer {
+  margin-top: 22px;
+  padding: 16px 4px 0;
+  border-top: 1px solid rgba(148, 163, 184, 0.1);
+  text-align: center;
+}
+@media (max-width: 1100px) {
+  .shadow-hero { align-items: flex-start; flex-direction: column; }
+  .shadow-actions { justify-content: flex-start; }
+  .inputs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 680px) {
+  .wrap { width: min(100% - 22px, 1580px); margin-top: 11px; }
+  .shadow-hero { min-height: auto; padding: 18px; border-radius: 19px; }
+  .shadow-brand { align-items: flex-start; min-width: 0; }
+  .logo-badge { width: 46px; height: 46px; border-radius: 14px; font-size: 24px; }
+  .shadow-actions { width: 100%; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .user-label { grid-column: 1 / -1; }
+  .nav-btn { justify-content: center; text-align: center; }
+  .shadow-panel { padding: 16px; border-radius: 18px; }
+  .section-head { align-items: flex-start; gap: 10px; }
+  .inputs { grid-template-columns: 1fr; }
+  .model-status-card { min-height: 112px; }
+  .comparison-notes { grid-template-columns: 1fr; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; }
+}
+"""
+
+
+ESTIMATOR_DASHBOARD_POLISH_CSS = """
+html {
+  color-scheme: dark;
+}
+body {
+  overflow-x: hidden;
+  background:
+    radial-gradient(circle at 88% 2%, rgba(245, 158, 11, 0.15), transparent 27rem),
+    radial-gradient(circle at 4% 18%, rgba(14, 116, 144, 0.16), transparent 30rem),
+    linear-gradient(155deg, #07111f 0%, #0a1425 48%, #080f1b 100%);
+}
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.16;
+  background-image:
+    linear-gradient(rgba(148, 163, 184, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(148, 163, 184, 0.05) 1px, transparent 1px);
+  background-size: 44px 44px;
+  mask-image: linear-gradient(to bottom, black, transparent 72%);
+}
+.wrap {
+  position: relative;
+  width: min(1480px, calc(100% - 40px));
+  margin: 24px auto 48px;
+}
+.dashboard-hero {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  min-height: 142px;
+  padding: 22px 24px;
+  border: 1px solid rgba(246, 196, 83, 0.22);
+  border-radius: 24px;
+  background: linear-gradient(110deg, rgba(17, 31, 51, 0.98), rgba(11, 24, 43, 0.9));
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.28), inset 0 1px rgba(255, 255, 255, 0.04);
+}
+.dashboard-hero::after {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  width: 390px;
+  height: 390px;
+  inset: -250px -70px auto auto;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(246, 196, 83, 0.28), transparent 68%);
+}
+.header-brand { min-width: 315px; gap: 16px; }
+.logo-badge {
+  flex: 0 0 auto;
+  width: 58px;
+  height: 58px;
+  border-radius: 18px;
+  color: #f6c453;
+  background: linear-gradient(145deg, rgba(245, 158, 11, 0.23), rgba(14, 116, 144, 0.2));
+  border-color: rgba(246, 196, 83, 0.42);
+  box-shadow: 0 16px 34px rgba(245, 158, 11, 0.13);
+  font-size: 28px;
+}
+.brand-copy { min-width: 0; }
+.brand-kicker,
+.section-kicker {
+  display: block;
+  color: #67e8f9;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+}
+h1 {
+  margin: 2px 0 7px;
+  font-size: clamp(20px, 2vw, 28px);
+  line-height: 1.35;
+  background: none;
+  color: #f8fafc;
+  -webkit-text-fill-color: currentColor;
+}
+h1 span { color: #f6c453; }
+.status-pill {
+  gap: 7px;
+  padding: 5px 10px;
+  background: rgba(16, 185, 129, 0.1);
+  border-color: rgba(52, 211, 153, 0.24);
+  font-size: 11px;
+}
+.status-dot { box-shadow: 0 0 12px rgba(52, 211, 153, 0.75); }
+.status-pill.warning {
+  color: #fda4af;
+  border-color: rgba(251, 113, 133, 0.25);
+  background: rgba(225, 29, 72, 0.1);
+}
+.status-pill.warning .status-dot {
+  background: #fb7185;
+  box-shadow: 0 0 12px rgba(251, 113, 133, 0.7);
+}
+.meta {
+  flex: 1;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+#freshness-content { min-width: 270px; }
+.meta-time {
+  display: grid;
+  gap: 2px;
+  padding: 9px 12px;
+  border: 1px solid rgba(148, 163, 184, 0.13);
+  border-radius: 13px;
+  color: var(--text-sub);
+  background: rgba(7, 17, 31, 0.42);
+  text-align: right;
+}
+.meta-time span { font-size: 10px; color: #67e8f9; }
+.meta-time strong { color: #e2e8f0; font-size: 12px; font-weight: 750; }
+.meta-time small { color: #7f91a8; font-size: 10px; }
+.header-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.user-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+  padding: 8px 11px;
+  border: 1px solid rgba(148, 163, 184, 0.13);
+  border-radius: 12px;
+  color: var(--text-sub);
+  background: rgba(7, 17, 31, 0.42);
+  font-size: 12px;
+}
+.user-label strong { color: var(--text-main); }
+.user-avatar { color: #f6c453; font-size: 10px; }
+.nav-btn {
+  min-height: 38px;
+  padding: 9px 14px;
+  border-radius: 11px;
+  background: linear-gradient(135deg, #d99622, #b86e12);
+  color: #fff8e7;
+  border: 1px solid rgba(251, 191, 36, 0.22);
+  box-shadow: 0 10px 24px rgba(217, 150, 34, 0.17);
+  transition: transform 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
+}
+.nav-btn.secondary {
+  color: #dce8f5;
+  background: rgba(15, 31, 52, 0.72);
+  border-color: rgba(148, 163, 184, 0.15);
+}
+.nav-btn:hover {
+  transform: translateY(-1px);
+  border-color: rgba(246, 196, 83, 0.52);
+  box-shadow: 0 12px 28px rgba(217, 150, 34, 0.2);
+}
+.nav-btn:focus-visible,
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 3px solid rgba(103, 232, 249, 0.22);
+  outline-offset: 2px;
+}
+.surface-panel,
+section,
+.group-control-card {
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  border-radius: 22px;
+  background: linear-gradient(155deg, rgba(17, 31, 51, 0.94), rgba(12, 24, 42, 0.94));
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.22), inset 0 1px rgba(255, 255, 255, 0.03);
+}
+.market-pulse {
+  padding: 20px;
+  border-top-color: rgba(246, 196, 83, 0.42);
+}
+.market-pulse .section-head { margin-bottom: 15px; }
+.section-head { gap: 12px; }
+.section-head h2 {
+  margin-top: 2px;
+  font-size: 18px;
+  line-height: 1.45;
+}
+.badge {
+  flex: 0 0 auto;
+  padding: 5px 11px;
+  color: #67e8f9;
+  border-color: rgba(34, 211, 238, 0.22);
+  background: rgba(8, 145, 178, 0.1);
+}
+.badge-live { color: #6ee7b7; border-color: rgba(52, 211, 153, 0.24); background: rgba(16, 185, 129, 0.1); }
+.badge-live span { display: inline-block; margin-left: 4px; font-size: 8px; }
+.top-ticker { margin: 0; }
+.inputs {
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 10px;
+}
+.input-card {
+  position: relative;
+  overflow: hidden;
+  justify-content: space-between;
+  min-height: 122px;
+  padding: 14px 15px;
+  border-color: rgba(148, 163, 184, 0.12);
+  border-radius: 16px;
+  background: rgba(7, 17, 31, 0.52);
+  box-shadow: inset 0 1px rgba(255, 255, 255, 0.025);
+}
+.input-card::after {
+  content: "";
+  position: absolute;
+  width: 72px;
+  height: 72px;
+  inset: auto auto -44px -28px;
+  border-radius: 50%;
+  background: rgba(103, 232, 249, 0.055);
+}
+.input-card:hover {
+  transform: translateY(-1px);
+  border-color: rgba(103, 232, 249, 0.26);
+}
+.input-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.input-icon {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 9px;
+  color: #f6c453;
+  background: rgba(246, 196, 83, 0.1);
+  font-size: 13px;
+}
+.input-card strong {
+  margin: 6px 0 3px;
+  font-size: clamp(18px, 1.55vw, 23px);
+  font-variant-numeric: tabular-nums;
+}
+.input-card.observed {
+  border-color: rgba(52, 211, 153, 0.19);
+  background: linear-gradient(155deg, rgba(16, 185, 129, 0.085), rgba(7, 17, 31, 0.52));
+}
+.input-card.estimated {
+  border-color: rgba(246, 196, 83, 0.23);
+  background: linear-gradient(155deg, rgba(245, 158, 11, 0.09), rgba(7, 17, 31, 0.52));
+}
+.input-card.no-data { border-style: dashed; }
+.group-control-card {
+  position: relative;
+  padding: 18px 20px;
+  border-radius: 19px;
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.18);
+}
+.group-control-copy { gap: 5px; }
+.group-control-copy .section-head { margin-bottom: 4px; }
+.group-control-copy strong { color: #e5edf6; font-size: 13px; }
+.group-control-copy small { line-height: 1.65; }
+.dashboard-grid {
+  grid-template-columns: minmax(0, 1.15fr) minmax(420px, 0.85fr);
+  gap: 18px;
+}
+.dashboard-grid section { margin-bottom: 0; }
+.table-section { padding: 20px; border-top-color: rgba(103, 232, 249, 0.26); }
+.table-wrap {
+  overflow: auto;
+  border-color: rgba(148, 163, 184, 0.11);
+  border-radius: 14px;
+  background: rgba(6, 14, 26, 0.4);
+  scrollbar-color: rgba(246, 196, 83, 0.35) rgba(15, 23, 42, 0.45);
+  scrollbar-width: thin;
+}
+th, td { padding: 13px 14px; border-bottom-color: rgba(148, 163, 184, 0.09); }
+th {
+  color: #aebed2;
+  background: rgba(8, 19, 34, 0.97);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+tbody tr:nth-child(even) td { background: rgba(148, 163, 184, 0.018); }
+tbody tr:hover td { background: rgba(103, 232, 249, 0.035); }
+.table-section tbody td:first-child strong { color: #e6edf5; font-size: 14px; }
+.rate-cell { min-width: 190px; }
+.rate-cell.cash { background: rgba(52, 211, 153, 0.025); }
+.rate-cell.tomorrow { background: rgba(96, 165, 250, 0.025); }
+.rate-cell strong { color: #f6c453; font-size: 18px; font-variant-numeric: tabular-nums; }
+.rate-cell small { margin-top: 3px; color: #7f91a8; }
+.side-column section { padding: 20px; }
+.group-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.feed-card {
+  min-width: 0;
+  padding: 13px;
+  border-color: rgba(148, 163, 184, 0.1);
+  border-radius: 14px;
+  background: rgba(7, 17, 31, 0.48);
+}
+.feed-card h3 { margin: 0 0 7px; color: #f6c453; line-height: 1.6; }
+.feed-card li { line-height: 1.75; border-top-color: rgba(148, 163, 184, 0.08); }
+.activity-freshness { line-height: 1.6; }
+footer { text-align: center; border-top-color: rgba(148, 163, 184, 0.1); }
+@media (max-width: 1180px) {
+  .dashboard-hero { align-items: flex-start; flex-direction: column; }
+  .meta { width: 100%; justify-content: space-between; }
+  .dashboard-grid { grid-template-columns: 1fr; }
+  .side-column .group-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 760px) {
+  .wrap { width: min(100% - 22px, 1480px); margin-top: 11px; }
+  .dashboard-hero { min-height: auto; padding: 18px; border-radius: 19px; }
+  .header-brand { min-width: 0; align-items: flex-start; }
+  .logo-badge { width: 46px; height: 46px; border-radius: 14px; font-size: 22px; }
+  .meta, #freshness-content { width: 100%; min-width: 0; }
+  .header-actions { width: 100%; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .user-label { grid-column: 1 / -1; }
+  .nav-btn { justify-content: center; text-align: center; }
+  .market-pulse, .table-section, .side-column section { padding: 16px; border-radius: 18px; }
+  .inputs { display: flex; overflow-x: auto; scroll-snap-type: x proximity; padding-bottom: 5px; }
+  .input-card { flex: 0 0 min(76vw, 235px); min-height: 112px; scroll-snap-align: start; }
+  .group-control-card { align-items: stretch; padding: 16px; }
+  .group-control-card form, .group-control-card .nav-btn { width: 100%; }
+  .side-column .group-grid { grid-template-columns: 1fr; }
+  .section-head { align-items: flex-start; }
+}
+@media (max-width: 460px) {
+  .header-actions { grid-template-columns: 1fr; }
+  .user-label { grid-column: auto; }
+  .section-head { flex-direction: column; }
+  .badge { align-self: flex-start; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; animation: none !important; transition: none !important; }
+}
+"""
 
 
 def render_shadow_page(
@@ -2436,12 +3079,12 @@ def render_shadow_page(
     ]
     live_window = fa_datetime(live_state.get("window_end_utc") if isinstance(live_state, dict) else None)
     live_card = f"""
-    <div class="input-card observed" style="border-color:rgba(245,158,11,0.55)">
-      <span>مدل اصلی (مرجع)</span>
+    <article class="input-card model-status-card live-model-card" style="--model-accent:#f6c453">
+      <span class="model-label">مدل اصلی (مرجع)</span>
       <strong>زنده</strong>
       <small>پایهٔ مقایسهٔ جدول</small>
       <small>پنجره: {html.escape(live_window)}</small>
-    </div>
+    </article>
     """
     status_cards = live_card + "".join(
         _shadow_status_card(title=title, payload=payload, accent=accent)
@@ -2456,7 +3099,7 @@ def render_shadow_page(
         for title, _, _ in model_specs
     )
     panels = f"""
-    <section class="shadow-panel" style="border-color:rgba(99,102,241,0.45)">
+    <section class="shadow-panel comparison-panel">
       <div class="section-head">
         <div>
           <h2>جدول مقایسهٔ یکپارچه</h2>
@@ -2478,11 +3121,13 @@ def render_shadow_page(
           <tbody>{table_rows}</tbody>
         </table>
       </div>
-      <p class="shadow-path">اختلاف = (سایه − اصلی) ÷ اصلی · علامت مثبت یعنی سایه بالاتر از اصلی است.</p>
-      <p class="shadow-path"><strong>این ستون معیار دقت نیست.</strong> فقط واگرایی از کتاب
-      اصلیِ کالیبره‌شده را نشان می‌دهد؛ اگر مدل اصلی خطا داشته باشد، سایهٔ دقیق‌تر
-      «اختلاف بیشتر» نشان می‌دهد. تنها معیار معتبر برای ارتقا، ارزیابی هر مدل در
-      برابر معاملهٔ واقعی است که در جدول زیر می‌آید.</p>
+      <div class="comparison-notes">
+        <p class="shadow-path">اختلاف = (سایه − اصلی) ÷ اصلی · علامت مثبت یعنی سایه بالاتر از اصلی است.</p>
+        <p class="shadow-path"><strong>این ستون معیار دقت نیست.</strong> فقط واگرایی از کتاب
+        اصلیِ کالیبره‌شده را نشان می‌دهد؛ اگر مدل اصلی خطا داشته باشد، سایهٔ دقیق‌تر
+        «اختلاف بیشتر» نشان می‌دهد. تنها معیار معتبر برای ارتقا، ارزیابی هر مدل در
+        برابر معاملهٔ واقعی است که در جدول زیر می‌آید.</p>
+      </div>
     </section>
     {render_model_outcome_panel(live_state if isinstance(live_state, dict) else {})}
     """
@@ -2492,8 +3137,8 @@ def render_shadow_page(
         """.encode("utf-8")
 
     user_badge = (
-        f"<span class='user-label' style='font-size:13px;color:var(--text-sub);margin-left:6px'>"
-        f"👤 <strong>{html.escape(user_session or 'bahar')}</strong></span>"
+        f"<span class='user-label'><span class='user-avatar' aria-hidden='true'>◉</span>"
+        f"<span>کاربر <strong>{html.escape(user_session or 'bahar')}</strong></span></span>"
     )
     research_link = ""
     if research_shadow_data_path:
@@ -2508,12 +3153,12 @@ def render_shadow_page(
             f"JSON سایه ۳</a> "
         )
     navigation = (
-        f"{user_badge} "
+        f"<nav class='shadow-actions' aria-label='ناوبری مدل‌های سایه'>{user_badge} "
         f"<a class='nav-btn secondary' href='{html.escape(home_path)}'>بازگشت به مدل اصلی</a> "
         f"<a class='nav-btn secondary' href='{html.escape(shadow_data_path)}'>JSON سایه ۱</a> "
         f"{research_link}"
         f"{ml_link}"
-        f"<a class='nav-btn secondary' href='{html.escape(logout_path)}'>خروج</a>"
+        f"<a class='nav-btn secondary' href='{html.escape(logout_path)}'>خروج</a></nav>"
     )
     document = f"""<!doctype html>
 <html lang="fa" dir="rtl">
@@ -2583,17 +3228,22 @@ th {{ color:var(--text-sub); background:rgba(15,23,42,0.95); position:sticky; to
 .missing {{ color:var(--accent-rose); }}
 .shadow-path {{ margin:12px 0 0; color:var(--text-sub); font-size:11px; word-break:break-all; }}
 footer {{ margin-top:18px; color:var(--text-sub); font-size:12px; }}
+{SHADOW_DASHBOARD_POLISH_CSS}
 </style>
 </head>
 <body>
 <main class="wrap">
-  <header>
-    <div>
+  <header class="shadow-hero">
+    <div class="shadow-brand">
+      <div class="logo-badge" aria-hidden="true">◌</div>
+      <div>
+      <span class="eyebrow">آزمایشگاه مدل</span>
       <h1>پایش مدل‌های سایه</h1>
       <p>جدول یکپارچهٔ مقایسه — مدل اصلی و سه سایه روی دادهٔ زندهٔ یکسان</p>
       <p>سایه ۱ = مدل قبلی · سایه ۲ = بازگشایی صبح · سایه ۳ = یادگیری ماشین</p>
+      </div>
     </div>
-    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">{navigation}</div>
+    {navigation}
   </header>
   <div id="estimate-content">{panels}</div>
   <footer>مدل اصلی همچنان تنها منبع نرخ نمایشی کاربر است.</footer>
@@ -2632,22 +3282,31 @@ def render_page(
     generated = fa_datetime(state.get("generated_at_utc"))
     window_start = fa_datetime(state.get("window_start_utc"))
     window_end = fa_datetime(state.get("window_end_utc"))
-    service_status = html.escape(str(state.get("service_status", "RUNNING")))
+    raw_service_status = str(state.get("service_status", "RUNNING"))
+    service_status = html.escape(raw_service_status)
+    service_status_class = (
+        "healthy" if raw_service_status.upper() in {"RUNNING", "READY", "OK"} else "warning"
+    )
     settlements = state.get("settlements", {})
     inputs = settlements.get("CASH", {}).get("inputs") or settlements.get("TOMORROW", {}).get("inputs") or {}
     melted = read_melted_minute_averages(market_db, state.get("window_end_utc")) if market_db else {}
     melted_cards = "".join(
-        f"<div class='input-card {'observed' if value.get('average_price') is not None else 'no-data'}'>"
-        f"<span>طلا آب‌شده {'کاغذی' if form == 'PAPER' else 'فیزیکی'}</span>"
+        f"<article class='input-card {'observed' if value.get('average_price') is not None else 'no-data'}' "
+        f"data-source='melted-{form.lower()}'>"
+        f"<div class='input-card-head'><span class='input-icon' aria-hidden='true'>◆</span>"
+        f"<span>طلا آب‌شده {'کاغذی' if form == 'PAPER' else 'فیزیکی'}</span></div>"
         f"<strong>{fa_number(value.get('average_price'))}</strong>"
-        f"<small>{fa_number(value.get('sample_count', 0))} رویداد</small></div>"
+        f"<small>{fa_number(value.get('sample_count', 0))} رویداد</small></article>"
         for form, value in melted.items()
     )
     ticker_cards = f"<div class='inputs'>{render_input_cards(inputs)}{melted_cards}</div>"
     table_section = f"""
-      <section class="table-section">
+      <section class="table-section surface-panel">
         <div class='section-head'>
-          <h2>لیست نرخ سکه و مسکوکات</h2>
+          <div>
+            <span class="section-kicker">خروجی مدل اصلی</span>
+            <h2>لیست نرخ سکه و مسکوکات</h2>
+          </div>
           <span class='badge'>برآورد نقدی و فردایی</span>
         </div>
         <div class='table-wrap'>
@@ -2666,8 +3325,9 @@ def render_page(
     """
     freshness_section = f"""
       <div class="meta-time">
-        بروزرسانی: {generated}<br>
-        بازه داده: {window_start} تا {window_end}
+        <span>آخرین بروزرسانی</span>
+        <strong>{generated}</strong>
+        <small>بازهٔ داده: {window_start} تا {window_end}</small>
       </div>
     """
     if estimate_fragment:
@@ -2732,94 +3392,41 @@ def render_page(
     </section>
     """
 
-    user_badge = f"<span class='user-label' style='font-size:13px;color:var(--text-sub);margin-left:6px'>👤 <strong>{html.escape(user_session or 'bahar')}</strong></span>"
+    user_badge = (
+        f"<span class='user-label'><span class='user-avatar' aria-hidden='true'>◉</span>"
+        f"<span>کاربر <strong>{html.escape(user_session or 'bahar')}</strong></span></span>"
+    )
     logout_btn = f"<a class='nav-btn secondary' href='{html.escape(logout_path)}'>خروج</a>"
 
-    shadow_payload = load_shadow_dashboard_payload(DEFAULT_SHADOW_STATE)
-    research_payload = load_shadow_dashboard_payload(DEFAULT_RESEARCH_SHADOW_STATE)
-    ml_payload = load_shadow_dashboard_payload(DEFAULT_ML_SHADOW_STATE_PATH)
-    shadow_status = str(shadow_payload.get("status") or "MISSING")
-    research_status = str(research_payload.get("status") or "MISSING")
-    ml_status = str(ml_payload.get("status") or "MISSING")
-    shadow_compare = shadow_payload.get("comparison_vs_live") or {}
-    research_compare = research_payload.get("comparison_vs_live") or {}
-    ml_compare = ml_payload.get("comparison_vs_live") or {}
-    shadow_mean = shadow_compare.get("mean_abs_pct")
-    research_mean = research_compare.get("mean_abs_pct")
-    ml_mean = ml_compare.get("mean_abs_pct")
-    shadow_mean_text = (
-        f"{fa_number(round(float(shadow_mean) * 100, 3))}٪"
-        if shadow_mean is not None
-        else "—"
-    )
-    research_mean_text = (
-        f"{fa_number(round(float(research_mean) * 100, 3))}٪"
-        if research_mean is not None
-        else "—"
-    )
-    ml_mean_text = (
-        f"{fa_number(round(float(ml_mean) * 100, 3))}٪"
-        if ml_mean is not None
-        else "—"
-    )
-    shadow_model_specs = [
-        ("سایه ۱ — مدل قبلی", shadow_payload),
-        ("سایه ۲ — بازگشایی صبح", research_payload),
-        ("سایه ۳ — یادگیری ماشین", ml_payload),
-    ]
-    shadow_table_rows = render_unified_shadow_compare_table(
-        state if isinstance(state, dict) else {},
-        shadow_model_specs,
-    )
-    shadow_banner = f"""
-    <section class="group-control-card" style="border-color:rgba(99,102,241,0.45)">
-      <div class="group-control-copy">
-        <div class="section-head">
-          <h2>مدل‌های سایه (پایش موازی یکپارچه)</h2>
-          <span class="badge">۳ سایه روی دادهٔ یکسان</span>
-        </div>
-        <strong>مدل اصلی و هر سه سایه روی دادهٔ زندهٔ یکسان؛ هیچ سایه‌ای خروجی اصلی را تغییر نمی‌دهد.</strong>
-        <div class="table-wrap" style="margin:12px 0">
-          <table class="compare-table">
-            <thead>
-              <tr>
-                <th>نوع کالا</th>
-                <th>تسویه</th>
-                <th>مدل اصلی</th>
-                <th>سایه ۱</th><th>اختلاف</th>
-                <th>سایه ۲</th><th>اختلاف</th>
-                <th>سایه ۳</th><th>اختلاف</th>
-              </tr>
-            </thead>
-            <tbody>{shadow_table_rows}</tbody>
-          </table>
-        </div>
-        <small>وضعیت سایه‌ها: {html.escape(shadow_status)} · {html.escape(research_status)} · {html.escape(ml_status)}</small>
-        <small>میانگین اختلاف: {shadow_mean_text} · {research_mean_text} · {ml_mean_text}</small>
-      </div>
-      <a class="nav-btn" href="{html.escape(shadow_path)}">مشاهده جزئیات و دقت در برابر معامله</a>
-    </section>
-    """
-
     if page == "manual":
-        navigation = f"{user_badge} <a class='nav-btn secondary' href='{html.escape('/' + manual_path.strip('/').rsplit('/', 1)[0])}'>بازگشت به داشبورد</a> {logout_btn}"
+        navigation = (
+            f"<nav class='header-actions' aria-label='ناوبری داشبورد'>{user_badge} "
+            f"<a class='nav-btn secondary' href='{html.escape('/' + manual_path.strip('/').rsplit('/', 1)[0])}'>"
+            f"بازگشت به داشبورد</a> {logout_btn}</nav>"
+        )
         page_content = manual_panel_html
         refresh_script = ""
     else:
         navigation = (
-            f"{user_badge} "
+            f"<nav class='header-actions' aria-label='ناوبری داشبورد'>{user_badge} "
             f"<a class='nav-btn secondary' href='{html.escape(shadow_path)}'>مدل‌های سایه</a> "
             f"<a class='nav-btn secondary' href='{html.escape(analytics_path)}'>آمار کاربران</a> "
             f"<a class='nav-btn' href='{html.escape(manual_path)}'>ثبت دستی آفر</a> "
-            f"{logout_btn}"
+            f"{logout_btn}</nav>"
         )
         page_content = f"""
-        <div id="ticker-content">
-          <div class="top-ticker">
-            {ticker_cards}
+        <section class="market-pulse surface-panel" aria-labelledby="market-pulse-title">
+          <div class="section-head">
+            <div>
+              <span class="section-kicker">ورودی‌های زنده</span>
+              <h2 id="market-pulse-title">نبض بازار</h2>
+            </div>
+            <span class="badge badge-live"><span aria-hidden="true">●</span> جریان داده</span>
           </div>
-        </div>
-        {shadow_banner}
+          <div id="ticker-content">
+            <div class="top-ticker">{ticker_cards}</div>
+          </div>
+        </section>
         {group_control_html}
         <div class="dashboard-grid">
           <div class="main-column">
@@ -3374,16 +3981,18 @@ footer code {{
     justify-content: space-between;
   }}
 }}
+{ESTIMATOR_DASHBOARD_POLISH_CSS}
 </style>
 </head>
 <body>
 <main class="wrap">
-  <header>
+  <header class="dashboard-hero">
     <div class="header-brand">
-      <div class="logo-badge">🪙</div>
-      <div>
+      <div class="logo-badge" aria-hidden="true">◈</div>
+      <div class="brand-copy">
+        <span class="brand-kicker">مرکز پایش بازار</span>
         <h1>سامانه <span>تخمین نرخ سکه</span></h1>
-        <div class="status-pill">
+        <div class="status-pill {service_status_class}">
           <span class="status-dot"></span>
           وضعیت سرویس: {service_status}
         </div>
