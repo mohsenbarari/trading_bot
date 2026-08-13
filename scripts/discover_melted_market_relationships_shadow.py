@@ -48,9 +48,10 @@ from core.market_intelligence.coin_relationships import (
     ConfirmedCoinTrade,
     build_coin_intrinsic_label,
 )
+from core.market_intelligence.relationship_ledger import MELTED_FEATURE_SCHEMA
 
 
-DISCOVERY_VERSION = "MELTED_MARKET_RELATIONSHIP_DISCOVERY_V2_SHADOW_20260812"
+DISCOVERY_VERSION = MELTED_FEATURE_SCHEMA
 DEFAULT_WINDOWS = (1, 3, 5, 10, 15)
 DEFAULT_HORIZON_MINUTES = 5
 DEFAULT_SAMPLE_STEP_MINUTES = 5

@@ -4,6 +4,8 @@ import tempfile
 import unittest
 
 from core.market_intelligence.relationship_ledger import (
+    LEGACY_MELTED_FEATURE_SCHEMAS,
+    MELTED_FEATURE_SCHEMA,
     append_labels,
     append_melted_features,
     iter_labels,
@@ -34,7 +36,7 @@ def label(*, bubble=0.02):
 
 def melted_feature():
     return {
-        "schema_version": "MELTED_MARKET_RELATIONSHIP_DISCOVERY_V1_SHADOW_20260803",
+        "schema_version": MELTED_FEATURE_SCHEMA,
         "available_at_utc": (NOW - timedelta(minutes=5)).isoformat(),
         "realized_at_utc": NOW.isoformat(),
         "target_market": "PAPER:TOMORROW:NORMAL",
@@ -79,6 +81,15 @@ class RelationshipLedgerTests(unittest.TestCase):
             self.assertEqual(first["inserted"], 1)
             self.assertEqual(second["unchanged"], 1)
             self.assertEqual(len(list(iter_melted_features(ledger))), 1)
+
+    def test_legacy_melted_feature_schema_remains_replayable(self):
+        historical = melted_feature()
+        historical["schema_version"] = next(iter(LEGACY_MELTED_FEATURE_SCHEMAS))
+        with tempfile.TemporaryDirectory() as directory:
+            result = append_melted_features(
+                Path(directory) / "ledger.sqlite3", [historical], retention_days=None
+            )
+            self.assertEqual(result["inserted"], 1)
 
 
 if __name__ == "__main__":

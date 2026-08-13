@@ -13,7 +13,10 @@ from typing import Iterable, Iterator, Mapping
 
 LEDGER_SCHEMA_VERSION = "COIN_RELATIONSHIP_LEDGER_V1"
 LABEL_SCHEMA = "COIN_INTRINSIC_RELATIONSHIP_DATASET_V1_SHADOW_20260803"
-MELTED_FEATURE_SCHEMA = "MELTED_MARKET_RELATIONSHIP_DISCOVERY_V1_SHADOW_20260803"
+MELTED_FEATURE_SCHEMA = "MELTED_MARKET_RELATIONSHIP_DISCOVERY_V2_SHADOW_20260812"
+LEGACY_MELTED_FEATURE_SCHEMAS = frozenset(
+    {"MELTED_MARKET_RELATIONSHIP_DISCOVERY_V1_SHADOW_20260803"}
+)
 RAW_OR_IDENTITY_KEYS = frozenset(
     {
         "offer_text",
@@ -314,7 +317,11 @@ def normalize_melted_feature_row(item: Mapping[str, object]) -> dict[str, object
     forbidden = RAW_OR_IDENTITY_KEYS.intersection(item)
     if forbidden:
         raise ValueError("relationship_ledger_raw_or_identity_field_forbidden")
-    if item.get("schema_version") != MELTED_FEATURE_SCHEMA:
+    schema_version = item.get("schema_version")
+    if not isinstance(schema_version, str) or (
+        schema_version != MELTED_FEATURE_SCHEMA
+        and schema_version not in LEGACY_MELTED_FEATURE_SCHEMAS
+    ):
         raise ValueError("relationship_ledger_melted_schema_invalid")
     available = _utc(item.get("available_at_utc"))
     realized = _utc(item.get("realized_at_utc"))

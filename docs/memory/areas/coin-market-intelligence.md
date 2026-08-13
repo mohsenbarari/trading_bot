@@ -14,3 +14,6 @@
 - Do not restore `group_commodity_context` or silently default an omitted coin
   to Imam. Commodity resolution uses strictly-prior same-book Market Store
   anchors and fails closed when context is insufficient or conflicting.
+- Live coin-intelligence systemd jobs must execute from the canonical checkout;
+  before removing a worktree, retarget and verify every timer/service that
+  references it so snapshots and Market Store inputs cannot silently stall.
