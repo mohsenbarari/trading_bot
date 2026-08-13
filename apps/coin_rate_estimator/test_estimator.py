@@ -31,6 +31,7 @@ from coin_estimator import (
     select_generic_coin_average,
     select_group_offer_anchor,
     select_historical_group_anchor,
+    select_live_xauusd_average,
     select_melted_average,
     summarize_order_flow,
     weighted_quantile,
@@ -989,6 +990,118 @@ class EstimatorTests(unittest.TestCase):
             self.assertEqual(
                 tomorrow_coin["excluded_fallback"],
                 "IME_CASH_CERTIFICATE_NOT_VALID_TOMORROW_DIRECT_ANCHOR",
+            )
+
+    def test_live_xau_uses_fresh_corroborated_paxg_only_as_proxy(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "market.sqlite3"
+            make_market_db(path)
+            connection = sqlite3.connect(path)
+            connection.row_factory = sqlite3.Row
+            connection.execute(
+                """
+                INSERT INTO external_market_observations(
+                    instrument_code, observed_at_utc, interval_seconds,
+                    quote_kind, normalized_price_num
+                ) VALUES ('PAXG_USD_PROXY', '2026-07-20T10:09:45Z', 0, 'MID', 4368.5)
+                """
+            )
+            connection.commit()
+
+            result = select_live_xauusd_average(
+                connection,
+                datetime(2026, 7, 20, 10, 10, tzinfo=timezone.utc),
+                seconds=90,
+            )
+
+            self.assertEqual(result["status"], "ESTIMATED")
+            self.assertTrue(result["is_proxy"])
+            self.assertEqual(result["proxy_instrument"], "PAXG_USD_PROXY")
+            self.assertEqual(result["point_price"], 4368.5)
+
+            historical = estimator_module.historical_market_context(
+                connection,
+                "CASH",
+                datetime(2026, 7, 20, 10, 10, tzinfo=timezone.utc),
+            )
+            self.assertEqual(historical["xauusd"]["status"], "NO_DATA")
+
+    def test_live_xau_direct_quote_always_wins_over_proxy(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "market.sqlite3"
+            make_market_db(path)
+            connection = sqlite3.connect(path)
+            connection.row_factory = sqlite3.Row
+            connection.execute(
+                """
+                INSERT INTO price_events(
+                    instrument, market_label, settlement_term, trade_form,
+                    event_type, side, quantity_num, price_num, event_time_utc
+                ) VALUES (
+                    'XAUUSD', 'اونس جهانی', 'UNKNOWN', 'UNKNOWN',
+                    'QUOTE', 'UNKNOWN', NULL, 4366, '2026-07-20T10:09:50Z'
+                )
+                """
+            )
+            connection.execute(
+                """
+                INSERT INTO external_market_observations(
+                    instrument_code, observed_at_utc, interval_seconds,
+                    quote_kind, normalized_price_num
+                ) VALUES ('PAXG_USD_PROXY', '2026-07-20T10:09:55Z', 0, 'MID', 4368.5)
+                """
+            )
+            connection.commit()
+
+            result = select_live_xauusd_average(
+                connection,
+                datetime(2026, 7, 20, 10, 10, tzinfo=timezone.utc),
+                seconds=90,
+            )
+
+            self.assertEqual(result["status"], "OBSERVED")
+            self.assertFalse(result["is_proxy"])
+            self.assertEqual(result["point_price"], 4366)
+            self.assertEqual(result["price_source"], "TELEGRAM_DIRECT_XAUUSD")
+
+    def test_live_xau_rejects_proxy_outside_recent_direct_range(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "market.sqlite3"
+            make_market_db(path)
+            connection = sqlite3.connect(path)
+            connection.row_factory = sqlite3.Row
+            connection.execute(
+                """
+                INSERT INTO price_events(
+                    instrument, market_label, settlement_term, trade_form,
+                    event_type, side, quantity_num, price_num, event_time_utc
+                ) VALUES (
+                    'XAUUSD', 'اونس جهانی', 'UNKNOWN', 'UNKNOWN',
+                    'QUOTE', 'UNKNOWN', NULL, 4366, '2026-07-20T10:00:30Z'
+                )
+                """
+            )
+            connection.execute(
+                """
+                INSERT INTO external_market_observations(
+                    instrument_code, observed_at_utc, interval_seconds,
+                    quote_kind, normalized_price_num
+                ) VALUES ('PAXG_USD_PROXY', '2026-07-20T10:09:55Z', 0, 'MID', 5000)
+                """
+            )
+            connection.commit()
+
+            result = select_live_xauusd_average(
+                connection,
+                datetime(2026, 7, 20, 10, 10, tzinfo=timezone.utc),
+                seconds=90,
+            )
+
+            self.assertEqual(result["status"], "NO_DATA")
+            self.assertFalse(result["is_proxy"])
+            self.assertEqual(
+                result["fallback_status"],
+                "PAXG_PROXY_OUTSIDE_RECENT_XAU_BAND",
             )
 
     def test_consecutive_buy_offers_create_positive_pressure(self) -> None:

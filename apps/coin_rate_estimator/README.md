@@ -347,3 +347,11 @@ Direct IME polling is disabled in the normal foreign-host deployment path.
 Any future relay or Object Storage transfer must be designed from the current
 architecture as a separate reviewed change.  This application must fail closed
 when an exchange observation is absent; it must not manufacture a current value.
+
+Live XAU/USD always prefers the direct normalized Telegram observation. If that
+feed is temporarily silent, live inference may use a fresh Binance PAXG proxy
+only when the independent PAXG/USDC and PAXG/USDT books have narrow spreads and
+agree within 0.5%. The proxy remains a separate external instrument, is marked
+`ESTIMATED`/`is_proxy`, changes aggregate health to `DEGRADED`, and is never used
+as historical training data. A proxy more than 2% away from a direct XAU quote
+observed in the preceding 15 minutes is rejected.

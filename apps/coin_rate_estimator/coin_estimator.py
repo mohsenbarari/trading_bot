@@ -877,6 +877,75 @@ def average_external_market_value(
     return empty
 
 
+def select_live_xauusd_average(
+    connection: sqlite3.Connection,
+    end: datetime,
+    *,
+    seconds: int = WINDOW_SECONDS,
+) -> dict[str, Any]:
+    """Prefer direct XAU/USD and fail over only to a corroborated PAXG proxy.
+
+    The proxy is never written into the direct XAU/USD event stream and is
+    excluded from historical training.  When a recent direct XAU observation
+    exists, a proxy outside a two-percent consistency band is rejected.
+    """
+
+    direct = average_market_value(
+        connection,
+        end=end,
+        seconds=seconds,
+        instrument="XAUUSD",
+        market_label="اونس جهانی",
+    )
+    if direct["status"] == "OBSERVED":
+        direct["is_proxy"] = False
+        direct["price_source"] = "TELEGRAM_DIRECT_XAUUSD"
+        return direct
+
+    proxy = average_external_market_value(
+        connection,
+        end=end,
+        instrument_code="PAXG_USD_PROXY",
+        quote_kinds=("MID",),
+        seconds=seconds,
+    )
+    if proxy["status"] != "OBSERVED":
+        direct["is_proxy"] = False
+        direct["fallback_status"] = "PAXG_PROXY_NO_DATA"
+        return direct
+
+    recent_direct = average_market_value(
+        connection,
+        end=end,
+        seconds=max(seconds, 15 * 60),
+        instrument="XAUUSD",
+        market_label="اونس جهانی",
+    )
+    recent_point = recent_direct.get("point_price")
+    proxy_point = proxy.get("point_price")
+    if recent_point is not None and proxy_point is not None:
+        relative_gap = abs(float(proxy_point) / float(recent_point) - 1.0)
+        if relative_gap > 0.02:
+            direct["is_proxy"] = False
+            direct["fallback_status"] = "PAXG_PROXY_OUTSIDE_RECENT_XAU_BAND"
+            direct["fallback_relative_gap"] = relative_gap
+            return direct
+
+    proxy.update(
+        {
+            "status": "ESTIMATED",
+            "selection": "BINANCE_PAXG_STABLECOIN_CORROBORATED_PROXY",
+            "price_source": "PAXG_USDC_USDT_PROXY",
+            "is_estimated": True,
+            "is_proxy": True,
+            "proxy_instrument": "PAXG_USD_PROXY",
+            "direct_source_status": direct["status"],
+            "safety_policy": "TWO_BOOK_CORROBORATION_AND_RECENT_XAU_BAND",
+        }
+    )
+    return proxy
+
+
 def select_usd_average(
     connection: sqlite3.Connection,
     settlement: str,
@@ -4963,12 +5032,8 @@ def _observed_inputs_uncached(
         "generic_coin": select_generic_coin_average(
             connection, settlement, end, seconds=average_seconds
         ),
-        "xauusd": average_market_value(
-            connection,
-            end=end,
-            seconds=average_seconds,
-            instrument="XAUUSD",
-            market_label="اونس جهانی",
+        "xauusd": select_live_xauusd_average(
+            connection, end, seconds=average_seconds
         ),
         "usd": select_effective_usd_average(
             connection, settlement, end, seconds=average_seconds

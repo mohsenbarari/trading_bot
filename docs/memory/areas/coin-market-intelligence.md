@@ -30,3 +30,6 @@
   must expose a collector heartbeat separately from market-hours-aware data
   freshness; stale or invalid inputs stay excluded, and aggregate health must
   degrade with explicit reason codes instead of reporting a bare `RUNNING`.
+  Direct normalized sources always win. A live-only fallback must remain a
+  separately stored, corroborated and explicitly labelled proxy, degrade health,
+  fail closed on disagreement, and never enter historical model training.

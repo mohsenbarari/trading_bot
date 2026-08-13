@@ -36,6 +36,8 @@ from .normalization import (
 WALLEX_HISTORY_URL = "https://api.wallex.ir/v1/udf/history"
 WALLEX_DEPTH_URL = "https://api.wallex.ir/v1/depth"
 WALLEX_SYMBOL = "USDTTMN"
+BINANCE_BOOK_TICKER_URL = "https://data-api.binance.vision/api/v3/ticker/bookTicker"
+BINANCE_PAXG_SYMBOLS = ("PAXGUSDC", "PAXGUSDT")
 IME_BASE_URL = "https://cdn.ime.co.ir"
 IME_GOLD_BAR_SYMBOL = "CD1GOB0001"
 IME_GOLD_COIN_SYMBOL = "CD1GOC0001"
@@ -195,6 +197,69 @@ def _wallex_observation(
         volume=parsed_volume,
         conversion_formula="identity: Wallex TMN is Iranian toman (IRT)",
     )
+
+
+def _binance_paxg_midpoint(payload: object, *, symbol: str) -> Decimal:
+    if not isinstance(payload, dict) or str(payload.get("symbol") or "") != symbol:
+        raise ExternalSourceError(f"Binance {symbol} response is malformed")
+    bid = _as_decimal(payload.get("bidPrice"), field=f"Binance {symbol} bid")
+    ask = _as_decimal(payload.get("askPrice"), field=f"Binance {symbol} ask")
+    if ask < bid:
+        raise ExternalSourceError(f"Binance {symbol} crossed book")
+    midpoint = (bid + ask) / Decimal("2")
+    spread_ratio = (ask - bid) / midpoint
+    if spread_ratio > Decimal("0.005"):
+        raise ExternalSourceError(f"Binance {symbol} spread is too wide")
+    return midpoint
+
+
+def fetch_binance_paxg_live(
+    *, timeout: float = 8.0, observed_at: datetime | None = None
+) -> list[ExternalMarketObservation]:
+    """Return one corroborated gold-ounce proxy from two PAXG books.
+
+    PAXG represents one fine troy ounce of London Good Delivery gold.  The
+    stablecoin books are still a proxy for XAU/USD, so both markets must agree
+    within a narrow relative band and downstream inference labels the result
+    as estimated rather than observed XAU/USD.
+    """
+
+    midpoints = {
+        symbol: _binance_paxg_midpoint(
+            _http_json(
+                BINANCE_BOOK_TICKER_URL,
+                params={"symbol": symbol},
+                timeout=timeout,
+            ),
+            symbol=symbol,
+        )
+        for symbol in BINANCE_PAXG_SYMBOLS
+    }
+    low = min(midpoints.values())
+    high = max(midpoints.values())
+    center = sum(midpoints.values(), Decimal("0")) / Decimal(len(midpoints))
+    if (high - low) / center > Decimal("0.005"):
+        raise ExternalSourceError("Binance PAXG stablecoin books diverged")
+    stamp = observed_at or datetime.now(timezone.utc)
+    return [
+        ExternalMarketObservation(
+            source="BINANCE_PUBLIC_API",
+            instrument="PAXG_USD_PROXY",
+            symbol="+".join(BINANCE_PAXG_SYMBOLS),
+            observed_at_utc=iso_utc(stamp),
+            quote_kind="MID",
+            raw_price=center,
+            raw_currency="USDC_USDT_BASKET",
+            raw_unit="STABLECOIN_PER_PAXG",
+            normalized_price=center,
+            normalized_currency="USD_PROXY",
+            normalized_unit="USD_PROXY_PER_TROY_OUNCE",
+            conversion_formula=(
+                "mean(mid(PAXGUSDC),mid(PAXGUSDT)); "
+                "PAXG represents one fine troy ounce; proxy, not direct XAUUSD"
+            ),
+        )
+    ]
 
 
 def fetch_wallex_history(

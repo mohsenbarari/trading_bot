@@ -8,10 +8,12 @@ from unittest.mock import patch
 
 from telegram_price_collector.db import initialize, upsert_external_observations
 from telegram_price_collector.external_collectors import (
+    ExternalSourceError,
     _fetch_ime_financial_snapshot,
     _fetch_ime_long_poll_items,
     _fetch_ime_sse_items,
     _ime_http_session,
+    fetch_binance_paxg_live,
     fetch_wallex_history,
     parse_ime_items,
 )
@@ -269,6 +271,45 @@ class WallexHistoryTests(unittest.TestCase):
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0].raw_price, Decimal("188100"))
         self.assertEqual(rows[0].volume, Decimal("12.5"))
+
+
+class BinancePaxgTests(unittest.TestCase):
+    @patch("telegram_price_collector.external_collectors._http_json")
+    def test_two_stablecoin_books_produce_one_explicit_proxy(self, http_json) -> None:
+        http_json.side_effect = [
+            {"symbol": "PAXGUSDC", "bidPrice": "4366", "askPrice": "4368"},
+            {"symbol": "PAXGUSDT", "bidPrice": "4369", "askPrice": "4371"},
+        ]
+
+        rows = fetch_binance_paxg_live(
+            observed_at=datetime(2026, 8, 13, 17, 0, tzinfo=timezone.utc)
+        )
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0].instrument, "PAXG_USD_PROXY")
+        self.assertEqual(rows[0].normalized_price, Decimal("4368.5"))
+        self.assertEqual(rows[0].normalized_currency, "USD_PROXY")
+        self.assertIn("proxy, not direct XAUUSD", rows[0].conversion_formula)
+
+    @patch("telegram_price_collector.external_collectors._http_json")
+    def test_divergent_stablecoin_books_fail_closed(self, http_json) -> None:
+        http_json.side_effect = [
+            {"symbol": "PAXGUSDC", "bidPrice": "4300", "askPrice": "4301"},
+            {"symbol": "PAXGUSDT", "bidPrice": "4400", "askPrice": "4401"},
+        ]
+
+        with self.assertRaises(ExternalSourceError):
+            fetch_binance_paxg_live()
+
+    @patch("telegram_price_collector.external_collectors._http_json")
+    def test_wide_book_spread_fails_closed(self, http_json) -> None:
+        http_json.side_effect = [
+            {"symbol": "PAXGUSDC", "bidPrice": "4300", "askPrice": "4400"},
+            {"symbol": "PAXGUSDT", "bidPrice": "4369", "askPrice": "4371"},
+        ]
+
+        with self.assertRaises(ExternalSourceError):
+            fetch_binance_paxg_live()
 
 
 if __name__ == "__main__":

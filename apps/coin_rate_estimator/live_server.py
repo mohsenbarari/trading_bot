@@ -83,6 +83,7 @@ from core.market_intelligence.input_health import (  # noqa: E402
 )
 from telegram_price_collector.external_collectors import (  # noqa: E402
     ExternalSourceError,
+    fetch_binance_paxg_live,
     fetch_ime_live,
     fetch_wallex_live,
 )
@@ -211,6 +212,10 @@ def input_health_config(
         wallex_max_age_seconds=max(
             20,
             int(os.environ.get("COIN_RATE_ESTIMATOR_WALLEX_HEARTBEAT_MAX_AGE", "45")),
+        ),
+        binance_paxg_max_age_seconds=max(
+            20,
+            int(os.environ.get("COIN_RATE_ESTIMATOR_PAXG_HEARTBEAT_MAX_AGE", "45")),
         ),
         group_projection_max_age_seconds=max(
             45,
@@ -1755,6 +1760,7 @@ def render_input_health_panel(input_health: object) -> str:
         "CRITICAL": "بحرانی",
         "DISABLED": "غیرفعال",
         "AVAILABLE": "در دسترس",
+        "AVAILABLE_PROXY": "در دسترس با منبع جایگزین",
         "QUIET_OR_NO_DATA": "بازار ساکت / بدون داده",
         "NO_DATA": "بدون داده",
         "STALE": "کهنه",
@@ -1762,6 +1768,7 @@ def render_input_health_panel(input_health: object) -> str:
     collector_labels = {
         "public_market_telegram": "تلگرام بازار عمومی",
         "wallex_public_api": "API تتر",
+        "binance_paxg_public_api": "پراکسی اونس PAXG",
         "coin_group_projection": "گروه‌ها تا مدل",
     }
     input_labels = {
@@ -3135,6 +3142,7 @@ section,
 .health-card span, .health-card small { color: var(--text-sub); font-size: 10px; }
 .health-card strong { color: #6ee7b7; font-size: 12px; }
 .health-card.health-degraded strong,
+.health-card.health-available_proxy strong,
 .health-card.health-quiet_or_no_data strong { color: #fde68a; }
 .health-card.health-critical strong,
 .health-card.health-no_data strong,
@@ -6262,6 +6270,59 @@ async def external_collection_loop(
                         {
                             "event": "external_live_failed",
                             "source": "WALLEX_PUBLIC_API",
+                            "error": f"{type(exc).__name__}: {exc}"[:500],
+                        },
+                        ensure_ascii=False,
+                    ),
+                    flush=True,
+                )
+
+            try:
+                paxg_rows = await asyncio.to_thread(fetch_binance_paxg_live)
+                if not paxg_rows:
+                    raise ExternalSourceError("binance_paxg_empty_snapshot")
+                upsert_external_observations(connection, paxg_rows)
+                update_probe_state(
+                    health_path,
+                    source="BINANCE_PAXG_PUBLIC_API",
+                    status="HEALTHY",
+                    successful=True,
+                    details={
+                        "observation_count": len(paxg_rows),
+                        "configured_interval_seconds": wallex_interval,
+                        "corroborating_books": 2,
+                    },
+                )
+                print(
+                    json.dumps(
+                        {
+                            "event": "external_live",
+                            "source": "BINANCE_PAXG_PUBLIC_API",
+                            "observations": len(paxg_rows),
+                            "observed_at_utc": paxg_rows[0].observed_at_utc,
+                        },
+                        ensure_ascii=False,
+                    ),
+                    flush=True,
+                )
+            except Exception as exc:
+                connection.rollback()
+                update_probe_state(
+                    health_path,
+                    source="BINANCE_PAXG_PUBLIC_API",
+                    status="FAILED",
+                    successful=False,
+                    error_code=f"BINANCE_PAXG_{type(exc).__name__.upper()}",
+                    details={
+                        "configured_interval_seconds": wallex_interval,
+                        "corroborating_books": 2,
+                    },
+                )
+                print(
+                    json.dumps(
+                        {
+                            "event": "external_live_failed",
+                            "source": "BINANCE_PAXG_PUBLIC_API",
                             "error": f"{type(exc).__name__}: {exc}"[:500],
                         },
                         ensure_ascii=False,

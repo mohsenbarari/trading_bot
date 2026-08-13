@@ -29,6 +29,7 @@ class InputHealthConfig:
     group_projection_state: Path
     public_telegram_max_age_seconds: int = 60
     wallex_max_age_seconds: int = 45
+    binance_paxg_max_age_seconds: int = 45
     group_projection_max_age_seconds: int = 90
 
 
@@ -229,6 +230,7 @@ def _logical_input_health(
         per_settlement: dict[str, str] = {}
         freshest: datetime | None = None
         stale_observed = False
+        proxy_active = False
         for settlement in ("CASH", "TOMORROW"):
             settlement_payload = settlements.get(settlement)
             settlement_payload = settlement_payload if isinstance(settlement_payload, Mapping) else {}
@@ -242,6 +244,8 @@ def _logical_input_health(
             payload = payload if isinstance(payload, Mapping) else {}
             status = str(payload.get("status") or "NO_DATA").upper()
             per_settlement[settlement] = status
+            if name == "xauusd" and payload.get("is_proxy") is True:
+                proxy_active = True
             observed_at = _input_time(payload)
             if observed_at is not None and (freshest is None or observed_at > freshest):
                 freshest = observed_at
@@ -256,6 +260,8 @@ def _logical_input_health(
         available = all(value in AVAILABLE_INPUT_STATES for value in per_settlement.values())
         if stale_observed:
             status = "STALE"
+        elif available and proxy_active:
+            status = "AVAILABLE_PROXY"
         elif available:
             status = "AVAILABLE"
         elif importance == "OPPORTUNISTIC":
@@ -267,6 +273,8 @@ def _logical_input_health(
             reasons.append(reason)
             if importance == "CRITICAL":
                 critical_failure = True
+        elif status == "AVAILABLE_PROXY":
+            reasons.append("MODEL_INPUT_XAUUSD_PROXY_ACTIVE")
         result[name] = {
             "status": status,
             "importance": importance,
@@ -303,6 +311,13 @@ def build_estimator_input_health(
             max_age_seconds=config.wallex_max_age_seconds,
             critical=False,
         ),
+        "binance_paxg_public_api": assess_probe(
+            config.external_market_state,
+            source="BINANCE_PAXG_PUBLIC_API",
+            as_of=effective_as_of,
+            max_age_seconds=config.binance_paxg_max_age_seconds,
+            critical=False,
+        ),
         "coin_group_projection": assess_probe(
             config.group_projection_state,
             source="COIN_GROUP_PROJECTION",
@@ -327,8 +342,11 @@ def build_estimator_input_health(
         payload.get("status") == "DEGRADED" for payload in collectors.values()
     )
     supporting_input_degraded = any(
-        payload.get("importance") == "SUPPORTING"
-        and payload.get("status") in {"NO_DATA", "STALE"}
+        (
+            payload.get("importance") == "SUPPORTING"
+            and payload.get("status") in {"NO_DATA", "STALE"}
+        )
+        or payload.get("status") == "AVAILABLE_PROXY"
         for payload in model_inputs.values()
     )
     if input_critical or collector_critical:

@@ -60,6 +60,7 @@ def _config(root: Path) -> InputHealthConfig:
         group_projection_state=root / "group.json",
         public_telegram_max_age_seconds=60,
         wallex_max_age_seconds=45,
+        binance_paxg_max_age_seconds=45,
         group_projection_max_age_seconds=90,
     )
 
@@ -75,6 +76,13 @@ def _write_healthy_probes(config: InputHealthConfig) -> None:
     update_probe_state(
         config.external_market_state,
         source="WALLEX_PUBLIC_API",
+        status="HEALTHY",
+        successful=True,
+        now=NOW,
+    )
+    update_probe_state(
+        config.external_market_state,
+        source="BINANCE_PAXG_PUBLIC_API",
         status="HEALTHY",
         successful=True,
         now=NOW,
@@ -146,6 +154,25 @@ def test_missing_critical_model_input_is_critical() -> None:
 
     assert result["status"] == "CRITICAL"
     assert "MODEL_INPUT_XAUUSD_NO_DATA" in result["reason_codes"]
+
+
+def test_explicit_xau_proxy_degrades_but_keeps_input_available() -> None:
+    with TemporaryDirectory() as directory:
+        config = _config(Path(directory))
+        _write_healthy_probes(config)
+        estimate = _estimate()
+        for settlement in ("CASH", "TOMORROW"):
+            estimate["settlements"][settlement]["inputs"]["xauusd"] = {
+                "status": "ESTIMATED",
+                "is_proxy": True,
+                "latest_event_utc": NOW.isoformat().replace("+00:00", "Z"),
+                "average_window_seconds": 90,
+            }
+        result = build_estimator_input_health(estimate, as_of=NOW, config=config)
+
+    assert result["status"] == "DEGRADED"
+    assert result["model_inputs"]["xauusd"]["status"] == "AVAILABLE_PROXY"
+    assert "MODEL_INPUT_XAUUSD_PROXY_ACTIVE" in result["reason_codes"]
 
 
 def test_failure_heartbeat_preserves_last_success_timestamp() -> None:
