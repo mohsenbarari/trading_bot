@@ -17,3 +17,9 @@
 - Live coin-intelligence systemd jobs must execute from the canonical checkout;
   before removing a worktree, retarget and verify every timer/service that
   references it so snapshots and Market Store inputs cannot silently stall.
+- The operator estimator runtime is a sidecar of canonical `main`; its model,
+  analytics, sessions and SQLite stores live only under
+  `/srv/trading-bot/production-data/coin-intelligence/estimator-live`.
+- Current private-group Market Store facts may be projected into the estimator's
+  compatibility conversation store using opaque identifiers and normalized
+  fields; do not revive the retired legacy group parser or its data plane.
