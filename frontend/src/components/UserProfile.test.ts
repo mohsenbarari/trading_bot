@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { nextTick } from 'vue'
+import { defineComponent, h, nextTick, ref, Transition } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 
@@ -214,6 +214,49 @@ describe('UserProfile.vue authoritative admin actions', () => {
     expect(userProfileSource).toMatch(
       /\.countdown-value\s*\{[\s\S]*?font-family:\s*'Vazirmatn',\s*var\(--ds-font-mono\);[\s\S]*?direction:\s*ltr;/,
     )
+  })
+
+  it('keeps one element root when rendered by a route transition', async () => {
+    const UserProfile = (await import('./UserProfile.vue')).default
+    const transitionWarning = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const TransitionHost = defineComponent({
+      setup() {
+        const visible = ref(true)
+        return () => h(
+          Transition,
+          { name: 'profile-route', appear: true },
+          {
+            default: () => (visible.value
+              ? h(UserProfile, {
+                user: makeUser(),
+                isAdminView: true,
+                jwtToken: 'token',
+              })
+              : null),
+          },
+        )
+      },
+    })
+    const wrapper = mount(TransitionHost, {
+      attachTo: document.body,
+      global: {
+        stubs: { teleport: true, transition: false },
+      },
+    })
+
+    try {
+      await nextTick()
+      const profile = wrapper.get('.admin-user-profile')
+      expect(profile.element).toBeInstanceOf(HTMLDivElement)
+      expect(transitionWarning.mock.calls).not.toContainEqual(
+        expect.arrayContaining([
+          expect.stringContaining('non-element root node that cannot be animated'),
+        ]),
+      )
+    } finally {
+      wrapper.unmount()
+      transitionWarning.mockRestore()
+    }
   })
 
   it('renders admin chrome with shared ui action cards and form primitives', async () => {

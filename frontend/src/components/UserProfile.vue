@@ -1635,7 +1635,6 @@ async function confirmPendingAction() {
         </AppActionCard>
       </div>
     </template>
-  </div>
 
     <!-- Moved Block Date Modal -->
     <AppResponsiveDialog
@@ -1734,6 +1733,7 @@ async function confirmPendingAction() {
       @cancel="closeConfirmation"
       @confirm="confirmPendingAction"
     />
+  </div>
 </template>
 
 <style>
