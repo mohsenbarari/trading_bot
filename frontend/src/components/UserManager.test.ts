@@ -1,6 +1,13 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import UserManager from './UserManager.vue'
+
+const userManagerSource = readFileSync(
+  resolve(process.cwd(), 'src/components/UserManager.vue'),
+  'utf8',
+)
 
 const userManagerMocks = vi.hoisted(() => ({
   apiFetchMock: vi.fn(),
@@ -116,6 +123,8 @@ describe('UserManager.vue', () => {
     expect(wrapper.get('.user-search-form').exists()).toBe(true)
     expect(wrapper.get('.user-search-input').classes()).toContain('ui-input')
     expect(wrapper.get('.search-submit-btn').classes()).toContain('ui-button')
+    expect(wrapper.get('label[for="user-directory-search"]').text()).toBe('جستجوی کاربر')
+    expect(wrapper.get('input#user-directory-search').exists()).toBe(true)
 
     await wrapper.get('input').setValue(' ali search ')
     expect(userManagerMocks.apiFetchMock).toHaveBeenCalledTimes(1)
@@ -128,6 +137,36 @@ describe('UserManager.vue', () => {
     expect(wrapper.emitted('query-change')).toEqual([['ali search']])
     expect((wrapper.get('input').element as HTMLInputElement).value).toBe('ali search')
     expect(wrapper.text()).toContain('ali-search')
+  })
+
+  it('keeps narrow directory row copy readable by placing metadata below it', async () => {
+    userManagerMocks.apiFetchMock.mockResolvedValue(makeJsonResponse([
+      makeUser({
+        account_name: 'directory-user-with-a-deliberately-long-name',
+        account_status: 'inactive',
+        role: 'مدیر ارشد',
+        customer_owner_account_name: 'owner-with-a-deliberately-long-account-name',
+      }),
+    ]))
+
+    const wrapper = await mountView()
+    const row = wrapper.get('.users-list > li > button.user-item')
+
+    expect(row.get('.ui-list-item__leading').exists()).toBe(true)
+    expect(row.get('.ui-list-item__copy').exists()).toBe(true)
+    expect(row.get('.ui-list-item__trailing').exists()).toBe(true)
+    expect(row.get('.user-name').text()).toContain('directory-user-with-a-deliberately-long-name')
+    expect(row.get('.user-meta').text()).toContain('حساب غیرفعال')
+    expect(row.get('.role-badge').text()).toContain('مدیر ارشد')
+    expect(userManagerSource).toMatch(
+      /@media \(max-width: 480px\) \{[\s\S]*?grid-template-columns:\s*44px minmax\(0, 1fr\);[\s\S]*?grid-template-areas:\s*'leading copy'\s*'leading trailing';/,
+    )
+    expect(userManagerSource).toMatch(
+      /\.user-item :deep\(\.ui-list-item__trailing\)\s*\{[\s\S]*?grid-area:\s*trailing;/,
+    )
+    expect(userManagerSource).toMatch(
+      /\.user-item :deep\(\.ui-list-item__copy > span\),\s*\.user-name\s*\{[\s\S]*?text-overflow:\s*ellipsis;[\s\S]*?white-space:\s*nowrap;/,
+    )
   })
 
   it('clears a committed search only from the explicit clear action and reloads the base list', async () => {

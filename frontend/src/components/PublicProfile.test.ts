@@ -201,6 +201,12 @@ describe('PublicProfile.vue', () => {
     expect(publicProfileSource).toMatch(/\.block-btn\s*\{[\s\S]*?var\(--ds-danger-50\)/)
     expect(publicProfileSource).toMatch(/\.unblock-btn\s*\{[\s\S]*?var\(--ds-success-50\)/)
     expect(publicProfileSource).not.toMatch(/\.project-users-search-submit/)
+    expect(publicProfileSource).toMatch(
+      /<label class="sr-only" for="project-users-directory-search">جستجوی همکاران پروژه<\/label>/,
+    )
+    expect(publicProfileSource).toMatch(
+      /<AppInput\s+id="project-users-directory-search"\s+v-model="projectUsersQuery"/,
+    )
   })
 
   it('sanitizes an over-broad legacy public response for an ordinary peer', async () => {
@@ -1040,6 +1046,9 @@ describe('PublicProfile.vue', () => {
     })
 
     await flushPromises()
+
+    expect(wrapper.get('label[for="project-users-directory-search"]').text()).toBe('جستجوی همکاران پروژه')
+    expect(wrapper.get('input#project-users-directory-search').exists()).toBe(true)
 
     await wrapper.get('.project-users-search').trigger('submit')
     await flushPromises()

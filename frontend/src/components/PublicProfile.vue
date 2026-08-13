@@ -1948,7 +1948,9 @@ function handleHistoryPresetChipChange(value: string) {
 
           <div class="profile-section-card__body">
             <form class="project-users-search" @submit.prevent="submitProjectUsersSearch">
+              <label class="sr-only" for="project-users-directory-search">جستجوی همکاران پروژه</label>
               <AppInput
+                id="project-users-directory-search"
                 v-model="projectUsersQuery"
                 class="project-users-search-input"
                 type="search"
