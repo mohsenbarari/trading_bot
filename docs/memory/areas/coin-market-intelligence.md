@@ -26,3 +26,7 @@
 - The estimator home dashboard shows only primary-model output plus live market
   inputs/activity. Shadow status, comparison and realised-outcome data belong
   exclusively to `/shadow`; home may expose navigation to that page only.
+- Estimator health is input-driven, not process-driven. Every required source
+  must expose a collector heartbeat separately from market-hours-aware data
+  freshness; stale or invalid inputs stay excluded, and aggregate health must
+  degrade with explicit reason codes instead of reporting a bare `RUNNING`.
