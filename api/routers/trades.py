@@ -2138,9 +2138,33 @@ def _queue_trade_user_notification(
     return True
 
 
+def _bind_trade_delivery_source_context(
+    trade: Trade | object,
+    source_offer: Offer | object | None,
+) -> bool:
+    """Expose source metadata without attaching noncanonical chain legs to an Offer."""
+    source_offer_id = _coerce_trade_user_id(getattr(source_offer, "id", None))
+    if source_offer_id is None:
+        return False
+
+    trade_offer_id = _coerce_trade_user_id(getattr(trade, "offer_id", None))
+    if trade_offer_id == source_offer_id:
+        trade.offer = source_offer
+        return True
+    if trade_offer_id is not None:
+        return False
+
+    # Customer-chain legs intentionally have no Offer FK. Delivery builders
+    # consume these transient fields while the persisted chain remains intact.
+    trade.offer_notes = getattr(source_offer, "notes", None)
+    trade.offer_home_server = getattr(source_offer, "home_server", None)
+    return True
+
+
 async def _repair_trade_completion_delivery_background(
     trade_number: int,
     current_server_name: str,
+    source_offer_id: int | None = None,
 ) -> bool:
     from core.db import AsyncSessionLocal
 
@@ -2169,6 +2193,33 @@ async def _repair_trade_completion_delivery_background(
                     trade_number=trade_number,
                 )
                 return False
+            if _coerce_trade_user_id(getattr(trade, "offer_id", None)) is None:
+                normalized_source_offer_id = _coerce_trade_user_id(source_offer_id)
+                if normalized_source_offer_id is None:
+                    log_trading_event(
+                        logger,
+                        "trade_delivery_repair_missing_source_context",
+                        level="warning",
+                        action="trading_side_effect",
+                        result="noop",
+                        side_effect="receipt_delivery_repair",
+                        trade_number=trade_number,
+                    )
+                    return False
+                source_offer = await delivery_db.get(Offer, normalized_source_offer_id)
+                if source_offer is None:
+                    log_trading_event(
+                        logger,
+                        "trade_delivery_repair_missing_source_offer",
+                        level="warning",
+                        action="trading_side_effect",
+                        result="noop",
+                        side_effect="receipt_delivery_repair",
+                        trade_number=trade_number,
+                        offer_id=normalized_source_offer_id,
+                    )
+                    return False
+                _bind_trade_delivery_source_context(trade, source_offer)
             await repair_webapp_trade_delivery_for_trade(
                 delivery_db,
                 trade,
@@ -2197,6 +2248,8 @@ async def _repair_trade_completion_delivery_background(
 def _queue_trade_completion_delivery_repair(
     background_tasks: BackgroundTasks,
     trade: Trade | object,
+    *,
+    source_offer_id: int | None = None,
 ) -> bool:
     trade_number = _coerce_trade_user_id(getattr(trade, "trade_number", None))
     if trade_number is None:
@@ -2205,6 +2258,7 @@ def _queue_trade_completion_delivery_repair(
         _repair_trade_completion_delivery_background,
         trade_number,
         current_server(),
+        _coerce_trade_user_id(source_offer_id),
     )
     return True
 
@@ -2676,7 +2730,11 @@ async def _try_return_completed_idempotent_replay(
         source_server=current_server(),
         has_idempotency_key=True,
     )
-    _queue_trade_completion_delivery_repair(background_tasks, existing_trade_obj)
+    _queue_trade_completion_delivery_repair(
+        background_tasks,
+        existing_trade_obj,
+        source_offer_id=getattr(offer, "id", None) or trade_data.offer_id,
+    )
     existing_response_kwargs = {
         "identity_map": existing_identity_map,
         "customer_relation_map": existing_customer_relation_map,
@@ -3840,10 +3898,15 @@ async def _execute_trade_authoritatively(
                 approving_overtime=approving_overtime,
                 overtime_decided_by_user_id=overtime_decided_by_user_id,
             )
+            _bind_trade_delivery_source_context(existing_trade_obj, offer)
             await persist_trade_completion_delivery_intents(db, existing_trade_obj)
             if callable(getattr(db, "commit", None)):
                 await _commit_trade_execution(db)
-            _queue_trade_completion_delivery_repair(background_tasks, existing_trade_obj)
+            _queue_trade_completion_delivery_repair(
+                background_tasks,
+                existing_trade_obj,
+                source_offer_id=getattr(offer, "id", None),
+            )
             existing_response_kwargs = {
                 "identity_map": existing_identity_map,
                 "customer_relation_map": existing_customer_relation_map,
@@ -3957,7 +4020,7 @@ async def _execute_trade_authoritatively(
     for delivery_trade, delivery_offer_user, delivery_responder_user in delivery_trade_contexts:
         # The audience builder is read-only. Bind already-loaded relationships
         # so it can construct the exact durable payload before the Trade commit.
-        delivery_trade.offer = offer
+        _bind_trade_delivery_source_context(delivery_trade, offer)
         delivery_trade.offer_user = delivery_offer_user
         delivery_trade.responder_user = delivery_responder_user
         delivery_trade.commodity = offer.commodity
@@ -4181,6 +4244,7 @@ async def _execute_trade_authoritatively(
             _queue_trade_completion_delivery_repair(
                 background_tasks,
                 leg_context.get("delivery_trade") or leg_trade_obj,
+                source_offer_id=getattr(offer, "id", None),
             )
 
             try:
@@ -4242,7 +4306,11 @@ async def _execute_trade_authoritatively(
                     error_class=type(exc).__name__,
                 )
     else:
-        _queue_trade_completion_delivery_repair(background_tasks, response_trade_record)
+        _queue_trade_completion_delivery_repair(
+            background_tasks,
+            response_trade_record,
+            source_offer_id=getattr(offer, "id", None),
+        )
 
         responder_audience = [owner_user.id]
         offer_owner_audience = [offer.user_id]

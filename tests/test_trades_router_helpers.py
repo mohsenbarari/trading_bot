@@ -727,6 +727,93 @@ class TradesRouterHelperTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("send_telegram_message_sync", source)
         self.assertNotIn("_legacy_create_user_notification", source)
 
+    async def test_trade_delivery_repair_retains_source_context_for_noncanonical_leg(self):
+        source_offer = SimpleNamespace(id=7, notes="یادداشت منبع", home_server="foreign")
+        trade = SimpleNamespace(offer_id=None, offer=None)
+        session = SimpleNamespace(
+            execute=AsyncMock(
+                return_value=SimpleNamespace(scalar_one_or_none=lambda: trade)
+            ),
+            get=AsyncMock(return_value=source_offer),
+        )
+
+        with patch(
+            "core.db.AsyncSessionLocal",
+            return_value=_AsyncSessionContext(session),
+        ), patch(
+            "api.routers.trades.repair_webapp_trade_delivery_for_trade",
+            new=AsyncMock(),
+        ) as repair_webapp, patch(
+            "api.routers.trades.repair_telegram_trade_delivery_for_trade",
+            new=AsyncMock(),
+        ) as repair_telegram:
+            self.assertTrue(
+                await trades._repair_trade_completion_delivery_background(
+                    10024,
+                    "foreign",
+                    source_offer_id=source_offer.id,
+                )
+            )
+
+        session.get.assert_awaited_once_with(trades.Offer, source_offer.id)
+        self.assertIsNone(trade.offer)
+        self.assertEqual(trade.offer_notes, source_offer.notes)
+        self.assertEqual(trade.offer_home_server, source_offer.home_server)
+        repair_webapp.assert_awaited_once_with(session, trade, current_server="foreign")
+        repair_telegram.assert_awaited_once_with(session, trade, current_server="foreign")
+
+    async def test_trade_delivery_repair_fails_closed_without_noncanonical_source(self):
+        trade = SimpleNamespace(offer_id=None, offer=None)
+        session = SimpleNamespace(
+            execute=AsyncMock(
+                return_value=SimpleNamespace(scalar_one_or_none=lambda: trade)
+            ),
+            get=AsyncMock(return_value=None),
+        )
+
+        with patch(
+            "core.db.AsyncSessionLocal",
+            return_value=_AsyncSessionContext(session),
+        ), patch(
+            "api.routers.trades.repair_webapp_trade_delivery_for_trade",
+            new=AsyncMock(),
+        ) as repair_webapp, patch(
+            "api.routers.trades.repair_telegram_trade_delivery_for_trade",
+            new=AsyncMock(),
+        ) as repair_telegram, patch("api.routers.trades.log_trading_event") as log_event:
+            self.assertFalse(
+                await trades._repair_trade_completion_delivery_background(
+                    10024,
+                    "foreign",
+                    source_offer_id=7,
+                )
+            )
+
+        repair_webapp.assert_not_awaited()
+        repair_telegram.assert_not_awaited()
+        log_event.assert_called_once()
+        self.assertEqual(log_event.call_args.args[1], "trade_delivery_repair_missing_source_offer")
+
+    def test_trade_delivery_repair_queue_passes_source_offer_context(self):
+        background_tasks = SimpleNamespace(add_task=Mock())
+        trade = SimpleNamespace(trade_number=10024)
+
+        with patch("api.routers.trades.current_server", return_value="foreign"):
+            self.assertTrue(
+                trades._queue_trade_completion_delivery_repair(
+                    background_tasks,
+                    trade,
+                    source_offer_id=7,
+                )
+            )
+
+        background_tasks.add_task.assert_called_once_with(
+            trades._repair_trade_completion_delivery_background,
+            10024,
+            "foreign",
+            7,
+        )
+
     async def test_update_channel_button_helpers(self):
         offer = SimpleNamespace(
             id=9,
