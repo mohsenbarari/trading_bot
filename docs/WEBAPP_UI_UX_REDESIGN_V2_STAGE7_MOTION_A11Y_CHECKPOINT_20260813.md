@@ -2,7 +2,7 @@
 
 تاریخ آغاز: ۲۰۲۶-۰۸-۱۳
 
-وضعیت: **`stage7_phase1_delivered_broader_dead_css_deferred`**
+وضعیت: **`stage7_phase1_delivered_shared_dependency_isolated_broader_dead_css_deferred`**
 
 شاخه: `condidate/webapp-ui-ux-redesign-v2`
 
@@ -18,10 +18,11 @@
 - `/admin/messages` و `/admin/system` از copyable خارج شدند تا interior محافظت‌شده عوض نشود.
 - `AppTabs` فوکوس کیبورد را مثل FilterChips منتقل می‌کند. FilterChips بازار opt-in نشده است.
 - FilterChips پروفایل عمومی و workspace مشتری/حسابدار `focus-selection-on-keyboard` دارند.
-- تقویم جلالی با کلیدهای جهت فوکوس روز را جابه‌جا می‌کند و مقدار را عوض نمی‌کند؛ CSS تقویم دست نخورده است.
-- `AppEmptyState` برابر `role="status"` است.
+- تقویم جلالی به‌صورت پیش‌فرض inert است؛ فقط UserProfile/PublicProfile صریحاً کلیدهای جهت را برای جابه‌جایی فوکوس فعال می‌کنند و TradingSettings محافظت‌شده opt-in نمی‌شود.
+- `AppEmptyState` بدون role پیش‌فرض است؛ call-siteهای مجاز `status` می‌گیرند و مصرف‌کننده‌های Market/CreateChannel محافظت‌شده inert می‌مانند.
 - متن بلند با `overflow-wrap: anywhere` روی عنوان/توضیح/لیست/کارت.
-- fade و transition تب‌ها با `prefers-reduced-motion: reduce` قطع می‌شوند.
+- reduced-motion با marker متصل به vnode فقط برای SECTIONهای غیرمحافظت‌شده قطع می‌شود؛ fade مسیرهای full/mixed، از جمله هنگام عبور دوطرفه، رفتار قبلی را حفظ می‌کند.
+- guard Stage 4 وابستگی‌های shared را هم بدون rebase کردن hashهای محافظت‌شده fail-closed بررسی می‌کند.
 
 فایل‌های اصلی: `App.vue`، `main.css`، `design-system-v2.components.css`، `AppTabs.vue`، `AppEmptyState.vue`، `JalaliDatePicker.vue`، `PublicProfile.vue`، `CustomerWorkspaceView.vue`، `AccountantWorkspaceView.vue`.
 
@@ -37,10 +38,18 @@ Figma page 09 sibling، نه overwrite صفحهٔ Stage 6
 
 ## ۴. Figma و Sites
 
-صفحهٔ تازه `09 — Stage 7 Motion & A11y` (`486:1455`). section `487:18`. W1=`487:20`، W2=`487:39`. Sites ساخته نشده است.
+صفحهٔ `09 — Stage 7 Motion & A11y` (`486:1455`) artifact تاریخی `487:18` را حفظ می‌کند. مرجع جدید design-system-bound با provenance `source 82cb016e` در section `496:18` ساخته شد: W1=`497:18`، W2=`499:49` و panel=`501:93`. این مرجع live/editable و non-freeze است. Sites ساخته نشده است.
 
 ## ۵. رسید
 
 - source: `ab0834aac3383e3c790c5865170ab9f007db235c` / tree `93e0c5cb0f8485a804b698d784cd3803a896081e`
 - browser: `uiux-stage7-phase1-motion-a11y-20260812T224044165Z` passed/promotable، ۷ assertion / ۵ screenshot
 - Figma: page `486:1455`، section `487:18`
+
+### رسید اصلاح shared dependency
+
+- source: `82cb016e57e676c211d746ae852a6600d8d3b6fa` / tree `db65232c7835440868773c8fdbbf032b7bdfd890`
+- browser: `uiux-stage7-shared-dependency-correction-20260813T072432779Z` passed/promotable، ۲۴ assertion / ۹ screenshot / ۳ viewport
+- protected/full/mixed enter+leave=`200ms`؛ SECTION مجاز under reduce enter+leave=`0ms`
+- Figma live: section `496:18`، ۵۰ text همگی Vazirmatn، ۹ instance، ۱۰۳ node variable-bound، unsafe scan صفر و overflow صفر
+- هیچ closure/freeze/Sites/staging/production/merge ادعا یا اجرا نشده است

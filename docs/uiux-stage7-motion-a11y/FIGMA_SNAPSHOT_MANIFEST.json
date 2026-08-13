@@ -1,25 +1,85 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "stage": 7,
-  "phase": 1,
   "mutableNarrative": true,
   "fileKey": "z8jgJxST4O2APzWnlyP9gv",
   "page": {
     "id": "486:1455",
-    "name": "09 — Stage 7 Motion & A11y"
+    "name": "09 — Stage 7 Motion & A11y",
+    "directChildCountCurrent": 2
   },
-  "section": {
-    "id": "487:18",
-    "name": "1 — Copy, keyboard, zoom · source ab0834aa",
-    "labelId": "487:19"
+  "historicalPhase1": {
+    "source": "ab0834aac3383e3c790c5865170ab9f007db235c",
+    "section": {
+      "id": "487:18",
+      "name": "1 — Copy, keyboard, zoom · source ab0834aa",
+      "labelId": "487:19"
+    },
+    "windows": [
+      {
+        "id": "487:20",
+        "name": "W1 — Copy + keyboard · 390×844",
+        "width": 390,
+        "height": 844
+      },
+      {
+        "id": "487:39",
+        "name": "W2 — Zoom 200% + reduced-motion · 390×844",
+        "width": 390,
+        "height": 844
+      }
+    ]
   },
-  "windows": [
-    { "id": "487:20", "name": "W1 — Copy + keyboard · 390×844", "width": 390, "height": 844 },
-    { "id": "487:39", "name": "W2 — Zoom 200% + reduced-motion · 390×844", "width": 390, "height": 844 }
-  ],
-  "audit": {
-    "font": "Vazirmatn",
-    "unsafeMatches": []
+  "liveEditableSharedDependencyReference": {
+    "source": "82cb016e57e676c211d746ae852a6600d8d3b6fa",
+    "section": {
+      "id": "496:18",
+      "name": "2 — Integrated UI/UX reference · source 82cb016e",
+      "width": 1320,
+      "height": 1240,
+      "directChildCount": 4
+    },
+    "provenanceId": "496:21",
+    "windows": [
+      {
+        "id": "497:18",
+        "name": "W1 — Account empty state + keyboard focus · 390×844",
+        "width": 390,
+        "height": 844
+      },
+      {
+        "id": "499:49",
+        "name": "W2 — Profile date focus + reduced motion · 390×844",
+        "width": 390,
+        "height": 844
+      }
+    ],
+    "designSystemPanelId": "501:93",
+    "audit": {
+      "textCount": 50,
+      "fontFamilies": [
+        "Vazirmatn / Bold",
+        "Vazirmatn / Regular",
+        "Vazirmatn / SemiBold",
+        "Vazirmatn / Medium"
+      ],
+      "nonVazirmatnTextCount": 0,
+      "linkedInstanceCount": 9,
+      "variableBoundNodeCount": 103,
+      "descendantsOutsideViewportCount": 0,
+      "unsafeMatches": [],
+      "minimumPrimaryControlHeight": 48,
+      "explicitNonAcceptanceBoundary": true
+    },
+    "localEphemeralRenders": {
+      "selectedOrFrozen": false,
+      "sectionSha256": "192cf744fe1d8b027c53f416f3b9d770209ec2859580cc909d078a33eeeb553b",
+      "w1Sha256": "f22f6d94c90bcf8f53d90d6d3ddea3a37540fc4497e09df6f9ebe229322c24e2",
+      "w2Sha256": "f45237d89abc5552042c8d391eb0d60c47a81a28aec6a43c460097fd0f74ac57",
+      "panelSha256": "ca2f714346992395a5850759cab68095d1e394cc00da44e7baed2759b380b3bb"
+    },
+    "liveEditable": true,
+    "fullStage7Freeze": false
   },
   "untouchedPriorPages": ["321:18", "297:18", "283:18"]
 }

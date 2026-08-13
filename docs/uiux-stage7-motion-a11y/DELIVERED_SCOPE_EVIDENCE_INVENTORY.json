@@ -1,28 +1,66 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "stage": 7,
-  "phase": 1,
   "mutableNarrative": true,
   "freeze": false,
-  "source": {
-    "commit": "ab0834aac3383e3c790c5865170ab9f007db235c",
-    "tree": "93e0c5cb0f8485a804b698d784cd3803a896081e",
-    "bindingSha256": "3578f342b90d11f3aaef8402bcdfb7c0af27dc7ccaca5c63d14c5daf8ea529f6",
-    "fileCount": 393
+  "historicalPhase1": {
+    "source": {
+      "commit": "ab0834aac3383e3c790c5865170ab9f007db235c",
+      "tree": "93e0c5cb0f8485a804b698d784cd3803a896081e",
+      "bindingSha256": "3578f342b90d11f3aaef8402bcdfb7c0af27dc7ccaca5c63d14c5daf8ea529f6",
+      "fileCount": 393
+    },
+    "browser": {
+      "runId": "uiux-stage7-phase1-motion-a11y-20260812T224044165Z",
+      "status": "passed",
+      "promotable": true,
+      "assertionCount": 7,
+      "screenshotCount": 5,
+      "metricsSha256": "fd9e514637b4ac887d5a2f3e536b12eac0d1f4cefa99e7ef3875e43a5f5e993c",
+      "harnessSha256": "fd239418e1755923fda4e210b8eca288e15b33cf79c54840c3b2142ca81e580e"
+    },
+    "figma": {
+      "pageId": "486:1455",
+      "sectionId": "487:18"
+    }
   },
-  "browser": {
-    "runId": "uiux-stage7-phase1-motion-a11y-20260812T224044165Z",
-    "status": "passed",
-    "promotable": true,
-    "assertionCount": 7,
-    "screenshotCount": 5,
-    "metricsSha256": "fd9e514637b4ac887d5a2f3e536b12eac0d1f4cefa99e7ef3875e43a5f5e993c",
-    "harnessSha256": "fd239418e1755923fda4e210b8eca288e15b33cf79c54840c3b2142ca81e580e",
-    "harnessPath": "/tmp/stage7-phase1-motion-a11y-browser-harness.mjs",
-    "outputDir": "/tmp/uiux-stage7-phase1-motion-a11y-browser/uiux-stage7-phase1-motion-a11y-20260812T224044165Z"
+  "supplementalSharedDependencyCorrection": {
+    "selectedOrFrozen": false,
+    "artifactLocation": "local ephemeral receipt; intentionally not copied into the repository or promoted to a Stage 7 freeze",
+    "source": {
+      "commit": "82cb016e57e676c211d746ae852a6600d8d3b6fa",
+      "tree": "db65232c7835440868773c8fdbbf032b7bdfd890",
+      "bindingSha256": "327753ddf601ead90e95fa28e1d1961caea3c1d8a3b8ea02f4326d337ae2e164",
+      "bindingFileSha256": "6f21eb702f2a6f8753620e81e574b87364e2e83cdbaf06a6f2dbf3b1b0edab99",
+      "fileCount": 394
+    },
+    "browser": {
+      "runId": "uiux-stage7-shared-dependency-correction-20260813T072432779Z",
+      "status": "passed",
+      "promotable": true,
+      "assertionCount": 24,
+      "runtimeCount": 3,
+      "bidirectionalTransitionPairCount": 15,
+      "screenshotCount": 9,
+      "metricsSha256": "f9063c4a5de6096d9baab206fd73948d5350b9d372ba5496a9efc822fbd25cdb",
+      "harnessSha256": "5d4223a62452c341c64d8cc9d61e4373a17603077ce2ee53a2e757c6608deddc",
+      "unexpectedDiagnostics": 0,
+      "externalProbeCountBlockedBeforeTransport": 3
+    },
+    "figma": {
+      "fileKey": "z8jgJxST4O2APzWnlyP9gv",
+      "pageId": "486:1455",
+      "sectionId": "496:18",
+      "screenIds": ["497:18", "499:49"],
+      "panelId": "501:93",
+      "liveEditable": true,
+      "freeze": false
+    }
   },
-  "figma": {
-    "pageId": "486:1455",
-    "sectionId": "487:18"
+  "completion": {
+    "stage7CompleteAuthority": false,
+    "fullStage7EvidenceFreeze": false,
+    "sitesStarted": false,
+    "stagingOrProductionChanged": false
   }
 }
