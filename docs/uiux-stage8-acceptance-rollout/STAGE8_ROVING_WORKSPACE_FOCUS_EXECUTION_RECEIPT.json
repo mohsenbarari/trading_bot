@@ -1,0 +1,130 @@
+{
+  "schemaVersion": 1,
+  "stage": "8A-workspace-roving-focus-postcommit",
+  "status": "passed-promotable-bounded-local-synthetic-postcommit-browser-evidence-not-acceptance",
+  "branch": "condidate/webapp-ui-ux-redesign-v2",
+  "runId": "roving-focus-postcommit-browser-20260813225220515",
+  "implementation": {
+    "title": "Postcommit workspace roving-focus local-synthetic browser receipt",
+    "sourceSnapshot": {
+      "commit": "d1e8ecd5a524a03c73b67e531edab363479a32b0",
+      "tree": "c2399cf06099929bcd79c6f9e675fcd62da24952",
+      "sourceHashes": {
+        "frontend/src/components/ui/AppFilterChips.vue": "66c9f96d8bab76b8ff6a2b055b77f2b4e4645512650fc8fbf12096e3881a9920",
+        "frontend/src/components/ui/AppPrimitives.test.ts": "233011b9d3e42c9e28fba9bca6b647c61f42f5f4f6f63b88a3ea674c35150975",
+        "frontend/src/components/ui/AppTabs.vue": "44eb54d62d20491cf8292dd8d75de73e783641a5817eff78994c2092cfe7962e",
+        "frontend/src/views/AccountantWorkspaceView.vue": "e8341505828789f9a40f62dda545e75bd3149ffb82dc61c7f3648bdd1fe733d5",
+        "frontend/src/views/CustomerWorkspaceView.vue": "9a1f29b7f492eb14a20f432f554b16f1bf90e535e88bdcc6c3e208c062662e0d"
+      }
+    },
+    "distSnapshot": {
+      "sha256": "264eaea9d67f74fe4b34044e7c75c44b5a6cdca18f3eb2226a4be70545e03db2",
+      "fileCount": 169
+    }
+  },
+  "validation": {
+    "sourceBinding": "The supplied browser report recorded the same clean commit, tree, changed-source hashes, and production-build dist snapshot before and after the run.",
+    "browserReportVerdict": "passed-promotable-bounded-local-synthetic-postcommit-browser-evidence"
+  },
+  "browserReceipt": {
+    "environment": "local-synthetic production-build browser with external network disabled",
+    "reportSha256": "59ceee263cf70e32a5bd6629fcd8890b7eb5f5b5713d23b45a59f62358044fe7",
+    "executedScenarioCount": 8,
+    "passedScenarioCount": 8,
+    "failedScenarioCount": 0,
+    "scenarioAccounting": {
+      "customerFilterScenarios": 2,
+      "customerDetailTabScenarios": 2,
+      "accountantFilterScenarios": 2,
+      "accountantDetailTabScenarios": 2,
+      "mobile390Scenarios": 4,
+      "desktop1440Scenarios": 4
+    },
+    "coverage": {
+      "routeFamilies": [
+        "customer workspace",
+        "accountant workspace"
+      ],
+      "modes": [
+        "filter strip",
+        "detail tab strip"
+      ],
+      "viewportsCssPx": [
+        {
+          "width": 390,
+          "height": 844
+        },
+        {
+          "width": 1440,
+          "height": 900
+        }
+      ],
+      "keyboardInput": "End",
+      "assertionContract": "The selected focused tab rectangle stays within its own visible tablist with one CSS pixel tolerance; document overflow stays absent and page/route scroll stays unchanged while the strip is visible."
+    },
+    "result": {
+      "allSelectedFinalTab": true,
+      "allFocusedSelected": true,
+      "allSelectedRectContainedWithinOwnTablistTolerance1": true,
+      "documentOverflowScenarioCount": 0,
+      "pageOrRouteScrollChangedScenarioCount": 0,
+      "tablistScrollChangedScenarioCount": 2
+    },
+    "diagnostics": {
+      "unexpectedConsoleDiagnosticCount": 0,
+      "runtimePageErrorCount": 0,
+      "requestFailureCount": 0,
+      "blockedExternalRequestCount": 0,
+      "externalNetworkPermitted": false,
+      "unknownSyntheticApiCount": 0,
+      "expectedLocalSyntheticApiRequestCount": 80,
+      "observedLocalSyntheticApiRequestCount": 80,
+      "boundary": "These zero counts describe only the eight covered local/synthetic scenarios; they do not establish a clean-console or network conclusion beyond this receipt."
+    },
+    "artifactAccounting": {
+      "reportedScreenshotArtifactCount": 8,
+      "rawArtifactsRetainedInRepository": false,
+      "rawArtifactsRetainedOnlyOutsideRepository": true
+    },
+    "limitations": [
+      "This is a bounded local/synthetic production-build browser receipt, not a full role-by-route, viewport, state, interaction, or environment matrix execution.",
+      "It covers only customer and accountant workspace filter/detail strips, the End key, and the two recorded viewports; it does not certify all keyboard inputs, routes, or workspace states.",
+      "Two intended tablist-only mobile scroll changes are recorded; the receipt does not claim a global no-scroll behavior outside the visible strip contract.",
+      "No raw screenshot, trace, console log, network log, local path, local URL, or fixture payload is retained in this repository receipt."
+    ]
+  },
+  "figmaReference": {
+    "status": "optional-live-editable-generic-draft-not-final-or-runtime-evidence",
+    "sectionNodeId": "603:18",
+    "boardNodeId": "603:19",
+    "scopeNoteNodeId": "604:22",
+    "mobileFrameNodeId": "606:18",
+    "desktopFrameNodeId": "606:19",
+    "contentBoundary": "A generic synthetic workspace roving-focus visual target with no technical provenance.",
+    "audit": {
+      "mobileCssPx": {
+        "width": 390,
+        "height": 844
+      },
+      "desktopCssPx": {
+        "width": 1440,
+        "height": 900
+      },
+      "vazirmatnTextNodeCount": 44,
+      "linkedExistingInstanceCount": 16,
+      "linkedExistingInstanceCountExpected": 16,
+      "semanticStylesAndVariables": "reused",
+      "visibleOverflowCropOrOverlapCount": 0,
+      "minimumTextContrastRatio": 4.55,
+      "focusIndicatorContrastRatio": 4.23,
+      "privacyScanFindingCount": 0
+    },
+    "limitations": [
+      "The board is live and editable DRAFT; it is neither a visual freeze nor final acceptance.",
+      "This generic Figma target is not runtime, browser, accessibility, owner-sign-off, merge, Sites, staging, or production authority."
+    ]
+  },
+  "countsTowardFullMatrixAcceptance": false,
+  "claimBoundary": "This bounded source-bound local/synthetic postcommit roving-focus receipt does not alter prior historical receipts, create full Stage 8 acceptance, owner aesthetic sign-off, a visual freeze, merge authority, Sites authority, staging authority, or production authority.",
+  "retention": "Only redacted counts, source revisions, source hashes, dist/report hashes, and claim boundaries are retained."
+}

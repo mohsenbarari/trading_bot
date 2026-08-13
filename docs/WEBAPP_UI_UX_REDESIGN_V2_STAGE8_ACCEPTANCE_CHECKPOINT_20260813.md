@@ -29,6 +29,9 @@ source محدود public/focused auth viewport-containment: `55f00218295d7aa6f52
 source rebaseline جاری directory/profile: `601b4005d80ef265afaaa6a06a43b48c44c7ca90`
 (evidence-only؛ مستقل از receipt تاریخی `4415b743` و بدون افزایش full matrix)
 
+source postcommit roving-focus workspace: `d1e8ecd5a524a03c73b67e531edab363479a32b0`
+(evidence-only؛ بدون افزایش full matrix)
+
 ## ۱. مجوز و حد آن
 
 دستور مالک برای ادامهٔ Stage 8، یکپارچگی و زیباسازی UI/UX با کنترل ایمنی، و ثبت رهگیری
@@ -102,6 +105,20 @@ requirement هستند و به cell-level evidence کامل متصل نشده‌
 diagnostic موردانتظار از fixtureهای injected 404/500، شامل retry warning، طبقه‌بندی و از
 نتیجهٔ layout/interaction کنار گذاشته شده‌اند؛ این receipt ادعای clean-console ندارد. raw
 artifact ثبت نشده و این slice evidence-only است.
+- receipt postcommit roving-focus workspace در source `d1e8ecd5`: ۸ scenario local/synthetic
+  production-build برای customer/accountant × filter/detail در `390×844` و `1440×900` با کلید
+  `End` اجرا و ۸/۸ pass شد. selected final tab focused ماند و rectangle آن با tolerance یک CSS
+  pixel داخل tablist خودش بود؛ document overflow و page/route scroll change صفر و دو tablist
+  scroll change موبایل intentional بودند. console/page error/request failure/blocked external/
+  unknown API غیرمنتظره صفر و `80/80` local synthetic API request موردانتظار ثبت شد. source/tree/
+  hash و dist پیش/پس از run یکسان و clean بودند؛ هشت screenshot فقط خارج repository ماندند. این
+  slice فقط همین scope، `End` و دو viewport را attest می‌کند و full matrix، همهٔ keyboard pathها
+  یا پذیرش نهایی نیست.
+- Figma اختیاری generic roving-focus: section `603:18`، board `603:19`، scope `604:22`، mobile
+  `606:18` (`390×844`) و desktop `606:19` (`1440×900`) یک DRAFT زنده/قابل‌ویرایش با محتوای
+  synthetic است. audit: ۴۴ text Vazirmatn، ۱۶/۱۶ instance متصل، semantic styles/variables reused،
+  zero overflow/crop/overlap، contrast متن `4.55:1`، focus indicator `4.23:1` و privacy scan zero.
+  این target نه visual freeze/final acceptance است و نه evidence runtime/browser/accessibility.
 - Figma اختیاری generic directory/profile: section `583:146`، scope `584:146`، mobile directory
   `584:147`، desktop rail `584:148` و mobile profile `584:149`، یک DRAFT زنده/قابل‌ویرایش با
   محتوای synthetic/sanitized است. audit: ۱۷ linked instance، ۶۳ text Vazirmatn، صفر visible
@@ -124,7 +141,7 @@ artifact ثبت نشده و این slice evidence-only است.
   `4.55:1` است. board عمداً generic و بدون provenance داخلی، route/hash/test/harness/local-path/
   URL/token/deploy/Sites است؛ نه freeze، نه final acceptance و نه evidence runtime/browser است.
 
-این هفت slice محدود و مرجع‌های Figma live/editable یا local/synthetic هستند؛ screenshot/hash-freeze، runtime
+این هشت slice محدود و مرجع‌های Figma live/editable یا local/synthetic هستند؛ screenshot/hash-freeze، runtime
 accessibility acceptance، sign-off زیبایی مالک، یا release authority نیستند. receipt/reference مبتنی
 بر `4415b743` فقط historical هستند و ادعایی دربارهٔ working tree جاری ندارند. artifact خام browser
 در repository ذخیره نشده و هیچ Sites action انجام نشده است.
@@ -153,7 +170,7 @@ Sites و production در این Stage شروع نشده‌اند.
 ## ۶. گیت بعدی (فنی و بصری)
 
 - ۲۷۰ نتیجهٔ موردانتظار مسیر×پروفایل به source متصل است؛
-- canonicalization مدیر میانی و هفت slice محدود source-bound ثبت شده‌اند، اما full matrix همچنان صفر است؛
+- canonicalization مدیر میانی و هشت slice محدود source-bound ثبت شده‌اند، اما full matrix همچنان صفر است؛
 - protected-surface hashهای تاریخی overwrite نشده‌اند؛
 - اجرای واقعی viewport/state/interaction/environment و sign-off زیبایی مالک هنوز pending است؛
 - عرضه فقط به‌صورت مدل تیمی و rollback-safe توصیف شده و شروع نشده است؛

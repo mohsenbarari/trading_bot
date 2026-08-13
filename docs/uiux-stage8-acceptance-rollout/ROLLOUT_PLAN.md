@@ -5,7 +5,8 @@
 کامپوننتی را رهگیری می‌کند. چهار slice 8A در `STAGE8A_EXECUTION_RECEIPTS.json`، یک slice
 8B در `STAGE8B_TYPOGRAPHY_EXECUTION_RECEIPT.json`، یک slice مستقل auth-containment در
 `STAGE8_AUTH_VIEWPORT_CONTAINMENT_EXECUTION_RECEIPT.json` و یک rebaseline مستقل current
-directory/profile در `STAGE8_DIRECTORY_PROFILE_REBASELINE_EXECUTION_RECEIPT.json` ثبت شده‌اند؛
+directory/profile در `STAGE8_DIRECTORY_PROFILE_REBASELINE_EXECUTION_RECEIPT.json` و یک receipt
+postcommit roving-focus در `STAGE8_ROVING_WORKSPACE_FOCUS_EXECUTION_RECEIPT.json` ثبت شده‌اند؛
 هیچ‌کدام نتیجهٔ اجرای پذیرش تیمی یا authority عرضه نیستند.
 
 ## پیش‌شرط تبدیل draft به پذیرش
@@ -27,6 +28,9 @@ directory/profile در `STAGE8_DIRECTORY_PROFILE_REBASELINE_EXECUTION_RECEIPT.js
 - rebaseline current directory/profile فقط receipt جداگانهٔ source-bound `601b4005` است؛ receipt
   تاریخی `4415b743` را overwrite، promote یا به acceptance تبدیل نمی‌کند. ۴۰ scenario محدود آن
   و diagnosticهای recovery طبقه‌بندی‌شده به `executedFullMatrixCellCount` افزوده نمی‌شوند.
+- receipt postcommit roving-focus فقط reveal صریحِ keyboard selection در filter/detail stripهای
+  workspace customer/accountant را با `End` و دو viewport توصیف می‌کند. ۸ scenario آن، دو
+  scroll intentional strip و diagnosticهای صفر به `executedFullMatrixCellCount` افزوده نمی‌شوند.
 - مرجع Figma زنده فقط برای هم‌راستایی design است؛ پیش از اجرای browser قابل‌تکرار، شاهد runtime
   یا visual freeze نیست.
 - زیبایی و یکپارچگی UI/UX باید با sign-off صریح مالک ثبت شود؛ سبز بودن test فنی جای آن نیست.

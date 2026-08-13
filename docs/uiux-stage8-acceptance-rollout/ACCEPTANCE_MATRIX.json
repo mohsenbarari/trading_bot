@@ -92,7 +92,8 @@
       "stage8a-execution-receipts",
       "stage8b-typography-execution-receipt",
       "stage8-auth-viewport-containment-execution-receipt",
-      "stage8-directory-profile-current-rebaseline-execution-receipt"
+      "stage8-directory-profile-current-rebaseline-execution-receipt",
+      "stage8-roving-workspace-focus-execution-receipt"
     ]
   },
   "cellAccounting": {
@@ -101,8 +102,8 @@
     "enumeratedExpectedAccessCells": 270,
     "viewportStateInteractionEnvironmentExpansionPerformed": false,
     "executedFullMatrixCellCount": 0,
-    "partialSyntheticBrowserSliceCount": 7,
-    "partialSyntheticBrowserScenarioCellCount": 124,
+    "partialSyntheticBrowserSliceCount": 8,
+    "partialSyntheticBrowserScenarioCellCount": 132,
     "partialSyntheticBrowserCellsCountTowardFullMatrix": false
   },
   "partialSyntheticBrowserSlices": [
@@ -372,6 +373,61 @@
         "It is distinct from and does not alter or promote the historical 4415b743 directory/profile receipt.",
         "Six expected console diagnostics from injected 404/500 recovery fixtures are classified separately; this slice makes no clean-console claim.",
         "The CDP 200% visual-scale and harness-only container-threshold probes do not certify every native-browser zoom or production-layout condition.",
+        "It creates no aesthetic sign-off, visual freeze, merge, Sites, staging, or production authority."
+      ]
+    },
+    {
+      "id": "stage8-roving-workspace-focus-postcommit",
+      "receiptId": "roving-focus-postcommit-browser-20260813225220515",
+      "evidenceRef": "stage8-roving-workspace-focus-execution-receipt",
+      "sourceEvidenceRef": "stage8-roving-workspace-focus-runtime-and-test",
+      "sourceCommit": "d1e8ecd5a524a03c73b67e531edab363479a32b0",
+      "sourceTree": "c2399cf06099929bcd79c6f9e675fcd62da24952",
+      "evidenceStatus": "passed-promotable-bounded-local-synthetic-postcommit-browser-evidence",
+      "countsTowardFullMatrixAcceptance": false,
+      "scope": {
+        "environment": "local-synthetic-production-build-browser",
+        "routeFamilies": [
+          "customer workspace",
+          "accountant workspace"
+        ],
+        "modes": [
+          "filter strip",
+          "detail tab strip"
+        ],
+        "viewportsCssPx": [
+          {
+            "width": 390,
+            "height": 844
+          },
+          {
+            "width": 1440,
+            "height": 900
+          }
+        ],
+        "keyboardInput": "End",
+        "executedScenarioCount": 8
+      },
+      "result": {
+        "passedScenarioCount": 8,
+        "failedScenarioCount": 0,
+        "allSelectedFinalTab": true,
+        "allFocusedSelected": true,
+        "allSelectedRectContainedWithinOwnTablistTolerance1": true,
+        "documentOverflowScenarioCount": 0,
+        "pageOrRouteScrollChangedScenarioCount": 0,
+        "tablistScrollChangedScenarioCount": 2,
+        "unexpectedConsoleDiagnosticCount": 0,
+        "runtimePageErrorCount": 0,
+        "requestFailureCount": 0,
+        "blockedExternalRequestCount": 0,
+        "unknownSyntheticApiCount": 0,
+        "observedExpectedLocalSyntheticApiRequests": "80/80"
+      },
+      "limitations": [
+        "This is a bounded local/synthetic production-build browser receipt, not a full role-by-route, viewport, state, interaction, or environment matrix execution.",
+        "It covers only customer and accountant workspace filter/detail strips, the End key, and the two recorded viewports; it does not certify all keyboard inputs, routes, or workspace states.",
+        "Two intended tablist-only mobile scroll changes are recorded; this does not claim a global no-scroll behavior outside the visible strip contract.",
         "It creates no aesthetic sign-off, visual freeze, merge, Sites, staging, or production authority."
       ]
     }
@@ -918,6 +974,51 @@
       "kind": "curated-evidence-only",
       "path": "docs/uiux-stage8-acceptance-rollout/STAGE8_DIRECTORY_PROFILE_REBASELINE_EXECUTION_RECEIPT.json",
       "claim": "One bounded current local/synthetic directory/profile rebaseline slice and an optional generic live editable Figma DRAFT; neither is full Stage 8 acceptance or release authority."
+    },
+    "stage8-roving-workspace-focus-runtime-and-test": {
+      "id": "stage8-roving-workspace-focus-runtime-and-test",
+      "kind": "runtime-and-test-source",
+      "sourceSnapshot": {
+        "commit": "d1e8ecd5a524a03c73b67e531edab363479a32b0",
+        "tree": "c2399cf06099929bcd79c6f9e675fcd62da24952"
+      },
+      "distSnapshot": {
+        "sha256": "264eaea9d67f74fe4b34044e7c75c44b5a6cdca18f3eb2226a4be70545e03db2",
+        "fileCount": 169
+      },
+      "sources": [
+        {
+          "path": "frontend/src/components/ui/AppFilterChips.vue",
+          "sha256": "66c9f96d8bab76b8ff6a2b055b77f2b4e4645512650fc8fbf12096e3881a9920",
+          "claim": "Explicit keyboard-selection callers focus and reveal the selected filter chip within its nearest visible strip."
+        },
+        {
+          "path": "frontend/src/components/ui/AppPrimitives.test.ts",
+          "sha256": "233011b9d3e42c9e28fba9bca6b647c61f42f5f4f6f63b88a3ea674c35150975",
+          "claim": "Covers explicit reveal behavior and preserves the default non-reveal primitive boundary."
+        },
+        {
+          "path": "frontend/src/components/ui/AppTabs.vue",
+          "sha256": "44eb54d62d20491cf8292dd8d75de73e783641a5817eff78994c2092cfe7962e",
+          "claim": "Provides explicit opt-in keyboard focus and nearest-strip reveal for selected detail tabs."
+        },
+        {
+          "path": "frontend/src/views/AccountantWorkspaceView.vue",
+          "sha256": "e8341505828789f9a40f62dda545e75bd3149ffb82dc61c7f3648bdd1fe733d5",
+          "claim": "Opts the accountant workspace detail tab strip into keyboard selection reveal."
+        },
+        {
+          "path": "frontend/src/views/CustomerWorkspaceView.vue",
+          "sha256": "9a1f29b7f492eb14a20f432f554b16f1bf90e535e88bdcc6c3e208c062662e0d",
+          "claim": "Opts the customer workspace detail tab strip into keyboard selection reveal."
+        }
+      ]
+    },
+    "stage8-roving-workspace-focus-execution-receipt": {
+      "id": "stage8-roving-workspace-focus-execution-receipt",
+      "kind": "curated-evidence-only",
+      "path": "docs/uiux-stage8-acceptance-rollout/STAGE8_ROVING_WORKSPACE_FOCUS_EXECUTION_RECEIPT.json",
+      "claim": "One bounded current local/synthetic postcommit workspace roving-focus slice; it is not full Stage 8 acceptance or release authority."
     },
     "stage3-evidence-manifest": {
       "id": "stage3-evidence-manifest",

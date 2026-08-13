@@ -97,6 +97,19 @@ hash source/test/guardهای مرتبط، از جمله `AuthFlowShell`، چها
 [STAGE8A_EXECUTION_RECEIPTS.json](STAGE8A_EXECUTION_RECEIPTS.json)، source/tree/hashهای تاریخی آن
 و freeze protected surfaces در این rebaseline تغییر، overwrite یا promote نشده‌اند.
 
+## Postcommit workspace roving-focus source binding
+
+`d1e8ecd5a524a03c73b67e531edab363479a32b0` / tree
+`c2399cf06099929bcd79c6f9e675fcd62da24952`، five source/test file و dist snapshot اجرای
+browser محدود postcommit را bind می‌کند: `AppFilterChips`، `AppTabs`، two workspace caller و
+`AppPrimitives.test`. SHA-256 هر پنج source و dist `169` فایلی در
+[STAGE8_ROVING_WORKSPACE_FOCUS_EXECUTION_RECEIPT.json](STAGE8_ROVING_WORKSPACE_FOCUS_EXECUTION_RECEIPT.json)
+ثبت شده است. report همان commit/tree/hash و dist را پیش و پس از run یکسان و clean ثبت کرد.
+
+این receipt فقط reveal صریحِ keyboard selection در filter/detail stripهای workspace customer و
+accountant را در scope دارد. نه global primitive behavior، نه route/access outcomeهای matrix، و
+نه receiptهای تاریخی یا protected freeze را overwrite، promote یا به پذیرش تبدیل نمی‌کند.
+
 ## What is validated by this correction
 
 - JSON schema 3 parse می‌شود.
@@ -104,7 +117,7 @@ hash source/test/guardهای مرتبط، از جمله `AuthFlowShell`، چها
 - ۹ access profile دقیق تعریف شده و هر route برای هر profile یک outcome و `evidenceRefs` دارد.
 - تعداد واقعی outcomeهای موردانتظار ۲۷۰ است.
 - چهار component canonical outcome مدیر میانی به source/test `AdminView` متصل‌اند.
-- `executedFullMatrixCellCount=0` است؛ هفت partial synthetic slice جداگانه ثبت شده‌اند اما
+- `executedFullMatrixCellCount=0` است؛ هشت partial synthetic slice جداگانه ثبت شده‌اند اما
   به full matrix یا viewport/state/interaction/environment expansion افزوده نشده‌اند.
 - نقش‌های واقعی از contextهای customer/accountant/owner جدا شده‌اند.
 
@@ -113,7 +126,7 @@ hash source/test/guardهای مرتبط، از جمله `AuthFlowShell`، چها
 ## Focused checks and bounded browser receipts on 2026-08-13
 
 - `jq` parse/invariant check روی `ACCEPTANCE_MATRIX.json`: ۳۰ route، ۹ profile،
-  ۲۷۰ outcome دارای `evidenceRefs` معتبر، چهار component outcome، هفت slice محدود، و صفر full-acceptance cell.
+  ۲۷۰ outcome دارای `evidenceRefs` معتبر، چهار component outcome، هشت slice محدود، و صفر full-acceptance cell.
   Evidence: [ACCEPTANCE_MATRIX.json](ACCEPTANCE_MATRIX.json).
 - `npm run test:unit:run -- src/router/index.test.ts src/utils/auth.test.ts`: pass؛
   ۲ فایل و ۴۲ تست. Evidence source:
@@ -185,6 +198,24 @@ diagnostic موردانتظار فقط از fixtureهای deliberate `404/500` r
 ادعای clean-console ندارد. 2× فقط CDP visual-scale و probe threshold فقط harness-only است. هیچ
 artifact خام یا local path/URL در repository نگه‌داری نشده و این slice full
 matrix یا protected-surface behavior را attest نمی‌کند.
+
+receipt هشتم در [STAGE8_ROVING_WORKSPACE_FOCUS_EXECUTION_RECEIPT.json](STAGE8_ROVING_WORKSPACE_FOCUS_EXECUTION_RECEIPT.json)
+به source clean `d1e8ecd5` / tree `c2399cf` bind است: ۸ scenario customer/accountant ×
+filter/detail در `390×844` و `1440×900` با کلید `End` اجرا و ۸/۸ pass شد. selected final tab
+همیشه focused ماند و rectangle آن با tolerance یک CSS pixel در tablist خودش بود؛ document
+overflow و page/route scroll change صفر و دو tablist scroll change موبایل intentional بودند.
+console/page error/request failure/blocked external/unknown API غیرمنتظره صفر و ۸۰/۸۰ local
+synthetic API request موردانتظار دیده شد. source/tree/hash و dist `169` فایلی پیش و پس از run
+یکسان و clean بودند؛ هشت screenshot فقط خارج repository نگه‌داری شدند. این receipt فقط scope
+نام‌برده، `End` و دو viewport را attest می‌کند؛ full matrix، همهٔ keyboard pathها، visual freeze
+یا پذیرش نهایی را attest نمی‌کند.
+
+مرجع Figma اختیاریِ generic roving-focus برای همین receipt، section `603:18`، board `603:19`،
+scope `604:22` و frameهای mobile `606:18` (`390×844`) و desktop `606:19` (`1440×900`) است.
+DRAFT زنده/قابل‌ویرایش، ۴۴ text Vazirmatn، ۱۶/۱۶ instance متصل، semantic style/variable reuse،
+zero overflow/crop/overlap، contrast متن `4.55:1`، focus indicator `4.23:1` و privacy scan zero
+دارد. محتوای آن generic/synthetic و بدون technical provenance است؛ نه visual freeze، نه final
+acceptance و نه evidence runtime/browser/accessibility.
 
 مرجع Figma اختیاریِ generic directory/profile برای همین rebaseline، section `583:146`، scope
 `584:146`، mobile directory `584:147`، desktop rail `584:148` و mobile profile `584:149` است.
