@@ -11,6 +11,7 @@ const props = defineProps<{
   modelValue: string
   options: AppTabOption[]
   label: string
+  revealSelectionOnKeyboard?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -20,6 +21,20 @@ const emit = defineEmits<{
 function selectOption(key: string, disabled?: boolean) {
   if (disabled) return
   emit('update:modelValue', key)
+}
+
+function focusAndRevealOption(button: HTMLButtonElement) {
+  try {
+    button.focus({ preventScroll: true })
+  } catch {
+    button.focus()
+  }
+
+  try {
+    button.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+  } catch {
+    // Ignore runtimes that do not support ScrollIntoViewOptions.
+  }
 }
 
 function handleKeydown(event: KeyboardEvent, index: number) {
@@ -49,7 +64,13 @@ function handleKeydown(event: KeyboardEvent, index: number) {
   emit('update:modelValue', nextOption.key)
   void nextTick(() => {
     const tabs = currentButton?.parentElement?.querySelectorAll<HTMLButtonElement>('[role="tab"]')
-    tabs?.[nextOption.optionIndex]?.focus()
+    const nextTab = tabs?.[nextOption.optionIndex]
+    if (!nextTab) return
+    if (!props.revealSelectionOnKeyboard) {
+      nextTab.focus()
+      return
+    }
+    focusAndRevealOption(nextTab)
   })
 }
 </script>

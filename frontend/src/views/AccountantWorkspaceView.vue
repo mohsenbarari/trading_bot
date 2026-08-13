@@ -1295,6 +1295,7 @@ onBeforeUnmount(() => {
               v-model="detailTab"
               label="بخش‌های پرونده حسابدار"
               :options="availableDetailTabOptions"
+              reveal-selection-on-keyboard
             />
 
             <div

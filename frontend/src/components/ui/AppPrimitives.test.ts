@@ -222,14 +222,57 @@ describe('ui primitives', () => {
     expect(wrapper.emitted('update:modelValue')?.[0]).toEqual(['active'])
 
     const tabButtons = wrapper.findAll<HTMLButtonElement>('[role="tab"]')
+    const defaultTabScrollIntoViewSpy = vi.fn()
+    Object.defineProperty(tabButtons[1]!.element, 'scrollIntoView', {
+      configurable: true,
+      value: defaultTabScrollIntoViewSpy,
+    })
     tabButtons[0]!.element.focus()
     await tabButtons[0]!.trigger('keydown', { key: 'ArrowLeft' })
     await nextTick()
     expect(wrapper.emitted('update:modelValue')?.[1]).toEqual(['active'])
     expect(document.activeElement).toBe(tabButtons[1]!.element)
+    expect(defaultTabScrollIntoViewSpy).not.toHaveBeenCalled()
     await tabButtons[1]!.trigger('keydown', { key: 'Home' })
     await nextTick()
     expect(document.activeElement).toBe(tabButtons[0]!.element)
+    delete (tabButtons[1]!.element as Partial<HTMLButtonElement>).scrollIntoView
+    wrapper.unmount()
+  })
+
+  it('reveals keyboard-selected tabs only when explicitly opted in', async () => {
+    const wrapper = mount(AppTabs, {
+      props: {
+        modelValue: 'all',
+        label: 'بخش‌های پرونده',
+        revealSelectionOnKeyboard: true,
+        options: [
+          { key: 'all', label: 'همه' },
+          { key: 'active', label: 'فعال' },
+        ],
+      },
+      attachTo: document.body,
+    })
+    const tabButtons = wrapper.findAll<HTMLButtonElement>('[role="tab"]')
+    const nextTab = tabButtons[1]!.element
+    const nativeFocus = nextTab.focus.bind(nextTab)
+    const focusSpy = vi.fn((options?: FocusOptions) => nativeFocus(options))
+    const scrollIntoViewSpy = vi.fn()
+    Object.defineProperty(nextTab, 'focus', { configurable: true, value: focusSpy })
+    Object.defineProperty(nextTab, 'scrollIntoView', {
+      configurable: true,
+      value: scrollIntoViewSpy,
+    })
+
+    tabButtons[0]!.element.focus()
+    await tabButtons[0]!.trigger('keydown', { key: 'ArrowLeft' })
+    await nextTick()
+
+    expect(focusSpy).toHaveBeenCalledWith({ preventScroll: true })
+    expect(scrollIntoViewSpy).toHaveBeenCalledWith({ block: 'nearest', inline: 'nearest' })
+
+    delete (nextTab as Partial<HTMLButtonElement>).focus
+    delete (nextTab as Partial<HTMLButtonElement>).scrollIntoView
     wrapper.unmount()
   })
 
@@ -549,14 +592,27 @@ describe('ui primitives', () => {
     )
 
     const chipTabs = chips.findAll<HTMLButtonElement>('[role="tab"]')
+    const optInChip = chipTabs[1]!.element
+    const nativeFocus = optInChip.focus.bind(optInChip)
+    const focusSpy = vi.fn((options?: FocusOptions) => nativeFocus(options))
+    const scrollIntoViewSpy = vi.fn()
+    Object.defineProperty(optInChip, 'focus', { configurable: true, value: focusSpy })
+    Object.defineProperty(optInChip, 'scrollIntoView', {
+      configurable: true,
+      value: scrollIntoViewSpy,
+    })
     chipTabs[0]!.element.focus()
     await chipTabs[0]!.trigger('keydown', { key: 'ArrowLeft' })
     await nextTick()
     expect(chips.emitted('update:modelValue')?.at(-1)).toEqual(['active'])
     expect(document.activeElement).toBe(chipTabs[1]!.element)
+    expect(focusSpy).toHaveBeenCalledWith({ preventScroll: true })
+    expect(scrollIntoViewSpy).toHaveBeenCalledWith({ block: 'nearest', inline: 'nearest' })
     await chipTabs[1]!.trigger('keydown', { key: 'Home' })
     await nextTick()
     expect(document.activeElement).toBe(chipTabs[0]!.element)
+    delete (optInChip as Partial<HTMLButtonElement>).focus
+    delete (optInChip as Partial<HTMLButtonElement>).scrollIntoView
     chips.unmount()
 
     const stepper = mount(AppNumberStepper, {
@@ -581,12 +637,19 @@ describe('ui primitives', () => {
       attachTo: document.body,
     })
     const tabs = chips.findAll<HTMLButtonElement>('[role="tab"]')
+    const defaultChipScrollIntoViewSpy = vi.fn()
+    Object.defineProperty(tabs[1]!.element, 'scrollIntoView', {
+      configurable: true,
+      value: defaultChipScrollIntoViewSpy,
+    })
     tabs[0]!.element.focus()
     await tabs[0]!.trigger('keydown', { key: 'ArrowLeft' })
     await nextTick()
 
     expect(chips.emitted('update:modelValue')?.at(-1)).toEqual(['active'])
     expect(document.activeElement).toBe(tabs[0]!.element)
+    expect(defaultChipScrollIntoViewSpy).not.toHaveBeenCalled()
+    delete (tabs[1]!.element as Partial<HTMLButtonElement>).scrollIntoView
     chips.unmount()
   })
 

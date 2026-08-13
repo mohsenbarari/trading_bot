@@ -24,6 +24,20 @@ function selectOption(key: string, disabled?: boolean) {
   emit('update:modelValue', key)
 }
 
+function focusAndRevealOption(button: HTMLButtonElement) {
+  try {
+    button.focus({ preventScroll: true })
+  } catch {
+    button.focus()
+  }
+
+  try {
+    button.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+  } catch {
+    // Ignore runtimes that do not support ScrollIntoViewOptions.
+  }
+}
+
 function handleKeydown(event: KeyboardEvent, index: number) {
   const enabledOptions = props.options
     .map((option, optionIndex) => ({ ...option, optionIndex }))
@@ -52,7 +66,8 @@ function handleKeydown(event: KeyboardEvent, index: number) {
   if (!props.focusSelectionOnKeyboard) return
   void nextTick(() => {
     const tabs = currentButton?.parentElement?.querySelectorAll<HTMLButtonElement>('[role="tab"]')
-    tabs?.[nextOption.optionIndex]?.focus()
+    const nextTab = tabs?.[nextOption.optionIndex]
+    if (nextTab) focusAndRevealOption(nextTab)
   })
 }
 </script>

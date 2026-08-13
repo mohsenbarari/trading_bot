@@ -1700,6 +1700,7 @@ onBeforeUnmount(() => {
               v-model="detailTab"
               label="بخش‌های پرونده مشتری"
               :options="availableDetailTabOptions"
+              reveal-selection-on-keyboard
             />
 
             <WorkspaceNotice
