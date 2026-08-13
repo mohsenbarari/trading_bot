@@ -3,7 +3,7 @@
   "stage": "8A",
   "status": "curated-evidence-only-not-full-acceptance",
   "branch": "condidate/webapp-ui-ux-redesign-v2",
-  "claimBoundary": "These are three bounded local synthetic-browser receipts and one live editable Figma reference. They do not create full Stage 8 acceptance, owner aesthetic sign-off, a visual freeze, merge authority, staging authority, Sites authority, or production authority.",
+  "claimBoundary": "These are four bounded local synthetic-browser receipts and two live editable Figma references. They do not create full Stage 8 acceptance, owner aesthetic sign-off, a visual freeze, merge authority, staging authority, Sites authority, or production authority.",
   "retention": "Only redacted counts, content hashes, and source revisions are retained. Original local browser artifacts, screenshots, diagnostics, and network traces are intentionally not stored in this repository.",
   "receipts": [
     {
@@ -213,6 +213,55 @@
         "It does not expand or pass the required viewport, state, interaction, or environment dimensions.",
         "It does not create owner aesthetic sign-off, a visual freeze, merge authority, Sites authority, staging authority, or production authority."
       ]
+    },
+    {
+      "id": "stage8a-admin-invitation-presentation",
+      "runId": "invitation-focus-browser-revalidation-2026-08-13-r1",
+      "executedOn": "2026-08-13",
+      "status": "nonpromotable-bounded-synthetic-browser-slice",
+      "sourceSnapshot": {
+        "commit": "4beeade2f3aae4964f1964dedc00f47dfbcd0c05",
+        "tree": "90a4ccea3a88768dc8b2525c5e55ca91aca82e9c",
+        "runtimeSourceHashes": {
+          "frontend/src/components/CreateInvitationView.vue": "f2c89b4c4becf509496978718e1cbe222a16a85b1e4a12968b40e1504ea762e0"
+        },
+        "testSourceHashes": {
+          "frontend/src/components/CreateInvitationView.test.ts": "a417db3ca12be4d1e4f83ff5aca3c7e76a7360d68c60bfc6491d7ddbb1aa3663"
+        }
+      },
+      "harnessSha256": "8a4546cc67145086d2012c8b0508924cc54bb9fb732d5e60f1eca085df99155b",
+      "scope": {
+        "environment": "local-synthetic-production-browser-with-mocked-delete-transport",
+        "route": "/admin/invitations",
+        "viewportsCssPx": [
+          {
+            "width": 390,
+            "height": 844
+          },
+          {
+            "width": 1440,
+            "height": 900
+          }
+        ],
+        "executedViewportFlowCount": 2,
+        "assertionCount": 44,
+        "retainedCaptureCount": 0
+      },
+      "result": {
+        "passedViewportFlowCount": 2,
+        "focusRestorationAfterCancelAndEscape": "passed",
+        "horizontalOverflowObserved": false,
+        "copyFlows": "passed",
+        "observedMockedDelete204UiEndStateCount": 2
+      },
+      "countsTowardFullMatrixAcceptance": false,
+      "limitations": [
+        "Evidence-only and nonpromotable: API transport was mocked, so the observed DELETE 204 UI end state is not a real-server completion attestation.",
+        "A paired Chromium abort artifact occurred with the mocked DELETE 204 transport; this receipt makes no server-completion or clean-network-diagnostics claim.",
+        "Vazirmatn binary-asset delivery could not be verified because the local Vite symlink filesystem-allow boundary blocked that environment check.",
+        "It does not expand or pass the required access-profile, viewport, state, interaction, or environment matrix dimensions.",
+        "It creates no full acceptance, owner aesthetic sign-off, visual freeze, merge, Sites, staging, or production authority."
+      ]
     }
   ],
   "liveFigmaReference": {
@@ -244,6 +293,34 @@
     "limitations": [
       "The section is live and editable, not a screenshot or hash-based freeze.",
       "Its design review is not runtime accessibility evidence and does not create final Stage 8 acceptance."
+    ]
+  },
+  "invitationPresentationFigmaReference": {
+    "status": "owner-approved-live-editable-target-not-freeze",
+    "fileKey": "z8jgJxST4O2APzWnlyP9gv",
+    "pageNodeId": "321:18",
+    "sectionNodeId": "535:1455",
+    "boardNodeId": "535:1456",
+    "implementationSource": {
+      "commit": "4beeade2f3aae4964f1964dedc00f47dfbcd0c05",
+      "tree": "90a4ccea3a88768dc8b2525c5e55ca91aca82e9c"
+    },
+    "contentBoundary": "Owner-approved invitation presentation target for the source-bound local component; it remains live and editable.",
+    "review": {
+      "textNodeCount": 48,
+      "allTextUses": "Vazirmatn",
+      "linkedInstanceCount": 18,
+      "expectedLinkedInstanceCount": 18,
+      "sensitiveContentScan": {
+        "phone": 0,
+        "url": 0,
+        "invitationToken": 0
+      },
+      "visualReview": "pass: no crop observed"
+    },
+    "limitations": [
+      "Owner approval of this editable target is not a screenshot or hash-based visual freeze.",
+      "It is not runtime accessibility, browser transport, full Stage 8 acceptance, merge, Sites, staging, or production authority."
     ]
   }
 }

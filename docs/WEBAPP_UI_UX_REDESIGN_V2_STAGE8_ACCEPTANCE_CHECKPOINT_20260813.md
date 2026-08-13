@@ -17,6 +17,9 @@ source تاریخی بازیابی محدود directory/profile: `4415b7431a6b67
 source محدود route-first directory-transition: `31c69d5a5d2fb1e2c08d9647473d3612b9d85629`
 (evidence-only؛ بدون افزایش full matrix)
 
+source محدود invitation-presentation: `4beeade2f3aae4964f1964dedc00f47dfbcd0c05`
+(evidence-only و nonpromotable؛ بدون افزایش full matrix)
+
 ## ۱. مجوز و حد آن
 
 دستور مالک برای ادامهٔ Stage 8، یکپارچگی و زیباسازی UI/UX با کنترل ایمنی، و ثبت رهگیری
@@ -59,11 +62,19 @@ requirement هستند و به cell-level evidence کامل متصل نشده‌
   non-aborted، صفر requestfailed/`ERR_ABORTED` و حداکثر یک UserManager/list مرئی داشتند؛ deep-link
   denied به `/admin` canonical شد و CommodityManager یا commodity API نداشت. Telegram probe محلی
   intercept شد و external transport مشاهده نشد. این slice evidence-only است و cell پذیرش کامل نیست.
+- slice invitation-presentation در source `4beeade2`: ۴۴ assertion روی `390×844` و `1440×900`
+  برای بازگشت focus پس از Cancel/Escape، overflow، copy و end-state حذف mock اجرا شد و ۲/۲
+  viewport-flow گذشت. DELETE روی transport mock بود و artifact paired Chromium abort دیده شد؛
+  بنابراین این receipt nonpromotable است و هیچ completion سرور واقعی را attest نمی‌کند.
 - Figma: file `z8jgJxST4O2APzWnlyP9gv`، page `486:1455`، section `508:95`، frame `508:96`
   (`390×844`) و provenance `511:151`. audit محدود: ۲۷ text با Vazirmatn، ۷ instance UIUX،
   ۴۹ node token-bound و صفر phone/email/URL/query ناایمن؛ review بصری بدون crop/overlap.
+- Figma invitation-presentation: file `z8jgJxST4O2APzWnlyP9gv`، page `321:18`، section
+  `535:1455` و board `535:1456`. این target زنده/قابل‌ویرایش و مورد تأیید مالک است، اما freeze
+  یا پذیرش نهایی نیست؛ audit آن ۴۸ text Vazirmatn، ۱۸/۱۸ instance متصل، صفر phone/URL/token
+  ناایمن و بدون crop را ثبت کرده است.
 
-این سه receipt و مرجع Figma live/editable یا local/synthetic هستند؛ screenshot/hash-freeze، runtime
+این چهار receipt و مرجع‌های Figma live/editable یا local/synthetic هستند؛ screenshot/hash-freeze، runtime
 accessibility acceptance، sign-off زیبایی مالک، یا release authority نیستند. receipt/reference مبتنی
 بر `4415b743` تا validation P1 ادعایی دربارهٔ working tree جاری ندارند. artifact خام browser در
 repository ذخیره نشده و هیچ Sites action انجام نشده است.
@@ -92,7 +103,7 @@ Sites و production در این Stage شروع نشده‌اند.
 ## ۶. گیت بعدی (فنی و بصری)
 
 - ۲۷۰ نتیجهٔ موردانتظار مسیر×پروفایل به source متصل است؛
-- canonicalization مدیر میانی و سه slice محدود source-bound ثبت شده‌اند، اما full matrix همچنان صفر است؛
+- canonicalization مدیر میانی و چهار slice محدود source-bound ثبت شده‌اند، اما full matrix همچنان صفر است؛
 - protected-surface hashهای تاریخی overwrite نشده‌اند؛
 - اجرای واقعی viewport/state/interaction/environment و sign-off زیبایی مالک هنوز pending است؛
 - عرضه فقط به‌صورت مدل تیمی و rollback-safe توصیف شده و شروع نشده است؛

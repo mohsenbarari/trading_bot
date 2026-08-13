@@ -2,7 +2,7 @@
 
 این سند برنامه است، نه دستور اجرا. هیچ staging یا productionای از روی آن شروع نمی‌شود.
 `ACCEPTANCE_MATRIX.json` اکنون ۲۷۰ outcome موردانتظار guard و چهار canonicalization
-کامپوننتی را رهگیری می‌کند. سه slice local/synthetic در
+کامپوننتی را رهگیری می‌کند. چهار slice local/synthetic در
 `STAGE8A_EXECUTION_RECEIPTS.json` ثبت شده‌اند، اما هیچ‌کدام نتیجهٔ اجرای پذیرش تیمی یا
 authority عرضه نیستند.
 
@@ -14,6 +14,8 @@ authority عرضه نیستند.
 - ارجاع به evidence مراحل قبلی فقط traceability است و به‌تنهایی سلول Stage 8 را pass نمی‌کند.
 - evidence محدود 8A باید با شناسهٔ خود باقی بماند و هرگز به `executedFullMatrixCellCount` یا
   sign-off مالک تبدیل نشود.
+- receipt invitation-presentation تا وقتی DELETE روی transport واقعی و بدون artifact تشخیصی
+  مستقل بازتأیید نشود، `nonpromotable` می‌ماند و فقط end-state محلی mock را توصیف می‌کند.
 - مرجع Figma زنده فقط برای هم‌راستایی design است؛ پیش از اجرای browser قابل‌تکرار، شاهد runtime
   یا visual freeze نیست.
 - زیبایی و یکپارچگی UI/UX باید با sign-off صریح مالک ثبت شود؛ سبز بودن test فنی جای آن نیست.

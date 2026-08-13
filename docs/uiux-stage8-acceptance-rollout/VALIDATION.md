@@ -43,6 +43,19 @@ deep-linkهای denied را با `router.replace({ name: 'admin' })` به `/admi
 canonicalization مدیر میانی است و hashهای تاریخی آن را جایگزین نمی‌کند. فقط رفتار lifecycle
 گذار `/admin` به `/admin/users` و مرز mount directory را برای receipt محدود جدید توصیف می‌کند.
 
+## Invitation-presentation source binding
+
+`4beeade2f3aae4964f1964dedc00f47dfbcd0c05` / tree
+`90a4ccea3a88768dc8b2525c5e55ca91aca82e9c`، source/test زیر را bind می‌کند:
+
+- `frontend/src/components/CreateInvitationView.vue` —
+  `f2c89b4c4becf509496978718e1cbe222a16a85b1e4a12968b40e1504ea762e0`
+- `frontend/src/components/CreateInvitationView.test.ts` —
+  `a417db3ca12be4d1e4f83ff5aca3c7e76a7360d68c60bfc6491d7ddbb1aa3663`
+
+این binding فقط source-bound presentation و regression محلی focus Cancel/Escape را توصیف
+می‌کند؛ نه receipt تکمیل DELETE روی سرور واقعی.
+
 ## What is validated by this correction
 
 - JSON schema 3 parse می‌شود.
@@ -50,7 +63,7 @@ canonicalization مدیر میانی است و hashهای تاریخی آن را
 - ۹ access profile دقیق تعریف شده و هر route برای هر profile یک outcome و `evidenceRefs` دارد.
 - تعداد واقعی outcomeهای موردانتظار ۲۷۰ است.
 - چهار component canonical outcome مدیر میانی به source/test `AdminView` متصل‌اند.
-- `executedFullMatrixCellCount=0` است؛ سه partial synthetic slice جداگانه ثبت شده‌اند اما
+- `executedFullMatrixCellCount=0` است؛ چهار partial synthetic slice جداگانه ثبت شده‌اند اما
   به full matrix یا viewport/state/interaction/environment expansion افزوده نشده‌اند.
 - نقش‌های واقعی از contextهای customer/accountant/owner جدا شده‌اند.
 
@@ -68,7 +81,7 @@ canonicalization مدیر میانی است و hashهای تاریخی آن را
 - `npm run test:unit:run -- --no-file-parallelism --maxWorkers=1 src/components/UserManager.test.ts src/components/PublicProfile.test.ts`:
   ۶۶/۶۶ pass؛ `npx vue-tsc --noEmit` و `npm run guard:ui` نیز pass.
 
-[STAGE8A_EXECUTION_RECEIPTS.json](STAGE8A_EXECUTION_RECEIPTS.json) سه slice redacted را
+[STAGE8A_EXECUTION_RECEIPTS.json](STAGE8A_EXECUTION_RECEIPTS.json) چهار slice redacted را
 ثبت می‌کند: ۴۸/۴۸ scenario cell دسترسی/shell در `390×844`، recovery محدود directory/profile
 در viewportهای `360/390/414/430/1440`، و slice رفتاری route-first در source `31c69d5a`.
 slice دوم فقط evidence تاریخی source `4415b743` است؛ پس از آن یک تغییر محلی P1 ایجاد شده و
@@ -79,6 +92,14 @@ validation آن pending است. slice جدید با delayed response `550ms`، �
 Telegram probe محلی intercept شد و هیچ external transport مشاهده نشد. خروجی‌های browser فقط
 local/synthetic بودند و artifact یا diagnostic خام در repository نگه‌داری نشده است. این receiptها
 هیچ سلول full Stage 8 را pass نمی‌کنند و پذیرش کامل یا aesthetic sign-off ایجاد نمی‌کنند.
+
+receipt چهارم invitation-presentation به source تمیز `4beeade2` bind است: run
+`invitation-focus-browser-revalidation-2026-08-13-r1`، ۴۴ assertion، صفر capture و ۲/۲
+viewport-flow در `390×844` و `1440×900`. focus بازگشتی Cancel/Escape، copy، نبود overflow
+و ۲/۲ end-state DELETE-204 محلی mock مشاهده شد. این receipt **nonpromotable** است: transport
+API mock بود و artifact paired Chromium abort مانع ادعای clean network diagnostics یا تکمیل واقعی
+سرور است. همچنین boundary محلی Vite برای symlink، verification باینری Vazirmatn را در این محیط
+مسدود کرد. artifact خام در repository نگه‌داری نشده و این receipt به full matrix اضافه نمی‌شود.
 
 - focused route-first validation: ۵۵/۵۵ test pass.
 - سپس full serial validation: ۱۵۴ فایل / ۱۷۴۶ test pass؛ production build، type check،
@@ -92,6 +113,12 @@ frame `508:96` (`390×844`) audit محدود گذرانده است: ۲۷ text ه
 این فقط clean design reference با محتوای synthetic و source تاریخی `4415b743` است؛ تا validation
 محلی P1، هیچ claim دربارهٔ working tree جاری، runtime accessibility، screenshot freeze یا پذیرش
 نهایی از آن نتیجه نمی‌شود.
+
+مرجع invitation-presentation در همان file، page `321:18`، section `535:1455` و board
+`535:1456` به source `4beeade2` مربوط است. audit نهایی آن ۴۸ text Vazirmatn، ۱۸/۱۸ instance
+متصل، صفر phone/URL/token ناایمن و بدون crop را ثبت کرده است. این target مورد تأیید مالک اما
+live/editable و غیر-freeze است؛ review طراحی آن evidence runtime، transport، پذیرش کامل یا
+authority عرضه نیست.
 
 ## Historical technical records referenced, not overwritten or promoted here
 

@@ -98,8 +98,8 @@
     "enumeratedExpectedAccessCells": 270,
     "viewportStateInteractionEnvironmentExpansionPerformed": false,
     "executedFullMatrixCellCount": 0,
-    "partialSyntheticBrowserSliceCount": 3,
-    "partialSyntheticBrowserScenarioCellCount": 52,
+    "partialSyntheticBrowserSliceCount": 4,
+    "partialSyntheticBrowserScenarioCellCount": 54,
     "partialSyntheticBrowserCellsCountTowardFullMatrix": false
   },
   "partialSyntheticBrowserSlices": [
@@ -197,6 +197,46 @@
       "limitations": [
         "This is a bounded local synthetic production-browser route-transition behavioral slice, not a full role-by-route matrix cell.",
         "It does not expand or pass the required viewport, state, interaction, or environment dimensions.",
+        "It is evidence-only and creates no full acceptance, aesthetic sign-off, visual freeze, merge, Sites, staging, or production authority."
+      ]
+    },
+    {
+      "id": "stage8a-admin-invitation-presentation",
+      "receiptId": "stage8a-admin-invitation-presentation",
+      "evidenceRef": "stage8a-execution-receipts",
+      "sourceEvidenceRef": "admin-invitation-presentation-runtime-and-test",
+      "sourceCommit": "4beeade2f3aae4964f1964dedc00f47dfbcd0c05",
+      "sourceTree": "90a4ccea3a88768dc8b2525c5e55ca91aca82e9c",
+      "evidenceStatus": "nonpromotable; mocked-delete-transport with paired Chromium abort artifact",
+      "countsTowardFullMatrixAcceptance": false,
+      "scope": {
+        "environment": "local-synthetic-production-browser-with-mocked-delete-transport",
+        "route": "/admin/invitations",
+        "viewportsCssPx": [
+          {
+            "width": 390,
+            "height": 844
+          },
+          {
+            "width": 1440,
+            "height": 900
+          }
+        ],
+        "executedViewportFlowCount": 2,
+        "assertionCount": 44
+      },
+      "result": {
+        "passedViewportFlowCount": 2,
+        "focusRestorationAfterCancelAndEscape": "passed",
+        "horizontalOverflowObserved": false,
+        "copyFlows": "passed",
+        "observedMockedDelete204UiEndStateCount": 2
+      },
+      "limitations": [
+        "API transport was mocked, so this observed DELETE 204 UI end state does not attest real-server completion.",
+        "A paired Chromium abort artifact prevents a clean-network-diagnostics or server-completion claim.",
+        "The local Vite symlink filesystem-allow boundary blocked Vazirmatn binary-asset delivery verification in this environment.",
+        "It does not expand or pass the required access-profile, viewport, state, interaction, or environment matrix dimensions.",
         "It is evidence-only and creates no full acceptance, aesthetic sign-off, visual freeze, merge, Sites, staging, or production authority."
       ]
     }
@@ -501,11 +541,31 @@
         }
       ]
     },
+    "admin-invitation-presentation-runtime-and-test": {
+      "id": "admin-invitation-presentation-runtime-and-test",
+      "kind": "runtime-and-test-source",
+      "sourceSnapshot": {
+        "commit": "4beeade2f3aae4964f1964dedc00f47dfbcd0c05",
+        "tree": "90a4ccea3a88768dc8b2525c5e55ca91aca82e9c"
+      },
+      "sources": [
+        {
+          "path": "frontend/src/components/CreateInvitationView.vue",
+          "sha256": "f2c89b4c4becf509496978718e1cbe222a16a85b1e4a12968b40e1504ea762e0",
+          "claim": "Invitation presentation, safe copy controls, and local cancel/Escape focus restoration source."
+        },
+        {
+          "path": "frontend/src/components/CreateInvitationView.test.ts",
+          "sha256": "a417db3ca12be4d1e4f83ff5aca3c7e76a7360d68c60bfc6491d7ddbb1aa3663",
+          "claim": "Invitation presentation and cancel/Escape focus-restoration regression test source."
+        }
+      ]
+    },
     "stage8a-execution-receipts": {
       "id": "stage8a-execution-receipts",
       "kind": "curated-evidence-only",
       "path": "docs/uiux-stage8-acceptance-rollout/STAGE8A_EXECUTION_RECEIPTS.json",
-      "claim": "Three bounded local synthetic browser slices and one live editable Figma reference; none is full Stage 8 acceptance or release authority."
+      "claim": "Four bounded local synthetic browser slices and two live editable Figma references; none is full Stage 8 acceptance or release authority."
     },
     "stage3-evidence-manifest": {
       "id": "stage3-evidence-manifest",
