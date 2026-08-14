@@ -1193,6 +1193,24 @@ export async function waitForMountedPendingMidProbe(page, pathname = '', timeout
   return last
 }
 
+export async function recoverIdentityPageDataAfterHold(page) {
+  const retry = page.locator(
+    [
+      '.dashboard-identity-retry',
+      '.operations-identity-retry',
+      '.account-identity-retry',
+      '.profile-load-retry',
+    ].join(', '),
+  )
+  if ((await retry.count()) === 0) return { recovered: false }
+  const first = retry.first()
+  if (!(await first.isVisible().catch(() => false))) return { recovered: false }
+  await first.click({ timeout: 1500 }).catch(() => {})
+  await waitForNetworkSettle(page).catch(() => {})
+  await waitForApp(page)
+  return { recovered: true }
+}
+
 export async function waitForNetworkSettle(page, timeout = 15000) {
   const started = Date.now()
   let last = await readStage8Status(page)
@@ -1386,7 +1404,13 @@ export async function collectUiProbe(page) {
           '[role="progressbar"]',
         ].join(','),
       ),
-    ].find(visible)
+    ].find(
+      (element) =>
+        visible(element) &&
+        !element.closest(
+          '.dashboard-identity-error, .operations-identity-error, .account-identity-error, .profile-load-error',
+        ),
+    )
     const loadingVisible = Boolean(loadingNode) || Boolean(
       [...document.querySelectorAll('[role="status"]')].find(
         (element) => visible(element) && /در حال (دریافت|بررسی|آماده‌سازی|بارگذاری)/.test(element.textContent || ''),

@@ -170,6 +170,8 @@ describe('stage8 full-acceptance fixture contract', () => {
       /\(controller\.mode === 'loading' \|\| controller\.mode === 'slow'\) && delayable\) \{/,
     )
     expect(browserSource).toMatch(/controller\.holdEndpoint/)
+    expect(runtimeSource).toMatch(/recoverIdentityPageDataAfterHold/)
+    expect(browserSource).toMatch(/recoverIdentityPageDataAfterHold\(page\)/)
   })
 
   it('does not restore the generic all-states applicability fallback', () => {

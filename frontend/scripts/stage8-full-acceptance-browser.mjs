@@ -37,6 +37,7 @@ import {
   waitForMountedPendingMidProbe,
   waitForNetworkSettle,
   waitForPendingRequest,
+  recoverIdentityPageDataAfterHold,
 } from './lib/stage8-full-acceptance-runtime.mjs'
 import {
   BINDING_PATHS,
@@ -170,6 +171,9 @@ async function runScenario({
       controller.releaseHeldRequest = true
       await waitForNetworkSettle(page)
       await waitForApp(page)
+      if (descriptor.states[state]?.identityPageData) {
+        await recoverIdentityPageDataAfterHold(page)
+      }
     } else if (state === 'stale' && expected.kind === 'render-route') {
       const staleEndpoint = descriptor.states.stale.endpoint || ''
       await waitForPendingRequest(page, staleEndpoint, 8000)
@@ -498,18 +502,32 @@ async function main() {
       .map((item) => item.trim())
       .filter(Boolean),
   )
+  const routeAllowlist = String(process.env.STAGE8_FULL_ACCEPTANCE_ROUTES || '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean)
+  const selectedRoutes = routeAllowlist.length
+    ? matrix.routes.filter((route) => routeAllowlist.includes(route.name))
+    : matrix.routes
+  if (routeAllowlist.length && selectedRoutes.length !== routeAllowlist.length) {
+    const known = new Set(matrix.routes.map((route) => route.name))
+    throw new Error(
+      `unknown Stage 8 route allowlist: ${routeAllowlist.filter((name) => !known.has(name)).join(',')}`,
+    )
+  }
   progress('start', {
     commit: git.commit,
     tree: git.tree,
     dist: distBefore.sha256,
     phases: [...requestedPhases],
+    routes: selectedRoutes.map((route) => route.name),
   })
 
   try {
     if (!requestedPhases.has('access')) {
       progress('access-skipped', { reason: 'phase-filter' })
     }
-    for (const route of requestedPhases.has('access') ? matrix.routes : []) {
+    for (const route of requestedPhases.has('access') ? selectedRoutes : []) {
       for (const profile of profiles) {
         const scenario = await runScenario({
           browser,
@@ -536,7 +554,7 @@ async function main() {
     if (!requestedPhases.has('viewport')) {
       progress('viewport-skipped', { reason: 'phase-filter' })
     }
-    for (const route of requestedPhases.has('viewport') ? matrix.routes : []) {
+    for (const route of requestedPhases.has('viewport') ? selectedRoutes : []) {
       const profile = allowedProfileForRoute(route, profiles)
       for (const viewport of VIEWPORTS) {
         const scenario = await runScenario({
@@ -562,7 +580,7 @@ async function main() {
     if (!requestedPhases.has('state')) {
       progress('states-skipped', { reason: 'phase-filter' })
     }
-    for (const route of requestedPhases.has('state') ? matrix.routes : []) {
+    for (const route of requestedPhases.has('state') ? selectedRoutes : []) {
       const profile = allowedProfileForRoute(route, profiles)
       for (const item of stateApplicability(route.name)) {
         if (!item.applicable) {
@@ -606,7 +624,7 @@ async function main() {
     if (!requestedPhases.has('interaction')) {
       progress('interactions-skipped', { reason: 'phase-filter' })
     }
-    for (const route of requestedPhases.has('interaction') ? matrix.routes : []) {
+    for (const route of requestedPhases.has('interaction') ? selectedRoutes : []) {
       const profile = allowedProfileForRoute(route, profiles)
       for (const item of interactionApplicability(route.name)) {
         if (!item.applicable) {
@@ -649,7 +667,7 @@ async function main() {
     if (!requestedPhases.has('environment')) {
       progress('environments-skipped', { reason: 'phase-filter' })
     }
-    for (const route of requestedPhases.has('environment') ? matrix.routes : []) {
+    for (const route of requestedPhases.has('environment') ? selectedRoutes : []) {
       const profile = allowedProfileForRoute(route, profiles)
       for (const environment of ENVIRONMENTS) {
         const applicability = environmentApplicability(route.name, environment)
@@ -713,7 +731,9 @@ async function main() {
   const uniqueIdCount = new Set(ids).size
   const duplicateIdCount = ids.length - uniqueIdCount
   const sourceDriftCount = scenarios.filter((item) => item.sourceDrift).length
-  const officialRun = OFFICIAL_PHASES.every((phase) => requestedPhases.has(phase))
+  const officialRun =
+    OFFICIAL_PHASES.every((phase) => requestedPhases.has(phase)) &&
+    selectedRoutes.length === matrix.routes.length
   const derivedOfficial = officialCounts()
   const diagnosticTotals = scenarios.reduce(
     (acc, item) => {

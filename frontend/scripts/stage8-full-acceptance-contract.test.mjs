@@ -304,6 +304,7 @@ describe('Stage 8 clean-source binding', () => {
     expect(browserSource).not.toMatch(/ALLOWED_DIRTY/)
     expect(browserSource).toMatch(/assertCleanOfficialBinding/)
     expect(browserSource).toMatch(/evaluateOfficialPass/)
+    expect(browserSource).toMatch(/selectedRoutes\.length === matrix\.routes\.length/)
     expect(browserSource).toMatch(/sourceDrift/)
   })
 })
