@@ -112,7 +112,10 @@ async function runScenario({
   const descriptor = getRouteDescriptor(route.name)
   controller.profile = profile
   controller.mode = state === 'loading' ? 'loading' : state
-  controller.delayMs = state === 'loading' || state === 'slow' ? 8000 : 0
+  controller.delayMs = 0
+  controller.holdEndpoint =
+    state === 'loading' || state === 'slow' ? descriptor.states[state].endpoint || '' : ''
+  controller.releaseHeldRequest = state !== 'loading' && state !== 'slow'
   controller.staleEndpoint = state === 'stale' ? descriptor.states.stale.endpoint || '' : ''
   const snapshotBefore = {
     unknown: serverState.unknownApiRequests,
@@ -145,9 +148,21 @@ async function runScenario({
         descriptor.states[state].endpoint || '',
         12000,
       )
+      const loadingDeadline = Date.now() + 1000
       midProbe = await collectUiProbe(page)
+      while (!midProbe.loadingVisible && Date.now() < loadingDeadline) {
+        const stillPending = await waitForPendingRequest(
+          page,
+          descriptor.states[state].endpoint || '',
+          80,
+        )
+        if (!stillPending.pendingRequest) break
+        await page.waitForTimeout(40)
+        midProbe = await collectUiProbe(page)
+      }
       midProbe.identityRequestCount = serverState.identityRequestCount
       midProbe.pendingRequest = pending.pendingRequest
+      controller.releaseHeldRequest = true
       await waitForNetworkSettle(page)
       await waitForApp(page)
     } else if (state === 'stale' && expected.kind === 'render-route') {
@@ -376,6 +391,8 @@ async function runScenario({
   } catch (error) {
     failures.push(error instanceof Error ? error.message : String(error))
   } finally {
+    controller.releaseHeldRequest = true
+    controller.holdEndpoint = ''
     await context.close()
   }
   const scenario = {
@@ -445,6 +462,8 @@ async function main() {
     mode: 'normal',
     delayMs: 0,
     staleEndpoint: '',
+    holdEndpoint: '',
+    releaseHeldRequest: true,
     routesByName: new Map(matrix.routes.map((item) => [item.name, item])),
   }
   const { server, state: serverState } = createFixtureServer(DIST, controller)

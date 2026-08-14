@@ -10,6 +10,7 @@ import {
   isErrorInjectablePath,
   isIdentityBootstrapPath,
   loadMatrix,
+  shouldHoldLoadingPath,
 } from './lib/stage8-full-acceptance-runtime.mjs'
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
@@ -119,6 +120,32 @@ describe('stage8 full-acceptance fixture contract', () => {
     expect(ENVIRONMENTS).not.toContain('pwa')
     expect(runtimeSource).toMatch(/telegram script is environment-injected/)
     expect(runtimeSource).not.toMatch(/window\.Telegram=window\.Telegram\|\|/)
+  })
+
+  it('holds only the descriptor loading endpoint so companion requests can finish', () => {
+    const controller = {
+      mode: 'loading',
+      holdEndpoint: '/api/sessions/active',
+      releaseHeldRequest: false,
+    }
+    expect(shouldHoldLoadingPath('/api/sessions/active', controller)).toBe(true)
+    expect(shouldHoldLoadingPath('/api/notifications/', {
+      mode: 'loading',
+      holdEndpoint: '/api/notifications',
+    })).toBe(true)
+    expect(shouldHoldLoadingPath('/api/chat/poll', controller)).toBe(false)
+    expect(shouldHoldLoadingPath('/api/notifications/', controller)).toBe(false)
+    expect(shouldHoldLoadingPath('/api/sessions/active', { mode: 'loading', holdEndpoint: '' })).toBe(
+      false,
+    )
+    expect(shouldHoldLoadingPath('/api/sessions/active', { mode: 'normal', holdEndpoint: '/api/sessions/active' })).toBe(
+      false,
+    )
+    expect(runtimeSource).toMatch(/shouldHoldLoadingPath\(pathname, controller\)/)
+    expect(runtimeSource).not.toMatch(
+      /\(controller\.mode === 'loading' \|\| controller\.mode === 'slow'\) && delayable\) \{/,
+    )
+    expect(browserSource).toMatch(/controller\.holdEndpoint/)
   })
 
   it('does not restore the generic all-states applicability fallback', () => {

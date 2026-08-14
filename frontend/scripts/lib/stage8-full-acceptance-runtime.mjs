@@ -420,6 +420,12 @@ export function isErrorInjectablePath(pathname) {
   return true
 }
 
+export function shouldHoldLoadingPath(pathname, controller) {
+  if (!controller || (controller.mode !== 'loading' && controller.mode !== 'slow')) return false
+  if (!controller.holdEndpoint) return false
+  return matchesStaleEndpoint(pathname, controller.holdEndpoint)
+}
+
 export function apiFixture(pathname, method, profile, mode = 'normal') {
   if (MUTATING_METHODS.has(method) && !isAllowedMutation(pathname, method)) {
     return { known: false, status: 405, body: { detail: 'mutating method blocked' }, mutating: true }
@@ -726,7 +732,14 @@ export function createFixtureServer(dist, controller) {
           delayMs = generation === 1 ? 900 : 0
         }
         try {
-          if (delayMs > 0) await new Promise((resolve) => setTimeout(resolve, delayMs))
+          if (delayable && shouldHoldLoadingPath(pathname, controller)) {
+            const holdUntil = Date.now() + 20_000
+            while (!controller.releaseHeldRequest && Date.now() < holdUntil) {
+              await new Promise((resolve) => setTimeout(resolve, 40))
+            }
+          } else if (delayMs > 0) {
+            await new Promise((resolve) => setTimeout(resolve, delayMs))
+          }
           const fixture = apiFixture(pathname, method, controller.profile, mode)
           state.apiRequests += 1
           if (pathname === '/api/auth/me' || pathname === '/api/auth/me/') {
