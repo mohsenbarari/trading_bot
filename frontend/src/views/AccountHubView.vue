@@ -251,7 +251,10 @@ onMounted(refreshIdentity)
         </header>
 
         <AppSectionCard class="account-section-card" title="پروفایل" tone="primary">
-          <div class="account-action-grid">
+          <div
+            class="account-action-grid"
+            :class="{ 'account-action-grid--single': profileActions.length === 1 }"
+          >
             <AppActionCard
               v-for="action in profileActions"
               :key="action.key"
@@ -280,7 +283,10 @@ onMounted(refreshIdentity)
           title="امنیت و داده‌ها"
           :description="securitySectionDescription"
         >
-          <div class="account-action-grid">
+          <div
+            class="account-action-grid"
+            :class="{ 'account-action-grid--single': securityActions.length === 1 }"
+          >
             <AppActionCard
               v-for="action in securityActions"
               :key="action.key"
@@ -301,7 +307,10 @@ onMounted(refreshIdentity)
           title="اعلان‌ها"
           description="اعلان‌های بازار، معامله و سیستم را از مسیر اختصاصی خود ببینید."
         >
-          <div class="account-action-grid">
+          <div
+            class="account-action-grid"
+            :class="{ 'account-action-grid--single': notificationActions.length === 1 }"
+          >
             <AppActionCard
               v-for="action in notificationActions"
               :key="action.key"
@@ -410,6 +419,10 @@ onMounted(refreshIdentity)
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.75rem;
+}
+
+.account-action-grid--single {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .account-telegram-panel {

@@ -1,6 +1,10 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import AccountHubView from './AccountHubView.vue'
+
+const accountHubSource = readFileSync(resolve(process.cwd(), 'src/views/AccountHubView.vue'), 'utf8')
 
 const accountHubMocks = vi.hoisted(() => ({
   routerPushMock: vi.fn(),
@@ -49,6 +53,15 @@ async function mountView() {
 
 function findAction(wrapper: ReturnType<typeof mount>, label: string) {
   return wrapper.findAll('.hub-action').find((action) => action.text().includes(label))
+}
+
+function findSectionGrid(wrapper: ReturnType<typeof mount>, title: string) {
+  const section = wrapper
+    .findAll('.account-section-card')
+    .find((card) => card.get('h2').text() === title)
+
+  if (!section) throw new Error(`Expected ${title} account section`)
+  return section.get('.account-action-grid')
 }
 
 describe('AccountHubView.vue', () => {
@@ -105,6 +118,71 @@ describe('AccountHubView.vue', () => {
       new Set(accountHubMocks.routerPushMock.mock.calls.map(([location]) => location.name)).size,
     ).toBe(4)
     expect(accountHubMocks.routerBackMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('uses the singleton grid modifier only for one-action profile and notification sections', async () => {
+    accountHubMocks.currentUserSummary.value = {
+      id: 10,
+      role: 'عادی',
+      account_name: 'desktop-grid-user',
+      account_status: 'active',
+      is_accountant: false,
+      is_customer: false,
+      can_connect_telegram: true,
+    }
+
+    const wrapper = await mountView()
+    const profileGrid = findSectionGrid(wrapper, 'پروفایل')
+    const securityGrid = findSectionGrid(wrapper, 'امنیت و داده‌ها')
+    const notificationGrid = findSectionGrid(wrapper, 'اعلان‌ها')
+
+    expect(profileGrid.findAll('.hub-action')).toHaveLength(1)
+    expect(profileGrid.classes()).toContain('account-action-grid--single')
+    expect(wrapper.find('.account-telegram-panel').exists()).toBe(true)
+    expect(profileGrid.find('.account-telegram-panel').exists()).toBe(false)
+    expect(notificationGrid.findAll('.hub-action')).toHaveLength(1)
+    expect(notificationGrid.classes()).toContain('account-action-grid--single')
+    expect(securityGrid.findAll('.hub-action')).toHaveLength(2)
+    expect(securityGrid.classes()).not.toContain('account-action-grid--single')
+
+    expect(accountHubSource).toContain(
+      ":class=\"{ 'account-action-grid--single': profileActions.length === 1 }\"",
+    )
+    expect(accountHubSource).toContain(
+      ":class=\"{ 'account-action-grid--single': notificationActions.length === 1 }\"",
+    )
+    expect(accountHubSource).toContain(
+      '.account-action-grid--single {\n  grid-template-columns: minmax(0, 1fr);\n}',
+    )
+    expect(accountHubSource).toContain(
+      '@media (max-width: 700px) {\n  .account-action-grid {\n    grid-template-columns: 1fr;\n  }',
+    )
+  })
+
+  it('uses the singleton grid modifier for the accountant storage-only security section', async () => {
+    accountHubMocks.currentUserSummary.value = {
+      id: 11,
+      role: 'عادی',
+      account_name: 'accountant-grid-user',
+      account_status: 'active',
+      is_accountant: true,
+      is_customer: false,
+    }
+
+    const wrapper = await mountView()
+    const profileGrid = findSectionGrid(wrapper, 'پروفایل')
+    const securityGrid = findSectionGrid(wrapper, 'امنیت و داده‌ها')
+    const notificationGrid = findSectionGrid(wrapper, 'اعلان‌ها')
+
+    expect(profileGrid.findAll('.hub-action')).toHaveLength(1)
+    expect(profileGrid.classes()).toContain('account-action-grid--single')
+    expect(securityGrid.findAll('.hub-action')).toHaveLength(1)
+    expect(securityGrid.classes()).toContain('account-action-grid--single')
+    expect(notificationGrid.findAll('.hub-action')).toHaveLength(1)
+    expect(notificationGrid.classes()).toContain('account-action-grid--single')
+    expect(accountHubSource).toContain(
+      ":class=\"{ 'account-action-grid--single': securityActions.length === 1 }\"",
+    )
   })
 
   it('marks an authoritative cached account as stale while the initial refresh is pending', async () => {
