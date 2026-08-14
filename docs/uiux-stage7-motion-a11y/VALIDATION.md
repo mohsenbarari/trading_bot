@@ -85,3 +85,27 @@ run `uiux-stage7-shared-dependency-correction-20260813T072432779Z`
 - کنترل‌های اصلی ۴۸ یا ۷۲px؛ unsafe phone/email/URL/query/bearer scan صفر
 - render hashهای محلی: section `192cf744fe1d8b027c53f416f3b9d770209ec2859580cc909d078a33eeeb553b`؛ W1 `f22f6d94c90bcf8f53d90d6d3ddea3a37540fc4497e09df6f9ebe229322c24e2`؛ W2 `f45237d89abc5552042c8d391eb0d60c47a81a28aec6a43c460097fd0f74ac57`؛ panel `ca2f714346992395a5850759cab68095d1e394cc00da44e7baed2759b380b3bb`
 - renderها local/ephemeral و non-selected هستند؛ Figma live/editable است، freeze یا acceptance کامل نیست
+
+## Closure — frontend runtime `3e62accd`
+
+| field | value |
+| --- | --- |
+| status | `stage7_complete` |
+| authority | `stage7CompleteAuthority=true` |
+| frontend runtime | `3e62accdd157bed5dc6f2ed974e56e07c7349910` |
+| Stage 6 docs parent | `cd6d9f8549365d246d58bc225133b222aff24a32` |
+| focused motion/a11y | `11` file / `297` test pass |
+| full serial Vitest | `156` file / `1779` test pass on unchanged frontend |
+| `vue-tsc --noEmit` | pass |
+| production build | pass؛ `169` file؛ SHA-256 `ee970be6ff3570f4c325c3f420c816b5fa61beb67a9b4071d208b2b3657c50db` |
+| `guard:ui` | pass |
+| browser | `stage7-closure-20260814084158579`؛ `60/60`؛ report `5b842a08c93cbe31966b446510185276c46d38bf7be85db19322e3c254722cc9`؛ harness `3567e564fa23df27254ea87f69889686a5d422b13f84bd67b88d099606b1fb18` |
+| NONE coverage | همهٔ ۲۳ route با `protection=none` در ۳۹۰ و ۱۴۴۰ |
+| cross-boundary | NONE↔FULL، NONE↔MIXED، public بدون نشست |
+| CSS/adapter removals | صفر؛ هیچ safe dead candidate |
+| Figma new section | ساخته نشد؛ historical `487:18` و `496:18` کافی بودند |
+| Sites | explicit non-requirement |
+
+Stage 8 دست‌نخورده: `270` / full `0` / slices `12` / scenarios `163` / authority `false`. پذیرش نهایی Stage 8 باید پس از merge روی integration commit اجرا شود.
+
+Ledger SHA-256 `8c4bb1051dee19d233c723956011da2fe982bc15798d32f0b696c727191c2ffb`. Evidence SHA-256 `866cddc27e3ca472069a1ea3d61395b8dd3d9f816b806378446de4a5c344360e`.

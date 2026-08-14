@@ -1,0 +1,123 @@
+{
+  "schemaVersion": 1,
+  "stage": 7,
+  "kind": "stage7-closure-evidence-manifest",
+  "status": "stage7_complete",
+  "stage7CompleteAuthority": true,
+  "runtimeFreeze": {
+    "branch": "condidate/webapp-ui-ux-redesign-v2",
+    "docsHead": "cd6d9f8549365d246d58bc225133b222aff24a32",
+    "docsTree": "27fa427b4e1633759e8e05b218d363d472b25564",
+    "frontendRuntimeCommit": "3e62accdd157bed5dc6f2ed974e56e07c7349910",
+    "frontendRuntimeTree": "3f4a186e46b12aee326c699cd1975ba34e485be7"
+  },
+  "validation": {
+    "focusedMotionA11y": {
+      "files": 11,
+      "tests": 297,
+      "result": "passed",
+      "note": "9 files/245 plus Accountant 38 and designSystemV2 14"
+    },
+    "fullSerialVitestAtFrontendFreeze": {
+      "files": 156,
+      "tests": 1779,
+      "result": "passed",
+      "commit": "3e62accdd157bed5dc6f2ed974e56e07c7349910"
+    },
+    "vueTsc": "passed",
+    "productionBuild": {
+      "result": "passed",
+      "distFileCount": 169,
+      "distSha256": "ee970be6ff3570f4c325c3f420c816b5fa61beb67a9b4071d208b2b3657c50db"
+    },
+    "guardUi": "passed",
+    "gitDiffCheck": "passed",
+    "frontendSourceQuiet": true,
+    "backendTouched": false
+  },
+  "browser": {
+    "runId": "stage7-closure-20260814084158579",
+    "kind": "stage7-closure-bounded-local-synthetic-production-browser",
+    "result": "passed",
+    "reportSha256": "5b842a08c93cbe31966b446510185276c46d38bf7be85db19322e3c254722cc9",
+    "harnessSha256": "3567e564fa23df27254ea87f69889686a5d422b13f84bd67b88d099606b1fb18",
+    "summary": {
+      "executed": 60,
+      "passed": 60,
+      "failed": 0
+    },
+    "network": {
+      "apiRequests": 422,
+      "expectedApiRequests": 422,
+      "unknownApiRequests": 0,
+      "mutatingApiRequests": 0
+    },
+    "diagnostics": {
+      "unexpectedConsole": 0,
+      "pageErrors": 0,
+      "externalRequests": 0,
+      "mutatingRequests": 0,
+      "classifiedExpected": {
+        "http401": "public unauthenticated pages",
+        "http403": "denied admin detail if present",
+        "registerContextPost": "POST /api/auth/registration-context* allowed as public session bootstrap"
+      },
+      "classifiedProtected": {
+        "chatUnnamedControls": 4
+      }
+    },
+    "coverage": {
+      "noneRoutesAt390and1440": 23,
+      "extraFamilyWidths": [
+        360,
+        375,
+        414,
+        430
+      ],
+      "cdp2x": true,
+      "reducedMotion": true,
+      "keyboard": true,
+      "crossBoundary": [
+        "NONE→FULL",
+        "FULL→NONE",
+        "NONE→MIXED",
+        "MIXED→NONE",
+        "public stays public without auth"
+      ]
+    },
+    "artifactRetention": "Raw screenshots remain outside the repository."
+  },
+  "cssAdapterAudit": {
+    "workspaceShellProductionConsumers": [
+      "frontend/src/views/OperationsView.vue",
+      "frontend/src/views/CustomerWorkspaceView.vue",
+      "frontend/src/views/AccountantWorkspaceView.vue"
+    ],
+    "safeDeadCandidates": [],
+    "removals": []
+  },
+  "figma": {
+    "fileKey": "z8jgJxST4O2APzWnlyP9gv",
+    "pageId": "486:1455",
+    "pageName": "09 — Stage 7 Motion & A11y",
+    "historicalOverwrite": false,
+    "newFinalSectionCreated": false,
+    "reason": "No runtime gap was patched; existing live section 496:18 already shows keyboard, reduced-motion, long text, and empty status.",
+    "historicalSections": [
+      "487:18",
+      "496:18"
+    ],
+    "sites": "owner-authorized-explicit-non-requirement"
+  },
+  "stage8Unchanged": {
+    "receiptSha256": "72c6077ede453ba7e624e5e01a08b58fa5aad7d41ed8e0410d3d6a99aceab9fa",
+    "matrixSha256": "846cc2f52df73a9442a130a72dcf308999f53faf583e410351032b9d7bd0a50b",
+    "cellAccounting": {
+      "expected": 270,
+      "executedFull": 0,
+      "partialSlices": 12,
+      "partialScenarios": 163,
+      "authority": false
+    }
+  }
+}

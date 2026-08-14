@@ -2,7 +2,13 @@
 
 تاریخ آغاز: ۲۰۲۶-۰۸-۱۳
 
-وضعیت: **`stage7_phase1_delivered_shared_dependency_isolated_broader_dead_css_deferred`**
+وضعیت: **`stage7_complete`**
+
+`stage7CompleteAuthority=true`
+
+frontend runtime freeze: `3e62accdd157bed5dc6f2ed974e56e07c7349910`
+
+مرحلهٔ بعدی مجاز: Stage 8، فقط پس از merge روی integration commit. هیچ slice تازهٔ Stage 8 اجرا نشده است.
 
 شاخه: `condidate/webapp-ui-ux-redesign-v2`
 
@@ -10,7 +16,7 @@
 
 دستور مالک برای ادامهٔ بدون توقف تا پایان Stage 8، شروع Stage 7 را مجاز کرد. این مجوز اجازهٔ merge، staging، production، Sites، یا overwrite evidence Stage 4/5/6 را نمی‌دهد.
 
-`stage7CompleteAuthority=false`. Phase 1 گیت فنی copy/keyboard/live-region/zoom/reduced-motion را برای سطح‌های غیرمحافظت‌شده می‌بندد؛ حذف CSS مرده و یکدست‌سازی microcopy باقی‌مانده deferred است.
+`stage7CompleteAuthority=true`. Phase 1 و اصلاح shared dependency تاریخی می‌مانند. حذف گستردهٔ CSS مرده و یکدست‌سازی microcopy با evidence به `PASS_NO_PATCH` reconcile شدند، چون حذف امن یا ناسازگاری فهم/دسترس‌پذیری پیدا نشد.
 
 ## ۲. Phase 1 — copy، keyboard، live region، zoom، reduced-motion
 

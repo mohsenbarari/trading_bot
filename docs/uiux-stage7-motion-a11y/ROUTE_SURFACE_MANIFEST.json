@@ -2,7 +2,7 @@
   "schemaVersion": 2,
   "stage": 7,
   "scope": "motion-a11y-phase1-plus-shared-dependency-isolation-correction",
-  "status": "phase1_delivered_shared_dependency_corrected_broader_cleanup_deferred",
+  "status": "stage7_complete",
   "mutableNarrative": true,
   "branch": "condidate/webapp-ui-ux-redesign-v2",
   "implementation": {
@@ -57,5 +57,11 @@
     "fullStage7EvidenceFreeze": false,
     "sitesStarted": false,
     "stagingOrProductionChanged": false
+  },
+  "stage7CompleteAuthority": true,
+  "closurePointer": {
+    "ledger": "docs/uiux-stage7-motion-a11y/STAGE7_CLOSURE_LEDGER.json",
+    "evidence": "docs/uiux-stage7-motion-a11y/STAGE7_CLOSURE_EVIDENCE_MANIFEST.json",
+    "runtimeCommit": "3e62accdd157bed5dc6f2ed974e56e07c7349910"
   }
 }

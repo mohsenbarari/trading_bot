@@ -1,18 +1,18 @@
 # Stage 7 — Motion & A11y
 
-بستهٔ توضیحی mutable برای Phase 1 و اصلاح ایزولیشن shared dependency است. freeze یا
-`EVIDENCE_MANIFEST.json` کل Stage 7 نیست.
+بستهٔ Stage 7 پس از بستن Stage 6. Phase 1 و اصلاح shared dependency تاریخی می‌مانند.
 
 ## وضعیت
 
 - branch: `condidate/webapp-ui-ux-redesign-v2`
-- historical Phase 1 implementation: `ab0834aac3383e3c790c5865170ab9f007db235c`
-- latest shared-dependency correction: `82cb016e57e676c211d746ae852a6600d8d3b6fa`
-- latest correction tree: `db65232c7835440868773c8fdbbf032b7bdfd890`
-- delivered: Phase 1 + correction (copy محدود، keyboard Tabs/چیپ غیر بازار، تقویم opt-in، semantic empty-state opt-in، zoom ۲۰۰٪ و reduced-motion per-route)
-- authority: `stage7CompleteAuthority=false`
+- frontend runtime freeze: `3e62accdd157bed5dc6f2ed974e56e07c7349910`
+- status: `stage7_complete`
+- authority: `stage7CompleteAuthority=true`
+- in-scope deferred: صفر
+- next authorized stage: Stage 8، فقط پس از merge روی integration commit
+- Sites: explicit non-requirement؛ اجرا نشده
 
-هیچ Sites، staging، production یا merge در این کار آغاز نشده است.
+مرجع ماشین‌خوان: [STAGE7_CLOSURE_LEDGER.json](STAGE7_CLOSURE_LEDGER.json) و [STAGE7_CLOSURE_EVIDENCE_MANIFEST.json](STAGE7_CLOSURE_EVIDENCE_MANIFEST.json).
 
 ## مرز تحویل‌شده
 
@@ -30,9 +30,10 @@
 - Figma live/editable: page `486:1455`، section جدید `496:18` با دو viewport واقعی `497:18` و `499:49`؛ artifact تاریخی `487:18` حفظ شده است
 - این Figma design-system-bound است، اما به‌تنهایی acceptance یا freeze نیست
 
-## Deferred
+## Deferred reconcile
 
-- حذف گستردهٔ CSS محلی منقضی؛
-- تغییر ظاهر JalaliDatePicker / HelpPopover / CustomerNameWithBadge؛
-- keyboard FilterChips داخل `/market`؛
-- closure/freeze/Sites کل Stage 7.
+- CSS مرده: هیچ `safe dead candidate` نبود؛ `WorkspaceShell` هنوز سه مصرف‌کنندهٔ زنده دارد (`PASS_NO_PATCH`).
+- ظاهر Jalali/HelpPopover/CustomerNameWithBadge فقط سلیقه‌ای بود و patch نشد.
+- keyboard FilterChips بازار محافظت‌شده و خارج از محدوده است.
+- Figma تاریخی `487:18` و `496:18` کافی بود؛ section تازه ساخته نشد چون runtime gap نبود.
+- Sites الزام checkpoint نیست و ساخته نشده است.

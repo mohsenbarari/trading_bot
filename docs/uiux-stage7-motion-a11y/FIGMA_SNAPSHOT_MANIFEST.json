@@ -81,5 +81,16 @@
     "liveEditable": true,
     "fullStage7Freeze": false
   },
-  "untouchedPriorPages": ["321:18", "297:18", "283:18"]
+  "untouchedPriorPages": [
+    "321:18",
+    "297:18",
+    "283:18"
+  ],
+  "status": "stage7_complete",
+  "stage7CompleteAuthority": true,
+  "closurePointer": {
+    "ledger": "docs/uiux-stage7-motion-a11y/STAGE7_CLOSURE_LEDGER.json",
+    "evidence": "docs/uiux-stage7-motion-a11y/STAGE7_CLOSURE_EVIDENCE_MANIFEST.json",
+    "runtimeCommit": "3e62accdd157bed5dc6f2ed974e56e07c7349910"
+  }
 }

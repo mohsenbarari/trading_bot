@@ -451,7 +451,7 @@ release disposition نیز صریح است: opaque-cookie response دیگر raw 
 
 ### مرحله ۷ — پویایی، دسترس‌پذیری و polish سراسری
 
-وضعیت اجرایی: **`authorized_next`** پس از بستن Stage 6؛ هنوز `stage7CompleteAuthority=false` تا closure مستقل Stage 7.
+وضعیت اجرایی: **`stage7_complete`**؛ `stage7CompleteAuthority=true`؛ frontend runtime freeze `3e62accdd157bed5dc6f2ed974e56e07c7349910`. مرجع: [checkpoint Stage 7](WEBAPP_UI_UX_REDESIGN_V2_STAGE7_MOTION_A11Y_CHECKPOINT_20260813.md) و [ledger بستن](uiux-stage7-motion-a11y/STAGE7_CLOSURE_LEDGER.json). Stage 8 مرحلهٔ بعدی است ولی باید پس از merge روی integration commit اجرا شود.
 
 مدت پیشنهادی: ۴ تا ۶ روز
 

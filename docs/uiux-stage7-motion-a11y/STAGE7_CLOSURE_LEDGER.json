@@ -1,0 +1,815 @@
+{
+  "schemaVersion": 1,
+  "stage": 7,
+  "status": "stage7_complete",
+  "stage7CompleteAuthority": true,
+  "branch": "condidate/webapp-ui-ux-redesign-v2",
+  "runtimeFreeze": {
+    "branch": "condidate/webapp-ui-ux-redesign-v2",
+    "docsHead": "cd6d9f8549365d246d58bc225133b222aff24a32",
+    "docsTree": "27fa427b4e1633759e8e05b218d363d472b25564",
+    "frontendRuntimeCommit": "3e62accdd157bed5dc6f2ed974e56e07c7349910",
+    "frontendRuntimeTree": "3f4a186e46b12aee326c699cd1975ba34e485be7"
+  },
+  "openActionableGaps": [],
+  "gapClosedThisClosure": [],
+  "deferredLedgerReconcile": {
+    "superseded": [
+      "broad dead CSS deletion — no safe dead candidate after consumer scan; WorkspaceShell still has 3 production consumers",
+      "Jalali/HelpPopover/CustomerNameWithBadge appearance — stylistic only; no a11y/understanding gap",
+      "FilterChips keyboard inside /market — protected out of scope",
+      "closure/freeze/Sites — this closure records Figma read-only + explicit Sites non-requirement"
+    ],
+    "remainingInScopeCount": 0
+  },
+  "sites": {
+    "requiredByCheckpoint": false,
+    "executed": false,
+    "disposition": "owner-authorized-explicit-non-requirement"
+  },
+  "nextAuthorizedStage": 8,
+  "stage8Boundary": {
+    "newSliceExecuted": false,
+    "expected": 270,
+    "executedFull": 0,
+    "partialSlices": 12,
+    "partialScenarios": 163,
+    "authority": false,
+    "finalAcceptanceDeferredUntil": "integration commit after merge to main"
+  },
+  "noneRoutesFromContract": [
+    "/setup-password",
+    "/login",
+    "/operations",
+    "/operations/customers",
+    "/operations/customers/:relationId",
+    "/operations/accountants",
+    "/operations/accountants/:relationId",
+    "/account",
+    "/account/security",
+    "/account/storage",
+    "/account/notifications",
+    "/users/:id",
+    "/profile",
+    "/settings",
+    "/admin",
+    "/admin/invitations",
+    "/admin/users",
+    "/admin/users/:id",
+    "/admin/commodities",
+    "/i/:code",
+    "/register",
+    "/notifications",
+    "/:pathMatch(.*)*"
+  ],
+  "requirements": [
+    {
+      "id": "S7-R01",
+      "title": "Motion micro component and page",
+      "roadmapSource": "roadmap stage 7",
+      "affectedRoutes": [
+        "/setup-password",
+        "/login",
+        "/operations",
+        "/operations/customers",
+        "/operations/customers/:relationId",
+        "/operations/accountants",
+        "/operations/accountants/:relationId",
+        "/account",
+        "/account/security",
+        "/account/storage",
+        "/account/notifications",
+        "/users/:id",
+        "/profile",
+        "/settings",
+        "/admin",
+        "/admin/invitations",
+        "/admin/users",
+        "/admin/users/:id",
+        "/admin/commodities",
+        "/i/:code",
+        "/register",
+        "/notifications",
+        "/:pathMatch(.*)*"
+      ],
+      "implementationFiles": [
+        "frontend/src/App.vue",
+        "frontend/src/assets/main.css"
+      ],
+      "testsEvidence": [
+        "App.test.ts",
+        "browser reduced and cross-boundary"
+      ],
+      "protectionClassification": "NONE section only",
+      "verdict": "DONE_EVIDENCE_BOUND",
+      "remainingAction": "none",
+      "finalResolution": "Reduced-motion marker is vnode-bound to NONE+SECTION. FULL/MIXED keep 200ms fade including cross-boundary.",
+      "sourceCommit": "3e62accdd157bed5dc6f2ed974e56e07c7349910",
+      "sourceTree": "3f4a186e46b12aee326c699cd1975ba34e485be7",
+      "evidenceReferences": [
+        "App.test.ts 19",
+        "admin-390-reduced",
+        "cross-none-to-full"
+      ]
+    },
+    {
+      "id": "S7-R02",
+      "title": "Reduced motion",
+      "roadmapSource": "roadmap stage 7 / phase 1",
+      "affectedRoutes": [
+        "/admin",
+        "/profile"
+      ],
+      "implementationFiles": [
+        "frontend/src/App.vue"
+      ],
+      "testsEvidence": [
+        "App.test.ts",
+        "browser reduced"
+      ],
+      "protectionClassification": "NONE section",
+      "verdict": "DONE_EVIDENCE_BOUND",
+      "remainingAction": "none",
+      "finalResolution": "Marker present on NONE section under reduce; absent after navigation to FULL.",
+      "sourceCommit": "3e62accdd157bed5dc6f2ed974e56e07c7349910",
+      "sourceTree": "3f4a186e46b12aee326c699cd1975ba34e485be7",
+      "evidenceReferences": [
+        "profile-390-reduced",
+        "cross-none-to-full expectReduced false"
+      ]
+    },
+    {
+      "id": "S7-R03",
+      "title": "Keyboard",
+      "roadmapSource": "roadmap stage 7",
+      "affectedRoutes": [
+        "/setup-password",
+        "/login",
+        "/operations",
+        "/operations/customers",
+        "/operations/customers/:relationId",
+        "/operations/accountants",
+        "/operations/accountants/:relationId",
+        "/account",
+        "/account/security",
+        "/account/storage",
+        "/account/notifications",
+        "/users/:id",
+        "/profile",
+        "/settings",
+        "/admin",
+        "/admin/invitations",
+        "/admin/users",
+        "/admin/users/:id",
+        "/admin/commodities",
+        "/i/:code",
+        "/register",
+        "/notifications",
+        "/:pathMatch(.*)*"
+      ],
+      "implementationFiles": [
+        "frontend/src/components/ui/AppTabs.vue",
+        "frontend/src/components/ui/AppFilterChips.vue"
+      ],
+      "testsEvidence": [
+        "AppPrimitives.test.ts",
+        "JalaliDatePicker.test.ts",
+        "browser login-360 keyboard"
+      ],
+      "protectionClassification": "NONE; market chips protected",
+      "verdict": "DONE_EVIDENCE_BOUND",
+      "remainingAction": "none",
+      "finalResolution": "Tabs move focus. FilterChips require opt-in. Market chips not opted in.",
+      "sourceCommit": "3e62accdd157bed5dc6f2ed974e56e07c7349910",
+      "sourceTree": "3f4a186e46b12aee326c699cd1975ba34e485be7",
+      "evidenceReferences": [
+        "AppPrimitives.test.ts 12",
+        "login-360"
+      ]
+    },
+    {
+      "id": "S7-R04",
+      "title": "Focus management",
+      "roadmapSource": "roadmap stage 7",
+      "affectedRoutes": [
+        "/setup-password",
+        "/login",
+        "/operations",
+        "/operations/customers",
+        "/operations/customers/:relationId",
+        "/operations/accountants",
+        "/operations/accountants/:relationId",
+        "/account",
+        "/account/security",
+        "/account/storage",
+        "/account/notifications",
+        "/users/:id",
+        "/profile",
+        "/settings",
+        "/admin",
+        "/admin/invitations",
+        "/admin/users",
+        "/admin/users/:id",
+        "/admin/commodities",
+        "/i/:code",
+        "/register",
+        "/notifications",
+        "/:pathMatch(.*)*"
+      ],
+      "implementationFiles": [
+        "frontend/src/components/ui/AppConfirmDialog.vue",
+        "frontend/src/App.vue"
+      ],
+      "testsEvidence": [
+        "AppPrimitives.test.ts",
+        "browser unnamed=0 on NONE"
+      ],
+      "protectionClassification": "NONE",
+      "verdict": "DONE_EVIDENCE_BOUND",
+      "remainingAction": "none",
+      "finalResolution": "NONE scenarios had zero unnamed/nested controls. Dialog focus remains on shared confirm.",
+      "sourceCommit": "3e62accdd157bed5dc6f2ed974e56e07c7349910",
+      "sourceTree": "3f4a186e46b12aee326c699cd1975ba34e485be7",
+      "evidenceReferences": [
+        "browser 60/60 overflow empty unnamed empty on NONE"
+      ]
+    },
+    {
+      "id": "S7-R05",
+      "title": "Live regions",
+      "roadmapSource": "roadmap stage 7",
+      "affectedRoutes": [
+        "/setup-password",
+        "/login",
+        "/operations",
+        "/operations/customers",
+        "/operations/customers/:relationId",
+        "/operations/accountants",
+        "/operations/accountants/:relationId",
+        "/account",
+        "/account/security",
+        "/account/storage",
+        "/account/notifications",
+        "/users/:id",
+        "/profile",
+        "/settings",
+        "/admin",
+        "/admin/invitations",
+        "/admin/users",
+        "/admin/users/:id",
+        "/admin/commodities",
+        "/i/:code",
+        "/register",
+        "/notifications",
+        "/:pathMatch(.*)*"
+      ],
+      "implementationFiles": [
+        "frontend/src/App.vue",
+        "frontend/src/components/ui/AppEmptyState.vue"
+      ],
+      "testsEvidence": [
+        "App.test.ts",
+        "AppPrimitives.test.ts"
+      ],
+      "protectionClassification": "NONE opt-in",
+      "verdict": "DONE_EVIDENCE_BOUND",
+      "remainingAction": "none",
+      "finalResolution": "Connection banner is status+polite. Empty state has no default role; approved sites opt in to status. Errors stay alert.",
+      "sourceCommit": "3e62accdd157bed5dc6f2ed974e56e07c7349910",
+      "sourceTree": "3f4a186e46b12aee326c699cd1975ba34e485be7",
+      "evidenceReferences": [
+        "RUNTIME_CONTRACT.md",
+        "AppPrimitives.test.ts"
+      ]
+    },
+    {
+      "id": "S7-R06",
+      "title": "Tabs",
+      "roadmapSource": "roadmap stage 7",
+      "affectedRoutes": [
+        "/setup-password",
+        "/login",
+        "/operations",
+        "/operations/customers",
+        "/operations/customers/:relationId",
+        "/operations/accountants",
+        "/operations/accountants/:relationId",
+        "/account",
+        "/account/security",
+        "/account/storage",
+        "/account/notifications",
+        "/users/:id",
+        "/profile",
+        "/settings",
+        "/admin",
+        "/admin/invitations",
+        "/admin/users",
+        "/admin/users/:id",
+        "/admin/commodities",
+        "/i/:code",
+        "/register",
+        "/notifications",
+        "/:pathMatch(.*)*"
+      ],
+      "implementationFiles": [
+        "frontend/src/components/ui/AppTabs.vue"
+      ],
+      "testsEvidence": [
+        "AppPrimitives.test.ts"
+      ],
+      "protectionClassification": "NONE shared primitive",
+      "verdict": "DONE_EVIDENCE_BOUND",
+      "remainingAction": "none",
+      "finalResolution": "Arrow/Home/End move focus. Default shared behavior unchanged except already-shipped keyboard move.",
+      "sourceCommit": "3e62accdd157bed5dc6f2ed974e56e07c7349910",
+      "sourceTree": "3f4a186e46b12aee326c699cd1975ba34e485be7",
+      "evidenceReferences": [
+        "AppPrimitives.test.ts"
+      ]
+    },
+    {
+      "id": "S7-R07",
+      "title": "FilterChips",
+      "roadmapSource": "roadmap stage 7",
+      "affectedRoutes": [
+        "/users/:id",
+        "/operations/customers",
+        "/market"
+      ],
+      "implementationFiles": [
+        "frontend/src/components/ui/AppFilterChips.vue"
+      ],
+      "testsEvidence": [
+        "PublicProfile.test.ts",
+        "CustomerWorkspaceView.test.ts"
+      ],
+      "protectionClassification": "NONE opt-in; /market FULL",
+      "verdict": "DONE_EVIDENCE_BOUND",
+      "remainingAction": "none",
+      "finalResolution": "Public profile and workspace chips opt in. Market chips remain protected and were not changed.",
+      "sourceCommit": "3e62accdd157bed5dc6f2ed974e56e07c7349910",
+      "sourceTree": "3f4a186e46b12aee326c699cd1975ba34e485be7",
+      "evidenceReferences": [
+        "PublicProfile.test.ts",
+        "S7-P02"
+      ]
+    },
+    {
+      "id": "S7-R08",
+      "title": "JalaliDatePicker",
+      "roadmapSource": "roadmap stage 7",
+      "affectedRoutes": [
+        "/admin/users/:id",
+        "/users/:id",
+        "/admin/system"
+      ],
+      "implementationFiles": [
+        "frontend/src/components/JalaliDatePicker.vue"
+      ],
+      "testsEvidence": [
+        "JalaliDatePicker.test.ts"
+      ],
+      "protectionClassification": "default-off; TradingSettings protected",
+      "verdict": "DONE_EVIDENCE_BOUND",
+      "remainingAction": "none",
+      "finalResolution": "Arrows default off. UserProfile/PublicProfile opt in and move focus only. TradingSettings stays inert.",
+      "sourceCommit": "3e62accdd157bed5dc6f2ed974e56e07c7349910",
+      "sourceTree": "3f4a186e46b12aee326c699cd1975ba34e485be7",
+      "evidenceReferences": [
+        "JalaliDatePicker.test.ts 8"
+      ]
+    },
+    {
+      "id": "S7-R09",
+      "title": "Copy and selectable information",
+      "roadmapSource": "roadmap stage 7",
+      "affectedRoutes": [
+        "/setup-password",
+        "/login",
+        "/operations",
+        "/operations/customers",
+        "/operations/customers/:relationId",
+        "/operations/accountants",
+        "/operations/accountants/:relationId",
+        "/account",
+        "/account/security",
+        "/account/storage",
+        "/account/notifications",
+        "/users/:id",
+        "/profile",
+        "/settings",
+        "/admin",
+        "/admin/invitations",
+        "/admin/users",
+        "/admin/users/:id",
+        "/admin/commodities",
+        "/i/:code",
+        "/register",
+        "/notifications",
+        "/:pathMatch(.*)*"
+      ],
+      "implementationFiles": [
+        "frontend/src/App.vue"
+      ],
+      "testsEvidence": [
+        "App.test.ts",
+        "browser copyable assertions"
+      ],
+      "protectionClassification": "NONE non-legacy; mixed messages/system excluded",
+      "verdict": "DONE_EVIDENCE_BOUND",
+      "remainingAction": "none",
+      "finalResolution": "app-copyable-info is on non-legacy shells. Market/chat do not receive it. Cross NONE→FULL did not leak copyable.",
+      "sourceCommit": "3e62accdd157bed5dc6f2ed974e56e07c7349910",
+      "sourceTree": "3f4a186e46b12aee326c699cd1975ba34e485be7",
+      "evidenceReferences": [
+        "admin-390-reduced expectCopyable",
+        "cross-none-to-full expectCopyable false"
+      ]
+    },
+    {
+      "id": "S7-R10",
+      "title": "WCAG contrast",
+      "roadmapSource": "roadmap stage 7",
+      "affectedRoutes": [
+        "/setup-password",
+        "/login",
+        "/operations",
+        "/operations/customers",
+        "/operations/customers/:relationId",
+        "/operations/accountants",
+        "/operations/accountants/:relationId",
+        "/account",
+        "/account/security",
+        "/account/storage",
+        "/account/notifications",
+        "/users/:id",
+        "/profile",
+        "/settings",
+        "/admin",
+        "/admin/invitations",
+        "/admin/users",
+        "/admin/users/:id",
+        "/admin/commodities",
+        "/i/:code",
+        "/register",
+        "/notifications",
+        "/:pathMatch(.*)*"
+      ],
+      "implementationFiles": [
+        "frontend/src/styles/design-system-v2.components.css"
+      ],
+      "testsEvidence": [
+        "designSystemV2.test.ts",
+        "Figma historical contrast-bound tokens"
+      ],
+      "protectionClassification": "NONE",
+      "verdict": "DONE_EVIDENCE_BOUND",
+      "remainingAction": "none",
+      "finalResolution": "V2 tokens remain the contrast source. No new contrast-breaking patch was required.",
+      "sourceCommit": "3e62accdd157bed5dc6f2ed974e56e07c7349910",
+      "sourceTree": "3f4a186e46b12aee326c699cd1975ba34e485be7",
+      "evidenceReferences": [
+        "designSystemV2.test.ts 14"
+      ]
+    },
+    {
+      "id": "S7-R11",
+      "title": "Zoom 200 percent",
+      "roadmapSource": "roadmap stage 7",
+      "affectedRoutes": [
+        "/setup-password",
+        "/login",
+        "/operations",
+        "/operations/customers",
+        "/operations/customers/:relationId",
+        "/operations/accountants",
+        "/operations/accountants/:relationId",
+        "/account",
+        "/account/security",
+        "/account/storage",
+        "/account/notifications",
+        "/users/:id",
+        "/profile",
+        "/settings",
+        "/admin",
+        "/admin/invitations",
+        "/admin/users",
+        "/admin/users/:id",
+        "/admin/commodities",
+        "/i/:code",
+        "/register",
+        "/notifications",
+        "/:pathMatch(.*)*"
+      ],
+      "implementationFiles": [
+        "frontend/src/App.vue"
+      ],
+      "testsEvidence": [
+        "historical phase 1 browser",
+        "profile-390-cdp2x"
+      ],
+      "protectionClassification": "NONE",
+      "verdict": "DONE_EVIDENCE_BOUND",
+      "remainingAction": "none",
+      "finalResolution": "CDP 2x profile and historical zoom proof; no horizontal overflow in closure matrix.",
+      "sourceCommit": "3e62accdd157bed5dc6f2ed974e56e07c7349910",
+      "sourceTree": "3f4a186e46b12aee326c699cd1975ba34e485be7",
+      "evidenceReferences": [
+        "profile-390-cdp2x",
+        "browser overflow empty"
+      ]
+    },
+    {
+      "id": "S7-R12",
+      "title": "Long text and dense content",
+      "roadmapSource": "roadmap stage 7",
+      "affectedRoutes": [
+        "/setup-password",
+        "/login",
+        "/operations",
+        "/operations/customers",
+        "/operations/customers/:relationId",
+        "/operations/accountants",
+        "/operations/accountants/:relationId",
+        "/account",
+        "/account/security",
+        "/account/storage",
+        "/account/notifications",
+        "/users/:id",
+        "/profile",
+        "/settings",
+        "/admin",
+        "/admin/invitations",
+        "/admin/users",
+        "/admin/users/:id",
+        "/admin/commodities",
+        "/i/:code",
+        "/register",
+        "/notifications",
+        "/:pathMatch(.*)*"
+      ],
+      "implementationFiles": [
+        "frontend/src/styles/design-system-v2.components.css"
+      ],
+      "testsEvidence": [
+        "browser overflow empty",
+        "historical wrap"
+      ],
+      "protectionClassification": "NONE",
+      "verdict": "DONE_EVIDENCE_BOUND",
+      "remainingAction": "none",
+      "finalResolution": "overflow-wrap anywhere remains. Closure matrix overflow=0.",
+      "sourceCommit": "3e62accdd157bed5dc6f2ed974e56e07c7349910",
+      "sourceTree": "3f4a186e46b12aee326c699cd1975ba34e485be7",
+      "evidenceReferences": [
+        "browser 60/60"
+      ]
+    },
+    {
+      "id": "S7-R13",
+      "title": "Dead CSS cleanup",
+      "roadmapSource": "roadmap stage 7 deferred",
+      "affectedRoutes": [
+        "/setup-password",
+        "/login",
+        "/operations",
+        "/operations/customers",
+        "/operations/customers/:relationId",
+        "/operations/accountants",
+        "/operations/accountants/:relationId",
+        "/account",
+        "/account/security",
+        "/account/storage",
+        "/account/notifications",
+        "/users/:id",
+        "/profile",
+        "/settings",
+        "/admin",
+        "/admin/invitations",
+        "/admin/users",
+        "/admin/users/:id",
+        "/admin/commodities",
+        "/i/:code",
+        "/register",
+        "/notifications",
+        "/:pathMatch(.*)*"
+      ],
+      "implementationFiles": [
+        "frontend/src/assets/main.css",
+        "frontend/src/components/workspace/WorkspaceShell.vue"
+      ],
+      "testsEvidence": [
+        "static consumer scan"
+      ],
+      "protectionClassification": "active adapter",
+      "verdict": "PASS_NO_PATCH",
+      "remainingAction": "none",
+      "finalResolution": "WorkspaceShell and ds-workspace-* still have production consumers in Operations, Customer, and Accountant views plus tests. No selector met safe-dead-candidate (static+dynamic+template+build+mutation+protected+rollback). Cosmetic deletion forbidden.",
+      "sourceCommit": "3e62accdd157bed5dc6f2ed974e56e07c7349910",
+      "sourceTree": "3f4a186e46b12aee326c699cd1975ba34e485be7",
+      "evidenceReferences": [
+        "WorkspaceShell.vue consumers=3 production views"
+      ]
+    },
+    {
+      "id": "S7-R14",
+      "title": "Expired adapters",
+      "roadmapSource": "roadmap stage 7",
+      "affectedRoutes": [
+        "/operations",
+        "/operations/customers",
+        "/operations/accountants"
+      ],
+      "implementationFiles": [
+        "frontend/src/components/workspace/WorkspaceShell.vue"
+      ],
+      "testsEvidence": [
+        "WorkspacePrimitives.test.ts",
+        "consumer scan"
+      ],
+      "protectionClassification": "active",
+      "verdict": "PASS_NO_PATCH",
+      "remainingAction": "none",
+      "finalResolution": "Adapter still wraps AppWorkspace when v2Scope is true. Production consumers are not zero.",
+      "sourceCommit": "3e62accdd157bed5dc6f2ed974e56e07c7349910",
+      "sourceTree": "3f4a186e46b12aee326c699cd1975ba34e485be7",
+      "evidenceReferences": [
+        "OperationsView.vue",
+        "CustomerWorkspaceView.vue",
+        "AccountantWorkspaceView.vue"
+      ]
+    },
+    {
+      "id": "S7-R15",
+      "title": "Microcopy consistency",
+      "roadmapSource": "roadmap stage 7 deferred",
+      "affectedRoutes": [
+        "/setup-password",
+        "/login",
+        "/operations",
+        "/operations/customers",
+        "/operations/customers/:relationId",
+        "/operations/accountants",
+        "/operations/accountants/:relationId",
+        "/account",
+        "/account/security",
+        "/account/storage",
+        "/account/notifications",
+        "/users/:id",
+        "/profile",
+        "/settings",
+        "/admin",
+        "/admin/invitations",
+        "/admin/users",
+        "/admin/users/:id",
+        "/admin/commodities",
+        "/i/:code",
+        "/register",
+        "/notifications",
+        "/:pathMatch(.*)*"
+      ],
+      "implementationFiles": [],
+      "testsEvidence": [
+        "source wording sample on NONE routes"
+      ],
+      "protectionClassification": "NONE only",
+      "verdict": "PASS_NO_PATCH",
+      "remainingAction": "none",
+      "finalResolution": "Retry/cancel/delete/back wording is already shared-dialog consistent on NONE surfaces. Remaining differences are contextual, not confusing or inaccessible. Market/Messenger copy untouched.",
+      "sourceCommit": "3e62accdd157bed5dc6f2ed974e56e07c7349910",
+      "sourceTree": "3f4a186e46b12aee326c699cd1975ba34e485be7",
+      "evidenceReferences": [
+        "CreateInvitation/UserProfile/Commodity/Account shared dialog copy"
+      ]
+    },
+    {
+      "id": "S7-R16",
+      "title": "Icons",
+      "roadmapSource": "roadmap stage 7",
+      "affectedRoutes": [
+        "/setup-password",
+        "/login",
+        "/operations",
+        "/operations/customers",
+        "/operations/customers/:relationId",
+        "/operations/accountants",
+        "/operations/accountants/:relationId",
+        "/account",
+        "/account/security",
+        "/account/storage",
+        "/account/notifications",
+        "/users/:id",
+        "/profile",
+        "/settings",
+        "/admin",
+        "/admin/invitations",
+        "/admin/users",
+        "/admin/users/:id",
+        "/admin/commodities",
+        "/i/:code",
+        "/register",
+        "/notifications",
+        "/:pathMatch(.*)*"
+      ],
+      "implementationFiles": [
+        "frontend/src/components/ui"
+      ],
+      "testsEvidence": [
+        "browser unnamed=0 on NONE",
+        "AppPrimitives"
+      ],
+      "protectionClassification": "NONE",
+      "verdict": "DONE_EVIDENCE_BOUND",
+      "remainingAction": "none",
+      "finalResolution": "No new icon package. NONE unnamed controls were zero. Decorative icons remain aria-hidden in shared primitives.",
+      "sourceCommit": "3e62accdd157bed5dc6f2ed974e56e07c7349910",
+      "sourceTree": "3f4a186e46b12aee326c699cd1975ba34e485be7",
+      "evidenceReferences": [
+        "browser NONE unnamed=0"
+      ]
+    },
+    {
+      "id": "S7-P01",
+      "title": "Market full protection",
+      "roadmapSource": "protected boundary",
+      "affectedRoutes": [
+        "/market"
+      ],
+      "implementationFiles": [
+        "frontend/src/views/MarketView.vue"
+      ],
+      "testsEvidence": [
+        "guard:ui",
+        "protected-market-390",
+        "cross-none-to-full"
+      ],
+      "protectionClassification": "FULL",
+      "verdict": "PROTECTED_OUT_OF_SCOPE",
+      "remainingAction": "none",
+      "finalResolution": "No Stage 7 behavior added. Copyable and reduced markers did not leak onto market.",
+      "sourceCommit": "3e62accdd157bed5dc6f2ed974e56e07c7349910",
+      "sourceTree": "3f4a186e46b12aee326c699cd1975ba34e485be7",
+      "evidenceReferences": [
+        "162e9e618684a24f3db3298eb8ff2c62498b18753cd4e0b6d6b97650d0202058"
+      ]
+    },
+    {
+      "id": "S7-P02",
+      "title": "Messenger and CreateChannel overlay",
+      "roadmapSource": "protected boundary / 0d7f2760",
+      "affectedRoutes": [
+        "/chat",
+        "/admin/channels"
+      ],
+      "implementationFiles": [
+        "frontend/src/components/CreateChannelView.vue"
+      ],
+      "testsEvidence": [
+        "guard:ui",
+        "protected-chat-390"
+      ],
+      "protectionClassification": "FULL allowed overlay",
+      "verdict": "PROTECTED_OUT_OF_SCOPE",
+      "remainingAction": "none",
+      "finalResolution": "CreateChannel placement overlay preserved. Chat unnamed=4 classified protected.",
+      "sourceCommit": "3e62accdd157bed5dc6f2ed974e56e07c7349910",
+      "sourceTree": "3f4a186e46b12aee326c699cd1975ba34e485be7",
+      "evidenceReferences": [
+        "2e92310e8c74150f9d94162405b68b4ed7bc36198bdfd3536faaae7b5568149a"
+      ]
+    },
+    {
+      "id": "S7-P03",
+      "title": "Mixed interiors",
+      "roadmapSource": "protected boundary",
+      "affectedRoutes": [
+        "/",
+        "/admin/messages",
+        "/admin/system"
+      ],
+      "implementationFiles": [
+        "frontend/src/components/AdminMessagesView.vue",
+        "frontend/src/components/TradingSettings.vue"
+      ],
+      "testsEvidence": [
+        "guard:ui",
+        "cross-none-to-mixed"
+      ],
+      "protectionClassification": "MIXED",
+      "verdict": "PROTECTED_OUT_OF_SCOPE",
+      "remainingAction": "none",
+      "finalResolution": "Copyable excluded on admin-messages/system. Reset dialog remains Stage 6 disposition only.",
+      "sourceCommit": "3e62accdd157bed5dc6f2ed974e56e07c7349910",
+      "sourceTree": "3f4a186e46b12aee326c699cd1975ba34e485be7",
+      "evidenceReferences": [
+        "AdminMessages 5572589b",
+        "TradingSettings a3718e8b"
+      ]
+    }
+  ],
+  "verdictCounts": {
+    "DONE_EVIDENCE_BOUND": 13,
+    "PASS_NO_PATCH": 3,
+    "PROTECTED_OUT_OF_SCOPE": 3
+  }
+}

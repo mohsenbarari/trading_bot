@@ -51,7 +51,10 @@
       "fileKey": "z8jgJxST4O2APzWnlyP9gv",
       "pageId": "486:1455",
       "sectionId": "496:18",
-      "screenIds": ["497:18", "499:49"],
+      "screenIds": [
+        "497:18",
+        "499:49"
+      ],
       "panelId": "501:93",
       "liveEditable": true,
       "freeze": false
@@ -62,5 +65,12 @@
     "fullStage7EvidenceFreeze": false,
     "sitesStarted": false,
     "stagingOrProductionChanged": false
+  },
+  "status": "stage7_complete",
+  "stage7CompleteAuthority": true,
+  "closurePointer": {
+    "ledger": "docs/uiux-stage7-motion-a11y/STAGE7_CLOSURE_LEDGER.json",
+    "evidence": "docs/uiux-stage7-motion-a11y/STAGE7_CLOSURE_EVIDENCE_MANIFEST.json",
+    "runtimeCommit": "3e62accdd157bed5dc6f2ed974e56e07c7349910"
   }
 }
