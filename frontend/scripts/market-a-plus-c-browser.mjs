@@ -129,6 +129,25 @@ async function runScenario({
     if (interaction === 'preview' && !probe.previewVisible) {
       failures.push('preview-missing')
     }
+    if (PHASE === 'candidate') {
+      if (state === 'normal' && !probe.marketTitleVisible) {
+        failures.push('market-title-missing')
+      }
+      if (interaction === 'first-tap' && !probe.decisionPanelVisible) {
+        failures.push('decision-panel-missing')
+      }
+      if (interaction === 'preview' && !probe.previewRecapVisible) {
+        failures.push('preview-recap-missing')
+      }
+      if (
+        ['normal', 'dense', 'admin', 'notice', 'notify-off'].includes(state)
+        && interaction === 'none'
+        && probe.tradeButtonCount > 0
+        && probe.smallTradeTargetCount > 0
+      ) {
+        failures.push('trade-target-below-44')
+      }
+    }
   } catch (error) {
     failures.push(error instanceof Error ? error.message : String(error))
   } finally {
@@ -285,6 +304,8 @@ async function main() {
       pendingCount: item.probe?.pendingCount ?? null,
       decisionPanelVisible: item.probe?.decisionPanelVisible ?? null,
       previewVisible: item.probe?.previewVisible ?? null,
+      previewRecapVisible: item.probe?.previewRecapVisible ?? null,
+      marketTitleVisible: item.probe?.marketTitleVisible ?? null,
       docOverflow: item.probe?.docOverflow ?? null,
       smallTradeTargetCount: item.probe?.smallTradeTargetCount ?? null,
       overtimeInMarket: item.probe?.overtimeInMarket ?? null,

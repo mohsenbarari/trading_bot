@@ -1374,4 +1374,63 @@ describe('OffersList.vue', () => {
 
     wrapper.unmount()
   })
+
+  it('shows decision focus and recap after the first lot tap without sending a trade', async () => {
+    const wrapper = await mountOffersList({
+      offers: [
+        buildTradeOffer({ id: 201, commodity_name: 'سکه امام', remaining_quantity: 10, quantity: 10 }),
+        buildTradeOffer({ id: 202, offer_type: 'buy', commodity_name: 'ربع سکه', remaining_quantity: 8, quantity: 8, price: 41000, viewer_effective_price: 41000 }),
+      ],
+    })
+
+    expect(wrapper.findAll('[data-test="offer-card"]')).toHaveLength(2)
+    expect(wrapper.findAll('[data-test="offer-remaining"]').map((node) => node.text().replace(/\s+/g, ''))).toEqual([
+      'باقی‌مانده10عدد',
+      'باقی‌مانده8عدد',
+    ])
+    expect(wrapper.text()).toContain('قیمت هر عدد')
+    expect(wrapper.text()).toContain('تومان')
+    expect(wrapper.find('[data-test="offer-decision-panel"]').exists()).toBe(false)
+
+    const firstCardButtons = wrapper.findAll('[data-test="offer-card"]')[0]!.findAll('.trade-btn')
+    expect(firstCardButtons[0]!.attributes('aria-label')).toContain('انتخاب مقدار 10 عدد برای فروش سکه امام')
+    await firstCardButtons[0]!.trigger('click')
+
+    expect(wrapper.findAll('[data-test="offer-card"]')[0]!.attributes('data-decision-focus')).toBe('true')
+    expect(wrapper.findAll('[data-test="offer-card"]')[1]!.attributes('data-decision-focus')).toBe('false')
+    expect(wrapper.get('[data-test="offer-decision-panel"]').text()).toContain('مقدار انتخاب‌شده: 10 عدد')
+    expect(wrapper.get('[data-test="offer-decision-panel"]').text()).toContain('فروش 10 عدد سکه امام')
+    expect(wrapper.get('[data-test="offer-decision-panel"]').text()).toContain('قیمت هر عدد 52,000 تومان')
+    expect(wrapper.get('[data-test="offer-decision-panel"]').text()).toContain('ثبت معامله 10 عدد از این لفظ فروش')
+    expect(wrapper.findAll('[data-test="offer-card"]')).toHaveLength(2)
+    expect(wrapper.findAll('[data-test="offer-card"]')[1]!.find('.trade-btn').exists()).toBe(true)
+    expect(apiFetchMock).not.toHaveBeenCalled()
+
+    wrapper.unmount()
+  })
+
+  it('clears pending confirmation with Escape or cancel without mutating the trade', async () => {
+    const wrapper = await mountOffersList({
+      offers: [buildTradeOffer({ id: 203, commodity_name: 'نیم‌سکه' })],
+    })
+
+    await wrapper.get('.trade-btn').trigger('click')
+    expect(wrapper.text()).toContain('تایید 10 عدد؟')
+    expect(wrapper.find('[data-test="offer-decision-panel"]').exists()).toBe(true)
+
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('تایید 10 عدد؟')
+    expect(wrapper.find('[data-test="offer-decision-panel"]').exists()).toBe(false)
+    expect(wrapper.get('[data-test="offer-card"]').attributes('data-decision-focus')).toBe('false')
+    expect(apiFetchMock).not.toHaveBeenCalled()
+
+    await wrapper.get('.trade-btn').trigger('click')
+    expect(wrapper.find('[data-test="offer-decision-panel"]').exists()).toBe(true)
+    await wrapper.get('[data-test="offer-decision-cancel"]').trigger('click')
+    expect(wrapper.find('[data-test="offer-decision-panel"]').exists()).toBe(false)
+    expect(apiFetchMock).not.toHaveBeenCalled()
+
+    wrapper.unmount()
+  })
 })

@@ -609,6 +609,10 @@ export async function collectMarketProbe(page) {
       decisionPanelVisible: decisionPanel instanceof HTMLElement && visible(decisionPanel),
       pendingCount: pendingButtons.length,
       previewVisible: Boolean(document.querySelector('[data-test="offer-preview-card"]')),
+      previewRecapVisible: Boolean(document.querySelector('[data-test="offer-preview-recap"]')),
+      marketTitleVisible: Boolean(
+        [...document.querySelectorAll('.market-page-title')].some((el) => el.textContent?.trim() === 'بازار'),
+      ),
       recentMenuVisible: Boolean(document.querySelector('[data-test="recent-offers-dropdown"]')),
       loadingVisible: Boolean(document.querySelector('[data-test="offers-loading-skeleton"]')),
       emptyVisible: Boolean(document.querySelector('[data-test="offers-empty-state"]')),

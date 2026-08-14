@@ -8,6 +8,8 @@ import {
   ADMIN_MESSAGES_SHA256,
   MAIN_UIUX_INTEGRATION_MARKET_ALLOWED_PATHS,
   MAIN_UIUX_INTEGRATION_MARKET_KIND,
+  MARKET_A_PLUS_C_ALLOWED_PATHS,
+  MARKET_A_PLUS_C_KIND,
   STAGE6_MESSENGER_URL_PRIVACY_ALLOWED_PATHS,
   STAGE8_CREATECHANNEL_HELPPOPOVER_PLACEMENT_ALLOWED_PATHS,
   STAGE8_CREATECHANNEL_HELPPOPOVER_PLACEMENT_KIND,
@@ -94,6 +96,10 @@ try {
   } else if (market.kind === MAIN_UIUX_INTEGRATION_MARKET_KIND) {
     console.log(
       `PASS main/UIUX Market integration disposition (exact ${MAIN_UIUX_INTEGRATION_MARKET_ALLOWED_PATHS.length}-file overlay; ${market.evidence.count} files, ${market.evidence.contentBytes} bytes, ${market.evidence.pathSetSha256}, ${market.evidence.sha256})`,
+    )
+  } else if (market.kind === MARKET_A_PLUS_C_KIND) {
+    console.log(
+      `PASS Market A+C visual/decision disposition (exact ${MARKET_A_PLUS_C_ALLOWED_PATHS.length}-file overlay; ${market.evidence.count} files, ${market.evidence.contentBytes} bytes, ${market.evidence.pathSetSha256}, ${market.evidence.sha256})`,
     )
   } else {
     throw new Error(`unsupported Market runtime disposition: ${String(market.kind)}`)

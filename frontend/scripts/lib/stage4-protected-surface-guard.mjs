@@ -114,6 +114,39 @@ export const MAIN_UIUX_INTEGRATION_MARKET_EVIDENCE = Object.freeze({
   sha256: 'cff97c36d965737605b80c098918c517999fb11f2c66108c2dae4573aac07867',
 })
 
+// This is a one-purpose disposition, not a Stage 4 baseline rewrite. It admits
+// only the reviewed Market A+C visual/interaction overlay on the same 19-file
+// runtime set. Trade semantics, API contracts, and protection stay unchanged.
+export const MARKET_A_PLUS_C_KIND = 'market-a-plus-c-visual-decision-clarity'
+
+export const MARKET_A_PLUS_C_ALLOWED_PATHS = Object.freeze([
+  'frontend/src/components/OfferPreviewModal.vue',
+  'frontend/src/components/OffersList.vue',
+  'frontend/src/components/TradeLotSuggestionAlert.vue',
+  'frontend/src/components/ui/AppOfferCard.vue',
+  'frontend/src/views/MarketView.vue',
+])
+
+export const MARKET_A_PLUS_C_ALLOWED_FILE_SHA256 = Object.freeze({
+  'frontend/src/components/OfferPreviewModal.vue':
+    'f7f725371f1a26076ae641832220891b9ba39b134a0bd8be09850f30f45fd075',
+  'frontend/src/components/OffersList.vue':
+    'bbfb0b738c79efda5b3a04ae0a5ee466e6f4e09c0e166090e14b9e67aa653d89',
+  'frontend/src/components/TradeLotSuggestionAlert.vue':
+    'a3cf12e0ff70739020830c48acf2eab7673a7bcc910c21530680db2036b5da2c',
+  'frontend/src/components/ui/AppOfferCard.vue':
+    '6c9844533065cb51603b9e55b9a22b8822cfeb2ebda24fde39a913079df970e6',
+  'frontend/src/views/MarketView.vue':
+    '250d50ce16db4b1d95ea76e0a5bf533b97359b42825e0caf1d023225fcac2c15',
+})
+
+export const MARKET_A_PLUS_C_EVIDENCE = Object.freeze({
+  count: 19,
+  contentBytes: 162211,
+  pathSetSha256: '37aa0b51e20f4ae86f7daf6c3c231d93b3d1f288ade1471490a1f843a57c9589',
+  sha256: 'e0b32d312b578fd6698beefb68e6d2a17c6c8efe024d408b917a05eb0dd5a531',
+})
+
 export const MESSENGER_RUNTIME_BASELINE = Object.freeze({
   count: 85,
   contentBytes: 1312405,
@@ -408,6 +441,32 @@ export function assertMainUiuxIntegrationMarketDisposition(entries) {
   )
 }
 
+function assertMarketAPlusCAllowedFiles(entries) {
+  const entriesByPath = new Map(entries.map((entry) => [entry.path, entry]))
+  for (const repoPath of MARKET_A_PLUS_C_ALLOWED_PATHS) {
+    const entry = entriesByPath.get(repoPath)
+    if (!entry) {
+      throw new Error(`Market A+C allowed file is missing: ${repoPath}`)
+    }
+    const actualSha256 = fileSha256(entry.content)
+    const expectedSha256 = MARKET_A_PLUS_C_ALLOWED_FILE_SHA256[repoPath]
+    if (actualSha256 !== expectedSha256) {
+      throw new Error(
+        `Market A+C allowed file drift: ${repoPath} ${expectedSha256} -> ${actualSha256}`,
+      )
+    }
+  }
+}
+
+export function assertMarketAPlusCDisposition(entries) {
+  assertMarketAPlusCAllowedFiles(entries)
+  return assertProtectedFileSetEvidence(
+    'Market A+C visual/decision disposition',
+    protectedFileSetEvidence(entries, MARKET_RUNTIME_CONTRACT),
+    MARKET_A_PLUS_C_EVIDENCE,
+  )
+}
+
 export function resolveMarketRuntimeDisposition(entries) {
   const actual = protectedFileSetEvidence(entries, MARKET_RUNTIME_CONTRACT)
   try {
@@ -426,13 +485,22 @@ export function resolveMarketRuntimeDisposition(entries) {
         evidence: assertMainUiuxIntegrationMarketDisposition(entries),
       }
     } catch (integrationError) {
-      const baselineMessage =
-        baselineError instanceof Error ? baselineError.message : String(baselineError)
-      const integrationMessage =
-        integrationError instanceof Error ? integrationError.message : String(integrationError)
-      throw new Error(
-        `Market runtime rejected after Stage 4 baseline drift (${baselineMessage}); main/UIUX integration disposition rejected (${integrationMessage})`,
-      )
+      try {
+        return {
+          kind: MARKET_A_PLUS_C_KIND,
+          evidence: assertMarketAPlusCDisposition(entries),
+        }
+      } catch (aPlusCError) {
+        const baselineMessage =
+          baselineError instanceof Error ? baselineError.message : String(baselineError)
+        const integrationMessage =
+          integrationError instanceof Error ? integrationError.message : String(integrationError)
+        const aPlusCMessage =
+          aPlusCError instanceof Error ? aPlusCError.message : String(aPlusCError)
+        throw new Error(
+          `Market runtime rejected after Stage 4 baseline drift (${baselineMessage}); main/UIUX integration disposition rejected (${integrationMessage}); Market A+C disposition rejected (${aPlusCMessage})`,
+        )
+      }
     }
   }
 }
