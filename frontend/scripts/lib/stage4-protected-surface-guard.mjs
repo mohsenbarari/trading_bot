@@ -14,6 +14,17 @@ export const TRADING_SETTINGS_PATH = 'frontend/src/components/TradingSettings.vu
 export const TRADING_SETTINGS_SHA256 =
   '509dd32235e1cb98aa164940cf7722604f16b6518f7387699554bf3a828ecfaa'
 
+// This is a one-purpose disposition, not a Stage 4 baseline rewrite. It permits
+// only the Stage 6 replacement of the unprotected system-reset native confirm.
+export const STAGE6_TRADING_SETTINGS_RESET_DIALOG_KIND =
+  'stage6-trading-settings-reset-dialog'
+export const STAGE6_TRADING_SETTINGS_RESET_DIALOG_SHA256 =
+  'a3718e8beccbdd6eddcbcd72eebd1838fdf4584430f4ed8ba12c5ec95030eea0'
+export const STAGE6_TRADING_SETTINGS_PROTECTED_CALENDAR_CONFIRM =
+  "if (!confirm('آیا از حذف این استثنای تقویمی مطمئن هستید؟'))"
+export const STAGE6_TRADING_SETTINGS_REMOVED_RESET_CONFIRM =
+  "if (!confirm('آیا از بازنشانی تنظیمات به مقادیر پیش‌فرض مطمئن هستید؟'))"
+
 export const STAGE4_SHARED_DEPENDENCY_ISOLATION_PATHS = Object.freeze([
   'frontend/src/App.vue',
   'frontend/src/assets/main.css',
@@ -596,6 +607,70 @@ export function assertStage8CreateChannelHelpPopoverPlacementDisposition(entries
  * URL-privacy disposition is tried next, then the exact Stage 8
  * CreateChannel HelpPopover placement remediation. All other drift fails.
  */
+function tradingSettingsSourceText(source) {
+  return Buffer.isBuffer(source) ? source.toString('utf8') : String(source)
+}
+
+/**
+ * Accepts only the one reviewed Stage 6 TradingSettings reset-dialog change.
+ * The protected market-calendar native confirm stays exactly as Stage 4 left it.
+ */
+export function assertStage6TradingSettingsResetDialogDisposition(source) {
+  const text = tradingSettingsSourceText(source)
+  if (!text.includes(STAGE6_TRADING_SETTINGS_PROTECTED_CALENDAR_CONFIRM)) {
+    throw new Error(
+      'Stage 6 TradingSettings reset-dialog disposition lost the protected calendar confirm',
+    )
+  }
+  if (text.includes(STAGE6_TRADING_SETTINGS_REMOVED_RESET_CONFIRM)) {
+    throw new Error(
+      'Stage 6 TradingSettings reset-dialog disposition must not keep the native reset confirm',
+    )
+  }
+  if (!text.includes('<AppConfirmDialog') || !text.includes('requestResetConfirmation')) {
+    throw new Error(
+      'Stage 6 TradingSettings reset-dialog disposition is missing the shared reset dialog',
+    )
+  }
+  if (text.includes('arrow-key-navigation')) {
+    throw new Error(
+      'Stage 6 TradingSettings reset-dialog disposition must not opt in Jalali arrows',
+    )
+  }
+  const actualSha256 = fileSha256(source)
+  if (actualSha256 !== STAGE6_TRADING_SETTINGS_RESET_DIALOG_SHA256) {
+    throw new Error(
+      `Stage 6 TradingSettings reset-dialog allowed file drift: ${STAGE6_TRADING_SETTINGS_RESET_DIALOG_SHA256} -> ${actualSha256}`,
+    )
+  }
+  return actualSha256
+}
+
+/**
+ * Stage 4 remains the immutable whole-file baseline. If it no longer matches,
+ * only the exact Stage 6 reset-dialog disposition may accept TradingSettings.
+ */
+export function resolveTradingSettingsDisposition(source) {
+  const actualSha256 = fileSha256(source)
+  if (actualSha256 === TRADING_SETTINGS_SHA256) {
+    return {
+      kind: 'stage4-baseline',
+      sha256: actualSha256,
+    }
+  }
+  try {
+    return {
+      kind: STAGE6_TRADING_SETTINGS_RESET_DIALOG_KIND,
+      sha256: assertStage6TradingSettingsResetDialogDisposition(source),
+    }
+  } catch (stage6Error) {
+    const stage6Message = stage6Error instanceof Error ? stage6Error.message : String(stage6Error)
+    throw new Error(
+      `TradingSettings rejected after Stage 4 whole-file drift (${TRADING_SETTINGS_SHA256} -> ${actualSha256}); Stage 6 reset-dialog disposition rejected (${stage6Message})`,
+    )
+  }
+}
+
 export function resolveMessengerRuntimeDisposition(entries) {
   const actual = protectedFileSetEvidence(entries, MESSENGER_RUNTIME_CONTRACT)
   try {

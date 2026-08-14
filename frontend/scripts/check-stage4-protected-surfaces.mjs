@@ -16,8 +16,10 @@ import {
   STAGE4_ROUTE_CONTRACT_PATH,
   STAGE4_SHARED_DEPENDENCY_ISOLATION_PATHS,
   STAGE4_SCOPE_MANIFEST_PATH,
+  STAGE6_TRADING_SETTINGS_RESET_DIALOG_KIND,
   TRADING_SETTINGS_PATH,
   TRADING_SETTINGS_SHA256,
+  resolveTradingSettingsDisposition,
   assertProtectedFileSetEvidence,
   assertStage4RouteProtection,
   assertStage4RuntimeRouteProtection,
@@ -74,11 +76,7 @@ try {
     ADMIN_MESSAGES_PATH,
     ADMIN_MESSAGES_SHA256,
   )
-  const tradingSettings = assertWholeFile(
-    'TradingSettings',
-    TRADING_SETTINGS_PATH,
-    TRADING_SETTINGS_SHA256,
-  )
+  const tradingSettings = resolveTradingSettingsDisposition(readRepoFile(TRADING_SETTINGS_PATH))
   const scopeManifest = JSON.parse(readRepoFile(STAGE4_SCOPE_MANIFEST_PATH, 'utf8'))
   const manifestRoutes = assertStage4RouteProtection(scopeManifest.routes)
   const runtimeRoutes = assertStage4RuntimeRouteProtection(
@@ -115,9 +113,17 @@ try {
   console.log(
     `PASS Stage 4 Home market interior (${dashboard.sections.length} sections, ${dashboard.bytes} bytes, ${dashboard.sha256})`,
   )
-  console.log(
-    `PASS Stage 4 admin protected files (AdminMessages ${adminMessages}, TradingSettings ${tradingSettings})`,
-  )
+  if (tradingSettings.kind === 'stage4-baseline') {
+    console.log(
+      `PASS Stage 4 admin protected files (AdminMessages ${adminMessages}, TradingSettings ${tradingSettings.sha256})`,
+    )
+  } else if (tradingSettings.kind === STAGE6_TRADING_SETTINGS_RESET_DIALOG_KIND) {
+    console.log(
+      `PASS Stage 4 admin protected files (AdminMessages ${adminMessages}; TradingSettings Stage 6 reset-dialog disposition ${tradingSettings.sha256}; Stage 4 baseline ${TRADING_SETTINGS_SHA256} retained)`,
+    )
+  } else {
+    throw new Error(`unsupported TradingSettings disposition: ${String(tradingSettings.kind)}`)
+  }
   console.log(
     `PASS Stage 4 route protection (${manifestRoutes.full} full/off, ${manifestRoutes.mixed} mixed; manifest + runtime ${runtimeRoutes.count}/${manifestRoutes.count})`,
   )

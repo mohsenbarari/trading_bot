@@ -298,9 +298,12 @@ describe('TradingSettings.vue', () => {
 
     const overrideDeleteButton = wrapper.get('[data-testid="override-delete-2"]')
     expect(overrideDeleteButton.classes()).toContain('ui-button')
+    const confirmMock = vi.mocked(window.confirm)
+    confirmMock.mockClear()
     await overrideDeleteButton.trigger('click')
     await flushPromises()
 
+    expect(confirmMock).toHaveBeenCalledWith('آیا از حذف این استثنای تقویمی مطمئن هستید؟')
     expect(wrapper.text()).toContain('استثنای تقویمی حذف شد')
     expect(wrapper.findAll('[data-testid="market-override-row"]').length).toBe(2)
 
@@ -343,7 +346,19 @@ describe('TradingSettings.vue', () => {
     await resetFooterButton.trigger('click')
     await flushPromises()
 
-    expect(confirmMock).toHaveBeenCalledOnce()
+    const dialog = document.body.querySelector('.ui-confirm-dialog')
+    expect(dialog).not.toBeNull()
+    expect(dialog?.textContent).toContain('لغو یا Escape هیچ تغییری ایجاد نمی‌کند.')
+    expect(confirmMock).not.toHaveBeenCalled()
+
+    const cancelButton = Array.from(dialog!.querySelectorAll('button')).find((button) =>
+      button.textContent?.includes('انصراف'),
+    )
+    expect(cancelButton).toBeTruthy()
+    cancelButton!.click()
+    await flushPromises()
+
+    expect(document.body.querySelector('.ui-confirm-dialog')).toBeNull()
     expect(tradingSettingsMocks.apiFetchMock).not.toHaveBeenCalledWith(
       '/api/trading-settings/reset',
       expect.anything(),
@@ -352,16 +367,30 @@ describe('TradingSettings.vue', () => {
     wrapper.unmount()
   })
 
-  it('resets settings to defaults after confirmation and surfaces reset errors', async () => {
+  it('resets settings to defaults after confirmation and keeps a safe failure copy', async () => {
+    const confirmMock = vi.fn(() => true)
+    vi.stubGlobal('confirm', confirmMock)
+
     const wrapper = await mountTradingSettings()
     await flushPromises()
 
     await wrapper.find('.settings-button.settings-button--danger.footer-control').trigger('click')
     await flushPromises()
 
+    const dialog = document.body.querySelector('.ui-confirm-dialog')
+    expect(dialog).not.toBeNull()
+    expect(confirmMock).not.toHaveBeenCalled()
+    const confirmButton = Array.from(dialog!.querySelectorAll('button')).find((button) =>
+      button.textContent?.includes('بازنشانی'),
+    )
+    expect(confirmButton).toBeTruthy()
+    confirmButton!.click()
+    await flushPromises()
+
     expect(tradingSettingsMocks.apiFetchMock).toHaveBeenCalledWith('/api/trading-settings/reset', { method: 'POST' })
     expect(wrapper.text()).toContain('تنظیمات به مقادیر پیش‌فرض بازنشانی شد')
     expect(wrapper.get('.settings-viewport-toast--success').text()).toBe('تنظیمات به مقادیر پیش‌فرض بازنشانی شد')
+    expect(document.body.querySelector('.ui-confirm-dialog')).toBeNull()
 
     tradingSettingsMocks.apiFetchMock.mockImplementation(async (path: string, options?: RequestInit) => {
       const method = options?.method || 'GET'
@@ -376,9 +405,18 @@ describe('TradingSettings.vue', () => {
 
     await wrapper.find('.settings-button.settings-button--danger.footer-control').trigger('click')
     await flushPromises()
+    const retryDialog = document.body.querySelector('.ui-confirm-dialog')
+    expect(retryDialog).not.toBeNull()
+    const retryConfirm = Array.from(retryDialog!.querySelectorAll('button')).find((button) =>
+      button.textContent?.includes('بازنشانی'),
+    )
+    retryConfirm!.click()
+    await flushPromises()
 
-    expect(wrapper.text()).toContain('خطا در بازنشانی تنظیمات')
+    expect(retryDialog?.textContent).not.toContain('reset failed')
+    expect(wrapper.text()).toContain('بازنشانی انجام نشد.')
     expect(wrapper.find('.ds-message.danger').exists()).toBe(true)
+    expect(document.body.querySelector('.ui-confirm-dialog')).not.toBeNull()
 
     wrapper.unmount()
   })

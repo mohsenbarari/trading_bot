@@ -24,8 +24,12 @@ import {
   STAGE4_ROUTE_CONTRACT_PATH,
   STAGE4_SHARED_DEPENDENCY_ISOLATION_PATHS,
   STAGE4_SCOPE_MANIFEST_PATH,
+  STAGE6_TRADING_SETTINGS_RESET_DIALOG_KIND,
+  STAGE6_TRADING_SETTINGS_RESET_DIALOG_SHA256,
   TRADING_SETTINGS_PATH,
   TRADING_SETTINGS_SHA256,
+  assertStage6TradingSettingsResetDialogDisposition,
+  resolveTradingSettingsDisposition,
   assertProtectedFileSetEvidence,
   assertStage4RouteProtection,
   assertStage4RuntimeRouteProtection,
@@ -428,17 +432,37 @@ describe('Stage 4 protected surface baseline', () => {
     }
   })
 
-  it('freezes AdminMessagesView and TradingSettings as whole files', () => {
+  it('freezes AdminMessagesView as a whole file and dispositions TradingSettings reset only', () => {
     const adminMessages = readRepoFile(ADMIN_MESSAGES_PATH)
     const tradingSettings = readRepoFile(TRADING_SETTINGS_PATH)
     expect(fileSha256(adminMessages)).toBe(ADMIN_MESSAGES_SHA256)
-    expect(fileSha256(tradingSettings)).toBe(TRADING_SETTINGS_SHA256)
+    expect(TRADING_SETTINGS_SHA256).toBe(
+      '509dd32235e1cb98aa164940cf7722604f16b6518f7387699554bf3a828ecfaa',
+    )
+    expect(fileSha256(tradingSettings)).toBe(STAGE6_TRADING_SETTINGS_RESET_DIALOG_SHA256)
+    expect(resolveTradingSettingsDisposition(tradingSettings)).toEqual({
+      kind: STAGE6_TRADING_SETTINGS_RESET_DIALOG_KIND,
+      sha256: STAGE6_TRADING_SETTINGS_RESET_DIALOG_SHA256,
+    })
+    expect(assertStage6TradingSettingsResetDialogDisposition(tradingSettings)).toBe(
+      STAGE6_TRADING_SETTINGS_RESET_DIALOG_SHA256,
+    )
     expect(fileSha256(Buffer.concat([adminMessages, Buffer.from('\n')]))).not.toBe(
       ADMIN_MESSAGES_SHA256,
     )
-    expect(fileSha256(Buffer.concat([tradingSettings, Buffer.from('\n')]))).not.toBe(
-      TRADING_SETTINGS_SHA256,
-    )
+    expect(() =>
+      resolveTradingSettingsDisposition(Buffer.concat([tradingSettings, Buffer.from('\n')])),
+    ).toThrow(/Stage 4 whole-file drift/)
+    expect(() =>
+      resolveTradingSettingsDisposition(
+        Buffer.from(
+          tradingSettings
+            .toString('utf8')
+            .replace("if (!confirm('آیا از حذف این استثنای تقویمی مطمئن هستید؟'))", 'if (false)'),
+          'utf8',
+        ),
+      ),
+    ).toThrow(/protected calendar confirm/)
   })
 
   it('locks the full/off and mixed/interior invariants in manifest and runtime source', () => {

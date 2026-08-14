@@ -4,7 +4,7 @@ import { apiFetch } from '../utils/auth'
 import { Loader2, ChevronLeft, Save, RotateCcw, Mail, ClipboardList, Clock, ShieldCheck, AlertCircle } from 'lucide-vue-next'
 import { formatIranDateTime } from '../utils/iranTime'
 import JalaliDatePicker from './JalaliDatePicker.vue'
-import { AppButton, AppCheckbox, AppInput, AppSelect } from './ui'
+import { AppButton, AppCheckbox, AppConfirmDialog, AppInput, AppSelect } from './ui'
 
 const props = defineProps<{
   apiBaseUrl: string;
@@ -358,13 +358,31 @@ const saveSettings = async () => {
   }
 }
 
-const resetSettings = async () => {
-  if (!confirm('آیا از بازنشانی تنظیمات به مقادیر پیش‌فرض مطمئن هستید؟')) {
-    return
-  }
+const pendingResetConfirmation = ref(false)
+const resetConfirmationError = ref('')
+const RESET_CONFIRMATION_TITLE = 'بازنشانی تنظیمات'
+const RESET_CONFIRMATION_MESSAGE =
+  'تنظیمات به مقادیر پیش‌فرض برمی‌گردد. لغو یا Escape هیچ تغییری ایجاد نمی‌کند.'
+const RESET_CONFIRMATION_FAILURE = 'بازنشانی انجام نشد.'
+
+const requestResetConfirmation = () => {
+  if (saving.value) return
+  resetConfirmationError.value = ''
+  pendingResetConfirmation.value = true
+}
+
+const cancelResetConfirmation = () => {
+  if (saving.value) return
+  pendingResetConfirmation.value = false
+  resetConfirmationError.value = ''
+}
+
+const confirmResetSettings = async () => {
+  if (!pendingResetConfirmation.value || saving.value) return
 
   try {
     saving.value = true
+    resetConfirmationError.value = ''
     message.value = ''
 
     const data = await fetchApi('POST', '/trading-settings/reset')
@@ -373,11 +391,13 @@ const resetSettings = async () => {
     resetOverrideForm()
     await loadMarketState()
 
+    pendingResetConfirmation.value = false
     message.value = 'تنظیمات به مقادیر پیش‌فرض بازنشانی شد'
     messageType.value = 'success'
     showViewportToast('success', message.value)
-  } catch (error) {
-    message.value = 'خطا در بازنشانی تنظیمات'
+  } catch {
+    resetConfirmationError.value = RESET_CONFIRMATION_FAILURE
+    message.value = RESET_CONFIRMATION_FAILURE
     messageType.value = 'danger'
     showViewportToast('danger', message.value)
   } finally {
@@ -859,12 +879,25 @@ onBeforeUnmount(() => {
           <Save v-else :size="18" />
           <span>ذخیره تنظیمات</span>
         </AppButton>
-        <AppButton type="button" class="settings-button settings-button--danger footer-control" variant="danger" @click="resetSettings" :disabled="saving">
+        <AppButton type="button" class="settings-button settings-button--danger footer-control" variant="danger" @click="requestResetConfirmation" :disabled="saving">
           <RotateCcw :size="18" />
           <span>بازنشانی به پیش‌فرض</span>
         </AppButton>
       </div>
     </div>
+    <AppConfirmDialog
+      :open="pendingResetConfirmation"
+      :title="RESET_CONFIRMATION_TITLE"
+      :message="RESET_CONFIRMATION_MESSAGE"
+      confirm-label="بازنشانی"
+      cancel-label="انصراف"
+      tone="danger"
+      :busy="saving"
+      :error="resetConfirmationError || undefined"
+      :confirm-disabled="saving"
+      @cancel="cancelResetConfirmation"
+      @confirm="confirmResetSettings"
+    />
   </div>
 </template>
 
