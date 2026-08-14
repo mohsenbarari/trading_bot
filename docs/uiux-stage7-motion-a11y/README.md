@@ -10,9 +10,10 @@
 - authority: `stage7CompleteAuthority=true`
 - in-scope deferred: صفر
 - next authorized stage: Stage 8، فقط پس از merge روی integration commit
-- Sites: explicit non-requirement؛ اجرا نشده
+- Sites Stage 7 در محدوده این مرحله نیست
+- follow-up مرز عبور: run تاریخی ۶۰/۶۰ چهار request failure طبقه‌بندی‌نشده داشت؛ report تاریخی تغییر نکرد؛ follow-up مستقل ۱۲/۱۲ با صفر request failure علت را مشخص کرد و defect محصول پیدا نشد
 
-مرجع ماشین‌خوان: [STAGE7_CLOSURE_LEDGER.json](STAGE7_CLOSURE_LEDGER.json) و [STAGE7_CLOSURE_EVIDENCE_MANIFEST.json](STAGE7_CLOSURE_EVIDENCE_MANIFEST.json).
+مرجع ماشین‌خوان: [STAGE7_CLOSURE_LEDGER.json](STAGE7_CLOSURE_LEDGER.json)، [STAGE7_CLOSURE_EVIDENCE_MANIFEST.json](STAGE7_CLOSURE_EVIDENCE_MANIFEST.json) و [STAGE7_CROSS_BOUNDARY_DIAGNOSTIC_RECEIPT.json](STAGE7_CROSS_BOUNDARY_DIAGNOSTIC_RECEIPT.json).
 
 ## مرز تحویل‌شده
 
@@ -36,4 +37,5 @@
 - ظاهر Jalali/HelpPopover/CustomerNameWithBadge فقط سلیقه‌ای بود و patch نشد.
 - keyboard FilterChips بازار محافظت‌شده و خارج از محدوده است.
 - Figma تاریخی `487:18` و `496:18` کافی بود؛ section تازه ساخته نشد چون runtime gap نبود.
-- Sites الزام checkpoint نیست و ساخته نشده است.
+- Sites Stage 7 در محدوده این مرحله نیست.
+- follow-up مرز عبور یک slice مرحله ۸ نیست و شمارش مرحله ۸ را افزایش نمی‌دهد.

@@ -59,3 +59,14 @@ Figma page 09 sibling، نه overwrite صفحهٔ Stage 6
 - protected/full/mixed enter+leave=`200ms`؛ SECTION مجاز under reduce enter+leave=`0ms`
 - Figma live: section `496:18`، ۵۰ text همگی Vazirmatn، ۹ instance، ۱۰۳ node variable-bound، unsafe scan صفر و overflow صفر
 - هیچ closure/freeze/Sites/staging/production/merge ادعا یا اجرا نشده است
+
+## ۶. بستن نهایی و follow-up مرز عبور
+
+Stage 7 روی frontend runtime `3e62accd` بسته است و **`stage7CompleteAuthority=true`** فقط پس از PASS همین follow-up باقی می‌ماند.
+
+- run تاریخی `stage7-closure-20260814084158579` برابر `60/60` است و چهار request failure طبقه‌بندی‌نشده در چهار سناریوی cross-boundary دارد.
+- آن report و harness تاریخی تغییر نکرده‌اند: report `5b842a08c93cbe31966b446510185276c46d38bf7be85db19322e3c254722cc9` و harness `3567e564fa23df27254ea87f69889686a5d422b13f84bd67b88d099606b1fb18`.
+- follow-up مستقل `stage7-xboundary-20260814093542875` همان چهار جهت را در `390×844`، `1440×900` و `390×844` با `prefers-reduced-motion` با کنترل واقعی محصول اجرا کرد: `12/12` پاس، request failure صفر، cancellation صفر.
+- علت تاریخی: harness قبلی برای hop دوم از `page.goto` استفاده می‌کرد و abortهای in-flight را بدون طبقه‌بندی ثبت می‌کرد. با transition واقعی SPA، failure صفر شد و defect محصول پیدا نشد.
+- این follow-up slice مرحله ۸ نیست و شمارش `270 / 0 / 12 / 163` را تغییر نمی‌دهد.
+- Receipt: `docs/uiux-stage7-motion-a11y/STAGE7_CROSS_BOUNDARY_DIAGNOSTIC_RECEIPT.json`.

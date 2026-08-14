@@ -85,7 +85,27 @@
         "public stays public without auth"
       ]
     },
-    "artifactRetention": "Raw screenshots remain outside the repository."
+    "artifactRetention": "Raw screenshots remain outside the repository.",
+    "historicalUnclassifiedRequestFailures": 4,
+    "historicalReportUnchanged": true
+  },
+  "crossBoundaryFollowUp": {
+    "runId": "stage7-xboundary-20260814093542875",
+    "kind": "stage7-cross-boundary-fail-closed-follow-up",
+    "result": "passed",
+    "reportSha256": "4781de48a9d9a08232fdd1523f89e2eca63acfa211ef34356bf9a02874bf591a",
+    "harnessSha256": "5a1c6e73d6393588bbc9171ca8412b025a7df43b657223b84189501111a8de61",
+    "summary": {
+      "executed": 12,
+      "passed": 12,
+      "failed": 0
+    },
+    "requestFailureTotal": 0,
+    "expectedCancellationTotal": 0,
+    "unexpectedRequestFailureTotal": 0,
+    "productDefectFound": false,
+    "receipt": "docs/uiux-stage7-motion-a11y/STAGE7_CROSS_BOUNDARY_DIAGNOSTIC_RECEIPT.json",
+    "countsTowardStage8Acceptance": false
   },
   "cssAdapterAudit": {
     "workspaceShellProductionConsumers": [
@@ -107,7 +127,7 @@
       "487:18",
       "496:18"
     ],
-    "sites": "owner-authorized-explicit-non-requirement"
+    "sites": "stage7-sites-not-in-scope"
   },
   "stage8Unchanged": {
     "receiptSha256": "72c6077ede453ba7e624e5e01a08b58fa5aad7d41ed8e0410d3d6a99aceab9fa",

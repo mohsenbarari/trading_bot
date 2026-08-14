@@ -25,7 +25,25 @@
   "sites": {
     "requiredByCheckpoint": false,
     "executed": false,
-    "disposition": "owner-authorized-explicit-non-requirement"
+    "disposition": "stage7-sites-not-in-scope"
+  },
+  "crossBoundaryFollowUp": {
+    "historicalRunId": "stage7-closure-20260814084158579",
+    "historicalReportSha256": "5b842a08c93cbe31966b446510185276c46d38bf7be85db19322e3c254722cc9",
+    "historicalHarnessSha256": "3567e564fa23df27254ea87f69889686a5d422b13f84bd67b88d099606b1fb18",
+    "historicalUnclassifiedRequestFailures": 4,
+    "historicalReportUnchanged": true,
+    "followUpRunId": "stage7-xboundary-20260814093542875",
+    "status": "passed",
+    "executed": 12,
+    "passed": 12,
+    "failed": 0,
+    "requestFailureTotal": 0,
+    "expectedCancellationTotal": 0,
+    "unexpectedRequestFailureTotal": 0,
+    "productDefectFound": false,
+    "receipt": "docs/uiux-stage7-motion-a11y/STAGE7_CROSS_BOUNDARY_DIAGNOSTIC_RECEIPT.json",
+    "countsTowardStage8Acceptance": false
   },
   "nextAuthorizedStage": 8,
   "stage8Boundary": {

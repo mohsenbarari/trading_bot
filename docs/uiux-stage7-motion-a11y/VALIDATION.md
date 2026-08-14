@@ -99,13 +99,14 @@ run `uiux-stage7-shared-dependency-correction-20260813T072432779Z`
 | `vue-tsc --noEmit` | pass |
 | production build | pass؛ `169` file؛ SHA-256 `ee970be6ff3570f4c325c3f420c816b5fa61beb67a9b4071d208b2b3657c50db` |
 | `guard:ui` | pass |
-| browser | `stage7-closure-20260814084158579`؛ `60/60`؛ report `5b842a08c93cbe31966b446510185276c46d38bf7be85db19322e3c254722cc9`؛ harness `3567e564fa23df27254ea87f69889686a5d422b13f84bd67b88d099606b1fb18` |
+| browser | `stage7-closure-20260814084158579`؛ `60/60`؛ report `5b842a08c93cbe31966b446510185276c46d38bf7be85db19322e3c254722cc9`؛ harness `3567e564fa23df27254ea87f69889686a5d422b13f84bd67b88d099606b1fb18`؛ چهار request failure طبقه‌بندی‌نشده در چهار سناریوی cross-boundary؛ این report تغییر نکرده است |
 | NONE coverage | همهٔ ۲۳ route با `protection=none` در ۳۹۰ و ۱۴۴۰ |
 | cross-boundary | NONE↔FULL، NONE↔MIXED، public بدون نشست |
+| follow-up | `stage7-xboundary-20260814093542875`؛ `12/12`؛ report `4781de48a9d9a08232fdd1523f89e2eca63acfa211ef34356bf9a02874bf591a`؛ harness `5a1c6e73d6393588bbc9171ca8412b025a7df43b657223b84189501111a8de61`؛ request failure=`0`؛ cancellation=`0`؛ defect محصول پیدا نشد |
 | CSS/adapter removals | صفر؛ هیچ safe dead candidate |
 | Figma new section | ساخته نشد؛ historical `487:18` و `496:18` کافی بودند |
-| Sites | explicit non-requirement |
+| Sites | در محدودهٔ Stage 7 نیست |
 
 Stage 8 دست‌نخورده: `270` / full `0` / slices `12` / scenarios `163` / authority `false`. پذیرش نهایی Stage 8 باید پس از merge روی integration commit اجرا شود.
 
-Ledger SHA-256 `8c4bb1051dee19d233c723956011da2fe982bc15798d32f0b696c727191c2ffb`. Evidence SHA-256 `866cddc27e3ca472069a1ea3d61395b8dd3d9f816b806378446de4a5c344360e`.
+Ledger SHA-256 `211ba71cbf7eebf88a5282d334f2662d584a40d7f8152cacf6ec6ed7656a8985`. Evidence SHA-256 `5f15f5b8891b90a9f810d2368af6649d58b2dca470f534943969139bb3a71f93`. Follow-up receipt SHA-256 `9c03e10e92cffc62455ddda10e4f5a5acc13eef094db3f34148114610dfbeac3`.

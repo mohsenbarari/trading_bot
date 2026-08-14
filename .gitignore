@@ -12,6 +12,7 @@ docs/uiux-stage6-admin-profile/*
 docs/uiux-stage7-motion-a11y/*
 !docs/uiux-stage7-motion-a11y/STAGE7_CLOSURE_LEDGER.json
 !docs/uiux-stage7-motion-a11y/STAGE7_CLOSURE_EVIDENCE_MANIFEST.json
+!docs/uiux-stage7-motion-a11y/STAGE7_CROSS_BOUNDARY_DIAGNOSTIC_RECEIPT.json
 !docs/memory/
 !docs/memory/**
 !docs/uiux-stage8-acceptance-rollout/

@@ -1,0 +1,104 @@
+{
+  "schemaVersion": 1,
+  "stage": 7,
+  "kind": "stage7-cross-boundary-diagnostic-follow-up",
+  "status": "passed",
+  "runId": "stage7-xboundary-20260814093542875",
+  "claimBoundary": "This follow-up classifies the four unclassified request failures from the historical Stage 7 closure report. It is not a Stage 8 slice and does not count toward Stage 8 acceptance. The historical report is unchanged.",
+  "historicalRunUnchanged": {
+    "runId": "stage7-closure-20260814084158579",
+    "reportSha256": "5b842a08c93cbe31966b446510185276c46d38bf7be85db19322e3c254722cc9",
+    "harnessSha256": "3567e564fa23df27254ea87f69889686a5d422b13f84bd67b88d099606b1fb18",
+    "summary": {
+      "executed": 60,
+      "passed": 60,
+      "failed": 0
+    },
+    "unclassifiedRequestFailures": 4,
+    "note": "The historical 60/60 report recorded four requestFailures on the four cross-boundary scenarios and did not keep method/path/resource/errorText or fail-closed classification. That report was not rewritten or presented as clean."
+  },
+  "branch": "condidate/webapp-ui-ux-redesign-v2",
+  "head": "c995d2e18b353830a10dbec78c3fa0747593e5d1",
+  "tree": "35b842e94f69a6b17bfbbdb884b47c4657f927e3",
+  "frontendTree": "b9bd7247632dbc52222294ca0127c564a99d3c96",
+  "productionDist": {
+    "fileCount": 169,
+    "sha256": "ee970be6ff3570f4c325c3f420c816b5fa61beb67a9b4071d208b2b3657c50db"
+  },
+  "harnessSha256": "5a1c6e73d6393588bbc9171ca8412b025a7df43b657223b84189501111a8de61",
+  "reportSha256": "4781de48a9d9a08232fdd1523f89e2eca63acfa211ef34356bf9a02874bf591a",
+  "scenarioCount": 12,
+  "passed": 12,
+  "failed": 0,
+  "viewportCoverage": [
+    "390x844",
+    "1440x900",
+    "390x844-prefers-reduced-motion"
+  ],
+  "routeTransitionMatrix": [
+    {
+      "direction": "NONE->FULL",
+      "from": "/profile",
+      "to": "/market",
+      "method": "click-bottom-nav-market",
+      "note": "direct product control"
+    },
+    {
+      "direction": "FULL->NONE",
+      "from": "/market",
+      "to": "/profile",
+      "method": "click-market-fab-account-then-profile-card",
+      "note": "no single market-to-profile control; two product SPA hops; not hard navigation"
+    },
+    {
+      "direction": "NONE->MIXED",
+      "from": "/admin",
+      "to": "/admin/messages",
+      "method": "click-admin-messages-card",
+      "note": "direct product control"
+    },
+    {
+      "direction": "MIXED->NONE",
+      "from": "/admin/messages",
+      "to": "/admin",
+      "method": "click-admin-subview-return",
+      "note": "direct product control"
+    }
+  ],
+  "requestFailureTotal": 0,
+  "expectedCancellationTotal": 0,
+  "unexpectedRequestFailureTotal": 0,
+  "requestFailureClassification": {
+    "total": 0,
+    "expectedRouteAbortGet": 0,
+    "unknown": 0,
+    "mutating": 0,
+    "external": 0,
+    "unclassified": 0,
+    "note": "The follow-up recorded zero request failures. The historical four failures are explained as harness-initiated second page.goto hops in the original 60/60 run, not as a product defect. No expected cancellation was recorded in this follow-up because in-SPA product transitions did not abort a prior-route GET."
+  },
+  "consolePageExternalUnknownApiMutation": {
+    "unexpectedConsole": 0,
+    "pageErrors": 0,
+    "externalRequests": 0,
+    "unknownApiRequests": 0,
+    "mutatingRequests": 0,
+    "expectedApiRequests": 209
+  },
+  "prePostSourceBinding": {
+    "headUnchanged": true,
+    "treeUnchanged": true,
+    "frontendTreeUnchanged": true,
+    "distUnchanged": true,
+    "worktreeClean": true
+  },
+  "productDefectFound": false,
+  "limitations": [
+    "FULL->NONE used two product SPA hops because Market has no single control to Profile.",
+    "Market destination has no product main landmark; the follow-up asserted a single #app root and required main only on NONE destinations.",
+    "This follow-up covers the four cross-boundary directions only; it does not replace the historical 60/60 report."
+  ],
+  "rawArtifactsNotRetained": true,
+  "screenshotCountExternalOnly": 12,
+  "countsTowardStage8Acceptance": false
+}
