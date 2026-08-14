@@ -247,7 +247,14 @@ class ActiveOfferRealtimeIdentityTests(unittest.IsolatedAsyncioTestCase):
 
         publish.assert_awaited_once_with(
             "offer:expired",
-            {"id": 72, "offer_public_id": "ofr_stage12_shared"},
+            {
+                "id": 72,
+                "status": "expired",
+                "overtime_trade_committed": False,
+                "overtime_minutes_snapshot": 0,
+                "lifecycle_phase": None,
+                "offer_public_id": "ofr_stage12_shared",
+            },
             source=REALTIME_SOURCE_SYNC_APPLY,
         )
 

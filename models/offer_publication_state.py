@@ -6,6 +6,7 @@ import enum
 from sqlalchemy import (
     BigInteger,
     Boolean,
+    CheckConstraint,
     Column,
     DateTime,
     Enum,
@@ -19,11 +20,18 @@ from sqlalchemy import (
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
+from core.telegram_multi_publisher_contract import TELEGRAM_PUBLISHER_IDENTITIES
+
 from .database import Base
 
 
 def _enum_values(enum_cls):
     return [item.value for item in enum_cls]
+
+
+_TELEGRAM_PUBLISHER_IDENTITY_SQL = ", ".join(
+    f"'{identity}'" for identity in ("primary", *TELEGRAM_PUBLISHER_IDENTITIES)
+)
 
 
 class OfferPublicationSurface(str, enum.Enum):
@@ -45,6 +53,12 @@ class OfferPublicationState(Base):
     __table_args__ = (
         UniqueConstraint("offer_public_id", "surface", name="ux_offer_publication_states_offer_surface"),
         UniqueConstraint("dedupe_key", name="ux_offer_publication_states_dedupe_key"),
+        CheckConstraint(
+            "publisher_bot_identity IS NULL OR "
+            "(surface = 'telegram_channel' AND publisher_bot_identity IN "
+            f"({_TELEGRAM_PUBLISHER_IDENTITY_SQL}))",
+            name="ck_offer_publication_states_publisher_bot_identity",
+        ),
         Index("ix_offer_publication_states_offer_status", "offer_public_id", "status"),
         Index("ix_offer_publication_states_surface_status", "surface", "status"),
     )
@@ -67,6 +81,7 @@ class OfferPublicationState(Base):
         index=True,
     )
     publication_owner_server = Column(String(16), nullable=False, index=True)
+    publisher_bot_identity = Column(String(32), nullable=True)
     status = Column(
         Enum(
             OfferPublicationStatus,

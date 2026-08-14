@@ -13,6 +13,65 @@ from scripts import trading_core_probe_worker as worker
 
 
 class TradingCoreMixedLoadHelperTests(unittest.TestCase):
+    def test_synthetic_callback_ids_are_short_and_deterministic(self):
+        long_run_prefix = "telegram-live-matrix-20260812t005017z-0123456789ab"
+        first = worker._synthetic_callback_id(long_run_prefix, "trade-tap-1", 11)
+        second = worker._synthetic_callback_id(long_run_prefix, "trade-tap-2", 11)
+
+        self.assertLessEqual(len(first), 64)
+        self.assertEqual(
+            first,
+            worker._synthetic_callback_id(long_run_prefix, "trade-tap-1", 11),
+        )
+        self.assertNotEqual(first, second)
+
+    def test_boundary_patch_records_synthetic_callback_acknowledgements(self):
+        async def run_probe():
+            callback = SimpleNamespace(answer=AsyncMock(return_value=True))
+            original = worker.bot_trade_execute.answer_callback_query_via_runtime
+            async with worker.patched_trading_boundaries(
+                emulate_callback_answers=True
+            ):
+                self.assertIsNot(
+                    worker.bot_trade_execute.answer_callback_query_via_runtime,
+                    original,
+                )
+                await worker.bot_trade_execute.answer_callback_query_via_runtime(
+                    callback,
+                    "acknowledged",
+                    show_alert=False,
+                )
+            self.assertIs(worker.bot_trade_execute.answer_callback_query_via_runtime, original)
+            callback.answer.assert_awaited_once_with("acknowledged", show_alert=False)
+
+        asyncio.run(run_probe())
+
+    def test_bot_manual_expiry_uses_authoritative_terminal_state(self):
+        async def run_probe():
+            harness = SimpleNamespace(
+                feed_private_callback=AsyncMock(return_value={"text": None})
+            )
+            with patch.object(
+                worker,
+                "load_offer_snapshot",
+                new=AsyncMock(return_value=SimpleNamespace(status="expired")),
+            ):
+                outcome = await worker.expire_bot_offer_with_dispatcher(
+                    harness=harness,
+                    owner=worker.LoadUserRef(user_id=1, telegram_id=2),
+                    offer_id=42,
+                    prefix="telegram-live-matrix-unit",
+                    index=1,
+                )
+
+            self.assertEqual(outcome, "success")
+            self.assertLessEqual(
+                len(harness.feed_private_callback.await_args.kwargs["callback_id"]),
+                64,
+            )
+
+        asyncio.run(run_probe())
+
     def test_dual_role_users_artifact_round_trip_is_iran_authoritative(self):
         users = [
             worker.LoadUserRef(user_id=10, telegram_id=9010),
@@ -1235,6 +1294,34 @@ class TradingCoreMixedLoadHelperTests(unittest.TestCase):
                 prefix=prefix,
                 case_id="stale_telegram_button",
                 action="complete",
+            ),
+        )
+
+    def test_load_offer_creation_key_is_stable_and_bounded(self):
+        prefix = "telegram-live-matrix-20260811t185130z-live002-" * 3
+        first = worker.build_load_offer_creation_idempotency_key(
+            prefix=prefix,
+            user_id=123456789,
+            index=7,
+            source_surface=worker.OfferSourceSurface.WEBAPP,
+        )
+        second = worker.build_load_offer_creation_idempotency_key(
+            prefix=prefix,
+            user_id=123456789,
+            index=8,
+            source_surface=worker.OfferSourceSurface.WEBAPP,
+        )
+
+        self.assertLessEqual(len(first), 64)
+        self.assertTrue(first.startswith("load-offer:webapp:"))
+        self.assertNotEqual(first, second)
+        self.assertEqual(
+            first,
+            worker.build_load_offer_creation_idempotency_key(
+                prefix=prefix,
+                user_id=123456789,
+                index=7,
+                source_surface=worker.OfferSourceSurface.WEBAPP,
             ),
         )
 

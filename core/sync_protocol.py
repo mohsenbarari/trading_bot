@@ -13,6 +13,11 @@ SYNC_PAYLOAD_SCHEMA_VERSION = 2
 SYNC_PAYLOAD_SCHEMA_MIN_SUPPORTED_VERSION = 1
 SYNC_REGISTRY_VERSION = 4
 SYNC_REGISTRY_MIN_SUPPORTED_VERSION = 1
+# Version 4's wire contract as emitted by main@2c08da14.  Candidate queue
+# tables and execution-only field policies are NO_SYNC/local metadata, so they
+# must not break a sequential two-peer rollout.  A real SYNC wire-contract
+# change requires a version bump and a new negotiated compatibility value.
+SYNC_REGISTRY_V4_WIRE_COMPATIBILITY_FINGERPRINT = "12ff8b60fe7b6b1e"
 
 
 @dataclass(frozen=True)
@@ -30,7 +35,7 @@ def _positive_int(value: Any) -> int | None:
     return coerced if coerced > 0 else None
 
 
-def current_sync_registry_fingerprint() -> str:
+def current_sync_registry_implementation_fingerprint() -> str:
     from core.sync_registry import sync_registry_entries
     from core.sync_field_policy import sync_field_policy_fingerprint_payload
 
@@ -54,6 +59,12 @@ def current_sync_registry_fingerprint() -> str:
     return hashlib.sha256(encoded).hexdigest()[:16]
 
 
+def current_sync_registry_fingerprint() -> str:
+    """Return the negotiated v4 wire fingerprint, not local NO_SYNC metadata."""
+
+    return SYNC_REGISTRY_V4_WIRE_COMPATIBILITY_FINGERPRINT
+
+
 def _default_producer_server() -> str | None:
     try:
         from core.config import settings
@@ -72,6 +83,9 @@ def build_sync_protocol_metadata(*, producer_server: str | None = None) -> dict[
         "registry_version": SYNC_REGISTRY_VERSION,
         "min_consumer_registry_version": SYNC_REGISTRY_MIN_SUPPORTED_VERSION,
         "registry_fingerprint": current_sync_registry_fingerprint(),
+        "registry_implementation_fingerprint": (
+            current_sync_registry_implementation_fingerprint()
+        ),
         "producer": {
             "server_mode": producer_server or _default_producer_server(),
         },

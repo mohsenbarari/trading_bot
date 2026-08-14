@@ -318,6 +318,8 @@ class OffersRouterHelperTests(unittest.IsolatedAsyncioTestCase):
 
         with patch("api.routers.offers.current_server", return_value="foreign"), patch.object(
             offers_module.settings, "channel_id", "@offers"
+        ), patch.object(
+            offers_module.settings, "bot_token", "token"
         ), patch(
             "api.routers.offers.telegram_gateway.send_message",
             new=AsyncMock(
@@ -350,6 +352,8 @@ class OffersRouterHelperTests(unittest.IsolatedAsyncioTestCase):
         )
         with patch("api.routers.offers.current_server", return_value="foreign"), patch.object(
             offers_module.settings, "channel_id", "@offers"
+        ), patch.object(
+            offers_module.settings, "bot_token", "token"
         ), patch(
             "core.services.telegram_offer_channel_service.get_available_trade_amounts",
             return_value=[10, 8, 10],
@@ -371,6 +375,8 @@ class OffersRouterHelperTests(unittest.IsolatedAsyncioTestCase):
 
         with patch("api.routers.offers.current_server", return_value="foreign"), patch.object(
             offers_module.settings, "channel_id", "@offers"
+        ), patch.object(
+            offers_module.settings, "bot_token", "token"
         ), patch(
             "api.routers.offers.telegram_gateway.send_message",
             new=AsyncMock(return_value=TelegramGatewayResult(ok=False, method="sendMessage", status_code=500, error="bad gateway")),
@@ -381,6 +387,8 @@ class OffersRouterHelperTests(unittest.IsolatedAsyncioTestCase):
 
         with patch("api.routers.offers.current_server", return_value="foreign"), patch.object(
             offers_module.settings, "channel_id", "@offers"
+        ), patch.object(
+            offers_module.settings, "bot_token", "token"
         ), patch(
             "api.routers.offers.telegram_gateway.send_message",
             new=AsyncMock(side_effect=RuntimeError("telegram down")),
@@ -463,7 +471,8 @@ class OffersRouterHelperTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("coalesce(offers.expired_at, offers.updated_at, offers.created_at) >=", recent_expired_sql)
         self.assertIn("offers.status = 'EXPIRED'", recent_expired_sql)
         self.assertIn("offers.status = 'ACTIVE'", recent_expired_sql)
-        self.assertIn("offers.created_at <", recent_expired_sql)
+        self.assertIn("EXTRACT(epoch FROM offers.created_at)", recent_expired_sql)
+        self.assertIn("overtime_minutes_snapshot", recent_expired_sql)
         self.assertIn("offers.created_at >=", recent_expired_sql)
         self.assertIn("OR", recent_expired_sql)
         self.assertIn("ORDER BY coalesce(offers.expired_at, offers.updated_at, offers.created_at) DESC", recent_expired_sql)
@@ -562,7 +571,8 @@ class OffersRouterHelperTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("offers.expire_reason = 'time_limit'", history_sql)
         self.assertIn("coalesce(anon_1.traded_quantity, 0) = 0", history_sql)
         self.assertIn("coalesce(offers.expired_at, offers.updated_at, offers.created_at) >=", history_sql)
-        self.assertIn("offers.created_at <=", history_sql)
+        self.assertIn("EXTRACT(epoch FROM offers.created_at)", history_sql)
+        self.assertIn("overtime_minutes_snapshot", history_sql)
         self.assertIn("ORDER BY CASE", history_sql)
         self.assertIn("OFFSET 25", history_sql)
         self.assertIn("LIMIT 25", history_sql)

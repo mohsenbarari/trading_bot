@@ -1,0 +1,371 @@
+import unittest
+import base64
+import hashlib
+from datetime import datetime
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
+
+from core.services import telegram_notification_outbox_service as outbox_service
+from core.telegram_delivery_notification_action_contract import (
+    TELEGRAM_NOTIFICATION_ACTIONS,
+    TELEGRAM_NOTIFICATION_ACTION_POLICIES,
+    TELEGRAM_NOTIFICATION_ACTION_SOURCE_TYPES,
+    telegram_notification_action_policy,
+    telegram_notification_action_policy_from_source,
+)
+from core.telegram_delivery_interaction_result_contract import (
+    TelegramInteractionAnchorEffect,
+    TelegramInteractionResultRequirement,
+    build_interaction_result_contract,
+)
+from core.telegram_delivery_queue_contract import (
+    TelegramDeliveryAction,
+    TelegramDestinationClass,
+    TelegramFeederKind,
+)
+from core.telegram_delivery_runtime_composition import (
+    configured_telegram_delivery_freshness_registry,
+    configured_telegram_delivery_lifecycle_registry,
+)
+from models.telegram_notification_outbox import TelegramNotificationOutbox
+
+
+class TelegramDeliveryNotificationActionContractTests(
+    unittest.IsolatedAsyncioTestCase
+):
+    def test_only_private_send_message_actions_are_allowlisted(self):
+        self.assertEqual(
+            TELEGRAM_NOTIFICATION_ACTIONS,
+            frozenset(
+                {
+                    TelegramDeliveryAction.ACCOUNT_STATUS,
+                    TelegramDeliveryAction.DELAYED_RESTRICTION,
+                    TelegramDeliveryAction.GENERAL_ANNOUNCEMENT,
+                    TelegramDeliveryAction.GENERAL_IMMEDIATE,
+                    TelegramDeliveryAction.OFFER_VALIDATION_RESPONSE,
+                    TelegramDeliveryAction.TARGETED_ADMIN_MESSAGE,
+                    TelegramDeliveryAction.TRADE_ALTERNATIVE,
+                    TelegramDeliveryAction.TRADE_NONCRITICAL,
+                    TelegramDeliveryAction.TRADE_RESPONSE,
+                    TelegramDeliveryAction.TRADE_UNAVAILABLE,
+                    TelegramDeliveryAction.TIMED_SECURITY,
+                }
+            ),
+        )
+        for forbidden in (
+            TelegramDeliveryAction.CALLBACK_DEADLINE,
+            TelegramDeliveryAction.OFFER_EXPIRY_CALLBACK,
+            TelegramDeliveryAction.OFFER_SUCCESS,
+            TelegramDeliveryAction.TEMPORARY_CLEANUP,
+        ):
+            with self.subTest(forbidden=forbidden.value):
+                with self.assertRaisesRegex(ValueError, "unsupported"):
+                    telegram_notification_action_policy(forbidden)
+
+    def test_source_types_are_unique_bounded_and_reversible(self):
+        self.assertEqual(
+            len(TELEGRAM_NOTIFICATION_ACTION_SOURCE_TYPES),
+            len(TELEGRAM_NOTIFICATION_ACTIONS),
+        )
+        for action, policy in TELEGRAM_NOTIFICATION_ACTION_POLICIES.items():
+            with self.subTest(action=action.value):
+                self.assertLessEqual(len(policy.source_type), 80)
+                self.assertIs(
+                    telegram_notification_action_policy_from_source(
+                        policy.source_type
+                    ),
+                    policy,
+                )
+        self.assertFalse(
+            TELEGRAM_NOTIFICATION_ACTION_POLICIES[
+                TelegramDeliveryAction.ACCOUNT_STATUS
+            ].require_bot_access
+        )
+        self.assertFalse(
+            TELEGRAM_NOTIFICATION_ACTION_POLICIES[
+                TelegramDeliveryAction.TIMED_SECURITY
+            ].require_bot_access
+        )
+        handoff_index = next(
+            index
+            for index in TelegramNotificationOutbox.__table__.indexes
+            if index.name == "ix_telegram_notification_outbox_queue_handoff"
+        )
+        predicate = str(handoff_index.dialect_options["postgresql"]["where"])
+        for source_type in TELEGRAM_NOTIFICATION_ACTION_SOURCE_TYPES:
+            with self.subTest(source_type=source_type):
+                self.assertIn(source_type, predicate)
+
+    async def test_generic_enqueue_stamps_action_contract(self):
+        expected = SimpleNamespace(outbox=object(), created=True)
+        recipient = outbox_service.TelegramNotificationRecipient(
+            user_id=7,
+            telegram_id=7007,
+        )
+        with patch.object(
+            outbox_service,
+            "enqueue_telegram_notification_once",
+            new=AsyncMock(return_value=expected),
+        ) as enqueue:
+            result = await outbox_service.enqueue_telegram_action_notification_once(
+                object(),
+                recipient=recipient,
+                action=TelegramDeliveryAction.TRADE_ALTERNATIVE,
+                source_id="trade:11:alternative:7",
+                text="پیشنهاد جایگزین",
+                user_sync_version=5,
+                parse_mode="Markdown",
+                reply_markup={"inline_keyboard": []},
+            )
+        self.assertIs(result, expected)
+        self.assertEqual(
+            enqueue.await_args.kwargs["source_type"],
+            "queue_action:trade_alternative",
+        )
+        self.assertEqual(
+            enqueue.await_args.kwargs["extra_payload"],
+            {
+                "queue_action": "trade_alternative",
+                "reply_markup": {"inline_keyboard": []},
+                "user_sync_version": 5,
+            },
+        )
+
+    async def test_persistent_menu_requires_interaction_anchor_metadata(self):
+        recipient = outbox_service.TelegramNotificationRecipient(
+            user_id=7,
+            telegram_id=7007,
+        )
+
+        with self.assertRaisesRegex(ValueError, "persistent_menu_requires_interaction"):
+            await outbox_service.enqueue_telegram_action_notification_once(
+                object(),
+                recipient=recipient,
+                action=TelegramDeliveryAction.GENERAL_IMMEDIATE,
+                source_id="menu:7:untracked",
+                text="منوی اصلی",
+                user_sync_version=5,
+                reply_markup={"keyboard": [[{"text": "منوی اصلی"}]]},
+            )
+
+    async def test_document_enqueue_validates_and_persists_bounded_content(self):
+        document = b"safe-report"
+        encoded = base64.b64encode(document).decode("ascii")
+        digest = hashlib.sha256(document).hexdigest()
+        contract = build_interaction_result_contract(
+            logical_message_key="private-document:7:report:91",
+            method="sendDocument",
+            destination_class=TelegramDestinationClass.PRIVATE,
+            result_requirement=TelegramInteractionResultRequirement.NONE,
+            anchor_effect=TelegramInteractionAnchorEffect.PRESERVE_CURRENT,
+            authenticated=True,
+        )
+        expected = SimpleNamespace(outbox=object(), created=True)
+        recipient = outbox_service.TelegramNotificationRecipient(
+            user_id=7,
+            telegram_id=7007,
+        )
+        with patch.object(
+            outbox_service,
+            "enqueue_telegram_notification_once",
+            new=AsyncMock(return_value=expected),
+        ) as enqueue:
+            result = await outbox_service.enqueue_telegram_action_notification_once(
+                object(),
+                recipient=recipient,
+                action=TelegramDeliveryAction.TRADE_NONCRITICAL,
+                source_id="document:7:report:91",
+                text="گزارش",
+                user_sync_version=5,
+                interaction_result=contract,
+                document_base64=encoded,
+                document_filename="report.xlsx",
+                document_sha256=digest,
+            )
+
+        self.assertIs(result, expected)
+        payload = enqueue.await_args.kwargs["extra_payload"]
+        self.assertEqual(payload["document_base64"], encoded)
+        self.assertEqual(payload["document_filename"], "report.xlsx")
+        self.assertEqual(payload["document_sha256"], digest)
+        self.assertEqual(payload["interaction_result"]["method"], "sendDocument")
+
+    async def test_document_enqueue_rejects_tampering_and_unsafe_filename(self):
+        document = b"safe-report"
+        encoded = base64.b64encode(document).decode("ascii")
+        contract = build_interaction_result_contract(
+            logical_message_key="private-document:7:report:91",
+            method="sendDocument",
+            destination_class=TelegramDestinationClass.PRIVATE,
+            result_requirement=TelegramInteractionResultRequirement.NONE,
+            anchor_effect=TelegramInteractionAnchorEffect.PRESERVE_CURRENT,
+            authenticated=True,
+        )
+        recipient = outbox_service.TelegramNotificationRecipient(
+            user_id=7,
+            telegram_id=7007,
+        )
+        invalid_cases = (
+            ({"document_base64": "not-base64"}, "encoding_invalid"),
+            ({"document_sha256": "0" * 64}, "hash_invalid"),
+            ({"document_filename": "../report.xlsx"}, "filename_invalid"),
+        )
+        defaults = {
+            "document_base64": encoded,
+            "document_filename": "report.xlsx",
+            "document_sha256": hashlib.sha256(document).hexdigest(),
+        }
+        for overrides, error in invalid_cases:
+            with self.subTest(error=error), self.assertRaisesRegex(ValueError, error):
+                await outbox_service.enqueue_telegram_action_notification_once(
+                    object(),
+                    recipient=recipient,
+                    action=TelegramDeliveryAction.TRADE_NONCRITICAL,
+                    source_id=f"document:7:{error}:91",
+                    text="گزارش",
+                    user_sync_version=5,
+                    interaction_result=contract,
+                    **{**defaults, **overrides},
+                )
+
+    async def test_account_enqueue_requires_explicit_state_snapshot(self):
+        recipient = outbox_service.TelegramNotificationRecipient(
+            user_id=8,
+            telegram_id=8008,
+        )
+        with self.assertRaisesRegex(ValueError, "requires_state_contract"):
+            await outbox_service.enqueue_telegram_action_notification_once(
+                object(),
+                recipient=recipient,
+                action=TelegramDeliveryAction.ACCOUNT_STATUS,
+                source_id="account:8",
+                text="وضعیت حساب",
+                user_sync_version=1,
+            )
+        with patch.object(
+            outbox_service,
+            "enqueue_telegram_notification_once",
+            new=AsyncMock(return_value=SimpleNamespace(created=True)),
+        ) as enqueue:
+            await outbox_service.enqueue_account_status_telegram_notification_once(
+                object(),
+                recipient=recipient,
+                source_id="account:8:inactive",
+                text="حساب غیرفعال شد",
+                account_status="inactive",
+                messenger_blocked=False,
+                user_sync_version=9,
+            )
+        self.assertEqual(
+            enqueue.await_args.kwargs["extra_payload"],
+            {
+                "account_status": "inactive",
+                "messenger_blocked": False,
+                "queue_action": "account_status",
+                "user_sync_version": 9,
+            },
+        )
+
+    async def test_account_restriction_and_deletion_enqueues_capture_authoritative_state(self):
+        recipient = outbox_service.TelegramNotificationRecipient(
+            user_id=8,
+            telegram_id=8008,
+        )
+        restricted_user = SimpleNamespace(
+            trading_restricted_until=datetime(
+                2026,
+                7,
+                20,
+                10,
+                30,
+            )
+        )
+        deleted_user = SimpleNamespace(
+            is_deleted=True,
+            deleted_at=datetime(2026, 7, 18, 12, 0),
+            telegram_id=None,
+        )
+        with patch.object(
+            outbox_service,
+            "enqueue_telegram_notification_once",
+            new=AsyncMock(return_value=SimpleNamespace(created=True)),
+        ) as enqueue:
+            await outbox_service.enqueue_account_restriction_telegram_notification_once(
+                object(),
+                recipient=recipient,
+                source_id="restriction:8:11",
+                text="حساب محدود شد",
+                user=restricted_user,
+                restriction_kind="block",
+                user_sync_version=11,
+            )
+            restriction_payload = enqueue.await_args.kwargs["extra_payload"]
+
+            await outbox_service.enqueue_account_deletion_telegram_notification_once(
+                object(),
+                recipient=recipient,
+                source_id="deleted:8:12",
+                text="حساب حذف شد",
+                user=deleted_user,
+                user_sync_version=12,
+            )
+            deletion_payload = enqueue.await_args.kwargs["extra_payload"]
+
+        self.assertEqual(
+            restriction_payload,
+            {
+                "account_notice_kind": "restriction_active",
+                "queue_action": "account_status",
+                "restriction_kind": "block",
+                "restriction_snapshot": {
+                    "trading_restricted_until": "2026-07-20T10:30:00+00:00"
+                },
+                "user_sync_version": 11,
+            },
+        )
+        self.assertEqual(
+            deletion_payload,
+            {
+                "account_notice_kind": "account_deleted",
+                "deleted_account_snapshot": {
+                    "deleted_at": "2026-07-18T12:00:00+00:00"
+                },
+                "queue_action": "account_status",
+                "user_sync_version": 12,
+            },
+        )
+
+    def test_runtime_coverage_is_complete_for_primary_lane(self):
+        freshness = configured_telegram_delivery_freshness_registry(
+            channel_id=-1001234567890
+        ).coverage("primary")
+        lifecycle = configured_telegram_delivery_lifecycle_registry(
+            channel_id=-1001234567890
+        ).coverage("primary")
+        self.assertTrue(freshness.complete)
+        self.assertEqual(freshness.missing_actions, ())
+        self.assertEqual(freshness.missing_actions, lifecycle.missing_actions)
+
+    def test_feeder_mapping_matches_accepted_priority_families(self):
+        self.assertEqual(
+            telegram_notification_action_policy(
+                TelegramDeliveryAction.OFFER_VALIDATION_RESPONSE
+            ).feeder,
+            TelegramFeederKind.OFFER_CONTROL,
+        )
+        self.assertEqual(
+            telegram_notification_action_policy(
+                TelegramDeliveryAction.TRADE_RESPONSE
+            ).feeder,
+            TelegramFeederKind.TRADE,
+        )
+        self.assertEqual(
+            telegram_notification_action_policy(
+                TelegramDeliveryAction.GENERAL_IMMEDIATE
+            ).feeder,
+            TelegramFeederKind.DIRECT,
+        )
+
+
+if __name__ == "__main__":
+    unittest.main()

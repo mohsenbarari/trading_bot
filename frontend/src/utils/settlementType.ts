@@ -13,8 +13,8 @@ export function tradeSettlementLabel(value: unknown): string {
 }
 
 export function offerDraftPrefix(tradeType: 'buy' | 'sell', settlementType: unknown): string {
-  const tradeLabel = tradeType === 'buy' ? 'خرید' : 'فروش'
+  const tradeLabel = tradeType === 'buy' ? 'خ' : 'ف'
   return normalizeSettlementType(settlementType) === 'tomorrow'
-    ? `${tradeLabel} نقد فردا`
-    : `${tradeLabel} نقد`
+    ? `${tradeLabel} ف`
+    : tradeLabel
 }

@@ -14,12 +14,15 @@ class StaticSurfaceSmokeTests(unittest.TestCase):
             'manifest.webmanifest',
             'share-target-sw.js',
             'sw.js',
-            'workbox-8c29f6e4.js',
         )
 
         for relative_path in expected_files:
             with self.subTest(relative_path=relative_path):
                 self.assertTrue((mini_app_dist / relative_path).exists())
+
+        workbox_files = sorted(mini_app_dist.glob('workbox-*.js'))
+        self.assertEqual(len(workbox_files), 1)
+        self.assertGreater(workbox_files[0].stat().st_size, 0)
 
         manifest = json.loads((mini_app_dist / 'manifest.webmanifest').read_text(encoding='utf-8'))
         self.assertEqual(manifest['name'], 'Gold')

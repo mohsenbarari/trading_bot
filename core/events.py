@@ -489,11 +489,13 @@ def setup_offer_events():
 def _offer_request_sync_payload(target, connection=None) -> Dict[str, Any]:
     source_surface = getattr(target, "request_source_surface", None)
     result_status = getattr(target, "result_status", None)
+    workflow_kind = getattr(target, "workflow_kind", None)
     commission_rate = getattr(target, "customer_commission_rate_snapshot", None)
     resulting_trade_number = _offer_request_resulting_trade_number(target, connection=connection)
     return {
         "id": target.id,
         "version_id": getattr(target, "version_id", None) or 1,
+        "request_public_id": getattr(target, "request_public_id", None),
         "request_home_server": target.request_home_server,
         "local_offer_id": target.local_offer_id,
         "offer_public_id": target.offer_public_id,
@@ -503,6 +505,15 @@ def _offer_request_sync_payload(target, connection=None) -> Dict[str, Any]:
         "request_source_server": target.request_source_server,
         "requested_quantity": target.requested_quantity,
         "idempotency_key": target.idempotency_key,
+        "workflow_kind": workflow_kind.value if hasattr(workflow_kind, "value") else workflow_kind,
+        "offer_owner_user_id": getattr(target, "offer_owner_user_id", None),
+        "queue_sequence": getattr(target, "queue_sequence", None),
+        "presented_at": _isoformat_or_none(getattr(target, "presented_at", None)),
+        "decision_deadline_at": _isoformat_or_none(getattr(target, "decision_deadline_at", None)),
+        "decided_by_user_id": getattr(target, "decided_by_user_id", None),
+        "terminal_reason": getattr(target, "terminal_reason", None),
+        # telegram_delivery_job_id is local-only (parity); message id syncs for audit mirrors.
+        "telegram_message_id": getattr(target, "telegram_message_id", None),
         "received_at": _isoformat_or_none(getattr(target, "received_at", None)),
         "decided_at": _isoformat_or_none(getattr(target, "decided_at", None)),
         "result_status": result_status.value if hasattr(result_status, "value") else result_status,
@@ -594,6 +605,11 @@ def _offer_publication_state_sync_payload(target) -> Dict[str, Any]:
         "offer_home_server": target.offer_home_server,
         "surface": surface.value if hasattr(surface, "value") else surface,
         "publication_owner_server": target.publication_owner_server,
+        "publisher_bot_identity": getattr(
+            target,
+            "publisher_bot_identity",
+            None,
+        ),
         "status": status.value if hasattr(status, "value") else status,
         "dedupe_key": target.dedupe_key,
         "surface_resource_id": target.surface_resource_id,
@@ -999,55 +1015,64 @@ def setup_telegram_notification_outbox_events():
     logger.info("✅ TelegramNotificationOutbox event listeners registered")
 
 
+def build_user_sync_payload(target, *, include_created_at: bool = False) -> Dict[str, Any]:
+    """Explicit wire payload for a synced user row.
+
+    Module level rather than a closure so the field list can be asserted
+    directly; a field missing here simply never reaches the peer.
+    """
+    data = {
+        "id": target.id,
+        "telegram_id": target.telegram_id,
+        "username": target.username,
+        "full_name": target.full_name,
+        "mobile_number": target.mobile_number,
+        "account_name": target.account_name,
+        "address": target.address,
+        "role": target.role.value if target.role else None,
+        "account_status": target.account_status.value if getattr(target, "account_status", None) else None,
+        "deactivated_at": target.deactivated_at.isoformat() if getattr(target, "deactivated_at", None) else None,
+        "messenger_grace_expires_at": target.messenger_grace_expires_at.isoformat() if getattr(target, "messenger_grace_expires_at", None) else None,
+        "messenger_blocked_at": target.messenger_blocked_at.isoformat() if getattr(target, "messenger_blocked_at", None) else None,
+        "global_lock_grace_expires_at": target.messenger_grace_expires_at.isoformat() if getattr(target, "messenger_grace_expires_at", None) else None,
+        "global_web_locked_at": target.messenger_blocked_at.isoformat() if getattr(target, "messenger_blocked_at", None) else None,
+        "has_bot_access": target.has_bot_access,
+        "bot_onboarding_required_step": getattr(target, "bot_onboarding_required_step", 0),
+        "bot_onboarding_completed_step": getattr(target, "bot_onboarding_completed_step", 0),
+        "bot_onboarding_completed_at": target.bot_onboarding_completed_at.isoformat() if getattr(target, "bot_onboarding_completed_at", None) else None,
+        "home_server": target.home_server,
+        "is_deleted": target.is_deleted,
+        "deleted_at": target.deleted_at.isoformat() if target.deleted_at else None,
+        "can_block_users": target.can_block_users,
+        "max_blocked_users": target.max_blocked_users,
+        "max_daily_trades": target.max_daily_trades,
+        "max_active_commodities": target.max_active_commodities,
+        "max_daily_requests": target.max_daily_requests,
+        "trading_restricted_until": target.trading_restricted_until.isoformat() if target.trading_restricted_until else None,
+        "limitations_expire_at": target.limitations_expire_at.isoformat() if target.limitations_expire_at else None,
+        "trades_count": target.trades_count,
+        "commodities_traded_count": target.commodities_traded_count,
+        "channel_messages_count": target.channel_messages_count,
+        "counter_epoch": int(getattr(target, "counter_epoch", 1) or 1),
+        "max_sessions": target.max_sessions,
+        "max_accountants": getattr(target, "max_accountants", 3),
+        "max_customers": getattr(target, "max_customers", 5),
+        "offer_overtime_minutes": int(getattr(target, "offer_overtime_minutes", 0) or 0),
+        "last_seen_at": target.last_seen_at.isoformat() if target.last_seen_at else None,
+        "sync_version": int(getattr(target, "sync_version", 1) or 1),
+    }
+    if include_created_at:
+        data["created_at"] = target.created_at.isoformat() if target.created_at else None
+    else:
+        data["updated_at"] = target.updated_at.isoformat() if target.updated_at else None
+    return data
+
+
 def setup_user_events():
     """Setup event listeners for User model"""
     from models.user import User
 
-    def user_payload(target, *, include_created_at: bool) -> Dict[str, Any]:
-        data = {
-            "id": target.id,
-            "telegram_id": target.telegram_id,
-            "username": target.username,
-            "full_name": target.full_name,
-            "mobile_number": target.mobile_number,
-            "account_name": target.account_name,
-            "address": target.address,
-            "role": target.role.value if target.role else None,
-            "account_status": target.account_status.value if getattr(target, "account_status", None) else None,
-            "deactivated_at": target.deactivated_at.isoformat() if getattr(target, "deactivated_at", None) else None,
-            "messenger_grace_expires_at": target.messenger_grace_expires_at.isoformat() if getattr(target, "messenger_grace_expires_at", None) else None,
-            "messenger_blocked_at": target.messenger_blocked_at.isoformat() if getattr(target, "messenger_blocked_at", None) else None,
-            "global_lock_grace_expires_at": target.messenger_grace_expires_at.isoformat() if getattr(target, "messenger_grace_expires_at", None) else None,
-            "global_web_locked_at": target.messenger_blocked_at.isoformat() if getattr(target, "messenger_blocked_at", None) else None,
-            "has_bot_access": target.has_bot_access,
-            "bot_onboarding_required_step": getattr(target, "bot_onboarding_required_step", 0),
-            "bot_onboarding_completed_step": getattr(target, "bot_onboarding_completed_step", 0),
-            "bot_onboarding_completed_at": target.bot_onboarding_completed_at.isoformat() if getattr(target, "bot_onboarding_completed_at", None) else None,
-            "home_server": target.home_server,
-            "is_deleted": target.is_deleted,
-            "deleted_at": target.deleted_at.isoformat() if target.deleted_at else None,
-            "can_block_users": target.can_block_users,
-            "max_blocked_users": target.max_blocked_users,
-            "max_daily_trades": target.max_daily_trades,
-            "max_active_commodities": target.max_active_commodities,
-            "max_daily_requests": target.max_daily_requests,
-            "trading_restricted_until": target.trading_restricted_until.isoformat() if target.trading_restricted_until else None,
-            "limitations_expire_at": target.limitations_expire_at.isoformat() if target.limitations_expire_at else None,
-            "trades_count": target.trades_count,
-            "commodities_traded_count": target.commodities_traded_count,
-            "channel_messages_count": target.channel_messages_count,
-            "counter_epoch": int(getattr(target, "counter_epoch", 1) or 1),
-            "max_sessions": target.max_sessions,
-            "max_accountants": getattr(target, "max_accountants", 3),
-            "max_customers": getattr(target, "max_customers", 5),
-            "last_seen_at": target.last_seen_at.isoformat() if target.last_seen_at else None,
-            "sync_version": int(getattr(target, "sync_version", 1) or 1),
-        }
-        if include_created_at:
-            data["created_at"] = target.created_at.isoformat() if target.created_at else None
-        else:
-            data["updated_at"] = target.updated_at.isoformat() if target.updated_at else None
-        return data
+    user_payload = build_user_sync_payload
 
     @event.listens_for(User, 'before_update')
     def bump_user_sync_version(mapper, connection, target):

@@ -55,6 +55,10 @@ from core.services.customer_relation_service import (
     is_customer_invitation_token,
 )
 from core.utils import utc_now
+from core.telegram_delivery_runtime_policy import (
+    TelegramDeliveryRuntimeMode,
+    configured_telegram_delivery_runtime,
+)
 from models.customer_relation import CustomerRelationStatus, CustomerTier
 from models.invitation import Invitation, InvitationCompletionSurface, InvitationKind
 from models.telegram_registration_intent import (
@@ -74,6 +78,14 @@ from bot.onboarding import (
 )
 from bot.states import Registration
 from bot.repeat_offer import build_persistent_navigation_keyboard
+from bot.telegram_callback_answer import answer_callback_query_via_runtime
+from bot.telegram_pre_auth_interaction import (
+    answer_pre_auth_callback_message_via_runtime,
+    answer_pre_auth_chat_via_runtime,
+    answer_pre_auth_message_via_runtime,
+    answer_pre_auth_non_private_message_via_runtime,
+    edit_pre_auth_callback_message_via_runtime,
+)
 from bot.handlers.link_account import (
     BOT_ACCOUNT_INACTIVE_REASON,
     bot_account_access_denial_reason,
@@ -90,7 +102,7 @@ from bot.utils.public_profile import (
     load_bot_public_profile,
 )
 from bot.message_manager import (
-    set_anchor, 
+    set_anchor,
     delete_previous_anchor,
     DeleteDelay
 )
@@ -168,9 +180,18 @@ async def _reject_non_private_registration(
     await _clear_registration_owned_fsm(state)
     text = "برای حفظ امنیت اطلاعات، ثبت‌نام را فقط در گفت‌وگوی خصوصی بات انجام دهید."
     if is_callback:
-        await event.answer(text, show_alert=True)
+        await answer_callback_query_via_runtime(
+            event,
+            text,
+            show_alert=True,
+        )
     elif getattr(event, "chat", None) is not None:
-        await event.answer(text, reply_markup=types.ReplyKeyboardRemove())
+        await answer_pre_auth_non_private_message_via_runtime(
+            event,
+            text,
+            source_key="registration-non-private-rejected",
+            reply_markup=types.ReplyKeyboardRemove(),
+        )
     return True
 
 
@@ -449,12 +470,12 @@ async def _send_registration_handoff(
             TelegramRegistrationIntentStatus.REJECTED,
             TelegramRegistrationIntentStatus.EXPIRED,
         }:
-            await message.answer(
+            await answer_pre_auth_message_via_runtime(message,
                 _registration_rejection_message(resolution.reason or resolution.status.value),
                 reply_markup=types.ReplyKeyboardRemove(),
             )
             return
-        await message.answer(
+        await answer_pre_auth_message_via_runtime(message,
             _registration_pending_message(),
             reply_markup=types.ReplyKeyboardRemove(),
         )
@@ -463,14 +484,14 @@ async def _send_registration_handoff(
     user = resolution.user
     user, pending_tutorial_step = await _ensure_registration_onboarding(user)
     if pending_tutorial_step is not None:
-        anchor_msg = await message.answer(
+        anchor_msg = await answer_pre_auth_message_via_runtime(message,
             onboarding_text_for_step(pending_tutorial_step),
             reply_markup=build_onboarding_keyboard(pending_tutorial_step),
         )
         set_anchor(message.chat.id, anchor_msg.message_id)
         return
 
-    anchor_msg = await message.answer(
+    anchor_msg = await answer_pre_auth_message_via_runtime(message,
         await build_linked_account_panel_message(
             getattr(message, "bot", None),
             user,
@@ -547,7 +568,7 @@ async def _begin_direct_registration(
 
     invitation_state = _enum_value(derive_invitation_state(invitation))
     if invitation_state not in {"pending", "completed"}:
-        await message.answer(
+        await answer_pre_auth_message_via_runtime(message,
             _registration_rejection_message(
                 "invitation_revoked"
                 if getattr(invitation, "revoked_at", None) is not None
@@ -559,7 +580,7 @@ async def _begin_direct_registration(
 
     expires_at = _utc_datetime(invitation.expires_at)
     if expires_at is None or expires_at <= utc_now():
-        await message.answer(
+        await answer_pre_auth_message_via_runtime(message,
             _registration_rejection_message("invitation_expired"),
             reply_markup=types.ReplyKeyboardRemove(),
         )
@@ -568,7 +589,7 @@ async def _begin_direct_registration(
     if not is_canonical_invitation_short_code(
         getattr(invitation, "short_code", None)
     ):
-        await message.answer(
+        await answer_pre_auth_message_via_runtime(message,
             _registration_rejection_message("legacy_state_ambiguous"),
             reply_markup=types.ReplyKeyboardRemove(),
         )
@@ -580,7 +601,7 @@ async def _begin_direct_registration(
             invitation.mobile_number
         )
     except ValueError:
-        await message.answer(
+        await answer_pre_auth_message_via_runtime(message,
             _registration_rejection_message("identity_conflict"),
             reply_markup=types.ReplyKeyboardRemove(),
         )
@@ -607,7 +628,7 @@ async def _begin_direct_registration(
         result="success",
         extra={"surface": "telegram"},
     )
-    anchor_msg = await message.answer(
+    anchor_msg = await answer_pre_auth_message_via_runtime(message,
         "✅ لینک دعوت معتبر است.\n\nبرای تایید هویت، شماره موبایل همین حساب تلگرام را از دکمه زیر ارسال کنید.",
         reply_markup=types.ReplyKeyboardMarkup(
             keyboard=[
@@ -706,13 +727,13 @@ def build_customer_register_link_line(short_code: object) -> str | None:
 
 @router.message(CommandStart(deep_link=True))
 async def handle_start_with_token(message: types.Message, command: CommandObject, state: FSMContext, user: Optional[User]):
-    
+
     token = command.args
 
     if token and token.startswith("link_"):
         await delete_previous_anchor(message.bot, message.chat.id, delay=DeleteDelay.DEFAULT.value)
         if user:
-            anchor_msg = await message.answer(
+            anchor_msg = await answer_pre_auth_message_via_runtime(message,
                 await build_returning_account_panel_message(message.bot, user),
                 reply_markup=await build_persistent_navigation_keyboard(
                     user,
@@ -727,7 +748,7 @@ async def handle_start_with_token(message: types.Message, command: CommandObject
             try:
                 await load_pending_telegram_link_token_user_with_sync_grace(session, raw_link_token)
             except TelegramLinkTokenError:
-                anchor_msg = await message.answer(
+                anchor_msg = await answer_pre_auth_message_via_runtime(message,
                     "لینک اتصال آماده نیست یا منقضی شده است. از وب‌اپ دوباره وارد مسیر اتصال شوید.",
                     reply_markup=types.ReplyKeyboardRemove(),
                 )
@@ -744,52 +765,60 @@ async def handle_start_with_token(message: types.Message, command: CommandObject
         )
         set_anchor(message.chat.id, anchor_msg.message_id)
         return
-    
+
     # --- بررسی لینک پروفایل عمومی ---
     if token and token.startswith("profile_"):
-        try:
-            await message.delete()
-        except Exception:
-            pass
+        if (
+            configured_telegram_delivery_runtime().mode
+            != TelegramDeliveryRuntimeMode.QUEUE_V1
+        ):
+            try:
+                await message.delete()
+            except Exception:
+                pass
 
         try:
             target_user_id = int(token.replace("profile_", ""))
             async with AsyncSessionLocal() as session:
                 profile = await load_bot_public_profile(session, viewer=user, target_user_id=target_user_id)
                 if profile is None:
-                    await message.answer("❌ پروفایل در دسترس نیست.")
+                    await answer_pre_auth_message_via_runtime(message, "❌ پروفایل در دسترس نیست.")
                     return
 
                 await delete_previous_anchor(message.bot, message.chat.id, delay=0)
-                anchor_msg = await message.answer(
+                anchor_msg = await answer_pre_auth_message_via_runtime(message,
                     build_bot_public_profile_text(profile),
                     reply_markup=build_bot_public_profile_keyboard(profile),
                 )
                 set_anchor(message.chat.id, anchor_msg.message_id)
         except (ValueError, Exception):
-            await message.answer("❌ لینک نامعتبر است.")
+            await answer_pre_auth_message_via_runtime(message, "❌ لینک نامعتبر است.")
         return
-    
+
     # --- بررسی لینک پاسخ به لفظ ---
     if token and token.startswith("respond_"):
-        try:
-            await message.delete()
-        except Exception:
-            pass
-        
+        if (
+            configured_telegram_delivery_runtime().mode
+            != TelegramDeliveryRuntimeMode.QUEUE_V1
+        ):
+            try:
+                await message.delete()
+            except Exception:
+                pass
+
         if not user:
-            await message.answer("❌ برای انجام معامله ابتدا باید ثبت‌نام کنید.")
+            await answer_pre_auth_message_via_runtime(message, "❌ برای انجام معامله ابتدا باید ثبت‌نام کنید.")
             return
 
-        await message.answer(LEGACY_RESPOND_PATH_DISABLED_MESSAGE)
+        await answer_pre_auth_message_via_runtime(message, LEGACY_RESPOND_PATH_DISABLED_MESSAGE)
         return
-    
+
     # --- حذف پیام و لنگر برای سایر حالات ---
     await delete_previous_anchor(message.bot, message.chat.id, delay=DeleteDelay.DEFAULT.value)
 
     if _direct_registration_runtime_ready() and await _reject_non_private_registration(message, state):
         return
-    
+
     # --- کاربر قبلاً ثبت‌نام کرده ---
     if user:
         if _direct_registration_runtime_ready():
@@ -800,18 +829,18 @@ async def handle_start_with_token(message: types.Message, command: CommandObject
                 )
                 decision = await evaluate_bot_access(session, user)
             if activation_block is not None:
-                await message.answer(
+                await answer_pre_auth_message_via_runtime(message,
                     _registration_pending_message(),
                     reply_markup=types.ReplyKeyboardRemove(),
                 )
                 return
             if not decision.allowed:
-                await message.answer(
+                await answer_pre_auth_message_via_runtime(message,
                     build_bot_account_access_denial_message(decision.reason),
                     reply_markup=types.ReplyKeyboardRemove(),
                 )
                 return
-        anchor_msg = await message.answer(
+        anchor_msg = await answer_pre_auth_message_via_runtime(message,
             await build_returning_account_panel_message(message.bot, user),
             reply_markup=await build_persistent_navigation_keyboard(
                 user,
@@ -820,7 +849,7 @@ async def handle_start_with_token(message: types.Message, command: CommandObject
         )
         set_anchor(message.chat.id, anchor_msg.message_id)
         return
-        
+
     # --- لینک دعوت ---
     async with AsyncSessionLocal() as session:
         inv_stmt = select(Invitation).where(Invitation.token == token)
@@ -832,7 +861,7 @@ async def handle_start_with_token(message: types.Message, command: CommandObject
             or getattr(invitation, "revoked_at", None) is not None
             or str(getattr(getattr(invitation, "kind", None), "value", getattr(invitation, "kind", ""))) == "legacy_unknown"
         ):
-            bot_response = await message.answer("لینک دعوت شما نامعتبر یا منقضی شده است.", reply_markup=types.ReplyKeyboardRemove())
+            bot_response = await answer_pre_auth_message_via_runtime(message, "لینک دعوت شما نامعتبر یا منقضی شده است.", reply_markup=types.ReplyKeyboardRemove())
             return
 
         audit_log(
@@ -845,7 +874,7 @@ async def handle_start_with_token(message: types.Message, command: CommandObject
         if is_accountant_invitation_token(token):
             relation = await get_pending_accountant_relation_by_invitation_token(session, token)
             if not relation:
-                await message.answer("لینک دعوت شما نامعتبر یا منقضی شده است.", reply_markup=types.ReplyKeyboardRemove())
+                await answer_pre_auth_message_via_runtime(message, "لینک دعوت شما نامعتبر یا منقضی شده است.", reply_markup=types.ReplyKeyboardRemove())
                 return
 
             accountant_lines = [
@@ -855,7 +884,7 @@ async def handle_start_with_token(message: types.Message, command: CommandObject
             register_line = build_accountant_register_link_line(invitation.short_code)
             if register_line:
                 accountant_lines.append(register_line)
-            await message.answer(
+            await answer_pre_auth_message_via_runtime(message,
                 "\n\n".join(accountant_lines),
                 reply_markup=types.ReplyKeyboardRemove(),
                 parse_mode="Markdown",
@@ -869,7 +898,7 @@ async def handle_start_with_token(message: types.Message, command: CommandObject
                 else await get_pending_customer_relation_by_invitation_token(session, token)
             )
             if not relation:
-                await message.answer("لینک دعوت شما نامعتبر یا منقضی شده است.", reply_markup=types.ReplyKeyboardRemove())
+                await answer_pre_auth_message_via_runtime(message, "لینک دعوت شما نامعتبر یا منقضی شده است.", reply_markup=types.ReplyKeyboardRemove())
                 return
 
             if direct_runtime_ready:
@@ -898,7 +927,7 @@ async def handle_start_with_token(message: types.Message, command: CommandObject
                             },
                         )
                         await state.clear()
-                        await message.answer(
+                        await answer_pre_auth_message_via_runtime(message,
                             "ثبت‌نام مستقیم تلگرام موقتاً در دسترس نیست. کمی بعد دوباره تلاش کنید.",
                             reply_markup=types.ReplyKeyboardRemove(),
                         )
@@ -914,7 +943,7 @@ async def handle_start_with_token(message: types.Message, command: CommandObject
             register_line = build_customer_register_link_line(invitation.short_code)
             if register_line:
                 customer_lines.append(register_line)
-            await message.answer(
+            await answer_pre_auth_message_via_runtime(message,
                 "\n\n".join(customer_lines),
                 reply_markup=types.ReplyKeyboardRemove(),
                 parse_mode="Markdown",
@@ -944,7 +973,7 @@ async def handle_start_with_token(message: types.Message, command: CommandObject
                         },
                     )
                     await state.clear()
-                    await message.answer(
+                    await answer_pre_auth_message_via_runtime(message,
                         "ثبت‌نام مستقیم تلگرام موقتاً در دسترس نیست. کمی بعد دوباره تلاش کنید.",
                         reply_markup=types.ReplyKeyboardRemove(),
                     )
@@ -957,7 +986,7 @@ async def handle_start_with_token(message: types.Message, command: CommandObject
         register_line = build_register_link_line(invitation.short_code)
         if register_line:
             register_lines.append(register_line)
-        anchor_msg = await message.answer(
+        anchor_msg = await answer_pre_auth_message_via_runtime(message,
             "\n\n".join(register_lines),
             reply_markup=types.ReplyKeyboardRemove(),
             parse_mode="Markdown",
@@ -967,9 +996,10 @@ async def handle_start_with_token(message: types.Message, command: CommandObject
 
 @router.message(CommandStart(deep_link=False))
 async def handle_start_without_token(message: types.Message, state: FSMContext, user: Optional[User]):
-    
+
+    await state.clear()
     await delete_previous_anchor(message.bot, message.chat.id, delay=DeleteDelay.DEFAULT.value)
-    
+
     if user:
         if _direct_registration_runtime_ready():
             async with AsyncSessionLocal() as session:
@@ -979,22 +1009,22 @@ async def handle_start_without_token(message: types.Message, state: FSMContext, 
                 )
                 decision = await evaluate_bot_access(session, user)
             if activation_block is not None:
-                anchor_msg = await message.answer(
+                anchor_msg = await answer_pre_auth_message_via_runtime(message,
                     _registration_pending_message(),
                     reply_markup=types.ReplyKeyboardRemove(),
                 )
                 set_anchor(message.chat.id, anchor_msg.message_id)
                 return
             if not decision.allowed:
-                anchor_msg = await message.answer(
+                anchor_msg = await answer_pre_auth_message_via_runtime(message,
                     build_bot_account_access_denial_message(decision.reason),
                     reply_markup=types.ReplyKeyboardRemove(),
                 )
                 set_anchor(message.chat.id, anchor_msg.message_id)
                 return
         logger.warning("DEBUG: Building persistent menu keyboard")
-        
-        anchor_msg = await message.answer(
+
+        anchor_msg = await answer_pre_auth_message_via_runtime(message,
             await build_returning_account_panel_message(message.bot, user),
             reply_markup=await build_persistent_navigation_keyboard(
                 user,
@@ -1003,7 +1033,7 @@ async def handle_start_without_token(message: types.Message, state: FSMContext, 
         )
         set_anchor(message.chat.id, anchor_msg.message_id)
     else:
-        anchor_msg = await message.answer(
+        anchor_msg = await answer_pre_auth_message_via_runtime(message,
             build_neutral_account_link_message(),
             reply_markup=types.ReplyKeyboardRemove(),
         )
@@ -1017,7 +1047,7 @@ async def handle_contact(message: types.Message, state: FSMContext):
     await delete_previous_anchor(message.bot, message.chat.id, delay=DeleteDelay.DEFAULT.value)
     state_data = await _read_registration_fsm(state)
     if state_data is None:
-        await message.answer("ثبت‌نام مستقیم تلگرام موقتاً در دسترس نیست. کمی بعد دوباره تلاش کنید.")
+        await answer_pre_auth_message_via_runtime(message, "ثبت‌نام مستقیم تلگرام موقتاً در دسترس نیست. کمی بعد دوباره تلاش کنید.")
         return
     if not _direct_registration_runtime_ready():
         short_code = state_data.get(_REGISTRATION_STATE_SHORT_CODE)
@@ -1031,7 +1061,7 @@ async def handle_contact(message: types.Message, state: FSMContext):
             register_line = build_register_link_line(short_code)
             if register_line:
                 register_lines.append(register_line)
-        anchor_msg = await message.answer(
+        anchor_msg = await answer_pre_auth_message_via_runtime(message,
             "\n\n".join(register_lines),
             reply_markup=types.ReplyKeyboardRemove(),
             parse_mode="Markdown",
@@ -1049,7 +1079,7 @@ async def handle_contact(message: types.Message, state: FSMContext):
         or int(expected_telegram_id or 0) != int(message.from_user.id)
     ):
         await state.clear()
-        await message.answer(
+        await answer_pre_auth_message_via_runtime(message,
             _registration_rejection_message("invitation_expired"),
             reply_markup=types.ReplyKeyboardRemove(),
         )
@@ -1057,17 +1087,17 @@ async def handle_contact(message: types.Message, state: FSMContext):
 
     contact = message.contact
     if getattr(contact, "user_id", None) != message.from_user.id:
-        await message.answer(_registration_rejection_message("contact_not_owned"))
+        await answer_pre_auth_message_via_runtime(message, _registration_rejection_message("contact_not_owned"))
         return
     try:
         contact_mobile = normalize_registration_mobile_number(
             getattr(contact, "phone_number", None)
         )
     except ValueError:
-        await message.answer(_registration_rejection_message("contact_mobile_mismatch"))
+        await answer_pre_auth_message_via_runtime(message, _registration_rejection_message("contact_mobile_mismatch"))
         return
     if contact_mobile != expected_mobile:
-        await message.answer(_registration_rejection_message("contact_mobile_mismatch"))
+        await answer_pre_auth_message_via_runtime(message, _registration_rejection_message("contact_mobile_mismatch"))
         return
 
     try:
@@ -1080,7 +1110,7 @@ async def handle_contact(message: types.Message, state: FSMContext):
         )
     except Exception:
         await state.clear()
-        await message.answer(
+        await answer_pre_auth_message_via_runtime(message,
             "ثبت‌نام مستقیم تلگرام موقتاً در دسترس نیست. کمی بعد دوباره تلاش کنید.",
             reply_markup=types.ReplyKeyboardRemove(),
         )
@@ -1091,7 +1121,7 @@ async def handle_contact(message: types.Message, state: FSMContext):
         result="success",
         extra={"surface": "telegram"},
     )
-    anchor_msg = await message.answer(
+    anchor_msg = await answer_pre_auth_message_via_runtime(message,
         "✅ شماره تماس تایید شد!\n\n📍 برای تکمیل ثبت‌نام، آدرس خود را جهت جابجایی سکه وارد نمایید:",
         reply_markup=types.ReplyKeyboardRemove(),
     )
@@ -1105,7 +1135,7 @@ async def handle_contact_non_contact(message: types.Message, state: FSMContext):
     if not _direct_registration_runtime_ready():
         await handle_contact(message, state)
         return
-    await message.answer(
+    await answer_pre_auth_message_via_runtime(message,
         "شماره تماس باید مستقیماً از حساب تلگرام خودتان ارسال شود. از دکمه «ارسال شماره همراه» استفاده کنید."
     )
 
@@ -1116,7 +1146,7 @@ async def handle_address(message: types.Message, state: FSMContext):
     await delete_previous_anchor(message.bot, message.chat.id, delay=DeleteDelay.DEFAULT.value)
     state_data = await _read_registration_fsm(state)
     if state_data is None:
-        await message.answer("ثبت‌نام مستقیم تلگرام موقتاً در دسترس نیست. کمی بعد دوباره تلاش کنید.")
+        await answer_pre_auth_message_via_runtime(message, "ثبت‌نام مستقیم تلگرام موقتاً در دسترس نیست. کمی بعد دوباره تلاش کنید.")
         return
     if not _direct_registration_runtime_ready():
         short_code = state_data.get(_REGISTRATION_STATE_SHORT_CODE)
@@ -1129,7 +1159,7 @@ async def handle_address(message: types.Message, state: FSMContext):
             register_line = build_register_link_line(short_code)
             if register_line:
                 register_lines.append(register_line)
-        anchor_msg = await message.answer(
+        anchor_msg = await answer_pre_auth_message_via_runtime(message,
             "\n\n".join(register_lines),
             reply_markup=types.ReplyKeyboardRemove(),
             parse_mode="Markdown",
@@ -1146,7 +1176,7 @@ async def handle_address(message: types.Message, state: FSMContext):
         or not state_data.get(_REGISTRATION_STATE_CONTACT_VERIFIED_AT)
     ):
         await state.clear()
-        await message.answer(
+        await answer_pre_auth_message_via_runtime(message,
             _registration_rejection_message("invitation_expired"),
             reply_markup=types.ReplyKeyboardRemove(),
         )
@@ -1154,7 +1184,7 @@ async def handle_address(message: types.Message, state: FSMContext):
 
     address = message.text
     if not isinstance(address, str) or len(address) < REGISTRATION_ADDRESS_MIN_LENGTH:
-        await message.answer(REGISTRATION_ADDRESS_MIN_LENGTH_MESSAGE)
+        await answer_pre_auth_message_via_runtime(message, REGISTRATION_ADDRESS_MIN_LENGTH_MESSAGE)
         return
 
     try:
@@ -1167,12 +1197,12 @@ async def handle_address(message: types.Message, state: FSMContext):
         )
     except Exception:
         await state.clear()
-        await message.answer(
+        await answer_pre_auth_message_via_runtime(message,
             "ثبت‌نام مستقیم تلگرام موقتاً در دسترس نیست. کمی بعد دوباره تلاش کنید.",
             reply_markup=types.ReplyKeyboardRemove(),
         )
         return
-    anchor_msg = await message.answer(
+    anchor_msg = await answer_pre_auth_message_via_runtime(message,
         f"آدرس واردشده:\n{address}\n\nآیا اطلاعات را تایید می‌کنید؟",
         reply_markup=types.InlineKeyboardMarkup(
             inline_keyboard=[
@@ -1206,7 +1236,7 @@ async def handle_registration_edit_address(
         return
     state_data = await _read_registration_fsm(state)
     if state_data is None:
-        await callback.answer("ثبت‌نام مستقیم تلگرام موقتاً در دسترس نیست.", show_alert=True)
+        await answer_callback_query_via_runtime(callback, "ثبت‌نام مستقیم تلگرام موقتاً در دسترس نیست.", show_alert=True)
         return
     expires_at = _utc_datetime(state_data.get(_REGISTRATION_STATE_EXPIRES_AT))
     if (
@@ -1217,7 +1247,7 @@ async def handle_registration_edit_address(
         != int(callback.from_user.id)
     ):
         await state.clear()
-        await callback.answer("فرآیند ثبت‌نام منقضی شده است.", show_alert=True)
+        await answer_callback_query_via_runtime(callback, "فرآیند ثبت‌نام منقضی شده است.", show_alert=True)
         return
     try:
         await _write_registration_fsm(
@@ -1228,19 +1258,20 @@ async def handle_registration_edit_address(
         )
     except Exception:
         await state.clear()
-        await callback.answer(
+        await answer_callback_query_via_runtime(
+            callback,
             "ثبت‌نام مستقیم تلگرام موقتاً در دسترس نیست.",
             show_alert=True,
         )
         if callback.message:
-            await callback.message.answer(
+            await answer_pre_auth_callback_message_via_runtime(callback,
                 "ثبت‌نام مستقیم تلگرام موقتاً در دسترس نیست. کمی بعد دوباره تلاش کنید.",
                 reply_markup=types.ReplyKeyboardRemove(),
             )
         return
-    await callback.answer("آدرس را دوباره وارد کنید.")
+    await answer_callback_query_via_runtime(callback, "آدرس را دوباره وارد کنید.")
     if callback.message:
-        await callback.message.answer(
+        await answer_pre_auth_callback_message_via_runtime(callback,
             "📍 آدرس کامل خود را جهت جابجایی سکه وارد نمایید:",
             reply_markup=types.ReplyKeyboardRemove(),
         )
@@ -1257,11 +1288,11 @@ async def handle_registration_confirm(
     if await _reject_non_private_registration(callback, state):
         return
     if callback.message is None:
-        await callback.answer("امکان تکمیل ثبت‌نام وجود ندارد.", show_alert=True)
+        await answer_callback_query_via_runtime(callback, "امکان تکمیل ثبت‌نام وجود ندارد.", show_alert=True)
         return
     state_data = await _read_registration_fsm(state)
     if state_data is None:
-        await callback.answer("ثبت‌نام مستقیم تلگرام موقتاً در دسترس نیست.", show_alert=True)
+        await answer_callback_query_via_runtime(callback, "ثبت‌نام مستقیم تلگرام موقتاً در دسترس نیست.", show_alert=True)
         return
     expires_at = _utc_datetime(state_data.get(_REGISTRATION_STATE_EXPIRES_AT))
     short_code = state_data.get(_REGISTRATION_STATE_SHORT_CODE)
@@ -1283,8 +1314,8 @@ async def handle_registration_confirm(
         or telegram_id != int(callback.from_user.id)
     ):
         await state.clear()
-        await callback.answer("فرآیند ثبت‌نام منقضی شده است.", show_alert=True)
-        await callback.message.answer(
+        await answer_callback_query_via_runtime(callback, "فرآیند ثبت‌نام منقضی شده است.", show_alert=True)
+        await answer_pre_auth_callback_message_via_runtime(callback,
             _registration_rejection_message("invitation_expired"),
             reply_markup=types.ReplyKeyboardRemove(),
         )
@@ -1304,8 +1335,8 @@ async def handle_registration_confirm(
                 or _enum_value(getattr(invitation, "kind", None)) == InvitationKind.LEGACY_UNKNOWN.value
             ):
                 await state.clear()
-                await callback.answer("دعوت‌نامه معتبر نیست.", show_alert=True)
-                await callback.message.answer(
+                await answer_callback_query_via_runtime(callback, "دعوت‌نامه معتبر نیست.", show_alert=True)
+                await answer_pre_auth_callback_message_via_runtime(callback,
                     _registration_rejection_message(
                         "invitation_revoked" if invitation is not None else "legacy_state_ambiguous"
                     ),
@@ -1318,8 +1349,8 @@ async def handle_registration_confirm(
             current_expiry = _utc_datetime(invitation.expires_at)
             if current_expiry is None or current_expiry <= utc_now():
                 await state.clear()
-                await callback.answer("مهلت ثبت‌نام پایان یافته است.", show_alert=True)
-                await callback.message.answer(
+                await answer_callback_query_via_runtime(callback, "مهلت ثبت‌نام پایان یافته است.", show_alert=True)
+                await answer_pre_auth_callback_message_via_runtime(callback,
                     _registration_rejection_message("invitation_expired"),
                     reply_markup=types.ReplyKeyboardRemove(),
                 )
@@ -1332,8 +1363,8 @@ async def handle_registration_confirm(
                 current_mobile = None
             if current_mobile != mobile_number:
                 await state.clear()
-                await callback.answer("هویت دعوت‌نامه قابل تایید نیست.", show_alert=True)
-                await callback.message.answer(
+                await answer_callback_query_via_runtime(callback, "هویت دعوت‌نامه قابل تایید نیست.", show_alert=True)
+                await answer_pre_auth_callback_message_via_runtime(callback,
                     _registration_rejection_message("identity_conflict"),
                     reply_markup=types.ReplyKeyboardRemove(),
                 )
@@ -1350,8 +1381,8 @@ async def handle_registration_confirm(
                     customer_relation,
                 ):
                     await state.clear()
-                    await callback.answer("دعوت‌نامه مشتری معتبر نیست.", show_alert=True)
-                    await callback.message.answer(
+                    await answer_callback_query_via_runtime(callback, "دعوت‌نامه مشتری معتبر نیست.", show_alert=True)
+                    await answer_pre_auth_callback_message_via_runtime(callback,
                         _registration_rejection_message("invitation_revoked"),
                         reply_markup=types.ReplyKeyboardRemove(),
                     )
@@ -1367,8 +1398,8 @@ async def handle_registration_confirm(
             )
             if not decision.allowed:
                 await state.clear()
-                await callback.answer("این دعوت‌نامه فقط برای وب‌اپ معتبر است.", show_alert=True)
-                await callback.message.answer(
+                await answer_callback_query_via_runtime(callback, "این دعوت‌نامه فقط برای وب‌اپ معتبر است.", show_alert=True)
+                await answer_pre_auth_callback_message_via_runtime(callback,
                     "این نوع حساب فقط از طریق وب‌اپ ثبت‌نام می‌شود.",
                     reply_markup=types.ReplyKeyboardRemove(),
                 )
@@ -1392,8 +1423,8 @@ async def handle_registration_confirm(
     except TelegramRegistrationIntentError as exc:
         if exc.code == "changed_payload_replay":
             await state.clear()
-            await callback.answer("درخواست ثبت‌نام قابل تکرار نیست.", show_alert=True)
-            await callback.message.answer(
+            await answer_callback_query_via_runtime(callback, "درخواست ثبت‌نام قابل تکرار نیست.", show_alert=True)
+            await answer_pre_auth_callback_message_via_runtime(callback,
                 _registration_rejection_message("identity_conflict"),
                 reply_markup=types.ReplyKeyboardRemove(),
             )
@@ -1405,7 +1436,7 @@ async def handle_registration_confirm(
                 "reason": exc.code,
             },
         )
-        await callback.answer("ثبت درخواست انجام نشد. دوباره تلاش کنید.", show_alert=True)
+        await answer_callback_query_via_runtime(callback, "ثبت درخواست انجام نشد. دوباره تلاش کنید.", show_alert=True)
         return
     except Exception as exc:
         logger.warning(
@@ -1415,7 +1446,7 @@ async def handle_registration_confirm(
                 "error_type": type(exc).__name__,
             },
         )
-        await callback.answer("ثبت درخواست انجام نشد. دوباره تلاش کنید.", show_alert=True)
+        await answer_callback_query_via_runtime(callback, "ثبت درخواست انجام نشد. دوباره تلاش کنید.", show_alert=True)
         return
 
     try:
@@ -1435,8 +1466,8 @@ async def handle_registration_confirm(
         target_id=str(intent_id),
         result="success",
     )
-    await callback.answer("درخواست ثبت شد.")
-    await callback.message.answer(
+    await answer_callback_query_via_runtime(callback, "درخواست ثبت شد.")
+    await answer_pre_auth_callback_message_via_runtime(callback,
         "⏳ اطلاعات شما ثبت شد و در حال بررسی نهایی است.",
         reply_markup=types.ReplyKeyboardRemove(),
     )
@@ -1466,7 +1497,7 @@ async def handle_registration_confirmation_message(
 ):
     if await _reject_non_private_registration(message, state):
         return
-    await message.answer("برای ادامه از دکمه «تایید و تکمیل ثبت‌نام» یا «اصلاح آدرس» استفاده کنید.")
+    await answer_pre_auth_message_via_runtime(message, "برای ادامه از دکمه «تایید و تکمیل ثبت‌نام» یا «اصلاح آدرس» استفاده کنید.")
 
 
 @router.chat_join_request()
@@ -1511,9 +1542,15 @@ async def handle_channel_join_request(join_request: types.ChatJoinRequest):
         )
         decline_text = build_bot_account_access_denial_message(denial_reason)
         try:
-            await join_request.bot.send_message(
-                chat_id=join_request.user_chat_id,
-                text=decline_text,
+            await answer_pre_auth_chat_via_runtime(
+                join_request.bot,
+                join_request.user_chat_id,
+                decline_text,
+                event_key=(
+                    f"join-denied:{join_request.chat.id}:"
+                    f"{join_request.from_user.id}:"
+                    f"{getattr(join_request, 'date', '')}"
+                ),
             )
         except Exception:
             logger.exception("Failed to notify declined channel join request user")
@@ -1530,9 +1567,15 @@ async def handle_channel_join_request(join_request: types.ChatJoinRequest):
         else:
             tutorial_text = "✅ درخواست عضویت شما به صورت خودکار تایید شد. اکنون می‌توانید از کانال معاملات استفاده کنید."
             tutorial_markup = None
-        await join_request.bot.send_message(
-            chat_id=join_request.user_chat_id,
-            text=tutorial_text,
+        await answer_pre_auth_chat_via_runtime(
+            join_request.bot,
+            join_request.user_chat_id,
+            tutorial_text,
+            event_key=(
+                f"join-approved:{join_request.chat.id}:"
+                f"{join_request.from_user.id}:"
+                f"{getattr(join_request, 'date', '')}"
+            ),
             reply_markup=tutorial_markup,
         )
     except Exception:
@@ -1551,7 +1594,7 @@ async def handle_customer_tutorial_ack(callback: types.CallbackQuery, user: Opti
 
 async def _handle_bot_onboarding_ack(callback: types.CallbackQuery, user: Optional[User], *, acknowledged_step: int):
     if not user:
-        await callback.answer("ابتدا حساب تلگرام خود را به حساب کاربری متصل کنید.", show_alert=True)
+        await answer_callback_query_via_runtime(callback, "ابتدا حساب تلگرام خود را به حساب کاربری متصل کنید.", show_alert=True)
         return
 
     async with AsyncSessionLocal() as session:
@@ -1561,11 +1604,11 @@ async def _handle_bot_onboarding_ack(callback: types.CallbackQuery, user: Option
         )
         db_user = (await session.execute(stmt)).scalar_one_or_none()
         if not db_user:
-            await callback.answer("حساب کاربری شما یافت نشد.", show_alert=True)
+            await answer_callback_query_via_runtime(callback, "حساب کاربری شما یافت نشد.", show_alert=True)
             return
 
         if pending_onboarding_step(db_user) != acknowledged_step:
-            await callback.answer("این مرحله در حال حاضر قابل تایید نیست.", show_alert=True)
+            await answer_callback_query_via_runtime(callback, "این مرحله در حال حاضر قابل تایید نیست.", show_alert=True)
             return
 
         required_step = int(getattr(db_user, "bot_onboarding_required_step", 0) or 0)
@@ -1580,10 +1623,10 @@ async def _handle_bot_onboarding_ack(callback: types.CallbackQuery, user: Option
         await session.commit()
 
     if acknowledged_step < BOT_ONBOARDING_REQUIRED_STEP:
-        await callback.answer("مرحله بعد")
+        await answer_callback_query_via_runtime(callback, "مرحله بعد")
         if callback.message:
             try:
-                await callback.message.edit_text(
+                await edit_pre_auth_callback_message_via_runtime(callback,
                     onboarding_text_for_step(acknowledged_step + 1),
                     reply_markup=build_onboarding_keyboard(acknowledged_step + 1),
                 )
@@ -1591,14 +1634,14 @@ async def _handle_bot_onboarding_ack(callback: types.CallbackQuery, user: Option
                 logger.exception("Failed to update bot onboarding tutorial message")
         return
 
-    await callback.answer("ثبت شد.")
+    await answer_callback_query_via_runtime(callback, "ثبت شد.")
     if callback.message:
         try:
-            await callback.message.edit_text("✅ راهنما تایید شد. اکنون می‌توانید از امکانات بات استفاده کنید.")
+            await edit_pre_auth_callback_message_via_runtime(callback, "✅ راهنما تایید شد. اکنون می‌توانید از امکانات بات استفاده کنید.")
         except Exception:
             logger.exception("Failed to update bot onboarding completion message")
         try:
-            anchor_msg = await callback.message.answer(
+            anchor_msg = await answer_pre_auth_callback_message_via_runtime(callback,
                 await build_linked_account_panel_message(callback.bot, db_user),
                 reply_markup=await build_persistent_navigation_keyboard(
                     db_user,
@@ -1614,20 +1657,20 @@ async def _handle_bot_onboarding_ack(callback: types.CallbackQuery, user: Option
 @router.callback_query(F.data.startswith("confirm_trade_"))
 async def handle_confirm_trade(callback: types.CallbackQuery, user: Optional[User]):
     if not user:
-        await callback.answer("❌ ابتدا ثبت‌نام کنید.", show_alert=True)
+        await answer_callback_query_via_runtime(callback, "❌ ابتدا ثبت‌نام کنید.", show_alert=True)
         return
 
     local_denial_reason = bot_account_access_denial_reason(user)
     if local_denial_reason:
-        await callback.answer(build_bot_account_access_denial_message(local_denial_reason), show_alert=True)
+        await answer_callback_query_via_runtime(callback, build_bot_account_access_denial_message(local_denial_reason), show_alert=True)
         return
 
-    await callback.message.edit_text(LEGACY_RESPOND_PATH_DISABLED_MESSAGE)
-    await callback.answer("این مسیر دیگر فعال نیست.", show_alert=True)
+    await edit_pre_auth_callback_message_via_runtime(callback, LEGACY_RESPOND_PATH_DISABLED_MESSAGE)
+    await answer_callback_query_via_runtime(callback, "این مسیر دیگر فعال نیست.", show_alert=True)
 
 
 # --- انصراف از پاسخ ---
 @router.callback_query(F.data == "cancel_respond")
 async def handle_cancel_respond(callback: types.CallbackQuery):
-    await callback.message.edit_text("❌ انصراف از معامله.")
-    await callback.answer()
+    await edit_pre_auth_callback_message_via_runtime(callback, "❌ انصراف از معامله.")
+    await answer_callback_query_via_runtime(callback)

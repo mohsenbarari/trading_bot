@@ -15,6 +15,10 @@ from core.config import settings
 from core.db import AsyncSessionLocal
 from core.job_logging import RepeatedErrorLogger, duration_ms_since, job_context
 from core.server_routing import current_server
+from core.telegram_delivery_runtime_policy import (
+    TelegramDeliveryRuntimeConfigurationError,
+    configured_telegram_delivery_runtime,
+)
 from core.services.trade_delivery_receipt_service import (
     TELEGRAM_DESTINATION_SERVER,
     WEBAPP_DESTINATION_SERVER,
@@ -106,6 +110,7 @@ async def run_webapp_trade_delivery_cycle(*, limit: int | None = None) -> TradeD
 
 
 async def run_telegram_trade_delivery_cycle(*, limit: int | None = None) -> TradeDeliveryCycleReport:
+    _assert_legacy_telegram_runtime_owner()
     assert_background_job_authority(JOB_TRADE_TELEGRAM_DELIVERY)
     status_counts: dict[str, int] = {}
     processed_count = 0
@@ -182,4 +187,13 @@ async def webapp_trade_delivery_loop() -> None:
 
 
 async def telegram_trade_delivery_loop() -> None:
+    _assert_legacy_telegram_runtime_owner()
     await _trade_delivery_loop(JOB_TRADE_TELEGRAM_DELIVERY, run_telegram_trade_delivery_cycle)
+
+
+def _assert_legacy_telegram_runtime_owner() -> None:
+    runtime = configured_telegram_delivery_runtime()
+    if not runtime.legacy_workers_enabled or runtime.queue_worker_enabled:
+        raise TelegramDeliveryRuntimeConfigurationError(
+            "legacy_telegram_worker_is_not_runtime_owner"
+        )

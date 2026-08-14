@@ -7,19 +7,22 @@ from unittest.mock import AsyncMock, Mock, patch
 
 from core import notifications, sync_push, telegram_gateway
 
+OTP_TEXT = "🔐 کد ورود شما: `12345`\n\nاین کد تا ۲ دقیقه معتبر است."
+
 
 class NotificationHelperTests(unittest.IsolatedAsyncioTestCase):
     async def test_send_telegram_message_relays_to_foreign_when_running_on_iran(self):
         with patch.object(notifications.settings, "server_mode", "iran"), \
              patch("core.notifications.push_sync_direct") as push_sync_direct:
-            await notifications.send_telegram_message(12345, "hello", parse_mode="HTML")
+            await notifications.send_telegram_message(12345, OTP_TEXT)
 
         push_sync_direct.assert_called_once()
         payload = push_sync_direct.call_args.args[0]
         self.assertEqual(payload["type"], "notification")
         self.assertEqual(payload["chat_id"], 12345)
-        self.assertEqual(payload["text"], "hello")
-        self.assertEqual(payload["parse_mode"], "HTML")
+        self.assertEqual(payload["text"], OTP_TEXT)
+        self.assertEqual(payload["parse_mode"], "Markdown")
+        self.assertEqual(payload["purpose"], "legacy_login_otp")
         self.assertIn("timestamp", payload)
 
     async def test_send_telegram_message_sends_directly_on_foreign(self):
@@ -28,14 +31,24 @@ class NotificationHelperTests(unittest.IsolatedAsyncioTestCase):
              patch("core.telegram_gateway.send_message", new=AsyncMock(
                  return_value=telegram_gateway.TelegramGatewayResult(ok=True, method="sendMessage")
              )) as send_message:
-            await notifications.send_telegram_message(54321, "ping")
+            await notifications.send_telegram_message(54321, OTP_TEXT)
 
         send_message.assert_awaited_once_with(
             54321,
-            "ping",
+            OTP_TEXT,
             parse_mode="Markdown",
-            idempotency_key="notification:54321",
+            idempotency_key="legacy-login-otp:54321",
         )
+
+    async def test_general_notification_cannot_use_legacy_otp_tunnel(self):
+        with patch.object(notifications.settings, "server_mode", "foreign"), patch(
+            "core.telegram_gateway.send_message",
+            new=AsyncMock(),
+        ) as send_message:
+            with self.assertRaisesRegex(ValueError, "otp_text_invalid"):
+                await notifications.send_telegram_message(54321, "پیام عمومی")
+
+        send_message.assert_not_awaited()
 
 
 class SyncPushHelperTests(unittest.TestCase):

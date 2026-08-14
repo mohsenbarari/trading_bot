@@ -11,6 +11,13 @@ from core.config import settings
 from core.offer_settlement import build_offer_summary_text
 from core.server_routing import SERVER_FOREIGN, current_server
 from core.services.telegram_offer_publication_service import telegram_publication_message_id
+from core.telegram_delivery_runtime_policy import (
+    TelegramDeliveryRuntimeConfigurationError,
+    TelegramDeliveryRuntimeMode,
+    assert_telegram_provider_execution_authority,
+    configured_telegram_delivery_producer_mode,
+    configured_telegram_delivery_runtime,
+)
 from core.services.trade_service import get_available_trade_amounts
 from core.telegram_trade_callbacks import build_channel_trade_callback_data
 from models.offer import OfferStatus
@@ -21,6 +28,21 @@ INVISIBLE_CHANNEL_PADDING = "\u2800" * 35
 TELEGRAM_MESSAGE_NOT_MODIFIED = "message is not modified"
 TELEGRAM_OFFER_FULLY_TRADED_TAG = "🤝 ✅"
 TELEGRAM_OFFER_EXPIRED_TAG = "❌"
+# Inventory M38 — channel overtime marker; never replaces trade history tags.
+TELEGRAM_OFFER_OVERTIME_MARKER = "⏳"
+TELEGRAM_OFFER_OVERTIME_FULLY_TRADED_TAG = (
+    f"{TELEGRAM_OFFER_FULLY_TRADED_TAG}{TELEGRAM_OFFER_OVERTIME_MARKER}"
+)
+CHANNEL_LIFECYCLE_METADATA_KEY = "channel_lifecycle_phase"
+
+
+def _assert_legacy_channel_editor_owner() -> None:
+    assert_telegram_provider_execution_authority()
+    runtime = configured_telegram_delivery_runtime()
+    if not runtime.legacy_workers_enabled or runtime.queue_worker_enabled:
+        raise TelegramDeliveryRuntimeConfigurationError(
+            "legacy_offer_channel_editor_is_not_runtime_owner"
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -159,18 +181,96 @@ def get_offer_channel_history_tag(offer: Any, traded_quantity: Optional[int] = N
     """Return the terminal Telegram emoji tag for channel history posts."""
     status = _status_value(getattr(offer, "status", None))
     if status == OfferStatus.COMPLETED.value:
-        return TELEGRAM_OFFER_FULLY_TRADED_TAG
+        return (
+            TELEGRAM_OFFER_OVERTIME_FULLY_TRADED_TAG
+            if bool(getattr(offer, "overtime_trade_committed", False))
+            else TELEGRAM_OFFER_FULLY_TRADED_TAG
+        )
 
     if status != OfferStatus.EXPIRED.value:
         return None
 
     quantity = traded_quantity if traded_quantity is not None else infer_traded_quantity_from_offer(offer)
     if quantity and quantity > 0:
-        return f"🤝 {quantity:,} تا ✅"
+        tag = f"🤝 {quantity:,} تا ✅"
+        return (
+            f"{tag}{TELEGRAM_OFFER_OVERTIME_MARKER}"
+            if bool(getattr(offer, "overtime_trade_committed", False))
+            else tag
+        )
     return TELEGRAM_OFFER_EXPIRED_TAG
 
 
-def build_offer_channel_message(offer: Any, *, history_tag: Optional[str] = None) -> str:
+def project_offer_channel_lifecycle(
+    offer: Any,
+    *,
+    normal_lifetime_minutes: int,
+    as_of: Any | None = None,
+):
+    """Project lifecycle for channel rendering without a DB tail-request lookup.
+
+    An ACTIVE offer past the final deadline is treated as final-tail: expiry
+    would otherwise have terminalized it already.
+    """
+    from datetime import datetime, timezone
+
+    from core.offer_lifecycle import compute_lifecycle_deadlines, project_offer_lifecycle
+
+    now = (
+        as_of
+        if isinstance(as_of, datetime)
+        else datetime.now(timezone.utc).replace(tzinfo=None)
+    )
+    if now.tzinfo is not None and now.utcoffset() is not None:
+        now = now.astimezone(timezone.utc).replace(tzinfo=None)
+    _normal_deadline, final_deadline = compute_lifecycle_deadlines(
+        getattr(offer, "created_at", None),
+        normal_lifetime_minutes=int(normal_lifetime_minutes or 0),
+        overtime_minutes_snapshot=int(getattr(offer, "overtime_minutes_snapshot", 0) or 0),
+    )
+    status = _status_value(getattr(offer, "status", None))
+    has_final_tail = bool(
+        status == OfferStatus.ACTIVE.value
+        and final_deadline is not None
+        and now >= final_deadline
+    )
+    return project_offer_lifecycle(
+        offer,
+        normal_lifetime_minutes=int(normal_lifetime_minutes or 0),
+        as_of=now,
+        has_final_tail_request=has_final_tail,
+    )
+
+
+def offer_channel_overtime_marker_visible(
+    offer: Any,
+    *,
+    lifecycle_phase: str | None = None,
+) -> bool:
+    """Whether the channel post should include inventory M38 ``⏳``.
+
+    Active overtime/final-tail keep the marker. Terminal posts carry overtime
+    context inside their final trade tag (``🤝 ✅⏳``), so a later terminal
+    expiry always replaces a standalone ``⏳`` with ``❌``.
+    """
+    status = _status_value(getattr(offer, "status", None))
+    if status in {
+        OfferStatus.COMPLETED.value,
+        OfferStatus.EXPIRED.value,
+        OfferStatus.CANCELLED.value,
+    }:
+        return False
+    phase = str(lifecycle_phase or "").strip().lower()
+    return phase in {"overtime", "final_tail"}
+
+
+def build_offer_channel_message(
+    offer: Any,
+    *,
+    history_tag: Optional[str] = None,
+    include_overtime_marker: bool | None = None,
+    lifecycle_phase: str | None = None,
+) -> str:
     """Build the canonical channel post text for active and terminal offer states."""
     offer_type = _offer_type_value(getattr(offer, "offer_type", None))
     commodity = getattr(offer, "commodity", None)
@@ -188,15 +288,30 @@ def build_offer_channel_message(offer: Any, *, history_tag: Optional[str] = None
     notes = (getattr(offer, "notes", None) or "").strip()
     if notes:
         message += f"\nتوضیحات: {notes}"
+    show_marker = include_overtime_marker
+    if show_marker is None:
+        show_marker = offer_channel_overtime_marker_visible(
+            offer,
+            lifecycle_phase=lifecycle_phase,
+        )
+    if show_marker:
+        # Trailing marker line; never replaces cash/future text or trade tags.
+        message += f"\n{TELEGRAM_OFFER_OVERTIME_MARKER}"
     if history_tag:
         message += f"\n{history_tag}"
     return f"{message}\n{INVISIBLE_CHANNEL_PADDING}"
 
 
-def build_offer_channel_reply_markup(offer: Any) -> Optional[dict[str, Any]]:
+def build_offer_channel_reply_markup(
+    offer: Any,
+    *,
+    accepts_new_public_interaction: bool | None = None,
+) -> Optional[dict[str, Any]]:
     """Build Telegram inline keyboard for active offers."""
     status = _status_value(getattr(offer, "status", None))
     if status and status != OfferStatus.ACTIVE.value:
+        return None
+    if accepts_new_public_interaction is False:
         return None
 
     offer_id = _finite_int(getattr(offer, "id", None))
@@ -277,6 +392,18 @@ async def apply_offer_channel_state_with_result(
     """
     if current_server() != SERVER_FOREIGN:
         return OfferChannelStateApplyResult(ok=False, response_class="skipped", reason="non_foreign_server")
+    if (
+        configured_telegram_delivery_producer_mode()
+        == TelegramDeliveryRuntimeMode.QUEUE_V1
+    ):
+        # The Offer mutation is already durable. The Offer edit feeder owns the
+        # one eventual channel edit and combines text plus keyboard state.
+        return OfferChannelStateApplyResult(
+            ok=True,
+            response_class="queued",
+            reason="telegram_delivery_queue_owned",
+        )
+    _assert_legacy_channel_editor_owner()
 
     channel_message_id = telegram_publication_message_id(offer, publication_state)
     if not channel_message_id:
@@ -292,39 +419,55 @@ async def apply_offer_channel_state_with_result(
     history_tag = get_offer_channel_history_tag(offer, traded_quantity=traded_quantity)
 
     try:
-        if history_tag:
-            text_result = await telegram_gateway.edit_message_text(
+        if status and status != OfferStatus.ACTIVE.value:
+            result = await telegram_gateway.edit_message_text(
                 channel_id,
                 channel_message_id,
                 build_offer_channel_message(offer, history_tag=history_tag),
+                reply_markup={"inline_keyboard": []},
                 timeout=timeout,
                 idempotency_key=f"offer-channel-state:{getattr(offer, 'id', '')}:{status}",
             )
-            classified_text = _classify_gateway_result(text_result)
-            if not classified_text.ok:
-                return classified_text
-            buttons_result = await telegram_gateway.edit_message_reply_markup(
-                channel_id,
-                channel_message_id,
-                timeout=timeout,
-                idempotency_key=f"offer-channel-buttons-remove:{getattr(offer, 'id', '')}:{status}",
-            )
-            return _classify_gateway_result(buttons_result)
-        elif status and status != OfferStatus.ACTIVE.value:
-            result = await telegram_gateway.edit_message_reply_markup(
-                channel_id,
-                channel_message_id,
-                timeout=timeout,
-                idempotency_key=f"offer-channel-buttons-remove:{getattr(offer, 'id', '')}:{status}",
-            )
         else:
-            result = await telegram_gateway.edit_message_reply_markup(
-                channel_id,
-                channel_message_id,
-                reply_markup=build_offer_channel_reply_markup(offer),
-                timeout=timeout,
-                idempotency_key=f"offer-channel-buttons:{getattr(offer, 'id', '')}",
+            from core.trading_settings import get_trading_settings
+
+            projection = project_offer_channel_lifecycle(
+                offer,
+                normal_lifetime_minutes=int(
+                    getattr(get_trading_settings(), "offer_expiry_minutes", 0) or 0
+                ),
             )
+            phase = projection.phase.value
+            markup = build_offer_channel_reply_markup(
+                offer,
+                accepts_new_public_interaction=projection.accepts_new_public_interaction,
+            )
+            needs_text_edit = (
+                offer_channel_overtime_marker_visible(offer, lifecycle_phase=phase)
+                or not projection.accepts_new_public_interaction
+            )
+            if needs_text_edit:
+                result = await telegram_gateway.edit_message_text(
+                    channel_id,
+                    channel_message_id,
+                    build_offer_channel_message(
+                        offer,
+                        lifecycle_phase=phase,
+                    ),
+                    reply_markup=markup or {"inline_keyboard": []},
+                    timeout=timeout,
+                    idempotency_key=(
+                        f"offer-channel-lifecycle:{getattr(offer, 'id', '')}:{phase}"
+                    ),
+                )
+            else:
+                result = await telegram_gateway.edit_message_reply_markup(
+                    channel_id,
+                    channel_message_id,
+                    reply_markup=markup,
+                    timeout=timeout,
+                    idempotency_key=f"offer-channel-buttons:{getattr(offer, 'id', '')}",
+                )
         return _classify_gateway_result(result)
     except Exception as exc:
         logger.debug(

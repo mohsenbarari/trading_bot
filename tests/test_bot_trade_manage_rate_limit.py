@@ -39,6 +39,15 @@ class FakeSessionFactory:
 
 
 class BotTradeManageRateLimitTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        self.expiry_lease = SimpleNamespace(acquired=True, release=AsyncMock())
+        self.expiry_gate_patcher = patch(
+            "bot.handlers.trade_manage.try_acquire_offer_expiry_gate",
+            new=AsyncMock(return_value=self.expiry_lease),
+        )
+        self.expiry_gate_patcher.start()
+        self.addCleanup(self.expiry_gate_patcher.stop)
+
     async def test_handle_expire_offer_returns_silently_without_user(self):
         callback = make_callback()
 

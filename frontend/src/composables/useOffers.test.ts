@@ -224,6 +224,23 @@ describe('useOffers', () => {
     expect(offersApi.hasMore.value).toBe(false)
   })
 
+  it('reconciles a single active page on silent refresh when an offer disappears', async () => {
+    useOffersMocks.apiFetch
+      .mockResolvedValueOnce(pageResponse([
+        { id: 8, offer_public_id: 'ofr-live', price: 100 },
+      ], 'cursor-live', true))
+      .mockResolvedValueOnce(pageResponse([], null, false))
+
+    const { useOffers } = await importFreshUseOffers()
+    const offersApi = useOffers()
+
+    await offersApi.fetchOffers()
+    await offersApi.fetchOffers(true)
+
+    expect(offersApi.offers.value).toEqual([])
+    expect(offersApi.hasMore.value).toBe(false)
+  })
+
   it('deduplicates page boundaries by public id and preserves loaded pages on silent refresh', async () => {
     useOffersMocks.apiFetch
       .mockResolvedValueOnce(pageResponse([

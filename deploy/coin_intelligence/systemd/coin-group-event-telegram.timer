@@ -1,0 +1,12 @@
+[Unit]
+Description=Collect private coin-group events every 15 seconds
+
+[Timer]
+OnBootSec=20s
+OnUnitActiveSec=15s
+AccuracySec=1s
+Persistent=true
+Unit=coin-group-event-telegram.service
+
+[Install]
+WantedBy=timers.target

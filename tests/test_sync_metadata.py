@@ -6,6 +6,7 @@ from core.sync_protocol import (
     SYNC_REGISTRY_VERSION,
     build_sync_protocol_metadata,
     current_sync_registry_fingerprint,
+    current_sync_registry_implementation_fingerprint,
     validate_sync_protocol_metadata,
 )
 
@@ -348,8 +349,25 @@ class SyncMetadataTests(unittest.TestCase):
         self.assertEqual(metadata["payload_schema_version"], 2)
         self.assertEqual(metadata["registry_version"], SYNC_REGISTRY_VERSION)
         self.assertEqual(metadata["registry_fingerprint"], current_sync_registry_fingerprint())
+        self.assertEqual(
+            metadata["registry_implementation_fingerprint"],
+            current_sync_registry_implementation_fingerprint(),
+        )
         self.assertEqual(metadata["producer"], {"server_mode": "foreign"})
         self.assertTrue(validate_sync_protocol_metadata(metadata).ok)
+
+    def test_current_candidate_remains_wire_compatible_with_v4_main_fingerprint(self):
+        self.assertEqual(current_sync_registry_fingerprint(), "12ff8b60fe7b6b1e")
+        self.assertNotEqual(
+            current_sync_registry_implementation_fingerprint(),
+            current_sync_registry_fingerprint(),
+        )
+        old_main_metadata = build_sync_protocol_metadata(producer_server="iran")
+        old_main_metadata.pop("registry_implementation_fingerprint")
+
+        result = validate_sync_protocol_metadata(old_main_metadata)
+
+        self.assertTrue(result.ok)
 
     def test_sync_protocol_validation_rejects_unsupported_future_version(self):
         metadata = build_sync_protocol_metadata(producer_server="foreign")

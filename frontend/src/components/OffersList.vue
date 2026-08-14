@@ -20,6 +20,14 @@ import {
   AppOfferTradeErrorToast,
   AppTradeActionButton,
 } from './ui';
+import {
+  isActiveLifecycleVisible,
+  isFinalTailPhase,
+  isOvertimeMarkerAnimated,
+  isOvertimePhase,
+  showOvertimeMarker,
+  timerDeadlineTs,
+} from '../utils/offerLifecycle';
 
 interface TradeLotSuggestionState {
   title: string;
@@ -120,21 +128,31 @@ onUnmounted(() => {
   if (tradeErrorTimeout) clearTimeout(tradeErrorTimeout)
 })
 
-// --- Timer percent ---
+// --- Timer percent (server phase + timer_total_seconds; no client phase invention) ---
+function timerTotalSeconds(offer: any): number {
+  const authoritative = Number(offer?.timer_total_seconds)
+  if (Number.isFinite(authoritative) && authoritative > 0) return authoritative
+  return (props.expiryMinutes || 2) * 60
+}
+
 function getTimerPercent(offer: any): number {
-  if (!offer.expires_at_ts) return 100
-  const remaining = offer.expires_at_ts - now.value
+  if (isFinalTailPhase(offer)) return 0
+  const deadline = timerDeadlineTs(offer)
+  if (deadline == null) return 100
+  const remaining = deadline - now.value
   if (remaining <= 0) return 0
-  const total = (props.expiryMinutes || 2) * 60
+  const total = timerTotalSeconds(offer)
   return Math.min(Math.max((remaining / total) * 100, 0), 100)
 }
 
 function cardTimerStyle(offer: any): Record<string, string> {
-  if (isReadOnlyOffer(offer)) return {}
-  if (!offer.expires_at_ts) return {}
-  const remainingSec = offer.expires_at_ts - now.value
+  if (isInteractionLocked(offer)) return {}
+  if (isFinalTailPhase(offer)) return {}
+  const deadline = timerDeadlineTs(offer)
+  if (deadline == null) return {}
+  const remainingSec = deadline - now.value
   if (remainingSec <= 0) return { '--t-pct': '0' }
-  const total = (props.expiryMinutes || 2) * 60
+  const total = timerTotalSeconds(offer)
   const pct = Math.min(Math.max((remainingSec / total) * 100, 0), 100)
   return {
     '--t-pct': String(pct)
@@ -142,11 +160,17 @@ function cardTimerStyle(offer: any): Record<string, string> {
 }
 
 function isCritical(offer: any): boolean {
-  return !!offer.expires_at_ts && getTimerPercent(offer) < 15
+  if (isOvertimePhase(offer) || isFinalTailPhase(offer)) return false
+  return timerDeadlineTs(offer) != null && getTimerPercent(offer) < 15
 }
 
 function hasTimer(offer: any): boolean {
-  return !!offer.expires_at_ts
+  if (isInteractionLocked(offer) || isFinalTailPhase(offer)) return false
+  return timerDeadlineTs(offer) != null
+}
+
+function isOvertimeTimer(offer: any): boolean {
+  return isOvertimePhase(offer) && hasTimer(offer)
 }
 
 function isExpiredOffer(offer: any): boolean {
@@ -163,6 +187,24 @@ function isReadOnlyOffer(offer: any): boolean {
   return offer?.is_read_only === true
     || typeof offer?.history_state === 'string'
     || (status !== '' && status !== 'active')
+}
+
+/** History rows, terminal rows, and final-tail (no new public interaction). */
+function isInteractionLocked(offer: any): boolean {
+  if (isReadOnlyOffer(offer)) return true
+  if (isFinalTailPhase(offer)) return true
+  if (offer?.accepts_new_public_interaction === false && String(offer?.status ?? '').toLowerCase() === 'active') {
+    return true
+  }
+  return false
+}
+
+function shouldShowOvertimeMarker(offer: any): boolean {
+  return showOvertimeMarker(offer)
+}
+
+function isMarkerAnimated(offer: any): boolean {
+  return isOvertimeMarkerAnimated(offer)
 }
 
 function getFiniteNumber(value: unknown): number | null {
@@ -203,10 +245,11 @@ function getOfferQuantityLabel(offer: any): string {
 }
 
 // Keep active offers live-filtered, while read-only history rows remain visible.
+// Final-tail stays visible via server lifecycle even when expires_at_ts has elapsed.
 const filteredOffers = computed(() => {
   const nowSec = now.value
   const source = Array.isArray(props.offers) ? props.offers : []
-  const visible = source.filter(o => isReadOnlyOffer(o) || !o.expires_at_ts || o.expires_at_ts > nowSec)
+  const visible = source.filter(o => isReadOnlyOffer(o) || isActiveLifecycleVisible(o, nowSec))
   return props.limit ? visible.slice(0, props.limit) : visible
 })
 
@@ -696,8 +739,9 @@ async function cancelOwnOffer(offerId: number) {
       <AppOfferCard
         v-for="offer in filteredOffers" 
         :key="offer.id"
-        :timer-critical="!isReadOnlyOffer(offer) && isCritical(offer)"
-        :has-timer="!isReadOnlyOffer(offer) && hasTimer(offer)"
+        :timer-critical="!isInteractionLocked(offer) && isCritical(offer)"
+        :has-timer="!isInteractionLocked(offer) && hasTimer(offer)"
+        :timer-overtime="!isInteractionLocked(offer) && isOvertimeTimer(offer)"
         :history="isReadOnlyOffer(offer)"
         :expired="isExpiredOffer(offer)"
         :traded="isTradedHistoryOffer(offer)"
@@ -710,7 +754,7 @@ async function cancelOwnOffer(offerId: number) {
             :traded="isTradedHistoryOffer(offer)"
           />
 
-          <!-- Header: role badge + time -->
+          <!-- Header: role badge + time; ⏳ at RTL end beside relative time -->
           <div class="offer-header">
             <div class="offer-classification">
               <AppOfferSideBadge :side="offer.offer_type" />
@@ -719,7 +763,18 @@ async function cancelOwnOffer(offerId: number) {
                 :settlement-type="offer.settlement_type"
               />
             </div>
-            <span class="offer-time">{{ timeAgo(offer.created_at) }}</span>
+            <div class="offer-meta-end">
+              <span class="offer-time">{{ timeAgo(offer.created_at) }}</span>
+              <span
+                v-if="shouldShowOvertimeMarker(offer)"
+                class="overtime-marker"
+                :class="{
+                  'overtime-marker--animated': isMarkerAnimated(offer),
+                  'overtime-marker--static': !isMarkerAnimated(offer),
+                }"
+                aria-hidden="true"
+              >⏳</span>
+            </div>
           </div>
 
           <!-- Body: commodity, remaining, price in one row -->
@@ -739,8 +794,8 @@ async function cancelOwnOffer(offerId: number) {
             </p>
           </div>
 
-          <!-- Footer: lot buttons or own offer -->
-          <div v-if="!isReadOnlyOffer(offer)" class="offer-footer">
+          <!-- Footer: lot buttons or own offer (hidden in history and final-tail) -->
+          <div v-if="!isInteractionLocked(offer)" class="offer-footer">
             <div v-if="!isOwnOffer(offer) && (offer.remaining_quantity ?? offer.quantity) > 0" class="trade-buttons">
               <AppTradeActionButton
                 v-for="amount in getLotButtons(offer)"
@@ -862,6 +917,16 @@ async function cancelOwnOffer(offerId: number) {
           mask-composite: exclude;
   pointer-events: none;
   z-index: 1;
+}
+
+/* Overtime: restart as a green lifetime ring (server timer_total_seconds). */
+.offer-card-wrap.has-timer.timer-overtime::before {
+  background: conic-gradient(
+    from 0deg at 50% 50%,
+    hsl(152 72% 38%)          calc(var(--t-pct) * 1% - 1%),
+    hsl(152 72% 38% / 0.14)   calc(var(--t-pct) * 1%),
+    rgba(229, 231, 235, 0.35) calc(var(--t-pct) * 1%)
+  );
 }
 
 .offer-card-wrap.timer-critical::before {
@@ -1049,9 +1114,73 @@ async function cancelOwnOffer(offerId: number) {
   color: var(--ds-danger-600);
 }
 
+.offer-meta-end {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 2px;
+  flex: 0 0 auto;
+  /* Fixed footprint so marker animation on/off never shifts header content. */
+  min-width: 4.75rem;
+  min-height: 14px;
+}
+
 .offer-time {
   font-size: 10px;
   color: var(--ds-text-placeholder);
+  line-height: 14px;
+  white-space: nowrap;
+}
+
+.overtime-marker {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  flex: 0 0 14px;
+  font-size: 12px;
+  line-height: 1;
+  transform-origin: center center;
+}
+
+.overtime-marker--animated {
+  animation: overtime-hourglass 1.8s ease-in-out infinite;
+}
+
+.overtime-marker--static {
+  animation: none;
+}
+
+@keyframes overtime-hourglass {
+  0% {
+    transform: translateY(0) rotateX(0deg);
+  }
+  35% {
+    transform: translateY(-1px) rotateX(180deg);
+  }
+  55% {
+    transform: translateY(0) rotateX(180deg);
+  }
+  70% {
+    transform: translateX(1px) rotateX(180deg);
+  }
+  85% {
+    transform: translateX(-1px) rotateX(180deg);
+  }
+  100% {
+    transform: translateX(0) rotateX(180deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .offer-card-wrap.timer-critical::before {
+    animation: none;
+  }
+
+  .overtime-marker--animated {
+    animation: none;
+  }
 }
 
 /* ── Body ── */

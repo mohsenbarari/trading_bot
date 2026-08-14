@@ -181,13 +181,13 @@ class BotTradeExecuteRemoteHomeTests(unittest.IsolatedAsyncioTestCase):
         ), patch("bot.handlers.trade_execute.get_available_trade_amounts", return_value=[2, 3]), patch(
             "bot.handlers.trade_execute.build_trade_amount_buttons", return_value="KB"
         ), patch("bot.handlers.trade_execute.upsert_trade_suggestion_record", new=AsyncMock()) as upsert_mock, patch(
-            "bot.handlers.trade_execute.schedule_trade_suggestion_cleanup"
-        ) as cleanup_mock, patch("bot.handlers.trade_execute.schedule_trade_suggestion_pending_reset") as pending_reset_mock:
+            "bot.handlers.trade_execute.schedule_trade_suggestion_cleanup", new=AsyncMock()
+        ) as cleanup_mock, patch("bot.handlers.trade_execute.schedule_trade_suggestion_pending_reset", new=AsyncMock()) as pending_reset_mock:
             await handle_channel_trade(callback, SimpleNamespace(offer_id=7, amount=2), user=user, bot=bot)
         callback.message.edit_reply_markup.assert_awaited_once_with(reply_markup="KB")
         upsert_mock.assert_awaited_once()
-        cleanup_mock.assert_called_once()
-        pending_reset_mock.assert_called_once()
+        cleanup_mock.assert_awaited_once()
+        pending_reset_mock.assert_awaited_once()
         callback.answer.assert_awaited_with("برای تایید دوباره روی همان دکمه بزنید ☑️", show_alert=False)
 
         callback = make_callback()
@@ -253,7 +253,8 @@ class BotTradeExecuteRemoteHomeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(schedule_recovery_mock.call_args.kwargs["fallback_chat_id"], 300)
         self.assertEqual(schedule_recovery_mock.call_args.kwargs["offer_snapshot"]["notes"], "تحویل فوری")
         bot.send_message.assert_not_awaited()
-        self.assertIn("درخواست معامله ارسال شد", callback.answer.await_args.args[0])
+        # Stage 7 ambiguous/pending forward ack uses inventory M18.
+        self.assertIn("⏳ در حال بررسی درخواست...", callback.answer.await_args.args[0])
         self.assertEqual(callback.answer.await_args.kwargs, {"show_alert": False})
 
         bot.send_message.reset_mock()
@@ -266,7 +267,7 @@ class BotTradeExecuteRemoteHomeTests(unittest.IsolatedAsyncioTestCase):
             await handle_channel_trade(callback, SimpleNamespace(offer_id=7, amount=2), user=user, bot=bot)
         schedule_recovery_mock.assert_called_once()
         bot.send_message.assert_not_awaited()
-        self.assertIn("درخواست معامله ارسال شد", callback.answer.await_args.args[0])
+        self.assertIn("⏳ در حال بررسی درخواست...", callback.answer.await_args.args[0])
         self.assertEqual(callback.answer.await_args.kwargs, {"show_alert": False})
 
         callback = make_callback()

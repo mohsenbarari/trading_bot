@@ -66,6 +66,9 @@ from core.services.trade_webapp_delivery_service import (
     repair_webapp_trade_delivery_for_trade,
 )
 from core.services.trade_telegram_delivery_service import repair_telegram_trade_delivery_for_trade
+from core.services.trade_delivery_receipt_service import (
+    persist_trade_completion_delivery_intents,
+)
 from core.services.offer_expiry_service import OfferExpiryReason
 from core.services.offer_request_ledger_service import (
     OfferRequestLedgerCommand,
@@ -74,20 +77,56 @@ from core.services.offer_request_ledger_service import (
     customer_relation_snapshot,
     load_offer_request_by_idempotency,
 )
+from core.services.offer_overtime_request_service import (
+    OvertimeRequestCreateCommand,
+    OvertimeRequestError,
+    OvertimeRequestErrorCode,
+    OvertimeRequestResult,
+    cancel_by_requester,
+    claim_owner_approval,
+    create_overtime_request,
+    invalidate_request,
+    list_nonterminal_overtime_requests,
+    load_overtime_request_by_public_id,
+    promote_next_for_owner,
+    record_completed_trade,
+    reject_by_owner,
+    remaining_seconds_until,
+)
 from core.services.telegram_offer_channel_service import apply_offer_channel_state
 from core.services.user_account_status_service import is_user_trade_blocked
 from core import telegram_gateway
 from models.user import User, UserRole
 from models.customer_relation import CustomerRelation, CustomerRelationStatus, CustomerTier
 from models.offer import Offer, OfferType, OfferStatus
-from models.offer_request import OfferRequest, OfferRequestSourceSurface, OfferRequestStatus
+from models.offer_request import (
+    OVERTIME_NONTERMINAL_STATUSES,
+    OVERTIME_OWNER_OCCUPYING_STATUSES,
+    OVERTIME_TERMINAL_STATUSES,
+    OfferRequest,
+    OfferRequestSourceSurface,
+    OfferRequestStatus,
+    OfferRequestWorkflow,
+)
 from models.trade import Trade, TradeType, TradeStatus
 from models.commodity import Commodity, CommodityAlias
 from api.deps import EffectiveOwnerActor, get_current_user, get_effective_owner_actor_context
 from core.server_routing import KNOWN_SERVERS, current_server, is_remote_home, normalize_server
 from core.telegram_trade_callbacks import build_channel_trade_callback_data
 from core.trade_forwarding import forward_trade_to_home_server, verify_internal_signature
+from core.trade_forward_pending import (
+    ambiguous_forward_pending_response,
+    mark_trade_forward_pending,
+    reconcile_trade_forward_pending,
+)
 from core.trading_observability import log_trading_event
+from core.telegram_delivery_runtime_policy import (
+    TelegramDeliveryRuntimeConfigurationError,
+    TelegramDeliveryRuntimeMode,
+    assert_telegram_provider_execution_authority,
+    configured_telegram_delivery_producer_mode,
+    configured_telegram_delivery_runtime,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -109,6 +148,15 @@ TRADE_TRANSIENT_RETRY_BASE_DELAY_SECONDS = 0.05
 router = APIRouter(
     tags=["Trades"],
 )
+
+
+def _assert_legacy_direct_delivery_owner() -> None:
+    assert_telegram_provider_execution_authority()
+    runtime = configured_telegram_delivery_runtime()
+    if not runtime.legacy_workers_enabled or runtime.queue_worker_enabled:
+        raise TelegramDeliveryRuntimeConfigurationError(
+            "legacy_trade_router_direct_sender_is_not_runtime_owner"
+        )
 
 
 def _ensure_accountant_market_access_allowed(context: EffectiveOwnerActor) -> None:
@@ -1792,6 +1840,7 @@ def trade_to_response(
 
 async def send_telegram_message(chat_id: int, text: str) -> bool:
     """ارسال پیام به تلگرام"""
+    _assert_legacy_direct_delivery_owner()
     bot_token = os.getenv("BOT_TOKEN")
     if not bot_token or not chat_id:
         return False
@@ -1833,6 +1882,12 @@ async def update_channel_buttons(offer: Offer) -> bool:
     """آپدیت دکمه‌های پست کانال"""
     if current_server() != "foreign":
         return False
+    if (
+        configured_telegram_delivery_producer_mode()
+        == TelegramDeliveryRuntimeMode.QUEUE_V1
+    ):
+        return True
+    _assert_legacy_direct_delivery_owner()
 
     bot_token = os.getenv("BOT_TOKEN")
     channel_id = settings.channel_id
@@ -1917,6 +1972,7 @@ async def update_channel_buttons(offer: Offer) -> bool:
 
 def send_telegram_message_sync(chat_id: int, text: str) -> bool:
     """نسخه sync برای استفاده در BackgroundTasks"""
+    _assert_legacy_direct_delivery_owner()
     bot_token = os.getenv("BOT_TOKEN")
     if not bot_token or not chat_id:
         return False
@@ -2060,9 +2116,33 @@ def _queue_trade_user_notification(
     return True
 
 
+def _bind_trade_delivery_source_context(
+    trade: Trade | object,
+    source_offer: Offer | object | None,
+) -> bool:
+    """Expose source metadata without attaching noncanonical chain legs to an Offer."""
+    source_offer_id = _coerce_trade_user_id(getattr(source_offer, "id", None))
+    if source_offer_id is None:
+        return False
+
+    trade_offer_id = _coerce_trade_user_id(getattr(trade, "offer_id", None))
+    if trade_offer_id == source_offer_id:
+        trade.offer = source_offer
+        return True
+    if trade_offer_id is not None:
+        return False
+
+    # Customer-chain legs intentionally have no Offer FK. Delivery builders
+    # consume these transient fields while the persisted chain remains intact.
+    trade.offer_notes = getattr(source_offer, "notes", None)
+    trade.offer_home_server = getattr(source_offer, "home_server", None)
+    return True
+
+
 async def _repair_trade_completion_delivery_background(
     trade_number: int,
     current_server_name: str,
+    source_offer_id: int | None = None,
 ) -> bool:
     from core.db import AsyncSessionLocal
 
@@ -2091,6 +2171,33 @@ async def _repair_trade_completion_delivery_background(
                     trade_number=trade_number,
                 )
                 return False
+            if _coerce_trade_user_id(getattr(trade, "offer_id", None)) is None:
+                normalized_source_offer_id = _coerce_trade_user_id(source_offer_id)
+                if normalized_source_offer_id is None:
+                    log_trading_event(
+                        logger,
+                        "trade_delivery_repair_missing_source_context",
+                        level="warning",
+                        action="trading_side_effect",
+                        result="noop",
+                        side_effect="receipt_delivery_repair",
+                        trade_number=trade_number,
+                    )
+                    return False
+                source_offer = await delivery_db.get(Offer, normalized_source_offer_id)
+                if source_offer is None:
+                    log_trading_event(
+                        logger,
+                        "trade_delivery_repair_missing_source_offer",
+                        level="warning",
+                        action="trading_side_effect",
+                        result="noop",
+                        side_effect="receipt_delivery_repair",
+                        trade_number=trade_number,
+                        offer_id=normalized_source_offer_id,
+                    )
+                    return False
+                _bind_trade_delivery_source_context(trade, source_offer)
             await repair_webapp_trade_delivery_for_trade(
                 delivery_db,
                 trade,
@@ -2119,6 +2226,8 @@ async def _repair_trade_completion_delivery_background(
 def _queue_trade_completion_delivery_repair(
     background_tasks: BackgroundTasks,
     trade: Trade | object,
+    *,
+    source_offer_id: int | None = None,
 ) -> bool:
     trade_number = _coerce_trade_user_id(getattr(trade, "trade_number", None))
     if trade_number is None:
@@ -2127,6 +2236,7 @@ def _queue_trade_completion_delivery_repair(
         _repair_trade_completion_delivery_background,
         trade_number,
         current_server(),
+        _coerce_trade_user_id(source_offer_id),
     )
     return True
 
@@ -2160,6 +2270,12 @@ def _queue_trade_channel_buttons_update(background_tasks: BackgroundTasks, offer
 
 def update_channel_buttons_sync(offer_id: int, remaining_quantity: int, status, lot_sizes) -> bool:
     """نسخه sync برای استفاده در BackgroundTasks"""
+    if (
+        configured_telegram_delivery_producer_mode()
+        == TelegramDeliveryRuntimeMode.QUEUE_V1
+    ):
+        return True
+    _assert_legacy_direct_delivery_owner()
     from core.db import AsyncSessionLocal
     import asyncio
     
@@ -2196,6 +2312,12 @@ def update_channel_buttons_sync(offer_id: int, remaining_quantity: int, status, 
 
 async def _update_channel_buttons_async(offer_id: int, remaining_quantity: int, offer_status, lot_sizes) -> bool:
     """Helper async function - باید offer را از دیتابیس بخواند"""
+    if (
+        configured_telegram_delivery_producer_mode()
+        == TelegramDeliveryRuntimeMode.QUEUE_V1
+    ):
+        return True
+    _assert_legacy_direct_delivery_owner()
     from core.db import AsyncSessionLocal
     
     bot_token = os.getenv("BOT_TOKEN")
@@ -2586,7 +2708,11 @@ async def _try_return_completed_idempotent_replay(
         source_server=current_server(),
         has_idempotency_key=True,
     )
-    _queue_trade_completion_delivery_repair(background_tasks, existing_trade_obj)
+    _queue_trade_completion_delivery_repair(
+        background_tasks,
+        existing_trade_obj,
+        source_offer_id=getattr(offer, "id", None) or trade_data.offer_id,
+    )
     existing_response_kwargs = {
         "identity_map": existing_identity_map,
         "customer_relation_map": existing_customer_relation_map,
@@ -2620,6 +2746,38 @@ async def _commit_rejected_offer_request_ledger(
 ) -> None:
     if ledger is None or not callable(getattr(db, "commit", None)):
         return
+    if _is_overtime_offer_request(ledger):
+        # Approval-time business failure: free the owner seat without inventing
+        # a DIRECT reject status on an overtime row.
+        reason = internal_failure_code or public_failure_code or "approval_revalidation_failed"
+        try:
+            await invalidate_request(db, ledger, reason=str(reason))
+            owner_id = getattr(ledger, "offer_owner_user_id", None)
+            home = getattr(ledger, "request_home_server", None)
+            if owner_id is not None and home:
+                from core.trading_settings import get_trading_settings_async
+
+                ts = await get_trading_settings_async()
+                await promote_next_for_owner(
+                    db,
+                    request_home_server=home,
+                    offer_owner_user_id=int(owner_id),
+                    normal_lifetime_minutes=int(getattr(ts, "offer_expiry_minutes", 0) or 0),
+                )
+            await db.commit()
+        except Exception as exc:
+            rollback = getattr(db, "rollback", None)
+            if callable(rollback):
+                await rollback()
+            log_trading_event(
+                logger,
+                "offer_request_ledger_overtime_invalidate_commit_failed",
+                level="warning",
+                action="offer_request_ledger",
+                result="failure",
+                error_class=type(exc).__name__,
+            )
+        return
     _finalize_offer_request_ledger(
         ledger,
         result_status=result_status,
@@ -2641,6 +2799,109 @@ async def _commit_rejected_offer_request_ledger(
             action="offer_request_ledger",
             result="failure",
             error_class=type(exc).__name__,
+        )
+
+
+def _finalize_successful_trade_ledger(
+    ledger: OfferRequest | object | None,
+    *,
+    offer: Offer | object | None,
+    resulting_trade_id: int | None,
+    approving_overtime: bool,
+    overtime_decided_by_user_id: int | None,
+) -> None:
+    if ledger is None:
+        return
+    if approving_overtime or _is_overtime_offer_request(ledger):
+        decided_by = overtime_decided_by_user_id
+        if decided_by is None:
+            decided_by = getattr(ledger, "offer_owner_user_id", None)
+        record_completed_trade(
+            ledger,
+            resulting_trade_id=int(resulting_trade_id or 0),
+            decided_by_user_id=int(decided_by or 0),
+        )
+        if offer is not None:
+            offer.overtime_trade_committed = True
+        return
+    _finalize_offer_request_ledger(
+        ledger,
+        result_status=OfferRequestStatus.COMPLETED_TRADE,
+        resulting_trade_id=resulting_trade_id,
+    )
+
+
+async def _finalize_overtime_trade_side_effects(
+    db: AsyncSession,
+    *,
+    ledger: OfferRequest | object | None,
+    offer: Offer | object | None,
+    approving_overtime: bool,
+    now: datetime | None = None,
+) -> None:
+    """Final-tail remainder expiry + owner-seat release after overtime success."""
+    if not approving_overtime or ledger is None or offer is None:
+        return
+
+    from core.offer_lifecycle import OfferLifecyclePhase, project_offer_lifecycle
+    from core.services.offer_expiry_service import (
+        OfferExpiryCommand,
+        OfferExpiryReason,
+        OfferExpirySourceSurface,
+        apply_offer_expiry,
+    )
+    from core.services.offer_overtime_request_service import (
+        invalidate_overtime_requests_for_offer,
+    )
+    from core.trading_settings import get_trading_settings_async
+
+    stamp = _normalize_naive_utc(now) or datetime.utcnow()
+    ts = await get_trading_settings_async()
+    normal_minutes = int(getattr(ts, "offer_expiry_minutes", 0) or 0)
+
+    # Partial approval in the final tail expires the leftover quantity immediately.
+    if getattr(offer, "status", None) == OfferStatus.ACTIVE:
+        projection = project_offer_lifecycle(
+            offer,
+            normal_lifetime_minutes=normal_minutes,
+            as_of=stamp,
+            has_final_tail_request=True,
+        )
+        past_final = (
+            projection.final_deadline_at is not None
+            and stamp >= _normalize_naive_utc(projection.final_deadline_at)
+        )
+        if projection.phase == OfferLifecyclePhase.FINAL_TAIL or past_final:
+            apply_offer_expiry(
+                offer,
+                OfferExpiryCommand(
+                    reason=OfferExpiryReason.TIME_LIMIT,
+                    source_surface=OfferExpirySourceSurface.SYSTEM,
+                    source_server=current_server(),
+                    require_active=True,
+                ),
+                now=stamp,
+            )
+
+    await invalidate_overtime_requests_for_offer(
+        db,
+        offer,
+        reason="overtime_trade_completed",
+        now=stamp,
+        promote_next=False,
+        normal_lifetime_minutes=normal_minutes,
+        flush=True,
+    )
+    owner_id = getattr(ledger, "offer_owner_user_id", None)
+    home = getattr(ledger, "request_home_server", None)
+    if owner_id is not None and home:
+        await promote_next_for_owner(
+            db,
+            request_home_server=home,
+            offer_owner_user_id=int(owner_id),
+            normal_lifetime_minutes=normal_minutes,
+            now=stamp,
+            flush=True,
         )
 
 
@@ -2711,24 +2972,243 @@ async def _flush_trade_request_state(db: AsyncSession) -> None:
         await flush()
 
 
-async def _is_offer_expired_for_trade(offer: Offer, edge_received_at: Optional[datetime]) -> bool:
+async def _classify_trade_request_intake(
+    offer: Offer,
+    edge_received_at: Optional[datetime],
+):
+    """Classify intake from the trusted receipt time via the shared projection."""
+    from core.offer_lifecycle import (
+        OfferRequestIntakePhase,
+        classify_request_intake_phase,
+        compute_lifecycle_deadlines,
+        read_overtime_minutes_snapshot,
+    )
     from core.trading_settings import get_trading_settings_async
 
     ts = await get_trading_settings_async()
-    if ts.offer_expiry_minutes <= 0 or not offer.created_at:
-        return False
+    normal_minutes = int(getattr(ts, "offer_expiry_minutes", 0) or 0)
+    if normal_minutes <= 0 or not getattr(offer, "created_at", None):
+        return OfferRequestIntakePhase.AUTOMATIC, None
 
-    created_at = _normalize_naive_utc(offer.created_at) or datetime.utcnow()
-    expiry_at = created_at + timedelta(minutes=ts.offer_expiry_minutes)
-    now = datetime.utcnow()
-    edge_at = _normalize_naive_utc(edge_received_at)
+    overtime = read_overtime_minutes_snapshot(offer)
+    normal_deadline, final_deadline = compute_lifecycle_deadlines(
+        offer.created_at,
+        normal_lifetime_minutes=normal_minutes,
+        overtime_minutes_snapshot=overtime,
+    )
+    receipt = _normalize_naive_utc(edge_received_at) or datetime.utcnow()
+    phase = classify_request_intake_phase(
+        receipt_at=receipt,
+        normal_deadline_at=normal_deadline,
+        final_deadline_at=final_deadline,
+        overtime_minutes_snapshot=overtime,
+    )
+    return phase, receipt
 
-    if edge_at and edge_at <= expiry_at:
-        transit_seconds = max(0.0, (now - edge_at).total_seconds())
-        if transit_seconds <= settings.trade_forward_grace_seconds:
-            return False
 
-    return now > expiry_at
+async def _is_offer_expired_for_trade(offer: Offer, edge_received_at: Optional[datetime]) -> bool:
+    """True when intake classification rejects the request outright.
+
+    Phase comes only from the trusted receipt. Transit grace no longer keeps a
+    late receipt inside automatic. Approval-phase receipts are routed into the
+    overtime state machine before this helper runs on the direct path.
+    """
+    from core.offer_lifecycle import OfferRequestIntakePhase
+
+    phase, _receipt = await _classify_trade_request_intake(offer, edge_received_at)
+    return phase == OfferRequestIntakePhase.REJECTED
+
+
+def _offer_request_workflow_value(ledger: OfferRequest | object | None) -> str:
+    raw = getattr(ledger, "workflow_kind", None) if ledger is not None else None
+    return str(getattr(raw, "value", raw) or OfferRequestWorkflow.DIRECT.value)
+
+
+def _is_overtime_offer_request(ledger: OfferRequest | object | None) -> bool:
+    return _offer_request_workflow_value(ledger) == OfferRequestWorkflow.OVERTIME.value
+
+
+def _overtime_request_public_payload(
+    result: OvertimeRequestResult | OfferRequest | object,
+    *,
+    duplicate_replay: bool = False,
+    promoted: bool | None = None,
+    viewer_role: str | None = None,
+    now: datetime | None = None,
+) -> dict[str, object]:
+    if isinstance(result, OvertimeRequestResult):
+        ledger = result.ledger
+        duplicate_replay = bool(result.duplicate_replay)
+        promoted = bool(result.promoted) if promoted is None else promoted
+    else:
+        ledger = result
+        if promoted is None:
+            promoted = False
+    status_raw = getattr(ledger, "result_status", None)
+    status_value = getattr(status_raw, "value", status_raw)
+    deadline = getattr(ledger, "decision_deadline_at", None)
+    presented = getattr(ledger, "presented_at", None)
+    stamp = now or datetime.utcnow()
+    remaining = remaining_seconds_until(deadline, now=stamp) if deadline is not None else None
+    occupying = status_value in {
+        item.value for item in OVERTIME_OWNER_OCCUPYING_STATUSES
+    }
+    actionable = status_value == OfferRequestStatus.OVERTIME_PRESENTED.value
+    payload: dict[str, object] = {
+        "workflow": OfferRequestWorkflow.OVERTIME.value,
+        "request_public_id": getattr(ledger, "request_public_id", None),
+        "offer_public_id": getattr(ledger, "offer_public_id", None),
+        "request_home_server": getattr(ledger, "request_home_server", None),
+        "result_status": status_value,
+        "requested_quantity": getattr(ledger, "requested_quantity", None),
+        "presented_at": presented.isoformat() if presented is not None else None,
+        "decision_deadline_at": deadline.isoformat() if deadline is not None else None,
+        "remaining_decision_seconds": remaining,
+        "is_occupying": occupying,
+        "is_actionable": actionable,
+        "promoted": bool(promoted),
+        "duplicate_replay": bool(duplicate_replay),
+    }
+    if viewer_role:
+        payload["viewer_role"] = viewer_role
+    return payload
+
+
+def _overtime_request_http_response(
+    result: OvertimeRequestResult | OfferRequest | object,
+    *,
+    duplicate_replay: bool = False,
+    promoted: bool | None = None,
+) -> JSONResponse:
+    return JSONResponse(
+        status_code=status.HTTP_202_ACCEPTED,
+        content=_overtime_request_public_payload(
+            result,
+            duplicate_replay=duplicate_replay,
+            promoted=promoted,
+        ),
+    )
+
+
+def _raise_overtime_request_http_error(exc: OvertimeRequestError) -> None:
+    code = exc.code
+    if code in {
+        OvertimeRequestErrorCode.SAME_OFFER_BUSY,
+        OvertimeRequestErrorCode.COOLDOWN_ACTIVE,
+        OvertimeRequestErrorCode.REQUESTER_LIMIT,
+        OvertimeRequestErrorCode.REQUESTER_OWNER_LIMIT,
+        OvertimeRequestErrorCode.ALREADY_TERMINAL,
+    }:
+        status_code = status.HTTP_409_CONFLICT
+    elif code in {
+        OvertimeRequestErrorCode.NOT_OWNER,
+        OvertimeRequestErrorCode.NOT_REQUESTER,
+    }:
+        status_code = status.HTTP_403_FORBIDDEN
+    elif code == OvertimeRequestErrorCode.NOT_FOUND:
+        status_code = status.HTTP_404_NOT_FOUND
+    else:
+        status_code = status.HTTP_400_BAD_REQUEST
+    detail: dict[str, object] | str = {
+        "error_code": code.value,
+        "message": exc.detail,
+    }
+    if exc.remaining_seconds is not None:
+        detail["remaining_seconds"] = int(exc.remaining_seconds)
+    raise HTTPException(status_code=status_code, detail=detail) from exc
+
+
+def _try_return_overtime_idempotent_status(
+    ledger: OfferRequest | object | None,
+    trade_data: TradeCreate,
+) -> JSONResponse | None:
+    """Replay an in-flight or terminal overtime row for the same idempotency key."""
+    if ledger is None or not _is_overtime_offer_request(ledger):
+        return None
+    if _is_completed_offer_request_replay(ledger):
+        return None
+    status_raw = getattr(ledger, "result_status", None)
+    status_value = getattr(status_raw, "value", status_raw)
+    nonterminal_values = {item.value for item in OVERTIME_NONTERMINAL_STATUSES}
+    terminal_values = {item.value for item in OVERTIME_TERMINAL_STATUSES}
+    if status_value in nonterminal_values:
+        return _overtime_request_http_response(ledger, duplicate_replay=True)
+    if status_value in terminal_values:
+        message = getattr(ledger, "public_failure_message", None) or TRADE_UNAVAILABLE_DETAIL
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "error_code": status_value,
+                "message": message,
+                "workflow": OfferRequestWorkflow.OVERTIME.value,
+                "request_public_id": getattr(ledger, "request_public_id", None),
+                "offer_id": trade_data.offer_id,
+            },
+        )
+    return None
+
+
+async def _create_overtime_request_for_trade(
+    db: AsyncSession,
+    *,
+    offer: Offer,
+    trade_data: TradeCreate,
+    owner_user: User,
+    actor_user: User,
+    request_source_surface: OfferRequestSourceSurface | str,
+    request_source_server: str | None,
+    receipt_at: datetime,
+    normal_lifetime_minutes: int,
+) -> JSONResponse:
+    """Persist an overtime approval request instead of committing a trade."""
+    from core.trading_settings import get_trading_settings_async
+
+    if not (trade_data.idempotency_key or "").strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "error_code": OvertimeRequestErrorCode.IDEMPOTENCY_REQUIRED.value,
+                "message": "کلید تکرار درخواست الزامی است.",
+            },
+        )
+
+    ts = await get_trading_settings_async()
+    normal_minutes = int(normal_lifetime_minutes or getattr(ts, "offer_expiry_minutes", 0) or 0)
+    responder_customer_relation = await get_active_customer_relation_for_customer(db, owner_user.id)
+    snapshot = customer_relation_snapshot(responder_customer_relation)
+    try:
+        result = await create_overtime_request(
+            db,
+            OvertimeRequestCreateCommand(
+                offer=offer,
+                requester_user_id=int(owner_user.id),
+                actor_user_id=int(actor_user.id),
+                requested_quantity=int(trade_data.quantity),
+                idempotency_key=str(trade_data.idempotency_key).strip(),
+                request_source_surface=request_source_surface,
+                request_source_server=normalize_server(request_source_server, current_server()),
+                receipt_at=receipt_at,
+                normal_lifetime_minutes=normal_minutes,
+                request_home_server=normalize_server(getattr(offer, "home_server", None), current_server()),
+                **snapshot,
+            ),
+            now=datetime.utcnow(),
+        )
+    except OvertimeRequestError as exc:
+        await db.rollback()
+        _raise_overtime_request_http_error(exc)
+
+    await db.commit()
+    log_trading_event(
+        logger,
+        "trade_execute.overtime_request_created",
+        action="trade_execute",
+        result="overtime_pending",
+        offer_id=getattr(offer, "id", None),
+        source_server=current_server(),
+        has_idempotency_key=True,
+    )
+    return _overtime_request_http_response(result)
 
 
 def _is_time_limit_expired_offer(offer: Offer | object) -> bool:
@@ -2740,6 +3220,37 @@ def _is_time_limit_expired_offer(offer: Offer | object) -> bool:
     )
 
 
+def _within_in_flight_finalization_grace(
+    *,
+    edge_received_at: Optional[datetime],
+    now: Optional[datetime] = None,
+) -> bool:
+    """Bound the post-worker finalization window; does not affect phase."""
+    edge_at = _normalize_naive_utc(edge_received_at)
+    if edge_at is None:
+        return False
+    current = _normalize_naive_utc(now) or datetime.utcnow()
+    transit_seconds = max(0.0, (current - edge_at).total_seconds())
+    return transit_seconds <= float(settings.trade_forward_grace_seconds)
+
+
+async def _reconcile_ambiguous_trade_forward(idempotency_key: str) -> None:
+    """Background replay of a retained forward payload (no local ledger write)."""
+    try:
+        await reconcile_trade_forward_pending(idempotency_key)
+    except Exception as exc:
+        log_trading_event(
+            logger,
+            "trade_forward.pending_reconcile_error",
+            level="warning",
+            action="trade_forward",
+            result="failure",
+            error_class=type(exc).__name__,
+            source_server=current_server(),
+            has_idempotency_key=True,
+        )
+
+
 async def _forward_trade_if_remote_home(
     db: AsyncSession,
     trade_data: TradeCreate,
@@ -2748,6 +3259,7 @@ async def _forward_trade_if_remote_home(
     *,
     request_source_surface: OfferRequestSourceSurface | str = OfferRequestSourceSurface.WEBAPP,
     request_pre_gated: bool = False,
+    background_tasks: BackgroundTasks | None = None,
 ) -> Optional[JSONResponse]:
     offer = await db.get(Offer, trade_data.offer_id)
     if not offer or not is_remote_home(offer.home_server):
@@ -2787,6 +3299,40 @@ async def _forward_trade_if_remote_home(
         delegated_actor=getattr(actor_user, "id", None) != owner_user.id,
     )
     status_code, body = await forward_trade_to_home_server(offer.home_server, payload)
+
+    # Uncertain delivery after send: retain the key, show M18, reconcile later.
+    # Definite pre-send failures (503) retain nothing and keep the retry copy.
+    if status_code == 504 and (trade_data.idempotency_key or "").strip():
+        marked = await mark_trade_forward_pending(
+            idempotency_key=trade_data.idempotency_key,
+            home_server=normalize_server(offer.home_server),
+            payload=payload,
+        )
+        if marked and background_tasks is not None:
+            background_tasks.add_task(
+                _reconcile_ambiguous_trade_forward,
+                str(trade_data.idempotency_key).strip(),
+            )
+        log_trading_event(
+            logger,
+            "trade_forward.remote_home_ambiguous",
+            level="warning",
+            action="trade_forward",
+            result="pending",
+            source_server=payload["source_server"],
+            target_server=normalize_server(offer.home_server),
+            offer_id=trade_data.offer_id,
+            status_code=status_code,
+            has_idempotency_key=True,
+        )
+        return JSONResponse(
+            status_code=status.HTTP_202_ACCEPTED,
+            content=ambiguous_forward_pending_response(
+                idempotency_key=str(trade_data.idempotency_key).strip(),
+                offer_public_id=offer_public_id,
+            ),
+        )
+
     if status_code >= 400:
         log_trading_event(
             logger,
@@ -2824,11 +3370,19 @@ async def _execute_trade_authoritatively(
     request_source_surface: OfferRequestSourceSurface | str = OfferRequestSourceSurface.WEBAPP,
     request_source_server: str | None = None,
     request_pre_gated: bool = False,
+    overtime_approval_ledger: OfferRequest | None = None,
+    overtime_decided_by_user_id: int | None = None,
 ):
     """
     انجام معامله روی یک لفظ از MiniApp
+
+    When ``overtime_approval_ledger`` is set, skip DIRECT ledger create and
+    intake routing; re-validate and commit under the existing overtime row.
     """
     from core.enums import UserRole
+    from core.offer_lifecycle import OfferRequestIntakePhase
+    from core.trading_settings import get_trading_settings_async
+
     owner_user = context.owner_user
     actor_user = context.actor_user
     request_source_surface = _normalize_trade_request_surface(request_source_surface)
@@ -2838,6 +3392,7 @@ async def _execute_trade_authoritatively(
     timing_started_at = time_module.perf_counter()
     timing_last_mark = timing_started_at
     idempotency_lock_held = False
+    approving_overtime = overtime_approval_ledger is not None
 
     def mark_trade_phase(phase: str) -> None:
         nonlocal timing_last_mark
@@ -2885,7 +3440,7 @@ async def _execute_trade_authoritatively(
             detail="حساب شما غیرفعال است و امکان انجام معامله ندارید.",
         )
 
-    if trade_data.idempotency_key:
+    if trade_data.idempotency_key and not approving_overtime:
         idempotency_lock_held = await _lock_trade_idempotency_key(db, trade_data.idempotency_key)
         completed_ledger = await load_offer_request_by_idempotency(
             db,
@@ -2903,6 +3458,12 @@ async def _execute_trade_authoritatively(
         )
         if completed_replay_response is not None:
             return completed_replay_response
+        overtime_status_response = _try_return_overtime_idempotent_status(
+            completed_ledger,
+            trade_data,
+        )
+        if overtime_status_response is not None:
+            return overtime_status_response
 
     market_evaluation = await evaluate_current_market_schedule(db)
     if not market_evaluation.is_open:
@@ -2951,37 +3512,71 @@ async def _execute_trade_authoritatively(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="لفظ یافت نشد.")
     mark_trade_phase("locked_offer")
 
-    offer_request_ledger = await _create_offer_request_ledger_for_trade(
-        db,
-        offer=offer,
-        trade_data=trade_data,
-        owner_user=owner_user,
-        actor_user=actor_user,
-        request_source_surface=request_source_surface,
-        request_source_server=request_source_server,
-        edge_received_at=edge_received_at,
-    )
+    if approving_overtime:
+        offer_request_ledger = overtime_approval_ledger
+        if int(getattr(offer_request_ledger, "local_offer_id", 0) or 0) != int(offer.id):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="درخواست وقت اضافه با این لفظ همخوانی ندارد.",
+            )
+        if int(getattr(offer_request_ledger, "requester_user_id", 0) or 0) != int(owner_user.id):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="فقط درخواست‌دهنده می‌تواند نتیجه این معامله را دریافت کند.",
+            )
+        expired_for_trade = False
+    else:
+        intake_phase, receipt_at = await _classify_trade_request_intake(offer, edge_received_at)
+        if intake_phase == OfferRequestIntakePhase.APPROVAL:
+            ts = await get_trading_settings_async()
+            return await _create_overtime_request_for_trade(
+                db,
+                offer=offer,
+                trade_data=trade_data,
+                owner_user=owner_user,
+                actor_user=actor_user,
+                request_source_surface=request_source_surface,
+                request_source_server=request_source_server,
+                receipt_at=receipt_at or (_normalize_naive_utc(edge_received_at) or datetime.utcnow()),
+                normal_lifetime_minutes=int(getattr(ts, "offer_expiry_minutes", 0) or 0),
+            )
 
-    completed_replay_response = await _try_return_completed_idempotent_replay(
-        db=db,
-        background_tasks=background_tasks,
-        offer_request_ledger=offer_request_ledger,
-        offer=offer,
-        trade_data=trade_data,
-        owner_user=owner_user,
-        actor_user=actor_user,
-    )
-    if completed_replay_response is not None:
-        return completed_replay_response
-    
-    expired_for_trade = await _is_offer_expired_for_trade(offer, edge_received_at)
+        offer_request_ledger = await _create_offer_request_ledger_for_trade(
+            db,
+            offer=offer,
+            trade_data=trade_data,
+            owner_user=owner_user,
+            actor_user=actor_user,
+            request_source_surface=request_source_surface,
+            request_source_server=request_source_server,
+            edge_received_at=edge_received_at,
+        )
 
+        completed_replay_response = await _try_return_completed_idempotent_replay(
+            db=db,
+            background_tasks=background_tasks,
+            offer_request_ledger=offer_request_ledger,
+            offer=offer,
+            trade_data=trade_data,
+            owner_user=owner_user,
+            actor_user=actor_user,
+        )
+        if completed_replay_response is not None:
+            return completed_replay_response
+
+        expired_for_trade = await _is_offer_expired_for_trade(offer, edge_received_at)
+
+    # Receipt was validly inside automatic; worker may already have flipped the
+    # row. Grace only bounds that finalization race — it never changes phase.
     allow_in_flight_after_time_limit_expiry = (
         _is_time_limit_expired_offer(offer)
-        and edge_received_at is not None
         and not expired_for_trade
+        and not approving_overtime
+        and _within_in_flight_finalization_grace(edge_received_at=edge_received_at)
     )
     if (offer.status != OfferStatus.ACTIVE and not allow_in_flight_after_time_limit_expiry) or expired_for_trade:
+        if approving_overtime:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="این لفظ دیگر فعال نیست.")
         await _commit_rejected_offer_request_ledger(
             db,
             offer_request_ledger,
@@ -3274,14 +3869,22 @@ async def _execute_trade_authoritatively(
                 has_idempotency_key=True,
                 chain_length=len(trade_execution_nodes) - 1,
             )
-            _finalize_offer_request_ledger(
+            _finalize_successful_trade_ledger(
                 offer_request_ledger,
-                result_status=OfferRequestStatus.COMPLETED_TRADE,
+                offer=offer,
                 resulting_trade_id=getattr(existing_trade_obj, "id", None),
+                approving_overtime=approving_overtime,
+                overtime_decided_by_user_id=overtime_decided_by_user_id,
             )
+            _bind_trade_delivery_source_context(existing_trade_obj, offer)
+            await persist_trade_completion_delivery_intents(db, existing_trade_obj)
             if callable(getattr(db, "commit", None)):
                 await _commit_trade_execution(db)
-            _queue_trade_completion_delivery_repair(background_tasks, existing_trade_obj)
+            _queue_trade_completion_delivery_repair(
+                background_tasks,
+                existing_trade_obj,
+                source_offer_id=getattr(offer, "id", None),
+            )
             existing_response_kwargs = {
                 "identity_map": existing_identity_map,
                 "customer_relation_map": existing_customer_relation_map,
@@ -3363,13 +3966,44 @@ async def _execute_trade_authoritatively(
         flag_modified(offer, "lot_sizes")  # اجبار SQLAlchemy برای تشخیص تغییر
 
     await _flush_trade_request_state(db)
-    _finalize_offer_request_ledger(
+    _finalize_successful_trade_ledger(
         offer_request_ledger,
-        result_status=OfferRequestStatus.COMPLETED_TRADE,
+        offer=offer,
         resulting_trade_id=getattr(response_trade_record, "id", None),
+        approving_overtime=approving_overtime,
+        overtime_decided_by_user_id=overtime_decided_by_user_id,
+    )
+    await _finalize_overtime_trade_side_effects(
+        db,
+        ledger=offer_request_ledger,
+        offer=offer,
+        approving_overtime=approving_overtime,
     )
     _apply_trade_counter_increment(owner_user, trade_quantity)
     mark_trade_phase("flushed_trade_state")
+
+    delivery_trade_contexts: list[tuple[Trade, object, object]]
+    if uses_customer_trade_chain:
+        delivery_trade_contexts = [
+            (
+                trade,
+                trade_execution_nodes[index]["user"],
+                trade_execution_nodes[index + 1]["user"],
+            )
+            for index, trade in enumerate(created_chain_trades)
+        ]
+    else:
+        delivery_trade_contexts = [(response_trade_record, offer.user, owner_user)]
+
+    for delivery_trade, delivery_offer_user, delivery_responder_user in delivery_trade_contexts:
+        # The audience builder is read-only. Bind already-loaded relationships
+        # so it can construct the exact durable payload before the Trade commit.
+        _bind_trade_delivery_source_context(delivery_trade, offer)
+        delivery_trade.offer_user = delivery_offer_user
+        delivery_trade.responder_user = delivery_responder_user
+        delivery_trade.commodity = offer.commodity
+        await persist_trade_completion_delivery_intents(db, delivery_trade)
+    mark_trade_phase("persisted_delivery_intents")
     
     # Commit با محافظت Optimistic Locking
     await _commit_trade_execution(db)
@@ -3588,6 +4222,7 @@ async def _execute_trade_authoritatively(
             _queue_trade_completion_delivery_repair(
                 background_tasks,
                 leg_context.get("delivery_trade") or leg_trade_obj,
+                source_offer_id=getattr(offer, "id", None),
             )
 
             try:
@@ -3649,7 +4284,11 @@ async def _execute_trade_authoritatively(
                     error_class=type(exc).__name__,
                 )
     else:
-        _queue_trade_completion_delivery_repair(background_tasks, response_trade_record)
+        _queue_trade_completion_delivery_repair(
+            background_tasks,
+            response_trade_record,
+            source_offer_id=getattr(offer, "id", None),
+        )
 
         responder_audience = [owner_user.id]
         offer_owner_audience = [offer.user_id]
@@ -3778,6 +4417,14 @@ async def _execute_trade_authoritatively(
         }
         if getattr(offer, "offer_public_id", None):
             realtime_offer_payload["offer_public_id"] = offer.offer_public_id
+        try:
+            from api.routers.offers import _offer_lifecycle_response_fields
+
+            realtime_offer_payload.update(_offer_lifecycle_response_fields(offer))
+        except Exception:
+            realtime_offer_payload["overtime_trade_committed"] = bool(
+                getattr(offer, "overtime_trade_committed", False)
+            )
         await publish_event("offer:updated", realtime_offer_payload)
     except Exception as exc:
         log_trading_event(
@@ -3818,10 +4465,18 @@ async def _execute_trade_authoritatively_with_transient_retry(
     request_source_surface: OfferRequestSourceSurface | str = OfferRequestSourceSurface.WEBAPP,
     request_source_server: str | None = None,
     request_pre_gated: bool = False,
+    overtime_approval_ledger: OfferRequest | None = None,
+    overtime_decided_by_user_id: int | None = None,
     max_attempts: int = TRADE_TRANSIENT_RETRY_ATTEMPTS,
 ):
     attempts = max(1, int(max_attempts or 1))
     retry_context = context
+    retry_overtime_ledger = overtime_approval_ledger
+    overtime_public_id = (
+        getattr(overtime_approval_ledger, "request_public_id", None)
+        if overtime_approval_ledger is not None
+        else None
+    )
     for attempt in range(1, attempts + 1):
         try:
             return await _execute_trade_authoritatively(
@@ -3833,6 +4488,8 @@ async def _execute_trade_authoritatively_with_transient_retry(
                 request_source_surface=request_source_surface,
                 request_source_server=request_source_server,
                 request_pre_gated=request_pre_gated,
+                overtime_approval_ledger=retry_overtime_ledger,
+                overtime_decided_by_user_id=overtime_decided_by_user_id,
             )
         except Exception as exc:
             if not _is_retryable_trade_transient_error(exc) or attempt >= attempts:
@@ -3861,6 +4518,14 @@ async def _execute_trade_authoritatively_with_transient_retry(
                 relation=getattr(retry_context, "relation", None),
                 is_accountant_context=getattr(retry_context, "is_accountant_context", False),
             )
+            if overtime_public_id:
+                retry_overtime_ledger = await load_overtime_request_by_public_id(
+                    db,
+                    str(overtime_public_id),
+                    for_update=True,
+                )
+                if retry_overtime_ledger is None:
+                    raise
             log_trading_event(
                 logger,
                 "trade_execute.transient_retry",
@@ -3895,6 +4560,7 @@ async def create_trade(
             edge_received_at,
             request_source_surface=OfferRequestSourceSurface.WEBAPP,
             request_pre_gated=trade_contention_lease_was_pre_gated(trade_contention_lease),
+            background_tasks=background_tasks,
         )
         if forwarded_response is not None:
             return forwarded_response
@@ -3911,6 +4577,277 @@ async def create_trade(
         )
     finally:
         await _release_trade_contention_lease(trade_contention_lease)
+
+
+@router.get("/overtime-requests/pending-owner", status_code=status.HTTP_200_OK)
+async def get_pending_owner_overtime_requests(
+    db: AsyncSession = Depends(get_db),
+    context: EffectiveOwnerActor = Depends(get_effective_owner_actor_context),
+):
+    """Reconnect recovery: owner's nonterminal overtime requests on this home server.
+
+    ``current`` is the single occupying/presented request the owner must decide
+    (if any). Queued siblings stay in ``items`` for UI context without exposing
+    requester identity.
+    """
+    _ensure_accountant_market_access_allowed(context)
+    owner_id = int(context.owner_user.id)
+    home = current_server()
+    rows = await list_nonterminal_overtime_requests(
+        db,
+        offer_owner_user_id=owner_id,
+        request_home_server=home,
+    )
+    now = datetime.utcnow()
+    items = [
+        _overtime_request_public_payload(row, viewer_role="owner", now=now)
+        for row in rows
+    ]
+    current_item = next(
+        (item for item in items if item.get("is_occupying")),
+        None,
+    )
+    return {
+        "request_home_server": home,
+        "viewer_role": "owner",
+        "current": current_item,
+        "items": items,
+    }
+
+
+@router.get("/overtime-requests/pending-requester", status_code=status.HTTP_200_OK)
+async def get_pending_requester_overtime_requests(
+    db: AsyncSession = Depends(get_db),
+    context: EffectiveOwnerActor = Depends(get_effective_owner_actor_context),
+):
+    """Reconnect recovery: requester's outstanding overtime requests on this server."""
+    _ensure_accountant_market_access_allowed(context)
+    requester_id = int(context.owner_user.id)
+    home = current_server()
+    rows = await list_nonterminal_overtime_requests(
+        db,
+        requester_user_id=requester_id,
+        request_home_server=home,
+    )
+    now = datetime.utcnow()
+    items = [
+        _overtime_request_public_payload(row, viewer_role="requester", now=now)
+        for row in rows
+    ]
+    return {
+        "request_home_server": home,
+        "viewer_role": "requester",
+        "items": items,
+    }
+
+
+@router.get("/overtime-requests/{request_public_id}", status_code=status.HTTP_200_OK)
+async def get_overtime_request(
+    request_public_id: str,
+    db: AsyncSession = Depends(get_db),
+    context: EffectiveOwnerActor = Depends(get_effective_owner_actor_context),
+):
+    """Reconnect recovery for one opaque request; owner or requester only."""
+    _ensure_accountant_market_access_allowed(context)
+    ledger = await load_overtime_request_by_public_id(db, request_public_id)
+    if ledger is None or not _is_overtime_offer_request(ledger):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="درخواست وقت اضافه یافت نشد.",
+        )
+    caller_id = int(context.owner_user.id)
+    owner_id = getattr(ledger, "offer_owner_user_id", None)
+    requester_id = getattr(ledger, "requester_user_id", None)
+    if caller_id == int(owner_id or 0):
+        viewer_role = "owner"
+    elif caller_id == int(requester_id or 0):
+        viewer_role = "requester"
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="دسترسی به این درخواست مجاز نیست.",
+        )
+    home = normalize_server(getattr(ledger, "request_home_server", None), current_server())
+    payload = _overtime_request_public_payload(
+        ledger,
+        viewer_role=viewer_role,
+        now=datetime.utcnow(),
+    )
+    payload["request_home_server"] = home
+    payload["is_local_home"] = home == current_server()
+    return payload
+
+
+@router.post(
+    "/overtime-requests/{request_public_id}/approve",
+    response_model=TradeResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def approve_overtime_request(
+    request_public_id: str,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    context: EffectiveOwnerActor = Depends(get_effective_owner_actor_context),
+):
+    """Owner approval: re-enter the authoritative trade commit for a presented request."""
+    _ensure_accountant_market_access_allowed(context)
+    decider = context.owner_user
+    ledger = await load_overtime_request_by_public_id(
+        db,
+        request_public_id,
+        for_update=True,
+    )
+    if ledger is None or not _is_overtime_offer_request(ledger):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="درخواست وقت اضافه یافت نشد.")
+    home = normalize_server(getattr(ledger, "request_home_server", None), current_server())
+    if home != current_server():
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="این درخواست فقط روی سرور مرجع لفظ قابل تأیید است.",
+        )
+    if _is_completed_offer_request_replay(ledger):
+        trade_data = TradeCreate(
+            offer_id=int(getattr(ledger, "local_offer_id")),
+            offer_public_id=getattr(ledger, "offer_public_id", None),
+            quantity=int(getattr(ledger, "requested_quantity")),
+            idempotency_key=getattr(ledger, "idempotency_key", None),
+        )
+        requester = await db.get(User, int(ledger.requester_user_id))
+        if requester is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="درخواست‌دهنده یافت نشد.")
+        replay = await _try_return_completed_idempotent_replay(
+            db=db,
+            background_tasks=background_tasks,
+            offer_request_ledger=ledger,
+            offer=await db.get(Offer, int(ledger.local_offer_id)),
+            trade_data=trade_data,
+            owner_user=requester,
+            actor_user=requester,
+        )
+        if replay is not None:
+            return replay
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="نتیجه قطعی معامله موقتاً در دسترس نیست. لطفاً همین درخواست را دوباره تلاش کنید.",
+        )
+    try:
+        await claim_owner_approval(
+            ledger,
+            decided_by_user_id=int(decider.id),
+            now=datetime.utcnow(),
+        )
+    except OvertimeRequestError as exc:
+        _raise_overtime_request_http_error(exc)
+
+    requester = await db.get(User, int(ledger.requester_user_id))
+    if requester is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="درخواست‌دهنده یافت نشد.")
+    actor_id = getattr(ledger, "actor_user_id", None) or requester.id
+    actor_user = requester if int(actor_id) == int(requester.id) else await db.get(User, int(actor_id))
+    if actor_user is None:
+        actor_user = requester
+
+    trade_data = TradeCreate(
+        offer_id=int(getattr(ledger, "local_offer_id")),
+        offer_public_id=getattr(ledger, "offer_public_id", None),
+        quantity=int(getattr(ledger, "requested_quantity")),
+        idempotency_key=getattr(ledger, "idempotency_key", None),
+    )
+    requester_context = EffectiveOwnerActor(
+        owner_user=requester,
+        actor_user=actor_user,
+        relation=None,
+        is_accountant_context=False,
+    )
+    surface = getattr(ledger, "request_source_surface", OfferRequestSourceSurface.WEBAPP)
+    source_server = getattr(ledger, "request_source_server", current_server())
+    return await _execute_trade_authoritatively_with_transient_retry(
+        trade_data=trade_data,
+        background_tasks=background_tasks,
+        db=db,
+        context=requester_context,
+        edge_received_at=getattr(ledger, "received_at", None) or datetime.utcnow(),
+        request_source_surface=surface,
+        request_source_server=source_server,
+        overtime_approval_ledger=ledger,
+        overtime_decided_by_user_id=int(decider.id),
+    )
+
+
+@router.post("/overtime-requests/{request_public_id}/reject", status_code=status.HTTP_200_OK)
+async def reject_overtime_request(
+    request_public_id: str,
+    db: AsyncSession = Depends(get_db),
+    context: EffectiveOwnerActor = Depends(get_effective_owner_actor_context),
+):
+    """Owner rejection of a presented overtime request."""
+    _ensure_accountant_market_access_allowed(context)
+    ledger = await load_overtime_request_by_public_id(
+        db,
+        request_public_id,
+        for_update=True,
+    )
+    if ledger is None or not _is_overtime_offer_request(ledger):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="درخواست وقت اضافه یافت نشد.")
+    home = normalize_server(getattr(ledger, "request_home_server", None), current_server())
+    if home != current_server():
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="این درخواست فقط روی سرور مرجع لفظ قابل رد است.",
+        )
+    from core.trading_settings import get_trading_settings_async
+
+    ts = await get_trading_settings_async()
+    try:
+        await reject_by_owner(
+            db,
+            ledger,
+            decided_by_user_id=int(context.owner_user.id),
+            now=datetime.utcnow(),
+            normal_lifetime_minutes=int(getattr(ts, "offer_expiry_minutes", 0) or 0),
+        )
+    except OvertimeRequestError as exc:
+        _raise_overtime_request_http_error(exc)
+    await db.commit()
+    return _overtime_request_public_payload(ledger, duplicate_replay=False)
+
+
+@router.post("/overtime-requests/{request_public_id}/cancel", status_code=status.HTTP_200_OK)
+async def cancel_overtime_request(
+    request_public_id: str,
+    db: AsyncSession = Depends(get_db),
+    context: EffectiveOwnerActor = Depends(get_effective_owner_actor_context),
+):
+    """Requester cancellation of a nonterminal overtime request (home only)."""
+    _ensure_accountant_market_access_allowed(context)
+    ledger = await load_overtime_request_by_public_id(
+        db,
+        request_public_id,
+        for_update=True,
+    )
+    if ledger is None or not _is_overtime_offer_request(ledger):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="درخواست وقت اضافه یافت نشد.")
+    home = normalize_server(getattr(ledger, "request_home_server", None), current_server())
+    if home != current_server():
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="این درخواست فقط روی سرور مرجع لفظ قابل لغو است.",
+        )
+    from core.trading_settings import get_trading_settings_async
+
+    ts = await get_trading_settings_async()
+    try:
+        await cancel_by_requester(
+            db,
+            ledger,
+            requester_user_id=int(context.owner_user.id),
+            now=datetime.utcnow(),
+            normal_lifetime_minutes=int(getattr(ts, "offer_expiry_minutes", 0) or 0),
+        )
+    except OvertimeRequestError as exc:
+        _raise_overtime_request_http_error(exc)
+    await db.commit()
+    return _overtime_request_public_payload(ledger, duplicate_replay=False)
 
 
 @router.post("/internal/execute", response_model=TradeResponse, status_code=status.HTTP_201_CREATED)

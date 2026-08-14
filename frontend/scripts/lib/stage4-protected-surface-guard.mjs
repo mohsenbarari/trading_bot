@@ -77,6 +77,43 @@ export const MARKET_RUNTIME_BASELINE = Object.freeze({
   sha256: '162e9e618684a24f3db3298eb8ff2c62498b18753cd4e0b6d6b97650d0202058',
 })
 
+// This exact integration disposition preserves the immutable Stage 4
+// baseline while admitting only the reviewed Market changes already present
+// on main when UI/UX candidate fed8fa49 is integrated with main 443ea5a1.
+export const MAIN_UIUX_INTEGRATION_MARKET_KIND =
+  'main-443ea5a-uiux-fed8fa49-market-integration'
+
+export const MAIN_UIUX_INTEGRATION_MARKET_ALLOWED_PATHS = Object.freeze([
+  'frontend/src/components/OfferPreviewModal.vue',
+  'frontend/src/components/OffersList.vue',
+  'frontend/src/components/ui/AppOfferCard.vue',
+  'frontend/src/composables/useOffers.ts',
+  'frontend/src/utils/settlementType.ts',
+  'frontend/src/views/MarketView.vue',
+])
+
+export const MAIN_UIUX_INTEGRATION_MARKET_ALLOWED_FILE_SHA256 = Object.freeze({
+  'frontend/src/components/OfferPreviewModal.vue':
+    '8a8aa129152070e192876eb9924e56d860c60b610cc4b2695a929d0c0dfa3e42',
+  'frontend/src/components/OffersList.vue':
+    '5e1d017e17f772e9a1621be54af16758128aaceb687942c123fc68bbfa21d6d9',
+  'frontend/src/components/ui/AppOfferCard.vue':
+    'edf2a78ed0a556b4b5e6ae2dbb81c6499da305ef5e36fc2de26c5271e1fff864',
+  'frontend/src/composables/useOffers.ts':
+    '4ce35b122ccfe94bcdac910663b9409211cac50eedd4bc0e08293e6067865bec',
+  'frontend/src/utils/settlementType.ts':
+    '4b1648a7310806d4d4bee7e5b241af663c6c998aaa7dde279ebee63a3dc6e5af',
+  'frontend/src/views/MarketView.vue':
+    'a03b608c63d2fc4ae397399ffb1bb5cf9d2b88adf201e4cf4dd4cd3a981a8d11',
+})
+
+export const MAIN_UIUX_INTEGRATION_MARKET_EVIDENCE = Object.freeze({
+  count: 19,
+  contentBytes: 147307,
+  pathSetSha256: '37aa0b51e20f4ae86f7daf6c3c231d93b3d1f288ade1471490a1f843a57c9589',
+  sha256: 'cff97c36d965737605b80c098918c517999fb11f2c66108c2dae4573aac07867',
+})
+
 export const MESSENGER_RUNTIME_BASELINE = Object.freeze({
   count: 85,
   contentBytes: 1312405,
@@ -343,6 +380,61 @@ export function assertProtectedFileSetEvidence(label, actual, expected) {
     }
   }
   return actual
+}
+
+function assertMainUiuxIntegrationMarketAllowedFiles(entries) {
+  const entriesByPath = new Map(entries.map((entry) => [entry.path, entry]))
+  for (const repoPath of MAIN_UIUX_INTEGRATION_MARKET_ALLOWED_PATHS) {
+    const entry = entriesByPath.get(repoPath)
+    if (!entry) {
+      throw new Error(`main/UIUX Market integration allowed file is missing: ${repoPath}`)
+    }
+    const actualSha256 = fileSha256(entry.content)
+    const expectedSha256 = MAIN_UIUX_INTEGRATION_MARKET_ALLOWED_FILE_SHA256[repoPath]
+    if (actualSha256 !== expectedSha256) {
+      throw new Error(
+        `main/UIUX Market integration allowed file drift: ${repoPath} ${expectedSha256} -> ${actualSha256}`,
+      )
+    }
+  }
+}
+
+export function assertMainUiuxIntegrationMarketDisposition(entries) {
+  assertMainUiuxIntegrationMarketAllowedFiles(entries)
+  return assertProtectedFileSetEvidence(
+    'main/UIUX Market integration disposition',
+    protectedFileSetEvidence(entries, MARKET_RUNTIME_CONTRACT),
+    MAIN_UIUX_INTEGRATION_MARKET_EVIDENCE,
+  )
+}
+
+export function resolveMarketRuntimeDisposition(entries) {
+  const actual = protectedFileSetEvidence(entries, MARKET_RUNTIME_CONTRACT)
+  try {
+    return {
+      kind: 'stage4-baseline',
+      evidence: assertProtectedFileSetEvidence(
+        'Market runtime',
+        actual,
+        MARKET_RUNTIME_BASELINE,
+      ),
+    }
+  } catch (baselineError) {
+    try {
+      return {
+        kind: MAIN_UIUX_INTEGRATION_MARKET_KIND,
+        evidence: assertMainUiuxIntegrationMarketDisposition(entries),
+      }
+    } catch (integrationError) {
+      const baselineMessage =
+        baselineError instanceof Error ? baselineError.message : String(baselineError)
+      const integrationMessage =
+        integrationError instanceof Error ? integrationError.message : String(integrationError)
+      throw new Error(
+        `Market runtime rejected after Stage 4 baseline drift (${baselineMessage}); main/UIUX integration disposition rejected (${integrationMessage})`,
+      )
+    }
+  }
 }
 
 export function fileSha256(value) {

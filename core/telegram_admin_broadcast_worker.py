@@ -14,6 +14,10 @@ from core.config import settings
 from core.db import AsyncSessionLocal
 from core.job_logging import RepeatedErrorLogger, duration_ms_since, job_context
 from core.server_routing import current_server
+from core.telegram_delivery_runtime_policy import (
+    TelegramDeliveryRuntimeConfigurationError,
+    configured_telegram_delivery_runtime,
+)
 from core.services.telegram_admin_broadcast_delivery_service import (
     TELEGRAM_ADMIN_BROADCAST_DELIVERY_STATUS_NO_RECEIPT,
     claim_and_deliver_next_telegram_admin_broadcast_receipt,
@@ -60,6 +64,14 @@ def _increment_status(status_counts: dict[str, int], status: str | None) -> None
     status_counts[key] = status_counts.get(key, 0) + 1
 
 
+def _assert_legacy_runtime_owner() -> None:
+    runtime = configured_telegram_delivery_runtime()
+    if not runtime.legacy_workers_enabled or runtime.queue_worker_enabled:
+        raise TelegramDeliveryRuntimeConfigurationError(
+            "legacy_admin_broadcast_worker_is_not_runtime_owner"
+        )
+
+
 async def _recover_leases() -> int:
     async with AsyncSessionLocal() as db:
         recovered = await recover_expired_telegram_admin_broadcast_leases(
@@ -76,6 +88,7 @@ async def run_telegram_admin_broadcast_delivery_cycle(
     *,
     limit: int | None = None,
 ) -> TelegramAdminBroadcastCycleReport:
+    _assert_legacy_runtime_owner()
     assert_background_job_authority(JOB_TELEGRAM_ADMIN_BROADCAST_DELIVERY)
     status_counts: dict[str, int] = {}
     processed_count = 0
@@ -104,6 +117,7 @@ async def run_telegram_admin_broadcast_delivery_cycle(
 
 
 async def telegram_admin_broadcast_delivery_loop() -> None:
+    _assert_legacy_runtime_owner()
     assert_background_job_authority(JOB_TELEGRAM_ADMIN_BROADCAST_DELIVERY)
     logger.info(
         "Telegram admin broadcast worker started",

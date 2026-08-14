@@ -1,6 +1,6 @@
 import unittest
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 from bot.handlers.link_account import (
     INCOMPLETE_ADDRESS_SENTINELS,
@@ -82,7 +82,15 @@ class BotLinkAccountCmdTests(unittest.IsolatedAsyncioTestCase):
         state = FakeState()
         user = SimpleNamespace(id=7, role="standard", address="تهران خیابان آزادی پلاک ۱۰")
 
-        await cmd_link(message, state, user=user)
+        # This is a command-unit test, not an integration test.  Keep the
+        # display-name enrichment boundary synthetic so importing the global
+        # application session factory cannot open a process-lifetime asyncpg
+        # pool connection on the per-test event loop.
+        with patch(
+            "bot.handlers.link_account.attach_customer_management_names",
+            new=AsyncMock(),
+        ):
+            await cmd_link(message, state, user=user)
 
         self.assertIn("قبلاً به تلگرام متصل شده", message.answer.await_args.args[0])
         self.assertEqual(state.states, [])

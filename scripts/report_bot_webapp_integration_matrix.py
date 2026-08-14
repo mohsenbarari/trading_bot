@@ -193,7 +193,7 @@ SCENARIOS: tuple[Scenario, ...] = (
         risk_area="telegram_projection",
         coverage_refs=(
             ref("telegram_channel_state", "tests/test_telegram_offer_channel_service.py", "test_history_tag_contract"),
-            ref("telegram_channel_state", "tests/test_telegram_offer_channel_service.py", "test_apply_terminal_completed_edits_text_and_removes_buttons_on_foreign"),
+            ref("telegram_channel_state", "tests/test_telegram_offer_channel_service.py", "test_apply_terminal_completed_edits_text_and_removes_buttons_in_one_request"),
             ref("telegram_channel_state", "tests/test_telegram_offer_channel_service.py", "test_apply_partially_traded_expired_edits_text_and_removes_buttons"),
             ref("telegram_channel_state", "tests/test_telegram_offer_channel_service.py", "test_apply_pure_expired_edits_text_and_removes_buttons"),
         ),
@@ -208,7 +208,7 @@ SCENARIOS: tuple[Scenario, ...] = (
         title="Telegram terminal edits remove inline buttons and tolerate duplicate/not-modified edits",
         risk_area="telegram_projection",
         coverage_refs=(
-            ref("telegram_channel_state", "tests/test_telegram_offer_channel_service.py", "test_apply_terminal_completed_edits_text_and_removes_buttons_on_foreign"),
+            ref("telegram_channel_state", "tests/test_telegram_offer_channel_service.py", "test_apply_terminal_completed_edits_text_and_removes_buttons_in_one_request"),
             ref("telegram_channel_state", "tests/test_telegram_offer_channel_service.py", "test_apply_pure_expired_edits_text_and_removes_buttons"),
             ref("telegram_channel_state", "tests/test_telegram_offer_channel_service.py", "test_message_not_modified_is_idempotent_success"),
             ref("bot_handler", "tests/test_bot_trade_execute_update_markup.py", "test_update_offer_channel_markup_handles_missing_completed_and_active_offers"),

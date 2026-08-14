@@ -102,6 +102,14 @@ class BotTradeCreateConfirmSuccessRetailTests(unittest.IsolatedAsyncioTestCase):
             return SimpleNamespace(message_id=message_id, error_code=None)
 
         with patch("core.trading_settings.get_trading_settings", return_value=SimpleNamespace(max_active_offers=3)), patch(
+            "core.services.trade_service.get_trading_settings",
+            return_value=SimpleNamespace(
+                offer_min_quantity=1,
+                offer_max_quantity=100_000,
+                lot_min_size=1,
+                lot_max_count=3,
+            ),
+        ), patch(
             "bot.handlers.trade_create.check_user_limits", side_effect=[(True, None), (True, None)]
         ), patch(
             "bot.handlers.trade_create.AsyncSessionLocal",
@@ -119,9 +127,25 @@ class BotTradeCreateConfirmSuccessRetailTests(unittest.IsolatedAsyncioTestCase):
             "bot.handlers.trade_create.publish_offer_to_telegram_channel_once",
             new=AsyncMock(side_effect=fake_publish),
         ), patch(
+            "core.cache.incr_active_offer_count",
+            new=AsyncMock(),
+        ) as cache_increment, patch(
+            "core.web_push.schedule_market_offer_web_push",
+        ) as web_push_schedule, patch(
+            "core.redis.pool.get_connection",
+            new=AsyncMock(side_effect=AssertionError("unexpected real Redis access")),
+        ) as redis_connection_guard, patch(
+            "core.db.AsyncSessionLocal",
+            side_effect=AssertionError("unexpected real PostgreSQL access"),
+        ) as database_connection_guard, patch(
             "bot.handlers.trade_create.settings", SimpleNamespace(channel_id=-100, bot_username="botname")
         ):
             await handle_trade_confirm(callback, state, user=SimpleNamespace(id=1, limitations_expire_at=None), bot=bot)
+
+        cache_increment.assert_awaited_once_with(1)
+        web_push_schedule.assert_called_once_with(88)
+        redis_connection_guard.assert_not_awaited()
+        database_connection_guard.assert_not_called()
 
         trade_keyboard = bot.send_message.await_args_list[0].kwargs["reply_markup"]
         buttons = trade_keyboard.inline_keyboard[0]

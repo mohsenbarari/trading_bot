@@ -15,6 +15,11 @@ from core.server_routing import SERVER_FOREIGN
 from core.services.bot_access_policy import evaluate_bot_access
 from core.services.telegram_admin_broadcast_service import validate_telegram_admin_broadcast_content
 from core.utils import utc_now
+from core.telegram_delivery_runtime_policy import (
+    TelegramDeliveryRuntimeConfigurationError,
+    assert_telegram_provider_execution_authority,
+    configured_telegram_delivery_runtime,
+)
 from models.telegram_admin_broadcast import (
     TERMINAL_TELEGRAM_ADMIN_BROADCAST_RECEIPT_STATUSES,
     TelegramAdminBroadcast,
@@ -77,6 +82,15 @@ _MALFORMED_PAYLOAD_PATTERNS = (
 
 
 TelegramSendCallable = Callable[..., Awaitable[telegram_gateway.TelegramGatewayResult]]
+
+
+def _assert_legacy_direct_delivery_owner() -> None:
+    assert_telegram_provider_execution_authority()
+    runtime = configured_telegram_delivery_runtime()
+    if not runtime.legacy_workers_enabled or runtime.queue_worker_enabled:
+        raise TelegramDeliveryRuntimeConfigurationError(
+            "legacy_admin_broadcast_direct_sender_is_not_runtime_owner"
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -317,6 +331,7 @@ async def claim_next_telegram_admin_broadcast_receipt(
     worker_id: str = TELEGRAM_ADMIN_BROADCAST_WORKER_ID,
     now: datetime | None = None,
 ) -> TelegramAdminBroadcastReceipt | None:
+    _assert_legacy_direct_delivery_owner()
     if str(current_server or "").strip().lower() != SERVER_FOREIGN:
         return None
 
@@ -330,6 +345,10 @@ async def claim_next_telegram_admin_broadcast_receipt(
                     TelegramAdminBroadcastReceiptStatus.RETRYABLE_FAILED,
                 ]
             ),
+            TelegramAdminBroadcastReceipt.queue_job_id.is_(None),
+            TelegramAdminBroadcastReceipt.queue_handed_off_at.is_(None),
+            TelegramAdminBroadcastReceipt.worker_id.is_(None),
+            TelegramAdminBroadcastReceipt.lease_until.is_(None),
             or_(
                 TelegramAdminBroadcastReceipt.next_retry_at.is_(None),
                 TelegramAdminBroadcastReceipt.next_retry_at <= current_time,
@@ -364,6 +383,7 @@ async def recover_expired_telegram_admin_broadcast_leases(
     max_rows: int = 100,
     now: datetime | None = None,
 ) -> list[TelegramAdminBroadcastReceipt]:
+    _assert_legacy_direct_delivery_owner()
     if str(current_server or "").strip().lower() != SERVER_FOREIGN:
         return []
     current_time = now or utc_now()
@@ -449,6 +469,7 @@ async def deliver_claimed_telegram_admin_broadcast_receipt(
     bot_token: str | None = None,
     now: datetime | None = None,
 ) -> TelegramAdminBroadcastDeliveryResult:
+    _assert_legacy_direct_delivery_owner()
     normalized_server = str(current_server or "").strip().lower()
     broadcast_id = _coerce_int(getattr(receipt, "broadcast_id", None))
     recipient_user_id = _coerce_int(getattr(receipt, "recipient_user_id", None))

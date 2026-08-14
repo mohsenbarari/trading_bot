@@ -6,7 +6,8 @@ import base64
 import binascii
 import json
 import logging
-from datetime import datetime, timedelta
+import os
+from datetime import datetime, timedelta, timezone
 from typing import Any, List, Optional
 from uuid import UUID
 
@@ -37,8 +38,16 @@ from core.services.telegram_offer_channel_service import (
 )
 from core.services.telegram_offer_publication_service import (
     TelegramOfferSendResult,
+    get_or_create_telegram_publication_state,
+    initial_telegram_publication_publisher_identity,
     publish_offer_to_telegram_channel_once,
     telegram_offer_send_result_from_gateway,
+)
+from core.telegram_delivery_runtime_policy import (
+    TelegramDeliveryRuntimeMode,
+    TelegramDeliveryRuntimeConfigurationError,
+    assert_telegram_provider_execution_authority,
+    configured_telegram_delivery_producer_mode,
 )
 from core.services.customer_relation_service import (
     build_customer_offer_read_model,
@@ -104,6 +113,16 @@ from core.services.offer_republish_service import (
     list_repeatable_offers,
     lock_repeatable_offer,
 )
+from core.market_intelligence.coin_inference_shadow import observe_coin_inference_shadow
+from core.market_intelligence.coin_inference_selection import (
+    CoinInferenceSelectionRejected,
+    revalidate_coin_inference_selection,
+)
+from core.market_intelligence.coin_inference_outcome import (
+    CoinInferenceAcceptedSelection,
+    append_coin_inference_accepted_selection,
+)
+from core.market_intelligence.coin_inference import COIN_INFERENCE_CANDIDATE_SCOPE_LOW_DATE_ONLY
 from core import telegram_gateway
 from core.trade_forwarding import verify_internal_signature
 from core.trading_observability import log_trading_event
@@ -217,6 +236,12 @@ router = APIRouter(
 
 # --- Pydantic Schemas ---
 
+class CommodityInferenceSelectionInput(BaseModel):
+    """Opaque receipt plus the commodity chosen in the preceding preview."""
+
+    decision_key: str = Field(..., pattern=r"^[a-f0-9]{64}$")
+    selected_commodity_id: int = Field(..., gt=0)
+
 class OfferCreate(BaseModel):
     """ایجاد لفظ جدید"""
     offer_type: str = Field(..., pattern="^(buy|sell)$", description="نوع: buy یا sell")
@@ -234,7 +259,309 @@ class OfferCreate(BaseModel):
         description="شناسه عمومی لفظ منبع برای تکرار",
     )
     warning_acknowledged: bool = Field(default=False, description="آیا هشدار قیمت غیرعادی توسط کاربر تایید شده است")
-    idempotency_key: Optional[str] = Field(default=None, max_length=64, description="شناسه یکتای تلاش ثبت لفظ")
+    commodity_inference: Optional[CommodityInferenceSelectionInput] = Field(
+        default=None,
+        description="رسید تشخیص قیمت‌محور کالا؛ فقط برای انتخاب انجام‌شده از پیش‌نمایش",
+    )
+    idempotency_key: str = Field(
+        ...,
+        min_length=8,
+        max_length=64,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9:._-]{7,63}$",
+        description="شناسه یکتای پایدار تلاش ثبت لفظ",
+    )
+
+
+class CoinInferencePreviewRequest(BaseModel):
+    """Shadow-only product inference request; it cannot create an offer."""
+
+    price: int = Field(..., gt=0, description="قیمت در واحد پروژه (هزار تومان)")
+    settlement_type: str = Field(
+        default="cash",
+        pattern="^(cash|tomorrow)$",
+        description="نقدی یا فردایی",
+    )
+
+
+class CoinInferencePreviewCandidateResponse(BaseModel):
+    commodity_id: int
+    commodity_code: str
+    commodity_name: str
+    center_project_price: int
+    lower_project_price: int
+    upper_project_price: int
+    confidence: str
+    distance_to_center_relative: float
+
+
+class CoinInferencePreviewResponse(BaseModel):
+    status: str
+    decision_key: str
+    settlement_type: str
+    snapshot_generated_at_utc: str | None
+    snapshot_receipt: str | None
+    reason: str | None
+    candidates: list[CoinInferencePreviewCandidateResponse]
+
+
+def _coin_inference_preview_path_or_error() -> str:
+    if not settings.coin_intelligence_inference_preview_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="قابلیت آزمایشی تشخیص کالا فعال نیست.",
+        )
+    snapshot_path = (settings.coin_intelligence_inference_snapshot_path or "").strip()
+    if not snapshot_path:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="snapshot محلی تشخیص کالا آماده نیست.",
+        )
+    return snapshot_path
+
+
+def _coin_inference_selection_path_or_error() -> str:
+    if not settings.coin_intelligence_inference_selection_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="انتخاب قیمت‌محور کالا در حال حاضر فعال نیست.",
+        )
+    snapshot_path = (settings.coin_intelligence_inference_snapshot_path or "").strip()
+    if not snapshot_path:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="دادهٔ محلی تشخیص کالا آماده نیست؛ نام کالا را وارد کنید.",
+        )
+    return snapshot_path
+
+
+def _catalog_inference_shadow_payload(
+    decision: object,
+    *,
+    decision_key: str,
+    mode: str = "SHADOW_ONLY",
+) -> dict[str, object]:
+    candidates = []
+    for item in getattr(decision, "candidates", ()):
+        candidates.append(
+            {
+                "commodity_id": int(item.commodity_id),
+                "commodity_code": str(item.commodity_code),
+                "commodity_name": str(item.commodity_name),
+                "center_project_price": int(item.center_project_price),
+                "lower_project_price": int(item.lower_project_price),
+                "upper_project_price": int(item.upper_project_price),
+                "confidence": str(item.confidence),
+                "distance_to_center_relative": float(item.distance_to_center_relative),
+            }
+        )
+    return {
+        "mode": mode,
+        "status": str(getattr(decision, "status", "ABSTAIN")),
+        "decision_key": decision_key,
+        "snapshot_generated_at_utc": getattr(decision, "snapshot_generated_at_utc", None),
+        "snapshot_receipt": getattr(decision, "snapshot_receipt", None),
+        "reason": getattr(decision, "reason", None),
+        "candidates": candidates,
+    }
+
+
+async def _shadow_inference_for_implicit_commodity(
+    db: AsyncSession,
+    *,
+    price: int,
+    settlement_type: str,
+) -> dict[str, object] | None:
+    """Observe a missing-name parse without changing its legacy commodity."""
+
+    if not settings.coin_intelligence_inference_preview_enabled:
+        return None
+    snapshot_path = (settings.coin_intelligence_inference_snapshot_path or "").strip()
+    if not snapshot_path:
+        return {
+            "mode": "SHADOW_ONLY",
+            "status": "ABSTAIN",
+            "decision_key": None,
+            "snapshot_generated_at_utc": None,
+            "snapshot_receipt": None,
+            "reason": "SNAPSHOT_PATH_UNCONFIGURED",
+            "candidates": [],
+        }
+    settlement = "CASH" if settlement_type == "cash" else "TOMORROW"
+    try:
+        observation = await observe_coin_inference_shadow(
+            db,
+            snapshot_path=snapshot_path,
+            submitted_project_price=price,
+            settlement_term=settlement,
+            source_surface="WEBAPP",
+            now_utc=datetime.now(timezone.utc),
+        )
+        await db.commit()
+        return _catalog_inference_shadow_payload(
+            observation.decision,
+            decision_key=observation.decision_key,
+        )
+    except Exception as exc:
+        await db.rollback()
+        log_trading_event(
+            logger,
+            "coin_inference_parse_shadow.unavailable",
+            level="warning",
+            action="coin_inference_parse_shadow",
+            result="abstained",
+            error_class=type(exc).__name__,
+        )
+        return {
+            "mode": "SHADOW_ONLY",
+            "status": "ABSTAIN",
+            "decision_key": None,
+            "snapshot_generated_at_utc": None,
+            "snapshot_receipt": None,
+            "reason": "INFERENCE_UNAVAILABLE",
+            "candidates": [],
+        }
+
+
+async def _selection_inference_for_missing_commodity(
+    db: AsyncSession,
+    *,
+    price: int,
+    settlement_type: str,
+    low_date_hint: bool,
+) -> dict[str, object]:
+    """Create a selectable, audited decision without creating an Offer."""
+
+    snapshot_path = (settings.coin_intelligence_inference_snapshot_path or "").strip()
+    if not snapshot_path:
+        return {
+            "mode": "SELECTABLE",
+            "status": "ABSTAIN",
+            "decision_key": None,
+            "snapshot_generated_at_utc": None,
+            "snapshot_receipt": None,
+            "reason": "SNAPSHOT_PATH_UNCONFIGURED",
+            "candidates": [],
+        }
+    settlement = "CASH" if settlement_type == "cash" else "TOMORROW"
+    candidate_scope = (
+        COIN_INFERENCE_CANDIDATE_SCOPE_LOW_DATE_ONLY if low_date_hint else "ALL"
+    )
+    try:
+        observation = await observe_coin_inference_shadow(
+            db,
+            snapshot_path=snapshot_path,
+            submitted_project_price=price,
+            settlement_term=settlement,
+            source_surface="WEBAPP",
+            now_utc=datetime.now(timezone.utc),
+            candidate_scope=candidate_scope,
+            force_confirmation=not bool(
+                getattr(settings, "coin_intelligence_inference_auto_selection_enabled", False)
+            ),
+        )
+        await db.commit()
+        return _catalog_inference_shadow_payload(
+            observation.decision,
+            decision_key=observation.decision_key,
+            mode="SELECTABLE",
+        )
+    except Exception as exc:
+        await db.rollback()
+        log_trading_event(
+            logger,
+            "coin_inference_parse_selection.unavailable",
+            level="warning",
+            action="coin_inference_parse_selection",
+            result="abstained",
+            error_class=type(exc).__name__,
+        )
+        return {
+            "mode": "SELECTABLE",
+            "status": "ABSTAIN",
+            "decision_key": None,
+            "snapshot_generated_at_utc": None,
+            "snapshot_receipt": None,
+            "reason": "INFERENCE_UNAVAILABLE",
+            "candidates": [],
+        }
+
+
+async def _revalidate_webapp_commodity_inference(
+    db: AsyncSession,
+    *,
+    offer_data: OfferCreate,
+) -> object | None:
+    """Reject an inferred commodity unless it is still valid at submit time."""
+
+    selection = offer_data.commodity_inference
+    if selection is None:
+        return None
+    if int(selection.selected_commodity_id) != int(offer_data.commodity_id):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="کالای انتخاب‌شده با پیش‌نمایش تشخیص کالا یکسان نیست.",
+        )
+    snapshot_path = _coin_inference_selection_path_or_error()
+    settlement = "CASH" if offer_data.settlement_type == "cash" else "TOMORROW"
+    try:
+        return await revalidate_coin_inference_selection(
+            db,
+            snapshot_path=snapshot_path,
+            decision_key=selection.decision_key,
+            selected_commodity_id=selection.selected_commodity_id,
+            submitted_project_price=offer_data.price,
+            settlement_term=settlement,
+            source_surface="WEBAPP",
+            now_utc=datetime.now(timezone.utc),
+        )
+    except CoinInferenceSelectionRejected as exc:
+        log_trading_event(
+            logger,
+            "coin_inference_offer_submit.rejected",
+            level="info",
+            action="coin_inference_offer_submit",
+            result="rejected",
+            reason=exc.reason,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="نتیجهٔ تشخیص کالا تغییر کرده یا دیگر معتبر نیست؛ متن آفر را دوباره بررسی کنید.",
+        ) from exc
+
+
+async def _record_webapp_inference_accepted_selection(
+    db: AsyncSession,
+    *,
+    revalidation: object | None,
+    offer_data: OfferCreate,
+) -> None:
+    """Record post-acceptance telemetry without changing Offer success semantics."""
+
+    if revalidation is None or offer_data.commodity_inference is None:
+        return
+    try:
+        await append_coin_inference_accepted_selection(
+            db,
+            CoinInferenceAcceptedSelection(
+                decision_key=offer_data.commodity_inference.decision_key,
+                source_surface="WEBAPP",
+                candidate=revalidation.candidate,
+            ),
+        )
+        await db.commit()
+    except Exception as exc:
+        # The Offer has already been accepted.  P7 telemetry must never turn a
+        # successful user action into an error if its own append-only ledger is
+        # temporarily unavailable.
+        await db.rollback()
+        log_trading_event(
+            logger,
+            "coin_inference_outcome.webapp_unavailable",
+            level="warning",
+            action="coin_inference_outcome",
+            result="not_recorded",
+            error_class=type(exc).__name__,
+        )
 
 
 def _build_webapp_offer_creation_command(
@@ -320,6 +647,15 @@ class OfferResponse(BaseModel):
     customer_tier: Optional[str] = None
     created_at: str
     expires_at_ts: Optional[int] = None
+    normal_deadline_ts: Optional[int] = None
+    final_deadline_ts: Optional[int] = None
+    lifecycle_phase: Optional[str] = None
+    overtime_minutes_snapshot: int = 0
+    timer_total_seconds: Optional[int] = None
+    accepts_new_public_interaction: Optional[bool] = None
+    accepts_automatic_trade: Optional[bool] = None
+    accepts_overtime_request: Optional[bool] = None
+    overtime_trade_committed: bool = False
 
     class Config:
         from_attributes = True
@@ -358,6 +694,14 @@ class PublicOfferResponse(BaseModel):
     notes: Optional[str]
     created_at: str
     expires_at_ts: Optional[int] = None
+    normal_deadline_ts: Optional[int] = None
+    final_deadline_ts: Optional[int] = None
+    lifecycle_phase: Optional[str] = None
+    overtime_minutes_snapshot: int = 0
+    timer_total_seconds: Optional[int] = None
+    accepts_automatic_trade: Optional[bool] = None
+    accepts_overtime_request: Optional[bool] = None
+    overtime_trade_committed: bool = False
     safe_public_state_label: str
     interaction_available: bool
 
@@ -461,20 +805,13 @@ def offer_to_response(
             or ""
         )
 
-    expires_at_ts = None
-    logger.debug("offer_expiry_trace id=%s status=%s", offer.id, offer.status)
-    if offer.status == OfferStatus.ACTIVE:
-        try:
-            ts = start_settings or get_trading_settings()
-            created_ts = offer.created_at.timestamp()
-            expiry_seconds = ts.offer_expiry_minutes * 60
-            expires_at_ts = int(created_ts + expiry_seconds)
-            logger.debug("offer_expiry_result id=%s expires_at_ts=%s", offer.id, expires_at_ts)
-        except Exception as exc:
-            logger.error(
-                "offer_expiry_projection_failed",
-                extra={"offer_id": getattr(offer, "id", None), "error_class": type(exc).__name__},
-            )
+    lifecycle_fields = _offer_lifecycle_response_fields(offer, start_settings=start_settings)
+    logger.debug(
+        "offer_expiry_result id=%s expires_at_ts=%s phase=%s",
+        offer.id,
+        lifecycle_fields.get("expires_at_ts"),
+        lifecycle_fields.get("lifecycle_phase"),
+    )
 
     return OfferResponse(
         id=offer.id,
@@ -505,7 +842,7 @@ def offer_to_response(
         customer_management_name=offer_read_model.customer_management_name,
         customer_tier=offer_read_model.customer_tier,
         created_at=to_jalali_str(offer.created_at) or "",
-        expires_at_ts=expires_at_ts,
+        **lifecycle_fields,
     )
 
 
@@ -536,6 +873,56 @@ def _offer_remaining_quantity(offer: Any) -> int:
         return 0
 
 
+def _offer_lifecycle_response_fields(
+    offer: Offer,
+    *,
+    start_settings: Optional['TradingSettings'] = None,
+) -> dict[str, Any]:
+    """Serialize the shared lifecycle projection for API/realtime clients."""
+    from core.offer_lifecycle import project_offer_lifecycle
+
+    committed = bool(getattr(offer, "overtime_trade_committed", False))
+    snapshot = int(getattr(offer, "overtime_minutes_snapshot", 0) or 0)
+    empty = {
+        "expires_at_ts": None,
+        "normal_deadline_ts": None,
+        "final_deadline_ts": None,
+        "lifecycle_phase": None,
+        "overtime_minutes_snapshot": snapshot,
+        "timer_total_seconds": None,
+        "accepts_new_public_interaction": False,
+        "accepts_automatic_trade": False,
+        "accepts_overtime_request": False,
+        "overtime_trade_committed": committed,
+    }
+    if getattr(offer, "status", None) != OfferStatus.ACTIVE:
+        return empty
+    try:
+        ts = start_settings or get_trading_settings()
+        projection = project_offer_lifecycle(
+            offer,
+            normal_lifetime_minutes=int(getattr(ts, "offer_expiry_minutes", 0) or 0),
+        )
+    except Exception as exc:
+        logger.error(
+            "offer_expiry_projection_failed",
+            extra={"offer_id": getattr(offer, "id", None), "error_class": type(exc).__name__},
+        )
+        return empty
+    return {
+        "expires_at_ts": projection.expires_at_ts,
+        "normal_deadline_ts": projection.normal_deadline_ts,
+        "final_deadline_ts": projection.final_deadline_ts,
+        "lifecycle_phase": projection.phase.value,
+        "overtime_minutes_snapshot": projection.overtime_minutes_snapshot,
+        "timer_total_seconds": projection.timer_total_seconds,
+        "accepts_new_public_interaction": projection.accepts_new_public_interaction,
+        "accepts_automatic_trade": projection.accepts_automatic_trade,
+        "accepts_overtime_request": projection.accepts_overtime_request,
+        "overtime_trade_committed": committed,
+    }
+
+
 def _build_public_offer_response(
     offer: Offer,
     *,
@@ -544,18 +931,14 @@ def _build_public_offer_response(
     offer_public_id = ensure_offer_public_id(offer)
     status_value = _enum_value(getattr(offer, "status", None))
     remaining_quantity = _offer_remaining_quantity(offer)
-    expires_at_ts = None
-    if status_value == OfferStatus.ACTIVE.value:
-        try:
-            ts = start_settings or get_trading_settings()
-            expires_at_ts = int(offer.created_at.timestamp() + ts.offer_expiry_minutes * 60)
-        except Exception as exc:
-            logger.error(
-                "public_offer_expiry_projection_failed",
-                extra={"offer_id": getattr(offer, "id", None), "error_class": type(exc).__name__},
-            )
+    lifecycle_fields = _offer_lifecycle_response_fields(offer, start_settings=start_settings)
 
     commodity = getattr(offer, "commodity", None)
+    interaction_available = bool(
+        lifecycle_fields.get("accepts_new_public_interaction")
+        if lifecycle_fields.get("accepts_new_public_interaction") is not None
+        else (status_value == OfferStatus.ACTIVE.value)
+    ) and remaining_quantity > 0
     return PublicOfferResponse(
         offer_public_id=offer_public_id,
         public_link=build_offer_public_link(offer_public_id),
@@ -570,20 +953,36 @@ def _build_public_offer_response(
         lot_sizes=getattr(offer, "lot_sizes", None),
         notes=getattr(offer, "notes", None),
         created_at=to_jalali_str(getattr(offer, "created_at", None)) or "",
-        expires_at_ts=expires_at_ts,
+        expires_at_ts=lifecycle_fields.get("expires_at_ts"),
+        normal_deadline_ts=lifecycle_fields.get("normal_deadline_ts"),
+        final_deadline_ts=lifecycle_fields.get("final_deadline_ts"),
+        lifecycle_phase=lifecycle_fields.get("lifecycle_phase"),
+        overtime_minutes_snapshot=int(lifecycle_fields.get("overtime_minutes_snapshot") or 0),
+        timer_total_seconds=lifecycle_fields.get("timer_total_seconds"),
+        accepts_automatic_trade=lifecycle_fields.get("accepts_automatic_trade"),
+        accepts_overtime_request=lifecycle_fields.get("accepts_overtime_request"),
+        overtime_trade_committed=bool(
+            lifecycle_fields.get("overtime_trade_committed")
+        ),
         safe_public_state_label=_safe_public_state_label(offer),
-        interaction_available=status_value == OfferStatus.ACTIVE.value and remaining_quantity > 0,
+        interaction_available=interaction_available,
     )
 
 
 def _offer_request_payload(ledger: OfferRequest) -> dict[str, Any]:
     commission_rate = getattr(ledger, "customer_commission_rate_snapshot", None)
+    presented = getattr(ledger, "presented_at", None)
+    deadline = getattr(ledger, "decision_deadline_at", None)
     return {
         "id": getattr(ledger, "id", None),
         "version_id": getattr(ledger, "version_id", None),
         "request_home_server": getattr(ledger, "request_home_server", None),
         "local_offer_id": getattr(ledger, "local_offer_id", None),
         "offer_public_id": getattr(ledger, "offer_public_id", None),
+        "request_public_id": getattr(ledger, "request_public_id", None),
+        "workflow_kind": _enum_value(getattr(ledger, "workflow_kind", None)),
+        "offer_owner_user_id": getattr(ledger, "offer_owner_user_id", None),
+        "queue_sequence": getattr(ledger, "queue_sequence", None),
         "requester_user_id": getattr(ledger, "requester_user_id", None),
         "actor_user_id": getattr(ledger, "actor_user_id", None),
         "request_source_surface": _enum_value(getattr(ledger, "request_source_surface", None)),
@@ -591,12 +990,18 @@ def _offer_request_payload(ledger: OfferRequest) -> dict[str, Any]:
         "requested_quantity": getattr(ledger, "requested_quantity", None),
         "idempotency_key": getattr(ledger, "idempotency_key", None),
         "received_at": to_jalali_str(getattr(ledger, "received_at", None)) if getattr(ledger, "received_at", None) else None,
+        "presented_at": presented.isoformat() if presented is not None else None,
+        "decision_deadline_at": deadline.isoformat() if deadline is not None else None,
+        "terminal_reason": getattr(ledger, "terminal_reason", None),
+        "decided_by_user_id": getattr(ledger, "decided_by_user_id", None),
         "decided_at": to_jalali_str(getattr(ledger, "decided_at", None)) if getattr(ledger, "decided_at", None) else None,
         "result_status": _enum_value(getattr(ledger, "result_status", None)),
         "public_failure_code": getattr(ledger, "public_failure_code", None),
         "public_failure_message": getattr(ledger, "public_failure_message", None),
         "internal_failure_code": getattr(ledger, "internal_failure_code", None),
         "internal_failure_context": getattr(ledger, "internal_failure_context", None),
+        "telegram_message_id": getattr(ledger, "telegram_message_id", None),
+        "telegram_delivery_job_id": getattr(ledger, "telegram_delivery_job_id", None),
         "resulting_trade_id": getattr(ledger, "resulting_trade_id", None),
         "customer_relation_id": getattr(ledger, "customer_relation_id", None),
         "customer_owner_user_id": getattr(ledger, "customer_owner_user_id", None),
@@ -962,7 +1367,15 @@ async def _expire_offer_side_effects(
             dedupe_key=side_effect_dedupe_key,
         )
     await _remove_offer_channel_buttons_safely(offer, reason=channel_reason, timeout=channel_timeout)
-    realtime_payload = {"id": offer.id}
+    realtime_payload = {
+        "id": offer.id,
+        "status": _enum_value(getattr(offer, "status", None)),
+        "overtime_trade_committed": bool(getattr(offer, "overtime_trade_committed", False)),
+        "overtime_minutes_snapshot": int(
+            getattr(offer, "overtime_minutes_snapshot", 0) or 0
+        ),
+        "lifecycle_phase": None,
+    }
     if getattr(offer, "offer_public_id", None):
         realtime_payload["offer_public_id"] = offer.offer_public_id
     await _publish_offer_event_safely("offer:expired", realtime_payload, reason=realtime_reason)
@@ -975,6 +1388,16 @@ async def send_offer_to_channel_with_result(offer: Offer, user: User) -> Telegra
     """ارسال لفظ به کانال تلگرام و برگرداندن message_id"""
     if current_server() != "foreign":
         return None
+    if (
+        configured_telegram_delivery_producer_mode()
+        == TelegramDeliveryRuntimeMode.QUEUE_V1
+    ):
+        raise RuntimeError("direct_offer_channel_send_forbidden_for_queue_owner")
+    assert_telegram_provider_execution_authority()
+    if not (getattr(settings, "bot_token", None) or os.getenv("BOT_TOKEN")):
+        raise TelegramDeliveryRuntimeConfigurationError(
+            "legacy_offer_channel_sender_has_no_provider_credentials"
+        )
 
     channel_id = settings.channel_id
     
@@ -1108,6 +1531,64 @@ async def _forward_offer_expiry_if_remote_home(
 
 # --- Endpoints ---
 
+@router.post("/inference-preview", response_model=CoinInferencePreviewResponse)
+async def preview_coin_commodity_inference(
+    payload: CoinInferencePreviewRequest,
+    db: AsyncSession = Depends(get_db),
+    _current_user: User = Depends(get_current_user),
+):
+    """Return a shadow inference decision without changing an Offer."""
+
+    snapshot_path = _coin_inference_preview_path_or_error()
+    settlement = "CASH" if payload.settlement_type == "cash" else "TOMORROW"
+    try:
+        observation = await observe_coin_inference_shadow(
+            db,
+            snapshot_path=snapshot_path,
+            submitted_project_price=payload.price,
+            settlement_term=settlement,
+            source_surface="WEBAPP",
+            now_utc=datetime.now(timezone.utc),
+        )
+        await db.commit()
+    except HTTPException:
+        raise
+    except Exception as exc:
+        await db.rollback()
+        log_trading_event(
+            logger,
+            "coin_inference_preview.unavailable",
+            level="warning",
+            action="coin_inference_preview",
+            result="abstained",
+            error_class=type(exc).__name__,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="پیش‌نمایش تشخیص کالا در حال حاضر در دسترس نیست.",
+        ) from exc
+    return CoinInferencePreviewResponse(
+        status=observation.decision.status,
+        decision_key=observation.decision_key,
+        settlement_type=payload.settlement_type,
+        snapshot_generated_at_utc=observation.decision.snapshot_generated_at_utc,
+        snapshot_receipt=observation.decision.snapshot_receipt,
+        reason=observation.decision.reason,
+        candidates=[
+            CoinInferencePreviewCandidateResponse(
+                commodity_id=item.commodity_id,
+                commodity_code=item.commodity_code,
+                commodity_name=item.commodity_name,
+                center_project_price=item.center_project_price,
+                lower_project_price=item.lower_project_price,
+                upper_project_price=item.upper_project_price,
+                confidence=item.confidence,
+                distance_to_center_relative=item.distance_to_center_relative,
+            )
+            for item in observation.decision.candidates
+        ],
+    )
+
 @router.post("/", response_model=OfferResponse, status_code=status.HTTP_201_CREATED)
 async def create_offer(
     offer_data: OfferCreate,
@@ -1126,7 +1607,7 @@ async def create_offer(
     _ensure_accountant_market_access_allowed(context)
     owner_user = context.owner_user
     actor_user = context.actor_user
-    idempotency_key = (offer_data.idempotency_key or "").strip() or None
+    idempotency_key = offer_data.idempotency_key.strip()
     republish_source_public_id = (offer_data.republished_from_public_id or "").strip()
     creation_command = _build_webapp_offer_creation_command(
         offer_data,
@@ -1162,6 +1643,8 @@ async def create_offer(
                 include_owner_identity=True,
             )
         )[0]
+
+    inference_revalidation = await _revalidate_webapp_commodity_inference(db, offer_data=offer_data)
     
     # بررسی نقش
     if owner_user.role == UserRole.WATCH:
@@ -1347,6 +1830,10 @@ async def create_offer(
                 detail="این لفظ دیگر قابل انتشار مجدد نیست. فهرست لفظ‌های اخیر را تازه‌سازی کنید.",
             ) from exc
 
+    queue_owns_telegram_delivery = (
+        configured_telegram_delivery_producer_mode()
+        == TelegramDeliveryRuntimeMode.QUEUE_V1
+    )
     try:
         creation_command = _build_webapp_offer_creation_command(
             offer_data,
@@ -1364,8 +1851,28 @@ async def create_offer(
             quota_policy=OfferCreationQuotaPolicy(
                 max_active_offers=ts.max_active_offers,
             ),
+            commit=not queue_owns_telegram_delivery,
+            refresh=not queue_owns_telegram_delivery,
         )
         new_offer = creation_outcome.offer
+        if queue_owns_telegram_delivery:
+            # Persist the authoritative Offer and its publication obligation in
+            # the same transaction on either home server.  The shared state is
+            # then synced; only foreign is allowed to execute Telegram work.
+            await db.flush()
+            await get_or_create_telegram_publication_state(
+                db,
+                new_offer,
+                publisher_bot_identity=initial_telegram_publication_publisher_identity(
+                    multi_publisher_enabled=bool(
+                        getattr(settings, "telegram_multi_publisher_enabled", False)
+                    ),
+                    b2b_dispatch_enabled=bool(
+                        getattr(settings, "telegram_b2b_dispatch_enabled", False)
+                    ),
+                ),
+            )
+            await db.commit()
     except MarketOfferAdmissionError as exc:
         await _raise_market_offer_admission_rejection(
             db,
@@ -1416,6 +1923,22 @@ async def create_offer(
                 )
             raise
         _ensure_offer_replay_matches_or_conflict(existing_offer, creation_command)
+        if queue_owns_telegram_delivery:
+            # The winner may have committed between this request's insert and
+            # rollback.  Ensure its durable intent exists before replaying the
+            await get_or_create_telegram_publication_state(
+                db,
+                existing_offer,
+                publisher_bot_identity=initial_telegram_publication_publisher_identity(
+                    multi_publisher_enabled=bool(
+                        getattr(settings, "telegram_multi_publisher_enabled", False)
+                    ),
+                    b2b_dispatch_enabled=bool(
+                        getattr(settings, "telegram_b2b_dispatch_enabled", False)
+                    ),
+                ),
+            )
+            await db.commit()
         from core.trading_settings import get_trading_settings_async
 
         ts = await get_trading_settings_async()
@@ -1470,6 +1993,12 @@ async def create_offer(
             )
         )[0]
 
+    await _record_webapp_inference_accepted_selection(
+        db,
+        revalidation=inference_revalidation,
+        offer_data=offer_data,
+    )
+
     # بارگذاری روابط
     result = await db.execute(
         select(Offer)
@@ -1478,16 +2007,41 @@ async def create_offer(
     )
     new_offer = result.scalar_one()
     
-    # ارسال idempotent به کانال تلگرام و ثبت نتیجه در publication-state
-    publish_result = await publish_offer_to_telegram_channel_once(
-        db,
-        new_offer,
-        owner_user,
-        send_offer_to_channel=send_offer_to_channel,
-    )
-    if publish_result.message_id:
-        new_offer.channel_message_id = publish_result.message_id
-        await db.commit()
+    # Queue-v1 already persisted the intent atomically above. Legacy retains
+    # the existing synchronous publication behavior until the ownership cutover.
+    if not queue_owns_telegram_delivery:
+        publish_result = await publish_offer_to_telegram_channel_once(
+            db,
+            new_offer,
+            owner_user,
+            send_offer_to_channel=send_offer_to_channel,
+        )
+        if publish_result.message_id:
+            new_offer.channel_message_id = publish_result.message_id
+            await db.commit()
+
+    # On Iran, the persisted Offer must reach the foreign Telegram publisher
+    # before normal best-effort replication traffic can consume its short
+    # lifetime.  This is deliberately post-commit and non-fatal: the same
+    # change_log row remains the durable recovery path on any network failure.
+    if queue_owns_telegram_delivery:
+        try:
+            from core.offer_priority_sync import dispatch_offer_priority_sync_once
+
+            await dispatch_offer_priority_sync_once(
+                db,
+                offer_public_id=getattr(new_offer, "offer_public_id", None),
+            )
+        except Exception as exc:
+            log_trading_event(
+                logger,
+                "offer_priority_sync.dispatch_error",
+                level="warning",
+                action="offer_priority_sync",
+                result="deferred",
+                offer_id=getattr(new_offer, "id", None),
+                error_class=type(exc).__name__,
+            )
 
     log_trading_event(
         logger,
@@ -1506,17 +2060,9 @@ async def create_offer(
 
     await register_market_offer_created(db)
     
-    # دریافت تنظیمات برای محاسبه انقضا
     from core.trading_settings import get_trading_settings_async
     ts = await get_trading_settings_async()
-    
-    # محاسبه expires_at_ts برای SSE event
-    sse_expires_at_ts = None
-    try:
-        created_ts = new_offer.created_at.timestamp()
-        sse_expires_at_ts = int(created_ts + ts.offer_expiry_minutes * 60)
-    except Exception:
-        pass
+    lifecycle_fields = _offer_lifecycle_response_fields(new_offer, start_settings=ts)
     
     await _publish_offer_event_safely("offer:created", {
         "id": new_offer.id,
@@ -1541,7 +2087,7 @@ async def create_offer(
         "is_wholesale": new_offer.is_wholesale,
         "lot_sizes": new_offer.lot_sizes,
         "original_lot_sizes": new_offer.original_lot_sizes,
-        "expires_at_ts": sse_expires_at_ts,
+        **lifecycle_fields,
     }, reason="create_offer")
 
     try:
@@ -1811,6 +2357,19 @@ async def get_market_offer_history(
         Offer.updated_at,
         Offer.created_at,
     )
+    from core.offer_lifecycle import offer_lifetime_end_epoch_sql
+
+    # Final public lifetime end, including each offer's overtime snapshot.
+    active_stale_end_epoch = offer_lifetime_end_epoch_sql(
+        Offer.created_at,
+        Offer.overtime_minutes_snapshot,
+        expiry_minutes,
+    )
+    # Reconstruct a datetime-ish ordering key: created_at + total minutes.
+    # SQLAlchemy's timedelta addition only accepts a constant, so epoch is the
+    # portable per-row form; history_event_at for ACTIVE stale rows uses
+    # created_at + normal as a stable lower bound and the response serializer
+    # can refine from the projection when needed.
     active_stale_event_at_expr = Offer.created_at + timedelta(minutes=expiry_minutes)
     history_event_at_expr = case(
         (Offer.status == OfferStatus.COMPLETED, completed_event_at_expr),
@@ -1834,12 +2393,15 @@ async def get_market_offer_history(
         market_visible_expired_condition,
     ]
     if expiry_minutes > 0:
-        stale_cutoff_time = utc_now_naive() - timedelta(minutes=expiry_minutes)
-        active_stale_created_after = cutoff_time - timedelta(minutes=expiry_minutes)
+        now_epoch = utc_now_naive().replace(tzinfo=timezone.utc).timestamp()
+        # Widest window that could still fall inside the since_hours history:
+        # an offer with the maximum overtime snapshot (10) that ended recently.
+        max_lifetime_minutes = expiry_minutes + 10
+        active_stale_created_after = cutoff_time - timedelta(minutes=max_lifetime_minutes)
         history_conditions.append(
             and_(
                 Offer.status == OfferStatus.ACTIVE,
-                Offer.created_at <= stale_cutoff_time,
+                active_stale_end_epoch <= now_epoch,
                 Offer.created_at >= active_stale_created_after,
                 traded_quantity_expr == 0,
             )
@@ -2022,12 +2584,21 @@ async def get_my_offers(
             ]
             expiry_minutes = int(getattr(start_settings, "offer_expiry_minutes", 0) or 0)
             if expiry_minutes > 0:
-                stale_cutoff_time = utc_now_naive() - timedelta(minutes=expiry_minutes)
-                recent_active_created_after = cutoff_time - timedelta(minutes=expiry_minutes)
+                from core.offer_lifecycle import offer_lifetime_end_epoch_sql
+
+                now_epoch = utc_now_naive().replace(tzinfo=timezone.utc).timestamp()
+                active_final_end_epoch = offer_lifetime_end_epoch_sql(
+                    Offer.created_at,
+                    Offer.overtime_minutes_snapshot,
+                    expiry_minutes,
+                )
+                recent_active_created_after = cutoff_time - timedelta(minutes=expiry_minutes + 10)
                 expired_conditions.append(
                     and_(
                         Offer.status == OfferStatus.ACTIVE,
-                        Offer.created_at < stale_cutoff_time,
+                        # Match the historical strictness of created_at < cutoff:
+                        # at the exact final instant the row is not yet listed here.
+                        active_final_end_epoch < now_epoch,
                         Offer.created_at >= recent_active_created_after,
                     )
                 )
@@ -2510,6 +3081,7 @@ async def cancel_all_active_offers(
 async def parse_offer_text(
     request: ParseOfferRequest,
     context: EffectiveOwnerActor = Depends(get_effective_owner_actor_context),
+    db: AsyncSession = Depends(get_db),
 ):
     """
     پارس متن لفظ با parser مشترک بات و وب اپ.
@@ -2517,7 +3089,16 @@ async def parse_offer_text(
     _ensure_accountant_market_access_allowed(context)
     from bot.utils.offer_parser import parse_offer_text as parser
     
-    result, error = await parser(request.text)
+    if (
+        settings.coin_intelligence_inference_preview_enabled
+        or settings.coin_intelligence_inference_selection_enabled
+    ):
+        result, error = await parser(
+            request.text,
+            capture_commodity_resolution=True,
+        )
+    else:
+        result, error = await parser(request.text)
     
     if error:
         return ParseOfferResponse(success=False, error=error.message)
@@ -2525,17 +3106,43 @@ async def parse_offer_text(
     if result is None:
         return ParseOfferResponse(success=False, error="متن قابل تشخیص نیست.")
     
-    return ParseOfferResponse(
-        success=True,
-        data={
-            "trade_type": result.trade_type,
-            "settlement_type": settlement_type_value(getattr(result, "settlement_type", None)),
-            "commodity_id": result.commodity_id,
-            "commodity_name": result.commodity_name,
-            "quantity": result.quantity,
-            "price": result.price,
-            "is_wholesale": result.is_wholesale,
-            "lot_sizes": result.lot_sizes,
-            "notes": result.notes
-        }
-    )
+    parsed_data = {
+        "trade_type": result.trade_type,
+        "settlement_type": settlement_type_value(getattr(result, "settlement_type", None)),
+        "commodity_id": result.commodity_id,
+        "commodity_name": result.commodity_name,
+        "commodity_resolution": getattr(result, "commodity_resolution", "UNKNOWN"),
+        "low_date_hint": bool(getattr(result, "low_date_hint", False)),
+        "quantity": result.quantity,
+        "price": result.price,
+        "is_wholesale": result.is_wholesale,
+        "lot_sizes": result.lot_sizes,
+        "notes": result.notes,
+    }
+    missing_commodity = getattr(result, "commodity_resolution", None) in {
+        "OMITTED",
+        "LOW_DATE_HINT",
+    }
+    if missing_commodity and settings.coin_intelligence_inference_selection_enabled:
+        selection = await _selection_inference_for_missing_commodity(
+            db,
+            price=result.price,
+            settlement_type=parsed_data["settlement_type"],
+            low_date_hint=bool(getattr(result, "low_date_hint", False)),
+        )
+        parsed_data["commodity_inference"] = selection
+        candidates = selection.get("candidates") or []
+        if selection.get("status") == "AUTO_SELECT" and len(candidates) == 1:
+            selected = candidates[0]
+            parsed_data["commodity_id"] = int(selected["commodity_id"])
+            parsed_data["commodity_name"] = str(selected["commodity_name"])
+            parsed_data["commodity_resolution"] = "INFERRED"
+    elif getattr(result, "commodity_resolution", None) == "OMITTED":
+        shadow = await _shadow_inference_for_implicit_commodity(
+            db,
+            price=result.price,
+            settlement_type=parsed_data["settlement_type"],
+        )
+        if shadow is not None:
+            parsed_data["commodity_inference"] = shadow
+    return ParseOfferResponse(success=True, data=parsed_data)

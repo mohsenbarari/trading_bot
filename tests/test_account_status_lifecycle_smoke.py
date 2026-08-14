@@ -104,6 +104,18 @@ def make_user(**overrides):
 
 
 class AccountStatusLifecycleSmokeTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        self.enqueue_account_notice = AsyncMock()
+        self.enqueue_account_notice_patcher = patch(
+            'core.services.telegram_notification_outbox_service.'
+            'enqueue_account_status_telegram_notification_once',
+            new=self.enqueue_account_notice,
+        )
+        self.enqueue_account_notice_patcher.start()
+
+    async def asyncTearDown(self):
+        self.enqueue_account_notice_patcher.stop()
+
     async def test_admin_deactivate_to_global_lock_refresh_deny_and_reactivate(self):
         admin = SimpleNamespace(role=UserRole.SUPER_ADMIN)
         user = make_user()
@@ -121,7 +133,11 @@ class AccountStatusLifecycleSmokeTests(unittest.IsolatedAsyncioTestCase):
             'api.routers.users.send_limitation_notification', new=AsyncMock()
         ), patch('api.routers.users.asyncio.create_task'), patch.object(
             status_service, '_utcnow_naive', return_value=deactivated_at
-        ), patch(
+        ), patch.object(
+            status_service,
+            '_invalidate_overtime_for_inactive_user',
+            new=AsyncMock(),
+        ) as invalidate_overtime, patch(
             'core.services.user_account_status_service.create_user_notification', new=AsyncMock()
         ) as create_notification, patch(
             'core.services.user_account_status_service.send_telegram_notification', new=AsyncMock()
@@ -146,8 +162,14 @@ class AccountStatusLifecycleSmokeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(user.messenger_blocked_at)
         self.assertFalse(status_service.is_user_global_web_locked(user, now=deactivated_at + timedelta(minutes=1)))
         create_notification.assert_awaited_once()
-        send_telegram.assert_awaited_once()
-        remove_from_channel.assert_awaited_once_with(410)
+        send_telegram.assert_not_awaited()
+        remove_from_channel.assert_not_awaited()
+        invalidate_overtime.assert_awaited_once_with(
+            user_db,
+            user,
+            now=deactivated_at,
+        )
+        self.assertEqual(self.enqueue_account_notice.await_count, 1)
 
         lock_db = FakeLockDB([user])
         with patch.object(status_service, '_utcnow_naive', return_value=locked_at), patch.object(
@@ -166,7 +188,8 @@ class AccountStatusLifecycleSmokeTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(status_service.is_user_global_web_locked(user, now=locked_at))
         force_clear_sessions.assert_awaited_once_with(lock_db, user.id)
         lock_notification.assert_awaited_once()
-        lock_telegram.assert_awaited_once()
+        lock_telegram.assert_not_awaited()
+        self.assertEqual(self.enqueue_account_notice.await_count, 2)
 
         with patch('jose.jwt.decode', return_value={'type': 'refresh', 'sub': user.id}):
             with self.assertRaises(HTTPException) as exc_info:
@@ -205,7 +228,8 @@ class AccountStatusLifecycleSmokeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(user.messenger_blocked_at)
         self.assertFalse(status_service.is_user_global_web_locked(user, now=locked_at))
         reactivated_notification.assert_awaited_once()
-        reactivated_telegram.assert_awaited_once()
+        reactivated_telegram.assert_not_awaited()
+        self.assertEqual(self.enqueue_account_notice.await_count, 3)
 
 
 if __name__ == '__main__':

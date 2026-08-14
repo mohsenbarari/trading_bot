@@ -7,6 +7,10 @@ from unittest.mock import AsyncMock, patch
 from sqlalchemy.exc import IntegrityError
 
 import main
+from core.telegram_delivery_runtime_policy import (
+    TelegramDeliveryRuntimeDecision,
+    TelegramDeliveryRuntimeMode,
+)
 
 
 class _AsyncSessionContext:
@@ -94,6 +98,21 @@ class MainLifespanTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("user_account_status", iran_jobs)
         self.assertIn("trade_webapp_delivery", iran_jobs)
         self.assertNotIn("trade_telegram_delivery", iran_jobs)
+
+    async def test_queue_owner_excludes_legacy_telegram_trade_worker_from_foreign_api(self):
+        queue_runtime = TelegramDeliveryRuntimeDecision(
+            mode=TelegramDeliveryRuntimeMode.QUEUE_V1,
+            legacy_workers_enabled=False,
+            queue_worker_enabled=True,
+        )
+        with patch.object(main.settings, "server_mode", "foreign"), patch(
+            "main.configured_telegram_delivery_runtime",
+            return_value=queue_runtime,
+        ):
+            foreign_jobs = [name for name, _ in main._background_job_factories()]
+
+        self.assertNotIn("trade_telegram_delivery", foreign_jobs)
+        self.assertNotIn("trade_webapp_delivery", foreign_jobs)
 
     async def test_background_leader_starts_jobs_and_releases_lock_on_cancel(self):
         class FakeRedis:

@@ -34,7 +34,7 @@ class SessionServiceSingleSessionRecoveryGuardTests(unittest.IsolatedAsyncioTest
             result = await session_service.approve_login_request(
                 db,
                 request_id,
-                SimpleNamespace(id=uuid.uuid4()),
+                SimpleNamespace(id=uuid.uuid4(), user_id=9),
                 refresh_token="refresh-token",
                 platform=Platform.WEB,
             )
@@ -63,7 +63,7 @@ class SessionServiceSingleSessionRecoveryGuardTests(unittest.IsolatedAsyncioTest
             result = await session_service.reject_login_request(
                 db,
                 request_id,
-                SimpleNamespace(id=uuid.uuid4()),
+                SimpleNamespace(id=uuid.uuid4(), user_id=9),
             )
 
         self.assertEqual(

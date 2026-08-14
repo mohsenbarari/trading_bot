@@ -36,12 +36,22 @@ class FakeSessionFactory:
 
 def make_callback():
     return SimpleNamespace(
+        id="expiry-guard-callback",
         answer=AsyncMock(),
         message=SimpleNamespace(edit_reply_markup=AsyncMock(), answer=AsyncMock()),
     )
 
 
 class BotTradeManageOfferGuardTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        self.expiry_lease = SimpleNamespace(acquired=True, release=AsyncMock())
+        self.expiry_gate_patcher = patch(
+            "bot.handlers.trade_manage.try_acquire_offer_expiry_gate",
+            new=AsyncMock(return_value=self.expiry_lease),
+        )
+        self.expiry_gate_patcher.start()
+        self.addCleanup(self.expiry_gate_patcher.stop)
+
     async def test_handle_expire_offer_handles_not_found_not_owner_and_inactive(self):
         settings_obj = SimpleNamespace(offer_expire_rate_per_minute=5, offer_expire_daily_limit_after_threshold=99)
         user = SimpleNamespace(id=4)
@@ -108,6 +118,43 @@ class BotTradeManageOfferGuardTests(unittest.IsolatedAsyncioTestCase):
         callback.message.edit_reply_markup.assert_awaited_once_with(reply_markup=None)
         callback.answer.assert_awaited_once_with()
         self.assertIn("منقضی شد", callback.message.answer.await_args.args[0])
+
+    async def test_queue_mode_not_found_is_a_durable_callback_without_direct_fallback(self):
+        settings_obj = SimpleNamespace(
+            offer_expire_rate_per_minute=5,
+            offer_expire_daily_limit_after_threshold=99,
+        )
+        callback = make_callback()
+        session = FakeSession(None)
+        session.commit = AsyncMock()
+
+        with patch(
+            "bot.handlers.trade_manage.get_trading_settings",
+            return_value=settings_obj,
+        ), patch(
+            "bot.handlers.trade_manage.AsyncSessionLocal",
+            new=FakeSessionFactory(session),
+        ), patch(
+            "bot.handlers.trade_manage.configured_telegram_delivery_runtime",
+            return_value=SimpleNamespace(mode="queue-v1"),
+        ), patch(
+            "bot.handlers.trade_manage.current_server",
+            return_value="foreign",
+        ), patch(
+            "bot.handlers.trade_manage.enqueue_telegram_callback_answer",
+            new=AsyncMock(),
+        ) as enqueue_callback:
+            await handle_expire_offer(
+                callback,
+                SimpleNamespace(offer_id=5),
+                user=SimpleNamespace(id=4),
+                bot=SimpleNamespace(),
+            )
+
+        enqueue_callback.assert_awaited_once()
+        self.assertIn("لفظ یافت نشد", enqueue_callback.await_args.kwargs["text"])
+        session.commit.assert_awaited_once()
+        callback.answer.assert_not_awaited()
 
 
 if __name__ == "__main__":

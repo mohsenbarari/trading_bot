@@ -23,7 +23,15 @@ class BotTradeCreateQuickQuantityTests(unittest.IsolatedAsyncioTestCase):
 
         callback = SimpleNamespace(message=SimpleNamespace(answer=AsyncMock(), edit_text=AsyncMock()), answer=AsyncMock())
         state = SimpleNamespace(get_data=AsyncMock(return_value={"trade_type_fa": "🟢 خرید", "commodity_name": "سکه"}), update_data=AsyncMock(), set_state=AsyncMock())
-        with patch("bot.handlers.trade_create.get_lot_type_keyboard", return_value="LK"):
+        with patch(
+            "core.trading_settings.get_trading_settings_async",
+            new=AsyncMock(
+                return_value=SimpleNamespace(
+                    offer_min_quantity=5,
+                    offer_max_quantity=100,
+                )
+            ),
+        ), patch("bot.handlers.trade_create.get_lot_type_keyboard", return_value="LK"):
             await handle_quick_quantity(
                 callback,
                 state,

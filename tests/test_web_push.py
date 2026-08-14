@@ -225,7 +225,8 @@ class WebPushHelpersTests(unittest.IsolatedAsyncioTestCase):
         compiled = str(empty_market_db.statement.compile(compile_kwargs={"literal_binds": True}))
         self.assertIn("offers.status = 'ACTIVE'", compiled)
         self.assertIn("offers.id !=", compiled)
-        self.assertIn("offers.created_at >", compiled)
+        self.assertIn("EXTRACT(epoch FROM offers.created_at)", compiled)
+        self.assertIn("overtime_minutes_snapshot", compiled)
 
     async def test_market_offer_push_ignores_time_expired_active_offers_when_detecting_first_live_offer(self):
         class FakeDB:
@@ -245,7 +246,8 @@ class WebPushHelpersTests(unittest.IsolatedAsyncioTestCase):
         compiled = str(db.statement.compile(compile_kwargs={"literal_binds": True}))
         self.assertIn("offers.status = 'ACTIVE'", compiled)
         self.assertIn("offers.id !=", compiled)
-        self.assertIn("offers.created_at > '2026-06-18 07:18:00'", compiled)
+        self.assertIn("EXTRACT(epoch FROM offers.created_at)", compiled)
+        self.assertIn("(2 + coalesce(offers.overtime_minutes_snapshot, 0)) * 60", compiled)
 
     async def test_market_offer_push_logs_skip_when_offer_is_not_first_live_offer(self):
         offer = SimpleNamespace(

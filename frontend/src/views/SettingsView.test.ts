@@ -79,7 +79,7 @@ function authoritativeUser(overrides: Record<string, unknown> = {}) {
 }
 
 async function mountSettingsView(
-  routeName: 'account-security' | 'account-storage' = 'account-security',
+  routeName: 'settings' | 'account-security' | 'account-storage' = 'account-security',
 ) {
   settingsViewMocks.route.name = routeName
   const SettingsView = (await import('./SettingsView.vue')).default
@@ -217,6 +217,32 @@ describe('SettingsView.vue', () => {
     expect(wrapper.text()).not.toContain('اتصال تلگرام')
     expect(settingsViewMocks.getCacheSizeMock).toHaveBeenCalledTimes(1)
     expect(requestsFor('/api/sessions/active')).toHaveLength(0)
+  })
+
+  it('renders overtime only on the eligible general settings route', async () => {
+    currentUserSummary.value = authoritativeUser({ offer_overtime_minutes: 3 })
+
+    const wrapper = await mountSettingsView('settings')
+
+    expect(wrapper.get('h1').text()).toBe('تنظیمات حساب')
+    expect(wrapper.get('.settings-overtime-card').text()).toContain('وقت اضافه')
+    expect(wrapper.find('.settings-security-card').exists()).toBe(false)
+    expect(wrapper.find('.settings-storage-card').exists()).toBe(false)
+    expect(requestsFor('/api/sessions/active')).toHaveLength(0)
+    expect(settingsViewMocks.getCacheSizeMock).not.toHaveBeenCalled()
+  })
+
+  it('fails closed on the general settings route for an ineligible accountant', async () => {
+    currentUserSummary.value = authoritativeUser({ is_accountant: true })
+
+    const wrapper = await mountSettingsView('settings')
+
+    expect(wrapper.find('.settings-overtime-card').exists()).toBe(false)
+    expect(wrapper.get('.settings-role-notice').text()).toContain(
+      'تنظیمی برای این نوع حساب فعال نیست',
+    )
+    expect(requestsFor('/api/sessions/active')).toHaveLength(0)
+    expect(settingsViewMocks.getCacheSizeMock).not.toHaveBeenCalled()
   })
 
   it('returns deterministically to Account instead of browser history', async () => {

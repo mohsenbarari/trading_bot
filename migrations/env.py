@@ -26,6 +26,14 @@ import models.invitation_identity_reservation
 import models.telegram_registration_intent
 import models.telegram_registration_command_receipt
 import models.user_counter_event_receipt
+import models.telegram_delivery_job
+import models.telegram_publisher_dispatch_command
+import models.telegram_delivery_feeder_state
+import models.telegram_delivery_resume_operation
+import models.telegram_admin_broadcast
+import models.coin_intelligence_market_outbox
+import models.coin_intelligence_inference_audit
+import models.coin_intelligence_inference_outcome
 
 # --- خواندن تنظیمات Alembic ---
 config = context.config

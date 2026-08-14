@@ -25,6 +25,8 @@ from core.services.telegram_username_observation_service import (
     refresh_observed_telegram_username,
 )
 from models.user import User
+from bot.telegram_callback_answer import answer_callback_query_via_runtime
+from bot.telegram_interaction_message import answer_incoming_message_via_runtime
 
 
 def _get_event_and_from_user(event: TelegramObject):
@@ -87,17 +89,33 @@ class AuthMiddleware(BaseMiddleware):
                         "پس از تکمیل همگام‌سازی دوباره تلاش کنید."
                     )
                     if isinstance(inner_event, Message):
-                        await inner_event.answer(pending_message)
+                        await answer_incoming_message_via_runtime(
+                            inner_event,
+                            user,
+                            pending_message,
+                        )
                     elif isinstance(inner_event, CallbackQuery):
-                        await inner_event.answer(pending_message, show_alert=True)
+                        await answer_callback_query_via_runtime(
+                            inner_event,
+                            pending_message,
+                            show_alert=True,
+                        )
                     return
                 access_decision = await evaluate_bot_access(session, user)
                 if not access_decision.allowed:
                     denial_message = bot_access_denial_message(access_decision.reason)
                     if isinstance(inner_event, Message):
-                        await inner_event.answer(denial_message)
+                        await answer_incoming_message_via_runtime(
+                            inner_event,
+                            user,
+                            denial_message,
+                        )
                     elif isinstance(inner_event, CallbackQuery):
-                        await inner_event.answer(denial_message, show_alert=True)
+                        await answer_callback_query_via_runtime(
+                            inner_event,
+                            denial_message,
+                            show_alert=True,
+                        )
                     return
             
             # بررسی قفل سراسری حساب بعد از پایان مهلت غیرفعال‌سازی
@@ -108,19 +126,33 @@ class AuthMiddleware(BaseMiddleware):
                 )
                 if inner_event is not None:
                     if isinstance(inner_event, Message):
-                        await inner_event.answer(restricted_message)
+                        await answer_incoming_message_via_runtime(
+                            inner_event,
+                            user,
+                            restricted_message,
+                        )
                     elif isinstance(inner_event, CallbackQuery):
-                        await inner_event.answer(restricted_message, show_alert=True)
+                        await answer_callback_query_via_runtime(
+                            inner_event,
+                            restricted_message,
+                            show_alert=True,
+                        )
                 return
 
             if user and user_requires_bot_onboarding(user):
                 if isinstance(inner_event, CallbackQuery):
                     if is_allowed_onboarding_callback(user, getattr(inner_event, "data", None)):
                         return await handler(event, data)
-                    await inner_event.answer(BOT_ONBOARDING_BLOCK_MESSAGE, show_alert=True)
+                    await answer_callback_query_via_runtime(
+                        inner_event,
+                        BOT_ONBOARDING_BLOCK_MESSAGE,
+                        show_alert=True,
+                    )
                 elif isinstance(inner_event, Message):
                     pending_step = pending_onboarding_step(user)
-                    await inner_event.answer(
+                    await answer_incoming_message_via_runtime(
+                        inner_event,
+                        user,
                         onboarding_text_for_step(pending_step or 1),
                         reply_markup=build_onboarding_keyboard(pending_step or 1),
                     )

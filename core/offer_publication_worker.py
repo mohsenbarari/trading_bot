@@ -18,7 +18,10 @@ from core.db import AsyncSessionLocal
 from core.job_logging import RepeatedErrorLogger, duration_ms_since, job_context
 from core.services.cross_server_recovery_service import active_publication_is_gated
 from core.services.offer_publication_reconciliation_service import reconcile_offer_publications
-from core.services.offer_publication_state_service import apply_publication_state_update
+from core.services.offer_publication_state_service import (
+    apply_publication_state_update,
+    canonical_telegram_publication_identity,
+)
 from core.services.telegram_offer_channel_service import apply_offer_channel_state_with_result
 from core.services.telegram_offer_publication_service import (
     get_or_create_telegram_publication_state,
@@ -519,12 +522,18 @@ def _prepare_channel_state_candidate_state(
     state: OfferPublicationState,
     offer: Offer,
 ) -> None:
-    message_id = _coerce_int(getattr(offer, "channel_message_id", None))
-    if message_id and _coerce_int(getattr(state, "telegram_message_id", None)) != message_id:
+    state_message_id = _coerce_int(getattr(state, "telegram_message_id", None))
+    offer_message_id = _coerce_int(getattr(offer, "channel_message_id", None))
+    if state_message_id:
+        identity = canonical_telegram_publication_identity(state)
+        if offer_message_id != identity.message_id:
+            offer.channel_message_id = identity.message_id
+        return
+    if offer_message_id:
         mark_telegram_publication_success(
             state,
             offer,
-            message_id=message_id,
+            message_id=offer_message_id,
             chat_id=_coerce_int(settings.channel_id),
         )
 
@@ -546,7 +555,10 @@ def _mark_channel_state_applied(
         requested_status=requested_status,
         now=now,
         error_code=error_code,
-        telegram_message_id=_coerce_int(getattr(offer, "channel_message_id", None)),
+        telegram_message_id=(
+            _coerce_int(getattr(state, "telegram_message_id", None))
+            or _coerce_int(getattr(offer, "channel_message_id", None))
+        ),
     )
     _set_channel_state_attempt_count(state, 0)
 

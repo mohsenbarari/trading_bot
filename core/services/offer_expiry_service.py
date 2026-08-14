@@ -120,6 +120,58 @@ def apply_offer_expiry(
     return offer
 
 
+async def _invalidate_overtime_after_offer_expiry(
+    db: AsyncSession,
+    offers: Iterable[Offer],
+    *,
+    reason: str,
+    now=None,
+) -> None:
+    """Drop nonterminal overtime rows for offers that just became terminal.
+
+    All offers in the command are invalidated first; owner-seat promotion runs
+    once per freed scope afterward so a queued sibling offer can advance only
+    if it remains valid under ``promote_next_for_owner`` revalidation.
+    """
+    from core.services.offer_overtime_request_service import (
+        invalidate_overtime_requests_for_offer,
+        promote_next_for_owner,
+    )
+    from core.server_routing import normalize_server
+    from core.trading_settings import get_trading_settings_async
+
+    offer_list = [offer for offer in offers if offer is not None]
+    if not offer_list:
+        return
+    ts = await get_trading_settings_async()
+    normal_minutes = int(getattr(ts, "offer_expiry_minutes", 0) or 0)
+    scopes: set[tuple[int, str]] = set()
+    for offer in offer_list:
+        rows = await invalidate_overtime_requests_for_offer(
+            db,
+            offer,
+            reason=reason,
+            now=now,
+            promote_next=False,
+            normal_lifetime_minutes=normal_minutes,
+            flush=True,
+        )
+        for row in rows:
+            owner_id = getattr(row, "offer_owner_user_id", None)
+            home = getattr(row, "request_home_server", None)
+            if owner_id is not None and home:
+                scopes.add((int(owner_id), normalize_server(home, current_server())))
+    for owner_id, home in sorted(scopes):
+        await promote_next_for_owner(
+            db,
+            request_home_server=home,
+            offer_owner_user_id=owner_id,
+            normal_lifetime_minutes=normal_minutes,
+            now=now,
+            flush=True,
+        )
+
+
 async def expire_offer_authoritatively(
     db: AsyncSession,
     offer: Offer,
@@ -129,7 +181,14 @@ async def expire_offer_authoritatively(
     now=None,
     require_authority: bool = True,
 ) -> OfferExpiryResult:
-    apply_offer_expiry(offer, command, now=now, require_authority=require_authority)
+    expiry_time = now or utc_now_naive()
+    apply_offer_expiry(offer, command, now=expiry_time, require_authority=require_authority)
+    await _invalidate_overtime_after_offer_expiry(
+        db,
+        (offer,),
+        reason=f"offer_expired:{command.reason}",
+        now=expiry_time,
+    )
     if commit:
         await db.commit()
     return OfferExpiryResult(expired_offers=(offer,))
@@ -153,6 +212,13 @@ async def expire_offers_authoritatively(
             continue
         apply_offer_expiry(offer, command, now=expiry_time, require_authority=require_authority)
         expired.append(offer)
+    if expired:
+        await _invalidate_overtime_after_offer_expiry(
+            db,
+            expired,
+            reason=f"offer_expired:{command.reason}",
+            now=expiry_time,
+        )
     if expired and commit:
         await db.commit()
     return OfferExpiryResult(expired_offers=tuple(expired))

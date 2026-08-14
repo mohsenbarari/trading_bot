@@ -5,7 +5,11 @@ from unittest.mock import AsyncMock, patch
 
 from fastapi import BackgroundTasks, HTTPException
 
-from api.routers.trades import TradeCreate, _execute_trade_authoritatively
+from api.routers.trades import (
+    TradeCreate,
+    _execute_trade_authoritatively,
+    _repair_trade_completion_delivery_background,
+)
 from core.enums import NotificationCategory, NotificationLevel, SettlementType, UserRole
 from core.services.offer_expiry_service import OfferExpiryReason
 from models.customer_relation import CustomerTier
@@ -180,6 +184,12 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
         )
         self.early_replay_ledger_mock = early_replay_patcher.start()
         self.addCleanup(early_replay_patcher.stop)
+        delivery_intent_patcher = patch(
+            "api.routers.trades.persist_trade_completion_delivery_intents",
+            new=AsyncMock(),
+        )
+        self.delivery_intent_mock = delivery_intent_patcher.start()
+        self.addCleanup(delivery_intent_patcher.stop)
 
     def _private_trade_payloads(self):
         payloads = []
@@ -233,6 +243,34 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(exc_info.exception.status_code, 409)
         self.assertEqual(exc_info.exception.detail, "این لفظ توسط کاربر دیگری در حال معامله است. لطفاً دوباره تلاش کنید.")
 
+    async def test_delivery_intent_failure_prevents_trade_commit(self):
+        locked_user = make_user()
+        offer = make_offer()
+        db = FakeDB(
+            get_results=[offer],
+            execute_results=[FakeExecuteResult(single=locked_user)],
+            scalar_result=10000,
+        )
+        self.delivery_intent_mock.side_effect = RuntimeError("intent-write-failed")
+
+        with patch("api.routers.trades.check_user_limits", return_value=(True, None)), patch(
+            "api.routers.trades._is_offer_expired_for_trade",
+            new=AsyncMock(return_value=False),
+        ), patch("core.services.block_service.is_blocked", new=AsyncMock(return_value=(False, None))), patch(
+            "api.routers.trades.validate_offer_trade_amount",
+            return_value=(True, None, 4, []),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "intent-write-failed"):
+                await _execute_trade_authoritatively(
+                    TradeCreate(offer_id=7, quantity=4),
+                    BackgroundTasks(),
+                    db=db,
+                    context=make_context(locked_user),
+                )
+
+        db.commit.assert_not_awaited()
+        self.delivery_intent_mock.assert_awaited_once()
+
     async def test_execute_trade_authoritatively_persists_trade_and_runs_side_effects(self):
         locked_user = make_user()
         context = make_context(locked_user)
@@ -249,6 +287,11 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
             scalar_result=9999,
         )
         background_tasks = BackgroundTasks()
+        delivery_order = []
+        self.delivery_intent_mock.side_effect = (
+            lambda *_args, **_kwargs: delivery_order.append("intent")
+        )
+        db.commit.side_effect = lambda: delivery_order.append("commit")
 
         with patch("api.routers.trades.check_user_limits", return_value=(True, None)), patch(
             "api.routers.trades._is_offer_expired_for_trade",
@@ -297,6 +340,8 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(offer.status, OfferStatus.COMPLETED)
         db.refresh.assert_any_await(offer, ["user", "commodity"])
         db.commit.assert_awaited_once()
+        self.delivery_intent_mock.assert_awaited_once()
+        self.assertEqual(delivery_order[:2], ["intent", "commit"])
         update_buttons_mock.assert_awaited_once_with(offer)
         self.assertEqual(len(background_tasks.tasks), 1)
         self.assertEqual(background_tasks.tasks[0].args[0], 10000)
@@ -410,6 +455,10 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
         self.publish_user_event_mock.assert_not_awaited()
         response_mock.assert_called_once_with(existing_trade, identity_map={}, customer_relation_map={})
         self.assertEqual(len(background_tasks.tasks), 1)
+        repair_task = background_tasks.tasks[0]
+        self.assertIs(repair_task.func, _repair_trade_completion_delivery_background)
+        self.assertEqual(repair_task.args[0], existing_trade.trade_number)
+        self.assertEqual(repair_task.args[2], 7)
 
     async def test_early_completed_replay_rejects_mismatched_ledger_identity_and_payload(self):
         owner_user = make_user()
@@ -1054,6 +1103,9 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(customer_leg.offer_user_id, mediator_owner.id)
         self.assertEqual(customer_leg.responder_user_id, customer_user.id)
         self.assertIsNone(customer_leg.offer_id)
+        self.assertIsNone(customer_leg.offer)
+        self.assertIsNone(customer_leg.offer_notes)
+        self.assertEqual(customer_leg.offer_home_server, offer.home_server)
         self.assertEqual(customer_leg.price, 100700)
         self.assertEqual(result, {"id": 94, "trade_number": 10007, "offer_id": None, "price": 100700})
 

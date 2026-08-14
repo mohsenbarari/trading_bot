@@ -46,7 +46,7 @@ class BotBlockManageListSearchEntryTests(unittest.IsolatedAsyncioTestCase):
             "bot.handlers.block_manage.get_block_status", new=AsyncMock(return_value=self.normal_status)
         ), patch("bot.handlers.block_manage.safe_edit_text", new=AsyncMock()) as safe_edit:
             await show_blocked_list(callback, user=SimpleNamespace(id=5))
-        self.assertIn("کاربران مسدود شده", safe_edit.await_args.args[1])
+        self.assertIn("کاربران مسدود شده", safe_edit.await_args.args[2])
 
     async def test_show_blocked_list_rejects_delegated_accounts(self):
         callback = SimpleNamespace(answer=AsyncMock(), message=SimpleNamespace())
@@ -77,7 +77,7 @@ class BotBlockManageListSearchEntryTests(unittest.IsolatedAsyncioTestCase):
             await start_search(callback, state, user=SimpleNamespace(id=5))
 
         self.assertEqual(state.states, [BlockStates.searching])
-        self.assertIn("جستجوی کاربر", safe_edit.await_args.args[1])
+        self.assertIn("جستجوی کاربر", safe_edit.await_args.args[2])
 
     async def test_start_search_rejects_delegated_accounts(self):
         callback = SimpleNamespace(answer=AsyncMock(), message=SimpleNamespace())

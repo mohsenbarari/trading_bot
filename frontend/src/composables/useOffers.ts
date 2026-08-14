@@ -2,6 +2,7 @@ import { ref } from 'vue';
 import { useWebSocket } from './useWebSocket.ts';
 import { apiFetch } from '../utils/auth';
 import { createHttpErrorFromResponse, getUserFacingErrorMessage } from '../utils/httpErrorPolicy';
+import { isActiveLifecycleVisible } from '../utils/offerLifecycle';
 
 const offers = ref<any[]>([]);
 const isLoading = ref(false);
@@ -151,7 +152,7 @@ export function useOffers() {
 
     function activeRows(rows: any[]): any[] {
         const nowSec = Date.now() / 1000;
-        return rows.filter((offer: any) => !offer.expires_at_ts || offer.expires_at_ts > nowSec);
+        return rows.filter((offer: any) => isActiveLifecycleVisible(offer, nowSec));
     }
 
     async function readOfferPage(response: Response): Promise<{
@@ -204,12 +205,8 @@ export function useOffers() {
 
             const page = await readOfferPage(response);
             if (requestRevision === filterRevision) {
-                if (silent && offers.value.length > 0) {
+                if (silent && offers.value.length > 0 && loadedAdditionalPages) {
                     offers.value = dedupeOffers([...page.items, ...offers.value]);
-                    if (!loadedAdditionalPages) {
-                        nextCursor.value = page.nextCursor;
-                        hasMore.value = page.hasMore;
-                    }
                 } else {
                     offers.value = dedupeOffers(page.items);
                     nextCursor.value = page.nextCursor;

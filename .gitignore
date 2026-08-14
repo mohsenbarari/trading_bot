@@ -33,7 +33,9 @@ docs/uiux-stage8-acceptance-rollout/*
 !docs/messenger-surface-manifest.json
 !docs/messenger-surface-report.md
 !docs/PRODUCTION_DEPLOYMENT_ONLINE.md
+!docs/TELEGRAM_MULTI_PUBLISHER_B2B_ROADMAP.md
 .env
+.env.test
 .env.staging
 .env.staging.*
 .env.iran
@@ -72,3 +74,4 @@ map_data/
 /.coverage.*
 .deploy_count
 deploy/production/online.env
+deploy/monitoring/.env.monitoring.local

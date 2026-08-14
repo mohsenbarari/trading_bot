@@ -497,6 +497,57 @@ def record_offer_publication_health(
         )
 
 
+def record_overtime_lifecycle_event(*, event: str, result: str, count: int = 1) -> None:
+    registry.counter(
+        "trading_bot_offer_overtime_lifecycle_events_total",
+        "Offer overtime lifecycle events by bounded event and result.",
+        amount=max(0, int(count)),
+        event=_sanitize_label_value(event, max_length=48),
+        result=_sanitize_label_value(result, max_length=32),
+    )
+
+
+def record_overtime_signal(*, signal: str, count: int = 1) -> None:
+    registry.counter(
+        "trading_bot_offer_overtime_signals_total",
+        "Offer overtime diagnostic signals (stale snapshot, silent owner, etc.).",
+        amount=max(0, int(count)),
+        signal=_sanitize_label_value(signal, max_length=64),
+    )
+
+
+def record_overtime_reconciliation_health(
+    *,
+    server_mode: str,
+    status_counts: Mapping[str, int] | None,
+    finding_counts: Mapping[str, int] | None,
+    silent_owner_count: int = 0,
+) -> None:
+    labels = {"server_mode": _sanitize_label_value(server_mode, max_length=16)}
+    for status, count in (status_counts or {}).items():
+        registry.gauge(
+            "trading_bot_offer_overtime_nonterminal_states",
+            "Current nonterminal overtime request counts by status.",
+            max(int(count or 0), 0),
+            status=_sanitize_label_value(status, max_length=64),
+            **labels,
+        )
+    for issue, count in (finding_counts or {}).items():
+        registry.gauge(
+            "trading_bot_offer_overtime_reconciliation_findings",
+            "Current overtime reconciliation findings by issue.",
+            max(int(count or 0), 0),
+            issue=_sanitize_label_value(issue, max_length=80),
+            **labels,
+        )
+    registry.gauge(
+        "trading_bot_offer_overtime_silent_owner_expiry_owners",
+        "Owners with repeated unseen overtime decision timeouts in the sample window.",
+        max(int(silent_owner_count or 0), 0),
+        **labels,
+    )
+
+
 def record_sync_conflict(*, server_mode: str, table: str, reason: str) -> None:
     registry.counter(
         "trading_bot_sync_conflicts_total",
@@ -579,6 +630,35 @@ def record_business_action(*, action: str, result: str) -> None:
         action=_sanitize_label_value(action, max_length=80),
         result=normalize_result(result),
     )
+
+
+def record_telegram_delivery_retention(report: Mapping[str, Any]) -> None:
+    """Publish bounded retention health without job, route, or payload labels."""
+    registry.counter(
+        "trading_bot_telegram_delivery_retention_cycles_total",
+        "Telegram delivery retention cycles by execution mode.",
+        mode="dry_run" if bool(report.get("dry_run")) else "apply",
+    )
+    for field in (
+        "payload_candidates",
+        "payload_redacted",
+        "provider_outcomes_redacted",
+        "terminal_candidates",
+        "terminal_purged",
+        "legal_hold_due",
+        "unresolved_due",
+        "source_blocked_due",
+    ):
+        try:
+            value = max(float(report.get(field) or 0), 0.0)
+        except (TypeError, ValueError, OverflowError):
+            value = 0.0
+        registry.gauge(
+            "trading_bot_telegram_delivery_retention_rows",
+            "Latest Telegram delivery retention row counts by bounded phase.",
+            value,
+            phase=field,
+        )
 
 
 def metrics_response_body() -> str:

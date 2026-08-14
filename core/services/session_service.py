@@ -290,6 +290,21 @@ async def handle_login_session(
     return {"action": "approval_required", "request": login_request}
 
 
+LOGIN_REQUEST_NOT_FOUND_ERROR = "درخواست یافت نشد"
+
+
+def _is_login_request_resolvable_by(
+    login_req: SessionLoginRequest,
+    approver_session: UserSession,
+) -> bool:
+    """A login request may only be resolved from its own account's primary session.
+
+    Callers must report a mismatch with the same message as a missing request, so a
+    caller holding a leaked request id learns nothing about whether it exists.
+    """
+    return getattr(login_req, "user_id", None) == getattr(approver_session, "user_id", None)
+
+
 async def approve_login_request(
     db: AsyncSession,
     request_id: uuid.UUID,
@@ -309,7 +324,9 @@ async def approve_login_request(
     )
     login_req = (await db.execute(stmt)).scalar_one_or_none()
     if not login_req:
-        return {"error": "درخواست یافت نشد"}
+        return {"error": LOGIN_REQUEST_NOT_FOUND_ERROR}
+    if not _is_login_request_resolvable_by(login_req, approver_session):
+        return {"error": LOGIN_REQUEST_NOT_FOUND_ERROR}
     if login_req.status != LoginRequestStatus.PENDING:
         return {"error": "درخواست قبلاً پردازش شده است"}
     if login_req.expires_at.replace(tzinfo=None) < utc_now_naive():
@@ -410,7 +427,9 @@ async def reject_login_request(
     )
     login_req = (await db.execute(stmt)).scalar_one_or_none()
     if not login_req:
-        return {"error": "درخواست یافت نشد"}
+        return {"error": LOGIN_REQUEST_NOT_FOUND_ERROR}
+    if not _is_login_request_resolvable_by(login_req, approver_session):
+        return {"error": LOGIN_REQUEST_NOT_FOUND_ERROR}
     if login_req.status != LoginRequestStatus.PENDING:
         return {"error": "درخواست قبلاً پردازش شده است"}
 

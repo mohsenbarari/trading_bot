@@ -6,8 +6,8 @@ import { fileURLToPath } from 'node:url'
 import {
   ADMIN_MESSAGES_PATH,
   ADMIN_MESSAGES_SHA256,
-  MARKET_RUNTIME_BASELINE,
-  MARKET_RUNTIME_CONTRACT,
+  MAIN_UIUX_INTEGRATION_MARKET_ALLOWED_PATHS,
+  MAIN_UIUX_INTEGRATION_MARKET_KIND,
   STAGE6_MESSENGER_URL_PRIVACY_ALLOWED_PATHS,
   STAGE8_CREATECHANNEL_HELPPOPOVER_PLACEMENT_ALLOWED_PATHS,
   STAGE8_CREATECHANNEL_HELPPOPOVER_PLACEMENT_KIND,
@@ -20,14 +20,13 @@ import {
   TRADING_SETTINGS_PATH,
   TRADING_SETTINGS_SHA256,
   resolveTradingSettingsDisposition,
-  assertProtectedFileSetEvidence,
   assertStage4RouteProtection,
   assertStage4RuntimeRouteProtection,
   assertStage4SharedDependencyIsolation,
   discoverStage4OwnedRuntimePaths,
   fileSha256,
-  protectedFileSetEvidence,
   readFileEntries,
+  resolveMarketRuntimeDisposition,
   resolveMessengerRuntimeDisposition,
 } from './lib/stage4-protected-surface-guard.mjs'
 import {
@@ -53,11 +52,7 @@ function assertWholeFile(label, repoPath, expectedSha256) {
 
 try {
   const ownedPaths = discoverStage4OwnedRuntimePaths(repoRoot)
-  const market = assertProtectedFileSetEvidence(
-    'Market runtime',
-    protectedFileSetEvidence(readFileEntries(repoRoot, ownedPaths.market), MARKET_RUNTIME_CONTRACT),
-    MARKET_RUNTIME_BASELINE,
-  )
+  const market = resolveMarketRuntimeDisposition(readFileEntries(repoRoot, ownedPaths.market))
   const messenger = resolveMessengerRuntimeDisposition(
     readFileEntries(repoRoot, ownedPaths.messenger),
   )
@@ -92,9 +87,17 @@ try {
   )
 
   console.log(`PASS protected checkpoint anchor (${STAGE4_BASE_COMMIT}, tree ${STAGE4_BASE_TREE})`)
-  console.log(
-    `PASS Stage 4 Market runtime (${market.count} files, ${market.contentBytes} bytes, ${market.pathSetSha256}, ${market.sha256})`,
-  )
+  if (market.kind === 'stage4-baseline') {
+    console.log(
+      `PASS Stage 4 Market runtime (${market.evidence.count} files, ${market.evidence.contentBytes} bytes, ${market.evidence.pathSetSha256}, ${market.evidence.sha256})`,
+    )
+  } else if (market.kind === MAIN_UIUX_INTEGRATION_MARKET_KIND) {
+    console.log(
+      `PASS main/UIUX Market integration disposition (exact ${MAIN_UIUX_INTEGRATION_MARKET_ALLOWED_PATHS.length}-file overlay; ${market.evidence.count} files, ${market.evidence.contentBytes} bytes, ${market.evidence.pathSetSha256}, ${market.evidence.sha256})`,
+    )
+  } else {
+    throw new Error(`unsupported Market runtime disposition: ${String(market.kind)}`)
+  }
   if (messenger.kind === 'stage4-baseline') {
     console.log(
       `PASS Stage 4 Messenger runtime baseline (${messenger.evidence.count} files, ${messenger.evidence.contentBytes} bytes, ${messenger.evidence.pathSetSha256}, ${messenger.evidence.sha256})`,

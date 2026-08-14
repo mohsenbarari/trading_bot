@@ -5,6 +5,7 @@ import enum
 
 from sqlalchemy import (
     BigInteger,
+    CheckConstraint,
     Column,
     DateTime,
     Enum,
@@ -68,6 +69,12 @@ class TelegramAdminBroadcast(Base):
     __tablename__ = "telegram_admin_broadcasts"
     __table_args__ = (
         Index("ix_telegram_admin_broadcasts_created", "created_at", "id"),
+        Index(
+            "ix_telegram_admin_broadcasts_queue_fairness",
+            "queue_last_handed_off_at",
+            "id",
+            postgresql_where=text("status IN ('queued', 'running')"),
+        ),
     )
 
     id = Column(Integer, primary_key=True, index=True)
@@ -93,6 +100,7 @@ class TelegramAdminBroadcast(Base):
         default=TelegramAdminBroadcastStatus.QUEUED,
     )
     queued_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    queue_last_handed_off_at = Column(DateTime(timezone=True), nullable=True)
     completed_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at = Column(DateTime(timezone=True), nullable=True, onupdate=func.now())
@@ -124,6 +132,27 @@ class TelegramAdminBroadcastReceipt(Base):
             "id",
             postgresql_where=text("status = 'sending' AND lease_until IS NOT NULL"),
         ),
+        Index(
+            "ix_telegram_admin_broadcast_receipts_queue_handoff",
+            "next_retry_at",
+            "id",
+            postgresql_where=text(
+                "status IN ('pending', 'retryable_failed') "
+                "AND queue_job_id IS NULL AND worker_id IS NULL "
+                "AND lease_until IS NULL"
+            ),
+        ),
+        Index(
+            "ux_telegram_admin_broadcast_receipts_queue_job",
+            "queue_job_id",
+            unique=True,
+            postgresql_where=text("queue_job_id IS NOT NULL"),
+        ),
+        CheckConstraint(
+            "((queue_job_id IS NULL AND queue_handed_off_at IS NULL) OR "
+            "(queue_job_id IS NOT NULL AND queue_handed_off_at IS NOT NULL))",
+            name="ck_telegram_admin_broadcast_receipts_queue_binding",
+        ),
     )
 
     id = Column(Integer, primary_key=True, index=True)
@@ -151,6 +180,12 @@ class TelegramAdminBroadcastReceipt(Base):
     last_error_message = Column(Text, nullable=True)
     worker_id = Column(String(128), nullable=True)
     lease_until = Column(DateTime(timezone=True), nullable=True)
+    queue_job_id = Column(
+        BigInteger,
+        ForeignKey("telegram_delivery_jobs.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
+    queue_handed_off_at = Column(DateTime(timezone=True), nullable=True)
     sent_at = Column(DateTime(timezone=True), nullable=True)
     terminal_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())

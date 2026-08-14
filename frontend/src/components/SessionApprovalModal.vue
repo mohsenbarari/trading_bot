@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, useId, watch } from 'vue'
 import { X, Check, Smartphone, ShieldAlert, Image } from 'lucide-vue-next'
+import { setSessionApprovalBlocking } from '../composables/authenticatedOverlayPriority'
 import { useSessionApprovalRuntime } from '../composables/useSessionApprovalRuntime'
 import { setSecurityLayerActive } from '../utils/securityLayerState'
 import { UI_DESIGN_SYSTEM_PORTAL_SCOPE_VALUE } from './ui/uiDesignSystemScope'
@@ -141,6 +142,7 @@ const SECURITY_LAYER_ID = 'session-approval'
 watch(
   [showModal, () => props.v2Portal],
   async ([active, isV2Portal]) => {
+    setSessionApprovalBlocking(Boolean(active))
     const shouldActivateV2Layer = active && isV2Portal
     setSecurityLayerActive(SECURITY_LAYER_ID, shouldActivateV2Layer)
 
@@ -164,6 +166,7 @@ watch(
 )
 
 onBeforeUnmount(() => {
+  setSessionApprovalBlocking(false)
   setSecurityLayerActive(SECURITY_LAYER_ID, false)
   detachFocusBoundary()
   restorePreviousFocus()

@@ -39,6 +39,9 @@ from core.services.telegram_link_token_service import (
     load_pending_telegram_link_token_user_for_update,
 )
 from bot.repeat_offer import build_persistent_navigation_keyboard
+from bot.telegram_pre_auth_interaction import (
+    answer_pre_auth_message_via_runtime,
+)
 from bot.utils.channel_invites import (
     build_channel_access_text,
     build_channel_join_request_text,
@@ -109,7 +112,7 @@ async def finalize_account_link(
     await ensure_mandatory_channel_membership(db, user=user)
     await db.commit()
     if send_success_message:
-        await message.answer(
+        await answer_pre_auth_message_via_runtime(message,
             await build_linked_account_panel_message(
                 getattr(message, "bot", None),
                 user,
@@ -385,7 +388,7 @@ async def prompt_address_completion(
         if already_linked
         else "✅ شماره تماس تایید شد!\n\n"
     )
-    await message.answer(
+    await answer_pre_auth_message_via_runtime(message,
         intro + "📍 برای تکمیل ثبت‌نام، آدرس خود را جهت جابجایی سکه وارد نمایید:",
         reply_markup=types.ReplyKeyboardRemove()
     )
@@ -402,7 +405,7 @@ async def prompt_contact_for_account_link(
         "🔗 برای اتصال حساب کاربری وب به تلگرام، لطفاً شماره موبایل خود را ارسال کنید.\n"
         "روی دکمه زیر کلیک کنید:"
     )
-    sent_message = await message.answer(
+    sent_message = await answer_pre_auth_message_via_runtime(message,
         text,
         reply_markup=types.ReplyKeyboardMarkup(
             keyboard=[
@@ -426,7 +429,7 @@ async def cmd_link(message: types.Message, state: FSMContext, user: User | None 
         if user_requires_address_completion(user):
             await prompt_address_completion(message, state, user.id, already_linked=True)
             return
-        await message.answer(
+        await answer_pre_auth_message_via_runtime(message,
             await build_linked_account_panel_message(getattr(message, "bot", None), user, already_linked=True),
             reply_markup=await build_persistent_navigation_keyboard(
                 user,
@@ -435,7 +438,7 @@ async def cmd_link(message: types.Message, state: FSMContext, user: User | None 
         )
         return
 
-    await message.answer(build_neutral_account_link_message(), reply_markup=types.ReplyKeyboardRemove())
+    await answer_pre_auth_message_via_runtime(message, build_neutral_account_link_message(), reply_markup=types.ReplyKeyboardRemove())
     clear_state = getattr(state, "clear", None)
     if callable(clear_state):
         await clear_state()
@@ -443,10 +446,10 @@ async def cmd_link(message: types.Message, state: FSMContext, user: User | None 
 @router.message(LinkState.waiting_for_contact, F.contact)
 async def handle_contact(message: types.Message, state: FSMContext):
     contact = message.contact
-    
+
     # Security check: verify contact belongs to sender
     if contact.user_id != message.from_user.id:
-        await message.answer("❌ لطفاً شماره خودتان را ارسال کنید.")
+        await answer_pre_auth_message_via_runtime(message, "❌ لطفاً شماره خودتان را ارسال کنید.")
         return
 
     phone = normalize_mobile_number(contact.phone_number)
@@ -458,20 +461,20 @@ async def handle_contact(message: types.Message, state: FSMContext):
     state_data = await state.get_data()
     link_token = state_data.get(BOT_ACCOUNT_LINK_TOKEN_STATE_KEY)
     if not link_token:
-        await message.answer(
+        await answer_pre_auth_message_via_runtime(message,
             build_neutral_account_link_message(),
             reply_markup=types.ReplyKeyboardRemove(),
         )
         await state.clear()
         return
-    
+
     async for db in get_db():
         token_record = None
         if isinstance(db, AsyncSession):
             try:
                 token_record, user, _decision = await load_pending_telegram_link_token_user_for_update(db, link_token)
             except TelegramLinkTokenError as exc:
-                await message.answer(
+                await answer_pre_auth_message_via_runtime(message,
                     build_bot_account_access_denial_message(exc.reason),
                     reply_markup=types.ReplyKeyboardRemove(),
                 )
@@ -480,9 +483,9 @@ async def handle_contact(message: types.Message, state: FSMContext):
         else:
             stmt = select(User).where(User.mobile_number == phone)
             user = (await db.execute(stmt)).scalar_one_or_none()
-        
+
         if not user:
-            await message.answer(
+            await answer_pre_auth_message_via_runtime(message,
                 build_bot_account_access_denial_message(BOT_ACCOUNT_SYNC_PENDING_REASON),
                 reply_markup=types.ReplyKeyboardRemove(),
             )
@@ -491,13 +494,13 @@ async def handle_contact(message: types.Message, state: FSMContext):
 
         registered_phone = str(getattr(user, "mobile_number", "") or "")
         if registered_phone and not registered_phone.endswith(phone[-10:]):
-            await message.answer("❌ شماره تماس ارسال شده با حساب انتخاب‌شده مطابقت ندارد.", reply_markup=types.ReplyKeyboardRemove())
+            await answer_pre_auth_message_via_runtime(message, "❌ شماره تماس ارسال شده با حساب انتخاب‌شده مطابقت ندارد.", reply_markup=types.ReplyKeyboardRemove())
             await state.clear()
             return
 
         access_denial_reason = bot_account_access_denial_reason(user)
         if access_denial_reason:
-            await message.answer(
+            await answer_pre_auth_message_via_runtime(message,
                 build_bot_account_access_denial_message(access_denial_reason),
                 reply_markup=types.ReplyKeyboardRemove(),
             )
@@ -506,19 +509,19 @@ async def handle_contact(message: types.Message, state: FSMContext):
 
         block_reason = await get_web_only_bot_access_reason(db, user)
         if block_reason:
-            await message.answer(
+            await answer_pre_auth_message_via_runtime(message,
                 build_web_only_message_for_reason(block_reason),
                 reply_markup=types.ReplyKeyboardRemove(),
                 parse_mode="Markdown",
             )
             await state.clear()
             return
-            
+
         if user.telegram_id and user.telegram_id != message.from_user.id:
-            await message.answer("❌ این شماره قبلاً به یک اکانت تلگرام دیگر متصل شده است.", reply_markup=types.ReplyKeyboardRemove())
+            await answer_pre_auth_message_via_runtime(message, "❌ این شماره قبلاً به یک اکانت تلگرام دیگر متصل شده است.", reply_markup=types.ReplyKeyboardRemove())
             await state.clear()
             return
-            
+
         if user.telegram_id == message.from_user.id:
             if user_requires_address_completion(user):
                 await prompt_address_completion(
@@ -529,7 +532,7 @@ async def handle_contact(message: types.Message, state: FSMContext):
                     mobile_number=registered_phone,
                 )
                 return
-            await message.answer(
+            await answer_pre_auth_message_via_runtime(message,
                 await build_linked_account_panel_message(getattr(message, "bot", None), user, already_linked=True, db=db),
                 reply_markup=await build_persistent_navigation_keyboard(
                     user,
@@ -551,7 +554,7 @@ async def handle_contact(message: types.Message, state: FSMContext):
                     )
                 except BotAccountLinkDenied as exc:
                     await db.rollback()
-                    await message.answer(
+                    await answer_pre_auth_message_via_runtime(message,
                         build_bot_account_access_denial_message(exc.reason),
                         reply_markup=types.ReplyKeyboardRemove(),
                     )
@@ -559,7 +562,7 @@ async def handle_contact(message: types.Message, state: FSMContext):
                     return
                 except PermissionError as exc:
                     await db.rollback()
-                    await message.answer(
+                    await answer_pre_auth_message_via_runtime(message,
                         build_web_only_message_for_reason(
                             str(exc).replace("_BOT_ACCESS_FORBIDDEN", "").lower()
                         ),
@@ -577,7 +580,7 @@ async def handle_contact(message: types.Message, state: FSMContext):
                             "error_type": type(exc).__name__,
                         },
                     )
-                    await message.answer(
+                    await answer_pre_auth_message_via_runtime(message,
                         "❌ خطا در اتصال حساب.",
                         reply_markup=types.ReplyKeyboardRemove(),
                     )
@@ -611,13 +614,13 @@ async def handle_contact(message: types.Message, state: FSMContext):
                 )
             except BotAccountLinkDenied as exc:
                 await db.rollback()
-                await message.answer(
+                await answer_pre_auth_message_via_runtime(message,
                     build_bot_account_access_denial_message(exc.reason),
                     reply_markup=types.ReplyKeyboardRemove(),
                 )
             except PermissionError as exc:
                 await db.rollback()
-                await message.answer(
+                await answer_pre_auth_message_via_runtime(message,
                     build_web_only_message_for_reason(
                         str(exc).replace("_BOT_ACCESS_FORBIDDEN", "").lower()
                     ),
@@ -633,7 +636,7 @@ async def handle_contact(message: types.Message, state: FSMContext):
                         "error_type": type(exc).__name__,
                     },
                 )
-                await message.answer(
+                await answer_pre_auth_message_via_runtime(message,
                     "❌ خطا در اتصال حساب.",
                     reply_markup=types.ReplyKeyboardRemove(),
                 )
@@ -648,7 +651,7 @@ async def handle_contact(message: types.Message, state: FSMContext):
                 link_token=link_token,
                 address=None,
             )
-            await message.answer(
+            await answer_pre_auth_message_via_runtime(message,
                 await build_linked_account_panel_message(
                     getattr(message, "bot", None),
                     projected_user,
@@ -660,12 +663,12 @@ async def handle_contact(message: types.Message, state: FSMContext):
                 ),
             )
         except BotAccountLinkPending:
-            await message.answer(
+            await answer_pre_auth_message_via_runtime(message,
                 "⏳ اتصال فعلاً به علت ارتباط سرورها تکمیل نشد. چند لحظه بعد دوباره از لینک اتصال استفاده کنید.",
                 reply_markup=types.ReplyKeyboardRemove(),
             )
         except BotAccountLinkDenied as exc:
-            await message.answer(
+            await answer_pre_auth_message_via_runtime(message,
                 build_bot_account_access_denial_message(exc.reason),
                 reply_markup=types.ReplyKeyboardRemove(),
             )
@@ -677,8 +680,8 @@ async def handle_contact(message: types.Message, state: FSMContext):
                     "error_type": type(exc).__name__,
                 },
             )
-            await message.answer("❌ خطا در اتصال حساب.", reply_markup=types.ReplyKeyboardRemove())
-            
+            await answer_pre_auth_message_via_runtime(message, "❌ خطا در اتصال حساب.", reply_markup=types.ReplyKeyboardRemove())
+
         await state.clear()
         return
 
@@ -691,7 +694,7 @@ async def handle_address_completion(message: types.Message, state: FSMContext):
     # reconciliation contract keeps the Web registration address byte-exact.
     address = raw_address if sync_v2_enabled else raw_address.strip()
     if len(address) < 10:
-        await message.answer("❌ آدرس وارد شده کوتاه است. لطفاً آدرس کامل‌تری وارد کنید.")
+        await answer_pre_auth_message_via_runtime(message, "❌ آدرس وارد شده کوتاه است. لطفاً آدرس کامل‌تری وارد کنید.")
         return
 
     state_data = await state.get_data()
@@ -700,7 +703,7 @@ async def handle_address_completion(message: types.Message, state: FSMContext):
     link_mobile = state_data.get(BOT_ACCOUNT_LINK_MOBILE_STATE_KEY)
     if not user_id:
         await state.clear()
-        await message.answer("❌ فرآیند تکمیل ثبت‌نام منقضی شده است. لطفاً دوباره /link را بزنید.")
+        await answer_pre_auth_message_via_runtime(message, "❌ فرآیند تکمیل ثبت‌نام منقضی شده است. لطفاً دوباره /link را بزنید.")
         return
 
     async for db in get_db():
@@ -709,7 +712,7 @@ async def handle_address_completion(message: types.Message, state: FSMContext):
 
         if not user:
             await state.clear()
-            await message.answer(
+            await answer_pre_auth_message_via_runtime(message,
                 build_bot_account_access_denial_message(BOT_ACCOUNT_SYNC_PENDING_REASON),
                 reply_markup=types.ReplyKeyboardRemove(),
             )
@@ -718,7 +721,7 @@ async def handle_address_completion(message: types.Message, state: FSMContext):
         access_denial_reason = bot_account_access_denial_reason(user)
         if access_denial_reason:
             await state.clear()
-            await message.answer(
+            await answer_pre_auth_message_via_runtime(message,
                 build_bot_account_access_denial_message(access_denial_reason),
                 reply_markup=types.ReplyKeyboardRemove(),
             )
@@ -727,7 +730,7 @@ async def handle_address_completion(message: types.Message, state: FSMContext):
         block_reason = await get_web_only_bot_access_reason(db, user)
         if block_reason:
             await state.clear()
-            await message.answer(
+            await answer_pre_auth_message_via_runtime(message,
                 build_web_only_message_for_reason(block_reason),
                 reply_markup=types.ReplyKeyboardRemove(),
                 parse_mode="Markdown",
@@ -736,16 +739,16 @@ async def handle_address_completion(message: types.Message, state: FSMContext):
 
         if user.telegram_id and user.telegram_id != message.from_user.id:
             await state.clear()
-            await message.answer("❌ این حساب قبلاً به یک اکانت تلگرام دیگر متصل شده است.")
+            await answer_pre_auth_message_via_runtime(message, "❌ این حساب قبلاً به یک اکانت تلگرام دیگر متصل شده است.")
             return
 
         if link_token and user.telegram_id not in (None, message.from_user.id):
             await state.clear()
-            await message.answer("❌ این حساب قبلاً به یک اکانت تلگرام دیگر متصل شده است.")
+            await answer_pre_auth_message_via_runtime(message, "❌ این حساب قبلاً به یک اکانت تلگرام دیگر متصل شده است.")
             return
         if not link_token and user.telegram_id != message.from_user.id:
             await state.clear()
-            await message.answer("❌ هویت حساب تلگرام قابل تایید نیست.")
+            await answer_pre_auth_message_via_runtime(message, "❌ هویت حساب تلگرام قابل تایید نیست.")
             return
 
         if not sync_v2_enabled:
@@ -758,13 +761,13 @@ async def handle_address_completion(message: types.Message, state: FSMContext):
                 )
             except BotAccountLinkDenied as exc:
                 await db.rollback()
-                await message.answer(
+                await answer_pre_auth_message_via_runtime(message,
                     build_bot_account_access_denial_message(exc.reason),
                     reply_markup=types.ReplyKeyboardRemove(),
                 )
             except PermissionError as exc:
                 await db.rollback()
-                await message.answer(
+                await answer_pre_auth_message_via_runtime(message,
                     build_web_only_message_for_reason(
                         str(exc).replace("_BOT_ACCESS_FORBIDDEN", "").lower()
                     ),
@@ -780,7 +783,7 @@ async def handle_address_completion(message: types.Message, state: FSMContext):
                         "error_type": type(exc).__name__,
                     },
                 )
-                await message.answer("❌ خطا در تکمیل ثبت‌نام.")
+                await answer_pre_auth_message_via_runtime(message, "❌ خطا در تکمیل ثبت‌نام.")
             await state.clear()
             return
 
@@ -792,7 +795,7 @@ async def handle_address_completion(message: types.Message, state: FSMContext):
                 link_token=link_token,
                 address=address,
             )
-            await message.answer(
+            await answer_pre_auth_message_via_runtime(message,
                 await build_linked_account_panel_message(
                     getattr(message, "bot", None),
                     projected_user,
@@ -806,12 +809,12 @@ async def handle_address_completion(message: types.Message, state: FSMContext):
                 ),
             )
         except BotAccountLinkPending:
-            await message.answer(
+            await answer_pre_auth_message_via_runtime(message,
                 "⏳ تکمیل اتصال فعلاً ممکن نیست. چند لحظه بعد دوباره از لینک اتصال استفاده کنید.",
                 reply_markup=types.ReplyKeyboardRemove(),
             )
         except BotAccountLinkDenied as exc:
-            await message.answer(
+            await answer_pre_auth_message_via_runtime(message,
                 build_bot_account_access_denial_message(exc.reason),
                 reply_markup=types.ReplyKeyboardRemove(),
             )
@@ -823,7 +826,7 @@ async def handle_address_completion(message: types.Message, state: FSMContext):
                     "error_type": type(exc).__name__,
                 },
             )
-            await message.answer("❌ خطا در تکمیل ثبت‌نام.")
+            await answer_pre_auth_message_via_runtime(message, "❌ خطا در تکمیل ثبت‌نام.")
 
         await state.clear()
         return

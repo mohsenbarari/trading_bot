@@ -22,16 +22,34 @@ from core.services.block_service import (
     unblock_user,
     search_users_for_block
 )
+from bot.telegram_callback_answer import answer_callback_query_via_runtime
+from bot.telegram_interaction_message import (
+    answer_incoming_message_via_runtime,
+    edit_callback_message_via_runtime,
+)
 
 logger = logging.getLogger(__name__)
 
 router = Router()
 
 
-async def safe_edit_text(message: types.Message, text: str, **kwargs):
+async def safe_edit_text(
+    callback: types.CallbackQuery,
+    user: User,
+    text: str,
+    *,
+    source_key: str,
+    **kwargs,
+):
     """ویرایش پیام با مدیریت خطای 'message is not modified'"""
     try:
-        await message.edit_text(text, **kwargs)
+        await edit_callback_message_via_runtime(
+            callback,
+            user,
+            text,
+            source_key=source_key,
+            **kwargs,
+        )
     except TelegramBadRequest as e:
         if "message is not modified" not in str(e):
             raise
@@ -161,7 +179,11 @@ async def reject_delegated_block_management(callback: types.CallbackQuery, user:
     if not message:
         return False
 
-    await callback.answer(message, show_alert=True)
+    await answer_callback_query_via_runtime(
+        callback,
+        message,
+        show_alert=True,
+    )
     return True
 
 
@@ -173,16 +195,24 @@ async def reject_delegated_block_management_message(message: types.Message, user
     if not rejection_message:
         return False
 
-    await message.answer(f"❌ {rejection_message}")
+    await answer_incoming_message_via_runtime(
+        message,
+        user,
+        f"❌ {rejection_message}",
+        source_key="block-delegated-rejection",
+    )
     return True
 
 
-async def send_block_menu_message(message: types.Message, user: User) -> types.Message:
+async def send_block_menu_message(message: types.Message, user: User):
     async with AsyncSessionLocal() as session:
         status = await get_block_status(session, user.id)
 
-    return await message.answer(
+    return await answer_incoming_message_via_runtime(
+        message,
+        user,
         build_block_menu_text(status),
+        source_key="block-menu-entry",
         parse_mode="Markdown",
         reply_markup=get_block_menu_keyboard(status),
     )
@@ -194,25 +224,28 @@ async def send_block_menu_message(message: types.Message, user: User) -> types.M
 async def show_block_menu(callback: types.CallbackQuery, user: Optional[User]):
     """نمایش منوی اصلی بلاک"""
     if not user:
-        await callback.answer()
+        await answer_callback_query_via_runtime(callback)
         return
 
     async with AsyncSessionLocal() as session:
         status = await get_block_status(session, user.id)
 
-    await safe_edit_text(callback.message, 
+    await safe_edit_text(
+        callback,
+        user,
         build_block_menu_text(status),
+        source_key="block-menu-main",
         parse_mode="Markdown",
-        reply_markup=get_block_menu_keyboard(status)
+        reply_markup=get_block_menu_keyboard(status),
     )
-    await callback.answer()
+    await answer_callback_query_via_runtime(callback)
 
 
 @router.callback_query(BlockMenuCallback.filter(F.action == "list"))
 async def show_blocked_list(callback: types.CallbackQuery, user: Optional[User]):
     """نمایش لیست کاربران مسدود"""
     if not user:
-        await callback.answer()
+        await answer_callback_query_via_runtime(callback)
         return
 
     if await reject_delegated_block_management(callback, user):
@@ -222,7 +255,11 @@ async def show_blocked_list(callback: types.CallbackQuery, user: Optional[User])
         blocked = await get_blocked_users(session, user.id)
     
     if not blocked:
-        await callback.answer("لیست خالی است", show_alert=True)
+        await answer_callback_query_via_runtime(
+            callback,
+            "لیست خالی است",
+            show_alert=True,
+        )
         return
     
     text = (
@@ -231,19 +268,22 @@ async def show_blocked_list(callback: types.CallbackQuery, user: Optional[User])
         f"برای رفع مسدودیت روی نام کلیک کنید:\n"
     )
     
-    await safe_edit_text(callback.message, 
+    await safe_edit_text(
+        callback,
+        user,
         text,
+        source_key="block-list",
         parse_mode="Markdown",
-        reply_markup=get_blocked_list_keyboard(blocked)
+        reply_markup=get_blocked_list_keyboard(blocked),
     )
-    await callback.answer()
+    await answer_callback_query_via_runtime(callback)
 
 
 @router.callback_query(BlockMenuCallback.filter(F.action == "search"))
 async def start_search(callback: types.CallbackQuery, state: FSMContext, user: Optional[User]):
     """شروع جستجوی کاربر"""
     if not user:
-        await callback.answer()
+        await answer_callback_query_via_runtime(callback)
         return
 
     if await reject_delegated_block_management(callback, user):
@@ -258,14 +298,17 @@ async def start_search(callback: types.CallbackQuery, state: FSMContext, user: O
         )]
     ])
     
-    await safe_edit_text(callback.message, 
+    await safe_edit_text(
+        callback,
+        user,
         "🔍 **جستجوی کاربر**\n\n"
         "شماره موبایل یا نام کاربری را وارد کنید:\n"
         "(حداقل 2 کاراکتر)",
+        source_key="block-search-start",
         parse_mode="Markdown",
-        reply_markup=cancel_kb
+        reply_markup=cancel_kb,
     )
-    await callback.answer()
+    await answer_callback_query_via_runtime(callback)
 
 
 @router.message(BlockStates.searching)
@@ -277,7 +320,12 @@ async def handle_search_query(message: types.Message, state: FSMContext, user: O
     query = message.text.strip()
     
     if len(query) < 2:
-        await message.answer("❌ حداقل 2 کاراکتر وارد کنید.")
+        await answer_incoming_message_via_runtime(
+            message,
+            user,
+            "❌ حداقل 2 کاراکتر وارد کنید.",
+            source_key="block-search-short",
+        )
         return
 
     if await reject_delegated_block_management_message(message, user):
@@ -288,9 +336,12 @@ async def handle_search_query(message: types.Message, state: FSMContext, user: O
         users = await search_users_for_block(session, query, user.id, limit=10)
     
     if not users:
-        await message.answer(
+        await answer_incoming_message_via_runtime(
+            message,
+            user,
             "❌ کاربری یافت نشد.\n"
             "دوباره جستجو کنید:",
+            source_key="block-search-empty",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(
                     text="🔙 بازگشت",
@@ -308,8 +359,11 @@ async def handle_search_query(message: types.Message, state: FSMContext, user: O
         f"✅ = کلیک برای رفع مسدودیت\n"
     )
     
-    await message.answer(
+    await answer_incoming_message_via_runtime(
+        message,
+        user,
         text,
+        source_key="block-search-results",
         parse_mode="Markdown",
         reply_markup=get_search_results_keyboard(users)
     )
@@ -319,7 +373,7 @@ async def handle_search_query(message: types.Message, state: FSMContext, user: O
 async def handle_block_user(callback: types.CallbackQuery, callback_data: BlockUserCallback, user: Optional[User]):
     """مسدود کردن کاربر"""
     if not user:
-        await callback.answer()
+        await answer_callback_query_via_runtime(callback)
         return
 
     if await reject_delegated_block_management(callback, user):
@@ -330,17 +384,24 @@ async def handle_block_user(callback: types.CallbackQuery, callback_data: BlockU
     async with AsyncSessionLocal() as session:
         success, message = await block_user(session, user.id, target_user_id)
     
-    await callback.answer(message, show_alert=True)
+    await answer_callback_query_via_runtime(
+        callback,
+        message,
+        show_alert=True,
+    )
     
     if success:
         # بازگشت به منوی اصلی
         async with AsyncSessionLocal() as session:
             status = await get_block_status(session, user.id)
         
-        await safe_edit_text(callback.message, 
+        await safe_edit_text(
+            callback,
+            user,
             build_block_menu_text(status),
+            source_key="block-after-block",
             parse_mode="Markdown",
-            reply_markup=get_block_menu_keyboard(status)
+            reply_markup=get_block_menu_keyboard(status),
         )
 
 
@@ -348,7 +409,7 @@ async def handle_block_user(callback: types.CallbackQuery, callback_data: BlockU
 async def handle_unblock_user(callback: types.CallbackQuery, callback_data: BlockUserCallback, user: Optional[User]):
     """رفع مسدودیت کاربر"""
     if not user:
-        await callback.answer()
+        await answer_callback_query_via_runtime(callback)
         return
 
     if await reject_delegated_block_management(callback, user):
@@ -359,7 +420,11 @@ async def handle_unblock_user(callback: types.CallbackQuery, callback_data: Bloc
     async with AsyncSessionLocal() as session:
         success, message = await unblock_user(session, user.id, target_user_id)
     
-    await callback.answer(message, show_alert=True)
+    await answer_callback_query_via_runtime(
+        callback,
+        message,
+        show_alert=True,
+    )
     
     if success:
         # بازگشت به لیست
@@ -372,23 +437,29 @@ async def handle_unblock_user(callback: types.CallbackQuery, callback_data: Bloc
                 f"━━━━━━━━━━━━━━━━━━━\n\n"
                 f"برای رفع مسدودیت روی نام کلیک کنید:\n"
             )
-            await safe_edit_text(callback.message, 
+            await safe_edit_text(
+                callback,
+                user,
                 text,
+                source_key="block-after-unblock-list",
                 parse_mode="Markdown",
-                reply_markup=get_blocked_list_keyboard(blocked)
+                reply_markup=get_blocked_list_keyboard(blocked),
             )
         else:
             # لیست خالی شد، برگرد به منو
             async with AsyncSessionLocal() as session:
                 status = await get_block_status(session, user.id)
             
-            await safe_edit_text(callback.message, 
+            await safe_edit_text(
+                callback,
+                user,
                 f"🚫 **مدیریت کاربران مسدود**\n"
                 f"━━━━━━━━━━━━━━━━━━━\n\n"
                 f"✅ لیست خالی است.\n"
                 f"📊 ظرفیت: {status['max_blocked']}\n",
+                source_key="block-after-unblock-empty",
                 parse_mode="Markdown",
-                reply_markup=get_block_menu_keyboard(status)
+                reply_markup=get_block_menu_keyboard(status),
             )
 
 
@@ -396,7 +467,7 @@ async def handle_unblock_user(callback: types.CallbackQuery, callback_data: Bloc
 async def handle_back(callback: types.CallbackQuery, state: FSMContext, user: Optional[User]):
     """بازگشت به منوی اصلی بلاک"""
     if not user:
-        await callback.answer()
+        await answer_callback_query_via_runtime(callback)
         return
     
     await state.clear()
@@ -404,20 +475,29 @@ async def handle_back(callback: types.CallbackQuery, state: FSMContext, user: Op
     async with AsyncSessionLocal() as session:
         status = await get_block_status(session, user.id)
     
-    await safe_edit_text(callback.message, 
+    await safe_edit_text(
+        callback,
+        user,
         build_block_menu_text(status),
+        source_key="block-menu-back",
         parse_mode="Markdown",
-        reply_markup=get_block_menu_keyboard(status)
+        reply_markup=get_block_menu_keyboard(status),
     )
-    await callback.answer()
+    await answer_callback_query_via_runtime(callback)
 
 
 @router.callback_query(BlockMenuCallback.filter(F.action == "panel"))
 async def back_to_user_panel_from_block_menu(callback: types.CallbackQuery, state: FSMContext, user: Optional[User]):
     if not user:
-        await callback.answer()
+        await answer_callback_query_via_runtime(callback)
         return
 
     await state.clear()
-    await callback.message.edit_text("👤 **پنل کاربر**\n\nاز دکمه‌های پایین پیام استفاده کنید.", parse_mode="Markdown")
-    await callback.answer()
+    await edit_callback_message_via_runtime(
+        callback,
+        user,
+        "👤 **پنل کاربر**\n\nاز دکمه‌های پایین پیام استفاده کنید.",
+        source_key="block-panel-back",
+        parse_mode="Markdown",
+    )
+    await answer_callback_query_via_runtime(callback)

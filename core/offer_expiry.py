@@ -11,10 +11,10 @@ interact with expired offers and see the right history marker.
 import asyncio
 import logging
 import time
-from datetime import timedelta, timezone
+from datetime import timedelta
 from types import SimpleNamespace
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 from sqlalchemy.orm.exc import StaleDataError
 
@@ -31,6 +31,11 @@ from core.services.offer_expiry_service import (
     expire_offers_authoritatively,
 )
 from core.services.telegram_offer_channel_service import apply_offer_channel_state
+from core.telegram_delivery_runtime_policy import (
+    TelegramDeliveryRuntimeMode,
+    assert_telegram_provider_execution_authority,
+    configured_telegram_delivery_runtime,
+)
 from core.utils import utc_now_naive
 from models.offer import Offer, OfferStatus
 
@@ -73,6 +78,12 @@ async def remove_channel_buttons(channel_message_id: int) -> None:
     """Remove inline keyboard from a channel message via Telegram API."""
     if current_server() != "foreign":
         return
+    if (
+        configured_telegram_delivery_runtime().mode
+        == TelegramDeliveryRuntimeMode.QUEUE_V1
+    ):
+        return
+    assert_telegram_provider_execution_authority()
 
     channel_id = settings.channel_id
     
@@ -95,11 +106,43 @@ async def remove_channel_buttons(channel_message_id: int) -> None:
         logger.debug(f"Failed to remove channel buttons for msg {channel_message_id}: {e}")
 
 
+async def _sweep_overdue_overtime_decisions(session, *, now, expiry_minutes: int) -> None:
+    try:
+        from core.services.offer_overtime_reconciliation_service import (
+            expire_overdue_presented_decisions,
+        )
+
+        swept = await expire_overdue_presented_decisions(
+            session,
+            now=now,
+            normal_lifetime_minutes=expiry_minutes,
+            flush=True,
+        )
+        if swept:
+            await session.commit()
+            logger.info(
+                "Expired overdue overtime presented decisions",
+                extra={
+                    "event": "offer_expiry.overtime_decision_sweep",
+                    "repaired": swept,
+                },
+            )
+    except Exception as exc:
+        await session.rollback()
+        logger.warning(
+            "Overtime decision sweeper failed during offer expiry cycle: %s",
+            exc,
+            extra={"event": "offer_expiry.overtime_decision_sweep_error"},
+        )
+
+
 async def expire_stale_offers() -> int:
     """
-    Find and expire all offers that have exceeded their time limit.
-    
-    Returns the number of offers expired.
+    Find and expire all offers that have exceeded their final lifetime.
+
+    Terminal expiry uses the shared lifecycle projection: normal setting plus
+    each offer's overtime snapshot. An offer with a live final-tail approval
+    request is deferred until that request resolves.
     """
     assert_background_job_authority(JOB_OFFER_EXPIRY)
     from core.trading_settings import get_trading_settings_async
@@ -111,15 +154,27 @@ async def expire_stale_offers() -> int:
         return 0
     
     now = utc_now_naive()
-    cutoff_time = now - timedelta(minutes=expiry_minutes)
     
     async with AsyncSessionLocal() as session:
         expiry_result = None
         for attempt in range(STALE_EXPIRY_RETRY_ATTEMPTS + 1):
-            expired_offers = await _load_local_stale_active_offers(session, cutoff_time)
+            expired_offers = await _load_local_stale_active_offers(
+                session,
+                now=now,
+                normal_lifetime_minutes=expiry_minutes,
+            )
 
             if not expired_offers:
-                await apply_remote_stale_channel_state(session, cutoff_time)
+                await apply_remote_stale_channel_state(
+                    session,
+                    now=now,
+                    normal_lifetime_minutes=expiry_minutes,
+                )
+                await _sweep_overdue_overtime_decisions(
+                    session,
+                    now=now,
+                    expiry_minutes=expiry_minutes,
+                )
                 return 0
 
             try:
@@ -146,7 +201,16 @@ async def expire_stale_offers() -> int:
                 )
 
         if expiry_result is None:
-            await apply_remote_stale_channel_state(session, cutoff_time)
+            await apply_remote_stale_channel_state(
+                session,
+                now=now,
+                normal_lifetime_minutes=expiry_minutes,
+            )
+            await _sweep_overdue_overtime_decisions(
+                session,
+                now=now,
+                expiry_minutes=expiry_minutes,
+            )
             return 0
 
         count = expiry_result.expired_count
@@ -177,36 +241,95 @@ async def expire_stale_offers() -> int:
         except Exception as e:
             logger.debug(f"Failed to update offer count cache: {e}")
 
-        await apply_remote_stale_channel_state(session, cutoff_time)
+        await apply_remote_stale_channel_state(
+            session,
+            now=now,
+            normal_lifetime_minutes=expiry_minutes,
+        )
+        await _sweep_overdue_overtime_decisions(
+            session,
+            now=now,
+            expiry_minutes=expiry_minutes,
+        )
     
     return count
 
 
-async def _load_local_stale_active_offers(session, cutoff_time):
+async def _offer_ids_with_final_tail_requests(session, offer_ids: list[int]) -> set[int]:
+    if not offer_ids:
+        return set()
+    from models.offer_request import OVERTIME_OWNER_OCCUPYING_STATUSES, OfferRequest
+
+    result = await session.execute(
+        select(OfferRequest.local_offer_id).where(
+            OfferRequest.local_offer_id.in_(offer_ids),
+            OfferRequest.result_status.in_(OVERTIME_OWNER_OCCUPYING_STATUSES),
+        )
+    )
+    return {
+        int(offer_id)
+        for offer_id in result.scalars().all()
+        if offer_id is not None
+    }
+
+
+async def _load_local_stale_active_offers(session, *, now, normal_lifetime_minutes: int):
+    """Load home-server offers whose final lifetime has ended, minus final-tail holds."""
+    from core.offer_lifecycle import project_offer_lifecycle
+
+    # Wide net: anything past the normal-only cutoff may be terminal, or still
+    # inside overtime. Exact eligibility comes from the shared projection.
+    earliest_possible_cutoff = now - timedelta(minutes=normal_lifetime_minutes)
     stmt = (
         select(Offer)
         .options(selectinload(Offer.commodity))
         .where(
             Offer.status == OfferStatus.ACTIVE,
             Offer.home_server == current_server(),
-            Offer.created_at <= cutoff_time,
+            Offer.created_at <= earliest_possible_cutoff,
         )
     )
     result = await session.execute(stmt)
-    return result.scalars().all()
+    candidates = list(result.scalars().all())
+    if not candidates:
+        return []
+
+    tail_ids = await _offer_ids_with_final_tail_requests(
+        session,
+        [int(offer.id) for offer in candidates if getattr(offer, "id", None)],
+    )
+    ready = []
+    for offer in candidates:
+        projection = project_offer_lifecycle(
+            offer,
+            normal_lifetime_minutes=normal_lifetime_minutes,
+            as_of=now,
+            has_final_tail_request=int(getattr(offer, "id", 0) or 0) in tail_ids,
+        )
+        if projection.terminal_expiry_due:
+            ready.append(offer)
+    return ready
 
 
-async def apply_remote_stale_channel_state(session, cutoff_time) -> int:
+async def apply_remote_stale_channel_state(
+    session,
+    *,
+    now,
+    normal_lifetime_minutes: int,
+) -> int:
     """
     Presentation-only Telegram convergence for remote-home offers on foreign.
 
     Foreign must not authoritatively expire Iran-owned offers. It may still
     remove channel interaction and show the expired marker once the same
-    time-limit has elapsed, while the real row state converges through sync.
+    final lifetime has elapsed, while the real row state converges through sync.
     """
     if current_server() != "foreign":
         return 0
 
+    from core.offer_lifecycle import project_offer_lifecycle
+
+    earliest_possible_cutoff = now - timedelta(minutes=normal_lifetime_minutes)
     stmt = (
         select(Offer)
         .options(selectinload(Offer.commodity))
@@ -215,16 +338,24 @@ async def apply_remote_stale_channel_state(session, cutoff_time) -> int:
             Offer.home_server.isnot(None),
             Offer.home_server != current_server(),
             Offer.channel_message_id.isnot(None),
-            Offer.created_at <= cutoff_time,
+            Offer.created_at <= earliest_possible_cutoff,
         )
         .limit(100)
     )
     result = await session.execute(stmt)
-    remote_stale_offers = result.scalars().all()
+    remote_candidates = list(result.scalars().all())
     applied_count = 0
-    for offer in remote_stale_offers:
+    for offer in remote_candidates:
         offer_id = int(getattr(offer, "id", 0) or 0)
         if not offer_id or _remote_channel_expiry_recently_presented(offer_id):
+            continue
+        projection = project_offer_lifecycle(
+            offer,
+            normal_lifetime_minutes=normal_lifetime_minutes,
+            as_of=now,
+            has_final_tail_request=False,
+        )
+        if not projection.terminal_expiry_due:
             continue
         presentation_offer = SimpleNamespace(
             id=offer.id,
@@ -253,16 +384,9 @@ async def apply_remote_stale_channel_state(session, cutoff_time) -> int:
     return applied_count
 
 
-def _as_naive_utc(value):
-    if value is None:
-        return None
-    if getattr(value, "tzinfo", None) is not None:
-        return value.astimezone(timezone.utc).replace(tzinfo=None)
-    return value
-
-
 async def get_next_expiry_delay_seconds() -> float:
     """Return a low-cost deadline-aware sleep interval for the expiry loop."""
+    from core.offer_lifecycle import compute_lifecycle_deadlines
     from core.trading_settings import get_trading_settings_async
 
     ts = await get_trading_settings_async()
@@ -272,20 +396,33 @@ async def get_next_expiry_delay_seconds() -> float:
 
     async with AsyncSessionLocal() as session:
         result = await session.execute(
-            select(func.min(Offer.created_at)).where(
+            select(Offer.created_at, Offer.overtime_minutes_snapshot).where(
                 Offer.status == OfferStatus.ACTIVE,
                 Offer.home_server == current_server(),
             )
         )
-        next_created_at = result.scalar_one_or_none()
+        rows = result.all()
 
-    if next_created_at is None:
+    if not rows:
         return CHECK_INTERVAL
 
     now = utc_now_naive()
-    next_created_at = _as_naive_utc(next_created_at)
-    next_expiry_at = next_created_at + timedelta(minutes=expiry_minutes)
-    delay = (next_expiry_at - now).total_seconds()
+    soonest_final = None
+    for created_at, overtime_snapshot in rows:
+        _normal_deadline, final_deadline = compute_lifecycle_deadlines(
+            created_at,
+            normal_lifetime_minutes=expiry_minutes,
+            overtime_minutes_snapshot=int(overtime_snapshot or 0),
+        )
+        if final_deadline is None:
+            continue
+        if soonest_final is None or final_deadline < soonest_final:
+            soonest_final = final_deadline
+
+    if soonest_final is None:
+        return CHECK_INTERVAL
+
+    delay = (soonest_final - now).total_seconds()
     if delay <= MIN_DEADLINE_SLEEP_SECONDS:
         return MIN_DEADLINE_SLEEP_SECONDS
     return min(delay, CHECK_INTERVAL)

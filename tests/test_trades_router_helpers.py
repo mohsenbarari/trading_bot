@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, Mock, patch
 
 from api.routers import trades
 from core.enums import NotificationCategory, NotificationLevel
+from core.telegram_delivery_runtime_policy import TelegramDeliveryRuntimeMode
 from models.customer_relation import CustomerRelationStatus, CustomerTier
 from models.offer import OfferStatus
 
@@ -692,13 +693,126 @@ class TradesRouterHelperTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(trades._queue_trade_telegram_message(background_tasks, 1, "hello"))
         background_tasks.add_task.assert_called_once_with(trades.send_telegram_message_sync, 1, "hello")
 
+    async def test_queue_owner_rejects_legacy_trade_router_senders(self):
+        queue_runtime = SimpleNamespace(
+            legacy_workers_enabled=False,
+            queue_worker_enabled=True,
+        )
+        with patch.object(
+            trades,
+            "configured_telegram_delivery_runtime",
+            return_value=queue_runtime,
+        ), patch.object(trades.telegram_gateway, "send_message", new=AsyncMock()) as send:
+            with self.assertRaises(
+                trades.TelegramDeliveryRuntimeConfigurationError
+            ):
+                await trades.send_telegram_message(1, "hello")
+            with self.assertRaises(
+                trades.TelegramDeliveryRuntimeConfigurationError
+            ):
+                trades.send_telegram_message_sync(1, "hello")
+
+        send.assert_not_awaited()
+
     def test_completed_trade_path_uses_receipt_delivery_not_direct_telegram_helpers(self):
         source = inspect.getsource(trades._execute_trade_authoritatively)
 
         self.assertIn("_queue_trade_completion_delivery_repair", source)
+        self.assertIn("persist_trade_completion_delivery_intents", source)
+        self.assertLess(
+            source.index("persist_trade_completion_delivery_intents"),
+            source.index("_commit_trade_execution"),
+        )
         self.assertNotIn("_queue_trade_telegram_message(", source)
         self.assertNotIn("send_telegram_message_sync", source)
         self.assertNotIn("_legacy_create_user_notification", source)
+
+    async def test_trade_delivery_repair_retains_source_context_for_noncanonical_leg(self):
+        source_offer = SimpleNamespace(id=7, notes="یادداشت منبع", home_server="foreign")
+        trade = SimpleNamespace(offer_id=None, offer=None)
+        session = SimpleNamespace(
+            execute=AsyncMock(
+                return_value=SimpleNamespace(scalar_one_or_none=lambda: trade)
+            ),
+            get=AsyncMock(return_value=source_offer),
+        )
+
+        with patch(
+            "core.db.AsyncSessionLocal",
+            return_value=_AsyncSessionContext(session),
+        ), patch(
+            "api.routers.trades.repair_webapp_trade_delivery_for_trade",
+            new=AsyncMock(),
+        ) as repair_webapp, patch(
+            "api.routers.trades.repair_telegram_trade_delivery_for_trade",
+            new=AsyncMock(),
+        ) as repair_telegram:
+            self.assertTrue(
+                await trades._repair_trade_completion_delivery_background(
+                    10024,
+                    "foreign",
+                    source_offer_id=source_offer.id,
+                )
+            )
+
+        session.get.assert_awaited_once_with(trades.Offer, source_offer.id)
+        self.assertIsNone(trade.offer)
+        self.assertEqual(trade.offer_notes, source_offer.notes)
+        self.assertEqual(trade.offer_home_server, source_offer.home_server)
+        repair_webapp.assert_awaited_once_with(session, trade, current_server="foreign")
+        repair_telegram.assert_awaited_once_with(session, trade, current_server="foreign")
+
+    async def test_trade_delivery_repair_fails_closed_without_noncanonical_source(self):
+        trade = SimpleNamespace(offer_id=None, offer=None)
+        session = SimpleNamespace(
+            execute=AsyncMock(
+                return_value=SimpleNamespace(scalar_one_or_none=lambda: trade)
+            ),
+            get=AsyncMock(return_value=None),
+        )
+
+        with patch(
+            "core.db.AsyncSessionLocal",
+            return_value=_AsyncSessionContext(session),
+        ), patch(
+            "api.routers.trades.repair_webapp_trade_delivery_for_trade",
+            new=AsyncMock(),
+        ) as repair_webapp, patch(
+            "api.routers.trades.repair_telegram_trade_delivery_for_trade",
+            new=AsyncMock(),
+        ) as repair_telegram, patch("api.routers.trades.log_trading_event") as log_event:
+            self.assertFalse(
+                await trades._repair_trade_completion_delivery_background(
+                    10024,
+                    "foreign",
+                    source_offer_id=7,
+                )
+            )
+
+        repair_webapp.assert_not_awaited()
+        repair_telegram.assert_not_awaited()
+        log_event.assert_called_once()
+        self.assertEqual(log_event.call_args.args[1], "trade_delivery_repair_missing_source_offer")
+
+    def test_trade_delivery_repair_queue_passes_source_offer_context(self):
+        background_tasks = SimpleNamespace(add_task=Mock())
+        trade = SimpleNamespace(trade_number=10024)
+
+        with patch("api.routers.trades.current_server", return_value="foreign"):
+            self.assertTrue(
+                trades._queue_trade_completion_delivery_repair(
+                    background_tasks,
+                    trade,
+                    source_offer_id=7,
+                )
+            )
+
+        background_tasks.add_task.assert_called_once_with(
+            trades._repair_trade_completion_delivery_background,
+            10024,
+            "foreign",
+            7,
+        )
 
     async def test_update_channel_button_helpers(self):
         offer = SimpleNamespace(
@@ -785,6 +899,37 @@ class TradesRouterHelperTests(unittest.IsolatedAsyncioTestCase):
         ), patch.object(trades, "logger") as logger:
             self.assertFalse(await trades.update_channel_buttons(active_offer))
         logger.error.assert_called_once()
+
+    async def test_queue_owner_short_circuits_all_legacy_channel_button_helpers(self):
+        offer = SimpleNamespace(channel_message_id=123)
+        with patch(
+            "api.routers.trades.configured_telegram_delivery_producer_mode",
+            return_value=TelegramDeliveryRuntimeMode.QUEUE_V1,
+        ), patch(
+            "core.telegram_gateway.httpx.AsyncClient",
+        ) as client_ctor, patch(
+            "asyncio.new_event_loop",
+        ) as loop_ctor:
+            self.assertTrue(await trades.update_channel_buttons(offer))
+            self.assertTrue(
+                trades.update_channel_buttons_sync(
+                    1,
+                    5,
+                    OfferStatus.ACTIVE,
+                    None,
+                )
+            )
+            self.assertTrue(
+                await trades._update_channel_buttons_async(
+                    1,
+                    5,
+                    OfferStatus.ACTIVE,
+                    None,
+                )
+            )
+
+        client_ctor.assert_not_called()
+        loop_ctor.assert_not_called()
 
     async def test_sync_channel_update_and_expiry_helpers(self):
         with patch("api.routers.trades.os.getenv", return_value=None):
@@ -878,18 +1023,14 @@ class TradesRouterHelperTests(unittest.IsolatedAsyncioTestCase):
             return_value=FakeHttpClientContext(response=SimpleNamespace(status_code=200)),
         ) as client_ctor:
             self.assertTrue(await trades._update_channel_buttons_async(2, 18, OfferStatus.COMPLETED, [10, 8]))
-        text_call, markup_call = client_ctor.return_value.post.await_args_list
+        self.assertEqual(client_ctor.return_value.post.await_count, 1)
+        text_call = client_ctor.return_value.post.await_args
         text_payload = text_call.kwargs["json"]
-        markup_payload = markup_call.kwargs["json"]
         self.assertTrue(text_call.args[0].endswith("/editMessageText"))
         self.assertEqual(text_payload["chat_id"], -100)
         self.assertEqual(text_payload["message_id"], 322)
-        self.assertNotIn("reply_markup", text_payload)
+        self.assertEqual(text_payload["reply_markup"], {"inline_keyboard": []})
         self.assertIn("🤝 ✅", text_payload["text"])
-        self.assertTrue(markup_call.args[0].endswith("/editMessageReplyMarkup"))
-        self.assertEqual(markup_payload["chat_id"], -100)
-        self.assertEqual(markup_payload["message_id"], 322)
-        self.assertNotIn("reply_markup", markup_payload)
 
         aware = datetime(2025, 1, 1, 12, 0, tzinfo=timezone.utc)
         naive = datetime(2025, 1, 1, 12, 0)
@@ -900,22 +1041,26 @@ class TradesRouterHelperTests(unittest.IsolatedAsyncioTestCase):
         with patch("core.trading_settings.get_trading_settings_async", AsyncMock(return_value=SimpleNamespace(offer_expiry_minutes=0))):
             self.assertFalse(await trades._is_offer_expired_for_trade(SimpleNamespace(created_at=naive), None))
 
-        with patch("core.trading_settings.get_trading_settings_async", AsyncMock(return_value=SimpleNamespace(offer_expiry_minutes=10))), patch.object(
-            trades.settings, "trade_forward_grace_seconds", 120
-        ), patch("api.routers.trades.datetime") as datetime_mock:
-            datetime_mock.utcnow.side_effect = [datetime(2025, 1, 1, 12, 20), datetime(2025, 1, 1, 12, 20)]
+        # Receipt alone classifies the phase. A pre-deadline receipt stays
+        # automatic even when home processing is late; transit grace no longer
+        # participates in this helper.
+        with patch("core.trading_settings.get_trading_settings_async", AsyncMock(return_value=SimpleNamespace(offer_expiry_minutes=10))):
             expired = await trades._is_offer_expired_for_trade(
-                SimpleNamespace(created_at=datetime(2025, 1, 1, 12, 0)),
+                SimpleNamespace(created_at=datetime(2025, 1, 1, 12, 0), overtime_minutes_snapshot=0),
                 edge_received_at=datetime(2025, 1, 1, 12, 9),
+            )
+        self.assertFalse(expired)
+
+        with patch("core.trading_settings.get_trading_settings_async", AsyncMock(return_value=SimpleNamespace(offer_expiry_minutes=10))):
+            expired = await trades._is_offer_expired_for_trade(
+                SimpleNamespace(created_at=datetime(2025, 1, 1, 12, 0), overtime_minutes_snapshot=0),
+                edge_received_at=datetime(2025, 1, 1, 12, 10),
             )
         self.assertTrue(expired)
 
-        with patch("core.trading_settings.get_trading_settings_async", AsyncMock(return_value=SimpleNamespace(offer_expiry_minutes=10))), patch.object(
-            trades.settings, "trade_forward_grace_seconds", 120
-        ), patch("api.routers.trades.datetime") as datetime_mock:
-            datetime_mock.utcnow.side_effect = [datetime(2025, 1, 1, 12, 10, 30), datetime(2025, 1, 1, 12, 10, 30)]
+        with patch("core.trading_settings.get_trading_settings_async", AsyncMock(return_value=SimpleNamespace(offer_expiry_minutes=10))):
             expired = await trades._is_offer_expired_for_trade(
-                SimpleNamespace(created_at=datetime(2025, 1, 1, 12, 0)),
+                SimpleNamespace(created_at=datetime(2025, 1, 1, 12, 0), overtime_minutes_snapshot=0),
                 edge_received_at=datetime(2025, 1, 1, 12, 9, 45),
             )
         self.assertFalse(expired)

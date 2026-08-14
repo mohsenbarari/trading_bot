@@ -82,6 +82,9 @@ from models.session import Platform, UserSession
 import uuid
 from core.utils import normalize_persian_numerals, utc_now, utc_now_naive
 from core.notifications import send_telegram_message
+from core.telegram_legacy_otp_relay_contract import (
+    LEGACY_TELEGRAM_OTP_RELAY_PURPOSE,
+)
 from core.services.otp_delivery_state_service import (
     OTP_CODE_TTL_SECONDS,
     OTP_DELIVERY_STATE_DECODE_ERRORS,
@@ -1377,6 +1380,107 @@ async def update_my_address(
     return schemas.UserAddressUpdateResponse(address=current_user.address)
 
 
+@router.put("/me/offer-overtime", response_model=schemas.UserOfferOvertimeUpdateResponse)
+async def update_my_offer_overtime(
+    payload: schemas.UserOfferOvertimeUpdate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """WebApp self-service save for the overtime preference.
+
+    Iran is the only writer. The WebApp surface lives on Iran; a call that
+    somehow lands elsewhere is refused without a local write so the
+    Iran-authoritative field cannot diverge.
+    """
+    from core.cache import invalidate_user_cache
+    from core.services.offer_overtime_preference_service import (
+        BOT_SAVE_UNAVAILABLE_MESSAGE,
+        OfferOvertimePreferenceError,
+        OfferOvertimePreferenceNotAllowedError,
+        persist_overtime_preference,
+    )
+
+    if current_server() != SERVER_IRAN:
+        raise HTTPException(status_code=503, detail=BOT_SAVE_UNAVAILABLE_MESSAGE)
+
+    try:
+        result = await persist_overtime_preference(
+            db,
+            current_user,
+            payload.offer_overtime_minutes,
+        )
+    except OfferOvertimePreferenceError as exc:
+        raise HTTPException(status_code=400, detail=exc.message) from exc
+    except OfferOvertimePreferenceNotAllowedError as exc:
+        raise HTTPException(status_code=403, detail=exc.message) from exc
+
+    await db.commit()
+    await db.refresh(current_user)
+    telegram_id = getattr(current_user, "telegram_id", None)
+    if telegram_id is not None:
+        await invalidate_user_cache(telegram_id)
+    return schemas.UserOfferOvertimeUpdateResponse(
+        offer_overtime_minutes=result.offer_overtime_minutes,
+        detail=result.detail,
+        warning=result.warning,
+    )
+
+
+@router.post(
+    "/internal/offer-overtime/update",
+    response_model=schemas.UserOfferOvertimeUpdateResponse,
+)
+async def update_offer_overtime_internal(
+    raw_request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Signed foreign→Iran command that persists a bot-origin preference save."""
+    from core.cache import invalidate_user_cache
+    from core.services.offer_overtime_preference_service import (
+        OfferOvertimePreferenceError,
+        OfferOvertimePreferenceNotAllowedError,
+        persist_overtime_preference,
+    )
+
+    body = await raw_request.body()
+    _verify_foreign_internal_command(raw_request, body)
+    try:
+        payload = json.loads(body)
+    except (json.JSONDecodeError, TypeError, ValueError):
+        raise HTTPException(status_code=422, detail="Invalid internal overtime preference command") from None
+
+    try:
+        user_id = int(payload.get("user_id"))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=422, detail="Invalid internal overtime preference user") from None
+
+    user = await db.get(User, user_id)
+    if user is None or getattr(user, "is_deleted", False):
+        raise HTTPException(status_code=404, detail="کاربر یافت نشد")
+
+    try:
+        result = await persist_overtime_preference(
+            db,
+            user,
+            payload.get("offer_overtime_minutes"),
+        )
+    except OfferOvertimePreferenceError as exc:
+        raise HTTPException(status_code=400, detail=exc.message) from exc
+    except OfferOvertimePreferenceNotAllowedError as exc:
+        raise HTTPException(status_code=403, detail=exc.message) from exc
+
+    await db.commit()
+    await db.refresh(user)
+    telegram_id = getattr(user, "telegram_id", None)
+    if telegram_id is not None:
+        await invalidate_user_cache(telegram_id)
+    return schemas.UserOfferOvertimeUpdateResponse(
+        offer_overtime_minutes=result.offer_overtime_minutes,
+        detail=result.detail,
+        warning=result.warning,
+    )
+
+
 LEGACY_RAW_REGISTRATION_RETIRED_DETAIL = (
     "این مسیر ثبت‌نام بازنشسته شده است؛ صفحه را دوباره بارگذاری کنید"
 )
@@ -2438,7 +2542,11 @@ async def request_otp(
     if is_connected and has_telegram:
         try:
             msg_text = f"🔐 کد ورود شما: `{otp_code}`\n\nاین کد تا ۲ دقیقه معتبر است."
-            await send_telegram_message(result.telegram_id, msg_text)
+            await send_telegram_message(
+                result.telegram_id,
+                msg_text,
+                purpose=LEGACY_TELEGRAM_OTP_RELAY_PURPOSE,
+            )
             sent_via_telegram = True
             logger.info("Legacy OTP sent via Telegram", extra={"event": "otp.legacy_telegram_sent"})
         except Exception as e:

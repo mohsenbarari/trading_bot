@@ -2182,23 +2182,23 @@ class Stage9InvitationRouterBoundaryTests(unittest.IsolatedAsyncioTestCase):
             return SimpleNamespace(**values)
 
         terminal_cases = (
-            ("lookup", invitation(revoked_at=utc_now()), "Invitation revoked"),
-            ("lookup", invitation(kind=InvitationKind.LEGACY_UNKNOWN), "ambiguous"),
-            ("validate", invitation(revoked_at=utc_now()), "Invitation revoked"),
-            ("validate", invitation(kind=InvitationKind.LEGACY_UNKNOWN), "ambiguous"),
+            (invitation(revoked_at=utc_now()), "Invitation revoked"),
+            (invitation(kind=InvitationKind.LEGACY_UNKNOWN), "ambiguous"),
         )
-        for endpoint, inv, detail in terminal_cases:
-            method = (
-                invitations_router.lookup_invitation
-                if endpoint == "lookup"
-                else invitations_router.validate_invitation
-            )
-            key = inv.short_code if endpoint == "lookup" else inv.token
-            with self.subTest(endpoint=endpoint, detail=detail), patch.object(
+        for inv, detail in terminal_cases:
+            with self.subTest(endpoint="lookup", detail=detail), patch.object(
                 invitations_router.settings, "invitation_contract_v2_enabled", False
             ), self.assertRaises(HTTPException) as raised:
-                await method(key, db=_DB([_Result(one=inv)]))
+                await invitations_router.lookup_invitation(
+                    inv.short_code,
+                    db=_DB([_Result(one=inv)]),
+                )
             self.assertIn(detail.lower(), str(raised.exception.detail).lower())
+
+        with self.assertRaises(HTTPException) as retired:
+            await invitations_router.validate_invitation("INV-stage9-raw")
+        self.assertEqual(retired.exception.status_code, 410)
+        self.assertIn("retired", str(retired.exception.detail).lower())
 
         customer = invitation(token="CUST-stage9", kind=InvitationKind.CUSTOMER)
         relation = SimpleNamespace(customer_tier=CustomerTier.TIER_2)

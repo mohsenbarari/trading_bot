@@ -437,6 +437,17 @@ async def create_authoritative_offer_with_outcome(
             )
 
     offer = build_authoritative_offer(command)
+    if locked_owner is not None:
+        # Freeze the owner's persisted preference onto the offer. Reading the
+        # locked row rather than the command keeps a caller from injecting a
+        # value the owner never saved, and makes a republished offer take the
+        # current preference instead of inheriting the source offer's snapshot.
+        # Replicated offers skip this and carry the peer's value instead.
+        from core.services.offer_overtime_preference_service import (
+            snapshot_overtime_minutes_for_new_offer,
+        )
+
+        offer.overtime_minutes_snapshot = snapshot_overtime_minutes_for_new_offer(locked_owner)
     db.add(offer)
     if locked_owner is not None:
         from core.user_counter_sync import increment_user_counters

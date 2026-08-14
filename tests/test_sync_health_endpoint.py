@@ -15,6 +15,13 @@ PUBLICATION_SUMMARY = {
     "state_counts": {},
     "finding_counts": {},
 }
+OVERTIME_SUMMARY = {
+    "status": "ok",
+    "status_counts": {},
+    "finding_counts": {},
+    "silent_owner_count": 0,
+    "sampled_finding_count": 0,
+}
 
 
 class FakeSummaryResult:
@@ -84,11 +91,18 @@ class SyncHealthEndpointTests(unittest.IsolatedAsyncioTestCase):
         ), patch(
             "api.routers.sync.publication_observability_summary",
             new=AsyncMock(return_value=PUBLICATION_SUMMARY),
+        ), patch(
+            "api.routers.sync.overtime_observability_summary",
+            new=AsyncMock(return_value=OVERTIME_SUMMARY),
+        ), patch(
+            "api.routers.sync.record_overtime_reconciliation_health",
         ):
             payload = await get_sync_health(request=request, db=db)
 
         self.assertEqual(payload["status"], "ok")
         self.assertEqual(payload["publication_reconciliation"], PUBLICATION_SUMMARY)
+        self.assertEqual(payload["overtime_reconciliation"], OVERTIME_SUMMARY)
+        self.assertNotIn("requester", str(payload["overtime_reconciliation"]).lower())
         self.assertEqual(payload["parity_status"]["status"], "available")
         self.assertEqual(payload["parity_status"]["comparison_status"], "missing")
         self.assertFalse(payload["parity_status"]["fresh"])
@@ -133,6 +147,11 @@ class SyncHealthEndpointTests(unittest.IsolatedAsyncioTestCase):
                 "state_counts": {"telegram_channel": {"failed": 1}},
                 "finding_counts": {"failed_telegram_publication": 1},
             }),
+        ), patch(
+            "api.routers.sync.overtime_observability_summary",
+            new=AsyncMock(return_value=OVERTIME_SUMMARY),
+        ), patch(
+            "api.routers.sync.record_overtime_reconciliation_health",
         ):
             payload = await get_sync_health(request=request, db=db)
 
@@ -197,6 +216,11 @@ class SyncHealthEndpointTests(unittest.IsolatedAsyncioTestCase):
         ), patch(
             "api.routers.sync.publication_observability_summary",
             new=AsyncMock(return_value=PUBLICATION_SUMMARY),
+        ), patch(
+            "api.routers.sync.overtime_observability_summary",
+            new=AsyncMock(return_value=OVERTIME_SUMMARY),
+        ), patch(
+            "api.routers.sync.record_overtime_reconciliation_health",
         ), patch("api.routers.sync.logger.info") as info:
             payload = await get_sync_health(request=request, db=db)
 
@@ -252,6 +276,11 @@ class SyncHealthEndpointTests(unittest.IsolatedAsyncioTestCase):
         ) as record_parity_summary, patch(
             "api.routers.sync.publication_observability_summary",
             new=AsyncMock(return_value=PUBLICATION_SUMMARY),
+        ), patch(
+            "api.routers.sync.overtime_observability_summary",
+            new=AsyncMock(return_value=OVERTIME_SUMMARY),
+        ), patch(
+            "api.routers.sync.record_overtime_reconciliation_health",
         ):
             payload = await get_sync_health(request=request, db=db)
 

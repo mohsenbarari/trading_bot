@@ -15,10 +15,18 @@ from core.config import settings
 from core.offer_identity import ensure_offer_public_id
 from core.server_routing import SERVER_FOREIGN, current_server
 from core.services.offer_publication_state_service import (
+    TELEGRAM_PRIMARY_PUBLISHER_BOT_IDENTITY,
     apply_publication_state_update,
     build_offer_publication_state,
+    canonical_telegram_publication_identity,
+    ensure_telegram_publication_publisher_identity,
     normalize_publication_status,
     publication_dedupe_key,
+)
+from core.telegram_delivery_runtime_policy import (
+    TelegramDeliveryRuntimeConfigurationError,
+    assert_telegram_provider_execution_authority,
+    configured_telegram_delivery_runtime,
 )
 from core.utils import utc_now_naive
 from models.offer import OfferStatus
@@ -51,6 +59,32 @@ SENT_TELEGRAM_PUBLICATION_STATUSES = {
     OfferPublicationStatus.SENT,
     OfferPublicationStatus.VISIBLE,
 }
+
+
+def initial_telegram_publication_publisher_identity(
+    *,
+    multi_publisher_enabled: bool,
+    b2b_dispatch_enabled: bool,
+) -> str | None:
+    """Leave a Queue-v1 publication unassigned until its B2B lane is chosen.
+
+    The offer queue feeder chooses and persists exactly one publisher lane for
+    a new multi-publisher publication.  Assigning ``primary`` while the offer
+    is created would bypass that selection and collapse every new post onto
+    the central bot.  Legacy and disabled-B2B routes keep their primary owner.
+    """
+    if bool(multi_publisher_enabled) and bool(b2b_dispatch_enabled):
+        return None
+    return TELEGRAM_PRIMARY_PUBLISHER_BOT_IDENTITY
+
+
+def _assert_legacy_direct_delivery_owner() -> None:
+    assert_telegram_provider_execution_authority()
+    runtime = configured_telegram_delivery_runtime()
+    if not runtime.legacy_workers_enabled or runtime.queue_worker_enabled:
+        raise TelegramDeliveryRuntimeConfigurationError(
+            "legacy_offer_publication_direct_sender_is_not_runtime_owner"
+        )
 
 
 @dataclass(slots=True)
@@ -179,7 +213,9 @@ def _telegram_message_id_from_state(state: OfferPublicationState | Any | None) -
 
 def telegram_publication_message_id(offer: Any, state: OfferPublicationState | Any | None = None) -> Optional[int]:
     """Return the channel message id from the offer or its publication state."""
-    return _coerce_int(getattr(offer, "channel_message_id", None)) or _telegram_message_id_from_state(state)
+    return _telegram_message_id_from_state(state) or _coerce_int(
+        getattr(offer, "channel_message_id", None)
+    )
 
 
 def telegram_publication_is_sent(state: OfferPublicationState | Any | None) -> bool:
@@ -189,15 +225,23 @@ def telegram_publication_is_sent(state: OfferPublicationState | Any | None) -> b
         status = normalize_publication_status(getattr(state, "status", None))
     except Exception:
         return False
-    return status in SENT_TELEGRAM_PUBLICATION_STATUSES and bool(_telegram_message_id_from_state(state))
+    if status not in SENT_TELEGRAM_PUBLICATION_STATUSES:
+        return False
+    if not _telegram_message_id_from_state(state):
+        return False
+    canonical_telegram_publication_identity(state)
+    return True
 
 
 def apply_existing_telegram_publication_to_offer(offer: Any, state: OfferPublicationState | Any | None) -> Optional[int]:
     """Backfill the legacy offer message id from publication state when needed."""
-    message_id = telegram_publication_message_id(offer, state)
-    if message_id and not _coerce_int(getattr(offer, "channel_message_id", None)):
-        setattr(offer, "channel_message_id", message_id)
-    return message_id
+    state_message_id = _telegram_message_id_from_state(state)
+    if state_message_id:
+        identity = canonical_telegram_publication_identity(state)
+        if _coerce_int(getattr(offer, "channel_message_id", None)) != identity.message_id:
+            setattr(offer, "channel_message_id", identity.message_id)
+        return identity.message_id
+    return _coerce_int(getattr(offer, "channel_message_id", None))
 
 
 def mark_telegram_publication_success(
@@ -207,13 +251,19 @@ def mark_telegram_publication_success(
     message_id: int,
     chat_id: int | None = None,
     now=None,
+    publisher_bot_identity: str | None = None,
 ) -> None:
+    publisher = ensure_telegram_publication_publisher_identity(
+        state,
+        publisher_bot_identity=publisher_bot_identity,
+    )
     apply_publication_state_update(
         state,
         offer_status=getattr(offer, "status", None),
         offer_version_id=_offer_version_id(offer),
         requested_status=OfferPublicationStatus.SENT,
         now=now or utc_now_naive(),
+        publisher_bot_identity=publisher,
         surface_resource_id=str(message_id),
         telegram_chat_id=chat_id,
         telegram_message_id=message_id,
@@ -258,6 +308,8 @@ async def load_telegram_publication_state_for_update(
 async def get_or_create_telegram_publication_state(
     db: AsyncSession,
     offer: Any,
+    *,
+    publisher_bot_identity: str | None = TELEGRAM_PRIMARY_PUBLISHER_BOT_IDENTITY,
 ) -> OfferPublicationState:
     state = await load_telegram_publication_state_for_update(db, offer)
     if state is not None:
@@ -267,6 +319,7 @@ async def get_or_create_telegram_publication_state(
         offer,
         OfferPublicationSurface.TELEGRAM_CHANNEL,
         status=OfferPublicationStatus.PENDING,
+        publisher_bot_identity=publisher_bot_identity,
     )
     try:
         async with db.begin_nested():
@@ -297,6 +350,7 @@ async def publish_offer_to_telegram_channel_once(
     ``Offer.channel_message_id``. The legacy field is still backfilled locally
     because older code paths use it to edit the channel post.
     """
+    _assert_legacy_direct_delivery_owner()
     if current_server() != SERVER_FOREIGN:
         return TelegramOfferPublicationResult(
             message_id=None,

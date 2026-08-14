@@ -347,6 +347,8 @@ async def is_first_active_market_offer(db: AsyncSession, offer_id: int) -> bool:
     from core.utils import utc_now_naive
     from models.offer import Offer, OfferStatus
 
+    from core.offer_lifecycle import offer_lifetime_end_epoch_sql
+
     trading_settings = await get_trading_settings_async()
     expiry_minutes = int(getattr(trading_settings, "offer_expiry_minutes", 0) or 0)
     live_offer_filters = [
@@ -354,8 +356,14 @@ async def is_first_active_market_offer(db: AsyncSession, offer_id: int) -> bool:
         Offer.id != int(offer_id),
     ]
     if expiry_minutes > 0:
-        cutoff_time = utc_now_naive() - timedelta(minutes=expiry_minutes)
-        live_offer_filters.append(Offer.created_at > cutoff_time)
+        now_epoch = utc_now_naive().replace(tzinfo=timezone.utc).timestamp()
+        live_end_epoch = offer_lifetime_end_epoch_sql(
+            Offer.created_at,
+            Offer.overtime_minutes_snapshot,
+            expiry_minutes,
+        )
+        # Live iff final deadline is still strictly in the future.
+        live_offer_filters.append(live_end_epoch > now_epoch)
 
     other_active_offer_count = await db.scalar(
         select(func.count(Offer.id)).where(*live_offer_filters)

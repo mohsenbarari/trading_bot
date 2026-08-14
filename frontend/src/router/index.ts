@@ -130,7 +130,7 @@ const router = createRouter({
     {
       path: '/settings',
       name: 'settings',
-      redirect: { name: 'account-security', query: {}, hash: '' },
+      component: () => import('../views/SettingsView.vue'),
       meta: routeMeta('settings', { requiresAuth: true }),
     },
     {

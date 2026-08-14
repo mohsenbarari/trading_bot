@@ -919,6 +919,7 @@ class CoreEventsTests(unittest.TestCase):
             offer_home_server='foreign',
             surface=SimpleNamespace(value='telegram_channel'),
             publication_owner_server='foreign',
+            publisher_bot_identity='primary',
             status=SimpleNamespace(value='failed'),
             dedupe_key='offer-publication:telegram_channel:ofr_event_1',
             surface_resource_id=None,
@@ -948,6 +949,7 @@ class CoreEventsTests(unittest.TestCase):
         payload = log_change.call_args_list[0].args[4]
         self.assertEqual(payload['surface'], 'telegram_channel')
         self.assertEqual(payload['publication_owner_server'], 'foreign')
+        self.assertEqual(payload['publisher_bot_identity'], 'primary')
         self.assertEqual(payload['status'], 'failed')
         self.assertEqual(payload['dedupe_key'], 'offer-publication:telegram_channel:ofr_event_1')
         self.assertEqual(payload['telegram_message_id'], 700)

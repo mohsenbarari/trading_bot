@@ -117,12 +117,8 @@ describe('router/index.ts', () => {
     expect(routeByName.get('account-storage')?.component).toBeTypeOf('function')
     expect(routeByName.get('account-notifications')?.component).toBeTypeOf('function')
     expect(routeByName.get('account-storage')?.redirect).toBeUndefined()
-    expect(routeByName.get('settings')?.component).toBeUndefined()
-    expect(routeByName.get('settings')?.redirect).toEqual({
-      name: 'account-security',
-      query: {},
-      hash: '',
-    })
+    expect(routeByName.get('settings')?.component).toBeTypeOf('function')
+    expect(routeByName.get('settings')?.redirect).toBeUndefined()
     expect(routeByName.get('notifications')?.component).toBeUndefined()
     expect(routeByName.get('notifications')?.redirect).toEqual({
       name: 'account-notifications',

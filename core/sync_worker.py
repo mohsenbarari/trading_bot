@@ -35,6 +35,10 @@ _loop_errors = RepeatedErrorLogger(every=10)
 
 TERMINAL_SOURCE_AUTHORITY_REJECTION_TABLES = IRAN_AUTHORITATIVE_SYNC_TABLES
 SYNC_OUTBOUND_TABLE_PRIORITY = (
+    # A two-minute Offer cannot wait behind notification and administration
+    # replication.  The immediate offer-priority dispatch below is the normal
+    # fast path; this ordering is its durable recovery companion.
+    "offers",
     "users",
     "invitations",
     "accountant_relations",
@@ -46,7 +50,6 @@ SYNC_OUTBOUND_TABLE_PRIORITY = (
     "trading_settings",
     "market_schedule_overrides",
     "market_runtime_state",
-    "offers",
     "trades",
     "offer_requests",
     "offer_publication_states",
@@ -443,7 +446,14 @@ async def requeue_if_needed(
         await redis_client.rpush(retry_queue, payload)
 
 
-async def send_sync_item(client: httpx.AsyncClient, item: dict, target_url: str, api_key: str):
+async def send_sync_item(
+    client: httpx.AsyncClient,
+    item: dict,
+    target_url: str,
+    api_key: str,
+    *,
+    timeout_seconds: float = 10.0,
+):
     """Send item to target server with security headers"""
     timestamp = int(time.time())
     # Prepare payload as list (batch of 1)
@@ -467,7 +477,7 @@ async def send_sync_item(client: httpx.AsyncClient, item: dict, target_url: str,
             "X-Timestamp": str(timestamp),
             "X-Signature": signature
         },
-        timeout=10.0
+        timeout=timeout_seconds,
     )
     return response
 
@@ -504,6 +514,30 @@ async def main():
         while True:
             iteration += 1
             try:
+                # A source-Iran active/terminal Offer is the only sync item
+                # whose external publication window is measured in minutes.
+                # Try its newest committed outbox row first, without changing
+                # the receiver contract or marking anything delivered before
+                # acknowledgement.  A failed acceleration intentionally falls
+                # through to the standard durable worker below.
+                if target_url and api_key:
+                    try:
+                        from core.offer_priority_sync import dispatch_offer_priority_sync_once
+
+                        priority_result = await dispatch_offer_priority_sync_once(
+                            None,
+                            client=client,
+                        )
+                        if priority_result.delivered:
+                            continue
+                    except Exception as priority_exc:
+                        logger.warning(
+                            "Priority offer sync cycle failed; standard sync remains active",
+                            extra={
+                                "event": "offer_priority_sync.cycle_error",
+                                "error_class": type(priority_exc).__name__,
+                            },
+                        )
                 should_requeue = True
                 if poll_drain_remaining > 0:
                     data = await fetch_next_unsynced_change_log_item()

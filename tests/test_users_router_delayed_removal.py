@@ -55,6 +55,32 @@ class UsersRouterDelayedRemovalTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("رفع محدودیت", notify_mock.await_args.args[2])
         telegram_mock.assert_awaited_once()
 
+    async def test_send_delayed_removal_can_keep_webapp_notice_without_direct_telegram(self):
+        user = SimpleNamespace(
+            trading_restricted_until=None,
+            max_daily_trades=None,
+            max_active_commodities=None,
+            max_daily_requests=None,
+        )
+        with patch("api.routers.users.asyncio.sleep", new=AsyncMock()), patch(
+            "api.routers.users.create_user_notification", new=AsyncMock()
+        ) as notify_mock, patch(
+            "api.routers.users.send_telegram_notification",
+            new=AsyncMock(),
+            create=True,
+        ) as telegram_mock:
+            await send_delayed_removal_notification_api(
+                factory_for(user),
+                5,
+                999,
+                is_block=False,
+                delay_seconds=0,
+                include_telegram=False,
+            )
+
+        notify_mock.assert_awaited_once()
+        telegram_mock.assert_not_awaited()
+
 
 if __name__ == "__main__":
     unittest.main()

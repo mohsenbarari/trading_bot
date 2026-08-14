@@ -108,6 +108,10 @@ class UserRead(UserBase):
     avatar_file_id: str | None = None
     created_at: datetime
     trading_restricted_until: datetime | None = None
+
+    # Offer overtime preference (Iran-authoritative). Minutes after normal
+    # lifetime during which owner-approved trades remain possible; 0 disables.
+    offer_overtime_minutes: int = 0
     
     # Limitations - حداکثر مجاز
     max_daily_trades: int | None = None
@@ -244,6 +248,29 @@ class UserAddressUpdate(BaseModel):
 
 class UserAddressUpdateResponse(BaseModel):
     address: str
+
+
+class UserOfferOvertimeUpdate(BaseModel):
+    offer_overtime_minutes: object
+
+    @field_validator("offer_overtime_minutes")
+    @classmethod
+    def normalize_offer_overtime_minutes(cls, value):
+        from core.services.offer_overtime_preference_service import (
+            OfferOvertimePreferenceError,
+            normalize_overtime_minutes,
+        )
+
+        try:
+            return normalize_overtime_minutes(value)
+        except OfferOvertimePreferenceError as exc:
+            raise ValueError(exc.message) from exc
+
+
+class UserOfferOvertimeUpdateResponse(BaseModel):
+    offer_overtime_minutes: int
+    detail: str
+    warning: str | None = None
 
 
 class AccountantRelationCreate(BaseModel):

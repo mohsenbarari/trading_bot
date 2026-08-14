@@ -5,6 +5,10 @@
 این ماژول از pydantic-settings برای مدیریت تنظیمات استفاده می‌کند.
 تمام مقادیر از فایل .env خوانده می‌شوند.
 """
+import math
+import os
+
+from pydantic import SecretStr, model_validator
 from pydantic_settings import BaseSettings
 
 __all__ = ["Settings", "settings"]
@@ -35,12 +39,33 @@ class Settings(BaseSettings):
     public_webapp_url: str | None = None
     sync_api_key: str | None = None
     sync_direct_push_cooldown_seconds: float = 90.0
+    # Active offers created on the Iran WebApp must reach the foreign Telegram
+    # publisher before their short market lifetime is consumed by unrelated
+    # replication work.  This is a committed-outbox acceleration only: the
+    # normal sync worker remains the durable reconciliation path.
+    offer_priority_sync_enabled: bool = True
+    offer_priority_sync_timeout_seconds: float = 2.0
+    # Recovery remains the regular change-log worker.  This bounded fast lane
+    # is deliberately for just-committed market state, never historical
+    # backlog replay after a deploy or outage.
+    offer_priority_sync_max_change_age_seconds: float = 45.0
     sync_verify_tls: bool = True
     sync_ca_bundle: str | None = None
     sync_parity_status_max_age_seconds: int = 900
     sync_watermark_strict_mode: bool = False
     environment: str = "production"
     release_sha: str | None = None
+    # Product inference stays opt-in until its local atomic Snapshot publisher
+    # and replay gates are deployed. This flag never starts a collector.
+    coin_intelligence_inference_preview_enabled: bool = False
+    # Separate from the passive preview switch.  This authorizes an inferred
+    # commodity to enter a real offer only after final-submit revalidation.
+    coin_intelligence_inference_selection_enabled: bool = False
+    # Even when selection is enabled for a constrained staging rollout, keep
+    # a unique model result as an explicit user confirmation until an owner
+    # promotes eligible cells.  This must never default to automatic choice.
+    coin_intelligence_inference_auto_selection_enabled: bool = False
+    coin_intelligence_inference_snapshot_path: str | None = None
     log_level: str = "INFO"
     log_format: str = "json"
     error_tracking_dsn: str | None = None
@@ -96,6 +121,76 @@ class Settings(BaseSettings):
     telegram_notification_outbox_worker_lease_seconds: int = 30
     telegram_notification_outbox_worker_recover_limit: int = 100
     telegram_notification_outbox_worker_max_sends_per_second: float = 10.0
+    # Shared Telegram queue rollout controls. Defaults preserve legacy ownership.
+    # Producers (API/Bot business paths) only need the non-secret ownership mode.
+    # Executors additionally require the worker/cutover controls and credentials
+    # below.  None preserves the legacy single-runtime compatibility contract by
+    # inheriting telegram_delivery_execution_owner.
+    telegram_delivery_producer_mode: str | None = None
+    # Non-secret cross-service attestation. API/sync processes do not receive
+    # executor controls, but they must still prove that their producer contract
+    # matches the operator-selected global owner.
+    telegram_delivery_expected_execution_owner: str | None = None
+    telegram_delivery_execution_owner: str = "legacy"
+    telegram_delivery_queue_worker_enabled: bool = False
+    telegram_delivery_queue_cutover_ready: bool = False
+    telegram_delivery_queue_channel_editor_enabled: bool = False
+    # Multi-publisher delivery is intentionally disabled until every staged
+    # migration and staging acceptance gate has passed.  B2B dispatch is a
+    # stricter sub-feature: enabling it without the parent flag is a startup
+    # error rather than a partially active configuration.
+    telegram_multi_publisher_enabled: bool = False
+    telegram_b2b_dispatch_enabled: bool = False
+    telegram_b2b_dispatch_interval_seconds: float = 0.5
+    telegram_b2b_acknowledgement_timeout_seconds: float = 15.0
+    # Publisher credentials remain separate to make accidental token reuse and
+    # identity drift fail before a worker can be composed.  They are consumed
+    # only when TELEGRAM_MULTI_PUBLISHER_ENABLED is true.
+    telegram_publisher_1_enabled: bool = False
+    telegram_publisher_1_bot_token: SecretStr | None = None
+    telegram_publisher_1_expected_bot_id: int | None = None
+    telegram_publisher_1_expected_username: str | None = None
+    telegram_publisher_2_enabled: bool = False
+    telegram_publisher_2_bot_token: SecretStr | None = None
+    telegram_publisher_2_expected_bot_id: int | None = None
+    telegram_publisher_2_expected_username: str | None = None
+    telegram_publisher_3_enabled: bool = False
+    telegram_publisher_3_bot_token: SecretStr | None = None
+    telegram_publisher_3_expected_bot_id: int | None = None
+    telegram_publisher_3_expected_username: str | None = None
+    telegram_publisher_4_enabled: bool = False
+    telegram_publisher_4_bot_token: SecretStr | None = None
+    telegram_publisher_4_expected_bot_id: int | None = None
+    telegram_publisher_4_expected_username: str | None = None
+    telegram_publisher_5_enabled: bool = False
+    telegram_publisher_5_bot_token: SecretStr | None = None
+    telegram_publisher_5_expected_bot_id: int | None = None
+    telegram_publisher_5_expected_username: str | None = None
+    telegram_multi_publisher_lane_concurrency: int = 1
+    telegram_delivery_queue_channel_editor_bot_token: SecretStr | None = None
+    telegram_delivery_queue_expected_primary_bot_id: int | None = None
+    telegram_delivery_queue_expected_channel_editor_bot_id: int | None = None
+    telegram_delivery_queue_expected_channel_id: int | None = None
+    telegram_delivery_queue_preflight_timeout_seconds: float = 10.0
+    telegram_delivery_queue_worker_interval_seconds: float = 1.0
+    telegram_delivery_queue_worker_batch_limit: int = 25
+    telegram_delivery_queue_primary_concurrency: int = 4
+    telegram_delivery_queue_primary_m0_reserved_concurrency: int = 1
+    telegram_delivery_queue_channel_editor_concurrency: int = 1
+    telegram_delivery_queue_worker_request_timeout_seconds: float = 10.0
+    telegram_delivery_queue_worker_lease_seconds: float = 30.0
+    telegram_delivery_queue_worker_recover_limit: int = 100
+    telegram_offer_queue_feeder_batch_limit: int = 25
+    telegram_offer_queue_feeder_interval_seconds: float = 0.5
+    telegram_delivery_queue_retry_after_safety_seconds: float = 0.1
+    telegram_delivery_queue_retry_base_seconds: float = 1.0
+    telegram_delivery_queue_retry_max_seconds: float = 300.0
+    telegram_delivery_queue_retry_jitter_ratio: float = 0.2
+    telegram_delivery_queue_bot_min_interval_seconds: float = 0.035
+    telegram_delivery_queue_destination_min_interval_seconds: float = 1.05
+    telegram_delivery_queue_rate_limit_probe_delay_seconds: float = 0.1
+    telegram_delivery_queue_global_rate_limit_window_seconds: float = 2.0
+    telegram_delivery_queue_limiter_key_ttl_seconds: int = 86400
     telegram_direct_registration_enabled: bool = False
     telegram_registration_reconciliation_enabled: bool = False
     telegram_login_otp_enabled: bool = False
@@ -160,8 +255,100 @@ class Settings(BaseSettings):
     smsir_customer_invitation_template_id: str | None = "903643"
     invitation_registration_session_ttl_seconds: int = 600
     staging_log_otp_codes: bool = False
+
+    @model_validator(mode="after")
+    def validate_telegram_delivery_queue_settings(self):
+        if (
+            self.telegram_b2b_dispatch_enabled
+            and not self.telegram_multi_publisher_enabled
+        ):
+            raise ValueError("telegram_b2b_dispatch_requires_multi_publisher")
+        for name in (
+            "telegram_b2b_dispatch_interval_seconds",
+            "telegram_b2b_acknowledgement_timeout_seconds",
+        ):
+            value = float(getattr(self, name))
+            if not math.isfinite(value) or value <= 0:
+                raise ValueError(f"{name}_must_be_positive")
+        producer = str(
+            self.telegram_delivery_producer_mode
+            or self.telegram_delivery_execution_owner
+            or ""
+        ).strip().lower()
+        expected_owner = str(
+            self.telegram_delivery_expected_execution_owner
+            or self.telegram_delivery_execution_owner
+            or ""
+        ).strip().lower()
+        actual_owner = str(self.telegram_delivery_execution_owner or "").strip().lower()
+        if producer not in {"legacy", "queue-v1"}:
+            raise ValueError("telegram_delivery_producer_mode_invalid")
+        if expected_owner not in {"legacy", "queue-v1"}:
+            raise ValueError("telegram_delivery_expected_execution_owner_invalid")
+        if producer != expected_owner:
+            raise ValueError("telegram_delivery_producer_executor_split_brain")
+        if self.trading_bot_service == "bot" and actual_owner != expected_owner:
+            raise ValueError("telegram_delivery_bot_executor_split_brain")
+        positive_float_fields = (
+            "telegram_delivery_queue_preflight_timeout_seconds",
+            "telegram_delivery_queue_worker_interval_seconds",
+            "telegram_delivery_queue_worker_request_timeout_seconds",
+            "telegram_delivery_queue_worker_lease_seconds",
+            "telegram_offer_queue_feeder_interval_seconds",
+            "telegram_delivery_queue_retry_base_seconds",
+            "telegram_delivery_queue_retry_max_seconds",
+            "telegram_delivery_queue_bot_min_interval_seconds",
+            "telegram_delivery_queue_destination_min_interval_seconds",
+            "telegram_delivery_queue_rate_limit_probe_delay_seconds",
+            "telegram_delivery_queue_global_rate_limit_window_seconds",
+        )
+        for name in positive_float_fields:
+            value = float(getattr(self, name))
+            if not math.isfinite(value) or value <= 0:
+                raise ValueError(f"{name}_must_be_finite_positive")
+        safety = float(self.telegram_delivery_queue_retry_after_safety_seconds)
+        if not math.isfinite(safety) or safety < 0:
+            raise ValueError(
+                "telegram_delivery_queue_retry_after_safety_seconds_invalid"
+            )
+        jitter = float(self.telegram_delivery_queue_retry_jitter_ratio)
+        if not math.isfinite(jitter) or jitter < 0 or jitter > 1:
+            raise ValueError("telegram_delivery_queue_retry_jitter_ratio_invalid")
+        if (
+            self.telegram_delivery_queue_retry_base_seconds
+            > self.telegram_delivery_queue_retry_max_seconds
+        ):
+            raise ValueError("telegram_delivery_queue_retry_base_exceeds_max")
+        if (
+            self.telegram_delivery_queue_worker_lease_seconds
+            < self.telegram_delivery_queue_worker_request_timeout_seconds + 15.0
+        ):
+            raise ValueError("telegram_delivery_queue_lease_too_short")
+        for name in (
+            "telegram_delivery_queue_worker_batch_limit",
+            "telegram_delivery_queue_worker_recover_limit",
+            "telegram_delivery_queue_primary_concurrency",
+            "telegram_delivery_queue_primary_m0_reserved_concurrency",
+            "telegram_delivery_queue_channel_editor_concurrency",
+            "telegram_multi_publisher_lane_concurrency",
+            "telegram_offer_queue_feeder_batch_limit",
+            "telegram_delivery_queue_limiter_key_ttl_seconds",
+        ):
+            if isinstance(getattr(self, name), bool) or int(getattr(self, name)) <= 0:
+                raise ValueError(f"{name}_must_be_positive")
+        if (
+            self.telegram_delivery_queue_primary_m0_reserved_concurrency
+            >= self.telegram_delivery_queue_primary_concurrency
+        ):
+            raise ValueError(
+                "telegram_delivery_queue_primary_m0_reservation_must_leave_general_capacity"
+            )
+        return self
     
     class Config:
-        env_file = ".env"
+        # Defaults to the deployment file. The unit-test target points this at
+        # ``config/unit-test.env.example`` so tests read code defaults instead
+        # of whatever a developer machine happens to have configured.
+        env_file = os.getenv("APP_ENV_FILE", ".env")
 
 settings = Settings()

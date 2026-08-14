@@ -5,6 +5,10 @@ import { describe, expect, it } from 'vitest'
 import {
   ADMIN_MESSAGES_PATH,
   ADMIN_MESSAGES_SHA256,
+  MAIN_UIUX_INTEGRATION_MARKET_ALLOWED_FILE_SHA256,
+  MAIN_UIUX_INTEGRATION_MARKET_ALLOWED_PATHS,
+  MAIN_UIUX_INTEGRATION_MARKET_EVIDENCE,
+  MAIN_UIUX_INTEGRATION_MARKET_KIND,
   MARKET_RUNTIME_BASELINE,
   MARKET_RUNTIME_CONTRACT,
   MESSENGER_OMITTED_DIRECT_RUNTIME_PATHS,
@@ -19,6 +23,7 @@ import {
   STAGE8_CREATECHANNEL_HELPPOPOVER_PLACEMENT_KIND,
   STAGE8_CREATECHANNEL_HELPPOPOVER_PLACEMENT_LOCKED_STAGE6_PATHS,
   assertStage8CreateChannelHelpPopoverPlacementDisposition,
+  assertMainUiuxIntegrationMarketDisposition,
   STAGE4_BASE_COMMIT,
   STAGE4_BASE_TREE,
   STAGE4_ROUTE_CONTRACT_PATH,
@@ -40,6 +45,7 @@ import {
   isMessengerOwnedRuntimePath,
   protectedFileSetEvidence,
   readFileEntries,
+  resolveMarketRuntimeDisposition,
   resolveMessengerRuntimeDisposition,
 } from './lib/stage4-protected-surface-guard.mjs'
 import {
@@ -196,15 +202,61 @@ describe('Stage 4 protected surface baseline', () => {
     )
   })
 
-  it('binds the complete Market runtime, including settlement type', () => {
+  it('keeps the Stage 4 Market baseline immutable and admits only the exact main/UIUX integration', () => {
     expect(ownedPaths.market).toContain('frontend/src/utils/settlementType.ts')
-    expect(
-      assertProtectedFileSetEvidence(
-        'Market runtime',
-        currentEvidence(ownedPaths.market, MARKET_RUNTIME_CONTRACT),
-        MARKET_RUNTIME_BASELINE,
-      ),
-    ).toMatchObject(MARKET_RUNTIME_BASELINE)
+    const entries = readFileEntries(repoRoot, ownedPaths.market)
+    expect(resolveMarketRuntimeDisposition(entries)).toMatchObject({
+      kind: MAIN_UIUX_INTEGRATION_MARKET_KIND,
+      evidence: MAIN_UIUX_INTEGRATION_MARKET_EVIDENCE,
+    })
+    expect(MARKET_RUNTIME_BASELINE).toEqual({
+      count: 19,
+      contentBytes: 137246,
+      pathSetSha256: '37aa0b51e20f4ae86f7daf6c3c231d93b3d1f288ade1471490a1f843a57c9589',
+      sha256: '162e9e618684a24f3db3298eb8ff2c62498b18753cd4e0b6d6b97650d0202058',
+    })
+    expect(MAIN_UIUX_INTEGRATION_MARKET_ALLOWED_PATHS).toHaveLength(6)
+    for (const repoPath of MAIN_UIUX_INTEGRATION_MARKET_ALLOWED_PATHS) {
+      const entry = entries.find(({ path: candidate }) => candidate === repoPath)
+      expect(fileSha256(entry.content)).toBe(
+        MAIN_UIUX_INTEGRATION_MARKET_ALLOWED_FILE_SHA256[repoPath],
+      )
+    }
+    expect(Object.isFrozen(MARKET_RUNTIME_BASELINE)).toBe(true)
+    expect(Object.isFrozen(MAIN_UIUX_INTEGRATION_MARKET_ALLOWED_PATHS)).toBe(true)
+    expect(Object.isFrozen(MAIN_UIUX_INTEGRATION_MARKET_ALLOWED_FILE_SHA256)).toBe(true)
+    expect(Object.isFrozen(MAIN_UIUX_INTEGRATION_MARKET_EVIDENCE)).toBe(true)
+  })
+
+  it('fails closed for any further Market drift inside or outside the integration allowlist', () => {
+    const entries = readFileEntries(repoRoot, ownedPaths.market)
+    const allowedPath = MAIN_UIUX_INTEGRATION_MARKET_ALLOWED_PATHS[0]
+    const changedAllowed = entries.map((entry) =>
+      entry.path === allowedPath
+        ? { ...entry, content: Buffer.concat([entry.content, Buffer.from('\n/* drift */')]) }
+        : entry,
+    )
+    const unlistedPath = entries.find(
+      ({ path: repoPath }) => !MAIN_UIUX_INTEGRATION_MARKET_ALLOWED_PATHS.includes(repoPath),
+    ).path
+    const changedUnlisted = entries.map((entry) =>
+      entry.path === unlistedPath
+        ? { ...entry, content: Buffer.concat([entry.content, Buffer.from('\n/* drift */')]) }
+        : entry,
+    )
+
+    expect(() => assertMainUiuxIntegrationMarketDisposition(changedAllowed)).toThrow(
+      /main\/UIUX Market integration allowed file drift/,
+    )
+    expect(() => resolveMarketRuntimeDisposition(changedAllowed)).toThrow(
+      /main\/UIUX integration disposition rejected/,
+    )
+    expect(() => assertMainUiuxIntegrationMarketDisposition(changedUnlisted)).toThrow(
+      /contentBytes drift/,
+    )
+    expect(() => resolveMarketRuntimeDisposition(changedUnlisted)).toThrow(
+      /main\/UIUX integration disposition rejected/,
+    )
   })
 
   it('keeps the immutable Stage 4 Messenger baseline and every formerly omitted direct dependency', () => {

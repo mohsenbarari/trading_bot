@@ -42,7 +42,7 @@ class BotBlockManageBlockUserTests(unittest.IsolatedAsyncioTestCase):
             "bot.handlers.block_manage.safe_edit_text", new=AsyncMock()
         ) as safe_edit:
             await handle_block_user(callback, SimpleNamespace(user_id=7), user=SimpleNamespace(id=5))
-        self.assertIn("مدیریت کاربران مسدود", safe_edit.await_args.args[1])
+        self.assertIn("مدیریت کاربران مسدود", safe_edit.await_args.args[2])
 
 
 if __name__ == "__main__":

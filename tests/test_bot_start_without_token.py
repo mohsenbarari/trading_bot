@@ -89,8 +89,12 @@ class BotStartWithoutTokenTests(unittest.IsolatedAsyncioTestCase):
             answer=AsyncMock(return_value=SimpleNamespace(message_id=55)),
         )
         user = SimpleNamespace(id=44, full_name="Ali", account_name="ali_44", role="standard")
+        state = SimpleNamespace(clear=AsyncMock())
 
-        with patch("bot.handlers.start.delete_previous_anchor", new=AsyncMock()) as delete_anchor, patch(
+        with patch(
+            "bot.handlers.start._direct_registration_runtime_ready",
+            return_value=False,
+        ), patch("bot.handlers.start.delete_previous_anchor", new=AsyncMock()) as delete_anchor, patch(
             "bot.handlers.start.build_persistent_navigation_keyboard",
             new=AsyncMock(return_value="menu"),
         ) as menu_mock, patch(
@@ -100,8 +104,9 @@ class BotStartWithoutTokenTests(unittest.IsolatedAsyncioTestCase):
             "bot.handlers.link_account.build_webapp_plain_link_line",
             return_value="🌐 ورود به وب اپ:\nhttps://app.example",
         ), patch("bot.handlers.start.set_anchor") as set_anchor:
-            await handle_start_without_token(message, state=SimpleNamespace(), user=user)
+            await handle_start_without_token(message, state=state, user=user)
 
+        state.clear.assert_awaited_once_with()
         delete_anchor.assert_awaited_once()
         menu_mock.assert_awaited_once()
         self.assertEqual(
@@ -181,12 +186,14 @@ class BotStartWithoutTokenTests(unittest.IsolatedAsyncioTestCase):
             chat=SimpleNamespace(id=10),
             answer=AsyncMock(return_value=SimpleNamespace(message_id=77)),
         )
+        state = SimpleNamespace(clear=AsyncMock())
 
         with patch("bot.handlers.start.delete_previous_anchor", new=AsyncMock()) as delete_anchor, patch(
             "bot.handlers.start.set_anchor"
         ) as set_anchor:
-            await handle_start_without_token(message, state=SimpleNamespace(), user=None)
+            await handle_start_without_token(message, state=state, user=None)
 
+        state.clear.assert_awaited_once_with()
         delete_anchor.assert_awaited_once()
         self.assertIn("ثبت‌نام را در سامانه کامل کنید", message.answer.await_args.args[0])
         set_anchor.assert_called_once_with(10, 77)

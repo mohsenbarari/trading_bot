@@ -172,6 +172,7 @@ class TelegramAdminBroadcastServiceTests(unittest.IsolatedAsyncioTestCase):
                         deleted_at DATETIME,
                         admin_password_hash VARCHAR,
                         must_change_password BOOLEAN,
+                        offer_overtime_minutes INTEGER,
                         trading_restricted_until DATETIME,
                         max_daily_trades INTEGER,
                         max_active_commodities INTEGER,

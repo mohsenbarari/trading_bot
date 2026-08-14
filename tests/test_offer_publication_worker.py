@@ -59,7 +59,14 @@ def make_state(offer=None, **overrides):
         "surface": OfferPublicationSurface.TELEGRAM_CHANNEL,
         "status": OfferPublicationStatus.SENT,
         "offer_version_id": max(1, int(offer.version_id) - 1),
+        "publisher_bot_identity": "primary",
+        "telegram_chat_id": -100123,
         "telegram_message_id": offer.channel_message_id,
+        "surface_resource_id": (
+            str(offer.channel_message_id)
+            if offer.channel_message_id is not None
+            else None
+        ),
         "state_metadata": None,
         "last_attempt_at": None,
         "last_success_at": None,
@@ -78,6 +85,19 @@ def candidate(offer, state=None):
 
 
 class OfferPublicationWorkerTests(unittest.IsolatedAsyncioTestCase):
+    def test_channel_repair_never_overwrites_canonical_state_from_offer_mirror(self):
+        offer = make_offer(channel_message_id=999)
+        state = make_state(
+            offer,
+            telegram_message_id=777,
+            surface_resource_id="777",
+        )
+
+        worker._prepare_channel_state_candidate_state(state, offer)
+
+        self.assertEqual(state.telegram_message_id, 777)
+        self.assertEqual(offer.channel_message_id, 777)
+
     async def test_cycle_repairs_foreign_publications_with_active_gate_open(self):
         fake_db = object()
         report = {

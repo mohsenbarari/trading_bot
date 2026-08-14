@@ -98,6 +98,25 @@ class StagingTwoServerFullMatrixTests(unittest.TestCase):
         binding = next(check for check in checks if check.name == "release_commit_binding")
         self.assertEqual(binding.status, "failed")
 
+    def test_release_sha_match_accepts_safe_prefix_in_either_direction(self):
+        full = "abcdef1234567890abcdef1234567890abcdef12"
+        short = full[:12]
+
+        self.assertTrue(runner.release_sha_matches_expected(expected=full, actual=short))
+        self.assertTrue(runner.release_sha_matches_expected(expected=short, actual=full))
+        self.assertTrue(runner.release_sha_matches_expected(expected="fixture", actual="fixture"))
+
+    def test_release_sha_match_rejects_short_or_unrelated_prefix(self):
+        full = "abcdef1234567890abcdef1234567890abcdef12"
+
+        self.assertFalse(runner.release_sha_matches_expected(expected=full, actual="abcdef1"))
+        self.assertFalse(
+            runner.release_sha_matches_expected(
+                expected=full,
+                actual="abcdef654321",
+            )
+        )
+
     def test_plan_writes_equivalent_agent_log_directories(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp_path = Path(tmpdir)
@@ -644,6 +663,43 @@ class StagingTwoServerFullMatrixTests(unittest.TestCase):
 
         self.assertEqual(result.status, "failed")
         self.assertIn("IRAN_SERVER_URL points to local compose", result.detail)
+
+    def test_runtime_identity_accepts_safe_abbreviation_of_expected_commit(self):
+        full = "abcdef1234567890abcdef1234567890abcdef12"
+
+        def fake_run_json_command(_command, *, timeout_seconds=10.0):
+            return (
+                0,
+                {
+                    "environment": "staging",
+                    "server_mode": "foreign",
+                    "service": "staging-bot",
+                    "release_sha": full[:12],
+                    "frontend_url": "https://staging.gold-trade.ir",
+                    "iran_server_url": "https://staging.gold-trade.ir",
+                    "germany_server_url": "http://foreign_app:8000",
+                    "foreign_server_url": "http://foreign_app:8000",
+                    "peer_server_url": "http://foreign_app:8000",
+                    "bot_token_configured": True,
+                    "channel_id_configured": True,
+                },
+                "{}",
+                "",
+            )
+
+        with patch(
+            "scripts.run_staging_two_server_full_matrix.run_json_command",
+            side_effect=fake_run_json_command,
+        ):
+            result = runner.check_container_runtime_identity(
+                "foreign_runtime_identity",
+                server="foreign",
+                expected_server_mode="foreign",
+                expected_release=full,
+                args=SimpleNamespace(foreign_app_container="foreign-app"),
+            )
+
+        self.assertEqual(result.status, "passed")
 
     def test_local_load_runner_command_overrides_iran_route(self):
         args = SimpleNamespace(iran_base_url="https://staging.gold-trade.ir")

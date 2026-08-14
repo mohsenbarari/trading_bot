@@ -95,6 +95,87 @@ class TelegramNotificationOutboxServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(rows[0].dedupe_key, "telegram-notification:project_user_joined:9:7")
         self.assertEqual(rows[1].dedupe_key, "telegram-notification:project_user_joined:9:8")
 
+    async def test_direct_sender_refuses_queue_owner_before_gateway(self):
+        db = FakeDeliveryDB(user=SimpleNamespace(id=7, telegram_id=7777))
+        gateway_send = AsyncMock()
+        queue_runtime = SimpleNamespace(
+            legacy_workers_enabled=False,
+            queue_worker_enabled=True,
+        )
+        with patch.object(
+            service,
+            "configured_telegram_delivery_runtime",
+            return_value=queue_runtime,
+        ):
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "legacy_notification_outbox_direct_sender_is_not_runtime_owner",
+            ):
+                await service.deliver_claimed_telegram_notification_outbox(
+                    db,
+                    _outbox(),
+                    current_server="foreign",
+                    gateway_send=gateway_send,
+                    now=NOW,
+                )
+        gateway_send.assert_not_awaited()
+
+    async def test_legacy_bot_delivers_durable_inactive_notice_and_membership_cleanup(self):
+        user = SimpleNamespace(
+            id=7,
+            telegram_id=7007,
+            sync_version=4,
+            account_status="inactive",
+            messenger_blocked_at=None,
+        )
+        db = FakeDeliveryDB(user=user)
+        outbox = _outbox(
+            dedupe_key=service.telegram_notification_dedupe_key(
+                source_type="queue_action:account_status",
+                source_id="account-inactive:7:v4",
+                recipient_user_id=7,
+            ),
+            source_type="queue_action:account_status",
+            source_id="account-inactive:7:v4",
+            recipient_user_id=7,
+            telegram_id_at_enqueue=7007,
+            text="حساب شما غیرفعال شد.",
+            parse_mode="Markdown",
+            extra_payload={
+                "account_status": "inactive",
+                "messenger_blocked": False,
+                "queue_action": "account_status",
+                "user_sync_version": 4,
+            },
+        )
+        gateway_send = AsyncMock(
+            return_value=telegram_gateway.TelegramGatewayResult(
+                ok=True,
+                method="sendMessage",
+                response_json={"result": {"message_id": 88}},
+            )
+        )
+        membership_cleanup = AsyncMock(return_value=True)
+
+        with patch(
+            "core.services.user_deletion_service.remove_user_from_telegram_channel",
+            new=membership_cleanup,
+        ), patch.object(service, "evaluate_bot_access", new=AsyncMock()) as access:
+            result = await service.deliver_claimed_telegram_notification_outbox(
+                db,
+                outbox,
+                current_server="foreign",
+                gateway_send=gateway_send,
+                bot_token="credentialed-bot-token",
+                now=NOW,
+            )
+
+        self.assertEqual(result.status, service.TELEGRAM_NOTIFICATION_DELIVERY_STATUS_SENT)
+        self.assertEqual(outbox.status, TelegramNotificationOutboxStatus.SENT)
+        gateway_send.assert_awaited_once()
+        membership_cleanup.assert_awaited_once_with(7007, require_delivery=True)
+        access.assert_not_awaited()
+
     async def test_deliver_sends_current_telegram_id_and_marks_sent(self):
         db = FakeDeliveryDB(user=SimpleNamespace(id=7, telegram_id=7777))
         outbox = _outbox()

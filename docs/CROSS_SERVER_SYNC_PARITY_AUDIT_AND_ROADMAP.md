@@ -56,6 +56,59 @@ metadata, and is covered by `tests/test_sync_coverage.py`,
 - `accountant_relations` and `customer_relations` now protect a resolved linked user id from a stale non-terminal payload with a NULL linked id.
 - `commodities`, `commodity_aliases`, `invitations`, `telegram_link_tokens`, `market_schedule_overrides`, and publication/delivery rows have unique natural keys or dedupe keys.
 
+## Offer Publication Fast Path
+
+An active offer has a short publication lifetime, while ordinary replication may
+also carry notifications, admin changes, and recovery traffic.  It is therefore
+incorrect to make Telegram publication wait solely for FIFO drain of generic
+sync traffic.
+
+The branch uses this deliberately narrow design:
+
+1. Iran commits the authoritative `offers` row and its regular `change_log`
+   record in the same transaction; no Telegram or peer HTTP call is made before
+   commit.
+2. After commit, Iran makes one bounded immediate attempt to deliver the newest
+   **freshly committed** Iran-owned Offer change to foreign through the *existing signed*
+   `/api/sync/receive` endpoint.  It uses the same HMAC, public identity,
+   source sequence watermark, model upsert, and foreign-only Telegram queue as
+   normal replication.
+3. A row is marked delivered only after the existing receiver returns a full
+   success acknowledgement.  Timeout, transport failure, partial/deferred
+   dependency, and lost response leave the `change_log` row pending.
+4. The regular sync worker remains the recovery mechanism.  Its fast lane only
+   scans a short recent window (45 seconds by default), so deployment/outage
+   backlog cannot consume CPU or starve ordinary recovery.  It also gives
+   `offers` first durable scheduling priority, so a later terminal state is not
+   blocked by notifications or administrative traffic.
+5. Replays are safe: the receiver's source-sequence watermark and
+   `offer_public_id` prevent an older replay from reopening, republishing, or
+   overwriting a newer Offer state.  The foreign queue retains its own
+   immutable job dedupe/freshness fences.
+
+This is intentionally **not** a second offer database, a second Telegram
+queue, or a bypass of the signed sync receiver.  The generic sync path still
+reconciles all remaining fields and repairs an interrupted immediate attempt.
+
+### Rollout and acceptance checks
+
+- Keep `OFFER_PRIORITY_SYNC_ENABLED=true` (the safe default) and configure
+  both peer URLs, `SYNC_API_KEY`, and TLS verification exactly as normal sync.
+- Before production, run a two-server staging test with an intentionally busy
+  generic sync backlog and active two-minute offers.  Record source commit,
+  foreign receiver acknowledgement, queue handoff, and Telegram provider
+  acceptance.  The steady-link target is p95 source-commit to foreign receipt
+  under five seconds and zero expiry-before-publication cases.
+- Repeat with a simulated lost acknowledgement and with foreign temporarily
+  unavailable.  The offer must appear at most once after recovery; its
+  `change_log` row must stay unsynced until acknowledged.
+- Repeat terminal transitions (trade, user cancellation, expiry) while normal
+  sync is congested.  The foreign queue must eventually edit the one canonical
+  message, never publish a second one.
+- Alert on any pending Iran-owned active Offer change older than five seconds
+  while peer health is green, and on any active offer that reaches its
+  publication freshness deadline without a Telegram message id.
+
 ## Missing Real Guarantees
 
 The system still lacks a general, table-independent guarantee that an older event from the same source cannot overwrite a newer event for the same logical row.

@@ -356,6 +356,9 @@ class BotLinkAccountSuccessTests(unittest.IsolatedAsyncioTestCase):
             "bot.handlers.link_account.build_linked_account_panel_message",
             new=AsyncMock(return_value="linked"),
         ), patch(
+            "bot.handlers.link_account.build_persistent_navigation_keyboard",
+            new=AsyncMock(return_value="menu"),
+        ), patch(
             "bot.handlers.link_account.settings",
             SimpleNamespace(
                 frontend_url="https://app.example",

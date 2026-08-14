@@ -2,6 +2,7 @@
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { ChevronLeft, LogOut, Smartphone, Trash2 } from 'lucide-vue-next'
 import { useRoute, useRouter } from 'vue-router'
+import OfferOvertimePreferencePanel from '../components/OfferOvertimePreferencePanel.vue'
 import {
   clearStorageFileCache,
   getStorageCacheSize,
@@ -22,6 +23,7 @@ import {
 import { WorkspaceNotice } from '../components/workspace'
 import { forceLogout } from '../utils/auth'
 import {
+  canEditOfferOvertimePreference,
   currentUserSummary,
   isAuthoritativeCurrentUserSummary,
   loadCurrentUserSummary,
@@ -150,15 +152,25 @@ const isAccountant = computed(
   () => hasIdentity.value && currentUserSummary.value?.is_accountant === true,
 )
 const canManageSessions = computed(() => hasIdentity.value && !isAccountant.value)
+const isGeneralRoute = computed(() => route.name === 'settings')
 const isSecurityRoute = computed(() => route.name === 'account-security')
-const isStorageRoute = computed(() => !isSecurityRoute.value)
-
-const pageTitle = computed(() => (isSecurityRoute.value ? 'امنیت حساب' : 'حافظه و داده‌ها'))
-const pageDescription = computed(() =>
-  isSecurityRoute.value
-    ? 'نشست‌های گزارش‌شده توسط همین سرور و اختیار دستگاه فعلی را مدیریت کنید.'
-    : 'فایل‌های محلی پیام‌رسان روی همین دستگاه را بررسی و پاک‌سازی کنید.',
+const isStorageRoute = computed(() => route.name === 'account-storage')
+const showOvertimePreference = computed(
+  () => isGeneralRoute.value && canEditOfferOvertimePreference(currentUserSummary.value),
 )
+
+const pageTitle = computed(() => {
+  if (isGeneralRoute.value) return 'تنظیمات حساب'
+  if (isSecurityRoute.value) return 'امنیت حساب'
+  return 'حافظه و داده‌ها'
+})
+const pageDescription = computed(() => {
+  if (isGeneralRoute.value) return 'وقت اضافه پیشنهادهای تازه را از مسیر مشخص حساب مدیریت کنید.'
+  if (isSecurityRoute.value) {
+    return 'نشست‌های گزارش‌شده توسط همین سرور و اختیار دستگاه فعلی را مدیریت کنید.'
+  }
+  return 'فایل‌های محلی پیام‌رسان روی همین دستگاه را بررسی و پاک‌سازی کنید.'
+})
 
 const currentSession = computed(() => sessions.value.find((session) => session.isCurrent) ?? null)
 const currentSessionIsPrimary = computed(() => currentSession.value?.isPrimary === true)
@@ -649,8 +661,26 @@ watch(
           </AppButton>
         </WorkspaceNotice>
 
+        <AppSectionCard
+          v-if="showOvertimePreference"
+          class="settings-section-card settings-overtime-card"
+          title="وقت اضافه پیشنهادها"
+          description="مدت اعتبار افزوده برای پیشنهادهایی که از این پس ایجاد می‌کنید."
+          tone="primary"
+        >
+          <OfferOvertimePreferencePanel class="settings-overtime-panel" />
+        </AppSectionCard>
+
         <WorkspaceNotice
-          v-if="isSecurityRoute && isAccountant"
+          v-else-if="isGeneralRoute"
+          class="settings-role-notice"
+          tone="info"
+          title="تنظیمی برای این نوع حساب فعال نیست"
+          message="امنیت، حافظه و اعلان‌ها از صفحه حساب و مسیرهای اختصاصی خود در دسترس‌اند."
+        />
+
+        <WorkspaceNotice
+          v-else-if="isSecurityRoute && isAccountant"
           class="settings-role-notice"
           tone="warning"
           title="مدیریت نشست برای حسابدار در دسترس نیست"
@@ -945,6 +975,7 @@ watch(
 }
 
 .settings-role-notice,
+.settings-overtime-card,
 .settings-section-card + .settings-section-card,
 .settings-identity-stale + .settings-section-card,
 .session-authority-notice + .sessions-list,

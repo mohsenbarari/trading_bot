@@ -103,6 +103,7 @@ describe('AppAuthenticatedShell.vue', () => {
         stubs: {
           BottomNav: true,
           SessionApprovalModal: true,
+          OvertimeApprovalModal: true,
           AppToasts: true,
         },
       },
@@ -145,6 +146,7 @@ describe('AppAuthenticatedShell.vue', () => {
         stubs: {
           BottomNav: true,
           SessionApprovalModal: true,
+          OvertimeApprovalModal: true,
           AppToasts: true,
         },
       },
@@ -186,6 +188,7 @@ describe('AppAuthenticatedShell.vue', () => {
         stubs: {
           BottomNav: true,
           SessionApprovalModal: true,
+          OvertimeApprovalModal: true,
           AppToasts: true,
         },
       },

@@ -2,8 +2,13 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import ANY, AsyncMock, patch
 
-from api.routers.sync import _publish_synced_offer_created_realtime_after_sync, receive_sync_data
+from api.routers.sync import (
+    _publish_foreign_synced_expired_offer_events,
+    _publish_synced_offer_created_realtime_after_sync,
+    receive_sync_data,
+)
 from core.enums import SettlementType
+from core.telegram_delivery_runtime_policy import TelegramDeliveryRuntimeMode
 
 
 class FakeOfferExecuteResult:
@@ -76,6 +81,17 @@ def make_terminal_offer():
 
 
 class SyncRouterReceiveOfferPublishTests(unittest.IsolatedAsyncioTestCase):
+    async def test_foreign_synced_expiry_publishes_local_bot_refresh_event(self):
+        expired_offer = SimpleNamespace(id=8, status="expired")
+        db = FakeDB([FakeOfferExecuteResult(expired_offer)])
+
+        with patch("api.routers.sync.select", return_value=FakeSelect()), patch(
+            "core.events.publish_event_sync"
+        ) as publish_event:
+            await _publish_foreign_synced_expired_offer_events(db, [8, 8])
+
+        publish_event.assert_called_once_with("offer:expired", {"id": 8})
+
     async def test_synced_offer_realtime_payload_preserves_tomorrow_settlement(self):
         offer = SimpleNamespace(
             id=7,
@@ -143,7 +159,9 @@ class SyncRouterReceiveOfferPublishTests(unittest.IsolatedAsyncioTestCase):
         db = FakeDB([FakeOfferExecuteResult(offer)])
         items = [{"table": "offers", "operation": "INSERT", "id": 7, "data": {"price": 11}}]
 
-        async def fake_apply_item(db_arg, table, operation, record_id, data, model, new_offers, terminal_offers=None):
+        async def fake_apply_item(
+            db_arg, table, operation, record_id, data, model, new_offers, terminal_offers=None, **_kwargs
+        ):
             new_offers.append(record_id)
             return "ok"
 
@@ -170,10 +188,44 @@ class SyncRouterReceiveOfferPublishTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(offer.channel_message_id, 555)
         self.assertEqual(result, {"status": "success", "processed": 1})
 
+    async def test_receive_sync_data_defers_foreign_offer_to_queue_v1(self):
+        offer = make_offer()
+        db = FakeDB([FakeOfferExecuteResult(offer)])
+        items = [{"table": "offers", "operation": "INSERT", "id": 7, "data": {"price": 11}}]
+
+        async def fake_apply_item(
+            db_arg, table, operation, record_id, data, model, new_offers, terminal_offers=None, **_kwargs
+        ):
+            new_offers.append(record_id)
+            return "ok"
+
+        with patch("api.routers.sync._apply_item", new=AsyncMock(side_effect=fake_apply_item)), patch(
+            "api.routers.sync.settings.server_mode", "foreign"
+        ), patch("api.routers.sync.select", return_value=FakeSelect()), patch(
+            "sqlalchemy.orm.selectinload", side_effect=lambda *args, **kwargs: object()
+        ), patch(
+            "api.routers.sync.configured_telegram_delivery_runtime",
+            return_value=SimpleNamespace(
+                mode=TelegramDeliveryRuntimeMode.QUEUE_V1,
+                queue_worker_enabled=True,
+            ),
+        ), patch(
+            "core.services.telegram_offer_publication_service.publish_offer_to_telegram_channel_once",
+            new=AsyncMock(),
+        ) as publish_mock, patch(
+            "api.routers.sync.active_publication_is_gated", new=AsyncMock(return_value=False)
+        ):
+            result = await receive_sync_data(items=items, request=SimpleNamespace(), db=db, _=None)
+
+        publish_mock.assert_not_awaited()
+        self.assertEqual(result, {"status": "success", "processed": 1})
+
     async def test_receive_sync_data_skips_already_published_or_none_message_id(self):
         items = [{"table": "offers", "operation": "INSERT", "id": 7, "data": {"price": 11}}]
 
-        async def fake_apply_item(db_arg, table, operation, record_id, data, model, new_offers, terminal_offers=None):
+        async def fake_apply_item(
+            db_arg, table, operation, record_id, data, model, new_offers, terminal_offers=None, **_kwargs
+        ):
             new_offers.append(record_id)
             return "ok"
 
@@ -217,7 +269,9 @@ class SyncRouterReceiveOfferPublishTests(unittest.IsolatedAsyncioTestCase):
         db = FakeDB([FakeOfferExecuteResult(offer)])
         items = [{"table": "offers", "operation": "INSERT", "id": 7, "data": {"price": 11}}]
 
-        async def fake_apply_item(db_arg, table, operation, record_id, data, model, new_offers, terminal_offers=None):
+        async def fake_apply_item(
+            db_arg, table, operation, record_id, data, model, new_offers, terminal_offers=None, **_kwargs
+        ):
             new_offers.append(record_id)
             return "ok"
 
@@ -239,7 +293,9 @@ class SyncRouterReceiveOfferPublishTests(unittest.IsolatedAsyncioTestCase):
         db = FakeDB()
         items = [{"table": "offers", "operation": "INSERT", "id": 7, "data": {"price": 11}}]
 
-        async def fake_apply_item(db_arg, table, operation, record_id, data, model, new_offers, terminal_offers=None):
+        async def fake_apply_item(
+            db_arg, table, operation, record_id, data, model, new_offers, terminal_offers=None, **_kwargs
+        ):
             new_offers.append(record_id)
             return "ok"
 
@@ -262,13 +318,18 @@ class SyncRouterReceiveOfferPublishTests(unittest.IsolatedAsyncioTestCase):
             {"table": "offers", "operation": "UPDATE", "id": 8, "data": {"status": "completed"}},
         ]
 
-        async def fake_apply_item(db_arg, table, operation, record_id, data, model, new_offers, terminal_offers=None):
+        async def fake_apply_item(
+            db_arg, table, operation, record_id, data, model, new_offers, terminal_offers=None, **_kwargs
+        ):
             terminal_offers.append(record_id)
             return "ok"
 
         with patch("api.routers.sync._apply_item", new=AsyncMock(side_effect=fake_apply_item)), patch(
             "api.routers.sync.settings.server_mode", "foreign"
-        ), patch("api.routers.sync.select", return_value=FakeSelect()), patch(
+        ), patch(
+            "api.routers.sync._publish_foreign_synced_expired_offer_events",
+            new=AsyncMock(),
+        ) as expiry_event_mock, patch("api.routers.sync.select", return_value=FakeSelect()), patch(
             "sqlalchemy.orm.selectinload", side_effect=lambda *args, **kwargs: object()
         ), patch("api.routers.realtime.publish_event", new=AsyncMock()) as publish_mock, patch(
             "core.services.telegram_offer_publication_service.load_telegram_publication_state_for_update",
@@ -279,6 +340,7 @@ class SyncRouterReceiveOfferPublishTests(unittest.IsolatedAsyncioTestCase):
             result = await receive_sync_data(items=items, request=SimpleNamespace(), db=db, _=None)
 
         self.assertEqual(result, {"status": "success", "processed": 2})
+        expiry_event_mock.assert_awaited_once_with(db, [8, 8])
         publish_mock.assert_not_awaited()
         load_publication_state_mock.assert_awaited_once_with(db, terminal_offer)
         apply_state_mock.assert_awaited_once_with(

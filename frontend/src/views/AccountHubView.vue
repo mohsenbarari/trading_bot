@@ -2,7 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import type { Component } from 'vue'
 import { useRouter } from 'vue-router'
-import { Bell, ChevronLeft, Database, Smartphone, UserRound } from 'lucide-vue-next'
+import { Bell, ChevronLeft, Database, Settings, Smartphone, UserRound } from 'lucide-vue-next'
 import {
   AppActionCard,
   AppButton,
@@ -15,6 +15,7 @@ import {
 } from '../components/ui'
 import { WorkspaceNotice } from '../components/workspace'
 import {
+  canEditOfferOvertimePreference,
   currentUserSummary,
   isAuthoritativeCurrentUserSummary,
   loadCurrentUserSummary,
@@ -75,19 +76,28 @@ const showTelegramConnectPanel = computed(
     (currentUserSummary.value?.can_connect_telegram === true || telegramConnected.value),
 )
 
-const profileActions = computed<AccountAction[]>(() =>
-  hasIdentity.value
-    ? [
-        {
-          key: 'profile',
-          title: 'پروفایل من',
-          description: 'مشاهده و ویرایش اطلاعات حساب',
-          icon: UserRound,
-          action: () => router.push({ name: 'profile' }),
-        },
-      ]
-    : [],
-)
+const profileActions = computed<AccountAction[]>(() => {
+  if (!hasIdentity.value) return []
+  const actions: AccountAction[] = [
+    {
+      key: 'profile',
+      title: 'پروفایل من',
+      description: 'مشاهده و ویرایش اطلاعات حساب',
+      icon: UserRound,
+      action: () => router.push({ name: 'profile' }),
+    },
+  ]
+  if (canEditOfferOvertimePreference(user.value)) {
+    actions.push({
+      key: 'settings',
+      title: 'تنظیمات کاربری',
+      description: 'مدیریت وقت اضافه پیشنهادهای تازه',
+      icon: Settings,
+      action: () => router.push({ name: 'settings' }),
+    })
+  }
+  return actions
+})
 
 const securityActions = computed<AccountAction[]>(() => {
   if (!hasIdentity.value) return []

@@ -4,6 +4,7 @@ import type { StyleValue } from 'vue'
 withDefaults(defineProps<{
   timerCritical?: boolean
   hasTimer?: boolean
+  timerOvertime?: boolean
   history?: boolean
   expired?: boolean
   traded?: boolean
@@ -11,6 +12,7 @@ withDefaults(defineProps<{
 }>(), {
   timerCritical: false,
   hasTimer: false,
+  timerOvertime: false,
   history: false,
   expired: false,
   traded: false,
@@ -23,6 +25,7 @@ withDefaults(defineProps<{
     :class="{
       'timer-critical': timerCritical,
       'has-timer': hasTimer,
+      'timer-overtime': timerOvertime,
       'is-history': history,
       'is-expired': expired,
       'is-traded': traded,

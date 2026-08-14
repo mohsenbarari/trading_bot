@@ -27,6 +27,8 @@ vi.mock('vue-router', () => ({
 vi.mock('../utils/currentUser', () => ({
   currentUserSummary: accountHubMocks.currentUserSummary,
   loadCurrentUserSummary: accountHubMocks.loadCurrentUserSummaryMock,
+  canEditOfferOvertimePreference: (value: Record<string, unknown> | null | undefined) =>
+    Boolean(value?.role && value.is_accountant !== true && value.customer_tier !== 'tier2'),
   isAuthoritativeCurrentUserSummary: (value: Record<string, unknown> | null | undefined) =>
     Boolean(
       value &&
@@ -80,7 +82,7 @@ describe('AccountHubView.vue', () => {
     }))
   })
 
-  it('renders account sections and routes normal users to profile, sessions, storage and notifications', async () => {
+  it('routes eligible users to profile, overtime settings, sessions, storage and notifications', async () => {
     accountHubMocks.currentUserSummary.value = {
       id: 1,
       role: 'عادی',
@@ -101,26 +103,29 @@ describe('AccountHubView.vue', () => {
     expect(wrapper.find('.account-status-badge').exists()).toBe(false)
     expect(wrapper.find('.account-status-dot').exists()).toBe(false)
     expect(wrapper.text()).toContain('نشست‌های فعال')
+    expect(findAction(wrapper, 'تنظیمات کاربری')?.text()).toContain('وقت اضافه')
 
     await findAction(wrapper, 'پروفایل من')!.trigger('click')
+    await findAction(wrapper, 'تنظیمات کاربری')!.trigger('click')
     await findAction(wrapper, 'نشست‌های فعال')!.trigger('click')
     await findAction(wrapper, 'حافظه و داده‌ها')!.trigger('click')
     await findAction(wrapper, 'اعلان‌ها')!.trigger('click')
     await wrapper.get('.account-return-control').trigger('click')
 
     expect(accountHubMocks.routerPushMock).toHaveBeenNthCalledWith(1, { name: 'profile' })
-    expect(accountHubMocks.routerPushMock).toHaveBeenNthCalledWith(2, { name: 'account-security' })
-    expect(accountHubMocks.routerPushMock).toHaveBeenNthCalledWith(3, { name: 'account-storage' })
-    expect(accountHubMocks.routerPushMock).toHaveBeenNthCalledWith(4, {
+    expect(accountHubMocks.routerPushMock).toHaveBeenNthCalledWith(2, { name: 'settings' })
+    expect(accountHubMocks.routerPushMock).toHaveBeenNthCalledWith(3, { name: 'account-security' })
+    expect(accountHubMocks.routerPushMock).toHaveBeenNthCalledWith(4, { name: 'account-storage' })
+    expect(accountHubMocks.routerPushMock).toHaveBeenNthCalledWith(5, {
       name: 'account-notifications',
     })
     expect(
       new Set(accountHubMocks.routerPushMock.mock.calls.map(([location]) => location.name)).size,
-    ).toBe(4)
+    ).toBe(5)
     expect(accountHubMocks.routerBackMock).toHaveBeenCalledTimes(1)
   })
 
-  it('uses the singleton grid modifier only for one-action profile and notification sections', async () => {
+  it('keeps eligible profile actions in two columns and singleton notifications full width', async () => {
     accountHubMocks.currentUserSummary.value = {
       id: 10,
       role: 'عادی',
@@ -136,8 +141,8 @@ describe('AccountHubView.vue', () => {
     const securityGrid = findSectionGrid(wrapper, 'امنیت و داده‌ها')
     const notificationGrid = findSectionGrid(wrapper, 'اعلان‌ها')
 
-    expect(profileGrid.findAll('.hub-action')).toHaveLength(1)
-    expect(profileGrid.classes()).toContain('account-action-grid--single')
+    expect(profileGrid.findAll('.hub-action')).toHaveLength(2)
+    expect(profileGrid.classes()).not.toContain('account-action-grid--single')
     expect(wrapper.find('.account-telegram-panel').exists()).toBe(true)
     expect(profileGrid.find('.account-telegram-panel').exists()).toBe(false)
     expect(notificationGrid.findAll('.hub-action')).toHaveLength(1)

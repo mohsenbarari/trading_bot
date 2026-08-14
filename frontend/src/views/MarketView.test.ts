@@ -326,6 +326,8 @@ describe('MarketView.vue', () => {
     const wrapper = await mountMarketView()
     await flushPromises()
 
+    expect(wrapper.find('.market-overtime-pref').exists()).toBe(false)
+
     expect(marketViewMocks.fetchOffersMock).toHaveBeenCalled()
     expect(marketViewMocks.startPollingMock).toHaveBeenCalled()
     expect(marketViewMocks.setFiltersMock).toHaveBeenCalledWith({
@@ -763,6 +765,175 @@ describe('MarketView.vue', () => {
     wrapper.unmount()
   })
 
+  it('shows parser inference as shadow metadata without changing the offer commodity', async () => {
+    const wrapper = await mountMarketView()
+    await flushPromises()
+    marketViewMocks.apiFetchMock.mockClear()
+    marketViewMocks.apiFetchJsonMock.mockResolvedValueOnce({
+      success: true,
+      data: {
+        trade_type: 'buy',
+        settlement_type: 'tomorrow',
+        commodity_id: 1,
+        commodity_name: 'امام',
+        quantity: 5,
+        price: 182700,
+        is_wholesale: false,
+        lot_sizes: [5],
+        notes: null,
+        commodity_inference: {
+          mode: 'SHADOW_ONLY',
+          status: 'AUTO_SELECT',
+          decision_key: 'a'.repeat(64),
+          snapshot_generated_at_utc: '2026-08-04T12:00:00+00:00',
+          snapshot_receipt: 'b'.repeat(64),
+          reason: null,
+          candidates: [{
+            commodity_id: 71,
+            commodity_code: 'BAHAR',
+            commodity_name: 'بهار',
+            center_project_price: 182650,
+            lower_project_price: 181900,
+            upper_project_price: 183400,
+            confidence: 'HIGH',
+            distance_to_center_relative: 0.0003,
+          }],
+        },
+      },
+    })
+
+    await wrapper.find('.text-offer-input').setValue('خرید 5 تا 182700')
+    await wrapper.find('.send-btn').trigger('click')
+    await flushPromises()
+
+    const shadow = wrapper.get('[data-test="offer-inference-shadow"]')
+    expect(shadow.text()).toContain('تشخیص آزمایشی کالا')
+    expect(shadow.text()).toContain('در ثبت آفر اثری ندارد')
+    expect(shadow.text()).toContain('بهار')
+    expect(shadow.text()).toContain('امام')
+
+    await wrapper.find('.offer-preview-confirm').trigger('click')
+    await flushPromises()
+
+    const postCall = marketViewMocks.apiFetchMock.mock.calls.find(
+      ([path, options]) => path === '/api/offers/' && options?.method === 'POST',
+    )
+    expect(postCall).toBeTruthy()
+    expect(JSON.parse(String(postCall![1].body))).toEqual(expect.objectContaining({
+      commodity_id: 1,
+      price: 182700,
+    }))
+    wrapper.unmount()
+  })
+
+  it('fails closed instead of previewing or posting an offer with an unresolved commodity', async () => {
+    const wrapper = await mountMarketView()
+    await flushPromises()
+    marketViewMocks.apiFetchMock.mockClear()
+    marketViewMocks.apiFetchJsonMock.mockResolvedValueOnce({
+      success: true,
+      data: {
+        trade_type: 'buy',
+        settlement_type: 'cash',
+        commodity_id: null,
+        commodity_name: null,
+        commodity_resolution: 'OMITTED',
+        low_date_hint: false,
+        quantity: 10,
+        price: 186800,
+        is_wholesale: true,
+        lot_sizes: null,
+        notes: null,
+      },
+    })
+
+    await wrapper.find('.text-offer-input').setValue('خ 10تا 186800')
+    await wrapper.find('.send-btn').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('.offer-preview-card').exists()).toBe(false)
+    expect(wrapper.text()).toContain('نام کالا از روی قیمت هنوز به انتخاب قطعی نرسیده است')
+    expect(marketViewMocks.apiFetchMock.mock.calls.some(
+      ([path, options]) => path === '/api/offers/' && options?.method === 'POST',
+    )).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('requires a same-denomination choice and sends its audited receipt with the offer', async () => {
+    const wrapper = await mountMarketView()
+    await flushPromises()
+    marketViewMocks.apiFetchMock.mockClear()
+    marketViewMocks.apiFetchJsonMock.mockResolvedValueOnce({
+      success: true,
+      data: {
+        trade_type: 'sell',
+        settlement_type: 'tomorrow',
+        commodity_id: null,
+        commodity_name: null,
+        commodity_resolution: 'OMITTED',
+        low_date_hint: false,
+        quantity: 5,
+        price: 186800,
+        is_wholesale: true,
+        lot_sizes: null,
+        notes: null,
+        commodity_inference: {
+          mode: 'SELECTABLE',
+          status: 'CONFIRM',
+          decision_key: 'a'.repeat(64),
+          snapshot_generated_at_utc: '2026-08-04T12:00:00+00:00',
+          snapshot_receipt: 'b'.repeat(64),
+          reason: 'MULTIPLE_OR_LOW_CONFIDENCE_CANDIDATES',
+          candidates: [
+            {
+              commodity_id: 71,
+              commodity_code: 'IMAM',
+              commodity_name: 'امام',
+              center_project_price: 186900,
+              lower_project_price: 185500,
+              upper_project_price: 188300,
+              confidence: 'HIGH',
+              distance_to_center_relative: 0.0005,
+            },
+            {
+              commodity_id: 72,
+              commodity_code: 'BAHAR',
+              commodity_name: 'بهار',
+              center_project_price: 186700,
+              lower_project_price: 185600,
+              upper_project_price: 187900,
+              confidence: 'HIGH',
+              distance_to_center_relative: 0.0005,
+            },
+          ],
+        },
+      },
+    })
+
+    await wrapper.find('.text-offer-input').setValue('ف ف 5تا 186800')
+    await wrapper.find('.send-btn').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="commodity-inference-selector"]').exists()).toBe(true)
+    await wrapper.find('[data-test="commodity-inference-option-72"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.offer-preview-card').text()).toContain('بهار')
+
+    await wrapper.find('.offer-preview-confirm').trigger('click')
+    await flushPromises()
+    const postCall = marketViewMocks.apiFetchMock.mock.calls.find(
+      ([path, options]) => path === '/api/offers/' && options?.method === 'POST',
+    )
+    expect(JSON.parse(String(postCall![1].body))).toEqual(expect.objectContaining({
+      commodity_id: 72,
+      commodity_inference: {
+        decision_key: 'a'.repeat(64),
+        selected_commodity_id: 72,
+      },
+    }))
+    wrapper.unmount()
+  })
+
   it('locks offer publishing during in-flight confirmation and uses one stable idempotency key', async () => {
     let resolvePost: ((value: any) => void) | null = null
     marketViewMocks.apiFetchMock.mockImplementation((path: string, options?: RequestInit) => {
@@ -829,7 +1000,7 @@ describe('MarketView.vue', () => {
     await flushPromises()
 
     expect(wrapper.find('.offer-preview-card').exists()).toBe(false)
-    expect((wrapper.find('.text-offer-input').element as HTMLTextAreaElement).value).toBe('خرید نقد فردا طلای آب‌شده 50 عدد 222222: از متن بازار')
+    expect((wrapper.find('.text-offer-input').element as HTMLTextAreaElement).value).toBe('خ ف طلای آب‌شده 50 عدد 222222: از متن بازار')
 
     wrapper.unmount()
   })
@@ -1180,7 +1351,7 @@ describe('MarketView.vue', () => {
     await flushPromises()
 
     expect(wrapper.find('.offer-preview-card').exists()).toBe(false)
-    expect((wrapper.find('.text-offer-input').element as HTMLTextAreaElement).value).toBe('فروش نقد سکه 12 عدد 345678: از لیست اخیر')
+    expect((wrapper.find('.text-offer-input').element as HTMLTextAreaElement).value).toBe('ف سکه 12 عدد 345678: از لیست اخیر')
 
     wrapper.unmount()
   })
@@ -1505,7 +1676,7 @@ describe('MarketView.vue', () => {
     const wrapper = await mountMarketView()
     await flushPromises()
 
-    expect((wrapper.find('.text-offer-input').element as HTMLTextAreaElement).placeholder).toBe('مثال: خرید نقد سکه 30 عدد 125000')
+    expect((wrapper.find('.text-offer-input').element as HTMLTextAreaElement).placeholder).toBe('مثال: خ سکه 30 عدد 125000')
     expect(consoleErrorSpy).toHaveBeenCalledWith('Failed to load commodities', expect.any(Error))
     expect(consoleErrorSpy).toHaveBeenCalledWith('Failed to load settings', expect.any(Error))
     expect(consoleErrorSpy).toHaveBeenCalledWith('Failed to load market state', expect.any(Error))
