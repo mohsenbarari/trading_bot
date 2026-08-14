@@ -95,7 +95,8 @@
       "stage8-directory-profile-current-rebaseline-execution-receipt",
       "stage8-roving-workspace-focus-execution-receipt",
       "stage8-settings-notifications-wrap-execution-receipt",
-      "stage8-account-hub-singleton-execution-receipt"
+      "stage8-account-hub-singleton-execution-receipt",
+      "stage8-notification-route-affordance-execution-receipt"
     ]
   },
   "cellAccounting": {
@@ -104,8 +105,8 @@
     "enumeratedExpectedAccessCells": 270,
     "viewportStateInteractionEnvironmentExpansionPerformed": false,
     "executedFullMatrixCellCount": 0,
-    "partialSyntheticBrowserSliceCount": 10,
-    "partialSyntheticBrowserScenarioCellCount": 148,
+    "partialSyntheticBrowserSliceCount": 11,
+    "partialSyntheticBrowserScenarioCellCount": 151,
     "partialSyntheticBrowserCellsCountTowardFullMatrix": false
   },
   "partialSyntheticBrowserSlices": [
@@ -541,6 +542,60 @@
       "limitations": [
         "This is a bounded local/synthetic production-build browser receipt, not a complete role-by-route, state, interaction, or environment matrix execution.",
         "It covers only normal and accountant contexts, two viewports, Account Hub action-grid topology, and the recorded keyboard/click journey.",
+        "It creates no aesthetic sign-off, visual freeze, merge, Sites, staging, or production authority."
+      ]
+    },
+    {
+      "id": "stage8-notification-route-affordance",
+      "receiptId": "notification-affordance-browser-20260814014739730",
+      "evidenceRef": "stage8-notification-route-affordance-execution-receipt",
+      "sourceEvidenceRef": "stage8-notification-route-affordance-runtime-and-test",
+      "sourceCommit": "95ef7aa768f833c8e8b954d38b36674a77a304a9",
+      "sourceTree": "d5ea1acdf4a461b15c784ff5b555b186de6315ff",
+      "evidenceStatus": "passed-promotable-bounded-local-synthetic-production-browser-evidence",
+      "countsTowardFullMatrixAcceptance": false,
+      "scope": {
+        "environment": "local-synthetic-production-build-browser",
+        "viewportsCssPx": [
+          {
+            "width": 360,
+            "height": 740
+          },
+          {
+            "width": 390,
+            "height": 844
+          },
+          {
+            "width": 1440,
+            "height": 900
+          }
+        ],
+        "notificationStateCoverage": [
+          "safe non-trade destination",
+          "unsafe non-trade target",
+          "recovery-resolving non-trade target",
+          "structured trade notification"
+        ],
+        "executedScenarioCount": 3
+      },
+      "result": {
+        "passedScenarioCount": 3,
+        "failedScenarioCount": 0,
+        "safeNonTradeVisualCue": "one non-interactive aria-hidden marker contained within the notification row",
+        "unsafeAndRecoveryNonTradeBoundary": "marker-free non-routable articles",
+        "structuredTradeBoundary": "marker-free structured trade notification",
+        "safeKeyboardAndPointerNavigation": "passed",
+        "nonRoutableArticleClicksNavigated": false,
+        "unexpectedConsoleDiagnosticCount": 0,
+        "runtimePageErrorCount": 0,
+        "requestFailureCount": 0,
+        "externalNetworkAttemptCount": 0,
+        "observedExpectedLocalSyntheticApiRequests": "162/162",
+        "unknownSyntheticApiCount": 0
+      },
+      "limitations": [
+        "This is a bounded local/synthetic production-build browser receipt, not a complete role-by-route, state, interaction, or environment matrix execution.",
+        "It covers only the recorded notification states, three viewports, and the recorded keyboard/pointer journeys.",
         "It creates no aesthetic sign-off, visual freeze, merge, Sites, staging, or production authority."
       ]
     }
@@ -1202,6 +1257,36 @@
       "kind": "curated-evidence-only",
       "path": "docs/uiux-stage8-acceptance-rollout/STAGE8_ACCOUNT_HUB_SINGLETON_EXECUTION_RECEIPT.json",
       "claim": "One bounded source-bound local/synthetic production-build browser slice for Account Hub singleton action-grid topology; it is not full Stage 8 acceptance or release authority."
+    },
+    "stage8-notification-route-affordance-runtime-and-test": {
+      "id": "stage8-notification-route-affordance-runtime-and-test",
+      "kind": "runtime-and-test-source",
+      "sourceSnapshot": {
+        "commit": "95ef7aa768f833c8e8b954d38b36674a77a304a9",
+        "tree": "d5ea1acdf4a461b15c784ff5b555b186de6315ff"
+      },
+      "distSnapshot": {
+        "sha256": "045ed4958868b87de2d3483fb64b348a3c9b5e4f7792ba4427005569d8eed9fd",
+        "fileCount": 169
+      },
+      "sources": [
+        {
+          "path": "frontend/src/views/NotificationsView.vue",
+          "sha256": "5442192164e2fd82043877d82acc057cffff216ad18c95b3e3e1d4dd3814cda3",
+          "claim": "Adds a visual, non-interactive route cue only for eligible non-trade notifications while preserving existing route resolution and structured trade presentation."
+        },
+        {
+          "path": "frontend/src/views/NotificationsView.test.ts",
+          "sha256": "41089fb5b70f2a100264c6a66b12a156968473fff090658a142e78083ff19b73",
+          "claim": "Locks the eligible visual cue, marker-free non-routable and structured-trade boundaries, and existing navigation behavior."
+        }
+      ]
+    },
+    "stage8-notification-route-affordance-execution-receipt": {
+      "id": "stage8-notification-route-affordance-execution-receipt",
+      "kind": "curated-evidence-only",
+      "path": "docs/uiux-stage8-acceptance-rollout/STAGE8_NOTIFICATION_ROUTE_AFFORDANCE_EXECUTION_RECEIPT.json",
+      "claim": "One bounded source-bound local/synthetic production-build browser slice for notification route affordance boundaries; it is not full Stage 8 acceptance or release authority."
     },
     "stage3-evidence-manifest": {
       "id": "stage3-evidence-manifest",

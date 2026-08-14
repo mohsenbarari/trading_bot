@@ -17,11 +17,12 @@
 - current bounded workspace roving-focus postcommit source: `d1e8ecd5a524a03c73b67e531edab363479a32b0` (evidence-only)
 - current bounded account long-text wrapping source: `8082d8dd6352154b52e86ca6511e27464e072b13` (evidence-only)
 - current bounded Account Hub singleton action-grid source: `656cf6c3b62111c5c7bae458e3ea6f61fd8af788` (evidence-only)
+- current bounded notification route-affordance source: `95ef7aa768f833c8e8b954d38b36674a77a304a9` (evidence-only)
 - authority: `stage8CompleteAuthority=false`
 - matrix status: `partial-browser-slice-executed-full-acceptance-pending`
 - expected-access coverage: ۳۰ مسیر × ۹ پروفایل دقیق = ۲۷۰ outcome صریح
 - full matrix execution: صفر سلول؛ viewport/state/interaction/environment هنوز فقط requirement هستند
-- partial synthetic evidence: چهار slice 8A، یک slice 8B typography، یک slice مستقل auth-containment با ۱۴ scenario، یک rebaseline مستقل directory/profile با ۴۰ scenario، یک slice postcommit roving-focus با ۸ scenario، یک slice long-text wrapping حساب با ۱۲ scenario و یک slice Account Hub singleton با ۴ scenario ثبت شده‌اند؛ هیچ‌کدام به full matrix افزوده نمی‌شوند
+- partial synthetic evidence: چهار slice 8A، یک slice 8B typography، یک slice مستقل auth-containment با ۱۴ scenario، یک rebaseline مستقل directory/profile با ۴۰ scenario، یک slice postcommit roving-focus با ۸ scenario، یک slice long-text wrapping حساب با ۱۲ scenario، یک slice Account Hub singleton با ۴ scenario و یک slice notification route-affordance با ۳ scenario ثبت شده‌اند؛ هیچ‌کدام به full matrix افزوده نمی‌شوند
 - owner aesthetic acceptance: انجام نشده
 - merge: انجام نشده
 - production/staging/Sites: انجام نشده
@@ -42,7 +43,7 @@ guard فعلی علاوه بر نقش از `account_status`، `is_customer` و `
 هویت شیء پارامتری، حالت inactive/unavailable و پذیرش بصری باید جداگانه اجرا و evidence-bound
 شوند. هیچ cross-product ساختگی یا ادعای ۵۱٬۹۶۸ سلول در این بسته وجود ندارد.
 
-## شواهد محدود 8A، 8B، auth-containment، directory/profile، roving-focus، long-text-wrap و Account Hub
+## شواهد محدود 8A، 8B، auth-containment، directory/profile، roving-focus، long-text-wrap، Account Hub و notification route-affordance
 
 [STAGE8A_EXECUTION_RECEIPTS.json](STAGE8A_EXECUTION_RECEIPTS.json) تنها count، hash و
 source-revisionهای redacted چهار اجرای local/synthetic را نگه می‌دارد؛ screenshot، diagnostic،
@@ -124,6 +125,16 @@ console/page error/request failure/external attempt و API ناشناخته صف
 `56/56` بود؛ چهار screenshot فقط خارج repository ماندند. این slice فقط همین role، viewport و
 journey محدود را attest می‌کند و به full matrix افزوده نمی‌شود.
 
+[STAGE8_NOTIFICATION_ROUTE_AFFORDANCE_EXECUTION_RECEIPT.json](STAGE8_NOTIFICATION_ROUTE_AFFORDANCE_EXECUTION_RECEIPT.json)
+یک receipt مستقل local/synthetic production-build و source-bound به `95ef7aa7` است: سه scenario
+در `360×740`، `390×844` و `1440×900` گذشتند. اعلان non-trade واجد مقصد امن دقیقاً یک cue بصریِ
+non-interactive و `aria-hidden` داشت؛ حالت‌های non-trade ناامن یا recovery-resolving marker نداشتند
+و به‌صورت article غیرقابل‌مسیر ماندند؛ اعلان trade ساختاری نیز marker نگرفت. Enter و pointer فقط
+برای اعلان امن journey ثبت‌شده را کامل کردند و click روی articleهای غیرقابل‌مسیر navigation نداشت.
+console/page error/request failure/external attempt و API ناشناخته صفر و API محلیِ موردانتظار
+`162/162` بود. این slice فقط stateها، viewportها و journey محدود نام‌برده را attest می‌کند و به
+full matrix افزوده نمی‌شود.
+
 مرجع Figma اختیاریِ generic roving-focus، DRAFT زنده/قابل‌ویرایش با section `603:18` و board
 `603:19` است؛ frameهای mobile `390×844` و desktop `1440×900` clip دارند. audit آن ۴۴ text
 Vazirmatn، ۱۶/۱۶ linked instance، zero overflow/crop/overlap، حداقل contrast متن `4.55:1`،
@@ -169,6 +180,7 @@ audit geometry و contrast آن pass و محتوایش عاری از دادهٔ 
 - [STAGE8_ROVING_WORKSPACE_FOCUS_EXECUTION_RECEIPT.json](STAGE8_ROVING_WORKSPACE_FOCUS_EXECUTION_RECEIPT.json)
 - [STAGE8_SETTINGS_NOTIFICATIONS_WRAP_EXECUTION_RECEIPT.json](STAGE8_SETTINGS_NOTIFICATIONS_WRAP_EXECUTION_RECEIPT.json)
 - [STAGE8_ACCOUNT_HUB_SINGLETON_EXECUTION_RECEIPT.json](STAGE8_ACCOUNT_HUB_SINGLETON_EXECUTION_RECEIPT.json)
+- [STAGE8_NOTIFICATION_ROUTE_AFFORDANCE_EXECUTION_RECEIPT.json](STAGE8_NOTIFICATION_ROUTE_AFFORDANCE_EXECUTION_RECEIPT.json)
 - [VISUAL_FREEZE_PROTECTED_SURFACES.json](VISUAL_FREEZE_PROTECTED_SURFACES.json)
 - [ROLLOUT_PLAN.md](ROLLOUT_PLAN.md)
 - [VALIDATION.md](VALIDATION.md)

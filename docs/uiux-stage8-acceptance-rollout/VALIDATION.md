@@ -131,6 +131,19 @@ browser محدود account security/notifications را bind می‌کند. SHA-2
 normal/accountant را توصیف می‌کند؛ نه access outcomeهای matrix، نه receiptهای تاریخی، و نه
 protected freeze را overwrite، promote یا به پذیرش تبدیل می‌کند.
 
+## Notification route-affordance source binding
+
+`95ef7aa768f833c8e8b954d38b36674a77a304a9` / tree
+`d5ea1acdf4a461b15c784ff5b555b186de6315ff`، `NotificationsView` و test آن را با dist `169`
+فایلی اجرای browser محدود bind می‌کند. SHA-256 هر دو source/test و report digest در
+[STAGE8_NOTIFICATION_ROUTE_AFFORDANCE_EXECUTION_RECEIPT.json](STAGE8_NOTIFICATION_ROUTE_AFFORDANCE_EXECUTION_RECEIPT.json)
+ثبت شده است؛ report همان commit/tree و dist را پیش و پس از هر سه case یکسان و clean ثبت کرد.
+
+این receipt فقط cue بصریِ non-interactive برای اعلان non-trade واجد مقصد امن، مرز marker-free
+برای اعلان‌های non-routable/trade، و journey محدود keyboard/pointer را توصیف می‌کند؛ نه access
+outcomeهای matrix، نه receiptهای تاریخی، و نه protected freeze را overwrite، promote یا به پذیرش
+تبدیل می‌کند.
+
 ## What is validated by this correction
 
 - JSON schema 3 parse می‌شود.
@@ -138,16 +151,16 @@ protected freeze را overwrite، promote یا به پذیرش تبدیل می�
 - ۹ access profile دقیق تعریف شده و هر route برای هر profile یک outcome و `evidenceRefs` دارد.
 - تعداد واقعی outcomeهای موردانتظار ۲۷۰ است.
 - چهار component canonical outcome مدیر میانی به source/test `AdminView` متصل‌اند.
-- `executedFullMatrixCellCount=0` است؛ ده partial synthetic slice جداگانه ثبت شده‌اند اما
+- `executedFullMatrixCellCount=0` است؛ یازده partial synthetic slice جداگانه ثبت شده‌اند اما
   به full matrix یا viewport/state/interaction/environment expansion افزوده نشده‌اند.
 - نقش‌های واقعی از contextهای customer/accountant/owner جدا شده‌اند.
 
 این‌ها validation ساختاری و source-traceability هستند، نه اجرای browser/backend روی ۲۷۰ سلول.
 
-## Focused checks and bounded browser receipts on 2026-08-13
+## Focused checks and bounded browser receipts through 2026-08-14
 
 - `jq` parse/invariant check روی `ACCEPTANCE_MATRIX.json`: ۳۰ route، ۹ profile،
-  ۲۷۰ outcome دارای `evidenceRefs` معتبر، چهار component outcome، ده slice محدود، و صفر full-acceptance cell.
+  ۲۷۰ outcome دارای `evidenceRefs` معتبر، چهار component outcome، یازده slice محدود، و صفر full-acceptance cell.
   Evidence: [ACCEPTANCE_MATRIX.json](ACCEPTANCE_MATRIX.json).
 - `npm run test:unit:run -- src/router/index.test.ts src/utils/auth.test.ts`: pass؛
   ۲ فایل و ۴۲ تست. Evidence source:
@@ -249,6 +262,17 @@ failure/external attempt و unknown API صفر و API محلیِ موردانت�
 فقط خارج repository ماندند. full regression همان source `155 files / 1769 tests`، build،
 `vue-tsc` و `guard:ui` را pass ثبت کرده است. این receipt فقط چهار case نام‌برده را attest می‌کند
 و full matrix، visual freeze یا پذیرش نهایی نیست.
+
+receipt یازدهم در [STAGE8_NOTIFICATION_ROUTE_AFFORDANCE_EXECUTION_RECEIPT.json](STAGE8_NOTIFICATION_ROUTE_AFFORDANCE_EXECUTION_RECEIPT.json)
+به source clean `95ef7aa7` / tree `d5ea1ac` bind است: سه scenario در `360×740`، `390×844` و
+`1440×900` pass شدند. اعلان non-trade واجد مقصد امن دقیقاً یک cue بصریِ non-interactive و
+`aria-hidden` داشت؛ حالت‌های non-trade ناامن یا recovery-resolving marker نداشتند و article
+غیرقابل‌مسیر ماندند؛ اعلان trade ساختاری نیز marker نگرفت. Enter و pointer فقط برای اعلان امن
+journey ثبت‌شده را کامل کردند و click روی articleهای غیرقابل‌مسیر navigation نداشت. console/page
+error/request failure/external attempt و unknown API صفر و API محلیِ موردانتظار `162/162` بود.
+full regression همان source `155 files / 1770 tests`، build، `vue-tsc` و `guard:ui` را pass ثبت
+کرده است. این receipt فقط سه case نام‌برده را attest می‌کند و full matrix، visual freeze یا
+پذیرش نهایی نیست.
 
 مرجع Figma اختیاریِ generic roving-focus برای همین receipt، section `603:18`، board `603:19`،
 scope `604:22` و frameهای mobile `606:18` (`390×844`) و desktop `606:19` (`1440×900`) است.

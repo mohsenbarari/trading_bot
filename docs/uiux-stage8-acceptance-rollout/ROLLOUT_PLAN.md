@@ -8,7 +8,9 @@
 directory/profile در `STAGE8_DIRECTORY_PROFILE_REBASELINE_EXECUTION_RECEIPT.json` و یک receipt
 postcommit roving-focus در `STAGE8_ROVING_WORKSPACE_FOCUS_EXECUTION_RECEIPT.json`، یک receipt
 long-text wrapping در `STAGE8_SETTINGS_NOTIFICATIONS_WRAP_EXECUTION_RECEIPT.json` و یک receipt
-Account Hub singleton در `STAGE8_ACCOUNT_HUB_SINGLETON_EXECUTION_RECEIPT.json` ثبت شده‌اند؛
+Account Hub singleton در `STAGE8_ACCOUNT_HUB_SINGLETON_EXECUTION_RECEIPT.json` و یک receipt
+notification route-affordance در `STAGE8_NOTIFICATION_ROUTE_AFFORDANCE_EXECUTION_RECEIPT.json`
+ثبت شده‌اند؛
 هیچ‌کدام نتیجهٔ اجرای پذیرش تیمی یا authority عرضه نیستند.
 
 ## پیش‌شرط تبدیل draft به پذیرش
@@ -38,6 +40,9 @@ Account Hub singleton در `STAGE8_ACCOUNT_HUB_SINGLETON_EXECUTION_RECEIPT.json`
 - receipt Account Hub singleton فقط topology action-grid برای normal/accountant در دو viewport،
   چهار scenario، journey محدود keyboard/click و diagnosticهای صفر را توصیف می‌کند و به
   `executedFullMatrixCellCount` افزوده نمی‌شود.
+- receipt notification route-affordance فقط cue بصریِ non-interactive برای اعلان non-trade واجد
+  مقصد امن، مرز marker-free برای حالت‌های non-routable/trade، سه viewport و journey محدود
+  keyboard/pointer را توصیف می‌کند و به `executedFullMatrixCellCount` افزوده نمی‌شود.
 - مرجع Figma زنده فقط برای هم‌راستایی design است؛ پیش از اجرای browser قابل‌تکرار، شاهد runtime
   یا visual freeze نیست.
 - زیبایی و یکپارچگی UI/UX باید با sign-off صریح مالک ثبت شود؛ سبز بودن test فنی جای آن نیست.

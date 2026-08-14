@@ -38,6 +38,9 @@ source محدود account long-text wrapping: `8082d8dd6352154b52e86ca6511e27464
 source محدود Account Hub singleton action-grid: `656cf6c3b62111c5c7bae458e3ea6f61fd8af788`
 (evidence-only؛ بدون افزایش full matrix)
 
+source محدود notification route-affordance: `95ef7aa768f833c8e8b954d38b36674a77a304a9`
+(evidence-only؛ بدون افزایش full matrix)
+
 ## ۱. مجوز و حد آن
 
 دستور مالک برای ادامهٔ Stage 8، یکپارچگی و زیباسازی UI/UX با کنترل ایمنی، و ثبت رهگیری
@@ -65,7 +68,7 @@ deep-link denied مدیر میانی (`/admin/channels`، `/admin/commodities`،
 تعداد سلول‌های پذیرش کامل اجراشده صفر است؛ viewport، state، interaction و environment هنوز
 requirement هستند و به cell-level evidence کامل متصل نشده‌اند. بازار/پیام‌رسان redesign نشده‌اند.
 
-## ۳. شواهد محدود 8A/8B/auth-containment/directory-profile/account و مرجع طراحی
+## ۳. شواهد محدود 8A/8B/auth-containment/directory-profile/account/notification و مرجع طراحی
 
 منبع redacted: `docs/uiux-stage8-acceptance-rollout/STAGE8A_EXECUTION_RECEIPTS.json`
 
@@ -133,6 +136,13 @@ artifact ثبت نشده و این slice evidence-only است.
   daily navigation صفر بود و Enter/click هر دو به profile رسیدند. console/page error/request
   failure/external attempt و unknown API صفر و API محلیِ موردانتظار `56/56` بود؛ چهار screenshot
   فقط خارج repository ماندند. این slice evidence-only است و full matrix یا پذیرش نهایی نیست.
+- receipt notification route-affordance در source `95ef7aa7`: سه scenario local/synthetic در
+  `360×740`، `390×844` و `1440×900` همگی pass شدند. اعلان non-trade واجد مقصد امن دقیقاً یک cue
+  بصریِ non-interactive و `aria-hidden` داشت؛ حالت‌های non-trade ناامن یا recovery-resolving
+  marker نداشتند و article غیرقابل‌مسیر ماندند؛ اعلان trade ساختاری نیز marker نگرفت. Enter و
+  pointer فقط برای اعلان امن journey ثبت‌شده را کامل کردند و click روی articleهای غیرقابل‌مسیر
+  navigation نداشت. console/page error/request failure/external attempt و unknown API صفر و API
+  محلیِ موردانتظار `162/162` بود. این slice evidence-only است و full matrix یا پذیرش نهایی نیست.
 - Figma اختیاری generic roving-focus: section `603:18`، board `603:19`، scope `604:22`، mobile
   `606:18` (`390×844`) و desktop `606:19` (`1440×900`) یک DRAFT زنده/قابل‌ویرایش با محتوای
   synthetic است. audit: ۴۴ text Vazirmatn، ۱۶/۱۶ instance متصل، semantic styles/variables reused،
@@ -160,7 +170,7 @@ artifact ثبت نشده و این slice evidence-only است.
   `4.55:1` است. board عمداً generic و بدون provenance داخلی، route/hash/test/harness/local-path/
   URL/token/deploy/Sites است؛ نه freeze، نه final acceptance و نه evidence runtime/browser است.
 
-این ده slice محدود و مرجع‌های طراحیِ پیشین، فقط evidence local/synthetic یا live/editable هستند؛ screenshot/hash-freeze، runtime
+این یازده slice محدود و مرجع‌های طراحیِ پیشین، فقط evidence local/synthetic یا live/editable هستند؛ freeze، runtime
 accessibility acceptance، sign-off زیبایی مالک، یا release authority نیستند. receipt/reference مبتنی
 بر `4415b743` فقط historical هستند و ادعایی دربارهٔ working tree جاری ندارند. artifact خام browser
 در repository ذخیره نشده و هیچ Sites action انجام نشده است.
@@ -189,7 +199,7 @@ Sites و production در این Stage شروع نشده‌اند.
 ## ۶. گیت بعدی (فنی و بصری)
 
 - ۲۷۰ نتیجهٔ موردانتظار مسیر×پروفایل به source متصل است؛
-- canonicalization مدیر میانی و ده slice محدود source-bound ثبت شده‌اند، اما full matrix همچنان صفر است؛
+- canonicalization مدیر میانی و یازده slice محدود source-bound ثبت شده‌اند، اما full matrix همچنان صفر است؛
 - protected-surface hashهای تاریخی overwrite نشده‌اند؛
 - اجرای واقعی viewport/state/interaction/environment و sign-off زیبایی مالک هنوز pending است؛
 - عرضه فقط به‌صورت مدل تیمی و rollback-safe توصیف شده و شروع نشده است؛

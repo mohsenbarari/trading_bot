@@ -1,0 +1,92 @@
+{
+  "schemaVersion": 1,
+  "stage": "8A-notification-route-affordance",
+  "status": "passed-promotable-bounded-local-synthetic-production-browser-evidence-not-acceptance",
+  "branch": "condidate/webapp-ui-ux-redesign-v2",
+  "reportId": "notification-affordance-browser-20260814014739730",
+  "implementation": {
+    "title": "Notification route-affordance local-synthetic browser receipt",
+    "sourceSnapshot": {
+      "commit": "95ef7aa768f833c8e8b954d38b36674a77a304a9",
+      "tree": "d5ea1acdf4a461b15c784ff5b555b186de6315ff",
+      "sourceHashes": {
+        "frontend/src/views/NotificationsView.vue": "5442192164e2fd82043877d82acc057cffff216ad18c95b3e3e1d4dd3814cda3",
+        "frontend/src/views/NotificationsView.test.ts": "41089fb5b70f2a100264c6a66b12a156968473fff090658a142e78083ff19b73"
+      }
+    },
+    "distSnapshot": {
+      "sha256": "045ed4958868b87de2d3483fb64b348a3c9b5e4f7792ba4427005569d8eed9fd",
+      "fileCount": 169
+    }
+  },
+  "validation": {
+    "sourceBinding": "The final browser report recorded the same clean product commit, tree, source manifest, and production-build dist snapshot before and after all three cases; this receipt retains the two changed notification source/test hashes.",
+    "browserReportVerdict": "PASS",
+    "browserReportSha256": "29ce930f9c730ee1e872e645f86000485bca5da1e0cbf576212e892d732e4353",
+    "fullRegression": {
+      "commit": "95ef7aa768f833c8e8b954d38b36674a77a304a9",
+      "tree": "d5ea1acdf4a461b15c784ff5b555b186de6315ff",
+      "unitTestFilesPassed": 155,
+      "unitTestsPassed": 1770,
+      "productionBuild": "passed",
+      "vueTsc": "passed",
+      "protectedUiGuard": "passed"
+    }
+  },
+  "browserReceipt": {
+    "environment": "local-synthetic production-build browser with same-origin fixtures and no external network used",
+    "executedScenarioCount": 3,
+    "passedScenarioCount": 3,
+    "failedScenarioCount": 0,
+    "coverage": {
+      "viewportsCssPx": [
+        {
+          "width": 360,
+          "height": 740
+        },
+        {
+          "width": 390,
+          "height": 844
+        },
+        {
+          "width": 1440,
+          "height": 900
+        }
+      ],
+      "notificationStateCoverage": [
+        "safe non-trade destination",
+        "unsafe non-trade target",
+        "recovery-resolving non-trade target",
+        "structured trade notification"
+      ],
+      "assertionContract": "A safe non-trade notification has one non-interactive, aria-hidden visual route cue; unsafe and recovery-resolving non-trade notifications remain marker-free non-routable articles; a structured trade notification remains marker-free; and only the safe notification completes the recorded keyboard and pointer navigation journeys."
+    },
+    "result": {
+      "safeNonTradeVisualCuePresent": true,
+      "safeNonTradeVisualCueContainedWithinRow": true,
+      "unsafeAndRecoveryNonTradeVisualCuesAbsent": true,
+      "structuredTradeVisualCueAbsent": true,
+      "safeKeyboardEnterNavigationPassed": true,
+      "safePointerNavigationPassed": true,
+      "nonRoutableArticleClicksDidNotNavigate": true
+    },
+    "diagnostics": {
+      "unexpectedConsoleDiagnosticCount": 0,
+      "runtimePageErrorCount": 0,
+      "requestFailureCount": 0,
+      "externalNetworkAttemptCount": 0,
+      "expectedLocalSyntheticApiRequestCount": 162,
+      "observedLocalSyntheticApiRequestCount": 162,
+      "unknownSyntheticApiCount": 0,
+      "boundary": "These zero counts describe only the three covered local/synthetic scenarios; they do not establish a clean-console or network conclusion beyond this receipt."
+    },
+    "limitations": [
+      "This is a bounded local/synthetic production-build browser receipt, not a complete role-by-route, state, interaction, or environment matrix execution.",
+      "It covers only the four recorded notification states, three viewports, and the recorded keyboard/pointer journeys.",
+      "No raw browser artifact, local execution location, URL, fixture payload, or user data is retained in this repository receipt."
+    ]
+  },
+  "countsTowardFullMatrixAcceptance": false,
+  "claimBoundary": "This bounded source-bound local/synthetic notification route-affordance receipt does not alter prior historical receipts, protected-surface freeze, full Stage 8 acceptance, owner aesthetic sign-off, a visual freeze, merge authority, Sites authority, staging authority, or production authority.",
+  "retention": "Only redacted counts, source revisions, source hashes, dist/report hashes, validation totals, and claim boundaries are retained."
+}
