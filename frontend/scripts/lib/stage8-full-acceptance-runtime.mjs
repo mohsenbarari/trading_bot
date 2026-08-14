@@ -333,11 +333,12 @@ function directoryUser(id, index = 0) {
   }
 }
 
-function fixtureOffer(index = 0) {
+function fixtureOffer(index = 0, overrides = {}) {
+  const nowSec = Math.floor(Date.now() / 1000)
   return {
     id: 501 + index,
     offer_public_id: `stage8-offer-${501 + index}`,
-    offer_type: 'sell',
+    offer_type: index === 1 ? 'buy' : 'sell',
     settlement_type: 'cash',
     commodity_id: 1,
     commodity_name: 'طلای ۱۸ عیار',
@@ -351,7 +352,82 @@ function fixtureOffer(index = 0) {
     notes: index ? `داده مصنوعی پذیرش ${index}` : 'داده مصنوعی پذیرش',
     status: 'active',
     created_at: FIXED_TIME,
+    lifecycle_phase: 'normal',
+    normal_deadline_ts: nowSec + 1800,
+    expires_at_ts: nowSec + 1800,
+    timer_total_seconds: 3600,
     accepts_new_public_interaction: true,
+    ...overrides,
+  }
+}
+
+function marketLifecycleOffers() {
+  const nowSec = Math.floor(Date.now() / 1000)
+  return {
+    active: fixtureOffer(0, { offer_type: 'sell' }),
+    overtime: fixtureOffer(1, {
+      offer_type: 'buy',
+      lifecycle_phase: 'overtime',
+      normal_deadline_ts: nowSec - 60,
+      final_deadline_ts: nowSec + 240,
+      expires_at_ts: nowSec + 240,
+      timer_total_seconds: 300,
+      accepts_overtime_request: true,
+    }),
+    expired: fixtureOffer(2, {
+      history_state: 'expired',
+      status: 'expired',
+      is_read_only: true,
+      lifecycle_phase: 'expired',
+      accepts_new_public_interaction: false,
+    }),
+    traded: fixtureOffer(3, {
+      history_state: 'traded',
+      status: 'completed',
+      is_read_only: true,
+      traded_quantity: 4,
+      accepts_new_public_interaction: false,
+    }),
+  }
+}
+
+function marketPageForMode(mode) {
+  const lifecycle = marketLifecycleOffers()
+  if (mode === 'empty') return { items: [], next_cursor: null, has_more: false }
+  if (mode === 'dense') {
+    return {
+      items: [lifecycle.active, lifecycle.overtime, ...Array.from({ length: 22 }, (_, index) => fixtureOffer(index + 4))],
+      next_cursor: null,
+      has_more: false,
+    }
+  }
+  if (mode === 'stale-old' || mode === 'stale-new') {
+    return { items: listForMode(mode, fixtureOffer), next_cursor: null, has_more: false }
+  }
+  return {
+    items: [lifecycle.active, lifecycle.overtime],
+    next_cursor: null,
+    has_more: false,
+  }
+}
+
+function marketHistoryForMode(mode) {
+  if (mode === 'empty' || mode === 'error' || mode === 'offline' || mode === 'loading') return []
+  const lifecycle = marketLifecycleOffers()
+  return [lifecycle.expired, lifecycle.traded]
+}
+
+function fixtureConversation(index = 0) {
+  return {
+    id: 6000 + index,
+    other_user_id: 9200 + index,
+    other_user_name: index ? `گفتگو ${index}` : 'گفتگوی نمونه',
+    last_message_content: 'پیام مصنوعی پذیرش',
+    last_message_type: 'text',
+    last_message_at: FIXED_TIME,
+    unread_count: 0,
+    room_kind: 'direct',
+    can_send: true,
   }
 }
 
@@ -426,11 +502,32 @@ export function shouldHoldLoadingPath(pathname, controller) {
   return matchesStaleEndpoint(pathname, controller.holdEndpoint)
 }
 
-export function apiFixture(pathname, method, profile, mode = 'normal') {
+export function apiFixture(pathname, method, profile, mode = 'normal', options = {}) {
   if (MUTATING_METHODS.has(method) && !isAllowedMutation(pathname, method)) {
     return { known: false, status: 405, body: { detail: 'mutating method blocked' }, mutating: true }
   }
   const identityBootstrap = isIdentityBootstrapPath(pathname, method)
+  const identityPageData = options.allowIdentityPageData === true
+  if (
+    identityPageData &&
+    (pathname === '/api/auth/me' || pathname === '/api/auth/me/') &&
+    mode === 'error'
+  ) {
+    return {
+      known: true,
+      status: 422,
+      body: { detail: 'synthetic identity page error' },
+      injectedError: true,
+    }
+  }
+  if ((pathname === '/api/chat/conversations' || pathname === '/api/chat/conversations/') && mode === 'error') {
+    return {
+      known: true,
+      status: 422,
+      body: { detail: 'synthetic conversation error' },
+      injectedError: true,
+    }
+  }
   if (!identityBootstrap && mode === 'offline') {
     return { known: true, status: 503, body: { detail: 'synthetic offline' }, offline: true }
   }
@@ -578,9 +675,10 @@ export function apiFixture(pathname, method, profile, mode = 'normal') {
     })
   }
   if (pathname === '/api/offers/page') {
-    return known({ items: listForMode(mode, fixtureOffer), next_cursor: null, has_more: false })
+    return known(marketPageForMode(mode))
   }
-  if (pathname === '/api/offers/market-history' || pathname === '/api/offers/my/repeatable') return known([])
+  if (pathname === '/api/offers/market-history') return known(marketHistoryForMode(mode))
+  if (pathname === '/api/offers/my/repeatable') return known([])
   if (pathname === '/api/offers/' || pathname === '/api/offers') return known(listForMode(mode, fixtureOffer))
   if (pathname === '/api/commodities/' || pathname === '/api/commodities') {
     return known(
@@ -660,6 +758,9 @@ export function apiFixture(pathname, method, profile, mode = 'normal') {
   if (pathname.startsWith('/api/users/')) return known(directoryUser(Number(pathname.split('/')[3]) || 9100))
   if (pathname.startsWith('/api/trades/overtime-requests/')) return known([])
   if (pathname.startsWith('/api/trades/')) return known([])
+  if (pathname === '/api/chat/conversations' || pathname === '/api/chat/conversations/') {
+    return known(listForMode(mode, fixtureConversation))
+  }
   if (pathname.startsWith('/api/chat/')) return known([])
   if (pathname.startsWith('/api/admin-messages/')) return known([])
   if (pathname.startsWith('/api/notifications/')) return known([])
@@ -732,7 +833,7 @@ export function createFixtureServer(dist, controller) {
           delayMs = generation === 1 ? 900 : 0
         }
         try {
-          if (delayable && shouldHoldLoadingPath(pathname, controller)) {
+          if (shouldHoldLoadingPath(pathname, controller)) {
             const holdUntil = Date.now() + 20_000
             while (!controller.releaseHeldRequest && Date.now() < holdUntil) {
               await new Promise((resolve) => setTimeout(resolve, 40))
@@ -740,7 +841,9 @@ export function createFixtureServer(dist, controller) {
           } else if (delayMs > 0) {
             await new Promise((resolve) => setTimeout(resolve, delayMs))
           }
-          const fixture = apiFixture(pathname, method, controller.profile, mode)
+          const fixture = apiFixture(pathname, method, controller.profile, mode, {
+            allowIdentityPageData: controller.allowIdentityPageData === true,
+          })
           state.apiRequests += 1
           if (pathname === '/api/auth/me' || pathname === '/api/auth/me/') {
             state.identityRequestCount += 1
@@ -847,9 +950,9 @@ export function classifyConsole(item) {
     text.includes('synthetic error fixture') ||
     text.includes('synthetic offline') ||
     text.includes('[apiFetch] Connection lost') ||
-    /Failed to load resource.*\b(500|503|410)\b/.test(text) ||
-    /the server responded with a status of (500|503|410)/.test(text) ||
-    /Request failed with status code (500|503|410)/.test(text)
+    /Failed to load resource.*\b(500|503|410|422)\b/.test(text) ||
+    /the server responded with a status of (500|503|410|422)/.test(text) ||
+    /Request failed with status code (500|503|410|422)/.test(text)
   ) {
     return 'fixture-injected-state'
   }
@@ -897,22 +1000,24 @@ export function diagnosticCounts(diagnostics, options = {}) {
   }
 }
 
-export async function instrumentPage(page, baseUrl, diagnostics, profile, environment) {
+export async function instrumentPage(page, baseUrl, diagnostics, profile, environment, pageOptions = {}) {
   const token = profile.authenticated ? makeJwt(1000 + (profile.userIdOffset || 1)) : null
   const user = profile.authenticated ? userPayload(profile) : null
   await page.addInitScript(
-    ({ authToken, userValue, environmentName }) => {
+    ({ authToken, userValue, environmentName, seedCurrentUserSummary }) => {
       window.__PLAYWRIGHT_DISABLE_PWA_REGISTRATION__ = true
       localStorage.clear()
       sessionStorage.clear()
       if (authToken && userValue) {
         localStorage.setItem('auth_token', authToken)
         localStorage.setItem('refresh_token', authToken)
-        localStorage.setItem('current_user_summary', JSON.stringify(userValue))
-        localStorage.setItem('current_user_role', userValue.role)
-        localStorage.setItem('current_user_account_status', userValue.account_status)
-        localStorage.setItem('current_user_is_accountant', String(userValue.is_accountant))
-        localStorage.setItem('current_user_is_customer', String(userValue.is_customer))
+        if (seedCurrentUserSummary) {
+          localStorage.setItem('current_user_summary', JSON.stringify(userValue))
+          localStorage.setItem('current_user_role', userValue.role)
+          localStorage.setItem('current_user_account_status', userValue.account_status)
+          localStorage.setItem('current_user_is_accountant', String(userValue.is_accountant))
+          localStorage.setItem('current_user_is_customer', String(userValue.is_customer))
+        }
       }
       window.__STAGE8_ENV__ = environmentName
       window.__STAGE8_TELEGRAM__ = { ready: 0, expand: 0 }
@@ -990,7 +1095,12 @@ export async function instrumentPage(page, baseUrl, diagnostics, profile, enviro
       }
       globalThis.WebSocket = LocalWebSocket
     },
-    { authToken: token, userValue: user, environmentName: environment },
+    {
+      authToken: token,
+      userValue: user,
+      environmentName: environment,
+      seedCurrentUserSummary: pageOptions.seedCurrentUserSummary !== false,
+    },
   )
   page.on('console', (message) => {
     if (message.type() === 'error' || message.type() === 'warning') {
@@ -1035,7 +1145,14 @@ export async function newPage(browser, baseUrl, viewport, diagnostics, profile, 
         : undefined,
   })
   const page = await context.newPage()
-  await instrumentPage(page, baseUrl, diagnostics, profile, options.environment || 'mobile-browser')
+  await instrumentPage(
+    page,
+    baseUrl,
+    diagnostics,
+    profile,
+    options.environment || 'mobile-browser',
+    options,
+  )
   return { context, page }
 }
 
@@ -1262,6 +1379,8 @@ export async function collectUiProbe(page) {
           '.chat-skeleton',
           '.conversation-skeleton',
           '.loading-state-skeleton',
+          '.loading-state',
+          '.messenger-loader',
           '[data-test="offers-loading-skeleton"]',
           '[aria-busy="true"]',
           '[role="progressbar"]',
@@ -1280,7 +1399,7 @@ export async function collectUiProbe(page) {
     ].find(visible)
     const errorVisible = [
       ...document.querySelectorAll(
-        '[role="alert"], .ui-empty-state--danger, .ui-v2-auth-error, .ui-v2-auth-login-error, [data-error]',
+        '[role="alert"], .ui-empty-state--danger, .ui-v2-auth-error, .ui-v2-auth-login-error, .error-state, [data-error]',
       ),
     ].some(visible)
     const bodyText = document.body.innerText || ''
@@ -1306,6 +1425,8 @@ export async function collectUiProbe(page) {
           '.mini-trade-card',
           '.notif-item',
           '.list-item-btn',
+          '.conversation-card',
+          '.conversation-item',
           'li[role="listitem"]',
         ].join(','),
       ),
@@ -1347,13 +1468,51 @@ export async function collectUiProbe(page) {
     const dialogVisible = dialog instanceof HTMLElement && visible(dialog)
     const dialogRect = dialogVisible ? dialog.getBoundingClientRect() : null
     const strip = document.querySelector(
-      '.app-route-scroll, .workspace-relation-list, .sessions-list, .offers-list, .users-result',
+      '.app-route-scroll, .workspace-relation-list, .sessions-list, .offers-list, .users-result, .conversations-list',
     )
     const internalStripOverflow =
       strip instanceof HTMLElement && strip.scrollWidth - strip.clientWidth > 1
     const navEl = document.querySelector('.bottom-nav-wrapper, .ui-v2-bottom-nav, .bottom-nav-bar')
     const navVisible = navEl instanceof HTMLElement && visible(navEl)
     const navBox = navVisible ? navEl.getBoundingClientRect() : null
+    const overtimeStickers = [...document.querySelectorAll('[data-test="offer-overtime-sticker"]')].filter(visible)
+    const overtimeIcon = overtimeStickers[0]?.querySelector('.offer-overtime-sticker__icon')
+    const overtimeCard = overtimeStickers[0]?.closest('.offer-card-wrap')
+    const overtimePct = overtimeCard
+      ? Number.parseFloat(getComputedStyle(overtimeCard).getPropertyValue('--t-pct') || '0')
+      : 0
+    const overtimePhase = overtimeCard?.querySelector('[data-test="offer-deadline-perimeter"]')?.getAttribute('data-phase')
+    const expiredCard = document.querySelector('.offer-card-wrap.is-expired')
+    const tradedCard = document.querySelector('.offer-card-wrap.is-traded')
+    const buyCard = [...document.querySelectorAll('.offer-card-inner.buy')].find(visible)
+    const sellCard = [...document.querySelectorAll('.offer-card-inner.sell')].find(visible)
+    const ariaOf = (card) =>
+      card
+        ? [...card.querySelectorAll('button, [aria-label]')]
+            .map((element) => element.getAttribute('aria-label') || '')
+            .join(' ')
+        : ''
+    const sideActionInverted = Boolean(
+      (ariaOf(buyCard) && /لفظ فروش/.test(ariaOf(buyCard))) ||
+        (ariaOf(sellCard) && /لفظ خرید/.test(ariaOf(sellCard))),
+    )
+    const marketLifecycle = {
+      perimeterPresent: Boolean(document.querySelector('[data-test="offer-deadline-perimeter"]')),
+      legacyDeadlineBarCount: document.querySelectorAll('.offer-deadline-bar, .offer-deadline-fill').length,
+      overtimeStickerCount: overtimeStickers.length,
+      overtimeStickerName: overtimeStickers[0]?.getAttribute('aria-label') || '',
+      overtimeStickerAnimated: overtimeIcon
+        ? getComputedStyle(overtimeIcon).animationName !== 'none' &&
+          getComputedStyle(overtimeIcon).animationName !== ''
+        : false,
+      overtimeProgressBound:
+        overtimePhase === 'overtime' && Number.isFinite(overtimePct) && overtimePct > 0 && overtimePct < 100,
+      expiredReadOnly: Boolean(expiredCard && !expiredCard.querySelector('.offer-footer')),
+      expiredDistinct: Boolean(expiredCard?.classList.contains('is-history') && expiredCard.classList.contains('is-expired')),
+      tradedReadOnly: Boolean(tradedCard && !tradedCard.querySelector('.offer-footer')),
+      tradedDistinct: Boolean(tradedCard?.classList.contains('is-history') && tradedCard.classList.contains('is-traded')),
+      sideActionInverted,
+    }
     return {
       visibleMainCount: mains.length,
       visibleRootCount: roots.length,
@@ -1422,6 +1581,7 @@ export async function collectUiProbe(page) {
       selectedControlInStrip: true,
       hitTestPassed: true,
       zoomStripExpected: false,
+      marketLifecycle,
     }
   })
 }

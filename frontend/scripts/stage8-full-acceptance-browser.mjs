@@ -45,9 +45,12 @@ import {
   assertCleanOfficialBinding,
   assertEnvironmentSemantics,
   assertInteractionSemantics,
+  assertMarketLifecycle,
   assertStateSemantics,
+  buildSuccessSummary,
   captureOfficialBinding,
   evaluateOfficialPass,
+  officialCounts,
 } from './lib/stage8-full-acceptance-contract.mjs'
 import {
   classifyScenarioFailure,
@@ -117,6 +120,7 @@ async function runScenario({
     state === 'loading' || state === 'slow' ? descriptor.states[state].endpoint || '' : ''
   controller.releaseHeldRequest = state !== 'loading' && state !== 'slow'
   controller.staleEndpoint = state === 'stale' ? descriptor.states.stale.endpoint || '' : ''
+  controller.allowIdentityPageData = Boolean(descriptor.states[state]?.identityPageData)
   const snapshotBefore = {
     unknown: serverState.unknownApiRequests,
     mutating: serverState.mutatingApiRequests,
@@ -129,6 +133,7 @@ async function runScenario({
   const { context, page } = await newPage(browser, baseUrl, viewport, diagnostics, profile, {
     reducedMotion: reducedMotion || interaction === 'reduced-motion',
     environment,
+    seedCurrentUserSummary: !descriptor.states[state]?.identityPageData,
   })
   const expected = finalRouteExpectation(route, profile)
   const failures = []
@@ -363,11 +368,23 @@ async function runScenario({
         if (kind === 'environment') {
           failures.push(...assertEnvironmentSemantics(probe, environment))
         }
+        failures.push(
+          ...assertMarketLifecycle(probe, {
+            routeName: route.name,
+            state,
+            expectedKind: expected.kind,
+            interaction,
+          }),
+        )
       }
     }
     const shouldShot =
       (kind === 'viewport' && (viewport.width === 390 || viewport.width === 1440)) ||
-      (kind === 'state' && ['loading', 'empty', 'error', 'offline', 'stale'].includes(state))
+      (kind === 'state' && ['loading', 'empty', 'error', 'offline', 'stale', 'normal'].includes(state) &&
+        (state !== 'normal' || route.name === 'market')) ||
+      (route.name === 'market' &&
+        kind === 'interaction' &&
+        ['reduced-motion', 'zoom-200'].includes(interaction))
     if (shouldShot) {
       const shotDir = path.join(OUTPUT_DIR, 'screenshots')
       await mkdir(shotDir, { recursive: true })
@@ -393,6 +410,7 @@ async function runScenario({
   } finally {
     controller.releaseHeldRequest = true
     controller.holdEndpoint = ''
+    controller.allowIdentityPageData = false
     await context.close()
   }
   const scenario = {
@@ -464,6 +482,7 @@ async function main() {
     staleEndpoint: '',
     holdEndpoint: '',
     releaseHeldRequest: true,
+    allowIdentityPageData: false,
     routesByName: new Map(matrix.routes.map((item) => [item.name, item])),
   }
   const { server, state: serverState } = createFixtureServer(DIST, controller)
@@ -554,6 +573,8 @@ async function main() {
             state: item.state,
             applicable: false,
             reason: item.reason,
+            taxonomy: item.taxonomy,
+            source: item.source || null,
             passed: true,
             failures: [],
           }
@@ -596,6 +617,8 @@ async function main() {
             interaction: item.interaction,
             applicable: false,
             reason: item.reason,
+            taxonomy: item.taxonomy,
+            source: item.source || null,
             passed: true,
             failures: [],
           }
@@ -638,6 +661,8 @@ async function main() {
             environment,
             applicable: false,
             reason: applicability.reason,
+            taxonomy: applicability.taxonomy,
+            source: applicability.source || null,
             passed: true,
             failures: [],
           }
@@ -688,6 +713,7 @@ async function main() {
   const duplicateIdCount = ids.length - uniqueIdCount
   const sourceDriftCount = scenarios.filter((item) => item.sourceDrift).length
   const officialRun = OFFICIAL_PHASES.every((phase) => requestedPhases.has(phase))
+  const derivedOfficial = officialCounts()
   const diagnosticTotals = scenarios.reduce(
     (acc, item) => {
       const counts = item.diagnostics || {}
@@ -697,13 +723,21 @@ async function main() {
       if (item.state !== 'offline') acc.requestFailuresOutsideOffline += counts.requestFailures || 0
       return acc
     },
-    { unexpectedConsole: 0, pageErrors: 0, externalRequests: 0, requestFailuresOutsideOffline: 0 },
+    {
+      unexpectedConsole: 0,
+      pageErrors: 0,
+      externalRequests: 0,
+      requestFailuresOutsideOffline: 0,
+      unknownApiRequests: serverState.unknownApiRequests,
+      mutatingApiRequests: serverState.mutatingApiRequests,
+      sourceDriftCount,
+    },
   )
   const counters = {
-    accessCellsExpected: 270,
+    accessCellsExpected: derivedOfficial.accessExpected,
     accessCellsExecuted: access.length,
     accessCellsPassed: access.filter((item) => item.passed).length,
-    routeViewportExpected: 240,
+    routeViewportExpected: derivedOfficial.viewportExpected,
     routeViewportExecuted: viewport.length,
     routeViewportPassed: viewport.filter((item) => item.passed).length,
     stateTotal: states.length,
@@ -747,8 +781,22 @@ async function main() {
     route: item.route,
     key: item.state || item.interaction || item.environment,
     reason: item.reason,
+    taxonomy: item.taxonomy || null,
+    source: item.source || null,
   }))
+  const taxonomyCounts = sourceDerivedNa.reduce(
+    (acc, item) => {
+      if (item.taxonomy === 'harness-deferred') acc.harnessDeferred += 1
+      else if (item.taxonomy === 'canonical-alias') acc.canonicalAlias += 1
+      else acc.productNotApplicable += 1
+      return acc
+    },
+    { productNotApplicable: 0, canonicalAlias: 0, harnessDeferred: 0 },
+  )
   failureByBucket['source-derived-na'] = sourceDerivedNa.length
+  const successEvidence = scenarios
+    .filter((item) => item.applicable !== false)
+    .map((item) => buildSuccessSummary(redactScenario(item)))
   const verdict = evaluateOfficialPass({
     officialRun,
     failed,
@@ -758,6 +806,7 @@ async function main() {
     counters,
     server: serverState,
     diagnosticTotals,
+    taxonomyCounts,
   })
   const contactSheetPath = path.join(OUTPUT_DIR, 'CONTACT_SHEET.html')
   await writeFile(
@@ -767,7 +816,7 @@ async function main() {
       .join('')}</body></html>\n`,
   )
   const report = {
-    schemaVersion: 3,
+    schemaVersion: 4,
     stage: 8,
     runId: RUN_ID,
     claimBoundary:
@@ -804,10 +853,26 @@ async function main() {
     },
     sourceDerivedNa: {
       count: sourceDerivedNa.length,
+      taxonomy: taxonomyCounts,
       items: sourceDerivedNa,
     },
+    diagnosticTotals,
+    successEvidence,
+    marketLifecycleSubset: successEvidence
+      .filter((item) => item.route === 'market' && item.lifecycleMarker)
+      .map((item) => ({
+        id: item.id,
+        digest: item.digest,
+        lifecycleMarker: item.lifecycleMarker,
+      })),
     failedScenarios: failedItems.map(redactScenario),
-    scenarioDigests: scenarios.map((item) => ({ id: item.id, digest: item.digest, passed: item.passed })),
+    scenarioDigests: scenarios.map((item) => ({
+      id: item.id,
+      digest: item.digest,
+      passed: item.passed,
+      applicable: item.applicable !== false,
+      taxonomy: item.taxonomy || null,
+    })),
     screenshotCount: screenshotDigests.length,
     screenshotDigests,
     contactSheet: { path: contactSheetPath, count: screenshotDigests.length },

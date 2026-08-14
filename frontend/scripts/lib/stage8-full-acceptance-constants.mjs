@@ -10,6 +10,16 @@ export const VIEWPORTS = Object.freeze([
 ])
 
 export const ACCESS_VIEWPORT = VIEWPORTS[2]
+export const ROUTE_COUNT = 30
+export const ACCESS_PROFILE_COUNT = 9
+
+export const NA_TAXONOMY = Object.freeze({
+  PRODUCT_NOT_APPLICABLE: 'product-not-applicable',
+  CANONICAL_ALIAS: 'canonical-alias',
+  HARNESS_DEFERRED: 'harness-deferred',
+})
+
+export const NA_TAXONOMY_VALUES = Object.freeze(Object.values(NA_TAXONOMY))
 
 export const ALL_STATES = Object.freeze([
   'loading',

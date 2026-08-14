@@ -10,11 +10,14 @@ import {
   assertCleanOfficialBinding,
   assertEnvironmentSemantics,
   assertInteractionSemantics,
+  assertMarketLifecycle,
   assertStateSemantics,
+  buildSuccessSummary,
   evaluateOfficialPass,
   hasListStateSurface,
   officialCounts,
 } from './lib/stage8-full-acceptance-contract.mjs'
+import { NA_TAXONOMY } from './lib/stage8-full-acceptance-constants.mjs'
 import {
   STAGE8_ROUTE_NAMES,
   deriveOfficialCounts,
@@ -113,7 +116,11 @@ function officialInput(overrides = {}) {
       pageErrors: 0,
       externalRequests: 0,
       requestFailuresOutsideOffline: 0,
+      unknownApiRequests: 0,
+      mutatingApiRequests: 0,
+      sourceDriftCount: 0,
     },
+    taxonomyCounts: { productNotApplicable: 0, canonicalAlias: 0, harnessDeferred: 0 },
     ...overrides,
   }
 }
@@ -136,10 +143,10 @@ describe('Stage 8 official pass invariants', () => {
     ['interactionExecuted', officialCounts().interactionExecuted - 1],
     ['interactionNotApplicable', officialCounts().interactionNotApplicable - 1],
     ['interactionPassed', officialCounts().interactionPassed - 1],
-    ['environmentTotal', 89],
-    ['environmentExecuted', 86],
-    ['environmentNotApplicable', 2],
-    ['environmentPassed', 86],
+    ['environmentTotal', officialCounts().environmentTotal - 1],
+    ['environmentExecuted', officialCounts().environmentExecuted - 1],
+    ['environmentNotApplicable', officialCounts().environmentNotApplicable - 1],
+    ['environmentPassed', officialCounts().environmentPassed - 1],
   ])('fails when %s is mutated to %s', (key, value) => {
     const counters = officialCounters()
     counters[key] = value
@@ -222,9 +229,30 @@ describe('Stage 8 official pass invariants', () => {
             pageErrors: 0,
             externalRequests: 0,
             requestFailuresOutsideOffline: 1,
+            unknownApiRequests: 0,
+            mutatingApiRequests: 0,
+            sourceDriftCount: 0,
           },
         }),
       ).passed,
+    ).toBe(false)
+    expect(
+      evaluateOfficialPass(
+        officialInput({
+          diagnosticTotals: {
+            unexpectedConsole: 0,
+            pageErrors: 0,
+            externalRequests: 0,
+            requestFailuresOutsideOffline: 0,
+            unknownApiRequests: 1,
+            mutatingApiRequests: 0,
+            sourceDriftCount: 0,
+          },
+        }),
+      ).passed,
+    ).toBe(false)
+    expect(
+      evaluateOfficialPass(officialInput({ taxonomyCounts: { harnessDeferred: 1 } })).passed,
     ).toBe(false)
   })
 
@@ -342,8 +370,14 @@ describe('Stage 8 descriptor contract is fail-closed', () => {
     expect(getRouteDescriptor('admin-commodities').states.stale.applicable).toBe(false)
     expect(getRouteDescriptor('admin-invitations').states.stale.applicable).toBe(false)
     expect(getRouteDescriptor('admin-invitations').states.stale.reason).toMatch(/pending-refresh-btn/)
-    expect(getRouteDescriptor('messenger').states.loading.applicable).toBe(false)
-    expect(getRouteDescriptor('messenger').states.slow.applicable).toBe(false)
+    expect(getRouteDescriptor('messenger').states.loading.applicable).toBe(true)
+    expect(getRouteDescriptor('messenger').states.loading.endpoint).toBe('/api/chat/conversations')
+    expect(getRouteDescriptor('messenger').states.slow.applicable).toBe(true)
+    expect(getRouteDescriptor('messenger').states.empty.applicable).toBe(true)
+    expect(getRouteDescriptor('messenger').states.dense.applicable).toBe(true)
+    expect(getRouteDescriptor('messenger').states.error.applicable).toBe(true)
+    expect(getRouteDescriptor('messenger').states.offline.applicable).toBe(false)
+    expect(getRouteDescriptor('messenger').states.stale.applicable).toBe(false)
     expect(getRouteDescriptor('operations-customers-detail').touch.selector).toMatch(/ds-workspace-back/)
     expect(getRouteDescriptor('operations-customers-detail').states.loading.endpoint).toBe(
       '/api/customers/owner-relations',
@@ -934,5 +968,122 @@ describe('Stage 8 environment separation', () => {
     expect(environmentApplicability('share-receive', 'telegram-webview-non-messenger').applicable).toBe(false)
     expect(environmentApplicability('admin-channels', 'telegram-webview-non-messenger').applicable).toBe(false)
     expect(environmentApplicability('settings', 'telegram-webview-non-messenger').applicable).toBe(true)
+  })
+})
+
+describe('Stage 8 N/A taxonomy is fail-closed', () => {
+  it('requires one of the three taxonomies on every N/A and forbids harness words in product N/A', () => {
+    const derived = deriveOfficialCounts()
+    expect(derived.taxonomy.harnessDeferred).toBe(0)
+    expect(derived.taxonomy.productNotApplicable + derived.taxonomy.canonicalAlias).toBe(
+      derived.stateNotApplicable + derived.interactionNotApplicable + derived.environmentNotApplicable,
+    )
+    for (const item of derived.naReasons) {
+      expect(Object.values(NA_TAXONOMY)).toContain(item.taxonomy)
+      if (item.taxonomy === NA_TAXONOMY.PRODUCT_NOT_APPLICABLE) {
+        expect(item.reason).not.toMatch(/harness|fixture|injectable/i)
+        expect(item.source?.file).toMatch(/\S/)
+      }
+      if (item.taxonomy === NA_TAXONOMY.CANONICAL_ALIAS) {
+        expect(item.source?.targetRoute).toBe('account-notifications')
+      }
+    }
+  })
+
+  it('keeps /notifications as a canonical alias and executes account-notifications separately', () => {
+    const notifications = getRouteDescriptor('notifications')
+    expect(notifications.states.loading.taxonomy).toBe(NA_TAXONOMY.CANONICAL_ALIAS)
+    expect(notifications.states.normal.taxonomy).toBe(NA_TAXONOMY.CANONICAL_ALIAS)
+    expect(notifications.touch.taxonomy).toBe(NA_TAXONOMY.CANONICAL_ALIAS)
+    expect(getRouteDescriptor('account-notifications').states.loading.applicable).toBe(true)
+    expect(getRouteDescriptor('account-notifications').states.empty.applicable).toBe(true)
+    expect(getRouteDescriptor('account-notifications').states.normal.applicable).toBe(true)
+  })
+
+  it('derives 960 unique IDs from descriptor dimensions, not scattered literals', () => {
+    const derived = deriveOfficialCounts()
+    expect(derived.accessExpected).toBe(STAGE8_ROUTE_NAMES.length * 9)
+    expect(derived.viewportExpected).toBe(STAGE8_ROUTE_NAMES.length * 8)
+    expect(derived.stateTotal).toBe(STAGE8_ROUTE_NAMES.length * 8)
+    expect(derived.interactionTotal).toBe(STAGE8_ROUTE_NAMES.length * 4)
+    expect(derived.environmentTotal).toBe(STAGE8_ROUTE_NAMES.length * 3)
+    expect(derived.uniqueScenarioIds).toBe(960)
+    expect(browserSource).toMatch(/officialCounts\(\)/)
+    expect(browserSource).toMatch(/taxonomyCounts/)
+    expect(browserSource).toMatch(/buildSuccessSummary/)
+    expect(browserSource).toMatch(/assertMarketLifecycle/)
+    expect(browserSource).toMatch(/schemaVersion: 4/)
+  })
+
+  it('executes identity page-data cells that have real UI', () => {
+    expect(getRouteDescriptor('home').states.loading.identityPageData).toBe(true)
+    expect(getRouteDescriptor('operations').states.error.identityPageData).toBe(true)
+    expect(getRouteDescriptor('account').states.slow.identityPageData).toBe(true)
+    expect(getRouteDescriptor('profile').states.loading.endpoint).toBe('/api/auth/me')
+  })
+})
+
+describe('Stage 8 Market lifecycle assertions', () => {
+  const healthy = {
+    documentOverflow: false,
+    ctaAboveNav: true,
+    marketLifecycle: {
+      perimeterPresent: true,
+      legacyDeadlineBarCount: 0,
+      overtimeStickerCount: 1,
+      overtimeStickerName: 'وقت اضافه',
+      overtimeStickerAnimated: true,
+      overtimeProgressBound: true,
+      expiredReadOnly: true,
+      expiredDistinct: true,
+      tradedReadOnly: true,
+      tradedDistinct: true,
+      sideActionInverted: false,
+    },
+  }
+
+  it('requires the merged A+C perimeter, hourglass, and distinct terminals', () => {
+    expect(
+      assertMarketLifecycle(healthy, {
+        routeName: 'market',
+        state: 'normal',
+        expectedKind: 'render-route',
+      }),
+    ).toEqual([])
+    expect(
+      assertMarketLifecycle(
+        { ...healthy, marketLifecycle: { ...healthy.marketLifecycle, perimeterPresent: false } },
+        { routeName: 'market', state: 'normal', expectedKind: 'render-route' },
+      ),
+    ).toContain('market full-card SVG perimeter missing')
+    expect(
+      assertMarketLifecycle(
+        { ...healthy, marketLifecycle: { ...healthy.marketLifecycle, overtimeStickerAnimated: true } },
+        { routeName: 'market', state: 'normal', expectedKind: 'render-route', interaction: 'reduced-motion' },
+      ),
+    ).toContain('market hourglass is not static under reduced motion')
+    expect(
+      assertMarketLifecycle(healthy, { routeName: 'home', state: 'normal', expectedKind: 'render-route' }),
+    ).toEqual([])
+  })
+
+  it('records a redacted success summary for applicable scenarios', () => {
+    const summary = buildSuccessSummary({
+      id: 'state/market/member/normal',
+      digest: 'abc',
+      route: 'market',
+      profile: 'member',
+      viewport: { width: 390, height: 844 },
+      state: 'normal',
+      interaction: null,
+      environment: 'mobile-browser',
+      passed: true,
+      failures: [],
+      probe: healthy,
+      diagnostics: { unexpectedConsole: 0 },
+    })
+    expect(summary.id).toBe('state/market/member/normal')
+    expect(summary.lifecycleMarker.perimeterPresent).toBe(true)
+    expect(summary.unnamedInteractive).toBe(0)
   })
 })

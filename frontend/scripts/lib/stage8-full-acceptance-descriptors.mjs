@@ -1,4 +1,12 @@
-import { ALL_STATES, ENVIRONMENTS, INTERACTIONS } from './stage8-full-acceptance-constants.mjs'
+import {
+  ACCESS_PROFILE_COUNT,
+  ALL_STATES,
+  ENVIRONMENTS,
+  INTERACTIONS,
+  NA_TAXONOMY,
+  NA_TAXONOMY_VALUES,
+  VIEWPORTS,
+} from './stage8-full-acceptance-constants.mjs'
 
 const ROUTE_NAMES = Object.freeze([
   'home',
@@ -33,44 +41,79 @@ const ROUTE_NAMES = Object.freeze([
   'system-recovery',
 ])
 
-function na(reason) {
-  return { applicable: false, reason }
+function assertProductNaReason(reason) {
+  if (/harness|fixture|injectable/i.test(reason)) {
+    throw new Error(`product N/A reason must not cite harness/fixture/injectable: ${reason}`)
+  }
+}
+
+function productNa(reason, file, symbol = '') {
+  assertProductNaReason(reason)
+  if (!file) throw new Error(`product N/A missing source file: ${reason}`)
+  return {
+    applicable: false,
+    reason,
+    taxonomy: NA_TAXONOMY.PRODUCT_NOT_APPLICABLE,
+    source: { file, symbol },
+  }
+}
+
+function canonicalNa(reason, targetRoute, file = 'frontend/src/router/index.ts', symbol = 'redirect') {
+  return {
+    applicable: false,
+    reason,
+    taxonomy: NA_TAXONOMY.CANONICAL_ALIAS,
+    source: { file, symbol, targetRoute },
+  }
 }
 
 function yes(spec = {}) {
-  return { applicable: true, reason: null, ...spec }
+  return { applicable: true, reason: null, taxonomy: null, source: null, ...spec }
 }
 
-function allNa(reason) {
-  return Object.fromEntries(ALL_STATES.map((state) => [state, na(reason)]))
+function allCanonical(reason, targetRoute) {
+  return Object.fromEntries(ALL_STATES.map((state) => [state, canonicalNa(reason, targetRoute)]))
 }
 
-function identityCachedNoInitialLoad(surface) {
-  return na(
-    `${surface} uses the harness-seeded current-user cache, so the initial loading/error/offline identity UI does not appear.`,
+function formOnly(surface, file, symbol = '') {
+  return productNa(
+    `${surface} is a form or status surface without list empty, dense, stale, or loading inventory.`,
+    file,
+    symbol,
   )
 }
 
-function noListInventory(surface, extra = '') {
-  return na(
+function authIdleNoPageData(surface, file, symbol = '') {
+  return productNa(
+    `${surface} idle step does not fetch page-data; error, offline, and slow UI are submit-bound.`,
+    file,
+    symbol,
+  )
+}
+
+function noListInventory(surface, file, symbol, extra = '') {
+  return productNa(
     `${surface} has no server list inventory in source.${extra ? ` ${extra}` : ''}`,
+    file,
+    symbol,
   )
 }
 
-function formOnly(surface) {
-  return na(`${surface} is a form/status surface without list empty/dense/stale/loading inventory.`)
-}
-
-function authIdleNoPageData(surface) {
-  return na(
-    `${surface} idle step does not fetch injectable page-data; error/offline/slow UI is submit-bound.`,
-  )
-}
-
-function noSecondInFlightGet(surface, endpoint, extra) {
-  return na(
+function noSecondInFlightGet(surface, endpoint, extra, file, symbol) {
+  return productNa(
     `${surface} cannot start a second in-flight GET to ${endpoint} from the success-path UI. ${extra}`,
+    file,
+    symbol,
   )
+}
+
+function identityPageData(selector, extra = {}) {
+  return yes({
+    endpoint: '/api/auth/me',
+    identityPageData: true,
+    selector,
+    ...extra,
+  })
 }
 
 function listStates({
@@ -86,6 +129,7 @@ function listStates({
   staleApplicable = true,
   staleReason = '',
   staleRefreshSelector = '',
+  staleSource = null,
 }) {
   return {
     loading: yes({
@@ -129,25 +173,49 @@ function listStates({
           selector: itemSelector,
           refreshSelector: staleRefreshSelector,
         })
-      : na(staleReason),
+      : productNa(staleReason, staleSource.file, staleSource.symbol),
   }
 }
 
-const REDIRECT_STATES = allNa('Router redirect record; states execute on the canonical target route.')
+const REDIRECT_STATES = allCanonical(
+  'Router redirect record; states execute on the canonical target route.',
+  'account-notifications',
+)
 
 const DESCRIPTORS = {
   home: {
     renderProfileId: 'member',
     canonical: null,
     states: {
-      loading: identityCachedNoInitialLoad('home'),
-      empty: noListInventory('home', 'Offer cards belong to the protected market interior.'),
+      loading: identityPageData('.ds-loading-state, .ui-loading-state', {
+        settle: '.dashboard-content, .ds-loading-state',
+      }),
+      empty: noListInventory(
+        'home / DashboardView',
+        'frontend/src/views/DashboardView.vue',
+        'DashboardView',
+        'Offer cards belong to MarketView, not the home identity surface.',
+      ),
       normal: yes({ settle: '.dashboard-content, .ui-v2-home-top' }),
-      dense: noListInventory('home', 'Offer density belongs to the protected market interior.'),
-      error: identityCachedNoInitialLoad('home'),
-      slow: identityCachedNoInitialLoad('home'),
-      offline: identityCachedNoInitialLoad('home'),
-      stale: noListInventory('home'),
+      dense: noListInventory(
+        'home / DashboardView',
+        'frontend/src/views/DashboardView.vue',
+        'DashboardView',
+        'Offer density belongs to MarketView, not the home identity surface.',
+      ),
+      error: identityPageData('.dashboard-identity-error, [role="alert"]'),
+      slow: identityPageData('.ds-loading-state, .ui-loading-state'),
+      offline: productNa(
+        'DashboardView offline identity UI is bound to navigator.onLine and the window offline event, not a page-data GET failure.',
+        'frontend/src/views/DashboardView.vue',
+        'handleBrowserOffline',
+      ),
+      stale: noListInventory(
+        'home / DashboardView',
+        'frontend/src/views/DashboardView.vue',
+        'identityState',
+        'The stale notice is identity freshness, not a list stale-overwrite race.',
+      ),
     },
     touch: yes({
       selector: 'button.ui-v2-home-identity, .ui-v2-home-identity',
@@ -160,14 +228,26 @@ const DESCRIPTORS = {
     renderProfileId: 'member',
     canonical: null,
     states: {
-      loading: formOnly('setup-password'),
-      empty: formOnly('setup-password'),
+      loading: formOnly('setup-password', 'frontend/src/views/SetupPassword.vue', 'SetupPassword'),
+      empty: formOnly('setup-password', 'frontend/src/views/SetupPassword.vue', 'SetupPassword'),
       normal: yes({ settle: '.ui-v2-auth-password-toggle, form' }),
-      dense: formOnly('setup-password'),
-      error: authIdleNoPageData('setup-password'),
-      slow: authIdleNoPageData('setup-password'),
-      offline: authIdleNoPageData('setup-password'),
-      stale: formOnly('setup-password'),
+      dense: formOnly('setup-password', 'frontend/src/views/SetupPassword.vue', 'SetupPassword'),
+      error: authIdleNoPageData(
+        'setup-password',
+        'frontend/src/views/SetupPassword.vue',
+        'SetupPassword',
+      ),
+      slow: authIdleNoPageData(
+        'setup-password',
+        'frontend/src/views/SetupPassword.vue',
+        'SetupPassword',
+      ),
+      offline: authIdleNoPageData(
+        'setup-password',
+        'frontend/src/views/SetupPassword.vue',
+        'SetupPassword',
+      ),
+      stale: formOnly('setup-password', 'frontend/src/views/SetupPassword.vue', 'SetupPassword'),
     },
     touch: yes({
       selector: '.ui-v2-auth-password-toggle',
@@ -179,17 +259,19 @@ const DESCRIPTORS = {
     renderProfileId: 'guest',
     canonical: null,
     states: {
-      loading: formOnly('login'),
-      empty: formOnly('login'),
+      loading: formOnly('login', 'frontend/src/views/LoginView.vue', 'LoginView'),
+      empty: formOnly('login', 'frontend/src/views/LoginView.vue', 'LoginView'),
       normal: yes({ settle: '.ui-v2-auth-login-step, [data-ui-system="v2"]' }),
-      dense: formOnly('login'),
-      error: authIdleNoPageData('login'),
-      slow: authIdleNoPageData('login'),
-      offline: authIdleNoPageData('login'),
-      stale: formOnly('login'),
+      dense: formOnly('login', 'frontend/src/views/LoginView.vue', 'LoginView'),
+      error: authIdleNoPageData('login', 'frontend/src/views/LoginView.vue', 'LoginView'),
+      slow: authIdleNoPageData('login', 'frontend/src/views/LoginView.vue', 'LoginView'),
+      offline: authIdleNoPageData('login', 'frontend/src/views/LoginView.vue', 'LoginView'),
+      stale: formOnly('login', 'frontend/src/views/LoginView.vue', 'LoginView'),
     },
-    touch: na(
-      'Login idle step only exposes OTP request and optional developer shortcut; there is no source-safe non-mutating activation.',
+    touch: productNa(
+      'LoginView idle step only exposes OTP request and optional developer shortcut; there is no source-safe non-mutating activation.',
+      'frontend/src/views/LoginView.vue',
+      'LoginView',
     ),
     zoom: { internalStrip: null },
   },
@@ -232,10 +314,14 @@ const DESCRIPTORS = {
         'market / useOffers.fetchOffers',
         '/api/offers/page',
         'isFetching queues a later refresh; a second GET does not start until the first settles, so a late stale overwrite cannot occur.',
+        'frontend/src/composables/useOffers.ts',
+        'isFetching',
       ),
     },
-    touch: na(
-      'Market hides the standard bottom nav and the remaining FAB nav is not a one-click non-mutating target.',
+    touch: productNa(
+      'MarketView hides the standard bottom nav and the remaining FAB nav is not a one-click non-mutating target.',
+      'frontend/src/views/MarketView.vue',
+      'MarketView',
     ),
     zoom: { internalStrip: '.offers-list, .app-route-scroll' },
   },
@@ -243,17 +329,32 @@ const DESCRIPTORS = {
     renderProfileId: 'member',
     canonical: null,
     states: {
-      loading: identityCachedNoInitialLoad('operations hub'),
-      empty: noListInventory(
-        'operations hub',
-        'The empty-state is role-action absence, not a fixture list.',
+      loading: identityPageData('.operations-identity-loading, .ui-loading-state', {
+        settle: '.operations-action-tile, .operations-empty-state, .operations-identity-loading',
+      }),
+      empty: productNa(
+        'OperationsView empty copy is role-action absence, not a server list inventory.',
+        'frontend/src/views/OperationsView.vue',
+        'OperationsView',
       ),
       normal: yes({ settle: '.operations-action-tile, .operations-empty-state, .workspace-shell' }),
-      dense: noListInventory('operations hub'),
-      error: identityCachedNoInitialLoad('operations hub'),
-      slow: identityCachedNoInitialLoad('operations hub'),
-      offline: identityCachedNoInitialLoad('operations hub'),
-      stale: noListInventory('operations hub'),
+      dense: noListInventory(
+        'operations hub / OperationsView',
+        'frontend/src/views/OperationsView.vue',
+        'OperationsView',
+      ),
+      error: identityPageData('.operations-identity-error, [role="alert"]'),
+      slow: identityPageData('.operations-identity-loading, .ui-loading-state'),
+      offline: productNa(
+        'OperationsView identity machine has loading, ready, stale, and error only; there is no offline identity contract.',
+        'frontend/src/views/OperationsView.vue',
+        'identityState',
+      ),
+      stale: noListInventory(
+        'operations hub / OperationsView',
+        'frontend/src/views/OperationsView.vue',
+        'identityState',
+      ),
     },
     touch: yes({
       selector: '.operations-action-tile, .operations-empty-state .ui-button, .hub-action',
@@ -278,6 +379,10 @@ const DESCRIPTORS = {
       staleApplicable: false,
       staleReason:
         'operations-customers cannot start a second in-flight GET to /api/customers/owner-relations from the success-path UI. loadRelations(true) is bound only to error-path تلاش دوباره, and overlapping calls abort via relationsRequestGeneration.',
+      staleSource: {
+        file: 'frontend/src/views/CustomerWorkspaceView.vue',
+        symbol: 'relationsRequestGeneration',
+      },
     }),
     touch: yes({
       selector: '.ui-list-item, .customer-pending-card, a[href^="/operations"]',
@@ -294,9 +399,18 @@ const DESCRIPTORS = {
         endpoint: '/api/customers/owner-relations',
         selector: '.ui-loading-state',
       }),
-      empty: noListInventory('customer detail', 'Detail shows one relation, not empty/dense lists.'),
+      empty: noListInventory(
+        'customer detail',
+        'frontend/src/views/CustomerWorkspaceView.vue',
+        'CustomerWorkspaceView',
+        'Detail shows one relation, not empty or dense lists.',
+      ),
       normal: yes({ settle: '.customer-detail-shell, .ui-empty-state, .ui-loading-state' }),
-      dense: noListInventory('customer detail'),
+      dense: noListInventory(
+        'customer detail',
+        'frontend/src/views/CustomerWorkspaceView.vue',
+        'CustomerWorkspaceView',
+      ),
       error: yes({
         endpoint: '/api/customers/owner-relations',
         selector: '[role="alert"], .ui-empty-state--danger',
@@ -314,6 +428,8 @@ const DESCRIPTORS = {
         'operations-customers-detail / loadRelations',
         '/api/customers/owner-relations',
         'The detail route first fetches the collection; success-path UI has no second identical GET, and overlapping calls abort via relationsRequestGeneration.',
+        'frontend/src/views/CustomerWorkspaceView.vue',
+        'relationsRequestGeneration',
       ),
     },
     touch: yes({
@@ -338,6 +454,10 @@ const DESCRIPTORS = {
       staleApplicable: false,
       staleReason:
         'operations-accountants cannot start a second in-flight GET to /api/accountants/owner-relations from the success-path UI. loadRelations(true) is bound only to error-path تلاش دوباره, and overlapping calls abort the previous controller.',
+      staleSource: {
+        file: 'frontend/src/views/AccountantWorkspaceView.vue',
+        symbol: 'loadRelations',
+      },
     }),
     touch: yes({
       selector: '.ui-list-item, .accountant-pending-card',
@@ -353,9 +473,17 @@ const DESCRIPTORS = {
         endpoint: '/api/accountants/owner-relations',
         selector: '.ui-loading-state',
       }),
-      empty: noListInventory('accountant detail'),
+      empty: noListInventory(
+        'accountant detail',
+        'frontend/src/views/AccountantWorkspaceView.vue',
+        'AccountantWorkspaceView',
+      ),
       normal: yes({ settle: '.ui-empty-state, .ui-loading-state, .app-route-v2-scope' }),
-      dense: noListInventory('accountant detail'),
+      dense: noListInventory(
+        'accountant detail',
+        'frontend/src/views/AccountantWorkspaceView.vue',
+        'AccountantWorkspaceView',
+      ),
       error: yes({
         endpoint: '/api/accountants/owner-relations',
         selector: '[role="alert"], .ui-empty-state--danger',
@@ -372,6 +500,8 @@ const DESCRIPTORS = {
         'operations-accountants-detail / loadRelations',
         '/api/accountants/owner-relations',
         'The detail route first fetches the collection; success-path UI has no second identical GET, and overlapping calls abort the previous controller.',
+        'frontend/src/views/AccountantWorkspaceView.vue',
+        'loadRelations',
       ),
     },
     touch: yes({
@@ -384,14 +514,32 @@ const DESCRIPTORS = {
     renderProfileId: 'member',
     canonical: null,
     states: {
-      loading: identityCachedNoInitialLoad('account hub'),
-      empty: noListInventory('account hub'),
+      loading: identityPageData('.account-identity-loading, .ui-loading-state', {
+        settle: '.hub-action, .account-section-card, .account-identity-loading',
+      }),
+      empty: noListInventory(
+        'account hub / AccountHubView',
+        'frontend/src/views/AccountHubView.vue',
+        'AccountHubView',
+      ),
       normal: yes({ settle: '.hub-action, .account-section-card' }),
-      dense: noListInventory('account hub'),
-      error: identityCachedNoInitialLoad('account hub'),
-      slow: identityCachedNoInitialLoad('account hub'),
-      offline: identityCachedNoInitialLoad('account hub'),
-      stale: noListInventory('account hub'),
+      dense: noListInventory(
+        'account hub / AccountHubView',
+        'frontend/src/views/AccountHubView.vue',
+        'AccountHubView',
+      ),
+      error: identityPageData('.account-identity-error, [role="alert"]'),
+      slow: identityPageData('.account-identity-loading, .ui-loading-state'),
+      offline: productNa(
+        'AccountHubView identity machine has loading, ready, stale, and error only; there is no offline identity contract.',
+        'frontend/src/views/AccountHubView.vue',
+        'identityState',
+      ),
+      stale: noListInventory(
+        'account hub / AccountHubView',
+        'frontend/src/views/AccountHubView.vue',
+        'identityState',
+      ),
     },
     touch: yes({
       selector: '.hub-action',
@@ -414,8 +562,10 @@ const DESCRIPTORS = {
         retrySelector: '.sessions-retry',
         settleSelector: '.session-card, .ui-empty-state, .ui-loading-state',
       }),
-      stale: na(
+      stale: productNa(
         'fetchSessions returns early while sessionsLoading is true and the success path has no second in-flight /api/sessions/active request.',
+        'frontend/src/views/SettingsView.vue',
+        'sessionsLoading',
       ),
     },
     touch: yes({
@@ -428,14 +578,43 @@ const DESCRIPTORS = {
     renderProfileId: 'member',
     canonical: null,
     states: {
-      loading: noListInventory('account-storage', 'Cache size is measured locally, not from a server list.'),
-      empty: noListInventory('account-storage'),
+      loading: noListInventory(
+        'account-storage',
+        'frontend/src/views/SettingsView.vue',
+        'isStorageRoute',
+        'Cache size is measured locally, not from a server list.',
+      ),
+      empty: noListInventory(
+        'account-storage',
+        'frontend/src/views/SettingsView.vue',
+        'isStorageRoute',
+      ),
       normal: yes({ settle: '.storage-value, .ui-v2-settings-page' }),
-      dense: noListInventory('account-storage'),
-      error: noListInventory('account-storage'),
-      slow: noListInventory('account-storage'),
-      offline: noListInventory('account-storage'),
-      stale: noListInventory('account-storage'),
+      dense: noListInventory(
+        'account-storage',
+        'frontend/src/views/SettingsView.vue',
+        'isStorageRoute',
+      ),
+      error: noListInventory(
+        'account-storage',
+        'frontend/src/views/SettingsView.vue',
+        'isStorageRoute',
+      ),
+      slow: noListInventory(
+        'account-storage',
+        'frontend/src/views/SettingsView.vue',
+        'isStorageRoute',
+      ),
+      offline: noListInventory(
+        'account-storage',
+        'frontend/src/views/SettingsView.vue',
+        'isStorageRoute',
+      ),
+      stale: noListInventory(
+        'account-storage',
+        'frontend/src/views/SettingsView.vue',
+        'isStorageRoute',
+      ),
     },
     touch: yes({
       selector: '.settings-return-control',
@@ -459,6 +638,10 @@ const DESCRIPTORS = {
       staleApplicable: false,
       staleReason:
         'account-notifications cannot start a second in-flight GET to /api/notifications from the success-path UI. fetchHistory coalesces on activeHistoryRequest, so a later open/retry returns the same in-flight promise.',
+      staleSource: {
+        file: 'frontend/src/stores/notifications.ts',
+        symbol: 'activeHistoryRequest',
+      },
     }),
     touch: yes({
       selector: 'a[href="/account"], .hub-action, [href="/account"]',
@@ -470,28 +653,52 @@ const DESCRIPTORS = {
     renderProfileId: 'member',
     canonical: null,
     states: {
-      loading: na(
-        'Messenger FULL list has no Stage 8 injectable page-level loading skeleton; the fixture also has no conversation inventory.',
+      loading: yes({
+        endpoint: '/api/chat/conversations',
+        selector: '.loading-state, .messenger-loader, .ui-loading-state',
+        settle: '.conversation-list-wrapper, .loading-state, .empty-state',
+      }),
+      empty: yes({
+        endpoint: '/api/chat/conversations',
+        selector: '.empty-state, .chat-empty-state',
+        settle: '.empty-state, .conversation-list-wrapper',
+      }),
+      normal: yes({
+        endpoint: '/api/chat/conversations',
+        settle: '.conversation-list-wrapper, .app-route-scroll, #app',
+      }),
+      dense: yes({
+        endpoint: '/api/chat/conversations',
+        selector: '.conversation-card, .conversation-item',
+        settle: '.conversation-card, .conversation-list-wrapper',
+        minItems: 8,
+      }),
+      error: yes({
+        endpoint: '/api/chat/conversations',
+        selector: '.error-state, [role="alert"]',
+        retry: 'button:has-text("تلاش")',
+      }),
+      slow: yes({
+        endpoint: '/api/chat/conversations',
+        selector: '.loading-state, .messenger-loader, .ui-loading-state',
+      }),
+      offline: productNa(
+        'ChatView conversation failure renders .error-state; there is no separate offline list contract.',
+        'frontend/src/components/ChatView.vue',
+        'error',
       ),
-      empty: noListInventory(
-        'messenger',
-        'The Stage 8 fixture does not provide conversation inventory; empty/dense/stale stay N/A.',
+      stale: productNa(
+        'ChatView loadConversations runs once on mount; the success-path list has no in-page refresh that starts a second /api/chat/conversations GET.',
+        'frontend/src/composables/chat/useChatMessages.ts',
+        'loadConversations',
       ),
-      normal: yes({ settle: '.app-route-scroll, #app' }),
-      dense: noListInventory('messenger'),
-      error: na('Messenger FULL surface has no Stage 8 injectable conversation error contract.'),
-      slow: na(
-        'Messenger FULL list has no Stage 8 injectable page-level loading skeleton; the fixture also has no conversation inventory.',
-      ),
-      offline: na('Messenger FULL surface has no Stage 8 injectable conversation offline contract.'),
-      stale: noListInventory('messenger'),
     },
     touch: yes({
       selector: 'button.header-btn.back-btn',
       expectedName: 'home',
       allowNavigation: true,
     }),
-    zoom: { internalStrip: null },
+    zoom: { internalStrip: '.conversations-list, .app-route-scroll' },
   },
   'public-profile': {
     renderProfileId: 'member',
@@ -501,16 +708,28 @@ const DESCRIPTORS = {
         endpoint: '/api/users-public/9101',
         selector: '.loading-state-skeleton, .skeleton-box, .skeleton-text-header',
       }),
-      empty: noListInventory('public-profile'),
+      empty: noListInventory(
+        'public-profile',
+        'frontend/src/views/PublicProfileView.vue',
+        'PublicProfileView',
+      ),
       normal: yes({ settle: '.public-profile, .app-route-v2-scope' }),
-      dense: noListInventory('public-profile'),
+      dense: noListInventory(
+        'public-profile',
+        'frontend/src/views/PublicProfileView.vue',
+        'PublicProfileView',
+      ),
       error: yes({ selector: '[role="alert"]' }),
       slow: yes({
         endpoint: '/api/users-public/9101',
         selector: '.loading-state-skeleton, .skeleton-box',
       }),
       offline: yes({ selector: '[role="alert"]' }),
-      stale: noListInventory('public-profile'),
+      stale: noListInventory(
+        'public-profile',
+        'frontend/src/views/PublicProfileView.vue',
+        'PublicProfileView',
+      ),
     },
     touch: yes({
       selector: 'a[href="/"], .bottom-nav-wrapper a, button[aria-label*="بازگشت"]',
@@ -522,14 +741,20 @@ const DESCRIPTORS = {
     renderProfileId: 'member',
     canonical: null,
     states: {
-      loading: identityCachedNoInitialLoad('profile'),
-      empty: noListInventory('profile'),
+      loading: identityPageData('.loading-container, .ui-loading-state', {
+        settle: '.app-route-v2-scope, .loading-container',
+      }),
+      empty: noListInventory('profile', 'frontend/src/views/ProfileView.vue', 'ProfileView'),
       normal: yes({ settle: '.app-route-v2-scope, main' }),
-      dense: noListInventory('profile'),
-      error: identityCachedNoInitialLoad('profile'),
-      slow: identityCachedNoInitialLoad('profile'),
-      offline: identityCachedNoInitialLoad('profile'),
-      stale: noListInventory('profile'),
+      dense: noListInventory('profile', 'frontend/src/views/ProfileView.vue', 'ProfileView'),
+      error: identityPageData('.profile-load-error, [role="alert"]'),
+      slow: identityPageData('.loading-container, .ui-loading-state'),
+      offline: productNa(
+        'ProfileView catch path shows a generic load error; there is no distinct offline identity contract.',
+        'frontend/src/views/ProfileView.vue',
+        'loadCurrentUser',
+      ),
+      stale: noListInventory('profile', 'frontend/src/views/ProfileView.vue', 'ProfileView'),
     },
     touch: yes({
       selector: 'a[href="/account"], .bottom-nav-wrapper a[href="/account"]',
@@ -543,27 +768,44 @@ const DESCRIPTORS = {
     states: {
       loading: noListInventory(
         'general /settings',
-        'Session loading/empty/dense/stale belong to /account/security, not the general settings route.',
+        'frontend/src/views/SettingsView.vue',
+        'SettingsView',
+        'Session loading, empty, dense, and stale belong to /account/security, not the general settings route.',
       ),
       empty: noListInventory(
         'general /settings',
+        'frontend/src/views/SettingsView.vue',
+        'SettingsView',
         'The general route renders overtime or a role notice, not a session list.',
       ),
       normal: yes({ settle: '.settings-overtime-card, .settings-role-notice, .ui-v2-settings-page' }),
       dense: noListInventory(
         'general /settings',
+        'frontend/src/views/SettingsView.vue',
+        'SettingsView',
         'The general route renders overtime or a role notice, not a session list.',
       ),
-      error: na(
-        'general /settings overtime panel reads cached identity; error UI is save-bound, not a page-data GET.',
+      error: productNa(
+        'SettingsView overtime panel reads cached identity; error UI is save-bound, not a page-data GET.',
+        'frontend/src/views/SettingsView.vue',
+        'SettingsView',
       ),
-      slow: noListInventory('general /settings', 'Overtime preference has no page-level loading skeleton.'),
-      offline: na(
-        'general /settings overtime panel reads cached identity; offline UI is save-bound, not a page-data GET.',
+      slow: noListInventory(
+        'general /settings',
+        'frontend/src/views/SettingsView.vue',
+        'SettingsView',
+        'Overtime preference has no page-level loading skeleton.',
+      ),
+      offline: productNa(
+        'SettingsView overtime panel reads cached identity; offline UI is save-bound, not a page-data GET.',
+        'frontend/src/views/SettingsView.vue',
+        'SettingsView',
       ),
       stale: noListInventory(
         'general /settings',
-        'No displayed session/list field exists on the general settings route.',
+        'frontend/src/views/SettingsView.vue',
+        'SettingsView',
+        'No displayed session or list field exists on the general settings route.',
       ),
     },
     touch: yes({
@@ -576,14 +818,30 @@ const DESCRIPTORS = {
     renderProfileId: 'middle-admin',
     canonical: null,
     states: {
-      loading: na('Admin menu is a static section grid after identity bootstrap.'),
-      empty: noListInventory('admin menu'),
+      loading: productNa(
+        'AdminView menu is a static section grid after identity bootstrap.',
+        'frontend/src/views/AdminView.vue',
+        'AdminView',
+      ),
+      empty: noListInventory('admin menu', 'frontend/src/views/AdminView.vue', 'AdminView'),
       normal: yes({ settle: '.app-route-v2-scope, main' }),
-      dense: noListInventory('admin menu'),
-      error: na('Admin menu does not fetch a list inventory.'),
-      slow: na('Admin menu is a static section grid after identity bootstrap.'),
-      offline: na('Admin menu does not fetch a list inventory.'),
-      stale: noListInventory('admin menu'),
+      dense: noListInventory('admin menu', 'frontend/src/views/AdminView.vue', 'AdminView'),
+      error: productNa(
+        'AdminView menu does not fetch a list inventory.',
+        'frontend/src/views/AdminView.vue',
+        'AdminView',
+      ),
+      slow: productNa(
+        'AdminView menu is a static section grid after identity bootstrap.',
+        'frontend/src/views/AdminView.vue',
+        'AdminView',
+      ),
+      offline: productNa(
+        'AdminView menu does not fetch a list inventory.',
+        'frontend/src/views/AdminView.vue',
+        'AdminView',
+      ),
+      stale: noListInventory('admin menu', 'frontend/src/views/AdminView.vue', 'AdminView'),
     },
     touch: yes({
       selector: '.admin-panel-action',
@@ -607,6 +865,10 @@ const DESCRIPTORS = {
       staleApplicable: false,
       staleReason:
         'admin-invitations cannot start a second in-flight GET to /api/invitations/pending from the success-path UI. pending-refresh-btn stays in the loading state for the whole request, so a later GET cannot overlap the first.',
+      staleSource: {
+        file: 'frontend/src/components/CreateInvitationView.vue',
+        symbol: 'pending-refresh-btn',
+      },
     }),
     touch: yes({
       selector: '.admin-subview-return',
@@ -618,14 +880,42 @@ const DESCRIPTORS = {
     renderProfileId: 'senior-admin',
     canonical: { profileId: 'middle-admin', finalName: 'admin', finalPath: '/admin' },
     states: {
-      loading: formOnly('admin-channels / CreateChannel'),
-      empty: formOnly('admin-channels / CreateChannel'),
+      loading: formOnly(
+        'admin-channels / CreateChannel',
+        'frontend/src/components/CreateChannelView.vue',
+        'CreateChannelView',
+      ),
+      empty: formOnly(
+        'admin-channels / CreateChannel',
+        'frontend/src/components/CreateChannelView.vue',
+        'CreateChannelView',
+      ),
       normal: yes({ settle: '.app-route-scroll, #app' }),
-      dense: formOnly('admin-channels / CreateChannel'),
-      error: formOnly('admin-channels / CreateChannel'),
-      slow: formOnly('admin-channels / CreateChannel'),
-      offline: formOnly('admin-channels / CreateChannel'),
-      stale: formOnly('admin-channels / CreateChannel'),
+      dense: formOnly(
+        'admin-channels / CreateChannel',
+        'frontend/src/components/CreateChannelView.vue',
+        'CreateChannelView',
+      ),
+      error: formOnly(
+        'admin-channels / CreateChannel',
+        'frontend/src/components/CreateChannelView.vue',
+        'CreateChannelView',
+      ),
+      slow: formOnly(
+        'admin-channels / CreateChannel',
+        'frontend/src/components/CreateChannelView.vue',
+        'CreateChannelView',
+      ),
+      offline: formOnly(
+        'admin-channels / CreateChannel',
+        'frontend/src/components/CreateChannelView.vue',
+        'CreateChannelView',
+      ),
+      stale: formOnly(
+        'admin-channels / CreateChannel',
+        'frontend/src/components/CreateChannelView.vue',
+        'CreateChannelView',
+      ),
     },
     touch: yes({
       selector: '.admin-subview-return',
@@ -649,6 +939,10 @@ const DESCRIPTORS = {
       staleApplicable: false,
       staleReason:
         'admin-users cannot start a second in-flight GET to /api/users/ from the success-path UI. retryUsers is error-path only, and fetchUsers abort-gates overlapping calls with usersRequestSequence.',
+      staleSource: {
+        file: 'frontend/src/components/UserManager.vue',
+        symbol: 'usersRequestSequence',
+      },
     }),
     touch: yes({
       selector: '.user-item, .ui-list-item',
@@ -664,9 +958,17 @@ const DESCRIPTORS = {
         endpoint: '/api/users/9102',
         selector: '.ui-loading-state',
       }),
-      empty: noListInventory('admin user profile'),
+      empty: noListInventory(
+        'admin user profile',
+        'frontend/src/components/UserProfile.vue',
+        'UserProfile',
+      ),
       normal: yes({ settle: '.app-route-v2-scope, main' }),
-      dense: noListInventory('admin user profile'),
+      dense: noListInventory(
+        'admin user profile',
+        'frontend/src/components/UserProfile.vue',
+        'UserProfile',
+      ),
       error: yes({
         endpoint: '/api/users/9102',
         selector: '[role="alert"], .ui-empty-state--danger',
@@ -676,7 +978,11 @@ const DESCRIPTORS = {
         selector: '.ui-loading-state',
       }),
       offline: yes({ selector: '[role="alert"], .ui-empty-state--danger' }),
-      stale: noListInventory('admin user profile'),
+      stale: noListInventory(
+        'admin user profile',
+        'frontend/src/components/UserProfile.vue',
+        'UserProfile',
+      ),
     },
     touch: yes({
       selector: '.admin-subview-return, a[href="/admin/users"]',
@@ -700,6 +1006,10 @@ const DESCRIPTORS = {
       staleApplicable: false,
       staleReason:
         'admin-commodities cannot start a second in-flight GET to /api/commodities from the success-path UI. commodity-list-retry is error-path only, and fetchCommodities abort-gates overlapping calls with listRequestSequence.',
+      staleSource: {
+        file: 'frontend/src/components/CommodityManager.vue',
+        symbol: 'listRequestSequence',
+      },
     }),
     touch: yes({
       selector: '.admin-subview-return, .commodity-back-control',
@@ -711,17 +1021,42 @@ const DESCRIPTORS = {
     renderProfileId: 'senior-admin',
     canonical: { profileId: 'middle-admin', finalName: 'admin', finalPath: '/admin' },
     states: {
-      loading: na('admin-messages has no dedicated page-level loading skeleton in source.'),
-      empty: noListInventory(
-        'admin-messages',
-        'Protected market/messenger delivery interiors stay outside this list contract.',
+      loading: productNa(
+        'AdminMessagesView has no page-level loading skeleton; loadDashboard only sets aria-busy on the workspace.',
+        'frontend/src/components/AdminMessagesView.vue',
+        'loadDashboard',
+      ),
+      empty: productNa(
+        'AdminMessagesView empty copy is section-level for market pin and history, not a page-level list empty contract.',
+        'frontend/src/components/AdminMessagesView.vue',
+        'AdminMessagesView',
       ),
       normal: yes({ settle: '.message-workspace, .app-route-scroll' }),
-      dense: noListInventory('admin-messages'),
-      error: na('admin-messages has no Stage 8 injectable page-level error contract.'),
-      slow: na('admin-messages has no dedicated page-level loading skeleton in source.'),
-      offline: na('admin-messages has no Stage 8 injectable page-level offline contract.'),
-      stale: noListInventory('admin-messages'),
+      dense: productNa(
+        'AdminMessagesView has no dense page-level list contract; market and broadcast interiors stay section-scoped.',
+        'frontend/src/components/AdminMessagesView.vue',
+        'AdminMessagesView',
+      ),
+      error: productNa(
+        'AdminMessagesView swallows initial GET failures; page-level error UI is submit-bound.',
+        'frontend/src/components/AdminMessagesView.vue',
+        'loadDashboard',
+      ),
+      slow: productNa(
+        'AdminMessagesView has no page-level loading skeleton; loadDashboard only sets aria-busy on the workspace.',
+        'frontend/src/components/AdminMessagesView.vue',
+        'loadDashboard',
+      ),
+      offline: productNa(
+        'AdminMessagesView has no page-level offline contract; initial GET failure is swallowed.',
+        'frontend/src/components/AdminMessagesView.vue',
+        'loadDashboard',
+      ),
+      stale: productNa(
+        'AdminMessagesView has no displayed list field and no success-path second GET that can race.',
+        'frontend/src/components/AdminMessagesView.vue',
+        'loadDashboard',
+      ),
     },
     touch: yes({
       selector: '.admin-subview-return',
@@ -733,14 +1068,42 @@ const DESCRIPTORS = {
     renderProfileId: 'senior-admin',
     canonical: { profileId: 'middle-admin', finalName: 'admin', finalPath: '/admin' },
     states: {
-      loading: formOnly('admin-system / TradingSettings'),
-      empty: formOnly('admin-system / TradingSettings'),
+      loading: formOnly(
+        'admin-system / TradingSettings',
+        'frontend/src/components/TradingSettings.vue',
+        'TradingSettings',
+      ),
+      empty: formOnly(
+        'admin-system / TradingSettings',
+        'frontend/src/components/TradingSettings.vue',
+        'TradingSettings',
+      ),
       normal: yes({ settle: '.app-route-scroll, #app' }),
-      dense: formOnly('admin-system / TradingSettings'),
-      error: formOnly('admin-system / TradingSettings'),
-      slow: formOnly('admin-system / TradingSettings'),
-      offline: formOnly('admin-system / TradingSettings'),
-      stale: formOnly('admin-system / TradingSettings'),
+      dense: formOnly(
+        'admin-system / TradingSettings',
+        'frontend/src/components/TradingSettings.vue',
+        'TradingSettings',
+      ),
+      error: formOnly(
+        'admin-system / TradingSettings',
+        'frontend/src/components/TradingSettings.vue',
+        'TradingSettings',
+      ),
+      slow: formOnly(
+        'admin-system / TradingSettings',
+        'frontend/src/components/TradingSettings.vue',
+        'TradingSettings',
+      ),
+      offline: formOnly(
+        'admin-system / TradingSettings',
+        'frontend/src/components/TradingSettings.vue',
+        'TradingSettings',
+      ),
+      stale: formOnly(
+        'admin-system / TradingSettings',
+        'frontend/src/components/TradingSettings.vue',
+        'TradingSettings',
+      ),
     },
     touch: yes({
       selector: '.admin-subview-return',
@@ -756,9 +1119,9 @@ const DESCRIPTORS = {
         endpoint: '/api/invitations/lookup/Stg8Inv1',
         selector: '.ui-loading-state',
       }),
-      empty: formOnly('invite-landing'),
+      empty: formOnly('invite-landing', 'frontend/src/views/InviteLanding.vue', 'InviteLanding'),
       normal: yes({ settle: '.ui-v2-auth-invite-actions, .ui-empty-state, .ui-loading-state' }),
-      dense: formOnly('invite-landing'),
+      dense: formOnly('invite-landing', 'frontend/src/views/InviteLanding.vue', 'InviteLanding'),
       error: yes({
         endpoint: '/api/invitations/lookup/Stg8Inv1',
         selector: '.ui-empty-state--danger, [role="alert"]',
@@ -772,7 +1135,7 @@ const DESCRIPTORS = {
         endpoint: '/api/invitations/lookup/Stg8Inv1',
         selector: '.ui-empty-state--danger, [role="alert"]',
       }),
-      stale: formOnly('invite-landing'),
+      stale: formOnly('invite-landing', 'frontend/src/views/InviteLanding.vue', 'InviteLanding'),
     },
     touch: yes({
       selector: '.ui-v2-auth-invite-route:not(.ui-v2-auth-invite-route--telegram)',
@@ -788,9 +1151,9 @@ const DESCRIPTORS = {
         endpoint: '/api/auth/registration-context',
         selector: '.ui-loading-state',
       }),
-      empty: formOnly('web-register'),
+      empty: formOnly('web-register', 'frontend/src/views/WebRegister.vue', 'WebRegister'),
       normal: yes({ settle: '.ui-v2-auth-register-step, .ui-loading-state, .ui-empty-state' }),
-      dense: formOnly('web-register'),
+      dense: formOnly('web-register', 'frontend/src/views/WebRegister.vue', 'WebRegister'),
       error: yes({
         endpoint: '/api/auth/registration-context',
         selector: '.ui-empty-state--danger, [role="alert"]',
@@ -800,10 +1163,12 @@ const DESCRIPTORS = {
         selector: '.ui-loading-state',
       }),
       offline: yes({ selector: '.ui-empty-state--danger, [role="alert"]' }),
-      stale: formOnly('web-register'),
+      stale: formOnly('web-register', 'frontend/src/views/WebRegister.vue', 'WebRegister'),
     },
-    touch: na(
-      'Web-register success path only exposes mutating OTP/Telegram actions; return-to-login is error-only.',
+    touch: productNa(
+      'Web-register success path only exposes mutating OTP and Telegram actions; return-to-login is error-only.',
+      'frontend/src/views/WebRegister.vue',
+      'WebRegister',
     ),
     zoom: { internalStrip: null },
   },
@@ -811,21 +1176,44 @@ const DESCRIPTORS = {
     renderProfileId: 'member',
     canonical: { finalName: 'account-notifications', finalPath: '/account/notifications' },
     states: REDIRECT_STATES,
-    touch: na('Router redirect record; interactions execute on canonical account-notifications.'),
+    touch: canonicalNa(
+      'Router redirect record; interactions execute on canonical account-notifications.',
+      'account-notifications',
+    ),
     zoom: { internalStrip: null },
   },
   'share-receive': {
     renderProfileId: 'member',
     canonical: null,
     states: {
-      loading: na('share-receive loading overlay is not the shared page-level loading contract.'),
-      empty: noListInventory('share-receive', 'The surface is a forward picker, not a dense list contract.'),
+      loading: productNa(
+        'ShareReceiveView default visit without share_key is the invalid-link error overlay; the loading overlay belongs to the share-payload path, not the Stage 8 visit contract.',
+        'frontend/src/views/ShareReceiveView.vue',
+        'onMounted',
+      ),
+      empty: productNa(
+        'ShareReceiveView default visit is an invalid-link status overlay, not a conversation-list empty contract.',
+        'frontend/src/views/ShareReceiveView.vue',
+        'ShareReceiveView',
+      ),
       normal: yes({ settle: '.share-receive-root, [role="dialog"]' }),
-      dense: noListInventory('share-receive'),
+      dense: productNa(
+        'ShareReceiveView default visit is an invalid-link status overlay, not a dense conversation-list contract.',
+        'frontend/src/views/ShareReceiveView.vue',
+        'ShareReceiveView',
+      ),
       error: yes({ selector: '.ui-empty-state--danger, [role="alert"]' }),
-      slow: na('share-receive loading overlay is not the shared page-level loading contract.'),
+      slow: productNa(
+        'ShareReceiveView default visit without share_key is the invalid-link error overlay; the loading overlay belongs to the share-payload path, not the Stage 8 visit contract.',
+        'frontend/src/views/ShareReceiveView.vue',
+        'onMounted',
+      ),
       offline: yes({ selector: '.ui-empty-state--danger, [role="alert"]' }),
-      stale: noListInventory('share-receive'),
+      stale: productNa(
+        'ShareReceiveView default visit is an invalid-link status overlay, not a list stale-overwrite contract.',
+        'frontend/src/views/ShareReceiveView.vue',
+        'ShareReceiveView',
+      ),
     },
     touch: yes({
       selector: 'button:has-text("بازگشت"), [aria-label*="بستن"], .share-receive-close',
@@ -838,14 +1226,42 @@ const DESCRIPTORS = {
     renderProfileId: 'guest',
     canonical: null,
     states: {
-      loading: na('Recovery is a terminal status page without list/data modes.'),
-      empty: na('Recovery is a terminal status page without list/data modes.'),
+      loading: productNa(
+        'System recovery is a terminal status page without list or data modes.',
+        'frontend/src/views/SystemRecoveryView.vue',
+        'SystemRecoveryView',
+      ),
+      empty: productNa(
+        'System recovery is a terminal status page without list or data modes.',
+        'frontend/src/views/SystemRecoveryView.vue',
+        'SystemRecoveryView',
+      ),
       normal: yes({ settle: '[data-test="route-system-recovery"]' }),
-      dense: na('Recovery is a terminal status page without list/data modes.'),
-      error: na('Recovery is a terminal status page without list/data modes.'),
-      slow: na('Recovery is a terminal status page without list/data modes.'),
-      offline: na('Recovery is a terminal status page without list/data modes.'),
-      stale: na('Recovery is a terminal status page without list/data modes.'),
+      dense: productNa(
+        'System recovery is a terminal status page without list or data modes.',
+        'frontend/src/views/SystemRecoveryView.vue',
+        'SystemRecoveryView',
+      ),
+      error: productNa(
+        'System recovery is a terminal status page without list or data modes.',
+        'frontend/src/views/SystemRecoveryView.vue',
+        'SystemRecoveryView',
+      ),
+      slow: productNa(
+        'System recovery is a terminal status page without list or data modes.',
+        'frontend/src/views/SystemRecoveryView.vue',
+        'SystemRecoveryView',
+      ),
+      offline: productNa(
+        'System recovery is a terminal status page without list or data modes.',
+        'frontend/src/views/SystemRecoveryView.vue',
+        'SystemRecoveryView',
+      ),
+      stale: productNa(
+        'System recovery is a terminal status page without list or data modes.',
+        'frontend/src/views/SystemRecoveryView.vue',
+        'SystemRecoveryView',
+      ),
     },
     touch: yes({
       selector: 'a.ui-button[href="/"], a[href="/"]',
@@ -857,8 +1273,8 @@ const DESCRIPTORS = {
 }
 
 function assertCompleteDescriptors() {
-  if (Object.keys(DESCRIPTORS).length !== 30) {
-    throw new Error(`expected 30 route descriptors, found ${Object.keys(DESCRIPTORS).length}`)
+  if (Object.keys(DESCRIPTORS).length !== ROUTE_NAMES.length) {
+    throw new Error(`expected ${ROUTE_NAMES.length} route descriptors, found ${Object.keys(DESCRIPTORS).length}`)
   }
   for (const name of ROUTE_NAMES) {
     const descriptor = DESCRIPTORS[name]
@@ -869,15 +1285,28 @@ function assertCompleteDescriptors() {
       if (!entry || typeof entry.applicable !== 'boolean') {
         throw new Error(`${name} missing explicit state descriptor for ${state}`)
       }
-      if (!entry.applicable && !entry.reason) {
-        throw new Error(`${name}/${state} N/A is missing a source reason`)
+      if (!entry.applicable) {
+        if (!entry.reason) throw new Error(`${name}/${state} N/A is missing a source reason`)
+        if (!NA_TAXONOMY_VALUES.includes(entry.taxonomy)) {
+          throw new Error(`${name}/${state} N/A missing taxonomy`)
+        }
+        if (entry.taxonomy === NA_TAXONOMY.PRODUCT_NOT_APPLICABLE) {
+          assertProductNaReason(entry.reason)
+          if (!entry.source?.file) throw new Error(`${name}/${state} product N/A missing source file`)
+        }
+        if (entry.taxonomy === NA_TAXONOMY.CANONICAL_ALIAS && !entry.source?.targetRoute) {
+          throw new Error(`${name}/${state} canonical alias missing targetRoute`)
+        }
       }
     }
     if (!descriptor.touch || typeof descriptor.touch.applicable !== 'boolean') {
       throw new Error(`${name} missing explicit touch descriptor`)
     }
-    if (!descriptor.touch.applicable && !descriptor.touch.reason) {
-      throw new Error(`${name} touch N/A is missing a source reason`)
+    if (!descriptor.touch.applicable) {
+      if (!descriptor.touch.reason) throw new Error(`${name} touch N/A is missing a source reason`)
+      if (!NA_TAXONOMY_VALUES.includes(descriptor.touch.taxonomy)) {
+        throw new Error(`${name} touch N/A missing taxonomy`)
+      }
     }
   }
 }
@@ -902,6 +1331,8 @@ export function stateApplicabilityFromDescriptor(routeName) {
     state,
     applicable: descriptor.states[state].applicable,
     reason: descriptor.states[state].reason,
+    taxonomy: descriptor.states[state].taxonomy || null,
+    source: descriptor.states[state].source || null,
     spec: descriptor.states[state],
   }))
 }
@@ -914,6 +1345,12 @@ export function interactionApplicabilityFromDescriptor(routeName) {
         interaction,
         applicable: false,
         reason: 'Router redirect record; interactions execute on canonical account-notifications.',
+        taxonomy: NA_TAXONOMY.CANONICAL_ALIAS,
+        source: {
+          file: 'frontend/src/router/index.ts',
+          symbol: 'redirect',
+          targetRoute: 'account-notifications',
+        },
       }
     }
     if (interaction === 'touch') {
@@ -921,10 +1358,12 @@ export function interactionApplicabilityFromDescriptor(routeName) {
         interaction,
         applicable: descriptor.touch.applicable,
         reason: descriptor.touch.reason || null,
+        taxonomy: descriptor.touch.taxonomy || null,
+        source: descriptor.touch.source || null,
         spec: descriptor.touch,
       }
     }
-    return { interaction, applicable: true, reason: null }
+    return { interaction, applicable: true, reason: null, taxonomy: null, source: null }
   })
 }
 
@@ -935,10 +1374,31 @@ export function environmentApplicabilityFromDescriptor(routeName, environment) {
   ) {
     return {
       applicable: false,
-      reason: 'Telegram WebView simulation is defined only for non-messenger routes.',
+      reason:
+        'telegram-webview-non-messenger applies only to non-messenger routes; messenger, share-receive, and admin-channels are messenger-family surfaces.',
+      taxonomy: NA_TAXONOMY.PRODUCT_NOT_APPLICABLE,
+      source: {
+        file: 'frontend/src/router/uiRouteContract.ts',
+        symbol: 'messenger-family',
+      },
     }
   }
-  return { applicable: true, reason: null }
+  return { applicable: true, reason: null, taxonomy: null, source: null }
+}
+
+function emptyTaxonomy() {
+  return {
+    productNotApplicable: 0,
+    canonicalAlias: 0,
+    harnessDeferred: 0,
+  }
+}
+
+function countTaxonomy(taxonomy, item) {
+  if (!item || item.applicable) return
+  if (item.taxonomy === NA_TAXONOMY.HARNESS_DEFERRED) taxonomy.harnessDeferred += 1
+  else if (item.taxonomy === NA_TAXONOMY.CANONICAL_ALIAS) taxonomy.canonicalAlias += 1
+  else taxonomy.productNotApplicable += 1
 }
 
 export function deriveOfficialCounts() {
@@ -949,23 +1409,35 @@ export function deriveOfficialCounts() {
   let environmentExecuted = 0
   let environmentNotApplicable = 0
   const naReasons = []
+  const taxonomy = emptyTaxonomy()
   for (const name of ROUTE_NAMES) {
     for (const item of stateApplicabilityFromDescriptor(name)) {
       if (item.applicable) stateExecuted += 1
       else {
         stateNotApplicable += 1
-        naReasons.push({ kind: 'state', route: name, key: item.state, reason: item.reason })
+        countTaxonomy(taxonomy, item)
+        naReasons.push({
+          kind: 'state',
+          route: name,
+          key: item.state,
+          reason: item.reason,
+          taxonomy: item.taxonomy,
+          source: item.source,
+        })
       }
     }
     for (const item of interactionApplicabilityFromDescriptor(name)) {
       if (item.applicable) interactionExecuted += 1
       else {
         interactionNotApplicable += 1
+        countTaxonomy(taxonomy, item)
         naReasons.push({
           kind: 'interaction',
           route: name,
           key: item.interaction,
           reason: item.reason,
+          taxonomy: item.taxonomy,
+          source: item.source,
         })
       }
     }
@@ -974,30 +1446,45 @@ export function deriveOfficialCounts() {
       if (item.applicable) environmentExecuted += 1
       else {
         environmentNotApplicable += 1
-        naReasons.push({ kind: 'environment', route: name, key: environment, reason: item.reason })
+        countTaxonomy(taxonomy, item)
+        naReasons.push({
+          kind: 'environment',
+          route: name,
+          key: environment,
+          reason: item.reason,
+          taxonomy: item.taxonomy,
+          source: item.source,
+        })
       }
     }
   }
+  const accessExpected = ROUTE_NAMES.length * ACCESS_PROFILE_COUNT
+  const viewportExpected = ROUTE_NAMES.length * VIEWPORTS.length
+  const stateTotal = ROUTE_NAMES.length * ALL_STATES.length
+  const interactionTotal = ROUTE_NAMES.length * INTERACTIONS.length
+  const environmentTotal = ROUTE_NAMES.length * ENVIRONMENTS.length
   return {
-    accessExpected: 270,
-    accessExecuted: 270,
-    accessPassed: 270,
-    viewportExpected: 240,
-    viewportExecuted: 240,
-    viewportPassed: 240,
-    stateTotal: 240,
+    accessExpected,
+    accessExecuted: accessExpected,
+    accessPassed: accessExpected,
+    viewportExpected,
+    viewportExecuted: viewportExpected,
+    viewportPassed: viewportExpected,
+    stateTotal,
     stateExecuted,
     stateNotApplicable,
     statePassed: stateExecuted,
-    interactionTotal: 120,
+    interactionTotal,
     interactionExecuted,
     interactionNotApplicable,
     interactionPassed: interactionExecuted,
-    environmentTotal: 90,
+    environmentTotal,
     environmentExecuted,
     environmentNotApplicable,
     environmentPassed: environmentExecuted,
-    uniqueScenarioIds: 960,
+    uniqueScenarioIds:
+      accessExpected + viewportExpected + stateTotal + interactionTotal + environmentTotal,
+    taxonomy,
     naReasons,
   }
 }

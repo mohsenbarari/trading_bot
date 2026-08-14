@@ -107,6 +107,26 @@ describe('stage8 full-acceptance fixture contract', () => {
     expect(apiFixture('/api/offers/page', 'GET', profile, 'dense').body.items).toHaveLength(24)
     expect(apiFixture('/api/offers/page', 'GET', profile, 'dense').body.items[0]).toMatchObject({
       accepts_new_public_interaction: true,
+      lifecycle_phase: 'normal',
+    })
+    expect(apiFixture('/api/offers/page', 'GET', profile, 'normal').body.items[1]).toMatchObject({
+      lifecycle_phase: 'overtime',
+    })
+    expect(apiFixture('/api/offers/market-history', 'GET', profile, 'normal').body).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ history_state: 'expired' }),
+        expect.objectContaining({ history_state: 'traded' }),
+      ]),
+    )
+    expect(apiFixture('/api/chat/conversations', 'GET', profile, 'dense').body).toHaveLength(24)
+    expect(apiFixture('/api/chat/conversations', 'GET', profile, 'empty').body).toEqual([])
+    expect(apiFixture('/api/chat/conversations', 'GET', profile, 'error')).toMatchObject({
+      status: 422,
+      injectedError: true,
+    })
+    expect(apiFixture('/api/auth/me', 'GET', profile, 'error', { allowIdentityPageData: true })).toMatchObject({
+      status: 422,
+      injectedError: true,
     })
     expect(apiFixture('/api/notifications', 'GET', profile, 'dense').body).toHaveLength(24)
     expect(apiFixture('/api/notifications', 'GET', profile, 'normal').body[0]).toMatchObject({
@@ -142,6 +162,10 @@ describe('stage8 full-acceptance fixture contract', () => {
       false,
     )
     expect(runtimeSource).toMatch(/shouldHoldLoadingPath\(pathname, controller\)/)
+    expect(runtimeSource).toMatch(/allowIdentityPageData/)
+    expect(runtimeSource).toMatch(/seedCurrentUserSummary/)
+    expect(runtimeSource).toMatch(/marketLifecycle/)
+    expect(runtimeSource).toMatch(/fixtureConversation/)
     expect(runtimeSource).not.toMatch(
       /\(controller\.mode === 'loading' \|\| controller\.mode === 'slow'\) && delayable\) \{/,
     )

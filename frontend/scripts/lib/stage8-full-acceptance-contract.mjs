@@ -128,6 +128,7 @@ export function evaluateOfficialPass({
   counters,
   server,
   diagnosticTotals,
+  taxonomyCounts,
 }) {
   const failures = []
   if (!officialRun) failures.push('official phases must be access,viewport,state,interaction,environment')
@@ -135,9 +136,13 @@ export function evaluateOfficialPass({
   if (sourceDriftCount !== 0) failures.push(`sourceDrift ${sourceDriftCount}`)
   if (duplicateIdCount !== 0) failures.push(`duplicate ids ${duplicateIdCount}`)
   const counts = officialCounts()
+  const derived = deriveOfficialCounts()
   if (uniqueIdCount !== counts.uniqueScenarioIds) {
     failures.push(`unique ids ${uniqueIdCount} != ${counts.uniqueScenarioIds}`)
   }
+  const harnessDeferred =
+    taxonomyCounts?.harnessDeferred ?? derived.taxonomy?.harnessDeferred ?? 0
+  if (harnessDeferred !== 0) failures.push(`harnessDeferred ${harnessDeferred}`)
   const expected = {
     accessCellsExpected: counts.accessExpected,
     accessCellsExecuted: counts.accessExecuted,
@@ -173,7 +178,89 @@ export function evaluateOfficialPass({
   if ((diagnosticTotals?.requestFailuresOutsideOffline || 0) !== 0) {
     failures.push(`requestFailures ${diagnosticTotals.requestFailuresOutsideOffline}`)
   }
+  if ((diagnosticTotals?.unknownApiRequests || 0) !== 0) {
+    failures.push(`unknownApi ${diagnosticTotals.unknownApiRequests}`)
+  }
+  if ((diagnosticTotals?.mutatingApiRequests || 0) !== 0) {
+    failures.push(`mutatingApi ${diagnosticTotals.mutatingApiRequests}`)
+  }
+  if ((diagnosticTotals?.sourceDriftCount || 0) !== 0) {
+    failures.push(`sourceDrift ${diagnosticTotals.sourceDriftCount}`)
+  }
   return { passed: failures.length === 0, failures }
+}
+
+export function buildSuccessSummary(scenario) {
+  const probe = scenario.probe || {}
+  return {
+    id: scenario.id,
+    digest: scenario.digest,
+    route: scenario.route,
+    profile: scenario.profile,
+    viewport: scenario.viewport || null,
+    state: scenario.state || null,
+    interaction: scenario.interaction || null,
+    environment: scenario.environment || null,
+    keyAssertions: scenario.passed ? ['passed'] : scenario.failures || [],
+    documentOverflow: Boolean(probe.documentOverflow),
+    appOverflow: Boolean(probe.appOverflow),
+    unnamedInteractive: Number(probe.unnamedInteractive || 0),
+    nestedInteractive: Number(probe.nestedInteractive || 0),
+    focusInViewport: probe.focusInViewport !== false,
+    focusVisible: Boolean(probe.focusVisible),
+    touchActivated: Boolean(probe.touchActivated),
+    ctaAboveNav: probe.ctaAboveNav !== false,
+    stateMarker: {
+      loadingVisible: Boolean(probe.loadingVisible),
+      emptyVisible: Boolean(probe.emptyVisible),
+      errorVisible: Boolean(probe.errorVisible),
+      offlineVisible: Boolean(probe.offlineVisible),
+      settledVisible: Boolean(probe.settledVisible),
+      listItemCount: Number(probe.listItemCount || 0),
+    },
+    lifecycleMarker: probe.marketLifecycle || null,
+    diagnosticSummary: scenario.diagnostics || null,
+  }
+}
+
+export function assertMarketLifecycle(probe, options = {}) {
+  const failures = []
+  const { routeName, state, expectedKind, interaction } = options
+  if (routeName !== 'market' || expectedKind !== 'render-route') return failures
+  if (['loading', 'empty', 'error', 'offline', 'stale'].includes(state)) return failures
+  const market = probe?.marketLifecycle || {}
+  if (!market.perimeterPresent) failures.push('market full-card SVG perimeter missing')
+  if ((market.legacyDeadlineBarCount || 0) > 0) {
+    failures.push('market legacy bottom deadline bar returned')
+  }
+  if ((market.overtimeStickerCount || 0) !== 1) {
+    failures.push(`market hourglass count ${market.overtimeStickerCount || 0} != 1`)
+  }
+  if (market.overtimeStickerName !== 'وقت اضافه') {
+    failures.push(`market hourglass name ${market.overtimeStickerName || 'missing'}`)
+  }
+  if (interaction === 'reduced-motion') {
+    if (market.overtimeStickerAnimated !== false) {
+      failures.push('market hourglass is not static under reduced motion')
+    }
+  } else if (market.overtimeStickerAnimated !== true) {
+    failures.push('market hourglass motion is not the gentle turn')
+  }
+  if (!market.overtimeProgressBound) {
+    failures.push('market overtime progress is not bound to final_deadline')
+  }
+  if (!market.expiredReadOnly || !market.expiredDistinct) {
+    failures.push('market expired is not read-only and distinct')
+  }
+  if (!market.tradedReadOnly || !market.tradedDistinct) {
+    failures.push('market traded is not read-only and distinct')
+  }
+  if (market.sideActionInverted) {
+    failures.push('market offer side is inverted against user action')
+  }
+  if (probe.documentOverflow) failures.push('market document overflow')
+  if (probe.ctaAboveNav === false) failures.push('market CTA obscured')
+  return failures
 }
 
 export function listStateRoutes() {
