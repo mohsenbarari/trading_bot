@@ -8,6 +8,7 @@ withDefaults(defineProps<{
   history?: boolean
   expired?: boolean
   traded?: boolean
+  decisionFocus?: boolean
   timerStyle?: StyleValue
 }>(), {
   timerCritical: false,
@@ -16,6 +17,7 @@ withDefaults(defineProps<{
   history: false,
   expired: false,
   traded: false,
+  decisionFocus: false,
 })
 </script>
 
@@ -29,9 +31,11 @@ withDefaults(defineProps<{
       'is-history': history,
       'is-expired': expired,
       'is-traded': traded,
+      'is-decision-focus': decisionFocus,
     }"
     :style="timerStyle"
     data-test="offer-card"
+    :data-decision-focus="decisionFocus ? 'true' : 'false'"
   >
     <slot />
   </div>

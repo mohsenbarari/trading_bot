@@ -212,6 +212,8 @@ const recentOffersToggleRef = ref<any>(null)
 const recentOffersOpenDirection = ref<'above' | 'below'>('above')
 const recentOffersDropdownStyle = ref<Record<string, string>>({})
 const offerInputRef = ref<HTMLTextAreaElement | null>(null)
+const marketContentRef = ref<HTMLElement | null>(null)
+const savedMarketScrollTop = ref(0)
 const adminMarketMessage = ref<AdminMarketMessage | null>(null)
 const adminMarketMessageExpanded = ref(false)
 const marketOfferPushEnabled = ref(true)
@@ -1018,6 +1020,20 @@ watch(isTier2Customer, (blocked) => {
   recentOffers.value = []
 })
 
+watch([pendingOfferPreview, pendingCommodityInference], async ([nextPreview, nextInference], [prevPreview, prevInference]) => {
+  const opening = (!prevPreview && nextPreview) || (!prevInference && nextInference)
+  const closing = (prevPreview && !nextPreview) || (prevInference && !nextInference)
+  if (opening && marketContentRef.value) {
+    savedMarketScrollTop.value = marketContentRef.value.scrollTop
+  }
+  if (closing) {
+    await nextTick()
+    if (marketContentRef.value) {
+      marketContentRef.value.scrollTop = savedMarketScrollTop.value
+    }
+  }
+})
+
 watch(canViewExpiredMarketOffers, (allowed) => {
   if (!allowed) {
     clearMarketHistoryOffers()
@@ -1088,6 +1104,16 @@ onUnmounted(() => {
   <div class="market-page ds-page">
 
     <div class="market-header">
+      <div class="market-title-row">
+        <h1 class="market-page-title">بازار</h1>
+        <span
+          class="market-status-chip"
+          :class="isMarketOpen ? 'is-open' : 'is-closed'"
+          data-test="market-status-chip"
+        >
+          {{ isMarketOpen ? 'باز' : 'بسته' }}
+        </span>
+      </div>
       <div class="header-controls">
         <AppIconButton
           class="market-notification-toggle"
@@ -1145,8 +1171,12 @@ onUnmounted(() => {
     </section>
 
     <!-- Offers List -->
-    <div class="market-content">
+    <div ref="marketContentRef" class="market-content">
       <div class="content-inner">
+        <div class="market-feed-heading">
+          <h2 class="market-feed-title">لفظ‌های فعال</h2>
+          <p class="market-feed-subtitle">مرتب‌شده بر اساس زمان</p>
+        </div>
         <OffersList
           :offers="visibleMarketOffers"
           :loading="isLoading" 
@@ -1318,6 +1348,87 @@ onUnmounted(() => {
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   border-bottom: 1px solid var(--ds-border-light);
+}
+
+.market-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  max-width: var(--ds-page-max-width);
+  width: 100%;
+  margin: 0 auto;
+}
+
+.market-page-title {
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: 800;
+  line-height: 1.4;
+  color: var(--ds-text-primary);
+}
+
+.market-status-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 32px;
+  padding: 0 0.75rem;
+  border-radius: 999px;
+  border: 1px solid var(--ds-border-medium);
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.market-status-chip.is-open {
+  color: var(--ds-market-open-text);
+  background: var(--ds-market-open-bg);
+  border-color: var(--ds-market-open-border);
+}
+
+.market-status-chip.is-closed {
+  color: var(--ds-danger-700);
+  background: var(--ds-market-closed-bg);
+  border-color: var(--ds-market-closed-border);
+}
+
+.market-feed-heading {
+  margin: 0 0 0.7rem;
+}
+
+.market-feed-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 800;
+  color: var(--ds-text-primary);
+}
+
+.market-feed-subtitle {
+  margin: 0.2rem 0 0;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--ds-text-secondary);
+}
+
+@media (min-width: 1024px) {
+  .market-page {
+    --market-column-max: 60rem;
+  }
+
+  .market-title-row,
+  .header-controls,
+  .content-inner,
+  .action-bar-inner,
+  .market-notification-error {
+    max-width: var(--market-column-max);
+  }
+
+  .market-runtime-notice,
+  .admin-market-message {
+    max-width: var(--market-column-max);
+    margin-left: auto;
+    margin-right: auto;
+  }
 }
 
 .header-controls {
