@@ -13,6 +13,10 @@ import {
   MARKET_A_PLUS_C_ALLOWED_PATHS,
   MARKET_A_PLUS_C_EVIDENCE,
   MARKET_A_PLUS_C_KIND,
+  MARKET_A_PLUS_C_LIFECYCLE_ALLOWED_FILE_SHA256,
+  MARKET_A_PLUS_C_LIFECYCLE_ALLOWED_PATHS,
+  MARKET_A_PLUS_C_LIFECYCLE_EVIDENCE,
+  MARKET_A_PLUS_C_LIFECYCLE_KIND,
   MARKET_RUNTIME_BASELINE,
   MARKET_RUNTIME_CONTRACT,
   MESSENGER_OMITTED_DIRECT_RUNTIME_PATHS,
@@ -29,6 +33,8 @@ import {
   assertStage8CreateChannelHelpPopoverPlacementDisposition,
   assertMainUiuxIntegrationMarketDisposition,
   assertMarketAPlusCDisposition,
+  assertMarketLifecycleClarityDisposition,
+  assertMarketLifecycleClaritySemantics,
   STAGE4_BASE_COMMIT,
   STAGE4_BASE_TREE,
   STAGE4_ROUTE_CONTRACT_PATH,
@@ -207,12 +213,12 @@ describe('Stage 4 protected surface baseline', () => {
     )
   })
 
-  it('keeps the Stage 4 Market baseline and main/UIUX integration immutable while admitting exact A+C overlay', () => {
+  it('keeps the Stage 4 Market baseline and prior overlays immutable while admitting lifecycle-clarity', () => {
     expect(ownedPaths.market).toContain('frontend/src/utils/settlementType.ts')
     const entries = readFileEntries(repoRoot, ownedPaths.market)
     expect(resolveMarketRuntimeDisposition(entries)).toMatchObject({
-      kind: MARKET_A_PLUS_C_KIND,
-      evidence: MARKET_A_PLUS_C_EVIDENCE,
+      kind: MARKET_A_PLUS_C_LIFECYCLE_KIND,
+      evidence: MARKET_A_PLUS_C_LIFECYCLE_EVIDENCE,
     })
     expect(MARKET_RUNTIME_BASELINE).toEqual({
       count: 19,
@@ -231,10 +237,21 @@ describe('Stage 4 protected surface baseline', () => {
     expect(() => assertMainUiuxIntegrationMarketDisposition(entries)).toThrow(
       /main\/UIUX Market integration allowed file drift/,
     )
+    expect(MARKET_A_PLUS_C_KIND).toBe('market-a-plus-c-visual-decision-clarity')
     expect(MARKET_A_PLUS_C_ALLOWED_PATHS).toHaveLength(5)
-    for (const repoPath of MARKET_A_PLUS_C_ALLOWED_PATHS) {
+    expect(MARKET_A_PLUS_C_EVIDENCE).toEqual({
+      count: 19,
+      contentBytes: 162211,
+      pathSetSha256: '37aa0b51e20f4ae86f7daf6c3c231d93b3d1f288ade1471490a1f843a57c9589',
+      sha256: 'e0b32d312b578fd6698beefb68e6d2a17c6c8efe024d408b917a05eb0dd5a531',
+    })
+    expect(() => assertMarketAPlusCDisposition(entries)).toThrow(
+      /Market A\+C allowed file drift/,
+    )
+    expect(MARKET_A_PLUS_C_LIFECYCLE_ALLOWED_PATHS).toHaveLength(5)
+    for (const repoPath of MARKET_A_PLUS_C_LIFECYCLE_ALLOWED_PATHS) {
       const entry = entries.find(({ path: candidate }) => candidate === repoPath)
-      expect(fileSha256(entry.content)).toBe(MARKET_A_PLUS_C_ALLOWED_FILE_SHA256[repoPath])
+      expect(fileSha256(entry.content)).toBe(MARKET_A_PLUS_C_LIFECYCLE_ALLOWED_FILE_SHA256[repoPath])
     }
     expect(Object.isFrozen(MARKET_RUNTIME_BASELINE)).toBe(true)
     expect(Object.isFrozen(MAIN_UIUX_INTEGRATION_MARKET_ALLOWED_PATHS)).toBe(true)
@@ -243,18 +260,21 @@ describe('Stage 4 protected surface baseline', () => {
     expect(Object.isFrozen(MARKET_A_PLUS_C_ALLOWED_PATHS)).toBe(true)
     expect(Object.isFrozen(MARKET_A_PLUS_C_ALLOWED_FILE_SHA256)).toBe(true)
     expect(Object.isFrozen(MARKET_A_PLUS_C_EVIDENCE)).toBe(true)
+    expect(Object.isFrozen(MARKET_A_PLUS_C_LIFECYCLE_ALLOWED_PATHS)).toBe(true)
+    expect(Object.isFrozen(MARKET_A_PLUS_C_LIFECYCLE_ALLOWED_FILE_SHA256)).toBe(true)
+    expect(Object.isFrozen(MARKET_A_PLUS_C_LIFECYCLE_EVIDENCE)).toBe(true)
   })
 
-  it('fails closed for any further Market drift inside or outside the A+C allowlist', () => {
+  it('fails closed for any further Market drift inside or outside the lifecycle-clarity allowlist', () => {
     const entries = readFileEntries(repoRoot, ownedPaths.market)
-    const allowedPath = MARKET_A_PLUS_C_ALLOWED_PATHS[0]
+    const allowedPath = MARKET_A_PLUS_C_LIFECYCLE_ALLOWED_PATHS[0]
     const changedAllowed = entries.map((entry) =>
       entry.path === allowedPath
         ? { ...entry, content: Buffer.concat([entry.content, Buffer.from('\n/* drift */')]) }
         : entry,
     )
     const unlistedPath = entries.find(
-      ({ path: repoPath }) => !MARKET_A_PLUS_C_ALLOWED_PATHS.includes(repoPath),
+      ({ path: repoPath }) => !MARKET_A_PLUS_C_LIFECYCLE_ALLOWED_PATHS.includes(repoPath),
     ).path
     const changedUnlisted = entries.map((entry) =>
       entry.path === unlistedPath
@@ -262,17 +282,17 @@ describe('Stage 4 protected surface baseline', () => {
         : entry,
     )
 
-    expect(() => assertMarketAPlusCDisposition(changedAllowed)).toThrow(
-      /Market A\+C allowed file drift/,
+    expect(() => assertMarketLifecycleClarityDisposition(changedAllowed)).toThrow(
+      /Market A\+C lifecycle-clarity allowed file drift/,
     )
     expect(() => resolveMarketRuntimeDisposition(changedAllowed)).toThrow(
-      /Market A\+C disposition rejected/,
+      /Market A\+C lifecycle-clarity disposition rejected/,
     )
-    expect(() => assertMarketAPlusCDisposition(changedUnlisted)).toThrow(
+    expect(() => assertMarketLifecycleClarityDisposition(changedUnlisted)).toThrow(
       /contentBytes drift/,
     )
     expect(() => resolveMarketRuntimeDisposition(changedUnlisted)).toThrow(
-      /Market A\+C disposition rejected/,
+      /Market A\+C lifecycle-clarity disposition rejected/,
     )
   })
 
@@ -316,6 +336,48 @@ describe('Stage 4 protected surface baseline', () => {
         ),
       ),
     ).toThrow(/Market A\+C allowed file drift/)
+  })
+
+  it('rejects lifecycle-clarity semantic bypasses that drop two-tap, names, or inversion', () => {
+    const entries = readFileEntries(repoRoot, ownedPaths.market)
+    const mutate = (repoPath, replacer) =>
+      entries.map((entry) => {
+        if (entry.path !== repoPath) return entry
+        const text = entry.content.toString('utf8')
+        return { ...entry, content: Buffer.from(replacer(text), 'utf8') }
+      })
+
+    expect(() =>
+      assertMarketLifecycleClaritySemantics(
+        mutate('frontend/src/components/OffersList.vue', (source) =>
+          source.replace('const pendingConfirm = ref<string | null>(null); // "offerId:amount"', 'const pendingConfirm = ref(null)'),
+        ),
+      ),
+    ).toThrow(/lost two-tap pendingConfirm/)
+
+    expect(() =>
+      assertMarketLifecycleClaritySemantics(
+        mutate('frontend/src/components/OffersList.vue', (source) =>
+          source.replace(':aria-label="tradeButtonAriaLabel(offer, amount)"', ''),
+        ),
+      ),
+    ).toThrow(/lost accessible trade names/)
+
+    expect(() =>
+      assertMarketLifecycleClaritySemantics(
+        mutate('frontend/src/components/OffersList.vue', (source) =>
+          source.replace("return offer?.offer_type === 'buy' ? 'فروش' : 'خرید'", "return 'خرید'"),
+        ),
+      ),
+    ).toThrow(/lost responder inversion/)
+
+    expect(() =>
+      assertMarketLifecycleClaritySemantics(
+        mutate('frontend/src/views/MarketView.vue', (source) =>
+          `${source}\n.app-route--persian-typography { font-family: "Vazirmatn"; }\n`,
+        ),
+      ),
+    ).toThrow(/leaked typography marker/)
   })
 
   it('keeps the immutable Stage 4 Messenger baseline and every formerly omitted direct dependency', () => {

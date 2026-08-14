@@ -1811,7 +1811,7 @@ describe('MarketView.vue', () => {
     await flushPromises()
 
     expect(wrapper.find('.offer-preview-card').exists()).toBe(true)
-    expect(wrapper.get('[data-test="offer-preview-recap"]').text()).toContain('نوع معامله: خرید')
+    expect(wrapper.get('[data-test="offer-preview-recap"]').text()).toContain('نوع لفظ شما: خرید')
     expect(wrapper.get('[data-test="offer-preview-recap"]').text()).toContain('مقدار: 50 عدد')
     expect(wrapper.get('[data-test="offer-preview-recap"]').text()).toContain('قیمت هر عدد: 222,222 تومان')
     expect(wrapper.get('[data-test="offer-preview-recap"]').text()).toContain('نتیجه مورد انتظار')

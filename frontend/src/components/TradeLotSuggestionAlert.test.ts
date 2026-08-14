@@ -133,13 +133,16 @@ describe('TradeLotSuggestionAlert.vue', () => {
   it('restates remaining amount and price, then closes on Escape without selecting a lot', async () => {
     const wrapper = await mountAlert({ autoCloseSeconds: 8 })
 
+    expect(wrapper.get('[data-test="trade-suggestion-recap"]').text()).toContain('نوع لفظ: خرید')
     expect(wrapper.get('[data-test="trade-suggestion-recap"]').text()).toContain('باقی‌مانده: 25 عدد')
     expect(wrapper.get('[data-test="trade-suggestion-recap"]').text()).toContain('قیمت هر عدد: 52,000 تومان')
-    expect(wrapper.findAll('.trade-suggestion-lot-btn')[0]!.attributes('aria-label')).toContain('انتخاب مقدار 15 عدد')
+    expect(wrapper.findAll('.trade-suggestion-lot-btn')[0]!.attributes('aria-label')).toContain('اقدام شما: فروش')
+    expect(wrapper.findAll('.trade-suggestion-lot-btn')[0]!.attributes('aria-label')).toContain('لفظ خرید')
 
     await wrapper.findAll('.trade-suggestion-lot-btn')[0]!.trigger('click')
+    expect(wrapper.get('[data-test="trade-suggestion-recap"]').text()).toContain('اقدام شما: فروش 15 عدد')
     expect(wrapper.get('[data-test="trade-suggestion-recap"]').text()).toContain('مقدار انتخاب‌شده: 15 عدد')
-    expect(wrapper.get('[data-test="trade-suggestion-recap"]').text()).toContain('نتیجه مورد انتظار')
+    expect(wrapper.get('[data-test="trade-suggestion-recap"]').text()).toContain('ثبت فروش 15 عدد در برابر این لفظ خرید')
     expect(wrapper.emitted('select-lot')).toBeUndefined()
 
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))

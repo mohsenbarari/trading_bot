@@ -97,7 +97,7 @@ export function ownerUser(overrides = {}) {
 }
 
 export function fixtureOffer(index = 0, overrides = {}) {
-  const nowSec = Math.floor(Date.parse(FIXED_TIME) / 1000)
+  const nowSec = Math.floor(Date.now() / 1000)
   const sides = ['buy', 'sell']
   const settlements = ['cash', 'tomorrow']
   const names = ['سکه امامی', 'نیم سکه', 'ربع سکه', 'طلای آب‌شده']
@@ -121,7 +121,9 @@ export function fixtureOffer(index = 0, overrides = {}) {
     notes: index ? `یادداشت مصنوعی ${index}` : null,
     status: 'active',
     created_at: '۲ دقیقه پیش',
-    expires_at_ts: nowSec + 3600,
+    lifecycle_phase: 'normal',
+    normal_deadline_ts: nowSec + 1800,
+    expires_at_ts: nowSec + 1800,
     timer_total_seconds: 3600,
     customer_badge_visible: false,
     accepts_new_public_interaction: true,
@@ -129,11 +131,110 @@ export function fixtureOffer(index = 0, overrides = {}) {
   }
 }
 
+function historyForMode(mode) {
+  if (mode === 'expired') {
+    return [fixtureOffer(5, { history_state: 'expired', status: 'expired', is_read_only: true, lifecycle_phase: 'expired' })]
+  }
+  if (mode === 'traded') {
+    return [fixtureOffer(4, { history_state: 'traded', status: 'completed', is_read_only: true, traded_quantity: 4 })]
+  }
+  if (mode === 'partially-traded') {
+    return [fixtureOffer(4, { history_state: 'traded', status: 'completed', is_read_only: true, traded_quantity: 2, is_partially_traded: true, quantity: 6 })]
+  }
+  if (mode === 'traded-overtime') {
+    return [fixtureOffer(4, { history_state: 'traded', status: 'completed', is_read_only: true, traded_quantity: 3, overtime_trade_committed: true })]
+  }
+  if (mode === 'terminal-mix') {
+    return [
+      fixtureOffer(5, { history_state: 'expired', status: 'expired', is_read_only: true, lifecycle_phase: 'expired' }),
+      fixtureOffer(4, { history_state: 'traded', status: 'completed', is_read_only: true, traded_quantity: 2, is_partially_traded: true }),
+    ]
+  }
+  if (mode === 'normal' || mode === 'dense') {
+    return [
+      fixtureOffer(4, {
+        history_state: 'traded',
+        status: 'completed',
+        is_read_only: true,
+        traded_quantity: 2,
+        is_partially_traded: true,
+      }),
+      fixtureOffer(5, {
+        history_state: 'expired',
+        status: 'expired',
+        is_read_only: true,
+      }),
+    ]
+  }
+  return []
+}
+
 function listForMode(mode) {
-  if (mode === 'empty') return []
+  const nowSec = Math.floor(Date.now() / 1000)
+  if (mode === 'empty' || mode === 'loading') return []
   if (mode === 'dense') return Array.from({ length: 18 }, (_, index) => fixtureOffer(index))
   if (mode === 'stale-old') return [fixtureOffer(0, { notes: 'کهنه-بازار' })]
   if (mode === 'stale-new') return [fixtureOffer(0, { notes: 'تازه-بازار' })]
+  if (mode === 'normal-buy') {
+    return [fixtureOffer(0, { offer_type: 'buy', lifecycle_phase: 'normal', normal_deadline_ts: nowSec + 1800, expires_at_ts: nowSec + 1800, timer_total_seconds: 3600 })]
+  }
+  if (mode === 'normal-sell') {
+    return [fixtureOffer(1, { offer_type: 'sell', lifecycle_phase: 'normal', normal_deadline_ts: nowSec + 1800, expires_at_ts: nowSec + 1800, timer_total_seconds: 3600 })]
+  }
+  if (mode === 'critical-normal') {
+    return [fixtureOffer(0, { offer_type: 'sell', lifecycle_phase: 'normal', normal_deadline_ts: nowSec + 200, expires_at_ts: nowSec + 200, timer_total_seconds: 3600 })]
+  }
+  if (mode === 'overtime-buy') {
+    return [fixtureOffer(0, {
+      offer_type: 'buy',
+      lifecycle_phase: 'overtime',
+      normal_deadline_ts: nowSec - 60,
+      final_deadline_ts: nowSec + 240,
+      expires_at_ts: nowSec + 240,
+      timer_total_seconds: 300,
+      accepts_overtime_request: true,
+    })]
+  }
+  if (mode === 'overtime-sell') {
+    return [fixtureOffer(1, {
+      offer_type: 'sell',
+      lifecycle_phase: 'overtime',
+      normal_deadline_ts: nowSec - 60,
+      final_deadline_ts: nowSec + 240,
+      expires_at_ts: nowSec + 240,
+      timer_total_seconds: 300,
+      accepts_overtime_request: true,
+    })]
+  }
+  if (mode === 'critical-overtime') {
+    return [fixtureOffer(1, {
+      offer_type: 'sell',
+      lifecycle_phase: 'overtime',
+      normal_deadline_ts: nowSec - 60,
+      final_deadline_ts: nowSec + 20,
+      expires_at_ts: nowSec + 20,
+      timer_total_seconds: 300,
+      accepts_overtime_request: true,
+    })]
+  }
+  if (mode === 'final-tail') {
+    return [fixtureOffer(0, {
+      lifecycle_phase: 'final_tail',
+      normal_deadline_ts: nowSec - 10,
+      final_deadline_ts: nowSec - 5,
+      expires_at_ts: nowSec - 5,
+      timer_total_seconds: 0,
+      accepts_new_public_interaction: false,
+      accepts_overtime_request: false,
+      accepts_automatic_trade: false,
+    })]
+  }
+  if (['expired', 'traded', 'partially-traded', 'traded-overtime', 'terminal-mix'].includes(mode)) {
+    return []
+  }
+  if (mode === 'own-offer') {
+    return [fixtureOffer(2, { user_id: OWNER_ID, is_own_offer: true })]
+  }
   return [
     fixtureOffer(0),
     fixtureOffer(1),
@@ -162,6 +263,7 @@ export function isAllowedMutation(pathname, method) {
   if (pathname === '/api/sessions/verify' && method === 'POST') return true
   if (pathname === '/api/auth/refresh' && method === 'POST') return true
   if (pathname === '/api/offers/parse' && method === 'POST') return true
+  if ((pathname === '/api/trades/' || pathname === '/api/trades') && method === 'POST') return true
   return false
 }
 
@@ -248,7 +350,7 @@ export function apiFixture(pathname, method, controller) {
   if (pathname.startsWith('/api/offers/page')) {
     return known({ items: listForMode(mode), next_cursor: null, has_more: false })
   }
-  if (pathname.startsWith('/api/offers/market-history')) return known([])
+  if (pathname.startsWith('/api/offers/market-history')) return known(historyForMode(mode))
   if (pathname.startsWith('/api/offers/my/repeatable')) {
     return known([
       {
@@ -270,6 +372,14 @@ export function apiFixture(pathname, method, controller) {
         created_at: FIXED_TIME,
       },
     ])
+  }
+  if ((pathname === '/api/trades/' || pathname === '/api/trades') && method === 'POST') {
+    return known({
+      id: 8801,
+      status: 'completed',
+      quantity: 1,
+      fixture_bound: true,
+    })
   }
   if (pathname === '/api/offers/parse' && method === 'POST') {
     return known({
@@ -573,9 +683,13 @@ export async function collectMarketProbe(page) {
     const composerRect = composer instanceof HTMLElement && visible(composer)
       ? composer.getBoundingClientRect()
       : null
-    const lastActionAboveComposer = !lastOfferRect || !composerRect
+    const lastOfferAction = lastOffer instanceof HTMLElement
+      ? [...lastOffer.querySelectorAll('[data-test="trade-action-button"], .cancel-own-offer-btn, [data-test="offer-decision-cancel"]')].filter(visible).at(-1)
+      : null
+    const lastOfferActionRect = lastOfferAction instanceof HTMLElement ? lastOfferAction.getBoundingClientRect() : lastOfferRect
+    const lastActionAboveComposer = !lastOfferActionRect || !composerRect
       ? true
-      : lastOfferRect.bottom <= composerRect.top + 8
+      : lastOfferActionRect.bottom <= composerRect.top + 8
     const headings = [...document.querySelectorAll('h1,h2,h3')].filter(visible).map((el) => el.textContent?.trim())
     const overtimeInMarket = Boolean(
       document.querySelector('.market-page .market-overtime-pref, .market-page [data-test="offer-overtime"]'),
@@ -586,6 +700,77 @@ export async function collectMarketProbe(page) {
     const font = getComputedStyle(document.body).fontFamily
     const decisionPanel = document.querySelector('[data-test="offer-decision-panel"]')
     const pendingButtons = [...document.querySelectorAll('[data-test="trade-action-button"][data-state="pending"]')]
+    const rectOf = (selector) => {
+      const element = document.querySelector(selector)
+      if (!(element instanceof HTMLElement) || !visible(element)) return null
+      const rect = element.getBoundingClientRect()
+      return {
+        width: Number(rect.width.toFixed(2)),
+        height: Number(rect.height.toFixed(2)),
+        left: Number(rect.left.toFixed(2)),
+        right: Number(rect.right.toFixed(2)),
+        top: Number(rect.top.toFixed(2)),
+        bottom: Number(rect.bottom.toFixed(2)),
+      }
+    }
+    const parseRgb = (value) => {
+      const match = String(value || '').match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/)
+      if (!match) return null
+      return [Number(match[1]), Number(match[2]), Number(match[3])]
+    }
+    const luminance = (rgb) => {
+      const linear = rgb.map((channel) => {
+        const value = channel / 255
+        return value <= 0.03928 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4
+      })
+      return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]
+    }
+    const contrastRatio = (a, b) => {
+      if (!a || !b) return null
+      const first = luminance(a)
+      const second = luminance(b)
+      const lighter = Math.max(first, second)
+      const darker = Math.min(first, second)
+      return Number(((lighter + 0.05) / (darker + 0.05)).toFixed(2))
+    }
+    const focused = document.activeElement
+    let focusContrast = null
+    if (focused instanceof HTMLElement) {
+      const style = getComputedStyle(focused)
+      const surface = focused.closest('[data-test="offer-card"], .offer-preview-card, .trade-suggestion-card, .market-page, body')
+      const surfaceStyle = getComputedStyle(surface instanceof HTMLElement ? surface : document.body)
+      const outline = parseRgb(style.outlineColor)
+      const adjacent = parseRgb(surfaceStyle.backgroundColor) || parseRgb('rgb(255, 255, 255)')
+      focusContrast = {
+        outline: style.outlineColor,
+        outlineStyle: style.outlineStyle,
+        outlineWidth: style.outlineWidth,
+        background: surfaceStyle.backgroundColor,
+        ratio: contrastRatio(outline, adjacent),
+      }
+    }
+    const deadlineBar = document.querySelector('[data-test="offer-deadline-bar"]')
+    const deadlineLabel = document.querySelector('[data-test="offer-deadline-label"]')
+    const deadlineCard = deadlineBar?.closest('[data-test="offer-card"]')
+    const timerPct = deadlineCard instanceof HTMLElement
+      ? Number(getComputedStyle(deadlineCard).getPropertyValue('--t-pct').trim() || 'NaN')
+      : null
+    const lastAction = [...document.querySelectorAll('[data-test="trade-action-button"], .cancel-own-offer-btn, [data-test="offer-decision-cancel"]')]
+      .filter(visible)
+      .at(-1)
+    let lastActionHit = null
+    if (lastAction instanceof HTMLElement) {
+      const rect = lastAction.getBoundingClientRect()
+      const x = rect.left + rect.width / 2
+      const y = rect.top + rect.height / 2
+      const topNode = document.elementFromPoint(x, y)
+      lastActionHit = {
+        x,
+        y,
+        hit: Boolean(topNode && (topNode === lastAction || lastAction.contains(topNode))),
+        topTag: topNode instanceof HTMLElement ? topNode.tagName : null,
+      }
+    }
     return {
       route: location.pathname,
       dir,
@@ -623,6 +808,32 @@ export async function collectMarketProbe(page) {
       v2Scope,
       fabPresent: fab instanceof HTMLElement && visible(fab),
       composerPresent: composer instanceof HTMLElement && visible(composer),
+      geometry: {
+        viewport: { width: window.innerWidth, height: window.innerHeight },
+        title: rectOf('.market-title-row'),
+        header: rectOf('.header-controls'),
+        content: rectOf('.content-inner'),
+        composer: rectOf('.action-bar-inner'),
+        offers: rectOf('.offers-list'),
+        firstCard: rectOf('[data-test="offer-card"]'),
+      },
+      decisionText: decisionPanel instanceof HTMLElement ? decisionPanel.textContent?.replace(/\s+/g, ' ').trim() : '',
+      previewText: document.querySelector('[data-test="offer-preview-recap"]')?.textContent?.replace(/\s+/g, ' ').trim() || '',
+      overtimeBadgeVisible: Boolean(document.querySelector('[data-test="offer-overtime-badge"]')),
+      finalTailBadgeVisible: Boolean(document.querySelector('[data-test="offer-final-tail-badge"]')),
+      overtimeTradeBadgeVisible: Boolean(document.querySelector('[data-test="offer-overtime-trade-badge"]')),
+      deadline: {
+        present: deadlineBar instanceof HTMLElement,
+        phase: deadlineBar instanceof HTMLElement ? deadlineBar.getAttribute('data-phase') : null,
+        critical: deadlineBar instanceof HTMLElement ? deadlineBar.getAttribute('data-critical') : null,
+        label: deadlineLabel?.textContent?.trim() || '',
+        pct: Number.isFinite(timerPct) ? Number(timerPct.toFixed(2)) : null,
+      },
+      focusContrast,
+      lastActionHit,
+      animationNames: [...document.querySelectorAll('.offer-deadline-fill, .offer-lifecycle-chip--overtime')].map((element) =>
+        getComputedStyle(element).animationName,
+      ),
     }
   })
 }

@@ -85,4 +85,56 @@ describe('Market A+C source contracts', () => {
     expect(suggestion).toContain("if (!props.show || event.key !== 'Escape') return")
     expect(suggestion).not.toMatch(/emit\('select-lot'\).*Escape/)
   })
+
+  it('keeps the desktop rail media last so 60rem wins over the 480px token', () => {
+    const styleStart = marketView.lastIndexOf('<style')
+    const style = marketView.slice(styleStart)
+    const mediaMatches = [...style.matchAll(/@media \(min-width: 1024px\) \{[\s\S]*?\n\}/g)]
+    expect(mediaMatches.length).toBeGreaterThanOrEqual(1)
+    const lastMedia = mediaMatches.at(-1)?.[0] || ''
+    expect(lastMedia).toContain('--market-rail-max: 60rem')
+    expect(lastMedia).not.toContain('--ds-page-max-width')
+    const lastMediaIndex = style.lastIndexOf('@media (min-width: 1024px)')
+    const afterLastMedia = style.slice(lastMediaIndex)
+    expect(afterLastMedia).not.toMatch(/--ds-page-max-width:\s*480px/)
+    expect(afterLastMedia).not.toMatch(/--market-rail-max:\s*var\(--ds-page-max-width\)/)
+    expect(afterLastMedia.trim().endsWith('</style>')).toBe(true)
+    for (const className of ['.market-title-row', '.header-controls', '.content-inner', '.action-bar-inner']) {
+      expect(style).toMatch(new RegExp(`${className.replace('.', '\\.')}[^{]*\\{[^}]*max-width:\\s*var\\(--market-rail-max\\)`))
+    }
+    expect(marketView).toContain('--market-rail-max: var(--ds-page-max-width)')
+  })
+
+  it('separates offer side from responder action and keeps preview uninverted', () => {
+    expect(offersList).toContain("function userActionLabel(offer: any): string {")
+    expect(offersList).toContain("return offer?.offer_type === 'buy' ? 'فروش' : 'خرید'")
+    expect(offersList).toContain('نوع لفظ: {{ offerSideLabel(offer) }}')
+    expect(offersList).toContain('اقدام شما: {{ userActionLabel(offer) }}')
+    expect(suggestion).toContain("return props.offerType === 'buy' ? 'فروش' : 'خرید'")
+    expect(suggestion).toContain('نوع لفظ: {{ offerSideLabel() }}')
+    expect(suggestion).toContain('اقدام شما: {{ userActionLabel() }}')
+    expect(offerPreview).toContain('نوع لفظ شما: {{ tradeLabel }}')
+    expect(offerPreview).not.toContain('userActionLabel')
+    expect(offerPreview).not.toContain("tradeType === 'buy' ? 'فروش'")
+  })
+
+  it('binds server-authoritative deadline bars and terminal chips without conic or emoji timers', () => {
+    expect(offersList).toContain('data-test="offer-deadline-bar"')
+    expect(offersList).toContain('data-test="offer-deadline-label"')
+    expect(offersList).toContain('timerDeadlineTs(offer)')
+    expect(offersList).toContain('مهلت اصلی')
+    expect(offersList).toContain('وقت اضافه')
+    expect(offersList).toContain('مهلت پایان یافته')
+    expect(offersList).toContain('در حال نهایی‌سازی')
+    expect(offersList).toContain('معامله در وقت اضافه')
+    expect(offersList).not.toContain('conic-gradient')
+    expect(offersList).not.toContain('overtime-marker')
+    expect(offersList).not.toContain('⏳')
+    expect(offersList).toContain('prefers-reduced-motion: reduce')
+    expect(offersList).toContain('--market-focus-ring: var(--ds-primary-800)')
+    expect(offersList).not.toContain('rgba(245, 158, 11, 0.34)')
+    expect(offerPreview).toContain('outline: 2px solid var(--ds-primary-800)')
+    expect(suggestion).toContain('outline: 2px solid var(--ds-primary-800)')
+    expect(marketView).toContain('--market-focus-ring: var(--ds-primary-800)')
+  })
 })

@@ -147,6 +147,38 @@ export const MARKET_A_PLUS_C_EVIDENCE = Object.freeze({
   sha256: 'e0b32d312b578fd6698beefb68e6d2a17c6c8efe024d408b917a05eb0dd5a531',
 })
 
+// Successor overlay after independent audit. This is not a Stage 4 baseline
+// rewrite and does not loosen the frozen A+C visual/decision hashes.
+export const MARKET_A_PLUS_C_LIFECYCLE_KIND = 'market-a-plus-c-lifecycle-clarity'
+
+export const MARKET_A_PLUS_C_LIFECYCLE_ALLOWED_PATHS = Object.freeze([
+  'frontend/src/components/OfferPreviewModal.vue',
+  'frontend/src/components/OffersList.vue',
+  'frontend/src/components/TradeLotSuggestionAlert.vue',
+  'frontend/src/components/ui/AppOfferCard.vue',
+  'frontend/src/views/MarketView.vue',
+])
+
+export const MARKET_A_PLUS_C_LIFECYCLE_ALLOWED_FILE_SHA256 = Object.freeze({
+  'frontend/src/components/OfferPreviewModal.vue':
+    '3278a01042eace0c754353a24a1de10afccd6e4c1899baa67ca927076a650a12',
+  'frontend/src/components/OffersList.vue':
+    '310992fd5cb6a8197fa6c8c3f7293bcad9af1f6f39a7105f6ec4079d17c53a5e',
+  'frontend/src/components/TradeLotSuggestionAlert.vue':
+    '9674841528b6092832816744cf34e499b73b59e204503bfc5353ce965cab5452',
+  'frontend/src/components/ui/AppOfferCard.vue':
+    '6c9844533065cb51603b9e55b9a22b8822cfeb2ebda24fde39a913079df970e6',
+  'frontend/src/views/MarketView.vue':
+    '5441b793a7ca2f50a34847775a24ab973f6433dfde72592aaae0640c4e4e68f2',
+})
+
+export const MARKET_A_PLUS_C_LIFECYCLE_EVIDENCE = Object.freeze({
+  count: 19,
+  contentBytes: 163628,
+  pathSetSha256: '37aa0b51e20f4ae86f7daf6c3c231d93b3d1f288ade1471490a1f843a57c9589',
+  sha256: '3d512eac8b60c18e7c7139f8040ffcd0ff749853de117d4888754ca730a92b80',
+})
+
 export const MESSENGER_RUNTIME_BASELINE = Object.freeze({
   count: 85,
   contentBytes: 1312405,
@@ -467,6 +499,82 @@ export function assertMarketAPlusCDisposition(entries) {
   )
 }
 
+function sourceByPath(entries, repoPath) {
+  const entry = entries.find((item) => item.path === repoPath)
+  if (!entry) throw new Error(`Market lifecycle-clarity source missing: ${repoPath}`)
+  return Buffer.isBuffer(entry.content) ? entry.content.toString('utf8') : String(entry.content)
+}
+
+export function assertMarketLifecycleClaritySemantics(entries) {
+  const offers = sourceByPath(entries, 'frontend/src/components/OffersList.vue')
+  const market = sourceByPath(entries, 'frontend/src/views/MarketView.vue')
+  const preview = sourceByPath(entries, 'frontend/src/components/OfferPreviewModal.vue')
+  const suggestion = sourceByPath(entries, 'frontend/src/components/TradeLotSuggestionAlert.vue')
+  if (!offers.includes('const pendingConfirm = ref<string | null>(null); // "offerId:amount"')) {
+    throw new Error('Market lifecycle-clarity disposition lost two-tap pendingConfirm')
+  }
+  if (!offers.includes('تایید {{ amount }} عدد؟')) {
+    throw new Error('Market lifecycle-clarity disposition lost pending confirm copy')
+  }
+  if (!offers.includes(':aria-label="tradeButtonAriaLabel(offer, amount)"')) {
+    throw new Error('Market lifecycle-clarity disposition lost accessible trade names')
+  }
+  if (!offers.includes("apiFetch('/api/trades/'")) {
+    throw new Error('Market lifecycle-clarity disposition changed trade endpoint')
+  }
+  if (!offers.includes("return offer?.offer_type === 'buy' ? 'فروش' : 'خرید'")) {
+    throw new Error('Market lifecycle-clarity disposition lost responder inversion')
+  }
+  if (!preview.includes('نوع لفظ شما:')) {
+    throw new Error('Market lifecycle-clarity disposition lost uninverted preview copy')
+  }
+  if (preview.includes('userActionLabel')) {
+    throw new Error('Market lifecycle-clarity disposition inverted own-offer preview')
+  }
+  if ([offers, market, preview, suggestion].some((source) => source.includes('buy-column') || source.includes('sell-column'))) {
+    throw new Error('Market lifecycle-clarity disposition introduced direction B columns')
+  }
+  if ([offers, market, preview, suggestion].some((source) => (
+    source.includes('app-route--persian-typography') || /font-family:\s*['"]Vazirmatn/.test(source)
+  ))) {
+    throw new Error('Market lifecycle-clarity disposition leaked typography marker')
+  }
+  if (!market.includes('--market-rail-max: 60rem')) {
+    throw new Error('Market lifecycle-clarity disposition lost desktop rail contract')
+  }
+  const style = market.slice(market.lastIndexOf('<style'))
+  if (style.lastIndexOf('--ds-page-max-width: 480px') > style.lastIndexOf('--market-rail-max: 60rem')) {
+    throw new Error('Market lifecycle-clarity disposition lost desktop cascade order')
+  }
+}
+
+function assertMarketLifecycleClarityAllowedFiles(entries) {
+  const entriesByPath = new Map(entries.map((entry) => [entry.path, entry]))
+  for (const repoPath of MARKET_A_PLUS_C_LIFECYCLE_ALLOWED_PATHS) {
+    const entry = entriesByPath.get(repoPath)
+    if (!entry) {
+      throw new Error(`Market A+C lifecycle-clarity allowed file is missing: ${repoPath}`)
+    }
+    const actualSha256 = fileSha256(entry.content)
+    const expectedSha256 = MARKET_A_PLUS_C_LIFECYCLE_ALLOWED_FILE_SHA256[repoPath]
+    if (actualSha256 !== expectedSha256) {
+      throw new Error(
+        `Market A+C lifecycle-clarity allowed file drift: ${repoPath} ${expectedSha256} -> ${actualSha256}`,
+      )
+    }
+  }
+}
+
+export function assertMarketLifecycleClarityDisposition(entries) {
+  assertMarketLifecycleClarityAllowedFiles(entries)
+  assertMarketLifecycleClaritySemantics(entries)
+  return assertProtectedFileSetEvidence(
+    'Market A+C lifecycle-clarity disposition',
+    protectedFileSetEvidence(entries, MARKET_RUNTIME_CONTRACT),
+    MARKET_A_PLUS_C_LIFECYCLE_EVIDENCE,
+  )
+}
+
 export function resolveMarketRuntimeDisposition(entries) {
   const actual = protectedFileSetEvidence(entries, MARKET_RUNTIME_CONTRACT)
   try {
@@ -491,15 +599,24 @@ export function resolveMarketRuntimeDisposition(entries) {
           evidence: assertMarketAPlusCDisposition(entries),
         }
       } catch (aPlusCError) {
-        const baselineMessage =
-          baselineError instanceof Error ? baselineError.message : String(baselineError)
-        const integrationMessage =
-          integrationError instanceof Error ? integrationError.message : String(integrationError)
-        const aPlusCMessage =
-          aPlusCError instanceof Error ? aPlusCError.message : String(aPlusCError)
-        throw new Error(
-          `Market runtime rejected after Stage 4 baseline drift (${baselineMessage}); main/UIUX integration disposition rejected (${integrationMessage}); Market A+C disposition rejected (${aPlusCMessage})`,
-        )
+        try {
+          return {
+            kind: MARKET_A_PLUS_C_LIFECYCLE_KIND,
+            evidence: assertMarketLifecycleClarityDisposition(entries),
+          }
+        } catch (lifecycleError) {
+          const baselineMessage =
+            baselineError instanceof Error ? baselineError.message : String(baselineError)
+          const integrationMessage =
+            integrationError instanceof Error ? integrationError.message : String(integrationError)
+          const aPlusCMessage =
+            aPlusCError instanceof Error ? aPlusCError.message : String(aPlusCError)
+          const lifecycleMessage =
+            lifecycleError instanceof Error ? lifecycleError.message : String(lifecycleError)
+          throw new Error(
+            `Market runtime rejected after Stage 4 baseline drift (${baselineMessage}); main/UIUX integration disposition rejected (${integrationMessage}); Market A+C disposition rejected (${aPlusCMessage}); Market A+C lifecycle-clarity disposition rejected (${lifecycleMessage})`,
+          )
+        }
       }
     }
   }
