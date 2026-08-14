@@ -1611,8 +1611,8 @@ async function cancelOwnOffer(offerId: number) {
 
 /* ── Soft pulse for confirm state ── */
 @keyframes pulse-soft {
-  0%, 100% { opacity: 1; transform: scale(1); }
-  50%      { opacity: 0.85; transform: scale(0.98); }
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.85; }
 }
 
 /* ── Toasts ── */
