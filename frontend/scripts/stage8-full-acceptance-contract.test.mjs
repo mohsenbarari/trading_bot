@@ -718,6 +718,26 @@ describe('Stage 8 state-specific assertions', () => {
         'account-security',
       ),
     ).toContain('slow settled into premature empty')
+    expect(
+      assertStateSemantics(
+        { ...settled, emptyVisible: true, listItemCount: 0 },
+        { loadingVisible: true, pendingRequest: true },
+        'slow',
+        'none',
+        'render-route',
+        'profile',
+      ),
+    ).toEqual([])
+    expect(
+      assertStateSemantics(
+        { ...settled, errorVisible: true, settledVisible: false },
+        { loadingVisible: true, pendingRequest: true },
+        'slow',
+        'none',
+        'render-route',
+        'account-security',
+      ),
+    ).toContain('slow settled into premature error')
   })
 
   it('requires offline fallback without recovery', () => {

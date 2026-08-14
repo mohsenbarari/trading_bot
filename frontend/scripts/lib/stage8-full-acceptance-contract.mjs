@@ -320,7 +320,12 @@ export function assertStateSemantics(probe, midProbe, state, protection, expecte
   if (state === 'slow') {
     if (!midProbe?.pendingRequest) failures.push('slow mid-probe ran without a pending request')
     if (!midProbe?.loadingVisible) failures.push('slow state never showed loading')
-    if (probe.emptyVisible && !probe.listItemCount) failures.push('slow settled into premature empty')
+    const identityPageData = STAGE8_ROUTE_NAMES.includes(routeName)
+      ? Boolean(getRouteDescriptor(routeName).states.slow?.identityPageData)
+      : false
+    if (probe.emptyVisible && !probe.listItemCount && !identityPageData) {
+      failures.push('slow settled into premature empty')
+    }
     if (probe.errorVisible && !probe.settledVisible) failures.push('slow settled into premature error')
   }
   if (state === 'offline') {
