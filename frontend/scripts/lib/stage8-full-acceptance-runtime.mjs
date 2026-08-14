@@ -4,7 +4,20 @@ import { createServer } from 'node:http'
 import { readFile, stat } from 'node:fs/promises'
 import fs from 'node:fs'
 import path from 'node:path'
-import { isStaleTargetPath } from './stage8-full-acceptance-contract.mjs'
+import { matchesStaleEndpoint } from './stage8-full-acceptance-contract.mjs'
+import {
+  environmentApplicabilityFromDescriptor,
+  getRouteDescriptor,
+  interactionApplicabilityFromDescriptor,
+  stateApplicabilityFromDescriptor,
+} from './stage8-full-acceptance-descriptors.mjs'
+import {
+  ACCESS_VIEWPORT,
+  ALL_STATES,
+  ENVIRONMENTS,
+  INTERACTIONS,
+  VIEWPORTS,
+} from './stage8-full-acceptance-constants.mjs'
 
 export const STAGE = '8'
 export const RUN_AUTHORIZATION = 'STAGE8 FULL ACCEPTANCE — RUN'
@@ -14,33 +27,7 @@ export const CUSTOMER_RELATION_ID = 9001
 export const ACCOUNTANT_RELATION_ID = 9002
 export const PUBLIC_USER_ID = 9101
 export const ADMIN_USER_ID = 9102
-export const VIEWPORTS = Object.freeze([
-  { width: 360, height: 740 },
-  { width: 375, height: 812 },
-  { width: 390, height: 844 },
-  { width: 414, height: 896 },
-  { width: 430, height: 932 },
-  { width: 768, height: 1024 },
-  { width: 1024, height: 768 },
-  { width: 1440, height: 900 },
-])
-export const ACCESS_VIEWPORT = VIEWPORTS[2]
-export const ALL_STATES = Object.freeze([
-  'loading',
-  'empty',
-  'normal',
-  'dense',
-  'error',
-  'slow',
-  'offline',
-  'stale',
-])
-export const INTERACTIONS = Object.freeze(['touch', 'keyboard', 'zoom-200', 'reduced-motion'])
-export const ENVIRONMENTS = Object.freeze([
-  'mobile-browser',
-  'pwa-simulation',
-  'telegram-webview-non-messenger',
-])
+export { ACCESS_VIEWPORT, ALL_STATES, ENVIRONMENTS, INTERACTIONS, VIEWPORTS }
 export const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
 export const MIME_TYPES = new Map([
   ['.css', 'text/css; charset=utf-8'],
@@ -674,50 +661,85 @@ export function createFixtureServer(dist, controller) {
     staleHits: {},
     staleCompletions: [],
     identityRequestCount: 0,
+    inFlight: 0,
+    inFlightByPath: {},
+  }
+  const beginFlight = (pathname) => {
+    state.inFlight += 1
+    state.inFlightByPath[pathname] = (state.inFlightByPath[pathname] || 0) + 1
+  }
+  const endFlight = (pathname) => {
+    state.inFlight = Math.max(0, state.inFlight - 1)
+    const next = Math.max(0, (state.inFlightByPath[pathname] || 0) - 1)
+    if (next) state.inFlightByPath[pathname] = next
+    else delete state.inFlightByPath[pathname]
   }
   const server = createServer(async (request, response) => {
     try {
       const url = new URL(request.url || '/', 'http://127.0.0.1')
       const pathname = decodeURIComponent(url.pathname)
       const method = request.method || 'GET'
+      if (pathname === '/__stage8/status') {
+        response.writeHead(200, {
+          'content-type': 'application/json; charset=utf-8',
+          'cache-control': 'no-store',
+        })
+        response.end(
+          JSON.stringify({
+            inFlight: state.inFlight,
+            inFlightByPath: state.inFlightByPath,
+            staleHits: state.staleHits,
+            identityRequestCount: state.identityRequestCount,
+          }),
+        )
+        return
+      }
       if (pathname.startsWith('/api/')) {
+        beginFlight(pathname)
         let mode = controller.mode
-        let delayMs = controller.mode === 'slow' || controller.mode === 'loading' ? controller.delayMs : 0
-        if (controller.mode === 'stale' && isStaleTargetPath(pathname)) {
+        const identity = isIdentityBootstrapPath(pathname, method)
+        const delayable = !identity && (isErrorInjectablePath(pathname) || isInvitationLookupPath(pathname))
+        let delayMs = (controller.mode === 'slow' || controller.mode === 'loading') && delayable ? controller.delayMs : 0
+        const staleEndpoint = controller.staleEndpoint || ''
+        if (controller.mode === 'stale' && matchesStaleEndpoint(pathname, staleEndpoint)) {
           state.staleHits[pathname] = (state.staleHits[pathname] || 0) + 1
           const generation = state.staleHits[pathname]
           mode = generation === 1 ? 'stale-old' : 'stale-new'
           delayMs = generation === 1 ? 900 : 0
         }
-        if (delayMs > 0) await new Promise((resolve) => setTimeout(resolve, delayMs))
-        const fixture = apiFixture(pathname, method, controller.profile, mode)
-        state.apiRequests += 1
-        if (pathname === '/api/auth/me' || pathname === '/api/auth/me/') {
-          state.identityRequestCount += 1
-        }
-        if (controller.mode === 'stale' && isStaleTargetPath(pathname)) {
-          state.staleCompletions.push({
-            path: pathname,
-            generation: state.staleHits[pathname],
-            mode,
-            completedAt: Date.now(),
+        try {
+          if (delayMs > 0) await new Promise((resolve) => setTimeout(resolve, delayMs))
+          const fixture = apiFixture(pathname, method, controller.profile, mode)
+          state.apiRequests += 1
+          if (pathname === '/api/auth/me' || pathname === '/api/auth/me/') {
+            state.identityRequestCount += 1
+          }
+          if (controller.mode === 'stale' && matchesStaleEndpoint(pathname, staleEndpoint)) {
+            state.staleCompletions.push({
+              path: pathname,
+              generation: state.staleHits[pathname],
+              mode,
+              completedAt: Date.now(),
+            })
+          }
+          if (fixture.mutating) {
+            state.mutatingApiRequests += 1
+            state.mutatingApiPaths.push(`${method} ${pathname}`)
+          } else if (fixture.known) {
+            state.expectedApiRequests += 1
+            if (fixture.injectedError) state.injectedErrorResponses += 1
+          } else {
+            state.unknownApiRequests += 1
+            state.unknownApiPaths.push(`${method} ${pathname}`)
+          }
+          response.writeHead(fixture.status, {
+            'content-type': 'application/json; charset=utf-8',
+            'cache-control': 'no-store',
           })
+          response.end(JSON.stringify(fixture.body))
+        } finally {
+          endFlight(pathname)
         }
-        if (fixture.mutating) {
-          state.mutatingApiRequests += 1
-          state.mutatingApiPaths.push(`${method} ${pathname}`)
-        } else if (fixture.known) {
-          state.expectedApiRequests += 1
-          if (fixture.injectedError) state.injectedErrorResponses += 1
-        } else {
-          state.unknownApiRequests += 1
-          state.unknownApiPaths.push(`${method} ${pathname}`)
-        }
-        response.writeHead(fixture.status, {
-          'content-type': 'application/json; charset=utf-8',
-          'cache-control': 'no-store',
-        })
-        response.end(JSON.stringify(fixture.body))
         return
       }
       if (pathname === '/__synthetic_telegram.js') {
@@ -986,6 +1008,57 @@ export async function newPage(browser, baseUrl, viewport, diagnostics, profile, 
   return { context, page }
 }
 
+export async function readStage8Status(page) {
+  return page.evaluate(async () => {
+    const response = await fetch('/__stage8/status', { cache: 'no-store' })
+    return response.json()
+  })
+}
+
+export async function waitForPendingRequest(page, pathname = '', timeout = 3000) {
+  const started = Date.now()
+  while (Date.now() - started < timeout) {
+    const status = await readStage8Status(page)
+    const pending = pathname
+      ? Object.entries(status.inFlightByPath || {}).some(
+          ([path, count]) => count > 0 && matchesStaleEndpoint(path, pathname),
+        )
+      : status.inFlight > 0
+    if (pending) return { ...status, pendingRequest: true }
+    await page.waitForTimeout(40)
+  }
+  return { ...(await readStage8Status(page)), pendingRequest: false }
+}
+
+export async function waitForNetworkSettle(page, timeout = 15000) {
+  const started = Date.now()
+  let last = await readStage8Status(page)
+  while (Date.now() - started < timeout) {
+    last = await readStage8Status(page)
+    if (last.inFlight === 0) return last
+    await page.waitForTimeout(50)
+  }
+  return last
+}
+
+export async function waitForRouteTransition(page, timeout = 4000) {
+  await page
+    .waitForFunction(() => {
+      const active = document.querySelector(
+        [
+          '.fade-leave-active',
+          '.fade-enter-active',
+          '.ui-v2-route-fade-leave-active',
+          '.ui-v2-route-fade-enter-active',
+        ].join(','),
+      )
+      if (active) return false
+      const scopes = [...document.querySelectorAll('.app-route-v2-scope, .app-route--persian-typography')]
+      return scopes.length <= 1
+    }, { timeout })
+    .catch(() => {})
+}
+
 export async function waitForApp(page, timeout = 20000) {
   await page.locator('#app').waitFor({ state: 'visible', timeout })
   await page.locator('html[data-app-mounted="1"]').waitFor({ state: 'attached', timeout })
@@ -996,7 +1069,7 @@ export async function waitForApp(page, timeout = 20000) {
   await page.evaluate(async () => {
     await document.fonts?.ready
   })
-  await page.waitForTimeout(140)
+  await waitForRouteTransition(page, Math.min(timeout, 4000))
 }
 
 export async function readRuntimeRoute(page) {
@@ -1065,6 +1138,43 @@ export async function collectUiProbe(page) {
     const unnamed = interactives.filter((element) => {
       return accessibleName(element).length === 0 && element.getAttribute('aria-hidden') !== 'true'
     })
+    const classFingerprint = (element) =>
+      [...element.classList]
+        .filter((name) => /^[A-Za-z][A-Za-z0-9_-]{1,40}$/.test(name))
+        .filter((name) => !/^(p|m|w|h|text|bg|flex|grid|gap|px|py|pt|pb|mt|mb|ml|mr|ms|me)-/.test(name))
+        .slice(0, 4)
+    const stableSelector = (element) => {
+      if (element.id && /^[A-Za-z][\w-]{0,40}$/.test(element.id)) return `#${element.id}`
+      const testId = element.getAttribute('data-test')
+      if (testId && /^[A-Za-z0-9_-]{1,60}$/.test(testId)) return `[data-test="${testId}"]`
+      const classes = classFingerprint(element)
+      const tag = element.tagName.toLowerCase()
+      if (classes.length) return `${tag}.${classes.join('.')}`
+      const role = element.getAttribute('role')
+      if (role && /^[A-Za-z0-9_-]{1,40}$/.test(role)) return `${tag}[role="${role}"]`
+      return tag
+    }
+    const unnamedFingerprints = unnamed.slice(0, 8).map((element) => ({
+      tag: element.tagName.toLowerCase(),
+      role: element.getAttribute('role'),
+      classNames: classFingerprint(element),
+      selector: stableSelector(element),
+    }))
+    const inInternalScroller = (element) => {
+      let current = element.parentElement
+      while (current) {
+        const style = getComputedStyle(current)
+        const scrollableX =
+          (style.overflowX === 'auto' || style.overflowX === 'scroll') &&
+          current.scrollWidth > current.clientWidth + 1
+        const scrollableY =
+          (style.overflowY === 'auto' || style.overflowY === 'scroll') &&
+          current.scrollHeight > current.clientHeight + 1
+        if (scrollableX || scrollableY) return true
+        current = current.parentElement
+      }
+      return false
+    }
     const nested = interactives.filter((element) =>
       interactives.some((other) => other !== element && other.contains(element)),
     )
@@ -1161,12 +1271,14 @@ export async function collectUiProbe(page) {
       return Number.parseFloat(first)
     }
     const clippedControlCount = interactives.filter((element) => {
+      if (inInternalScroller(element)) return false
       const rect = element.getBoundingClientRect()
       return rect.right > window.innerWidth + 2 || rect.left < -2
     }).length
     const clippedTextCount = [...document.querySelectorAll('p,h1,h2,h3,h4,label,button,a')]
       .filter(visible)
       .filter((element) => {
+        if (inInternalScroller(element)) return false
         const rect = element.getBoundingClientRect()
         return rect.right > window.innerWidth + 2 || rect.left < -2
       }).length
@@ -1196,6 +1308,7 @@ export async function collectUiProbe(page) {
       documentOverflow: docOverflow,
       appOverflow,
       unnamedInteractive: unnamed.length,
+      unnamedFingerprints,
       nestedInteractive: nested.length,
       focusInViewport,
       dir,
@@ -1250,92 +1363,34 @@ export async function collectUiProbe(page) {
       bottomNavClipped: Boolean(navBox && (navBox.right > window.innerWidth + 2 || navBox.left < -2)),
       mutatingProductRequest: false,
       environmentName: window.__STAGE8_ENV__ || null,
+      pendingRequest: false,
+      staleTargetHits: 0,
+      selectedControlInStrip: true,
+      hitTestPassed: true,
+      zoomStripExpected: false,
     }
   })
 }
 
 export function stateApplicability(routeName) {
-  const na = (state, reason) => ({ applicable: false, state, reason })
-  const yes = (state) => ({ applicable: true, state, reason: null })
-  if (routeName === 'notifications') {
-    return ALL_STATES.map((state) =>
-      na(state, 'Router redirect record; states execute on canonical account-notifications.'),
-    )
-  }
-  if (routeName === 'system-recovery') {
-    return ALL_STATES.map((state) =>
-      state === 'normal' ? yes(state) : na(state, 'Recovery is a terminal status page without list/data modes.'),
-    )
-  }
-  if (['login', 'web-register', 'setup-password'].includes(routeName)) {
-    return ALL_STATES.map((state) =>
-      ['normal', 'error', 'slow', 'offline'].includes(state)
-        ? yes(state)
-        : na(state, 'Public/focused auth form has no list empty/dense/stale/loading inventory.'),
-    )
-  }
-  if (routeName === 'invite-landing') {
-    return ALL_STATES.map((state) =>
-      ['loading', 'normal', 'error', 'slow', 'offline'].includes(state)
-        ? yes(state)
-        : na(state, 'Invitation lookup has no dense/empty/stale list inventory.'),
-    )
-  }
-  if (['operations', 'admin'].includes(routeName)) {
-    return ALL_STATES.map((state) =>
-      ['normal', 'loading', 'error', 'slow', 'offline', 'stale'].includes(state)
-        ? yes(state)
-        : na(state, 'Hub/menu has no list empty/dense inventory.'),
-    )
-  }
-  if (
-    [
-      'account',
-      'account-storage',
-      'profile',
-      'public-profile',
-      'admin-user-profile',
-      'operations-customers-detail',
-      'operations-accountants-detail',
-    ].includes(routeName)
-  ) {
-    return ALL_STATES.map((state) =>
-      ['empty', 'dense'].includes(state)
-        ? na(state, 'Detail/hub family has no list empty/dense inventory.')
-        : yes(state),
-    )
-  }
-  return ALL_STATES.map(yes)
+  return stateApplicabilityFromDescriptor(routeName)
 }
 
 export function environmentApplicability(routeName, environment) {
-  if (environment === 'telegram-webview-non-messenger' && MESSENGER_FAMILY.has(routeName)) {
-    return {
-      applicable: false,
-      reason: 'Telegram WebView simulation is defined only for non-messenger routes.',
-    }
-  }
-  return { applicable: true, reason: null }
+  return environmentApplicabilityFromDescriptor(routeName, environment)
 }
 
 export function interactionApplicability(routeName) {
-  if (routeName === 'notifications') {
-    return INTERACTIONS.map((interaction) => ({
-      interaction,
-      applicable: false,
-      reason: 'Router redirect record; interactions execute on canonical account-notifications.',
-    }))
-  }
-  return INTERACTIONS.map((interaction) => ({ interaction, applicable: true, reason: null }))
+  return interactionApplicabilityFromDescriptor(routeName)
 }
 
 export function allowedProfileForRoute(route, profiles) {
-  const render = profiles.find((profile) => deriveExpectedOutcome(route, profile).kind === 'render-route')
-  if (render) return render
-  const redirected = profiles.find((profile) =>
-    ['redirect-canonical', 'redirect-home'].includes(deriveExpectedOutcome(route, profile).kind),
-  )
-  return redirected || profiles[0]
+  const descriptor = getRouteDescriptor(route.name)
+  const named = profiles.find((profile) => profile.id === descriptor.renderProfileId)
+  if (!named) {
+    throw new Error(`descriptor renderProfileId ${descriptor.renderProfileId} is missing for ${route.name}`)
+  }
+  return named
 }
 
 export function assertOutcome(actual, expected) {

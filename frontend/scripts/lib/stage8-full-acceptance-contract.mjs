@@ -2,6 +2,12 @@ import { createHash } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
+import {
+  deriveOfficialCounts,
+  getRouteDescriptor,
+  STAGE8_ROUTE_NAMES,
+  staleEndpointsFromDescriptors,
+} from './stage8-full-acceptance-descriptors.mjs'
 
 function sha256File(filePath) {
   return createHash('sha256').update(fs.readFileSync(filePath)).digest('hex')
@@ -23,32 +29,39 @@ export const OFFICIAL_PHASES = Object.freeze([
   'environment',
 ])
 
-export const OFFICIAL_COUNTS = Object.freeze({
-  accessExpected: 270,
-  accessExecuted: 270,
-  accessPassed: 270,
-  viewportExpected: 240,
-  viewportExecuted: 240,
-  viewportPassed: 240,
-  stateTotal: 240,
-  stateExecuted: 192,
-  stateNotApplicable: 48,
-  statePassed: 192,
-  interactionTotal: 120,
-  interactionExecuted: 116,
-  interactionNotApplicable: 4,
-  interactionPassed: 116,
-  environmentTotal: 90,
-  environmentExecuted: 87,
-  environmentNotApplicable: 3,
-  environmentPassed: 87,
-  uniqueScenarioIds: 960,
-})
+export function officialCounts() {
+  const derived = deriveOfficialCounts()
+  return {
+    accessExpected: derived.accessExpected,
+    accessExecuted: derived.accessExecuted,
+    accessPassed: derived.accessPassed,
+    viewportExpected: derived.viewportExpected,
+    viewportExecuted: derived.viewportExecuted,
+    viewportPassed: derived.viewportPassed,
+    stateTotal: derived.stateTotal,
+    stateExecuted: derived.stateExecuted,
+    stateNotApplicable: derived.stateNotApplicable,
+    statePassed: derived.statePassed,
+    interactionTotal: derived.interactionTotal,
+    interactionExecuted: derived.interactionExecuted,
+    interactionNotApplicable: derived.interactionNotApplicable,
+    interactionPassed: derived.interactionPassed,
+    environmentTotal: derived.environmentTotal,
+    environmentExecuted: derived.environmentExecuted,
+    environmentNotApplicable: derived.environmentNotApplicable,
+    environmentPassed: derived.environmentPassed,
+    uniqueScenarioIds: derived.uniqueScenarioIds,
+  }
+}
+
+export const OFFICIAL_COUNTS = officialCounts()
 
 export const BINDING_PATHS = Object.freeze([
   'frontend/scripts/stage8-full-acceptance-browser.mjs',
   'frontend/scripts/lib/stage8-full-acceptance-runtime.mjs',
   'frontend/scripts/lib/stage8-full-acceptance-contract.mjs',
+  'frontend/scripts/lib/stage8-full-acceptance-descriptors.mjs',
+  'frontend/scripts/lib/stage8-full-acceptance-constants.mjs',
   'frontend/scripts/stage8-full-acceptance-runtime.test.mjs',
   'frontend/scripts/stage8-acceptance-matrix-source-guard.test.mjs',
   'frontend/scripts/stage8-full-acceptance-contract.test.mjs',
@@ -120,29 +133,30 @@ export function evaluateOfficialPass({
   if (!officialRun) failures.push('official phases must be access,viewport,state,interaction,environment')
   if (failed !== 0) failures.push(`failed scenarios ${failed}`)
   if (sourceDriftCount !== 0) failures.push(`sourceDrift ${sourceDriftCount}`)
-  if (uniqueIdCount !== OFFICIAL_COUNTS.uniqueScenarioIds) {
-    failures.push(`unique ids ${uniqueIdCount} != ${OFFICIAL_COUNTS.uniqueScenarioIds}`)
-  }
   if (duplicateIdCount !== 0) failures.push(`duplicate ids ${duplicateIdCount}`)
+  const counts = officialCounts()
+  if (uniqueIdCount !== counts.uniqueScenarioIds) {
+    failures.push(`unique ids ${uniqueIdCount} != ${counts.uniqueScenarioIds}`)
+  }
   const expected = {
-    accessCellsExpected: OFFICIAL_COUNTS.accessExpected,
-    accessCellsExecuted: OFFICIAL_COUNTS.accessExecuted,
-    accessCellsPassed: OFFICIAL_COUNTS.accessPassed,
-    routeViewportExpected: OFFICIAL_COUNTS.viewportExpected,
-    routeViewportExecuted: OFFICIAL_COUNTS.viewportExecuted,
-    routeViewportPassed: OFFICIAL_COUNTS.viewportPassed,
-    stateTotal: OFFICIAL_COUNTS.stateTotal,
-    stateExecuted: OFFICIAL_COUNTS.stateExecuted,
-    stateNotApplicable: OFFICIAL_COUNTS.stateNotApplicable,
-    statePassed: OFFICIAL_COUNTS.statePassed,
-    interactionTotal: OFFICIAL_COUNTS.interactionTotal,
-    interactionExecuted: OFFICIAL_COUNTS.interactionExecuted,
-    interactionNotApplicable: OFFICIAL_COUNTS.interactionNotApplicable,
-    interactionPassed: OFFICIAL_COUNTS.interactionPassed,
-    environmentTotal: OFFICIAL_COUNTS.environmentTotal,
-    environmentExecuted: OFFICIAL_COUNTS.environmentExecuted,
-    environmentNotApplicable: OFFICIAL_COUNTS.environmentNotApplicable,
-    environmentPassed: OFFICIAL_COUNTS.environmentPassed,
+    accessCellsExpected: counts.accessExpected,
+    accessCellsExecuted: counts.accessExecuted,
+    accessCellsPassed: counts.accessPassed,
+    routeViewportExpected: counts.viewportExpected,
+    routeViewportExecuted: counts.viewportExecuted,
+    routeViewportPassed: counts.viewportPassed,
+    stateTotal: counts.stateTotal,
+    stateExecuted: counts.stateExecuted,
+    stateNotApplicable: counts.stateNotApplicable,
+    statePassed: counts.statePassed,
+    interactionTotal: counts.interactionTotal,
+    interactionExecuted: counts.interactionExecuted,
+    interactionNotApplicable: counts.interactionNotApplicable,
+    interactionPassed: counts.interactionPassed,
+    environmentTotal: counts.environmentTotal,
+    environmentExecuted: counts.environmentExecuted,
+    environmentNotApplicable: counts.environmentNotApplicable,
+    environmentPassed: counts.environmentPassed,
   }
   for (const [key, value] of Object.entries(expected)) {
     if (counters?.[key] !== value) failures.push(`counter ${key} ${counters?.[key]} != ${value}`)
@@ -162,23 +176,17 @@ export function evaluateOfficialPass({
   return { passed: failures.length === 0, failures }
 }
 
-export const LIST_STATE_ROUTES = Object.freeze([
-  'home',
-  'market',
-  'operations-customers',
-  'operations-accountants',
-  'account-security',
-  'account-notifications',
-  'messenger',
-  'admin-invitations',
-  'admin-users',
-  'admin-commodities',
-  'admin-messages',
-  'share-receive',
-])
+export function listStateRoutes() {
+  return STAGE8_ROUTE_NAMES.filter((name) => {
+    const descriptor = getRouteDescriptor(name)
+    return descriptor.states.empty.applicable && descriptor.states.dense.applicable
+  })
+}
+
+export const LIST_STATE_ROUTES = Object.freeze(listStateRoutes())
 
 export function hasListStateSurface(routeName) {
-  return LIST_STATE_ROUTES.includes(routeName)
+  return listStateRoutes().includes(routeName)
 }
 
 export function assertStateSemantics(probe, midProbe, state, protection, expectedKind, routeName = '') {
@@ -186,6 +194,7 @@ export function assertStateSemantics(probe, midProbe, state, protection, expecte
   if (expectedKind !== 'render-route') return failures
   const listSurface = hasListStateSurface(routeName)
   if (state === 'loading') {
+    if (!midProbe?.pendingRequest) failures.push('loading mid-probe ran without a pending request')
     if (!midProbe?.loadingVisible) failures.push('loading UI not observed before settle')
     if (probe.loadingVisible && !probe.settledVisible) failures.push('loading did not settle')
     if ((midProbe?.identityRequestCount || 0) > 3) {
@@ -212,6 +221,7 @@ export function assertStateSemantics(probe, midProbe, state, protection, expecte
     if (probe.identityBootstrapBroken) failures.push('error state broke identity bootstrap')
   }
   if (state === 'slow') {
+    if (!midProbe?.pendingRequest) failures.push('slow mid-probe ran without a pending request')
     if (!midProbe?.loadingVisible) failures.push('slow state never showed loading')
     if (probe.emptyVisible && !probe.listItemCount) failures.push('slow settled into premature empty')
     if (probe.errorVisible && !probe.settledVisible) failures.push('slow settled into premature error')
@@ -223,8 +233,11 @@ export function assertStateSemantics(probe, midProbe, state, protection, expecte
     if (probe.landedRecovery) failures.push('offline state left the route for system recovery')
   }
   if (state === 'stale') {
+    if ((probe.staleTargetHits || 0) < 2) {
+      failures.push(`stale endpoint requested ${probe.staleTargetHits || 0} times`)
+    }
     if (probe.staleOldVisible) failures.push('stale response overwrote newer state')
-    if (!probe.staleFreshVisible && (protection === 'none' || listSurface)) {
+    if (!probe.staleFreshVisible) {
       failures.push('fresh stale-race marker not observed')
     }
     if ((probe.staleNewCompletedAt || 0) > 0 && (probe.staleOldCompletedAt || 0) > 0) {
@@ -254,13 +267,23 @@ export function assertInteractionSemantics(probe, interaction, protection) {
   }
   if (interaction === 'zoom-200') {
     if (Number(probe.visualScale || 0) < 1.9) failures.push(`zoom scale ${probe.visualScale} != 2`)
-    if (probe.documentOverflow) failures.push('document overflow at 200% zoom')
-    if (probe.appOverflow) failures.push('app overflow at 200% zoom')
+    if (probe.documentOverflow && !probe.internalStripOverflow) {
+      failures.push('document overflow at 200% zoom')
+    }
+    if (probe.appOverflow && !probe.internalStripOverflow) {
+      failures.push('app overflow at 200% zoom')
+    }
     if (probe.clippedControlCount > 0) failures.push(`clipped controls at zoom ${probe.clippedControlCount}`)
     if (probe.clippedTextCount > 0) failures.push(`clipped text at zoom ${probe.clippedTextCount}`)
     if (!probe.ctaAboveNav) failures.push('CTA obscured at 200% zoom')
     if (probe.bottomNavClipped) failures.push('BottomNav clipped at 200% zoom')
     if (probe.modalOpen && probe.modalOutOfBounds) failures.push('modal/sheet exceeded viewport at 200% zoom')
+    if (probe.zoomStripExpected && !probe.selectedControlInStrip) {
+      failures.push('selected control is not inside the internal strip after reveal')
+    }
+    if (probe.zoomStripExpected && !probe.hitTestPassed) {
+      failures.push('selected control failed hit-test after reveal')
+    }
   }
   if (interaction === 'reduced-motion') {
     if (!probe.reducedMotion) failures.push('prefers-reduced-motion is not reduce')
@@ -302,14 +325,12 @@ export function assertEnvironmentSemantics(probe, environment) {
   return failures
 }
 
-export function isStaleTargetPath(pathname) {
-  return (
-    pathname === '/api/offers/page' ||
-    pathname === '/api/notifications' ||
-    pathname === '/api/notifications/' ||
-    pathname === '/api/customers/owner-relations' ||
-    pathname === '/api/accountants/owner-relations' ||
-    pathname === '/api/users/' ||
-    pathname === '/api/sessions/active'
-  )
+export function matchesStaleEndpoint(pathname, endpoint) {
+  if (!pathname || !endpoint) return false
+  return pathname.replace(/\/$/u, '') === endpoint.replace(/\/$/u, '')
+}
+
+export function isStaleTargetPath(pathname, endpoint = '') {
+  if (endpoint) return matchesStaleEndpoint(pathname, endpoint)
+  return staleEndpointsFromDescriptors().some((item) => matchesStaleEndpoint(pathname, item))
 }

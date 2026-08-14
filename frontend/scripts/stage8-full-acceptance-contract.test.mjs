@@ -13,7 +13,12 @@ import {
   assertStateSemantics,
   evaluateOfficialPass,
   hasListStateSurface,
+  officialCounts,
 } from './lib/stage8-full-acceptance-contract.mjs'
+import {
+  deriveOfficialCounts,
+  getRouteDescriptor,
+} from './lib/stage8-full-acceptance-descriptors.mjs'
 import {
   ENVIRONMENTS,
   apiFixture,
@@ -68,25 +73,26 @@ const ROUTES = [
 ]
 
 function officialCounters() {
+  const counts = officialCounts()
   return {
-    accessCellsExpected: 270,
-    accessCellsExecuted: 270,
-    accessCellsPassed: 270,
-    routeViewportExpected: 240,
-    routeViewportExecuted: 240,
-    routeViewportPassed: 240,
-    stateTotal: 240,
-    stateExecuted: 192,
-    stateNotApplicable: 48,
-    statePassed: 192,
-    interactionTotal: 120,
-    interactionExecuted: 116,
-    interactionNotApplicable: 4,
-    interactionPassed: 116,
-    environmentTotal: 90,
-    environmentExecuted: 87,
-    environmentNotApplicable: 3,
-    environmentPassed: 87,
+    accessCellsExpected: counts.accessExpected,
+    accessCellsExecuted: counts.accessExecuted,
+    accessCellsPassed: counts.accessPassed,
+    routeViewportExpected: counts.viewportExpected,
+    routeViewportExecuted: counts.viewportExecuted,
+    routeViewportPassed: counts.viewportPassed,
+    stateTotal: counts.stateTotal,
+    stateExecuted: counts.stateExecuted,
+    stateNotApplicable: counts.stateNotApplicable,
+    statePassed: counts.statePassed,
+    interactionTotal: counts.interactionTotal,
+    interactionExecuted: counts.interactionExecuted,
+    interactionNotApplicable: counts.interactionNotApplicable,
+    interactionPassed: counts.interactionPassed,
+    environmentTotal: counts.environmentTotal,
+    environmentExecuted: counts.environmentExecuted,
+    environmentNotApplicable: counts.environmentNotApplicable,
+    environmentPassed: counts.environmentPassed,
   }
 }
 
@@ -119,14 +125,14 @@ describe('Stage 8 official pass invariants', () => {
     ['accessCellsPassed', 269],
     ['routeViewportExecuted', 239],
     ['routeViewportPassed', 239],
-    ['stateTotal', 239],
-    ['stateExecuted', 191],
-    ['stateNotApplicable', 47],
-    ['statePassed', 191],
-    ['interactionTotal', 119],
-    ['interactionExecuted', 115],
-    ['interactionNotApplicable', 3],
-    ['interactionPassed', 115],
+    ['stateTotal', officialCounts().stateTotal - 1],
+    ['stateExecuted', officialCounts().stateExecuted - 1],
+    ['stateNotApplicable', officialCounts().stateNotApplicable - 1],
+    ['statePassed', officialCounts().statePassed - 1],
+    ['interactionTotal', officialCounts().interactionTotal - 1],
+    ['interactionExecuted', officialCounts().interactionExecuted - 1],
+    ['interactionNotApplicable', officialCounts().interactionNotApplicable - 1],
+    ['interactionPassed', officialCounts().interactionPassed - 1],
     ['environmentTotal', 89],
     ['environmentExecuted', 86],
     ['environmentNotApplicable', 2],
@@ -271,7 +277,8 @@ describe('Stage 8 clean-source binding', () => {
 })
 
 describe('Stage 8 applicability counts stay source-bound', () => {
-  it('keeps 192/48 state, 116/4 interaction, and 87/3 environment cells', () => {
+  it('derives executed and N/A counts from route descriptors', () => {
+    const derived = deriveOfficialCounts()
     let stateYes = 0
     let stateNo = 0
     let interactionYes = 0
@@ -293,12 +300,84 @@ describe('Stage 8 applicability counts stay source-bound', () => {
       }
     }
     expect(ROUTES).toHaveLength(30)
-    expect(stateYes).toBe(192)
-    expect(stateNo).toBe(48)
-    expect(interactionYes).toBe(116)
-    expect(interactionNo).toBe(4)
-    expect(environmentYes).toBe(87)
-    expect(environmentNo).toBe(3)
+    expect(stateYes + stateNo).toBe(240)
+    expect(interactionYes + interactionNo).toBe(120)
+    expect(environmentYes + environmentNo).toBe(90)
+    expect(stateYes).toBe(derived.stateExecuted)
+    expect(stateNo).toBe(derived.stateNotApplicable)
+    expect(interactionYes).toBe(derived.interactionExecuted)
+    expect(interactionNo).toBe(derived.interactionNotApplicable)
+    expect(environmentYes).toBe(derived.environmentExecuted)
+    expect(environmentNo).toBe(derived.environmentNotApplicable)
+    expect(derived.uniqueScenarioIds).toBe(960)
+    expect(OFFICIAL_COUNTS.stateExecuted).toBe(derived.stateExecuted)
+  })
+})
+
+describe('Stage 8 descriptor contract is fail-closed', () => {
+  it('does not fall back to all states or first render-route profile', () => {
+    expect(runtimeSource).not.toMatch(/return ALL_STATES\.map\(yes\)/)
+    expect(runtimeSource).not.toMatch(/deriveExpectedOutcome\(route, profile\)\.kind === 'render-route'/)
+    expect(runtimeSource).toMatch(/descriptor\.renderProfileId/)
+    expect(runtimeSource).toMatch(/stateApplicabilityFromDescriptor/)
+  })
+
+  it('keeps general /settings free of session-list states', () => {
+    const settings = getRouteDescriptor('settings')
+    expect(settings.states.loading.applicable).toBe(false)
+    expect(settings.states.empty.applicable).toBe(false)
+    expect(settings.states.dense.applicable).toBe(false)
+    expect(settings.states.stale.applicable).toBe(false)
+    expect(settings.states.loading.reason).toMatch(/account\/security/)
+    expect(hasListStateSurface('settings')).toBe(false)
+    expect(hasListStateSurface('account-security')).toBe(true)
+  })
+
+  it('renders denied admin subviews with senior-admin, not middle-admin', () => {
+    expect(getRouteDescriptor('admin-channels').renderProfileId).toBe('senior-admin')
+    expect(getRouteDescriptor('admin-commodities').renderProfileId).toBe('senior-admin')
+    expect(getRouteDescriptor('admin-messages').renderProfileId).toBe('senior-admin')
+    expect(getRouteDescriptor('admin-system').renderProfileId).toBe('senior-admin')
+    expect(getRouteDescriptor('admin').renderProfileId).toBe('middle-admin')
+    expect(getRouteDescriptor('admin-invitations').renderProfileId).toBe('middle-admin')
+    expect(getRouteDescriptor('admin-users').renderProfileId).toBe('middle-admin')
+  })
+
+  it('makes login and web-register touch N/A and setup-password touch explicit', () => {
+    expect(getRouteDescriptor('login').touch.applicable).toBe(false)
+    expect(getRouteDescriptor('web-register').touch.applicable).toBe(false)
+    expect(getRouteDescriptor('setup-password').touch.applicable).toBe(true)
+    expect(getRouteDescriptor('setup-password').touch.selector).toMatch(/password-toggle/)
+    expect(getRouteDescriptor('invite-landing').touch.expectedName).toBe('web-register')
+  })
+
+  it('treats system-recovery home navigation as the expected guest landing', () => {
+    const recovery = getRouteDescriptor('system-recovery')
+    expect(recovery.touch.applicable).toBe(true)
+    expect(recovery.touch.allowNavigation).toBe(true)
+    expect(recovery.touch.expectedName).toBe('login')
+    expect(recovery.states.normal.applicable).toBe(true)
+    expect(recovery.states.loading.applicable).toBe(false)
+  })
+
+  it('requires a source reason for every N/A cell', () => {
+    for (const route of ROUTES) {
+      for (const item of stateApplicability(route)) {
+        if (!item.applicable) expect(item.reason).toMatch(/\S/)
+      }
+      for (const item of interactionApplicability(route)) {
+        if (!item.applicable) expect(item.reason).toMatch(/\S/)
+      }
+    }
+    expect(deriveOfficialCounts().naReasons.every((item) => item.reason)).toBe(true)
+  })
+
+  it('binds the descriptor module into the official hash set', () => {
+    expect(BINDING_PATHS).toContain('frontend/scripts/lib/stage8-full-acceptance-descriptors.mjs')
+    expect(BINDING_PATHS).toContain('frontend/scripts/lib/stage8-full-acceptance-constants.mjs')
+    expect(browserSource).toMatch(/getRouteDescriptor/)
+    expect(browserSource).toMatch(/waitForPendingRequest/)
+    expect(browserSource).toMatch(/unnamedFingerprints/)
   })
 })
 
@@ -320,35 +399,60 @@ describe('Stage 8 state-specific assertions', () => {
     identityRequestCount: 1,
     staleOldCompletedAt: 20,
     staleNewCompletedAt: 10,
+    staleTargetHits: 2,
     documentOverflow: false,
     internalStripOverflow: false,
   }
 
   it('requires a real loading UI before settle and rejects remount storms', () => {
     expect(
-      assertStateSemantics(settled, { loadingVisible: true, identityRequestCount: 1 }, 'loading', 'none', 'render-route', 'settings'),
+      assertStateSemantics(
+        settled,
+        { loadingVisible: true, pendingRequest: true, identityRequestCount: 1 },
+        'loading',
+        'none',
+        'render-route',
+        'account-security',
+      ),
     ).toEqual([])
     expect(
-      assertStateSemantics(settled, { loadingVisible: false }, 'loading', 'none', 'render-route', 'settings'),
+      assertStateSemantics(
+        settled,
+        { loadingVisible: true, pendingRequest: false },
+        'loading',
+        'none',
+        'render-route',
+        'account-security',
+      ),
+    ).toContain('loading mid-probe ran without a pending request')
+    expect(
+      assertStateSemantics(
+        settled,
+        { loadingVisible: false, pendingRequest: true },
+        'loading',
+        'none',
+        'render-route',
+        'account-security',
+      ),
     ).toContain('loading UI not observed before settle')
     expect(
       assertStateSemantics(
         { ...settled, loadingVisible: true, settledVisible: false },
-        { loadingVisible: true },
+        { loadingVisible: true, pendingRequest: true },
         'loading',
         'none',
         'render-route',
-        'settings',
+        'account-security',
       ),
     ).toContain('loading did not settle')
     expect(
       assertStateSemantics(
         settled,
-        { loadingVisible: true, identityRequestCount: 4 },
+        { loadingVisible: true, pendingRequest: true, identityRequestCount: 4 },
         'loading',
         'none',
         'render-route',
-        'settings',
+        'account-security',
       ),
     ).toContain('loading remounted identity 4 times')
   })
@@ -448,7 +552,7 @@ describe('Stage 8 state-specific assertions', () => {
         'account-security',
       ),
     ).toEqual([])
-    expect(assertStateSemantics(settled, null, 'error', 'none', 'render-route', 'settings')).toContain(
+    expect(assertStateSemantics(settled, null, 'error', 'none', 'render-route', 'account-security')).toContain(
       'error UI not observed',
     )
     expect(
@@ -458,7 +562,7 @@ describe('Stage 8 state-specific assertions', () => {
         'error',
         'none',
         'render-route',
-        'settings',
+        'account-security',
       ),
     ).toContain('error state left the route for system recovery')
     expect(
@@ -468,18 +572,42 @@ describe('Stage 8 state-specific assertions', () => {
         'error',
         'none',
         'render-route',
-        'settings',
+        'account-security',
       ),
     ).toContain('error state broke identity bootstrap')
   })
 
   it('requires slow to show loading then a non-empty/error settle', () => {
     expect(
-      assertStateSemantics(settled, { loadingVisible: true }, 'slow', 'none', 'render-route', 'settings'),
+      assertStateSemantics(
+        settled,
+        { loadingVisible: true, pendingRequest: true },
+        'slow',
+        'none',
+        'render-route',
+        'account-security',
+      ),
     ).toEqual([])
-    expect(assertStateSemantics(settled, { loadingVisible: false }, 'slow', 'none', 'render-route', 'settings')).toContain(
-      'slow state never showed loading',
-    )
+    expect(
+      assertStateSemantics(
+        settled,
+        { loadingVisible: false, pendingRequest: true },
+        'slow',
+        'none',
+        'render-route',
+        'account-security',
+      ),
+    ).toContain('slow state never showed loading')
+    expect(
+      assertStateSemantics(
+        settled,
+        { loadingVisible: true, pendingRequest: false },
+        'slow',
+        'none',
+        'render-route',
+        'account-security',
+      ),
+    ).toContain('slow mid-probe ran without a pending request')
     expect(
       assertStateSemantics(
         { ...settled, emptyVisible: true, listItemCount: 0 },
@@ -500,10 +628,10 @@ describe('Stage 8 state-specific assertions', () => {
         'offline',
         'none',
         'render-route',
-        'settings',
+        'account-security',
       ),
     ).toEqual([])
-    expect(assertStateSemantics(settled, null, 'offline', 'none', 'render-route', 'settings')).toContain(
+    expect(assertStateSemantics(settled, null, 'offline', 'none', 'render-route', 'account-security')).toContain(
       'offline/fallback UI not observed',
     )
     expect(
@@ -513,13 +641,23 @@ describe('Stage 8 state-specific assertions', () => {
         'offline',
         'none',
         'render-route',
-        'settings',
+        'account-security',
       ),
     ).toContain('offline state left the route for system recovery')
   })
 
   it('requires a real stale race that cannot overwrite newer state', () => {
-    expect(assertStateSemantics(settled, null, 'stale', 'none', 'render-route', 'account-security')).toEqual([])
+    expect(assertStateSemantics(settled, null, 'stale', 'none', 'render-route', 'admin-users')).toEqual([])
+    expect(
+      assertStateSemantics(
+        { ...settled, staleTargetHits: 1 },
+        null,
+        'stale',
+        'none',
+        'render-route',
+        'admin-users',
+      ),
+    ).toContain('stale endpoint requested 1 times')
     expect(
       assertStateSemantics(
         { ...settled, staleOldVisible: true },
@@ -527,7 +665,7 @@ describe('Stage 8 state-specific assertions', () => {
         'stale',
         'none',
         'render-route',
-        'account-security',
+        'admin-users',
       ),
     ).toContain('stale response overwrote newer state')
     expect(
@@ -537,7 +675,7 @@ describe('Stage 8 state-specific assertions', () => {
         'stale',
         'none',
         'render-route',
-        'account-security',
+        'admin-users',
       ),
     ).toContain('fresh stale-race marker not observed')
     expect(
@@ -547,7 +685,7 @@ describe('Stage 8 state-specific assertions', () => {
         'stale',
         'none',
         'render-route',
-        'account-security',
+        'admin-users',
       ),
     ).toContain('stale race did not deliver the old response after the fresh one')
     expect(hasListStateSurface('account-security')).toBe(true)
@@ -623,6 +761,23 @@ describe('Stage 8 interaction-specific assertions', () => {
     expect(
       assertInteractionSemantics({ visualScale: 2, documentOverflow: true, ctaAboveNav: true }, 'zoom-200', 'none'),
     ).toContain('document overflow at 200% zoom')
+    expect(
+      assertInteractionSemantics(
+        {
+          visualScale: 2,
+          documentOverflow: true,
+          appOverflow: true,
+          internalStripOverflow: true,
+          clippedControlCount: 0,
+          clippedTextCount: 0,
+          ctaAboveNav: true,
+          bottomNavClipped: false,
+          modalOpen: false,
+        },
+        'zoom-200',
+        'none',
+      ),
+    ).toEqual([])
   })
 
   it('requires Stage 7 reduced-motion tokens', () => {

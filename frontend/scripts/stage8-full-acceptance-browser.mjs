@@ -34,6 +34,8 @@ import {
   stateApplicability,
   visitPathFor,
   waitForApp,
+  waitForNetworkSettle,
+  waitForPendingRequest,
 } from './lib/stage8-full-acceptance-runtime.mjs'
 import {
   BINDING_PATHS,
@@ -46,9 +48,16 @@ import {
   captureOfficialBinding,
   evaluateOfficialPass,
 } from './lib/stage8-full-acceptance-contract.mjs'
+import {
+  classifyScenarioFailure,
+  deriveOfficialCounts,
+  getRouteDescriptor,
+} from './lib/stage8-full-acceptance-descriptors.mjs'
 
 const HARNESS_PATH = fileURLToPath(import.meta.url)
 const LIB_PATH = fileURLToPath(new URL('./lib/stage8-full-acceptance-runtime.mjs', import.meta.url))
+const DESCRIPTOR_PATH = fileURLToPath(new URL('./lib/stage8-full-acceptance-descriptors.mjs', import.meta.url))
+const CONTRACT_PATH = fileURLToPath(new URL('./lib/stage8-full-acceptance-contract.mjs', import.meta.url))
 const FRONTEND = path.resolve(path.dirname(HARNESS_PATH), '..')
 const REPO = path.resolve(FRONTEND, '..')
 const MATRIX_PATH = path.join(REPO, 'docs/uiux-stage8-acceptance-rollout/ACCEPTANCE_MATRIX.json')
@@ -99,9 +108,11 @@ async function runScenario({
   zoom200 = false,
 }) {
   const diagnostics = newDiagnostics()
+  const descriptor = getRouteDescriptor(route.name)
   controller.profile = profile
   controller.mode = state === 'loading' ? 'loading' : state
   controller.delayMs = state === 'loading' ? 700 : state === 'slow' ? 1200 : 0
+  controller.staleEndpoint = state === 'stale' ? descriptor.states.stale.endpoint || '' : ''
   const snapshotBefore = {
     unknown: serverState.unknownApiRequests,
     mutating: serverState.mutatingApiRequests,
@@ -128,29 +139,50 @@ async function runScenario({
     const target = `${baseUrl}${visitPathFor(route)}`
     await page.goto(target, { waitUntil: 'domcontentloaded', timeout: 30_000 })
     if (state === 'loading' || state === 'slow') {
-      await page.waitForTimeout(180)
+      const pending = await waitForPendingRequest(page, descriptor.states[state].endpoint || '', 2500)
       midProbe = await collectUiProbe(page)
       midProbe.identityRequestCount = serverState.identityRequestCount
-    }
-    await waitForApp(page)
-    if (state === 'stale' && expected.kind === 'render-route') {
-      await page.waitForTimeout(200)
-      await page.evaluate(() => {
-        const app = document.querySelector('#app')?.__vue_app__
-        const router = app?.config?.globalProperties?.$router
-        const current = router?.currentRoute?.value
-        if (!router || !current) return null
-        return router.replace({
-          name: current.name,
-          params: current.params,
-          query: { ...current.query, s8stale: '2' },
-        })
-      })
-      const refresh = page.getByRole('button', { name: /به‌روزرسانی|تلاش دوباره|نوسازی/i })
+      midProbe.pendingRequest = pending.pendingRequest
+      await waitForNetworkSettle(page)
+      await waitForApp(page)
+    } else if (state === 'stale' && expected.kind === 'render-route') {
+      await waitForPendingRequest(page, descriptor.states.stale.endpoint || '', 2500)
+      const refresh = page.locator(
+        [
+          descriptor.states.stale.trigger === 'in-page-refresh' ? '' : '',
+          '.pending-refresh-btn',
+          '.user-load-retry',
+          '.sessions-retry',
+          '.customer-detail-refresh-retry',
+          '.notification-history-retry',
+          '.commodity-list-retry',
+          'button:has-text("به‌روزرسانی")',
+          'button:has-text("تلاش دوباره")',
+          'button:has-text("تلاش مجدد")',
+        ]
+          .filter(Boolean)
+          .join(', '),
+      )
       if ((await refresh.count()) > 0) {
         await refresh.first().click({ timeout: 1500 }).catch(() => {})
+      } else {
+        await page.evaluate(() => {
+          const app = document.querySelector('#app')?.__vue_app__
+          const router = app?.config?.globalProperties?.$router
+          const current = router?.currentRoute?.value
+          if (!router || !current) return null
+          return router.replace({
+            name: current.name,
+            params: current.params,
+            query: { ...current.query, s8stale: '2' },
+          })
+        })
       }
-      await page.waitForTimeout(1100)
+      await waitForNetworkSettle(page)
+      await waitForApp(page)
+    } else {
+      await waitForApp(page)
+      await waitForNetworkSettle(page).catch(() => {})
     }
     if (zoom200 || interaction === 'zoom-200') {
       const session = await context.newCDPSession(page)
@@ -179,13 +211,13 @@ async function runScenario({
       midProbe.focusVisible = afterTab.focusVisible
     }
     if (interaction === 'touch') {
-      const candidate = page.locator(
-        'a[href^="/"], a[href^="#"], [role="tab"], .bottom-nav-wrapper a, .ui-v2-bottom-nav a, .settings-return-control',
-      ).first()
+      const candidate = page.locator(descriptor.touch.selector).first()
       if ((await candidate.count()) > 0) {
-        await candidate.click({ timeout: 1500 })
+        await candidate.click({ timeout: 2000 })
         midProbe = midProbe || {}
         midProbe.touchClicked = true
+        await waitForApp(page)
+        await waitForNetworkSettle(page).catch(() => {})
       }
     }
     if (state === 'error' && expected.kind === 'render-route') {
@@ -207,11 +239,41 @@ async function runScenario({
     if (interaction === 'touch') {
       probe.touchActivated = Boolean(midProbe?.touchClicked)
     }
+    if ((zoom200 || interaction === 'zoom-200') && descriptor.zoom?.internalStrip) {
+      const revealed = await page.evaluate((stripSel) => {
+        const focused = document.activeElement instanceof HTMLElement ? document.activeElement : null
+        const strip = document.querySelector(stripSel)
+        if (focused) focused.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+        const target = focused || strip?.querySelector('a,button,[role="tab"]')
+        if (target instanceof HTMLElement) target.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+        const rect = target instanceof HTMLElement ? target.getBoundingClientRect() : null
+        const stripRect = strip instanceof HTMLElement ? strip.getBoundingClientRect() : null
+        const inside = Boolean(
+          rect &&
+            stripRect &&
+            rect.left >= stripRect.left - 2 &&
+            rect.right <= stripRect.right + 2,
+        )
+        const cx = rect ? (rect.left + rect.right) / 2 : -1
+        const cy = rect ? (rect.top + rect.bottom) / 2 : -1
+        const hit = cx >= 0 ? document.elementFromPoint(cx, cy) : null
+        return {
+          selectedControlInStrip: inside,
+          hitTestPassed: Boolean(
+            hit && target && (hit === target || target.contains(hit) || hit.contains(target)),
+          ),
+        }
+      }, descriptor.zoom.internalStrip)
+      probe.zoomStripExpected = Boolean(revealed)
+      probe.selectedControlInStrip = revealed.selectedControlInStrip
+      probe.hitTestPassed = revealed.hitTestPassed
+    }
     const staleOld = (serverState.staleCompletions || []).find((item) => item.mode === 'stale-old')
     const staleNew = (serverState.staleCompletions || []).find((item) => item.mode === 'stale-new')
     if (probe) {
       probe.staleOldCompletedAt = staleOld?.completedAt || 0
       probe.staleNewCompletedAt = staleNew?.completedAt || 0
+      probe.staleTargetHits = Object.values(serverState.staleHits || {}).reduce((sum, value) => sum + value, 0)
       probe.identityBootstrapBroken = false
       probe.mutatingProductRequest = serverState.mutatingApiRequests > snapshotBefore.mutating
     }
@@ -220,7 +282,20 @@ async function runScenario({
       errorProbe.landedRecovery = errorProbe.landedRecovery || probe.landedRecovery
       errorProbe.identityBootstrapBroken = probe.identityBootstrapBroken
     }
-    failures.push(...assertOutcome(actual, expected))
+    const skipRouteAssert = interaction === 'touch' && descriptor.touch.allowNavigation
+    if (interaction === 'touch' && descriptor.touch.applicable) {
+      const landed = actual?.name
+      const expectedNames = [
+        descriptor.touch.expectedName,
+        ...(descriptor.touch.expectedNameAny || []),
+      ].filter(Boolean)
+      if (expectedNames.length && !expectedNames.includes(landed)) {
+        failures.push(`touch landed ${landed} != ${expectedNames.join('|')}`)
+      }
+    }
+    if (!skipRouteAssert) {
+      failures.push(...assertOutcome(actual, expected))
+    }
     if (['access', 'viewport', 'state', 'interaction', 'environment'].includes(kind)) {
       if (
         expected.kind === 'render-route' ||
@@ -358,6 +433,7 @@ async function main() {
     profile: profiles[0],
     mode: 'normal',
     delayMs: 0,
+    staleEndpoint: '',
     routesByName: new Map(matrix.routes.map((item) => [item.name, item])),
   }
   const { server, state: serverState } = createFixtureServer(DIST, controller)
@@ -613,6 +689,36 @@ async function main() {
     environmentNotApplicable: naEnvironments.length,
     environmentPassed: executedEnvironments.filter((item) => item.passed).length,
   }
+  const derivedCounts = deriveOfficialCounts()
+  const failedItems = scenarios.filter((item) => !item.passed)
+  const classifiedFailures = failedItems.map((item) => ({
+    id: item.id,
+    route: item.route,
+    kind: item.kind,
+    state: item.state || null,
+    interaction: item.interaction || null,
+    ...classifyScenarioFailure(item),
+    failures: item.failures,
+    unnamedFingerprints: item.probe?.unnamedFingerprints || [],
+  }))
+  const failureByRootCause = {}
+  const failureByBucket = {
+    'confirmed-product': 0,
+    'harness-fixture': 0,
+    'source-derived-na': 0,
+  }
+  for (const item of classifiedFailures) {
+    failureByBucket[item.bucket] = (failureByBucket[item.bucket] || 0) + 1
+    failureByRootCause[item.rootCause] = (failureByRootCause[item.rootCause] || 0) + 1
+  }
+  const sourceDerivedNa = [...naStates, ...naInteractions, ...naEnvironments].map((item) => ({
+    id: item.id,
+    kind: item.kind,
+    route: item.route,
+    key: item.state || item.interaction || item.environment,
+    reason: item.reason,
+  }))
+  failureByBucket['source-derived-na'] = sourceDerivedNa.length
   const verdict = evaluateOfficialPass({
     officialRun,
     failed,
@@ -631,7 +737,7 @@ async function main() {
       .join('')}</body></html>\n`,
   )
   const report = {
-    schemaVersion: 2,
+    schemaVersion: 3,
     stage: 8,
     runId: RUN_ID,
     claimBoundary:
@@ -647,6 +753,9 @@ async function main() {
     bindingPaths: BINDING_PATHS,
     harnessSha256: sha256File(HARNESS_PATH),
     runtimeSha256: sha256File(LIB_PATH),
+    descriptorSha256: sha256File(DESCRIPTOR_PATH),
+    contractSha256: sha256File(CONTRACT_PATH),
+    derivedCounts,
     dist: distBefore,
     matrixSourceSnapshot: matrix.sourceSnapshot,
     sourceDriftCount,
@@ -656,7 +765,18 @@ async function main() {
       passed: item.passed,
       actual: item.actual,
     })),
-    failedScenarios: scenarios.filter((item) => !item.passed).map(redactScenario),
+    classification: {
+      scenarioFailureCount: failedItems.length,
+      rootCauseCount: Object.keys(failureByRootCause).length,
+      byBucket: failureByBucket,
+      byRootCause: failureByRootCause,
+      items: classifiedFailures,
+    },
+    sourceDerivedNa: {
+      count: sourceDerivedNa.length,
+      items: sourceDerivedNa,
+    },
+    failedScenarios: failedItems.map(redactScenario),
     scenarioDigests: scenarios.map((item) => ({ id: item.id, digest: item.digest, passed: item.passed })),
     screenshotCount: screenshotDigests.length,
     screenshotDigests,

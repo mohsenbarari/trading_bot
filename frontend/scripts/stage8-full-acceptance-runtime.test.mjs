@@ -108,6 +108,12 @@ describe('stage8 full-acceptance fixture contract', () => {
     expect(runtimeSource).not.toMatch(/window\.Telegram=window\.Telegram\|\|/)
   })
 
+  it('does not restore the generic all-states applicability fallback', () => {
+    expect(runtimeSource).not.toMatch(/return ALL_STATES\.map\(yes\)/)
+    expect(runtimeSource).toMatch(/stateApplicabilityFromDescriptor/)
+    expect(runtimeSource).toMatch(/\/__stage8\/status/)
+  })
+
   it('fails closed when the matrix drifts from source and the runner sees sourceDrift', () => {
     const matrixPath = path.join(repoRoot, 'docs/uiux-stage8-acceptance-rollout/ACCEPTANCE_MATRIX.json')
     expect(() => loadMatrix(matrixPath)).not.toThrow()
