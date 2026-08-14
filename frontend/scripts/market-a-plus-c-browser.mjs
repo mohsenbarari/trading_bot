@@ -260,9 +260,9 @@ async function runScenario({
         failures.push('desktop-1024-overflow')
       }
       if (['overtime-buy', 'overtime-sell', 'critical-overtime'].includes(state)) {
-        if (!probe.overtimeBadgeVisible) failures.push('overtime-badge-missing')
+        if (!probe.overtimeStickerVisible) failures.push('overtime-sticker-missing')
         if (probe.deadline?.phase !== 'overtime') failures.push(`overtime-phase-mismatch:${probe.deadline?.phase}`)
-        if (!String(probe.deadline?.label || '').includes('وقت اضافه')) failures.push('overtime-label-missing')
+        if (!String(probe.deadline?.label || '').includes('باقی‌مانده')) failures.push('overtime-countdown-label-missing')
         if (state !== 'critical-overtime' && !(probe.deadline?.pct > 50)) {
           failures.push(`overtime-progress-not-reset:${probe.deadline?.pct}`)
         }
@@ -276,6 +276,15 @@ async function runScenario({
         }
         if (!String(probe.deadline?.label || '').includes('مهلت اصلی')) {
           failures.push('critical-normal-label-missing')
+        }
+      }
+      if (
+        ['normal', 'dense', 'normal-buy', 'normal-sell', 'critical-normal', 'overtime-buy', 'overtime-sell', 'critical-overtime', 'own-offer'].includes(state)
+        && probe.deadline?.present
+      ) {
+        if (!probe.deadline.perimeterMatchesCard) failures.push('deadline-perimeter-does-not-follow-card')
+        if (!probe.deadline.strokeDasharray || probe.deadline.strokeDasharray === 'none') {
+          failures.push('deadline-perimeter-progress-missing')
         }
       }
       if (state === 'final-tail') {

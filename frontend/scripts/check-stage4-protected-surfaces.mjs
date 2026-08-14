@@ -12,6 +12,8 @@ import {
   MARKET_A_PLUS_C_KIND,
   MARKET_A_PLUS_C_LIFECYCLE_ALLOWED_PATHS,
   MARKET_A_PLUS_C_LIFECYCLE_KIND,
+  MARKET_A_PLUS_C_PERIMETER_ALLOWED_PATHS,
+  MARKET_A_PLUS_C_PERIMETER_KIND,
   STAGE6_MESSENGER_URL_PRIVACY_ALLOWED_PATHS,
   STAGE8_CREATECHANNEL_HELPPOPOVER_PLACEMENT_ALLOWED_PATHS,
   STAGE8_CREATECHANNEL_HELPPOPOVER_PLACEMENT_KIND,
@@ -106,6 +108,10 @@ try {
   } else if (market.kind === MARKET_A_PLUS_C_LIFECYCLE_KIND) {
     console.log(
       `PASS Market A+C lifecycle-clarity disposition (exact ${MARKET_A_PLUS_C_LIFECYCLE_ALLOWED_PATHS.length}-file overlay; ${market.evidence.count} files, ${market.evidence.contentBytes} bytes, ${market.evidence.pathSetSha256}, ${market.evidence.sha256})`,
+    )
+  } else if (market.kind === MARKET_A_PLUS_C_PERIMETER_KIND) {
+    console.log(
+      `PASS Market A+C perimeter deadline/hourglass disposition (exact ${MARKET_A_PLUS_C_PERIMETER_ALLOWED_PATHS.length}-file overlay; ${market.evidence.count} files, ${market.evidence.contentBytes} bytes, ${market.evidence.pathSetSha256}, ${market.evidence.sha256})`,
     )
   } else {
     throw new Error(`unsupported Market runtime disposition: ${String(market.kind)}`)

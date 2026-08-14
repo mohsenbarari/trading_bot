@@ -243,11 +243,11 @@ function formatDeadlineClock(offer: any): string {
 
 function deadlineLabel(offer: any): string {
   const clock = formatDeadlineClock(offer)
-  if (isOvertimePhase(offer)) return clock ? `وقت اضافه · ${clock}` : 'وقت اضافه'
+  if (isOvertimePhase(offer)) return clock ? `${clock} باقی‌مانده` : 'در حال محاسبه مهلت'
   return clock ? `مهلت اصلی · ${clock}` : 'مهلت اصلی'
 }
 
-function showOvertimeBadge(offer: any): boolean {
+function showOvertimeSticker(offer: any): boolean {
   return isOvertimePhase(offer) && !isReadOnlyOffer(offer)
 }
 
@@ -854,12 +854,14 @@ async function cancelOwnOffer(offerId: number) {
                 :traded="isTradedHistoryOffer(offer)"
               />
               <span
-                v-if="showOvertimeBadge(offer)"
-                class="offer-lifecycle-chip offer-lifecycle-chip--overtime"
-                data-test="offer-overtime-badge"
+                v-if="showOvertimeSticker(offer)"
+                class="offer-overtime-sticker"
+                data-test="offer-overtime-sticker"
+                role="img"
+                aria-label="وقت اضافه"
+                title="وقت اضافه"
               >
-                <Hourglass :size="13" aria-hidden="true" />
-                وقت اضافه
+                <Hourglass class="offer-overtime-sticker__icon" :size="17" aria-hidden="true" />
               </span>
               <span
                 v-if="showFinalTailBadge(offer)"
@@ -982,15 +984,6 @@ async function cancelOwnOffer(offerId: number) {
             :data-critical="isCritical(offer) ? 'true' : 'false'"
           >
             <p class="offer-deadline-label" data-test="offer-deadline-label">{{ deadlineLabel(offer) }}</p>
-            <div
-              class="offer-deadline-bar"
-              data-test="offer-deadline-bar"
-              :data-phase="deadlinePhase(offer)"
-              :data-critical="isCritical(offer) ? 'true' : 'false'"
-              aria-hidden="true"
-            >
-              <span class="offer-deadline-fill"></span>
-            </div>
           </div>
 
         </div><!-- /offer-card-inner -->
@@ -1144,10 +1137,45 @@ async function cancelOwnOffer(offerId: number) {
   border-color: #5eead4;
 }
 
-.offer-lifecycle-chip--overtime {
-  background: var(--ds-warning-50);
+.offer-overtime-sticker {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 28px;
+  border: 1px solid color-mix(in srgb, var(--ds-warning-600) 72%, white);
+  border-radius: 9px;
   color: var(--ds-warning-700);
-  border-color: var(--ds-warning-500);
+  background:
+    radial-gradient(circle at 36% 28%, rgba(255, 255, 255, 0.96), transparent 34%),
+    linear-gradient(145deg, var(--ds-warning-50), color-mix(in srgb, var(--ds-warning-100) 80%, white));
+  box-shadow:
+    0 4px 12px color-mix(in srgb, var(--ds-warning-600) 16%, transparent),
+    inset 0 1px 0 rgba(255, 255, 255, 0.82);
+}
+
+.offer-overtime-sticker__icon {
+  transform-origin: 50% 50%;
+  animation: overtime-hourglass-turn 3.6s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+@keyframes overtime-hourglass-turn {
+  0%, 32% {
+    transform: translateY(0) rotate(0deg);
+  }
+  42% {
+    transform: translateY(-1px) rotate(180deg);
+  }
+  48%, 82% {
+    transform: translateY(0) rotate(180deg);
+  }
+  92% {
+    transform: translateY(-1px) rotate(360deg);
+  }
+  100% {
+    transform: translateY(0) rotate(360deg);
+  }
 }
 
 .offer-lifecycle-chip--final-tail {
@@ -1230,9 +1258,9 @@ async function cancelOwnOffer(offerId: number) {
 }
 
 .offer-deadline {
-  display: grid;
-  gap: 0.28rem;
-  margin-top: 0.7rem;
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 0.58rem;
   padding-inline-start: 0;
 }
 
@@ -1243,28 +1271,8 @@ async function cancelOwnOffer(offerId: number) {
   color: var(--ds-text-secondary);
 }
 
-.offer-deadline-bar {
-  height: 4px;
-  border-radius: 999px;
-  background: #e2e8f0;
-  overflow: hidden;
-}
-
-.offer-deadline-fill {
-  display: block;
-  height: 100%;
-  width: calc(var(--t-pct, 100) * 1%);
-  border-radius: inherit;
-  background: var(--ds-primary-600);
-}
-
 .offer-deadline[data-phase="overtime"] .offer-deadline-label {
   color: var(--ds-warning-700);
-}
-
-.offer-deadline[data-phase="overtime"] .offer-deadline-fill {
-  background: var(--ds-warning-600);
-  animation: deadline-breathe 2.4s ease-in-out infinite;
 }
 
 .offer-deadline[data-critical="true"] .offer-deadline-label,
@@ -1272,27 +1280,9 @@ async function cancelOwnOffer(offerId: number) {
   color: var(--ds-danger-700);
 }
 
-.offer-deadline[data-critical="true"] .offer-deadline-fill,
-.offer-deadline[data-phase="critical"] .offer-deadline-fill {
-  background: var(--ds-danger-600);
-  animation: deadline-pulse 1.4s ease-in-out infinite;
-}
-
-@keyframes deadline-breathe {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.72; }
-}
-
-@keyframes deadline-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.55; }
-}
 
 @media (prefers-reduced-motion: reduce) {
-  .offer-deadline-fill,
-  .offer-deadline[data-phase="overtime"] .offer-deadline-fill,
-  .offer-deadline[data-critical="true"] .offer-deadline-fill,
-  .offer-deadline[data-phase="critical"] .offer-deadline-fill,
+  .offer-overtime-sticker__icon,
   .trade-btn,
   .trade-btn.pending,
   .cancel-own-offer-btn {

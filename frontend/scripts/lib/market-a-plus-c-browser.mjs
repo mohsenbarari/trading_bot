@@ -749,12 +749,31 @@ export async function collectMarketProbe(page) {
         ratio: contrastRatio(outline, adjacent),
       }
     }
-    const deadlineBar = document.querySelector('[data-test="offer-deadline-bar"]')
+    const deadlinePerimeter = document.querySelector('[data-test="offer-deadline-perimeter"]')
     const deadlineLabel = document.querySelector('[data-test="offer-deadline-label"]')
-    const deadlineCard = deadlineBar?.closest('[data-test="offer-card"]')
+    const deadlineCard = deadlinePerimeter?.closest('[data-test="offer-card"]')
     const timerPct = deadlineCard instanceof HTMLElement
       ? Number(getComputedStyle(deadlineCard).getPropertyValue('--t-pct').trim() || 'NaN')
       : null
+    const deadlineRect = deadlinePerimeter instanceof SVGElement
+      ? deadlinePerimeter.getBoundingClientRect()
+      : null
+    const deadlineCardRect = deadlineCard instanceof HTMLElement
+      ? deadlineCard.getBoundingClientRect()
+      : null
+    // The absolutely positioned SVG sits inside the card's 1px border box.
+    // CSS page zoom scales that physical inset, so scale only this tolerance.
+    const documentZoom = Number(getComputedStyle(document.documentElement).zoom) || 1
+    const perimeterTolerance = 2.5 * Math.max(1, documentZoom)
+    const perimeterMatchesCard = Boolean(
+      deadlineRect
+      && deadlineCardRect
+      && Math.abs(deadlineRect.left - deadlineCardRect.left) <= perimeterTolerance
+      && Math.abs(deadlineRect.top - deadlineCardRect.top) <= perimeterTolerance
+      && Math.abs(deadlineRect.width - deadlineCardRect.width) <= perimeterTolerance
+      && Math.abs(deadlineRect.height - deadlineCardRect.height) <= perimeterTolerance,
+    )
+    const perimeterValue = document.querySelector('.offer-deadline-perimeter__value')
     const lastAction = [...document.querySelectorAll('[data-test="trade-action-button"], .cancel-own-offer-btn, [data-test="offer-decision-cancel"]')]
       .filter(visible)
       .at(-1)
@@ -819,19 +838,23 @@ export async function collectMarketProbe(page) {
       },
       decisionText: decisionPanel instanceof HTMLElement ? decisionPanel.textContent?.replace(/\s+/g, ' ').trim() : '',
       previewText: document.querySelector('[data-test="offer-preview-recap"]')?.textContent?.replace(/\s+/g, ' ').trim() || '',
-      overtimeBadgeVisible: Boolean(document.querySelector('[data-test="offer-overtime-badge"]')),
+      overtimeStickerVisible: Boolean(document.querySelector('[data-test="offer-overtime-sticker"]')),
       finalTailBadgeVisible: Boolean(document.querySelector('[data-test="offer-final-tail-badge"]')),
       overtimeTradeBadgeVisible: Boolean(document.querySelector('[data-test="offer-overtime-trade-badge"]')),
       deadline: {
-        present: deadlineBar instanceof HTMLElement,
-        phase: deadlineBar instanceof HTMLElement ? deadlineBar.getAttribute('data-phase') : null,
-        critical: deadlineBar instanceof HTMLElement ? deadlineBar.getAttribute('data-critical') : null,
+        present: deadlinePerimeter instanceof SVGElement,
+        phase: deadlinePerimeter instanceof SVGElement ? deadlinePerimeter.getAttribute('data-phase') : null,
+        critical: deadlinePerimeter instanceof SVGElement ? deadlinePerimeter.getAttribute('data-critical') : null,
         label: deadlineLabel?.textContent?.trim() || '',
         pct: Number.isFinite(timerPct) ? Number(timerPct.toFixed(2)) : null,
+        perimeterMatchesCard,
+        strokeDasharray: perimeterValue instanceof SVGElement
+          ? getComputedStyle(perimeterValue).strokeDasharray
+          : '',
       },
       focusContrast,
       lastActionHit,
-      animationNames: [...document.querySelectorAll('.offer-deadline-fill, .offer-lifecycle-chip--overtime')].map((element) =>
+      animationNames: [...document.querySelectorAll('.offer-overtime-sticker__icon, .offer-deadline-perimeter__value')].map((element) =>
         getComputedStyle(element).animationName,
       ),
     }

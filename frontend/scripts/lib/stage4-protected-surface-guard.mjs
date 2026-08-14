@@ -179,6 +179,40 @@ export const MARKET_A_PLUS_C_LIFECYCLE_EVIDENCE = Object.freeze({
   sha256: '3d512eac8b60c18e7c7139f8040ffcd0ff749853de117d4888754ca730a92b80',
 })
 
+// Owner-approved successor after visual review. It restores a precise SVG
+// perimeter countdown and replaces the duplicated overtime text chip with a
+// reduced-motion-safe Lucide hourglass sticker. Prior dispositions stay frozen.
+export const MARKET_A_PLUS_C_PERIMETER_KIND =
+  'market-a-plus-c-perimeter-deadline-hourglass'
+
+export const MARKET_A_PLUS_C_PERIMETER_ALLOWED_PATHS = Object.freeze([
+  'frontend/src/components/OfferPreviewModal.vue',
+  'frontend/src/components/OffersList.vue',
+  'frontend/src/components/TradeLotSuggestionAlert.vue',
+  'frontend/src/components/ui/AppOfferCard.vue',
+  'frontend/src/views/MarketView.vue',
+])
+
+export const MARKET_A_PLUS_C_PERIMETER_ALLOWED_FILE_SHA256 = Object.freeze({
+  'frontend/src/components/OfferPreviewModal.vue':
+    '3278a01042eace0c754353a24a1de10afccd6e4c1899baa67ca927076a650a12',
+  'frontend/src/components/OffersList.vue':
+    '61b7f6f9d662ba8160b4dd27e908f5fed1781480305e6ca4a56f906abb455cd1',
+  'frontend/src/components/TradeLotSuggestionAlert.vue':
+    '9674841528b6092832816744cf34e499b73b59e204503bfc5353ce965cab5452',
+  'frontend/src/components/ui/AppOfferCard.vue':
+    '29dc50030550476956345b3bef54b9faef736cbe9e937be91a2bbc2df15a3fb2',
+  'frontend/src/views/MarketView.vue':
+    '5441b793a7ca2f50a34847775a24ab973f6433dfde72592aaae0640c4e4e68f2',
+})
+
+export const MARKET_A_PLUS_C_PERIMETER_EVIDENCE = Object.freeze({
+  count: 19,
+  contentBytes: 165085,
+  pathSetSha256: '37aa0b51e20f4ae86f7daf6c3c231d93b3d1f288ade1471490a1f843a57c9589',
+  sha256: 'f7bb91fa317bbfeb2c2bee573d5cee38ce380f492c984c9b2cf0215b3bdaed55',
+})
+
 export const MESSENGER_RUNTIME_BASELINE = Object.freeze({
   count: 85,
   contentBytes: 1312405,
@@ -575,6 +609,63 @@ export function assertMarketLifecycleClarityDisposition(entries) {
   )
 }
 
+export function assertMarketPerimeterDeadlineSemantics(entries) {
+  assertMarketLifecycleClaritySemantics(entries)
+  const offers = sourceByPath(entries, 'frontend/src/components/OffersList.vue')
+  const card = sourceByPath(entries, 'frontend/src/components/ui/AppOfferCard.vue')
+  if (!card.includes('data-test="offer-deadline-perimeter"')) {
+    throw new Error('Market perimeter disposition lost the card perimeter')
+  }
+  if (!card.includes('stroke-dasharray: var(--t-pct, 100) 100')) {
+    throw new Error('Market perimeter disposition lost authoritative progress binding')
+  }
+  if (offers.includes('offer-deadline-bar') || offers.includes('offer-deadline-fill')) {
+    throw new Error('Market perimeter disposition restored a bottom-only deadline bar')
+  }
+  if (!offers.includes('data-test="offer-overtime-sticker"')) {
+    throw new Error('Market perimeter disposition lost the overtime sticker')
+  }
+  if (!offers.includes('role="img"') || !offers.includes('aria-label="وقت اضافه"')) {
+    throw new Error('Market perimeter disposition lost the overtime accessible name')
+  }
+  if (!offers.includes('@keyframes overtime-hourglass-turn')) {
+    throw new Error('Market perimeter disposition lost the bounded hourglass motion')
+  }
+  if (!offers.includes('@media (prefers-reduced-motion: reduce)')) {
+    throw new Error('Market perimeter disposition lost reduced-motion handling')
+  }
+  if (offers.includes('⏳')) {
+    throw new Error('Market perimeter disposition replaced the Lucide icon with emoji')
+  }
+}
+
+function assertMarketPerimeterDeadlineAllowedFiles(entries) {
+  const entriesByPath = new Map(entries.map((entry) => [entry.path, entry]))
+  for (const repoPath of MARKET_A_PLUS_C_PERIMETER_ALLOWED_PATHS) {
+    const entry = entriesByPath.get(repoPath)
+    if (!entry) {
+      throw new Error(`Market perimeter allowed file is missing: ${repoPath}`)
+    }
+    const actualSha256 = fileSha256(entry.content)
+    const expectedSha256 = MARKET_A_PLUS_C_PERIMETER_ALLOWED_FILE_SHA256[repoPath]
+    if (actualSha256 !== expectedSha256) {
+      throw new Error(
+        `Market perimeter allowed file drift: ${repoPath} ${expectedSha256} -> ${actualSha256}`,
+      )
+    }
+  }
+}
+
+export function assertMarketPerimeterDeadlineDisposition(entries) {
+  assertMarketPerimeterDeadlineAllowedFiles(entries)
+  assertMarketPerimeterDeadlineSemantics(entries)
+  return assertProtectedFileSetEvidence(
+    'Market A+C perimeter-deadline disposition',
+    protectedFileSetEvidence(entries, MARKET_RUNTIME_CONTRACT),
+    MARKET_A_PLUS_C_PERIMETER_EVIDENCE,
+  )
+}
+
 export function resolveMarketRuntimeDisposition(entries) {
   const actual = protectedFileSetEvidence(entries, MARKET_RUNTIME_CONTRACT)
   try {
@@ -605,17 +696,26 @@ export function resolveMarketRuntimeDisposition(entries) {
             evidence: assertMarketLifecycleClarityDisposition(entries),
           }
         } catch (lifecycleError) {
-          const baselineMessage =
-            baselineError instanceof Error ? baselineError.message : String(baselineError)
-          const integrationMessage =
-            integrationError instanceof Error ? integrationError.message : String(integrationError)
-          const aPlusCMessage =
-            aPlusCError instanceof Error ? aPlusCError.message : String(aPlusCError)
-          const lifecycleMessage =
-            lifecycleError instanceof Error ? lifecycleError.message : String(lifecycleError)
-          throw new Error(
-            `Market runtime rejected after Stage 4 baseline drift (${baselineMessage}); main/UIUX integration disposition rejected (${integrationMessage}); Market A+C disposition rejected (${aPlusCMessage}); Market A+C lifecycle-clarity disposition rejected (${lifecycleMessage})`,
-          )
+          try {
+            return {
+              kind: MARKET_A_PLUS_C_PERIMETER_KIND,
+              evidence: assertMarketPerimeterDeadlineDisposition(entries),
+            }
+          } catch (perimeterError) {
+            const baselineMessage =
+              baselineError instanceof Error ? baselineError.message : String(baselineError)
+            const integrationMessage =
+              integrationError instanceof Error ? integrationError.message : String(integrationError)
+            const aPlusCMessage =
+              aPlusCError instanceof Error ? aPlusCError.message : String(aPlusCError)
+            const lifecycleMessage =
+              lifecycleError instanceof Error ? lifecycleError.message : String(lifecycleError)
+            const perimeterMessage =
+              perimeterError instanceof Error ? perimeterError.message : String(perimeterError)
+            throw new Error(
+              `Market runtime rejected after Stage 4 baseline drift (${baselineMessage}); main/UIUX integration disposition rejected (${integrationMessage}); Market A+C disposition rejected (${aPlusCMessage}); Market A+C lifecycle-clarity disposition rejected (${lifecycleMessage}); Market A+C perimeter-deadline disposition rejected (${perimeterMessage})`,
+            )
+          }
         }
       }
     }

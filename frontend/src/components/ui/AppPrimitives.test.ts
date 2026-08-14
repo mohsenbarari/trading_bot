@@ -135,6 +135,8 @@ describe('ui primitives', () => {
     expect(offerCard.classes()).toEqual(expect.arrayContaining(['offer-card-wrap', 'has-timer', 'timer-critical', 'is-traded']))
     expect(offerCard.classes()).not.toContain('is-decision-focus')
     expect(offerCard.attributes('style')).toContain('--t-pct: 42')
+    expect(offerCard.get('[data-test="offer-deadline-perimeter"]').attributes('data-phase')).toBe('critical')
+    expect(offerCard.get('.offer-deadline-perimeter__value').attributes('pathLength')).toBe('100')
     expect(offerCard.text()).toContain('لفظ بازار')
 
     const focusedOfferCard = mount(AppOfferCard, {

@@ -17,6 +17,10 @@ import {
   MARKET_A_PLUS_C_LIFECYCLE_ALLOWED_PATHS,
   MARKET_A_PLUS_C_LIFECYCLE_EVIDENCE,
   MARKET_A_PLUS_C_LIFECYCLE_KIND,
+  MARKET_A_PLUS_C_PERIMETER_ALLOWED_FILE_SHA256,
+  MARKET_A_PLUS_C_PERIMETER_ALLOWED_PATHS,
+  MARKET_A_PLUS_C_PERIMETER_EVIDENCE,
+  MARKET_A_PLUS_C_PERIMETER_KIND,
   MARKET_RUNTIME_BASELINE,
   MARKET_RUNTIME_CONTRACT,
   MESSENGER_OMITTED_DIRECT_RUNTIME_PATHS,
@@ -35,6 +39,8 @@ import {
   assertMarketAPlusCDisposition,
   assertMarketLifecycleClarityDisposition,
   assertMarketLifecycleClaritySemantics,
+  assertMarketPerimeterDeadlineDisposition,
+  assertMarketPerimeterDeadlineSemantics,
   STAGE4_BASE_COMMIT,
   STAGE4_BASE_TREE,
   STAGE4_ROUTE_CONTRACT_PATH,
@@ -213,12 +219,12 @@ describe('Stage 4 protected surface baseline', () => {
     )
   })
 
-  it('keeps the Stage 4 Market baseline and prior overlays immutable while admitting lifecycle-clarity', () => {
+  it('keeps every prior Market disposition immutable while admitting the perimeter deadline successor', () => {
     expect(ownedPaths.market).toContain('frontend/src/utils/settlementType.ts')
     const entries = readFileEntries(repoRoot, ownedPaths.market)
     expect(resolveMarketRuntimeDisposition(entries)).toMatchObject({
-      kind: MARKET_A_PLUS_C_LIFECYCLE_KIND,
-      evidence: MARKET_A_PLUS_C_LIFECYCLE_EVIDENCE,
+      kind: MARKET_A_PLUS_C_PERIMETER_KIND,
+      evidence: MARKET_A_PLUS_C_PERIMETER_EVIDENCE,
     })
     expect(MARKET_RUNTIME_BASELINE).toEqual({
       count: 19,
@@ -249,9 +255,14 @@ describe('Stage 4 protected surface baseline', () => {
       /Market A\+C allowed file drift/,
     )
     expect(MARKET_A_PLUS_C_LIFECYCLE_ALLOWED_PATHS).toHaveLength(5)
-    for (const repoPath of MARKET_A_PLUS_C_LIFECYCLE_ALLOWED_PATHS) {
+    expect(() => assertMarketLifecycleClarityDisposition(entries)).toThrow(
+      /Market A\+C lifecycle-clarity allowed file drift/,
+    )
+    expect(MARKET_A_PLUS_C_PERIMETER_KIND).toBe('market-a-plus-c-perimeter-deadline-hourglass')
+    expect(MARKET_A_PLUS_C_PERIMETER_ALLOWED_PATHS).toHaveLength(5)
+    for (const repoPath of MARKET_A_PLUS_C_PERIMETER_ALLOWED_PATHS) {
       const entry = entries.find(({ path: candidate }) => candidate === repoPath)
-      expect(fileSha256(entry.content)).toBe(MARKET_A_PLUS_C_LIFECYCLE_ALLOWED_FILE_SHA256[repoPath])
+      expect(fileSha256(entry.content)).toBe(MARKET_A_PLUS_C_PERIMETER_ALLOWED_FILE_SHA256[repoPath])
     }
     expect(Object.isFrozen(MARKET_RUNTIME_BASELINE)).toBe(true)
     expect(Object.isFrozen(MAIN_UIUX_INTEGRATION_MARKET_ALLOWED_PATHS)).toBe(true)
@@ -263,18 +274,21 @@ describe('Stage 4 protected surface baseline', () => {
     expect(Object.isFrozen(MARKET_A_PLUS_C_LIFECYCLE_ALLOWED_PATHS)).toBe(true)
     expect(Object.isFrozen(MARKET_A_PLUS_C_LIFECYCLE_ALLOWED_FILE_SHA256)).toBe(true)
     expect(Object.isFrozen(MARKET_A_PLUS_C_LIFECYCLE_EVIDENCE)).toBe(true)
+    expect(Object.isFrozen(MARKET_A_PLUS_C_PERIMETER_ALLOWED_PATHS)).toBe(true)
+    expect(Object.isFrozen(MARKET_A_PLUS_C_PERIMETER_ALLOWED_FILE_SHA256)).toBe(true)
+    expect(Object.isFrozen(MARKET_A_PLUS_C_PERIMETER_EVIDENCE)).toBe(true)
   })
 
-  it('fails closed for any further Market drift inside or outside the lifecycle-clarity allowlist', () => {
+  it('fails closed for any further Market drift inside or outside the perimeter allowlist', () => {
     const entries = readFileEntries(repoRoot, ownedPaths.market)
-    const allowedPath = MARKET_A_PLUS_C_LIFECYCLE_ALLOWED_PATHS[0]
+    const allowedPath = MARKET_A_PLUS_C_PERIMETER_ALLOWED_PATHS[0]
     const changedAllowed = entries.map((entry) =>
       entry.path === allowedPath
         ? { ...entry, content: Buffer.concat([entry.content, Buffer.from('\n/* drift */')]) }
         : entry,
     )
     const unlistedPath = entries.find(
-      ({ path: repoPath }) => !MARKET_A_PLUS_C_LIFECYCLE_ALLOWED_PATHS.includes(repoPath),
+      ({ path: repoPath }) => !MARKET_A_PLUS_C_PERIMETER_ALLOWED_PATHS.includes(repoPath),
     ).path
     const changedUnlisted = entries.map((entry) =>
       entry.path === unlistedPath
@@ -282,18 +296,41 @@ describe('Stage 4 protected surface baseline', () => {
         : entry,
     )
 
-    expect(() => assertMarketLifecycleClarityDisposition(changedAllowed)).toThrow(
-      /Market A\+C lifecycle-clarity allowed file drift/,
+    expect(() => assertMarketPerimeterDeadlineDisposition(changedAllowed)).toThrow(
+      /Market perimeter allowed file drift/,
     )
     expect(() => resolveMarketRuntimeDisposition(changedAllowed)).toThrow(
-      /Market A\+C lifecycle-clarity disposition rejected/,
+      /Market A\+C perimeter-deadline disposition rejected/,
     )
-    expect(() => assertMarketLifecycleClarityDisposition(changedUnlisted)).toThrow(
+    expect(() => assertMarketPerimeterDeadlineDisposition(changedUnlisted)).toThrow(
       /contentBytes drift/,
     )
     expect(() => resolveMarketRuntimeDisposition(changedUnlisted)).toThrow(
-      /Market A\+C lifecycle-clarity disposition rejected/,
+      /Market A\+C perimeter-deadline disposition rejected/,
     )
+  })
+
+  it('rejects a bottom-only deadline regression or inaccessible overtime sticker', () => {
+    const entries = readFileEntries(repoRoot, ownedPaths.market)
+    const mutate = (repoPath, replacer) => entries.map((entry) => {
+      if (entry.path !== repoPath) return entry
+      const source = entry.content.toString('utf8')
+      const next = replacer(source)
+      if (next === source) throw new Error(`test mutation did not change ${repoPath}`)
+      return { ...entry, content: Buffer.from(next, 'utf8') }
+    })
+
+    expect(() => assertMarketPerimeterDeadlineSemantics(
+      mutate('frontend/src/components/ui/AppOfferCard.vue', (source) =>
+        source.replace('data-test="offer-deadline-perimeter"', 'data-test="offer-deadline-bar"'),
+      ),
+    )).toThrow(/lost the card perimeter/)
+
+    expect(() => assertMarketPerimeterDeadlineSemantics(
+      mutate('frontend/src/components/OffersList.vue', (source) =>
+        source.replace('aria-label="وقت اضافه"', 'aria-label=""'),
+      ),
+    )).toThrow(/lost the overtime accessible name/)
   })
 
   it('rejects Market A+C bypasses that drop confirmation, names, or buy/sell authority', () => {
