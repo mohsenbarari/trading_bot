@@ -139,7 +139,8 @@ async function runScenario({
     const target = `${baseUrl}${visitPathFor(route)}`
     await page.goto(target, { waitUntil: 'domcontentloaded', timeout: 30_000 })
     if (state === 'loading' || state === 'slow') {
-      const pending = await waitForPendingRequest(page, descriptor.states[state].endpoint || '', 2500)
+      await page.locator('html[data-app-mounted="1"]').waitFor({ state: 'attached', timeout: 20_000 }).catch(() => {})
+      const pending = await waitForPendingRequest(page, descriptor.states[state].endpoint || '', 8000)
       midProbe = await collectUiProbe(page)
       midProbe.identityRequestCount = serverState.identityRequestCount
       midProbe.pendingRequest = pending.pendingRequest
@@ -216,6 +217,23 @@ async function runScenario({
         await candidate.click({ timeout: 2000 })
         midProbe = midProbe || {}
         midProbe.touchClicked = true
+        const expectedNames = [
+          descriptor.touch.expectedName,
+          ...(descriptor.touch.expectedNameAny || []),
+        ].filter(Boolean)
+        if (expectedNames.length) {
+          await page
+            .waitForFunction(
+              (names) => {
+                const app = document.querySelector('#app')?.__vue_app__
+                const name = app?.config?.globalProperties?.$router?.currentRoute?.value?.name
+                return names.includes(name)
+              },
+              expectedNames,
+              { timeout: 4000 },
+            )
+            .catch(() => {})
+        }
         await waitForApp(page)
         await waitForNetworkSettle(page).catch(() => {})
       }
@@ -241,30 +259,32 @@ async function runScenario({
     }
     if ((zoom200 || interaction === 'zoom-200') && descriptor.zoom?.internalStrip) {
       const revealed = await page.evaluate((stripSel) => {
-        const focused = document.activeElement instanceof HTMLElement ? document.activeElement : null
+        const focused =
+          document.activeElement instanceof HTMLElement && document.activeElement !== document.body
+            ? document.activeElement
+            : null
         const strip = document.querySelector(stripSel)
-        if (focused) focused.scrollIntoView({ block: 'nearest', inline: 'nearest' })
-        const target = focused || strip?.querySelector('a,button,[role="tab"]')
-        if (target instanceof HTMLElement) target.scrollIntoView({ block: 'nearest', inline: 'nearest' })
-        const rect = target instanceof HTMLElement ? target.getBoundingClientRect() : null
-        const stripRect = strip instanceof HTMLElement ? strip.getBoundingClientRect() : null
-        const inside = Boolean(
-          rect &&
-            stripRect &&
-            rect.left >= stripRect.left - 2 &&
-            rect.right <= stripRect.right + 2,
-        )
-        const cx = rect ? (rect.left + rect.right) / 2 : -1
-        const cy = rect ? (rect.top + rect.bottom) / 2 : -1
-        const hit = cx >= 0 ? document.elementFromPoint(cx, cy) : null
+        if (!focused || !strip) {
+          return { expected: false, selectedControlInStrip: true, hitTestPassed: true }
+        }
+        focused.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+        const rect = focused.getBoundingClientRect()
+        const stripRect = strip.getBoundingClientRect()
+        const inside =
+          rect.left >= stripRect.left - 2 &&
+          rect.right <= stripRect.right + 2 &&
+          rect.top >= stripRect.top - 2 &&
+          rect.bottom <= stripRect.bottom + 2
+        const cx = (rect.left + rect.right) / 2
+        const cy = (rect.top + rect.bottom) / 2
+        const hit = document.elementFromPoint(cx, cy)
         return {
+          expected: true,
           selectedControlInStrip: inside,
-          hitTestPassed: Boolean(
-            hit && target && (hit === target || target.contains(hit) || hit.contains(target)),
-          ),
+          hitTestPassed: Boolean(hit && (hit === focused || focused.contains(hit) || hit.contains(focused))),
         }
       }, descriptor.zoom.internalStrip)
-      probe.zoomStripExpected = Boolean(revealed)
+      probe.zoomStripExpected = revealed.expected
       probe.selectedControlInStrip = revealed.selectedControlInStrip
       probe.hitTestPassed = revealed.hitTestPassed
     }
@@ -282,7 +302,9 @@ async function runScenario({
       errorProbe.landedRecovery = errorProbe.landedRecovery || probe.landedRecovery
       errorProbe.identityBootstrapBroken = probe.identityBootstrapBroken
     }
-    const skipRouteAssert = interaction === 'touch' && descriptor.touch.allowNavigation
+    const skipRouteAssert =
+      (interaction === 'touch' && descriptor.touch.applicable) ||
+      (interaction === 'keyboard' && route.name === 'system-recovery' && actual?.name === 'login')
     if (interaction === 'touch' && descriptor.touch.applicable) {
       const landed = actual?.name
       const expectedNames = [

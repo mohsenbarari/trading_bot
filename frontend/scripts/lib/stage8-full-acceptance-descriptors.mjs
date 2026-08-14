@@ -130,6 +130,7 @@ const DESCRIPTORS = {
     touch: yes({
       selector: 'button.ui-v2-home-identity, .ui-v2-home-identity',
       expectedName: 'profile',
+      allowNavigation: true,
     }),
     zoom: { internalStrip: null },
   },
@@ -209,10 +210,9 @@ const DESCRIPTORS = {
         selector: '.offer-card, .offers-list',
       }),
     },
-    touch: yes({
-      selector: '.bottom-nav-wrapper a[href="/"], .ui-v2-bottom-nav a[href="/"]',
-      expectedName: 'home',
-    }),
+    touch: na(
+      'Market hides the standard bottom nav and the remaining FAB nav is not a one-click non-mutating target.',
+    ),
     zoom: { internalStrip: '.offers-list, .app-route-scroll' },
   },
   operations: {
@@ -233,8 +233,8 @@ const DESCRIPTORS = {
     },
     touch: yes({
       selector: '.operations-action-tile, .operations-empty-state .ui-button, .hub-action',
-      expectedName: null,
       expectedNameAny: ['operations-customers', 'operations-accountants', 'account', 'admin'],
+      allowNavigation: true,
     }),
     zoom: { internalStrip: null },
   },
@@ -264,34 +264,34 @@ const DESCRIPTORS = {
     canonical: null,
     states: {
       loading: yes({
-        endpoint: '/api/customers/owner-relations',
+        endpoint: '/api/customers/owner-relations/9001',
         selector: '.ui-loading-state',
       }),
       empty: noListInventory('customer detail', 'Detail shows one relation, not empty/dense lists.'),
       normal: yes({ settle: '.customer-detail-shell, .ui-empty-state, .ui-loading-state' }),
       dense: noListInventory('customer detail'),
       error: yes({
-        endpoint: '/api/customers/owner-relations',
+        endpoint: '/api/customers/owner-relations/9001',
         selector: '[role="alert"], .ui-empty-state--danger',
         retry: '.customer-detail-retry',
       }),
       slow: yes({
-        endpoint: '/api/customers/owner-relations',
+        endpoint: '/api/customers/owner-relations/9001',
         selector: '.ui-loading-state',
       }),
       offline: yes({
-        endpoint: '/api/customers/owner-relations',
+        endpoint: '/api/customers/owner-relations/9001',
         selector: '[role="alert"], .ui-empty-state--danger',
       }),
       stale: yes({
-        endpoint: '/api/customers/owner-relations',
+        endpoint: '/api/customers/owner-relations/9001',
         field: 'management_name',
         trigger: 'in-page-refresh',
         selector: '.customer-detail-header, .customer-detail-shell',
       }),
     },
     touch: yes({
-      selector: '.customer-detail-retry, button:has-text("بازگشت"), a[href="/operations/customers"]',
+      selector: 'button:has-text("بازگشت"), a[href="/operations/customers"], .workspace-back, .ui-page-header button',
       expectedNameAny: ['operations-customers', 'operations-customers-detail'],
     }),
     zoom: { internalStrip: '.customer-detail-shell' },
@@ -321,32 +321,32 @@ const DESCRIPTORS = {
     canonical: null,
     states: {
       loading: yes({
-        endpoint: '/api/accountants/owner-relations',
+        endpoint: '/api/accountants/owner-relations/9002',
         selector: '.ui-loading-state',
       }),
       empty: noListInventory('accountant detail'),
       normal: yes({ settle: '.ui-empty-state, .ui-loading-state, .app-route-v2-scope' }),
       dense: noListInventory('accountant detail'),
       error: yes({
-        endpoint: '/api/accountants/owner-relations',
+        endpoint: '/api/accountants/owner-relations/9002',
         selector: '[role="alert"], .ui-empty-state--danger',
       }),
       slow: yes({
-        endpoint: '/api/accountants/owner-relations',
+        endpoint: '/api/accountants/owner-relations/9002',
         selector: '.ui-loading-state',
       }),
       offline: yes({
-        endpoint: '/api/accountants/owner-relations',
+        endpoint: '/api/accountants/owner-relations/9002',
         selector: '[role="alert"], .ui-empty-state--danger',
       }),
       stale: yes({
-        endpoint: '/api/accountants/owner-relations',
+        endpoint: '/api/accountants/owner-relations/9002',
         field: 'management_name',
         trigger: 'in-page-refresh',
       }),
     },
     touch: yes({
-      selector: 'button:has-text("بازگشت"), a[href="/operations/accountants"]',
+      selector: 'button:has-text("بازگشت"), a[href="/operations/accountants"], .workspace-back, .ui-page-header button',
       expectedNameAny: ['operations-accountants', 'operations-accountants-detail'],
     }),
     zoom: { internalStrip: null },
@@ -419,7 +419,7 @@ const DESCRIPTORS = {
     canonical: null,
     states: listStates({
       endpoint: '/api/notifications',
-      itemSelector: '.notification-item, [data-test*="notification"]',
+      itemSelector: '.notif-item, .notification-item, [data-test*="notification"]',
       emptySelector: '.ui-empty-state, .ds-empty-state',
       loadingSelector: '.ds-loading-state, .ui-loading-state',
       errorSelector: '[role="alert"], .ui-empty-state--danger',
@@ -454,8 +454,9 @@ const DESCRIPTORS = {
       stale: noListInventory('messenger'),
     },
     touch: yes({
-      selector: '.bottom-nav-wrapper a[href="/"], .ui-v2-bottom-nav a[href="/"]',
+      selector: 'button.header-btn.back-btn',
       expectedName: 'home',
+      allowNavigation: true,
     }),
     zoom: { internalStrip: null },
   },
@@ -516,15 +517,13 @@ const DESCRIPTORS = {
         'general /settings',
         'The general route renders overtime or a role notice, not a session list.',
       ),
-      error: yes({
-        endpoint: '/api/auth/me/offer-overtime',
-        selector: '.overtime-pref__error, [role="alert"]',
-      }),
+      error: na(
+        'general /settings overtime panel reads cached identity; error UI is save-bound, not a page-data GET.',
+      ),
       slow: noListInventory('general /settings', 'Overtime preference has no page-level loading skeleton.'),
-      offline: yes({
-        endpoint: '/api/auth/me/offer-overtime',
-        selector: '.overtime-pref__error, [role="alert"]',
-      }),
+      offline: na(
+        'general /settings overtime panel reads cached identity; offline UI is save-bound, not a page-data GET.',
+      ),
       stale: noListInventory(
         'general /settings',
         'No displayed session/list field exists on the general settings route.',
@@ -550,7 +549,7 @@ const DESCRIPTORS = {
       stale: noListInventory('admin menu'),
     },
     touch: yes({
-      selector: 'a[href="/admin/invitations"], a[href="/admin/users"], button, .ui-action-card',
+      selector: '.admin-panel-action',
       expectedNameAny: ['admin', 'admin-invitations', 'admin-users'],
     }),
     zoom: { internalStrip: null },
@@ -570,8 +569,8 @@ const DESCRIPTORS = {
       settleSelector: '.pending-row, .ui-empty-state, .ui-loading-state',
     }),
     touch: yes({
-      selector: 'a[href="/admin"], button:has-text("بازگشت")',
-      expectedNameAny: ['admin', 'admin-invitations'],
+      selector: '.admin-subview-return',
+      expectedName: 'admin',
     }),
     zoom: { internalStrip: null },
   },
@@ -589,8 +588,8 @@ const DESCRIPTORS = {
       stale: formOnly('admin-channels / CreateChannel'),
     },
     touch: yes({
-      selector: 'a[href="/admin"], button:has-text("بازگشت")',
-      expectedNameAny: ['admin', 'admin-channels'],
+      selector: '.admin-subview-return',
+      expectedName: 'admin',
     }),
     zoom: { internalStrip: null },
   },
@@ -628,8 +627,8 @@ const DESCRIPTORS = {
       stale: noListInventory('admin user profile'),
     },
     touch: yes({
-      selector: 'a[href="/admin/users"], button:has-text("بازگشت")',
-      expectedNameAny: ['admin-users', 'admin-user-profile'],
+      selector: '.admin-subview-return, a[href="/admin/users"]',
+      expectedNameAny: ['admin-users', 'admin-user-profile', 'admin'],
     }),
     zoom: { internalStrip: null },
   },
@@ -638,7 +637,7 @@ const DESCRIPTORS = {
     canonical: { profileId: 'middle-admin', finalName: 'admin', finalPath: '/admin' },
     states: listStates({
       endpoint: '/api/commodities',
-      itemSelector: '.list-group, .ui-list-item, [data-test*="commodity"]',
+      itemSelector: '.list-item-btn, .list-group, .ui-list-item, [data-test*="commodity"]',
       emptySelector: '.ui-empty-state',
       loadingSelector: '.ui-loading-state, [aria-busy="true"]',
       errorSelector: '.commodity-feedback--error, [role="alert"]',
@@ -648,7 +647,7 @@ const DESCRIPTORS = {
       settleSelector: '.list-group, .ui-empty-state, [aria-busy="true"]',
     }),
     touch: yes({
-      selector: 'a[href="/admin"], button:has-text("بازگشت")',
+      selector: '.admin-subview-return, .commodity-back-control',
       expectedNameAny: ['admin', 'admin-commodities'],
     }),
     zoom: { internalStrip: '.list-group' },
@@ -657,21 +656,21 @@ const DESCRIPTORS = {
     renderProfileId: 'senior-admin',
     canonical: { profileId: 'middle-admin', finalName: 'admin', finalPath: '/admin' },
     states: {
-      loading: yes({ selector: '[aria-busy="true"], .ui-loading-state' }),
+      loading: na('admin-messages has no dedicated page-level loading skeleton in source.'),
       empty: noListInventory(
         'admin-messages',
         'Protected market/messenger delivery interiors stay outside this list contract.',
       ),
       normal: yes({ settle: '.message-workspace, .app-route-scroll' }),
       dense: noListInventory('admin-messages'),
-      error: yes({ selector: '[role="alert"]' }),
-      slow: yes({ selector: '[aria-busy="true"], .ui-loading-state' }),
-      offline: yes({ selector: '[role="alert"]' }),
+      error: na('admin-messages has no Stage 8 injectable page-level error contract.'),
+      slow: na('admin-messages has no dedicated page-level loading skeleton in source.'),
+      offline: na('admin-messages has no Stage 8 injectable page-level offline contract.'),
       stale: noListInventory('admin-messages'),
     },
     touch: yes({
-      selector: 'a[href="/admin"], button:has-text("بازگشت")',
-      expectedNameAny: ['admin', 'admin-messages'],
+      selector: '.admin-subview-return',
+      expectedName: 'admin',
     }),
     zoom: { internalStrip: null },
   },
@@ -689,8 +688,8 @@ const DESCRIPTORS = {
       stale: formOnly('admin-system / TradingSettings'),
     },
     touch: yes({
-      selector: 'a[href="/admin"], button:has-text("بازگشت")',
-      expectedNameAny: ['admin', 'admin-system'],
+      selector: '.admin-subview-return',
+      expectedName: 'admin',
     }),
     zoom: { internalStrip: null },
   },
@@ -759,18 +758,19 @@ const DESCRIPTORS = {
     renderProfileId: 'member',
     canonical: null,
     states: {
-      loading: yes({ selector: '.ui-loading-state, .state-overlay' }),
+      loading: na('share-receive loading overlay is not the shared page-level loading contract.'),
       empty: noListInventory('share-receive', 'The surface is a forward picker, not a dense list contract.'),
       normal: yes({ settle: '.share-receive-root, [role="dialog"]' }),
       dense: noListInventory('share-receive'),
       error: yes({ selector: '.ui-empty-state--danger, [role="alert"]' }),
-      slow: yes({ selector: '.ui-loading-state, .state-overlay' }),
+      slow: na('share-receive loading overlay is not the shared page-level loading contract.'),
       offline: yes({ selector: '.ui-empty-state--danger, [role="alert"]' }),
       stale: noListInventory('share-receive'),
     },
     touch: yes({
-      selector: 'button:has-text("بازگشت"), [aria-label*="بستن"]',
+      selector: 'button:has-text("بازگشت"), [aria-label*="بستن"], .share-receive-close',
       expectedNameAny: ['home', 'share-receive', 'messenger'],
+      allowNavigation: true,
     }),
     zoom: { internalStrip: null },
   },

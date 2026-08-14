@@ -451,7 +451,18 @@ export function apiFixture(pathname, method, profile, mode = 'normal') {
   }
   if (pathname.startsWith('/api/auth/registration-context')) {
     if (pathname.endsWith('/clear')) return known({}, 204)
-    if (pathname.endsWith('/exchange') || pathname.endsWith('/otp/request') || pathname.endsWith('/otp/verify') || pathname.endsWith('/complete')) {
+    if (pathname.endsWith('/exchange')) {
+      return known({
+        account_name: 'invitee_sample',
+        mobile_number: 'synthetic-mobile',
+        role: 'عادی',
+        expires_at: FIXED_TIME,
+        kind: 'invitation',
+        progress: 'context_ready',
+        requires_otp: true,
+      })
+    }
+    if (pathname.endsWith('/otp/request') || pathname.endsWith('/otp/verify') || pathname.endsWith('/complete')) {
       return { known: true, status: 410, body: { detail: 'expired' } }
     }
     return known({
@@ -1054,7 +1065,11 @@ export async function waitForRouteTransition(page, timeout = 4000) {
       )
       if (active) return false
       const scopes = [...document.querySelectorAll('.app-route-v2-scope, .app-route--persian-typography')]
-      return scopes.length <= 1
+      const mains = [...document.querySelectorAll('main')].filter((element) => {
+        const style = getComputedStyle(element)
+        return style.display !== 'none' && style.visibility !== 'hidden'
+      })
+      return scopes.length <= 1 && mains.length <= 1
     }, { timeout })
     .catch(() => {})
 }
@@ -1252,6 +1267,8 @@ export async function collectUiProbe(page) {
           '.customer-pending-card',
           '.accountant-pending-card',
           '.mini-trade-card',
+          '.notif-item',
+          '.list-item-btn',
           'li[role="listitem"]',
         ].join(','),
       ),

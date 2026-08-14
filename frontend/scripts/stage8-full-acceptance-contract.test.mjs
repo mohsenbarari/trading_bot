@@ -328,6 +328,8 @@ describe('Stage 8 descriptor contract is fail-closed', () => {
     expect(settings.states.empty.applicable).toBe(false)
     expect(settings.states.dense.applicable).toBe(false)
     expect(settings.states.stale.applicable).toBe(false)
+    expect(settings.states.error.applicable).toBe(false)
+    expect(settings.states.offline.applicable).toBe(false)
     expect(settings.states.loading.reason).toMatch(/account\/security/)
     expect(hasListStateSurface('settings')).toBe(false)
     expect(hasListStateSurface('account-security')).toBe(true)
@@ -346,6 +348,8 @@ describe('Stage 8 descriptor contract is fail-closed', () => {
   it('makes login and web-register touch N/A and setup-password touch explicit', () => {
     expect(getRouteDescriptor('login').touch.applicable).toBe(false)
     expect(getRouteDescriptor('web-register').touch.applicable).toBe(false)
+    expect(getRouteDescriptor('market').touch.applicable).toBe(false)
+    expect(getRouteDescriptor('messenger').touch.selector).toMatch(/header-btn\.back-btn/)
     expect(getRouteDescriptor('setup-password').touch.applicable).toBe(true)
     expect(getRouteDescriptor('setup-password').touch.selector).toMatch(/password-toggle/)
     expect(getRouteDescriptor('invite-landing').touch.expectedName).toBe('web-register')
