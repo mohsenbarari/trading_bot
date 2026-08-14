@@ -280,6 +280,28 @@ post-fix read-only audit: `assets/figma/final-provenance-20260811T204635Z/stage6
 
 این receipt محلی، mutable و supplemental است؛ artifactهای آن عمداً به `selectedArtifacts` تاریخی Phase 1–3 افزوده یا freeze نشده‌اند و رفتار live backend را مستقل اثبات نمی‌کنند.
 
-## Closure boundary
+## Closure — runtime `3e62accd`
 
-`stage6CompleteAuthority=false` باقی می‌ماند. این بسته EVIDENCE_MANIFEST یا local freeze نیست و هیچ Sites project/preview، staging، production یا product deployment ایجاد یا تغییر نداده است.
+| field | value |
+| --- | --- |
+| status | `stage6_complete` |
+| authority | `stage6CompleteAuthority=true` |
+| runtime commit | `3e62accdd157bed5dc6f2ed974e56e07c7349910` |
+| runtime tree | `3f4a186e46b12aee326c699cd1975ba34e485be7` |
+| focused | `13` file / `232` test pass |
+| full serial Vitest | `156` file / `1779` test pass |
+| `vue-tsc --noEmit` | pass |
+| production build | pass؛ `169` file؛ SHA-256 `ee970be6ff3570f4c325c3f420c816b5fa61beb67a9b4071d208b2b3657c50db` |
+| `guard:ui` | pass؛ TradingSettings Stage 6 reset-dialog disposition؛ Stage 4 baseline retained |
+| `git diff --check` | pass |
+| browser | `stage6-closure-20260814082632509`؛ `40/40`؛ report `306ef9d1495046fbd8ab579029e3ea56179b9e904597ed55a110bf7a9a49dce5`؛ harness `78f1bd2b5b1d4aee5f28dc2f71a43c54d18c20e8a5c797035368d3d0fdec3de3` |
+| unknown/mutating API | `0` / `0` |
+| unexpected console | `0` پس از طبقه‌بندی 403 fixture |
+| Figma sibling | `645:1693` روی page `321:18`؛ historical overwrite نشده |
+| Sites | explicit non-requirement؛ اجرا نشده |
+
+تنها `ACTIONABLE_GAP` بسته‌شده: native `confirm` بازنشانی تنظیمات غیر بازار در `TradingSettings.vue`، commit `3e62accd`.
+
+Stage 8 دست‌نخورده مانده: `270` / full `0` / slices `12` / scenarios `163` / authority `false`.
+
+جزئیات ماشین‌خوان در `STAGE6_CLOSURE_LEDGER.json` (SHA-256 `9d5e660cd690cb666b1cc33d6146cd953b8b787e8c11eae26f6895149ded168e`) و `STAGE6_CLOSURE_EVIDENCE_MANIFEST.json` (SHA-256 `df071f52184dabb7a24bf80a3c8cdbbbc6bbe5537549f7d09a916d5bc128679b`) است.

@@ -2,7 +2,13 @@
 
 تاریخ آغاز: ۲۰۲۶-۰۸-۱۱
 
-وضعیت: **`stage6_phase1_phase2_phase3_phase4_phase5_phase6_phase7_phase8_phase9_phase10_phase11_phase12_phase13_phase14_phase15_phase16_phase17_phase18_phase19_delivered_broader_roadmap_partial_deferred`**
+وضعیت: **`stage6_complete`**
+
+`stage6CompleteAuthority=true`
+
+runtime freeze: `3e62accdd157bed5dc6f2ed974e56e07c7349910` / tree `3f4a186e46b12aee326c699cd1975ba34e485be7`
+
+مرحلهٔ بعدی مجاز: Stage 7. Stage 8 اجرا یا ثبت نشده است.
 
 شاخه: `condidate/webapp-ui-ux-redesign-v2`
 
@@ -37,14 +43,16 @@ Stage 6 به‌صورت route-scoped، rollback-safe و با گیت مستقل �
 
 فایل‌های مجاز این slice فقط `frontend/src/components/AdminPanel.vue`، تست مستقیم آن و در صورت نیاز expectation محدود `AdminView.test.ts` هستند. تغییر child workflow، API، router، route guard، permission یا backend در Phase 1 مجاز نیست.
 
-## ۴. deferred خارج از Phase 1/2/3/4/5/6/7/8/9/10/11/12/13/14/15/16/17/18/19 تحویل‌شده
+## ۴. deferred reconcile
 
-موارد زیر sliceهای مستقل و گیت‌دار بعدی‌اند:
+فهرست deferred قبلی برای الزام‌های داخل محدوده supersede شد:
 
-- dialogهای sensitive خارج از PublicProfile block/unblock، workspace deletion، پایان نشست workspace، mutationهای رابطهٔ workspace، حذف کالا/نام مستعار در `/admin/commodities`، حذف/پایان نشست/تغییر وضعیت/رفع مسدودیت/رفع محدودیت کاربر در `/admin/users/:id`، نشست‌های `/account/security` و پاک‌سازی `/account/storage`؛
-- هر تغییر در Admin Messages و System Settings غیرمحافظت‌شده.
+- dialogهای حساس تحویل‌شدهٔ Phase 4–13 به‌علاوهٔ بازنشانی غیر بازار در `/admin/system` اکنون با `AppConfirmDialog` هستند؛
+- تنها `confirm` زندهٔ باقی‌مانده در `TradingSettings` حذف استثنای تقویم بازار است و عمداً داخل interior محافظت‌شده می‌ماند؛
+- پوستهٔ غیرمحافظت‌شدهٔ Admin Messages شکاف دیدنی نداشت و patch نشد؛
+- Sites برای این closure الزام checkpoint نیست و ساخته نشده است.
 
-`/market`، `/chat`، `/share-receive`، `/admin/channels`، interiorهای market/messenger در `AdminMessagesView` و `TradingSettings` و Home Market همچنان protected هستند. هیچ shared CSS/token بدون guard و proof نبود drift تغییر نمی‌کند.
+`/market`، `/chat`، `/share-receive`، `/admin/channels`، interiorهای market/messenger در `AdminMessagesView` و کنترل‌های بازار `TradingSettings` و Home Market همچنان protected/out-of-scope هستند. overlay مجاز CreateChannel از `0d7f2760` حفظ شده و گسترش نیافته است.
 
 ## ۵. قرارداد authority، PII و state — تصمیم pending با Phase 3 supersede شد
 
@@ -364,6 +372,14 @@ browser receipt promotable در run `uiux-stage6-phase19-public-profile-action-c
 
 Figma Phase 19 در page `321:18`، sibling section `485:1414` ثبت شد: W1=`485:1416` کارت‌های اقدام پروفایل خود و W2=`485:1465` اقدام تنظیمات، هر دو `390×844`. overlayهای کلون‌شده مخفی ماندند. label `485:1415` دقیقاً `Phase 19 · یکپارچگی ظاهر کارت اقدام پروفایل عمومی · source 92e30fef · دادهٔ synthetic` است؛ audit live، 70 text node با familyهای Vazirmatn، 10 linked instance و unsafe scan خالی را تأیید کرد. این reference live/editable است و freeze یا screenshot hash مستقل نیست.
 
-## ۲۸. مرز closure
+## ۲۸. بستن نهایی
 
-Phase 1/2/3/4/5/6/7/8/9/10/11/12/13/14/15/16/17/18/19 تحویل‌شده‌اند، اما broader roadmap Stage 6 partial/deferred است و **`stage6CompleteAuthority=false`**. هیچ `EVIDENCE_MANIFEST`، local freeze، Sites project/preview، product deployment، staging deployment یا production deployment ساخته یا تغییر داده نشده است. این checkpoint مجوز انجام deferredها یا ادعای complete Stage 6 نیست.
+Stage 6 روی runtime `3e62accd` بسته است و **`stage6CompleteAuthority=true`**.
+
+- ledger: `docs/uiux-stage6-admin-profile/STAGE6_CLOSURE_LEDGER.json` بدون `ACTIONABLE_GAP` داخل محدوده.
+- evidence: `docs/uiux-stage6-admin-profile/STAGE6_CLOSURE_EVIDENCE_MANIFEST.json`.
+- تنها gap بسته‌شده در این closure: جایگزینی native confirm بازنشانی تنظیمات غیر بازار.
+- Figma: section زندهٔ `645:1693` sibling صفحهٔ `321:18`؛ Phaseهای تاریخی overwrite نشده‌اند.
+- Sites: explicit non-requirement؛ هیچ project/preview تازه‌ای ساخته نشده است.
+- Stage 7 مرحلهٔ بعدی مجاز است. Stage 8 همچنان `270 / 0 full / 12 slices / 163 scenarios / authority=false` است و تا پس از merge اجرا نمی‌شود.
+- هیچ merge، push، staging یا production انجام نشده است.

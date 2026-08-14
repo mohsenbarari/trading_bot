@@ -10,12 +10,12 @@
     "parent": "63bc6827af63c722e7f1c156b3d47825afc18eae"
   },
   "lifecycleBoundary": {
-    "stage6CompleteAuthority": false,
+    "stage6CompleteAuthority": true,
     "fullStage6EvidenceFreeze": false,
     "sitesInput": false,
     "sitesProven": false,
     "stagingOrProductionChanged": false,
-    "description": "selectedArtifacts is a curated, reviewable record of delivered Phase 1/2/3 evidence only; supplementalPhase4To19Receipts is metadata-only and non-selected. Neither authorizes deferred Stage 6 work, a full-stage immutable freeze, or Sites publication."
+    "description": "Historical selectedArtifacts remain Phase 1-3 curated evidence. Closure is recorded in STAGE6_CLOSURE_EVIDENCE_MANIFEST.json. Sites was not started."
   },
   "projectionAlgorithm": "SHA-256 over sorted UTF-8 lines: <repo-relative-path>\\t<byte-count>\\t<file-sha256>\\n. Directory projections cover every regular file below that exact directory.",
   "selectedArtifacts": {
@@ -416,5 +416,10 @@
         "harnessSha256": "3fa192d58cac1b344b1e804f701b21c2548e6eaba84f40b7966ae59f7646f8ee"
       }
     }
+  },
+  "closurePointer": {
+    "ledger": "docs/uiux-stage6-admin-profile/STAGE6_CLOSURE_LEDGER.json",
+    "evidence": "docs/uiux-stage6-admin-profile/STAGE6_CLOSURE_EVIDENCE_MANIFEST.json",
+    "runtimeCommit": "3e62accdd157bed5dc6f2ed974e56e07c7349910"
   }
 }

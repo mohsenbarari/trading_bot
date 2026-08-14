@@ -1,0 +1,163 @@
+{
+  "schemaVersion": 1,
+  "stage": 6,
+  "kind": "stage6-closure-evidence-manifest",
+  "status": "stage6_complete",
+  "stage6CompleteAuthority": true,
+  "runtimeFreeze": {
+    "branch": "condidate/webapp-ui-ux-redesign-v2",
+    "commit": "3e62accdd157bed5dc6f2ed974e56e07c7349910",
+    "tree": "3f4a186e46b12aee326c699cd1975ba34e485be7",
+    "parent": "f5e22a7c1ff69f19ff9cbc735529d84e2ed2169e"
+  },
+  "validation": {
+    "focused": {
+      "files": 13,
+      "tests": 232,
+      "result": "passed"
+    },
+    "fullSerialVitest": {
+      "files": 156,
+      "tests": 1779,
+      "result": "passed"
+    },
+    "vueTsc": "passed",
+    "productionBuild": {
+      "result": "passed",
+      "distFileCount": 169,
+      "distSha256": "ee970be6ff3570f4c325c3f420c816b5fa61beb67a9b4071d208b2b3657c50db"
+    },
+    "guardUi": "passed",
+    "gitDiffCheck": "passed",
+    "frontendSourceQuiet": true,
+    "backendTouched": false
+  },
+  "browser": {
+    "runId": "stage6-closure-20260814082632509",
+    "kind": "stage6-closure-bounded-local-synthetic-production-browser",
+    "result": "passed",
+    "reportSha256": "306ef9d1495046fbd8ab579029e3ea56179b9e904597ed55a110bf7a9a49dce5",
+    "harnessSha256": "78f1bd2b5b1d4aee5f28dc2f71a43c54d18c20e8a5c797035368d3d0fdec3de3",
+    "summary": {
+      "executed": 40,
+      "passed": 40,
+      "failed": 0
+    },
+    "network": {
+      "apiRequests": 300,
+      "expectedApiRequests": 300,
+      "unknownApiRequests": 0,
+      "mutatingApiRequests": 0,
+      "staticServerErrors": 0
+    },
+    "diagnostics": {
+      "unexpectedConsole": 0,
+      "pageErrors": 0,
+      "externalRequests": 0,
+      "mutatingRequests": 0,
+      "classifiedExpected": {
+        "http403": "browser 403 on denied admin user detail is expected and filtered from unexpectedConsole"
+      },
+      "classifiedProtected": {
+        "chatUnnamedControls": 4
+      }
+    },
+    "coverage": {
+      "roles": [
+        "ordinary",
+        "owner",
+        "middle",
+        "super"
+      ],
+      "widths": [
+        360,
+        375,
+        390,
+        414,
+        430,
+        1440
+      ],
+      "cdp2x": true,
+      "reducedMotion": true,
+      "keyboard": true,
+      "longText": true,
+      "empty": true,
+      "denied": true,
+      "dialogEscape": true,
+      "routes": [
+        "/admin",
+        "/admin/invitations",
+        "/admin/users",
+        "/admin/users/:id",
+        "/admin/commodities",
+        "/admin/messages",
+        "/admin/system",
+        "/profile",
+        "/users/:id"
+      ]
+    },
+    "artifactRetention": "Raw screenshots and traces remain outside the repository. This receipt stores only redacted hashes and counts."
+  },
+  "figma": {
+    "fileKey": "z8jgJxST4O2APzWnlyP9gv",
+    "pageId": "321:18",
+    "pageName": "08 — Stage 6 Admin & Profile",
+    "historicalSectionsPreserved": 21,
+    "finalClosureSection": {
+      "id": "645:1693",
+      "name": "23 — Final closure · Admin and Profile · live editable",
+      "labelId": "645:1694",
+      "frames": {
+        "w1": "645:1695",
+        "w2": "645:1696",
+        "w3": "645:1697",
+        "w4": "645:1698"
+      },
+      "audit": {
+        "textCount": 58,
+        "fonts": [
+          "Vazirmatn/Medium",
+          "Vazirmatn/SemiBold",
+          "Vazirmatn/Bold",
+          "Vazirmatn/Regular"
+        ],
+        "linkedInstances": 11,
+        "boundPaintNodes": 95,
+        "overflowLikely": 0,
+        "unsafe": {
+          "urls": 0,
+          "emails": 0,
+          "phones": 0,
+          "hashes": 0,
+          "commits": 0,
+          "routes": 0
+        }
+      }
+    },
+    "historicalStaticAuditSha256": "ccdea4bd31124d759c68ed89e16c9ed73290f04e2bb58359b4138e8ed575b89b"
+  },
+  "sites": {
+    "requiredByCheckpoint": false,
+    "executed": false,
+    "disposition": "owner-authorized-explicit-non-requirement"
+  },
+  "sourceHashes": {
+    "frontend/src/components/TradingSettings.vue": "a3718e8beccbdd6eddcbcd72eebd1838fdf4584430f4ed8ba12c5ec95030eea0",
+    "frontend/src/components/TradingSettings.test.ts": "9ab7d2ea058b352a1f639f5cdeef1a4e92a05a6c5d29ecb684db4109a90fec20",
+    "frontend/src/components/AdminMessagesView.vue": "5572589b83a8a07776d5b983777a14a91e2104f9577fa76960df5a54562a431a",
+    "frontend/src/components/CreateChannelView.vue": "2e92310e8c74150f9d94162405b68b4ed7bc36198bdfd3536faaae7b5568149a",
+    "frontend/src/components/ChatView.vue": "e03ded196c369871f3ecd6763c09535c5a57efc5c0a767d848b2c5a94994273b",
+    "frontend/src/router/uiRouteContract.ts": "8e7495a05dfbf6b36bcc242af1b20919bef56a8bd0ed9458360d36cf79fba144"
+  },
+  "stage8Unchanged": {
+    "receiptSha256": "72c6077ede453ba7e624e5e01a08b58fa5aad7d41ed8e0410d3d6a99aceab9fa",
+    "matrixSha256": "846cc2f52df73a9442a130a72dcf308999f53faf583e410351032b9d7bd0a50b",
+    "cellAccounting": {
+      "expected": 270,
+      "executedFull": 0,
+      "partialSlices": 12,
+      "partialScenarios": 163,
+      "authority": false
+    }
+  }
+}

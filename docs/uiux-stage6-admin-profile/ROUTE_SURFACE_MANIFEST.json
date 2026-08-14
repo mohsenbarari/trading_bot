@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "stage": 6,
   "scope": "admin-profile-workspace-commodities-admin-user-account-security-account-storage-admin-account-status-admin-user-chrome-admin-user-directory-public-profile-chrome-admin-custom-date-public-profile-remaining-chrome-public-profile-action-cards-delivered-phase1-phase2-phase3-phase4-phase5-phase6-phase7-phase8-phase9-phase10-phase11-phase12-phase13-phase14-phase15-phase16-phase17-phase18-phase19",
-  "status": "delivered_phase1_phase2_phase3_phase4_phase5_phase6_phase7_phase8_phase9_phase10_phase11_phase12_phase13_phase14_phase15_phase16_phase17_phase18_phase19_broader_stage6_partial_deferred",
+  "status": "stage6_complete",
   "mutableNarrative": true,
   "branch": "condidate/webapp-ui-ux-redesign-v2",
   "implementation": {
@@ -355,5 +355,10 @@
     "phase18": "complete_delivered",
     "phase19": "complete_delivered"
   },
-  "claimBoundary": "This manifest describes the delivered route/state boundary only. It does not authorize deferred Stage 6 work, prove a live backend, publish Sites, or change staging/production."
+  "claimBoundary": "This manifest describes the delivered route/state boundary only. It does not authorize deferred Stage 6 work, prove a live backend, publish Sites, or change staging/production.",
+  "stage6CompleteAuthority": true,
+  "closureRuntime": {
+    "commit": "3e62accdd157bed5dc6f2ed974e56e07c7349910",
+    "tree": "3f4a186e46b12aee326c699cd1975ba34e485be7"
+  }
 }

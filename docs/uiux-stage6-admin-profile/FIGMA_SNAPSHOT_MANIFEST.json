@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "stage": 6,
   "scope": "historical-phase1-phase2-phase3-static-figma-provenance-with-live-editable-phase4-phase5-phase6-phase7-phase8-phase9-phase10-phase11-phase12-phase13-phase14-phase15-phase16-phase17-phase18-phase19-references",
-  "status": "pass_with_documented_page_sibling_topology",
+  "status": "stage6_complete_with_live_final_closure_sibling",
   "mutableNarrative": true,
   "historicalStaticAudit": {
     "path": "assets/figma/final-provenance-20260811T204635Z/stage6-final-figma-provenance-audit.json",
@@ -22,7 +22,7 @@
       "id": "321:18",
       "name": "08 — Stage 6 Admin & Profile",
       "directChildCountAtHistoricalAudit": 2,
-      "directChildCountCurrent": 18
+      "directChildCountCurrent": 22
     },
     "canonicalRoot": {
       "id": "321:19",
@@ -1100,6 +1100,26 @@
           "settingsNavigatesWithoutMutation": true
         }
       }
+    }
+  },
+  "finalClosure": {
+    "sectionId": "645:1693",
+    "name": "23 — Final closure · Admin and Profile · live editable",
+    "labelId": "645:1694",
+    "frames": {
+      "w1": "645:1695",
+      "w2": "645:1696",
+      "w3": "645:1697",
+      "w4": "645:1698"
+    },
+    "historicalOverwrite": false,
+    "privacy": "sanitized synthetic; no route/commit/hash/URL/PII exported",
+    "audit": {
+      "textCount": 58,
+      "allVazirmatn": true,
+      "linkedInstances": 11,
+      "boundPaintNodes": 95,
+      "unsafeScanEmpty": true
     }
   }
 }

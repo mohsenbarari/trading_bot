@@ -420,6 +420,8 @@ release disposition نیز صریح است: opaque-cookie response دیگر raw 
 
 ### مرحله ۶ — مدیریت و پروفایل
 
+وضعیت اجرایی: **`stage6_complete`**؛ `stage6CompleteAuthority=true`؛ runtime freeze `3e62accdd157bed5dc6f2ed974e56e07c7349910`. مرجع: [checkpoint Stage 6](WEBAPP_UI_UX_REDESIGN_V2_STAGE6_ADMIN_PROFILE_CHECKPOINT_20260811.md) و [ledger بستن](uiux-stage6-admin-profile/STAGE6_CLOSURE_LEDGER.json). مرحلهٔ بعدی مجاز Stage 7 است.
+
 مدت پیشنهادی: ۸ تا ۱۲ روز
 
 صفحه‌ها:
@@ -448,6 +450,8 @@ release disposition نیز صریح است: opaque-cookie response دیگر raw 
 گیت پایان: ادمین از جست‌وجو تا action نهایی، و کاربر از مشاهده هویت تا مدیریت پروفایل، مسیر قابل پیش‌بینی و یکپارچه داشته باشند؛ metadata مدیریتی فقط در context تصمیم و نه به‌دلیل نقش ادمین دیده شود.
 
 ### مرحله ۷ — پویایی، دسترس‌پذیری و polish سراسری
+
+وضعیت اجرایی: **`authorized_next`** پس از بستن Stage 6؛ هنوز `stage7CompleteAuthority=false` تا closure مستقل Stage 7.
 
 مدت پیشنهادی: ۴ تا ۶ روز
 

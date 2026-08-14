@@ -55,9 +55,25 @@
     "protectedSurfaceConclusion": "the guard accepts the reviewed overlay; it does not authorize unrelated Messenger changes"
   },
   "completion": {
-    "stage6CompleteAuthority": false,
+    "stage6CompleteAuthority": true,
     "sitesStarted": false,
+    "sitesDisposition": "owner-authorized-explicit-non-requirement",
     "stagingOrProductionChanged": false
   },
-  "claimBoundary": "This is an exact protected-surface disposition, not a blanket protected-surface pass for future edits and not a Stage 6 closure manifest."
+  "claimBoundary": "Historical messenger overlay remains exact. Closure addendum records the Stage 6 reset-dialog disposition and unchanged protected hashes. Protected surfaces are not marked complete.",
+  "closureAddendum": {
+    "runtimeCommit": "3e62accdd157bed5dc6f2ed974e56e07c7349910",
+    "tradingSettings": {
+      "kind": "stage6-trading-settings-reset-dialog",
+      "currentSha256": "a3718e8beccbdd6eddcbcd72eebd1838fdf4584430f4ed8ba12c5ec95030eea0",
+      "stage4BaselineRetained": "509dd32235e1cb98aa164940cf7722604f16b6518f7387699554bf3a828ecfaa",
+      "allowedRegion": "footer system reset confirmation only",
+      "protectedCalendarConfirmPreserved": true
+    },
+    "adminMessagesSha256": "5572589b83a8a07776d5b983777a14a91e2104f9577fa76960df5a54562a431a",
+    "createChannelAllowedPlacementSha256": "2e92310e8c74150f9d94162405b68b4ed7bc36198bdfd3536faaae7b5568149a",
+    "homeMarketSha256": "f25c01dac38db208517047ffc0f2458e2c89868e988a6d7f68749221db106860",
+    "marketRuntimeSha256": "162e9e618684a24f3db3298eb8ff2c62498b18753cd4e0b6d6b97650d0202058",
+    "messengerAggregateSha256": "7659633875a604e75b925dcd9938ac71f74090b8b077d55ec9d4809107224124"
+  }
 }

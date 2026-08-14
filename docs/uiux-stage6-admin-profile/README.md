@@ -1,17 +1,19 @@
 # Stage 6 — Admin & Profile
 
-این پوشه یک بستهٔ توضیحیِ **mutable** برای برش تحویل‌شدهٔ Phase 1 تا Phase 19 است؛ freeze، `EVIDENCE_MANIFEST.json` یا مجوز closure کل Stage 6 نیست.
+این پوشه بستهٔ Stage 6 است. Phaseهای ۱ تا ۱۹ تاریخی می‌مانند؛ بستن نهایی روی runtime `3e62accd` ثبت شده است.
 
 ## وضعیت دقیق
 
 - branch: `condidate/webapp-ui-ux-redesign-v2`
-- latest implementation: `92e30fef4d414e7144eca995fc12a075c042aa0b`
-- latest tree: `a1b86940a9e1e96cf87af18eb4a57cdd977deece`
-- delivered: Phase 1 (Admin landing)، Phase 2 (Admin user directory/detail)، Phase 3 (public-profile privacy/authority)، Phase 4 (invitation management)، Phase 5 (public-profile block/unblock)، Phase 6 (workspace account deletion)، Phase 7 (safe recovery برای پایان یک نشست workspace)، Phase 8 (safe recovery برای mutationهای رابطهٔ workspace)، Phase 9 (receipt-safe commodity/alias mutations)، Phase 10 (حذف امن کاربر مدیریت و پایان نشست‌ها)، Phase 11 (نشست‌های امن حساب)، Phase 12 (پاک‌سازی حافظه محلی حساب)، Phase 13 (تأیید امن تغییر وضعیت حساب، رفع مسدودیت و رفع محدودیت)، Phase 14 (یکپارچگی ظاهر مدیریت کاربر)، Phase 15 (یکپارچگی ظاهر فهرست کاربران مدیریت)، Phase 16 (یکپارچگی ظاهر پوسته پروفایل عمومی)، Phase 17 (یکپارچگی ظاهر انتخاب تاریخ سفارشی مدیریت)، Phase 18 (یکپارچگی ظاهر پوسته باقی‌مانده پروفایل عمومی) و Phase 19 (یکپارچگی ظاهر کارت اقدام پروفایل عمومی).
-- authority: `stage6CompleteAuthority=false`.
-- broader Stage 6 roadmap: partial/deferred؛ این بسته فقط واقعیت برش تحویل‌شده را ثبت می‌کند.
+- runtime freeze: `3e62accdd157bed5dc6f2ed974e56e07c7349910`
+- runtime tree: `3f4a186e46b12aee326c699cd1975ba34e485be7`
+- status: `stage6_complete`
+- authority: `stage6CompleteAuthority=true`
+- in-scope deferred: صفر
+- next authorized stage: Stage 7
+- Sites: non-requirement صریح؛ اجرا نشده است
 
-هیچ Sites، staging، production یا product deployment در این کار آغاز یا تغییر داده نشده است.
+مرجع ماشین‌خوان: [STAGE6_CLOSURE_LEDGER.json](STAGE6_CLOSURE_LEDGER.json) و [STAGE6_CLOSURE_EVIDENCE_MANIFEST.json](STAGE6_CLOSURE_EVIDENCE_MANIFEST.json).
 
 ## مرز تحویل‌شده
 
@@ -39,21 +41,25 @@
 
 ## نقشهٔ این بسته
 
+- [STAGE6_CLOSURE_LEDGER.json](STAGE6_CLOSURE_LEDGER.json): verdict هر الزام داخل محدوده.
+- [STAGE6_CLOSURE_EVIDENCE_MANIFEST.json](STAGE6_CLOSURE_EVIDENCE_MANIFEST.json): گیت تست، مرورگر، Figma و مرز Stage 8.
 - [RUNTIME_CONTRACT.md](RUNTIME_CONTRACT.md): privacy، authority، route و recovery contract.
 - [CONTENT_NECESSITY_MATRIX.md](CONTENT_NECESSITY_MATRIX.md): هر سطح باقی‌مانده و علت آن.
-- [ROUTE_SURFACE_MANIFEST.json](ROUTE_SURFACE_MANIFEST.json): route/state boundary for the delivered Phase 1–19 slices.
-- [PROTECTED_SURFACE_DIFF_MANIFEST.json](PROTECTED_SURFACE_DIFF_MANIFEST.json): disposition دقیق Messenger protected surface.
-- [FIGMA_SNAPSHOT_MANIFEST.json](FIGMA_SNAPSHOT_MANIFEST.json): historical Phase 1–3 static Figma audit plus live editable references for Phase 4–19.
-- [DELIVERED_SCOPE_EVIDENCE_INVENTORY.json](DELIVERED_SCOPE_EVIDENCE_INVENTORY.json): historical allowlist/hash inventory for Phase 1–3 plus non-freeze supplemental receipts for Phase 4–19.
-- [VALIDATION.md](VALIDATION.md): receiptهای source/browser/Figma و محدودیت‌هایشان.
+- [ROUTE_SURFACE_MANIFEST.json](ROUTE_SURFACE_MANIFEST.json): route/state boundary.
+- [PROTECTED_SURFACE_DIFF_MANIFEST.json](PROTECTED_SURFACE_DIFF_MANIFEST.json): disposition محافظت‌شده به‌همراه addendum بستن.
+- [FIGMA_SNAPSHOT_MANIFEST.json](FIGMA_SNAPSHOT_MANIFEST.json): Phaseهای تاریخی به‌علاوه section زندهٔ بستن نهایی.
+- [DELIVERED_SCOPE_EVIDENCE_INVENTORY.json](DELIVERED_SCOPE_EVIDENCE_INVENTORY.json): allowlist تاریخی Phase 1–3 و اشاره به closure.
+- [VALIDATION.md](VALIDATION.md): receiptهای source/browser/Figma.
 
 artifactهای allowlisted زیر `assets/` برای review تاریخیِ Phase 1–3 curated هستند؛ receiptهای Phase 4–19 هم در validation/checkpoint ثبت شده‌اند اما هنوز allowlist یا aggregate جدیدی ندارند. این فایل‌های narrative عمداً mutable باقی می‌مانند؛ هیچ‌کدام `EVIDENCE_MANIFEST` یا freeze کل Stage 6 نیست. یک freeze آینده باید فقط inputs immutable را انتخاب کند و این متن‌ها را داخل aggregate خودش قرار ندهد.
 
-## Deferred، نه بسته‌شده
+## Deferred reconcile
 
-- dialogهای حساسِ باقی‌مانده خارج از PublicProfile، workspace deletion، پایان نشست workspace، mutationهای رابطهٔ workspace، حذف کالا/نام مستعار در `/admin/commodities`، حذف/پایان نشست/تغییر وضعیت/رفع مسدودیت/رفع محدودیت کاربر در `/admin/users/:id`، نشست‌های `/account/security` و پاک‌سازی `/account/storage`؛
-- تغییر مستقل Admin Messages/System Settings؛
-- closure/freeze/Sites evidence Stage 6؛
-- هر ادعای live backend، staging یا production acceptance.
+فهرست deferred قدیمی checkpoint supersede شده است:
 
-این موارد نتیجهٔ منفی دربارهٔ رفتار موجود نیستند؛ صرفاً خارج از authority این برش‌اند.
+- dialog حساس داخل محدوده با `AppConfirmDialog` بسته است؛ تنها `confirm` زنده‌ای که باقی مانده حذف تقویم بازار است و عمداً محافظت‌شده است.
+- پوستهٔ غیرمحافظت‌شدهٔ Admin Messages شکاف دیدنی نداشت (`PASS_NO_PATCH`).
+- بازنشانی غیر بازار در تنظیمات سیستم با dialog مشترک بسته شد.
+- Sites برای این closure الزام نیست و ساخته نشده است.
+
+سطح‌های محافظت‌شده complete معرفی نمی‌شوند؛ آن‌ها `PROTECTED_OUT_OF_SCOPE` می‌مانند.

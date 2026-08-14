@@ -3,6 +3,10 @@ app_logs.txt
 # Build artifacts
 check-dns
 docs/*
+!docs/uiux-stage6-admin-profile/
+docs/uiux-stage6-admin-profile/*
+!docs/uiux-stage6-admin-profile/STAGE6_CLOSURE_LEDGER.json
+!docs/uiux-stage6-admin-profile/STAGE6_CLOSURE_EVIDENCE_MANIFEST.json
 !docs/memory/
 !docs/memory/**
 !docs/uiux-stage8-acceptance-rollout/

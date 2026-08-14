@@ -1,0 +1,1147 @@
+{
+  "schemaVersion": 1,
+  "stage": 6,
+  "status": "stage6_complete",
+  "stage6CompleteAuthority": true,
+  "branch": "condidate/webapp-ui-ux-redesign-v2",
+  "runtimeFreeze": {
+    "branch": "condidate/webapp-ui-ux-redesign-v2",
+    "commit": "3e62accdd157bed5dc6f2ed974e56e07c7349910",
+    "tree": "3f4a186e46b12aee326c699cd1975ba34e485be7",
+    "parent": "f5e22a7c1ff69f19ff9cbc735529d84e2ed2169e"
+  },
+  "gapClosedThisClosure": [
+    {
+      "id": "S6-R34",
+      "commit": "3e62accdd157bed5dc6f2ed974e56e07c7349910",
+      "title": "fix(ui): replace system reset native confirm",
+      "was": "ACTIONABLE_GAP",
+      "now": "DONE_EVIDENCE_BOUND"
+    }
+  ],
+  "openActionableGaps": [],
+  "deferredLedgerReconcile": {
+    "superseded": [
+      "sensitive dialogs outside delivered Phase 4-13 — reconciled: remaining in-scope native confirm was system reset; now AppConfirmDialog",
+      "any change to non-protected Admin Messages / System Settings — reconciled: Admin Messages chrome PASS_NO_PATCH; System Settings reset DONE_EVIDENCE_BOUND; market interiors remain protected"
+    ],
+    "remainingInScopeCount": 0
+  },
+  "sites": {
+    "requiredByCheckpoint": false,
+    "executed": false,
+    "disposition": "owner-authorized-explicit-non-requirement",
+    "reason": "Checkpoint section 7 requires a private Sites project only if a separate Sites closure starts after an immutable freeze. This closure uses Figma sibling evidence only."
+  },
+  "nextAuthorizedStage": 7,
+  "stage8Boundary": {
+    "newSliceExecuted": false,
+    "expected": 270,
+    "executedFull": 0,
+    "partialSlices": 12,
+    "partialScenarios": 163,
+    "authority": false
+  },
+  "requirements": [
+    {
+      "id": "S6-R01",
+      "title": "Admin landing has no duplicate destinations",
+      "roadmapSource": "roadmap stage 6 / checkpoint phase 1",
+      "affectedRoutes": [
+        "/admin"
+      ],
+      "implementationFiles": [
+        "frontend/src/components/AdminPanel.vue",
+        "frontend/src/views/AdminView.vue"
+      ],
+      "testsEvidence": [
+        "AdminPanel.test.ts",
+        "AdminView.test.ts",
+        "browser super/middle landing"
+      ],
+      "protectionClassification": "NONE",
+      "verdict": "DONE_EVIDENCE_BOUND",
+      "remainingAction": "none",
+      "finalResolution": "Role-filtered destination list; no duplicate keys; middle sees invitations+users only; super sees the full allowed set.",
+      "sourceCommit": "3e62accdd157bed5dc6f2ed974e56e07c7349910",
+      "sourceTree": "3f4a186e46b12aee326c699cd1975ba34e485be7",
+      "evidenceReferences": [
+        "focused 13/232",
+        "browser super-admin-home-*",
+        "middle-admin-home-390"
+      ]
+    },
+    {
+      "id": "S6-R02",
+      "title": "Admin route is the source of state and deep link",
+      "roadmapSource": "roadmap stage 6",
+      "affectedRoutes": [
+        "/admin",
+        "/admin/invitations",
+        "/admin/users",
+        "/admin/users/:id",
+        "/admin/commodities",
+        "/admin/messages",
+        "/admin/system"
+      ],
+      "implementationFiles": [
+        "frontend/src/views/AdminView.vue",
+        "frontend/src/router/index.ts",
+        "frontend/src/router/uiRouteContract.ts"
+      ],
+      "testsEvidence": [
+        "AdminView.test.ts",
+        "uiRouteContract.test.ts"
+      ],
+      "protectionClassification": "NONE except mixed interiors",
+      "verdict": "DONE_EVIDENCE_BOUND",
+      "remainingAction": "none",
+      "finalResolution": "Child surfaces mount from the admin route; denied deep links recover to /admin.",
+      "sourceCommit": "3e62accdd157bed5dc6f2ed974e56e07c7349910",
+      "sourceTree": "3f4a186e46b12aee326c699cd1975ba34e485be7",
+      "evidenceReferences": [
+        "middle-denied-system-390 path=/admin",
+        "AdminView.test.ts"
+      ]
+    },
+    {
+      "id": "S6-R03",
+      "title": "Role filter does not replace backend authority",
+      "roadmapSource": "checkpoint section 5",
+      "affectedRoutes": [
+        "/admin",
+        "/admin/users/:id"
+      ],
+      "implementationFiles": [
+        "frontend/src/components/AdminPanel.vue",
+        "frontend/src/components/UserProfile.vue"
+      ],
+      "testsEvidence": [
+        "UserProfile.test.ts",
+        "historical phase 3 backend 131"
+      ],
+      "protectionClassification": "NONE",
+      "verdict": "DONE_EVIDENCE_BOUND",
+      "remainingAction": "none",
+      "finalResolution": "UI hides unauthorized destinations; sensitive actions remain server-enforced 403.",
+      "sourceCommit": "3e62accdd157bed5dc6f2ed974e56e07c7349910",
+      "sourceTree": "3f4a186e46b12aee326c699cd1975ba34e485be7",
+      "evidenceReferences": [
+        "UserProfile.test.ts 31",
+        "super-user-403-390"
+      ]
+    },
+    {
+      "id": "S6-R04",
+      "title": "No synthetic count KPI or badge",
+      "roadmapSource": "roadmap stage 6 / phase 1",
+      "affectedRoutes": [
+        "/admin",
+        "/admin/invitations"
+      ],
+      "implementationFiles": [
+        "frontend/src/components/AdminPanel.vue",
+        "frontend/src/components/CreateInvitationView.vue"
+      ],
+      "testsEvidence": [
+        "AdminPanel.test.ts",
+        "CreateInvitationView.test.ts"
+      ],
+      "protectionClassification": "NONE",
+      "verdict": "DONE_EVIDENCE_BOUND",
+      "remainingAction": "none",
+      "finalResolution": "Landing has no pending/total fabrication; invitation queue uses authoritative pending only.",
+      "sourceCommit": "3e62accdd157bed5dc6f2ed974e56e07c7349910",
+      "sourceTree": "3f4a186e46b12aee326c699cd1975ba34e485be7",
+      "evidenceReferences": [
+        "browser landing text",
+        "CreateInvitationView.test.ts 23"
+      ]
+    },
+    {
+      "id": "S6-R05",
+      "title": "Middle and super admin behavior is real",
+      "roadmapSource": "checkpoint phase 1",
+      "affectedRoutes": [
+        "/admin"
+      ],
+      "implementationFiles": [
+        "frontend/src/components/AdminPanel.vue"
+      ],
+      "testsEvidence": [
+        "AdminPanel.test.ts",
+        "browser middle vs super"
+      ],
+      "protectionClassification": "NONE",
+      "verdict": "DONE_EVIDENCE_BOUND",
+      "remainingAction": "none",
+      "finalResolution": "Middle landing forbids system/commodities/messages; super shows them.",
+      "sourceCommit": "3e62accdd157bed5dc6f2ed974e56e07c7349910",
+      "sourceTree": "3f4a186e46b12aee326c699cd1975ba34e485be7",
+      "evidenceReferences": [
+        "middle-admin-home-390 forbidText",
+        "super-admin-home-390 expectText"
+      ]
+    },
+    {
+      "id": "S6-R06",
+      "title": "Denied deep link is canonical and recoverable",
+      "roadmapSource": "checkpoint phase 1-2",
+      "affectedRoutes": [
+        "/admin/system",
+        "/admin/users/:id"
+      ],
+      "implementationFiles": [
+        "frontend/src/views/AdminView.vue",
+        "frontend/src/components/UserProfile.vue"
+      ],
+      "testsEvidence": [
+        "AdminView.test.ts",
+        "UserProfile.test.ts",
+        "browser denied and 403"
+      ],
+      "protectionClassification": "NONE",
+      "verdict": "DONE_EVIDENCE_BOUND",
+      "remainingAction": "none",
+      "finalResolution": "Middle /admin/system recovers to /admin; 403 user detail stays generic.",
+      "sourceCommit": "3e62accdd157bed5dc6f2ed974e56e07c7349910",
+      "sourceTree": "3f4a186e46b12aee326c699cd1975ba34e485be7",
+      "evidenceReferences": [
+        "middle-denied-system-390",
+        "super-user-403-390 classified 403 console"
+      ]
+    },
+    {
+      "id": "S6-R07",
+      "title": "Keyboard navigation and focus-visible",
+      "roadmapSource": "roadmap stage 6 / phase 1",
+      "affectedRoutes": [
+        "/admin",
+        "/admin/users"
+      ],
+      "implementationFiles": [
+        "frontend/src/components/AdminPanel.vue",
+        "frontend/src/components/UserManager.vue"
+      ],
+      "testsEvidence": [
+        "AdminPanel.test.ts",
+        "UserManager.test.ts",
+        "browser keyboard"
+      ],
+      "protectionClassification": "NONE",
+      "verdict": "DONE_EVIDENCE_BOUND",
+      "remainingAction": "none",
+      "finalResolution": "Landing nav and directory rows are native list/button semantics; keyboard tab works.",
+      "sourceCommit": "3e62accdd157bed5dc6f2ed974e56e07c7349910",
+      "sourceTree": "3f4a186e46b12aee326c699cd1975ba34e485be7",
+      "evidenceReferences": [
+        "super-admin-home-390-keyboard",
+        "UserManager.test.ts 11"
+      ]
+    },
+    {
+      "id": "S6-R08",
+      "title": "Invitation pending/count is authoritative",
+      "roadmapSource": "checkpoint phase 4",
+      "affectedRoutes": [
+        "/admin/invitations"
+      ],
+      "implementationFiles": [
+        "frontend/src/components/CreateInvitationView.vue"
+      ],
+      "testsEvidence": [
+        "CreateInvitationView.test.ts"
+      ],
+      "protectionClassification": "NONE",
+      "verdict": "DONE_EVIDENCE_BOUND",
+      "remainingAction": "none",
+      "finalResolution": "Empty pending fixture shows empty queue; no fabricated total.",
+      "sourceCommit": "3e62accdd157bed5dc6f2ed974e56e07c7349910",
+      "sourceTree": "3f4a186e46b12aee326c699cd1975ba34e485be7",
+      "evidenceReferences": [
+        "CreateInvitationView.test.ts 23",
+        "super-invitations-*"
+      ]
+    },
+    {
+      "id": "S6-R09",
+      "title": "Invitation URL token and raw bearer are not shown or stored",
+      "roadmapSource": "checkpoint phase 4",
+      "affectedRoutes": [
+        "/admin/invitations"
+      ],
+      "implementationFiles": [
+        "frontend/src/components/CreateInvitationView.vue"
+      ],
+      "testsEvidence": [
+        "CreateInvitationView.test.ts"
+      ],
+      "protectionClassification": "NONE",
+      "verdict": "DONE_EVIDENCE_BOUND",
+      "remainingAction": "none",
+      "finalResolution": "Link stays in-memory copy-only; no textarea fallback.",
+      "sourceCommit": "3e62accdd157bed5dc6f2ed974e56e07c7349910",
+      "sourceTree": "3f4a186e46b12aee326c699cd1975ba34e485be7",
+      "evidenceReferences": [
+        "CreateInvitationView.test.ts",
+        "historical phase 4 receipt"
+      ]
+    },
+    {
+      "id": "S6-R10",
+      "title": "Invitation copy no-store privacy contract",
+      "roadmapSource": "checkpoint phase 4",
+      "affectedRoutes": [
+        "/admin/invitations"
+      ],
+      "implementationFiles": [
+        "frontend/src/components/CreateInvitationView.vue"
+      ],
+      "testsEvidence": [
+        "CreateInvitationView.test.ts"
+      ],
+      "protectionClassification": "NONE",
+      "verdict": "DONE_EVIDENCE_BOUND",
+      "remainingAction": "none",
+      "finalResolution": "cache no-store and abort/revision remain.",
+      "sourceCommit": "3e62accdd157bed5dc6f2ed974e56e07c7349910",
+      "sourceTree": "3f4a186e46b12aee326c699cd1975ba34e485be7",
+      "evidenceReferences": [
+        "CreateInvitationView.test.ts"
+      ]
+    },
+    {
+      "id": "S6-R11",
+      "title": "Invitation delete dialog is teleported and focus-trapped",
+      "roadmapSource": "checkpoint phase 4",
+      "affectedRoutes": [
+        "/admin/invitations"
+      ],
+      "implementationFiles": [
+        "frontend/src/components/CreateInvitationView.vue",
+        "frontend/src/components/ui/AppConfirmDialog.vue"
+      ],
+      "testsEvidence": [
+        "CreateInvitationView.test.ts"
+      ],
+      "protectionClassification": "NONE",
+      "verdict": "DONE_EVIDENCE_BOUND",
+      "remainingAction": "none",
+      "finalResolution": "Shared AppConfirmDialog portal; no inline clipped confirm.",
+      "sourceCommit": "3e62accdd157bed5dc6f2ed974e56e07c7349910",
+      "sourceTree": "3f4a186e46b12aee326c699cd1975ba34e485be7",
+      "evidenceReferences": [
+        "CreateInvitationView.test.ts",
+        "historical phase 4 browser"
+      ]
+    },
+    {
+      "id": "S6-R12",
+      "title": "Invitation cancel/Escape has zero mutation",
+      "roadmapSource": "checkpoint phase 4",
+      "affectedRoutes": [
+        "/admin/invitations"
+      ],
+      "implementationFiles": [
+        "frontend/src/components/CreateInvitationView.vue"
+      ],
+      "testsEvidence": [
+        "CreateInvitationView.test.ts"
+      ],
+      "protectionClassification": "NONE",
+      "verdict": "DONE_EVIDENCE_BOUND",
+      "remainingAction": "none",
+      "finalResolution": "Cancel/Escape send no DELETE.",
+      "sourceCommit": "3e62accdd157bed5dc6f2ed974e56e07c7349910",
+      "sourceTree": "3f4a186e46b12aee326c699cd1975ba34e485be7",
+      "evidenceReferences": [
+        "CreateInvitationView.test.ts"
+      ]
+    },
+    {
+      "id": "S6-R13",
+      "title": "Invitation receipt 400/403/404 reconciliation",
+      "roadmapSource": "checkpoint phase 4",
+      "affectedRoutes": [
+        "/admin/invitations"
+      ],
+      "implementationFiles": [
+        "frontend/src/components/CreateInvitationView.vue"
+      ],
+      "testsEvidence": [
+        "CreateInvitationView.test.ts"
+      ],
+      "protectionClassification": "NONE",
+      "verdict": "DONE_EVIDENCE_BOUND",
+      "remainingAction": "none",
+      "finalResolution": "204 deletes row; 400/404 reconcile; 403 clears sensitive state.",
+      "sourceCommit": "3e62accdd157bed5dc6f2ed974e56e07c7349910",
+      "sourceTree": "3f4a186e46b12aee326c699cd1975ba34e485be7",
+      "evidenceReferences": [
+        "CreateInvitationView.test.ts"
+      ]
+    },
+    {
+      "id": "S6-R14",
+      "title": "Admin users directory search is stable and keyboard-accessible",
+      "roadmapSource": "roadmap stage 6 / phase 2 / phase 15",
+      "affectedRoutes": [
+        "/admin/users"
+      ],
+      "implementationFiles": [
+        "frontend/src/components/UserManager.vue"
+      ],
+      "testsEvidence": [
+        "UserManager.test.ts",
+        "browser users 360/390/414/1440"
+      ],
+      "protectionClassification": "NONE",
+      "verdict": "DONE_EVIDENCE_BOUND",
+      "remainingAction": "none",
+      "finalResolution": "Session-local search; ui-list-item rows; no URL query.",
+      "sourceCommit": "3e62accdd157bed5dc6f2ed974e56e07c7349910",
+      "sourceTree": "3f4a186e46b12aee326c699cd1975ba34e485be7",
+      "evidenceReferences": [
+        "UserManager.test.ts 11",
+        "super-users-*"
+      ]
+    },
+    {
+      "id": "S6-R15",
+      "title": "Admin users URL/history/storage hold no query or PII",
+      "roadmapSource": "checkpoint phase 2",
+      "affectedRoutes": [
+        "/admin/users",
+        "/admin/users/:id"
+      ],
+      "implementationFiles": [
+        "frontend/src/components/UserManager.vue",
+        "frontend/src/views/AdminView.vue"
+      ],
+      "testsEvidence": [
+        "UserManager.test.ts",
+        "AdminView.test.ts"
+      ],
+      "protectionClassification": "NONE",
+      "verdict": "DONE_EVIDENCE_BOUND",
+      "remainingAction": "none",
+      "finalResolution": "Only normalized non-negative integer scroll is route context.",
+      "sourceCommit": "3e62accdd157bed5dc6f2ed974e56e07c7349910",
+      "sourceTree": "3f4a186e46b12aee326c699cd1975ba34e485be7",
+      "evidenceReferences": [
+        "UserManager.test.ts",
+        "historical phase 2"
+      ]
+    },
+    {
+      "id": "S6-R16",
+      "title": "Admin users row/list semantics",
+      "roadmapSource": "phase 2 / phase 15",
+      "affectedRoutes": [
+        "/admin/users"
+      ],
+      "implementationFiles": [
+        "frontend/src/components/UserManager.vue"
+      ],
+      "testsEvidence": [
+        "UserManager.test.ts"
+      ],
+      "protectionClassification": "NONE",
+      "verdict": "DONE_EVIDENCE_BOUND",
+      "remainingAction": "none",
+      "finalResolution": "ul/li/button with ui-list-item chrome.",
+      "sourceCommit": "3e62accdd157bed5dc6f2ed974e56e07c7349910",
+      "sourceTree": "3f4a186e46b12aee326c699cd1975ba34e485be7",
+      "evidenceReferences": [
+        "UserManager.test.ts"
+      ]
+    },
+    {
+      "id": "S6-R17",
+      "title": "Admin user detail authority is server-side",
+      "roadmapSource": "checkpoint phase 2-3 / phase 10 / phase 13",
+      "affectedRoutes": [
+        "/admin/users/:id"
+      ],
+      "implementationFiles": [
+        "frontend/src/components/UserProfile.vue"
+      ],
+      "testsEvidence": [
+        "UserProfile.test.ts",
+        "super-user-detail-390",
+        "super-user-403-390"
+      ],
+      "protectionClassification": "NONE",
+      "verdict": "DONE_EVIDENCE_BOUND",
+      "remainingAction": "none",
+      "finalResolution": "Detail loads from authorized GET; 403/404 recover generically.",
+      "sourceCommit": "3e62accdd157bed5dc6f2ed974e56e07c7349910",
+      "sourceTree": "3f4a186e46b12aee326c699cd1975ba34e485be7",
+      "evidenceReferences": [
+        "UserProfile.test.ts 31"
+      ]
+    },
+    {
+      "id": "S6-R18",
+      "title": "Admin user dialogs are shared, generic, cancel-safe",
+      "roadmapSource": "checkpoint phases 10 and 13",
+      "affectedRoutes": [
+        "/admin/users/:id"
+      ],
+      "implementationFiles": [
+        "frontend/src/components/UserProfile.vue"
+      ],
+      "testsEvidence": [
+        "UserProfile.test.ts"
+      ],
+      "protectionClassification": "NONE",
+      "verdict": "DONE_EVIDENCE_BOUND",
+      "remainingAction": "none",
+      "finalResolution": "No native alert/confirm; generic copy; Escape zero mutation; exact 200 receipts.",
+      "sourceCommit": "3e62accdd157bed5dc6f2ed974e56e07c7349910",
+      "sourceTree": "3f4a186e46b12aee326c699cd1975ba34e485be7",
+      "evidenceReferences": [
+        "UserProfile.test.ts"
+      ]
+    },
+    {
+      "id": "S6-R19",
+      "title": "Locked default commodity behavior",
+      "roadmapSource": "roadmap stage 6 / phase 9",
+      "affectedRoutes": [
+        "/admin/commodities"
+      ],
+      "implementationFiles": [
+        "frontend/src/components/CommodityManager.vue"
+      ],
+      "testsEvidence": [
+        "CommodityManager.test.ts",
+        "browser Imam visible"
+      ],
+      "protectionClassification": "NONE",
+      "verdict": "DONE_EVIDENCE_BOUND",
+      "remainingAction": "none",
+      "finalResolution": "امام remains locked default name.",
+      "sourceCommit": "3e62accdd157bed5dc6f2ed974e56e07c7349910",
+      "sourceTree": "3f4a186e46b12aee326c699cd1975ba34e485be7",
+      "evidenceReferences": [
+        "CommodityManager.test.ts 17",
+        "super-commodities-390"
+      ]
+    },
+    {
+      "id": "S6-R20",
+      "title": "Alias and main-name distinctions",
+      "roadmapSource": "phase 9",
+      "affectedRoutes": [
+        "/admin/commodities"
+      ],
+      "implementationFiles": [
+        "frontend/src/components/CommodityManager.vue"
+      ],
+      "testsEvidence": [
+        "CommodityManager.test.ts"
+      ],
+      "protectionClassification": "NONE",
+      "verdict": "DONE_EVIDENCE_BOUND",
+      "remainingAction": "none",
+      "finalResolution": "Aliases are typed objects with commodity_id; edit/delete are separate.",
+      "sourceCommit": "3e62accdd157bed5dc6f2ed974e56e07c7349910",
+      "sourceTree": "3f4a186e46b12aee326c699cd1975ba34e485be7",
+      "evidenceReferences": [
+        "CommodityManager.test.ts"
+      ]
+    },
+    {
+      "id": "S6-R21",
+      "title": "Commodity success feedback survives refresh",
+      "roadmapSource": "roadmap stage 6",
+      "affectedRoutes": [
+        "/admin/commodities"
+      ],
+      "implementationFiles": [
+        "frontend/src/components/CommodityManager.vue"
+      ],
+      "testsEvidence": [
+        "CommodityManager.test.ts"
+      ],
+      "protectionClassification": "NONE",
+      "verdict": "DONE_EVIDENCE_BOUND",
+      "remainingAction": "none",
+      "finalResolution": "preserveMessages path keeps success across list refresh.",
+      "sourceCommit": "3e62accdd157bed5dc6f2ed974e56e07c7349910",
+      "sourceTree": "3f4a186e46b12aee326c699cd1975ba34e485be7",
+      "evidenceReferences": [
+        "CommodityManager.test.ts"
+      ]
+    },
+    {
+      "id": "S6-R22",
+      "title": "Commodity delete receipts and safe dialogs",
+      "roadmapSource": "phase 9",
+      "affectedRoutes": [
+        "/admin/commodities"
+      ],
+      "implementationFiles": [
+        "frontend/src/components/CommodityManager.vue"
+      ],
+      "testsEvidence": [
+        "CommodityManager.test.ts"
+      ],
+      "protectionClassification": "NONE",
+      "verdict": "DONE_EVIDENCE_BOUND",
+      "remainingAction": "none",
+      "finalResolution": "Delete applies only on empty 204; cancel/Escape send no DELETE.",
+      "sourceCommit": "3e62accdd157bed5dc6f2ed974e56e07c7349910",
+      "sourceTree": "3f4a186e46b12aee326c699cd1975ba34e485be7",
+      "evidenceReferences": [
+        "CommodityManager.test.ts"
+      ]
+    },
+    {
+      "id": "S6-R23",
+      "title": "Last commodity CTA does not collide with BottomNav",
+      "roadmapSource": "closure browser / BottomNav rule",
+      "affectedRoutes": [
+        "/admin/commodities"
+      ],
+      "implementationFiles": [
+        "frontend/src/components/CommodityManager.vue"
+      ],
+      "testsEvidence": [
+        "browser commodities 390/1440"
+      ],
+      "protectionClassification": "NONE",
+      "verdict": "DONE_EVIDENCE_BOUND",
+      "remainingAction": "none",
+      "finalResolution": "No horizontal overflow; list remains above shell chrome in production build.",
+      "sourceCommit": "3e62accdd157bed5dc6f2ed974e56e07c7349910",
+      "sourceTree": "3f4a186e46b12aee326c699cd1975ba34e485be7",
+      "evidenceReferences": [
+        "super-commodities-390",
+        "super-commodities-long-390"
+      ]
+    },
+    {
+      "id": "S6-R24",
+      "title": "No horizontal overflow and long-text wrap",
+      "roadmapSource": "roadmap stage 6 / closure matrix",
+      "affectedRoutes": [
+        "/admin",
+        "/admin/commodities",
+        "/profile",
+        "/users/:id"
+      ],
+      "implementationFiles": [
+        "frontend/src/components/CommodityManager.vue",
+        "frontend/src/components/PublicProfile.vue"
+      ],
+      "testsEvidence": [
+        "browser overflow=false all 40 scenarios"
+      ],
+      "protectionClassification": "NONE",
+      "verdict": "DONE_EVIDENCE_BOUND",
+      "remainingAction": "none",
+      "finalResolution": "Long unbroken commodity name wraps; document overflow zero in closure matrix.",
+      "sourceCommit": "3e62accdd157bed5dc6f2ed974e56e07c7349910",
+      "sourceTree": "3f4a186e46b12aee326c699cd1975ba34e485be7",
+      "evidenceReferences": [
+        "super-commodities-long-390",
+        "browser overflow empty"
+      ]
+    },
+    {
+      "id": "S6-R25",
+      "title": "Self public peer admin projections are separated",
+      "roadmapSource": "checkpoint phase 3 / phases 16-19",
+      "affectedRoutes": [
+        "/profile",
+        "/users/:id"
+      ],
+      "implementationFiles": [
+        "frontend/src/components/PublicProfile.vue",
+        "frontend/src/views/ProfileView.vue",
+        "frontend/src/views/PublicProfileView.vue"
+      ],
+      "testsEvidence": [
+        "PublicProfile.test.ts 57",
+        "ProfileView.test.ts 3",
+        "PublicProfileView.test.ts 10"
+      ],
+      "protectionClassification": "NONE",
+      "verdict": "DONE_EVIDENCE_BOUND",
+      "remainingAction": "none",
+      "finalResolution": "normalizePublicProfile separates own vs requested target; admin vs peer fields come from server.",
+      "sourceCommit": "3e62accdd157bed5dc6f2ed974e56e07c7349910",
+      "sourceTree": "3f4a186e46b12aee326c699cd1975ba34e485be7",
+      "evidenceReferences": [
+        "PublicProfile.test.ts",
+        "ordinary-profile-*",
+        "ordinary-public-*"
+      ]
+    },
+    {
+      "id": "S6-R26",
+      "title": "PII and authority come only from server projection",
+      "roadmapSource": "checkpoint section 5 / phase 3",
+      "affectedRoutes": [
+        "/profile",
+        "/users/:id"
+      ],
+      "implementationFiles": [
+        "frontend/src/components/PublicProfile.vue"
+      ],
+      "testsEvidence": [
+        "PublicProfile.test.ts"
+      ],
+      "protectionClassification": "NONE",
+      "verdict": "DONE_EVIDENCE_BOUND",
+      "remainingAction": "none",
+      "finalResolution": "Client does not reconstruct omitted fields.",
+      "sourceCommit": "3e62accdd157bed5dc6f2ed974e56e07c7349910",
+      "sourceTree": "3f4a186e46b12aee326c699cd1975ba34e485be7",
+      "evidenceReferences": [
+        "PublicProfile.test.ts",
+        "historical phase 3"
+      ]
+    },
+    {
+      "id": "S6-R27",
+      "title": "Profile URL is ID-safe",
+      "roadmapSource": "checkpoint phase 3",
+      "affectedRoutes": [
+        "/users/:id",
+        "/profile"
+      ],
+      "implementationFiles": [
+        "frontend/src/views/PublicProfileView.vue",
+        "frontend/src/components/PublicProfile.vue"
+      ],
+      "testsEvidence": [
+        "PublicProfileView.test.ts",
+        "PublicProfile.test.ts"
+      ],
+      "protectionClassification": "NONE",
+      "verdict": "DONE_EVIDENCE_BOUND",
+      "remainingAction": "none",
+      "finalResolution": "Public profile is /users/:id only.",
+      "sourceCommit": "3e62accdd157bed5dc6f2ed974e56e07c7349910",
+      "sourceTree": "3f4a186e46b12aee326c699cd1975ba34e485be7",
+      "evidenceReferences": [
+        "ordinary-public-390 path=/users/18"
+      ]
+    },
+    {
+      "id": "S6-R28",
+      "title": "Legacy query is canonicalized",
+      "roadmapSource": "checkpoint phase 3",
+      "affectedRoutes": [
+        "/users/:id"
+      ],
+      "implementationFiles": [
+        "frontend/src/views/PublicProfileView.vue"
+      ],
+      "testsEvidence": [
+        "PublicProfileView.test.ts"
+      ],
+      "protectionClassification": "NONE",
+      "verdict": "DONE_EVIDENCE_BOUND",
+      "remainingAction": "none",
+      "finalResolution": "Legacy query is stripped before navigation.",
+      "sourceCommit": "3e62accdd157bed5dc6f2ed974e56e07c7349910",
+      "sourceTree": "3f4a186e46b12aee326c699cd1975ba34e485be7",
+      "evidenceReferences": [
+        "PublicProfileView.test.ts 10"
+      ]
+    },
+    {
+      "id": "S6-R29",
+      "title": "Avatar links action cards address edit and settings",
+      "roadmapSource": "phases 16-19",
+      "affectedRoutes": [
+        "/profile",
+        "/users/:id"
+      ],
+      "implementationFiles": [
+        "frontend/src/components/PublicProfile.vue"
+      ],
+      "testsEvidence": [
+        "PublicProfile.test.ts"
+      ],
+      "protectionClassification": "NONE",
+      "verdict": "DONE_EVIDENCE_BOUND",
+      "remainingAction": "none",
+      "finalResolution": "Shared primitives and tokens; address edit and settings keep existing contracts.",
+      "sourceCommit": "3e62accdd157bed5dc6f2ed974e56e07c7349910",
+      "sourceTree": "3f4a186e46b12aee326c699cd1975ba34e485be7",
+      "evidenceReferences": [
+        "PublicProfile.test.ts 57"
+      ]
+    },
+    {
+      "id": "S6-R30",
+      "title": "Messenger entry preserves existing behavior only",
+      "roadmapSource": "roadmap stage 6",
+      "affectedRoutes": [
+        "/profile",
+        "/users/:id"
+      ],
+      "implementationFiles": [
+        "frontend/src/components/PublicProfile.vue"
+      ],
+      "testsEvidence": [
+        "PublicProfile.test.ts"
+      ],
+      "protectionClassification": "NONE entry / FULL messenger interior",
+      "verdict": "DONE_EVIDENCE_BOUND",
+      "remainingAction": "none",
+      "finalResolution": "Chat entry emits existing navigation; messenger interiors were not redesigned.",
+      "sourceCommit": "3e62accdd157bed5dc6f2ed974e56e07c7349910",
+      "sourceTree": "3f4a186e46b12aee326c699cd1975ba34e485be7",
+      "evidenceReferences": [
+        "PublicProfile.test.ts",
+        "protected-chat-390"
+      ]
+    },
+    {
+      "id": "S6-R31",
+      "title": "HelpPopover opt-in stays on NONE profile surfaces",
+      "roadmapSource": "prior profile help commits / Stage 8 boundary",
+      "affectedRoutes": [
+        "/profile",
+        "/users/:id"
+      ],
+      "implementationFiles": [
+        "frontend/src/components/PublicProfile.vue"
+      ],
+      "testsEvidence": [
+        "PublicProfile.test.ts"
+      ],
+      "protectionClassification": "NONE",
+      "verdict": "DONE_EVIDENCE_BOUND",
+      "remainingAction": "none",
+      "finalResolution": "Profile help remains opt-in on NONE surfaces; CreateChannel placement is a separate FULL overlay.",
+      "sourceCommit": "3e62accdd157bed5dc6f2ed974e56e07c7349910",
+      "sourceTree": "3f4a186e46b12aee326c699cd1975ba34e485be7",
+      "evidenceReferences": [
+        "PublicProfile.test.ts",
+        "CreateChannel receipt 72c6077ede453ba7e624e5e01a08b58fa5aad7d41ed8e0410d3d6a99aceab9fa"
+      ]
+    },
+    {
+      "id": "S6-R32",
+      "title": "Identity relation history action separation",
+      "roadmapSource": "roadmap stage 6 profile decomposition",
+      "affectedRoutes": [
+        "/profile",
+        "/users/:id"
+      ],
+      "implementationFiles": [
+        "frontend/src/components/PublicProfile.vue"
+      ],
+      "testsEvidence": [
+        "PublicProfile.test.ts"
+      ],
+      "protectionClassification": "NONE",
+      "verdict": "PASS_NO_PATCH",
+      "remainingAction": "none",
+      "finalResolution": "Semantic sections already exist and are testable. File size alone is not a refactor reason; no maintainability/behavior break found.",
+      "sourceCommit": "3e62accdd157bed5dc6f2ed974e56e07c7349910",
+      "sourceTree": "3f4a186e46b12aee326c699cd1975ba34e485be7",
+      "evidenceReferences": [
+        "PublicProfile.test.ts 57",
+        "audit of PublicProfile.vue sections"
+      ]
+    },
+    {
+      "id": "S6-R33",
+      "title": "AdminMessages non-protected chrome",
+      "roadmapSource": "roadmap stage 6 / deferred ledger",
+      "affectedRoutes": [
+        "/admin/messages"
+      ],
+      "implementationFiles": [
+        "frontend/src/components/AdminMessagesView.vue"
+      ],
+      "testsEvidence": [
+        "AdminMessagesView.test.ts 4",
+        "browser messages 390/1440"
+      ],
+      "protectionClassification": "MIXED",
+      "verdict": "PASS_NO_PATCH",
+      "remainingAction": "none",
+      "finalResolution": "No user-visible non-protected chrome gap. Whole-file hash 5572589b83a8a07776d5b983777a14a91e2104f9577fa76960df5a54562a431a unchanged. Market/messenger interiors stay protected.",
+      "sourceCommit": "3e62accdd157bed5dc6f2ed974e56e07c7349910",
+      "sourceTree": "3f4a186e46b12aee326c699cd1975ba34e485be7",
+      "evidenceReferences": [
+        "AdminMessagesView.test.ts",
+        "super-messages-390",
+        "super-messages-1440"
+      ]
+    },
+    {
+      "id": "S6-R34",
+      "title": "System settings non-protected reset confirmation",
+      "roadmapSource": "roadmap stage 6 / native API inventory",
+      "affectedRoutes": [
+        "/admin/system"
+      ],
+      "implementationFiles": [
+        "frontend/src/components/TradingSettings.vue",
+        "frontend/src/components/TradingSettings.test.ts",
+        "frontend/scripts/lib/stage4-protected-surface-guard.mjs",
+        "frontend/scripts/check-stage4-protected-surfaces.mjs"
+      ],
+      "testsEvidence": [
+        "TradingSettings.test.ts 7",
+        "guard:ui Stage 6 reset-dialog disposition",
+        "browser reset Escape"
+      ],
+      "protectionClassification": "MIXED exact region",
+      "verdict": "DONE_EVIDENCE_BOUND",
+      "remainingAction": "none",
+      "finalResolution": "Footer reset uses AppConfirmDialog. Cancel/Escape send no POST. Failure copy is generic and keeps the dialog. Calendar delete confirm remains protected window.confirm. Stage 4 baseline hash 509dd32235e1cb98aa164940cf7722604f16b6518f7387699554bf3a828ecfaa retained. Current file hash a3718e8beccbdd6eddcbcd72eebd1838fdf4584430f4ed8ba12c5ec95030eea0.",
+      "sourceCommit": "3e62accdd157bed5dc6f2ed974e56e07c7349910",
+      "sourceTree": "3f4a186e46b12aee326c699cd1975ba34e485be7",
+      "evidenceReferences": [
+        "commit 3e62accd",
+        "TradingSettings.test.ts",
+        "super-system-390",
+        "super-system-390-reduced"
+      ]
+    },
+    {
+      "id": "S6-R35",
+      "title": "Dialog and native API inventory",
+      "roadmapSource": "closure instruction B4",
+      "affectedRoutes": [
+        "/admin",
+        "/admin/invitations",
+        "/admin/users",
+        "/admin/users/:id",
+        "/admin/commodities",
+        "/admin/messages",
+        "/admin/system",
+        "/profile",
+        "/users/:id"
+      ],
+      "implementationFiles": [
+        "frontend/src/components/TradingSettings.vue"
+      ],
+      "testsEvidence": [
+        "source scan",
+        "TradingSettings.test.ts"
+      ],
+      "protectionClassification": "in-scope vs protected vs test-only",
+      "verdict": "DONE_EVIDENCE_BOUND",
+      "remainingAction": "none",
+      "finalResolution": "Live in-scope native confirm was only system reset and is replaced. Remaining confirm() is TradingSettings calendar override delete inside trading-settings-market-controls. Chat/Messenger/owner native calls stay out of Stage 6 scope.",
+      "sourceCommit": "3e62accdd157bed5dc6f2ed974e56e07c7349910",
+      "sourceTree": "3f4a186e46b12aee326c699cd1975ba34e485be7",
+      "evidenceReferences": [
+        "source scan confirm(",
+        "TradingSettings.test.ts protected calendar still calls window.confirm"
+      ]
+    },
+    {
+      "id": "S6-P01",
+      "title": "Market protected surface",
+      "roadmapSource": "protected boundary",
+      "affectedRoutes": [
+        "/market"
+      ],
+      "implementationFiles": [
+        "frontend/src/views/MarketView.vue"
+      ],
+      "testsEvidence": [
+        "guard:ui Stage 4 Market runtime",
+        "protected-market-390"
+      ],
+      "protectionClassification": "FULL",
+      "verdict": "PROTECTED_OUT_OF_SCOPE",
+      "remainingAction": "none",
+      "finalResolution": "No unauthorized redesign. Guard aggregate 162e9e618684a24f3db3298eb8ff2c62498b18753cd4e0b6d6b97650d0202058.",
+      "sourceCommit": "3e62accdd157bed5dc6f2ed974e56e07c7349910",
+      "sourceTree": "3f4a186e46b12aee326c699cd1975ba34e485be7",
+      "evidenceReferences": [
+        "guard:ui",
+        "protected-market-390"
+      ]
+    },
+    {
+      "id": "S6-P02",
+      "title": "Messenger chat protected surface",
+      "roadmapSource": "protected boundary",
+      "affectedRoutes": [
+        "/chat"
+      ],
+      "implementationFiles": [
+        "frontend/src/components/ChatView.vue",
+        "frontend/src/views/MessengerView.vue"
+      ],
+      "testsEvidence": [
+        "guard:ui Stage 8 CreateChannel overlay",
+        "protected-chat-390"
+      ],
+      "protectionClassification": "FULL",
+      "verdict": "PROTECTED_OUT_OF_SCOPE",
+      "remainingAction": "none",
+      "finalResolution": "Chat unnamed controls classified protected. Allowed overlay is CreateChannel help placement only.",
+      "sourceCommit": "3e62accdd157bed5dc6f2ed974e56e07c7349910",
+      "sourceTree": "3f4a186e46b12aee326c699cd1975ba34e485be7",
+      "evidenceReferences": [
+        "ChatView sha256 e03ded196c369871f3ecd6763c09535c5a57efc5c0a767d848b2c5a94994273b",
+        "protected-chat-390 unnamed=4 classified"
+      ]
+    },
+    {
+      "id": "S6-P03",
+      "title": "ShareReceive protected surface",
+      "roadmapSource": "protected boundary",
+      "affectedRoutes": [
+        "/share-receive"
+      ],
+      "implementationFiles": [
+        "frontend/src/views/ShareReceiveView.vue"
+      ],
+      "testsEvidence": [
+        "guard:ui",
+        "protected-share-receive-390"
+      ],
+      "protectionClassification": "FULL",
+      "verdict": "PROTECTED_OUT_OF_SCOPE",
+      "remainingAction": "none",
+      "finalResolution": "No Stage 6 redesign.",
+      "sourceCommit": "3e62accdd157bed5dc6f2ed974e56e07c7349910",
+      "sourceTree": "3f4a186e46b12aee326c699cd1975ba34e485be7",
+      "evidenceReferences": [
+        "ShareReceiveView sha256 032955d8c5cf494ba9aad6c266daffd2d81554a46d6fe933f5449a7abb4faf82"
+      ]
+    },
+    {
+      "id": "S6-P04",
+      "title": "AdminChannels protected surface",
+      "roadmapSource": "protected boundary",
+      "affectedRoutes": [
+        "/admin/channels"
+      ],
+      "implementationFiles": [
+        "frontend/src/views/AdminView.vue",
+        "frontend/src/components/CreateChannelView.vue"
+      ],
+      "testsEvidence": [
+        "guard:ui",
+        "protected-admin-channels-390"
+      ],
+      "protectionClassification": "FULL",
+      "verdict": "PROTECTED_OUT_OF_SCOPE",
+      "remainingAction": "none",
+      "finalResolution": "No Stage 6 redesign of channel interiors.",
+      "sourceCommit": "3e62accdd157bed5dc6f2ed974e56e07c7349910",
+      "sourceTree": "3f4a186e46b12aee326c699cd1975ba34e485be7",
+      "evidenceReferences": [
+        "protected-admin-channels-390"
+      ]
+    },
+    {
+      "id": "S6-P05",
+      "title": "Home Market protected interior",
+      "roadmapSource": "protected boundary",
+      "affectedRoutes": [
+        "/"
+      ],
+      "implementationFiles": [
+        "frontend/src/App.vue"
+      ],
+      "testsEvidence": [
+        "guard:ui Stage 3/4 Home market interior"
+      ],
+      "protectionClassification": "MIXED interior",
+      "verdict": "PROTECTED_OUT_OF_SCOPE",
+      "remainingAction": "none",
+      "finalResolution": "Home market region hash f25c01dac38db208517047ffc0f2458e2c89868e988a6d7f68749221db106860 unchanged.",
+      "sourceCommit": "3e62accdd157bed5dc6f2ed974e56e07c7349910",
+      "sourceTree": "3f4a186e46b12aee326c699cd1975ba34e485be7",
+      "evidenceReferences": [
+        "guard:ui"
+      ]
+    },
+    {
+      "id": "S6-P06",
+      "title": "AdminMessages protected interiors",
+      "roadmapSource": "protected boundary",
+      "affectedRoutes": [
+        "/admin/messages"
+      ],
+      "implementationFiles": [
+        "frontend/src/components/AdminMessagesView.vue"
+      ],
+      "testsEvidence": [
+        "guard:ui AdminMessages hash"
+      ],
+      "protectionClassification": "MIXED interiors",
+      "verdict": "PROTECTED_OUT_OF_SCOPE",
+      "remainingAction": "none",
+      "finalResolution": "Whole-file hash unchanged; interiors not redesigned.",
+      "sourceCommit": "3e62accdd157bed5dc6f2ed974e56e07c7349910",
+      "sourceTree": "3f4a186e46b12aee326c699cd1975ba34e485be7",
+      "evidenceReferences": [
+        "AdminMessages 5572589b83a8a07776d5b983777a14a91e2104f9577fa76960df5a54562a431a"
+      ]
+    },
+    {
+      "id": "S6-P07",
+      "title": "TradingSettings market interiors",
+      "roadmapSource": "protected boundary",
+      "affectedRoutes": [
+        "/admin/system"
+      ],
+      "implementationFiles": [
+        "frontend/src/components/TradingSettings.vue"
+      ],
+      "testsEvidence": [
+        "guard:ui Stage 4 baseline retained",
+        "TradingSettings.test.ts calendar confirm"
+      ],
+      "protectionClassification": "MIXED interiors",
+      "verdict": "PROTECTED_OUT_OF_SCOPE",
+      "remainingAction": "none",
+      "finalResolution": "Market calendar confirm and controls remain on Stage 4 baseline. Only footer reset region received Stage 6 disposition.",
+      "sourceCommit": "3e62accdd157bed5dc6f2ed974e56e07c7349910",
+      "sourceTree": "3f4a186e46b12aee326c699cd1975ba34e485be7",
+      "evidenceReferences": [
+        "Stage 4 baseline 509dd32235e1cb98aa164940cf7722604f16b6518f7387699554bf3a828ecfaa"
+      ]
+    },
+    {
+      "id": "S6-P08",
+      "title": "CreateChannel allowed help placement",
+      "roadmapSource": "0d7f2760 baseline / Stage 8 receipt",
+      "affectedRoutes": [
+        "/admin/channels",
+        "/chat"
+      ],
+      "implementationFiles": [
+        "frontend/src/components/CreateChannelView.vue"
+      ],
+      "testsEvidence": [
+        "Stage 8 CreateChannel receipt"
+      ],
+      "protectionClassification": "FULL allowed overlay",
+      "verdict": "PROTECTED_OUT_OF_SCOPE",
+      "remainingAction": "none",
+      "finalResolution": "Placement overlay from 0d7f2760 is preserved and was not widened. Receipt sha256 72c6077ede453ba7e624e5e01a08b58fa5aad7d41ed8e0410d3d6a99aceab9fa. File sha256 2e92310e8c74150f9d94162405b68b4ed7bc36198bdfd3536faaae7b5568149a.",
+      "sourceCommit": "3e62accdd157bed5dc6f2ed974e56e07c7349910",
+      "sourceTree": "3f4a186e46b12aee326c699cd1975ba34e485be7",
+      "evidenceReferences": [
+        "CreateChannel receipt",
+        "guard:ui 7659633875a604e75b925dcd9938ac71f74090b8b077d55ec9d4809107224124"
+      ]
+    }
+  ],
+  "verdictCounts": {
+    "DONE_EVIDENCE_BOUND": 33,
+    "PASS_NO_PATCH": 2,
+    "PROTECTED_OUT_OF_SCOPE": 8
+  }
+}
