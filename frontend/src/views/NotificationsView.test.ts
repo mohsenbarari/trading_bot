@@ -364,6 +364,109 @@ describe('NotificationsView.vue', () => {
     expect(wrapper.get('.notif-item').attributes('type')).toBe('button')
   })
 
+  it('shows a decorative route affordance only for safely routable non-trade notifications', async () => {
+    const store = useNotificationStore()
+    store.appNotifications = [
+      {
+        id: 91,
+        title: 'اعلان قابل‌مشاهده',
+        body: 'بدنه',
+        content: 'بدنه',
+        message: 'بدنه',
+        level: 'info',
+        category: 'system',
+        is_read: false,
+        route: '/market',
+      },
+      {
+        id: 92,
+        title: 'اعلان بدون مسیر امن',
+        body: 'بدنه',
+        content: 'بدنه',
+        message: 'بدنه',
+        level: 'warning',
+        category: 'system',
+        is_read: true,
+        route: '/missing/notification-target',
+      },
+      {
+        id: 93,
+        title: 'اعلان معامله قابل‌مشاهده',
+        body: 'بدنه معامله',
+        content: 'بدنه معامله',
+        message: 'بدنه معامله',
+        level: 'success',
+        category: 'trade',
+        is_read: true,
+        route: '/market',
+      },
+      {
+        id: 94,
+        title: 'اعلان بازیابی‌شده',
+        body: 'بدنه',
+        content: 'بدنه',
+        message: 'بدنه',
+        level: 'warning',
+        category: 'system',
+        is_read: true,
+        route: '/recovery-target',
+      },
+    ]
+    vi.spyOn(store, 'openNotificationCenter').mockResolvedValue()
+    routerResolveMock.mockImplementation((path: string) => {
+      if (path === '/recovery-target') {
+        return {
+          name: 'system-recovery',
+          fullPath: '/system/permission-denied',
+          matched: [{ name: 'system-recovery' }],
+        }
+      }
+      return {
+        name: path.startsWith('/missing') ? 'system-recovery' : 'resolved-notification',
+        fullPath: path,
+        matched: path.startsWith('/missing') ? [] : [{ name: 'resolved-notification' }],
+      }
+    })
+
+    const wrapper = mount(NotificationsView)
+    await flushPromises()
+
+    const source = readFileSync(resolve(process.cwd(), 'src/views/NotificationsView.vue'), 'utf8')
+    const styleSource = source.slice(source.indexOf('<style scoped>'))
+    expect(styleSource).toMatch(/\.notif-route-affordance\s*\{[^}]*flex:\s*0 0 auto\s*;/)
+    expect(styleSource).toMatch(/\.notif-route-affordance\s*\{[^}]*pointer-events:\s*none\s*;/)
+
+    const tradeItem = wrapper.get('.notif-item.category-trade')
+    expect(tradeItem.element.tagName).toBe('BUTTON')
+    expect(tradeItem.attributes('type')).toBe('button')
+    expect(tradeItem.attributes('aria-label')).toBe('باز کردن اعلان اعلان معامله قابل‌مشاهده')
+    expect(tradeItem.find('.notif-route-affordance').exists()).toBe(false)
+
+    await wrapper.find('.notification-category-tabs').findAll('[role="tab"]')[1]!.trigger('click')
+
+    const [eligibleItem, ineligibleItem, recoveryItem] = wrapper.findAll('.notif-item')
+    expect(eligibleItem!.element.tagName).toBe('BUTTON')
+    expect(eligibleItem!.attributes('type')).toBe('button')
+    expect(eligibleItem!.attributes('aria-label')).toBe('باز کردن اعلان اعلان قابل‌مشاهده')
+    expect(eligibleItem!.findAll('.notif-route-affordance')).toHaveLength(1)
+    expect(eligibleItem!.get('.notif-route-affordance').attributes('aria-hidden')).toBe('true')
+    expect(eligibleItem!.get('.notif-main').element.lastElementChild).toBe(
+      eligibleItem!.get('.notif-route-affordance').element,
+    )
+    expect(wrapper.findAll('.notif-route-affordance')).toHaveLength(1)
+
+    await eligibleItem!.trigger('click')
+    expect(routerPushMock).toHaveBeenCalledWith('/market')
+
+    expect(ineligibleItem!.element.tagName).toBe('ARTICLE')
+    expect(ineligibleItem!.attributes('aria-label')).toBeUndefined()
+    expect(ineligibleItem!.find('.notif-route-affordance').exists()).toBe(false)
+
+    expect(recoveryItem!.element.tagName).toBe('ARTICLE')
+    expect(recoveryItem!.attributes('aria-label')).toBeUndefined()
+    expect(recoveryItem!.find('.notif-route-affordance').exists()).toBe(false)
+  })
+
   it('restores the notification center when an auth guard redirects a target to recovery', async () => {
     const store = useNotificationStore()
     store.appNotifications = [

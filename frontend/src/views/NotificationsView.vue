@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { Bell, BellRing, ChevronRight, RefreshCw } from 'lucide-vue-next'
+import { Bell, BellRing, ChevronLeft, ChevronRight, RefreshCw } from 'lucide-vue-next'
 import {
   AppButton,
   AppEmptyState,
@@ -475,6 +475,14 @@ onMounted(async () => {
                   <p v-else class="notif-text">{{ notif.content || notif.body }}</p>
                   <span class="notif-time">{{ formatTime(notif.created_at || notif.client_received_at) }}</span>
                 </div>
+
+                <span
+                  v-if="notif.category !== 'trade' && canOpenNotificationRoute(notif)"
+                  class="notif-route-affordance"
+                  aria-hidden="true"
+                >
+                  <ChevronLeft :size="20" />
+                </span>
               </div>
 
             </component>
@@ -687,6 +695,15 @@ onMounted(async () => {
   flex-direction: column;
   gap: 0.35rem;
   min-width: 0;
+}
+
+.notif-route-affordance {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  color: var(--ds-text-muted);
+  pointer-events: none;
 }
 
 .notif-item.category-trade .notif-body {
