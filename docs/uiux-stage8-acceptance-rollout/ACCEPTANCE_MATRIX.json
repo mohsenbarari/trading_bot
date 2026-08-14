@@ -94,7 +94,8 @@
       "stage8-auth-viewport-containment-execution-receipt",
       "stage8-directory-profile-current-rebaseline-execution-receipt",
       "stage8-roving-workspace-focus-execution-receipt",
-      "stage8-settings-notifications-wrap-execution-receipt"
+      "stage8-settings-notifications-wrap-execution-receipt",
+      "stage8-account-hub-singleton-execution-receipt"
     ]
   },
   "cellAccounting": {
@@ -103,8 +104,8 @@
     "enumeratedExpectedAccessCells": 270,
     "viewportStateInteractionEnvironmentExpansionPerformed": false,
     "executedFullMatrixCellCount": 0,
-    "partialSyntheticBrowserSliceCount": 9,
-    "partialSyntheticBrowserScenarioCellCount": 144,
+    "partialSyntheticBrowserSliceCount": 10,
+    "partialSyntheticBrowserScenarioCellCount": 148,
     "partialSyntheticBrowserCellsCountTowardFullMatrix": false
   },
   "partialSyntheticBrowserSlices": [
@@ -490,6 +491,57 @@
         "The two CDP visual-scale probes do not certify every native-browser zoom implementation.",
         "The notification visual-scale probe used keyboard activation because that scale invalidates pointer hit-testing; the same scoped text and containment assertions passed.",
         "It is a redacted aggregation of three independently source-bound browser reports and creates no aesthetic sign-off, visual freeze, merge, Figma, Sites, staging, or production authority."
+      ]
+    },
+    {
+      "id": "stage8-account-hub-singleton-action-grid",
+      "receiptId": "account-hub-p1-final-independent-656cf6c3",
+      "evidenceRef": "stage8-account-hub-singleton-execution-receipt",
+      "sourceEvidenceRef": "stage8-account-hub-singleton-runtime-and-test",
+      "sourceCommit": "656cf6c3b62111c5c7bae458e3ea6f61fd8af788",
+      "sourceTree": "64909c2671348fb81903f70ecbedd8d73afbd596",
+      "evidenceStatus": "passed-promotable-bounded-local-synthetic-production-browser-evidence",
+      "countsTowardFullMatrixAcceptance": false,
+      "scope": {
+        "environment": "local-synthetic-production-build-browser",
+        "roleContexts": [
+          "normal",
+          "accountant"
+        ],
+        "viewportsCssPx": [
+          {
+            "width": 390,
+            "height": 844
+          },
+          {
+            "width": 1440,
+            "height": 900
+          }
+        ],
+        "executedScenarioCount": 4
+      },
+      "result": {
+        "passedScenarioCount": 4,
+        "failedScenarioCount": 0,
+        "mobileSingletonUsableGridWidthCssPx": 332,
+        "desktopSingletonUsableGridWidthCssPx": 1214,
+        "normalDesktopSecurity": "two equal 601 CSS-pixel tracks",
+        "accountantSecurity": "one full-width singleton track",
+        "telegramPanel": "normal-role Telegram panel remained a sibling outside the action grid",
+        "mobileHorizontalOverflowObserved": false,
+        "dailyNavigationOverlapObserved": false,
+        "keyboardEnterAndClickReachedProfile": true,
+        "unexpectedConsoleDiagnosticCount": 0,
+        "runtimePageErrorCount": 0,
+        "requestFailureCount": 0,
+        "externalNetworkAttemptCount": 0,
+        "observedExpectedLocalSyntheticApiRequests": "56/56",
+        "unknownSyntheticApiCount": 0
+      },
+      "limitations": [
+        "This is a bounded local/synthetic production-build browser receipt, not a complete role-by-route, state, interaction, or environment matrix execution.",
+        "It covers only normal and accountant contexts, two viewports, Account Hub action-grid topology, and the recorded keyboard/click journey.",
+        "It creates no aesthetic sign-off, visual freeze, merge, Sites, staging, or production authority."
       ]
     }
   ],
@@ -1120,6 +1172,36 @@
       "kind": "curated-evidence-only",
       "path": "docs/uiux-stage8-acceptance-rollout/STAGE8_SETTINGS_NOTIFICATIONS_WRAP_EXECUTION_RECEIPT.json",
       "claim": "One bounded redacted aggregation of three source-bound local/synthetic production-build browser reports for account-security and account-notifications long-text containment; it is not full Stage 8 acceptance or release authority."
+    },
+    "stage8-account-hub-singleton-runtime-and-test": {
+      "id": "stage8-account-hub-singleton-runtime-and-test",
+      "kind": "runtime-and-test-source",
+      "sourceSnapshot": {
+        "commit": "656cf6c3b62111c5c7bae458e3ea6f61fd8af788",
+        "tree": "64909c2671348fb81903f70ecbedd8d73afbd596"
+      },
+      "distSnapshot": {
+        "sha256": "e0fbc448b93052b3995c75979bb699668b7d814607bab89c005911e1f3a3857d",
+        "fileCount": 169
+      },
+      "sources": [
+        {
+          "path": "frontend/src/views/AccountHubView.vue",
+          "sha256": "e00cd98a389cde69e08d99530452644ad99b5cb405bbada03d48bc0bef9b7e3e",
+          "claim": "Scopes the full-width singleton grid modifier to Account Hub sections with exactly one action."
+        },
+        {
+          "path": "frontend/src/views/AccountHubView.test.ts",
+          "sha256": "379bc0e32d66d3a9683909da263b21dcf645d7fc6c4f9c3868e1230352e2645e",
+          "claim": "Locks normal and accountant singleton-grid selection while preserving the normal two-action security grid."
+        }
+      ]
+    },
+    "stage8-account-hub-singleton-execution-receipt": {
+      "id": "stage8-account-hub-singleton-execution-receipt",
+      "kind": "curated-evidence-only",
+      "path": "docs/uiux-stage8-acceptance-rollout/STAGE8_ACCOUNT_HUB_SINGLETON_EXECUTION_RECEIPT.json",
+      "claim": "One bounded source-bound local/synthetic production-build browser slice for Account Hub singleton action-grid topology; it is not full Stage 8 acceptance or release authority."
     },
     "stage3-evidence-manifest": {
       "id": "stage3-evidence-manifest",

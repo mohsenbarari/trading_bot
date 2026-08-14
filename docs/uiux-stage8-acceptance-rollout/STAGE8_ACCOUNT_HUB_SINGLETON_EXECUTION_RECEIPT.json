@@ -1,0 +1,100 @@
+{
+  "schemaVersion": 1,
+  "stage": "8A-account-hub-singleton-action-grid",
+  "status": "passed-promotable-bounded-local-synthetic-production-browser-evidence-not-acceptance",
+  "branch": "condidate/webapp-ui-ux-redesign-v2",
+  "reportId": "account-hub-p1-final-independent-656cf6c3",
+  "implementation": {
+    "title": "Account Hub singleton action-grid local-synthetic browser receipt",
+    "sourceSnapshot": {
+      "commit": "656cf6c3b62111c5c7bae458e3ea6f61fd8af788",
+      "tree": "64909c2671348fb81903f70ecbedd8d73afbd596",
+      "sourceHashes": {
+        "frontend/src/views/AccountHubView.vue": "e00cd98a389cde69e08d99530452644ad99b5cb405bbada03d48bc0bef9b7e3e",
+        "frontend/src/views/AccountHubView.test.ts": "379bc0e32d66d3a9683909da263b21dcf645d7fc6c4f9c3868e1230352e2645e"
+      }
+    },
+    "distSnapshot": {
+      "sha256": "e0fbc448b93052b3995c75979bb699668b7d814607bab89c005911e1f3a3857d",
+      "fileCount": 169
+    }
+  },
+  "validation": {
+    "sourceBinding": "The final browser report recorded the same clean product commit, tree, source manifest, and production-build dist snapshot before and after all four cases; this receipt retains the two changed Account Hub source/test hashes.",
+    "browserReportVerdict": "PASS",
+    "browserReportSha256": "91548f93ad7c679a50a0808e72352209de35bf1314a20dd5616bc5bc08881f3b",
+    "fullRegression": {
+      "commit": "656cf6c3b62111c5c7bae458e3ea6f61fd8af788",
+      "tree": "64909c2671348fb81903f70ecbedd8d73afbd596",
+      "unitTestFilesPassed": 155,
+      "unitTestsPassed": 1769,
+      "productionBuild": "passed",
+      "vueTsc": "passed",
+      "protectedUiGuard": "passed"
+    }
+  },
+  "browserReceipt": {
+    "environment": "local-synthetic production-build browser with same-origin fixtures and no external network used",
+    "executedScenarioCount": 4,
+    "passedScenarioCount": 4,
+    "failedScenarioCount": 0,
+    "scenarioAccounting": {
+      "normalContextScenarios": 2,
+      "accountantContextScenarios": 2,
+      "mobile390Scenarios": 2,
+      "desktop1440Scenarios": 2
+    },
+    "coverage": {
+      "roleContexts": [
+        "normal",
+        "accountant"
+      ],
+      "viewportsCssPx": [
+        {
+          "width": 390,
+          "height": 844
+        },
+        {
+          "width": 1440,
+          "height": 900
+        }
+      ],
+      "assertionContract": "Singleton action cards fill their usable section grid; normal desktop security retains exactly two equal tracks; accountant security is a singleton; mobile action grids have no horizontal overflow; the normal Telegram panel remains outside the action grid; the daily navigation does not overlap its action; and profile navigation works through Enter and click."
+    },
+    "result": {
+      "mobileSingletonUsableGridWidthCssPx": 332,
+      "desktopSingletonUsableGridWidthCssPx": 1214,
+      "normalDesktopSecurityTrackCount": 2,
+      "normalDesktopSecurityEqualTrackWidthCssPx": 601,
+      "accountantSecuritySingleton": true,
+      "normalTelegramPanelOutsideActionGrid": true,
+      "mobileHorizontalOverflowObserved": false,
+      "dailyNavigationOverlapObserved": false,
+      "keyboardEnterReachedProfile": true,
+      "clickReachedProfile": true
+    },
+    "diagnostics": {
+      "unexpectedConsoleDiagnosticCount": 0,
+      "runtimePageErrorCount": 0,
+      "requestFailureCount": 0,
+      "externalNetworkAttemptCount": 0,
+      "expectedLocalSyntheticApiRequestCount": 56,
+      "observedLocalSyntheticApiRequestCount": 56,
+      "unknownSyntheticApiCount": 0,
+      "boundary": "These zero counts describe only the four covered local/synthetic scenarios; they do not establish a clean-console or network conclusion beyond this receipt."
+    },
+    "artifactAccounting": {
+      "reportedScreenshotArtifactCount": 4,
+      "rawArtifactsRetainedInRepository": false,
+      "rawArtifactsRetainedOnlyOutsideRepository": true
+    },
+    "limitations": [
+      "This is a bounded local/synthetic production-build browser receipt, not a complete role-by-route, state, interaction, or environment matrix execution.",
+      "It covers only normal and accountant contexts, the two recorded viewports, Account Hub action-grid topology, and the recorded keyboard/click journey.",
+      "No raw screenshot, trace, console log, network log, local path, local URL, fixture payload, or user data is retained in this repository receipt."
+    ]
+  },
+  "countsTowardFullMatrixAcceptance": false,
+  "claimBoundary": "This bounded source-bound local/synthetic Account Hub singleton receipt does not alter prior historical receipts, protected-surface freeze, full Stage 8 acceptance, owner aesthetic sign-off, a visual freeze, merge authority, Sites authority, staging authority, or production authority.",
+  "retention": "Only redacted counts, source revisions, source hashes, dist/report hashes, validation totals, and claim boundaries are retained."
+}

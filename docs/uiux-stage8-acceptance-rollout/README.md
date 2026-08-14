@@ -16,11 +16,12 @@
 - current bounded directory/profile rebaseline source: `601b4005d80ef265afaaa6a06a43b48c44c7ca90` (evidence-only)
 - current bounded workspace roving-focus postcommit source: `d1e8ecd5a524a03c73b67e531edab363479a32b0` (evidence-only)
 - current bounded account long-text wrapping source: `8082d8dd6352154b52e86ca6511e27464e072b13` (evidence-only)
+- current bounded Account Hub singleton action-grid source: `656cf6c3b62111c5c7bae458e3ea6f61fd8af788` (evidence-only)
 - authority: `stage8CompleteAuthority=false`
 - matrix status: `partial-browser-slice-executed-full-acceptance-pending`
 - expected-access coverage: ۳۰ مسیر × ۹ پروفایل دقیق = ۲۷۰ outcome صریح
 - full matrix execution: صفر سلول؛ viewport/state/interaction/environment هنوز فقط requirement هستند
-- partial synthetic evidence: چهار slice 8A، یک slice 8B typography، یک slice مستقل auth-containment با ۱۴ scenario، یک rebaseline مستقل directory/profile با ۴۰ scenario، یک slice postcommit roving-focus با ۸ scenario و یک slice long-text wrapping حساب با ۱۲ scenario ثبت شده‌اند؛ هیچ‌کدام به full matrix افزوده نمی‌شوند
+- partial synthetic evidence: چهار slice 8A، یک slice 8B typography، یک slice مستقل auth-containment با ۱۴ scenario، یک rebaseline مستقل directory/profile با ۴۰ scenario، یک slice postcommit roving-focus با ۸ scenario، یک slice long-text wrapping حساب با ۱۲ scenario و یک slice Account Hub singleton با ۴ scenario ثبت شده‌اند؛ هیچ‌کدام به full matrix افزوده نمی‌شوند
 - owner aesthetic acceptance: انجام نشده
 - merge: انجام نشده
 - production/staging/Sites: انجام نشده
@@ -41,7 +42,7 @@ guard فعلی علاوه بر نقش از `account_status`، `is_customer` و `
 هویت شیء پارامتری، حالت inactive/unavailable و پذیرش بصری باید جداگانه اجرا و evidence-bound
 شوند. هیچ cross-product ساختگی یا ادعای ۵۱٬۹۶۸ سلول در این بسته وجود ندارد.
 
-## شواهد محدود 8A، 8B، auth-containment، directory/profile، roving-focus و long-text-wrap
+## شواهد محدود 8A، 8B، auth-containment، directory/profile، roving-focus، long-text-wrap و Account Hub
 
 [STAGE8A_EXECUTION_RECEIPTS.json](STAGE8A_EXECUTION_RECEIPTS.json) تنها count، hash و
 source-revisionهای redacted چهار اجرای local/synthetic را نگه می‌دارد؛ screenshot، diagnostic،
@@ -113,6 +114,16 @@ synthetic را تأیید کردند. console/page error/request failure/blocked
 aggregation اجرای browser تازه‌ای نیست و فقط این scope محدود را ثبت می‌کند؛ CDP 2× جایگزین همهٔ
 پیاده‌سازی‌های zoom بومی نیست و این slice به full matrix افزوده نمی‌شود.
 
+[STAGE8_ACCOUNT_HUB_SINGLETON_EXECUTION_RECEIPT.json](STAGE8_ACCOUNT_HUB_SINGLETON_EXECUTION_RECEIPT.json)
+یک receipt مستقل local/synthetic production-build و source-bound به `656cf6c3` است: چهار scenario
+normal/accountant در `390×844` و `1440×900` گذشتند. singletonها در موبایل عرض `332` و در desktop
+عرض `1214` CSS pixelِ grid را پر کردند؛ security عادیِ desktop دقیقاً دو track مساوی `601` pixel
+داشت و security حسابدار singleton بود. Telegram فقط برای normal خارج از grid و sibling آن ماند؛
+overflow موبایل و overlap با daily navigation صفر بود و Enter و click هر دو به profile رسیدند.
+console/page error/request failure/external attempt و API ناشناخته صفر و API محلیِ موردانتظار
+`56/56` بود؛ چهار screenshot فقط خارج repository ماندند. این slice فقط همین role، viewport و
+journey محدود را attest می‌کند و به full matrix افزوده نمی‌شود.
+
 مرجع Figma اختیاریِ generic roving-focus، DRAFT زنده/قابل‌ویرایش با section `603:18` و board
 `603:19` است؛ frameهای mobile `390×844` و desktop `1440×900` clip دارند. audit آن ۴۴ text
 Vazirmatn، ۱۶/۱۶ linked instance، zero overflow/crop/overlap، حداقل contrast متن `4.55:1`،
@@ -157,6 +168,7 @@ audit geometry و contrast آن pass و محتوایش عاری از دادهٔ 
 - [STAGE8_DIRECTORY_PROFILE_REBASELINE_EXECUTION_RECEIPT.json](STAGE8_DIRECTORY_PROFILE_REBASELINE_EXECUTION_RECEIPT.json)
 - [STAGE8_ROVING_WORKSPACE_FOCUS_EXECUTION_RECEIPT.json](STAGE8_ROVING_WORKSPACE_FOCUS_EXECUTION_RECEIPT.json)
 - [STAGE8_SETTINGS_NOTIFICATIONS_WRAP_EXECUTION_RECEIPT.json](STAGE8_SETTINGS_NOTIFICATIONS_WRAP_EXECUTION_RECEIPT.json)
+- [STAGE8_ACCOUNT_HUB_SINGLETON_EXECUTION_RECEIPT.json](STAGE8_ACCOUNT_HUB_SINGLETON_EXECUTION_RECEIPT.json)
 - [VISUAL_FREEZE_PROTECTED_SURFACES.json](VISUAL_FREEZE_PROTECTED_SURFACES.json)
 - [ROLLOUT_PLAN.md](ROLLOUT_PLAN.md)
 - [VALIDATION.md](VALIDATION.md)

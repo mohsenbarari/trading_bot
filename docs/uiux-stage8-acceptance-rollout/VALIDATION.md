@@ -110,6 +110,27 @@ browser محدود postcommit را bind می‌کند: `AppFilterChips`، `AppTa
 accountant را در scope دارد. نه global primitive behavior، نه route/access outcomeهای matrix، و
 نه receiptهای تاریخی یا protected freeze را overwrite، promote یا به پذیرش تبدیل نمی‌کند.
 
+## Account long-text wrapping source binding
+
+`8082d8dd6352154b52e86ca6511e27464e072b13` / tree
+`7969b02a8cd49c0abe39dd660a7c01e5203df2ff`، چهار source/test file و dist snapshot اجرای
+browser محدود account security/notifications را bind می‌کند. SHA-256 هر چهار source و dist
+`169` فایلی در [STAGE8_SETTINGS_NOTIFICATIONS_WRAP_EXECUTION_RECEIPT.json](STAGE8_SETTINGS_NOTIFICATIONS_WRAP_EXECUTION_RECEIPT.json)
+ثبت شده است. aggregation redacted سه report source-bound را نگه می‌دارد؛ این binding نه receiptهای
+تاریخی یا freeze را تغییر می‌دهد و نه به پذیرش کامل تبدیل می‌شود.
+
+## Account Hub singleton action-grid source binding
+
+`656cf6c3b62111c5c7bae458e3ea6f61fd8af788` / tree
+`64909c2671348fb81903f70ecbedd8d73afbd596`، `AccountHubView` و test آن را با dist `169` فایلی
+اجرای browser محدود bind می‌کند. SHA-256 هر دو source/test و report digest در
+[STAGE8_ACCOUNT_HUB_SINGLETON_EXECUTION_RECEIPT.json](STAGE8_ACCOUNT_HUB_SINGLETON_EXECUTION_RECEIPT.json)
+ثبت شده است؛ report همان commit/tree و dist را پیش و پس از هر چهار case یکسان و clean ثبت کرد.
+
+این receipt فقط action-grid singleton، مرز Telegram، عدم overlap navigation و journey محدود
+normal/accountant را توصیف می‌کند؛ نه access outcomeهای matrix، نه receiptهای تاریخی، و نه
+protected freeze را overwrite، promote یا به پذیرش تبدیل می‌کند.
+
 ## What is validated by this correction
 
 - JSON schema 3 parse می‌شود.
@@ -117,7 +138,7 @@ accountant را در scope دارد. نه global primitive behavior، نه route
 - ۹ access profile دقیق تعریف شده و هر route برای هر profile یک outcome و `evidenceRefs` دارد.
 - تعداد واقعی outcomeهای موردانتظار ۲۷۰ است.
 - چهار component canonical outcome مدیر میانی به source/test `AdminView` متصل‌اند.
-- `executedFullMatrixCellCount=0` است؛ هشت partial synthetic slice جداگانه ثبت شده‌اند اما
+- `executedFullMatrixCellCount=0` است؛ ده partial synthetic slice جداگانه ثبت شده‌اند اما
   به full matrix یا viewport/state/interaction/environment expansion افزوده نشده‌اند.
 - نقش‌های واقعی از contextهای customer/accountant/owner جدا شده‌اند.
 
@@ -126,7 +147,7 @@ accountant را در scope دارد. نه global primitive behavior، نه route
 ## Focused checks and bounded browser receipts on 2026-08-13
 
 - `jq` parse/invariant check روی `ACCEPTANCE_MATRIX.json`: ۳۰ route، ۹ profile،
-  ۲۷۰ outcome دارای `evidenceRefs` معتبر، چهار component outcome، هشت slice محدود، و صفر full-acceptance cell.
+  ۲۷۰ outcome دارای `evidenceRefs` معتبر، چهار component outcome، ده slice محدود، و صفر full-acceptance cell.
   Evidence: [ACCEPTANCE_MATRIX.json](ACCEPTANCE_MATRIX.json).
 - `npm run test:unit:run -- src/router/index.test.ts src/utils/auth.test.ts`: pass؛
   ۲ فایل و ۴۲ تست. Evidence source:
@@ -209,6 +230,25 @@ synthetic API request موردانتظار دیده شد. source/tree/hash و di
 یکسان و clean بودند؛ هشت screenshot فقط خارج repository نگه‌داری شدند. این receipt فقط scope
 نام‌برده، `End` و دو viewport را attest می‌کند؛ full matrix، همهٔ keyboard pathها، visual freeze
 یا پذیرش نهایی را attest نمی‌کند.
+
+receipt نهم در [STAGE8_SETTINGS_NOTIFICATIONS_WRAP_EXECUTION_RECEIPT.json](STAGE8_SETTINGS_NOTIFICATIONS_WRAP_EXECUTION_RECEIPT.json)
+به source clean `8082d8dd` / tree `7969b02` bind است: aggregation redacted سه report مستقل،
+۱۲/۱۲ scenario account security/notifications را در پنج viewport عادی و دو probe CDP visual-scale
+2 ثبت می‌کند. ۲۸۲ direct-target/ancestor measurement و ۵۴ assertion متن DOM/accessibility گذشت؛
+console/page error/request failure/blocked external و unknown API غیرمنتظره صفر و API محلیِ
+موردانتظار `131/131` بود. دوازده screenshot فقط خارج repository ماندند. این aggregation اجرای
+browser تازه‌ای نیست، CDP 2× همهٔ zoomهای بومی را attest نمی‌کند و به full matrix افزوده نمی‌شود.
+
+receipt دهم در [STAGE8_ACCOUNT_HUB_SINGLETON_EXECUTION_RECEIPT.json](STAGE8_ACCOUNT_HUB_SINGLETON_EXECUTION_RECEIPT.json)
+به source clean `656cf6c3` / tree `64909c` bind است: چهار scenario normal/accountant در
+`390×844` و `1440×900` همگی pass شدند. singleton gridها `332` CSS pixel در mobile و `1214` در
+desktop را پر کردند؛ security عادی desktop دقیقاً دو track مساوی `601` pixel داشت و security
+حسابدار singleton بود. Telegram normal خارج از grid و sibling آن ماند، overflow موبایل و overlap
+با daily navigation صفر بود و Enter/click هر دو به profile رسیدند. console/page error/request
+failure/external attempt و unknown API صفر و API محلیِ موردانتظار `56/56` بود؛ چهار screenshot
+فقط خارج repository ماندند. full regression همان source `155 files / 1769 tests`، build،
+`vue-tsc` و `guard:ui` را pass ثبت کرده است. این receipt فقط چهار case نام‌برده را attest می‌کند
+و full matrix، visual freeze یا پذیرش نهایی نیست.
 
 مرجع Figma اختیاریِ generic roving-focus برای همین receipt، section `603:18`، board `603:19`،
 scope `604:22` و frameهای mobile `606:18` (`390×844`) و desktop `606:19` (`1440×900`) است.
