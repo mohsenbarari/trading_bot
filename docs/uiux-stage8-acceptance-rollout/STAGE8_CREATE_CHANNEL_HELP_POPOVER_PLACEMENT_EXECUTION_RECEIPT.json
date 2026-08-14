@@ -1,0 +1,190 @@
+{
+  "schemaVersion": 1,
+  "stage": "8-create-channel-help-popover-placement",
+  "status": "passed-promotable-bounded-local-synthetic-production-browser-evidence-not-acceptance",
+  "branch": "condidate/webapp-ui-ux-redesign-v2",
+  "reportId": "postcommit-revalidation-20260814073517753",
+  "implementation": {
+    "title": "CreateChannel help-popover local containing-block placement",
+    "sourceSnapshot": {
+      "commit": "0d7f276006deb7f97d20ba07e6f9ecb4d1b48a79",
+      "tree": "8ba2636354f638910198327d84a2d74fe2f21b06",
+      "parent": "7107246059b41e5a88fa14b41d04da7e5baa3eb7",
+      "changedSourceHashes": {
+        "frontend/src/components/CreateChannelView.vue": "2e92310e8c74150f9d94162405b68b4ed7bc36198bdfd3536faaae7b5568149a",
+        "frontend/src/components/CreateChannelView.test.ts": "40cc1a55f47fc649327c333f8246095283bba2007b3eebf10354d1a28495ed93",
+        "frontend/scripts/lib/stage4-protected-surface-guard.mjs": "04b7f20edf88bb08a70470b4c5bc599d3a04f6dc98ef8e55ff092fcd29e4e1e7",
+        "frontend/scripts/stage4-protected-surface-guard.test.mjs": "ae71a53dce472d75f613e5eedb356b02e0388135633df084d654cbf0aa6ec70b",
+        "frontend/scripts/check-stage4-protected-surfaces.mjs": "4a63d1213bbd2588dbafc820ad3b2d914c43eff0420826588f01ae1cc841475b"
+      },
+      "unchangedProtectedContextHashes": {
+        "frontend/src/components/HelpPopover.vue": "23185ffaed12f35876dd056264bb37481a13059ef33b2ea0d0552ff7cd36544b",
+        "frontend/src/components/ChatView.vue": "e03ded196c369871f3ecd6763c09535c5a57efc5c0a767d848b2c5a94994273b",
+        "frontend/src/views/AdminView.vue": "b69c3b6c1d34788449f40c1394dbc8981f63597044ad37c24268d76f5f385c0a",
+        "frontend/src/components/ui/AppSectionCard.vue": "198f1142eb403a620329a65bda145ebebc2577a6156783a068398ea56694f9fb",
+        "frontend/src/assets/main.css": "a0188ce01a74150799cae2b5d4696391586892bc8ddd8eccc76aff6918634111"
+      }
+    },
+    "distSnapshot": {
+      "sha256": "95c160aee9722926dd0fa9a1129ae2309b1c73bb0a5b26163261552626013d3e",
+      "fileCount": 169
+    },
+    "guardDisposition": {
+      "kind": "stage8-createchannel-helppopover-placement",
+      "stage4AndStage6": "Stage 4 and Stage 6 baselines were not weakened or rewritten.",
+      "stage8Scope": "Stage 8 only dispositions the allowed CreateChannel placement change.",
+      "stage4Baseline": {
+        "files": 85,
+        "bytes": 1312405,
+        "aggregate": "f66debf9809180d97b2bac98f5195ba24200d3b61b0d8e0e5cd423a8a7b97248"
+      },
+      "stage8Disposition": {
+        "files": 85,
+        "bytes": 1311122,
+        "aggregate": "7659633875a604e75b925dcd9938ac71f74090b8b077d55ec9d4809107224124"
+      }
+    },
+    "productChange": {
+      "runtimeSelector": ".manager-section-card.card-with-help",
+      "contract": {
+        "position": "relative",
+        "paddingLeft": "4rem retained"
+      },
+      "notAdded": [
+        "overflow: visible",
+        "z-index",
+        "transform",
+        "isolation",
+        "shared/global CSS override",
+        "shared HelpPopover change",
+        "default 32x32 target change"
+      ]
+    }
+  },
+  "validation": {
+    "preCommitFrozenCandidateFullRegression": {
+      "binding": "Frozen against the same changed-source hashes before the product commit. This is not a post-commit full-suite re-run.",
+      "unitTestFilesPassed": 156,
+      "unitTestsPassed": 1779,
+      "unitTestFailures": 0,
+      "productionBuild": "passed",
+      "vueTsc": "passed",
+      "protectedUiGuard": "passed",
+      "diffCheck": "passed"
+    },
+    "postCommitFocusedValidation": {
+      "commit": "0d7f276006deb7f97d20ba07e6f9ecb4d1b48a79",
+      "tree": "8ba2636354f638910198327d84a2d74fe2f21b06",
+      "createChannelViewTests": "9/9",
+      "helpPopoverTests": "4/4",
+      "protectedSurfaceGuardTests": "18/18",
+      "protectedUiGuard": "passed",
+      "vueTsc": "passed",
+      "diffCheck": "passed",
+      "browserReportVerdict": "PASS",
+      "fullSuiteExecutedAsPostCommit": false
+    }
+  },
+  "browserReceipt": {
+    "environment": "bounded local/synthetic production-build browser with same-origin fixtures",
+    "reportId": "postcommit-revalidation-20260814073517753",
+    "reportSha256": "de297caaf526225cf9fe6bb99a6dc2956140203d258cd54b70ebfbaab4fa97dc",
+    "harnessSha256": "4df123dfa945254df023d1a463ff0b3973284b532106b262107cef1b3c01fdc0",
+    "distSnapshot": {
+      "sha256": "95c160aee9722926dd0fa9a1129ae2309b1c73bb0a5b26163261552626013d3e",
+      "fileCount": 169
+    },
+    "executedScenarioCount": 12,
+    "passedScenarioCount": 12,
+    "failedScenarioCount": 0,
+    "assertionCount": "228/228",
+    "screenshots": {
+      "count": 12,
+      "retention": "external-only"
+    },
+    "countsTowardFullMatrixAcceptance": false,
+    "postCommitScenarioMatrix": [
+      "admin-home-390",
+      "admin-home-1440",
+      "admin-home-390-cdp2x",
+      "admin-create-390",
+      "admin-create-1440",
+      "admin-create-390-reduced",
+      "chat-home-390",
+      "chat-home-1440",
+      "chat-home-390-cdp2x",
+      "chat-create-390",
+      "chat-create-1440",
+      "chat-create-390-reduced"
+    ],
+    "coverage": {
+      "routes": [
+        "/admin/channels",
+        "/chat channel-manager overlay"
+      ],
+      "states": [
+        "home",
+        "create"
+      ],
+      "viewportsCssPx": [
+        {
+          "width": 390,
+          "height": 844
+        },
+        {
+          "width": 1440,
+          "height": 900
+        }
+      ],
+      "cdpScale2xRecordedHomeCases": 2,
+      "reducedMotionRecordedCreateCases": 2
+    },
+    "result": {
+      "containingBlock": "the local manager-section-card.card-with-help card",
+      "triggerRemainedBesideSameCardTitle": true,
+      "measuredInsetPx": 17,
+      "insetTolerancePx": 6,
+      "noteInsideCardSheetAndViewportAndComplete": true,
+      "noteScrollHeightEqualsClientHeight": true,
+      "sevenPointHitTestPassed": true,
+      "triggerSizeCssPx": {
+        "width": 32,
+        "height": 32
+      },
+      "comfortableTarget": false,
+      "rtlPassed": true,
+      "tabEnterPassed": true,
+      "focusVisiblePassed": true,
+      "unnamedControlCount": 0,
+      "nestedControlCount": 0,
+      "newFocusTrapCount": 0,
+      "horizontalOverflowCount": 0,
+      "uiSectionCardOverflowHiddenDidNotClip": true,
+      "adminChannelsRouteScroll": "card, trigger, and note each moved 80px with the route scroller",
+      "chatOverlayScroll": "the note stayed inside the sheet; background route scroll did not separate it"
+    },
+    "diagnostics": {
+      "unexpectedConsoleDiagnosticCount": 0,
+      "runtimePageErrorCount": 0,
+      "requestFailureCount": 0,
+      "unknownSyntheticApiCount": 0,
+      "externalRequestCount": 0,
+      "staticServerErrorCount": 0,
+      "productPostPutPatchDeleteCount": 0,
+      "expectedLocalSyntheticApiRequestCount": 132,
+      "observedLocalSyntheticApiRequestCount": 132,
+      "boundary": "These zero counts describe only the twelve covered local/synthetic scenarios; they do not establish a clean-console or network conclusion beyond this receipt."
+    },
+    "limitations": [
+      "This is a bounded local/synthetic production-build browser receipt, not a complete role-by-route, state, interaction, or environment matrix execution.",
+      "It attests only the corrected help-popover placement on the two recorded FULL surfaces.",
+      "It is not a visual freeze or owner aesthetic sign-off.",
+      "It is not merge, staging, production, or Sites authority.",
+      "It does not authorize protected-surface change beyond the exact Stage 8 CreateChannel placement disposition.",
+      "No raw browser artifact, local execution location, URL, fixture payload, or user data is retained in this repository receipt."
+    ]
+  },
+  "countsTowardFullMatrixAcceptance": false,
+  "claimBoundary": "This evidence attests only the corrected CreateChannel help-popover placement on the two recorded FULL surfaces. It is not full role×route/state/interaction/environment acceptance, not a visual freeze, not owner aesthetic sign-off, and not merge, staging, production, or Sites authority. It does not authorize protected-surface change beyond the exact Stage 8 CreateChannel placement disposition. Prior historical receipts and the protected-surface freeze remain unchanged.",
+  "retention": "Only redacted counts, source revisions, source hashes, dist/report/harness hashes, validation totals, and claim boundaries are retained. No local path, URL, fixture payload, trace, or raw screenshot is retained."
+}

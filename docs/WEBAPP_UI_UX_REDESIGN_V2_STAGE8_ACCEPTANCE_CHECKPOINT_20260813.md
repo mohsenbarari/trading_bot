@@ -41,6 +41,9 @@ source محدود Account Hub singleton action-grid: `656cf6c3b62111c5c7bae458e3
 source محدود notification route-affordance: `95ef7aa768f833c8e8b954d38b36674a77a304a9`
 (evidence-only؛ بدون افزایش full matrix)
 
+source محدود CreateChannel help-popover placement: `0d7f276006deb7f97d20ba07e6f9ecb4d1b48a79`
+(evidence-only؛ بدون افزایش full matrix)
+
 ## ۱. مجوز و حد آن
 
 دستور مالک برای ادامهٔ Stage 8، یکپارچگی و زیباسازی UI/UX با کنترل ایمنی، و ثبت رهگیری
@@ -143,6 +146,15 @@ artifact ثبت نشده و این slice evidence-only است.
   pointer فقط برای اعلان امن journey ثبت‌شده را کامل کردند و click روی articleهای غیرقابل‌مسیر
   navigation نداشت. console/page error/request failure/external attempt و unknown API صفر و API
   محلیِ موردانتظار `162/162` بود. این slice evidence-only است و full matrix یا پذیرش نهایی نیست.
+- receipt CreateChannel help-popover placement در source `0d7f2760`: دوازده scenario
+  local/synthetic روی `/admin/channels` و overlay کانال `/chat` در home/create، `390×844`،
+  `1440×900`، CDP 2× و reduced-motion همگی pass شدند (۱۲/۱۲، ۲۲۸/۲۲۸). containing-block همان
+  کارت محلی بود، trigger کنار عنوان همان کارت و دقیقاً `32×32` ماند، و note کامل داخل
+  card/sheet/viewport بود. clipping قبلی مثبت کاذب بود؛ defect واقعی placement با patch محلی و
+  guardشده رفع شد و هیچ shared/global overflow workaround استفاده نشد. در `/admin/channels`
+  کارت، trigger و note با scroll مسیر حرکت کردند؛ در `/chat` note داخل sheet ماند.
+  console/page error/request failure/external attempt و unknown API صفر و API محلیِ موردانتظار
+  `132/132` بود. این slice evidence-only است و full matrix یا پذیرش نهایی نیست.
 - Figma اختیاری generic roving-focus: section `603:18`، board `603:19`، scope `604:22`، mobile
   `606:18` (`390×844`) و desktop `606:19` (`1440×900`) یک DRAFT زنده/قابل‌ویرایش با محتوای
   synthetic است. audit: ۴۴ text Vazirmatn، ۱۶/۱۶ instance متصل، semantic styles/variables reused،
@@ -170,7 +182,7 @@ artifact ثبت نشده و این slice evidence-only است.
   `4.55:1` است. board عمداً generic و بدون provenance داخلی، route/hash/test/harness/local-path/
   URL/token/deploy/Sites است؛ نه freeze، نه final acceptance و نه evidence runtime/browser است.
 
-این یازده slice محدود و مرجع‌های طراحیِ پیشین، فقط evidence local/synthetic یا live/editable هستند؛ freeze، runtime
+این دوازده slice محدود / ۱۶۳ scenario و مرجع‌های طراحیِ پیشین، فقط evidence local/synthetic یا live/editable هستند؛ freeze، runtime
 accessibility acceptance، sign-off زیبایی مالک، یا release authority نیستند. receipt/reference مبتنی
 بر `4415b743` فقط historical هستند و ادعایی دربارهٔ working tree جاری ندارند. artifact خام browser
 در repository ذخیره نشده و هیچ Sites action انجام نشده است.
@@ -199,7 +211,7 @@ Sites و production در این Stage شروع نشده‌اند.
 ## ۶. گیت بعدی (فنی و بصری)
 
 - ۲۷۰ نتیجهٔ موردانتظار مسیر×پروفایل به source متصل است؛
-- canonicalization مدیر میانی و یازده slice محدود source-bound ثبت شده‌اند، اما full matrix همچنان صفر است؛
+- canonicalization مدیر میانی و دوازده slice محدود source-bound ثبت شده‌اند، اما full matrix همچنان صفر است؛
 - protected-surface hashهای تاریخی overwrite نشده‌اند؛
 - اجرای واقعی viewport/state/interaction/environment و sign-off زیبایی مالک هنوز pending است؛
 - عرضه فقط به‌صورت مدل تیمی و rollback-safe توصیف شده و شروع نشده است؛

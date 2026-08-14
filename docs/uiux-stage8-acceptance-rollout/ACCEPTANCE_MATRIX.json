@@ -96,7 +96,8 @@
       "stage8-roving-workspace-focus-execution-receipt",
       "stage8-settings-notifications-wrap-execution-receipt",
       "stage8-account-hub-singleton-execution-receipt",
-      "stage8-notification-route-affordance-execution-receipt"
+      "stage8-notification-route-affordance-execution-receipt",
+      "stage8-create-channel-help-popover-placement-execution-receipt"
     ]
   },
   "cellAccounting": {
@@ -105,8 +106,8 @@
     "enumeratedExpectedAccessCells": 270,
     "viewportStateInteractionEnvironmentExpansionPerformed": false,
     "executedFullMatrixCellCount": 0,
-    "partialSyntheticBrowserSliceCount": 11,
-    "partialSyntheticBrowserScenarioCellCount": 151,
+    "partialSyntheticBrowserSliceCount": 12,
+    "partialSyntheticBrowserScenarioCellCount": 163,
     "partialSyntheticBrowserCellsCountTowardFullMatrix": false
   },
   "partialSyntheticBrowserSlices": [
@@ -596,6 +597,74 @@
       "limitations": [
         "This is a bounded local/synthetic production-build browser receipt, not a complete role-by-route, state, interaction, or environment matrix execution.",
         "It covers only the recorded notification states, three viewports, and the recorded keyboard/pointer journeys.",
+        "It creates no aesthetic sign-off, visual freeze, merge, Sites, staging, or production authority."
+      ]
+    },
+    {
+      "id": "stage8-create-channel-help-popover-placement",
+      "receiptId": "postcommit-revalidation-20260814073517753",
+      "evidenceRef": "stage8-create-channel-help-popover-placement-execution-receipt",
+      "sourceEvidenceRef": "stage8-create-channel-help-popover-placement-runtime-and-guard",
+      "sourceCommit": "0d7f276006deb7f97d20ba07e6f9ecb4d1b48a79",
+      "sourceTree": "8ba2636354f638910198327d84a2d74fe2f21b06",
+      "evidenceStatus": "passed-promotable-bounded-local-synthetic-production-browser-evidence",
+      "executedScenarioCount": 12,
+      "passed": 12,
+      "failed": 0,
+      "countsTowardFullMatrixAcceptance": false,
+      "scope": {
+        "environment": "bounded-local-synthetic-production-build-browser",
+        "routes": [
+          "/admin/channels",
+          "/chat channel-manager overlay"
+        ],
+        "states": [
+          "home",
+          "create"
+        ],
+        "viewportsCssPx": [
+          {
+            "width": 390,
+            "height": 844
+          },
+          {
+            "width": 1440,
+            "height": 900
+          }
+        ],
+        "cdpScale": "2x on recorded 390 home cases",
+        "reducedMotion": "recorded 390 create cases",
+        "interactions": [
+          "keyboard",
+          "focus",
+          "scroll",
+          "hit-test",
+          "containment"
+        ],
+        "executedScenarioCount": 12
+      },
+      "result": {
+        "passedScenarioCount": 12,
+        "failedScenarioCount": 0,
+        "containingBlock": "local manager-section-card.card-with-help",
+        "measuredInsetPx": 17,
+        "insetTolerancePx": 6,
+        "triggerSizeCssPx": "32x32",
+        "comfortableTarget": false,
+        "noteCompleteAndUnclipped": true,
+        "adminRouteScrollDeltaPx": -80,
+        "chatNoteRemainedInsideSheet": true,
+        "unexpectedConsoleDiagnosticCount": 0,
+        "runtimePageErrorCount": 0,
+        "requestFailureCount": 0,
+        "externalRequestCount": 0,
+        "unknownSyntheticApiCount": 0,
+        "productPostPutPatchDeleteCount": 0,
+        "observedExpectedLocalSyntheticApiRequests": "132/132"
+      },
+      "limitations": [
+        "This is a bounded local/synthetic production-build browser receipt, not a complete role-by-route, state, interaction, or environment matrix execution.",
+        "It attests only the corrected help-popover placement on the two recorded FULL surfaces.",
         "It creates no aesthetic sign-off, visual freeze, merge, Sites, staging, or production authority."
       ]
     }
@@ -1287,6 +1356,51 @@
       "kind": "curated-evidence-only",
       "path": "docs/uiux-stage8-acceptance-rollout/STAGE8_NOTIFICATION_ROUTE_AFFORDANCE_EXECUTION_RECEIPT.json",
       "claim": "One bounded source-bound local/synthetic production-build browser slice for notification route affordance boundaries; it is not full Stage 8 acceptance or release authority."
+    },
+    "stage8-create-channel-help-popover-placement-runtime-and-guard": {
+      "id": "stage8-create-channel-help-popover-placement-runtime-and-guard",
+      "kind": "runtime-and-guard-source",
+      "sourceSnapshot": {
+        "commit": "0d7f276006deb7f97d20ba07e6f9ecb4d1b48a79",
+        "tree": "8ba2636354f638910198327d84a2d74fe2f21b06"
+      },
+      "distSnapshot": {
+        "sha256": "95c160aee9722926dd0fa9a1129ae2309b1c73bb0a5b26163261552626013d3e",
+        "fileCount": 169
+      },
+      "sources": [
+        {
+          "path": "frontend/src/components/CreateChannelView.vue",
+          "sha256": "2e92310e8c74150f9d94162405b68b4ed7bc36198bdfd3536faaae7b5568149a",
+          "claim": "Adds a local containing block on .manager-section-card.card-with-help while retaining padding-left: 4rem."
+        },
+        {
+          "path": "frontend/src/components/CreateChannelView.test.ts",
+          "sha256": "40cc1a55f47fc649327c333f8246095283bba2007b3eebf10354d1a28495ed93",
+          "claim": "Locks the local CreateChannel help-popover placement contract."
+        },
+        {
+          "path": "frontend/scripts/lib/stage4-protected-surface-guard.mjs",
+          "sha256": "04b7f20edf88bb08a70470b4c5bc599d3a04f6dc98ef8e55ff092fcd29e4e1e7",
+          "claim": "Dispositions only the allowed Stage 8 CreateChannel placement change."
+        },
+        {
+          "path": "frontend/scripts/stage4-protected-surface-guard.test.mjs",
+          "sha256": "ae71a53dce472d75f613e5eedb356b02e0388135633df084d654cbf0aa6ec70b",
+          "claim": "Locks the Stage 8 CreateChannel placement disposition without rewriting Stage 4 or Stage 6."
+        },
+        {
+          "path": "frontend/scripts/check-stage4-protected-surfaces.mjs",
+          "sha256": "4a63d1213bbd2588dbafc820ad3b2d914c43eff0420826588f01ae1cc841475b",
+          "claim": "Keeps the protected-surface checker aligned with the Stage 8 placement disposition."
+        }
+      ]
+    },
+    "stage8-create-channel-help-popover-placement-execution-receipt": {
+      "id": "stage8-create-channel-help-popover-placement-execution-receipt",
+      "kind": "curated-evidence-only",
+      "path": "docs/uiux-stage8-acceptance-rollout/STAGE8_CREATE_CHANNEL_HELP_POPOVER_PLACEMENT_EXECUTION_RECEIPT.json",
+      "claim": "One bounded source-bound local/synthetic production-build browser slice for corrected CreateChannel help-popover placement on two FULL surfaces; it is not full Stage 8 acceptance or release authority."
     },
     "stage3-evidence-manifest": {
       "id": "stage3-evidence-manifest",

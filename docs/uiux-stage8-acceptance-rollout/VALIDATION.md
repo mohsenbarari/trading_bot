@@ -144,6 +144,19 @@ protected freeze را overwrite، promote یا به پذیرش تبدیل می�
 outcomeهای matrix، نه receiptهای تاریخی، و نه protected freeze را overwrite، promote یا به پذیرش
 تبدیل می‌کند.
 
+## CreateChannel help-popover placement source binding
+
+`0d7f276006deb7f97d20ba07e6f9ecb4d1b48a79` / tree
+`8ba2636354f638910198327d84a2d74fe2f21b06`، `CreateChannelView` و guard disposition مجاز را با
+dist `169` فایلی اجرای browser محدود bind می‌کند. SHA-256 پنج source/test/guard و report digest در
+[STAGE8_CREATE_CHANNEL_HELP_POPOVER_PLACEMENT_EXECUTION_RECEIPT.json](STAGE8_CREATE_CHANNEL_HELP_POPOVER_PLACEMENT_EXECUTION_RECEIPT.json)
+ثبت شده است.
+
+این receipt فقط جای‌گذاری اصلاح‌شدهٔ help روی دو سطح FULL، containing-block محلی، target
+`32×32` و رفتار scroll ثبت‌شده را توصیف می‌کند؛ clipping قبلی مثبت کاذب بود و هیچ
+shared/global overflow workaround استفاده نشد. نه access outcomeهای matrix، نه receiptهای
+تاریخی، و نه protected freeze را overwrite، promote یا به پذیرش تبدیل می‌کند.
+
 ## What is validated by this correction
 
 - JSON schema 3 parse می‌شود.
@@ -151,7 +164,7 @@ outcomeهای matrix، نه receiptهای تاریخی، و نه protected freez
 - ۹ access profile دقیق تعریف شده و هر route برای هر profile یک outcome و `evidenceRefs` دارد.
 - تعداد واقعی outcomeهای موردانتظار ۲۷۰ است.
 - چهار component canonical outcome مدیر میانی به source/test `AdminView` متصل‌اند.
-- `executedFullMatrixCellCount=0` است؛ یازده partial synthetic slice جداگانه ثبت شده‌اند اما
+- `executedFullMatrixCellCount=0` است؛ دوازده partial synthetic slice جداگانه ثبت شده‌اند اما
   به full matrix یا viewport/state/interaction/environment expansion افزوده نشده‌اند.
 - نقش‌های واقعی از contextهای customer/accountant/owner جدا شده‌اند.
 
@@ -160,7 +173,7 @@ outcomeهای matrix، نه receiptهای تاریخی، و نه protected freez
 ## Focused checks and bounded browser receipts through 2026-08-14
 
 - `jq` parse/invariant check روی `ACCEPTANCE_MATRIX.json`: ۳۰ route، ۹ profile،
-  ۲۷۰ outcome دارای `evidenceRefs` معتبر، چهار component outcome، یازده slice محدود، و صفر full-acceptance cell.
+  ۲۷۰ outcome دارای `evidenceRefs` معتبر، چهار component outcome، دوازده slice محدود / ۱۶۳ scenario، و صفر full-acceptance cell.
   Evidence: [ACCEPTANCE_MATRIX.json](ACCEPTANCE_MATRIX.json).
 - `npm run test:unit:run -- src/router/index.test.ts src/utils/auth.test.ts`: pass؛
   ۲ فایل و ۴۲ تست. Evidence source:
@@ -274,7 +287,20 @@ full regression همان source `155 files / 1770 tests`، build، `vue-tsc` و 
 کرده است. این receipt فقط سه case نام‌برده را attest می‌کند و full matrix، visual freeze یا
 پذیرش نهایی نیست.
 
-مرجع Figma اختیاریِ generic roving-focus برای همین receipt، section `603:18`، board `603:19`،
+receipt دوازدهم در [STAGE8_CREATE_CHANNEL_HELP_POPOVER_PLACEMENT_EXECUTION_RECEIPT.json](STAGE8_CREATE_CHANNEL_HELP_POPOVER_PLACEMENT_EXECUTION_RECEIPT.json)
+به source `0d7f2760` / tree `8ba26363` bind است: دوازده scenario روی `/admin/channels` و
+overlay کانال `/chat` در home/create، `390×844`، `1440×900`، CDP 2× و reduced-motion همگی
+pass شدند (۱۲/۱۲، ۲۲۸/۲۲۸). containing-block همان کارت محلی بود، trigger کنار عنوان همان کارت
+و دقیقاً `32×32` ماند، و note کامل داخل card/sheet/viewport بود. clipping قبلی مثبت کاذب بود؛
+defect واقعی placement با patch محلی و guardشده رفع شد و هیچ shared/global overflow
+workaround استفاده نشد. در `/admin/channels` کارت، trigger و note با scroll مسیر حرکت کردند؛
+در `/chat` note داخل sheet ماند. console/page error/request failure/external attempt و unknown
+API صفر و API محلیِ موردانتظار `132/132` بود. validation پس از commit فقط CreateChannel
+`9/9`، HelpPopover `4/4`، protected guard `18/18`، `guard:ui`، `vue-tsc` و browser PASS را
+ثبت می‌کند و full suite را به‌عنوان اجرای post-commit معرفی نمی‌کند. این receipt فقط دو سطح
+FULL نام‌برده را attest می‌کند و full matrix، visual freeze یا پذیرش نهایی نیست.
+
+مرجع Figma اختیاریِ generic roving-focus برای receipt مستقل roving-focus، section `603:18`، board `603:19`،
 scope `604:22` و frameهای mobile `606:18` (`390×844`) و desktop `606:19` (`1440×900`) است.
 DRAFT زنده/قابل‌ویرایش، ۴۴ text Vazirmatn، ۱۶/۱۶ instance متصل، semantic style/variable reuse،
 zero overflow/crop/overlap، contrast متن `4.55:1`، focus indicator `4.23:1` و privacy scan zero

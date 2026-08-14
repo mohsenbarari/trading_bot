@@ -18,11 +18,12 @@
 - current bounded account long-text wrapping source: `8082d8dd6352154b52e86ca6511e27464e072b13` (evidence-only)
 - current bounded Account Hub singleton action-grid source: `656cf6c3b62111c5c7bae458e3ea6f61fd8af788` (evidence-only)
 - current bounded notification route-affordance source: `95ef7aa768f833c8e8b954d38b36674a77a304a9` (evidence-only)
+- current bounded CreateChannel help-popover placement source: `0d7f276006deb7f97d20ba07e6f9ecb4d1b48a79` (evidence-only)
 - authority: `stage8CompleteAuthority=false`
 - matrix status: `partial-browser-slice-executed-full-acceptance-pending`
 - expected-access coverage: ۳۰ مسیر × ۹ پروفایل دقیق = ۲۷۰ outcome صریح
 - full matrix execution: صفر سلول؛ viewport/state/interaction/environment هنوز فقط requirement هستند
-- partial synthetic evidence: چهار slice 8A، یک slice 8B typography، یک slice مستقل auth-containment با ۱۴ scenario، یک rebaseline مستقل directory/profile با ۴۰ scenario، یک slice postcommit roving-focus با ۸ scenario، یک slice long-text wrapping حساب با ۱۲ scenario، یک slice Account Hub singleton با ۴ scenario و یک slice notification route-affordance با ۳ scenario ثبت شده‌اند؛ هیچ‌کدام به full matrix افزوده نمی‌شوند
+- partial synthetic evidence: دوازده partial slice / ۱۶۳ partial scenario؛ چهار slice 8A، یک slice 8B typography، یک slice مستقل auth-containment با ۱۴ scenario، یک rebaseline مستقل directory/profile با ۴۰ scenario، یک slice postcommit roving-focus با ۸ scenario، یک slice long-text wrapping حساب با ۱۲ scenario، یک slice Account Hub singleton با ۴ scenario، یک slice notification route-affordance با ۳ scenario و یک slice CreateChannel help-popover placement با ۱۲ scenario ثبت شده‌اند؛ هیچ‌کدام به full matrix افزوده نمی‌شوند
 - owner aesthetic acceptance: انجام نشده
 - merge: انجام نشده
 - production/staging/Sites: انجام نشده
@@ -43,7 +44,7 @@ guard فعلی علاوه بر نقش از `account_status`، `is_customer` و `
 هویت شیء پارامتری، حالت inactive/unavailable و پذیرش بصری باید جداگانه اجرا و evidence-bound
 شوند. هیچ cross-product ساختگی یا ادعای ۵۱٬۹۶۸ سلول در این بسته وجود ندارد.
 
-## شواهد محدود 8A، 8B، auth-containment، directory/profile، roving-focus، long-text-wrap، Account Hub و notification route-affordance
+## شواهد محدود 8A، 8B، auth-containment، directory/profile، roving-focus، long-text-wrap، Account Hub، notification route-affordance و CreateChannel help-popover placement
 
 [STAGE8A_EXECUTION_RECEIPTS.json](STAGE8A_EXECUTION_RECEIPTS.json) تنها count، hash و
 source-revisionهای redacted چهار اجرای local/synthetic را نگه می‌دارد؛ screenshot، diagnostic،
@@ -135,6 +136,17 @@ console/page error/request failure/external attempt و API ناشناخته صف
 `162/162` بود. این slice فقط stateها، viewportها و journey محدود نام‌برده را attest می‌کند و به
 full matrix افزوده نمی‌شود.
 
+[STAGE8_CREATE_CHANNEL_HELP_POPOVER_PLACEMENT_EXECUTION_RECEIPT.json](STAGE8_CREATE_CHANNEL_HELP_POPOVER_PLACEMENT_EXECUTION_RECEIPT.json)
+یک receipt مستقل local/synthetic production-build و source-bound به `0d7f2760` است: دوازده
+scenario روی `/admin/channels` و overlay کانال `/chat` در حالت home/create، `390×844`،
+`1440×900`، CDP 2× و reduced-motion همگی گذشتند (۱۲/۱۲، ۲۲۸/۲۲۸). containing-block همان کارت
+محلی بود، trigger کنار عنوان همان کارت و دقیقاً `32×32` ماند، و note کامل داخل card/sheet/viewport
+بود. clipping قبلی مثبت کاذب بود؛ defect واقعی placement با patch محلی و guardشده رفع شد و هیچ
+shared/global overflow workaround استفاده نشد. در `/admin/channels` کارت، trigger و note با
+scroll مسیر حرکت کردند؛ در `/chat` note داخل sheet ماند. diagnosticهای console/page/request/
+external/unknown API و mutation محصول صفر و API محلیِ موردانتظار `132/132` بود. این slice فقط
+جای‌گذاری اصلاح‌شده روی دو سطح FULL را attest می‌کند و به full matrix افزوده نمی‌شود.
+
 مرجع Figma اختیاریِ generic roving-focus، DRAFT زنده/قابل‌ویرایش با section `603:18` و board
 `603:19` است؛ frameهای mobile `390×844` و desktop `1440×900` clip دارند. audit آن ۴۴ text
 Vazirmatn، ۱۶/۱۶ linked instance، zero overflow/crop/overlap، حداقل contrast متن `4.55:1`،
@@ -181,6 +193,7 @@ audit geometry و contrast آن pass و محتوایش عاری از دادهٔ 
 - [STAGE8_SETTINGS_NOTIFICATIONS_WRAP_EXECUTION_RECEIPT.json](STAGE8_SETTINGS_NOTIFICATIONS_WRAP_EXECUTION_RECEIPT.json)
 - [STAGE8_ACCOUNT_HUB_SINGLETON_EXECUTION_RECEIPT.json](STAGE8_ACCOUNT_HUB_SINGLETON_EXECUTION_RECEIPT.json)
 - [STAGE8_NOTIFICATION_ROUTE_AFFORDANCE_EXECUTION_RECEIPT.json](STAGE8_NOTIFICATION_ROUTE_AFFORDANCE_EXECUTION_RECEIPT.json)
+- [STAGE8_CREATE_CHANNEL_HELP_POPOVER_PLACEMENT_EXECUTION_RECEIPT.json](STAGE8_CREATE_CHANNEL_HELP_POPOVER_PLACEMENT_EXECUTION_RECEIPT.json)
 - [VISUAL_FREEZE_PROTECTED_SURFACES.json](VISUAL_FREEZE_PROTECTED_SURFACES.json)
 - [ROLLOUT_PLAN.md](ROLLOUT_PLAN.md)
 - [VALIDATION.md](VALIDATION.md)
