@@ -337,8 +337,11 @@ describe('Stage 8 descriptor contract is fail-closed', () => {
     expect(getRouteDescriptor('account-notifications').states.stale.applicable).toBe(false)
     expect(getRouteDescriptor('account-notifications').states.stale.reason).toMatch(/activeHistoryRequest/)
     expect(getRouteDescriptor('admin-commodities').states.stale.applicable).toBe(false)
-    expect(getRouteDescriptor('admin-invitations').states.stale.applicable).toBe(true)
-    expect(getRouteDescriptor('admin-invitations').states.stale.refreshSelector).toBe('.pending-refresh-btn')
+    expect(getRouteDescriptor('admin-invitations').states.stale.applicable).toBe(false)
+    expect(getRouteDescriptor('admin-invitations').states.stale.reason).toMatch(/pending-refresh-btn/)
+    expect(getRouteDescriptor('messenger').states.loading.applicable).toBe(false)
+    expect(getRouteDescriptor('messenger').states.slow.applicable).toBe(false)
+    expect(getRouteDescriptor('operations-customers-detail').touch.selector).toMatch(/ds-workspace-back/)
     expect(getRouteDescriptor('operations-customers-detail').states.loading.endpoint).toBe(
       '/api/customers/owner-relations',
     )
@@ -408,8 +411,8 @@ describe('Stage 8 descriptor contract is fail-closed', () => {
     expect(browserSource).toMatch(/waitForPendingRequest/)
     expect(browserSource).toMatch(/waitForMountedPendingMidProbe/)
     expect(browserSource).not.toMatch(/s8stale/)
-    expect(browserSource).toMatch(/refreshSelector/)
     expect(browserSource).toMatch(/unnamedFingerprints/)
+    expect(browserSource).toMatch(/delayMs = state === 'loading' \|\| state === 'slow' \? 2500/)
     expect(runtimeSource).toMatch(/offer-card-wrap/)
     expect(runtimeSource).toMatch(/offers-empty-state/)
     expect(runtimeSource).toMatch(/category: 'trade'/)

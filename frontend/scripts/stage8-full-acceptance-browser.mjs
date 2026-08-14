@@ -112,7 +112,7 @@ async function runScenario({
   const descriptor = getRouteDescriptor(route.name)
   controller.profile = profile
   controller.mode = state === 'loading' ? 'loading' : state
-  controller.delayMs = state === 'loading' ? 700 : state === 'slow' ? 1200 : 0
+  controller.delayMs = state === 'loading' || state === 'slow' ? 2500 : 0
   controller.staleEndpoint = state === 'stale' ? descriptor.states.stale.endpoint || '' : ''
   const snapshotBefore = {
     unknown: serverState.unknownApiRequests,
@@ -232,9 +232,11 @@ async function runScenario({
         controller.mode = 'normal'
         controller.delayMs = 0
         await retry.first().click({ timeout: 1500 }).catch(() => {})
-        await page.waitForTimeout(400)
+        await waitForNetworkSettle(page).catch(() => {})
+        await waitForApp(page)
       }
     }
+    await waitForApp(page)
     actual = await readRuntimeRoute(page)
     probe = await collectUiProbe(page)
     if (interaction === 'keyboard') {

@@ -351,7 +351,7 @@ function fixtureOffer(index = 0) {
     notes: index ? `داده مصنوعی پذیرش ${index}` : 'داده مصنوعی پذیرش',
     status: 'active',
     created_at: FIXED_TIME,
-    expires_at_ts: Math.floor(Date.parse(FIXED_TIME) / 1000) + 3600,
+    accepts_new_public_interaction: true,
   }
 }
 
@@ -577,7 +577,13 @@ export function apiFixture(pathname, method, profile, mode = 'normal') {
   if (pathname === '/api/offers/market-history' || pathname === '/api/offers/my/repeatable') return known([])
   if (pathname === '/api/offers/' || pathname === '/api/offers') return known(listForMode(mode, fixtureOffer))
   if (pathname === '/api/commodities/' || pathname === '/api/commodities') {
-    return known(listForMode(mode, (index) => ({ id: 1 + index, name: index ? `کالای ${index}` : 'طلای ۱۸ عیار' })))
+    return known(
+      listForMode(mode, (index) => ({
+        id: 1 + index,
+        name: index ? `کالای ${index}` : 'طلای ۱۸ عیار',
+        aliases: [],
+      })),
+    )
   }
   if (pathname === '/api/admin-messages/market/current') return known(null)
   if (pathname === '/api/admin-messages/market/history' || pathname === '/api/admin-messages/broadcasts/history') {

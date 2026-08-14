@@ -317,7 +317,7 @@ const DESCRIPTORS = {
       ),
     },
     touch: yes({
-      selector: 'button:has-text("بازگشت"), a[href="/operations/customers"], .workspace-back, .ui-page-header button',
+      selector: '.ds-workspace-back, button:has-text("بازگشت")',
       expectedNameAny: ['operations-customers', 'operations-customers-detail'],
     }),
     zoom: { internalStrip: '.customer-detail-shell' },
@@ -375,7 +375,7 @@ const DESCRIPTORS = {
       ),
     },
     touch: yes({
-      selector: 'button:has-text("بازگشت"), a[href="/operations/accountants"], .workspace-back, .ui-page-header button',
+      selector: '.ds-workspace-back, button:has-text("بازگشت")',
       expectedNameAny: ['operations-accountants', 'operations-accountants-detail'],
     }),
     zoom: { internalStrip: null },
@@ -470,10 +470,9 @@ const DESCRIPTORS = {
     renderProfileId: 'member',
     canonical: null,
     states: {
-      loading: yes({
-        selector: '.chat-skeleton, .conversation-skeleton',
-        settle: '.chat-skeleton, .conversation-skeleton, .app-route-scroll',
-      }),
+      loading: na(
+        'Messenger FULL list has no Stage 8 injectable page-level loading skeleton; the fixture also has no conversation inventory.',
+      ),
       empty: noListInventory(
         'messenger',
         'The Stage 8 fixture does not provide conversation inventory; empty/dense/stale stay N/A.',
@@ -481,7 +480,9 @@ const DESCRIPTORS = {
       normal: yes({ settle: '.app-route-scroll, #app' }),
       dense: noListInventory('messenger'),
       error: na('Messenger FULL surface has no Stage 8 injectable conversation error contract.'),
-      slow: yes({ selector: '.chat-skeleton, .conversation-skeleton' }),
+      slow: na(
+        'Messenger FULL list has no Stage 8 injectable page-level loading skeleton; the fixture also has no conversation inventory.',
+      ),
       offline: na('Messenger FULL surface has no Stage 8 injectable conversation offline contract.'),
       stale: noListInventory('messenger'),
     },
@@ -599,7 +600,9 @@ const DESCRIPTORS = {
       staleTrigger: 'in-page-refresh',
       retrySelector: 'button:has-text("تلاش")',
       settleSelector: '.pending-row, .ui-empty-state, .ui-loading-state',
-      staleRefreshSelector: '.pending-refresh-btn',
+      staleApplicable: false,
+      staleReason:
+        'admin-invitations cannot start a second in-flight GET to /api/invitations/pending from the success-path UI. pending-refresh-btn stays in the loading state for the whole request, so a later GET cannot overlap the first.',
     }),
     touch: yes({
       selector: '.admin-subview-return',

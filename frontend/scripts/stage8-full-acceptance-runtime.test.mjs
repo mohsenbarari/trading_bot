@@ -99,6 +99,14 @@ describe('stage8 full-acceptance fixture contract', () => {
       'تازه-پذیرش',
     )
     expect(apiFixture('/api/invitations/pending', 'GET', profile, 'dense').body).toHaveLength(24)
+    expect(apiFixture('/api/commodities', 'GET', profile, 'dense').body).toHaveLength(24)
+    expect(apiFixture('/api/commodities', 'GET', profile, 'normal').body[0]).toMatchObject({
+      aliases: [],
+    })
+    expect(apiFixture('/api/offers/page', 'GET', profile, 'dense').body.items).toHaveLength(24)
+    expect(apiFixture('/api/offers/page', 'GET', profile, 'dense').body.items[0]).toMatchObject({
+      accepts_new_public_interaction: true,
+    })
     expect(apiFixture('/api/notifications', 'GET', profile, 'dense').body).toHaveLength(24)
     expect(apiFixture('/api/notifications', 'GET', profile, 'normal').body[0]).toMatchObject({
       category: 'trade',
