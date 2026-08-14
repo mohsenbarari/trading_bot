@@ -9,7 +9,7 @@ Load for Vue/PWA refactoring, Design System V2, Figma/Sites evidence, or shared 
 - 2026-08-14 | Stage 7 is closed: NONE-only copy, keyboard, live-region and reduced-motion changes; protected routes retain 200ms. Follow-up cross-boundary evidence passed 12/12 with zero request failures.
 - 2026-08-14 | Stage 6 is closed: admin/profile projections remain server-authoritative; shared dialogs replace in-scope confirms. PII stays server-side, cancel/Escape never mutate, and FULL/MIXED plus the CreateChannel overlay remain protected.
 - 2026-08-11 | Owner-relation DELETE uses locked `expected_action`; Customer/Accountant query-only changes retain one root and scroll owner. Reason: prevent stale destructive escalation and remount races.
-- 2026-08-14 | V2 stays mobile-first at `360/375/390/414/430`; `ui-*`/DS V2 are canonical; Figma/Sites stay owner-only DRAFT evidence. Approved Market direction is A base + C decision/amount clarity; B is rejected for this rollout. Market remains protected and source/browser rebaseline is mandatory. Reason: keep the familiar chronological feed while reducing mistaken confirms, without changing trade semantics.
+- 2026-08-14 | V2 mobile-first `360/375/390/414/430`; Figma/Sites remain owner DRAFT. Market stays A+C and protected: server deadline bar; overtime from `final_deadline` with text badge and one motion; expired/traded read-only; offer side ≠ user action. B rejected. Reason: unambiguous lifecycle/trade perspective without changing trade semantics.
 - 2026-08-09 | Current-user authority is token-bound/revision-safe; owner-only routes use guards, not visibility. Reason: prevent stale cache and deep-link bypass.
 
 ## Constraints
