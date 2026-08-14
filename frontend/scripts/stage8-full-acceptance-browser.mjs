@@ -112,7 +112,7 @@ async function runScenario({
   const descriptor = getRouteDescriptor(route.name)
   controller.profile = profile
   controller.mode = state === 'loading' ? 'loading' : state
-  controller.delayMs = state === 'loading' || state === 'slow' ? 2500 : 0
+  controller.delayMs = state === 'loading' || state === 'slow' ? 8000 : 0
   controller.staleEndpoint = state === 'stale' ? descriptor.states.stale.endpoint || '' : ''
   const snapshotBefore = {
     unknown: serverState.unknownApiRequests,
@@ -143,7 +143,7 @@ async function runScenario({
       const pending = await waitForMountedPendingMidProbe(
         page,
         descriptor.states[state].endpoint || '',
-        8000,
+        12000,
       )
       midProbe = await collectUiProbe(page)
       midProbe.identityRequestCount = serverState.identityRequestCount

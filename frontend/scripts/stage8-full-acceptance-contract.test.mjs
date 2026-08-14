@@ -412,7 +412,7 @@ describe('Stage 8 descriptor contract is fail-closed', () => {
     expect(browserSource).toMatch(/waitForMountedPendingMidProbe/)
     expect(browserSource).not.toMatch(/s8stale/)
     expect(browserSource).toMatch(/unnamedFingerprints/)
-    expect(browserSource).toMatch(/delayMs = state === 'loading' \|\| state === 'slow' \? 2500/)
+    expect(browserSource).toMatch(/delayMs = state === 'loading' \|\| state === 'slow' \? 8000/)
     expect(runtimeSource).toMatch(/offer-card-wrap/)
     expect(runtimeSource).toMatch(/offers-empty-state/)
     expect(runtimeSource).toMatch(/category: 'trade'/)

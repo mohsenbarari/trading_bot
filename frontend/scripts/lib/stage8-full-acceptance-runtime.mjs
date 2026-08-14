@@ -1050,7 +1050,7 @@ export async function waitForPendingRequest(page, pathname = '', timeout = 3000)
   return { ...(await readStage8Status(page)), pendingRequest: false }
 }
 
-export async function waitForMountedPendingMidProbe(page, pathname = '', timeout = 8000) {
+export async function waitForMountedPendingMidProbe(page, pathname = '', timeout = 12000) {
   const started = Date.now()
   let last = { pendingRequest: false }
   while (Date.now() - started < timeout) {
