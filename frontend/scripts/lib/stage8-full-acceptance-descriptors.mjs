@@ -498,13 +498,17 @@ const DESCRIPTORS = {
     canonical: null,
     states: {
       loading: yes({
+        endpoint: '/api/users-public/9101',
         selector: '.loading-state-skeleton, .skeleton-box, .skeleton-text-header',
       }),
       empty: noListInventory('public-profile'),
       normal: yes({ settle: '.public-profile, .app-route-v2-scope' }),
       dense: noListInventory('public-profile'),
       error: yes({ selector: '[role="alert"]' }),
-      slow: yes({ selector: '.loading-state-skeleton, .skeleton-box' }),
+      slow: yes({
+        endpoint: '/api/users-public/9101',
+        selector: '.loading-state-skeleton, .skeleton-box',
+      }),
       offline: yes({ selector: '[role="alert"]' }),
       stale: noListInventory('public-profile'),
     },
@@ -656,12 +660,21 @@ const DESCRIPTORS = {
     renderProfileId: 'middle-admin',
     canonical: null,
     states: {
-      loading: yes({ selector: '.ui-loading-state' }),
+      loading: yes({
+        endpoint: '/api/users/9102',
+        selector: '.ui-loading-state',
+      }),
       empty: noListInventory('admin user profile'),
       normal: yes({ settle: '.app-route-v2-scope, main' }),
       dense: noListInventory('admin user profile'),
-      error: yes({ selector: '[role="alert"], .ui-empty-state--danger' }),
-      slow: yes({ selector: '.ui-loading-state' }),
+      error: yes({
+        endpoint: '/api/users/9102',
+        selector: '[role="alert"], .ui-empty-state--danger',
+      }),
+      slow: yes({
+        endpoint: '/api/users/9102',
+        selector: '.ui-loading-state',
+      }),
       offline: yes({ selector: '[role="alert"], .ui-empty-state--danger' }),
       stale: noListInventory('admin user profile'),
     },
@@ -772,15 +785,20 @@ const DESCRIPTORS = {
     canonical: null,
     states: {
       loading: yes({
+        endpoint: '/api/auth/registration-context',
         selector: '.ui-loading-state',
       }),
       empty: formOnly('web-register'),
       normal: yes({ settle: '.ui-v2-auth-register-step, .ui-loading-state, .ui-empty-state' }),
       dense: formOnly('web-register'),
       error: yes({
+        endpoint: '/api/auth/registration-context',
         selector: '.ui-empty-state--danger, [role="alert"]',
       }),
-      slow: yes({ selector: '.ui-loading-state' }),
+      slow: yes({
+        endpoint: '/api/auth/registration-context',
+        selector: '.ui-loading-state',
+      }),
       offline: yes({ selector: '.ui-empty-state--danger, [role="alert"]' }),
       stale: formOnly('web-register'),
     },

@@ -16,11 +16,14 @@ import {
   officialCounts,
 } from './lib/stage8-full-acceptance-contract.mjs'
 import {
+  STAGE8_ROUTE_NAMES,
   deriveOfficialCounts,
   getRouteDescriptor,
 } from './lib/stage8-full-acceptance-descriptors.mjs'
 import {
+  ADMIN_USER_ID,
   ENVIRONMENTS,
+  PUBLIC_USER_ID,
   apiFixture,
   isErrorInjectablePath,
   isIdentityBootstrapPath,
@@ -348,6 +351,26 @@ describe('Stage 8 descriptor contract is fail-closed', () => {
     expect(getRouteDescriptor('operations-accountants-detail').states.loading.endpoint).toBe(
       '/api/accountants/owner-relations',
     )
+  })
+
+  it('binds applicable loading and slow cells to an injectable page-data endpoint', () => {
+    expect(getRouteDescriptor('public-profile').states.loading.endpoint).toBe(
+      `/api/users-public/${PUBLIC_USER_ID}`,
+    )
+    expect(getRouteDescriptor('admin-user-profile').states.loading.endpoint).toBe(
+      `/api/users/${ADMIN_USER_ID}`,
+    )
+    expect(getRouteDescriptor('web-register').states.loading.endpoint).toBe(
+      '/api/auth/registration-context',
+    )
+    for (const name of STAGE8_ROUTE_NAMES) {
+      const descriptor = getRouteDescriptor(name)
+      for (const state of ['loading', 'slow']) {
+        const cell = descriptor.states[state]
+        if (!cell.applicable) continue
+        expect(cell.endpoint, `${name}/${state} missing injectable endpoint`).toMatch(/^\/api\//)
+      }
+    }
   })
 
   it('keeps general /settings free of session-list states', () => {
