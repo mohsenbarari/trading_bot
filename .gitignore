@@ -15,6 +15,10 @@ docs/uiux-stage7-motion-a11y/*
 !docs/uiux-stage7-motion-a11y/STAGE7_CROSS_BOUNDARY_DIAGNOSTIC_RECEIPT.json
 !docs/memory/
 !docs/memory/**
+!docs/uiux-market-refactor/
+docs/uiux-market-refactor/*
+!docs/uiux-market-refactor/MARKET_A_PLUS_C_PROPOSAL.md
+!docs/uiux-market-refactor/MARKET_A_PLUS_C_EVIDENCE.md
 !docs/uiux-stage8-acceptance-rollout/
 docs/uiux-stage8-acceptance-rollout/*
 !docs/uiux-stage8-acceptance-rollout/STAGE8A_EXECUTION_RECEIPTS.json
