@@ -2,7 +2,7 @@
   <div class="chat-header">
     <template v-if="!isSelectionMode">
       <!-- Back Button -->
-      <button class="header-btn back-btn" v-ripple @click="$emit('back')" v-if="!isSearchActive">
+      <button class="header-btn back-btn" type="button" aria-label="بازگشت" v-ripple @click="$emit('back')" v-if="!isSearchActive">
         <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M19 12H5M12 19l-7-7 7-7"/>
         </svg>
@@ -162,14 +162,14 @@
       
       <!-- Conversation List Actions -->
       <template v-else-if="!selectedUserId && !isSearchActive">
-         <button class="header-btn" v-ripple @click="$emit('toggle-search')">
+         <button class="header-btn" type="button" aria-label="جستجو" v-ripple @click="$emit('toggle-search')">
           <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <circle cx="11" cy="11" r="8"></circle>
             <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
           </svg>
         </button>
         <div class="header-menu-container">
-          <button class="header-btn" v-ripple @click.stop="toggleMenu">
+          <button class="header-btn" type="button" aria-label="گزینه‌های بیشتر" v-ripple @click.stop="toggleMenu">
             <MoreVertical :size="22" />
           </button>
           <div v-if="isMenuOpen" class="header-dropdown-menu" v-click-outside="closeMenu">

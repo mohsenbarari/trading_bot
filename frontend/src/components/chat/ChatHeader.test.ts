@@ -237,6 +237,49 @@ describe('ChatHeader.vue', () => {
     expect(visibleWrapper.emitted('admin-broadcast')).toHaveLength(1)
   })
 
+  it('names the conversation-list header controls without changing their actions', async () => {
+    const ChatHeader = (await import('./ChatHeader.vue')).default
+    const wrapper = mount(ChatHeader, {
+      props: {
+        isSelectionMode: false,
+        selectedUserId: null,
+        selectedUserName: '',
+        selectedAvatarFileId: null,
+        selectedRoomKind: null,
+        apiBaseUrl: '',
+        targetUserStatus: '',
+        isTyping: false,
+        totalUnread: 0,
+        isSearchActive: false,
+        searchQuery: '',
+        searchResults: [],
+        currentSearchIndex: 0,
+        selectedMessagesCount: 0,
+        isDeleted: false,
+        roomMemberCount: null,
+        isRoomMandatory: false,
+        isRoomSystem: false,
+        canCreateGroup: false,
+        canCreateChannel: false,
+      },
+      global: {
+        directives: {
+          ripple: {},
+          'click-outside': {},
+        },
+      },
+    })
+
+    expect(wrapper.get('.header-btn.back-btn').attributes('aria-label')).toBe('بازگشت')
+    expect(wrapper.get('button.header-btn[aria-label="جستجو"]').attributes('aria-label')).toBe('جستجو')
+    expect(wrapper.get('.header-menu-container .header-btn').attributes('aria-label')).toBe('گزینه‌های بیشتر')
+
+    await wrapper.get('.header-btn.back-btn').trigger('click')
+    await wrapper.get('button.header-btn[aria-label="جستجو"]').trigger('click')
+    expect(wrapper.emitted('back')).toHaveLength(1)
+    expect(wrapper.emitted('toggle-search')).toHaveLength(1)
+  })
+
   it('keeps system management rooms non-manageable from title and menu', async () => {
     const ChatHeader = (await import('./ChatHeader.vue')).default
     const wrapper = mount(ChatHeader, {

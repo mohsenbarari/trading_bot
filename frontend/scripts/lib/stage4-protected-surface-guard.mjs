@@ -171,6 +171,38 @@ export const STAGE8_CREATECHANNEL_HELPPOPOVER_PLACEMENT_EVIDENCE = Object.freeze
   sha256: '7659633875a604e75b925dcd9938ac71f74090b8b077d55ec9d4809107224124',
 })
 
+// This is a one-purpose disposition, not a Stage 4/6 rewrite. It permits only
+// aria-label names on the four unnamed Messenger list controls found by Gate A.
+export const STAGE8_MESSENGER_UNNAMED_CONTROL_KIND = 'stage8-messenger-unnamed-control-names'
+
+export const STAGE8_MESSENGER_UNNAMED_CONTROL_ALLOWED_PATHS = Object.freeze([
+  'frontend/src/components/chat/ChatHeader.vue',
+  'frontend/src/components/chat/ChatConversationList.vue',
+])
+
+export const STAGE8_MESSENGER_UNNAMED_CONTROL_ALLOWED_FILE_SHA256 = Object.freeze({
+  'frontend/src/components/chat/ChatHeader.vue':
+    'a18d717f9823c262d2bbc9d3dc01cfca488be2a9cbc46d89a3dffb29429ad635',
+  'frontend/src/components/chat/ChatConversationList.vue':
+    '20359ff625de5faf7fcff7e739d181ee14e5d2262be8acaa559f2ba39f03f142',
+})
+
+export const STAGE8_MESSENGER_UNNAMED_CONTROL_LOCKED_STAGE8_PATHS = Object.freeze([
+  'frontend/src/components/CreateChannelView.vue',
+])
+
+export const STAGE8_MESSENGER_UNNAMED_CONTROL_LOCKED_STAGE6_PATHS = Object.freeze([
+  'frontend/src/components/ChatView.vue',
+  'frontend/src/views/MessengerView.vue',
+])
+
+export const STAGE8_MESSENGER_UNNAMED_CONTROL_EVIDENCE = Object.freeze({
+  count: 85,
+  contentBytes: 1311357,
+  pathSetSha256: 'f6af1f961e45d785ba9c752ee670643571086c6a946843807fe6f581d11aea58',
+  sha256: '32dde68767fbcf6dfd070e25547ca5c2d69199aaf9d1999fff26bfcac05bedbb',
+})
+
 const RUNTIME_SOURCE_EXTENSION = /\.(?:css|[cm]?[jt]sx?|vue)$/
 const TEST_SOURCE = /(?:^|\/)[^/]+\.(?:spec|test)\.[^/]+$/
 
@@ -694,6 +726,67 @@ export function assertStage8CreateChannelHelpPopoverPlacementDisposition(entries
   )
 }
 
+function assertStage8MessengerUnnamedControlAllowedFiles(entries) {
+  const entriesByPath = new Map(entries.map((entry) => [entry.path, entry]))
+  for (const repoPath of STAGE8_MESSENGER_UNNAMED_CONTROL_ALLOWED_PATHS) {
+    const entry = entriesByPath.get(repoPath)
+    if (!entry) {
+      throw new Error(`Stage 8 Messenger unnamed-control allowed file is missing: ${repoPath}`)
+    }
+    const actualSha256 = fileSha256(entry.content)
+    const expectedSha256 = STAGE8_MESSENGER_UNNAMED_CONTROL_ALLOWED_FILE_SHA256[repoPath]
+    if (actualSha256 !== expectedSha256) {
+      throw new Error(
+        `Stage 8 Messenger unnamed-control allowed file drift: ${repoPath} ${expectedSha256} -> ${actualSha256}`,
+      )
+    }
+    const text = entry.content.toString('utf8')
+    if (repoPath.endsWith('ChatHeader.vue')) {
+      if (!text.includes('aria-label="بازگشت"') || !text.includes('aria-label="جستجو"') || !text.includes('aria-label="گزینه‌های بیشتر"')) {
+        throw new Error('Stage 8 Messenger unnamed-control disposition lost ChatHeader accessible names')
+      }
+    }
+    if (repoPath.endsWith('ChatConversationList.vue') && !text.includes('aria-label="شروع گفتگوی جدید"')) {
+      throw new Error('Stage 8 Messenger unnamed-control disposition lost the new-chat accessible name')
+    }
+  }
+  for (const repoPath of STAGE8_MESSENGER_UNNAMED_CONTROL_LOCKED_STAGE8_PATHS) {
+    const entry = entriesByPath.get(repoPath)
+    if (!entry) {
+      throw new Error(`Stage 8 Messenger unnamed-control locked Stage 8 file is missing: ${repoPath}`)
+    }
+    const actualSha256 = fileSha256(entry.content)
+    const expectedSha256 = STAGE8_CREATECHANNEL_HELPPOPOVER_PLACEMENT_ALLOWED_FILE_SHA256[repoPath]
+    if (actualSha256 !== expectedSha256) {
+      throw new Error(
+        `Stage 8 Messenger unnamed-control requires unchanged CreateChannel file: ${repoPath} ${expectedSha256} -> ${actualSha256}`,
+      )
+    }
+  }
+  for (const repoPath of STAGE8_MESSENGER_UNNAMED_CONTROL_LOCKED_STAGE6_PATHS) {
+    const entry = entriesByPath.get(repoPath)
+    if (!entry) {
+      throw new Error(`Stage 8 Messenger unnamed-control locked Stage 6 file is missing: ${repoPath}`)
+    }
+    const actualSha256 = fileSha256(entry.content)
+    const expectedSha256 = STAGE6_MESSENGER_URL_PRIVACY_ALLOWED_FILE_SHA256[repoPath]
+    if (actualSha256 !== expectedSha256) {
+      throw new Error(
+        `Stage 8 Messenger unnamed-control requires unchanged Stage 6 file: ${repoPath} ${expectedSha256} -> ${actualSha256}`,
+      )
+    }
+  }
+}
+
+export function assertStage8MessengerUnnamedControlDisposition(entries) {
+  assertStage8MessengerUnnamedControlAllowedFiles(entries)
+  return assertProtectedFileSetEvidence(
+    'Stage 8 Messenger unnamed-control names',
+    protectedFileSetEvidence(entries, MESSENGER_RUNTIME_CONTRACT),
+    STAGE8_MESSENGER_UNNAMED_CONTROL_EVIDENCE,
+  )
+}
+
 /**
  * Stage 4 remains immutable. If it no longer matches, the exact Stage 6
  * URL-privacy disposition is tried next, then the exact Stage 8
@@ -787,15 +880,24 @@ export function resolveMessengerRuntimeDisposition(entries) {
           evidence: assertStage8CreateChannelHelpPopoverPlacementDisposition(entries),
         }
       } catch (stage8Error) {
-        const baselineMessage =
-          baselineError instanceof Error ? baselineError.message : String(baselineError)
-        const stage6Message =
-          stage6Error instanceof Error ? stage6Error.message : String(stage6Error)
-        const stage8Message =
-          stage8Error instanceof Error ? stage8Error.message : String(stage8Error)
-        throw new Error(
-          `Messenger runtime rejected after Stage 4 baseline drift (${baselineMessage}); Stage 6 URL-privacy disposition rejected (${stage6Message}); Stage 8 CreateChannel HelpPopover placement remediation rejected (${stage8Message})`,
-        )
+        try {
+          return {
+            kind: STAGE8_MESSENGER_UNNAMED_CONTROL_KIND,
+            evidence: assertStage8MessengerUnnamedControlDisposition(entries),
+          }
+        } catch (stage8NamesError) {
+          const baselineMessage =
+            baselineError instanceof Error ? baselineError.message : String(baselineError)
+          const stage6Message =
+            stage6Error instanceof Error ? stage6Error.message : String(stage6Error)
+          const stage8Message =
+            stage8Error instanceof Error ? stage8Error.message : String(stage8Error)
+          const stage8NamesMessage =
+            stage8NamesError instanceof Error ? stage8NamesError.message : String(stage8NamesError)
+          throw new Error(
+            `Messenger runtime rejected after Stage 4 baseline drift (${baselineMessage}); Stage 6 URL-privacy disposition rejected (${stage6Message}); Stage 8 CreateChannel HelpPopover placement remediation rejected (${stage8Message}); Stage 8 Messenger unnamed-control names rejected (${stage8NamesMessage})`,
+          )
+        }
       }
     }
   }

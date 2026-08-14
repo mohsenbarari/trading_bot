@@ -365,6 +365,7 @@ describe('ChatConversationList.vue', () => {
     expect(wrapper.find('.online-indicator-dot').exists()).toBe(true)
     expect(wrapper.get('.unread-badge').text()).toBe('۱۲')
 
+    expect(wrapper.get('.fab-new-chat').attributes('aria-label')).toBe('شروع گفتگوی جدید')
     await wrapper.get('.fab-new-chat').trigger('click')
     expect(wrapper.emitted('new-conversation')).toHaveLength(1)
   })

@@ -22,7 +22,14 @@ import {
   STAGE8_CREATECHANNEL_HELPPOPOVER_PLACEMENT_EVIDENCE,
   STAGE8_CREATECHANNEL_HELPPOPOVER_PLACEMENT_KIND,
   STAGE8_CREATECHANNEL_HELPPOPOVER_PLACEMENT_LOCKED_STAGE6_PATHS,
+  STAGE8_MESSENGER_UNNAMED_CONTROL_ALLOWED_FILE_SHA256,
+  STAGE8_MESSENGER_UNNAMED_CONTROL_ALLOWED_PATHS,
+  STAGE8_MESSENGER_UNNAMED_CONTROL_EVIDENCE,
+  STAGE8_MESSENGER_UNNAMED_CONTROL_KIND,
+  STAGE8_MESSENGER_UNNAMED_CONTROL_LOCKED_STAGE6_PATHS,
+  STAGE8_MESSENGER_UNNAMED_CONTROL_LOCKED_STAGE8_PATHS,
   assertStage8CreateChannelHelpPopoverPlacementDisposition,
+  assertStage8MessengerUnnamedControlDisposition,
   assertMainUiuxIntegrationMarketDisposition,
   STAGE4_BASE_COMMIT,
   STAGE4_BASE_TREE,
@@ -87,6 +94,50 @@ function withCreateChannelPlacementReverted(entries) {
       throw new Error('test mutation did not revert the Stage 8 placement declaration')
     }
     return { ...entry, content: Buffer.from(next, 'utf8') }
+  })
+}
+
+function withUnnamedControlNamesReverted(entries) {
+  return entries.map((entry) => {
+    if (entry.path === 'frontend/src/components/chat/ChatHeader.vue') {
+      const source = entry.content.toString('utf8')
+      const next = source
+        .replace(
+          '<button class="header-btn back-btn" type="button" aria-label="بازگشت" v-ripple @click="$emit(\'back\')" v-if="!isSearchActive">',
+          '<button class="header-btn back-btn" v-ripple @click="$emit(\'back\')" v-if="!isSearchActive">',
+        )
+        .replace(
+          '<button class="header-btn" type="button" aria-label="جستجو" v-ripple @click="$emit(\'toggle-search\')">',
+          '<button class="header-btn" v-ripple @click="$emit(\'toggle-search\')">',
+        )
+        .replace(
+          '<button class="header-btn" type="button" aria-label="گزینه‌های بیشتر" v-ripple @click.stop="toggleMenu">',
+          '<button class="header-btn" v-ripple @click.stop="toggleMenu">',
+        )
+      if (next === source) {
+        throw new Error('test mutation did not revert ChatHeader accessible names')
+      }
+      return { ...entry, content: Buffer.from(next, 'utf8') }
+    }
+    if (entry.path === 'frontend/src/components/chat/ChatConversationList.vue') {
+      const source = entry.content.toString('utf8')
+      const next = source.replace(
+        `<button
+      v-if="canStartNewConversation !== false"
+      type="button"
+      class="fab-new-chat"
+      aria-label="شروع گفتگوی جدید"
+      v-ripple
+      @click="emit('new-conversation')"
+    >`,
+        `<button v-if="canStartNewConversation !== false" class="fab-new-chat" v-ripple @click="emit('new-conversation')">`,
+      )
+      if (next === source) {
+        throw new Error('test mutation did not revert the new-chat accessible name')
+      }
+      return { ...entry, content: Buffer.from(next, 'utf8') }
+    }
+    return entry
   })
 }
 
@@ -299,7 +350,7 @@ describe('Stage 4 protected surface baseline', () => {
 
   it('still recognizes the exact historical Stage 6 Messenger URL-privacy tree', () => {
     const entries = withCreateChannelPlacementReverted(
-      readFileEntries(repoRoot, ownedPaths.messenger),
+      withUnnamedControlNamesReverted(readFileEntries(repoRoot, ownedPaths.messenger)),
     )
     const createChannel = entries.find(
       ({ path: repoPath }) => repoPath === 'frontend/src/components/CreateChannelView.vue',
@@ -316,17 +367,15 @@ describe('Stage 4 protected surface baseline', () => {
     })
   })
 
-  it('permits only the exact Stage 8 CreateChannel HelpPopover placement remediation', () => {
-    const entries = readFileEntries(repoRoot, ownedPaths.messenger)
-    const actual = currentEvidence(ownedPaths.messenger, MESSENGER_RUNTIME_CONTRACT)
-    const disposition = resolveMessengerRuntimeDisposition(entries)
+  it('still recognizes the exact historical Stage 8 CreateChannel HelpPopover placement tree', () => {
+    const entries = withUnnamedControlNamesReverted(
+      readFileEntries(repoRoot, ownedPaths.messenger),
+    )
     const createChannel = entries.find(
       ({ path: repoPath }) => repoPath === 'frontend/src/components/CreateChannelView.vue',
     )
 
-    expect(actual).not.toMatchObject(MESSENGER_RUNTIME_BASELINE)
-    expect(actual).not.toMatchObject(STAGE6_MESSENGER_URL_PRIVACY_EVIDENCE)
-    expect(disposition).toMatchObject({
+    expect(resolveMessengerRuntimeDisposition(entries)).toMatchObject({
       kind: STAGE8_CREATECHANNEL_HELPPOPOVER_PLACEMENT_KIND,
       evidence: STAGE8_CREATECHANNEL_HELPPOPOVER_PLACEMENT_EVIDENCE,
     })
@@ -343,6 +392,49 @@ describe('Stage 4 protected surface baseline', () => {
       ],
     )
     for (const repoPath of STAGE8_CREATECHANNEL_HELPPOPOVER_PLACEMENT_LOCKED_STAGE6_PATHS) {
+      const entry = entries.find(({ path: candidate }) => candidate === repoPath)
+      expect(fileSha256(entry.content)).toBe(
+        STAGE6_MESSENGER_URL_PRIVACY_ALLOWED_FILE_SHA256[repoPath],
+      )
+    }
+  })
+
+  it('permits only the exact Stage 8 Messenger unnamed-control names', () => {
+    const entries = readFileEntries(repoRoot, ownedPaths.messenger)
+    const actual = currentEvidence(ownedPaths.messenger, MESSENGER_RUNTIME_CONTRACT)
+    const disposition = resolveMessengerRuntimeDisposition(entries)
+
+    expect(actual).not.toMatchObject(MESSENGER_RUNTIME_BASELINE)
+    expect(actual).not.toMatchObject(STAGE6_MESSENGER_URL_PRIVACY_EVIDENCE)
+    expect(actual).not.toMatchObject(STAGE8_CREATECHANNEL_HELPPOPOVER_PLACEMENT_EVIDENCE)
+    expect(disposition).toMatchObject({
+      kind: STAGE8_MESSENGER_UNNAMED_CONTROL_KIND,
+      evidence: STAGE8_MESSENGER_UNNAMED_CONTROL_EVIDENCE,
+    })
+    expect(STAGE8_MESSENGER_UNNAMED_CONTROL_ALLOWED_PATHS).toEqual([
+      'frontend/src/components/chat/ChatHeader.vue',
+      'frontend/src/components/chat/ChatConversationList.vue',
+    ])
+    expect(STAGE8_MESSENGER_UNNAMED_CONTROL_LOCKED_STAGE8_PATHS).toEqual([
+      'frontend/src/components/CreateChannelView.vue',
+    ])
+    expect(STAGE8_MESSENGER_UNNAMED_CONTROL_LOCKED_STAGE6_PATHS).toEqual([
+      'frontend/src/components/ChatView.vue',
+      'frontend/src/views/MessengerView.vue',
+    ])
+    for (const repoPath of STAGE8_MESSENGER_UNNAMED_CONTROL_ALLOWED_PATHS) {
+      const entry = entries.find(({ path: candidate }) => candidate === repoPath)
+      expect(fileSha256(entry.content)).toBe(
+        STAGE8_MESSENGER_UNNAMED_CONTROL_ALLOWED_FILE_SHA256[repoPath],
+      )
+    }
+    for (const repoPath of STAGE8_MESSENGER_UNNAMED_CONTROL_LOCKED_STAGE8_PATHS) {
+      const entry = entries.find(({ path: candidate }) => candidate === repoPath)
+      expect(fileSha256(entry.content)).toBe(
+        STAGE8_CREATECHANNEL_HELPPOPOVER_PLACEMENT_ALLOWED_FILE_SHA256[repoPath],
+      )
+    }
+    for (const repoPath of STAGE8_MESSENGER_UNNAMED_CONTROL_LOCKED_STAGE6_PATHS) {
       const entry = entries.find(({ path: candidate }) => candidate === repoPath)
       expect(fileSha256(entry.content)).toBe(
         STAGE6_MESSENGER_URL_PRIVACY_ALLOWED_FILE_SHA256[repoPath],
@@ -389,6 +481,9 @@ describe('Stage 4 protected surface baseline', () => {
     expect(() => resolveMessengerRuntimeDisposition(mutated)).toThrow(
       /Stage 8 CreateChannel HelpPopover placement requires unchanged Stage 6 file: frontend\/src\/components\/ChatView\.vue/,
     )
+    expect(() => resolveMessengerRuntimeDisposition(mutated)).toThrow(
+      /Stage 8 Messenger unnamed-control requires unchanged Stage 6 file: frontend\/src\/components\/ChatView\.vue/,
+    )
   })
 
   it('fails closed if CreateChannelView changes again without a new Stage 8 hash', () => {
@@ -401,6 +496,9 @@ describe('Stage 4 protected surface baseline', () => {
 
     expect(() => resolveMessengerRuntimeDisposition(mutated)).toThrow(
       /Stage 8 CreateChannel HelpPopover placement allowed file drift: frontend\/src\/components\/CreateChannelView\.vue/,
+    )
+    expect(() => resolveMessengerRuntimeDisposition(mutated)).toThrow(
+      /Stage 8 Messenger unnamed-control requires unchanged CreateChannel file: frontend\/src\/components\/CreateChannelView\.vue/,
     )
   })
 
@@ -421,6 +519,9 @@ describe('Stage 4 protected surface baseline', () => {
     )
     expect(() => resolveMessengerRuntimeDisposition(mutated)).toThrow(
       /Stage 8 CreateChannel HelpPopover placement remediation rejected/,
+    )
+    expect(() => resolveMessengerRuntimeDisposition(mutated)).toThrow(
+      /Stage 8 Messenger unnamed-control names rejected/,
     )
   })
 
@@ -448,6 +549,32 @@ describe('Stage 4 protected surface baseline', () => {
     expect(() => resolveMessengerRuntimeDisposition(addedUnlisted)).toThrow(
       /Stage 6 URL-privacy disposition rejected .*count drift/,
     )
+  })
+
+  it('fails closed if an allowed Stage 8 unnamed-control file changes by even one byte', () => {
+    const entries = readFileEntries(repoRoot, ownedPaths.messenger)
+    const mutated = entries.map((entry) =>
+      entry.path === 'frontend/src/components/chat/ChatHeader.vue'
+        ? { ...entry, content: Buffer.concat([entry.content, Buffer.from('\n// drift')]) }
+        : entry,
+    )
+
+    expect(() => resolveMessengerRuntimeDisposition(mutated)).toThrow(
+      /Stage 8 Messenger unnamed-control allowed file drift: frontend\/src\/components\/chat\/ChatHeader\.vue/,
+    )
+  })
+
+  it('fails closed if the Stage 8 unnamed-control names are removed', () => {
+    const entries = readFileEntries(repoRoot, ownedPaths.messenger)
+    const mutated = withUnnamedControlNamesReverted(entries)
+
+    expect(() => assertStage8MessengerUnnamedControlDisposition(mutated)).toThrow(
+      /Stage 8 Messenger unnamed-control allowed file drift/,
+    )
+    expect(resolveMessengerRuntimeDisposition(mutated)).toMatchObject({
+      kind: STAGE8_CREATECHANNEL_HELPPOPOVER_PLACEMENT_KIND,
+      evidence: STAGE8_CREATECHANNEL_HELPPOPOVER_PLACEMENT_EVIDENCE,
+    })
   })
 
   it('discovers new owned files while leaving unrelated Stage 4 files outside the full freeze', () => {

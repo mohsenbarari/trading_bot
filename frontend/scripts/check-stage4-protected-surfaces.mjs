@@ -11,6 +11,8 @@ import {
   STAGE6_MESSENGER_URL_PRIVACY_ALLOWED_PATHS,
   STAGE8_CREATECHANNEL_HELPPOPOVER_PLACEMENT_ALLOWED_PATHS,
   STAGE8_CREATECHANNEL_HELPPOPOVER_PLACEMENT_KIND,
+  STAGE8_MESSENGER_UNNAMED_CONTROL_ALLOWED_PATHS,
+  STAGE8_MESSENGER_UNNAMED_CONTROL_KIND,
   STAGE4_BASE_COMMIT,
   STAGE4_BASE_TREE,
   STAGE4_ROUTE_CONTRACT_PATH,
@@ -109,6 +111,10 @@ try {
   } else if (messenger.kind === STAGE8_CREATECHANNEL_HELPPOPOVER_PLACEMENT_KIND) {
     console.log(
       `PASS Stage 8 CreateChannel HelpPopover placement remediation (exact ${STAGE8_CREATECHANNEL_HELPPOPOVER_PLACEMENT_ALLOWED_PATHS.length}-file overlay; ${messenger.evidence.count} files, ${messenger.evidence.contentBytes} bytes, ${messenger.evidence.pathSetSha256}, ${messenger.evidence.sha256})`,
+    )
+  } else if (messenger.kind === STAGE8_MESSENGER_UNNAMED_CONTROL_KIND) {
+    console.log(
+      `PASS Stage 8 Messenger unnamed-control names (exact ${STAGE8_MESSENGER_UNNAMED_CONTROL_ALLOWED_PATHS.length}-file overlay; ${messenger.evidence.count} files, ${messenger.evidence.contentBytes} bytes, ${messenger.evidence.pathSetSha256}, ${messenger.evidence.sha256})`,
     )
   } else {
     throw new Error(`unsupported Messenger runtime disposition: ${String(messenger.kind)}`)

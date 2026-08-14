@@ -669,7 +669,14 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <button v-if="canStartNewConversation !== false" class="fab-new-chat" v-ripple @click="emit('new-conversation')">
+    <button
+      v-if="canStartNewConversation !== false"
+      type="button"
+      class="fab-new-chat"
+      aria-label="شروع گفتگوی جدید"
+      v-ripple
+      @click="emit('new-conversation')"
+    >
       <MessageCirclePlus :size="28" />
     </button>
 
