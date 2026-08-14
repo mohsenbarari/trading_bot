@@ -114,6 +114,9 @@ async function runScenario({
   })
   const expected = finalRouteExpectation(route, profile)
   const failures = []
+  if (expected.sourceDrift) {
+    failures.push(expected.driftReason || 'sourceDrift')
+  }
   let probe = null
   let actual = null
   try {

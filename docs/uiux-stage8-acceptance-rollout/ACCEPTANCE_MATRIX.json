@@ -5,15 +5,25 @@
   "branch": "condidate/webapp-ui-ux-redesign-v2",
   "acceptanceAuthority": false,
   "sourceSnapshot": {
-    "commit": "8eccdd2177ea5e2b21710b3a8863eace40092c35",
-    "tree": "6cba83c9c2a87672b2741d4a52500c7c6c4f197b",
+    "commit": "6c02f58140839e741d16f47f8564e09feacefdd9",
+    "tree": "bc067b7b4985b9277c5885f3cde958ecd750d6c8",
     "runtimeSourcesMatchCommit": true,
-    "runtimeSourceBindingSha256": "b140e9992c8b9e2e6f94db03236015e6975a55e2aa2d0b5155c4429537ba2e52",
+    "runtimeSourceBindingSha256": "3104653856a0ee365c351bb939c18cdb273d782edb5d32c323fe2a280aefc53b",
     "runtimeSourceHashes": {
-      "frontend/src/router/index.ts": "a85c2432ff6a4ad0230ee63e58d54dce7aaa5d1a781b50efa3b44d0fcf8c051c",
+      "frontend/src/router/index.ts": "e5ba4c8b2d63549fe60280d074427463fd892ce4e059fd1137f08af415a06e25",
       "frontend/src/router/uiRouteContract.ts": "8e7495a05dfbf6b36bcc242af1b20919bef56a8bd0ed9458360d36cf79fba144",
       "frontend/src/utils/auth.ts": "f151144a8d18fe8fa1af78e9cbee72a7b35e512d2e8266454adc5f57a0873caa",
-      "models/user.py": "f3cf8930175d5d7ea8d57bc063e3fc0f17f1bc6d8659d5cd8184246c774bb18b"
+      "models/user.py": "4caca81d39dfa682ac8c453a5e4362da39df2de435eae24dcb394ca7239cd7a7",
+      "frontend/src/components/UserProfile.vue": "6ee59780e2cef449b4c6f379b0dd31d116d5773303ead0345fece34109cf117e",
+      "frontend/src/components/UserProfile.test.ts": "7d2f0b3ca3edac4ecc6cca5846e43c3165c41288d3e99687d68135ac54c589b2",
+      "frontend/src/views/AdminView.vue": "b69c3b6c1d34788449f40c1394dbc8981f63597044ad37c24268d76f5f385c0a"
+    },
+    "settingsRouteCorrection": {
+      "previousAuthenticatedOutcome": "redirect-canonical to account-security",
+      "currentAuthenticatedOutcome": "render-route SettingsView at /settings",
+      "guestOutcome": "redirect-login",
+      "productSourceCommit": "6c02f58140839e741d16f47f8564e09feacefdd9",
+      "closesStage8": false
     }
   },
   "componentCanonicalizationSnapshot": {
@@ -143,10 +153,10 @@
       "id": "stage8a-profile-admin-directory-recovery",
       "receiptId": "stage8a-profile-admin-directory-recovery",
       "evidenceRef": "stage8a-execution-receipts",
-    "sourceCommit": "4415b7431a6b67965d24c44f6f9f0e59e48ed422",
-    "evidenceStatus": "historical-source-bound; subsequent-local-p1-validation-pending",
-    "countsTowardFullMatrixAcceptance": false,
-    "scope": {
+      "sourceCommit": "4415b7431a6b67965d24c44f6f9f0e59e48ed422",
+      "evidenceStatus": "historical-source-bound; subsequent-local-p1-validation-pending",
+      "countsTowardFullMatrixAcceptance": false,
+      "scope": {
         "environment": "local-synthetic-browser",
         "routes": [
           "/profile",
@@ -2980,8 +2990,8 @@
     {
       "path": "/settings",
       "name": "settings",
-      "routerKind": "redirect",
-      "redirectTargetName": "account-security",
+      "routerKind": "component",
+      "redirectTargetName": null,
       "routeMeta": {
         "requiresAuth": true,
         "requiresMarketAccess": false,
@@ -3002,81 +3012,84 @@
           "targetName": "login",
           "evidenceRefs": [
             "router-runtime",
-            "auth-guard-runtime"
+            "auth-guard-runtime",
+            "settings-view-runtime"
           ]
         },
         "watch": {
-          "kind": "redirect-canonical",
-          "targetName": "account-security",
+          "kind": "render-route",
           "evidenceRefs": [
             "router-runtime",
-            "auth-guard-runtime"
+            "auth-guard-runtime",
+            "settings-view-runtime"
           ]
         },
         "member": {
-          "kind": "redirect-canonical",
-          "targetName": "account-security",
+          "kind": "render-route",
           "evidenceRefs": [
             "router-runtime",
-            "auth-guard-runtime"
+            "auth-guard-runtime",
+            "settings-view-runtime"
           ]
         },
         "police": {
-          "kind": "redirect-canonical",
-          "targetName": "account-security",
+          "kind": "render-route",
           "evidenceRefs": [
             "router-runtime",
-            "auth-guard-runtime"
+            "auth-guard-runtime",
+            "settings-view-runtime"
           ]
         },
         "customer": {
-          "kind": "redirect-canonical",
-          "targetName": "account-security",
+          "kind": "render-route",
           "evidenceRefs": [
             "router-runtime",
-            "auth-guard-runtime"
+            "auth-guard-runtime",
+            "settings-view-runtime"
           ]
         },
         "accountant": {
-          "kind": "redirect-canonical",
-          "targetName": "account-security",
+          "kind": "render-route",
           "evidenceRefs": [
             "router-runtime",
-            "auth-guard-runtime"
+            "auth-guard-runtime",
+            "settings-view-runtime"
           ]
         },
         "owner-context": {
-          "kind": "redirect-canonical",
-          "targetName": "account-security",
+          "kind": "render-route",
           "evidenceRefs": [
             "router-runtime",
-            "auth-guard-runtime"
+            "auth-guard-runtime",
+            "settings-view-runtime"
           ]
         },
         "middle-admin": {
-          "kind": "redirect-canonical",
-          "targetName": "account-security",
+          "kind": "render-route",
           "evidenceRefs": [
             "router-runtime",
-            "auth-guard-runtime"
+            "auth-guard-runtime",
+            "settings-view-runtime"
           ]
         },
         "senior-admin": {
-          "kind": "redirect-canonical",
-          "targetName": "account-security",
+          "kind": "render-route",
           "evidenceRefs": [
             "router-runtime",
-            "auth-guard-runtime"
+            "auth-guard-runtime",
+            "settings-view-runtime"
           ]
         }
       },
       "uiTraceability": {
-        "status": "prior-stage-reference-only",
+        "status": "source-corrected-pending-full-acceptance",
         "evidenceRefs": [
-          "stage4-evidence-manifest"
+          "stage4-evidence-manifest",
+          "settings-view-runtime"
         ],
         "stage8AcceptanceClaim": "none",
-        "humanAestheticAcceptance": "pending-owner"
+        "humanAestheticAcceptance": "pending-owner",
+        "note": "Source registers /settings as SettingsView; authenticated profiles render it. This correction is not Stage 8 closure."
       }
     },
     {

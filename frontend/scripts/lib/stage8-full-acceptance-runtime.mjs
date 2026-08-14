@@ -114,7 +114,21 @@ export function loadMatrix(matrixPath) {
     }
   }
   if (cells !== 270) throw new Error(`Expected 270 access cells, found ${cells}`)
+  assertMatrixMatchesSource(matrix)
   return matrix
+}
+
+export function assertMatrixMatchesSource(matrix) {
+  const drifted = []
+  for (const route of matrix.routes) {
+    for (const profile of matrix.accessProfiles) {
+      const expected = deriveExpectedOutcome(route, profile)
+      if (expected.sourceDrift) drifted.push(expected.driftReason)
+    }
+  }
+  if (drifted.length) {
+    throw new Error(`ACCEPTANCE_MATRIX source drift: ${drifted.join('; ')}`)
+  }
 }
 
 export function visitPathFor(route) {
@@ -129,23 +143,51 @@ export function visitPathFor(route) {
   return route.path
 }
 
+const ADMIN_ROLES = new Set(['مدیر میانی', 'مدیر ارشد'])
+
+export function deriveSourceBoundOutcome(route, profile) {
+  const meta = route.routeMeta || {}
+  if (route.name === 'login') {
+    return profile.authenticated
+      ? { kind: 'redirect-home', targetName: 'home' }
+      : { kind: 'render-route' }
+  }
+  if (route.routerKind === 'redirect' && route.redirectTargetName) {
+    if (meta.requiresAuth && !profile.authenticated) {
+      return { kind: 'redirect-login', targetName: 'login' }
+    }
+    return { kind: 'redirect-canonical', targetName: route.redirectTargetName }
+  }
+  if (meta.requiresAuth && !profile.authenticated) {
+    return { kind: 'redirect-login', targetName: 'login' }
+  }
+  if (meta.requiresAdmin && !ADMIN_ROLES.has(profile.role)) {
+    return { kind: 'redirect-forbidden-recovery', targetName: 'system-recovery' }
+  }
+  if (meta.requiresMarketAccess && (profile.isAccountant === true || profile.accountStatus === 'inactive')) {
+    return { kind: 'redirect-forbidden-recovery', targetName: 'system-recovery' }
+  }
+  if (meta.requiresOwnerAccess && (profile.isAccountant === true || profile.isCustomer === true)) {
+    return { kind: 'redirect-forbidden-recovery', targetName: 'system-recovery' }
+  }
+  return { kind: 'render-route' }
+}
+
 export function deriveExpectedOutcome(route, profile) {
   const matrixOutcome = route.expectedAccess[profile.id]
-  if (route.name === 'settings') {
-    const derived = profile.authenticated
-      ? { kind: 'render-route', evidenceRefs: ['router-runtime', 'auth-guard-runtime'] }
-      : { kind: 'redirect-login', targetName: 'login', evidenceRefs: ['router-runtime', 'auth-guard-runtime'] }
-    return {
-      ...derived,
-      matrixKind: matrixOutcome.kind,
-      sourceDrift: matrixOutcome.kind !== derived.kind,
-      driftReason:
-        matrixOutcome.kind !== derived.kind
-          ? 'Current router registers /settings as SettingsView, not a redirect to account-security.'
-          : null,
-    }
+  const source = deriveSourceBoundOutcome(route, profile)
+  const sourceDrift =
+    matrixOutcome.kind !== source.kind ||
+    Boolean(source.targetName && matrixOutcome.targetName && source.targetName !== matrixOutcome.targetName)
+  return {
+    ...matrixOutcome,
+    matrixKind: matrixOutcome.kind,
+    sourceKind: source.kind,
+    sourceDrift,
+    driftReason: sourceDrift
+      ? `matrix ${matrixOutcome.kind} != source ${source.kind} for ${route.name}/${profile.id}`
+      : null,
   }
-  return { ...matrixOutcome, matrixKind: matrixOutcome.kind, sourceDrift: false, driftReason: null }
 }
 
 export function componentCanonical(route, profile) {
