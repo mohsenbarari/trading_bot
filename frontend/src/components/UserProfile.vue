@@ -1284,6 +1284,7 @@ async function confirmPendingAction() {
               min="0"
               step="1"
               class="form-input-sm max-accountants-input"
+              aria-label="حداکثر حسابداران مجاز"
               :disabled="isUserMutationBusy"
               @change="saveMaxAccountants"
             />
@@ -1298,6 +1299,7 @@ async function confirmPendingAction() {
               min="0"
               step="1"
               class="form-input-sm max-customers-input"
+              aria-label="حداکثر مشتریان مجاز"
               :disabled="isUserMutationBusy"
               @change="saveMaxCustomers"
             />
@@ -1329,6 +1331,7 @@ async function confirmPendingAction() {
               max="100"
               step="1"
               class="form-input-sm max-blocked-users-input"
+              aria-label="سقف کاربران قابل بلاک"
               :disabled="isUserMutationBusy"
               @change="saveMaxBlockedUsers"
             />

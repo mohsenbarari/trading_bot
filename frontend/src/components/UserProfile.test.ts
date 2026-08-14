@@ -712,6 +712,11 @@ describe('UserProfile.vue authoritative admin actions', () => {
     expect(user.max_sessions).toBe(2)
 
     const maxAccountants = wrapper.get('.max-accountants-input')
+    expect(maxAccountants.attributes('aria-label')).toBe('حداکثر حسابداران مجاز')
+    expect(wrapper.get('.max-customers-input').attributes('aria-label')).toBe('حداکثر مشتریان مجاز')
+    expect(wrapper.get('.max-blocked-users-input').attributes('aria-label')).toBe(
+      'سقف کاربران قابل بلاک',
+    )
     await maxAccountants.setValue('-5')
     await maxAccountants.trigger('change')
     await flushPromises()
