@@ -1,7 +1,7 @@
 <script setup lang="ts">
 
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
-import { Loader2 } from 'lucide-vue-next';
+import { Hourglass, Loader2 } from 'lucide-vue-next';
 import { apiFetch } from '../utils/auth';
 import { createHttpErrorFromResponse, getUserFacingErrorMessage } from '../utils/httpErrorPolicy';
 import { offerSettlementLabel, normalizeSettlementType, type SettlementType } from '../utils/settlementType';
@@ -23,9 +23,7 @@ import {
 import {
   isActiveLifecycleVisible,
   isFinalTailPhase,
-  isOvertimeMarkerAnimated,
   isOvertimePhase,
-  showOvertimeMarker,
   timerDeadlineTs,
 } from '../utils/offerLifecycle';
 
@@ -144,29 +142,28 @@ function offerSideLabel(offer: any): string {
   return offer?.offer_type === 'buy' ? 'خرید' : 'فروش'
 }
 
+function userActionLabel(offer: any): string {
+  return offer?.offer_type === 'buy' ? 'فروش' : 'خرید'
+}
+
 function remainingFieldLabel(offer: any): string {
   return isTradedHistoryOffer(offer) ? 'مقدار' : 'باقی‌مانده'
 }
 
 function tradeButtonAriaLabel(offer: any, amount: number): string {
+  const action = userActionLabel(offer)
   const side = offerSideLabel(offer)
   const commodity = offer?.commodity_name || 'کالا'
   if (isPending(offer.id, amount)) {
-    return `تأیید نهایی ${side} ${amount} عدد ${commodity} به قیمت ${getDisplayedOfferPrice(offer).toLocaleString()} تومان`
+    return `تأیید نهایی اقدام شما: ${action} ${amount} عدد ${commodity} در برابر لفظ ${side} به قیمت ${getDisplayedOfferPrice(offer).toLocaleString()} تومان`
   }
-  return `انتخاب مقدار ${amount} عدد برای ${side} ${commodity}`
-}
-
-function decisionSummary(offer: any): string {
-  const amount = pendingAmountFor(offer)
-  if (amount == null) return ''
-  return `${offerSideLabel(offer)} ${amount.toLocaleString()} عدد ${offer?.commodity_name || 'کالا'} · قیمت هر عدد ${getDisplayedOfferPrice(offer).toLocaleString()} تومان · باقی‌مانده ${getOfferRemainingQuantity(offer).toLocaleString()} عدد`
+  return `انتخاب مقدار ${amount} عدد برای اقدام شما: ${action} در برابر لفظ ${side} ${commodity}`
 }
 
 function expectedTradeResult(offer: any): string {
   const amount = pendingAmountFor(offer)
   if (amount == null) return ''
-  return `ثبت معامله ${amount.toLocaleString()} عدد از این لفظ ${offerSideLabel(offer)}`
+  return `ثبت ${userActionLabel(offer)} ${amount.toLocaleString()} عدد در برابر این لفظ ${offerSideLabel(offer)}`
 }
 
 function handlePendingEscape(event: KeyboardEvent) {
@@ -225,8 +222,41 @@ function cardTimerStyle(offer: any): Record<string, string> {
 }
 
 function isCritical(offer: any): boolean {
-  if (isOvertimePhase(offer) || isFinalTailPhase(offer)) return false
+  if (isFinalTailPhase(offer) || isInteractionLocked(offer)) return false
   return timerDeadlineTs(offer) != null && getTimerPercent(offer) < 15
+}
+
+function deadlinePhase(offer: any): 'normal' | 'overtime' | 'critical' {
+  if (isOvertimePhase(offer)) return 'overtime'
+  if (isCritical(offer)) return 'critical'
+  return 'normal'
+}
+
+function formatDeadlineClock(offer: any): string {
+  const deadline = timerDeadlineTs(offer)
+  if (deadline == null) return ''
+  const remaining = Math.max(0, Math.ceil(deadline - now.value))
+  const minutes = Math.floor(remaining / 60)
+  const seconds = remaining % 60
+  return `${minutes}:${String(seconds).padStart(2, '0')}`
+}
+
+function deadlineLabel(offer: any): string {
+  const clock = formatDeadlineClock(offer)
+  if (isOvertimePhase(offer)) return clock ? `وقت اضافه · ${clock}` : 'وقت اضافه'
+  return clock ? `مهلت اصلی · ${clock}` : 'مهلت اصلی'
+}
+
+function showOvertimeBadge(offer: any): boolean {
+  return isOvertimePhase(offer) && !isReadOnlyOffer(offer)
+}
+
+function showFinalTailBadge(offer: any): boolean {
+  return isFinalTailPhase(offer)
+}
+
+function showOvertimeTradeBadge(offer: any): boolean {
+  return isTradedHistoryOffer(offer) && offer?.overtime_trade_committed === true
 }
 
 function hasTimer(offer: any): boolean {
@@ -262,14 +292,6 @@ function isInteractionLocked(offer: any): boolean {
     return true
   }
   return false
-}
-
-function shouldShowOvertimeMarker(offer: any): boolean {
-  return showOvertimeMarker(offer)
-}
-
-function isMarkerAnimated(offer: any): boolean {
-  return isOvertimeMarkerAnimated(offer)
 }
 
 function getFiniteNumber(value: unknown): number | null {
@@ -816,14 +838,9 @@ async function cancelOwnOffer(offerId: number) {
           class="offer-card-inner"
           :class="[offer.offer_type, { 'is-decision-focus': isDecisionFocus(offer) }]"
         >
-          <span v-if="!isReadOnlyOffer(offer)" class="offer-trade-rail" aria-hidden="true"></span>
-          <AppOfferHistoryStamp
-            v-if="getHistoryStampLabel(offer)"
-            :label="getHistoryStampLabel(offer)"
-            :traded="isTradedHistoryOffer(offer)"
-          />
+          <span class="offer-trade-rail" aria-hidden="true"></span>
 
-          <!-- Header: role badge + time; ⏳ at RTL end beside relative time -->
+          <!-- Header: role badge + lifecycle chips + time -->
           <div class="offer-header">
             <div class="offer-classification">
               <AppOfferSideBadge :side="offer.offer_type" />
@@ -831,18 +848,36 @@ async function cancelOwnOffer(offerId: number) {
                 class="offer-settlement"
                 :settlement-type="offer.settlement_type"
               />
+              <AppOfferHistoryStamp
+                v-if="getHistoryStampLabel(offer)"
+                :label="getHistoryStampLabel(offer)"
+                :traded="isTradedHistoryOffer(offer)"
+              />
+              <span
+                v-if="showOvertimeBadge(offer)"
+                class="offer-lifecycle-chip offer-lifecycle-chip--overtime"
+                data-test="offer-overtime-badge"
+              >
+                <Hourglass :size="13" aria-hidden="true" />
+                وقت اضافه
+              </span>
+              <span
+                v-if="showFinalTailBadge(offer)"
+                class="offer-lifecycle-chip offer-lifecycle-chip--final-tail"
+                data-test="offer-final-tail-badge"
+              >
+                مهلت پایان یافته
+              </span>
+              <span
+                v-if="showOvertimeTradeBadge(offer)"
+                class="offer-lifecycle-chip offer-lifecycle-chip--overtime-trade"
+                data-test="offer-overtime-trade-badge"
+              >
+                معامله در وقت اضافه
+              </span>
             </div>
             <div class="offer-meta-end">
               <span class="offer-time">{{ timeAgo(offer.created_at) }}</span>
-              <span
-                v-if="shouldShowOvertimeMarker(offer)"
-                class="overtime-marker"
-                :class="{
-                  'overtime-marker--animated': isMarkerAnimated(offer),
-                  'overtime-marker--static': !isMarkerAnimated(offer),
-                }"
-                aria-hidden="true"
-              >⏳</span>
             </div>
           </div>
 
@@ -878,6 +913,9 @@ async function cancelOwnOffer(offerId: number) {
             <p v-if="offer.notes" class="offer-notes">
               توضیحات: {{ offer.notes }}
             </p>
+            <p v-if="showFinalTailBadge(offer)" class="offer-final-tail-copy">
+              در حال نهایی‌سازی
+            </p>
           </div>
 
           <div
@@ -887,13 +925,16 @@ async function cancelOwnOffer(offerId: number) {
             role="status"
             aria-live="polite"
           >
-            <p class="offer-decision-prompt">مقدار معامله را انتخاب کنید</p>
+            <p class="offer-decision-title">مرور و تأیید معامله</p>
+            <p data-test="offer-decision-side">نوع لفظ: {{ offerSideLabel(offer) }}</p>
+            <p data-test="offer-decision-action">اقدام شما: {{ userActionLabel(offer) }} {{ pendingAmountFor(offer)?.toLocaleString() }} عدد</p>
             <p class="offer-decision-selected">
               مقدار انتخاب‌شده: {{ pendingAmountFor(offer)?.toLocaleString() }} عدد
             </p>
-            <p class="offer-decision-summary">{{ decisionSummary(offer) }}</p>
+            <p>قیمت هر عدد: {{ getDisplayedOfferPrice(offer).toLocaleString() }} تومان</p>
+            <p>باقی‌مانده: {{ getOfferRemainingQuantity(offer).toLocaleString() }} عدد</p>
             <p class="offer-decision-result">{{ expectedTradeResult(offer) }}</p>
-            <p class="offer-decision-hint">تأیید نهایی با لمس دوبارهٔ همان مقدار</p>
+            <p class="offer-decision-hint">برای تأیید، همان مقدار را دوباره انتخاب کنید</p>
             <button
               type="button"
               class="offer-decision-cancel"
@@ -931,6 +972,24 @@ async function cancelOwnOffer(offerId: number) {
                 <Loader2 v-if="cancelingOfferId === offer.id" class="inline animate-spin mr-1" :size="14" />
                 منقضی کردن لفظ
               </button>
+            </div>
+          </div>
+
+          <div
+            v-if="hasTimer(offer)"
+            class="offer-deadline"
+            :data-phase="deadlinePhase(offer)"
+            :data-critical="isCritical(offer) ? 'true' : 'false'"
+          >
+            <p class="offer-deadline-label" data-test="offer-deadline-label">{{ deadlineLabel(offer) }}</p>
+            <div
+              class="offer-deadline-bar"
+              data-test="offer-deadline-bar"
+              :data-phase="deadlinePhase(offer)"
+              :data-critical="isCritical(offer) ? 'true' : 'false'"
+              aria-hidden="true"
+            >
+              <span class="offer-deadline-fill"></span>
             </div>
           </div>
 
@@ -986,78 +1045,28 @@ async function cancelOwnOffer(offerId: number) {
 
 /* ── Offers list ── */
 .offers-list {
+  --market-focus-ring: var(--ds-primary-800);
   display: flex;
   flex-direction: column;
   gap: 10px;
 }
 
-/* ── Card wrapper (timer border ring) ── */
+/* ── Card wrapper ── */
 .offer-card-wrap {
+  --market-focus-ring: var(--ds-primary-800);
   position: relative;
   border-radius: var(--ds-radius-md);
-  border: 3px solid rgba(229, 231, 235, 0.45);
-}
-
-.offer-card-wrap.has-timer {
-  border-color: transparent;
-}
-
-.offer-card-wrap.is-history {
-  border-color: transparent;
-}
-
-.offer-card-wrap.has-timer::before {
-  content: '';
-  position: absolute;
-  inset: -3px;
-  border-radius: var(--ds-radius-md);
-  padding: 3px;
-  background: conic-gradient(
-    from 0deg at 50% 50%,
-    hsl(calc(var(--t-pct) * 1.6) 82% 45%)          calc(var(--t-pct) * 1% - 1%),
-    hsl(calc(var(--t-pct) * 1.6) 82% 45% / 0.12)   calc(var(--t-pct) * 1%),
-    rgba(229, 231, 235, 0.35)                        calc(var(--t-pct) * 1%)
-  );
-  -webkit-mask:
-    linear-gradient(#fff 0 0) content-box,
-    linear-gradient(#fff 0 0);
-  mask:
-    linear-gradient(#fff 0 0) content-box,
-    linear-gradient(#fff 0 0);
-  -webkit-mask-composite: xor;
-          mask-composite: exclude;
-  pointer-events: none;
-  z-index: 1;
-}
-
-/* Overtime: restart as a green lifetime ring (server timer_total_seconds). */
-.offer-card-wrap.has-timer.timer-overtime::before {
-  background: conic-gradient(
-    from 0deg at 50% 50%,
-    hsl(152 72% 38%)          calc(var(--t-pct) * 1% - 1%),
-    hsl(152 72% 38% / 0.14)   calc(var(--t-pct) * 1%),
-    rgba(229, 231, 235, 0.35) calc(var(--t-pct) * 1%)
-  );
-}
-
-.offer-card-wrap.timer-critical::before {
-  animation: ring-pulse 1.2s ease-in-out infinite;
-}
-
-@keyframes ring-pulse {
-  0%, 100% { opacity: 1; }
-  50%      { opacity: 0.4; }
+  border: 1px solid var(--ds-border-light);
 }
 
 /* ── Inner card ── */
 .offer-card-inner {
   position: relative;
   background: var(--ds-bg-card);
-  border-radius: calc(var(--ds-radius-md) - 3px);
-  padding: 10px 11px 9px;
+  border-radius: var(--ds-radius-md);
+  padding: 10px 11px 12px;
   padding-inline-start: 16px;
   z-index: 0;
-  overflow: hidden;
 }
 
 .offer-trade-rail {
@@ -1077,133 +1086,80 @@ async function cancelOwnOffer(offerId: number) {
 }
 
 .offer-card-wrap.is-decision-focus {
-  box-shadow: 0 0 0 2px var(--ds-primary-400);
-}
-
-.offer-card-inner.is-decision-focus {
-  padding-bottom: 12px;
+  box-shadow: 0 0 0 2px var(--market-focus-ring);
 }
 
 .offer-card-wrap.is-history .offer-card-inner {
   background: var(--ds-bg-surface);
-  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
-  padding-top: 34px;
 }
 
 .offer-card-wrap.is-expired .offer-card-inner {
-  background:
-    linear-gradient(90deg, rgba(71, 85, 105, 0.24), rgba(148, 163, 184, 0.15) 42%, rgba(241, 245, 249, 0.92) 100%),
-    var(--ds-bg-surface);
-  box-shadow: 0 1px 3px rgba(71, 85, 105, 0.05);
+  background: #f8fafc;
 }
 
 .offer-card-wrap.is-traded .offer-card-inner {
-  background:
-    linear-gradient(90deg, rgba(13, 148, 136, 0.28), rgba(20, 184, 166, 0.16) 42%, rgba(236, 253, 245, 0.94) 100%),
-    var(--ds-bg-surface);
-  box-shadow: 0 1px 3px rgba(15, 118, 110, 0.07);
+  background: #f0fdfa;
 }
 
-.offer-card-wrap.is-expired .offer-card-inner::before,
-.offer-card-wrap.is-traded .offer-card-inner::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  width: 4px;
-  pointer-events: none;
+.offer-card-wrap.is-expired .offer-trade-rail {
+  background: #94a3b8;
 }
 
-.offer-card-wrap.is-expired .offer-card-inner::before {
-  background: rgba(100, 116, 139, 0.52);
+.offer-card-wrap.is-traded .offer-trade-rail {
+  background: #0f766e;
 }
 
-.offer-card-wrap.is-traded .offer-card-inner::before {
-  background: rgba(13, 148, 136, 0.62);
-}
-
-.offer-card-wrap.is-expired .offer-header,
-.offer-card-wrap.is-expired .offer-body {
-  opacity: 0.58;
-}
-
-.offer-card-wrap.is-traded .offer-header,
-.offer-card-wrap.is-traded .offer-body {
-  opacity: 0.92;
+.offer-card-wrap.is-history .role-badge {
+  opacity: 0.78;
 }
 
 .offer-card-wrap.is-history .price,
 .offer-card-wrap.is-history .commodity {
-  color: var(--ds-text-secondary);
+  color: var(--ds-text-primary);
 }
 
-.history-ribbon {
-  position: absolute;
-  top: 8px;
-  left: 50%;
-  z-index: 2;
-  min-width: 74px;
-  transform: translateX(-50%) rotate(-7deg);
-  transform-origin: center;
-  border-radius: 5px;
+.history-ribbon,
+.offer-lifecycle-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  min-height: 22px;
+  padding: 2px 8px;
+  border-radius: 999px;
   font-size: 11px;
-  font-weight: 900;
-  line-height: 1.1;
-  text-align: center;
-  letter-spacing: 0;
-  padding: 4px 10px 3px;
-  box-shadow:
-    inset 0 0 0 1px rgba(185, 28, 28, 0.22),
-    0 1px 0 rgba(185, 28, 28, 0.08);
-  opacity: 0.9;
-  pointer-events: none;
+  font-weight: 800;
+  line-height: 1.2;
+  border: 1px solid transparent;
 }
 
 .expired-ribbon {
-  background: rgba(239, 68, 68, 0.06);
-  color: var(--ds-danger-700);
-  border: 2px solid rgba(185, 28, 28, 0.72);
+  background: #f1f5f9;
+  color: #475569;
+  border-color: #cbd5e1;
 }
 
 .traded-ribbon {
-  min-width: 92px;
-  background: rgba(20, 184, 166, 0.08);
+  background: #ccfbf1;
   color: #0f766e;
-  border: 2px solid rgba(15, 118, 110, 0.72);
-  box-shadow:
-    inset 0 0 0 1px rgba(15, 118, 110, 0.22),
-    0 1px 0 rgba(15, 118, 110, 0.08);
+  border-color: #5eead4;
 }
 
-.history-ribbon::before,
-.history-ribbon::after {
-  content: '';
-  position: absolute;
-  inset: 2px;
-  border-radius: 3px;
-  pointer-events: none;
+.offer-lifecycle-chip--overtime {
+  background: var(--ds-warning-50);
+  color: var(--ds-warning-700);
+  border-color: var(--ds-warning-500);
 }
 
-.expired-ribbon::before {
-  border: 1px solid rgba(185, 28, 28, 0.32);
+.offer-lifecycle-chip--final-tail {
+  background: #f8fafc;
+  color: #475569;
+  border-color: #cbd5e1;
 }
 
-.traded-ribbon::before {
-  border: 1px solid rgba(15, 118, 110, 0.32);
-}
-
-.history-ribbon::after {
-  inset: -1px 5px;
-  transform: rotate(2deg);
-}
-
-.expired-ribbon::after {
-  border-color: rgba(185, 28, 28, 0.14);
-}
-
-.traded-ribbon::after {
-  border-color: rgba(15, 118, 110, 0.14);
+.offer-lifecycle-chip--overtime-trade {
+  background: var(--ds-warning-50);
+  color: var(--ds-warning-700);
+  border-color: var(--ds-warning-600);
 }
 
 /* Subtle outer shadow for depth */
@@ -1256,8 +1212,6 @@ async function cancelOwnOffer(offerId: number) {
   justify-content: flex-end;
   gap: 2px;
   flex: 0 0 auto;
-  /* Fixed footprint so marker animation on/off never shifts header content. */
-  min-width: 4.75rem;
   min-height: 14px;
 }
 
@@ -1268,63 +1222,82 @@ async function cancelOwnOffer(offerId: number) {
   white-space: nowrap;
 }
 
-.overtime-marker {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 14px;
-  height: 14px;
-  flex: 0 0 14px;
+.offer-final-tail-copy {
+  margin: 0.45rem 0 0;
   font-size: 12px;
-  line-height: 1;
-  transform-origin: center center;
+  font-weight: 700;
+  color: #475569;
 }
 
-.overtime-marker--animated {
-  animation: overtime-hourglass 1.8s ease-in-out infinite;
+.offer-deadline {
+  display: grid;
+  gap: 0.28rem;
+  margin-top: 0.7rem;
+  padding-inline-start: 0;
 }
 
-.overtime-marker--static {
-  animation: none;
+.offer-deadline-label {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--ds-text-secondary);
 }
 
-@keyframes overtime-hourglass {
-  0% {
-    transform: translateY(0) rotateX(0deg);
-  }
-  35% {
-    transform: translateY(-1px) rotateX(180deg);
-  }
-  55% {
-    transform: translateY(0) rotateX(180deg);
-  }
-  70% {
-    transform: translateX(1px) rotateX(180deg);
-  }
-  85% {
-    transform: translateX(-1px) rotateX(180deg);
-  }
-  100% {
-    transform: translateX(0) rotateX(180deg);
-  }
+.offer-deadline-bar {
+  height: 4px;
+  border-radius: 999px;
+  background: #e2e8f0;
+  overflow: hidden;
+}
+
+.offer-deadline-fill {
+  display: block;
+  height: 100%;
+  width: calc(var(--t-pct, 100) * 1%);
+  border-radius: inherit;
+  background: var(--ds-primary-600);
+}
+
+.offer-deadline[data-phase="overtime"] .offer-deadline-label {
+  color: var(--ds-warning-700);
+}
+
+.offer-deadline[data-phase="overtime"] .offer-deadline-fill {
+  background: var(--ds-warning-600);
+  animation: deadline-breathe 2.4s ease-in-out infinite;
+}
+
+.offer-deadline[data-critical="true"] .offer-deadline-label,
+.offer-deadline[data-phase="critical"] .offer-deadline-label {
+  color: var(--ds-danger-700);
+}
+
+.offer-deadline[data-critical="true"] .offer-deadline-fill,
+.offer-deadline[data-phase="critical"] .offer-deadline-fill {
+  background: var(--ds-danger-600);
+  animation: deadline-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes deadline-breathe {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.72; }
+}
+
+@keyframes deadline-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .offer-card-wrap.timer-critical::before {
-    animation: none;
-  }
-
-  .overtime-marker--animated {
-    animation: none;
-  }
-
+  .offer-deadline-fill,
+  .offer-deadline[data-phase="overtime"] .offer-deadline-fill,
+  .offer-deadline[data-critical="true"] .offer-deadline-fill,
+  .offer-deadline[data-phase="critical"] .offer-deadline-fill,
   .trade-btn,
+  .trade-btn.pending,
   .cancel-own-offer-btn {
-    transition: none;
-  }
-
-  .trade-btn.pending {
     animation: none;
+    transition: none;
   }
 }
 
@@ -1388,9 +1361,15 @@ async function cancelOwnOffer(offerId: number) {
   border: 1px solid var(--ds-border-medium);
 }
 
-.offer-decision-prompt,
+.offer-decision-panel p {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--ds-text-primary);
+}
+
+.offer-decision-title,
 .offer-decision-selected,
-.offer-decision-summary,
 .offer-decision-result,
 .offer-decision-hint {
   margin: 0;
@@ -1399,6 +1378,7 @@ async function cancelOwnOffer(offerId: number) {
   color: var(--ds-text-primary);
 }
 
+.offer-decision-title,
 .offer-decision-selected,
 .offer-decision-result {
   font-weight: 800;
@@ -1423,8 +1403,8 @@ async function cancelOwnOffer(offerId: number) {
 }
 
 .offer-decision-cancel:focus-visible {
-  outline: 3px solid rgba(245, 158, 11, 0.34);
-  outline-offset: 3px;
+  outline: 2px solid var(--market-focus-ring);
+  outline-offset: 2px;
 }
 
 .quantity-badge {
@@ -1487,7 +1467,7 @@ async function cancelOwnOffer(offerId: number) {
 }
 
 .trade-btn:active {
-  transform: scale(0.96);
+  filter: brightness(0.96);
 }
 
 .trade-btn.buy {
@@ -1516,8 +1496,8 @@ async function cancelOwnOffer(offerId: number) {
 }
 
 .trade-btn:focus-visible {
-  outline: 3px solid rgba(245, 158, 11, 0.34);
-  outline-offset: 3px;
+  outline: 2px solid var(--market-focus-ring);
+  outline-offset: 2px;
 }
 
 .trade-btn.busy {
@@ -1551,6 +1531,11 @@ async function cancelOwnOffer(offerId: number) {
   align-items: center;
   justify-content: center;
   transition: all 0.2s;
+}
+
+.cancel-own-offer-btn:focus-visible {
+  outline: 2px solid var(--market-focus-ring);
+  outline-offset: 2px;
 }
 
 .cancel-own-offer-btn:hover {
@@ -1618,4 +1603,31 @@ async function cancelOwnOffer(offerId: number) {
 /* ── Toasts ── */
 .fade-enter-active, .fade-leave-active { transition: opacity 0.3s ease; }
 .fade-enter-from, .fade-leave-to { opacity: 0; }
+
+@media (min-width: 1024px) {
+  .offers-list {
+    gap: 14px;
+  }
+
+  .offer-card-inner {
+    padding: 14px 16px 14px;
+    padding-inline-start: 20px;
+  }
+
+  .offer-main {
+    grid-template-columns: minmax(0, 1.15fr) minmax(12rem, 0.85fr);
+    align-items: end;
+    column-gap: 1.5rem;
+  }
+
+  .offer-metrics {
+    justify-content: flex-end;
+    gap: 1.25rem;
+    flex-wrap: nowrap;
+  }
+
+  .commodity {
+    font-size: 15px;
+  }
+}
 </style>

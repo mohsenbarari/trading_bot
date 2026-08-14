@@ -56,12 +56,21 @@ function clearPending() {
   pendingAmount.value = null
 }
 
+function offerSideLabel(): string {
+  return props.offerTypeLabel || (props.offerType === 'buy' ? 'خرید' : 'فروش')
+}
+
+function userActionLabel(): string {
+  return props.offerType === 'buy' ? 'فروش' : 'خرید'
+}
+
 function lotButtonAriaLabel(amount: number): string {
-  const side = props.offerTypeLabel || (props.offerType === 'buy' ? 'خرید' : 'فروش')
+  const action = userActionLabel()
+  const side = offerSideLabel()
   if (pendingAmount.value === amount) {
-    return `تأیید نهایی ${side} ${amount.toLocaleString()} عدد ${props.commodityName} به قیمت ${props.price.toLocaleString()} تومان`
+    return `تأیید نهایی اقدام شما: ${action} ${amount.toLocaleString()} عدد ${props.commodityName} در برابر لفظ ${side} به قیمت ${props.price.toLocaleString()} تومان`
   }
-  return `انتخاب مقدار ${amount.toLocaleString()} عدد برای ${side} ${props.commodityName}`
+  return `انتخاب مقدار ${amount.toLocaleString()} عدد برای اقدام شما: ${action} در برابر لفظ ${side} ${props.commodityName}`
 }
 
 function handleEscape(event: KeyboardEvent) {
@@ -185,11 +194,13 @@ onBeforeUnmount(() => {
             </div>
 
             <div class="trade-suggestion-recap" data-test="trade-suggestion-recap">
+              <p>نوع لفظ: {{ offerSideLabel() }}</p>
               <p>باقی‌مانده: {{ props.remainingQuantity.toLocaleString() }} عدد</p>
               <p>قیمت هر عدد: {{ props.price.toLocaleString() }} تومان</p>
+              <p v-if="pendingAmount !== null">اقدام شما: {{ userActionLabel() }} {{ pendingAmount.toLocaleString() }} عدد</p>
               <p v-if="pendingAmount !== null">مقدار انتخاب‌شده: {{ pendingAmount.toLocaleString() }} عدد</p>
-              <p v-if="pendingAmount !== null">نتیجه مورد انتظار: ثبت معامله {{ pendingAmount.toLocaleString() }} عدد از این لفظ {{ props.offerTypeLabel }}</p>
-              <p v-if="pendingAmount !== null">تأیید نهایی با لمس دوبارهٔ همان مقدار</p>
+              <p v-if="pendingAmount !== null">نتیجه مورد انتظار: ثبت {{ userActionLabel() }} {{ pendingAmount.toLocaleString() }} عدد در برابر این لفظ {{ offerSideLabel() }}</p>
+              <p v-if="pendingAmount !== null">برای تأیید، همان مقدار را دوباره انتخاب کنید</p>
             </div>
 
             <div v-if="props.availableLots.length > 0" class="trade-suggestion-actions">
@@ -464,8 +475,8 @@ onBeforeUnmount(() => {
 }
 
 .trade-suggestion-lot-btn:focus-visible {
-  outline: 3px solid rgba(245, 158, 11, 0.34);
-  outline-offset: 3px;
+  outline: 2px solid var(--ds-primary-800);
+  outline-offset: 2px;
 }
 
 .trade-suggestion-lot-btn.busy {
@@ -497,8 +508,8 @@ onBeforeUnmount(() => {
 }
 
 .trade-suggestion-dismiss:focus-visible {
-  outline: 3px solid rgba(245, 158, 11, 0.34);
-  outline-offset: 3px;
+  outline: 2px solid var(--ds-primary-800);
+  outline-offset: 2px;
 }
 
 @media (prefers-reduced-motion: reduce) {

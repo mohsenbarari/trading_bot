@@ -1327,6 +1327,8 @@ onUnmounted(() => {
 
 <style scoped>
 .market-page {
+  --market-rail-max: var(--ds-page-max-width);
+  --market-focus-ring: var(--ds-primary-800);
   display: flex;
   flex-direction: column;
   height: 100dvh;
@@ -1355,7 +1357,7 @@ onUnmounted(() => {
   align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
-  max-width: var(--ds-page-max-width);
+  max-width: var(--market-rail-max);
   width: 100%;
   margin: 0 auto;
 }
@@ -1410,33 +1412,12 @@ onUnmounted(() => {
   color: var(--ds-text-secondary);
 }
 
-@media (min-width: 1024px) {
-  .market-page {
-    --market-column-max: 60rem;
-  }
-
-  .market-title-row,
-  .header-controls,
-  .content-inner,
-  .action-bar-inner,
-  .market-notification-error {
-    max-width: var(--market-column-max);
-  }
-
-  .market-runtime-notice,
-  .admin-market-message {
-    max-width: var(--market-column-max);
-    margin-left: auto;
-    margin-right: auto;
-  }
-}
-
 .header-controls {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
   gap: 0.65rem;
-  max-width: var(--ds-page-max-width);
+  max-width: var(--market-rail-max);
   width: 100%;
   margin: 0 auto;
 }
@@ -1463,7 +1444,7 @@ onUnmounted(() => {
 }
 
 .market-notification-error {
-  max-width: var(--ds-page-max-width);
+  max-width: var(--market-rail-max);
   width: 100%;
   margin: -0.25rem auto 0;
   padding: 0 0.1rem;
@@ -1510,7 +1491,7 @@ onUnmounted(() => {
 .market-settlement-filter-chips,
 .market-commodity-filter-chips {
   width: max-content;
-  min-height: 40px;
+  min-height: 44px;
   padding: 0;
   overflow: visible;
   border: 0;
@@ -1521,7 +1502,7 @@ onUnmounted(() => {
 .market-filter-chips :deep(.ui-filter-chip),
 .market-settlement-filter-chips :deep(.ui-filter-chip),
 .market-commodity-filter-chips :deep(.ui-filter-chip) {
-  min-height: 2.5rem;
+  min-height: 44px;
 }
 
 .market-settlement-filter-chips :deep(.ui-filter-chip.is-active) {
@@ -1539,15 +1520,15 @@ onUnmounted(() => {
 .send-btn:focus-visible,
 .recent-offer-item:focus-visible,
 .admin-market-message-expand:focus-visible {
-  outline: 3px solid rgba(245, 158, 11, 0.34);
-  outline-offset: 3px;
+  outline: 2px solid var(--market-focus-ring);
+  outline-offset: 2px;
 }
 
 @media (max-width: 430px) {
   .market-filter-chips :deep(.ui-filter-chip),
   .market-settlement-filter-chips :deep(.ui-filter-chip),
   .market-commodity-filter-chips :deep(.ui-filter-chip) {
-    min-height: 2.5rem;
+    min-height: 44px;
     padding-inline: 0.6rem;
   }
 
@@ -1566,7 +1547,9 @@ onUnmounted(() => {
 }
 
 .market-runtime-notice {
-  margin: 0.75rem 1rem 0;
+  max-width: var(--market-rail-max);
+  width: calc(100% - 2rem);
+  margin: 0.75rem auto 0;
   padding: 0.8rem 1rem;
   border-radius: var(--ds-radius-lg);
   font-size: 0.84rem;
@@ -1588,7 +1571,9 @@ onUnmounted(() => {
 }
 
 .admin-market-message {
-  margin: 0.75rem 1rem 0;
+  max-width: var(--market-rail-max);
+  width: calc(100% - 2rem);
+  margin: 0.75rem auto 0;
   padding: 0.72rem 0.95rem;
   border-radius: var(--ds-radius-lg);
   background: linear-gradient(135deg, rgba(255, 251, 235, 0.98), rgba(236, 253, 245, 0.95));
@@ -1631,7 +1616,7 @@ onUnmounted(() => {
 }
 
 .content-inner {
-  max-width: var(--ds-page-max-width);
+  max-width: var(--market-rail-max);
   margin: 0 auto;
   padding: 0 1rem;
   width: 100%;
@@ -1653,7 +1638,7 @@ onUnmounted(() => {
 }
 
 .action-bar-inner {
-  max-width: var(--ds-page-max-width);
+  max-width: var(--market-rail-max);
   margin: 0 auto;
   display: flex;
   flex-direction: column;
@@ -1880,4 +1865,10 @@ onUnmounted(() => {
 .fade-enter-from, .fade-leave-to { opacity: 0; }
 
 .ltr { direction: ltr; }
+
+@media (min-width: 1024px) {
+  .market-page {
+    --market-rail-max: 60rem;
+  }
+}
 </style>

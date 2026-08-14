@@ -137,7 +137,7 @@ onBeforeUnmount(() => {
             {{ offer.commodity_name }} {{ offer.quantity }} عدد {{ formattedPrice }}
           </div>
           <div class="offer-preview-recap" data-test="offer-preview-recap">
-            <p>نوع معامله: {{ tradeLabel }}</p>
+            <p>نوع لفظ شما: {{ tradeLabel }}</p>
             <p>مقدار: {{ offer.quantity.toLocaleString() }} عدد</p>
             <p>قیمت هر عدد: {{ formattedPrice }} تومان</p>
             <p>نتیجه مورد انتظار: {{ expectedPublishResult }}</p>
@@ -253,8 +253,8 @@ onBeforeUnmount(() => {
 
 .offer-preview-close:focus-visible,
 .offer-preview-actions button:focus-visible {
-  outline: 3px solid rgba(245, 158, 11, 0.34);
-  outline-offset: 3px;
+  outline: 2px solid var(--ds-primary-800);
+  outline-offset: 2px;
 }
 
 .offer-preview-recap {
