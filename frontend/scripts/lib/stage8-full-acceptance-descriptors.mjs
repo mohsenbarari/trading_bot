@@ -67,7 +67,26 @@ function authIdleNoPageData(surface) {
   )
 }
 
-function listStates({ endpoint, itemSelector, emptySelector, loadingSelector, errorSelector, staleField, staleTrigger, retrySelector, settleSelector }) {
+function noSecondInFlightGet(surface, endpoint, extra) {
+  return na(
+    `${surface} cannot start a second in-flight GET to ${endpoint} from the success-path UI. ${extra}`,
+  )
+}
+
+function listStates({
+  endpoint,
+  itemSelector,
+  emptySelector,
+  loadingSelector,
+  errorSelector,
+  staleField,
+  staleTrigger,
+  retrySelector,
+  settleSelector,
+  staleApplicable = true,
+  staleReason = '',
+  staleRefreshSelector = '',
+}) {
   return {
     loading: yes({
       endpoint,
@@ -102,12 +121,15 @@ function listStates({ endpoint, itemSelector, emptySelector, loadingSelector, er
       selector: errorSelector,
       settle: errorSelector,
     }),
-    stale: yes({
-      endpoint,
-      field: staleField,
-      trigger: staleTrigger,
-      selector: itemSelector,
-    }),
+    stale: staleApplicable
+      ? yes({
+          endpoint,
+          field: staleField,
+          trigger: staleTrigger,
+          selector: itemSelector,
+          refreshSelector: staleRefreshSelector,
+        })
+      : na(staleReason),
   }
 }
 
@@ -182,13 +204,16 @@ const DESCRIPTORS = {
       }),
       empty: yes({
         endpoint: '/api/offers/page',
-        selector: '.offers-list, .active-load-error, [role="status"]',
-        settle: '.offers-list, .active-load-error',
+        selector: '[data-test="offers-empty-state"], .empty-state',
+        settle: '[data-test="offers-empty-state"], .empty-state',
       }),
-      normal: yes({ endpoint: '/api/offers/page', selector: '.offer-card, .offers-list' }),
+      normal: yes({
+        endpoint: '/api/offers/page',
+        selector: '[data-test="offer-card"], .offer-card-wrap, .offers-list',
+      }),
       dense: yes({
         endpoint: '/api/offers/page',
-        selector: '.offer-card, .offers-list',
+        selector: '[data-test="offer-card"], .offer-card-wrap, .offers-list',
         minItems: 8,
       }),
       error: yes({
@@ -203,12 +228,11 @@ const DESCRIPTORS = {
         endpoint: '/api/offers/page',
         selector: '.active-load-error, [role="alert"]',
       }),
-      stale: yes({
-        endpoint: '/api/offers/page',
-        field: 'notes',
-        trigger: 'in-page-refresh',
-        selector: '.offer-card, .offers-list',
-      }),
+      stale: noSecondInFlightGet(
+        'market / useOffers.fetchOffers',
+        '/api/offers/page',
+        'isFetching queues a later refresh; a second GET does not start until the first settles, so a late stale overwrite cannot occur.',
+      ),
     },
     touch: na(
       'Market hides the standard bottom nav and the remaining FAB nav is not a one-click non-mutating target.',
@@ -251,6 +275,9 @@ const DESCRIPTORS = {
       staleTrigger: 'in-page-refresh',
       retrySelector: '.customer-detail-retry, button:has-text("تلاش")',
       settleSelector: '.workspace-relation-list, .ui-empty-state, .ui-loading-state',
+      staleApplicable: false,
+      staleReason:
+        'operations-customers cannot start a second in-flight GET to /api/customers/owner-relations from the success-path UI. loadRelations(true) is bound only to error-path تلاش دوباره, and overlapping calls abort via relationsRequestGeneration.',
     }),
     touch: yes({
       selector: '.ui-list-item, .customer-pending-card, a[href^="/operations"]',
@@ -264,31 +291,30 @@ const DESCRIPTORS = {
     canonical: null,
     states: {
       loading: yes({
-        endpoint: '/api/customers/owner-relations/9001',
+        endpoint: '/api/customers/owner-relations',
         selector: '.ui-loading-state',
       }),
       empty: noListInventory('customer detail', 'Detail shows one relation, not empty/dense lists.'),
       normal: yes({ settle: '.customer-detail-shell, .ui-empty-state, .ui-loading-state' }),
       dense: noListInventory('customer detail'),
       error: yes({
-        endpoint: '/api/customers/owner-relations/9001',
+        endpoint: '/api/customers/owner-relations',
         selector: '[role="alert"], .ui-empty-state--danger',
         retry: '.customer-detail-retry',
       }),
       slow: yes({
-        endpoint: '/api/customers/owner-relations/9001',
+        endpoint: '/api/customers/owner-relations',
         selector: '.ui-loading-state',
       }),
       offline: yes({
-        endpoint: '/api/customers/owner-relations/9001',
+        endpoint: '/api/customers/owner-relations',
         selector: '[role="alert"], .ui-empty-state--danger',
       }),
-      stale: yes({
-        endpoint: '/api/customers/owner-relations/9001',
-        field: 'management_name',
-        trigger: 'in-page-refresh',
-        selector: '.customer-detail-header, .customer-detail-shell',
-      }),
+      stale: noSecondInFlightGet(
+        'operations-customers-detail / loadRelations',
+        '/api/customers/owner-relations',
+        'The detail route first fetches the collection; success-path UI has no second identical GET, and overlapping calls abort via relationsRequestGeneration.',
+      ),
     },
     touch: yes({
       selector: 'button:has-text("بازگشت"), a[href="/operations/customers"], .workspace-back, .ui-page-header button',
@@ -309,6 +335,9 @@ const DESCRIPTORS = {
       staleTrigger: 'in-page-refresh',
       retrySelector: 'button:has-text("تلاش")',
       settleSelector: '.workspace-relation-list, .ui-empty-state, .ui-loading-state',
+      staleApplicable: false,
+      staleReason:
+        'operations-accountants cannot start a second in-flight GET to /api/accountants/owner-relations from the success-path UI. loadRelations(true) is bound only to error-path تلاش دوباره, and overlapping calls abort the previous controller.',
     }),
     touch: yes({
       selector: '.ui-list-item, .accountant-pending-card',
@@ -321,29 +350,29 @@ const DESCRIPTORS = {
     canonical: null,
     states: {
       loading: yes({
-        endpoint: '/api/accountants/owner-relations/9002',
+        endpoint: '/api/accountants/owner-relations',
         selector: '.ui-loading-state',
       }),
       empty: noListInventory('accountant detail'),
       normal: yes({ settle: '.ui-empty-state, .ui-loading-state, .app-route-v2-scope' }),
       dense: noListInventory('accountant detail'),
       error: yes({
-        endpoint: '/api/accountants/owner-relations/9002',
+        endpoint: '/api/accountants/owner-relations',
         selector: '[role="alert"], .ui-empty-state--danger',
       }),
       slow: yes({
-        endpoint: '/api/accountants/owner-relations/9002',
+        endpoint: '/api/accountants/owner-relations',
         selector: '.ui-loading-state',
       }),
       offline: yes({
-        endpoint: '/api/accountants/owner-relations/9002',
+        endpoint: '/api/accountants/owner-relations',
         selector: '[role="alert"], .ui-empty-state--danger',
       }),
-      stale: yes({
-        endpoint: '/api/accountants/owner-relations/9002',
-        field: 'management_name',
-        trigger: 'in-page-refresh',
-      }),
+      stale: noSecondInFlightGet(
+        'operations-accountants-detail / loadRelations',
+        '/api/accountants/owner-relations',
+        'The detail route first fetches the collection; success-path UI has no second identical GET, and overlapping calls abort the previous controller.',
+      ),
     },
     touch: yes({
       selector: 'button:has-text("بازگشت"), a[href="/operations/accountants"], .workspace-back, .ui-page-header button',
@@ -427,6 +456,9 @@ const DESCRIPTORS = {
       staleTrigger: 'in-page-refresh',
       retrySelector: 'button:has-text("تلاش")',
       settleSelector: '.ui-empty-state, .notification-item, .ds-loading-state',
+      staleApplicable: false,
+      staleReason:
+        'account-notifications cannot start a second in-flight GET to /api/notifications from the success-path UI. fetchHistory coalesces on activeHistoryRequest, so a later open/retry returns the same in-flight promise.',
     }),
     touch: yes({
       selector: 'a[href="/account"], .hub-action, [href="/account"]',
@@ -567,6 +599,7 @@ const DESCRIPTORS = {
       staleTrigger: 'in-page-refresh',
       retrySelector: 'button:has-text("تلاش")',
       settleSelector: '.pending-row, .ui-empty-state, .ui-loading-state',
+      staleRefreshSelector: '.pending-refresh-btn',
     }),
     touch: yes({
       selector: '.admin-subview-return',
@@ -606,6 +639,9 @@ const DESCRIPTORS = {
       staleTrigger: 'in-page-refresh',
       retrySelector: 'button:has-text("تلاش")',
       settleSelector: '.user-item, .ui-empty-state, [aria-busy="true"]',
+      staleApplicable: false,
+      staleReason:
+        'admin-users cannot start a second in-flight GET to /api/users/ from the success-path UI. retryUsers is error-path only, and fetchUsers abort-gates overlapping calls with usersRequestSequence.',
     }),
     touch: yes({
       selector: '.user-item, .ui-list-item',
@@ -645,6 +681,9 @@ const DESCRIPTORS = {
       staleTrigger: 'in-page-refresh',
       retrySelector: 'button:has-text("تلاش")',
       settleSelector: '.list-group, .ui-empty-state, [aria-busy="true"]',
+      staleApplicable: false,
+      staleReason:
+        'admin-commodities cannot start a second in-flight GET to /api/commodities from the success-path UI. commodity-list-retry is error-path only, and fetchCommodities abort-gates overlapping calls with listRequestSequence.',
     }),
     touch: yes({
       selector: '.admin-subview-return, .commodity-back-control',

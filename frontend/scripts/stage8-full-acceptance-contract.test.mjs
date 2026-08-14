@@ -322,6 +322,31 @@ describe('Stage 8 descriptor contract is fail-closed', () => {
     expect(runtimeSource).toMatch(/stateApplicabilityFromDescriptor/)
   })
 
+  it('marks stale N/A only where source cannot start a second in-flight GET', () => {
+    expect(getRouteDescriptor('market').states.stale.applicable).toBe(false)
+    expect(getRouteDescriptor('market').states.stale.reason).toMatch(/isFetching/)
+    expect(getRouteDescriptor('operations-customers').states.stale.applicable).toBe(false)
+    expect(getRouteDescriptor('operations-customers').states.stale.reason).toMatch(
+      /\/api\/customers\/owner-relations/,
+    )
+    expect(getRouteDescriptor('operations-customers-detail').states.stale.applicable).toBe(false)
+    expect(getRouteDescriptor('operations-accountants').states.stale.applicable).toBe(false)
+    expect(getRouteDescriptor('operations-accountants-detail').states.stale.applicable).toBe(false)
+    expect(getRouteDescriptor('admin-users').states.stale.applicable).toBe(false)
+    expect(getRouteDescriptor('admin-users').states.stale.reason).toMatch(/usersRequestSequence/)
+    expect(getRouteDescriptor('account-notifications').states.stale.applicable).toBe(false)
+    expect(getRouteDescriptor('account-notifications').states.stale.reason).toMatch(/activeHistoryRequest/)
+    expect(getRouteDescriptor('admin-commodities').states.stale.applicable).toBe(false)
+    expect(getRouteDescriptor('admin-invitations').states.stale.applicable).toBe(true)
+    expect(getRouteDescriptor('admin-invitations').states.stale.refreshSelector).toBe('.pending-refresh-btn')
+    expect(getRouteDescriptor('operations-customers-detail').states.loading.endpoint).toBe(
+      '/api/customers/owner-relations',
+    )
+    expect(getRouteDescriptor('operations-accountants-detail').states.loading.endpoint).toBe(
+      '/api/accountants/owner-relations',
+    )
+  })
+
   it('keeps general /settings free of session-list states', () => {
     const settings = getRouteDescriptor('settings')
     expect(settings.states.loading.applicable).toBe(false)
@@ -381,7 +406,13 @@ describe('Stage 8 descriptor contract is fail-closed', () => {
     expect(BINDING_PATHS).toContain('frontend/scripts/lib/stage8-full-acceptance-constants.mjs')
     expect(browserSource).toMatch(/getRouteDescriptor/)
     expect(browserSource).toMatch(/waitForPendingRequest/)
+    expect(browserSource).toMatch(/waitForMountedPendingMidProbe/)
+    expect(browserSource).not.toMatch(/s8stale/)
+    expect(browserSource).toMatch(/refreshSelector/)
     expect(browserSource).toMatch(/unnamedFingerprints/)
+    expect(runtimeSource).toMatch(/offer-card-wrap/)
+    expect(runtimeSource).toMatch(/offers-empty-state/)
+    expect(runtimeSource).toMatch(/category: 'trade'/)
   })
 })
 

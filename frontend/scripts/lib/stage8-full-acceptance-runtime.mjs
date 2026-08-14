@@ -543,7 +543,8 @@ export function apiFixture(pathname, method, profile, mode = 'normal') {
       body: 'متن مصنوعی اعلان',
       is_read: false,
       created_at: FIXED_TIME,
-      kind: 'system',
+      kind: 'trade',
+      category: 'trade',
     })))
   }
   if (pathname === '/api/notifications/preferences') return known({ market_offer_push_enabled: true })
@@ -1026,19 +1027,34 @@ export async function readStage8Status(page) {
   })
 }
 
+function statusHasPending(status, pathname = '') {
+  if (!pathname) return status.inFlight > 0
+  return Object.entries(status.inFlightByPath || {}).some(
+    ([path, count]) => count > 0 && matchesStaleEndpoint(path, pathname),
+  )
+}
+
 export async function waitForPendingRequest(page, pathname = '', timeout = 3000) {
   const started = Date.now()
   while (Date.now() - started < timeout) {
     const status = await readStage8Status(page)
-    const pending = pathname
-      ? Object.entries(status.inFlightByPath || {}).some(
-          ([path, count]) => count > 0 && matchesStaleEndpoint(path, pathname),
-        )
-      : status.inFlight > 0
-    if (pending) return { ...status, pendingRequest: true }
+    if (statusHasPending(status, pathname)) return { ...status, pendingRequest: true }
     await page.waitForTimeout(40)
   }
   return { ...(await readStage8Status(page)), pendingRequest: false }
+}
+
+export async function waitForMountedPendingMidProbe(page, pathname = '', timeout = 8000) {
+  const started = Date.now()
+  let last = { pendingRequest: false }
+  while (Date.now() - started < timeout) {
+    const mounted = (await page.locator('html[data-app-mounted="1"]').count()) > 0
+    const status = await readStage8Status(page)
+    last = { ...status, pendingRequest: statusHasPending(status, pathname) }
+    if (mounted && last.pendingRequest) return last
+    await page.waitForTimeout(40)
+  }
+  return last
 }
 
 export async function waitForNetworkSettle(page, timeout = 15000) {
@@ -1240,7 +1256,7 @@ export async function collectUiProbe(page) {
     )
     const emptyNode = [
       ...document.querySelectorAll(
-        '.ui-empty-state, .ds-empty-state, .operations-empty-state, .chat-empty-state, [data-empty]',
+        '.ui-empty-state, .ds-empty-state, .operations-empty-state, .chat-empty-state, [data-test="offers-empty-state"], .empty-state, [data-empty]',
       ),
     ].find(visible)
     const errorVisible = [
@@ -1259,6 +1275,8 @@ export async function collectUiProbe(page) {
         [
           '[data-test*="row"]',
           '.offer-card',
+          '.offer-card-wrap',
+          '[data-test="offer-card"]',
           '.session-card',
           '.notification-item',
           '.pending-row',

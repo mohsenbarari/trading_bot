@@ -99,6 +99,11 @@ describe('stage8 full-acceptance fixture contract', () => {
       'تازه-پذیرش',
     )
     expect(apiFixture('/api/invitations/pending', 'GET', profile, 'dense').body).toHaveLength(24)
+    expect(apiFixture('/api/notifications', 'GET', profile, 'dense').body).toHaveLength(24)
+    expect(apiFixture('/api/notifications', 'GET', profile, 'normal').body[0]).toMatchObject({
+      category: 'trade',
+    })
+    expect(apiFixture('/api/notifications', 'GET', profile, 'stale-old').body[0].title).toBe('کهنه-پذیرش')
   })
 
   it('names the local PWA lane as a simulation and never re-injects Telegram from the stub', () => {
@@ -112,6 +117,9 @@ describe('stage8 full-acceptance fixture contract', () => {
     expect(runtimeSource).not.toMatch(/return ALL_STATES\.map\(yes\)/)
     expect(runtimeSource).toMatch(/stateApplicabilityFromDescriptor/)
     expect(runtimeSource).toMatch(/\/__stage8\/status/)
+    expect(runtimeSource).toMatch(/waitForMountedPendingMidProbe/)
+    expect(browserSource).toMatch(/waitForMountedPendingMidProbe/)
+    expect(browserSource).not.toMatch(/s8stale/)
   })
 
   it('fails closed when the matrix drifts from source and the runner sees sourceDrift', () => {

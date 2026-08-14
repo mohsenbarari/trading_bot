@@ -34,6 +34,7 @@ import {
   stateApplicability,
   visitPathFor,
   waitForApp,
+  waitForMountedPendingMidProbe,
   waitForNetworkSettle,
   waitForPendingRequest,
 } from './lib/stage8-full-acceptance-runtime.mjs'
@@ -139,45 +140,31 @@ async function runScenario({
     const target = `${baseUrl}${visitPathFor(route)}`
     await page.goto(target, { waitUntil: 'domcontentloaded', timeout: 30_000 })
     if (state === 'loading' || state === 'slow') {
-      await page.locator('html[data-app-mounted="1"]').waitFor({ state: 'attached', timeout: 20_000 }).catch(() => {})
-      const pending = await waitForPendingRequest(page, descriptor.states[state].endpoint || '', 8000)
+      const pending = await waitForMountedPendingMidProbe(
+        page,
+        descriptor.states[state].endpoint || '',
+        8000,
+      )
       midProbe = await collectUiProbe(page)
       midProbe.identityRequestCount = serverState.identityRequestCount
       midProbe.pendingRequest = pending.pendingRequest
       await waitForNetworkSettle(page)
       await waitForApp(page)
     } else if (state === 'stale' && expected.kind === 'render-route') {
-      await waitForPendingRequest(page, descriptor.states.stale.endpoint || '', 2500)
-      const refresh = page.locator(
-        [
-          descriptor.states.stale.trigger === 'in-page-refresh' ? '' : '',
-          '.pending-refresh-btn',
-          '.user-load-retry',
-          '.sessions-retry',
-          '.customer-detail-refresh-retry',
-          '.notification-history-retry',
-          '.commodity-list-retry',
-          'button:has-text("به‌روزرسانی")',
-          'button:has-text("تلاش دوباره")',
-          'button:has-text("تلاش مجدد")',
-        ]
-          .filter(Boolean)
-          .join(', '),
-      )
-      if ((await refresh.count()) > 0) {
-        await refresh.first().click({ timeout: 1500 }).catch(() => {})
-      } else {
-        await page.evaluate(() => {
-          const app = document.querySelector('#app')?.__vue_app__
-          const router = app?.config?.globalProperties?.$router
-          const current = router?.currentRoute?.value
-          if (!router || !current) return null
-          return router.replace({
-            name: current.name,
-            params: current.params,
-            query: { ...current.query, s8stale: '2' },
-          })
-        })
+      const staleEndpoint = descriptor.states.stale.endpoint || ''
+      await waitForPendingRequest(page, staleEndpoint, 8000)
+      const refreshSelector = descriptor.states.stale.refreshSelector || ''
+      if (refreshSelector) {
+        const refresh = page.locator(refreshSelector)
+        if ((await refresh.count()) > 0) {
+          await refresh.first().click({ timeout: 1500 }).catch(() => {})
+        }
+      }
+      const staleWaitStarted = Date.now()
+      while (Date.now() - staleWaitStarted < 4000) {
+        const hits = Object.values(serverState.staleHits || {}).reduce((sum, value) => sum + value, 0)
+        if (hits >= 2) break
+        await page.waitForTimeout(50)
       }
       await waitForNetworkSettle(page)
       await waitForApp(page)
