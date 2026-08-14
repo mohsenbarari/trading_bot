@@ -50,7 +50,7 @@ Stage 6 به‌صورت route-scoped، rollback-safe و با گیت مستقل �
 - dialogهای حساس تحویل‌شدهٔ Phase 4–13 به‌علاوهٔ بازنشانی غیر بازار در `/admin/system` اکنون با `AppConfirmDialog` هستند؛
 - تنها `confirm` زندهٔ باقی‌مانده در `TradingSettings` حذف استثنای تقویم بازار است و عمداً داخل interior محافظت‌شده می‌ماند؛
 - پوستهٔ غیرمحافظت‌شدهٔ Admin Messages شکاف دیدنی نداشت و patch نشد؛
-- Sites برای این closure الزام checkpoint نیست و ساخته نشده است.
+- Sites خصوصی owner-only پس از freeze ورودی‌ها اجرا و بررسی شد؛ این evidence است نه استقرار محصول.
 
 `/market`، `/chat`، `/share-receive`، `/admin/channels`، interiorهای market/messenger در `AdminMessagesView` و کنترل‌های بازار `TradingSettings` و Home Market همچنان protected/out-of-scope هستند. overlay مجاز CreateChannel از `0d7f2760` حفظ شده و گسترش نیافته است.
 
@@ -83,7 +83,7 @@ rollback به revert commit مستقل Phase 1 محدود است؛ پس از rol
 
 Figma منبع اصلی طراحی است. Phase 1 boundary card و proof موبایل ورودی مدیریت، Phase 2 directory/desktop/recovery، Phase 3 privacy/authority، Phase 4 invitation management، Phase 5 block confirmation، Phase 6 workspace account deletion، Phase 7 session-termination safe recovery، Phase 8 relation-mutation safe recovery، Phase 9 commodity deletion exact-receipt safe recovery، Phase 10 admin user deletion exact-receipt safe recovery، Phase 11 account-security session exact-receipt safe recovery، Phase 12 account-storage local-clear confirmation، Phase 13 admin account-status confirmation، Phase 14 admin user chrome unification، Phase 15 admin user directory list unification، Phase 16 public-profile remaining chrome unification، Phase 17 admin custom-date trigger unification، Phase 18 public-profile remaining token unification و Phase 19 public-profile action-card token unification را ثبت می‌کند؛ pending-attention canonical فقط در state دارای دادهٔ واقعی باقی می‌ماند و به runtime نسبت داده نمی‌شود. Phaseهای 3 تا 19 siblingهای page-level root هستند؛ این caveat مانع از ادعای nested bundle می‌شود.
 
-Sites در Stage 6 هنوز هیچ mutation، repo/project، preview یا deployment ندارد. اگر و فقط اگر scope گسترده‌تر مجاز و closure جداگانه آغاز شود، ابتدا inputs immutable freeze می‌شوند و سپس یک repo/project تازه و private owner-only برای evidence ساخته می‌شود. آن preview product deployment نیست و هیچ staging/production را تغییر نمی‌دهد.
+Sites در Stage 6 پس از freeze ورودی‌ها به‌صورت project تازه، private و owner-only برای evidence ساخته و بررسی شد. آن preview استقرار محصول نیست و هیچ staging یا production را تغییر نمی‌دهد. Figma تاریخی overwrite نشده است.
 
 ## ۸. رسید Phase 1
 
@@ -380,6 +380,6 @@ Stage 6 روی runtime `3e62accd` بسته است و **`stage6CompleteAuthority=
 - evidence: `docs/uiux-stage6-admin-profile/STAGE6_CLOSURE_EVIDENCE_MANIFEST.json`.
 - تنها gap بسته‌شده در این closure: جایگزینی native confirm بازنشانی تنظیمات غیر بازار.
 - Figma: section زندهٔ `645:1693` sibling صفحهٔ `321:18`؛ Phaseهای تاریخی overwrite نشده‌اند.
-- Sites: explicit non-requirement؛ هیچ project/preview تازه‌ای ساخته نشده است.
+- Sites: evidence خصوصی owner-only اجرا و بررسی شد؛ `requiredByCheckpoint=true`، `executed=true`، visibility=`private-owner-only`؛ استقرار محصول نیست. Receipt: `docs/uiux-stage6-admin-profile/STAGE6_PRIVATE_SITES_CLOSURE_RECEIPT.json`.
 - Stage 7 مرحلهٔ بعدی مجاز است. Stage 8 همچنان `270 / 0 full / 12 slices / 163 scenarios / authority=false` است و تا پس از merge اجرا نمی‌شود.
 - هیچ merge، push، staging یا production انجام نشده است.

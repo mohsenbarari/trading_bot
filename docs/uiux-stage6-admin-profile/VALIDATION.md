@@ -298,10 +298,10 @@ post-fix read-only audit: `assets/figma/final-provenance-20260811T204635Z/stage6
 | unknown/mutating API | `0` / `0` |
 | unexpected console | `0` پس از طبقه‌بندی 403 fixture |
 | Figma sibling | `645:1693` روی page `321:18`؛ historical overwrite نشده |
-| Sites | explicit non-requirement؛ اجرا نشده |
+| Sites | evidence خصوصی owner-only اجرا و بررسی شد؛ project `appgprj_6a7ee21d0f288191b8f7f3221d3aff14`؛ version `appgprj_6a7ee21d0f288191b8f7f3221d3aff14~appgver_8797af6c5af481918d77b6509424e68d`؛ deployment `appgdep_6a7ee780c6988191bffa60213296e7cf`؛ visibility=`private-owner-only`؛ owner قابل مشاهده؛ ناشناس `401` + `no-store`؛ public/staging/production=`false` |
 
 تنها `ACTIONABLE_GAP` بسته‌شده: native `confirm` بازنشانی تنظیمات غیر بازار در `TradingSettings.vue`، commit `3e62accd`.
 
 Stage 8 دست‌نخورده مانده: `270` / full `0` / slices `12` / scenarios `163` / authority `false`.
 
-جزئیات ماشین‌خوان در `STAGE6_CLOSURE_LEDGER.json` (SHA-256 `9d5e660cd690cb666b1cc33d6146cd953b8b787e8c11eae26f6895149ded168e`) و `STAGE6_CLOSURE_EVIDENCE_MANIFEST.json` (SHA-256 `df071f52184dabb7a24bf80a3c8cdbbbc6bbe5537549f7d09a916d5bc128679b`) است.
+جزئیات ماشین‌خوان در `STAGE6_CLOSURE_LEDGER.json` (SHA-256 `fd13fa2aae27a6d514eeb4a0e9d22647f115f37fdc92aadac9e52ffea6260787`)، `STAGE6_CLOSURE_EVIDENCE_MANIFEST.json` (SHA-256 `8330517eba375445e245b43de4046421c649f9ea29b330771663947e733cc2fd`) و `STAGE6_PRIVATE_SITES_CLOSURE_RECEIPT.json` (SHA-256 `fdbb5e195729dda41698393c91da8601332a844077f80e22221c31ca1e9849ed`) است.

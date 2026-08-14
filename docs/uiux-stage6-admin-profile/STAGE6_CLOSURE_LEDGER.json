@@ -28,10 +28,22 @@
     "remainingInScopeCount": 0
   },
   "sites": {
-    "requiredByCheckpoint": false,
-    "executed": false,
-    "disposition": "owner-authorized-explicit-non-requirement",
-    "reason": "Checkpoint section 7 requires a private Sites project only if a separate Sites closure starts after an immutable freeze. This closure uses Figma sibling evidence only."
+    "requiredByCheckpoint": true,
+    "executed": true,
+    "disposition": "private-owner-only-evidence-executed-and-verified",
+    "kind": "private-owner-only-evidence-not-product-deployment",
+    "receipt": "docs/uiux-stage6-admin-profile/STAGE6_PRIVATE_SITES_CLOSURE_RECEIPT.json",
+    "projectId": "appgprj_6a7ee21d0f288191b8f7f3221d3aff14",
+    "repositoryId": "appgrepo_a04d2bc3f8a88191a446b3ccf67c3e75",
+    "versionId": "appgprj_6a7ee21d0f288191b8f7f3221d3aff14~appgver_8797af6c5af481918d77b6509424e68d",
+    "deploymentId": "appgdep_6a7ee780c6988191bffa60213296e7cf",
+    "visibility": "private-owner-only",
+    "ownerAccessVerified": true,
+    "anonymousAccessDenied": true,
+    "publicPublishing": false,
+    "stagingDeployment": false,
+    "productionDeployment": false,
+    "countsTowardStage8Acceptance": false
   },
   "nextAuthorizedStage": 7,
   "stage8Boundary": {

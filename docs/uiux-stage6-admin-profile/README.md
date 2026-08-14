@@ -11,9 +11,9 @@
 - authority: `stage6CompleteAuthority=true`
 - in-scope deferred: صفر
 - next authorized stage: Stage 7
-- Sites: non-requirement صریح؛ اجرا نشده است
+- Sites: evidence خصوصی owner-only اجرا و بررسی شد؛ استقرار محصول نیست
 
-مرجع ماشین‌خوان: [STAGE6_CLOSURE_LEDGER.json](STAGE6_CLOSURE_LEDGER.json) و [STAGE6_CLOSURE_EVIDENCE_MANIFEST.json](STAGE6_CLOSURE_EVIDENCE_MANIFEST.json).
+مرجع ماشین‌خوان: [STAGE6_CLOSURE_LEDGER.json](STAGE6_CLOSURE_LEDGER.json)، [STAGE6_CLOSURE_EVIDENCE_MANIFEST.json](STAGE6_CLOSURE_EVIDENCE_MANIFEST.json) و [STAGE6_PRIVATE_SITES_CLOSURE_RECEIPT.json](STAGE6_PRIVATE_SITES_CLOSURE_RECEIPT.json).
 
 ## مرز تحویل‌شده
 
@@ -43,6 +43,7 @@
 
 - [STAGE6_CLOSURE_LEDGER.json](STAGE6_CLOSURE_LEDGER.json): verdict هر الزام داخل محدوده.
 - [STAGE6_CLOSURE_EVIDENCE_MANIFEST.json](STAGE6_CLOSURE_EVIDENCE_MANIFEST.json): گیت تست، مرورگر، Figma و مرز Stage 8.
+- [STAGE6_PRIVATE_SITES_CLOSURE_RECEIPT.json](STAGE6_PRIVATE_SITES_CLOSURE_RECEIPT.json): evidence خصوصی owner-only؛ استقرار محصول نیست.
 - [RUNTIME_CONTRACT.md](RUNTIME_CONTRACT.md): privacy، authority، route و recovery contract.
 - [CONTENT_NECESSITY_MATRIX.md](CONTENT_NECESSITY_MATRIX.md): هر سطح باقی‌مانده و علت آن.
 - [ROUTE_SURFACE_MANIFEST.json](ROUTE_SURFACE_MANIFEST.json): route/state boundary.
@@ -60,6 +61,6 @@ artifactهای allowlisted زیر `assets/` برای review تاریخیِ Phase
 - dialog حساس داخل محدوده با `AppConfirmDialog` بسته است؛ تنها `confirm` زنده‌ای که باقی مانده حذف تقویم بازار است و عمداً محافظت‌شده است.
 - پوستهٔ غیرمحافظت‌شدهٔ Admin Messages شکاف دیدنی نداشت (`PASS_NO_PATCH`).
 - بازنشانی غیر بازار در تنظیمات سیستم با dialog مشترک بسته شد.
-- Sites برای این closure الزام نیست و ساخته نشده است.
+- Sites خصوصی owner-only پس از freeze ورودی‌ها اجرا و بررسی شد؛ این evidence است نه استقرار محصول.
 
 سطح‌های محافظت‌شده complete معرفی نمی‌شوند؛ آن‌ها `PROTECTED_OUT_OF_SCOPE` می‌مانند.

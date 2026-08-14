@@ -56,8 +56,8 @@
   },
   "completion": {
     "stage6CompleteAuthority": true,
-    "sitesStarted": false,
-    "sitesDisposition": "owner-authorized-explicit-non-requirement",
+    "sitesStarted": true,
+    "sitesDisposition": "private-owner-only-evidence-executed-and-verified",
     "stagingOrProductionChanged": false
   },
   "claimBoundary": "Historical messenger overlay remains exact. Closure addendum records the Stage 6 reset-dialog disposition and unchanged protected hashes. Protected surfaces are not marked complete.",

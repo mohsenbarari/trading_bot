@@ -1,0 +1,97 @@
+{
+  "schemaVersion": 1,
+  "stage": 6,
+  "kind": "stage6-private-sites-closure-receipt",
+  "status": "passed",
+  "claimBoundary": "This receipt proves a private owner-only Sites evidence preview for Stage 6 admin and profile closure. It is not a product, staging, or production deployment and does not count toward Stage 8 acceptance.",
+  "source": {
+    "branch": "condidate/webapp-ui-ux-redesign-v2",
+    "runtimeFreeze": {
+      "commit": "3e62accdd157bed5dc6f2ed974e56e07c7349910",
+      "tree": "3f4a186e46b12aee326c699cd1975ba34e485be7"
+    },
+    "frontendTree": "b9bd7247632dbc52222294ca0127c564a99d3c96"
+  },
+  "closureBaseline": {
+    "head": "c995d2e18b353830a10dbec78c3fa0747593e5d1",
+    "tree": "35b842e94f69a6b17bfbbdb884b47c4657f927e3",
+    "parent": "1816ac6745630dcb081ee7840df5c5bc4c47ef88"
+  },
+  "freeze": {
+    "inputFreezeSha256": "bdc854fbaba026e25aff5716b647dc3260c378d9044ef90dfe160233fab5b169",
+    "frozenBeforeExternalMutation": true,
+    "hashes": {
+      "stage6LedgerBefore": "9d5e660cd690cb666b1cc33d6146cd953b8b787e8c11eae26f6895149ded168e",
+      "stage6EvidenceBefore": "df071f52184dabb7a24bf80a3c8cdbbbc6bbe5537549f7d09a916d5bc128679b",
+      "stage6CheckpointBefore": "97e76f24ce0336aa4c538e72df5b246d18e6712ac5a0057e9465d15bd09d04df",
+      "stage8Matrix": "846cc2f52df73a9442a130a72dcf308999f53faf583e410351032b9d7bd0a50b",
+      "stage8CreateChannelReceipt": "72c6077ede453ba7e624e5e01a08b58fa5aad7d41ed8e0410d3d6a99aceab9fa",
+      "productionDist": {
+        "fileCount": 169,
+        "sha256": "ee970be6ff3570f4c325c3f420c816b5fa61beb67a9b4071d208b2b3657c50db"
+      }
+    },
+    "figmaSafeIds": {
+      "fileKey": "z8jgJxST4O2APzWnlyP9gv",
+      "pageId": "321:18",
+      "finalClosureSectionId": "645:1693"
+    }
+  },
+  "sites": {
+    "projectId": "appgprj_6a7ee21d0f288191b8f7f3221d3aff14",
+    "repositoryId": "appgrepo_a04d2bc3f8a88191a446b3ccf67c3e75",
+    "repository": "appgprj_6a7ee21d0f288191b8f7f3221d3aff14",
+    "slug": "tb-uiux-stage6-admin-profile",
+    "versionId": "appgprj_6a7ee21d0f288191b8f7f3221d3aff14~appgver_8797af6c5af481918d77b6509424e68d",
+    "versionNumber": 1,
+    "deploymentId": "appgdep_6a7ee780c6988191bffa60213296e7cf",
+    "deploymentStatus": "succeeded",
+    "sourceCommit": "3d91ee6df133ddbf57668205648cacc2e651033a",
+    "sourceTree": "b065b2a50003cdb85d473914a91f7d626c61860a",
+    "sourceFileCount": 15,
+    "sourceManifestSha256": "bce62863c052073b978c78d752494a5bde89c6c92673a2a4b1117b6aa35dce36",
+    "visibility": "private-owner-only",
+    "access": {
+      "policy": "custom",
+      "effectiveScope": "owner_only",
+      "ownerCount": 1,
+      "groupCount": 0,
+      "externalVisitorCount": 0,
+      "editorCount": 0,
+      "currentCallerRole": "owner"
+    },
+    "ownerAccessVerified": true,
+    "anonymousAccessDenied": true,
+    "publicPublishing": false,
+    "stagingDeployment": false,
+    "productionDeployment": false,
+    "anonymousProbes": {
+      "requestContext": "anonymous_without_credentials_or_bypass",
+      "root": {
+        "path": "/",
+        "status": 401,
+        "cacheControl": "no-store",
+        "referrerPolicy": "no-referrer"
+      },
+      "evidence": {
+        "path": "/docs/uiux-stage6-admin-profile/stage6-admin-profile-evidence.html",
+        "status": 401,
+        "cacheControl": "no-store",
+        "referrerPolicy": "no-referrer"
+      }
+    }
+  },
+  "artifactRetentionBoundary": "Raw Sites source, credentials, access tokens, traces, and screenshots remain outside the product repository. This receipt stores only redacted identifiers, visibility, access results, and hashes.",
+  "privacyScan": {
+    "result": "passed",
+    "fullSitesUrlRecorded": false,
+    "tokenOrCredentialRecorded": false,
+    "otpRecorded": false,
+    "realEmailOrPhoneRecorded": false,
+    "localhostRecorded": false,
+    "internalPathRecorded": false,
+    "rawPayloadRecorded": false
+  },
+  "sitesEvidenceDigest": "fe49dbb8fa441d70830da0ca26a741588322bca8f92b68c5e3b943b2f7216802",
+  "countsTowardStage8Acceptance": false
+}
