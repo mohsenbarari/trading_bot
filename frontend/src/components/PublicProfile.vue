@@ -1876,6 +1876,7 @@ function handleHistoryPresetChipChange(value: string) {
         >
           <template #actions>
             <HelpPopover
+              comfortable-target
               button-test="public-profile-info-help"
               note-test="public-profile-info-help-note"
               label="راهنمای اطلاعات پروفایل"
@@ -1939,6 +1940,7 @@ function handleHistoryPresetChipChange(value: string) {
         <AppSectionCard class="profile-section-card card-with-help" title="لیست همکاران" description="اعضای قابل مشاهده پروژه را جستجو و از همین بخش باز کنید.">
           <template #actions>
             <HelpPopover
+              comfortable-target
               button-test="public-profile-project-users-help"
               note-test="public-profile-project-users-help-note"
               label="راهنمای لیست همکاران"
@@ -2011,6 +2013,7 @@ function handleHistoryPresetChipChange(value: string) {
         <AppSectionCard class="profile-section-card card-with-help" title="لیست حسابداران" description="عنوان هر ردیف همان نام نمایشی رابطه است و توضیح وظیفه، در صورت ثبت، زیر آن می‌آید.">
           <template #actions>
             <HelpPopover
+              comfortable-target
               button-test="public-profile-accountants-help"
               note-test="public-profile-accountants-help-note"
               label="راهنمای لیست حسابداران"
@@ -2042,6 +2045,7 @@ function handleHistoryPresetChipChange(value: string) {
         <AppSectionCard class="profile-section-card card-with-help" title="مشتریان این مالک" description="نمایش این بخش به حسابداران همان مالک و مدیر ارشد محدود است.">
           <template #actions>
             <HelpPopover
+              comfortable-target
               button-test="public-profile-customers-help"
               note-test="public-profile-customers-help-note"
               label="راهنمای مشتریان این مالک"
@@ -2085,6 +2089,7 @@ function handleHistoryPresetChipChange(value: string) {
           <template #actions>
             <HelpPopover
               floating
+              comfortable-target
               button-test="public-profile-visitor-menu-help"
               note-test="public-profile-visitor-menu-help-note"
               label="راهنمای منوی پروفایل عمومی"
@@ -2128,6 +2133,7 @@ function handleHistoryPresetChipChange(value: string) {
           <template #actions>
             <HelpPopover
               floating
+              comfortable-target
               button-test="public-profile-admin-menu-help"
               note-test="public-profile-admin-menu-help-note"
               label="راهنمای منوی مدیریت پروفایل"
@@ -2159,6 +2165,7 @@ function handleHistoryPresetChipChange(value: string) {
         <AppSectionCard class="profile-section-card card-with-help history-section-card" :title="tradeHistoryTitle" description="فیلترها و خروجی‌ها دقیقاً روی همین بازه و کالا اعمال می‌شوند.">
           <template #actions>
             <HelpPopover
+              comfortable-target
               button-test="public-profile-history-help"
               note-test="public-profile-history-help-note"
               label="راهنمای تاریخچه معاملات"
@@ -2347,6 +2354,7 @@ function handleHistoryPresetChipChange(value: string) {
           <template #actions>
             <HelpPopover
               floating
+              comfortable-target
               button-test="public-profile-owner-menu-help"
               note-test="public-profile-owner-menu-help-note"
               label="راهنمای منوی مالک"

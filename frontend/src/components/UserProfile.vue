@@ -1379,6 +1379,7 @@ async function confirmPendingAction() {
         <div v-if="!showSettings || !canPerformSensitiveAdminActions" class="main-actions profile-menu-card card-with-help">
             <HelpPopover
               floating
+              comfortable-target
               button-test="user-profile-admin-menu-help"
               note-test="user-profile-admin-menu-help-note"
               label="راهنمای منوی مدیریت کاربر"
@@ -1420,6 +1421,7 @@ async function confirmPendingAction() {
         <div v-else-if="canPerformSensitiveAdminActions" class="settings-menu profile-menu-card card-with-help">
           <HelpPopover
             floating
+            comfortable-target
             button-test="user-profile-settings-menu-help"
             note-test="user-profile-settings-menu-help-note"
             label="راهنمای زیرمنوی تنظیمات کاربر"
@@ -1612,6 +1614,7 @@ async function confirmPendingAction() {
       <div class="profile-user-actions profile-menu-card card-with-help">
         <HelpPopover
           floating
+          comfortable-target
           button-test="profile-user-actions-help"
           note-test="profile-user-actions-help-note"
           label="راهنمای پنل کاربری"

@@ -8,11 +8,13 @@ withDefaults(defineProps<{
   buttonTest?: string
   noteTest?: string
   floating?: boolean
+  comfortableTarget?: boolean
 }>(), {
   label: 'توضیحات',
   buttonTest: undefined,
   noteTest: undefined,
   floating: false,
+  comfortableTarget: false,
 })
 
 const isOpen = ref(false)
@@ -38,7 +40,13 @@ onUnmounted(clearTimer)
 </script>
 
 <template>
-  <span class="help-popover" :class="{ 'help-popover--floating': floating }">
+  <span
+    class="help-popover"
+    :class="{
+      'help-popover--floating': floating,
+      'help-popover--comfortable-target': comfortableTarget,
+    }"
+  >
     <button
       type="button"
       class="help-popover-trigger"
@@ -82,6 +90,14 @@ onUnmounted(clearTimer)
   color: #475569;
   cursor: pointer;
   transition: border-color 0.2s ease, color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
+}
+
+.help-popover--comfortable-target .help-popover-trigger {
+  box-sizing: border-box;
+  inline-size: 2.75rem;
+  block-size: 2.75rem;
+  min-inline-size: 2.75rem;
+  min-block-size: 2.75rem;
 }
 
 .help-popover-trigger:hover,
