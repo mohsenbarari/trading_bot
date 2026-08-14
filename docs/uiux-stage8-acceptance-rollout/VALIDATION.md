@@ -164,11 +164,23 @@ shared/global overflow workaround استفاده نشد. نه access outcomeها
 - ۹ access profile دقیق تعریف شده و هر route برای هر profile یک outcome و `evidenceRefs` دارد.
 - تعداد واقعی outcomeهای موردانتظار ۲۷۰ است.
 - چهار component canonical outcome مدیر میانی به source/test `AdminView` متصل‌اند.
-- `executedFullMatrixCellCount=0` است؛ دوازده partial synthetic slice جداگانه ثبت شده‌اند اما
-  به full matrix یا viewport/state/interaction/environment expansion افزوده نشده‌اند.
+- `executedFullMatrixCellCount=270` پس از اجرای رسمی محلی access است؛ دوازده partial
+  synthetic slice تاریخی جداگانه می‌مانند و به این عدد افزوده نشده‌اند.
 - نقش‌های واقعی از contextهای customer/accountant/owner جدا شده‌اند.
 
-این‌ها validation ساختاری و source-traceability هستند، نه اجرای browser/backend روی ۲۷۰ سلول.
+## Official local full run on merged Market A+C — 2026-08-15
+
+مرجع فنی جاری اجرای رسمی پنج‌فازی روی `main` ادغام‌شده است:
+`STAGE8_FULL_ACCEPTANCE_EXECUTION_RECEIPT.json`، run
+`stage8-full-acceptance-20260814T224708726Z`، report SHA-256
+`074b52bc2cd3c07bd20b9ff1c190c31e9f69fa8e8a5a392e9fcfd21d5477b07d`.
+
+۹۶۰ شناسه یکتا، ۲۷۰/۲۷۰ access، ۲۴۰/۲۴۰ viewport، ۱۲۰/۱۱۳/۸۷ applicable
+state/interaction/environment، صفر harness-deferred، صفر failure، صفر drift،
+صفر unknown/mutating/external. Gate A v3 روی `02162106` با report
+`aa6c94bfaa595e3ad1292078a1f2a13bea049c98abe2949e455aaafc3469247a` پیش از ادغام
+Market است، superseded است و promotable نیست. این اجرا مجوز staging/production/Sites
+نیست و تا تأیید صریح زیبایی مالک `acceptanceAuthority=false` می‌ماند.
 
 ## Focused checks and bounded browser receipts through 2026-08-14
 

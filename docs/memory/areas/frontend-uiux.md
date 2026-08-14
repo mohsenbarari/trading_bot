@@ -5,7 +5,7 @@ Load for Vue/PWA refactoring, Design System V2, Figma/Sites evidence, or shared 
 ## Decisions
 
 - 2026-08-14 | Main/UIUX integration keeps raw invitation validation at unconditional `410`, sends pre-auth Telegram replies through the shared runtime, and exposes eligible overtime preference at `/settings`. Market and Telegram inventory use exact integration overlays, not rewritten baselines. Reason: preserve security/UIUX and newer main behavior fail-closed.
-- 2026-08-14 | Stage 8 stays open: 270 expected / 0 full / 12 partial / 163 non-counting / `acceptanceAuthority=false`. Gate A v3 passed on the pre-Market tree; Market A+C is now integrated locally so final acceptance must rerun on the merged source. Prior v2 receipt stays non-promotable; no push, staging, or owner acceptance yet.
+- 2026-08-15 | Stage 8 open, owner sign-off pending: official local run on merged Market A+C `main` passed 960 IDs (270 access; 0 harness-deferred). `acceptanceAuthority=false`. Pre-Market Gate A v3 is non-promotable. No push/staging/Sites.
 - 2026-08-14 | Stage 7 is closed: NONE-only copy, keyboard, live-region and reduced-motion changes; protected routes retain 200ms. Follow-up cross-boundary evidence passed 12/12 with zero request failures.
 - 2026-08-14 | Stage 6 is closed: admin/profile projections remain server-authoritative; shared dialogs replace in-scope confirms. PII stays server-side, cancel/Escape never mutate, and FULL/MIXED plus the CreateChannel overlay remain protected.
 - 2026-08-11 | Owner-relation DELETE uses locked `expected_action`; Customer/Accountant query-only changes retain one root and scroll owner. Reason: prevent stale destructive escalation and remount races.

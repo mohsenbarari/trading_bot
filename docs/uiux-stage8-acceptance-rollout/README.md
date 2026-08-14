@@ -19,14 +19,14 @@
 - current bounded Account Hub singleton action-grid source: `656cf6c3b62111c5c7bae458e3ea6f61fd8af788` (evidence-only)
 - current bounded notification route-affordance source: `95ef7aa768f833c8e8b954d38b36674a77a304a9` (evidence-only)
 - current bounded CreateChannel help-popover placement source: `0d7f276006deb7f97d20ba07e6f9ecb4d1b48a79` (evidence-only)
-- authority: `stage8CompleteAuthority=false`
-- matrix status: `partial-browser-slice-executed-full-acceptance-pending`
+- authority: `stage8CompleteAuthority=false` و `acceptanceAuthority=false`
+- matrix status: `full-local-synthetic-acceptance-executed-owner-signoff-pending`
 - expected-access coverage: ۳۰ مسیر × ۹ پروفایل دقیق = ۲۷۰ outcome صریح
-- full matrix execution: صفر سلول؛ viewport/state/interaction/environment هنوز فقط requirement هستند
-- partial synthetic evidence: دوازده partial slice / ۱۶۳ partial scenario؛ چهار slice 8A، یک slice 8B typography، یک slice مستقل auth-containment با ۱۴ scenario، یک rebaseline مستقل directory/profile با ۴۰ scenario، یک slice postcommit roving-focus با ۸ scenario، یک slice long-text wrapping حساب با ۱۲ scenario، یک slice Account Hub singleton با ۴ scenario، یک slice notification route-affordance با ۳ scenario و یک slice CreateChannel help-popover placement با ۱۲ scenario ثبت شده‌اند؛ هیچ‌کدام به full matrix افزوده نمی‌شوند
-- owner aesthetic acceptance: انجام نشده
-- merge: انجام نشده
-- production/staging/Sites: انجام نشده
+- official local full run: ۹۶۰ شناسه روی `main` ادغام‌شدهٔ Market A+C؛ ۲۷۰/۲۷۰ access شمارش می‌شود؛ viewport/state/interaction/environment اجرا شد
+- Gate A v3 روی `02162106` پیش از ادغام Market است، superseded است و promotable نیست
+- partial synthetic evidence تاریخی: دوازده partial slice / ۱۶۳ partial scenario همچنان historical/non-counting می‌مانند و دوباره شمرده نشدند
+- owner aesthetic acceptance: در انتظار تأیید صریح مالک
+- production/staging/Sites: انجام نشده و این اجرا مجوز آن‌ها نیست
 
 ## اصلاح مدل دسترسی
 
@@ -43,6 +43,13 @@ guard فعلی علاوه بر نقش از `account_status`، `is_customer` و `
 این outcomeها انتظار ایستای normal-case هستند؛ authorization داخل component یا API،
 هویت شیء پارامتری، حالت inactive/unavailable و پذیرش بصری باید جداگانه اجرا و evidence-bound
 شوند. هیچ cross-product ساختگی یا ادعای ۵۱٬۹۶۸ سلول در این بسته وجود ندارد.
+
+## رسید اجرای رسمی محلی
+
+[STAGE8_FULL_ACCEPTANCE_EXECUTION_RECEIPT.json](STAGE8_FULL_ACCEPTANCE_EXECUTION_RECEIPT.json)
+مرجع فنی جاری روی `main` ادغام‌شدهٔ Market A+C است. Gate A v3 پیش از Market را
+overwrite یا promote نمی‌کند. screenshot خام داخل مخزن نیست. تأیید زیبایی مالک
+و مجوز staging/production/Sites هنوز وجود ندارد.
 
 ## شواهد محدود 8A، 8B، auth-containment، directory/profile، roving-focus، long-text-wrap، Account Hub، notification route-affordance و CreateChannel help-popover placement
 

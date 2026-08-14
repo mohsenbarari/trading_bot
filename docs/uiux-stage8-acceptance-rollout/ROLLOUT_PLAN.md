@@ -15,6 +15,11 @@ notification route-affordance در `STAGE8_NOTIFICATION_ROUTE_AFFORDANCE_EXECUTI
 ثبت شده‌اند؛
 هیچ‌کدام نتیجهٔ اجرای پذیرش تیمی یا authority عرضه نیستند.
 
+رسید رسمی محلی `STAGE8_FULL_ACCEPTANCE_EXECUTION_RECEIPT.json` اجرای پنج‌فازی روی
+`main` ادغام‌شدهٔ Market A+C را ثبت می‌کند و به `executedFullMatrixCellCount=270`
+وصل است. این رسید slice جزئی جدید نیست، Gate A v3 پیش از Market را promote نمی‌کند،
+و تا تأیید صریح مالک مجوز زیبایی، staging، production یا Sites نیست.
+
 ## پیش‌شرط تبدیل draft به پذیرش
 
 - هر اجرای واقعی باید route، access profile، viewport، state، interaction و environment

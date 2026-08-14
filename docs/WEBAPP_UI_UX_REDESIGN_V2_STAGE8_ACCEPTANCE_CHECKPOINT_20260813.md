@@ -1,10 +1,13 @@
 # Stage 8 — پیش‌نویس رهگیری پذیرش و عرضهٔ مرحله‌ای
 
-تاریخ: ۲۰۲۶-۰۸-۱۳
+تاریخ: ۲۰۲۶-۰۸-۱۵
 
-وضعیت: **`stage8_partial_synthetic_browser_slices_evidence_only_no_full_acceptance_no_production`**
+وضعیت: **`full-local-synthetic-acceptance-executed-owner-signoff-pending`**
 
-شاخه: `condidate/webapp-ui-ux-redesign-v2`
+شاخهٔ فنی جاری: `main` ادغام‌شدهٔ Market A+C. Gate A v3 روی `02162106` پیش از Market،
+superseded و non-promotable است. `acceptanceAuthority=false`.
+
+شاخهٔ تاریخی بستهٔ draft: `condidate/webapp-ui-ux-redesign-v2`
 
 source اصلاح shared-dependency: `82cb016e`
 
@@ -68,8 +71,10 @@ source محدود CreateChannel help-popover placement: `0d7f276006deb7f97d20ba0
 نسخهٔ ۳، ۳۰ × ۹ = ۲۷۰ نتیجهٔ normal-case router/guard را از source رهگیری می‌کند و چهار
 deep-link denied مدیر میانی (`/admin/channels`، `/admin/commodities`، `/admin/messages` و
 `/admin/system`) را نیز به canonicalization کامپوننتی `AdminView → /admin` متصل می‌کند.
-تعداد سلول‌های پذیرش کامل اجراشده صفر است؛ viewport، state، interaction و environment هنوز
-requirement هستند و به cell-level evidence کامل متصل نشده‌اند. بازار/پیام‌رسان redesign نشده‌اند.
+تعداد سلول‌های access اجراشدهٔ رسمی محلی ۲۷۰ است. گسترش viewport/state/interaction/environment
+روی همان اجرای رسمی انجام شد (۹۶۰ شناسه؛ ۱۳۰ N/A منبع‌محور). بازار A+C و پیام‌رسان disposition
+Stage 8 حفظ شده‌اند. تأیید زیبایی مالک هنوز pending است و این checkpoint مجوز
+staging/production/Sites نیست.
 
 ## ۳. شواهد محدود 8A/8B/auth-containment/directory-profile/account/notification و مرجع طراحی
 

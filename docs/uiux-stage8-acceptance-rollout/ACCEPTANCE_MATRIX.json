@@ -1,7 +1,7 @@
 {
   "schemaVersion": 3,
   "stage": 8,
-  "status": "partial-browser-slice-executed-full-acceptance-pending",
+  "status": "full-local-synthetic-acceptance-executed-owner-signoff-pending",
   "branch": "condidate/webapp-ui-ux-redesign-v2",
   "acceptanceAuthority": false,
   "sourceSnapshot": {
@@ -34,7 +34,7 @@
       "frontend/src/views/AdminView.test.ts": "c4d72ba4a353390c95752788431efe6831fde7451830aeef7780b8bdeb62ab57"
     }
   },
-  "claimBoundary": "This file enumerates normal-case source-derived route and component canonicalization outcomes. The separately recorded partial synthetic browser slices do not execute every role/route/viewport/state cell, do not create owner aesthetic acceptance, and are not merge, staging, Sites, or production authority.",
+  "claimBoundary": "This file enumerates source-derived route outcomes and records one official local synthetic full-acceptance run on merged Market A+C main. Owner aesthetic sign-off is pending. Historical partial slices remain non-counting. This is not staging, Sites, or production authority. Gate A v3 on 02162106 is pre-Market, superseded, and non-promotable.",
   "dimensionCorrection": {
     "previousProblem": "The prior schema treated customer, accountant, and group-lead as UserRole values and attached every profile to every route without an expected outcome.",
     "currentModel": "Access profiles combine authentication, the persisted role, account status, and customer/accountant relationship flags because the route guard uses all of those inputs.",
@@ -62,7 +62,7 @@
     "Parameterized route IDs are syntactically valid; component/API-level ownership and object authorization are outside this route-level matrix except for the explicitly listed AdminView canonicalization outcomes."
   ],
   "acceptanceDimensions": {
-    "status": "requirements-not-expanded; limited synthetic browser slices are recorded separately and do not satisfy full-matrix acceptance",
+    "status": "official-local-synthetic-full-run-executed-owner-signoff-pending; historical partial slices remain separately recorded and non-counting",
     "viewports": {
       "mobile": [
         360,
@@ -107,18 +107,36 @@
       "stage8-settings-notifications-wrap-execution-receipt",
       "stage8-account-hub-singleton-execution-receipt",
       "stage8-notification-route-affordance-execution-receipt",
-      "stage8-create-channel-help-popover-placement-execution-receipt"
+      "stage8-create-channel-help-popover-placement-execution-receipt",
+      "stage8-full-acceptance-execution-receipt"
     ]
   },
   "cellAccounting": {
     "routeCount": 30,
     "accessProfileCount": 9,
     "enumeratedExpectedAccessCells": 270,
-    "viewportStateInteractionEnvironmentExpansionPerformed": false,
-    "executedFullMatrixCellCount": 0,
+    "viewportStateInteractionEnvironmentExpansionPerformed": true,
+    "executedFullMatrixCellCount": 270,
     "partialSyntheticBrowserSliceCount": 12,
     "partialSyntheticBrowserScenarioCellCount": 163,
-    "partialSyntheticBrowserCellsCountTowardFullMatrix": false
+    "partialSyntheticBrowserCellsCountTowardFullMatrix": false,
+    "expectedAccessCells": 270,
+    "plannedScenarioCount": 960,
+    "applicableExecutedCount": 830,
+    "applicablePassedCount": 830,
+    "notApplicableCount": 130,
+    "naTaxonomy": {
+      "productNotApplicable": 118,
+      "canonicalAlias": 12,
+      "harnessDeferred": 0
+    },
+    "officialFullAcceptance": {
+      "runId": "stage8-full-acceptance-20260814T224708726Z",
+      "receiptId": "stage8-full-acceptance-execution-receipt",
+      "countsTowardFullMatrixAcceptance": true,
+      "introducedAsPartialSlice": false,
+      "status": "full-local-synthetic-acceptance-executed-owner-signoff-pending"
+    }
   },
   "partialSyntheticBrowserSlices": [
     {
@@ -1453,6 +1471,13 @@
       "path": "docs/uiux-stage8-acceptance-rollout/VISUAL_FREEZE_PROTECTED_SURFACES.json",
       "claim": "Recorded protected-surface hashes; not aesthetic or role-route acceptance.",
       "sha256": "6f4e20121b8d950c42f87a0670c44e9eabc436d88cbf30370c49225afc35c82a"
+    },
+    "stage8-full-acceptance-execution-receipt": {
+      "id": "stage8-full-acceptance-execution-receipt",
+      "kind": "official-local-synthetic-full-acceptance",
+      "path": "docs/uiux-stage8-acceptance-rollout/STAGE8_FULL_ACCEPTANCE_EXECUTION_RECEIPT.json",
+      "sha256": "eec298d957532dd0974f358e6df43d96640af4e6b01c482f351fe8fc571dc891",
+      "claim": "Official local synthetic five-phase full-acceptance run on merged Market A+C main. Owner aesthetic sign-off is pending. Not staging, production, or Sites authority. Does not overwrite historical receipts or the protected-surface freeze."
     }
   },
   "routes": [
@@ -4391,5 +4416,20 @@
         "humanAestheticAcceptance": "pending-owner"
       }
     }
-  ]
+  ],
+  "fullAcceptanceSourceSnapshot": {
+    "commit": "8f5f06f90e17ae1dae67bbe1bbbe0dc435701c68",
+    "tree": "8c5215d9d13fd5ac5817dbfe87e2ca5d06bf76b2",
+    "implementationCommit": "a2b35dc2742aca22a6b19829bab6a23ecf9eb267",
+    "implementationTree": "9e3589aaf4aaa4faaa9b7686c0f9f98bfb410e3a",
+    "implementationParents": [
+      "021621060d55573df0dacbd1e67b8b9991ac1d82",
+      "f0c49322d708344ccc766c6bacf563918be1639a"
+    ],
+    "runtimeSourcesMatchCommit": true,
+    "reportSha256": "074b52bc2cd3c07bd20b9ff1c190c31e9f69fa8e8a5a392e9fcfd21d5477b07d",
+    "receiptSha256": "eec298d957532dd0974f358e6df43d96640af4e6b01c482f351fe8fc571dc891",
+    "distSha256": "92c76dbc27d6df512dc994a80d34750253ed5cd9c1c540ea00db9d2d42d3bca3",
+    "distFileCount": 172
+  }
 }
