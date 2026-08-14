@@ -223,9 +223,17 @@ export function buildSuccessSummary(scenario) {
   }
 }
 
+export function canViewExpiredMarketHistory(profile) {
+  if (!profile) return true
+  if (profile.authenticated === false) return false
+  if (profile.isCustomer === true) return false
+  if (profile.isAccountant === true) return false
+  return true
+}
+
 export function assertMarketLifecycle(probe, options = {}) {
   const failures = []
-  const { routeName, state, expectedKind, interaction } = options
+  const { routeName, state, expectedKind, interaction, profile } = options
   if (routeName !== 'market' || expectedKind !== 'render-route') return failures
   if (['loading', 'empty', 'error', 'offline', 'stale'].includes(state)) return failures
   const market = probe?.marketLifecycle || {}
@@ -249,11 +257,13 @@ export function assertMarketLifecycle(probe, options = {}) {
   if (!market.overtimeProgressBound) {
     failures.push('market overtime progress is not bound to final_deadline')
   }
-  if (!market.expiredReadOnly || !market.expiredDistinct) {
-    failures.push('market expired is not read-only and distinct')
-  }
-  if (!market.tradedReadOnly || !market.tradedDistinct) {
-    failures.push('market traded is not read-only and distinct')
+  if (canViewExpiredMarketHistory(profile)) {
+    if (!market.expiredReadOnly || !market.expiredDistinct) {
+      failures.push('market expired is not read-only and distinct')
+    }
+    if (!market.tradedReadOnly || !market.tradedDistinct) {
+      failures.push('market traded is not read-only and distinct')
+    }
   }
   if (market.sideActionInverted) {
     failures.push('market offer side is inverted against user action')

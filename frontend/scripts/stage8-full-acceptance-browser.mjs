@@ -374,6 +374,7 @@ async function runScenario({
             state,
             expectedKind: expected.kind,
             interaction,
+            profile,
           }),
         )
       }

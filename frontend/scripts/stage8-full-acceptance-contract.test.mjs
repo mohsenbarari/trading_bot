@@ -13,6 +13,7 @@ import {
   assertMarketLifecycle,
   assertStateSemantics,
   buildSuccessSummary,
+  canViewExpiredMarketHistory,
   evaluateOfficialPass,
   hasListStateSurface,
   officialCounts,
@@ -1065,6 +1066,38 @@ describe('Stage 8 Market lifecycle assertions', () => {
     expect(
       assertMarketLifecycle(healthy, { routeName: 'home', state: 'normal', expectedKind: 'render-route' }),
     ).toEqual([])
+  })
+
+  it('does not require expired or traded history for customer or accountant profiles', () => {
+    const withoutHistory = {
+      ...healthy,
+      marketLifecycle: {
+        ...healthy.marketLifecycle,
+        expiredReadOnly: false,
+        expiredDistinct: false,
+        tradedReadOnly: false,
+        tradedDistinct: false,
+      },
+    }
+    expect(canViewExpiredMarketHistory({ id: 'member', isCustomer: false, isAccountant: false })).toBe(true)
+    expect(canViewExpiredMarketHistory({ id: 'customer', isCustomer: true, isAccountant: false })).toBe(false)
+    expect(canViewExpiredMarketHistory({ id: 'accountant', isCustomer: false, isAccountant: true })).toBe(false)
+    expect(
+      assertMarketLifecycle(withoutHistory, {
+        routeName: 'market',
+        state: 'normal',
+        expectedKind: 'render-route',
+        profile: { id: 'customer', isCustomer: true, isAccountant: false },
+      }),
+    ).toEqual([])
+    expect(
+      assertMarketLifecycle(withoutHistory, {
+        routeName: 'market',
+        state: 'normal',
+        expectedKind: 'render-route',
+        profile: { id: 'member', isCustomer: false, isAccountant: false },
+      }),
+    ).toEqual(['market expired is not read-only and distinct', 'market traded is not read-only and distinct'])
   })
 
   it('records a redacted success summary for applicable scenarios', () => {
