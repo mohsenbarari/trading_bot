@@ -1,11 +1,26 @@
+import fs from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import {
+  ENVIRONMENTS,
   apiFixture,
   classifyConsole,
   diagnosticCounts,
   isErrorInjectablePath,
   isIdentityBootstrapPath,
+  loadMatrix,
 } from './lib/stage8-full-acceptance-runtime.mjs'
+
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
+const runtimeSource = fs.readFileSync(
+  path.join(repoRoot, 'frontend/scripts/lib/stage8-full-acceptance-runtime.mjs'),
+  'utf8',
+)
+const browserSource = fs.readFileSync(
+  path.join(repoRoot, 'frontend/scripts/stage8-full-acceptance-browser.mjs'),
+  'utf8',
+)
 
 const profile = { authenticated: true, role: 'عادی', userIdOffset: 1 }
 
@@ -68,5 +83,36 @@ describe('stage8 full-acceptance fixture contract', () => {
       { allowInjected: true },
     )
     expect(counts.unexpectedConsole).toBe(0)
+  })
+
+  it('keeps sessions and invitations on the injectable page-data boundary', () => {
+    expect(isErrorInjectablePath('/api/sessions/active')).toBe(true)
+    expect(isErrorInjectablePath('/api/auth/me/offer-overtime')).toBe(true)
+    expect(isErrorInjectablePath('/api/auth/me')).toBe(false)
+    expect(isIdentityBootstrapPath('/api/auth/me', 'GET')).toBe(true)
+    expect(apiFixture('/api/sessions/active', 'GET', profile, 'empty').body).toEqual([])
+    expect(apiFixture('/api/sessions/active', 'GET', profile, 'dense').body).toHaveLength(24)
+    expect(apiFixture('/api/sessions/active', 'GET', profile, 'stale-old').body[0].device_name).toBe(
+      'کهنه-پذیرش',
+    )
+    expect(apiFixture('/api/sessions/active', 'GET', profile, 'stale-new').body[0].device_name).toBe(
+      'تازه-پذیرش',
+    )
+    expect(apiFixture('/api/invitations/pending', 'GET', profile, 'dense').body).toHaveLength(24)
+  })
+
+  it('names the local PWA lane as a simulation and never re-injects Telegram from the stub', () => {
+    expect(ENVIRONMENTS).toContain('pwa-simulation')
+    expect(ENVIRONMENTS).not.toContain('pwa')
+    expect(runtimeSource).toMatch(/telegram script is environment-injected/)
+    expect(runtimeSource).not.toMatch(/window\.Telegram=window\.Telegram\|\|/)
+  })
+
+  it('fails closed when the matrix drifts from source and the runner sees sourceDrift', () => {
+    const matrixPath = path.join(repoRoot, 'docs/uiux-stage8-acceptance-rollout/ACCEPTANCE_MATRIX.json')
+    expect(() => loadMatrix(matrixPath)).not.toThrow()
+    expect(browserSource).toMatch(/if \(expected\.sourceDrift\)/)
+    expect(browserSource).toMatch(/evaluateOfficialPass/)
+    expect(browserSource).not.toMatch(/ALLOWED_DIRTY/)
   })
 })

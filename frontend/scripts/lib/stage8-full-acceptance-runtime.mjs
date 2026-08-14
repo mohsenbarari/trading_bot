@@ -4,6 +4,7 @@ import { createServer } from 'node:http'
 import { readFile, stat } from 'node:fs/promises'
 import fs from 'node:fs'
 import path from 'node:path'
+import { isStaleTargetPath } from './stage8-full-acceptance-contract.mjs'
 
 export const STAGE = '8'
 export const RUN_AUTHORIZATION = 'STAGE8 FULL ACCEPTANCE — RUN'
@@ -37,7 +38,7 @@ export const ALL_STATES = Object.freeze([
 export const INTERACTIONS = Object.freeze(['touch', 'keyboard', 'zoom-200', 'reduced-motion'])
 export const ENVIRONMENTS = Object.freeze([
   'mobile-browser',
-  'pwa',
+  'pwa-simulation',
   'telegram-webview-non-messenger',
 ])
 export const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
@@ -360,7 +361,7 @@ function fixtureOffer(index = 0) {
     is_wholesale: false,
     lot_sizes: null,
     original_lot_sizes: null,
-    notes: 'داده مصنوعی پذیرش',
+    notes: index ? `داده مصنوعی پذیرش ${index}` : 'داده مصنوعی پذیرش',
     status: 'active',
     created_at: FIXED_TIME,
     expires_at_ts: Math.floor(Date.parse(FIXED_TIME) / 1000) + 3600,
@@ -370,7 +371,29 @@ function fixtureOffer(index = 0) {
 function listForMode(mode, factory) {
   if (mode === 'empty') return []
   if (mode === 'dense') return Array.from({ length: 24 }, (_, index) => factory(index))
+  if (mode === 'stale-old') {
+    const item = factory(0)
+    return [markStaleItem(item, 'کهنه-پذیرش')]
+  }
+  if (mode === 'stale-new') {
+    const item = factory(0)
+    return [markStaleItem(item, 'تازه-پذیرش')]
+  }
   return [factory(0)]
+}
+
+function markStaleItem(item, marker) {
+  if (!item || typeof item !== 'object') return item
+  const next = { ...item }
+  if ('notes' in next) next.notes = marker
+  if ('title' in next) next.title = marker
+  if ('account_name' in next) next.account_name = marker
+  if ('management_name' in next) next.management_name = marker
+  if ('deviceName' in next) next.deviceName = marker
+  if ('device_name' in next) next.device_name = marker
+  if ('full_name' in next) next.full_name = marker
+  next.revision = marker === 'کهنه-پذیرش' ? 1 : 2
+  return next
 }
 
 function isSessionVerify(pathname, method) {
@@ -400,14 +423,14 @@ export function isInvitationLookupPath(pathname) {
 }
 
 export function isErrorInjectablePath(pathname) {
+  if (!pathname.startsWith('/api/')) return false
   if (isInvitationLookupPath(pathname)) return false
-  return (
-    /\/api\/(users|customers|accountants|invitations|notifications|offers|commodities)(\/|$)/.test(pathname) ||
-    pathname === '/api/notifications' ||
-    pathname === '/api/offers' ||
-    pathname === '/api/commodities' ||
-    pathname === '/api/invitations'
-  )
+  if (pathname === '/api/auth/me' || pathname === '/api/auth/me/' || pathname === '/api/auth/switchable-users') {
+    return false
+  }
+  if (pathname === '/api/auth/refresh' || pathname === '/api/sessions/verify') return false
+  if (pathname === '/api/config' || pathname.startsWith('/api/config/')) return false
+  return true
 }
 
 export function apiFixture(pathname, method, profile, mode = 'normal') {
@@ -495,16 +518,16 @@ export function apiFixture(pathname, method, profile, mode = 'normal') {
     return known([])
   }
   if (pathname === '/api/sessions/active') {
-    return known([
-      {
-        id: 'synthetic-stage8-session',
-        is_current: true,
-        is_primary: true,
-        deviceName: 'مرورگر آزمایشی',
+    return known(
+      listForMode(mode, (index) => ({
+        id: `synthetic-stage8-session-${index}`,
+        is_current: index === 0,
+        is_primary: index === 0,
+        device_name: index ? `دستگاه ${index}` : 'مرورگر آزمایشی',
         platform: 'web',
-        lastActiveAt: FIXED_TIME,
-      },
-    ])
+        last_active_at: FIXED_TIME,
+      })),
+    )
   }
   if (pathname === '/api/chat/poll') {
     return known({
@@ -562,7 +585,21 @@ export function apiFixture(pathname, method, profile, mode = 'normal') {
     return known([])
   }
   if (pathname === '/api/invitations/pending' || pathname === '/api/invitations/' || pathname === '/api/invitations') {
-    return known([])
+    return known(
+      listForMode(mode, (index) => ({
+        id: 8000 + index,
+        account_name: index ? `invitee_${index}` : 'invitee_sample',
+        mobile_number: 'synthetic-mobile',
+        role: 'عادی',
+        web_link: `/i/${INVITE_CODE}`,
+        web_short_link: `/i/${INVITE_CODE}`,
+        bot_available: false,
+        web_available: true,
+        state: 'pending',
+        expires_at: FIXED_TIME,
+        created_at: FIXED_TIME,
+      })),
+    )
   }
   if (isInvitationLookupPath(pathname)) {
     return known({
@@ -634,6 +671,9 @@ export function createFixtureServer(dist, controller) {
     mutatingApiPaths: [],
     staticServerErrors: [],
     injectedErrorResponses: 0,
+    staleHits: {},
+    staleCompletions: [],
+    identityRequestCount: 0,
   }
   const server = createServer(async (request, response) => {
     try {
@@ -641,10 +681,28 @@ export function createFixtureServer(dist, controller) {
       const pathname = decodeURIComponent(url.pathname)
       const method = request.method || 'GET'
       if (pathname.startsWith('/api/')) {
-        const delayMs = controller.mode === 'slow' || controller.mode === 'loading' ? controller.delayMs : 0
+        let mode = controller.mode
+        let delayMs = controller.mode === 'slow' || controller.mode === 'loading' ? controller.delayMs : 0
+        if (controller.mode === 'stale' && isStaleTargetPath(pathname)) {
+          state.staleHits[pathname] = (state.staleHits[pathname] || 0) + 1
+          const generation = state.staleHits[pathname]
+          mode = generation === 1 ? 'stale-old' : 'stale-new'
+          delayMs = generation === 1 ? 900 : 0
+        }
         if (delayMs > 0) await new Promise((resolve) => setTimeout(resolve, delayMs))
-        const fixture = apiFixture(pathname, method, controller.profile, controller.mode)
+        const fixture = apiFixture(pathname, method, controller.profile, mode)
         state.apiRequests += 1
+        if (pathname === '/api/auth/me' || pathname === '/api/auth/me/') {
+          state.identityRequestCount += 1
+        }
+        if (controller.mode === 'stale' && isStaleTargetPath(pathname)) {
+          state.staleCompletions.push({
+            path: pathname,
+            generation: state.staleHits[pathname],
+            mode,
+            completedAt: Date.now(),
+          })
+        }
         if (fixture.mutating) {
           state.mutatingApiRequests += 1
           state.mutatingApiPaths.push(`${method} ${pathname}`)
@@ -667,9 +725,7 @@ export function createFixtureServer(dist, controller) {
           'content-type': 'application/javascript; charset=utf-8',
           'cache-control': 'no-store',
         })
-        response.end(
-          'window.Telegram=window.Telegram||{WebApp:{ready(){},expand(){},onEvent(){},offEvent(){}}};',
-        )
+        response.end('/* telegram script is environment-injected; this stub must not create window.Telegram */')
         return
       }
       const relative = pathname === '/' ? 'index.html' : pathname.replace(/^\/+/, '')
@@ -805,12 +861,33 @@ export async function instrumentPage(page, baseUrl, diagnostics, profile, enviro
         localStorage.setItem('current_user_is_accountant', String(userValue.is_accountant))
         localStorage.setItem('current_user_is_customer', String(userValue.is_customer))
       }
-      window.Telegram = { WebApp: { ready() {}, expand() {}, onEvent() {}, offEvent() {} } }
+      window.__STAGE8_ENV__ = environmentName
+      window.__STAGE8_TELEGRAM__ = { ready: 0, expand: 0 }
+      if (environmentName === 'telegram-webview-non-messenger') {
+        window.Telegram = {
+          WebApp: {
+            ready() {
+              window.__STAGE8_TELEGRAM__.ready += 1
+            },
+            expand() {
+              window.__STAGE8_TELEGRAM__.expand += 1
+            },
+            onEvent() {},
+            offEvent() {},
+          },
+        }
+      } else {
+        try {
+          delete window.Telegram
+        } catch {
+          window.Telegram = undefined
+        }
+      }
       try {
         navigator.serviceWorker.getRegistration = async () => undefined
         navigator.serviceWorker.getRegistrations = async () => []
       } catch {}
-      if (environmentName === 'pwa') {
+      if (environmentName === 'pwa-simulation') {
         const original = window.matchMedia.bind(window)
         window.matchMedia = (query) => {
           if (String(query).includes('display-mode: standalone')) {
@@ -1014,6 +1091,103 @@ export async function collectUiProbe(page) {
     const lastCtaRect = lastCta instanceof HTMLElement ? lastCta.getBoundingClientRect() : null
     const navRect = nav instanceof HTMLElement && visible(nav) ? nav.getBoundingClientRect() : null
     const ctaAboveNav = !lastCtaRect || !navRect ? true : lastCtaRect.bottom <= navRect.top + 2
+    const loadingNode = [
+      ...document.querySelectorAll(
+        [
+          '.ui-loading-state',
+          '.ds-loading-state',
+          '.skeleton-loader',
+          '.skeleton-item',
+          '.skeleton-card',
+          '.chat-skeleton',
+          '.conversation-skeleton',
+          '.loading-state-skeleton',
+          '[data-test="offers-loading-skeleton"]',
+          '[aria-busy="true"]',
+          '[role="progressbar"]',
+        ].join(','),
+      ),
+    ].find(visible)
+    const loadingVisible = Boolean(loadingNode) || Boolean(
+      [...document.querySelectorAll('[role="status"]')].find(
+        (element) => visible(element) && /در حال (دریافت|بررسی|آماده‌سازی|بارگذاری)/.test(element.textContent || ''),
+      ),
+    )
+    const emptyNode = [
+      ...document.querySelectorAll(
+        '.ui-empty-state, .ds-empty-state, .operations-empty-state, .chat-empty-state, [data-empty]',
+      ),
+    ].find(visible)
+    const errorVisible = [
+      ...document.querySelectorAll(
+        '[role="alert"], .ui-empty-state--danger, .ui-v2-auth-error, .ui-v2-auth-login-error, [data-error]',
+      ),
+    ].some(visible)
+    const bodyText = document.body.innerText || ''
+    const offlineVisible =
+      /آفلاین|offline|اتصال برقرار نشد|اتصال قطع/i.test(bodyText) ||
+      [...document.querySelectorAll('[role="alert"], .ui-empty-state')].some(
+        (element) => visible(element) && /آفلاین|offline|اتصال/i.test(element.textContent || ''),
+      )
+    const listItems = [
+      ...document.querySelectorAll(
+        [
+          '[data-test*="row"]',
+          '.offer-card',
+          '.session-card',
+          '.notification-item',
+          '.pending-row',
+          '.user-item',
+          '.ui-list-item',
+          '.customer-pending-card',
+          '.accountant-pending-card',
+          '.mini-trade-card',
+          'li[role="listitem"]',
+        ].join(','),
+      ),
+    ].filter(visible)
+    const lastItem = listItems.at(-1)
+    const lastItemRect = lastItem instanceof HTMLElement ? lastItem.getBoundingClientRect() : null
+    const lastItemAccessible = !lastItemRect
+      ? listItems.length === 0
+      : lastItemRect.width > 0 && lastItemRect.height > 0
+    const v2 = document.querySelector('[data-ui-system="v2"], [data-ui-system="v2-portal"]')
+    const v2Style = v2 ? getComputedStyle(v2) : null
+    const parseMs = (value) => {
+      if (!value) return null
+      const first = String(value).split(',')[0].trim()
+      if (first.endsWith('ms')) return Number.parseFloat(first)
+      if (first.endsWith('s')) return Number.parseFloat(first) * 1000
+      return Number.parseFloat(first)
+    }
+    const clippedControlCount = interactives.filter((element) => {
+      const rect = element.getBoundingClientRect()
+      return rect.right > window.innerWidth + 2 || rect.left < -2
+    }).length
+    const clippedTextCount = [...document.querySelectorAll('p,h1,h2,h3,h4,label,button,a')]
+      .filter(visible)
+      .filter((element) => {
+        const rect = element.getBoundingClientRect()
+        return rect.right > window.innerWidth + 2 || rect.left < -2
+      }).length
+    const fadeProbe = document.createElement('div')
+    fadeProbe.className = 'fade-enter-active'
+    fadeProbe.style.position = 'absolute'
+    fadeProbe.style.visibility = 'hidden'
+    document.body.appendChild(fadeProbe)
+    const protectedFadeMs = parseMs(getComputedStyle(fadeProbe).transitionDuration)
+    fadeProbe.remove()
+    const dialog = document.querySelector('[role="dialog"], [aria-modal="true"]')
+    const dialogVisible = dialog instanceof HTMLElement && visible(dialog)
+    const dialogRect = dialogVisible ? dialog.getBoundingClientRect() : null
+    const strip = document.querySelector(
+      '.app-route-scroll, .workspace-relation-list, .sessions-list, .offers-list, .users-result',
+    )
+    const internalStripOverflow =
+      strip instanceof HTMLElement && strip.scrollWidth - strip.clientWidth > 1
+    const navEl = document.querySelector('.bottom-nav-wrapper, .ui-v2-bottom-nav, .bottom-nav-bar')
+    const navVisible = navEl instanceof HTMLElement && visible(navEl)
+    const navBox = navVisible ? navEl.getBoundingClientRect() : null
     return {
       visibleMainCount: mains.length,
       visibleRootCount: roots.length,
@@ -1029,6 +1203,53 @@ export async function collectUiProbe(page) {
       vazirmatn: /Vazirmatn/i.test(font),
       ctaAboveNav,
       reducedMotion: window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches === true,
+      loadingVisible,
+      emptyVisible: Boolean(emptyNode),
+      emptyNamed: Boolean(emptyNode && accessibleName(emptyNode)),
+      errorVisible,
+      offlineVisible,
+      retryVisible: [...document.querySelectorAll('button, [role="button"]')]
+        .filter(visible)
+        .some((element) => /تلاش|دوباره|retry/i.test(accessibleName(element))),
+      listItemCount: listItems.length,
+      lastItemAccessible,
+      settledVisible: !loadingVisible,
+      staleOldVisible: bodyText.includes('کهنه-پذیرش'),
+      staleFreshVisible: bodyText.includes('تازه-پذیرش'),
+      landedRecovery: location.pathname.startsWith('/__system/recovery'),
+      hasTelegramBridge: Boolean(window.Telegram?.WebApp),
+      telegramReadyCalled: Number(window.__STAGE8_TELEGRAM__?.ready || 0) > 0,
+      standalone: window.matchMedia?.('(display-mode: standalone)')?.matches === true,
+      serviceWorkerControlled: Boolean(navigator.serviceWorker?.controller),
+      userAgent: navigator.userAgent,
+      visualScale: window.visualViewport?.scale || 1,
+      clippedControlCount,
+      clippedTextCount,
+      v2MotionMs: v2Style ? parseMs(v2Style.getPropertyValue('--ui-v2-motion-state')) : null,
+      protectedFadeMs,
+      tabCycleObserved: false,
+      touchActivated: false,
+      escapeOpenedMutation: false,
+      denseVisible: listItems.length >= 8,
+      internalStripOverflow,
+      identityBootstrapBroken: false,
+      identityRequestCount: 0,
+      staleOldCompletedAt: 0,
+      staleNewCompletedAt: 0,
+      focusVisible: Boolean(focused?.matches?.(':focus-visible')),
+      modalOpen: dialogVisible,
+      focusInsideModal: Boolean(dialogVisible && focused && dialog.contains(focused)),
+      modalClosedAfterEscape: false,
+      modalOutOfBounds: Boolean(
+        dialogRect &&
+          (dialogRect.left < -2 ||
+            dialogRect.top < -2 ||
+            dialogRect.right > window.innerWidth + 2 ||
+            dialogRect.bottom > window.innerHeight + 2),
+      ),
+      bottomNavClipped: Boolean(navBox && (navBox.right > window.innerWidth + 2 || navBox.left < -2)),
+      mutatingProductRequest: false,
+      environmentName: window.__STAGE8_ENV__ || null,
     }
   })
 }
@@ -1145,20 +1366,24 @@ export function assertCommonUi(probe, expected, route, landedRoute = route) {
     if (probe.appOverflow) failures.push('app horizontal overflow')
     if (probe.dir && probe.dir !== 'rtl') failures.push(`dir ${probe.dir}`)
     const landedProtection = landedRoute?.uiContract?.protection || route.uiContract?.protection
-    if (landedProtection === 'full') {
-      return failures
+    if (probe.visibleMainCount < 1 && probe.visibleRootCount < 1) {
+      failures.push('no visible main or route landmark')
     }
-    if (probe.visibleMainCount !== 1) failures.push(`visible main count ${probe.visibleMainCount}`)
-    if (probe.visibleRootCount < 1) failures.push('no visible route root')
-    if (probe.headingCount < 1) failures.push('no visible heading')
-    if (probe.headingSkip) failures.push('heading hierarchy skip')
+    if (landedProtection !== 'full') {
+      if (probe.visibleMainCount !== 1) failures.push(`visible main count ${probe.visibleMainCount}`)
+      if (probe.visibleRootCount < 1) failures.push('no visible route root')
+      if (probe.headingCount < 1) failures.push('no visible heading')
+      if (probe.headingSkip) failures.push('heading hierarchy skip')
+      if (landedProtection === 'none' && !probe.vazirmatn) {
+        failures.push('NONE route missing Vazirmatn')
+      }
+      if (!probe.ctaAboveNav) failures.push('final CTA obscured by BottomNav')
+    } else if (/^\s*Vazirmatn/i.test(probe.fontFamily || '')) {
+      failures.push('FULL route unexpectedly used Vazirmatn as the primary family')
+    }
     if (probe.unnamedInteractive > 0) failures.push(`unnamed interactive ${probe.unnamedInteractive}`)
     if (probe.nestedInteractive > 0) failures.push(`nested interactive ${probe.nestedInteractive}`)
     if (!probe.focusInViewport) failures.push('focus outside viewport')
-    if (landedProtection === 'none' && !probe.vazirmatn) {
-      failures.push('NONE route missing Vazirmatn')
-    }
-    if (!probe.ctaAboveNav) failures.push('final CTA obscured by BottomNav')
   }
   return failures
 }

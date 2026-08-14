@@ -35,6 +35,17 @@ import {
   visitPathFor,
   waitForApp,
 } from './lib/stage8-full-acceptance-runtime.mjs'
+import {
+  BINDING_PATHS,
+  OFFICIAL_PHASES,
+  assertBindingUnchanged,
+  assertCleanOfficialBinding,
+  assertEnvironmentSemantics,
+  assertInteractionSemantics,
+  assertStateSemantics,
+  captureOfficialBinding,
+  evaluateOfficialPass,
+} from './lib/stage8-full-acceptance-contract.mjs'
 
 const HARNESS_PATH = fileURLToPath(import.meta.url)
 const LIB_PATH = fileURLToPath(new URL('./lib/stage8-full-acceptance-runtime.mjs', import.meta.url))
@@ -45,20 +56,7 @@ const DIST = process.env.STAGE8_FULL_ACCEPTANCE_DIST || '/tmp/stage8-full-accept
 const OUTPUT_ROOT = process.env.STAGE8_FULL_ACCEPTANCE_OUT || '/tmp/stage8-full-acceptance-runs'
 const RUN_ID = `stage8-full-acceptance-${new Date().toISOString().replace(/[-:.]/gu, '')}`
 const OUTPUT_DIR = path.join(OUTPUT_ROOT, RUN_ID)
-const ALLOWED_DIRTY = new Set([
-  'frontend/scripts/stage8-full-acceptance-browser.mjs',
-  'frontend/scripts/lib/stage8-full-acceptance-runtime.mjs',
-  'frontend/scripts/stage8-full-acceptance-runtime.test.mjs',
-  'frontend/src/components/UserProfile.vue',
-  'frontend/src/components/UserProfile.test.ts',
-])
-const PRODUCT_HASH_PATHS = [
-  'frontend/src/router/index.ts',
-  'frontend/src/router/uiRouteContract.ts',
-  'frontend/src/utils/auth.ts',
-  'frontend/src/views/AdminView.vue',
-  'models/user.py',
-]
+const screenshotDigests = []
 
 function assert(condition, message) {
   if (!condition) throw new Error(message)
@@ -108,6 +106,11 @@ async function runScenario({
     unknown: serverState.unknownApiRequests,
     mutating: serverState.mutatingApiRequests,
   }
+  if (state === 'stale') {
+    serverState.staleHits = {}
+    serverState.staleCompletions = []
+  }
+  serverState.identityRequestCount = 0
   const { context, page } = await newPage(browser, baseUrl, viewport, diagnostics, profile, {
     reducedMotion: reducedMotion || interaction === 'reduced-motion',
     environment,
@@ -118,33 +121,105 @@ async function runScenario({
     failures.push(expected.driftReason || 'sourceDrift')
   }
   let probe = null
+  let midProbe = null
+  let errorProbe = null
   let actual = null
   try {
     const target = `${baseUrl}${visitPathFor(route)}`
     await page.goto(target, { waitUntil: 'domcontentloaded', timeout: 30_000 })
-    if (state === 'loading') {
+    if (state === 'loading' || state === 'slow') {
       await page.waitForTimeout(180)
+      midProbe = await collectUiProbe(page)
+      midProbe.identityRequestCount = serverState.identityRequestCount
     }
     await waitForApp(page)
+    if (state === 'stale' && expected.kind === 'render-route') {
+      await page.waitForTimeout(200)
+      await page.evaluate(() => {
+        const app = document.querySelector('#app')?.__vue_app__
+        const router = app?.config?.globalProperties?.$router
+        const current = router?.currentRoute?.value
+        if (!router || !current) return null
+        return router.replace({
+          name: current.name,
+          params: current.params,
+          query: { ...current.query, s8stale: '2' },
+        })
+      })
+      const refresh = page.getByRole('button', { name: /به‌روزرسانی|تلاش دوباره|نوسازی/i })
+      if ((await refresh.count()) > 0) {
+        await refresh.first().click({ timeout: 1500 }).catch(() => {})
+      }
+      await page.waitForTimeout(1100)
+    }
     if (zoom200 || interaction === 'zoom-200') {
       const session = await context.newCDPSession(page)
       await session.send('Emulation.setPageScaleFactor', { pageScaleFactor: 2 })
       await page.waitForTimeout(120)
     }
     if (interaction === 'keyboard') {
+      const before = await page.evaluate(() => document.activeElement?.outerHTML?.slice(0, 80) || '')
       await page.keyboard.press('Tab')
       await page.keyboard.press('Tab')
       await page.keyboard.press('Shift+Tab')
+      const afterTab = await page.evaluate(() => ({
+        html: document.activeElement?.outerHTML?.slice(0, 80) || '',
+        focusVisible: document.activeElement?.matches?.(':focus-visible') === true,
+        safe:
+          document.activeElement instanceof HTMLAnchorElement ||
+          document.activeElement?.getAttribute('role') === 'tab',
+      }))
+      if (afterTab.safe) {
+        await page.keyboard.press('Enter')
+        await page.keyboard.press('Space')
+      }
       await page.keyboard.press('Escape')
+      midProbe = midProbe || {}
+      midProbe.tabChanged = before !== afterTab.html
+      midProbe.focusVisible = afterTab.focusVisible
     }
     if (interaction === 'touch') {
-      const candidate = page.locator('button, a, [role="button"], [role="tab"]').first()
+      const candidate = page.locator(
+        'a[href^="/"], a[href^="#"], [role="tab"], .bottom-nav-wrapper a, .ui-v2-bottom-nav a, .settings-return-control',
+      ).first()
       if ((await candidate.count()) > 0) {
-        await candidate.click({ trial: true }).catch(() => {})
+        await candidate.click({ timeout: 1500 })
+        midProbe = midProbe || {}
+        midProbe.touchClicked = true
+      }
+    }
+    if (state === 'error' && expected.kind === 'render-route') {
+      errorProbe = await collectUiProbe(page)
+      const retry = page.getByRole('button', { name: /تلاش|دوباره|retry/i })
+      if ((await retry.count()) > 0) {
+        controller.mode = 'normal'
+        controller.delayMs = 0
+        await retry.first().click({ timeout: 1500 }).catch(() => {})
+        await page.waitForTimeout(400)
       }
     }
     actual = await readRuntimeRoute(page)
     probe = await collectUiProbe(page)
+    if (interaction === 'keyboard') {
+      probe.tabCycleObserved = Boolean(midProbe?.tabChanged)
+      probe.focusVisible = Boolean(midProbe?.focusVisible || probe.focusVisible)
+    }
+    if (interaction === 'touch') {
+      probe.touchActivated = Boolean(midProbe?.touchClicked)
+    }
+    const staleOld = (serverState.staleCompletions || []).find((item) => item.mode === 'stale-old')
+    const staleNew = (serverState.staleCompletions || []).find((item) => item.mode === 'stale-new')
+    if (probe) {
+      probe.staleOldCompletedAt = staleOld?.completedAt || 0
+      probe.staleNewCompletedAt = staleNew?.completedAt || 0
+      probe.identityBootstrapBroken = false
+      probe.mutatingProductRequest = serverState.mutatingApiRequests > snapshotBefore.mutating
+    }
+    const stateProbe = state === 'error' && errorProbe ? errorProbe : probe
+    if (state === 'error' && errorProbe && probe) {
+      errorProbe.landedRecovery = errorProbe.landedRecovery || probe.landedRecovery
+      errorProbe.identityBootstrapBroken = probe.identityBootstrapBroken
+    }
     failures.push(...assertOutcome(actual, expected))
     if (['access', 'viewport', 'state', 'interaction', 'environment'].includes(kind)) {
       if (
@@ -160,7 +235,45 @@ async function runScenario({
           (expected.finalName && controller.routesByName?.get(expected.finalName)) ||
           route
         failures.push(...assertCommonUi(probe, expected, route, landedRoute))
+        if (kind === 'state') {
+          failures.push(
+            ...assertStateSemantics(
+              stateProbe,
+              midProbe,
+              state,
+              landedRoute?.uiContract?.protection || route.uiContract?.protection,
+              expected.kind,
+              route.name,
+            ),
+          )
+          if (state === 'error' && errorProbe?.retryVisible && probe.errorVisible) {
+            failures.push('error retry did not recover in a separate probe')
+          }
+        }
+        if (kind === 'interaction') {
+          failures.push(
+            ...assertInteractionSemantics(
+              probe,
+              interaction,
+              landedRoute?.uiContract?.protection || route.uiContract?.protection,
+            ),
+          )
+        }
+        if (kind === 'environment') {
+          failures.push(...assertEnvironmentSemantics(probe, environment))
+        }
       }
+    }
+    const shouldShot =
+      (kind === 'viewport' && (viewport.width === 390 || viewport.width === 1440)) ||
+      (kind === 'state' && ['loading', 'empty', 'error', 'offline', 'stale'].includes(state))
+    if (shouldShot) {
+      const shotDir = path.join(OUTPUT_DIR, 'screenshots')
+      await mkdir(shotDir, { recursive: true })
+      const shotName = `${kind}-${route.name}-${viewport.width}-${state}-${interaction || 'none'}-${environment}.png`
+      const shotPath = path.join(shotDir, shotName)
+      await page.screenshot({ path: shotPath, fullPage: false })
+      screenshotDigests.push({ id: shotName, sha256: sha256File(shotPath) })
     }
     const counts = diagnosticCounts(diagnostics, {
       allowInjected: state === 'error' || state === 'offline',
@@ -223,22 +336,15 @@ async function main() {
     process.env.STAGE8_FULL_ACCEPTANCE_AUTHORIZATION === RUN_AUTHORIZATION,
     'Stage 8 full acceptance is locked behind the exact authorization value.',
   )
+  const bindingBefore = captureOfficialBinding(REPO)
+  const cleanFailures = assertCleanOfficialBinding(bindingBefore)
+  assert(cleanFailures.length === 0, cleanFailures.join('; '))
+  assert(bindingBefore.branch === 'main', `Stage 8 full acceptance must run on main, found ${bindingBefore.branch}`)
   const git = gitSnapshot(REPO)
-  const dirty = git.status
-    ? git.status
-        .split('\n')
-        .filter(Boolean)
-        .map((line) => line.replace(/^.. /u, ''))
-    : []
-  const unexpectedDirty = dirty.filter((file) => !ALLOWED_DIRTY.has(file))
-  assert(unexpectedDirty.length === 0, `Worktree is dirty beyond the Stage 8 harness: ${unexpectedDirty.join(', ')}`)
   assert(git.diffCheck === '', 'git diff --check failed')
-  assert(git.branch === 'main', `Stage 8 full acceptance must run on main, found ${git.branch}`)
   const matrix = loadMatrix(MATRIX_PATH)
   const profiles = attachProfileRuntime(matrix.accessProfiles)
-  const productHashes = Object.fromEntries(
-    PRODUCT_HASH_PATHS.map((relative) => [relative, sha256File(path.join(REPO, relative))]),
-  )
+  const productHashes = bindingBefore.hashes
   assert(fs.existsSync(path.join(DIST, 'index.html')), `Production dist missing at ${DIST}`)
   const distBefore = distFingerprint(DIST)
   const requireFromFrontend = createRequire(path.join(FRONTEND, 'package.json'))
@@ -454,10 +560,10 @@ async function main() {
     await closeServer(server)
   }
 
-  const gitAfter = gitSnapshot(REPO)
+  const bindingAfter = captureOfficialBinding(REPO)
   const distAfter = distFingerprint(DIST)
-  assert(gitAfter.commit === git.commit, 'source commit drifted during the run')
-  assert(gitAfter.tree === git.tree, 'source tree drifted during the run')
+  const bindingDrift = assertBindingUnchanged(bindingBefore, bindingAfter)
+  assert(bindingDrift.length === 0, bindingDrift.join('; '))
   assert(distAfter.sha256 === distBefore.sha256, 'dist fingerprint drifted during the run')
 
   const access = scenarios.filter((item) => item.kind === 'access')
@@ -469,39 +575,82 @@ async function main() {
   const executedInteractions = interactions.filter((item) => item.applicable !== false)
   const executedEnvironments = environments.filter((item) => item.applicable !== false)
   const naStates = states.filter((item) => item.applicable === false)
+  const naInteractions = interactions.filter((item) => item.applicable === false)
+  const naEnvironments = environments.filter((item) => item.applicable === false)
+  const ids = scenarios.map((item) => item.id)
+  const uniqueIdCount = new Set(ids).size
+  const duplicateIdCount = ids.length - uniqueIdCount
+  const sourceDriftCount = scenarios.filter((item) => item.sourceDrift).length
+  const officialRun = OFFICIAL_PHASES.every((phase) => requestedPhases.has(phase))
+  const diagnosticTotals = scenarios.reduce(
+    (acc, item) => {
+      const counts = item.diagnostics || {}
+      acc.unexpectedConsole += counts.unexpectedConsole || 0
+      acc.pageErrors += counts.pageErrors || 0
+      acc.externalRequests += counts.externalRequests || 0
+      if (item.state !== 'offline') acc.requestFailuresOutsideOffline += counts.requestFailures || 0
+      return acc
+    },
+    { unexpectedConsole: 0, pageErrors: 0, externalRequests: 0, requestFailuresOutsideOffline: 0 },
+  )
+  const counters = {
+    accessCellsExpected: 270,
+    accessCellsExecuted: access.length,
+    accessCellsPassed: access.filter((item) => item.passed).length,
+    routeViewportExpected: 240,
+    routeViewportExecuted: viewport.length,
+    routeViewportPassed: viewport.filter((item) => item.passed).length,
+    stateTotal: states.length,
+    stateExecuted: executedStates.length,
+    stateNotApplicable: naStates.length,
+    statePassed: executedStates.filter((item) => item.passed).length,
+    interactionTotal: interactions.length,
+    interactionExecuted: executedInteractions.length,
+    interactionNotApplicable: naInteractions.length,
+    interactionPassed: executedInteractions.filter((item) => item.passed).length,
+    environmentTotal: environments.length,
+    environmentExecuted: executedEnvironments.length,
+    environmentNotApplicable: naEnvironments.length,
+    environmentPassed: executedEnvironments.filter((item) => item.passed).length,
+  }
+  const verdict = evaluateOfficialPass({
+    officialRun,
+    failed,
+    sourceDriftCount,
+    uniqueIdCount,
+    duplicateIdCount,
+    counters,
+    server: serverState,
+    diagnosticTotals,
+  })
+  const contactSheetPath = path.join(OUTPUT_DIR, 'CONTACT_SHEET.html')
+  await writeFile(
+    contactSheetPath,
+    `<!doctype html><html lang="fa" dir="rtl"><body>${screenshotDigests
+      .map((item) => `<figure><img alt="${item.id}" src="screenshots/${item.id}"><figcaption>${item.id}</figcaption></figure>`)
+      .join('')}</body></html>\n`,
+  )
   const report = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     stage: 8,
     runId: RUN_ID,
     claimBoundary:
-      'Local synthetic production-build full-acceptance execution. It is not owner aesthetic acceptance, staging authority, Sites authority, or production authority.',
+      'Local synthetic production-build full-acceptance execution. It is not owner aesthetic acceptance, staging authority, Sites authority, or production authority. Previous report fb69a47b is provisional and non-promotable.',
     git: {
-      branch: git.branch,
-      commit: git.commit,
-      tree: git.tree,
+      branch: bindingAfter.branch,
+      commit: bindingAfter.commit,
+      tree: bindingAfter.tree,
       parents: git.parents,
+      porcelain: bindingAfter.porcelain,
     },
     productHashes,
+    bindingPaths: BINDING_PATHS,
     harnessSha256: sha256File(HARNESS_PATH),
     runtimeSha256: sha256File(LIB_PATH),
     dist: distBefore,
     matrixSourceSnapshot: matrix.sourceSnapshot,
-    settingsSourceDrift: access.filter((item) => item.sourceDrift).length,
-    counters: {
-      accessCellsExpected: 270,
-      accessCellsExecuted: access.length,
-      accessCellsPassed: access.filter((item) => item.passed).length,
-      routeViewportExpected: 240,
-      routeViewportExecuted: viewport.length,
-      routeViewportPassed: viewport.filter((item) => item.passed).length,
-      stateExecuted: executedStates.length,
-      stateNotApplicable: naStates.length,
-      statePassed: executedStates.filter((item) => item.passed).length,
-      interactionExecuted: executedInteractions.length,
-      interactionPassed: executedInteractions.filter((item) => item.passed).length,
-      environmentExecuted: executedEnvironments.length,
-      environmentPassed: executedEnvironments.filter((item) => item.passed).length,
-    },
+    sourceDriftCount,
+    counters,
     componentCanonicalizations: access.filter((item) => item.canonical).map((item) => ({
       id: item.id,
       passed: item.passed,
@@ -509,6 +658,9 @@ async function main() {
     })),
     failedScenarios: scenarios.filter((item) => !item.passed).map(redactScenario),
     scenarioDigests: scenarios.map((item) => ({ id: item.id, digest: item.digest, passed: item.passed })),
+    screenshotCount: screenshotDigests.length,
+    screenshotDigests,
+    contactSheet: { path: contactSheetPath, count: screenshotDigests.length },
     server: {
       apiRequests: serverState.apiRequests,
       expectedApiRequests: serverState.expectedApiRequests,
@@ -516,14 +668,9 @@ async function main() {
       unknownApiPaths: [...new Set(serverState.unknownApiPaths)],
       mutatingApiRequests: serverState.mutatingApiRequests,
     },
-    officialRun: ['access', 'viewport', 'state', 'interaction', 'environment'].every((phase) =>
-      requestedPhases.has(phase),
-    ),
-    passed:
-      failed === 0 &&
-      ['access', 'viewport', 'state', 'interaction', 'environment'].every((phase) => requestedPhases.has(phase)) &&
-      access.length === 270 &&
-      viewport.length === 240,
+    officialRun,
+    passFailures: verdict.failures,
+    passed: verdict.passed,
   }
 
   const reportPath = path.join(OUTPUT_DIR, 'STAGE8_FULL_ACCEPTANCE_REPORT.json')
