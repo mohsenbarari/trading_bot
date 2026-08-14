@@ -212,6 +212,8 @@ const recentOffersToggleRef = ref<any>(null)
 const recentOffersOpenDirection = ref<'above' | 'below'>('above')
 const recentOffersDropdownStyle = ref<Record<string, string>>({})
 const offerInputRef = ref<HTMLTextAreaElement | null>(null)
+const marketContentRef = ref<HTMLElement | null>(null)
+const savedMarketScrollTop = ref(0)
 const adminMarketMessage = ref<AdminMarketMessage | null>(null)
 const adminMarketMessageExpanded = ref(false)
 const marketOfferPushEnabled = ref(true)
@@ -1018,6 +1020,20 @@ watch(isTier2Customer, (blocked) => {
   recentOffers.value = []
 })
 
+watch([pendingOfferPreview, pendingCommodityInference], async ([nextPreview, nextInference], [prevPreview, prevInference]) => {
+  const opening = (!prevPreview && nextPreview) || (!prevInference && nextInference)
+  const closing = (prevPreview && !nextPreview) || (prevInference && !nextInference)
+  if (opening && marketContentRef.value) {
+    savedMarketScrollTop.value = marketContentRef.value.scrollTop
+  }
+  if (closing) {
+    await nextTick()
+    if (marketContentRef.value) {
+      marketContentRef.value.scrollTop = savedMarketScrollTop.value
+    }
+  }
+})
+
 watch(canViewExpiredMarketOffers, (allowed) => {
   if (!allowed) {
     clearMarketHistoryOffers()
@@ -1088,6 +1104,16 @@ onUnmounted(() => {
   <div class="market-page ds-page">
 
     <div class="market-header">
+      <div class="market-title-row">
+        <h1 class="market-page-title">بازار</h1>
+        <span
+          class="market-status-chip"
+          :class="isMarketOpen ? 'is-open' : 'is-closed'"
+          data-test="market-status-chip"
+        >
+          {{ isMarketOpen ? 'باز' : 'بسته' }}
+        </span>
+      </div>
       <div class="header-controls">
         <AppIconButton
           class="market-notification-toggle"
@@ -1145,8 +1171,12 @@ onUnmounted(() => {
     </section>
 
     <!-- Offers List -->
-    <div class="market-content">
+    <div ref="marketContentRef" class="market-content">
       <div class="content-inner">
+        <div class="market-feed-heading">
+          <h2 class="market-feed-title">لفظ‌های فعال</h2>
+          <p class="market-feed-subtitle">مرتب‌شده بر اساس زمان</p>
+        </div>
         <OffersList
           :offers="visibleMarketOffers"
           :loading="isLoading" 
@@ -1297,6 +1327,8 @@ onUnmounted(() => {
 
 <style scoped>
 .market-page {
+  --market-rail-max: var(--ds-page-max-width);
+  --market-focus-ring: var(--ds-primary-800);
   display: flex;
   flex-direction: column;
   height: 100dvh;
@@ -1320,12 +1352,72 @@ onUnmounted(() => {
   border-bottom: 1px solid var(--ds-border-light);
 }
 
+.market-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  max-width: var(--market-rail-max);
+  width: 100%;
+  margin: 0 auto;
+}
+
+.market-page-title {
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: 800;
+  line-height: 1.4;
+  color: var(--ds-text-primary);
+}
+
+.market-status-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 32px;
+  padding: 0 0.75rem;
+  border-radius: 999px;
+  border: 1px solid var(--ds-border-medium);
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.market-status-chip.is-open {
+  color: var(--ds-market-open-text);
+  background: var(--ds-market-open-bg);
+  border-color: var(--ds-market-open-border);
+}
+
+.market-status-chip.is-closed {
+  color: var(--ds-danger-700);
+  background: var(--ds-market-closed-bg);
+  border-color: var(--ds-market-closed-border);
+}
+
+.market-feed-heading {
+  margin: 0 0 0.7rem;
+}
+
+.market-feed-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 800;
+  color: var(--ds-text-primary);
+}
+
+.market-feed-subtitle {
+  margin: 0.2rem 0 0;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--ds-text-secondary);
+}
+
 .header-controls {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
   gap: 0.65rem;
-  max-width: var(--ds-page-max-width);
+  max-width: var(--market-rail-max);
   width: 100%;
   margin: 0 auto;
 }
@@ -1352,7 +1444,7 @@ onUnmounted(() => {
 }
 
 .market-notification-error {
-  max-width: var(--ds-page-max-width);
+  max-width: var(--market-rail-max);
   width: 100%;
   margin: -0.25rem auto 0;
   padding: 0 0.1rem;
@@ -1399,7 +1491,7 @@ onUnmounted(() => {
 .market-settlement-filter-chips,
 .market-commodity-filter-chips {
   width: max-content;
-  min-height: 40px;
+  min-height: 44px;
   padding: 0;
   overflow: visible;
   border: 0;
@@ -1410,7 +1502,7 @@ onUnmounted(() => {
 .market-filter-chips :deep(.ui-filter-chip),
 .market-settlement-filter-chips :deep(.ui-filter-chip),
 .market-commodity-filter-chips :deep(.ui-filter-chip) {
-  min-height: 2.5rem;
+  min-height: 44px;
 }
 
 .market-settlement-filter-chips :deep(.ui-filter-chip.is-active) {
@@ -1428,15 +1520,15 @@ onUnmounted(() => {
 .send-btn:focus-visible,
 .recent-offer-item:focus-visible,
 .admin-market-message-expand:focus-visible {
-  outline: 3px solid rgba(245, 158, 11, 0.34);
-  outline-offset: 3px;
+  outline: 2px solid var(--market-focus-ring);
+  outline-offset: 2px;
 }
 
 @media (max-width: 430px) {
   .market-filter-chips :deep(.ui-filter-chip),
   .market-settlement-filter-chips :deep(.ui-filter-chip),
   .market-commodity-filter-chips :deep(.ui-filter-chip) {
-    min-height: 2.5rem;
+    min-height: 44px;
     padding-inline: 0.6rem;
   }
 
@@ -1455,7 +1547,9 @@ onUnmounted(() => {
 }
 
 .market-runtime-notice {
-  margin: 0.75rem 1rem 0;
+  max-width: var(--market-rail-max);
+  width: calc(100% - 2rem);
+  margin: 0.75rem auto 0;
   padding: 0.8rem 1rem;
   border-radius: var(--ds-radius-lg);
   font-size: 0.84rem;
@@ -1477,7 +1571,9 @@ onUnmounted(() => {
 }
 
 .admin-market-message {
-  margin: 0.75rem 1rem 0;
+  max-width: var(--market-rail-max);
+  width: calc(100% - 2rem);
+  margin: 0.75rem auto 0;
   padding: 0.72rem 0.95rem;
   border-radius: var(--ds-radius-lg);
   background: linear-gradient(135deg, rgba(255, 251, 235, 0.98), rgba(236, 253, 245, 0.95));
@@ -1520,7 +1616,7 @@ onUnmounted(() => {
 }
 
 .content-inner {
-  max-width: var(--ds-page-max-width);
+  max-width: var(--market-rail-max);
   margin: 0 auto;
   padding: 0 1rem;
   width: 100%;
@@ -1542,7 +1638,7 @@ onUnmounted(() => {
 }
 
 .action-bar-inner {
-  max-width: var(--ds-page-max-width);
+  max-width: var(--market-rail-max);
   margin: 0 auto;
   display: flex;
   flex-direction: column;
@@ -1769,4 +1865,10 @@ onUnmounted(() => {
 .fade-enter-from, .fade-leave-to { opacity: 0; }
 
 .ltr { direction: ltr; }
+
+@media (min-width: 1024px) {
+  .market-page {
+    --market-rail-max: 60rem;
+  }
+}
 </style>

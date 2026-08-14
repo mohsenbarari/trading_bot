@@ -1272,7 +1272,7 @@ describe('OffersList.vue', () => {
     expect(paginatedWrapper.find('.active-load-more-btn').exists()).toBe(false)
   })
 
-  it('restarts a green overtime timer ring and animates the hourglass beside relative time', async () => {
+  it('restarts the overtime perimeter from final_deadline_ts with an accessible hourglass sticker', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-08-05T12:05:00Z'))
     const nowSec = Date.now() / 1000
@@ -1301,9 +1301,12 @@ describe('OffersList.vue', () => {
     expect(card.classes()).not.toContain('timer-critical')
     expect(card.attributes('style')).toContain('--t-pct')
 
-    const marker = wrapper.get('.overtime-marker')
-    expect(marker.text()).toBe('⏳')
-    expect(marker.classes()).toContain('overtime-marker--animated')
+    const sticker = wrapper.get('[data-test="offer-overtime-sticker"]')
+    expect(sticker.attributes('role')).toBe('img')
+    expect(sticker.attributes('aria-label')).toBe('وقت اضافه')
+    expect(sticker.find('.offer-overtime-sticker__icon').exists()).toBe(true)
+    expect(wrapper.get('[data-test="offer-deadline-perimeter"]').attributes('data-phase')).toBe('overtime')
+    expect(wrapper.get('[data-test="offer-deadline-label"]').text()).toMatch(/باقی‌مانده/)
     expect(wrapper.find('.offer-meta-end').exists()).toBe(true)
     expect(wrapper.find('.trade-btn').exists()).toBe(true)
 
@@ -1335,7 +1338,9 @@ describe('OffersList.vue', () => {
     expect(wrapper.text()).toContain('لفظ دم نهایی')
     const card = wrapper.get('.offer-card-wrap')
     expect(card.classes()).not.toContain('has-timer')
-    expect(wrapper.get('.overtime-marker').classes()).toContain('overtime-marker--static')
+    expect(wrapper.get('[data-test="offer-final-tail-badge"]').text()).toContain('مهلت پایان یافته')
+    expect(wrapper.text()).toContain('در حال نهایی‌سازی')
+    expect(wrapper.find('[data-test="offer-deadline-perimeter"]').exists()).toBe(false)
     expect(wrapper.find('.trade-btn').exists()).toBe(false)
     expect(wrapper.find('.cancel-own-offer-btn').exists()).toBe(false)
 
@@ -1343,7 +1348,7 @@ describe('OffersList.vue', () => {
     vi.useRealTimers()
   })
 
-  it('keeps a static history hourglass only when overtime_trade_committed is true', async () => {
+  it('keeps a static overtime-trade badge only when overtime_trade_committed is true', async () => {
     const wrapper = await mountOffersList({
       offers: [
         buildTradeOffer({
@@ -1368,9 +1373,228 @@ describe('OffersList.vue', () => {
 
     const cards = wrapper.findAll('.offer-card-wrap')
     expect(cards).toHaveLength(2)
-    expect(cards[0]!.find('.overtime-marker').exists()).toBe(true)
-    expect(cards[0]!.find('.overtime-marker').classes()).toContain('overtime-marker--static')
-    expect(cards[1]!.find('.overtime-marker').exists()).toBe(false)
+    expect(cards[0]!.find('[data-test="offer-overtime-trade-badge"]').text()).toContain('معامله در وقت اضافه')
+    expect(cards[1]!.find('[data-test="offer-overtime-trade-badge"]').exists()).toBe(false)
+    expect(cards[0]!.find('[data-test="offer-deadline-perimeter"]').exists()).toBe(false)
+    expect(cards[1]!.find('[data-test="offer-deadline-perimeter"]').exists()).toBe(false)
+
+    wrapper.unmount()
+  })
+
+  it('shows decision focus and recap after the first lot tap without sending a trade', async () => {
+    const wrapper = await mountOffersList({
+      offers: [
+        buildTradeOffer({ id: 201, commodity_name: 'سکه امام', remaining_quantity: 10, quantity: 10 }),
+        buildTradeOffer({ id: 202, offer_type: 'buy', commodity_name: 'ربع سکه', remaining_quantity: 8, quantity: 8, price: 41000, viewer_effective_price: 41000 }),
+      ],
+    })
+
+    expect(wrapper.findAll('[data-test="offer-card"]')).toHaveLength(2)
+    expect(wrapper.findAll('[data-test="offer-remaining"]').map((node) => node.text().replace(/\s+/g, ''))).toEqual([
+      'باقی‌مانده10عدد',
+      'باقی‌مانده8عدد',
+    ])
+    expect(wrapper.text()).toContain('قیمت هر عدد')
+    expect(wrapper.text()).toContain('تومان')
+    expect(wrapper.find('[data-test="offer-decision-panel"]').exists()).toBe(false)
+
+    const firstCardButtons = wrapper.findAll('[data-test="offer-card"]')[0]!.findAll('.trade-btn')
+    expect(firstCardButtons[0]!.attributes('aria-label')).toContain('اقدام شما: خرید')
+    expect(firstCardButtons[0]!.attributes('aria-label')).toContain('لفظ فروش')
+    await firstCardButtons[0]!.trigger('click')
+
+    expect(wrapper.findAll('[data-test="offer-card"]')[0]!.attributes('data-decision-focus')).toBe('true')
+    expect(wrapper.findAll('[data-test="offer-card"]')[1]!.attributes('data-decision-focus')).toBe('false')
+    expect(wrapper.get('[data-test="offer-decision-panel"]').text()).toContain('مرور و تأیید معامله')
+    expect(wrapper.get('[data-test="offer-decision-side"]').text()).toBe('نوع لفظ: فروش')
+    expect(wrapper.get('[data-test="offer-decision-action"]').text()).toBe('اقدام شما: خرید 10 عدد')
+    expect(wrapper.get('[data-test="offer-decision-panel"]').text()).toContain('مقدار انتخاب‌شده: 10 عدد')
+    expect(wrapper.get('[data-test="offer-decision-panel"]').text()).toContain('قیمت هر عدد: 52,000 تومان')
+    expect(wrapper.get('[data-test="offer-decision-panel"]').text()).toContain('ثبت خرید 10 عدد در برابر این لفظ فروش')
+    expect(wrapper.findAll('[data-test="offer-card"]')).toHaveLength(2)
+    expect(wrapper.findAll('[data-test="offer-card"]')[1]!.find('.trade-btn').exists()).toBe(true)
+    expect(apiFetchMock).not.toHaveBeenCalled()
+
+    wrapper.unmount()
+  })
+
+  it('clears pending confirmation with Escape or cancel without mutating the trade', async () => {
+    const wrapper = await mountOffersList({
+      offers: [buildTradeOffer({ id: 203, commodity_name: 'نیم‌سکه' })],
+    })
+
+    await wrapper.get('.trade-btn').trigger('click')
+    expect(wrapper.text()).toContain('تایید 10 عدد؟')
+    expect(wrapper.find('[data-test="offer-decision-panel"]').exists()).toBe(true)
+
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('تایید 10 عدد؟')
+    expect(wrapper.find('[data-test="offer-decision-panel"]').exists()).toBe(false)
+    expect(wrapper.get('[data-test="offer-card"]').attributes('data-decision-focus')).toBe('false')
+    expect(apiFetchMock).not.toHaveBeenCalled()
+
+    await wrapper.get('.trade-btn').trigger('click')
+    expect(wrapper.find('[data-test="offer-decision-panel"]').exists()).toBe(true)
+    await wrapper.get('[data-test="offer-decision-cancel"]').trigger('click')
+    expect(wrapper.find('[data-test="offer-decision-panel"]').exists()).toBe(false)
+    expect(apiFetchMock).not.toHaveBeenCalled()
+
+    wrapper.unmount()
+  })
+
+  it('inverts responder action for a buy offer without changing the offer-side badge', async () => {
+    const wrapper = await mountOffersList({
+      offers: [buildTradeOffer({ id: 204, offer_type: 'buy', commodity_name: 'سکه بهار', remaining_quantity: 8, quantity: 8 })],
+    })
+
+    const lot = wrapper.get('.trade-btn')
+    expect(lot.attributes('aria-label')).toContain('اقدام شما: فروش')
+    expect(lot.attributes('aria-label')).toContain('لفظ خرید')
+    expect(wrapper.get('.role-badge').text()).toContain('خرید')
+
+    await lot.trigger('click')
+    expect(wrapper.get('[data-test="offer-decision-side"]').text()).toBe('نوع لفظ: خرید')
+    expect(wrapper.get('[data-test="offer-decision-action"]').text()).toBe('اقدام شما: فروش 8 عدد')
+    expect(wrapper.get('[data-test="offer-decision-panel"]').text()).toContain('ثبت فروش 8 عدد در برابر این لفظ خرید')
+    expect(wrapper.get('.trade-btn').text()).toContain('تایید 8 عدد؟')
+    expect(apiFetchMock).not.toHaveBeenCalled()
+
+    wrapper.unmount()
+  })
+
+  it('derives the main deadline perimeter from normal_deadline_ts and marks sub-15 percent as critical', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-08-14T12:00:00Z'))
+    const nowSec = Date.now() / 1000
+
+    const wrapper = await mountOffersList({
+      expiryMinutes: 2,
+      offers: [
+        buildTradeOffer({
+          id: 301,
+          lifecycle_phase: 'normal',
+          normal_deadline_ts: nowSec + 60,
+          expires_at_ts: nowSec + 120,
+          timer_total_seconds: 120,
+          accepts_new_public_interaction: true,
+        }),
+      ],
+    })
+
+    expect(wrapper.get('[data-test="offer-deadline-perimeter"]').attributes('data-phase')).toBe('normal')
+    expect(wrapper.get('[data-test="offer-deadline-perimeter"]').attributes('data-critical')).toBe('false')
+    expect(wrapper.get('.offer-card-wrap').attributes('style') || '').toMatch(/--t-pct:\s*50(?:\.0+)?(?:;|\s|$)/)
+    expect(wrapper.get('[data-test="offer-deadline-label"]').text()).toMatch(/مهلت اصلی/)
+
+    await wrapper.setProps({
+      offers: [
+        buildTradeOffer({
+          id: 301,
+          lifecycle_phase: 'normal',
+          normal_deadline_ts: nowSec + 12,
+          expires_at_ts: nowSec + 120,
+          timer_total_seconds: 120,
+          accepts_new_public_interaction: true,
+        }),
+      ],
+    })
+
+    expect(wrapper.get('[data-test="offer-deadline-perimeter"]').attributes('data-phase')).toBe('critical')
+    expect(wrapper.get('[data-test="offer-deadline-perimeter"]').attributes('data-critical')).toBe('true')
+    expect(wrapper.get('.offer-card-wrap').classes()).toContain('timer-critical')
+    expect(wrapper.get('[data-test="offer-deadline-label"]').text()).toMatch(/مهلت اصلی/)
+
+    wrapper.unmount()
+    vi.useRealTimers()
+  })
+
+  it('resets overtime progress from final_deadline_ts instead of the elapsed normal window', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-08-14T12:00:00Z'))
+    const nowSec = Date.now() / 1000
+
+    const wrapper = await mountOffersList({
+      expiryMinutes: 2,
+      offers: [
+        buildTradeOffer({
+          id: 302,
+          lifecycle_phase: 'normal',
+          normal_deadline_ts: nowSec + 6,
+          expires_at_ts: nowSec + 6,
+          timer_total_seconds: 120,
+          accepts_new_public_interaction: true,
+        }),
+      ],
+    })
+
+    const before = wrapper.get('.offer-card-wrap').attributes('style') || ''
+    expect(before).toMatch(/--t-pct:\s*5(?:\.0+)?(?:;|\s|$)/)
+
+    await wrapper.setProps({
+      offers: [
+        buildTradeOffer({
+          id: 302,
+          lifecycle_phase: 'overtime',
+          normal_deadline_ts: nowSec - 60,
+          final_deadline_ts: nowSec + 240,
+          expires_at_ts: nowSec + 240,
+          timer_total_seconds: 300,
+          accepts_new_public_interaction: true,
+        }),
+      ],
+    })
+
+    expect(wrapper.get('[data-test="offer-overtime-sticker"]').attributes('aria-label')).toBe('وقت اضافه')
+    expect(wrapper.get('[data-test="offer-deadline-perimeter"]').attributes('data-phase')).toBe('overtime')
+    expect(wrapper.get('[data-test="offer-deadline-label"]').text()).toMatch(/باقی‌مانده/)
+    expect(wrapper.get('.offer-card-wrap').attributes('style') || '').toMatch(/--t-pct:\s*80(?:\.0+)?(?:;|\s|$)/)
+    expect(wrapper.find('.trade-btn').exists()).toBe(true)
+
+    wrapper.unmount()
+    vi.useRealTimers()
+  })
+
+  it('keeps expired and traded cards terminal, distinct, and without a live timer', async () => {
+    const wrapper = await mountOffersList({
+      offers: [
+        buildTradeOffer({
+          id: 401,
+          status: 'expired',
+          history_state: 'expired',
+          is_read_only: true,
+          commodity_name: 'لفظ منقضی آرام',
+        }),
+        buildTradeOffer({
+          id: 402,
+          status: 'completed',
+          history_state: 'traded',
+          is_read_only: true,
+          is_partially_traded: true,
+          traded_quantity: 3,
+          quantity: 10,
+          commodity_name: 'لفظ معامله جزئی',
+        }),
+        buildTradeOffer({
+          id: 403,
+          status: 'completed',
+          history_state: 'traded',
+          is_read_only: true,
+          overtime_trade_committed: true,
+          traded_quantity: 4,
+          commodity_name: 'لفظ معامله وقت اضافه',
+        }),
+      ],
+    })
+
+    const cards = wrapper.findAll('[data-test="offer-card"]')
+    expect(cards[0]!.get('[data-test="history-stamp"]').text()).toBe('منقضی')
+    expect(cards[1]!.get('[data-test="history-stamp"]').text()).toBe('معامله‌شده 3 عدد')
+    expect(cards[2]!.get('[data-test="history-stamp"]').text()).toBe('معامله‌شده')
+    expect(cards[2]!.get('[data-test="offer-overtime-trade-badge"]').text()).toContain('معامله در وقت اضافه')
+    expect(wrapper.find('[data-test="offer-deadline-perimeter"]').exists()).toBe(false)
+    expect(wrapper.find('.trade-btn').exists()).toBe(false)
+    expect(wrapper.find('.overtime-marker').exists()).toBe(false)
 
     wrapper.unmount()
   })

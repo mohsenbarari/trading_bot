@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { AppSettlementBadge, AppStatusBadge } from './ui'
 import type { SettlementType } from '../utils/settlementType'
 
@@ -81,6 +81,9 @@ const confirmButtonText = computed(() => {
   if (props.submitting) return 'در حال ارسال...'
   return props.warning ? 'با وجود هشدار منتشر کن' : 'تایید و ارسال'
 })
+const expectedPublishResult = computed(() => (
+  `انتشار لفظ ${tradeLabel.value} ${props.offer.quantity.toLocaleString()} عدد ${props.offer.commodity_name || 'کالا'} به قیمت ${formattedPrice.value} تومان`
+))
 const confirmClickLocked = ref(false)
 
 watch(() => [props.submitting, props.error, props.warning], ([submitting, error, warning]) => {
@@ -92,6 +95,22 @@ function handleConfirmClick() {
   confirmClickLocked.value = true
   emit('confirm')
 }
+
+function handlePreviewEscape(event: KeyboardEvent) {
+  if (event.key !== 'Escape' || props.submitting) return
+  event.preventDefault()
+  emit('cancel')
+}
+
+if (typeof document !== 'undefined') {
+  document.addEventListener('keydown', handlePreviewEscape)
+}
+
+onBeforeUnmount(() => {
+  if (typeof document !== 'undefined') {
+    document.removeEventListener('keydown', handlePreviewEscape)
+  }
+})
 </script>
 
 <template>
@@ -116,6 +135,12 @@ function handleConfirmClick() {
           </div>
           <div class="offer-preview-line">
             {{ offer.commodity_name }} {{ offer.quantity }} عدد {{ formattedPrice }}
+          </div>
+          <div class="offer-preview-recap" data-test="offer-preview-recap">
+            <p>نوع لفظ شما: {{ tradeLabel }}</p>
+            <p>مقدار: {{ offer.quantity.toLocaleString() }} عدد</p>
+            <p>قیمت هر عدد: {{ formattedPrice }} تومان</p>
+            <p>نتیجه مورد انتظار: {{ expectedPublishResult }}</p>
           </div>
           <div v-if="offer.notes" class="offer-preview-notes">
             توضیحات: {{ offer.notes }}
@@ -215,13 +240,34 @@ function handleConfirmClick() {
 }
 
 .offer-preview-close {
-  width: 2rem;
-  height: 2rem;
+  width: 2.75rem;
+  height: 2.75rem;
+  min-width: 44px;
+  min-height: 44px;
   border-radius: 999px;
   border: 1px solid var(--ds-border-light, rgba(148, 163, 184, 0.25));
   background: var(--ds-bg-page, #f8fafc);
   color: var(--ds-text-secondary, #475569);
   font-size: 1.2rem;
+}
+
+.offer-preview-close:focus-visible,
+.offer-preview-actions button:focus-visible {
+  outline: 2px solid var(--ds-primary-800);
+  outline-offset: 2px;
+}
+
+.offer-preview-recap {
+  display: grid;
+  gap: 0.2rem;
+  margin-top: 0.75rem;
+}
+
+.offer-preview-recap p {
+  margin: 0;
+  font-size: 0.86rem;
+  line-height: 1.7;
+  color: var(--ds-text-primary, #0f172a);
 }
 
 .offer-preview-body {

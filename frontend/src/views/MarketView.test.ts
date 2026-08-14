@@ -327,6 +327,11 @@ describe('MarketView.vue', () => {
     await flushPromises()
 
     expect(wrapper.find('.market-overtime-pref').exists()).toBe(false)
+    expect(wrapper.get('.market-page-title').text()).toBe('بازار')
+    expect(wrapper.get('[data-test="market-status-chip"]').exists()).toBe(true)
+    expect(wrapper.get('.market-feed-title').text()).toBe('لفظ‌های فعال')
+    expect(wrapper.get('.market-feed-subtitle').text()).toBe('مرتب‌شده بر اساس زمان')
+    expect(wrapper.text()).not.toContain('بعدی')
 
     expect(marketViewMocks.fetchOffersMock).toHaveBeenCalled()
     expect(marketViewMocks.startPollingMock).toHaveBeenCalled()
@@ -1792,6 +1797,32 @@ describe('MarketView.vue', () => {
 
     expect(wrapper.find('.parse-error').text()).toBe('لغو لفظ‌ها ممکن نشد')
     expect(marketViewMocks.fetchOffersMock).toHaveBeenCalledTimes(1)
+
+    wrapper.unmount()
+  })
+
+  it('keeps preview recap visible and cancels the preview with Escape without creating an offer', async () => {
+    const wrapper = await mountMarketView()
+    await flushPromises()
+    marketViewMocks.apiFetchMock.mockClear()
+
+    await wrapper.find('.text-offer-input').setValue('خرید نقد فردا طلای آب‌شده 50 عدد 222222')
+    await wrapper.find('.send-btn').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('.offer-preview-card').exists()).toBe(true)
+    expect(wrapper.get('[data-test="offer-preview-recap"]').text()).toContain('نوع لفظ شما: خرید')
+    expect(wrapper.get('[data-test="offer-preview-recap"]').text()).toContain('مقدار: 50 عدد')
+    expect(wrapper.get('[data-test="offer-preview-recap"]').text()).toContain('قیمت هر عدد: 222,222 تومان')
+    expect(wrapper.get('[data-test="offer-preview-recap"]').text()).toContain('نتیجه مورد انتظار')
+
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+    await flushPromises()
+
+    expect(wrapper.find('.offer-preview-card').exists()).toBe(false)
+    expect(marketViewMocks.apiFetchMock.mock.calls.some(([path, options]) => (
+      path === '/api/offers/' && Boolean(options && typeof options === 'object' && 'method' in options && options.method === 'POST')
+    ))).toBe(false)
 
     wrapper.unmount()
   })

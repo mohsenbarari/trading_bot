@@ -131,9 +131,20 @@ describe('ui primitives', () => {
       slots: { default: '<div class="offer-card-inner">لفظ بازار</div>' },
     })
     expect(offerCard.attributes('data-test')).toBe('offer-card')
+    expect(offerCard.attributes('data-decision-focus')).toBe('false')
     expect(offerCard.classes()).toEqual(expect.arrayContaining(['offer-card-wrap', 'has-timer', 'timer-critical', 'is-traded']))
+    expect(offerCard.classes()).not.toContain('is-decision-focus')
     expect(offerCard.attributes('style')).toContain('--t-pct: 42')
+    expect(offerCard.get('[data-test="offer-deadline-perimeter"]').attributes('data-phase')).toBe('critical')
+    expect(offerCard.get('.offer-deadline-perimeter__value').attributes('pathLength')).toBe('100')
     expect(offerCard.text()).toContain('لفظ بازار')
+
+    const focusedOfferCard = mount(AppOfferCard, {
+      props: { decisionFocus: true },
+      slots: { default: '<div>انتخاب‌شده</div>' },
+    })
+    expect(focusedOfferCard.attributes('data-decision-focus')).toBe('true')
+    expect(focusedOfferCard.classes()).toContain('is-decision-focus')
 
     const tradeButton = mount(AppTradeActionButton, {
       props: { side: 'buy', pending: true, busy: true },

@@ -56,6 +56,29 @@ function clearPending() {
   pendingAmount.value = null
 }
 
+function offerSideLabel(): string {
+  return props.offerTypeLabel || (props.offerType === 'buy' ? 'خرید' : 'فروش')
+}
+
+function userActionLabel(): string {
+  return props.offerType === 'buy' ? 'فروش' : 'خرید'
+}
+
+function lotButtonAriaLabel(amount: number): string {
+  const action = userActionLabel()
+  const side = offerSideLabel()
+  if (pendingAmount.value === amount) {
+    return `تأیید نهایی اقدام شما: ${action} ${amount.toLocaleString()} عدد ${props.commodityName} در برابر لفظ ${side} به قیمت ${props.price.toLocaleString()} تومان`
+  }
+  return `انتخاب مقدار ${amount.toLocaleString()} عدد برای اقدام شما: ${action} در برابر لفظ ${side} ${props.commodityName}`
+}
+
+function handleEscape(event: KeyboardEvent) {
+  if (!props.show || event.key !== 'Escape') return
+  event.preventDefault()
+  emit('close')
+}
+
 function handleLotClick(amount: number) {
   if (props.busy) return
   if (pendingAmount.value === amount) {
@@ -121,7 +144,20 @@ watch(
   }
 )
 
+watch(
+  () => props.show,
+  (show) => {
+    if (typeof document === 'undefined') return
+    if (show) document.addEventListener('keydown', handleEscape)
+    else document.removeEventListener('keydown', handleEscape)
+  },
+  { immediate: true },
+)
+
 onBeforeUnmount(() => {
+  if (typeof document !== 'undefined') {
+    document.removeEventListener('keydown', handleEscape)
+  }
   clearTimers()
 })
 </script>
@@ -157,6 +193,16 @@ onBeforeUnmount(() => {
               <div class="trade-offer-lot-info">🔢 خُرد: {{ props.lotSummary }}</div>
             </div>
 
+            <div class="trade-suggestion-recap" data-test="trade-suggestion-recap">
+              <p>نوع لفظ: {{ offerSideLabel() }}</p>
+              <p>باقی‌مانده: {{ props.remainingQuantity.toLocaleString() }} عدد</p>
+              <p>قیمت هر عدد: {{ props.price.toLocaleString() }} تومان</p>
+              <p v-if="pendingAmount !== null">اقدام شما: {{ userActionLabel() }} {{ pendingAmount.toLocaleString() }} عدد</p>
+              <p v-if="pendingAmount !== null">مقدار انتخاب‌شده: {{ pendingAmount.toLocaleString() }} عدد</p>
+              <p v-if="pendingAmount !== null">نتیجه مورد انتظار: ثبت {{ userActionLabel() }} {{ pendingAmount.toLocaleString() }} عدد در برابر این لفظ {{ offerSideLabel() }}</p>
+              <p v-if="pendingAmount !== null">برای تأیید، همان مقدار را دوباره انتخاب کنید</p>
+            </div>
+
             <div v-if="props.availableLots.length > 0" class="trade-suggestion-actions">
               <button
                 v-for="amount in props.availableLots"
@@ -165,9 +211,11 @@ onBeforeUnmount(() => {
                 class="trade-suggestion-lot-btn"
                 data-test="trade-suggestion-lot-button"
                 :data-state="pendingAmount === amount ? 'pending' : 'idle'"
+                :aria-label="lotButtonAriaLabel(amount)"
                 :class="[
                   offerTypeClass,
                   pendingAmount === amount ? 'pending' : '',
+                  pendingAmount !== null && pendingAmount !== amount ? 'is-secondary' : '',
                   props.busy ? 'busy' : ''
                 ]"
                 :disabled="props.busy"
@@ -180,7 +228,15 @@ onBeforeUnmount(() => {
             </div>
 
             <div class="trade-suggestion-footer">
-              <button type="button" class="trade-suggestion-dismiss" @click="emit('close')">رد کردن</button>
+              <button
+                type="button"
+                class="trade-suggestion-dismiss"
+                data-test="trade-suggestion-dismiss"
+                aria-label="رد کردن پیشنهاد معامله"
+                @click="emit('close')"
+              >
+                رد کردن
+              </button>
             </div>
           </div>
         </div>
@@ -205,7 +261,7 @@ onBeforeUnmount(() => {
 .trade-suggestion-card {
   width: min(100%, 25rem);
   border-radius: 1.45rem;
-  background: #ffffff;
+  background: var(--ds-bg-card, #ffffff);
   box-shadow: 0 24px 70px rgba(15, 23, 42, 0.28);
   overflow: hidden;
   animation: tradeSuggestionScaleIn 0.22s ease-out;
@@ -221,11 +277,11 @@ onBeforeUnmount(() => {
 }
 
 .trade-suggestion-topbar.buy {
-  background: linear-gradient(135deg, #16a34a, #10b981);
+  background: linear-gradient(135deg, var(--ds-success-600), var(--ds-success-500));
 }
 
 .trade-suggestion-topbar.sell {
-  background: linear-gradient(135deg, #dc2626, #ef4444);
+  background: linear-gradient(135deg, var(--ds-danger-600), var(--ds-danger-500));
 }
 
 .trade-suggestion-topbar-copy {
@@ -252,7 +308,7 @@ onBeforeUnmount(() => {
   margin: 0;
   font-size: 0.93rem;
   line-height: 1.85;
-  color: #334155;
+  color: var(--ds-text-secondary, #334155);
 }
 
 .trade-offer-card {
@@ -264,11 +320,11 @@ onBeforeUnmount(() => {
 }
 
 .trade-offer-card.buy {
-  box-shadow: 0 1px 4px rgba(16, 185, 129, 0.18), 0 1px 2px rgba(0, 0, 0, 0.04);
+  box-shadow: 0 1px 4px var(--ds-trade-buy-shadow), 0 1px 2px rgba(0, 0, 0, 0.04);
 }
 
 .trade-offer-card.sell {
-  box-shadow: 0 1px 4px rgba(239, 68, 68, 0.18), 0 1px 2px rgba(0, 0, 0, 0.04);
+  box-shadow: 0 1px 4px var(--ds-trade-sell-shadow), 0 1px 2px rgba(0, 0, 0, 0.04);
 }
 
 .trade-offer-header {
@@ -288,13 +344,13 @@ onBeforeUnmount(() => {
 }
 
 .trade-offer-badge.buy {
-  background: #dcfce7;
-  color: #16a34a;
+  background: var(--ds-success-100);
+  color: var(--ds-trade-buy-text);
 }
 
 .trade-offer-badge.sell {
-  background: #fee2e2;
-  color: #dc2626;
+  background: var(--ds-danger-100);
+  color: var(--ds-danger-600);
 }
 
 .trade-offer-live {
@@ -332,7 +388,7 @@ onBeforeUnmount(() => {
 }
 
 .trade-offer-price {
-  color: #f59e0b;
+  color: var(--ds-primary-500, #f59e0b);
   font-weight: 900;
   font-size: 0.94rem;
 }
@@ -351,17 +407,35 @@ onBeforeUnmount(() => {
   margin-top: 1rem;
 }
 
+.trade-suggestion-recap {
+  display: grid;
+  gap: 0.25rem;
+  margin-top: 0.85rem;
+  padding: 0.75rem 0.8rem;
+  border-radius: 0.85rem;
+  background: var(--ds-bg-inset, #f8fafc);
+  border: 1px solid var(--ds-border-light, rgba(148, 163, 184, 0.25));
+}
+
+.trade-suggestion-recap p {
+  margin: 0;
+  font-size: 0.82rem;
+  line-height: 1.7;
+  color: var(--ds-text-primary, #0f172a);
+}
+
 .trade-suggestion-lot-btn {
-  padding: 8px 12px;
+  padding: 10px 12px;
   color: white;
-  border: none;
+  border: 1px solid transparent;
   border-radius: 8px;
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
   flex: 1 1 auto;
-  min-width: 50px;
-  max-width: 120px;
+  min-width: 44px;
+  min-height: 44px;
+  max-width: 160px;
   text-align: center;
   transition: all 0.2s ease;
   letter-spacing: 0.02em;
@@ -376,16 +450,33 @@ onBeforeUnmount(() => {
 }
 
 .trade-suggestion-lot-btn.buy {
-  background: linear-gradient(135deg, #10b981, #059669);
+  background: linear-gradient(135deg, var(--ds-success-500), var(--ds-success-600));
 }
 
 .trade-suggestion-lot-btn.sell {
-  background: linear-gradient(135deg, #ef4444, #dc2626);
+  background: linear-gradient(135deg, var(--ds-danger-500), var(--ds-danger-600));
 }
 
 .trade-suggestion-lot-btn.pending {
-  background: #f59e0b;
+  background: var(--ds-primary-500, #f59e0b);
   animation: pulse-soft 1s ease-in-out infinite;
+}
+
+.trade-suggestion-lot-btn.buy.is-secondary {
+  background: var(--ds-success-100);
+  color: var(--ds-trade-buy-text);
+  border-color: var(--ds-trade-buy-text);
+}
+
+.trade-suggestion-lot-btn.sell.is-secondary {
+  background: var(--ds-danger-50);
+  color: var(--ds-danger-600);
+  border-color: var(--ds-danger-600);
+}
+
+.trade-suggestion-lot-btn:focus-visible {
+  outline: 2px solid var(--ds-primary-800);
+  outline-offset: 2px;
 }
 
 .trade-suggestion-lot-btn.busy {
@@ -404,15 +495,36 @@ onBeforeUnmount(() => {
 
 .trade-suggestion-dismiss {
   width: 100%;
-  padding: 8px 12px;
-  border: none;
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1px solid var(--ds-border-light, rgba(148, 163, 184, 0.25));
   border-radius: 8px;
   font-size: 13px;
   font-weight: 600;
   transition: all 0.2s ease;
   letter-spacing: 0.02em;
-  background: #f3f4f6;
-  color: #475569;
+  background: var(--ds-bg-hover, #f3f4f6);
+  color: var(--ds-text-secondary, #475569);
+}
+
+.trade-suggestion-dismiss:focus-visible {
+  outline: 2px solid var(--ds-primary-800);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .trade-suggestion-card {
+    animation: none;
+  }
+
+  .trade-suggestion-lot-btn,
+  .trade-suggestion-dismiss {
+    transition: none;
+  }
+
+  .trade-suggestion-lot-btn.pending {
+    animation: none;
+  }
 }
 
 .trade-suggestion-dismiss:active {
@@ -441,8 +553,8 @@ onBeforeUnmount(() => {
 }
 
 @keyframes pulse-soft {
-  0%, 100% { opacity: 1; transform: scale(1); }
-  50% { opacity: 0.85; transform: scale(0.98); }
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.85; }
 }
 
 @media (max-width: 480px) {
