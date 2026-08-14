@@ -1594,6 +1594,7 @@ onBeforeUnmount(() => {
 }
 
 .manager-section-card.card-with-help {
+  position: relative;
   padding-left: 4rem;
 }
 

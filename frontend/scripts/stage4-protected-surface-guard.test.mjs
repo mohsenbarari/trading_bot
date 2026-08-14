@@ -13,6 +13,12 @@ import {
   STAGE6_MESSENGER_URL_PRIVACY_ALLOWED_FILE_SHA256,
   STAGE6_MESSENGER_URL_PRIVACY_ALLOWED_PATHS,
   STAGE6_MESSENGER_URL_PRIVACY_EVIDENCE,
+  STAGE8_CREATECHANNEL_HELPPOPOVER_PLACEMENT_ALLOWED_FILE_SHA256,
+  STAGE8_CREATECHANNEL_HELPPOPOVER_PLACEMENT_ALLOWED_PATHS,
+  STAGE8_CREATECHANNEL_HELPPOPOVER_PLACEMENT_EVIDENCE,
+  STAGE8_CREATECHANNEL_HELPPOPOVER_PLACEMENT_KIND,
+  STAGE8_CREATECHANNEL_HELPPOPOVER_PLACEMENT_LOCKED_STAGE6_PATHS,
+  assertStage8CreateChannelHelpPopoverPlacementDisposition,
   STAGE4_BASE_COMMIT,
   STAGE4_BASE_TREE,
   STAGE4_ROUTE_CONTRACT_PATH,
@@ -57,6 +63,21 @@ function currentSharedDependencySources() {
       readRepoFile(repoPath, 'utf8'),
     ]),
   )
+}
+
+function withCreateChannelPlacementReverted(entries) {
+  return entries.map((entry) => {
+    if (entry.path !== 'frontend/src/components/CreateChannelView.vue') return entry
+    const source = entry.content.toString('utf8')
+    const next = source.replace(
+      '.manager-section-card.card-with-help {\n  position: relative;\n  padding-left: 4rem;\n}',
+      '.manager-section-card.card-with-help {\n  padding-left: 4rem;\n}',
+    )
+    if (next === source) {
+      throw new Error('test mutation did not revert the Stage 8 placement declaration')
+    }
+    return { ...entry, content: Buffer.from(next, 'utf8') }
+  })
 }
 
 function withSharedDependencyMutation(sources, repoPath, mutate) {
@@ -195,26 +216,80 @@ describe('Stage 4 protected surface baseline', () => {
     expect(Object.isFrozen(MESSENGER_RUNTIME_BASELINE)).toBe(true)
   })
 
-  it('permits only the exact Stage 6 Messenger URL-privacy disposition', () => {
-    const entries = readFileEntries(repoRoot, ownedPaths.messenger)
-    const actual = currentEvidence(ownedPaths.messenger, MESSENGER_RUNTIME_CONTRACT)
-    const disposition = resolveMessengerRuntimeDisposition(entries)
-
-    expect(actual).not.toMatchObject(MESSENGER_RUNTIME_BASELINE)
-    expect(disposition).toMatchObject({
-      kind: 'stage6-url-privacy',
-      evidence: STAGE6_MESSENGER_URL_PRIVACY_EVIDENCE,
-    })
+  it('keeps the immutable Stage 6 Messenger URL-privacy constants', () => {
     expect(STAGE6_MESSENGER_URL_PRIVACY_ALLOWED_PATHS).toEqual([
       'frontend/src/components/ChatView.vue',
       'frontend/src/components/CreateChannelView.vue',
       'frontend/src/views/MessengerView.vue',
     ])
-    for (const entry of entries.filter(({ path: repoPath }) =>
-      STAGE6_MESSENGER_URL_PRIVACY_ALLOWED_PATHS.includes(repoPath),
-    )) {
+    expect(STAGE6_MESSENGER_URL_PRIVACY_ALLOWED_FILE_SHA256).toEqual({
+      'frontend/src/components/ChatView.vue':
+        'e03ded196c369871f3ecd6763c09535c5a57efc5c0a767d848b2c5a94994273b',
+      'frontend/src/components/CreateChannelView.vue':
+        '708cabb84325114d03b35b5db8a0b4add64193f438c1a3375a5e66232034102c',
+      'frontend/src/views/MessengerView.vue':
+        '1cabee73dc161c456130f131f53274a5b546816ff0652d68a4e6ea290e0f83fb',
+    })
+    expect(STAGE6_MESSENGER_URL_PRIVACY_EVIDENCE).toEqual({
+      count: 85,
+      contentBytes: 1311100,
+      pathSetSha256: 'f6af1f961e45d785ba9c752ee670643571086c6a946843807fe6f581d11aea58',
+      sha256: '3089210a77936d29754c9478fcdf40619acd08f35d1e8c64f6266fe8efb1699a',
+    })
+    expect(Object.isFrozen(STAGE6_MESSENGER_URL_PRIVACY_ALLOWED_PATHS)).toBe(true)
+    expect(Object.isFrozen(STAGE6_MESSENGER_URL_PRIVACY_ALLOWED_FILE_SHA256)).toBe(true)
+    expect(Object.isFrozen(STAGE6_MESSENGER_URL_PRIVACY_EVIDENCE)).toBe(true)
+  })
+
+  it('still recognizes the exact historical Stage 6 Messenger URL-privacy tree', () => {
+    const entries = withCreateChannelPlacementReverted(
+      readFileEntries(repoRoot, ownedPaths.messenger),
+    )
+    const createChannel = entries.find(
+      ({ path: repoPath }) => repoPath === 'frontend/src/components/CreateChannelView.vue',
+    )
+
+    expect(fileSha256(createChannel.content)).toBe(
+      STAGE6_MESSENGER_URL_PRIVACY_ALLOWED_FILE_SHA256[
+        'frontend/src/components/CreateChannelView.vue'
+      ],
+    )
+    expect(resolveMessengerRuntimeDisposition(entries)).toMatchObject({
+      kind: 'stage6-url-privacy',
+      evidence: STAGE6_MESSENGER_URL_PRIVACY_EVIDENCE,
+    })
+  })
+
+  it('permits only the exact Stage 8 CreateChannel HelpPopover placement remediation', () => {
+    const entries = readFileEntries(repoRoot, ownedPaths.messenger)
+    const actual = currentEvidence(ownedPaths.messenger, MESSENGER_RUNTIME_CONTRACT)
+    const disposition = resolveMessengerRuntimeDisposition(entries)
+    const createChannel = entries.find(
+      ({ path: repoPath }) => repoPath === 'frontend/src/components/CreateChannelView.vue',
+    )
+
+    expect(actual).not.toMatchObject(MESSENGER_RUNTIME_BASELINE)
+    expect(actual).not.toMatchObject(STAGE6_MESSENGER_URL_PRIVACY_EVIDENCE)
+    expect(disposition).toMatchObject({
+      kind: STAGE8_CREATECHANNEL_HELPPOPOVER_PLACEMENT_KIND,
+      evidence: STAGE8_CREATECHANNEL_HELPPOPOVER_PLACEMENT_EVIDENCE,
+    })
+    expect(STAGE8_CREATECHANNEL_HELPPOPOVER_PLACEMENT_ALLOWED_PATHS).toEqual([
+      'frontend/src/components/CreateChannelView.vue',
+    ])
+    expect(STAGE8_CREATECHANNEL_HELPPOPOVER_PLACEMENT_LOCKED_STAGE6_PATHS).toEqual([
+      'frontend/src/components/ChatView.vue',
+      'frontend/src/views/MessengerView.vue',
+    ])
+    expect(fileSha256(createChannel.content)).toBe(
+      STAGE8_CREATECHANNEL_HELPPOPOVER_PLACEMENT_ALLOWED_FILE_SHA256[
+        'frontend/src/components/CreateChannelView.vue'
+      ],
+    )
+    for (const repoPath of STAGE8_CREATECHANNEL_HELPPOPOVER_PLACEMENT_LOCKED_STAGE6_PATHS) {
+      const entry = entries.find(({ path: candidate }) => candidate === repoPath)
       expect(fileSha256(entry.content)).toBe(
-        STAGE6_MESSENGER_URL_PRIVACY_ALLOWED_FILE_SHA256[entry.path],
+        STAGE6_MESSENGER_URL_PRIVACY_ALLOWED_FILE_SHA256[repoPath],
       )
     }
   })
@@ -254,6 +329,42 @@ describe('Stage 4 protected surface baseline', () => {
 
     expect(() => resolveMessengerRuntimeDisposition(mutated)).toThrow(
       /Stage 6 Messenger URL-privacy allowed file drift: frontend\/src\/components\/ChatView\.vue/,
+    )
+    expect(() => resolveMessengerRuntimeDisposition(mutated)).toThrow(
+      /Stage 8 CreateChannel HelpPopover placement requires unchanged Stage 6 file: frontend\/src\/components\/ChatView\.vue/,
+    )
+  })
+
+  it('fails closed if CreateChannelView changes again without a new Stage 8 hash', () => {
+    const entries = readFileEntries(repoRoot, ownedPaths.messenger)
+    const mutated = entries.map((entry) =>
+      entry.path === 'frontend/src/components/CreateChannelView.vue'
+        ? { ...entry, content: Buffer.concat([entry.content, Buffer.from('\n/* drift */')]) }
+        : entry,
+    )
+
+    expect(() => resolveMessengerRuntimeDisposition(mutated)).toThrow(
+      /Stage 8 CreateChannel HelpPopover placement allowed file drift: frontend\/src\/components\/CreateChannelView\.vue/,
+    )
+  })
+
+  it('fails closed if the Stage 8 placement declaration is removed', () => {
+    const entries = readFileEntries(repoRoot, ownedPaths.messenger)
+    const mutated = entries.map((entry) => {
+      if (entry.path !== 'frontend/src/components/CreateChannelView.vue') return entry
+      const source = entry.content.toString('utf8')
+      const next = source.replace('position: relative;', '')
+      if (next === source) {
+        throw new Error('test mutation did not remove position:relative')
+      }
+      return { ...entry, content: Buffer.from(next, 'utf8') }
+    })
+
+    expect(() => assertStage8CreateChannelHelpPopoverPlacementDisposition(mutated)).toThrow(
+      /Stage 8 CreateChannel HelpPopover placement allowed file drift: frontend\/src\/components\/CreateChannelView\.vue/,
+    )
+    expect(() => resolveMessengerRuntimeDisposition(mutated)).toThrow(
+      /Stage 8 CreateChannel HelpPopover placement remediation rejected/,
     )
   })
 

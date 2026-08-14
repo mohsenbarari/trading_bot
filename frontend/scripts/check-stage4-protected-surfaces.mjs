@@ -9,6 +9,8 @@ import {
   MARKET_RUNTIME_BASELINE,
   MARKET_RUNTIME_CONTRACT,
   STAGE6_MESSENGER_URL_PRIVACY_ALLOWED_PATHS,
+  STAGE8_CREATECHANNEL_HELPPOPOVER_PLACEMENT_ALLOWED_PATHS,
+  STAGE8_CREATECHANNEL_HELPPOPOVER_PLACEMENT_KIND,
   STAGE4_BASE_COMMIT,
   STAGE4_BASE_TREE,
   STAGE4_ROUTE_CONTRACT_PATH,
@@ -99,10 +101,16 @@ try {
     console.log(
       `PASS Stage 4 Messenger runtime baseline (${messenger.evidence.count} files, ${messenger.evidence.contentBytes} bytes, ${messenger.evidence.pathSetSha256}, ${messenger.evidence.sha256})`,
     )
-  } else {
+  } else if (messenger.kind === 'stage6-url-privacy') {
     console.log(
       `PASS Stage 6 Messenger URL-privacy disposition (exact ${STAGE6_MESSENGER_URL_PRIVACY_ALLOWED_PATHS.length}-file overlay; ${messenger.evidence.count} files, ${messenger.evidence.contentBytes} bytes, ${messenger.evidence.pathSetSha256}, ${messenger.evidence.sha256})`,
     )
+  } else if (messenger.kind === STAGE8_CREATECHANNEL_HELPPOPOVER_PLACEMENT_KIND) {
+    console.log(
+      `PASS Stage 8 CreateChannel HelpPopover placement remediation (exact ${STAGE8_CREATECHANNEL_HELPPOPOVER_PLACEMENT_ALLOWED_PATHS.length}-file overlay; ${messenger.evidence.count} files, ${messenger.evidence.contentBytes} bytes, ${messenger.evidence.pathSetSha256}, ${messenger.evidence.sha256})`,
+    )
+  } else {
+    throw new Error(`unsupported Messenger runtime disposition: ${String(messenger.kind)}`)
   }
   console.log(
     `PASS Stage 4 Home market interior (${dashboard.sections.length} sections, ${dashboard.bytes} bytes, ${dashboard.sha256})`,

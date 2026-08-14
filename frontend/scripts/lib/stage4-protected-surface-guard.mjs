@@ -97,6 +97,32 @@ export const STAGE6_MESSENGER_URL_PRIVACY_EVIDENCE = Object.freeze({
   sha256: '3089210a77936d29754c9478fcdf40619acd08f35d1e8c64f6266fe8efb1699a',
 })
 
+// This is a one-purpose disposition, not a Stage 4 or Stage 6 rewrite. It
+// permits only the Stage 8 CreateChannel HelpPopover placement remediation.
+export const STAGE8_CREATECHANNEL_HELPPOPOVER_PLACEMENT_KIND =
+  'stage8-createchannel-helppopover-placement'
+
+export const STAGE8_CREATECHANNEL_HELPPOPOVER_PLACEMENT_ALLOWED_PATHS = Object.freeze([
+  'frontend/src/components/CreateChannelView.vue',
+])
+
+export const STAGE8_CREATECHANNEL_HELPPOPOVER_PLACEMENT_ALLOWED_FILE_SHA256 = Object.freeze({
+  'frontend/src/components/CreateChannelView.vue':
+    '2e92310e8c74150f9d94162405b68b4ed7bc36198bdfd3536faaae7b5568149a',
+})
+
+export const STAGE8_CREATECHANNEL_HELPPOPOVER_PLACEMENT_LOCKED_STAGE6_PATHS = Object.freeze([
+  'frontend/src/components/ChatView.vue',
+  'frontend/src/views/MessengerView.vue',
+])
+
+export const STAGE8_CREATECHANNEL_HELPPOPOVER_PLACEMENT_EVIDENCE = Object.freeze({
+  count: 85,
+  contentBytes: 1311122,
+  pathSetSha256: 'f6af1f961e45d785ba9c752ee670643571086c6a946843807fe6f581d11aea58',
+  sha256: '7659633875a604e75b925dcd9938ac71f74090b8b077d55ec9d4809107224124',
+})
+
 const RUNTIME_SOURCE_EXTENSION = /\.(?:css|[cm]?[jt]sx?|vue)$/
 const TEST_SOURCE = /(?:^|\/)[^/]+\.(?:spec|test)\.[^/]+$/
 
@@ -517,9 +543,58 @@ export function assertStage6MessengerUrlPrivacyDisposition(entries) {
   )
 }
 
+function assertStage8CreateChannelHelpPopoverPlacementAllowedFiles(entries) {
+  const entriesByPath = new Map(entries.map((entry) => [entry.path, entry]))
+  for (const repoPath of STAGE8_CREATECHANNEL_HELPPOPOVER_PLACEMENT_ALLOWED_PATHS) {
+    const entry = entriesByPath.get(repoPath)
+    if (!entry) {
+      throw new Error(
+        `Stage 8 CreateChannel HelpPopover placement allowed file is missing: ${repoPath}`,
+      )
+    }
+    const actualSha256 = fileSha256(entry.content)
+    const expectedSha256 = STAGE8_CREATECHANNEL_HELPPOPOVER_PLACEMENT_ALLOWED_FILE_SHA256[repoPath]
+    if (actualSha256 !== expectedSha256) {
+      throw new Error(
+        `Stage 8 CreateChannel HelpPopover placement allowed file drift: ${repoPath} ${expectedSha256} -> ${actualSha256}`,
+      )
+    }
+  }
+  for (const repoPath of STAGE8_CREATECHANNEL_HELPPOPOVER_PLACEMENT_LOCKED_STAGE6_PATHS) {
+    const entry = entriesByPath.get(repoPath)
+    if (!entry) {
+      throw new Error(
+        `Stage 8 CreateChannel HelpPopover placement locked Stage 6 file is missing: ${repoPath}`,
+      )
+    }
+    const actualSha256 = fileSha256(entry.content)
+    const expectedSha256 = STAGE6_MESSENGER_URL_PRIVACY_ALLOWED_FILE_SHA256[repoPath]
+    if (actualSha256 !== expectedSha256) {
+      throw new Error(
+        `Stage 8 CreateChannel HelpPopover placement requires unchanged Stage 6 file: ${repoPath} ${expectedSha256} -> ${actualSha256}`,
+      )
+    }
+  }
+}
+
 /**
- * Stage 4 remains immutable. If it no longer matches, a separate exact Stage
- * 6 privacy disposition is the only alternate outcome; all other drift fails.
+ * Accepts only the one reviewed Stage 8 CreateChannel HelpPopover placement
+ * remediation. ChatView and MessengerView stay on their Stage 6 hashes; only
+ * CreateChannelView may carry the new exact file hash.
+ */
+export function assertStage8CreateChannelHelpPopoverPlacementDisposition(entries) {
+  assertStage8CreateChannelHelpPopoverPlacementAllowedFiles(entries)
+  return assertProtectedFileSetEvidence(
+    'Stage 8 CreateChannel HelpPopover placement remediation',
+    protectedFileSetEvidence(entries, MESSENGER_RUNTIME_CONTRACT),
+    STAGE8_CREATECHANNEL_HELPPOPOVER_PLACEMENT_EVIDENCE,
+  )
+}
+
+/**
+ * Stage 4 remains immutable. If it no longer matches, the exact Stage 6
+ * URL-privacy disposition is tried next, then the exact Stage 8
+ * CreateChannel HelpPopover placement remediation. All other drift fails.
  */
 export function resolveMessengerRuntimeDisposition(entries) {
   const actual = protectedFileSetEvidence(entries, MESSENGER_RUNTIME_CONTRACT)
@@ -538,14 +613,23 @@ export function resolveMessengerRuntimeDisposition(entries) {
         kind: 'stage6-url-privacy',
         evidence: assertStage6MessengerUrlPrivacyDisposition(entries),
       }
-    } catch (dispositionError) {
-      const baselineMessage =
-        baselineError instanceof Error ? baselineError.message : String(baselineError)
-      const dispositionMessage =
-        dispositionError instanceof Error ? dispositionError.message : String(dispositionError)
-      throw new Error(
-        `Messenger runtime rejected after Stage 4 baseline drift (${baselineMessage}); Stage 6 URL-privacy disposition rejected (${dispositionMessage})`,
-      )
+    } catch (stage6Error) {
+      try {
+        return {
+          kind: STAGE8_CREATECHANNEL_HELPPOPOVER_PLACEMENT_KIND,
+          evidence: assertStage8CreateChannelHelpPopoverPlacementDisposition(entries),
+        }
+      } catch (stage8Error) {
+        const baselineMessage =
+          baselineError instanceof Error ? baselineError.message : String(baselineError)
+        const stage6Message =
+          stage6Error instanceof Error ? stage6Error.message : String(stage6Error)
+        const stage8Message =
+          stage8Error instanceof Error ? stage8Error.message : String(stage8Error)
+        throw new Error(
+          `Messenger runtime rejected after Stage 4 baseline drift (${baselineMessage}); Stage 6 URL-privacy disposition rejected (${stage6Message}); Stage 8 CreateChannel HelpPopover placement remediation rejected (${stage8Message})`,
+        )
+      }
     }
   }
 }
