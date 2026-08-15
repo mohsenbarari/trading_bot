@@ -23,7 +23,7 @@ from .coin_groups import (
 from .market_contracts import MarketObservation, MarketStoreContractError, derive_event_key, normalize_utc
 
 
-COIN_GROUP_RESOLUTION_VERSION = "coin-group-context-v3-bounded-evidence"
+COIN_GROUP_RESOLUTION_VERSION = "coin-group-context-v4-overlap-coverage"
 MINIMUM_ANCHOR_COUNT = 2
 MAXIMUM_RELATIVE_DISTANCE = 0.015
 MINIMUM_RUNNER_UP_MARGIN = 0.005
@@ -174,8 +174,20 @@ def _resolve_one(
     )
     winner = candidates[0] if candidates else None
     runner_up = candidates[1] if len(candidates) > 1 else None
+    plausible_codes = {
+        code
+        for code, (low, high) in _PRICE_BOUNDS.items()
+        if low <= parsed.price_project_thousand_toman <= high
+    }
+    covered_codes = {candidate[0] for candidate in candidates}
+    overlap_coverage_complete = bool(
+        parsed.commodity_code is not None
+        or len(plausible_codes) <= 1
+        or plausible_codes.issubset(covered_codes)
+    )
     decisive = bool(
         winner
+        and overlap_coverage_complete
         and winner[3] <= MAXIMUM_RELATIVE_DISTANCE
         and (
             runner_up is None
@@ -184,6 +196,11 @@ def _resolve_one(
     )
     claimed = parsed.commodity_code
     if not decisive:
+        reason = (
+            "OVERLAPPING_COMMODITY_BOOKS_REQUIRE_STRICTLY_PRIOR_ANCHOR_COVERAGE"
+            if winner and not overlap_coverage_complete
+            else "INSUFFICIENT_OR_AMBIGUOUS_STRICTLY_PRIOR_SAME_BOOK_ANCHORS"
+        )
         return ResolvedCoinGroupOffer(
             offer_index=offer_index,
             commodity_code=claimed,
@@ -194,7 +211,7 @@ def _resolve_one(
             trade_form=parsed.trade_form,
             is_conditional=parsed.is_conditional,
             quality_state="PENDING_REVIEW",
-            resolution_reason="INSUFFICIENT_OR_AMBIGUOUS_STRICTLY_PRIOR_SAME_BOOK_ANCHORS",
+            resolution_reason=reason,
             anchor_count=winner[2] if winner else 0,
             relative_distance=round(winner[3], 6) if winner else None,
             authoritative_anchor_count=winner[4] if winner else 0,

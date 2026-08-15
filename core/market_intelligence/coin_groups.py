@@ -17,7 +17,7 @@ from typing import Iterable
 from .market_contracts import MarketObservation, derive_event_key, normalize_utc
 
 
-COIN_GROUP_PARSER_VERSION = "coin-group-rules-v3-contextual-numbers"
+COIN_GROUP_PARSER_VERSION = "coin-group-rules-v4-tomorrow-default"
 _DIGITS = str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789")
 _ARABIC_LETTERS = str.maketrans({"ي": "ی", "ى": "ی", "ك": "ک"})
 # Dot and slash are genuine thousands separators when they are attached to
@@ -266,7 +266,7 @@ def coin_group_settlement_markers(text: str) -> tuple[bool, bool]:
 
 
 def resolve_coin_group_settlement(text: str) -> str:
-    """Resolve delivery book; future wins over the old intermediate ن."""
+    """Resolve the private-group book; marker-less offers default tomorrow."""
 
     normalized = _text(text)
     explicit_cash, explicit_tomorrow = coin_group_settlement_markers(normalized)
@@ -274,8 +274,10 @@ def resolve_coin_group_settlement(text: str) -> str:
         return "TOMORROW"
     if explicit_cash:
         return "CASH"
-    # Current syntax: a single خ/ف (or full side word) is cash.
-    return "CASH" if _side(normalized) is not None else "TOMORROW"
+    # This feed historically omits a settlement marker for the dominant
+    # tomorrow book.  Cash must be explicit (`ن`, `نق`, or a cash word); using
+    # the side marker itself as cash mixed Imam-tomorrow into Bahar-cash.
+    return "TOMORROW"
 
 
 def coin_group_settlement_conflict_reason(text: str, settlement: str) -> str | None:

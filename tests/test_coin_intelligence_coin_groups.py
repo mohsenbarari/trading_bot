@@ -65,7 +65,7 @@ class CoinGroupParserTests(unittest.TestCase):
             (parsed[0].commodity_code, parsed[0].price_project_thousand_toman),
             ("QUARTER_LOW_DATE", 45_800),
         )
-        self.assertEqual(parsed[0].settlement_term, "CASH")
+        self.assertEqual(parsed[0].settlement_term, "TOMORROW")
 
     def test_old_and_new_settlement_syntax_and_nagh_are_distinguished(self) -> None:
         cases = {
@@ -74,7 +74,8 @@ class CoinGroupParserTests(unittest.TestCase):
             "خن امام 10 تا 183000": "CASH",
             "خ ف امام 10 تا 183000": "TOMORROW",
             "خنف امام 10 تا 183000": "TOMORROW",
-            "خ امام 10 تا 183000": "CASH",
+            "خ امام 10 تا 183000": "TOMORROW",
+            "خ نق امام 10 تا 183000": "CASH",
             "10 تا نق خ 183000 امام": "CASH",
         }
         for text, expected in cases.items():

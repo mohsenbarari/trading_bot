@@ -101,6 +101,18 @@ class CoinGroupResolutionTests(unittest.TestCase):
         assert (result.commodity_code, result.quality_state) == ("BAHAR", "ELIGIBLE")
         assert result.resolution_reason.startswith("UNNAMED")
 
+    def test_unnamed_full_coin_requires_coverage_for_both_overlapping_books(self) -> None:
+        result = resolve_coin_group_offers(
+            source("فروش 188,900 / 5 تا"),
+            anchors=(
+                anchor("BAHAR", 188_600, "2026-08-04T10:08:00Z"),
+                anchor("BAHAR", 188_700, "2026-08-04T10:09:00Z"),
+            ),
+        )[0]
+        assert result.commodity_code is None
+        assert result.quality_state == "PENDING_REVIEW"
+        assert "OVERLAPPING_COMMODITY" in result.resolution_reason
+
     def test_future_wrong_book_or_too_thin_anchor_cannot_validate(self) -> None:
         result = resolve_coin_group_offers(
             source("ربع بهار فروش 52,300 / 5 تا"),

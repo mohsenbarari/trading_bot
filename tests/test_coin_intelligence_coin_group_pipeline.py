@@ -50,7 +50,14 @@ class CoinGroupPipelineTests(unittest.TestCase):
             ),
         )
 
-    def _anchor(self, event_id: int, price: int, at: str) -> None:
+    def _anchor(
+        self,
+        event_id: int,
+        price: int,
+        at: str,
+        *,
+        commodity: str = "IMAM",
+    ) -> None:
         upsert_observation(
             self.market,
             MarketObservation(
@@ -59,8 +66,8 @@ class CoinGroupPipelineTests(unittest.TestCase):
                 source_family="MANUAL_REVIEW",
                 event_time_utc=at,
                 available_at_utc=at,
-                instrument="COIN_IMAM",
-                market_label="TEST_COIN_IMAM",
+                instrument="COIN_" + commodity,
+                market_label="TEST_COIN_" + commodity,
                 settlement_term="TOMORROW",
                 trade_form="PHYSICAL",
                 event_type="TRADE",
@@ -176,6 +183,75 @@ class CoinGroupPipelineTests(unittest.TestCase):
         self.assertEqual(
             [row["quality_state"] for row in states],
             ["PENDING_REVIEW", "PENDING_REVIEW", "PENDING_REVIEW", "ELIGIBLE"],
+        )
+
+    def test_conditional_explicit_cluster_can_disambiguate_later_plain_offer(self) -> None:
+        self._anchor(
+            1,
+            186_700,
+            "2026-08-04T09:50:00Z",
+            commodity="BAHAR",
+        )
+        self._anchor(
+            2,
+            186_800,
+            "2026-08-04T09:55:00Z",
+            commodity="BAHAR",
+        )
+        self.market.commit()
+        for message_id, sender, second in (
+            (1, "offerer-a", 0),
+            (2, "offerer-b", 10),
+            (3, "offerer-c", 20),
+        ):
+            suffix = "حساب شب" if message_id != 3 else ""
+            self._stage(
+                message_id,
+                f"امام فروش 189000 / 5 تا {suffix}",
+                sender=sender,
+                at=f"2026-08-04T10:00:{second:02d}Z",
+            )
+        self._stage(
+            4,
+            "فروش 188900 / 5 تا",
+            sender="offerer-d",
+            at="2026-08-04T10:00:30Z",
+        )
+        self._stage(
+            5,
+            "خرید 188950 / 5 تا",
+            sender="offerer-e",
+            at="2026-08-04T10:01:00Z",
+        )
+        self._stage(
+            6,
+            "فروش 189000 / 5 تا",
+            sender="offerer-f",
+            at="2026-08-04T10:40:00Z",
+        )
+        self.staging.commit()
+
+        report = process_coin_group_staging(
+            self.staging,
+            self.market,
+            as_of_utc="2026-08-04T10:41:00Z",
+        )
+        rows = self.market.execute(
+            """
+            SELECT instrument,settlement_term,quality_state
+            FROM market_observations
+            WHERE source_code='GROUP_1'
+              AND event_time_utc IN ('2026-08-04T10:00:30Z','2026-08-04T10:01:00Z','2026-08-04T10:40:00Z')
+            ORDER BY event_time_utc
+            """
+        ).fetchall()
+        self.assertEqual(report.eligible_offers, 3)
+        self.assertEqual(
+            [
+                (row["instrument"], row["settlement_term"], row["quality_state"])
+                for row in rows
+            ],
+            [("COIN_IMAM", "TOMORROW", "ELIGIBLE")] * 3,
         )
 
     def test_edit_that_removes_offer_retracts_offer_and_linked_trade(self) -> None:

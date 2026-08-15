@@ -28,10 +28,11 @@ from .market_contracts import MarketObservation, normalize_utc
 from .market_store import upsert_observation
 
 
-COIN_GROUP_PIPELINE_VERSION = "coin-group-pipeline-v2-causal-bootstrap"
+COIN_GROUP_PIPELINE_VERSION = "coin-group-pipeline-v3-forward-anchors"
 PROVISIONAL_BOOTSTRAP_WINDOW_SECONDS = 30 * 60
 PROVISIONAL_MINIMUM_MESSAGES = 3
 PROVISIONAL_MINIMUM_SENDERS = 2
+PROVISIONAL_MINIMUM_NONCONDITIONAL_MESSAGES = 1
 PROVISIONAL_MAXIMUM_RELATIVE_SPREAD = 0.015
 _RETRACTION_REASON = "NO_LONGER_PRESENT_IN_CURRENT_STAGED_MESSAGE_GRAPH"
 
@@ -131,6 +132,7 @@ class _ExplicitClaim:
     available_at_utc: str
     settlement_term: str
     trade_form: str
+    is_conditional: bool
 
 
 def _source(message: StagedCoinGroupMessage) -> CoinGroupMessageInput:
@@ -239,6 +241,11 @@ def _coherent_provisional_anchors(
         if len(values) < PROVISIONAL_MINIMUM_MESSAGES:
             continue
         if len({item.sender_digest for item in values}) < PROVISIONAL_MINIMUM_SENDERS:
+            continue
+        if (
+            sum(not item.is_conditional for item in values)
+            < PROVISIONAL_MINIMUM_NONCONDITIONAL_MESSAGES
+        ):
             continue
         center = float(median(item.price for item in values))
         spread = (
@@ -356,6 +363,7 @@ def process_coin_group_staging(
     ) + tuple(additional_anchors)
     all_resolved: dict[tuple[int, int], list] = {}
     explicit_claims: list[_ExplicitClaim] = []
+    dynamic_anchors: list[CoinPriceAnchor] = []
     active_event_keys: set[bytes] = set()
     offer_facts = 0
     eligible_offers = 0
@@ -367,7 +375,11 @@ def process_coin_group_staging(
             explicit_claims,
             source=source,
         )
-        resolution_anchors = (*base_anchors, *provisional_anchors)
+        resolution_anchors = (
+            *base_anchors,
+            *provisional_anchors,
+            *dynamic_anchors,
+        )
         resolved = resolve_coin_group_offers(
             source,
             anchors=resolution_anchors,
@@ -387,9 +399,24 @@ def process_coin_group_staging(
             )
         eligible_offers += sum(item.quality_state == "ELIGIBLE" for item in resolved)
         pending_or_rejected_offers += sum(item.quality_state != "ELIGIBLE" for item in resolved)
+        dynamic_anchors.extend(
+            CoinPriceAnchor(
+                commodity_code=item.commodity_code,
+                price_project_thousand_toman=item.price_project_thousand_toman,
+                event_time_utc=message.event_time_utc,
+                available_at_utc=message.available_at_utc,
+                settlement_term=item.settlement_term,
+                trade_form=item.trade_form,
+                evidence_kind="GROUP_DERIVED",
+            )
+            for item in resolved
+            if item.quality_state == "ELIGIBLE"
+            and item.commodity_code is not None
+            and not item.is_conditional
+        )
         if message.sender_digest is not None:
             for candidate in parsed:
-                if candidate.commodity_code is None or candidate.is_conditional:
+                if candidate.commodity_code is None:
                     continue
                 explicit_claims.append(
                     _ExplicitClaim(
@@ -402,6 +429,7 @@ def process_coin_group_staging(
                         available_at_utc=message.available_at_utc,
                         settlement_term=candidate.settlement_term,
                         trade_form=candidate.trade_form,
+                        is_conditional=candidate.is_conditional,
                     )
                 )
 
