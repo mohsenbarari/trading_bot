@@ -134,6 +134,7 @@ class CoinGroupParserTests(unittest.TestCase):
             "۱ خريد نقد ۱۸۸": (188_000, 1, "BUY"),
             "۱۰ نیم ۴۰۴ ف ۹۴۵۰۰": (94_500, 10, "SELL"),
             "۲تاف94500 نیم": (94_500, 2, "SELL"),
+            "3تا نقدی 187خ": (187_000, 3, "BUY"),
         }
         for text, expected in cases.items():
             with self.subTest(text=text):
@@ -147,6 +148,10 @@ class CoinGroupParserTests(unittest.TestCase):
                     ),
                     expected,
                 )
+
+        cash = parse_coin_group_offers(self.source("3تا نقدی 187خ"))[0]
+        self.assertIsNone(cash.commodity_code)
+        self.assertEqual(cash.settlement_term, "CASH")
 
     def test_full_toman_and_redundant_zero_prices_and_low_date_shorthand(self) -> None:
         cases = {

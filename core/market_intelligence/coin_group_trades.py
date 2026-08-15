@@ -14,23 +14,43 @@ from typing import Iterable, Mapping
 
 from .coin_group_resolution import ResolvedCoinGroupOffer
 from .coin_group_staging import StagedCoinGroupMessage
-from .coin_groups import _explicit_quantity, _text as _normalize_group_text
+from .coin_groups import (
+    _PRICE_BOUNDS,
+    _explicit_quantity,
+    _price_candidates,
+    _text as _normalize_group_text,
+    coin_group_settlement_markers,
+)
 from .market_contracts import MarketObservation, derive_event_key, normalize_utc
 
 
-COIN_GROUP_TRADE_LINKER_VERSION = "coin-group-trade-link-v3-root-audit"
+COIN_GROUP_TRADE_LINKER_VERSION = "coin-group-trade-link-v4-consensus-terms"
 MAX_REPLY_DEPTH = 12
 MAX_REPLY_AGE_SECONDS = 2 * 60 * 60
+MAX_NEGOTIATED_PRICE_RELATIVE_DELTA = 0.05
 _NUMBER = re.compile(r"(?<!\d)(\d{1,3}(?:[٬،,./]\d{3})+|\d{2,7})(?!\d)")
 _SMALL_NUMBER = re.compile(r"(?<!\d)(\d{1,3})(?!\d)")
-_CANCEL = re.compile(r"کنسل|لغو|منتفی|پاس|حذف|نشد|ندارم|تمام\s*شد|اشتباه|عذر")
+_CANCEL = re.compile(
+    r"کنسل|لغو|منتفی|پاس|حذف|نشد|ندارم|اشتباه|عذر|بی\s*خیال|"
+    r"قبول\s*نیست|نمی\s*(?:خوام|خواهم)"
+)
 _EXPLICIT_TRADE = re.compile(
-    r"معامله|مع\s+با|مع\s+شد|انجام\s*شد|خریدم|فروختم|برداشتم|مال\s+من|"
-    r"خرید(?:م|ه)?\s*شد|فروش(?:م|ه)?|(?<![آ-ی])مع(?![آ-ی])"
+    r"معامله|مع\s+با|مع\s+شد|انجام\s*شد|قطعی\s*شد|جوش\s*خورد|"
+    r"خریدم|فروختم|برداشتم|مال\s+من|خرید(?:ه)?\s*شد|"
+    r"فروخته\s*شد|فروش\s*(?:انجام\s*)?شد|(?<![آ-ی])مع(?![آ-ی])"
 )
 _CUMULATIVE = re.compile(r"کلا|کلن|جمعا|مجموعا|مجموع")
-_ACCEPT = re.compile(r"برکت|^چشم\s+ب(?:\s|$)|^(?:ب|اوکی|تایید|قبول|شد|بزن|بده|بردار|باشه|تمام)(?:\s|$)")
-_BUY_MARKER = re.compile(r"(?<![آ-ی])ب(?![آ-ی])|خریدم|برداشتم|مال\s+من")
+_ACCEPT = re.compile(
+    r"برکت|^چشم\s+ب(?:\s|$)|^(?:ب|بله|اوکی(?:ه)?|ت[اأ]یید|قبول(?:ه)?|"
+    r"موافق(?:م)?|حله|شد|بزن(?:ید)?|بده|بردار|باش(?:ه)?|تمام)(?:\s|$)"
+)
+_BUY_MARKER = re.compile(
+    r"(?<![آ-ی])(?:ب|خ)(?![آ-ی])|خریدم|برداشتم|مال\s+من"
+)
+_SELL_MARKER = re.compile(r"(?<![آ-ی])ف(?![آ-ی])|فروختم")
+_PARTICIPATION_MARKER = re.compile(
+    rf"(?:{_BUY_MARKER.pattern})|(?:{_SELL_MARKER.pattern})"
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,6 +87,13 @@ class LinkedCoinGroupTrade:
     resolution_reason: str
 
 
+@dataclass(frozen=True, slots=True)
+class _TradeCandidate:
+    trade: LinkedCoinGroupTrade
+    branch_ids: frozenset[int]
+    participant_digests: frozenset[bytes]
+
+
 def _text(value: str) -> str:
     return _normalize_group_text(value)
 
@@ -83,6 +110,8 @@ def _signal(text: str) -> str:
         return "ACCEPT"
     if _BUY_MARKER.search(normalized):
         return "BUY_REQUEST"
+    if _SELL_MARKER.search(normalized):
+        return "SELL_REQUEST"
     return "NEGOTIATION"
 
 
@@ -99,11 +128,21 @@ def _quantity_and_spans(text: str) -> tuple[int | None, list[tuple[int, int]]]:
         for item in _SMALL_NUMBER.finditer(text)
         if 1 <= int(re.sub(r"\D", "", item.group(1))) <= 100
     ]
+    other_price_shaped_number = bool(
+        len(candidates) == 1
+        and any(
+            not _overlap(match.span(1), [candidates[0].span(1)])
+            and len(re.sub(r"\D", "", match.group(1))) >= 3
+            for match in _NUMBER.finditer(text)
+        )
+    )
     if len(candidates) == 1 and (
-        _BUY_MARKER.search(text)
+        _PARTICIPATION_MARKER.search(text)
+        or _ACCEPT.search(text)
         or "؟" in text
         or "?" in text
         or re.fullmatch(r"\s*\d{1,3}\s*", text)
+        or other_price_shaped_number
     ):
         candidate = candidates[0]
         return int(re.sub(r"\D", "", candidate.group(1))), [candidate.span(1)]
@@ -114,33 +153,71 @@ def _overlap(span: tuple[int, int], spans: Iterable[tuple[int, int]]) -> bool:
     return any(span[0] < end and span[1] > start for start, end in spans)
 
 
-def _negotiated_price(text: str, *, offer_price: int, quantity_spans: Iterable[tuple[int, int]]) -> int | None:
-    """Use an explicit reply price only when it remains close to the offer."""
+def _negotiated_price_result(
+    text: str,
+    *,
+    offer_price: int,
+    quantity_spans: Iterable[tuple[int, int]],
+    commodity_code: str | None,
+) -> tuple[int | None, bool, bool]:
+    """Return price, whether a price-like number existed, and safety status.
 
-    candidates: list[int] = []
+    Exact project-thousand values, full-Toman values, redundant-zero prices,
+    and contextual tails share the offer parser's normalization policy.  A
+    plausible but unusually distant negotiated value is retained for audit and
+    gated from the model instead of silently falling back to the root price.
+    """
+
+    excluded = tuple(quantity_spans)
+    numeric_seen = False
+    candidates = {
+        value
+        for value, _score, _span in _price_candidates(text, excluded)
+    }
     for match in _NUMBER.finditer(text):
-        if _overlap(match.span(1), quantity_spans):
+        if _overlap(match.span(1), excluded):
             continue
+        numeric_seen = True
         digits = re.sub(r"\D", "", match.group(1))
         raw = int(digits)
         values: list[int] = []
-        if len(digits) in {5, 6}:
-            values.append(raw)
-        elif len(digits) == 3 and raw % 50 == 0:
+        if len(digits) == 3 and raw % 50 == 0:
             base = (offer_price // 1000) * 1000
             values.extend((base - 1000 + raw, base + raw, base + 1000 + raw))
         elif len(digits) == 4 and raw % 50 == 0:
             base = (offer_price // 10_000) * 10_000
             values.extend((base - 10_000 + raw, base + raw, base + 10_000 + raw))
-        for value in values:
-            if value > 0 and abs(value - offer_price) / offer_price <= 0.03:
-                candidates.append(value)
-    if not candidates:
-        return None
-    ranked = sorted(set(candidates), key=lambda item: (abs(item - offer_price), item))
-    winner = ranked[0]
-    if len(ranked) > 1 and abs(ranked[0] - offer_price) == abs(ranked[1] - offer_price):
-        return None
+        candidates.update(value for value in values if value > 0)
+    low, high = _PRICE_BOUNDS.get(commodity_code or "", (20_000, 260_000))
+    plausible = sorted(
+        {value for value in candidates if low <= value <= high},
+        key=lambda item: (abs(item - offer_price), item),
+    )
+    if not plausible:
+        return None, numeric_seen, not numeric_seen
+    winner = plausible[0]
+    if (
+        len(plausible) > 1
+        and abs(plausible[0] - offer_price) == abs(plausible[1] - offer_price)
+    ):
+        return None, True, False
+    safe = abs(winner - offer_price) / offer_price <= MAX_NEGOTIATED_PRICE_RELATIVE_DELTA
+    return winner, True, safe
+
+
+def _negotiated_price(
+    text: str,
+    *,
+    offer_price: int,
+    quantity_spans: Iterable[tuple[int, int]],
+    commodity_code: str | None = None,
+) -> int | None:
+    winner, _seen, _safe = _negotiated_price_result(
+        text,
+        offer_price=offer_price,
+        quantity_spans=quantity_spans,
+        commodity_code=commodity_code,
+    )
     return winner
 
 
@@ -177,7 +254,9 @@ def _root_offer(
         seen.add(parent_id)
         parent = messages.get((current.group_number, parent_id))
         if parent is None:
-            return oldest_candidate
+            # A retained counter-offer must not become a new root merely
+            # because an older parent fell outside staging retention.
+            return None
         current = parent
     return None
 
@@ -216,12 +295,20 @@ def _age_seconds(later: str, earlier: str) -> float:
     return (datetime.fromisoformat(later.replace("Z", "+00:00")) - datetime.fromisoformat(earlier.replace("Z", "+00:00"))).total_seconds()
 
 
+def _append_gate_reason(current: str, gate: str) -> str:
+    if current == "STRUCTURALLY_LINKED_CONFIRMED_TRADE":
+        return gate
+    if gate in current.split(";"):
+        return current
+    return current + ";" + gate
+
+
 def _trade_from_confirmation(
     message: StagedCoinGroupMessage,
     *,
     root: CoinGroupOfferRecord,
     messages: Mapping[tuple[int, int], StagedCoinGroupMessage],
-) -> LinkedCoinGroupTrade | None:
+) -> tuple[LinkedCoinGroupTrade, frozenset[bytes]] | None:
     offer = root.offer
     if root.offerer_digest is None or message.sender_digest is None:
         # We may retain a source row with an unknown display name, but without
@@ -285,20 +372,49 @@ def _trade_from_confirmation(
     evidence = [
         item for item in branch[1:] if item.sender_digest in participants
     ]
+    last_reject_index = max(
+        (index for index, item in enumerate(evidence) if _signal(item.text) == "REJECT"),
+        default=-1,
+    )
+    active_evidence = evidence[last_reject_index + 1 :]
     quantity: int | None = None
     price: int | None = None
-    for evidence_message in evidence:
+    price_is_safe = True
+    price_is_ambiguous = False
+    settlement = offer.settlement_term
+    settlement_changed = False
+    post_reject_has_terms = False
+    for evidence_message in active_evidence:
         normalized = _text(evidence_message.text)
         candidate_quantity, spans = _quantity_and_spans(normalized)
         if candidate_quantity is not None:
             quantity = candidate_quantity
-        candidate_price = _negotiated_price(
+            post_reject_has_terms = True
+        candidate_price, price_seen, candidate_price_is_safe = _negotiated_price_result(
             normalized,
             offer_price=offer.price_project_thousand_toman,
             quantity_spans=spans,
+            commodity_code=offer.commodity_code,
         )
-        if candidate_price is not None:
+        if price_seen:
+            post_reject_has_terms = True
             price = candidate_price
+            price_is_ambiguous = candidate_price is None
+            price_is_safe = candidate_price_is_safe
+        explicit_cash, explicit_tomorrow = coin_group_settlement_markers(normalized)
+        if explicit_cash and explicit_tomorrow:
+            return None
+        if explicit_cash or explicit_tomorrow:
+            post_reject_has_terms = True
+            candidate_settlement = "CASH" if explicit_cash else "TOMORROW"
+            settlement_changed = candidate_settlement != offer.settlement_term
+            settlement = candidate_settlement
+    if last_reject_index >= 0 and not post_reject_has_terms:
+        # A bare acceptance cannot revive terms that a participant already
+        # cancelled.  A new explicit quantity/price/book proposal is required.
+        return None
+    if price_is_ambiguous:
+        return None
     if quantity is None:
         if kind == "OWNER_EXPLICIT_AGGREGATE_REPLY_TRADE":
             return None
@@ -320,6 +436,17 @@ def _trade_from_confirmation(
     else:
         quality = "ELIGIBLE"
         resolution_reason = "STRUCTURALLY_LINKED_CONFIRMED_TRADE"
+    gates: list[str] = []
+    if kind == "COUNTERPARTY_EXPLICIT_REPLY_TRADE":
+        gates.append("COUNTERPARTY_DECLARATION_REQUIRES_OFFERER_CONFIRMATION")
+    if not price_is_safe:
+        gates.append("NEGOTIATED_PRICE_OUTSIDE_SAFE_RELATIVE_DELTA")
+    if settlement_changed:
+        gates.append("NEGOTIATED_SETTLEMENT_REQUIRES_SAME_BOOK_VALIDATION")
+    if quality != "REJECTED" and gates:
+        quality = "PENDING_REVIEW"
+        for gate in gates:
+            resolution_reason = _append_gate_reason(resolution_reason, gate)
     return LinkedCoinGroupTrade(
         group_number=root.group_number,
         root_offer_message_id=root.message_id,
@@ -328,7 +455,7 @@ def _trade_from_confirmation(
         price_project_thousand_toman=price,
         quantity=quantity,
         side=offer.side,
-        settlement_term=offer.settlement_term,
+        settlement_term=settlement,
         trade_form=offer.trade_form,
         event_time_utc=message.event_time_utc,
         available_at_utc=message.available_at_utc,
@@ -337,7 +464,34 @@ def _trade_from_confirmation(
         confirmation_kind=kind,
         is_aggregate=is_aggregate,
         resolution_reason=resolution_reason,
-    )
+    ), frozenset(participants)
+
+
+def _has_later_participant_rejection(
+    candidate: _TradeCandidate,
+    *,
+    children: Mapping[tuple[int, int], tuple[StagedCoinGroupMessage, ...]],
+) -> bool:
+    """A participant cancellation after confirmation gates the prior fill."""
+
+    trade = candidate.trade
+    pending = list(children.get((trade.group_number, trade.confirmation_message_id), ()))
+    seen: set[int] = set()
+    while pending:
+        message = pending.pop()
+        if message.message_id in seen:
+            continue
+        seen.add(message.message_id)
+        age = _age_seconds(message.event_time_utc, trade.event_time_utc)
+        if age < 0 or age > MAX_REPLY_AGE_SECONDS:
+            continue
+        if (
+            message.sender_digest in candidate.participant_digests
+            and _signal(message.text) == "REJECT"
+        ):
+            return True
+        pending.extend(children.get((message.group_number, message.message_id), ()))
+    return False
 
 
 def link_coin_group_trades(
@@ -351,21 +505,29 @@ def link_coin_group_trades(
         (offer.group_number, offer.message_id): offer
         for offer in offers
     }
-    candidates: list[tuple[LinkedCoinGroupTrade, frozenset[int]]] = []
+    children: dict[tuple[int, int], list[StagedCoinGroupMessage]] = {}
+    for message in message_by_key.values():
+        if message.reply_to_message_id is not None:
+            children.setdefault(
+                (message.group_number, message.reply_to_message_id), []
+            ).append(message)
+    frozen_children = {key: tuple(value) for key, value in children.items()}
+    candidates: list[_TradeCandidate] = []
     for message in sorted(message_by_key.values(), key=lambda item: (item.event_time_utc, item.message_id)):
         if message.reply_to_message_id is None:
             continue
         root = _root_offer(message, messages=message_by_key, offers=offer_by_key)
         if root is None or message.message_id == root.message_id:
             continue
-        trade = _trade_from_confirmation(message, root=root, messages=message_by_key)
-        if trade is None:
+        linked = _trade_from_confirmation(message, root=root, messages=message_by_key)
+        if linked is None:
             continue
+        trade, participants = linked
         branch_ids = frozenset(
             item.message_id
             for item in _branch_from_root(message, root=root, messages=message_by_key)
         )
-        candidates.append((trade, branch_ids))
+        candidates.append(_TradeCandidate(trade, branch_ids, participants))
 
     # One conversational branch can contain both a counterparty declaration
     # and the owner's later confirmation.  They are two pieces of evidence for
@@ -377,31 +539,31 @@ def link_coin_group_trades(
         "COUNTERPARTY_EXPLICIT_REPLY_TRADE": 2,
         "RECIPROCAL_COUNTERPARTY_CONFIRMATION": 2,
     }
-    selected: list[LinkedCoinGroupTrade] = []
-    for candidate, candidate_branch in candidates:
+    selected: list[_TradeCandidate] = []
+    for candidate in candidates:
         superseded = False
-        for other, other_branch in candidates:
+        for other in candidates:
             if other is candidate:
                 continue
             same_root = (
-                other.group_number == candidate.group_number
-                and other.root_offer_message_id == candidate.root_offer_message_id
+                other.trade.group_number == candidate.trade.group_number
+                and other.trade.root_offer_message_id == candidate.trade.root_offer_message_id
             )
             same_reply_path = (
-                candidate.confirmation_message_id in other_branch
-                or other.confirmation_message_id in candidate_branch
+                candidate.trade.confirmation_message_id in other.branch_ids
+                or other.trade.confirmation_message_id in candidate.branch_ids
             )
             if not same_root or not same_reply_path:
                 continue
             candidate_rank = (
-                authority.get(candidate.confirmation_kind, 0),
-                candidate.event_time_utc,
-                candidate.confirmation_message_id,
+                authority.get(candidate.trade.confirmation_kind, 0),
+                candidate.trade.event_time_utc,
+                candidate.trade.confirmation_message_id,
             )
             other_rank = (
-                authority.get(other.confirmation_kind, 0),
-                other.event_time_utc,
-                other.confirmation_message_id,
+                authority.get(other.trade.confirmation_kind, 0),
+                other.trade.event_time_utc,
+                other.trade.confirmation_message_id,
             )
             if other_rank > candidate_rank:
                 superseded = True
@@ -411,9 +573,28 @@ def link_coin_group_trades(
 
     filled: dict[tuple[int, int], int] = {}
     trades: list[LinkedCoinGroupTrade] = []
-    for trade in sorted(
-        selected, key=lambda item: (item.event_time_utc, item.confirmation_message_id)
+    for candidate in sorted(
+        selected,
+        key=lambda item: (
+            item.trade.event_time_utc,
+            item.trade.confirmation_message_id,
+        ),
     ):
+        trade = candidate.trade
+        if _has_later_participant_rejection(
+            candidate,
+            children=frozen_children,
+        ):
+            trade = replace(
+                trade,
+                quality_state=(
+                    "REJECTED" if trade.quality_state == "REJECTED" else "PENDING_REVIEW"
+                ),
+                resolution_reason=_append_gate_reason(
+                    trade.resolution_reason,
+                    "PARTICIPANT_REJECTION_AFTER_CONFIRMATION",
+                ),
+            )
         root_key = (trade.group_number, trade.root_offer_message_id)
         root = offer_by_key[root_key]
         if not trade.is_aggregate:
@@ -427,11 +608,9 @@ def link_coin_group_trades(
                             if trade.quality_state == "REJECTED"
                             else "PENDING_REVIEW"
                         ),
-                        resolution_reason=(
-                            trade.resolution_reason
-                            + ";NON_AGGREGATE_FILL_EXCEEDS_REMAINING_ROOT_QUANTITY"
-                            if trade.quality_state == "REJECTED"
-                            else "NON_AGGREGATE_FILL_EXCEEDS_REMAINING_ROOT_QUANTITY"
+                        resolution_reason=_append_gate_reason(
+                            trade.resolution_reason,
+                            "NON_AGGREGATE_FILL_EXCEEDS_REMAINING_ROOT_QUANTITY",
                         ),
                     )
                 )
@@ -494,6 +673,12 @@ def coin_group_trade_observations(
                     "group_number": trade.group_number,
                     "confirmation_kind": trade.confirmation_kind,
                     "is_aggregate": trade.is_aggregate,
+                    "root_offer_event_key": derive_event_key(
+                        "coin-group-offer-v1",
+                        trade.group_number,
+                        trade.root_offer_message_id,
+                        0,
+                    ).hex(),
                     "resolution_reason": trade.resolution_reason,
                 },
             )

@@ -101,6 +101,45 @@ class CoinGroupResolutionTests(unittest.TestCase):
         assert (result.commodity_code, result.quality_state) == ("BAHAR", "ELIGIBLE")
         assert result.resolution_reason.startswith("UNNAMED")
 
+    def test_compact_cash_offer_resolves_with_complete_prior_book_coverage(self) -> None:
+        result = resolve_coin_group_offers(
+            source("3تا نقدی 187خ"),
+            anchors=(
+                anchor(
+                    "IMAM",
+                    186_900,
+                    "2026-08-04T10:08:00Z",
+                    settlement_term="CASH",
+                ),
+                anchor(
+                    "IMAM",
+                    187_100,
+                    "2026-08-04T10:09:00Z",
+                    settlement_term="CASH",
+                ),
+                anchor(
+                    "BAHAR",
+                    181_900,
+                    "2026-08-04T10:08:30Z",
+                    settlement_term="CASH",
+                ),
+                anchor(
+                    "BAHAR",
+                    182_100,
+                    "2026-08-04T10:09:30Z",
+                    settlement_term="CASH",
+                ),
+            ),
+        )[0]
+        assert (
+            result.commodity_code,
+            result.price_project_thousand_toman,
+            result.quantity,
+            result.side,
+            result.settlement_term,
+            result.quality_state,
+        ) == ("IMAM", 187_000, 3, "BUY", "CASH", "ELIGIBLE")
+
     def test_unnamed_full_coin_requires_coverage_for_both_overlapping_books(self) -> None:
         result = resolve_coin_group_offers(
             source("فروش 188,900 / 5 تا"),

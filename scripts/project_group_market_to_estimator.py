@@ -126,6 +126,25 @@ def _commodity(row: sqlite3.Row) -> str:
         raise ProjectionError("canonical_group_commodity_unsupported") from exc
 
 
+def _attributes(row: sqlite3.Row) -> dict[str, object]:
+    try:
+        value = json.loads(str(row["attributes_json"] or "{}"))
+    except (TypeError, ValueError):
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def _root_offer_event_key(attributes: dict[str, object]) -> bytes | None:
+    value = str(attributes.get("root_offer_event_key") or "").strip()
+    if not value:
+        return None
+    try:
+        decoded = bytes.fromhex(value)
+    except ValueError:
+        return None
+    return decoded if 16 <= len(decoded) <= 64 else None
+
+
 def _rows(connection: sqlite3.Connection) -> list[sqlite3.Row]:
     connection.row_factory = sqlite3.Row
     return list(
@@ -294,6 +313,7 @@ def project(
         for row in rows:
             event_key = bytes(row["event_key"])
             event_type = str(row["event_type"]).upper()
+            attributes = _attributes(row)
             row_id = _opaque_id(event_key, event_type.encode("ascii"))
             message_id = _opaque_id(event_key, b"MESSAGE")
             prior = destination.execute(
@@ -422,6 +442,27 @@ def project(
                 )
                 counts["eligible_offers"] += 1
             else:
+                root_event_key = _root_offer_event_key(attributes)
+                linked_offer = (
+                    destination.execute(
+                        """
+                        SELECT row_id,message_id
+                        FROM canonical_group_projection
+                        WHERE event_key=? AND event_type='OFFER'
+                        """,
+                        (root_event_key,),
+                    ).fetchone()
+                    if root_event_key is not None
+                    else None
+                )
+                linked_offer_id = (
+                    int(linked_offer["row_id"]) if linked_offer is not None else None
+                )
+                linked_offer_message_id = (
+                    int(linked_offer["message_id"])
+                    if linked_offer is not None
+                    else None
+                )
                 destination.execute(
                     """
                     INSERT INTO confirmed_trades(
@@ -436,13 +477,18 @@ def project(
                         commodity=excluded.commodity,price=excluded.price,
                         quantity=excluded.quantity,side=excluded.side,
                         settlement=excluded.settlement,trade_form=excluded.trade_form,
-                        confidence=excluded.confidence,context_json=excluded.context_json
+                        confidence=excluded.confidence,
+                        offer_message_id=excluded.offer_message_id,
+                        is_aggregate=excluded.is_aggregate,
+                        confirmation_type=excluded.confirmation_type,
+                        evidence_json=excluded.evidence_json,
+                        context_json=excluded.context_json
                     """,
                     (
                         row_id,
                         PROJECTION_IMPORT_ID,
                         message_id,
-                        None,
+                        linked_offer_message_id,
                         None,
                         event_time,
                         commodity,
@@ -452,14 +498,26 @@ def project(
                         quantity,
                         "CANONICAL_MARKET_STORE",
                         quantity,
-                        0,
+                        int(bool(attributes.get("is_aggregate"))),
                         1,
                         str(row["side"]).upper(),
                         settlement,
                         trade_form,
                         confidence,
-                        "CANONICAL_REPLY_CHAIN",
-                        "{}",
+                        str(
+                            attributes.get("confirmation_kind")
+                            or "CANONICAL_REPLY_CHAIN"
+                        ),
+                        json.dumps(
+                            {
+                                "root_offer_event_key": (
+                                    root_event_key.hex()
+                                    if root_event_key is not None
+                                    else None
+                                )
+                            },
+                            separators=(",", ":"),
+                        ),
                         json.dumps(
                             {
                                 "opaque_event": opaque_context,
@@ -478,11 +536,23 @@ def project(
                         regime_confidence,cross_state,exclusion_reason
                     ) VALUES(?,?,?,?,?,?,?,?,?,?)
                     ON CONFLICT(trade_id) DO UPDATE SET
+                        linked_offer_id=excluded.linked_offer_id,
                         training_eligible=1,realtime_eligible=1,
                         training_weight=excluded.training_weight,
                         cross_state=excluded.cross_state,exclusion_reason=NULL
                     """,
-                    (row_id, None, 1, 1, 1.5, "UNKNOWN", None, 0.0, "CANONICAL_ELIGIBLE", None),
+                    (
+                        row_id,
+                        linked_offer_id,
+                        1,
+                        1,
+                        1.5,
+                        "UNKNOWN",
+                        None,
+                        0.0,
+                        "CANONICAL_ELIGIBLE",
+                        None,
+                    ),
                 )
                 counts["eligible_trades"] += 1
             destination.execute(

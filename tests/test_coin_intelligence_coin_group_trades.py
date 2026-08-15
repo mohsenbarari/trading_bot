@@ -111,6 +111,95 @@ class CoinGroupTradeTests(unittest.TestCase):
                 self.assertEqual(len(trades), 1)
                 self.assertEqual(trades[0].price_project_thousand_toman, expected)
 
+    def test_full_toman_and_redundant_zero_negotiated_prices_are_exact(self) -> None:
+        cases = (
+            ("5 تا 188.500.000", offer_record(price=188_750), 188_500),
+            ("5 تا 188500000", offer_record(price=188_750), 188_500),
+            (
+                "5 تا 519000",
+                offer_record(price=51_500, commodity="QUARTER_BAHAR"),
+                51_900,
+            ),
+        )
+        for reply, root, expected in cases:
+            with self.subTest(reply=reply):
+                rows = [
+                    message(1, OWNER, "10 تا ف 188750", at_second=0),
+                    message(2, BUYER_ONE, reply, reply=1, at_second=2),
+                    message(3, OWNER, "برکت", reply=2, at_second=4),
+                ]
+                trades = link_coin_group_trades(rows, [root])
+                self.assertEqual(len(trades), 1)
+                self.assertEqual(trades[0].price_project_thousand_toman, expected)
+
+    def test_low_date_two_digit_negotiated_price_uses_instrument_band(self) -> None:
+        rows = [
+            message(1, OWNER, "10 تا رب پ ف 47000", at_second=0),
+            message(2, BUYER_ONE, "5 تا 48", reply=1, at_second=2),
+            message(3, OWNER, "قبوله", reply=2, at_second=4),
+        ]
+        trades = link_coin_group_trades(
+            rows,
+            [offer_record(price=47_000, commodity="QUARTER_LOW_DATE")],
+        )
+        self.assertEqual(
+            [(item.price_project_thousand_toman, item.quantity) for item in trades],
+            [(48_000, 5)],
+        )
+
+    def test_large_but_plausible_negotiated_price_is_retained_and_gated(self) -> None:
+        rows = [
+            message(1, OWNER, "10 تا ف 183100", at_second=0),
+            message(2, BUYER_ONE, "5 تا 200000", reply=1, at_second=2),
+            message(3, OWNER, "برکت", reply=2, at_second=4),
+        ]
+        trades = link_coin_group_trades(rows, [offer_record()])
+        self.assertEqual(len(trades), 1)
+        self.assertEqual(
+            (
+                trades[0].price_project_thousand_toman,
+                trades[0].quantity,
+                trades[0].quality_state,
+                trades[0].resolution_reason,
+            ),
+            (
+                200_000,
+                5,
+                "PENDING_REVIEW",
+                "NEGOTIATED_PRICE_OUTSIDE_SAFE_RELATIVE_DELTA",
+            ),
+        )
+
+    def test_bare_numeric_quantity_and_price_are_both_retained(self) -> None:
+        rows = [
+            message(1, OWNER, "20 تا ف 183100", at_second=0),
+            message(2, BUYER_ONE, "10 182900", reply=1, at_second=2),
+            message(3, OWNER, "برکت", reply=2, at_second=4),
+        ]
+        trades = link_coin_group_trades(
+            rows,
+            [offer_record(price=183_100, quantity=20)],
+        )
+        self.assertEqual(
+            [(item.price_project_thousand_toman, item.quantity) for item in trades],
+            [(182_900, 10)],
+        )
+
+    def test_sell_shorthand_quantity_is_valid_counterparty_proposal(self) -> None:
+        rows = [
+            message(1, OWNER, "20 تا خ 183100", at_second=0),
+            message(2, BUYER_ONE, "ف 4 182900", reply=1, at_second=2),
+            message(3, OWNER, "تأیید", reply=2, at_second=4),
+        ]
+        trades = link_coin_group_trades(
+            rows,
+            [offer_record(price=183_100, quantity=20)],
+        )
+        self.assertEqual(
+            [(item.price_project_thousand_toman, item.quantity) for item in trades],
+            [(182_900, 4)],
+        )
+
     def test_latest_counterparty_quantity_overrides_an_earlier_owner_counter(self) -> None:
         rows = [
             message(1, OWNER, "35 تا ف 183100", at_second=0),
@@ -198,6 +287,65 @@ class CoinGroupTradeTests(unittest.TestCase):
     def test_unconfirmed_buy_request_is_not_a_trade(self) -> None:
         rows = [message(1, OWNER, "10 تا ف 183100"), message(2, BUYER_ONE, "ب10 تا182900", reply=1, at_second=2)]
         self.assertEqual(link_coin_group_trades(rows, [offer_record()]), [])
+
+    def test_counterparty_only_trade_declaration_is_audit_only(self) -> None:
+        rows = [
+            message(1, OWNER, "10 تا ف 183100", at_second=0),
+            message(2, BUYER_ONE, "5 تا خریدم", reply=1, at_second=2),
+        ]
+        trades = link_coin_group_trades(rows, [offer_record()])
+        self.assertEqual(len(trades), 1)
+        self.assertEqual(trades[0].quality_state, "PENDING_REVIEW")
+        self.assertEqual(
+            trades[0].resolution_reason,
+            "COUNTERPARTY_DECLARATION_REQUIRES_OFFERER_CONFIRMATION",
+        )
+
+    def test_rejection_breaks_old_terms_until_a_new_proposal_exists(self) -> None:
+        rejected = [
+            message(1, OWNER, "10 تا ف 183100", at_second=0),
+            message(2, BUYER_ONE, "5 تا 182900", reply=1, at_second=2),
+            message(3, OWNER, "نشد", reply=2, at_second=3),
+            message(4, BUYER_ONE, "ب", reply=3, at_second=4),
+        ]
+        self.assertEqual(link_coin_group_trades(rejected, [offer_record()]), [])
+
+        reopened = rejected[:-1] + [
+            message(4, OWNER, "5 تا 182950", reply=3, at_second=4),
+            message(5, BUYER_ONE, "ب", reply=4, at_second=5),
+        ]
+        trades = link_coin_group_trades(reopened, [offer_record()])
+        self.assertEqual(
+            [(item.price_project_thousand_toman, item.quantity) for item in trades],
+            [(182_950, 5)],
+        )
+
+    def test_participant_cancellation_after_confirmation_gates_the_trade(self) -> None:
+        rows = [
+            message(1, OWNER, "10 تا ف 183100", at_second=0),
+            message(2, BUYER_ONE, "5 تا خریدم", reply=1, at_second=2),
+            message(3, OWNER, "برکت", reply=2, at_second=3),
+            message(4, BUYER_ONE, "لغو شد", reply=3, at_second=4),
+        ]
+        trades = link_coin_group_trades(rows, [offer_record()])
+        self.assertEqual(len(trades), 1)
+        self.assertEqual(
+            (trades[0].quality_state, trades[0].resolution_reason),
+            ("PENDING_REVIEW", "PARTICIPANT_REJECTION_AFTER_CONFIRMATION"),
+        )
+
+    def test_missing_ancestry_cannot_promote_a_retained_counter_offer_to_root(self) -> None:
+        rows = [
+            message(2, BUYER_ONE, "5 تا خ 182900", reply=99, at_second=2),
+            message(3, OWNER, "خریدم", reply=2, at_second=4),
+        ]
+        counter_offer = offer_record(
+            message_id=2,
+            owner=BUYER_ONE,
+            price=182_900,
+            quantity=5,
+        )
+        self.assertEqual(link_coin_group_trades(rows, [counter_offer]), [])
 
     def test_counterparty_declaration_and_owner_confirmation_are_one_fill(self) -> None:
         rows = [

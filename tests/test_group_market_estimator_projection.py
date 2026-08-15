@@ -154,6 +154,91 @@ def test_projection_reconciles_missing_source_and_excludes_late_arrival() -> Non
         destination.close()
 
 
+def test_projection_links_canonical_trade_to_its_opaque_root_offer() -> None:
+    with TemporaryDirectory() as directory:
+        root = Path(directory)
+        market_path = root / "market.sqlite3"
+        conversation_path = root / "conversation.sqlite3"
+        destination = sqlite3.connect(conversation_path)
+        destination.executescript(_CONVERSATION_SCHEMA)
+        destination.close()
+        market = connect_market_store(market_path)
+        initialize_market_store(market)
+        offer_key = derive_event_key("coin-group-offer-v1", 1, 101, 0)
+        trade_key = derive_event_key("coin-group-trade-v1", 1, 101, 104)
+        for key, event_type, minute, price, quantity, attributes in (
+            (
+                offer_key,
+                "OFFER",
+                0,
+                "188750",
+                "10",
+                {"group_number": 1},
+            ),
+            (
+                trade_key,
+                "TRADE",
+                1,
+                "188500",
+                "5",
+                {
+                    "group_number": 1,
+                    "confirmation_kind": "RECIPROCAL_OFFERER_CONFIRMATION",
+                    "is_aggregate": False,
+                    "root_offer_event_key": offer_key.hex(),
+                },
+            ),
+        ):
+            upsert_observation(
+                market,
+                MarketObservation(
+                    event_key=key,
+                    source_code="GROUP_1",
+                    source_family="GROUP",
+                    event_time_utc=datetime(2026, 8, 13, 9, minute, tzinfo=timezone.utc),
+                    available_at_utc=datetime(
+                        2026, 8, 13, 9, minute, 3, tzinfo=timezone.utc
+                    ),
+                    instrument="COIN_IMAM",
+                    market_label="GROUP_COIN_IMAM",
+                    settlement_term="CASH",
+                    trade_form="PHYSICAL",
+                    event_type=event_type,
+                    side="SELL",
+                    price=Decimal(price),
+                    price_unit="PROJECT_THOUSAND_TOMAN",
+                    currency="TOMAN",
+                    quantity=Decimal(quantity),
+                    quantity_unit="COIN_COUNT",
+                    parse_confidence=0.99,
+                    parser_version="coin-group-trade-projection-test",
+                    quality_state="ELIGIBLE",
+                    quality_policy_version="test",
+                    attributes=attributes,
+                ),
+            )
+        market.commit()
+        market.close()
+
+        report = project(market_path, conversation_path)
+        assert (report["eligible_offers"], report["eligible_trades"]) == (1, 1)
+        connection = sqlite3.connect(conversation_path)
+        offer = connection.execute("SELECT id,message_id FROM offers").fetchone()
+        trade = connection.execute(
+            "SELECT offer_message_id,price,quantity,confirmation_type FROM confirmed_trades"
+        ).fetchone()
+        quality = connection.execute(
+            "SELECT linked_offer_id FROM trade_market_quality"
+        ).fetchone()
+        connection.close()
+
+        assert offer is not None and trade is not None and quality is not None
+        assert trade[0] == offer[1]
+        assert (trade[1], trade[2]) == (188500, 5)
+        assert trade[3] == "RECIPROCAL_OFFERER_CONFIRMATION"
+        assert quality[0] == offer[0]
+
+
 def test_projection_command_records_failure_heartbeat() -> None:
     with TemporaryDirectory() as directory:
         root = Path(directory)

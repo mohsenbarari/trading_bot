@@ -10,24 +10,24 @@
   values divided by 1,000, or a bounded redundant-zero candidate; never add a
   constant. Quantities, scripts and mint years must not corrupt fields. `رب`
   means quarter; `پ`/`ت پ` and `پایین` spelling variants mark low-date.
-- Commodity resolution never defaults to Imam or restores `group_commodity_context`.
-  Use strictly-prior same-book anchors no older than
-  two hours. In overlapping full-coin bands, every plausible book needs anchor
-  coverage or the unnamed fact remains pending. A new regime may bootstrap only
-  from a coherent prior 30-minute explicit cluster with at least three messages,
-  two senders, one nonconditional claim and 1.5% spread. Conditional named
-  claims may support that cluster but are not projected directly. Eligible
-  nonconditional facts propagate only forward; only independent canonical
+- Commodity resolution never defaults to Imam or restores
+  `group_commodity_context`. Use prior same-book anchors no older than two hours;
+  overlapping full-coin bands require coverage for every plausible book. Regime
+  bootstrap requires a coherent prior 30-minute explicit cluster: three
+  messages, two senders, one nonconditional claim, and 1.5% spread. Conditional
+  claims are support-only; eligible facts propagate forward, and only canonical
   evidence may reject an explicit name.
-- A trade requires one structurally linked reply branch. Isolate users/siblings,
-  choose the oldest ancestral offer, prefer attributable owner confirmation,
-  use the latest negotiated quantity/price and deduplicate one fill. Keep
-  ambiguous/overfilled facts out of the model; unresolved-root trades stay audit-only.
-- Reconciliation rejects derived offer/trade facts invalidated by edits or the
-  current reply graph. Idempotent unchanged decisions retain first availability.
-  Estimator projection is authoritative: remove missing/ineligible prior rows,
-  exclude conditional or over-five-minute-late facts, and use `available_at_utc`
-  as the compatibility timeline while retaining source event time as metadata.
+- A trade requires one complete, structurally linked reply branch. Isolate
+  users/siblings, choose the oldest ancestral offer, and require reciprocal
+  offerer evidence for model eligibility. Cancellation breaks inherited terms;
+  a later participant rejection gates the fill. Use the latest negotiated
+  quantity/exact normalized price, deduplicate one fill, and link the projected
+  trade to its opaque root offer. Ambiguous, overfilled, or unresolved-root
+  trades stay out of the model.
+- Reconciliation rejects facts invalidated by edits/current reply graph;
+  unchanged decisions retain first availability. Projection removes absent or
+  ineligible rows, excludes conditional/over-five-minute-late facts, and uses
+  `available_at_utc` while retaining source event time as metadata.
 - Reject malformed group envelopes individually; inverted timestamps must not
   poison siblings or freeze checkpoints. Health separates heartbeat, latest
   canonical event, and actual model-eligible input; historical rows are not live.
