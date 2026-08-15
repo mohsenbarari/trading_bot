@@ -4,8 +4,11 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import {
   ENVIRONMENTS,
+  FIXED_JALALI_TIME,
+  FIXED_TIME,
   apiFixture,
   classifyConsole,
+  redactScenario,
   diagnosticCounts,
   isErrorInjectablePath,
   isIdentityBootstrapPath,
@@ -112,6 +115,9 @@ describe('stage8 full-acceptance fixture contract', () => {
     expect(apiFixture('/api/offers/page', 'GET', profile, 'normal').body.items[1]).toMatchObject({
       lifecycle_phase: 'overtime',
     })
+    expect(apiFixture('/api/offers/page', 'GET', profile, 'normal').body.items[0].created_at).toBe(
+      FIXED_JALALI_TIME,
+    )
     expect(apiFixture('/api/offers/market-history', 'GET', profile, 'normal').body).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ history_state: 'expired' }),
@@ -165,6 +171,8 @@ describe('stage8 full-acceptance fixture contract', () => {
     expect(runtimeSource).toMatch(/allowIdentityPageData/)
     expect(runtimeSource).toMatch(/seedCurrentUserSummary/)
     expect(runtimeSource).toMatch(/marketLifecycle/)
+    expect(runtimeSource).toMatch(/FIXED_JALALI_TIME/)
+    expect(runtimeSource).toMatch(/displayCreatedAtIso/)
     expect(runtimeSource).toMatch(/fixtureConversation/)
     expect(runtimeSource).not.toMatch(
       /\(controller\.mode === 'loading' \|\| controller\.mode === 'slow'\) && delayable\) \{/,
@@ -183,11 +191,71 @@ describe('stage8 full-acceptance fixture contract', () => {
     expect(browserSource).not.toMatch(/s8stale/)
   })
 
+  it('uses a readable Jalali created_at for Market fixtures and keeps lifecycle deadlines technical', () => {
+    const page = apiFixture('/api/offers/page', 'GET', profile, 'normal').body
+    const history = apiFixture('/api/offers/market-history', 'GET', profile, 'normal').body
+    const offers = [...page.items, ...history]
+    expect(offers).toHaveLength(4)
+    for (const offer of offers) {
+      expect(offer.created_at).toBe(FIXED_JALALI_TIME)
+      expect(offer.created_at).not.toBe(FIXED_TIME)
+      expect(offer.created_at).not.toMatch(/\d{4}-\d{2}-\d{2}T/u)
+      expect(offer.created_at).toMatch(/[۰-۹0-9]{4}\/[۰-۹0-9]{2}\/[۰-۹0-9]{2}/u)
+    }
+    expect(page.items[0]).toMatchObject({
+      lifecycle_phase: 'normal',
+      accepts_new_public_interaction: true,
+    })
+    expect(page.items[0].normal_deadline_ts).toBeGreaterThan(1_000_000_000)
+    expect(page.items[1]).toMatchObject({ lifecycle_phase: 'overtime' })
+    expect(page.items[1].final_deadline_ts).toBeGreaterThan(page.items[1].normal_deadline_ts)
+    expect(history.find((item) => item.history_state === 'expired')).toMatchObject({
+      status: 'expired',
+      is_read_only: true,
+    })
+    expect(history.find((item) => item.history_state === 'traded')).toMatchObject({
+      status: 'completed',
+      is_read_only: true,
+    })
+  })
+
   it('fails closed when the matrix drifts from source and the runner sees sourceDrift', () => {
     const matrixPath = path.join(repoRoot, 'docs/uiux-stage8-acceptance-rollout/ACCEPTANCE_MATRIX.json')
     expect(() => loadMatrix(matrixPath)).not.toThrow()
     expect(browserSource).toMatch(/if \(expected\.sourceDrift\)/)
     expect(browserSource).toMatch(/evaluateOfficialPass/)
+    expect(browserSource).toMatch(/digestScenario/)
+    expect(browserSource).toMatch(/preSettleEvidence/)
+    expect(browserSource).toMatch(/summarizeMarketLifecycle/)
     expect(browserSource).not.toMatch(/ALLOWED_DIRTY/)
+  })
+
+  it('keeps redacted pre-settle evidence on the scenario', () => {
+    const redacted = redactScenario({
+      id: 'state/market/member/loading',
+      rawConsole: ['secret'],
+      screenshotPath: '/tmp/shot.png',
+      errorProbe: { html: '<div>' },
+      preSettleEvidence: {
+        applicable: true,
+        pendingRequest: true,
+        loadingVisible: true,
+        endpointKey: '/api/offers/page',
+        rawDom: '<div class="loading">',
+        url: 'http://127.0.0.1:4173/api/offers/page?cursor=1',
+        query: 'cursor=1',
+        payload: { token: 'abc' },
+      },
+    })
+    expect(redacted.preSettleEvidence).toMatchObject({
+      applicable: true,
+      pendingRequest: true,
+      loadingVisible: true,
+      endpointKey: '/api/offers/page',
+    })
+    expect(redacted.preSettleEvidence.rawDom).toBeUndefined()
+    expect(redacted.preSettleEvidence.url).toBeUndefined()
+    expect(redacted.rawConsole).toBeUndefined()
+    expect(redacted.errorProbe).toBeUndefined()
   })
 })

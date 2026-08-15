@@ -13,6 +13,17 @@ function sha256File(filePath) {
   return createHash('sha256').update(fs.readFileSync(filePath)).digest('hex')
 }
 
+export function sha256Hex(value) {
+  return createHash('sha256').update(typeof value === 'string' ? value : JSON.stringify(value)).digest('hex')
+}
+
+export const MATRIX_PENDING_STATUS = 'full-local-synthetic-acceptance-executed-owner-signoff-pending'
+export const MATRIX_CLOSED_STATUS = 'closed-owner-aesthetic-approved'
+export const OWNER_APPROVAL_PHRASE = 'STAGE8 OWNER AESTHETIC SIGN-OFF — APPROVED'
+const SENSITIVE_ENDPOINT = /token|otp|secret|password|authorization|cookie|session_id/iu
+const QUERY_OR_FRAGMENT = /[?#]/u
+const ISO_TIMESTAMP = /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/u
+
 function gitText(repo, args) {
   return execFileSync('git', args, {
     cwd: repo,
@@ -190,6 +201,129 @@ export function evaluateOfficialPass({
   return { passed: failures.length === 0, failures }
 }
 
+export function isRawIsoTimestamp(value) {
+  return ISO_TIMESTAMP.test(String(value || ''))
+}
+
+export function endpointKey(pathname) {
+  const raw = String(pathname || '')
+  if (!raw || QUERY_OR_FRAGMENT.test(raw) || SENSITIVE_ENDPOINT.test(raw)) return ''
+  return raw
+}
+
+export function assertEndpointKey(key) {
+  const failures = []
+  const value = String(key || '')
+  if (QUERY_OR_FRAGMENT.test(value)) failures.push('endpoint key contains query')
+  if (SENSITIVE_ENDPOINT.test(value)) failures.push('endpoint key contains sensitive data')
+  return failures
+}
+
+export function buildPreSettleEvidence({
+  state,
+  kind,
+  midProbe = null,
+  probe = null,
+  holdEndpoint = '',
+  recovered = false,
+  errorProbe = null,
+} = {}) {
+  const loadingOrSlow = state === 'loading' || state === 'slow'
+  const isError = state === 'error'
+  const applicable = kind === 'state' && (loadingOrSlow || isError)
+  return {
+    applicable,
+    observedBeforeRelease: Boolean(applicable && loadingOrSlow && midProbe),
+    pendingRequest: Boolean(midProbe?.pendingRequest),
+    loadingVisible: Boolean(midProbe?.loadingVisible),
+    identityRequestCount: Number(midProbe?.identityRequestCount || 0),
+    endpointKey: endpointKey(holdEndpoint),
+    state: state || null,
+    settledAfterRelease: Boolean(probe?.settledVisible),
+    settledLoadingVisible: Boolean(probe?.loadingVisible),
+    recovered: Boolean(recovered),
+    retryVisibleBeforeRecovery: isError ? Boolean(errorProbe?.retryVisible) : null,
+    errorClearedAfterRetry: isError
+      ? Boolean(errorProbe?.errorVisible && probe && !probe.errorVisible)
+      : null,
+  }
+}
+
+export function assertPreSettleEvidence(evidence, { state } = {}) {
+  const failures = []
+  if ((state === 'loading' || state === 'slow') && !evidence) {
+    failures.push('pre-settle evidence missing')
+    return failures
+  }
+  if (!evidence) return failures
+  failures.push(...assertEndpointKey(evidence.endpointKey || ''))
+  if (evidence.applicable && (evidence.state === 'loading' || evidence.state === 'slow')) {
+    if (!evidence.pendingRequest) failures.push('loading/slow without pendingRequest')
+    if (!evidence.loadingVisible) failures.push('loading/slow without loadingVisible before release')
+    if (!evidence.observedBeforeRelease) failures.push('loading/slow not observed before release')
+    if (evidence.settledLoadingVisible === true && evidence.loadingVisible === true && !evidence.pendingRequest) {
+      failures.push('settled state recorded as pre-settle evidence')
+    }
+  }
+  return failures
+}
+
+export function digestScenario(scenario) {
+  return sha256Hex({
+    id: scenario.id,
+    kind: scenario.kind,
+    route: scenario.route,
+    profile: scenario.profile,
+    viewport: scenario.viewport,
+    state: scenario.state || null,
+    interaction: scenario.interaction || null,
+    environment: scenario.environment || null,
+    passed: scenario.passed,
+    failures: scenario.failures || [],
+    preSettleEvidence: scenario.preSettleEvidence || null,
+  })
+}
+
+export function collectKeyAssertions(scenario) {
+  const probe = scenario.probe || {}
+  const mid = scenario.preSettleEvidence || {}
+  const assertions = []
+  if (!probe.documentOverflow && !probe.appOverflow) assertions.push('common-ui-no-overflow')
+  if (!Number(probe.unnamedInteractive || 0)) assertions.push('no-unnamed-interactive')
+  if (!Number(probe.nestedInteractive || 0)) assertions.push('no-nested-interactive')
+  if (scenario.state === 'loading' && mid.loadingVisible && mid.observedBeforeRelease) {
+    assertions.push('loading-observed-before-release')
+  }
+  if (scenario.state === 'slow' && mid.loadingVisible && mid.observedBeforeRelease) {
+    assertions.push('slow-loading-observed-before-release')
+  }
+  if ((scenario.state === 'loading' || scenario.state === 'slow') && mid.settledAfterRelease) {
+    assertions.push('settled-after-release')
+  }
+  if (scenario.state === 'error' && (mid.retryVisibleBeforeRecovery || scenario.errorProbe?.errorVisible)) {
+    assertions.push('error-visible-before-retry')
+  }
+  if (scenario.state === 'error' && mid.errorClearedAfterRetry) assertions.push('retry-recovered')
+  if (scenario.state === 'offline' && (probe.offlineVisible || probe.errorVisible)) {
+    assertions.push('offline-state-visible')
+  }
+  if (scenario.interaction === 'keyboard' && probe.focusVisible) assertions.push('keyboard-focus-visible')
+  if (scenario.interaction === 'touch' && probe.touchActivated) assertions.push('touch-activation-observed')
+  if (scenario.interaction === 'reduced-motion' && probe.reducedMotion !== false) {
+    assertions.push('reduced-motion-respected')
+  }
+  if (scenario.interaction === 'zoom-200') assertions.push('zoom-content-preserved')
+  if (
+    scenario.route === 'market' &&
+    scenario.expectedKind === 'render-route' &&
+    !['loading', 'empty', 'error', 'offline', 'stale'].includes(scenario.state) &&
+    probe.marketLifecycle?.perimeterPresent
+  ) {
+    assertions.push('market-lifecycle-contract-passed')
+  }
+  return assertions
+}
+
 export function buildSuccessSummary(scenario) {
   const probe = scenario.probe || {}
   return {
@@ -201,7 +335,8 @@ export function buildSuccessSummary(scenario) {
     state: scenario.state || null,
     interaction: scenario.interaction || null,
     environment: scenario.environment || null,
-    keyAssertions: scenario.passed ? ['passed'] : scenario.failures || [],
+    keyAssertions: collectKeyAssertions(scenario),
+    preSettleEvidence: scenario.preSettleEvidence || null,
     documentOverflow: Boolean(probe.documentOverflow),
     appOverflow: Boolean(probe.appOverflow),
     unnamedInteractive: Number(probe.unnamedInteractive || 0),
@@ -220,6 +355,136 @@ export function buildSuccessSummary(scenario) {
     },
     lifecycleMarker: probe.marketLifecycle || null,
     diagnosticSummary: scenario.diagnostics || null,
+  }
+}
+
+export function classifyMarketLifecycleScenario(scenario) {
+  if (scenario?.route !== 'market') return null
+  const state = scenario.state || 'normal'
+  const profileId = typeof scenario.profile === 'object' ? scenario.profile?.id : scenario.profile
+  if (scenario.applicable === false || scenario.expectedKind !== 'render-route') {
+    return 'nonLifecycleOrNotApplicable'
+  }
+  if (state === 'loading' || state === 'slow') return 'loadingOrSlow'
+  if (state === 'error' || state === 'offline') return 'errorOrOffline'
+  if (state === 'empty' || state === 'stale') return 'nonLifecycleOrNotApplicable'
+  if (profileId === 'customer' || profileId === 'accountant') return 'historyHiddenByProfile'
+  const marker = scenario.probe?.marketLifecycle || scenario.lifecycleMarker || {}
+  if (marker.perimeterPresent && marker.expiredDistinct && marker.tradedDistinct) {
+    return 'fullLifecycleVisible'
+  }
+  return 'nonLifecycleOrNotApplicable'
+}
+
+export function summarizePreSettleEvidence(scenarios) {
+  const items = (scenarios || []).map((scenario) => scenario.preSettleEvidence).filter(Boolean)
+  const applicable = items.filter((item) => item.applicable)
+  return {
+    applicableCount: applicable.length,
+    observedBeforeRelease: applicable.filter((item) => item.observedBeforeRelease).length,
+    pendingRequest: applicable.filter((item) => item.pendingRequest).length,
+    loadingVisibleBeforeRelease: applicable.filter((item) => item.loadingVisible).length,
+    settledAfterRelease: applicable.filter((item) => item.settledAfterRelease).length,
+    recovered: applicable.filter((item) => item.recovered).length,
+  }
+}
+
+export function summarizeMarketLifecycle(scenarios) {
+  const buckets = {
+    fullLifecycleVisible: [],
+    historyHiddenByProfile: [],
+    loadingOrSlow: [],
+    errorOrOffline: [],
+    nonLifecycleOrNotApplicable: [],
+  }
+  for (const scenario of scenarios || []) {
+    const bucket = classifyMarketLifecycleScenario(scenario)
+    if (!bucket) continue
+    buckets[bucket].push(scenario.id)
+  }
+  return {
+    fullLifecycleVisible: buckets.fullLifecycleVisible.length,
+    historyHiddenByProfile: buckets.historyHiddenByProfile.length,
+    loadingOrSlow: buckets.loadingOrSlow.length,
+    errorOrOffline: buckets.errorOrOffline.length,
+    nonLifecycleOrNotApplicable: buckets.nonLifecycleOrNotApplicable.length,
+    historyHiddenIds: buckets.historyHiddenByProfile,
+  }
+}
+
+export function evaluateMatrixAcceptanceTransition(matrix, options = {}) {
+  const failures = []
+  const accounting = matrix?.cellAccounting || {}
+  const taxonomy = accounting.naTaxonomy || {}
+  const official = accounting.officialFullAcceptance || {}
+  const catalog = matrix?.evidenceCatalog || {}
+  const receiptId = official.receiptId
+  const receiptEntry = receiptId ? catalog[receiptId] : null
+  const snapshot = matrix?.fullAcceptanceSourceSnapshot || {}
+  const closure = options.closure || null
+  const required = [
+    ['executedFullMatrixCellCount', 270],
+    ['viewportStateInteractionEnvironmentExpansionPerformed', true],
+    ['plannedScenarioCount', 960],
+    ['applicableExecutedCount', 830],
+    ['applicablePassedCount', 830],
+    ['notApplicableCount', 130],
+    ['partialSyntheticBrowserSliceCount', 12],
+    ['partialSyntheticBrowserScenarioCellCount', 163],
+    ['partialSyntheticBrowserCellsCountTowardFullMatrix', false],
+  ]
+  for (const [key, value] of required) {
+    if (accounting[key] !== value) failures.push(`counter ${key} ${accounting[key]} != ${value}`)
+  }
+  if ((accounting.applicablePassedCount || 0) < (accounting.applicableExecutedCount || 0)) {
+    failures.push('applicablePassedCount below applicableExecutedCount')
+  }
+  if (taxonomy.productNotApplicable !== 118) failures.push('productNotApplicable drifted')
+  if (taxonomy.canonicalAlias !== 12) failures.push('canonicalAlias drifted')
+  if (taxonomy.harnessDeferred !== 0) failures.push(`harnessDeferred ${taxonomy.harnessDeferred}`)
+  if ((matrix?.partialSyntheticBrowserSlices || []).length !== 12) {
+    failures.push('partial slice list drifted')
+  }
+  if (!receiptId || !receiptEntry?.path || !receiptEntry?.sha256) {
+    failures.push('receipt/report reference incomplete')
+  }
+  if (!official.runId) failures.push('official runId missing')
+  if (!/^[0-9a-f]{64}$/u.test(String(snapshot.reportSha256 || ''))) {
+    failures.push('report hash missing or invalid')
+  }
+  if (options.repoRoot && receiptEntry?.path) {
+    const receiptPath = path.join(options.repoRoot, receiptEntry.path)
+    if (!fs.existsSync(receiptPath)) failures.push('receipt file missing')
+    else if (sha256File(receiptPath) !== receiptEntry.sha256) failures.push('receipt hash mismatch')
+  }
+  const ownerApproved = Boolean(
+    closure?.ownerSignoff?.status === 'approved' &&
+      closure?.ownerSignoff?.approvalPhrase === OWNER_APPROVAL_PHRASE,
+  )
+  const pending = matrix?.status === MATRIX_PENDING_STATUS
+  const closed = matrix?.status === MATRIX_CLOSED_STATUS
+  if (pending) {
+    if (matrix.acceptanceAuthority !== false) failures.push('pending requires acceptanceAuthority=false')
+    if (ownerApproved || closure?.status === MATRIX_CLOSED_STATUS) {
+      failures.push('pending must not record owner closure')
+    }
+  } else if (closed) {
+    if (matrix.acceptanceAuthority !== true) failures.push('closed requires acceptanceAuthority=true')
+    if (!ownerApproved) failures.push('closed requires explicit owner sign-off')
+    if (closure?.status !== MATRIX_CLOSED_STATUS) failures.push('closure record missing')
+    if (closure?.technicalReceiptSha256 && receiptEntry?.sha256 !== closure.technicalReceiptSha256) {
+      failures.push('closure receipt hash mismatch')
+    }
+  } else {
+    failures.push(`invalid matrix status ${matrix?.status || 'missing'}`)
+  }
+  if (matrix?.acceptanceAuthority === true && !closed) {
+    failures.push('acceptanceAuthority=true without valid closure')
+  }
+  return {
+    passed: failures.length === 0,
+    failures,
+    state: pending ? 'pending' : closed ? 'closed' : 'invalid',
   }
 }
 
@@ -267,6 +532,9 @@ export function assertMarketLifecycle(probe, options = {}) {
   }
   if (market.sideActionInverted) {
     failures.push('market offer side is inverted against user action')
+  }
+  if (market.displayCreatedAtIso) {
+    failures.push('market created_at shows raw ISO')
   }
   if (probe.documentOverflow) failures.push('market document overflow')
   if (probe.ctaAboveNav === false) failures.push('market CTA obscured')

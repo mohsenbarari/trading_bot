@@ -29,7 +29,6 @@ import {
   newPage,
   readRuntimeRoute,
   redactScenario,
-  sha256,
   sha256File,
   stateApplicability,
   visitPathFor,
@@ -47,11 +46,16 @@ import {
   assertEnvironmentSemantics,
   assertInteractionSemantics,
   assertMarketLifecycle,
+  assertPreSettleEvidence,
   assertStateSemantics,
+  buildPreSettleEvidence,
   buildSuccessSummary,
   captureOfficialBinding,
+  digestScenario,
   evaluateOfficialPass,
   officialCounts,
+  summarizeMarketLifecycle,
+  summarizePreSettleEvidence,
 } from './lib/stage8-full-acceptance-contract.mjs'
 import {
   classifyScenarioFailure,
@@ -78,23 +82,6 @@ function assert(condition, message) {
 
 function progress(stage, details = {}) {
   process.stdout.write(`${JSON.stringify({ event: 'stage8-full-acceptance', runId: RUN_ID, stage, ...details })}\n`)
-}
-
-function scenarioDigest(scenario) {
-  return sha256(
-    JSON.stringify({
-      id: scenario.id,
-      kind: scenario.kind,
-      route: scenario.route,
-      profile: scenario.profile,
-      viewport: scenario.viewport,
-      state: scenario.state || null,
-      interaction: scenario.interaction || null,
-      environment: scenario.environment || null,
-      passed: scenario.passed,
-      failures: scenario.failures || [],
-    }),
-  )
 }
 
 async function runScenario({
@@ -145,6 +132,7 @@ async function runScenario({
   let midProbe = null
   let errorProbe = null
   let actual = null
+  let recovered = false
   try {
     const target = `${baseUrl}${visitPathFor(route)}`
     await page.goto(target, { waitUntil: 'domcontentloaded', timeout: 30_000 })
@@ -172,7 +160,7 @@ async function runScenario({
       await waitForNetworkSettle(page)
       await waitForApp(page)
       if (descriptor.states[state]?.identityPageData) {
-        await recoverIdentityPageDataAfterHold(page)
+        recovered = Boolean((await recoverIdentityPageDataAfterHold(page)).recovered)
       }
     } else if (state === 'stale' && expected.kind === 'render-route') {
       const staleEndpoint = descriptor.states.stale.endpoint || ''
@@ -418,6 +406,16 @@ async function runScenario({
     controller.allowIdentityPageData = false
     await context.close()
   }
+  const preSettleEvidence = buildPreSettleEvidence({
+    state,
+    kind,
+    midProbe,
+    probe,
+    holdEndpoint: descriptor.states?.[state]?.endpoint || '',
+    recovered,
+    errorProbe,
+  })
+  failures.push(...assertPreSettleEvidence(preSettleEvidence, { state }))
   const scenario = {
     id: [
       kind,
@@ -447,13 +445,14 @@ async function runScenario({
     canonical: expected.canonical || null,
     actual,
     probe,
+    preSettleEvidence,
     failures,
     passed: failures.length === 0,
     diagnostics: diagnosticCounts(diagnostics, {
       allowInjected: state === 'error' || state === 'offline',
     }),
   }
-  scenario.digest = scenarioDigest(scenario)
+  scenario.digest = digestScenario(scenario)
   return scenario
 }
 
@@ -597,7 +596,7 @@ async function main() {
             passed: true,
             failures: [],
           }
-          scenario.digest = scenarioDigest(scenario)
+          scenario.digest = digestScenario(scenario)
           scenarios.push(scenario)
           continue
         }
@@ -641,7 +640,7 @@ async function main() {
             passed: true,
             failures: [],
           }
-          scenario.digest = scenarioDigest(scenario)
+          scenario.digest = digestScenario(scenario)
           scenarios.push(scenario)
           continue
         }
@@ -685,7 +684,7 @@ async function main() {
             passed: true,
             failures: [],
           }
-          scenario.digest = scenarioDigest(scenario)
+          scenario.digest = digestScenario(scenario)
           scenarios.push(scenario)
           continue
         }
@@ -879,13 +878,8 @@ async function main() {
     },
     diagnosticTotals,
     successEvidence,
-    marketLifecycleSubset: successEvidence
-      .filter((item) => item.route === 'market' && item.lifecycleMarker)
-      .map((item) => ({
-        id: item.id,
-        digest: item.digest,
-        lifecycleMarker: item.lifecycleMarker,
-      })),
+    preSettleEvidenceTotals: summarizePreSettleEvidence(scenarios),
+    marketLifecycleSummary: summarizeMarketLifecycle(scenarios),
     failedScenarios: failedItems.map(redactScenario),
     scenarioDigests: scenarios.map((item) => ({
       id: item.id,

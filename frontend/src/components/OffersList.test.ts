@@ -1598,4 +1598,40 @@ describe('OffersList.vue', () => {
 
     wrapper.unmount()
   })
+
+  it('shows Stage 8 Market fixture created_at as readable Jalali, not raw ISO', async () => {
+    const jalali = '۱۴۰۵/۰۵/۲۳ ۱۲:۳۰'
+    const nowSec = Math.floor(Date.now() / 1000)
+    const wrapper = await mountOffersList({
+      offers: [
+        buildTradeOffer({
+          created_at: jalali,
+          lifecycle_phase: 'normal',
+          normal_deadline_ts: nowSec + 1800,
+          expires_at_ts: nowSec + 1800,
+          timer_total_seconds: 3600,
+          accepts_new_public_interaction: true,
+        }),
+        buildTradeOffer({
+          id: 30,
+          created_at: jalali,
+          offer_type: 'buy',
+          lifecycle_phase: 'overtime',
+          normal_deadline_ts: nowSec - 60,
+          final_deadline_ts: nowSec + 240,
+          expires_at_ts: nowSec + 240,
+          timer_total_seconds: 300,
+          accepts_new_public_interaction: true,
+        }),
+      ],
+    })
+    const times = wrapper.findAll('.offer-time').map((node) => node.text())
+    expect(times).toEqual([jalali, jalali])
+    for (const time of times) {
+      expect(time).not.toMatch(/\d{4}-\d{2}-\d{2}T/)
+    }
+    expect(wrapper.get('[data-test="offer-deadline-perimeter"]').exists()).toBe(true)
+    expect(wrapper.get('[data-test="offer-overtime-sticker"]').attributes('aria-label')).toBe('وقت اضافه')
+    wrapper.unmount()
+  })
 })

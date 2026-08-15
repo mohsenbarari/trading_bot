@@ -12,11 +12,17 @@ import {
   assertInteractionSemantics,
   assertMarketLifecycle,
   assertStateSemantics,
+  assertPreSettleEvidence,
+  buildPreSettleEvidence,
   buildSuccessSummary,
   canViewExpiredMarketHistory,
+  classifyMarketLifecycleScenario,
+  collectKeyAssertions,
+  digestScenario,
   evaluateOfficialPass,
   hasListStateSurface,
   officialCounts,
+  summarizeMarketLifecycle,
 } from './lib/stage8-full-acceptance-contract.mjs'
 import { NA_TAXONOMY } from './lib/stage8-full-acceptance-constants.mjs'
 import {
@@ -1033,6 +1039,9 @@ describe('Stage 8 N/A taxonomy is fail-closed', () => {
     expect(browserSource).toMatch(/officialCounts\(\)/)
     expect(browserSource).toMatch(/taxonomyCounts/)
     expect(browserSource).toMatch(/buildSuccessSummary/)
+    expect(browserSource).toMatch(/digestScenario/)
+    expect(browserSource).toMatch(/preSettleEvidence/)
+    expect(browserSource).toMatch(/summarizeMarketLifecycle/)
     expect(browserSource).toMatch(/assertMarketLifecycle/)
     expect(browserSource).toMatch(/schemaVersion: 4/)
   })
@@ -1087,6 +1096,12 @@ describe('Stage 8 Market lifecycle assertions', () => {
     expect(
       assertMarketLifecycle(healthy, { routeName: 'home', state: 'normal', expectedKind: 'render-route' }),
     ).toEqual([])
+    expect(
+      assertMarketLifecycle(
+        { ...healthy, marketLifecycle: { ...healthy.marketLifecycle, displayCreatedAtIso: true } },
+        { routeName: 'market', state: 'normal', expectedKind: 'render-route' },
+      ),
+    ).toContain('market created_at shows raw ISO')
   })
 
   it('does not require expired or traded history for customer or accountant profiles', () => {
@@ -1127,6 +1142,7 @@ describe('Stage 8 Market lifecycle assertions', () => {
       digest: 'abc',
       route: 'market',
       profile: 'member',
+      expectedKind: 'render-route',
       viewport: { width: 390, height: 844 },
       state: 'normal',
       interaction: null,
@@ -1139,5 +1155,226 @@ describe('Stage 8 Market lifecycle assertions', () => {
     expect(summary.id).toBe('state/market/member/normal')
     expect(summary.lifecycleMarker.perimeterPresent).toBe(true)
     expect(summary.unnamedInteractive).toBe(0)
+    expect(summary.keyAssertions).not.toEqual(['passed'])
+    expect(summary.keyAssertions).toEqual(
+      expect.arrayContaining([
+        'common-ui-no-overflow',
+        'no-unnamed-interactive',
+        'no-nested-interactive',
+        'market-lifecycle-contract-passed',
+      ]),
+    )
+    expect(summary.preSettleEvidence).toBeNull()
+  })
+})
+
+describe('Stage 8 durable pre-settle evidence', () => {
+  const midProbe = {
+    pendingRequest: true,
+    loadingVisible: true,
+    identityRequestCount: 1,
+  }
+  const settledProbe = {
+    settledVisible: true,
+    loadingVisible: false,
+  }
+
+  it('binds a redacted loading summary into the scenario digest', () => {
+    const preSettleEvidence = buildPreSettleEvidence({
+      state: 'loading',
+      kind: 'state',
+      midProbe,
+      probe: settledProbe,
+      holdEndpoint: '/api/offers/page',
+      recovered: false,
+    })
+    expect(preSettleEvidence).toMatchObject({
+      applicable: true,
+      observedBeforeRelease: true,
+      pendingRequest: true,
+      loadingVisible: true,
+      endpointKey: '/api/offers/page',
+      settledAfterRelease: true,
+      settledLoadingVisible: false,
+    })
+    const scenario = {
+      id: 'state/market/member/390x844/loading/none/mobile-browser',
+      kind: 'state',
+      route: 'market',
+      profile: 'member',
+      viewport: { width: 390, height: 844 },
+      state: 'loading',
+      passed: true,
+      failures: [],
+      preSettleEvidence,
+    }
+    const digest = digestScenario(scenario)
+    expect(digest).toMatch(/^[0-9a-f]{64}$/u)
+    expect(digestScenario({ ...scenario, preSettleEvidence: null })).not.toBe(digest)
+    expect(
+      digestScenario({
+        ...scenario,
+        preSettleEvidence: { ...preSettleEvidence, loadingVisible: false },
+      }),
+    ).not.toBe(digest)
+    expect(assertPreSettleEvidence(preSettleEvidence, { state: 'loading' })).toEqual([])
+  })
+
+  it('fails loading/slow without a pending request or visible loading before release', () => {
+    expect(
+      assertPreSettleEvidence(
+        buildPreSettleEvidence({
+          state: 'slow',
+          kind: 'state',
+          midProbe: { pendingRequest: false, loadingVisible: true },
+          probe: settledProbe,
+          holdEndpoint: '/api/offers/page',
+        }),
+        { state: 'slow' },
+      ),
+    ).toContain('loading/slow without pendingRequest')
+    expect(
+      assertPreSettleEvidence(
+        buildPreSettleEvidence({
+          state: 'loading',
+          kind: 'state',
+          midProbe: { pendingRequest: true, loadingVisible: false },
+          probe: settledProbe,
+          holdEndpoint: '/api/offers/page',
+        }),
+        { state: 'loading' },
+      ),
+    ).toContain('loading/slow without loadingVisible before release')
+    expect(assertPreSettleEvidence(null, { state: 'loading' })).toContain('pre-settle evidence missing')
+  })
+
+  it('fails a settled probe copied as pre-settle evidence and sensitive endpoints', () => {
+    expect(
+      assertPreSettleEvidence(
+        {
+          applicable: true,
+          observedBeforeRelease: true,
+          pendingRequest: false,
+          loadingVisible: true,
+          settledLoadingVisible: true,
+          endpointKey: '/api/offers/page',
+          state: 'loading',
+        },
+        { state: 'loading' },
+      ),
+    ).toContain('settled state recorded as pre-settle evidence')
+    expect(
+      buildPreSettleEvidence({
+        state: 'loading',
+        kind: 'state',
+        midProbe,
+        probe: settledProbe,
+        holdEndpoint: '/api/offers/page?token=secret',
+      }).endpointKey,
+    ).toBe('')
+    expect(
+      assertPreSettleEvidence({
+        applicable: true,
+        observedBeforeRelease: true,
+        pendingRequest: true,
+        loadingVisible: true,
+        endpointKey: '/api/offers/page?cursor=1',
+        state: 'loading',
+      }, { state: 'loading' }),
+    ).toContain('endpoint key contains query')
+    expect(
+      assertPreSettleEvidence({
+        applicable: true,
+        observedBeforeRelease: true,
+        pendingRequest: true,
+        loadingVisible: true,
+        endpointKey: '/api/auth/refresh?token=abc',
+        state: 'loading',
+      }, { state: 'loading' }),
+    ).toEqual(expect.arrayContaining(['endpoint key contains query', 'endpoint key contains sensitive data']))
+  })
+
+  it('records only the assertions that apply to the scenario', () => {
+    expect(
+      collectKeyAssertions({
+        state: 'loading',
+        route: 'home',
+        expectedKind: 'render-route',
+        probe: { documentOverflow: false, appOverflow: false, unnamedInteractive: 0, nestedInteractive: 0 },
+        preSettleEvidence: {
+          loadingVisible: true,
+          observedBeforeRelease: true,
+          settledAfterRelease: true,
+        },
+      }),
+    ).toEqual(
+      expect.arrayContaining([
+        'loading-observed-before-release',
+        'settled-after-release',
+      ]),
+    )
+    expect(
+      collectKeyAssertions({
+        state: 'error',
+        route: 'operations',
+        probe: { documentOverflow: false, unnamedInteractive: 0, nestedInteractive: 0 },
+        preSettleEvidence: { retryVisibleBeforeRecovery: true, errorClearedAfterRetry: true },
+      }),
+    ).toEqual(expect.arrayContaining(['error-visible-before-retry', 'retry-recovered']))
+    expect(
+      collectKeyAssertions({
+        interaction: 'keyboard',
+        probe: { focusVisible: true, documentOverflow: false, unnamedInteractive: 0, nestedInteractive: 0 },
+      }),
+    ).toContain('keyboard-focus-visible')
+  })
+})
+
+describe('Stage 8 Market lifecycle summary taxonomy', () => {
+  it('never puts loading or error into historyHiddenByProfile', () => {
+    const scenarios = [
+      {
+        id: 'state/market/customer/loading',
+        route: 'market',
+        profile: 'customer',
+        state: 'loading',
+        expectedKind: 'render-route',
+      },
+      {
+        id: 'state/market/customer/error',
+        route: 'market',
+        profile: 'customer',
+        state: 'error',
+        expectedKind: 'render-route',
+      },
+      {
+        id: 'state/market/customer/normal',
+        route: 'market',
+        profile: 'customer',
+        state: 'normal',
+        expectedKind: 'render-route',
+        probe: { marketLifecycle: { perimeterPresent: true } },
+      },
+      {
+        id: 'state/market/member/normal',
+        route: 'market',
+        profile: 'member',
+        state: 'normal',
+        expectedKind: 'render-route',
+        probe: {
+          marketLifecycle: { perimeterPresent: true, expiredDistinct: true, tradedDistinct: true },
+        },
+      },
+    ]
+    expect(classifyMarketLifecycleScenario(scenarios[0])).toBe('loadingOrSlow')
+    expect(classifyMarketLifecycleScenario(scenarios[1])).toBe('errorOrOffline')
+    expect(classifyMarketLifecycleScenario(scenarios[2])).toBe('historyHiddenByProfile')
+    expect(classifyMarketLifecycleScenario(scenarios[3])).toBe('fullLifecycleVisible')
+    const summary = summarizeMarketLifecycle(scenarios)
+    expect(summary.historyHiddenIds).toEqual(['state/market/customer/normal'])
+    expect(summary.historyHiddenByProfile).toBe(1)
+    expect(summary.loadingOrSlow).toBe(1)
+    expect(summary.errorOrOffline).toBe(1)
+    expect(summary.fullLifecycleVisible).toBe(1)
   })
 })

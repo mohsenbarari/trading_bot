@@ -8,6 +8,12 @@ import {
   deriveSourceBoundOutcome,
   loadMatrix,
 } from './lib/stage8-full-acceptance-runtime.mjs'
+import {
+  MATRIX_CLOSED_STATUS,
+  MATRIX_PENDING_STATUS,
+  OWNER_APPROVAL_PHRASE,
+  evaluateMatrixAcceptanceTransition,
+} from './lib/stage8-full-acceptance-contract.mjs'
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 const matrixPath = path.join(repoRoot, 'docs/uiux-stage8-acceptance-rollout/ACCEPTANCE_MATRIX.json')
@@ -25,12 +31,99 @@ describe('Stage 8 acceptance matrix source binding', () => {
     'utf8',
   )
 
-  it('keeps Stage 8 open and non-authoritative', () => {
+  it('locks the pending official-run state machine', () => {
+    const result = evaluateMatrixAcceptanceTransition(matrix, { repoRoot })
+    expect(result).toEqual({ passed: true, failures: [], state: 'pending' })
+    expect(matrix.status).toBe(MATRIX_PENDING_STATUS)
     expect(matrix.acceptanceAuthority).toBe(false)
-    expect(matrix.cellAccounting.executedFullMatrixCellCount).toBe(0)
+    expect(matrix.cellAccounting.executedFullMatrixCellCount).toBe(270)
+    expect(matrix.cellAccounting.viewportStateInteractionEnvironmentExpansionPerformed).toBe(true)
+    expect(matrix.cellAccounting.plannedScenarioCount).toBe(960)
+    expect(matrix.cellAccounting.applicableExecutedCount).toBe(830)
+    expect(matrix.cellAccounting.applicablePassedCount).toBe(830)
+    expect(matrix.cellAccounting.notApplicableCount).toBe(130)
+    expect(matrix.cellAccounting.naTaxonomy).toEqual({
+      productNotApplicable: 118,
+      canonicalAlias: 12,
+      harnessDeferred: 0,
+    })
     expect(matrix.cellAccounting.partialSyntheticBrowserSliceCount).toBe(12)
     expect(matrix.cellAccounting.partialSyntheticBrowserScenarioCellCount).toBe(163)
     expect(matrix.cellAccounting.partialSyntheticBrowserCellsCountTowardFullMatrix).toBe(false)
+    expect(matrix.partialSyntheticBrowserSlices).toHaveLength(12)
+  })
+
+  it('fails 270 cells with a stale status or missing expansion', () => {
+    const staleStatus = structuredClone(matrix)
+    staleStatus.status = 'partial-browser-slice-executed-full-acceptance-pending'
+    expect(evaluateMatrixAcceptanceTransition(staleStatus, { repoRoot }).passed).toBe(false)
+    const noExpansion = structuredClone(matrix)
+    noExpansion.cellAccounting.viewportStateInteractionEnvironmentExpansionPerformed = false
+    expect(evaluateMatrixAcceptanceTransition(noExpansion, { repoRoot }).passed).toBe(false)
+  })
+
+  it('fails acceptanceAuthority=true without a valid closure and owner sign-off', () => {
+    const authorityOnly = structuredClone(matrix)
+    authorityOnly.acceptanceAuthority = true
+    expect(evaluateMatrixAcceptanceTransition(authorityOnly, { repoRoot }).passed).toBe(false)
+    const closedWithoutSignoff = structuredClone(matrix)
+    closedWithoutSignoff.status = MATRIX_CLOSED_STATUS
+    closedWithoutSignoff.acceptanceAuthority = true
+    expect(evaluateMatrixAcceptanceTransition(closedWithoutSignoff, { repoRoot }).passed).toBe(false)
+  })
+
+  it('fails passed-below-executed, harnessDeferred, partial drift, and broken refs', () => {
+    const fewerPassed = structuredClone(matrix)
+    fewerPassed.cellAccounting.applicablePassedCount = 829
+    expect(evaluateMatrixAcceptanceTransition(fewerPassed, { repoRoot }).failures).toEqual(
+      expect.arrayContaining([
+        'counter applicablePassedCount 829 != 830',
+        'applicablePassedCount below applicableExecutedCount',
+      ]),
+    )
+    const deferred = structuredClone(matrix)
+    deferred.cellAccounting.naTaxonomy.harnessDeferred = 1
+    expect(evaluateMatrixAcceptanceTransition(deferred, { repoRoot }).failures).toEqual(
+      expect.arrayContaining(['harnessDeferred 1']),
+    )
+    const partialDrift = structuredClone(matrix)
+    partialDrift.cellAccounting.partialSyntheticBrowserSliceCount = 13
+    expect(evaluateMatrixAcceptanceTransition(partialDrift, { repoRoot }).passed).toBe(false)
+    const brokenRef = structuredClone(matrix)
+    brokenRef.cellAccounting.officialFullAcceptance.receiptId = ''
+    brokenRef.fullAcceptanceSourceSnapshot.reportSha256 = 'not-a-hash'
+    expect(evaluateMatrixAcceptanceTransition(brokenRef, { repoRoot }).failures).toEqual(
+      expect.arrayContaining([
+        'receipt/report reference incomplete',
+        'report hash missing or invalid',
+      ]),
+    )
+  })
+
+  it('accepts only pending or closed consistent states', () => {
+    const receiptId = matrix.cellAccounting.officialFullAcceptance.receiptId
+    const closure = {
+      status: MATRIX_CLOSED_STATUS,
+      technicalReceiptSha256: matrix.evidenceCatalog[receiptId].sha256,
+      ownerSignoff: {
+        status: 'approved',
+        approvalPhrase: OWNER_APPROVAL_PHRASE,
+      },
+    }
+    const closed = structuredClone(matrix)
+    closed.status = MATRIX_CLOSED_STATUS
+    closed.acceptanceAuthority = true
+    expect(evaluateMatrixAcceptanceTransition(closed, { repoRoot, closure })).toEqual({
+      passed: true,
+      failures: [],
+      state: 'closed',
+    })
+    const midAuthority = structuredClone(matrix)
+    midAuthority.status = MATRIX_CLOSED_STATUS
+    midAuthority.acceptanceAuthority = false
+    expect(evaluateMatrixAcceptanceTransition(midAuthority, { repoRoot, closure }).passed).toBe(false)
+    const pendingWithClosure = structuredClone(matrix)
+    expect(evaluateMatrixAcceptanceTransition(pendingWithClosure, { repoRoot, closure }).passed).toBe(false)
   })
 
   it('binds runtime hashes to the current source files', () => {

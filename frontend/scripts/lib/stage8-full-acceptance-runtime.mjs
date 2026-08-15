@@ -22,6 +22,7 @@ import {
 export const STAGE = '8'
 export const RUN_AUTHORIZATION = 'STAGE8 FULL ACCEPTANCE — RUN'
 export const FIXED_TIME = '2026-08-14T12:00:00.000Z'
+export const FIXED_JALALI_TIME = '۱۴۰۵/۰۵/۲۳ ۱۲:۳۰'
 export const INVITE_CODE = 'Stg8Inv1'
 export const CUSTOMER_RELATION_ID = 9001
 export const ACCOUNTANT_RELATION_ID = 9002
@@ -351,7 +352,7 @@ function fixtureOffer(index = 0, overrides = {}) {
     original_lot_sizes: null,
     notes: index ? `داده مصنوعی پذیرش ${index}` : 'داده مصنوعی پذیرش',
     status: 'active',
-    created_at: FIXED_TIME,
+    created_at: FIXED_JALALI_TIME,
     lifecycle_phase: 'normal',
     normal_deadline_ts: nowSec + 1800,
     expires_at_ts: nowSec + 1800,
@@ -1520,6 +1521,9 @@ export async function collectUiProbe(page) {
       (ariaOf(buyCard) && /لفظ فروش/.test(ariaOf(buyCard))) ||
         (ariaOf(sellCard) && /لفظ خرید/.test(ariaOf(sellCard))),
     )
+    const offerTimes = [...document.querySelectorAll('.offer-time')]
+      .filter(visible)
+      .map((element) => (element.textContent || '').trim())
     const marketLifecycle = {
       perimeterPresent: Boolean(document.querySelector('[data-test="offer-deadline-perimeter"]')),
       legacyDeadlineBarCount: document.querySelectorAll('.offer-deadline-bar, .offer-deadline-fill').length,
@@ -1536,6 +1540,10 @@ export async function collectUiProbe(page) {
       tradedReadOnly: Boolean(tradedCard && !tradedCard.querySelector('.offer-footer')),
       tradedDistinct: Boolean(tradedCard?.classList.contains('is-history') && tradedCard.classList.contains('is-traded')),
       sideActionInverted,
+      displayCreatedAtIso: offerTimes.some((text) => /\d{4}-\d{2}-\d{2}T/u.test(text)),
+      readableCreatedAtCount: offerTimes.filter((text) =>
+        /[۰-۹0-9]{4}\/[۰-۹0-9]{2}\/[۰-۹0-9]{2}/u.test(text),
+      ).length,
     }
     return {
       visibleMainCount: mains.length,
@@ -1685,8 +1693,16 @@ export function redactScenario(scenario) {
   const clone = JSON.parse(JSON.stringify(scenario))
   delete clone.rawConsole
   delete clone.screenshotPath
+  delete clone.errorProbe
   if (clone.unknownApiPaths) {
     clone.unknownApiPaths = clone.unknownApiPaths.map((item) => String(item).split('?')[0])
+  }
+  if (clone.preSettleEvidence) {
+    delete clone.preSettleEvidence.rawDom
+    delete clone.preSettleEvidence.url
+    delete clone.preSettleEvidence.query
+    delete clone.preSettleEvidence.payload
+    delete clone.preSettleEvidence.token
   }
   return clone
 }
