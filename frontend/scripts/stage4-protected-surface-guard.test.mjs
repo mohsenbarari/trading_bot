@@ -25,6 +25,10 @@ import {
   MARKET_A_PLUS_C_LINEAR_METER_ALLOWED_PATHS,
   MARKET_A_PLUS_C_LINEAR_METER_EVIDENCE,
   MARKET_A_PLUS_C_LINEAR_METER_KIND,
+  MARKET_COMPACT_BUTTON_CONFIRM_ALLOWED_FILE_SHA256,
+  MARKET_COMPACT_BUTTON_CONFIRM_ALLOWED_PATHS,
+  MARKET_COMPACT_BUTTON_CONFIRM_EVIDENCE,
+  MARKET_COMPACT_BUTTON_CONFIRM_KIND,
   MARKET_RUNTIME_BASELINE,
   MARKET_RUNTIME_CONTRACT,
   MESSENGER_OMITTED_DIRECT_RUNTIME_PATHS,
@@ -54,6 +58,8 @@ import {
   assertMarketPerimeterDeadlineSemantics,
   assertMarketLinearDeadlineDisposition,
   assertMarketLinearDeadlineSemantics,
+  assertMarketCompactButtonConfirmDisposition,
+  assertMarketCompactButtonConfirmSemantics,
   STAGE4_BASE_COMMIT,
   STAGE4_BASE_TREE,
   STAGE4_ROUTE_CONTRACT_PATH,
@@ -276,12 +282,12 @@ describe('Stage 4 protected surface baseline', () => {
     )
   })
 
-  it('keeps every prior Market disposition immutable while admitting the linear deadline successor', () => {
+  it('keeps every prior Market disposition immutable while admitting compact button-local confirmation', () => {
     expect(ownedPaths.market).toContain('frontend/src/utils/settlementType.ts')
     const entries = readFileEntries(repoRoot, ownedPaths.market)
     expect(resolveMarketRuntimeDisposition(entries)).toMatchObject({
-      kind: MARKET_A_PLUS_C_LINEAR_METER_KIND,
-      evidence: MARKET_A_PLUS_C_LINEAR_METER_EVIDENCE,
+      kind: MARKET_COMPACT_BUTTON_CONFIRM_KIND,
+      evidence: MARKET_COMPACT_BUTTON_CONFIRM_EVIDENCE,
     })
     expect(MARKET_RUNTIME_BASELINE).toEqual({
       count: 19,
@@ -322,9 +328,16 @@ describe('Stage 4 protected surface baseline', () => {
     )
     expect(MARKET_A_PLUS_C_LINEAR_METER_KIND).toBe('market-a-plus-c-linear-deadline-terminal-clarity')
     expect(MARKET_A_PLUS_C_LINEAR_METER_ALLOWED_PATHS).toHaveLength(5)
-    for (const repoPath of MARKET_A_PLUS_C_LINEAR_METER_ALLOWED_PATHS) {
+    expect(() => assertMarketLinearDeadlineDisposition(entries)).toThrow(
+      /Market linear-meter allowed file drift/,
+    )
+    expect(MARKET_COMPACT_BUTTON_CONFIRM_KIND).toBe('market-compact-button-local-confirmation')
+    expect(MARKET_COMPACT_BUTTON_CONFIRM_ALLOWED_PATHS).toEqual([
+      'frontend/src/components/OffersList.vue',
+    ])
+    for (const repoPath of MARKET_COMPACT_BUTTON_CONFIRM_ALLOWED_PATHS) {
       const entry = entries.find(({ path: candidate }) => candidate === repoPath)
-      expect(fileSha256(entry.content)).toBe(MARKET_A_PLUS_C_LINEAR_METER_ALLOWED_FILE_SHA256[repoPath])
+      expect(fileSha256(entry.content)).toBe(MARKET_COMPACT_BUTTON_CONFIRM_ALLOWED_FILE_SHA256[repoPath])
     }
     expect(Object.isFrozen(MARKET_RUNTIME_BASELINE)).toBe(true)
     expect(Object.isFrozen(MAIN_UIUX_INTEGRATION_MARKET_ALLOWED_PATHS)).toBe(true)
@@ -342,18 +355,21 @@ describe('Stage 4 protected surface baseline', () => {
     expect(Object.isFrozen(MARKET_A_PLUS_C_LINEAR_METER_ALLOWED_PATHS)).toBe(true)
     expect(Object.isFrozen(MARKET_A_PLUS_C_LINEAR_METER_ALLOWED_FILE_SHA256)).toBe(true)
     expect(Object.isFrozen(MARKET_A_PLUS_C_LINEAR_METER_EVIDENCE)).toBe(true)
+    expect(Object.isFrozen(MARKET_COMPACT_BUTTON_CONFIRM_ALLOWED_PATHS)).toBe(true)
+    expect(Object.isFrozen(MARKET_COMPACT_BUTTON_CONFIRM_ALLOWED_FILE_SHA256)).toBe(true)
+    expect(Object.isFrozen(MARKET_COMPACT_BUTTON_CONFIRM_EVIDENCE)).toBe(true)
   })
 
-  it('fails closed for any further Market drift inside or outside the linear-meter allowlist', () => {
+  it('fails closed for any further Market drift inside or outside the compact-confirm allowlist', () => {
     const entries = readFileEntries(repoRoot, ownedPaths.market)
-    const allowedPath = MARKET_A_PLUS_C_LINEAR_METER_ALLOWED_PATHS[0]
+    const allowedPath = MARKET_COMPACT_BUTTON_CONFIRM_ALLOWED_PATHS[0]
     const changedAllowed = entries.map((entry) =>
       entry.path === allowedPath
         ? { ...entry, content: Buffer.concat([entry.content, Buffer.from('\n/* drift */')]) }
         : entry,
     )
     const unlistedPath = entries.find(
-      ({ path: repoPath }) => !MARKET_A_PLUS_C_LINEAR_METER_ALLOWED_PATHS.includes(repoPath),
+      ({ path: repoPath }) => !MARKET_COMPACT_BUTTON_CONFIRM_ALLOWED_PATHS.includes(repoPath),
     ).path
     const changedUnlisted = entries.map((entry) =>
       entry.path === unlistedPath
@@ -361,18 +377,41 @@ describe('Stage 4 protected surface baseline', () => {
         : entry,
     )
 
-    expect(() => assertMarketLinearDeadlineDisposition(changedAllowed)).toThrow(
-      /Market linear-meter allowed file drift/,
+    expect(() => assertMarketCompactButtonConfirmDisposition(changedAllowed)).toThrow(
+      /Market compact-confirm allowed file drift/,
     )
     expect(() => resolveMarketRuntimeDisposition(changedAllowed)).toThrow(
-      /Market A\+C linear-meter disposition rejected/,
+      /Market compact-confirm disposition rejected/,
     )
-    expect(() => assertMarketLinearDeadlineDisposition(changedUnlisted)).toThrow(
+    expect(() => assertMarketCompactButtonConfirmDisposition(changedUnlisted)).toThrow(
       /contentBytes drift/,
     )
     expect(() => resolveMarketRuntimeDisposition(changedUnlisted)).toThrow(
-      /Market A\+C linear-meter disposition rejected/,
+      /Market compact-confirm disposition rejected/,
     )
+  })
+
+  it('rejects an expanded first-tap panel, visible countdown, or undersized Market trade target', () => {
+    const entries = readFileEntries(repoRoot, ownedPaths.market)
+    const mutate = (replacer) => entries.map((entry) => {
+      if (entry.path !== 'frontend/src/components/OffersList.vue') return entry
+      const source = entry.content.toString('utf8')
+      const next = replacer(source)
+      if (next === source) throw new Error('test mutation did not change OffersList.vue')
+      return { ...entry, content: Buffer.from(next, 'utf8') }
+    })
+
+    expect(() => assertMarketCompactButtonConfirmSemantics(
+      mutate((source) => `${source}\n<div data-test="offer-decision-panel">مرور و تأیید معامله</div>\n`),
+    )).toThrow(/restored the expanded first-tap panel/)
+
+    expect(() => assertMarketCompactButtonConfirmSemantics(
+      mutate((source) => source.replace('min-height: 44px;', 'min-height: 36px;')),
+    )).toThrow(/shrank the trade touch target below 44px/)
+
+    expect(() => assertMarketCompactButtonConfirmSemantics(
+      mutate((source) => `${source}\n<p data-test="offer-deadline-label">30:00</p>\n`),
+    )).toThrow(/restored the redundant visible countdown/)
   })
 
   it('rejects a nonlinear meter, restored trade rail, or inaccessible overtime sticker', () => {

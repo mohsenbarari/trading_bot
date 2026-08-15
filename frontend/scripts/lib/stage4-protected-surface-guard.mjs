@@ -248,6 +248,29 @@ export const MARKET_A_PLUS_C_LINEAR_METER_EVIDENCE = Object.freeze({
   sha256: '76903997d27e1a260100fef4d88bc3bff3fb99e96e0eef49f3bb1b5b927261a5',
 })
 
+// Owner-directed post-Stage-8 refinement. The web interaction remains
+// two-tap, but the first tap is confined to the chosen button and the card
+// becomes denser without shrinking any trade action below 44px. Every prior
+// Market disposition remains immutable.
+export const MARKET_COMPACT_BUTTON_CONFIRM_KIND =
+  'market-compact-button-local-confirmation'
+
+export const MARKET_COMPACT_BUTTON_CONFIRM_ALLOWED_PATHS = Object.freeze([
+  'frontend/src/components/OffersList.vue',
+])
+
+export const MARKET_COMPACT_BUTTON_CONFIRM_ALLOWED_FILE_SHA256 = Object.freeze({
+  'frontend/src/components/OffersList.vue':
+    '6785f2c20ab80d9b79a05fcc4519aa4d09b42941f27d11246454b14986d8572a',
+})
+
+export const MARKET_COMPACT_BUTTON_CONFIRM_EVIDENCE = Object.freeze({
+  count: 19,
+  contentBytes: 165788,
+  pathSetSha256: '37aa0b51e20f4ae86f7daf6c3c231d93b3d1f288ade1471490a1f843a57c9589',
+  sha256: 'fc3684c998ed042b5c5c9cb587dcf62adde2d2d3ba69d727680b9ad350777e24',
+})
+
 export const MESSENGER_RUNTIME_BASELINE = Object.freeze({
   count: 85,
   contentBytes: 1312405,
@@ -817,6 +840,60 @@ export function assertMarketLinearDeadlineDisposition(entries) {
   )
 }
 
+export function assertMarketCompactButtonConfirmSemantics(entries) {
+  assertMarketLinearDeadlineSemantics(entries)
+  const offers = sourceByPath(entries, 'frontend/src/components/OffersList.vue')
+  if (offers.includes('data-test="offer-decision-panel"') || offers.includes('مرور و تأیید معامله')) {
+    throw new Error('Market compact-confirm disposition restored the expanded first-tap panel')
+  }
+  if (offers.includes(':decision-focus=') || offers.includes("'is-decision-focus'")) {
+    throw new Error('Market compact-confirm disposition restored card-wide decision focus')
+  }
+  if (!offers.includes('تایید {{ amount }} عدد؟') || !offers.includes(':pending="isPending(offer.id, amount)"')) {
+    throw new Error('Market compact-confirm disposition lost button-local two-tap feedback')
+  }
+  const tradeButtonRule = offers.match(/\.trade-btn\s*\{([^}]*)\}/u)?.[1] || ''
+  if (!/min-width:\s*44px/u.test(tradeButtonRule) || !/min-height:\s*44px/u.test(tradeButtonRule)) {
+    throw new Error('Market compact-confirm disposition shrank the trade touch target below 44px')
+  }
+  if (!offers.includes('padding: 8px 9px 9px') || !offers.includes('gap: 7px')) {
+    throw new Error('Market compact-confirm disposition lost the reviewed compact card rhythm')
+  }
+  if (offers.includes('data-test="offer-deadline-label"')) {
+    throw new Error('Market compact-confirm disposition restored the redundant visible countdown')
+  }
+  if (!offers.includes(':aria-label="deadlineMeterAriaLabel(offer)"')) {
+    throw new Error('Market compact-confirm disposition lost the accessible deadline name')
+  }
+}
+
+function assertMarketCompactButtonConfirmAllowedFiles(entries) {
+  const entriesByPath = new Map(entries.map((entry) => [entry.path, entry]))
+  for (const repoPath of MARKET_COMPACT_BUTTON_CONFIRM_ALLOWED_PATHS) {
+    const entry = entriesByPath.get(repoPath)
+    if (!entry) {
+      throw new Error(`Market compact-confirm allowed file is missing: ${repoPath}`)
+    }
+    const actualSha256 = fileSha256(entry.content)
+    const expectedSha256 = MARKET_COMPACT_BUTTON_CONFIRM_ALLOWED_FILE_SHA256[repoPath]
+    if (actualSha256 !== expectedSha256) {
+      throw new Error(
+        `Market compact-confirm allowed file drift: ${repoPath} ${expectedSha256} -> ${actualSha256}`,
+      )
+    }
+  }
+}
+
+export function assertMarketCompactButtonConfirmDisposition(entries) {
+  assertMarketCompactButtonConfirmAllowedFiles(entries)
+  assertMarketCompactButtonConfirmSemantics(entries)
+  return assertProtectedFileSetEvidence(
+    'Market compact button-local confirmation disposition',
+    protectedFileSetEvidence(entries, MARKET_RUNTIME_CONTRACT),
+    MARKET_COMPACT_BUTTON_CONFIRM_EVIDENCE,
+  )
+}
+
 export function resolveMarketRuntimeDisposition(entries) {
   const actual = protectedFileSetEvidence(entries, MARKET_RUNTIME_CONTRACT)
   try {
@@ -859,21 +936,30 @@ export function resolveMarketRuntimeDisposition(entries) {
                 evidence: assertMarketLinearDeadlineDisposition(entries),
               }
             } catch (linearMeterError) {
-              const baselineMessage =
-                baselineError instanceof Error ? baselineError.message : String(baselineError)
-              const integrationMessage =
-                integrationError instanceof Error ? integrationError.message : String(integrationError)
-              const aPlusCMessage =
-                aPlusCError instanceof Error ? aPlusCError.message : String(aPlusCError)
-              const lifecycleMessage =
-                lifecycleError instanceof Error ? lifecycleError.message : String(lifecycleError)
-              const perimeterMessage =
-                perimeterError instanceof Error ? perimeterError.message : String(perimeterError)
-              const linearMeterMessage =
-                linearMeterError instanceof Error ? linearMeterError.message : String(linearMeterError)
-              throw new Error(
-                `Market runtime rejected after Stage 4 baseline drift (${baselineMessage}); main/UIUX integration disposition rejected (${integrationMessage}); Market A+C disposition rejected (${aPlusCMessage}); Market A+C lifecycle-clarity disposition rejected (${lifecycleMessage}); Market A+C perimeter-deadline disposition rejected (${perimeterMessage}); Market A+C linear-meter disposition rejected (${linearMeterMessage})`,
-              )
+              try {
+                return {
+                  kind: MARKET_COMPACT_BUTTON_CONFIRM_KIND,
+                  evidence: assertMarketCompactButtonConfirmDisposition(entries),
+                }
+              } catch (compactConfirmError) {
+                const baselineMessage =
+                  baselineError instanceof Error ? baselineError.message : String(baselineError)
+                const integrationMessage =
+                  integrationError instanceof Error ? integrationError.message : String(integrationError)
+                const aPlusCMessage =
+                  aPlusCError instanceof Error ? aPlusCError.message : String(aPlusCError)
+                const lifecycleMessage =
+                  lifecycleError instanceof Error ? lifecycleError.message : String(lifecycleError)
+                const perimeterMessage =
+                  perimeterError instanceof Error ? perimeterError.message : String(perimeterError)
+                const linearMeterMessage =
+                  linearMeterError instanceof Error ? linearMeterError.message : String(linearMeterError)
+                const compactConfirmMessage =
+                  compactConfirmError instanceof Error ? compactConfirmError.message : String(compactConfirmError)
+                throw new Error(
+                  `Market runtime rejected after Stage 4 baseline drift (${baselineMessage}); main/UIUX integration disposition rejected (${integrationMessage}); Market A+C disposition rejected (${aPlusCMessage}); Market A+C lifecycle-clarity disposition rejected (${lifecycleMessage}); Market A+C perimeter-deadline disposition rejected (${perimeterMessage}); Market A+C linear-meter disposition rejected (${linearMeterMessage}); Market compact-confirm disposition rejected (${compactConfirmMessage})`,
+                )
+              }
             }
           }
         }

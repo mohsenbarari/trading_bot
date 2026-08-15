@@ -1358,7 +1358,7 @@ describe('OffersList.vue', () => {
     expect(meter.attributes('aria-valuenow')).toBe('20')
     expect(meter.attributes('aria-label')).toContain('وقت اضافه سپری‌شده · 20 درصد')
     expect(wrapper.find('.offer-trade-rail').exists()).toBe(false)
-    expect(wrapper.get('[data-test="offer-deadline-label"]').text()).toMatch(/باقی‌مانده/)
+    expect(wrapper.find('[data-test="offer-deadline-label"]').exists()).toBe(false)
     expect(wrapper.find('.offer-meta-end').exists()).toBe(true)
     expect(wrapper.find('.trade-btn').exists()).toBe(true)
 
@@ -1433,7 +1433,7 @@ describe('OffersList.vue', () => {
     wrapper.unmount()
   })
 
-  it('shows decision focus and recap after the first lot tap without sending a trade', async () => {
+  it('keeps the first lot tap compact and local to the selected button without sending a trade', async () => {
     const wrapper = await mountOffersList({
       offers: [
         buildTradeOffer({ id: 201, commodity_name: 'سکه امام', remaining_quantity: 10, quantity: 10 }),
@@ -1455,14 +1455,15 @@ describe('OffersList.vue', () => {
     expect(firstCardButtons[0]!.attributes('aria-label')).toContain('لفظ فروش')
     await firstCardButtons[0]!.trigger('click')
 
-    expect(wrapper.findAll('[data-test="offer-card"]')[0]!.attributes('data-decision-focus')).toBe('true')
+    const refreshedFirstCardButtons = wrapper.findAll('[data-test="offer-card"]')[0]!.findAll('.trade-btn')
+    expect(refreshedFirstCardButtons[0]!.attributes('data-state')).toBe('pending')
+    expect(refreshedFirstCardButtons[0]!.text()).toContain('تایید 10 عدد؟')
+    expect(refreshedFirstCardButtons[0]!.attributes('aria-label')).toContain('تأیید نهایی اقدام شما: خرید 10 عدد')
+    expect(wrapper.findAll('[data-test="offer-card"]')[0]!.attributes('data-decision-focus')).toBe('false')
     expect(wrapper.findAll('[data-test="offer-card"]')[1]!.attributes('data-decision-focus')).toBe('false')
-    expect(wrapper.get('[data-test="offer-decision-panel"]').text()).toContain('مرور و تأیید معامله')
-    expect(wrapper.get('[data-test="offer-decision-side"]').text()).toBe('نوع لفظ: فروش')
-    expect(wrapper.get('[data-test="offer-decision-action"]').text()).toBe('اقدام شما: خرید 10 عدد')
-    expect(wrapper.get('[data-test="offer-decision-panel"]').text()).toContain('مقدار انتخاب‌شده: 10 عدد')
-    expect(wrapper.get('[data-test="offer-decision-panel"]').text()).toContain('قیمت هر عدد: 52,000 تومان')
-    expect(wrapper.get('[data-test="offer-decision-panel"]').text()).toContain('ثبت خرید 10 عدد در برابر این لفظ فروش')
+    expect(wrapper.find('[data-test="offer-decision-panel"]').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('مرور و تأیید معامله')
+    expect(wrapper.text()).not.toContain('برای تأیید، همان مقدار را دوباره انتخاب کنید')
     expect(wrapper.findAll('[data-test="offer-card"]')).toHaveLength(2)
     expect(wrapper.findAll('[data-test="offer-card"]')[1]!.find('.trade-btn').exists()).toBe(true)
     expect(apiFetchMock).not.toHaveBeenCalled()
@@ -1470,14 +1471,21 @@ describe('OffersList.vue', () => {
     wrapper.unmount()
   })
 
-  it('clears pending confirmation with Escape or cancel without mutating the trade', async () => {
+  it('clears pending confirmation with Escape and moves it between lot buttons without mutating the trade', async () => {
     const wrapper = await mountOffersList({
-      offers: [buildTradeOffer({ id: 203, commodity_name: 'نیم‌سکه' })],
+      offers: [buildTradeOffer({
+        id: 203,
+        commodity_name: 'نیم‌سکه',
+        quantity: 25,
+        remaining_quantity: 25,
+        is_wholesale: false,
+        lot_sizes: [10, 15, 25],
+      })],
     })
 
-    await wrapper.get('.trade-btn').trigger('click')
+    await wrapper.findAll('.trade-btn')[0]!.trigger('click')
     expect(wrapper.text()).toContain('تایید 10 عدد؟')
-    expect(wrapper.find('[data-test="offer-decision-panel"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="offer-decision-panel"]').exists()).toBe(false)
 
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
     await flushPromises()
@@ -1486,9 +1494,11 @@ describe('OffersList.vue', () => {
     expect(wrapper.get('[data-test="offer-card"]').attributes('data-decision-focus')).toBe('false')
     expect(apiFetchMock).not.toHaveBeenCalled()
 
-    await wrapper.get('.trade-btn').trigger('click')
-    expect(wrapper.find('[data-test="offer-decision-panel"]').exists()).toBe(true)
-    await wrapper.get('[data-test="offer-decision-cancel"]').trigger('click')
+    await wrapper.findAll('.trade-btn')[0]!.trigger('click')
+    await wrapper.findAll('.trade-btn')[1]!.trigger('click')
+    expect(wrapper.findAll('.trade-btn')[0]!.attributes('data-state')).toBe('idle')
+    expect(wrapper.findAll('.trade-btn')[1]!.attributes('data-state')).toBe('pending')
+    expect(wrapper.findAll('.trade-btn')[1]!.text()).toContain('تایید 15 عدد؟')
     expect(wrapper.find('[data-test="offer-decision-panel"]').exists()).toBe(false)
     expect(apiFetchMock).not.toHaveBeenCalled()
 
@@ -1506,10 +1516,10 @@ describe('OffersList.vue', () => {
     expect(wrapper.get('.role-badge').text()).toContain('خرید')
 
     await lot.trigger('click')
-    expect(wrapper.get('[data-test="offer-decision-side"]').text()).toBe('نوع لفظ: خرید')
-    expect(wrapper.get('[data-test="offer-decision-action"]').text()).toBe('اقدام شما: فروش 8 عدد')
-    expect(wrapper.get('[data-test="offer-decision-panel"]').text()).toContain('ثبت فروش 8 عدد در برابر این لفظ خرید')
     expect(wrapper.get('.trade-btn').text()).toContain('تایید 8 عدد؟')
+    expect(wrapper.get('.trade-btn').attributes('aria-label')).toContain('تأیید نهایی اقدام شما: فروش 8 عدد')
+    expect(wrapper.get('.trade-btn').attributes('aria-label')).toContain('لفظ خرید')
+    expect(wrapper.find('[data-test="offer-decision-panel"]').exists()).toBe(false)
     expect(apiFetchMock).not.toHaveBeenCalled()
 
     wrapper.unmount()
@@ -1542,7 +1552,8 @@ describe('OffersList.vue', () => {
     const halfLifeStyle = wrapper.get('.offer-card-wrap').attributes('style') || ''
     const halfLifeColor = halfLifeStyle.match(/--t-color:\s*([^;]+)/)?.[1]
     expect(halfLifeColor).toBeTruthy()
-    expect(wrapper.get('[data-test="offer-deadline-label"]').text()).toMatch(/مهلت اصلی/)
+    expect(wrapper.get('[data-test="offer-deadline-meter"]').attributes('aria-label')).toMatch(/مهلت اصلی/)
+    expect(wrapper.find('[data-test="offer-deadline-label"]').exists()).toBe(false)
 
     await wrapper.setProps({
       offers: [
@@ -1563,7 +1574,8 @@ describe('OffersList.vue', () => {
     const criticalStyle = wrapper.get('.offer-card-wrap').attributes('style') || ''
     expect(criticalStyle).toMatch(/--t-ratio:\s*0\.1(?:;|\s|$)/)
     expect(criticalStyle.match(/--t-color:\s*([^;]+)/)?.[1]).not.toBe(halfLifeColor)
-    expect(wrapper.get('[data-test="offer-deadline-label"]').text()).toMatch(/مهلت اصلی/)
+    expect(wrapper.get('[data-test="offer-deadline-meter"]').attributes('aria-label')).toMatch(/مهلت اصلی/)
+    expect(wrapper.find('[data-test="offer-deadline-label"]').exists()).toBe(false)
 
     wrapper.unmount()
     vi.useRealTimers()
@@ -1609,7 +1621,7 @@ describe('OffersList.vue', () => {
     expect(wrapper.get('[data-test="offer-deadline-meter"]').attributes('data-phase')).toBe('overtime')
     expect(wrapper.get('[data-test="offer-deadline-meter"]').attributes('aria-valuenow')).toBe('0')
     expect(wrapper.get('[data-test="offer-deadline-meter"]').attributes('aria-label')).toContain('وقت اضافه سپری‌شده · 0 درصد')
-    expect(wrapper.get('[data-test="offer-deadline-label"]').text()).toMatch(/باقی‌مانده/)
+    expect(wrapper.find('[data-test="offer-deadline-label"]').exists()).toBe(false)
     expect(wrapper.get('.offer-card-wrap').attributes('style') || '').toMatch(/--t-pct:\s*0(?:\.0+)?(?:;|\s|$)/)
     expect(wrapper.get('.offer-card-wrap').attributes('style') || '').toMatch(/--t-ratio:\s*0(?:\.0+)?(?:;|\s|$)/)
     expect(wrapper.find('.trade-btn').exists()).toBe(true)

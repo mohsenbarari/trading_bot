@@ -92,6 +92,7 @@ async function runScenario({
   const failures = []
   let probe = null
   let screenshot = null
+  let firstTapCardHeightBefore = null
   try {
     await page.goto(`${baseUrl}/market`, { waitUntil: 'domcontentloaded', timeout: 30_000 })
     if (state === 'loading') {
@@ -104,9 +105,12 @@ async function runScenario({
       }, cssZoom)
       await page.waitForTimeout(80)
     }
-    if (interaction === 'first-tap' || interaction === 'decision') {
+    if (interaction === 'first-tap') {
       const button = page.locator('[data-test="trade-action-button"]').first()
       if ((await button.count()) > 0) {
+        firstTapCardHeightBefore = await page.locator('[data-test="offer-card"]').first().evaluate((element) => (
+          Number(element.getBoundingClientRect().height.toFixed(2))
+        ))
         await button.click()
         await page.waitForTimeout(80)
       }
@@ -128,12 +132,11 @@ async function runScenario({
         await page.waitForTimeout(80)
       }
     }
-    if (interaction === 'cancel-pending') {
-      const button = page.locator('[data-test="trade-action-button"]').first()
-      if ((await button.count()) > 0) {
-        await button.click()
-        const cancel = page.locator('[data-test="offer-decision-cancel"]')
-        if ((await cancel.count()) > 0) await cancel.click()
+    if (interaction === 'switch-pending') {
+      const buttons = page.locator('[data-test="trade-action-button"]')
+      if ((await buttons.count()) > 1) {
+        await buttons.nth(0).click()
+        await buttons.nth(1).click()
         await page.waitForTimeout(80)
       }
     }
@@ -180,6 +183,7 @@ async function runScenario({
       }
     }
     probe = await collectMarketProbe(page)
+    probe.firstTapCardHeightBefore = firstTapCardHeightBefore
     if (probe.overtimeInMarket) failures.push('overtime-preference-rendered-in-market')
     if (probe.persianMarker) failures.push('stage8b-marker-on-market')
     if (probe.docOverflow) failures.push('document-overflow')
@@ -198,8 +202,18 @@ async function runScenario({
     if (interaction === 'first-tap' && probe.pendingCount < 1) {
       failures.push('pending-confirm-missing')
     }
-    if ((interaction === 'escape-pending' || interaction === 'cancel-pending') && probe.pendingCount > 0) {
+    if (
+      interaction === 'first-tap'
+      && Number.isFinite(firstTapCardHeightBefore)
+      && Math.abs((probe.geometry?.firstCard?.height ?? Number.NaN) - firstTapCardHeightBefore) > 1
+    ) {
+      failures.push(`first-tap-expanded-card:${firstTapCardHeightBefore}->${probe.geometry?.firstCard?.height}`)
+    }
+    if (interaction === 'escape-pending' && probe.pendingCount > 0) {
       failures.push('pending-did-not-clear')
+    }
+    if (interaction === 'switch-pending' && probe.pendingCount !== 1) {
+      failures.push(`pending-switch-count:${probe.pendingCount}`)
     }
     if (interaction === 'second-tap') {
       if (serverState.tradeRequests - snapshotBefore.tradeRequests !== 1) {
@@ -219,8 +233,10 @@ async function runScenario({
       if (state === 'normal' && !probe.marketTitleVisible) {
         failures.push('market-title-missing')
       }
-      if ((interaction === 'first-tap' || interaction === 'decision') && !probe.decisionPanelVisible) {
-        failures.push('decision-panel-missing')
+      if (probe.expandedDecisionPanelCount > 0) failures.push('expanded-decision-panel-returned')
+      if ((probe.deadline?.visibleCountdownCount ?? 0) > 0) failures.push('visible-deadline-countdown-returned')
+      if (interaction === 'first-tap' && probe.pendingButtonText !== 'تایید 1 عدد؟') {
+        failures.push(`button-local-confirm-copy-mismatch:${probe.pendingButtonText}`)
       }
       if (interaction === 'preview' && !probe.previewRecapVisible) {
         failures.push('preview-recap-missing')
@@ -228,20 +244,17 @@ async function runScenario({
       if (interaction === 'preview' && probe.previewText && !probe.previewText.includes('نوع لفظ شما')) {
         failures.push('preview-direction-inverted')
       }
-      if ((interaction === 'first-tap' || interaction === 'decision') && probe.decisionText) {
+      if (interaction === 'first-tap' && probe.pendingButtonAriaLabel) {
         const firstOfferIsBuy = state === 'normal' || state === 'normal-buy'
         if (firstOfferIsBuy && state !== 'normal-sell') {
-          if (!probe.decisionText.includes('نوع لفظ: خرید') || !probe.decisionText.includes('اقدام شما: فروش')) {
+          if (!probe.pendingButtonAriaLabel.includes('لفظ خرید') || !probe.pendingButtonAriaLabel.includes('اقدام شما: فروش')) {
             failures.push('offer-side-user-action-mismatch')
           }
         }
         if (state === 'normal-sell') {
-          if (!probe.decisionText.includes('نوع لفظ: فروش') || !probe.decisionText.includes('اقدام شما: خرید')) {
+          if (!probe.pendingButtonAriaLabel.includes('لفظ فروش') || !probe.pendingButtonAriaLabel.includes('اقدام شما: خرید')) {
             failures.push('offer-side-user-action-mismatch')
           }
-        }
-        if (probe.decisionText.includes('مقدار معامله را انتخاب کنید')) {
-          failures.push('stale-decision-prompt')
         }
       }
       if (
@@ -251,6 +264,16 @@ async function runScenario({
         && probe.smallTradeTargetCount > 0
       ) {
         failures.push('trade-target-below-44')
+      }
+      if (
+        viewport.id === '390x844'
+        && ['normal', 'dense'].includes(state)
+        && interaction === 'none'
+        && !cssZoom
+        && deviceScaleFactor === 1
+        && (probe.geometry?.fullyVisibleOfferCount ?? 0) < 2
+      ) {
+        failures.push(`market-shows-fewer-than-two-complete-offers:${state}:${probe.geometry?.fullyVisibleOfferCount}`)
       }
       if (viewport.id === '1440x900' && ['normal', 'normal-buy', 'normal-sell', 'overtime-sell'].includes(state)) {
         const { title, header, content, composer, firstCard } = probe.geometry || {}
@@ -275,7 +298,7 @@ async function runScenario({
       if (['overtime-start', 'overtime-buy', 'overtime-sell', 'critical-overtime'].includes(state)) {
         if (!probe.overtimeStickerVisible) failures.push('overtime-sticker-missing')
         if (probe.deadline?.phase !== 'overtime') failures.push(`overtime-phase-mismatch:${probe.deadline?.phase}`)
-        if (!String(probe.deadline?.label || '').includes('باقی‌مانده')) failures.push('overtime-countdown-label-missing')
+        if (!String(probe.deadline?.ariaLabel || '').includes('وقت اضافه سپری‌شده')) failures.push('overtime-progress-accessible-name-missing')
         if (state === 'overtime-start' && !(probe.deadline?.pct >= 0 && probe.deadline?.pct <= 2)) {
           failures.push(`overtime-progress-did-not-start-at-zero:${probe.deadline?.pct}`)
         }
@@ -293,8 +316,8 @@ async function runScenario({
         if (probe.deadline?.phase !== 'critical' && probe.deadline?.critical !== 'true') {
           failures.push('critical-normal-not-marked')
         }
-        if (!String(probe.deadline?.label || '').includes('مهلت اصلی')) {
-          failures.push('critical-normal-label-missing')
+        if (!String(probe.deadline?.ariaLabel || '').includes('مهلت اصلی')) {
+          failures.push('critical-normal-accessible-name-missing')
         }
       }
       if (
@@ -472,13 +495,13 @@ async function main() {
     const focus390 = byId('390x844')
     const focus1440 = byId('1440x900')
     const interactionCases = [
-      { viewport: focus390, interaction: 'first-tap', screenshotName: '08-mobile-decision' },
-      { viewport: focus1440, interaction: 'first-tap', screenshotName: '09-desktop-decision' },
+      { viewport: focus390, interaction: 'first-tap', screenshotName: '08-mobile-first-tap' },
+      { viewport: focus1440, interaction: 'first-tap', screenshotName: '09-desktop-first-tap' },
       { viewport: focus390, state: 'normal-sell', interaction: 'first-tap' },
       { viewport: focus390, interaction: 'second-tap' },
       { viewport: focus390, state: 'overtime-buy', interaction: 'second-tap' },
       { viewport: focus390, interaction: 'escape-pending' },
-      { viewport: focus390, interaction: 'cancel-pending' },
+      { viewport: focus390, interaction: 'switch-pending' },
       { viewport: focus390, interaction: 'recent-offers' },
       { viewport: focus390, interaction: 'preview', screenshotName: '10-preview-modal' },
       { viewport: focus390, interaction: 'keyboard' },
@@ -588,8 +611,9 @@ async function main() {
       deviceScaleFactor: item.deviceScaleFactor || 1,
       offerCount: item.probe?.offerCount ?? null,
       pendingCount: item.probe?.pendingCount ?? null,
-      decisionPanelVisible: item.probe?.decisionPanelVisible ?? null,
-      decisionText: item.probe?.decisionText || null,
+      expandedDecisionPanelCount: item.probe?.expandedDecisionPanelCount ?? null,
+      pendingButtonText: item.probe?.pendingButtonText || null,
+      pendingButtonAriaLabel: item.probe?.pendingButtonAriaLabel || null,
       previewVisible: item.probe?.previewVisible ?? null,
       previewRecapVisible: item.probe?.previewRecapVisible ?? null,
       previewText: item.probe?.previewText || null,
@@ -598,6 +622,7 @@ async function main() {
       smallTradeTargetCount: item.probe?.smallTradeTargetCount ?? null,
       smallTargetCount: item.probe?.smallTargetCount ?? null,
       geometry: item.probe?.geometry || null,
+      firstTapCardHeightBefore: item.probe?.firstTapCardHeightBefore ?? null,
       deadline: item.probe?.deadline || null,
       focusContrast: item.probe?.focusContrast || null,
       lastActionHit: item.probe?.lastActionHit || null,

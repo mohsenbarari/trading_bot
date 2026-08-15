@@ -744,8 +744,23 @@ export async function collectMarketProbe(page) {
     const composerRect = composer instanceof HTMLElement && visible(composer)
       ? composer.getBoundingClientRect()
       : null
+    const contentScroller = document.querySelector('.market-content')
+    const contentScrollerRect = contentScroller instanceof HTMLElement && visible(contentScroller)
+      ? contentScroller.getBoundingClientRect()
+      : null
+    const offerCards = [...document.querySelectorAll('[data-test="offer-card"]')].filter(visible)
+    const offerCardRects = offerCards.map((element) => element.getBoundingClientRect())
+    const visibleOfferTop = Math.max(0, contentScrollerRect?.top ?? 0)
+    const visibleOfferBottom = Math.min(
+      window.innerHeight,
+      contentScrollerRect?.bottom ?? window.innerHeight,
+      composerRect?.top ?? window.innerHeight,
+    )
+    const fullyVisibleOfferCount = offerCardRects.filter((rect) => (
+      rect.top >= visibleOfferTop - 1 && rect.bottom <= visibleOfferBottom + 1
+    )).length
     const lastOfferAction = lastOffer instanceof HTMLElement
-      ? [...lastOffer.querySelectorAll('[data-test="trade-action-button"], .cancel-own-offer-btn, [data-test="offer-decision-cancel"]')].filter(visible).at(-1)
+      ? [...lastOffer.querySelectorAll('[data-test="trade-action-button"], .cancel-own-offer-btn')].filter(visible).at(-1)
       : null
     const lastOfferActionRect = lastOfferAction instanceof HTMLElement ? lastOfferAction.getBoundingClientRect() : lastOfferRect
     const lastActionAboveComposer = !lastOfferActionRect || !composerRect
@@ -759,8 +774,8 @@ export async function collectMarketProbe(page) {
     const v2Scope = Boolean(document.querySelector('[data-ui-system="v2"]'))
     const dir = document.documentElement.getAttribute('dir') || document.documentElement.dir
     const font = getComputedStyle(document.body).fontFamily
-    const decisionPanel = document.querySelector('[data-test="offer-decision-panel"]')
     const pendingButtons = [...document.querySelectorAll('[data-test="trade-action-button"][data-state="pending"]')]
+    const expandedDecisionPanelCount = document.querySelectorAll('[data-test="offer-decision-panel"]').length
     const rectOf = (selector) => {
       const element = document.querySelector(selector)
       if (!(element instanceof HTMLElement) || !visible(element)) return null
@@ -811,7 +826,6 @@ export async function collectMarketProbe(page) {
       }
     }
     const deadlineMeter = document.querySelector('[data-test="offer-deadline-meter"]')
-    const deadlineLabel = document.querySelector('[data-test="offer-deadline-label"]')
     const deadlineCard = deadlineMeter?.closest('[data-test="offer-card"]')
     const timerPct = deadlineCard instanceof HTMLElement
       ? Number(getComputedStyle(deadlineCard).getPropertyValue('--t-pct').trim() || 'NaN')
@@ -844,7 +858,7 @@ export async function collectMarketProbe(page) {
     const meterScaleMatchesPercent = Number.isFinite(meterScale)
       && Number.isFinite(timerPct)
       && Math.abs(meterScale - (timerPct / 100)) <= 0.02
-    const lastAction = [...document.querySelectorAll('.offer-card-wrap:not(.is-history) [data-test="trade-action-button"], .offer-card-wrap:not(.is-history) .cancel-own-offer-btn, [data-test="offer-decision-cancel"]')]
+    const lastAction = [...document.querySelectorAll('.offer-card-wrap:not(.is-history) [data-test="trade-action-button"], .offer-card-wrap:not(.is-history) .cancel-own-offer-btn')]
       .filter(visible)
       .at(-1)
     let lastActionHit = null
@@ -880,8 +894,10 @@ export async function collectMarketProbe(page) {
       buyBadgeCount: [...document.querySelectorAll('.role-badge.buy')].filter(visible).length,
       sellBadgeCount: [...document.querySelectorAll('.role-badge.sell')].filter(visible).length,
       remainingCount: document.querySelectorAll('[data-test="offer-remaining"], .quantity-badge').length,
-      decisionPanelVisible: decisionPanel instanceof HTMLElement && visible(decisionPanel),
+      expandedDecisionPanelCount,
       pendingCount: pendingButtons.length,
+      pendingButtonText: pendingButtons[0]?.textContent?.replace(/\s+/g, ' ').trim() || '',
+      pendingButtonAriaLabel: pendingButtons[0]?.getAttribute('aria-label') || '',
       previewVisible: Boolean(document.querySelector('[data-test="offer-preview-card"]')),
       previewRecapVisible: Boolean(document.querySelector('[data-test="offer-preview-recap"]')),
       marketTitleVisible: Boolean(
@@ -905,8 +921,9 @@ export async function collectMarketProbe(page) {
         composer: rectOf('.action-bar-inner'),
         offers: rectOf('.offers-list'),
         firstCard: rectOf('[data-test="offer-card"]'),
+        offerCardHeights: offerCardRects.slice(0, 6).map((rect) => Number(rect.height.toFixed(2))),
+        fullyVisibleOfferCount,
       },
-      decisionText: decisionPanel instanceof HTMLElement ? decisionPanel.textContent?.replace(/\s+/g, ' ').trim() : '',
       previewText: document.querySelector('[data-test="offer-preview-recap"]')?.textContent?.replace(/\s+/g, ' ').trim() || '',
       overtimeStickerVisible: Boolean(document.querySelector('[data-test="offer-overtime-sticker"]')),
       finalTailBadgeVisible: Boolean(document.querySelector('[data-test="offer-final-tail-badge"]')),
@@ -915,7 +932,8 @@ export async function collectMarketProbe(page) {
         present: deadlineMeter instanceof HTMLElement,
         phase: deadlineMeter instanceof HTMLElement ? deadlineMeter.getAttribute('data-phase') : null,
         critical: deadlineMeter instanceof HTMLElement ? deadlineMeter.getAttribute('data-critical') : null,
-        label: deadlineLabel?.textContent?.trim() || '',
+        ariaLabel: deadlineMeter instanceof HTMLElement ? deadlineMeter.getAttribute('aria-label') || '' : '',
+        visibleCountdownCount: document.querySelectorAll('[data-test="offer-deadline-label"]').length,
         pct: Number.isFinite(timerPct) ? Number(timerPct.toFixed(2)) : null,
         meterContainedInCard,
         valueTransform: meterTransform,
