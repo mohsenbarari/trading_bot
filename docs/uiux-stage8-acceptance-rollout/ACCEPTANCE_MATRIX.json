@@ -2,7 +2,7 @@
   "schemaVersion": 3,
   "stage": 8,
   "status": "closed-owner-aesthetic-approved",
-  "branch": "condidate/webapp-ui-ux-redesign-v2",
+  "branch": "main",
   "acceptanceAuthority": true,
   "stage8CompleteAuthority": true,
   "sourceSnapshot": {

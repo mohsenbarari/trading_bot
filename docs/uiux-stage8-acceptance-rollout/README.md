@@ -1,11 +1,13 @@
-# Stage 8 — پیش‌نویس رهگیری پذیرش و عرضهٔ تیمی
+# Stage 8 — ثبت پذیرش بسته‌شده و مرز عرضه
 
-بستهٔ mutable برای رهگیری پذیرش و مدل عرضه است. این پوشه نه freeze محصول است، نه
-گواه اجرای ماتریس کامل، و نه مجوز production.
+این بسته ثبت نگهداری‌پذیر پذیرش UI/UX مرحلهٔ ۸ است و اجرای رسمی محلی V2 و
+closure مستقل پس از تأیید زیبایی مالک را رهگیری می‌کند. این پوشه freeze محصول یا
+مجوز staging، production یا Sites نیست.
 
 ## وضعیت
 
-- branch: `condidate/webapp-ui-ux-redesign-v2`
+- current closure branch: `main`
+- historical draft branch: `condidate/webapp-ui-ux-redesign-v2`
 - access-policy snapshot: `8eccdd2177ea5e2b21710b3a8863eace40092c35`
 - component canonicalization snapshot: `7588d9c20b995244197d8de09392dd6a5f61b195`
 - historical bounded visual-recovery source: `4415b7431a6b67965d24c44f6f9f0e59e48ed422` (historical record; not rewritten or promoted)

@@ -194,7 +194,8 @@ Market است، superseded است و promotable نیست. این اجرا مجو
 ## Focused checks and bounded browser receipts through 2026-08-14
 
 - `jq` parse/invariant check روی `ACCEPTANCE_MATRIX.json`: ۳۰ route، ۹ profile،
-  ۲۷۰ outcome دارای `evidenceRefs` معتبر، چهار component outcome، دوازده slice محدود / ۱۶۳ scenario، و صفر full-acceptance cell.
+  ۲۷۰ outcome دارای `evidenceRefs` معتبر، چهار component outcome، ۲۷۰ full-acceptance
+  cell اجراشده، و دوازده slice محدود / ۱۶۳ scenario تاریخی و non-counting.
   Evidence: [ACCEPTANCE_MATRIX.json](ACCEPTANCE_MATRIX.json).
 - `npm run test:unit:run -- src/router/index.test.ts src/utils/auth.test.ts`: pass؛
   ۲ فایل و ۴۲ تست. Evidence source:
