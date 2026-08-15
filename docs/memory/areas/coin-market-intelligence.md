@@ -3,15 +3,15 @@
 - USD/Herat repair is causal at ingest: reconstruct omitted leading digits from
   three strictly-prior same-source/book facts within 15 minutes; never add a
   fixed constant. Replay chronologically.
-- In the bounded private coin-group feed, old `خ ن ف`/`ف ن ف`, current
-  `خ ف`/`ف ف`, and marker-less/single-side posts mean tomorrow; `خ ن`/`ف ن`
-  and standalone `نق`/cash words mean cash. Explicit future wins. This feed
-  default must not be generalized to user offer-registration syntax.
-- Coin-group numbers are contextual: separators, glued/bare/word quantities,
-  Persian/Arabic letters and mint years must not corrupt price or quantity.
-  Payment timing/account terms are conditional.
-- Commodity resolution never defaults an omitted coin to Imam and never restores
-  `group_commodity_context`. Use strictly-prior same-book anchors no older than
+- In the private group feed, `خ ن ف`/`ف ن ف`, `خ ف`/`ف ف`, and marker-less
+  side posts mean tomorrow; `خ ن`/`ف ن` and `نق`/cash words mean cash. Future
+  wins. Do not apply this feed default to user registration syntax.
+- Coin-group prices may be exact project-thousand values, exact full-Toman
+  values divided by 1,000, or a bounded redundant-zero candidate; never add a
+  constant. Quantities, scripts and mint years must not corrupt fields. `رب`
+  means quarter; `پ`/`ت پ` and `پایین` spelling variants mark low-date.
+- Commodity resolution never defaults to Imam or restores `group_commodity_context`.
+  Use strictly-prior same-book anchors no older than
   two hours. In overlapping full-coin bands, every plausible book needs anchor
   coverage or the unnamed fact remains pending. A new regime may bootstrap only
   from a coherent prior 30-minute explicit cluster with at least three messages,
@@ -39,6 +39,5 @@
   `/srv/trading-bot/production-data/coin-intelligence/estimator-live`. The home
   page shows only primary output and its exact CASH/TOMORROW inputs; shadow and
   realised outcomes stay on `/shadow`.
-- Input health is data-driven: expose heartbeat separately from market-hours-aware
-  freshness, exclude stale/invalid inputs, prefer direct normalized sources, and
-  label any corroborated live-only proxy as degraded and never training-eligible.
+- Input health separates heartbeat from market-hours freshness, excludes stale
+  inputs, prefers normalized sources, and keeps live-only proxies out of training.

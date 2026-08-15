@@ -148,6 +148,36 @@ class CoinGroupParserTests(unittest.TestCase):
                     expected,
                 )
 
+    def test_full_toman_and_redundant_zero_prices_and_low_date_shorthand(self) -> None:
+        cases = {
+            "۴ گرمی سالم ف ۲۷.۷۰۰.۰۰۰": ("ONE_GRAM", 4, "SELL", 27_700),
+            "۴ گرمی سالم ف ۲۷۷۰۰۰۰۰": ("ONE_GRAM", 4, "SELL", 27_700),
+            "۲ تا ف ۱۸۸.۷۵۰.۰۰۰": (None, 2, "SELL", 188_750),
+            "10 تا ربع نقدی ف۵۱۵۰۰۰": ("QUARTER_BAHAR", 10, "SELL", 51_500),
+            "۴ نیم خ ۹۴.۸۰۰.۰۰۰": ("HALF_BAHAR", 4, "BUY", 94_800),
+            "۳۰ تا ربع ف۵۱۹۰۰۰": ("QUARTER_BAHAR", 30, "SELL", 51_900),
+            "20 تا رب پایبن بالا 80 47 ف": ("QUARTER_LOW_DATE", 20, "SELL", 47_000),
+            "۶ نیم ف ۹۵.۵۰۰.۰۰۰": ("HALF_BAHAR", 6, "SELL", 95_500),
+            "۴ نیم پ خ ۹۴.۸۰۰.۰۰۰": ("HALF_LOW_DATE", 4, "BUY", 94_800),
+            "۴ رب پ ف ۴۷.۰۰۰.۰۰۰": ("QUARTER_LOW_DATE", 4, "SELL", 47_000),
+        }
+        for text, expected in cases.items():
+            with self.subTest(text=text):
+                parsed = parse_coin_group_offers(self.source(text))
+                self.assertEqual(len(parsed), 1)
+                self.assertEqual(
+                    (
+                        parsed[0].commodity_code,
+                        parsed[0].quantity,
+                        parsed[0].side,
+                        parsed[0].price_project_thousand_toman,
+                    ),
+                    expected,
+                )
+
+        cash = parse_coin_group_offers(self.source("10 تا ربع نقدی ف۵۱۵۰۰۰"))[0]
+        self.assertEqual(cash.settlement_term, "CASH")
+
     def test_payment_timing_is_conditional(self) -> None:
         for text in (
             "امام ف 188900 / 5 تا حساب شب",

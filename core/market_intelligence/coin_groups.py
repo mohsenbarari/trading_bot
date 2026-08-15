@@ -17,13 +17,13 @@ from typing import Iterable
 from .market_contracts import MarketObservation, derive_event_key, normalize_utc
 
 
-COIN_GROUP_PARSER_VERSION = "coin-group-rules-v4-tomorrow-default"
+COIN_GROUP_PARSER_VERSION = "coin-group-rules-v5-price-formats-low-date"
 _DIGITS = str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789")
 _ARABIC_LETTERS = str.maketrans({"ي": "ی", "ى": "ی", "ك": "ک"})
 # Dot and slash are genuine thousands separators when they are attached to
 # exactly three trailing digits.  Whitespace-delimited `/ 5 تا` remains two
 # fields because it cannot match the grouped branch.
-_NUMBER = re.compile(r"(?<!\d)(\d{1,3}(?:[٬،,./]\d{3})+|\d{2,7})(?!\d)")
+_NUMBER = re.compile(r"(?<!\d)(\d{1,3}(?:[٬،,./]\d{3})+|\d{2,9})(?!\d)")
 _SMALL_NUMBER = re.compile(r"(?<!\d)(\d{1,3})(?!\d)")
 _QUANTITY = re.compile(r"(?<!\d)(\d{1,3})\s*(?:د?تا|عدد)")
 _SIDE = re.compile(r"خرید|فروش|(?<![آ-ی])([خف]+)(?![آ-ی])")
@@ -119,9 +119,13 @@ def _commodity(text: str) -> str | None:
     if re.search(r"(?:یک\s*گرمی|گرمی|مرکزی)", text):
         return "ONE_GRAM"
     low_date = bool(
-        re.search(r"تاریخ\s*پایین|ت\s*\.?\s*پ|(?<![آ-ی])پایین(?![آ-ی])", text)
+        re.search(
+            r"تاریخ\s*(?:پایین|پاین|پایبن)|ت\s*\.?\s*پ|"
+            r"(?<![آ-ی])(?:پایین|پاین|پایبن|پ)(?![آ-ی])",
+            text,
+        )
     )
-    if re.search(r"ربع(?![آ-ی])", text):
+    if re.search(r"(?:ربع|(?<![آ-ی])رب)(?![آ-ی])", text):
         return "QUARTER_LOW_DATE" if low_date else "QUARTER_BAHAR"
     if re.search(r"نیم(?![آ-ی])", text):
         return "HALF_LOW_DATE" if low_date else "HALF_BAHAR"
@@ -192,8 +196,17 @@ def _price_candidates(
         length = len(digits)
         separated = bool(re.search(r"[٬،,./]", match.group(1)))
         values: list[tuple[int, float]] = []
-        if length in {5, 6}:
+        if length in {8, 9} and raw % 1_000 == 0:
+            # Some group clients paste the full Toman amount, e.g.
+            # `188.750.000`; the project contract stores thousand Toman.
+            values.append((raw // 1_000, 1.0 if separated else 0.92))
+        elif length in {5, 6}:
             values.append((raw, 1.0 if separated else 0.96))
+            # Coin shorthand sometimes carries one redundant trailing zero
+            # (`515000` => `51500`). Keeping both candidates lets an explicit
+            # commodity band select safely; an unnamed overlap stays ambiguous.
+            if length == 6 and raw % 10 == 0:
+                values.append((raw // 10, 0.90))
         elif length == 7 and raw % 10 == 0:
             values.append((raw // 10, 0.72))
         elif length == 4:
