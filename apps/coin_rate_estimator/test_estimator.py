@@ -39,6 +39,7 @@ from coin_estimator import (
 from live_server import (
     GroupLiveInputControl,
     ensure_manual_entry_schema,
+    fa_datetime,
     health_response,
     insert_manual_entry,
     insert_manual_trade_for_open_offer,
@@ -1679,12 +1680,25 @@ class EstimatorTests(unittest.TestCase):
             try:
                 connection.execute("ALTER TABLE messages ADD COLUMN source_html_file TEXT")
                 connection.execute("UPDATE messages SET source_html_file='group_1'")
+                connection.execute(
+                    """
+                    INSERT INTO confirmed_trades(
+                      id, import_id, confirmation_message_id, offer_message_id,
+                      event_time_utc, commodity, price, quantity, side,
+                      settlement, trade_form, confidence
+                    ) VALUES (1, 1, 10, 10, '2026-07-19T09:00:00Z',
+                              'امام', 184900, 1, 'BUY', 'CASH', 'PHYSICAL', 0.95)
+                    """
+                )
                 connection.commit()
             finally:
                 connection.close()
             body = render_group_activity_fragment(conversation_path)
-        self.assertIn("خارج از پنجرهٔ فعال مدل", body)
-        self.assertIn("فقط رکوردهای پذیرفته‌شده", body)
+        self.assertIn("بدون آفر فعال برای مدل", body)
+        self.assertIn("بدون معامله فعال برای مدل", body)
+        self.assertIn("آخرین سوابق گروهیِ پذیرفته‌شدهٔ مدل", body)
+        self.assertEqual(body.count(fa_datetime("2026-07-20T10:00:50Z")), 2)
+        self.assertEqual(body.count(fa_datetime("2026-07-19T09:00:00Z")), 2)
 
     def test_estimate_fragment_includes_top_ticker_cards(self) -> None:
         fragment = render_page(

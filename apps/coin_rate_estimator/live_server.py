@@ -1061,10 +1061,10 @@ def render_live_rows(items: list[dict[str, Any]], *, kind: str) -> str:
 
 def render_group_activity_fragment(conversation_db: Path) -> str:
     activity = read_recent_group_activity(conversation_db)
-    def freshness(group: str) -> str:
-        rows = list(activity.get(f"{group}_offers", [])) + list(
-            activity.get(f"{group}_trades", [])
-        )
+    def freshness(group: str, kind: str) -> str:
+        plural = "offers" if kind == "offer" else "trades"
+        kind_fa = "آفر" if kind == "offer" else "معامله"
+        rows = list(activity.get(f"{group}_{plural}", []))
         observed: list[datetime] = []
         for row in rows:
             try:
@@ -1072,26 +1072,33 @@ def render_group_activity_fragment(conversation_db: Path) -> str:
             except (TypeError, ValueError):
                 continue
         if not observed:
-            return "<small class='activity-freshness stale'>بدون رویداد ثبت‌شده</small>"
+            return (
+                "<small class='activity-freshness stale'>"
+                f"هیچ {kind_fa} پذیرفته‌شده‌ای ثبت نشده</small>"
+            )
         latest = max(observed)
         age_seconds = max(
             0,
             int((datetime.now(timezone.utc) - latest).total_seconds()),
         )
         fresh = age_seconds <= GROUP_ANCHOR_WINDOW_SECONDS
-        status = "در پنجرهٔ فعال مدل" if fresh else "خارج از پنجرهٔ فعال مدل"
+        status = (
+            f"{kind_fa} فعال برای مدل"
+            if fresh
+            else f"بدون {kind_fa} فعال برای مدل"
+        )
         return (
             f"<small class='activity-freshness {'fresh' if fresh else 'stale'}'>"
-            f"{status} · آخرین رکورد واجدشرایط: {fa_datetime(iso_utc(latest))} "
+            f"{status} · آخرین {kind_fa} پذیرفته‌شده: {fa_datetime(iso_utc(latest))} "
             f"({fa_number(age_seconds // 60)} دقیقه پیش)</small>"
         )
-    return f"""<section><div class="section-head"><h2>آخرین ورودی‌های گروهیِ واجدشرایط مدل</h2><span class="badge">فقط رکوردهای پذیرفته‌شده</span></div>
+    return f"""<section><div class="section-head"><h2>آخرین سوابق گروهیِ پذیرفته‌شدهٔ مدل</h2><span class="badge">فعال و تاریخی</span></div>
       <p class="activity-scope-note">این فهرست همهٔ پیام‌های دریافتی نیست؛ فقط رکوردهایی را نشان می‌دهد که قرارداد مدل پذیرفته است. سلامت دریافت و زمان جدیدترین رویداد canonical گروه در کارت «ورود گروه‌ها تا مدل» جدا نمایش داده می‌شود.</p>
       <div class="group-grid">
-        <article class="feed-card"><h3>۵ آفر آخر — گروه ۱</h3>{freshness('group_1')}<ul>{render_live_rows(activity.get('group_1_offers', []), kind='offer')}</ul></article>
-        <article class="feed-card"><h3>۵ آفر آخر — گروه ۲</h3>{freshness('group_2')}<ul>{render_live_rows(activity.get('group_2_offers', []), kind='offer')}</ul></article>
-        <article class="feed-card"><h3>۳ معاملهٔ آخر — گروه ۱</h3>{freshness('group_1')}<ul>{render_live_rows(activity.get('group_1_trades', []), kind='trade')}</ul></article>
-        <article class="feed-card"><h3>۳ معاملهٔ آخر — گروه ۲</h3>{freshness('group_2')}<ul>{render_live_rows(activity.get('group_2_trades', []), kind='trade')}</ul></article>
+        <article class="feed-card"><h3>۵ آفر پذیرفته‌شدهٔ آخر — گروه ۱</h3>{freshness('group_1', 'offer')}<ul>{render_live_rows(activity.get('group_1_offers', []), kind='offer')}</ul></article>
+        <article class="feed-card"><h3>۵ آفر پذیرفته‌شدهٔ آخر — گروه ۲</h3>{freshness('group_2', 'offer')}<ul>{render_live_rows(activity.get('group_2_offers', []), kind='offer')}</ul></article>
+        <article class="feed-card"><h3>۳ معاملهٔ پذیرفته‌شدهٔ آخر — گروه ۱</h3>{freshness('group_1', 'trade')}<ul>{render_live_rows(activity.get('group_1_trades', []), kind='trade')}</ul></article>
+        <article class="feed-card"><h3>۳ معاملهٔ پذیرفته‌شدهٔ آخر — گروه ۲</h3>{freshness('group_2', 'trade')}<ul>{render_live_rows(activity.get('group_2_trades', []), kind='trade')}</ul></article>
       </div>
     </section>"""
 

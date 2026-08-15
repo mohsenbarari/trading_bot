@@ -10,7 +10,8 @@
 - Reject a malformed coin-group envelope individually; inverted edit/create
   times must not poison valid siblings or freeze the checkpoint. The dashboard
   keeps collector heartbeat, latest canonical group event, latest eligible event and
-  the rate's selected anchor distinct.
+  the rate's selected anchor distinct; offer and trade freshness are computed
+  independently and historical accepted rows are never labelled as live intake.
 - A group trade requires one structurally linked reply branch. Keep users and
   sibling branches isolated, prefer attributable owner confirmation, use the
   latest negotiated quantity/price on that branch, deduplicate declarations
