@@ -18,9 +18,10 @@ notification route-affordance در `STAGE8_NOTIFICATION_ROUTE_AFFORDANCE_EXECUTI
 رسید رسمی محلی اصلاح‌شده `STAGE8_FULL_ACCEPTANCE_EXECUTION_RECEIPT_V2.json` اجرای
 پنج‌فازی روی `main` ادغام‌شدهٔ Market A+C را ثبت می‌کند و به
 `executedFullMatrixCellCount=270` وصل است. رسید V1 تاریخی به‌خاطر نقص evidence و
-fixture بازار superseded است و overwrite نشده. این رسید slice جزئی جدید نیست،
-Gate A v3 پیش از Market را promote نمی‌کند، و تا تأیید صریح مالک مجوز زیبایی،
-staging، production یا Sites نیست.
+fixture بازار superseded است و overwrite نشده. بستن Stage 8 در
+`STAGE8_FINAL_ACCEPTANCE_CLOSURE.json` پس از تأیید صریح زیبایی مالک ثبت شد.
+این بستن slice جزئی جدید نیست، Gate A v3 پیش از Market را promote نمی‌کند، و
+مجوز staging، production یا Sites نیست.
 
 ## پیش‌شرط تبدیل draft به پذیرش
 

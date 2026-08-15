@@ -19,15 +19,15 @@
 - current bounded Account Hub singleton action-grid source: `656cf6c3b62111c5c7bae458e3ea6f61fd8af788` (evidence-only)
 - current bounded notification route-affordance source: `95ef7aa768f833c8e8b954d38b36674a77a304a9` (evidence-only)
 - current bounded CreateChannel help-popover placement source: `0d7f276006deb7f97d20ba07e6f9ecb4d1b48a79` (evidence-only)
-- authority: `stage8CompleteAuthority=false` و `acceptanceAuthority=false`
-- matrix status: `full-local-synthetic-acceptance-executed-owner-signoff-pending`
+- authority: `stage8CompleteAuthority=true` و `acceptanceAuthority=true` فقط برای پذیرش UI/UX مرحلهٔ ۸
+- matrix status: `closed-owner-aesthetic-approved`
 - expected-access coverage: ۳۰ مسیر × ۹ پروفایل دقیق = ۲۷۰ outcome صریح
 - official local full run V2: ۹۶۰ شناسه روی `main` ادغام‌شدهٔ Market A+C؛ ۲۷۰/۲۷۰ access شمارش می‌شود؛ viewport/state/interaction/environment اجرا شد
 - رسید V1 تاریخی به‌خاطر نقص evidence/fixture superseded و non-promotable مانده و overwrite نشده است
 - Gate A v3 روی `02162106` پیش از ادغام Market است، superseded است و promotable نیست
 - partial synthetic evidence تاریخی: دوازده partial slice / ۱۶۳ partial scenario همچنان historical/non-counting می‌مانند و دوباره شمرده نشدند
-- owner aesthetic acceptance: در انتظار تأیید صریح مالک
-- production/staging/Sites: انجام نشده و این اجرا مجوز آن‌ها نیست
+- owner aesthetic acceptance: با عبارت صریح مالک در گفتگوی جاری ثبت شد
+- production/staging/Sites: انجام نشده و بستن Stage 8 مجوز آن‌ها نیست
 
 ## اصلاح مدل دسترسی
 
@@ -48,12 +48,14 @@ guard فعلی علاوه بر نقش از `account_status`، `is_customer` و `
 ## رسید اجرای رسمی محلی
 
 [STAGE8_FULL_ACCEPTANCE_EXECUTION_RECEIPT_V2.json](STAGE8_FULL_ACCEPTANCE_EXECUTION_RECEIPT_V2.json)
-مرجع فنی جاری روی `main` ادغام‌شدهٔ Market A+C است. رسید V1 تاریخی
+مرجع فنی جاری روی `main` ادغام‌شدهٔ Market A+C است.
+[STAGE8_FINAL_ACCEPTANCE_CLOSURE.json](STAGE8_FINAL_ACCEPTANCE_CLOSURE.json)
+بستن پذیرش UI/UX مرحلهٔ ۸ را پس از تأیید صریح زیبایی مالک ثبت می‌کند.
+رسید V1 تاریخی
 [STAGE8_FULL_ACCEPTANCE_EXECUTION_RECEIPT.json](STAGE8_FULL_ACCEPTANCE_EXECUTION_RECEIPT.json)
 به‌خاطر نقص serialization شواهد و قرارداد fixture بازار superseded است و
 byte-for-byte حفظ شده. Gate A v3 پیش از Market را overwrite یا promote نمی‌کند.
-screenshot خام داخل مخزن نیست. تأیید زیبایی مالک و مجوز staging/production/Sites
-هنوز وجود ندارد.
+screenshot خام داخل مخزن نیست. بستن Stage 8 مجوز staging/production/Sites نیست.
 
 ## شواهد محدود 8A، 8B، auth-containment، directory/profile، roving-focus، long-text-wrap، Account Hub، notification route-affordance و CreateChannel help-popover placement
 
@@ -196,6 +198,7 @@ audit geometry و contrast آن pass و محتوایش عاری از دادهٔ 
 ## محتوا
 
 - [ACCEPTANCE_MATRIX.json](ACCEPTANCE_MATRIX.json)
+- [STAGE8_FINAL_ACCEPTANCE_CLOSURE.json](STAGE8_FINAL_ACCEPTANCE_CLOSURE.json)
 - [STAGE8_FULL_ACCEPTANCE_EXECUTION_RECEIPT_V2.json](STAGE8_FULL_ACCEPTANCE_EXECUTION_RECEIPT_V2.json)
 - [STAGE8_FULL_ACCEPTANCE_EXECUTION_RECEIPT.json](STAGE8_FULL_ACCEPTANCE_EXECUTION_RECEIPT.json)
 - [STAGE8A_EXECUTION_RECEIPTS.json](STAGE8A_EXECUTION_RECEIPTS.json)

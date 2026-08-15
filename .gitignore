@@ -32,6 +32,7 @@ docs/uiux-stage8-acceptance-rollout/*
 !docs/uiux-stage8-acceptance-rollout/STAGE8_CREATE_CHANNEL_HELP_POPOVER_PLACEMENT_EXECUTION_RECEIPT.json
 !docs/uiux-stage8-acceptance-rollout/STAGE8_FULL_ACCEPTANCE_EXECUTION_RECEIPT.json
 !docs/uiux-stage8-acceptance-rollout/STAGE8_FULL_ACCEPTANCE_EXECUTION_RECEIPT_V2.json
+!docs/uiux-stage8-acceptance-rollout/STAGE8_FINAL_ACCEPTANCE_CLOSURE.json
 !docs/AUTOMATED_TEST_CHECKLIST.md
 !docs/CROSS_SERVER_SYNC_PARITY_AUDIT_AND_ROADMAP.md
 !docs/MESSENGER_REFACTORING_ROADMAP.md

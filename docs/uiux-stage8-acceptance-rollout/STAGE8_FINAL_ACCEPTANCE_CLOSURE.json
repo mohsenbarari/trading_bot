@@ -1,0 +1,58 @@
+{
+  "schemaVersion": 1,
+  "stage": 8,
+  "status": "closed-owner-aesthetic-approved",
+  "acceptanceAuthority": true,
+  "stage8CompleteAuthority": true,
+  "officialRun": true,
+  "branch": "main",
+  "runId": "stage8-full-acceptance-20260815T063022538Z",
+  "technicalReceiptId": "stage8-full-acceptance-execution-receipt-v2",
+  "technicalReceiptPath": "docs/uiux-stage8-acceptance-rollout/STAGE8_FULL_ACCEPTANCE_EXECUTION_RECEIPT_V2.json",
+  "technicalReceiptSha256": "a4d1f3338e19bd2f907257bb86f418de3802ed0b09f7c2f4f761fba8d63f1a80",
+  "officialReportSha256": "e2a00c5599d87a512fadb4a315a55071e47ebbff59a61ef85cf2e52cfcd68aec",
+  "dist": {
+    "fileCount": 172,
+    "sha256": "92c76dbc27d6df512dc994a80d34750253ed5cd9c1c540ea00db9d2d42d3bca3"
+  },
+  "git": {
+    "branch": "main",
+    "implementationCommit": "a2b35dc2742aca22a6b19829bab6a23ecf9eb267",
+    "implementationTree": "9e3589aaf4aaa4faaa9b7686c0f9f98bfb410e3a",
+    "harnessCommit": "7bd50838cb99d17e3a0a0e9523019de30117668a",
+    "harnessTree": "0e340291fc535e72e73dbc0b497f00e2b310557c",
+    "docsCommitAtSignoff": "7326c30927b78517b79af8cca604ad97d7ec76bb",
+    "docsTreeAtSignoff": "dc7b1499f15380ab91c498a524a606b146a41533"
+  },
+  "counts": {
+    "planned": 960,
+    "applicableExecuted": 830,
+    "applicablePassed": 830,
+    "notApplicable": 130,
+    "accessExpected": 270,
+    "accessExecuted": 270,
+    "accessPassed": 270,
+    "harnessDeferred": 0,
+    "productNotApplicable": 118,
+    "canonicalAlias": 12,
+    "partialSlices": 12,
+    "partialScenarios": 163,
+    "partialCountsTowardFull": false
+  },
+  "diagnosticTotals": {
+    "unexpectedConsole": 0,
+    "pageErrors": 0,
+    "externalRequests": 0,
+    "requestFailuresOutsideOffline": 0,
+    "unknownApiRequests": 0,
+    "mutatingApiRequests": 0,
+    "sourceDriftCount": 0
+  },
+  "ownerSignoff": {
+    "status": "approved",
+    "source": "explicit-current-conversation",
+    "approvedAt": "2026-08-15T08:00:00Z",
+    "approvalPhrase": "STAGE8 OWNER AESTHETIC SIGN-OFF — APPROVED"
+  },
+  "claimBoundary": "This closure records Stage 8 UI/UX acceptance only after explicit owner aesthetic sign-off on the corrected official local synthetic V2 run. It is not push, merge, staging, production, Sites, Figma, or deploy authority."
+}

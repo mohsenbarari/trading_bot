@@ -186,7 +186,10 @@ digest است. تاریخ نمایشی Market شمسی/خوانا است و load
 superseded و non-promotable مانده است. Gate A v3 روی `02162106` با report
 `aa6c94bfaa595e3ad1292078a1f2a13bea049c98abe2949e455aaafc3469247a` پیش از ادغام
 Market است، superseded است و promotable نیست. این اجرا مجوز staging/production/Sites
-نیست و تا تأیید صریح زیبایی مالک `acceptanceAuthority=false` می‌ماند.
+نیست. تأیید صریح زیبایی مالک در
+[STAGE8_FINAL_ACCEPTANCE_CLOSURE.json](STAGE8_FINAL_ACCEPTANCE_CLOSURE.json)
+ثبت شد و `acceptanceAuthority=true` فقط برای بستن پذیرش UI/UX مرحلهٔ ۸ است، نه
+مجوز staging/production/Sites.
 
 ## Focused checks and bounded browser receipts through 2026-08-14
 

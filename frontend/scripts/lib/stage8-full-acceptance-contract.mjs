@@ -20,6 +20,14 @@ export function sha256Hex(value) {
 export const MATRIX_PENDING_STATUS = 'full-local-synthetic-acceptance-executed-owner-signoff-pending'
 export const MATRIX_CLOSED_STATUS = 'closed-owner-aesthetic-approved'
 export const OWNER_APPROVAL_PHRASE = 'STAGE8 OWNER AESTHETIC SIGN-OFF — APPROVED'
+export const STAGE8_CLOSURE_RELATIVE_PATH =
+  'docs/uiux-stage8-acceptance-rollout/STAGE8_FINAL_ACCEPTANCE_CLOSURE.json'
+
+export function loadStage8Closure(repoRoot) {
+  const closurePath = path.join(repoRoot, STAGE8_CLOSURE_RELATIVE_PATH)
+  if (!fs.existsSync(closurePath)) return null
+  return JSON.parse(fs.readFileSync(closurePath, 'utf8'))
+}
 const SENSITIVE_ENDPOINT = /token|otp|secret|password|authorization|cookie|session_id/iu
 const QUERY_OR_FRAGMENT = /[?#]/u
 const ISO_TIMESTAMP = /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/u

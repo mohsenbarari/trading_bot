@@ -2,12 +2,14 @@
 
 تاریخ: ۲۰۲۶-۰۸-۱۵
 
-وضعیت: **`full-local-synthetic-acceptance-executed-owner-signoff-pending`**
+وضعیت: **`closed-owner-aesthetic-approved`**
 
 شاخهٔ فنی جاری: `main` ادغام‌شدهٔ Market A+C. مرجع فنی جاری رسید V2
-`STAGE8_FULL_ACCEPTANCE_EXECUTION_RECEIPT_V2.json` است. رسید V1 تاریخی به‌خاطر
-نقص evidence/fixture superseded است. Gate A v3 روی `02162106` پیش از Market،
-superseded و non-promotable است. `acceptanceAuthority=false`.
+`STAGE8_FULL_ACCEPTANCE_EXECUTION_RECEIPT_V2.json` است. بستن پذیرش در
+`STAGE8_FINAL_ACCEPTANCE_CLOSURE.json` پس از تأیید صریح زیبایی مالک ثبت شد.
+رسید V1 تاریخی به‌خاطر نقص evidence/fixture superseded است. Gate A v3 روی
+`02162106` پیش از Market، superseded و non-promotable است.
+`acceptanceAuthority=true` فقط برای پذیرش UI/UX مرحلهٔ ۸.
 
 شاخهٔ تاریخی بستهٔ draft: `condidate/webapp-ui-ux-redesign-v2`
 
@@ -56,7 +58,7 @@ source محدود CreateChannel help-popover placement: `0d7f276006deb7f97d20ba0
 
 این مجوز **merge به main، staging deploy، production deploy، یا Sites محصول** نیست.
 
-`stage8CompleteAuthority=false`. این checkpoint نه پذیرش کامل است و نه پایان roadmap؛ سبز بودن تست به‌تنهایی پذیرش زیبایی نیست و بازبینی انسانی مالک هنوز لازم است.
+`stage8CompleteAuthority=true` فقط برای پذیرش UI/UX مرحلهٔ ۸. این checkpoint پایان roadmap یا مجوز merge/staging/production/Sites نیست.
 
 ## ۲. ماتریس پذیرش
 
@@ -75,7 +77,7 @@ deep-link denied مدیر میانی (`/admin/channels`، `/admin/commodities`،
 `/admin/system`) را نیز به canonicalization کامپوننتی `AdminView → /admin` متصل می‌کند.
 تعداد سلول‌های access اجراشدهٔ رسمی محلی ۲۷۰ است. گسترش viewport/state/interaction/environment
 روی اجرای رسمی V2 انجام شد (۹۶۰ شناسه؛ ۱۳۰ N/A منبع‌محور). بازار A+C و پیام‌رسان disposition
-Stage 8 حفظ شده‌اند. تأیید زیبایی مالک هنوز pending است و این checkpoint مجوز
+Stage 8 حفظ شده‌اند. تأیید زیبایی مالک ثبت شد. این checkpoint مجوز
 staging/production/Sites نیست.
 
 ## ۳. شواهد محدود 8A/8B/auth-containment/directory-profile/account/notification و مرجع طراحی
@@ -218,8 +220,8 @@ Sites و production در این Stage شروع نشده‌اند.
 ## ۶. گیت بعدی (فنی و بصری)
 
 - ۲۷۰ نتیجهٔ موردانتظار مسیر×پروفایل به source متصل است؛
-- canonicalization مدیر میانی و دوازده slice محدود source-bound ثبت شده‌اند، اما full matrix همچنان صفر است؛
+- اجرای رسمی V2 با ۹۶۰/۸۳۰/۱۳۰ و ۲۷۰ سلول access ثبت شد و مالک زیبایی را تأیید کرد؛
+- canonicalization مدیر میانی و دوازده slice محدود source-bound historical/non-counting مانده‌اند؛
 - protected-surface hashهای تاریخی overwrite نشده‌اند؛
-- اجرای واقعی viewport/state/interaction/environment و sign-off زیبایی مالک هنوز pending است؛
 - عرضه فقط به‌صورت مدل تیمی و rollback-safe توصیف شده و شروع نشده است؛
-- merge/staging/production/Sites انجام نشده و مجاز نیست تا مالک جداگانه بگوید.
+- merge/staging/production/Sites انجام نشده و بستن Stage 8 مجوز آن‌ها نیست.

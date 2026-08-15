@@ -1,9 +1,10 @@
 {
   "schemaVersion": 3,
   "stage": 8,
-  "status": "full-local-synthetic-acceptance-executed-owner-signoff-pending",
+  "status": "closed-owner-aesthetic-approved",
   "branch": "condidate/webapp-ui-ux-redesign-v2",
-  "acceptanceAuthority": false,
+  "acceptanceAuthority": true,
+  "stage8CompleteAuthority": true,
   "sourceSnapshot": {
     "commit": "6c02f58140839e741d16f47f8564e09feacefdd9",
     "tree": "bc067b7b4985b9277c5885f3cde958ecd750d6c8",
@@ -34,7 +35,7 @@
       "frontend/src/views/AdminView.test.ts": "c4d72ba4a353390c95752788431efe6831fde7451830aeef7780b8bdeb62ab57"
     }
   },
-  "claimBoundary": "This file enumerates source-derived route outcomes and records the corrected official local synthetic full-acceptance run V2 on merged Market A+C main. Owner aesthetic sign-off is pending. The previous official receipt remains historical, superseded, and non-promotable. Historical partial slices remain non-counting. This is not staging, Sites, or production authority. Gate A v3 on 02162106 is pre-Market, superseded, and non-promotable.",
+  "claimBoundary": "This file enumerates source-derived route outcomes and records Stage 8 UI/UX acceptance closed after explicit owner aesthetic sign-off on the corrected official local synthetic full-acceptance run V2. The previous official receipt remains historical, superseded, and non-promotable. Historical partial slices remain non-counting. This is not staging, Sites, production, push, or deploy authority. Gate A v3 on 02162106 is pre-Market, superseded, and non-promotable.",
   "dimensionCorrection": {
     "previousProblem": "The prior schema treated customer, accountant, and group-lead as UserRole values and attached every profile to every route without an expected outcome.",
     "currentModel": "Access profiles combine authentication, the persisted role, account status, and customer/accountant relationship flags because the route guard uses all of those inputs.",
@@ -62,7 +63,7 @@
     "Parameterized route IDs are syntactically valid; component/API-level ownership and object authorization are outside this route-level matrix except for the explicitly listed AdminView canonicalization outcomes."
   ],
   "acceptanceDimensions": {
-    "status": "official-local-synthetic-full-run-executed-owner-signoff-pending; historical partial slices remain separately recorded and non-counting",
+    "status": "closed-owner-aesthetic-approved; historical partial slices remain separately recorded and non-counting",
     "viewports": {
       "mobile": [
         360,
@@ -109,7 +110,8 @@
       "stage8-notification-route-affordance-execution-receipt",
       "stage8-create-channel-help-popover-placement-execution-receipt",
       "stage8-full-acceptance-execution-receipt",
-      "stage8-full-acceptance-execution-receipt-v2"
+      "stage8-full-acceptance-execution-receipt-v2",
+      "stage8-final-acceptance-closure"
     ]
   },
   "cellAccounting": {
@@ -134,9 +136,10 @@
     "officialFullAcceptance": {
       "runId": "stage8-full-acceptance-20260815T063022538Z",
       "receiptId": "stage8-full-acceptance-execution-receipt-v2",
+      "closureId": "stage8-final-acceptance-closure",
       "countsTowardFullMatrixAcceptance": true,
       "introducedAsPartialSlice": false,
-      "status": "full-local-synthetic-acceptance-executed-owner-signoff-pending"
+      "status": "closed-owner-aesthetic-approved"
     }
   },
   "partialSyntheticBrowserSlices": [
@@ -1485,7 +1488,14 @@
       "kind": "official-local-synthetic-full-acceptance",
       "path": "docs/uiux-stage8-acceptance-rollout/STAGE8_FULL_ACCEPTANCE_EXECUTION_RECEIPT_V2.json",
       "sha256": "a4d1f3338e19bd2f907257bb86f418de3802ed0b09f7c2f4f761fba8d63f1a80",
-      "claim": "Corrected official local synthetic five-phase full-acceptance run V2 on merged Market A+C main. Owner aesthetic sign-off is pending. Not staging, production, or Sites authority. Does not overwrite historical receipts or the protected-surface freeze."
+      "claim": "Corrected official local synthetic five-phase full-acceptance run V2 on merged Market A+C main. Technical receipt remains unchanged. Owner aesthetic sign-off is recorded in the independent closure. Not staging, production, or Sites authority. Does not overwrite historical receipts or the protected-surface freeze."
+    },
+    "stage8-final-acceptance-closure": {
+      "id": "stage8-final-acceptance-closure",
+      "kind": "stage8-final-acceptance-closure",
+      "path": "docs/uiux-stage8-acceptance-rollout/STAGE8_FINAL_ACCEPTANCE_CLOSURE.json",
+      "sha256": "206ab9abb5377882237eadd7f3d44b5dc03a383b2452b9080823c85a6dca6d97",
+      "claim": "Stage 8 UI/UX acceptance closed after explicit owner aesthetic sign-off on official local synthetic V2. Not push, staging, production, Sites, Figma, or deploy authority."
     }
   },
   "routes": [

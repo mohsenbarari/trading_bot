@@ -13,6 +13,7 @@ import {
   MATRIX_PENDING_STATUS,
   OWNER_APPROVAL_PHRASE,
   evaluateMatrixAcceptanceTransition,
+  loadStage8Closure,
 } from './lib/stage8-full-acceptance-contract.mjs'
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
@@ -31,11 +32,19 @@ describe('Stage 8 acceptance matrix source binding', () => {
     'utf8',
   )
 
-  it('locks the pending official-run state machine', () => {
-    const result = evaluateMatrixAcceptanceTransition(matrix, { repoRoot })
-    expect(result).toEqual({ passed: true, failures: [], state: 'pending' })
-    expect(matrix.status).toBe(MATRIX_PENDING_STATUS)
-    expect(matrix.acceptanceAuthority).toBe(false)
+  it('locks the closed official-run state machine after owner sign-off', () => {
+    const closure = loadStage8Closure(repoRoot)
+    const result = evaluateMatrixAcceptanceTransition(matrix, { repoRoot, closure })
+    expect(result).toEqual({ passed: true, failures: [], state: 'closed' })
+    expect(matrix.status).toBe(MATRIX_CLOSED_STATUS)
+    expect(matrix.acceptanceAuthority).toBe(true)
+    expect(closure.status).toBe(MATRIX_CLOSED_STATUS)
+    expect(closure.ownerSignoff).toEqual({
+      status: 'approved',
+      source: 'explicit-current-conversation',
+      approvedAt: '2026-08-15T08:00:00Z',
+      approvalPhrase: OWNER_APPROVAL_PHRASE,
+    })
     expect(matrix.cellAccounting.executedFullMatrixCellCount).toBe(270)
     expect(matrix.cellAccounting.viewportStateInteractionEnvironmentExpansionPerformed).toBe(true)
     expect(matrix.cellAccounting.plannedScenarioCount).toBe(960)
@@ -53,6 +62,17 @@ describe('Stage 8 acceptance matrix source binding', () => {
     expect(matrix.partialSyntheticBrowserSlices).toHaveLength(12)
   })
 
+  it('still accepts a consistent pending clone without owner closure', () => {
+    const pending = structuredClone(matrix)
+    pending.status = MATRIX_PENDING_STATUS
+    pending.acceptanceAuthority = false
+    expect(evaluateMatrixAcceptanceTransition(pending, { repoRoot, closure: null })).toEqual({
+      passed: true,
+      failures: [],
+      state: 'pending',
+    })
+  })
+
   it('fails 270 cells with a stale status or missing expansion', () => {
     const staleStatus = structuredClone(matrix)
     staleStatus.status = 'partial-browser-slice-executed-full-acceptance-pending'
@@ -64,12 +84,15 @@ describe('Stage 8 acceptance matrix source binding', () => {
 
   it('fails acceptanceAuthority=true without a valid closure and owner sign-off', () => {
     const authorityOnly = structuredClone(matrix)
+    authorityOnly.status = MATRIX_PENDING_STATUS
     authorityOnly.acceptanceAuthority = true
-    expect(evaluateMatrixAcceptanceTransition(authorityOnly, { repoRoot }).passed).toBe(false)
+    expect(evaluateMatrixAcceptanceTransition(authorityOnly, { repoRoot, closure: null }).passed).toBe(false)
     const closedWithoutSignoff = structuredClone(matrix)
     closedWithoutSignoff.status = MATRIX_CLOSED_STATUS
     closedWithoutSignoff.acceptanceAuthority = true
-    expect(evaluateMatrixAcceptanceTransition(closedWithoutSignoff, { repoRoot }).passed).toBe(false)
+    expect(evaluateMatrixAcceptanceTransition(closedWithoutSignoff, { repoRoot, closure: null }).passed).toBe(
+      false,
+    )
   })
 
   it('fails passed-below-executed, harnessDeferred, partial drift, and broken refs', () => {
@@ -123,6 +146,8 @@ describe('Stage 8 acceptance matrix source binding', () => {
     midAuthority.acceptanceAuthority = false
     expect(evaluateMatrixAcceptanceTransition(midAuthority, { repoRoot, closure }).passed).toBe(false)
     const pendingWithClosure = structuredClone(matrix)
+    pendingWithClosure.status = MATRIX_PENDING_STATUS
+    pendingWithClosure.acceptanceAuthority = false
     expect(evaluateMatrixAcceptanceTransition(pendingWithClosure, { repoRoot, closure }).passed).toBe(false)
   })
 
