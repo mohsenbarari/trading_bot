@@ -1079,13 +1079,14 @@ def render_group_activity_fragment(conversation_db: Path) -> str:
             int((datetime.now(timezone.utc) - latest).total_seconds()),
         )
         fresh = age_seconds <= GROUP_ANCHOR_WINDOW_SECONDS
-        status = "تازه برای مدل" if fresh else "منقضی برای مدل"
+        status = "در پنجرهٔ فعال مدل" if fresh else "خارج از پنجرهٔ فعال مدل"
         return (
             f"<small class='activity-freshness {'fresh' if fresh else 'stale'}'>"
-            f"{status} · آخرین رویداد: {fa_datetime(iso_utc(latest))} "
+            f"{status} · آخرین رکورد واجدشرایط: {fa_datetime(iso_utc(latest))} "
             f"({fa_number(age_seconds // 60)} دقیقه پیش)</small>"
         )
-    return f"""<section><div class="section-head"><h2>آخرین فعالیت گروه‌های معاملاتی</h2><span class="badge">داده‌های ثبت‌شده</span></div>
+    return f"""<section><div class="section-head"><h2>آخرین ورودی‌های گروهیِ واجدشرایط مدل</h2><span class="badge">فقط رکوردهای پذیرفته‌شده</span></div>
+      <p class="activity-scope-note">این فهرست همهٔ پیام‌های دریافتی نیست؛ فقط رکوردهایی را نشان می‌دهد که قرارداد مدل پذیرفته است. سلامت دریافت و زمان جدیدترین رویداد canonical گروه در کارت «ورود گروه‌ها تا مدل» جدا نمایش داده می‌شود.</p>
       <div class="group-grid">
         <article class="feed-card"><h3>۵ آفر آخر — گروه ۱</h3>{freshness('group_1')}<ul>{render_live_rows(activity.get('group_1_offers', []), kind='offer')}</ul></article>
         <article class="feed-card"><h3>۵ آفر آخر — گروه ۲</h3>{freshness('group_2')}<ul>{render_live_rows(activity.get('group_2_offers', []), kind='offer')}</ul></article>
@@ -2085,7 +2086,7 @@ def render_input_health_panel(input_health: object) -> str:
         "public_market_telegram": "تلگرام بازار عمومی",
         "wallex_public_api": "API تتر",
         "binance_paxg_public_api": "پراکسی اونس PAXG",
-        "coin_group_projection": "گروه‌ها تا مدل",
+        "coin_group_projection": "ورود گروه‌ها تا مدل",
     }
     input_labels = {
         "melted_gold": "آب‌شده",
@@ -2110,6 +2111,38 @@ def render_input_health_panel(input_health: object) -> str:
                 if age is None
                 else f"heartbeat: {fa_number(age)} ثانیه پیش"
             )
+            if key == "coin_group_projection":
+                details = payload.get("details")
+                details = details if isinstance(details, dict) else {}
+                for group_number in (1, 2):
+                    prefix = f"group_{group_number}"
+                    canonical_event = details.get(
+                        f"{prefix}_latest_canonical_event_utc"
+                    )
+                    eligible = details.get(
+                        f"{prefix}_latest_eligible_event_utc"
+                    )
+                    pending = details.get(f"{prefix}_pending_review_total")
+                    rejected = details.get(f"{prefix}_rejected_total")
+                    canonical_event_text = (
+                        fa_datetime(str(canonical_event))
+                        if canonical_event
+                        else "بدون ورودی canonical"
+                    )
+                    eligible_text = (
+                        fa_datetime(str(eligible))
+                        if eligible
+                        else "بدون ورودی واجدشرایط"
+                    )
+                    detail += (
+                        f" · گروه {fa_number(group_number)}: جدیدترین رویداد canonical گروه "
+                        f"{canonical_event_text}؛ آخرین ورودی واجدشرایط canonical {eligible_text}"
+                    )
+                    if pending is not None or rejected is not None:
+                        detail += (
+                            f"؛ در انتظار بررسی {fa_number(pending or 0)}"
+                            f"؛ رد/نادیده {fa_number(rejected or 0)}"
+                        )
             cards.append(
                 f"<article class='health-card health-{html.escape(status.lower())}'>"
                 f"<span>{html.escape(label)}</span>"
@@ -2144,7 +2177,12 @@ def render_input_health_panel(input_health: object) -> str:
             )
             age = _fa_age(payload.get("latest_observation_age_seconds"))
             if age:
-                detail += f" · آخرین داده {age} پیش"
+                age_label = (
+                    "جدیدترین لنگر واجدشرایط مدل"
+                    if key == "coin_groups"
+                    else "آخرین دادهٔ قابل‌مصرف"
+                )
+                detail += f" · {age_label} {age} پیش"
             cards.append(
                 f"<article class='health-card health-{html.escape(status.lower())}'>"
                 f"<span>ورودی {html.escape(input_labels.get(key, key))}</span>"
@@ -4543,6 +4581,12 @@ button:disabled, input:disabled, select:disabled, textarea:disabled {{
 }}
 .activity-freshness.fresh {{ color: var(--accent-emerald); }}
 .activity-freshness.stale {{ color: var(--accent-rose); }}
+.activity-scope-note {{
+  margin: -3px 0 12px;
+  color: var(--text-sub);
+  font-size: 11px;
+  line-height: 1.75;
+}}
 footer {{
   color: var(--text-sub);
   font-size: 12px;

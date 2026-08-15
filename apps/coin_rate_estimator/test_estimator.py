@@ -1544,7 +1544,20 @@ class EstimatorTests(unittest.TestCase):
                     "collectors": {
                         "public_market_telegram": {"status": "HEALTHY", "heartbeat_age_seconds": 4},
                         "wallex_public_api": {"status": "DEGRADED", "heartbeat_age_seconds": 2},
-                        "coin_group_projection": {"status": "HEALTHY", "heartbeat_age_seconds": 8},
+                        "coin_group_projection": {
+                            "status": "HEALTHY",
+                            "heartbeat_age_seconds": 8,
+                            "details": {
+                                "group_1_latest_canonical_event_utc": "2026-08-13T16:59:58Z",
+                                "group_1_latest_eligible_event_utc": "2026-08-11T08:51:10Z",
+                                "group_1_pending_review_total": 59,
+                                "group_1_rejected_total": 3,
+                                "group_2_latest_canonical_event_utc": "2026-08-13T16:59:59Z",
+                                "group_2_latest_eligible_event_utc": "2026-08-13T16:59:30Z",
+                                "group_2_pending_review_total": 57,
+                                "group_2_rejected_total": 3,
+                            },
+                        },
                     },
                     "model_inputs": {
                         "coin_groups": {
@@ -1561,7 +1574,12 @@ class EstimatorTests(unittest.TestCase):
         self.assertIn("نیازمند توجه", body)
         self.assertIn("ورودی گروه‌های سکه", body)
         self.assertIn("فقط لنگر تاریخی", body)
-        self.assertIn("آخرین داده ۵ دقیقه پیش", body)
+        self.assertIn("جدیدترین لنگر واجدشرایط مدل ۵ دقیقه پیش", body)
+        self.assertNotIn("آخرین آپدیت گروه‌های تلگرامی", body)
+        self.assertIn("ورود گروه‌ها تا مدل", body)
+        self.assertIn("جدیدترین رویداد canonical گروه", body)
+        self.assertIn("آخرین ورودی واجدشرایط", body)
+        self.assertIn("در انتظار بررسی ۵۹", body)
 
     def test_health_response_is_unavailable_for_critical_inputs(self) -> None:
         status, payload = health_response(
@@ -1665,7 +1683,8 @@ class EstimatorTests(unittest.TestCase):
             finally:
                 connection.close()
             body = render_group_activity_fragment(conversation_path)
-        self.assertIn("منقضی برای مدل", body)
+        self.assertIn("خارج از پنجرهٔ فعال مدل", body)
+        self.assertIn("فقط رکوردهای پذیرفته‌شده", body)
 
     def test_estimate_fragment_includes_top_ticker_cards(self) -> None:
         fragment = render_page(

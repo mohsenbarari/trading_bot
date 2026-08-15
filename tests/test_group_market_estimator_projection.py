@@ -65,7 +65,11 @@ def test_projection_uses_opaque_ids_and_removes_later_ineligible_fact() -> None:
         market.commit()
         market.close()
 
-        assert project(market_path, conversation_path)["eligible_offers"] == 1
+        report = project(market_path, conversation_path)
+        assert report["eligible_offers"] == 1
+        assert report["group_1_latest_canonical_event_utc"] == "2026-08-13T09:00:00Z"
+        assert report["group_1_latest_eligible_event_utc"] == "2026-08-13T09:00:00Z"
+        assert report["group_2_latest_canonical_event_utc"] is None
         connection = sqlite3.connect(conversation_path)
         row = connection.execute(
             "SELECT m.message_id,m.text,o.source_text,o.price FROM offers o JOIN messages m ON m.import_id=o.import_id AND m.message_id=o.message_id"

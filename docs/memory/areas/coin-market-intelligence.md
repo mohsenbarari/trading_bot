@@ -7,6 +7,10 @@
 - Coin-group settlement supports both generations: old `خ ن ف`/`ف ن ف` and
   current `خ ف`/`ف ف` mean tomorrow; old `خ ن`/`ف ن`, current single `خ`/`ف`,
   and standalone `نق` mean cash. Explicit future delivery wins over `ن`.
+- Reject a malformed coin-group envelope individually; inverted edit/create
+  times must not poison valid siblings or freeze the checkpoint. The dashboard
+  keeps collector heartbeat, latest canonical group event, latest eligible event and
+  the rate's selected anchor distinct.
 - A group trade requires one structurally linked reply branch. Keep users and
   sibling branches isolated, prefer attributable owner confirmation, use the
   latest negotiated quantity/price on that branch, deduplicate declarations

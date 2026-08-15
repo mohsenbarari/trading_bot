@@ -26,6 +26,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from core.market_intelligence.coin_group_pipeline import process_coin_group_staging
 from core.market_intelligence.coin_group_staging import (
+    CoinGroupStagingError,
     CoinGroupStagingMessage,
     connect_coin_group_staging,
     initialize_coin_group_staging,
@@ -49,6 +50,17 @@ _BATCH_RULE = re.compile(r"(?:\r?\n\s*)+[━─—-]{3,}\s*(?:\r?\n\s*)+")
 
 class CoinGroupEventCollectorError(RuntimeError):
     """A redacted, operator-safe collection failure."""
+
+
+def collector_failure_reason(exc: BaseException) -> str:
+    """Return actionable detail only for errors with an operator-safe contract."""
+
+    if isinstance(
+        exc,
+        (CoinGroupEventCollectorError, CoinGroupStagingError, OSError, ValueError),
+    ):
+        return str(exc)
+    return f"coin_group_event_collect_failed:{type(exc).__name__}"
 
 
 def _emit(**payload: object) -> None:
@@ -148,6 +160,12 @@ def _event_message(
             else None
         )
     except Exception:
+        return None
+    # A malformed edit timestamp must not poison the complete channel batch.
+    # The canonical payload decoder already applies this same fail-closed
+    # ordering rule: reject only the contradictory envelope and never repair
+    # or guess its source time.
+    if edited is not None and edited < published:
         return None
     available = max(published, received)
     reply = _positive_int(payload.get("reply_message_id"))
@@ -328,11 +346,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         _emit(**asyncio.run(collect(args)))
         return 0
-    except (CoinGroupEventCollectorError, OSError, ValueError) as exc:
-        _emit(status="FAILED", reason=str(exc))
-        return 2
     except Exception as exc:
-        _emit(status="FAILED", reason=f"coin_group_event_collect_failed:{type(exc).__name__}")
+        _emit(status="FAILED", reason=collector_failure_reason(exc))
         return 2
 
 

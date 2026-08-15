@@ -159,6 +159,8 @@ def assess_probe(
     probe_status = str(raw.get("status") or "UNKNOWN").upper()
     heartbeat = parse_utc(raw.get("heartbeat_at_utc"))
     last_success = parse_utc(raw.get("last_success_at_utc"))
+    raw_details = raw.get("details")
+    raw_details = raw_details if isinstance(raw_details, Mapping) else {}
     age = None if heartbeat is None else (as_of - heartbeat).total_seconds()
     base = {
         "probe_status": probe_status,
@@ -167,6 +169,11 @@ def assess_probe(
         "last_success_at_utc": utc_text(last_success) if last_success else None,
         "max_age_seconds": int(max_age_seconds),
         "error_code": raw.get("error_code"),
+        "details": {
+            str(key): value
+            for key, value in raw_details.items()
+            if value is None or isinstance(value, (bool, int, float, str))
+        },
     }
     if heartbeat is None:
         return {**base, "status": _severity(critical), "reason_code": "COLLECTOR_HEARTBEAT_INVALID"}

@@ -146,7 +146,48 @@ def _rows(connection: sqlite3.Connection) -> list[sqlite3.Row]:
     )
 
 
-def project(market_store: Path, conversation_db: Path) -> dict[str, int | str]:
+def _group_observability(rows: Sequence[sqlite3.Row]) -> dict[str, int | str | None]:
+    """Summarize intake separately from model eligibility without private data."""
+
+    result: dict[str, int | str | None] = {}
+    for group_number in (1, 2):
+        prefix = f"group_{group_number}"
+        result[f"{prefix}_latest_canonical_event_utc"] = None
+        result[f"{prefix}_latest_eligible_event_utc"] = None
+        result[f"{prefix}_pending_review_total"] = 0
+        result[f"{prefix}_rejected_total"] = 0
+    for row in rows:
+        source_code = str(row["source_code"] or "").upper()
+        if source_code not in {"GROUP_1", "GROUP_2"}:
+            continue
+        prefix = source_code.lower()
+        event_time = str(row["event_time_utc"] or "") or None
+        canonical_key = f"{prefix}_latest_canonical_event_utc"
+        if event_time and (
+            result[canonical_key] is None
+            or event_time > str(result[canonical_key])
+        ):
+            result[canonical_key] = event_time
+        quality = str(row["quality_state"] or "").upper()
+        if quality == "ELIGIBLE":
+            eligible_key = f"{prefix}_latest_eligible_event_utc"
+            if event_time and (
+                result[eligible_key] is None
+                or event_time > str(result[eligible_key])
+            ):
+                result[eligible_key] = event_time
+        elif quality == "PENDING_REVIEW":
+            key = f"{prefix}_pending_review_total"
+            result[key] = int(result[key] or 0) + 1
+        elif quality in {"REJECTED", "IGNORED"}:
+            key = f"{prefix}_rejected_total"
+            result[key] = int(result[key] or 0) + 1
+    return result
+
+
+def project(
+    market_store: Path, conversation_db: Path
+) -> dict[str, int | str | None]:
     if not market_store.is_file():
         raise ProjectionError("market_store_unavailable")
     if not conversation_db.is_file():
@@ -160,6 +201,7 @@ def project(market_store: Path, conversation_db: Path) -> dict[str, int | str]:
     try:
         _require_schema(destination)
         rows = _rows(source)
+        counts.update(_group_observability(rows))
         now = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
         destination.execute("BEGIN IMMEDIATE")
         destination.execute(
@@ -443,9 +485,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             status="HEALTHY",
             successful=True,
             details={
-                "eligible_offers": int(result["eligible_offers"]),
-                "eligible_trades": int(result["eligible_trades"]),
-                "ineligible_removed": int(result["ineligible_removed"]),
+                str(key): value
+                for key, value in result.items()
+                if key != "status"
             },
         )
         print(json.dumps(result, sort_keys=True), flush=True)

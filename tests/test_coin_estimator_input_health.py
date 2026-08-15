@@ -93,7 +93,12 @@ def _write_healthy_probes(config: InputHealthConfig) -> None:
         status="HEALTHY",
         successful=True,
         now=NOW,
-        details={"eligible_offers": 0, "eligible_trades": 0},
+        details={
+            "eligible_offers": 0,
+            "eligible_trades": 0,
+            "group_1_latest_canonical_event_utc": "2026-08-13T16:59:58Z",
+            "group_1_latest_eligible_event_utc": "2026-08-11T08:51:10Z",
+        },
     )
 
 
@@ -105,6 +110,12 @@ def test_quiet_group_is_healthy_when_projection_heartbeat_is_fresh() -> None:
 
     assert result["status"] == "HEALTHY"
     assert result["collectors"]["coin_group_projection"]["status"] == "HEALTHY"
+    assert (
+        result["collectors"]["coin_group_projection"]["details"][
+            "group_1_latest_canonical_event_utc"
+        ]
+        == "2026-08-13T16:59:58Z"
+    )
     assert result["model_inputs"]["generic_coin"]["status"] == "QUIET_OR_NO_DATA"
     assert result["reason_codes"] == []
 

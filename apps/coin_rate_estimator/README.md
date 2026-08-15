@@ -143,6 +143,13 @@ recorded blend weight and rate method. Fresh public coin quotes with ambiguous
 settlement remain excluded from inference, but are labelled as
 fresh-but-ineligible instead of being presented as a quiet source.
 
+For private coin groups the page keeps four clocks distinct: projection
+heartbeat, latest privacy-safe canonical group event, latest canonical eligible
+event and the live/historical anchor selected by each rate row. Pending-review
+and rejected totals are shown without raw message text or identity. An invalid
+envelope is rejected individually and cannot block valid sibling messages or
+freeze the channel checkpoint.
+
 ### Live input cadence and bounded self-training
 
 Inference refreshes every five seconds. Telegram messages remain
