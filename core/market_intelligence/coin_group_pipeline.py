@@ -7,24 +7,34 @@ no collector, scheduler, network, or application request hook is registered.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
+from hashlib import blake2b
 import json
 import math
+import re
 import sqlite3
 from statistics import median
-from typing import Iterable
+from typing import Iterable, Mapping
+
+from .coin_group_feedback import CoinGroupParserFeedback
 
 from .coin_group_resolution import (
     MAXIMUM_ANCHOR_AGE_SECONDS,
     CoinPriceAnchor,
+    ResolvedCoinGroupOffer,
     resolve_coin_group_offers,
     resolved_coin_group_observations,
 )
 from .coin_group_staging import StagedCoinGroupMessage, list_current_staged_coin_group_messages
 from .coin_group_trades import CoinGroupOfferRecord, coin_group_trade_observations, link_coin_group_trades
-from .coin_groups import CoinGroupMessageInput, parse_coin_group_offers
-from .market_contracts import MarketObservation, normalize_utc
+from .coin_groups import (
+    _PRICE_BOUNDS,
+    _text as normalize_coin_group_text,
+    CoinGroupMessageInput,
+    parse_coin_group_offers,
+)
+from .market_contracts import MarketObservation, derive_event_key, normalize_utc
 from .market_store import upsert_observation
 
 
@@ -35,6 +45,8 @@ PROVISIONAL_MINIMUM_SENDERS = 2
 PROVISIONAL_MINIMUM_NONCONDITIONAL_MESSAGES = 1
 PROVISIONAL_MAXIMUM_RELATIVE_SPREAD = 0.015
 _RETRACTION_REASON = "NO_LONGER_PRESENT_IN_CURRENT_STAGED_MESSAGE_GRAPH"
+_SYNTAX_NUMBERS = re.compile(r"\d+(?:[٬،,./_-]\d+)*")
+_SAFE_PRICE_MULTIPLIERS = (0.001, 0.01, 0.1, 10.0, 100.0, 1_000.0)
 
 
 _SEMANTIC_OBSERVATION_COLUMNS = (
@@ -119,6 +131,10 @@ class CoinGroupPipelineReport:
     pending_or_rejected_trades: int
     root_messages_not_trade_linkable: int
     retracted_facts: int
+    feedback_reviews_seen: int
+    feedback_reviews_applied: int
+    feedback_pattern_calibrations_applied: int
+    applied_feedback_event_keys: tuple[bytes, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -135,6 +151,23 @@ class _ExplicitClaim:
     is_conditional: bool
 
 
+@dataclass(frozen=True, slots=True)
+class _ParserPatternCalibration:
+    syntax_fingerprint: str
+    event_type: str
+    group_number: int
+    ambiguous_fields: frozenset[str]
+    event_confirmed: bool
+    commodity_code: str
+    side: str
+    settlement_term: str
+    trade_form: str
+    is_conditional: bool
+    price_multiplier: float | None
+    review_revision: int
+    reviewed_at_utc: str
+
+
 def _source(message: StagedCoinGroupMessage) -> CoinGroupMessageInput:
     return CoinGroupMessageInput(
         group_number=message.group_number,
@@ -145,6 +178,431 @@ def _source(message: StagedCoinGroupMessage) -> CoinGroupMessageInput:
     )
 
 
+def _syntax_fingerprint(
+    text: str,
+    *,
+    event_type: str,
+    offer_index: int = 0,
+) -> str:
+    """Hash a number-redacted grammar shape; never retain the private text."""
+
+    normalized = normalize_coin_group_text(text)
+    skeleton = _SYNTAX_NUMBERS.sub("#", normalized)
+    material = f"{event_type.upper()}:{int(offer_index)}:{skeleton}".encode("utf-8")
+    return blake2b(
+        material,
+        digest_size=32,
+        person=b"coin-grp-syntax1",
+    ).hexdigest()
+
+
+def _safe_price_multiplier(original: int, reviewed: int) -> float | None:
+    if original <= 0 or reviewed <= 0:
+        return None
+    ratio = reviewed / original
+    return next(
+        (
+            candidate
+            for candidate in _SAFE_PRICE_MULTIPLIERS
+            if math.isclose(ratio, candidate, rel_tol=1e-9, abs_tol=1e-9)
+        ),
+        None,
+    )
+
+
+def _calibration_from_feedback(
+    review: CoinGroupParserFeedback,
+    *,
+    syntax_fingerprint: str,
+    original_price: int,
+) -> _ParserPatternCalibration:
+    return _ParserPatternCalibration(
+        syntax_fingerprint=syntax_fingerprint,
+        event_type=review.event_type,
+        group_number=review.group_number,
+        ambiguous_fields=review.ambiguous_fields,
+        event_confirmed=review.event_confirmed,
+        commodity_code=review.commodity_code,
+        side=review.side,
+        settlement_term=review.settlement_term,
+        trade_form=review.trade_form,
+        is_conditional=review.is_conditional,
+        price_multiplier=(
+            _safe_price_multiplier(
+                original_price,
+                review.price_project_thousand_toman,
+            )
+            if "price" in review.ambiguous_fields
+            else None
+        ),
+        review_revision=review.review_revision,
+        reviewed_at_utc=review.reviewed_at_utc,
+    )
+
+
+def _store_parser_calibrations(
+    connection: sqlite3.Connection,
+) -> list[_ParserPatternCalibration]:
+    rows = connection.execute(
+        """
+        SELECT event_type,source_code,instrument,side,settlement_term,trade_form,
+               is_conditional,attributes_json
+        FROM market_observations
+        WHERE json_extract(attributes_json,'$.human_feedback_syntax_fingerprint')
+              IS NOT NULL
+          AND json_extract(attributes_json,'$.human_feedback_reviewed_at_utc')
+              IS NOT NULL
+        ORDER BY available_at_utc,event_key
+        """
+    ).fetchall()
+    calibrations: list[_ParserPatternCalibration] = []
+    for row in rows:
+        try:
+            attributes = json.loads(str(row["attributes_json"] or "{}"))
+            fields = frozenset(
+                str(item) for item in attributes["human_feedback_fields"]
+            )
+            fingerprint = str(
+                attributes["human_feedback_syntax_fingerprint"]
+            )
+            reviewed_at = normalize_utc(
+                attributes["human_feedback_reviewed_at_utc"],
+                field_name="human_feedback_pattern_reviewed_at_utc",
+            )
+            group_number = int(str(row["source_code"])[-1])
+            revision = int(attributes["human_feedback_revision"])
+            event_confirmed = bool(attributes["human_feedback_event_confirmed"])
+            raw_multiplier = attributes.get("human_feedback_price_multiplier")
+            multiplier = (
+                float(raw_multiplier) if raw_multiplier is not None else None
+            )
+            commodity = str(row["instrument"])[len("COIN_") :]
+        except (KeyError, TypeError, ValueError):
+            continue
+        if (
+            len(fingerprint) != 64
+            or group_number not in {1, 2}
+            or not fields
+            or multiplier is not None
+            and multiplier not in _SAFE_PRICE_MULTIPLIERS
+        ):
+            continue
+        calibrations.append(
+            _ParserPatternCalibration(
+                syntax_fingerprint=fingerprint,
+                event_type=str(row["event_type"]),
+                group_number=group_number,
+                ambiguous_fields=fields,
+                event_confirmed=event_confirmed,
+                commodity_code=commodity,
+                side=str(row["side"]),
+                settlement_term=str(row["settlement_term"]),
+                trade_form=str(row["trade_form"]),
+                is_conditional=bool(row["is_conditional"]),
+                price_multiplier=multiplier,
+                review_revision=revision,
+                reviewed_at_utc=reviewed_at,
+            )
+        )
+    return calibrations
+
+
+def _matching_pattern_calibration(
+    calibrations: Iterable[_ParserPatternCalibration],
+    *,
+    syntax_fingerprint: str,
+    event_type: str,
+    group_number: int,
+    available_at_utc: str,
+) -> _ParserPatternCalibration | None:
+    candidates = [
+        item
+        for item in calibrations
+        if item.syntax_fingerprint == syntax_fingerprint
+        and item.event_type == event_type
+        and item.group_number == group_number
+        and item.reviewed_at_utc <= available_at_utc
+    ]
+    return max(
+        candidates,
+        key=lambda item: (item.reviewed_at_utc, item.review_revision),
+        default=None,
+    )
+
+
+def _feedback_anchors(
+    feedback: Iterable[CoinGroupParserFeedback],
+) -> tuple[CoinPriceAnchor, ...]:
+    """Convert confirmed reviews to causal anchors; never backdate review knowledge."""
+
+    return tuple(
+        CoinPriceAnchor(
+            commodity_code=item.commodity_code,
+            price_project_thousand_toman=item.price_project_thousand_toman,
+            event_time_utc=item.source_event_time_utc,
+            available_at_utc=item.reviewed_at_utc,
+            settlement_term=item.settlement_term,
+            trade_form=item.trade_form,
+            evidence_kind="HUMAN_REVIEWED",
+        )
+        for item in feedback
+        if item.event_confirmed and not item.is_conditional
+    )
+
+
+def _reviewed_offer(
+    source: CoinGroupMessageInput,
+    resolved: ResolvedCoinGroupOffer,
+    feedback: Mapping[bytes, CoinGroupParserFeedback],
+    *,
+    as_of_utc: str,
+) -> tuple[ResolvedCoinGroupOffer, CoinGroupParserFeedback | None]:
+    offer_index = int(resolved.offer_index)
+    key = derive_event_key(
+        "coin-group-offer-v1",
+        source.group_number,
+        source.source_event_id,
+        offer_index,
+    )
+    review = feedback.get(key)
+    if (
+        review is None
+        or review.event_type != "OFFER"
+        or review.group_number != int(source.group_number)
+        or review.source_event_time_utc
+        != normalize_utc(source.published_at_utc, field_name="feedback_offer_event_time")
+        or review.reviewed_at_utc > as_of_utc
+    ):
+        return resolved, None
+    return (
+        replace(
+            resolved,
+            commodity_code=review.commodity_code,
+            price_project_thousand_toman=review.price_project_thousand_toman,
+            quantity=review.quantity,
+            side=review.side,
+            settlement_term=review.settlement_term,
+            trade_form=review.trade_form,
+            is_conditional=review.is_conditional,
+            quality_state="ELIGIBLE" if review.event_confirmed else "REJECTED",
+            resolution_reason=(
+                "HUMAN_REVIEWED_FIELD_CORRECTION"
+                if review.event_confirmed
+                else "HUMAN_REVIEWED_NOT_AN_EVENT"
+            ),
+            authoritative_anchor_count=max(
+                2, int(getattr(resolved, "authoritative_anchor_count", 0))
+            ),
+        ),
+        review,
+    )
+
+
+def _reviewed_observation(
+    observation: MarketObservation,
+    review: CoinGroupParserFeedback,
+    *,
+    syntax_fingerprint: str,
+) -> MarketObservation:
+    price_multiplier = (
+        _safe_price_multiplier(
+            int(observation.price),
+            review.price_project_thousand_toman,
+        )
+        if "price" in review.ambiguous_fields
+        else None
+    )
+    attributes = dict(observation.attributes)
+    attributes.update(
+        {
+            "human_feedback_version": COIN_GROUP_PIPELINE_VERSION,
+            "human_feedback_revision": review.review_revision,
+            "human_feedback_fields": sorted(review.ambiguous_fields),
+            "human_feedback_reviewed_at_utc": review.reviewed_at_utc,
+            "human_feedback_event_confirmed": review.event_confirmed,
+            "human_feedback_syntax_fingerprint": syntax_fingerprint,
+            "human_feedback_price_multiplier": price_multiplier,
+            "resolution_reason": (
+                "HUMAN_REVIEWED_FIELD_CORRECTION"
+                if review.event_confirmed
+                else "HUMAN_REVIEWED_NOT_AN_EVENT"
+            ),
+        }
+    )
+    return replace(
+        observation,
+        instrument="COIN_" + review.commodity_code,
+        market_label="GROUP_COIN_" + review.commodity_code,
+        settlement_term=review.settlement_term,
+        trade_form=review.trade_form,
+        side=review.side,
+        price=review.price_project_thousand_toman,
+        quantity=review.quantity,
+        parse_confidence=1.0 if review.event_confirmed else 0.0,
+        parser_version=(
+            observation.parser_version
+            + f"+human-feedback-r{review.review_revision}"
+        ),
+        quality_state="ELIGIBLE" if review.event_confirmed else "REJECTED",
+        quality_policy_version="coin-group-human-feedback-v1",
+        is_conditional=review.is_conditional,
+        attributes=attributes,
+    )
+
+
+def _pattern_calibrated_offer(
+    offer: ResolvedCoinGroupOffer,
+    calibration: _ParserPatternCalibration,
+) -> ResolvedCoinGroupOffer:
+    fields = calibration.ambiguous_fields
+    commodity = (
+        calibration.commodity_code
+        if "commodity" in fields
+        else offer.commodity_code
+    )
+    price = offer.price_project_thousand_toman
+    if "price" in fields and calibration.price_multiplier is not None:
+        candidate_price = int(round(price * calibration.price_multiplier))
+        if (
+            commodity in _PRICE_BOUNDS
+            and _PRICE_BOUNDS[str(commodity)][0]
+            <= candidate_price
+            <= _PRICE_BOUNDS[str(commodity)][1]
+        ):
+            price = candidate_price
+    event_rejected = (
+        "event_validity" in fields and not calibration.event_confirmed
+    )
+    price_in_band = bool(
+        commodity in _PRICE_BOUNDS
+        and _PRICE_BOUNDS[str(commodity)][0]
+        <= price
+        <= _PRICE_BOUNDS[str(commodity)][1]
+    )
+    human_resolved = (
+        "commodity" in fields
+        or "event_validity" in fields
+        and calibration.event_confirmed
+    )
+    quality = offer.quality_state
+    if event_rejected:
+        quality = "REJECTED"
+    elif human_resolved and price_in_band:
+        quality = "ELIGIBLE"
+    return replace(
+        offer,
+        commodity_code=commodity,
+        price_project_thousand_toman=price,
+        side=calibration.side if "side" in fields else offer.side,
+        settlement_term=(
+            calibration.settlement_term
+            if "settlement" in fields
+            else offer.settlement_term
+        ),
+        trade_form=(
+            calibration.trade_form
+            if "trade_form" in fields
+            else offer.trade_form
+        ),
+        is_conditional=(
+            calibration.is_conditional
+            if "conditional" in fields
+            else offer.is_conditional
+        ),
+        quality_state=quality,
+        resolution_reason=(
+            "HUMAN_REVIEWED_SYNTAX_NOT_AN_EVENT"
+            if event_rejected
+            else "HUMAN_REVIEWED_SYNTAX_CALIBRATION"
+        ),
+        authoritative_anchor_count=(
+            max(2, offer.authoritative_anchor_count)
+            if quality == "ELIGIBLE"
+            else offer.authoritative_anchor_count
+        ),
+    )
+
+
+def _pattern_calibrated_observation(
+    observation: MarketObservation,
+    calibration: _ParserPatternCalibration,
+    *,
+    apply_economic_fields: bool = True,
+) -> MarketObservation:
+    review_fields = calibration.ambiguous_fields
+    fields = review_fields if apply_economic_fields else frozenset()
+    instrument = str(observation.instrument)
+    if "commodity" in fields:
+        instrument = "COIN_" + calibration.commodity_code
+    code = instrument[len("COIN_") :] if instrument.startswith("COIN_") else ""
+    price = int(observation.price)
+    if "price" in fields and calibration.price_multiplier is not None:
+        candidate_price = int(round(price * calibration.price_multiplier))
+        if (
+            code in _PRICE_BOUNDS
+            and _PRICE_BOUNDS[code][0] <= candidate_price <= _PRICE_BOUNDS[code][1]
+        ):
+            price = candidate_price
+    event_rejected = (
+        "event_validity" in fields and not calibration.event_confirmed
+    )
+    price_in_band = bool(
+        code in _PRICE_BOUNDS
+        and _PRICE_BOUNDS[code][0] <= price <= _PRICE_BOUNDS[code][1]
+    )
+    human_resolved = (
+        "commodity" in fields
+        or "event_validity" in fields
+        and calibration.event_confirmed
+    )
+    quality = observation.quality_state
+    if event_rejected:
+        quality = "REJECTED"
+    elif human_resolved and price_in_band:
+        quality = "ELIGIBLE"
+    attributes = dict(observation.attributes)
+    attributes.update(
+        {
+            "human_pattern_calibration_revision": calibration.review_revision,
+            "human_pattern_calibration_fields": sorted(review_fields),
+            "human_pattern_calibration_reviewed_at_utc": calibration.reviewed_at_utc,
+            "resolution_reason": (
+                "HUMAN_REVIEWED_SYNTAX_NOT_AN_EVENT"
+                if event_rejected
+                else "HUMAN_REVIEWED_SYNTAX_CALIBRATION"
+            ),
+        }
+    )
+    return replace(
+        observation,
+        instrument=instrument,
+        market_label="GROUP_" + instrument,
+        settlement_term=(
+            calibration.settlement_term
+            if "settlement" in fields
+            else observation.settlement_term
+        ),
+        trade_form=(
+            calibration.trade_form
+            if "trade_form" in fields
+            else observation.trade_form
+        ),
+        side=calibration.side if "side" in fields else observation.side,
+        price=price,
+        parser_version=(
+            observation.parser_version
+            + f"+human-pattern-r{calibration.review_revision}"
+        ),
+        parse_confidence=1.0 if quality == "ELIGIBLE" else 0.0,
+        quality_state=quality,
+        quality_policy_version="coin-group-human-pattern-v1",
+        is_conditional=(
+            calibration.is_conditional
+            if "conditional" in fields
+            else observation.is_conditional
+        ),
+        attributes=attributes,
+    )
 def _store_anchors(
     connection: sqlite3.Connection,
     *,
@@ -335,6 +793,7 @@ def process_coin_group_staging(
     *,
     as_of_utc: datetime | str,
     additional_anchors: Iterable[CoinPriceAnchor] = (),
+    parser_feedback: Mapping[bytes, CoinGroupParserFeedback] | None = None,
 ) -> CoinGroupPipelineReport:
     """Process current staging idempotently in one caller-owned Store transaction.
 
@@ -345,6 +804,9 @@ def process_coin_group_staging(
     """
 
     as_of = normalize_utc(as_of_utc, field_name="coin_group_pipeline_as_of_utc")
+    feedback = dict(parser_feedback or {})
+    pattern_calibrations = _store_parser_calibrations(market_connection)
+    pattern_calibrations_applied = 0
     messages = list_current_staged_coin_group_messages(staging_connection, as_of_utc=as_of)
     staging_horizon = min((item.event_time_utc for item in messages), default=None)
     minimum_anchor_time = (
@@ -360,7 +822,7 @@ def process_coin_group_staging(
             market_connection,
             minimum_event_time_utc=minimum_anchor_time,
         )
-    ) + tuple(additional_anchors)
+    ) + tuple(additional_anchors) + _feedback_anchors(feedback.values())
     all_resolved: dict[tuple[int, int], list] = {}
     explicit_claims: list[_ExplicitClaim] = []
     dynamic_anchors: list[CoinPriceAnchor] = []
@@ -368,6 +830,7 @@ def process_coin_group_staging(
     offer_facts = 0
     eligible_offers = 0
     pending_or_rejected_offers = 0
+    applied_feedback_keys: set[bytes] = set()
     for message in messages:
         source = _source(message)
         parsed = parse_coin_group_offers(source)
@@ -380,11 +843,55 @@ def process_coin_group_staging(
             *provisional_anchors,
             *dynamic_anchors,
         )
-        resolved = resolve_coin_group_offers(
+        resolver_output = resolve_coin_group_offers(
             source,
             anchors=resolution_anchors,
             parsed_offers=parsed,
         )
+        resolved = []
+        offer_reviews: dict[int, CoinGroupParserFeedback] = {}
+        offer_pattern_calibrations: dict[int, _ParserPatternCalibration] = {}
+        offer_syntax_fingerprints: dict[int, str] = {}
+        for item in resolver_output:
+            offer_index = int(item.offer_index)
+            syntax_fingerprint = _syntax_fingerprint(
+                source.text,
+                event_type="OFFER",
+                offer_index=offer_index,
+            )
+            offer_syntax_fingerprints[offer_index] = syntax_fingerprint
+            reviewed, review = _reviewed_offer(
+                source,
+                item,
+                feedback,
+                as_of_utc=as_of,
+            )
+            if review is not None:
+                offer_reviews[offer_index] = review
+                applied_feedback_keys.add(review.event_key)
+                pattern_calibrations.append(
+                    _calibration_from_feedback(
+                        review,
+                        syntax_fingerprint=syntax_fingerprint,
+                        original_price=item.price_project_thousand_toman,
+                    )
+                )
+            else:
+                calibration = _matching_pattern_calibration(
+                    pattern_calibrations,
+                    syntax_fingerprint=syntax_fingerprint,
+                    event_type="OFFER",
+                    group_number=source.group_number,
+                    available_at_utc=normalize_utc(
+                        source.available_at_utc,
+                        field_name="coin_group_pattern_offer_available_at_utc",
+                    ),
+                )
+                if calibration is not None:
+                    reviewed = _pattern_calibrated_offer(reviewed, calibration)
+                    offer_pattern_calibrations[offer_index] = calibration
+                    pattern_calibrations_applied += 1
+            resolved.append(reviewed)
         all_resolved[(message.group_number, message.message_id)] = resolved
         observations = resolved_coin_group_observations(
             source,
@@ -392,30 +899,65 @@ def process_coin_group_staging(
             resolution_available_at_utc=as_of,
             resolved_offers=resolved,
         )
-        for observation in observations:
+        for offer_index, observation in enumerate(observations):
+            review = feedback.get(observation.event_key)
+            if review is not None and review.event_key in applied_feedback_keys:
+                observation = _reviewed_observation(
+                    observation,
+                    review,
+                    syntax_fingerprint=offer_syntax_fingerprints[offer_index],
+                )
+            else:
+                calibration = offer_pattern_calibrations.get(offer_index)
+                if calibration is not None:
+                    observation = _pattern_calibrated_observation(
+                        observation,
+                        calibration,
+                        apply_economic_fields=False,
+                    )
             active_event_keys.add(observation.event_key)
             offer_facts += int(
                 _upsert_if_semantically_changed(market_connection, observation)
             )
         eligible_offers += sum(item.quality_state == "ELIGIBLE" for item in resolved)
         pending_or_rejected_offers += sum(item.quality_state != "ELIGIBLE" for item in resolved)
-        dynamic_anchors.extend(
-            CoinPriceAnchor(
-                commodity_code=item.commodity_code,
-                price_project_thousand_toman=item.price_project_thousand_toman,
-                event_time_utc=message.event_time_utc,
-                available_at_utc=message.available_at_utc,
-                settlement_term=item.settlement_term,
-                trade_form=item.trade_form,
-                evidence_kind="GROUP_DERIVED",
+        for item in resolved:
+            if (
+                item.quality_state != "ELIGIBLE"
+                or item.commodity_code is None
+                or item.is_conditional
+            ):
+                continue
+            review = offer_reviews.get(int(item.offer_index))
+            dynamic_anchors.append(
+                CoinPriceAnchor(
+                    commodity_code=item.commodity_code,
+                    price_project_thousand_toman=item.price_project_thousand_toman,
+                    event_time_utc=message.event_time_utc,
+                    available_at_utc=(
+                        review.reviewed_at_utc
+                        if review is not None
+                        else message.available_at_utc
+                    ),
+                    settlement_term=item.settlement_term,
+                    trade_form=item.trade_form,
+                    evidence_kind=(
+                        "HUMAN_REVIEWED"
+                        if review is not None
+                        else "GROUP_DERIVED"
+                    ),
+                )
             )
-            for item in resolved
-            if item.quality_state == "ELIGIBLE"
-            and item.commodity_code is not None
-            and not item.is_conditional
-        )
         if message.sender_digest is not None:
-            for candidate in parsed:
+            for candidate_index, candidate in enumerate(parsed):
+                candidate_key = derive_event_key(
+                    "coin-group-offer-v1",
+                    message.group_number,
+                    message.message_id,
+                    candidate_index,
+                )
+                if candidate_key in applied_feedback_keys:
+                    continue
                 if candidate.commodity_code is None:
                     continue
                 explicit_claims.append(
@@ -457,7 +999,59 @@ def process_coin_group_staging(
         resolution_available_at_utc=as_of,
     )
     trade_facts = 0
-    for observation in observations:
+    reviewed_trade_observations: list[MarketObservation] = []
+    message_by_key = {
+        (message.group_number, message.message_id): message for message in messages
+    }
+    for trade, observation in zip(trades, observations, strict=True):
+        confirmation = message_by_key[
+            (trade.group_number, trade.confirmation_message_id)
+        ]
+        syntax_fingerprint = _syntax_fingerprint(
+            confirmation.text,
+            event_type="TRADE",
+        )
+        review = feedback.get(observation.event_key)
+        if (
+            review is not None
+            and review.event_type == "TRADE"
+            and review.group_number == int(observation.source_code[-1])
+            and review.source_event_time_utc
+            == normalize_utc(observation.event_time_utc, field_name="feedback_trade_event_time")
+            and review.reviewed_at_utc <= as_of
+        ):
+            original_price = int(observation.price)
+            observation = _reviewed_observation(
+                observation,
+                review,
+                syntax_fingerprint=syntax_fingerprint,
+            )
+            applied_feedback_keys.add(review.event_key)
+            pattern_calibrations.append(
+                _calibration_from_feedback(
+                    review,
+                    syntax_fingerprint=syntax_fingerprint,
+                    original_price=original_price,
+                )
+            )
+        else:
+            calibration = _matching_pattern_calibration(
+                pattern_calibrations,
+                syntax_fingerprint=syntax_fingerprint,
+                event_type="TRADE",
+                group_number=trade.group_number,
+                available_at_utc=normalize_utc(
+                    trade.available_at_utc,
+                    field_name="coin_group_pattern_trade_available_at_utc",
+                ),
+            )
+            if calibration is not None:
+                observation = _pattern_calibrated_observation(
+                    observation,
+                    calibration,
+                )
+                pattern_calibrations_applied += 1
+        reviewed_trade_observations.append(observation)
         active_event_keys.add(observation.event_key)
         trade_facts += int(
             _upsert_if_semantically_changed(market_connection, observation)
@@ -474,8 +1068,16 @@ def process_coin_group_staging(
         eligible_offers=eligible_offers,
         pending_or_rejected_offers=pending_or_rejected_offers,
         trade_facts_upserted=trade_facts,
-        eligible_trades=sum(item.quality_state == "ELIGIBLE" for item in trades),
-        pending_or_rejected_trades=sum(item.quality_state != "ELIGIBLE" for item in trades),
+        eligible_trades=sum(
+            item.quality_state == "ELIGIBLE" for item in reviewed_trade_observations
+        ),
+        pending_or_rejected_trades=sum(
+            item.quality_state != "ELIGIBLE" for item in reviewed_trade_observations
+        ),
         root_messages_not_trade_linkable=not_linkable,
         retracted_facts=retracted_facts,
+        feedback_reviews_seen=len(feedback),
+        feedback_reviews_applied=len(applied_feedback_keys),
+        feedback_pattern_calibrations_applied=pattern_calibrations_applied,
+        applied_feedback_event_keys=tuple(sorted(applied_feedback_keys)),
     )

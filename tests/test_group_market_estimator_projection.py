@@ -59,7 +59,11 @@ def test_projection_uses_opaque_ids_and_keeps_conditional_fact_audit_only() -> N
                 quality_state="ELIGIBLE",
                 quality_policy_version="coin-group-resolution-v1",
                 is_conditional=False,
-                attributes={"group_number": 1},
+                attributes={
+                    "group_number": 1,
+                    "resolution_reason": "HUMAN_REVIEWED_FIELD_CORRECTION",
+                    "human_feedback_revision": 3,
+                },
             ),
         )
         market.commit()
@@ -78,7 +82,18 @@ def test_projection_uses_opaque_ids_and_keeps_conditional_fact_audit_only() -> N
         assert row[0] < 0
         assert row[1] == ""
         assert row[2] == "2026-08-13T09:00:03Z"
-        assert json.loads(row[3])["source_event_time_utc"] == "2026-08-13T09:00:00Z"
+        relevance = json.loads(row[3])
+        assert relevance["source_event_time_utc"] == "2026-08-13T09:00:00Z"
+        assert relevance["canonical_settlement_term"] == "CASH"
+        assert relevance["canonical_trade_form"] == "PHYSICAL"
+        assert relevance["canonical_quality_state"] == "ELIGIBLE"
+        assert relevance["canonical_is_conditional"] is False
+        assert (
+            relevance["canonical_resolution_reason"]
+            == "HUMAN_REVIEWED_FIELD_CORRECTION"
+        )
+        assert relevance["human_feedback_revision"] == 3
+        assert relevance["parser_version"] == "coin-group-context-v1"
         assert row[4].startswith("canonical:")
         assert row[5] == 186900
         connection.close()

@@ -47,6 +47,7 @@ from coin_estimator import (  # noqa: E402
     DEFAULT_CONVERSATION_DB,
     DEFAULT_MARKET_DB,
     DEFAULT_MODEL,
+    DEFAULT_REVIEW_DECISIONS_DB,
     COMMODITY_SPECS,
     GROUP_ANCHOR_WINDOW_SECONDS,
     NO_DATA_TOKEN,
@@ -81,6 +82,13 @@ from core.market_intelligence.input_health import (  # noqa: E402
     InputHealthConfig,
     build_estimator_input_health,
     update_probe_state,
+)
+from core.market_intelligence.coin_group_feedback import (  # noqa: E402
+    AMBIGUOUS_FIELDS as COIN_GROUP_AMBIGUOUS_FIELDS,
+    CoinGroupFeedbackError,
+    ensure_coin_group_feedback_store,
+    load_coin_group_parser_feedback,
+    record_coin_group_parser_feedback,
 )
 from telegram_price_collector.external_collectors import (  # noqa: E402
     ExternalSourceError,
@@ -1588,12 +1596,51 @@ _EVENT_AUDIT_MODEL_LABELS = {
     "SHADOW2_MORNING_REOPEN": "Shadow بازگشایی",
     "SHADOW3_ML_RESIDUAL": "Shadow یادگیری ماشین",
 }
+_FEEDBACK_COMMODITY_LABELS = {
+    "UNRESOLVED": "نامشخص / نامرتبط",
+    "IMAM": "امام",
+    "BAHAR": "بهار آزادی",
+    "QUARTER_BAHAR": "ربع بهار",
+    "HALF_BAHAR": "نیم بهار",
+    "QUARTER_LOW_DATE": "ربع تاریخ پایین",
+    "HALF_LOW_DATE": "نیم تاریخ پایین",
+    "ONE_GRAM": "یک گرمی مرکزی",
+}
+_FEEDBACK_LABEL_TO_COMMODITY = {
+    label: code for code, label in _FEEDBACK_COMMODITY_LABELS.items()
+}
+_FEEDBACK_SETTLEMENT_LABELS = {
+    "CASH": "نقدی",
+    "TODAY": "امروزی کاغذی",
+    "TOMORROW": "فردایی",
+}
+_PARSER_FEEDBACK_ERROR_FA = {
+    "parser_feedback_event_not_found": "این رویداد دیگر در دفتر canonical موجود نیست.",
+    "parser_feedback_ambiguous_fields_invalid": "حداقل یک فیلد مبهم معتبر انتخاب کنید.",
+    "parser_feedback_boolean_field_invalid": "وضعیت رویداد یا شرطی‌بودن نامعتبر است.",
+    "parser_feedback_numeric_field_invalid": "فی یا تعداد باید عدد معتبر باشد.",
+    "parser_feedback_full_toman_price_invalid": "فی کامل باید به تومان و مضرب ۱۰۰۰ باشد.",
+    "parser_feedback_commodity_invalid": "برای رویداد معتبر یک کالای مشخص انتخاب کنید.",
+    "parser_feedback_side_invalid": "سمت خرید/فروش نامعتبر است.",
+    "parser_feedback_settlement_invalid": "نوع تسویه نامعتبر است.",
+    "parser_feedback_trade_form_invalid": "نوع بازار نامعتبر است.",
+    "parser_feedback_price_outside_commodity_band": "فی خارج از بازهٔ معتبر کالای انتخابی است.",
+    "parser_feedback_price_invalid": "فی رویداد نامعتبر است.",
+    "parser_feedback_quantity_invalid": "تعداد باید بین ۱ تا ۱۰۰ باشد.",
+}
+
+
+def _parser_feedback_error_message(error: BaseException) -> str:
+    return _PARSER_FEEDBACK_ERROR_FA.get(
+        str(error), "بازخورد با قرارداد parser سازگار نیست."
+    )
 
 
 def query_model_event_audit(
     conversation_db: Path,
     calibration_db: Path,
     *,
+    feedback_db: Path = DEFAULT_REVIEW_DECISIONS_DB,
     range_type: str = "today",
     start_shamsi: str | None = None,
     end_shamsi: str | None = None,
@@ -1634,15 +1681,44 @@ def query_model_event_audit(
         }
         if "canonical_group_projection" not in tables:
             return empty
+        offer_columns = {
+            str(row[1]) for row in connection.execute("PRAGMA table_info(offers)")
+        }
+        trade_columns = {
+            str(row[1])
+            for row in connection.execute("PRAGMA table_info(confirmed_trades)")
+        }
+        offer_trade_form = (
+            "o.trade_form" if "trade_form" in offer_columns else "'PHYSICAL'"
+        )
+        trade_trade_form = (
+            "t.trade_form" if "trade_form" in trade_columns else "'PHYSICAL'"
+        )
         rows = connection.execute(
-            """
-            SELECT m.source_html_file AS source_group,'OFFER' AS event_type,
+            f"""
+            SELECT lower(hex(p.event_key)) AS event_id,
+                   m.source_html_file AS source_group,'OFFER' AS event_type,
                    COALESCE(
                      json_extract(m.relevance_json,'$.source_event_time_utc'),
                      m.event_time_utc
                    ) AS source_event_time_utc,
                    m.event_time_utc AS available_at_utc,
-                   o.commodity,o.side,o.price,o.quantity,o.settlement,
+                   o.commodity,o.side,o.price,o.quantity,
+                   o.settlement AS model_settlement,
+                   COALESCE(
+                     json_extract(m.relevance_json,'$.canonical_settlement_term'),
+                     o.settlement
+                   ) AS canonical_settlement,
+                   COALESCE(
+                     json_extract(m.relevance_json,'$.canonical_trade_form'),
+                     CASE WHEN {offer_trade_form}='PAPER' THEN 'PAPER_NORMAL' ELSE {offer_trade_form} END
+                   ) AS trade_form,
+                   COALESCE(
+                     json_extract(m.relevance_json,'$.canonical_is_conditional'),0
+                   ) AS is_conditional,
+                   json_extract(
+                     m.relevance_json,'$.canonical_resolution_reason'
+                   ) AS resolution_reason,
                    COALESCE(q.realtime_eligible,0) AS model_eligible,
                    q.exclusion_reason
             FROM canonical_group_projection p
@@ -1659,14 +1735,30 @@ def query_model_event_audit(
                     m.event_time_utc
                   ) <= ?
             UNION ALL
-            SELECT m.source_html_file AS source_group,'TRADE' AS event_type,
+            SELECT lower(hex(p.event_key)) AS event_id,
+                   m.source_html_file AS source_group,'TRADE' AS event_type,
                    COALESCE(
                      json_extract(m.relevance_json,'$.source_event_time_utc'),
                      json_extract(t.context_json,'$.source_event_time_utc'),
                      t.event_time_utc
                    ) AS source_event_time_utc,
                    t.event_time_utc AS available_at_utc,
-                   t.commodity,t.side,t.price,t.quantity,t.settlement,
+                   t.commodity,t.side,t.price,t.quantity,
+                   t.settlement AS model_settlement,
+                   COALESCE(
+                     json_extract(m.relevance_json,'$.canonical_settlement_term'),
+                     t.settlement
+                   ) AS canonical_settlement,
+                   COALESCE(
+                     json_extract(m.relevance_json,'$.canonical_trade_form'),
+                     CASE WHEN {trade_trade_form}='PAPER' THEN 'PAPER_NORMAL' ELSE {trade_trade_form} END
+                   ) AS trade_form,
+                   COALESCE(
+                     json_extract(m.relevance_json,'$.canonical_is_conditional'),0
+                   ) AS is_conditional,
+                   json_extract(
+                     m.relevance_json,'$.canonical_resolution_reason'
+                   ) AS resolution_reason,
                    COALESCE(q.realtime_eligible,0) AS model_eligible,
                    q.exclusion_reason
             FROM canonical_group_projection p
@@ -1753,19 +1845,26 @@ def query_model_event_audit(
         maximum_delay = 90 if model_id == "MAIN_ONLINE" else 180
         return candidate if 0 <= delay <= maximum_delay else None
 
+    parser_feedback = load_coin_group_parser_feedback(feedback_db)
     events: list[dict[str, Any]] = []
     missing_main = 0
     model_input_count = 0
     for row in rows:
+        event_id = str(row["event_id"])
+        try:
+            review = parser_feedback.get(bytes.fromhex(event_id))
+        except ValueError:
+            review = None
         model_eligible = bool(row["model_eligible"])
         model_input_count += int(model_eligible)
         available_at = parse_datetime(str(row["available_at_utc"]))
         commodity = str(row["commodity"] or "نامشخص")
-        settlement = str(row["settlement"] or "")
+        model_settlement = str(row["model_settlement"] or "")
+        canonical_settlement = str(row["canonical_settlement"] or "")
         estimates = {
             model_id: first_prediction(
                 commodity=commodity,
-                settlement=settlement,
+                settlement=model_settlement,
                 model_id=model_id,
                 available_at=available_at,
             )
@@ -1785,6 +1884,7 @@ def query_model_event_audit(
         events.append(
             {
                 "group_number": int(str(row["source_group"]).rsplit("_", 1)[-1]),
+                "event_id": event_id,
                 "event_type": str(row["event_type"]),
                 "source_event_time_utc": str(row["source_event_time_utc"]),
                 "available_at_utc": str(row["available_at_utc"]),
@@ -1792,10 +1892,37 @@ def query_model_event_audit(
                 "side": str(row["side"]),
                 "price_toman": int(row["price"]) * 1_000,
                 "quantity": int(row["quantity"]) if row["quantity"] is not None else None,
-                "settlement": settlement,
+                "settlement": canonical_settlement,
+                "model_settlement": model_settlement,
+                "trade_form": str(row["trade_form"] or "UNKNOWN"),
+                "is_conditional": bool(row["is_conditional"]),
+                "resolution_reason": (
+                    str(row["resolution_reason"])
+                    if row["resolution_reason"] is not None
+                    else None
+                ),
                 "status": status,
                 "exclusion_reason": reason or None,
                 "estimates": estimates,
+                "parser_feedback": (
+                    {
+                        "ambiguous_fields": sorted(review.ambiguous_fields),
+                        "event_confirmed": review.event_confirmed,
+                        "review_revision": review.review_revision,
+                        "reviewed_at_utc": review.reviewed_at_utc,
+                        "applied": review.applied_revision >= review.review_revision,
+                        "applied_at_utc": review.applied_at_utc,
+                        "commodity_code": review.commodity_code,
+                        "side": review.side,
+                        "price_toman": review.price_project_thousand_toman * 1_000,
+                        "quantity": review.quantity,
+                        "settlement_term": review.settlement_term,
+                        "trade_form": review.trade_form,
+                        "is_conditional": review.is_conditional,
+                    }
+                    if review is not None
+                    else None
+                ),
             }
         )
     if calibration is not None:
@@ -1807,6 +1934,154 @@ def query_model_event_audit(
         "audit_only_events": len(events) - model_input_count,
         "missing_main_prediction_events": missing_main,
         "events": events,
+    }
+
+
+def _canonical_event_for_feedback(
+    conversation_db: Path,
+    event_id: str,
+) -> dict[str, Any] | None:
+    try:
+        event_key = bytes.fromhex(str(event_id or "").strip())
+    except ValueError:
+        return None
+    if not 16 <= len(event_key) <= 64 or not conversation_db.is_file():
+        return None
+    connection = sqlite3.connect(
+        f"file:{conversation_db.resolve()}?mode=ro", uri=True
+    )
+    connection.row_factory = sqlite3.Row
+    try:
+        offer_columns = {
+            str(item[1]) for item in connection.execute("PRAGMA table_info(offers)")
+        }
+        trade_columns = {
+            str(item[1])
+            for item in connection.execute("PRAGMA table_info(confirmed_trades)")
+        }
+        offer_trade_form = (
+            "o.trade_form" if "trade_form" in offer_columns else "'PHYSICAL'"
+        )
+        trade_trade_form = (
+            "t.trade_form" if "trade_form" in trade_columns else "'PHYSICAL'"
+        )
+        row = connection.execute(
+            f"""
+            SELECT p.event_key,p.event_type,m.source_html_file,
+                   COALESCE(
+                     json_extract(m.relevance_json,'$.source_event_time_utc'),
+                     m.event_time_utc
+                   ) AS source_event_time_utc,
+                   CASE WHEN p.event_type='OFFER' THEN o.commodity ELSE t.commodity END AS commodity,
+                   CASE WHEN p.event_type='OFFER' THEN o.side ELSE t.side END AS side,
+                   CASE WHEN p.event_type='OFFER' THEN o.price ELSE t.price END AS price,
+                   CASE WHEN p.event_type='OFFER' THEN o.quantity ELSE t.quantity END AS quantity,
+                   COALESCE(
+                     json_extract(m.relevance_json,'$.canonical_settlement_term'),
+                     CASE WHEN p.event_type='OFFER' THEN o.settlement ELSE t.settlement END
+                   ) AS settlement,
+                   COALESCE(
+                     json_extract(m.relevance_json,'$.canonical_trade_form'),
+                     CASE
+                       WHEN p.event_type='OFFER' AND {offer_trade_form}='PAPER' THEN 'PAPER_NORMAL'
+                       WHEN p.event_type='TRADE' AND {trade_trade_form}='PAPER' THEN 'PAPER_NORMAL'
+                       WHEN p.event_type='OFFER' THEN {offer_trade_form}
+                       ELSE {trade_trade_form}
+                     END
+                   ) AS trade_form,
+                   COALESCE(
+                     json_extract(m.relevance_json,'$.canonical_is_conditional'),0
+                   ) AS is_conditional
+            FROM canonical_group_projection p
+            LEFT JOIN offers o ON p.event_type='OFFER' AND o.id=p.row_id
+            LEFT JOIN confirmed_trades t ON p.event_type='TRADE' AND t.id=p.row_id
+            JOIN messages m ON m.import_id=COALESCE(o.import_id,t.import_id)
+             AND m.message_id=COALESCE(o.message_id,t.confirmation_message_id)
+            WHERE p.event_key=?
+            """,
+            (event_key,),
+        ).fetchone()
+        if row is None:
+            return None
+        source_group = str(row["source_html_file"] or "")
+        try:
+            group_number = int(source_group.rsplit("_", 1)[-1])
+        except ValueError:
+            return None
+        return {
+            "event_key": bytes(row["event_key"]),
+            "event_type": str(row["event_type"]),
+            "group_number": group_number,
+            "source_event_time_utc": str(row["source_event_time_utc"]),
+            "commodity": str(row["commodity"] or "نامشخص"),
+            "side": str(row["side"] or ""),
+            "price": int(row["price"]),
+            "quantity": int(row["quantity"] or 1),
+            "settlement": str(row["settlement"] or ""),
+            "trade_form": str(row["trade_form"] or ""),
+            "is_conditional": bool(row["is_conditional"]),
+        }
+    except (OSError, sqlite3.Error, TypeError, ValueError):
+        return None
+    finally:
+        connection.close()
+
+
+def submit_coin_group_parser_feedback(
+    conversation_db: Path,
+    feedback_db: Path,
+    payload: dict[str, Any],
+    *,
+    reviewer: str,
+) -> dict[str, Any]:
+    """Validate a complete operator correction against the canonical event."""
+
+    event = _canonical_event_for_feedback(
+        conversation_db, str(payload.get("event_id") or "")
+    )
+    if event is None:
+        raise CoinGroupFeedbackError("parser_feedback_event_not_found")
+    fields = payload.get("ambiguous_fields")
+    if not isinstance(fields, list):
+        raise CoinGroupFeedbackError("parser_feedback_ambiguous_fields_invalid")
+    normalized_fields = [str(item).strip() for item in fields]
+    if not set(normalized_fields).issubset(COIN_GROUP_AMBIGUOUS_FIELDS):
+        raise CoinGroupFeedbackError("parser_feedback_ambiguous_fields_invalid")
+    event_confirmed = payload.get("event_confirmed")
+    is_conditional = payload.get("is_conditional")
+    if not isinstance(event_confirmed, bool) or not isinstance(is_conditional, bool):
+        raise CoinGroupFeedbackError("parser_feedback_boolean_field_invalid")
+    try:
+        full_toman_price = int(payload.get("price_toman"))
+        quantity = int(payload.get("quantity"))
+    except (TypeError, ValueError) as exc:
+        raise CoinGroupFeedbackError("parser_feedback_numeric_field_invalid") from exc
+    if full_toman_price <= 0 or full_toman_price % 1_000:
+        raise CoinGroupFeedbackError("parser_feedback_full_toman_price_invalid")
+    review = record_coin_group_parser_feedback(
+        feedback_db,
+        event_key=event["event_key"],
+        event_type=event["event_type"],
+        group_number=event["group_number"],
+        source_event_time_utc=event["source_event_time_utc"],
+        ambiguous_fields=normalized_fields,
+        event_confirmed=event_confirmed,
+        commodity_code=str(payload.get("commodity_code") or ""),
+        side=str(payload.get("side") or ""),
+        price_project_thousand_toman=full_toman_price // 1_000,
+        quantity=quantity,
+        settlement_term=str(payload.get("settlement_term") or ""),
+        trade_form=str(payload.get("trade_form") or ""),
+        is_conditional=is_conditional,
+        reviewer=reviewer,
+    )
+    return {
+        "status": "RECORDED_PENDING_PIPELINE",
+        "event_id": review.event_key.hex(),
+        "review_revision": review.review_revision,
+        "ambiguous_fields": sorted(review.ambiguous_fields),
+        "reviewed_at_utc": review.reviewed_at_utc,
+        "expected_apply_seconds": 45,
     }
 
 
@@ -1852,13 +2127,70 @@ def render_model_event_audit(audit: dict[str, Any]) -> str:
         reason = html.escape(str(event.get("exclusion_reason") or ""), quote=True)
         estimates = event.get("estimates")
         estimates = estimates if isinstance(estimates, dict) else {}
+        existing_feedback = event.get("parser_feedback")
+        existing_feedback = (
+            existing_feedback if isinstance(existing_feedback, dict) else None
+        )
+        reviewed_values = existing_feedback or {}
+        commodity_code = str(
+            reviewed_values.get("commodity_code")
+            or _FEEDBACK_LABEL_TO_COMMODITY.get(
+                str(event.get("commodity") or ""), ""
+            )
+        )
+        review_payload = html.escape(
+            json.dumps(
+                {
+                    "event_id": event.get("event_id"),
+                    "event_type": event.get("event_type"),
+                    "commodity_code": commodity_code,
+                    "side": reviewed_values.get("side") or event.get("side"),
+                    "price_toman": reviewed_values.get("price_toman")
+                    or event.get("price_toman"),
+                    "quantity": reviewed_values.get("quantity")
+                    or event.get("quantity") or 1,
+                    "settlement_term": reviewed_values.get("settlement_term")
+                    or event.get("settlement"),
+                    "trade_form": reviewed_values.get("trade_form")
+                    or event.get("trade_form"),
+                    "is_conditional": bool(
+                        reviewed_values.get(
+                            "is_conditional", event.get("is_conditional")
+                        )
+                    ),
+                    "event_confirmed": reviewed_values.get(
+                        "event_confirmed", True
+                    ),
+                    "feedback": existing_feedback,
+                },
+                ensure_ascii=False,
+                separators=(",", ":"),
+            ),
+            quote=True,
+        )
+        if existing_feedback is not None:
+            review_state = (
+                "اعمال‌شده در parser"
+                if existing_feedback.get("applied")
+                else "ثبت‌شده؛ منتظر چرخهٔ parser"
+            )
+            review_summary = (
+                f"<small class='feedback-state'>{review_state} · بازبینی "
+                f"{fa_number(existing_feedback.get('review_revision'))}</small>"
+            )
+            review_label = "اصلاح بازخورد"
+        else:
+            review_summary = ""
+            review_label = "مشخص‌کردن ابهام"
         model_cells = "".join(
             f"<td class='estimate-cell'>{_render_event_estimate_cell(estimates.get(model_id))}</td>"
             for model_id in _EVENT_AUDIT_MODELS
         )
         event_type = "آفر" if event.get("event_type") == "OFFER" else "معامله"
         side = "خرید" if event.get("side") == "BUY" else "فروش"
-        settlement = SETTLEMENT_FA.get(str(event.get("settlement")), "نامشخص")
+        settlement = _FEEDBACK_SETTLEMENT_LABELS.get(
+            str(event.get("settlement")), "نامشخص"
+        )
         rows.append(
             "<tr>"
             f"<td>گروه {fa_number(event.get('group_number'))}</td>"
@@ -1871,12 +2203,15 @@ def render_model_event_audit(audit: dict[str, Any]) -> str:
             f"<td class='numeric'><strong>{fa_number(event.get('price_toman'))}</strong> تومان"
             f"<small>{fa_number(event.get('quantity')) if event.get('quantity') is not None else '—'} عدد</small></td>"
             f"{model_cells}"
+            f"<td class='feedback-cell'>{review_summary}"
+            f"<button type='button' class='parser-feedback-btn' data-review='{review_payload}' "
+            f"onclick='openParserFeedback(this)'>{review_label}</button></td>"
             "</tr>"
         )
 
     if not rows:
         rows.append(
-            "<tr><td colspan='12' class='missing'>در این بازه هیچ رویداد canonical "
+            "<tr><td colspan='13' class='missing'>در این بازه هیچ رویداد canonical "
             "تشخیص‌داده‌شده‌ای ثبت نشده است.</td></tr>"
         )
     model_headers = "".join(
@@ -1904,10 +2239,48 @@ def render_model_event_audit(audit: dict[str, Any]) -> str:
           <thead><tr>
             <th>گروه</th><th>رویداد</th><th>زمان پیام</th><th>زمان دسترس‌پذیری برای مدل</th>
             <th>وضعیت</th><th>کالا</th><th>سمت / تسویه</th><th>فی واقعی رویداد / تعداد</th>
-            {model_headers}
+            {model_headers}<th>بازخورد parser</th>
           </tr></thead>
           <tbody>{''.join(rows)}</tbody>
         </table>
+      </div>
+      <div id='parser-feedback-modal' class='modal-overlay' onclick='closeParserFeedback(event)'>
+        <form id='parser-feedback-form' class='modal-card feedback-modal-card' onclick='event.stopPropagation()'>
+          <div class='modal-header'>
+            <div><h2>بازبینی فیلدهای مبهم parser</h2>
+            <small id='parser-feedback-context'>—</small></div>
+            <button type='button' class='modal-close-btn' onclick='closeParserFeedback()'>&times;</button>
+          </div>
+          <div class='modal-body'>
+            <input type='hidden' id='feedback-event-id'>
+            <p class='feedback-help'>حداقل یک فیلد مبهم را انتخاب کنید و سپس مقدار صحیح کامل رویداد را ثبت کنید. تصحیح همان رویداد در چرخهٔ بعدی اعمال و برای کالیبراسیون موارد بعدی استفاده می‌شود.</p>
+            <fieldset class='feedback-fields'><legend>کدام فیلدها مبهم یا اشتباه بوده‌اند؟</legend>
+              <label><input type='checkbox' name='ambiguous_field' value='event_validity'> اصل آفر/معامله بودن</label>
+              <label><input type='checkbox' name='ambiguous_field' value='commodity'> کالا</label>
+              <label><input type='checkbox' name='ambiguous_field' value='side'> خرید/فروش</label>
+              <label><input type='checkbox' name='ambiguous_field' value='price'> فی</label>
+              <label><input type='checkbox' name='ambiguous_field' value='quantity'> تعداد</label>
+              <label><input type='checkbox' name='ambiguous_field' value='settlement'> نقدی/فردایی</label>
+              <label><input type='checkbox' name='ambiguous_field' value='trade_form'> نوع فیزیکی/کاغذی</label>
+              <label><input type='checkbox' name='ambiguous_field' value='conditional'> شرطی بودن</label>
+            </fieldset>
+            <div class='feedback-grid'>
+              <label class='feedback-toggle'><input id='feedback-event-confirmed' type='checkbox' checked> این رویداد واقعاً آفر/معامله است</label>
+              <label>کالا<select id='feedback-commodity' required>
+                <option value=''>انتخاب کنید</option>
+                {''.join(f"<option value='{code}'>{label}</option>" for code, label in _FEEDBACK_COMMODITY_LABELS.items())}
+              </select></label>
+              <label>سمت<select id='feedback-side' required><option value='BUY'>خرید</option><option value='SELL'>فروش</option></select></label>
+              <label>فی کامل (تومان)<input id='feedback-price' type='number' min='1' step='1000' required></label>
+              <label>تعداد<input id='feedback-quantity' type='number' min='1' max='100' required></label>
+              <label>تسویه<select id='feedback-settlement' required><option value='CASH'>نقدی</option><option value='TODAY'>امروزی کاغذی</option><option value='TOMORROW'>فردایی</option></select></label>
+              <label>نوع بازار<select id='feedback-trade-form' required><option value='PHYSICAL'>فیزیکی</option><option value='PAPER_NORMAL'>کاغذی عادی</option><option value='PAPER_REVERSE'>کاغذی معکوس</option><option value='PAPER_SWIM'>کاغذی شنا</option></select></label>
+              <label class='feedback-toggle'><input id='feedback-conditional' type='checkbox'> آفر/معامله شرطی است</label>
+            </div>
+            <p id='parser-feedback-result' class='feedback-result' aria-live='polite'></p>
+          </div>
+          <div class='feedback-actions'><button type='button' class='nav-btn secondary' onclick='closeParserFeedback()'>انصراف</button><button id='parser-feedback-submit' type='submit' class='nav-btn'>ثبت و کالیبره‌کردن parser</button></div>
+        </form>
       </div>
     </section>
     """
@@ -5370,6 +5743,7 @@ def render_analytics_page(
     conversation_db: Path,
     *,
     calibration_db: Path = DEFAULT_CALIBRATION_DB,
+    feedback_db: Path = DEFAULT_REVIEW_DECISIONS_DB,
     analytics_path: str = "/analytics",
     home_path: str = "/",
     logout_path: str = "/logout",
@@ -5387,6 +5761,7 @@ def render_analytics_page(
     event_audit = query_model_event_audit(
         conversation_db,
         calibration_db,
+        feedback_db=feedback_db,
         range_type=range_type,
         start_shamsi=start_shamsi,
         end_shamsi=end_shamsi,
@@ -5926,7 +6301,7 @@ td {{
 .event-audit-summary strong {{ color: var(--accent-gold); margin-right: 4px; }}
 .event-audit-summary .warning {{ border-color: var(--accent-rose); }}
 .event-audit-wrap {{ max-height: 68vh; overflow: auto; }}
-.event-audit-table {{ min-width: 2100px; }}
+.event-audit-table {{ min-width: 2320px; }}
 .event-audit-table thead {{ position: sticky; top: 0; z-index: 2; }}
 .event-audit-table td {{ vertical-align: top; white-space: normal; min-width: 105px; }}
 .event-audit-table td:nth-child(3),
@@ -5966,6 +6341,67 @@ td {{
 .estimate-cell {{ min-width: 190px !important; direction: rtl; }}
 .estimate-cell strong {{ color: var(--accent-cyan); }}
 .event-no-estimate {{ color: var(--text-sub); }}
+.feedback-cell {{ min-width: 175px !important; }}
+.parser-feedback-btn {{
+  display: block;
+  width: 100%;
+  margin-top: 6px;
+  padding: 7px 9px;
+  border-radius: 8px;
+  border: 1px solid rgba(6,182,212,.35);
+  background: rgba(6,182,212,.12);
+  color: var(--accent-cyan);
+  font-family: inherit;
+  font-size: 10.5px;
+  font-weight: 800;
+  cursor: pointer;
+}}
+.feedback-state {{ display: block; color: #6ee7b7; line-height: 1.7; }}
+.feedback-modal-card {{ max-width: 780px; }}
+.feedback-help {{
+  margin: 0 0 14px;
+  color: var(--text-sub);
+  font-size: 12px;
+  line-height: 1.9;
+}}
+.feedback-fields {{
+  border: 1px solid var(--border-line);
+  border-radius: 12px;
+  padding: 12px;
+  margin: 0 0 14px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit,minmax(150px,1fr));
+  gap: 8px;
+}}
+.feedback-fields legend {{ color: var(--accent-gold); padding: 0 7px; font-size: 12px; }}
+.feedback-fields label, .feedback-toggle {{ color: var(--text-main); font-size: 11.5px; }}
+.feedback-grid {{
+  display: grid;
+  grid-template-columns: repeat(2,minmax(0,1fr));
+  gap: 12px;
+}}
+.feedback-grid label {{ color: var(--text-sub); font-size: 11.5px; }}
+.feedback-grid input[type='number'], .feedback-grid select {{
+  width: 100%;
+  margin-top: 5px;
+  padding: 9px 10px;
+  border: 1px solid var(--border-line);
+  border-radius: 8px;
+  color: var(--text-main);
+  background: #0f172a;
+  font-family: inherit;
+}}
+.feedback-toggle {{ display: flex; align-items: center; gap: 7px; }}
+.feedback-result {{ min-height: 24px; color: var(--accent-cyan); font-size: 12px; }}
+.feedback-result.error {{ color: var(--accent-rose); }}
+.feedback-actions {{
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 14px 20px;
+  border-top: 1px solid var(--border-line);
+}}
+@media (max-width: 720px) {{ .feedback-grid {{ grid-template-columns: 1fr; }} }}
 </style>
 </head>
 <body>
@@ -6133,7 +6569,104 @@ function closeUserModal(e) {{
   document.getElementById("detail-modal").classList.remove("active");
 }}
 document.addEventListener("keydown", (e) => {{
-  if (e.key === "Escape") closeUserModal();
+  if (e.key === "Escape") {{ closeUserModal(); closeParserFeedback(); }}
+}});
+
+function openParserFeedback(button) {{
+  const data = JSON.parse(button.getAttribute("data-review") || "{{}}");
+  const modal = document.getElementById("parser-feedback-modal");
+  const form = document.getElementById("parser-feedback-form");
+  form.reset();
+  document.getElementById("feedback-event-id").value = data.event_id || "";
+  document.getElementById("feedback-event-confirmed").checked = data.feedback
+    ? Boolean(data.feedback.event_confirmed) : true;
+  document.getElementById("feedback-commodity").value = data.commodity_code || "";
+  document.getElementById("feedback-side").value = data.side || "SELL";
+  document.getElementById("feedback-price").value = data.price_toman || "";
+  document.getElementById("feedback-quantity").value = data.quantity || 1;
+  document.getElementById("feedback-settlement").value = data.settlement_term || "TOMORROW";
+  document.getElementById("feedback-trade-form").value = data.trade_form || "PHYSICAL";
+  document.getElementById("feedback-conditional").checked = Boolean(data.is_conditional);
+  const selected = new Set((data.feedback && data.feedback.ambiguous_fields) || []);
+  if (!selected.size && !data.commodity_code) selected.add("commodity");
+  document.querySelectorAll("input[name='ambiguous_field']").forEach((input) => {{
+    input.checked = selected.has(input.value);
+  }});
+  document.getElementById("parser-feedback-context").textContent =
+    `${{data.event_type === "TRADE" ? "معامله" : "آفر"}} · شناسهٔ امن ${{String(data.event_id || "").slice(0, 12)}}`;
+  const result = document.getElementById("parser-feedback-result");
+  result.textContent = "";
+  result.classList.remove("error");
+  modal.classList.add("active");
+}}
+
+function closeParserFeedback(e) {{
+  if (e && e.target !== e.currentTarget && !e.target.classList.contains("modal-close-btn")) return;
+  const modal = document.getElementById("parser-feedback-modal");
+  if (modal) modal.classList.remove("active");
+}}
+
+const feedbackEventConfirmed = document.getElementById("feedback-event-confirmed");
+feedbackEventConfirmed.addEventListener("change", (event) => {{
+  const commodity = document.getElementById("feedback-commodity");
+  if (event.target.checked) {{
+    if (commodity.value === "UNRESOLVED") commodity.value = "";
+    return;
+  }}
+  const validity = document.querySelector(
+    "input[name='ambiguous_field'][value='event_validity']"
+  );
+  if (validity) validity.checked = true;
+  if (!commodity.value) commodity.value = "UNRESOLVED";
+}});
+document.getElementById("feedback-commodity").addEventListener("change", (event) => {{
+  if (event.target.value !== "UNRESOLVED") return;
+  feedbackEventConfirmed.checked = false;
+  feedbackEventConfirmed.dispatchEvent(new Event("change"));
+}});
+
+document.getElementById("parser-feedback-form").addEventListener("submit", async (event) => {{
+  event.preventDefault();
+  const result = document.getElementById("parser-feedback-result");
+  const button = document.getElementById("parser-feedback-submit");
+  const ambiguousFields = Array.from(
+    document.querySelectorAll("input[name='ambiguous_field']:checked")
+  ).map((input) => input.value);
+  if (!ambiguousFields.length) {{
+    result.textContent = "حداقل یک فیلد مبهم را انتخاب کنید.";
+    result.classList.add("error");
+    return;
+  }}
+  const payload = {{
+    event_id: document.getElementById("feedback-event-id").value,
+    ambiguous_fields: ambiguousFields,
+    event_confirmed: document.getElementById("feedback-event-confirmed").checked,
+    commodity_code: document.getElementById("feedback-commodity").value,
+    side: document.getElementById("feedback-side").value,
+    price_toman: Number(document.getElementById("feedback-price").value),
+    quantity: Number(document.getElementById("feedback-quantity").value),
+    settlement_term: document.getElementById("feedback-settlement").value,
+    trade_form: document.getElementById("feedback-trade-form").value,
+    is_conditional: document.getElementById("feedback-conditional").checked,
+  }};
+  button.disabled = true;
+  result.classList.remove("error");
+  result.textContent = "در حال ثبت بازخورد و افزایش نسخهٔ کالیبراسیون…";
+  try {{
+    const response = await fetch("{analytics_path}/parser-feedback.json", {{
+      method: "POST",
+      headers: {{"Content-Type": "application/json"}},
+      body: JSON.stringify(payload),
+    }});
+    const body = await response.json();
+    if (!response.ok) throw new Error(body.error || "ثبت بازخورد ناموفق بود");
+    result.textContent = `بازخورد نسخهٔ ${{body.review_revision}} ثبت شد؛ حداکثر تا ${{body.expected_apply_seconds}} ثانیه در چرخهٔ parser اعمال می‌شود.`;
+    setTimeout(() => window.location.reload(), 1800);
+  }} catch (error) {{
+    result.textContent = error.message || "ثبت بازخورد ناموفق بود.";
+    result.classList.add("error");
+    button.disabled = false;
+  }}
 }});
 </script>
 </body>
@@ -6189,6 +6722,7 @@ def handler_factory(
     market_db: Path,
     conversation_db: Path,
     calibration_db: Path,
+    feedback_db: Path,
     write_token: str | None,
     refresh_estimate,
     group_live_control: GroupLiveInputControl,
@@ -6198,6 +6732,7 @@ def handler_factory(
     health_path = normalized + "/healthz"
     manual_path = normalized + "/manual-entry"
     analytics_path = normalized + "/analytics"
+    parser_feedback_path = analytics_path + "/parser-feedback.json"
     login_path = normalized + "/login"
     logout_path = normalized + "/logout"
     estimate_path = normalized + "/estimates.html"
@@ -6385,6 +6920,7 @@ def handler_factory(
                 body = render_analytics_page(
                     conversation_db,
                     calibration_db=calibration_db,
+                    feedback_db=feedback_db,
                     analytics_path=analytics_path,
                     home_path=normalized,
                     logout_path=logout_path,
@@ -6410,6 +6946,7 @@ def handler_factory(
                 data["model_event_audit"] = query_model_event_audit(
                     conversation_db,
                     calibration_db,
+                    feedback_db=feedback_db,
                     range_type=range_type,
                     start_shamsi=start_shamsi,
                     end_shamsi=end_shamsi,
@@ -6571,6 +7108,91 @@ def handler_factory(
                 else:
                     self._redirect(login_path)
                 return
+            if path == parser_feedback_path:
+                origin = self.headers.get("Origin")
+                referer = self.headers.get("Referer")
+                expected_host = self.headers.get("Host", "")
+                for candidate in (origin, referer):
+                    if not candidate:
+                        continue
+                    parsed_candidate = urlsplit(candidate)
+                    if parsed_candidate.netloc and parsed_candidate.netloc != expected_host:
+                        body = b'{"error":"cross_origin_forbidden"}'
+                        self._headers(
+                            HTTPStatus.FORBIDDEN,
+                            "application/json; charset=utf-8",
+                            len(body),
+                        )
+                        self.wfile.write(body)
+                        return
+                try:
+                    content_length = int(self.headers.get("Content-Length", "0"))
+                except ValueError:
+                    content_length = 0
+                if content_length <= 0 or content_length > 4_096:
+                    body = b'{"error":"invalid_parser_feedback_request"}'
+                    self._headers(
+                        HTTPStatus.BAD_REQUEST,
+                        "application/json; charset=utf-8",
+                        len(body),
+                    )
+                    self.wfile.write(body)
+                    return
+                try:
+                    payload = json.loads(
+                        self.rfile.read(content_length).decode(
+                            "utf-8", errors="strict"
+                        )
+                    )
+                    if not isinstance(payload, dict):
+                        raise CoinGroupFeedbackError(
+                            "parser_feedback_payload_invalid"
+                        )
+                    result = submit_coin_group_parser_feedback(
+                        conversation_db,
+                        feedback_db,
+                        payload,
+                        reviewer=user_session,
+                    )
+                except (
+                    CoinGroupFeedbackError,
+                    UnicodeDecodeError,
+                    json.JSONDecodeError,
+                    OSError,
+                    sqlite3.Error,
+                ) as exc:
+                    body = json.dumps(
+                        {"error": _parser_feedback_error_message(exc)},
+                        ensure_ascii=False,
+                    ).encode("utf-8")
+                    self._headers(
+                        HTTPStatus.BAD_REQUEST,
+                        "application/json; charset=utf-8",
+                        len(body),
+                    )
+                    self.wfile.write(body)
+                    return
+                body = json.dumps(result, ensure_ascii=False).encode("utf-8")
+                self._headers(
+                    HTTPStatus.OK,
+                    "application/json; charset=utf-8",
+                    len(body),
+                )
+                self.wfile.write(body)
+                print(
+                    json.dumps(
+                        {
+                            "event": "coin_group_parser_feedback_recorded",
+                            "review_revision": result["review_revision"],
+                            "ambiguous_field_count": len(
+                                result["ambiguous_fields"]
+                            ),
+                        },
+                        ensure_ascii=False,
+                    ),
+                    flush=True,
+                )
+                return
             if path == group_live_control_path:
                 # The endpoint is authenticated and rejects cross-origin
                 # browser submissions when the browser supplies Origin or
@@ -6731,6 +7353,7 @@ def start_web_server(
     market_db: Path,
     conversation_db: Path,
     calibration_db: Path,
+    feedback_db: Path,
     write_token: str | None,
     refresh_estimate,
     group_live_control: GroupLiveInputControl,
@@ -6743,6 +7366,7 @@ def start_web_server(
             market_db=market_db,
             conversation_db=conversation_db,
             calibration_db=calibration_db,
+            feedback_db=feedback_db,
             write_token=write_token,
             refresh_estimate=refresh_estimate,
             group_live_control=group_live_control,
@@ -7655,6 +8279,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--calibration-db", type=Path, default=DEFAULT_CALIBRATION_DB,
         help="Mutable prediction ledger kept outside the promoted conversation input.",
     )
+    parser.add_argument(
+        "--parser-feedback-db",
+        type=Path,
+        default=DEFAULT_REVIEW_DECISIONS_DB,
+        help="Privacy-safe operator corrections used by the coin-group parser.",
+    )
     parser.add_argument("--state", type=Path, default=DEFAULT_STATE)
     parser.add_argument(
         "--group-live-control",
@@ -7736,6 +8366,7 @@ def main() -> int:
     args = build_parser().parse_args()
     ensure_manual_entry_schema(args.conversation_db)
     prepare_calibration_store(args.calibration_db, args.conversation_db)
+    ensure_coin_group_feedback_store(args.parser_feedback_db)
     model = load_model(args.model)
     state = StateStore()
     group_live_control = GroupLiveInputControl(args.group_live_control)
@@ -7773,6 +8404,7 @@ def main() -> int:
         market_db=args.market_db,
         conversation_db=args.conversation_db,
         calibration_db=args.calibration_db,
+        feedback_db=args.parser_feedback_db,
         write_token=write_token,
         refresh_estimate=refresh_from_web,
         group_live_control=group_live_control,

@@ -25,6 +25,11 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from core.market_intelligence.coin_group_pipeline import process_coin_group_staging
+from core.market_intelligence.coin_group_feedback import (
+    ensure_coin_group_feedback_store,
+    load_coin_group_parser_feedback,
+    mark_coin_group_parser_feedback_applied,
+)
 from core.market_intelligence.coin_group_staging import (
     CoinGroupStagingError,
     CoinGroupStagingMessage,
@@ -82,6 +87,19 @@ def _inside(root: Path, value: str, *, field: str) -> Path:
     except ValueError as exc:
         raise CoinGroupEventCollectorError(f"{field}_outside_runtime_root") from exc
     if path == root:
+        raise CoinGroupEventCollectorError(f"{field}_must_be_file")
+    return path
+
+
+def _external_sidecar(value: str, *, field: str) -> Path:
+    path = Path(value).expanduser().resolve()
+    try:
+        path.relative_to(REPO_ROOT.resolve())
+    except ValueError:
+        pass
+    else:
+        raise CoinGroupEventCollectorError(f"{field}_inside_repository")
+    if path == path.parent:
         raise CoinGroupEventCollectorError(f"{field}_must_be_file")
     return path
 
@@ -187,6 +205,11 @@ async def collect(args: argparse.Namespace) -> dict[str, object]:
     market_path = _inside(root, args.market_store, field="market_store")
     staging_path = _inside(root, args.staging_store, field="staging_store")
     session_path = _inside(root, args.session, field="telegram_session")
+    feedback_path = (
+        _external_sidecar(args.feedback_db, field="feedback_db")
+        if args.feedback_db
+        else None
+    )
     market_path.parent.mkdir(parents=True, exist_ok=True)
     staging_path.parent.mkdir(parents=True, exist_ok=True)
     session_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -211,6 +234,8 @@ async def collect(args: argparse.Namespace) -> dict[str, object]:
     try:
         initialize_market_store(market)
         initialize_coin_group_staging(staging)
+        if feedback_path is not None:
+            ensure_coin_group_feedback_store(feedback_path)
         credentials = PublicTelegramCredentials.from_environment()
         client = TelegramClient(
             str(session_path),
@@ -284,6 +309,11 @@ async def collect(args: argparse.Namespace) -> dict[str, object]:
                 staging,
                 market,
                 as_of_utc=received_at,
+                parser_feedback=(
+                    load_coin_group_parser_feedback(feedback_path)
+                    if feedback_path is not None
+                    else None
+                ),
             )
             for message_id, event_time in checkpoints:
                 advance_source_checkpoint(
@@ -295,6 +325,15 @@ async def collect(args: argparse.Namespace) -> dict[str, object]:
             purged = purge_expired_coin_group_staging(staging, as_of_utc=received_at)
             market.commit()
             staging.commit()
+            feedback_marked_applied = (
+                mark_coin_group_parser_feedback_applied(
+                    feedback_path,
+                    pipeline.applied_feedback_event_keys,
+                    applied_at_utc=received_at,
+                )
+                if feedback_path is not None
+                else 0
+            )
         except BaseException:
             market.rollback()
             staging.rollback()
@@ -313,6 +352,12 @@ async def collect(args: argparse.Namespace) -> dict[str, object]:
                 "pending_or_rejected_trades": pipeline.pending_or_rejected_trades,
                 "root_messages_not_trade_linkable": pipeline.root_messages_not_trade_linkable,
                 "retracted_facts": pipeline.retracted_facts,
+                "feedback_reviews_seen": pipeline.feedback_reviews_seen,
+                "feedback_reviews_applied": pipeline.feedback_reviews_applied,
+                "feedback_pattern_calibrations_applied": (
+                    pipeline.feedback_pattern_calibrations_applied
+                ),
+                "feedback_revisions_marked_applied": feedback_marked_applied,
             },
         }
     finally:
@@ -334,6 +379,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--runtime-root", required=True)
     parser.add_argument("--market-store", default="market/market.sqlite3")
     parser.add_argument("--staging-store", default="staging/coin-groups.sqlite3")
+    parser.add_argument(
+        "--feedback-db",
+        help="External privacy-safe parser-feedback sidecar; raw text is never stored there.",
+    )
     parser.add_argument("--session", default="session/coin-group-event-reader")
     parser.add_argument("--days", type=int, default=3)
     parser.add_argument("--maximum-messages", type=int, default=MAXIMUM_MESSAGES)

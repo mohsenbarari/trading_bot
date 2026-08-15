@@ -1934,12 +1934,17 @@ class EstimatorTests(unittest.TestCase):
             query_model_event_audit,
             query_user_analytics,
             render_analytics_page,
+            submit_coin_group_parser_feedback,
+        )
+        from core.market_intelligence.coin_group_feedback import (
+            mark_coin_group_parser_feedback_applied,
         )
 
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             db_path = root / "conversation.sqlite3"
             calibration_db = root / "calibration.sqlite3"
+            feedback_db = root / "parser-feedback.sqlite3"
             analytics_root = root / "analytics" / "training-snapshots"
             analytics_root.mkdir(parents=True)
             stale = sqlite3.connect(analytics_root / "group-training-stale.sqlite3")
@@ -2067,20 +2072,45 @@ class EstimatorTests(unittest.TestCase):
             calibration.commit()
             calibration.close()
 
+            review = submit_coin_group_parser_feedback(
+                db_path,
+                feedback_db,
+                {
+                    "event_id": (bytes([2]) * 16).hex(),
+                    "ambiguous_fields": ["settlement"],
+                    "event_confirmed": True,
+                    "commodity_code": "IMAM",
+                    "side": "SELL",
+                    "price_toman": 188_600_000,
+                    "quantity": 5,
+                    "settlement_term": "CASH",
+                    "trade_form": "PHYSICAL",
+                    "is_conditional": False,
+                },
+                reviewer="test-operator",
+            )
+
             with patch.dict(
                 "os.environ",
                 {"COIN_RATE_ESTIMATOR_ANALYTICS_DIR": str(root / "analytics")},
             ):
                 data = query_user_analytics(db_path, range_type="today")
                 audit = query_model_event_audit(
-                    db_path, calibration_db, range_type="today"
+                    db_path,
+                    calibration_db,
+                    feedback_db=feedback_db,
+                    range_type="today",
                 )
                 audit_without_ledger = query_model_event_audit(
-                    db_path, root / "missing-calibration.sqlite3", range_type="today"
+                    db_path,
+                    root / "missing-calibration.sqlite3",
+                    feedback_db=feedback_db,
+                    range_type="today",
                 )
                 body = render_analytics_page(
                     db_path,
                     calibration_db=calibration_db,
+                    feedback_db=feedback_db,
                     range_type="today",
                 ).decode("utf-8")
             summary = data["groups"][1]["summary"]
@@ -2120,6 +2150,34 @@ class EstimatorTests(unittest.TestCase):
             self.assertIn("دفتر کامل رویدادهای مدل و قیمت واقعی همان لحظه", body)
             self.assertIn("ورودی واقعی مدل", body)
             self.assertIn("Shadow یادگیری ماشین", body)
+            self.assertIn("اصلاح بازخورد", body)
+            reviewed_event = next(
+                event
+                for event in audit["events"]
+                if event["event_id"] == review["event_id"]
+            )
+            self.assertEqual(
+                reviewed_event["parser_feedback"]["settlement_term"], "CASH"
+            )
+            self.assertFalse(reviewed_event["parser_feedback"]["applied"])
+            self.assertEqual(
+                mark_coin_group_parser_feedback_applied(
+                    feedback_db, [bytes.fromhex(review["event_id"])]
+                ),
+                1,
+            )
+            applied_audit = query_model_event_audit(
+                db_path,
+                calibration_db,
+                feedback_db=feedback_db,
+                range_type="today",
+            )
+            applied_event = next(
+                event
+                for event in applied_audit["events"]
+                if event["event_id"] == review["event_id"]
+            )
+            self.assertTrue(applied_event["parser_feedback"]["applied"])
 
     def test_session_store_and_authentication(self) -> None:
         from live_server import SessionStore, render_login_page

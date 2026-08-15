@@ -100,6 +100,7 @@ def _normalized_anchor(
     if evidence_kind not in {
         "CANONICAL",
         "GROUP_DERIVED",
+        "HUMAN_REVIEWED",
         "PROVISIONAL_EXPLICIT_CLUSTER",
     }:
         return None
@@ -112,7 +113,7 @@ def _candidate_centers(
     source_event_time_utc: str,
     source_available_at_utc: str,
     anchors: Iterable[CoinPriceAnchor],
-) -> list[tuple[str, float, int, float, int]]:
+) -> list[tuple[str, float, int, float, int, bool]]:
     """Return strictly-prior same-book centers as code/center/count/distance."""
 
     grouped: dict[str, list[tuple[int, str]]] = {}
@@ -143,18 +144,34 @@ def _candidate_centers(
         if settlement != parsed.settlement_term or form != parsed.trade_form:
             continue
         grouped.setdefault(code, []).append((price, evidence_kind))
-    candidates: list[tuple[str, float, int, float, int]] = []
+    candidates: list[tuple[str, float, int, float, int, bool]] = []
     for code, evidence in grouped.items():
         prices = [item[0] for item in evidence]
-        if len(prices) < MINIMUM_ANCHOR_COUNT:
+        human_reviewed = any(kind == "HUMAN_REVIEWED" for _, kind in evidence)
+        if len(prices) < MINIMUM_ANCHOR_COUNT and not human_reviewed:
             continue
         low, high = _PRICE_BOUNDS[code]
         if not low <= parsed.price_project_thousand_toman <= high:
             continue
         center = float(median(prices))
         distance = abs(parsed.price_project_thousand_toman - center) / center
+        # One explicit operator review has the contradiction strength of the
+        # normal two-anchor canonical quorum while remaining causal by its
+        # review availability timestamp.
         authoritative_count = sum(kind == "CANONICAL" for _, kind in evidence)
-        candidates.append((code, center, len(prices), distance, authoritative_count))
+        authoritative_count += MINIMUM_ANCHOR_COUNT * sum(
+            kind == "HUMAN_REVIEWED" for _, kind in evidence
+        )
+        candidates.append(
+            (
+                code,
+                center,
+                len(prices),
+                distance,
+                authoritative_count,
+                human_reviewed,
+            )
+        )
     return sorted(candidates, key=lambda item: (item[3], -item[2], item[0]))
 
 
@@ -184,6 +201,7 @@ def _resolve_one(
         parsed.commodity_code is not None
         or len(plausible_codes) <= 1
         or plausible_codes.issubset(covered_codes)
+        or bool(winner and winner[5])
     )
     decisive = bool(
         winner
@@ -217,7 +235,7 @@ def _resolve_one(
             authoritative_anchor_count=winner[4] if winner else 0,
         )
     assert winner is not None
-    winner_code, _, anchor_count, distance, authoritative_count = winner
+    winner_code, _, anchor_count, distance, authoritative_count, _human_reviewed = winner
     if claimed is not None and claimed != winner_code:
         # Never silently rewrite an explicit commodity.  A price conflict is
         # useless as an offer or a later linked-trade label until a human or

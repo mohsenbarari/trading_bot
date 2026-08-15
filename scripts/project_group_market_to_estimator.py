@@ -156,7 +156,7 @@ def _rows(connection: sqlite3.Connection) -> list[sqlite3.Row]:
             SELECT event_key,source_code,event_time_utc,available_at_utc,
                    instrument,settlement_term,trade_form,event_type,side,
                    price_num,quantity_num,parse_confidence,quality_state,
-                   is_conditional,attributes_json
+                   parser_version,is_conditional,attributes_json
             FROM market_observations
             WHERE source_code IN ('GROUP_1','GROUP_2')
               AND source_family='GROUP'
@@ -388,6 +388,17 @@ def project(
                             "source": "CANONICAL_MARKET_STORE",
                             "source_event_time_utc": source_event_time,
                             "available_at_utc": event_time,
+                            "canonical_settlement_term": str(row["settlement_term"]),
+                            "canonical_trade_form": str(row["trade_form"]),
+                            "canonical_quality_state": str(row["quality_state"]),
+                            "canonical_is_conditional": bool(row["is_conditional"]),
+                            "canonical_resolution_reason": attributes.get(
+                                "resolution_reason"
+                            ),
+                            "human_feedback_revision": attributes.get(
+                                "human_feedback_revision"
+                            ),
+                            "parser_version": str(row["parser_version"]),
                         },
                         separators=(",", ":"),
                     ),
