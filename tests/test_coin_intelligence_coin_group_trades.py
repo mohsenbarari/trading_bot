@@ -33,22 +33,37 @@ def message(message_id: int, sender: bytes, text: str, reply: int | None = None,
     )
 
 
-def offer_record(*, price: int = 183_100, quantity: int = 10) -> CoinGroupOfferRecord:
+def offer_record(
+    *,
+    message_id: int = 1,
+    owner: bytes = OWNER,
+    price: int = 183_100,
+    quantity: int = 10,
+    commodity: str | None = "IMAM",
+    quality: str = "ELIGIBLE",
+) -> CoinGroupOfferRecord:
     offer = ResolvedCoinGroupOffer(
         offer_index=0,
-        commodity_code="IMAM",
+        commodity_code=commodity,
         price_project_thousand_toman=price,
         quantity=quantity,
         side="SELL",
         settlement_term="TOMORROW",
         trade_form="PHYSICAL",
         is_conditional=False,
-        quality_state="ELIGIBLE",
+        quality_state=quality,
         resolution_reason="test",
         anchor_count=2,
         relative_distance=0.001,
     )
-    return CoinGroupOfferRecord(1, 1, OWNER, "2026-08-04T10:00:00Z", "2026-08-04T10:00:01Z", offer)
+    return CoinGroupOfferRecord(
+        1,
+        message_id,
+        owner,
+        "2026-08-04T10:00:00Z",
+        "2026-08-04T10:00:01Z",
+        offer,
+    )
 
 
 class CoinGroupTradeTests(unittest.TestCase):
@@ -84,6 +99,18 @@ class CoinGroupTradeTests(unittest.TestCase):
             [(177_300, 10)],
         )
 
+    def test_dot_or_slash_negotiated_price_is_not_truncated(self) -> None:
+        for reply, expected in (("ب 5 تا 182.900", 182_900), ("ب 5 تا 182/800", 182_800)):
+            with self.subTest(reply=reply):
+                rows = [
+                    message(1, OWNER, "10 تا ف 183100", at_second=0),
+                    message(2, BUYER_ONE, reply, reply=1, at_second=2),
+                    message(3, OWNER, "برکت", reply=2, at_second=4),
+                ]
+                trades = link_coin_group_trades(rows, [offer_record()])
+                self.assertEqual(len(trades), 1)
+                self.assertEqual(trades[0].price_project_thousand_toman, expected)
+
     def test_latest_counterparty_quantity_overrides_an_earlier_owner_counter(self) -> None:
         rows = [
             message(1, OWNER, "35 تا ف 183100", at_second=0),
@@ -93,6 +120,25 @@ class CoinGroupTradeTests(unittest.TestCase):
         ]
         trades = link_coin_group_trades(rows, [offer_record(quantity=35)])
         self.assertEqual([item.quantity for item in trades], [9])
+
+    def test_offer_shaped_counter_reply_cannot_steal_original_root(self) -> None:
+        rows = [
+            message(1, OWNER, "10 تا ف 183100", at_second=0),
+            message(2, BUYER_ONE, "5 تا خ 182900", reply=1, at_second=2),
+            message(3, OWNER, "برکت", reply=2, at_second=4),
+        ]
+        counter_offer = offer_record(
+            message_id=2,
+            owner=BUYER_ONE,
+            price=182_900,
+            quantity=5,
+            commodity=None,
+            quality="PENDING_REVIEW",
+        )
+        trades = link_coin_group_trades(rows, [offer_record(), counter_offer])
+        self.assertEqual(len(trades), 1)
+        self.assertEqual(trades[0].root_offer_message_id, 1)
+        self.assertEqual(trades[0].quantity, 5)
 
     def test_multi_user_negotiation_uses_only_the_confirmed_reply_path(self) -> None:
         rows = [
@@ -139,7 +185,15 @@ class CoinGroupTradeTests(unittest.TestCase):
             message(7, OWNER, "برکت", reply=6, at_second=9),
         ]
         trades = link_coin_group_trades(rows, [offer_record()])
-        self.assertEqual([item.quantity for item in trades], [3, 5])
+        self.assertEqual([item.quantity for item in trades], [3, 5, 5])
+        self.assertEqual(
+            [item.quality_state for item in trades],
+            ["ELIGIBLE", "ELIGIBLE", "PENDING_REVIEW"],
+        )
+        self.assertEqual(
+            trades[-1].resolution_reason,
+            "NON_AGGREGATE_FILL_EXCEEDS_REMAINING_ROOT_QUANTITY",
+        )
 
     def test_unconfirmed_buy_request_is_not_a_trade(self) -> None:
         rows = [message(1, OWNER, "10 تا ف 183100"), message(2, BUYER_ONE, "ب10 تا182900", reply=1, at_second=2)]
@@ -165,6 +219,22 @@ class CoinGroupTradeTests(unittest.TestCase):
             message(3, None, "برکت", reply=2, at_second=4),  # type: ignore[arg-type]
         ]
         self.assertEqual(link_coin_group_trades(rows, [offer_record()]), [])
+
+    def test_confirmed_branch_on_unresolved_root_is_retained_but_not_model_eligible(self) -> None:
+        rows = [
+            message(1, OWNER, "10 تا ف 183100", at_second=0),
+            message(2, BUYER_ONE, "5 تا خریدم", reply=1, at_second=2),
+            message(3, OWNER, "برکت", reply=2, at_second=4),
+        ]
+        trades = link_coin_group_trades(
+            rows,
+            [offer_record(commodity=None, quality="PENDING_REVIEW")],
+        )
+        self.assertEqual(len(trades), 1)
+        self.assertEqual(trades[0].quality_state, "PENDING_REVIEW")
+        self.assertIsNone(trades[0].commodity_code)
+        observation = coin_group_trade_observations(trades)[0].normalized()
+        self.assertEqual(observation.instrument, "COIN_UNRESOLVED")
 
     def test_cumulative_owner_declaration_is_recorded_but_not_model_eligible_if_over_offer(self) -> None:
         rows = [

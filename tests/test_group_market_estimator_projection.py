@@ -72,18 +72,20 @@ def test_projection_uses_opaque_ids_and_removes_later_ineligible_fact() -> None:
         assert report["group_2_latest_canonical_event_utc"] is None
         connection = sqlite3.connect(conversation_path)
         row = connection.execute(
-            "SELECT m.message_id,m.text,o.source_text,o.price FROM offers o JOIN messages m ON m.import_id=o.import_id AND m.message_id=o.message_id"
+            "SELECT m.message_id,m.text,m.event_time_utc,m.relevance_json,o.source_text,o.price FROM offers o JOIN messages m ON m.import_id=o.import_id AND m.message_id=o.message_id"
         ).fetchone()
         assert row is not None
         assert row[0] < 0
         assert row[1] == ""
-        assert row[2].startswith("canonical:")
-        assert row[3] == 186900
+        assert row[2] == "2026-08-13T09:00:03Z"
+        assert json.loads(row[3])["source_event_time_utc"] == "2026-08-13T09:00:00Z"
+        assert row[4].startswith("canonical:")
+        assert row[5] == 186900
         connection.close()
 
         market = sqlite3.connect(market_path)
         market.execute(
-            "UPDATE market_observations SET quality_state='REJECTED' WHERE event_key=?",
+            "UPDATE market_observations SET is_conditional=1 WHERE event_key=?",
             (key,),
         )
         market.commit()
@@ -92,6 +94,64 @@ def test_projection_uses_opaque_ids_and_removes_later_ineligible_fact() -> None:
         connection = sqlite3.connect(conversation_path)
         assert connection.execute("SELECT COUNT(*) FROM offers").fetchone()[0] == 0
         connection.close()
+
+
+def test_projection_reconciles_missing_source_and_excludes_late_arrival() -> None:
+    with TemporaryDirectory() as directory:
+        root = Path(directory)
+        market_path = root / "market.sqlite3"
+        conversation_path = root / "conversation.sqlite3"
+        destination = sqlite3.connect(conversation_path)
+        destination.executescript(_CONVERSATION_SCHEMA)
+        destination.close()
+        market = connect_market_store(market_path)
+        initialize_market_store(market)
+        current_key = derive_event_key("projection-current", 1)
+        late_key = derive_event_key("projection-late", 2)
+        for key, minute, available_minute in (
+            (current_key, 0, 1),
+            (late_key, 2, 12),
+        ):
+            upsert_observation(
+                market,
+                MarketObservation(
+                    event_key=key,
+                    source_code="GROUP_2",
+                    source_family="GROUP",
+                    event_time_utc=datetime(2026, 8, 13, 9, minute, tzinfo=timezone.utc),
+                    available_at_utc=datetime(2026, 8, 13, 9, available_minute, tzinfo=timezone.utc),
+                    instrument="COIN_IMAM",
+                    market_label="GROUP_COIN_IMAM",
+                    settlement_term="CASH",
+                    trade_form="PHYSICAL",
+                    event_type="OFFER",
+                    side="SELL",
+                    price=Decimal("186900"),
+                    price_unit="PROJECT_THOUSAND_TOMAN",
+                    currency="TOMAN",
+                    quantity=Decimal("5"),
+                    quantity_unit="COIN_COUNT",
+                    parser_version="coin-group-context-v2",
+                ),
+            )
+        market.commit()
+        market.close()
+
+        first = project(market_path, conversation_path)
+        assert first["eligible_offers"] == 1
+        destination = sqlite3.connect(conversation_path)
+        assert destination.execute("SELECT COUNT(*) FROM offers").fetchone()[0] == 1
+        destination.close()
+
+        market = sqlite3.connect(market_path)
+        market.execute("DELETE FROM market_observations WHERE event_key=?", (current_key,))
+        market.commit()
+        market.close()
+        second = project(market_path, conversation_path)
+        assert second["ineligible_removed"] == 1
+        destination = sqlite3.connect(conversation_path)
+        assert destination.execute("SELECT COUNT(*) FROM offers").fetchone()[0] == 0
+        destination.close()
 
 
 def test_projection_command_records_failure_heartbeat() -> None:

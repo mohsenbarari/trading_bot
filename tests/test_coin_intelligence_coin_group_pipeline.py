@@ -101,6 +101,10 @@ class CoinGroupPipelineTests(unittest.TestCase):
             ORDER BY event_type
             """
         ).fetchall()
+        self.assertEqual(
+            [row["available_at_utc"] for row in first_timestamps],
+            ["2026-08-04T10:01:00Z", "2026-08-04T10:01:00Z"],
+        )
 
         process_coin_group_staging(self.staging, self.market, as_of_utc="2026-08-04T10:01:30Z")
         self.market.commit()
@@ -118,7 +122,7 @@ class CoinGroupPipelineTests(unittest.TestCase):
             [tuple(row) for row in first_timestamps],
         )
 
-    def test_without_prior_anchors_offer_and_trade_stay_out_of_model(self) -> None:
+    def test_without_prior_anchors_offer_and_trade_are_auditable_but_stay_out_of_model(self) -> None:
         self._stage(1, "امام فروش فردا 186,900 / 5 تا", sender="offerer")
         self._stage(2, "ب5 تا186800", sender="buyer", reply=1, at="2026-08-04T10:00:02Z")
         self._stage(3, "برکت", sender="offerer", reply=2, at="2026-08-04T10:00:04Z")
@@ -128,9 +132,82 @@ class CoinGroupPipelineTests(unittest.TestCase):
             self.staging, self.market, as_of_utc="2026-08-04T10:01:00Z"
         )
         self.market.commit()
-        self.assertEqual((report.eligible_offers, report.trade_facts_upserted), (0, 0))
-        row = self.market.execute("SELECT quality_state FROM market_observations WHERE source_code = 'GROUP_1'").fetchone()
-        self.assertEqual(row["quality_state"], "PENDING_REVIEW")
+        self.assertEqual(
+            (
+                report.eligible_offers,
+                report.trade_facts_upserted,
+                report.eligible_trades,
+                report.pending_or_rejected_trades,
+            ),
+            (0, 1, 0, 1),
+        )
+        rows = self.market.execute(
+            "SELECT event_type,quality_state FROM market_observations WHERE source_code = 'GROUP_1' ORDER BY event_type"
+        ).fetchall()
+        self.assertEqual(
+            [(row["event_type"], row["quality_state"]) for row in rows],
+            [("OFFER", "PENDING_REVIEW"), ("TRADE", "PENDING_REVIEW")],
+        )
+
+    def test_tight_prior_explicit_cluster_bootstraps_new_regime_causally(self) -> None:
+        for message_id, sender, price, second in (
+            (1, "offerer-a", 188_700, 0),
+            (2, "offerer-b", 188_800, 10),
+            (3, "offerer-a", 188_900, 20),
+            (4, "offerer-c", 188_850, 30),
+        ):
+            self._stage(
+                message_id,
+                f"امام فروش فردا {price} / 5 تا",
+                sender=sender,
+                at=f"2026-08-04T10:00:{second:02d}Z",
+            )
+        self.staging.commit()
+
+        report = process_coin_group_staging(
+            self.staging,
+            self.market,
+            as_of_utc="2026-08-04T10:01:00Z",
+        )
+        states = self.market.execute(
+            "SELECT event_time_utc,quality_state FROM market_observations WHERE source_code='GROUP_1' ORDER BY event_time_utc"
+        ).fetchall()
+        self.assertEqual(report.eligible_offers, 1)
+        self.assertEqual(
+            [row["quality_state"] for row in states],
+            ["PENDING_REVIEW", "PENDING_REVIEW", "PENDING_REVIEW", "ELIGIBLE"],
+        )
+
+    def test_edit_that_removes_offer_retracts_offer_and_linked_trade(self) -> None:
+        self._anchor(1, 186_700, "2026-08-04T09:50:00Z")
+        self._anchor(2, 186_800, "2026-08-04T09:55:00Z")
+        self.market.commit()
+        self._stage(1, "امام فروش فردا 186,900 / 5 تا", sender="offerer")
+        self._stage(2, "ب5 تا186800", sender="buyer", reply=1, at="2026-08-04T10:00:02Z")
+        self._stage(3, "برکت", sender="offerer", reply=2, at="2026-08-04T10:00:04Z")
+        self.staging.commit()
+        process_coin_group_staging(
+            self.staging,
+            self.market,
+            as_of_utc="2026-08-04T10:01:00Z",
+        )
+        self.market.commit()
+
+        self._stage(1, "پیام غیر آفر", sender="offerer")
+        self.staging.commit()
+        report = process_coin_group_staging(
+            self.staging,
+            self.market,
+            as_of_utc="2026-08-04T10:02:00Z",
+        )
+        states = self.market.execute(
+            "SELECT event_type,quality_state,attributes_json FROM market_observations WHERE source_code='GROUP_1' ORDER BY event_type"
+        ).fetchall()
+        self.assertEqual(report.retracted_facts, 2)
+        self.assertEqual([row["quality_state"] for row in states], ["REJECTED", "REJECTED"])
+        self.assertTrue(
+            all("NO_LONGER_PRESENT" in row["attributes_json"] for row in states)
+        )
 
     def test_non_integral_project_price_cannot_be_coerced_into_an_anchor(self) -> None:
         self._anchor(1, 186_700, "2026-08-04T09:50:00Z")

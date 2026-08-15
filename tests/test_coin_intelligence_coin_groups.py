@@ -92,11 +92,12 @@ class CoinGroupParserTests(unittest.TestCase):
             "SETTLEMENT_LABEL_TOMORROW_BUT_TEXT_CASH",
         )
 
-    def test_year_403_404_and_thursday_cashier_offers_are_ignored(self) -> None:
-        self.assertEqual(
-            parse_coin_group_offers(self.source("امام 1404 فروش 186,900 / 5 تا")),
-            [],
+    def test_mint_year_is_metadata_but_thursday_cashier_offers_are_ignored(self) -> None:
+        dated = parse_coin_group_offers(
+            self.source("امام 1404 فروش 186,900 / 5 تا")
         )
+        self.assertEqual(len(dated), 1)
+        self.assertEqual(dated[0].price_project_thousand_toman, 186_900)
         self.assertEqual(
             parse_coin_group_offers(self.source("امام فروش 186,900 / 5 تا پنجشنبه")),
             [],
@@ -104,7 +105,58 @@ class CoinGroupParserTests(unittest.TestCase):
         mixed = parse_coin_group_offers(
             self.source("امام 1404 فروش 186,900 / 5 تا\nنیم بهار فروش 94,500 / 5 تا")
         )
-        self.assertEqual([item.commodity_code for item in mixed], ["HALF_BAHAR"])
+        self.assertEqual(
+            [item.commodity_code for item in mixed],
+            ["IMAM", "HALF_BAHAR"],
+        )
+
+    def test_dot_and_attached_slash_are_exact_thousands_separators(self) -> None:
+        cases = {
+            "نیم ف 95.200 5": (95_200, 5),
+            "نیم ف 95/600 ده تا": (95_600, 10),
+            "امام ف 188.300 / 5 تا": (188_300, 5),
+        }
+        for text, expected in cases.items():
+            with self.subTest(text=text):
+                parsed = parse_coin_group_offers(self.source(text))
+                self.assertEqual(len(parsed), 1)
+                self.assertEqual(
+                    (parsed[0].price_project_thousand_toman, parsed[0].quantity),
+                    expected,
+                )
+
+    def test_glued_and_bare_quantities_are_contextual_not_prices(self) -> None:
+        cases = {
+            "189ف 20": (189_000, 20, "SELL"),
+            "188600خ 10": (188_600, 10, "BUY"),
+            "١٠تا١٨٩ف": (189_000, 10, "SELL"),
+            "۱ خريد نقد ۱۸۸": (188_000, 1, "BUY"),
+            "۱۰ نیم ۴۰۴ ف ۹۴۵۰۰": (94_500, 10, "SELL"),
+            "۲تاف94500 نیم": (94_500, 2, "SELL"),
+        }
+        for text, expected in cases.items():
+            with self.subTest(text=text):
+                parsed = parse_coin_group_offers(self.source(text))
+                self.assertEqual(len(parsed), 1)
+                self.assertEqual(
+                    (
+                        parsed[0].price_project_thousand_toman,
+                        parsed[0].quantity,
+                        parsed[0].side,
+                    ),
+                    expected,
+                )
+
+    def test_payment_timing_is_conditional(self) -> None:
+        for text in (
+            "امام ف 188900 / 5 تا حساب شب",
+            "امام ف 188900 / 5 تا شب ح",
+            "امام ف 188900 / 5 تا تا 9 شب",
+        ):
+            with self.subTest(text=text):
+                parsed = parse_coin_group_offers(self.source(text))
+                self.assertEqual(len(parsed), 1)
+                self.assertTrue(parsed[0].is_conditional)
 
     def test_paper_variant_is_separate_from_physical_and_bad_text_is_ignored(self) -> None:
         parsed = parse_coin_group_offers(

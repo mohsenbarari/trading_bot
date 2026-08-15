@@ -28,8 +28,9 @@ if str(REPO_ROOT) not in sys.path:
 from core.market_intelligence.input_health import update_probe_state
 
 
-PROJECTION_VERSION = "canonical-group-estimator-projection-v1"
+PROJECTION_VERSION = "canonical-group-estimator-projection-v2-causal"
 PROJECTION_IMPORT_ID = -9_000_000_000_000_000_001
+MAXIMUM_MODEL_PROJECTION_DELAY_SECONDS = 5 * 60
 _TEHRAN = ZoneInfo("Asia/Tehran")
 _COMMODITY = {
     "IMAM": "امام",
@@ -146,6 +147,51 @@ def _rows(connection: sqlite3.Connection) -> list[sqlite3.Row]:
     )
 
 
+def _model_exclusion_reason(row: sqlite3.Row) -> str | None:
+    if str(row["quality_state"] or "").upper() != "ELIGIBLE":
+        return "CANONICAL_QUALITY_NOT_ELIGIBLE"
+    if bool(row["is_conditional"]):
+        return "CONDITIONAL_GROUP_FACT"
+    event_time = datetime.fromisoformat(
+        str(row["event_time_utc"]).replace("Z", "+00:00")
+    )
+    available_at = datetime.fromisoformat(
+        str(row["available_at_utc"]).replace("Z", "+00:00")
+    )
+    delay = (available_at - event_time).total_seconds()
+    if delay < 0:
+        return "CANONICAL_AVAILABILITY_PRECEDES_EVENT"
+    if delay > MAXIMUM_MODEL_PROJECTION_DELAY_SECONDS:
+        return "CANONICAL_FACT_ARRIVED_TOO_LATE"
+    return None
+
+
+def _delete_projected(destination: sqlite3.Connection, prior: sqlite3.Row) -> None:
+    if str(prior["event_type"]) == "OFFER":
+        destination.execute(
+            "DELETE FROM offer_market_quality WHERE offer_id=?",
+            (int(prior["row_id"]),),
+        )
+        destination.execute("DELETE FROM offers WHERE id=?", (int(prior["row_id"]),))
+    else:
+        destination.execute(
+            "DELETE FROM trade_market_quality WHERE trade_id=?",
+            (int(prior["row_id"]),),
+        )
+        destination.execute(
+            "DELETE FROM confirmed_trades WHERE id=?",
+            (int(prior["row_id"]),),
+        )
+    destination.execute(
+        "DELETE FROM messages WHERE import_id=? AND message_id=?",
+        (PROJECTION_IMPORT_ID, int(prior["message_id"])),
+    )
+    destination.execute(
+        "DELETE FROM canonical_group_projection WHERE event_key=?",
+        (bytes(prior["event_key"]),),
+    )
+
+
 def _group_observability(rows: Sequence[sqlite3.Row]) -> dict[str, int | str | None]:
     """Summarize intake separately from model eligibility without private data."""
 
@@ -169,7 +215,7 @@ def _group_observability(rows: Sequence[sqlite3.Row]) -> dict[str, int | str | N
         ):
             result[canonical_key] = event_time
         quality = str(row["quality_state"] or "").upper()
-        if quality == "ELIGIBLE":
+        if _model_exclusion_reason(row) is None:
             eligible_key = f"{prefix}_latest_eligible_event_utc"
             if event_time and (
                 result[eligible_key] is None
@@ -216,6 +262,14 @@ def project(
             )
             """
         )
+        source_event_keys = {bytes(row["event_key"]) for row in rows}
+        for prior in destination.execute(
+            "SELECT event_key,event_type,row_id,message_id FROM canonical_group_projection"
+        ).fetchall():
+            if bytes(prior["event_key"]) in source_event_keys:
+                continue
+            _delete_projected(destination, prior)
+            counts["ineligible_removed"] += 1
         destination.execute(
             """
             INSERT INTO imports(
@@ -243,22 +297,12 @@ def project(
             row_id = _opaque_id(event_key, event_type.encode("ascii"))
             message_id = _opaque_id(event_key, b"MESSAGE")
             prior = destination.execute(
-                "SELECT event_type,row_id,message_id FROM canonical_group_projection WHERE event_key=?",
+                "SELECT event_key,event_type,row_id,message_id FROM canonical_group_projection WHERE event_key=?",
                 (event_key,),
             ).fetchone()
-            if str(row["quality_state"]).upper() != "ELIGIBLE":
+            if _model_exclusion_reason(row) is not None:
                 if prior is not None:
-                    if str(prior["event_type"]) == "OFFER":
-                        destination.execute("DELETE FROM offer_market_quality WHERE offer_id=?", (int(prior["row_id"]),))
-                        destination.execute("DELETE FROM offers WHERE id=?", (int(prior["row_id"]),))
-                    else:
-                        destination.execute("DELETE FROM trade_market_quality WHERE trade_id=?", (int(prior["row_id"]),))
-                        destination.execute("DELETE FROM confirmed_trades WHERE id=?", (int(prior["row_id"]),))
-                    destination.execute(
-                        "DELETE FROM messages WHERE import_id=? AND message_id=?",
-                        (PROJECTION_IMPORT_ID, int(prior["message_id"])),
-                    )
-                    destination.execute("DELETE FROM canonical_group_projection WHERE event_key=?", (event_key,))
+                    _delete_projected(destination, prior)
                     counts["ineligible_removed"] += 1
                 continue
             source_file, _group_number = _source(row)
@@ -269,7 +313,10 @@ def project(
             if price <= 0 or not price.is_integer():
                 raise ProjectionError("canonical_group_price_invalid")
             quantity = _quantity(row)
-            event_time = str(row["event_time_utc"])
+            source_event_time = str(row["event_time_utc"])
+            # Compatibility-store time means "known by".  The economic event
+            # time remains in opaque metadata for audit without future leakage.
+            event_time = str(row["available_at_utc"])
             confidence = float(row["parse_confidence"])
             destination.execute(
                 """
@@ -293,7 +340,14 @@ def project(
                     None,
                     source_file,
                     "[]",
-                    json.dumps({"source": "CANONICAL_MARKET_STORE"}, separators=(",", ":")),
+                    json.dumps(
+                        {
+                            "source": "CANONICAL_MARKET_STORE",
+                            "source_event_time_utc": source_event_time,
+                            "available_at_utc": event_time,
+                        },
+                        separators=(",", ":"),
+                    ),
                 ),
             )
             opaque_context = "canonical:" + event_key.hex()
@@ -406,7 +460,14 @@ def project(
                         confidence,
                         "CANONICAL_REPLY_CHAIN",
                         "{}",
-                        json.dumps({"opaque_event": opaque_context}, separators=(",", ":")),
+                        json.dumps(
+                            {
+                                "opaque_event": opaque_context,
+                                "source_event_time_utc": source_event_time,
+                                "available_at_utc": event_time,
+                            },
+                            separators=(",", ":"),
+                        ),
                     ),
                 )
                 destination.execute(

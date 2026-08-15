@@ -17,17 +17,22 @@ from typing import Iterable
 from .market_contracts import MarketObservation, derive_event_key, normalize_utc
 
 
-COIN_GROUP_PARSER_VERSION = "coin-group-rules-v2-settlement-syntax"
+COIN_GROUP_PARSER_VERSION = "coin-group-rules-v3-contextual-numbers"
 _DIGITS = str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789")
-# `/` frequently separates price from quantity in group posts (for example
-# `186,900 / 5 تا`), so it must never join the two numeric fields.  Thousand
-# separators are accepted only in their unambiguous three-digit grouping form.
-_NUMBER = re.compile(r"(?<!\d)(\d{1,3}(?:[٬،,]\d{3})+|\d{2,7})(?!\d)")
-_QUANTITY = re.compile(r"(?<!\d)(\d{1,3})\s*(?:د?تا|عدد)\b")
+_ARABIC_LETTERS = str.maketrans({"ي": "ی", "ى": "ی", "ك": "ک"})
+# Dot and slash are genuine thousands separators when they are attached to
+# exactly three trailing digits.  Whitespace-delimited `/ 5 تا` remains two
+# fields because it cannot match the grouped branch.
+_NUMBER = re.compile(r"(?<!\d)(\d{1,3}(?:[٬،,./]\d{3})+|\d{2,7})(?!\d)")
+_SMALL_NUMBER = re.compile(r"(?<!\d)(\d{1,3})(?!\d)")
+_QUANTITY = re.compile(r"(?<!\d)(\d{1,3})\s*(?:د?تا|عدد)")
 _SIDE = re.compile(r"خرید|فروش|(?<![آ-ی])([خف]+)(?![آ-ی])")
-_EXCLUDED_YEAR = re.compile(r"(?<!\d)(?:403|404|1403|1404)(?!\d)")
+_YEAR_TOKEN = re.compile(r"(?<!\d)(?:403|404|1403|1404)(?!\d)")
 _THURSDAY = re.compile(r"پنج\s*شنبه|پنجشنبه|کشیک")
-_CONDITIONAL = re.compile(r"فیش|شرط|مهلت|واریز|تسویه|چک|توضیحات\s*[:：]")
+_CONDITIONAL = re.compile(
+    r"فیش|شرط|مهلت|واریز|تسویه|چک|حساب|شب\s*ح(?:ساب)?|ش\s*ح(?:ساب)?|"
+    r"تا\s*\d{1,2}(?::\d{2})?\s*(?:شب|ظهر|عصر)|توضیحات\s*[:：]"
+)
 _NON_OFFER = re.compile(
     r"نحوه\s+گذاشتن|مثال|لینک\s+ارسالی|بات\s+تلگرامی|شروع\s+معاملات|"
     r"آماده\s*بکار|عضو\s+شدند"
@@ -45,6 +50,37 @@ _PRICE_BOUNDS = {
     "HALF_LOW_DATE": (70_000, 100_000),
     "ONE_GRAM": (20_000, 36_000),
 }
+
+_PERSIAN_UNITS = {
+    "یه": 1,
+    "یک": 1,
+    "دو": 2,
+    "سه": 3,
+    "چهار": 4,
+    "پنج": 5,
+    "شش": 6,
+    "هفت": 7,
+    "هشت": 8,
+    "نه": 9,
+}
+_PERSIAN_TENS = {
+    "ده": 10,
+    "بیست": 20,
+    "سی": 30,
+    "چهل": 40,
+    "پنجاه": 50,
+    "شصت": 60,
+    "هفتاد": 70,
+    "هشتاد": 80,
+    "نود": 90,
+}
+_WORD_QUANTITY = re.compile(
+    r"(?<![آ-ی])((?:"
+    + "|".join((*_PERSIAN_TENS, *_PERSIAN_UNITS))
+    + r")(?:\s+و\s+(?:"
+    + "|".join(_PERSIAN_UNITS)
+    + r"))?|صد)\s*(?:د?تا|عدد)(?![آ-ی])"
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,7 +110,7 @@ class ParsedCoinGroupOffer:
 
 
 def _text(value: str) -> str:
-    normalized = str(value or "").translate(_DIGITS)
+    normalized = str(value or "").translate(_DIGITS).translate(_ARABIC_LETTERS)
     normalized = normalized.replace("\u200c", " ").replace("\u200f", " ")
     return " ".join(normalized.split())
 
@@ -105,28 +141,49 @@ def _side(text: str) -> str | None:
     if compact_historical is not None:
         return "BUY" if compact_historical.group(1) == "خ" else "SELL"
     match = _SIDE.search(text)
-    if match is None:
+    if match is not None:
+        marker = match.group()
+        return "BUY" if marker.startswith("خ") else "SELL"
+    # Current group shorthand is frequently glued to a price or `تا`, e.g.
+    # `189ف`, `188600خ 10`, or `2تاف94500`.
+    attached = re.search(r"(?:^|\s|\d|تا)([خف])(?=\s|\d|$)", text)
+    if attached is None:
         return None
-    marker = match.group()
+    marker = attached.group(1)
     return "BUY" if marker.startswith("خ") else "SELL"
 
 
-def _quantity(text: str) -> tuple[int | None, list[tuple[int, int]]]:
-    match = _QUANTITY.search(text)
+def _word_quantity(text: str) -> tuple[int | None, list[tuple[int, int]]]:
+    match = _WORD_QUANTITY.search(text)
     if match is None:
         return None, []
-    quantity = int(match.group(1))
-    return (quantity if 1 <= quantity <= 100 else None), [match.span(1)]
+    words = match.group(1).split()
+    if words == ["صد"]:
+        return 100, [match.span(1)]
+    parts = [word for word in words if word != "و"]
+    value = sum(_PERSIAN_TENS.get(word, _PERSIAN_UNITS.get(word, 0)) for word in parts)
+    return (value if 1 <= value <= 100 else None), [match.span(1)]
+
+
+def _explicit_quantity(text: str) -> tuple[int | None, list[tuple[int, int]]]:
+    match = _QUANTITY.search(text)
+    if match is not None:
+        quantity = int(match.group(1))
+        return (quantity if 1 <= quantity <= 100 else None), [match.span(1)]
+    return _word_quantity(text)
 
 
 def _spans_overlap(first: tuple[int, int], spans: Iterable[tuple[int, int]]) -> bool:
     return any(first[0] < end and first[1] > start for start, end in spans)
 
 
-def _price_candidates(text: str, quantity_spans: Iterable[tuple[int, int]]) -> list[tuple[int, float]]:
-    candidates: dict[int, float] = {}
+def _price_candidates(
+    text: str,
+    excluded_spans: Iterable[tuple[int, int]],
+) -> list[tuple[int, float, tuple[int, int]]]:
+    candidates: dict[tuple[int, tuple[int, int]], float] = {}
     for match in _NUMBER.finditer(text):
-        if _spans_overlap(match.span(1), quantity_spans):
+        if _spans_overlap(match.span(1), excluded_spans):
             continue
         digits = re.sub(r"\D", "", match.group(1))
         if not digits:
@@ -147,21 +204,45 @@ def _price_candidates(text: str, quantity_spans: Iterable[tuple[int, int]]) -> l
             values.append((raw * 1000, 0.78))
         for value, score in values:
             if 20_000 <= value <= 260_000:
-                candidates[value] = max(candidates.get(value, 0.0), score)
-    return sorted(candidates.items(), key=lambda item: item[1], reverse=True)
+                key = (value, match.span(1))
+                candidates[key] = max(candidates.get(key, 0.0), score)
+    return sorted(
+        ((value, score, span) for (value, span), score in candidates.items()),
+        key=lambda item: (-item[1], item[0], item[2]),
+    )
 
 
-def _price(text: str, quantity_spans: Iterable[tuple[int, int]], commodity: str | None) -> int | None:
-    candidates = _price_candidates(text, quantity_spans)
+def _price(
+    text: str,
+    excluded_spans: Iterable[tuple[int, int]],
+    commodity: str | None,
+) -> tuple[int | None, list[tuple[int, int]]]:
+    candidates = _price_candidates(text, excluded_spans)
     if commodity is not None:
         low, high = _PRICE_BOUNDS[commodity]
         candidates = [item for item in candidates if low <= item[0] <= high]
     if not candidates:
-        return None
-    winner, score = candidates[0]
+        return None, []
+    winner, score, span = candidates[0]
     if len(candidates) > 1 and candidates[1][0] != winner and score - candidates[1][1] < 0.08:
-        return None
-    return winner
+        return None, []
+    return winner, [span]
+
+
+def _bare_quantity(
+    text: str,
+    excluded_spans: Iterable[tuple[int, int]],
+) -> tuple[int | None, list[tuple[int, int]]]:
+    candidates = [
+        match
+        for match in _SMALL_NUMBER.finditer(text)
+        if not _spans_overlap(match.span(1), excluded_spans)
+        and 1 <= int(match.group(1)) <= 100
+    ]
+    if len(candidates) != 1:
+        return None, []
+    match = candidates[0]
+    return int(match.group(1)), [match.span(1)]
 
 
 def coin_group_settlement_markers(text: str) -> tuple[bool, bool]:
@@ -240,12 +321,18 @@ def parse_coin_group_offers(source: CoinGroupMessageInput) -> list[ParsedCoinGro
     results: list[ParsedCoinGroupOffer] = []
     for line in [item for item in str(source.text).splitlines() if _text(item)] or [whole]:
         text = _text(line)
-        if _EXCLUDED_YEAR.search(text) or _THURSDAY.search(text):
+        if _THURSDAY.search(text):
             continue
         commodity = _commodity(text)
         side = _side(text)
-        quantity, quantity_spans = _quantity(text)
-        price = _price(text, quantity_spans, commodity)
+        year_spans = [match.span() for match in _YEAR_TOKEN.finditer(text)]
+        quantity, quantity_spans = _explicit_quantity(text)
+        price, price_spans = _price(text, (*quantity_spans, *year_spans), commodity)
+        if quantity is None and price is not None:
+            quantity, quantity_spans = _bare_quantity(
+                text,
+                (*year_spans, *price_spans),
+            )
         if side is None or quantity is None or price is None:
             continue
         trade_form, settlement = _dimensions(text)

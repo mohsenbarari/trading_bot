@@ -1,44 +1,42 @@
 # Coin Market Intelligence
 
-- USD/Herat abbreviation repair is an ingest-time causal decision: use at
-  least three strictly-prior observations from the same source/book in a
-  bounded 15-minute range, reconstruct omitted leading digits from that range,
-  and never add a fixed price constant. Historical replay must be chronological.
+- USD/Herat abbreviation repair is ingest-time and causal: reconstruct omitted
+  leading digits from at least three strictly-prior same-source/book facts in a
+  bounded 15-minute range; never add a fixed constant. Replay chronologically.
 - Coin-group settlement supports both generations: old `خ ن ف`/`ف ن ف` and
   current `خ ف`/`ف ف` mean tomorrow; old `خ ن`/`ف ن`, current single `خ`/`ف`,
   and standalone `نق` mean cash. Explicit future delivery wins over `ن`.
-- Reject malformed coin-group envelopes individually; inverted edit/create
-  times must not poison siblings or freeze checkpoints. The dashboard keeps
-  heartbeat, latest canonical/eligible events and selected anchors distinct;
-  offer/trade freshness is independent and historical rows are not live intake.
-  Idempotent replays preserve first unchanged-decision availability rather than
-  moving anchors to each reconciliation time.
-- A group trade requires one structurally linked reply branch. Keep users and
-  sibling branches isolated, prefer attributable owner confirmation, use the
-  latest negotiated quantity/price on that branch, deduplicate declarations
-  from one fill, and keep ambiguous/overfilled facts out of model eligibility.
-- Do not restore `group_commodity_context` or silently default an omitted coin
-  to Imam. Commodity resolution uses strictly-prior same-book Market Store
-  anchors and fails closed when context is insufficient or conflicting.
-- Live coin-intelligence systemd jobs must execute from the canonical checkout;
-  before removing a worktree, retarget and verify every timer/service that
-  references it so snapshots and Market Store inputs cannot silently stall.
-- The operator estimator runtime is a sidecar of canonical `main`; its model,
-  analytics, sessions and SQLite stores live only under
-  `/srv/trading-bot/production-data/coin-intelligence/estimator-live`.
-- Current private-group Market Store facts may be projected into the estimator's
-  compatibility conversation store using opaque identifiers and normalized
-  fields; do not revive the retired legacy group parser or its data plane.
-- The estimator home shows only primary-model output plus the exact CASH/TOMORROW
-  input snapshot consumed by it: point-before-mean values,
-  explicit proxy/estimate/exclusion provenance, and per-rate live/historical
-  coin-group anchors. Collector heartbeat, stored activity and actual model
-  eligibility/effect are separate; shadow and realised-outcome data remain
-  exclusively on `/shadow`.
-- Estimator health is input-driven, not process-driven. Every required source
-  must expose a collector heartbeat separately from market-hours-aware data
-  freshness; stale or invalid inputs stay excluded, and aggregate health must
-  degrade with explicit reason codes instead of reporting a bare `RUNNING`.
-  Direct normalized sources always win. A live-only fallback must remain a
-  separately stored, corroborated and explicitly labelled proxy, degrade health,
-  fail closed on disagreement, and never enter historical model training.
+- Coin-group number parsing is contextual: attached comma/dot/slash thousands,
+  glued/bare/word quantities, Persian/Arabic letters and mint-year metadata must
+  not corrupt price or quantity. Payment timing/account terms are conditional.
+- Commodity resolution never defaults an omitted coin to Imam and never restores
+  `group_commodity_context`. Use strictly-prior same-book anchors no older than
+  two hours. A new regime may bootstrap only from a coherent prior 30-minute
+  explicit cluster with at least three messages, two senders and 1.5% spread.
+  Group-derived consensus may resolve an unnamed offer or validate a matching
+  name, but only independent canonical evidence may reject an explicit name.
+- A trade requires one structurally linked reply branch. Keep users/siblings
+  isolated, choose the oldest offer on that ancestry, prefer attributable owner
+  confirmation, use the latest negotiated quantity/price, deduplicate one fill,
+  and keep ambiguous/overfilled facts out of model eligibility. Detect confirmed
+  trades even when the root commodity is unresolved, but retain them only as
+  pending audit facts until the root is eligible.
+- Reconciliation rejects derived offer/trade facts invalidated by edits or the
+  current reply graph. Idempotent unchanged decisions retain first availability.
+  Estimator projection is authoritative: remove missing/ineligible prior rows,
+  exclude conditional or over-five-minute-late facts, and use `available_at_utc`
+  as the compatibility timeline while retaining source event time as metadata.
+- Reject malformed group envelopes individually; inverted timestamps must not
+  poison siblings or freeze checkpoints. Health separates heartbeat, latest
+  canonical event, and actual model-eligible input; historical rows are not live.
+- Private group text stays only in bounded external staging. Market Store and
+  estimator projection keep opaque normalized facts; never revive the legacy
+  parser/data plane. Live jobs execute from canonical `main`; verify and retarget
+  every systemd reference before removing a worktree.
+- Estimator runtime state lives under
+  `/srv/trading-bot/production-data/coin-intelligence/estimator-live`. The home
+  page shows only primary output and its exact CASH/TOMORROW inputs; shadow and
+  realised outcomes stay on `/shadow`.
+- Input health is data-driven: expose heartbeat separately from market-hours-aware
+  freshness, exclude stale/invalid inputs, prefer direct normalized sources, and
+  label any corroborated live-only proxy as degraded and never training-eligible.

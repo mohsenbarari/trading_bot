@@ -307,8 +307,12 @@ async def collect(args: argparse.Namespace) -> dict[str, object]:
                 "staged_messages_seen": pipeline.staged_messages_seen,
                 "offer_facts_upserted": pipeline.offer_facts_upserted,
                 "eligible_offers": pipeline.eligible_offers,
+                "pending_or_rejected_offers": pipeline.pending_or_rejected_offers,
                 "trade_facts_upserted": pipeline.trade_facts_upserted,
                 "eligible_trades": pipeline.eligible_trades,
+                "pending_or_rejected_trades": pipeline.pending_or_rejected_trades,
+                "root_messages_not_trade_linkable": pipeline.root_messages_not_trade_linkable,
+                "retracted_facts": pipeline.retracted_facts,
             },
         }
     finally:

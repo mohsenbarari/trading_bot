@@ -64,6 +64,30 @@ class CoinGroupResolutionTests(unittest.TestCase):
         assert (result.commodity_code, result.quality_state) == ("IMAM", "REJECTED")
         assert "CONFLICTS" in result.resolution_reason
 
+    def test_group_consensus_cannot_overrule_an_explicit_commodity(self) -> None:
+        result = resolve_coin_group_offers(
+            source("امام خرید فردا 181,900 / 5 تا"),
+            anchors=(
+                anchor(
+                    "BAHAR",
+                    181_700,
+                    "2026-08-04T10:08:00Z",
+                    evidence_kind="GROUP_DERIVED",
+                ),
+                anchor(
+                    "BAHAR",
+                    181_800,
+                    "2026-08-04T10:09:00Z",
+                    evidence_kind="GROUP_DERIVED",
+                ),
+            ),
+        )[0]
+        assert (result.commodity_code, result.quality_state) == (
+            "IMAM",
+            "PENDING_REVIEW",
+        )
+        assert "GROUP_DERIVED" in result.resolution_reason
+
     def test_unnamed_offer_can_be_resolved_only_by_decisive_prior_context(self) -> None:
         result = resolve_coin_group_offers(
             source("خرید 181,900 / 5 تا فردایی"),
@@ -84,6 +108,17 @@ class CoinGroupResolutionTests(unittest.TestCase):
                 anchor("QUARTER_BAHAR", 52_250, "2026-08-04T10:11:00Z"),
                 anchor("QUARTER_BAHAR", 52_300, "2026-08-04T10:09:00Z", settlement_term="CASH"),
                 anchor("QUARTER_BAHAR", 52_300, "2026-08-04T10:09:30Z"),
+            ),
+        )[0]
+        assert result.quality_state == "PENDING_REVIEW"
+        assert result.anchor_count == 0
+
+    def test_stale_same_book_anchors_cannot_freeze_a_new_price_regime(self) -> None:
+        result = resolve_coin_group_offers(
+            source("امام فروش فردا 188,900 / 5 تا"),
+            anchors=(
+                anchor("IMAM", 184_500, "2026-08-04T07:00:00Z"),
+                anchor("IMAM", 184_700, "2026-08-04T07:01:00Z"),
             ),
         )[0]
         assert result.quality_state == "PENDING_REVIEW"

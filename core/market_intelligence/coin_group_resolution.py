@@ -23,10 +23,11 @@ from .coin_groups import (
 from .market_contracts import MarketObservation, MarketStoreContractError, derive_event_key, normalize_utc
 
 
-COIN_GROUP_RESOLUTION_VERSION = "coin-group-context-v1"
+COIN_GROUP_RESOLUTION_VERSION = "coin-group-context-v3-bounded-evidence"
 MINIMUM_ANCHOR_COUNT = 2
 MAXIMUM_RELATIVE_DISTANCE = 0.015
 MINIMUM_RUNNER_UP_MARGIN = 0.005
+MAXIMUM_ANCHOR_AGE_SECONDS = 2 * 60 * 60
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,6 +41,7 @@ class CoinPriceAnchor:
     settlement_term: str
     trade_form: str
     quality_state: str = "ELIGIBLE"
+    evidence_kind: str = "CANONICAL"
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,6 +60,7 @@ class ResolvedCoinGroupOffer:
     resolution_reason: str
     anchor_count: int
     relative_distance: float | None
+    authoritative_anchor_count: int = 0
 
 
 def _strict_timestamp(value: datetime | str, *, name: str) -> str:
@@ -67,7 +70,9 @@ def _strict_timestamp(value: datetime | str, *, name: str) -> str:
         raise ValueError(str(exc)) from exc
 
 
-def _normalized_anchor(anchor: CoinPriceAnchor) -> tuple[str, int, str, str, str, str] | None:
+def _normalized_anchor(
+    anchor: CoinPriceAnchor,
+) -> tuple[str, int, str, str, str, str, str] | None:
     code = str(anchor.commodity_code or "").strip().upper()
     if code not in _PRICE_BOUNDS:
         return None
@@ -91,7 +96,14 @@ def _normalized_anchor(anchor: CoinPriceAnchor) -> tuple[str, int, str, str, str
         return None
     if available_at < event_time:
         return None
-    return code, price, event_time, available_at, settlement, trade_form
+    evidence_kind = str(anchor.evidence_kind or "").strip().upper()
+    if evidence_kind not in {
+        "CANONICAL",
+        "GROUP_DERIVED",
+        "PROVISIONAL_EXPLICIT_CLUSTER",
+    }:
+        return None
+    return code, price, event_time, available_at, settlement, trade_form, evidence_kind
 
 
 def _candidate_centers(
@@ -100,25 +112,40 @@ def _candidate_centers(
     source_event_time_utc: str,
     source_available_at_utc: str,
     anchors: Iterable[CoinPriceAnchor],
-) -> list[tuple[str, float, int, float]]:
+) -> list[tuple[str, float, int, float, int]]:
     """Return strictly-prior same-book centers as code/center/count/distance."""
 
-    grouped: dict[str, list[int]] = {}
+    grouped: dict[str, list[tuple[int, str]]] = {}
+    source_stamp = datetime.fromisoformat(
+        source_event_time_utc.replace("Z", "+00:00")
+    )
     for anchor in anchors:
         normalized = _normalized_anchor(anchor)
         if normalized is None:
             continue
-        code, price, event_time, available_at, settlement, form = normalized
+        (
+            code,
+            price,
+            event_time,
+            available_at,
+            settlement,
+            form,
+            evidence_kind,
+        ) = normalized
         # Both publication and availability must be earlier.  A source event
         # that exists in the future cannot rewrite a historical label, and a
         # delayed fact cannot leak into the offer's contemporaneous decision.
         if event_time >= source_event_time_utc or available_at > source_available_at_utc:
             continue
+        anchor_stamp = datetime.fromisoformat(event_time.replace("Z", "+00:00"))
+        if (source_stamp - anchor_stamp).total_seconds() > MAXIMUM_ANCHOR_AGE_SECONDS:
+            continue
         if settlement != parsed.settlement_term or form != parsed.trade_form:
             continue
-        grouped.setdefault(code, []).append(price)
-    candidates: list[tuple[str, float, int, float]] = []
-    for code, prices in grouped.items():
+        grouped.setdefault(code, []).append((price, evidence_kind))
+    candidates: list[tuple[str, float, int, float, int]] = []
+    for code, evidence in grouped.items():
+        prices = [item[0] for item in evidence]
         if len(prices) < MINIMUM_ANCHOR_COUNT:
             continue
         low, high = _PRICE_BOUNDS[code]
@@ -126,7 +153,8 @@ def _candidate_centers(
             continue
         center = float(median(prices))
         distance = abs(parsed.price_project_thousand_toman - center) / center
-        candidates.append((code, center, len(prices), distance))
+        authoritative_count = sum(kind == "CANONICAL" for _, kind in evidence)
+        candidates.append((code, center, len(prices), distance, authoritative_count))
     return sorted(candidates, key=lambda item: (item[3], -item[2], item[0]))
 
 
@@ -169,23 +197,39 @@ def _resolve_one(
             resolution_reason="INSUFFICIENT_OR_AMBIGUOUS_STRICTLY_PRIOR_SAME_BOOK_ANCHORS",
             anchor_count=winner[2] if winner else 0,
             relative_distance=round(winner[3], 6) if winner else None,
+            authoritative_anchor_count=winner[4] if winner else 0,
         )
     assert winner is not None
-    winner_code, _, anchor_count, distance = winner
+    winner_code, _, anchor_count, distance, authoritative_count = winner
     if claimed is not None and claimed != winner_code:
         # Never silently rewrite an explicit commodity.  A price conflict is
         # useless as an offer or a later linked-trade label until a human or
         # another authoritative source resolves it.
-        state = "REJECTED"
-        reason = "EXPLICIT_COMMODITY_CONFLICTS_WITH_STRICTLY_PRIOR_SAME_BOOK_PRICE"
+        state = (
+            "REJECTED"
+            if authoritative_count >= MINIMUM_ANCHOR_COUNT
+            else "PENDING_REVIEW"
+        )
+        reason = (
+            "EXPLICIT_COMMODITY_CONFLICTS_WITH_STRICTLY_PRIOR_SAME_BOOK_PRICE"
+            if state == "REJECTED"
+            else "EXPLICIT_COMMODITY_CONFLICTS_ONLY_WITH_GROUP_DERIVED_PRICE"
+        )
         code = claimed
     else:
         state = "ELIGIBLE"
-        reason = (
-            "EXPLICIT_COMMODITY_VALIDATED_BY_STRICTLY_PRIOR_SAME_BOOK_PRICE"
-            if claimed is not None
-            else "UNNAMED_COMMODITY_RESOLVED_BY_STRICTLY_PRIOR_SAME_BOOK_PRICE"
-        )
+        if authoritative_count:
+            reason = (
+                "EXPLICIT_COMMODITY_VALIDATED_BY_STRICTLY_PRIOR_SAME_BOOK_PRICE"
+                if claimed is not None
+                else "UNNAMED_COMMODITY_RESOLVED_BY_STRICTLY_PRIOR_SAME_BOOK_PRICE"
+            )
+        else:
+            reason = (
+                "EXPLICIT_COMMODITY_VALIDATED_BY_COHERENT_PRIOR_GROUP_CLUSTER"
+                if claimed is not None
+                else "UNNAMED_COMMODITY_RESOLVED_BY_COHERENT_PRIOR_GROUP_CLUSTER"
+            )
         code = winner_code
     return ResolvedCoinGroupOffer(
         offer_index=offer_index,
@@ -200,6 +244,7 @@ def _resolve_one(
         resolution_reason=reason,
         anchor_count=anchor_count,
         relative_distance=round(distance, 6),
+        authoritative_anchor_count=authoritative_count,
     )
 
 
@@ -207,6 +252,7 @@ def resolve_coin_group_offers(
     source: CoinGroupMessageInput,
     *,
     anchors: Iterable[CoinPriceAnchor],
+    parsed_offers: Iterable[ParsedCoinGroupOffer] | None = None,
 ) -> list[ResolvedCoinGroupOffer]:
     """Resolve all parser candidates using only facts known before the message."""
 
@@ -215,6 +261,11 @@ def resolve_coin_group_offers(
     if available_at < event_time:
         raise ValueError("coin_group_available_before_published")
     materialized_anchors = tuple(anchors)
+    parsed_values = (
+        tuple(parsed_offers)
+        if parsed_offers is not None
+        else tuple(parse_coin_group_offers(source))
+    )
     return [
         _resolve_one(
             parsed,
@@ -223,7 +274,7 @@ def resolve_coin_group_offers(
             source_available_at_utc=available_at,
             anchors=materialized_anchors,
         )
-        for index, parsed in enumerate(parse_coin_group_offers(source))
+        for index, parsed in enumerate(parsed_values)
     ]
 
 
@@ -232,6 +283,7 @@ def resolved_coin_group_observations(
     *,
     anchors: Iterable[CoinPriceAnchor],
     resolution_available_at_utc: datetime | str | None = None,
+    resolved_offers: Iterable[ResolvedCoinGroupOffer] | None = None,
 ) -> list[MarketObservation]:
     """Project resolved results without text, identity, or future leakage.
 
@@ -249,7 +301,12 @@ def resolved_coin_group_observations(
     if resolution_available < source_available:
         raise ValueError("coin_group_resolution_available_before_source_available")
     observations: list[MarketObservation] = []
-    for resolved in resolve_coin_group_offers(source, anchors=anchors):
+    resolved_values = (
+        tuple(resolved_offers)
+        if resolved_offers is not None
+        else tuple(resolve_coin_group_offers(source, anchors=anchors))
+    )
+    for resolved in resolved_values:
         commodity = resolved.commodity_code or "UNRESOLVED"
         observations.append(
             MarketObservation(
@@ -281,6 +338,7 @@ def resolved_coin_group_observations(
                     "commodity_resolution": "VALIDATED" if resolved.quality_state == "ELIGIBLE" else "UNRESOLVED",
                     "resolution_reason": resolved.resolution_reason,
                     "anchor_count": resolved.anchor_count,
+                    "authoritative_anchor_count": resolved.authoritative_anchor_count,
                     "relative_distance": resolved.relative_distance,
                 },
             )

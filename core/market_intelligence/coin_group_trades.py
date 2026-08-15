@@ -7,22 +7,21 @@ reply parents, and quantity overfills remain out of the model-facing store.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from decimal import Decimal
 import re
 from typing import Iterable, Mapping
 
 from .coin_group_resolution import ResolvedCoinGroupOffer
 from .coin_group_staging import StagedCoinGroupMessage
-from .market_contracts import MarketObservation, derive_event_key
+from .coin_groups import _explicit_quantity, _text as _normalize_group_text
+from .market_contracts import MarketObservation, derive_event_key, normalize_utc
 
 
-COIN_GROUP_TRADE_LINKER_VERSION = "coin-group-trade-link-v2-branch-terms"
+COIN_GROUP_TRADE_LINKER_VERSION = "coin-group-trade-link-v3-root-audit"
 MAX_REPLY_DEPTH = 12
 MAX_REPLY_AGE_SECONDS = 2 * 60 * 60
-_DIGITS = str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789")
-_QTY = re.compile(r"(?<!\d)(\d{1,3})\s*(?:د?تا|عدد)\b")
-_NUMBER = re.compile(r"(?<!\d)(\d{1,3}(?:[٬،,]\d{3})+|\d{2,7})(?!\d)")
+_NUMBER = re.compile(r"(?<!\d)(\d{1,3}(?:[٬،,./]\d{3})+|\d{2,7})(?!\d)")
 _SMALL_NUMBER = re.compile(r"(?<!\d)(\d{1,3})(?!\d)")
 _CANCEL = re.compile(r"کنسل|لغو|منتفی|پاس|حذف|نشد|ندارم|تمام\s*شد|اشتباه|عذر")
 _EXPLICIT_TRADE = re.compile(
@@ -36,7 +35,7 @@ _BUY_MARKER = re.compile(r"(?<![آ-ی])ب(?![آ-ی])|خریدم|برداشتم|�
 
 @dataclass(frozen=True, slots=True)
 class CoinGroupOfferRecord:
-    """Transient link between an eligible resolved offer and its staged root."""
+    """Transient link between one resolved candidate and its staged root."""
 
     group_number: int
     message_id: int
@@ -53,7 +52,7 @@ class LinkedCoinGroupTrade:
     group_number: int
     root_offer_message_id: int
     confirmation_message_id: int
-    commodity_code: str
+    commodity_code: str | None
     price_project_thousand_toman: int
     quantity: int
     side: str
@@ -65,10 +64,11 @@ class LinkedCoinGroupTrade:
     quality_state: str
     confirmation_kind: str
     is_aggregate: bool
+    resolution_reason: str
 
 
 def _text(value: str) -> str:
-    return " ".join(str(value or "").translate(_DIGITS).replace("\u200c", " ").split())
+    return _normalize_group_text(value)
 
 
 def _signal(text: str) -> str:
@@ -87,10 +87,9 @@ def _signal(text: str) -> str:
 
 
 def _quantity_and_spans(text: str) -> tuple[int | None, list[tuple[int, int]]]:
-    match = _QTY.search(text)
-    if match is not None:
-        value = int(match.group(1))
-        return (value if 1 <= value <= 100 else None), [match.span(1)]
+    explicit, spans = _explicit_quantity(text)
+    if explicit is not None:
+        return explicit, spans
     # Negotiation replies commonly omit «تا» (``ب ۱۰``, ``۹ب``, or a bare
     # ``۲۵``).  Accept one small integer only when the rest of the message is
     # an acceptance/question/quantity-shaped phrase; a three-digit price tail
@@ -163,18 +162,22 @@ def _root_offer(
 ) -> CoinGroupOfferRecord | None:
     current = message
     seen: set[int] = set()
+    oldest_candidate: CoinGroupOfferRecord | None = None
     for _ in range(MAX_REPLY_DEPTH):
         key = (current.group_number, current.message_id)
         candidate = offers.get(key)
         if candidate is not None:
-            return candidate
+            # Negotiation replies can themselves look offer-shaped.  Keep
+            # walking to the oldest offer candidate on this exact ancestry so
+            # a counter-offer cannot steal the root from the original offer.
+            oldest_candidate = candidate
         parent_id = current.reply_to_message_id
         if parent_id is None or parent_id in seen:
-            return None
+            return oldest_candidate if parent_id is None else None
         seen.add(parent_id)
         parent = messages.get((current.group_number, parent_id))
         if parent is None:
-            return None
+            return oldest_candidate
         current = parent
     return None
 
@@ -220,8 +223,6 @@ def _trade_from_confirmation(
     messages: Mapping[tuple[int, int], StagedCoinGroupMessage],
 ) -> LinkedCoinGroupTrade | None:
     offer = root.offer
-    if offer.quality_state != "ELIGIBLE" or offer.commodity_code is None:
-        return None
     if root.offerer_digest is None or message.sender_digest is None:
         # We may retain a source row with an unknown display name, but without
         # a stable transient identity we cannot safely assert a reciprocal
@@ -307,7 +308,18 @@ def _trade_from_confirmation(
     is_aggregate = kind == "OWNER_EXPLICIT_AGGREGATE_REPLY_TRADE" and bool(
         _CUMULATIVE.search(_text(message.text))
     )
-    quality = "PENDING_REVIEW" if is_aggregate and quantity > offer.quantity else "ELIGIBLE"
+    if offer.quality_state == "REJECTED":
+        quality = "REJECTED"
+        resolution_reason = "ROOT_OFFER_REJECTED:" + offer.resolution_reason
+    elif offer.quality_state != "ELIGIBLE" or offer.commodity_code is None:
+        quality = "PENDING_REVIEW"
+        resolution_reason = "ROOT_OFFER_NOT_MODEL_ELIGIBLE:" + offer.resolution_reason
+    elif is_aggregate and quantity > offer.quantity:
+        quality = "PENDING_REVIEW"
+        resolution_reason = "AGGREGATE_QUANTITY_EXCEEDS_ROOT_OFFER"
+    else:
+        quality = "ELIGIBLE"
+        resolution_reason = "STRUCTURALLY_LINKED_CONFIRMED_TRADE"
     return LinkedCoinGroupTrade(
         group_number=root.group_number,
         root_offer_message_id=root.message_id,
@@ -324,6 +336,7 @@ def _trade_from_confirmation(
         quality_state=quality,
         confirmation_kind=kind,
         is_aggregate=is_aggregate,
+        resolution_reason=resolution_reason,
     )
 
 
@@ -337,7 +350,6 @@ def link_coin_group_trades(
     offer_by_key = {
         (offer.group_number, offer.message_id): offer
         for offer in offers
-        if offer.offer.quality_state == "ELIGIBLE" and offer.offer.commodity_code is not None
     }
     candidates: list[tuple[LinkedCoinGroupTrade, frozenset[int]]] = []
     for message in sorted(message_by_key.values(), key=lambda item: (item.event_time_utc, item.message_id)):
@@ -407,17 +419,52 @@ def link_coin_group_trades(
         if not trade.is_aggregate:
             remaining = root.offer.quantity - filled.get(root_key, 0)
             if trade.quantity > remaining:
+                trades.append(
+                    replace(
+                        trade,
+                        quality_state=(
+                            "REJECTED"
+                            if trade.quality_state == "REJECTED"
+                            else "PENDING_REVIEW"
+                        ),
+                        resolution_reason=(
+                            trade.resolution_reason
+                            + ";NON_AGGREGATE_FILL_EXCEEDS_REMAINING_ROOT_QUANTITY"
+                            if trade.quality_state == "REJECTED"
+                            else "NON_AGGREGATE_FILL_EXCEEDS_REMAINING_ROOT_QUANTITY"
+                        ),
+                    )
+                )
                 continue
             filled[root_key] = filled.get(root_key, 0) + trade.quantity
         trades.append(trade)
     return trades
 
 
-def coin_group_trade_observations(trades: Iterable[LinkedCoinGroupTrade]) -> list[MarketObservation]:
+def coin_group_trade_observations(
+    trades: Iterable[LinkedCoinGroupTrade],
+    *,
+    resolution_available_at_utc: str | None = None,
+) -> list[MarketObservation]:
     """Project linked trades without raw message/reply/sender identifiers."""
 
+    resolution_available = (
+        normalize_utc(
+            resolution_available_at_utc,
+            field_name="coin_group_trade_resolution_available_at_utc",
+        )
+        if resolution_available_at_utc is not None
+        else None
+    )
     observations: list[MarketObservation] = []
     for trade in trades:
+        commodity = trade.commodity_code or "UNRESOLVED"
+        trade_available = normalize_utc(
+            trade.available_at_utc,
+            field_name="coin_group_trade_available_at_utc",
+        )
+        if resolution_available is not None and resolution_available < trade_available:
+            raise ValueError("coin_group_trade_resolution_available_before_confirmation")
         observations.append(
             MarketObservation(
                 event_key=derive_event_key(
@@ -426,9 +473,9 @@ def coin_group_trade_observations(trades: Iterable[LinkedCoinGroupTrade]) -> lis
                 source_code=f"GROUP_{trade.group_number}",
                 source_family="GROUP",
                 event_time_utc=trade.event_time_utc,
-                available_at_utc=trade.available_at_utc,
-                instrument="COIN_" + trade.commodity_code,
-                market_label="GROUP_COIN_" + trade.commodity_code,
+                available_at_utc=resolution_available or trade_available,
+                instrument="COIN_" + commodity,
+                market_label="GROUP_COIN_" + commodity,
                 settlement_term=trade.settlement_term,
                 trade_form=trade.trade_form,
                 event_type="TRADE",
@@ -447,6 +494,7 @@ def coin_group_trade_observations(trades: Iterable[LinkedCoinGroupTrade]) -> lis
                     "group_number": trade.group_number,
                     "confirmation_kind": trade.confirmation_kind,
                     "is_aggregate": trade.is_aggregate,
+                    "resolution_reason": trade.resolution_reason,
                 },
             )
         )
