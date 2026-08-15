@@ -811,6 +811,8 @@ def local_load_runner_command(
         "-e",
         "PYTHONDONTWRITEBYTECODE=1",
         "-e",
+        "APP_ENV_FILE=/dev/null",
+        "-e",
         f"IRAN_SERVER_URL={iran_peer_url}",
         "-e",
         "GERMANY_SERVER_URL=http://foreign_app:8000",
@@ -852,6 +854,7 @@ def remote_load_runner_command(args: argparse.Namespace, service: str, remote_ar
         f"-f {shlex.quote(REMOTE_STAGING_COMPOSE_FILE)} "
         "run --rm --no-deps "
         "-e PYTHONDONTWRITEBYTECODE=1 "
+        "-e APP_ENV_FILE=/dev/null "
         f"-e GERMANY_SERVER_URL={shlex.quote(foreign_peer_url)} "
         f"-e FOREIGN_SERVER_URL={shlex.quote(foreign_peer_url)} "
         "-e IRAN_SERVER_URL=http://app:8000 "

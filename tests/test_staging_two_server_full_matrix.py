@@ -713,6 +713,7 @@ class StagingTwoServerFullMatrixTests(unittest.TestCase):
         self.assertIn("IRAN_SERVER_URL=https://staging.gold-trade.ir", command)
         self.assertIn("GERMANY_SERVER_URL=http://foreign_app:8000", command)
         self.assertIn("FOREIGN_SERVER_URL=http://foreign_app:8000", command)
+        self.assertIn("APP_ENV_FILE=/dev/null", command)
 
     def test_remote_load_runner_supports_compose_v2_with_legacy_fallback(self):
         args = runner.parse_args(
@@ -737,6 +738,7 @@ class StagingTwoServerFullMatrixTests(unittest.TestCase):
         self.assertIn("docker compose version", remote_command)
         self.assertIn("command -v docker-compose", remote_command)
         self.assertIn('"${compose[@]}"', remote_command)
+        self.assertIn("-e APP_ENV_FILE=/dev/null", remote_command)
         self.assertNotIn(" STAGING_FRONTEND_DOCKER_DIST_DIR=mini_app_dist_staging docker-compose ", remote_command)
 
     def test_worker_split_reindexes_each_role_schedule_from_zero(self):
