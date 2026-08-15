@@ -34,7 +34,7 @@
       "frontend/src/views/AdminView.test.ts": "c4d72ba4a353390c95752788431efe6831fde7451830aeef7780b8bdeb62ab57"
     }
   },
-  "claimBoundary": "This file enumerates source-derived route outcomes and records one official local synthetic full-acceptance run on merged Market A+C main. Owner aesthetic sign-off is pending. Historical partial slices remain non-counting. This is not staging, Sites, or production authority. Gate A v3 on 02162106 is pre-Market, superseded, and non-promotable.",
+  "claimBoundary": "This file enumerates source-derived route outcomes and records the corrected official local synthetic full-acceptance run V2 on merged Market A+C main. Owner aesthetic sign-off is pending. The previous official receipt remains historical, superseded, and non-promotable. Historical partial slices remain non-counting. This is not staging, Sites, or production authority. Gate A v3 on 02162106 is pre-Market, superseded, and non-promotable.",
   "dimensionCorrection": {
     "previousProblem": "The prior schema treated customer, accountant, and group-lead as UserRole values and attached every profile to every route without an expected outcome.",
     "currentModel": "Access profiles combine authentication, the persisted role, account status, and customer/accountant relationship flags because the route guard uses all of those inputs.",
@@ -108,7 +108,8 @@
       "stage8-account-hub-singleton-execution-receipt",
       "stage8-notification-route-affordance-execution-receipt",
       "stage8-create-channel-help-popover-placement-execution-receipt",
-      "stage8-full-acceptance-execution-receipt"
+      "stage8-full-acceptance-execution-receipt",
+      "stage8-full-acceptance-execution-receipt-v2"
     ]
   },
   "cellAccounting": {
@@ -131,8 +132,8 @@
       "harnessDeferred": 0
     },
     "officialFullAcceptance": {
-      "runId": "stage8-full-acceptance-20260814T224708726Z",
-      "receiptId": "stage8-full-acceptance-execution-receipt",
+      "runId": "stage8-full-acceptance-20260815T063022538Z",
+      "receiptId": "stage8-full-acceptance-execution-receipt-v2",
       "countsTowardFullMatrixAcceptance": true,
       "introducedAsPartialSlice": false,
       "status": "full-local-synthetic-acceptance-executed-owner-signoff-pending"
@@ -1477,7 +1478,14 @@
       "kind": "official-local-synthetic-full-acceptance",
       "path": "docs/uiux-stage8-acceptance-rollout/STAGE8_FULL_ACCEPTANCE_EXECUTION_RECEIPT.json",
       "sha256": "eec298d957532dd0974f358e6df43d96640af4e6b01c482f351fe8fc571dc891",
-      "claim": "Official local synthetic five-phase full-acceptance run on merged Market A+C main. Owner aesthetic sign-off is pending. Not staging, production, or Sites authority. Does not overwrite historical receipts or the protected-surface freeze."
+      "claim": "Historical official local synthetic five-phase full-acceptance run. Superseded and non-promotable because of stale source-guard expectation, missing durable pre-settle evidence, and ISO Market created_at fixture. Kept byte-for-byte. Not staging, production, or Sites authority."
+    },
+    "stage8-full-acceptance-execution-receipt-v2": {
+      "id": "stage8-full-acceptance-execution-receipt-v2",
+      "kind": "official-local-synthetic-full-acceptance",
+      "path": "docs/uiux-stage8-acceptance-rollout/STAGE8_FULL_ACCEPTANCE_EXECUTION_RECEIPT_V2.json",
+      "sha256": "a4d1f3338e19bd2f907257bb86f418de3802ed0b09f7c2f4f761fba8d63f1a80",
+      "claim": "Corrected official local synthetic five-phase full-acceptance run V2 on merged Market A+C main. Owner aesthetic sign-off is pending. Not staging, production, or Sites authority. Does not overwrite historical receipts or the protected-surface freeze."
     }
   },
   "routes": [
@@ -4418,8 +4426,8 @@
     }
   ],
   "fullAcceptanceSourceSnapshot": {
-    "commit": "8f5f06f90e17ae1dae67bbe1bbbe0dc435701c68",
-    "tree": "8c5215d9d13fd5ac5817dbfe87e2ca5d06bf76b2",
+    "commit": "7bd50838cb99d17e3a0a0e9523019de30117668a",
+    "tree": "0e340291fc535e72e73dbc0b497f00e2b310557c",
     "implementationCommit": "a2b35dc2742aca22a6b19829bab6a23ecf9eb267",
     "implementationTree": "9e3589aaf4aaa4faaa9b7686c0f9f98bfb410e3a",
     "implementationParents": [
@@ -4427,8 +4435,8 @@
       "f0c49322d708344ccc766c6bacf563918be1639a"
     ],
     "runtimeSourcesMatchCommit": true,
-    "reportSha256": "074b52bc2cd3c07bd20b9ff1c190c31e9f69fa8e8a5a392e9fcfd21d5477b07d",
-    "receiptSha256": "eec298d957532dd0974f358e6df43d96640af4e6b01c482f351fe8fc571dc891",
+    "reportSha256": "e2a00c5599d87a512fadb4a315a55071e47ebbff59a61ef85cf2e52cfcd68aec",
+    "receiptSha256": "a4d1f3338e19bd2f907257bb86f418de3802ed0b09f7c2f4f761fba8d63f1a80",
     "distSha256": "92c76dbc27d6df512dc994a80d34750253ed5cd9c1c540ea00db9d2d42d3bca3",
     "distFileCount": 172
   }

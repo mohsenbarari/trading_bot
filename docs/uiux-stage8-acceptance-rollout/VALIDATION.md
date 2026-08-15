@@ -170,14 +170,20 @@ shared/global overflow workaround استفاده نشد. نه access outcomeها
 
 ## Official local full run on merged Market A+C — 2026-08-15
 
-مرجع فنی جاری اجرای رسمی پنج‌فازی روی `main` ادغام‌شده است:
-`STAGE8_FULL_ACCEPTANCE_EXECUTION_RECEIPT.json`، run
-`stage8-full-acceptance-20260814T224708726Z`، report SHA-256
-`074b52bc2cd3c07bd20b9ff1c190c31e9f69fa8e8a5a392e9fcfd21d5477b07d`.
+مرجع فنی جاری اجرای رسمی اصلاح‌شدهٔ پنج‌فازی روی `main` ادغام‌شده است:
+`STAGE8_FULL_ACCEPTANCE_EXECUTION_RECEIPT_V2.json`، run
+`stage8-full-acceptance-20260815T063022538Z`، report SHA-256
+`e2a00c5599d87a512fadb4a315a55071e47ebbff59a61ef85cf2e52cfcd68aec`،
+receipt SHA-256
+`a4d1f3338e19bd2f907257bb86f418de3802ed0b09f7c2f4f761fba8d63f1a80`.
 
 ۹۶۰ شناسه یکتا، ۲۷۰/۲۷۰ access، ۲۴۰/۲۴۰ viewport، ۱۲۰/۱۱۳/۸۷ applicable
 state/interaction/environment، صفر harness-deferred، صفر failure، صفر drift،
-صفر unknown/mutating/external. Gate A v3 روی `02162106` با report
+صفر unknown/mutating/external. شواهد loading/slow قبل از release پایدار و داخل
+digest است. تاریخ نمایشی Market شمسی/خوانا است و loading/error دیگر در
+`historyHiddenByProfile` نیستند. رسید V1
+`eec298d957532dd0974f358e6df43d96640af4e6b01c482f351fe8fc571dc891` تاریخی،
+superseded و non-promotable مانده است. Gate A v3 روی `02162106` با report
 `aa6c94bfaa595e3ad1292078a1f2a13bea049c98abe2949e455aaafc3469247a` پیش از ادغام
 Market است، superseded است و promotable نیست. این اجرا مجوز staging/production/Sites
 نیست و تا تأیید صریح زیبایی مالک `acceptanceAuthority=false` می‌ماند.

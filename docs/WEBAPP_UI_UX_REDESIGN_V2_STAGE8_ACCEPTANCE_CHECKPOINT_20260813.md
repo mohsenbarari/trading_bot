@@ -4,7 +4,9 @@
 
 وضعیت: **`full-local-synthetic-acceptance-executed-owner-signoff-pending`**
 
-شاخهٔ فنی جاری: `main` ادغام‌شدهٔ Market A+C. Gate A v3 روی `02162106` پیش از Market،
+شاخهٔ فنی جاری: `main` ادغام‌شدهٔ Market A+C. مرجع فنی جاری رسید V2
+`STAGE8_FULL_ACCEPTANCE_EXECUTION_RECEIPT_V2.json` است. رسید V1 تاریخی به‌خاطر
+نقص evidence/fixture superseded است. Gate A v3 روی `02162106` پیش از Market،
 superseded و non-promotable است. `acceptanceAuthority=false`.
 
 شاخهٔ تاریخی بستهٔ draft: `condidate/webapp-ui-ux-redesign-v2`
@@ -72,7 +74,7 @@ source محدود CreateChannel help-popover placement: `0d7f276006deb7f97d20ba0
 deep-link denied مدیر میانی (`/admin/channels`، `/admin/commodities`، `/admin/messages` و
 `/admin/system`) را نیز به canonicalization کامپوننتی `AdminView → /admin` متصل می‌کند.
 تعداد سلول‌های access اجراشدهٔ رسمی محلی ۲۷۰ است. گسترش viewport/state/interaction/environment
-روی همان اجرای رسمی انجام شد (۹۶۰ شناسه؛ ۱۳۰ N/A منبع‌محور). بازار A+C و پیام‌رسان disposition
+روی اجرای رسمی V2 انجام شد (۹۶۰ شناسه؛ ۱۳۰ N/A منبع‌محور). بازار A+C و پیام‌رسان disposition
 Stage 8 حفظ شده‌اند. تأیید زیبایی مالک هنوز pending است و این checkpoint مجوز
 staging/production/Sites نیست.
 

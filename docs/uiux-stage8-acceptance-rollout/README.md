@@ -22,7 +22,8 @@
 - authority: `stage8CompleteAuthority=false` و `acceptanceAuthority=false`
 - matrix status: `full-local-synthetic-acceptance-executed-owner-signoff-pending`
 - expected-access coverage: ۳۰ مسیر × ۹ پروفایل دقیق = ۲۷۰ outcome صریح
-- official local full run: ۹۶۰ شناسه روی `main` ادغام‌شدهٔ Market A+C؛ ۲۷۰/۲۷۰ access شمارش می‌شود؛ viewport/state/interaction/environment اجرا شد
+- official local full run V2: ۹۶۰ شناسه روی `main` ادغام‌شدهٔ Market A+C؛ ۲۷۰/۲۷۰ access شمارش می‌شود؛ viewport/state/interaction/environment اجرا شد
+- رسید V1 تاریخی به‌خاطر نقص evidence/fixture superseded و non-promotable مانده و overwrite نشده است
 - Gate A v3 روی `02162106` پیش از ادغام Market است، superseded است و promotable نیست
 - partial synthetic evidence تاریخی: دوازده partial slice / ۱۶۳ partial scenario همچنان historical/non-counting می‌مانند و دوباره شمرده نشدند
 - owner aesthetic acceptance: در انتظار تأیید صریح مالک
@@ -46,10 +47,13 @@ guard فعلی علاوه بر نقش از `account_status`، `is_customer` و `
 
 ## رسید اجرای رسمی محلی
 
+[STAGE8_FULL_ACCEPTANCE_EXECUTION_RECEIPT_V2.json](STAGE8_FULL_ACCEPTANCE_EXECUTION_RECEIPT_V2.json)
+مرجع فنی جاری روی `main` ادغام‌شدهٔ Market A+C است. رسید V1 تاریخی
 [STAGE8_FULL_ACCEPTANCE_EXECUTION_RECEIPT.json](STAGE8_FULL_ACCEPTANCE_EXECUTION_RECEIPT.json)
-مرجع فنی جاری روی `main` ادغام‌شدهٔ Market A+C است. Gate A v3 پیش از Market را
-overwrite یا promote نمی‌کند. screenshot خام داخل مخزن نیست. تأیید زیبایی مالک
-و مجوز staging/production/Sites هنوز وجود ندارد.
+به‌خاطر نقص serialization شواهد و قرارداد fixture بازار superseded است و
+byte-for-byte حفظ شده. Gate A v3 پیش از Market را overwrite یا promote نمی‌کند.
+screenshot خام داخل مخزن نیست. تأیید زیبایی مالک و مجوز staging/production/Sites
+هنوز وجود ندارد.
 
 ## شواهد محدود 8A، 8B، auth-containment، directory/profile، roving-focus، long-text-wrap، Account Hub، notification route-affordance و CreateChannel help-popover placement
 
@@ -192,6 +196,8 @@ audit geometry و contrast آن pass و محتوایش عاری از دادهٔ 
 ## محتوا
 
 - [ACCEPTANCE_MATRIX.json](ACCEPTANCE_MATRIX.json)
+- [STAGE8_FULL_ACCEPTANCE_EXECUTION_RECEIPT_V2.json](STAGE8_FULL_ACCEPTANCE_EXECUTION_RECEIPT_V2.json)
+- [STAGE8_FULL_ACCEPTANCE_EXECUTION_RECEIPT.json](STAGE8_FULL_ACCEPTANCE_EXECUTION_RECEIPT.json)
 - [STAGE8A_EXECUTION_RECEIPTS.json](STAGE8A_EXECUTION_RECEIPTS.json)
 - [STAGE8B_TYPOGRAPHY_EXECUTION_RECEIPT.json](STAGE8B_TYPOGRAPHY_EXECUTION_RECEIPT.json)
 - [STAGE8_AUTH_VIEWPORT_CONTAINMENT_EXECUTION_RECEIPT.json](STAGE8_AUTH_VIEWPORT_CONTAINMENT_EXECUTION_RECEIPT.json)
