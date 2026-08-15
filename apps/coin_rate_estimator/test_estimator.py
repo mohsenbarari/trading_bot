@@ -918,6 +918,14 @@ class EstimatorTests(unittest.TestCase):
             self.assertFalse(usd["is_usdt_proxy"])
             self.assertEqual(coin["status"], "NO_DATA")
             self.assertEqual(coin["selection"], "NO_DATA")
+            self.assertEqual(
+                coin["excluded_input_reason"],
+                "AMBIGUOUS_SETTLEMENT_NOT_MODEL_ELIGIBLE",
+            )
+            self.assertEqual(
+                coin["excluded_observations"][0]["market_label"],
+                "سکه حواله",
+            )
 
     def test_generic_coin_requires_exact_settlement_and_form_axes(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -1538,13 +1546,22 @@ class EstimatorTests(unittest.TestCase):
                         "wallex_public_api": {"status": "DEGRADED", "heartbeat_age_seconds": 2},
                         "coin_group_projection": {"status": "HEALTHY", "heartbeat_age_seconds": 8},
                     },
-                    "model_inputs": {},
+                    "model_inputs": {
+                        "coin_groups": {
+                            "status": "HISTORICAL_ONLY",
+                            "settlements": {"CASH": "HISTORICAL", "TOMORROW": "NO_DATA"},
+                            "latest_observation_age_seconds": 300,
+                        }
+                    },
                 },
             }
         ).decode("utf-8")
         self.assertIn("سلامت ورودی‌های مدل", body)
         self.assertIn("تلگرام بازار عمومی", body)
         self.assertIn("نیازمند توجه", body)
+        self.assertIn("ورودی گروه‌های سکه", body)
+        self.assertIn("فقط لنگر تاریخی", body)
+        self.assertIn("آخرین داده ۵ دقیقه پیش", body)
 
     def test_health_response_is_unavailable_for_critical_inputs(self) -> None:
         status, payload = health_response(
@@ -1675,6 +1692,171 @@ class EstimatorTests(unittest.TestCase):
         self.assertIn("دلار هرات", fragment)
         self.assertIn("لیست نرخ سکه و مسکوکات", fragment)
         self.assertIn('id="freshness-fragment"', fragment)
+
+    def test_page_renders_exact_settlement_inputs_and_group_provenance(self) -> None:
+        state = {
+            "service_status": "DEGRADED",
+            "generated_at_utc": "2026-08-15T08:21:05Z",
+            "window_start_utc": "2026-08-15T08:20:05Z",
+            "window_end_utc": "2026-08-15T08:21:05Z",
+            "settlements": {
+                "CASH": {
+                    "inputs": {
+                        "melted_gold": {
+                            "status": "OBSERVED",
+                            "average_price": 82_875_000,
+                            "point_price": 82_800_000,
+                            "latest_event_utc": "2026-08-15T08:20:26Z",
+                            "selection": "PRIMARY",
+                            "selected_market_label": "آبشده نقدی",
+                            "selected_trade_form": "PHYSICAL",
+                        },
+                        "usd": {
+                            "status": "ESTIMATED",
+                            "average_price": 186_637.5,
+                            "point_price": None,
+                            "anchor_event_utc": "2026-08-13T12:29:10Z",
+                            "anchor_age_seconds": 158_155,
+                            "selection": "CASH_HERAT_ANCHOR_USD_HERAT_TOMORROW_UP",
+                            "price_source": "USD_HERAT_CASH_TIME_AND_TOMORROW_BASIS_ESTIMATE",
+                            "market_movement_driver": "USD_HERAT_TOMORROW",
+                        },
+                        "usdt": {
+                            "status": "OBSERVED",
+                            "average_price": 187_116.4,
+                            "point_price": 187_103,
+                            "latest_event_utc": "2026-08-15T08:21:04Z",
+                            "selection": "WALLEX_USDT_IRT",
+                        },
+                        "xauusd": {
+                            "status": "ESTIMATED",
+                            "average_price": 4_377.15,
+                            "point_price": 4_376.91,
+                            "latest_event_utc": "2026-08-15T08:20:57Z",
+                            "selection": "BINANCE_PAXG_STABLECOIN_CORROBORATED_PROXY",
+                            "is_proxy": True,
+                        },
+                        "generic_coin": {
+                            "status": "NO_DATA",
+                            "selection": "NO_DATA",
+                            "excluded_input_reason": "AMBIGUOUS_SETTLEMENT_NOT_MODEL_ELIGIBLE",
+                            "excluded_observations": [
+                                {
+                                    "market_label": "سکه نقدی",
+                                    "settlement_term": "UNKNOWN",
+                                    "trade_form": "PHYSICAL",
+                                    "point_price": 189_200_000,
+                                    "latest_event_utc": "2026-08-15T08:20:40Z",
+                                }
+                            ],
+                        },
+                        "order_flow": {"status": "OBSERVED", "estimator_score": 0.12},
+                        "market_regime": {
+                            "status": "OBSERVED",
+                            "regime": "RANGE",
+                            "direction_score": 0.1,
+                            "confidence": 0.8,
+                        },
+                    },
+                    "rates": [
+                        {
+                            "commodity_name": "امام",
+                            "method": "FRESHNESS_WEIGHTED_GROUP_ANCHOR_X_CURRENT_MELTED_BLEND_STRUCTURAL_REGIME",
+                            "group_offer_anchor": {"status": "NO_DATA"},
+                            "historical_group_anchor": {
+                                "status": "OBSERVED",
+                                "reference_price_toman": 187_500_000,
+                                "event_time_utc": "2026-08-15T08:04:21Z",
+                                "age_seconds": 1_244,
+                                "offer_count": 1,
+                                "trade_count": 0,
+                                "reference_source": "LATEST_QUALITY_OFFER_RECENCY_VALIDATED",
+                            },
+                            "anchor_weight": 0.8436,
+                        }
+                    ],
+                },
+                "TOMORROW": {
+                    "inputs": {
+                        "melted_gold": {
+                            "status": "OBSERVED",
+                            "average_price": 82_935_714,
+                            "point_price": 82_900_000,
+                            "latest_event_utc": "2026-08-15T08:20:29Z",
+                            "selection": "SAME_MINUTE_PAPER_REFERENCE_FALLBACK",
+                            "selected_market_label": "آبشده امروزی",
+                            "selected_trade_form": "PAPER",
+                        },
+                        "usd": {
+                            "status": "OBSERVED",
+                            "average_price": 186_733.3,
+                            "point_price": 186_750,
+                            "latest_event_utc": "2026-08-15T08:20:16Z",
+                            "selection": "ALL_EVENTS",
+                            "price_source": "USD_HERAT",
+                            "selected_settlement_term": "TOMORROW",
+                            "selected_trade_form": "PAPER",
+                        },
+                        "usdt": {
+                            "status": "OBSERVED",
+                            "average_price": 187_116.4,
+                            "point_price": 187_103,
+                            "latest_event_utc": "2026-08-15T08:21:04Z",
+                            "selection": "WALLEX_USDT_IRT",
+                        },
+                        "xauusd": {
+                            "status": "ESTIMATED",
+                            "average_price": 4_377.15,
+                            "point_price": 4_376.91,
+                            "latest_event_utc": "2026-08-15T08:20:57Z",
+                            "selection": "BINANCE_PAXG_STABLECOIN_CORROBORATED_PROXY",
+                            "is_proxy": True,
+                        },
+                        "generic_coin": {"status": "NO_DATA", "selection": "NO_DATA"},
+                        "order_flow": {"status": "OBSERVED", "estimator_score": -0.08},
+                        "market_regime": {
+                            "status": "OBSERVED",
+                            "regime": "DIRECTIONAL",
+                            "direction_score": -0.2,
+                            "confidence": 0.7,
+                        },
+                    },
+                    "rates": [
+                        {
+                            "commodity_name": "امام",
+                            "method": "CURRENT_CASH_ESTIMATE_X_ROBUST_EMPIRICAL_TOMORROW_CASH_RATIO",
+                            "group_offer_anchor": {"status": "NO_DATA"},
+                        }
+                    ],
+                },
+            },
+        }
+        with patch(
+            "live_server.read_melted_minute_averages",
+            side_effect=AssertionError("dashboard must render the model snapshot directly"),
+        ):
+            body = render_page(
+                state,
+                market_db=Path("/not/read/by/dashboard.sqlite3"),
+            ).decode("utf-8")
+
+        self.assertIn("دفتر دقیق ورودی‌های تخمین", body)
+        self.assertIn("دفتر ورودی نقدی", body)
+        self.assertIn("دفتر ورودی فردایی", body)
+        self.assertIn("مقدار واقعاً مصرف‌شده", body)
+        self.assertIn("آبشده نقدی", body)
+        self.assertIn("آبشده امروزی", body)
+        self.assertIn("PRIMARY", body)
+        self.assertIn("SAME_MINUTE_PAPER_REFERENCE_FALLBACK", body)
+        self.assertIn("پراکسی تأییدشدهٔ PAXG", body)
+        self.assertIn("سن لنگر", body)
+        self.assertIn("اثر واقعی گروه‌های سکه در هر نرخ", body)
+        self.assertIn("LATEST_QUALITY_OFFER_RECENCY_VALIDATED", body)
+        self.assertIn("وزن ۸۴.۴٪", body)
+        self.assertIn("از نرخ نقدی مشتق شده", body)
+        self.assertIn("نرخ عمومی سکه؛ مستقل از گروه‌های معاملاتی", body)
+        self.assertIn("داده موجود؛ خارج از قرارداد", body)
+        self.assertIn("تسویهٔ صریح ندارد و وارد مدل نشده", body)
 
     def test_analytics_query_and_render(self) -> None:
         from live_server import parse_shamsi_to_utc_iso, query_user_analytics, render_analytics_page

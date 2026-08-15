@@ -243,6 +243,13 @@ def _logical_input_health(
             )
             payload = payload if isinstance(payload, Mapping) else {}
             status = str(payload.get("status") or "NO_DATA").upper()
+            if (
+                name == "generic_coin"
+                and status == "NO_DATA"
+                and isinstance(payload.get("excluded_observations"), (list, tuple))
+                and bool(payload.get("excluded_observations"))
+            ):
+                status = "EXCLUDED"
             per_settlement[settlement] = status
             if name == "xauusd" and payload.get("is_proxy") is True:
                 proxy_active = True
@@ -258,12 +265,20 @@ def _logical_input_health(
                 if observed_at is None or (as_of - observed_at) > timedelta(seconds=maximum_age):
                     stale_observed = True
         available = all(value in AVAILABLE_INPUT_STATES for value in per_settlement.values())
+        excluded_by_contract = any(
+            value == "EXCLUDED" for value in per_settlement.values()
+        )
         if stale_observed:
             status = "STALE"
         elif available and proxy_active:
             status = "AVAILABLE_PROXY"
         elif available:
             status = "AVAILABLE"
+        elif excluded_by_contract and all(
+            value in {"EXCLUDED", "NO_DATA"}
+            for value in per_settlement.values()
+        ):
+            status = "EXCLUDED_BY_CONTRACT"
         elif importance == "OPPORTUNISTIC":
             status = "QUIET_OR_NO_DATA"
         else:
@@ -284,6 +299,84 @@ def _logical_input_health(
                 None if freshest is None else round(max(0.0, (as_of - freshest).total_seconds()), 3)
             ),
         }
+
+    # Coin-group observations do not live in ``settlement.inputs``.  They are
+    # selected per commodity after the common market inputs have been built,
+    # and the exact selected live/historical anchors are therefore attached to
+    # rate rows.  Keep this separate from ``generic_coin`` (the public generic
+    # coin quote) so a healthy projection heartbeat cannot make an empty live
+    # group book look populated, and a quiet group cannot be mistaken for a
+    # collector failure.
+    group_settlements: dict[str, str] = {}
+    group_freshest: datetime | None = None
+    live_commodity_count = 0
+    historical_commodity_count = 0
+    for settlement in ("CASH", "TOMORROW"):
+        settlement_payload = settlements.get(settlement)
+        settlement_payload = (
+            settlement_payload if isinstance(settlement_payload, Mapping) else {}
+        )
+        rates = settlement_payload.get("rates")
+        rates = rates if isinstance(rates, (list, tuple)) else ()
+        live_found = False
+        historical_found = False
+        for rate in rates:
+            if not isinstance(rate, Mapping):
+                continue
+            live_anchor = rate.get("group_offer_anchor")
+            live_anchor = live_anchor if isinstance(live_anchor, Mapping) else {}
+            if str(live_anchor.get("status") or "").upper() == "OBSERVED":
+                live_found = True
+                live_commodity_count += 1
+                observed_at = parse_utc(live_anchor.get("latest_event_utc"))
+                if observed_at is not None and (
+                    group_freshest is None or observed_at > group_freshest
+                ):
+                    group_freshest = observed_at
+
+            historical_anchor = rate.get("historical_group_anchor")
+            historical_anchor = (
+                historical_anchor
+                if isinstance(historical_anchor, Mapping)
+                else {}
+            )
+            if str(historical_anchor.get("status") or "").upper() == "OBSERVED":
+                historical_found = True
+                historical_commodity_count += 1
+                observed_at = parse_utc(historical_anchor.get("event_time_utc"))
+                if observed_at is not None and (
+                    group_freshest is None or observed_at > group_freshest
+                ):
+                    group_freshest = observed_at
+        group_settlements[settlement] = (
+            "OBSERVED"
+            if live_found
+            else ("HISTORICAL" if historical_found else "NO_DATA")
+        )
+
+    if all(value == "OBSERVED" for value in group_settlements.values()):
+        group_status = "AVAILABLE"
+    elif any(value == "OBSERVED" for value in group_settlements.values()):
+        group_status = "PARTIAL"
+    elif any(value == "HISTORICAL" for value in group_settlements.values()):
+        group_status = "HISTORICAL_ONLY"
+    else:
+        group_status = "QUIET_OR_NO_DATA"
+    result["coin_groups"] = {
+        "status": group_status,
+        "importance": "OPPORTUNISTIC",
+        "settlements": group_settlements,
+        "latest_observation_utc": (
+            utc_text(group_freshest) if group_freshest else None
+        ),
+        "latest_observation_age_seconds": (
+            None
+            if group_freshest is None
+            else round(max(0.0, (as_of - group_freshest).total_seconds()), 3)
+        ),
+        "live_commodity_count": live_commodity_count,
+        "historical_commodity_count": historical_commodity_count,
+    }
     return result, reasons, critical_failure
 
 

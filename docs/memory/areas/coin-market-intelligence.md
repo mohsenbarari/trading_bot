@@ -23,9 +23,12 @@
 - Current private-group Market Store facts may be projected into the estimator's
   compatibility conversation store using opaque identifiers and normalized
   fields; do not revive the retired legacy group parser or its data plane.
-- The estimator home dashboard shows only primary-model output plus live market
-  inputs/activity. Shadow status, comparison and realised-outcome data belong
-  exclusively to `/shadow`; home may expose navigation to that page only.
+- The estimator home dashboard shows only primary-model output plus the exact
+  CASH/TOMORROW input snapshot consumed by it: point-before-mean values,
+  explicit proxy/estimate/exclusion provenance, and per-rate live/historical
+  coin-group anchors. Collector heartbeat, stored activity and actual model
+  eligibility/effect are separate; shadow and realised-outcome data remain
+  exclusively on `/shadow`.
 - Estimator health is input-driven, not process-driven. Every required source
   must expose a collector heartbeat separately from market-hours-aware data
   freshness; stale or invalid inputs stay excluded, and aggregate health must

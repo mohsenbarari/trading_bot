@@ -126,6 +126,23 @@ all rows accumulated while disconnected are applied without replaying or
 deleting them. The state is also exposed in `data.json` under
 `live_group_input_control` for auditability.
 
+### Exact model-input observability
+
+The home dashboard renders its input ledger directly from the same immutable
+estimate snapshot used for the displayed rates. Cash and tomorrow books are
+shown separately. For melted gold, Herat USD, USDT, XAU/PAXG and the public
+generic-coin lane, the page distinguishes the point value actually consumed
+by inference from the trailing-window average, and exposes the selected
+market/form, fallback or proxy, observation/anchor time and machine selection
+code. It must not issue an independent market query to construct these cards.
+
+Coin-group collector liveness, stored activity and model eligibility are also
+separate. The dashboard lists the selected five-minute live anchor and the
+selected historical transfer anchor per commodity/settlement, including the
+recorded blend weight and rate method. Fresh public coin quotes with ambiguous
+settlement remain excluded from inference, but are labelled as
+fresh-but-ineligible instead of being presented as a quiet source.
+
 ### Live input cadence and bounded self-training
 
 Inference refreshes every five seconds. Telegram messages remain

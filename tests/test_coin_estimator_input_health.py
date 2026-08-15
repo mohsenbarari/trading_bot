@@ -196,3 +196,82 @@ def test_failure_heartbeat_preserves_last_success_timestamp() -> None:
 
     assert failed["last_success_at_utc"] == successful["last_success_at_utc"]
     assert failed["error_code"] == "TIMEOUT"
+
+
+def test_coin_group_health_is_derived_from_selected_rate_anchors() -> None:
+    with TemporaryDirectory() as directory:
+        config = _config(Path(directory))
+        _write_healthy_probes(config)
+        estimate = _estimate()
+        estimate["settlements"]["CASH"]["rates"] = [
+            {
+                "commodity_name": "امام",
+                "group_offer_anchor": {"status": "NO_DATA"},
+                "historical_group_anchor": {
+                    "status": "OBSERVED",
+                    "event_time_utc": "2026-08-13T16:55:00Z",
+                },
+            }
+        ]
+        estimate["settlements"]["TOMORROW"]["rates"] = [
+            {
+                "commodity_name": "امام",
+                "group_offer_anchor": {"status": "NO_DATA"},
+            }
+        ]
+        result = build_estimator_input_health(estimate, as_of=NOW, config=config)
+
+    group = result["model_inputs"]["coin_groups"]
+    assert group["status"] == "HISTORICAL_ONLY"
+    assert group["settlements"] == {"CASH": "HISTORICAL", "TOMORROW": "NO_DATA"}
+    assert group["live_commodity_count"] == 0
+    assert group["historical_commodity_count"] == 1
+    assert group["latest_observation_age_seconds"] == 300.0
+    assert result["status"] == "HEALTHY"
+
+
+def test_live_coin_group_anchor_is_visible_without_masquerading_as_generic_coin() -> None:
+    with TemporaryDirectory() as directory:
+        config = _config(Path(directory))
+        _write_healthy_probes(config)
+        estimate = _estimate()
+        estimate["settlements"]["CASH"]["rates"] = [
+            {
+                "commodity_name": "امام",
+                "group_offer_anchor": {
+                    "status": "OBSERVED",
+                    "latest_event_utc": "2026-08-13T16:59:30Z",
+                },
+            }
+        ]
+        estimate["settlements"]["TOMORROW"]["rates"] = []
+        result = build_estimator_input_health(estimate, as_of=NOW, config=config)
+
+    assert result["model_inputs"]["coin_groups"]["status"] == "PARTIAL"
+    assert result["model_inputs"]["coin_groups"]["settlements"]["CASH"] == "OBSERVED"
+    assert result["model_inputs"]["generic_coin"]["status"] == "QUIET_OR_NO_DATA"
+
+
+def test_ambiguous_public_coin_quote_is_excluded_not_reported_as_quiet() -> None:
+    with TemporaryDirectory() as directory:
+        config = _config(Path(directory))
+        _write_healthy_probes(config)
+        estimate = _estimate()
+        for settlement in ("CASH", "TOMORROW"):
+            estimate["settlements"][settlement]["inputs"]["generic_coin"] = {
+                "status": "NO_DATA",
+                "excluded_input_reason": "AMBIGUOUS_SETTLEMENT_NOT_MODEL_ELIGIBLE",
+                "excluded_observations": [
+                    {
+                        "status": "OBSERVED",
+                        "latest_event_utc": "2026-08-13T16:59:45Z",
+                    }
+                ],
+            }
+        result = build_estimator_input_health(estimate, as_of=NOW, config=config)
+
+    generic = result["model_inputs"]["generic_coin"]
+    assert generic["status"] == "EXCLUDED_BY_CONTRACT"
+    assert generic["settlements"] == {"CASH": "EXCLUDED", "TOMORROW": "EXCLUDED"}
+    assert generic["latest_observation_age_seconds"] == 15.0
+    assert result["status"] == "HEALTHY"

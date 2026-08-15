@@ -1623,6 +1623,44 @@ def select_generic_coin_average(
             instrument="GOLD_COIN",
             settlement_term="__NO_CONFIGURED_CANDIDATE__",
         )
+    # The public board frequently publishes ``سکه نقدی``/``سکه حواله``
+    # without an explicit today/tomorrow term.  Keep rejecting those rows for
+    # inference (form and settlement are independent), but expose a sanitized
+    # diagnostic summary so the operator dashboard can distinguish a quiet
+    # source from fresh-but-ineligible data.
+    excluded_observations: list[dict[str, Any]] = []
+    for market_label, trade_form in (
+        ("سکه نقدی", "PHYSICAL"),
+        ("سکه حواله", "PAPER"),
+    ):
+        excluded = average_market_value(
+            connection,
+            end=end,
+            seconds=seconds,
+            instrument="GOLD_COIN",
+            market_label=market_label,
+            settlement_term="UNKNOWN",
+            trade_form=trade_form,
+        )
+        if excluded["status"] != "OBSERVED":
+            continue
+        excluded_observations.append(
+            {
+                "status": "OBSERVED",
+                "market_label": market_label,
+                "settlement_term": "UNKNOWN",
+                "trade_form": trade_form,
+                "point_price": excluded.get("point_price"),
+                "average_price": excluded.get("average_price"),
+                "sample_count": excluded.get("sample_count"),
+                "latest_event_utc": excluded.get("latest_event_utc"),
+            }
+        )
+    if excluded_observations:
+        telegram["excluded_input_reason"] = (
+            "AMBIGUOUS_SETTLEMENT_NOT_MODEL_ELIGIBLE"
+        )
+        telegram["excluded_observations"] = excluded_observations
     if settlement != "CASH":
         # The IME continuous coin certificate is a current/cash anchor.  It
         # must not directly replace a tomorrow coin quote; tomorrow keeps its

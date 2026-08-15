@@ -54,6 +54,7 @@ from coin_estimator import (  # noqa: E402
     enforce_cash_tomorrow_term_structure,
     estimate_rates,
     iso_utc,
+    live_point_value,
     load_model,
     parse_datetime,
     write_json_atomic,
@@ -1702,10 +1703,129 @@ def render_analytics_leaderboard_table(
     """
 
 
-def render_input_cards(inputs: dict[str, dict[str, Any]]) -> str:
+INPUT_STATUS_FA = {
+    "OBSERVED": "مشاهده‌شده",
+    "ESTIMATED": "برآورد فعال",
+    "EXCLUDED": "داده موجود؛ خارج از قرارداد",
+    "NO_DATA": "بدون دادهٔ معتبر",
+}
+
+INPUT_FORM_FA = {
+    "PHYSICAL": "فیزیکی",
+    "PAPER": "کاغذی",
+    "PHYSICAL_BRIDGED_BY_PAPER": "فیزیکی با پل تغییرات کاغذی",
+}
+
+INPUT_SETTLEMENT_FA = {
+    "TODAY": "امروز",
+    "TOMORROW": "فردا",
+    "UNKNOWN": "نامشخص",
+}
+
+
+def _settlement_inputs(
+    settlements: dict[str, dict[str, Any]], settlement: str
+) -> dict[str, dict[str, Any]]:
+    payload = settlements.get(settlement)
+    payload = payload if isinstance(payload, dict) else {}
+    inputs = payload.get("inputs")
+    return inputs if isinstance(inputs, dict) else {}
+
+
+def _input_active_value(payload: dict[str, Any]) -> float | None:
+    """Mirror the estimator's exact point-then-mean selection contract."""
+
+    if str(payload.get("status") or "").upper() not in {"OBSERVED", "ESTIMATED"}:
+        return None
+    return live_point_value(payload)
+
+
+def _input_value_text(key: str, value: object) -> str:
+    if value is None:
+        return NO_DATA_TOKEN
+    rendered = fa_number(value, decimals=2 if key == "xauusd" else 0)
+    return f"{rendered} {'دلار' if key == 'xauusd' else 'تومان'}"
+
+
+def _input_time(payload: dict[str, Any]) -> str | None:
+    if payload.get("point_price") is not None:
+        return str(
+            payload.get("latest_event_utc")
+            or payload.get("last_event_utc")
+            or ""
+        ) or None
+    selected = str(
+        payload.get("anchor_event_utc")
+        or payload.get("latest_event_utc")
+        or payload.get("last_event_utc")
+        or ""
+    ) or None
+    if selected:
+        return selected
+    excluded = payload.get("excluded_observations")
+    excluded = excluded if isinstance(excluded, list) else []
+    excluded_times = [
+        str(item.get("latest_event_utc"))
+        for item in excluded
+        if isinstance(item, dict) and item.get("latest_event_utc")
+    ]
+    return max(excluded_times) if excluded_times else None
+
+
+def _fa_age(seconds: object) -> str | None:
+    try:
+        value = max(0, int(float(seconds)))
+    except (TypeError, ValueError):
+        return None
+    if value < 120:
+        return f"{fa_number(value)} ثانیه"
+    if value < 7_200:
+        return f"{fa_number(value // 60)} دقیقه"
+    if value < 172_800:
+        return f"{fa_number(value // 3_600)} ساعت"
+    return f"{fa_number(value // 86_400)} روز"
+
+
+def _input_source_text(key: str, payload: dict[str, Any]) -> str:
+    parts: list[str] = []
+    if key == "xauusd" and payload.get("is_proxy") is True:
+        parts.append("پراکسی تأییدشدهٔ PAXG؛ اونس مستقیم در دسترس نیست")
+    elif key == "usdt":
+        parts.append("بازار عمومی USDT/IRT")
+    elif key == "generic_coin":
+        parts.append("نرخ عمومی سکه؛ مستقل از گروه‌های معاملاتی")
+        excluded = payload.get("excluded_observations")
+        excluded = excluded if isinstance(excluded, list) else []
+        if excluded:
+            labels = "، ".join(
+                str(item.get("market_label") or "سکه")
+                for item in excluded
+                if isinstance(item, dict)
+            )
+            parts.append(
+                f"{labels} تازه است، اما تسویهٔ صریح ندارد و وارد مدل نشده"
+            )
+    elif payload.get("price_source"):
+        parts.append(str(payload["price_source"]))
+    if payload.get("selected_market_label"):
+        parts.append(str(payload["selected_market_label"]))
+    if payload.get("selected_settlement_term"):
+        settlement = str(payload["selected_settlement_term"])
+        parts.append(INPUT_SETTLEMENT_FA.get(settlement, settlement))
+    if payload.get("selected_trade_form"):
+        trade_form = str(payload["selected_trade_form"])
+        parts.append(INPUT_FORM_FA.get(trade_form, trade_form))
+    if payload.get("market_movement_driver"):
+        parts.append(f"محرک: {payload['market_movement_driver']}")
+    if not parts and str(payload.get("status") or "").upper() == "NO_DATA":
+        parts.append("هیچ مسیر مجازِ هم‌تسویه و هم‌فرم انتخاب نشده است")
+    return " · ".join(parts) or "—"
+
+
+def render_input_cards(settlements: dict[str, dict[str, Any]]) -> str:
     labels = {
         "melted_gold": "طلا آب‌شده",
-        "generic_coin": "سکه عمومی",
+        "generic_coin": "سکه عمومی (غیرگروهی)",
         "xauusd": "اونس جهانی",
         "usd": "دلار هرات",
         "usdt": "تتر / تومان",
@@ -1719,35 +1839,226 @@ def render_input_cards(inputs: dict[str, dict[str, Any]]) -> str:
     }
     cards = []
     for key, label in labels.items():
-        value = inputs.get(key, {})
-        estimated = key == "usd" and bool(value.get("is_estimated"))
-        observed = value.get("status") in {"OBSERVED", "ESTIMATED"}
-        if estimated:
-            label = (
-                "دلار هرات نقدی"
-                if value.get("market_movement_driver")
-                else "دلار هرات فردایی"
-            )
-        rendered = fa_number(value.get("average_price"), decimals=2 if key == "xauusd" else 0)
-        samples = fa_number(value.get("sample_count", 0))
+        cash = _settlement_inputs(settlements, "CASH").get(key)
+        cash = cash if isinstance(cash, dict) else {}
+        tomorrow = _settlement_inputs(settlements, "TOMORROW").get(key)
+        tomorrow = tomorrow if isinstance(tomorrow, dict) else {}
+        values = {
+            "CASH": _input_active_value(cash),
+            "TOMORROW": _input_active_value(tomorrow),
+        }
+        statuses = {
+            str(cash.get("status") or "NO_DATA").upper(),
+            str(tomorrow.get("status") or "NO_DATA").upper(),
+        }
+        estimated = "ESTIMATED" in statuses
+        observed = bool(statuses & {"OBSERVED", "ESTIMATED"})
         css = "estimated" if estimated else ("observed" if observed else "no-data")
-        if estimated:
-            trend_code = value.get("market_direction") or value.get("usdt_trend")
-            direction = {
-                "UP": "افزایشی",
-                "DOWN": "کاهشی",
-                "NEUTRAL": "خنثی",
-            }.get(str(trend_code), "نامشخص")
-            detail = f"برآورد روند: {direction}"
-        else:
-            detail = f"تعداد رویداد: {samples}"
+        if key == "xauusd" and (
+            cash.get("is_proxy") is True or tomorrow.get("is_proxy") is True
+        ):
+            label = "پراکسی اونس جهانی (PAXG)"
+        detail = "نقطهٔ زندهٔ مصرف‌شده؛ در نبود آن برآورد/میانگین فعال"
         cards.append(
             f"<article class='input-card {css}' data-source='{html.escape(key)}'>"
             f"<div class='input-card-head'><span class='input-icon' aria-hidden='true'>"
             f"{icons[key]}</span><span>{label}</span></div>"
-            f"<strong>{rendered}</strong><small>{detail}</small></article>"
+            f"<strong><span class='settlement-value'>نقدی</span> "
+            f"{_input_value_text(key, values['CASH'])}<br>"
+            f"<span class='settlement-value'>فردایی</span> "
+            f"{_input_value_text(key, values['TOMORROW'])}</strong>"
+            f"<small>{html.escape(detail)}</small></article>"
         )
     return "".join(cards)
+
+
+def render_model_input_audit(
+    settlements: dict[str, dict[str, Any]],
+) -> str:
+    labels = {
+        "melted_gold": "آب‌شدهٔ انتخاب‌شده",
+        "usd": "دلار هرات",
+        "usdt": "تتر",
+        "xauusd": "اونس / پراکسی اونس",
+        "generic_coin": "سکهٔ عمومی (غیرگروهی)",
+        "order_flow": "جریان سفارش",
+        "market_regime": "رژیم بازار",
+    }
+    tables: list[str] = []
+    for settlement, settlement_label in SETTLEMENT_FA.items():
+        inputs = _settlement_inputs(settlements, settlement)
+        rows: list[str] = []
+        for key, label in labels.items():
+            payload = inputs.get(key)
+            payload = payload if isinstance(payload, dict) else {}
+            status = str(payload.get("status") or "NO_DATA").upper()
+            if key == "generic_coin" and payload.get("excluded_observations"):
+                status = "EXCLUDED"
+            status_text = INPUT_STATUS_FA.get(status, status)
+            active_value = _input_active_value(payload)
+            if key == "order_flow":
+                score = payload.get("estimator_score")
+                active_text = (
+                    NO_DATA_TOKEN
+                    if score is None
+                    else f"{fa_number(float(score) * 100, decimals=1)}٪"
+                )
+                average_text = "امتیاز اثر در تخمین"
+                average_kind = "سیگنال محاسبه‌شدهٔ مدل"
+                source_text = "جریان خرید/فروش، جداشده بر پایهٔ تسویه و فرم"
+            elif key == "market_regime":
+                active_text = html.escape(str(payload.get("regime") or NO_DATA_TOKEN))
+                direction = payload.get("direction_score")
+                confidence = payload.get("confidence")
+                average_text = (
+                    f"جهت {fa_number(direction, decimals=3)} · اطمینان "
+                    f"{fa_number(confidence, decimals=3)}"
+                    if direction is not None or confidence is not None
+                    else NO_DATA_TOKEN
+                )
+                average_kind = "سیگنال محاسبه‌شدهٔ مدل"
+                source_text = "رژیم مستقل بازار؛ ورودی سیگنال و دامنهٔ عدم‌قطعیت"
+            else:
+                active_text = _input_value_text(key, active_value)
+                average_text = _input_value_text(key, payload.get("average_price"))
+                average_kind = "میانگین بازهٔ مدل"
+                source_text = _input_source_text(key, payload)
+            selection = str(payload.get("selection") or "—")
+            observed_at = _input_time(payload)
+            age = _fa_age(payload.get("anchor_age_seconds"))
+            time_text = fa_datetime(observed_at) if observed_at else NO_DATA_TOKEN
+            if age:
+                time_text += f" · سن لنگر {age}"
+            if key in {"order_flow", "market_regime"}:
+                active_kind = "سیگنال مستقیم مدل"
+            else:
+                active_kind = (
+                    "آخرین رویداد واقعی"
+                    if payload.get("point_price") is not None
+                    else (
+                        "مقدار برآوردی/میانگین فعال"
+                        if active_value is not None
+                        else "بدون مقدار قابل مصرف"
+                    )
+                )
+            rows.append(
+                "<tr>"
+                f"<td><strong>{html.escape(label)}</strong></td>"
+                f"<td><span class='audit-status audit-{html.escape(status.lower())}'>"
+                f"{html.escape(status_text)}</span></td>"
+                f"<td><strong class='audit-value'>{active_text}</strong>"
+                f"<small>{html.escape(active_kind)}</small></td>"
+                f"<td>{average_text}<small>{html.escape(average_kind)}</small></td>"
+                f"<td>{html.escape(source_text)}<code dir='ltr'>{html.escape(selection)}</code></td>"
+                f"<td>{html.escape(time_text)}</td>"
+                "</tr>"
+            )
+        tables.append(
+            "<article class='model-input-book'>"
+            f"<h3>دفتر ورودی {html.escape(settlement_label)}</h3>"
+            "<div class='table-wrap'><table class='input-audit-table'>"
+            "<thead><tr><th>ورودی</th><th>وضعیت</th><th>مقدار واقعاً مصرف‌شده</th>"
+            "<th>میانگین/سیگنال</th><th>منبع و مسیر انتخاب</th><th>زمان داده</th></tr></thead>"
+            f"<tbody>{''.join(rows)}</tbody></table></div></article>"
+        )
+    return f"""
+    <div class="model-input-audit" role="region" aria-labelledby="model-input-audit-title">
+      <div class="section-head">
+        <div><span class="section-kicker">اتصال مستقیم به snapshot مدل</span>
+        <h3 id="model-input-audit-title">دفتر دقیق ورودی‌های تخمین</h3></div>
+        <span class="badge">نقدی و فردایی جدا</span>
+      </div>
+      <p>مقدار فعال دقیقاً با قرارداد مدل انتخاب می‌شود: آخرین رویداد واقعی؛ و فقط اگر نقطه‌ای وجود نداشته باشد، برآورد یا میانگین معتبر همان ورودی.</p>
+      <div class="model-input-books">{''.join(tables)}</div>
+    </div>
+    """
+
+
+def _render_group_anchor(anchor: object, *, historical: bool = False) -> str:
+    payload = anchor if isinstance(anchor, dict) else {}
+    if str(payload.get("status") or "").upper() != "OBSERVED":
+        return "<span class='missing'>بدون لنگر واجد شرایط</span>"
+    price = payload.get("reference_price_toman")
+    observed_at = payload.get("event_time_utc") if historical else payload.get("latest_event_utc")
+    age = _fa_age(payload.get("age_seconds"))
+    source = str(payload.get("reference_source") or payload.get("selection") or "—")
+    counts = (
+        f"{fa_number(payload.get('offer_count', 0))} آفر · "
+        f"{fa_number(payload.get('trade_count', 0))} معامله"
+    )
+    return (
+        f"<strong class='audit-value'>{fa_number(price)} تومان کامل</strong>"
+        f"<small>{html.escape(counts)}</small>"
+        f"<small>{html.escape(fa_datetime(str(observed_at)) if observed_at else NO_DATA_TOKEN)}"
+        f"{f' · {html.escape(age)} پیش' if age else ''}</small>"
+        f"<code dir='ltr'>{html.escape(source)}</code>"
+    )
+
+
+def render_group_model_input_audit(
+    settlements: dict[str, dict[str, Any]],
+) -> str:
+    books: list[str] = []
+    for settlement, settlement_label in SETTLEMENT_FA.items():
+        payload = settlements.get(settlement)
+        payload = payload if isinstance(payload, dict) else {}
+        rates = payload.get("rates")
+        rates = rates if isinstance(rates, list) else []
+        rows: list[str] = []
+        for rate in rates:
+            if not isinstance(rate, dict):
+                continue
+            live = rate.get("group_offer_anchor")
+            historical = rate.get("historical_group_anchor")
+            historical_payload = historical if isinstance(historical, dict) else {}
+            anchor_weight = rate.get("anchor_weight")
+            if (
+                isinstance(live, dict)
+                and str(live.get("status") or "").upper() == "OBSERVED"
+            ):
+                effect = "لنگر زنده مستقیماً در این ردیف فعال است"
+            elif str(historical_payload.get("status") or "").upper() == "OBSERVED":
+                effect = (
+                    "لنگر تاریخی در ترکیب فعال است"
+                    + (
+                        f" · وزن {fa_number(float(anchor_weight) * 100, decimals=1)}٪"
+                        if anchor_weight is not None
+                        else ""
+                    )
+                )
+            elif str(rate.get("method") or "").startswith("CURRENT_CASH_ESTIMATE"):
+                effect = "از نرخ نقدی مشتق شده؛ اثر گروه را در ردیف نقدی همان کالا ببینید"
+            else:
+                effect = "اثر مستقیم لنگر گروه در این ردیف ثبت نشده است"
+            rows.append(
+                "<tr>"
+                f"<td><strong>{html.escape(str(rate.get('commodity_name') or '—'))}</strong></td>"
+                f"<td>{_render_group_anchor(live)}</td>"
+                f"<td>{_render_group_anchor(historical, historical=True)}</td>"
+                f"<td>{html.escape(effect)}<code dir='ltr'>"
+                f"{html.escape(str(rate.get('method') or '—'))}</code></td>"
+                "</tr>"
+            )
+        books.append(
+            "<article class='model-input-book group-input-book'>"
+            f"<h3>اثر گروه‌ها بر برآورد {html.escape(settlement_label)}</h3>"
+            "<div class='table-wrap'><table class='input-audit-table group-audit-table'>"
+            "<thead><tr><th>کالا</th><th>لنگر زندهٔ ۵ دقیقه‌ای</th>"
+            "<th>لنگر تاریخی منتخب</th><th>اثر ثبت‌شده در خروجی</th></tr></thead>"
+            f"<tbody>{''.join(rows) if rows else '<tr><td colspan=\"4\" class=\"missing\">نرخی در این دفتر ثبت نشده است</td></tr>'}</tbody>"
+            "</table></div></article>"
+        )
+    return f"""
+    <div class="model-input-audit group-model-audit" role="region" aria-labelledby="group-model-input-title">
+      <div class="section-head">
+        <div><span class="section-kicker">آفر و معاملهٔ واجد شرایط</span>
+        <h3 id="group-model-input-title">اثر واقعی گروه‌های سکه در هر نرخ</h3></div>
+        <span class="badge">زنده، تاریخی یا بدون اثر</span>
+      </div>
+      <p>heartbeat جمع‌آور با وجود بازار ساکت هم می‌تواند سالم باشد؛ این جدول جداگانه نشان می‌دهد کدام لنگر گروه واقعاً در هر خروجی استفاده شده است.</p>
+      <div class="model-input-books">{''.join(books)}</div>
+    </div>
+    """
 
 
 def render_input_health_panel(input_health: object) -> str:
@@ -1761,6 +2072,11 @@ def render_input_health_panel(input_health: object) -> str:
         "DISABLED": "غیرفعال",
         "AVAILABLE": "در دسترس",
         "AVAILABLE_PROXY": "در دسترس با منبع جایگزین",
+        "PARTIAL": "بخشی از دفتر در دسترس",
+        "HISTORICAL_ONLY": "فقط لنگر تاریخی",
+        "HISTORICAL": "تاریخی",
+        "EXCLUDED": "کنارگذاشته‌شده",
+        "EXCLUDED_BY_CONTRACT": "داده موجود؛ خارج از قرارداد",
         "QUIET_OR_NO_DATA": "بازار ساکت / بدون داده",
         "NO_DATA": "بدون داده",
         "STALE": "کهنه",
@@ -1779,6 +2095,7 @@ def render_input_health_panel(input_health: object) -> str:
         "generic_coin": "سکه عمومی",
         "order_flow": "جریان سفارش",
         "market_regime": "رژیم بازار",
+        "coin_groups": "گروه‌های سکه",
     }
     cards: list[str] = []
     collectors = input_health.get("collectors")
@@ -1801,16 +2118,33 @@ def render_input_health_panel(input_health: object) -> str:
             )
     model_inputs = input_health.get("model_inputs")
     if isinstance(model_inputs, dict):
-        for key in ("melted_gold", "xauusd", "usd", "usdt", "generic_coin", "order_flow"):
+        for key in (
+            "melted_gold",
+            "xauusd",
+            "usd",
+            "usdt",
+            "generic_coin",
+            "coin_groups",
+            "order_flow",
+        ):
             payload = model_inputs.get(key)
             payload = payload if isinstance(payload, dict) else {}
             status = str(payload.get("status") or "UNKNOWN").upper()
             settlements = payload.get("settlements")
             settlements = settlements if isinstance(settlements, dict) else {}
             detail = "نقدی: {cash} · فردایی: {tomorrow}".format(
-                cash=settlements.get("CASH", "NO_DATA"),
-                tomorrow=settlements.get("TOMORROW", "NO_DATA"),
+                cash=status_fa.get(
+                    str(settlements.get("CASH", "NO_DATA")).upper(),
+                    str(settlements.get("CASH", "NO_DATA")),
+                ),
+                tomorrow=status_fa.get(
+                    str(settlements.get("TOMORROW", "NO_DATA")).upper(),
+                    str(settlements.get("TOMORROW", "NO_DATA")),
+                ),
             )
+            age = _fa_age(payload.get("latest_observation_age_seconds"))
+            if age:
+                detail += f" · آخرین داده {age} پیش"
             cards.append(
                 f"<article class='health-card health-{html.escape(status.lower())}'>"
                 f"<span>ورودی {html.escape(input_labels.get(key, key))}</span>"
@@ -3087,6 +3421,11 @@ section,
   font-size: clamp(18px, 1.55vw, 23px);
   font-variant-numeric: tabular-nums;
 }
+.input-card strong .settlement-value {
+  color: #93a7be;
+  font-size: 10px;
+  font-weight: 800;
+}
 .input-card.observed {
   border-color: rgba(52, 211, 153, 0.19);
   background: linear-gradient(155deg, rgba(16, 185, 129, 0.085), rgba(7, 17, 31, 0.52));
@@ -3143,10 +3482,84 @@ section,
 .health-card strong { color: #6ee7b7; font-size: 12px; }
 .health-card.health-degraded strong,
 .health-card.health-available_proxy strong,
+.health-card.health-partial strong,
+.health-card.health-historical_only strong,
+.health-card.health-excluded_by_contract strong,
 .health-card.health-quiet_or_no_data strong { color: #fde68a; }
 .health-card.health-critical strong,
 .health-card.health-no_data strong,
 .health-card.health-stale strong { color: #fda4af; }
+.model-input-audit {
+  margin-top: 12px;
+  padding: 16px;
+  border: 1px solid rgba(103, 232, 249, 0.17);
+  border-radius: 17px;
+  background: rgba(5, 14, 27, 0.56);
+}
+.model-input-audit > p {
+  margin: -5px 0 13px;
+  color: var(--text-sub);
+  font-size: 11px;
+  line-height: 1.8;
+}
+.model-input-audit .section-head h3 {
+  margin: 2px 0 0;
+  color: #e8f0f9;
+  font-size: 15px;
+}
+.model-input-books {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.model-input-book {
+  min-width: 0;
+}
+.model-input-book h3 {
+  margin: 0 0 8px;
+  color: #67e8f9;
+  font-size: 13px;
+}
+.input-audit-table {
+  min-width: 880px;
+  white-space: normal;
+}
+.input-audit-table th,
+.input-audit-table td {
+  vertical-align: top;
+  padding: 10px;
+  font-size: 10px;
+  line-height: 1.65;
+}
+.input-audit-table td > small,
+.input-audit-table td > code {
+  display: block;
+  margin-top: 3px;
+  color: #7f91a8;
+  font-size: 9px;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+.audit-value {
+  display: block;
+  color: #f4cf74;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.audit-status {
+  display: inline-block;
+  padding: 3px 7px;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 999px;
+  color: #aebed2;
+  white-space: nowrap;
+}
+.audit-observed { color: #6ee7b7; border-color: rgba(52, 211, 153, 0.24); }
+.audit-estimated { color: #fde68a; border-color: rgba(251, 191, 36, 0.26); }
+.audit-excluded { color: #fde68a; border-color: rgba(251, 191, 36, 0.26); }
+.audit-no_data { color: #fda4af; border-color: rgba(251, 113, 133, 0.25); }
+.group-model-audit { border-color: rgba(246, 196, 83, 0.18); }
+.group-audit-table { min-width: 760px; }
 .group-control-card {
   position: relative;
   padding: 18px 20px;
@@ -3205,6 +3618,7 @@ footer { text-align: center; border-top-color: rgba(148, 163, 184, 0.1); }
   .meta { width: 100%; justify-content: space-between; }
   .dashboard-grid { grid-template-columns: 1fr; }
   .side-column .group-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .model-input-books { grid-template-columns: 1fr; }
 }
 @media (max-width: 760px) {
   .wrap { width: min(100% - 22px, 1480px); margin-top: 11px; }
@@ -3477,20 +3891,11 @@ def render_page(
         "healthy" if raw_service_status.upper() in {"RUNNING", "READY", "OK"} else "warning"
     )
     settlements = state.get("settlements", {})
-    inputs = settlements.get("CASH", {}).get("inputs") or settlements.get("TOMORROW", {}).get("inputs") or {}
-    melted = read_melted_minute_averages(market_db, state.get("window_end_utc")) if market_db else {}
-    melted_cards = "".join(
-        f"<article class='input-card {'observed' if value.get('average_price') is not None else 'no-data'}' "
-        f"data-source='melted-{form.lower()}'>"
-        f"<div class='input-card-head'><span class='input-icon' aria-hidden='true'>◆</span>"
-        f"<span>طلا آب‌شده {'کاغذی' if form == 'PAPER' else 'فیزیکی'}</span></div>"
-        f"<strong>{fa_number(value.get('average_price'))}</strong>"
-        f"<small>{fa_number(value.get('sample_count', 0))} رویداد</small></article>"
-        for form, value in melted.items()
-    )
     ticker_cards = (
-        f"<div class='inputs'>{render_input_cards(inputs)}{melted_cards}</div>"
+        f"<div class='inputs'>{render_input_cards(settlements)}</div>"
         f"{render_input_health_panel(state.get('input_health'))}"
+        f"{render_model_input_audit(settlements)}"
+        f"{render_group_model_input_audit(settlements)}"
     )
     table_section = f"""
       <section class="table-section surface-panel">
