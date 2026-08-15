@@ -7,11 +7,12 @@
 - Coin-group settlement supports both generations: old `خ ن ف`/`ف ن ف` and
   current `خ ف`/`ف ف` mean tomorrow; old `خ ن`/`ف ن`, current single `خ`/`ف`,
   and standalone `نق` mean cash. Explicit future delivery wins over `ن`.
-- Reject a malformed coin-group envelope individually; inverted edit/create
-  times must not poison valid siblings or freeze the checkpoint. The dashboard
-  keeps collector heartbeat, latest canonical group event, latest eligible event and
-  the rate's selected anchor distinct; offer and trade freshness are computed
-  independently and historical accepted rows are never labelled as live intake.
+- Reject malformed coin-group envelopes individually; inverted edit/create
+  times must not poison siblings or freeze checkpoints. The dashboard keeps
+  heartbeat, latest canonical/eligible events and selected anchors distinct;
+  offer/trade freshness is independent and historical rows are not live intake.
+  Idempotent replays preserve first unchanged-decision availability rather than
+  moving anchors to each reconciliation time.
 - A group trade requires one structurally linked reply branch. Keep users and
   sibling branches isolated, prefer attributable owner confirmation, use the
   latest negotiated quantity/price on that branch, deduplicate declarations
@@ -28,8 +29,8 @@
 - Current private-group Market Store facts may be projected into the estimator's
   compatibility conversation store using opaque identifiers and normalized
   fields; do not revive the retired legacy group parser or its data plane.
-- The estimator home dashboard shows only primary-model output plus the exact
-  CASH/TOMORROW input snapshot consumed by it: point-before-mean values,
+- The estimator home shows only primary-model output plus the exact CASH/TOMORROW
+  input snapshot consumed by it: point-before-mean values,
   explicit proxy/estimate/exclusion provenance, and per-rate live/historical
   coin-group anchors. Collector heartbeat, stored activity and actual model
   eligibility/effect are separate; shadow and realised-outcome data remain

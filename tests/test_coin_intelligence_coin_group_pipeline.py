@@ -93,9 +93,30 @@ class CoinGroupPipelineTests(unittest.TestCase):
         self.assertNotIn("offerer", facts[0]["attributes_json"])
         self.assertNotIn("message", facts[0]["attributes_json"])
 
+        first_timestamps = self.market.execute(
+            """
+            SELECT event_type, available_at_utc, inserted_at_utc
+            FROM market_observations
+            WHERE source_code = 'GROUP_1'
+            ORDER BY event_type
+            """
+        ).fetchall()
+
         process_coin_group_staging(self.staging, self.market, as_of_utc="2026-08-04T10:01:30Z")
         self.market.commit()
         self.assertEqual(self.market.execute("SELECT COUNT(*) FROM market_observations WHERE source_code = 'GROUP_1'").fetchone()[0], 2)
+        replay_timestamps = self.market.execute(
+            """
+            SELECT event_type, available_at_utc, inserted_at_utc
+            FROM market_observations
+            WHERE source_code = 'GROUP_1'
+            ORDER BY event_type
+            """
+        ).fetchall()
+        self.assertEqual(
+            [tuple(row) for row in replay_timestamps],
+            [tuple(row) for row in first_timestamps],
+        )
 
     def test_without_prior_anchors_offer_and_trade_stay_out_of_model(self) -> None:
         self._stage(1, "امام فروش فردا 186,900 / 5 تا", sender="offerer")

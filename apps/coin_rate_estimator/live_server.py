@@ -1059,8 +1059,79 @@ def render_live_rows(items: list[dict[str, Any]], *, kind: str) -> str:
     return "".join(rows)
 
 
-def render_group_activity_fragment(conversation_db: Path) -> str:
+def render_group_activity_fragment(
+    conversation_db: Path,
+    *,
+    input_health: object | None = None,
+) -> str:
     activity = read_recent_group_activity(conversation_db)
+
+    def timestamp_with_age(value: object) -> str:
+        if not value:
+            return "ثبت نشده"
+        try:
+            observed = parse_datetime(str(value))
+        except (TypeError, ValueError):
+            return "نامعتبر"
+        age_seconds = max(
+            0,
+            int((datetime.now(timezone.utc) - observed).total_seconds()),
+        )
+        return (
+            f"{fa_datetime(iso_utc(observed))} "
+            f"({fa_number(age_seconds // 60)} دقیقه پیش)"
+        )
+
+    def runtime_summary() -> str:
+        health = input_health if isinstance(input_health, dict) else {}
+        collectors = health.get("collectors")
+        collectors = collectors if isinstance(collectors, dict) else {}
+        projection = collectors.get("coin_group_projection")
+        projection = projection if isinstance(projection, dict) else {}
+        details = projection.get("details")
+        details = details if isinstance(details, dict) else {}
+        if not details:
+            return ""
+        collector_status = str(projection.get("status") or "UNKNOWN").upper()
+        collector_text = "سالم" if collector_status == "HEALTHY" else "نیازمند توجه"
+        cards: list[str] = []
+        for group_number in (1, 2):
+            prefix = f"group_{group_number}"
+            canonical = details.get(f"{prefix}_latest_canonical_event_utc")
+            eligible = details.get(f"{prefix}_latest_eligible_event_utc")
+            pending = int(details.get(f"{prefix}_pending_review_total") or 0)
+            rejected = int(details.get(f"{prefix}_rejected_total") or 0)
+            model_active = False
+            if eligible:
+                try:
+                    model_active = (
+                        datetime.now(timezone.utc)
+                        - parse_datetime(str(eligible))
+                    ).total_seconds() <= GROUP_ANCHOR_WINDOW_SECONDS
+                except (TypeError, ValueError):
+                    model_active = False
+            model_text = "ورودی فعال دارد" if model_active else "ورودی فعال ندارد"
+            cards.append(
+                "<article class='group-runtime-card'>"
+                f"<div><strong>گروه {fa_number(group_number)}</strong>"
+                f"<span class='activity-freshness {'fresh' if model_active else 'stale'}'>"
+                f"مدل {model_text}</span></div>"
+                f"<small>وضعیت دریافت: {collector_text}</small>"
+                f"<small>جدیدترین رویداد ثبت‌شده: {timestamp_with_age(canonical)}</small>"
+                f"<small>جدیدترین ورودی پذیرفته‌شدهٔ canonical: "
+                f"{timestamp_with_age(eligible)}</small>"
+                f"<small>در انتظار بررسی: {fa_number(pending)} · "
+                f"رد/نادیده: {fa_number(rejected)}</small>"
+                "</article>"
+            )
+        return (
+            "<div class='group-runtime-summary'>"
+            "<h3>وضعیت واقعی دریافت و مصرف مدل</h3>"
+            "<p>رویداد ثبت‌شده با داده‌ای که کنترل کیفیت پذیرفته و مدل مصرف می‌کند یکسان نیست.</p>"
+            f"<div class='group-runtime-grid'>{''.join(cards)}</div>"
+            "</div>"
+        )
+
     def freshness(group: str, kind: str) -> str:
         plural = "offers" if kind == "offer" else "trades"
         kind_fa = "آفر" if kind == "offer" else "معامله"
@@ -1094,6 +1165,7 @@ def render_group_activity_fragment(conversation_db: Path) -> str:
         )
     return f"""<section><div class="section-head"><h2>آخرین سوابق گروهیِ پذیرفته‌شدهٔ مدل</h2><span class="badge">فعال و تاریخی</span></div>
       <p class="activity-scope-note">این فهرست همهٔ پیام‌های دریافتی نیست؛ فقط رکوردهایی را نشان می‌دهد که قرارداد مدل پذیرفته است. سلامت دریافت و زمان جدیدترین رویداد canonical گروه در کارت «ورود گروه‌ها تا مدل» جدا نمایش داده می‌شود.</p>
+      {runtime_summary()}
       <div class="group-grid">
         <article class="feed-card"><h3>۵ آفر پذیرفته‌شدهٔ آخر — گروه ۱</h3>{freshness('group_1', 'offer')}<ul>{render_live_rows(activity.get('group_1_offers', []), kind='offer')}</ul></article>
         <article class="feed-card"><h3>۵ آفر پذیرفته‌شدهٔ آخر — گروه ۲</h3>{freshness('group_2', 'offer')}<ul>{render_live_rows(activity.get('group_2_offers', []), kind='offer')}</ul></article>
@@ -4075,7 +4147,7 @@ def render_page(
             <div id="estimate-content">{table_section}</div>
           </div>
           <div class="side-column">
-            <div id="activity-content">{render_group_activity_fragment(conversation_db) if conversation_db else ''}</div>
+            <div id="activity-content">{render_group_activity_fragment(conversation_db, input_health=state.get('input_health')) if conversation_db else ''}</div>
           </div>
         </div>"""
         refresh_script = "window.setInterval(refreshEstimateView, 15000); window.setInterval(refreshActivityView, 15000);"
@@ -4594,6 +4666,20 @@ button:disabled, input:disabled, select:disabled, textarea:disabled {{
   font-size: 11px;
   line-height: 1.75;
 }}
+.group-runtime-summary {{
+  margin: 0 0 14px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--surface-strong) 84%, transparent);
+}}
+.group-runtime-summary h3 {{ margin: 0 0 4px; font-size: 13px; }}
+.group-runtime-summary > p {{ margin: 0 0 10px; color: var(--text-sub); font-size: 11px; line-height: 1.7; }}
+.group-runtime-grid {{ display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }}
+.group-runtime-card {{ display: grid; gap: 5px; padding: 10px; border-radius: 11px; background: var(--surface); }}
+.group-runtime-card > div {{ display: flex; justify-content: space-between; gap: 8px; align-items: center; }}
+.group-runtime-card small {{ color: var(--text-sub); line-height: 1.65; }}
+@media (max-width: 680px) {{ .group-runtime-grid {{ grid-template-columns: 1fr; }} }}
 footer {{
   color: var(--text-sub);
   font-size: 12px;
@@ -5746,7 +5832,10 @@ def handler_factory(
                 self.wfile.write(body)
                 return
             if path == activity_path:
-                body = render_group_activity_fragment(conversation_db).encode("utf-8")
+                body = render_group_activity_fragment(
+                    conversation_db,
+                    input_health=state.get("input_health"),
+                ).encode("utf-8")
                 self._headers(HTTPStatus.OK, "text/html; charset=utf-8", len(body))
                 self.wfile.write(body)
                 return

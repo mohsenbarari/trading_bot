@@ -1693,10 +1693,33 @@ class EstimatorTests(unittest.TestCase):
                 connection.commit()
             finally:
                 connection.close()
-            body = render_group_activity_fragment(conversation_path)
+            body = render_group_activity_fragment(
+                conversation_path,
+                input_health={
+                    "collectors": {
+                        "coin_group_projection": {
+                            "status": "HEALTHY",
+                            "details": {
+                                "group_1_latest_canonical_event_utc": "2026-08-15T10:02:31Z",
+                                "group_1_latest_eligible_event_utc": None,
+                                "group_1_pending_review_total": 82,
+                                "group_1_rejected_total": 4,
+                                "group_2_latest_canonical_event_utc": "2026-08-15T10:01:00Z",
+                                "group_2_latest_eligible_event_utc": "2026-08-15T09:35:56Z",
+                                "group_2_pending_review_total": 87,
+                                "group_2_rejected_total": 4,
+                            },
+                        }
+                    }
+                },
+            )
         self.assertIn("بدون آفر فعال برای مدل", body)
         self.assertIn("بدون معامله فعال برای مدل", body)
         self.assertIn("آخرین سوابق گروهیِ پذیرفته‌شدهٔ مدل", body)
+        self.assertIn("وضعیت واقعی دریافت و مصرف مدل", body)
+        self.assertIn("جدیدترین رویداد ثبت‌شده", body)
+        self.assertIn("مدل ورودی فعال ندارد", body)
+        self.assertIn("در انتظار بررسی: ۸۲", body)
         self.assertEqual(body.count(fa_datetime("2026-07-20T10:00:50Z")), 2)
         self.assertEqual(body.count(fa_datetime("2026-07-19T09:00:00Z")), 2)
 

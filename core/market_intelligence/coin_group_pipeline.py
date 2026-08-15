@@ -17,11 +17,80 @@ from .coin_group_resolution import CoinPriceAnchor, resolve_coin_group_offers, r
 from .coin_group_staging import StagedCoinGroupMessage, list_current_staged_coin_group_messages
 from .coin_group_trades import CoinGroupOfferRecord, coin_group_trade_observations, link_coin_group_trades
 from .coin_groups import CoinGroupMessageInput
-from .market_contracts import normalize_utc
+from .market_contracts import MarketObservation, normalize_utc
 from .market_store import upsert_observation
 
 
 COIN_GROUP_PIPELINE_VERSION = "coin-group-pipeline-v1"
+
+
+_SEMANTIC_OBSERVATION_COLUMNS = (
+    "source_code",
+    "source_family",
+    "event_time_utc",
+    "instrument",
+    "market_label",
+    "settlement_term",
+    "trade_form",
+    "event_type",
+    "side",
+    "price_value",
+    "price_unit",
+    "currency",
+    "quantity_value",
+    "quantity_unit",
+    "parse_confidence",
+    "parser_version",
+    "quality_state",
+    "quality_policy_version",
+    "is_conditional",
+    "attributes_json",
+)
+
+
+def _upsert_if_semantically_changed(
+    connection: sqlite3.Connection,
+    observation: MarketObservation,
+) -> bool:
+    """Preserve first availability when an idempotent replay changes nothing."""
+
+    normalized = observation.normalized()
+    existing = connection.execute(
+        f"SELECT {','.join(_SEMANTIC_OBSERVATION_COLUMNS)} "
+        "FROM market_observations WHERE event_key=?",
+        (normalized.event_key,),
+    ).fetchone()
+    quantity_value = (
+        str(normalized.quantity) if normalized.quantity is not None else None
+    )
+    expected = (
+        normalized.source_code,
+        normalized.source_family,
+        normalized.event_time_utc,
+        normalized.instrument,
+        normalized.market_label,
+        normalized.settlement_term,
+        normalized.trade_form,
+        normalized.event_type,
+        normalized.side,
+        str(normalized.price),
+        normalized.price_unit,
+        normalized.currency,
+        quantity_value,
+        normalized.quantity_unit,
+        normalized.parse_confidence,
+        normalized.parser_version,
+        normalized.quality_state,
+        normalized.quality_policy_version,
+        int(normalized.is_conditional),
+        normalized.attributes_json,
+    )
+    if existing is not None and tuple(
+        existing[column] for column in _SEMANTIC_OBSERVATION_COLUMNS
+    ) == expected:
+        return False
+    upsert_observation(connection, observation)
+    return True
 
 
 @dataclass(frozen=True, slots=True)
@@ -119,7 +188,7 @@ def process_coin_group_staging(
             resolution_available_at_utc=as_of,
         )
         for observation in observations:
-            upsert_observation(market_connection, observation)
+            _upsert_if_semantically_changed(market_connection, observation)
             offer_facts += 1
         eligible_offers += sum(item.quality_state == "ELIGIBLE" for item in resolved)
         pending_or_rejected_offers += sum(item.quality_state != "ELIGIBLE" for item in resolved)
@@ -146,7 +215,7 @@ def process_coin_group_staging(
     trades = link_coin_group_trades(messages, records)
     observations = coin_group_trade_observations(trades)
     for observation in observations:
-        upsert_observation(market_connection, observation)
+        _upsert_if_semantically_changed(market_connection, observation)
     return CoinGroupPipelineReport(
         staged_messages_seen=len(messages),
         offer_facts_upserted=offer_facts,
