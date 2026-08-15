@@ -1008,31 +1008,92 @@ def read_melted_minute_averages(
 
 
 def read_recent_group_activity(conversation_db: Path) -> dict[str, list[dict[str, Any]]]:
-    """Return only the compact live dashboard feed, separated by source group."""
+    """Return the compact canonical audit feed, separated by source group.
+
+    Reporting rows deliberately include audit-only detections.  Model-facing
+    readers still require the realtime/training quality flags, so a delayed or
+    pending fact can be visible to the operator without entering an estimate.
+    """
     result = {"group_1_offers": [], "group_2_offers": [], "group_1_trades": [], "group_2_trades": []}
     if not conversation_db.exists():
         return result
     try:
         connection = sqlite3.connect(f"file:{conversation_db.resolve()}?mode=ro", uri=True)
         connection.row_factory = sqlite3.Row
+        tables = {
+            str(row[0])
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            )
+        }
+        canonical = "canonical_group_projection" in tables
         for group in ("group_1", "group_2"):
-            offer_rows = connection.execute(
-                """
-                SELECT m.event_time_utc,o.commodity,o.side,o.price,o.quantity,o.settlement
-                FROM offers o JOIN messages m ON m.import_id=o.import_id AND m.message_id=o.message_id
-                WHERE m.source_html_file=? ORDER BY m.event_time_utc DESC LIMIT 5
-                """,
-                (group,),
-            ).fetchall()
-            trade_rows = connection.execute(
-                """
-                SELECT t.event_time_utc,t.commodity,t.side,t.price,t.quantity,t.settlement
-                FROM confirmed_trades t JOIN messages m
-                  ON m.import_id=t.import_id AND m.message_id=t.confirmation_message_id
-                WHERE m.source_html_file=? ORDER BY t.event_time_utc DESC LIMIT 3
-                """,
-                (group,),
-            ).fetchall()
+            if canonical:
+                offer_rows = connection.execute(
+                    """
+                    SELECT COALESCE(
+                               json_extract(m.relevance_json,'$.source_event_time_utc'),
+                               m.event_time_utc
+                           ) AS event_time_utc,
+                           o.commodity,o.side,o.price,o.quantity,o.settlement,
+                           COALESCE(q.realtime_eligible,0) AS model_eligible,
+                           q.exclusion_reason
+                    FROM canonical_group_projection p
+                    JOIN offers o ON o.id=p.row_id AND p.event_type='OFFER'
+                    JOIN messages m
+                      ON m.import_id=o.import_id AND m.message_id=o.message_id
+                    LEFT JOIN offer_market_quality q ON q.offer_id=o.id
+                    WHERE m.source_html_file=?
+                    ORDER BY event_time_utc DESC,o.id DESC LIMIT 10
+                    """,
+                    (group,),
+                ).fetchall()
+                trade_rows = connection.execute(
+                    """
+                    SELECT COALESCE(
+                               json_extract(m.relevance_json,'$.source_event_time_utc'),
+                               json_extract(t.context_json,'$.source_event_time_utc'),
+                               t.event_time_utc
+                           ) AS event_time_utc,
+                           t.commodity,t.side,t.price,t.quantity,t.settlement,
+                           COALESCE(q.realtime_eligible,0) AS model_eligible,
+                           q.exclusion_reason
+                    FROM canonical_group_projection p
+                    JOIN confirmed_trades t
+                      ON t.id=p.row_id AND p.event_type='TRADE'
+                    JOIN messages m
+                      ON m.import_id=t.import_id
+                     AND m.message_id=t.confirmation_message_id
+                    LEFT JOIN trade_market_quality q ON q.trade_id=t.id
+                    WHERE m.source_html_file=?
+                    ORDER BY event_time_utc DESC,t.id DESC LIMIT 10
+                    """,
+                    (group,),
+                ).fetchall()
+            else:
+                offer_rows = connection.execute(
+                    """
+                    SELECT m.event_time_utc,o.commodity,o.side,o.price,o.quantity,o.settlement,
+                           1 AS model_eligible,NULL AS exclusion_reason
+                    FROM offers o JOIN messages m
+                      ON m.import_id=o.import_id AND m.message_id=o.message_id
+                    WHERE m.source_html_file=?
+                    ORDER BY m.event_time_utc DESC LIMIT 10
+                    """,
+                    (group,),
+                ).fetchall()
+                trade_rows = connection.execute(
+                    """
+                    SELECT t.event_time_utc,t.commodity,t.side,t.price,t.quantity,t.settlement,
+                           1 AS model_eligible,NULL AS exclusion_reason
+                    FROM confirmed_trades t JOIN messages m
+                      ON m.import_id=t.import_id
+                     AND m.message_id=t.confirmation_message_id
+                    WHERE m.source_html_file=?
+                    ORDER BY t.event_time_utc DESC LIMIT 10
+                    """,
+                    (group,),
+                ).fetchall()
             result[f"{group}_offers"] = [dict(row) for row in offer_rows]
             result[f"{group}_trades"] = [dict(row) for row in trade_rows]
         connection.close()
@@ -1048,12 +1109,22 @@ def render_live_rows(items: list[dict[str, Any]], *, kind: str) -> str:
     rows = []
     for item in items:
         quantity = f" / {fa_number(item.get('quantity'))} عدد" if item.get("quantity") is not None else ""
+        reason = str(item.get("exclusion_reason") or "")
+        if bool(item.get("model_eligible")):
+            status = "<small class='fact-status model'>ورودی مدل</small>"
+        elif reason == "CANONICAL_FACT_ARRIVED_TOO_LATE":
+            status = "<small class='fact-status audit'>دیررس؛ فقط گزارش</small>"
+        elif reason == "CONDITIONAL_GROUP_FACT":
+            status = "<small class='fact-status audit'>شرطی؛ فقط گزارش</small>"
+        else:
+            status = "<small class='fact-status review'>نیازمند بررسی</small>"
         rows.append(
             "<li>"
             f"<time>{fa_datetime(item.get('event_time_utc'))}</time> "
             f"<strong>{html.escape(str(item.get('commodity') or '—'))}</strong> "
             f"{side.get(str(item.get('side')), '—')} {fa_number(item.get('price'))}{quantity}"
             f" <small>{SETTLEMENT_FA.get(str(item.get('settlement')), '—')}</small>"
+            f" {status}"
             "</li>"
         )
     return "".join(rows)
@@ -1137,45 +1208,80 @@ def render_group_activity_fragment(
         kind_fa = "آفر" if kind == "offer" else "معامله"
         rows = list(activity.get(f"{group}_{plural}", []))
         observed: list[datetime] = []
+        model_observed: list[datetime] = []
         for row in rows:
             try:
-                observed.append(parse_datetime(str(row.get("event_time_utc") or "")))
+                parsed_time = parse_datetime(str(row.get("event_time_utc") or ""))
+                observed.append(parsed_time)
+                if bool(row.get("model_eligible")):
+                    model_observed.append(parsed_time)
             except (TypeError, ValueError):
                 continue
         if not observed:
             return (
                 "<small class='activity-freshness stale'>"
-                f"هیچ {kind_fa} پذیرفته‌شده‌ای ثبت نشده</small>"
+                f"هیچ {kind_fa} تشخیص‌داده‌شده‌ای ثبت نشده</small>"
             )
         latest = max(observed)
         age_seconds = max(
             0,
             int((datetime.now(timezone.utc) - latest).total_seconds()),
         )
-        fresh = age_seconds <= GROUP_ANCHOR_WINDOW_SECONDS
-        status = (
-            f"{kind_fa} فعال برای مدل"
-            if fresh
-            else f"بدون {kind_fa} فعال برای مدل"
+        latest_model = max(model_observed) if model_observed else None
+        model_age = (
+            max(0, int((datetime.now(timezone.utc) - latest_model).total_seconds()))
+            if latest_model is not None
+            else None
         )
+        fresh = model_age is not None and model_age <= GROUP_ANCHOR_WINDOW_SECONDS
+        if latest_model is None:
+            model_status = f"بدون {kind_fa} فعال برای مدل؛ هیچ ردیف مدل‌پذیری در این فهرست نیست"
+        elif fresh:
+            model_status = (
+                f"{kind_fa} فعال برای مدل"
+                if latest_model == latest
+                else f"{kind_fa} فعال برای مدل · آخرین ورودی مدل: {fa_datetime(iso_utc(latest_model))}"
+            )
+        else:
+            model_status = (
+                f"بدون {kind_fa} فعال برای مدل"
+                if latest_model == latest
+                else f"بدون {kind_fa} فعال برای مدل · آخرین ورودی مدل: {fa_datetime(iso_utc(latest_model))}"
+            )
         return (
             f"<small class='activity-freshness {'fresh' if fresh else 'stale'}'>"
-            f"{status} · آخرین {kind_fa} پذیرفته‌شده: {fa_datetime(iso_utc(latest))} "
-            f"({fa_number(age_seconds // 60)} دقیقه پیش)</small>"
+            f"آخرین {kind_fa} تشخیص‌داده‌شده: {fa_datetime(iso_utc(latest))} "
+            f"({fa_number(age_seconds // 60)} دقیقه پیش) · {model_status}</small>"
         )
-    return f"""<section><div class="section-head"><h2>آخرین سوابق گروهیِ پذیرفته‌شدهٔ مدل</h2><span class="badge">فعال و تاریخی</span></div>
-      <p class="activity-scope-note">این فهرست همهٔ پیام‌های دریافتی نیست؛ فقط رکوردهایی را نشان می‌دهد که قرارداد مدل پذیرفته است. سلامت دریافت و زمان جدیدترین رویداد canonical گروه در کارت «ورود گروه‌ها تا مدل» جدا نمایش داده می‌شود.</p>
+    return f"""<section><div class="section-head"><h2>آخرین آفرها و معاملات تشخیص‌داده‌شده</h2><span class="badge">زنده و تفکیک‌شده</span></div>
+      <p class="activity-scope-note">این فهرست تشخیص‌های canonical را نشان می‌دهد؛ برچسب هر ردیف مشخص می‌کند داده وارد مدل شده یا فقط برای گزارش/بررسی نگه داشته شده است. پیام‌های غیرآفر و غیرمعامله در این فهرست نیستند.</p>
       {runtime_summary()}
       <div class="group-grid">
-        <article class="feed-card"><h3>۵ آفر پذیرفته‌شدهٔ آخر — گروه ۱</h3>{freshness('group_1', 'offer')}<ul>{render_live_rows(activity.get('group_1_offers', []), kind='offer')}</ul></article>
-        <article class="feed-card"><h3>۵ آفر پذیرفته‌شدهٔ آخر — گروه ۲</h3>{freshness('group_2', 'offer')}<ul>{render_live_rows(activity.get('group_2_offers', []), kind='offer')}</ul></article>
-        <article class="feed-card"><h3>۳ معاملهٔ پذیرفته‌شدهٔ آخر — گروه ۱</h3>{freshness('group_1', 'trade')}<ul>{render_live_rows(activity.get('group_1_trades', []), kind='trade')}</ul></article>
-        <article class="feed-card"><h3>۳ معاملهٔ پذیرفته‌شدهٔ آخر — گروه ۲</h3>{freshness('group_2', 'trade')}<ul>{render_live_rows(activity.get('group_2_trades', []), kind='trade')}</ul></article>
+        <article class="feed-card"><h3>۱۰ آفر آخر — گروه ۱</h3>{freshness('group_1', 'offer')}<ul>{render_live_rows(activity.get('group_1_offers', []), kind='offer')}</ul></article>
+        <article class="feed-card"><h3>۱۰ آفر آخر — گروه ۲</h3>{freshness('group_2', 'offer')}<ul>{render_live_rows(activity.get('group_2_offers', []), kind='offer')}</ul></article>
+        <article class="feed-card"><h3>۱۰ معاملهٔ آخر — گروه ۱</h3>{freshness('group_1', 'trade')}<ul>{render_live_rows(activity.get('group_1_trades', []), kind='trade')}</ul></article>
+        <article class="feed-card"><h3>۱۰ معاملهٔ آخر — گروه ۲</h3>{freshness('group_2', 'trade')}<ul>{render_live_rows(activity.get('group_2_trades', []), kind='trade')}</ul></article>
       </div>
     </section>"""
 
 
 def find_analytics_db(conversation_db: Path) -> Path | None:
+    if conversation_db.exists():
+        try:
+            connection = sqlite3.connect(
+                f"file:{conversation_db.resolve()}?mode=ro", uri=True
+            )
+            canonical = connection.execute(
+                """
+                SELECT 1 FROM sqlite_master
+                WHERE type='table' AND name='canonical_group_projection'
+                """
+            ).fetchone()
+            connection.close()
+            if canonical is not None:
+                return conversation_db
+        except sqlite3.Error:
+            pass
     analytics_root = Path(
         os.environ.get(
             "COIN_RATE_ESTIMATOR_ANALYTICS_DIR",
@@ -1270,6 +1376,8 @@ def query_user_analytics(
         "end_utc": end_utc,
         "start_shamsi": start_shamsi or "",
         "end_shamsi": end_shamsi or "",
+        "data_source": "NO_DATA",
+        "identity_analytics_available": False,
         "groups": {1: empty_group(), 2: empty_group()},
     }
     if not db_path or not db_path.exists():
@@ -1279,6 +1387,88 @@ def query_user_analytics(
         conn = sqlite3.connect(f"file:{db_path.resolve()}?mode=ro", uri=True)
         conn.row_factory = sqlite3.Row
         tables = [r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()]
+        if "canonical_group_projection" in tables:
+            groups_data: dict[int, dict[str, Any]] = {}
+            for group in (1, 2):
+                source_file = f"group_{group}"
+                offer_row = conn.execute(
+                    """
+                    SELECT COUNT(*) AS c,
+                           SUM(COALESCE(o.quantity,1)) AS q,
+                           SUM(CASE WHEN COALESCE(mq.realtime_eligible,0)=1 THEN 1 ELSE 0 END) AS model_c,
+                           SUM(CASE WHEN COALESCE(mq.realtime_eligible,0)=0 THEN 1 ELSE 0 END) AS audit_c
+                    FROM canonical_group_projection p
+                    JOIN offers o ON o.id=p.row_id AND p.event_type='OFFER'
+                    JOIN messages m
+                      ON m.import_id=o.import_id AND m.message_id=o.message_id
+                    LEFT JOIN offer_market_quality mq ON mq.offer_id=o.id
+                    WHERE m.source_html_file=?
+                      AND COALESCE(
+                            json_extract(m.relevance_json,'$.source_event_time_utc'),
+                            m.event_time_utc
+                          ) >= ?
+                      AND COALESCE(
+                            json_extract(m.relevance_json,'$.source_event_time_utc'),
+                            m.event_time_utc
+                          ) <= ?
+                    """,
+                    (source_file, start_utc, end_utc),
+                ).fetchone()
+                trade_row = conn.execute(
+                    """
+                    SELECT COUNT(*) AS c,
+                           SUM(COALESCE(t.quantity,1)) AS q,
+                           SUM(CASE WHEN COALESCE(mq.realtime_eligible,0)=1 THEN 1 ELSE 0 END) AS model_c,
+                           SUM(CASE WHEN COALESCE(mq.realtime_eligible,0)=0 THEN 1 ELSE 0 END) AS audit_c
+                    FROM canonical_group_projection p
+                    JOIN confirmed_trades t
+                      ON t.id=p.row_id AND p.event_type='TRADE'
+                    JOIN messages m
+                      ON m.import_id=t.import_id
+                     AND m.message_id=t.confirmation_message_id
+                    LEFT JOIN trade_market_quality mq ON mq.trade_id=t.id
+                    WHERE m.source_html_file=?
+                      AND COALESCE(
+                            json_extract(m.relevance_json,'$.source_event_time_utc'),
+                            json_extract(t.context_json,'$.source_event_time_utc'),
+                            t.event_time_utc
+                          ) >= ?
+                      AND COALESCE(
+                            json_extract(m.relevance_json,'$.source_event_time_utc'),
+                            json_extract(t.context_json,'$.source_event_time_utc'),
+                            t.event_time_utc
+                          ) <= ?
+                    """,
+                    (source_file, start_utc, end_utc),
+                ).fetchone()
+                groups_data[group] = {
+                    "summary": {
+                        "total_offer_count": int(offer_row["c"] or 0),
+                        "total_offer_qty": int(offer_row["q"] or 0),
+                        "total_trade_count": int(trade_row["c"] or 0),
+                        "total_trade_qty": int(trade_row["q"] or 0),
+                        "model_eligible_offer_count": int(offer_row["model_c"] or 0),
+                        "audit_only_offer_count": int(offer_row["audit_c"] or 0),
+                        "model_eligible_trade_count": int(trade_row["model_c"] or 0),
+                        "audit_only_trade_count": int(trade_row["audit_c"] or 0),
+                    },
+                    "top_offer_count": [],
+                    "top_trade_count": [],
+                    "top_offer_qty": [],
+                    "top_trade_qty": [],
+                }
+            conn.close()
+            return {
+                "range_type": range_type,
+                "range_label": label,
+                "start_utc": start_utc,
+                "end_utc": end_utc,
+                "start_shamsi": start_shamsi or "",
+                "end_shamsi": end_shamsi or "",
+                "data_source": "CANONICAL_LIVE_AUDIT",
+                "identity_analytics_available": False,
+                "groups": groups_data,
+            }
         if "offer_training_examples" not in tables or "confirmed_trade_training_examples" not in tables:
             conn.close()
             return empty_result
@@ -1378,10 +1568,349 @@ def query_user_analytics(
             "end_utc": end_utc,
             "start_shamsi": start_shamsi or "",
             "end_shamsi": end_shamsi or "",
+            "data_source": "LEGACY_TRAINING_SNAPSHOT",
+            "identity_analytics_available": True,
             "groups": groups_data,
         }
     except Exception:
         return empty_result
+
+
+_EVENT_AUDIT_MODELS = (
+    "MAIN_ONLINE",
+    "SHADOW1_PREVIOUS",
+    "SHADOW2_MORNING_REOPEN",
+    "SHADOW3_ML_RESIDUAL",
+)
+_EVENT_AUDIT_MODEL_LABELS = {
+    "MAIN_ONLINE": "مدل اصلی زنده",
+    "SHADOW1_PREVIOUS": "Shadow قبلی",
+    "SHADOW2_MORNING_REOPEN": "Shadow بازگشایی",
+    "SHADOW3_ML_RESIDUAL": "Shadow یادگیری ماشین",
+}
+
+
+def query_model_event_audit(
+    conversation_db: Path,
+    calibration_db: Path,
+    *,
+    range_type: str = "today",
+    start_shamsi: str | None = None,
+    end_shamsi: str | None = None,
+) -> dict[str, Any]:
+    """Join every canonical detection to the first model cycle that saw it.
+
+    The join is intentionally one-way: only rows whose quality contract says
+    ``realtime_eligible=1`` receive model prices.  Audit-only rows stay visible
+    with their exclusion reason, but can never masquerade as model input.
+    """
+
+    start_utc, end_utc, label = calculate_time_bounds(
+        range_type, start_shamsi, end_shamsi
+    )
+    empty = {
+        "range_label": label,
+        "generated_at_utc": iso_utc(datetime.now(timezone.utc)),
+        "total_events": 0,
+        "model_input_events": 0,
+        "audit_only_events": 0,
+        "missing_main_prediction_events": 0,
+        "events": [],
+        "model_labels": dict(_EVENT_AUDIT_MODEL_LABELS),
+    }
+    if not conversation_db.is_file():
+        return empty
+    connection: sqlite3.Connection | None = None
+    try:
+        connection = sqlite3.connect(
+            f"file:{conversation_db.resolve()}?mode=ro", uri=True
+        )
+        connection.row_factory = sqlite3.Row
+        tables = {
+            str(row[0])
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            )
+        }
+        if "canonical_group_projection" not in tables:
+            return empty
+        rows = connection.execute(
+            """
+            SELECT m.source_html_file AS source_group,'OFFER' AS event_type,
+                   COALESCE(
+                     json_extract(m.relevance_json,'$.source_event_time_utc'),
+                     m.event_time_utc
+                   ) AS source_event_time_utc,
+                   m.event_time_utc AS available_at_utc,
+                   o.commodity,o.side,o.price,o.quantity,o.settlement,
+                   COALESCE(q.realtime_eligible,0) AS model_eligible,
+                   q.exclusion_reason
+            FROM canonical_group_projection p
+            JOIN offers o ON o.id=p.row_id AND p.event_type='OFFER'
+            JOIN messages m
+              ON m.import_id=o.import_id AND m.message_id=o.message_id
+            LEFT JOIN offer_market_quality q ON q.offer_id=o.id
+            WHERE COALESCE(
+                    json_extract(m.relevance_json,'$.source_event_time_utc'),
+                    m.event_time_utc
+                  ) >= ?
+              AND COALESCE(
+                    json_extract(m.relevance_json,'$.source_event_time_utc'),
+                    m.event_time_utc
+                  ) <= ?
+            UNION ALL
+            SELECT m.source_html_file AS source_group,'TRADE' AS event_type,
+                   COALESCE(
+                     json_extract(m.relevance_json,'$.source_event_time_utc'),
+                     json_extract(t.context_json,'$.source_event_time_utc'),
+                     t.event_time_utc
+                   ) AS source_event_time_utc,
+                   t.event_time_utc AS available_at_utc,
+                   t.commodity,t.side,t.price,t.quantity,t.settlement,
+                   COALESCE(q.realtime_eligible,0) AS model_eligible,
+                   q.exclusion_reason
+            FROM canonical_group_projection p
+            JOIN confirmed_trades t
+              ON t.id=p.row_id AND p.event_type='TRADE'
+            JOIN messages m
+              ON m.import_id=t.import_id
+             AND m.message_id=t.confirmation_message_id
+            LEFT JOIN trade_market_quality q ON q.trade_id=t.id
+            WHERE COALESCE(
+                    json_extract(m.relevance_json,'$.source_event_time_utc'),
+                    json_extract(t.context_json,'$.source_event_time_utc'),
+                    t.event_time_utc
+                  ) >= ?
+              AND COALESCE(
+                    json_extract(m.relevance_json,'$.source_event_time_utc'),
+                    json_extract(t.context_json,'$.source_event_time_utc'),
+                    t.event_time_utc
+                  ) <= ?
+            ORDER BY source_event_time_utc DESC,event_type
+            """,
+            (start_utc, end_utc, start_utc, end_utc),
+        ).fetchall()
+    except (OSError, sqlite3.Error, ValueError):
+        return empty
+    finally:
+        if connection is not None:
+            connection.close()
+
+    calibration: sqlite3.Connection | None = None
+    if rows and calibration_db.is_file():
+        try:
+            calibration = sqlite3.connect(
+                f"file:{calibration_db.resolve()}?mode=ro", uri=True
+            )
+            calibration.row_factory = sqlite3.Row
+            calibration.execute(
+                "SELECT 1 FROM coin_estimate_predictions LIMIT 1"
+            ).fetchone()
+        except (OSError, sqlite3.Error):
+            if calibration is not None:
+                calibration.close()
+            calibration = None
+
+    def first_prediction(
+        *, commodity: str, settlement: str, model_id: str, available_at: datetime
+    ) -> dict[str, Any] | None:
+        if calibration is None:
+            return None
+        try:
+            row = calibration.execute(
+                """
+                SELECT prediction_time_utc,model_version,
+                       estimated_price_toman,lower_price_toman,upper_price_toman
+                FROM coin_estimate_predictions
+                WHERE model_id=? AND commodity=? AND settlement=?
+                  AND prediction_time_utc>=?
+                ORDER BY prediction_time_utc,id LIMIT 1
+                """,
+                (model_id, commodity, settlement, iso_utc(available_at)),
+            ).fetchone()
+        except sqlite3.Error:
+            return None
+        if row is None:
+            return None
+        candidate = {
+            "prediction_time_utc": str(row["prediction_time_utc"]),
+            "estimated_price_toman": int(round(float(row["estimated_price_toman"]))),
+            "lower_price_toman": (
+                int(round(float(row["lower_price_toman"])))
+                if row["lower_price_toman"] is not None
+                else None
+            ),
+            "upper_price_toman": (
+                int(round(float(row["upper_price_toman"])))
+                if row["upper_price_toman"] is not None
+                else None
+            ),
+            "model_version": str(row["model_version"] or ""),
+        }
+        delay = (
+            parse_datetime(candidate["prediction_time_utc"]) - available_at
+        ).total_seconds()
+        maximum_delay = 90 if model_id == "MAIN_ONLINE" else 180
+        return candidate if 0 <= delay <= maximum_delay else None
+
+    events: list[dict[str, Any]] = []
+    missing_main = 0
+    model_input_count = 0
+    for row in rows:
+        model_eligible = bool(row["model_eligible"])
+        model_input_count += int(model_eligible)
+        available_at = parse_datetime(str(row["available_at_utc"]))
+        commodity = str(row["commodity"] or "نامشخص")
+        settlement = str(row["settlement"] or "")
+        estimates = {
+            model_id: first_prediction(
+                commodity=commodity,
+                settlement=settlement,
+                model_id=model_id,
+                available_at=available_at,
+            )
+            for model_id in _EVENT_AUDIT_MODELS
+        } if model_eligible else {}
+        if model_eligible and estimates.get("MAIN_ONLINE") is None:
+            missing_main += 1
+        reason = str(row["exclusion_reason"] or "")
+        if model_eligible:
+            status = "MODEL_INPUT"
+        elif reason == "CANONICAL_FACT_ARRIVED_TOO_LATE":
+            status = "AUDIT_ONLY_LATE"
+        elif reason == "CONDITIONAL_GROUP_FACT":
+            status = "AUDIT_ONLY_CONDITIONAL"
+        else:
+            status = "PENDING_REVIEW"
+        events.append(
+            {
+                "group_number": int(str(row["source_group"]).rsplit("_", 1)[-1]),
+                "event_type": str(row["event_type"]),
+                "source_event_time_utc": str(row["source_event_time_utc"]),
+                "available_at_utc": str(row["available_at_utc"]),
+                "commodity": commodity,
+                "side": str(row["side"]),
+                "price_toman": int(row["price"]) * 1_000,
+                "quantity": int(row["quantity"]) if row["quantity"] is not None else None,
+                "settlement": settlement,
+                "status": status,
+                "exclusion_reason": reason or None,
+                "estimates": estimates,
+            }
+        )
+    if calibration is not None:
+        calibration.close()
+    return {
+        **empty,
+        "total_events": len(events),
+        "model_input_events": model_input_count,
+        "audit_only_events": len(events) - model_input_count,
+        "missing_main_prediction_events": missing_main,
+        "events": events,
+    }
+
+
+_EVENT_AUDIT_STATUS_FA = {
+    "MODEL_INPUT": "ورودی واقعی مدل",
+    "AUDIT_ONLY_LATE": "دیررس؛ فقط گزارش",
+    "AUDIT_ONLY_CONDITIONAL": "شرطی؛ فقط گزارش",
+    "PENDING_REVIEW": "نیازمند بررسی",
+}
+
+
+def _render_event_estimate_cell(prediction: object) -> str:
+    if not isinstance(prediction, dict):
+        return "<span class='event-no-estimate'>—</span>"
+    estimated = fa_number(prediction.get("estimated_price_toman"))
+    lower = prediction.get("lower_price_toman")
+    upper = prediction.get("upper_price_toman")
+    interval = (
+        f"<small>بازه {fa_number(lower)} تا {fa_number(upper)}</small>"
+        if lower is not None and upper is not None
+        else "<small>بازه ثبت نشده</small>"
+    )
+    cycle_time = fa_datetime(prediction.get("prediction_time_utc"))
+    return (
+        f"<strong>{estimated} تومان</strong>{interval}"
+        f"<time>چرخهٔ مدل: {cycle_time}</time>"
+    )
+
+
+def render_model_event_audit(audit: dict[str, Any]) -> str:
+    """Render every canonical detection without exposing private group text."""
+
+    model_labels = audit.get("model_labels")
+    model_labels = model_labels if isinstance(model_labels, dict) else {}
+    events = audit.get("events")
+    events = events if isinstance(events, list) else []
+    rows: list[str] = []
+    for event in events:
+        if not isinstance(event, dict):
+            continue
+        status = str(event.get("status") or "PENDING_REVIEW")
+        status_text = _EVENT_AUDIT_STATUS_FA.get(status, status)
+        reason = html.escape(str(event.get("exclusion_reason") or ""), quote=True)
+        estimates = event.get("estimates")
+        estimates = estimates if isinstance(estimates, dict) else {}
+        model_cells = "".join(
+            f"<td class='estimate-cell'>{_render_event_estimate_cell(estimates.get(model_id))}</td>"
+            for model_id in _EVENT_AUDIT_MODELS
+        )
+        event_type = "آفر" if event.get("event_type") == "OFFER" else "معامله"
+        side = "خرید" if event.get("side") == "BUY" else "فروش"
+        settlement = SETTLEMENT_FA.get(str(event.get("settlement")), "نامشخص")
+        rows.append(
+            "<tr>"
+            f"<td>گروه {fa_number(event.get('group_number'))}</td>"
+            f"<td><strong>{event_type}</strong></td>"
+            f"<td><time>{fa_datetime(event.get('source_event_time_utc'))}</time></td>"
+            f"<td><time>{fa_datetime(event.get('available_at_utc'))}</time></td>"
+            f"<td><span class='event-status {status.lower()}' title='{reason}'>{status_text}</span></td>"
+            f"<td>{html.escape(str(event.get('commodity') or 'نامشخص'))}</td>"
+            f"<td>{side} · {settlement}</td>"
+            f"<td class='numeric'><strong>{fa_number(event.get('price_toman'))}</strong> تومان"
+            f"<small>{fa_number(event.get('quantity')) if event.get('quantity') is not None else '—'} عدد</small></td>"
+            f"{model_cells}"
+            "</tr>"
+        )
+
+    if not rows:
+        rows.append(
+            "<tr><td colspan='12' class='missing'>در این بازه هیچ رویداد canonical "
+            "تشخیص‌داده‌شده‌ای ثبت نشده است.</td></tr>"
+        )
+    model_headers = "".join(
+        f"<th>{html.escape(str(model_labels.get(model_id) or model_id))}</th>"
+        for model_id in _EVENT_AUDIT_MODELS
+    )
+    return f"""
+    <section class='event-audit-section'>
+      <div class='section-head'>
+        <div>
+          <h2>دفتر کامل رویدادهای مدل و قیمت واقعی همان لحظه</h2>
+          <p>هر ردیف یک آفر یا معاملهٔ canonical است. فقط ردیف سبز واقعاً وارد مدل شده؛
+          قیمت‌ها از دفتر ثبت پیش‌بینی همان چرخه خوانده شده‌اند و بازبرآورد امروزی نیستند.</p>
+        </div>
+        <span class='badge'>آخرین خواندن: {fa_datetime(audit.get('generated_at_utc'))}</span>
+      </div>
+      <div class='event-audit-summary'>
+        <span>کل رویدادها <strong>{fa_number(audit.get('total_events', 0))}</strong></span>
+        <span>ورودی واقعی مدل <strong>{fa_number(audit.get('model_input_events', 0))}</strong></span>
+        <span>فقط گزارش/بررسی <strong>{fa_number(audit.get('audit_only_events', 0))}</strong></span>
+        <span class='{'warning' if audit.get('missing_main_prediction_events') else ''}'>بدون قیمت ثبت‌شدهٔ مدل اصلی <strong>{fa_number(audit.get('missing_main_prediction_events', 0))}</strong></span>
+      </div>
+      <div class='table-wrap event-audit-wrap'>
+        <table class='event-audit-table'>
+          <thead><tr>
+            <th>گروه</th><th>رویداد</th><th>زمان پیام</th><th>زمان دسترس‌پذیری برای مدل</th>
+            <th>وضعیت</th><th>کالا</th><th>سمت / تسویه</th><th>فی واقعی رویداد / تعداد</th>
+            {model_headers}
+          </tr></thead>
+          <tbody>{''.join(rows)}</tbody>
+        </table>
+      </div>
+    </section>
+    """
 
 
 def query_user_details(
@@ -4660,6 +5189,17 @@ button:disabled, input:disabled, select:disabled, textarea:disabled {{
 }}
 .activity-freshness.fresh {{ color: var(--accent-emerald); }}
 .activity-freshness.stale {{ color: var(--accent-rose); }}
+.fact-status {{
+  display: inline-flex;
+  margin-inline-start: 4px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid currentColor;
+  font-size: 10px !important;
+}}
+.fact-status.model {{ color: var(--accent-emerald) !important; }}
+.fact-status.audit {{ color: var(--accent-gold) !important; }}
+.fact-status.review {{ color: var(--accent-rose) !important; }}
 .activity-scope-note {{
   margin: -3px 0 12px;
   color: var(--text-sub);
@@ -4829,6 +5369,7 @@ document.querySelectorAll(".manual-form").forEach((form) => {{
 def render_analytics_page(
     conversation_db: Path,
     *,
+    calibration_db: Path = DEFAULT_CALIBRATION_DB,
     analytics_path: str = "/analytics",
     home_path: str = "/",
     logout_path: str = "/logout",
@@ -4843,6 +5384,14 @@ def render_analytics_page(
         start_shamsi=start_shamsi,
         end_shamsi=end_shamsi,
     )
+    event_audit = query_model_event_audit(
+        conversation_db,
+        calibration_db,
+        range_type=range_type,
+        start_shamsi=start_shamsi,
+        end_shamsi=end_shamsi,
+    )
+    event_audit_html = render_model_event_audit(event_audit)
 
     def btn_active(r: str) -> str:
         return "active-filter" if data["range_type"] == r else ""
@@ -4856,21 +5405,38 @@ def render_analytics_page(
         off_q = fa_number(summary.get("total_offer_qty", 0))
         trd_c = fa_number(summary.get("total_trade_count", 0))
         trd_q = fa_number(summary.get("total_trade_qty", 0))
+        model_off_c = fa_number(summary.get("model_eligible_offer_count", 0))
+        audit_off_c = fa_number(summary.get("audit_only_offer_count", 0))
+        model_trd_c = fa_number(summary.get("model_eligible_trade_count", 0))
+        audit_trd_c = fa_number(summary.get("audit_only_trade_count", 0))
+        canonical_live = data.get("data_source") == "CANONICAL_LIVE_AUDIT"
+        offer_breakdown = (
+            f"<small>{model_off_c} ورودی مدل · {audit_off_c} فقط گزارش/بررسی</small>"
+            if canonical_live
+            else ""
+        )
+        trade_breakdown = (
+            f"<small>{model_trd_c} ورودی مدل · {audit_trd_c} فقط گزارش/بررسی</small>"
+            if canonical_live
+            else ""
+        )
 
         summary_cards_html = f"""
         <div class='group-summary-grid'>
           <div class='summary-card'>
             <div class='stat-icon'>📨</div>
             <div class='stat-info'>
-              <span>تعداد کل آفرها</span>
+              <span>آفرهای تشخیص‌داده‌شده</span>
               <strong>{off_c} <small>آفر</small></strong>
+              {offer_breakdown}
             </div>
           </div>
           <div class='summary-card'>
             <div class='stat-icon'>🤝</div>
             <div class='stat-info'>
-              <span>تعداد کل معاملات</span>
+              <span>معاملات تشخیص‌داده‌شده</span>
               <strong>{trd_c} <small>معامله</small></strong>
+              {trade_breakdown}
             </div>
           </div>
           <div class='summary-card'>
@@ -4895,6 +5461,14 @@ def render_analytics_page(
         t3 = render_analytics_leaderboard_table("۱۰ کاربر بیشترین حجم آفر", "مجموع تعداد کالای پیشنهادشده", gdata.get("top_offer_qty", []), "total_qty", "عدد کالا", grp, "offer_qty")
         t4 = render_analytics_leaderboard_table("۱۰ کاربر بیشترین حجم معامله", "مجموع تعداد کالای معامله‌شده", gdata.get("top_trade_qty", []), "total_qty", "عدد کالا", grp, "trade_qty")
 
+        leaderboards = (
+            f"<div class='leaderboards-grid'>{t1}{t2}{t3}{t4}</div>"
+            if data.get("identity_analytics_available")
+            else (
+                "<p class='identity-notice'>رتبه‌بندی هویتی در مسیر canonical "
+                "ذخیره نمی‌شود؛ این بخش فقط آمار اقتصادی زنده و بدون هویت را نمایش می‌دهد.</p>"
+            )
+        )
         groups_html.append(
             f"""
             <section class='group-analytics-section'>
@@ -4903,12 +5477,7 @@ def render_analytics_page(
                 <span class='badge'>گروه {fa_number(grp)} معاملاتی</span>
               </div>
               {summary_cards_html}
-              <div class='leaderboards-grid'>
-                {t1}
-                {t2}
-                {t3}
-                {t4}
-              </div>
+              {leaderboards}
             </section>
             """
         )
@@ -4916,6 +5485,12 @@ def render_analytics_page(
     user_badge = f"<span class='user-label' style='font-size:13px;color:var(--text-sub);margin-left:6px'>👤 <strong>{html.escape(user_session or 'bahar')}</strong></span>"
     logout_btn = f"<a class='nav-btn secondary' href='{html.escape(logout_path)}'>خروج</a>"
     navigation = f"{user_badge} <a class='nav-btn secondary' href='{html.escape(home_path)}'>بازگشت به داشبورد اصلی</a> {logout_btn}"
+    source_notice = (
+        "<p class='source-notice'>منبع این آمار، projection زندهٔ canonical است؛ "
+        "داده‌های دیررس و نیازمند بررسی نمایش داده می‌شوند اما وارد مدل تخمین نمی‌شوند.</p>"
+        if data.get("data_source") == "CANONICAL_LIVE_AUDIT"
+        else ""
+    )
 
     document = f"""<!doctype html>
 <html lang="fa" dir="rtl">
@@ -5309,6 +5884,88 @@ td {{
 .modal-badge strong {{
   color: var(--accent-cyan);
 }}
+.source-notice, .identity-notice {{
+  margin: 0 0 16px;
+  padding: 11px 14px;
+  border: 1px solid var(--border-gold);
+  border-radius: 12px;
+  color: var(--text-sub);
+  background: rgba(245, 158, 11, 0.07);
+  font-size: 12px;
+  line-height: 1.8;
+}}
+.stat-info > small {{ color: var(--text-sub); font-size: 10px; }}
+.event-audit-section {{
+  background: var(--bg-surface);
+  border: 1px solid var(--border-gold);
+  border-radius: 18px;
+  padding: 20px;
+  margin-bottom: 24px;
+}}
+.event-audit-section .section-head {{ gap: 16px; align-items: flex-start; }}
+.event-audit-section .section-head p {{
+  margin: 6px 0 0;
+  color: var(--text-sub);
+  font-size: 12px;
+  line-height: 1.9;
+}}
+.event-audit-summary {{
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 14px 0;
+}}
+.event-audit-summary span {{
+  padding: 7px 11px;
+  border: 1px solid var(--border-line);
+  border-radius: 9px;
+  background: var(--bg-card);
+  color: var(--text-sub);
+  font-size: 11.5px;
+}}
+.event-audit-summary strong {{ color: var(--accent-gold); margin-right: 4px; }}
+.event-audit-summary .warning {{ border-color: var(--accent-rose); }}
+.event-audit-wrap {{ max-height: 68vh; overflow: auto; }}
+.event-audit-table {{ min-width: 2100px; }}
+.event-audit-table thead {{ position: sticky; top: 0; z-index: 2; }}
+.event-audit-table td {{ vertical-align: top; white-space: normal; min-width: 105px; }}
+.event-audit-table td:nth-child(3),
+.event-audit-table td:nth-child(4) {{ min-width: 165px; }}
+.event-status {{
+  display: inline-block;
+  padding: 4px 8px;
+  border-radius: 99px;
+  font-size: 10.5px;
+  font-weight: 800;
+  white-space: nowrap;
+}}
+.event-status.model_input {{
+  color: #6ee7b7;
+  background: rgba(16,185,129,.13);
+  border: 1px solid rgba(16,185,129,.35);
+}}
+.event-status.audit_only_late,
+.event-status.audit_only_conditional {{
+  color: #fcd34d;
+  background: rgba(245,158,11,.12);
+  border: 1px solid rgba(245,158,11,.32);
+}}
+.event-status.pending_review {{
+  color: #fda4af;
+  background: rgba(244,63,94,.12);
+  border: 1px solid rgba(244,63,94,.32);
+}}
+.numeric {{ direction: rtl; }}
+.numeric small, .estimate-cell small, .estimate-cell time {{
+  display: block;
+  margin-top: 4px;
+  color: var(--text-sub);
+  font-size: 10px;
+  direction: rtl;
+}}
+.estimate-cell {{ min-width: 190px !important; direction: rtl; }}
+.estimate-cell strong {{ color: var(--accent-cyan); }}
+.event-no-estimate {{ color: var(--text-sub); }}
 </style>
 </head>
 <body>
@@ -5339,7 +5996,9 @@ td {{
     </form>
   </div>
 
+  {source_notice}
   {''.join(groups_html)}
+  {event_audit_html}
 </main>
 
 <div id="detail-modal" class="modal-overlay" onclick="closeUserModal(event)">
@@ -5529,6 +6188,7 @@ def handler_factory(
     *,
     market_db: Path,
     conversation_db: Path,
+    calibration_db: Path,
     write_token: str | None,
     refresh_estimate,
     group_live_control: GroupLiveInputControl,
@@ -5724,6 +6384,7 @@ def handler_factory(
                 end_shamsi = query.get("end_shamsi", [None])[0]
                 body = render_analytics_page(
                     conversation_db,
+                    calibration_db=calibration_db,
                     analytics_path=analytics_path,
                     home_path=normalized,
                     logout_path=logout_path,
@@ -5742,6 +6403,13 @@ def handler_factory(
                 end_shamsi = query.get("end_shamsi", [None])[0]
                 data = query_user_analytics(
                     conversation_db,
+                    range_type=range_type,
+                    start_shamsi=start_shamsi,
+                    end_shamsi=end_shamsi,
+                )
+                data["model_event_audit"] = query_model_event_audit(
+                    conversation_db,
+                    calibration_db,
                     range_type=range_type,
                     start_shamsi=start_shamsi,
                     end_shamsi=end_shamsi,
@@ -6062,6 +6730,7 @@ def start_web_server(
     *,
     market_db: Path,
     conversation_db: Path,
+    calibration_db: Path,
     write_token: str | None,
     refresh_estimate,
     group_live_control: GroupLiveInputControl,
@@ -6073,6 +6742,7 @@ def start_web_server(
             state,
             market_db=market_db,
             conversation_db=conversation_db,
+            calibration_db=calibration_db,
             write_token=write_token,
             refresh_estimate=refresh_estimate,
             group_live_control=group_live_control,
@@ -7102,6 +7772,7 @@ def main() -> int:
         state,
         market_db=args.market_db,
         conversation_db=args.conversation_db,
+        calibration_db=args.calibration_db,
         write_token=write_token,
         refresh_estimate=refresh_from_web,
         group_live_control=group_live_control,

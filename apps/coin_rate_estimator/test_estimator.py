@@ -3,7 +3,7 @@ from __future__ import annotations
 import sqlite3
 import tempfile
 import unittest
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -1715,7 +1715,7 @@ class EstimatorTests(unittest.TestCase):
             )
         self.assertIn("بدون آفر فعال برای مدل", body)
         self.assertIn("بدون معامله فعال برای مدل", body)
-        self.assertIn("آخرین سوابق گروهیِ پذیرفته‌شدهٔ مدل", body)
+        self.assertIn("آخرین آفرها و معاملات تشخیص‌داده‌شده", body)
         self.assertIn("وضعیت واقعی دریافت و مصرف مدل", body)
         self.assertIn("جدیدترین رویداد ثبت‌شده", body)
         self.assertIn("مدل ورودی فعال ندارد", body)
@@ -1924,10 +1924,202 @@ class EstimatorTests(unittest.TestCase):
         self.assertIn("summary", res["groups"].get(1, {}))
         body = render_analytics_page(db_path, range_type="today").decode("utf-8")
         self.assertIn("آمار و تحلیل", body)
-        self.assertIn("تعداد کل آفرها", body)
-        self.assertIn("تعداد کل معاملات", body)
+        self.assertIn("آفرهای تشخیص‌داده‌شده", body)
+        self.assertIn("معاملات تشخیص‌داده‌شده", body)
         self.assertIn("گروه ۱", body)
         self.assertIn("گروه ۲", body)
+
+    def test_today_analytics_prefers_live_canonical_audit_over_stale_snapshot(self) -> None:
+        from live_server import (
+            query_model_event_audit,
+            query_user_analytics,
+            render_analytics_page,
+        )
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            db_path = root / "conversation.sqlite3"
+            calibration_db = root / "calibration.sqlite3"
+            analytics_root = root / "analytics" / "training-snapshots"
+            analytics_root.mkdir(parents=True)
+            stale = sqlite3.connect(analytics_root / "group-training-stale.sqlite3")
+            stale.executescript(
+                """
+                CREATE TABLE offer_training_examples(
+                    occurred_at_utc TEXT,group_number INTEGER,offerer_name TEXT,
+                    quantity INTEGER
+                );
+                CREATE TABLE confirmed_trade_training_examples(
+                    occurred_at_utc TEXT,group_number INTEGER,offerer_name TEXT,
+                    counterparty_name TEXT,quantity INTEGER
+                );
+                """
+            )
+            stale.close()
+            event_time = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+            relevance = '{"source_event_time_utc":"' + event_time + '"}'
+            connection = sqlite3.connect(db_path)
+            connection.executescript(
+                """
+                CREATE TABLE canonical_group_projection(
+                    event_key BLOB PRIMARY KEY,event_type TEXT,row_id INTEGER,
+                    message_id INTEGER,projected_at_utc TEXT,projection_version TEXT
+                );
+                CREATE TABLE messages(
+                    import_id INTEGER,message_id INTEGER,event_time_utc TEXT,
+                    source_html_file TEXT,relevance_json TEXT,
+                    PRIMARY KEY(import_id,message_id)
+                );
+                CREATE TABLE offers(
+                    id INTEGER PRIMARY KEY,import_id INTEGER,message_id INTEGER,
+                    commodity TEXT,side TEXT,price INTEGER,quantity INTEGER,
+                    settlement TEXT
+                );
+                CREATE TABLE confirmed_trades(
+                    id INTEGER PRIMARY KEY,import_id INTEGER,
+                    confirmation_message_id INTEGER,event_time_utc TEXT,
+                    commodity TEXT,side TEXT,price INTEGER,quantity INTEGER,
+                    settlement TEXT,context_json TEXT
+                );
+                CREATE TABLE offer_market_quality(
+                    offer_id INTEGER PRIMARY KEY,realtime_eligible INTEGER,
+                    exclusion_reason TEXT
+                );
+                CREATE TABLE trade_market_quality(
+                    trade_id INTEGER PRIMARY KEY,realtime_eligible INTEGER,
+                    exclusion_reason TEXT
+                );
+                """
+            )
+            for row_id, model_eligible in ((1, 1), (2, 0)):
+                connection.execute(
+                    "INSERT INTO canonical_group_projection VALUES(?,?,?,?,?,?)",
+                    (bytes([row_id]) * 16, "OFFER", row_id, row_id, event_time, "test"),
+                )
+                connection.execute(
+                    "INSERT INTO messages VALUES(?,?,?,?,?)",
+                    (-1, row_id, event_time, "group_1", relevance),
+                )
+                connection.execute(
+                    "INSERT INTO offers VALUES(?,?,?,?,?,?,?,?)",
+                    (row_id, -1, row_id, "امام", "SELL", 188_600, 5, "TOMORROW"),
+                )
+                connection.execute(
+                    "INSERT INTO offer_market_quality VALUES(?,?,?)",
+                    (row_id, model_eligible, None if model_eligible else "CANONICAL_FACT_ARRIVED_TOO_LATE"),
+                )
+            connection.execute(
+                "INSERT INTO canonical_group_projection VALUES(?,?,?,?,?,?)",
+                (b"t" * 16, "TRADE", 3, 3, event_time, "test"),
+            )
+            connection.execute(
+                "INSERT INTO messages VALUES(?,?,?,?,?)",
+                (-1, 3, event_time, "group_1", relevance),
+            )
+            connection.execute(
+                "INSERT INTO confirmed_trades VALUES(?,?,?,?,?,?,?,?,?,?)",
+                (3, -1, 3, event_time, "امام", "SELL", 188_600, 5, "TOMORROW", relevance),
+            )
+            connection.execute(
+                "INSERT INTO trade_market_quality VALUES(?,?,?)",
+                (3, 0, "CANONICAL_FACT_ARRIVED_TOO_LATE"),
+            )
+            connection.commit()
+            connection.close()
+
+            prediction_time = (
+                datetime.fromisoformat(event_time) + timedelta(seconds=30)
+            ).isoformat().replace("+00:00", "Z")
+            calibration = sqlite3.connect(calibration_db)
+            calibration.execute(
+                """
+                CREATE TABLE coin_estimate_predictions(
+                    id INTEGER PRIMARY KEY,prediction_time_utc TEXT,
+                    model_id TEXT,model_version TEXT,commodity TEXT,
+                    settlement TEXT,estimated_price_toman REAL,
+                    lower_price_toman REAL,upper_price_toman REAL
+                )
+                """
+            )
+            for index, (model_id, price) in enumerate(
+                (
+                    ("MAIN_ONLINE", 188_700_000),
+                    ("SHADOW1_PREVIOUS", 188_710_000),
+                    ("SHADOW2_MORNING_REOPEN", 188_720_000),
+                    ("SHADOW3_ML_RESIDUAL", 188_730_000),
+                ),
+                1,
+            ):
+                calibration.execute(
+                    "INSERT INTO coin_estimate_predictions VALUES(?,?,?,?,?,?,?,?,?)",
+                    (
+                        index,
+                        prediction_time,
+                        model_id,
+                        "test-v1",
+                        "امام",
+                        "TOMORROW",
+                        price,
+                        price - 1_000_000,
+                        price + 1_000_000,
+                    ),
+                )
+            calibration.commit()
+            calibration.close()
+
+            with patch.dict(
+                "os.environ",
+                {"COIN_RATE_ESTIMATOR_ANALYTICS_DIR": str(root / "analytics")},
+            ):
+                data = query_user_analytics(db_path, range_type="today")
+                audit = query_model_event_audit(
+                    db_path, calibration_db, range_type="today"
+                )
+                audit_without_ledger = query_model_event_audit(
+                    db_path, root / "missing-calibration.sqlite3", range_type="today"
+                )
+                body = render_analytics_page(
+                    db_path,
+                    calibration_db=calibration_db,
+                    range_type="today",
+                ).decode("utf-8")
+            summary = data["groups"][1]["summary"]
+            self.assertEqual(data["data_source"], "CANONICAL_LIVE_AUDIT")
+            self.assertEqual(
+                (
+                    summary["total_offer_count"],
+                    summary["model_eligible_offer_count"],
+                    summary["audit_only_offer_count"],
+                    summary["total_trade_count"],
+                    summary["audit_only_trade_count"],
+                ),
+                (2, 1, 1, 1, 1),
+            )
+            self.assertIn("projection زندهٔ canonical", body)
+            self.assertIn("فقط گزارش/بررسی", body)
+            self.assertEqual(audit["total_events"], 3)
+            self.assertEqual(audit["model_input_events"], 1)
+            self.assertEqual(audit["audit_only_events"], 2)
+            self.assertEqual(audit["missing_main_prediction_events"], 0)
+            self.assertEqual(
+                audit_without_ledger["missing_main_prediction_events"], 1
+            )
+            self.assertEqual(
+                audit["events"][0]["estimates"]["MAIN_ONLINE"][
+                    "estimated_price_toman"
+                ],
+                188_700_000,
+            )
+            self.assertTrue(
+                all(
+                    not event["estimates"]
+                    for event in audit["events"]
+                    if event["status"] != "MODEL_INPUT"
+                )
+            )
+            self.assertIn("دفتر کامل رویدادهای مدل و قیمت واقعی همان لحظه", body)
+            self.assertIn("ورودی واقعی مدل", body)
+            self.assertIn("Shadow یادگیری ماشین", body)
 
     def test_session_store_and_authentication(self) -> None:
         from live_server import SessionStore, render_login_page

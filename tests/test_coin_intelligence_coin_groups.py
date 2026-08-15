@@ -135,6 +135,7 @@ class CoinGroupParserTests(unittest.TestCase):
             "۱۰ نیم ۴۰۴ ف ۹۴۵۰۰": (94_500, 10, "SELL"),
             "۲تاف94500 نیم": (94_500, 2, "SELL"),
             "3تا نقدی 187خ": (187_000, 3, "BUY"),
+            "5 تا 188/600 ف": (188_600, 5, "SELL"),
         }
         for text, expected in cases.items():
             with self.subTest(text=text):

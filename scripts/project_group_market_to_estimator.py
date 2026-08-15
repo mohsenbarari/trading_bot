@@ -28,7 +28,7 @@ if str(REPO_ROOT) not in sys.path:
 from core.market_intelligence.input_health import update_probe_state
 
 
-PROJECTION_VERSION = "canonical-group-estimator-projection-v2-causal"
+PROJECTION_VERSION = "canonical-group-estimator-projection-v3-audit-separated"
 PROJECTION_IMPORT_ID = -9_000_000_000_000_000_001
 MAXIMUM_MODEL_PROJECTION_DELAY_SECONDS = 5 * 60
 _TEHRAN = ZoneInfo("Asia/Tehran")
@@ -120,8 +120,11 @@ def _commodity(row: sqlite3.Row) -> str:
     instrument = str(row["instrument"] or "").strip().upper()
     if not instrument.startswith("COIN_"):
         raise ProjectionError("canonical_group_instrument_unsupported")
+    code = instrument.removeprefix("COIN_")
+    if code == "UNRESOLVED":
+        return "نامشخص"
     try:
-        return _COMMODITY[instrument.removeprefix("COIN_")]
+        return _COMMODITY[code]
     except KeyError as exc:
         raise ProjectionError("canonical_group_commodity_unsupported") from exc
 
@@ -183,6 +186,15 @@ def _model_exclusion_reason(row: sqlite3.Row) -> str | None:
     if delay > MAXIMUM_MODEL_PROJECTION_DELAY_SECONDS:
         return "CANONICAL_FACT_ARRIVED_TOO_LATE"
     return None
+
+
+def _audit_projectable(row: sqlite3.Row) -> bool:
+    """Keep detected facts for reporting without weakening model gates."""
+
+    return str(row["quality_state"] or "").upper() in {
+        "ELIGIBLE",
+        "PENDING_REVIEW",
+    }
 
 
 def _delete_projected(destination: sqlite3.Connection, prior: sqlite3.Row) -> None:
@@ -262,7 +274,15 @@ def project(
     destination = sqlite3.connect(conversation_db, timeout=30)
     destination.row_factory = sqlite3.Row
     destination.execute("PRAGMA busy_timeout=30000")
-    counts = {"eligible_offers": 0, "eligible_trades": 0, "ineligible_removed": 0}
+    counts = {
+        "eligible_offers": 0,
+        "eligible_trades": 0,
+        "audit_offers": 0,
+        "audit_trades": 0,
+        "audit_only_offers": 0,
+        "audit_only_trades": 0,
+        "ineligible_removed": 0,
+    }
     try:
         _require_schema(destination)
         rows = _rows(source)
@@ -320,11 +340,13 @@ def project(
                 "SELECT event_key,event_type,row_id,message_id FROM canonical_group_projection WHERE event_key=?",
                 (event_key,),
             ).fetchone()
-            if _model_exclusion_reason(row) is not None:
+            if not _audit_projectable(row):
                 if prior is not None:
                     _delete_projected(destination, prior)
                     counts["ineligible_removed"] += 1
                 continue
+            exclusion_reason = _model_exclusion_reason(row)
+            model_eligible = exclusion_reason is None
             source_file, _group_number = _source(row)
             commodity = _commodity(row)
             settlement = _settlement(str(row["settlement_term"]))
@@ -348,7 +370,8 @@ def project(
                 ON CONFLICT(import_id,message_id) DO UPDATE SET
                     event_time_utc=excluded.event_time_utc,
                     event_time_tehran=excluded.event_time_tehran,
-                    source_html_file=excluded.source_html_file
+                    source_html_file=excluded.source_html_file,
+                    relevance_json=excluded.relevance_json
                 """,
                 (
                     PROJECTION_IMPORT_ID,
@@ -372,6 +395,13 @@ def project(
             )
             opaque_context = "canonical:" + event_key.hex()
             if event_type == "OFFER":
+                lifecycle = (
+                    "CANONICAL_ELIGIBLE"
+                    if model_eligible
+                    else "CANONICAL_AUDIT_ONLY"
+                )
+                live_weight = 1.0 if model_eligible else 0.0
+                training_weight = (1.0 / 3.0) if model_eligible else 0.0
                 destination.execute(
                     """
                     INSERT INTO offers(
@@ -419,28 +449,34 @@ def project(
                         live_range_weight=excluded.live_range_weight,
                         live_flow_weight=excluded.live_flow_weight,
                         historical_training_weight=excluded.historical_training_weight,
-                        realtime_eligible=1,training_eligible=1,
-                        cross_state=excluded.cross_state,exclusion_reason=NULL
+                        realtime_eligible=excluded.realtime_eligible,
+                        training_eligible=excluded.training_eligible,
+                        cross_state=excluded.cross_state,
+                        exclusion_reason=excluded.exclusion_reason
                     """,
                     (
                         row_id,
                         event_time,
-                        "CANONICAL_ELIGIBLE",
-                        1.0,
-                        1.0,
-                        1.0 / 3.0,
-                        1,
-                        1,
-                        "CANONICAL_ELIGIBLE",
+                        lifecycle,
+                        live_weight,
+                        live_weight,
+                        training_weight,
+                        int(model_eligible),
+                        int(model_eligible),
+                        lifecycle,
                         None,
                         "UNKNOWN",
                         None,
                         0.0,
                         None,
-                        None,
+                        exclusion_reason,
                     ),
                 )
-                counts["eligible_offers"] += 1
+                counts["audit_offers"] += 1
+                if model_eligible:
+                    counts["eligible_offers"] += 1
+                else:
+                    counts["audit_only_offers"] += 1
             else:
                 root_event_key = _root_offer_event_key(attributes)
                 linked_offer = (
@@ -480,6 +516,7 @@ def project(
                         confidence=excluded.confidence,
                         offer_message_id=excluded.offer_message_id,
                         is_aggregate=excluded.is_aggregate,
+                        training_eligible=excluded.training_eligible,
                         confirmation_type=excluded.confirmation_type,
                         evidence_json=excluded.evidence_json,
                         context_json=excluded.context_json
@@ -499,7 +536,7 @@ def project(
                         "CANONICAL_MARKET_STORE",
                         quantity,
                         int(bool(attributes.get("is_aggregate"))),
-                        1,
+                        int(model_eligible),
                         str(row["side"]).upper(),
                         settlement,
                         trade_form,
@@ -537,24 +574,34 @@ def project(
                     ) VALUES(?,?,?,?,?,?,?,?,?,?)
                     ON CONFLICT(trade_id) DO UPDATE SET
                         linked_offer_id=excluded.linked_offer_id,
-                        training_eligible=1,realtime_eligible=1,
+                        training_eligible=excluded.training_eligible,
+                        realtime_eligible=excluded.realtime_eligible,
                         training_weight=excluded.training_weight,
-                        cross_state=excluded.cross_state,exclusion_reason=NULL
+                        cross_state=excluded.cross_state,
+                        exclusion_reason=excluded.exclusion_reason
                     """,
                     (
                         row_id,
                         linked_offer_id,
-                        1,
-                        1,
-                        1.5,
+                        int(model_eligible),
+                        int(model_eligible),
+                        1.5 if model_eligible else 0.0,
                         "UNKNOWN",
                         None,
                         0.0,
-                        "CANONICAL_ELIGIBLE",
-                        None,
+                        (
+                            "CANONICAL_ELIGIBLE"
+                            if model_eligible
+                            else "CANONICAL_AUDIT_ONLY"
+                        ),
+                        exclusion_reason,
                     ),
                 )
-                counts["eligible_trades"] += 1
+                counts["audit_trades"] += 1
+                if model_eligible:
+                    counts["eligible_trades"] += 1
+                else:
+                    counts["audit_only_trades"] += 1
             destination.execute(
                 """
                 INSERT INTO canonical_group_projection(

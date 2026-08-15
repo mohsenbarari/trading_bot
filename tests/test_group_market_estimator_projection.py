@@ -24,7 +24,7 @@ CREATE TABLE trade_market_quality(trade_id INTEGER PRIMARY KEY,linked_offer_id I
 """
 
 
-def test_projection_uses_opaque_ids_and_removes_later_ineligible_fact() -> None:
+def test_projection_uses_opaque_ids_and_keeps_conditional_fact_audit_only() -> None:
     with TemporaryDirectory() as directory:
         root = Path(directory)
         market_path = root / "market.sqlite3"
@@ -90,9 +90,14 @@ def test_projection_uses_opaque_ids_and_removes_later_ineligible_fact() -> None:
         )
         market.commit()
         market.close()
-        assert project(market_path, conversation_path)["ineligible_removed"] == 1
+        report = project(market_path, conversation_path)
+        assert (report["eligible_offers"], report["audit_only_offers"]) == (0, 1)
         connection = sqlite3.connect(conversation_path)
-        assert connection.execute("SELECT COUNT(*) FROM offers").fetchone()[0] == 0
+        assert connection.execute("SELECT COUNT(*) FROM offers").fetchone()[0] == 1
+        quality = connection.execute(
+            "SELECT realtime_eligible,training_eligible,exclusion_reason FROM offer_market_quality"
+        ).fetchone()
+        assert quality == (0, 0, "CONDITIONAL_GROUP_FACT")
         connection.close()
 
 
@@ -138,9 +143,17 @@ def test_projection_reconciles_missing_source_and_excludes_late_arrival() -> Non
         market.close()
 
         first = project(market_path, conversation_path)
-        assert first["eligible_offers"] == 1
+        assert (first["eligible_offers"], first["audit_offers"]) == (1, 2)
         destination = sqlite3.connect(conversation_path)
-        assert destination.execute("SELECT COUNT(*) FROM offers").fetchone()[0] == 1
+        assert destination.execute("SELECT COUNT(*) FROM offers").fetchone()[0] == 2
+        late_quality = destination.execute(
+            """
+            SELECT realtime_eligible,training_eligible,exclusion_reason
+            FROM offer_market_quality
+            WHERE exclusion_reason IS NOT NULL
+            """
+        ).fetchone()
+        assert late_quality == (0, 0, "CANONICAL_FACT_ARRIVED_TOO_LATE")
         destination.close()
 
         market = sqlite3.connect(market_path)
@@ -150,8 +163,59 @@ def test_projection_reconciles_missing_source_and_excludes_late_arrival() -> Non
         second = project(market_path, conversation_path)
         assert second["ineligible_removed"] == 1
         destination = sqlite3.connect(conversation_path)
-        assert destination.execute("SELECT COUNT(*) FROM offers").fetchone()[0] == 0
+        assert destination.execute("SELECT COUNT(*) FROM offers").fetchone()[0] == 1
         destination.close()
+
+
+def test_pending_unresolved_offer_is_visible_but_never_model_eligible() -> None:
+    with TemporaryDirectory() as directory:
+        root = Path(directory)
+        market_path = root / "market.sqlite3"
+        conversation_path = root / "conversation.sqlite3"
+        destination = sqlite3.connect(conversation_path)
+        destination.executescript(_CONVERSATION_SCHEMA)
+        destination.close()
+        market = connect_market_store(market_path)
+        initialize_market_store(market)
+        upsert_observation(
+            market,
+            MarketObservation(
+                event_key=derive_event_key("pending-audit", 1),
+                source_code="GROUP_1",
+                source_family="GROUP",
+                event_time_utc="2026-08-15T10:56:50Z",
+                available_at_utc="2026-08-15T10:56:55Z",
+                instrument="COIN_UNRESOLVED",
+                market_label="GROUP_COIN_UNRESOLVED",
+                settlement_term="TOMORROW",
+                trade_form="PHYSICAL",
+                event_type="OFFER",
+                side="SELL",
+                price=Decimal("188600"),
+                price_unit="PROJECT_THOUSAND_TOMAN",
+                currency="TOMAN",
+                quantity=Decimal("5"),
+                quantity_unit="COIN_COUNT",
+                parse_confidence=0.0,
+                parser_version="coin-group-test",
+                quality_state="PENDING_REVIEW",
+                quality_policy_version="test",
+            ),
+        )
+        market.commit()
+        market.close()
+
+        report = project(market_path, conversation_path)
+        assert (report["eligible_offers"], report["audit_only_offers"]) == (0, 1)
+        connection = sqlite3.connect(conversation_path)
+        row = connection.execute(
+            """
+            SELECT o.commodity,q.realtime_eligible,q.training_eligible,q.exclusion_reason
+            FROM offers o JOIN offer_market_quality q ON q.offer_id=o.id
+            """
+        ).fetchone()
+        connection.close()
+        assert row == ("نامشخص", 0, 0, "CANONICAL_QUALITY_NOT_ELIGIBLE")
 
 
 def test_projection_links_canonical_trade_to_its_opaque_root_offer() -> None:
