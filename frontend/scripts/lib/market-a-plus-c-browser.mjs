@@ -148,6 +148,7 @@ function historyForMode(mode) {
     return [
       fixtureOffer(5, { history_state: 'expired', status: 'expired', is_read_only: true, lifecycle_phase: 'expired' }),
       fixtureOffer(4, { history_state: 'traded', status: 'completed', is_read_only: true, traded_quantity: 2, is_partially_traded: true }),
+      fixtureOffer(6, { history_state: 'traded', status: 'completed', is_read_only: true, quantity: 4, remaining_quantity: 0, traded_quantity: 4 }),
     ]
   }
   if (mode === 'normal' || mode === 'dense') {
@@ -163,6 +164,14 @@ function historyForMode(mode) {
         history_state: 'expired',
         status: 'expired',
         is_read_only: true,
+      }),
+      fixtureOffer(6, {
+        history_state: 'traded',
+        status: 'completed',
+        is_read_only: true,
+        quantity: 4,
+        remaining_quantity: 0,
+        traded_quantity: 4,
       }),
     ]
   }
@@ -191,6 +200,17 @@ function listForMode(mode) {
       normal_deadline_ts: nowSec - 60,
       final_deadline_ts: nowSec + 240,
       expires_at_ts: nowSec + 240,
+      timer_total_seconds: 300,
+      accepts_overtime_request: true,
+    })]
+  }
+  if (mode === 'overtime-start') {
+    return [fixtureOffer(0, {
+      offer_type: 'buy',
+      lifecycle_phase: 'overtime',
+      normal_deadline_ts: nowSec - 1,
+      final_deadline_ts: nowSec + 300,
+      expires_at_ts: nowSec + 300,
       timer_total_seconds: 300,
       accepts_overtime_request: true,
     })]
@@ -267,7 +287,7 @@ export function isAllowedMutation(pathname, method) {
   return false
 }
 
-export function apiFixture(pathname, method, controller) {
+export function apiFixture(pathname, method, controller, requestBody = null) {
   const mode = controller.mode || 'normal'
   if (MUTATING_METHODS.has(method) && !isAllowedMutation(pathname, method)) {
     return { known: false, status: 405, body: { detail: 'mutating method blocked' }, mutating: true }
@@ -374,12 +394,36 @@ export function apiFixture(pathname, method, controller) {
     ])
   }
   if ((pathname === '/api/trades/' || pathname === '/api/trades') && method === 'POST') {
-    return known({
-      id: 8801,
-      status: 'completed',
-      quantity: 1,
-      fixture_bound: true,
-    })
+    const tradePayloadValid = Boolean(
+      requestBody
+      && Number.isInteger(requestBody.offer_id)
+      && requestBody.offer_id > 0
+      && typeof requestBody.offer_public_id === 'string'
+      && requestBody.offer_public_id.length > 0
+      && requestBody.offer_public_id.length <= 40
+      && Number.isInteger(requestBody.quantity)
+      && requestBody.quantity > 0
+      && typeof requestBody.idempotency_key === 'string'
+      && requestBody.idempotency_key.startsWith('trade:')
+      && requestBody.idempotency_key.length <= 64
+    )
+    if (!tradePayloadValid) {
+      return {
+        known: true,
+        status: 422,
+        body: { detail: [{ loc: ['body'], msg: 'invalid synthetic trade payload' }] },
+        tradePayloadValid: false,
+      }
+    }
+    return {
+      ...known({
+        id: 8801,
+        status: 'completed',
+        quantity: 1,
+        fixture_bound: true,
+      }),
+      tradePayloadValid: true,
+    }
   }
   if (pathname === '/api/offers/parse' && method === 'POST') {
     return known({
@@ -418,7 +462,24 @@ export async function createFixtureServer(distDir, controller, serverState) {
     const pathname = url.pathname
     if (pathname.startsWith('/api/')) {
       serverState.apiRequests += 1
-      const fixture = apiFixture(pathname, method, controller)
+      let requestBody = null
+      if (MUTATING_METHODS.has(method)) {
+        const chunks = []
+        for await (const chunk of request) chunks.push(Buffer.from(chunk))
+        const rawBody = Buffer.concat(chunks).toString('utf8')
+        if (rawBody) {
+          try {
+            requestBody = JSON.parse(rawBody)
+          } catch {
+            requestBody = null
+          }
+        }
+      }
+      const fixture = apiFixture(pathname, method, controller, requestBody)
+      if ('tradePayloadValid' in fixture) {
+        serverState.tradeRequests += 1
+        if (fixture.tradePayloadValid !== true) serverState.invalidTradePayloads += 1
+      }
       if (!fixture.known && !fixture.mutating) {
         if (!Array.isArray(serverState.unknownPaths)) serverState.unknownPaths = []
         serverState.unknownPaths.push(`${method} ${pathname}`)
@@ -749,32 +810,41 @@ export async function collectMarketProbe(page) {
         ratio: contrastRatio(outline, adjacent),
       }
     }
-    const deadlinePerimeter = document.querySelector('[data-test="offer-deadline-perimeter"]')
+    const deadlineMeter = document.querySelector('[data-test="offer-deadline-meter"]')
     const deadlineLabel = document.querySelector('[data-test="offer-deadline-label"]')
-    const deadlineCard = deadlinePerimeter?.closest('[data-test="offer-card"]')
+    const deadlineCard = deadlineMeter?.closest('[data-test="offer-card"]')
     const timerPct = deadlineCard instanceof HTMLElement
       ? Number(getComputedStyle(deadlineCard).getPropertyValue('--t-pct').trim() || 'NaN')
       : null
-    const deadlineRect = deadlinePerimeter instanceof SVGElement
-      ? deadlinePerimeter.getBoundingClientRect()
+    const deadlineRect = deadlineMeter instanceof HTMLElement
+      ? deadlineMeter.getBoundingClientRect()
       : null
     const deadlineCardRect = deadlineCard instanceof HTMLElement
       ? deadlineCard.getBoundingClientRect()
       : null
-    // The absolutely positioned SVG sits inside the card's 1px border box.
-    // CSS page zoom scales that physical inset, so scale only this tolerance.
     const documentZoom = Number(getComputedStyle(document.documentElement).zoom) || 1
-    const perimeterTolerance = 2.5 * Math.max(1, documentZoom)
-    const perimeterMatchesCard = Boolean(
+    const meterTolerance = 2.5 * Math.max(1, documentZoom)
+    const meterContainedInCard = Boolean(
       deadlineRect
       && deadlineCardRect
-      && Math.abs(deadlineRect.left - deadlineCardRect.left) <= perimeterTolerance
-      && Math.abs(deadlineRect.top - deadlineCardRect.top) <= perimeterTolerance
-      && Math.abs(deadlineRect.width - deadlineCardRect.width) <= perimeterTolerance
-      && Math.abs(deadlineRect.height - deadlineCardRect.height) <= perimeterTolerance,
+      && deadlineRect.left >= deadlineCardRect.left - meterTolerance
+      && deadlineRect.right <= deadlineCardRect.right + meterTolerance
+      && deadlineRect.top >= deadlineCardRect.top - meterTolerance
+      && deadlineRect.bottom <= deadlineCardRect.bottom + meterTolerance
+      && deadlineRect.width >= deadlineCardRect.width * 0.8,
     )
-    const perimeterValue = document.querySelector('.offer-deadline-perimeter__value')
-    const lastAction = [...document.querySelectorAll('[data-test="trade-action-button"], .cancel-own-offer-btn, [data-test="offer-decision-cancel"]')]
+    const meterValue = document.querySelector('.offer-deadline-meter__value')
+    const meterTransform = meterValue instanceof HTMLElement
+      ? getComputedStyle(meterValue).transform
+      : ''
+    const meterScale = (() => {
+      const match = meterTransform.match(/^matrix\(([-+0-9.eE]+)/u)
+      return match ? Number.parseFloat(match[1]) : null
+    })()
+    const meterScaleMatchesPercent = Number.isFinite(meterScale)
+      && Number.isFinite(timerPct)
+      && Math.abs(meterScale - (timerPct / 100)) <= 0.02
+    const lastAction = [...document.querySelectorAll('.offer-card-wrap:not(.is-history) [data-test="trade-action-button"], .offer-card-wrap:not(.is-history) .cancel-own-offer-btn, [data-test="offer-decision-cancel"]')]
       .filter(visible)
       .at(-1)
     let lastActionHit = null
@@ -842,19 +912,23 @@ export async function collectMarketProbe(page) {
       finalTailBadgeVisible: Boolean(document.querySelector('[data-test="offer-final-tail-badge"]')),
       overtimeTradeBadgeVisible: Boolean(document.querySelector('[data-test="offer-overtime-trade-badge"]')),
       deadline: {
-        present: deadlinePerimeter instanceof SVGElement,
-        phase: deadlinePerimeter instanceof SVGElement ? deadlinePerimeter.getAttribute('data-phase') : null,
-        critical: deadlinePerimeter instanceof SVGElement ? deadlinePerimeter.getAttribute('data-critical') : null,
+        present: deadlineMeter instanceof HTMLElement,
+        phase: deadlineMeter instanceof HTMLElement ? deadlineMeter.getAttribute('data-phase') : null,
+        critical: deadlineMeter instanceof HTMLElement ? deadlineMeter.getAttribute('data-critical') : null,
         label: deadlineLabel?.textContent?.trim() || '',
         pct: Number.isFinite(timerPct) ? Number(timerPct.toFixed(2)) : null,
-        perimeterMatchesCard,
-        strokeDasharray: perimeterValue instanceof SVGElement
-          ? getComputedStyle(perimeterValue).strokeDasharray
+        meterContainedInCard,
+        valueTransform: meterTransform,
+        valueScale: Number.isFinite(meterScale) ? Number(meterScale.toFixed(4)) : null,
+        scaleMatchesPercent: meterScaleMatchesPercent,
+        color: deadlineCard instanceof HTMLElement
+          ? getComputedStyle(deadlineCard).getPropertyValue('--t-color').trim()
           : '',
+        tradeRailCount: document.querySelectorAll('.offer-trade-rail').length,
       },
       focusContrast,
       lastActionHit,
-      animationNames: [...document.querySelectorAll('.offer-overtime-sticker__icon, .offer-deadline-perimeter__value')].map((element) =>
+      animationNames: [...document.querySelectorAll('.offer-overtime-sticker__icon')].map((element) =>
         getComputedStyle(element).animationName,
       ),
     }

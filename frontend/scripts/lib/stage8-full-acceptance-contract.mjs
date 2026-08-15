@@ -325,7 +325,7 @@ export function collectKeyAssertions(scenario) {
     scenario.route === 'market' &&
     scenario.expectedKind === 'render-route' &&
     !['loading', 'empty', 'error', 'offline', 'stale'].includes(scenario.state) &&
-    probe.marketLifecycle?.perimeterPresent
+    probe.marketLifecycle?.deadlineMeterPresent
   ) {
     assertions.push('market-lifecycle-contract-passed')
   }
@@ -378,7 +378,13 @@ export function classifyMarketLifecycleScenario(scenario) {
   if (state === 'empty' || state === 'stale') return 'nonLifecycleOrNotApplicable'
   if (profileId === 'customer' || profileId === 'accountant') return 'historyHiddenByProfile'
   const marker = scenario.probe?.marketLifecycle || scenario.lifecycleMarker || {}
-  if (marker.perimeterPresent && marker.expiredDistinct && marker.tradedDistinct) {
+  if (
+    marker.deadlineMeterPresent
+    && marker.expiredDistinct
+    && marker.tradedDistinct
+    && marker.partialTradedDistinct
+    && marker.fullTradedDistinct
+  ) {
     return 'fullLifecycleVisible'
   }
   return 'nonLifecycleOrNotApplicable'
@@ -510,9 +516,15 @@ export function assertMarketLifecycle(probe, options = {}) {
   if (routeName !== 'market' || expectedKind !== 'render-route') return failures
   if (['loading', 'empty', 'error', 'offline', 'stale'].includes(state)) return failures
   const market = probe?.marketLifecycle || {}
-  if (!market.perimeterPresent) failures.push('market full-card SVG perimeter missing')
-  if ((market.legacyDeadlineBarCount || 0) > 0) {
-    failures.push('market legacy bottom deadline bar returned')
+  if (!market.deadlineMeterPresent) failures.push('market linear deadline meter missing')
+  if (market.deadlineMeterRole !== 'progressbar') {
+    failures.push('market deadline meter lacks progressbar semantics')
+  }
+  if ((market.legacyDeadlineVisualCount || 0) > 0) {
+    failures.push('market legacy deadline visual returned')
+  }
+  if ((market.tradeRailCount || 0) > 0) {
+    failures.push('market overlapping vertical trade rail returned')
   }
   if ((market.overtimeStickerCount || 0) !== 1) {
     failures.push(`market hourglass count ${market.overtimeStickerCount || 0} != 1`)
@@ -536,6 +548,9 @@ export function assertMarketLifecycle(probe, options = {}) {
     }
     if (!market.tradedReadOnly || !market.tradedDistinct) {
       failures.push('market traded is not read-only and distinct')
+    }
+    if (!market.partialTradedDistinct || !market.fullTradedDistinct) {
+      failures.push('market partial and full trade histories are not visually distinct')
     }
   }
   if (market.sideActionInverted) {

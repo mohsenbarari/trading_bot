@@ -382,11 +382,20 @@ function marketLifecycleOffers() {
       lifecycle_phase: 'expired',
       accepts_new_public_interaction: false,
     }),
-    traded: fixtureOffer(3, {
+    partialTraded: fixtureOffer(3, {
       history_state: 'traded',
       status: 'completed',
       is_read_only: true,
       traded_quantity: 4,
+      is_partially_traded: true,
+      accepts_new_public_interaction: false,
+    }),
+    fullTraded: fixtureOffer(4, {
+      history_state: 'traded',
+      status: 'completed',
+      is_read_only: true,
+      traded_quantity: 10,
+      remaining_quantity: 0,
       accepts_new_public_interaction: false,
     }),
   }
@@ -415,7 +424,7 @@ function marketPageForMode(mode) {
 function marketHistoryForMode(mode) {
   if (mode === 'empty' || mode === 'error' || mode === 'offline' || mode === 'loading') return []
   const lifecycle = marketLifecycleOffers()
-  return [lifecycle.expired, lifecycle.traded]
+  return [lifecycle.expired, lifecycle.partialTraded, lifecycle.fullTraded]
 }
 
 function fixtureConversation(index = 0) {
@@ -1506,9 +1515,12 @@ export async function collectUiProbe(page) {
     const overtimePct = overtimeCard
       ? Number.parseFloat(getComputedStyle(overtimeCard).getPropertyValue('--t-pct') || '0')
       : 0
-    const overtimePhase = overtimeCard?.querySelector('[data-test="offer-deadline-perimeter"]')?.getAttribute('data-phase')
+    const overtimePhase = overtimeCard?.querySelector('[data-test="offer-deadline-meter"]')?.getAttribute('data-phase')
     const expiredCard = document.querySelector('.offer-card-wrap.is-expired')
     const tradedCard = document.querySelector('.offer-card-wrap.is-traded')
+    const partialTradedCard = document.querySelector('.offer-card-wrap.is-partially-traded')
+    const fullTradedCard = document.querySelector('.offer-card-wrap.is-fully-traded')
+    const deadlineMeter = document.querySelector('[data-test="offer-deadline-meter"]')
     const buyCard = [...document.querySelectorAll('.offer-card-inner.buy')].find(visible)
     const sellCard = [...document.querySelectorAll('.offer-card-inner.sell')].find(visible)
     const ariaOf = (card) =>
@@ -1525,8 +1537,12 @@ export async function collectUiProbe(page) {
       .filter(visible)
       .map((element) => (element.textContent || '').trim())
     const marketLifecycle = {
-      perimeterPresent: Boolean(document.querySelector('[data-test="offer-deadline-perimeter"]')),
-      legacyDeadlineBarCount: document.querySelectorAll('.offer-deadline-bar, .offer-deadline-fill').length,
+      deadlineMeterPresent: Boolean(deadlineMeter),
+      deadlineMeterRole: deadlineMeter?.getAttribute('role') || '',
+      legacyDeadlineVisualCount: document.querySelectorAll(
+        '.offer-deadline-perimeter, .offer-deadline-bar, .offer-deadline-fill',
+      ).length,
+      tradeRailCount: document.querySelectorAll('.offer-trade-rail').length,
       overtimeStickerCount: overtimeStickers.length,
       overtimeStickerName: overtimeStickers[0]?.getAttribute('aria-label') || '',
       overtimeStickerAnimated: overtimeIcon
@@ -1536,9 +1552,19 @@ export async function collectUiProbe(page) {
       overtimeProgressBound:
         overtimePhase === 'overtime' && Number.isFinite(overtimePct) && overtimePct > 0 && overtimePct < 100,
       expiredReadOnly: Boolean(expiredCard && !expiredCard.querySelector('.offer-footer')),
-      expiredDistinct: Boolean(expiredCard?.classList.contains('is-history') && expiredCard.classList.contains('is-expired')),
+      expiredDistinct: Boolean(
+        expiredCard?.classList.contains('is-history')
+        && expiredCard.classList.contains('is-expired')
+        && expiredCard.getAttribute('data-lifecycle-state') === 'expired',
+      ),
       tradedReadOnly: Boolean(tradedCard && !tradedCard.querySelector('.offer-footer')),
       tradedDistinct: Boolean(tradedCard?.classList.contains('is-history') && tradedCard.classList.contains('is-traded')),
+      partialTradedDistinct: Boolean(
+        partialTradedCard?.getAttribute('data-lifecycle-state') === 'partially-traded',
+      ),
+      fullTradedDistinct: Boolean(
+        fullTradedCard?.getAttribute('data-lifecycle-state') === 'fully-traded',
+      ),
       sideActionInverted,
       displayCreatedAtIso: offerTimes.some((text) => /\d{4}-\d{2}-\d{2}T/u.test(text)),
       readableCreatedAtCount: offerTimes.filter((text) =>

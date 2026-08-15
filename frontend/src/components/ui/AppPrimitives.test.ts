@@ -125,19 +125,26 @@ describe('ui primitives', () => {
       props: {
         hasTimer: true,
         timerCritical: true,
-        traded: true,
-        timerStyle: { '--t-pct': '42' },
+        timerStyle: { '--t-pct': '42', '--t-ratio': '0.42' },
       },
       slots: { default: '<div class="offer-card-inner">لفظ بازار</div>' },
     })
     expect(offerCard.attributes('data-test')).toBe('offer-card')
     expect(offerCard.attributes('data-decision-focus')).toBe('false')
-    expect(offerCard.classes()).toEqual(expect.arrayContaining(['offer-card-wrap', 'has-timer', 'timer-critical', 'is-traded']))
+    expect(offerCard.classes()).toEqual(expect.arrayContaining(['offer-card-wrap', 'has-timer', 'timer-critical']))
+    expect(offerCard.classes()).not.toContain('is-traded')
     expect(offerCard.classes()).not.toContain('is-decision-focus')
     expect(offerCard.attributes('style')).toContain('--t-pct: 42')
-    expect(offerCard.get('[data-test="offer-deadline-perimeter"]').attributes('data-phase')).toBe('critical')
-    expect(offerCard.get('.offer-deadline-perimeter__value').attributes('pathLength')).toBe('100')
+    expect(offerCard.attributes('data-lifecycle-state')).toBe('critical')
+    expect(offerCard.find('[data-test="offer-deadline-perimeter"]').exists()).toBe(false)
     expect(offerCard.text()).toContain('لفظ بازار')
+
+    const completedOfferCard = mount(AppOfferCard, {
+      props: { history: true, traded: true, partiallyTraded: false },
+      slots: { default: '<div>معامله کامل</div>' },
+    })
+    expect(completedOfferCard.classes()).toEqual(expect.arrayContaining(['is-traded', 'is-fully-traded']))
+    expect(completedOfferCard.attributes('data-lifecycle-state')).toBe('fully-traded')
 
     const focusedOfferCard = mount(AppOfferCard, {
       props: { decisionFocus: true },

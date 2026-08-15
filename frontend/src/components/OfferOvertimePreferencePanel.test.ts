@@ -3,7 +3,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import OfferOvertimePreferencePanel from './OfferOvertimePreferencePanel.vue'
 import {
   M5_SAVE_SUCCESS_ZERO,
-  M6_REACHABILITY_WARNING,
   M9_HELPER,
   M9_LABEL,
 } from '../constants/offerOvertimeCopy'
@@ -76,11 +75,13 @@ describe('OfferOvertimePreferencePanel', () => {
     wrapper.unmount()
   })
 
-  it('surfaces reachability warning on nonzero save', async () => {
+  it('does not surface the legacy cross-channel reachability warning on nonzero save', async () => {
+    const legacyWarning =
+      'تأیید هر لفظ فقط در همان محل ثبت لفظ نمایش داده می‌شود: لفظ وب در وب‌اپ و لفظ بات در بات.'
     apiMocks.saveOfferOvertimePreference.mockResolvedValue({
       offer_overtime_minutes: 5,
       detail: '✅ وقت اضافه لفظ‌های جدید شما روی 5 دقیقه تنظیم شد.',
-      warning: M6_REACHABILITY_WARNING,
+      warning: legacyWarning,
     })
 
     const wrapper = mount(OfferOvertimePreferencePanel)
@@ -89,7 +90,8 @@ describe('OfferOvertimePreferencePanel', () => {
     await saveButton!.trigger('click')
     await flushPromises()
 
-    expect(wrapper.text()).toContain(M6_REACHABILITY_WARNING)
+    expect(wrapper.text()).not.toContain(legacyWarning)
+    expect(wrapper.text()).toContain('✅ وقت اضافه لفظ‌های جدید شما روی 5 دقیقه تنظیم شد.')
     wrapper.unmount()
   })
 })

@@ -2,7 +2,6 @@
 import { computed, ref, watch } from 'vue'
 import { AppButton, AppNumberStepper } from './ui'
 import {
-  M6_REACHABILITY_WARNING,
   M8_INVALID_VALUE,
   M9_HELPER,
   M9_LABEL,
@@ -27,7 +26,6 @@ const props = withDefaults(defineProps<{
 const draftMinutes = ref(0)
 const saving = ref(false)
 const detail = ref<string | null>(null)
-const warning = ref<string | null>(null)
 const error = ref<string | null>(null)
 
 const eligible = computed(() => canEditOfferOvertimePreference(currentUserSummary.value))
@@ -59,13 +57,11 @@ async function save() {
   if (minutes == null) {
     error.value = M8_INVALID_VALUE
     detail.value = null
-    warning.value = null
     return
   }
   saving.value = true
   error.value = null
   detail.value = null
-  warning.value = null
   try {
     const result = await saveOfferOvertimePreference(minutes)
     cacheCurrentUserSummary({
@@ -74,7 +70,6 @@ async function save() {
     })
     draftMinutes.value = result.offer_overtime_minutes
     detail.value = result.detail || formatSaveSuccessDetail(result.offer_overtime_minutes)
-    warning.value = result.warning || (result.offer_overtime_minutes > 0 ? M6_REACHABILITY_WARNING : null)
   } catch (err) {
     const message = err instanceof Error ? err.message.trim() : ''
     error.value = message || M8_INVALID_VALUE
@@ -118,7 +113,6 @@ async function save() {
     </div>
 
     <p v-if="detail" class="overtime-pref__detail" role="status">{{ detail }}</p>
-    <p v-if="warning" class="overtime-pref__warning" role="status">{{ warning }}</p>
     <p v-if="error" class="overtime-pref__error" role="alert">{{ error }}</p>
   </section>
 </template>
@@ -165,7 +159,6 @@ async function save() {
 }
 
 .overtime-pref__detail,
-.overtime-pref__warning,
 .overtime-pref__error {
   margin: 0;
   font-size: 0.8rem;
@@ -174,10 +167,6 @@ async function save() {
 
 .overtime-pref__detail {
   color: #047857;
-}
-
-.overtime-pref__warning {
-  color: #b45309;
 }
 
 .overtime-pref__error {

@@ -195,7 +195,7 @@ describe('stage8 full-acceptance fixture contract', () => {
     const page = apiFixture('/api/offers/page', 'GET', profile, 'normal').body
     const history = apiFixture('/api/offers/market-history', 'GET', profile, 'normal').body
     const offers = [...page.items, ...history]
-    expect(offers).toHaveLength(4)
+    expect(offers).toHaveLength(5)
     for (const offer of offers) {
       expect(offer.created_at).toBe(FIXED_JALALI_TIME)
       expect(offer.created_at).not.toBe(FIXED_TIME)

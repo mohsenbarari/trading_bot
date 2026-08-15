@@ -26,6 +26,7 @@ const REPO = path.resolve(FRONTEND, '..')
 const DIST = process.env.MARKET_AC_DIST || '/tmp/market-a-plus-c-dist'
 const OUTPUT_ROOT = process.env.MARKET_AC_OUT || '/tmp/market-a-plus-c-runs'
 const PHASE = process.env.MARKET_AC_PHASE || 'baseline'
+const CHROMIUM_EXECUTABLE = process.env.MARKET_AC_CHROMIUM || undefined
 const RUN_ID = `market-ac-${PHASE}-${new Date().toISOString().replace(/[-:.]/gu, '')}`
 const OUTPUT_DIR = path.join(OUTPUT_ROOT, RUN_ID)
 const SCREEN_DIR = path.join(OUTPUT_DIR, 'screenshots')
@@ -77,6 +78,8 @@ async function runScenario({
     unknown: serverState.unknownApiRequests,
     mutating: serverState.mutatingApiRequests,
     known: serverState.knownApiRequests,
+    tradeRequests: serverState.tradeRequests,
+    invalidTradePayloads: serverState.invalidTradePayloads,
   }
   const useReducedMotion = reducedMotion || interaction === 'reduced-motion'
   const { context, page } = await newPage(browser, baseUrl, viewport, diagnostics, ownerUser(), {
@@ -157,6 +160,8 @@ async function runScenario({
       await page.evaluate(() => {
         const scroller = document.querySelector('.market-content')
         if (scroller instanceof HTMLElement) scroller.scrollTop = scroller.scrollHeight
+        const action = [...document.querySelectorAll('.offer-card-wrap:not(.is-history) [data-test="trade-action-button"], .offer-card-wrap:not(.is-history) .cancel-own-offer-btn')].at(-1)
+        if (action instanceof HTMLElement) action.scrollIntoView({ block: 'nearest', inline: 'nearest' })
       })
       await page.waitForTimeout(80)
     }
@@ -195,6 +200,14 @@ async function runScenario({
     }
     if ((interaction === 'escape-pending' || interaction === 'cancel-pending') && probe.pendingCount > 0) {
       failures.push('pending-did-not-clear')
+    }
+    if (interaction === 'second-tap') {
+      if (serverState.tradeRequests - snapshotBefore.tradeRequests !== 1) {
+        failures.push(`trade-request-count:${serverState.tradeRequests - snapshotBefore.tradeRequests}`)
+      }
+      if (serverState.invalidTradePayloads > snapshotBefore.invalidTradePayloads) {
+        failures.push('invalid-trade-request-payload')
+      }
     }
     if (interaction === 'preview' && !probe.previewVisible) {
       failures.push('preview-missing')
@@ -259,12 +272,18 @@ async function runScenario({
       if (viewport.id === '1024x768' && probe.docOverflow) {
         failures.push('desktop-1024-overflow')
       }
-      if (['overtime-buy', 'overtime-sell', 'critical-overtime'].includes(state)) {
+      if (['overtime-start', 'overtime-buy', 'overtime-sell', 'critical-overtime'].includes(state)) {
         if (!probe.overtimeStickerVisible) failures.push('overtime-sticker-missing')
         if (probe.deadline?.phase !== 'overtime') failures.push(`overtime-phase-mismatch:${probe.deadline?.phase}`)
         if (!String(probe.deadline?.label || '').includes('باقی‌مانده')) failures.push('overtime-countdown-label-missing')
-        if (state !== 'critical-overtime' && !(probe.deadline?.pct > 50)) {
-          failures.push(`overtime-progress-not-reset:${probe.deadline?.pct}`)
+        if (state === 'overtime-start' && !(probe.deadline?.pct >= 0 && probe.deadline?.pct <= 2)) {
+          failures.push(`overtime-progress-did-not-start-at-zero:${probe.deadline?.pct}`)
+        }
+        if (['overtime-buy', 'overtime-sell'].includes(state) && !(probe.deadline?.pct > 0 && probe.deadline?.pct < 50)) {
+          failures.push(`overtime-progress-not-elapsed:${probe.deadline?.pct}`)
+        }
+        if (state === 'critical-overtime' && !(probe.deadline?.pct > 85)) {
+          failures.push(`critical-overtime-progress-not-near-complete:${probe.deadline?.pct}`)
         }
         if (state === 'critical-overtime' && probe.deadline?.critical !== 'true') {
           failures.push('critical-overtime-not-marked')
@@ -279,12 +298,19 @@ async function runScenario({
         }
       }
       if (
-        ['normal', 'dense', 'normal-buy', 'normal-sell', 'critical-normal', 'overtime-buy', 'overtime-sell', 'critical-overtime', 'own-offer'].includes(state)
+        ['normal', 'dense', 'normal-buy', 'normal-sell', 'critical-normal', 'overtime-start', 'overtime-buy', 'overtime-sell', 'critical-overtime', 'own-offer'].includes(state)
         && probe.deadline?.present
       ) {
-        if (!probe.deadline.perimeterMatchesCard) failures.push('deadline-perimeter-does-not-follow-card')
-        if (!probe.deadline.strokeDasharray || probe.deadline.strokeDasharray === 'none') {
-          failures.push('deadline-perimeter-progress-missing')
+        if (!probe.deadline.meterContainedInCard) failures.push('deadline-meter-not-contained-in-card')
+        if (!probe.deadline.valueTransform || probe.deadline.valueTransform === 'none') {
+          failures.push('deadline-meter-progress-missing')
+        }
+        if (!probe.deadline.scaleMatchesPercent) {
+          failures.push(`deadline-meter-not-linear:${probe.deadline.valueScale}/${probe.deadline.pct}`)
+        }
+        if (!probe.deadline.color) failures.push('deadline-meter-color-missing')
+        if (probe.deadline.tradeRailCount > 0) {
+          failures.push('deadline-meter-overlaps-vertical-trade-rail')
         }
       }
       if (state === 'final-tail') {
@@ -376,10 +402,15 @@ async function main() {
     mutatingApiRequests: 0,
     injectedErrorResponses: 0,
     unknownPaths: [],
+    tradeRequests: 0,
+    invalidTradePayloads: 0,
   }
   const server = await createFixtureServer(DIST, controller, serverState)
   const baseUrl = await listen(server)
-  const browser = await chromium.launch({ headless: true })
+  const browser = await chromium.launch({
+    headless: true,
+    ...(CHROMIUM_EXECUTABLE ? { executablePath: CHROMIUM_EXECUTABLE } : {}),
+  })
   const scenarios = []
   const screenshots = []
   const byId = (id) => VIEWPORTS.find((item) => item.id === id)
@@ -409,6 +440,7 @@ async function main() {
       'normal-buy',
       'normal-sell',
       'critical-normal',
+      'overtime-start',
       'overtime-buy',
       'overtime-sell',
       'critical-overtime',
@@ -444,6 +476,7 @@ async function main() {
       { viewport: focus1440, interaction: 'first-tap', screenshotName: '09-desktop-decision' },
       { viewport: focus390, state: 'normal-sell', interaction: 'first-tap' },
       { viewport: focus390, interaction: 'second-tap' },
+      { viewport: focus390, state: 'overtime-buy', interaction: 'second-tap' },
       { viewport: focus390, interaction: 'escape-pending' },
       { viewport: focus390, interaction: 'cancel-pending' },
       { viewport: focus390, interaction: 'recent-offers' },
@@ -473,6 +506,7 @@ async function main() {
       { name: '02-desktop-normal', viewport: focus1440, state: 'normal' },
       { name: '03-mobile-critical-main', viewport: focus390, state: 'critical-normal' },
       { name: '04-mobile-overtime', viewport: focus390, state: 'overtime-sell' },
+      { name: '04a-mobile-overtime-start', viewport: focus390, state: 'overtime-start' },
       { name: '05-desktop-overtime', viewport: focus1440, state: 'overtime-sell' },
       { name: '06-mobile-expired-traded', viewport: focus390, state: 'terminal-mix' },
       { name: '07-desktop-expired-traded', viewport: focus1440, state: 'terminal-mix' },
@@ -537,6 +571,8 @@ async function main() {
       knownApiRequests: serverState.knownApiRequests,
       unknownApiRequests: serverState.unknownApiRequests,
       mutatingApiRequests: serverState.mutatingApiRequests,
+      tradeRequests: serverState.tradeRequests,
+      invalidTradePayloads: serverState.invalidTradePayloads,
       unknownPaths: serverState.unknownPaths.slice(0, 20),
       screenshots: screenshots.length,
     },

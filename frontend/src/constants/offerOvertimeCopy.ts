@@ -18,10 +18,6 @@ export const M4_SAVE_SUCCESS_NONZERO = '✅ وقت اضافه لفظ‌های ج
 /** M5 */
 export const M5_SAVE_SUCCESS_ZERO = '✅ وقت اضافه برای لفظ‌های جدید شما غیرفعال شد.'
 
-/** M6 */
-export const M6_REACHABILITY_WARNING =
-  'تأیید هر لفظ فقط در همان محل ثبت لفظ نمایش داده می‌شود: لفظ وب در وب‌اپ و لفظ بات در بات.'
-
 /** M8 */
 export const M8_INVALID_VALUE = 'لطفاً فقط یک عدد بین ۰ تا ۱۰ بفرستید.'
 

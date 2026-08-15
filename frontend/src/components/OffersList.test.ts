@@ -238,8 +238,9 @@ describe('OffersList.vue', () => {
       canLoadExpired: true,
     })
 
-    expect(wrapper.find('.expired-ribbon').text()).toBe('منقضی')
+    expect(wrapper.find('.expired-ribbon').text()).toBe('منقضی · بدون معامله')
     expect(wrapper.find('.offer-card-wrap').classes()).toContain('is-expired')
+    expect(wrapper.find('.offer-card-wrap').attributes('data-lifecycle-state')).toBe('expired')
     expect(wrapper.find('.trade-btn').exists()).toBe(false)
     expect(wrapper.find('.cancel-own-offer-btn').exists()).toBe(false)
 
@@ -299,13 +300,17 @@ describe('OffersList.vue', () => {
     expect(wrapper.find('.trade-btn').exists()).toBe(false)
     expect(wrapper.find('.cancel-own-offer-btn').exists()).toBe(false)
     expect(wrapper.findAll('[data-test="history-stamp"]').map((stamp) => stamp.text())).toEqual([
-      'معامله‌شده',
-      'معامله‌شده 20 عدد',
+      'کامل معامله شد · 12 از 12',
+      'بخشی معامله شد · 20 از 40',
     ])
     expect(wrapper.findAll('.traded-ribbon')).toHaveLength(2)
     expect(wrapper.find('.expired-ribbon').exists()).toBe(false)
     expect(wrapper.findAll('.offer-card-wrap')[0]!.classes()).toContain('is-traded')
+    expect(wrapper.findAll('.offer-card-wrap')[0]!.classes()).toContain('is-fully-traded')
+    expect(wrapper.findAll('.offer-card-wrap')[0]!.attributes('data-lifecycle-state')).toBe('fully-traded')
     expect(wrapper.findAll('.offer-card-wrap')[1]!.classes()).toContain('is-traded')
+    expect(wrapper.findAll('.offer-card-wrap')[1]!.classes()).toContain('is-partially-traded')
+    expect(wrapper.findAll('.offer-card-wrap')[1]!.attributes('data-lifecycle-state')).toBe('partially-traded')
     expect(wrapper.findAll('.offer-card-wrap')[1]!.classes()).not.toContain('is-expired')
     expect(wrapper.findAll('.quantity-badge').map((badge) => badge.text())).toEqual(['12 عدد', '40 عدد'])
   })
@@ -370,6 +375,48 @@ describe('OffersList.vue', () => {
 
     wrapper.unmount()
     vi.useRealTimers()
+  })
+
+  it('normalizes the trade payload and includes the offer public identity', async () => {
+    apiFetchMock.mockResolvedValue(new Response(JSON.stringify({ id: 209 }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }))
+    const wrapper = await mountOffersList({
+      offers: [buildTradeOffer({
+        id: '209',
+        offer_public_id: 'ofr_web_overtime_209',
+        quantity: 10,
+        remaining_quantity: 10,
+      })],
+    })
+
+    await confirmTrade(wrapper)
+
+    expect(apiFetchMock).toHaveBeenCalledTimes(1)
+    expect(JSON.parse(String(apiFetchMock.mock.calls[0]![1].body))).toEqual({
+      offer_id: 209,
+      offer_public_id: 'ofr_web_overtime_209',
+      quantity: 10,
+      idempotency_key: expect.stringMatching(/^trade:/),
+    })
+    wrapper.unmount()
+  })
+
+  it('explains a structured trade payload validation failure instead of showing the generic message', async () => {
+    apiFetchMock.mockResolvedValue(new Response(JSON.stringify({
+      detail: [{ loc: ['body', 'quantity'], msg: 'Input should be a valid integer', type: 'int_type' }],
+    }), {
+      status: 422,
+      headers: { 'Content-Type': 'application/json' },
+    }))
+    const wrapper = await mountOffersList({ offers: [buildTradeOffer({ id: 210 })] })
+
+    await confirmTrade(wrapper)
+
+    expect(wrapper.text()).toContain('مقدار معامله معتبر نیست')
+    expect(wrapper.text()).not.toContain('اطلاعات وارد شده معتبر نیست')
+    wrapper.unmount()
   })
 
   it('locks trade execution during an in-flight request and does not duplicate rapid taps', async () => {
@@ -1272,7 +1319,7 @@ describe('OffersList.vue', () => {
     expect(paginatedWrapper.find('.active-load-more-btn').exists()).toBe(false)
   })
 
-  it('restarts the overtime perimeter from final_deadline_ts with an accessible hourglass sticker', async () => {
+  it('restarts the overtime meter from final_deadline_ts with an accessible hourglass sticker', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-08-05T12:05:00Z'))
     const nowSec = Date.now() / 1000
@@ -1305,7 +1352,12 @@ describe('OffersList.vue', () => {
     expect(sticker.attributes('role')).toBe('img')
     expect(sticker.attributes('aria-label')).toBe('وقت اضافه')
     expect(sticker.find('.offer-overtime-sticker__icon').exists()).toBe(true)
-    expect(wrapper.get('[data-test="offer-deadline-perimeter"]').attributes('data-phase')).toBe('overtime')
+    const meter = wrapper.get('[data-test="offer-deadline-meter"]')
+    expect(meter.attributes('data-phase')).toBe('overtime')
+    expect(meter.attributes('role')).toBe('progressbar')
+    expect(meter.attributes('aria-valuenow')).toBe('20')
+    expect(meter.attributes('aria-label')).toContain('وقت اضافه سپری‌شده · 20 درصد')
+    expect(wrapper.find('.offer-trade-rail').exists()).toBe(false)
     expect(wrapper.get('[data-test="offer-deadline-label"]').text()).toMatch(/باقی‌مانده/)
     expect(wrapper.find('.offer-meta-end').exists()).toBe(true)
     expect(wrapper.find('.trade-btn').exists()).toBe(true)
@@ -1340,7 +1392,7 @@ describe('OffersList.vue', () => {
     expect(card.classes()).not.toContain('has-timer')
     expect(wrapper.get('[data-test="offer-final-tail-badge"]').text()).toContain('مهلت پایان یافته')
     expect(wrapper.text()).toContain('در حال نهایی‌سازی')
-    expect(wrapper.find('[data-test="offer-deadline-perimeter"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="offer-deadline-meter"]').exists()).toBe(false)
     expect(wrapper.find('.trade-btn').exists()).toBe(false)
     expect(wrapper.find('.cancel-own-offer-btn').exists()).toBe(false)
 
@@ -1375,8 +1427,8 @@ describe('OffersList.vue', () => {
     expect(cards).toHaveLength(2)
     expect(cards[0]!.find('[data-test="offer-overtime-trade-badge"]').text()).toContain('معامله در وقت اضافه')
     expect(cards[1]!.find('[data-test="offer-overtime-trade-badge"]').exists()).toBe(false)
-    expect(cards[0]!.find('[data-test="offer-deadline-perimeter"]').exists()).toBe(false)
-    expect(cards[1]!.find('[data-test="offer-deadline-perimeter"]').exists()).toBe(false)
+    expect(cards[0]!.find('[data-test="offer-deadline-meter"]').exists()).toBe(false)
+    expect(cards[1]!.find('[data-test="offer-deadline-meter"]').exists()).toBe(false)
 
     wrapper.unmount()
   })
@@ -1463,7 +1515,7 @@ describe('OffersList.vue', () => {
     wrapper.unmount()
   })
 
-  it('derives the main deadline perimeter from normal_deadline_ts and marks sub-15 percent as critical', async () => {
+  it('derives a linear main deadline meter from normal_deadline_ts and marks sub-15 percent as critical', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-08-14T12:00:00Z'))
     const nowSec = Date.now() / 1000
@@ -1482,9 +1534,14 @@ describe('OffersList.vue', () => {
       ],
     })
 
-    expect(wrapper.get('[data-test="offer-deadline-perimeter"]').attributes('data-phase')).toBe('normal')
-    expect(wrapper.get('[data-test="offer-deadline-perimeter"]').attributes('data-critical')).toBe('false')
+    expect(wrapper.get('[data-test="offer-deadline-meter"]').attributes('data-phase')).toBe('normal')
+    expect(wrapper.get('[data-test="offer-deadline-meter"]').attributes('data-critical')).toBe('false')
+    expect(wrapper.get('[data-test="offer-deadline-meter"]').attributes('aria-valuenow')).toBe('50')
     expect(wrapper.get('.offer-card-wrap').attributes('style') || '').toMatch(/--t-pct:\s*50(?:\.0+)?(?:;|\s|$)/)
+    expect(wrapper.get('.offer-card-wrap').attributes('style') || '').toMatch(/--t-ratio:\s*0\.5(?:;|\s|$)/)
+    const halfLifeStyle = wrapper.get('.offer-card-wrap').attributes('style') || ''
+    const halfLifeColor = halfLifeStyle.match(/--t-color:\s*([^;]+)/)?.[1]
+    expect(halfLifeColor).toBeTruthy()
     expect(wrapper.get('[data-test="offer-deadline-label"]').text()).toMatch(/مهلت اصلی/)
 
     await wrapper.setProps({
@@ -1500,16 +1557,19 @@ describe('OffersList.vue', () => {
       ],
     })
 
-    expect(wrapper.get('[data-test="offer-deadline-perimeter"]').attributes('data-phase')).toBe('critical')
-    expect(wrapper.get('[data-test="offer-deadline-perimeter"]').attributes('data-critical')).toBe('true')
+    expect(wrapper.get('[data-test="offer-deadline-meter"]').attributes('data-phase')).toBe('critical')
+    expect(wrapper.get('[data-test="offer-deadline-meter"]').attributes('data-critical')).toBe('true')
     expect(wrapper.get('.offer-card-wrap').classes()).toContain('timer-critical')
+    const criticalStyle = wrapper.get('.offer-card-wrap').attributes('style') || ''
+    expect(criticalStyle).toMatch(/--t-ratio:\s*0\.1(?:;|\s|$)/)
+    expect(criticalStyle.match(/--t-color:\s*([^;]+)/)?.[1]).not.toBe(halfLifeColor)
     expect(wrapper.get('[data-test="offer-deadline-label"]').text()).toMatch(/مهلت اصلی/)
 
     wrapper.unmount()
     vi.useRealTimers()
   })
 
-  it('resets overtime progress from final_deadline_ts instead of the elapsed normal window', async () => {
+  it('jumps the overtime meter to zero at the new final window without a reverse animation', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-08-14T12:00:00Z'))
     const nowSec = Date.now() / 1000
@@ -1537,8 +1597,8 @@ describe('OffersList.vue', () => {
           id: 302,
           lifecycle_phase: 'overtime',
           normal_deadline_ts: nowSec - 60,
-          final_deadline_ts: nowSec + 240,
-          expires_at_ts: nowSec + 240,
+          final_deadline_ts: nowSec + 300,
+          expires_at_ts: nowSec + 300,
           timer_total_seconds: 300,
           accepts_new_public_interaction: true,
         }),
@@ -1546,9 +1606,12 @@ describe('OffersList.vue', () => {
     })
 
     expect(wrapper.get('[data-test="offer-overtime-sticker"]').attributes('aria-label')).toBe('وقت اضافه')
-    expect(wrapper.get('[data-test="offer-deadline-perimeter"]').attributes('data-phase')).toBe('overtime')
+    expect(wrapper.get('[data-test="offer-deadline-meter"]').attributes('data-phase')).toBe('overtime')
+    expect(wrapper.get('[data-test="offer-deadline-meter"]').attributes('aria-valuenow')).toBe('0')
+    expect(wrapper.get('[data-test="offer-deadline-meter"]').attributes('aria-label')).toContain('وقت اضافه سپری‌شده · 0 درصد')
     expect(wrapper.get('[data-test="offer-deadline-label"]').text()).toMatch(/باقی‌مانده/)
-    expect(wrapper.get('.offer-card-wrap').attributes('style') || '').toMatch(/--t-pct:\s*80(?:\.0+)?(?:;|\s|$)/)
+    expect(wrapper.get('.offer-card-wrap').attributes('style') || '').toMatch(/--t-pct:\s*0(?:\.0+)?(?:;|\s|$)/)
+    expect(wrapper.get('.offer-card-wrap').attributes('style') || '').toMatch(/--t-ratio:\s*0(?:\.0+)?(?:;|\s|$)/)
     expect(wrapper.find('.trade-btn').exists()).toBe(true)
 
     wrapper.unmount()
@@ -1582,17 +1645,18 @@ describe('OffersList.vue', () => {
           is_read_only: true,
           overtime_trade_committed: true,
           traded_quantity: 4,
+          quantity: 4,
           commodity_name: 'لفظ معامله وقت اضافه',
         }),
       ],
     })
 
     const cards = wrapper.findAll('[data-test="offer-card"]')
-    expect(cards[0]!.get('[data-test="history-stamp"]').text()).toBe('منقضی')
-    expect(cards[1]!.get('[data-test="history-stamp"]').text()).toBe('معامله‌شده 3 عدد')
-    expect(cards[2]!.get('[data-test="history-stamp"]').text()).toBe('معامله‌شده')
+    expect(cards[0]!.get('[data-test="history-stamp"]').text()).toBe('منقضی · بدون معامله')
+    expect(cards[1]!.get('[data-test="history-stamp"]').text()).toBe('بخشی معامله شد · 3 از 10')
+    expect(cards[2]!.get('[data-test="history-stamp"]').text()).toBe('کامل معامله شد · 4 از 4')
     expect(cards[2]!.get('[data-test="offer-overtime-trade-badge"]').text()).toContain('معامله در وقت اضافه')
-    expect(wrapper.find('[data-test="offer-deadline-perimeter"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="offer-deadline-meter"]').exists()).toBe(false)
     expect(wrapper.find('.trade-btn').exists()).toBe(false)
     expect(wrapper.find('.overtime-marker').exists()).toBe(false)
 
@@ -1630,7 +1694,7 @@ describe('OffersList.vue', () => {
     for (const time of times) {
       expect(time).not.toMatch(/\d{4}-\d{2}-\d{2}T/)
     }
-    expect(wrapper.get('[data-test="offer-deadline-perimeter"]').exists()).toBe(true)
+    expect(wrapper.get('[data-test="offer-deadline-meter"]').exists()).toBe(true)
     expect(wrapper.get('[data-test="offer-overtime-sticker"]').attributes('aria-label')).toBe('وقت اضافه')
     wrapper.unmount()
   })

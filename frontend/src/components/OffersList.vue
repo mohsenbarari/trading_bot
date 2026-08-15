@@ -49,6 +49,7 @@ type TradeIntentStatus = 'in_flight' | 'uncertain';
 interface TradeIntentState {
   version: 1;
   offerId: number;
+  offerPublicId?: string | null;
   quantity: number;
   idempotencyKey: string;
   status: TradeIntentStatus;
@@ -207,18 +208,35 @@ function getTimerPercent(offer: any): number {
   return Math.min(Math.max((remaining / total) * 100, 0), 100)
 }
 
+function getDeadlineMeterPercent(offer: any): number {
+  const remainingPercent = getTimerPercent(offer)
+  return isOvertimePhase(offer) ? 100 - remainingPercent : remainingPercent
+}
+
 function cardTimerStyle(offer: any): Record<string, string> {
   if (isInteractionLocked(offer)) return {}
   if (isFinalTailPhase(offer)) return {}
   const deadline = timerDeadlineTs(offer)
   if (deadline == null) return {}
-  const remainingSec = deadline - now.value
-  if (remainingSec <= 0) return { '--t-pct': '0' }
-  const total = timerTotalSeconds(offer)
-  const pct = Math.min(Math.max((remainingSec / total) * 100, 0), 100)
+  const remainingPct = getTimerPercent(offer)
+  const pct = getDeadlineMeterPercent(offer)
   return {
-    '--t-pct': String(pct)
+    '--t-pct': String(pct),
+    '--t-ratio': String(pct / 100),
+    '--t-color': timerColor(offer, remainingPct),
   }
+}
+
+function timerColor(offer: any, percent: number): string {
+  const pct = Math.min(Math.max(percent, 0), 100)
+  // Normal time moves continuously green → amber → red. Overtime is a
+  // shorter amber → red window so its urgency never reads as a fresh offer.
+  const hue = isOvertimePhase(offer)
+    ? 4 + pct * 0.38
+    : pct >= 50
+      ? 42 + ((pct - 50) / 50) * 100
+      : 4 + (pct / 50) * 38
+  return `hsl(${hue.toFixed(2)} 76% 37%)`
 }
 
 function isCritical(offer: any): boolean {
@@ -245,6 +263,13 @@ function deadlineLabel(offer: any): string {
   const clock = formatDeadlineClock(offer)
   if (isOvertimePhase(offer)) return clock ? `${clock} باقی‌مانده` : 'در حال محاسبه مهلت'
   return clock ? `مهلت اصلی · ${clock}` : 'مهلت اصلی'
+}
+
+function deadlineMeterAriaLabel(offer: any): string {
+  if (!isOvertimePhase(offer)) return deadlineLabel(offer)
+  const progress = Math.round(getDeadlineMeterPercent(offer))
+  const clock = formatDeadlineClock(offer)
+  return `وقت اضافه سپری‌شده · ${progress} درصد${clock ? ` · ${clock} باقی‌مانده` : ''}`
 }
 
 function showOvertimeSticker(offer: any): boolean {
@@ -275,6 +300,17 @@ function isExpiredOffer(offer: any): boolean {
 
 function isTradedHistoryOffer(offer: any): boolean {
   return offer?.history_state === 'traded'
+}
+
+function isPartiallyTradedHistoryOffer(offer: any): boolean {
+  if (!isTradedHistoryOffer(offer)) return false
+  if (offer?.is_partially_traded === true) return true
+  const tradedQuantity = getFiniteNumber(offer?.traded_quantity)
+  const totalQuantity = getFiniteNumber(offer?.quantity)
+  return tradedQuantity !== null
+    && totalQuantity !== null
+    && tradedQuantity > 0
+    && tradedQuantity < totalQuantity
 }
 
 function isReadOnlyOffer(offer: any): boolean {
@@ -311,12 +347,21 @@ function getOfferRemainingQuantity(offer: any): number {
 function getHistoryStampLabel(offer: any): string {
   if (isTradedHistoryOffer(offer)) {
     const tradedQuantity = getFiniteNumber(offer?.traded_quantity)
-    if (offer?.is_partially_traded === true && tradedQuantity !== null && tradedQuantity > 0) {
-      return `معامله‌شده ${tradedQuantity.toLocaleString()} عدد`
+    const totalQuantity = getFiniteNumber(offer?.quantity)
+    if (isPartiallyTradedHistoryOffer(offer)) {
+      if (tradedQuantity !== null && totalQuantity !== null) {
+        return `بخشی معامله شد · ${tradedQuantity.toLocaleString()} از ${totalQuantity.toLocaleString()}`
+      }
+      if (tradedQuantity !== null) return `بخشی معامله شد · ${tradedQuantity.toLocaleString()} عدد`
+      return 'بخشی معامله شد'
     }
-    return 'معامله‌شده'
+    if (totalQuantity !== null) {
+      const completedQuantity = tradedQuantity !== null && tradedQuantity > 0 ? tradedQuantity : totalQuantity
+      return `کامل معامله شد · ${completedQuantity.toLocaleString()} از ${totalQuantity.toLocaleString()}`
+    }
+    return 'کامل معامله شد'
   }
-  if (isExpiredOffer(offer)) return 'منقضی'
+  if (isExpiredOffer(offer)) return 'منقضی · بدون معامله'
   return ''
 }
 
@@ -414,6 +459,11 @@ function isStoredTradeIntent(value: unknown): value is TradeIntentState {
   return intent.version === 1
     && Number.isInteger(intent.offerId)
     && Number(intent.offerId) > 0
+    && (intent.offerPublicId === undefined
+      || intent.offerPublicId === null
+      || (typeof intent.offerPublicId === 'string'
+        && intent.offerPublicId.trim().length > 0
+        && intent.offerPublicId.trim().length <= 40))
     && Number.isInteger(intent.quantity)
     && Number(intent.quantity) > 0
     && typeof intent.idempotencyKey === 'string'
@@ -469,15 +519,23 @@ function restoreTradeIntents() {
   }
 }
 
-function getTradeIntent(offerId: number, quantity: number): TradeIntentState {
+function getTradeIntent(offerId: number, quantity: number, offerPublicId: string | null): TradeIntentState {
   const key = tradeKeyFor(offerId, quantity);
   const existing = tradeIntents.get(key);
-  if (existing) return existing;
+  if (existing) {
+    if (!existing.offerPublicId && offerPublicId) {
+      existing.offerPublicId = offerPublicId;
+      existing.updatedAt = Date.now();
+      persistTradeIntents();
+    }
+    return existing;
+  }
 
   const createdAt = Date.now();
   const next: TradeIntentState = {
     version: 1,
     offerId,
+    offerPublicId,
     quantity,
     idempotencyKey: createMutationIdempotencyKey('trade'),
     status: 'uncertain',
@@ -549,6 +607,20 @@ function isRetryableMutationError(error: unknown): boolean {
 }
 
 async function readMarketMutationErrorMessage(response: Response, payload: any, fallbackMessage: string): Promise<string> {
+  if (response.status === 422 && Array.isArray(payload?.detail)) {
+    const invalidFields = new Set(payload.detail.flatMap((item: any) => (
+      Array.isArray(item?.loc) ? item.loc.map((part: unknown) => String(part)) : []
+    )))
+    if (invalidFields.has('offer_id') || invalidFields.has('offer_public_id')) {
+      return 'شناسه لفظ معتبر نیست. فهرست بازار را تازه‌سازی و دوباره تلاش کنید.'
+    }
+    if (invalidFields.has('quantity')) {
+      return 'مقدار معامله معتبر نیست. یکی از مقدارهای نمایش‌داده‌شده را انتخاب کنید.'
+    }
+    if (invalidFields.has('idempotency_key')) {
+      return 'درخواست معامله کامل نیست. دوباره تلاش کنید.'
+    }
+  }
   const error = await createHttpErrorFromResponse(response, {
     surface: 'market',
     scope: 'action',
@@ -566,14 +638,24 @@ async function readMarketMutationErrorMessage(response: Response, payload: any, 
 }
 
 // --- Trade execution with double-tap confirm ---
-function handleLotClick(offerId: number, amount: number) {
+function handleLotClick(offerId: unknown, amount: unknown) {
   if (tradingOfferId.value !== null) return;
-  const key = `${offerId}:${amount}`;
+  const normalizedOfferId = Number(offerId)
+  const normalizedAmount = Number(amount)
+  if (!Number.isInteger(normalizedOfferId) || normalizedOfferId <= 0) {
+    showTradeError('شناسه لفظ معتبر نیست. فهرست بازار را تازه‌سازی و دوباره تلاش کنید.')
+    return
+  }
+  if (!Number.isInteger(normalizedAmount) || normalizedAmount <= 0) {
+    showTradeError('مقدار معامله معتبر نیست. یکی از مقدارهای نمایش‌داده‌شده را انتخاب کنید.')
+    return
+  }
+  const key = `${normalizedOfferId}:${normalizedAmount}`;
   
   if (pendingConfirm.value === key) {
     // Second tap — execute trade
     clearPendingConfirm();
-    executeTrade(offerId, amount);
+    executeTrade(normalizedOfferId, normalizedAmount);
   } else {
     // First tap — set pending
     pendingConfirm.value = key;
@@ -676,15 +758,32 @@ async function executeTrade(offerId: number, quantity: number) {
     showTradeError('اطلاعات حساب در حال بارگذاری است. لطفاً چند لحظه دیگر تلاش کنید.');
     return;
   }
-  if (hasConflictingTradeIntent(offerId, quantity)) {
+  const normalizedOfferId = Number(offerId)
+  const normalizedQuantity = Number(quantity)
+  if (!Number.isInteger(normalizedOfferId) || normalizedOfferId <= 0) {
+    showTradeError('شناسه لفظ معتبر نیست. فهرست بازار را تازه‌سازی و دوباره تلاش کنید.');
+    return;
+  }
+  if (!Number.isInteger(normalizedQuantity) || normalizedQuantity <= 0) {
+    showTradeError('مقدار معامله معتبر نیست. یکی از مقدارهای نمایش‌داده‌شده را انتخاب کنید.');
+    return;
+  }
+  const sourceOffer = props.offers.find((offer: any) => Number(offer?.id) === normalizedOfferId)
+  const candidatePublicId = typeof sourceOffer?.offer_public_id === 'string'
+    ? sourceOffer.offer_public_id.trim()
+    : ''
+  const offerPublicId = candidatePublicId.length > 0 && candidatePublicId.length <= 40
+    ? candidatePublicId
+    : null
+  if (hasConflictingTradeIntent(normalizedOfferId, normalizedQuantity)) {
     showTradeError(CONFLICTING_TRADE_INTENT_MESSAGE);
     return;
   }
 
-  const intent = getTradeIntent(offerId, quantity);
+  const intent = getTradeIntent(normalizedOfferId, normalizedQuantity, offerPublicId);
   const executionStorageKey = activeTradeIntentStorageKey;
-  tradingOfferId.value = offerId;
-  tradingAmount.value = quantity;
+  tradingOfferId.value = normalizedOfferId;
+  tradingAmount.value = normalizedQuantity;
   tradeError.value = '';
   setTradeIntentStatus(intent, 'in_flight');
   
@@ -694,6 +793,7 @@ async function executeTrade(offerId: number, quantity: number) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         offer_id: intent.offerId,
+        ...(intent.offerPublicId ? { offer_public_id: intent.offerPublicId } : {}),
         quantity: intent.quantity,
         idempotency_key: intent.idempotencyKey,
       }),
@@ -831,6 +931,7 @@ async function cancelOwnOffer(offerId: number) {
         :history="isReadOnlyOffer(offer)"
         :expired="isExpiredOffer(offer)"
         :traded="isTradedHistoryOffer(offer)"
+        :partially-traded="isPartiallyTradedHistoryOffer(offer)"
         :decision-focus="isDecisionFocus(offer)"
         :timer-style="cardTimerStyle(offer)"
       >
@@ -838,8 +939,6 @@ async function cancelOwnOffer(offerId: number) {
           class="offer-card-inner"
           :class="[offer.offer_type, { 'is-decision-focus': isDecisionFocus(offer) }]"
         >
-          <span class="offer-trade-rail" aria-hidden="true"></span>
-
           <!-- Header: role badge + lifecycle chips + time -->
           <div class="offer-header">
             <div class="offer-classification">
@@ -984,6 +1083,19 @@ async function cancelOwnOffer(offerId: number) {
             :data-critical="isCritical(offer) ? 'true' : 'false'"
           >
             <p class="offer-deadline-label" data-test="offer-deadline-label">{{ deadlineLabel(offer) }}</p>
+            <div
+              class="offer-deadline-meter"
+              data-test="offer-deadline-meter"
+              :data-phase="deadlinePhase(offer)"
+              :data-critical="isCritical(offer) ? 'true' : 'false'"
+              role="progressbar"
+              :aria-label="deadlineMeterAriaLabel(offer)"
+              aria-valuemin="0"
+              aria-valuemax="100"
+              :aria-valuenow="Math.round(getDeadlineMeterPercent(offer))"
+            >
+              <span class="offer-deadline-meter__value" aria-hidden="true"></span>
+            </div>
           </div>
 
         </div><!-- /offer-card-inner -->
@@ -1022,15 +1134,6 @@ async function cancelOwnOffer(offerId: number) {
     </div>
 </template>
 
-<!-- Global @property (must NOT be scoped) -->
-<style>
-@property --t-pct {
-  syntax: '<number>';
-  inherits: true;
-  initial-value: 100;
-}
-</style>
-
 <style scoped>
 /* ══════════════════════════════════════
    Offer Card — Mini-App-style layout
@@ -1050,6 +1153,11 @@ async function cancelOwnOffer(offerId: number) {
   position: relative;
   border-radius: var(--ds-radius-md);
   border: 1px solid var(--ds-border-light);
+  overflow: hidden;
+}
+
+.offer-card-wrap.has-timer {
+  border-color: color-mix(in srgb, var(--t-color) 34%, var(--ds-border-light));
 }
 
 /* ── Inner card ── */
@@ -1058,24 +1166,7 @@ async function cancelOwnOffer(offerId: number) {
   background: var(--ds-bg-card);
   border-radius: var(--ds-radius-md);
   padding: 10px 11px 12px;
-  padding-inline-start: 16px;
   z-index: 0;
-}
-
-.offer-trade-rail {
-  position: absolute;
-  inset-block: 0;
-  inset-inline-start: 0;
-  width: 8px;
-  pointer-events: none;
-}
-
-.offer-card-inner.buy .offer-trade-rail {
-  background: var(--ds-trade-buy-text);
-}
-
-.offer-card-inner.sell .offer-trade-rail {
-  background: var(--ds-danger-600);
 }
 
 .offer-card-wrap.is-decision-focus {
@@ -1083,23 +1174,34 @@ async function cancelOwnOffer(offerId: number) {
 }
 
 .offer-card-wrap.is-history .offer-card-inner {
-  background: var(--ds-bg-surface);
+  box-shadow: none;
 }
 
 .offer-card-wrap.is-expired .offer-card-inner {
-  background: #f8fafc;
+  background: linear-gradient(145deg, #f8fafc, #f1f5f9);
 }
 
-.offer-card-wrap.is-traded .offer-card-inner {
-  background: #f0fdfa;
+.offer-card-wrap.is-expired {
+  border-color: #94a3b8;
+  border-top-width: 3px;
 }
 
-.offer-card-wrap.is-expired .offer-trade-rail {
-  background: #94a3b8;
+.offer-card-wrap.is-fully-traded .offer-card-inner {
+  background: linear-gradient(145deg, #f0fdfa, #ecfdf5);
 }
 
-.offer-card-wrap.is-traded .offer-trade-rail {
-  background: #0f766e;
+.offer-card-wrap.is-fully-traded {
+  border-color: #0f766e;
+  border-top-width: 3px;
+}
+
+.offer-card-wrap.is-partially-traded .offer-card-inner {
+  background: linear-gradient(145deg, #fffbeb, #fefce8);
+}
+
+.offer-card-wrap.is-partially-traded {
+  border-color: #d97706;
+  border-top-width: 3px;
 }
 
 .offer-card-wrap.is-history .role-badge {
@@ -1126,15 +1228,20 @@ async function cancelOwnOffer(offerId: number) {
 }
 
 .expired-ribbon {
-  background: #f1f5f9;
-  color: #475569;
-  border-color: #cbd5e1;
+  background: #475569;
+  color: #fff;
+  border-color: #475569;
 }
 
 .traded-ribbon {
-  background: #ccfbf1;
-  color: #0f766e;
-  border-color: #5eead4;
+  background: #0f766e;
+  color: #fff;
+  border-color: #0f766e;
+}
+
+.offer-card-wrap.is-partially-traded .traded-ribbon {
+  background: #b45309;
+  border-color: #b45309;
 }
 
 .offer-overtime-sticker {
@@ -1258,10 +1365,9 @@ async function cancelOwnOffer(offerId: number) {
 }
 
 .offer-deadline {
-  display: flex;
-  justify-content: flex-end;
+  display: grid;
+  gap: 0.38rem;
   margin-top: 0.58rem;
-  padding-inline-start: 0;
 }
 
 .offer-deadline-label {
@@ -1269,6 +1375,7 @@ async function cancelOwnOffer(offerId: number) {
   font-size: 11px;
   font-weight: 700;
   color: var(--ds-text-secondary);
+  text-align: end;
 }
 
 .offer-deadline[data-phase="overtime"] .offer-deadline-label {
@@ -1278,6 +1385,30 @@ async function cancelOwnOffer(offerId: number) {
 .offer-deadline[data-critical="true"] .offer-deadline-label,
 .offer-deadline[data-phase="critical"] .offer-deadline-label {
   color: var(--ds-danger-700);
+}
+
+.offer-deadline-meter {
+  position: relative;
+  height: 5px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--t-color) 14%, var(--ds-bg-hover));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--t-color) 18%, transparent);
+}
+
+.offer-deadline-meter__value {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--t-color) 78%, white),
+    var(--t-color)
+  );
+  box-shadow: 0 0 8px color-mix(in srgb, var(--t-color) 24%, transparent);
+  transform: scaleX(var(--t-ratio, 1));
+  transform-origin: right center;
+  will-change: transform;
 }
 
 
@@ -1601,7 +1732,6 @@ async function cancelOwnOffer(offerId: number) {
 
   .offer-card-inner {
     padding: 14px 16px 14px;
-    padding-inline-start: 20px;
   }
 
   .offer-main {

@@ -1059,8 +1059,10 @@ describe('Stage 8 Market lifecycle assertions', () => {
     documentOverflow: false,
     ctaAboveNav: true,
     marketLifecycle: {
-      perimeterPresent: true,
-      legacyDeadlineBarCount: 0,
+      deadlineMeterPresent: true,
+      deadlineMeterRole: 'progressbar',
+      legacyDeadlineVisualCount: 0,
+      tradeRailCount: 0,
       overtimeStickerCount: 1,
       overtimeStickerName: 'وقت اضافه',
       overtimeStickerAnimated: true,
@@ -1069,11 +1071,13 @@ describe('Stage 8 Market lifecycle assertions', () => {
       expiredDistinct: true,
       tradedReadOnly: true,
       tradedDistinct: true,
+      partialTradedDistinct: true,
+      fullTradedDistinct: true,
       sideActionInverted: false,
     },
   }
 
-  it('requires the merged A+C perimeter, hourglass, and distinct terminals', () => {
+  it('requires the linear meter, hourglass, and three distinct terminal states', () => {
     expect(
       assertMarketLifecycle(healthy, {
         routeName: 'market',
@@ -1083,10 +1087,10 @@ describe('Stage 8 Market lifecycle assertions', () => {
     ).toEqual([])
     expect(
       assertMarketLifecycle(
-        { ...healthy, marketLifecycle: { ...healthy.marketLifecycle, perimeterPresent: false } },
+        { ...healthy, marketLifecycle: { ...healthy.marketLifecycle, deadlineMeterPresent: false } },
         { routeName: 'market', state: 'normal', expectedKind: 'render-route' },
       ),
-    ).toContain('market full-card SVG perimeter missing')
+    ).toContain('market linear deadline meter missing')
     expect(
       assertMarketLifecycle(
         { ...healthy, marketLifecycle: { ...healthy.marketLifecycle, overtimeStickerAnimated: true } },
@@ -1113,6 +1117,8 @@ describe('Stage 8 Market lifecycle assertions', () => {
         expiredDistinct: false,
         tradedReadOnly: false,
         tradedDistinct: false,
+        partialTradedDistinct: false,
+        fullTradedDistinct: false,
       },
     }
     expect(canViewExpiredMarketHistory({ id: 'member', isCustomer: false, isAccountant: false })).toBe(true)
@@ -1133,7 +1139,11 @@ describe('Stage 8 Market lifecycle assertions', () => {
         expectedKind: 'render-route',
         profile: { id: 'member', isCustomer: false, isAccountant: false },
       }),
-    ).toEqual(['market expired is not read-only and distinct', 'market traded is not read-only and distinct'])
+    ).toEqual([
+      'market expired is not read-only and distinct',
+      'market traded is not read-only and distinct',
+      'market partial and full trade histories are not visually distinct',
+    ])
   })
 
   it('records a redacted success summary for applicable scenarios', () => {
@@ -1153,7 +1163,7 @@ describe('Stage 8 Market lifecycle assertions', () => {
       diagnostics: { unexpectedConsole: 0 },
     })
     expect(summary.id).toBe('state/market/member/normal')
-    expect(summary.lifecycleMarker.perimeterPresent).toBe(true)
+    expect(summary.lifecycleMarker.deadlineMeterPresent).toBe(true)
     expect(summary.unnamedInteractive).toBe(0)
     expect(summary.keyAssertions).not.toEqual(['passed'])
     expect(summary.keyAssertions).toEqual(
@@ -1353,7 +1363,7 @@ describe('Stage 8 Market lifecycle summary taxonomy', () => {
         profile: 'customer',
         state: 'normal',
         expectedKind: 'render-route',
-        probe: { marketLifecycle: { perimeterPresent: true } },
+        probe: { marketLifecycle: { deadlineMeterPresent: true } },
       },
       {
         id: 'state/market/member/normal',
@@ -1362,7 +1372,13 @@ describe('Stage 8 Market lifecycle summary taxonomy', () => {
         state: 'normal',
         expectedKind: 'render-route',
         probe: {
-          marketLifecycle: { perimeterPresent: true, expiredDistinct: true, tradedDistinct: true },
+          marketLifecycle: {
+            deadlineMeterPresent: true,
+            expiredDistinct: true,
+            tradedDistinct: true,
+            partialTradedDistinct: true,
+            fullTradedDistinct: true,
+          },
         },
       },
     ]

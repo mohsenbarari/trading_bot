@@ -213,6 +213,41 @@ export const MARKET_A_PLUS_C_PERIMETER_EVIDENCE = Object.freeze({
   sha256: 'f7bb91fa317bbfeb2c2bee573d5cee38ce380f492c984c9b2cf0215b3bdaed55',
 })
 
+// Owner-directed successor after the full-card perimeter proved visually
+// nonlinear across card aspect ratios. It keeps server-authoritative timing
+// and the hourglass, removes the overlapping side rail, and separates all
+// three read-only lifecycle states without changing trade behavior.
+export const MARKET_A_PLUS_C_LINEAR_METER_KIND =
+  'market-a-plus-c-linear-deadline-terminal-clarity'
+
+export const MARKET_A_PLUS_C_LINEAR_METER_ALLOWED_PATHS = Object.freeze([
+  'frontend/src/components/OfferPreviewModal.vue',
+  'frontend/src/components/OffersList.vue',
+  'frontend/src/components/TradeLotSuggestionAlert.vue',
+  'frontend/src/components/ui/AppOfferCard.vue',
+  'frontend/src/views/MarketView.vue',
+])
+
+export const MARKET_A_PLUS_C_LINEAR_METER_ALLOWED_FILE_SHA256 = Object.freeze({
+  'frontend/src/components/OfferPreviewModal.vue':
+    '3278a01042eace0c754353a24a1de10afccd6e4c1899baa67ca927076a650a12',
+  'frontend/src/components/OffersList.vue':
+    '939ae95167aff3ef4fb3da3b5fa8706d48632828555aa59fcbc7107c3d3030c7',
+  'frontend/src/components/TradeLotSuggestionAlert.vue':
+    '9674841528b6092832816744cf34e499b73b59e204503bfc5353ce965cab5452',
+  'frontend/src/components/ui/AppOfferCard.vue':
+    '3cd57a98d9d3213a0e5fb2ea5da42fee05cc7cae171fbc28ae52d2e8f5b952ab',
+  'frontend/src/views/MarketView.vue':
+    '5441b793a7ca2f50a34847775a24ab973f6433dfde72592aaae0640c4e4e68f2',
+})
+
+export const MARKET_A_PLUS_C_LINEAR_METER_EVIDENCE = Object.freeze({
+  count: 19,
+  contentBytes: 169989,
+  pathSetSha256: '37aa0b51e20f4ae86f7daf6c3c231d93b3d1f288ade1471490a1f843a57c9589',
+  sha256: '76903997d27e1a260100fef4d88bc3bff3fb99e96e0eef49f3bb1b5b927261a5',
+})
+
 export const MESSENGER_RUNTIME_BASELINE = Object.freeze({
   count: 85,
   contentBytes: 1312405,
@@ -588,6 +623,12 @@ export function assertMarketLifecycleClaritySemantics(entries) {
   if (!offers.includes("apiFetch('/api/trades/'")) {
     throw new Error('Market lifecycle-clarity disposition changed trade endpoint')
   }
+  if (!offers.includes("...(intent.offerPublicId ? { offer_public_id: intent.offerPublicId } : {})")) {
+    throw new Error('Market lifecycle-clarity disposition lost public offer identity in trade requests')
+  }
+  if (!offers.includes('const normalizedOfferId = Number(offerId)') || !offers.includes('const normalizedQuantity = Number(quantity)')) {
+    throw new Error('Market lifecycle-clarity disposition lost fail-closed trade payload normalization')
+  }
   if (!offers.includes("return offer?.offer_type === 'buy' ? 'فروش' : 'خرید'")) {
     throw new Error('Market lifecycle-clarity disposition lost responder inversion')
   }
@@ -698,6 +739,84 @@ export function assertMarketPerimeterDeadlineDisposition(entries) {
   )
 }
 
+export function assertMarketLinearDeadlineSemantics(entries) {
+  assertMarketLifecycleClaritySemantics(entries)
+  const offers = sourceByPath(entries, 'frontend/src/components/OffersList.vue')
+  const card = sourceByPath(entries, 'frontend/src/components/ui/AppOfferCard.vue')
+  if (!offers.includes('data-test="offer-deadline-meter"')) {
+    throw new Error('Market linear-meter disposition lost the deadline meter')
+  }
+  if (!offers.includes('role="progressbar"') || !offers.includes(':aria-valuenow="Math.round(getDeadlineMeterPercent(offer))"')) {
+    throw new Error('Market linear-meter disposition lost progressbar semantics')
+  }
+  if (!offers.includes('return isOvertimePhase(offer) ? 100 - remainingPercent : remainingPercent')) {
+    throw new Error('Market linear-meter disposition lost the zero-origin overtime reset')
+  }
+  if (!offers.includes('transform: scaleX(var(--t-ratio, 1))')) {
+    throw new Error('Market linear-meter disposition lost linear authoritative progress')
+  }
+  if (!offers.includes("'--t-color': timerColor(offer, remainingPct)")) {
+    throw new Error('Market linear-meter disposition lost lifetime color binding')
+  }
+  const meterValueRule = offers.match(/\.offer-deadline-meter__value\s*\{([^}]*)\}/u)?.[1] || ''
+  if (meterValueRule.includes('transition:')) {
+    throw new Error('Market linear-meter disposition restored an animated reverse reset')
+  }
+  if (offers.includes('offer-trade-rail')) {
+    throw new Error('Market linear-meter disposition restored the overlapping trade rail')
+  }
+  if (offers.includes('offer-deadline-perimeter') || card.includes('offer-deadline-perimeter')) {
+    throw new Error('Market linear-meter disposition restored the nonlinear perimeter')
+  }
+  for (const label of ['منقضی · بدون معامله', 'بخشی معامله شد', 'کامل معامله شد']) {
+    if (!offers.includes(label)) {
+      throw new Error(`Market linear-meter disposition lost terminal label: ${label}`)
+    }
+  }
+  if (!card.includes("'is-partially-traded': traded && partiallyTraded")) {
+    throw new Error('Market linear-meter disposition lost partial-trade state')
+  }
+  if (!card.includes("'is-fully-traded': traded && !partiallyTraded")) {
+    throw new Error('Market linear-meter disposition lost full-trade state')
+  }
+  if (!offers.includes('data-test="offer-overtime-sticker"')) {
+    throw new Error('Market linear-meter disposition lost the overtime sticker')
+  }
+  if (!offers.includes('role="img"') || !offers.includes('aria-label="وقت اضافه"')) {
+    throw new Error('Market linear-meter disposition lost the overtime accessible name')
+  }
+  if (!offers.includes('@keyframes overtime-hourglass-turn') || !offers.includes('@media (prefers-reduced-motion: reduce)')) {
+    throw new Error('Market linear-meter disposition lost bounded hourglass motion')
+  }
+}
+
+function assertMarketLinearDeadlineAllowedFiles(entries) {
+  const entriesByPath = new Map(entries.map((entry) => [entry.path, entry]))
+  for (const repoPath of MARKET_A_PLUS_C_LINEAR_METER_ALLOWED_PATHS) {
+    const entry = entriesByPath.get(repoPath)
+    if (!entry) {
+      throw new Error(`Market linear-meter allowed file is missing: ${repoPath}`)
+    }
+    const actualSha256 = fileSha256(entry.content)
+    const expectedSha256 = MARKET_A_PLUS_C_LINEAR_METER_ALLOWED_FILE_SHA256[repoPath]
+    if (actualSha256 !== expectedSha256) {
+      throw new Error(
+        `Market linear-meter allowed file drift: ${repoPath} ${expectedSha256} -> ${actualSha256}`,
+      )
+    }
+  }
+}
+
+export function assertMarketLinearDeadlineDisposition(entries) {
+  assertMarketLinearDeadlineAllowedFiles(entries)
+  assertMarketLinearDeadlineSemantics(entries)
+  return assertProtectedFileSetEvidence(
+    'Market A+C linear deadline/terminal-clarity disposition',
+    protectedFileSetEvidence(entries, MARKET_RUNTIME_CONTRACT),
+    MARKET_A_PLUS_C_LINEAR_METER_EVIDENCE,
+  )
+}
+
 export function resolveMarketRuntimeDisposition(entries) {
   const actual = protectedFileSetEvidence(entries, MARKET_RUNTIME_CONTRACT)
   try {
@@ -734,19 +853,28 @@ export function resolveMarketRuntimeDisposition(entries) {
               evidence: assertMarketPerimeterDeadlineDisposition(entries),
             }
           } catch (perimeterError) {
-            const baselineMessage =
-              baselineError instanceof Error ? baselineError.message : String(baselineError)
-            const integrationMessage =
-              integrationError instanceof Error ? integrationError.message : String(integrationError)
-            const aPlusCMessage =
-              aPlusCError instanceof Error ? aPlusCError.message : String(aPlusCError)
-            const lifecycleMessage =
-              lifecycleError instanceof Error ? lifecycleError.message : String(lifecycleError)
-            const perimeterMessage =
-              perimeterError instanceof Error ? perimeterError.message : String(perimeterError)
-            throw new Error(
-              `Market runtime rejected after Stage 4 baseline drift (${baselineMessage}); main/UIUX integration disposition rejected (${integrationMessage}); Market A+C disposition rejected (${aPlusCMessage}); Market A+C lifecycle-clarity disposition rejected (${lifecycleMessage}); Market A+C perimeter-deadline disposition rejected (${perimeterMessage})`,
-            )
+            try {
+              return {
+                kind: MARKET_A_PLUS_C_LINEAR_METER_KIND,
+                evidence: assertMarketLinearDeadlineDisposition(entries),
+              }
+            } catch (linearMeterError) {
+              const baselineMessage =
+                baselineError instanceof Error ? baselineError.message : String(baselineError)
+              const integrationMessage =
+                integrationError instanceof Error ? integrationError.message : String(integrationError)
+              const aPlusCMessage =
+                aPlusCError instanceof Error ? aPlusCError.message : String(aPlusCError)
+              const lifecycleMessage =
+                lifecycleError instanceof Error ? lifecycleError.message : String(lifecycleError)
+              const perimeterMessage =
+                perimeterError instanceof Error ? perimeterError.message : String(perimeterError)
+              const linearMeterMessage =
+                linearMeterError instanceof Error ? linearMeterError.message : String(linearMeterError)
+              throw new Error(
+                `Market runtime rejected after Stage 4 baseline drift (${baselineMessage}); main/UIUX integration disposition rejected (${integrationMessage}); Market A+C disposition rejected (${aPlusCMessage}); Market A+C lifecycle-clarity disposition rejected (${lifecycleMessage}); Market A+C perimeter-deadline disposition rejected (${perimeterMessage}); Market A+C linear-meter disposition rejected (${linearMeterMessage})`,
+              )
+            }
           }
         }
       }
