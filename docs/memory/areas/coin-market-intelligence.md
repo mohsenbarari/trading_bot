@@ -1,7 +1,7 @@
 # Coin Market Intelligence
 
-- USD/Herat repairs infer omitted leading digits from three prior same-book,
-  same-source facts within 15m; never add constants or replay out of order.
+- USD/Herat infers omitted leading digits from three prior same-book/source
+  facts within 15m; never add constants or replay out of order.
 - Private-group `خ ن ف`/`ف ن ف`, `خ ف`/`ف ف`, and marker-less sides mean
   tomorrow; `خ ن`/`ف ن` and `نق`/cash words mean cash. Future wins. Do not apply
   this to user registration.
@@ -16,16 +16,17 @@
   Bootstrap: 30m, three messages, two senders, one nonconditional claim, 1.5%
   spread. Conditional claims only support. Never default Imam or restore
   `group_commodity_context`.
-- Trades require a complete linked branch, isolated users/siblings, oldest root,
-  and reciprocal offerer evidence. Cancellation breaks inherited terms; later
-  rejection gates the fill. Keep final price/quantity, deduplicate, and link the
-  opaque root. Ambiguous/overfilled/unresolved trades stay audit-only.
+- Trades require a complete branch, isolated users/siblings, oldest root and
+  reciprocal offerer evidence. Cancellation breaks terms; later rejection gates
+  fill. Retain final price/quantity, deduplicate and link opaque root. A
+  reciprocal explicit first fill may amend root quantity; later/cumulative
+  overfills and ambiguous/unresolved stay audit-only.
 - Reconciliation rejects invalid edit/reply graphs; unchanged decisions keep
   first availability. Projection removes absent/rejected facts but retains
   pending, conditional, or over-five-minute-late facts audit-only. Models use
   `available_at_utc`; reports retain source time.
-- Reject malformed envelopes individually; inverted timestamps cannot advance
-  checkpoints. Health separates heartbeat, canonical event, and eligible input.
+- Reject malformed envelopes individually; inverted times cannot advance
+  checkpoints. Health separates heartbeat, event and eligible input.
 - Private text stays in bounded staging and may render only in authenticated
   review. Market Store/projection stay opaque; never revive the legacy data
   plane. Live jobs use canonical `main`; retarget systemd before removal.

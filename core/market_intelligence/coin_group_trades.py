@@ -24,7 +24,7 @@ from .coin_groups import (
 from .market_contracts import MarketObservation, derive_event_key, normalize_utc
 
 
-COIN_GROUP_TRADE_LINKER_VERSION = "coin-group-trade-link-v4-consensus-terms"
+COIN_GROUP_TRADE_LINKER_VERSION = "coin-group-trade-link-v5-negotiated-quantity"
 MAX_REPLY_DEPTH = 12
 MAX_REPLY_AGE_SECONDS = 2 * 60 * 60
 MAX_NEGOTIATED_PRICE_RELATIVE_DELTA = 0.05
@@ -84,6 +84,7 @@ class LinkedCoinGroupTrade:
     quality_state: str
     confirmation_kind: str
     is_aggregate: bool
+    quantity_was_negotiated: bool
     resolution_reason: str
 
 
@@ -415,6 +416,7 @@ def _trade_from_confirmation(
         return None
     if price_is_ambiguous:
         return None
+    quantity_was_negotiated = quantity is not None
     if quantity is None:
         if kind == "OWNER_EXPLICIT_AGGREGATE_REPLY_TRADE":
             return None
@@ -463,6 +465,7 @@ def _trade_from_confirmation(
         quality_state=quality,
         confirmation_kind=kind,
         is_aggregate=is_aggregate,
+        quantity_was_negotiated=quantity_was_negotiated,
         resolution_reason=resolution_reason,
     ), frozenset(participants)
 
@@ -598,8 +601,25 @@ def link_coin_group_trades(
         root_key = (trade.group_number, trade.root_offer_message_id)
         root = offer_by_key[root_key]
         if not trade.is_aggregate:
-            remaining = root.offer.quantity - filled.get(root_key, 0)
-            if trade.quantity > remaining:
+            already_filled = filled.get(root_key, 0)
+            remaining = root.offer.quantity - already_filled
+            # A reciprocal branch can explicitly amend the root quantity.  A
+            # seller advertising 10 and then accepting a counterparty's
+            # explicit request for 15 has agreed a 15-unit fill; it is not an
+            # overfill merely because the negotiated final quantity exceeds
+            # the original advert.  This exception is deliberately limited to
+            # the first fill.  Independent later branches still cannot consume
+            # more than the unamended root remainder.
+            explicit_first_fill_amendment = (
+                already_filled == 0
+                and trade.quantity_was_negotiated
+                and trade.confirmation_kind
+                in {
+                    "RECIPROCAL_OFFERER_CONFIRMATION",
+                    "RECIPROCAL_COUNTERPARTY_CONFIRMATION",
+                }
+            )
+            if trade.quantity > remaining and not explicit_first_fill_amendment:
                 trades.append(
                     replace(
                         trade,
@@ -615,7 +635,7 @@ def link_coin_group_trades(
                     )
                 )
                 continue
-            filled[root_key] = filled.get(root_key, 0) + trade.quantity
+            filled[root_key] = already_filled + trade.quantity
         trades.append(trade)
     return trades
 
@@ -667,12 +687,13 @@ def coin_group_trade_observations(
                 parse_confidence=0.99 if trade.quality_state == "ELIGIBLE" else 0.65,
                 parser_version=COIN_GROUP_TRADE_LINKER_VERSION,
                 quality_state=trade.quality_state,
-                quality_policy_version="coin-group-trade-link-v1",
+                quality_policy_version="coin-group-trade-link-v2",
                 is_conditional=trade.is_conditional,
                 attributes={
                     "group_number": trade.group_number,
                     "confirmation_kind": trade.confirmation_kind,
                     "is_aggregate": trade.is_aggregate,
+                    "quantity_was_negotiated": trade.quantity_was_negotiated,
                     "root_offer_event_key": derive_event_key(
                         "coin-group-offer-v1",
                         trade.group_number,

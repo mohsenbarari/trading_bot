@@ -86,6 +86,64 @@ class CoinGroupTradeTests(unittest.TestCase):
         trades = link_coin_group_trades(rows, [offer_record()])
         self.assertEqual([(item.quantity, item.price_project_thousand_toman) for item in trades], [(3, 183_100)])
 
+    def test_owner_accepts_explicit_quantity_above_root_as_amended_first_fill(self) -> None:
+        rows = [
+            message(1, OWNER, "10 تا ف ن 187500", at_second=0),
+            message(2, BUYER_ONE, "15تا؟", reply=1, at_second=2),
+            message(3, OWNER, "برکت", reply=2, at_second=4),
+        ]
+        trades = link_coin_group_trades(
+            rows,
+            [offer_record(price=187_500, quantity=10)],
+        )
+        self.assertEqual(len(trades), 1)
+        self.assertEqual(
+            (
+                trades[0].quantity,
+                trades[0].quality_state,
+                trades[0].quantity_was_negotiated,
+                trades[0].resolution_reason,
+            ),
+            (15, "ELIGIBLE", True, "STRUCTURALLY_LINKED_CONFIRMED_TRADE"),
+        )
+
+    def test_counterparty_accepts_owner_quantity_above_root_as_amended_first_fill(self) -> None:
+        rows = [
+            message(1, OWNER, "10 تا ف 183100", at_second=0),
+            message(2, BUYER_ONE, "15تا؟", reply=1, at_second=2),
+            message(3, OWNER, "15 تا", reply=2, at_second=3),
+            message(4, BUYER_ONE, "ب", reply=3, at_second=4),
+        ]
+        trades = link_coin_group_trades(rows, [offer_record(quantity=10)])
+        self.assertEqual(len(trades), 1)
+        self.assertEqual(
+            (
+                trades[0].quantity,
+                trades[0].quality_state,
+                trades[0].quantity_was_negotiated,
+                trades[0].confirmation_kind,
+            ),
+            (15, "ELIGIBLE", True, "RECIPROCAL_COUNTERPARTY_CONFIRMATION"),
+        )
+
+    def test_amended_first_fill_does_not_open_capacity_for_later_branches(self) -> None:
+        rows = [
+            message(1, OWNER, "10 تا ف 183100", at_second=0),
+            message(2, BUYER_ONE, "15تا؟", reply=1, at_second=2),
+            message(3, OWNER, "برکت", reply=2, at_second=3),
+            message(4, BUYER_TWO, "1 تا من", reply=1, at_second=4),
+            message(5, OWNER, "برکت", reply=4, at_second=5),
+        ]
+        trades = link_coin_group_trades(rows, [offer_record(quantity=10)])
+        self.assertEqual(
+            [(item.quantity, item.quality_state) for item in trades],
+            [(15, "ELIGIBLE"), (1, "PENDING_REVIEW")],
+        )
+        self.assertEqual(
+            trades[-1].resolution_reason,
+            "NON_AGGREGATE_FILL_EXCEEDS_REMAINING_ROOT_QUANTITY",
+        )
+
     def test_final_negotiated_price_and_quantity_come_from_the_full_reply_branch(self) -> None:
         rows = [
             message(1, OWNER, "20 تا ف 177100", at_second=0),
