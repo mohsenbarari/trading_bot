@@ -38,7 +38,7 @@ def anchor(code: str, price: int, at: str, **changes: object) -> CoinPriceAnchor
 
 
 class CoinGroupResolutionTests(unittest.TestCase):
-    def test_explicit_name_requires_and_passes_same_book_prior_context(self) -> None:
+    def test_explicit_name_can_be_supported_by_same_book_prior_context(self) -> None:
         result = resolve_coin_group_offers(
             source("امام فروش فردا 186,900 / 5 تا"),
             anchors=(
@@ -84,9 +84,9 @@ class CoinGroupResolutionTests(unittest.TestCase):
         )[0]
         assert (result.commodity_code, result.quality_state) == (
             "IMAM",
-            "PENDING_REVIEW",
+            "ELIGIBLE",
         )
-        assert "GROUP_DERIVED" in result.resolution_reason
+        assert "NONAUTHORITATIVE" in result.resolution_reason
 
     def test_unnamed_offer_can_be_resolved_only_by_decisive_prior_context(self) -> None:
         result = resolve_coin_group_offers(
@@ -161,7 +161,7 @@ class CoinGroupResolutionTests(unittest.TestCase):
                 anchor("QUARTER_BAHAR", 52_300, "2026-08-04T10:09:30Z"),
             ),
         )[0]
-        assert result.quality_state == "PENDING_REVIEW"
+        assert result.quality_state == "ELIGIBLE"
         assert result.anchor_count == 0
 
     def test_stale_same_book_anchors_cannot_freeze_a_new_price_regime(self) -> None:
@@ -172,7 +172,7 @@ class CoinGroupResolutionTests(unittest.TestCase):
                 anchor("IMAM", 184_700, "2026-08-04T07:01:00Z"),
             ),
         )[0]
-        assert result.quality_state == "PENDING_REVIEW"
+        assert result.quality_state == "ELIGIBLE"
         assert result.anchor_count == 0
 
     def test_resolved_fact_waits_until_reconciliation_is_available_and_has_no_private_fields(self) -> None:

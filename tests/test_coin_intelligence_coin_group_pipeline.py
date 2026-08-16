@@ -129,7 +129,7 @@ class CoinGroupPipelineTests(unittest.TestCase):
             [tuple(row) for row in first_timestamps],
         )
 
-    def test_without_prior_anchors_offer_and_trade_are_auditable_but_stay_out_of_model(self) -> None:
+    def test_complete_explicit_offer_and_trade_do_not_wait_for_prior_anchors(self) -> None:
         self._stage(1, "امام فروش فردا 186,900 / 5 تا", sender="offerer")
         self._stage(2, "ب5 تا186800", sender="buyer", reply=1, at="2026-08-04T10:00:02Z")
         self._stage(3, "برکت", sender="offerer", reply=2, at="2026-08-04T10:00:04Z")
@@ -146,17 +146,17 @@ class CoinGroupPipelineTests(unittest.TestCase):
                 report.eligible_trades,
                 report.pending_or_rejected_trades,
             ),
-            (0, 1, 0, 1),
+            (1, 1, 1, 0),
         )
         rows = self.market.execute(
             "SELECT event_type,quality_state FROM market_observations WHERE source_code = 'GROUP_1' ORDER BY event_type"
         ).fetchall()
         self.assertEqual(
             [(row["event_type"], row["quality_state"]) for row in rows],
-            [("OFFER", "PENDING_REVIEW"), ("TRADE", "PENDING_REVIEW")],
+            [("OFFER", "ELIGIBLE"), ("TRADE", "ELIGIBLE")],
         )
 
-    def test_tight_prior_explicit_cluster_bootstraps_new_regime_causally(self) -> None:
+    def test_explicit_cluster_is_eligible_from_its_first_complete_offer(self) -> None:
         for message_id, sender, price, second in (
             (1, "offerer-a", 188_700, 0),
             (2, "offerer-b", 188_800, 10),
@@ -179,10 +179,10 @@ class CoinGroupPipelineTests(unittest.TestCase):
         states = self.market.execute(
             "SELECT event_time_utc,quality_state FROM market_observations WHERE source_code='GROUP_1' ORDER BY event_time_utc"
         ).fetchall()
-        self.assertEqual(report.eligible_offers, 1)
+        self.assertEqual(report.eligible_offers, 4)
         self.assertEqual(
             [row["quality_state"] for row in states],
-            ["PENDING_REVIEW", "PENDING_REVIEW", "PENDING_REVIEW", "ELIGIBLE"],
+            ["ELIGIBLE", "ELIGIBLE", "ELIGIBLE", "ELIGIBLE"],
         )
 
     def test_conditional_explicit_cluster_can_disambiguate_later_plain_offer(self) -> None:
@@ -296,7 +296,13 @@ class CoinGroupPipelineTests(unittest.TestCase):
         report = process_coin_group_staging(
             self.staging, self.market, as_of_utc="2026-08-04T10:01:00Z"
         )
-        self.assertEqual(report.eligible_offers, 0)
+        row = self.market.execute(
+            "SELECT quality_state,attributes_json FROM market_observations "
+            "WHERE source_code='GROUP_1' AND event_type='OFFER'"
+        ).fetchone()
+        self.assertEqual(report.eligible_offers, 1)
+        self.assertEqual(row["quality_state"], "ELIGIBLE")
+        self.assertIn('"anchor_count":0', row["attributes_json"])
 
 
 if __name__ == "__main__":

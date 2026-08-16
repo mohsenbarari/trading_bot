@@ -46,7 +46,7 @@ class CoinGroupParserTests(unittest.TestCase):
                 offer.trade_form,
                 offer.quality_state,
             ),
-            ("IMAM", 186_900, 5, "SELL", "CASH", "PHYSICAL", "PENDING_REVIEW"),
+            ("IMAM", 186_900, 5, "SELL", "CASH", "PHYSICAL", "ELIGIBLE"),
         )
 
     def test_unnamed_offer_is_not_silently_defaulted_to_imam(self) -> None:
@@ -239,7 +239,7 @@ class CoinGroupObservationTests(unittest.TestCase):
         }
         self.assertEqual(
             (row["source_code"], row["instrument"], row["price_num"], row["quality_state"]),
-            ("GROUP_2", "COIN_IMAM", 186_900.0, "PENDING_REVIEW"),
+            ("GROUP_2", "COIN_IMAM", 186_900.0, "ELIGIBLE"),
         )
         self.assertNotIn("raw_text", columns)
         self.assertNotIn("message_id", columns)

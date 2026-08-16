@@ -2,22 +2,23 @@
 
 - USD/Herat repairs infer omitted leading digits from three prior same-book,
   same-source facts within 15 minutes; never add constants or replay out of order.
-- In the private group feed, `خ ن ف`/`ف ن ف`, `خ ف`/`ف ف`, and marker-less
-  side posts mean tomorrow; `خ ن`/`ف ن` and `نق`/cash words mean cash. Future
-  wins. Do not apply this feed default to user registration syntax.
+- Private-group `خ ن ف`/`ف ن ف`, `خ ف`/`ف ف`, and marker-less sides mean
+  tomorrow; `خ ن`/`ف ن` and `نق`/cash words mean cash. Future wins. Do not use
+  this default for user registration.
 - Coin-group prices accept project-thousand, full-Toman divided once by 1,000,
-  or bounded redundant-zero forms; never constants. Quantities, scripts and mint
-  years cannot become prices. `رب` means quarter; `پ`/`ت پ`/`پایین` mark low-date.
-- Commodity resolution never defaults to Imam or restores
-  `group_commodity_context`. Prior same-book anchors expire after two hours;
-  overlapping full-coin bands need every plausible book covered. Bootstrap needs
-  a 30-minute cluster: three messages, two senders, one nonconditional claim,
-  1.5% spread. Conditional claims only support; only authoritative evidence may
-  reject an explicit name.
-- Trades require one complete linked reply branch, isolated users/siblings, the
-  oldest root, and reciprocal offerer evidence. Cancellation breaks inherited
-  terms; later rejection gates the fill. Keep final price/quantity, deduplicate,
-  and link the opaque root. Ambiguous/overfilled/unresolved trades stay audit-only.
+  or bounded redundant zeros; never constants. Quantities, scripts and mint
+  years are not prices. `رب` is quarter; `پ`/`ت پ`/`پایین` mark low-date.
+- Explicit, complete commodity offers are immediately eligible; missing anchors
+  never make them pending. Only decisive authoritative prior evidence may reject
+  them. Unnamed offers need causal resolution: same-book anchors expire after
+  2h; overlapping full-coin bands require all plausible books. Bootstrap: 30m,
+  three messages, two senders, one nonconditional claim, 1.5% spread.
+  Conditional claims only support. Never default Imam or restore
+  `group_commodity_context`.
+- Trades require a complete linked branch, isolated users/siblings, oldest root,
+  and reciprocal offerer evidence. Cancellation breaks inherited terms; later
+  rejection gates the fill. Keep final price/quantity, deduplicate, and link the
+  opaque root. Ambiguous/overfilled/unresolved trades stay audit-only.
 - Reconciliation rejects edit/reply-graph-invalid facts; unchanged decisions keep
   first availability. Projection removes absent/rejected facts but retains
   pending, conditional, or over-five-minute-late facts audit-only. Models use

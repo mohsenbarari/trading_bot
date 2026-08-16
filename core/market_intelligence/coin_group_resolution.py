@@ -23,7 +23,7 @@ from .coin_groups import (
 from .market_contracts import MarketObservation, MarketStoreContractError, derive_event_key, normalize_utc
 
 
-COIN_GROUP_RESOLUTION_VERSION = "coin-group-context-v4-overlap-coverage"
+COIN_GROUP_RESOLUTION_VERSION = "coin-group-context-v5-parser-complete"
 MINIMUM_ANCHOR_COUNT = 2
 MAXIMUM_RELATIVE_DISTANCE = 0.015
 MINIMUM_RUNNER_UP_MARGIN = 0.005
@@ -213,6 +213,84 @@ def _resolve_one(
         )
     )
     claimed = parsed.commodity_code
+    if claimed is not None:
+        if decisive:
+            assert winner is not None
+            (
+                winner_code,
+                _,
+                anchor_count,
+                distance,
+                authoritative_count,
+                _human_reviewed,
+            ) = winner
+            if (
+                claimed != winner_code
+                and authoritative_count >= MINIMUM_ANCHOR_COUNT
+            ):
+                # An explicit parser result is never silently relabelled.  A
+                # contradiction can reject it only when the causal evidence is
+                # authoritative; group-derived context is advisory.
+                return ResolvedCoinGroupOffer(
+                    offer_index=offer_index,
+                    commodity_code=claimed,
+                    price_project_thousand_toman=parsed.price_project_thousand_toman,
+                    quantity=parsed.quantity,
+                    side=parsed.side,
+                    settlement_term=parsed.settlement_term,
+                    trade_form=parsed.trade_form,
+                    is_conditional=parsed.is_conditional,
+                    quality_state="REJECTED",
+                    resolution_reason=(
+                        "EXPLICIT_COMMODITY_CONFLICTS_WITH_STRICTLY_PRIOR_SAME_BOOK_PRICE"
+                    ),
+                    anchor_count=anchor_count,
+                    relative_distance=round(distance, 6),
+                    authoritative_anchor_count=authoritative_count,
+                )
+            if claimed == winner_code:
+                reason = (
+                    "EXPLICIT_COMMODITY_VALIDATED_BY_STRICTLY_PRIOR_SAME_BOOK_PRICE"
+                    if authoritative_count
+                    else "EXPLICIT_COMMODITY_SUPPORTED_BY_COHERENT_PRIOR_GROUP_CLUSTER"
+                )
+            else:
+                reason = (
+                    "EXPLICIT_COMMODITY_RETAINED_DESPITE_NONAUTHORITATIVE_PRICE_CONFLICT"
+                )
+            return ResolvedCoinGroupOffer(
+                offer_index=offer_index,
+                commodity_code=claimed,
+                price_project_thousand_toman=parsed.price_project_thousand_toman,
+                quantity=parsed.quantity,
+                side=parsed.side,
+                settlement_term=parsed.settlement_term,
+                trade_form=parsed.trade_form,
+                is_conditional=parsed.is_conditional,
+                quality_state="ELIGIBLE",
+                resolution_reason=reason,
+                anchor_count=anchor_count,
+                relative_distance=round(distance, 6),
+                authoritative_anchor_count=authoritative_count,
+            )
+        # The parser already established commodity, side, price, quantity,
+        # settlement and form.  No fresh price context means "no conflict",
+        # not "unknown"; otherwise a market reopen deadlocks every valid row.
+        return ResolvedCoinGroupOffer(
+            offer_index=offer_index,
+            commodity_code=claimed,
+            price_project_thousand_toman=parsed.price_project_thousand_toman,
+            quantity=parsed.quantity,
+            side=parsed.side,
+            settlement_term=parsed.settlement_term,
+            trade_form=parsed.trade_form,
+            is_conditional=parsed.is_conditional,
+            quality_state="ELIGIBLE",
+            resolution_reason="EXPLICIT_COMMODITY_ACCEPTED_WITHOUT_AUTHORITATIVE_CONFLICT",
+            anchor_count=winner[2] if winner else 0,
+            relative_distance=round(winner[3], 6) if winner else None,
+            authoritative_anchor_count=winner[4] if winner else 0,
+        )
     if not decisive:
         reason = (
             "OVERLAPPING_COMMODITY_BOOKS_REQUIRE_STRICTLY_PRIOR_ANCHOR_COVERAGE"
@@ -236,36 +314,13 @@ def _resolve_one(
         )
     assert winner is not None
     winner_code, _, anchor_count, distance, authoritative_count, _human_reviewed = winner
-    if claimed is not None and claimed != winner_code:
-        # Never silently rewrite an explicit commodity.  A price conflict is
-        # useless as an offer or a later linked-trade label until a human or
-        # another authoritative source resolves it.
-        state = (
-            "REJECTED"
-            if authoritative_count >= MINIMUM_ANCHOR_COUNT
-            else "PENDING_REVIEW"
-        )
-        reason = (
-            "EXPLICIT_COMMODITY_CONFLICTS_WITH_STRICTLY_PRIOR_SAME_BOOK_PRICE"
-            if state == "REJECTED"
-            else "EXPLICIT_COMMODITY_CONFLICTS_ONLY_WITH_GROUP_DERIVED_PRICE"
-        )
-        code = claimed
-    else:
-        state = "ELIGIBLE"
-        if authoritative_count:
-            reason = (
-                "EXPLICIT_COMMODITY_VALIDATED_BY_STRICTLY_PRIOR_SAME_BOOK_PRICE"
-                if claimed is not None
-                else "UNNAMED_COMMODITY_RESOLVED_BY_STRICTLY_PRIOR_SAME_BOOK_PRICE"
-            )
-        else:
-            reason = (
-                "EXPLICIT_COMMODITY_VALIDATED_BY_COHERENT_PRIOR_GROUP_CLUSTER"
-                if claimed is not None
-                else "UNNAMED_COMMODITY_RESOLVED_BY_COHERENT_PRIOR_GROUP_CLUSTER"
-            )
-        code = winner_code
+    state = "ELIGIBLE"
+    reason = (
+        "UNNAMED_COMMODITY_RESOLVED_BY_STRICTLY_PRIOR_SAME_BOOK_PRICE"
+        if authoritative_count
+        else "UNNAMED_COMMODITY_RESOLVED_BY_COHERENT_PRIOR_GROUP_CLUSTER"
+    )
+    code = winner_code
     return ResolvedCoinGroupOffer(
         offer_index=offer_index,
         commodity_code=code,

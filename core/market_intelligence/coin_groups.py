@@ -351,16 +351,15 @@ def parse_coin_group_offers(source: CoinGroupMessageInput) -> list[ParsedCoinGro
         if side is None or quantity is None or price is None:
             continue
         trade_form, settlement = _dimensions(text)
-        # A name in a free-form group message is not enough to let an offer
-        # influence a rate.  It may be a typo (for example, Imam where the
-        # quoted price belongs to Bahar).  Static bands above merely reject
-        # impossible text; P2-C-B must validate every surviving name against
-        # strictly-prior, same-book price evidence before it becomes ELIGIBLE.
-        quality_state = "PENDING_REVIEW"
+        # A syntactically complete explicit offer is usable immediately.  The
+        # resolver may still reject an explicit commodity when authoritative,
+        # strictly-prior evidence proves a real price-book conflict, but a
+        # missing market anchor is not itself ambiguity in a parsed message.
+        quality_state = "ELIGIBLE" if commodity is not None else "PENDING_REVIEW"
         reason = (
             "UNNAMED_COMMODITY_REQUIRES_POINT_IN_TIME_PRICE_RESOLUTION"
             if commodity is None
-            else "EXPLICIT_COMMODITY_REQUIRES_POINT_IN_TIME_PRICE_VALIDATION"
+            else "EXPLICIT_COMMODITY_PARSED_WITH_COMPLETE_REQUIRED_FIELDS"
         )
         results.append(
             ParsedCoinGroupOffer(
