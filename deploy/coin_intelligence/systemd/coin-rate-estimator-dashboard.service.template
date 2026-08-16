@@ -8,6 +8,7 @@ Type=simple
 User=root
 WorkingDirectory=@CODE_ROOT@
 EnvironmentFile=@RUNTIME_ROOT@/dashboard.env
+EnvironmentFile=-@RUNTIME_ROOT@/coin-group-review.env
 Environment=COIN_RATE_ESTIMATOR_RUNTIME_DIR=@RUNTIME_ROOT@/runtime
 Environment=COIN_RATE_ESTIMATOR_MARKET_DB=@RUNTIME_ROOT@/public-market/market_prices.sqlite3
 Environment=COIN_CONVERSATION_DB=@RUNTIME_ROOT@/conversation/conversation_events.sqlite3

@@ -24,8 +24,9 @@
   `available_at_utc`; reports retain source time.
 - Reject malformed envelopes individually; inverted timestamps cannot advance
   checkpoints. Health separates heartbeat, canonical event, and eligible input.
-- Private group text stays only in bounded external staging. Market Store and
-  projection keep opaque normalized facts; never revive the legacy data plane.
+- Private group text stays in bounded staging; authenticated review may render
+  transiently. Market Store/projection stay opaque; never
+  revive the legacy data plane.
   Live jobs use canonical `main`; retarget systemd before worktree removal.
 - Estimator runtime state lives under
   `/srv/trading-bot/production-data/coin-intelligence/estimator-live`. Home shows
@@ -33,8 +34,8 @@
 - Web UI is the parser/estimator contract: list normalized events, model/audit
   status, recorded main/shadow prices/times—never recompute. Parser review is a
   dashboard link, first on analytics, with actions by status.
-- Field reviews use a structured sidecar with opaque keys
-  and reviewer digests, never raw text/identity. Each revision corrects/rejects
+- Reviews use opaque keys/reviewer digests; raw text/identity never persist.
+  Each revision corrects/rejects
   the exact fact next cycle. A number-redacted syntax digest calibrates matching
   later grammar; price anchors start at review and never affect past live input.
 - Input health separates heartbeat from market-hours freshness, rejects stale

@@ -1948,12 +1948,14 @@ class EstimatorTests(unittest.TestCase):
         from core.market_intelligence.coin_group_feedback import (
             mark_coin_group_parser_feedback_applied,
         )
+        from core.market_intelligence.market_contracts import derive_event_key
 
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             db_path = root / "conversation.sqlite3"
             calibration_db = root / "calibration.sqlite3"
             feedback_db = root / "parser-feedback.sqlite3"
+            staging_db = root / "coin-groups.sqlite3"
             analytics_root = root / "analytics" / "training-snapshots"
             analytics_root.mkdir(parents=True)
             stale = sqlite3.connect(analytics_root / "group-training-stale.sqlite3")
@@ -1970,7 +1972,48 @@ class EstimatorTests(unittest.TestCase):
                 """
             )
             stale.close()
-            event_time = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+            event_time = (
+                datetime.now(timezone.utc)
+                .replace(microsecond=0)
+                .isoformat()
+                .replace("+00:00", "Z")
+            )
+            expires_at = (
+                datetime.now(timezone.utc)
+                .replace(microsecond=0)
+                + timedelta(days=3)
+            ).isoformat().replace("+00:00", "Z")
+            offer_keys = {
+                row_id: derive_event_key(
+                    "coin-group-offer-v1", 1, row_id, 0
+                )
+                for row_id in (1, 2)
+            }
+            trade_key = derive_event_key("coin-group-trade-v1", 1, 1, 3)
+            staging = sqlite3.connect(staging_db)
+            staging.execute(
+                """
+                CREATE TABLE coin_group_staged_messages(
+                    group_number INTEGER,message_id INTEGER,event_time_utc TEXT,
+                    available_at_utc TEXT,message_text TEXT,
+                    reply_to_message_id INTEGER,expires_at_utc TEXT
+                )
+                """
+            )
+            staging.executemany(
+                "INSERT INTO coin_group_staged_messages VALUES(?,?,?,?,?,?,?)",
+                (
+                    (
+                        1, 1, event_time, event_time,
+                        "۵ تا 188/600 ف <script>alert(1)</script>", None,
+                        expires_at,
+                    ),
+                    (1, 2, event_time, event_time, "3تا نقدی 187خ", None, expires_at),
+                    (1, 3, event_time, event_time, "قبوله ۵ تا 188/600", 1, expires_at),
+                ),
+            )
+            staging.commit()
+            staging.close()
             relevance = '{"source_event_time_utc":"' + event_time + '"}'
             connection = sqlite3.connect(db_path)
             connection.executescript(
@@ -2008,7 +2051,7 @@ class EstimatorTests(unittest.TestCase):
             for row_id, model_eligible in ((1, 1), (2, 0)):
                 connection.execute(
                     "INSERT INTO canonical_group_projection VALUES(?,?,?,?,?,?)",
-                    (bytes([row_id]) * 16, "OFFER", row_id, row_id, event_time, "test"),
+                    (offer_keys[row_id], "OFFER", row_id, row_id, event_time, "test"),
                 )
                 connection.execute(
                     "INSERT INTO messages VALUES(?,?,?,?,?)",
@@ -2024,7 +2067,7 @@ class EstimatorTests(unittest.TestCase):
                 )
             connection.execute(
                 "INSERT INTO canonical_group_projection VALUES(?,?,?,?,?,?)",
-                (b"t" * 16, "TRADE", 3, 3, event_time, "test"),
+                (trade_key, "TRADE", 3, 3, event_time, "test"),
             )
             connection.execute(
                 "INSERT INTO messages VALUES(?,?,?,?,?)",
@@ -2085,7 +2128,7 @@ class EstimatorTests(unittest.TestCase):
                 db_path,
                 feedback_db,
                 {
-                    "event_id": (bytes([2]) * 16).hex(),
+                    "event_id": offer_keys[2].hex(),
                     "ambiguous_fields": ["settlement"],
                     "event_confirmed": True,
                     "commodity_code": "IMAM",
@@ -2098,6 +2141,7 @@ class EstimatorTests(unittest.TestCase):
                 },
                 reviewer="test-operator",
             )
+            self.assertNotIn(b"<script>alert(1)</script>", feedback_db.read_bytes())
 
             with patch.dict(
                 "os.environ",
@@ -2108,6 +2152,7 @@ class EstimatorTests(unittest.TestCase):
                     db_path,
                     calibration_db,
                     feedback_db=feedback_db,
+                    coin_group_staging_db=staging_db,
                     range_type="today",
                 )
                 audit_without_ledger = query_model_event_audit(
@@ -2120,6 +2165,7 @@ class EstimatorTests(unittest.TestCase):
                     db_path,
                     calibration_db=calibration_db,
                     feedback_db=feedback_db,
+                    coin_group_staging_db=staging_db,
                     range_type="today",
                 ).decode("utf-8")
             summary = data["groups"][1]["summary"]
@@ -2161,6 +2207,25 @@ class EstimatorTests(unittest.TestCase):
             self.assertIn("Shadow یادگیری ماشین", body)
             self.assertIn("اصلاح بازخورد", body)
             self.assertIn("<td class='event-status-cell'>", body)
+            self.assertIn("آفر خام کاربر", body)
+            self.assertIn(
+                "۵ تا 188/600 ف &lt;script&gt;alert(1)&lt;/script&gt;", body
+            )
+            self.assertNotIn("۵ تا 188/600 ف <script>alert(1)</script>", body)
+            source_offer = next(
+                event
+                for event in audit["events"]
+                if event["event_id"] == offer_keys[1].hex()
+            )
+            self.assertEqual(
+                source_offer["raw_offer_text"],
+                "۵ تا 188/600 ف <script>alert(1)</script>",
+            )
+            trade_event = next(
+                event for event in audit["events"] if event["event_type"] == "TRADE"
+            )
+            self.assertEqual(trade_event["raw_offer_text"], source_offer["raw_offer_text"])
+            self.assertEqual(trade_event["raw_event_text"], "قبوله ۵ تا 188/600")
             reviewed_event = next(
                 event
                 for event in audit["events"]

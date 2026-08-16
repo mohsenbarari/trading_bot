@@ -90,6 +90,11 @@ from core.market_intelligence.coin_group_feedback import (  # noqa: E402
     load_coin_group_parser_feedback,
     record_coin_group_parser_feedback,
 )
+from core.market_intelligence.coin_groups import (  # noqa: E402
+    CoinGroupMessageInput,
+    parse_coin_group_offers,
+)
+from core.market_intelligence.market_contracts import derive_event_key  # noqa: E402
 from telegram_price_collector.external_collectors import (  # noqa: E402
     ExternalSourceError,
     fetch_binance_paxg_live,
@@ -1636,11 +1641,120 @@ def _parser_feedback_error_message(error: BaseException) -> str:
     )
 
 
+def _load_private_group_text_by_event(
+    staging_db: Path | None,
+    event_ids: set[bytes],
+) -> dict[bytes, dict[str, str]]:
+    """Resolve current raw text from bounded private staging, without copying it.
+
+    Event keys are reconstructed at this private boundary.  No Telegram message
+    identifier, sender identity, or text crosses into Market Store or feedback
+    storage; returned text exists only for the authenticated response render.
+    """
+
+    if staging_db is None or not event_ids:
+        return {}
+    try:
+        database = staging_db.expanduser().resolve()
+        database.relative_to(REPO_ROOT.resolve())
+    except ValueError:
+        pass
+    except (OSError, RuntimeError):
+        return {}
+    else:
+        return {}
+    if not database.is_file():
+        return {}
+
+    connection: sqlite3.Connection | None = None
+    try:
+        connection = sqlite3.connect(f"file:{database}?mode=ro", uri=True)
+        connection.row_factory = sqlite3.Row
+        if connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' "
+            "AND name='coin_group_staged_messages'"
+        ).fetchone() is None:
+            return {}
+        now = iso_utc(datetime.now(timezone.utc))
+        rows = connection.execute(
+            """
+            SELECT group_number,message_id,event_time_utc,available_at_utc,
+                   message_text,reply_to_message_id
+            FROM coin_group_staged_messages
+            WHERE available_at_utc<=? AND expires_at_utc>?
+            ORDER BY group_number,event_time_utc,message_id
+            """,
+            (now, now),
+        ).fetchall()
+    except (OSError, sqlite3.Error, ValueError):
+        return {}
+    finally:
+        if connection is not None:
+            connection.close()
+
+    by_message = {
+        (int(row["group_number"]), int(row["message_id"])): row for row in rows
+    }
+    resolved: dict[bytes, dict[str, str]] = {}
+    for row in rows:
+        group_number = int(row["group_number"])
+        message_id = int(row["message_id"])
+        raw_text = str(row["message_text"] or "")
+        source = CoinGroupMessageInput(
+            group_number=group_number,
+            source_event_id=message_id,
+            published_at_utc=str(row["event_time_utc"]),
+            available_at_utc=str(row["available_at_utc"]),
+            text=raw_text,
+        )
+        try:
+            offer_count = len(parse_coin_group_offers(source))
+        except (TypeError, ValueError):
+            offer_count = 0
+        for offer_index in range(offer_count):
+            event_key = derive_event_key(
+                "coin-group-offer-v1", group_number, message_id, offer_index
+            )
+            if event_key in event_ids:
+                resolved[event_key] = {
+                    "raw_offer_text": raw_text,
+                    "raw_event_text": raw_text,
+                }
+
+        reply_id = row["reply_to_message_id"]
+        if reply_id is None:
+            continue
+        root = row
+        seen = {message_id}
+        while root["reply_to_message_id"] is not None:
+            parent_id = int(root["reply_to_message_id"])
+            if parent_id in seen:
+                break
+            parent = by_message.get((group_number, parent_id))
+            if parent is None:
+                break
+            seen.add(parent_id)
+            root = parent
+        root_message_id = int(root["message_id"])
+        if root_message_id == message_id:
+            continue
+        event_key = derive_event_key(
+            "coin-group-trade-v1", group_number, root_message_id, message_id
+        )
+        if event_key in event_ids:
+            resolved[event_key] = {
+                "raw_offer_text": str(root["message_text"] or ""),
+                "raw_event_text": raw_text,
+            }
+    return resolved
+
+
 def query_model_event_audit(
     conversation_db: Path,
     calibration_db: Path,
     *,
     feedback_db: Path = DEFAULT_REVIEW_DECISIONS_DB,
+    coin_group_staging_db: Path | None = None,
     range_type: str = "today",
     start_shamsi: str | None = None,
     end_shamsi: str | None = None,
@@ -1846,6 +1960,14 @@ def query_model_event_audit(
         return candidate if 0 <= delay <= maximum_delay else None
 
     parser_feedback = load_coin_group_parser_feedback(feedback_db)
+    private_text = _load_private_group_text_by_event(
+        coin_group_staging_db,
+        {
+            bytes.fromhex(str(row["event_id"]))
+            for row in rows
+            if re.fullmatch(r"[0-9a-fA-F]{32,128}", str(row["event_id"]))
+        },
+    )
     events: list[dict[str, Any]] = []
     missing_main = 0
     model_input_count = 0
@@ -1855,6 +1977,7 @@ def query_model_event_audit(
             review = parser_feedback.get(bytes.fromhex(event_id))
         except ValueError:
             review = None
+        raw_text = private_text.get(bytes.fromhex(event_id), {})
         model_eligible = bool(row["model_eligible"])
         model_input_count += int(model_eligible)
         available_at = parse_datetime(str(row["available_at_utc"]))
@@ -1901,6 +2024,8 @@ def query_model_event_audit(
                     if row["resolution_reason"] is not None
                     else None
                 ),
+                "raw_offer_text": raw_text.get("raw_offer_text"),
+                "raw_event_text": raw_text.get("raw_event_text"),
                 "status": status,
                 "exclusion_reason": reason or None,
                 "estimates": estimates,
@@ -2111,8 +2236,33 @@ def _render_event_estimate_cell(prediction: object) -> str:
     )
 
 
+def _render_private_event_text(event: dict[str, Any]) -> str:
+    raw_offer = event.get("raw_offer_text")
+    if not isinstance(raw_offer, str) or not raw_offer.strip():
+        return (
+            "<span class='raw-text-unavailable'>متن خام در staging سه‌روزه "
+            "موجود نیست.</span>"
+        )
+    result = (
+        "<div class='raw-event-text'><strong>آفر خام کاربر</strong>"
+        f"<pre>{html.escape(raw_offer)}</pre>"
+    )
+    raw_event = event.get("raw_event_text")
+    if (
+        event.get("event_type") == "TRADE"
+        and isinstance(raw_event, str)
+        and raw_event.strip()
+        and raw_event != raw_offer
+    ):
+        result += (
+            "<strong>پیام خام تأیید معامله</strong>"
+            f"<pre>{html.escape(raw_event)}</pre>"
+        )
+    return result + "</div>"
+
+
 def render_model_event_audit(audit: dict[str, Any]) -> str:
-    """Render every canonical detection without exposing private group text."""
+    """Render canonical detections with ephemeral authenticated review text."""
 
     model_labels = audit.get("model_labels")
     model_labels = model_labels if isinstance(model_labels, dict) else {}
@@ -2196,6 +2346,7 @@ def render_model_event_audit(audit: dict[str, Any]) -> str:
             f"<td class='event-status-cell'><span class='event-status {status.lower()}' title='{reason}'>{status_text}</span>"
             f"{review_summary}<button type='button' class='parser-feedback-btn' data-review='{review_payload}' "
             f"onclick='openParserFeedback(this)'>{review_label}</button></td>"
+            f"<td class='raw-text-cell'>{_render_private_event_text(event)}</td>"
             f"<td>گروه {fa_number(event.get('group_number'))}</td>"
             f"<td><strong>{event_type}</strong></td>"
             f"<td><time>{fa_datetime(event.get('source_event_time_utc'))}</time></td>"
@@ -2210,7 +2361,7 @@ def render_model_event_audit(audit: dict[str, Any]) -> str:
 
     if not rows:
         rows.append(
-            "<tr><td colspan='12' class='missing'>در این بازه هیچ رویداد canonical "
+            "<tr><td colspan='13' class='missing'>در این بازه هیچ رویداد canonical "
             "تشخیص‌داده‌شده‌ای ثبت نشده است.</td></tr>"
         )
     model_headers = "".join(
@@ -2224,7 +2375,8 @@ def render_model_event_audit(audit: dict[str, Any]) -> str:
           <h2>بازبینی parser و دفتر کامل رویدادهای مدل</h2>
           <p>هر ردیف یک آفر یا معاملهٔ canonical است. فقط ردیف سبز واقعاً وارد مدل شده؛
           قیمت‌ها از دفتر ثبت پیش‌بینی همان چرخه خوانده شده‌اند و بازبرآورد امروزی نیستند.
-          دکمهٔ بازبینی کنار وضعیت هر ردیف، فیلدهای مبهم یا اشتباه را برای کالیبراسیون parser ثبت می‌کند.</p>
+          دکمهٔ بازبینی کنار وضعیت هر ردیف، فیلدهای مبهم یا اشتباه را برای کالیبراسیون parser ثبت می‌کند.
+          متن خام فقط از staging خصوصی سه‌روزه خوانده می‌شود و در بازخورد یا مدل کپی نمی‌شود.</p>
         </div>
         <span class='badge'>آخرین خواندن: {fa_datetime(audit.get('generated_at_utc'))}</span>
       </div>
@@ -2237,7 +2389,7 @@ def render_model_event_audit(audit: dict[str, Any]) -> str:
       <div class='table-wrap event-audit-wrap'>
         <table class='event-audit-table'>
           <thead><tr>
-            <th>وضعیت / بازبینی parser</th><th>گروه</th><th>رویداد</th><th>زمان پیام</th>
+            <th>وضعیت / بازبینی parser</th><th>آفر خام کاربر</th><th>گروه</th><th>رویداد</th><th>زمان پیام</th>
             <th>زمان دسترس‌پذیری برای مدل</th><th>کالا</th><th>سمت / تسویه</th>
             <th>فی واقعی رویداد / تعداد</th>{model_headers}
           </tr></thead>
@@ -5744,6 +5896,7 @@ def render_analytics_page(
     *,
     calibration_db: Path = DEFAULT_CALIBRATION_DB,
     feedback_db: Path = DEFAULT_REVIEW_DECISIONS_DB,
+    coin_group_staging_db: Path | None = None,
     analytics_path: str = "/analytics",
     home_path: str = "/",
     logout_path: str = "/logout",
@@ -5762,6 +5915,7 @@ def render_analytics_page(
         conversation_db,
         calibration_db,
         feedback_db=feedback_db,
+        coin_group_staging_db=coin_group_staging_db,
         range_type=range_type,
         start_shamsi=start_shamsi,
         end_shamsi=end_shamsi,
@@ -6301,11 +6455,11 @@ td {{
 .event-audit-summary strong {{ color: var(--accent-gold); margin-right: 4px; }}
 .event-audit-summary .warning {{ border-color: var(--accent-rose); }}
 .event-audit-wrap {{ max-height: 68vh; overflow: auto; }}
-.event-audit-table {{ min-width: 2140px; }}
+.event-audit-table {{ min-width: 2480px; }}
 .event-audit-table thead {{ position: sticky; top: 0; z-index: 2; }}
 .event-audit-table td {{ vertical-align: top; white-space: normal; min-width: 105px; }}
-.event-audit-table td:nth-child(4),
-.event-audit-table td:nth-child(5) {{ min-width: 165px; }}
+.event-audit-table td:nth-child(5),
+.event-audit-table td:nth-child(6) {{ min-width: 165px; }}
 .event-audit-table th:first-child,
 .event-audit-table td:first-child {{
   position: sticky;
@@ -6317,6 +6471,27 @@ td {{
 }}
 .event-audit-table th:first-child {{ background: #0f172a; z-index: 3; }}
 .event-status-cell {{ min-width: 185px !important; }}
+.raw-text-cell {{ min-width: 320px !important; max-width: 420px; }}
+.raw-event-text strong {{ display: block; color: var(--accent-gold); font-size: 10.5px; }}
+.raw-event-text strong:not(:first-child) {{ margin-top: 9px; color: var(--accent-cyan); }}
+.raw-event-text pre {{
+  margin: 5px 0 0;
+  padding: 8px 10px;
+  max-height: 150px;
+  overflow: auto;
+  border: 1px solid var(--border-line);
+  border-radius: 8px;
+  background: #0f172a;
+  color: var(--text-main);
+  font: inherit;
+  font-size: 11.5px;
+  line-height: 1.8;
+  text-align: right;
+  direction: rtl;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}}
+.raw-text-unavailable {{ color: var(--text-sub); font-size: 10.5px; line-height: 1.8; }}
 .event-status {{
   display: inline-block;
   padding: 4px 8px;
@@ -6733,6 +6908,7 @@ def handler_factory(
     conversation_db: Path,
     calibration_db: Path,
     feedback_db: Path,
+    coin_group_staging_db: Path | None,
     write_token: str | None,
     refresh_estimate,
     group_live_control: GroupLiveInputControl,
@@ -6931,6 +7107,7 @@ def handler_factory(
                     conversation_db,
                     calibration_db=calibration_db,
                     feedback_db=feedback_db,
+                    coin_group_staging_db=coin_group_staging_db,
                     analytics_path=analytics_path,
                     home_path=normalized,
                     logout_path=logout_path,
@@ -7364,6 +7541,7 @@ def start_web_server(
     conversation_db: Path,
     calibration_db: Path,
     feedback_db: Path,
+    coin_group_staging_db: Path | None,
     write_token: str | None,
     refresh_estimate,
     group_live_control: GroupLiveInputControl,
@@ -7377,6 +7555,7 @@ def start_web_server(
             conversation_db=conversation_db,
             calibration_db=calibration_db,
             feedback_db=feedback_db,
+            coin_group_staging_db=coin_group_staging_db,
             write_token=write_token,
             refresh_estimate=refresh_estimate,
             group_live_control=group_live_control,
@@ -8295,6 +8474,15 @@ def build_parser() -> argparse.ArgumentParser:
         default=DEFAULT_REVIEW_DECISIONS_DB,
         help="Privacy-safe operator corrections used by the coin-group parser.",
     )
+    parser.add_argument(
+        "--coin-group-staging-db",
+        type=Path,
+        default=None,
+        help=(
+            "Optional external three-day private staging database used only "
+            "to render authenticated parser review text."
+        ),
+    )
     parser.add_argument("--state", type=Path, default=DEFAULT_STATE)
     parser.add_argument(
         "--group-live-control",
@@ -8415,6 +8603,7 @@ def main() -> int:
         conversation_db=args.conversation_db,
         calibration_db=args.calibration_db,
         feedback_db=args.parser_feedback_db,
+        coin_group_staging_db=args.coin_group_staging_db,
         write_token=write_token,
         refresh_estimate=refresh_from_web,
         group_live_control=group_live_control,

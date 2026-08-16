@@ -22,5 +22,8 @@ fi
 if [[ "${COIN_RATE_ESTIMATOR_NO_EXTERNAL:-0}" == "1" ]]; then
   args+=(--no-external)
 fi
+if [[ -n "${COIN_RATE_ESTIMATOR_COIN_GROUP_STAGING_DB:-}" ]]; then
+  args+=(--coin-group-staging-db "$COIN_RATE_ESTIMATOR_COIN_GROUP_STAGING_DB")
+fi
 
 exec "${args[@]}"
