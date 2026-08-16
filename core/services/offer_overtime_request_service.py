@@ -15,6 +15,7 @@ from typing import Any, Callable, Awaitable
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from core.offer_lifecycle import (
     OfferRequestIntakePhase,
@@ -687,7 +688,14 @@ async def promote_next_for_owner(
         if load_offer is not None:
             offer = await load_offer(db, int(local_offer_id))
         else:
-            offer = await db.get(Offer, int(local_offer_id))
+            # The Telegram approval copy needs the commodity name. Eager-load
+            # it inside the active async session; relationship lazy-loading
+            # from the synchronous message builder raises MissingGreenlet.
+            offer = await db.get(
+                Offer,
+                int(local_offer_id),
+                options=[selectinload(Offer.commodity)],
+            )
 
     invalid_reason = await _revalidate_offer_for_promotion(
         offer,

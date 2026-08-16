@@ -132,6 +132,7 @@ class _MemoryDB:
         self.rows: list[OfferRequest] = []
         self.offers = dict(offers or {})
         self.added: list[OfferRequest] = []
+        self.get_calls: list[tuple[object, object, dict]] = []
         self.flush = AsyncMock(side_effect=self._flush)
 
     def add(self, obj):
@@ -144,7 +145,8 @@ class _MemoryDB:
             if getattr(row, "id", None) is None:
                 row.id = index
 
-    async def get(self, model, ident):
+    async def get(self, model, ident, **kwargs):
+        self.get_calls.append((model, ident, kwargs))
         if model.__name__ == "Offer":
             return self.offers.get(int(ident))
         return None
@@ -384,6 +386,8 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.ledger.result_status, OfferRequestStatus.OVERTIME_DELIVERING)
         self.assertIsNone(result.ledger.presented_at)
         self.assertEqual(result.ledger.telegram_delivery_job_id, 42)
+        offer_get = next(call for call in db.get_calls if call[0].__name__ == "Offer")
+        self.assertTrue(offer_get[2].get("options"))
         enqueue.assert_awaited_once()
 
         await mark_presented(
