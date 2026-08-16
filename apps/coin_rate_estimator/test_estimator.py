@@ -1913,6 +1913,8 @@ class EstimatorTests(unittest.TestCase):
         self.assertIn("نرخ عمومی سکه؛ مستقل از گروه‌های معاملاتی", body)
         self.assertIn("داده موجود؛ خارج از قرارداد", body)
         self.assertIn("تسویهٔ صریح ندارد و وارد مدل نشده", body)
+        self.assertIn("بازبینی parser", body)
+        self.assertIn("#parser-review-ledger", body)
 
     def test_analytics_query_and_render(self) -> None:
         from live_server import parse_shamsi_to_utc_iso, query_user_analytics, render_analytics_page
@@ -1928,6 +1930,13 @@ class EstimatorTests(unittest.TestCase):
         self.assertIn("معاملات تشخیص‌داده‌شده", body)
         self.assertIn("گروه ۱", body)
         self.assertIn("گروه ۲", body)
+        self.assertIn("id='parser-review-ledger'", body)
+        self.assertIn("وضعیت / بازبینی parser", body)
+        self.assertNotIn("<th>بازخورد parser</th>", body)
+        self.assertLess(
+            body.index("id='parser-review-ledger'"),
+            body.index("تحلیل و خلاصه آمار"),
+        )
 
     def test_today_analytics_prefers_live_canonical_audit_over_stale_snapshot(self) -> None:
         from live_server import (
@@ -2147,10 +2156,11 @@ class EstimatorTests(unittest.TestCase):
                     if event["status"] != "MODEL_INPUT"
                 )
             )
-            self.assertIn("دفتر کامل رویدادهای مدل و قیمت واقعی همان لحظه", body)
+            self.assertIn("بازبینی parser و دفتر کامل رویدادهای مدل", body)
             self.assertIn("ورودی واقعی مدل", body)
             self.assertIn("Shadow یادگیری ماشین", body)
             self.assertIn("اصلاح بازخورد", body)
+            self.assertIn("<td class='event-status-cell'>", body)
             reviewed_event = next(
                 event
                 for event in audit["events"]

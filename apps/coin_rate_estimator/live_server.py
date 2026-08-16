@@ -2181,7 +2181,7 @@ def render_model_event_audit(audit: dict[str, Any]) -> str:
             review_label = "اصلاح بازخورد"
         else:
             review_summary = ""
-            review_label = "مشخص‌کردن ابهام"
+            review_label = "بازبینی parser"
         model_cells = "".join(
             f"<td class='estimate-cell'>{_render_event_estimate_cell(estimates.get(model_id))}</td>"
             for model_id in _EVENT_AUDIT_MODELS
@@ -2193,25 +2193,24 @@ def render_model_event_audit(audit: dict[str, Any]) -> str:
         )
         rows.append(
             "<tr>"
+            f"<td class='event-status-cell'><span class='event-status {status.lower()}' title='{reason}'>{status_text}</span>"
+            f"{review_summary}<button type='button' class='parser-feedback-btn' data-review='{review_payload}' "
+            f"onclick='openParserFeedback(this)'>{review_label}</button></td>"
             f"<td>گروه {fa_number(event.get('group_number'))}</td>"
             f"<td><strong>{event_type}</strong></td>"
             f"<td><time>{fa_datetime(event.get('source_event_time_utc'))}</time></td>"
             f"<td><time>{fa_datetime(event.get('available_at_utc'))}</time></td>"
-            f"<td><span class='event-status {status.lower()}' title='{reason}'>{status_text}</span></td>"
             f"<td>{html.escape(str(event.get('commodity') or 'نامشخص'))}</td>"
             f"<td>{side} · {settlement}</td>"
             f"<td class='numeric'><strong>{fa_number(event.get('price_toman'))}</strong> تومان"
             f"<small>{fa_number(event.get('quantity')) if event.get('quantity') is not None else '—'} عدد</small></td>"
             f"{model_cells}"
-            f"<td class='feedback-cell'>{review_summary}"
-            f"<button type='button' class='parser-feedback-btn' data-review='{review_payload}' "
-            f"onclick='openParserFeedback(this)'>{review_label}</button></td>"
             "</tr>"
         )
 
     if not rows:
         rows.append(
-            "<tr><td colspan='13' class='missing'>در این بازه هیچ رویداد canonical "
+            "<tr><td colspan='12' class='missing'>در این بازه هیچ رویداد canonical "
             "تشخیص‌داده‌شده‌ای ثبت نشده است.</td></tr>"
         )
     model_headers = "".join(
@@ -2219,12 +2218,13 @@ def render_model_event_audit(audit: dict[str, Any]) -> str:
         for model_id in _EVENT_AUDIT_MODELS
     )
     return f"""
-    <section class='event-audit-section'>
+    <section id='parser-review-ledger' class='event-audit-section'>
       <div class='section-head'>
         <div>
-          <h2>دفتر کامل رویدادهای مدل و قیمت واقعی همان لحظه</h2>
+          <h2>بازبینی parser و دفتر کامل رویدادهای مدل</h2>
           <p>هر ردیف یک آفر یا معاملهٔ canonical است. فقط ردیف سبز واقعاً وارد مدل شده؛
-          قیمت‌ها از دفتر ثبت پیش‌بینی همان چرخه خوانده شده‌اند و بازبرآورد امروزی نیستند.</p>
+          قیمت‌ها از دفتر ثبت پیش‌بینی همان چرخه خوانده شده‌اند و بازبرآورد امروزی نیستند.
+          دکمهٔ بازبینی کنار وضعیت هر ردیف، فیلدهای مبهم یا اشتباه را برای کالیبراسیون parser ثبت می‌کند.</p>
         </div>
         <span class='badge'>آخرین خواندن: {fa_datetime(audit.get('generated_at_utc'))}</span>
       </div>
@@ -2237,9 +2237,9 @@ def render_model_event_audit(audit: dict[str, Any]) -> str:
       <div class='table-wrap event-audit-wrap'>
         <table class='event-audit-table'>
           <thead><tr>
-            <th>گروه</th><th>رویداد</th><th>زمان پیام</th><th>زمان دسترس‌پذیری برای مدل</th>
-            <th>وضعیت</th><th>کالا</th><th>سمت / تسویه</th><th>فی واقعی رویداد / تعداد</th>
-            {model_headers}<th>بازخورد parser</th>
+            <th>وضعیت / بازبینی parser</th><th>گروه</th><th>رویداد</th><th>زمان پیام</th>
+            <th>زمان دسترس‌پذیری برای مدل</th><th>کالا</th><th>سمت / تسویه</th>
+            <th>فی واقعی رویداد / تعداد</th>{model_headers}
           </tr></thead>
           <tbody>{''.join(rows)}</tbody>
         </table>
@@ -5026,7 +5026,7 @@ def render_page(
         navigation = (
             f"<nav class='header-actions' aria-label='ناوبری داشبورد'>{user_badge} "
             f"<a class='nav-btn secondary' href='{html.escape(shadow_path)}'>مدل‌های سایه</a> "
-            f"<a class='nav-btn secondary' href='{html.escape(analytics_path)}'>آمار کاربران</a> "
+            f"<a class='nav-btn secondary' href='{html.escape(analytics_path + '#parser-review-ledger')}'>بازبینی parser</a> "
             f"<a class='nav-btn' href='{html.escape(manual_path)}'>ثبت دستی آفر</a> "
             f"{logout_btn}</nav>"
         )
@@ -5871,7 +5871,7 @@ def render_analytics_page(
 <html lang="fa" dir="rtl">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>آمار و تحلیل کاربران گروه‌های معاملاتی</title>
+<title>بازبینی parser و آمار و تحلیل گروه‌های معاملاتی</title>
 <style>
 @import url('https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/Vazirmatn-font-face.css');
 :root {{
@@ -6301,11 +6301,22 @@ td {{
 .event-audit-summary strong {{ color: var(--accent-gold); margin-right: 4px; }}
 .event-audit-summary .warning {{ border-color: var(--accent-rose); }}
 .event-audit-wrap {{ max-height: 68vh; overflow: auto; }}
-.event-audit-table {{ min-width: 2320px; }}
+.event-audit-table {{ min-width: 2140px; }}
 .event-audit-table thead {{ position: sticky; top: 0; z-index: 2; }}
 .event-audit-table td {{ vertical-align: top; white-space: normal; min-width: 105px; }}
-.event-audit-table td:nth-child(3),
-.event-audit-table td:nth-child(4) {{ min-width: 165px; }}
+.event-audit-table td:nth-child(4),
+.event-audit-table td:nth-child(5) {{ min-width: 165px; }}
+.event-audit-table th:first-child,
+.event-audit-table td:first-child {{
+  position: sticky;
+  right: 0;
+  min-width: 185px;
+  background: #141f36;
+  border-left: 1px solid var(--border-line);
+  z-index: 1;
+}}
+.event-audit-table th:first-child {{ background: #0f172a; z-index: 3; }}
+.event-status-cell {{ min-width: 185px !important; }}
 .event-status {{
   display: inline-block;
   padding: 4px 8px;
@@ -6341,7 +6352,6 @@ td {{
 .estimate-cell {{ min-width: 190px !important; direction: rtl; }}
 .estimate-cell strong {{ color: var(--accent-cyan); }}
 .event-no-estimate {{ color: var(--text-sub); }}
-.feedback-cell {{ min-width: 175px !important; }}
 .parser-feedback-btn {{
   display: block;
   width: 100%;
@@ -6410,7 +6420,7 @@ td {{
     <div class="header-brand">
       <div class="logo-badge">📊</div>
       <div>
-        <h1>آمار و تحلیل <span>کاربران گروه‌های معاملاتی</span></h1>
+        <h1>بازبینی parser و <span>آمار و تحلیل گروه‌های معاملاتی</span></h1>
         <small style="color:var(--text-sub)">بازه‌ فعلی: <strong>{data['range_label']}</strong></small>
       </div>
     </div>
@@ -6433,8 +6443,8 @@ td {{
   </div>
 
   {source_notice}
-  {''.join(groups_html)}
   {event_audit_html}
+  {''.join(groups_html)}
 </main>
 
 <div id="detail-modal" class="modal-overlay" onclick="closeUserModal(event)">

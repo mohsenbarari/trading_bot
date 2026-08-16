@@ -30,9 +30,9 @@
 - Estimator runtime state lives under
   `/srv/trading-bot/production-data/coin-intelligence/estimator-live`. Home shows
   primary CASH/TOMORROW inputs; shadow/realised detail stays on `/shadow`.
-- The web UI is the parser/estimator observable contract. Its ledger shows every
-  normalized offer/trade, separates input from audit-only facts, and joins
-  eligible facts to recorded main/shadow prices and cycle times—never recomputation.
+- Web UI is the parser/estimator contract: list normalized events, model/audit
+  status, recorded main/shadow prices/times—never recompute. Parser review is a
+  dashboard link, first on analytics, with actions by status.
 - Field reviews use a structured sidecar with opaque keys
   and reviewer digests, never raw text/identity. Each revision corrects/rejects
   the exact fact next cycle. A number-redacted syntax digest calibrates matching
