@@ -19,7 +19,6 @@ import {
 interface DashboardTrade {
   id: number
   trade_number: number
-  offer_id: number | null
   trade_type: 'buy' | 'sell'
   settlement_type: string
   commodity_id: number
@@ -32,10 +31,6 @@ interface DashboardTrade {
   responder_user_id: number | null
   responder_user_name: string | null
   counterparty_name: string | null
-  customer_context_visible: boolean
-  customer_context_management_name: string | null
-  customer_context_tier: string | null
-  trade_path_summary: string | null
   offer_notes: string | null
   created_at: string
 }
@@ -148,7 +143,6 @@ function normalizeTrade(value: unknown): DashboardTrade | null {
   return {
     id,
     trade_number: tradeNumber,
-    offer_id: normalizeNullableId(raw.offer_id),
     trade_type: tradeType,
     settlement_type: normalizeText(raw.settlement_type, 32),
     commodity_id: commodityId,
@@ -161,11 +155,6 @@ function normalizeTrade(value: unknown): DashboardTrade | null {
     responder_user_id: normalizeNullableId(raw.responder_user_id),
     responder_user_name: normalizeText(raw.responder_user_name, 120) || null,
     counterparty_name: normalizeText(raw.counterparty_name, 120) || null,
-    customer_context_visible: raw.customer_context_visible === true,
-    customer_context_management_name:
-      normalizeText(raw.customer_context_management_name, 120) || null,
-    customer_context_tier: normalizeText(raw.customer_context_tier, 24) || null,
-    trade_path_summary: normalizeText(raw.trade_path_summary, 240) || null,
     offer_notes: normalizeText(raw.offer_notes, 500) || null,
     created_at: createdAt,
   }
@@ -201,6 +190,13 @@ function normalizeCommodity(value: unknown): DashboardCommodity | null {
 function formatNumber(value: number | string) {
   const number = Number(value)
   return Number.isFinite(number) ? number.toLocaleString('fa-IR') : '—'
+}
+
+function formatIdentifier(value: number | string) {
+  const number = Number(value)
+  return Number.isSafeInteger(number)
+    ? number.toLocaleString('fa-IR', { useGrouping: false })
+    : '—'
 }
 
 function formatTotal(trade: DashboardTrade) {
@@ -260,6 +256,12 @@ function tradeStatusTone(status: string): BadgeTone {
 }
 
 function tradeCreatedAtLabel(value: string) {
+  // The trade API returns an already-formatted Jalali value. Parsing that as a
+  // Gregorian date produces impossible years such as ۷۸۴ in the browser.
+  const normalizedDigits = value.trim().replace(/[۰-۹]/g, (digit) => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(digit)))
+  if (/^(?:13|14)\d{2}\/\d{2}\/\d{2}(?:\s+\d{1,2}:\d{2}(?::\d{2})?)?$/.test(normalizedDigits)) {
+    return value.trim()
+  }
   const formatted = formatIranDateTime(value)
   return formatted || value
 }
@@ -269,12 +271,6 @@ function counterpartyLabel(trade: DashboardTrade) {
   return trade.responder_user_id === perspectiveUserId.value
     ? trade.offer_user_name || 'نامشخص'
     : trade.responder_user_name || 'نامشخص'
-}
-
-function customerTierLabel(value: string | null) {
-  if (value === 'tier1') return 'سطح ۱'
-  if (value === 'tier2') return 'سطح ۲'
-  return ''
 }
 
 async function loadTodayTrades() {
@@ -540,7 +536,7 @@ onUnmounted(() => {
             <thead>
               <tr>
                 <th scope="col">شماره معامله</th>
-                <th scope="col">زمان ثبت</th>
+                <th scope="col">طرف مقابل</th>
                 <th scope="col">نوع</th>
                 <th scope="col">وضعیت</th>
                 <th scope="col">کالا</th>
@@ -548,17 +544,14 @@ onUnmounted(() => {
                 <th scope="col">مقدار</th>
                 <th scope="col">قیمت واحد</th>
                 <th scope="col">ارزش کل</th>
-                <th scope="col">طرف مقابل</th>
-                <th scope="col">شماره آفر</th>
-                <th scope="col">مشتری</th>
-                <th scope="col">مسیر معامله</th>
-                <th scope="col">یادداشت آفر</th>
+                <th scope="col">زمان ثبت</th>
+                <th scope="col">توضیحات</th>
               </tr>
             </thead>
             <tbody>
               <tr v-for="trade in trades" :key="trade.id" class="dashboard-trade-row">
-                <th scope="row">{{ formatNumber(trade.trade_number) }}</th>
-                <td>{{ tradeCreatedAtLabel(trade.created_at) }}</td>
+                <th scope="row">{{ formatIdentifier(trade.trade_number) }}</th>
+                <td>{{ counterpartyLabel(trade) }}</td>
                 <td>
                   <AppStatusBadge :tone="tradeTypeForPerspective(trade) === 'buy' ? 'success' : 'danger'">
                     {{ tradeTypeLabel(trade) }}
@@ -574,18 +567,7 @@ onUnmounted(() => {
                 <td>{{ formatNumber(trade.quantity) }}</td>
                 <td>{{ formatNumber(trade.price) }} تومان</td>
                 <td>{{ formatTotal(trade) }} تومان</td>
-                <td>{{ counterpartyLabel(trade) }}</td>
-                <td>{{ trade.offer_id ? formatNumber(trade.offer_id) : '—' }}</td>
-                <td>
-                  <template v-if="trade.customer_context_visible && trade.customer_context_management_name">
-                    {{ trade.customer_context_management_name }}
-                    <small v-if="customerTierLabel(trade.customer_context_tier)">
-                      · {{ customerTierLabel(trade.customer_context_tier) }}
-                    </small>
-                  </template>
-                  <template v-else>—</template>
-                </td>
-                <td>{{ trade.trade_path_summary || '—' }}</td>
+                <td>{{ tradeCreatedAtLabel(trade.created_at) }}</td>
                 <td>{{ trade.offer_notes || '—' }}</td>
               </tr>
             </tbody>

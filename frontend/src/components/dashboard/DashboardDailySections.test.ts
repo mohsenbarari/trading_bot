@@ -54,7 +54,7 @@ function user(overrides: Record<string, unknown> = {}) {
 function trade(overrides: Record<string, unknown> = {}) {
   return {
     id: 81,
-    trade_number: 123,
+    trade_number: 123456,
     offer_id: 44,
     trade_type: 'sell',
     settlement_type: 'tomorrow',
@@ -73,7 +73,7 @@ function trade(overrides: Record<string, unknown> = {}) {
     customer_context_tier: 'tier1',
     trade_path_summary: 'مسیر مستقیم وب',
     offer_notes: 'تحویل در دفتر',
-    created_at: '۱۴۰۵/۰۲/۲۴ ۱۰:۱۵',
+    created_at: '1405/02/24 10:15',
     ...overrides,
   }
 }
@@ -124,8 +124,8 @@ describe('DashboardDailySections.vue', () => {
     ])
     const tradeRows = wrapper.findAll('.dashboard-trades__table tbody tr')
     expect(tradeRows).toHaveLength(2)
-    expect(tradeRows[0].findAll('th, td')).toHaveLength(14)
-    expect(wrapper.findAll('.dashboard-trades__table thead th')).toHaveLength(14)
+    expect(tradeRows[0].findAll('th, td')).toHaveLength(11)
+    expect(wrapper.findAll('.dashboard-trades__table thead th')).toHaveLength(11)
     expect(wrapper.get('.dashboard-trades__scroller').attributes()).toMatchObject({
       role: 'region',
       tabindex: '0',
@@ -133,16 +133,20 @@ describe('DashboardDailySections.vue', () => {
     expect(wrapper.get('.dashboard-trades__scroller').attributes('aria-label')).toContain('۲ معامله')
     expect(wrapper.text()).toContain('جدول را به چپ یا راست بکشید')
     expect(wrapper.text()).toContain('شماره معامله')
-    expect(wrapper.text()).toContain('۱۲۳')
+    expect(wrapper.text()).toContain('۱۲۳۴۵۶')
+    expect(wrapper.text()).not.toContain('۱۲۳٬۴۵۶')
     expect(wrapper.text()).toContain('سکه امامی')
     expect(wrapper.text()).toContain('فردایی')
     expect(wrapper.text()).toContain('۵۰٬۰۰۰٬۰۰۰ تومان')
     expect(wrapper.text()).toContain('۱۰۰٬۰۰۰٬۰۰۰ تومان')
     expect(wrapper.text()).toContain('همکار بازار')
-    expect(wrapper.text()).toContain('شماره آفر')
-    expect(wrapper.text()).toContain('مشتری ویژه')
-    expect(wrapper.text()).toContain('مسیر مستقیم وب')
+    expect(wrapper.text()).not.toContain('شماره آفر')
+    expect(wrapper.text()).not.toContain('مسیر معامله')
+    expect(wrapper.text()).not.toContain('یادداشت آفر')
+    expect(wrapper.text()).toContain('توضیحات')
     expect(wrapper.text()).toContain('تحویل در دفتر')
+    expect(wrapper.text()).toContain('1405/02/24 10:15')
+    expect(wrapper.text()).not.toContain('۷۸۴')
     expect(wrapper.text()).toContain('۱۲۵')
     expect(wrapper.text()).not.toContain('۱۲۴')
   })

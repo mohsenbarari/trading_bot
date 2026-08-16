@@ -558,7 +558,7 @@ describe('MarketView.vue', () => {
     wrapper.unmount()
   })
 
-  it('does not load market history offers for tier customers', async () => {
+  it('loads read-only market history offers for tier customers', async () => {
     marketViewMocks.apiFetchMock.mockImplementation(async (path: string, options?: RequestInit) => {
       if (path === '/api/notifications/preferences' && options?.method === 'PATCH') {
         return responseOf(JSON.parse(String(options.body)))
@@ -582,7 +582,7 @@ describe('MarketView.vue', () => {
     const wrapper = await mountMarketView()
     await flushPromises()
 
-    expect(marketViewMocks.apiFetchMock).not.toHaveBeenCalledWith('/api/offers/market-history?skip=0&limit=25')
+    expect(marketViewMocks.apiFetchMock).toHaveBeenCalledWith('/api/offers/market-history?skip=0&limit=25')
 
     wrapper.unmount()
   })

@@ -20,7 +20,7 @@ from bot.utils.customer_display import resolve_customer_display_name_for_viewer
 from bot.utils.redis_helpers import check_double_click
 from core.utils import check_user_limits, to_jalali_str, utc_now
 from core.enums import UserRole
-from core.offer_settlement import settlement_type_value, trade_settlement_label
+from core.offer_settlement import settlement_type_value, trade_settlement_message_line
 from core.offer_quantity import coalesce_offer_remaining_quantity
 from core.services.bot_access_policy import bot_access_denial_message, evaluate_bot_access, evaluate_bot_access_local_state
 from core.services.block_service import is_trade_blocked_by_principals
@@ -269,16 +269,16 @@ def _build_remote_trade_success_message(body: object, fallback_offer: object, am
             f"💰 فی: {int(price):,}" if isinstance(price, (int, float)) else f"💰 فی: {price}",
             f"📦 تعداد: {quantity}",
             f"🏷️ کالا: {commodity_name}",
-            f"🗓️ تسویه: {trade_settlement_label(settlement_type)}",
+            trade_settlement_message_line(settlement_type),
             f"👤 طرف معامله: {counterparty_name}",
         ]
+        normalized_notes = " ".join(str(offer_notes or "").split())
+        if normalized_notes:
+            lines.append(f"📝 توضیحات: {normalized_notes}")
         if trade_number:
             lines.append(f"🔢 شماره معامله: {trade_number}")
         if created_at:
             lines.append(f"🕐 زمان معامله: {created_at}")
-        normalized_notes = " ".join(str(offer_notes or "").split())
-        if normalized_notes:
-            lines.append(f"📝 توضیحات: {normalized_notes}")
         return "\n".join(lines)
 
     fallback_offer_type = str(_safe_enum_value(_snapshot_get(fallback_offer, "offer_type")) or "").lower()
@@ -298,7 +298,7 @@ def _build_remote_trade_success_message(body: object, fallback_offer: object, am
         f"💰 فی: {(_snapshot_get(fallback_offer, 'price', 0) or 0):,}",
         f"📦 تعداد: {amount}",
         f"🏷️ کالا: {_snapshot_get(fallback_offer, 'commodity_name') or 'نامشخص'}",
-        f"🗓️ تسویه: {trade_settlement_label(_snapshot_get(fallback_offer, 'settlement_type'))}",
+        trade_settlement_message_line(_snapshot_get(fallback_offer, "settlement_type")),
     ]
     fallback_counterparty = _snapshot_get(fallback_offer, "counterparty_name")
     if fallback_counterparty:

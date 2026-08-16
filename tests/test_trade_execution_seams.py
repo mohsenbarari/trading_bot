@@ -187,6 +187,7 @@ class TradeExecutionSeamTests(unittest.TestCase):
                     trade_datetime="1405/03/27   16:45",
                     counterparty_name="سرگروه",
                     audience_user_id=52,
+                    principal_user_id=52,
                     counterparty_user_id=78,
                     customer_relation_map={52: customer_relation},
                     trade_path_summary="مالک ↔ مشتری",
@@ -198,9 +199,13 @@ class TradeExecutionSeamTests(unittest.TestCase):
                 self.assertIn("📦 تعداد: 23", message)
                 self.assertIn("🏷️ کالا: ربع", message)
                 self.assertIn("🔢 شماره معامله: 10012", message)
-                self.assertIn("🧭 مسیر: مالک ↔ مشتری", message)
+                self.assertNotIn("🧭 مسیر: مالک ↔ مشتری", message)
                 self.assertIn("📝 توضیحات: تحویل امروز", message)
                 self.assertIn("👤 طرف معامله: سرگروه", message)
+                self.assertEqual(
+                    message.splitlines()[-2:],
+                    ["🔢 شماره معامله: 10012", "🕐 زمان معامله: 1405/03/27   16:45"],
+                )
 
                 external_message = _build_trade_notification_message(
                     trade_emoji="🟢",

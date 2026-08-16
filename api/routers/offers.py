@@ -2333,10 +2333,6 @@ async def get_market_offer_history(
     context = _resolve_offer_owner_context(context, current_user)
     _ensure_accountant_market_access_allowed(context)
 
-    actor_relation = await get_active_customer_relation_for_customer(db, context.actor_user.id)
-    if actor_relation is not None:
-        return []
-
     cutoff_time = utc_now_naive() - timedelta(hours=since_hours)
     expired_at_expr = func.coalesce(Offer.expired_at, Offer.updated_at, Offer.created_at)
     from core.trading_settings import get_trading_settings_async
@@ -2469,10 +2465,6 @@ async def get_market_expired_offers(
     """
     context = _resolve_offer_owner_context(context, current_user)
     _ensure_accountant_market_access_allowed(context)
-
-    actor_relation = await get_active_customer_relation_for_customer(db, context.actor_user.id)
-    if actor_relation is not None:
-        return []
 
     cutoff_time = utc_now_naive() - timedelta(hours=since_hours)
     expired_at_expr = func.coalesce(Offer.expired_at, Offer.updated_at, Offer.created_at)

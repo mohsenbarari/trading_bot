@@ -26,6 +26,7 @@ def make_trade():
         offer_user=SimpleNamespace(account_name="offer-side"),
         responder_user=SimpleNamespace(account_name="responder-side"),
         commodity=SimpleNamespace(name="سکه"),
+        offer=SimpleNamespace(notes="تحویل در دفتر"),
         quantity=3,
         price=150000,
         created_at=datetime(2026, 1, 1, 12, 0, 0),
@@ -55,6 +56,7 @@ class TradeHistoryExportServiceTests(unittest.TestCase):
         self.assertEqual(rows[0].counterparty_name, "offer-side")
         self.assertRegex(rows[0].date_time_label, r"^\d{4}/\d{2}/\d{2} \d{2}:\d{2}$")
         self.assertEqual(rows[0].commodity_name, "سکه")
+        self.assertEqual(rows[0].offer_notes, "تحویل در دفتر")
 
     def test_build_trade_history_export_rows_prefers_canonical_commodity_relation(self):
         trade = make_trade()
@@ -260,6 +262,8 @@ class TradeHistoryExportServiceTests(unittest.TestCase):
                 subject_name="owner",
                 date_range_label="بازه زمانی: همه تاریخ‌ها",
                 rows=build_trade_history_export_rows([make_trade()], 2),
+                include_counterparty=False,
+                include_offer_notes=True,
             )
 
         try:
@@ -267,8 +271,10 @@ class TradeHistoryExportServiceTests(unittest.TestCase):
             self.assertTrue(os.path.exists(filename))
             self.assertEqual(
                 DummyTable.last_instance.data[0],
-                ["قیمت", "تعداد", "کالا", "نوع تسویه", "نوع معامله", "طرف دیگر معامله", "تاریخ و ساعت", "شماره معامله", "ردیف"],
+                ["توضیحات", "قیمت", "تعداد", "کالا", "نوع تسویه", "نوع معامله", "تاریخ و ساعت", "شماره معامله", "ردیف"],
             )
+            self.assertNotIn("طرف دیگر معامله", DummyTable.last_instance.data[0])
+            self.assertEqual(DummyTable.last_instance.data[1][0], "تحویل در دفتر")
             self.assertEqual(DummyTable.last_instance.data[1][-1], "1")
             self.assertEqual(DummyTable.last_instance.data[1][-2], "10001")
         finally:

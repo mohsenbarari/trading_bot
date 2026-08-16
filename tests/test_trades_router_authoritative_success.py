@@ -1334,8 +1334,7 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["price"], 50300)
 
         notification_messages = [call.args[2] for call in notif_mock.await_args_list]
-        self.assertTrue(any("🧭 مسیر: مالک ↔ مشتری سطح ۲" in message for message in notification_messages))
-        self.assertTrue(any("🧭 مسیر: مالک ↔ مشتری سطح ۱" in message for message in notification_messages))
+        self.assertFalse(any("🧭 مسیر:" in message for message in notification_messages))
 
         trade_payloads = self._private_trade_payloads()
         self.assertEqual(len(trade_payloads), 2)
@@ -1469,8 +1468,7 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, {"id": 97, "trade_number": 10010, "offer_id": None, "price": 50300})
 
         notification_messages = [call.args[2] for call in notif_mock.await_args_list]
-        self.assertTrue(any("🧭 مسیر: مالک ↔ مشتری سطح ۲" in message for message in notification_messages))
-        self.assertTrue(any("🧭 مسیر: مالک ↔ مشتری سطح ۱" in message for message in notification_messages))
+        self.assertFalse(any("🧭 مسیر:" in message for message in notification_messages))
 
         trade_payloads = self._private_trade_payloads()
         self.assertEqual(len(trade_payloads), 3)
@@ -1607,8 +1605,7 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, {"id": 98, "trade_number": 10011, "offer_id": None, "price": 99300})
 
         notification_messages = [call.args[2] for call in notif_mock.await_args_list]
-        self.assertTrue(any("🧭 مسیر: مالک ↔ مشتری سطح ۲" in message for message in notification_messages))
-        self.assertTrue(any("🧭 مسیر: مالک ↔ مشتری سطح ۱" in message for message in notification_messages))
+        self.assertFalse(any("🧭 مسیر:" in message for message in notification_messages))
 
         trade_payloads = self._private_trade_payloads()
         self.assertEqual(len(trade_payloads), 3)
@@ -1725,7 +1722,7 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, {"id": 99, "trade_number": 10012, "offer_id": None, "price": 100000})
 
         notification_messages = [call.args[2] for call in notif_mock.await_args_list]
-        self.assertTrue(any("🧭 مسیر: مالک ↔ مشتری سطح ۱" in message for message in notification_messages))
+        self.assertFalse(any("🧭 مسیر:" in message for message in notification_messages))
 
         trade_payloads = self._private_trade_payloads()
         self.assertEqual(len(trade_payloads), 2)
@@ -1846,7 +1843,7 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, {"id": 100, "trade_number": 10013, "offer_id": None, "price": 50000})
 
         notification_messages = [call.args[2] for call in notif_mock.await_args_list]
-        self.assertTrue(any("🧭 مسیر: مالک ↔ مشتری سطح ۱" in message for message in notification_messages))
+        self.assertFalse(any("🧭 مسیر:" in message for message in notification_messages))
 
         trade_payloads = self._private_trade_payloads()
         self.assertEqual(len(trade_payloads), 2)
@@ -1977,7 +1974,7 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, {"id": 101, "trade_number": 10014, "offer_id": None, "price": 100000})
 
         notification_messages = [call.args[2] for call in notif_mock.await_args_list]
-        self.assertTrue(any("🧭 مسیر: مالک ↔ مشتری سطح ۱" in message for message in notification_messages))
+        self.assertFalse(any("🧭 مسیر:" in message for message in notification_messages))
 
         trade_payloads = self._private_trade_payloads()
         self.assertEqual(len(trade_payloads), 2)
@@ -2111,7 +2108,7 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, {"id": 102, "trade_number": 10015, "offer_id": None, "price": 200000})
 
         notification_messages = [call.args[2] for call in notif_mock.await_args_list]
-        self.assertTrue(any("🧭 مسیر: مالک ↔ مشتری سطح ۱" in message for message in notification_messages))
+        self.assertFalse(any("🧭 مسیر:" in message for message in notification_messages))
 
         trade_payloads = self._private_trade_payloads()
         self.assertEqual(len(trade_payloads), 3)

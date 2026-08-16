@@ -274,7 +274,7 @@ describe('PublicProfile.vue', () => {
 
     expect(fetchMock).toHaveBeenCalledWith('/api/users-public/44', expect.objectContaining({
       headers: expect.objectContaining({
-        Authorization: 'Bearer token',
+        authorization: 'Bearer token',
       }),
     }))
     expect(wrapper.text()).toContain('owner20')
@@ -794,7 +794,7 @@ describe('PublicProfile.vue', () => {
 
     expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/blocks/30', expect.objectContaining({
       method: 'POST',
-      headers: expect.objectContaining({ Authorization: 'Bearer token' }),
+      headers: expect.objectContaining({ authorization: 'Bearer token' }),
     }))
     expect(wrapper.get('[data-test="public-block-feedback"]').text()).toBe('کاربر با موفقیت بلاک شد.')
     expect(wrapper.text()).not.toContain('متن پاسخ سرور نباید دیده شود')
@@ -890,7 +890,7 @@ describe('PublicProfile.vue', () => {
     expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/blocks/30', expect.objectContaining({
       method: 'DELETE',
       headers: expect.objectContaining({
-        Authorization: 'Bearer token',
+        authorization: 'Bearer token',
       }),
     }))
     expect(wrapper.get('[data-test="public-block-feedback"]').text()).toBe('رفع بلاک کاربر انجام شد.')
@@ -1085,7 +1085,7 @@ describe('PublicProfile.vue', () => {
 
     expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/users-public/44/project-users?limit=25&offset=25', expect.objectContaining({
       headers: expect.objectContaining({
-        Authorization: 'Bearer token',
+        authorization: 'Bearer token',
       }),
     }))
     expect(wrapper.text()).toContain('manager124')
@@ -1566,7 +1566,7 @@ describe('PublicProfile.vue', () => {
 
     expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/users/61', expect.objectContaining({
       headers: expect.objectContaining({
-        Authorization: 'Bearer token',
+        authorization: 'Bearer token',
       }),
     }))
     expect(wrapper.find('.user-profile-stub').exists()).toBe(true)
@@ -1637,7 +1637,7 @@ describe('PublicProfile.vue', () => {
 
     expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/users/61', expect.objectContaining({
       headers: expect.objectContaining({
-        Authorization: 'Bearer token',
+        authorization: 'Bearer token',
       }),
     }))
     expect(wrapper.find('.user-profile-stub').exists()).toBe(false)

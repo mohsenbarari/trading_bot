@@ -27,11 +27,12 @@ from starlette.background import BackgroundTask
 from core.db import get_db
 from core.config import settings
 from core.enums import NotificationLevel, NotificationCategory, SettlementType
-from core.offer_settlement import settlement_type_value, trade_settlement_label
+from core.offer_settlement import settlement_type_value, trade_settlement_label, trade_settlement_message_line
 from core.offer_quantity import coalesce_offer_remaining_quantity
 from core.utils import (
     check_user_limits, increment_user_counter, to_jalali_str,
     create_user_notification as _legacy_create_user_notification,
+    unique_user_ids,
 )
 from core.services.accountant_chat_contract import AccountantChatIdentity, load_accountant_chat_identity_map
 from core.services.accountant_relation_service import build_trade_notification_audience_user_ids
@@ -1636,6 +1637,29 @@ def _should_hide_counterparty_for_recipient(
     return normalized_counterparty_user_id != owner_user_id
 
 
+def _should_hide_trade_path_for_recipient(
+    *,
+    audience_user_id: int | None,
+    principal_user_id: int | None,
+    counterparty_user_id: int | None,
+    customer_relation_map: Mapping[int, CustomerRelation | object] | None,
+) -> bool:
+    normalized_audience_user_id = _coerce_trade_user_id(audience_user_id)
+    if normalized_audience_user_id is None or not customer_relation_map:
+        return False
+    for participant_user_id in unique_user_ids([principal_user_id, counterparty_user_id]):
+        relation = customer_relation_map.get(participant_user_id)
+        if _normalize_customer_tier_value(getattr(relation, "customer_tier", None)) not in {
+            CustomerTier.TIER_1.value,
+            CustomerTier.TIER_2.value,
+        }:
+            continue
+        owner_user_id = _coerce_trade_user_id(getattr(relation, "owner_user_id", None))
+        if normalized_audience_user_id in {participant_user_id, owner_user_id}:
+            return True
+    return False
+
+
 def _normalize_offer_notes_for_notification(offer_notes: str | None) -> str | None:
     normalized = " ".join(str(offer_notes or "").split())
     return normalized or None
@@ -1673,13 +1697,18 @@ def _build_trade_notification_message(
         customer_relation_map=customer_relation_map,
     ):
         lines.append(f"👤 طرف معامله: {counterparty_name}")
-    lines.append(f"🔢 شماره معامله: {trade_number}")
-    lines.append(f"🕐 زمان معامله: {trade_datetime}")
-    if trade_path_summary:
+    if trade_path_summary and not _should_hide_trade_path_for_recipient(
+        audience_user_id=audience_user_id,
+        principal_user_id=principal_user_id,
+        counterparty_user_id=counterparty_user_id,
+        customer_relation_map=customer_relation_map,
+    ):
         lines.append(f"🧭 مسیر: {trade_path_summary}")
     normalized_notes = _normalize_offer_notes_for_notification(offer_notes)
     if normalized_notes:
         lines.append(f"📝 توضیحات: {normalized_notes}")
+    lines.append(f"🔢 شماره معامله: {trade_number}")
+    lines.append(f"🕐 زمان معامله: {trade_datetime}")
     return "\n".join(lines)
 
 
@@ -1701,34 +1730,27 @@ def _build_trade_message_bundle(
     offer_notes: str | None = None,
     settlement_type: object = SettlementType.CASH,
 ) -> tuple[str, str, str, str]:
-    trade_path_line = f"\n🧭 مسیر: {trade_path_summary}" if trade_path_summary else ""
     normalized_offer_notes = _normalize_offer_notes_for_notification(offer_notes)
-    offer_notes_line = f"\n📝 توضیحات: {normalized_offer_notes}" if normalized_offer_notes else ""
-    settlement_line = f"🗓️ تسویه: {trade_settlement_label(settlement_type)}\n"
-    responder_msg = (
-        f"{responder_trade_emoji} <b>{responder_trade_label}</b>\n\n"
-        f"💰 فی: {trade_price:,}\n"
-        f"📦 تعداد: {trade_quantity}\n"
-        f"🏷️ کالا: {commodity_name}\n"
-        f"{settlement_line}"
-        f"👤 طرف معامله: {offer_user_name}\n"
-        f"🔢 شماره معامله: {trade_number}\n"
-        f"🕐 زمان معامله: {trade_datetime}"
-        f"{trade_path_line}"
-        f"{offer_notes_line}"
-    )
-    offer_owner_msg = (
-        f"{offer_trade_emoji} <b>{offer_trade_label}</b>\n\n"
-        f"💰 فی: {trade_price:,}\n"
-        f"📦 تعداد: {trade_quantity}\n"
-        f"🏷️ کالا: {commodity_name}\n"
-        f"{settlement_line}"
-        f"👤 طرف معامله: {responder_user_name}\n"
-        f"🔢 شماره معامله: {trade_number}\n"
-        f"🕐 زمان معامله: {trade_datetime}"
-        f"{trade_path_line}"
-        f"{offer_notes_line}"
-    )
+    def build_telegram_message(emoji: str, label: str, counterparty_name: str) -> str:
+        lines = [
+            f"{emoji} <b>{label}</b>",
+            "",
+            f"💰 فی: {trade_price:,}",
+            f"📦 تعداد: {trade_quantity}",
+            f"🏷️ کالا: {commodity_name}",
+            trade_settlement_message_line(settlement_type),
+            f"👤 طرف معامله: {counterparty_name}",
+        ]
+        if trade_path_summary:
+            lines.append(f"🧭 مسیر: {trade_path_summary}")
+        if normalized_offer_notes:
+            lines.append(f"📝 توضیحات: {normalized_offer_notes}")
+        lines.append(f"🔢 شماره معامله: {trade_number}")
+        lines.append(f"🕐 زمان معامله: {trade_datetime}")
+        return "\n".join(lines)
+
+    responder_msg = build_telegram_message(responder_trade_emoji, responder_trade_label, offer_user_name)
+    offer_owner_msg = build_telegram_message(offer_trade_emoji, offer_trade_label, responder_user_name)
     notif_msg_responder = _build_trade_notification_message(
         trade_emoji=responder_trade_emoji,
         trade_type_label=responder_trade_label,

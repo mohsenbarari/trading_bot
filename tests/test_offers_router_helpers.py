@@ -501,7 +501,7 @@ class OffersRouterHelperTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("OFFSET 1", status_only_sql)
         self.assertIn("LIMIT 5", status_only_sql)
 
-    async def test_market_expired_offers_query_is_time_limit_only_and_customer_hidden(self):
+    async def test_market_expired_offers_query_is_time_limit_only_and_customer_visible(self):
         current_user = SimpleNamespace(id=8)
 
         expired_db = CapturingDB(FakeExecuteResult([]))
@@ -532,12 +532,15 @@ class OffersRouterHelperTests(unittest.IsolatedAsyncioTestCase):
             new=AsyncMock(return_value=SimpleNamespace(customer_tier="tier1")),
         ):
             result = await offers_module.get_market_expired_offers(
+                skip=0,
+                limit=25,
+                since_hours=48,
                 db=hidden_db,
                 current_user=current_user,
             )
 
         self.assertEqual(result, [])
-        self.assertEqual(hidden_db.statements, [])
+        self.assertEqual(len(hidden_db.statements), 1)
 
     async def test_market_offer_history_query_covers_all_visible_terminal_offers(self):
         current_user = SimpleNamespace(id=8)
@@ -586,12 +589,15 @@ class OffersRouterHelperTests(unittest.IsolatedAsyncioTestCase):
             new=AsyncMock(return_value=SimpleNamespace(offer_expiry_minutes=2)),
         ):
             result = await offers_module.get_market_offer_history(
+                skip=0,
+                limit=25,
+                since_hours=48,
                 db=hidden_db,
                 current_user=current_user,
             )
 
         self.assertEqual(result, [])
-        self.assertEqual(hidden_db.statements, [])
+        self.assertEqual(len(hidden_db.statements), 1)
 
     async def test_market_offer_history_serializes_traded_and_partial_expired_metadata(self):
         current_user = SimpleNamespace(id=8)

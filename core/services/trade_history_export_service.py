@@ -22,6 +22,7 @@ class TradeHistoryExportRow:
     commodity_name: str
     quantity: int
     price: int
+    offer_notes: str
 
 
 def _normalize_trade_type_value(value: object | None) -> str | None:
@@ -89,6 +90,9 @@ def build_trade_history_export_rows(
             if normalized_trade_id is not None and normalized_trade_id in counterparty_name_by_trade_id:
                 has_projected_counterparty = True
                 projected_counterparty_name = counterparty_name_by_trade_id[normalized_trade_id]
+        loaded_offer = getattr(trade, "__dict__", {}).get("offer")
+        offer_notes = getattr(loaded_offer, "notes", None) or getattr(trade, "offer_notes", None)
+        normalized_offer_notes = " ".join(str(offer_notes or "").split()) or "---"
         rows.append(
             TradeHistoryExportRow(
                 trade_number=getattr(trade, "trade_number", None),
@@ -103,6 +107,7 @@ def build_trade_history_export_rows(
                 commodity_name=getattr(getattr(trade, "commodity", None), "name", "---"),
                 quantity=int(getattr(trade, "quantity", 0) or 0),
                 price=int(getattr(trade, "price", 0) or 0),
+                offer_notes=normalized_offer_notes,
             )
         )
     return rows
@@ -214,6 +219,8 @@ def generate_trade_history_pdf_file(
     subject_name: str,
     date_range_label: str,
     rows: Sequence[TradeHistoryExportRow],
+    include_counterparty: bool = True,
+    include_offer_notes: bool = False,
 ) -> str:
     reportlab_colors = import_module("reportlab.lib.colors")
     reportlab_pagesizes = import_module("reportlab.lib.pagesizes")
@@ -251,24 +258,42 @@ def generate_trade_history_pdf_file(
         alignment=reportlab_enums.TA_RIGHT,
     )
 
-    table_data = [[_shape_rtl_text(header) for header in reversed(_history_table_headers())]]
+    headers = ["ردیف", "شماره معامله", "تاریخ و ساعت"]
+    logical_widths = [34, 64, 84]
+    if include_counterparty:
+        headers.append("طرف دیگر معامله")
+        logical_widths.append(88)
+    headers.extend(["نوع معامله", "نوع تسویه", "کالا", "تعداد", "قیمت"])
+    logical_widths.extend([52, 56, 64, 44, 68])
+    if include_offer_notes:
+        headers.append("توضیحات")
+        logical_widths.append(122)
+
+    table_data = [[_shape_rtl_text(header) for header in reversed(headers)]]
     for index, row in enumerate(rows, start=1):
         display_values = [
             str(index),
             str(row.trade_number or "-"),
             row.date_time_label,
-            _shape_rtl_text(row.counterparty_name),
-            _shape_rtl_text(row.trade_type_label),
-            _shape_rtl_text(row.settlement_type_label),
-            _shape_rtl_text(row.commodity_name),
-            str(row.quantity),
-            f"{row.price:,}",
         ]
+        if include_counterparty:
+            display_values.append(_shape_rtl_text(row.counterparty_name))
+        display_values.extend(
+            [
+                _shape_rtl_text(row.trade_type_label),
+                _shape_rtl_text(row.settlement_type_label),
+                _shape_rtl_text(row.commodity_name),
+                str(row.quantity),
+                f"{row.price:,}",
+            ]
+        )
+        if include_offer_notes:
+            display_values.append(_shape_rtl_text(row.offer_notes))
         table_data.append(list(reversed(display_values)))
 
     table = reportlab_platypus.Table(
         table_data,
-        colWidths=[68, 44, 64, 56, 52, 88, 84, 64, 34],
+        colWidths=list(reversed(logical_widths)),
     )
     table.setStyle(
         reportlab_platypus.TableStyle(

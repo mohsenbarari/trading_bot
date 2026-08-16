@@ -223,7 +223,6 @@ const marketOfferPushError = ref('')
 const isTier2Customer = computed(() => currentUserCustomerTier.value === 'tier2')
 const canViewExpiredMarketOffers = computed(() => (
   currentUserLoaded.value
-  && currentUserCustomerTier.value === null
   && !currentUserIsAccountant.value
 ))
 const visibleTabs = computed<MarketFilterType[]>(() => (

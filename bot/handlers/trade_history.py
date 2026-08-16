@@ -144,7 +144,8 @@ async def get_trade_history(current_user_id: int, target_user_id: int, months: i
             .options(
                 joinedload(Trade.commodity),
                 joinedload(Trade.offer_user),
-                joinedload(Trade.responder_user)
+                joinedload(Trade.responder_user),
+                joinedload(Trade.offer),
             )
             .order_by(Trade.created_at.desc()) # از جدید به قدیم
         )
@@ -371,6 +372,8 @@ async def generate_pdf(trades, target_user, current_user, months: Optional[int] 
         subject_name=display_name,
         date_range_label=date_range_label,
         rows=export_rows,
+        include_counterparty=False,
+        include_offer_notes=True,
     )
 
 

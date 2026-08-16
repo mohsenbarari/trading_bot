@@ -555,6 +555,8 @@ async def show_recent_trades_pdf(message: types.Message, state: FSMContext, user
             subject_name=subject_name,
             date_range_label=build_trade_history_date_range_label(from_date, today),
             rows=build_trade_history_export_rows(trades, user.id),
+            include_counterparty=False,
+            include_offer_notes=True,
         )
         export_filename = _history_download_filename(subject_name, "pdf")
         await send_private_document_via_runtime(

@@ -280,7 +280,7 @@ describe('ChatNewConversationModal.vue', () => {
     expect(String(url)).toContain('chat_targets=true')
     expect(options).toEqual(expect.objectContaining({
       headers: expect.objectContaining({
-        Authorization: 'Bearer jwt-token',
+        authorization: 'Bearer jwt-token',
       }),
     }))
   })

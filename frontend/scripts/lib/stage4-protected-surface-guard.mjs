@@ -318,6 +318,28 @@ export const MARKET_HISTORY_TERMINAL_VISUAL_EVIDENCE = Object.freeze({
   sha256: '8320a622ec35748d46c50a86488d039ad82cf1ef0e8557ea70e525c612e38dff',
 })
 
+// Owner-approved post-Stage-8 access correction. It only admits the removal
+// of the customer-tier gate from the read-only terminal Market history; the
+// accountant gate and every terminal-card visual contract remain inherited.
+export const MARKET_CUSTOMER_HISTORY_ACCESS_KIND =
+  'market-customer-read-only-history-access'
+
+export const MARKET_CUSTOMER_HISTORY_ACCESS_ALLOWED_PATHS = Object.freeze([
+  'frontend/src/views/MarketView.vue',
+])
+
+export const MARKET_CUSTOMER_HISTORY_ACCESS_ALLOWED_FILE_SHA256 = Object.freeze({
+  'frontend/src/views/MarketView.vue':
+    '821aa2766f977bfef9e32ec56d68250a21d7d15aa5f9a7c1709ab0cf56f6ad13',
+})
+
+export const MARKET_CUSTOMER_HISTORY_ACCESS_EVIDENCE = Object.freeze({
+  count: 19,
+  contentBytes: 166783,
+  pathSetSha256: '37aa0b51e20f4ae86f7daf6c3c231d93b3d1f288ade1471490a1f843a57c9589',
+  sha256: '9209fd37b6eb1335f3656004988f259da3836831938dc1b74a33d29b9d7cfbf9',
+})
+
 export const MESSENGER_RUNTIME_BASELINE = Object.freeze({
   count: 85,
   contentBytes: 1312405,
@@ -1039,6 +1061,46 @@ export function assertMarketHistoryTerminalVisualDisposition(entries) {
   )
 }
 
+export function assertMarketCustomerHistoryAccessSemantics(entries) {
+  assertMarketHistoryTerminalVisualSemantics(entries)
+  const market = sourceByPath(entries, 'frontend/src/views/MarketView.vue')
+  const visibilityRule = market.match(
+    /const canViewExpiredMarketOffers = computed\(\(\) => \(([\s\S]*?)\n\)\)/u,
+  )?.[1] || ''
+  if (!visibilityRule.includes('currentUserLoaded.value')
+    || !visibilityRule.includes('!currentUserIsAccountant.value')) {
+    throw new Error('Market customer-history disposition lost the authenticated non-accountant gate')
+  }
+  if (visibilityRule.includes('currentUserCustomerTier.value')) {
+    throw new Error('Market customer-history disposition restored the customer-tier exclusion')
+  }
+}
+
+function assertMarketCustomerHistoryAccessAllowedFiles(entries) {
+  const entriesByPath = new Map(entries.map((entry) => [entry.path, entry]))
+  for (const repoPath of MARKET_CUSTOMER_HISTORY_ACCESS_ALLOWED_PATHS) {
+    const entry = entriesByPath.get(repoPath)
+    if (!entry) throw new Error(`Market customer-history allowed file is missing: ${repoPath}`)
+    const actualSha256 = fileSha256(entry.content)
+    const expectedSha256 = MARKET_CUSTOMER_HISTORY_ACCESS_ALLOWED_FILE_SHA256[repoPath]
+    if (actualSha256 !== expectedSha256) {
+      throw new Error(
+        `Market customer-history allowed file drift: ${repoPath} ${expectedSha256} -> ${actualSha256}`,
+      )
+    }
+  }
+}
+
+export function assertMarketCustomerHistoryAccessDisposition(entries) {
+  assertMarketCustomerHistoryAccessAllowedFiles(entries)
+  assertMarketCustomerHistoryAccessSemantics(entries)
+  return assertProtectedFileSetEvidence(
+    'Market customer read-only history access disposition',
+    protectedFileSetEvidence(entries, MARKET_RUNTIME_CONTRACT),
+    MARKET_CUSTOMER_HISTORY_ACCESS_EVIDENCE,
+  )
+}
+
 export function resolveMarketRuntimeDisposition(entries) {
   const actual = protectedFileSetEvidence(entries, MARKET_RUNTIME_CONTRACT)
   try {
@@ -1099,27 +1161,28 @@ export function resolveMarketRuntimeDisposition(entries) {
                       evidence: assertMarketHistoryTerminalVisualDisposition(entries),
                     }
                   } catch (terminalVisualError) {
-                    const baselineMessage =
-                      baselineError instanceof Error ? baselineError.message : String(baselineError)
-                    const integrationMessage =
-                      integrationError instanceof Error ? integrationError.message : String(integrationError)
-                    const aPlusCMessage =
-                      aPlusCError instanceof Error ? aPlusCError.message : String(aPlusCError)
-                    const lifecycleMessage =
-                      lifecycleError instanceof Error ? lifecycleError.message : String(lifecycleError)
-                    const perimeterMessage =
-                      perimeterError instanceof Error ? perimeterError.message : String(perimeterError)
-                    const linearMeterMessage =
-                      linearMeterError instanceof Error ? linearMeterError.message : String(linearMeterError)
-                    const compactConfirmMessage =
-                      compactConfirmError instanceof Error ? compactConfirmError.message : String(compactConfirmError)
-                    const feedHeadingMessage =
-                      feedHeadingError instanceof Error ? feedHeadingError.message : String(feedHeadingError)
-                    const terminalVisualMessage =
-                      terminalVisualError instanceof Error ? terminalVisualError.message : String(terminalVisualError)
-                    throw new Error(
-                      `Market runtime rejected after Stage 4 baseline drift (${baselineMessage}); main/UIUX integration disposition rejected (${integrationMessage}); Market A+C disposition rejected (${aPlusCMessage}); Market A+C lifecycle-clarity disposition rejected (${lifecycleMessage}); Market A+C perimeter-deadline disposition rejected (${perimeterMessage}); Market A+C linear-meter disposition rejected (${linearMeterMessage}); Market compact-confirm disposition rejected (${compactConfirmMessage}); Market feed-heading removal disposition rejected (${feedHeadingMessage}); Market terminal-history visual disposition rejected (${terminalVisualMessage})`,
-                    )
+                    try {
+                      return {
+                        kind: MARKET_CUSTOMER_HISTORY_ACCESS_KIND,
+                        evidence: assertMarketCustomerHistoryAccessDisposition(entries),
+                      }
+                    } catch (customerHistoryError) {
+                      const messages = [
+                        baselineError,
+                        integrationError,
+                        aPlusCError,
+                        lifecycleError,
+                        perimeterError,
+                        linearMeterError,
+                        compactConfirmError,
+                        feedHeadingError,
+                        terminalVisualError,
+                        customerHistoryError,
+                      ].map((error) => error instanceof Error ? error.message : String(error))
+                      throw new Error(
+                        `Market runtime rejected after Stage 4 baseline drift (${messages[0]}); main/UIUX integration disposition rejected (${messages[1]}); Market A+C disposition rejected (${messages[2]}); Market A+C lifecycle-clarity disposition rejected (${messages[3]}); Market A+C perimeter-deadline disposition rejected (${messages[4]}); Market A+C linear-meter disposition rejected (${messages[5]}); Market compact-confirm disposition rejected (${messages[6]}); Market feed-heading removal disposition rejected (${messages[7]}); Market terminal-history visual disposition rejected (${messages[8]}); Market customer-history access disposition rejected (${messages[9]})`,
+                      )
+                    }
                   }
                 }
               }

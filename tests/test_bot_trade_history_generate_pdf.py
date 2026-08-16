@@ -14,6 +14,7 @@ def make_trade():
         responder_user_id=2,
         trade_type=TradeType.BUY,
         commodity=SimpleNamespace(name="سکه"),
+        offer=SimpleNamespace(notes="تحویل در دفتر"),
         quantity=3,
         price=150000,
         created_at=datetime(2026, 1, 1, 12, 0, 0),
@@ -41,6 +42,8 @@ class BotTradeHistoryGeneratePdfTests(unittest.IsolatedAsyncioTestCase):
             subject_name="پروفایل من",
             date_range_label="بازه زمانی: تست",
             rows=["row"],
+            include_counterparty=False,
+            include_offer_notes=True,
         )
 
     async def test_generate_pdf_creates_pdf_file(self):

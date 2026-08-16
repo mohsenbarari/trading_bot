@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import settings
 from core.enums import SettlementType
-from core.offer_settlement import settlement_type_value, trade_settlement_label
+from core.offer_settlement import settlement_type_value, trade_settlement_label, trade_settlement_message_line
 from core.services.accountant_chat_contract import AccountantChatIdentity, load_accountant_chat_identity_map
 from core.services.accountant_relation_service import build_trade_notification_audience_user_ids
 from core.services.bot_access_policy import evaluate_bot_access
@@ -310,6 +310,30 @@ def _should_hide_counterparty_for_recipient(
     return normalized_counterparty_user_id != owner_user_id
 
 
+def _should_hide_trade_path_for_recipient(
+    *,
+    audience_user_id: int | None,
+    principal_user_id: int | None,
+    counterparty_user_id: int | None,
+    customer_relation_map: Mapping[int, CustomerRelation | object] | None,
+) -> bool:
+    """Hide the internal owner/customer route on that customer's delivery side."""
+    normalized_audience_user_id = _coerce_user_id(audience_user_id)
+    if normalized_audience_user_id is None or not customer_relation_map:
+        return False
+    for participant_user_id in unique_user_ids([principal_user_id, counterparty_user_id]):
+        relation = customer_relation_map.get(participant_user_id)
+        if _normalize_customer_tier_value(getattr(relation, "customer_tier", None)) not in {
+            CustomerTier.TIER_1.value,
+            CustomerTier.TIER_2.value,
+        }:
+            continue
+        owner_user_id = _coerce_user_id(getattr(relation, "owner_user_id", None))
+        if normalized_audience_user_id in {participant_user_id, owner_user_id}:
+            return True
+    return False
+
+
 def _bot_profile_deep_link(profile_user_id: int | None) -> str | None:
     normalized_profile_user_id = _coerce_user_id(profile_user_id)
     bot_username = str(getattr(settings, "bot_username", None) or "").strip().lstrip("@")
@@ -362,13 +386,18 @@ def _build_trade_notification_message(
         customer_relation_map=customer_relation_map,
     ):
         lines.append(f"👤 طرف معامله: {counterparty_name}")
-    lines.append(f"🔢 شماره معامله: {trade_number}")
-    lines.append(f"🕐 زمان معامله: {trade_datetime}")
-    if trade_path_summary:
+    if trade_path_summary and not _should_hide_trade_path_for_recipient(
+        audience_user_id=audience_user_id,
+        principal_user_id=principal_user_id,
+        counterparty_user_id=counterparty_user_id,
+        customer_relation_map=customer_relation_map,
+    ):
         lines.append(f"🧭 مسیر: {trade_path_summary}")
     normalized_notes = _normalize_offer_notes_for_notification(offer_notes)
     if normalized_notes:
         lines.append(f"📝 توضیحات: {normalized_notes}")
+    lines.append(f"🔢 شماره معامله: {trade_number}")
+    lines.append(f"🕐 زمان معامله: {trade_datetime}")
     return "\n".join(lines)
 
 
@@ -384,6 +413,7 @@ def _build_trade_telegram_message(
     counterparty_name: str | None,
     counterparty_profile_user_id: int | None = None,
     hide_counterparty: bool = False,
+    hide_trade_path: bool = False,
     trade_path_summary: str | None = None,
     offer_notes: str | None = None,
     settlement_type: object = SettlementType.CASH,
@@ -394,7 +424,7 @@ def _build_trade_telegram_message(
         f"💰 فی: {trade_price:,}",
         f"📦 تعداد: {trade_quantity}",
         f"🏷️ کالا: {commodity_name}",
-        f"🗓️ تسویه: {trade_settlement_label(settlement_type)}",
+        trade_settlement_message_line(settlement_type),
     ]
     if counterparty_name and not hide_counterparty:
         lines.append(
@@ -404,13 +434,13 @@ def _build_trade_telegram_message(
                 counterparty_profile_user_id=counterparty_profile_user_id,
             )
         )
-    lines.append(f"🔢 شماره معامله: {trade_number}")
-    lines.append(f"🕐 زمان معامله: {trade_datetime}")
-    if trade_path_summary:
+    if trade_path_summary and not hide_trade_path:
         lines.append(f"🧭 مسیر: {trade_path_summary}")
     normalized_offer_notes = _normalize_offer_notes_for_notification(offer_notes)
     if normalized_offer_notes:
         lines.append(f"📝 توضیحات: {normalized_offer_notes}")
+    lines.append(f"🔢 شماره معامله: {trade_number}")
+    lines.append(f"🕐 زمان معامله: {trade_datetime}")
     return "\n".join(lines)
 
 
@@ -686,6 +716,12 @@ async def build_trade_completion_notification_audience(
                 counterparty_user_id=_coerce_user_id(side_spec["counterparty_user_id"]),
                 customer_relation_map=customer_relation_map,
             )
+            hide_trade_path = _should_hide_trade_path_for_recipient(
+                audience_user_id=audience_user_id,
+                principal_user_id=principal_user_id,
+                counterparty_user_id=_coerce_user_id(side_spec["counterparty_user_id"]),
+                customer_relation_map=customer_relation_map,
+            )
             webapp_message = _build_trade_notification_message(
                 trade_emoji=str(side_spec["trade_emoji"]),
                 trade_type_label=str(side_spec["trade_label"]),
@@ -727,6 +763,7 @@ async def build_trade_completion_notification_audience(
                     counterparty_name=str(side_spec["counterparty_name"]),
                     counterparty_profile_user_id=_coerce_user_id(side_spec.get("counterparty_profile_user_id")),
                     hide_counterparty=hide_counterparty,
+                    hide_trade_path=hide_trade_path,
                     trade_path_summary=trade_path_payload.get("trade_path_summary"),
                     offer_notes=_offer_notes(trade),
                     settlement_type=getattr(trade, "settlement_type", SettlementType.CASH),

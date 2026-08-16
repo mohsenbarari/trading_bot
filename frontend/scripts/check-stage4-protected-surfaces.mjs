@@ -18,6 +18,8 @@ import {
   MARKET_A_PLUS_C_LINEAR_METER_KIND,
   MARKET_COMPACT_BUTTON_CONFIRM_ALLOWED_PATHS,
   MARKET_COMPACT_BUTTON_CONFIRM_KIND,
+  MARKET_CUSTOMER_HISTORY_ACCESS_ALLOWED_PATHS,
+  MARKET_CUSTOMER_HISTORY_ACCESS_KIND,
   MARKET_FEED_HEADING_REMOVAL_ALLOWED_PATHS,
   MARKET_FEED_HEADING_REMOVAL_KIND,
   MARKET_HISTORY_TERMINAL_VISUAL_ALLOWED_PATHS,
@@ -138,6 +140,10 @@ try {
   } else if (market.kind === MARKET_HISTORY_TERMINAL_VISUAL_KIND) {
     console.log(
       `PASS Market terminal-history minimal-clarity disposition (exact ${MARKET_HISTORY_TERMINAL_VISUAL_ALLOWED_PATHS.length}-file overlay; ${market.evidence.count} files, ${market.evidence.contentBytes} bytes, ${market.evidence.pathSetSha256}, ${market.evidence.sha256})`,
+    )
+  } else if (market.kind === MARKET_CUSTOMER_HISTORY_ACCESS_KIND) {
+    console.log(
+      `PASS Market customer read-only history access disposition (exact ${MARKET_CUSTOMER_HISTORY_ACCESS_ALLOWED_PATHS.length}-file overlay; ${market.evidence.count} files, ${market.evidence.contentBytes} bytes, ${market.evidence.pathSetSha256}, ${market.evidence.sha256})`,
     )
   } else {
     throw new Error(`unsupported Market runtime disposition: ${String(market.kind)}`)

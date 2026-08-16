@@ -29,6 +29,10 @@ import {
   MARKET_COMPACT_BUTTON_CONFIRM_ALLOWED_PATHS,
   MARKET_COMPACT_BUTTON_CONFIRM_EVIDENCE,
   MARKET_COMPACT_BUTTON_CONFIRM_KIND,
+  MARKET_CUSTOMER_HISTORY_ACCESS_ALLOWED_FILE_SHA256,
+  MARKET_CUSTOMER_HISTORY_ACCESS_ALLOWED_PATHS,
+  MARKET_CUSTOMER_HISTORY_ACCESS_EVIDENCE,
+  MARKET_CUSTOMER_HISTORY_ACCESS_KIND,
   MARKET_FEED_HEADING_REMOVAL_ALLOWED_FILE_SHA256,
   MARKET_FEED_HEADING_REMOVAL_ALLOWED_PATHS,
   MARKET_FEED_HEADING_REMOVAL_EVIDENCE,
@@ -60,6 +64,8 @@ import {
   assertStage8MessengerUnnamedControlDisposition,
   assertMainUiuxIntegrationMarketDisposition,
   assertMarketAPlusCDisposition,
+  assertMarketCustomerHistoryAccessDisposition,
+  assertMarketCustomerHistoryAccessSemantics,
   assertMarketLifecycleClarityDisposition,
   assertMarketLifecycleClaritySemantics,
   assertMarketPerimeterDeadlineDisposition,
@@ -294,12 +300,12 @@ describe('Stage 4 protected surface baseline', () => {
     )
   })
 
-  it('keeps every prior Market disposition immutable while admitting terminal-history visual clarity', () => {
+  it('keeps every prior Market disposition immutable while admitting customer read-only history', () => {
     expect(ownedPaths.market).toContain('frontend/src/utils/settlementType.ts')
     const entries = readFileEntries(repoRoot, ownedPaths.market)
     expect(resolveMarketRuntimeDisposition(entries)).toMatchObject({
-      kind: MARKET_HISTORY_TERMINAL_VISUAL_KIND,
-      evidence: MARKET_HISTORY_TERMINAL_VISUAL_EVIDENCE,
+      kind: MARKET_CUSTOMER_HISTORY_ACCESS_KIND,
+      evidence: MARKET_CUSTOMER_HISTORY_ACCESS_EVIDENCE,
     })
     expect(MARKET_RUNTIME_BASELINE).toEqual({
       count: 19,
@@ -373,14 +379,16 @@ describe('Stage 4 protected surface baseline', () => {
     expect(MARKET_FEED_HEADING_REMOVAL_ALLOWED_PATHS).toEqual([
       'frontend/src/views/MarketView.vue',
     ])
-    for (const repoPath of MARKET_FEED_HEADING_REMOVAL_ALLOWED_PATHS) {
-      const entry = entries.find(({ path: candidate }) => candidate === repoPath)
-      expect(fileSha256(entry.content)).toBe(MARKET_FEED_HEADING_REMOVAL_ALLOWED_FILE_SHA256[repoPath])
-    }
+    expect(MARKET_FEED_HEADING_REMOVAL_ALLOWED_FILE_SHA256).toEqual({
+      'frontend/src/views/MarketView.vue':
+        '92cb621e01b4005e2c693da665913049f26672334f2f29fd40cdf1c153238b2d',
+    })
     expect(Object.isFrozen(MARKET_FEED_HEADING_REMOVAL_ALLOWED_PATHS)).toBe(true)
     expect(Object.isFrozen(MARKET_FEED_HEADING_REMOVAL_ALLOWED_FILE_SHA256)).toBe(true)
     expect(Object.isFrozen(MARKET_FEED_HEADING_REMOVAL_EVIDENCE)).toBe(true)
-    expect(() => assertMarketFeedHeadingRemovalDisposition(entries)).toThrow(/contentBytes drift/)
+    expect(() => assertMarketFeedHeadingRemovalDisposition(entries)).toThrow(
+      /Market feed-heading removal allowed file drift/,
+    )
     expect(MARKET_HISTORY_TERMINAL_VISUAL_KIND).toBe('market-history-terminal-minimal-clarity')
     expect(MARKET_HISTORY_TERMINAL_VISUAL_ALLOWED_PATHS).toEqual([
       'frontend/src/components/OffersList.vue',
@@ -399,18 +407,62 @@ describe('Stage 4 protected surface baseline', () => {
     expect(Object.isFrozen(MARKET_HISTORY_TERMINAL_VISUAL_ALLOWED_PATHS)).toBe(true)
     expect(Object.isFrozen(MARKET_HISTORY_TERMINAL_VISUAL_ALLOWED_FILE_SHA256)).toBe(true)
     expect(Object.isFrozen(MARKET_HISTORY_TERMINAL_VISUAL_EVIDENCE)).toBe(true)
+    expect(MARKET_CUSTOMER_HISTORY_ACCESS_KIND).toBe('market-customer-read-only-history-access')
+    expect(MARKET_CUSTOMER_HISTORY_ACCESS_ALLOWED_PATHS).toEqual([
+      'frontend/src/views/MarketView.vue',
+    ])
+    for (const repoPath of MARKET_CUSTOMER_HISTORY_ACCESS_ALLOWED_PATHS) {
+      const entry = entries.find(({ path: candidate }) => candidate === repoPath)
+      expect(fileSha256(entry.content)).toBe(MARKET_CUSTOMER_HISTORY_ACCESS_ALLOWED_FILE_SHA256[repoPath])
+    }
+    expect(MARKET_CUSTOMER_HISTORY_ACCESS_EVIDENCE).toEqual({
+      count: 19,
+      contentBytes: 166783,
+      pathSetSha256: '37aa0b51e20f4ae86f7daf6c3c231d93b3d1f288ade1471490a1f843a57c9589',
+      sha256: '9209fd37b6eb1335f3656004988f259da3836831938dc1b74a33d29b9d7cfbf9',
+    })
+    expect(Object.isFrozen(MARKET_CUSTOMER_HISTORY_ACCESS_ALLOWED_PATHS)).toBe(true)
+    expect(Object.isFrozen(MARKET_CUSTOMER_HISTORY_ACCESS_ALLOWED_FILE_SHA256)).toBe(true)
+    expect(Object.isFrozen(MARKET_CUSTOMER_HISTORY_ACCESS_EVIDENCE)).toBe(true)
+    expect(() => assertMarketCustomerHistoryAccessDisposition(entries)).not.toThrow()
   })
 
-  it('fails closed for any further Market drift inside or outside the feed-heading allowlist', () => {
+  it('fails closed if the customer history gate or accountant exclusion returns', () => {
     const entries = readFileEntries(repoRoot, ownedPaths.market)
-    const allowedPath = MARKET_FEED_HEADING_REMOVAL_ALLOWED_PATHS[0]
+    const mutateMarket = (replacer) => entries.map((entry) => {
+      if (entry.path !== 'frontend/src/views/MarketView.vue') return entry
+      const source = entry.content.toString('utf8')
+      const next = replacer(source)
+      if (next === source) throw new Error('test mutation did not change MarketView.vue')
+      return { ...entry, content: Buffer.from(next) }
+    })
+    const customerExcluded = mutateMarket((source) => source.replace(
+      '  && !currentUserIsAccountant.value',
+      '  && currentUserCustomerTier.value === null\n  && !currentUserIsAccountant.value',
+    ))
+    const accountantAllowed = mutateMarket((source) => source.replace(
+      '  && !currentUserIsAccountant.value',
+      '  && currentUserIsAccountant.value',
+    ))
+
+    expect(() => assertMarketCustomerHistoryAccessSemantics(customerExcluded)).toThrow(
+      /restored the customer-tier exclusion/,
+    )
+    expect(() => assertMarketCustomerHistoryAccessSemantics(accountantAllowed)).toThrow(
+      /lost the authenticated non-accountant gate/,
+    )
+  })
+
+  it('fails closed for any further Market drift inside or outside the customer-history allowlist', () => {
+    const entries = readFileEntries(repoRoot, ownedPaths.market)
+    const allowedPath = MARKET_CUSTOMER_HISTORY_ACCESS_ALLOWED_PATHS[0]
     const changedAllowed = entries.map((entry) =>
       entry.path === allowedPath
         ? { ...entry, content: Buffer.concat([entry.content, Buffer.from('\n/* drift */')]) }
         : entry,
     )
     const unlistedPath = entries.find(
-      ({ path: repoPath }) => !MARKET_FEED_HEADING_REMOVAL_ALLOWED_PATHS.includes(repoPath),
+      ({ path: repoPath }) => !MARKET_CUSTOMER_HISTORY_ACCESS_ALLOWED_PATHS.includes(repoPath),
     ).path
     const changedUnlisted = entries.map((entry) =>
       entry.path === unlistedPath
@@ -418,17 +470,17 @@ describe('Stage 4 protected surface baseline', () => {
         : entry,
     )
 
-    expect(() => assertMarketFeedHeadingRemovalDisposition(changedAllowed)).toThrow(
-      /Market feed-heading removal allowed file drift/,
+    expect(() => assertMarketCustomerHistoryAccessDisposition(changedAllowed)).toThrow(
+      /Market customer-history allowed file drift/,
     )
     expect(() => resolveMarketRuntimeDisposition(changedAllowed)).toThrow(
-      /Market feed-heading removal disposition rejected/,
+      /Market customer-history access disposition rejected/,
     )
-    expect(() => assertMarketFeedHeadingRemovalDisposition(changedUnlisted)).toThrow(
+    expect(() => assertMarketCustomerHistoryAccessDisposition(changedUnlisted)).toThrow(
       /contentBytes drift/,
     )
     expect(() => resolveMarketRuntimeDisposition(changedUnlisted)).toThrow(
-      /Market feed-heading removal disposition rejected/,
+      /Market customer-history access disposition rejected/,
     )
   })
 

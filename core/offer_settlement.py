@@ -33,6 +33,17 @@ def trade_settlement_label(value: Any) -> str:
     return "نقد حاضر"
 
 
+def trade_settlement_emoji(value: Any) -> str:
+    """Return the compact visual cue used on Telegram trade settlement rows."""
+    if settlement_type_value(value) == SettlementType.TOMORROW.value:
+        return "📆"
+    return "☀️"
+
+
+def trade_settlement_message_line(value: Any) -> str:
+    return f"{trade_settlement_emoji(value)} تسویه: {trade_settlement_label(value)}"
+
+
 def offer_draft_prefix(offer_type: Any, settlement_type: Any) -> str:
     raw_offer_type = getattr(offer_type, "value", offer_type)
     trade_label = "خ" if str(raw_offer_type or "buy").strip().lower() == "buy" else "ف"

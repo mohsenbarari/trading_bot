@@ -188,8 +188,8 @@ class TradeNotificationAudienceServiceTests(unittest.IsolatedAsyncioTestCase):
         )
 
         for recipient in built.result.recipients:
-            self.assertIn("تسویه: فردایی", recipient.webapp_message)
-            self.assertIn("تسویه: فردایی", channel(recipient, "telegram").message)
+            self.assertIn("🗓️ تسویه: فردایی", recipient.webapp_message)
+            self.assertIn("📆 تسویه: فردایی", channel(recipient, "telegram").message)
             self.assertEqual(recipient.extra_payload["settlement_type"], "tomorrow")
 
     async def test_admin_normal_user_trade_keeps_bot_eligible_roles(self):
@@ -227,13 +227,22 @@ class TradeNotificationAudienceServiceTests(unittest.IsolatedAsyncioTestCase):
         )
 
         customer_recipient = built.result.recipients[0]
+        owner_recipient = built.result.recipients[1]
         self.assertEqual(built.result.trade_path_kind, "owner_customer_tier1")
         self.assertEqual(customer_recipient.extra_payload["trade_path_summary"], "مالک ↔ مشتری سطح ۱")
         self.assertTrue(channel(customer_recipient, "telegram").required)
         self.assertIn("طرف معامله: owner", customer_recipient.webapp_message)
+        self.assertNotIn("🧭 مسیر:", customer_recipient.webapp_message)
         self.assertIn("<b>", channel(customer_recipient, "telegram").message)
         self.assertIn("طرف معامله:", channel(customer_recipient, "telegram").message)
+        self.assertNotIn("🧭 مسیر:", channel(customer_recipient, "telegram").message)
         self.assertIn('start=profile_10">owner</a>', channel(customer_recipient, "telegram").message)
+        self.assertEqual(
+            channel(customer_recipient, "telegram").message.splitlines()[-2:],
+            ["🔢 شماره معامله: 10025", "🕐 زمان معامله: 1405/04/02   11:00"],
+        )
+        self.assertNotIn("🧭 مسیر:", owner_recipient.webapp_message)
+        self.assertNotIn("🧭 مسیر:", channel(owner_recipient, "telegram").message)
 
     async def test_customer_counterparty_is_hidden_from_an_unrelated_trade_side(self):
         owner = make_user(10, account_name="owner", telegram_id=9010)
