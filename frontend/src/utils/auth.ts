@@ -404,12 +404,12 @@ export async function apiFetch(url: string, options: ApiFetchOptions = {}) {
     const token = localStorage.getItem('auth_token')
 
     const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
+      'content-type': 'application/json',
       ...normalizeRequestHeaders(requestOptions.headers),
     }
 
     if (token) {
-      headers['Authorization'] = `Bearer ${token}`
+      headers.authorization = `Bearer ${token}`
     }
 
     const config = {

@@ -151,14 +151,16 @@ describe('Stage 8 acceptance matrix source binding', () => {
     expect(evaluateMatrixAcceptanceTransition(pendingWithClosure, { repoRoot, closure }).passed).toBe(false)
   })
 
-  it('binds runtime hashes to the current source files', () => {
-    const hashes = matrix.sourceSnapshot.runtimeSourceHashes
-    expect(hashes['frontend/src/router/index.ts']).toBe(sha256File('frontend/src/router/index.ts'))
-    expect(hashes['frontend/src/router/uiRouteContract.ts']).toBe(
-      sha256File('frontend/src/router/uiRouteContract.ts'),
-    )
-    expect(hashes['frontend/src/utils/auth.ts']).toBe(sha256File('frontend/src/utils/auth.ts'))
-    expect(hashes['models/user.py']).toBe(sha256File('models/user.py'))
+  it('binds historical runtime hashes to the immutable official receipt', () => {
+    const snapshot = matrix.sourceSnapshot
+    const receiptId = matrix.cellAccounting.officialFullAcceptance.receiptId
+    const receiptRecord = matrix.evidenceCatalog[receiptId]
+    const receipt = JSON.parse(fs.readFileSync(path.join(repoRoot, receiptRecord.path), 'utf8'))
+    expect(snapshot.runtimeSourcesMatchCommit).toBe(true)
+    expect(sha256File(receiptRecord.path)).toBe(receiptRecord.sha256)
+    for (const [rel, expectedHash] of Object.entries(snapshot.runtimeSourceHashes)) {
+      expect(receipt.bindingHashesAtOfficialRun[rel], rel).toBe(expectedHash)
+    }
   })
 
   it('registers /settings as SettingsView with auth, not a redirect', () => {

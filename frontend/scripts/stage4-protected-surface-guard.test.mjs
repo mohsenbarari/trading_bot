@@ -29,6 +29,10 @@ import {
   MARKET_COMPACT_BUTTON_CONFIRM_ALLOWED_PATHS,
   MARKET_COMPACT_BUTTON_CONFIRM_EVIDENCE,
   MARKET_COMPACT_BUTTON_CONFIRM_KIND,
+  MARKET_FEED_HEADING_REMOVAL_ALLOWED_FILE_SHA256,
+  MARKET_FEED_HEADING_REMOVAL_ALLOWED_PATHS,
+  MARKET_FEED_HEADING_REMOVAL_EVIDENCE,
+  MARKET_FEED_HEADING_REMOVAL_KIND,
   MARKET_RUNTIME_BASELINE,
   MARKET_RUNTIME_CONTRACT,
   MESSENGER_OMITTED_DIRECT_RUNTIME_PATHS,
@@ -60,6 +64,8 @@ import {
   assertMarketLinearDeadlineSemantics,
   assertMarketCompactButtonConfirmDisposition,
   assertMarketCompactButtonConfirmSemantics,
+  assertMarketFeedHeadingRemovalDisposition,
+  assertMarketFeedHeadingRemovalSemantics,
   STAGE4_BASE_COMMIT,
   STAGE4_BASE_TREE,
   STAGE4_ROUTE_CONTRACT_PATH,
@@ -282,12 +288,12 @@ describe('Stage 4 protected surface baseline', () => {
     )
   })
 
-  it('keeps every prior Market disposition immutable while admitting compact button-local confirmation', () => {
+  it('keeps every prior Market disposition immutable while admitting the redundant feed-heading removal', () => {
     expect(ownedPaths.market).toContain('frontend/src/utils/settlementType.ts')
     const entries = readFileEntries(repoRoot, ownedPaths.market)
     expect(resolveMarketRuntimeDisposition(entries)).toMatchObject({
-      kind: MARKET_COMPACT_BUTTON_CONFIRM_KIND,
-      evidence: MARKET_COMPACT_BUTTON_CONFIRM_EVIDENCE,
+      kind: MARKET_FEED_HEADING_REMOVAL_KIND,
+      evidence: MARKET_FEED_HEADING_REMOVAL_EVIDENCE,
     })
     expect(MARKET_RUNTIME_BASELINE).toEqual({
       count: 19,
@@ -358,18 +364,29 @@ describe('Stage 4 protected surface baseline', () => {
     expect(Object.isFrozen(MARKET_COMPACT_BUTTON_CONFIRM_ALLOWED_PATHS)).toBe(true)
     expect(Object.isFrozen(MARKET_COMPACT_BUTTON_CONFIRM_ALLOWED_FILE_SHA256)).toBe(true)
     expect(Object.isFrozen(MARKET_COMPACT_BUTTON_CONFIRM_EVIDENCE)).toBe(true)
+    expect(MARKET_FEED_HEADING_REMOVAL_KIND).toBe('market-redundant-feed-heading-removal')
+    expect(MARKET_FEED_HEADING_REMOVAL_ALLOWED_PATHS).toEqual([
+      'frontend/src/views/MarketView.vue',
+    ])
+    for (const repoPath of MARKET_FEED_HEADING_REMOVAL_ALLOWED_PATHS) {
+      const entry = entries.find(({ path: candidate }) => candidate === repoPath)
+      expect(fileSha256(entry.content)).toBe(MARKET_FEED_HEADING_REMOVAL_ALLOWED_FILE_SHA256[repoPath])
+    }
+    expect(Object.isFrozen(MARKET_FEED_HEADING_REMOVAL_ALLOWED_PATHS)).toBe(true)
+    expect(Object.isFrozen(MARKET_FEED_HEADING_REMOVAL_ALLOWED_FILE_SHA256)).toBe(true)
+    expect(Object.isFrozen(MARKET_FEED_HEADING_REMOVAL_EVIDENCE)).toBe(true)
   })
 
-  it('fails closed for any further Market drift inside or outside the compact-confirm allowlist', () => {
+  it('fails closed for any further Market drift inside or outside the feed-heading allowlist', () => {
     const entries = readFileEntries(repoRoot, ownedPaths.market)
-    const allowedPath = MARKET_COMPACT_BUTTON_CONFIRM_ALLOWED_PATHS[0]
+    const allowedPath = MARKET_FEED_HEADING_REMOVAL_ALLOWED_PATHS[0]
     const changedAllowed = entries.map((entry) =>
       entry.path === allowedPath
         ? { ...entry, content: Buffer.concat([entry.content, Buffer.from('\n/* drift */')]) }
         : entry,
     )
     const unlistedPath = entries.find(
-      ({ path: repoPath }) => !MARKET_COMPACT_BUTTON_CONFIRM_ALLOWED_PATHS.includes(repoPath),
+      ({ path: repoPath }) => !MARKET_FEED_HEADING_REMOVAL_ALLOWED_PATHS.includes(repoPath),
     ).path
     const changedUnlisted = entries.map((entry) =>
       entry.path === unlistedPath
@@ -377,18 +394,37 @@ describe('Stage 4 protected surface baseline', () => {
         : entry,
     )
 
-    expect(() => assertMarketCompactButtonConfirmDisposition(changedAllowed)).toThrow(
-      /Market compact-confirm allowed file drift/,
+    expect(() => assertMarketFeedHeadingRemovalDisposition(changedAllowed)).toThrow(
+      /Market feed-heading removal allowed file drift/,
     )
     expect(() => resolveMarketRuntimeDisposition(changedAllowed)).toThrow(
-      /Market compact-confirm disposition rejected/,
+      /Market feed-heading removal disposition rejected/,
     )
-    expect(() => assertMarketCompactButtonConfirmDisposition(changedUnlisted)).toThrow(
+    expect(() => assertMarketFeedHeadingRemovalDisposition(changedUnlisted)).toThrow(
       /contentBytes drift/,
     )
     expect(() => resolveMarketRuntimeDisposition(changedUnlisted)).toThrow(
-      /Market compact-confirm disposition rejected/,
+      /Market feed-heading removal disposition rejected/,
     )
+  })
+
+  it('rejects restoration of the redundant Market feed heading or removal of the page heading', () => {
+    const entries = readFileEntries(repoRoot, ownedPaths.market)
+    const mutate = (replacer) => entries.map((entry) => {
+      if (entry.path !== 'frontend/src/views/MarketView.vue') return entry
+      const source = entry.content.toString('utf8')
+      const next = replacer(source)
+      if (next === source) throw new Error('test mutation did not change MarketView.vue')
+      return { ...entry, content: Buffer.from(next, 'utf8') }
+    })
+
+    expect(() => assertMarketFeedHeadingRemovalSemantics(
+      mutate((source) => `${source}\n<div class="market-feed-heading">لفظ‌های فعال</div>\n`),
+    )).toThrow(/restored the redundant heading/)
+
+    expect(() => assertMarketFeedHeadingRemovalSemantics(
+      mutate((source) => source.replace('<h1 class="market-page-title">بازار</h1>', '')),
+    )).toThrow(/lost the page heading/)
   })
 
   it('rejects an expanded first-tap panel, visible countdown, or undersized Market trade target', () => {

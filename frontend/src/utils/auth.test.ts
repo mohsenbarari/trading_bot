@@ -347,11 +347,9 @@ describe('auth utils', () => {
     )
 
     expect(next).toHaveBeenLastCalledWith()
-    expect(fetchMock).toHaveBeenCalledWith(
-      '/api/auth/me',
-      expect.objectContaining({
-        headers: expect.objectContaining({ Authorization: `Bearer ${token}` }),
-      }),
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/auth/me')
+    expect(new Headers(fetchMock.mock.calls[0]?.[1]?.headers).get('authorization')).toBe(
+      `Bearer ${token}`,
     )
     expect(JSON.parse(localStorage.getItem('current_user_summary') || '{}')).toMatchObject({
       role: 'مدیر میانی',
@@ -847,15 +845,33 @@ describe('auth utils', () => {
     expect(response.ok).toBe(true)
     expect(fetchMock).toHaveBeenCalledTimes(3)
     expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/test')
-    expect(fetchMock.mock.calls[0]?.[1]?.headers).toMatchObject({
-      Authorization: 'Bearer old-auth',
-    })
+    expect(new Headers(fetchMock.mock.calls[0]?.[1]?.headers).get('authorization')).toBe('Bearer old-auth')
     expect(fetchMock.mock.calls[1]?.[0]).toBe('/api/auth/refresh')
-    expect(fetchMock.mock.calls[2]?.[1]?.headers).toMatchObject({
-      Authorization: 'Bearer new-auth',
-    })
+    expect(new Headers(fetchMock.mock.calls[2]?.[1]?.headers).get('authorization')).toBe('Bearer new-auth')
     expect(localStorage.getItem('auth_token')).toBe('new-auth')
     expect(localStorage.getItem('refresh_token')).toBe('new-refresh')
+  })
+
+  it('apiFetch sends one valid JSON content type when callers provide the header with different casing', async () => {
+    localStorage.setItem('auth_token', 'auth-token')
+    fetchMock.mockResolvedValueOnce(makeJsonResponse({ result: 'ok' }))
+
+    const { apiFetch } = await import(authModulePath)
+    await apiFetch('/api/trades/', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer stale-caller-token',
+      },
+      body: JSON.stringify({ offer_id: 26, quantity: 12 }),
+      retryNetwork: false,
+    })
+
+    const requestHeaders = new Headers(fetchMock.mock.calls[0]?.[1]?.headers)
+    expect(requestHeaders.get('content-type')).toBe('application/json')
+    expect([...requestHeaders.keys()].filter((name) => name === 'content-type')).toHaveLength(1)
+    expect(requestHeaders.get('authorization')).toBe('Bearer auth-token')
+    expect([...requestHeaders.keys()].filter((name) => name === 'authorization')).toHaveLength(1)
   })
 
   it('apiFetch redirects to setup-password when the backend requires a password change', async () => {

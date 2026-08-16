@@ -271,6 +271,28 @@ export const MARKET_COMPACT_BUTTON_CONFIRM_EVIDENCE = Object.freeze({
   sha256: 'fc3684c998ed042b5c5c9cb587dcf62adde2d2d3ba69d727680b9ad350777e24',
 })
 
+// Owner-directed post-Stage-8 cleanup. Only the redundant feed heading and
+// subtitle are removed; the compact card, lifecycle and trade contracts stay
+// on their previously reviewed exact sources.
+export const MARKET_FEED_HEADING_REMOVAL_KIND =
+  'market-redundant-feed-heading-removal'
+
+export const MARKET_FEED_HEADING_REMOVAL_ALLOWED_PATHS = Object.freeze([
+  'frontend/src/views/MarketView.vue',
+])
+
+export const MARKET_FEED_HEADING_REMOVAL_ALLOWED_FILE_SHA256 = Object.freeze({
+  'frontend/src/views/MarketView.vue':
+    '92cb621e01b4005e2c693da665913049f26672334f2f29fd40cdf1c153238b2d',
+})
+
+export const MARKET_FEED_HEADING_REMOVAL_EVIDENCE = Object.freeze({
+  count: 19,
+  contentBytes: 165291,
+  pathSetSha256: '37aa0b51e20f4ae86f7daf6c3c231d93b3d1f288ade1471490a1f843a57c9589',
+  sha256: 'd4f2e67bc291454872298c20d0e2a7a809eb7fce5ad0e69ee630f37f80993ad9',
+})
+
 export const MESSENGER_RUNTIME_BASELINE = Object.freeze({
   count: 85,
   contentBytes: 1312405,
@@ -894,6 +916,47 @@ export function assertMarketCompactButtonConfirmDisposition(entries) {
   )
 }
 
+export function assertMarketFeedHeadingRemovalSemantics(entries) {
+  assertMarketCompactButtonConfirmSemantics(entries)
+  const market = sourceByPath(entries, 'frontend/src/views/MarketView.vue')
+  if (market.includes('market-feed-heading') || market.includes('market-feed-title') || market.includes('market-feed-subtitle')) {
+    throw new Error('Market feed-heading removal disposition restored the redundant heading structure')
+  }
+  if (market.includes('لفظ‌های فعال') || market.includes('مرتب‌شده بر اساس زمان')) {
+    throw new Error('Market feed-heading removal disposition restored the redundant heading copy')
+  }
+  if (!market.includes('<h1 class="market-page-title">بازار</h1>')) {
+    throw new Error('Market feed-heading removal disposition lost the page heading')
+  }
+}
+
+function assertMarketFeedHeadingRemovalAllowedFiles(entries) {
+  const entriesByPath = new Map(entries.map((entry) => [entry.path, entry]))
+  for (const repoPath of MARKET_FEED_HEADING_REMOVAL_ALLOWED_PATHS) {
+    const entry = entriesByPath.get(repoPath)
+    if (!entry) {
+      throw new Error(`Market feed-heading removal allowed file is missing: ${repoPath}`)
+    }
+    const actualSha256 = fileSha256(entry.content)
+    const expectedSha256 = MARKET_FEED_HEADING_REMOVAL_ALLOWED_FILE_SHA256[repoPath]
+    if (actualSha256 !== expectedSha256) {
+      throw new Error(
+        `Market feed-heading removal allowed file drift: ${repoPath} ${expectedSha256} -> ${actualSha256}`,
+      )
+    }
+  }
+}
+
+export function assertMarketFeedHeadingRemovalDisposition(entries) {
+  assertMarketFeedHeadingRemovalAllowedFiles(entries)
+  assertMarketFeedHeadingRemovalSemantics(entries)
+  return assertProtectedFileSetEvidence(
+    'Market redundant feed-heading removal disposition',
+    protectedFileSetEvidence(entries, MARKET_RUNTIME_CONTRACT),
+    MARKET_FEED_HEADING_REMOVAL_EVIDENCE,
+  )
+}
+
 export function resolveMarketRuntimeDisposition(entries) {
   const actual = protectedFileSetEvidence(entries, MARKET_RUNTIME_CONTRACT)
   try {
@@ -942,23 +1005,32 @@ export function resolveMarketRuntimeDisposition(entries) {
                   evidence: assertMarketCompactButtonConfirmDisposition(entries),
                 }
               } catch (compactConfirmError) {
-                const baselineMessage =
-                  baselineError instanceof Error ? baselineError.message : String(baselineError)
-                const integrationMessage =
-                  integrationError instanceof Error ? integrationError.message : String(integrationError)
-                const aPlusCMessage =
-                  aPlusCError instanceof Error ? aPlusCError.message : String(aPlusCError)
-                const lifecycleMessage =
-                  lifecycleError instanceof Error ? lifecycleError.message : String(lifecycleError)
-                const perimeterMessage =
-                  perimeterError instanceof Error ? perimeterError.message : String(perimeterError)
-                const linearMeterMessage =
-                  linearMeterError instanceof Error ? linearMeterError.message : String(linearMeterError)
-                const compactConfirmMessage =
-                  compactConfirmError instanceof Error ? compactConfirmError.message : String(compactConfirmError)
-                throw new Error(
-                  `Market runtime rejected after Stage 4 baseline drift (${baselineMessage}); main/UIUX integration disposition rejected (${integrationMessage}); Market A+C disposition rejected (${aPlusCMessage}); Market A+C lifecycle-clarity disposition rejected (${lifecycleMessage}); Market A+C perimeter-deadline disposition rejected (${perimeterMessage}); Market A+C linear-meter disposition rejected (${linearMeterMessage}); Market compact-confirm disposition rejected (${compactConfirmMessage})`,
-                )
+                try {
+                  return {
+                    kind: MARKET_FEED_HEADING_REMOVAL_KIND,
+                    evidence: assertMarketFeedHeadingRemovalDisposition(entries),
+                  }
+                } catch (feedHeadingError) {
+                  const baselineMessage =
+                    baselineError instanceof Error ? baselineError.message : String(baselineError)
+                  const integrationMessage =
+                    integrationError instanceof Error ? integrationError.message : String(integrationError)
+                  const aPlusCMessage =
+                    aPlusCError instanceof Error ? aPlusCError.message : String(aPlusCError)
+                  const lifecycleMessage =
+                    lifecycleError instanceof Error ? lifecycleError.message : String(lifecycleError)
+                  const perimeterMessage =
+                    perimeterError instanceof Error ? perimeterError.message : String(perimeterError)
+                  const linearMeterMessage =
+                    linearMeterError instanceof Error ? linearMeterError.message : String(linearMeterError)
+                  const compactConfirmMessage =
+                    compactConfirmError instanceof Error ? compactConfirmError.message : String(compactConfirmError)
+                  const feedHeadingMessage =
+                    feedHeadingError instanceof Error ? feedHeadingError.message : String(feedHeadingError)
+                  throw new Error(
+                    `Market runtime rejected after Stage 4 baseline drift (${baselineMessage}); main/UIUX integration disposition rejected (${integrationMessage}); Market A+C disposition rejected (${aPlusCMessage}); Market A+C lifecycle-clarity disposition rejected (${lifecycleMessage}); Market A+C perimeter-deadline disposition rejected (${perimeterMessage}); Market A+C linear-meter disposition rejected (${linearMeterMessage}); Market compact-confirm disposition rejected (${compactConfirmMessage}); Market feed-heading removal disposition rejected (${feedHeadingMessage})`,
+                  )
+                }
               }
             }
           }

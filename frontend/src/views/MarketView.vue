@@ -1173,10 +1173,6 @@ onUnmounted(() => {
     <!-- Offers List -->
     <div ref="marketContentRef" class="market-content">
       <div class="content-inner">
-        <div class="market-feed-heading">
-          <h2 class="market-feed-title">لفظ‌های فعال</h2>
-          <p class="market-feed-subtitle">مرتب‌شده بر اساس زمان</p>
-        </div>
         <OffersList
           :offers="visibleMarketOffers"
           :loading="isLoading" 
@@ -1392,24 +1388,6 @@ onUnmounted(() => {
   color: var(--ds-danger-700);
   background: var(--ds-market-closed-bg);
   border-color: var(--ds-market-closed-border);
-}
-
-.market-feed-heading {
-  margin: 0 0 0.7rem;
-}
-
-.market-feed-title {
-  margin: 0;
-  font-size: 1rem;
-  font-weight: 800;
-  color: var(--ds-text-primary);
-}
-
-.market-feed-subtitle {
-  margin: 0.2rem 0 0;
-  font-size: 0.75rem;
-  font-weight: 600;
-  color: var(--ds-text-secondary);
 }
 
 .header-controls {
