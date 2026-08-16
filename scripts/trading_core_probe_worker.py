@@ -5238,6 +5238,17 @@ async def expire_bot_offer_with_dispatcher(
     except Exception as exc:
         if error_details is not None:
             error_details.append(f"{type(exc).__name__}: {exc}")
+        try:
+            offer = await load_offer_snapshot(offer_id)
+        except Exception:
+            return "error"
+        offer_status = getattr(
+            getattr(offer, "status", None),
+            "value",
+            getattr(offer, "status", None),
+        )
+        if str(offer_status or "").strip().lower() == OfferStatus.EXPIRED.value:
+            return "success"
         return "error"
     offer = await load_offer_snapshot(offer_id)
     offer_status = getattr(getattr(offer, "status", None), "value", getattr(offer, "status", None))

@@ -46,6 +46,29 @@ class TradingCoreMixedLoadHelperTests(unittest.TestCase):
 
         asyncio.run(run_probe())
 
+    def test_bot_manual_expiry_treats_post_commit_callback_error_as_success(self):
+        async def run_probe():
+            harness = SimpleNamespace(
+                feed_private_callback=AsyncMock(side_effect=ValueError("callback_followup"))
+            )
+            with patch.object(
+                worker,
+                "load_offer_snapshot",
+                new=AsyncMock(return_value=SimpleNamespace(status="expired")),
+            ):
+                outcome = await worker.expire_bot_offer_with_dispatcher(
+                    harness=harness,
+                    owner=worker.LoadUserRef(user_id=1, telegram_id=2),
+                    offer_id=42,
+                    prefix="telegram-live-matrix-unit",
+                    index=1,
+                    error_details=[],
+                )
+
+            self.assertEqual(outcome, "success")
+
+        asyncio.run(run_probe())
+
     def test_bot_manual_expiry_uses_authoritative_terminal_state(self):
         async def run_probe():
             harness = SimpleNamespace(
