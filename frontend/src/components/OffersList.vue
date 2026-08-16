@@ -1123,34 +1123,46 @@ async function cancelOwnOffer(offerId: number) {
 }
 
 .offer-card-wrap.is-expired .offer-card-inner {
-  background: linear-gradient(145deg, #f8fafc, #f1f5f9);
+  background: linear-gradient(
+    145deg,
+    var(--ds-bg-subtle),
+    color-mix(in srgb, var(--ds-border-strong) 24%, var(--ds-bg-card))
+  );
 }
 
 .offer-card-wrap.is-expired {
-  border-color: #94a3b8;
-  border-top-width: 3px;
+  border-color: var(--ds-border-strong);
+  border-inline-start: 3px solid var(--ds-text-tertiary);
 }
 
 .offer-card-wrap.is-fully-traded .offer-card-inner {
-  background: linear-gradient(145deg, #f0fdfa, #ecfdf5);
+  background: linear-gradient(
+    145deg,
+    color-mix(in srgb, var(--ds-success-50) 88%, var(--ds-bg-card)),
+    color-mix(in srgb, var(--ds-success-100) 58%, var(--ds-bg-card))
+  );
 }
 
 .offer-card-wrap.is-fully-traded {
-  border-color: #0f766e;
-  border-top-width: 3px;
+  border-color: color-mix(in srgb, var(--ds-success-600) 46%, var(--ds-border-light));
+  border-inline-start: 3px solid var(--ds-success-600);
 }
 
 .offer-card-wrap.is-partially-traded .offer-card-inner {
-  background: linear-gradient(145deg, #fffbeb, #fefce8);
+  background: linear-gradient(
+    145deg,
+    color-mix(in srgb, var(--ds-success-50) 68%, var(--ds-bg-card)),
+    color-mix(in srgb, var(--ds-success-100) 34%, var(--ds-bg-card))
+  );
 }
 
 .offer-card-wrap.is-partially-traded {
-  border-color: #d97706;
-  border-top-width: 3px;
+  border-color: color-mix(in srgb, var(--ds-success-600) 34%, var(--ds-border-light));
+  border-inline-start: 3px solid color-mix(in srgb, var(--ds-success-600) 76%, var(--ds-border-strong));
 }
 
-.offer-card-wrap.is-history .role-badge {
-  opacity: 0.78;
+.offer-card-wrap.is-history :is(.offer-body, .offer-time, .offer-settlement, .role-badge) {
+  opacity: 0.8;
 }
 
 .offer-card-wrap.is-history .price,
@@ -1163,8 +1175,8 @@ async function cancelOwnOffer(offerId: number) {
   display: inline-flex;
   align-items: center;
   gap: 0.25rem;
-  min-height: 20px;
-  padding: 1px 7px;
+  min-height: 24px;
+  padding: 2px 7px;
   border-radius: 999px;
   font-size: 10.5px;
   font-weight: 800;
@@ -1172,21 +1184,29 @@ async function cancelOwnOffer(offerId: number) {
   border: 1px solid transparent;
 }
 
+.history-ribbon {
+  box-shadow: inset 0 1px 0 color-mix(in srgb, white 72%, transparent);
+}
+
+.history-ribbon :deep(.history-ribbon__icon) {
+  flex: 0 0 auto;
+}
+
 .expired-ribbon {
-  background: #475569;
-  color: #fff;
-  border-color: #475569;
+  background: color-mix(in srgb, var(--ds-border-medium) 58%, var(--ds-bg-card));
+  color: var(--ds-text-secondary);
+  border-color: var(--ds-border-strong);
 }
 
 .traded-ribbon {
-  background: #0f766e;
-  color: #fff;
-  border-color: #0f766e;
+  background: color-mix(in srgb, var(--ds-success-100) 72%, var(--ds-bg-card));
+  color: var(--ds-success-800);
+  border-color: color-mix(in srgb, var(--ds-success-600) 42%, var(--ds-bg-card));
 }
 
 .offer-card-wrap.is-partially-traded .traded-ribbon {
-  background: #b45309;
-  border-color: #b45309;
+  background: color-mix(in srgb, var(--ds-success-50) 78%, var(--ds-bg-card));
+  border-color: color-mix(in srgb, var(--ds-success-600) 32%, var(--ds-bg-card));
 }
 
 .offer-overtime-sticker {

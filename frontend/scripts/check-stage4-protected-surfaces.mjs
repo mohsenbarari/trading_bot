@@ -20,6 +20,8 @@ import {
   MARKET_COMPACT_BUTTON_CONFIRM_KIND,
   MARKET_FEED_HEADING_REMOVAL_ALLOWED_PATHS,
   MARKET_FEED_HEADING_REMOVAL_KIND,
+  MARKET_HISTORY_TERMINAL_VISUAL_ALLOWED_PATHS,
+  MARKET_HISTORY_TERMINAL_VISUAL_KIND,
   STAGE6_MESSENGER_URL_PRIVACY_ALLOWED_PATHS,
   STAGE8_CREATECHANNEL_HELPPOPOVER_PLACEMENT_ALLOWED_PATHS,
   STAGE8_CREATECHANNEL_HELPPOPOVER_PLACEMENT_KIND,
@@ -132,6 +134,10 @@ try {
   } else if (market.kind === MARKET_FEED_HEADING_REMOVAL_KIND) {
     console.log(
       `PASS Market redundant feed-heading removal disposition (exact ${MARKET_FEED_HEADING_REMOVAL_ALLOWED_PATHS.length}-file overlay; ${market.evidence.count} files, ${market.evidence.contentBytes} bytes, ${market.evidence.pathSetSha256}, ${market.evidence.sha256})`,
+    )
+  } else if (market.kind === MARKET_HISTORY_TERMINAL_VISUAL_KIND) {
+    console.log(
+      `PASS Market terminal-history minimal-clarity disposition (exact ${MARKET_HISTORY_TERMINAL_VISUAL_ALLOWED_PATHS.length}-file overlay; ${market.evidence.count} files, ${market.evidence.contentBytes} bytes, ${market.evidence.pathSetSha256}, ${market.evidence.sha256})`,
     )
   } else {
     throw new Error(`unsupported Market runtime disposition: ${String(market.kind)}`)

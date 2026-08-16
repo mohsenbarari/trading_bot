@@ -187,6 +187,8 @@ describe('ui primitives', () => {
     expect(historyStamp.attributes('data-test')).toBe('history-stamp')
     expect(historyStamp.classes()).toEqual(expect.arrayContaining(['history-ribbon', 'traded-ribbon']))
     expect(historyStamp.text()).toBe('معامله‌شده 20 عدد')
+    expect(historyStamp.find('.history-ribbon__icon').exists()).toBe(true)
+    expect(historyStamp.find('.history-ribbon__icon').attributes('aria-hidden')).toBe('true')
 
     const offerPrice = mount(AppOfferPrice, { props: { value: 50000 } })
     expect(offerPrice.attributes('data-test')).toBe('offer-price')

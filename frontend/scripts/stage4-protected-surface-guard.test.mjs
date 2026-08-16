@@ -33,6 +33,10 @@ import {
   MARKET_FEED_HEADING_REMOVAL_ALLOWED_PATHS,
   MARKET_FEED_HEADING_REMOVAL_EVIDENCE,
   MARKET_FEED_HEADING_REMOVAL_KIND,
+  MARKET_HISTORY_TERMINAL_VISUAL_ALLOWED_FILE_SHA256,
+  MARKET_HISTORY_TERMINAL_VISUAL_ALLOWED_PATHS,
+  MARKET_HISTORY_TERMINAL_VISUAL_EVIDENCE,
+  MARKET_HISTORY_TERMINAL_VISUAL_KIND,
   MARKET_RUNTIME_BASELINE,
   MARKET_RUNTIME_CONTRACT,
   MESSENGER_OMITTED_DIRECT_RUNTIME_PATHS,
@@ -66,6 +70,8 @@ import {
   assertMarketCompactButtonConfirmSemantics,
   assertMarketFeedHeadingRemovalDisposition,
   assertMarketFeedHeadingRemovalSemantics,
+  assertMarketHistoryTerminalVisualDisposition,
+  assertMarketHistoryTerminalVisualSemantics,
   STAGE4_BASE_COMMIT,
   STAGE4_BASE_TREE,
   STAGE4_ROUTE_CONTRACT_PATH,
@@ -288,12 +294,12 @@ describe('Stage 4 protected surface baseline', () => {
     )
   })
 
-  it('keeps every prior Market disposition immutable while admitting the redundant feed-heading removal', () => {
+  it('keeps every prior Market disposition immutable while admitting terminal-history visual clarity', () => {
     expect(ownedPaths.market).toContain('frontend/src/utils/settlementType.ts')
     const entries = readFileEntries(repoRoot, ownedPaths.market)
     expect(resolveMarketRuntimeDisposition(entries)).toMatchObject({
-      kind: MARKET_FEED_HEADING_REMOVAL_KIND,
-      evidence: MARKET_FEED_HEADING_REMOVAL_EVIDENCE,
+      kind: MARKET_HISTORY_TERMINAL_VISUAL_KIND,
+      evidence: MARKET_HISTORY_TERMINAL_VISUAL_EVIDENCE,
     })
     expect(MARKET_RUNTIME_BASELINE).toEqual({
       count: 19,
@@ -341,10 +347,9 @@ describe('Stage 4 protected surface baseline', () => {
     expect(MARKET_COMPACT_BUTTON_CONFIRM_ALLOWED_PATHS).toEqual([
       'frontend/src/components/OffersList.vue',
     ])
-    for (const repoPath of MARKET_COMPACT_BUTTON_CONFIRM_ALLOWED_PATHS) {
-      const entry = entries.find(({ path: candidate }) => candidate === repoPath)
-      expect(fileSha256(entry.content)).toBe(MARKET_COMPACT_BUTTON_CONFIRM_ALLOWED_FILE_SHA256[repoPath])
-    }
+    expect(() => assertMarketCompactButtonConfirmDisposition(entries)).toThrow(
+      /Market compact-confirm allowed file drift/,
+    )
     expect(Object.isFrozen(MARKET_RUNTIME_BASELINE)).toBe(true)
     expect(Object.isFrozen(MAIN_UIUX_INTEGRATION_MARKET_ALLOWED_PATHS)).toBe(true)
     expect(Object.isFrozen(MAIN_UIUX_INTEGRATION_MARKET_ALLOWED_FILE_SHA256)).toBe(true)
@@ -375,6 +380,25 @@ describe('Stage 4 protected surface baseline', () => {
     expect(Object.isFrozen(MARKET_FEED_HEADING_REMOVAL_ALLOWED_PATHS)).toBe(true)
     expect(Object.isFrozen(MARKET_FEED_HEADING_REMOVAL_ALLOWED_FILE_SHA256)).toBe(true)
     expect(Object.isFrozen(MARKET_FEED_HEADING_REMOVAL_EVIDENCE)).toBe(true)
+    expect(() => assertMarketFeedHeadingRemovalDisposition(entries)).toThrow(/contentBytes drift/)
+    expect(MARKET_HISTORY_TERMINAL_VISUAL_KIND).toBe('market-history-terminal-minimal-clarity')
+    expect(MARKET_HISTORY_TERMINAL_VISUAL_ALLOWED_PATHS).toEqual([
+      'frontend/src/components/OffersList.vue',
+      'frontend/src/components/ui/AppOfferHistoryStamp.vue',
+    ])
+    for (const repoPath of MARKET_HISTORY_TERMINAL_VISUAL_ALLOWED_PATHS) {
+      const entry = entries.find(({ path: candidate }) => candidate === repoPath)
+      expect(fileSha256(entry.content)).toBe(MARKET_HISTORY_TERMINAL_VISUAL_ALLOWED_FILE_SHA256[repoPath])
+    }
+    expect(MARKET_HISTORY_TERMINAL_VISUAL_EVIDENCE).toEqual({
+      count: 19,
+      contentBytes: 166827,
+      pathSetSha256: '37aa0b51e20f4ae86f7daf6c3c231d93b3d1f288ade1471490a1f843a57c9589',
+      sha256: '8320a622ec35748d46c50a86488d039ad82cf1ef0e8557ea70e525c612e38dff',
+    })
+    expect(Object.isFrozen(MARKET_HISTORY_TERMINAL_VISUAL_ALLOWED_PATHS)).toBe(true)
+    expect(Object.isFrozen(MARKET_HISTORY_TERMINAL_VISUAL_ALLOWED_FILE_SHA256)).toBe(true)
+    expect(Object.isFrozen(MARKET_HISTORY_TERMINAL_VISUAL_EVIDENCE)).toBe(true)
   })
 
   it('fails closed for any further Market drift inside or outside the feed-heading allowlist', () => {
@@ -405,6 +429,52 @@ describe('Stage 4 protected surface baseline', () => {
     )
     expect(() => resolveMarketRuntimeDisposition(changedUnlisted)).toThrow(
       /Market feed-heading removal disposition rejected/,
+    )
+  })
+
+  it('locks the green traded family, muted expired state, bounded fade, and decorative status icons', () => {
+    const entries = readFileEntries(repoRoot, ownedPaths.market)
+    const mutate = (repoPath, replacer) => entries.map((entry) => {
+      if (entry.path !== repoPath) return entry
+      const source = entry.content.toString('utf8')
+      const next = replacer(source)
+      if (next === source) throw new Error(`test mutation did not change ${repoPath}`)
+      return { ...entry, content: Buffer.from(next, 'utf8') }
+    })
+
+    expect(() => assertMarketHistoryTerminalVisualSemantics(
+      mutate('frontend/src/components/OffersList.vue', (source) =>
+        source.replace(
+          'border-inline-start: 3px solid var(--ds-success-600);',
+          'border-inline-start: 3px solid var(--ds-warning-600);',
+        ),
+      ),
+    )).toThrow(/lost the green traded-card treatment/)
+
+    expect(() => assertMarketHistoryTerminalVisualSemantics(
+      mutate('frontend/src/components/OffersList.vue', (source) =>
+        source.replace(
+          'background: color-mix(in srgb, var(--ds-success-50) 78%, var(--ds-bg-card));',
+          'background: var(--ds-warning-50);',
+        ),
+      ),
+    )).toThrow(/lost the green partial-trade family/)
+
+    expect(() => assertMarketHistoryTerminalVisualSemantics(
+      mutate('frontend/src/components/ui/AppOfferHistoryStamp.vue', (source) =>
+        source.replace(/CircleCheckBig/g, 'Circle'),
+      ),
+    )).toThrow(/lost the distinct traded\/expired icons/)
+
+    const drifted = mutate(
+      MARKET_HISTORY_TERMINAL_VISUAL_ALLOWED_PATHS[0],
+      (source) => `${source}\n/* terminal-history drift */\n`,
+    )
+    expect(() => assertMarketHistoryTerminalVisualDisposition(drifted)).toThrow(
+      /Market terminal-history allowed file drift/,
+    )
+    expect(() => resolveMarketRuntimeDisposition(drifted)).toThrow(
+      /Market terminal-history visual disposition rejected/,
     )
   })
 

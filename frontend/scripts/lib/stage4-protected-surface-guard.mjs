@@ -293,6 +293,31 @@ export const MARKET_FEED_HEADING_REMOVAL_EVIDENCE = Object.freeze({
   sha256: 'd4f2e67bc291454872298c20d0e2a7a809eb7fce5ad0e69ee630f37f80993ad9',
 })
 
+// Owner-directed terminal-history refinement. It changes only the visual
+// hierarchy of read-only traded/expired cards and their status stamp; trade,
+// timer, filtering, API and interaction contracts remain inherited unchanged.
+export const MARKET_HISTORY_TERMINAL_VISUAL_KIND =
+  'market-history-terminal-minimal-clarity'
+
+export const MARKET_HISTORY_TERMINAL_VISUAL_ALLOWED_PATHS = Object.freeze([
+  'frontend/src/components/OffersList.vue',
+  'frontend/src/components/ui/AppOfferHistoryStamp.vue',
+])
+
+export const MARKET_HISTORY_TERMINAL_VISUAL_ALLOWED_FILE_SHA256 = Object.freeze({
+  'frontend/src/components/OffersList.vue':
+    '2ba59224feb7dd817c491be193a769f21d7ea3cf6989ba9e8450398c9ca535bd',
+  'frontend/src/components/ui/AppOfferHistoryStamp.vue':
+    '3a3a91c1a279cdc98529c4505a3272ab9ddc0eec6a3a47357af9ddd354d2d385',
+})
+
+export const MARKET_HISTORY_TERMINAL_VISUAL_EVIDENCE = Object.freeze({
+  count: 19,
+  contentBytes: 166827,
+  pathSetSha256: '37aa0b51e20f4ae86f7daf6c3c231d93b3d1f288ade1471490a1f843a57c9589',
+  sha256: '8320a622ec35748d46c50a86488d039ad82cf1ef0e8557ea70e525c612e38dff',
+})
+
 export const MESSENGER_RUNTIME_BASELINE = Object.freeze({
   count: 85,
   contentBytes: 1312405,
@@ -957,6 +982,63 @@ export function assertMarketFeedHeadingRemovalDisposition(entries) {
   )
 }
 
+export function assertMarketHistoryTerminalVisualSemantics(entries) {
+  assertMarketFeedHeadingRemovalSemantics(entries)
+  const offers = sourceByPath(entries, 'frontend/src/components/OffersList.vue')
+  const stamp = sourceByPath(entries, 'frontend/src/components/ui/AppOfferHistoryStamp.vue')
+  if (!offers.includes('.offer-card-wrap.is-expired .offer-card-inner')
+    || !offers.includes('border-inline-start: 3px solid var(--ds-text-tertiary)')) {
+    throw new Error('Market terminal-history disposition lost the muted expired-card treatment')
+  }
+  if (!offers.includes('.offer-card-wrap.is-fully-traded .offer-card-inner')
+    || !offers.includes('border-inline-start: 3px solid var(--ds-success-600)')) {
+    throw new Error('Market terminal-history disposition lost the green traded-card treatment')
+  }
+  const partialRibbonRule = offers.match(
+    /\.offer-card-wrap\.is-partially-traded \.traded-ribbon\s*\{([^}]*)\}/u,
+  )?.[1] || ''
+  if (!partialRibbonRule.includes('--ds-success-') || partialRibbonRule.includes('--ds-warning-')) {
+    throw new Error('Market terminal-history disposition lost the green partial-trade family')
+  }
+  if (!offers.includes(':is(.offer-body, .offer-time, .offer-settlement, .role-badge)')
+    || !offers.includes('opacity: 0.8')) {
+    throw new Error('Market terminal-history disposition lost the bounded secondary-content fade')
+  }
+  if (!stamp.includes('CircleCheckBig') || !stamp.includes('Clock3')) {
+    throw new Error('Market terminal-history disposition lost the distinct traded/expired icons')
+  }
+  if (!stamp.includes('class="history-ribbon__icon"') || !stamp.includes('aria-hidden="true"')) {
+    throw new Error('Market terminal-history disposition exposed or removed the decorative status icon')
+  }
+}
+
+function assertMarketHistoryTerminalVisualAllowedFiles(entries) {
+  const entriesByPath = new Map(entries.map((entry) => [entry.path, entry]))
+  for (const repoPath of MARKET_HISTORY_TERMINAL_VISUAL_ALLOWED_PATHS) {
+    const entry = entriesByPath.get(repoPath)
+    if (!entry) {
+      throw new Error(`Market terminal-history allowed file is missing: ${repoPath}`)
+    }
+    const actualSha256 = fileSha256(entry.content)
+    const expectedSha256 = MARKET_HISTORY_TERMINAL_VISUAL_ALLOWED_FILE_SHA256[repoPath]
+    if (actualSha256 !== expectedSha256) {
+      throw new Error(
+        `Market terminal-history allowed file drift: ${repoPath} ${expectedSha256} -> ${actualSha256}`,
+      )
+    }
+  }
+}
+
+export function assertMarketHistoryTerminalVisualDisposition(entries) {
+  assertMarketHistoryTerminalVisualAllowedFiles(entries)
+  assertMarketHistoryTerminalVisualSemantics(entries)
+  return assertProtectedFileSetEvidence(
+    'Market terminal-history minimal-clarity disposition',
+    protectedFileSetEvidence(entries, MARKET_RUNTIME_CONTRACT),
+    MARKET_HISTORY_TERMINAL_VISUAL_EVIDENCE,
+  )
+}
+
 export function resolveMarketRuntimeDisposition(entries) {
   const actual = protectedFileSetEvidence(entries, MARKET_RUNTIME_CONTRACT)
   try {
@@ -1011,25 +1093,34 @@ export function resolveMarketRuntimeDisposition(entries) {
                     evidence: assertMarketFeedHeadingRemovalDisposition(entries),
                   }
                 } catch (feedHeadingError) {
-                  const baselineMessage =
-                    baselineError instanceof Error ? baselineError.message : String(baselineError)
-                  const integrationMessage =
-                    integrationError instanceof Error ? integrationError.message : String(integrationError)
-                  const aPlusCMessage =
-                    aPlusCError instanceof Error ? aPlusCError.message : String(aPlusCError)
-                  const lifecycleMessage =
-                    lifecycleError instanceof Error ? lifecycleError.message : String(lifecycleError)
-                  const perimeterMessage =
-                    perimeterError instanceof Error ? perimeterError.message : String(perimeterError)
-                  const linearMeterMessage =
-                    linearMeterError instanceof Error ? linearMeterError.message : String(linearMeterError)
-                  const compactConfirmMessage =
-                    compactConfirmError instanceof Error ? compactConfirmError.message : String(compactConfirmError)
-                  const feedHeadingMessage =
-                    feedHeadingError instanceof Error ? feedHeadingError.message : String(feedHeadingError)
-                  throw new Error(
-                    `Market runtime rejected after Stage 4 baseline drift (${baselineMessage}); main/UIUX integration disposition rejected (${integrationMessage}); Market A+C disposition rejected (${aPlusCMessage}); Market A+C lifecycle-clarity disposition rejected (${lifecycleMessage}); Market A+C perimeter-deadline disposition rejected (${perimeterMessage}); Market A+C linear-meter disposition rejected (${linearMeterMessage}); Market compact-confirm disposition rejected (${compactConfirmMessage}); Market feed-heading removal disposition rejected (${feedHeadingMessage})`,
-                  )
+                  try {
+                    return {
+                      kind: MARKET_HISTORY_TERMINAL_VISUAL_KIND,
+                      evidence: assertMarketHistoryTerminalVisualDisposition(entries),
+                    }
+                  } catch (terminalVisualError) {
+                    const baselineMessage =
+                      baselineError instanceof Error ? baselineError.message : String(baselineError)
+                    const integrationMessage =
+                      integrationError instanceof Error ? integrationError.message : String(integrationError)
+                    const aPlusCMessage =
+                      aPlusCError instanceof Error ? aPlusCError.message : String(aPlusCError)
+                    const lifecycleMessage =
+                      lifecycleError instanceof Error ? lifecycleError.message : String(lifecycleError)
+                    const perimeterMessage =
+                      perimeterError instanceof Error ? perimeterError.message : String(perimeterError)
+                    const linearMeterMessage =
+                      linearMeterError instanceof Error ? linearMeterError.message : String(linearMeterError)
+                    const compactConfirmMessage =
+                      compactConfirmError instanceof Error ? compactConfirmError.message : String(compactConfirmError)
+                    const feedHeadingMessage =
+                      feedHeadingError instanceof Error ? feedHeadingError.message : String(feedHeadingError)
+                    const terminalVisualMessage =
+                      terminalVisualError instanceof Error ? terminalVisualError.message : String(terminalVisualError)
+                    throw new Error(
+                      `Market runtime rejected after Stage 4 baseline drift (${baselineMessage}); main/UIUX integration disposition rejected (${integrationMessage}); Market A+C disposition rejected (${aPlusCMessage}); Market A+C lifecycle-clarity disposition rejected (${lifecycleMessage}); Market A+C perimeter-deadline disposition rejected (${perimeterMessage}); Market A+C linear-meter disposition rejected (${linearMeterMessage}); Market compact-confirm disposition rejected (${compactConfirmMessage}); Market feed-heading removal disposition rejected (${feedHeadingMessage}); Market terminal-history visual disposition rejected (${terminalVisualMessage})`,
+                    )
+                  }
                 }
               }
             }

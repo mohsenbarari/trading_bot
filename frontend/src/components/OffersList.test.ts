@@ -239,6 +239,7 @@ describe('OffersList.vue', () => {
     })
 
     expect(wrapper.find('.expired-ribbon').text()).toBe('منقضی · بدون معامله')
+    expect(wrapper.find('.expired-ribbon .history-ribbon__icon').exists()).toBe(true)
     expect(wrapper.find('.offer-card-wrap').classes()).toContain('is-expired')
     expect(wrapper.find('.offer-card-wrap').attributes('data-lifecycle-state')).toBe('expired')
     expect(wrapper.find('.trade-btn').exists()).toBe(false)
@@ -304,6 +305,7 @@ describe('OffersList.vue', () => {
       'بخشی معامله شد · 20 از 40',
     ])
     expect(wrapper.findAll('.traded-ribbon')).toHaveLength(2)
+    expect(wrapper.findAll('.traded-ribbon .history-ribbon__icon')).toHaveLength(2)
     expect(wrapper.find('.expired-ribbon').exists()).toBe(false)
     expect(wrapper.findAll('.offer-card-wrap')[0]!.classes()).toContain('is-traded')
     expect(wrapper.findAll('.offer-card-wrap')[0]!.classes()).toContain('is-fully-traded')
