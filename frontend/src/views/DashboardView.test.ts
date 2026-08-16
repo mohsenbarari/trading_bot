@@ -22,6 +22,7 @@ import {
 const dashboardViewMocks = vi.hoisted(() => ({
   routerPushMock: vi.fn(),
   apiFetchMock: vi.fn(),
+  forceLogoutMock: vi.fn(),
   isAppConnecting: { value: false },
   notificationStore: {
     appNotifications: [] as Array<Record<string, unknown>>,
@@ -41,8 +42,20 @@ vi.mock('../stores/notifications', () => ({
 
 vi.mock('../utils/auth', () => ({
   apiFetch: dashboardViewMocks.apiFetchMock,
+  forceLogout: dashboardViewMocks.forceLogoutMock,
   isAppConnecting: dashboardViewMocks.isAppConnecting,
 }))
+
+const DashboardDailySectionsStub = {
+  props: ['user'],
+  template: `
+    <section class="dashboard-daily-sections-stub">
+      <h2>معاملات امروز</h2>
+      <h2>لیست همکاران</h2>
+      <h2>کالاهای مجاز برای معامله</h2>
+    </section>
+  `,
+}
 
 function makeJsonResponse(payload: unknown, ok = true) {
   return {
@@ -65,8 +78,16 @@ function mockIdentity(user: Record<string, unknown>) {
   })
 }
 
+function mountDashboard() {
+  return mount(DashboardView, {
+    global: {
+      stubs: { DashboardDailySections: DashboardDailySectionsStub },
+    },
+  })
+}
+
 async function mountView() {
-  const wrapper = mount(DashboardView)
+  const wrapper = mountDashboard()
   await flushPromises()
   return wrapper
 }
@@ -81,6 +102,7 @@ describe('DashboardView.vue Stage 4 Home contract', () => {
     vi.setSystemTime(new Date(2026, 4, 14, 5, 0, 0))
     dashboardViewMocks.routerPushMock.mockReset()
     dashboardViewMocks.apiFetchMock.mockReset()
+    dashboardViewMocks.forceLogoutMock.mockReset()
     dashboardViewMocks.isAppConnecting.value = false
     dashboardViewMocks.notificationStore.appNotifications = []
     dashboardViewMocks.notificationStore.appUnreadCount = 0
@@ -243,7 +265,7 @@ describe('DashboardView.vue Stage 4 Home contract', () => {
     expect(currentUserSummary.value).toBeNull()
   })
 
-  it('renders the quiet Home header, one unread dot, canonical routes, and no removed dashboard content', async () => {
+  it('renders the quiet Home header, daily sections, and canonical routes', async () => {
     dashboardViewMocks.notificationStore.appNotifications = [
       { id: 1, is_read: true },
       { id: 2, is_read: false },
@@ -266,19 +288,21 @@ describe('DashboardView.vue Stage 4 Home contract', () => {
     expect(wrapper.get('.user-name').text()).toBe('رضا محمدی')
     expect(wrapper.get('.avatar').text()).toBe('ر')
     expect(wrapper.get('.user-info-center').attributes('aria-label')).toBe(
-      'مشاهده پروفایل رضا محمدی',
+      'باز کردن منوی حساب رضا محمدی',
     )
+    expect(wrapper.get('.user-info-center').attributes('aria-haspopup')).toBe('menu')
+    expect(wrapper.get('.user-info-center').attributes('aria-expanded')).toBe('false')
     expect(wrapper.findAll('.notif-dot')).toHaveLength(1)
     expect(wrapper.get('.notif-btn').attributes('aria-label')).toBe('اعلان‌های خوانده‌نشده')
     expect(wrapper.text()).not.toContain('۲ اعلان')
     expect(wrapper.text()).not.toContain('صبح بخیر')
     expect(wrapper.text()).not.toContain('حساب فعال')
     expect(wrapper.text()).not.toContain('آماده انجام عملیات روزانه')
-    expect(wrapper.text()).not.toContain('معاملات امروز')
-    expect(wrapper.text()).not.toContain('لیست همکاران')
-    expect(wrapper.text()).not.toContain('کالاهای مجاز برای معامله')
+    expect(wrapper.text()).toContain('معاملات امروز')
+    expect(wrapper.text()).toContain('لیست همکاران')
+    expect(wrapper.text()).toContain('کالاهای مجاز برای معامله')
     expect(wrapper.text()).not.toContain('اتصال تلگرام')
-    expect(wrapper.find('.logout-btn').exists()).toBe(false)
+    expect(wrapper.find('.dashboard-account-menu__panel').exists()).toBe(false)
     expect(wrapper.getComponent(PWAInstallOverlay).props('eligible')).toBe(true)
 
     const marketHero = wrapper.get('.hero-btn')
@@ -286,6 +310,8 @@ describe('DashboardView.vue Stage 4 Home contract', () => {
 
     await wrapper.get('.notif-btn').trigger('click')
     await wrapper.get('.user-info-center').trigger('click')
+    expect(wrapper.get('.user-info-center').attributes('aria-expanded')).toBe('true')
+    await wrapper.get('[role="menuitem"]').trigger('click')
     await marketHero.trigger('click')
 
     expect(dashboardViewMocks.routerPushMock).toHaveBeenNthCalledWith(1, '/account/notifications')
@@ -312,6 +338,56 @@ describe('DashboardView.vue Stage 4 Home contract', () => {
 
     expect(wrapper.find('.notif-dot').exists()).toBe(false)
     expect(wrapper.get('.notif-btn').attributes('aria-label')).toBe('اعلان‌ها')
+  })
+
+  it('closes the account menu with Escape and logs out after best-effort session cleanup', async () => {
+    dashboardViewMocks.apiFetchMock.mockImplementation(async (url: string) => {
+      if (url === '/api/auth/me') {
+        return makeJsonResponse({
+          id: 55,
+          role: 'owner',
+          is_accountant: false,
+          is_customer: false,
+          full_name: 'مالک حساب',
+          account_name: 'owner55',
+          account_status: 'active',
+          global_lock_grace_expires_at: null,
+          global_web_locked_at: null,
+          trading_restricted_until: null,
+        })
+      }
+      if (url === '/api/sessions/active') {
+        return makeJsonResponse([{ id: 901, is_current: true }, { id: 902, is_current: false }])
+      }
+      if (url === '/api/sessions/901') return makeJsonResponse({ ok: true })
+      return makeJsonResponse(null, false)
+    })
+
+    const wrapper = await mountView()
+    const trigger = wrapper.get<HTMLButtonElement>('.user-info-center')
+    const focusSpy = vi.spyOn(trigger.element, 'focus')
+    await trigger.trigger('click')
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    await flushPromises()
+
+    expect(wrapper.find('.dashboard-account-menu__panel').exists()).toBe(false)
+    expect(focusSpy).toHaveBeenCalledTimes(1)
+
+    await trigger.trigger('click')
+    const logoutButton = wrapper
+      .findAll<HTMLButtonElement>('[role="menuitem"]')
+      .find((button) => button.text().includes('خروج'))
+    expect(logoutButton).toBeTruthy()
+    await logoutButton!.trigger('click')
+    await flushPromises()
+
+    expect(requestedUrls()).toEqual([
+      '/api/auth/me',
+      '/api/sessions/active',
+      '/api/sessions/901',
+    ])
+    expect(dashboardViewMocks.apiFetchMock.mock.calls[2]?.[1]).toMatchObject({ method: 'DELETE' })
+    expect(dashboardViewMocks.forceLogoutMock).toHaveBeenCalledTimes(1)
   })
 
   it('shows durable unread attention from the server count before history is opened', async () => {
@@ -342,7 +418,7 @@ describe('DashboardView.vue Stage 4 Home contract', () => {
         }),
     )
 
-    const wrapper = mount(DashboardView)
+    const wrapper = mountDashboard()
     await flushPromises()
 
     expect(wrapper.findComponent(PWAInstallOverlay).exists()).toBe(false)
@@ -493,6 +569,7 @@ describe('DashboardView.vue Stage 4 Home contract', () => {
 
     await wrapper.get('.notif-btn').trigger('click')
     await wrapper.get('.user-info-center').trigger('click')
+    await wrapper.get('[role="menuitem"]').trigger('click')
 
     expect(dashboardViewMocks.routerPushMock).toHaveBeenNthCalledWith(1, '/account/notifications')
     expect(dashboardViewMocks.routerPushMock).toHaveBeenNthCalledWith(2, '/profile')
@@ -552,7 +629,7 @@ describe('DashboardView.vue Stage 4 Home contract', () => {
     expect(dashboardViewMocks.routerPushMock).toHaveBeenCalledWith('/market')
   })
 
-  it('contains no removed Home API, component, content, or CSS implementation', () => {
+  it('keeps the new daily data implementation outside the protected Dashboard file', () => {
     const source = readFileSync(resolve(process.cwd(), 'src/views/DashboardView.vue'), 'utf8')
     const styleStart = source.indexOf('<style scoped>')
     const runtimeSource = source.slice(0, styleStart)
@@ -560,9 +637,8 @@ describe('DashboardView.vue Stage 4 Home contract', () => {
 
     expect(runtimeSource).not.toMatch(/\/api\/trades\/my|\/api\/commodities|project-users/)
     expect(runtimeSource).not.toMatch(/telegramLink|TelegramConnectPanel/)
-    expect(runtimeSource).not.toMatch(
-      /معاملات امروز|لیست همکاران|کالاهای مجاز|اتصال تلگرام|operations-customers/,
-    )
+    expect(runtimeSource).toContain('DashboardDailySections')
+    expect(runtimeSource).not.toMatch(/اتصال تلگرام|operations-customers/)
     expect(styleSource).not.toMatch(
       /\.today-trades-card|\.dashboard-project-users|\.dashboard-commodit|\.telegram-connect/,
     )

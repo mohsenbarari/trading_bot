@@ -1790,7 +1790,6 @@ onBeforeUnmount(() => {
       backdrop-class="ui-v2-workspace-overlay-backdrop"
       panel-class="ui-v2-workspace-overlay-panel"
       body-class="ui-v2-workspace-overlay-body"
-      actions-class="ui-v2-workspace-overlay-actions"
       :show-close="!isCreateSubmitting"
       :close-on-backdrop="!isCreateSubmitting"
       :close-on-escape="!isCreateSubmitting"
@@ -1868,21 +1867,23 @@ onBeforeUnmount(() => {
           title="ثبت دعوت ناموفق بود"
           :message="createError"
         />
-      </div>
 
-      <template #actions>
-        <AppButton variant="secondary" :disabled="isCreateSubmitting" @click="closeCreatePanel">
-          انصراف
-        </AppButton>
-        <AppButton
-          variant="primary"
-          :loading="isCreateSubmitting"
-          :disabled="isCreateSubmitting"
-          @click="createRelation"
+        <div
+          class="ui-v2-workspace-inline-form-actions ui-v2-workspace-accountant-create-actions"
         >
-          ثبت دعوت حسابدار
-        </AppButton>
-      </template>
+          <AppButton variant="secondary" :disabled="isCreateSubmitting" @click="closeCreatePanel">
+            انصراف
+          </AppButton>
+          <AppButton
+            variant="primary"
+            :loading="isCreateSubmitting"
+            :disabled="isCreateSubmitting"
+            @click="createRelation"
+          >
+            ثبت دعوت حسابدار
+          </AppButton>
+        </div>
+      </div>
     </component>
   </div>
 </template>

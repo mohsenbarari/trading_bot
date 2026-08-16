@@ -1392,9 +1392,15 @@ describe('AccountantWorkspaceView.vue', () => {
       ).toBe(true)
       expect(
         wrapper
-          .findAll('.ui-v2-workspace-overlay-actions .ui-button')
+          .findAll('.ui-v2-workspace-accountant-create-actions .ui-button')
           .every((button) => button.attributes('disabled') !== undefined),
       ).toBe(true)
+      expect(
+        wrapper
+          .get('.ui-v2-workspace-accountant-create-actions')
+          .element.closest('.ui-v2-workspace-overlay-body'),
+      ).not.toBeNull()
+      expect(wrapper.find('.ui-bottom-sheet__actions').exists()).toBe(false)
       expect(document.querySelector('.ui-bottom-sheet__header button')).toBeNull()
       document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
       document.querySelector<HTMLElement>('.ui-sheet-backdrop')?.click()

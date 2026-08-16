@@ -42,6 +42,24 @@
 }
 
 :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-workspace-inline-form-actions {
+  position: static;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--ui-v2-spacing-8);
+  margin-block-start: var(--ui-v2-spacing-16);
+  padding-block-start: var(--ui-v2-spacing-16);
+  border-block-start: var(--ui-v2-stroke-standard) solid var(--ui-v2-color-border-default);
+  background: transparent;
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-workspace-inline-form-actions
+  .ui-button {
+  min-height: var(--ui-v2-size-cta-min);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
   :where(.ui-v2-workspace-overlay-actions, .ui-v2-workspace-confirm-backdrop > section > footer) {
   display: grid;
   grid-template-columns: 1fr;

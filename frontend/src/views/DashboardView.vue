@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { AlertTriangle, Ban, Bell, Store } from 'lucide-vue-next'
+import { AlertTriangle, Ban, Bell, ChevronDown, LogOut, Store, UserRound } from 'lucide-vue-next'
 import { useNotificationStore } from '../stores/notifications'
-import { isAppConnecting } from '../utils/auth'
+import { apiFetch, forceLogout, isAppConnecting } from '../utils/auth'
 import {
   clearCurrentUserSummary,
   currentUserSummary,
@@ -13,6 +13,7 @@ import {
 import { formatIranDateTime, parseIranDisplayDate } from '../utils/iranTime'
 import { marketRuntime } from '../composables/useMarketRuntime'
 import PWAInstallOverlay from '../components/PWAInstallOverlay.vue'
+import DashboardDailySections from '../components/dashboard/DashboardDailySections.vue'
 import {
   AppButton,
   AppDesignSystemScope,
@@ -45,6 +46,11 @@ const user = ref<DashboardUser | null>(cachedUser)
 const identityState = ref<HomeIdentityState>(cachedUser ? 'stale' : 'loading')
 const browserOnline = ref(typeof navigator === 'undefined' || navigator.onLine !== false)
 const userError = ref('')
+const accountMenuOpen = ref(false)
+const accountMenuBusy = ref(false)
+const accountMenuAnchor = ref<HTMLElement | null>(null)
+const accountMenuTrigger = ref<HTMLButtonElement | null>(null)
+const accountMenu = ref<HTMLElement | null>(null)
 let userRequestInFlight = false
 
 const loading = computed(() => identityState.value === 'loading')
@@ -182,15 +188,78 @@ function openMarket() {
   router.push('/market')
 }
 
+function closeAccountMenu(restoreFocus = false) {
+  accountMenuOpen.value = false
+  if (restoreFocus) void nextTick(() => accountMenuTrigger.value?.focus())
+}
+
+function toggleAccountMenu() {
+  accountMenuOpen.value = !accountMenuOpen.value
+}
+
+async function openAccountMenuAndFocusFirst() {
+  accountMenuOpen.value = true
+  await nextTick()
+  accountMenu.value?.querySelector<HTMLButtonElement>('[role="menuitem"]')?.focus()
+}
+
+function openProfile() {
+  closeAccountMenu()
+  void router.push('/profile')
+}
+
+async function logout() {
+  if (accountMenuBusy.value) return
+  accountMenuBusy.value = true
+  closeAccountMenu()
+  try {
+    const response = await apiFetch('/api/sessions/active', { retryNetwork: false })
+    const payload = response.ok ? await response.json().catch(() => null) : null
+    const currentSession = Array.isArray(payload)
+      ? payload.find(
+          (session) => session && typeof session === 'object' && session.is_current === true,
+        )
+      : null
+    const sessionId = Number(currentSession?.id)
+    if (Number.isInteger(sessionId) && sessionId > 0) {
+      await apiFetch(`/api/sessions/${sessionId}`, {
+        method: 'DELETE',
+        retryNetwork: false,
+      })
+    }
+  } catch {
+    // Local logout must finish even when server-side session cleanup is unavailable.
+  } finally {
+    forceLogout()
+  }
+}
+
+function handleDocumentPointerDown(event: PointerEvent) {
+  const target = event.target
+  if (accountMenuOpen.value && target instanceof Node && !accountMenuAnchor.value?.contains(target)) {
+    closeAccountMenu()
+  }
+}
+
+function handleDocumentKeydown(event: KeyboardEvent) {
+  if (event.key !== 'Escape' || !accountMenuOpen.value) return
+  event.preventDefault()
+  closeAccountMenu(true)
+}
+
 onMounted(() => {
   window.addEventListener('offline', handleBrowserOffline)
   window.addEventListener('online', handleBrowserOnline)
+  document.addEventListener('pointerdown', handleDocumentPointerDown)
+  document.addEventListener('keydown', handleDocumentKeydown)
   void fetchUser()
 })
 
 onUnmounted(() => {
   window.removeEventListener('offline', handleBrowserOffline)
   window.removeEventListener('online', handleBrowserOnline)
+  document.removeEventListener('pointerdown', handleDocumentPointerDown)
+  document.removeEventListener('keydown', handleDocumentKeydown)
 })
 </script>
 
@@ -222,15 +291,52 @@ onUnmounted(() => {
           aria-labelledby="dashboard-page-title"
         >
           <div class="dashboard-header-main ui-v2-home-header__main">
-            <button
-              type="button"
-              class="user-info-center ui-v2-home-identity"
-              :aria-label="`مشاهده پروفایل ${currentUserDisplayName}`"
-              @click="router.push('/profile')"
-            >
-              <span class="avatar ui-v2-home-avatar" aria-hidden="true">{{ userInitial }}</span>
-              <span class="user-name ui-v2-home-name">{{ currentUserDisplayName }}</span>
-            </button>
+            <div ref="accountMenuAnchor" class="dashboard-account-menu">
+              <button
+                ref="accountMenuTrigger"
+                type="button"
+                class="user-info-center ui-v2-home-identity dashboard-account-menu__trigger"
+                aria-haspopup="menu"
+                :aria-expanded="accountMenuOpen"
+                aria-controls="dashboard-account-menu"
+                :aria-label="`باز کردن منوی حساب ${currentUserDisplayName}`"
+                @click="toggleAccountMenu"
+                @keydown.down.prevent="openAccountMenuAndFocusFirst"
+              >
+                <span class="avatar ui-v2-home-avatar" aria-hidden="true">{{ userInitial }}</span>
+                <span class="user-name ui-v2-home-name">{{ currentUserDisplayName }}</span>
+                <ChevronDown
+                  :size="17"
+                  class="dashboard-account-menu__chevron"
+                  :class="{ 'is-open': accountMenuOpen }"
+                  aria-hidden="true"
+                />
+              </button>
+
+              <div
+                v-if="accountMenuOpen"
+                id="dashboard-account-menu"
+                ref="accountMenu"
+                class="dashboard-account-menu__panel"
+                role="menu"
+                aria-label="گزینه‌های حساب کاربری"
+              >
+                <button type="button" role="menuitem" @click="openProfile">
+                  <UserRound :size="18" aria-hidden="true" />
+                  پروفایل
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  class="dashboard-account-menu__logout"
+                  :disabled="accountMenuBusy"
+                  @click="logout"
+                >
+                  <LogOut :size="18" aria-hidden="true" />
+                  خروج
+                </button>
+              </div>
+            </div>
 
             <AppIconButton
               type="button"
@@ -343,6 +449,8 @@ onUnmounted(() => {
         </button>
         </template>
 
+        <DashboardDailySections :user="user" />
+
         <AppDesignSystemScope as="div" class="ui-v2-pwa-section">
           <PWAInstallOverlay :eligible="pwaPromptEligible" />
         </AppDesignSystemScope>
@@ -383,6 +491,78 @@ onUnmounted(() => {
 .today-trades-refresh:focus-visible {
   outline: 3px solid rgba(245, 158, 11, 0.34);
   outline-offset: 3px;
+}
+
+.dashboard-account-menu {
+  position: relative;
+  min-width: 0;
+}
+
+.dashboard-account-menu__trigger {
+  max-width: min(18rem, calc(100vw - 7rem));
+}
+
+.dashboard-account-menu__chevron {
+  flex: none;
+  transition: transform 0.18s ease;
+}
+
+.dashboard-account-menu__chevron.is-open {
+  transform: rotate(180deg);
+}
+
+.dashboard-account-menu__panel {
+  position: absolute;
+  z-index: 40;
+  inset-block-start: calc(100% + 0.5rem);
+  inset-inline-start: 0;
+  display: grid;
+  width: min(13rem, calc(100vw - 2.5rem));
+  padding: 0.35rem;
+  border: 1px solid var(--ds-border-medium);
+  border-radius: var(--ds-radius-lg);
+  background: var(--ds-bg-card);
+  box-shadow: var(--ds-shadow-lg);
+}
+
+.dashboard-account-menu__panel button {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  min-height: 44px;
+  padding: 0.65rem 0.75rem;
+  border: 0;
+  border-radius: var(--ds-radius-md);
+  background: transparent;
+  color: var(--ds-text-primary);
+  font: inherit;
+  font-weight: 750;
+  text-align: start;
+  cursor: pointer;
+}
+
+.dashboard-account-menu__panel button:hover {
+  background: var(--ds-bg-inset);
+}
+
+.dashboard-account-menu__panel button:focus-visible {
+  outline: 3px solid rgba(245, 158, 11, 0.34);
+  outline-offset: -2px;
+}
+
+.dashboard-account-menu__panel .dashboard-account-menu__logout {
+  color: var(--ds-danger-700);
+}
+
+.dashboard-account-menu__panel button:disabled {
+  cursor: wait;
+  opacity: 0.62;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dashboard-account-menu__chevron {
+    transition-duration: 1ms;
+  }
 }
 
 /* ═══ Hero Button ═══ */

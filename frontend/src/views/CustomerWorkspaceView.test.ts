@@ -561,10 +561,16 @@ describe('CustomerWorkspaceView.vue', () => {
     ).toBe(true)
     expect(document.querySelector('.ui-responsive-dialog__header .ui-button')).toBeNull()
     const createActionButtons = Array.from(
-      document.querySelectorAll<HTMLButtonElement>('.ui-responsive-dialog__actions .ui-button'),
+      document.querySelectorAll<HTMLButtonElement>(
+        '.ui-v2-workspace-customer-create-actions .ui-button',
+      ),
     )
     expect(createActionButtons).toHaveLength(2)
     expect(createActionButtons.every((button) => button.disabled)).toBe(true)
+    expect(
+      createActionButtons[0]?.closest('.ui-v2-workspace-overlay-body'),
+    ).not.toBeNull()
+    expect(document.querySelector('.ui-responsive-dialog__actions')).toBeNull()
 
     vm.closeCreatePanel()
     vm.handleBack()

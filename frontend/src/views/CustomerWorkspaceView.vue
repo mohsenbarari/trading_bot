@@ -2469,7 +2469,6 @@ onBeforeUnmount(() => {
       backdrop-class="ui-v2-workspace-overlay-backdrop"
       panel-class="ui-v2-workspace-overlay-panel"
       body-class="ui-v2-workspace-overlay-body"
-      actions-class="ui-v2-workspace-overlay-actions"
       @close="closeCreatePanel"
     >
       <div class="customer-create-panel ui-v2-workspace-customer-create-panel">
@@ -2591,16 +2590,18 @@ onBeforeUnmount(() => {
           title="دعوت ثبت شد"
           :message="createNotice"
         />
-      </div>
 
-      <template #actions>
-        <AppButton variant="secondary" :disabled="isCreateSubmitting" @click="closeCreatePanel">
-          انصراف
-        </AppButton>
-        <AppButton variant="primary" :loading="isCreateSubmitting" @click="createRelation">
-          ثبت دعوت مشتری
-        </AppButton>
-      </template>
+        <div
+          class="ui-v2-workspace-inline-form-actions ui-v2-workspace-customer-create-actions"
+        >
+          <AppButton variant="secondary" :disabled="isCreateSubmitting" @click="closeCreatePanel">
+            انصراف
+          </AppButton>
+          <AppButton variant="primary" :loading="isCreateSubmitting" @click="createRelation">
+            ثبت دعوت مشتری
+          </AppButton>
+        </div>
+      </div>
     </component>
   </div>
 </template>

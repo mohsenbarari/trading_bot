@@ -13,6 +13,10 @@ const componentCss = readFileSync(
   path.resolve(process.cwd(), 'src/styles/design-system-v2.components.css'),
   'utf8',
 )
+const workspaceOverlayCss = readFileSync(
+  path.resolve(process.cwd(), 'src/styles/design-system-v2.stage5-overlays.css'),
+  'utf8',
+)
 
 const expectedCanonicalVariables: Record<string, string> = {
   '--ui-v2-neutral-ink-950': '#0f233c',
@@ -102,6 +106,27 @@ function parseVariables(source: string) {
 }
 
 describe('Design System V2 CSS contract', () => {
+  it('keeps create-form actions in normal scroll flow instead of pinning them above keyboards', () => {
+    const rules: import('postcss').Rule[] = []
+    postcss.parse(workspaceOverlayCss).walkRules((rule) => rules.push(rule))
+    const inlineActionsRule = rules.find((rule) =>
+      rule.selector.includes('.ui-v2-workspace-inline-form-actions'),
+    )
+    const declarations = Object.fromEntries(
+      inlineActionsRule?.nodes
+        .filter((node) => node.type === 'decl')
+        .map((node) => [node.prop, node.value]) ?? [],
+    )
+
+    expect(declarations).toMatchObject({
+      position: 'static',
+      display: 'grid',
+    })
+    expect(declarations.position).not.toMatch(/fixed|sticky/)
+    expect(workspaceOverlayCss).toContain('.ui-v2-workspace-overlay-body')
+    expect(workspaceOverlayCss).toContain('overflow-y: auto')
+  })
+
   it('contains the exact 65 canonical Figma variables', () => {
     const variables = parseVariables(canonicalVariableBlock())
 
