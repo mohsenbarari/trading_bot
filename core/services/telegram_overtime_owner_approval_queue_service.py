@@ -30,6 +30,7 @@ from core.telegram_delivery_queue_contract import (
     TelegramDeliveryAction,
     TelegramDestinationClass,
 )
+from models.commodity import Commodity
 from models.offer import Offer
 from models.offer_request import OfferRequest, OfferRequestStatus
 from models.user import User
@@ -62,6 +63,22 @@ def _positive_int(value: Any) -> int | None:
 def _strip_channel_padding(offer_text: str) -> str:
     # Channel posts append invisible padding; private prompts should not.
     return offer_text.replace(INVISIBLE_CHANNEL_PADDING, "").rstrip()
+
+
+async def _attach_offer_commodity(db: AsyncSession, offer: Offer) -> None:
+    """Load commodity in this async session before the sync channel renderer.
+
+    ``db.get(Offer, ..., options=[selectinload(commodity)])`` returns the
+    identity-mapped instance without applying the loader when the offer is
+    already present. The sync renderer must not lazy-load.
+    """
+    commodity_id = _positive_int(getattr(offer, "commodity_id", None))
+    if commodity_id is None:
+        return
+    commodity = await db.get(Commodity, commodity_id)
+    if commodity is None:
+        return
+    offer.commodity = commodity
 
 
 async def enqueue_overtime_owner_approval_delivery(
@@ -113,6 +130,7 @@ async def enqueue_overtime_owner_approval_delivery(
         )
 
     request_public_id = str(getattr(ledger, "request_public_id", "") or "").strip()
+    await _attach_offer_commodity(db, offer)
     try:
         delivery_deadline_at = overtime_owner_approval_delivery_deadline(
             offer,
