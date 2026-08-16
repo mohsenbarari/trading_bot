@@ -580,3 +580,69 @@ async def expire_overdue_presented_decisions(
     if flush and repaired:
         await db.flush()
     return repaired
+
+
+async def expire_overdue_delivering_requests(
+    db: AsyncSession,
+    *,
+    now: datetime | None = None,
+    limit: int = 50,
+    flush: bool = True,
+) -> int:
+    """Release delivering requests that never received a Telegram message id.
+
+    The owner clock starts only after presentation. A durable job that stays
+    delivering without a message id past the official grace is reconciled
+    through ``invalidate_request``, matching ``overdue_delivering`` repair.
+    """
+    clock = _normalized_time(now) or _normalized_time(utc_now()) or datetime.now(timezone.utc)
+    candidate_rows = list(
+        (
+            await db.execute(
+                select(OfferRequest)
+                .where(
+                    OfferRequest.workflow_kind == OfferRequestWorkflow.OVERTIME,
+                    OfferRequest.result_status == OfferRequestStatus.OVERTIME_DELIVERING,
+                    OfferRequest.telegram_message_id.is_(None),
+                )
+                .order_by(OfferRequest.id.asc())
+                .limit(max(1, int(limit)))
+                .with_for_update(skip_locked=True)
+            )
+        ).scalars().all()
+    )
+    rows = []
+    for row in candidate_rows:
+        received = _normalized_time(getattr(row, "received_at", None)) or _normalized_time(
+            getattr(row, "created_at", None)
+        )
+        if received is not None and clock >= received + OVERDUE_DELIVERING_GRACE:
+            rows.append(row)
+
+    repaired = 0
+    for row in rows:
+        try:
+            await invalidate_request(
+                db,
+                row,
+                reason="overtime_delivery_reconcile_timeout",
+                now=clock,
+                flush=False,
+            )
+            repaired += 1
+            log_overtime_event(
+                "Overtime delivering request expired by sweeper",
+                event="delivery_timeout",
+                result="invalidated",
+                request_public_id=getattr(row, "request_public_id", None),
+                offer_public_id=getattr(row, "offer_public_id", None),
+                offer_owner_user_id=getattr(row, "offer_owner_user_id", None),
+                request_home_server=getattr(row, "request_home_server", None),
+                status=OfferRequestStatus.OVERTIME_INVALIDATED.value,
+                terminal_reason="overtime_delivery_reconcile_timeout",
+            )
+        except OvertimeRequestError:
+            continue
+    if flush and repaired:
+        await db.flush()
+    return repaired

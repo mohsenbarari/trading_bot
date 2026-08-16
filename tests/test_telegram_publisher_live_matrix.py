@@ -920,5 +920,68 @@ class TelegramPublisherLiveMatrixTests(unittest.TestCase):
         self.assertFalse(observed[0]["run_background_tasks"])
 
 
+class TelegramPublisherLiveMatrixExpiryDriveTests(unittest.IsolatedAsyncioTestCase):
+    async def test_official_expiry_cycles_run_iran_then_foreign(self):
+        from unittest.mock import patch
+
+        import scripts.run_telegram_publisher_live_matrix as matrix
+
+        called = []
+
+        async def fake_cycle(server):
+            called.append(server)
+            return 0
+
+        with patch(
+            "scripts.trading_core_probe_worker.run_offer_expiry_cycle_for_server",
+            fake_cycle,
+        ):
+            await matrix._drive_official_home_expiry_cycles()
+        self.assertEqual(called, ["iran", "foreign"])
+
+    async def test_terminal_wait_drives_official_expiry_before_snapshot(self):
+        from unittest.mock import AsyncMock, patch
+
+        import scripts.run_telegram_publisher_live_matrix as matrix
+
+        order = []
+
+        async def fake_drive():
+            order.append("drive")
+
+        async def fake_snapshot(_run):
+            order.append("snapshot")
+            return (matrix.MATRIX_TOTAL_OFFERS,) * 4
+
+        run = MatrixRun(
+            run_id="telegram-live-matrix-unit",
+            started_at="2026-08-12T00:00:00+00:00",
+            expected_expiry_minutes=25,
+        )
+        run.timelines.append(
+            OfferTimeline(
+                index=1,
+                origin="webapp",
+                scenario="natural_expiry",
+                expected_terminal_status="expired",
+                scheduled_at="2026-08-12T00:00:00+00:00",
+                webapp_terminal_status="expired",
+            )
+        )
+        with patch.object(matrix, "_drive_official_home_expiry_cycles", fake_drive), patch.object(
+            matrix, "_terminal_progress_snapshot", fake_snapshot
+        ), patch.object(
+            matrix, "_hydrate_timelines", AsyncMock()
+        ), patch.object(
+            matrix, "_observe_webapp_terminal_projections", AsyncMock()
+        ), patch.object(
+            matrix, "_timeline_terminal_follows_initial_publication", return_value=True
+        ), patch.object(
+            matrix, "_write_audit"
+        ):
+            await matrix._wait_for_terminal_lifecycle(run)
+        self.assertEqual(order[:3], ["snapshot", "drive", "snapshot"])
+
+
 if __name__ == "__main__":
     unittest.main()

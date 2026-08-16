@@ -155,6 +155,46 @@ class OvertimeReconciliationServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(report.repaired, ())
         self.assertTrue(any(item.issue == "overdue_presented_decision" for item in report.skipped))
 
+    async def test_delivering_sweeper_invalidates_overdue_missing_message(self):
+        row = make_row(
+            result_status=OfferRequestStatus.OVERTIME_DELIVERING,
+            telegram_message_id=None,
+            received_at=NOW - timedelta(seconds=121),
+        )
+        db = FakeDB([FakeResult([row])])
+        invalidate = AsyncMock(return_value=row)
+        with patch.object(recon, "invalidate_request", new=invalidate):
+            repaired = await recon.expire_overdue_delivering_requests(
+                db,
+                now=NOW,
+                flush=True,
+            )
+        self.assertEqual(repaired, 1)
+        invalidate.assert_awaited_once()
+        self.assertEqual(
+            invalidate.await_args.kwargs["reason"],
+            "overtime_delivery_reconcile_timeout",
+        )
+        self.assertTrue(db.flushed)
+
+    async def test_delivering_sweeper_skips_rows_inside_grace(self):
+        row = make_row(
+            result_status=OfferRequestStatus.OVERTIME_DELIVERING,
+            telegram_message_id=None,
+            received_at=NOW - timedelta(seconds=30),
+        )
+        db = FakeDB([FakeResult([row])])
+        invalidate = AsyncMock(return_value=row)
+        with patch.object(recon, "invalidate_request", new=invalidate):
+            repaired = await recon.expire_overdue_delivering_requests(
+                db,
+                now=NOW,
+                flush=True,
+            )
+        self.assertEqual(repaired, 0)
+        invalidate.assert_not_awaited()
+        self.assertFalse(db.flushed)
+
     async def test_observability_summary_omits_requester_identity(self):
         summary = {
             "status": "action_required",

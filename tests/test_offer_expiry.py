@@ -361,6 +361,27 @@ class OfferExpiryTests(unittest.IsolatedAsyncioTestCase):
         logger.info.assert_any_call("⏰ Expiry cycle: 2 offers expired")
         logger.error.assert_called_once()
 
+    async def test_overtime_sweep_repairs_presented_and_delivering(self):
+        session = SimpleNamespace(commit=AsyncMock(), rollback=AsyncMock())
+        presented = AsyncMock(return_value=2)
+        delivering = AsyncMock(return_value=3)
+        with patch(
+            "core.services.offer_overtime_reconciliation_service.expire_overdue_presented_decisions",
+            presented,
+        ), patch(
+            "core.services.offer_overtime_reconciliation_service.expire_overdue_delivering_requests",
+            delivering,
+        ):
+            await offer_expiry._sweep_overdue_overtime_decisions(
+                session,
+                now=datetime.utcnow(),
+                expiry_minutes=25,
+            )
+        presented.assert_awaited_once()
+        delivering.assert_awaited_once()
+        session.commit.assert_awaited_once()
+        session.rollback.assert_not_awaited()
+
 
 if __name__ == "__main__":
     unittest.main()

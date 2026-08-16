@@ -10,6 +10,13 @@ records and writes a redacted, per-offer timeline to the staging audit volume.
 It is deliberately staging-only and fail-closed.  A crash never deletes test
 offers or queue evidence: operators can inspect the audit artifact and the
 normal queue resumes its durable work after the process exits.
+
+WebApp-origin rows are written with ``home_server=iran`` onto the same
+foreign database this runner reads. The official expiry helper is therefore
+driven for both homes during the terminal wait; it is the same
+``expire_stale_offers`` path the background worker uses, including overtime
+decision and delivering sweeps. The runner still does not rewrite
+``created_at`` or expire rows by raw SQL.
 """
 from __future__ import annotations
 
@@ -2449,11 +2456,31 @@ def _timeline_terminal_follows_initial_publication(timeline: OfferTimeline) -> b
         return False
 
 
+async def _drive_official_home_expiry_cycles() -> None:
+    """Run the official expiry worker for Iran-home and foreign-home rows.
+
+    Time-limit expiry is home-authoritative. This matrix persists WebApp
+    offers onto the foreign database with ``home_server=iran``, so Iran's
+    background loop never sees them. The official probe helper applies the
+    same ``expire_stale_offers`` cycle with the correct ``current_server``.
+    """
+    from scripts.trading_core_probe_worker import run_offer_expiry_cycle_for_server
+
+    for server in (SERVER_IRAN, SERVER_FOREIGN):
+        try:
+            await run_offer_expiry_cycle_for_server(server)
+        except Exception as exc:
+            raise LiveMatrixError(
+                f"live_matrix_official_expiry_cycle_failed:{server}:{type(exc).__name__}"
+            ) from exc
+
+
 async def _wait_for_terminal_lifecycle(run: MatrixRun) -> None:
     """Wait without a wall-clock cap; fail only when an expected active phase stalls."""
     last_progress = await _terminal_progress_snapshot(run)
     last_progress_at = time.monotonic()
     while True:
+        await _drive_official_home_expiry_cycles()
         progress = await _terminal_progress_snapshot(run)
         if progress != last_progress:
             last_progress = progress

@@ -109,15 +109,22 @@ async def remove_channel_buttons(channel_message_id: int) -> None:
 async def _sweep_overdue_overtime_decisions(session, *, now, expiry_minutes: int) -> None:
     try:
         from core.services.offer_overtime_reconciliation_service import (
+            expire_overdue_delivering_requests,
             expire_overdue_presented_decisions,
         )
 
-        swept = await expire_overdue_presented_decisions(
+        presented = await expire_overdue_presented_decisions(
             session,
             now=now,
             normal_lifetime_minutes=expiry_minutes,
             flush=True,
         )
+        delivering = await expire_overdue_delivering_requests(
+            session,
+            now=now,
+            flush=True,
+        )
+        swept = int(presented or 0) + int(delivering or 0)
         if swept:
             await session.commit()
             logger.info(
@@ -125,6 +132,8 @@ async def _sweep_overdue_overtime_decisions(session, *, now, expiry_minutes: int
                 extra={
                     "event": "offer_expiry.overtime_decision_sweep",
                     "repaired": swept,
+                    "presented_repaired": int(presented or 0),
+                    "delivering_repaired": int(delivering or 0),
                 },
             )
     except Exception as exc:
@@ -142,7 +151,9 @@ async def expire_stale_offers() -> int:
 
     Terminal expiry uses the shared lifecycle projection: normal setting plus
     each offer's overtime snapshot. An offer with a live final-tail approval
-    request is deferred until that request resolves.
+    request is deferred until that request resolves. The same cycle also
+    sweeps overdue presented decisions and overdue delivering requests that
+    never received a Telegram message id.
     """
     assert_background_job_authority(JOB_OFFER_EXPIRY)
     from core.trading_settings import get_trading_settings_async
