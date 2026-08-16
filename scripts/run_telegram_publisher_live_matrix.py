@@ -1836,6 +1836,56 @@ async def _load_overtime_request_public_id(
     return str(request.request_public_id)
 
 
+async def _ensure_foreign_overtime_presented(
+    *,
+    offer_id: int,
+    idempotency_key: str,
+    offer_index: int,
+) -> None:
+    """Start the foreign owner clock after Queue-v1 accepted the private job.
+
+    Fixture users have synthetic Telegram identities, so the worker quarantines
+    the real provider call. The matrix still uses the official ``mark_presented``
+    path once a durable job id exists, matching fake private transport.
+    """
+    from core.services.offer_overtime_request_service import mark_presented
+    from models.offer_request import OfferRequest, OfferRequestStatus, OfferRequestWorkflow
+
+    deadline = time.monotonic() + 30.0
+    last_status = None
+    while time.monotonic() < deadline:
+        async with AsyncSessionLocal() as db:
+            request = (
+                await db.execute(
+                    select(OfferRequest).where(
+                        OfferRequest.local_offer_id == int(offer_id),
+                        OfferRequest.idempotency_key == idempotency_key,
+                        OfferRequest.workflow_kind == OfferRequestWorkflow.OVERTIME,
+                    )
+                )
+            ).scalar_one_or_none()
+            if request is None:
+                await asyncio.sleep(0.2)
+                continue
+            last_status = _value(request.result_status)
+            if last_status == OfferRequestStatus.OVERTIME_PRESENTED.value:
+                return
+            if last_status == OfferRequestStatus.OVERTIME_DELIVERING.value and getattr(
+                request, "telegram_delivery_job_id", None
+            ):
+                await mark_presented(
+                    db,
+                    request,
+                    telegram_message_id=10_000_000 + int(offer_index),
+                )
+                await db.commit()
+                return
+        await asyncio.sleep(0.2)
+    raise LiveMatrixError(
+        f"live_matrix_foreign_overtime_not_presented:{last_status or 'missing'}"
+    )
+
+
 async def _decide_overtime_request_via_webapp(
     *,
     worker: Any,
@@ -1951,6 +2001,12 @@ async def _run_overtime_lifecycle(
             offer_id=int(timeline.offer_id),
             idempotency_key=idempotency_key,
         )
+        if str(timeline.offer_home_server or SERVER_IRAN) == SERVER_FOREIGN:
+            await _ensure_foreign_overtime_presented(
+                offer_id=int(timeline.offer_id),
+                idempotency_key=idempotency_key,
+                offer_index=int(timeline.index),
+            )
         decision = "approve" if timeline.scenario == "overtime_approved_trade" else "reject"
         decision_entry = _append_lifecycle_action(
             run,

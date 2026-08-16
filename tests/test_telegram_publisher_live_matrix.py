@@ -568,6 +568,75 @@ class TelegramPublisherLiveMatrixTests(unittest.TestCase):
         self.assertFalse(completed)
         self.assertGreater(MATRIX_BACKGROUND_TASKS_MAX_WAIT_SECONDS, 0)
 
+    def test_foreign_overtime_decision_uses_official_presented_path(self):
+        presented = []
+
+        class FakeWorker:
+            async def execute_webapp_trade_for_user(self, **_kwargs):
+                return "success"
+
+        import scripts.run_telegram_publisher_live_matrix as matrix
+
+        timeline = OfferTimeline(
+            index=4,
+            origin="bot",
+            scenario="overtime_approved_trade",
+            expected_terminal_status="completed",
+            scheduled_at="2026-08-12T00:00:00+00:00",
+            offer_id=44,
+            offer_public_id="ofr_44",
+            offer_home_server="foreign",
+            normal_deadline_at="2026-08-12T00:00:00+00:00",
+        )
+        run = MatrixRun(
+            run_id="telegram-live-matrix-unit",
+            started_at="2026-08-12T00:00:00+00:00",
+            expected_expiry_minutes=25,
+        )
+        users = [SimpleNamespace(user_id=index) for index in range(1, 1_001)]
+
+        async def fake_load(**_kwargs):
+            return "req_public_test"
+
+        async def fake_present(**kwargs):
+            presented.append(kwargs)
+
+        async def fake_decide(**_kwargs):
+            return "success"
+
+        original_load = matrix._load_overtime_request_public_id
+        original_present = matrix._ensure_foreign_overtime_presented
+        original_decide = matrix._decide_overtime_request_via_webapp
+        matrix._load_overtime_request_public_id = fake_load
+        matrix._ensure_foreign_overtime_presented = fake_present
+        matrix._decide_overtime_request_via_webapp = fake_decide
+        try:
+            asyncio.run(
+                _run_overtime_lifecycle(
+                    worker=FakeWorker(),
+                    users=users,
+                    run=run,
+                    timeline=timeline,
+                    wait_for_schedule=False,
+                )
+            )
+        finally:
+            matrix._load_overtime_request_public_id = original_load
+            matrix._ensure_foreign_overtime_presented = original_present
+            matrix._decide_overtime_request_via_webapp = original_decide
+
+        self.assertEqual(presented, [
+            {
+                "offer_id": 44,
+                "idempotency_key": "telegram-live-matrix-unit-overtime-0004",
+                "offer_index": 4,
+            }
+        ])
+        self.assertEqual(
+            [entry.action for entry in run.lifecycle_actions],
+            ["overtime_request", "overtime_owner_approve"],
+        )
+
     def test_overtime_is_scheduled_after_the_normal_deadline(self):
         from datetime import datetime
 
