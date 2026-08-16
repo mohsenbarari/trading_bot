@@ -99,6 +99,7 @@ from models.session import (
 )
 from models.telegram_link_token import TelegramLinkToken
 from models.telegram_admin_broadcast import TelegramAdminBroadcast, TelegramAdminBroadcastReceipt
+from models.telegram_notification_outbox import TelegramNotificationOutbox
 from models.trade import Trade, TradeStatus, TradeType
 from models.trade_delivery_receipt import TradeDeliveryReceipt
 from models.user import User, UserRole
@@ -328,6 +329,7 @@ class CleanupPlan:
     offer_request_ids: list[int]
     publication_state_ids: list[int]
     notification_ids: list[int]
+    telegram_notification_outbox_ids: list[int]
     chat_member_ids: list[int]
     user_block_ids: list[int]
 
@@ -1336,6 +1338,7 @@ def cleanup_plan_counts(plan: CleanupPlan) -> dict[str, int]:
         "telegram_admin_broadcasts": len(plan.telegram_admin_broadcast_ids),
         "telegram_admin_broadcast_receipts": len(plan.telegram_admin_broadcast_receipt_ids),
         "notifications": len(plan.notification_ids),
+        "telegram_notification_outbox": len(plan.telegram_notification_outbox_ids),
     }
 
 
@@ -1361,6 +1364,7 @@ def cleanup_report_payload(
     deleted_telegram_admin_broadcasts: int = 0,
     deleted_telegram_admin_broadcast_receipts: int = 0,
     deleted_notifications: int = 0,
+    deleted_telegram_notification_outbox: int = 0,
     deleted_offer_requests: int = 0,
     deleted_publication_states: int = 0,
     deleted_change_logs: int = 0,
@@ -1390,6 +1394,7 @@ def cleanup_report_payload(
         "deleted_telegram_admin_broadcasts": deleted_telegram_admin_broadcasts,
         "deleted_telegram_admin_broadcast_receipts": deleted_telegram_admin_broadcast_receipts,
         "deleted_notifications": deleted_notifications,
+        "deleted_telegram_notification_outbox": deleted_telegram_notification_outbox,
         "deleted_offer_requests": deleted_offer_requests,
         "deleted_publication_states": deleted_publication_states,
         "deleted_change_logs": deleted_change_logs,
@@ -1427,6 +1432,33 @@ async def cleanup_redis_for_user_ids(user_ids: list[int], *, dry_run: bool = Fal
     finally:
         await client.aclose()
     return deleted
+
+
+async def collect_telegram_notification_outbox_ids_for_users(
+    db: Any,
+    user_ids: list[int],
+) -> list[int]:
+    """Collect live and orphaned Queue-v1 private-reply outbox rows for a cohort.
+
+    User delete nulls ``recipient_user_id`` but leaves the recycled user id
+    inside ``source_id``. Those leftovers keep the official dedupe key and
+    reject a later fixture user that reuses the same id.
+    """
+    ids: list[int] = []
+    for batch in cleanup_in_batches(user_ids):
+        normalized = [int(user_id) for user_id in batch]
+        clauses = [TelegramNotificationOutbox.recipient_user_id.in_(normalized)]
+        clauses.extend(
+            TelegramNotificationOutbox.source_id.like(f"%:{user_id}:{user_id}")
+            for user_id in normalized
+        )
+        ids.extend(
+            await collect_int_ids(
+                db,
+                select(TelegramNotificationOutbox.id).where(or_(*clauses)),
+            )
+        )
+    return stable_unique(ids)
 
 
 async def collect_int_ids(db: Any, statement: Any) -> list[int]:
@@ -1661,6 +1693,10 @@ async def collect_cleanup_plan(prefix: str) -> CleanupPlan:
             Notification.id,
             [(Notification.user_id, user_ids)],
         )
+        telegram_notification_outbox_ids = await collect_telegram_notification_outbox_ids_for_users(
+            db,
+            user_ids,
+        )
         chat_member_ids = await collect_int_ids_by_batched_filters(
             db, ChatMember.id, [(ChatMember.user_id, user_ids)]
         )
@@ -1693,6 +1729,7 @@ async def collect_cleanup_plan(prefix: str) -> CleanupPlan:
         offer_request_ids=offer_request_ids,
         publication_state_ids=publication_state_ids,
         notification_ids=notification_ids,
+        telegram_notification_outbox_ids=telegram_notification_outbox_ids,
         chat_member_ids=chat_member_ids,
         user_block_ids=user_block_ids,
     )
@@ -1918,6 +1955,7 @@ async def delete_cleanup_plan(plan: CleanupPlan) -> dict[str, Any]:
         deleted_telegram_link_tokens = 0
         deleted_push_subscriptions = 0
         deleted_notifications = 0
+        deleted_telegram_notification_outbox = 0
         deleted_chat_members = 0
         deleted_user_blocks = 0
         deleted_trade_delivery_receipts = 0
@@ -1958,6 +1996,12 @@ async def delete_cleanup_plan(plan: CleanupPlan) -> dict[str, Any]:
             plan.telegram_admin_broadcast_receipt_ids,
         )
         deleted_notifications = await delete_in_batches(db, Notification, Notification.id, plan.notification_ids)
+        deleted_telegram_notification_outbox = await delete_in_batches(
+            db,
+            TelegramNotificationOutbox,
+            TelegramNotificationOutbox.id,
+            plan.telegram_notification_outbox_ids,
+        )
         deleted_telegram_admin_broadcasts = await delete_in_batches(
             db,
             TelegramAdminBroadcast,
@@ -2047,6 +2091,7 @@ async def delete_cleanup_plan(plan: CleanupPlan) -> dict[str, Any]:
         deleted_telegram_admin_broadcasts=deleted_telegram_admin_broadcasts,
         deleted_telegram_admin_broadcast_receipts=deleted_telegram_admin_broadcast_receipts,
         deleted_notifications=deleted_notifications,
+        deleted_telegram_notification_outbox=deleted_telegram_notification_outbox,
         deleted_offer_requests=deleted_offer_requests,
         deleted_publication_states=deleted_publication_states,
         deleted_change_logs=int(change_log_result.rowcount or 0),
@@ -3500,6 +3545,15 @@ class AiogramDispatcherHarness:
         await self.telegram.close()
 
 
+def bot_text_handler_probe_message_id(user_id: int) -> int:
+    """Inbound message identity for the text-offer probe.
+
+    Queue-v1 dedupes private replies by source key, user, and inbound message
+    id. Recycled fixture user ids must not reuse a previous inbound message.
+    """
+    return 10_000_000 + int(user_id)
+
+
 async def run_bot_text_handler_probe(*, user_id: int, text_value: str) -> dict[str, Any]:
     async with AsyncSessionLocal() as db:
         user = await load_user(db, user_id)
@@ -3510,7 +3564,7 @@ async def run_bot_text_handler_probe(*, user_id: int, text_value: str) -> dict[s
         # production guard with an incomplete fake message.
         message = FakeMessage(
             text_value,
-            message_id=int(user.id),
+            message_id=bot_text_handler_probe_message_id(int(user.id)),
             chat_id=int(user.telegram_id),
         )
         await bot_trade_create.handle_text_offer(message, state, user, bot=None)

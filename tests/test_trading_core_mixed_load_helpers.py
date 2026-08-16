@@ -1571,6 +1571,7 @@ class TradingCoreMixedLoadHelperTests(unittest.TestCase):
             offer_request_ids=[30, 31],
             publication_state_ids=[40, 41],
             notification_ids=[50],
+            telegram_notification_outbox_ids=[80, 81],
             chat_member_ids=[60],
             user_block_ids=[70],
         )
@@ -1581,6 +1582,7 @@ class TradingCoreMixedLoadHelperTests(unittest.TestCase):
         self.assertEqual(report["planned_counts"]["offer_requests"], 2)
         self.assertEqual(report["planned_counts"]["offer_publication_states"], 2)
         self.assertEqual(report["planned_counts"]["user_blocks"], 1)
+        self.assertEqual(report["planned_counts"]["telegram_notification_outbox"], 2)
         self.assertEqual(report["planned_ids"]["offer_public_ids"], ["ofr_10"])
         self.assertEqual(report["deleted_offer_requests"], 0)
         self.assertEqual(report["deleted_publication_states"], 0)
@@ -1606,6 +1608,22 @@ class TradingCoreMixedLoadHelperTests(unittest.TestCase):
         self.assertIn(late_chat_member_delete, source)
         self.assertLess(source.index(user_lock), source.index(late_chat_member_delete))
         self.assertLess(source.index(late_chat_member_delete), source.index(user_delete))
+
+    def test_cleanup_deletes_telegram_notification_outbox_before_users(self):
+        source = inspect.getsource(worker.delete_cleanup_plan)
+
+        outbox_delete = (
+            "delete_in_batches(\n            db,\n            TelegramNotificationOutbox,"
+        )
+        user_delete = "delete_in_batches(db, User, User.id, plan.user_ids)"
+        self.assertIn("TelegramNotificationOutbox", source)
+        self.assertIn("plan.telegram_notification_outbox_ids", source)
+        self.assertLess(source.index("TelegramNotificationOutbox"), source.index(user_delete))
+        self.assertIn(outbox_delete, source)
+
+    def test_bot_text_handler_probe_message_id_is_not_the_recycled_user_id(self):
+        self.assertEqual(worker.bot_text_handler_probe_message_id(103), 10_000_103)
+        self.assertNotEqual(worker.bot_text_handler_probe_message_id(103), 103)
 
     def test_cleanup_tracks_user_blocks_before_deleting_users_and_change_logs(self):
         source = inspect.getsource(worker.delete_cleanup_plan)
