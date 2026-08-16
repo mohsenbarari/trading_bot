@@ -111,6 +111,10 @@ MATRIX_MANUAL_EXPIRIES = 50
 MATRIX_NATURAL_EXPIRIES = 200
 MATRIX_OVERTIME_MINUTES = 5
 MATRIX_OVERTIME_RECEIPT_SAFETY_SECONDS = 1.0
+# Owner-approval delivery uses the current snapshot, which is still 0 until
+# the request is accepted. Requesting after the normal deadline makes that
+# job already stale and races the expiry worker. Land inside the live window.
+MATRIX_OVERTIME_REQUEST_LEAD_SECONDS = 5.0
 MATRIX_MANAGEMENT_MESSAGE_CAMPAIGNS = 5
 MATRIX_MANAGEMENT_MESSAGE_RECIPIENTS_PER_CAMPAIGN = 10
 MATRIX_ACTIVE_LIFECYCLE_MIN_AGE_SECONDS = 30.0
@@ -1974,8 +1978,8 @@ async def _run_overtime_lifecycle(
 def _overtime_scheduled_at(timeline: OfferTimeline) -> datetime:
     if not timeline.normal_deadline_at:
         raise LiveMatrixError("live_matrix_overtime_normal_deadline_missing")
-    return datetime.fromisoformat(timeline.normal_deadline_at) + timedelta(
-        seconds=MATRIX_OVERTIME_RECEIPT_SAFETY_SECONDS
+    return datetime.fromisoformat(timeline.normal_deadline_at) - timedelta(
+        seconds=MATRIX_OVERTIME_REQUEST_LEAD_SECONDS
     )
 
 
