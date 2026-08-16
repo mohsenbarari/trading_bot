@@ -21,9 +21,10 @@
 ## ارکستراسیون cutover
 
 - اسکریپت رسمی: `scripts/cutover_telegram_delivery_queue_staging.py`
-- دستورهای فعلی: `plan`, `status`, `backup`, `restore-probe`
+- دستورهای فعلی: `plan`, `status`, `backup`, `restore-probe`, `rehearse-rollback`, `apply`, `rollback`
 - قرارداد نقش process در `core/telegram_delivery_cutover_contract.py` است
-- `apply` هنوز وقتی اجرا می‌شود که health، backup، restore و preflight زنده پاس شوند
+- سرویس‌های API/sync در `deploy/staging/docker-compose.staging.yml` token و worker اجرا را از env مشترک خالی می‌کنند
+- `apply` فقط با عبارت تأیید، worktree پاک، و `main == origin/main` اجرا می‌شود؛ deploy رسمی هر دو سرور را به یک SHA می‌رساند
 
 ## ماتریس زندهٔ authoritative
 

@@ -96,3 +96,60 @@ def executor_overlap_forbidden(
     queue_worker_enabled: bool,
 ) -> bool:
     return bool(legacy_workers_enabled) and bool(queue_worker_enabled)
+
+
+def bot_env_updates() -> dict[str, str]:
+    return dict(BOT_REQUIRED_ENV)
+
+
+def api_env_updates() -> dict[str, str]:
+    updates = dict(API_REQUIRED_ENV)
+    updates.update(API_FORBIDDEN_EXECUTION_ENV)
+    for key in API_FORBIDDEN_TOKEN_KEYS:
+        updates[key] = ""
+    return updates
+
+
+def legacy_runtime_env_updates() -> dict[str, str]:
+    return {
+        "TELEGRAM_DELIVERY_PRODUCER_MODE": LEGACY,
+        "TELEGRAM_DELIVERY_EXPECTED_EXECUTION_OWNER": LEGACY,
+        "TELEGRAM_DELIVERY_EXECUTION_OWNER": LEGACY,
+        "TELEGRAM_DELIVERY_QUEUE_WORKER_ENABLED": "false",
+        "TELEGRAM_DELIVERY_QUEUE_CUTOVER_READY": "false",
+    }
+
+
+def upsert_env_lines(text: str, updates: Mapping[str, str]) -> str:
+    """Replace or append env assignments without echoing values to callers."""
+    lines = str(text or "").splitlines()
+    seen: set[str] = set()
+    rewritten: list[str] = []
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in line:
+            rewritten.append(line)
+            continue
+        key = line.split("=", 1)[0].strip()
+        if key in updates:
+            rewritten.append(f"{key}={updates[key]}")
+            seen.add(key)
+            continue
+        rewritten.append(line)
+    for key, value in updates.items():
+        if key not in seen:
+            rewritten.append(f"{key}={value}")
+    return "\n".join(rewritten) + "\n"
+
+
+def executor_count(*, bot_running: bool, legacy_workers_enabled: bool, queue_worker_enabled: bool) -> int:
+    if not bot_running:
+        return 0
+    if executor_overlap_forbidden(
+        legacy_workers_enabled=legacy_workers_enabled,
+        queue_worker_enabled=queue_worker_enabled,
+    ):
+        return 2
+    if legacy_workers_enabled or queue_worker_enabled:
+        return 1
+    return 0

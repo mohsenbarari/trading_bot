@@ -188,6 +188,21 @@ class TelegramDeliveryCredentialRegistryTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("publisher-3-token", repr(registry))
         self.assertNotIn("publisher-3-token", repr(lane))
 
+        incomplete_lanes = {
+            identity: lane
+            for identity, lane in self._publisher_lanes().items()
+            if identity != "publisher_5"
+        }
+        with self.assertRaisesRegex(
+            TelegramDeliveryCredentialConfigurationError,
+            "telegram_publisher_lane_set_invalid",
+        ):
+            TelegramDeliveryCredentialRegistry.from_values(
+                primary_token="primary-token",
+                editor_enabled=False,
+                publisher_lanes=incomplete_lanes,
+            )
+
         cases = (
             ({"publisher_3": {"enabled": False}}, "lane_disabled:publisher_3"),
             ({"publisher_3": {"token": "primary-token"}}, "credentials_must_be_distinct"),
