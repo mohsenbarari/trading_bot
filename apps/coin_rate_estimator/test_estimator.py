@@ -2206,6 +2206,14 @@ class EstimatorTests(unittest.TestCase):
             self.assertIn("ورودی واقعی مدل", body)
             self.assertIn("Shadow یادگیری ماشین", body)
             self.assertIn("اصلاح بازخورد", body)
+            self.assertIn(
+                "id='feedback-price' type='number' min='1000' step='1000'",
+                body,
+            )
+            self.assertNotIn(
+                "id='feedback-price' type='number' min='1' step='1000'",
+                body,
+            )
             self.assertIn("<td class='event-status-cell'>", body)
             self.assertIn("آفر خام کاربر", body)
             self.assertIn(

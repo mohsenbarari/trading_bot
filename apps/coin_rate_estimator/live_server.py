@@ -2423,7 +2423,7 @@ def render_model_event_audit(audit: dict[str, Any]) -> str:
                 {''.join(f"<option value='{code}'>{label}</option>" for code, label in _FEEDBACK_COMMODITY_LABELS.items())}
               </select></label>
               <label>سمت<select id='feedback-side' required><option value='BUY'>خرید</option><option value='SELL'>فروش</option></select></label>
-              <label>فی کامل (تومان)<input id='feedback-price' type='number' min='1' step='1000' required></label>
+              <label>فی کامل (تومان)<input id='feedback-price' type='number' min='1000' step='1000' required></label>
               <label>تعداد<input id='feedback-quantity' type='number' min='1' max='100' required></label>
               <label>تسویه<select id='feedback-settlement' required><option value='CASH'>نقدی</option><option value='TODAY'>امروزی کاغذی</option><option value='TOMORROW'>فردایی</option></select></label>
               <label>نوع بازار<select id='feedback-trade-form' required><option value='PHYSICAL'>فیزیکی</option><option value='PAPER_NORMAL'>کاغذی عادی</option><option value='PAPER_REVERSE'>کاغذی معکوس</option><option value='PAPER_SWIM'>کاغذی شنا</option></select></label>
