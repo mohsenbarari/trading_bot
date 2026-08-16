@@ -1,6 +1,13 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import DashboardDailySections from './DashboardDailySections.vue'
+
+const componentSource = readFileSync(
+  resolve(process.cwd(), 'src/components/dashboard/DashboardDailySections.vue'),
+  'utf8',
+)
 
 const mocks = vi.hoisted(() => ({
   apiFetch: vi.fn(),
@@ -83,6 +90,16 @@ describe('DashboardDailySections.vue', () => {
     mocks.routerPush.mockReset()
   })
 
+  it('keeps one semantic row per trade inside a keyboard-focusable horizontal scroller', () => {
+    expect(componentSource.match(/<tr v-for="trade in trades"/g)).toHaveLength(1)
+    expect(componentSource).toMatch(
+      /\.dashboard-trades__scroller\s*\{[^}]*overflow-x:\s*auto;/s,
+    )
+    expect(componentSource).toMatch(
+      /\.dashboard-trades__table th,[\s\S]*?white-space:\s*nowrap;/,
+    )
+  })
+
   it('loads only the effective user trades for Iran today and shows their complete user-facing facts', async () => {
     mocks.apiFetch
       .mockResolvedValueOnce(
@@ -105,8 +122,18 @@ describe('DashboardDailySections.vue', () => {
       '/api/trades/my/page?from_date=2026-05-14&to_date=2026-05-14&limit=100',
       '/api/trades/my/page?from_date=2026-05-14&to_date=2026-05-14&limit=100&cursor=signed+cursor',
     ])
-    expect(wrapper.findAll('.dashboard-trade-card')).toHaveLength(2)
-    expect(wrapper.text()).toContain('معاملهٔ ۱۲۳')
+    const tradeRows = wrapper.findAll('.dashboard-trades__table tbody tr')
+    expect(tradeRows).toHaveLength(2)
+    expect(tradeRows[0].findAll('th, td')).toHaveLength(14)
+    expect(wrapper.findAll('.dashboard-trades__table thead th')).toHaveLength(14)
+    expect(wrapper.get('.dashboard-trades__scroller').attributes()).toMatchObject({
+      role: 'region',
+      tabindex: '0',
+    })
+    expect(wrapper.get('.dashboard-trades__scroller').attributes('aria-label')).toContain('۲ معامله')
+    expect(wrapper.text()).toContain('جدول را به چپ یا راست بکشید')
+    expect(wrapper.text()).toContain('شماره معامله')
+    expect(wrapper.text()).toContain('۱۲۳')
     expect(wrapper.text()).toContain('سکه امامی')
     expect(wrapper.text()).toContain('فردایی')
     expect(wrapper.text()).toContain('۵۰٬۰۰۰٬۰۰۰ تومان')
@@ -116,7 +143,7 @@ describe('DashboardDailySections.vue', () => {
     expect(wrapper.text()).toContain('مشتری ویژه')
     expect(wrapper.text()).toContain('مسیر مستقیم وب')
     expect(wrapper.text()).toContain('تحویل در دفتر')
-    expect(wrapper.text()).toContain('معاملهٔ ۱۲۵')
+    expect(wrapper.text()).toContain('۱۲۵')
     expect(wrapper.text()).not.toContain('۱۲۴')
   })
 
@@ -207,7 +234,7 @@ describe('DashboardDailySections.vue', () => {
     resolveFirst(responseOf(tradePage([trade({ id: 81, trade_number: 123, offer_user_id: 7 })])))
     await flushPromises()
 
-    expect(wrapper.text()).toContain('معاملهٔ ۹۰۰')
-    expect(wrapper.text()).not.toContain('معاملهٔ ۱۲۳')
+    expect(wrapper.get('.dashboard-trades__table tbody th').text()).toBe('۹۰۰')
+    expect(wrapper.text()).not.toContain('۱۲۳')
   })
 })

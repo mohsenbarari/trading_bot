@@ -525,48 +525,72 @@ onUnmounted(() => {
         message="معامله‌های امروز پس از ثبت، همراه با جزئیات کامل اینجا دیده می‌شوند."
         role="status"
       />
-      <div v-else class="dashboard-trades" :aria-label="tradeCountLabel">
-        <article v-for="trade in trades" :key="trade.id" class="dashboard-trade-card">
-          <header class="dashboard-trade-card__header">
-            <div>
-              <strong>معاملهٔ {{ formatNumber(trade.trade_number) }}</strong>
-              <span>{{ tradeCreatedAtLabel(trade.created_at) }}</span>
-            </div>
-            <div class="dashboard-trade-card__badges">
-              <AppStatusBadge :tone="tradeTypeForPerspective(trade) === 'buy' ? 'success' : 'danger'">
-                {{ tradeTypeLabel(trade) }}
-              </AppStatusBadge>
-              <AppStatusBadge :tone="tradeStatusTone(trade.status)">
-                {{ tradeStatusLabel(trade.status) }}
-              </AppStatusBadge>
-            </div>
-          </header>
-
-          <dl class="dashboard-trade-card__facts">
-            <div><dt>کالا</dt><dd>{{ trade.commodity_name }}</dd></div>
-            <div><dt>تسویه</dt><dd>{{ tradeSettlementLabel(trade.settlement_type) }}</dd></div>
-            <div><dt>مقدار</dt><dd>{{ formatNumber(trade.quantity) }}</dd></div>
-            <div><dt>قیمت واحد</dt><dd>{{ formatNumber(trade.price) }} تومان</dd></div>
-            <div><dt>ارزش کل</dt><dd>{{ formatTotal(trade) }} تومان</dd></div>
-            <div><dt>طرف مقابل</dt><dd>{{ counterpartyLabel(trade) }}</dd></div>
-            <div v-if="trade.offer_id"><dt>شماره آفر</dt><dd>{{ formatNumber(trade.offer_id) }}</dd></div>
-            <div v-if="trade.customer_context_visible && trade.customer_context_management_name">
-              <dt>مشتری</dt>
-              <dd>
-                {{ trade.customer_context_management_name }}
-                <small v-if="customerTierLabel(trade.customer_context_tier)">
-                  · {{ customerTierLabel(trade.customer_context_tier) }}
-                </small>
-              </dd>
-            </div>
-          </dl>
-          <p v-if="trade.trade_path_summary" class="dashboard-trade-card__summary">
-            {{ trade.trade_path_summary }}
-          </p>
-          <p v-if="trade.offer_notes" class="dashboard-trade-card__notes">
-            <strong>یادداشت آفر:</strong> {{ trade.offer_notes }}
-          </p>
-        </article>
+      <div v-else class="dashboard-trades">
+        <p class="dashboard-trades__scroll-hint">
+          برای دیدن همهٔ ستون‌ها، جدول را به چپ یا راست بکشید.
+        </p>
+        <div
+          class="dashboard-trades__scroller"
+          tabindex="0"
+          role="region"
+          :aria-label="`${tradeCountLabel}؛ جدول معاملات امروز با پیمایش افقی`"
+        >
+          <table class="dashboard-trades__table">
+            <caption class="sr-only">جزئیات کامل معاملات امروز</caption>
+            <thead>
+              <tr>
+                <th scope="col">شماره معامله</th>
+                <th scope="col">زمان ثبت</th>
+                <th scope="col">نوع</th>
+                <th scope="col">وضعیت</th>
+                <th scope="col">کالا</th>
+                <th scope="col">تسویه</th>
+                <th scope="col">مقدار</th>
+                <th scope="col">قیمت واحد</th>
+                <th scope="col">ارزش کل</th>
+                <th scope="col">طرف مقابل</th>
+                <th scope="col">شماره آفر</th>
+                <th scope="col">مشتری</th>
+                <th scope="col">مسیر معامله</th>
+                <th scope="col">یادداشت آفر</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="trade in trades" :key="trade.id" class="dashboard-trade-row">
+                <th scope="row">{{ formatNumber(trade.trade_number) }}</th>
+                <td>{{ tradeCreatedAtLabel(trade.created_at) }}</td>
+                <td>
+                  <AppStatusBadge :tone="tradeTypeForPerspective(trade) === 'buy' ? 'success' : 'danger'">
+                    {{ tradeTypeLabel(trade) }}
+                  </AppStatusBadge>
+                </td>
+                <td>
+                  <AppStatusBadge :tone="tradeStatusTone(trade.status)">
+                    {{ tradeStatusLabel(trade.status) }}
+                  </AppStatusBadge>
+                </td>
+                <td>{{ trade.commodity_name }}</td>
+                <td>{{ tradeSettlementLabel(trade.settlement_type) }}</td>
+                <td>{{ formatNumber(trade.quantity) }}</td>
+                <td>{{ formatNumber(trade.price) }} تومان</td>
+                <td>{{ formatTotal(trade) }} تومان</td>
+                <td>{{ counterpartyLabel(trade) }}</td>
+                <td>{{ trade.offer_id ? formatNumber(trade.offer_id) : '—' }}</td>
+                <td>
+                  <template v-if="trade.customer_context_visible && trade.customer_context_management_name">
+                    {{ trade.customer_context_management_name }}
+                    <small v-if="customerTierLabel(trade.customer_context_tier)">
+                      · {{ customerTierLabel(trade.customer_context_tier) }}
+                    </small>
+                  </template>
+                  <template v-else>—</template>
+                </td>
+                <td>{{ trade.trade_path_summary || '—' }}</td>
+                <td>{{ trade.offer_notes || '—' }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </div>
     </AppSectionCard>
 
@@ -736,94 +760,97 @@ onUnmounted(() => {
 }
 
 .dashboard-trades {
-  display: grid;
-  gap: 0.75rem;
-}
-
-.dashboard-trade-card {
   min-width: 0;
-  padding: 0.75rem;
-  border: 1px solid var(--ds-border-medium);
-  border-radius: var(--ds-radius-md);
-  background: var(--ds-bg-inset);
-}
-
-.dashboard-trade-card__header,
-.dashboard-trade-card__badges,
-.dashboard-trade-card__facts > div,
-.dashboard-commodity header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
+  display: grid;
   gap: 0.5rem;
 }
 
-.dashboard-trade-card__header > div:first-child {
-  min-width: 0;
-  display: grid;
-  gap: 0.125rem;
+.dashboard-trades__scroll-hint {
+  margin: 0;
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-font-xs);
+  line-height: 1.6;
 }
 
-.dashboard-trade-card__header strong,
+.dashboard-trades__scroller {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  border: 1px solid var(--ds-border-medium);
+  border-radius: var(--ds-radius-md);
+  background: var(--ds-bg-card);
+  scrollbar-gutter: stable;
+}
+
+.dashboard-trades__scroller:focus-visible {
+  outline: none;
+  box-shadow: var(--ds-focus-ring);
+}
+
+.dashboard-trades__table {
+  width: max-content;
+  min-width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  color: var(--ds-text-primary);
+  font-size: var(--ds-font-sm);
+}
+
+.dashboard-trades__table th,
+.dashboard-trades__table td {
+  padding: 0.625rem 0.75rem;
+  border-block-end: 1px solid var(--ds-border-subtle);
+  text-align: start;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+.dashboard-trades__table thead th {
+  position: sticky;
+  inset-block-start: 0;
+  z-index: 1;
+  background: var(--ds-bg-inset);
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-font-xs);
+  font-weight: 700;
+}
+
+.dashboard-trades__table tbody th {
+  color: var(--ds-text-primary);
+  font-weight: 800;
+}
+
+.dashboard-trades__table tbody tr:last-child > * {
+  border-block-end: 0;
+}
+
+.dashboard-trades__table tbody tr:nth-child(even) > * {
+  background: var(--ds-bg-inset);
+}
+
+.dashboard-trades__table small {
+  color: var(--ds-text-secondary);
+  font-size: inherit;
+}
+
 .dashboard-commodity strong {
   color: var(--ds-text-primary);
   overflow-wrap: anywhere;
 }
 
-.dashboard-trade-card__header span,
 .dashboard-commodity p {
   color: var(--ds-text-secondary);
   font-size: var(--ds-font-xs);
   line-height: 1.6;
 }
 
-.dashboard-trade-card__badges {
-  flex-wrap: wrap;
-  justify-content: flex-end;
-}
-
-.dashboard-trade-card__facts {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.5rem 1rem;
-  margin: 0.75rem 0 0;
-}
-
-.dashboard-trade-card__facts > div {
-  min-width: 0;
-  border-block-start: 1px solid var(--ds-border-subtle);
-  padding-block-start: 0.5rem;
-}
-
-.dashboard-trade-card__facts dt {
-  color: var(--ds-text-secondary);
-  font-size: var(--ds-font-xs);
-}
-
-.dashboard-trade-card__facts dd {
-  min-width: 0;
-  margin: 0;
-  color: var(--ds-text-primary);
-  font-size: var(--ds-font-sm);
-  font-weight: 700;
-  text-align: end;
-  overflow-wrap: anywhere;
-}
-
-.dashboard-trade-card__summary,
-.dashboard-trade-card__notes {
-  margin: 0.5rem 0 0;
-  padding: 0.5rem;
-  border-radius: var(--ds-radius-sm);
-  background: var(--ds-bg-card);
-  color: var(--ds-text-secondary);
-  font-size: var(--ds-font-sm);
-  line-height: 1.7;
-  overflow-wrap: anywhere;
-}
-
-.dashboard-trade-card__notes strong {
-  color: var(--ds-text-primary);
+.dashboard-commodity header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.5rem;
 }
 
 .dashboard-disclosure-chevron {
@@ -898,16 +925,9 @@ onUnmounted(() => {
     flex-direction: column;
   }
 
-  .dashboard-trade-card__header {
-    display: grid;
-  }
-
-  .dashboard-trade-card__badges {
-    justify-content: flex-start;
-  }
-
-  .dashboard-trade-card__facts {
-    grid-template-columns: 1fr;
+  .dashboard-trades__table th,
+  .dashboard-trades__table td {
+    padding: 0.5625rem 0.625rem;
   }
 
   .dashboard-directory-search > div {
