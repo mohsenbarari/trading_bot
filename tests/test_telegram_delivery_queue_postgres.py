@@ -79,6 +79,7 @@ from core.services.telegram_delivery_queue_service import (
 )
 from core.services.telegram_delivery_reconciliation_service import (
     RECONCILIATION_CONFIRMED_ABSENT,
+    reconcile_ready_telegram_delivery_jobs_by_freshness,
     reconcile_telegram_delivery_jobs,
     resolve_ambiguous_telegram_delivery_job,
 )
@@ -306,7 +307,7 @@ def _run_alembic(sync_url: str, *args: str) -> None:
     env["DATABASE_URL"] = sync_url
     env["TRADING_BOT_MIGRATION_MODE"] = "scratch"
     env["TRADING_BOT_EXPECTED_CHECKOUT"] = os.getcwd()
-    env["TRADING_BOT_EXPECTED_ALEMBIC_HEAD"] = "b986c7d8e0f1"
+    env["TRADING_BOT_EXPECTED_ALEMBIC_HEAD"] = "fb1c2d3e4f5a"
     result = subprocess.run(
         [sys.executable, "scripts/run_guarded_scratch_alembic.py", *args],
         capture_output=True,
@@ -1041,6 +1042,63 @@ class TelegramDeliveryQueuePostgresTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(job.state, TelegramDeliveryState.PENDING_RETRY)
         self.assertIsNone(job.dispatch_started_at)
         self.assertEqual(evidence_count, 1)
+
+    async def test_ready_freshness_reconcile_expires_stale_pending_and_leaves_fresh(self):
+        now = utc_now()
+        stale = await self._enqueue("ready-freshness-stale")
+        fresh = await self._enqueue("ready-freshness-current")
+        feedback = _NoopLifecycleFeedback()
+
+        async def freshness(_db, job, _now):
+            source = str(job.source_natural_id)
+            if source == "ready-freshness-stale":
+                return TelegramFreshnessDecision(
+                    TelegramFreshnessOutcome.EXPIRED_INTERACTION,
+                    reason="overtime_owner_approval_freshness_request_not_delivering",
+                )
+            return TelegramFreshnessDecision(
+                TelegramFreshnessOutcome.SEND,
+                reason="overtime_owner_approval_freshness_current",
+            )
+
+        async with self.Session() as db:
+            report = await reconcile_ready_telegram_delivery_jobs_by_freshness(
+                db,
+                current_server="foreign",
+                freshness_validators={"primary": freshness},
+                freshness_feedbacks={"primary": feedback.apply_freshness},
+                max_rows=10,
+                now=now,
+            )
+            await db.commit()
+        self.assertEqual(report.inspected_count, 2)
+        self.assertEqual(report.still_fresh_count, 1)
+        self.assertEqual(report.freshness_terminal_count, 1)
+        self.assertEqual(report.provider_network_calls, 0)
+
+        async with self.Session() as db:
+            stale_job = await db.get(TelegramDeliveryJobRecord, stale.job.id)
+            fresh_job = await db.get(TelegramDeliveryJobRecord, fresh.job.id)
+            stale_evidence = await db.scalar(
+                select(func.count(TelegramDeliveryReconciliationEvidence.id)).where(
+                    TelegramDeliveryReconciliationEvidence.job_id == stale.job.id
+                )
+            )
+            fresh_evidence = await db.scalar(
+                select(func.count(TelegramDeliveryReconciliationEvidence.id)).where(
+                    TelegramDeliveryReconciliationEvidence.job_id == fresh.job.id
+                )
+            )
+        self.assertEqual(stale_job.state, TelegramDeliveryState.EXPIRED_INTERACTION)
+        self.assertEqual(
+            stale_job.outcome_reason,
+            "overtime_owner_approval_freshness_request_not_delivering",
+        )
+        self.assertEqual(int(stale_job.provider_attempt_count or 0), 0)
+        self.assertEqual(stale_evidence, 1)
+        self.assertEqual(fresh_job.state, TelegramDeliveryState.PENDING)
+        self.assertIsNone(fresh_job.outcome_reason)
+        self.assertEqual(fresh_evidence, 0)
 
     async def test_ambiguous_send_escalates_and_only_audited_positive_absence_retries(self):
         now = utc_now()

@@ -17,6 +17,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.telegram_delivery_queue_contract import (
+    CLAIMABLE_DELIVERY_STATES,
     FINAL_DELIVERY_STATES,
     TelegramDeliveryDecision,
     TelegramDeliveryOutcome,
@@ -99,6 +100,19 @@ class TelegramDeliveryReconciliationHealth:
     oldest_active_at: datetime | None
     pending_provider_outcome_count: int
     oldest_pending_provider_outcome_at: datetime | None
+
+
+@dataclass(frozen=True, slots=True)
+class TelegramReadyFreshnessReconciliationReport:
+    inspected_count: int
+    still_fresh_count: int
+    freshness_terminal_count: int
+    retry_count: int
+    reclassify_count: int
+    configuration_blocked_count: int
+    provider_network_calls: int
+    outcome_counts: Mapping[str, int]
+    action_counts: Mapping[str, int]
 
 
 def _positive_int(value: Any) -> int | None:
@@ -615,4 +629,148 @@ async def inspect_telegram_delivery_reconciliation_health(
         oldest_active_at=oldest_active,
         pending_provider_outcome_count=int(pending_count or 0),
         oldest_pending_provider_outcome_at=oldest_pending,
+    )
+
+
+async def reconcile_ready_telegram_delivery_jobs_by_freshness(
+    db: AsyncSession,
+    *,
+    current_server: str,
+    freshness_validators: Mapping[str, TelegramReconciliationFreshnessValidator],
+    freshness_feedbacks: Mapping[str, TelegramReconciliationFreshnessFeedback],
+    max_rows: int = 100,
+    actor_kind: str = "operator",
+    now: datetime | None = None,
+) -> TelegramReadyFreshnessReconciliationReport:
+    """Close claimable ready jobs whose official freshness is already non-SEND.
+
+    This path never calls Telegram. A SEND decision is left untouched so a
+    still-deliverable job cannot be quarantined or resent. PENDING_RECONCILE
+    and AMBIGUOUS rows stay on ``reconcile_telegram_delivery_jobs``.
+    """
+    _require_foreign(current_server)
+    current_time = await _transition_time(db, now)
+    records = list(
+        (
+            await db.execute(
+                select(TelegramDeliveryJobRecord)
+                .where(
+                    TelegramDeliveryJobRecord.state.in_(tuple(CLAIMABLE_DELIVERY_STATES)),
+                    or_(
+                        TelegramDeliveryJobRecord.lease_until.is_(None),
+                        TelegramDeliveryJobRecord.lease_until <= current_time,
+                    ),
+                    or_(
+                        TelegramDeliveryJobRecord.eligible_at.is_(None),
+                        TelegramDeliveryJobRecord.eligible_at <= current_time,
+                    ),
+                    or_(
+                        TelegramDeliveryJobRecord.next_retry_at.is_(None),
+                        TelegramDeliveryJobRecord.next_retry_at <= current_time,
+                    ),
+                    ~select(TelegramDeliveryProviderOutcomeRecord.id)
+                    .where(
+                        TelegramDeliveryProviderOutcomeRecord.job_id
+                        == TelegramDeliveryJobRecord.id,
+                        TelegramDeliveryProviderOutcomeRecord.apply_state
+                        == TELEGRAM_PROVIDER_OUTCOME_PENDING,
+                    )
+                    .exists(),
+                )
+                .order_by(
+                    TelegramDeliveryJobRecord.updated_at.asc(),
+                    TelegramDeliveryJobRecord.id.asc(),
+                )
+                .with_for_update(skip_locked=True)
+                .limit(max(1, int(max_rows)))
+            )
+        ).scalars()
+    )
+    still_fresh_count = 0
+    freshness_terminal_count = 0
+    retry_count = 0
+    reclassify_count = 0
+    configuration_blocked_count = 0
+    outcome_counts: dict[str, int] = {}
+    action_counts: dict[str, int] = {}
+
+    for job in records:
+        observed_state = _enum_value(job.state)
+        identity = str(job.bot_identity)
+        action = _enum_value(job.action_kind)
+        action_counts[action] = action_counts.get(action, 0) + 1
+        validator = freshness_validators.get(identity)
+        freshness_feedback = freshness_feedbacks.get(identity)
+        if validator is None:
+            configuration_blocked_count += 1
+            outcome_counts["configuration_blocked"] = (
+                outcome_counts.get("configuration_blocked", 0) + 1
+            )
+            continue
+        freshness = await validator(db, job, current_time)
+        outcome_counts[freshness.outcome.value] = (
+            outcome_counts.get(freshness.outcome.value, 0) + 1
+        )
+        if freshness.outcome == TelegramFreshnessOutcome.SEND:
+            still_fresh_count += 1
+            continue
+        if (
+            freshness.outcome == TelegramFreshnessOutcome.RECLASSIFY
+            and freshness.replacement_action is not None
+        ):
+            job.state = TelegramDeliveryState.PENDING_RECONCILE
+            job.next_retry_at = None
+            reclassify_count += 1
+        elif freshness.outcome == TelegramFreshnessOutcome.WAIT_DEPENDENCY:
+            job.state = TelegramDeliveryState.PENDING_RETRY
+            job.next_retry_at = current_time + timedelta(seconds=1)
+            retry_count += 1
+        else:
+            contract_job = _record_to_contract(job)
+            apply_freshness_decision(contract_job, freshness)
+            job.state = contract_job.state
+            job.next_retry_at = None
+            if TelegramDeliveryState(_enum_value(job.state)) in FINAL_DELIVERY_STATES:
+                job.terminal_at = current_time
+                freshness_terminal_count += 1
+            elif freshness.outcome == TelegramFreshnessOutcome.RECLASSIFY:
+                reclassify_count += 1
+            else:
+                retry_count += 1
+        job.worker_id = None
+        job.lease_until = None
+        job.dispatch_started_at = None
+        job.rate_limit_probe = False
+        job.outcome_reason = (
+            freshness.reason or f"ready_freshness_{freshness.outcome.value}"
+        )[:160]
+        job.updated_at = current_time
+        if freshness_feedback is not None:
+            await freshness_feedback(db, job, freshness, current_time)
+        await _append_evidence(
+            db,
+            job=job,
+            observed_state=observed_state,
+            evidence_kind=f"ready_freshness_{freshness.outcome.value}",
+            evidence_reference=(
+                f"ready_freshness:{freshness.reason or freshness.outcome.value}:"
+                f"lease:{int(job.lease_token or 0)}"
+            ),
+            decision_action=f"ready_freshness_{_enum_value(job.state)}",
+            actor_kind=str(actor_kind or "operator")[:32],
+            actor_reference=None,
+            reason_code=freshness.reason or freshness.outcome.value,
+            now=current_time,
+        )
+
+    return TelegramReadyFreshnessReconciliationReport(
+        inspected_count=len(records),
+        still_fresh_count=still_fresh_count,
+        freshness_terminal_count=freshness_terminal_count,
+        retry_count=retry_count,
+        reclassify_count=reclassify_count,
+        configuration_blocked_count=configuration_blocked_count,
+        provider_network_calls=0,
+        outcome_counts=dict(sorted(outcome_counts.items())),
+        action_counts=dict(sorted(action_counts.items())),
     )

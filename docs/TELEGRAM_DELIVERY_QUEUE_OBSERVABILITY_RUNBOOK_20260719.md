@@ -64,6 +64,19 @@ python scripts/report_telegram_delivery_queue_health.py \
 
 `warning` تست را متوقف نمی‌کند ولی باید در time series ثبت شود. `stop` با exit code `2` ورودی جدید را متوقف می‌کند، row یا job را حذف نمی‌کند، drain/reconciliation را طبق runbook ادامه می‌دهد و run را `NO-GO` می‌سازد. exit code `3` یعنی اسکن security artifact شکست خورده و exit code `4/5` به‌ترتیب config یا خطای داخلی است.
 
+job آمادهٔ کهنه که دامنهٔ آن terminal شده فقط با مسیر رسمی freshness و بدون تماس Telegram بسته می‌شود:
+
+```bash
+python scripts/reconcile_telegram_delivery_ready_jobs.py \
+  --environment staging \
+  --expected-database-name trading_bot_staging \
+  --requested-by <operator> \
+  --confirm "RECONCILE READY TELEGRAM JOBS BY FRESHNESS" \
+  --dry-run
+```
+
+تصمیم `SEND` دست‌نخورده می‌ماند. حذف SQL یا ارسال مجدد کور ممنوع است.
+
 ## Shadow plan
 
 `--include-shadow` حداکثر ۱۰۰ candidate هر lane را بدون `FOR UPDATE`, lease، dispatch marker یا gateway call مرتب می‌کند. خروجی فقط correlation hash یک‌طرفه دارد. این خروجی شاهد readiness و ترتیب است، نه پیش‌بینی قطعی dispatch؛ gateهای هم‌زمان Redis و raceهای بعد از snapshot فقط از ledger واقعی سنجیده می‌شوند.
