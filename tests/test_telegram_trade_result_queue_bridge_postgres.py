@@ -324,6 +324,10 @@ class TelegramTradeResultQueueBridgePostgresTests(unittest.IsolatedAsyncioTestCa
             "core.services.trade_telegram_delivery_service."
             "configured_telegram_delivery_runtime",
             return_value=self._queue_runtime(),
+        ), patch(
+            "core.services.trade_telegram_delivery_service."
+            "configured_telegram_delivery_producer_mode",
+            return_value=TelegramDeliveryRuntimeMode.QUEUE_V1,
         ):
             async with self.Session() as db:
                 result = await deliver_telegram_trade_notification(

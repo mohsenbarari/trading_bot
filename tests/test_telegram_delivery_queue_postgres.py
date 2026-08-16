@@ -426,26 +426,29 @@ class TelegramDeliveryQueuePostgresTests(unittest.IsolatedAsyncioTestCase):
         """
 
         async with self.maintenance_engine.begin() as connection:
-            disabled = await connection.scalar(
-                text(
-                    "UPDATE dr_database_runtime SET enforcement_enabled=false "
-                    "WHERE singleton_id=1 AND enforcement_enabled=true RETURNING 1"
+            has_dr = await connection.scalar(text("SELECT to_regclass('dr_database_runtime')"))
+            if has_dr:
+                disabled = await connection.scalar(
+                    text(
+                        "UPDATE dr_database_runtime SET enforcement_enabled=false "
+                        "WHERE singleton_id=1 AND enforcement_enabled=true RETURNING 1"
+                    )
                 )
-            )
-            if disabled != 1:
-                raise RuntimeError(
-                    "scratch fixture reset requires active database enforcement"
-                )
+                if disabled != 1:
+                    raise RuntimeError(
+                        "scratch fixture reset requires active database enforcement"
+                    )
             for statement, parameters in statements:
                 await connection.execute(text(statement), parameters)
-            restored = await connection.scalar(
-                text(
-                    "UPDATE dr_database_runtime SET enforcement_enabled=true "
-                    "WHERE singleton_id=1 AND enforcement_enabled=false RETURNING 1"
+            if has_dr:
+                restored = await connection.scalar(
+                    text(
+                        "UPDATE dr_database_runtime SET enforcement_enabled=true "
+                        "WHERE singleton_id=1 AND enforcement_enabled=false RETURNING 1"
+                    )
                 )
-            )
-            if restored != 1:
-                raise RuntimeError("scratch fixture reset failed to restore enforcement")
+                if restored != 1:
+                    raise RuntimeError("scratch fixture reset failed to restore enforcement")
 
     async def test_two_processes_cannot_own_queue_executor_simultaneously(self):
         environment = os.environ.copy()
@@ -2038,7 +2041,7 @@ class TelegramDeliveryQueuePostgresTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(
             {
                 "ck_telegram_delivery_jobs_bot_identity",
-                "ck_telegram_delivery_jobs_editor_route",
+                "ck_telegram_delivery_jobs_lane_route",
             }.issubset(constraint_names)
         )
         self.assertEqual(
@@ -4075,7 +4078,7 @@ class TelegramDeliveryQueuePostgresTests(unittest.IsolatedAsyncioTestCase):
                 source_natural_id=public_id,
                 source_version=offer.version_id,
                 action=TelegramDeliveryAction.PARTIAL_OFFER_EDIT,
-                bot_identity="channel_editor",
+                bot_identity="primary",
                 destination_key=telegram_channel_destination_key(channel_id),
                 destination_class=TelegramDestinationClass.CHANNEL,
                 method="editMessageText",

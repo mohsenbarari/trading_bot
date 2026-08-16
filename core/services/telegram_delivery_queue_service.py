@@ -482,7 +482,7 @@ async def _assert_durable_dispatch_gate(
     if not blockers:
         return
 
-    retry_until = now + timedelta(seconds=0.1)
+    retry_until = now
     # PostgreSQL is the authoritative exclusion fence for an in-flight
     # provider call.  Do not mirror that call's full recovery lease into
     # Redis: a second marker that races the short provider/persistence window

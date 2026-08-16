@@ -1599,10 +1599,11 @@ class TelegramNotificationOutboxQueueBridgePostgresTests(
                 lease_seconds=30,
                 now=due + timedelta(seconds=1),
             )
+            legacy_source_type = None if legacy is None else legacy.source_type
             await db.rollback()
         self.assertIsNotNone(legacy)
         self.assertEqual(
-            legacy.source_type,
+            legacy_source_type,
             f"queue_action:{TelegramDeliveryAction.DELAYED_RESTRICTION.value}",
         )
         async with self.Session() as db:
@@ -1643,10 +1644,11 @@ class TelegramNotificationOutboxQueueBridgePostgresTests(
                 lease_seconds=30,
                 now=utc_now() + timedelta(hours=1),
             )
+            claimed_source_type = None if claimed is None else claimed.source_type
             await db.rollback()
         self.assertIsNotNone(claimed)
         self.assertEqual(
-            claimed.source_type,
+            claimed_source_type,
             f"queue_action:{TelegramDeliveryAction.GENERAL_IMMEDIATE.value}",
         )
 
