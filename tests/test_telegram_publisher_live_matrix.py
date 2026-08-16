@@ -9,6 +9,8 @@ from scripts.run_telegram_publisher_live_matrix import (
     MATRIX_BACKGROUND_TASKS_MAX_WAIT_SECONDS,
     MATRIX_INGRESS_MAX_INTERVAL_SECONDS,
     MATRIX_INGRESS_MIN_INTERVAL_SECONDS,
+    MATRIX_OVERTIME_RECEIPT_SAFETY_SECONDS,
+    _overtime_scheduled_at,
     MatrixRun,
     RetryableBotCallbackReceiptAbsent,
     OfferTimeline,
@@ -565,6 +567,25 @@ class TelegramPublisherLiveMatrixTests(unittest.TestCase):
 
         self.assertFalse(completed)
         self.assertGreater(MATRIX_BACKGROUND_TASKS_MAX_WAIT_SECONDS, 0)
+
+    def test_overtime_is_scheduled_after_the_normal_deadline(self):
+        from datetime import datetime
+
+        timeline = OfferTimeline(
+            index=1,
+            origin="bot",
+            scenario="overtime_decision_timeout",
+            expected_terminal_status="expired",
+            scheduled_at="2026-08-12T00:00:00+00:00",
+            normal_deadline_at="2026-08-12T00:25:00+00:00",
+        )
+        scheduled = _overtime_scheduled_at(timeline)
+        deadline = datetime.fromisoformat(timeline.normal_deadline_at)
+        self.assertGreater(scheduled, deadline)
+        self.assertEqual(
+            (scheduled - deadline).total_seconds(),
+            MATRIX_OVERTIME_RECEIPT_SAFETY_SECONDS,
+        )
 
     def test_overtime_requests_are_limited_before_the_direct_webapp_operation(self):
         active_operations = 0
