@@ -5,7 +5,8 @@
 
 1. current rows غیرمنقضی staging را می‌خواند؛
 2. فقط anchorهای `ELIGIBLE`, non-conditional, unit-compatible از Market Store
-   (و anchor صریح اضافه) را می‌گیرد؛
+   و rangeهای downsample‌شدهٔ `MAIN_ONLINE` را که پیش از همان پیام ساخته شده‌اند
+   می‌گیرد؛
 3. آفرها را causal resolve و با `available_at` زمان واقعی اجرای resolver
    upsert می‌کند؛
 4. فقط ریشه‌هایی با **یک** آفر eligible را برای reply trade linking می‌فرستد؛
@@ -13,9 +14,9 @@
 
 این تابع transaction را commit نمی‌کند؛ caller یک transaction محلی برای
 Market Store دارد. Replay همان staging باعث افزایش شمار facts نمی‌شود. بدون
-anchor کافی، آفر `PENDING_REVIEW` می‌ماند و trade آن ساخته نمی‌شود. تبدیل
-قیمت از بازار دیگر در این لایه ممنوع است؛ provider آینده باید تبدیل واحد را
-خارج از آن به `CoinPriceAnchor` صریح انجام دهد.
+anchor/range کافی، آفر `PENDING_REVIEW` می‌ماند و trade آن ساخته نمی‌شود.
+تبدیل full-Toman به project-thousand فقط یک‌بار در adapter فقط‌خواندنی prediction
+انجام می‌شود؛ خود pipeline هیچ تبدیل واحد یا کالای پیش‌فرضی نمی‌سازد.
 
-Collector، scheduler، startup registration، endpoint و هر اتصال سه‌سروره در
-این مرحله عمداً وجود ندارند.
+Collector این function را در transaction محلی صدا می‌زند؛ خود pipeline همچنان
+worker، scheduler، endpoint یا اتصال شبکه ثبت نمی‌کند.

@@ -38,7 +38,7 @@ from .market_contracts import MarketObservation, derive_event_key, normalize_utc
 from .market_store import upsert_observation
 
 
-COIN_GROUP_PIPELINE_VERSION = "coin-group-pipeline-v3-forward-anchors"
+COIN_GROUP_PIPELINE_VERSION = "coin-group-pipeline-v4-model-price-range"
 PROVISIONAL_BOOTSTRAP_WINDOW_SECONDS = 30 * 60
 PROVISIONAL_MINIMUM_MESSAGES = 3
 PROVISIONAL_MINIMUM_SENDERS = 2
@@ -797,7 +797,7 @@ def process_coin_group_staging(
 ) -> CoinGroupPipelineReport:
     """Process current staging idempotently in one caller-owned Store transaction.
 
-    ``additional_anchors`` exists for a future unit-safe Snapshot provider; it
+    ``additional_anchors`` accepts only caller-normalized causal snapshots; it
     is explicit so this layer can never manufacture a project-unit conversion
     from another market.  The caller must commit/rollback ``market_connection``
     around this function.

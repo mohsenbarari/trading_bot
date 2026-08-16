@@ -9,6 +9,7 @@ User=root
 WorkingDirectory=@CODE_ROOT@
 EnvironmentFile=@MARKET_ENV@
 Environment=COIN_GROUP_EVENT_CHANNEL_ID=@GROUP_EVENT_CHANNEL_ID@
+Environment=COIN_GROUP_ESTIMATOR_CALIBRATION_DB=@ESTIMATOR_RUNTIME_ROOT@/runtime/online_calibration.sqlite3
 Environment=PYTHONPATH=@PYTHON_PACKAGES@
 ExecStart=/usr/bin/flock --exclusive --timeout 300 @MARKET_RUNTIME_ROOT@/staging/.market-store-writer.lock /usr/bin/python3 @CODE_ROOT@/scripts/collect_coin_group_event_telegram.py --runtime-root @MARKET_RUNTIME_ROOT@ --market-store market/market.sqlite3 --staging-store staging/coin-groups.sqlite3 --feedback-db @ESTIMATOR_RUNTIME_ROOT@/runtime/review_decisions.sqlite3 --session session/coin-group-event-reader --days 3
 ExecStart=/usr/bin/flock --exclusive --timeout 300 @ESTIMATOR_RUNTIME_ROOT@/.conversation-writer.lock /usr/bin/python3 @CODE_ROOT@/scripts/project_group_market_to_estimator.py --market-store @MARKET_RUNTIME_ROOT@/market/market.sqlite3 --conversation-db @ESTIMATOR_RUNTIME_ROOT@/conversation/conversation_events.sqlite3

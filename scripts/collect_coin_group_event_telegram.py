@@ -25,6 +25,9 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from core.market_intelligence.coin_group_pipeline import process_coin_group_staging
+from core.market_intelligence.coin_prediction_anchors import (
+    load_coin_prediction_anchors,
+)
 from core.market_intelligence.coin_group_feedback import (
     ensure_coin_group_feedback_store,
     load_coin_group_parser_feedback,
@@ -35,6 +38,7 @@ from core.market_intelligence.coin_group_staging import (
     CoinGroupStagingMessage,
     connect_coin_group_staging,
     initialize_coin_group_staging,
+    list_current_staged_coin_group_messages,
     purge_expired_coin_group_staging,
     stage_coin_group_message,
 )
@@ -210,6 +214,14 @@ async def collect(args: argparse.Namespace) -> dict[str, object]:
         if args.feedback_db
         else None
     )
+    prediction_path = (
+        _external_sidecar(
+            args.estimator_calibration_db,
+            field="estimator_calibration_db",
+        )
+        if args.estimator_calibration_db
+        else None
+    )
     market_path.parent.mkdir(parents=True, exist_ok=True)
     staging_path.parent.mkdir(parents=True, exist_ok=True)
     session_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -305,10 +317,27 @@ async def collect(args: argparse.Namespace) -> dict[str, object]:
                 )
         staging.commit()
         try:
+            prediction_anchors = ()
+            prediction_rows_seen = 0
+            prediction_rows_rejected = 0
+            staged_window = list_current_staged_coin_group_messages(
+                staging,
+                as_of_utc=received_at,
+            )
+            if prediction_path is not None and staged_window:
+                prediction_load = load_coin_prediction_anchors(
+                    prediction_path,
+                    earliest_event_time_utc=staged_window[0].event_time_utc,
+                    as_of_utc=received_at,
+                )
+                prediction_anchors = prediction_load.anchors
+                prediction_rows_seen = prediction_load.rows_seen
+                prediction_rows_rejected = prediction_load.rows_rejected
             pipeline = process_coin_group_staging(
                 staging,
                 market,
                 as_of_utc=received_at,
+                additional_anchors=prediction_anchors,
                 parser_feedback=(
                     load_coin_group_parser_feedback(feedback_path)
                     if feedback_path is not None
@@ -358,6 +387,9 @@ async def collect(args: argparse.Namespace) -> dict[str, object]:
                     pipeline.feedback_pattern_calibrations_applied
                 ),
                 "feedback_revisions_marked_applied": feedback_marked_applied,
+                "estimator_prediction_rows_seen": prediction_rows_seen,
+                "estimator_prediction_rows_rejected": prediction_rows_rejected,
+                "estimator_prediction_anchors": len(prediction_anchors),
             },
         }
     finally:
@@ -382,6 +414,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--feedback-db",
         help="External privacy-safe parser-feedback sidecar; raw text is never stored there.",
+    )
+    parser.add_argument(
+        "--estimator-calibration-db",
+        default=os.environ.get("COIN_GROUP_ESTIMATOR_CALIBRATION_DB") or None,
+        help="External read-only prediction ledger used for causal unnamed-commodity resolution.",
     )
     parser.add_argument("--session", default="session/coin-group-event-reader")
     parser.add_argument("--days", type=int, default=3)

@@ -1,5 +1,9 @@
+import os
+from unittest.mock import patch
+
 from scripts.collect_coin_group_event_telegram import (
     _event_message,
+    build_parser,
     collector_failure_reason,
     decode_event_envelopes,
 )
@@ -67,3 +71,13 @@ def test_collector_redacts_unclassified_failure_detail() -> None:
     reason = collector_failure_reason(RuntimeError("sensitive upstream detail"))
 
     assert reason == "coin_group_event_collect_failed:RuntimeError"
+
+
+def test_collector_reads_prediction_ledger_path_from_environment() -> None:
+    with patch.dict(
+        os.environ,
+        {"COIN_GROUP_ESTIMATOR_CALIBRATION_DB": "/runtime/predictions.sqlite3"},
+    ):
+        args = build_parser().parse_args(["--runtime-root", "/runtime"])
+
+    assert args.estimator_calibration_db == "/runtime/predictions.sqlite3"

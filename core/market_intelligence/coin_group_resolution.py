@@ -23,7 +23,7 @@ from .coin_groups import (
 from .market_contracts import MarketObservation, MarketStoreContractError, derive_event_key, normalize_utc
 
 
-COIN_GROUP_RESOLUTION_VERSION = "coin-group-context-v5-parser-complete"
+COIN_GROUP_RESOLUTION_VERSION = "coin-group-context-v6-causal-model-range"
 MINIMUM_ANCHOR_COUNT = 2
 MAXIMUM_RELATIVE_DISTANCE = 0.015
 MINIMUM_RUNNER_UP_MARGIN = 0.005
@@ -101,6 +101,7 @@ def _normalized_anchor(
         "CANONICAL",
         "GROUP_DERIVED",
         "HUMAN_REVIEWED",
+        "MODEL_SNAPSHOT",
         "PROVISIONAL_EXPLICIT_CLUSTER",
     }:
         return None
@@ -113,7 +114,7 @@ def _candidate_centers(
     source_event_time_utc: str,
     source_available_at_utc: str,
     anchors: Iterable[CoinPriceAnchor],
-) -> list[tuple[str, float, int, float, int, bool]]:
+) -> list[tuple[str, float, int, float, int, bool, bool]]:
     """Return strictly-prior same-book centers as code/center/count/distance."""
 
     grouped: dict[str, list[tuple[int, str]]] = {}
@@ -144,10 +145,11 @@ def _candidate_centers(
         if settlement != parsed.settlement_term or form != parsed.trade_form:
             continue
         grouped.setdefault(code, []).append((price, evidence_kind))
-    candidates: list[tuple[str, float, int, float, int, bool]] = []
+    candidates: list[tuple[str, float, int, float, int, bool, bool]] = []
     for code, evidence in grouped.items():
         prices = [item[0] for item in evidence]
         human_reviewed = any(kind == "HUMAN_REVIEWED" for _, kind in evidence)
+        model_snapshot = any(kind == "MODEL_SNAPSHOT" for _, kind in evidence)
         if len(prices) < MINIMUM_ANCHOR_COUNT and not human_reviewed:
             continue
         low, high = _PRICE_BOUNDS[code]
@@ -170,6 +172,7 @@ def _candidate_centers(
                 distance,
                 authoritative_count,
                 human_reviewed,
+                model_snapshot,
             )
         )
     return sorted(candidates, key=lambda item: (item[3], -item[2], item[0]))
@@ -223,6 +226,7 @@ def _resolve_one(
                 distance,
                 authoritative_count,
                 _human_reviewed,
+                model_snapshot,
             ) = winner
             if (
                 claimed != winner_code
@@ -252,7 +256,11 @@ def _resolve_one(
                 reason = (
                     "EXPLICIT_COMMODITY_VALIDATED_BY_STRICTLY_PRIOR_SAME_BOOK_PRICE"
                     if authoritative_count
-                    else "EXPLICIT_COMMODITY_SUPPORTED_BY_COHERENT_PRIOR_GROUP_CLUSTER"
+                    else (
+                        "EXPLICIT_COMMODITY_SUPPORTED_BY_STRICTLY_PRIOR_MODEL_PRICE_RANGE"
+                        if model_snapshot
+                        else "EXPLICIT_COMMODITY_SUPPORTED_BY_COHERENT_PRIOR_GROUP_CLUSTER"
+                    )
                 )
             else:
                 reason = (
@@ -313,12 +321,24 @@ def _resolve_one(
             authoritative_anchor_count=winner[4] if winner else 0,
         )
     assert winner is not None
-    winner_code, _, anchor_count, distance, authoritative_count, _human_reviewed = winner
+    (
+        winner_code,
+        _,
+        anchor_count,
+        distance,
+        authoritative_count,
+        _human_reviewed,
+        model_snapshot,
+    ) = winner
     state = "ELIGIBLE"
     reason = (
         "UNNAMED_COMMODITY_RESOLVED_BY_STRICTLY_PRIOR_SAME_BOOK_PRICE"
         if authoritative_count
-        else "UNNAMED_COMMODITY_RESOLVED_BY_COHERENT_PRIOR_GROUP_CLUSTER"
+        else (
+            "UNNAMED_COMMODITY_RESOLVED_BY_STRICTLY_PRIOR_MODEL_PRICE_RANGE"
+            if model_snapshot
+            else "UNNAMED_COMMODITY_RESOLVED_BY_COHERENT_PRIOR_GROUP_CLUSTER"
+        )
     )
     code = winner_code
     return ResolvedCoinGroupOffer(
