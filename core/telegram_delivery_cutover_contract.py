@@ -120,6 +120,31 @@ def legacy_runtime_env_updates() -> dict[str, str]:
     }
 
 
+def _env_assignment(text: str, key: str) -> str | None:
+    for line in str(text or "").splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in line:
+            continue
+        name, value = line.split("=", 1)
+        if name.strip() == key:
+            cleaned = value.strip()
+            return cleaned or None
+    return None
+
+
+def expected_channel_id_updates(text: str) -> dict[str, str]:
+    """Copy CHANNEL_ID into the Queue-v1 expected-channel lock when it is absent."""
+    channel = _env_assignment(text, "CHANNEL_ID")
+    expected = _env_assignment(text, "TELEGRAM_DELIVERY_QUEUE_EXPECTED_CHANNEL_ID")
+    if not channel:
+        raise ValueError("telegram_channel_id_missing")
+    if expected and expected != channel:
+        raise ValueError("telegram_expected_channel_id_mismatch")
+    if expected:
+        return {}
+    return {"TELEGRAM_DELIVERY_QUEUE_EXPECTED_CHANNEL_ID": channel}
+
+
 def upsert_env_lines(text: str, updates: Mapping[str, str]) -> str:
     """Replace or append env assignments without echoing values to callers."""
     lines = str(text or "").splitlines()

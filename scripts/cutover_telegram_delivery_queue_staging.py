@@ -28,6 +28,7 @@ from core.telegram_delivery_cutover_contract import (
     api_env_updates,
     api_process_contract,
     bot_env_updates,
+    expected_channel_id_updates,
     bot_process_contract,
     executor_count,
     executor_overlap_forbidden,
@@ -656,9 +657,14 @@ def _upsert_local_env(path: Path, updates: dict[str, str]) -> dict[str, Any]:
     if not path.is_file():
         raise StagingCutoverError("foreign_env_file_missing")
     original = path.read_text(encoding="utf-8")
-    path.write_text(upsert_env_lines(original, updates), encoding="utf-8")
+    merged = dict(updates)
+    try:
+        merged.update(expected_channel_id_updates(original))
+    except ValueError as exc:
+        raise StagingCutoverError(str(exc)) from exc
+    path.write_text(upsert_env_lines(original, merged), encoding="utf-8")
     os.chmod(path, 0o600)
-    return {"keys": sorted(updates), "host": "foreign"}
+    return {"keys": sorted(merged), "host": "foreign"}
 
 
 def _upsert_iran_env(updates: dict[str, str]) -> dict[str, Any]:

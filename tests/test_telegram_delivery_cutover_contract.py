@@ -9,6 +9,7 @@ from core.telegram_delivery_cutover_contract import (
     bot_process_contract,
     executor_count,
     executor_overlap_forbidden,
+    expected_channel_id_updates,
     missing_required_env,
     present_forbidden_tokens,
     upsert_env_lines,
@@ -92,6 +93,25 @@ class TelegramDeliveryCutoverContractTests(unittest.TestCase):
         self.assertIn("TELEGRAM_DELIVERY_PRODUCER_MODE=queue-v1\n", updated)
         self.assertIn("TELEGRAM_DELIVERY_QUEUE_WORKER_ENABLED=true\n", updated)
         self.assertNotIn("legacy", updated)
+
+    def test_expected_channel_id_is_copied_only_when_absent_and_matching(self):
+        copied = expected_channel_id_updates("CHANNEL_ID=-100111\n")
+        self.assertEqual(
+            copied,
+            {"TELEGRAM_DELIVERY_QUEUE_EXPECTED_CHANNEL_ID": "-100111"},
+        )
+        self.assertEqual(
+            expected_channel_id_updates(
+                "CHANNEL_ID=-100111\nTELEGRAM_DELIVERY_QUEUE_EXPECTED_CHANNEL_ID=-100111\n"
+            ),
+            {},
+        )
+        with self.assertRaises(ValueError):
+            expected_channel_id_updates(
+                "CHANNEL_ID=-100111\nTELEGRAM_DELIVERY_QUEUE_EXPECTED_CHANNEL_ID=-100222\n"
+            )
+        with self.assertRaises(ValueError):
+            expected_channel_id_updates("TELEGRAM_DELIVERY_PRODUCER_MODE=legacy\n")
 
     def test_process_role_env_updates_keep_tokens_off_api(self):
         api = api_env_updates()

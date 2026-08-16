@@ -25,6 +25,7 @@
 - قرارداد نقش process در `core/telegram_delivery_cutover_contract.py` است
 - سرویس‌های API/sync در `deploy/staging/docker-compose.staging.yml` token و worker اجرا را از env مشترک خالی می‌کنند
 - `apply` فقط با عبارت تأیید، worktree پاک، و `main == origin/main` اجرا می‌شود؛ deploy رسمی هر دو سرور را به یک SHA می‌رساند
+- اگر قفل کانال Queue-v1 خالی باشد، از `CHANNEL_ID` موجود کپی می‌شود؛ مقدار در گزارش چاپ نمی‌شود
 
 ## ماتریس زندهٔ authoritative
 
