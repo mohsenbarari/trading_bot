@@ -90,6 +90,19 @@ class TradesRouterHelperTests(unittest.IsolatedAsyncioTestCase):
             )
         )
 
+        owner_context = SimpleNamespace(
+            owner_user=SimpleNamespace(id=7, role=None),
+            actor_user=SimpleNamespace(id=17, role=None),
+        )
+        own_relation = SimpleNamespace(customer_user_id=41, owner_user_id=7)
+        foreign_relation = SimpleNamespace(customer_user_id=42, owner_user_id=8)
+        visible_relations, restricted_ids = trades._partition_trade_customer_relations_for_viewer(
+            {41: own_relation, 42: foreign_relation},
+            context=owner_context,
+        )
+        self.assertEqual(visible_relations, {41: own_relation})
+        self.assertEqual(restricted_ids, {42})
+
         self.assertEqual(
             await trades._load_trade_customer_relation_map_for_user_ids(AsyncMock(), []),
             {},
@@ -313,6 +326,22 @@ class TradesRouterHelperTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.responder_user_name, "buyer")
         self.assertEqual(response.offer_notes, "تحویل فوری")
         self.assertEqual(response.created_at, "1403/10/12")
+
+        restricted_response = trades.trade_to_response(
+            trade,
+            customer_relation_map={},
+            restricted_customer_user_ids={22},
+            viewer_context=SimpleNamespace(
+                owner_user=SimpleNamespace(id=11, role=None),
+                actor_user=SimpleNamespace(id=11, role=None),
+            ),
+            history_target_user_id=11,
+        )
+        self.assertIsNone(restricted_response.responder_user_id)
+        self.assertIsNone(restricted_response.responder_user_name)
+        self.assertIsNone(restricted_response.responder_user_profile_user_id)
+        self.assertIsNone(restricted_response.counterparty_user_id)
+        self.assertIsNone(restricted_response.counterparty_name)
 
         relation_aware_response = trades.trade_to_response(
             trade,
@@ -636,6 +665,49 @@ class TradesRouterHelperTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(recipient_payload['customer_context_management_name'], 'مشتری واسط')
         self.assertEqual(recipient_payload['customer_context_tier'], CustomerTier.TIER_1.value)
         self.assertEqual(recipient_payload['audience_user_ids'], [22, 33])
+
+        foreign_group_payload = trades._build_trade_created_event_payload(
+            trade_id=93,
+            trade_number=10004,
+            offer_id=16,
+            commodity_id=6,
+            quantity=3,
+            price=82000,
+            commodity_name='Coin',
+            trade_type='sell',
+            status='completed',
+            created_at='1403/10/13',
+            offer_user=SimpleNamespace(account_name='customer-secret'),
+            offer_user_id=11,
+            responder_user=SimpleNamespace(account_name='unrelated-owner'),
+            responder_user_id=99,
+            actor_user_id=99,
+            identity_map={},
+            customer_relation_map={
+                11: SimpleNamespace(
+                    customer_user_id=11,
+                    owner_user_id=22,
+                    customer_tier=CustomerTier.TIER_1,
+                    management_name='نام مدیریتی محرمانه',
+                ),
+            },
+            viewer_context=SimpleNamespace(
+                owner_user=SimpleNamespace(id=99, role=None),
+                actor_user=SimpleNamespace(id=99, role=None),
+                relation=None,
+                is_accountant_context=False,
+            ),
+            history_target_user_id=99,
+            recipient_specific=True,
+            audience_user_ids=[99],
+        )
+        self.assertIsNone(foreign_group_payload['offer_user_id'])
+        self.assertIsNone(foreign_group_payload['offer_user_name'])
+        self.assertIsNone(foreign_group_payload['counterparty_user_id'])
+        self.assertIsNone(foreign_group_payload['counterparty_name'])
+        self.assertIsNone(foreign_group_payload['trade_path_summary'])
+        self.assertNotIn('customer-secret', str(foreign_group_payload))
+        self.assertNotIn('نام مدیریتی محرمانه', str(foreign_group_payload))
 
         profile_route = trades._build_trade_profile_route_from_payload('offer_user', event_payload)
         self.assertEqual(

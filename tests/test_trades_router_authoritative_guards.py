@@ -2,7 +2,7 @@ import json
 import unittest
 from datetime import datetime, timedelta
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import ANY, AsyncMock, patch
 
 from fastapi import BackgroundTasks, HTTPException
 
@@ -507,7 +507,14 @@ class TradesRouterAuthoritativeGuardTests(unittest.IsolatedAsyncioTestCase):
 
         db.refresh.assert_any_await(offer, ["user", "commodity"])
         persist_delivery_intents.assert_awaited_once_with(db, existing_trade)
-        response_mock.assert_called_once_with(existing_trade, identity_map={}, customer_relation_map={})
+        response_mock.assert_called_once_with(
+            existing_trade,
+            identity_map={},
+            customer_relation_map={},
+            restricted_customer_user_ids=set(),
+            viewer_context=ANY,
+            history_target_user_id=locked_user.id,
+        )
         self.assertEqual(result, {"id": 88})
 
     async def test_execute_trade_authoritatively_rejects_duplicate_failed_request_without_mutation(self):

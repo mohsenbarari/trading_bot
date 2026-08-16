@@ -248,6 +248,40 @@ class TradeExecutionSeamTests(unittest.TestCase):
         self.assertIn("📝 توضیحات: تسویه فوری", responder_notif)
         self.assertIn("📝 توضیحات: تسویه فوری", owner_notif)
 
+    def test_notification_message_hides_customer_from_other_group_and_keeps_own_group_visibility(self):
+        relation = SimpleNamespace(
+            customer_user_id=41,
+            customer_tier=CustomerTier.TIER_1,
+            owner_user_id=78,
+        )
+        common = {
+            "trade_emoji": "🟢",
+            "trade_type_label": "خرید",
+            "trade_price": 50_800,
+            "trade_quantity": 2,
+            "commodity_name": "ربع",
+            "trade_number": 10013,
+            "trade_datetime": "1405/03/27   16:46",
+            "counterparty_name": "نام مدیریتی مشتری",
+            "counterparty_user_id": 41,
+            "customer_relation_map": {41: relation},
+        }
+
+        foreign_message = _build_trade_notification_message(
+            **common,
+            audience_user_id=52,
+            principal_user_id=52,
+        )
+        owner_message = _build_trade_notification_message(
+            **common,
+            audience_user_id=78,
+            principal_user_id=78,
+        )
+
+        self.assertNotIn("نام مدیریتی مشتری", foreign_message)
+        self.assertNotIn("طرف معامله", foreign_message)
+        self.assertIn("طرف معامله: نام مدیریتی مشتری", owner_message)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -796,8 +796,15 @@ def offer_to_response(
         viewer_customer_relation=viewer_customer_relation,
     )
     offer_public_id = ensure_offer_public_id(offer)
+    relation_owner_user_id = getattr(offer_owner_relation, "owner_user_id", None)
+    customer_identity_visible = (
+        offer_owner_relation is None
+        or viewer_user_id == offer.user_id
+        or viewer_user_id == relation_owner_user_id
+    )
+    owner_identity_visible = include_owner_identity and customer_identity_visible
     owner_display_name = ""
-    if include_owner_identity and offer.user:
+    if owner_identity_visible and offer.user:
         owner_relation_map = {int(offer.user_id): offer_owner_relation} if offer_owner_relation else None
         owner_display_name = (
             customer_management_name_for_user_id(offer.user_id, owner_relation_map)
@@ -817,7 +824,7 @@ def offer_to_response(
         id=offer.id,
         offer_public_id=offer_public_id,
         public_link=build_offer_public_link(offer_public_id),
-        user_id=offer.user_id if include_owner_identity else None,
+        user_id=offer.user_id if owner_identity_visible else None,
         user_account_name=owner_display_name,
         is_own_offer=is_own_offer,
         offer_type=offer.offer_type.value,

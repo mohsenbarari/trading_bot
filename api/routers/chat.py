@@ -4,7 +4,7 @@ API endpoints for in-app messaging system
 """
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status, UploadFile, File, Form, Query
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List, Optional
 import inspect
@@ -23,6 +23,7 @@ from models.chat_member import ChatMember
 from models.message import Message
 from models.upload_session import UploadSession, UploadSessionStatus, UploadRoomKind
 from models.user import User
+from models.customer_relation import CustomerRelation, CustomerRelationStatus
 from models.chat_file import ChatFile
 from api.deps import get_current_user, verify_super_admin
 from api.routers.chat_schemas import (
@@ -131,7 +132,10 @@ from core.services.chat_room_service import (
 )
 from core.services.chat_role_badge_service import load_chat_role_badges
 from core.services.avatar_service import resolve_owned_avatar_file_id
-from core.services.accountant_relation_service import is_user_accountant
+from core.services.accountant_relation_service import (
+    get_active_accountant_relation_for_accountant,
+    is_user_accountant,
+)
 from core.services.user_account_status_service import is_user_global_web_locked
 from core.services.customer_relation_service import (
     build_allowed_customer_chat_targets,
@@ -457,6 +461,7 @@ async def _serialize_pinned_message_state(
     room_kind: str,
     chat: Chat | None,
     message: Message | None,
+    viewer_user_id: int | None = None,
 ) -> PinnedMessageStateResponse:
     return PinnedMessageStateResponse(
         chat_id=chat.id if chat is not None else None,
@@ -464,7 +469,11 @@ async def _serialize_pinned_message_state(
         pinned_at=getattr(chat, "pinned_message_at", None) if chat is not None else None,
         pinned_by_user_id=getattr(chat, "pinned_message_by_id", None) if chat is not None else None,
         message=(
-            await _serialize_direct_message_with_accountant_contract(db, message)
+            await _serialize_direct_message_with_accountant_contract(
+                db,
+                message,
+                viewer_user_id=viewer_user_id,
+            )
             if message is not None
             else None
         ),
@@ -491,13 +500,71 @@ async def _ensure_customer_can_access_direct_target(
     target_user_id: int,
     allowed_target_ids: set[int] | None = None,
 ) -> set[int] | None:
+    if target_user_id == current_user.id:
+        return allowed_target_ids
     if allowed_target_ids is None:
         allowed_target_ids = await _get_customer_visible_direct_target_ids(db, current_user=current_user)
-    if allowed_target_ids is None:
+    if allowed_target_ids is not None:
+        if target_user_id not in allowed_target_ids:
+            raise HTTPException(status_code=404, detail="User not found")
+        return allowed_target_ids
+
+    target_customer_relation = await get_active_customer_relation_for_customer(db, target_user_id)
+    if target_customer_relation is None:
         return None
-    if target_user_id not in allowed_target_ids:
+    viewer_accountant_relation = await get_active_accountant_relation_for_accountant(db, current_user.id)
+    if (
+        current_user.id != target_customer_relation.owner_user_id
+        and (
+            viewer_accountant_relation is None
+            or viewer_accountant_relation.owner_user_id != target_customer_relation.owner_user_id
+        )
+    ):
         raise HTTPException(status_code=404, detail="User not found")
-    return allowed_target_ids
+    return None
+
+
+async def _filter_customer_scoped_direct_target_ids(
+    db: AsyncSession,
+    *,
+    current_user: User,
+    target_user_ids: set[int],
+    customer_allowed_target_ids: set[int] | None,
+) -> set[int]:
+    if not target_user_ids:
+        return set()
+    if customer_allowed_target_ids is not None:
+        return target_user_ids & customer_allowed_target_ids
+
+    viewer_accountant_relation = await get_active_accountant_relation_for_accountant(db, current_user.id)
+    viewer_owner_user_id = (
+        viewer_accountant_relation.owner_user_id
+        if viewer_accountant_relation is not None
+        else current_user.id
+    )
+    relation_rows = (
+        await db.execute(
+            select(CustomerRelation.customer_user_id, CustomerRelation.owner_user_id).where(
+                CustomerRelation.customer_user_id.in_(target_user_ids),
+                CustomerRelation.status == CustomerRelationStatus.ACTIVE,
+                CustomerRelation.deleted_at.is_(None),
+            )
+        )
+    ).all()
+    customer_owner_by_user_id = {
+        int(customer_user_id): int(owner_user_id)
+        for customer_user_id, owner_user_id in relation_rows
+        if customer_user_id is not None and owner_user_id is not None
+    }
+    return {
+        target_user_id
+        for target_user_id in target_user_ids
+        if (
+            target_user_id not in customer_owner_by_user_id
+            or customer_owner_by_user_id[target_user_id] == viewer_owner_user_id
+            or target_user_id == current_user.id
+        )
+    }
 
 
 def _get_direct_message_counterparty_id(message: Message | object, *, viewer_user_id: int) -> int | None:
@@ -528,10 +595,15 @@ async def get_conversations(
         )
     result = await db.execute(stmt)
     direct_conversations = [ConversationRead(**row) for row in result.mappings().all()]
-    if allowed_direct_target_ids is not None:
-        direct_conversations = [
-            row for row in direct_conversations if row.other_user_id in allowed_direct_target_ids
-        ]
+    visible_direct_target_ids = await _filter_customer_scoped_direct_target_ids(
+        db,
+        current_user=current_user,
+        target_user_ids={row.other_user_id for row in direct_conversations},
+        customer_allowed_target_ids=allowed_direct_target_ids,
+    )
+    direct_conversations = [
+        row for row in direct_conversations if row.other_user_id in visible_direct_target_ids
+    ]
     room_conversations = [
         ConversationRead(
             id=row.id,
@@ -575,6 +647,11 @@ async def pin_direct_conversation(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
+    await _ensure_customer_can_access_direct_target(
+        db,
+        current_user=current_user,
+        target_user_id=user_id,
+    )
     member = await set_direct_chat_pin_state(
         db,
         actor=current_user,
@@ -597,6 +674,11 @@ async def reorder_direct_conversation_pin(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    await _ensure_customer_can_access_direct_target(
+        db,
+        current_user=current_user,
+        target_user_id=user_id,
+    )
     member = await set_direct_chat_pin_state(
         db,
         actor=current_user,
@@ -622,13 +704,24 @@ async def get_direct_pinned_message(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    await _ensure_customer_can_access_direct_target(
+        db,
+        current_user=current_user,
+        target_user_id=user_id,
+    )
     target = await db.get(User, user_id)
     if target is None:
         raise HTTPException(status_code=404, detail="User not found")
 
     chat = await get_existing_direct_chat(db, current_user.id, user_id)
     message = await get_pinned_message_for_chat(db, chat) if chat is not None else None
-    return await _serialize_pinned_message_state(db=db, room_kind="direct", chat=chat, message=message)
+    return await _serialize_pinned_message_state(
+        db=db,
+        room_kind="direct",
+        chat=chat,
+        message=message,
+        viewer_user_id=current_user.id,
+    )
 
 
 @router.post("/direct/{user_id}/mute", response_model=ConversationMuteResponse)
@@ -638,6 +731,11 @@ async def mute_direct_conversation(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
+    await _ensure_customer_can_access_direct_target(
+        db,
+        current_user=current_user,
+        target_user_id=user_id,
+    )
     member = await set_direct_chat_mute_state(
         db,
         actor=current_user,
@@ -658,6 +756,11 @@ async def mark_direct_conversation_unread(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
+    await _ensure_customer_can_access_direct_target(
+        db,
+        current_user=current_user,
+        target_user_id=user_id,
+    )
     member = await set_direct_chat_mark_unread_state(
         db,
         actor=current_user,
@@ -677,6 +780,11 @@ async def delete_direct_conversation(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
+    await _ensure_customer_can_access_direct_target(
+        db,
+        current_user=current_user,
+        target_user_id=user_id,
+    )
     member = await hide_direct_conversation(
         db,
         actor=current_user,
@@ -718,11 +826,25 @@ async def search_messages(
     )
     result = await db.execute(query)
     messages = result.scalars().all()
-    if allowed_direct_target_ids is not None and chat_id is None:
+    if chat_id is None:
+        visible_direct_target_ids = await _filter_customer_scoped_direct_target_ids(
+            db,
+            current_user=current_user,
+            target_user_ids={
+                target_user_id
+                for message in messages
+                for target_user_id in [
+                    _get_direct_message_counterparty_id(message, viewer_user_id=current_user.id)
+                ]
+                if target_user_id is not None
+            },
+            customer_allowed_target_ids=allowed_direct_target_ids,
+        )
         messages = [
             message
             for message in messages
-            if _get_direct_message_counterparty_id(message, viewer_user_id=current_user.id) in allowed_direct_target_ids
+            if _get_direct_message_counterparty_id(message, viewer_user_id=current_user.id)
+            in visible_direct_target_ids
         ]
     return await _serialize_direct_messages_with_accountant_contract(
         db,
@@ -904,13 +1026,26 @@ async def _enrich_direct_message_reads(
     }
     customer_sender_names: dict[int, str] = {}
     customer_lookup_ids = sender_ids | forwarded_from_ids
-    if can_execute and customer_lookup_ids:
-        from models.customer_relation import CustomerRelation, CustomerRelationStatus
-
+    if can_execute and customer_lookup_ids and viewer_user_id is not None:
+        viewer_customer_relation = await get_active_customer_relation_for_customer(db, viewer_user_id)
+        viewer_accountant_relation = await get_active_accountant_relation_for_accountant(db, viewer_user_id)
+        if viewer_customer_relation is not None:
+            visibility_clause = CustomerRelation.customer_user_id == viewer_user_id
+        else:
+            viewer_owner_user_id = (
+                viewer_accountant_relation.owner_user_id
+                if viewer_accountant_relation is not None
+                else viewer_user_id
+            )
+            visibility_clause = or_(
+                CustomerRelation.owner_user_id == viewer_owner_user_id,
+                CustomerRelation.customer_user_id == viewer_user_id,
+            )
         customer_stmt = select(CustomerRelation.customer_user_id, CustomerRelation.management_name).where(
             CustomerRelation.customer_user_id.in_(customer_lookup_ids),
             CustomerRelation.status == CustomerRelationStatus.ACTIVE,
             CustomerRelation.deleted_at.is_(None),
+            visibility_clause,
         )
         customer_result = await db.execute(customer_stmt)
         customer_sender_names = {
@@ -2105,12 +2240,21 @@ async def poll_messages(
             return row.get(key, default)
         return default
 
-    if allowed_direct_target_ids is not None:
-        direct_poll_rows = [
-            row
+    visible_direct_target_ids = await _filter_customer_scoped_direct_target_ids(
+        db,
+        current_user=current_user,
+        target_user_ids={
+            int(read_field(row, "other_user_id", 0) or 0)
             for row in direct_poll_rows
-            if int(read_field(row, "other_user_id", 0) or 0) in allowed_direct_target_ids
-        ]
+            if int(read_field(row, "other_user_id", 0) or 0) > 0
+        },
+        customer_allowed_target_ids=allowed_direct_target_ids,
+    )
+    direct_poll_rows = [
+        row
+        for row in direct_poll_rows
+        if int(read_field(row, "other_user_id", 0) or 0) in visible_direct_target_ids
+    ]
 
     unread_convs = [
         *[

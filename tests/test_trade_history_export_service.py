@@ -65,6 +65,22 @@ class TradeHistoryExportServiceTests(unittest.TestCase):
 
         self.assertEqual(rows[0].commodity_name, "ربع بهار")
 
+    def test_build_trade_history_export_rows_uses_authorized_counterparty_projection(self):
+        trade = make_trade()
+        trade.id = 91
+        trade.offer_user.customer_management_name = "نام مدیریتی ناامن"
+
+        projected = build_trade_history_export_rows(
+            [trade],
+            2,
+            counterparty_name_by_trade_id={91: None},
+        )
+        fallback = build_trade_history_export_rows([trade], 2)
+
+        self.assertEqual(projected[0].counterparty_name, "---")
+        self.assertEqual(fallback[0].counterparty_name, "offer-side")
+        self.assertNotEqual(fallback[0].counterparty_name, "نام مدیریتی ناامن")
+
     def test_resolve_counterparty_account_name_from_perspective(self):
         trade = make_trade()
         trade.offer_user = SimpleNamespace(account_name="offer-side")

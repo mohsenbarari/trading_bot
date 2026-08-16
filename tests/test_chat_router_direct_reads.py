@@ -6,6 +6,8 @@ from unittest.mock import AsyncMock, patch
 from fastapi import HTTPException
 
 from api.routers.chat import (
+    _ensure_customer_can_access_direct_target,
+    _filter_customer_scoped_direct_target_ids,
     delete_direct_conversation,
     get_conversations,
     get_messages,
@@ -69,6 +71,64 @@ class FakeDB:
 
 
 class ChatRouterDirectReadEndpointTests(unittest.IsolatedAsyncioTestCase):
+    async def test_direct_customer_target_policy_allows_only_owner_and_same_owner_accountant(self):
+        relation = SimpleNamespace(customer_user_id=91, owner_user_id=20)
+
+        async def relation_lookup(_db, user_id):
+            return relation if user_id == 91 else None
+
+        with patch(
+            "api.routers.chat.get_active_customer_relation_for_customer",
+            new=AsyncMock(side_effect=relation_lookup),
+        ), patch(
+            "api.routers.chat.get_active_accountant_relation_for_accountant",
+            new=AsyncMock(return_value=None),
+        ):
+            await _ensure_customer_can_access_direct_target(
+                object(),
+                current_user=SimpleNamespace(id=20),
+                target_user_id=91,
+            )
+            with self.assertRaises(HTTPException) as exc_info:
+                await _ensure_customer_can_access_direct_target(
+                    object(),
+                    current_user=SimpleNamespace(id=99),
+                    target_user_id=91,
+                )
+        self.assertEqual(exc_info.exception.status_code, 404)
+
+        with patch(
+            "api.routers.chat.get_active_customer_relation_for_customer",
+            new=AsyncMock(side_effect=relation_lookup),
+        ), patch(
+            "api.routers.chat.get_active_accountant_relation_for_accountant",
+            new=AsyncMock(return_value=SimpleNamespace(owner_user_id=20)),
+        ):
+            await _ensure_customer_can_access_direct_target(
+                object(),
+                current_user=SimpleNamespace(id=33),
+                target_user_id=91,
+            )
+
+    async def test_conversation_filter_removes_foreign_group_customers(self):
+        class RelationRows:
+            def all(self):
+                return [(41, 7), (42, 8)]
+
+        db = SimpleNamespace(execute=AsyncMock(return_value=RelationRows()))
+        with patch(
+            "api.routers.chat.get_active_accountant_relation_for_accountant",
+            new=AsyncMock(return_value=SimpleNamespace(owner_user_id=7)),
+        ):
+            visible = await _filter_customer_scoped_direct_target_ids(
+                db,
+                current_user=SimpleNamespace(id=17),
+                target_user_ids={30, 41, 42},
+                customer_allowed_target_ids=None,
+            )
+
+        self.assertEqual(visible, {30, 41})
+
     async def test_get_conversations_merges_and_sorts_direct_group_and_channel_rows(self):
         current_user = SimpleNamespace(id=5)
         direct_rows = [
@@ -139,6 +199,9 @@ class ChatRouterDirectReadEndpointTests(unittest.IsolatedAsyncioTestCase):
         with patch(
             "api.routers.chat.get_active_customer_relation_for_customer",
             new=AsyncMock(return_value=None),
+        ), patch(
+            "api.routers.chat._filter_customer_scoped_direct_target_ids",
+            new=AsyncMock(return_value={9}),
         ), patch("api.routers.chat.build_direct_conversation_list_stmt", return_value="stmt") as stmt_mock, patch(
             "api.routers.chat.list_room_conversations",
             new=AsyncMock(return_value=[group_row, channel_row]),
@@ -293,7 +356,10 @@ class ChatRouterDirectReadEndpointTests(unittest.IsolatedAsyncioTestCase):
         db = object()
         typing_data = SimpleNamespace(receiver_id=9)
 
-        with patch("api.routers.chat.publish_direct_typing_event", new=AsyncMock()) as typing_mock:
+        with patch(
+            "api.routers.chat._ensure_customer_can_access_direct_target",
+            new=AsyncMock(),
+        ), patch("api.routers.chat.publish_direct_typing_event", new=AsyncMock()) as typing_mock:
             result = await send_typing_signal(data=typing_data, current_user=current_user)
         typing_mock.assert_awaited_once_with(
             receiver_id=9,
@@ -303,7 +369,10 @@ class ChatRouterDirectReadEndpointTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIsNone(result)
 
-        with patch("api.routers.chat.commit_direct_read_state", new=AsyncMock()) as commit_mock, patch(
+        with patch(
+            "api.routers.chat._ensure_customer_can_access_direct_target",
+            new=AsyncMock(),
+        ), patch("api.routers.chat.commit_direct_read_state", new=AsyncMock()) as commit_mock, patch(
             "api.routers.chat.publish_direct_read_event",
             new=AsyncMock(),
         ) as publish_mock:
@@ -377,7 +446,10 @@ class ChatRouterDirectReadEndpointTests(unittest.IsolatedAsyncioTestCase):
         current_user = SimpleNamespace(id=5, account_name="ali-user")
         activity_data = SimpleNamespace(receiver_id=9, activity="uploading_file", active=False)
 
-        with patch("api.routers.chat.publish_direct_activity_event", new=AsyncMock()) as activity_mock:
+        with patch(
+            "api.routers.chat._ensure_customer_can_access_direct_target",
+            new=AsyncMock(),
+        ), patch("api.routers.chat.publish_direct_activity_event", new=AsyncMock()) as activity_mock:
             result = await send_direct_activity_signal(data=activity_data, current_user=current_user)
 
         activity_mock.assert_awaited_once_with(
@@ -443,6 +515,9 @@ class ChatRouterDirectReadEndpointTests(unittest.IsolatedAsyncioTestCase):
         with patch(
             "api.routers.chat.get_active_customer_relation_for_customer",
             new=AsyncMock(return_value=None),
+        ), patch(
+            "api.routers.chat._filter_customer_scoped_direct_target_ids",
+            new=AsyncMock(return_value={9}),
         ), patch("api.routers.chat.build_direct_poll_summary_stmt", return_value="poll-stmt") as poll_stmt_mock, patch(
             "api.routers.chat.list_room_poll_summaries",
             new=AsyncMock(return_value=[group_row, channel_row]),
@@ -466,6 +541,9 @@ class ChatRouterDirectReadEndpointTests(unittest.IsolatedAsyncioTestCase):
         member = SimpleNamespace(chat_id=44, is_pinned=True, pinned_at=pinned_at, is_hidden=True)
 
         with patch(
+            "api.routers.chat._ensure_customer_can_access_direct_target",
+            new=AsyncMock(),
+        ), patch(
             "api.routers.chat.set_direct_chat_pin_state",
             new=AsyncMock(return_value=member),
         ) as pin_mock:
@@ -483,6 +561,9 @@ class ChatRouterDirectReadEndpointTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(pin_result.pinned_at, pinned_at)
 
         with patch(
+            "api.routers.chat._ensure_customer_can_access_direct_target",
+            new=AsyncMock(),
+        ), patch(
             "api.routers.chat.hide_direct_conversation",
             new=AsyncMock(return_value=member),
         ) as hide_mock:
@@ -499,6 +580,9 @@ class ChatRouterDirectReadEndpointTests(unittest.IsolatedAsyncioTestCase):
         member = SimpleNamespace(chat_id=45, is_muted=True)
 
         with patch(
+            "api.routers.chat._ensure_customer_can_access_direct_target",
+            new=AsyncMock(),
+        ), patch(
             "api.routers.chat.set_direct_chat_mute_state",
             new=AsyncMock(return_value=member),
         ) as mute_mock:
@@ -515,6 +599,9 @@ class ChatRouterDirectReadEndpointTests(unittest.IsolatedAsyncioTestCase):
 
         unread_member = SimpleNamespace(chat_id=46, is_marked_unread=True)
         with patch(
+            "api.routers.chat._ensure_customer_can_access_direct_target",
+            new=AsyncMock(),
+        ), patch(
             "api.routers.chat.set_direct_chat_mark_unread_state",
             new=AsyncMock(return_value=unread_member),
         ) as unread_mock:

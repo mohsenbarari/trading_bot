@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, time
 from importlib import import_module
 from pathlib import Path
-from typing import Sequence
+from typing import Mapping, Sequence
 
 from core.utils import to_jalali_str
 from core.offer_settlement import trade_settlement_label
@@ -53,11 +53,9 @@ def resolve_trade_type_label_for_perspective(trade: object, perspective_user_id:
 
 
 def _participant_display_name(user: object | None) -> str:
-    return (
-        getattr(user, "customer_management_name", None)
-        or getattr(user, "account_name", None)
-        or ""
-    )
+    # Relation-scoped customer names must be supplied by an authorized caller;
+    # a mutable attribute attached elsewhere is not an authorization boundary.
+    return getattr(user, "account_name", None) or ""
 
 
 def resolve_counterparty_account_name_for_perspective(trade: object, perspective_user_id: int) -> str:
@@ -72,14 +70,34 @@ def resolve_counterparty_account_name_for_perspective(trade: object, perspective
     return _participant_display_name(getattr(trade, "responder_user", None))
 
 
-def build_trade_history_export_rows(trades: Sequence[object], perspective_user_id: int) -> list[TradeHistoryExportRow]:
+def build_trade_history_export_rows(
+    trades: Sequence[object],
+    perspective_user_id: int,
+    *,
+    counterparty_name_by_trade_id: Mapping[int, str | None] | None = None,
+) -> list[TradeHistoryExportRow]:
     rows: list[TradeHistoryExportRow] = []
     for trade in trades:
+        trade_id = getattr(trade, "id", None)
+        projected_counterparty_name = None
+        has_projected_counterparty = False
+        if counterparty_name_by_trade_id is not None:
+            try:
+                normalized_trade_id = int(trade_id)
+            except (TypeError, ValueError):
+                normalized_trade_id = None
+            if normalized_trade_id is not None and normalized_trade_id in counterparty_name_by_trade_id:
+                has_projected_counterparty = True
+                projected_counterparty_name = counterparty_name_by_trade_id[normalized_trade_id]
         rows.append(
             TradeHistoryExportRow(
                 trade_number=getattr(trade, "trade_number", None),
                 date_time_label=to_jalali_str(getattr(trade, "created_at", None), "%Y/%m/%d %H:%M") or "---",
-                counterparty_name=resolve_counterparty_account_name_for_perspective(trade, perspective_user_id) or "---",
+                counterparty_name=(
+                    projected_counterparty_name or "---"
+                    if has_projected_counterparty
+                    else resolve_counterparty_account_name_for_perspective(trade, perspective_user_id) or "---"
+                ),
                 trade_type_label=resolve_trade_type_label_for_perspective(trade, perspective_user_id),
                 settlement_type_label=trade_settlement_label(getattr(trade, "settlement_type", None)),
                 commodity_name=getattr(getattr(trade, "commodity", None), "name", "---"),

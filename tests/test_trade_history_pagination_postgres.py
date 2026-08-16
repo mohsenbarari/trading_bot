@@ -6,6 +6,7 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
+from fastapi import HTTPException
 from sqlalchemy import text
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -316,7 +317,7 @@ class TradeHistoryPaginationPostgresTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([trade.id for trade in rows], [trade.id for trade in expected])
         self.assertEqual(len({trade.id for trade in rows}), len(rows))
 
-    async def test_owner_sees_full_customer_history_but_unrelated_user_sees_only_mutual_rows(self):
+    async def test_owner_sees_full_customer_history_but_unrelated_user_cannot_open_customer_history(self):
         owner, customer, outsider, _, _, _, trades = await self._seed_history()
         owner_rows = await self._read_pages(
             context=self._context(owner),
@@ -324,25 +325,20 @@ class TradeHistoryPaginationPostgresTests(unittest.IsolatedAsyncioTestCase):
             target_user_id=customer.id,
             limit=20,
         )
-        outsider_rows = await self._read_pages(
-            context=self._context(outsider),
-            scope="with",
-            target_user_id=customer.id,
-            limit=7,
-        )
+        with self.assertRaises(HTTPException) as denied:
+            await self._read_pages(
+                context=self._context(outsider),
+                scope="with",
+                target_user_id=customer.id,
+                limit=7,
+            )
         customer_trade_ids = {
             trade.id for trade in trades
             if trade.offer_user_id == customer.id or trade.responder_user_id == customer.id
         }
-        mutual_ids = {
-            trade.id for trade in trades
-            if {trade.offer_user_id, trade.responder_user_id} == {customer.id, outsider.id}
-        }
         self.assertEqual({trade.id for trade in owner_rows}, customer_trade_ids)
-        self.assertEqual({trade.id for trade in outsider_rows}, mutual_ids)
+        self.assertEqual(denied.exception.status_code, 404)
         self.assertGreater(len(owner_rows), 20)
-        self.assertTrue(mutual_ids)
-        self.assertTrue(mutual_ids < customer_trade_ids)
 
     async def test_settlement_commodity_and_relative_trade_type_filters_match_every_row(self):
         owner, customer, _, _, coin, _, _ = await self._seed_history()

@@ -109,7 +109,7 @@ class UsersPublicRouterReadTests(unittest.IsolatedAsyncioTestCase):
                 viewer_accountant_relation=None,
             )
         )
-        self.assertTrue(
+        self.assertFalse(
             _can_view_customer_profile(
                 SimpleNamespace(id=1, role=UserRole.SUPER_ADMIN),
                 relation,

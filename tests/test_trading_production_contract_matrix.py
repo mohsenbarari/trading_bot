@@ -292,7 +292,14 @@ class TradingProductionContractMatrixTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(offer.remaining_quantity, 10)
         self.assertEqual(offer.status, OfferStatus.ACTIVE)
         persist_delivery_intents.assert_awaited_once_with(db, existing_trade)
-        response_mock.assert_called_once_with(existing_trade, identity_map={}, customer_relation_map={})
+        response_mock.assert_called_once()
+        response_args, response_kwargs = response_mock.call_args
+        self.assertEqual(response_args, (existing_trade,))
+        self.assertEqual(response_kwargs["identity_map"], {})
+        self.assertEqual(response_kwargs["customer_relation_map"], {})
+        self.assertEqual(response_kwargs["restricted_customer_user_ids"], set())
+        self.assertEqual(response_kwargs["history_target_user_id"], owner_user.id)
+        self.assertEqual(response_kwargs["viewer_context"].owner_user, owner_user)
 
     async def test_remote_home_forward_payload_preserves_delegated_actor_context(self):
         owner_user = make_user(id=5)

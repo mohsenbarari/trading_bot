@@ -256,6 +256,12 @@ async def change_history_months(callback: types.CallbackQuery, callback_data: Hi
 
     months = callback_data.months
     target_user_id = callback_data.target_user_id
+    if not await _ensure_history_profile_access(
+        user=user,
+        target_user_id=target_user_id,
+        callback=callback,
+    ):
+        return
     await state.update_data(history_months=months)
 
     target_user, trades = await get_trade_history(user.id, target_user_id, months=months)

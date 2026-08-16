@@ -70,6 +70,9 @@ class TradesRouterHistoryExportTests(unittest.IsolatedAsyncioTestCase):
             "api.routers.trades.build_trade_history_date_range_label",
             return_value="LABEL",
         ), patch(
+            "api.routers.trades._build_viewer_scoped_trade_history_export_rows",
+            new=AsyncMock(return_value=["ROW"]),
+        ) as build_rows, patch(
             "api.routers.trades.generate_trade_history_excel_file",
             return_value="/tmp/history.xlsx",
         ) as generate_excel:
@@ -90,6 +93,13 @@ class TradesRouterHistoryExportTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.headers.get("pragma"), "no-cache")
         self.assertEqual(generate_excel.call_args.kwargs["subject_name"], "owner5")
         self.assertEqual(generate_excel.call_args.kwargs["date_range_label"], "LABEL")
+        build_rows.assert_awaited_once_with(
+            db,
+            [trade],
+            context=context,
+            history_target_user_id=5,
+            perspective_user_id=5,
+        )
         self.assertIn("ORDER BY trades.created_at ASC, trades.id ASC", str(db.executed_statements[0]))
 
     async def test_export_trades_with_user_uses_target_perspective_for_privileged_target_history(self):
@@ -125,8 +135,8 @@ class TradesRouterHistoryExportTests(unittest.IsolatedAsyncioTestCase):
             "api.routers.trades.build_trade_history_date_range_label",
             return_value="LABEL",
         ), patch(
-            "api.routers.trades.build_trade_history_export_rows",
-            return_value=["ROW"],
+            "api.routers.trades._build_viewer_scoped_trade_history_export_rows",
+            new=AsyncMock(return_value=["ROW"]),
         ) as build_rows, patch(
             "api.routers.trades.generate_trade_history_pdf_file",
             return_value="/tmp/history.pdf",
@@ -144,7 +154,13 @@ class TradesRouterHistoryExportTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(response.path, "/tmp/history.pdf")
         self.assertEqual(response.media_type, "application/pdf")
-        build_rows.assert_called_once_with([trade], 77)
+        build_rows.assert_awaited_once_with(
+            db,
+            [trade],
+            context=context,
+            history_target_user_id=77,
+            perspective_user_id=77,
+        )
         self.assertEqual([str(arg) for arg in fake_query.order_by_args], ["trades.created_at ASC", "trades.id ASC"])
 
     async def test_export_endpoints_reject_empty_results(self):

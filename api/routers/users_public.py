@@ -102,10 +102,6 @@ def _serialize_public_search_result(
     })
 
 
-def _is_super_admin(user: User) -> bool:
-    return getattr(user, "role", None) == UserRole.SUPER_ADMIN
-
-
 def _can_view_project_users_directory(
     current_user: User,
     owner_user_id: int,
@@ -130,8 +126,6 @@ def _can_view_customer_profile(
         return True
     if current_user.id == relation.owner_user_id:
         return True
-    if _is_super_admin(current_user):
-        return True
     return (
         viewer_accountant_relation is not None
         and getattr(viewer_accountant_relation, "owner_user_id", None) == relation.owner_user_id
@@ -142,7 +136,6 @@ def _customer_profile_access_is_immediate(current_user: User, relation: Customer
     return (
         current_user.id == relation.customer_user_id
         or current_user.id == relation.owner_user_id
-        or _is_super_admin(current_user)
     )
 
 

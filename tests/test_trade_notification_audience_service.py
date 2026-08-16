@@ -235,7 +235,7 @@ class TradeNotificationAudienceServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("طرف معامله:", channel(customer_recipient, "telegram").message)
         self.assertIn('start=profile_10">owner</a>', channel(customer_recipient, "telegram").message)
 
-    async def test_customer_counterparty_uses_management_name_in_messages(self):
+    async def test_customer_counterparty_is_hidden_from_an_unrelated_trade_side(self):
         owner = make_user(10, account_name="owner", telegram_id=9010)
         customer = make_user(30, account_name="customer_0937", telegram_id=9030)
         responder = make_user(40, account_name="buyer", telegram_id=9040)
@@ -257,11 +257,39 @@ class TradeNotificationAudienceServiceTests(unittest.IsolatedAsyncioTestCase):
         )
 
         responder_recipient = built.result.recipients[0]
-        self.assertIn("طرف معامله: مشتری بازار تهران", responder_recipient.webapp_message)
-        self.assertIn("طرف معامله:", channel(responder_recipient, "telegram").message)
-        self.assertIn('start=profile_30">مشتری بازار تهران</a>', channel(responder_recipient, "telegram").message)
+        self.assertNotIn("طرف معامله:", responder_recipient.webapp_message)
+        self.assertNotIn("طرف معامله:", channel(responder_recipient, "telegram").message)
+        self.assertIsNone(responder_recipient.extra_payload["route"])
+        self.assertIsNone(responder_recipient.extra_payload["counterparty_profile_user_id"])
+        self.assertNotIn("مشتری بازار تهران", responder_recipient.webapp_message)
+        self.assertNotIn("مشتری بازار تهران", channel(responder_recipient, "telegram").message)
         self.assertNotIn("customer_0937", responder_recipient.webapp_message)
         self.assertNotIn("customer_0937", channel(responder_recipient, "telegram").message)
+
+    async def test_customer_counterparty_is_visible_to_own_group_owner(self):
+        owner = make_user(10, account_name="owner", telegram_id=9010)
+        customer = make_user(30, account_name="customer_0937", telegram_id=9030)
+        trade = make_trade(offer_user=customer, responder_user=owner)
+        relations = {
+            customer.id: make_relation(
+                customer_user_id=customer.id,
+                owner_user_id=owner.id,
+                tier=CustomerTier.TIER_1,
+                management_name="مشتری بازار تهران",
+            )
+        }
+
+        built = await self.build_audience(
+            trade,
+            audience_side_effect=[[owner.id], [customer.id]],
+            users=[owner, customer],
+            relations=relations,
+        )
+
+        owner_recipient = built.result.recipients[0]
+        self.assertIn("طرف معامله: مشتری بازار تهران", owner_recipient.webapp_message)
+        self.assertIn("طرف معامله:", channel(owner_recipient, "telegram").message)
+        self.assertEqual(owner_recipient.extra_payload["route"], "/users/30")
 
     async def test_tier2_customer_is_webapp_only_and_owner_counterparty_is_visible(self):
         owner = make_user(10, account_name="owner", telegram_id=9010)

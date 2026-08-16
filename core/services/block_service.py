@@ -27,22 +27,44 @@ NON_GROUP_CUSTOMER_BLOCK_MESSAGE = "برای مسدودسازی این مسیر�
 _RELATION_NOT_PROVIDED = object()
 
 
-async def _load_customer_display_name_map(db: AsyncSession, user_ids: List[int]) -> dict[int, str]:
+async def _partition_customer_display_scope(
+    db: AsyncSession,
+    user_ids: List[int],
+    *,
+    viewer_owner_user_id: int,
+) -> tuple[dict[int, str], set[int]]:
     normalized_ids = sorted({int(user_id) for user_id in user_ids if user_id})
     if not normalized_ids:
-        return {}
+        return {}, set()
     result = await db.execute(
-        select(CustomerRelation.customer_user_id, CustomerRelation.management_name).where(
+        select(
+            CustomerRelation.customer_user_id,
+            CustomerRelation.owner_user_id,
+            CustomerRelation.management_name,
+        ).where(
             CustomerRelation.customer_user_id.in_(normalized_ids),
             CustomerRelation.status == CustomerRelationStatus.ACTIVE,
             CustomerRelation.deleted_at.is_(None),
         )
     )
-    return {
-        int(customer_user_id): str(management_name).strip()
-        for customer_user_id, management_name in result.all()
-        if customer_user_id is not None and str(management_name or "").strip()
-    }
+    visible_names: dict[int, str] = {}
+    restricted_ids: set[int] = set()
+    for customer_user_id, owner_user_id, management_name in result.all():
+        if customer_user_id is None:
+            continue
+        normalized_customer_user_id = int(customer_user_id)
+        try:
+            normalized_owner_user_id = int(owner_user_id)
+        except (TypeError, ValueError):
+            restricted_ids.add(normalized_customer_user_id)
+            continue
+        if normalized_owner_user_id != int(viewer_owner_user_id):
+            restricted_ids.add(normalized_customer_user_id)
+            continue
+        normalized_name = str(management_name or "").strip()
+        if normalized_name:
+            visible_names[normalized_customer_user_id] = normalized_name
+    return visible_names, restricted_ids
 
 
 async def _is_user_customer_for_block(db: AsyncSession, user_id: int) -> bool:
@@ -333,10 +355,16 @@ async def get_blocked_users(db: AsyncSession, user_id: int) -> List[dict]:
     
     result = await db.execute(stmt)
     rows = result.all()
-    customer_names = await _load_customer_display_name_map(db, [user.id for _, user in rows])
+    customer_names, restricted_customer_ids = await _partition_customer_display_scope(
+        db,
+        [user.id for _, user in rows],
+        viewer_owner_user_id=user_id,
+    )
     
     blocked_users = []
     for block, user in rows:
+        if user.id in restricted_customer_ids:
+            continue
         blocked_users.append({
             "id": user.id,
             "account_name": customer_names.get(user.id) or user.account_name,
@@ -437,10 +465,16 @@ async def search_users_for_block(
     
     result = await db.execute(stmt)
     users = result.scalars().all()
-    customer_names = await _load_customer_display_name_map(db, [user.id for user in users])
+    customer_names, restricted_customer_ids = await _partition_customer_display_scope(
+        db,
+        [user.id for user in users],
+        viewer_owner_user_id=current_user_id,
+    )
     
     user_list = []
     for user in users:
+        if user.id in restricted_customer_ids:
+            continue
         # چک بلاک
         is_user_blocked = await is_blocked_by(db, current_user_id, user.id)
         

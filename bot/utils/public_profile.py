@@ -19,7 +19,7 @@ from core.services.customer_relation_service import (
 )
 from models.accountant_relation import AccountantRelation, AccountantRelationStatus
 from models.customer_relation import CustomerRelation
-from models.user import User, UserRole
+from models.user import User
 
 
 PUBLIC_PROFILE_USERNAME_UNAVAILABLE_CALLBACK = "public_profile_username_unavailable"
@@ -37,10 +37,6 @@ class BotPublicProfile:
     display_name: str
     accountants: tuple[BotPublicProfileAccountant, ...]
     is_self: bool = False
-
-
-def _is_super_admin(user: User | object | None) -> bool:
-    return getattr(user, "role", None) == UserRole.SUPER_ADMIN
 
 
 def _is_deleted(user: User | object | None) -> bool:
@@ -116,8 +112,6 @@ async def _viewer_can_access_target(
     original_target_user_id: int,
 ) -> bool:
     if viewer.id == target_user.id or viewer.id == original_target_user_id:
-        return True
-    if _is_super_admin(viewer):
         return True
 
     viewer_accountant_relation = await get_active_accountant_relation_for_accountant(db, viewer.id)

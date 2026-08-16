@@ -179,6 +179,12 @@ class ChatRouterRemainingPathTests(unittest.IsolatedAsyncioTestCase):
             'api.routers.chat.collect_message_identity_user_ids',
             return_value={5, 9},
         ) as collect_mock, patch(
+            'api.routers.chat.get_active_customer_relation_for_customer',
+            new=AsyncMock(return_value=None),
+        ), patch(
+            'api.routers.chat.get_active_accountant_relation_for_accountant',
+            new=AsyncMock(return_value=None),
+        ), patch(
             'api.routers.chat.apply_accountant_identity_to_message_payload',
             side_effect=lambda payload, _identity_map: {**payload, **{k: v for k, v in enriched_payload.items() if k not in payload or payload[k] != v}},
         ) as apply_mock, patch(
@@ -254,7 +260,9 @@ class ChatRouterRemainingPathTests(unittest.IsolatedAsyncioTestCase):
         member = SimpleNamespace(chat_id=44)
         reordered_member = SimpleNamespace(chat_id=44, pin_order=3)
 
-        with patch('api.routers.chat.set_direct_chat_pin_state', new=AsyncMock(return_value=member)) as pin_mock, patch(
+        with patch('api.routers.chat._ensure_customer_can_access_direct_target', new=AsyncMock()), patch(
+            'api.routers.chat.set_direct_chat_pin_state', new=AsyncMock(return_value=member)
+        ) as pin_mock, patch(
             'api.routers.chat.reorder_chat_member_pin_order',
             new=AsyncMock(return_value=reordered_member),
         ) as reorder_mock:
@@ -269,19 +277,22 @@ class ChatRouterRemainingPathTests(unittest.IsolatedAsyncioTestCase):
         reorder_mock.assert_awaited_once_with(db, user_id=5, chat_id=44, direction='up')
         self.assertEqual(reordered.pin_order, 3)
 
-        with self.assertRaises(HTTPException) as exc_info:
-            await get_direct_pinned_message(
-                user_id=9,
-                current_user=current_user,
-                db=FakeDB(get_values={}),
-            )
+        with patch('api.routers.chat._ensure_customer_can_access_direct_target', new=AsyncMock()):
+            with self.assertRaises(HTTPException) as exc_info:
+                await get_direct_pinned_message(
+                    user_id=9,
+                    current_user=current_user,
+                    db=FakeDB(get_values={}),
+                )
         self.assertEqual(exc_info.exception.status_code, 404)
         self.assertEqual(exc_info.exception.detail, 'User not found')
 
         target = SimpleNamespace(id=9)
         db = FakeDB(get_values={9: target})
         serialized_none = SimpleNamespace(kind='none')
-        with patch('api.routers.chat.get_existing_direct_chat', new=AsyncMock(return_value=None)) as chat_mock, patch(
+        with patch('api.routers.chat._ensure_customer_can_access_direct_target', new=AsyncMock()), patch(
+            'api.routers.chat.get_existing_direct_chat', new=AsyncMock(return_value=None)
+        ) as chat_mock, patch(
             'api.routers.chat.get_pinned_message_for_chat',
             new=AsyncMock(),
         ) as pinned_mock, patch(
@@ -292,13 +303,21 @@ class ChatRouterRemainingPathTests(unittest.IsolatedAsyncioTestCase):
 
         chat_mock.assert_awaited_once_with(db, 5, 9)
         pinned_mock.assert_not_awaited()
-        serialize_mock.assert_awaited_once_with(db=db, room_kind='direct', chat=None, message=None)
+        serialize_mock.assert_awaited_once_with(
+            db=db,
+            room_kind='direct',
+            chat=None,
+            message=None,
+            viewer_user_id=5,
+        )
         self.assertIs(result_none, serialized_none)
 
         chat = SimpleNamespace(id=55, type=ChatType.DIRECT)
         pinned_message = SimpleNamespace(id=88)
         serialized = SimpleNamespace(kind='chat')
-        with patch('api.routers.chat.get_existing_direct_chat', new=AsyncMock(return_value=chat)), patch(
+        with patch('api.routers.chat._ensure_customer_can_access_direct_target', new=AsyncMock()), patch(
+            'api.routers.chat.get_existing_direct_chat', new=AsyncMock(return_value=chat)
+        ), patch(
             'api.routers.chat.get_pinned_message_for_chat',
             new=AsyncMock(return_value=pinned_message),
         ) as pinned_mock, patch(
@@ -308,7 +327,13 @@ class ChatRouterRemainingPathTests(unittest.IsolatedAsyncioTestCase):
             result = await get_direct_pinned_message(user_id=9, current_user=current_user, db=db)
 
         pinned_mock.assert_awaited_once_with(db, chat)
-        serialize_mock.assert_awaited_once_with(db=db, room_kind='direct', chat=chat, message=pinned_message)
+        serialize_mock.assert_awaited_once_with(
+            db=db,
+            room_kind='direct',
+            chat=chat,
+            message=pinned_message,
+            viewer_user_id=5,
+        )
         self.assertIs(result, serialized)
 
     async def test_room_pin_and_pinned_message_routes_cover_guards_and_success_branches(self):
@@ -694,6 +719,9 @@ class ChatRouterRemainingPathTests(unittest.IsolatedAsyncioTestCase):
         with patch(
             'api.routers.chat.get_active_customer_relation_for_customer',
             new=AsyncMock(return_value=None),
+        ), patch(
+            'api.routers.chat._filter_customer_scoped_direct_target_ids',
+            new=AsyncMock(return_value={9}),
         ), patch('api.routers.chat.build_direct_poll_summary_stmt', return_value=object()), patch(
             'api.routers.chat.list_room_poll_summaries',
             new=AsyncMock(return_value=[SimpleNamespace(other_user_id=-10, other_user_name='Desk', unread_count=1, is_muted=False, other_user_is_deleted=False, unread_mention_count=0)]),

@@ -137,14 +137,14 @@ EXPECTED_RUNTIME_INVENTORY_SHA256 = (
     "5907c3df342b8a2578b214c47dca1f5220c1d49d68d15fc850899f6ae63931ab"
 )
 MAIN_UIUX_INTEGRATION_RUNTIME_INVENTORY_SHA256 = (
-    "d0dfa2fcf101cd08e6d0eff2c61eb9e9c5a9da1738a6e9e7bc7f2170337dfe04"
+    "580f895e63c07a16cc2f9c7764aa1870cdabe51d2d9cdc1f79293b3d22d58649"
 )
 REVIEWED_RUNTIME_INVENTORY_SHA256 = frozenset(
     {
         EXPECTED_RUNTIME_INVENTORY_SHA256,
-        # Exact main/UIUX integration overlay: classifications and counts remain
-        # unchanged; nine reviewed identities move only because the merged auth,
-        # trade, user, and registration sources add non-delivery code above them.
+        # Exact main/customer-visibility overlay: classifications and counts remain
+        # unchanged; reviewed identities move only because viewer-scoped customer
+        # display resolution adds non-delivery code above existing callsites.
         MAIN_UIUX_INTEGRATION_RUNTIME_INVENTORY_SHA256,
     }
 )

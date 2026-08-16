@@ -58,12 +58,27 @@ class BotTradeHistoryShowTests(unittest.IsolatedAsyncioTestCase):
         callback.answer.assert_not_awaited()
 
         callback = make_callback()
-        with patch("bot.handlers.trade_history.get_trade_history", new=AsyncMock(return_value=(SimpleNamespace(account_name="t"), [1]))), patch(
+        with patch("bot.handlers.trade_history._ensure_history_profile_access", new=AsyncMock(return_value=True)), patch(
+            "bot.handlers.trade_history.get_trade_history", new=AsyncMock(return_value=(SimpleNamespace(account_name="t"), [1]))
+        ), patch(
             "bot.handlers.trade_history.format_trade_history", return_value="TEXT"
         ), patch("bot.handlers.trade_history.get_trade_history_keyboard", return_value="KB"):
             await change_history_months(callback, SimpleNamespace(months=1, target_user_id=2), FakeState(), user=SimpleNamespace(id=2))
         callback.message.edit_text.assert_awaited_once_with("TEXT", reply_markup="KB")
         callback.answer.assert_awaited_once()
+
+        callback = make_callback()
+        get_history = AsyncMock()
+        with patch("bot.handlers.trade_history._ensure_history_profile_access", new=AsyncMock(return_value=False)), patch(
+            "bot.handlers.trade_history.get_trade_history", new=get_history
+        ):
+            await change_history_months(
+                callback,
+                SimpleNamespace(months=1, target_user_id=55),
+                FakeState(),
+                user=SimpleNamespace(id=2),
+            )
+        get_history.assert_not_awaited()
 
     async def test_show_trade_history_requires_user_and_handles_missing_target(self):
         callback = make_callback()
@@ -120,7 +135,9 @@ class BotTradeHistoryShowTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_change_history_months_ignores_bad_request_and_mutual_history_covers_self_missing_and_no_user(self):
         callback = make_callback(side_effect=FakeBadRequest())
-        with patch("bot.handlers.trade_history.get_trade_history", new=AsyncMock(return_value=(SimpleNamespace(account_name="t"), [1]))), patch(
+        with patch("bot.handlers.trade_history._ensure_history_profile_access", new=AsyncMock(return_value=True)), patch(
+            "bot.handlers.trade_history.get_trade_history", new=AsyncMock(return_value=(SimpleNamespace(account_name="t"), [1]))
+        ), patch(
             "bot.handlers.trade_history.format_trade_history", return_value="TEXT"
         ), patch("bot.handlers.trade_history.get_trade_history_keyboard", return_value="KB"), patch(
             "bot.handlers.trade_history.TelegramBadRequest", FakeBadRequest

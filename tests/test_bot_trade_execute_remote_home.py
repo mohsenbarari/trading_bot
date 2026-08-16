@@ -161,7 +161,11 @@ class BotTradeExecuteRemoteHomeTests(unittest.IsolatedAsyncioTestCase):
                 fallback_chat_id=300,
             )
 
-        wait_mock.assert_awaited_once_with("telegram_callback:test", grace_seconds=8)
+        wait_mock.assert_awaited_once_with(
+            "telegram_callback:test",
+            viewer_user_id=user.id,
+            grace_seconds=8,
+        )
         bot.send_message.assert_not_awaited()
 
     async def test_handle_channel_trade_remote_home_handles_pending_suggestion_success_and_error(self):

@@ -267,7 +267,7 @@ class BlockServiceTests(unittest.IsolatedAsyncioTestCase):
         user = SimpleNamespace(id=41, account_name="ali", mobile_number="0912", full_name="Ali")
         db = SimpleNamespace(execute=AsyncMock(side_effect=[
             rows_result([(block, user)]),
-            rows_result([(41, "مشتری علی")]),
+            rows_result([(41, 40, "مشتری علی")]),
         ]))
 
         result = await block_service.get_blocked_users(db, 40)
@@ -279,6 +279,34 @@ class BlockServiceTests(unittest.IsolatedAsyncioTestCase):
             "full_name": "Ali",
             "blocked_at": "2026-05-07T20:00:00",
         }])
+
+    async def test_get_blocked_users_hides_customer_moved_to_another_owner(self):
+        own_block = SimpleNamespace(created_at="2026-05-07T20:00:00")
+        foreign_block = SimpleNamespace(created_at="2026-05-07T21:00:00")
+        own_customer = SimpleNamespace(
+            id=41,
+            account_name="customer-41",
+            mobile_number="0912",
+            full_name="Own Customer",
+        )
+        foreign_customer = SimpleNamespace(
+            id=42,
+            account_name="customer-42",
+            mobile_number="0935",
+            full_name="Foreign Customer",
+        )
+        db = SimpleNamespace(execute=AsyncMock(side_effect=[
+            rows_result([(own_block, own_customer), (foreign_block, foreign_customer)]),
+            rows_result([
+                (41, 40, "مشتری خودی"),
+                (42, 99, "مشتری منتقل‌شده"),
+            ]),
+        ]))
+
+        result = await block_service.get_blocked_users(db, 40)
+
+        self.assertEqual([row["id"] for row in result], [41])
+        self.assertEqual(result[0]["account_name"], "مشتری خودی")
 
     async def test_get_block_status_handles_missing_user_and_remaining_capacity(self):
         missing_db = SimpleNamespace(get=AsyncMock(return_value=None), scalar=AsyncMock())
@@ -345,7 +373,7 @@ class BlockServiceTests(unittest.IsolatedAsyncioTestCase):
         ]
         db = SimpleNamespace(execute=AsyncMock(side_effect=[
             scalars_result(users),
-            rows_result([(81, "مشتری علی")]),
+            rows_result([(81, 80, "مشتری علی")]),
         ]))
 
         with patch("core.services.block_service.is_blocked_by", AsyncMock(side_effect=[True, False])) as is_blocked_by:

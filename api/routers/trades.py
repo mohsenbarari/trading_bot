@@ -642,10 +642,44 @@ def _viewer_can_access_customer_history_relation(
     if relation is None:
         return False
     relation_owner_user_id = _coerce_trade_user_id(getattr(relation, "owner_user_id", None))
+    relation_customer_user_id = _coerce_trade_user_id(getattr(relation, "customer_user_id", None))
     viewer_owner_user_id = _coerce_trade_user_id(getattr(getattr(context, "owner_user", None), "id", None))
+    viewer_actor_user_id = _coerce_trade_user_id(getattr(getattr(context, "actor_user", None), "id", None))
     if relation_owner_user_id is None:
         return False
-    return relation_owner_user_id == viewer_owner_user_id or _is_super_admin_trade_history_viewer(context)
+    return (
+        relation_owner_user_id == viewer_owner_user_id
+        or (
+            relation_customer_user_id is not None
+            and relation_customer_user_id == viewer_actor_user_id
+        )
+    )
+
+
+def _partition_trade_customer_relations_for_viewer(
+    customer_relation_map: Mapping[int, CustomerRelation | object] | None,
+    *,
+    context: EffectiveOwnerActor,
+) -> tuple[dict[int, CustomerRelation | object], set[int]]:
+    """Split customer relations into viewer-visible and identity-redacted sets."""
+
+    visible: dict[int, CustomerRelation | object] = {}
+    restricted_customer_user_ids: set[int] = set()
+    for raw_customer_user_id, relation in (customer_relation_map or {}).items():
+        customer_user_id = _coerce_trade_user_id(raw_customer_user_id)
+        if customer_user_id is None:
+            continue
+        viewer_actor_user_id = _coerce_trade_user_id(
+            getattr(getattr(context, "actor_user", None), "id", None)
+        )
+        if (
+            customer_user_id == viewer_actor_user_id
+            or _viewer_can_access_customer_history_relation(relation=relation, context=context)
+        ):
+            visible[customer_user_id] = relation
+        else:
+            restricted_customer_user_ids.add(customer_user_id)
+    return visible, restricted_customer_user_ids
 
 
 async def _resolve_viewable_customer_history_relation(
@@ -889,11 +923,15 @@ async def _build_trades_with_user_query(
     perspective_trade_type: str | None = None,
 ):
     owner_user = context.owner_user
-    target_customer_relation = await _resolve_viewable_customer_history_relation(
-        db,
-        customer_user_id=other_user_id,
+    target_history_relation = await _get_customer_history_relation_for_customer(db, other_user_id)
+    if target_history_relation is not None and not _viewer_can_access_customer_history_relation(
+        relation=target_history_relation,
         context=context,
-    )
+    ):
+        # A caller who knows or guesses a customer id must not be able to use
+        # trade history as an alternate customer directory.
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    target_customer_relation = target_history_relation
 
     query = _build_trade_history_select()
     if target_customer_relation is not None or _is_super_admin_trade_history_viewer(context):
@@ -903,12 +941,11 @@ async def _build_trades_with_user_query(
                 Trade.responder_user_id == other_user_id,
             )
         )
-        if target_customer_relation is not None and not _is_super_admin_trade_history_viewer(context):
-            relation_start_at, relation_end_at = _customer_relation_history_bounds(target_customer_relation)
-            if relation_start_at is not None:
-                query = query.where(Trade.created_at >= relation_start_at)
-            if relation_end_at is not None:
-                query = query.where(Trade.created_at <= relation_end_at)
+        relation_start_at, relation_end_at = _customer_relation_history_bounds(target_customer_relation)
+        if relation_start_at is not None:
+            query = query.where(Trade.created_at >= relation_start_at)
+        if relation_end_at is not None:
+            query = query.where(Trade.created_at <= relation_end_at)
     else:
         query = query.where(
             or_(
@@ -1034,7 +1071,7 @@ async def _serialize_trade_history_rows(
     if not rows:
         return []
     identity_map = await _load_trade_identity_map(db, rows)
-    customer_relation_map = await _load_trade_customer_relation_map_for_user_ids(
+    loaded_customer_relation_map = await _load_trade_customer_relation_map_for_user_ids(
         db,
         [
             raw_user_id
@@ -1047,16 +1084,45 @@ async def _serialize_trade_history_rows(
         ],
         include_inactive_historical=True,
     )
+    customer_relation_map, restricted_customer_user_ids = _partition_trade_customer_relations_for_viewer(
+        loaded_customer_relation_map,
+        context=context,
+    )
     return [
         trade_to_response(
             trade,
             identity_map=identity_map,
             customer_relation_map=customer_relation_map,
+            restricted_customer_user_ids=restricted_customer_user_ids,
             viewer_context=context,
             history_target_user_id=history_target_user_id,
         )
         for trade in rows
     ]
+
+
+async def _build_viewer_scoped_trade_history_export_rows(
+    db: AsyncSession,
+    trades: list[Trade] | tuple[Trade, ...],
+    *,
+    context: EffectiveOwnerActor,
+    history_target_user_id: int,
+    perspective_user_id: int,
+):
+    serialized_rows = await _serialize_trade_history_rows(
+        db,
+        trades,
+        context=context,
+        history_target_user_id=history_target_user_id,
+    )
+    return build_trade_history_export_rows(
+        trades,
+        perspective_user_id,
+        counterparty_name_by_trade_id={
+            row.id: row.counterparty_name
+            for row in serialized_rows
+        },
+    )
 
 
 def _build_trade_history_export_subject_name(*, current_user: object, target_user: object | None) -> str:
@@ -1207,8 +1273,19 @@ def _build_trade_participant_payload(
     user_id: object,
     identity_map: Mapping[int, AccountantChatIdentity] | None,
     customer_relation_map: Mapping[int, CustomerRelation | object] | None = None,
+    restricted_customer_user_ids: set[int] | frozenset[int] | None = None,
 ) -> dict[str, object | None]:
     normalized_user_id = _coerce_trade_user_id(user_id)
+    if normalized_user_id is not None and normalized_user_id in (restricted_customer_user_ids or set()):
+        return {
+            f"{field_prefix}_id": None,
+            f"{field_prefix}_name": None,
+            f"{field_prefix}_profile_user_id": None,
+            f"{field_prefix}_profile_account_name": None,
+            f"{field_prefix}_resolved_from_accountant_id": None,
+            f"{field_prefix}_highlight_accountant_user_id": None,
+            f"{field_prefix}_highlight_accountant_relation_display_name": None,
+        }
     fallback_name = getattr(user, "account_name", None)
     customer_display_name = customer_management_name_for_user_id(normalized_user_id, customer_relation_map)
 
@@ -1294,6 +1371,12 @@ def _build_trade_created_event_payload(
     recipient_specific: bool = False,
     settlement_type: str = SettlementType.CASH.value,
 ) -> dict[str, object | None]:
+    restricted_customer_user_ids: set[int] = set()
+    if viewer_context is not None:
+        customer_relation_map, restricted_customer_user_ids = _partition_trade_customer_relations_for_viewer(
+            customer_relation_map,
+            context=viewer_context,
+        )
     trade_like = SimpleNamespace(
         id=trade_id,
         trade_number=trade_number,
@@ -1318,6 +1401,7 @@ def _build_trade_created_event_payload(
         user_id=offer_user_id,
         identity_map=identity_map,
         customer_relation_map=customer_relation_map,
+        restricted_customer_user_ids=restricted_customer_user_ids,
     )
     responder_user_payload = _build_trade_participant_payload(
         "responder_user",
@@ -1325,6 +1409,7 @@ def _build_trade_created_event_payload(
         user_id=responder_user_id,
         identity_map=identity_map,
         customer_relation_map=customer_relation_map,
+        restricted_customer_user_ids=restricted_customer_user_ids,
     )
     payload: dict[str, object | None] = {
         "id": trade_id,
@@ -1528,11 +1613,24 @@ def _should_hide_counterparty_for_recipient(
     audience_user_id: int | None,
     counterparty_user_id: int | None,
     customer_relation_map: Mapping[int, CustomerRelation | object] | None,
+    principal_user_id: int | None = None,
 ) -> bool:
+    normalized_counterparty_user_id = _coerce_trade_user_id(counterparty_user_id)
+    counterparty_relation = (
+        customer_relation_map.get(normalized_counterparty_user_id)
+        if customer_relation_map and normalized_counterparty_user_id is not None
+        else None
+    )
+    if counterparty_relation is not None:
+        counterparty_owner_user_id = _coerce_trade_user_id(
+            getattr(counterparty_relation, "owner_user_id", None)
+        )
+        if counterparty_owner_user_id != _coerce_trade_user_id(principal_user_id):
+            return True
+
     owner_user_id = _recipient_customer_owner_user_id(audience_user_id, customer_relation_map)
     if owner_user_id is None:
         return False
-    normalized_counterparty_user_id = _coerce_trade_user_id(counterparty_user_id)
     if normalized_counterparty_user_id is None:
         return True
     return normalized_counterparty_user_id != owner_user_id
@@ -1555,6 +1653,7 @@ def _build_trade_notification_message(
     counterparty_name: str | None,
     audience_user_id: int | None,
     customer_relation_map: Mapping[int, CustomerRelation | object] | None,
+    principal_user_id: int | None = None,
     counterparty_user_id: int | None = None,
     trade_path_summary: str | None = None,
     offer_notes: str | None = None,
@@ -1569,6 +1668,7 @@ def _build_trade_notification_message(
     ]
     if counterparty_name and not _should_hide_counterparty_for_recipient(
         audience_user_id=audience_user_id,
+        principal_user_id=principal_user_id,
         counterparty_user_id=counterparty_user_id,
         customer_relation_map=customer_relation_map,
     ):
@@ -1777,6 +1877,7 @@ def trade_to_response(
     *,
     identity_map: Mapping[int, AccountantChatIdentity] | None = None,
     customer_relation_map: Mapping[int, CustomerRelation | object] | None = None,
+    restricted_customer_user_ids: set[int] | frozenset[int] | None = None,
     viewer_context: EffectiveOwnerActor | None = None,
     history_target_user_id: int | None = None,
     offer_notes: str | None = None,
@@ -1788,6 +1889,7 @@ def trade_to_response(
         user_id=trade.offer_user_id,
         identity_map=identity_map,
         customer_relation_map=customer_relation_map,
+        restricted_customer_user_ids=restricted_customer_user_ids,
     )
     responder_user_payload = _build_trade_participant_payload(
         "responder_user",
@@ -1795,6 +1897,7 @@ def trade_to_response(
         user_id=trade.responder_user_id,
         identity_map=identity_map,
         customer_relation_map=customer_relation_map,
+        restricted_customer_user_ids=restricted_customer_user_ids,
     )
     trade_path_payload = _build_trade_path_payload(
         offer_user_id=trade.offer_user_id,
@@ -2697,6 +2800,18 @@ async def _try_return_completed_idempotent_replay(
         db,
         [existing_trade_obj.offer_user_id, existing_trade_obj.responder_user_id],
     )
+    replay_context = EffectiveOwnerActor(
+        owner_user=owner_user,
+        actor_user=actor_user,
+        relation=None,
+        is_accountant_context=getattr(owner_user, "id", None) != getattr(actor_user, "id", None),
+    )
+    existing_customer_relation_map, restricted_customer_user_ids = (
+        _partition_trade_customer_relations_for_viewer(
+            existing_customer_relation_map,
+            context=replay_context,
+        )
+    )
     log_trading_event(
         logger,
         "trade_idempotent_replay",
@@ -2716,6 +2831,9 @@ async def _try_return_completed_idempotent_replay(
     existing_response_kwargs = {
         "identity_map": existing_identity_map,
         "customer_relation_map": existing_customer_relation_map,
+        "restricted_customer_user_ids": restricted_customer_user_ids,
+        "viewer_context": replay_context,
+        "history_target_user_id": getattr(owner_user, "id", None),
     }
     existing_offer_notes = getattr(offer, "notes", None) if offer is not None else None
     if existing_offer_notes is not None:
@@ -3857,6 +3975,12 @@ async def _execute_trade_authoritatively(
                 db,
                 [existing_trade_obj.offer_user_id, existing_trade_obj.responder_user_id],
             )
+            existing_customer_relation_map, restricted_customer_user_ids = (
+                _partition_trade_customer_relations_for_viewer(
+                    existing_customer_relation_map,
+                    context=context,
+                )
+            )
             log_trading_event(
                 logger,
                 "trade_idempotent_replay",
@@ -3888,6 +4012,9 @@ async def _execute_trade_authoritatively(
             existing_response_kwargs = {
                 "identity_map": existing_identity_map,
                 "customer_relation_map": existing_customer_relation_map,
+                "restricted_customer_user_ids": restricted_customer_user_ids,
+                "viewer_context": context,
+                "history_target_user_id": owner_user.id,
             }
             existing_offer_notes = getattr(offer, "notes", None)
             if existing_offer_notes is not None:
@@ -4118,6 +4245,7 @@ async def _execute_trade_authoritatively(
     async def _create_trade_notifications_for_leg(
         *,
         audience_user_ids: list[int],
+        principal_user_id: int,
         trade_emoji: str,
         trade_type_label: str,
         trade_price: int,
@@ -4128,6 +4256,22 @@ async def _execute_trade_authoritatively(
         offer_notes: str | None,
         extra_payload: dict[str, object | None],
     ) -> None:
+        hide_counterparty = _should_hide_counterparty_for_recipient(
+            audience_user_id=principal_user_id,
+            principal_user_id=principal_user_id,
+            counterparty_user_id=counterparty_user_id,
+            customer_relation_map=participant_customer_relation_map,
+        )
+        recipient_extra_payload = dict(extra_payload)
+        if hide_counterparty:
+            for field_name in (
+                "route",
+                "counterparty_profile_user_id",
+                "counterparty_profile_account_name",
+                "highlight_accountant_user_id",
+                "highlight_accountant_relation_display_name",
+            ):
+                recipient_extra_payload[field_name] = None
         for audience_user_id in audience_user_ids:
             message = _build_trade_notification_message(
                 trade_emoji=trade_emoji,
@@ -4140,6 +4284,7 @@ async def _execute_trade_authoritatively(
                 counterparty_name=counterparty_name,
                 counterparty_user_id=counterparty_user_id,
                 audience_user_id=audience_user_id,
+                principal_user_id=principal_user_id,
                 customer_relation_map=participant_customer_relation_map,
                 trade_path_summary=trade_path_summary,
                 offer_notes=offer_notes,
@@ -4152,7 +4297,7 @@ async def _execute_trade_authoritatively(
                     message,
                     level=NotificationLevel.SUCCESS,
                     category=NotificationCategory.TRADE,
-                    extra_payload=extra_payload,
+                    extra_payload=recipient_extra_payload,
                 )
             else:
                 await create_user_notification(
@@ -4161,7 +4306,7 @@ async def _execute_trade_authoritatively(
                     message,
                     level=NotificationLevel.SUCCESS,
                     category=NotificationCategory.TRADE,
-                    extra_payload=extra_payload,
+                    extra_payload=recipient_extra_payload,
                 )
 
     chain_leg_contexts: list[dict[str, object]] = []
@@ -4238,6 +4383,7 @@ async def _execute_trade_authoritatively(
                 leg_context["offer_audience"] = leg_offer_audience
                 await _create_trade_notifications_for_leg(
                     audience_user_ids=leg_responder_audience,
+                    principal_user_id=int(getattr(leg_trade_obj, "responder_user_id")),
                     trade_emoji=respond_emoji,
                     trade_type_label=respond_type_fa,
                     trade_price=getattr(leg_trade_obj, "price", offer.price),
@@ -4255,6 +4401,7 @@ async def _execute_trade_authoritatively(
                 )
                 await _create_trade_notifications_for_leg(
                     audience_user_ids=leg_offer_audience,
+                    principal_user_id=int(getattr(leg_trade_obj, "offer_user_id")),
                     trade_emoji=offer_emoji,
                     trade_type_label=offer_type_fa,
                     trade_price=getattr(leg_trade_obj, "price", offer.price),
@@ -4310,6 +4457,7 @@ async def _execute_trade_authoritatively(
 
             await _create_trade_notifications_for_leg(
                 audience_user_ids=responder_audience,
+                principal_user_id=int(owner_user.id),
                 trade_emoji=respond_emoji,
                 trade_type_label=respond_type_fa,
                 trade_price=executed_trade_price,
@@ -4328,6 +4476,7 @@ async def _execute_trade_authoritatively(
             )
             await _create_trade_notifications_for_leg(
                 audience_user_ids=offer_owner_audience,
+                principal_user_id=int(offer.user_id),
                 trade_emoji=offer_emoji,
                 trade_type_label=offer_type_fa,
                 trade_price=executed_trade_price,
@@ -4441,9 +4590,16 @@ async def _execute_trade_authoritatively(
         )
     mark_trade_phase("published_realtime")
     
+    response_customer_relation_map, response_restricted_customer_user_ids = (
+        _partition_trade_customer_relations_for_viewer(
+            participant_customer_relation_map,
+            context=context,
+        )
+    )
     response_kwargs = {
         "identity_map": participant_identity_map,
-        "customer_relation_map": participant_customer_relation_map,
+        "customer_relation_map": response_customer_relation_map,
+        "restricted_customer_user_ids": response_restricted_customer_user_ids,
         "viewer_context": context,
         "history_target_user_id": owner_user.id,
     }
@@ -5125,7 +5281,13 @@ async def export_my_trades(
 
     subject_name = _build_trade_history_export_subject_name(current_user=owner_user, target_user=None)
     date_range_label = build_trade_history_date_range_label(from_date, to_date)
-    export_rows = build_trade_history_export_rows(trades, owner_user.id)
+    export_rows = await _build_viewer_scoped_trade_history_export_rows(
+        db,
+        trades,
+        context=context,
+        history_target_user_id=owner_user.id,
+        perspective_user_id=owner_user.id,
+    )
 
     if format == "excel":
         output_path = generate_trade_history_excel_file(
@@ -5179,15 +5341,20 @@ async def get_trade(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="شما به این معامله دسترسی ندارید.")
 
     identity_map = await _load_trade_identity_map(db, [trade])
-    customer_relation_map = await _load_trade_customer_relation_map_for_user_ids(
+    loaded_customer_relation_map = await _load_trade_customer_relation_map_for_user_ids(
         db,
         [trade.offer_user_id, trade.responder_user_id, getattr(trade, "actor_user_id", None)],
         include_inactive_historical=True,
+    )
+    customer_relation_map, restricted_customer_user_ids = _partition_trade_customer_relations_for_viewer(
+        loaded_customer_relation_map,
+        context=context,
     )
     return trade_to_response(
         trade,
         identity_map=identity_map,
         customer_relation_map=customer_relation_map,
+        restricted_customer_user_ids=restricted_customer_user_ids,
         viewer_context=context,
         history_target_user_id=owner_user.id,
     )
@@ -5362,9 +5529,17 @@ async def export_trades_with_user(
     target_user = await db.get(User, other_user_id)
     subject_name = _build_trade_history_export_subject_name(current_user=owner_user, target_user=target_user)
     date_range_label = build_trade_history_date_range_label(from_date, to_date)
-    export_rows = build_trade_history_export_rows(
+    perspective_user_id = (
+        other_user_id
+        if target_customer_relation is not None or _is_super_admin_trade_history_viewer(context)
+        else owner_user.id
+    )
+    export_rows = await _build_viewer_scoped_trade_history_export_rows(
+        db,
         trades,
-        other_user_id if (target_customer_relation is not None or _is_super_admin_trade_history_viewer(context)) else owner_user.id,
+        context=context,
+        history_target_user_id=perspective_user_id,
+        perspective_user_id=perspective_user_id,
     )
 
     if format == "excel":

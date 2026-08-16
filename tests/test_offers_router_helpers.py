@@ -289,8 +289,8 @@ class OffersRouterHelperTests(unittest.IsolatedAsyncioTestCase):
             offer_owner_relation=owner_relation,
             include_owner_identity=True,
         )
-        self.assertEqual(admin_like_view.user_id, 21)
-        self.assertEqual(admin_like_view.user_account_name, "مشتری ویژه")
+        self.assertIsNone(admin_like_view.user_id)
+        self.assertEqual(admin_like_view.user_account_name, "")
         self.assertEqual(admin_like_view.viewer_effective_price, 50000)
         self.assertFalse(admin_like_view.customer_badge_visible)
         self.assertIsNone(admin_like_view.customer_management_name)

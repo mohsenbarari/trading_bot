@@ -144,7 +144,7 @@ class BotPublicProfileTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(profile)
         self.assertEqual(profile.display_name, "مشتری مجاز")
 
-    async def test_superadmin_can_open_customer_profile(self):
+    async def test_superadmin_cannot_open_foreign_customer_public_profile(self):
         target = SimpleNamespace(id=5, is_deleted=False, account_name="customer_public")
         viewer = SimpleNamespace(id=99, is_deleted=False, role=UserRole.SUPER_ADMIN)
         target_relation = SimpleNamespace(owner_user_id=10, management_name="مشتری")
@@ -161,8 +161,7 @@ class BotPublicProfileTests(unittest.IsolatedAsyncioTestCase):
         ):
             profile = await load_bot_public_profile(FakeDB(), viewer=viewer, target_user_id=5)
 
-        self.assertIsNotNone(profile)
-        self.assertEqual(profile.display_name, "مشتری")
+        self.assertIsNone(profile)
 
     async def test_accountant_profile_target_redirects_to_owner_profile(self):
         accountant_target = SimpleNamespace(id=20, is_deleted=False, account_name="accountant_public")

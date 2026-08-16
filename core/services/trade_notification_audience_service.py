@@ -285,13 +285,26 @@ def _recipient_customer_owner_user_id(
 def _should_hide_counterparty_for_recipient(
     *,
     audience_user_id: int | None,
+    principal_user_id: int | None,
     counterparty_user_id: int | None,
     customer_relation_map: Mapping[int, CustomerRelation | object] | None,
 ) -> bool:
+    normalized_counterparty_user_id = _coerce_user_id(counterparty_user_id)
+    counterparty_relation = (
+        customer_relation_map.get(normalized_counterparty_user_id)
+        if customer_relation_map and normalized_counterparty_user_id is not None
+        else None
+    )
+    if counterparty_relation is not None:
+        counterparty_owner_user_id = _coerce_user_id(
+            getattr(counterparty_relation, "owner_user_id", None)
+        )
+        if counterparty_owner_user_id != _coerce_user_id(principal_user_id):
+            return True
+
     owner_user_id = _recipient_customer_owner_user_id(audience_user_id, customer_relation_map)
     if owner_user_id is None:
         return False
-    normalized_counterparty_user_id = _coerce_user_id(counterparty_user_id)
     if normalized_counterparty_user_id is None:
         return True
     return normalized_counterparty_user_id != owner_user_id
@@ -328,6 +341,7 @@ def _build_trade_notification_message(
     trade_datetime: str,
     counterparty_name: str | None,
     audience_user_id: int | None,
+    principal_user_id: int | None,
     customer_relation_map: Mapping[int, CustomerRelation | object] | None,
     counterparty_user_id: int | None = None,
     trade_path_summary: str | None = None,
@@ -343,6 +357,7 @@ def _build_trade_notification_message(
     ]
     if counterparty_name and not _should_hide_counterparty_for_recipient(
         audience_user_id=audience_user_id,
+        principal_user_id=principal_user_id,
         counterparty_user_id=counterparty_user_id,
         customer_relation_map=customer_relation_map,
     ):
@@ -665,6 +680,12 @@ async def build_trade_completion_notification_audience(
                 continue
 
             recipient_user = user_map.get(audience_user_id)
+            hide_counterparty = _should_hide_counterparty_for_recipient(
+                audience_user_id=audience_user_id,
+                principal_user_id=principal_user_id,
+                counterparty_user_id=_coerce_user_id(side_spec["counterparty_user_id"]),
+                customer_relation_map=customer_relation_map,
+            )
             webapp_message = _build_trade_notification_message(
                 trade_emoji=str(side_spec["trade_emoji"]),
                 trade_type_label=str(side_spec["trade_label"]),
@@ -676,6 +697,7 @@ async def build_trade_completion_notification_audience(
                 counterparty_name=str(side_spec["counterparty_name"]),
                 counterparty_user_id=_coerce_user_id(side_spec["counterparty_user_id"]),
                 audience_user_id=audience_user_id,
+                principal_user_id=principal_user_id,
                 customer_relation_map=customer_relation_map,
                 trade_path_summary=trade_path_payload.get("trade_path_summary"),
                 offer_notes=_offer_notes(trade),
@@ -694,28 +716,21 @@ async def build_trade_completion_notification_audience(
                 recipient_role=recipient_role,
             )
             if telegram_requirement.required:
-                telegram_message = str(side_spec["telegram_message"])
-                if _recipient_is_customer(audience_user_id, customer_relation_map):
-                    hide_counterparty = _should_hide_counterparty_for_recipient(
-                        audience_user_id=audience_user_id,
-                        counterparty_user_id=_coerce_user_id(side_spec["counterparty_user_id"]),
-                        customer_relation_map=customer_relation_map,
-                    )
-                    telegram_message = _build_trade_telegram_message(
-                        trade_emoji=str(side_spec["trade_emoji"]),
-                        trade_type_label=str(side_spec["trade_label"]),
-                        trade_price=trade_price,
-                        trade_quantity=trade_quantity,
-                        commodity_name=commodity_name,
-                        trade_number=int(trade_number or 0),
-                        trade_datetime=trade_datetime,
-                        counterparty_name=str(side_spec["counterparty_name"]),
-                        counterparty_profile_user_id=_coerce_user_id(side_spec.get("counterparty_profile_user_id")),
-                        hide_counterparty=hide_counterparty,
-                        trade_path_summary=trade_path_payload.get("trade_path_summary"),
-                        offer_notes=_offer_notes(trade),
-                        settlement_type=getattr(trade, "settlement_type", SettlementType.CASH),
-                    )
+                telegram_message = _build_trade_telegram_message(
+                    trade_emoji=str(side_spec["trade_emoji"]),
+                    trade_type_label=str(side_spec["trade_label"]),
+                    trade_price=trade_price,
+                    trade_quantity=trade_quantity,
+                    commodity_name=commodity_name,
+                    trade_number=int(trade_number or 0),
+                    trade_datetime=trade_datetime,
+                    counterparty_name=str(side_spec["counterparty_name"]),
+                    counterparty_profile_user_id=_coerce_user_id(side_spec.get("counterparty_profile_user_id")),
+                    hide_counterparty=hide_counterparty,
+                    trade_path_summary=trade_path_payload.get("trade_path_summary"),
+                    offer_notes=_offer_notes(trade),
+                    settlement_type=getattr(trade, "settlement_type", SettlementType.CASH),
+                )
                 telegram_requirement = TradeNotificationChannelRequirement(
                     channel=telegram_requirement.channel,
                     destination_server=telegram_requirement.destination_server,
@@ -745,7 +760,7 @@ async def build_trade_completion_notification_audience(
                     webapp_message=webapp_message,
                     extra_payload=_build_trade_notification_extra_payload(
                         str(side_spec["counterparty_payload_prefix"]),
-                        side_spec["counterparty_payload"],
+                        {} if hide_counterparty else side_spec["counterparty_payload"],
                         trade=trade,
                         recipient_role=recipient_role,
                         recipient_user_id=audience_user_id,

@@ -16,7 +16,7 @@ from models.offer_request import OfferRequest, OfferRequestSourceSurface, OfferR
 from models.trade import Trade
 from core.config import settings
 from core.db import AsyncSessionLocal
-from bot.utils.customer_display import attach_customer_management_names, user_display_name
+from bot.utils.customer_display import resolve_customer_display_name_for_viewer
 from bot.utils.redis_helpers import check_double_click
 from core.utils import check_user_limits, to_jalali_str, utc_now
 from core.enums import UserRole
@@ -216,7 +216,11 @@ def _safe_enum_value(value: object) -> object:
     return getattr(value, "value", value)
 
 
-def _remote_trade_offer_snapshot(offer: Offer | object) -> dict[str, object]:
+def _remote_trade_offer_snapshot(
+    offer: Offer | object,
+    *,
+    counterparty_name: str | None,
+) -> dict[str, object]:
     """Capture offer fields while the ORM object is still attached and loaded."""
     commodity = getattr(offer, "commodity", None)
     offer_user = getattr(offer, "user", None)
@@ -227,7 +231,7 @@ def _remote_trade_offer_snapshot(offer: Offer | object) -> dict[str, object]:
         "price": getattr(offer, "price", None),
         "notes": getattr(offer, "notes", None),
         "commodity_name": getattr(commodity, "name", None),
-        "counterparty_name": user_display_name(offer_user, "نامشخص") if offer_user else None,
+        "counterparty_name": counterparty_name,
     }
 
 
@@ -339,6 +343,7 @@ async def _notify_remote_trade_success_when_recovered(
     try:
         recovered_body = await _wait_for_forwarded_trade_completion(
             idempotency_key,
+            viewer_user_id=user.id,
             grace_seconds=max(settings.trade_forward_grace_seconds, 8),
         )
         if not recovered_body:
@@ -582,7 +587,11 @@ async def _acknowledge_overtime_request(
     )
 
 
-def _trade_model_to_remote_home_body(trade: Trade | object) -> dict[str, object | None]:
+def _trade_model_to_remote_home_body(
+    trade: Trade | object,
+    *,
+    counterparty_name: str | None,
+) -> dict[str, object | None]:
     commodity = getattr(trade, "commodity", None)
     offer_user = getattr(trade, "offer_user", None)
     offer = getattr(trade, "offer", None)
@@ -594,7 +603,7 @@ def _trade_model_to_remote_home_body(trade: Trade | object) -> dict[str, object 
         "quantity": getattr(trade, "quantity", None),
         "price": getattr(trade, "price", None),
         "created_at": to_jalali_str(getattr(trade, "created_at", None)) or "",
-        "counterparty_name": user_display_name(offer_user, "نامشخص") if offer_user else None,
+        "counterparty_name": counterparty_name,
         "offer_notes": getattr(offer, "notes", None),
     }
 
@@ -602,6 +611,7 @@ def _trade_model_to_remote_home_body(trade: Trade | object) -> dict[str, object 
 async def _wait_for_forwarded_trade_completion(
     idempotency_key: str | None,
     *,
+    viewer_user_id: int,
     grace_seconds: int | float | None = None,
 ) -> dict[str, object | None] | None:
     if not idempotency_key:
@@ -633,8 +643,16 @@ async def _wait_for_forwarded_trade_completion(
                 )
                 trade = trade_result.scalar_one_or_none()
                 if trade:
-                    await attach_customer_management_names(session, [trade.offer_user])
-                    return _trade_model_to_remote_home_body(trade)
+                    counterparty_name = await resolve_customer_display_name_for_viewer(
+                        session,
+                        trade.offer_user,
+                        viewer_user_id=viewer_user_id,
+                        fallback="نامشخص",
+                    )
+                    return _trade_model_to_remote_home_body(
+                        trade,
+                        counterparty_name=counterparty_name,
+                    )
         if attempt < attempts - 1:
             await asyncio.sleep(0.25)
     return None
@@ -852,8 +870,6 @@ async def _handle_channel_trade(
             # before the row lock. Keep callback lookup lock-free to preserve that order.
             await session.refresh(offer, ["user", "commodity"])
             offer_user = getattr(offer, "user", None)
-            if offer_user is not None:
-                await attach_customer_management_names(session, [offer_user])
         
         if not offer:
             await answer_callback_query_via_runtime(
@@ -964,7 +980,15 @@ async def _handle_channel_trade(
                 offer=offer,
                 actual_amount=actual_amount,
             )
-            offer_snapshot = _remote_trade_offer_snapshot(offer)
+            offer_snapshot = _remote_trade_offer_snapshot(
+                offer,
+                counterparty_name=await resolve_customer_display_name_for_viewer(
+                    session,
+                    offer_user,
+                    viewer_user_id=user.id,
+                    fallback="نامشخص",
+                ),
+            )
             callback_chat_id = getattr(getattr(callback, "from_user", None), "id", None)
             forward_payload = {
                 "offer_id": offer.id,

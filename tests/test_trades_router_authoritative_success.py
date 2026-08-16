@@ -1,7 +1,7 @@
 import unittest
 from datetime import datetime, timezone
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import ANY, AsyncMock, patch
 
 from fastapi import BackgroundTasks, HTTPException
 
@@ -390,6 +390,7 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
             reloaded_trade,
             identity_map={},
             customer_relation_map={},
+            restricted_customer_user_ids=set(),
             viewer_context=context,
             history_target_user_id=locked_user.id,
         )
@@ -453,7 +454,14 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
         offer_mutation_mock.assert_not_called()
         commit_trade_mock.assert_not_awaited()
         self.publish_user_event_mock.assert_not_awaited()
-        response_mock.assert_called_once_with(existing_trade, identity_map={}, customer_relation_map={})
+        response_mock.assert_called_once_with(
+            existing_trade,
+            identity_map={},
+            customer_relation_map={},
+            restricted_customer_user_ids=set(),
+            viewer_context=ANY,
+            history_target_user_id=locked_user.id,
+        )
         self.assertEqual(len(background_tasks.tasks), 1)
         repair_task = background_tasks.tasks[0]
         self.assertIs(repair_task.func, _repair_trade_completion_delivery_background)
@@ -783,6 +791,7 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
             reloaded_trade,
             identity_map={},
             customer_relation_map={},
+            restricted_customer_user_ids=set(),
             viewer_context=context,
             history_target_user_id=locked_user.id,
         )
