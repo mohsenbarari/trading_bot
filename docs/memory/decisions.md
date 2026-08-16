@@ -2,6 +2,7 @@
 
 Entries are newest first.
 
+- 2026-08-16 | Overtime owner approval follows the offer's canonical home, not requester surface: foreign/bot-home offers queue Telegram approval; Iran/WebApp-home offers present in WebApp; requester surface remains audit context.
 - 2026-08-16 | Customer identity is server-scoped to self, relation owner, and same-owner accountants across history/dashboard, exports, notifications, realtime, profiles, offers, chat, and block lists; foreign lookup fails closed. Privileged user-management remains a separate explicit control-plane surface.
 - 2026-08-15 | Staging sync resets exact resources on both hosts, validates all 23 shared tables/both origins, resets before formal scenarios, and mounts probes with `APP_ENV_FILE=/dev/null`.
 - 2026-08-13 | Coin estimator/sidecar run from canonical `main`; mutable state lives under `/srv/trading-bot/production-data/coin-intelligence/estimator-live`; conversations stay read-only, legacy import is empty-store-only, and dashboard projection is privacy-safe.
@@ -10,8 +11,7 @@ Entries are newest first.
 - 2026-08-12 | Canonical Alembic restores deployed merge `f9b` before `f9c`; `fb1` validates complete coin schema, repairs only all-absent `fa0`, and rejects partial state.
 - 2026-08-12 | Coin inference normalizes canonical-Toman Market Store data once; confirmed trades outrank offers, IDs break only equal-time ties, and atomic rebuilds absorb freshness/backfills/corrections.
 - 2026-08-12 | The 500-offer matrix uses 60/40 Bot/WebApp origin, random 0.8–4-second ingress, fake private transport, bounded lifecycle work, fail-fast tasks and redacted audits.
-- 2026-08-11 | Queue-v1 retries only serialization/deadlock aborts before provider dispatch inside the same bounded unstarted lease; other DB failures fail closed.
-- 2026-08-11 | Queue-v1 retains an unstarted fenced lease only through a short absolute Redis cadence deadline; longer waits are durable retries. Reason: re-claiming causes DB churn, but long leases starve a lane.
+- 2026-08-11 | Queue-v1 retries only pre-dispatch serialization/deadlock aborts within a short fenced Redis cadence lease; other DB failures fail closed and longer waits become durable retries.
 - 2026-08-11 | Publication scans exclude offers with an existing non-final control/publish job. Reason: repeated deduplication delays central ingress and can age queued offers before worker admission.
 - 2026-08-11 | Queue-v1 interaction probes model authenticated private chat and positive message identity. Reason: reject unanchored or cross-chat replies.
 - 2026-08-11 | Multi-publisher B2B requires five capable identities; the feeder fixes one healthy lane at first publish and pairs its immutable owner/message with one dispatch command. Callbacks remain on the receiver; legacy routes use `primary`. Reason: Telegram edit ownership cannot transfer.

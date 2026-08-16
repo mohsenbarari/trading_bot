@@ -17,9 +17,9 @@ from core.services.offer_overtime_request_service import (
     load_overtime_request_by_public_id,
 )
 from core.services.offer_request_ledger_service import (
-    normalize_offer_request_source_surface,
     normalize_offer_request_status,
 )
+from core.server_routing import SERVER_FOREIGN, normalize_server
 from core.services.telegram_delivery_queue_service import (
     TelegramDeliveryQueueValidationError,
     canonical_telegram_delivery_payload,
@@ -41,7 +41,6 @@ from core.telegram_delivery_queue_contract import (
 from core.trading_settings import get_trading_settings_async
 from models.offer import Offer, OfferStatus
 from models.offer_request import (
-    OfferRequestSourceSurface,
     OfferRequestStatus,
     OfferRequestWorkflow,
 )
@@ -189,10 +188,6 @@ async def validate_overtime_owner_approval_delivery_freshness(
     if status != OfferRequestStatus.OVERTIME_DELIVERING:
         # Already presented or terminal — do not send a second approval prompt.
         return _expired("overtime_owner_approval_freshness_request_not_delivering")
-    surface = normalize_offer_request_source_surface(ledger.request_source_surface)
-    if surface != OfferRequestSourceSurface.TELEGRAM_BOT:
-        return _quarantined("overtime_owner_approval_freshness_surface_mismatch")
-
     owner_user_id = _positive_int(ledger.offer_owner_user_id)
     if owner_user_id is None:
         return _quarantined("overtime_owner_approval_freshness_owner_missing")
@@ -218,6 +213,13 @@ async def validate_overtime_owner_approval_delivery_freshness(
     offer = await db.get(Offer, local_offer_id) if local_offer_id is not None else None
     if offer is None:
         return _expired("overtime_owner_approval_freshness_offer_missing")
+    request_home = normalize_server(
+        getattr(ledger, "request_home_server", None),
+        default="",
+    )
+    offer_home = normalize_server(getattr(offer, "home_server", None), default="")
+    if request_home != SERVER_FOREIGN or offer_home != SERVER_FOREIGN:
+        return _quarantined("overtime_owner_approval_freshness_surface_mismatch")
     if _enum_value(offer.status) != OfferStatus.ACTIVE.value:
         return _expired("overtime_owner_approval_freshness_offer_inactive")
 

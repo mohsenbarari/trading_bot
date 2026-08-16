@@ -354,7 +354,7 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
             decision_deadline_at(RECEIPT_IN_OVERTIME),
         )
 
-    async def test_create_bot_request_promotes_to_delivering(self):
+    async def test_webapp_request_for_bot_offer_promotes_to_telegram_delivering(self):
         offer = _offer(home_server="foreign")
         db = _MemoryDB(offers={7: offer})
         enqueue = AsyncMock(
@@ -378,13 +378,12 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
             result = await self._create(
                 db,
                 offer,
-                request_source_surface=OfferRequestSourceSurface.TELEGRAM_BOT,
-                request_source_server="foreign",
                 request_home_server="foreign",
             )
 
         self.assertEqual(result.ledger.result_status, OfferRequestStatus.OVERTIME_DELIVERING)
         self.assertIsNone(result.ledger.presented_at)
+        self.assertEqual(result.ledger.telegram_delivery_job_id, 42)
         enqueue.assert_awaited_once()
 
         await mark_presented(
@@ -395,6 +394,33 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(result.ledger.result_status, OfferRequestStatus.OVERTIME_PRESENTED)
         self.assertEqual(result.ledger.telegram_message_id, 555)
+
+    async def test_bot_request_for_webapp_offer_stays_on_webapp_owner_surface(self):
+        offer = _offer(home_server="iran")
+        db = _MemoryDB(offers={7: offer})
+        enqueue = AsyncMock()
+        with patch(
+            "core.services.offer_overtime_request_service.current_server",
+            return_value="iran",
+        ), patch(
+            "core.services.offer_request_ledger_service.current_server",
+            return_value="iran",
+        ), patch(
+            "core.services.telegram_overtime_owner_approval_queue_service."
+            "enqueue_overtime_owner_approval_delivery",
+            enqueue,
+        ):
+            result = await self._create(
+                db,
+                offer,
+                request_source_surface=OfferRequestSourceSurface.TELEGRAM_BOT,
+                request_source_server="foreign",
+                request_home_server="iran",
+            )
+
+        self.assertEqual(result.ledger.result_status, OfferRequestStatus.OVERTIME_PRESENTED)
+        self.assertEqual(result.ledger.presented_at, RECEIPT_IN_OVERTIME)
+        enqueue.assert_not_awaited()
 
     async def test_idempotent_replay(self):
         offer = _offer()
@@ -461,6 +487,13 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
         iran_offer = _offer(id=7, offer_public_id="ofr_iran", home_server="iran")
         foreign_offer = _offer(id=8, offer_public_id="ofr_foreign", home_server="foreign")
         db = _MemoryDB(offers={7: iran_offer, 8: foreign_offer})
+        enqueue = AsyncMock(
+            return_value=OvertimeOwnerApprovalEnqueueOutcome(
+                enqueued=True,
+                job_id=43,
+                job_created=True,
+            )
+        )
         with patch(
             "core.services.offer_overtime_request_service.current_server",
             return_value="iran",
@@ -477,6 +510,10 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
         ), patch(
             "core.services.offer_request_ledger_service.current_server",
             return_value="foreign",
+        ), patch(
+            "core.services.telegram_overtime_owner_approval_queue_service."
+            "enqueue_overtime_owner_approval_delivery",
+            enqueue,
         ):
             foreign = await self._create(
                 db,
@@ -487,7 +524,9 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
                 requester_user_id=11,
             )
         self.assertEqual(iran.ledger.result_status, OfferRequestStatus.OVERTIME_PRESENTED)
-        self.assertEqual(foreign.ledger.result_status, OfferRequestStatus.OVERTIME_PRESENTED)
+        self.assertEqual(foreign.ledger.result_status, OfferRequestStatus.OVERTIME_DELIVERING)
+        self.assertEqual(foreign.ledger.telegram_delivery_job_id, 43)
+        enqueue.assert_awaited_once()
 
     async def test_requester_limit_and_per_owner_limit(self):
         offers = {

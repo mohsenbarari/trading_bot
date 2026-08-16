@@ -73,7 +73,7 @@ async def enqueue_overtime_owner_approval_delivery(
     normal_lifetime_minutes: int,
     now: datetime | None = None,
 ) -> OvertimeOwnerApprovalEnqueueOutcome:
-    """Insert one private approval job for a bot-origin DELIVERING request.
+    """Insert one private approval job for a Telegram-home offer request.
 
     Returns ``undeliverable_reason`` when the owner cannot receive Telegram
     messages at all (missing/unlinked/denied). Callers should invalidate that

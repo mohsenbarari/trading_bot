@@ -2,8 +2,9 @@
 
 Stage 4 owns create, queue, promote, cancel, reject, and decision-timeout
 transitions. Trade commit after owner approval is Stage 5. Stage 8 wires
-bot-origin ``OVERTIME_DELIVERING`` rows onto the Telegram delivery queue;
-WebApp surfaces remain later stages.
+requests for Telegram-home offers through ``OVERTIME_DELIVERING`` and the
+Telegram delivery queue. The requester's surface remains audit/status context;
+the offer's canonical home determines where its owner approves.
 """
 from __future__ import annotations
 
@@ -22,7 +23,12 @@ from core.offer_lifecycle import (
     project_offer_lifecycle,
     read_overtime_minutes_snapshot,
 )
-from core.server_routing import current_server, normalize_server
+from core.server_routing import (
+    SERVER_FOREIGN,
+    SERVER_IRAN,
+    current_server,
+    normalize_server,
+)
 from core.services.offer_request_ledger_service import (
     OfferRequestTerminalStateError,
     apply_offer_request_decision,
@@ -603,12 +609,19 @@ async def create_overtime_request(
 async def _revalidate_offer_for_promotion(
     offer: Offer | None,
     *,
+    request_home_server: str,
     normal_lifetime_minutes: int,
     now: datetime,
 ) -> str | None:
     """Return an invalidation reason, or None when promotion may proceed."""
     if offer is None:
         return "offer_missing"
+    request_home = normalize_server(request_home_server, default="")
+    offer_home = normalize_server(getattr(offer, "home_server", None), default="")
+    if offer_home not in {SERVER_FOREIGN, SERVER_IRAN}:
+        return "offer_home_invalid"
+    if request_home != offer_home:
+        return "offer_home_mismatch"
     if _status_value(getattr(offer, "status", None)) != OfferStatus.ACTIVE.value:
         return "offer_not_active"
     projection = project_offer_lifecycle(
@@ -644,9 +657,11 @@ async def promote_next_for_owner(
 ) -> OfferRequest | None:
     """Promote the next queued request for an owner scope, if the seat is free.
 
-    WebApp-origin requests become PRESENTED (clock starts). Bot-origin requests
-    become DELIVERING (occupying; clock starts later when a message id lands).
-    Always advances the earliest ``queue_sequence`` so FIFO is preserved.
+    Requests for Iran/WebApp-home offers become PRESENTED immediately (clock
+    starts). Requests for foreign/Telegram-home offers become DELIVERING
+    (occupying; clock starts only after Telegram returns a message id). The
+    requester may originate from either surface. Always advances the earliest
+    ``queue_sequence`` so FIFO is preserved.
     """
     home = normalize_server(request_home_server, current_server())
     current = now or utc_now()
@@ -676,6 +691,7 @@ async def promote_next_for_owner(
 
     invalid_reason = await _revalidate_offer_for_promotion(
         offer,
+        request_home_server=home,
         normal_lifetime_minutes=normal_lifetime_minutes,
         now=current,
     )
@@ -701,8 +717,7 @@ async def promote_next_for_owner(
             flush=flush,
         )
 
-    surface = normalize_offer_request_source_surface(candidate.request_source_surface)
-    if surface == OfferRequestSourceSurface.TELEGRAM_BOT:
+    if home == SERVER_FOREIGN:
         _apply_overtime_transition(
             candidate,
             new_status=OfferRequestStatus.OVERTIME_DELIVERING,
@@ -756,6 +771,9 @@ async def promote_next_for_owner(
                 load_offer=load_offer,
                 flush=flush,
             )
+        candidate.telegram_delivery_job_id = enqueue_outcome.job_id
+        if flush:
+            await db.flush()
         from core.services.telegram_overtime_requester_status_service import (
             schedule_requester_status_presented_edit,
         )
