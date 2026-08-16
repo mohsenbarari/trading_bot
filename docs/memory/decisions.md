@@ -2,7 +2,7 @@
 
 Entries are newest first.
 
-- 2026-08-16 | Overtime owner approval follows the offer's canonical home, not requester surface: foreign/bot-home offers queue Telegram approval; Iran/WebApp-home offers present in WebApp; requester surface remains audit context.
+- 2026-08-16 | Overtime follows offer home: foreign/bot-home uses its active Telegram runtime (legacy outbox or queue-v1), starts the clock only after a message id, and queues channel refresh; Iran/WebApp-home presents in WebApp. Requester surface is audit-only.
 - 2026-08-16 | Customer identity is server-scoped to self, relation owner, and same-owner accountants across history/dashboard, exports, notifications, realtime, profiles, offers, chat, and block lists; foreign lookup fails closed. Privileged user-management remains a separate explicit control-plane surface.
 - 2026-08-15 | Staging sync resets exact resources on both hosts, validates all 23 shared tables/both origins, resets before formal scenarios, and mounts probes with `APP_ENV_FILE=/dev/null`.
 - 2026-08-13 | Coin estimator/sidecar run from canonical `main`; mutable state lives under `/srv/trading-bot/production-data/coin-intelligence/estimator-live`; conversations stay read-only, legacy import is empty-store-only, and dashboard projection is privacy-safe.

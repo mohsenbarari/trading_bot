@@ -1118,6 +1118,8 @@ async def deliver_claimed_telegram_notification_outbox(
         )
 
     current_time = now or utc_now()
+    legacy_overtime = False
+    legacy_overtime_reply_markup: Mapping[str, Any] | None = None
     if _is_terminal(outbox):
         return TelegramNotificationDeliveryResult(
             status=TELEGRAM_NOTIFICATION_DELIVERY_STATUS_ALREADY_TERMINAL,
@@ -1149,9 +1151,84 @@ async def deliver_claimed_telegram_notification_outbox(
             alert_required=True,
         )
 
+    from core.services.telegram_overtime_owner_approval_legacy_service import (
+        is_legacy_overtime_owner_approval_outbox,
+    )
+
+    legacy_overtime = is_legacy_overtime_owner_approval_outbox(outbox)
+    if legacy_overtime:
+        from core.services.telegram_overtime_owner_approval_legacy_service import (
+            apply_legacy_overtime_owner_approval_terminal_failure,
+            prepare_legacy_overtime_owner_approval_dispatch,
+        )
+
+        try:
+            preflight = await prepare_legacy_overtime_owner_approval_dispatch(
+                db,
+                outbox,
+                now=current_time,
+            )
+        except (TypeError, ValueError, OverflowError) as exc:
+            await apply_legacy_overtime_owner_approval_terminal_failure(
+                db,
+                outbox,
+                reason="legacy_overtime_owner_approval_contract_invalid",
+                now=current_time,
+            )
+            await _mark_outbox(
+                db,
+                outbox=outbox,
+                status=TelegramNotificationOutboxStatus.TERMINAL_FAILED,
+                current_time=current_time,
+                reason="legacy_overtime_owner_approval_contract_invalid",
+                error_class=type(exc).__name__,
+                error_message=str(exc)[:500],
+            )
+            return TelegramNotificationDeliveryResult(
+                status=TELEGRAM_NOTIFICATION_DELIVERY_STATUS_TERMINAL_FAILED,
+                current_server=normalized_server,
+                outbox=outbox,
+                recipient_user_id=recipient_user_id,
+                reason="legacy_overtime_owner_approval_contract_invalid",
+                alert_required=True,
+            )
+        if not preflight.dispatchable:
+            await _mark_outbox(
+                db,
+                outbox=outbox,
+                status=TelegramNotificationOutboxStatus.SKIPPED,
+                current_time=current_time,
+                reason=preflight.reason,
+                error_class="TelegramOvertimeOwnerApprovalSuperseded",
+                error_message=preflight.reason,
+            )
+            return TelegramNotificationDeliveryResult(
+                status=TELEGRAM_NOTIFICATION_DELIVERY_STATUS_SKIPPED,
+                current_server=normalized_server,
+                outbox=outbox,
+                recipient_user_id=recipient_user_id,
+                reason=preflight.reason,
+            )
+        legacy_overtime_reply_markup = preflight.reply_markup
+
+    async def finalize_legacy_overtime_failure(reason: str) -> None:
+        if not legacy_overtime:
+            return
+        from core.services.telegram_overtime_owner_approval_legacy_service import (
+            apply_legacy_overtime_owner_approval_terminal_failure,
+        )
+
+        await apply_legacy_overtime_owner_approval_terminal_failure(
+            db,
+            outbox,
+            reason=reason,
+            now=current_time,
+        )
+
     user = await db.get(User, int(outbox.recipient_user_id)) if recipient_user_id is not None else None
     if user is None:
         reason = "telegram_user_missing_current"
+        await finalize_legacy_overtime_failure(reason)
         await _mark_outbox(
             db,
             outbox=outbox,
@@ -1274,6 +1351,7 @@ async def deliver_claimed_telegram_notification_outbox(
 
     if telegram_id is None:
         reason = "telegram_unlinked_current"
+        await finalize_legacy_overtime_failure(reason)
         await _mark_outbox(
             db,
             outbox=outbox,
@@ -1295,6 +1373,7 @@ async def deliver_claimed_telegram_notification_outbox(
         access_decision = await evaluate_bot_access(db, user)
         if not access_decision.allowed:
             reason = access_decision.reason or "bot_access_denied_current"
+            await finalize_legacy_overtime_failure(reason)
             await _mark_outbox(
                 db,
                 outbox=outbox,
@@ -1313,6 +1392,7 @@ async def deliver_claimed_telegram_notification_outbox(
             )
 
     if await _outbox_excludes_current_customer(db, outbox, user):
+        await finalize_legacy_overtime_failure("customer_excluded_current")
         await _mark_outbox(
             db,
             outbox=outbox,
@@ -1342,6 +1422,7 @@ async def deliver_claimed_telegram_notification_outbox(
             telegram_id,
             message,
             parse_mode=outbox.parse_mode,
+            reply_markup=legacy_overtime_reply_markup,
             bot_token=bot_token,
             idempotency_key=correlation_key,
         )
@@ -1387,6 +1468,19 @@ async def deliver_claimed_telegram_notification_outbox(
                     reason="telegram_channel_membership_retry",
                     retry_after_seconds=5,
                 )
+        if legacy_overtime:
+            if telegram_message_id is None:
+                raise ValueError("legacy_overtime_owner_approval_message_id_missing")
+            from core.services.telegram_overtime_owner_approval_legacy_service import (
+                apply_legacy_overtime_owner_approval_sent,
+            )
+
+            await apply_legacy_overtime_owner_approval_sent(
+                db,
+                outbox,
+                telegram_message_id=int(telegram_message_id),
+                now=current_time,
+            )
         await _mark_outbox(
             db,
             outbox=outbox,
@@ -1410,6 +1504,7 @@ async def deliver_claimed_telegram_notification_outbox(
         classification,
         outbox,
     ):
+        await finalize_legacy_overtime_failure("telegram_retry_exhausted")
         await _mark_outbox(
             db,
             outbox=outbox,
@@ -1434,6 +1529,11 @@ async def deliver_claimed_telegram_notification_outbox(
         if classification.status == TelegramNotificationOutboxStatus.RETRYABLE_FAILED
         else classification.retry_after_seconds
     )
+    if legacy_overtime and classification.status in {
+        TelegramNotificationOutboxStatus.SKIPPED,
+        TelegramNotificationOutboxStatus.TERMINAL_FAILED,
+    }:
+        await finalize_legacy_overtime_failure(str(classification.reason))
     await _mark_outbox(
         db,
         outbox=outbox,

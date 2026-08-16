@@ -32,6 +32,10 @@ from core.services.offer_overtime_request_service import (
 from core.services.telegram_overtime_owner_approval_queue_service import (
     OvertimeOwnerApprovalEnqueueOutcome,
 )
+from core.services.telegram_overtime_owner_approval_legacy_service import (
+    LegacyOvertimeOwnerApprovalEnqueueOutcome,
+)
+from core.telegram_delivery_runtime_policy import TelegramDeliveryRuntimeMode
 from models.offer import OfferStatus
 from models.offer_request import (
     OVERTIME_NONTERMINAL_STATUSES,
@@ -376,6 +380,10 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
             "core.services.telegram_overtime_owner_approval_queue_service."
             "enqueue_overtime_owner_approval_delivery",
             enqueue,
+        ), patch(
+            "core.telegram_delivery_runtime_policy."
+            "configured_telegram_delivery_producer_mode",
+            return_value=TelegramDeliveryRuntimeMode.QUEUE_V1,
         ):
             result = await self._create(
                 db,
@@ -399,6 +407,44 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.ledger.result_status, OfferRequestStatus.OVERTIME_PRESENTED)
         self.assertEqual(result.ledger.telegram_message_id, 555)
 
+    async def test_legacy_runtime_uses_active_notification_outbox_not_queue_v1(self):
+        offer = _offer(home_server="foreign")
+        db = _MemoryDB(offers={7: offer})
+        enqueue = AsyncMock(
+            return_value=LegacyOvertimeOwnerApprovalEnqueueOutcome(
+                enqueued=True,
+                outbox_id=81,
+                outbox_created=True,
+            )
+        )
+        refresh_channel = AsyncMock(return_value=True)
+        with patch(
+            "core.services.offer_overtime_request_service.current_server",
+            return_value="foreign",
+        ), patch(
+            "core.services.offer_request_ledger_service.current_server",
+            return_value="foreign",
+        ), patch(
+            "core.services.telegram_overtime_owner_approval_legacy_service."
+            "enqueue_legacy_overtime_owner_approval_delivery",
+            enqueue,
+        ), patch(
+            "core.telegram_delivery_runtime_policy."
+            "configured_telegram_delivery_producer_mode",
+            return_value=TelegramDeliveryRuntimeMode.LEGACY,
+        ), patch(
+            "core.services.telegram_offer_channel_service."
+            "request_offer_channel_state_refresh",
+            refresh_channel,
+        ):
+            result = await self._create(db, offer, request_home_server="foreign")
+
+        self.assertEqual(result.ledger.result_status, OfferRequestStatus.OVERTIME_DELIVERING)
+        self.assertIsNone(result.ledger.presented_at)
+        self.assertIsNone(result.ledger.telegram_delivery_job_id)
+        enqueue.assert_awaited_once()
+        refresh_channel.assert_awaited_once_with(db, offer, now=RECEIPT_IN_OVERTIME)
+
     async def test_bot_request_for_webapp_offer_stays_on_webapp_owner_surface(self):
         offer = _offer(home_server="iran")
         db = _MemoryDB(offers={7: offer})
@@ -413,6 +459,10 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
             "core.services.telegram_overtime_owner_approval_queue_service."
             "enqueue_overtime_owner_approval_delivery",
             enqueue,
+        ), patch(
+            "core.telegram_delivery_runtime_policy."
+            "configured_telegram_delivery_producer_mode",
+            return_value=TelegramDeliveryRuntimeMode.QUEUE_V1,
         ):
             result = await self._create(
                 db,
@@ -518,6 +568,10 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
             "core.services.telegram_overtime_owner_approval_queue_service."
             "enqueue_overtime_owner_approval_delivery",
             enqueue,
+        ), patch(
+            "core.telegram_delivery_runtime_policy."
+            "configured_telegram_delivery_producer_mode",
+            return_value=TelegramDeliveryRuntimeMode.QUEUE_V1,
         ):
             foreign = await self._create(
                 db,

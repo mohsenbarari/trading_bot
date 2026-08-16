@@ -51,6 +51,35 @@ def make_offer(**overrides):
 
 
 class TelegramOfferChannelServiceTests(unittest.IsolatedAsyncioTestCase):
+    async def test_channel_refresh_is_durable_and_preserves_earliest_request(self):
+        offer = make_offer(
+            status=OfferStatus.ACTIVE,
+            channel_message_id=123,
+        )
+        state = SimpleNamespace(state_metadata={"unrelated": "kept"})
+        db = SimpleNamespace()
+        first = datetime(2026, 8, 16, 12, 0, tzinfo=timezone.utc)
+        later = first + timedelta(seconds=10)
+
+        with patch.object(channel_service, "current_server", return_value="foreign"), patch.object(
+            channel_service,
+            "get_or_create_telegram_publication_state",
+            new=AsyncMock(return_value=state),
+        ) as get_state:
+            self.assertTrue(
+                await channel_service.request_offer_channel_state_refresh(db, offer, now=first)
+            )
+            self.assertTrue(
+                await channel_service.request_offer_channel_state_refresh(db, offer, now=later)
+            )
+
+        self.assertEqual(get_state.await_count, 2)
+        self.assertEqual(state.state_metadata["unrelated"], "kept")
+        self.assertEqual(
+            state.state_metadata[channel_service.CHANNEL_STATE_REFRESH_AT_METADATA_KEY],
+            first.timestamp(),
+        )
+
     def test_lifecycle_projection_accepts_aware_clock_with_database_offer_timestamp(self):
         now = datetime(2026, 8, 11, 19, 0, tzinfo=timezone.utc)
         projection = channel_service.project_offer_channel_lifecycle(

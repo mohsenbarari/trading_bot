@@ -732,11 +732,6 @@ async def promote_next_for_owner(
         )
         if flush:
             await db.flush()
-        # Lazy import keeps the ledger module free of queue package cycles.
-        from core.services.telegram_overtime_owner_approval_queue_service import (
-            enqueue_overtime_owner_approval_delivery,
-        )
-
         if offer is None:
             await invalidate_request(
                 db,
@@ -754,14 +749,37 @@ async def promote_next_for_owner(
                 load_offer=load_offer,
                 flush=flush,
             )
-        enqueue_outcome = await enqueue_overtime_owner_approval_delivery(
-            db,
-            current_server=current_server(),
-            ledger=candidate,
-            offer=offer,
-            normal_lifetime_minutes=normal_lifetime_minutes,
-            now=current,
+        from core.telegram_delivery_runtime_policy import (
+            TelegramDeliveryRuntimeMode,
+            configured_telegram_delivery_producer_mode,
         )
+
+        telegram_producer_mode = configured_telegram_delivery_producer_mode()
+        if telegram_producer_mode == TelegramDeliveryRuntimeMode.QUEUE_V1:
+            from core.services.telegram_overtime_owner_approval_queue_service import (
+                enqueue_overtime_owner_approval_delivery,
+            )
+
+            enqueue_outcome = await enqueue_overtime_owner_approval_delivery(
+                db,
+                current_server=current_server(),
+                ledger=candidate,
+                offer=offer,
+                normal_lifetime_minutes=normal_lifetime_minutes,
+                now=current,
+            )
+            candidate.telegram_delivery_job_id = enqueue_outcome.job_id
+        else:
+            from core.services.telegram_overtime_owner_approval_legacy_service import (
+                enqueue_legacy_overtime_owner_approval_delivery,
+            )
+
+            enqueue_outcome = await enqueue_legacy_overtime_owner_approval_delivery(
+                db,
+                ledger=candidate,
+                offer=offer,
+                normal_lifetime_minutes=normal_lifetime_minutes,
+            )
         if enqueue_outcome.undeliverable_reason:
             await invalidate_request(
                 db,
@@ -779,7 +797,16 @@ async def promote_next_for_owner(
                 load_offer=load_offer,
                 flush=flush,
             )
-        candidate.telegram_delivery_job_id = enqueue_outcome.job_id
+        if telegram_producer_mode == TelegramDeliveryRuntimeMode.LEGACY:
+            from core.services.telegram_offer_channel_service import (
+                request_offer_channel_state_refresh,
+            )
+
+            await request_offer_channel_state_refresh(
+                db,
+                offer,
+                now=current,
+            )
         if flush:
             await db.flush()
         from core.services.telegram_overtime_requester_status_service import (

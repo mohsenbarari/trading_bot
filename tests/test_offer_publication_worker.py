@@ -250,6 +250,50 @@ class OfferPublicationWorkerTests(unittest.IsolatedAsyncioTestCase):
             or worker._channel_state_next_retry_at(item.state) is not None
         )
 
+    async def test_full_active_offer_with_explicit_refresh_is_applied_once(self):
+        offer = make_offer(
+            id=32,
+            offer_public_id="ofr_32",
+            status=OfferStatus.ACTIVE,
+            remaining_quantity=50,
+            quantity=50,
+            version_id=7,
+        )
+        item = candidate(
+            offer,
+            make_state(
+                offer,
+                offer_version_id=offer.version_id,
+                state_metadata={
+                    worker._CHANNEL_STATE_RETRY_AT_METADATA_KEY: utc_now().timestamp(),
+                },
+            ),
+        )
+
+        self.assertTrue(worker._channel_state_candidate_still_due(item, now=utc_now()))
+        report, _, apply_state = await self._run_channel_cycle(
+            [item],
+            OfferChannelStateApplyResult(ok=True, response_class="2xx", reason="ok"),
+        )
+
+        self.assertEqual(report.applied, 1)
+        self.assertEqual(apply_state.await_count, 1)
+        self.assertIsNone(worker._channel_state_next_retry_at(item.state))
+        self.assertFalse(worker._channel_state_candidate_still_due(item, now=utc_now()))
+
+    def test_full_active_offer_without_drift_or_refresh_is_not_due(self):
+        offer = make_offer(
+            id=33,
+            offer_public_id="ofr_33",
+            status=OfferStatus.ACTIVE,
+            remaining_quantity=50,
+            quantity=50,
+            version_id=7,
+        )
+        item = candidate(offer, make_state(offer, offer_version_id=offer.version_id))
+
+        self.assertFalse(worker._channel_state_candidate_still_due(item, now=utc_now()))
+
     async def test_channel_state_cycle_stops_on_rate_limit_and_schedules_retry(self):
         items = [
             candidate(make_offer(id=41, offer_public_id="ofr_41", version_id=8)),

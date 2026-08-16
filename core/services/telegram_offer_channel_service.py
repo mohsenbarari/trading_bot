@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import datetime, timezone
 import logging
 from typing import Any, Optional
 
@@ -11,6 +12,9 @@ from core.config import settings
 from core.offer_settlement import build_offer_summary_text
 from core.server_routing import SERVER_FOREIGN, current_server
 from core.services.telegram_offer_publication_service import telegram_publication_message_id
+from core.services.telegram_offer_publication_service import (
+    get_or_create_telegram_publication_state,
+)
 from core.telegram_delivery_runtime_policy import (
     TelegramDeliveryRuntimeConfigurationError,
     TelegramDeliveryRuntimeMode,
@@ -34,6 +38,49 @@ TELEGRAM_OFFER_OVERTIME_FULLY_TRADED_TAG = (
     f"{TELEGRAM_OFFER_FULLY_TRADED_TAG}{TELEGRAM_OFFER_OVERTIME_MARKER}"
 )
 CHANNEL_LIFECYCLE_METADATA_KEY = "channel_lifecycle_phase"
+CHANNEL_STATE_REFRESH_AT_METADATA_KEY = "channel_state_reconciliation_next_retry_at"
+
+
+async def request_offer_channel_state_refresh(
+    db: Any,
+    offer: Any,
+    *,
+    now: Any | None = None,
+) -> bool:
+    """Persist one immediate legacy-worker refresh for a published offer.
+
+    Lifecycle time passing does not mutate the offer version, so a fully
+    available offer entering overtime would otherwise be invisible to the
+    channel-state reconciliation worker.  The worker owns the eventual
+    Telegram edit; this helper only records that durable intent.
+    """
+    if current_server() != SERVER_FOREIGN:
+        return False
+    if not _positive_int(getattr(offer, "channel_message_id", None)):
+        return False
+
+    state = await get_or_create_telegram_publication_state(db, offer)
+    metadata = getattr(state, "state_metadata", None)
+    updated_metadata = dict(metadata) if isinstance(metadata, Mapping) else {}
+    requested_at = now
+    if requested_at is None:
+        from core.utils import utc_now
+
+        requested_at = utc_now()
+    if not isinstance(requested_at, datetime):
+        raise TypeError("offer_channel_refresh_time_invalid")
+    normalized_at = (
+        requested_at.replace(tzinfo=timezone.utc)
+        if requested_at.tzinfo is None or requested_at.utcoffset() is None
+        else requested_at.astimezone(timezone.utc)
+    )
+    timestamp = normalized_at.timestamp()
+    existing = updated_metadata.get(CHANNEL_STATE_REFRESH_AT_METADATA_KEY)
+    if isinstance(existing, (int, float)) and not isinstance(existing, bool):
+        timestamp = min(float(existing), float(timestamp))
+    updated_metadata[CHANNEL_STATE_REFRESH_AT_METADATA_KEY] = timestamp
+    state.state_metadata = updated_metadata
+    return True
 
 
 def _assert_legacy_channel_editor_owner() -> None:
@@ -212,8 +259,6 @@ def project_offer_channel_lifecycle(
     An ACTIVE offer past the final deadline is treated as final-tail: expiry
     would otherwise have terminalized it already.
     """
-    from datetime import datetime, timezone
-
     from core.offer_lifecycle import compute_lifecycle_deadlines, project_offer_lifecycle
 
     now = (

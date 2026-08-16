@@ -207,6 +207,64 @@ class TelegramNotificationOutboxServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(outbox.telegram_message_id, 55)
         self.assertEqual(outbox.reason, "sent")
 
+    async def test_legacy_overtime_prompt_sends_inline_decision_markup_then_starts_clock(self):
+        from core.services import telegram_overtime_owner_approval_legacy_service as legacy
+
+        db = FakeDeliveryDB(user=SimpleNamespace(id=7, telegram_id=7777))
+        markup = {"inline_keyboard": [[{"text": "تأیید", "callback_data": "ota:req:approve"}]]}
+        outbox = _outbox(
+            source_type=legacy.LEGACY_OVERTIME_OWNER_APPROVAL_SOURCE,
+            source_id="req_test",
+            extra_payload={"reply_markup": markup},
+            parse_mode="Markdown",
+        )
+        gateway_send = AsyncMock(
+            return_value=telegram_gateway.TelegramGatewayResult(
+                ok=True,
+                method="sendMessage",
+                status_code=200,
+                response_json={"result": {"message_id": 901}},
+            )
+        )
+        prepare = AsyncMock(
+            return_value=legacy.LegacyOvertimeOwnerApprovalPreflight(
+                True,
+                "current",
+                markup,
+            )
+        )
+        mark_presented = AsyncMock()
+
+        with patch.object(legacy, "prepare_legacy_overtime_owner_approval_dispatch", new=prepare), patch.object(
+            legacy,
+            "apply_legacy_overtime_owner_approval_sent",
+            new=mark_presented,
+        ), patch.object(
+            service,
+            "evaluate_bot_access",
+            new=AsyncMock(return_value=BotAccessDecision(True)),
+        ), patch.object(
+            service,
+            "get_active_customer_relation_for_user",
+            new=AsyncMock(return_value=None),
+        ):
+            result = await service.deliver_claimed_telegram_notification_outbox(
+                db,
+                outbox,
+                current_server="foreign",
+                gateway_send=gateway_send,
+                now=NOW,
+            )
+
+        self.assertEqual(result.status, service.TELEGRAM_NOTIFICATION_DELIVERY_STATUS_SENT)
+        self.assertEqual(gateway_send.await_args.kwargs["reply_markup"], markup)
+        mark_presented.assert_awaited_once_with(
+            db,
+            outbox,
+            telegram_message_id=901,
+            now=NOW,
+        )
+
     async def test_deliver_skips_current_customer_when_policy_excludes_customers(self):
         db = FakeDeliveryDB(user=SimpleNamespace(id=7, telegram_id=7777))
         outbox = _outbox()

@@ -22,7 +22,10 @@ from core.services.offer_publication_state_service import (
     apply_publication_state_update,
     canonical_telegram_publication_identity,
 )
-from core.services.telegram_offer_channel_service import apply_offer_channel_state_with_result
+from core.services.telegram_offer_channel_service import (
+    CHANNEL_STATE_REFRESH_AT_METADATA_KEY,
+    apply_offer_channel_state_with_result,
+)
 from core.services.telegram_offer_publication_service import (
     get_or_create_telegram_publication_state,
     mark_telegram_publication_success,
@@ -39,7 +42,7 @@ logger = logging.getLogger(__name__)
 _loop_errors = RepeatedErrorLogger(every=10)
 _CHANNEL_STATE_RETRY_METADATA_KEY = "channel_state_reconciliation_attempt_count"
 _CHANNEL_STATE_RETRY_VERSION_METADATA_KEY = "channel_state_reconciliation_attempt_offer_version_id"
-_CHANNEL_STATE_RETRY_AT_METADATA_KEY = "channel_state_reconciliation_next_retry_at"
+_CHANNEL_STATE_RETRY_AT_METADATA_KEY = CHANNEL_STATE_REFRESH_AT_METADATA_KEY
 _CHANNEL_STATE_LOCK_PREFIX = "offer-channel-state-reconciliation"
 
 
@@ -215,11 +218,7 @@ def _channel_state_base_condition():
         or_(Offer.archived.is_(False), Offer.archived.is_(None)),
         or_(
             Offer.status.in_([OfferStatus.COMPLETED, OfferStatus.CANCELLED, OfferStatus.EXPIRED]),
-            and_(
-                Offer.status == OfferStatus.ACTIVE,
-                Offer.remaining_quantity.isnot(None),
-                Offer.remaining_quantity < Offer.quantity,
-            ),
+            Offer.status == OfferStatus.ACTIVE,
         ),
     )
 
@@ -479,14 +478,7 @@ def _channel_state_candidate_still_due(
     if state is None:
         return True
     status = _offer_status_value(offer)
-    remaining = _coerce_int(getattr(offer, "remaining_quantity", None))
-    quantity = _coerce_int(getattr(offer, "quantity", None))
-    eligible = _is_terminal_offer(offer) or (
-        status == OfferStatus.ACTIVE.value
-        and remaining is not None
-        and quantity is not None
-        and remaining < quantity
-    )
+    eligible = _is_terminal_offer(offer) or status == OfferStatus.ACTIVE.value
     if not eligible or not _coerce_int(getattr(offer, "channel_message_id", None)):
         return False
     if bool(getattr(offer, "archived", False)):
