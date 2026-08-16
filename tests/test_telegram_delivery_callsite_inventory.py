@@ -6,6 +6,7 @@ from scripts.audit_telegram_delivery_calls import (
     EXPECTED_RUNTIME_INVENTORY_COUNTS,
     EXPECTED_RUNTIME_INVENTORY_SHA256,
     MAIN_UIUX_INTEGRATION_RUNTIME_INVENTORY_SHA256,
+    OVERTIME_OWNER_PROMPT_RUNTIME_INVENTORY_SHA256,
     REMAINING_DISPOSITION_BUDGETS,
     REVIEWED_RUNTIME_INVENTORY_SHA256,
     build_inventory,
@@ -42,11 +43,12 @@ class TelegramDeliveryCallsiteInventoryTests(unittest.TestCase):
             {
                 EXPECTED_RUNTIME_INVENTORY_SHA256,
                 MAIN_UIUX_INTEGRATION_RUNTIME_INVENTORY_SHA256,
+                OVERTIME_OWNER_PROMPT_RUNTIME_INVENTORY_SHA256,
             },
         )
         self.assertEqual(
             inventory_fingerprint(self.inventory),
-            MAIN_UIUX_INTEGRATION_RUNTIME_INVENTORY_SHA256,
+            OVERTIME_OWNER_PROMPT_RUNTIME_INVENTORY_SHA256,
         )
 
     def test_final_legacy_publication_boundary_is_owner_guarded(self):

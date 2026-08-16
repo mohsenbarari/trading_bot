@@ -1,0 +1,54 @@
+# وضعیت جاری تحویل تلگرام Queue-v1
+
+این سند منبع عملیاتی جاری است. checkpointها و handoffهای ژوئیهٔ ۲۰۲۶ شواهد تاریخی‌اند و حذف نمی‌شوند.
+
+## قابلیت کد در برابر مالکیت اجرا
+
+- در کد، `TELEGRAM_DELIVERY_QUEUE_IMPLEMENTATION_READY=True` فقط یعنی قابلیت بررسی‌شده حاضر است.
+- این پرچم به‌تنهایی مالکیت اجرا را عوض نمی‌کند.
+- مالکیت اجرا فقط با هر سه کنترل صریح `TELEGRAM_DELIVERY_EXECUTION_OWNER`، `TELEGRAM_DELIVERY_QUEUE_WORKER_ENABLED` و `TELEGRAM_DELIVERY_QUEUE_CUTOVER_READY` روی runtime بات فعال می‌شود.
+- API/WebApp فقط قرارداد producer و expected-owner را می‌گیرند؛ token و worker اجرا روی آن‌ها ممنوع است.
+
+## معماری فیزیکی جاری
+
+- یک بات مرکزی و پنج publisher lane.
+- API و WebApp روی سرور ایران staging.
+- central bot و publisherها روی سرور بات.
+- deploy رسمی هر دو سرور: `scripts/deploy_staging.sh`.
+- head مهاجرت کد: `fb1c2d3e4f5a`.
+- تست‌های PostgreSQL scratch صف باید همین head را انتظار داشته باشند؛ پین تاریخی `b986c7d8e0f1` دیگر در درخت migrations وجود ندارد.
+
+## ماتریس زندهٔ authoritative
+
+- منبع حقیقت پس از cutover: `scripts/run_telegram_publisher_live_matrix.py` با ۵۰۰ آفر.
+- ماتریس B2B در `scripts/run_telegram_publisher_b2b_matrix.py` فقط حمل‌ونقل فرمان/رسید است.
+- workload قدیمی Stage 4 با `1800 valid + 400 invalid` تاریخی است و برای این cutover تکرار نمی‌شود.
+
+## ممیزی callsite
+
+- اسکریپت: `scripts/audit_telegram_delivery_calls.py`
+- شمار جاری: `100` callsite، بدون دستهٔ ناشناخته.
+- اثر انگشت بازبینی‌شدهٔ فعلی: `e15b604e99e012f1156e5f0d93070470d58d6b7ea97f3f48853f567db68c1995`
+- سه هویت فقط به‌خاطر جابه‌جایی خط بعد از `03be742b` حرکت کردند؛ طبقه و callee عوض نشد.
+
+## اندازه‌گیری staging در شروع مأموریت cutover
+
+سرور بات / foreign:
+
+- producer و execution owner برابر `legacy`
+- workerهای legacy فعال؛ Queue-v1 خاموش؛ cutover ready خاموش
+- multi-publisher و B2B فعال؛ هر پنج lane فعال و identity-bound
+- health پیش از reconciliation: `stop` به‌خاطر `oldest_ready_age_stop`
+- دو job آماده از نوع `overtime_owner_approval`؛ دامنهٔ هر دو terminal بود (`overtime_cancelled_by_requester` و `overtime_invalidated`) و آفرها `expired` بودند
+- پس از مسیر رسمی `reconcile_telegram_delivery_ready_jobs.py` هر دو `expired_interaction` شدند و health برابر `continue` شد
+- ارسال تلگرام و حذف SQL انجام نشد
+
+سرور ایران / API:
+
+- تصویر Docker با سرور بات یکی نیست؛ `RELEASE_SHA` خالی است
+- head مهاجرت با سرور بات یکی است: `fb1c2d3e4f5a`
+- producer و expected-owner و execution-owner روی `queue-v1` تنظیم شده‌اند، در حالی که اجرا روی سرور بات هنوز `legacy` است
+- token ناشر و token مرکزی روی ایران نیست؛ یک token ویرایشگر کانال روی ایران دیده شد و باید قبل از cutover حذف شود
+- این ترکیب split-brain قراردادی است و تا اصلاح، cutover `NO-GO` می‌ماند
+
+production در این سند تغییر نمی‌کند و مجوز جداگانه می‌خواهد.

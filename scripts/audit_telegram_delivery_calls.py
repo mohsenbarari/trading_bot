@@ -139,6 +139,9 @@ EXPECTED_RUNTIME_INVENTORY_SHA256 = (
 MAIN_UIUX_INTEGRATION_RUNTIME_INVENTORY_SHA256 = (
     "ea648b0b53a7185bf6e53258f7140c0d62a4620462dc7bfa4569f1e1772563e8"
 )
+OVERTIME_OWNER_PROMPT_RUNTIME_INVENTORY_SHA256 = (
+    "e15b604e99e012f1156e5f0d93070470d58d6b7ea97f3f48853f567db68c1995"
+)
 REVIEWED_RUNTIME_INVENTORY_SHA256 = frozenset(
     {
         EXPECTED_RUNTIME_INVENTORY_SHA256,
@@ -146,6 +149,12 @@ REVIEWED_RUNTIME_INVENTORY_SHA256 = frozenset(
         # unchanged; reviewed identities move only because viewer-scoped customer
         # display resolution adds non-delivery code above existing callsites.
         MAIN_UIUX_INTEGRATION_RUNTIME_INVENTORY_SHA256,
+        # Overtime owner-prompt overlay on 03be742b: same 100 callsites and
+        # dispositions. Only three identities moved because legacy overtime
+        # owner-approval preflight/finalize was inserted above the existing
+        # owner-guarded outbox gateway_send and the queue-exiting channel
+        # edit pair. No new send/edit/delete/callback boundary was added.
+        OVERTIME_OWNER_PROMPT_RUNTIME_INVENTORY_SHA256,
     }
 )
 

@@ -2,7 +2,7 @@
 
 ## Safety boundary
 
-This runbook prepares and verifies the final `1,800 valid + 400 invalid` staging workload. It does not authorize execution, merge, production access, or deployment. At the activation child, `TELEGRAM_DELIVERY_QUEUE_IMPLEMENTATION_READY=True` means only that the reviewed code capability is present; runtime ownership still requires the explicit producer/executor, worker and cutover controls plus a separate owner approval before `execute`.
+This runbook prepares and verifies the historical `1,800 valid + 400 invalid` staging workload. It does not authorize execution, merge, production access, or deployment. The current code flag `TELEGRAM_DELIVERY_QUEUE_IMPLEMENTATION_READY=True` still means only that the reviewed code capability is present; runtime ownership still requires the explicit producer/executor, worker and cutover controls. The authoritative live matrix for the current multi-publisher cutover is `scripts/run_telegram_publisher_live_matrix.py` (500 offers), documented in `docs/TELEGRAM_DELIVERY_QUEUE_CURRENT_STATE_20260816.md`. This Stage 4 workload is retained as historical evidence and is not re-run for that cutover.
 
 The four commands are:
 

@@ -1,5 +1,7 @@
 # Roadmap صف پایدار انتشار آفر در تلگرام
 
+> وضعیت عملیاتی جاری، از جمله `TELEGRAM_DELIVERY_QUEUE_IMPLEMENTATION_READY=True` به‌عنوان قابلیت کد و نه سوییچ اجرا، در `docs/TELEGRAM_DELIVERY_QUEUE_CURRENT_STATE_20260816.md` است. جدول Stage و checkpointهای زیر وضعیت تاریخی ۲۰۲۶-۰۷-۱۹ را حفظ می‌کنند و بازنویسی نمی‌شوند.
+
 ## وضعیت سند
 
 - تاریخ ایجاد: `2026-07-15`
