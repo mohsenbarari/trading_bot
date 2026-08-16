@@ -20,6 +20,13 @@ if str(ROOT) not in sys.path:
 
 async def _main(dry_run: bool, limit: int) -> int:
     from core.db import AsyncSessionLocal
+    if not dry_run:
+        # This CLI runs outside the API/bot startup path. Register the same
+        # transactional listeners before an authoritative repair so its
+        # OfferRequest update is durably emitted to the peer server.
+        from core.events import setup_all_events
+
+        setup_all_events()
     from core.services.offer_overtime_reconciliation_service import (
         reconcile_overtime_requests,
     )
