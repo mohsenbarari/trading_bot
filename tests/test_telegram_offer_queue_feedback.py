@@ -380,6 +380,30 @@ class TelegramOfferQueueFeedbackTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(job.terminal_at)
         self.db.flush.assert_awaited_once()
 
+    async def test_supersede_without_offer_does_not_raise(self):
+        job = make_job(TelegramDeliveryAction.OFFER_PUBLISH, source_version=1)
+        job.state = TelegramDeliveryState.SUPERSEDED
+        decision = TelegramFreshnessDecision(
+            TelegramFreshnessOutcome.SUPERSEDED,
+            reason="offer_freshness_source_missing",
+        )
+        with patch.object(
+            feedback_module,
+            "_load_offer_and_state_for_update",
+            new=AsyncMock(
+                side_effect=feedback_module.TelegramOfferQueueFeedbackError(
+                    "telegram_offer_queue_feedback_offer_missing"
+                )
+            ),
+        ):
+            await self.feedback.apply_freshness(
+                self.db,
+                job,
+                decision,
+                utc_now(),
+            )
+        self.assertEqual(job.state, TelegramDeliveryState.SUPERSEDED)
+
 
 if __name__ == "__main__":
     unittest.main()

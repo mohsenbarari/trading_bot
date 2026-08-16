@@ -757,17 +757,36 @@ async def promote_next_for_owner(
         telegram_producer_mode = configured_telegram_delivery_producer_mode()
         if telegram_producer_mode == TelegramDeliveryRuntimeMode.QUEUE_V1:
             from core.services.telegram_overtime_owner_approval_queue_service import (
+                OvertimeOwnerApprovalQueueError,
                 enqueue_overtime_owner_approval_delivery,
             )
 
-            enqueue_outcome = await enqueue_overtime_owner_approval_delivery(
-                db,
-                current_server=current_server(),
-                ledger=candidate,
-                offer=offer,
-                normal_lifetime_minutes=normal_lifetime_minutes,
-                now=current,
-            )
+            try:
+                enqueue_outcome = await enqueue_overtime_owner_approval_delivery(
+                    db,
+                    current_server=current_server(),
+                    ledger=candidate,
+                    offer=offer,
+                    normal_lifetime_minutes=normal_lifetime_minutes,
+                    now=current,
+                )
+            except OvertimeOwnerApprovalQueueError as exc:
+                await invalidate_request(
+                    db,
+                    candidate,
+                    reason=str(exc).split(":", 1)[0],
+                    now=current,
+                    flush=flush,
+                )
+                return await promote_next_for_owner(
+                    db,
+                    request_home_server=home,
+                    offer_owner_user_id=offer_owner_user_id,
+                    normal_lifetime_minutes=normal_lifetime_minutes,
+                    now=current,
+                    load_offer=load_offer,
+                    flush=flush,
+                )
             candidate.telegram_delivery_job_id = enqueue_outcome.job_id
         else:
             from core.services.telegram_overtime_owner_approval_legacy_service import (

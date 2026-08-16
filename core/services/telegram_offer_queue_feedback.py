@@ -270,7 +270,15 @@ class TelegramOfferQueueLifecycleFeedback:
         }:
             return
 
-        offer, state = await _load_offer_and_state_for_update(db, job=job)
+        try:
+            offer, state = await _load_offer_and_state_for_update(db, job=job)
+        except TelegramOfferQueueFeedbackError as exc:
+            if (
+                str(exc) == "telegram_offer_queue_feedback_offer_missing"
+                and outcome != TelegramFreshnessOutcome.SEND
+            ):
+                return
+            raise
         if outcome == TelegramFreshnessOutcome.RECLASSIFY:
             replacement = decision.replacement_action
             if replacement is None:
