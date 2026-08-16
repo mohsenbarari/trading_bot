@@ -18,6 +18,13 @@
 - head مهاجرت کد: `fb1c2d3e4f5a`.
 - تست‌های PostgreSQL scratch صف باید همین head را انتظار داشته باشند؛ پین تاریخی `b986c7d8e0f1` دیگر در درخت migrations وجود ندارد.
 
+## ارکستراسیون cutover
+
+- اسکریپت رسمی: `scripts/cutover_telegram_delivery_queue_staging.py`
+- دستورهای فعلی: `plan`, `status`, `backup`, `restore-probe`
+- قرارداد نقش process در `core/telegram_delivery_cutover_contract.py` است
+- `apply` هنوز وقتی اجرا می‌شود که health، backup، restore و preflight زنده پاس شوند
+
 ## ماتریس زندهٔ authoritative
 
 - منبع حقیقت پس از cutover: `scripts/run_telegram_publisher_live_matrix.py` با ۵۰۰ آفر.
