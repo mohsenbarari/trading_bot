@@ -71,11 +71,15 @@ class BotTelegramExecutionOwnershipTests(unittest.TestCase):
             ),
             settings_obj=self._queue_settings(),
         )
-        self.assertEqual(len(factories), 1)
+        self.assertEqual(len(factories), 2)
         self.assertIsNot(factories[0], telegram_delivery_queue_loop)
         self.assertEqual(
             factories[0].__name__,
             "run_configured_telegram_delivery_queue",
+        )
+        self.assertEqual(
+            factories[1].__name__,
+            "run_telegram_otp_ephemeral_worker",
         )
         self.assertNotIn(offer_telegram_publication_loop, factories)
         self.assertNotIn(telegram_trade_delivery_loop, factories)

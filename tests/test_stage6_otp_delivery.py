@@ -32,6 +32,13 @@ from core.services.otp_sms_delivery_service import (
     execute_claimed_otp_sms_delivery,
 )
 from core.services.telegram_otp_delivery_service import _text, deliver_telegram_otp_once
+from core.services.telegram_otp_ephemeral_queue import (
+    OTP_EQ_STREAM,
+    command_hash,
+    encrypt_otp_command,
+    execute_telegram_otp_via_gateway,
+    process_telegram_otp_stream_message,
+)
 from core.sms import SMSDeliveryOutcome, send_otp_sms_result_async
 from core.telegram_otp_transport import forward_telegram_otp_delivery
 from core.utils import utc_now
@@ -95,6 +102,26 @@ class DedupeRedis:
         return self.values.get(key)
 
 
+class StreamRedis(DedupeRedis):
+    def __init__(self):
+        super().__init__()
+        self.stream = []
+        self.acked = set()
+        self._seq = 0
+
+    async def xadd(self, name, fields):
+        del name
+        self._seq += 1
+        message_id = f"1-{self._seq}"
+        self.stream.append((message_id, dict(fields)))
+        return message_id
+
+    async def xack(self, name, group, message_id):
+        del name, group
+        self.acked.add(str(message_id))
+        return 1
+
+
 class RequestRedis:
     async def get(self, _key):
         return None
@@ -130,35 +157,33 @@ class Stage6ContractAndForeignDeliveryTests(unittest.IsolatedAsyncioTestCase):
                 {**command().model_dump(), "unexpected": True}
             )
 
-    async def test_foreign_delivery_dedupes_exact_command_and_rejects_changed_replay(self):
-        redis = DedupeRedis()
+    async def test_foreign_delivery_enqueues_instead_of_calling_provider(self):
+        redis = StreamRedis()
         original = command()
-        gateway_result = SimpleNamespace(ok=True, status_code=200, error=None)
         with override_current_server(SERVER_FOREIGN), patch(
-            "core.services.telegram_otp_delivery_service.telegram_gateway.send_message",
-            new=AsyncMock(return_value=gateway_result),
-        ) as send:
+            "core.services.telegram_otp_ephemeral_queue.settings"
+        ) as configured, patch(
+            "core.services.telegram_otp_ephemeral_queue.wait_telegram_otp_receipt",
+            new=AsyncMock(return_value=TelegramOTPDeliveryOutcome.SENT),
+        ):
+            configured.telegram_otp_queue_secret = TEST_STATE_SECRET
             first = await deliver_telegram_otp_once(redis, command=original)
-            replay = await deliver_telegram_otp_once(redis, command=original)
-            changed = await deliver_telegram_otp_once(
-                redis,
-                command=original.model_copy(update={"otp_code": "54321"}),
-            )
-
         self.assertEqual(first.outcome, TelegramOTPDeliveryOutcome.SENT)
-        self.assertEqual(replay.outcome, TelegramOTPDeliveryOutcome.DUPLICATE_SENT)
-        self.assertEqual(changed.outcome, TelegramOTPDeliveryOutcome.INVALID)
-        send.assert_awaited_once()
-        self.assertNotIn("12345", " ".join(redis.values.values()))
+        self.assertEqual(len(redis.stream), 1)
+        stored = " ".join(str(value) for value in redis.stream[0][1].values())
+        self.assertNotIn("12345", stored)
 
     async def test_foreign_delivery_classifies_rate_limit_and_enforces_surface(self):
         result = SimpleNamespace(ok=False, status_code=429, error=None)
+        cmd = command()
         with override_current_server(SERVER_FOREIGN), patch(
-            "core.services.telegram_otp_delivery_service.telegram_gateway.send_message",
+            "core.services.telegram_otp_ephemeral_queue.telegram_gateway.send_message",
             new=AsyncMock(return_value=result),
+        ), patch(
+            "core.services.telegram_otp_ephemeral_queue.assert_telegram_provider_execution_authority",
         ):
-            response = await deliver_telegram_otp_once(DedupeRedis(), command=command())
-        self.assertEqual(response.outcome, TelegramOTPDeliveryOutcome.RATE_LIMITED)
+            outcome = await execute_telegram_otp_via_gateway(cmd)
+        self.assertEqual(outcome, TelegramOTPDeliveryOutcome.RATE_LIMITED)
 
         with override_current_server(SERVER_IRAN):
             with self.assertRaisesRegex(RuntimeError, "requires_foreign"):
@@ -175,6 +200,7 @@ class Stage6ContractAndForeignDeliveryTests(unittest.IsolatedAsyncioTestCase):
         cases = (
             (RuntimeError("gateway failed"), TelegramOTPDeliveryOutcome.PROVIDER_ERROR),
             (SimpleNamespace(ok=False, status_code=400), TelegramOTPDeliveryOutcome.UNREACHABLE),
+            (SimpleNamespace(ok=False, status_code=403), TelegramOTPDeliveryOutcome.UNREACHABLE),
             (SimpleNamespace(ok=False, status_code=500), TelegramOTPDeliveryOutcome.PROVIDER_ERROR),
         )
         for gateway_result, expected in cases:
@@ -183,14 +209,13 @@ class Stage6ContractAndForeignDeliveryTests(unittest.IsolatedAsyncioTestCase):
             with self.subTest(expected=expected), override_current_server(
                 SERVER_FOREIGN
             ), patch(
-                "core.services.telegram_otp_delivery_service.telegram_gateway.send_message",
+                "core.services.telegram_otp_ephemeral_queue.telegram_gateway.send_message",
                 new=AsyncMock(side_effect=side_effect, return_value=return_value),
+            ), patch(
+                "core.services.telegram_otp_ephemeral_queue.assert_telegram_provider_execution_authority",
             ):
-                result = await deliver_telegram_otp_once(
-                    DedupeRedis(),
-                    command=command(),
-                )
-            self.assertEqual(result.outcome, expected)
+                result = await execute_telegram_otp_via_gateway(command())
+            self.assertEqual(result, expected)
 
     async def test_internal_endpoint_rejects_wrong_surface_and_unknown_fields(self):
         cmd = command()

@@ -117,6 +117,8 @@ class TelegramOTPDeliveryOutcome(str, Enum):
     PROVIDER_ERROR = "provider_error"
     INVALID = "invalid"
     FEATURE_DISABLED = "feature_disabled"
+    TIMEOUT = "timeout"
+    WORKER_UNAVAILABLE = "worker_unavailable"
 
 
 class TelegramRegistrationCommand(BaseModel):

@@ -56,6 +56,9 @@ from core.telegram_delivery_queue_limiter import (
 from core.telegram_delivery_runtime_composition import (
     build_configured_telegram_delivery_runtime,
 )
+from core.services.telegram_otp_ephemeral_queue import (
+    configured_telegram_otp_ephemeral_worker_factory,
+)
 from core.telegram_delivery_runtime_policy import (
     TelegramDeliveryRuntimeConfigurationError,
     TelegramDeliveryRuntimeDecision,
@@ -294,7 +297,10 @@ def telegram_execution_worker_factories(
             raise TelegramDeliveryRuntimeConfigurationError(
                 "inconsistent_queue_runtime_decision"
             )
-        return (configured_telegram_delivery_queue_worker_factory(settings_obj),)
+        return (
+            configured_telegram_delivery_queue_worker_factory(settings_obj),
+            configured_telegram_otp_ephemeral_worker_factory(settings_obj),
+        )
     raise TelegramDeliveryRuntimeConfigurationError("unknown_runtime_decision_mode")
 
 
