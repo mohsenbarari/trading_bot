@@ -45,6 +45,20 @@ def validate_iran_sms_fallback_runtime(settings_obj=settings) -> None:
         raise RuntimeError("sms_fallback_config_incomplete")
 
 
+def validate_non_iran_sms_isolation(settings_obj=settings) -> None:
+    """SMS credentials and fallback belong only to the Iran API process."""
+
+    server = normalize_server(getattr(settings_obj, "server_mode", None))
+    service = str(getattr(settings_obj, "trading_bot_service", "") or "").strip().lower()
+    isolated = service in {"bot", "sync_worker", "load_runner", "migration"} or server != SERVER_IRAN
+    if not isolated:
+        return
+    if bool(getattr(settings_obj, "otp_sms_auto_fallback_enabled", False)):
+        raise RuntimeError("sms_fallback_forbidden_outside_iran_api")
+    if str(getattr(settings_obj, "smsir_api_key", "") or "").strip():
+        raise RuntimeError("sms_credential_forbidden_outside_iran_api")
+
+
 def _api_url(path: str) -> str:
     base_url = (settings.smsir_base_url or "https://api.sms.ir").rstrip("/")
     return f"{base_url}/{path.lstrip('/')}"

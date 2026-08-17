@@ -4744,11 +4744,11 @@ async def get_sync_health(
     telegram_otp_ephemeral = {"status": "not_applicable"}
     if redis_ok and normalize_server(settings.server_mode) == SERVER_FOREIGN:
         try:
+            otp_health = await inspect_telegram_otp_ephemeral_health(redis_client)
+            otp_payload = telegram_otp_ephemeral_health_payload(otp_health)
             telegram_otp_ephemeral = {
-                "status": "ok",
-                **telegram_otp_ephemeral_health_payload(
-                    await inspect_telegram_otp_ephemeral_health(redis_client)
-                ),
+                "status": "error" if otp_health.error else "ok",
+                **otp_payload,
             }
         except Exception as exc:
             telegram_otp_ephemeral = {

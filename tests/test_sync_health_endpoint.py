@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, patch
 from fastapi import HTTPException
 
 from api.routers.sync import get_sync_health, get_sync_parity_snapshot, record_sync_parity_status
+from core.services.telegram_otp_ephemeral_queue import TelegramOTPEphemeralHealth
 from core.sync_protocol import current_sync_registry_fingerprint
 
 
@@ -154,6 +155,17 @@ class SyncHealthEndpointTests(unittest.IsolatedAsyncioTestCase):
             new=AsyncMock(return_value=OVERTIME_SUMMARY),
         ), patch(
             "api.routers.sync.record_overtime_reconciliation_health",
+        ), patch(
+            "api.routers.sync.inspect_telegram_otp_ephemeral_health",
+            new=AsyncMock(
+                return_value=TelegramOTPEphemeralHealth(
+                    worker_present=True,
+                    pending_count=0,
+                    poison_count=0,
+                    oldest_command_age_seconds=None,
+                    receipt_wait_seconds=4.0,
+                )
+            ),
         ):
             payload = await get_sync_health(request=request, db=db)
 

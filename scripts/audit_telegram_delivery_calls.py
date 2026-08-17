@@ -142,10 +142,13 @@ EXPECTED_RUNTIME_INVENTORY_COUNTS = {
     "queue_execution": 1,
 }
 EXPECTED_RUNTIME_INVENTORY_SHA256 = (
-    "b106a19f532e7f6c6ecfc4e5f3a20e81a8f29427e77e9ba680dffd095153b451"
+    "18f80e229bdad8eff47b9aae9316b43cf3ccaeb4f143ebdc18a276306e876fdc"
 )
 PRODUCER_ONLY_OTP_QUEUE_RUNTIME_INVENTORY_SHA256 = (
     "c524e2309347a745034b2e7bae3af2e727495a8bac5f667dc2aecf2019f74c4f"
+)
+PRE_OTP_QUEUE_HARDENING_RUNTIME_INVENTORY_SHA256 = (
+    "b106a19f532e7f6c6ecfc4e5f3a20e81a8f29427e77e9ba680dffd095153b451"
 )
 MAIN_UIUX_INTEGRATION_RUNTIME_INVENTORY_SHA256 = (
     "ea648b0b53a7185bf6e53258f7140c0d62a4620462dc7bfa4569f1e1772563e8"
@@ -157,6 +160,10 @@ REVIEWED_RUNTIME_INVENTORY_SHA256 = frozenset(
     {
         EXPECTED_RUNTIME_INVENTORY_SHA256,
         PRODUCER_ONLY_OTP_QUEUE_RUNTIME_INVENTORY_SHA256,
+        # Same 103 callsites and dispositions. Three identities moved because
+        # OTP finalize/retention helpers and SMS isolation startup checks were
+        # inserted above the existing bot-owned OTP send and Bot() constructors.
+        PRE_OTP_QUEUE_HARDENING_RUNTIME_INVENTORY_SHA256,
         # Exact main/customer-visibility overlay: classifications and counts remain
         # unchanged; reviewed identities move only because viewer-scoped customer
         # display resolution adds non-delivery code above existing callsites.

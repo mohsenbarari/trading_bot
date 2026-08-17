@@ -44,6 +44,12 @@ OTP_EQ_POLL_SECONDS = 0.05
 OTP_EQ_WORKER_TTL_SECONDS = 30
 OTP_EQ_CLAIM_IDLE_MS = 15_000
 OTP_EQ_MAX_DELIVERIES = 3
+# OTP itself is two minutes; receipts keep at most five minutes plus a
+# one-minute waiter margin. Unused commands may not outlive that window.
+OTP_EQ_COMMAND_RETENTION_SECONDS = 360
+OTP_EQ_RECEIPT_FALLBACK_TTL_SECONDS = 180
+OTP_EQ_POISON_MAXLEN = 256
+OTP_EQ_POISON_TTL_SECONDS = 86_400
 _MIN_QUEUE_SECRET_LENGTH = 32
 _FERNET_DOMAIN = b"trading-bot:telegram-otp-eq:v1\x00"
 
@@ -55,10 +61,11 @@ class TelegramOTPQueueError(RuntimeError):
 @dataclass(frozen=True, slots=True)
 class TelegramOTPEphemeralHealth:
     worker_present: bool
-    pending_count: int
+    pending_count: int | None
     poison_count: int
     oldest_command_age_seconds: float | None
     receipt_wait_seconds: float
+    error: str | None = None
 
 
 def _text(value: object | None) -> str | None:
@@ -147,7 +154,7 @@ def outcome_from_receipt(
 async def _write_receipt(
     redis,
     *,
-    otp_request_id: UUID,
+    otp_request_id: UUID | str,
     outcome: TelegramOTPDeliveryOutcome,
     digest: str,
     ttl_seconds: int,
@@ -195,6 +202,7 @@ async def enqueue_telegram_otp_command(
         "enqueued_at": str(int(moment.timestamp())),
     }
     message_id = await redis.xadd(OTP_EQ_STREAM, fields)
+    await retain_telegram_otp_command_stream(redis)
     return str(message_id)
 
 
@@ -377,13 +385,137 @@ def _stream_entries(raw: Any) -> list[tuple[str, dict[str, Any]]]:
     return pairs
 
 
-async def _quarantine(
+def _stream_id_ms(message_id: str) -> int | None:
+    text = str(message_id or "")
+    head, separator, _tail = text.partition("-")
+    if not separator or not head.isdigit():
+        return None
+    return int(head)
+
+
+def _mapping(raw: Any) -> dict[str, Any]:
+    if isinstance(raw, dict):
+        return {str(key): raw[key] for key in raw}
+    if not isinstance(raw, (list, tuple)):
+        return {}
+    mapped: dict[str, Any] = {}
+    for index in range(0, len(raw) - 1, 2):
+        mapped[str(raw[index])] = raw[index + 1]
+    return mapped
+
+
+def _pending_delivery_count(entry: Any) -> tuple[str, int] | None:
+    if isinstance(entry, dict):
+        message_id = str(entry.get("message_id") or entry.get("msgid") or "")
+        raw_count = entry.get("times_delivered", entry.get("deliveries"))
+        if not message_id or raw_count is None:
+            return None
+        try:
+            return message_id, int(raw_count)
+        except (TypeError, ValueError):
+            return None
+    if isinstance(entry, (list, tuple)) and len(entry) >= 4:
+        try:
+            return str(entry[0]), int(entry[3])
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
+def _group_info(raw: Any) -> dict[str, Any] | None:
+    rows = raw or []
+    if isinstance(rows, dict):
+        rows = [rows]
+    for item in rows:
+        info = _mapping(item)
+        name = str(info.get("name") or "")
+        if name == OTP_EQ_GROUP:
+            return info
+    return None
+
+
+async def _ack_and_delete(redis, message_id: str) -> None:
+    """ACK then delete one command. Idempotent; never sends OTP."""
+    try:
+        pipeline = redis.pipeline(transaction=True)
+        if hasattr(pipeline, "__aenter__"):
+            async with pipeline as pipe:
+                pipe.xack(OTP_EQ_STREAM, OTP_EQ_GROUP, message_id)
+                pipe.xdel(OTP_EQ_STREAM, message_id)
+                await pipe.execute()
+        else:
+            pipeline.xack(OTP_EQ_STREAM, OTP_EQ_GROUP, message_id)
+            pipeline.xdel(OTP_EQ_STREAM, message_id)
+            await pipeline.execute()
+        return
+    except Exception:
+        logger.warning(
+            "Telegram OTP finalize pipeline failed",
+            extra={"event": "otp.eq.finalize_pipeline_failed"},
+        )
+    try:
+        await redis.xack(OTP_EQ_STREAM, OTP_EQ_GROUP, message_id)
+        await redis.xdel(OTP_EQ_STREAM, message_id)
+    except Exception:
+        logger.warning(
+            "Telegram OTP finalize recovery failed",
+            extra={"event": "otp.eq.finalize_ack_delete_retry_failed"},
+        )
+        raise
+
+
+async def finalize_telegram_otp_command(
     redis,
     *,
     message_id: str,
-    request_id: str,
-    reason: str,
+    otp_request_id: UUID | str | None = None,
+    outcome: TelegramOTPDeliveryOutcome | None = None,
+    digest: str | None = None,
+    ttl_seconds: int | None = None,
 ) -> None:
+    """Persist a terminal receipt first, then ACK+DELETE the command.
+
+    Re-running this helper is safe. A crash after the receipt write leaves a
+    reclaim that observes the receipt, does not resend, and deletes the body.
+    """
+    if (
+        otp_request_id is not None
+        and outcome is not None
+        and digest
+    ):
+        await _write_receipt(
+            redis,
+            otp_request_id=otp_request_id,
+            outcome=outcome,
+            digest=digest,
+            ttl_seconds=max(1, int(ttl_seconds or OTP_EQ_RECEIPT_FALLBACK_TTL_SECONDS)),
+        )
+    await _ack_and_delete(redis, message_id)
+    await retain_telegram_otp_command_stream(redis)
+
+
+async def _bound_poison_stream(redis) -> None:
+    try:
+        await redis.xtrim(
+            OTP_EQ_POISON_STREAM,
+            maxlen=OTP_EQ_POISON_MAXLEN,
+            approximate=False,
+        )
+    except Exception:
+        logger.warning(
+            "Telegram OTP poison trim failed",
+            extra={"event": "otp.eq.poison_trim_failed"},
+        )
+    try:
+        await redis.expire(OTP_EQ_POISON_STREAM, OTP_EQ_POISON_TTL_SECONDS)
+    except Exception:
+        logger.warning(
+            "Telegram OTP poison expire failed",
+            extra={"event": "otp.eq.poison_expire_failed"},
+        )
+
+
+async def _record_poison(redis, *, request_id: str, reason: str) -> None:
     await redis.xadd(
         OTP_EQ_POISON_STREAM,
         {
@@ -392,11 +524,144 @@ async def _quarantine(
             "quarantined_at": str(int(utc_now().timestamp())),
         },
     )
-    await redis.xack(OTP_EQ_STREAM, OTP_EQ_GROUP, message_id)
+    await _bound_poison_stream(redis)
     logger.warning(
         "Telegram OTP command quarantined",
         extra={"event": "otp.eq.poison", "reason": reason},
     )
+
+
+async def retain_telegram_otp_command_stream(redis) -> None:
+    """Drop only commands older than OTP lifetime plus operational margin.
+
+    Pending entries are never trimmed. A small MAXLEN is intentionally not
+    used because it can evict a still-valid in-flight command.
+    """
+    cutoff_ms = int((utc_now().timestamp() - OTP_EQ_COMMAND_RETENTION_SECONDS) * 1000)
+    cutoff_id = f"{max(0, cutoff_ms)}-0"
+    threshold = cutoff_id
+    try:
+        pending_ids = await _pending_message_ids(redis)
+    except Exception:
+        logger.warning(
+            "Telegram OTP retention skipped pending lookup",
+            extra={"event": "otp.eq.retention_pending_unavailable"},
+        )
+        return
+    if pending_ids:
+        oldest_pending = min(
+            pending_ids,
+            key=lambda item: _stream_id_ms(item) if _stream_id_ms(item) is not None else 2**63,
+        )
+        oldest_ms = _stream_id_ms(oldest_pending)
+        if oldest_ms is not None and oldest_ms < cutoff_ms:
+            threshold = oldest_pending
+    try:
+        await redis.xtrim(OTP_EQ_STREAM, minid=threshold, approximate=False)
+    except TypeError:
+        try:
+            await redis.xtrim(OTP_EQ_STREAM, maxlen=0, minid=threshold, approximate=False)
+        except Exception:
+            logger.warning(
+                "Telegram OTP command trim failed",
+                extra={"event": "otp.eq.command_trim_failed"},
+            )
+    except Exception:
+        logger.warning(
+            "Telegram OTP command trim failed",
+            extra={"event": "otp.eq.command_trim_failed"},
+        )
+
+
+async def _pending_message_ids(redis) -> list[str]:
+    try:
+        rows = await redis.xpending_range(
+            OTP_EQ_STREAM,
+            OTP_EQ_GROUP,
+            min="-",
+            max="+",
+            count=1024,
+        )
+    except Exception as exc:
+        message = str(exc).lower()
+        if "nogroup" in message or "no such key" in message:
+            return []
+        raise
+    ids: list[str] = []
+    for entry in rows or ():
+        parsed = _pending_delivery_count(entry)
+        if parsed is None:
+            if isinstance(entry, dict) and entry.get("message_id"):
+                ids.append(str(entry["message_id"]))
+            elif isinstance(entry, (list, tuple)) and entry:
+                ids.append(str(entry[0]))
+            continue
+        ids.append(parsed[0])
+    return ids
+
+
+async def _times_delivered(redis, message_ids: list[str]) -> dict[str, int | None]:
+    wanted = {str(item) for item in message_ids}
+    found: dict[str, int] = {}
+    if not wanted:
+        return {}
+    try:
+        rows = await redis.xpending_range(
+            OTP_EQ_STREAM,
+            OTP_EQ_GROUP,
+            min="-",
+            max="+",
+            count=max(len(wanted) * 4, 16),
+        )
+    except Exception:
+        logger.warning(
+            "Telegram OTP delivery metadata unavailable",
+            extra={"event": "otp.eq.delivery_count_unavailable"},
+        )
+        return {item: None for item in wanted}
+    for entry in rows or ():
+        parsed = _pending_delivery_count(entry)
+        if parsed is None:
+            continue
+        message_id, deliveries = parsed
+        if message_id in wanted:
+            found[message_id] = deliveries
+    return {item: found.get(item) for item in wanted}
+
+
+async def _finalize_without_send(
+    redis,
+    *,
+    message_id: str,
+    request_id: str,
+    digest: str,
+    outcome: TelegramOTPDeliveryOutcome,
+    reason: str | None = None,
+    ttl_seconds: int = OTP_EQ_RECEIPT_FALLBACK_TTL_SECONDS,
+) -> TelegramOTPDeliveryOutcome:
+    existing = None
+    if request_id and digest:
+        existing = outcome_from_receipt(
+            await redis.get(receipt_key(request_id)),
+            expected_hash=digest,
+        )
+    if existing is None:
+        if reason:
+            await _record_poison(redis, request_id=request_id, reason=reason)
+        if request_id and digest:
+            await finalize_telegram_otp_command(
+                redis,
+                message_id=message_id,
+                otp_request_id=request_id,
+                outcome=outcome,
+                digest=digest,
+                ttl_seconds=ttl_seconds,
+            )
+            return outcome
+        await finalize_telegram_otp_command(redis, message_id=message_id)
+        return outcome
+    await finalize_telegram_otp_command(redis, message_id=message_id)
+    return existing
 
 
 async def process_telegram_otp_stream_message(
@@ -404,23 +669,54 @@ async def process_telegram_otp_stream_message(
     *,
     message_id: str,
     fields: dict[str, Any],
-    deliveries: int = 1,
+    deliveries: int | None = 1,
 ) -> TelegramOTPDeliveryOutcome:
     request_id = str(fields.get("request_id") or "")
     declared_hash = str(fields.get("command_hash") or "")
     ciphertext = str(fields.get("payload") or "")
+    if deliveries is None:
+        return await _finalize_without_send(
+            redis,
+            message_id=message_id,
+            request_id=request_id,
+            digest=declared_hash,
+            outcome=TelegramOTPDeliveryOutcome.PROVIDER_ERROR,
+            reason="delivery_count_unknown",
+        )
     if deliveries > OTP_EQ_MAX_DELIVERIES:
-        await _quarantine(redis, message_id=message_id, request_id=request_id, reason="max_deliveries")
-        return TelegramOTPDeliveryOutcome.PROVIDER_ERROR
+        logger.warning(
+            "Telegram OTP max deliveries exceeded",
+            extra={"event": "otp.eq.max_deliveries"},
+        )
+        return await _finalize_without_send(
+            redis,
+            message_id=message_id,
+            request_id=request_id,
+            digest=declared_hash,
+            outcome=TelegramOTPDeliveryOutcome.PROVIDER_ERROR,
+            reason="max_deliveries",
+        )
     try:
         command = decrypt_otp_command(ciphertext)
     except (TelegramOTPQueueError, InvalidToken, ValueError, TypeError, json.JSONDecodeError):
-        await _quarantine(redis, message_id=message_id, request_id=request_id, reason="decrypt_or_contract")
-        return TelegramOTPDeliveryOutcome.INVALID
+        return await _finalize_without_send(
+            redis,
+            message_id=message_id,
+            request_id=request_id,
+            digest=declared_hash,
+            outcome=TelegramOTPDeliveryOutcome.INVALID,
+            reason="decrypt_or_contract",
+        )
     digest = command_hash(command)
     if request_id != str(command.otp_request_id) or (declared_hash and declared_hash != digest):
-        await _quarantine(redis, message_id=message_id, request_id=request_id, reason="hash_mismatch")
-        return TelegramOTPDeliveryOutcome.INVALID
+        return await _finalize_without_send(
+            redis,
+            message_id=message_id,
+            request_id=request_id,
+            digest=declared_hash or digest,
+            outcome=TelegramOTPDeliveryOutcome.INVALID,
+            reason="hash_mismatch",
+        )
     ttl_seconds = _receipt_ttl_seconds(command, now=utc_now())
     existing = await read_receipt_outcome(
         redis,
@@ -428,33 +724,33 @@ async def process_telegram_otp_stream_message(
         expected_hash=digest,
     )
     if existing is not None:
-        await redis.xack(OTP_EQ_STREAM, OTP_EQ_GROUP, message_id)
+        await finalize_telegram_otp_command(redis, message_id=message_id)
         return existing
     limiter_outcome = await _admit_central_bot(redis, command)
     if limiter_outcome is not None:
-        await _write_receipt(
+        await finalize_telegram_otp_command(
             redis,
+            message_id=message_id,
             otp_request_id=command.otp_request_id,
             outcome=limiter_outcome,
             digest=digest,
             ttl_seconds=ttl_seconds,
         )
-        await redis.xack(OTP_EQ_STREAM, OTP_EQ_GROUP, message_id)
         return limiter_outcome
     outcome = await execute_telegram_otp_via_gateway(command)
-    await _write_receipt(
+    await finalize_telegram_otp_command(
         redis,
+        message_id=message_id,
         otp_request_id=command.otp_request_id,
         outcome=outcome,
         digest=digest,
         ttl_seconds=ttl_seconds,
     )
-    await redis.xack(OTP_EQ_STREAM, OTP_EQ_GROUP, message_id)
     return outcome
 
 
-async def _read_group_messages(redis, *, consumer: str, count: int = 1) -> list[tuple[str, dict[str, Any], int]]:
-    claimed: list[tuple[str, dict[str, Any], int]] = []
+async def _read_group_messages(redis, *, consumer: str, count: int = 1) -> list[tuple[str, dict[str, Any], int | None]]:
+    claimed: list[tuple[str, dict[str, Any]]] = []
     try:
         autoclaim = await redis.xautoclaim(
             OTP_EQ_STREAM,
@@ -464,22 +760,25 @@ async def _read_group_messages(redis, *, consumer: str, count: int = 1) -> list[
             "0-0",
             count=count,
         )
-        for message_id, fields in _stream_entries(autoclaim):
-            claimed.append((message_id, fields, 2))
+        claimed.extend(_stream_entries(autoclaim))
     except Exception:
         logger.debug("Telegram OTP autoclaim skipped", extra={"event": "otp.eq.autoclaim_skipped"})
-    if claimed:
-        return claimed
-    raw = await redis.xreadgroup(
-        OTP_EQ_GROUP,
-        consumer,
-        streams={OTP_EQ_STREAM: ">"},
-        count=count,
-        block=1000,
-    )
-    for message_id, fields in _stream_entries(raw):
-        claimed.append((message_id, fields, 1))
-    return claimed
+    if not claimed:
+        raw = await redis.xreadgroup(
+            OTP_EQ_GROUP,
+            consumer,
+            streams={OTP_EQ_STREAM: ">"},
+            count=count,
+            block=1000,
+        )
+        claimed.extend(_stream_entries(raw))
+    if not claimed:
+        return []
+    deliveries = await _times_delivered(redis, [message_id for message_id, _fields in claimed])
+    return [
+        (message_id, fields, deliveries.get(message_id))
+        for message_id, fields in claimed
+    ]
 
 
 async def run_telegram_otp_ephemeral_once(
@@ -489,6 +788,7 @@ async def run_telegram_otp_ephemeral_once(
 ) -> int:
     await ensure_otp_eq_group(redis)
     await redis.set(OTP_EQ_WORKER_KEY, "1", ex=OTP_EQ_WORKER_TTL_SECONDS)
+    await retain_telegram_otp_command_stream(redis)
     messages = await _read_group_messages(redis, consumer=consumer, count=1)
     processed = 0
     for message_id, fields, deliveries in messages:
@@ -536,33 +836,181 @@ def configured_telegram_otp_ephemeral_worker_factory(settings_obj=settings):
     return run_telegram_otp_ephemeral_worker
 
 
+def _int_or_none(value: Any) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 async def inspect_telegram_otp_ephemeral_health(redis) -> TelegramOTPEphemeralHealth:
     worker_present = bool(await redis.get(OTP_EQ_WORKER_KEY))
-    try:
-        pending_count = int(await redis.xlen(OTP_EQ_STREAM) or 0)
-    except Exception:
-        pending_count = 0
     try:
         poison_count = int(await redis.xlen(OTP_EQ_POISON_STREAM) or 0)
     except Exception:
         poison_count = 0
-    oldest_age: float | None = None
     try:
-        first = await redis.xrange(OTP_EQ_STREAM, min="-", max="+", count=1)
-        if first:
-            _message_id, fields = first[0]
-            enqueued_at = int(str((fields or {}).get("enqueued_at") or "0"))
-            if enqueued_at > 0:
-                oldest_age = max(0.0, utc_now().timestamp() - enqueued_at)
+        return await _inspect_outstanding_health(
+            redis,
+            worker_present=worker_present,
+            poison_count=poison_count,
+        )
+    except TelegramOTPQueueError as exc:
+        logger.warning(
+            "Telegram OTP health metadata unavailable",
+            extra={"event": "otp.eq.health_metadata_unavailable", "reason": str(exc)},
+        )
+        return TelegramOTPEphemeralHealth(
+            worker_present=worker_present,
+            pending_count=None,
+            poison_count=poison_count,
+            oldest_command_age_seconds=None,
+            receipt_wait_seconds=OTP_EQ_WAIT_SECONDS,
+            error=str(exc) or "otp_eq_health_metadata_unavailable",
+        )
     except Exception:
-        oldest_age = None
+        logger.warning(
+            "Telegram OTP health inspection failed",
+            extra={"event": "otp.eq.health_inspect_failed"},
+        )
+        return TelegramOTPEphemeralHealth(
+            worker_present=worker_present,
+            pending_count=None,
+            poison_count=poison_count,
+            oldest_command_age_seconds=None,
+            receipt_wait_seconds=OTP_EQ_WAIT_SECONDS,
+            error="otp_eq_health_metadata_unavailable",
+        )
+
+
+async def _inspect_outstanding_health(
+    redis,
+    *,
+    worker_present: bool,
+    poison_count: int,
+) -> TelegramOTPEphemeralHealth:
+    try:
+        stream_length = int(await redis.xlen(OTP_EQ_STREAM) or 0)
+    except Exception as exc:
+        raise TelegramOTPQueueError("otp_eq_health_stream_unavailable") from exc
+    try:
+        groups = await redis.xinfo_groups(OTP_EQ_STREAM)
+    except Exception as exc:
+        message = str(exc).lower()
+        if "no such key" in message or "no such file" in message:
+            groups = []
+        else:
+            raise TelegramOTPQueueError("otp_eq_health_groups_unavailable") from exc
+    info = _group_info(groups)
+    if info is None:
+        if stream_length == 0:
+            return TelegramOTPEphemeralHealth(
+                worker_present=worker_present,
+                pending_count=0,
+                poison_count=poison_count,
+                oldest_command_age_seconds=None,
+                receipt_wait_seconds=OTP_EQ_WAIT_SECONDS,
+            )
+        outstanding_ids = [
+            str(message_id)
+            for message_id, _fields in await redis.xrange(OTP_EQ_STREAM, min="-", max="+")
+        ]
+        return TelegramOTPEphemeralHealth(
+            worker_present=worker_present,
+            pending_count=len(outstanding_ids),
+            poison_count=poison_count,
+            oldest_command_age_seconds=_oldest_age_seconds(outstanding_ids, {}),
+            receipt_wait_seconds=OTP_EQ_WAIT_SECONDS,
+        )
+    pending = _int_or_none(info.get("pending"))
+    lag = _int_or_none(info.get("lag"))
+    entries_read = _int_or_none(info.get("entries-read", info.get("entries_read")))
+    if lag is None:
+        if entries_read is None:
+            raise TelegramOTPQueueError("otp_eq_health_lag_unavailable")
+        lag = max(0, stream_length - entries_read)
+    if pending is None:
+        raise TelegramOTPQueueError("otp_eq_health_pending_unavailable")
+    try:
+        summary = await redis.xpending(OTP_EQ_STREAM, OTP_EQ_GROUP)
+    except Exception as exc:
+        raise TelegramOTPQueueError("otp_eq_health_xpending_unavailable") from exc
+    summary_pending = 0
+    if isinstance(summary, dict):
+        summary_pending = _int_or_none(summary.get("pending")) or 0
+    elif isinstance(summary, (list, tuple)) and summary:
+        summary_pending = _int_or_none(summary[0]) or 0
+    if summary_pending != pending:
+        raise TelegramOTPQueueError("otp_eq_health_pending_inconsistent")
+    outstanding = pending + lag
+    if outstanding == 0:
+        return TelegramOTPEphemeralHealth(
+            worker_present=worker_present,
+            pending_count=0,
+            poison_count=poison_count,
+            oldest_command_age_seconds=None,
+            receipt_wait_seconds=OTP_EQ_WAIT_SECONDS,
+        )
+    pending_ids = await _pending_message_ids(redis)
+    last_delivered = str(info.get("last-delivered-id") or info.get("last_delivered_id") or "0-0")
+    unread_ids = await _unread_message_ids(redis, last_delivered_id=last_delivered, pending_ids=set(pending_ids))
+    outstanding_ids = list(dict.fromkeys([*pending_ids, *unread_ids]))
+    if outstanding > 0 and not outstanding_ids:
+        raise TelegramOTPQueueError("otp_eq_health_outstanding_inconsistent")
+    fields_by_id = {
+        str(message_id): fields
+        for message_id, fields in await redis.xrange(OTP_EQ_STREAM, min="-", max="+")
+        if str(message_id) in set(outstanding_ids)
+    }
     return TelegramOTPEphemeralHealth(
         worker_present=worker_present,
-        pending_count=pending_count,
+        pending_count=outstanding,
         poison_count=poison_count,
-        oldest_command_age_seconds=oldest_age,
+        oldest_command_age_seconds=_oldest_age_seconds(outstanding_ids, fields_by_id),
         receipt_wait_seconds=OTP_EQ_WAIT_SECONDS,
     )
+
+
+async def _unread_message_ids(
+    redis,
+    *,
+    last_delivered_id: str,
+    pending_ids: set[str],
+) -> list[str]:
+    minimum = "-" if last_delivered_id in {"", "0-0"} else f"({last_delivered_id}"
+    try:
+        rows = await redis.xrange(OTP_EQ_STREAM, min=minimum, max="+")
+    except Exception as exc:
+        raise TelegramOTPQueueError("otp_eq_health_unread_unavailable") from exc
+    unread: list[str] = []
+    for message_id, _fields in rows or ():
+        text_id = str(message_id)
+        if text_id in pending_ids:
+            continue
+        unread.append(text_id)
+    return unread
+
+
+def _oldest_age_seconds(
+    message_ids: list[str],
+    fields_by_id: dict[str, dict[str, Any]],
+) -> float | None:
+    now = utc_now().timestamp()
+    ages: list[float] = []
+    for message_id in message_ids:
+        fields = fields_by_id.get(message_id) or {}
+        enqueued_raw = str(fields.get("enqueued_at") or "")
+        if enqueued_raw.isdigit():
+            ages.append(max(0.0, now - int(enqueued_raw)))
+            continue
+        stream_ms = _stream_id_ms(message_id)
+        if stream_ms is not None:
+            ages.append(max(0.0, now - (stream_ms / 1000.0)))
+    if not ages:
+        return None
+    return max(ages)
 
 
 def telegram_otp_ephemeral_health_payload(health: TelegramOTPEphemeralHealth) -> dict[str, Any]:
@@ -572,4 +1020,5 @@ def telegram_otp_ephemeral_health_payload(health: TelegramOTPEphemeralHealth) ->
         "poison_count": health.poison_count,
         "oldest_command_age_seconds": health.oldest_command_age_seconds,
         "receipt_wait_seconds": health.receipt_wait_seconds,
+        "error": health.error,
     }
