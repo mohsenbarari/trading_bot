@@ -208,6 +208,7 @@ class TelegramDeliveryCutoverContractTests(unittest.TestCase):
         self.assertIn("TELEGRAM_DELIVERY_PRODUCER_MODE: queue-v1", compose)
         self.assertIn("TELEGRAM_DELIVERY_EXPECTED_EXECUTION_OWNER: queue-v1", compose)
         self.assertIn("x-non-iran-sms-isolation", compose)
+        self.assertIn("OTP_SMS_AUTO_FALLBACK_ENABLED: \"false\"", compose)
         self.assertGreaterEqual(compose.count("*api_telegram_isolation"), 5)
         self.assertIn("<<: *api_telegram_isolation", compose)
         self.assertIn("*non_iran_sms_isolation", compose)

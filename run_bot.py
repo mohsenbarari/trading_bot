@@ -5,6 +5,7 @@ import redis.asyncio as redis
 from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.redis import RedisStorage
 from core.config import settings
+from core.sms import validate_non_iran_sms_isolation
 from core.server_routing import SERVER_FOREIGN, normalize_server
 from bot.handlers import (
     start, 
@@ -338,6 +339,7 @@ def assert_bot_runtime_surface() -> None:
 
 async def main():
     assert_bot_runtime_surface()
+    validate_non_iran_sms_isolation(settings)
     telegram_runtime = configured_telegram_delivery_runtime()
 
     # Initialize Database

@@ -299,7 +299,10 @@ assert_iran_sms_fallback_ready() {
         return
     fi
     local fallback key line template param
-    fallback="$(env_value OTP_SMS_AUTO_FALLBACK_ENABLED || true)"
+    fallback="$(env_value IRAN_OTP_SMS_AUTO_FALLBACK_ENABLED || true)"
+    if [[ -z "$fallback" ]]; then
+        fallback="$(env_value OTP_SMS_AUTO_FALLBACK_ENABLED || true)"
+    fi
     case "$fallback" in
         1|true|TRUE|yes|YES) ;;
         *) return ;;

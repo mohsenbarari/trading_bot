@@ -246,6 +246,7 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
             self.assertIn("FOREIGN_SERVER_URL=https://coin.362514.ir", iran_lines)
             self.assertIn("SMSIR_API_KEY=", foreign_lines)
             self.assertNotIn("SMSIR_API_KEY=sms-key", foreign_lines)
+            self.assertIn("OTP_SMS_AUTO_FALLBACK_ENABLED=false", foreign_lines)
             self.assertIn("SMSIR_API_KEY=sms-key", iran_lines)
             self.assertIn("SMSIR_OTP_TEMPLATE_ID=123456", iran_lines)
             self.assertIn("SMSIR_OTP_TEMPLATE_PARAMETER=CODE", iran_lines)

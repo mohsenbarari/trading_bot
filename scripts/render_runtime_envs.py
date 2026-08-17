@@ -271,6 +271,9 @@ def build_runtime_env(
         if role != "iran" and key.startswith("SMSIR_"):
             rendered[key] = ""
             continue
+        if role != "iran" and key == "OTP_SMS_AUTO_FALLBACK_ENABLED":
+            rendered[key] = "false"
+            continue
         rendered[key] = values.get(key, OPTIONAL_RUNTIME_DEFAULTS.get(key, ""))
     rendered["OTP_DELIVERY_STATE_SECRET"] = (
         values.get("IRAN_OTP_DELIVERY_STATE_SECRET", "") if role == "iran" else ""
