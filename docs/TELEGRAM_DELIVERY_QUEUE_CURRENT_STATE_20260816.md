@@ -61,3 +61,17 @@
 - این ترکیب split-brain قراردادی است و تا اصلاح، cutover `NO-GO` می‌ماند
 
 production در این سند تغییر نمی‌کند و مجوز جداگانه می‌خواهد.
+
+## وضعیت پس از cutover staging
+
+اندازه‌گیری شروع مأموریت در بخش بالا حفظ شده است. وضعیت جاری پس از apply و ماتریس زنده:
+
+- شاخه `main`، HEAD `4e79d1c6`، هم‌تراز با `origin/main`
+- هر دو سرور staging روی همین SHA و schema `fb1c2d3e4f5a`
+- بات foreign: producer و execution owner برابر `queue-v1`؛ worker و cutover gate روشن؛ multi-publisher و B2B روشن
+- API ایران و API foreign: producer/expected برابر `queue-v1`؛ execution owner برابر `legacy` و worker خاموش (قرارداد API)
+- token مرکزی، ناشر، ویرایشگر و پایش روی ایران غایب است
+- health برابر `continue`؛ job باز غیرپایانی صفر؛ فرمان B2B باز صفر
+- ماتریس زندهٔ ۵۰۰تایی `telegram-live-matrix-20260816t231306z-08c5c6b74635` پاس شد؛ هر پنج lane استفاده شد
+- مهلت انقضای ماتریس پس از پاک‌سازی رسمی به ۲ دقیقه برگشت
+- production دست‌نخورده ماند و فعال‌سازی Queue-v1 در آن مجوز جداگانه می‌خواهد
