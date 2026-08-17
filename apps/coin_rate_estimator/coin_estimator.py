@@ -2079,7 +2079,7 @@ def _select_historical_group_anchor_uncached(
             quality_join = "LEFT JOIN offer_market_quality q ON q.offer_id=o.id" if "offer_market_quality" in tables else ""
             quality_filter = "AND COALESCE(q.training_eligible,1)=1" if "offer_market_quality" in tables else ""
             rows = connection.execute(
-                f"""SELECT o.price,m.event_time_utc,o.confidence,o.quantity
+                f"""SELECT o.price,m.event_time_utc,o.confidence,o.quantity,o.side
                     FROM offers o JOIN messages m ON m.import_id=o.import_id AND m.message_id=o.message_id {quality_join}
                     WHERE o.commodity=? AND o.settlement=? AND o.trade_form=?
                       AND m.event_time_utc>=? AND m.event_time_utc<?
@@ -2095,6 +2095,7 @@ def _select_historical_group_anchor_uncached(
                     "confidence": float(row["confidence"]),
                     "quantity": row["quantity"],
                     "kind": "OFFER",
+                    "side": str(row["side"]),
                     "source_factor": 1.0,
                 }
                 for row in rows
@@ -2173,6 +2174,22 @@ def _select_historical_group_anchor_uncached(
         key=lambda row: (row["stamp"], 1 if row["kind"] == "TRADE" else 0),
     )
     latest_deviation = abs(float(latest["price_toman"]) - consensus) / max(1.0, consensus)
+    offer_bids = [
+        float(row["price_toman"])
+        for row in cluster
+        if row["kind"] == "OFFER" and row.get("side") == "BUY"
+    ]
+    offer_asks = [
+        float(row["price_toman"])
+        for row in cluster
+        if row["kind"] == "OFFER" and row.get("side") == "SELL"
+    ]
+    best_bid = max(offer_bids) if offer_bids else None
+    best_ask = min(offer_asks) if offer_asks else None
+    two_sided_spread_percent = None
+    if best_bid is not None and best_ask is not None and best_bid <= best_ask:
+        midpoint = (best_bid + best_ask) / 2.0
+        two_sided_spread_percent = (best_ask - best_bid) / max(1.0, midpoint) * 100.0
     # A recent observation inside the local consensus envelope is the best
     # representation of the last known market.  Outside that envelope, use the
     # robust time/quantity/source weighted consensus instead of trusting a typo.
@@ -2195,6 +2212,11 @@ def _select_historical_group_anchor_uncached(
         "quantity": latest["quantity"],
         "trade_count": sum(row["kind"] == "TRADE" for row in cluster),
         "offer_count": sum(row["kind"] == "OFFER" for row in cluster),
+        "buy_offer_count": len(offer_bids),
+        "sell_offer_count": len(offer_asks),
+        "best_bid_toman": best_bid,
+        "best_ask_toman": best_ask,
+        "two_sided_spread_percent": two_sided_spread_percent,
         "cluster_window_seconds": 30 * 60,
         "consensus_price_toman": consensus,
         "latest_price_toman": float(latest["price_toman"]),

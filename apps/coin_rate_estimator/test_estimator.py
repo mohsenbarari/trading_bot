@@ -225,6 +225,11 @@ class EstimatorTests(unittest.TestCase):
                 ),
             )
             self.assertEqual(historical["status"], "OBSERVED")
+            self.assertEqual(historical["buy_offer_count"], 1)
+            self.assertEqual(historical["sell_offer_count"], 1)
+            self.assertEqual(historical["best_bid_toman"], 184_900_000)
+            self.assertEqual(historical["best_ask_toman"], 186_000_000)
+            self.assertLess(historical["two_sided_spread_percent"], 1.0)
 
             resumed = select_group_offer_anchor(
                 conversation_path,

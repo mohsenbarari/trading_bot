@@ -18,6 +18,7 @@ from online_recalibration import (
     apply_recent_realized_calibration,
     ensure_schema,
     expire_unmatched_predictions,
+    group_market_evidence_kind,
     ledger_storage_report,
     maintain_prediction_ledger,
     prune_prediction_ledger,
@@ -912,6 +913,47 @@ class OnlineRecalibrationTests(unittest.TestCase):
         self.assertEqual(info["status"], "SKIPPED_RECENT_GROUP_CONSENSUS")
         self.assertEqual(info["group_market_evidence"], "RECENT_GROUP_CONSENSUS")
         self.assertEqual(rate["estimated_price_toman"], 189_000_000)
+
+    def test_tight_two_sided_book_is_recent_group_evidence(self) -> None:
+        rate = {
+            "group_offer_anchor": {"status": "NO_DATA"},
+            "historical_group_anchor": {
+                "status": "OBSERVED",
+                "reference_price_toman": 188_300_000,
+                "age_seconds": 324,
+                "confidence": 0.98,
+                "trade_count": 0,
+                "offer_count": 2,
+                "buy_offer_count": 1,
+                "sell_offer_count": 1,
+                "two_sided_spread_percent": 0.11,
+                "latest_is_consistent": True,
+            },
+        }
+
+        self.assertEqual(
+            group_market_evidence_kind(rate),
+            "RECENT_TWO_SIDED_GROUP_BOOK",
+        )
+
+    def test_two_one_sided_offers_are_not_enough_group_evidence(self) -> None:
+        rate = {
+            "group_offer_anchor": {"status": "NO_DATA"},
+            "historical_group_anchor": {
+                "status": "OBSERVED",
+                "reference_price_toman": 188_300_000,
+                "age_seconds": 324,
+                "confidence": 0.98,
+                "trade_count": 0,
+                "offer_count": 2,
+                "buy_offer_count": 2,
+                "sell_offer_count": 0,
+                "two_sided_spread_percent": None,
+                "latest_is_consistent": True,
+            },
+        }
+
+        self.assertIsNone(group_market_evidence_kind(rate))
 
 
 if __name__ == "__main__":

@@ -1,7 +1,7 @@
 # Coin Market Intelligence
 
-- USD/Herat restores omitted leading digits from 3 prior same-book/source facts
-  per 15m; no constants/future replay.
+- USD/Herat restores omitted leading digits from 3 same-book/source facts/15m;
+  no constants/future replay.
 - In private groups, `خ ن ف`/`ف ن ف`, `خ ف`/`ف ف`, or no marker mean tomorrow;
   `خ ن`/`ف ن` and `نق` mean cash. Future wins. Exclude user registration.
 - Coin prices accept project-thousand, full-Toman /1,000 once, or bounded extra
@@ -22,22 +22,22 @@
   6 robust deviations) are audit-only; prefer same settlement, else the other
   physical settlement only when thin.
   Historical anchors apply this gate pre-weighting.
-- Term structure cannot move tomorrow from <=30m consistent evidence
-  (>=1 trade or >=3 offers); cap unsupported cash.
+- Term structure/residual cannot override <=30m consistent evidence
+  (>=1 trade, >=3 offers, or <=1% two-sided book); cap unsupported cash.
 - Reconciliation rejects invalid reply graphs; unchanged facts keep first
   availability. Projection removes absent/rejected facts; pending, conditional
   or >5m-late facts stay audit-only. Models use `available_at_utc`; reports use
   source time.
-- Reject malformed envelopes separately; inverted times cannot advance
+- Reject malformed envelopes; inverted times cannot advance
   checkpoints. Health separates heartbeat, event and eligible input.
-- Private text stays in bounded staging/authenticated review; Store/projection
+- Private text stays in bounded/authenticated review; Store/projection
   stay opaque. Live jobs use `main`; retarget systemd before removal.
 - Estimator state: `estimator-live`; home: CASH/TOMORROW inputs; `/shadow`:
   shadow/realised detail.
 - Web UI is the parser/estimator contract: show normalized events, model/audit
-  status and recorded prices/times—never recompute. Analytics-first status actions.
+  status, recorded prices/times—never recompute. Analytics-first status actions.
 - Reviews use opaque keys/digests; never persist raw text/identity. Revisions
-  correct facts; number-redacted syntax calibrates later grammar. Review-time
+  correct facts; redacted-number syntax calibrates grammar. Review
   anchors never affect prior input.
 - Input health separates heartbeat/freshness, rejects stale/live-only proxies,
   and prefers normalized sources.

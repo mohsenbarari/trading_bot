@@ -29,6 +29,7 @@ MAX_RECENT_REALIZED_CORRECTION_RATIO = 0.01
 RECENT_GROUP_CONSENSUS_MAX_AGE_SECONDS = 30 * 60
 RECENT_GROUP_CONSENSUS_MIN_OFFERS = 3
 RECENT_GROUP_CONSENSUS_MIN_CONFIDENCE = 0.90
+RECENT_GROUP_CONSENSUS_MAX_TWO_SIDED_SPREAD_PERCENT = 1.0
 NORMAL_MATCH_SECONDS = 5 * 60
 # The event parser and trade-confirmation pass are independent workers.  A
 # short grace window allows a late-arriving trusted event to be paired with
@@ -1313,6 +1314,8 @@ def group_market_evidence_kind(rate: dict[str, Any]) -> str | None:
         reference_price = float(historical.get("reference_price_toman"))
         trade_count = int(historical.get("trade_count") or 0)
         offer_count = int(historical.get("offer_count") or 0)
+        buy_offer_count = int(historical.get("buy_offer_count") or 0)
+        sell_offer_count = int(historical.get("sell_offer_count") or 0)
     except (TypeError, ValueError):
         return None
     if not 0 <= age_seconds <= RECENT_GROUP_CONSENSUS_MAX_AGE_SECONDS:
@@ -1321,9 +1324,23 @@ def group_market_evidence_kind(rate: dict[str, Any]) -> str | None:
         return None
     if reference_price <= 0 or historical.get("latest_is_consistent") is False:
         return None
-    if trade_count < 1 and offer_count < RECENT_GROUP_CONSENSUS_MIN_OFFERS:
+    two_sided = False
+    try:
+        spread_percent = float(historical.get("two_sided_spread_percent"))
+        two_sided = (
+            buy_offer_count >= 1
+            and sell_offer_count >= 1
+            and 0 <= spread_percent <= RECENT_GROUP_CONSENSUS_MAX_TWO_SIDED_SPREAD_PERCENT
+        )
+    except (TypeError, ValueError):
+        pass
+    if (
+        trade_count < 1
+        and offer_count < RECENT_GROUP_CONSENSUS_MIN_OFFERS
+        and not two_sided
+    ):
         return None
-    return "RECENT_GROUP_CONSENSUS"
+    return "RECENT_TWO_SIDED_GROUP_BOOK" if two_sided else "RECENT_GROUP_CONSENSUS"
 
 
 def apply_recent_realized_calibration(
