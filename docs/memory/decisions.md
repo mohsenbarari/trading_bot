@@ -2,7 +2,7 @@
 
 Entries are newest first.
 
-- 2026-08-17 | Staging login OTP is encrypted on foreign Redis and executed only by the credentialed bot; API stays producer-only. Missing an approved SMS credential leaves SMS BLOCKED and must not force Telegram off.
+- 2026-08-17 | Staging login OTP is encrypted on foreign Redis and executed only by the credentialed bot; API stays producer-only. After a terminal result, ACK and DELETE the command; health is outstanding rather than historical XLEN; max-deliveries is Redis metadata, not a guessed count. Missing an approved staging SMS credential leaves SMS BLOCKED and must not force Telegram off or copy production secrets. Production Queue-v1 still needs a separate owner order.
 - 2026-08-16 | Customer identity is server-scoped to self, relation owner, and same-owner accountants; foreign lookup fails closed. Privileged user-management stays a separate control-plane surface.
 - 2026-08-15 | Staging sync resets exact resources on both hosts, validates all 23 shared tables/both origins, resets before formal scenarios, and mounts probes with `APP_ENV_FILE=/dev/null`.
 - 2026-08-13 | Coin estimator/sidecar run from canonical `main`; mutable state lives under the production-data estimator-live path; conversations stay read-only and dashboard projection is privacy-safe.
