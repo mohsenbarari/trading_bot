@@ -63,6 +63,7 @@ Discover optional memory without loading it. Entries here are not default loads.
 - `areas/frontend-uiux.md` — load for Vue/PWA UI/UX refactoring, Design System V2, Figma/Sites evidence, or shared UI changes that can affect protected surfaces.
 - `areas/coin-market-intelligence.md`: load for estimator, Market Store,
   coin-group parsing/trade linking, and public market ingestion work.
+- `areas/telegram-delivery.md` — load for Queue-v1, Telegram execution ownership, bot/API delivery boundaries, OTP delivery, or Telegram runtime cutover work.
 
 ## Optional rules
 `rules/` files load only when listed above and the task clearly matches.
