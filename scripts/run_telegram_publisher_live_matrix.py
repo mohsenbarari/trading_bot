@@ -23,7 +23,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 from collections import Counter
-from dataclasses import asdict, dataclass, field, fields
+from dataclasses import asdict, dataclass, field, fields, replace
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
@@ -129,6 +129,110 @@ MATRIX_TRADE_MESSAGE_SIMULATION_EVENTS = (
     + MATRIX_DIRECT_RETAIL_TRADES
     + MATRIX_OVERTIME_APPROVED_TRADES
 )
+
+
+@dataclass(frozen=True, slots=True)
+class LiveMatrixProfile:
+    name: str
+    total_offers: int
+    bot_offers: int
+    webapp_offers: int
+    user_interactions: int
+    offer_expiry_minutes: int
+    direct_wholesale_trades: int
+    direct_retail_trades: int
+    overtime_approved_trades: int
+    overtime_owner_rejections: int
+    overtime_decision_timeouts: int
+    manual_expiries: int
+    natural_expiries: int
+    require_per_scenario_source_ratio: bool
+
+    @property
+    def trade_message_simulation_events(self) -> int:
+        return (
+            self.direct_wholesale_trades
+            + self.direct_retail_trades
+            + self.overtime_approved_trades
+        )
+
+    @property
+    def overtime_owner_count(self) -> int:
+        return (
+            self.overtime_approved_trades
+            + self.overtime_owner_rejections
+            + self.overtime_decision_timeouts
+        )
+
+
+AUTHORITATIVE_500_PROFILE = LiveMatrixProfile(
+    name="authoritative-500",
+    total_offers=MATRIX_TOTAL_OFFERS,
+    bot_offers=MATRIX_BOT_OFFERS,
+    webapp_offers=MATRIX_WEBAPP_OFFERS,
+    user_interactions=MATRIX_USER_INTERACTIONS,
+    offer_expiry_minutes=MATRIX_OFFER_EXPIRY_MINUTES,
+    direct_wholesale_trades=MATRIX_DIRECT_WHOLESALE_TRADES,
+    direct_retail_trades=MATRIX_DIRECT_RETAIL_TRADES,
+    overtime_approved_trades=MATRIX_OVERTIME_APPROVED_TRADES,
+    overtime_owner_rejections=MATRIX_OVERTIME_OWNER_REJECTIONS,
+    overtime_decision_timeouts=MATRIX_OVERTIME_DECISION_TIMEOUTS,
+    manual_expiries=MATRIX_MANUAL_EXPIRIES,
+    natural_expiries=MATRIX_NATURAL_EXPIRIES,
+    require_per_scenario_source_ratio=True,
+)
+REVALIDATION_100_PROFILE = LiveMatrixProfile(
+    name="revalidation-100",
+    total_offers=100,
+    bot_offers=60,
+    webapp_offers=40,
+    user_interactions=10,
+    offer_expiry_minutes=6,
+    direct_wholesale_trades=10,
+    direct_retail_trades=10,
+    overtime_approved_trades=3,
+    overtime_owner_rejections=3,
+    overtime_decision_timeouts=24,
+    manual_expiries=10,
+    natural_expiries=40,
+    require_per_scenario_source_ratio=False,
+)
+LIVE_MATRIX_PROFILES = {
+    AUTHORITATIVE_500_PROFILE.name: AUTHORITATIVE_500_PROFILE,
+    REVALIDATION_100_PROFILE.name: REVALIDATION_100_PROFILE,
+}
+
+
+def compute_revalidation_offer_expiry_minutes(
+    *,
+    total_offers: int,
+    preferred_minutes: int = 5,
+) -> int:
+    """Keep TTL long enough for publication at 1.05s plus stall margin."""
+    drain_seconds = float(total_offers) * MATRIX_DESTINATION_MIN_INTERVAL_SECONDS
+    needed_seconds = (
+        drain_seconds
+        + MATRIX_PROGRESS_STALL_SECONDS
+        + 45.0
+        + MATRIX_OVERTIME_RECEIPT_SAFETY_SECONDS
+    )
+    return max(int(preferred_minutes), int(math.ceil(needed_seconds / 60.0)))
+
+
+def resolve_live_matrix_profile(name: str | None) -> LiveMatrixProfile:
+    key = str(name or AUTHORITATIVE_500_PROFILE.name).strip()
+    try:
+        profile = LIVE_MATRIX_PROFILES[key]
+    except KeyError as exc:
+        raise LiveMatrixError("live_matrix_profile_unknown") from exc
+    if profile.name == REVALIDATION_100_PROFILE.name:
+        return replace(
+            profile,
+            offer_expiry_minutes=compute_revalidation_offer_expiry_minutes(
+                total_offers=profile.total_offers
+            ),
+        )
+    return profile
 
 _INITIAL_ACTION = TelegramDeliveryAction.OFFER_PUBLISH.value
 _EXPIRY_ACTION = TelegramDeliveryAction.EXPIRED_OFFER_EDIT.value
@@ -328,6 +432,7 @@ class MatrixRun:
     run_id: str
     started_at: str
     expected_expiry_minutes: int
+    profile: LiveMatrixProfile = field(default_factory=lambda: AUTHORITATIVE_500_PROFILE)
     random_seed: int | None = None
     timelines: list[OfferTimeline] = field(default_factory=list)
     interactions: list[InteractionTimeline] = field(default_factory=list)
@@ -349,13 +454,23 @@ def build_live_matrix_workload(
     ingress_min_interval_seconds: float,
     ingress_max_interval_seconds: float,
     random_seed: int,
+    profile: LiveMatrixProfile | None = None,
 ) -> MatrixWorkload:
     """Build a reproducible mixed workload without hiding ingress-rate drift."""
-    if total_offers != MATRIX_TOTAL_OFFERS:
-        raise LiveMatrixError("live_matrix_total_offers_must_equal_500")
-    if bot_offers != MATRIX_BOT_OFFERS or webapp_offers != MATRIX_WEBAPP_OFFERS:
-        raise LiveMatrixError("live_matrix_source_mix_must_be_300_bot_200_webapp")
-    if interaction_count != MATRIX_USER_INTERACTIONS:
+    active = profile or AUTHORITATIVE_500_PROFILE
+    if total_offers != active.total_offers:
+        raise LiveMatrixError(
+            "live_matrix_total_offers_must_equal_500"
+            if active.name == AUTHORITATIVE_500_PROFILE.name
+            else "live_matrix_total_offers_must_match_profile"
+        )
+    if bot_offers != active.bot_offers or webapp_offers != active.webapp_offers:
+        raise LiveMatrixError(
+            "live_matrix_source_mix_must_be_300_bot_200_webapp"
+            if active.name == AUTHORITATIVE_500_PROFILE.name
+            else "live_matrix_source_mix_must_match_profile"
+        )
+    if interaction_count != active.user_interactions:
         raise LiveMatrixError("live_matrix_interactions_must_equal_10")
     ingress_minimum = float(ingress_min_interval_seconds)
     ingress_maximum = float(ingress_max_interval_seconds)
@@ -367,26 +482,36 @@ def build_live_matrix_workload(
     if not math.isfinite(float(random_seed)):
         raise LiveMatrixError("live_matrix_random_seed_invalid")
     scenario_counts = (
-        ("direct_wholesale_trade", MATRIX_DIRECT_WHOLESALE_TRADES),
-        ("direct_retail_lot_trade", MATRIX_DIRECT_RETAIL_TRADES),
-        ("overtime_approved_trade", MATRIX_OVERTIME_APPROVED_TRADES),
-        ("overtime_owner_rejected", MATRIX_OVERTIME_OWNER_REJECTIONS),
-        ("overtime_decision_timeout", MATRIX_OVERTIME_DECISION_TIMEOUTS),
-        ("manual_expiry", MATRIX_MANUAL_EXPIRIES),
-        ("natural_expiry", MATRIX_NATURAL_EXPIRIES),
+        ("direct_wholesale_trade", active.direct_wholesale_trades),
+        ("direct_retail_lot_trade", active.direct_retail_trades),
+        ("overtime_approved_trade", active.overtime_approved_trades),
+        ("overtime_owner_rejected", active.overtime_owner_rejections),
+        ("overtime_decision_timeout", active.overtime_decision_timeouts),
+        ("manual_expiry", active.manual_expiries),
+        ("natural_expiry", active.natural_expiries),
     )
     if sum(count for _name, count in scenario_counts) != total_offers:
         raise LiveMatrixError("live_matrix_lifecycle_total_invalid")
     rng = random.Random(int(random_seed))
-    workload_pairs: list[tuple[str, str]] = []
-    for scenario, count in scenario_counts:
-        if count % 5:
-            raise LiveMatrixError("live_matrix_lifecycle_source_ratio_invalid")
-        workload_pairs.extend(("bot", scenario) for _ in range(count * 3 // 5))
-        workload_pairs.extend(("webapp", scenario) for _ in range(count * 2 // 5))
-    rng.shuffle(workload_pairs)
-    origins = [origin for origin, _scenario in workload_pairs]
-    scenarios = [scenario for _origin, scenario in workload_pairs]
+    if active.require_per_scenario_source_ratio:
+        workload_pairs: list[tuple[str, str]] = []
+        for scenario, count in scenario_counts:
+            if count % 5:
+                raise LiveMatrixError("live_matrix_lifecycle_source_ratio_invalid")
+            workload_pairs.extend(("bot", scenario) for _ in range(count * 3 // 5))
+            workload_pairs.extend(("webapp", scenario) for _ in range(count * 2 // 5))
+        rng.shuffle(workload_pairs)
+        origins = [origin for origin, _scenario in workload_pairs]
+        scenarios = [scenario for _origin, scenario in workload_pairs]
+    else:
+        scenario_slots: list[str] = []
+        for scenario, count in scenario_counts:
+            scenario_slots.extend([scenario] * count)
+        origin_slots = (["bot"] * active.bot_offers) + (["webapp"] * active.webapp_offers)
+        rng.shuffle(scenario_slots)
+        rng.shuffle(origin_slots)
+        origins = origin_slots
+        scenarios = scenario_slots
     if len(origins) != total_offers or len(scenarios) != total_offers:
         raise LiveMatrixError("live_matrix_origin_cycle_invalid")
     ingress_offsets = [0.0]
@@ -396,9 +521,9 @@ def build_live_matrix_workload(
         )
     duration = ingress_offsets[-1]
     active_scenarios = [
-        *("direct_wholesale_trade",) * MATRIX_DIRECT_WHOLESALE_TRADES,
-        *("direct_retail_lot_trade",) * MATRIX_DIRECT_RETAIL_TRADES,
-        *("manual_expiry",) * MATRIX_MANUAL_EXPIRIES,
+        *("direct_wholesale_trade",) * active.direct_wholesale_trades,
+        *("direct_retail_lot_trade",) * active.direct_retail_trades,
+        *("manual_expiry",) * active.manual_expiries,
     ]
     rng.shuffle(active_scenarios)
     active_offsets = sorted(
@@ -495,13 +620,14 @@ def _report_payload(run: MatrixRun) -> dict[str, Any]:
         _timeline_terminal_follows_initial_publication(item)
         for item in run.timelines
     )
+    profile = run.profile
     passed = (
         run.failure_reason is None
-        and len(timelines) == MATRIX_TOTAL_OFFERS
-        and queue_entered == MATRIX_TOTAL_OFFERS
-        and acknowledged == MATRIX_TOTAL_OFFERS
-        and initial_posted == MATRIX_TOTAL_OFFERS
-        and terminal_edited == MATRIX_TOTAL_OFFERS
+        and len(timelines) == profile.total_offers
+        and queue_entered == profile.total_offers
+        and acknowledged == profile.total_offers
+        and initial_posted == profile.total_offers
+        and terminal_edited == profile.total_offers
         and terminal_after_initial_publication
         and all(
             item["offer_status"] == item["expected_terminal_status"]
@@ -510,9 +636,9 @@ def _report_payload(run: MatrixRun) -> dict[str, Any]:
         and all(item["webapp_terminal_status"] == item["expected_terminal_status"] for item in timelines)
         and set(lanes) == set(TELEGRAM_PUBLISHER_IDENTITIES)
         and all(count > 0 for count in lanes.values())
-        and len(interactions) == MATRIX_USER_INTERACTIONS
+        and len(interactions) == profile.user_interactions
         and all(item["status"] == "success" for item in interactions)
-        and len(trade_message_simulations) == MATRIX_TRADE_MESSAGE_SIMULATION_EVENTS
+        and len(trade_message_simulations) == profile.trade_message_simulation_events
         and len(management_message_simulations) == MATRIX_MANAGEMENT_MESSAGE_CAMPAIGNS
         and all(item["status"] == "success" for item in private_message_simulations)
         and all(int(item["message_count"] or 0) > 0 for item in private_message_simulations)
@@ -525,20 +651,21 @@ def _report_payload(run: MatrixRun) -> dict[str, Any]:
         "phase": run.phase,
         "failure_reason": run.failure_reason,
         "configuration": {
+            "profile": profile.name,
             "offer_expiry_minutes": run.expected_expiry_minutes,
             "ingress_interval_seconds": {
                 "minimum": MATRIX_INGRESS_MIN_INTERVAL_SECONDS,
                 "maximum": MATRIX_INGRESS_MAX_INTERVAL_SECONDS,
             },
-            "source_mix": {"bot": MATRIX_BOT_OFFERS, "webapp": MATRIX_WEBAPP_OFFERS},
+            "source_mix": {"bot": profile.bot_offers, "webapp": profile.webapp_offers},
             "lifecycle_mix": {
-                "direct_wholesale_trades": MATRIX_DIRECT_WHOLESALE_TRADES,
-                "direct_retail_lot_trades": MATRIX_DIRECT_RETAIL_TRADES,
-                "overtime_approved_trades": MATRIX_OVERTIME_APPROVED_TRADES,
-                "overtime_owner_rejections": MATRIX_OVERTIME_OWNER_REJECTIONS,
-                "overtime_decision_timeouts": MATRIX_OVERTIME_DECISION_TIMEOUTS,
-                "manual_expiries": MATRIX_MANUAL_EXPIRIES,
-                "natural_expiries": MATRIX_NATURAL_EXPIRIES,
+                "direct_wholesale_trades": profile.direct_wholesale_trades,
+                "direct_retail_lot_trades": profile.direct_retail_trades,
+                "overtime_approved_trades": profile.overtime_approved_trades,
+                "overtime_owner_rejections": profile.overtime_owner_rejections,
+                "overtime_decision_timeouts": profile.overtime_decision_timeouts,
+                "manual_expiries": profile.manual_expiries,
+                "natural_expiries": profile.natural_expiries,
                 "overtime_minutes": MATRIX_OVERTIME_MINUTES,
             },
             "publisher_lanes": list(TELEGRAM_PUBLISHER_IDENTITIES),
@@ -607,7 +734,10 @@ def _write_audit(run: MatrixRun) -> Path:
     return path
 
 
-async def _assert_live_preflight() -> tuple[int, tuple[str, ...], int]:
+async def _assert_live_preflight(
+    *,
+    expected_expiry_minutes: int = MATRIX_OFFER_EXPIRY_MINUTES,
+) -> tuple[int, tuple[str, ...], int]:
     if str(getattr(settings, "environment", "")).strip().lower() != "staging":
         raise LiveMatrixError("live_matrix_requires_staging_environment")
     if current_server() != SERVER_FOREIGN:
@@ -623,8 +753,12 @@ async def _assert_live_preflight() -> tuple[int, tuple[str, ...], int]:
     if not math.isclose(destination_interval, MATRIX_DESTINATION_MIN_INTERVAL_SECONDS, abs_tol=0.000_001):
         raise LiveMatrixError("live_matrix_channel_limiter_must_be_57_per_minute")
     trading_settings = await get_trading_settings_async()
-    if int(getattr(trading_settings, "offer_expiry_minutes", 0) or 0) != MATRIX_OFFER_EXPIRY_MINUTES:
-        raise LiveMatrixError("live_matrix_offer_expiry_must_be_25_minutes")
+    if int(getattr(trading_settings, "offer_expiry_minutes", 0) or 0) != int(expected_expiry_minutes):
+        raise LiveMatrixError(
+            "live_matrix_offer_expiry_must_be_25_minutes"
+            if int(expected_expiry_minutes) == MATRIX_OFFER_EXPIRY_MINUTES
+            else "live_matrix_offer_expiry_must_match_profile"
+        )
     channel_id, lanes = _require_live_configuration()
     if len(lanes) != len(TELEGRAM_PUBLISHER_IDENTITIES):
         raise LiveMatrixError("live_matrix_requires_all_five_publishers")
@@ -908,7 +1042,7 @@ async def _reconstruct_terminal_projection_verification_run(run_id: str) -> Matr
 
 def _terminal_projection_verification_passed(run: MatrixRun) -> bool:
     return (
-        len(run.timelines) == MATRIX_TOTAL_OFFERS
+        len(run.timelines) == run.profile.total_offers
         and all(
             item.offer_status == item.expected_terminal_status
             and item.central_queue_entered_at is not None
@@ -1489,11 +1623,12 @@ async def _configure_overtime_preferences(
         for index, scenario in enumerate(workload.scenarios)
         if scenario in _OVERTIME_SCENARIOS
     ]
-    if len(overtime_owner_indexes) != (
-        MATRIX_OVERTIME_APPROVED_TRADES
-        + MATRIX_OVERTIME_OWNER_REJECTIONS
-        + MATRIX_OVERTIME_DECISION_TIMEOUTS
-    ):
+    expected_overtime_owners = (
+        workload.scenarios.count("overtime_approved_trade")
+        + workload.scenarios.count("overtime_owner_rejected")
+        + workload.scenarios.count("overtime_decision_timeout")
+    )
+    if len(overtime_owner_indexes) != expected_overtime_owners:
         raise LiveMatrixError("live_matrix_overtime_owner_count_invalid")
     from core.services.offer_overtime_preference_service import persist_overtime_preference
 
@@ -1514,7 +1649,7 @@ async def _wait_until(target: datetime) -> None:
 
 
 def _taker_for_timeline(users: Sequence[Any], timeline: OfferTimeline) -> Any:
-    taker = users[(timeline.index - 1 + MATRIX_TOTAL_OFFERS // 2) % len(users)]
+    taker = users[(timeline.index - 1 + max(1, len(users) // 2)) % len(users)]
     if int(taker.user_id) == int(users[timeline.index - 1].user_id):
         raise LiveMatrixError("live_matrix_taker_must_differ_from_owner")
     return taker
@@ -2306,7 +2441,7 @@ async def _worker_acknowledgement_progress(
 async def _wait_for_worker_acknowledgement(run: MatrixRun) -> None:
     """Require all 500 central dispatches to reach publisher workers first."""
     expected_count = len(run.timelines)
-    if expected_count != MATRIX_TOTAL_OFFERS:
+    if expected_count != run.profile.total_offers:
         raise LiveMatrixError("live_matrix_worker_ack_offer_count_invalid")
     last_acknowledged = -1
     last_progress_at = time.monotonic()
@@ -2487,10 +2622,10 @@ async def _wait_for_terminal_lifecycle(run: MatrixRun) -> None:
             last_progress_at = time.monotonic()
         queue_count, posted_count, terminal_count, edited_count = progress
         if (
-            queue_count == MATRIX_TOTAL_OFFERS
-            and posted_count == MATRIX_TOTAL_OFFERS
-            and terminal_count == MATRIX_TOTAL_OFFERS
-            and edited_count == MATRIX_TOTAL_OFFERS
+            queue_count == run.profile.total_offers
+            and posted_count == run.profile.total_offers
+            and terminal_count == run.profile.total_offers
+            and edited_count == run.profile.total_offers
         ):
             await _hydrate_timelines(run.timelines)
             if not all(
@@ -2536,19 +2671,22 @@ async def run_live_matrix(args: argparse.Namespace) -> dict[str, Any]:
     if not run_id.startswith("telegram-live-matrix-"):
         raise LiveMatrixError("live_matrix_run_id_invalid")
     random_seed = _workload_seed(run_id, args.random_seed)
+    profile = resolve_live_matrix_profile(getattr(args, "profile", None))
     workload = build_live_matrix_workload(
-        total_offers=args.total_offers,
-        bot_offers=args.bot_offers,
-        webapp_offers=args.webapp_offers,
-        interaction_count=args.user_interactions,
+        total_offers=profile.total_offers,
+        bot_offers=profile.bot_offers,
+        webapp_offers=profile.webapp_offers,
+        interaction_count=profile.user_interactions,
         ingress_min_interval_seconds=args.ingress_min_interval_seconds,
         ingress_max_interval_seconds=args.ingress_max_interval_seconds,
         random_seed=random_seed,
+        profile=profile,
     )
     run = MatrixRun(
         run_id=run_id,
         started_at=_iso(_utcnow()) or "",
-        expected_expiry_minutes=MATRIX_OFFER_EXPIRY_MINUTES,
+        expected_expiry_minutes=profile.offer_expiry_minutes,
+        profile=profile,
         random_seed=workload.random_seed,
     )
     report_path = _audit_path(run_id)
@@ -2561,7 +2699,9 @@ async def run_live_matrix(args: argparse.Namespace) -> dict[str, Any]:
             _channel_id,
             _lanes,
             run.ignored_historical_private_job_count,
-        ) = await _assert_live_preflight()
+        ) = await _assert_live_preflight(
+            expected_expiry_minutes=profile.offer_expiry_minutes
+        )
         run.phase = "preflight_passed"
         _write_audit(run)
         if args.preflight_only:
@@ -2570,7 +2710,7 @@ async def run_live_matrix(args: argparse.Namespace) -> dict[str, Any]:
 
         from scripts import trading_core_probe_worker as worker
 
-        users = await worker.create_load_fixture_users(run_id, user_count=MATRIX_TOTAL_OFFERS)
+        users = await worker.create_load_fixture_users(run_id, user_count=profile.total_offers)
         await _configure_overtime_preferences(users=users, workload=workload)
         commodity_id, commodity_name = await worker.resolve_commodity()
         started_monotonic = time.monotonic()
@@ -2711,6 +2851,11 @@ async def run_live_matrix(args: argparse.Namespace) -> dict[str, Any]:
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run the real Telegram publisher staging matrix.")
     parser.add_argument("--authorize-live-staging", action="store_true")
+    parser.add_argument(
+        "--profile",
+        choices=tuple(LIVE_MATRIX_PROFILES),
+        default=AUTHORITATIVE_500_PROFILE.name,
+    )
     parser.add_argument("--preflight-only", action="store_true")
     parser.add_argument("--verify-terminal-run-id")
     parser.add_argument("--run-id")

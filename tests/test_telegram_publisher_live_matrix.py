@@ -10,6 +10,8 @@ from scripts.run_telegram_publisher_live_matrix import (
     MATRIX_INGRESS_MAX_INTERVAL_SECONDS,
     MATRIX_INGRESS_MIN_INTERVAL_SECONDS,
     MATRIX_OVERTIME_RECEIPT_SAFETY_SECONDS,
+    compute_revalidation_offer_expiry_minutes,
+    resolve_live_matrix_profile,
     _overtime_scheduled_at,
     MatrixRun,
     RetryableBotCallbackReceiptAbsent,
@@ -186,6 +188,63 @@ class TelegramPublisherLiveMatrixTests(unittest.TestCase):
             tuple(event.scheduled_offset_seconds for event in workload.active_lifecycle_events),
             tuple(sorted(event.scheduled_offset_seconds for event in workload.active_lifecycle_events)),
         )
+
+    def test_revalidation_100_profile_keeps_source_and_lifecycle_totals(self):
+        profile = resolve_live_matrix_profile("revalidation-100")
+        self.assertEqual(profile.total_offers, 100)
+        self.assertEqual(profile.bot_offers, 60)
+        self.assertEqual(profile.webapp_offers, 40)
+        self.assertEqual(
+            profile.direct_wholesale_trades
+            + profile.direct_retail_trades
+            + profile.overtime_approved_trades,
+            23,
+        )
+        self.assertEqual(
+            profile.overtime_owner_rejections
+            + profile.overtime_decision_timeouts
+            + profile.manual_expiries
+            + profile.natural_expiries,
+            77,
+        )
+        self.assertEqual(compute_revalidation_offer_expiry_minutes(total_offers=100), 6)
+        self.assertEqual(profile.offer_expiry_minutes, 6)
+        workload = build_live_matrix_workload(
+            total_offers=100,
+            bot_offers=60,
+            webapp_offers=40,
+            interaction_count=10,
+            ingress_min_interval_seconds=MATRIX_INGRESS_MIN_INTERVAL_SECONDS,
+            ingress_max_interval_seconds=MATRIX_INGRESS_MAX_INTERVAL_SECONDS,
+            random_seed=43,
+            profile=profile,
+        )
+        self.assertEqual(len(workload.origins), 100)
+        self.assertEqual(workload.origins.count("bot"), 60)
+        self.assertEqual(workload.origins.count("webapp"), 40)
+        self.assertEqual(
+            Counter(workload.scenarios),
+            {
+                "direct_wholesale_trade": 10,
+                "direct_retail_lot_trade": 10,
+                "overtime_approved_trade": 3,
+                "overtime_owner_rejected": 3,
+                "overtime_decision_timeout": 24,
+                "manual_expiry": 10,
+                "natural_expiry": 40,
+            },
+        )
+        self.assertEqual(len(workload.interaction_offsets_seconds), 10)
+        with self.assertRaisesRegex(RuntimeError, "must_equal_500"):
+            build_live_matrix_workload(
+                total_offers=100,
+                bot_offers=60,
+                webapp_offers=40,
+                interaction_count=10,
+                ingress_min_interval_seconds=MATRIX_INGRESS_MIN_INTERVAL_SECONDS,
+                ingress_max_interval_seconds=MATRIX_INGRESS_MAX_INTERVAL_SECONDS,
+                random_seed=43,
+            )
 
     def test_rejects_any_non_approved_random_ingress_range(self):
         with self.assertRaisesRegex(RuntimeError, "random_0_8_to_4_seconds"):
