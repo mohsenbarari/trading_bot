@@ -204,6 +204,9 @@ class SyncRouterReceiveOfferPublishTests(unittest.IsolatedAsyncioTestCase):
         ), patch("api.routers.sync.select", return_value=FakeSelect()), patch(
             "sqlalchemy.orm.selectinload", side_effect=lambda *args, **kwargs: object()
         ), patch(
+            "api.routers.sync.configured_telegram_delivery_producer_mode",
+            return_value=TelegramDeliveryRuntimeMode.QUEUE_V1,
+        ), patch(
             "api.routers.sync.configured_telegram_delivery_runtime",
             return_value=SimpleNamespace(
                 mode=TelegramDeliveryRuntimeMode.QUEUE_V1,

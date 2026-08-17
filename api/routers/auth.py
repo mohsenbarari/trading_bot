@@ -82,6 +82,10 @@ from models.session import Platform, UserSession
 import uuid
 from core.utils import normalize_persian_numerals, utc_now, utc_now_naive
 from core.notifications import send_telegram_message
+from core.telegram_delivery_runtime_policy import (
+    TelegramDeliveryRuntimeMode,
+    configured_telegram_delivery_producer_mode,
+)
 from core.telegram_legacy_otp_relay_contract import (
     LEGACY_TELEGRAM_OTP_RELAY_PURPOSE,
 )
@@ -2463,6 +2467,11 @@ async def request_otp(
             user=result,
         )
 
+    queue_v1_sms_only = (
+        configured_telegram_delivery_producer_mode()
+        == TelegramDeliveryRuntimeMode.QUEUE_V1
+    )
+
     rate_limit_key = f"otp_limit:{mobile}"
     otp_key = f"otp:{mobile}"
 
@@ -2538,8 +2547,8 @@ async def request_otp(
     sent_via_telegram = False
     sent_via_sms = False
     
-    # اولویت ۱: تلگرام (اگر اینترنت وصله و کاربر تلگرام داره)
-    if is_connected and has_telegram:
+    # اولویت ۱: تلگرام فقط در runtime واقعاً Legacy.
+    if not queue_v1_sms_only and is_connected and has_telegram:
         try:
             msg_text = f"🔐 کد ورود شما: `{otp_code}`\n\nاین کد تا ۲ دقیقه معتبر است."
             await send_telegram_message(
@@ -2840,108 +2849,18 @@ async def verify_otp(
         "token_type": "bearer"
     }
 
-@router.post("/webapp-login", response_model=Token)
+@router.post("/webapp-login")
 async def webapp_login(
     login_data: WebAppLogin,
     raw_request: Request,
     db: AsyncSession = Depends(get_db)
 ):
-    """
-    Login via Telegram WebApp data validation.
-    """
-    init_data = login_data.init_data
-    
-    if not settings.bot_token:
-        raise HTTPException(status_code=500, detail="Bot token not configured")
-
-    # Parse and validate init_data
-    try:
-        blocked_error = None
-        from urllib.parse import parse_qsl
-        parsed_data = dict(parse_qsl(init_data))
-        hash_val = parsed_data.pop('hash')
-        
-        # Sort keys
-        data_check_string = "\n".join(f"{k}={v}" for k, v in sorted(parsed_data.items()))
-        
-        # Calculate HMAC
-        secret_key = hmac.new(b"WebAppData", settings.bot_token.encode(), hashlib.sha256).digest()
-        calculated_hash = hmac.new(secret_key, data_check_string.encode(), hashlib.sha256).hexdigest()
-        
-        if calculated_hash != hash_val:
-            raise HTTPException(status_code=403, detail="Invalid data hash")
-            
-        # Check auth_date to prevent replay attacks (optional but recommended)
-        auth_date = int(parsed_data.get('auth_date', 0))
-        if time.time() - auth_date > 86400: # 1 day expiry
-             raise HTTPException(status_code=403, detail="Data expired")
-
-        user_data = json.loads(parsed_data['user'])
-        telegram_id = user_data['id']
-        
-        # Find user by telegram_id
-        stmt = select(User).where(User.telegram_id == telegram_id)
-        user = (await db.execute(stmt)).scalar_one_or_none()
-        
-        if not user:
-            raise HTTPException(status_code=404, detail="User not registered")
-            
-        if user.is_deleted:
-            raise HTTPException(status_code=403, detail="User is blocked")
-
-        # Generate tokens
-        refresh_token = create_refresh_token(subject=user.id)
-        
-        # Session management
-        device_info = _extract_device_info(raw_request)
-        # Override platform to telegram_mini_app for webapp login
-        device_info["platform"] = Platform.TELEGRAM_MINI_APP
-        device_info["device_name"] = "Telegram Mini App"
-        login_home_server = SERVER_FOREIGN
-        await assert_login_allowed_for_server(db, user, requested_server=login_home_server)
-        session_result = await handle_login_session(
-            db, user, refresh_token,
-            device_name=device_info["device_name"],
-            device_ip=device_info["device_ip"],
-            platform=device_info["platform"],
-            home_server=login_home_server,
-        )
-        
-        if session_result["action"] == "blocked":
-            if session_result["reason"] == ACCOUNT_INACTIVE_BLOCK_REASON:
-                blocked_error = HTTPException(status_code=403, detail="INACTIVE_ACCOUNT_BLOCKED")
-            else:
-                blocked_error = HTTPException(status_code=429, detail=session_result["reason"])
-        
-        if session_result["action"] == "approval_required":
-            login_req = session_result["request"]
-            return {
-                "status": "approval_required",
-                "login_request_id": str(login_req.id),
-                "message": "درخواست ورود شما ارسال شد. منتظر تایید از دستگاه اصلی باشید.",
-                "expires_at": login_req.expires_at.isoformat(),
-            }
-
-        if blocked_error is not None:
-            raise blocked_error
-        
-        session_id = str(session_result["session"].id) if session_result.get("session") else None
-        access_token = create_access_token(subject=user.id, session_id=session_id, server_id=login_home_server)
-        
-        return {
-            "access_token": access_token,
-            "refresh_token": refresh_token,
-            "token_type": "bearer"
-        }
-    except HTTPException as exc:
-        if exc.detail == "INACTIVE_ACCOUNT_BLOCKED":
-            raise HTTPException(status_code=403, detail="User is blocked")
-        logger.error(f"WebApp login error: {exc}")
-        raise HTTPException(status_code=400, detail="Authentication failed")
-        
-    except Exception as e:
-        logger.error(f"WebApp login error: {e}")
-        raise HTTPException(status_code=400, detail="Authentication failed")
+    """Retired Telegram Mini App login. OTP-first WebApp auth is the supported path."""
+    del login_data, raw_request, db
+    raise HTTPException(
+        status_code=status.HTTP_410_GONE,
+        detail="Telegram Mini App login is retired",
+    )
 
 class SetupPasswordRequest(BaseModel):
     password: str

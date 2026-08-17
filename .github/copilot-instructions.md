@@ -53,7 +53,7 @@ Iran is identical but **no bot service**. Nginx proxies `/api/` → backend, `/`
 
 ## API Endpoints Summary
 
-### Auth (`/api/auth`): request-otp, resend-otp-sms, verify-otp, webapp-login, refresh, register-otp-request/verify/complete, /me
+### Auth (`/api/auth`): request-otp, resend-otp-sms, verify-otp, webapp-login (retired 410), refresh, register-otp-request/verify/complete, /me
 ### Invitations (`/api/invitations`): CRUD + lookup/{short_code} + validate/{token}
 ### Users (`/api/users`): CRUD (Super Admin/Dev Key required). DELETE = soft delete
 ### Offers (`/api/offers`): CRUD + /parse (NLP). Creates Telegram channel messages

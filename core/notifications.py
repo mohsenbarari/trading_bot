@@ -4,6 +4,10 @@ import logging
 from core.config import settings
 from core.sync_push import push_sync_direct
 from core import telegram_gateway
+from core.telegram_delivery_runtime_policy import (
+    TelegramDeliveryRuntimeMode,
+    configured_telegram_delivery_producer_mode,
+)
 from core.telegram_legacy_otp_relay_contract import (
     LEGACY_TELEGRAM_OTP_RELAY_PURPOSE,
     validate_legacy_telegram_otp_relay,
@@ -26,6 +30,8 @@ async def send_telegram_message(
         parse_mode=parse_mode,
         purpose=purpose,
     )
+    if configured_telegram_delivery_producer_mode() == TelegramDeliveryRuntimeMode.QUEUE_V1:
+        raise RuntimeError("legacy_otp_relay_forbidden_in_queue_v1")
     if settings.server_mode == "iran":
         logger.info("Relaying legacy Telegram OTP to Foreign server")
         

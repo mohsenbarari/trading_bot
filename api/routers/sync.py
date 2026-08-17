@@ -56,6 +56,7 @@ from core.sync_registry import SyncPolicy, get_sync_registry_entry
 from core.sync_transport import assert_runtime_sync_transport_allowed, runtime_sync_tls_verify_setting
 from core.telegram_delivery_runtime_policy import (
     TelegramDeliveryRuntimeMode,
+    configured_telegram_delivery_producer_mode,
     configured_telegram_delivery_runtime,
 )
 from core.security import constant_time_secret_equals
@@ -70,6 +71,10 @@ from core.services.telegram_notification_outbox_service import (
 )
 from core.telegram_legacy_otp_relay_contract import (
     validate_legacy_telegram_otp_relay,
+)
+from core.services.telegram_otp_ephemeral_queue import (
+    inspect_telegram_otp_ephemeral_health,
+    telegram_otp_ephemeral_health_payload,
 )
 import hmac
 import hashlib
@@ -3638,30 +3643,36 @@ async def receive_sync_data(
         for item in sorted_items:
             # Handle Notification Relay
             if item.get("type") == "notification":
-                try:
-                    from core.notifications import send_telegram_message
-                    relay = validate_legacy_telegram_otp_relay(
-                        chat_id=item.get("chat_id"),
-                        text=item.get("text"),
-                        parse_mode=item.get("parse_mode", "Markdown"),
-                        purpose=item.get("purpose"),
+                if configured_telegram_delivery_producer_mode() == TelegramDeliveryRuntimeMode.QUEUE_V1:
+                    logger.warning(
+                        "Rejected legacy Telegram OTP envelope in Queue-v1",
+                        extra={"event": "sync.notification_relay_rejected_queue_v1"},
                     )
-                    await send_telegram_message(
-                        chat_id=relay.chat_id,
-                        text=relay.text,
-                        parse_mode=relay.parse_mode,
-                        purpose=relay.purpose,
-                    )
-                    processed_count += 1
-                    logger.info("Relayed validated legacy Telegram OTP")
-                except Exception as e:
-                    logger.error(
-                        "Rejected or failed legacy Telegram OTP relay",
-                        extra={
-                            "event": "sync.notification_relay_failed",
-                            **_summarize_exception(e),
-                        },
-                    )
+                else:
+                    try:
+                        from core.notifications import send_telegram_message
+                        relay = validate_legacy_telegram_otp_relay(
+                            chat_id=item.get("chat_id"),
+                            text=item.get("text"),
+                            parse_mode=item.get("parse_mode", "Markdown"),
+                            purpose=item.get("purpose"),
+                        )
+                        await send_telegram_message(
+                            chat_id=relay.chat_id,
+                            text=relay.text,
+                            parse_mode=relay.parse_mode,
+                            purpose=relay.purpose,
+                        )
+                        processed_count += 1
+                        logger.info("Relayed validated legacy Telegram OTP")
+                    except Exception as e:
+                        logger.error(
+                            "Rejected or failed legacy Telegram OTP relay",
+                            extra={
+                                "event": "sync.notification_relay_failed",
+                                **_summarize_exception(e),
+                            },
+                        )
                 continue
 
             protocol_validation = validate_sync_protocol_metadata(item.get("sync_protocol"))
@@ -4149,10 +4160,9 @@ async def receive_sync_data(
         # (same sync item may arrive via both direct-push and sync_worker)
         if settings.server_mode != "iran" and new_offers:
             try:
-                telegram_runtime = configured_telegram_delivery_runtime()
                 queue_owns_publication = (
-                    telegram_runtime.mode == TelegramDeliveryRuntimeMode.QUEUE_V1
-                    and telegram_runtime.queue_worker_enabled
+                    configured_telegram_delivery_producer_mode()
+                    == TelegramDeliveryRuntimeMode.QUEUE_V1
                 )
                 telegram_publication_gated = await _active_publication_gated_for_sync_receive("telegram_channel")
                 if queue_owns_publication:
@@ -4731,6 +4741,32 @@ async def get_sync_health(
     else:
         registration_jobs = unavailable_registration_health(settings_obj=settings)
 
+    telegram_otp_ephemeral = {"status": "not_applicable"}
+    if redis_ok and normalize_server(settings.server_mode) == SERVER_FOREIGN:
+        try:
+            telegram_otp_ephemeral = {
+                "status": "ok",
+                **telegram_otp_ephemeral_health_payload(
+                    await inspect_telegram_otp_ephemeral_health(redis_client)
+                ),
+            }
+        except Exception as exc:
+            telegram_otp_ephemeral = {
+                "status": "error",
+                "error_type": type(exc).__name__,
+            }
+            logger.warning(
+                "Could not collect Telegram OTP ephemeral health",
+                extra={
+                    "event": "sync.health.telegram_otp_ephemeral_error",
+                    "log_class": "integration",
+                    "server_mode": settings.server_mode,
+                    **_summarize_exception(exc),
+                },
+            )
+    elif not redis_ok and normalize_server(settings.server_mode) == SERVER_FOREIGN:
+        telegram_otp_ephemeral = {"status": "redis_unavailable"}
+
     payload = {
         "status": "ok",
         "server_mode": settings.server_mode,
@@ -4754,6 +4790,7 @@ async def get_sync_health(
         "parity_status": _parity_status_payload(latest_parity_summary),
         "registration_sync": registration_sync_capabilities(settings),
         "registration_jobs": registration_jobs,
+        "telegram_otp_ephemeral": telegram_otp_ephemeral,
     }
     latest_parity = payload["parity_status"].get("latest_comparison") if isinstance(payload.get("parity_status"), dict) else None
     if isinstance(latest_parity, dict):

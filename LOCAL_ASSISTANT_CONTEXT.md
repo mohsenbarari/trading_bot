@@ -76,7 +76,7 @@ Implemented auth paths include:
 - `POST /api/auth/request-otp`
 - `POST /api/auth/resend-otp-sms`
 - `POST /api/auth/verify-otp`
-- `POST /api/auth/webapp-login`
+- `POST /api/auth/webapp-login` (retired; `410 Gone`; OTP-first WebApp auth is the supported path)
 - `POST /api/auth/refresh`
 - `GET /api/auth/me`
 - `POST /api/auth/register-otp-request`

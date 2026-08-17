@@ -136,7 +136,9 @@ class SyncHealthEndpointTests(unittest.IsolatedAsyncioTestCase):
 
         with patch("api.routers.sync.settings.observability_api_key", "obs-key"), patch(
             "api.routers.sync.settings.server_mode", "foreign"
-        ), patch("api.routers.sync.default_peer_server_url", return_value="https://iran.example"), patch(
+        ), patch("api.routers.sync.settings.release_sha", None), patch(
+            "api.routers.sync.default_peer_server_url", return_value="https://iran.example"
+        ), patch(
             "api.routers.sync.get_redis_client", return_value=redis_client
         ), patch("api.routers.sync.record_sync_health") as record_sync_health, patch(
             "api.routers.sync.record_offer_publication_health"
@@ -185,6 +187,11 @@ class SyncHealthEndpointTests(unittest.IsolatedAsyncioTestCase):
             set(payload["registration_jobs"]["jobs"]),
             {"telegram_registration_reconciliation", "otp_sms_fallback"},
         )
+        self.assertEqual(payload["telegram_otp_ephemeral"]["status"], "ok")
+        self.assertIn("worker_present", payload["telegram_otp_ephemeral"])
+        self.assertIn("pending_count", payload["telegram_otp_ephemeral"])
+        self.assertIn("poison_count", payload["telegram_otp_ephemeral"])
+        self.assertNotIn("otp_code", str(payload["telegram_otp_ephemeral"]))
         record_sync_health.assert_called_once()
         record_publication_health.assert_called_once()
 

@@ -52,6 +52,17 @@ class CoreNotificationsRuntimeTests(unittest.IsolatedAsyncioTestCase):
 
         logger.error.assert_called_once()
 
+    async def test_queue_v1_cannot_use_legacy_otp_relay(self):
+        with patch(
+            "core.notifications.configured_telegram_delivery_producer_mode",
+            return_value=__import__(
+                "core.telegram_delivery_runtime_policy",
+                fromlist=["TelegramDeliveryRuntimeMode"],
+            ).TelegramDeliveryRuntimeMode.QUEUE_V1,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "legacy_otp_relay_forbidden_in_queue_v1"):
+                await notifications.send_telegram_message(2, OTP_TEXT)
+
 
 if __name__ == '__main__':
     unittest.main()
