@@ -142,6 +142,9 @@ EXPECTED_RUNTIME_INVENTORY_COUNTS = {
     "queue_execution": 1,
 }
 EXPECTED_RUNTIME_INVENTORY_SHA256 = (
+    "88e33a2d042ff43f3a1640048682290ed958b76a6e6a26deb47adfd1cc4320ab"
+)
+PRE_OTP_QUEUE_METADATA_FIX_RUNTIME_INVENTORY_SHA256 = (
     "18f80e229bdad8eff47b9aae9316b43cf3ccaeb4f143ebdc18a276306e876fdc"
 )
 PRODUCER_ONLY_OTP_QUEUE_RUNTIME_INVENTORY_SHA256 = (
@@ -159,6 +162,9 @@ OVERTIME_OWNER_PROMPT_RUNTIME_INVENTORY_SHA256 = (
 REVIEWED_RUNTIME_INVENTORY_SHA256 = frozenset(
     {
         EXPECTED_RUNTIME_INVENTORY_SHA256,
+        # Same 103 callsites and dispositions. Only the bot-owned OTP send line
+        # moved when exact pending lookup and poison idempotency were added.
+        PRE_OTP_QUEUE_METADATA_FIX_RUNTIME_INVENTORY_SHA256,
         PRODUCER_ONLY_OTP_QUEUE_RUNTIME_INVENTORY_SHA256,
         # Same 103 callsites and dispositions. Three identities moved because
         # OTP finalize/retention helpers and SMS isolation startup checks were

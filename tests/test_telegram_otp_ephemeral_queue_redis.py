@@ -16,8 +16,10 @@ from core.services.telegram_otp_ephemeral_queue import (
     OTP_EQ_WORKER_KEY,
     command_hash,
     enqueue_telegram_otp_command,
+    ensure_otp_eq_group,
     inspect_telegram_otp_ephemeral_health,
     process_telegram_otp_stream_message,
+    _read_group_messages,
     run_telegram_otp_ephemeral_once,
 )
 from core.utils import utc_now
@@ -138,3 +140,59 @@ class TelegramOTPEphemeralQueueRedisTests(unittest.IsolatedAsyncioTestCase):
             dumped = str(await self.redis.dump(OTP_EQ_STREAM) or b"")
             self.assertNotIn("12345", dumped)
             self.assertNotIn("12345", str(await self.redis.keys(f"{OTP_EQ_RECEIPT_PREFIX}*")))
+
+    async def test_real_redis_delivery_lookup_targets_message_after_large_pending_prefix(self):
+        await ensure_otp_eq_group(self.redis)
+        commands = [_command() for _index in range(18)]
+        for item in commands:
+            await enqueue_telegram_otp_command(self.redis, command=item)
+        await self.redis.xreadgroup(
+            OTP_EQ_GROUP,
+            "stalled",
+            streams={OTP_EQ_STREAM: ">"},
+            count=17,
+        )
+
+        messages = await _read_group_messages(self.redis, consumer="bot", count=1)
+
+        self.assertEqual(len(messages), 1)
+        _message_id, _fields, deliveries = messages[0]
+        self.assertEqual(deliveries, 1)
+
+    async def test_real_redis_quarantine_is_idempotent_after_finalize_crash(self):
+        await ensure_otp_eq_group(self.redis)
+        request_id = str(uuid4())
+        fields = {
+            "payload": "not-valid-ciphertext",
+            "request_id": request_id,
+            "command_hash": "synthetic-digest",
+        }
+        message_id = str(await self.redis.xadd(OTP_EQ_STREAM, fields))
+        await self.redis.xreadgroup(
+            OTP_EQ_GROUP,
+            "bot",
+            streams={OTP_EQ_STREAM: ">"},
+            count=1,
+        )
+        with patch(
+            "core.services.telegram_otp_ephemeral_queue.finalize_telegram_otp_command",
+            new=AsyncMock(side_effect=RuntimeError("crash_after_poison")),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "crash_after_poison"):
+                await process_telegram_otp_stream_message(
+                    self.redis,
+                    message_id=message_id,
+                    fields=fields,
+                    deliveries=1,
+                )
+
+        replay = await process_telegram_otp_stream_message(
+            self.redis,
+            message_id=message_id,
+            fields=fields,
+            deliveries=2,
+        )
+
+        self.assertEqual(replay, TelegramOTPDeliveryOutcome.INVALID)
+        self.assertEqual(int(await self.redis.xlen(OTP_EQ_POISON_STREAM) or 0), 1)
+        self.assertEqual(int(await self.redis.xlen(OTP_EQ_STREAM) or 0), 0)

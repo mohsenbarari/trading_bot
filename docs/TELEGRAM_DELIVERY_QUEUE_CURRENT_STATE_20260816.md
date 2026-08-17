@@ -37,7 +37,8 @@
 
 - اسکریپت: `scripts/audit_telegram_delivery_calls.py`
 - شمار جاری: `103` callsite، بدون دستهٔ ناشناخته و بدون `durable_exempt`.
-- اثر انگشت بازبینی‌شدهٔ فعلی: `18f80e229bdad8eff47b9aae9316b43cf3ccaeb4f143ebdc18a276306e876fdc`
+- اثر انگشت بازبینی‌شدهٔ فعلی: `88e33a2d042ff43f3a1640048682290ed958b76a6e6a26deb47adfd1cc4320ab`
+- اثر انگشت پیش از اصلاح lookup دقیق pending و poison idempotent: `18f80e229bdad8eff47b9aae9316b43cf3ccaeb4f143ebdc18a276306e876fdc` (همان ۱۰۳ callsite؛ فقط جابه‌جایی خط ارسال OTP بات)
 - اثر انگشت پیش از سخت‌سازی صف OTP: `b106a19f532e7f6c6ecfc4e5f3a20e81a8f29427e77e9ba680dffd095153b451` (همان ۱۰۳ callsite؛ فقط جابه‌جایی شماره خط)
 - دسته‌های جدید: `ephemeral_queue_execution=1` (ارسال OTP فقط در bot) و `operational_control=3` (ساخت Bot در `run_bot` و لینک عضویت بات).
 
@@ -91,7 +92,7 @@ production در این سند تغییر نمی‌کند و مجوز جداگا�
 - صف OTP: پس از نتیجهٔ نهایی ACK+DELETE؛ `XLEN=0` و `XPENDING=0`؛ health `pending_count=0` و oldest خالی
 - max-deliveries از `XPENDING RANGE` / `times_delivered` خوانده می‌شود؛ quarantine مصنوعی یک‌بار و بدون payload
 - SMS staging: `BLOCKED — VERIFIED STAGING CREDENTIAL ABSENT`؛ fallback روی ایران و foreign صریحاً false
-- callsite inventory: `103`؛ اثر انگشت جاری `18f80e229bdad8eff47b9aae9316b43cf3ccaeb4f143ebdc18a276306e876fdc`
+- callsite inventory: `103`؛ اثر انگشت جاری `88e33a2d042ff43f3a1640048682290ed958b76a6e6a26deb47adfd1cc4320ab`
 - ماتریس بازاعتبار `telegram-live-matrix-20260817t152138z-4053a0a01a8e` با پروفایل `revalidation-100` پاس شد: ۱۰۰/۱۰۰ صف، ارسال کانال، ack، terminal و WebApp؛ completed ۲۳ / expired ۷۷؛ هر پنج lane استفاده شد
 - ماتریس تاریخی ۵۰۰تایی `telegram-live-matrix-20260817t121645z-e4215158d505` و `telegram-live-matrix-20260816t231306z-08c5c6b74635` حذف یا بازنویسی نشد
 - مهلت انقضا هنگام ماتریس ۱۰۰تایی ۶ دقیقه بود و پس از پاک‌سازی رسمی به ۲ دقیقه برگشت

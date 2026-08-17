@@ -39,6 +39,7 @@ OTP_EQ_GROUP = "telegram_otp_eq"
 OTP_EQ_POISON_STREAM = "telegram_otp_eq:poison"
 OTP_EQ_WORKER_KEY = "telegram_otp_eq:worker"
 OTP_EQ_RECEIPT_PREFIX = "telegram_otp_eq:receipt:"
+OTP_EQ_POISON_DEDUPE_PREFIX = "telegram_otp_eq:poison_once:"
 OTP_EQ_WAIT_SECONDS = 4.0
 OTP_EQ_POLL_SECONDS = 0.05
 OTP_EQ_WORKER_TTL_SECONDS = 30
@@ -50,8 +51,23 @@ OTP_EQ_COMMAND_RETENTION_SECONDS = 360
 OTP_EQ_RECEIPT_FALLBACK_TTL_SECONDS = 180
 OTP_EQ_POISON_MAXLEN = 256
 OTP_EQ_POISON_TTL_SECONDS = 86_400
+OTP_EQ_POISON_DEDUPE_TTL_SECONDS = 2 * OTP_EQ_POISON_TTL_SECONDS
 _MIN_QUEUE_SECRET_LENGTH = 32
 _FERNET_DOMAIN = b"trading-bot:telegram-otp-eq:v1\x00"
+
+_RECORD_POISON_ONCE_LUA = """
+if redis.call('EXISTS', KEYS[1]) == 1 then
+  return 0
+end
+redis.call(
+  'XADD', KEYS[2], '*',
+  'request_id', ARGV[2],
+  'reason', ARGV[3],
+  'quarantined_at', ARGV[4]
+)
+redis.call('SET', KEYS[1], '1', 'EX', ARGV[1])
+return 1
+"""
 
 
 class TelegramOTPQueueError(RuntimeError):
@@ -515,20 +531,42 @@ async def _bound_poison_stream(redis) -> None:
         )
 
 
-async def _record_poison(redis, *, request_id: str, reason: str) -> None:
-    await redis.xadd(
-        OTP_EQ_POISON_STREAM,
-        {
-            "request_id": request_id,
-            "reason": reason,
-            "quarantined_at": str(int(utc_now().timestamp())),
-        },
+def _poison_dedupe_key(*, message_id: str, reason: str) -> str:
+    identity = hashlib.sha256(f"{message_id}\x00{reason}".encode("utf-8")).hexdigest()
+    return f"{OTP_EQ_POISON_DEDUPE_PREFIX}{identity}"
+
+
+async def _record_poison(
+    redis,
+    *,
+    message_id: str,
+    request_id: str,
+    reason: str,
+) -> bool:
+    recorded = bool(
+        await redis.eval(
+            _RECORD_POISON_ONCE_LUA,
+            2,
+            _poison_dedupe_key(message_id=message_id, reason=reason),
+            OTP_EQ_POISON_STREAM,
+            str(OTP_EQ_POISON_DEDUPE_TTL_SECONDS),
+            request_id,
+            reason,
+            str(int(utc_now().timestamp())),
+        )
     )
-    await _bound_poison_stream(redis)
-    logger.warning(
-        "Telegram OTP command quarantined",
-        extra={"event": "otp.eq.poison", "reason": reason},
-    )
+    if recorded:
+        await _bound_poison_stream(redis)
+        logger.warning(
+            "Telegram OTP command quarantined",
+            extra={"event": "otp.eq.poison", "reason": reason},
+        )
+    else:
+        logger.info(
+            "Duplicate Telegram OTP quarantine suppressed",
+            extra={"event": "otp.eq.poison_duplicate_suppressed", "reason": reason},
+        )
+    return recorded
 
 
 async def retain_telegram_otp_command_stream(redis) -> None:
@@ -602,31 +640,31 @@ async def _pending_message_ids(redis) -> list[str]:
 
 async def _times_delivered(redis, message_ids: list[str]) -> dict[str, int | None]:
     wanted = {str(item) for item in message_ids}
-    found: dict[str, int] = {}
     if not wanted:
         return {}
-    try:
-        rows = await redis.xpending_range(
-            OTP_EQ_STREAM,
-            OTP_EQ_GROUP,
-            min="-",
-            max="+",
-            count=max(len(wanted) * 4, 16),
-        )
-    except Exception:
-        logger.warning(
-            "Telegram OTP delivery metadata unavailable",
-            extra={"event": "otp.eq.delivery_count_unavailable"},
-        )
-        return {item: None for item in wanted}
-    for entry in rows or ():
-        parsed = _pending_delivery_count(entry)
-        if parsed is None:
+    observed: dict[str, int | None] = {}
+    for message_id in sorted(wanted):
+        try:
+            rows = await redis.xpending_range(
+                OTP_EQ_STREAM,
+                OTP_EQ_GROUP,
+                min=message_id,
+                max=message_id,
+                count=1,
+            )
+        except Exception:
+            logger.warning(
+                "Telegram OTP delivery metadata unavailable",
+                extra={"event": "otp.eq.delivery_count_unavailable"},
+            )
+            observed[message_id] = None
             continue
-        message_id, deliveries = parsed
-        if message_id in wanted:
-            found[message_id] = deliveries
-    return {item: found.get(item) for item in wanted}
+        parsed = _pending_delivery_count(rows[0]) if rows else None
+        if parsed is None or parsed[0] != message_id:
+            observed[message_id] = None
+            continue
+        observed[message_id] = parsed[1]
+    return observed
 
 
 async def _finalize_without_send(
@@ -647,7 +685,12 @@ async def _finalize_without_send(
         )
     if existing is None:
         if reason:
-            await _record_poison(redis, request_id=request_id, reason=reason)
+            await _record_poison(
+                redis,
+                message_id=message_id,
+                request_id=request_id,
+                reason=reason,
+            )
         if request_id and digest:
             await finalize_telegram_otp_command(
                 redis,

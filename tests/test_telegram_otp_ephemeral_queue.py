@@ -107,6 +107,24 @@ class FakeStreamRedis:
         self.expires[name] = ttl
         return True
 
+    async def eval(self, script, numkeys, *values):
+        del script
+        if int(numkeys) != 2:
+            raise AssertionError("unexpected_eval_key_count")
+        marker_key, stream_name, ttl, request_id, reason, quarantined_at = values
+        if marker_key in self.values:
+            return 0
+        await self.xadd(
+            stream_name,
+            {
+                "request_id": request_id,
+                "reason": reason,
+                "quarantined_at": quarantined_at,
+            },
+        )
+        await self.set(marker_key, "1", ex=int(ttl))
+        return 1
+
     async def xadd(self, name, fields):
         self._now_ms = max(self._now_ms, int(time.time() * 1000))
         self._seq += 1
@@ -144,18 +162,29 @@ class FakeStreamRedis:
         head, _, _ = str(message_id).partition("-")
         return int(head) if head.isdigit() else 0
 
+    def _id_parts(self, message_id):
+        head, separator, tail = str(message_id).lstrip("(").partition("-")
+        if not separator or not head.isdigit() or not tail.isdigit():
+            return (0, 0)
+        return (int(head), int(tail))
+
     def _in_range(self, message_id, minimum, maximum):
-        value = self._id_ms(message_id)
+        value = self._id_parts(message_id)
         if minimum not in {"-", ""}:
             exclusive = str(minimum).startswith("(")
             bound = str(minimum)[1:] if exclusive else str(minimum)
-            bound_ms = self._id_ms(bound)
-            if exclusive and value <= bound_ms:
+            bound_value = self._id_parts(bound)
+            if exclusive and value <= bound_value:
                 return False
-            if not exclusive and value < bound_ms:
+            if not exclusive and value < bound_value:
                 return False
         if maximum not in {"+", ""}:
-            if value > self._id_ms(str(maximum)):
+            exclusive = str(maximum).startswith("(")
+            bound = str(maximum)[1:] if exclusive else str(maximum)
+            bound_value = self._id_parts(bound)
+            if exclusive and value >= bound_value:
+                return False
+            if not exclusive and value > bound_value:
                 return False
         return True
 
@@ -173,14 +202,12 @@ class FakeStreamRedis:
         del approximate, limit
         items = list(self.streams.get(name, []))
         if minid is not None:
-            items = [item for item in items if not self._in_range(item[0], "-", f"({minid}")]
-            # keep ids >= minid
-            items = [item for item in self.streams.get(name, []) if self._id_ms(item[0]) >= self._id_ms(str(minid))]
             # never drop pending
             pending = set(self.pel)
+            threshold = self._id_parts(str(minid))
             kept = []
             for item in self.streams.get(name, []):
-                if item[0] in pending or self._id_ms(item[0]) >= self._id_ms(str(minid)):
+                if item[0] in pending or self._id_parts(item[0]) >= threshold:
                     kept.append(item)
             items = kept
         elif maxlen is not None:
@@ -568,6 +595,38 @@ class TelegramOTPEphemeralQueueTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(redis.streams[OTP_EQ_POISON_STREAM][0][1]["reason"], "max_deliveries")
         self.assertEqual(redis.streams[OTP_EQ_STREAM], [])
 
+    async def test_delivery_lookup_targets_message_beyond_first_sixteen_pending(self):
+        redis = FakeStreamRedis()
+        await redis.xgroup_create(OTP_EQ_STREAM, OTP_EQ_GROUP, mkstream=True)
+        commands = [command() for _index in range(18)]
+        for item in commands:
+            await enqueue_telegram_otp_command(redis, command=item)
+        await redis.xreadgroup(
+            OTP_EQ_GROUP,
+            "stalled",
+            streams={OTP_EQ_STREAM: ">"},
+            count=17,
+        )
+        for pending in redis.pel.values():
+            pending["last_deliver_ms"] = redis._now_ms
+
+        send, patches = self._send_patches()
+        with patches[0], patches[1], patches[2]:
+            messages = await read_only(redis)
+            self.assertEqual(len(messages), 1)
+            message_id, fields, deliveries = messages[0]
+            self.assertEqual(deliveries, 1)
+            outcome = await process_telegram_otp_stream_message(
+                redis,
+                message_id=message_id,
+                fields=fields,
+                deliveries=deliveries,
+            )
+
+        self.assertEqual(outcome, TelegramOTPDeliveryOutcome.SENT)
+        send.assert_awaited_once()
+        self.assertEqual(redis.streams[OTP_EQ_POISON_STREAM], [])
+
     async def test_unknown_delivery_count_is_fail_closed(self):
         redis = FakeStreamRedis()
         cmd = command()
@@ -610,6 +669,37 @@ class TelegramOTPEphemeralQueueTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(second, TelegramOTPDeliveryOutcome.PROVIDER_ERROR)
         send.assert_not_awaited()
         self.assertEqual(len(redis.streams[OTP_EQ_POISON_STREAM]), 1)
+
+    async def test_quarantine_is_idempotent_across_crash_before_terminal_receipt(self):
+        redis = FakeStreamRedis()
+        request_id = str(uuid4())
+        fields = {
+            "payload": "not-valid-ciphertext",
+            "request_id": request_id,
+            "command_hash": "synthetic-digest",
+        }
+        with patch(
+            "core.services.telegram_otp_ephemeral_queue.finalize_telegram_otp_command",
+            new=AsyncMock(side_effect=RuntimeError("crash_after_poison")),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "crash_after_poison"):
+                await process_telegram_otp_stream_message(
+                    redis,
+                    message_id="1-9",
+                    fields=fields,
+                    deliveries=1,
+                )
+
+        replay = await process_telegram_otp_stream_message(
+            redis,
+            message_id="1-9",
+            fields=fields,
+            deliveries=2,
+        )
+
+        self.assertEqual(replay, TelegramOTPDeliveryOutcome.INVALID)
+        self.assertEqual(len(redis.streams[OTP_EQ_POISON_STREAM]), 1)
+        self.assertEqual(redis.streams[OTP_EQ_POISON_STREAM][0][1]["reason"], "decrypt_or_contract")
 
     async def test_iran_cannot_enqueue(self):
         with override_current_server(SERVER_IRAN):
