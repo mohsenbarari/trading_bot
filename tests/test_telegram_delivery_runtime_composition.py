@@ -14,6 +14,7 @@ from core.telegram_delivery_runtime_composition import (
     configured_telegram_delivery_freshness_registry,
     configured_telegram_delivery_lifecycle_registry,
 )
+from core.telegram_delivery_callback_contract import CALLBACK_FRESHNESS_ACTIONS
 
 
 class TelegramDeliveryRuntimeCompositionTests(unittest.TestCase):
@@ -88,6 +89,16 @@ class TelegramDeliveryRuntimeCompositionTests(unittest.TestCase):
             self.assertEqual(
                 runtime.lifecycle_feedbacks[identity].bot_identity,
                 identity,
+            )
+            self.assertTrue(
+                CALLBACK_FRESHNESS_ACTIONS.issubset(
+                    runtime.freshness_validators[identity].required_actions
+                )
+            )
+            self.assertTrue(
+                CALLBACK_FRESHNESS_ACTIONS.issubset(
+                    runtime.lifecycle_feedbacks[identity].required_actions
+                )
             )
 
     def test_primary_freshness_and_lifecycle_are_complete(self):

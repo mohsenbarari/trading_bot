@@ -12,6 +12,7 @@ from core.telegram_delivery_freshness_router import (
     TelegramDeliveryFreshnessRouter,
     TelegramDeliveryFreshnessRoutingError,
     admin_broadcast_freshness_routes,
+    callback_freshness_routes,
     market_freshness_routes,
     new_user_membership_freshness_routes,
     offer_freshness_routes,
@@ -20,6 +21,7 @@ from core.telegram_delivery_freshness_router import (
     trade_result_freshness_routes,
 )
 from core.telegram_delivery_market_freshness import MARKET_NOTICE_FRESHNESS_ACTIONS
+from core.telegram_delivery_callback_contract import CALLBACK_FRESHNESS_ACTIONS
 from core.telegram_delivery_offer_freshness import OFFER_FRESHNESS_ACTIONS
 from core.telegram_delivery_trade_freshness import TRADE_RESULT_FRESHNESS_ACTIONS
 from core.telegram_delivery_admin_broadcast_freshness import (
@@ -67,7 +69,10 @@ class TelegramDeliveryFreshnessRouterTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn(TelegramDeliveryAction.OTP_DEADLINE, primary)
         self.assertEqual(editor, CHANNEL_EDITOR_ACTIONS)
         self.assertNotIn(TelegramDeliveryAction.OFFER_PUBLISH, editor)
-        self.assertEqual(publisher, OFFER_FRESHNESS_ACTIONS)
+        self.assertEqual(
+            publisher,
+            OFFER_FRESHNESS_ACTIONS | CALLBACK_FRESHNESS_ACTIONS,
+        )
         self.assertNotIn(TelegramDeliveryAction.ADMIN_BROADCAST, publisher)
 
     def test_offer_registry_reports_exact_remaining_lane_coverage(self):
@@ -91,8 +96,34 @@ class TelegramDeliveryFreshnessRouterTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertTrue(editor.complete)
         self.assertEqual(editor.missing_actions, ())
-        self.assertTrue(publisher.complete)
-        self.assertEqual(publisher.missing_actions, ())
+        self.assertFalse(publisher.complete)
+        self.assertEqual(
+            set(publisher.missing_actions),
+            CALLBACK_FRESHNESS_ACTIONS,
+        )
+
+    async def test_publisher_router_includes_owner_callback_freshness(self):
+        offer_validator = send_validator()
+        callback_validator = send_validator()
+        routes = offer_freshness_routes(offer_validator)
+        routes.update(
+            callback_freshness_routes(
+                CALLBACK_FRESHNESS_ACTIONS,
+                callback_validator,
+            )
+        )
+        registry = TelegramDeliveryFreshnessRegistry(routes)
+        router = registry.build_lane_router("publisher_3")
+        job = make_job(
+            TelegramDeliveryAction.CALLBACK_DEADLINE,
+            bot_identity="publisher_3",
+        )
+
+        result = await router(object(), job, NOW)
+
+        self.assertEqual(result.outcome, TelegramFreshnessOutcome.SEND)
+        callback_validator.assert_awaited_once()
+        offer_validator.assert_not_awaited()
 
     def test_offer_and_market_routes_report_remaining_primary_coverage(self):
         validator = send_validator()
