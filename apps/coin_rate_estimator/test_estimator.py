@@ -2642,6 +2642,95 @@ class EstimatorTests(unittest.TestCase):
             "CASH_NOT_ABOVE_OBSERVED_TOMORROW_BOOK",
         )
 
+    def test_recent_tomorrow_consensus_never_gets_lifted_by_inferred_cash(self) -> None:
+        settlements = {
+            "CASH": {
+                "rates": [
+                    {
+                        "commodity_name": "امام",
+                        "status": "ESTIMATED",
+                        "estimated_price_toman": 190_100_000,
+                        "estimated_project_price": 190_100,
+                        "group_offer_anchor": {"status": "NO_DATA"},
+                    }
+                ]
+            },
+            "TOMORROW": {
+                "rates": [
+                    {
+                        "commodity_name": "امام",
+                        "status": "ESTIMATED",
+                        "estimated_price_toman": 189_250_000,
+                        "estimated_project_price": 189_250,
+                        "group_offer_anchor": {"status": "NO_DATA"},
+                        "historical_group_anchor": {
+                            "status": "OBSERVED",
+                            "reference_price_toman": 189_100_000,
+                            "age_seconds": 388,
+                            "confidence": 0.99,
+                            "trade_count": 5,
+                            "offer_count": 20,
+                            "latest_is_consistent": True,
+                        },
+                    }
+                ]
+            },
+        }
+
+        audits = enforce_cash_tomorrow_term_structure(settlements)
+        cash = settlements["CASH"]["rates"][0]
+        tomorrow = settlements["TOMORROW"]["rates"][0]
+
+        self.assertEqual(len(audits), 1)
+        self.assertEqual(cash["estimated_price_toman"], 189_250_000)
+        self.assertEqual(tomorrow["estimated_price_toman"], 189_250_000)
+        self.assertEqual(
+            cash["term_structure_cap"]["policy"],
+            "CASH_NOT_ABOVE_RECENT_TOMORROW_CONSENSUS",
+        )
+
+    def test_isolated_historical_offer_does_not_override_term_structure(self) -> None:
+        settlements = {
+            "CASH": {
+                "rates": [
+                    {
+                        "commodity_name": "امام",
+                        "status": "ESTIMATED",
+                        "estimated_price_toman": 190_100_000,
+                        "estimated_project_price": 190_100,
+                    }
+                ]
+            },
+            "TOMORROW": {
+                "rates": [
+                    {
+                        "commodity_name": "امام",
+                        "status": "ESTIMATED",
+                        "estimated_price_toman": 189_250_000,
+                        "estimated_project_price": 189_250,
+                        "historical_group_anchor": {
+                            "status": "OBSERVED",
+                            "reference_price_toman": 189_100_000,
+                            "age_seconds": 388,
+                            "confidence": 0.99,
+                            "trade_count": 0,
+                            "offer_count": 1,
+                            "latest_is_consistent": True,
+                        },
+                    }
+                ]
+            },
+        }
+
+        audits = enforce_cash_tomorrow_term_structure(settlements)
+
+        self.assertEqual(len(audits), 1)
+        self.assertEqual(
+            settlements["TOMORROW"]["rates"][0]["estimated_price_toman"],
+            190_100_000,
+        )
+        self.assertNotIn("term_structure_cap", settlements["CASH"]["rates"][0])
+
 
 if __name__ == "__main__":
     unittest.main()

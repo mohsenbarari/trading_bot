@@ -194,6 +194,14 @@ CONFIRMED_TRADE_FLOW_WEIGHT = 3.0
 FLOW_TOLERANCE_EXPANSION_MAX = 0.75
 GROUP_ANCHOR_WINDOW_SECONDS = OFFER_LIVE_SECONDS
 HISTORICAL_GROUP_MAXIMUM_RELATIVE_DEVIATION = 0.05
+# A short-lived executable quote still expires after OFFER_LIVE_SECONDS, but a
+# dense, recent group consensus remains stronger evidence than an inferred
+# cash/tomorrow ordering rule.  This grace period is used only to prevent the
+# finalizer from moving a well-supported estimate away from the observed
+# market; it never turns an expired offer back into a live quote.
+RECENT_GROUP_TERM_STRUCTURE_MAX_AGE_SECONDS = 30 * 60
+RECENT_GROUP_TERM_STRUCTURE_MIN_OFFERS = 3
+RECENT_GROUP_TERM_STRUCTURE_MIN_CONFIDENCE = 0.90
 MARKET_FORM_POLICY_VERSION = "EXPLICIT_CASH_MARKET_FORMS_V3"
 ACCOUNT1_PHYSICAL_TODAY_LABEL = "آبشده کانال جدید نقد حاضر"
 ACCOUNT1_PHYSICAL_TOMORROW_LABEL = "آبشده کانال جدید فیزیکی فردا"
@@ -5280,11 +5288,40 @@ def enforce_cash_tomorrow_term_structure(
 
     TOMORROW is often ``CASH × empirical ratio`` (ratio ≳ 1).  Online residual
     can then pull only the TOMORROW book (CASH still warming up), which flips
-    the term structure.  A current, observed group book is stronger evidence
-    than this structural rule: never lift an observed TOMORROW price merely
-    because an inferred CASH estimate is stale.  In that case cap the inferred
-    cash estimate at the observed tomorrow book instead.
+    the term structure.  A current group book, or a dense and recent group
+    consensus, is stronger evidence than this structural rule: never lift a
+    market-supported TOMORROW price merely because an inferred CASH estimate
+    is stale.  In that case cap the inferred cash estimate at the tomorrow
+    market instead.
     """
+
+    def authoritative_group_market(rate: dict[str, Any]) -> str | None:
+        live = rate.get("group_offer_anchor")
+        if isinstance(live, dict) and str(live.get("status") or "") == "OBSERVED":
+            return "LIVE_GROUP_BOOK"
+
+        historical = rate.get("historical_group_anchor")
+        if not isinstance(historical, dict):
+            return None
+        if str(historical.get("status") or "") != "OBSERVED":
+            return None
+        try:
+            age_seconds = float(historical.get("age_seconds"))
+            confidence = float(historical.get("confidence"))
+            reference_price = float(historical.get("reference_price_toman"))
+            trade_count = int(historical.get("trade_count") or 0)
+            offer_count = int(historical.get("offer_count") or 0)
+        except (TypeError, ValueError):
+            return None
+        if not 0 <= age_seconds <= RECENT_GROUP_TERM_STRUCTURE_MAX_AGE_SECONDS:
+            return None
+        if confidence < RECENT_GROUP_TERM_STRUCTURE_MIN_CONFIDENCE:
+            return None
+        if reference_price <= 0 or historical.get("latest_is_consistent") is False:
+            return None
+        if trade_count < 1 and offer_count < RECENT_GROUP_TERM_STRUCTURE_MIN_OFFERS:
+            return None
+        return "RECENT_GROUP_CONSENSUS"
 
     audits: list[dict[str, Any]] = []
     cash_rates = {
@@ -5308,22 +5345,14 @@ def enforce_cash_tomorrow_term_structure(
             continue
         cash_price_f = float(cash_price)
         tom_price_f = float(tom_price)
-        cash_anchor = cash.get("group_offer_anchor")
-        tomorrow_anchor = rate.get("group_offer_anchor")
-        cash_has_live_anchor = (
-            isinstance(cash_anchor, dict)
-            and str(cash_anchor.get("status") or "") == "OBSERVED"
-        )
-        tomorrow_has_live_anchor = (
-            isinstance(tomorrow_anchor, dict)
-            and str(tomorrow_anchor.get("status") or "") == "OBSERVED"
-        )
-        # A live tomorrow book is authoritative.  If cash is only inferred,
-        # move the inferred cash centre down to that book rather than lifting
-        # the live tomorrow centre upward.  With two conflicting live books,
-        # retain both observations for the caller/operator to inspect.
-        if tomorrow_has_live_anchor:
-            if not cash_has_live_anchor and cash_price_f > tom_price_f:
+        cash_group_market = authoritative_group_market(cash)
+        tomorrow_group_market = authoritative_group_market(rate)
+        # A market-supported tomorrow book is authoritative.  If cash is only
+        # inferred, move its centre down rather than lifting tomorrow away from
+        # recent trades/offers.  With two conflicting supported books, retain
+        # both observations for the caller/operator to inspect.
+        if tomorrow_group_market is not None:
+            if cash_group_market is None and cash_price_f > tom_price_f:
                 cap = int(round(tom_price_f / 50_000.0) * 50_000)
                 cash["_pre_term_structure_estimated_price_toman"] = cash_price_f
                 cash["estimated_price_toman"] = cap
@@ -5348,7 +5377,12 @@ def enforce_cash_tomorrow_term_structure(
                         tolerance["upper_project_price"] = int(round(capped_upper / PRICE_MULTIPLIER))
                 audit = {
                     "commodity": name,
-                    "policy": "CASH_NOT_ABOVE_OBSERVED_TOMORROW_BOOK",
+                    "policy": (
+                        "CASH_NOT_ABOVE_OBSERVED_TOMORROW_BOOK"
+                        if tomorrow_group_market == "LIVE_GROUP_BOOK"
+                        else "CASH_NOT_ABOVE_RECENT_TOMORROW_CONSENSUS"
+                    ),
+                    "tomorrow_market_evidence": tomorrow_group_market,
                     "cash_limited_from_toman": int(cash_price_f),
                     "cash_limited_to_toman": cap,
                     "tomorrow_observed_toman": int(tom_price_f),
