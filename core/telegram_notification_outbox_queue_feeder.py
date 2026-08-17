@@ -65,7 +65,7 @@ def _interval_seconds() -> float:
             getattr(
                 settings,
                 "telegram_notification_outbox_queue_feeder_interval_seconds",
-                0.1,
+                0.2,
             )
         ),
     )

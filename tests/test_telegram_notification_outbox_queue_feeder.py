@@ -37,13 +37,13 @@ class TelegramNotificationOutboxQueueFeederTests(
         with patch.object(
             feeder.settings,
             "telegram_notification_outbox_queue_feeder_interval_seconds",
-            0.1,
+            0.2,
         ), patch.object(
             feeder.settings,
             "telegram_delivery_queue_worker_interval_seconds",
             9.0,
         ):
-            self.assertEqual(feeder._interval_seconds(), 0.1)
+            self.assertEqual(feeder._interval_seconds(), 0.2)
 
     async def test_cycle_refuses_legacy_owner_before_database_touch(self):
         with patch(

@@ -159,11 +159,11 @@ class TelegramDeliveryQueueWorkerSafetyTests(unittest.IsolatedAsyncioTestCase):
                 places=6,
             )
 
-    def test_primary_idle_poll_is_fast_without_accelerating_publisher_lanes(self):
+    def test_one_primary_slot_is_fast_without_accelerating_other_lanes(self):
         with patch.object(
             worker.settings,
             "telegram_delivery_queue_primary_idle_poll_interval_seconds",
-            0.1,
+            0.2,
         ), patch.object(
             worker.settings,
             "telegram_delivery_queue_worker_interval_seconds",
@@ -171,16 +171,34 @@ class TelegramDeliveryQueueWorkerSafetyTests(unittest.IsolatedAsyncioTestCase):
         ):
             self.assertEqual(
                 worker._lane_idle_poll_interval_seconds(
-                    worker.TELEGRAM_PRIMARY_BOT_IDENTITY
+                    worker.TELEGRAM_PRIMARY_BOT_IDENTITY,
+                    "general-0",
                 ),
-                0.1,
+                0.2,
             )
             self.assertEqual(
-                worker._lane_idle_poll_interval_seconds("publisher_1"),
+                worker._lane_idle_poll_interval_seconds(
+                    worker.TELEGRAM_PRIMARY_BOT_IDENTITY,
+                    "general-1",
+                ),
                 1.0,
             )
             self.assertEqual(
-                worker._lane_idle_poll_interval_seconds("channel_editor"),
+                worker._lane_idle_poll_interval_seconds(
+                    worker.TELEGRAM_PRIMARY_BOT_IDENTITY,
+                    "m0-reserved-0",
+                ),
+                1.0,
+            )
+            self.assertEqual(
+                worker._lane_idle_poll_interval_seconds("publisher_1", "general-0"),
+                1.0,
+            )
+            self.assertEqual(
+                worker._lane_idle_poll_interval_seconds(
+                    "channel_editor",
+                    "general-0",
+                ),
                 1.0,
             )
 

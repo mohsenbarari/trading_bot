@@ -575,17 +575,17 @@ def _worker_interval_seconds() -> float:
     )
 
 
-def _lane_idle_poll_interval_seconds(bot_identity: str) -> float:
-    """Keep Central Bot private work responsive without accelerating publishers."""
+def _lane_idle_poll_interval_seconds(bot_identity: str, slot_name: str) -> float:
+    """Keep one Central Bot slot responsive without empty-poll fan-out."""
     identity = _normalize_lane_identity(bot_identity)
-    if identity == TELEGRAM_PRIMARY_BOT_IDENTITY:
+    if identity == TELEGRAM_PRIMARY_BOT_IDENTITY and slot_name == "general-0":
         return max(
             0.1,
             float(
                 getattr(
                     settings,
                     "telegram_delivery_queue_primary_idle_poll_interval_seconds",
-                    0.1,
+                    0.2,
                 )
             ),
         )
@@ -1565,7 +1565,10 @@ async def _telegram_delivery_queue_lane_slot_loop(
 ) -> None:
     assert_background_job_authority(JOB_TELEGRAM_DELIVERY_QUEUE)
     _assert_queue_runtime_owner()
-    idle_poll_interval = _lane_idle_poll_interval_seconds(lane.bot_identity)
+    idle_poll_interval = _lane_idle_poll_interval_seconds(
+        lane.bot_identity,
+        slot_name,
+    )
     logger.info(
         "Telegram delivery execution slot started",
         extra={
