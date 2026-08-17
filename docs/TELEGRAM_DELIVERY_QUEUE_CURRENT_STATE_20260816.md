@@ -37,7 +37,7 @@
 
 - اسکریپت: `scripts/audit_telegram_delivery_calls.py`
 - شمار جاری: `103` callsite، بدون دستهٔ ناشناخته و بدون `durable_exempt`.
-- اثر انگشت بازبینی‌شدهٔ فعلی: `c524e2309347a745034b2e7bae3af2e727495a8bac5f667dc2aecf2019f74c4f`
+- اثر انگشت بازبینی‌شدهٔ فعلی: `b106a19f532e7f6c6ecfc4e5f3a20e81a8f29427e77e9ba680dffd095153b451`
 - دسته‌های جدید: `ephemeral_queue_execution=1` (ارسال OTP فقط در bot) و `operational_control=3` (ساخت Bot در `run_bot` و لینک عضویت بات).
 
 ## اندازه‌گیری staging در شروع مأموریت cutover

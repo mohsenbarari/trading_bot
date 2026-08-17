@@ -142,6 +142,9 @@ EXPECTED_RUNTIME_INVENTORY_COUNTS = {
     "queue_execution": 1,
 }
 EXPECTED_RUNTIME_INVENTORY_SHA256 = (
+    "b106a19f532e7f6c6ecfc4e5f3a20e81a8f29427e77e9ba680dffd095153b451"
+)
+PRODUCER_ONLY_OTP_QUEUE_RUNTIME_INVENTORY_SHA256 = (
     "c524e2309347a745034b2e7bae3af2e727495a8bac5f667dc2aecf2019f74c4f"
 )
 MAIN_UIUX_INTEGRATION_RUNTIME_INVENTORY_SHA256 = (
@@ -153,6 +156,7 @@ OVERTIME_OWNER_PROMPT_RUNTIME_INVENTORY_SHA256 = (
 REVIEWED_RUNTIME_INVENTORY_SHA256 = frozenset(
     {
         EXPECTED_RUNTIME_INVENTORY_SHA256,
+        PRODUCER_ONLY_OTP_QUEUE_RUNTIME_INVENTORY_SHA256,
         # Exact main/customer-visibility overlay: classifications and counts remain
         # unchanged; reviewed identities move only because viewer-scoped customer
         # display resolution adds non-delivery code above existing callsites.
