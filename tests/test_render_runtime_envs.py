@@ -52,6 +52,7 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
             "FOREIGN_SERVER_ALIASES": "sync-foreign.example.com,foreign-app",
             "IRAN_SERVER_ALIASES": "sync-iran.example.com,iran-app",
             "IRAN_OTP_DELIVERY_STATE_SECRET": "iran-only-otp-state-secret-0123456789abcdef",
+            "TELEGRAM_OTP_QUEUE_SECRET": "foreign-only-otp-queue-secret-0123456789abcdef",
             "OFFER_EXPIRY_COMMAND_RECEIPTS_ENABLED": "true",
             "RELEASE_SHA": "abc123release",
             "DB_POOL_SIZE": "15",
@@ -243,8 +244,20 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
             self.assertIn("IRAN_SERVER_ALIASES=sync-iran.example.com,iran-app", iran_lines)
             self.assertIn("IRAN_SERVER_URL=https://coin.gold-trade.ir", foreign_lines)
             self.assertIn("FOREIGN_SERVER_URL=https://coin.362514.ir", iran_lines)
+            self.assertIn("SMSIR_API_KEY=", foreign_lines)
+            self.assertNotIn("SMSIR_API_KEY=sms-key", foreign_lines)
+            self.assertIn("SMSIR_API_KEY=sms-key", iran_lines)
             self.assertIn("SMSIR_OTP_TEMPLATE_ID=123456", iran_lines)
             self.assertIn("SMSIR_OTP_TEMPLATE_PARAMETER=CODE", iran_lines)
+            self.assertIn(
+                "TELEGRAM_OTP_QUEUE_SECRET=foreign-only-otp-queue-secret-0123456789abcdef",
+                foreign_lines,
+            )
+            self.assertIn("TELEGRAM_OTP_QUEUE_SECRET=", iran_lines)
+            self.assertNotIn(
+                "TELEGRAM_OTP_QUEUE_SECRET=foreign-only-otp-queue-secret-0123456789abcdef",
+                iran_lines,
+            )
             self.assertIn("SMSIR_INVITATION_TEMPLATE_ID=657938", iran_lines)
             self.assertIn("SMSIR_INVITATION_TEMPLATE_PARAMETER=NAME", iran_lines)
             self.assertIn("SMSIR_ACCOUNTANT_INVITATION_TEMPLATE_ID=162103", iran_lines)

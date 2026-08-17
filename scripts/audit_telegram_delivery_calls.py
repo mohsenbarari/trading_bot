@@ -52,6 +52,10 @@ BOT_API_METHODS = frozenset(
         "send_voice",
         "stop_message_live_location",
         "unban_chat_member",
+        "create_chat_invite_link",
+        "createChatInviteLink",
+        "banChatMember",
+        "unbanChatMember",
     }
 )
 GATEWAY_METHODS = BOT_API_METHODS | frozenset(
@@ -101,7 +105,9 @@ QUEUE_NATIVE_FILES = frozenset(
     }
 )
 TRANSPORT_FILES = frozenset({"core/telegram_gateway.py"})
-OTP_EXEMPT_FILES = frozenset({"core/services/telegram_otp_delivery_service.py"})
+EPHEMERAL_OTP_EXECUTION_FILES = frozenset(
+    {"core/services/telegram_otp_ephemeral_queue.py"}
+)
 LEGACY_OWNER_FILES = frozenset(
     {
         "core/offer_publication_worker.py",
@@ -123,18 +129,20 @@ REMAINING_DISPOSITION_BUDGETS = {
 }
 EXPECTED_RUNTIME_INVENTORY_COUNTS = {
     "b2b_control": 1,
-    "durable_exempt": 4,
+    "ephemeral_queue_execution": 1,
     # Includes Stage 8/9 overtime requester/owner status legacy branches that
-    # are gated by configured_telegram_delivery_runtime().
-    "legacy_mode_guarded": 72,
+    # are gated by configured_telegram_delivery_runtime(), plus Queue-v1
+    # producer exits that keep legacy OTP/sync send unreachable.
+    "legacy_mode_guarded": 75,
     "legacy_owner_guarded": 13,
     "legacy_parameter_guarded": 2,
     "non_delivery_timer": 5,
     "non_message_control": 2,
+    "operational_control": 3,
     "queue_execution": 1,
 }
 EXPECTED_RUNTIME_INVENTORY_SHA256 = (
-    "5907c3df342b8a2578b214c47dca1f5220c1d49d68d15fc850899f6ae63931ab"
+    "c524e2309347a745034b2e7bae3af2e727495a8bac5f667dc2aecf2019f74c4f"
 )
 MAIN_UIUX_INTEGRATION_RUNTIME_INVENTORY_SHA256 = (
     "ea648b0b53a7185bf6e53258f7140c0d62a4620462dc7bfa4569f1e1772563e8"
@@ -317,6 +325,8 @@ def _call_kind(path: str, callee: str) -> str | None:
         or {"bot", "callback", "message", "query"} & set(callee.split("."))
     ):
         return "dynamic_delivery_lookup"
+    if terminal in {"Bot"} or callee in {"aiogram.Bot", "Bot"}:
+        return "bot_construction"
     if terminal in {"send_telegram_message", "send_telegram_notification"}:
         return "notification_helper"
     if terminal in CALLABLE_GATEWAY_NAMES:
@@ -718,8 +728,11 @@ def _classify(
         return "transport_wrapper", "Bot API transport definition"
     if path in QUEUE_NATIVE_FILES:
         return "queue_execution", "shared queue credential-bound gateway"
-    if path in OTP_EXEMPT_FILES:
-        return "durable_exempt", "OTP stays on the signed short-lived transport"
+    if path in EPHEMERAL_OTP_EXECUTION_FILES and (
+        "assert_telegram_provider_execution_authority" in scope_text
+        or scope.endswith("execute_telegram_otp_via_gateway")
+    ):
+        return "ephemeral_queue_execution", "bot-owned short-lived OTP executor"
     if (
         path == "bot/handlers/telegram_publisher_b2b.py"
         and scope.endswith("receive_dispatch")
@@ -731,21 +744,19 @@ def _classify(
             "b2b_control",
             "validated payload-free publisher receipt uses the dedicated B2B control plane",
         )
+    if path == "bot/utils/channel_invites.py" and terminal in {
+        "create_chat_invite_link",
+        "createChatInviteLink",
+    }:
+        return "operational_control", "bot-owned join-request link helper"
+    if path == "run_bot.py" and kind == "bot_construction":
+        return "operational_control", "foreign bot bootstrap constructs the polling Bot"
     if (
-        path == "core/notifications.py"
-        and scope.endswith("send_telegram_message")
-        and "validate_legacy_telegram_otp_relay" in scope_text
+        path.startswith("api/")
+        and kind in {"gateway", "bot_api", "bot_construction", "raw_http"}
+        and legacy_guard_evidence is None
     ):
-        return "durable_exempt", "legacy sender accepts only the strict OTP envelope"
-    if path == "api/routers/auth.py" and scope.endswith("request_otp"):
-        return "durable_exempt", "registration OTP uses the signed short-lived transport"
-    if (
-        path == "api/routers/sync.py"
-        and scope.endswith("receive_sync_data")
-        and kind == "notification_helper"
-        and "validate_legacy_telegram_otp_relay" in scope_text
-    ):
-        return "durable_exempt", "sync ingress accepts only the strict legacy OTP envelope"
+        return "forbidden_api_execution", "API process must not execute Telegram provider work"
     if kind == "membership_control":
         return "non_message_control", "channel membership mutation is not delivery pacing"
     if path in LEGACY_OWNER_FILES:
@@ -818,6 +829,10 @@ class _CallsiteVisitor(ast.NodeVisitor):
     def visit_Call(self, node: ast.Call) -> None:  # noqa: N802
         callee = _resolved_dotted_name(node.func, aliases=self.callable_aliases)
         kind = _call_kind(self.path, callee)
+        rendered_call = ast.unparse(node)
+        if kind is None and "api.telegram.org" in rendered_call:
+            kind = "raw_http"
+            callee = f"{callee or 'http'}(api.telegram.org)"
         if kind is not None:
             scope_text = _scope_text(self.source_lines, self.stack)
             disposition, evidence = _classify(
@@ -966,14 +981,54 @@ def inventory_fingerprint(
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
+def mini_app_revival_failures(repo_root: Path) -> list[str]:
+    auth_source = (repo_root / "api" / "routers" / "auth.py").read_text(encoding="utf-8")
+    failures: list[str] = []
+    if 'hmac.new(b"WebAppData"' in auth_source or "hmac.new(b'WebAppData'" in auth_source:
+        failures.append("mini_app_bot_token_validation_revived")
+    if "Bot token not configured" in auth_source:
+        failures.append("mini_app_bot_token_requirement_revived")
+    if "settings.bot_token" in auth_source or 'os.getenv("BOT_TOKEN")' in auth_source:
+        failures.append("api_auth_bot_token_consumer")
+    frontend_root = repo_root / "frontend" / "src"
+    if frontend_root.is_dir():
+        for path in frontend_root.rglob("*"):
+            if path.suffix.lower() not in {".ts", ".tsx", ".js", ".vue"}:
+                continue
+            text = path.read_text(encoding="utf-8")
+            if "webapp-login" in text or "webapp_login" in text:
+                failures.append("frontend_mini_app_login_caller")
+                break
+    return failures
+
+
+def otp_direct_api_gateway_failures(repo_root: Path) -> list[str]:
+    delivery = (
+        repo_root / "core" / "services" / "telegram_otp_delivery_service.py"
+    ).read_text(encoding="utf-8")
+    if "telegram_gateway" in delivery:
+        return ["otp_delivery_service_direct_gateway"]
+    return []
+
+
 def inventory_check_failures(
     inventory: Sequence[TelegramDeliveryCallsite],
+    *,
+    repo_root: Path | None = None,
 ) -> list[str]:
     failures = [
         f"unclassified:{item.identity}"
         for item in inventory
         if item.disposition == "unclassified"
     ]
+    failures.extend(
+        f"forbidden_api_execution:{item.identity}"
+        for item in inventory
+        if item.disposition == "forbidden_api_execution"
+    )
+    if repo_root is not None:
+        failures.extend(mini_app_revival_failures(repo_root))
+        failures.extend(otp_direct_api_gateway_failures(repo_root))
     counts = disposition_counts(inventory)
     for disposition, budget in REMAINING_DISPOSITION_BUDGETS.items():
         actual = counts.get(disposition, 0)
@@ -981,6 +1036,10 @@ def inventory_check_failures(
             failures.append(
                 f"remaining_budget_exceeded:{disposition}:{actual}>{budget}"
             )
+    if counts.get("durable_exempt", 0):
+        failures.append("filename_based_durable_exempt_remaining")
+    if counts.get("forbidden_api_execution", 0):
+        failures.append("forbidden_api_execution_budget_exceeded")
     if counts != EXPECTED_RUNTIME_INVENTORY_COUNTS:
         failures.append("runtime_inventory_counts_changed")
     if inventory_fingerprint(inventory) not in REVIEWED_RUNTIME_INVENTORY_SHA256:
@@ -1038,7 +1097,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     inventory = build_inventory(args.repo_root.resolve())
     print(_json_report(inventory) if args.format == "json" else _summary_report(inventory))
     if args.check:
-        failures = inventory_check_failures(inventory)
+        failures = inventory_check_failures(inventory, repo_root=args.repo_root.resolve())
         if failures:
             print("\n".join(failures), file=sys.stderr)
             return 1

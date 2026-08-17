@@ -10,6 +10,7 @@ import httpx
 
 from core.config import settings
 from core.log_redaction import mask_mobile
+from core.server_routing import SERVER_IRAN, normalize_server
 from core.utils import normalize_persian_numerals
 
 logger = logging.getLogger(__name__)
@@ -19,6 +20,29 @@ class SMSDeliveryOutcome(str, Enum):
     ACCEPTED = "accepted"
     FAILED = "failed"
     AMBIGUOUS = "ambiguous"
+
+
+def sms_otp_runtime_complete(settings_obj=settings) -> bool:
+    return bool(
+        str(getattr(settings_obj, "smsir_api_key", "") or "").strip()
+        and getattr(settings_obj, "smsir_line_number", None)
+        and str(getattr(settings_obj, "smsir_otp_template_id", "") or "").strip()
+        and str(getattr(settings_obj, "smsir_otp_template_parameter", "") or "").strip()
+    )
+
+
+def validate_iran_sms_fallback_runtime(settings_obj=settings) -> None:
+    """Fail closed when Iran API fallback is on but SMS OTP config is incomplete."""
+
+    if not bool(getattr(settings_obj, "otp_sms_auto_fallback_enabled", False)):
+        return
+    if normalize_server(getattr(settings_obj, "server_mode", None)) != SERVER_IRAN:
+        return
+    service = str(getattr(settings_obj, "trading_bot_service", "") or "").strip().lower()
+    if service in {"bot", "sync_worker", "load_runner", "webapp", "migration"}:
+        return
+    if not sms_otp_runtime_complete(settings_obj):
+        raise RuntimeError("sms_fallback_config_incomplete")
 
 
 def _api_url(path: str) -> str:

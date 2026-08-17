@@ -117,7 +117,7 @@ class TelegramDeliveryCutoverContractTests(unittest.TestCase):
         api = api_env_updates()
         bot = bot_env_updates()
         forbidden = api_process_contract().forbidden_token_keys
-        self.assertEqual(api["TELEGRAM_DELIVERY_EXECUTION_OWNER"], "legacy")
+        self.assertEqual(api["TELEGRAM_DELIVERY_EXECUTION_OWNER"], "producer-only")
         self.assertTrue(all(api[key] == "" for key in forbidden))
         self.assertEqual(bot["TELEGRAM_DELIVERY_EXECUTION_OWNER"], "queue-v1")
         self.assertTrue(all(key not in bot for key in forbidden))
@@ -205,8 +205,10 @@ class TelegramDeliveryCutoverContractTests(unittest.TestCase):
             / "docker-compose.staging.yml"
         ).read_text(encoding="utf-8")
         self.assertIn("x-api-telegram-isolation", compose)
+        self.assertIn("x-non-iran-sms-isolation", compose)
+        self.assertGreaterEqual(compose.count("*api_telegram_isolation"), 5)
         self.assertIn("<<: *api_telegram_isolation", compose)
-        self.assertGreaterEqual(compose.count("<<: *api_telegram_isolation"), 5)
+        self.assertIn("*non_iran_sms_isolation", compose)
 
 
 if __name__ == "__main__":

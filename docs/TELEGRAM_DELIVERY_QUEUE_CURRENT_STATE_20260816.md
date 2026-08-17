@@ -36,9 +36,9 @@
 ## ممیزی callsite
 
 - اسکریپت: `scripts/audit_telegram_delivery_calls.py`
-- شمار جاری: `100` callsite، بدون دستهٔ ناشناخته.
-- اثر انگشت بازبینی‌شدهٔ فعلی: `e15b604e99e012f1156e5f0d93070470d58d6b7ea97f3f48853f567db68c1995`
-- سه هویت فقط به‌خاطر جابه‌جایی خط بعد از `03be742b` حرکت کردند؛ طبقه و callee عوض نشد.
+- شمار جاری: `103` callsite، بدون دستهٔ ناشناخته و بدون `durable_exempt`.
+- اثر انگشت بازبینی‌شدهٔ فعلی: `c524e2309347a745034b2e7bae3af2e727495a8bac5f667dc2aecf2019f74c4f`
+- دسته‌های جدید: `ephemeral_queue_execution=1` (ارسال OTP فقط در bot) و `operational_control=3` (ساخت Bot در `run_bot` و لینک عضویت بات).
 
 ## اندازه‌گیری staging در شروع مأموریت cutover
 

@@ -10,7 +10,7 @@ x-default-logging: &default_logging
     max-size: "${DOCKER_LOG_MAX_SIZE:-20m}"
     max-file: "${DOCKER_LOG_MAX_FILE:-5}"
 x-api-telegram-isolation: &api_telegram_isolation
-  TELEGRAM_DELIVERY_EXECUTION_OWNER: legacy
+  TELEGRAM_DELIVERY_EXECUTION_OWNER: producer-only
   TELEGRAM_DELIVERY_QUEUE_WORKER_ENABLED: "false"
   TELEGRAM_DELIVERY_QUEUE_CUTOVER_READY: "false"
   BOT_TOKEN: ""
@@ -21,6 +21,9 @@ x-api-telegram-isolation: &api_telegram_isolation
   TELEGRAM_PUBLISHER_5_BOT_TOKEN: ""
   TELEGRAM_DELIVERY_QUEUE_CHANNEL_EDITOR_BOT_TOKEN: ""
   TELEGRAM_MONITORING_BOT_TOKEN: ""
+x-non-iran-sms-isolation: &non_iran_sms_isolation
+  SMSIR_API_KEY: ""
+  SMSIR_LINE_NUMBER: ""
 
 services:
   app:
@@ -42,6 +45,7 @@ services:
       DB_POOL_RECYCLE_SECONDS: ${DB_POOL_RECYCLE_SECONDS:-3600}
       OTP_DELIVERY_STATE_SECRET: ${IRAN_OTP_DELIVERY_STATE_SECRET:-}
       IRAN_OTP_DELIVERY_STATE_SECRET: ""
+      TELEGRAM_OTP_QUEUE_SECRET: ""
     env_file:
       - ../../.env.staging
     ports:
@@ -76,7 +80,7 @@ services:
     restart: unless-stopped
     command: sh -c "exec uvicorn main:app --host 0.0.0.0 --port 8000 --workers ${STAGING_FOREIGN_API_WORKERS:-1}"
     environment:
-      <<: *api_telegram_isolation
+      <<: [*api_telegram_isolation, *non_iran_sms_isolation]
       TZ: UTC
       TRADING_BOT_SERVICE: api
       ENVIRONMENT: staging
@@ -128,7 +132,7 @@ services:
     restart: unless-stopped
     command: python -m core.sync_worker
     environment:
-      <<: *api_telegram_isolation
+      <<: [*api_telegram_isolation, *non_iran_sms_isolation]
       TZ: UTC
       TRADING_BOT_SERVICE: sync_worker
       ENVIRONMENT: staging
@@ -162,7 +166,7 @@ services:
     restart: unless-stopped
     command: python -m core.sync_worker
     environment:
-      <<: *api_telegram_isolation
+      <<: [*api_telegram_isolation, *non_iran_sms_isolation]
       TZ: UTC
       TRADING_BOT_SERVICE: sync_worker
       ENVIRONMENT: staging
@@ -202,7 +206,7 @@ services:
       - -c
       - python manage.py && python scripts/align_trade_number_sequence.py
     environment:
-      <<: *api_telegram_isolation
+      <<: [*api_telegram_isolation, *non_iran_sms_isolation]
       TZ: UTC
       ENVIRONMENT: staging
       SERVER_MODE: ${STAGING_MIGRATION_SERVER_MODE:-iran}
@@ -274,6 +278,7 @@ services:
     restart: unless-stopped
     command: python run_bot.py
     environment:
+      <<: *non_iran_sms_isolation
       TZ: UTC
       TRADING_BOT_SERVICE: bot
       ENVIRONMENT: staging
@@ -315,7 +320,7 @@ services:
     restart: "no"
     command: ["python", "scripts/trading_core_probe_worker.py", "load-runner-ready", "--role", "telegram_foreign"]
     environment:
-      <<: *api_telegram_isolation
+      <<: [*api_telegram_isolation, *non_iran_sms_isolation]
       TZ: UTC
       TRADING_BOT_SERVICE: load_runner
       ENVIRONMENT: staging
@@ -352,7 +357,7 @@ services:
     restart: "no"
     command: ["python", "scripts/trading_core_probe_worker.py", "load-runner-ready", "--role", "webapp_iran"]
     environment:
-      <<: *api_telegram_isolation
+      <<: [*api_telegram_isolation, *non_iran_sms_isolation]
       TZ: UTC
       TRADING_BOT_SERVICE: load_runner
       ENVIRONMENT: staging

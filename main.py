@@ -32,7 +32,11 @@ from core.market_schedule_loop import market_schedule_loop
 from core.offer_expiry import offer_expiry_loop
 from core.session_expiry import session_expiry_loop
 from core.trade_delivery_worker import telegram_trade_delivery_loop, webapp_trade_delivery_loop
-from core.telegram_delivery_runtime_policy import configured_telegram_delivery_runtime
+from core.sms import validate_iran_sms_fallback_runtime
+from core.telegram_delivery_runtime_policy import (
+    assert_queue_v1_non_bot_is_producer_only,
+    configured_telegram_delivery_runtime,
+)
 from core.telegram_registration_reconciliation_worker import (
     telegram_registration_reconciliation_loop,
 )
@@ -362,6 +366,8 @@ async def lifespan(app: FastAPI):
     # Startup
     logger.info("🚀 Starting up...")
     validate_otp_delivery_runtime_settings(settings)
+    validate_iran_sms_fallback_runtime(settings)
+    assert_queue_v1_non_bot_is_producer_only()
     if settings.invitation_contract_v2_enabled:
         public_webapp_url_for_links()
     await init_db()

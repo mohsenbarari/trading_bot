@@ -25,7 +25,10 @@ class TelegramDeliveryCallsiteInventoryTests(unittest.TestCase):
         cls.inventory = build_inventory(REPO_ROOT)
 
     def test_every_runtime_callsite_is_classified_and_remaining_counts_do_not_grow(self):
-        self.assertEqual(inventory_check_failures(self.inventory), [])
+        self.assertEqual(
+            inventory_check_failures(self.inventory, repo_root=REPO_ROOT),
+            [],
+        )
         self.assertTrue(
             all(budget == 0 for budget in REMAINING_DISPOSITION_BUDGETS.values())
         )
@@ -48,7 +51,7 @@ class TelegramDeliveryCallsiteInventoryTests(unittest.TestCase):
         )
         self.assertEqual(
             inventory_fingerprint(self.inventory),
-            OVERTIME_OWNER_PROMPT_RUNTIME_INVENTORY_SHA256,
+            EXPECTED_RUNTIME_INVENTORY_SHA256,
         )
 
     def test_final_legacy_publication_boundary_is_owner_guarded(self):
@@ -123,38 +126,40 @@ class TelegramDeliveryCallsiteInventoryTests(unittest.TestCase):
         ]
         self.assertEqual(remaining_admin_broadcast_calls, [])
 
+    def test_source_guards_reject_mini_app_revival_and_api_otp_gateway(self):
+        self.assertEqual(inventory_check_failures(self.inventory, repo_root=REPO_ROOT), [])
+        auth_source = (REPO_ROOT / "api" / "routers" / "auth.py").read_text(encoding="utf-8")
+        self.assertNotIn("settings.bot_token", auth_source)
+        self.assertNotIn("telegram_gateway", auth_source)
+        delivery_source = (
+            REPO_ROOT / "core" / "services" / "telegram_otp_delivery_service.py"
+        ).read_text(encoding="utf-8")
+        self.assertNotIn("telegram_gateway", delivery_source)
+
     def test_otp_and_membership_mutations_are_not_misreported_as_shared_message_work(self):
         otp_calls = [
             item
             for item in self.inventory
-            if item.path in {
-                "api/routers/auth.py",
-                "core/services/telegram_otp_delivery_service.py",
-            }
-            and item.disposition == "durable_exempt"
+            if item.disposition == "ephemeral_queue_execution"
         ]
         membership_calls = [
             item
             for item in self.inventory
             if item.disposition == "non_message_control"
         ]
-        self.assertEqual(len(otp_calls), 2)
+        self.assertTrue(otp_calls)
+        self.assertTrue(
+            all(
+                item.path == "core/services/telegram_otp_ephemeral_queue.py"
+                for item in otp_calls
+            )
+        )
         self.assertEqual(len(membership_calls), 2)
-        strict_legacy_relay_scopes = {
-            (item.path, item.scope)
-            for item in self.inventory
-            if item.disposition == "durable_exempt"
-            and item.path in {
-                "api/routers/sync.py",
-                "core/notifications.py",
-            }
-        }
-        self.assertEqual(
-            strict_legacy_relay_scopes,
-            {
-                ("api/routers/sync.py", "receive_sync_data"),
-                ("core/notifications.py", "send_telegram_message"),
-            },
+        self.assertFalse(
+            any(item.disposition == "durable_exempt" for item in self.inventory)
+        )
+        self.assertFalse(
+            any(item.disposition == "forbidden_api_execution" for item in self.inventory)
         )
 
     def test_publisher_ack_is_the_only_direct_b2b_control_message(self):
@@ -332,7 +337,7 @@ async def unsafe():
 
         self.assertEqual(len(inventory), 1)
         self.assertEqual(inventory[0].scope, "unsafe")
-        self.assertEqual(inventory[0].disposition, "remaining_business_direct")
+        self.assertEqual(inventory[0].disposition, "forbidden_api_execution")
 
     def test_queue_else_closure_is_legacy_guarded(self):
         with TemporaryDirectory() as tmp:
@@ -436,7 +441,7 @@ async def unsafe(bot):
 
         dispositions = {(item.callee, item.disposition) for item in inventory}
         self.assertIn(
-            ("core.telegram_gateway.send_message", "remaining_business_direct"),
+            ("core.telegram_gateway.send_message", "forbidden_api_execution"),
             dispositions,
         )
         self.assertIn(

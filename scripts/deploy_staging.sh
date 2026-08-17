@@ -277,6 +277,40 @@ ensure_runtime_env_values() {
     set_env_value AUDIT_TRAIL_PATH /app/audit_trail/audit.jsonl
     set_env_value STAGING_LOG_OTP_CODES false
     ensure_web_push_env
+    ensure_telegram_otp_queue_secret
+    assert_iran_sms_fallback_ready
+}
+
+ensure_telegram_otp_queue_secret() {
+    if [[ "$STAGING_ENABLE_BOT" != "1" || "$STAGING_FOREIGN_ONLY" != "1" ]]; then
+        return
+    fi
+    local secret
+    secret="$(env_value TELEGRAM_OTP_QUEUE_SECRET || true)"
+    if [[ -n "$secret" ]]; then
+        return
+    fi
+    set_env_value TELEGRAM_OTP_QUEUE_SECRET "$(secret_hex 32)"
+    log "generated staging Telegram OTP queue secret"
+}
+
+assert_iran_sms_fallback_ready() {
+    if [[ "$STAGING_FOREIGN_ONLY" == "1" ]]; then
+        return
+    fi
+    local fallback key line template param
+    fallback="$(env_value OTP_SMS_AUTO_FALLBACK_ENABLED || true)"
+    case "$fallback" in
+        1|true|TRUE|yes|YES) ;;
+        *) return ;;
+    esac
+    key="$(env_value SMSIR_API_KEY || true)"
+    line="$(env_value SMSIR_LINE_NUMBER || true)"
+    template="$(env_value SMSIR_OTP_TEMPLATE_ID || true)"
+    param="$(env_value SMSIR_OTP_TEMPLATE_PARAMETER || true)"
+    if [[ -z "$key" || -z "$line" || -z "$template" || -z "$param" ]]; then
+        die "OTP_SMS_AUTO_FALLBACK_ENABLED requires complete SMSIR OTP config on Iran staging"
+    fi
 }
 
 ensure_web_push_env() {

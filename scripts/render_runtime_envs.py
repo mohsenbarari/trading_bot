@@ -61,6 +61,7 @@ COMMON_RUNTIME_KEYS = (
     "OTP_SMS_AUTO_FALLBACK_SECONDS",
     "OTP_TTL_SECONDS",
     "IRAN_OTP_DELIVERY_STATE_SECRET",
+    "TELEGRAM_OTP_QUEUE_SECRET",
     "TELEGRAM_REGISTRATION_POST_EXPIRY_GRACE_SECONDS",
     "TELEGRAM_REGISTRATION_JOB_BATCH_SIZE",
     "TELEGRAM_REGISTRATION_JOB_CONCURRENCY",
@@ -104,6 +105,7 @@ OPTIONAL_RUNTIME_DEFAULTS = {
     "OTP_SMS_AUTO_FALLBACK_SECONDS": "40",
     "OTP_TTL_SECONDS": "120",
     "IRAN_OTP_DELIVERY_STATE_SECRET": "",
+    "TELEGRAM_OTP_QUEUE_SECRET": "",
     "TELEGRAM_REGISTRATION_POST_EXPIRY_GRACE_SECONDS": "86400",
     "TELEGRAM_REGISTRATION_JOB_BATCH_SIZE": "10",
     "TELEGRAM_REGISTRATION_JOB_CONCURRENCY": "1",
@@ -264,11 +266,17 @@ def build_runtime_env(
         rendered[key] = values[key]
     rendered["FRONTEND_URL"] = frontend_url
     for key in COMMON_RUNTIME_KEYS[6:]:
-        if key == "IRAN_OTP_DELIVERY_STATE_SECRET":
+        if key in {"IRAN_OTP_DELIVERY_STATE_SECRET", "TELEGRAM_OTP_QUEUE_SECRET"}:
+            continue
+        if role != "iran" and key.startswith("SMSIR_"):
+            rendered[key] = ""
             continue
         rendered[key] = values.get(key, OPTIONAL_RUNTIME_DEFAULTS.get(key, ""))
     rendered["OTP_DELIVERY_STATE_SECRET"] = (
         values.get("IRAN_OTP_DELIVERY_STATE_SECRET", "") if role == "iran" else ""
+    )
+    rendered["TELEGRAM_OTP_QUEUE_SECRET"] = (
+        values.get("TELEGRAM_OTP_QUEUE_SECRET", "") if role == "foreign" else ""
     )
     role_prefix = role.upper()
     for key in PERFORMANCE_RUNTIME_DEFAULTS:
