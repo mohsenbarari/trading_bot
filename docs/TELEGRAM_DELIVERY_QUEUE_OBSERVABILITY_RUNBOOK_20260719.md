@@ -32,6 +32,7 @@ python scripts/report_telegram_delivery_queue_health.py \
 - ingress، goodput و زمان تخمینی drain در پنجره نمونه؛
 - ambiguity، unresolved، blocked، lease منقضی، freshness deadline ازدست‌رفته و terminal failure؛
 - pending provider outcome و سن قدیمی‌ترین مورد؛
+- outbox بدون recipient که یا هنوز handoff نشده یا job آن terminal شده است؛
 - تعداد jobهای دارای `429` و bucketهای `retry_after`؛
 - runtime gate بر پایه scope/state، بدون gate key یا reason آزاد؛
 - تصمیم `continue`, `warning` یا `stop` و reason codeهای محدود.
@@ -59,6 +60,7 @@ python scripts/report_telegram_delivery_queue_health.py \
 | terminal failure در پنجره نمونه | ندارد | هر مقدار بیشتر از صفر |
 | expired lease | ندارد | `>10` |
 | oldest pending provider outcome | ندارد | `>30s` |
+| orphaned notification outbox | ندارد | هر مقدار بیشتر از صفر |
 
 این اعداد برای اجرای بدون fault هستند. زیرآزمون fault injection باید threshold مرتبط را فقط در manifest همان زیرآزمون override کند و بعد از بازیابی دوباره threshold اصلی را اعمال کند. کاهش SLO، حذف alert یا تغییر threshold در میانه trace ممنوع است.
 
@@ -102,4 +104,5 @@ Shadow در production توصیه یا پشتیبانی نمی‌شود. هدف 
 - blocked: scope بات، مقصد یا gateway از runtime gate خوانده و فقط با preflight/resume پایدار باز می‌شود.
 - missed freshness: run بلافاصله `NO-GO` است؛ ارسال stale یا تغییر deadline برای نجات run ممنوع است.
 - terminal failure: response class و lifecycle feedback بررسی می‌شود؛ حذف row یا بازنویسی نتیجه مجاز نیست.
+- orphaned notification outbox: فقط reconciler رسمی، intent بدون handoff یا متصل به job ناموفقِ terminal را بدون provider call به `skipped` terminal می‌برد؛ job فعال یا نتیجهٔ موفقِ ناسازگار fail-closed می‌ماند و حذف SQL مستقیم ممنوع است.
 - security scan failure: artifact قرنطینه و پیش از هر اشتراک‌گذاری بازتولید می‌شود.

@@ -90,6 +90,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--stop-terminal-failure", type=int, default=0)
     parser.add_argument("--stop-expired-lease", type=int, default=10)
     parser.add_argument("--stop-provider-outcome-age", type=float, default=30.0)
+    parser.add_argument("--stop-orphaned-notification-outbox", type=int, default=0)
     return parser.parse_args(argv)
 
 
@@ -106,6 +107,9 @@ def _thresholds(args: argparse.Namespace) -> TelegramQueueHealthThresholds:
         stop_terminal_failure_count=args.stop_terminal_failure,
         stop_expired_lease_count=args.stop_expired_lease,
         stop_provider_outcome_age_seconds=args.stop_provider_outcome_age,
+        stop_orphaned_notification_outbox_count=(
+            args.stop_orphaned_notification_outbox
+        ),
     )
 
 

@@ -11,6 +11,10 @@ from scripts.report_telegram_delivery_queue_health import (
     parse_args,
     validate_observability_environment,
 )
+from scripts.reconcile_telegram_notification_outbox_orphans import (
+    TelegramNotificationOutboxReconciliationConfigurationError,
+    _validate_target as validate_outbox_reconciliation_target,
+)
 
 
 class TelegramDeliveryObservabilityUnitTests(unittest.TestCase):
@@ -20,6 +24,10 @@ class TelegramDeliveryObservabilityUnitTests(unittest.TestCase):
     def test_thresholds_reject_negative_or_inverted_values(self):
         with self.assertRaisesRegex(ValueError, "threshold_invalid"):
             TelegramQueueHealthThresholds(stop_ready_depth=-1)
+        with self.assertRaisesRegex(ValueError, "threshold_invalid"):
+            TelegramQueueHealthThresholds(
+                stop_orphaned_notification_outbox_count=-1
+            )
         with self.assertRaisesRegex(ValueError, "ready_warning_exceeds_stop"):
             TelegramQueueHealthThresholds(
                 warning_ready_depth=11,
@@ -49,6 +57,23 @@ class TelegramDeliveryObservabilityUnitTests(unittest.TestCase):
             "telegram_queue_stage3_observability_test",
         )
         validate_observability_environment("staging", "trading_bot_staging")
+
+    def test_outbox_reconciler_is_staging_or_synthetic_only(self):
+        with self.assertRaisesRegex(
+            TelegramNotificationOutboxReconciliationConfigurationError,
+            "production_environment_is_forbidden",
+        ):
+            validate_outbox_reconciliation_target("production", "production")
+        with self.assertRaisesRegex(
+            TelegramNotificationOutboxReconciliationConfigurationError,
+            "staging_database_name_invalid",
+        ):
+            validate_outbox_reconciliation_target("staging", "production")
+        validate_outbox_reconciliation_target(
+            "synthetic-test",
+            "telegram_queue_stage3_outbox_scratch",
+        )
+        validate_outbox_reconciliation_target("staging", "trading_bot_staging")
 
     def test_metrics_have_only_bounded_labels_and_no_identity(self):
         snapshot = {

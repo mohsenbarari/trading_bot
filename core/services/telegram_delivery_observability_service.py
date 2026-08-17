@@ -27,6 +27,10 @@ from models.telegram_delivery_runtime_gate import (
     ACTIVE_TELEGRAM_RUNTIME_GATE_STATES,
     TelegramDeliveryRuntimeGate,
 )
+from models.telegram_notification_outbox import (
+    NON_TERMINAL_TELEGRAM_NOTIFICATION_OUTBOX_STATUSES,
+    TelegramNotificationOutbox,
+)
 
 from .telegram_delivery_queue_service import _enum_value, _require_foreign
 
@@ -62,6 +66,7 @@ class TelegramQueueHealthThresholds:
     stop_terminal_failure_count: int = 0
     stop_expired_lease_count: int = 10
     stop_provider_outcome_age_seconds: float = 30.0
+    stop_orphaned_notification_outbox_count: int = 0
 
     def __post_init__(self) -> None:
         numeric = asdict(self)
@@ -206,6 +211,11 @@ def _alerts(
             "expired_lease_stop",
             "expired_lease_count",
             thresholds.stop_expired_lease_count,
+        ),
+        (
+            "orphaned_notification_outbox_stop",
+            "orphaned_notification_outbox_count",
+            thresholds.stop_orphaned_notification_outbox_count,
         ),
     ):
         add_if(
@@ -456,6 +466,35 @@ async def inspect_telegram_delivery_queue_health(
         for scope, state, count in gate_rows
     ]
 
+    orphaned_notification_outbox_count = 0
+    if run_id is None:
+        terminal_job_states = tuple(state.value for state in FINAL_DELIVERY_STATES)
+        orphaned_notification_outbox_count = int(
+            (
+                await db.execute(
+                    select(func.count(TelegramNotificationOutbox.id))
+                    .outerjoin(
+                        TelegramDeliveryJobRecord,
+                        TelegramDeliveryJobRecord.id
+                        == TelegramNotificationOutbox.queue_job_id,
+                    )
+                    .where(
+                        TelegramNotificationOutbox.recipient_user_id.is_(None),
+                        TelegramNotificationOutbox.status.in_(
+                            tuple(
+                                NON_TERMINAL_TELEGRAM_NOTIFICATION_OUTBOX_STATUSES
+                            )
+                        ),
+                        or_(
+                            TelegramNotificationOutbox.queue_job_id.is_(None),
+                            TelegramDeliveryJobRecord.state.in_(terminal_job_states),
+                        ),
+                    )
+                )
+            ).scalar_one()
+            or 0
+        )
+
     goodput = sent_count / window_seconds
     ingress_rate = ingress_count / window_seconds
     drain_estimate = ready_depth / goodput if ready_depth and goodput > 0 else None
@@ -494,6 +533,9 @@ async def inspect_telegram_delivery_queue_health(
         "ready_by_method": dict(sorted(ready_by_method.items())),
         "retry_after_buckets": dict(sorted(retry_after_buckets.items())),
         "active_runtime_gates": active_runtime_gates,
+        "orphaned_notification_outbox_count": (
+            orphaned_notification_outbox_count
+        ),
     }
     applied_thresholds = thresholds or TelegramQueueHealthThresholds()
     alerts = _alerts(snapshot, applied_thresholds)

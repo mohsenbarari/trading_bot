@@ -2,7 +2,7 @@
 
 Entries are newest first.
 
-- 2026-08-17 | Staging Telegram delivery execution is Queue-v1 on the bot host; API/WebApp stay producer-only. Production remains Legacy and needs a separate owner authorization.
+- 2026-08-17 | Staging Telegram delivery execution is Queue-v1 on the bot host; API/WebApp stay producer-only. Recipient-less outbox residue stops health and is terminalized only by the audited staging reconciler—never direct SQL/provider calls. Production remains Legacy pending separate owner authorization.
 - 2026-08-16 | Overtime follows offer home: foreign/bot-home uses its active Telegram runtime, starts the clock only after a message id, and queues channel refresh; Iran/WebApp-home presents in WebApp. Requester surface is audit-only.
 - 2026-08-16 | Customer identity is server-scoped to self, relation owner, and same-owner accountants; foreign lookup fails closed. Privileged user-management stays a separate control-plane surface.
 - 2026-08-15 | Staging sync resets exact resources on both hosts, validates all 23 shared tables/both origins, resets before formal scenarios, and mounts probes with `APP_ENV_FILE=/dev/null`.

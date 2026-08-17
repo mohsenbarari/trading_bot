@@ -20,6 +20,7 @@ from core.services.telegram_delivery_queue_service import enqueue_telegram_deliv
 from core.telegram_delivery_queue_contract import (
     TelegramDeliveryAction,
     TelegramDeliveryState,
+    TelegramDeliveryState,
     TelegramDestinationClass,
     TelegramFeederKind,
 )
@@ -30,6 +31,13 @@ from models.telegram_delivery_provider_outcome import (
     TelegramDeliveryProviderOutcomeRecord,
 )
 from models.telegram_delivery_runtime_gate import TelegramDeliveryRuntimeGate
+from models.telegram_notification_outbox import (
+    TelegramNotificationOutbox,
+    TelegramNotificationOutboxStatus,
+)
+from core.services.telegram_notification_outbox_orphan_reconciliation_service import (
+    reconcile_orphaned_telegram_notification_outbox,
+)
 from tests.test_telegram_delivery_queue_postgres import DATABASE_URLS, _run_alembic
 
 
@@ -51,7 +59,8 @@ class TelegramDeliveryObservabilityPostgresTests(unittest.IsolatedAsyncioTestCas
                 text(
                     "TRUNCATE TABLE telegram_delivery_provider_outcomes, "
                     "telegram_delivery_reconciliation_evidence, "
-                    "telegram_delivery_runtime_gates, telegram_delivery_jobs "
+                    "telegram_delivery_runtime_gates, "
+                    "telegram_notification_outbox, telegram_delivery_jobs "
                     "RESTART IDENTITY CASCADE"
                 )
             )
@@ -211,6 +220,136 @@ class TelegramDeliveryObservabilityPostgresTests(unittest.IsolatedAsyncioTestCas
             "998877",
         ):
             self.assertNotIn(raw_identity, rendered)
+
+    async def test_health_stops_for_reconcilable_orphan_outbox_and_reconciler_closes_it(self):
+        now = utc_now()
+        async with self.Session() as db:
+            bound_job = await self._job(
+                db,
+                key="synthetic-orphan-bound",
+                run_id="synthetic-orphan-run",
+            )
+            bound_job.state = TelegramDeliveryState.QUARANTINED
+            bound_job.terminal_at = now
+            unbound = TelegramNotificationOutbox(
+                dedupe_key="synthetic-orphan-unbound",
+                source_type="queue_smoke_private",
+                source_id="synthetic-orphan-unbound",
+                recipient_user_id=None,
+                telegram_id_at_enqueue=998877,
+                text="synthetic orphan",
+                status=TelegramNotificationOutboxStatus.PENDING,
+            )
+            bound = TelegramNotificationOutbox(
+                dedupe_key="synthetic-orphan-bound",
+                source_type="queue_action:general_immediate",
+                source_id="synthetic-orphan-bound",
+                recipient_user_id=None,
+                telegram_id_at_enqueue=998878,
+                text="synthetic bound orphan",
+                status=TelegramNotificationOutboxStatus.PENDING,
+                queue_job_id=bound_job.id,
+                queue_handed_off_at=now,
+            )
+            active_job = await self._job(
+                db,
+                key="synthetic-orphan-control-active",
+                run_id="synthetic-orphan-run",
+            )
+            active_control = TelegramNotificationOutbox(
+                dedupe_key="synthetic-orphan-control-active",
+                source_type="queue_action:general_immediate",
+                source_id="synthetic-orphan-control-active",
+                recipient_user_id=None,
+                telegram_id_at_enqueue=998879,
+                text="synthetic active control",
+                status=TelegramNotificationOutboxStatus.PENDING,
+                queue_job_id=active_job.id,
+                queue_handed_off_at=now,
+            )
+            db.add_all((unbound, bound, active_control))
+            await db.commit()
+
+        async with self.Session() as db:
+            before = await inspect_telegram_delivery_queue_health(
+                db,
+                current_server="foreign",
+                now=now,
+            )
+            dry_run = await reconcile_orphaned_telegram_notification_outbox(
+                db,
+                current_server="foreign",
+                dry_run=True,
+                now=now,
+            )
+            await db.rollback()
+
+        self.assertEqual(before["orphaned_notification_outbox_count"], 2)
+        self.assertEqual(before["decision"], "stop")
+        self.assertIn(
+            "orphaned_notification_outbox_stop",
+            before["stop_reasons"],
+        )
+        self.assertEqual(dry_run.reconciled_count, 2)
+        self.assertEqual(dry_run.preserved_non_reconcilable_count, 1)
+        self.assertEqual(dry_run.remaining_reconcilable_count, 2)
+        self.assertEqual(dry_run.provider_network_calls, 0)
+
+        async with self.Session() as db:
+            applied = await reconcile_orphaned_telegram_notification_outbox(
+                db,
+                current_server="foreign",
+                dry_run=False,
+                now=now,
+            )
+            await db.commit()
+        self.assertEqual(applied.reconciled_count, 2)
+        self.assertEqual(applied.remaining_reconcilable_count, 0)
+
+        async with self.Session() as db:
+            after = await inspect_telegram_delivery_queue_health(
+                db,
+                current_server="foreign",
+                now=now,
+            )
+            rows = (
+                await db.execute(
+                    select(TelegramNotificationOutbox).where(
+                        TelegramNotificationOutbox.dedupe_key.in_(
+                            (
+                                "synthetic-orphan-unbound",
+                                "synthetic-orphan-bound",
+                                "synthetic-orphan-control-active",
+                            )
+                        )
+                    )
+                )
+            ).scalars().all()
+            rows_by_key = {row.dedupe_key: row for row in rows}
+        self.assertEqual(after["orphaned_notification_outbox_count"], 0)
+        self.assertNotIn(
+            "orphaned_notification_outbox_stop",
+            after["stop_reasons"],
+        )
+        self.assertEqual(
+            rows_by_key["synthetic-orphan-unbound"].status,
+            TelegramNotificationOutboxStatus.SKIPPED,
+        )
+        self.assertEqual(
+            rows_by_key["synthetic-orphan-unbound"].reason,
+            "recipient_missing_before_queue_handoff",
+        )
+        self.assertEqual(
+            rows_by_key["synthetic-orphan-bound"].reason,
+            "recipient_missing_after_terminal_queue",
+        )
+        self.assertIsNotNone(
+            rows_by_key["synthetic-orphan-bound"].terminal_at
+        )
+        self.assertEqual(
+            rows_by_key["synthetic-orphan-control-active"].status,
+            TelegramNotificationOutboxStatus.PENDING,
+        )
 
     async def test_shadow_plan_is_read_only_bounded_and_hides_raw_identity(self):
         await self._seed_unhealthy_snapshot()
