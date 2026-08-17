@@ -182,6 +182,17 @@ def _document_multipart_payload(
     }
 
 
+def _json_request_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """Omit absent optional fields at the Telegram HTTP boundary.
+
+    Queue payloads intentionally retain ``None`` while they are hashed and
+    freshness-checked.  Telegram's Bot API, however, treats JSON null for
+    optional enum fields such as ``parse_mode`` as a supplied unsupported
+    value instead of as an omitted field.
+    """
+    return {key: value for key, value in payload.items() if value is not None}
+
+
 async def post_telegram_method(
     method: str,
     payload: Mapping[str, Any],
@@ -215,7 +226,7 @@ async def post_telegram_method(
             else:
                 response = await client.post(
                     f"{TELEGRAM_API_BASE_URL}/bot{token}/{method}",
-                    json=dict(payload),
+                    json=_json_request_payload(payload),
                     timeout=timeout,
                 )
     except Exception as exc:
@@ -287,7 +298,7 @@ def post_telegram_method_sync(
         else:
             response = httpx.post(
                 f"{TELEGRAM_API_BASE_URL}/bot{token}/{method}",
-                json=dict(payload),
+                json=_json_request_payload(payload),
                 timeout=timeout,
             )
     except Exception as exc:

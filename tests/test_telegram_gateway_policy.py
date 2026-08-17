@@ -74,6 +74,37 @@ class TelegramGatewayPolicyTests(unittest.IsolatedAsyncioTestCase):
             {"chat_id": 9, "text": "hello", "parse_mode": "HTML"},
         )
 
+    async def test_async_gateway_omits_none_optional_fields_only_at_http_boundary(self):
+        client = FakeAsyncClientContext(response=FakeResponse())
+        payload = {
+            "chat_id": 9,
+            "text": "hello",
+            "parse_mode": None,
+            "disable_notification": False,
+        }
+
+        with patch("core.telegram_gateway.current_server", return_value="foreign"), patch(
+            "core.telegram_gateway.httpx.AsyncClient",
+            return_value=client,
+        ):
+            result = await telegram_gateway.post_telegram_method(
+                "sendMessage",
+                payload,
+                bot_token="token",
+            )
+
+        self.assertTrue(result.ok)
+        self.assertIn("parse_mode", payload)
+        self.assertIsNone(payload["parse_mode"])
+        self.assertEqual(
+            client.post.await_args.kwargs["json"],
+            {
+                "chat_id": 9,
+                "text": "hello",
+                "disable_notification": False,
+            },
+        )
+
     async def test_document_gateway_decodes_verified_content_into_multipart(self):
         document = b"safe-binary-report"
         client = FakeAsyncClientContext(response=FakeResponse())
@@ -239,6 +270,35 @@ class TelegramGatewayPolicyTests(unittest.IsolatedAsyncioTestCase):
         http_post.assert_called_once_with(
             "https://api.telegram.org/bottoken/sendMessage",
             json={"chat_id": 9, "text": "hello", "parse_mode": "HTML"},
+            timeout=10,
+        )
+
+    def test_sync_gateway_omits_none_optional_fields_only_at_http_boundary(self):
+        response = SimpleNamespace(status_code=200, text="", json=lambda: {"ok": True})
+
+        with patch("core.telegram_gateway.current_server", return_value="foreign"), patch(
+            "core.telegram_gateway.httpx.post",
+            return_value=response,
+        ) as http_post:
+            result = telegram_gateway.post_telegram_method_sync(
+                "sendMessage",
+                {
+                    "chat_id": 9,
+                    "text": "hello",
+                    "parse_mode": None,
+                    "disable_notification": False,
+                },
+                bot_token="token",
+            )
+
+        self.assertTrue(result.ok)
+        http_post.assert_called_once_with(
+            "https://api.telegram.org/bottoken/sendMessage",
+            json={
+                "chat_id": 9,
+                "text": "hello",
+                "disable_notification": False,
+            },
             timeout=10,
         )
 
