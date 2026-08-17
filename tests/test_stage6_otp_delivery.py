@@ -607,6 +607,80 @@ class Stage6RequestAndCompatibilityTests(unittest.IsolatedAsyncioTestCase):
             extra={"fallback_seconds": 40, "lifecycle_state": "scheduled"},
         )
 
+    async def test_telegram_send_works_when_sms_fallback_is_blocked(self):
+        otp_state = state()
+        delivery = TelegramOTPDeliveryResponse(
+            otp_request_id=otp_state.otp_request_id,
+            outcome=TelegramOTPDeliveryOutcome.SENT,
+        )
+        user = SimpleNamespace(telegram_id=TEST_TELEGRAM_ID)
+        with override_current_server(SERVER_IRAN), patch.object(
+            auth.settings, "telegram_login_otp_enabled", True
+        ), patch.object(
+            auth.settings, "otp_sms_auto_fallback_enabled", False
+        ), patch.object(
+            auth.settings, "staging_log_otp_codes", False
+        ), patch.object(
+            auth, "_generate_otp_code", return_value="12345"
+        ), patch.object(
+            auth, "build_otp_delivery_state", return_value=otp_state
+        ), patch.object(
+            auth, "create_otp_delivery_state", new=AsyncMock(return_value=True)
+        ), patch.object(
+            auth, "arm_sms_fallback", new=AsyncMock()
+        ) as arm, patch.object(
+            auth,
+            "forward_telegram_otp_delivery",
+            new=AsyncMock(return_value=(200, delivery.model_dump(mode="json"))),
+        ) as forward, patch.object(
+            auth, "schedule_sms_fallback", new=AsyncMock()
+        ) as schedule, patch.object(
+            auth, "_deliver_stage6_sms", new=AsyncMock()
+        ) as sms, patch.object(auth, "audit_log"):
+            result = await auth._request_stage6_login_otp(
+                RequestRedis(), mobile=TEST_MOBILE, user=user
+            )
+
+        self.assertEqual(result["method"], "telegram")
+        self.assertNotIn("sms_fallback_in", result)
+        self.assertEqual(forward.await_args.args[0].otp_code, "12345")
+        arm.assert_not_awaited()
+        schedule.assert_not_awaited()
+        sms.assert_not_awaited()
+
+    async def test_telegram_failure_does_not_call_sms_when_fallback_is_blocked(self):
+        otp_state = state()
+        user = SimpleNamespace(telegram_id=TEST_TELEGRAM_ID)
+        with override_current_server(SERVER_IRAN), patch.object(
+            auth.settings, "telegram_login_otp_enabled", True
+        ), patch.object(
+            auth.settings, "otp_sms_auto_fallback_enabled", False
+        ), patch.object(
+            auth.settings, "staging_log_otp_codes", False
+        ), patch.object(
+            auth, "_generate_otp_code", return_value="12345"
+        ), patch.object(
+            auth, "build_otp_delivery_state", return_value=otp_state
+        ), patch.object(
+            auth, "create_otp_delivery_state", new=AsyncMock(return_value=True)
+        ), patch.object(
+            auth,
+            "forward_telegram_otp_delivery",
+            new=AsyncMock(return_value=(503, {"detail": "down"})),
+        ), patch.object(
+            auth, "_deliver_stage6_sms", new=AsyncMock()
+        ) as sms, patch.object(
+            auth, "cancel_otp_delivery", new=AsyncMock()
+        ) as cancel, patch.object(auth, "audit_log"):
+            with self.assertRaises(HTTPException) as exc:
+                await auth._request_stage6_login_otp(
+                    RequestRedis(), mobile=TEST_MOBILE, user=user
+                )
+
+        self.assertEqual(exc.exception.status_code, 503)
+        sms.assert_not_awaited()
+        cancel.assert_awaited_once()
+
     async def test_active_request_returns_structured_absolute_timing_without_new_code(self):
         otp_state = state(
             telegram_delivery_status=OTPDeliveryStatus.ACCEPTED,

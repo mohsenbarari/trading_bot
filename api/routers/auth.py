@@ -2336,42 +2336,46 @@ async def _request_stage6_login_otp(
     record_otp_event(event="requested")
 
     telegram_id = int(user.telegram_id) if user and user.telegram_id else None
-    use_telegram = bool(
-        telegram_id
-        and settings.telegram_login_otp_enabled
-        and settings.otp_sms_auto_fallback_enabled
-    )
+    use_telegram = bool(telegram_id and settings.telegram_login_otp_enabled)
+    sms_fallback_ready = bool(settings.otp_sms_auto_fallback_enabled)
     if use_telegram:
         fallback_seconds = OTP_SMS_FALLBACK_SECONDS
-        # Persist recovery before the remote side effect. A valid acknowledgement
-        # moves this conservative deadline to exactly fallback_seconds after ack.
-        recovery_at = utc_now() + timedelta(seconds=fallback_seconds + 5)
-        try:
-            fallback_armed = await arm_sms_fallback(
-                redis,
-                request_id=state.otp_request_id,
-                recovery_at=recovery_at,
-            )
-        except Exception:
-            fallback_armed = False
         command = TelegramOTPDeliveryCommand(
             otp_request_id=state.otp_request_id,
             telegram_id=telegram_id,
             otp_code=otp_code,
             expires_at=state.expires_at,
         )
-        if fallback_armed:
+        status_code, body = 503, {"detail": "Telegram delivery failed"}
+        if sms_fallback_ready:
+            # Persist recovery before the remote side effect. A valid acknowledgement
+            # moves this conservative deadline to exactly fallback_seconds after ack.
+            recovery_at = utc_now() + timedelta(seconds=fallback_seconds + 5)
+            try:
+                fallback_armed = await arm_sms_fallback(
+                    redis,
+                    request_id=state.otp_request_id,
+                    recovery_at=recovery_at,
+                )
+            except Exception:
+                fallback_armed = False
+            if fallback_armed:
+                try:
+                    status_code, body = await forward_telegram_otp_delivery(command)
+                except Exception:
+                    status_code, body = 503, {"detail": "Telegram delivery failed"}
+            else:
+                status_code, body = 503, {"detail": "OTP fallback scheduling failed"}
+        else:
             try:
                 status_code, body = await forward_telegram_otp_delivery(command)
             except Exception:
                 status_code, body = 503, {"detail": "Telegram delivery failed"}
-        else:
-            status_code, body = 503, {"detail": "OTP fallback scheduling failed"}
         try:
             delivery = TelegramOTPDeliveryResponse.model_validate(body)
         except (TypeError, ValueError):
             delivery = None
-        if (
+        telegram_sent = (
             status_code == 200
             and delivery is not None
             and delivery.otp_request_id == state.otp_request_id
@@ -2380,7 +2384,8 @@ async def _request_stage6_login_otp(
                 TelegramOTPDeliveryOutcome.SENT,
                 TelegramOTPDeliveryOutcome.DUPLICATE_SENT,
             }
-        ):
+        )
+        if telegram_sent and sms_fallback_ready:
             sent_at = utc_now()
             fallback_at = sent_at + timedelta(seconds=fallback_seconds)
             try:
@@ -2412,6 +2417,28 @@ async def _request_stage6_login_otp(
                         "sms_fallback_at": fallback_at,
                     }), method="telegram"),
                 }
+        elif telegram_sent:
+            sent_at = utc_now()
+            return {
+                "detail": "کد تایید ارسال شد",
+                **_otp_timing_payload(state.model_copy(update={
+                    "telegram_delivery_status": OTPDeliveryStatus.ACCEPTED,
+                    "telegram_sent_at": sent_at,
+                }), method="telegram"),
+            }
+        if not sms_fallback_ready:
+            await cancel_otp_delivery(redis, mobile=mobile)
+            raise HTTPException(
+                status_code=503,
+                detail="سرویس ارسال کد موقتاً در دسترس نیست",
+            )
+
+    if not sms_fallback_ready:
+        await cancel_otp_delivery(redis, mobile=mobile)
+        raise HTTPException(
+            status_code=503,
+            detail="سرویس ارسال کد موقتاً در دسترس نیست",
+        )
 
     sms_outcome = await _deliver_stage6_sms(redis, state=state)
     if sms_outcome == SMSDeliveryOutcome.ACCEPTED:
