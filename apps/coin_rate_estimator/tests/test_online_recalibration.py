@@ -871,6 +871,48 @@ class OnlineRecalibrationTests(unittest.TestCase):
         self.assertEqual(info["status"], "SKIPPED_FRESH_LIVE_GROUP_ANCHOR")
         self.assertEqual(rate["estimated_price_toman"], 180_000_000)
 
+    def test_recent_realized_correction_never_overrides_recent_consensus(self) -> None:
+        now = datetime(2026, 8, 5, 12, 0, tzinfo=UTC)
+        self.connection.execute(
+            """
+            INSERT INTO coin_estimate_predictions(
+                prediction_time_utc, commodity, settlement,
+                structural_estimated_price_toman, estimated_price_toman,
+                lower_price_toman, upper_price_toman, group_live_enabled,
+                actual_price_toman, actual_event_utc, residual_ratio,
+                evaluated_at_utc, evaluation_mode, created_at_utc
+            ) VALUES ('2026-08-05T11:40:00Z','امام','TOMORROW',189100000,189000000,
+                      188000000,190000000,1,188100000,'2026-08-05T11:45:00Z',-0.0047,
+                      '2026-08-05T11:45:01Z','FORWARD_5M','2026-08-05T11:45:01Z')
+            """
+        )
+        self.connection.commit()
+        rate = {
+            "estimated_price_toman": 189_000_000,
+            "group_offer_anchor": {"status": "NO_DATA"},
+            "historical_group_anchor": {
+                "status": "OBSERVED",
+                "reference_price_toman": 188_900_000,
+                "age_seconds": 320,
+                "confidence": 1.0,
+                "trade_count": 1,
+                "offer_count": 18,
+                "latest_is_consistent": True,
+            },
+        }
+
+        info = apply_recent_realized_calibration(
+            self.connection,
+            commodity="امام",
+            settlement="TOMORROW",
+            rate=rate,
+            as_of=now,
+        )
+
+        self.assertEqual(info["status"], "SKIPPED_RECENT_GROUP_CONSENSUS")
+        self.assertEqual(info["group_market_evidence"], "RECENT_GROUP_CONSENSUS")
+        self.assertEqual(rate["estimated_price_toman"], 189_000_000)
+
 
 if __name__ == "__main__":
     unittest.main()

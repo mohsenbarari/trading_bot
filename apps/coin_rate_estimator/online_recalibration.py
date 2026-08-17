@@ -26,6 +26,9 @@ RECENT_REALIZED_HALF_LIFE_SECONDS = 30 * 60
 # It is a short-lived correction from completed coin events, not a replacement
 # for the structural model or for a fresh live coin book.
 MAX_RECENT_REALIZED_CORRECTION_RATIO = 0.01
+RECENT_GROUP_CONSENSUS_MAX_AGE_SECONDS = 30 * 60
+RECENT_GROUP_CONSENSUS_MIN_OFFERS = 3
+RECENT_GROUP_CONSENSUS_MIN_CONFIDENCE = 0.90
 NORMAL_MATCH_SECONDS = 5 * 60
 # The event parser and trade-confirmation pass are independent workers.  A
 # short grace window allows a late-arriving trusted event to be paired with
@@ -1287,13 +1290,40 @@ def _weighted_median(values: list[tuple[float, float]]) -> float | None:
     return eligible[-1][0]
 
 
-def _is_fresh_live_group_anchor(rate: dict[str, Any]) -> bool:
-    """A live book wins over any retrospective calibration signal."""
+def group_market_evidence_kind(rate: dict[str, Any]) -> str | None:
+    """Classify group evidence strong enough to outrank retrospective rules.
+
+    The executable quote TTL remains unchanged.  A dense, consistent recent
+    consensus is only a guard against moving an already market-supported
+    estimate away from observed offers/trades; it is not relabelled as live.
+    """
 
     anchor = rate.get("group_offer_anchor")
-    if not isinstance(anchor, dict):
-        return False
-    return str(anchor.get("status") or "") == "OBSERVED"
+    if isinstance(anchor, dict) and str(anchor.get("status") or "") == "OBSERVED":
+        return "LIVE_GROUP_BOOK"
+
+    historical = rate.get("historical_group_anchor")
+    if not isinstance(historical, dict):
+        return None
+    if str(historical.get("status") or "") != "OBSERVED":
+        return None
+    try:
+        age_seconds = float(historical.get("age_seconds"))
+        confidence = float(historical.get("confidence"))
+        reference_price = float(historical.get("reference_price_toman"))
+        trade_count = int(historical.get("trade_count") or 0)
+        offer_count = int(historical.get("offer_count") or 0)
+    except (TypeError, ValueError):
+        return None
+    if not 0 <= age_seconds <= RECENT_GROUP_CONSENSUS_MAX_AGE_SECONDS:
+        return None
+    if confidence < RECENT_GROUP_CONSENSUS_MIN_CONFIDENCE:
+        return None
+    if reference_price <= 0 or historical.get("latest_is_consistent") is False:
+        return None
+    if trade_count < 1 and offer_count < RECENT_GROUP_CONSENSUS_MIN_OFFERS:
+        return None
+    return "RECENT_GROUP_CONSENSUS"
 
 
 def apply_recent_realized_calibration(
@@ -1316,11 +1346,17 @@ def apply_recent_realized_calibration(
     original = _price(rate.get("estimated_price_toman"))
     if original is None:
         return {"status": "NO_ESTIMATE", "actual_event_count": 0, "correction_ratio": 0.0}
-    if _is_fresh_live_group_anchor(rate):
+    group_evidence = group_market_evidence_kind(rate)
+    if group_evidence is not None:
         return {
-            "status": "SKIPPED_FRESH_LIVE_GROUP_ANCHOR",
+            "status": (
+                "SKIPPED_FRESH_LIVE_GROUP_ANCHOR"
+                if group_evidence == "LIVE_GROUP_BOOK"
+                else "SKIPPED_RECENT_GROUP_CONSENSUS"
+            ),
             "actual_event_count": 0,
             "correction_ratio": 0.0,
+            "group_market_evidence": group_evidence,
         }
 
     if as_of.tzinfo is None:

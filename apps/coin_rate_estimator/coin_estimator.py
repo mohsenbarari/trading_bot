@@ -52,6 +52,7 @@ from online_recalibration import (  # noqa: E402
     LEDGER_OUTCOME_RETENTION_DAYS,
     LEDGER_UNMATCHED_RETENTION_DAYS,
     ensure_schema as ensure_online_schema,
+    group_market_evidence_kind,
     prune_prediction_ledger,
 )
 
@@ -194,14 +195,6 @@ CONFIRMED_TRADE_FLOW_WEIGHT = 3.0
 FLOW_TOLERANCE_EXPANSION_MAX = 0.75
 GROUP_ANCHOR_WINDOW_SECONDS = OFFER_LIVE_SECONDS
 HISTORICAL_GROUP_MAXIMUM_RELATIVE_DEVIATION = 0.05
-# A short-lived executable quote still expires after OFFER_LIVE_SECONDS, but a
-# dense, recent group consensus remains stronger evidence than an inferred
-# cash/tomorrow ordering rule.  This grace period is used only to prevent the
-# finalizer from moving a well-supported estimate away from the observed
-# market; it never turns an expired offer back into a live quote.
-RECENT_GROUP_TERM_STRUCTURE_MAX_AGE_SECONDS = 30 * 60
-RECENT_GROUP_TERM_STRUCTURE_MIN_OFFERS = 3
-RECENT_GROUP_TERM_STRUCTURE_MIN_CONFIDENCE = 0.90
 MARKET_FORM_POLICY_VERSION = "EXPLICIT_CASH_MARKET_FORMS_V3"
 ACCOUNT1_PHYSICAL_TODAY_LABEL = "آبشده کانال جدید نقد حاضر"
 ACCOUNT1_PHYSICAL_TOMORROW_LABEL = "آبشده کانال جدید فیزیکی فردا"
@@ -5295,34 +5288,6 @@ def enforce_cash_tomorrow_term_structure(
     market instead.
     """
 
-    def authoritative_group_market(rate: dict[str, Any]) -> str | None:
-        live = rate.get("group_offer_anchor")
-        if isinstance(live, dict) and str(live.get("status") or "") == "OBSERVED":
-            return "LIVE_GROUP_BOOK"
-
-        historical = rate.get("historical_group_anchor")
-        if not isinstance(historical, dict):
-            return None
-        if str(historical.get("status") or "") != "OBSERVED":
-            return None
-        try:
-            age_seconds = float(historical.get("age_seconds"))
-            confidence = float(historical.get("confidence"))
-            reference_price = float(historical.get("reference_price_toman"))
-            trade_count = int(historical.get("trade_count") or 0)
-            offer_count = int(historical.get("offer_count") or 0)
-        except (TypeError, ValueError):
-            return None
-        if not 0 <= age_seconds <= RECENT_GROUP_TERM_STRUCTURE_MAX_AGE_SECONDS:
-            return None
-        if confidence < RECENT_GROUP_TERM_STRUCTURE_MIN_CONFIDENCE:
-            return None
-        if reference_price <= 0 or historical.get("latest_is_consistent") is False:
-            return None
-        if trade_count < 1 and offer_count < RECENT_GROUP_TERM_STRUCTURE_MIN_OFFERS:
-            return None
-        return "RECENT_GROUP_CONSENSUS"
-
     audits: list[dict[str, Any]] = []
     cash_rates = {
         str(row.get("commodity_name")): row
@@ -5345,8 +5310,8 @@ def enforce_cash_tomorrow_term_structure(
             continue
         cash_price_f = float(cash_price)
         tom_price_f = float(tom_price)
-        cash_group_market = authoritative_group_market(cash)
-        tomorrow_group_market = authoritative_group_market(rate)
+        cash_group_market = group_market_evidence_kind(cash)
+        tomorrow_group_market = group_market_evidence_kind(rate)
         # A market-supported tomorrow book is authoritative.  If cash is only
         # inferred, move its centre down rather than lifting tomorrow away from
         # recent trades/offers.  With two conflicting supported books, retain
