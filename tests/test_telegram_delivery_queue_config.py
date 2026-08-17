@@ -80,6 +80,16 @@ class TelegramDeliveryQueueConfigTests(unittest.TestCase):
                 telegram_provider_test_authority=True,
             )
 
+        inherited = _settings(
+            trading_bot_service="api",
+            telegram_delivery_execution_owner="producer-only",
+        )
+        self.assertEqual(inherited.telegram_delivery_producer_mode, "queue-v1")
+        self.assertEqual(
+            inherited.telegram_delivery_expected_execution_owner, "queue-v1"
+        )
+        self.assertIsNone(_settings(smsir_line_number="").smsir_line_number)
+
     def test_b2b_dispatch_is_fail_closed_behind_multi_publisher_flag(self):
         defaults = _settings()
         self.assertFalse(defaults.telegram_multi_publisher_enabled)

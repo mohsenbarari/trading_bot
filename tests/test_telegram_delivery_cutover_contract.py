@@ -205,6 +205,8 @@ class TelegramDeliveryCutoverContractTests(unittest.TestCase):
             / "docker-compose.staging.yml"
         ).read_text(encoding="utf-8")
         self.assertIn("x-api-telegram-isolation", compose)
+        self.assertIn("TELEGRAM_DELIVERY_PRODUCER_MODE: queue-v1", compose)
+        self.assertIn("TELEGRAM_DELIVERY_EXPECTED_EXECUTION_OWNER: queue-v1", compose)
         self.assertIn("x-non-iran-sms-isolation", compose)
         self.assertGreaterEqual(compose.count("*api_telegram_isolation"), 5)
         self.assertIn("<<: *api_telegram_isolation", compose)

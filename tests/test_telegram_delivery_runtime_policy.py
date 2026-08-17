@@ -6,6 +6,7 @@ from core.telegram_delivery_runtime_policy import (
     TelegramDeliveryRuntimeMode,
     TelegramProviderAuthorityError,
     assert_telegram_provider_execution_authority,
+    configured_telegram_delivery_producer_mode,
     configured_telegram_delivery_runtime,
     resolve_telegram_delivery_runtime,
 )
@@ -92,6 +93,15 @@ class TelegramDeliveryRuntimePolicyTests(unittest.TestCase):
                 execution_owner="producer-only",
                 queue_worker_enabled=True,
                 cutover_ready=False,
+            )
+
+    def test_blank_producer_mode_follows_queue_when_owner_is_producer_only(self):
+        with patch("core.telegram_delivery_runtime_policy.settings") as configured:
+            configured.telegram_delivery_producer_mode = None
+            configured.telegram_delivery_execution_owner = "producer-only"
+            self.assertEqual(
+                configured_telegram_delivery_producer_mode(),
+                TelegramDeliveryRuntimeMode.QUEUE_V1,
             )
 
     def test_queue_v1_api_cannot_call_provider(self):

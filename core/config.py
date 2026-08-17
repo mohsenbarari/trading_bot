@@ -8,7 +8,7 @@
 import math
 import os
 
-from pydantic import SecretStr, model_validator
+from pydantic import SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings
 
 __all__ = ["Settings", "settings"]
@@ -258,6 +258,15 @@ class Settings(BaseSettings):
     invitation_registration_session_ttl_seconds: int = 600
     staging_log_otp_codes: bool = False
 
+    @field_validator("smsir_line_number", mode="before")
+    @classmethod
+    def _blank_smsir_line_number_is_unset(cls, value):
+        if value is None:
+            return None
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
+
     @model_validator(mode="after")
     def validate_telegram_delivery_queue_settings(self):
         if (
@@ -272,17 +281,22 @@ class Settings(BaseSettings):
             value = float(getattr(self, name))
             if not math.isfinite(value) or value <= 0:
                 raise ValueError(f"{name}_must_be_positive")
-        producer = str(
-            self.telegram_delivery_producer_mode
-            or self.telegram_delivery_execution_owner
-            or ""
-        ).strip().lower()
-        expected_owner = str(
-            self.telegram_delivery_expected_execution_owner
-            or self.telegram_delivery_execution_owner
-            or ""
-        ).strip().lower()
         actual_owner = str(self.telegram_delivery_execution_owner or "").strip().lower()
+        producer = str(self.telegram_delivery_producer_mode or "").strip().lower()
+        expected_owner = str(
+            self.telegram_delivery_expected_execution_owner or ""
+        ).strip().lower()
+        if not producer:
+            producer = "queue-v1" if actual_owner == "producer-only" else actual_owner
+        if not expected_owner:
+            expected_owner = (
+                "queue-v1" if actual_owner == "producer-only" else actual_owner
+            )
+        if actual_owner == "producer-only":
+            if not str(self.telegram_delivery_producer_mode or "").strip():
+                self.telegram_delivery_producer_mode = producer
+            if not str(self.telegram_delivery_expected_execution_owner or "").strip():
+                self.telegram_delivery_expected_execution_owner = expected_owner
         if producer not in {"legacy", "queue-v1"}:
             raise ValueError("telegram_delivery_producer_mode_invalid")
         if expected_owner not in {"legacy", "queue-v1"}:

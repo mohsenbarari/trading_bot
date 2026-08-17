@@ -131,10 +131,18 @@ def resolve_telegram_delivery_producer_mode(
 def configured_telegram_delivery_producer_mode() -> TelegramDeliveryRuntimeMode:
     configured_mode = getattr(settings, "telegram_delivery_producer_mode", None)
     if configured_mode is None or not str(configured_mode).strip():
-        configured_mode = getattr(
-            settings,
-            "telegram_delivery_execution_owner",
-            LEGACY_TELEGRAM_EXECUTION_OWNER,
+        owner = str(
+            getattr(
+                settings,
+                "telegram_delivery_execution_owner",
+                LEGACY_TELEGRAM_EXECUTION_OWNER,
+            )
+            or ""
+        ).strip().lower()
+        configured_mode = (
+            QUEUE_V1_TELEGRAM_EXECUTION_OWNER
+            if owner == PRODUCER_ONLY_TELEGRAM_EXECUTION_OWNER
+            else owner
         )
     return resolve_telegram_delivery_producer_mode(producer_mode=configured_mode)
 
