@@ -19,6 +19,10 @@ import httpx
 
 from core.config import settings
 from core.server_routing import SERVER_FOREIGN, current_server
+from core.telegram_delivery_runtime_policy import (
+    TelegramProviderAuthorityError,
+    assert_telegram_provider_execution_authority,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -188,6 +192,10 @@ async def post_telegram_method(
 ) -> TelegramGatewayResult:
     """Execute one Telegram Bot API method through the approved async path."""
     assert_telegram_execution_surface(operation=method)
+    try:
+        assert_telegram_provider_execution_authority()
+    except TelegramProviderAuthorityError as exc:
+        raise TelegramGatewaySurfaceError(str(exc)) from exc
 
     token = _resolve_bot_token(bot_token)
     if not token:
@@ -257,6 +265,10 @@ def post_telegram_method_sync(
 ) -> TelegramGatewayResult:
     """Execute one Telegram Bot API method through the approved sync path."""
     assert_telegram_execution_surface(operation=method)
+    try:
+        assert_telegram_provider_execution_authority()
+    except TelegramProviderAuthorityError as exc:
+        raise TelegramGatewaySurfaceError(str(exc)) from exc
 
     token = _resolve_bot_token(bot_token)
     if not token:

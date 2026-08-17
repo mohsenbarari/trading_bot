@@ -27,6 +27,7 @@ from core.services.offer_expiry_service import OfferExpiryReason, OfferExpirySou
 from core.services.session_service import deactivate_active_sessions, publish_session_revocation
 from core.telegram_delivery_runtime_policy import (  # compatibility import
     TelegramDeliveryRuntimeMode,
+    assert_legacy_bot_membership_authority,
     configured_telegram_delivery_runtime,
 )
 from core.utils import send_telegram_notification, utc_now_naive  # compatibility import
@@ -84,6 +85,7 @@ async def remove_user_from_telegram_channel(
         if require_delivery:
             raise RuntimeError("telegram_channel_removal_credentials_missing")
         return False
+    assert_legacy_bot_membership_authority()
 
     ban_result = await telegram_gateway.ban_chat_member(
         settings.channel_id,

@@ -15,6 +15,7 @@ def _settings(**overrides):
         "frontend_url": "http://localhost:3000",
         "redis_url": "redis://127.0.0.1:6379/15",
         "jwt_secret_key": "test-only-not-production",
+        "telegram_provider_test_authority": False,
     }
     values.update(overrides)
     return Settings(**values)
@@ -61,8 +62,23 @@ class TelegramDeliveryQueueConfigTests(unittest.TestCase):
             trading_bot_service="api",
             telegram_delivery_producer_mode="queue-v1",
             telegram_delivery_expected_execution_owner="queue-v1",
+            telegram_delivery_execution_owner="producer-only",
         )
         self.assertEqual(api.telegram_delivery_producer_mode, "queue-v1")
+        self.assertEqual(api.telegram_delivery_execution_owner, "producer-only")
+
+        with self.assertRaises(ValidationError):
+            _settings(
+                trading_bot_service="bot",
+                telegram_delivery_producer_mode="queue-v1",
+                telegram_delivery_expected_execution_owner="queue-v1",
+                telegram_delivery_execution_owner="producer-only",
+            )
+        with self.assertRaises(ValidationError):
+            _settings(
+                trading_bot_service="api",
+                telegram_provider_test_authority=True,
+            )
 
     def test_b2b_dispatch_is_fail_closed_behind_multi_publisher_flag(self):
         defaults = _settings()

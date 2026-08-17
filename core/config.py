@@ -134,6 +134,8 @@ class Settings(BaseSettings):
     telegram_delivery_execution_owner: str = "legacy"
     telegram_delivery_queue_worker_enabled: bool = False
     telegram_delivery_queue_cutover_ready: bool = False
+    telegram_provider_test_authority: bool = False
+    telegram_otp_queue_secret: str | None = None
     telegram_delivery_queue_channel_editor_enabled: bool = False
     # Multi-publisher delivery is intentionally disabled until every staged
     # migration and staging acceptance gate has passed.  B2B dispatch is a
@@ -285,10 +287,21 @@ class Settings(BaseSettings):
             raise ValueError("telegram_delivery_producer_mode_invalid")
         if expected_owner not in {"legacy", "queue-v1"}:
             raise ValueError("telegram_delivery_expected_execution_owner_invalid")
+        if actual_owner not in {"legacy", "queue-v1", "producer-only"}:
+            raise ValueError("telegram_delivery_execution_owner_invalid")
         if producer != expected_owner:
             raise ValueError("telegram_delivery_producer_executor_split_brain")
         if self.trading_bot_service == "bot" and actual_owner != expected_owner:
             raise ValueError("telegram_delivery_bot_executor_split_brain")
+        if actual_owner == "producer-only":
+            if self.trading_bot_service == "bot":
+                raise ValueError("telegram_delivery_bot_cannot_be_producer_only")
+            if self.telegram_delivery_queue_worker_enabled or self.telegram_delivery_queue_cutover_ready:
+                raise ValueError("telegram_delivery_producer_only_rejects_workers")
+        if bool(self.telegram_provider_test_authority) and str(
+            self.trading_bot_service or ""
+        ).strip().lower() in {"api", "bot", "sync_worker", "load_runner", "webapp", "migration"}:
+            raise ValueError("telegram_provider_test_authority_forbidden_on_deployable_service")
         positive_float_fields = (
             "telegram_delivery_queue_preflight_timeout_seconds",
             "telegram_delivery_queue_worker_interval_seconds",

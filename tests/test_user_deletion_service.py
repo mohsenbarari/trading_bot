@@ -136,6 +136,8 @@ class DeleteUserAccountTests(unittest.IsolatedAsyncioTestCase):
         with patch("core.services.user_deletion_service.current_server", return_value="foreign"), patch(
             "core.services.user_deletion_service.settings", SimpleNamespace(channel_id=-100123, bot_token="bot-token")
         ), patch(
+            "core.services.user_deletion_service.assert_legacy_bot_membership_authority"
+        ), patch(
             "core.telegram_gateway.httpx.AsyncClient",
             return_value=client,
         ):
