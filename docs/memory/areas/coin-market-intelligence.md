@@ -1,44 +1,44 @@
 # Coin Market Intelligence
 
-- USD/Herat infers omitted leading digits from three prior same-book/source
-  facts within 15m; never add constants or replay out of order.
-- Private-group `خ ن ف`/`ف ن ف`, `خ ف`/`ف ف`, and marker-less sides mean
-  tomorrow; `خ ن`/`ف ن` and `نق`/cash words mean cash. Future wins. Do not apply
-  this to user registration.
-- Coin-group prices accept project-thousand, full-Toman divided once by 1,000,
-  or bounded redundant zeros; never constants. Quantities, scripts and mint
-  years are not prices. `رب` is quarter; `پ`/`ت پ`/`پایین` mark low-date.
-- Complete explicit commodity offers are immediately eligible; missing anchors
-  do not make them pending. Only decisive authoritative prior evidence may
-  reject. Unnamed offers use unit-safe `MAIN_ONLINE` ranges created before the
-  message plus same-book anchors (2h expiry); model ranges are
-  non-authoritative. Overlaps require all plausible books and a decisive margin.
-  Bootstrap: 30m, three messages, two senders, one nonconditional claim, 1.5%
-  spread. Conditional claims only support. Never default Imam or restore
+- USD/Herat infers omitted leading digits from 3 prior same-book/source facts
+  in 15m; no constants or future replay.
+- In private groups, `خ ن ف`/`ف ن ف`, `خ ف`/`ف ف`, or no marker mean tomorrow;
+  `خ ن`/`ف ن` and `نق` mean cash. Future wins. Exclude user registration.
+- Coin prices accept project-thousand, full-Toman divided once by 1,000, or
+  bounded redundant zeros. Quantities/scripts/years are not
+  prices. `رب` is quarter; `پ`/`ت پ`/`پایین`/`بالا 80` mark low-date.
+- Named offers need no anchors; decisive prior evidence may reject. Unnamed
+  offers use causal unit-safe `MAIN_ONLINE` ranges
+  plus 2h same-book anchors; ranges cannot contradict. Overlaps need a decisive
+  margin. Bootstrap: 30m/3 messages/2 senders/1 nonconditional/1.5% spread.
+  Conditional only supports. Never default Imam or restore
   `group_commodity_context`.
-- Trades require a complete branch, isolated users/siblings, oldest root and
-  reciprocal offerer evidence. Cancellation breaks terms; later rejection gates
-  fill. Retain final price/quantity, deduplicate and link opaque root. A
-  reciprocal explicit first fill may amend root quantity; later/cumulative
-  overfills and ambiguous/unresolved stay audit-only.
-- Reconciliation rejects invalid edit/reply graphs; unchanged decisions keep
-  first availability. Projection removes absent/rejected facts but retains
-  pending, conditional, or over-five-minute-late facts audit-only. Models use
-  `available_at_utc`; reports retain source time.
+- Trades require an isolated full branch, oldest root and reciprocal offerer
+  evidence. Cancellation/rejection gates fills. Retain negotiated
+  price/quantity and opaque root. Only a reciprocal explicit first fill may
+  amend root quantity; ambiguous or cumulative overfills stay audit-only.
+- Trade feedback hashes the full root-to-confirmation branch and cannot rewrite
+  root commodity/side/settlement/form/conditional state; mismatches are
+  audit-only. With 3 causal same-instrument offers in 5m, prices beyond max(5%,
+  6 robust deviations) from median are audit-only; prefer the same settlement,
+  falling back to the other physical settlement only when that book is thin.
+  Historical anchors apply this scale gate before trade weighting.
+- Reconciliation rejects invalid reply graphs; unchanged facts keep first
+  availability. Projection removes absent/rejected facts; pending, conditional,
+  or >5m-late facts stay audit-only. Models use `available_at_utc`; reports use
+  source time.
 - Reject malformed envelopes individually; inverted times cannot advance
-  checkpoints. Health separates heartbeat, event and eligible input.
-- Private text stays in bounded staging and may render only in authenticated
-  review. Market Store/projection stay opaque; never revive the legacy data
-  plane. Live jobs use canonical `main`; retarget systemd before removal.
-- Estimator state lives under
-  `/srv/trading-bot/production-data/coin-intelligence/estimator-live`. Home shows
+  checkpoints. Separate heartbeat, event and eligible-input health.
+- Private text stays in bounded staging/authenticated review. Market
+  Store/projection stay opaque; never revive legacy. Live jobs use
+  canonical `main`; retarget systemd before removal.
+- Estimator state is under `estimator-live`. Home shows
   CASH/TOMORROW inputs; shadow/realised detail stays on `/shadow`.
 - Web UI is the parser/estimator contract: list normalized events, model/audit
-  status and recorded model prices/times—never recompute. Parser review is first
+  status and recorded prices/times—never recompute. Parser review is first
   on analytics, with actions by status.
-- Reviews use opaque keys/reviewer digests; raw text/identity never persist.
-  Each revision corrects/rejects
-  the exact fact next cycle. A number-redacted syntax digest calibrates matching
-  later grammar; price anchors start at review and never affect past live input.
-- Input health separates heartbeat from freshness, rejects stale input, prefers
-  normalized sources, and excludes live-only proxies from training.
+- Reviews use opaque keys/digests; raw text/identity never persist. Revisions
+  correct exact facts. Number-redacted syntax calibrates later grammar;
+  review-time anchors never affect prior input.
+- Input health separates heartbeat/freshness, rejects stale/live-only training
+  proxies, and prefers normalized sources.

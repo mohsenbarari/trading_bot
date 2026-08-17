@@ -163,6 +163,7 @@ class CoinGroupParserTests(unittest.TestCase):
             "۴ نیم خ ۹۴.۸۰۰.۰۰۰": ("HALF_BAHAR", 4, "BUY", 94_800),
             "۳۰ تا ربع ف۵۱۹۰۰۰": ("QUARTER_BAHAR", 30, "SELL", 51_900),
             "20 تا رب پایبن بالا 80 47 ف": ("QUARTER_LOW_DATE", 20, "SELL", 47_000),
+            "۱۲ تا ربع بالا ۸۰ ف نقدی ۴۶۵۰۰": ("QUARTER_LOW_DATE", 12, "SELL", 46_500),
             "۶ نیم ف ۹۵.۵۰۰.۰۰۰": ("HALF_BAHAR", 6, "SELL", 95_500),
             "۴ نیم پ خ ۹۴.۸۰۰.۰۰۰": ("HALF_LOW_DATE", 4, "BUY", 94_800),
             "۴ رب پ ف ۴۷.۰۰۰.۰۰۰": ("QUARTER_LOW_DATE", 4, "SELL", 47_000),

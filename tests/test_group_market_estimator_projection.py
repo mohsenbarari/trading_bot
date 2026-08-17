@@ -318,6 +318,260 @@ def test_projection_links_canonical_trade_to_its_opaque_root_offer() -> None:
         assert quality[0] == offer[0]
 
 
+def test_projection_keeps_trade_with_root_instrument_mismatch_audit_only() -> None:
+    with TemporaryDirectory() as directory:
+        root = Path(directory)
+        market_path = root / "market.sqlite3"
+        conversation_path = root / "conversation.sqlite3"
+        destination = sqlite3.connect(conversation_path)
+        destination.executescript(_CONVERSATION_SCHEMA)
+        destination.close()
+        market = connect_market_store(market_path)
+        initialize_market_store(market)
+        offer_key = derive_event_key("coin-group-offer-v1", 1, 201, 0)
+        trade_key = derive_event_key("coin-group-trade-v1", 1, 201, 203)
+        for key, event_type, instrument, minute, attributes in (
+            (
+                offer_key,
+                "OFFER",
+                "COIN_HALF_BAHAR",
+                0,
+                {"group_number": 1},
+            ),
+            (
+                trade_key,
+                "TRADE",
+                "COIN_IMAM",
+                1,
+                {
+                    "group_number": 1,
+                    "confirmation_kind": "RECIPROCAL_OFFERER_CONFIRMATION",
+                    "root_offer_event_key": offer_key.hex(),
+                },
+            ),
+        ):
+            upsert_observation(
+                market,
+                MarketObservation(
+                    event_key=key,
+                    source_code="GROUP_1",
+                    source_family="GROUP",
+                    event_time_utc=datetime(
+                        2026, 8, 17, 9, minute, tzinfo=timezone.utc
+                    ),
+                    available_at_utc=datetime(
+                        2026, 8, 17, 9, minute, 3, tzinfo=timezone.utc
+                    ),
+                    instrument=instrument,
+                    market_label="GROUP_" + instrument,
+                    settlement_term="CASH",
+                    trade_form="PHYSICAL",
+                    event_type=event_type,
+                    side="BUY",
+                    price=Decimal("94500"),
+                    price_unit="PROJECT_THOUSAND_TOMAN",
+                    currency="TOMAN",
+                    quantity=Decimal("4"),
+                    quantity_unit="COIN_COUNT",
+                    parse_confidence=0.99,
+                    parser_version="coin-group-causal-guard-test",
+                    quality_state="ELIGIBLE",
+                    quality_policy_version="test",
+                    attributes=attributes,
+                ),
+            )
+        market.commit()
+        market.close()
+
+        report = project(market_path, conversation_path)
+        assert (report["eligible_offers"], report["eligible_trades"]) == (1, 0)
+        assert report["audit_only_trades"] == 1
+        connection = sqlite3.connect(conversation_path)
+        trade = connection.execute(
+            "SELECT commodity,training_eligible FROM confirmed_trades"
+        ).fetchone()
+        quality = connection.execute(
+            "SELECT realtime_eligible,training_eligible,exclusion_reason "
+            "FROM trade_market_quality"
+        ).fetchone()
+        connection.close()
+
+        assert trade == ("امام", 0)
+        assert quality == (
+            0,
+            0,
+            "CAUSAL_TRADE_ROOT_INSTRUMENT_MISMATCH",
+        )
+
+
+def test_projection_excludes_glaring_price_outlier_against_live_offer_book() -> None:
+    with TemporaryDirectory() as directory:
+        root = Path(directory)
+        market_path = root / "market.sqlite3"
+        conversation_path = root / "conversation.sqlite3"
+        destination = sqlite3.connect(conversation_path)
+        destination.executescript(_CONVERSATION_SCHEMA)
+        destination.close()
+        market = connect_market_store(market_path)
+        initialize_market_store(market)
+        offer_keys: list[bytes] = []
+        for index, price in enumerate(("188500", "188600", "188700"), 1):
+            offer_key = derive_event_key("live-imam-offer", index)
+            offer_keys.append(offer_key)
+            upsert_observation(
+                market,
+                MarketObservation(
+                    event_key=offer_key,
+                    source_code="GROUP_1",
+                    source_family="GROUP",
+                    event_time_utc=datetime(
+                        2026, 8, 17, 9, index, tzinfo=timezone.utc
+                    ),
+                    available_at_utc=datetime(
+                        2026, 8, 17, 9, index, 2, tzinfo=timezone.utc
+                    ),
+                    instrument="COIN_IMAM",
+                    market_label="GROUP_COIN_IMAM",
+                    settlement_term="CASH",
+                    trade_form="PHYSICAL",
+                    event_type="OFFER",
+                    side="SELL",
+                    price=Decimal(price),
+                    price_unit="PROJECT_THOUSAND_TOMAN",
+                    currency="TOMAN",
+                    quantity=Decimal("5"),
+                    quantity_unit="COIN_COUNT",
+                    parser_version="coin-group-price-guard-test",
+                    attributes={"group_number": 1},
+                ),
+            )
+        trade_key = derive_event_key("live-imam-trade-outlier", 1)
+        upsert_observation(
+            market,
+            MarketObservation(
+                event_key=trade_key,
+                source_code="GROUP_1",
+                source_family="GROUP",
+                event_time_utc="2026-08-17T09:04:00Z",
+                available_at_utc="2026-08-17T09:04:02Z",
+                instrument="COIN_IMAM",
+                market_label="GROUP_COIN_IMAM",
+                settlement_term="CASH",
+                trade_form="PHYSICAL",
+                event_type="TRADE",
+                side="SELL",
+                price=Decimal("94800"),
+                price_unit="PROJECT_THOUSAND_TOMAN",
+                currency="TOMAN",
+                quantity=Decimal("4"),
+                quantity_unit="COIN_COUNT",
+                parser_version="coin-group-price-guard-test",
+                attributes={
+                    "group_number": 1,
+                    "root_offer_event_key": offer_keys[-1].hex(),
+                },
+            ),
+        )
+        market.commit()
+        market.close()
+
+        report = project(market_path, conversation_path)
+        assert report["eligible_offers"] == 3
+        assert report["eligible_trades"] == 0
+        assert report["audit_only_trades"] == 1
+        assert report["live_book_price_outliers"] == 1
+        connection = sqlite3.connect(conversation_path)
+        quality = connection.execute(
+            "SELECT realtime_eligible,training_eligible,exclusion_reason "
+            "FROM trade_market_quality"
+        ).fetchone()
+        connection.close()
+        assert quality == (0, 0, "LIVE_BOOK_PRICE_OUTLIER")
+
+
+def test_projection_uses_other_settlement_when_exact_book_is_thin() -> None:
+    with TemporaryDirectory() as directory:
+        root = Path(directory)
+        market_path = root / "market.sqlite3"
+        conversation_path = root / "conversation.sqlite3"
+        destination = sqlite3.connect(conversation_path)
+        destination.executescript(_CONVERSATION_SCHEMA)
+        destination.close()
+        market = connect_market_store(market_path)
+        initialize_market_store(market)
+        for index, price in enumerate(("188100", "188200", "188300"), 1):
+            event_time = (
+                datetime(2026, 8, 17, 9, 4, 30, tzinfo=timezone.utc)
+                if index == 3
+                else datetime(2026, 8, 17, 9, index, tzinfo=timezone.utc)
+            )
+            available_at = (
+                datetime(2026, 8, 17, 9, 5, tzinfo=timezone.utc)
+                if index == 3
+                else datetime(2026, 8, 17, 9, index, 2, tzinfo=timezone.utc)
+            )
+            upsert_observation(
+                market,
+                MarketObservation(
+                    event_key=derive_event_key("tomorrow-imam-reference", index),
+                    source_code="GROUP_2",
+                    source_family="GROUP",
+                    event_time_utc=event_time,
+                    available_at_utc=available_at,
+                    instrument="COIN_IMAM",
+                    market_label="GROUP_COIN_IMAM",
+                    settlement_term="TOMORROW",
+                    trade_form="PHYSICAL",
+                    event_type="OFFER",
+                    side="SELL",
+                    price=Decimal(price),
+                    price_unit="PROJECT_THOUSAND_TOMAN",
+                    currency="TOMAN",
+                    quantity=Decimal("10"),
+                    quantity_unit="COIN_COUNT",
+                    parser_version="coin-group-cross-book-price-guard-test",
+                    attributes={"group_number": 2},
+                ),
+            )
+        upsert_observation(
+            market,
+            MarketObservation(
+                event_key=derive_event_key("cash-imam-isolated-typo", 1),
+                source_code="GROUP_2",
+                source_family="GROUP",
+                event_time_utc="2026-08-17T09:04:00Z",
+                available_at_utc="2026-08-17T09:05:00Z",
+                instrument="COIN_IMAM",
+                market_label="GROUP_COIN_IMAM",
+                settlement_term="CASH",
+                trade_form="PHYSICAL",
+                event_type="OFFER",
+                side="BUY",
+                price=Decimal("178500"),
+                price_unit="PROJECT_THOUSAND_TOMAN",
+                currency="TOMAN",
+                quantity=Decimal("20"),
+                quantity_unit="COIN_COUNT",
+                parser_version="coin-group-cross-book-price-guard-test",
+                attributes={"group_number": 2},
+            ),
+        )
+        market.commit()
+        market.close()
+
+        report = project(market_path, conversation_path)
+        assert report["eligible_offers"] == 3
+        assert report["audit_only_offers"] == 1
+        assert report["live_book_price_outliers"] == 1
+        connection = sqlite3.connect(conversation_path)
+        quality = connection.execute(
+            "SELECT realtime_eligible,training_eligible,exclusion_reason "
+            "FROM offer_market_quality WHERE exclusion_reason IS NOT NULL"
+        ).fetchone()
+        connection.close()
+        assert quality == (0, 0, "LIVE_BOOK_PRICE_OUTLIER")
+
+
 def test_projection_command_records_failure_heartbeat() -> None:
     with TemporaryDirectory() as directory:
         root = Path(directory)

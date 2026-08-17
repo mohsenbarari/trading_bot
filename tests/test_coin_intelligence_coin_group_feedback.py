@@ -457,3 +457,118 @@ def test_feedback_persists_number_redacted_syntax_calibration_for_later_offer() 
         assert "human_feedback_syntax_fingerprint" not in attributes
         staging.close()
         market.close()
+
+
+def test_trade_pattern_calibration_is_bound_to_reply_chain_and_root_commodity() -> None:
+    """A generic final acknowledgement must not relabel another coin family."""
+
+    with TemporaryDirectory() as directory:
+        root = Path(directory)
+        staging = connect_coin_group_staging(root / "staging.sqlite3")
+        initialize_coin_group_staging(staging)
+        market = connect_market_store(root / "market.sqlite3")
+        initialize_market_store(market)
+        feedback_path = root / "feedback.sqlite3"
+        reviewed_trade_key = derive_event_key(
+            "coin-group-trade-v1", 1, 101, 103
+        )
+        record_coin_group_parser_feedback(
+            feedback_path,
+            event_key=reviewed_trade_key,
+            event_type="TRADE",
+            group_number=1,
+            source_event_time_utc="2026-08-17T09:00:04Z",
+            ambiguous_fields=["commodity"],
+            event_confirmed=True,
+            commodity_code="IMAM",
+            side="SELL",
+            price_project_thousand_toman=188_600,
+            quantity=5,
+            settlement_term="CASH",
+            trade_form="PHYSICAL",
+            is_conditional=False,
+            reviewer="operator",
+            reviewed_at_utc="2026-08-17T09:01:00Z",
+        )
+        for item in (
+            CoinGroupStagingMessage(
+                group_number=1,
+                message_id=101,
+                event_time_utc="2026-08-17T09:00:00Z",
+                available_at_utc="2026-08-17T09:00:01Z",
+                text="۵ امام ف نقدی ۱۸۸۶۰۰",
+                sender_identity="first-owner",
+            ),
+            CoinGroupStagingMessage(
+                group_number=1,
+                message_id=102,
+                event_time_utc="2026-08-17T09:00:02Z",
+                available_at_utc="2026-08-17T09:00:03Z",
+                text="۵ خریدم",
+                reply_to_message_id=101,
+                sender_identity="first-buyer",
+            ),
+            CoinGroupStagingMessage(
+                group_number=1,
+                message_id=103,
+                event_time_utc="2026-08-17T09:00:04Z",
+                available_at_utc="2026-08-17T09:00:05Z",
+                text="برکت",
+                reply_to_message_id=102,
+                sender_identity="first-owner",
+            ),
+            CoinGroupStagingMessage(
+                group_number=1,
+                message_id=201,
+                event_time_utc="2026-08-17T09:02:00Z",
+                available_at_utc="2026-08-17T09:02:01Z",
+                text="۴ نیم خ نقدی ۹۴۵۰۰",
+                sender_identity="second-owner",
+            ),
+            CoinGroupStagingMessage(
+                group_number=1,
+                message_id=202,
+                event_time_utc="2026-08-17T09:02:02Z",
+                available_at_utc="2026-08-17T09:02:03Z",
+                text="۴ فروختم",
+                reply_to_message_id=201,
+                sender_identity="second-seller",
+            ),
+            CoinGroupStagingMessage(
+                group_number=1,
+                message_id=203,
+                event_time_utc="2026-08-17T09:02:04Z",
+                available_at_utc="2026-08-17T09:02:05Z",
+                text="برکت",
+                reply_to_message_id=202,
+                sender_identity="second-owner",
+            ),
+        ):
+            stage_coin_group_message(staging, item)
+        staging.commit()
+
+        process_coin_group_staging(
+            staging,
+            market,
+            as_of_utc="2026-08-17T09:03:00Z",
+            parser_feedback=load_coin_group_parser_feedback(feedback_path),
+        )
+        trades = market.execute(
+            "SELECT event_key,instrument,price_num,quality_state,attributes_json "
+            "FROM market_observations WHERE event_type='TRADE' "
+            "ORDER BY event_time_utc"
+        ).fetchall()
+
+        assert len(trades) == 2
+        assert trades[0]["event_key"] == reviewed_trade_key
+        assert trades[0]["instrument"] == "COIN_IMAM"
+        assert (
+            trades[1]["instrument"],
+            int(trades[1]["price_num"]),
+            trades[1]["quality_state"],
+        ) == ("COIN_HALF_BAHAR", 94_500, "ELIGIBLE")
+        assert "human_pattern_calibration_revision" not in json.loads(
+            trades[1]["attributes_json"]
+        )
+        staging.close()
+        market.close()

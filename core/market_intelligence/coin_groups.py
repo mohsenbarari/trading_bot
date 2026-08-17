@@ -17,7 +17,7 @@ from typing import Iterable
 from .market_contracts import MarketObservation, derive_event_key, normalize_utc
 
 
-COIN_GROUP_PARSER_VERSION = "coin-group-rules-v5-price-formats-low-date"
+COIN_GROUP_PARSER_VERSION = "coin-group-rules-v6-low-date-year-aliases"
 _DIGITS = str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789")
 _ARABIC_LETTERS = str.maketrans({"ي": "ی", "ى": "ی", "ك": "ک"})
 # Dot and slash are genuine thousands separators when they are attached to
@@ -121,7 +121,12 @@ def _commodity(text: str) -> str | None:
     low_date = bool(
         re.search(
             r"تاریخ\s*(?:پایین|پاین|پایبن)|ت\s*\.?\s*پ|"
-            r"(?<![آ-ی])(?:پایین|پاین|پایبن|پ)(?![آ-ی])",
+            r"(?<![آ-ی])(?:پایین|پاین|پایبن|پ)(?![آ-ی])|"
+            # Traders also describe old-date quarter/half coins by the
+            # accepted mint-year floor, most commonly `ربع بالا 80`.
+            # Restrict the alias to the literal year marker so an unrelated
+            # adjective such as `قیمت بالا` cannot change the commodity.
+            r"(?<![آ-ی])بالا(?:ی)?\s*80(?!\d)",
             text,
         )
     )

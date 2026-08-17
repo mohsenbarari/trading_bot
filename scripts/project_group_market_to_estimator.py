@@ -16,6 +16,7 @@ import hashlib
 import json
 from pathlib import Path
 import sqlite3
+import statistics
 import sys
 from typing import Sequence
 from zoneinfo import ZoneInfo
@@ -28,9 +29,12 @@ if str(REPO_ROOT) not in sys.path:
 from core.market_intelligence.input_health import update_probe_state
 
 
-PROJECTION_VERSION = "canonical-group-estimator-projection-v3-audit-separated"
+PROJECTION_VERSION = "canonical-group-estimator-projection-v5-cross-book-price-guard"
 PROJECTION_IMPORT_ID = -9_000_000_000_000_000_001
 MAXIMUM_MODEL_PROJECTION_DELAY_SECONDS = 5 * 60
+LIVE_BOOK_PRICE_WINDOW_SECONDS = 5 * 60
+LIVE_BOOK_PRICE_MINIMUM_OFFERS = 3
+LIVE_BOOK_MAXIMUM_RELATIVE_DEVIATION = 0.05
 _TEHRAN = ZoneInfo("Asia/Tehran")
 _COMMODITY = {
     "IMAM": "امام",
@@ -188,6 +192,142 @@ def _model_exclusion_reason(row: sqlite3.Row) -> str | None:
     return None
 
 
+def _causal_trade_exclusion_reason(
+    row: sqlite3.Row,
+    *,
+    rows_by_key: dict[bytes, sqlite3.Row],
+    exclusions: dict[bytes, str | None],
+) -> str | None:
+    if str(row["event_type"]).upper() != "TRADE":
+        return None
+    root_key = _root_offer_event_key(_attributes(row))
+    if root_key is None:
+        return "CAUSAL_TRADE_ROOT_KEY_MISSING"
+    root = rows_by_key.get(root_key)
+    if root is None or str(root["event_type"]).upper() != "OFFER":
+        return "CAUSAL_TRADE_ROOT_OFFER_UNAVAILABLE"
+    for column, reason in (
+        ("source_code", "CAUSAL_TRADE_ROOT_SOURCE_MISMATCH"),
+        ("instrument", "CAUSAL_TRADE_ROOT_INSTRUMENT_MISMATCH"),
+        ("settlement_term", "CAUSAL_TRADE_ROOT_SETTLEMENT_MISMATCH"),
+        ("trade_form", "CAUSAL_TRADE_ROOT_FORM_MISMATCH"),
+        ("side", "CAUSAL_TRADE_ROOT_SIDE_MISMATCH"),
+    ):
+        if str(row[column]).upper() != str(root[column]).upper():
+            return reason
+    if exclusions.get(root_key) is not None:
+        return "CAUSAL_TRADE_ROOT_NOT_MODEL_ELIGIBLE"
+    return None
+
+
+def _live_book_price_exclusion_reason(
+    row: sqlite3.Row,
+    *,
+    eligible_offers: Sequence[sqlite3.Row],
+) -> str | None:
+    """Reject a glaring deviation from a causal, multi-offer instrument book.
+
+    Prefer the exact settlement book.  When it is too thin, the other physical
+    settlement of the same instrument is still a useful safety reference: its
+    normal basis is much smaller than a five-percent price-family error.  The
+    fallback never labels the candidate or changes its price; it only keeps an
+    implausible fact out of realtime estimation and training.
+    """
+
+    event_time = datetime.fromisoformat(
+        str(row["event_time_utc"]).replace("Z", "+00:00")
+    )
+    available_at = datetime.fromisoformat(
+        str(row["available_at_utc"]).replace("Z", "+00:00")
+    )
+    same_book_prices: list[float] = []
+    instrument_prices: list[float] = []
+    for offer in eligible_offers:
+        if bytes(offer["event_key"]) == bytes(row["event_key"]):
+            continue
+        if any(
+            str(offer[column]).upper() != str(row[column]).upper()
+            for column in ("instrument", "trade_form")
+        ):
+            continue
+        offer_event_time = datetime.fromisoformat(
+            str(offer["event_time_utc"]).replace("Z", "+00:00")
+        )
+        offer_available_at = datetime.fromisoformat(
+            str(offer["available_at_utc"]).replace("Z", "+00:00")
+        )
+        # The estimator can use every offer already known when this fact
+        # becomes available.  Telegram batches may deliver a slightly later
+        # economic event in the same envelope, so ordering by source time here
+        # would discard causal evidence that is already present at decision
+        # time.
+        age = (available_at - offer_event_time).total_seconds()
+        if (
+            age < 0
+            or age > LIVE_BOOK_PRICE_WINDOW_SECONDS
+            or offer_available_at > available_at
+        ):
+            continue
+        price = float(offer["price_num"])
+        if price > 0:
+            instrument_prices.append(price)
+            if str(offer["settlement_term"]).upper() == str(
+                row["settlement_term"]
+            ).upper():
+                same_book_prices.append(price)
+    prices = (
+        same_book_prices
+        if len(same_book_prices) >= LIVE_BOOK_PRICE_MINIMUM_OFFERS
+        else instrument_prices
+    )
+    if len(prices) < LIVE_BOOK_PRICE_MINIMUM_OFFERS:
+        return None
+    center = float(statistics.median(prices))
+    relative_mad = float(
+        statistics.median(abs(price - center) for price in prices)
+    ) / max(1.0, center)
+    tolerance = max(
+        LIVE_BOOK_MAXIMUM_RELATIVE_DEVIATION,
+        6.0 * relative_mad,
+    )
+    deviation = abs(float(row["price_num"]) - center) / max(1.0, center)
+    return "LIVE_BOOK_PRICE_OUTLIER" if deviation > tolerance else None
+
+
+def _model_exclusion_reasons(
+    rows: Sequence[sqlite3.Row],
+) -> dict[bytes, str | None]:
+    """Build causal model gates once so projection and observability agree."""
+
+    rows_by_key = {bytes(row["event_key"]): row for row in rows}
+    base_exclusions = {
+        bytes(row["event_key"]): _model_exclusion_reason(row) for row in rows
+    }
+    eligible_offers = [
+        row
+        for row in rows
+        if str(row["event_type"]).upper() == "OFFER"
+        and base_exclusions[bytes(row["event_key"])] is None
+    ]
+    exclusions: dict[bytes, str | None] = {}
+    for row in rows:
+        event_key = bytes(row["event_key"])
+        reason = base_exclusions[event_key]
+        if reason is None:
+            reason = _causal_trade_exclusion_reason(
+                row,
+                rows_by_key=rows_by_key,
+                exclusions=exclusions,
+            )
+        if reason is None:
+            reason = _live_book_price_exclusion_reason(
+                row,
+                eligible_offers=eligible_offers,
+            )
+        exclusions[event_key] = reason
+    return exclusions
+
+
 def _audit_projectable(row: sqlite3.Row) -> bool:
     """Keep detected facts for reporting without weakening model gates."""
 
@@ -223,7 +363,11 @@ def _delete_projected(destination: sqlite3.Connection, prior: sqlite3.Row) -> No
     )
 
 
-def _group_observability(rows: Sequence[sqlite3.Row]) -> dict[str, int | str | None]:
+def _group_observability(
+    rows: Sequence[sqlite3.Row],
+    *,
+    exclusion_reasons: dict[bytes, str | None],
+) -> dict[str, int | str | None]:
     """Summarize intake separately from model eligibility without private data."""
 
     result: dict[str, int | str | None] = {}
@@ -246,7 +390,7 @@ def _group_observability(rows: Sequence[sqlite3.Row]) -> dict[str, int | str | N
         ):
             result[canonical_key] = event_time
         quality = str(row["quality_state"] or "").upper()
-        if _model_exclusion_reason(row) is None:
+        if exclusion_reasons.get(bytes(row["event_key"])) is None:
             eligible_key = f"{prefix}_latest_eligible_event_utc"
             if event_time and (
                 result[eligible_key] is None
@@ -281,12 +425,25 @@ def project(
         "audit_trades": 0,
         "audit_only_offers": 0,
         "audit_only_trades": 0,
+        "live_book_price_outliers": 0,
+        "causal_trade_mismatches": 0,
         "ineligible_removed": 0,
     }
     try:
         _require_schema(destination)
         rows = _rows(source)
-        counts.update(_group_observability(rows))
+        exclusion_reasons = _model_exclusion_reasons(rows)
+        counts.update(
+            _group_observability(rows, exclusion_reasons=exclusion_reasons)
+        )
+        counts["live_book_price_outliers"] = sum(
+            reason == "LIVE_BOOK_PRICE_OUTLIER"
+            for reason in exclusion_reasons.values()
+        )
+        counts["causal_trade_mismatches"] = sum(
+            bool(reason and reason.startswith("CAUSAL_TRADE_ROOT_"))
+            for reason in exclusion_reasons.values()
+        )
         now = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
         destination.execute("BEGIN IMMEDIATE")
         destination.execute(
@@ -345,7 +502,7 @@ def project(
                     _delete_projected(destination, prior)
                     counts["ineligible_removed"] += 1
                 continue
-            exclusion_reason = _model_exclusion_reason(row)
+            exclusion_reason = exclusion_reasons[event_key]
             model_eligible = exclusion_reason is None
             source_file, _group_number = _source(row)
             commodity = _commodity(row)

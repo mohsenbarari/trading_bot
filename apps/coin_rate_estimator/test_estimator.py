@@ -585,6 +585,110 @@ class EstimatorTests(unittest.TestCase):
         self.assertEqual(anchor["reference_price_toman"], 186_500_000)
         self.assertIn("OFFER", anchor["reference_source"])
 
+    def test_historical_anchor_rejects_cross_family_scale_outlier(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            conversation_path = Path(directory) / "conversation.sqlite3"
+            make_conversation_db(conversation_path)
+            connection = sqlite3.connect(conversation_path)
+            for index, price in enumerate((188400, 188600, 188500), 1):
+                connection.execute(
+                    "INSERT INTO messages VALUES (?,?,?)",
+                    (2, 100 + index, f"2026-07-20T10:2{index}:00Z"),
+                )
+                connection.execute(
+                    """INSERT INTO offers(
+                       id,import_id,message_id,commodity,price,quantity,side,
+                       settlement,trade_form,confidence
+                       ) VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                    (
+                        100 + index,
+                        2,
+                        100 + index,
+                        "امام",
+                        price,
+                        5,
+                        "SELL",
+                        "CASH",
+                        "PHYSICAL",
+                        0.95,
+                    ),
+                )
+            connection.execute(
+                """INSERT INTO confirmed_trades VALUES (
+                  10,2,200,NULL,'2026-07-20T10:24:00Z','امام',
+                  94800,4,'BUY','CASH','PHYSICAL',0.99
+                )"""
+            )
+            connection.commit()
+            connection.close()
+
+            anchor = select_historical_group_anchor(
+                conversation_path,
+                commodity="امام",
+                settlement="CASH",
+                trade_form="PHYSICAL",
+                end=datetime(2026, 7, 20, 10, 30, tzinfo=timezone.utc),
+            )
+
+        self.assertGreater(anchor["reference_price_toman"], 180_000_000)
+        self.assertEqual(anchor["outlier_rejected_count"], 1)
+        self.assertEqual(anchor["latest_rejected_reason"], "LOCAL_PRICE_SCALE_OUTLIER")
+
+    def test_historical_anchor_rejects_isolated_five_percent_price_typo(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            conversation_path = Path(directory) / "conversation.sqlite3"
+            make_conversation_db(conversation_path)
+            connection = sqlite3.connect(conversation_path)
+            connection.execute("DELETE FROM offers")
+            connection.execute("DELETE FROM messages")
+            for index, price in enumerate((188_400, 188_600, 188_500), 1):
+                connection.execute(
+                    "INSERT INTO messages VALUES (?,?,?)",
+                    (2, 300 + index, f"2026-07-20T10:2{index}:00Z"),
+                )
+                connection.execute(
+                    """INSERT INTO offers(
+                       id,import_id,message_id,commodity,price,quantity,side,
+                       settlement,trade_form,confidence
+                       ) VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                    (
+                        300 + index,
+                        2,
+                        300 + index,
+                        "امام",
+                        price,
+                        5,
+                        "SELL",
+                        "CASH",
+                        "PHYSICAL",
+                        0.95,
+                    ),
+                )
+            connection.execute(
+                "INSERT INTO messages VALUES (2, 400, '2026-07-20T10:24:00Z')"
+            )
+            connection.execute(
+                """INSERT INTO offers(
+                   id,import_id,message_id,commodity,price,quantity,side,
+                   settlement,trade_form,confidence
+                   ) VALUES (400,2,400,'امام',178500,20,'BUY','CASH','PHYSICAL',1.0)
+                """
+            )
+            connection.commit()
+            connection.close()
+
+            anchor = select_historical_group_anchor(
+                conversation_path,
+                commodity="امام",
+                settlement="CASH",
+                trade_form="PHYSICAL",
+                end=datetime(2026, 7, 20, 10, 30, tzinfo=timezone.utc),
+            )
+
+        self.assertGreater(anchor["reference_price_toman"], 188_000_000)
+        self.assertEqual(anchor["outlier_rejected_count"], 1)
+        self.assertEqual(anchor["latest_rejected_reason"], "LOCAL_PRICE_SCALE_OUTLIER")
+
     def test_fresh_transfer_anchor_does_not_inherit_wide_structural_floor(self) -> None:
         qhat = fresh_transfer_anchor_qhat(
             {
@@ -1457,6 +1561,120 @@ class EstimatorTests(unittest.TestCase):
             imam["settlement_ratio_anchor"]["quality_gate"], "CONFIRMED_PAIR"
         )
 
+    def test_tomorrow_prefers_usable_same_settlement_history_over_cash_transfer(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            market_path = Path(directory) / "market.sqlite3"
+            conversation_path = Path(directory) / "conversation.sqlite3"
+            make_market_db(market_path)
+            make_conversation_db(conversation_path)
+            market = sqlite3.connect(market_path)
+            market.executemany(
+                """INSERT INTO price_events(
+                   instrument,market_label,settlement_term,trade_form,event_type,
+                   side,quantity_num,price_num,event_time_utc
+                   ) VALUES (?,?,?,?,?,?,?,?,?)""",
+                (
+                    (
+                        "MELTED_GOLD",
+                        "آبشده نقدی",
+                        "TODAY",
+                        "PHYSICAL",
+                        "QUOTE",
+                        "UNKNOWN",
+                        None,
+                        80_000_000,
+                        "2026-07-20T09:54:50Z",
+                    ),
+                    (
+                        "MELTED_GOLD",
+                        "آبشده فردایی",
+                        "TOMORROW",
+                        "PAPER",
+                        "QUOTE",
+                        "UNKNOWN",
+                        None,
+                        82_000_000,
+                        "2026-07-20T09:55:10Z",
+                    ),
+                ),
+            )
+            market.commit()
+            market.close()
+            conversation = sqlite3.connect(conversation_path)
+            for index in range(5):
+                cash_message = 300 + index * 2
+                tomorrow_message = cash_message + 1
+                minute = 51 + index
+                conversation.execute(
+                    "INSERT INTO messages VALUES (?,?,?)",
+                    (3, cash_message, f"2026-07-20T09:{minute:02d}:00Z"),
+                )
+                conversation.execute(
+                    "INSERT INTO messages VALUES (?,?,?)",
+                    (3, tomorrow_message, f"2026-07-20T09:{minute:02d}:20Z"),
+                )
+                conversation.execute(
+                    """INSERT INTO offers(
+                       id,import_id,message_id,commodity,price,quantity,side,
+                       settlement,trade_form,confidence
+                       ) VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                    (
+                        cash_message,
+                        3,
+                        cash_message,
+                        "ربع بهار",
+                        50_500,
+                        10,
+                        "BUY",
+                        "CASH",
+                        "PHYSICAL",
+                        0.95,
+                    ),
+                )
+                conversation.execute(
+                    """INSERT INTO offers(
+                       id,import_id,message_id,commodity,price,quantity,side,
+                       settlement,trade_form,confidence
+                       ) VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                    (
+                        tomorrow_message,
+                        3,
+                        tomorrow_message,
+                        "ربع بهار",
+                        52_000,
+                        10,
+                        "SELL",
+                        "TOMORROW",
+                        "PHYSICAL",
+                        0.95,
+                    ),
+                )
+            conversation.commit()
+            conversation.close()
+            estimator_model = model()
+            estimator_model["group_offer_anchor"] = {"enabled": True}
+
+            result = estimate_rates(
+                estimator_model,
+                market_path,
+                datetime(2026, 7, 20, 10, 2, tzinfo=timezone.utc),
+                conversation_path,
+            )
+
+        quarter = next(
+            row
+            for row in result["settlements"]["TOMORROW"]["rates"]
+            if row["commodity_name"] == "ربع بهار"
+        )
+        self.assertEqual(
+            quarter["method"],
+            "FRESHNESS_WEIGHTED_GROUP_ANCHOR_X_CURRENT_MELTED_BLEND_STRUCTURAL_REGIME",
+        )
+        self.assertEqual(
+            quarter["historical_group_anchor"]["latest_price_toman"],
+            52_000_000,
+        )
+
     def test_low_date_cash_uses_same_settlement_imam_ratio_not_history(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             market_path = Path(directory) / "market.sqlite3"
@@ -1557,6 +1775,8 @@ class EstimatorTests(unittest.TestCase):
                                 "group_2_latest_eligible_event_utc": "2026-08-13T16:59:30Z",
                                 "group_2_pending_review_total": 57,
                                 "group_2_rejected_total": 3,
+                                "causal_trade_mismatches": 2,
+                                "live_book_price_outliers": 1,
                             },
                         },
                     },
@@ -1581,6 +1801,8 @@ class EstimatorTests(unittest.TestCase):
         self.assertIn("جدیدترین رویداد canonical گروه", body)
         self.assertIn("آخرین ورودی واجدشرایط", body)
         self.assertIn("در انتظار بررسی ۵۹", body)
+        self.assertIn("ناهمخوانی معامله با آفر ریشه ۲", body)
+        self.assertIn("پرت قیمتی نسبت به آفرهای زنده ۱", body)
 
     def test_health_response_is_unavailable_for_critical_inputs(self) -> None:
         status, payload = health_response(

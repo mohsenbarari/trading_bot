@@ -1178,6 +1178,8 @@ def render_group_activity_fragment(
             return ""
         collector_status = str(projection.get("status") or "UNKNOWN").upper()
         collector_text = "سالم" if collector_status == "HEALTHY" else "نیازمند توجه"
+        price_outliers = int(details.get("live_book_price_outliers") or 0)
+        causal_mismatches = int(details.get("causal_trade_mismatches") or 0)
         cards: list[str] = []
         for group_number in (1, 2):
             prefix = f"group_{group_number}"
@@ -1212,6 +1214,9 @@ def render_group_activity_fragment(
             "<div class='group-runtime-summary'>"
             "<h3>وضعیت واقعی دریافت و مصرف مدل</h3>"
             "<p>رویداد ثبت‌شده با داده‌ای که کنترل کیفیت پذیرفته و مدل مصرف می‌کند یکسان نیست.</p>"
+            "<p class='group-safety-gates'>گیت‌های ایمنی مدل: "
+            f"ناهمخوانی معامله با آفر ریشه {fa_number(causal_mismatches)} · "
+            f"پرت قیمتی نسبت به آفرهای زنده {fa_number(price_outliers)}</p>"
             f"<div class='group-runtime-grid'>{''.join(cards)}</div>"
             "</div>"
         )
@@ -3276,6 +3281,12 @@ def render_input_health_panel(input_health: object) -> str:
                             f"؛ در انتظار بررسی {fa_number(pending or 0)}"
                             f"؛ رد/نادیده {fa_number(rejected or 0)}"
                         )
+                detail += (
+                    " · گیت ایمنی: ناهمخوانی معامله با آفر ریشه "
+                    f"{fa_number(details.get('causal_trade_mismatches') or 0)}"
+                    "؛ پرت قیمتی نسبت به آفرهای زنده "
+                    f"{fa_number(details.get('live_book_price_outliers') or 0)}"
+                )
             cards.append(
                 f"<article class='health-card health-{html.escape(status.lower())}'>"
                 f"<span>{html.escape(label)}</span>"

@@ -129,6 +129,29 @@ class CoinGroupPipelineTests(unittest.TestCase):
             [tuple(row) for row in first_timestamps],
         )
 
+        self.market.execute(
+            "UPDATE market_observations SET parser_version='previous-parser-release' "
+            "WHERE source_code='GROUP_1'"
+        )
+        self.market.commit()
+        process_coin_group_staging(
+            self.staging,
+            self.market,
+            as_of_utc="2026-08-04T10:02:00Z",
+        )
+        parser_rollout_timestamps = self.market.execute(
+            """
+            SELECT event_type,available_at_utc
+            FROM market_observations
+            WHERE source_code='GROUP_1'
+            ORDER BY event_type
+            """
+        ).fetchall()
+        self.assertEqual(
+            [row["available_at_utc"] for row in parser_rollout_timestamps],
+            ["2026-08-04T10:01:00Z", "2026-08-04T10:01:00Z"],
+        )
+
     def test_complete_explicit_offer_and_trade_do_not_wait_for_prior_anchors(self) -> None:
         self._stage(1, "امام فروش فردا 186,900 / 5 تا", sender="offerer")
         self._stage(2, "ب5 تا186800", sender="buyer", reply=1, at="2026-08-04T10:00:02Z")

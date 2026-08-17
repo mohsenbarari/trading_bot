@@ -27,7 +27,12 @@ from .coin_group_resolution import (
     resolved_coin_group_observations,
 )
 from .coin_group_staging import StagedCoinGroupMessage, list_current_staged_coin_group_messages
-from .coin_group_trades import CoinGroupOfferRecord, coin_group_trade_observations, link_coin_group_trades
+from .coin_group_trades import (
+    CoinGroupOfferRecord,
+    LinkedCoinGroupTrade,
+    coin_group_trade_observations,
+    link_coin_group_trades,
+)
 from .coin_groups import (
     _PRICE_BOUNDS,
     _text as normalize_coin_group_text,
@@ -38,7 +43,7 @@ from .market_contracts import MarketObservation, derive_event_key, normalize_utc
 from .market_store import upsert_observation
 
 
-COIN_GROUP_PIPELINE_VERSION = "coin-group-pipeline-v4-model-price-range"
+COIN_GROUP_PIPELINE_VERSION = "coin-group-pipeline-v5-causal-trade-feedback"
 PROVISIONAL_BOOTSTRAP_WINDOW_SECONDS = 30 * 60
 PROVISIONAL_MINIMUM_MESSAGES = 3
 PROVISIONAL_MINIMUM_SENDERS = 2
@@ -47,6 +52,9 @@ PROVISIONAL_MAXIMUM_RELATIVE_SPREAD = 0.015
 _RETRACTION_REASON = "NO_LONGER_PRESENT_IN_CURRENT_STAGED_MESSAGE_GRAPH"
 _SYNTAX_NUMBERS = re.compile(r"\d+(?:[٬،,./_-]\d+)*")
 _SAFE_PRICE_MULTIPLIERS = (0.001, 0.01, 0.1, 10.0, 100.0, 1_000.0)
+_TRADE_ROOT_DERIVED_FIELDS = frozenset(
+    {"commodity", "side", "settlement", "trade_form", "conditional"}
+)
 
 
 _SEMANTIC_OBSERVATION_COLUMNS = (
@@ -71,6 +79,30 @@ _SEMANTIC_OBSERVATION_COLUMNS = (
     "is_conditional",
     "attributes_json",
 )
+_AVAILABILITY_NEUTRAL_OBSERVATION_COLUMNS = frozenset(
+    {
+        "parse_confidence",
+        "parser_version",
+        "quality_policy_version",
+        "attributes_json",
+    }
+)
+_CAUSAL_ATTRIBUTE_KEYS = (
+    "root_offer_event_key",
+    "is_aggregate",
+    "quantity_was_negotiated",
+    "confirmation_kind",
+)
+
+
+def _causal_attribute_signature(value: object) -> tuple[object, ...]:
+    try:
+        attributes = json.loads(str(value or "{}"))
+    except (TypeError, ValueError):
+        attributes = {}
+    if not isinstance(attributes, dict):
+        attributes = {}
+    return tuple(attributes.get(key) for key in _CAUSAL_ATTRIBUTE_KEYS)
 
 
 def _upsert_if_semantically_changed(
@@ -81,7 +113,7 @@ def _upsert_if_semantically_changed(
 
     normalized = observation.normalized()
     existing = connection.execute(
-        f"SELECT {','.join(_SEMANTIC_OBSERVATION_COLUMNS)} "
+        f"SELECT available_at_utc,{','.join(_SEMANTIC_OBSERVATION_COLUMNS)} "
         "FROM market_observations WHERE event_key=?",
         (normalized.event_key,),
     ).fetchone()
@@ -110,10 +142,35 @@ def _upsert_if_semantically_changed(
         int(normalized.is_conditional),
         normalized.attributes_json,
     )
-    if existing is not None and tuple(
-        existing[column] for column in _SEMANTIC_OBSERVATION_COLUMNS
-    ) == expected:
-        return False
+    if existing is not None:
+        actual = tuple(
+            existing[column] for column in _SEMANTIC_OBSERVATION_COLUMNS
+        )
+        if actual == expected:
+            return False
+        changed_columns = {
+            column
+            for column, actual_value, expected_value in zip(
+                _SEMANTIC_OBSERVATION_COLUMNS,
+                actual,
+                expected,
+                strict=True,
+            )
+            if actual_value != expected_value
+        }
+        neutral_change = changed_columns <= _AVAILABILITY_NEUTRAL_OBSERVATION_COLUMNS
+        if neutral_change and "attributes_json" in changed_columns:
+            neutral_change = _causal_attribute_signature(
+                existing["attributes_json"]
+            ) == _causal_attribute_signature(normalized.attributes_json)
+        if neutral_change:
+            # A parser release identifier is provenance, not new economic
+            # knowledge.  Persist it without making every unchanged historical
+            # fact appear to have arrived at deployment time.
+            observation = replace(
+                observation,
+                available_at_utc=str(existing["available_at_utc"]),
+            )
     upsert_observation(connection, observation)
     return True
 
@@ -194,6 +251,49 @@ def _syntax_fingerprint(
         digest_size=32,
         person=b"coin-grp-syntax1",
     ).hexdigest()
+
+
+def _trade_syntax_fingerprint(
+    trade: LinkedCoinGroupTrade,
+    observation: MarketObservation,
+    *,
+    message_by_key: Mapping[tuple[int, int], StagedCoinGroupMessage],
+) -> str:
+    """Bind learned trade grammar to its complete causal reply branch.
+
+    A terminal acknowledgement such as ``برکت`` carries no commodity identity
+    by itself.  The digest therefore includes the root-derived market identity
+    and every message on the root-to-confirmation chain, with numbers redacted
+    by ``_syntax_fingerprint``.  No private text is retained.
+    """
+
+    branch_text: list[str] = []
+    seen: set[int] = set()
+    message_id: int | None = trade.confirmation_message_id
+    reached_root = False
+    while message_id is not None and message_id not in seen and len(seen) < 64:
+        seen.add(message_id)
+        message = message_by_key.get((trade.group_number, message_id))
+        if message is None:
+            break
+        branch_text.append(message.text)
+        if message_id == trade.root_offer_message_id:
+            reached_root = True
+            break
+        message_id = message.reply_to_message_id
+    if reached_root:
+        branch_text.reverse()
+    context = "\n".join(
+        (
+            str(observation.instrument),
+            str(observation.settlement_term),
+            str(observation.trade_form),
+            str(observation.side),
+            "ROOT_REACHED" if reached_root else "ROOT_NOT_REACHED",
+            *branch_text,
+        )
+    )
+    return _syntax_fingerprint(context, event_type="TRADE_BRANCH_V2")
 
 
 def _safe_price_multiplier(original: int, reviewed: int) -> float | None:
@@ -528,9 +628,15 @@ def _pattern_calibrated_observation(
     calibration: _ParserPatternCalibration,
     *,
     apply_economic_fields: bool = True,
+    protected_fields: frozenset[str] = frozenset(),
 ) -> MarketObservation:
     review_fields = calibration.ambiguous_fields
-    fields = review_fields if apply_economic_fields else frozenset()
+    fields = (
+        review_fields - protected_fields
+        if apply_economic_fields
+        else frozenset()
+    )
+    skipped_fields = review_fields - fields if apply_economic_fields else frozenset()
     instrument = str(observation.instrument)
     if "commodity" in fields:
         instrument = "COIN_" + calibration.commodity_code
@@ -573,6 +679,10 @@ def _pattern_calibrated_observation(
             ),
         }
     )
+    if skipped_fields:
+        attributes["human_pattern_calibration_guarded_fields"] = sorted(
+            skipped_fields
+        )
     return replace(
         observation,
         instrument=instrument,
@@ -1004,12 +1114,10 @@ def process_coin_group_staging(
         (message.group_number, message.message_id): message for message in messages
     }
     for trade, observation in zip(trades, observations, strict=True):
-        confirmation = message_by_key[
-            (trade.group_number, trade.confirmation_message_id)
-        ]
-        syntax_fingerprint = _syntax_fingerprint(
-            confirmation.text,
-            event_type="TRADE",
+        syntax_fingerprint = _trade_syntax_fingerprint(
+            trade,
+            observation,
+            message_by_key=message_by_key,
         )
         review = feedback.get(observation.event_key)
         if (
@@ -1049,6 +1157,7 @@ def process_coin_group_staging(
                 observation = _pattern_calibrated_observation(
                     observation,
                     calibration,
+                    protected_fields=_TRADE_ROOT_DERIVED_FIELDS,
                 )
                 pattern_calibrations_applied += 1
         reviewed_trade_observations.append(observation)

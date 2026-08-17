@@ -193,6 +193,7 @@ UNKNOWN_SETTLEMENT_PAPER_FLOW_WEIGHT = 0.25
 CONFIRMED_TRADE_FLOW_WEIGHT = 3.0
 FLOW_TOLERANCE_EXPANSION_MAX = 0.75
 GROUP_ANCHOR_WINDOW_SECONDS = OFFER_LIVE_SECONDS
+HISTORICAL_GROUP_MAXIMUM_RELATIVE_DEVIATION = 0.05
 MARKET_FORM_POLICY_VERSION = "EXPLICIT_CASH_MARKET_FORMS_V3"
 ACCOUNT1_PHYSICAL_TODAY_LABEL = "آبشده کانال جدید نقد حاضر"
 ACCOUNT1_PHYSICAL_TOMORROW_LABEL = "آبشده کانال جدید فیزیکی فردا"
@@ -2105,9 +2106,45 @@ def _select_historical_group_anchor_uncached(
     # Compare only the local state surrounding the newest observation.  This
     # prevents yesterday's dense book from overwhelming today's first quote,
     # while retaining enough neighbours to reject a truly isolated typo.
-    newest_stamp = max(row["stamp"] for row in observations)
-    cluster_start = newest_stamp - timedelta(minutes=30)
+    raw_newest_stamp = max(row["stamp"] for row in observations)
+    cluster_start = raw_newest_stamp - timedelta(minutes=30)
     cluster = [row for row in observations if row["stamp"] >= cluster_start]
+    raw_latest = max(
+        cluster,
+        key=lambda row: (row["stamp"], 1 if row["kind"] == "TRADE" else 0),
+    )
+    outlier_rejected_count = 0
+    latest_rejected_reason = None
+    # Source weights are useful only after the observations agree on price
+    # scale.  Otherwise one mislabelled half/quarter trade can outweigh several
+    # valid Imam offers merely because trades carry a 3x weight.  Require at
+    # least three retained same-book witnesses.  A five-percent floor matches
+    # the causal live-book gate: it catches an isolated wrong digit or product
+    # family without allowing source weights to turn it into the consensus.
+    if len(cluster) >= 4:
+        raw_prices = [float(row["price_toman"]) for row in cluster]
+        raw_center = float(statistics.median(raw_prices))
+        raw_relative_mad = float(
+            statistics.median(abs(price - raw_center) for price in raw_prices)
+        ) / max(1.0, raw_center)
+        scale_limit = max(
+            HISTORICAL_GROUP_MAXIMUM_RELATIVE_DEVIATION,
+            6.0 * raw_relative_mad,
+        )
+        scale_consistent = [
+            row
+            for row in cluster
+            if abs(float(row["price_toman"]) - raw_center)
+            / max(1.0, raw_center)
+            <= scale_limit
+        ]
+        if len(scale_consistent) >= 3 and len(scale_consistent) < len(cluster):
+            retained_ids = {id(row) for row in scale_consistent}
+            outlier_rejected_count = len(cluster) - len(scale_consistent)
+            if id(raw_latest) not in retained_ids:
+                latest_rejected_reason = "LOCAL_PRICE_SCALE_OUTLIER"
+            cluster = scale_consistent
+    newest_stamp = max(row["stamp"] for row in cluster)
     for row in cluster:
         relative_age = max(0.0, (newest_stamp - row["stamp"]).total_seconds())
         quantity_weight = math.sqrt(max(1.0, min(25.0, float(row["quantity"] or 1))))
@@ -2164,6 +2201,8 @@ def _select_historical_group_anchor_uncached(
         "latest_deviation_percent": latest_deviation * 100.0,
         "relative_mad": relative_mad,
         "latest_is_consistent": latest_is_consistent,
+        "outlier_rejected_count": outlier_rejected_count,
+        "latest_rejected_reason": latest_rejected_reason,
         "source_weight_policy": "TRADE_3X_OFFER_WITH_8M_RECENCY_DECAY",
     }
 
@@ -5641,7 +5680,59 @@ def estimate_rates(
                     }
                 )
                 anchor_used = group_anchor.get("status") == "OBSERVED"
-                if settlement == "TOMORROW" and not anchor_used:
+                historical_group_anchor: dict[str, Any] | None = None
+                historical_anchor_inputs: dict[str, Any] | None = None
+                historical_anchor_melted: float | None = None
+                historical_melted_transfer_ratio: float | None = None
+                historical_group_candidate = bool(
+                    not anchor_used
+                    and melted_value is not None
+                    and (
+                        commodity["name"] != "امام"
+                        or generic_coin_value is None
+                    )
+                )
+                if historical_group_candidate:
+                    historical_group_anchor = select_historical_group_anchor(
+                        anchor_database,
+                        commodity=str(commodity["name"]),
+                        settlement=settlement,
+                        trade_form="PHYSICAL",
+                        end=end,
+                        minimum_confidence=anchor_minimum_confidence,
+                        group_live_events_before=group_live_events_before,
+                    )
+                    if historical_group_anchor.get("status") == "OBSERVED":
+                        historical_anchor_time = parse_datetime(
+                            str(historical_group_anchor["event_time_utc"])
+                        )
+                        historical_anchor_inputs = observed_inputs(
+                            connection,
+                            settlement,
+                            historical_anchor_time,
+                        )
+                        historical_anchor_melted = live_point_value(
+                            historical_anchor_inputs["melted_gold"]
+                        )
+                        if (
+                            historical_anchor_melted is not None
+                            and float(historical_anchor_melted) > 0
+                        ):
+                            historical_melted_transfer_ratio = (
+                                float(melted_value)
+                                / float(historical_anchor_melted)
+                            )
+                historical_group_transfer_usable = bool(
+                    historical_group_anchor is not None
+                    and historical_group_anchor.get("status") == "OBSERVED"
+                    and historical_melted_transfer_ratio is not None
+                    and 0.5 <= historical_melted_transfer_ratio <= 2.0
+                )
+                if (
+                    settlement == "TOMORROW"
+                    and not anchor_used
+                    and not historical_group_transfer_usable
+                ):
                     cash_rates = (
                         result.get("settlements", {})
                         .get("CASH", {})
@@ -5860,32 +5951,13 @@ def estimate_rates(
                             }
                         )
                         continue
-                if (
-                    not anchor_used
-                    and melted_value is not None
-                    and (
-                        commodity["name"] != "امام"
-                        or generic_coin_value is None
-                    )
-                ):
-                    historical_group_anchor = select_historical_group_anchor(
-                        anchor_database,
-                        commodity=str(commodity["name"]),
-                        settlement=settlement,
-                        trade_form="PHYSICAL",
-                        end=end,
-                        minimum_confidence=anchor_minimum_confidence,
-                        group_live_events_before=group_live_events_before,
-                    )
+                if historical_group_candidate:
+                    assert historical_group_anchor is not None
                     if historical_group_anchor.get("status") == "OBSERVED":
-                        anchor_time = parse_datetime(str(historical_group_anchor["event_time_utc"]))
-                        anchor_inputs = observed_inputs(connection, settlement, anchor_time)
-                        anchor_melted = live_point_value(anchor_inputs["melted_gold"])
-                        melted_transfer_ratio = (
-                            float(melted_value) / float(anchor_melted)
-                            if anchor_melted is not None and float(anchor_melted) > 0
-                            else None
-                        )
+                        assert historical_anchor_inputs is not None
+                        anchor_inputs = historical_anchor_inputs
+                        anchor_melted = historical_anchor_melted
+                        melted_transfer_ratio = historical_melted_transfer_ratio
                         if (
                             melted_transfer_ratio is not None
                             and 0.5 <= melted_transfer_ratio <= 2.0
