@@ -84,23 +84,16 @@ class UserAccountStatusTransitionTests(unittest.IsolatedAsyncioTestCase):
         self.invalidate_overtime_patcher.stop()
         self.enqueue_account_notice_patcher.stop()
 
-    async def test_build_activation_join_line_closes_bot_and_tolerates_failures(self):
-        bot = SimpleNamespace(session=SimpleNamespace(close=AsyncMock()))
-
-        with patch.object(status_service.settings, "bot_token", "123:abc"), patch(
-            "core.services.user_account_status_service.Bot",
-            return_value=bot,
-        ) as bot_factory, patch(
+    async def test_build_activation_join_line_uses_static_invite_and_tolerates_failures(self):
+        with patch(
             "core.services.user_account_status_service.build_channel_join_request_line",
             new=AsyncMock(return_value="join-line"),
         ) as build_line:
             self.assertEqual(await status_service._build_activation_join_line(5), "join-line")
 
-        bot_factory.assert_called_once_with(token="123:abc")
-        build_line.assert_awaited_once_with(bot, user_id=5)
-        bot.session.close.assert_awaited_once()
+        build_line.assert_awaited_once_with(None, user_id=5)
 
-        with patch.object(status_service.settings, "bot_token", ""), patch(
+        with patch(
             "core.services.user_account_status_service.build_channel_join_request_line",
             new=AsyncMock(side_effect=RuntimeError("join failed")),
         ), patch.object(status_service.logger, "exception") as log_exception:

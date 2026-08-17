@@ -4,14 +4,12 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
-from aiogram import Bot
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.utils.channel_invites import build_channel_join_request_line
-from core.config import settings
 from core.enums import NotificationCategory, NotificationLevel, UserAccountStatus
-from core.server_routing import SERVER_FOREIGN, current_server
+from core.server_routing import current_server
 from core.services.accountant_relation_service import list_active_accountants_for_owner
 from core.services.session_service import force_clear_sessions
 from core.services.user_deletion_service import remove_user_from_telegram_channel  # compatibility import
@@ -119,17 +117,11 @@ def is_user_messenger_blocked(user: User | object | None, *, now: datetime | Non
 
 
 async def _build_activation_join_line(user_id: int) -> str | None:
-    bot: Bot | None = None
     try:
-        if current_server() == SERVER_FOREIGN and settings.bot_token:
-            bot = Bot(token=settings.bot_token)
-        return await build_channel_join_request_line(bot, user_id=user_id)
+        return await build_channel_join_request_line(None, user_id=user_id)
     except Exception:
         logger.exception("Failed to build channel join line for reactivated user %s", user_id)
         return None
-    finally:
-        if bot is not None:
-            await bot.session.close()
 
 
 async def _send_or_enqueue_account_status_telegram(
