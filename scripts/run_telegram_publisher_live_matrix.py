@@ -1073,7 +1073,10 @@ async def _verify_terminal_projection_run(run_id: str) -> dict[str, Any]:
             raise
         run = await _reconstruct_terminal_projection_verification_run(run_id)
         audit_backed = False
-    await _hydrate_timelines(run.timelines)
+    await _hydrate_timelines(
+        run.timelines,
+        normal_lifetime_minutes=matrix_normal_lifetime_minutes(run),
+    )
     await _observe_webapp_terminal_projections(run.timelines)
     if not _terminal_projection_verification_passed(run):
         raise LiveMatrixError("live_matrix_webapp_terminal_projection_mismatch")
@@ -1429,7 +1432,19 @@ async def _run_management_message_simulation(
             entry.completed_at = _iso(_utcnow())
 
 
-async def _hydrate_timelines(timelines: Iterable[OfferTimeline]) -> None:
+def matrix_normal_lifetime_minutes(run: MatrixRun) -> int:
+    """Use the active profile TTL, never the authoritative-500 constant."""
+    minutes = int(run.expected_expiry_minutes or 0)
+    if minutes <= 0:
+        raise LiveMatrixError("live_matrix_offer_expiry_minutes_invalid")
+    return minutes
+
+
+async def _hydrate_timelines(
+    timelines: Iterable[OfferTimeline],
+    *,
+    normal_lifetime_minutes: int,
+) -> None:
     rows = [item for item in timelines if item.offer_id and item.offer_public_id]
     if not rows:
         return
@@ -1490,7 +1505,7 @@ async def _hydrate_timelines(timelines: Iterable[OfferTimeline]) -> None:
             )
             normal_deadline, final_deadline = compute_lifecycle_deadlines(
                 offer.created_at,
-                normal_lifetime_minutes=MATRIX_OFFER_EXPIRY_MINUTES,
+                normal_lifetime_minutes=int(normal_lifetime_minutes),
                 overtime_minutes_snapshot=timeline.overtime_minutes_snapshot,
             )
             timeline.normal_deadline_at = _iso(normal_deadline)
@@ -2451,7 +2466,10 @@ async def _wait_for_worker_acknowledgement(run: MatrixRun) -> None:
             # Overtime tasks start from each offer's durable normal deadline.
             # This one phase-boundary hydration records those deadlines without
             # reintroducing a global channel-publication barrier.
-            await _hydrate_timelines(run.timelines)
+            await _hydrate_timelines(
+                run.timelines,
+                normal_lifetime_minutes=matrix_normal_lifetime_minutes(run),
+            )
             _write_audit(run)
             return
         if acknowledged_count > last_acknowledged:
@@ -2554,7 +2572,10 @@ async def _wait_for_initial_publication(
             expired_before_initial_publication_count=expired_before_initial_publication_count,
             expected_count=expected_count,
         ):
-            await _hydrate_timelines(selected_timelines)
+            await _hydrate_timelines(
+                selected_timelines,
+                normal_lifetime_minutes=matrix_normal_lifetime_minutes(run),
+            )
             _write_audit(run)
             return
         if posted_count > last_posted:
@@ -2627,7 +2648,10 @@ async def _wait_for_terminal_lifecycle(run: MatrixRun) -> None:
             and terminal_count == run.profile.total_offers
             and edited_count == run.profile.total_offers
         ):
-            await _hydrate_timelines(run.timelines)
+            await _hydrate_timelines(
+                run.timelines,
+                normal_lifetime_minutes=matrix_normal_lifetime_minutes(run),
+            )
             if not all(
                 _timeline_terminal_follows_initial_publication(item)
                 for item in run.timelines
@@ -2838,7 +2862,10 @@ async def run_live_matrix(args: argparse.Namespace) -> dict[str, Any]:
             await asyncio.gather(management_message_task, return_exceptions=True)
         if visibility_tasks:
             await asyncio.gather(*visibility_tasks, return_exceptions=True)
-        await _hydrate_timelines(run.timelines)
+        await _hydrate_timelines(
+            run.timelines,
+            normal_lifetime_minutes=matrix_normal_lifetime_minutes(run),
+        )
         _write_audit(run)
     payload = _report_payload(run)
     return {

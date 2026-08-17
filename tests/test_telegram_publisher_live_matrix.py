@@ -9,8 +9,10 @@ from scripts.run_telegram_publisher_live_matrix import (
     MATRIX_BACKGROUND_TASKS_MAX_WAIT_SECONDS,
     MATRIX_INGRESS_MAX_INTERVAL_SECONDS,
     MATRIX_INGRESS_MIN_INTERVAL_SECONDS,
+    MATRIX_OFFER_EXPIRY_MINUTES,
     MATRIX_OVERTIME_RECEIPT_SAFETY_SECONDS,
     compute_revalidation_offer_expiry_minutes,
+    matrix_normal_lifetime_minutes,
     resolve_live_matrix_profile,
     _overtime_scheduled_at,
     MatrixRun,
@@ -209,6 +211,14 @@ class TelegramPublisherLiveMatrixTests(unittest.TestCase):
         )
         self.assertEqual(compute_revalidation_offer_expiry_minutes(total_offers=100), 6)
         self.assertEqual(profile.offer_expiry_minutes, 6)
+        run = MatrixRun(
+            run_id="telegram-live-matrix-revalidation-lifetime",
+            started_at="2026-08-17T00:00:00+00:00",
+            expected_expiry_minutes=profile.offer_expiry_minutes,
+            profile=profile,
+        )
+        self.assertEqual(matrix_normal_lifetime_minutes(run), 6)
+        self.assertNotEqual(matrix_normal_lifetime_minutes(run), MATRIX_OFFER_EXPIRY_MINUTES)
         workload = build_live_matrix_workload(
             total_offers=100,
             bot_offers=60,
