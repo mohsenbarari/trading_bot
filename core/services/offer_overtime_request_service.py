@@ -3,8 +3,10 @@
 Stage 4 owns create, queue, promote, cancel, reject, and decision-timeout
 transitions. Trade commit after owner approval is Stage 5. Stage 8 wires
 requests for Telegram-home offers through ``OVERTIME_DELIVERING`` and the
-Telegram delivery queue. The requester's surface remains audit/status context;
-the offer's canonical home determines where its owner approves.
+Telegram delivery queue. The offer's canonical home determines where its owner
+approves and where the ledger is mutated. The requester's source surface also
+owns requester interaction: cancellation is accepted there and, when needed,
+forwarded to the canonical writer for the locked terminal transition.
 """
 from __future__ import annotations
 

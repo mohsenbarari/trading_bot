@@ -179,6 +179,10 @@ class OfferRequest(Base):
         default=generate_offer_request_public_id,
     )
 
+    # Historical name: for overtime this is the authoritative ledger/offer
+    # decision server.  The interaction ingress that created the request is
+    # recorded separately in request_source_server and may accept cancellation
+    # before forwarding the locked transition here.
     request_home_server = Column(String(16), nullable=False, index=True)
     local_offer_id = Column(Integer, ForeignKey("offers.id", ondelete="SET NULL"), nullable=True)
     offer_public_id = Column(String(40), nullable=False)

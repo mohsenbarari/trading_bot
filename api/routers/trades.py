@@ -113,6 +113,7 @@ from models.trade import Trade, TradeType, TradeStatus
 from models.commodity import Commodity, CommodityAlias
 from api.deps import EffectiveOwnerActor, get_current_user, get_effective_owner_actor_context
 from core.server_routing import KNOWN_SERVERS, current_server, is_remote_home, normalize_server
+from core.offer_overtime_request_forwarding import forward_overtime_requester_cancel
 from core.telegram_trade_callbacks import build_channel_trade_callback_data
 from core.trade_forwarding import forward_trade_to_home_server, verify_internal_signature
 from core.trade_forward_pending import (
@@ -239,6 +240,14 @@ class InternalTradeExecuteRequest(BaseModel):
     source_server: str
     idempotency_key: Optional[str] = None
     request_pre_gated: bool = False
+
+
+class InternalOvertimeRequesterCancelRequest(BaseModel):
+    """درخواست امضاشدهٔ لغو از همان سطحی که درخواست وقت اضافه را ساخته است."""
+
+    request_public_id: str = Field(..., min_length=1, max_length=40)
+    requester_user_id: int = Field(..., gt=0)
+    source_server: str
 
 
 class TradeResponse(BaseModel):
@@ -4996,8 +5005,52 @@ async def cancel_overtime_request(
     db: AsyncSession = Depends(get_db),
     context: EffectiveOwnerActor = Depends(get_effective_owner_actor_context),
 ):
-    """Requester cancellation of a nonterminal overtime request (home only)."""
+    """Cancel at the requester's surface; forward to the ledger writer if needed."""
     _ensure_accountant_market_access_allowed(context)
+    ledger = await load_overtime_request_by_public_id(
+        db,
+        request_public_id,
+        for_update=False,
+    )
+    if ledger is None or not _is_overtime_offer_request(ledger):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="درخواست وقت اضافه یافت نشد.")
+    requester_user_id = int(context.owner_user.id)
+    if int(getattr(ledger, "requester_user_id", 0) or 0) != requester_user_id:
+        _raise_overtime_request_http_error(
+            OvertimeRequestError(
+                OvertimeRequestErrorCode.NOT_REQUESTER,
+                "فقط درخواست‌دهنده می‌تواند این درخواست را لغو کند.",
+            )
+        )
+    home = normalize_server(getattr(ledger, "request_home_server", None), current_server())
+    if home != current_server():
+        source = normalize_server(
+            getattr(ledger, "request_source_server", None),
+            current_server(),
+        )
+        if source != current_server():
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="این درخواست باید از همان محلی که ثبت شده لغو شود.",
+            )
+        await db.rollback()
+        forwarded_status, forwarded_body = await forward_overtime_requester_cancel(
+            home,
+            {
+                "request_public_id": request_public_id,
+                "requester_user_id": requester_user_id,
+                "source_server": current_server(),
+            },
+        )
+        if forwarded_status >= 400:
+            detail = (
+                forwarded_body.get("detail")
+                if isinstance(forwarded_body, dict)
+                else None
+            ) or "لغو درخواست انجام نشد. لطفاً دوباره تلاش کنید."
+            raise HTTPException(status_code=forwarded_status, detail=detail)
+        return forwarded_body
+
     ledger = await load_overtime_request_by_public_id(
         db,
         request_public_id,
@@ -5005,12 +5058,6 @@ async def cancel_overtime_request(
     )
     if ledger is None or not _is_overtime_offer_request(ledger):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="درخواست وقت اضافه یافت نشد.")
-    home = normalize_server(getattr(ledger, "request_home_server", None), current_server())
-    if home != current_server():
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="این درخواست فقط روی سرور مرجع لفظ قابل لغو است.",
-        )
     from core.trading_settings import get_trading_settings_async
 
     ts = await get_trading_settings_async()
@@ -5026,6 +5073,120 @@ async def cancel_overtime_request(
         _raise_overtime_request_http_error(exc)
     await db.commit()
     return _overtime_request_public_payload(ledger, duplicate_replay=False)
+
+
+@router.post(
+    "/internal/overtime-requests/cancel",
+    status_code=status.HTTP_200_OK,
+)
+async def cancel_overtime_request_internal(
+    internal_data: InternalOvertimeRequesterCancelRequest,
+    raw_request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Apply a requester cancellation once on the authoritative ledger server."""
+    body = await raw_request.body()
+    target_server = current_server()
+    payload_source_server = _normalize_internal_trade_source(internal_data.source_server)
+    header_source_server = _normalize_internal_trade_source(
+        raw_request.headers.get("x-source-server")
+    )
+    if not verify_internal_signature(
+        body,
+        raw_request.headers.get("x-timestamp"),
+        raw_request.headers.get("x-signature"),
+        raw_request.headers.get("x-api-key"),
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid internal overtime cancellation signature",
+        )
+    if (
+        not payload_source_server
+        or not header_source_server
+        or payload_source_server != header_source_server
+        or payload_source_server == target_server
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid internal overtime cancellation source",
+        )
+
+    ledger = await load_overtime_request_by_public_id(
+        db,
+        internal_data.request_public_id,
+        for_update=True,
+    )
+    if ledger is None or not _is_overtime_offer_request(ledger):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="درخواست وقت اضافه یافت نشد.",
+        )
+    home = normalize_server(getattr(ledger, "request_home_server", None), target_server)
+    source = normalize_server(getattr(ledger, "request_source_server", None), target_server)
+    if home != target_server:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="این سرور مرجع معتبر درخواست نیست.",
+        )
+    if source != payload_source_server:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="محل ثبت درخواست با فرمان لغو همخوانی ندارد.",
+        )
+    requester_user_id = int(internal_data.requester_user_id)
+    if int(getattr(ledger, "requester_user_id", 0) or 0) != requester_user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="فقط درخواست‌دهنده می‌تواند این درخواست را لغو کند.",
+        )
+
+    status_raw = getattr(ledger, "result_status", None)
+    status_value = getattr(status_raw, "value", status_raw)
+    replayed = status_value == OfferRequestStatus.OVERTIME_CANCELLED_BY_REQUESTER.value
+    if not replayed:
+        from core.trading_settings import get_trading_settings_async
+
+        ts = await get_trading_settings_async()
+        try:
+            await cancel_by_requester(
+                db,
+                ledger,
+                requester_user_id=requester_user_id,
+                now=datetime.utcnow(),
+                normal_lifetime_minutes=int(
+                    getattr(ts, "offer_expiry_minutes", 0) or 0
+                ),
+            )
+        except OvertimeRequestError as exc:
+            _raise_overtime_request_http_error(exc)
+
+        owner_id = getattr(ledger, "offer_owner_user_id", None)
+        if owner_id is not None:
+            owner = await db.get(User, int(owner_id))
+            if owner is not None:
+                from bot.overtime_request_status import (
+                    edit_owner_overtime_approval_message,
+                    owner_terminal_text_for_reason,
+                )
+
+                await edit_owner_overtime_approval_message(
+                    session=db,
+                    owner=owner,
+                    ledger=ledger,
+                    text=owner_terminal_text_for_reason(),
+                )
+        await db.commit()
+
+    return {
+        "workflow": OfferRequestWorkflow.OVERTIME.value,
+        "request_public_id": getattr(ledger, "request_public_id", None),
+        "offer_public_id": getattr(ledger, "offer_public_id", None),
+        "request_home_server": getattr(ledger, "request_home_server", None),
+        "request_source_server": getattr(ledger, "request_source_server", None),
+        "result_status": OfferRequestStatus.OVERTIME_CANCELLED_BY_REQUESTER.value,
+        "replayed": replayed,
+    }
 
 
 @router.post("/internal/execute", response_model=TradeResponse, status_code=status.HTTP_201_CREATED)

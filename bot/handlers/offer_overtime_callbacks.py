@@ -25,6 +25,7 @@ from bot.telegram_callback_answer import answer_callback_query_via_runtime
 from bot.telegram_interaction_message import edit_callback_message_via_runtime
 from core.db import AsyncSessionLocal
 from core.offer_lifecycle import read_normal_lifetime_minutes
+from core.offer_overtime_request_forwarding import forward_overtime_requester_cancel
 from core.offer_overtime_bot_copy import (
     M15_REQUESTER_STATUS_CANCELLED,
     M29_OWNER_STATUS_APPROVED,
@@ -86,18 +87,63 @@ async def handle_overtime_requester_cancel(
 
     async with AsyncSessionLocal() as session:
         ledger = await load_overtime_request_by_public_id(
-            session, public_id, for_update=True
+            session, public_id, for_update=False
         )
         if ledger is None or getattr(ledger, "workflow_kind", None) != OfferRequestWorkflow.OVERTIME:
             await _answer(callback, M33_OWNER_ALREADY_TERMINAL_MESSAGE, alert=True)
             return
+        if int(getattr(ledger, "requester_user_id", 0) or 0) != int(user.id):
+            await _answer(callback, M33_OWNER_ALREADY_TERMINAL_MESSAGE, alert=True)
+            return
         home = normalize_server(getattr(ledger, "request_home_server", None), current_server())
         if home != current_server():
-            await _answer(
-                callback,
-                "این درخواست فقط روی سرور مرجع لفظ قابل لغو است.",
-                alert=True,
+            source = normalize_server(
+                getattr(ledger, "request_source_server", None),
+                current_server(),
             )
+            if source != current_server():
+                await _answer(
+                    callback,
+                    "این درخواست باید از همان محلی که ثبت شده لغو شود.",
+                    alert=True,
+                )
+                return
+            await session.rollback()
+            forwarded_status, forwarded_body = await forward_overtime_requester_cancel(
+                home,
+                {
+                    "request_public_id": public_id,
+                    "requester_user_id": int(user.id),
+                    "source_server": current_server(),
+                },
+            )
+            if forwarded_status >= 400:
+                detail = (
+                    forwarded_body.get("detail")
+                    if isinstance(forwarded_body, dict)
+                    else None
+                ) or "لغو درخواست انجام نشد. لطفاً دوباره تلاش کنید."
+                if isinstance(detail, dict):
+                    detail = detail.get("message") or "لغو درخواست انجام نشد. لطفاً دوباره تلاش کنید."
+                await _answer(callback, str(detail), alert=True)
+                return
+            await edit_callback_message_via_runtime(
+                callback,
+                user,
+                M15_REQUESTER_STATUS_CANCELLED,
+                source_key="ot-cancel-edit-forwarded",
+                reply_markup=empty_inline_keyboard(),
+                session=session,
+                commit=False,
+            )
+            await session.commit()
+            await _answer(callback, M15_REQUESTER_STATUS_CANCELLED, alert=False)
+            return
+        ledger = await load_overtime_request_by_public_id(
+            session, public_id, for_update=True
+        )
+        if ledger is None or getattr(ledger, "workflow_kind", None) != OfferRequestWorkflow.OVERTIME:
+            await _answer(callback, M33_OWNER_ALREADY_TERMINAL_MESSAGE, alert=True)
             return
         ts = await get_trading_settings_async()
         try:

@@ -23,6 +23,7 @@ _ALLOWED_ACTIONS = {
     "trading_side_effect",
     # Overtime admission on the trade path (create returns pending, not error).
     "overtime_request",
+    "overtime_cancel_forward",
 }
 
 _ALLOWED_RESULTS = {

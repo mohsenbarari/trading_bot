@@ -142,6 +142,9 @@ EXPECTED_RUNTIME_INVENTORY_COUNTS = {
     "queue_execution": 1,
 }
 EXPECTED_RUNTIME_INVENTORY_SHA256 = (
+    "424f951de6bf0f8afe7a05f33c288388a266cc25e27b81349a0f42902250d01d"
+)
+PRE_OVERTIME_REQUEST_CANCEL_FORWARD_RUNTIME_INVENTORY_SHA256 = (
     "88e33a2d042ff43f3a1640048682290ed958b76a6e6a26deb47adfd1cc4320ab"
 )
 PRE_OTP_QUEUE_METADATA_FIX_RUNTIME_INVENTORY_SHA256 = (
@@ -180,6 +183,10 @@ REVIEWED_RUNTIME_INVENTORY_SHA256 = frozenset(
         # owner-guarded outbox gateway_send and the queue-exiting channel
         # edit pair. No new send/edit/delete/callback boundary was added.
         OVERTIME_OWNER_PROMPT_RUNTIME_INVENTORY_SHA256,
+        # Requester-cancel forwarding adds one Pydantic contract above the
+        # trade router's existing Telegram boundaries. The same four callsites
+        # moved by nine lines; counts and classifications are unchanged.
+        PRE_OVERTIME_REQUEST_CANCEL_FORWARD_RUNTIME_INVENTORY_SHA256,
     }
 )
 
