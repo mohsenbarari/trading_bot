@@ -1620,6 +1620,14 @@ class TradingCoreMixedLoadHelperTests(unittest.TestCase):
         self.assertIn("plan.telegram_notification_outbox_ids", source)
         self.assertLess(source.index("TelegramNotificationOutbox"), source.index(user_delete))
         self.assertIn(outbox_delete, source)
+        self.assertIn(
+            "table_name = 'telegram_notification_outbox' AND record_id = ANY(:telegram_notification_outbox_ids)",
+            source,
+        )
+        self.assertIn(
+            '"telegram_notification_outbox_ids": plan.telegram_notification_outbox_ids or [-1]',
+            source,
+        )
 
     def test_bot_text_handler_probe_message_id_is_not_the_recycled_user_id(self):
         self.assertEqual(worker.bot_text_handler_probe_message_id(103), 10_000_103)
@@ -1638,6 +1646,12 @@ class TradingCoreMixedLoadHelperTests(unittest.TestCase):
 
     def test_targeted_prefix_sync_includes_user_block_ids(self):
         self.assertEqual(worker.TARGETED_SYNC_TABLE_ID_FIELDS["user_blocks"], "user_block_ids")
+
+    def test_targeted_prefix_sync_includes_notification_outbox_ids(self):
+        self.assertEqual(
+            worker.TARGETED_SYNC_TABLE_ID_FIELDS["telegram_notification_outbox"],
+            "telegram_notification_outbox_ids",
+        )
 
     def test_cleanup_retries_late_chat_member_fk_violation(self):
         exc = worker.DBAPIError(

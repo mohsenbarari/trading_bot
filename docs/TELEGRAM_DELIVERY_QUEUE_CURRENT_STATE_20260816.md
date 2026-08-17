@@ -75,4 +75,5 @@ production در این سند تغییر نمی‌کند و مجوز جداگا�
 - ماتریس زندهٔ ۵۰۰تایی `telegram-live-matrix-20260816t231306z-08c5c6b74635` پاس شد؛ هر پنج lane استفاده شد
 - مهلت انقضای ماتریس پس از پاک‌سازی رسمی به ۲ دقیقه برگشت
 - outbox بدون recipient اکنون در health یک stop reason است؛ فقط intent بدون handoff یا متصل به job ناموفقِ terminal با `scripts/reconcile_telegram_notification_outbox_orphans.py` به terminal `skipped` آشتی می‌شود و سایر ناسازگاری‌ها fail-closed می‌مانند
+- پاک‌سازی fixture رسمی، `telegram_notification_outbox` و change-logهای همان شناسه‌ها را با هم حذف می‌کند تا residue مصنوعی به quarantine همگام‌سازی تبدیل نشود
 - production دست‌نخورده ماند و فعال‌سازی Queue-v1 در آن مجوز جداگانه می‌خواهد

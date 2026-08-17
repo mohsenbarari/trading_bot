@@ -1771,6 +1771,7 @@ TARGETED_SYNC_TABLE_ID_FIELDS = {
     "trade_delivery_receipts": "trade_delivery_receipt_ids",
     "telegram_admin_broadcasts": "telegram_admin_broadcast_ids",
     "telegram_admin_broadcast_receipts": "telegram_admin_broadcast_receipt_ids",
+    "telegram_notification_outbox": "telegram_notification_outbox_ids",
 }
 TARGETED_SYNC_TABLES = tuple(TARGETED_SYNC_TABLE_ID_FIELDS)
 
@@ -2041,6 +2042,7 @@ async def delete_cleanup_plan(plan: CleanupPlan) -> dict[str, Any]:
                        OR (table_name = 'trade_delivery_receipts' AND record_id = ANY(:trade_delivery_receipt_ids))
                        OR (table_name = 'telegram_admin_broadcasts' AND record_id = ANY(:telegram_admin_broadcast_ids))
                        OR (table_name = 'telegram_admin_broadcast_receipts' AND record_id = ANY(:telegram_admin_broadcast_receipt_ids))
+                       OR (table_name = 'telegram_notification_outbox' AND record_id = ANY(:telegram_notification_outbox_ids))
                        OR (table_name = 'offer_requests' AND record_id = ANY(:offer_request_ids))
                        OR (table_name = 'offer_publication_states' AND record_id = ANY(:publication_state_ids))
                        OR (table_name = 'notifications' AND record_id = ANY(:notification_ids))
@@ -2060,6 +2062,7 @@ async def delete_cleanup_plan(plan: CleanupPlan) -> dict[str, Any]:
                 "trade_delivery_receipt_ids": plan.trade_delivery_receipt_ids or [-1],
                 "telegram_admin_broadcast_ids": plan.telegram_admin_broadcast_ids or [-1],
                 "telegram_admin_broadcast_receipt_ids": plan.telegram_admin_broadcast_receipt_ids or [-1],
+                "telegram_notification_outbox_ids": plan.telegram_notification_outbox_ids or [-1],
                 "offer_request_ids": plan.offer_request_ids or [-1],
                 "publication_state_ids": plan.publication_state_ids or [-1],
                 "notification_ids": plan.notification_ids or [-1],
