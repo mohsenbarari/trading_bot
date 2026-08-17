@@ -175,6 +175,11 @@ class Settings(BaseSettings):
     telegram_delivery_queue_expected_channel_id: int | None = None
     telegram_delivery_queue_preflight_timeout_seconds: float = 10.0
     telegram_delivery_queue_worker_interval_seconds: float = 1.0
+    # Private Central Bot interactions use their own primary lane and should
+    # not inherit the publisher/editor idle-poll latency. Telegram/Redis rate
+    # limits remain authoritative after a job is claimed.
+    telegram_delivery_queue_primary_idle_poll_interval_seconds: float = 0.1
+    telegram_notification_outbox_queue_feeder_interval_seconds: float = 0.1
     telegram_delivery_queue_worker_batch_limit: int = 25
     telegram_delivery_queue_primary_concurrency: int = 4
     telegram_delivery_queue_primary_m0_reserved_concurrency: int = 1
@@ -319,6 +324,8 @@ class Settings(BaseSettings):
         positive_float_fields = (
             "telegram_delivery_queue_preflight_timeout_seconds",
             "telegram_delivery_queue_worker_interval_seconds",
+            "telegram_delivery_queue_primary_idle_poll_interval_seconds",
+            "telegram_notification_outbox_queue_feeder_interval_seconds",
             "telegram_delivery_queue_worker_request_timeout_seconds",
             "telegram_delivery_queue_worker_lease_seconds",
             "telegram_offer_queue_feeder_interval_seconds",

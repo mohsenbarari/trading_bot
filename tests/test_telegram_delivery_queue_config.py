@@ -24,6 +24,14 @@ def _settings(**overrides):
 class TelegramDeliveryQueueConfigTests(unittest.TestCase):
     def test_default_queue_retry_and_lease_config_is_valid(self):
         settings = _settings()
+        self.assertEqual(
+            settings.telegram_delivery_queue_primary_idle_poll_interval_seconds,
+            0.1,
+        )
+        self.assertEqual(
+            settings.telegram_notification_outbox_queue_feeder_interval_seconds,
+            0.1,
+        )
         self.assertLessEqual(
             settings.telegram_delivery_queue_retry_base_seconds,
             settings.telegram_delivery_queue_retry_max_seconds,
@@ -107,6 +115,18 @@ class TelegramDeliveryQueueConfigTests(unittest.TestCase):
 
     def test_nonfinite_negative_and_inverted_retry_config_fail_startup(self):
         invalid = (
+            {"telegram_delivery_queue_primary_idle_poll_interval_seconds": 0},
+            {"telegram_notification_outbox_queue_feeder_interval_seconds": 0},
+            {
+                "telegram_delivery_queue_primary_idle_poll_interval_seconds": float(
+                    "nan"
+                )
+            },
+            {
+                "telegram_notification_outbox_queue_feeder_interval_seconds": float(
+                    "inf"
+                )
+            },
             {"telegram_delivery_queue_retry_base_seconds": float("nan")},
             {"telegram_delivery_queue_retry_max_seconds": float("inf")},
             {"telegram_delivery_queue_retry_after_safety_seconds": -0.1},

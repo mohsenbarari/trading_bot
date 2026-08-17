@@ -159,6 +159,31 @@ class TelegramDeliveryQueueWorkerSafetyTests(unittest.IsolatedAsyncioTestCase):
                 places=6,
             )
 
+    def test_primary_idle_poll_is_fast_without_accelerating_publisher_lanes(self):
+        with patch.object(
+            worker.settings,
+            "telegram_delivery_queue_primary_idle_poll_interval_seconds",
+            0.1,
+        ), patch.object(
+            worker.settings,
+            "telegram_delivery_queue_worker_interval_seconds",
+            1.0,
+        ):
+            self.assertEqual(
+                worker._lane_idle_poll_interval_seconds(
+                    worker.TELEGRAM_PRIMARY_BOT_IDENTITY
+                ),
+                0.1,
+            )
+            self.assertEqual(
+                worker._lane_idle_poll_interval_seconds("publisher_1"),
+                1.0,
+            )
+            self.assertEqual(
+                worker._lane_idle_poll_interval_seconds("channel_editor"),
+                1.0,
+            )
+
     def test_activation_diagnostic_exposes_only_attribute_identifier(self):
         try:
             {}.missing_attribute

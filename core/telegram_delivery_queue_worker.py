@@ -575,6 +575,23 @@ def _worker_interval_seconds() -> float:
     )
 
 
+def _lane_idle_poll_interval_seconds(bot_identity: str) -> float:
+    """Keep Central Bot private work responsive without accelerating publishers."""
+    identity = _normalize_lane_identity(bot_identity)
+    if identity == TELEGRAM_PRIMARY_BOT_IDENTITY:
+        return max(
+            0.1,
+            float(
+                getattr(
+                    settings,
+                    "telegram_delivery_queue_primary_idle_poll_interval_seconds",
+                    0.1,
+                )
+            ),
+        )
+    return _worker_interval_seconds()
+
+
 def _request_timeout_seconds() -> float:
     return max(
         0.1,
@@ -1548,6 +1565,7 @@ async def _telegram_delivery_queue_lane_slot_loop(
 ) -> None:
     assert_background_job_authority(JOB_TELEGRAM_DELIVERY_QUEUE)
     _assert_queue_runtime_owner()
+    idle_poll_interval = _lane_idle_poll_interval_seconds(lane.bot_identity)
     logger.info(
         "Telegram delivery execution slot started",
         extra={
@@ -1556,7 +1574,7 @@ async def _telegram_delivery_queue_lane_slot_loop(
             "slot_name": slot_name,
             "slot_index": slot_index,
             "maximum_effective_priority": maximum_effective_priority,
-            "interval_seconds": _worker_interval_seconds(),
+            "interval_seconds": idle_poll_interval,
             "batch_limit": 1,
         },
     )
@@ -1627,9 +1645,9 @@ async def _telegram_delivery_queue_lane_slot_loop(
         # cancellable yield also prevents a hot empty/limited database loop and
         # gives shutdown a clean boundary outside connection establishment.
         if report is not None and report.processed_count:
-            await asyncio.sleep(min(0.01, _worker_interval_seconds()))
+            await asyncio.sleep(min(0.01, idle_poll_interval))
         else:
-            await asyncio.sleep(_worker_interval_seconds())
+            await asyncio.sleep(idle_poll_interval)
 
 
 async def telegram_delivery_queue_lane_loop(

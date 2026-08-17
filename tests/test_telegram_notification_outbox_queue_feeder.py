@@ -33,6 +33,18 @@ class TelegramNotificationOutboxQueueFeederTests(
             legacy_workers_enabled=not queue_owner,
         )
 
+    def test_queue_feeder_uses_dedicated_low_latency_poll_interval(self):
+        with patch.object(
+            feeder.settings,
+            "telegram_notification_outbox_queue_feeder_interval_seconds",
+            0.1,
+        ), patch.object(
+            feeder.settings,
+            "telegram_delivery_queue_worker_interval_seconds",
+            9.0,
+        ):
+            self.assertEqual(feeder._interval_seconds(), 0.1)
+
     async def test_cycle_refuses_legacy_owner_before_database_touch(self):
         with patch(
             "core.telegram_notification_outbox_queue_feeder."
