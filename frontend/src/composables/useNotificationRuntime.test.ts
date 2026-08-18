@@ -25,6 +25,7 @@ const notificationRuntimeMocks = vi.hoisted(() => ({
   replace: vi.fn(),
   resolve: vi.fn(),
   store: {
+    appNotifications: [] as Array<Record<string, unknown>>,
     addAppNotification: vi.fn(),
     addToast: vi.fn(),
     addAppNotificationsBatch: undefined as OptionalMock,
@@ -43,6 +44,7 @@ const notificationRuntimeMocks = vi.hoisted(() => ({
   },
   requestNotificationPermission: vi.fn(),
   getWebPushStatus: vi.fn(),
+  enableWebPushNotifications: vi.fn(),
   showBrowserNotification: vi.fn(),
   unlockAudioContext: vi.fn(),
   handlers: new Map<string, Array<(payload?: unknown) => void>>(),
@@ -96,6 +98,7 @@ vi.mock('../utils/audio', () => ({
 
 vi.mock('../services/webPush', () => ({
   getWebPushStatus: notificationRuntimeMocks.getWebPushStatus,
+  enableWebPushNotifications: notificationRuntimeMocks.enableWebPushNotifications,
 }))
 
 function emitWsEvent(event: string, payload?: unknown) {
@@ -171,9 +174,12 @@ describe('useNotificationRuntime', () => {
     notificationRuntimeMocks.requestNotificationPermission.mockReset()
     notificationRuntimeMocks.getWebPushStatus.mockReset()
     notificationRuntimeMocks.getWebPushStatus.mockResolvedValue({ state: 'subscribed' })
+    notificationRuntimeMocks.enableWebPushNotifications.mockReset()
+    notificationRuntimeMocks.enableWebPushNotifications.mockResolvedValue({ state: 'subscribed' })
     notificationRuntimeMocks.showBrowserNotification.mockReset()
     notificationRuntimeMocks.unlockAudioContext.mockReset()
     notificationRuntimeMocks.store.addAppNotification.mockReset()
+    notificationRuntimeMocks.store.appNotifications = []
     notificationRuntimeMocks.store.addToast.mockReset()
     notificationRuntimeMocks.store.addAppNotificationsBatch = undefined
     notificationRuntimeMocks.store.addToastsBatch = undefined
@@ -285,6 +291,17 @@ describe('useNotificationRuntime', () => {
     expect(notificationRuntimeMocks.getWebPushStatus).toHaveBeenCalledTimes(2)
     expect(notificationRuntimeMocks.ensureSessionValidation).toHaveBeenCalledTimes(2)
     expect(notificationRuntimeMocks.store.fetchInitialCounts).toHaveBeenCalledTimes(2)
+    expect(notificationRuntimeMocks.requestNotificationPermission).not.toHaveBeenCalled()
+
+    wrapper.unmount()
+  })
+
+  it('restores a missing Web Push subscription without prompting when permission was already granted', async () => {
+    notificationRuntimeMocks.getWebPushStatus.mockResolvedValueOnce({ state: 'unsubscribed' })
+    const wrapper = mountRuntime()
+    await flushPromises()
+
+    expect(notificationRuntimeMocks.enableWebPushNotifications).toHaveBeenCalledTimes(1)
     expect(notificationRuntimeMocks.requestNotificationPermission).not.toHaveBeenCalled()
 
     wrapper.unmount()
@@ -412,7 +429,7 @@ describe('useNotificationRuntime', () => {
     wrapper.unmount()
   })
 
-  it('normalizes app notifications into toasts and browser notifications, but suppresses toast rendering in the notification center', async () => {
+  it('normalizes app notifications into toasts without duplicating an active Web Push subscription', async () => {
     const wrapper = mountRuntime()
     setDocumentHidden(true)
 
@@ -431,13 +448,7 @@ describe('useNotificationRuntime', () => {
       level: 'INFO',
       category: 'SYSTEM',
     })
-    expect(notificationRuntimeMocks.showBrowserNotification).toHaveBeenCalledWith(
-      'اعلان جدید',
-      'متن اعلان',
-      {
-        route: '/account/notifications',
-      },
-    )
+    expect(notificationRuntimeMocks.showBrowserNotification).not.toHaveBeenCalled()
 
     setRoute('/account/notifications', '/account/notifications')
     emitWsEvent(WS_NOTIFICATION_EVENTS.appMessage, { id: 'n2' })
@@ -448,6 +459,27 @@ describe('useNotificationRuntime', () => {
     wrapper.unmount()
   })
 
+  it('does not create a competing page notification while Web Push reconciliation is pending', async () => {
+    let resolveStatus!: (value: { state: 'subscribed' }) => void
+    notificationRuntimeMocks.getWebPushStatus.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveStatus = resolve
+      }),
+    )
+    const wrapper = mountRuntime()
+    setDocumentHidden(true)
+
+    emitWsEvent(WS_NOTIFICATION_EVENTS.appMessage, { id: 'pending-push', message: 'payload' })
+    await flushPromises()
+
+    expect(notificationRuntimeMocks.store.addToast).toHaveBeenCalledTimes(1)
+    expect(notificationRuntimeMocks.showBrowserNotification).not.toHaveBeenCalled()
+
+    resolveStatus({ state: 'subscribed' })
+    await flushPromises()
+    wrapper.unmount()
+  })
+
   it('routes trade app notifications through payload routes when provided', async () => {
     notificationRuntimeMocks.store.addAppNotification.mockReturnValueOnce({
       title: 'معامله جدید',
@@ -455,6 +487,7 @@ describe('useNotificationRuntime', () => {
       level: 'success',
       category: 'trade',
       route: '/users/19?account_name=owner-19',
+      trade_number: 123456,
     })
 
     const wrapper = mountRuntime()
@@ -464,23 +497,68 @@ describe('useNotificationRuntime', () => {
     await flushPromises()
 
     expect(notificationRuntimeMocks.store.addToast).toHaveBeenLastCalledWith({
-      title: 'معامله جدید',
-      body: 'طرف معامله: دفتر مالک',
+      title: 'معامله انجام شد',
+      body: 'معامله شماره ۱۲۳۴۵۶ با موفقیت ثبت شد.',
       route: '/account/notifications',
       kind: 'app',
       level: 'success',
       category: 'trade',
     })
-    expect(notificationRuntimeMocks.showBrowserNotification).toHaveBeenLastCalledWith(
-      'معامله جدید',
-      'طرف معامله: دفتر مالک',
-      { route: '/account/notifications' },
+    expect(notificationRuntimeMocks.showBrowserNotification).not.toHaveBeenCalled()
+
+    wrapper.unmount()
+  })
+
+  it('shows a temporary trade popup even when browser permission is blocked and the notification center is open', async () => {
+    notificationRuntimeMocks.getWebPushStatus.mockResolvedValueOnce({ state: 'permission-blocked' })
+    notificationRuntimeMocks.store.addAppNotification.mockReturnValueOnce({
+      id: 'trade-center-1',
+      title: 'اعلان معامله',
+      body: 'جزئیات معامله',
+      level: 'success',
+      category: 'trade',
+      trade_number: 77,
+    })
+    setRoute('/account/notifications', '/account/notifications')
+    const wrapper = mountRuntime()
+
+    emitWsEvent(WS_NOTIFICATION_EVENTS.appMessage, { id: 'trade-center-1' })
+    await flushPromises()
+
+    expect(notificationRuntimeMocks.store.addToast).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: 'معامله انجام شد',
+        body: 'معامله شماره ۷۷ با موفقیت ثبت شد.',
+        category: 'trade',
+      }),
     )
 
     wrapper.unmount()
   })
 
+  it('does not repeat a trade popup when the same persisted notification is replayed', async () => {
+    notificationRuntimeMocks.store.appNotifications = [{ id: 'trade-known' }]
+    notificationRuntimeMocks.store.addAppNotification.mockReturnValueOnce({
+      id: 'trade-known',
+      title: 'اعلان معامله',
+      body: 'جزئیات معامله',
+      level: 'success',
+      category: 'trade',
+      trade_number: 77,
+    })
+    const wrapper = mountRuntime()
+
+    emitWsEvent(WS_NOTIFICATION_EVENTS.appMessage, { id: 'trade-known' })
+    await flushPromises()
+
+    expect(notificationRuntimeMocks.store.addToast).not.toHaveBeenCalled()
+    expect(notificationRuntimeMocks.showBrowserNotification).not.toHaveBeenCalled()
+
+    wrapper.unmount()
+  })
+
   it('removes route and backend metadata from app toast and browser notification bodies', async () => {
+    notificationRuntimeMocks.getWebPushStatus.mockResolvedValueOnce({ state: 'server-disabled' })
     notificationRuntimeMocks.store.addAppNotification.mockReturnValueOnce({
       title: 'route: /admin/system',
       body: [

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, onMounted, watch } from 'vue';
+import { computed, ref, onMounted, onUnmounted, watch } from 'vue';
 import {
   BriefcaseBusiness,
   ChevronLeft,
@@ -45,6 +45,8 @@ import { routeRequestJson } from '../utils/routeRequest';
 import { formatLastSeenStatus, isUserOnline as isPresenceOnline } from '../utils/userPresence';
 import { formatIranDate } from '../utils/iranTime';
 import { tradeSettlementLabel, type SettlementType } from '../utils/settlementType';
+import { useWebSocket } from '../composables/useWebSocket';
+import { WS_NOTIFICATION_EVENTS } from '../types/notifications';
 
 const props = defineProps<{
   user: { id: number; account_name: string } | null;
@@ -56,6 +58,7 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits(['navigate']);
+const { on: wsOn, off: wsOff } = useWebSocket();
 
 interface PublicUser {
   id: number;
@@ -193,6 +196,7 @@ const historyCounterpartyOptionsLoading = ref(false);
 let historyRequestRevision = 0;
 let profileRequestRevision = 0;
 let projectUsersRequestRevision = 0;
+let realtimeTradeRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 const historyCounterpartyOptionsLoaded = ref(false);
 const historyCounterpartyError = ref('');
 const avatarBusy = ref(false);
@@ -1228,6 +1232,50 @@ async function loadMutualTrades(force = false, append = false) {
 async function loadMoreMutualTrades() {
   await loadMutualTrades(false, true);
 }
+
+function scheduleLoadedTradeHistoryRefresh() {
+  if (!isOwnProfile.value || !profileData.value || !hasLoadedHistoryOnce.value) return;
+  if (realtimeTradeRefreshTimer !== null) clearTimeout(realtimeTradeRefreshTimer);
+  realtimeTradeRefreshTimer = setTimeout(() => {
+    realtimeTradeRefreshTimer = null;
+    void loadMutualTrades(true, false);
+  }, 80);
+}
+
+function handleRealtimeTradeCreated() {
+  // The server publishes this event on recipient-private channels only. Keep
+  // active filters authoritative by refetching instead of injecting a row that
+  // might not belong to the selected date/commodity/counterparty projection.
+  scheduleLoadedTradeHistoryRefresh();
+}
+
+function handleAppNotification(payload: unknown) {
+  if (!payload || typeof payload !== 'object') return;
+  const notification = payload as Record<string, unknown>;
+  const embedded = notification.extra_payload;
+  const embeddedCategory = embedded && typeof embedded === 'object'
+    ? (embedded as Record<string, unknown>).category
+    : null;
+  const category = String(notification.category ?? embeddedCategory ?? '').trim().toLowerCase();
+  if (category === 'trade') scheduleLoadedTradeHistoryRefresh();
+}
+
+function handleRealtimeReconnect() {
+  scheduleLoadedTradeHistoryRefresh();
+}
+
+onMounted(() => {
+  wsOn(WS_NOTIFICATION_EVENTS.tradeCreated, handleRealtimeTradeCreated);
+  wsOn(WS_NOTIFICATION_EVENTS.appMessage, handleAppNotification);
+  wsOn(WS_NOTIFICATION_EVENTS.wsReconnect, handleRealtimeReconnect);
+});
+
+onUnmounted(() => {
+  if (realtimeTradeRefreshTimer !== null) clearTimeout(realtimeTradeRefreshTimer);
+  wsOff(WS_NOTIFICATION_EVENTS.tradeCreated, handleRealtimeTradeCreated);
+  wsOff(WS_NOTIFICATION_EVENTS.appMessage, handleAppNotification);
+  wsOff(WS_NOTIFICATION_EVENTS.wsReconnect, handleRealtimeReconnect);
+});
 
 async function loadProjectUsersDirectory(force = false) {
   const targetProfileUserId = Number(profileData.value?.id);

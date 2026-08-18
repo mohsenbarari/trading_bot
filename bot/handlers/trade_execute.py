@@ -79,6 +79,27 @@ OFFER_UNAVAILABLE_CALLBACK_MESSAGE = "این لفظ دیگر در دسترس ن�
 OFFER_INACTIVE_CALLBACK_MESSAGE = "این لفظ دیگر فعال نیست."
 BOT_REMOTE_HOME_FORWARD_TIMEOUT_SECONDS = 2.0
 
+TRADE_TERMINAL_ERROR_MESSAGES = {
+    "overtime_cancelled_by_requester": "این درخواست قبلاً لغو شده است.",
+    "overtime_rejected_by_owner": "این درخواست قبلاً رد شده است.",
+    "overtime_expired": "مهلت این درخواست پایان یافته است.",
+    "overtime_completed": "این درخواست قبلاً نهایی شده است.",
+}
+
+
+def _user_facing_trade_error(detail: object) -> str:
+    """Return a short Telegram-safe error without exposing structured API fields."""
+    fallback = "امکان انجام این معامله وجود ندارد."
+    if isinstance(detail, Mapping):
+        error_code = str(detail.get("error_code") or "").strip().lower()
+        if error_code in TRADE_TERMINAL_ERROR_MESSAGES:
+            return TRADE_TERMINAL_ERROR_MESSAGES[error_code]
+        message = detail.get("message")
+        return str(message).strip() if isinstance(message, str) and message.strip() else fallback
+    if isinstance(detail, str) and detail.strip():
+        return detail.strip()
+    return fallback
+
 
 async def _queue_authoritative_channel_offer_refresh(
     session,
@@ -709,7 +730,7 @@ async def _execute_confirmed_channel_trade_via_shared_command(
     except HTTPException as exc:
         await answer_callback_query_via_runtime(
             callback,
-            f"❌ {exc.detail or 'امکان انجام این معامله وجود ندارد.'}",
+            f"❌ {_user_facing_trade_error(exc.detail)}",
             show_alert=True,
         )
         return
@@ -743,7 +764,7 @@ async def _execute_confirmed_channel_trade_via_shared_command(
         detail = body.get("detail") if isinstance(body, dict) else None
         await answer_callback_query_via_runtime(
             callback,
-            f"❌ {detail or 'امکان انجام این معامله وجود ندارد.'}",
+            f"❌ {_user_facing_trade_error(detail)}",
             show_alert=True,
         )
         return
@@ -1131,7 +1152,7 @@ async def _handle_channel_trade(
             detail = body_dict.get("detail")
             await answer_callback_query_via_runtime(
                 callback,
-                f"❌ {detail or 'امکان انجام این معامله وجود ندارد.'}",
+                f"❌ {_user_facing_trade_error(detail)}",
                 show_alert=True,
             )
             return

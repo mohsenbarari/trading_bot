@@ -8,6 +8,15 @@ import { currentUserSummary } from '../utils/currentUser'
 
 const buildChatFileUrlMock = vi.fn(() => '')
 const uploadAvatarImageMock = vi.fn()
+const publicProfileRealtimeMocks = vi.hoisted(() => ({
+  handlers: new Map<string, Array<(payload?: unknown) => void>>(),
+  on: vi.fn((event: string, callback: (payload?: unknown) => void) => {
+    const handlers = publicProfileRealtimeMocks.handlers.get(event) ?? []
+    handlers.push(callback)
+    publicProfileRealtimeMocks.handlers.set(event, handlers)
+  }),
+  off: vi.fn(),
+}))
 const publicProfileSource = readFileSync(
   resolve(process.cwd(), 'src/components/PublicProfile.vue'),
   'utf8',
@@ -18,6 +27,14 @@ vi.mock('../utils/chatFiles', () => ({
   getAvatarInitial: (value: string) => value.slice(0, 1),
   uploadAvatarImage: uploadAvatarImageMock,
 }))
+
+vi.mock('../composables/useWebSocket', () => ({
+  useWebSocket: () => ({ on: publicProfileRealtimeMocks.on, off: publicProfileRealtimeMocks.off }),
+}))
+
+function emitPublicProfileRealtime(event: string, payload?: unknown) {
+  for (const handler of publicProfileRealtimeMocks.handlers.get(event) ?? []) handler(payload)
+}
 
 function makeResponse(payload: unknown, ok = true, status = ok ? 200 : 400): Response {
   return new Response(JSON.stringify(payload), {
@@ -126,6 +143,9 @@ describe('PublicProfile.vue', () => {
     document.body.replaceChildren()
     buildChatFileUrlMock.mockClear()
     uploadAvatarImageMock.mockReset()
+    publicProfileRealtimeMocks.handlers.clear()
+    publicProfileRealtimeMocks.on.mockClear()
+    publicProfileRealtimeMocks.off.mockClear()
     vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL) => {
       const url = typeof input === 'string'
         ? input
@@ -2269,6 +2289,83 @@ describe('PublicProfile.vue', () => {
 
     expect(fetchMock.mock.calls.filter(([url]) => typeof url === 'string' && url.startsWith('/api/trades/my/page?'))).toHaveLength(1)
     expect(wrapper.text()).toContain('هنوز هیچ معامله‌ای انجام نداده‌اید.')
+  })
+
+  it('refreshes an already-loaded own trade history from a receipt-backed trade notification', async () => {
+    const fetchMock = vi.mocked(fetch)
+    let historyRequestCount = 0
+    fetchMock.mockImplementation((input: RequestInfo | URL) => {
+      const url = typeof input === 'string'
+        ? input
+        : input instanceof URL
+          ? input.toString()
+          : input.url
+      if (url === '/api/users-public/51') {
+        return Promise.resolve(makeResponse({
+          id: 51,
+          account_name: 'owner51',
+          avatar_file_id: null,
+          mobile_number: '09123334444',
+          address: 'کرج',
+          created_at_jalali: '۱۴۰۵/۰۱/۱۱',
+          trades_count: 1,
+          accountant_relations: [],
+        }))
+      }
+      if (url === '/api/commodities/') return Promise.resolve(makeResponse([]))
+      if (url.startsWith('/api/trades/my/page?')) {
+        historyRequestCount += 1
+        return Promise.resolve(makeHistoryPage(historyRequestCount === 1 ? [] : [{
+          id: 91,
+          trade_number: 777,
+          created_at: 'امروز',
+          commodity_name: 'سکه',
+          quantity: 1,
+          price: 50000000,
+          trade_type: 'BUY',
+          settlement_type: 'cash',
+          offer_user_id: 51,
+          offer_user_name: 'owner51',
+          responder_user_id: 9,
+          responder_user_name: 'peer9',
+        }]))
+      }
+      return defaultFetchResponse(url)
+    })
+
+    const PublicProfile = (await import('./PublicProfile.vue')).default
+    const wrapper = mount(PublicProfile, {
+      props: {
+        user: { id: 51, account_name: 'owner51' },
+        viewerUserId: 51,
+        apiBaseUrl: '',
+        jwtToken: 'token',
+      },
+      global: {
+        stubs: {
+          LoadingSkeleton: true,
+          OwnerAccountantManagerModal: true,
+        },
+      },
+    })
+    await flushPromises()
+
+    const applyButton = wrapper.findAll('button').find((node) => node.text().includes('اعمال فیلتر'))
+    await applyButton!.trigger('click')
+    await flushPromises()
+    expect(historyRequestCount).toBe(1)
+
+    vi.useFakeTimers()
+    emitPublicProfileRealtime('message', { id: 501, category: 'trade', trade_number: 777 })
+    await vi.advanceTimersByTimeAsync(90)
+    await flushPromises()
+
+    expect(historyRequestCount).toBe(2)
+    expect(wrapper.text()).toContain('#777')
+
+    wrapper.unmount()
+    expect(publicProfileRealtimeMocks.off).toHaveBeenCalledWith('message', expect.any(Function))
+    vi.useRealTimers()
   })
 
   it('hides customer tier and trade relationship details on customer own profiles', async () => {

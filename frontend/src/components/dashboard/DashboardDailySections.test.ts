@@ -12,6 +12,13 @@ const componentSource = readFileSync(
 const mocks = vi.hoisted(() => ({
   apiFetch: vi.fn(),
   routerPush: vi.fn(),
+  wsHandlers: new Map<string, Array<(payload?: unknown) => void>>(),
+  wsOn: vi.fn((event: string, callback: (payload?: unknown) => void) => {
+    const handlers = mocks.wsHandlers.get(event) ?? []
+    handlers.push(callback)
+    mocks.wsHandlers.set(event, handlers)
+  }),
+  wsOff: vi.fn(),
 }))
 
 vi.mock('../../utils/auth', () => ({
@@ -21,6 +28,14 @@ vi.mock('../../utils/auth', () => ({
 vi.mock('vue-router', () => ({
   useRouter: () => ({ push: mocks.routerPush }),
 }))
+
+vi.mock('../../composables/useWebSocket', () => ({
+  useWebSocket: () => ({ on: mocks.wsOn, off: mocks.wsOff }),
+}))
+
+function emitRealtime(event: string, payload?: unknown) {
+  for (const handler of mocks.wsHandlers.get(event) ?? []) handler(payload)
+}
 
 function responseOf(payload: unknown, ok = true) {
   return {
@@ -88,6 +103,9 @@ describe('DashboardDailySections.vue', () => {
     vi.setSystemTime(new Date('2026-05-14T09:00:00Z'))
     mocks.apiFetch.mockReset()
     mocks.routerPush.mockReset()
+    mocks.wsHandlers.clear()
+    mocks.wsOn.mockClear()
+    mocks.wsOff.mockClear()
   })
 
   it('keeps one semantic row per trade inside a keyboard-focusable horizontal scroller', () => {
@@ -149,6 +167,50 @@ describe('DashboardDailySections.vue', () => {
     expect(wrapper.text()).not.toContain('۷۸۴')
     expect(wrapper.text()).toContain('۱۲۵')
     expect(wrapper.text()).not.toContain('۱۲۴')
+  })
+
+  it('shows an authorized completed trade immediately and reconciles today history without a page refresh', async () => {
+    const realtimeTrade = trade({ id: 91, trade_number: 777, offer_notes: null })
+    mocks.apiFetch
+      .mockResolvedValueOnce(responseOf(tradePage([])))
+      .mockResolvedValueOnce(
+        responseOf(tradePage([trade({ id: 91, trade_number: 777, offer_notes: 'توضیح نهایی' })])),
+      )
+
+    const wrapper = mount(DashboardDailySections, { props: { user: user() } })
+    await flushPromises()
+    expect(wrapper.text()).toContain('امروز معامله‌ای ثبت نشده است')
+
+    emitRealtime('trade:created', realtimeTrade)
+    await flushPromises()
+    expect(wrapper.get('.dashboard-trades__table tbody th').text()).toBe('۷۷۷')
+
+    await vi.advanceTimersByTimeAsync(80)
+    await flushPromises()
+    expect(requestedUrls()).toHaveLength(2)
+    expect(wrapper.text()).toContain('توضیح نهایی')
+
+    wrapper.unmount()
+    expect(mocks.wsOff).toHaveBeenCalledWith('trade:created', expect.any(Function))
+  })
+
+  it('refreshes today history from the receipt-backed trade notification path', async () => {
+    mocks.apiFetch
+      .mockResolvedValueOnce(responseOf(tradePage([])))
+      .mockResolvedValueOnce(responseOf(tradePage([trade({ id: 92, trade_number: 778 })])))
+
+    const wrapper = mount(DashboardDailySections, { props: { user: user() } })
+    await flushPromises()
+
+    emitRealtime('message', { id: 501, category: 'trade', trade_number: 778 })
+    await vi.advanceTimersByTimeAsync(80)
+    await flushPromises()
+
+    expect(requestedUrls()).toHaveLength(2)
+    expect(wrapper.get('.dashboard-trades__table tbody th').text()).toBe('۷۷۸')
+
+    wrapper.unmount()
+    expect(mocks.wsOff).toHaveBeenCalledWith('message', expect.any(Function))
   })
 
   it('keeps coworkers and commodities collapsed, then lazily loads and navigates without exposing phone data', async () => {

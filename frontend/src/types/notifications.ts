@@ -1,5 +1,6 @@
 export const WS_NOTIFICATION_EVENTS = {
     appMessage: 'message',
+    tradeCreated: 'trade:created',
     chatMessage: 'chat:message',
     sessionLoginRequest: 'session:login_request',
     sessionRecoveryUpdate: 'session:single_session_recovery',

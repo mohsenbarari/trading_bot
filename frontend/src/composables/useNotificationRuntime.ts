@@ -18,7 +18,7 @@ import { resolveRoomConversationKey } from '../utils/chatRoomRouting'
 import { currentUserSummary } from '../utils/currentUser'
 import { useConversationsStore } from '../stores/chat/conversations'
 import { validateIntendedRoute } from '../utils/authNavigation'
-import { getWebPushStatus } from '../services/webPush'
+import { enableWebPushNotifications, getWebPushStatus } from '../services/webPush'
 import { assertSuccessfulNavigation } from '../utils/navigationResult'
 
 type WebSocketEventHandler<T = unknown> = (data: T) => void
@@ -84,6 +84,24 @@ function uniqueByKey<T>(items: T[], getKey: (item: T) => string | number) {
   return Array.from(nextByKey.values())
 }
 
+function buildAppToastCopy(notification: ReturnType<typeof useNotificationStore>['appNotifications'][number]) {
+  if (notification.category !== 'trade') {
+    return {
+      title: sanitizeNotificationTitle(notification.title),
+      body: sanitizeNotificationBody(notification.body),
+    }
+  }
+
+  const tradeNumber = Number(notification.trade_number)
+  const tradeLabel = Number.isSafeInteger(tradeNumber) && tradeNumber > 0
+    ? `معامله شماره ${tradeNumber.toLocaleString('fa-IR', { useGrouping: false })}`
+    : 'معامله جدید'
+  return {
+    title: 'معامله انجام شد',
+    body: `${tradeLabel} با موفقیت ثبت شد.`,
+  }
+}
+
 export function useNotificationRuntime({
   connect,
   on,
@@ -98,6 +116,7 @@ export function useNotificationRuntime({
   let skipNextReconnectCountsFetch = false
   let flushScheduled = false
   let isUnmounted = false
+  let webPushDeliveryState: 'checking' | 'subscribed' | 'fallback' = 'checking'
   const pendingAppMessages: AppRealtimeNotificationPayload[] = []
   const pendingChatMessages: ChatRealtimeNotificationPayload[] = []
 
@@ -195,37 +214,45 @@ export function useNotificationRuntime({
 
     if (pendingAppMessages.length > 0) {
       const appPayloads = pendingAppMessages.splice(0, pendingAppMessages.length)
+      const existingNotificationIds = new Set(
+        notificationStore.appNotifications.map((notification) => notification.id),
+      )
       const normalizedNotifications = addAppNotificationsBatch(appPayloads)
       const uniqueNotifications = uniqueByKey(
-        normalizedNotifications,
+        normalizedNotifications.filter(
+          (notification) => !existingNotificationIds.has(notification.id),
+        ),
         (notification) => notification.id,
       )
 
-      if (route.path !== '/account/notifications' && route.path !== '/notifications') {
-        addToastsBatch(
-          uniqueNotifications.map((notification) => {
-            const title = sanitizeNotificationTitle(notification.title)
-            const body = sanitizeNotificationBody(notification.body)
-            // Global app toasts always enter through the canonical center.
-            // The center keeps the original, validated item route available
-            // without letting untrusted payload routes drive shell navigation.
-            const targetRoute = '/account/notifications'
+      const isNotificationCenterRoute =
+        route.path === '/account/notifications' || route.path === '/notifications'
+      const toastItems: Parameters<typeof notificationStore.addToast>[0][] = []
+      for (const notification of uniqueNotifications) {
+        const canonicalTitle = sanitizeNotificationTitle(notification.title)
+        const canonicalBody = sanitizeNotificationBody(notification.body)
+        const toastCopy = buildAppToastCopy(notification)
+        // Global app toasts always enter through the canonical center. Trade
+        // completion is intentionally also surfaced while that center is open,
+        // so users without browser-notification permission still get immediate
+        // confirmation in every authenticated route.
+        const targetRoute = '/account/notifications'
 
-            if (document.hidden) {
-              showBrowserNotification(title, body, { route: targetRoute })
-            }
+        if (document.hidden && webPushDeliveryState === 'fallback') {
+          showBrowserNotification(canonicalTitle, canonicalBody, { route: targetRoute })
+        }
 
-            return {
-              title,
-              body,
-              route: targetRoute,
-              kind: 'app' as const,
-              level: notification.level,
-              category: notification.category,
-            }
-          }),
-        )
+        if (!isNotificationCenterRoute || notification.category === 'trade') {
+          toastItems.push({
+            ...toastCopy,
+            route: targetRoute,
+            kind: 'app' as const,
+            level: notification.level,
+            category: notification.category,
+          })
+        }
       }
+      addToastsBatch(toastItems)
     }
 
     if (pendingChatMessages.length > 0) {
@@ -385,6 +412,7 @@ export function useNotificationRuntime({
     if (!authToken) {
       bootstrappedAuthToken = null
       skipNextReconnectCountsFetch = false
+      webPushDeliveryState = 'checking'
       return
     }
 
@@ -399,9 +427,31 @@ export function useNotificationRuntime({
 
     void notificationStore.fetchInitialCounts()
     void ensureSessionValidation()
-    // This never requests permission. When permission was already granted,
-    // it rebinds an existing browser subscription to the current account.
-    void getWebPushStatus().catch(() => undefined)
+    // Never prompt during bootstrap. If the user has already granted browser
+    // permission but the subscription is missing, restore it automatically so
+    // a permission/subscription split cannot silently suppress trade alerts.
+    webPushDeliveryState = 'checking'
+    void getWebPushStatus()
+      .then((status) => {
+        webPushDeliveryState = status.state === 'subscribed' ? 'subscribed' : 'fallback'
+        if (
+          isUnmounted ||
+          status.state !== 'unsubscribed' ||
+          localStorage.getItem('auth_token') !== authToken
+        ) {
+          return undefined
+        }
+        webPushDeliveryState = 'checking'
+        return enableWebPushNotifications()
+      })
+      .then((status) => {
+        if (status) {
+          webPushDeliveryState = status.state === 'subscribed' ? 'subscribed' : 'fallback'
+        }
+      })
+      .catch(() => {
+        webPushDeliveryState = 'fallback'
+      })
   }
 
   const handleAppMessage = (payload: AppRealtimeNotificationPayload) => {

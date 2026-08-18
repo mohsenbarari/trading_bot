@@ -2,6 +2,8 @@
 import { computed, onUnmounted, ref, watch } from 'vue'
 import { ChevronDown, PackageCheck, RefreshCw, UsersRound } from 'lucide-vue-next'
 import { useRouter } from 'vue-router'
+import { useWebSocket } from '../../composables/useWebSocket'
+import { WS_NOTIFICATION_EVENTS } from '../../types/notifications'
 import { apiFetch } from '../../utils/auth'
 import type { CurrentUserSummary } from '../../utils/currentUser'
 import { formatIranDateTime, IRAN_TIME_ZONE } from '../../utils/iranTime'
@@ -54,6 +56,7 @@ const props = defineProps<{
 
 const PROJECT_USERS_PAGE_SIZE = 25
 const router = useRouter()
+const { on: wsOn, off: wsOff } = useWebSocket()
 const trades = ref<DashboardTrade[]>([])
 const tradesLoading = ref(false)
 const tradesError = ref(false)
@@ -76,6 +79,7 @@ let tradesController: AbortController | null = null
 let coworkersController: AbortController | null = null
 let commoditiesController: AbortController | null = null
 let identityGeneration = 0
+let tradeRefreshTimer: ReturnType<typeof setTimeout> | null = null
 
 const normalizedCurrentUserId = computed(() => normalizeId(props.user.id))
 const perspectiveUserId = computed(() => {
@@ -273,12 +277,13 @@ function counterpartyLabel(trade: DashboardTrade) {
     : trade.responder_user_name || 'نامشخص'
 }
 
-async function loadTodayTrades() {
+async function loadTodayTrades(options: { silent?: boolean } = {}) {
+  const silent = options.silent === true
   tradesController?.abort()
   const controller = new AbortController()
   tradesController = controller
   const generation = identityGeneration
-  tradesLoading.value = true
+  if (!silent) tradesLoading.value = true
   tradesError.value = false
 
   try {
@@ -322,12 +327,63 @@ async function loadTodayTrades() {
       .filter(tradeBelongsToPerspective)
   } catch {
     if (controller.signal.aborted || generation !== identityGeneration) return
-    trades.value = []
-    tradesError.value = true
+    if (!silent) {
+      trades.value = []
+      tradesError.value = true
+    }
   } finally {
     if (!controller.signal.aborted && generation === identityGeneration) tradesLoading.value = false
   }
 }
+
+function scheduleTodayTradesRefresh() {
+  if (tradeRefreshTimer !== null) clearTimeout(tradeRefreshTimer)
+  tradeRefreshTimer = setTimeout(() => {
+    tradeRefreshTimer = null
+    void loadTodayTrades({ silent: true })
+  }, 80)
+}
+
+function handleTradeCreated(payload: unknown) {
+  const incoming = normalizeTrade(payload)
+  if (incoming && tradeBelongsToPerspective(incoming)) {
+    const previous = trades.value.find(
+      (trade) => trade.id === incoming.id || trade.trade_number === incoming.trade_number,
+    )
+    const nextTrade = previous
+      ? { ...previous, ...incoming, offer_notes: incoming.offer_notes ?? previous.offer_notes }
+      : incoming
+    trades.value = [
+      nextTrade,
+      ...trades.value.filter(
+        (trade) => trade.id !== incoming.id && trade.trade_number !== incoming.trade_number,
+      ),
+    ]
+  }
+  // The private event is only delivered to an authorized trade audience. An
+  // authoritative refresh also covers manager/accountant projections whose
+  // participant ids may differ from the current dashboard perspective.
+  scheduleTodayTradesRefresh()
+}
+
+function handleAppNotification(payload: unknown) {
+  if (!payload || typeof payload !== 'object') return
+  const notification = payload as Record<string, unknown>
+  const embedded = notification.extra_payload
+  const embeddedCategory = embedded && typeof embedded === 'object'
+    ? (embedded as Record<string, unknown>).category
+    : null
+  const category = String(notification.category ?? embeddedCategory ?? '').trim().toLowerCase()
+  if (category === 'trade') scheduleTodayTradesRefresh()
+}
+
+function handleRealtimeReconnect() {
+  scheduleTodayTradesRefresh()
+}
+
+wsOn(WS_NOTIFICATION_EVENTS.tradeCreated, handleTradeCreated)
+wsOn(WS_NOTIFICATION_EVENTS.appMessage, handleAppNotification)
+wsOn(WS_NOTIFICATION_EVENTS.wsReconnect, handleRealtimeReconnect)
 
 function resetCoworkers() {
   coworkers.value = []
@@ -475,6 +531,10 @@ onUnmounted(() => {
   tradesController?.abort()
   coworkersController?.abort()
   commoditiesController?.abort()
+  if (tradeRefreshTimer !== null) clearTimeout(tradeRefreshTimer)
+  wsOff(WS_NOTIFICATION_EVENTS.tradeCreated, handleTradeCreated)
+  wsOff(WS_NOTIFICATION_EVENTS.appMessage, handleAppNotification)
+  wsOff(WS_NOTIFICATION_EVENTS.wsReconnect, handleRealtimeReconnect)
 })
 </script>
 
@@ -494,7 +554,7 @@ onUnmounted(() => {
           class="dashboard-today-trades__refresh"
           :loading="tradesLoading"
           aria-label="به‌روزرسانی معاملات امروز"
-          @click="loadTodayTrades"
+          @click="loadTodayTrades()"
         >
           <RefreshCw :size="16" aria-hidden="true" />
           به‌روزرسانی
