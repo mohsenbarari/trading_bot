@@ -1,7 +1,11 @@
 import unittest
 from unittest.mock import patch
 
-from bot.handlers.trade_create import _get_offer_suggestion, has_trade_indicator
+from bot.handlers.trade_create import (
+    _get_offer_suggestion,
+    has_trade_indicator,
+    looks_like_text_offer,
+)
 
 
 class BotTradeCreateTextHelperTests(unittest.TestCase):
@@ -21,6 +25,13 @@ class BotTradeCreateTextHelperTests(unittest.TestCase):
         self.assertFalse(has_trade_indicator("امام 30تا 75800: خ ن"))
         self.assertFalse(has_trade_indicator("این پیام عادی است"))
         self.assertFalse(has_trade_indicator(""))
+
+    def test_looks_like_text_offer_keeps_offer_shaped_input_out_of_silent_fallback(self):
+        self.assertTrue(looks_like_text_offer("امام 30تا 75800"))
+        self.assertTrue(looks_like_text_offer("امام ۳۰ عدد ۷۵۸۰۰: خ"))
+        self.assertTrue(looks_like_text_offer("خ ربع 30تا 75800"))
+        self.assertFalse(looks_like_text_offer("این پیام عادی است"))
+        self.assertFalse(looks_like_text_offer("سفارش 30 عدد"))
 
 
 if __name__ == "__main__":

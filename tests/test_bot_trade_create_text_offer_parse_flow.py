@@ -11,6 +11,7 @@ from bot.handlers.trade_create import (
     handle_text_offer_inference_choice,
 )
 from core.enums import UserRole
+from core.telegram_delivery_queue_contract import TelegramDeliveryAction
 
 
 class FakeSession:
@@ -51,7 +52,9 @@ class BotTradeCreateTextOfferParseFlowTests(unittest.IsolatedAsyncioTestCase):
             "bot.utils.offer_parser.parse_offer_text", new=AsyncMock(return_value=(None, None))
         ):
             await handle_text_offer(message, state, user=user, bot=SimpleNamespace())
-        message.answer.assert_not_awaited()
+        message.answer.assert_awaited_once()
+        self.assertIn("متن لفظ قابل تشخیص نیست", message.answer.await_args.args[0])
+        self.assertIn("خ امام ۵تا ۱۰۰۰۰۰", message.answer.await_args.args[0])
 
         error = SimpleNamespace(message="خطای قیمت")
         message = SimpleNamespace(text="خ ربع 30تا", answer=AsyncMock())
@@ -123,6 +126,42 @@ class BotTradeCreateTextOfferParseFlowTests(unittest.IsolatedAsyncioTestCase):
         preview_text = message.answer.await_args.args[0]
         self.assertIn("پیش\u200cنمایش لفظ", preview_text)
         self.assertIn("خُرد [7, 5]", preview_text)
+
+    async def test_unrecognized_offer_candidate_uses_queue_validation_lane(self):
+        user = SimpleNamespace(
+            role=UserRole.STANDARD,
+            trading_restricted_until=None,
+            id=1,
+        )
+        message = SimpleNamespace(text="امام 5تا 100000", answer=AsyncMock())
+        state = SimpleNamespace(
+            get_state=AsyncMock(return_value=None),
+            update_data=AsyncMock(),
+            set_state=AsyncMock(),
+        )
+        with (
+            patch(
+                "bot.handlers.trade_create._bot_market_is_open",
+                new=AsyncMock(return_value=True),
+            ),
+            patch(
+                "bot.utils.offer_parser.parse_offer_text",
+                new=AsyncMock(return_value=(None, None)),
+            ),
+            patch(
+                "bot.handlers.trade_create.answer_incoming_message_via_runtime",
+                new=AsyncMock(),
+            ) as enqueue,
+        ):
+            await handle_text_offer(message, state, user=user, bot=SimpleNamespace())
+
+        enqueue.assert_awaited_once()
+        self.assertIn("متن لفظ قابل تشخیص نیست", enqueue.await_args.args[2])
+        self.assertEqual(
+            enqueue.await_args.kwargs["action"],
+            TelegramDeliveryAction.OFFER_VALIDATION_RESPONSE,
+        )
+        message.answer.assert_not_awaited()
 
     async def test_omitted_name_never_enters_bot_offer_state_while_inference_is_shadow(self):
         user = SimpleNamespace(role=UserRole.STANDARD, trading_restricted_until=None, id=1)

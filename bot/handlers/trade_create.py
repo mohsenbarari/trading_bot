@@ -158,6 +158,11 @@ STALE_TRADE_BUILDER_GUIDANCE = (
 STALE_TRADE_CREATION_CALLBACK_TEXT = (
     "این دکمه دیگر فعال نیست. ثبت آفر را دوباره شروع کنید."
 )
+UNRECOGNIZED_TEXT_OFFER_MESSAGE = (
+    "❌ متن لفظ قابل تشخیص نیست. لطفاً نوع معامله، نام کالا، تعداد و قیمت "
+    "را در یک پیام بفرستید.\n\n"
+    "نمونه: `خ امام ۵تا ۱۰۰۰۰۰`"
+)
 
 
 def _build_channel_offer_text(
@@ -2185,6 +2190,27 @@ def has_trade_indicator(text: str) -> bool:
     return bool(re.search(pattern, offer_part))
 
 
+def looks_like_text_offer(text: str) -> bool:
+    """Admit offer-shaped text even when its side marker is misplaced/missing.
+
+    The parser remains the sole grammar authority.  This broader ingress check
+    only prevents an authenticated user's offer-shaped message from falling
+    through the router without a validation response.
+    """
+    import re
+    from bot.utils.offer_parser import normalize_digits
+
+    if not text:
+        return False
+    normalized = normalize_digits(text)
+    if has_trade_indicator(normalized):
+        return True
+    offer_part = normalized.split(":", 1)[0]
+    has_quantity = re.search(r"\d+\s*(?:تا|عدد)", offer_part) is not None
+    has_price = re.search(r"(?<!\d)\d{5,6}(?!\d)", offer_part) is not None
+    return has_quantity and has_price
+
+
 async def _handoff_stale_wizard_state_to_text_offer(
     message: types.Message,
     state: FSMContext,
@@ -2200,7 +2226,7 @@ async def _handoff_stale_wizard_state_to_text_offer(
     if await handoff_navigation_button(message, state, user):
         return True
 
-    if not has_trade_indicator(message.text or ""):
+    if not looks_like_text_offer(message.text or ""):
         return False
 
     await state.clear()
@@ -2564,14 +2590,25 @@ async def _prepare_text_offer(
     else:
         result, error = await parse_offer_text(offer_text)
     if result is None and error is None:
-        if wizard_source:
-            await _text_offer_response(
-                message,
-                user,
-                "متن ساخته‌شده قابل تشخیص نیست. گزینه‌ها را اصلاح کنید.",
-                edit=edit_response,
-                reply_markup=get_wizard_review_keyboard(),
-            )
+        await _text_offer_response(
+            message,
+            user,
+            (
+                "متن ساخته‌شده قابل تشخیص نیست. گزینه‌ها را اصلاح کنید."
+                if wizard_source
+                else UNRECOGNIZED_TEXT_OFFER_MESSAGE
+            ),
+            edit=edit_response,
+            reply_markup=get_wizard_review_keyboard() if wizard_source else None,
+        )
+        logger.info(
+            "Offer-shaped Telegram message was rejected by the parser",
+            extra={
+                "event": "telegram.offer_text.unrecognized",
+                "wizard_source": bool(wizard_source),
+                "user_id": getattr(user, "id", None),
+            },
+        )
         return False
 
     if error:
@@ -2795,7 +2832,7 @@ async def handle_repeat_offer_button(
     )
 
 
-@router.message(StateFilter(None), F.text.func(has_trade_indicator))
+@router.message(StateFilter(None), F.text.func(looks_like_text_offer))
 async def handle_text_offer(message: types.Message, state: FSMContext, user: Optional[User], bot: Optional[Bot] = None):
     """پردازش آفر متنی با بلوک دقیق و جابه‌جاپذیر نوع معامله و تسویه."""
     if not user:
@@ -2816,7 +2853,7 @@ async def handle_text_offer(message: types.Message, state: FSMContext, user: Opt
 
 @router.message(
     StateFilter(*_TEXT_OFFER_PENDING_CONFIRMATION_STATES),
-    F.text.func(has_trade_indicator),
+    F.text.func(looks_like_text_offer),
 )
 async def handle_text_offer_while_confirmation_pending(
     message: types.Message,
@@ -2904,7 +2941,7 @@ async def _answer_stale_trade_creation_callback(
         await session.commit()
 
 
-@router.message(StateFilter(*_TEXT_OFFER_RECOVERY_STATES), F.text.func(has_trade_indicator))
+@router.message(StateFilter(*_TEXT_OFFER_RECOVERY_STATES), F.text.func(looks_like_text_offer))
 async def handle_text_offer_from_stale_trade_state(
     message: types.Message,
     state: FSMContext,

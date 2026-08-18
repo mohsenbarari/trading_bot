@@ -81,6 +81,18 @@ class BotTradeCreateStaleStateTextOfferTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(idle_match)
         self.assertFalse(broadcast_match)
 
+        missing_side_message = SimpleNamespace(text="امام 20 عدد 176000")
+        missing_side_idle_match, _ = await handler.check(
+            missing_side_message,
+            raw_state=None,
+        )
+        missing_side_broadcast_match, _ = await handler.check(
+            missing_side_message,
+            raw_state=AdminBroadcast.awaiting_message_text,
+        )
+        self.assertTrue(missing_side_idle_match)
+        self.assertFalse(missing_side_broadcast_match)
+
     async def test_pending_confirmation_router_accepts_replacement_offer_text(self):
         handler = next(
             item for item in trade_create.router.message.handlers
