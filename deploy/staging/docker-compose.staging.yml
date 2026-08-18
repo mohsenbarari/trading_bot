@@ -66,8 +66,8 @@ services:
       - staging_uploads:/app/uploads
       - staging_audit:/app/audit_trail
       - type: bind
-        source: ${STAGING_COIN_INFERENCE_SNAPSHOT_HOST_PATH:-/dev/null}
-        target: ${STAGING_COIN_INFERENCE_SNAPSHOT_CONTAINER_PATH:-/app/runtime/coin-inference/coin-rates.json}
+        source: ${STAGING_COIN_INFERENCE_SNAPSHOT_HOST_DIR:-/srv/trading-bot/staging-data/coin-intelligence}
+        target: ${STAGING_COIN_INFERENCE_SNAPSHOT_CONTAINER_DIR:-/app/runtime/coin-inference}
         read_only: true
     depends_on:
       migration:
@@ -126,8 +126,8 @@ services:
       - staging_uploads:/app/uploads
       - staging_audit:/app/audit_trail
       - type: bind
-        source: ${STAGING_COIN_INFERENCE_SNAPSHOT_HOST_PATH:-/dev/null}
-        target: ${STAGING_COIN_INFERENCE_SNAPSHOT_CONTAINER_PATH:-/app/runtime/coin-inference/coin-rates.json}
+        source: ${STAGING_COIN_INFERENCE_SNAPSHOT_HOST_DIR:-/srv/trading-bot/staging-data/coin-intelligence}
+        target: ${STAGING_COIN_INFERENCE_SNAPSHOT_CONTAINER_DIR:-/app/runtime/coin-inference}
         read_only: true
     depends_on:
       migration:
@@ -330,8 +330,8 @@ services:
       # share the durable staging audit volume rather than its container layer.
       - staging_audit:/app/audit_trail
       - type: bind
-        source: ${STAGING_COIN_INFERENCE_SNAPSHOT_HOST_PATH:-/dev/null}
-        target: ${STAGING_COIN_INFERENCE_SNAPSHOT_CONTAINER_PATH:-/app/runtime/coin-inference/coin-rates.json}
+        source: ${STAGING_COIN_INFERENCE_SNAPSHOT_HOST_DIR:-/srv/trading-bot/staging-data/coin-intelligence}
+        target: ${STAGING_COIN_INFERENCE_SNAPSHOT_CONTAINER_DIR:-/app/runtime/coin-inference}
         read_only: true
     depends_on:
       foreign_app:

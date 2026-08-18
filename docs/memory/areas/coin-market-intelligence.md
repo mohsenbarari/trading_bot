@@ -31,9 +31,9 @@
   opaque. Live jobs use `main`; retarget systemd before removal.
 - Estimator: `estimator-live`; home CASH/TOMORROW; `/shadow` shadow/realised.
 - Web UI shows parser/estimator events, status and recorded values—never recompute.
-- Staging imports production names/aliases only via Iran authority and atomically
-  relays a fresh read-only Snapshot to both peers. Preview/selection on, auto off;
-  omitted names require confirmation.
+- Staging imports production names/aliases only via Iran authority; relay Snapshot
+  atomically to both peers. Directory-mount read-only so replacements stay visible.
+  Preview/selection on, auto off; omitted names require confirmation.
 - Reviews use opaque keys/digests, never raw text/identity. Revisions correct
   facts; redacted-number syntax calibrates grammar. Review anchors never affect
   prior input.

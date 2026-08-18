@@ -133,10 +133,24 @@ class StagingSnapshotRelayContractTests(TestCase):
             3,
         )
         self.assertEqual(
-            compose.count("source: ${STAGING_COIN_INFERENCE_SNAPSHOT_HOST_PATH:-/dev/null}"),
+            compose.count(
+                "source: ${STAGING_COIN_INFERENCE_SNAPSHOT_HOST_DIR:-"
+                "/srv/trading-bot/staging-data/coin-intelligence}"
+            ),
+            3,
+        )
+        self.assertEqual(
+            compose.count(
+                "target: ${STAGING_COIN_INFERENCE_SNAPSHOT_CONTAINER_DIR:-"
+                "/app/runtime/coin-inference}"
+            ),
             3,
         )
         self.assertEqual(compose.count("read_only: true"), 3)
+        self.assertNotIn(
+            "source: ${STAGING_COIN_INFERENCE_SNAPSHOT_HOST_PATH",
+            compose,
+        )
         self.assertNotIn("COIN_INTELLIGENCE_INFERENCE_AUTO_SELECTION_ENABLED: true", compose)
 
     def test_deploy_defaults_to_confirmation_only_and_freshness_gate(self) -> None:

@@ -60,6 +60,10 @@ STAGING_COIN_INFERENCE_SNAPSHOT_HOST_PATH=/srv/trading-bot/staging-data/coin-int
 STAGING_COIN_INFERENCE_SNAPSHOT_CONTAINER_PATH=/app/runtime/coin-inference/coin-rates.json
 ```
 
+Compose پوشهٔ والد این فایل‌ها را read-only mount می‌کند، نه خود فایل را. این
+جزئیات ضروری است چون relay فایل Snapshot را به‌صورت atomic جایگزین می‌کند؛ mount
+مستقیم فایل می‌تواند کانتینر را روی inode قدیمی و Snapshot منقضی نگه دارد.
+
 ## معیار پذیرش
 
 1. کاتالوگ هفت‌گانه و تمام aliasهای production در هر دو staging موجود باشد.
