@@ -150,6 +150,43 @@ class StagingOfferOvertimeAcceptanceTests(unittest.TestCase):
         self.assertEqual(argv[-3:], ["--phase", "run", "--no-cleanup-after"])
         self.assertNotIn("bash", argv)
 
+    def test_b2b_driver_runs_from_app_with_explicit_pythonpath(self):
+        completed = runner.subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout='{"passed": true}\n',
+            stderr="",
+        )
+        with patch.dict(
+            os.environ,
+            {"STAGING_FOREIGN_APP_CONTAINER": "foreign-app"},
+            clear=True,
+        ), patch.object(
+            runner,
+            "_run_argv",
+            return_value=(completed, 0.1),
+        ) as run_argv:
+            result = runner.run_b2b_receipt_driver(
+                runner.parse_args([]),
+                "OTACC_safe",
+            )
+
+        argv = run_argv.call_args.args[0]
+        self.assertEqual(
+            argv[:8],
+            [
+                "docker",
+                "exec",
+                "-w",
+                "/app",
+                "-e",
+                "PYTHONPATH=/app",
+                "foreign-app",
+                "python",
+            ],
+        )
+        self.assertEqual(result["status"], "passed")
+
     def test_execute_blocks_when_driver_transports_are_unavailable(self):
         with tempfile.TemporaryDirectory() as tmp:
             args = runner.parse_args(

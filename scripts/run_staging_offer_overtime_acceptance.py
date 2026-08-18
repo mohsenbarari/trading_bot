@@ -825,6 +825,10 @@ def run_b2b_receipt_driver(
     argv = [
         "docker",
         "exec",
+        "-w",
+        "/app",
+        "-e",
+        "PYTHONPATH=/app",
         container,
         "python",
         "scripts/run_telegram_publisher_b2b_harness.py",
