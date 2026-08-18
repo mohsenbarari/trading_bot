@@ -1,3 +1,4 @@
+import json
 import unittest
 from datetime import datetime
 from types import SimpleNamespace
@@ -345,6 +346,35 @@ class TradesRouterExecutionWrapperTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(payload["idempotency_key"], "idem-retry")
                 self.assertEqual(payload["offer_id"], 7)
                 self.assertEqual(payload["responder_user_id"], 5)
+
+    async def test_forwarded_lot_suggestion_is_rebound_to_source_mirror_identity(self):
+        db = FakeDB(get_results=[SimpleNamespace(home_server="foreign", offer_public_id="ofr_shared_106")])
+        owner_user = SimpleNamespace(id=5)
+        remote_payload = {
+            "error_code": "TRADE_LOT_UNAVAILABLE",
+            "offer_id": 8445,
+            "offer_public_id": "ofr_shared_106",
+            "available_lots": [5, 8],
+        }
+
+        with patch("api.routers.trades.is_remote_home", return_value=True), patch(
+            "api.routers.trades.current_server", return_value="iran"
+        ), patch(
+            "api.routers.trades.forward_trade_to_home_server",
+            new=AsyncMock(return_value=(409, remote_payload)),
+        ):
+            response = await _forward_trade_if_remote_home(
+                db=db,
+                trade_data=TradeCreate(offer_id=106, quantity=13, idempotency_key="idem-race"),
+                context=make_context(owner_user),
+                edge_received_at=datetime(2026, 8, 18, 12, 0, 0),
+            )
+
+        self.assertEqual(response.status_code, 409)
+        body = json.loads(response.body)
+        self.assertEqual(body["offer_id"], 106)
+        self.assertEqual(body["offer_public_id"], "ofr_shared_106")
+        self.assertEqual(body["available_lots"], [5, 8])
 
 
 if __name__ == "__main__":

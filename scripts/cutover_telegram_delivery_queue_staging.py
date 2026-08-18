@@ -56,7 +56,7 @@ FOREIGN_ENV_FILE = REPO_ROOT / ".env.staging"
 IRAN_ENV_FILE = f"{IRAN_WORKDIR}/.env.staging"
 STAGING_DB_NAME = "trading_bot_staging"
 RESTORE_DB_NAME = "telegram_queue_stage3_cutover_restore_test"
-EXPECTED_SCHEMA_HEAD = "fb1c2d3e4f5a"
+EXPECTED_SCHEMA_HEAD = "fc2d3e4f5a6b"
 DEFAULT_ARTIFACT_DIR = Path("/tmp/telegram-queue-cutover-staging")
 IRAN_CONTAINERS = frozenset(
     {IRAN_APP_CONTAINER, IRAN_DB_CONTAINER, IRAN_SYNC_CONTAINER}

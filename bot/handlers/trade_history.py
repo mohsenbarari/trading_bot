@@ -53,7 +53,7 @@ router = Router()
 async def show_public_profile_username_unavailable(callback: types.CallbackQuery):
     await answer_callback_query_via_runtime(
         callback,
-        "نام کاربری تلگرام این کاربر شناسایی نشده است.",
+        "اتصال تلگرام این کاربر شناسایی نشده است.",
         show_alert=True,
     )
 

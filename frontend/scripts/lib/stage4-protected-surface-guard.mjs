@@ -363,6 +363,29 @@ export const MARKET_OVERTIME_REQUESTER_ACK_EVIDENCE = Object.freeze({
   sha256: '337868bcd27df759d8cb643c5d4e74f6c887aac1b9b2b2d5e93ea08a7f7df9b1',
 })
 
+// Functional cross-server recovery correction. Numeric offer ids are local to
+// each database, so a suggested-lot retry must retain the source mirror id and
+// carry the stable public id back to the authoritative home. No visual,
+// lifecycle, history, pricing or confirmation contract is widened.
+export const MARKET_CROSS_SERVER_LOT_SUGGESTION_KIND =
+  'market-cross-server-lot-suggestion-identity'
+
+export const MARKET_CROSS_SERVER_LOT_SUGGESTION_ALLOWED_PATHS = Object.freeze([
+  'frontend/src/components/OffersList.vue',
+])
+
+export const MARKET_CROSS_SERVER_LOT_SUGGESTION_ALLOWED_FILE_SHA256 = Object.freeze({
+  'frontend/src/components/OffersList.vue':
+    '063581d59aac95a2a497f7dc0fe2f741e7f9425df28aa53fb4af8d5b8cb054f2',
+})
+
+export const MARKET_CROSS_SERVER_LOT_SUGGESTION_EVIDENCE = Object.freeze({
+  count: 19,
+  contentBytes: 167797,
+  pathSetSha256: '37aa0b51e20f4ae86f7daf6c3c231d93b3d1f288ade1471490a1f843a57c9589',
+  sha256: '310a154c29b733c13534d8f290b065b69f14bdefc64b4c34a5ceaa09a7971425',
+})
+
 export const MESSENGER_RUNTIME_BASELINE = Object.freeze({
   count: 85,
   contentBytes: 1312405,
@@ -1160,6 +1183,52 @@ export function assertMarketOvertimeRequesterAcknowledgementDisposition(entries)
   )
 }
 
+export function assertMarketCrossServerLotSuggestionSemantics(entries) {
+  assertMarketOvertimeRequesterAcknowledgementSemantics(entries)
+  const offers = sourceByPath(entries, 'frontend/src/components/OffersList.vue')
+  const requiredFragments = [
+    'offerPublicId?: string | null;',
+    'const rawOfferPublicId = sourceOffer?.offer_public_id ?? data?.offer_public_id',
+    'tradeSuggestion.value = createTradeSuggestionState(data, sourceOffer);',
+    'executeTrade(tradeSuggestion.offerId, amount, tradeSuggestion.offerPublicId || null)',
+  ]
+  for (const fragment of requiredFragments) {
+    if (!offers.includes(fragment)) {
+      throw new Error(`Market cross-server lot suggestion lost identity binding: ${fragment}`)
+    }
+  }
+  const localIdBeforePeerId = offers.indexOf('const sourceOfferId = Number(sourceOffer?.id)')
+  const selectedLocalId = offers.indexOf('Number.isInteger(sourceOfferId) && sourceOfferId > 0')
+  if (localIdBeforePeerId < 0 || selectedLocalId < localIdBeforePeerId) {
+    throw new Error('Market cross-server lot suggestion no longer prefers the local mirror id')
+  }
+}
+
+function assertMarketCrossServerLotSuggestionAllowedFiles(entries) {
+  const entriesByPath = new Map(entries.map((entry) => [entry.path, entry]))
+  for (const repoPath of MARKET_CROSS_SERVER_LOT_SUGGESTION_ALLOWED_PATHS) {
+    const entry = entriesByPath.get(repoPath)
+    if (!entry) throw new Error(`Market cross-server lot suggestion allowed file is missing: ${repoPath}`)
+    const actualSha256 = fileSha256(entry.content)
+    const expectedSha256 = MARKET_CROSS_SERVER_LOT_SUGGESTION_ALLOWED_FILE_SHA256[repoPath]
+    if (actualSha256 !== expectedSha256) {
+      throw new Error(
+        `Market cross-server lot suggestion allowed file drift: ${repoPath} ${expectedSha256} -> ${actualSha256}`,
+      )
+    }
+  }
+}
+
+export function assertMarketCrossServerLotSuggestionDisposition(entries) {
+  assertMarketCrossServerLotSuggestionAllowedFiles(entries)
+  assertMarketCrossServerLotSuggestionSemantics(entries)
+  return assertProtectedFileSetEvidence(
+    'Market cross-server lot suggestion identity disposition',
+    protectedFileSetEvidence(entries, MARKET_RUNTIME_CONTRACT),
+    MARKET_CROSS_SERVER_LOT_SUGGESTION_EVIDENCE,
+  )
+}
+
 export function resolveMarketRuntimeDisposition(entries) {
   const actual = protectedFileSetEvidence(entries, MARKET_RUNTIME_CONTRACT)
   try {
@@ -1232,22 +1301,30 @@ export function resolveMarketRuntimeDisposition(entries) {
                           evidence: assertMarketOvertimeRequesterAcknowledgementDisposition(entries),
                         }
                       } catch (requesterAckError) {
-                        const messages = [
-                          baselineError,
-                          integrationError,
-                          aPlusCError,
-                          lifecycleError,
-                          perimeterError,
-                          linearMeterError,
-                          compactConfirmError,
-                          feedHeadingError,
-                          terminalVisualError,
-                          customerHistoryError,
-                          requesterAckError,
-                        ].map((error) => error instanceof Error ? error.message : String(error))
-                        throw new Error(
-                          `Market runtime rejected after Stage 4 baseline drift (${messages[0]}); main/UIUX integration disposition rejected (${messages[1]}); Market A+C disposition rejected (${messages[2]}); Market A+C lifecycle-clarity disposition rejected (${messages[3]}); Market A+C perimeter-deadline disposition rejected (${messages[4]}); Market A+C linear-meter disposition rejected (${messages[5]}); Market compact-confirm disposition rejected (${messages[6]}); Market feed-heading removal disposition rejected (${messages[7]}); Market terminal-history visual disposition rejected (${messages[8]}); Market customer-history access disposition rejected (${messages[9]}); Market overtime requester acknowledgement disposition rejected (${messages[10]})`,
-                        )
+                        try {
+                          return {
+                            kind: MARKET_CROSS_SERVER_LOT_SUGGESTION_KIND,
+                            evidence: assertMarketCrossServerLotSuggestionDisposition(entries),
+                          }
+                        } catch (lotSuggestionError) {
+                          const messages = [
+                            baselineError,
+                            integrationError,
+                            aPlusCError,
+                            lifecycleError,
+                            perimeterError,
+                            linearMeterError,
+                            compactConfirmError,
+                            feedHeadingError,
+                            terminalVisualError,
+                            customerHistoryError,
+                            requesterAckError,
+                            lotSuggestionError,
+                          ].map((error) => error instanceof Error ? error.message : String(error))
+                          throw new Error(
+                            `Market runtime rejected after Stage 4 baseline drift (${messages[0]}); main/UIUX integration disposition rejected (${messages[1]}); Market A+C disposition rejected (${messages[2]}); Market A+C lifecycle-clarity disposition rejected (${messages[3]}); Market A+C perimeter-deadline disposition rejected (${messages[4]}); Market A+C linear-meter disposition rejected (${messages[5]}); Market compact-confirm disposition rejected (${messages[6]}); Market feed-heading removal disposition rejected (${messages[7]}); Market terminal-history visual disposition rejected (${messages[8]}); Market customer-history access disposition rejected (${messages[9]}); Market overtime requester acknowledgement disposition rejected (${messages[10]}); Market cross-server lot suggestion identity disposition rejected (${messages[11]})`,
+                          )
+                        }
                       }
                     }
                   }

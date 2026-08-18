@@ -113,7 +113,7 @@ class SyncParityFollowupF0Tests(unittest.IsolatedAsyncioTestCase):
         )
         send_mock = AsyncMock(return_value=_FakeResponse())
         marker_mock = AsyncMock(return_value=1)
-        fetch_mock = AsyncMock(return_value=committed_change)
+        fetch_mock = AsyncMock(side_effect=[committed_change, None])
         sleep_mock = AsyncMock()
 
         with patch("core.sync_worker.redis.Redis", return_value=fake_redis), patch(
@@ -130,7 +130,7 @@ class SyncParityFollowupF0Tests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(asyncio.CancelledError):
                 await sync_worker.main()
 
-        fetch_mock.assert_awaited_once()
+        self.assertEqual(fetch_mock.await_count, 2)
         send_mock.assert_awaited_once()
         self.assertEqual(send_mock.await_args.args[1], committed_change)
         marker_mock.assert_awaited_once_with(committed_change)

@@ -1220,6 +1220,59 @@ describe('OffersList.vue', () => {
     expect(wrapper.find('.trade-suggestion-card').exists()).toBe(false)
   })
 
+  it('reuses the local mirror id and stable public id for a forwarded lot suggestion', async () => {
+    apiFetchMock
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 409,
+        json: async () => ({
+          error_code: 'TRADE_LOT_UNAVAILABLE',
+          offer_id: 8445,
+          offer_public_id: 'ofr_cross_server_106',
+          detail: 'لات انتخابی انجام شد.',
+          available_lots: [8, 5],
+          remaining_quantity: 13,
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 201,
+        json: async () => ({ id: 500 }),
+      })
+
+    const wrapper = await mountOffersList({
+      offers: [{
+        id: 106,
+        offer_public_id: 'ofr_cross_server_106',
+        home_server: 'foreign',
+        user_id: 22,
+        offer_type: 'buy',
+        commodity_name: 'طلا',
+        quantity: 13,
+        remaining_quantity: 13,
+        price: 49700,
+        viewer_effective_price: 49700,
+        is_wholesale: false,
+        lot_sizes: [8, 5],
+        status: 'active',
+      }],
+    })
+
+    await confirmTrade(wrapper, 2)
+    expect(wrapper.find('.trade-suggestion-card').exists()).toBe(true)
+
+    const suggestedLot = wrapper.findAll('[data-test="trade-suggestion-lot-button"]')[0]!
+    await suggestedLot.trigger('click')
+    await suggestedLot.trigger('click')
+    await flushPromises()
+
+    const retryBody = JSON.parse(apiFetchMock.mock.calls[1]![1]!.body as string)
+    expect(retryBody.offer_id).toBe(106)
+    expect(retryBody.offer_public_id).toBe('ofr_cross_server_106')
+    expect([5, 8]).toContain(retryBody.quantity)
+    expect(wrapper.emitted('trade-completed')).toHaveLength(1)
+  })
+
   it('syncs the suggestion overlay with live offer updates and closes it when the offer becomes inactive', async () => {
     apiFetchMock.mockResolvedValue({
       ok: false,

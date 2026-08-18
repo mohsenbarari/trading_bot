@@ -219,12 +219,18 @@ def build_bot_public_profile_keyboard(profile: BotPublicProfile) -> InlineKeyboa
     if not profile.is_self:
         raw_username = getattr(profile.target_user, "username", None)
         username = str(raw_username or "").strip().lstrip("@").strip()
-        if username:
+        telegram_id = _coerce_user_id(getattr(profile.target_user, "telegram_id", None))
+        if telegram_id is not None:
+            message_url = (
+                f"https://t.me/{quote(username, safe='')}"
+                if username
+                else f"tg://user?id={telegram_id}"
+            )
             rows.append(
                 [
                     InlineKeyboardButton(
                         text="💬 ارسال پیام",
-                        url=f"https://t.me/{quote(username, safe='')}",
+                        url=message_url,
                     )
                 ]
             )

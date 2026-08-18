@@ -142,7 +142,13 @@ EXPECTED_RUNTIME_INVENTORY_COUNTS = {
     "queue_execution": 1,
 }
 EXPECTED_RUNTIME_INVENTORY_SHA256 = (
+    "8d0ef6132e6bdcd6a7bbbaf1525c9e270d63eae4e74d8272123e9585ceeac9d2"
+)
+PRE_REALTIME_RECOVERY_RUNTIME_INVENTORY_SHA256 = (
     "918381d8820d04e6247d0c8fdd61c3ac82c103bca35f74eb2e0a581ff95c91c9"
+)
+PRE_LOT_SUGGESTION_PROFILE_LINK_RUNTIME_INVENTORY_SHA256 = (
+    "e251d2d744756d91515f2dc142117bd4debe4cad7ecf0e0f68e2a4833e7976e1"
 )
 PRE_LOCAL_REQUESTER_RECEIPT_RUNTIME_INVENTORY_SHA256 = (
     "424f951de6bf0f8afe7a05f33c288388a266cc25e27b81349a0f42902250d01d"
@@ -168,6 +174,14 @@ OVERTIME_OWNER_PROMPT_RUNTIME_INVENTORY_SHA256 = (
 REVIEWED_RUNTIME_INVENTORY_SHA256 = frozenset(
     {
         EXPECTED_RUNTIME_INVENTORY_SHA256,
+        # Exact reviewed inventory at the request-home cancellation boundary.
+        # Subsequent realtime recovery work shifted existing callsites without
+        # adding or reclassifying a Telegram delivery boundary.
+        PRE_REALTIME_RECOVERY_RUNTIME_INVENTORY_SHA256,
+        # Exact clean-HEAD inventory before local-id rebinding for cross-server
+        # lot suggestions. The repair only shifts existing callsites in the
+        # trade router/handler; all 103 dispositions remain unchanged.
+        PRE_LOT_SUGGESTION_PROFILE_LINK_RUNTIME_INVENTORY_SHA256,
         # The local requester-status receipt hardening adds no Telegram
         # boundary. Existing calls in overtime_request_status.py only moved
         # below a Core SQL helper that prevents mirror lifecycle sync writes.

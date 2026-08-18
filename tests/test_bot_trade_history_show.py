@@ -34,7 +34,7 @@ class BotTradeHistoryShowTests(unittest.IsolatedAsyncioTestCase):
         await show_public_profile_username_unavailable(callback)
 
         callback.answer.assert_awaited_once_with(
-            "نام کاربری تلگرام این کاربر شناسایی نشده است.",
+            "اتصال تلگرام این کاربر شناسایی نشده است.",
             show_alert=True,
         )
 

@@ -37,6 +37,7 @@ from api.routers.trades import TradeCreate, _execute_trade_authoritatively_with_
 from core.services.trade_service import (
     build_lot_unavailable_suggestion_payload,
     get_available_trade_amounts,
+    rebind_lot_unavailable_suggestion_payload,
     validate_offer_trade_amount,
 )
 from core.services.telegram_offer_channel_service import apply_offer_channel_state
@@ -1041,6 +1042,11 @@ async def _handle_channel_trade(
             )
 
             if status_code == 409 and isinstance(body, dict) and body.get("error_code") == "TRADE_LOT_UNAVAILABLE":
+                body = rebind_lot_unavailable_suggestion_payload(
+                    body,
+                    source_offer_id=remote_offer_id,
+                    source_offer_public_id=getattr(offer, "offer_public_id", None),
+                )
                 target_chat_id = user.telegram_id or callback.from_user.id
                 await send_or_update_trade_suggestion_message(
                     callback=callback,

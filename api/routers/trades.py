@@ -54,6 +54,7 @@ from core.services.customer_relation_service import (
 from core.services.trade_service import (
     build_lot_unavailable_suggestion_payload,
     get_available_trade_amounts,
+    rebind_lot_unavailable_suggestion_payload,
     validate_offer_trade_amount,
 )
 from core.services.block_service import is_trade_blocked_by_principals
@@ -3448,6 +3449,21 @@ async def _forward_trade_if_remote_home(
         delegated_actor=getattr(actor_user, "id", None) != owner_user.id,
     )
     status_code, body = await forward_trade_to_home_server(offer.home_server, payload)
+
+    # The authoritative server's numeric ``offer_id`` belongs to its own
+    # database.  A recovery payload is consumed on this (source) server, so
+    # returning that foreign id can make the next suggested-lot click target
+    # an unrelated local row.  Keep the stable public id and translate the
+    # response back to the source mirror id before it reaches the client.
+    if (
+        isinstance(body, dict)
+        and body.get("error_code") == "TRADE_LOT_UNAVAILABLE"
+    ):
+        body = rebind_lot_unavailable_suggestion_payload(
+            body,
+            source_offer_id=trade_data.offer_id,
+            source_offer_public_id=offer_public_id,
+        )
 
     # Uncertain delivery after send: retain the key, show M18, reconcile later.
     # Definite pre-send failures (503) retain nothing and keep the retry copy.

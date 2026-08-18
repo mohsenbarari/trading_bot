@@ -33,6 +33,10 @@ import {
   MARKET_CUSTOMER_HISTORY_ACCESS_ALLOWED_PATHS,
   MARKET_CUSTOMER_HISTORY_ACCESS_EVIDENCE,
   MARKET_CUSTOMER_HISTORY_ACCESS_KIND,
+  MARKET_CROSS_SERVER_LOT_SUGGESTION_ALLOWED_FILE_SHA256,
+  MARKET_CROSS_SERVER_LOT_SUGGESTION_ALLOWED_PATHS,
+  MARKET_CROSS_SERVER_LOT_SUGGESTION_EVIDENCE,
+  MARKET_CROSS_SERVER_LOT_SUGGESTION_KIND,
   MARKET_FEED_HEADING_REMOVAL_ALLOWED_FILE_SHA256,
   MARKET_FEED_HEADING_REMOVAL_ALLOWED_PATHS,
   MARKET_FEED_HEADING_REMOVAL_EVIDENCE,
@@ -70,6 +74,8 @@ import {
   assertMarketAPlusCDisposition,
   assertMarketCustomerHistoryAccessDisposition,
   assertMarketCustomerHistoryAccessSemantics,
+  assertMarketCrossServerLotSuggestionDisposition,
+  assertMarketCrossServerLotSuggestionSemantics,
   assertMarketLifecycleClarityDisposition,
   assertMarketLifecycleClaritySemantics,
   assertMarketPerimeterDeadlineDisposition,
@@ -306,12 +312,12 @@ describe('Stage 4 protected surface baseline', () => {
     )
   })
 
-  it('keeps every prior Market disposition immutable while admitting requester local acknowledgement', () => {
+  it('keeps every prior Market disposition immutable while admitting cross-server lot identity', () => {
     expect(ownedPaths.market).toContain('frontend/src/utils/settlementType.ts')
     const entries = readFileEntries(repoRoot, ownedPaths.market)
     expect(resolveMarketRuntimeDisposition(entries)).toMatchObject({
-      kind: MARKET_OVERTIME_REQUESTER_ACK_KIND,
-      evidence: MARKET_OVERTIME_REQUESTER_ACK_EVIDENCE,
+      kind: MARKET_CROSS_SERVER_LOT_SUGGESTION_KIND,
+      evidence: MARKET_CROSS_SERVER_LOT_SUGGESTION_EVIDENCE,
     })
     expect(MARKET_RUNTIME_BASELINE).toEqual({
       count: 19,
@@ -457,7 +463,42 @@ describe('Stage 4 protected surface baseline', () => {
     expect(Object.isFrozen(MARKET_OVERTIME_REQUESTER_ACK_ALLOWED_PATHS)).toBe(true)
     expect(Object.isFrozen(MARKET_OVERTIME_REQUESTER_ACK_ALLOWED_FILE_SHA256)).toBe(true)
     expect(Object.isFrozen(MARKET_OVERTIME_REQUESTER_ACK_EVIDENCE)).toBe(true)
-    expect(() => assertMarketOvertimeRequesterAcknowledgementDisposition(entries)).not.toThrow()
+    expect(() => assertMarketOvertimeRequesterAcknowledgementDisposition(entries)).toThrow(
+      /allowed file drift/,
+    )
+    expect(MARKET_CROSS_SERVER_LOT_SUGGESTION_ALLOWED_PATHS).toEqual([
+      'frontend/src/components/OffersList.vue',
+    ])
+    expect(MARKET_CROSS_SERVER_LOT_SUGGESTION_ALLOWED_FILE_SHA256).toEqual({
+      'frontend/src/components/OffersList.vue':
+        '063581d59aac95a2a497f7dc0fe2f741e7f9425df28aa53fb4af8d5b8cb054f2',
+    })
+    expect(MARKET_CROSS_SERVER_LOT_SUGGESTION_EVIDENCE).toEqual({
+      count: 19,
+      contentBytes: 167797,
+      pathSetSha256: '37aa0b51e20f4ae86f7daf6c3c231d93b3d1f288ade1471490a1f843a57c9589',
+      sha256: '310a154c29b733c13534d8f290b065b69f14bdefc64b4c34a5ceaa09a7971425',
+    })
+    expect(() => assertMarketCrossServerLotSuggestionDisposition(entries)).not.toThrow()
+  })
+
+  it('fails closed if the cross-server suggestion loses local or public identity', () => {
+    const entries = readFileEntries(repoRoot, ownedPaths.market)
+    const mutateOffers = (fragment) => entries.map((entry) => (
+      entry.path === 'frontend/src/components/OffersList.vue'
+        ? { ...entry, content: Buffer.from(entry.content.toString('utf8').replace(fragment, '')) }
+        : entry
+    ))
+
+    const withoutPublicId = mutateOffers(
+      'const rawOfferPublicId = sourceOffer?.offer_public_id ?? data?.offer_public_id',
+    )
+    expect(() => assertMarketCrossServerLotSuggestionSemantics(withoutPublicId)).toThrow(
+      /lost identity binding/,
+    )
+    expect(() => resolveMarketRuntimeDisposition(withoutPublicId)).toThrow(
+      /Market cross-server lot suggestion identity disposition rejected/,
+    )
   })
 
   it('fails closed if the customer history gate or accountant exclusion returns', () => {

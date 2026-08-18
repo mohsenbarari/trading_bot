@@ -27,14 +27,10 @@ import {
 
 const INITIAL_FETCH_DELAY_MS = 1000
 const POLL_INTERVAL_MS = 2000
+const REQUESTER_DELIVERY_POLL_INTERVAL_MS = 500
+const REQUESTER_DELIVERY_POLL_WINDOW_MS = 15_000
 const LOCAL_REQUESTER_ACK_GRACE_MS = 15_000
 const LOCAL_REQUESTER_CANCEL_GRACE_MS = 30_000
-const ACTIONABLE_STATUSES = new Set([
-  'overtime_presented',
-  'overtime_delivering',
-  'overtime_claimed',
-])
-
 interface SessionSummary {
   is_current?: boolean
   is_primary?: boolean
@@ -62,6 +58,20 @@ function remainingFromPayload(
   return 0
 }
 
+function requesterDecisionStarted(
+  payload: OvertimeRequestPublicPayload | null | undefined,
+): boolean {
+  return Boolean(
+    payload?.is_actionable
+    || payload?.presented_at
+    || deadlineMs(payload) != null
+    || (
+      typeof payload?.remaining_decision_seconds === 'number'
+      && payload.remaining_decision_seconds > 0
+    )
+  )
+}
+
 export function useOvertimeApprovalRuntime() {
   const { on, off } = useWebSocket()
 
@@ -84,6 +94,11 @@ export function useOvertimeApprovalRuntime() {
   let terminalNoticeTimeout: number | null = null
   let ownerOfferFetchToken = 0
   let refreshInFlight: Promise<void> | null = null
+  let requesterDeliveryPollTimeout: number | null = null
+  let requesterDeliveryPollExpiresAt = 0
+  let requesterDeliveryPollRequestId: string | null = null
+  let requesterFallbackDeadlineId: string | null = null
+  let requesterFallbackDeadlineMs: number | null = null
   let requesterRevision = 0
   let localRequesterAckId: string | null = null
   let localRequesterAckExpiresAt = 0
@@ -125,6 +140,22 @@ export function useOvertimeApprovalRuntime() {
     }
   }
 
+  const clearRequesterDeliveryPoll = () => {
+    if (requesterDeliveryPollTimeout != null) {
+      window.clearTimeout(requesterDeliveryPollTimeout)
+      requesterDeliveryPollTimeout = null
+    }
+    requesterDeliveryPollExpiresAt = 0
+    requesterDeliveryPollRequestId = null
+  }
+
+  const stopRequesterDeliveryPollTimer = () => {
+    if (requesterDeliveryPollTimeout != null) {
+      window.clearTimeout(requesterDeliveryPollTimeout)
+      requesterDeliveryPollTimeout = null
+    }
+  }
+
   const clearInitialFetchTimeout = () => {
     if (initialFetchTimeout != null) {
       window.clearTimeout(initialFetchTimeout)
@@ -153,6 +184,9 @@ export function useOvertimeApprovalRuntime() {
     showRequesterStatus.value = false
     requesterCountdown.value = 0
     requesterMessage.value = ''
+    requesterFallbackDeadlineId = null
+    requesterFallbackDeadlineMs = null
+    clearRequesterDeliveryPoll()
   }
 
   const clearLocalRequesterAcknowledgement = () => {
@@ -176,8 +210,29 @@ export function useOvertimeApprovalRuntime() {
       ownerCountdown.value = 0
     }
 
-    if (requesterRequest.value?.is_actionable || requesterRequest.value?.presented_at) {
-      requesterCountdown.value = remainingFromPayload(requesterRequest.value, now)
+    if (requesterDecisionStarted(requesterRequest.value)) {
+      const requestId = requesterRequest.value.request_public_id || null
+      const absolute = deadlineMs(requesterRequest.value)
+      if (absolute != null) {
+        requesterFallbackDeadlineId = null
+        requesterFallbackDeadlineMs = null
+        requesterCountdown.value = Math.max(0, Math.floor((absolute - now) / 1000))
+      } else {
+        const remaining = requesterRequest.value.remaining_decision_seconds
+        if (typeof remaining === 'number' && Number.isFinite(remaining) && remaining > 0) {
+          const candidateDeadline = now + Math.floor(remaining) * 1000
+          if (requesterFallbackDeadlineId !== requestId || requesterFallbackDeadlineMs == null) {
+            requesterFallbackDeadlineId = requestId
+            requesterFallbackDeadlineMs = candidateDeadline
+          } else {
+            // A repeated snapshot must never restart the local countdown.
+            requesterFallbackDeadlineMs = Math.min(requesterFallbackDeadlineMs, candidateDeadline)
+          }
+        }
+        requesterCountdown.value = requesterFallbackDeadlineMs == null
+          ? 0
+          : Math.max(0, Math.floor((requesterFallbackDeadlineMs - now) / 1000))
+      }
       if (requesterCountdown.value <= 0 && requesterRequest.value?.is_actionable) {
         closeRequesterStatus()
       }
@@ -273,13 +328,29 @@ export function useOvertimeApprovalRuntime() {
     requesterRequest.value = payload
     showRequesterStatus.value = true
     const status = String(payload.result_status || '')
-    if (payload.is_actionable || ACTIONABLE_STATUSES.has(status)) {
+    const decisionStarted = requesterDecisionStarted(payload)
+    if (decisionStarted) {
       requesterMessage.value = ''
       syncCountdowns()
       ensureCountdownTimer()
+      clearRequesterDeliveryPoll()
     } else {
       requesterMessage.value = M21_REQUESTER_QUEUED
       requesterCountdown.value = 0
+    }
+    if (
+      status === 'overtime_delivering'
+      && !payload.presented_at
+      && deadlineMs(payload) == null
+    ) {
+      if (requesterDeliveryPollRequestId !== payload.request_public_id) {
+        clearRequesterDeliveryPoll()
+        requesterDeliveryPollRequestId = payload.request_public_id
+        requesterDeliveryPollExpiresAt = Date.now() + REQUESTER_DELIVERY_POLL_WINDOW_MS
+      }
+      scheduleRequesterDeliveryPoll()
+    } else if (!decisionStarted) {
+      clearRequesterDeliveryPoll()
     }
   }
 
@@ -317,6 +388,32 @@ export function useOvertimeApprovalRuntime() {
       refreshInFlight = null
     })
     return refreshInFlight
+  }
+
+  function scheduleRequesterDeliveryPoll() {
+    if (requesterDeliveryPollTimeout != null) return
+    if (Date.now() >= requesterDeliveryPollExpiresAt) {
+      // Keep the request identity and expired deadline. A regular 2s refresh of
+      // the same stuck delivery must not restart another fast-poll window.
+      stopRequesterDeliveryPollTimer()
+      return
+    }
+    requesterDeliveryPollTimeout = window.setTimeout(async () => {
+      requesterDeliveryPollTimeout = null
+      await refreshPending()
+      const current = requesterRequest.value
+      const status = String(current?.result_status || '')
+      if (
+        current
+        && status === 'overtime_delivering'
+        && !current.presented_at
+        && deadlineMs(current) == null
+      ) {
+        scheduleRequesterDeliveryPoll()
+      } else {
+        clearRequesterDeliveryPoll()
+      }
+    }, REQUESTER_DELIVERY_POLL_INTERVAL_MS)
   }
 
   const handleRequesterAcknowledged = (event: Event) => {
@@ -441,6 +538,7 @@ export function useOvertimeApprovalRuntime() {
   onBeforeUnmount(() => {
     clearInitialFetchTimeout()
     clearPollTimer()
+    clearRequesterDeliveryPoll()
     clearCountdownTimer()
     clearTerminalNoticeTimeout()
     document.removeEventListener('visibilitychange', handleVisibilityChange)

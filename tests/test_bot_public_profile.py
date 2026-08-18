@@ -282,7 +282,7 @@ class BotPublicProfileTests(unittest.IsolatedAsyncioTestCase):
 
     def test_other_user_profile_links_to_observed_telegram_username(self):
         profile = BotPublicProfile(
-            target_user=SimpleNamespace(id=5, username="@coin_owner"),
+            target_user=SimpleNamespace(id=5, username="@coin_owner", telegram_id=7005),
             display_name="target",
             accountants=(),
         )
@@ -296,7 +296,7 @@ class BotPublicProfileTests(unittest.IsolatedAsyncioTestCase):
 
     def test_unsafe_stored_username_cannot_change_telegram_url_structure(self):
         profile = BotPublicProfile(
-            target_user=SimpleNamespace(id=5, username="owner/path"),
+            target_user=SimpleNamespace(id=5, username="owner/path", telegram_id=7005),
             display_name="target",
             accountants=(),
         )
@@ -307,7 +307,7 @@ class BotPublicProfileTests(unittest.IsolatedAsyncioTestCase):
 
     def test_missing_username_uses_non_navigation_status_button(self):
         profile = BotPublicProfile(
-            target_user=SimpleNamespace(id=5, username=None),
+            target_user=SimpleNamespace(id=5, username=None, telegram_id=None),
             display_name="target",
             accountants=(),
         )
@@ -317,6 +317,32 @@ class BotPublicProfileTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(button.text, "⚠️ عدم شناسایی کاربر")
         self.assertEqual(button.callback_data, PUBLIC_PROFILE_USERNAME_UNAVAILABLE_CALLBACK)
         self.assertIsNone(button.url)
+
+    def test_stored_username_without_bot_link_is_not_treated_as_active(self):
+        profile = BotPublicProfile(
+            target_user=SimpleNamespace(id=5, username="stale_username", telegram_id=None),
+            display_name="target",
+            accountants=(),
+        )
+
+        button = build_bot_public_profile_keyboard(profile).inline_keyboard[1][0]
+
+        self.assertEqual(button.text, "⚠️ عدم شناسایی کاربر")
+        self.assertEqual(button.callback_data, PUBLIC_PROFILE_USERNAME_UNAVAILABLE_CALLBACK)
+        self.assertIsNone(button.url)
+
+    def test_bot_linked_user_without_username_uses_telegram_id_message_link(self):
+        profile = BotPublicProfile(
+            target_user=SimpleNamespace(id=5, username=None, telegram_id=7005),
+            display_name="target",
+            accountants=(),
+        )
+
+        button = build_bot_public_profile_keyboard(profile).inline_keyboard[1][0]
+
+        self.assertEqual(button.text, "💬 ارسال پیام")
+        self.assertEqual(button.url, "tg://user?id=7005")
+        self.assertIsNone(button.callback_data)
 
     def test_send_message_button_is_hidden_on_own_profile(self):
         profile = BotPublicProfile(

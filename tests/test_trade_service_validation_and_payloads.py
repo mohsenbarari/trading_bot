@@ -7,6 +7,7 @@ from core.services.trade_service import (
     _ensure_int_list,
     build_lot_unavailable_suggestion_payload,
     get_available_trade_amounts,
+    rebind_lot_unavailable_suggestion_payload,
     suggest_lot_combination,
     validate_lot_sizes,
     validate_offer_trade_amount,
@@ -143,6 +144,32 @@ class TradeServiceValidationAndPayloadTests(unittest.TestCase):
         self.assertEqual(payload["lot_summary"], "ندارد")
         self.assertEqual(payload["available_lots_text"], "ندارد")
         self.assertIn("دکمه فعالی ندارد", payload["message"])
+
+    def test_rebind_lot_suggestion_keeps_peer_payload_but_uses_source_identity(self):
+        peer_payload = {
+            "error_code": "TRADE_LOT_UNAVAILABLE",
+            "offer_id": 8445,
+            "offer_public_id": "ofr_shared_106",
+            "available_lots": [8, 5],
+        }
+
+        rebound = rebind_lot_unavailable_suggestion_payload(
+            peer_payload,
+            source_offer_id=106,
+            source_offer_public_id="ofr_shared_106",
+        )
+
+        self.assertEqual(rebound["offer_id"], 106)
+        self.assertEqual(rebound["offer_public_id"], "ofr_shared_106")
+        self.assertEqual(rebound["available_lots"], [8, 5])
+        self.assertEqual(peer_payload["offer_id"], 8445)
+
+        peer_public_id_fallback = rebind_lot_unavailable_suggestion_payload(
+            peer_payload,
+            source_offer_id=106,
+            source_offer_public_id=None,
+        )
+        self.assertEqual(peer_public_id_fallback["offer_public_id"], "ofr_shared_106")
 
     def test_validate_quantity_covers_invalid_below_above_and_valid_values(self):
         self.assertEqual(validate_quantity(7.5), (False, "❌ quantity باید یک عدد صحیح باشد، نه اعشاری"))

@@ -18,6 +18,7 @@ __all__ = [
     "get_available_trade_amounts",
     "validate_offer_trade_amount",
     "build_lot_unavailable_suggestion_payload",
+    "rebind_lot_unavailable_suggestion_payload",
     "validate_quantity",
     "validate_price",
     "parse_lot_sizes_text",
@@ -386,6 +387,25 @@ def build_lot_unavailable_suggestion_payload(
         "available_lots": normalized_available_amounts,
         "available_lots_text": lots_button_text,
     }
+
+
+def rebind_lot_unavailable_suggestion_payload(
+    payload: dict,
+    *,
+    source_offer_id: Union[int, float, str],
+    source_offer_public_id: Optional[str],
+) -> dict:
+    """Translate a peer's recovery payload to the source mirror identity.
+
+    Numeric offer ids are database-local.  A client or bot consuming the
+    response on the source server must continue with its local mirror id while
+    carrying the stable public id back to the authoritative home.
+    """
+    rebound = dict(payload)
+    rebound["offer_id"] = _ensure_int(source_offer_id, "source_offer_id")
+    stable_public_id = source_offer_public_id or payload.get("offer_public_id")
+    rebound["offer_public_id"] = str(stable_public_id or "").strip() or None
+    return rebound
 
 
 def validate_quantity(quantity: Union[int, float, str]) -> Tuple[bool, str]:

@@ -261,6 +261,119 @@ describe('useOvertimeApprovalRuntime', () => {
     wrapper.unmount()
   })
 
+  it('starts and decrements a requester countdown from a remaining-seconds snapshot', async () => {
+    overtimeRuntimeMocks.apiFetch.mockImplementation(async (url: string) => {
+      if (url.includes('pending-owner')) return jsonResponse({ current: null, items: [] })
+      if (url.includes('pending-requester')) return jsonResponse({ items: [] })
+      return jsonResponse({})
+    })
+
+    const { wrapper, runtime } = mountRuntime()
+    publishRequesterOvertimeAcknowledgement({
+      workflow: 'overtime',
+      request_public_id: 'req_countdown_snapshot_1',
+      request_home_server: 'foreign',
+      result_status: 'overtime_presented',
+      is_actionable: true,
+      remaining_decision_seconds: 10,
+    })
+    await flushPromises()
+
+    expect(runtime.requesterMessage.value).toBe('')
+    expect(runtime.requesterCountdown.value).toBe(10)
+
+    await vi.advanceTimersByTimeAsync(1000)
+    await flushPromises()
+    expect(runtime.requesterCountdown.value).toBe(9)
+
+    wrapper.unmount()
+  })
+
+  it('fast-polls a delivered request and never presents a frozen zero countdown', async () => {
+    let requesterPolls = 0
+    const deadline = new Date(Date.now() + 30_000).toISOString()
+    overtimeRuntimeMocks.apiFetch.mockImplementation(async (url: string) => {
+      if (url.includes('pending-owner')) return jsonResponse({ current: null, items: [] })
+      if (url.includes('pending-requester')) {
+        requesterPolls += 1
+        return jsonResponse({
+          items: requesterPolls >= 1
+            ? [{
+              request_public_id: 'req_fast_delivery_1',
+              result_status: 'overtime_presented',
+              is_actionable: true,
+              presented_at: new Date().toISOString(),
+              decision_deadline_at: deadline,
+              remaining_decision_seconds: 30,
+            }]
+            : [],
+        })
+      }
+      return jsonResponse({})
+    })
+
+    const { wrapper, runtime } = mountRuntime()
+    publishRequesterOvertimeAcknowledgement({
+      workflow: 'overtime',
+      request_public_id: 'req_fast_delivery_1',
+      request_home_server: 'foreign',
+      result_status: 'overtime_delivering',
+      is_actionable: false,
+    })
+    await flushPromises()
+
+    expect(runtime.requesterMessage.value).toBe(M21_REQUESTER_QUEUED)
+    expect(runtime.requesterCountdown.value).toBe(0)
+
+    await vi.advanceTimersByTimeAsync(500)
+    await flushPromises()
+
+    expect(requesterPolls).toBe(1)
+    expect(runtime.requesterMessage.value).toBe('')
+    expect(runtime.requesterCountdown.value).toBeGreaterThanOrEqual(29)
+
+    wrapper.unmount()
+  })
+
+  it('does not restart the bounded fast-poll window for a stuck delivery', async () => {
+    let requesterPolls = 0
+    const delivering = {
+      request_public_id: 'req_stuck_delivery_1',
+      result_status: 'overtime_delivering',
+      is_actionable: false,
+    }
+    overtimeRuntimeMocks.apiFetch.mockImplementation(async (url: string) => {
+      if (url.includes('pending-owner')) return jsonResponse({ current: null, items: [] })
+      if (url.includes('pending-requester')) {
+        requesterPolls += 1
+        return jsonResponse({ items: [delivering] })
+      }
+      return jsonResponse({})
+    })
+
+    const { wrapper, runtime } = mountRuntime()
+    publishRequesterOvertimeAcknowledgement({
+      workflow: 'overtime',
+      request_home_server: 'foreign',
+      ...delivering,
+    })
+    await flushPromises()
+
+    await vi.advanceTimersByTimeAsync(16_000)
+    await flushPromises()
+    const pollsAfterWindow = requesterPolls
+
+    // The next second contains no regular 2s poll. If the same request had
+    // silently restarted its fast window, two more 500ms calls would appear.
+    await vi.advanceTimersByTimeAsync(1_000)
+    await flushPromises()
+    expect(requesterPolls).toBe(pollsAfterWindow)
+    expect(runtime.requesterMessage.value).toBe(M21_REQUESTER_QUEUED)
+    expect(runtime.requesterCountdown.value).toBe(0)
+
+    wrapper.unmount()
+  })
+
   it('does not restore a cancelled request from an older in-flight poll', async () => {
     const request = {
       request_public_id: 'req_cancel_race_1',

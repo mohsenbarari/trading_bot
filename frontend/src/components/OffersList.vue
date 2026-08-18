@@ -32,6 +32,7 @@ interface TradeLotSuggestionState {
   title: string;
   introText: string;
   offerId: number;
+  offerPublicId?: string | null;
   offerType: 'buy' | 'sell' | '';
   offerTypeLabel: string;
   settlementType: SettlementType;
@@ -658,10 +659,22 @@ function buildOfferSignature(offer: any | null): string | null {
 
 function createTradeSuggestionState(data: any, fallbackOffer?: any): TradeLotSuggestionState {
   const sourceOffer = fallbackOffer || (Array.isArray(props.offers) ? props.offers.find((offer: any) => offer.id === (data.offer_id || 0)) : null);
+  const sourceOfferId = Number(sourceOffer?.id)
+  const responseOfferId = Number(data?.offer_id)
+  const offerId = Number.isInteger(sourceOfferId) && sourceOfferId > 0
+    ? sourceOfferId
+    : responseOfferId
+  const rawOfferPublicId = sourceOffer?.offer_public_id ?? data?.offer_public_id
+  const offerPublicId = typeof rawOfferPublicId === 'string'
+    && rawOfferPublicId.trim().length > 0
+    && rawOfferPublicId.trim().length <= 40
+    ? rawOfferPublicId.trim()
+    : null
   return {
     title: data.title || 'پیشنهاد معامله',
     introText: data.intro_text || data.detail || 'بخش انتخابی شما دیگر در دسترس نیست.',
-    offerId: data.offer_id || sourceOffer?.id || 0,
+    offerId: Number.isInteger(offerId) && offerId > 0 ? offerId : 0,
+    offerPublicId,
     offerType: data.offer_type || sourceOffer?.offer_type || '',
     offerTypeLabel: data.offer_type_label || ((data.offer_type || sourceOffer?.offer_type) === 'buy' ? 'خرید' : 'فروش'),
     settlementType: normalizeSettlementType(data.settlement_type ?? sourceOffer?.settlement_type),
@@ -714,6 +727,9 @@ function syncTradeSuggestionFromOffers() {
     remainingQuantity: remaining,
     lotSummary: formatLotSummary(availableLots),
     availableLots,
+    offerPublicId: typeof sourceOffer.offer_public_id === 'string'
+      ? sourceOffer.offer_public_id
+      : tradeSuggestion.value.offerPublicId,
     expiresAtTs: sourceOffer.expires_at_ts ?? null,
     sourceSignature: currentSourceSignature,
   };
@@ -731,7 +747,11 @@ watch(now, () => {
   }
 });
 
-async function executeTrade(offerId: number, quantity: number) {
+async function executeTrade(
+  offerId: number,
+  quantity: number,
+  explicitOfferPublicId: string | null = null,
+) {
   if (tradingOfferId.value !== null) return;
   if (!tradeIdentityReady.value) {
     showTradeError('اطلاعات حساب در حال بارگذاری است. لطفاً چند لحظه دیگر تلاش کنید.');
@@ -748,8 +768,8 @@ async function executeTrade(offerId: number, quantity: number) {
     return;
   }
   const sourceOffer = props.offers.find((offer: any) => Number(offer?.id) === normalizedOfferId)
-  const candidatePublicId = typeof sourceOffer?.offer_public_id === 'string'
-    ? sourceOffer.offer_public_id.trim()
+  const candidatePublicId = typeof (sourceOffer?.offer_public_id ?? explicitOfferPublicId) === 'string'
+    ? String(sourceOffer?.offer_public_id ?? explicitOfferPublicId).trim()
     : ''
   const offerPublicId = candidatePublicId.length > 0 && candidatePublicId.length <= 40
     ? candidatePublicId
@@ -795,7 +815,7 @@ async function executeTrade(offerId: number, quantity: number) {
       if (componentActive) emit('trade-completed');
     } else {
       if (data?.error_code === 'TRADE_LOT_UNAVAILABLE' && Array.isArray(data.available_lots) && data.available_lots.length > 0) {
-        tradeSuggestion.value = createTradeSuggestionState(data);
+        tradeSuggestion.value = createTradeSuggestionState(data, sourceOffer);
         clearTradeIntent(intent);
         return;
       }
@@ -878,7 +898,7 @@ async function cancelOwnOffer(offerId: number) {
     :busy-amount="tradingAmount"
     :auto-close-seconds="15"
     @close="closeTradeSuggestion"
-    @select-lot="(amount) => tradeSuggestion && executeTrade(tradeSuggestion.offerId, amount)"
+    @select-lot="(amount) => tradeSuggestion && executeTrade(tradeSuggestion.offerId, amount, tradeSuggestion.offerPublicId || null)"
   />
     <!-- Trade Error Toast -->
     <transition name="fade">
