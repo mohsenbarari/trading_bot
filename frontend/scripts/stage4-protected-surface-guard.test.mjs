@@ -41,6 +41,10 @@ import {
   MARKET_HISTORY_TERMINAL_VISUAL_ALLOWED_PATHS,
   MARKET_HISTORY_TERMINAL_VISUAL_EVIDENCE,
   MARKET_HISTORY_TERMINAL_VISUAL_KIND,
+  MARKET_OVERTIME_REQUESTER_ACK_ALLOWED_FILE_SHA256,
+  MARKET_OVERTIME_REQUESTER_ACK_ALLOWED_PATHS,
+  MARKET_OVERTIME_REQUESTER_ACK_EVIDENCE,
+  MARKET_OVERTIME_REQUESTER_ACK_KIND,
   MARKET_RUNTIME_BASELINE,
   MARKET_RUNTIME_CONTRACT,
   MESSENGER_OMITTED_DIRECT_RUNTIME_PATHS,
@@ -78,6 +82,8 @@ import {
   assertMarketFeedHeadingRemovalSemantics,
   assertMarketHistoryTerminalVisualDisposition,
   assertMarketHistoryTerminalVisualSemantics,
+  assertMarketOvertimeRequesterAcknowledgementDisposition,
+  assertMarketOvertimeRequesterAcknowledgementSemantics,
   STAGE4_BASE_COMMIT,
   STAGE4_BASE_TREE,
   STAGE4_ROUTE_CONTRACT_PATH,
@@ -300,12 +306,12 @@ describe('Stage 4 protected surface baseline', () => {
     )
   })
 
-  it('keeps every prior Market disposition immutable while admitting customer read-only history', () => {
+  it('keeps every prior Market disposition immutable while admitting requester local acknowledgement', () => {
     expect(ownedPaths.market).toContain('frontend/src/utils/settlementType.ts')
     const entries = readFileEntries(repoRoot, ownedPaths.market)
     expect(resolveMarketRuntimeDisposition(entries)).toMatchObject({
-      kind: MARKET_CUSTOMER_HISTORY_ACCESS_KIND,
-      evidence: MARKET_CUSTOMER_HISTORY_ACCESS_EVIDENCE,
+      kind: MARKET_OVERTIME_REQUESTER_ACK_KIND,
+      evidence: MARKET_OVERTIME_REQUESTER_ACK_EVIDENCE,
     })
     expect(MARKET_RUNTIME_BASELINE).toEqual({
       count: 19,
@@ -394,10 +400,12 @@ describe('Stage 4 protected surface baseline', () => {
       'frontend/src/components/OffersList.vue',
       'frontend/src/components/ui/AppOfferHistoryStamp.vue',
     ])
-    for (const repoPath of MARKET_HISTORY_TERMINAL_VISUAL_ALLOWED_PATHS) {
-      const entry = entries.find(({ path: candidate }) => candidate === repoPath)
-      expect(fileSha256(entry.content)).toBe(MARKET_HISTORY_TERMINAL_VISUAL_ALLOWED_FILE_SHA256[repoPath])
-    }
+    expect(MARKET_HISTORY_TERMINAL_VISUAL_ALLOWED_FILE_SHA256).toEqual({
+      'frontend/src/components/OffersList.vue':
+        '2ba59224feb7dd817c491be193a769f21d7ea3cf6989ba9e8450398c9ca535bd',
+      'frontend/src/components/ui/AppOfferHistoryStamp.vue':
+        '3a3a91c1a279cdc98529c4505a3272ab9ddc0eec6a3a47357af9ddd354d2d385',
+    })
     expect(MARKET_HISTORY_TERMINAL_VISUAL_EVIDENCE).toEqual({
       count: 19,
       contentBytes: 166827,
@@ -407,6 +415,9 @@ describe('Stage 4 protected surface baseline', () => {
     expect(Object.isFrozen(MARKET_HISTORY_TERMINAL_VISUAL_ALLOWED_PATHS)).toBe(true)
     expect(Object.isFrozen(MARKET_HISTORY_TERMINAL_VISUAL_ALLOWED_FILE_SHA256)).toBe(true)
     expect(Object.isFrozen(MARKET_HISTORY_TERMINAL_VISUAL_EVIDENCE)).toBe(true)
+    expect(() => assertMarketHistoryTerminalVisualDisposition(entries)).toThrow(
+      /Market terminal-history allowed file drift/,
+    )
     expect(MARKET_CUSTOMER_HISTORY_ACCESS_KIND).toBe('market-customer-read-only-history-access')
     expect(MARKET_CUSTOMER_HISTORY_ACCESS_ALLOWED_PATHS).toEqual([
       'frontend/src/views/MarketView.vue',
@@ -424,7 +435,29 @@ describe('Stage 4 protected surface baseline', () => {
     expect(Object.isFrozen(MARKET_CUSTOMER_HISTORY_ACCESS_ALLOWED_PATHS)).toBe(true)
     expect(Object.isFrozen(MARKET_CUSTOMER_HISTORY_ACCESS_ALLOWED_FILE_SHA256)).toBe(true)
     expect(Object.isFrozen(MARKET_CUSTOMER_HISTORY_ACCESS_EVIDENCE)).toBe(true)
-    expect(() => assertMarketCustomerHistoryAccessDisposition(entries)).not.toThrow()
+    expect(() => assertMarketCustomerHistoryAccessDisposition(entries)).toThrow(
+      /contentBytes drift/,
+    )
+    expect(MARKET_OVERTIME_REQUESTER_ACK_KIND).toBe(
+      'market-overtime-requester-local-acknowledgement',
+    )
+    expect(MARKET_OVERTIME_REQUESTER_ACK_ALLOWED_PATHS).toEqual([
+      'frontend/src/components/OffersList.vue',
+    ])
+    expect(MARKET_OVERTIME_REQUESTER_ACK_ALLOWED_FILE_SHA256).toEqual({
+      'frontend/src/components/OffersList.vue':
+        '739458aaaaa4346a71423ad623657168f8d4a846ee86beb010815ac938240dc9',
+    })
+    expect(MARKET_OVERTIME_REQUESTER_ACK_EVIDENCE).toEqual({
+      count: 19,
+      contentBytes: 166934,
+      pathSetSha256: '37aa0b51e20f4ae86f7daf6c3c231d93b3d1f288ade1471490a1f843a57c9589',
+      sha256: '337868bcd27df759d8cb643c5d4e74f6c887aac1b9b2b2d5e93ea08a7f7df9b1',
+    })
+    expect(Object.isFrozen(MARKET_OVERTIME_REQUESTER_ACK_ALLOWED_PATHS)).toBe(true)
+    expect(Object.isFrozen(MARKET_OVERTIME_REQUESTER_ACK_ALLOWED_FILE_SHA256)).toBe(true)
+    expect(Object.isFrozen(MARKET_OVERTIME_REQUESTER_ACK_EVIDENCE)).toBe(true)
+    expect(() => assertMarketOvertimeRequesterAcknowledgementDisposition(entries)).not.toThrow()
   })
 
   it('fails closed if the customer history gate or accountant exclusion returns', () => {
@@ -450,6 +483,32 @@ describe('Stage 4 protected surface baseline', () => {
     )
     expect(() => assertMarketCustomerHistoryAccessSemantics(accountantAllowed)).toThrow(
       /lost the authenticated non-accountant gate/,
+    )
+  })
+
+  it('fails closed if requester acknowledgement moves away from the successful response', () => {
+    const entries = readFileEntries(repoRoot, ownedPaths.market)
+    const withoutAcknowledgement = entries.map((entry) => {
+      if (entry.path !== 'frontend/src/components/OffersList.vue') return entry
+      return {
+        ...entry,
+        content: Buffer.from(
+          entry.content.toString('utf8').replace(
+            '      publishRequesterOvertimeAcknowledgement(data);\n',
+            '',
+          ),
+        ),
+      }
+    })
+
+    expect(() => assertMarketOvertimeRequesterAcknowledgementSemantics(
+      withoutAcknowledgement,
+    )).toThrow(/no longer follows a successful trade response/)
+    expect(() => assertMarketOvertimeRequesterAcknowledgementDisposition(
+      withoutAcknowledgement,
+    )).toThrow(/allowed file drift/)
+    expect(() => resolveMarketRuntimeDisposition(withoutAcknowledgement)).toThrow(
+      /Market overtime requester acknowledgement disposition rejected/,
     )
   })
 

@@ -340,6 +340,29 @@ export const MARKET_CUSTOMER_HISTORY_ACCESS_EVIDENCE = Object.freeze({
   sha256: '9209fd37b6eb1335f3656004988f259da3836831938dc1b74a33d29b9d7cfbf9',
 })
 
+// Functional post-Stage-8 correction. A successful overtime request is
+// acknowledged locally so its requester control does not wait for the
+// cross-server mirror. All visual, two-tap, trade and history contracts remain
+// inherited from the latest reviewed Market disposition.
+export const MARKET_OVERTIME_REQUESTER_ACK_KIND =
+  'market-overtime-requester-local-acknowledgement'
+
+export const MARKET_OVERTIME_REQUESTER_ACK_ALLOWED_PATHS = Object.freeze([
+  'frontend/src/components/OffersList.vue',
+])
+
+export const MARKET_OVERTIME_REQUESTER_ACK_ALLOWED_FILE_SHA256 = Object.freeze({
+  'frontend/src/components/OffersList.vue':
+    '739458aaaaa4346a71423ad623657168f8d4a846ee86beb010815ac938240dc9',
+})
+
+export const MARKET_OVERTIME_REQUESTER_ACK_EVIDENCE = Object.freeze({
+  count: 19,
+  contentBytes: 166934,
+  pathSetSha256: '37aa0b51e20f4ae86f7daf6c3c231d93b3d1f288ade1471490a1f843a57c9589',
+  sha256: '337868bcd27df759d8cb643c5d4e74f6c887aac1b9b2b2d5e93ea08a7f7df9b1',
+})
+
 export const MESSENGER_RUNTIME_BASELINE = Object.freeze({
   count: 85,
   contentBytes: 1312405,
@@ -1101,6 +1124,42 @@ export function assertMarketCustomerHistoryAccessDisposition(entries) {
   )
 }
 
+export function assertMarketOvertimeRequesterAcknowledgementSemantics(entries) {
+  assertMarketCustomerHistoryAccessSemantics(entries)
+  const offers = sourceByPath(entries, 'frontend/src/components/OffersList.vue')
+  if (!offers.includes("import { publishRequesterOvertimeAcknowledgement } from '../services/offerOvertimeRuntimeEvents';")) {
+    throw new Error('Market overtime requester acknowledgement lost its typed runtime event import')
+  }
+  if (!/if \(response\.ok\) \{\s*publishRequesterOvertimeAcknowledgement\(data\);/u.test(offers)) {
+    throw new Error('Market overtime requester acknowledgement no longer follows a successful trade response')
+  }
+}
+
+function assertMarketOvertimeRequesterAcknowledgementAllowedFiles(entries) {
+  const entriesByPath = new Map(entries.map((entry) => [entry.path, entry]))
+  for (const repoPath of MARKET_OVERTIME_REQUESTER_ACK_ALLOWED_PATHS) {
+    const entry = entriesByPath.get(repoPath)
+    if (!entry) throw new Error(`Market overtime requester acknowledgement allowed file is missing: ${repoPath}`)
+    const actualSha256 = fileSha256(entry.content)
+    const expectedSha256 = MARKET_OVERTIME_REQUESTER_ACK_ALLOWED_FILE_SHA256[repoPath]
+    if (actualSha256 !== expectedSha256) {
+      throw new Error(
+        `Market overtime requester acknowledgement allowed file drift: ${repoPath} ${expectedSha256} -> ${actualSha256}`,
+      )
+    }
+  }
+}
+
+export function assertMarketOvertimeRequesterAcknowledgementDisposition(entries) {
+  assertMarketOvertimeRequesterAcknowledgementAllowedFiles(entries)
+  assertMarketOvertimeRequesterAcknowledgementSemantics(entries)
+  return assertProtectedFileSetEvidence(
+    'Market overtime requester local-acknowledgement disposition',
+    protectedFileSetEvidence(entries, MARKET_RUNTIME_CONTRACT),
+    MARKET_OVERTIME_REQUESTER_ACK_EVIDENCE,
+  )
+}
+
 export function resolveMarketRuntimeDisposition(entries) {
   const actual = protectedFileSetEvidence(entries, MARKET_RUNTIME_CONTRACT)
   try {
@@ -1167,21 +1226,29 @@ export function resolveMarketRuntimeDisposition(entries) {
                         evidence: assertMarketCustomerHistoryAccessDisposition(entries),
                       }
                     } catch (customerHistoryError) {
-                      const messages = [
-                        baselineError,
-                        integrationError,
-                        aPlusCError,
-                        lifecycleError,
-                        perimeterError,
-                        linearMeterError,
-                        compactConfirmError,
-                        feedHeadingError,
-                        terminalVisualError,
-                        customerHistoryError,
-                      ].map((error) => error instanceof Error ? error.message : String(error))
-                      throw new Error(
-                        `Market runtime rejected after Stage 4 baseline drift (${messages[0]}); main/UIUX integration disposition rejected (${messages[1]}); Market A+C disposition rejected (${messages[2]}); Market A+C lifecycle-clarity disposition rejected (${messages[3]}); Market A+C perimeter-deadline disposition rejected (${messages[4]}); Market A+C linear-meter disposition rejected (${messages[5]}); Market compact-confirm disposition rejected (${messages[6]}); Market feed-heading removal disposition rejected (${messages[7]}); Market terminal-history visual disposition rejected (${messages[8]}); Market customer-history access disposition rejected (${messages[9]})`,
-                      )
+                      try {
+                        return {
+                          kind: MARKET_OVERTIME_REQUESTER_ACK_KIND,
+                          evidence: assertMarketOvertimeRequesterAcknowledgementDisposition(entries),
+                        }
+                      } catch (requesterAckError) {
+                        const messages = [
+                          baselineError,
+                          integrationError,
+                          aPlusCError,
+                          lifecycleError,
+                          perimeterError,
+                          linearMeterError,
+                          compactConfirmError,
+                          feedHeadingError,
+                          terminalVisualError,
+                          customerHistoryError,
+                          requesterAckError,
+                        ].map((error) => error instanceof Error ? error.message : String(error))
+                        throw new Error(
+                          `Market runtime rejected after Stage 4 baseline drift (${messages[0]}); main/UIUX integration disposition rejected (${messages[1]}); Market A+C disposition rejected (${messages[2]}); Market A+C lifecycle-clarity disposition rejected (${messages[3]}); Market A+C perimeter-deadline disposition rejected (${messages[4]}); Market A+C linear-meter disposition rejected (${messages[5]}); Market compact-confirm disposition rejected (${messages[6]}); Market feed-heading removal disposition rejected (${messages[7]}); Market terminal-history visual disposition rejected (${messages[8]}); Market customer-history access disposition rejected (${messages[9]}); Market overtime requester acknowledgement disposition rejected (${messages[10]})`,
+                        )
+                      }
                     }
                   }
                 }

@@ -2,6 +2,7 @@ import asyncio
 import hashlib
 import hmac
 import json
+import pathlib
 import unittest
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
@@ -11,6 +12,22 @@ import httpx
 
 from core import sync_worker
 from core.sync_protocol import build_sync_protocol_metadata
+
+
+class ChangeLogDrainIndexTests(unittest.TestCase):
+    def test_partial_aggregate_order_index_is_declared_and_migrated_concurrently(self):
+        from models.change_log import ChangeLog
+
+        self.assertIn(
+            "idx_change_log_unsynced_aggregate_order",
+            {index.name for index in ChangeLog.__table__.indexes},
+        )
+        migration = pathlib.Path(
+            "migrations/versions/fc2d3e4f5a6b_accelerate_change_log_backlog_drain.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn('down_revision: Union[str, Sequence[str], None] = "fb1c2d3e4f5a"', migration)
+        self.assertIn("CREATE INDEX CONCURRENTLY IF NOT EXISTS", migration)
+        self.assertIn("WHERE synced = false", migration)
 
 
 class FakeRedis:
@@ -1073,11 +1090,11 @@ class SyncWorkerMainTests(unittest.IsolatedAsyncioTestCase):
 
         fake_redis, send_mock, sleep_mock, marker_mock = await self._run_main_once(
             blpop_results=[("sync:outbound", stale_payload), asyncio.CancelledError()],
-            fetch_return_value=committed_item,
+            fetch_side_effect=[committed_item, None],
             send_return_value=response,
         )
 
-        self.fetch_mock.assert_awaited_once()
+        self.assertEqual(self.fetch_mock.await_count, 2)
         send_mock.assert_awaited_once()
         self.assertEqual(send_mock.await_args.args[1], committed_item)
         marker_mock.assert_awaited_once_with(committed_item)
@@ -1098,6 +1115,52 @@ class SyncWorkerMainTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(fake_redis.rpush_calls, [])
         sleep_mock.assert_not_awaited()
         self.assertIn("job.item.outbound_wakeup_no_committed_change", repr(logger_mock.info.call_args))
+
+    async def test_main_drains_committed_backlog_after_outbound_wakeup(self):
+        stale_payload = json.dumps({"hash": "wake-up-only", "change_log_id": 999})
+        first_item = {
+            "type": "db_change",
+            "operation": "INSERT",
+            "table": "trade_delivery_receipts",
+            "id": 51,
+            "data": {"id": 51},
+            "hash": "receipt-51",
+            "timestamp": 1700000000,
+            "change_log_id": 51,
+        }
+        second_item = {
+            "type": "db_change",
+            "operation": "UPDATE",
+            "table": "offer_requests",
+            "id": 52,
+            "data": {"id": 52},
+            "hash": "request-52",
+            "timestamp": 1700000001,
+            "change_log_id": 52,
+        }
+        response = FakeResponse(
+            200,
+            '{"status":"success","processed":1,"errors":0}',
+            {"status": "success", "processed": 1, "errors": 0},
+        )
+
+        fake_redis, send_mock, sleep_mock, marker_mock = await self._run_main_once(
+            blpop_results=[("sync:outbound", stale_payload), asyncio.CancelledError()],
+            fetch_side_effect=[first_item, second_item, None],
+            send_return_value=response,
+        )
+
+        self.assertEqual(send_mock.await_count, 2)
+        self.assertEqual(
+            [call.args[1] for call in send_mock.await_args_list],
+            [first_item, second_item],
+        )
+        self.assertEqual(
+            [call.args[0] for call in marker_mock.await_args_list],
+            [first_item, second_item],
+        )
+        self.assertEqual(len(fake_redis.blpop_calls), 2)
+        sleep_mock.assert_not_awaited()
 
     async def test_main_keeps_db_sourced_change_log_unsynced_on_peer_rejection(self):
         item = {

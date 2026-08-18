@@ -175,11 +175,13 @@ class Settings(BaseSettings):
     telegram_delivery_queue_expected_channel_id: int | None = None
     telegram_delivery_queue_preflight_timeout_seconds: float = 10.0
     telegram_delivery_queue_worker_interval_seconds: float = 1.0
-    # One primary-lane slot and the private outbox feeder use a bounded faster
-    # cadence.  Other primary slots plus publisher/editor lanes retain the
-    # normal idle cadence, avoiding an expensive empty-queue polling fan-out.
+    # One primary-lane slot plus the latency-sensitive private/trade-result
+    # feeders use a bounded faster cadence. Other primary slots and the
+    # publisher/editor lanes retain the normal idle cadence, avoiding an
+    # expensive empty-queue polling fan-out.
     telegram_delivery_queue_primary_idle_poll_interval_seconds: float = 0.2
     telegram_notification_outbox_queue_feeder_interval_seconds: float = 0.2
+    telegram_trade_result_queue_feeder_interval_seconds: float = 0.2
     telegram_delivery_queue_worker_batch_limit: int = 25
     telegram_delivery_queue_primary_concurrency: int = 4
     telegram_delivery_queue_primary_m0_reserved_concurrency: int = 1
@@ -326,6 +328,7 @@ class Settings(BaseSettings):
             "telegram_delivery_queue_worker_interval_seconds",
             "telegram_delivery_queue_primary_idle_poll_interval_seconds",
             "telegram_notification_outbox_queue_feeder_interval_seconds",
+            "telegram_trade_result_queue_feeder_interval_seconds",
             "telegram_delivery_queue_worker_request_timeout_seconds",
             "telegram_delivery_queue_worker_lease_seconds",
             "telegram_offer_queue_feeder_interval_seconds",

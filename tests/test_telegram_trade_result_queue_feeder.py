@@ -47,6 +47,14 @@ class TelegramTradeResultQueueFeederTests(unittest.IsolatedAsyncioTestCase):
 
         session_factory.assert_not_called()
 
+    def test_trade_result_feeder_uses_its_bounded_fast_cadence(self):
+        with patch.object(
+            feeder.settings,
+            "telegram_trade_result_queue_feeder_interval_seconds",
+            0.2,
+        ):
+            self.assertEqual(feeder._interval_seconds(), 0.2)
+
     async def test_cycle_commits_each_handoff_and_stops_on_empty_queue(self):
         sessions = [
             SimpleNamespace(commit=AsyncMock(), rollback=AsyncMock()),

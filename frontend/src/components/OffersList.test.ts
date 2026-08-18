@@ -1,5 +1,6 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { OVERTIME_REQUESTER_ACKNOWLEDGED_EVENT } from '../services/offerOvertimeRuntimeEvents'
 
 const apiFetchMock = vi.fn()
 
@@ -402,6 +403,37 @@ describe('OffersList.vue', () => {
       quantity: 10,
       idempotency_key: expect.stringMatching(/^trade:/),
     })
+    wrapper.unmount()
+  })
+
+  it('publishes an immediate requester acknowledgement for an overtime response', async () => {
+    const acknowledgement = {
+      workflow: 'overtime',
+      request_public_id: 'req_web_209',
+      offer_public_id: 'ofr_web_overtime_209',
+      request_home_server: 'foreign',
+      result_status: 'overtime_queued',
+      is_actionable: false,
+      is_occupying: false,
+    }
+    apiFetchMock.mockResolvedValue(new Response(JSON.stringify(acknowledgement), {
+      status: 202,
+      headers: { 'Content-Type': 'application/json' },
+    }))
+    const eventHandler = vi.fn()
+    window.addEventListener(OVERTIME_REQUESTER_ACKNOWLEDGED_EVENT, eventHandler)
+    const wrapper = await mountOffersList({
+      offers: [buildTradeOffer({
+        id: 209,
+        offer_public_id: 'ofr_web_overtime_209',
+      })],
+    })
+
+    await confirmTrade(wrapper)
+
+    expect(eventHandler).toHaveBeenCalledTimes(1)
+    expect((eventHandler.mock.calls[0]?.[0] as CustomEvent).detail).toEqual(acknowledgement)
+    window.removeEventListener(OVERTIME_REQUESTER_ACKNOWLEDGED_EVENT, eventHandler)
     wrapper.unmount()
   })
 

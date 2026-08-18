@@ -3,6 +3,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { setSessionApprovalBlocking } from './authenticatedOverlayPriority'
 import { useOvertimeApprovalRuntime } from './useOvertimeApprovalRuntime'
+import { publishRequesterOvertimeAcknowledgement } from '../services/offerOvertimeRuntimeEvents'
 import {
   M12_CANCEL_BUTTON,
   M15_CANCELLED,
@@ -220,6 +221,102 @@ describe('useOvertimeApprovalRuntime', () => {
 
     await runtime.cancel()
     await flushPromises()
+    expect(runtime.requesterTerminalNotice.value).toBe(M15_CANCELLED)
+    wrapper.unmount()
+  })
+
+  it('shows the requester control immediately from the accepted trade response', async () => {
+    overtimeRuntimeMocks.apiFetch.mockImplementation(async (url: string) => {
+      if (url.includes('pending-owner')) {
+        return jsonResponse({ current: null, items: [] })
+      }
+      if (url.includes('pending-requester')) {
+        return jsonResponse({ items: [] })
+      }
+      return jsonResponse({})
+    })
+
+    const { wrapper, runtime } = mountRuntime()
+    publishRequesterOvertimeAcknowledgement({
+      workflow: 'overtime',
+      request_public_id: 'req_immediate_1',
+      request_home_server: 'foreign',
+      result_status: 'overtime_queued',
+      is_actionable: false,
+      is_occupying: false,
+    })
+    await flushPromises()
+
+    expect(runtime.requesterVisible.value).toBe(true)
+    expect(runtime.requesterRequest.value?.request_public_id).toBe('req_immediate_1')
+    expect(runtime.requesterMessage.value).toBe(M21_REQUESTER_QUEUED)
+
+    // The first mirror poll may still be empty. It must not erase a request
+    // that the mutation endpoint has already durably acknowledged.
+    await vi.advanceTimersByTimeAsync(1000)
+    await flushPromises()
+    expect(runtime.requesterVisible.value).toBe(true)
+    expect(runtime.requesterRequest.value?.request_public_id).toBe('req_immediate_1')
+
+    wrapper.unmount()
+  })
+
+  it('does not restore a cancelled request from an older in-flight poll', async () => {
+    const request = {
+      request_public_id: 'req_cancel_race_1',
+      request_home_server: 'foreign',
+      result_status: 'overtime_queued',
+      is_actionable: false,
+      is_occupying: false,
+    }
+    let requesterPollCount = 0
+    let resolveStalePoll!: (response: ReturnType<typeof jsonResponse>) => void
+    const stalePoll = new Promise<ReturnType<typeof jsonResponse>>((resolve) => {
+      resolveStalePoll = resolve
+    })
+
+    overtimeRuntimeMocks.apiFetch.mockImplementation(async (url: string) => {
+      if (url.includes('pending-owner')) {
+        return jsonResponse({ current: null, items: [] })
+      }
+      if (url.includes('pending-requester')) {
+        requesterPollCount += 1
+        if (requesterPollCount === 1) return jsonResponse({ items: [request] })
+        return stalePoll
+      }
+      if (url.includes('/cancel')) {
+        return jsonResponse({
+          request_public_id: request.request_public_id,
+          result_status: 'overtime_cancelled',
+        })
+      }
+      return jsonResponse({})
+    })
+
+    const { wrapper, runtime } = mountRuntime()
+    await vi.advanceTimersByTimeAsync(1000)
+    await flushPromises()
+    expect(runtime.requesterRequest.value?.request_public_id).toBe(request.request_public_id)
+
+    const pendingRefresh = runtime.refreshPending()
+    await flushPromises()
+    await runtime.cancel()
+    await flushPromises()
+    expect(runtime.requesterRequest.value).toBeNull()
+    expect(runtime.requesterTerminalNotice.value).toBe(M15_CANCELLED)
+
+    resolveStalePoll(jsonResponse({ items: [request] }))
+    await pendingRefresh
+    await flushPromises()
+
+    expect(runtime.requesterRequest.value).toBeNull()
+    expect(runtime.requesterTerminalNotice.value).toBe(M15_CANCELLED)
+
+    // A later poll can still see the pre-cancel mirror for a short time. It
+    // must not resurrect the cancelled control either.
+    await vi.advanceTimersByTimeAsync(2000)
+    await flushPromises()
+    expect(runtime.requesterRequest.value).toBeNull()
     expect(runtime.requesterTerminalNotice.value).toBe(M15_CANCELLED)
     wrapper.unmount()
   })

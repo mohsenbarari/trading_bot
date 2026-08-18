@@ -5,6 +5,7 @@ import { Hourglass, Loader2 } from 'lucide-vue-next';
 import { apiFetch } from '../utils/auth';
 import { createHttpErrorFromResponse, getUserFacingErrorMessage } from '../utils/httpErrorPolicy';
 import { offerSettlementLabel, normalizeSettlementType, type SettlementType } from '../utils/settlementType';
+import { publishRequesterOvertimeAcknowledgement } from '../services/offerOvertimeRuntimeEvents';
 import TradeLotSuggestionAlert from './TradeLotSuggestionAlert.vue';
 import {
   AppOfferCard,
@@ -788,6 +789,7 @@ async function executeTrade(offerId: number, quantity: number) {
     if (!componentActive || activeTradeIntentStorageKey !== executionStorageKey) return;
 
     if (response.ok) {
+      publishRequesterOvertimeAcknowledgement(data);
       tradeSuggestion.value = null;
       clearTradeIntent(intent);
       if (componentActive) emit('trade-completed');

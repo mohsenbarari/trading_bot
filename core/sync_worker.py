@@ -576,6 +576,16 @@ async def main():
                                     },
                                 )
                                 continue
+                            # A Redis entry is only a wake-up signal.  Once a
+                            # committed row exists, drain a bounded batch from
+                            # the durable change log before blocking again.
+                            # Without this, a steady stream of wake-ups makes
+                            # the worker deliver just one old row per signal
+                            # and the database backlog can grow indefinitely.
+                            poll_drain_remaining = max(
+                                poll_drain_remaining,
+                                SYNC_CHANGE_LOG_POLL_DRAIN_LIMIT - 1,
+                            )
                             origin_queue = "change_log"
                             payload = json.dumps(data, sort_keys=True, default=str)
                             should_requeue = False

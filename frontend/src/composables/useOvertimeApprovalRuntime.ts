@@ -20,9 +20,15 @@ import {
   type OvertimeRequestPublicPayload,
   type PublicOfferSummary,
 } from '../services/offerOvertimeApi'
+import {
+  OVERTIME_REQUESTER_ACKNOWLEDGED_EVENT,
+  readRequesterOvertimeAcknowledgement,
+} from '../services/offerOvertimeRuntimeEvents'
 
 const INITIAL_FETCH_DELAY_MS = 1000
 const POLL_INTERVAL_MS = 2000
+const LOCAL_REQUESTER_ACK_GRACE_MS = 15_000
+const LOCAL_REQUESTER_CANCEL_GRACE_MS = 30_000
 const ACTIONABLE_STATUSES = new Set([
   'overtime_presented',
   'overtime_delivering',
@@ -77,6 +83,12 @@ export function useOvertimeApprovalRuntime() {
   let initialFetchTimeout: number | null = null
   let terminalNoticeTimeout: number | null = null
   let ownerOfferFetchToken = 0
+  let refreshInFlight: Promise<void> | null = null
+  let requesterRevision = 0
+  let localRequesterAckId: string | null = null
+  let localRequesterAckExpiresAt = 0
+  let localRequesterCancelledId: string | null = null
+  let localRequesterCancelledExpiresAt = 0
 
   const hasAuthToken = () => Boolean(localStorage.getItem('auth_token'))
 
@@ -141,6 +153,16 @@ export function useOvertimeApprovalRuntime() {
     showRequesterStatus.value = false
     requesterCountdown.value = 0
     requesterMessage.value = ''
+  }
+
+  const clearLocalRequesterAcknowledgement = () => {
+    localRequesterAckId = null
+    localRequesterAckExpiresAt = 0
+  }
+
+  const clearLocalRequesterCancellation = () => {
+    localRequesterCancelledId = null
+    localRequesterCancelledExpiresAt = 0
   }
 
   const syncCountdowns = () => {
@@ -226,7 +248,23 @@ export function useOvertimeApprovalRuntime() {
   }
 
   const applyRequesterPayload = (payload: OvertimeRequestPublicPayload | null) => {
+    if (
+      payload?.request_public_id === localRequesterCancelledId
+      && Date.now() < localRequesterCancelledExpiresAt
+    ) {
+      return
+    }
+    if (localRequesterCancelledId && Date.now() >= localRequesterCancelledExpiresAt) {
+      clearLocalRequesterCancellation()
+    }
     if (!payload?.request_public_id) {
+      if (
+        localRequesterAckId
+        && requesterRequest.value?.request_public_id === localRequesterAckId
+        && Date.now() < localRequesterAckExpiresAt
+      ) {
+        return
+      }
       if (!requesterTerminalNotice.value) {
         closeRequesterStatus()
       }
@@ -245,24 +283,50 @@ export function useOvertimeApprovalRuntime() {
     }
   }
 
-  const refreshPending = async () => {
+  const runRefreshPending = async () => {
     if (!hasAuthToken()) {
+      requesterRevision += 1
+      clearLocalRequesterAcknowledgement()
+      clearLocalRequesterCancellation()
       closeOwnerModal()
       closeRequesterStatus()
       return
     }
 
+    const requesterRevisionAtStart = requesterRevision
     try {
       const [ownerBody, requesterBody] = await Promise.all([
         fetchPendingOwnerOvertimeRequests(),
         fetchPendingRequesterOvertimeRequests(),
       ])
       await applyOwnerPayload(ownerBody.current)
+      if (requesterRevisionAtStart !== requesterRevision) return
       const firstRequester = Array.isArray(requesterBody.items) ? requesterBody.items[0] ?? null : null
+      if (firstRequester?.request_public_id === localRequesterAckId) {
+        clearLocalRequesterAcknowledgement()
+      }
       applyRequesterPayload(firstRequester)
     } catch {
       // Soft-fail: keep last known UI until the next poll.
     }
+  }
+
+  const refreshPending = (): Promise<void> => {
+    if (refreshInFlight) return refreshInFlight
+    refreshInFlight = runRefreshPending().finally(() => {
+      refreshInFlight = null
+    })
+    return refreshInFlight
+  }
+
+  const handleRequesterAcknowledged = (event: Event) => {
+    const payload = readRequesterOvertimeAcknowledgement(event)
+    if (!payload?.request_public_id) return
+    requesterRevision += 1
+    localRequesterAckId = payload.request_public_id
+    localRequesterAckExpiresAt = Date.now() + LOCAL_REQUESTER_ACK_GRACE_MS
+    requesterTerminalNotice.value = null
+    applyRequesterPayload(payload)
   }
 
   const triggerRefresh = () => {
@@ -320,6 +384,10 @@ export function useOvertimeApprovalRuntime() {
     try {
       const response = await cancelOvertimeRequest(requestId)
       if (response.ok) {
+        requesterRevision += 1
+        clearLocalRequesterAcknowledgement()
+        localRequesterCancelledId = requestId
+        localRequesterCancelledExpiresAt = Date.now() + LOCAL_REQUESTER_CANCEL_GRACE_MS
         closeRequesterStatus()
         requesterTerminalNotice.value = M15_CANCELLED
         showRequesterStatus.value = true
@@ -366,6 +434,7 @@ export function useOvertimeApprovalRuntime() {
       void refreshPending()
     }, POLL_INTERVAL_MS)
     document.addEventListener('visibilitychange', handleVisibilityChange)
+    window.addEventListener(OVERTIME_REQUESTER_ACKNOWLEDGED_EVENT, handleRequesterAcknowledged)
     on('ws:reconnect', handleWsReconnect)
   })
 
@@ -375,6 +444,7 @@ export function useOvertimeApprovalRuntime() {
     clearCountdownTimer()
     clearTerminalNoticeTimeout()
     document.removeEventListener('visibilitychange', handleVisibilityChange)
+    window.removeEventListener(OVERTIME_REQUESTER_ACKNOWLEDGED_EVENT, handleRequesterAcknowledged)
     off('ws:reconnect', handleWsReconnect)
   })
 

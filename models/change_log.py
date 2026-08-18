@@ -34,4 +34,11 @@ class ChangeLog(Base):
             "id",
         ),
         Index("idx_table", "table_name", "record_id"),
+        Index(
+            "idx_change_log_unsynced_aggregate_order",
+            "table_name",
+            "record_id",
+            "id",
+            postgresql_where=text("synced = false"),
+        ),
     )

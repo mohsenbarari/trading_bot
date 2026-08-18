@@ -64,8 +64,8 @@ def _interval_seconds() -> float:
         float(
             getattr(
                 settings,
-                "telegram_delivery_queue_worker_interval_seconds",
-                1.0,
+                "telegram_trade_result_queue_feeder_interval_seconds",
+                0.2,
             )
         ),
     )
