@@ -89,6 +89,15 @@ def _safe_count(value: Any) -> int:
         return 0
 
 
+def _is_current_home_request(row: OfferRequest | object) -> bool:
+    """Return whether this server owns the request lifecycle."""
+    home = normalize_server(
+        getattr(row, "request_home_server", None),
+        default="",
+    )
+    return bool(home and home == current_server())
+
+
 def _finding(
     issue: str,
     row: OfferRequest,
@@ -114,6 +123,7 @@ async def _nonterminal_status_counts(db: AsyncSession) -> dict[str, int]:
             select(OfferRequest.result_status, func.count(OfferRequest.id))
             .where(
                 OfferRequest.workflow_kind == OfferRequestWorkflow.OVERTIME,
+                OfferRequest.request_home_server == current_server(),
                 OfferRequest.result_status.in_(OVERTIME_NONTERMINAL_STATUSES),
             )
             .group_by(OfferRequest.result_status)
@@ -132,6 +142,7 @@ async def _count_silent_owners(db: AsyncSession, *, now: datetime) -> int:
             )
             .where(
                 OfferRequest.workflow_kind == OfferRequestWorkflow.OVERTIME,
+                OfferRequest.request_home_server == current_server(),
                 OfferRequest.result_status
                 == OfferRequestStatus.OVERTIME_DECISION_EXPIRED,
                 OfferRequest.terminal_reason == "decision_timeout",
@@ -168,6 +179,7 @@ async def collect_overtime_reconciliation_findings(
                 .options(selectinload(OfferRequest.offer))
                 .where(
                     OfferRequest.workflow_kind == OfferRequestWorkflow.OVERTIME,
+                    OfferRequest.request_home_server == current_server(),
                     OfferRequest.result_status.in_(OVERTIME_NONTERMINAL_STATUSES),
                 )
                 .order_by(OfferRequest.id.asc())
@@ -178,6 +190,8 @@ async def collect_overtime_reconciliation_findings(
 
     owner_occupying: dict[tuple[int, str], list[OfferRequest]] = {}
     for row in rows:
+        if not _is_current_home_request(row):
+            continue
         status = _enum_value(getattr(row, "result_status", None))
         offer = getattr(row, "offer", None)
         if offer is None and getattr(row, "local_offer_id", None) is not None:
@@ -309,6 +323,7 @@ async def collect_overtime_reconciliation_findings(
                 select(OfferRequest)
                 .where(
                     OfferRequest.workflow_kind == OfferRequestWorkflow.OVERTIME,
+                    OfferRequest.request_home_server == current_server(),
                     OfferRequest.result_status == OfferRequestStatus.COMPLETED_TRADE,
                     or_(
                         OfferRequest.resulting_trade_id.is_(None),
@@ -381,7 +396,8 @@ async def reconcile_overtime_requests(
                     await db.execute(
                         select(OfferRequest)
                         .where(
-                            OfferRequest.request_public_id.in_(tuple(by_request.keys()))
+                            OfferRequest.request_public_id.in_(tuple(by_request.keys())),
+                            OfferRequest.request_home_server == current_server(),
                         )
                         .with_for_update()
                     )
@@ -393,7 +409,7 @@ async def reconcile_overtime_requests(
             }
             for request_id, finding in by_request.items():
                 row = rows_by_id.get(request_id)
-                if row is None:
+                if row is None or not _is_current_home_request(row):
                     skipped.append(finding)
                     continue
                 try:
@@ -536,6 +552,7 @@ async def expire_overdue_presented_decisions(
                 select(OfferRequest)
                 .where(
                     OfferRequest.workflow_kind == OfferRequestWorkflow.OVERTIME,
+                    OfferRequest.request_home_server == current_server(),
                     OfferRequest.result_status == OfferRequestStatus.OVERTIME_PRESENTED,
                     OfferRequest.decision_deadline_at.is_not(None),
                 )
@@ -548,7 +565,8 @@ async def expire_overdue_presented_decisions(
     rows = [
         row
         for row in candidate_rows
-        if (_normalized_time(getattr(row, "decision_deadline_at", None)) or clock)
+        if _is_current_home_request(row)
+        and (_normalized_time(getattr(row, "decision_deadline_at", None)) or clock)
         <= clock
     ]
 
@@ -602,6 +620,7 @@ async def expire_overdue_delivering_requests(
                 select(OfferRequest)
                 .where(
                     OfferRequest.workflow_kind == OfferRequestWorkflow.OVERTIME,
+                    OfferRequest.request_home_server == current_server(),
                     OfferRequest.result_status == OfferRequestStatus.OVERTIME_DELIVERING,
                     OfferRequest.telegram_message_id.is_(None),
                 )
@@ -613,6 +632,8 @@ async def expire_overdue_delivering_requests(
     )
     rows = []
     for row in candidate_rows:
+        if not _is_current_home_request(row):
+            continue
         received = _normalized_time(getattr(row, "received_at", None)) or _normalized_time(
             getattr(row, "created_at", None)
         )

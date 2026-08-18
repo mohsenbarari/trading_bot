@@ -142,6 +142,9 @@ EXPECTED_RUNTIME_INVENTORY_COUNTS = {
     "queue_execution": 1,
 }
 EXPECTED_RUNTIME_INVENTORY_SHA256 = (
+    "918381d8820d04e6247d0c8fdd61c3ac82c103bca35f74eb2e0a581ff95c91c9"
+)
+PRE_LOCAL_REQUESTER_RECEIPT_RUNTIME_INVENTORY_SHA256 = (
     "424f951de6bf0f8afe7a05f33c288388a266cc25e27b81349a0f42902250d01d"
 )
 PRE_OVERTIME_REQUEST_CANCEL_FORWARD_RUNTIME_INVENTORY_SHA256 = (
@@ -165,6 +168,10 @@ OVERTIME_OWNER_PROMPT_RUNTIME_INVENTORY_SHA256 = (
 REVIEWED_RUNTIME_INVENTORY_SHA256 = frozenset(
     {
         EXPECTED_RUNTIME_INVENTORY_SHA256,
+        # The local requester-status receipt hardening adds no Telegram
+        # boundary. Existing calls in overtime_request_status.py only moved
+        # below a Core SQL helper that prevents mirror lifecycle sync writes.
+        PRE_LOCAL_REQUESTER_RECEIPT_RUNTIME_INVENTORY_SHA256,
         # Same 103 callsites and dispositions. Only the bot-owned OTP send line
         # moved when exact pending lookup and poison idempotency were added.
         PRE_OTP_QUEUE_METADATA_FIX_RUNTIME_INVENTORY_SHA256,

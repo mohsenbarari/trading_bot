@@ -518,7 +518,17 @@ class SyncGuaranteeMatrixTests(unittest.IsolatedAsyncioTestCase):
         ]
         seen_tables: list[str] = []
 
-        async def fake_apply_item(db, table, operation, record_id, data, model, new_offers, terminal_offers=None):
+        async def fake_apply_item(
+            db,
+            table,
+            operation,
+            record_id,
+            data,
+            model,
+            new_offers,
+            terminal_offers=None,
+            source_server=None,
+        ):
             seen_tables.append(table)
             return "ok"
 

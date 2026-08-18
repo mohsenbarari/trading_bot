@@ -195,6 +195,52 @@ class OvertimeReconciliationServiceTests(unittest.IsolatedAsyncioTestCase):
         invalidate.assert_not_awaited()
         self.assertFalse(db.flushed)
 
+    async def test_presented_sweeper_processes_only_current_home_rows(self):
+        local_row = make_row(request_home_server="foreign")
+        remote_row = make_row(
+            request_public_id="orq_remote",
+            request_home_server="iran",
+        )
+        expire = AsyncMock(return_value=local_row)
+
+        with patch.object(recon, "current_server", return_value="foreign"), patch.object(
+            recon,
+            "expire_decision",
+            new=expire,
+        ):
+            repaired = await recon.expire_overdue_presented_decisions(
+                FakeDB([FakeResult([remote_row, local_row])]),
+                now=NOW,
+                normal_lifetime_minutes=2,
+                flush=False,
+            )
+
+        self.assertEqual(repaired, 1)
+        self.assertIs(expire.await_args.args[1], local_row)
+
+    async def test_delivering_sweeper_skips_non_home_mirror(self):
+        remote_row = make_row(
+            request_home_server="iran",
+            result_status=OfferRequestStatus.OVERTIME_DELIVERING,
+            telegram_message_id=None,
+            received_at=NOW - timedelta(seconds=121),
+        )
+        invalidate = AsyncMock(return_value=remote_row)
+
+        with patch.object(recon, "current_server", return_value="foreign"), patch.object(
+            recon,
+            "invalidate_request",
+            new=invalidate,
+        ):
+            repaired = await recon.expire_overdue_delivering_requests(
+                FakeDB([FakeResult([remote_row])]),
+                now=NOW,
+                flush=True,
+            )
+
+        self.assertEqual(repaired, 0)
+        invalidate.assert_not_awaited()
+
     async def test_observability_summary_omits_requester_identity(self):
         summary = {
             "status": "action_required",

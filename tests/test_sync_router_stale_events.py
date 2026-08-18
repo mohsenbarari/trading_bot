@@ -7,6 +7,7 @@ from api.routers.sync import (
     _build_upsert_stmt,
     _localize_trade_delivery_receipt_references,
     _localize_offer_request_resulting_trade_reference,
+    _offer_request_sync_authority_rejection_reason,
 )
 from models.offer import Offer
 from models.offer_request import OfferRequest
@@ -276,6 +277,15 @@ def completed_trade_payload(**overrides):
 
 
 class SyncRouterStaleOfferEventTests(unittest.IsolatedAsyncioTestCase):
+    def test_offer_request_home_updates_are_allowed_on_peer_mirror(self):
+        with patch("api.routers.sync.current_server", return_value="foreign"):
+            reason = _offer_request_sync_authority_rejection_reason(
+                {"request_home_server": "iran"},
+                source_server="iran",
+            )
+
+        self.assertIsNone(reason)
+
     async def test_trade_delivery_receipt_trade_number_resolves_local_trade_and_offer_ids(self):
         data = {
             "dedupe_key": "trade_completed:webapp:10088:7",
@@ -905,9 +915,44 @@ class SyncRouterStaleOfferEventTests(unittest.IsolatedAsyncioTestCase):
                 data,
                 model=OfferRequest,
                 new_offers=[],
+                source_server="foreign",
             )
 
         self.assertEqual(result, "ok")
         rendered_log = repr(logger_mock.warning.call_args)
         self.assertIn("atomic_upsert_guard_noop", rendered_log)
         self.assertIn("sync.stale_offer_request_ignored", rendered_log)
+
+    async def test_offer_request_mirror_cannot_overwrite_home_authority(self):
+        db = ApplyDB()
+        data = {
+            "request_home_server": "iran",
+            "idempotency_key": "stage-forward:home-owned",
+            "request_source_surface": "telegram_bot",
+            "request_source_server": "foreign",
+            "requested_quantity": 1,
+            "result_status": "overtime_queued",
+            "presented_at": None,
+            "version_id": 2,
+        }
+
+        with patch("api.routers.sync.current_server", return_value="iran"), patch(
+            "api.routers.sync._build_upsert_stmt"
+        ) as builder, patch(
+            "api.routers.sync.record_sync_source_authority_rejection"
+        ) as rejection_metric:
+            result = await _apply_item(
+                db,
+                "offer_requests",
+                "UPDATE",
+                2,
+                data,
+                model=OfferRequest,
+                new_offers=[],
+                source_server="foreign",
+            )
+
+        self.assertEqual(result, "ignored")
+        builder.assert_not_called()
+        rejection_metric.assert_called_once()
+        self.assertEqual(db.execute_calls, [])

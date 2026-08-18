@@ -2068,6 +2068,28 @@ def _offer_request_upsert_where_clause(model, stmt, data: dict):
     return (current_version <= incoming_version) & ~terminal_reactivation & ~same_version_terminal_conflict
 
 
+def _offer_request_sync_authority_rejection_reason(
+    data: dict,
+    *,
+    source_server: str | None,
+) -> str | None:
+    """Keep an offer-request lifecycle writable only by its offer-home server.
+
+    The peer stores a read/interaction mirror.  It may receive authoritative
+    home updates, but its own mirror updates must never flow back and overwrite
+    the home ledger, including at an equal ``version_id``.
+    """
+    home = normalize_server(data.get("request_home_server"), default="")
+    source = normalize_server(source_server, default="")
+    if home not in {SERVER_FOREIGN, SERVER_IRAN}:
+        return "offer_request_home_missing_or_invalid"
+    if source not in {SERVER_FOREIGN, SERVER_IRAN}:
+        return "offer_request_source_missing_or_invalid"
+    if current_server() == home and source != home:
+        return "offer_request_non_home_write_to_authority"
+    return None
+
+
 def _linked_relation_upsert_where_clause(model, stmt, data: dict, link_field: str):
     if link_field not in data:
         return None
@@ -2818,6 +2840,34 @@ async def _apply_item(
       3. ForeignKeyViolation → returns 'deferred' for retry
     Returns: 'ok', 'ignored', 'deferred', or 'error'
     """
+    if table == "offer_requests":
+        authority_reason = _offer_request_sync_authority_rejection_reason(
+            data,
+            source_server=source_server,
+        )
+        if authority_reason:
+            record_sync_source_authority_rejection(
+                server_mode=settings.server_mode,
+                table=table,
+                reason=authority_reason,
+            )
+            logger.warning(
+                "Ignored non-authoritative offer request sync write",
+                extra={
+                    "event": "sync.offer_request_home_authority_ignored",
+                    "table": table,
+                    "operation": operation,
+                    "reason": authority_reason,
+                    "target_server": current_server(),
+                    "source_server": normalize_server(source_server, default="") or None,
+                    "request_home_server": normalize_server(
+                        data.get("request_home_server"),
+                        default="",
+                    ) or None,
+                },
+            )
+            return "ignored"
+
     if table == "trading_settings":
         setting_key = data.get('key')
         if not setting_key:
@@ -3823,7 +3873,8 @@ async def receive_sync_data(
                 )
                 apply_args = (
                     {"source_server": source_server}
-                    if bool(getattr(settings, "registration_sync_v2_enabled", False))
+                    if table == "offer_requests"
+                    or bool(getattr(settings, "registration_sync_v2_enabled", False))
                     else {}
                 )
                 result = await _apply_item(
@@ -3923,9 +3974,11 @@ async def receive_sync_data(
                         record_id=record_id,
                         data=data,
                     )
+                    deferred_source_server = _sync_item_source_server(item)
                     apply_args = (
-                        {"source_server": _sync_item_source_server(item)}
-                        if bool(getattr(settings, "registration_sync_v2_enabled", False))
+                        {"source_server": deferred_source_server}
+                        if table == "offer_requests"
+                        or bool(getattr(settings, "registration_sync_v2_enabled", False))
                         else {}
                     )
                     result = await _apply_item(

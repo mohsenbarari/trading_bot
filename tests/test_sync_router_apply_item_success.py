@@ -747,6 +747,7 @@ class SyncRouterApplyItemSuccessTests(unittest.IsolatedAsyncioTestCase):
                 offer_request_data,
                 model=OfferRequest,
                 new_offers=[],
+                source_server="foreign",
             )
         self.assertEqual(result, "ok")
         self.assertNotIn("id", offer_request_data)

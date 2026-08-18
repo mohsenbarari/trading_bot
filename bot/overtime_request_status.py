@@ -6,7 +6,9 @@ from types import SimpleNamespace
 from typing import Any
 
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.attributes import set_committed_value
 
 from bot.telegram_interaction_message import (
     edit_delivery_receipt_via_runtime,
@@ -48,6 +50,33 @@ from models.offer_request import OfferRequest, OfferRequestStatus
 from models.user import User
 
 logger = logging.getLogger(__name__)
+
+
+async def _persist_requester_status_receipt_locally(
+    session: AsyncSession,
+    ledger: OfferRequest,
+    receipt_id: int | None,
+) -> None:
+    """Persist the requester-message receipt without changing ledger authority.
+
+    ``requester_status_outbox_id`` is explicitly local-only delivery state.  An
+    ORM flush would bump ``OfferRequest.version_id`` and emit a full cross-server
+    lifecycle payload, allowing a mirror's stale status to race the authoritative
+    offer-home transition.  A sync-marked Core update keeps this receipt local,
+    leaves the lifecycle version untouched, and skips mapper sync events.
+    """
+    ledger_id = getattr(ledger, "id", None)
+    if not isinstance(ledger_id, int) or ledger_id <= 0:
+        return
+
+    await session.execute(
+        update(OfferRequest)
+        .where(OfferRequest.id == ledger_id)
+        .values(requester_status_outbox_id=receipt_id)
+        .execution_options(synchronize_session=False),
+        execution_options={"is_sync": True},
+    )
+    set_committed_value(ledger, "requester_status_outbox_id", receipt_id)
 
 
 def requester_status_text_for_result_status(result_status: Any) -> str:
@@ -112,17 +141,13 @@ async def send_requester_overtime_status(
             )
             message_id = getattr(sent, "message_id", None)
             if isinstance(message_id, int) and message_id > 0:
-                # Legacy path: reuse owner field only if unused; otherwise keep outbox id null
-                # and rely on callback.message for cancel edits.
-                if getattr(ledger, "telegram_message_id", None) is None:
-                    pass
-                ledger.requester_status_outbox_id = None
-                # Store legacy message id in outbox column negated? Better: use a side map.
-                # Keep simple: stash positive message id in a dedicated attribute if column
-                # is Integer — we use outbox ids which are positive DB ids. For legacy,
-                # store message_id as negative sentinel in requester_status_outbox_id.
-                ledger.requester_status_outbox_id = -int(message_id)
-                await session.flush()
+                # Store the legacy message id as a negative sentinel in the
+                # local-only receipt column without publishing a ledger update.
+                await _persist_requester_status_receipt_locally(
+                    session,
+                    ledger,
+                    -int(message_id),
+                )
         except Exception as exc:
             logger.warning("overtime requester status send failed: %s", exc)
         return
@@ -153,8 +178,11 @@ async def send_requester_overtime_status(
         outbox = result.notification.outbox
         outbox_id = getattr(outbox, "id", None)
         if isinstance(outbox_id, int) and outbox_id > 0:
-            ledger.requester_status_outbox_id = outbox_id
-            await session.flush()
+            await _persist_requester_status_receipt_locally(
+                session,
+                ledger,
+                outbox_id,
+            )
     except Exception as exc:
         logger.warning("overtime requester status enqueue failed: %s", exc)
 
