@@ -40,6 +40,7 @@ docs/uiux-stage8-acceptance-rollout/*
 !docs/messenger-surface-manifest.json
 !docs/messenger-surface-report.md
 !docs/PRODUCTION_DEPLOYMENT_ONLINE.md
+!docs/STAGING_COIN_INFERENCE_ACTIVATION.md
 !docs/TELEGRAM_MULTI_PUBLISHER_B2B_ROADMAP.md
 !docs/TELEGRAM_DELIVERY_QUEUE_CURRENT_STATE_20260816.md
 .env

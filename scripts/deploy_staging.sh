@@ -73,6 +73,12 @@ STAGING_WEB_PUSH_SUBJECT="${STAGING_WEB_PUSH_SUBJECT:-mailto:admin@362514.ir}"
 STAGING_TRUSTED_PROXY_CIDRS="${STAGING_TRUSTED_PROXY_CIDRS:-127.0.0.1/32,::1/128,172.16.0.0/12}"
 STAGING_BASIC_AUTH_FILE="${STAGING_BASIC_AUTH_FILE:-/etc/nginx/.htpasswd-trading-bot-staging}"
 STAGING_NGINX_DEDUPLICATE="${STAGING_NGINX_DEDUPLICATE:-1}"
+STAGING_COIN_INFERENCE_PREVIEW_ENABLED="${STAGING_COIN_INFERENCE_PREVIEW_ENABLED:-true}"
+STAGING_COIN_INFERENCE_SELECTION_ENABLED="${STAGING_COIN_INFERENCE_SELECTION_ENABLED:-true}"
+STAGING_COIN_INFERENCE_AUTO_SELECTION_ENABLED="${STAGING_COIN_INFERENCE_AUTO_SELECTION_ENABLED:-false}"
+STAGING_COIN_INFERENCE_SNAPSHOT_HOST_PATH="${STAGING_COIN_INFERENCE_SNAPSHOT_HOST_PATH:-/srv/trading-bot/staging-data/coin-intelligence/coin-rates.json}"
+STAGING_COIN_INFERENCE_SNAPSHOT_CONTAINER_PATH="${STAGING_COIN_INFERENCE_SNAPSHOT_CONTAINER_PATH:-/app/runtime/coin-inference/coin-rates.json}"
+STAGING_COIN_INFERENCE_MAXIMUM_AGE_SECONDS="${STAGING_COIN_INFERENCE_MAXIMUM_AGE_SECONDS:-120}"
 STAGING_FRONTEND_DIST_DIR="${STAGING_FRONTEND_DIST_DIR:-mini_app_dist_staging}"
 case "$STAGING_FRONTEND_DIST_DIR" in
     /*) ;;
@@ -196,6 +202,39 @@ validate_staging_bot_username() {
     if [[ ! "$STAGING_BOT_USERNAME" =~ ^[A-Za-z][A-Za-z0-9_]{1,28}[bB][oO][tT]$ ]]; then
         die "STAGING_BOT_USERNAME must be a valid public Telegram bot username ending in bot"
     fi
+}
+
+is_enabled_value() {
+    case "${1:-}" in
+        1|true|TRUE|yes|YES) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+validate_staging_coin_inference() {
+    if is_enabled_value "$STAGING_COIN_INFERENCE_AUTO_SELECTION_ENABLED" && \
+       ! is_enabled_value "$STAGING_COIN_INFERENCE_SELECTION_ENABLED"; then
+        die "coin inference auto-selection requires selection"
+    fi
+    if is_enabled_value "$STAGING_COIN_INFERENCE_SELECTION_ENABLED" && \
+       ! is_enabled_value "$STAGING_COIN_INFERENCE_PREVIEW_ENABLED"; then
+        die "coin inference selection requires preview"
+    fi
+    if ! is_enabled_value "$STAGING_COIN_INFERENCE_PREVIEW_ENABLED" && \
+       ! is_enabled_value "$STAGING_COIN_INFERENCE_SELECTION_ENABLED"; then
+        return
+    fi
+    [[ "$STAGING_COIN_INFERENCE_SNAPSHOT_HOST_PATH" = /* ]] || \
+        die "staging coin inference host path must be absolute"
+    [[ "$STAGING_COIN_INFERENCE_SNAPSHOT_CONTAINER_PATH" = /* ]] || \
+        die "staging coin inference container path must be absolute"
+    [[ -r "$STAGING_COIN_INFERENCE_SNAPSHOT_HOST_PATH" ]] || \
+        die "staging coin inference Snapshot is missing or unreadable"
+    python3 "$PROJECT_DIR/scripts/publish_coin_intelligence_snapshot.py" check \
+        --runtime-root "$(dirname "$STAGING_COIN_INFERENCE_SNAPSHOT_HOST_PATH")" \
+        --snapshot "$STAGING_COIN_INFERENCE_SNAPSHOT_HOST_PATH" \
+        --maximum-age-seconds "$STAGING_COIN_INFERENCE_MAXIMUM_AGE_SECONDS" \
+        >/dev/null || die "staging coin inference Snapshot is not fresh and rate-ready"
 }
 
 ensure_env() {
@@ -423,6 +462,11 @@ compose() {
     STAGING_FOREIGN_IRAN_SERVER_URL="$STAGING_FOREIGN_IRAN_SERVER_URL" \
     STAGING_FOREIGN_FRONTEND_URL="$STAGING_FOREIGN_FRONTEND_URL" \
     STAGING_FOREIGN_FOREIGN_SERVER_URL="$STAGING_FOREIGN_FOREIGN_SERVER_URL" \
+    STAGING_COIN_INFERENCE_PREVIEW_ENABLED="$STAGING_COIN_INFERENCE_PREVIEW_ENABLED" \
+    STAGING_COIN_INFERENCE_SELECTION_ENABLED="$STAGING_COIN_INFERENCE_SELECTION_ENABLED" \
+    STAGING_COIN_INFERENCE_AUTO_SELECTION_ENABLED="$STAGING_COIN_INFERENCE_AUTO_SELECTION_ENABLED" \
+    STAGING_COIN_INFERENCE_SNAPSHOT_HOST_PATH="$STAGING_COIN_INFERENCE_SNAPSHOT_HOST_PATH" \
+    STAGING_COIN_INFERENCE_SNAPSHOT_CONTAINER_PATH="$STAGING_COIN_INFERENCE_SNAPSHOT_CONTAINER_PATH" \
     "${compose_cmd[@]}" "$@"
 }
 
@@ -669,11 +713,13 @@ check() {
     require_cmd docker
     require_cmd curl
     require_cmd git
+    require_cmd python3
     require_cmd sed
     require_cmd nginx
     init_compose_cmd
     [[ -f "$COMPOSE_FILE" ]] || die "missing $COMPOSE_FILE"
     [[ -f "$NGINX_TEMPLATE" ]] || die "missing $NGINX_TEMPLATE"
+    validate_staging_coin_inference
     log "domain=$STAGING_DOMAIN frontend_url=$STAGING_FRONTEND_URL ssl=$STAGING_ENABLE_SSL app_port=$STAGING_APP_PORT foreign_app_port=$STAGING_FOREIGN_APP_PORT project=$STAGING_PROJECT_NAME frontend_dist=$STAGING_FRONTEND_DIST_DIR foreign_iran_url=$STAGING_FOREIGN_IRAN_SERVER_URL foreign_public_guard=$STAGING_FOREIGN_PUBLIC_SURFACE_GUARD"
     getent hosts "$STAGING_DOMAIN" || true
 }

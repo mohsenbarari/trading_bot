@@ -32,7 +32,6 @@ x-non-iran-sms-isolation: &non_iran_sms_isolation
   SMSIR_INVITATION_TEMPLATE_ID: ""
   SMSIR_ACCOUNTANT_INVITATION_TEMPLATE_ID: ""
   SMSIR_CUSTOMER_INVITATION_TEMPLATE_ID: ""
-
 services:
   app:
     image: *app_image
@@ -55,6 +54,10 @@ services:
       IRAN_OTP_DELIVERY_STATE_SECRET: ""
       TELEGRAM_OTP_QUEUE_SECRET: ""
       OTP_SMS_AUTO_FALLBACK_ENABLED: ${IRAN_OTP_SMS_AUTO_FALLBACK_ENABLED:-false}
+      COIN_INTELLIGENCE_INFERENCE_PREVIEW_ENABLED: ${STAGING_COIN_INFERENCE_PREVIEW_ENABLED:-false}
+      COIN_INTELLIGENCE_INFERENCE_SELECTION_ENABLED: ${STAGING_COIN_INFERENCE_SELECTION_ENABLED:-false}
+      COIN_INTELLIGENCE_INFERENCE_AUTO_SELECTION_ENABLED: ${STAGING_COIN_INFERENCE_AUTO_SELECTION_ENABLED:-false}
+      COIN_INTELLIGENCE_INFERENCE_SNAPSHOT_PATH: ${STAGING_COIN_INFERENCE_SNAPSHOT_CONTAINER_PATH:-}
     env_file:
       - ../../.env.staging
     ports:
@@ -62,6 +65,10 @@ services:
     volumes:
       - staging_uploads:/app/uploads
       - staging_audit:/app/audit_trail
+      - type: bind
+        source: ${STAGING_COIN_INFERENCE_SNAPSHOT_HOST_PATH:-/dev/null}
+        target: ${STAGING_COIN_INFERENCE_SNAPSHOT_CONTAINER_PATH:-/app/runtime/coin-inference/coin-rates.json}
+        read_only: true
     depends_on:
       migration:
         condition: service_completed_successfully
@@ -105,6 +112,10 @@ services:
       DB_POOL_RECYCLE_SECONDS: ${DB_POOL_RECYCLE_SECONDS:-3600}
       OTP_DELIVERY_STATE_SECRET: ""
       IRAN_OTP_DELIVERY_STATE_SECRET: ""
+      COIN_INTELLIGENCE_INFERENCE_PREVIEW_ENABLED: ${STAGING_COIN_INFERENCE_PREVIEW_ENABLED:-false}
+      COIN_INTELLIGENCE_INFERENCE_SELECTION_ENABLED: ${STAGING_COIN_INFERENCE_SELECTION_ENABLED:-false}
+      COIN_INTELLIGENCE_INFERENCE_AUTO_SELECTION_ENABLED: ${STAGING_COIN_INFERENCE_AUTO_SELECTION_ENABLED:-false}
+      COIN_INTELLIGENCE_INFERENCE_SNAPSHOT_PATH: ${STAGING_COIN_INFERENCE_SNAPSHOT_CONTAINER_PATH:-}
     env_file:
       - ../../.env.staging
     extra_hosts:
@@ -114,6 +125,10 @@ services:
     volumes:
       - staging_uploads:/app/uploads
       - staging_audit:/app/audit_trail
+      - type: bind
+        source: ${STAGING_COIN_INFERENCE_SNAPSHOT_HOST_PATH:-/dev/null}
+        target: ${STAGING_COIN_INFERENCE_SNAPSHOT_CONTAINER_PATH:-/app/runtime/coin-inference/coin-rates.json}
+        read_only: true
     depends_on:
       migration:
         condition: service_completed_successfully
@@ -302,6 +317,10 @@ services:
       DB_POOL_RECYCLE_SECONDS: ${DB_POOL_RECYCLE_SECONDS:-3600}
       OTP_DELIVERY_STATE_SECRET: ""
       IRAN_OTP_DELIVERY_STATE_SECRET: ""
+      COIN_INTELLIGENCE_INFERENCE_PREVIEW_ENABLED: ${STAGING_COIN_INFERENCE_PREVIEW_ENABLED:-false}
+      COIN_INTELLIGENCE_INFERENCE_SELECTION_ENABLED: ${STAGING_COIN_INFERENCE_SELECTION_ENABLED:-false}
+      COIN_INTELLIGENCE_INFERENCE_AUTO_SELECTION_ENABLED: ${STAGING_COIN_INFERENCE_AUTO_SELECTION_ENABLED:-false}
+      COIN_INTELLIGENCE_INFERENCE_SNAPSHOT_PATH: ${STAGING_COIN_INFERENCE_SNAPSHOT_CONTAINER_PATH:-}
     env_file:
       - ../../.env.staging
     extra_hosts:
@@ -310,6 +329,10 @@ services:
       # Matrix evidence is written by the foreign-side bot process; it must
       # share the durable staging audit volume rather than its container layer.
       - staging_audit:/app/audit_trail
+      - type: bind
+        source: ${STAGING_COIN_INFERENCE_SNAPSHOT_HOST_PATH:-/dev/null}
+        target: ${STAGING_COIN_INFERENCE_SNAPSHOT_CONTAINER_PATH:-/app/runtime/coin-inference/coin-rates.json}
+        read_only: true
     depends_on:
       foreign_app:
         condition: service_healthy
