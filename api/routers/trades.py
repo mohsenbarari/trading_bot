@@ -4807,14 +4807,19 @@ async def get_pending_requester_overtime_requests(
     db: AsyncSession = Depends(get_db),
     context: EffectiveOwnerActor = Depends(get_effective_owner_actor_context),
 ):
-    """Reconnect recovery: requester's outstanding overtime requests on this server."""
+    """Recover requests created on this interaction surface.
+
+    The offer home owns the ledger transition, but the request source owns the
+    requester's cancel control.  Cross-server mirror rows therefore must be
+    selected by ``request_source_server`` rather than ``request_home_server``.
+    """
     _ensure_accountant_market_access_allowed(context)
     requester_id = int(context.owner_user.id)
     home = current_server()
     rows = await list_nonterminal_overtime_requests(
         db,
         requester_user_id=requester_id,
-        request_home_server=home,
+        request_source_server=home,
     )
     now = datetime.utcnow()
     items = [

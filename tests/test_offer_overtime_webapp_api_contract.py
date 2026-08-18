@@ -5,7 +5,7 @@ from __future__ import annotations
 import unittest
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import ANY, AsyncMock, patch
 
 from fastapi import HTTPException
 
@@ -259,13 +259,40 @@ class OvertimeReconnectEndpointTests(unittest.IsolatedAsyncioTestCase):
         with patch(
             "api.routers.trades.list_nonterminal_overtime_requests",
             new=AsyncMock(return_value=[row]),
-        ), patch("api.routers.trades.current_server", return_value="iran"):
+        ) as list_requests, patch("api.routers.trades.current_server", return_value="iran"):
             body = await trades.get_pending_requester_overtime_requests(
                 db=SimpleNamespace(),
                 context=make_context(make_user(id=9)),
             )
         self.assertEqual(body["viewer_role"], "requester")
         self.assertEqual(body["items"][0]["request_public_id"], "req_ot_web_1")
+        list_requests.assert_awaited_once_with(
+            ANY,
+            requester_user_id=9,
+            request_source_server="iran",
+        )
+
+    async def test_pending_requester_recovers_remote_home_request_created_on_web(self):
+        row = _presented_ledger(
+            request_home_server="foreign",
+            request_source_server="iran",
+        )
+        with patch(
+            "api.routers.trades.list_nonterminal_overtime_requests",
+            new=AsyncMock(return_value=[row]),
+        ) as list_requests, patch("api.routers.trades.current_server", return_value="iran"):
+            body = await trades.get_pending_requester_overtime_requests(
+                db=SimpleNamespace(),
+                context=make_context(make_user(id=9)),
+            )
+
+        self.assertEqual(body["items"][0]["request_home_server"], "foreign")
+        list_requests.assert_awaited_once_with(
+            ANY,
+            requester_user_id=9,
+            request_source_server="iran",
+        )
+        self.assertNotIn("request_home_server", list_requests.await_args.kwargs)
 
     async def test_get_one_forbids_unrelated_user(self):
         with patch(

@@ -189,7 +189,7 @@ describe('useOvertimeApprovalRuntime', () => {
     wrapper.unmount()
   })
 
-  it('shows queued requester status and cancels with M15', async () => {
+  it('shows and cancels a Web request whose authoritative offer home is foreign', async () => {
     overtimeRuntimeMocks.apiFetch.mockImplementation(async (url: string, options?: { method?: string }) => {
       if (url.includes('pending-owner')) {
         return jsonResponse({ current: null, items: [] })
@@ -198,6 +198,7 @@ describe('useOvertimeApprovalRuntime', () => {
         return jsonResponse({
           items: [{
             request_public_id: 'req_ot_3',
+            request_home_server: 'foreign',
             result_status: 'overtime_queued',
             is_actionable: false,
             is_occupying: false,

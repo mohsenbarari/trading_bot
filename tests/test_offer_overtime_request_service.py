@@ -24,6 +24,7 @@ from core.services.offer_overtime_request_service import (
     create_overtime_request,
     decision_deadline_at,
     expire_decision,
+    list_nonterminal_overtime_requests,
     mark_presented,
     promote_next_for_owner,
     record_completed_trade,
@@ -108,6 +109,26 @@ class TransitionTableTests(unittest.TestCase):
             cooldown_remaining_seconds(CREATED, now=CREATED + timedelta(seconds=30)),
             0,
         )
+
+
+class RequestSourceQueryContractTests(unittest.IsolatedAsyncioTestCase):
+    async def test_nonterminal_query_can_scope_requester_interaction_source(self):
+        result = SimpleNamespace(
+            scalars=lambda: SimpleNamespace(all=lambda: []),
+        )
+        db = SimpleNamespace(execute=AsyncMock(return_value=result))
+
+        await list_nonterminal_overtime_requests(
+            db,
+            requester_user_id=9,
+            request_source_server="iran",
+        )
+
+        statement = db.execute.await_args.args[0]
+        compiled = str(statement.compile(compile_kwargs={"literal_binds": True}))
+        self.assertIn("offer_requests.requester_user_id = 9", compiled)
+        self.assertIn("offer_requests.request_source_server = 'iran'", compiled)
+        self.assertNotIn("offer_requests.request_home_server = 'iran'", compiled)
 
 
 class _MemResult:

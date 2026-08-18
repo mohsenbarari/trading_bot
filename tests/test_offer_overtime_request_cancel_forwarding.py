@@ -156,6 +156,42 @@ class OvertimeCancelRouterTests(unittest.IsolatedAsyncioTestCase):
                 )
         self.assertEqual(caught.exception.status_code, 409)
 
+    async def test_public_cancel_forwards_web_request_on_foreign_offer_home(self):
+        ledger = _ledger(
+            request_home_server="foreign",
+            request_source_server="iran",
+            request_source_surface="webapp",
+        )
+        db = SimpleNamespace(rollback=AsyncMock())
+        receipt = {
+            "request_public_id": ledger.request_public_id,
+            "result_status": "overtime_cancelled_by_requester",
+            "replayed": False,
+        }
+        with patch(
+            "api.routers.trades.load_overtime_request_by_public_id",
+            new=AsyncMock(return_value=ledger),
+        ), patch("api.routers.trades.current_server", return_value="iran"), patch(
+            "api.routers.trades.forward_overtime_requester_cancel",
+            new=AsyncMock(return_value=(200, receipt)),
+        ) as forward:
+            result = await trades.cancel_overtime_request(
+                request_public_id=ledger.request_public_id,
+                db=db,
+                context=make_context(make_user(id=9)),
+            )
+
+        self.assertEqual(result, receipt)
+        db.rollback.assert_awaited_once()
+        forward.assert_awaited_once_with(
+            "foreign",
+            {
+                "request_public_id": ledger.request_public_id,
+                "requester_user_id": 9,
+                "source_server": "iran",
+            },
+        )
+
     async def test_internal_cancel_is_idempotent_on_authoritative_home(self):
         ledger = _ledger(
             result_status=OfferRequestStatus.OVERTIME_CANCELLED_BY_REQUESTER
@@ -223,6 +259,47 @@ class OvertimeCancelRouterTests(unittest.IsolatedAsyncioTestCase):
                 raw_request=request,
                 db=db,
             )
+        self.assertFalse(result["replayed"])
+        cancel.assert_awaited_once()
+        db.commit.assert_awaited_once()
+
+    async def test_internal_cancel_accepts_iran_web_source_on_foreign_home(self):
+        ledger = _ledger(
+            request_home_server="foreign",
+            request_source_server="iran",
+            request_source_surface="webapp",
+        )
+        request = SimpleNamespace(
+            body=AsyncMock(return_value=b"{}"),
+            headers={
+                "x-source-server": "iran",
+                "x-timestamp": "1",
+                "x-signature": "sig",
+                "x-api-key": "key",
+            },
+        )
+        db = SimpleNamespace(commit=AsyncMock(), get=AsyncMock(return_value=None))
+        with patch(
+            "api.routers.trades.verify_internal_signature", return_value=True
+        ), patch("api.routers.trades.current_server", return_value="foreign"), patch(
+            "api.routers.trades.load_overtime_request_by_public_id",
+            new=AsyncMock(return_value=ledger),
+        ), patch(
+            "core.trading_settings.get_trading_settings_async",
+            new=AsyncMock(return_value=SimpleNamespace(offer_expiry_minutes=2)),
+        ), patch(
+            "api.routers.trades.cancel_by_requester", new=AsyncMock()
+        ) as cancel:
+            result = await trades.cancel_overtime_request_internal(
+                internal_data=trades.InternalOvertimeRequesterCancelRequest(
+                    request_public_id=ledger.request_public_id,
+                    requester_user_id=9,
+                    source_server="iran",
+                ),
+                raw_request=request,
+                db=db,
+            )
+
         self.assertFalse(result["replayed"])
         cancel.assert_awaited_once()
         db.commit.assert_awaited_once()

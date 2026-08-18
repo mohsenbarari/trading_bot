@@ -1170,6 +1170,7 @@ async def list_nonterminal_overtime_requests(
     offer_owner_user_id: int | None = None,
     requester_user_id: int | None = None,
     request_home_server: str | None = None,
+    request_source_server: str | None = None,
     for_update: bool = False,
 ) -> list[OfferRequest]:
     """Load nonterminal overtime rows matching any provided filter.
@@ -1202,6 +1203,11 @@ async def list_nonterminal_overtime_requests(
         stmt = stmt.where(
             OfferRequest.request_home_server
             == normalize_server(request_home_server, current_server())
+        )
+    if request_source_server is not None:
+        stmt = stmt.where(
+            OfferRequest.request_source_server
+            == normalize_server(request_source_server, current_server())
         )
     stmt = stmt.order_by(OfferRequest.id.asc())
     if for_update:
