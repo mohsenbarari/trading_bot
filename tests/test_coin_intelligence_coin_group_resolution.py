@@ -6,6 +6,7 @@ import unittest
 
 from core.market_intelligence.coin_group_resolution import (
     CoinPriceAnchor,
+    CoinPriceAnchorIndex,
     resolve_coin_group_offers,
     resolved_coin_group_observations,
 )
@@ -38,6 +39,63 @@ def anchor(code: str, price: int, at: str, **changes: object) -> CoinPriceAnchor
 
 
 class CoinGroupResolutionTests(unittest.TestCase):
+    def test_indexed_anchors_match_iterable_causal_resolution(self) -> None:
+        anchors = (
+            anchor("IMAM", 186_800, "2026-08-04T10:08:00Z"),
+            anchor(
+                "IMAM",
+                186_900,
+                "2026-08-04T10:09:00Z",
+                available_at_utc="2026-08-04T10:10:06Z",
+            ),
+            anchor("IMAM", 187_000, "2026-08-04T10:11:00Z"),
+            anchor("IMAM", 186_700, "2026-08-04T07:00:00Z"),
+            anchor(
+                "IMAM",
+                186_850,
+                "2026-08-04T10:09:30Z",
+                settlement_term="CASH",
+            ),
+        )
+        supplemental = (
+            anchor(
+                "IMAM",
+                186_900,
+                "2026-08-04T10:09:00Z",
+                evidence_kind="PROVISIONAL_EXPLICIT_CLUSTER",
+            ),
+        )
+        message = source("امام فروش فردا 186,900 / 5 تا")
+
+        iterable_result = resolve_coin_group_offers(
+            message,
+            anchors=anchors,
+            supplemental_anchors=supplemental,
+        )
+        index = CoinPriceAnchorIndex(anchors)
+        indexed_result = resolve_coin_group_offers(
+            message,
+            anchors=index,
+            supplemental_anchors=supplemental,
+        )
+
+        assert indexed_result == iterable_result
+
+        dynamic = anchor("IMAM", 187_050, "2026-08-04T10:10:30Z")
+        index.add(dynamic)
+        later_message = source(
+            "امام فروش فردا 187,000 / 5 تا",
+            published_at_utc="2026-08-04T10:11:00Z",
+            available_at_utc="2026-08-04T10:11:05Z",
+        )
+        assert resolve_coin_group_offers(
+            later_message,
+            anchors=index,
+        ) == resolve_coin_group_offers(
+            later_message,
+            anchors=(*anchors, dynamic),
+        )
+
     def test_explicit_name_can_be_supported_by_same_book_prior_context(self) -> None:
         result = resolve_coin_group_offers(
             source("امام فروش فردا 186,900 / 5 تا"),

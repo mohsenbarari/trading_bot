@@ -204,6 +204,44 @@ def _event_message(
     )
 
 
+async def _incremental_channel_messages(
+    client: object,
+    entity: object,
+    *,
+    minimum_id: int,
+    maximum_messages: int,
+) -> list[object]:
+    """Fetch the normal small delta in one newest-first Telegram request.
+
+    Telethon's reverse iterator emulates oldest-first pagination with extra
+    history requests.  The recurring collector normally has a tiny delta, so
+    fetch newest-first and restore causal order locally.  If the delta exceeds
+    the bounded batch, refetch oldest-first so advancing the checkpoint can
+    never skip an older transport envelope.
+    """
+
+    newest_first = [
+        message
+        async for message in client.iter_messages(  # type: ignore[attr-defined]
+            entity,
+            min_id=int(minimum_id),
+            reverse=False,
+            limit=int(maximum_messages) + 1,
+        )
+    ]
+    if len(newest_first) <= int(maximum_messages):
+        return sorted(newest_first, key=lambda message: int(message.id))
+    return [
+        message
+        async for message in client.iter_messages(  # type: ignore[attr-defined]
+            entity,
+            min_id=int(minimum_id),
+            reverse=True,
+            limit=int(maximum_messages),
+        )
+    ]
+
+
 async def collect(args: argparse.Namespace) -> dict[str, object]:
     root = _runtime_root(args.runtime_root)
     market_path = _inside(root, args.market_store, field="market_store")
@@ -256,10 +294,10 @@ async def collect(args: argparse.Namespace) -> dict[str, object]:
             sequential_updates=True,
             flood_sleep_threshold=60,
             timeout=10,
-            connection_retries=1,
+            connection_retries=3,
             retry_delay=1,
-            request_retries=1,
-            auto_reconnect=False,
+            request_retries=3,
+            auto_reconnect=True,
         )
         await client.connect()
         if not await client.is_user_authorized():
@@ -272,27 +310,37 @@ async def collect(args: argparse.Namespace) -> dict[str, object]:
             newest = [message async for message in client.iter_messages(entity, limit=1)]
             minimum_id = max(0, int(newest[0].id) - 1) if newest else 0
         cutoff = datetime.now(timezone.utc) - timedelta(days=max(1, min(3, int(args.days))))
-        messages = []
-        async for telegram_message in client.iter_messages(
-            entity,
-            min_id=0 if args.replay_window else int(minimum_id or 0),
-            reverse=True,
-            limit=int(args.maximum_messages),
-        ):
-            published = getattr(telegram_message, "date", None)
-            if not isinstance(published, datetime):
-                continue
-            if published.tzinfo is None:
-                published = published.replace(tzinfo=timezone.utc)
-            if args.replay_window and published.astimezone(timezone.utc) < cutoff:
-                continue
-            messages.append(telegram_message)
+        if args.replay_window:
+            messages = []
+            async for telegram_message in client.iter_messages(
+                entity,
+                min_id=0,
+                reverse=True,
+                limit=int(args.maximum_messages),
+            ):
+                published = getattr(telegram_message, "date", None)
+                if not isinstance(published, datetime):
+                    continue
+                if published.tzinfo is None:
+                    published = published.replace(tzinfo=timezone.utc)
+                if published.astimezone(timezone.utc) < cutoff:
+                    continue
+                messages.append(telegram_message)
+        else:
+            messages = await _incremental_channel_messages(
+                client,
+                entity,
+                minimum_id=int(minimum_id or 0),
+                maximum_messages=int(args.maximum_messages),
+            )
 
         received_at = normalize_utc(datetime.now(timezone.utc), field_name="coin_group_received_at_utc")
         checkpoints: list[tuple[int, str]] = []
         for telegram_message in messages:
+            published = getattr(telegram_message, "date", None)
+            if not isinstance(published, datetime):
+                continue
             counters["telegram_messages"] += 1
-            published = telegram_message.date
             if published.tzinfo is None:
                 published = published.replace(tzinfo=timezone.utc)
             checkpoints.append(

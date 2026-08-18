@@ -1,8 +1,11 @@
+import asyncio
 import os
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from scripts.collect_coin_group_event_telegram import (
     _event_message,
+    _incremental_channel_messages,
     build_parser,
     collector_failure_reason,
     decode_event_envelopes,
@@ -81,3 +84,55 @@ def test_collector_reads_prediction_ledger_path_from_environment() -> None:
         args = build_parser().parse_args(["--runtime-root", "/runtime"])
 
     assert args.estimator_calibration_db == "/runtime/predictions.sqlite3"
+
+
+def test_incremental_reader_fetches_newest_first_and_restores_causal_order() -> None:
+    class FakeClient:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, object]] = []
+
+        async def iter_messages(self, _entity: object, **kwargs: object):
+            self.calls.append(kwargs)
+            for message_id in (14, 13, 12):
+                yield SimpleNamespace(id=message_id)
+
+    client = FakeClient()
+    messages = asyncio.run(
+        _incremental_channel_messages(
+            client,
+            object(),
+            minimum_id=11,
+            maximum_messages=10,
+        )
+    )
+
+    assert [message.id for message in messages] == [12, 13, 14]
+    assert client.calls == [{"min_id": 11, "reverse": False, "limit": 11}]
+
+
+def test_incremental_reader_refetches_oldest_batch_when_backlog_exceeds_limit() -> None:
+    class FakeClient:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, object]] = []
+
+        async def iter_messages(self, _entity: object, **kwargs: object):
+            self.calls.append(kwargs)
+            ids = (15, 14, 13, 12) if kwargs["reverse"] is False else (12, 13, 14)
+            for message_id in ids:
+                yield SimpleNamespace(id=message_id)
+
+    client = FakeClient()
+    messages = asyncio.run(
+        _incremental_channel_messages(
+            client,
+            object(),
+            minimum_id=11,
+            maximum_messages=3,
+        )
+    )
+
+    assert [message.id for message in messages] == [12, 13, 14]
+    assert client.calls == [
+        {"min_id": 11, "reverse": False, "limit": 4},
+        {"min_id": 11, "reverse": True, "limit": 3},
+    ]

@@ -7,9 +7,11 @@ uses facts that were available strictly before the group offer arrived.
 
 from __future__ import annotations
 
+from bisect import bisect_left, bisect_right
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
+from functools import lru_cache
 from statistics import median
 from typing import Iterable
 
@@ -28,6 +30,7 @@ MINIMUM_ANCHOR_COUNT = 2
 MAXIMUM_RELATIVE_DISTANCE = 0.015
 MINIMUM_RUNNER_UP_MARGIN = 0.005
 MAXIMUM_ANCHOR_AGE_SECONDS = 2 * 60 * 60
+_NormalizedAnchor = tuple[str, int, str, str, str, str, str]
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,9 +73,9 @@ def _strict_timestamp(value: datetime | str, *, name: str) -> str:
         raise ValueError(str(exc)) from exc
 
 
-def _normalized_anchor(
+def _normalize_anchor_uncached(
     anchor: CoinPriceAnchor,
-) -> tuple[str, int, str, str, str, str, str] | None:
+) -> _NormalizedAnchor | None:
     code = str(anchor.commodity_code or "").strip().upper()
     if code not in _PRICE_BOUNDS:
         return None
@@ -108,12 +111,83 @@ def _normalized_anchor(
     return code, price, event_time, available_at, settlement, trade_form, evidence_kind
 
 
+@lru_cache(maxsize=32_768)
+def _normalized_anchor_cached(
+    anchor: CoinPriceAnchor,
+) -> _NormalizedAnchor | None:
+    """Validate an immutable anchor once per collector process."""
+
+    return _normalize_anchor_uncached(anchor)
+
+
+def _normalized_anchor(
+    anchor: CoinPriceAnchor,
+) -> _NormalizedAnchor | None:
+    # ``CoinPriceAnchor`` is frozen and its contract contains only hashable
+    # scalar values.  Keep a defensive fallback for malformed callers so the
+    # cache never changes the resolver's previous fail-closed behaviour.
+    try:
+        return _normalized_anchor_cached(anchor)
+    except TypeError:
+        return _normalize_anchor_uncached(anchor)
+
+
+@lru_cache(maxsize=32_768)
+def _anchor_event_stamp(event_time_utc: str) -> datetime:
+    """Parse one already-normalized anchor timestamp once."""
+
+    return datetime.fromisoformat(event_time_utc.replace("Z", "+00:00"))
+
+
+@dataclass(slots=True)
+class _AnchorBucket:
+    event_stamps: list[datetime]
+    anchors: list[_NormalizedAnchor]
+
+
+class CoinPriceAnchorIndex:
+    """Mutable same-book/time index with the exact resolver anchor contract."""
+
+    def __init__(self, anchors: Iterable[CoinPriceAnchor] = ()) -> None:
+        self._buckets: dict[tuple[str, str], _AnchorBucket] = {}
+        for anchor in anchors:
+            self.add(anchor)
+
+    def add(self, anchor: CoinPriceAnchor) -> None:
+        normalized = _normalized_anchor(anchor)
+        if normalized is None:
+            return
+        event_stamp = _anchor_event_stamp(normalized[2])
+        key = (normalized[4], normalized[5])
+        bucket = self._buckets.setdefault(key, _AnchorBucket([], []))
+        position = bisect_right(bucket.event_stamps, event_stamp)
+        bucket.event_stamps.insert(position, event_stamp)
+        bucket.anchors.insert(position, normalized)
+
+    def matching(
+        self,
+        *,
+        settlement_term: str,
+        trade_form: str,
+        source_event_stamp: datetime,
+    ) -> tuple[_NormalizedAnchor, ...]:
+        bucket = self._buckets.get((settlement_term, trade_form))
+        if bucket is None:
+            return ()
+        lower = source_event_stamp - timedelta(seconds=MAXIMUM_ANCHOR_AGE_SECONDS)
+        start = bisect_left(bucket.event_stamps, lower)
+        # Strict causality excludes anchors at the source event itself.
+        stop = bisect_left(bucket.event_stamps, source_event_stamp)
+        return tuple(bucket.anchors[start:stop])
+
+
 def _candidate_centers(
     parsed: ParsedCoinGroupOffer,
     *,
     source_event_time_utc: str,
     source_available_at_utc: str,
-    anchors: Iterable[CoinPriceAnchor],
+    anchors: Iterable[CoinPriceAnchor] | CoinPriceAnchorIndex,
+    supplemental_anchors: Iterable[CoinPriceAnchor] = (),
 ) -> list[tuple[str, float, int, float, int, bool, bool]]:
     """Return strictly-prior same-book centers as code/center/count/distance."""
 
@@ -121,8 +195,19 @@ def _candidate_centers(
     source_stamp = datetime.fromisoformat(
         source_event_time_utc.replace("Z", "+00:00")
     )
-    for anchor in anchors:
-        normalized = _normalized_anchor(anchor)
+    if isinstance(anchors, CoinPriceAnchorIndex):
+        normalized_anchors: Iterable[_NormalizedAnchor | None] = anchors.matching(
+            settlement_term=parsed.settlement_term,
+            trade_form=parsed.trade_form,
+            source_event_stamp=source_stamp,
+        )
+    else:
+        normalized_anchors = (_normalized_anchor(anchor) for anchor in anchors)
+    combined_anchors = (
+        *normalized_anchors,
+        *(_normalized_anchor(anchor) for anchor in supplemental_anchors),
+    )
+    for normalized in combined_anchors:
         if normalized is None:
             continue
         (
@@ -139,7 +224,7 @@ def _candidate_centers(
         # delayed fact cannot leak into the offer's contemporaneous decision.
         if event_time >= source_event_time_utc or available_at > source_available_at_utc:
             continue
-        anchor_stamp = datetime.fromisoformat(event_time.replace("Z", "+00:00"))
+        anchor_stamp = _anchor_event_stamp(event_time)
         if (source_stamp - anchor_stamp).total_seconds() > MAXIMUM_ANCHOR_AGE_SECONDS:
             continue
         if settlement != parsed.settlement_term or form != parsed.trade_form:
@@ -184,13 +269,15 @@ def _resolve_one(
     offer_index: int,
     source_event_time_utc: str,
     source_available_at_utc: str,
-    anchors: Iterable[CoinPriceAnchor],
+    anchors: Iterable[CoinPriceAnchor] | CoinPriceAnchorIndex,
+    supplemental_anchors: Iterable[CoinPriceAnchor] = (),
 ) -> ResolvedCoinGroupOffer:
     candidates = _candidate_centers(
         parsed,
         source_event_time_utc=source_event_time_utc,
         source_available_at_utc=source_available_at_utc,
         anchors=anchors,
+        supplemental_anchors=supplemental_anchors,
     )
     winner = candidates[0] if candidates else None
     runner_up = candidates[1] if len(candidates) > 1 else None
@@ -361,8 +448,9 @@ def _resolve_one(
 def resolve_coin_group_offers(
     source: CoinGroupMessageInput,
     *,
-    anchors: Iterable[CoinPriceAnchor],
+    anchors: Iterable[CoinPriceAnchor] | CoinPriceAnchorIndex,
     parsed_offers: Iterable[ParsedCoinGroupOffer] | None = None,
+    supplemental_anchors: Iterable[CoinPriceAnchor] = (),
 ) -> list[ResolvedCoinGroupOffer]:
     """Resolve all parser candidates using only facts known before the message."""
 
@@ -370,7 +458,10 @@ def resolve_coin_group_offers(
     available_at = _strict_timestamp(source.available_at_utc, name="coin_group_available_at_utc")
     if available_at < event_time:
         raise ValueError("coin_group_available_before_published")
-    materialized_anchors = tuple(anchors)
+    materialized_anchors = (
+        anchors if isinstance(anchors, CoinPriceAnchorIndex) else tuple(anchors)
+    )
+    materialized_supplemental_anchors = tuple(supplemental_anchors)
     parsed_values = (
         tuple(parsed_offers)
         if parsed_offers is not None
@@ -383,6 +474,7 @@ def resolve_coin_group_offers(
             source_event_time_utc=event_time,
             source_available_at_utc=available_at,
             anchors=materialized_anchors,
+            supplemental_anchors=materialized_supplemental_anchors,
         )
         for index, parsed in enumerate(parsed_values)
     ]

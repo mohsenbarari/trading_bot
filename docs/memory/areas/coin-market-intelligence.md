@@ -2,9 +2,9 @@
 
 - USD/Herat restores omitted leading digits from 3 same-book/source facts/15m;
   no constants/future replay.
-- In private groups, `خ ن ف`/`ف ن ف`, `خ ف`/`ف ف`, or no marker mean tomorrow;
+- `خ ن ف`/`ف ن ف`, `خ ف`/`ف ف`, or no marker mean tomorrow;
   `خ ن`/`ف ن` and `نق` mean cash. Future wins. Exclude user registration.
-- Coin prices accept project-thousand, full-Toman /1,000 once, or bounded extra
+- Prices accept project-thousand, full-Toman /1,000 once, or bounded extra
   zeros; quantities/scripts/years are not prices. `رب` is quarter;
   `پ`/`ت پ`/`پایین`/`بالا 80` mark low-date.
 - Named offers need no anchors; decisive prior evidence may reject. Unnamed use
@@ -32,12 +32,12 @@
   checkpoints. Health separates heartbeat, event and eligible input.
 - Private text stays in bounded/authenticated review; Store/projection
   stay opaque. Live jobs use `main`; retarget systemd before removal.
-- Estimator state: `estimator-live`; home: CASH/TOMORROW inputs; `/shadow`:
-  shadow/realised detail.
+- Estimator: `estimator-live`; home: CASH/TOMORROW; `/shadow`: shadow/realised.
 - Web UI is the parser/estimator contract: show normalized events, model/audit
-  status, recorded prices/times—never recompute. Analytics-first status actions.
+  status and recorded prices/times—never recompute.
 - Reviews use opaque keys/digests; never persist raw text/identity. Revisions
   correct facts; redacted-number syntax calibrates grammar. Review
   anchors never affect prior input.
-- Input health separates heartbeat/freshness, rejects stale/live-only proxies,
-  and prefers normalized sources.
+- Group ingestion indexes anchors by book/time; never rescan per message.
+  Fetch Telegram deltas newest-first then sort; fetch backlog
+  oldest-first so checkpoints cannot skip events.

@@ -22,6 +22,7 @@ from .coin_group_feedback import CoinGroupParserFeedback
 from .coin_group_resolution import (
     MAXIMUM_ANCHOR_AGE_SECONDS,
     CoinPriceAnchor,
+    CoinPriceAnchorIndex,
     ResolvedCoinGroupOffer,
     resolve_coin_group_offers,
     resolved_coin_group_observations,
@@ -933,9 +934,9 @@ def process_coin_group_staging(
             minimum_event_time_utc=minimum_anchor_time,
         )
     ) + tuple(additional_anchors) + _feedback_anchors(feedback.values())
+    anchor_index = CoinPriceAnchorIndex(base_anchors)
     all_resolved: dict[tuple[int, int], list] = {}
     explicit_claims: list[_ExplicitClaim] = []
-    dynamic_anchors: list[CoinPriceAnchor] = []
     active_event_keys: set[bytes] = set()
     offer_facts = 0
     eligible_offers = 0
@@ -948,15 +949,11 @@ def process_coin_group_staging(
             explicit_claims,
             source=source,
         )
-        resolution_anchors = (
-            *base_anchors,
-            *provisional_anchors,
-            *dynamic_anchors,
-        )
         resolver_output = resolve_coin_group_offers(
             source,
-            anchors=resolution_anchors,
+            anchors=anchor_index,
             parsed_offers=parsed,
+            supplemental_anchors=provisional_anchors,
         )
         resolved = []
         offer_reviews: dict[int, CoinGroupParserFeedback] = {}
@@ -1005,7 +1002,7 @@ def process_coin_group_staging(
         all_resolved[(message.group_number, message.message_id)] = resolved
         observations = resolved_coin_group_observations(
             source,
-            anchors=resolution_anchors,
+            anchors=(),
             resolution_available_at_utc=as_of,
             resolved_offers=resolved,
         )
@@ -1039,7 +1036,7 @@ def process_coin_group_staging(
             ):
                 continue
             review = offer_reviews.get(int(item.offer_index))
-            dynamic_anchors.append(
+            anchor_index.add(
                 CoinPriceAnchor(
                     commodity_code=item.commodity_code,
                     price_project_thousand_toman=item.price_project_thousand_toman,
