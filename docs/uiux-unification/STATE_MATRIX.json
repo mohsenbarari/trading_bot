@@ -2,7 +2,7 @@
   "schema_version": 1,
   "track": "webapp-uiux-unification-v3",
   "independent_of_stage8": true,
-  "status": "phase0-skeleton",
+  "status": "phase1-source-and-runtime-audit",
   "access_profiles": [
     "guest",
     "watch",
@@ -52,12 +52,5712 @@
     "zoom-200",
     "reduced-motion"
   ],
-  "environments": ["mobile-browser", "desktop-browser", "installed-pwa"],
+  "environments": [
+    "mobile-browser",
+    "desktop-browser",
+    "installed-pwa"
+  ],
   "excluded_environments": [
     {
       "id": "telegram-mini-app",
       "reason": "retired-product-surface"
     }
   ],
-  "cells": []
+  "cells": [
+    {
+      "surface_id": "home-shell",
+      "route": "/",
+      "state": "loading",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "home-shell",
+      "route": "/",
+      "state": "empty",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "home-shell",
+      "route": "/",
+      "state": "normal",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "home-shell",
+      "route": "/",
+      "state": "dense",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "home-shell",
+      "route": "/",
+      "state": "error",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "home-shell",
+      "route": "/",
+      "state": "retry",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "home-shell",
+      "route": "/",
+      "state": "slow",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "home-shell",
+      "route": "/",
+      "state": "offline",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "home-shell",
+      "route": "/",
+      "state": "stale",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "home-shell",
+      "route": "/",
+      "state": "long-persian",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "home-shell",
+      "route": "/",
+      "state": "unbroken-ltr",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "home-shell",
+      "route": "/",
+      "state": "unauthorized",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "home-shell",
+      "route": "/",
+      "state": "not-found",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "home-shell",
+      "route": "/",
+      "state": "partial-data",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "home-identity-menu",
+      "route": "/",
+      "state": "loading",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "home-identity-menu",
+      "route": "/",
+      "state": "empty",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "home-identity-menu",
+      "route": "/",
+      "state": "normal",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "home-identity-menu",
+      "route": "/",
+      "state": "dense",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "home-identity-menu",
+      "route": "/",
+      "state": "error",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "home-identity-menu",
+      "route": "/",
+      "state": "retry",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "home-identity-menu",
+      "route": "/",
+      "state": "slow",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "home-identity-menu",
+      "route": "/",
+      "state": "offline",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "home-identity-menu",
+      "route": "/",
+      "state": "stale",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "home-identity-menu",
+      "route": "/",
+      "state": "long-persian",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "home-identity-menu",
+      "route": "/",
+      "state": "unbroken-ltr",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "home-identity-menu",
+      "route": "/",
+      "state": "unauthorized",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "home-identity-menu",
+      "route": "/",
+      "state": "not-found",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "home-identity-menu",
+      "route": "/",
+      "state": "partial-data",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "home-market-widget",
+      "route": "/",
+      "state": "loading",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "home-market-widget",
+      "route": "/",
+      "state": "empty",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "home-market-widget",
+      "route": "/",
+      "state": "normal",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "home-market-widget",
+      "route": "/",
+      "state": "dense",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "home-market-widget",
+      "route": "/",
+      "state": "error",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "home-market-widget",
+      "route": "/",
+      "state": "retry",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "home-market-widget",
+      "route": "/",
+      "state": "slow",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "home-market-widget",
+      "route": "/",
+      "state": "offline",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "home-market-widget",
+      "route": "/",
+      "state": "stale",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "home-market-widget",
+      "route": "/",
+      "state": "long-persian",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "home-market-widget",
+      "route": "/",
+      "state": "unbroken-ltr",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "home-market-widget",
+      "route": "/",
+      "state": "unauthorized",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "home-market-widget",
+      "route": "/",
+      "state": "not-found",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "home-market-widget",
+      "route": "/",
+      "state": "partial-data",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "home-today-trades",
+      "route": "/",
+      "state": "loading",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "home-today-trades",
+      "route": "/",
+      "state": "empty",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "home-today-trades",
+      "route": "/",
+      "state": "normal",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "home-today-trades",
+      "route": "/",
+      "state": "dense",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "home-today-trades",
+      "route": "/",
+      "state": "error",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "home-today-trades",
+      "route": "/",
+      "state": "retry",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "home-today-trades",
+      "route": "/",
+      "state": "slow",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "home-today-trades",
+      "route": "/",
+      "state": "offline",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "home-today-trades",
+      "route": "/",
+      "state": "stale",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "home-today-trades",
+      "route": "/",
+      "state": "long-persian",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "home-today-trades",
+      "route": "/",
+      "state": "unbroken-ltr",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "home-today-trades",
+      "route": "/",
+      "state": "unauthorized",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "home-today-trades",
+      "route": "/",
+      "state": "not-found",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "home-today-trades",
+      "route": "/",
+      "state": "partial-data",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "home-associates",
+      "route": "/",
+      "state": "loading",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "home-associates",
+      "route": "/",
+      "state": "empty",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "home-associates",
+      "route": "/",
+      "state": "normal",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "home-associates",
+      "route": "/",
+      "state": "dense",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "home-associates",
+      "route": "/",
+      "state": "error",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "home-associates",
+      "route": "/",
+      "state": "retry",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "home-associates",
+      "route": "/",
+      "state": "slow",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "home-associates",
+      "route": "/",
+      "state": "offline",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "home-associates",
+      "route": "/",
+      "state": "stale",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "home-associates",
+      "route": "/",
+      "state": "long-persian",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "home-associates",
+      "route": "/",
+      "state": "unbroken-ltr",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "home-associates",
+      "route": "/",
+      "state": "unauthorized",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "home-associates",
+      "route": "/",
+      "state": "not-found",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "home-associates",
+      "route": "/",
+      "state": "partial-data",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "home-commodities-aliases",
+      "route": "/",
+      "state": "loading",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "home-commodities-aliases",
+      "route": "/",
+      "state": "empty",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "home-commodities-aliases",
+      "route": "/",
+      "state": "normal",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "home-commodities-aliases",
+      "route": "/",
+      "state": "dense",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "home-commodities-aliases",
+      "route": "/",
+      "state": "error",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "home-commodities-aliases",
+      "route": "/",
+      "state": "retry",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "home-commodities-aliases",
+      "route": "/",
+      "state": "slow",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "home-commodities-aliases",
+      "route": "/",
+      "state": "offline",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "home-commodities-aliases",
+      "route": "/",
+      "state": "stale",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "home-commodities-aliases",
+      "route": "/",
+      "state": "long-persian",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "home-commodities-aliases",
+      "route": "/",
+      "state": "unbroken-ltr",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "home-commodities-aliases",
+      "route": "/",
+      "state": "unauthorized",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "home-commodities-aliases",
+      "route": "/",
+      "state": "not-found",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "home-commodities-aliases",
+      "route": "/",
+      "state": "partial-data",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "home-pwa-install",
+      "route": "/",
+      "state": "loading",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "home-pwa-install",
+      "route": "/",
+      "state": "empty",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "home-pwa-install",
+      "route": "/",
+      "state": "normal",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "home-pwa-install",
+      "route": "/",
+      "state": "dense",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "home-pwa-install",
+      "route": "/",
+      "state": "error",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "home-pwa-install",
+      "route": "/",
+      "state": "retry",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "home-pwa-install",
+      "route": "/",
+      "state": "slow",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "home-pwa-install",
+      "route": "/",
+      "state": "offline",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "home-pwa-install",
+      "route": "/",
+      "state": "stale",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "home-pwa-install",
+      "route": "/",
+      "state": "long-persian",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "home-pwa-install",
+      "route": "/",
+      "state": "unbroken-ltr",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "home-pwa-install",
+      "route": "/",
+      "state": "unauthorized",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "home-pwa-install",
+      "route": "/",
+      "state": "not-found",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "home-pwa-install",
+      "route": "/",
+      "state": "partial-data",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "shell-bottom-nav",
+      "route": "*authenticated-daily",
+      "state": "loading",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "shell-bottom-nav",
+      "route": "*authenticated-daily",
+      "state": "empty",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "shell-bottom-nav",
+      "route": "*authenticated-daily",
+      "state": "normal",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "shell-bottom-nav",
+      "route": "*authenticated-daily",
+      "state": "dense",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "shell-bottom-nav",
+      "route": "*authenticated-daily",
+      "state": "error",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "shell-bottom-nav",
+      "route": "*authenticated-daily",
+      "state": "retry",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "shell-bottom-nav",
+      "route": "*authenticated-daily",
+      "state": "slow",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "shell-bottom-nav",
+      "route": "*authenticated-daily",
+      "state": "offline",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "shell-bottom-nav",
+      "route": "*authenticated-daily",
+      "state": "stale",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "shell-bottom-nav",
+      "route": "*authenticated-daily",
+      "state": "long-persian",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "shell-bottom-nav",
+      "route": "*authenticated-daily",
+      "state": "unbroken-ltr",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "shell-bottom-nav",
+      "route": "*authenticated-daily",
+      "state": "unauthorized",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "shell-bottom-nav",
+      "route": "*authenticated-daily",
+      "state": "not-found",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "shell-bottom-nav",
+      "route": "*authenticated-daily",
+      "state": "partial-data",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "shell-connection-banners",
+      "route": "*",
+      "state": "loading",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "shell-connection-banners",
+      "route": "*",
+      "state": "empty",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "shell-connection-banners",
+      "route": "*",
+      "state": "normal",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "shell-connection-banners",
+      "route": "*",
+      "state": "dense",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "shell-connection-banners",
+      "route": "*",
+      "state": "error",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "shell-connection-banners",
+      "route": "*",
+      "state": "retry",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "shell-connection-banners",
+      "route": "*",
+      "state": "slow",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "shell-connection-banners",
+      "route": "*",
+      "state": "offline",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "shell-connection-banners",
+      "route": "*",
+      "state": "stale",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "shell-connection-banners",
+      "route": "*",
+      "state": "long-persian",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "shell-connection-banners",
+      "route": "*",
+      "state": "unbroken-ltr",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "shell-connection-banners",
+      "route": "*",
+      "state": "unauthorized",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "shell-connection-banners",
+      "route": "*",
+      "state": "not-found",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "shell-connection-banners",
+      "route": "*",
+      "state": "partial-data",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-self-shell",
+      "route": "/profile",
+      "state": "loading",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-self-shell",
+      "route": "/profile",
+      "state": "empty",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-self-shell",
+      "route": "/profile",
+      "state": "normal",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-self-shell",
+      "route": "/profile",
+      "state": "dense",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-self-shell",
+      "route": "/profile",
+      "state": "error",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-self-shell",
+      "route": "/profile",
+      "state": "retry",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-self-shell",
+      "route": "/profile",
+      "state": "slow",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-self-shell",
+      "route": "/profile",
+      "state": "offline",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-self-shell",
+      "route": "/profile",
+      "state": "stale",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-self-shell",
+      "route": "/profile",
+      "state": "long-persian",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-self-shell",
+      "route": "/profile",
+      "state": "unbroken-ltr",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-self-shell",
+      "route": "/profile",
+      "state": "unauthorized",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-self-shell",
+      "route": "/profile",
+      "state": "not-found",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-self-shell",
+      "route": "/profile",
+      "state": "partial-data",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-public-shell",
+      "route": "/users/:id",
+      "state": "loading",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-public-shell",
+      "route": "/users/:id",
+      "state": "empty",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-public-shell",
+      "route": "/users/:id",
+      "state": "normal",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-public-shell",
+      "route": "/users/:id",
+      "state": "dense",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-public-shell",
+      "route": "/users/:id",
+      "state": "error",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-public-shell",
+      "route": "/users/:id",
+      "state": "retry",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-public-shell",
+      "route": "/users/:id",
+      "state": "slow",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-public-shell",
+      "route": "/users/:id",
+      "state": "offline",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-public-shell",
+      "route": "/users/:id",
+      "state": "stale",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-public-shell",
+      "route": "/users/:id",
+      "state": "long-persian",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-public-shell",
+      "route": "/users/:id",
+      "state": "unbroken-ltr",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-public-shell",
+      "route": "/users/:id",
+      "state": "unauthorized",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-public-shell",
+      "route": "/users/:id",
+      "state": "not-found",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-public-shell",
+      "route": "/users/:id",
+      "state": "partial-data",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-identity-header",
+      "route": "/profile|/users/:id",
+      "state": "loading",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-identity-header",
+      "route": "/profile|/users/:id",
+      "state": "empty",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-identity-header",
+      "route": "/profile|/users/:id",
+      "state": "normal",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-identity-header",
+      "route": "/profile|/users/:id",
+      "state": "dense",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-identity-header",
+      "route": "/profile|/users/:id",
+      "state": "error",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-identity-header",
+      "route": "/profile|/users/:id",
+      "state": "retry",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-identity-header",
+      "route": "/profile|/users/:id",
+      "state": "slow",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-identity-header",
+      "route": "/profile|/users/:id",
+      "state": "offline",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-identity-header",
+      "route": "/profile|/users/:id",
+      "state": "stale",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-identity-header",
+      "route": "/profile|/users/:id",
+      "state": "long-persian",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-identity-header",
+      "route": "/profile|/users/:id",
+      "state": "unbroken-ltr",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-identity-header",
+      "route": "/profile|/users/:id",
+      "state": "unauthorized",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-identity-header",
+      "route": "/profile|/users/:id",
+      "state": "not-found",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-identity-header",
+      "route": "/profile|/users/:id",
+      "state": "partial-data",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-summary-and-actions",
+      "route": "/profile|/users/:id",
+      "state": "loading",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-summary-and-actions",
+      "route": "/profile|/users/:id",
+      "state": "empty",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-summary-and-actions",
+      "route": "/profile|/users/:id",
+      "state": "normal",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-summary-and-actions",
+      "route": "/profile|/users/:id",
+      "state": "dense",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-summary-and-actions",
+      "route": "/profile|/users/:id",
+      "state": "error",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-summary-and-actions",
+      "route": "/profile|/users/:id",
+      "state": "retry",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-summary-and-actions",
+      "route": "/profile|/users/:id",
+      "state": "slow",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-summary-and-actions",
+      "route": "/profile|/users/:id",
+      "state": "offline",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-summary-and-actions",
+      "route": "/profile|/users/:id",
+      "state": "stale",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-summary-and-actions",
+      "route": "/profile|/users/:id",
+      "state": "long-persian",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-summary-and-actions",
+      "route": "/profile|/users/:id",
+      "state": "unbroken-ltr",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-summary-and-actions",
+      "route": "/profile|/users/:id",
+      "state": "unauthorized",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-summary-and-actions",
+      "route": "/profile|/users/:id",
+      "state": "not-found",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-summary-and-actions",
+      "route": "/profile|/users/:id",
+      "state": "partial-data",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-trade-history",
+      "route": "/profile",
+      "state": "loading",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-trade-history",
+      "route": "/profile",
+      "state": "empty",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-trade-history",
+      "route": "/profile",
+      "state": "normal",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-trade-history",
+      "route": "/profile",
+      "state": "dense",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-trade-history",
+      "route": "/profile",
+      "state": "error",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-trade-history",
+      "route": "/profile",
+      "state": "retry",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-trade-history",
+      "route": "/profile",
+      "state": "slow",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-trade-history",
+      "route": "/profile",
+      "state": "offline",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-trade-history",
+      "route": "/profile",
+      "state": "stale",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-trade-history",
+      "route": "/profile",
+      "state": "long-persian",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-trade-history",
+      "route": "/profile",
+      "state": "unbroken-ltr",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-trade-history",
+      "route": "/profile",
+      "state": "unauthorized",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-trade-history",
+      "route": "/profile",
+      "state": "not-found",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-trade-history",
+      "route": "/profile",
+      "state": "partial-data",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-relationship-directory",
+      "route": "/profile",
+      "state": "loading",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-relationship-directory",
+      "route": "/profile",
+      "state": "empty",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-relationship-directory",
+      "route": "/profile",
+      "state": "normal",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-relationship-directory",
+      "route": "/profile",
+      "state": "dense",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-relationship-directory",
+      "route": "/profile",
+      "state": "error",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-relationship-directory",
+      "route": "/profile",
+      "state": "retry",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-relationship-directory",
+      "route": "/profile",
+      "state": "slow",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-relationship-directory",
+      "route": "/profile",
+      "state": "offline",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-relationship-directory",
+      "route": "/profile",
+      "state": "stale",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-relationship-directory",
+      "route": "/profile",
+      "state": "long-persian",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-relationship-directory",
+      "route": "/profile",
+      "state": "unbroken-ltr",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-relationship-directory",
+      "route": "/profile",
+      "state": "unauthorized",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-relationship-directory",
+      "route": "/profile",
+      "state": "not-found",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-relationship-directory",
+      "route": "/profile",
+      "state": "partial-data",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-customer-relations-dead",
+      "route": "/profile",
+      "state": "loading",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-customer-relations-dead",
+      "route": "/profile",
+      "state": "empty",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-customer-relations-dead",
+      "route": "/profile",
+      "state": "normal",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-customer-relations-dead",
+      "route": "/profile",
+      "state": "dense",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-customer-relations-dead",
+      "route": "/profile",
+      "state": "error",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-customer-relations-dead",
+      "route": "/profile",
+      "state": "retry",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-customer-relations-dead",
+      "route": "/profile",
+      "state": "slow",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-customer-relations-dead",
+      "route": "/profile",
+      "state": "offline",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-customer-relations-dead",
+      "route": "/profile",
+      "state": "stale",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-customer-relations-dead",
+      "route": "/profile",
+      "state": "long-persian",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-customer-relations-dead",
+      "route": "/profile",
+      "state": "unbroken-ltr",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-customer-relations-dead",
+      "route": "/profile",
+      "state": "unauthorized",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-customer-relations-dead",
+      "route": "/profile",
+      "state": "not-found",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-customer-relations-dead",
+      "route": "/profile",
+      "state": "partial-data",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-admin-overlay",
+      "route": "/users/:id",
+      "state": "loading",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-admin-overlay",
+      "route": "/users/:id",
+      "state": "empty",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-admin-overlay",
+      "route": "/users/:id",
+      "state": "normal",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-admin-overlay",
+      "route": "/users/:id",
+      "state": "dense",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-admin-overlay",
+      "route": "/users/:id",
+      "state": "error",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-admin-overlay",
+      "route": "/users/:id",
+      "state": "retry",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-admin-overlay",
+      "route": "/users/:id",
+      "state": "slow",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-admin-overlay",
+      "route": "/users/:id",
+      "state": "offline",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-admin-overlay",
+      "route": "/users/:id",
+      "state": "stale",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-admin-overlay",
+      "route": "/users/:id",
+      "state": "long-persian",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-admin-overlay",
+      "route": "/users/:id",
+      "state": "unbroken-ltr",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-admin-overlay",
+      "route": "/users/:id",
+      "state": "unauthorized",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-admin-overlay",
+      "route": "/users/:id",
+      "state": "not-found",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "profile-admin-overlay",
+      "route": "/users/:id",
+      "state": "partial-data",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-user-profile",
+      "route": "/admin/users/:id",
+      "state": "loading",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-user-profile",
+      "route": "/admin/users/:id",
+      "state": "empty",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-user-profile",
+      "route": "/admin/users/:id",
+      "state": "normal",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-user-profile",
+      "route": "/admin/users/:id",
+      "state": "dense",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-user-profile",
+      "route": "/admin/users/:id",
+      "state": "error",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-user-profile",
+      "route": "/admin/users/:id",
+      "state": "retry",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-user-profile",
+      "route": "/admin/users/:id",
+      "state": "slow",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-user-profile",
+      "route": "/admin/users/:id",
+      "state": "offline",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-user-profile",
+      "route": "/admin/users/:id",
+      "state": "stale",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-user-profile",
+      "route": "/admin/users/:id",
+      "state": "long-persian",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-user-profile",
+      "route": "/admin/users/:id",
+      "state": "unbroken-ltr",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-user-profile",
+      "route": "/admin/users/:id",
+      "state": "unauthorized",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-user-profile",
+      "route": "/admin/users/:id",
+      "state": "not-found",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-user-profile",
+      "route": "/admin/users/:id",
+      "state": "partial-data",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "operations-hub",
+      "route": "/operations",
+      "state": "loading",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "operations-hub",
+      "route": "/operations",
+      "state": "empty",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "operations-hub",
+      "route": "/operations",
+      "state": "normal",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "operations-hub",
+      "route": "/operations",
+      "state": "dense",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "operations-hub",
+      "route": "/operations",
+      "state": "error",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "operations-hub",
+      "route": "/operations",
+      "state": "retry",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "operations-hub",
+      "route": "/operations",
+      "state": "slow",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "operations-hub",
+      "route": "/operations",
+      "state": "offline",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "operations-hub",
+      "route": "/operations",
+      "state": "stale",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "operations-hub",
+      "route": "/operations",
+      "state": "long-persian",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "operations-hub",
+      "route": "/operations",
+      "state": "unbroken-ltr",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "operations-hub",
+      "route": "/operations",
+      "state": "unauthorized",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "operations-hub",
+      "route": "/operations",
+      "state": "not-found",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "operations-hub",
+      "route": "/operations",
+      "state": "partial-data",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "operations-customers-list",
+      "route": "/operations/customers",
+      "state": "loading",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "operations-customers-list",
+      "route": "/operations/customers",
+      "state": "empty",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "operations-customers-list",
+      "route": "/operations/customers",
+      "state": "normal",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "operations-customers-list",
+      "route": "/operations/customers",
+      "state": "dense",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "operations-customers-list",
+      "route": "/operations/customers",
+      "state": "error",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "operations-customers-list",
+      "route": "/operations/customers",
+      "state": "retry",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "operations-customers-list",
+      "route": "/operations/customers",
+      "state": "slow",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "operations-customers-list",
+      "route": "/operations/customers",
+      "state": "offline",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "operations-customers-list",
+      "route": "/operations/customers",
+      "state": "stale",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "operations-customers-list",
+      "route": "/operations/customers",
+      "state": "long-persian",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "operations-customers-list",
+      "route": "/operations/customers",
+      "state": "unbroken-ltr",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "operations-customers-list",
+      "route": "/operations/customers",
+      "state": "unauthorized",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "operations-customers-list",
+      "route": "/operations/customers",
+      "state": "not-found",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "operations-customers-list",
+      "route": "/operations/customers",
+      "state": "partial-data",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "operations-customers-detail",
+      "route": "/operations/customers/:relationId",
+      "state": "loading",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "operations-customers-detail",
+      "route": "/operations/customers/:relationId",
+      "state": "empty",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "operations-customers-detail",
+      "route": "/operations/customers/:relationId",
+      "state": "normal",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "operations-customers-detail",
+      "route": "/operations/customers/:relationId",
+      "state": "dense",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "operations-customers-detail",
+      "route": "/operations/customers/:relationId",
+      "state": "error",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "operations-customers-detail",
+      "route": "/operations/customers/:relationId",
+      "state": "retry",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "operations-customers-detail",
+      "route": "/operations/customers/:relationId",
+      "state": "slow",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "operations-customers-detail",
+      "route": "/operations/customers/:relationId",
+      "state": "offline",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "operations-customers-detail",
+      "route": "/operations/customers/:relationId",
+      "state": "stale",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "operations-customers-detail",
+      "route": "/operations/customers/:relationId",
+      "state": "long-persian",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "operations-customers-detail",
+      "route": "/operations/customers/:relationId",
+      "state": "unbroken-ltr",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "operations-customers-detail",
+      "route": "/operations/customers/:relationId",
+      "state": "unauthorized",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "operations-customers-detail",
+      "route": "/operations/customers/:relationId",
+      "state": "not-found",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "operations-customers-detail",
+      "route": "/operations/customers/:relationId",
+      "state": "partial-data",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "operations-accountants-list",
+      "route": "/operations/accountants",
+      "state": "loading",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "operations-accountants-list",
+      "route": "/operations/accountants",
+      "state": "empty",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "operations-accountants-list",
+      "route": "/operations/accountants",
+      "state": "normal",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "operations-accountants-list",
+      "route": "/operations/accountants",
+      "state": "dense",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "operations-accountants-list",
+      "route": "/operations/accountants",
+      "state": "error",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "operations-accountants-list",
+      "route": "/operations/accountants",
+      "state": "retry",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "operations-accountants-list",
+      "route": "/operations/accountants",
+      "state": "slow",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "operations-accountants-list",
+      "route": "/operations/accountants",
+      "state": "offline",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "operations-accountants-list",
+      "route": "/operations/accountants",
+      "state": "stale",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "operations-accountants-list",
+      "route": "/operations/accountants",
+      "state": "long-persian",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "operations-accountants-list",
+      "route": "/operations/accountants",
+      "state": "unbroken-ltr",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "operations-accountants-list",
+      "route": "/operations/accountants",
+      "state": "unauthorized",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "operations-accountants-list",
+      "route": "/operations/accountants",
+      "state": "not-found",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "operations-accountants-list",
+      "route": "/operations/accountants",
+      "state": "partial-data",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "operations-accountants-detail",
+      "route": "/operations/accountants/:relationId",
+      "state": "loading",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "operations-accountants-detail",
+      "route": "/operations/accountants/:relationId",
+      "state": "empty",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "operations-accountants-detail",
+      "route": "/operations/accountants/:relationId",
+      "state": "normal",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "operations-accountants-detail",
+      "route": "/operations/accountants/:relationId",
+      "state": "dense",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "operations-accountants-detail",
+      "route": "/operations/accountants/:relationId",
+      "state": "error",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "operations-accountants-detail",
+      "route": "/operations/accountants/:relationId",
+      "state": "retry",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "operations-accountants-detail",
+      "route": "/operations/accountants/:relationId",
+      "state": "slow",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "operations-accountants-detail",
+      "route": "/operations/accountants/:relationId",
+      "state": "offline",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "operations-accountants-detail",
+      "route": "/operations/accountants/:relationId",
+      "state": "stale",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "operations-accountants-detail",
+      "route": "/operations/accountants/:relationId",
+      "state": "long-persian",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "operations-accountants-detail",
+      "route": "/operations/accountants/:relationId",
+      "state": "unbroken-ltr",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "operations-accountants-detail",
+      "route": "/operations/accountants/:relationId",
+      "state": "unauthorized",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "operations-accountants-detail",
+      "route": "/operations/accountants/:relationId",
+      "state": "not-found",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "operations-accountants-detail",
+      "route": "/operations/accountants/:relationId",
+      "state": "partial-data",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "account-hub",
+      "route": "/account",
+      "state": "loading",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "account-hub",
+      "route": "/account",
+      "state": "empty",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "account-hub",
+      "route": "/account",
+      "state": "normal",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "account-hub",
+      "route": "/account",
+      "state": "dense",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "account-hub",
+      "route": "/account",
+      "state": "error",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "account-hub",
+      "route": "/account",
+      "state": "retry",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "account-hub",
+      "route": "/account",
+      "state": "slow",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "account-hub",
+      "route": "/account",
+      "state": "offline",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "account-hub",
+      "route": "/account",
+      "state": "stale",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "account-hub",
+      "route": "/account",
+      "state": "long-persian",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "account-hub",
+      "route": "/account",
+      "state": "unbroken-ltr",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "account-hub",
+      "route": "/account",
+      "state": "unauthorized",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "account-hub",
+      "route": "/account",
+      "state": "not-found",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "account-hub",
+      "route": "/account",
+      "state": "partial-data",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "account-security",
+      "route": "/account/security",
+      "state": "loading",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "account-security",
+      "route": "/account/security",
+      "state": "empty",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "account-security",
+      "route": "/account/security",
+      "state": "normal",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "account-security",
+      "route": "/account/security",
+      "state": "dense",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "account-security",
+      "route": "/account/security",
+      "state": "error",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "account-security",
+      "route": "/account/security",
+      "state": "retry",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "account-security",
+      "route": "/account/security",
+      "state": "slow",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "account-security",
+      "route": "/account/security",
+      "state": "offline",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "account-security",
+      "route": "/account/security",
+      "state": "stale",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "account-security",
+      "route": "/account/security",
+      "state": "long-persian",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "account-security",
+      "route": "/account/security",
+      "state": "unbroken-ltr",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "account-security",
+      "route": "/account/security",
+      "state": "unauthorized",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "account-security",
+      "route": "/account/security",
+      "state": "not-found",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "account-security",
+      "route": "/account/security",
+      "state": "partial-data",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "account-storage",
+      "route": "/account/storage",
+      "state": "loading",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "account-storage",
+      "route": "/account/storage",
+      "state": "empty",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "account-storage",
+      "route": "/account/storage",
+      "state": "normal",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "account-storage",
+      "route": "/account/storage",
+      "state": "dense",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "account-storage",
+      "route": "/account/storage",
+      "state": "error",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "account-storage",
+      "route": "/account/storage",
+      "state": "retry",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "account-storage",
+      "route": "/account/storage",
+      "state": "slow",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "account-storage",
+      "route": "/account/storage",
+      "state": "offline",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "account-storage",
+      "route": "/account/storage",
+      "state": "stale",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "account-storage",
+      "route": "/account/storage",
+      "state": "long-persian",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "account-storage",
+      "route": "/account/storage",
+      "state": "unbroken-ltr",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "account-storage",
+      "route": "/account/storage",
+      "state": "unauthorized",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "account-storage",
+      "route": "/account/storage",
+      "state": "not-found",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "account-storage",
+      "route": "/account/storage",
+      "state": "partial-data",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "account-notifications",
+      "route": "/account/notifications",
+      "state": "loading",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "account-notifications",
+      "route": "/account/notifications",
+      "state": "empty",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "account-notifications",
+      "route": "/account/notifications",
+      "state": "normal",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "account-notifications",
+      "route": "/account/notifications",
+      "state": "dense",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "account-notifications",
+      "route": "/account/notifications",
+      "state": "error",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "account-notifications",
+      "route": "/account/notifications",
+      "state": "retry",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "account-notifications",
+      "route": "/account/notifications",
+      "state": "slow",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "account-notifications",
+      "route": "/account/notifications",
+      "state": "offline",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "account-notifications",
+      "route": "/account/notifications",
+      "state": "stale",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "account-notifications",
+      "route": "/account/notifications",
+      "state": "long-persian",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "account-notifications",
+      "route": "/account/notifications",
+      "state": "unbroken-ltr",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "account-notifications",
+      "route": "/account/notifications",
+      "state": "unauthorized",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "account-notifications",
+      "route": "/account/notifications",
+      "state": "not-found",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "account-notifications",
+      "route": "/account/notifications",
+      "state": "partial-data",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "account-settings-overtime",
+      "route": "/settings",
+      "state": "loading",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "account-settings-overtime",
+      "route": "/settings",
+      "state": "empty",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "account-settings-overtime",
+      "route": "/settings",
+      "state": "normal",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "account-settings-overtime",
+      "route": "/settings",
+      "state": "dense",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "account-settings-overtime",
+      "route": "/settings",
+      "state": "error",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "account-settings-overtime",
+      "route": "/settings",
+      "state": "retry",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "account-settings-overtime",
+      "route": "/settings",
+      "state": "slow",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "account-settings-overtime",
+      "route": "/settings",
+      "state": "offline",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "account-settings-overtime",
+      "route": "/settings",
+      "state": "stale",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "account-settings-overtime",
+      "route": "/settings",
+      "state": "long-persian",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "account-settings-overtime",
+      "route": "/settings",
+      "state": "unbroken-ltr",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "account-settings-overtime",
+      "route": "/settings",
+      "state": "unauthorized",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "account-settings-overtime",
+      "route": "/settings",
+      "state": "not-found",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "account-settings-overtime",
+      "route": "/settings",
+      "state": "partial-data",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "notifications-alias",
+      "route": "/notifications",
+      "state": "loading",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "notifications-alias",
+      "route": "/notifications",
+      "state": "empty",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "notifications-alias",
+      "route": "/notifications",
+      "state": "normal",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "notifications-alias",
+      "route": "/notifications",
+      "state": "dense",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "notifications-alias",
+      "route": "/notifications",
+      "state": "error",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "notifications-alias",
+      "route": "/notifications",
+      "state": "retry",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "notifications-alias",
+      "route": "/notifications",
+      "state": "slow",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "notifications-alias",
+      "route": "/notifications",
+      "state": "offline",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "notifications-alias",
+      "route": "/notifications",
+      "state": "stale",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "notifications-alias",
+      "route": "/notifications",
+      "state": "long-persian",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "notifications-alias",
+      "route": "/notifications",
+      "state": "unbroken-ltr",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "notifications-alias",
+      "route": "/notifications",
+      "state": "unauthorized",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "notifications-alias",
+      "route": "/notifications",
+      "state": "not-found",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "notifications-alias",
+      "route": "/notifications",
+      "state": "partial-data",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-hub",
+      "route": "/admin",
+      "state": "loading",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-hub",
+      "route": "/admin",
+      "state": "empty",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-hub",
+      "route": "/admin",
+      "state": "normal",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-hub",
+      "route": "/admin",
+      "state": "dense",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-hub",
+      "route": "/admin",
+      "state": "error",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-hub",
+      "route": "/admin",
+      "state": "retry",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-hub",
+      "route": "/admin",
+      "state": "slow",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-hub",
+      "route": "/admin",
+      "state": "offline",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-hub",
+      "route": "/admin",
+      "state": "stale",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-hub",
+      "route": "/admin",
+      "state": "long-persian",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-hub",
+      "route": "/admin",
+      "state": "unbroken-ltr",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-hub",
+      "route": "/admin",
+      "state": "unauthorized",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-hub",
+      "route": "/admin",
+      "state": "not-found",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-hub",
+      "route": "/admin",
+      "state": "partial-data",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-invitations",
+      "route": "/admin/invitations",
+      "state": "loading",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-invitations",
+      "route": "/admin/invitations",
+      "state": "empty",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-invitations",
+      "route": "/admin/invitations",
+      "state": "normal",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-invitations",
+      "route": "/admin/invitations",
+      "state": "dense",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-invitations",
+      "route": "/admin/invitations",
+      "state": "error",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-invitations",
+      "route": "/admin/invitations",
+      "state": "retry",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-invitations",
+      "route": "/admin/invitations",
+      "state": "slow",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-invitations",
+      "route": "/admin/invitations",
+      "state": "offline",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-invitations",
+      "route": "/admin/invitations",
+      "state": "stale",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-invitations",
+      "route": "/admin/invitations",
+      "state": "long-persian",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-invitations",
+      "route": "/admin/invitations",
+      "state": "unbroken-ltr",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-invitations",
+      "route": "/admin/invitations",
+      "state": "unauthorized",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-invitations",
+      "route": "/admin/invitations",
+      "state": "not-found",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-invitations",
+      "route": "/admin/invitations",
+      "state": "partial-data",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-channels",
+      "route": "/admin/channels",
+      "state": "loading",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-channels",
+      "route": "/admin/channels",
+      "state": "empty",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-channels",
+      "route": "/admin/channels",
+      "state": "normal",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-channels",
+      "route": "/admin/channels",
+      "state": "dense",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-channels",
+      "route": "/admin/channels",
+      "state": "error",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-channels",
+      "route": "/admin/channels",
+      "state": "retry",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-channels",
+      "route": "/admin/channels",
+      "state": "slow",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-channels",
+      "route": "/admin/channels",
+      "state": "offline",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-channels",
+      "route": "/admin/channels",
+      "state": "stale",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-channels",
+      "route": "/admin/channels",
+      "state": "long-persian",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-channels",
+      "route": "/admin/channels",
+      "state": "unbroken-ltr",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-channels",
+      "route": "/admin/channels",
+      "state": "unauthorized",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-channels",
+      "route": "/admin/channels",
+      "state": "not-found",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-channels",
+      "route": "/admin/channels",
+      "state": "partial-data",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-users-list",
+      "route": "/admin/users",
+      "state": "loading",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-users-list",
+      "route": "/admin/users",
+      "state": "empty",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-users-list",
+      "route": "/admin/users",
+      "state": "normal",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-users-list",
+      "route": "/admin/users",
+      "state": "dense",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-users-list",
+      "route": "/admin/users",
+      "state": "error",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-users-list",
+      "route": "/admin/users",
+      "state": "retry",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-users-list",
+      "route": "/admin/users",
+      "state": "slow",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-users-list",
+      "route": "/admin/users",
+      "state": "offline",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-users-list",
+      "route": "/admin/users",
+      "state": "stale",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-users-list",
+      "route": "/admin/users",
+      "state": "long-persian",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-users-list",
+      "route": "/admin/users",
+      "state": "unbroken-ltr",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-users-list",
+      "route": "/admin/users",
+      "state": "unauthorized",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-users-list",
+      "route": "/admin/users",
+      "state": "not-found",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-users-list",
+      "route": "/admin/users",
+      "state": "partial-data",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-commodities",
+      "route": "/admin/commodities",
+      "state": "loading",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-commodities",
+      "route": "/admin/commodities",
+      "state": "empty",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-commodities",
+      "route": "/admin/commodities",
+      "state": "normal",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-commodities",
+      "route": "/admin/commodities",
+      "state": "dense",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-commodities",
+      "route": "/admin/commodities",
+      "state": "error",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-commodities",
+      "route": "/admin/commodities",
+      "state": "retry",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-commodities",
+      "route": "/admin/commodities",
+      "state": "slow",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-commodities",
+      "route": "/admin/commodities",
+      "state": "offline",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-commodities",
+      "route": "/admin/commodities",
+      "state": "stale",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-commodities",
+      "route": "/admin/commodities",
+      "state": "long-persian",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-commodities",
+      "route": "/admin/commodities",
+      "state": "unbroken-ltr",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-commodities",
+      "route": "/admin/commodities",
+      "state": "unauthorized",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-commodities",
+      "route": "/admin/commodities",
+      "state": "not-found",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-commodities",
+      "route": "/admin/commodities",
+      "state": "partial-data",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-messages",
+      "route": "/admin/messages",
+      "state": "loading",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-messages",
+      "route": "/admin/messages",
+      "state": "empty",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-messages",
+      "route": "/admin/messages",
+      "state": "normal",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-messages",
+      "route": "/admin/messages",
+      "state": "dense",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-messages",
+      "route": "/admin/messages",
+      "state": "error",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-messages",
+      "route": "/admin/messages",
+      "state": "retry",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-messages",
+      "route": "/admin/messages",
+      "state": "slow",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-messages",
+      "route": "/admin/messages",
+      "state": "offline",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-messages",
+      "route": "/admin/messages",
+      "state": "stale",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-messages",
+      "route": "/admin/messages",
+      "state": "long-persian",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-messages",
+      "route": "/admin/messages",
+      "state": "unbroken-ltr",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-messages",
+      "route": "/admin/messages",
+      "state": "unauthorized",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-messages",
+      "route": "/admin/messages",
+      "state": "not-found",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-messages",
+      "route": "/admin/messages",
+      "state": "partial-data",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-system",
+      "route": "/admin/system",
+      "state": "loading",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-system",
+      "route": "/admin/system",
+      "state": "empty",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-system",
+      "route": "/admin/system",
+      "state": "normal",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-system",
+      "route": "/admin/system",
+      "state": "dense",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-system",
+      "route": "/admin/system",
+      "state": "error",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-system",
+      "route": "/admin/system",
+      "state": "retry",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-system",
+      "route": "/admin/system",
+      "state": "slow",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-system",
+      "route": "/admin/system",
+      "state": "offline",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-system",
+      "route": "/admin/system",
+      "state": "stale",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-system",
+      "route": "/admin/system",
+      "state": "long-persian",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-system",
+      "route": "/admin/system",
+      "state": "unbroken-ltr",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-system",
+      "route": "/admin/system",
+      "state": "unauthorized",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-system",
+      "route": "/admin/system",
+      "state": "not-found",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "admin-system",
+      "route": "/admin/system",
+      "state": "partial-data",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "login",
+      "route": "/login",
+      "state": "loading",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "login",
+      "route": "/login",
+      "state": "empty",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "login",
+      "route": "/login",
+      "state": "normal",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "login",
+      "route": "/login",
+      "state": "dense",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "login",
+      "route": "/login",
+      "state": "error",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "login",
+      "route": "/login",
+      "state": "retry",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "login",
+      "route": "/login",
+      "state": "slow",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "login",
+      "route": "/login",
+      "state": "offline",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "login",
+      "route": "/login",
+      "state": "stale",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "login",
+      "route": "/login",
+      "state": "long-persian",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "login",
+      "route": "/login",
+      "state": "unbroken-ltr",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "login",
+      "route": "/login",
+      "state": "unauthorized",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "login",
+      "route": "/login",
+      "state": "not-found",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "login",
+      "route": "/login",
+      "state": "partial-data",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "setup-password",
+      "route": "/setup-password",
+      "state": "loading",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "setup-password",
+      "route": "/setup-password",
+      "state": "empty",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "setup-password",
+      "route": "/setup-password",
+      "state": "normal",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "setup-password",
+      "route": "/setup-password",
+      "state": "dense",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "setup-password",
+      "route": "/setup-password",
+      "state": "error",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "setup-password",
+      "route": "/setup-password",
+      "state": "retry",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "setup-password",
+      "route": "/setup-password",
+      "state": "slow",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "setup-password",
+      "route": "/setup-password",
+      "state": "offline",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "setup-password",
+      "route": "/setup-password",
+      "state": "stale",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "setup-password",
+      "route": "/setup-password",
+      "state": "long-persian",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "setup-password",
+      "route": "/setup-password",
+      "state": "unbroken-ltr",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "setup-password",
+      "route": "/setup-password",
+      "state": "unauthorized",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "setup-password",
+      "route": "/setup-password",
+      "state": "not-found",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "setup-password",
+      "route": "/setup-password",
+      "state": "partial-data",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "invite-landing",
+      "route": "/i/:code",
+      "state": "loading",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "invite-landing",
+      "route": "/i/:code",
+      "state": "empty",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "invite-landing",
+      "route": "/i/:code",
+      "state": "normal",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "invite-landing",
+      "route": "/i/:code",
+      "state": "dense",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "invite-landing",
+      "route": "/i/:code",
+      "state": "error",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "invite-landing",
+      "route": "/i/:code",
+      "state": "retry",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "invite-landing",
+      "route": "/i/:code",
+      "state": "slow",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "invite-landing",
+      "route": "/i/:code",
+      "state": "offline",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "invite-landing",
+      "route": "/i/:code",
+      "state": "stale",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "invite-landing",
+      "route": "/i/:code",
+      "state": "long-persian",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "invite-landing",
+      "route": "/i/:code",
+      "state": "unbroken-ltr",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "invite-landing",
+      "route": "/i/:code",
+      "state": "unauthorized",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "invite-landing",
+      "route": "/i/:code",
+      "state": "not-found",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "invite-landing",
+      "route": "/i/:code",
+      "state": "partial-data",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "web-register",
+      "route": "/register",
+      "state": "loading",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "web-register",
+      "route": "/register",
+      "state": "empty",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "web-register",
+      "route": "/register",
+      "state": "normal",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "web-register",
+      "route": "/register",
+      "state": "dense",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "web-register",
+      "route": "/register",
+      "state": "error",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "web-register",
+      "route": "/register",
+      "state": "retry",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "web-register",
+      "route": "/register",
+      "state": "slow",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "web-register",
+      "route": "/register",
+      "state": "offline",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "web-register",
+      "route": "/register",
+      "state": "stale",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "web-register",
+      "route": "/register",
+      "state": "long-persian",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "web-register",
+      "route": "/register",
+      "state": "unbroken-ltr",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "web-register",
+      "route": "/register",
+      "state": "unauthorized",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "web-register",
+      "route": "/register",
+      "state": "not-found",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "web-register",
+      "route": "/register",
+      "state": "partial-data",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "system-recovery",
+      "route": "/:pathMatch(.*)*",
+      "state": "loading",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "system-recovery",
+      "route": "/:pathMatch(.*)*",
+      "state": "empty",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "system-recovery",
+      "route": "/:pathMatch(.*)*",
+      "state": "normal",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "system-recovery",
+      "route": "/:pathMatch(.*)*",
+      "state": "dense",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "system-recovery",
+      "route": "/:pathMatch(.*)*",
+      "state": "error",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "system-recovery",
+      "route": "/:pathMatch(.*)*",
+      "state": "retry",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "system-recovery",
+      "route": "/:pathMatch(.*)*",
+      "state": "slow",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "system-recovery",
+      "route": "/:pathMatch(.*)*",
+      "state": "offline",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "system-recovery",
+      "route": "/:pathMatch(.*)*",
+      "state": "stale",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "system-recovery",
+      "route": "/:pathMatch(.*)*",
+      "state": "long-persian",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "system-recovery",
+      "route": "/:pathMatch(.*)*",
+      "state": "unbroken-ltr",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "system-recovery",
+      "route": "/:pathMatch(.*)*",
+      "state": "unauthorized",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "system-recovery",
+      "route": "/:pathMatch(.*)*",
+      "state": "not-found",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "system-recovery",
+      "route": "/:pathMatch(.*)*",
+      "state": "partial-data",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "share-receive",
+      "route": "/share-receive",
+      "state": "loading",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "share-receive",
+      "route": "/share-receive",
+      "state": "empty",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "share-receive",
+      "route": "/share-receive",
+      "state": "normal",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "share-receive",
+      "route": "/share-receive",
+      "state": "dense",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "share-receive",
+      "route": "/share-receive",
+      "state": "error",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "share-receive",
+      "route": "/share-receive",
+      "state": "retry",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "share-receive",
+      "route": "/share-receive",
+      "state": "slow",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "share-receive",
+      "route": "/share-receive",
+      "state": "offline",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "share-receive",
+      "route": "/share-receive",
+      "state": "stale",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "share-receive",
+      "route": "/share-receive",
+      "state": "long-persian",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "share-receive",
+      "route": "/share-receive",
+      "state": "unbroken-ltr",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "share-receive",
+      "route": "/share-receive",
+      "state": "unauthorized",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "share-receive",
+      "route": "/share-receive",
+      "state": "not-found",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "share-receive",
+      "route": "/share-receive",
+      "state": "partial-data",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "market-feed",
+      "route": "/market",
+      "state": "loading",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "market-feed",
+      "route": "/market",
+      "state": "empty",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "market-feed",
+      "route": "/market",
+      "state": "normal",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "market-feed",
+      "route": "/market",
+      "state": "dense",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "market-feed",
+      "route": "/market",
+      "state": "error",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "market-feed",
+      "route": "/market",
+      "state": "retry",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "market-feed",
+      "route": "/market",
+      "state": "slow",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "market-feed",
+      "route": "/market",
+      "state": "offline",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "market-feed",
+      "route": "/market",
+      "state": "stale",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "market-feed",
+      "route": "/market",
+      "state": "long-persian",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "market-feed",
+      "route": "/market",
+      "state": "unbroken-ltr",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "market-feed",
+      "route": "/market",
+      "state": "unauthorized",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "market-feed",
+      "route": "/market",
+      "state": "not-found",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "market-feed",
+      "route": "/market",
+      "state": "partial-data",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "market-overlays",
+      "route": "/market",
+      "state": "loading",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "market-overlays",
+      "route": "/market",
+      "state": "empty",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "market-overlays",
+      "route": "/market",
+      "state": "normal",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "market-overlays",
+      "route": "/market",
+      "state": "dense",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "market-overlays",
+      "route": "/market",
+      "state": "error",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "market-overlays",
+      "route": "/market",
+      "state": "retry",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "market-overlays",
+      "route": "/market",
+      "state": "slow",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "market-overlays",
+      "route": "/market",
+      "state": "offline",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "market-overlays",
+      "route": "/market",
+      "state": "stale",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "market-overlays",
+      "route": "/market",
+      "state": "long-persian",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "market-overlays",
+      "route": "/market",
+      "state": "unbroken-ltr",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "market-overlays",
+      "route": "/market",
+      "state": "unauthorized",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "market-overlays",
+      "route": "/market",
+      "state": "not-found",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "market-overlays",
+      "route": "/market",
+      "state": "partial-data",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "messenger-legacy",
+      "route": "/chat",
+      "state": "loading",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "messenger-legacy",
+      "route": "/chat",
+      "state": "empty",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "messenger-legacy",
+      "route": "/chat",
+      "state": "normal",
+      "applicable": true,
+      "reason": null,
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "messenger-legacy",
+      "route": "/chat",
+      "state": "dense",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "messenger-legacy",
+      "route": "/chat",
+      "state": "error",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "messenger-legacy",
+      "route": "/chat",
+      "state": "retry",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "messenger-legacy",
+      "route": "/chat",
+      "state": "slow",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "messenger-legacy",
+      "route": "/chat",
+      "state": "offline",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "messenger-legacy",
+      "route": "/chat",
+      "state": "stale",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "messenger-legacy",
+      "route": "/chat",
+      "state": "long-persian",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "messenger-legacy",
+      "route": "/chat",
+      "state": "unbroken-ltr",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "messenger-legacy",
+      "route": "/chat",
+      "state": "unauthorized",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "messenger-legacy",
+      "route": "/chat",
+      "state": "not-found",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    },
+    {
+      "surface_id": "messenger-legacy",
+      "route": "/chat",
+      "state": "partial-data",
+      "applicable": false,
+      "reason": "not-expressed-in-source-for-this-surface",
+      "runtime_status": "source-derived",
+      "result": null
+    }
+  ],
+  "runtime_audit": {
+    "off_repo_dir": "/tmp/uiux-unification-v3-phase1/uiux-v3-phase1-20260819T074125332Z",
+    "scenarios": 108,
+    "passed": 107,
+    "failed": 1,
+    "failed_ids": [
+      "home/390x844/error"
+    ],
+    "unknown_api": 0,
+    "page_errors": 0,
+    "external_requests": 0,
+    "mutating_requests": 0,
+    "screenshot_count": 108,
+    "screenshot_tree_sha256": "9985b1f09f0d62db35df9ef9e7696e79e553aec3747da75eb08c330dcb498f39",
+    "audit_sha256": "4cf1e45117b4345d82562402b14c60300603cf300d356e5a289ad33a3b859df0",
+    "dist_sha256": "9a3e536614403b398f88415facfbd52ffb15277d4e5e2a63ed0e54f05798b2be",
+    "classification": {
+      "home/390x844/error": {
+        "bucket": "confirmed-product",
+        "finding": "identity-error replaces page without visible main landmark",
+        "false_positive": false,
+        "phase_owner": 5
+      }
+    }
+  }
 }

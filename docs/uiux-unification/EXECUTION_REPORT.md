@@ -10,13 +10,15 @@
 - tree مبنا: `1b970cc6f5be6697ceebbd76c91d36c9ea1dddb9`
 - وضعیت `main` در لحظهٔ انزوا: clean و هم‌تراز با `origin/main`
 - `production-main` جدا و خارج از scope است
+- commit فاز صفر: `5c43d920197fe20a8a959961017cc55c735eaeca`
+- tree پس از فاز صفر: `c5784407c043b7f5c8ebfcaf39ed78de33a87bf5`
 
 ## وضعیت فازها
 
 | فاز | وضعیت | HEAD پس از gate |
 |---|---|---|
-| 0 اتصال و انزوا | in-progress | ثبت پس از commit |
-| 1 ممیزی | pending | |
+| 0 اتصال و انزوا | done | `5c43d920` |
+| 1 ممیزی | in-progress | ثبت پس از commit |
 | 2 Figma و foundation | pending | |
 | 3 پروفایل | pending | |
 | 4 عملیات | pending | |
@@ -27,6 +29,45 @@
 | 9 Messenger | pending | |
 | 10 shell مشترک | pending | |
 | 11 پذیرش شاخه | pending | |
+
+## فاز یک — ممیزی
+
+قرارداد مسیر به‌صورت مستقل تأیید شد:
+
+- ۳۰ مسیر
+- ۱۰ route-scope
+- ۱۶ section-scope
+- ۴ off: `/market`، `/chat`، `/admin/channels`، `/share-receive`
+- ۲۳ NONE
+- ۳ MIXED
+- ۴ FULL
+
+موجودی زنده: ۴۵ سطح با وضعیت معلوم (۱۶ complete، ۱۶ partial، ۶ inconsistent، ۶ protected-history-only، ۱ legacy). هیچ سطح زنده‌ای unknown نماند.
+
+ماتریس حالت: ۶۳۰ سلول ماشین‌خوان. Telegram Mini App خارج از ماتریس است.
+
+ساخت production محلی: `/tmp/uiux-unification-v3-dist` با اثر انگشت `9a3e536614403b398f88415facfbd52ffb15277d4e5e2a63ed0e54f05798b2be`.
+
+مونتاژ runtime (Chromium، fixture محلی، بدون دستکاری رسید Stage 8):
+
+- ۱۰۸ سناریو (۳۰ مسیر × ۲ viewport اولیه + stateهای اصلی قابل‌اجرا)
+- ۱۰۷ pass
+- ۱ finding محصولی: `home/390x844/error` بدون landmark `main` در حالت خطای هویت
+- overflow افقی صفر
+- CTA پوشیده صفر
+- unnamed/nested interactive صفر در سناریوهای اجراشده
+- unknown API صفر
+- خطای صفحه صفر
+- درخواست خارجی صفر
+- mutation محصولی صفر
+- ۱۰۸ screenshot خارج مخزن در `/tmp/uiux-unification-v3-phase1/uiux-v3-phase1-20260819T074125332Z`
+- digest تصاویر: `9985b1f09f0d62db35df9ef9e7696e79e553aec3747da75eb08c330dcb498f39`
+- digest گزارش: `4cf1e45117b4345d82562402b14c60300603cf300d356e5a289ad33a3b859df0`
+
+کمبود واقعی در برابر false positive:
+
+- واقعی: landmark مفقود در خطای هویت خانه؛ دوگانگی مودال/مسیر پروفایل مدیر؛ monolith پروفایل؛ `confirm()` بومی در تنظیمات سیستم؛ منوی هویت خام
+- false positive جداشده: ادعای Vazirmatn روی مسیر FULL رخ نداد؛ بنر خطای تزریقی fixture به‌عنوان خطای محصول شمرده نشد
 
 ## ممنوعیت‌های اجرایی
 
