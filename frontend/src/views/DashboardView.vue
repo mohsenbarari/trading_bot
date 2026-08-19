@@ -465,8 +465,7 @@ onUnmounted(() => {
   position: relative;
 }
 
-.user-name,
-:deep(.ui-v2-home-name) {
+.user-name {
   min-width: 0;
   overflow: visible;
   text-overflow: unset;

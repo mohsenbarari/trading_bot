@@ -21,7 +21,7 @@ withDefaults(defineProps<{
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: var(--ui-v2-spacing-8, 0.5rem);
+  gap: 0.5rem;
   position: static;
   inset: auto;
   width: 100%;

@@ -38,7 +38,7 @@ withDefaults(defineProps<{
   flex-wrap: wrap;
   align-items: flex-start;
   justify-content: space-between;
-  gap: var(--ui-v2-spacing-12, 0.75rem);
+  gap: var(--ds-section-gap);
   min-width: 0;
 }
 

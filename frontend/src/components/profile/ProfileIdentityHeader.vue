@@ -239,7 +239,7 @@ const emit = defineEmits<{
 
 .skeleton-box {
   border-radius: 8px;
-  background: var(--ds-bg-muted, #e5e7eb);
+  background: var(--ds-bg-subtle);
 }
 
 @media (prefers-reduced-motion: reduce) {

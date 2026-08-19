@@ -296,44 +296,24 @@ const saveOverride = async () => {
   }
 }
 
-const pendingDeleteOverrideId = ref<number | null>(null)
-const deleteOverrideError = ref('')
-const DELETE_OVERRIDE_TITLE = 'حذف استثنای تقویمی'
-const DELETE_OVERRIDE_MESSAGE =
-  'این استثنای تقویمی حذف می‌شود. لغو یا Escape هیچ تغییری ایجاد نمی‌کند.'
-
-const requestDeleteOverride = (overrideId: number) => {
-  if (overrideDeletingId.value !== null) return
-  deleteOverrideError.value = ''
-  pendingDeleteOverrideId.value = overrideId
-}
-
-const cancelDeleteOverride = () => {
-  if (overrideDeletingId.value !== null) return
-  pendingDeleteOverrideId.value = null
-  deleteOverrideError.value = ''
-}
-
-const confirmDeleteOverride = async () => {
-  const overrideId = pendingDeleteOverrideId.value
-  if (overrideId == null || overrideDeletingId.value !== null) return
+const deleteOverride = async (overrideId: number) => {
+  if (!confirm('آیا از حذف این استثنای تقویمی مطمئن هستید؟')) {
+    return
+  }
 
   try {
     overrideDeletingId.value = overrideId
-    deleteOverrideError.value = ''
     message.value = ''
     await fetchApi('DELETE', `/trading-settings/market-overrides/${overrideId}`)
     if (editingOverrideId.value === overrideId) {
       resetOverrideForm()
     }
-    pendingDeleteOverrideId.value = null
     message.value = 'استثنای تقویمی حذف شد'
     messageType.value = 'success'
     showViewportToast('success', message.value)
     await Promise.all([loadOverrides(), loadMarketState()])
   } catch (error: any) {
-    deleteOverrideError.value = error.message || 'خطا در حذف استثنای تقویمی'
-    message.value = deleteOverrideError.value
+    message.value = error.message || 'خطا در حذف استثنای تقویمی'
     messageType.value = 'danger'
     showViewportToast('danger', message.value)
   } finally {
@@ -883,7 +863,7 @@ onBeforeUnmount(() => {
               </div>
               <div class="override-card__actions">
                 <AppButton type="button" :data-testid="`override-edit-${item.id}`" class="mini-footer-control" variant="secondary" @click="startEditingOverride(item)">ویرایش</AppButton>
-                <AppButton type="button" :data-testid="`override-delete-${item.id}`" class="mini-footer-control danger" variant="danger" @click="requestDeleteOverride(item.id)" :disabled="overrideDeletingId === item.id">
+                <AppButton type="button" :data-testid="`override-delete-${item.id}`" class="mini-footer-control danger" variant="danger" @click="deleteOverride(item.id)" :disabled="overrideDeletingId === item.id">
                   {{ overrideDeletingId === item.id ? 'در حال حذف...' : 'حذف' }}
                 </AppButton>
               </div>
@@ -917,19 +897,6 @@ onBeforeUnmount(() => {
       :confirm-disabled="saving"
       @cancel="cancelResetConfirmation"
       @confirm="confirmResetSettings"
-    />
-    <AppConfirmDialog
-      :open="pendingDeleteOverrideId !== null"
-      :title="DELETE_OVERRIDE_TITLE"
-      :message="DELETE_OVERRIDE_MESSAGE"
-      confirm-label="حذف"
-      cancel-label="انصراف"
-      tone="danger"
-      :busy="overrideDeletingId !== null"
-      :error="deleteOverrideError || undefined"
-      :confirm-disabled="overrideDeletingId !== null"
-      @cancel="cancelDeleteOverride"
-      @confirm="confirmDeleteOverride"
     />
   </div>
 </template>

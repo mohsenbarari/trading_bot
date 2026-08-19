@@ -60,7 +60,7 @@ withDefaults(defineProps<{
   max-width: min(100%, 520px);
   margin: 0 auto;
   padding: 12px 14px;
-  border-radius: var(--ui-v2-radius-14, 16px);
+  border-radius: var(--ds-radius-lg);
   border: 1px solid var(--ds-primary-200);
   background: var(--ds-bg-card);
   text-align: right;

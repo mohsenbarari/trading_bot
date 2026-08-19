@@ -45,7 +45,7 @@ withDefaults(defineProps<{
 }
 
 .profile-presence-status.online {
-  color: var(--ui-v2-color-text-warning, #b45309);
+  color: var(--ds-warning-500);
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -197,8 +197,6 @@ function handleBack() {
   /* Messenger takes up the full screen height (or what's left behind the nav) */
   height: 100dvh;
   width: 100%;
-  min-width: 0;
-  font-family: Vazirmatn, Tahoma, Arial, sans-serif;
   background-color: var(--messenger-surface-page, #fceceb); /* Match chat background or app background */
 }
 
@@ -218,12 +216,6 @@ function handleBack() {
 }
 @keyframes spin {
   to { transform: rotate(360deg); }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .loading-spinner {
-    animation: none;
-  }
 }
 
 .chat-wrapper {

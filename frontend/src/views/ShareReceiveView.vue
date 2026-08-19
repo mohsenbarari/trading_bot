@@ -1,31 +1,37 @@
 <template>
   <div class="share-receive-root">
-    <AuthFlowShell
-      v-if="loading || errorMsg || sending || sendDone"
-      title="اشتراک‌گذاری"
-      :description="shellDescription"
-    >
-      <AppLoadingState v-if="loading" label="در حال آماده‌سازی" />
-      <AppErrorState v-else-if="errorMsg" title="اشتراک‌گذاری آماده نشد" :message="errorMsg">
+    <!-- Loading / error states (rare; modal takes over on success) -->
+    <div v-if="loading" class="state-overlay">
+      <AppLoadingState label="در حال آماده‌سازی" />
+    </div>
+
+    <div v-else-if="errorMsg" class="state-overlay error">
+      <AppErrorState title="اشتراک‌گذاری آماده نشد" :message="errorMsg">
         <template #actions>
           <AppButton @click="goHome">بازگشت به خانه</AppButton>
         </template>
       </AppErrorState>
-      <template v-else-if="sending">
-        <AppLoadingState :label="`در حال ارسال (${sentCount}/${totalSendCount})`" />
-        <ul v-if="sendErrors.length" class="errors-list">
-          <li v-for="(e, i) in sendErrors" :key="i">{{ e }}</li>
-        </ul>
-      </template>
-      <template v-else>
-        <p v-if="sendErrors.length">ارسال با {{ sendErrors.length }} خطا انجام شد</p>
-        <p v-else>ارسال انجام شد</p>
-        <ul v-if="sendErrors.length" class="errors-list">
-          <li v-for="(e, i) in sendErrors" :key="i">{{ e }}</li>
-        </ul>
-        <AppButton @click="goHome">بازگشت</AppButton>
-      </template>
-    </AuthFlowShell>
+    </div>
+
+    <!-- Sending progress overlay -->
+    <div v-else-if="sending" class="state-overlay">
+      <AppLoadingState :label="`در حال ارسال (${sentCount}/${totalSendCount})`" />
+      <ul v-if="sendErrors.length" class="errors-list">
+        <li v-for="(e, i) in sendErrors" :key="i">{{ e }}</li>
+      </ul>
+    </div>
+
+    <!-- Final result (only shown briefly on errors before redirect) -->
+    <div v-else-if="sendDone" class="state-overlay">
+      <p v-if="sendErrors.length">
+        ارسال با {{ sendErrors.length }} خطا انجام شد
+      </p>
+      <p v-else>ارسال انجام شد</p>
+      <ul v-if="sendErrors.length" class="errors-list">
+        <li v-for="(e, i) in sendErrors" :key="i">{{ e }}</li>
+      </ul>
+      <AppButton @click="goHome">بازگشت</AppButton>
+    </div>
 
     <!-- Main UI: full-screen messenger-like target picker -->
     <ChatForwardModal
@@ -45,7 +51,6 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { apiFetchJson } from '../utils/auth'
 import { readSharedPayload, deleteSharedPayload, type SharedPayload, type SharedFileEntry } from '../utils/shareTargetStore'
-import AuthFlowShell from '../components/auth/AuthFlowShell.vue'
 import AppButton from '../components/ui/AppButton.vue'
 import AppErrorState from '../components/ui/AppErrorState.vue'
 import AppLoadingState from '../components/ui/AppLoadingState.vue'
@@ -70,12 +75,6 @@ const sharedText = ref('')
 const sharedUrl = ref('')
 
 const conversations = ref<Conversation[]>([])
-const shellDescription = computed(() => {
-  if (errorMsg.value) return 'ارسال این محتوا ممکن نشد.'
-  if (sending.value) return 'پیام‌ها در حال ارسال هستند.'
-  if (sendDone.value) return 'نتیجه ارسال آماده است.'
-  return 'محتوای اشتراک برای ارسال آماده می‌شود.'
-})
 
 const sending = ref(false)
 const sendDone = ref(false)
@@ -274,10 +273,25 @@ function goHome() { router.replace('/') }
 
 <style scoped>
 .share-receive-root {
-  min-height: 100%;
-  min-width: 0;
-  font-family: Vazirmatn, Tahoma, Arial, sans-serif;
+  min-height: 100vh;
+  background: var(--app-bg, #f5f7fb);
 }
+.state-overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 24px;
+  text-align: center;
+  background: var(--app-bg, #f5f7fb);
+  color: var(--app-fg, #1f2937);
+  direction: rtl;
+  z-index: 10;
+}
+.state-overlay.error { color: var(--ds-danger-700); }
 .errors-list {
   list-style: disc;
   padding-inline-start: 20px;
