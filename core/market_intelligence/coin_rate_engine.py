@@ -16,11 +16,12 @@ from statistics import median
 from typing import Any, Iterable
 
 from .market_contracts import normalize_utc
+from .market_regime import detect_canonical_market_regime, product_market_regime
 from .price_magnitude_policy import RIAL_PER_TOMAN, TRUE_IRT_MESGHAL_FLOOR
 from .private_gold import filter_comparable_private_gold_physical_rows
 
 
-COIN_RATE_ENGINE_VERSION = "coin-rate-engine-v5"
+COIN_RATE_ENGINE_VERSION = "coin-rate-engine-v6"
 PROJECT_TOMAN_PER_UNIT = 1_000.0  # 1 project unit = 1,000 toman
 _MESGHAL_TOMAN_MIN = 30_000_000.0
 _MESGHAL_TOMAN_MAX = 200_000_000.0
@@ -342,31 +343,6 @@ def _ime_imam_point(connection: sqlite3.Connection, *, as_of: datetime) -> float
     return value if value > 0 else None
 
 
-def _paper_regime(connection: sqlite3.Connection, *, as_of: datetime) -> str:
-    rows = _rows(
-        connection,
-        as_of=as_of,
-        instrument="MELTED_GOLD_PRIVATE",
-        settlement_terms=("TOMORROW",),
-        trade_forms=("PAPER_NORMAL",),
-        price_unit="TOMAN_PER_MESGHAL_750",
-    )
-    values = [float(row["price_num"]) for row in rows[:20] if float(row["price_num"]) > 0]
-    if len(values) < 3:
-        return "NORMAL"
-    latest = values[0]
-    baseline = float(median(values[1:]))
-    relative = latest / baseline - 1.0
-    dispersion = (max(values) - min(values)) / baseline
-    if dispersion >= 0.012:
-        return "VOLATILE"
-    if relative >= 0.0015:
-        return "UP"
-    if relative <= -0.0015:
-        return "DOWN"
-    return "NORMAL"
-
-
 def _round_project(value: float) -> int:
     return max(1, int(round(value / 50.0) * 50))
 
@@ -398,9 +374,16 @@ def build_coin_rate_estimates(connection: sqlite3.Connection, *, as_of_utc: date
     """Build ranges from facts known at ``as_of``; no write or network side effect."""
 
     as_of = _utc(as_of_utc, name="coin_rate_as_of_utc")
-    regime = _paper_regime(connection, as_of=as_of)
     output: list[CoinRateEstimate] = []
     for settlement in _SETTLEMENTS:
+        regime_payload = product_market_regime(
+            detect_canonical_market_regime(connection, as_of, settlement)
+        )
+        regime = (
+            str(regime_payload.get("label") or "UNKNOWN")
+            if regime_payload.get("status") == "OBSERVED"
+            else "UNKNOWN"
+        )
         current = _melted_point(connection, as_of=as_of, settlement=settlement)
         for code, (coefficient, low_date) in COIN_SPECS.items():
             if current.value_project is None:

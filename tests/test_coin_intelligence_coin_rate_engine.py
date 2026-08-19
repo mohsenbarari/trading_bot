@@ -22,11 +22,11 @@ class CoinRateEngineTests(unittest.TestCase):
         self.connection.close()
         self.tempdir.cleanup()
 
-    def add(self, key: str, *, instrument: str, price: int, unit: str, at: str, settlement: str, form: str, event_type: str = "QUOTE", is_conditional: bool = False) -> None:
+    def add(self, key: str, *, instrument: str, price: int, unit: str, at: str, settlement: str, form: str, event_type: str = "QUOTE", is_conditional: bool = False, source_code: str = "TEST_RATE") -> None:
         upsert_observation(
             self.connection,
             MarketObservation(
-                event_key=derive_event_key("rate-engine", key), source_code="TEST_RATE", source_family="MANUAL_REVIEW",
+                event_key=derive_event_key("rate-engine", key), source_code=source_code, source_family="MANUAL_REVIEW",
                 event_time_utc=at, available_at_utc=at, instrument=instrument, market_label="TEST_RATE",
                 settlement_term=settlement, trade_form=form, event_type=event_type, side="MID",
                 price=Decimal(price), price_unit=unit, quantity=None, quantity_unit=None,
@@ -112,7 +112,7 @@ class CoinRateEngineTests(unittest.TestCase):
 
     def test_paper_up_regime_only_widens_positive_side_with_a_bounded_interval(self) -> None:
         for index, price in enumerate((80_000_000, 80_020_000, 80_100_000, 80_400_000), start=6):
-            self.add(f"paper-{index}", instrument="MELTED_GOLD_PRIVATE", price=price, unit="TOMAN_PER_MESGHAL_750", at=f"2026-08-04T10:{index:02d}:00Z", settlement="TOMORROW", form="PAPER_NORMAL")
+            self.add(f"paper-{index}", instrument="MELTED_GOLD_PRIVATE", price=price, unit="TOMAN_PER_MESGHAL_750", at=f"2026-08-04T10:{index:02d}:00Z", settlement="TOMORROW", form="PAPER_NORMAL", source_code="PRIVATE_GOLD_PAPER_MINUTE")
         self.connection.commit()
         low = self.rate("BAHAR", "TOMORROW")
         self.assertEqual(low.market_regime, "UP")

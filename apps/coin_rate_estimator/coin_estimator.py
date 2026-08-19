@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import bisect
+from contextlib import ExitStack
 from copy import deepcopy
 import json
 import math
@@ -39,6 +40,10 @@ from core.market_intelligence.conversation_quality import (  # noqa: E402
     OFFER_TIMEOUT_TRAINING_WEIGHT,
     PROJECT_COMPLETED_TRADE_TRAINING_WEIGHT,
     detect_market_regime,
+)
+from core.market_intelligence.market_regime import (  # noqa: E402
+    operational_market_regime,
+    stabilize_market_regime,
 )
 from morning_reopen import (  # noqa: E402
     METHOD_NAME as MORNING_REOPEN_METHOD,
@@ -67,6 +72,12 @@ DEFAULT_MARKET_DB = Path(
         os.environ.get("COIN_MARKET_DB", RUNTIME_ROOT / "market_prices.sqlite3"),
     )
 ).expanduser()
+_REGIME_MARKET_DB_ENV = os.environ.get("COIN_RATE_ESTIMATOR_REGIME_MARKET_DB")
+DEFAULT_REGIME_MARKET_DB = (
+    Path(_REGIME_MARKET_DB_ENV).expanduser()
+    if _REGIME_MARKET_DB_ENV
+    else None
+)
 DEFAULT_MODEL = Path(
     os.environ.get("COIN_RATE_ESTIMATOR_MODEL", RUNTIME_ROOT / "model.json")
 ).expanduser()
@@ -4998,16 +5009,22 @@ def train_model(
         },
         "market_regime_policy": {
             "states": ["RANGE", "UP", "DOWN", "SHOCK", "UNKNOWN"],
+            "method": "private-melted-led-market-regime-v2",
+            "axes": ["DIRECTION", "VOLATILITY", "PHASE"],
             "inputs": [
-                "MELTED_GOLD",
+                "PRIVATE_MELTED_GOLD",
                 "USD_HERAT",
-                "USDT_IRT",
                 "XAUUSD",
-                "IME_GOLD_BAR",
+                "LIVE_COIN_MARKET",
             ],
-            "coin_offers_used_as_regime_input": False,
-            "usdt_nominal_weight": 0.75,
-            "ime_nominal_weight": 0.25,
+            "source_priority": [
+                "PRIVATE_MELTED_GOLD",
+                "USD_HERAT",
+                "XAUUSD_AND_LIVE_COIN_MARKET_CONFIRMATION",
+            ],
+            "coin_offers_used_as_regime_input": True,
+            "coin_offer_scope": "CANONICAL_GROUP_1_AND_GROUP_2_RESOLVED_INSTRUMENTS",
+            "insufficient_data_state": "UNKNOWN",
             "crossed_range_offer_and_linked_trade": "EXCLUDED",
             "normal_market_outlier_rule": (
                 "SELL_BELOW_LOWEST_ACTIVE_BUY_OR_BUY_ABOVE_HIGHEST_ACTIVE_SELL"
@@ -5119,7 +5136,11 @@ def load_model(path: Path) -> dict[str, Any]:
 
 
 def _observed_inputs_uncached(
-    connection: sqlite3.Connection, settlement: str, end: datetime
+    connection: sqlite3.Connection,
+    settlement: str,
+    end: datetime,
+    *,
+    regime_connection: sqlite3.Connection | None = None,
 ) -> dict[str, dict[str, Any]]:
     # All values below originate from parser/normalizer output tables.  Raw
     # Telegram text is never consumed by inference.  The 30-second summaries
@@ -5148,23 +5169,53 @@ def _observed_inputs_uncached(
             bucket_seconds=MELTED_LIVE_BUCKET_SECONDS,
         ),
         "order_flow": market_order_flow(connection, settlement, end),
-        "market_regime": detect_market_regime(connection, end, settlement),
+        "market_regime": detect_market_regime(
+            connection,
+            end,
+            settlement,
+            canonical_connection=regime_connection,
+        ),
     }
 
 
 def observed_inputs(
-    connection: sqlite3.Connection, settlement: str, end: datetime
+    connection: sqlite3.Connection,
+    settlement: str,
+    end: datetime,
+    *,
+    regime_connection: sqlite3.Connection | None = None,
 ) -> dict[str, dict[str, Any]]:
     """Read model-independent market inputs once per DB/settlement/timestamp."""
 
     source = _market_connection_identity(connection)
+    regime_source = (
+        _market_connection_identity(regime_connection)
+        if regime_connection is not None
+        else None
+    )
     if source is None:
-        return _observed_inputs_uncached(connection, settlement, end)
-    key = ("OBSERVED_INPUTS", source, settlement, _snapshot_timestamp(end))
+        return _observed_inputs_uncached(
+            connection,
+            settlement,
+            end,
+            regime_connection=regime_connection,
+        )
+    key = (
+        "OBSERVED_INPUTS",
+        source,
+        regime_source,
+        settlement,
+        _snapshot_timestamp(end),
+    )
     cached = _snapshot_cache_get(key)
     if cached is not None:
         return cached
-    result = _observed_inputs_uncached(connection, settlement, end)
+    result = _observed_inputs_uncached(
+        connection,
+        settlement,
+        end,
+        regime_connection=regime_connection,
+    )
     return _snapshot_cache_put(key, result)
 
 
@@ -5550,6 +5601,8 @@ def estimate_rates(
     end: datetime,
     conversation_db: Path | None = None,
     *,
+    regime_market_db: Path | None = None,
+    previous_market_regimes: dict[str, dict[str, Any]] | None = None,
     live_group_events_enabled: bool = True,
     group_live_events_before: datetime | None = None,
 ) -> dict[str, Any]:
@@ -5619,9 +5672,68 @@ def estimate_rates(
     anchor_relative_error_qhat = float(
         anchor_policy.get("relative_error_qhat", 0.006)
     )
-    with connect_market_db(market_db) as connection:
+    effective_regime_market_db = regime_market_db or DEFAULT_REGIME_MARKET_DB
+    with ExitStack() as stack:
+        connection = stack.enter_context(connect_market_db(market_db))
+        regime_connection = None
+        if (
+            effective_regime_market_db is not None
+            and effective_regime_market_db.is_file()
+        ):
+            regime_connection = stack.enter_context(
+                connect_market_db(effective_regime_market_db)
+            )
+        result["market_regime_input"] = {
+            "method": (
+                "CANONICAL_MARKET_STORE"
+                if regime_connection is not None
+                else (
+                    "CANONICAL_MARKET_STORE_UNAVAILABLE"
+                    if effective_regime_market_db is not None
+                    else "LEGACY_PUBLIC_MARKET_FALLBACK"
+                )
+            ),
+            "canonical_store_available": regime_connection is not None,
+            "canonical_store_required": effective_regime_market_db is not None,
+        }
         for settlement in SETTLEMENT_CONFIG:
-            inputs = observed_inputs(connection, settlement, end)
+            inputs = observed_inputs(
+                connection,
+                settlement,
+                end,
+                regime_connection=regime_connection,
+            )
+            if effective_regime_market_db is not None and regime_connection is None:
+                inputs["market_regime"] = {
+                    "status": "NO_DATA",
+                    "quality": "CANONICAL_STORE_UNAVAILABLE",
+                    "regime": "UNKNOWN",
+                    "direction_state": "UNKNOWN",
+                    "volatility_state": "UNKNOWN",
+                    "phase": "UNKNOWN",
+                    "direction_score": None,
+                    "confidence": 0.0,
+                    "volatility_percent": None,
+                    "volatility_score": None,
+                    "window_seconds": 600,
+                    "components": [],
+                    "method": "private-melted-led-market-regime-v2",
+                    "private_melted_anchor_present": False,
+                    "coin_offers_used_as_regime_input": True,
+                }
+            if regime_connection is not None:
+                inputs["market_regime"] = operational_market_regime(
+                    inputs["market_regime"]
+                )
+                previous_regime = (
+                    (previous_market_regimes or {}).get(settlement)
+                    if isinstance(previous_market_regimes, dict)
+                    else None
+                )
+                inputs["market_regime"] = stabilize_market_regime(
+                    inputs["market_regime"],
+                    previous_regime,
+                )
             # The point estimate follows the last real parsed event; the
             # 30-second averages remain present in ``inputs`` for stability,
             # trend and diagnostics.
@@ -6853,6 +6965,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     estimate_parser = subparsers.add_parser("estimate")
     estimate_parser.add_argument("--market-db", type=Path, default=DEFAULT_MARKET_DB)
+    estimate_parser.add_argument(
+        "--regime-market-db",
+        type=Path,
+        default=DEFAULT_REGIME_MARKET_DB,
+        help="Optional canonical Market Store used by the source-prioritized regime classifier.",
+    )
     estimate_parser.add_argument("--model", type=Path, default=DEFAULT_MODEL)
     estimate_parser.add_argument(
         "--conversation-db", type=Path, default=DEFAULT_CONVERSATION_DB
@@ -6970,7 +7088,13 @@ def main() -> int:
     else:
         with connect_market_db(args.market_db) as connection:
             end = latest_complete_minute(connection)
-    estimate = estimate_rates(model, args.market_db, end, args.conversation_db)
+    estimate = estimate_rates(
+        model,
+        args.market_db,
+        end,
+        args.conversation_db,
+        regime_market_db=args.regime_market_db,
+    )
     if args.output:
         write_json_atomic(args.output, estimate, mode=0o644)
         print(str(args.output.resolve()))

@@ -1409,6 +1409,28 @@ class EstimatorTests(unittest.TestCase):
                 "DIRECT_GENERIC_COIN_LATEST_PLUS_30S_MEAN_ASSUMED_IMAM",
             )
 
+    def test_configured_missing_canonical_regime_store_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            market_path = root / "market.sqlite3"
+            make_market_db(market_path)
+
+            result = estimate_rates(
+                model(),
+                market_path,
+                datetime(2026, 7, 20, 10, 1, tzinfo=timezone.utc),
+                regime_market_db=root / "missing-canonical-market.sqlite3",
+            )
+
+            self.assertEqual(
+                result["market_regime_input"]["method"],
+                "CANONICAL_MARKET_STORE_UNAVAILABLE",
+            )
+            self.assertEqual(
+                result["settlements"]["CASH"]["market_regime"]["regime"],
+                "UNKNOWN",
+            )
+
     def test_cash_coin_uses_structural_estimate_without_live_coin_quote(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             market_path = Path(directory) / "market.sqlite3"

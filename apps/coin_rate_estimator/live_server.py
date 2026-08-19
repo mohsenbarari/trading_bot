@@ -47,6 +47,7 @@ from coin_estimator import (  # noqa: E402
     DEFAULT_CONVERSATION_DB,
     DEFAULT_MARKET_DB,
     DEFAULT_MODEL,
+    DEFAULT_REGIME_MARKET_DB,
     DEFAULT_REVIEW_DECISIONS_DB,
     COMMODITY_SPECS,
     GROUP_ANCHOR_WINDOW_SECONDS,
@@ -7643,6 +7644,7 @@ def refresh_estimate(
     state: StateStore,
     *,
     calibration_db: Path | None = None,
+    regime_market_db: Path | None = None,
     end: datetime | None = None,
     group_live_control: GroupLiveInputControl | None = None,
     shadow_model_path: Path | None = None,
@@ -7711,11 +7713,23 @@ def refresh_estimate(
     finally:
         observation_connection.close()
     calibration_connection.close()
+    previous_state = state.get()
+    previous_settlements = previous_state.get("settlements")
+    previous_settlements = (
+        previous_settlements if isinstance(previous_settlements, dict) else {}
+    )
+    previous_market_regimes = {
+        settlement: body.get("market_regime")
+        for settlement, body in previous_settlements.items()
+        if isinstance(body, dict) and isinstance(body.get("market_regime"), dict)
+    }
     estimate = estimate_rates(
         model,
         market_db,
         effective_end,
         conversation_db,
+        regime_market_db=regime_market_db,
+        previous_market_regimes=previous_market_regimes,
         live_group_events_enabled=enabled,
         group_live_events_before=disabled_since,
     )
@@ -7750,6 +7764,7 @@ def refresh_estimate(
     shadow_meta = run_shadow_parallel(
         live_estimate=estimate,
         market_db=market_db,
+        regime_market_db=regime_market_db,
         conversation_db=conversation_db,
         end=effective_end,
         shadow_model_path=shadow_model_path,
@@ -7761,6 +7776,7 @@ def refresh_estimate(
     research_meta = run_shadow_parallel(
         live_estimate=estimate,
         market_db=market_db,
+        regime_market_db=regime_market_db,
         conversation_db=conversation_db,
         end=effective_end,
         shadow_model_path=research_shadow_model_path
@@ -7988,6 +8004,7 @@ async def estimation_loop(
     state: StateStore,
     group_live_control: GroupLiveInputControl,
     *,
+    regime_market_db: Path | None = None,
     health_config: InputHealthConfig | None = None,
     shadow_model_path: Path | None = None,
     shadow_state_path: Path | None = None,
@@ -8010,6 +8027,7 @@ async def estimation_loop(
                     state_path,
                     state,
                     calibration_db=calibration_db,
+                    regime_market_db=regime_market_db,
                     end=end,
                     group_live_control=group_live_control,
                     shadow_model_path=shadow_model_path,
@@ -8473,6 +8491,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--market-db", type=Path, default=DEFAULT_MARKET_DB)
     parser.add_argument(
+        "--regime-market-db",
+        type=Path,
+        default=DEFAULT_REGIME_MARKET_DB,
+        help="Canonical Market Store used by the private-melted-led regime classifier.",
+    )
+    parser.add_argument(
         "--conversation-db", type=Path, default=DEFAULT_CONVERSATION_DB
     )
     parser.add_argument(
@@ -8532,6 +8556,7 @@ async def async_main(
                 args.state,
                 state,
                 group_live_control,
+                regime_market_db=args.regime_market_db,
                 health_config=health_config,
                 shadow_model_path=args.shadow_model,
                 shadow_state_path=args.shadow_state,
@@ -8595,6 +8620,7 @@ def main() -> int:
             args.state,
             state,
             calibration_db=args.calibration_db,
+            regime_market_db=args.regime_market_db,
             group_live_control=group_live_control,
             shadow_model_path=args.shadow_model,
             shadow_state_path=args.shadow_state,

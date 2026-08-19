@@ -71,6 +71,7 @@ def run_shadow_parallel(
     *,
     live_estimate: dict[str, Any],
     market_db: Path,
+    regime_market_db: Path | None = None,
     conversation_db: Path,
     end: datetime,
     shadow_model_path: Path | None,
@@ -98,6 +99,7 @@ def run_shadow_parallel(
             market_db,
             end,
             conversation_db,
+            regime_market_db=regime_market_db,
             live_group_events_enabled=live_group_events_enabled,
             group_live_events_before=group_live_events_before,
         )

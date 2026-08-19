@@ -21,6 +21,7 @@ from typing import Any, Iterable, Mapping, Sequence
 
 from .coin_rate_engine import COIN_RATE_ENGINE_VERSION, COIN_SPECS, build_coin_rate_estimates
 from .market_contracts import MARKET_STORE_CONTRACT_VERSION, normalize_utc
+from .market_regime import detect_canonical_market_regime, product_market_regime
 from .private_gold import filter_comparable_private_gold_physical_rows
 
 
@@ -264,51 +265,6 @@ def _signal(
             method=method,
         ),
     )
-
-
-def _regime_from_signals(signals: Mapping[str, Mapping[str, Any]]) -> dict[str, Any]:
-    """A conservative, non-authoritative underlying direction summary.
-
-    It intentionally abstains until two independent fresh series agree.  This
-    keeps a thin or stale source from turning into a false market regime.
-    """
-
-    usable: list[tuple[str, float]] = []
-    for name in ("MELTED_PAPER_TOMORROW", "USD_HERAT_TOMORROW", "USDT_IRT"):
-        signal = signals.get(name) or {}
-        if signal.get("status") != "FRESH":
-            continue
-        latest = signal.get("latest_price")
-        median = signal.get("median_price")
-        if not isinstance(latest, (int, float)) or not isinstance(median, (int, float)):
-            continue
-        if median <= 0:
-            continue
-        usable.append((name, (float(latest) / float(median)) - 1.0))
-    if len(usable) < 2:
-        return {
-            "status": "ABSTAIN",
-            "reason": "INSUFFICIENT_INDEPENDENT_FRESH_SIGNALS",
-            "inputs": [name for name, _ in usable],
-        }
-    positives = sum(1 for _, change in usable if change >= 0.001)
-    negatives = sum(1 for _, change in usable if change <= -0.001)
-    magnitude = _median([abs(change) for _, change in usable])
-    if positives and negatives:
-        label = "VOLATILE"
-    elif positives >= 2:
-        label = "UP"
-    elif negatives >= 2:
-        label = "DOWN"
-    else:
-        label = "NORMAL"
-    return {
-        "status": "OBSERVED",
-        "label": label,
-        "median_window_return": magnitude,
-        "inputs": [name for name, _ in usable],
-        "method": "independent_underlying_window_direction_v1",
-    }
 
 
 def build_market_snapshot(
@@ -558,13 +514,23 @@ def build_market_snapshot(
         )
     )
     rate_items = [item.to_dict() for item in build_coin_rate_estimates(connection, as_of_utc=as_of)]
+    market_regimes = {
+        settlement: product_market_regime(
+            detect_canonical_market_regime(connection, as_of, settlement)
+        )
+        for settlement in ("CASH", "TOMORROW")
+    }
     snapshot = {
         "schema_version": MARKET_SNAPSHOT_SCHEMA_VERSION,
         "market_store_contract_version": MARKET_STORE_CONTRACT_VERSION,
         "builder_version": MARKET_SNAPSHOT_BUILDER_VERSION,
         "generated_at_utc": _iso(as_of),
         "signals": signals,
-        "market_regime": _regime_from_signals(signals),
+        # The historical top-level field represented the tomorrow paper book.
+        # Preserve that compatibility while publishing both settlements from
+        # the one canonical classifier.
+        "market_regime": market_regimes["TOMORROW"],
+        "market_regimes": market_regimes,
         # Range generation is deterministic and source-separated.  Product
         # commodity selection remains deliberately deferred to P5.
         "rates": {

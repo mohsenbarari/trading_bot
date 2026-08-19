@@ -31,12 +31,16 @@ from typing import Any, Iterable, Sequence
 
 try:
     from .coin_groups import coin_group_settlement_conflict_reason
+    from .market_regime import detect_canonical_market_regime
 except ImportError:  # Preserve the existing direct-script operator entrypoint.
     _REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
     if str(_REPOSITORY_ROOT) not in sys.path:
         sys.path.insert(0, str(_REPOSITORY_ROOT))
     from core.market_intelligence.coin_groups import (  # type: ignore[no-redef]
         coin_group_settlement_conflict_reason,
+    )
+    from core.market_intelligence.market_regime import (  # type: ignore[no-redef]
+        detect_canonical_market_regime,
     )
 
 
@@ -80,6 +84,10 @@ DEFAULT_CONVERSATION_DB = Path(
     os.environ.get("COIN_CONVERSATION_DB", "conversation_events.candidate.sqlite3")
 )
 DEFAULT_MARKET_DB = Path(os.environ.get("COIN_MARKET_DB", "market_prices.sqlite3"))
+_CANONICAL_MARKET_DB_ENV = os.environ.get("COIN_RATE_ESTIMATOR_REGIME_MARKET_DB")
+DEFAULT_CANONICAL_MARKET_DB = (
+    Path(_CANONICAL_MARKET_DB_ENV) if _CANONICAL_MARKET_DB_ENV else None
+)
 
 
 def parse_time(value: str) -> datetime:
@@ -271,13 +279,22 @@ def detect_market_regime(
     settlement: str,
     *,
     window_seconds: int = 10 * 60,
+    canonical_connection: sqlite3.Connection | None = None,
 ) -> dict[str, Any]:
-    """Classify RANGE/UP/DOWN/SHOCK from independent underlying inputs.
+    """Classify RANGE/UP/DOWN/SHOCK from the best available regime source.
 
-    Coin offers are deliberately absent.  Melted gold and FX dominate.  When
-    only USDT and IME are present, their nominal weights are 0.75 and 0.25, so
-    USDT remains the stronger direction reference as requested.
+    The canonical Market Store path is private-melted-led and may use resolved
+    live coin books as confirmation.  The legacy public-database fallback
+    deliberately excludes coin offers and retains its historical weights.
     """
+
+    if canonical_connection is not None:
+        return detect_canonical_market_regime(
+            canonical_connection,
+            end,
+            settlement,
+            window_seconds=window_seconds,
+        )
 
     end = end.astimezone(timezone.utc)
     start = end - timedelta(seconds=window_seconds)
@@ -405,6 +422,8 @@ def detect_market_regime(
             "window_seconds": window_seconds,
             "components": [],
             "usdt_preferred_over_ime": True,
+            "method": "legacy-public-input-market-regime-v1",
+            "quality": "NO_DATA",
         }
 
     total_weight = sum(float(row["reliability"]) for row in components)
@@ -457,6 +476,8 @@ def detect_market_regime(
             for row in components
         },
         "usdt_preferred_over_ime": True,
+        "method": "legacy-public-input-market-regime-v1",
+        "quality": "LEGACY_FALLBACK",
     }
 
 
@@ -561,12 +582,21 @@ def _table_columns(connection: sqlite3.Connection, table: str) -> set[str]:
     return {str(row[1]) for row in connection.execute(f"PRAGMA table_info({table})")}
 
 
-def annotate_database(conversation_db: Path, market_db: Path) -> dict[str, Any]:
+def annotate_database(
+    conversation_db: Path,
+    market_db: Path,
+    canonical_market_db: Path | None = None,
+) -> dict[str, Any]:
     """Populate derived quality tables without mutating extracted facts."""
 
     conversation = sqlite3.connect(conversation_db)
     conversation.row_factory = sqlite3.Row
     market = sqlite3.connect(f"file:{market_db.resolve()}?mode=ro", uri=True)
+    canonical_market = (
+        sqlite3.connect(f"file:{canonical_market_db.resolve()}?mode=ro", uri=True)
+        if canonical_market_db is not None and canonical_market_db.is_file()
+        else None
+    )
     try:
         conversation.executescript(
             """
@@ -636,7 +666,12 @@ def annotate_database(conversation_db: Path, market_db: Path) -> dict[str, Any]:
             minute = event.replace(second=0, microsecond=0)
             key = (iso_utc(minute), settlement)
             if key not in regime_cache:
-                regime_cache[key] = detect_market_regime(market, event, settlement)
+                regime_cache[key] = detect_market_regime(
+                    market,
+                    event,
+                    settlement,
+                    canonical_connection=canonical_market,
+                )
             return regime_cache[key]
 
         active: dict[tuple[str, str, str], list[dict[str, Any]]] = defaultdict(list)
@@ -997,12 +1032,20 @@ def annotate_database(conversation_db: Path, market_db: Path) -> dict[str, Any]:
                 "linked_negotiated_tail_near_anchored_offer": "ELIGIBLE",
                 "settlement_text_label_mismatch": "EXCLUDED",
                 "extreme_strictly_prior_local_price_discontinuity": "EXCLUDED",
-                "regime_inputs_exclude_coin_offers": True,
-                "usdt_weight_exceeds_ime_weight": True,
+                "regime_method": (
+                    "private-melted-led-market-regime-v2"
+                    if canonical_market is not None
+                    else "legacy-public-input-market-regime-v1"
+                ),
+                "regime_inputs_include_resolved_live_coin_books": (
+                    canonical_market is not None
+                ),
             },
         }
         return summary
     finally:
+        if canonical_market is not None:
+            canonical_market.close()
         market.close()
         conversation.close()
 
@@ -1011,8 +1054,17 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--conversation-db", type=Path, default=DEFAULT_CONVERSATION_DB)
     parser.add_argument("--market-db", type=Path, default=DEFAULT_MARKET_DB)
+    parser.add_argument(
+        "--canonical-market-db",
+        type=Path,
+        default=DEFAULT_CANONICAL_MARKET_DB,
+    )
     args = parser.parse_args()
-    result = annotate_database(args.conversation_db, args.market_db)
+    result = annotate_database(
+        args.conversation_db,
+        args.market_db,
+        args.canonical_market_db,
+    )
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0
 
