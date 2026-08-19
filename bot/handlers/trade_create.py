@@ -2447,6 +2447,7 @@ async def _show_text_offer_preview(
     *,
     edit_response: bool,
     inference_selection: dict[str, object] | None = None,
+    inference_edit_candidates: list[Mapping[str, object]] | None = None,
 ) -> bool:
     """Persist a validated draft and show its final Telegram confirmation."""
 
@@ -2485,11 +2486,27 @@ async def _show_text_offer_preview(
         f"{shadow_section}"
         "آیا تایید می‌کنید؟"
     )
+    confirm_row = [
+        InlineKeyboardButton(
+            text="✅ تایید و ارسال",
+            callback_data=TextOfferActionCallback(action="confirm").pack(),
+        )
+    ]
+    if inference_edit_candidates:
+        confirm_row.append(
+            InlineKeyboardButton(
+                text="✏️ ویرایش کالا",
+                callback_data=TextOfferActionCallback(action="edit_commodity").pack(),
+            )
+        )
     confirm_kb = InlineKeyboardMarkup(inline_keyboard=[
+        confirm_row,
         [
-            InlineKeyboardButton(text="✅ تایید و ارسال", callback_data=TextOfferActionCallback(action="confirm").pack()),
-            InlineKeyboardButton(text="❌ انصراف", callback_data=TextOfferActionCallback(action="cancel").pack()),
-        ]
+            InlineKeyboardButton(
+                text="❌ انصراف",
+                callback_data=TextOfferActionCallback(action="cancel").pack(),
+            )
+        ],
     ])
     confirmation_message = await _text_offer_response(
         message,
@@ -2503,6 +2520,10 @@ async def _show_text_offer_preview(
             text_offer_confirmation_chat_id=confirmation_message.chat.id,
             text_offer_confirmation_message_id=confirmation_message.message_id,
         )
+        if inference_edit_candidates:
+            await state.update_data(
+                text_offer_inference_message_id=confirmation_message.message_id,
+            )
     else:
         outbox = getattr(
             getattr(confirmation_message, "notification", None),
@@ -2522,6 +2543,11 @@ async def _show_text_offer_preview(
                     message.message_id if edit_response else None
                 ),
             )
+    if inference_edit_candidates:
+        await state.update_data(
+            text_offer_inference_edit_candidates=inference_edit_candidates,
+            text_offer_inference_mode="model",
+        )
     await state.set_state(Trade.awaiting_text_confirm)
     return True
 
@@ -2673,36 +2699,24 @@ async def _prepare_text_offer(
                 )
                 if len(candidates) == 1:
                     suggested = candidates[0]
-                    action_row = [
-                        InlineKeyboardButton(
-                            text="✅ تأیید",
-                            callback_data=TextOfferActionCallback(
-                                action="confirm_commodity"
-                            ).pack(),
-                        )
-                    ]
-                    if any(
-                        item.commodity_id != suggested.commodity_id
-                        for item in edit_candidates
-                    ):
-                        action_row.append(
-                            InlineKeyboardButton(
-                                text="✏️ ویرایش",
-                                callback_data=TextOfferActionCallback(
-                                    action="edit_commodity"
-                                ).pack(),
-                            )
-                        )
-                    choice_keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                        action_row,
-                        [
-                            InlineKeyboardButton(
-                                text="❌ انصراف",
-                                callback_data=TextOfferActionCallback(action="cancel").pack(),
-                            )
+                    result.commodity_id = suggested.commodity_id
+                    result.commodity_name = suggested.commodity_name
+                    result.commodity_resolution = "INFERRED"
+                    return await _show_text_offer_preview(
+                        message,
+                        state,
+                        user,
+                        result,
+                        edit_response=edit_response,
+                        inference_selection={
+                            "decision_key": observation.decision_key,
+                            "selected_commodity_id": suggested.commodity_id,
+                        },
+                        inference_edit_candidates=[
+                            {"commodity_id": item.commodity_id, "commodity_name": item.commodity_name}
+                            for item in edit_candidates
                         ],
-                    ])
-                    prompt = f"کالای پیشنهادی: «{suggested.commodity_name}»\nدرست است؟"
+                    )
                 else:
                     choice_keyboard = InlineKeyboardMarkup(inline_keyboard=[
                         *[
@@ -3181,12 +3195,16 @@ async def handle_text_offer_inference_suggestion_confirm(
     Trade.awaiting_text_inference_choice,
     TextOfferActionCallback.filter(F.action == "edit_commodity"),
 )
+@router.callback_query(
+    Trade.awaiting_text_confirm,
+    TextOfferActionCallback.filter(F.action == "edit_commodity"),
+)
 async def handle_text_offer_inference_suggestion_edit(
     callback: types.CallbackQuery,
     state: FSMContext,
     user: Optional[User],
 ):
-    """Show explicit same-family alternatives for a unique suggestion."""
+    """Show explicit nearby same-family alternatives for a unique suggestion."""
 
     if not user:
         await answer_callback_query_via_runtime(callback)
@@ -3234,7 +3252,7 @@ async def handle_text_offer_inference_suggestion_edit(
     await edit_callback_message_via_runtime(
         callback,
         user,
-        "کالای درست را انتخاب کنید.",
+        "کالای درست را از گزینه‌های نزدیک به قیمت لفظ انتخاب کنید.",
         reply_markup=keyboard,
     )
     await answer_callback_query_via_runtime(callback)

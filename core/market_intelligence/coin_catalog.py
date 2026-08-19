@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from typing import Any
+from typing import Any, Mapping
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -22,6 +22,7 @@ from .coin_inference import (
 
 
 COIN_CATALOG_RESOLUTION_VERSION = "coin-catalog-resolution-v1"
+COIN_INFERENCE_EDIT_PRICE_RANGE_PERCENT = 10
 
 
 @dataclass(frozen=True, slots=True)
@@ -147,30 +148,68 @@ async def resolve_coin_inference_edit_candidates(
     db: AsyncSession,
     inference: CatalogCoinCommodityInference,
     *,
+    snapshot: Mapping[str, Any],
+    submitted_project_price: int,
     candidate_scope: str = "ALL",
 ) -> tuple[CatalogCoinCommodityEditCandidate, ...]:
-    """Return existing same-family commodities for an explicit user correction.
+    """Return nearby existing same-family commodities for explicit correction.
 
     These are not model candidates and must never inherit the inference receipt.
-    They merely keep the correction list relevant (full/half/quarter/one-gram)
-    while resolving every name against the local canonical catalog.
+    A choice is relevant only when its published center rate is within ten
+    percent (inclusive) of the submitted offer price.  The exact Snapshot used
+    for the inference is supplied by the caller, so Bot and Web never compute
+    or widen this range independently.
     """
 
     if inference.status not in {"AUTO_SELECT", "CONFIRM"} or not inference.candidates:
+        return ()
+    try:
+        submitted_price = int(submitted_project_price)
+    except (TypeError, ValueError):
+        return ()
+    if submitted_price <= 0 or not isinstance(snapshot, Mapping):
         return ()
     scope = normalize_coin_inference_candidate_scope(candidate_scope)
     first_code = inference.candidates[0].commodity_code
     family = COIN_CANDIDATE_FAMILY_BY_CODE.get(first_code)
     if family is None:
         return ()
-    ordered_codes = [candidate.commodity_code for candidate in inference.candidates]
+
+    rates = snapshot.get("rates")
+    if not isinstance(rates, Mapping):
+        return ()
+    nearby_distances: dict[str, int] = {}
+    for item in rates.get("items") or ():
+        if not isinstance(item, Mapping) or item.get("status") != "ESTIMATED":
+            continue
+        code = str(item.get("commodity_code") or "")
+        if (
+            code not in CANONICAL_COMMODITY_NAMES
+            or COIN_CANDIDATE_FAMILY_BY_CODE.get(code) != family
+            or str(item.get("settlement_term") or "").upper() != inference.settlement_term
+            or (
+                scope == COIN_INFERENCE_CANDIDATE_SCOPE_LOW_DATE_ONLY
+                and code not in COIN_LOW_DATE_COMMODITY_CODES
+            )
+        ):
+            continue
+        center = item.get("estimated_project_price")
+        if not isinstance(center, int) or isinstance(center, bool) or center <= 0:
+            continue
+        distance = abs(center - submitted_price)
+        if distance * 100 > submitted_price * COIN_INFERENCE_EDIT_PRICE_RANGE_PERCENT:
+            continue
+        nearby_distances[code] = distance
+
+    model_order = [candidate.commodity_code for candidate in inference.candidates]
+    ordered_codes = [code for code in model_order if code in nearby_distances]
     ordered_codes.extend(
         code
-        for code in CANONICAL_COMMODITY_NAMES
-        if COIN_CANDIDATE_FAMILY_BY_CODE.get(code) == family and code not in ordered_codes
+        for code in sorted(
+            (code for code in nearby_distances if code not in ordered_codes),
+            key=lambda code: (nearby_distances[code], code),
+        )
     )
-    if scope == COIN_INFERENCE_CANDIDATE_SCOPE_LOW_DATE_ONLY:
-        ordered_codes = [code for code in ordered_codes if code in COIN_LOW_DATE_COMMODITY_CODES]
 
     resolved: list[CatalogCoinCommodityEditCandidate] = []
     for code in ordered_codes:
@@ -190,6 +229,7 @@ async def resolve_coin_inference_edit_candidates(
 
 __all__ = [
     "COIN_CATALOG_RESOLUTION_VERSION",
+    "COIN_INFERENCE_EDIT_PRICE_RANGE_PERCENT",
     "CatalogCoinCommodityCandidate",
     "CatalogCoinCommodityEditCandidate",
     "CatalogCoinCommodityInference",

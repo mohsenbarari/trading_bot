@@ -142,6 +142,9 @@ EXPECTED_RUNTIME_INVENTORY_COUNTS = {
     "queue_execution": 1,
 }
 EXPECTED_RUNTIME_INVENTORY_SHA256 = (
+    "e69c3e81cd5e9c00954e06e7a7fd716c6735061011a1b8eedba9d31cbaf64ca2"
+)
+PRE_NEARBY_COIN_PREVIEW_RUNTIME_INVENTORY_SHA256 = (
     "faebde08f41c835bfd70203386e447bb8cc180a3ced0c91ffeafc1d59b7d232c"
 )
 PRE_COIN_INFERENCE_CONFIRMATION_RUNTIME_INVENTORY_SHA256 = (
@@ -177,6 +180,11 @@ OVERTIME_OWNER_PROMPT_RUNTIME_INVENTORY_SHA256 = (
 REVIEWED_RUNTIME_INVENTORY_SHA256 = frozenset(
     {
         EXPECTED_RUNTIME_INVENTORY_SHA256,
+        # Singleton coin inference now enters the real offer preview and its
+        # edit action opens the server-filtered nearby list. This only shifts
+        # existing trade_create delivery identities; all 103 dispositions and
+        # owners remain unchanged.
+        PRE_NEARBY_COIN_PREVIEW_RUNTIME_INVENTORY_SHA256,
         # Coin-inference confirmation adds no Telegram delivery boundary. One
         # API and four bot callsite identities only move below the new response
         # contract and confirmation/edit UI; all 103 dispositions stay exact.

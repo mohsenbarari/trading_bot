@@ -61,6 +61,22 @@ def inference(status: str = "AUTO_SELECT", *candidates: CoinCommodityCandidate) 
     )
 
 
+def edit_snapshot(*rates: tuple[str, str, int]) -> dict[str, object]:
+    return {
+        "rates": {
+            "items": [
+                {
+                    "commodity_code": code,
+                    "settlement_term": settlement,
+                    "status": "ESTIMATED",
+                    "estimated_project_price": center,
+                }
+                for code, settlement, center in rates
+            ]
+        }
+    }
+
+
 class CoinCatalogResolutionTests(unittest.IsolatedAsyncioTestCase):
     async def test_auto_select_maps_only_the_exact_canonical_catalog_name(self) -> None:
         db = _CatalogDB({"امام": [SimpleNamespace(id=71, name="امام")]})
@@ -111,7 +127,15 @@ class CoinCatalogResolutionTests(unittest.IsolatedAsyncioTestCase):
             ),
         )
 
-        choices = await resolve_coin_inference_edit_candidates(db, decision)
+        choices = await resolve_coin_inference_edit_candidates(
+            db,
+            decision,
+            snapshot=edit_snapshot(
+                ("QUARTER_BAHAR", "TOMORROW", 186_900),
+                ("QUARTER_LOW_DATE", "TOMORROW", 180_000),
+            ),
+            submitted_project_price=186_800,
+        )
 
         self.assertEqual(
             [(item.commodity_id, item.commodity_code, item.commodity_name) for item in choices],
@@ -139,6 +163,11 @@ class CoinCatalogResolutionTests(unittest.IsolatedAsyncioTestCase):
         choices = await resolve_coin_inference_edit_candidates(
             db,
             decision,
+            snapshot=edit_snapshot(
+                ("HALF_BAHAR", "TOMORROW", 186_900),
+                ("HALF_LOW_DATE", "TOMORROW", 186_800),
+            ),
+            submitted_project_price=186_800,
             candidate_scope="LOW_DATE_ONLY",
         )
 
@@ -146,6 +175,40 @@ class CoinCatalogResolutionTests(unittest.IsolatedAsyncioTestCase):
             [(item.commodity_code, item.commodity_name) for item in choices],
             [("HALF_LOW_DATE", "نیم تاریخ پایین")],
         )
+
+    async def test_edit_choices_use_an_inclusive_ten_percent_snapshot_range(self) -> None:
+        db = _CatalogDB(
+            {
+                "امام": [SimpleNamespace(id=71, name="امام")],
+                "بهار": [SimpleNamespace(id=72, name="بهار")],
+            }
+        )
+        decision = await resolve_coin_inference_against_catalog(
+            db,
+            inference("CONFIRM", candidate("IMAM", "امام")),
+        )
+
+        inclusive = await resolve_coin_inference_edit_candidates(
+            db,
+            decision,
+            snapshot=edit_snapshot(
+                ("IMAM", "TOMORROW", 100_000),
+                ("BAHAR", "TOMORROW", 110_000),
+            ),
+            submitted_project_price=100_000,
+        )
+        outside = await resolve_coin_inference_edit_candidates(
+            db,
+            decision,
+            snapshot=edit_snapshot(
+                ("IMAM", "TOMORROW", 100_000),
+                ("BAHAR", "TOMORROW", 110_001),
+            ),
+            submitted_project_price=100_000,
+        )
+
+        self.assertEqual([item.commodity_code for item in inclusive], ["IMAM", "BAHAR"])
+        self.assertEqual([item.commodity_code for item in outside], ["IMAM"])
 
 
 if __name__ == "__main__":

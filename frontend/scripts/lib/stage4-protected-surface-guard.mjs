@@ -386,10 +386,11 @@ export const MARKET_CROSS_SERVER_LOT_SUGGESTION_EVIDENCE = Object.freeze({
   sha256: '310a154c29b733c13534d8f290b065b69f14bdefc64b4c34a5ceaa09a7971425',
 })
 
-// Explicit product-requested UX correction for omitted commodity names. The
-// unique model suggestion is static copy with confirm/edit/cancel actions;
-// ambiguous results remain a choice list, and edits are explicit same-family
-// corrections that cannot inherit the model receipt.
+// Explicit product-requested UX correction for omitted commodity names. A
+// unique model suggestion enters the real offer preview with publish/edit/
+// cancel actions; ambiguous results remain a choice list. Editing opens only
+// server-filtered nearby same-family choices and cannot inherit the model
+// receipt.
 export const MARKET_INFERENCE_CONFIRMATION_UX_KIND =
   'market-inference-confirmation-ux'
 
@@ -400,16 +401,16 @@ export const MARKET_INFERENCE_CONFIRMATION_UX_ALLOWED_PATHS = Object.freeze([
 
 export const MARKET_INFERENCE_CONFIRMATION_UX_ALLOWED_FILE_SHA256 = Object.freeze({
   'frontend/src/components/CommodityInferenceSelectionModal.vue':
-    'fb11d4fa909ffd8c64fa60b3b52809c3ad57ffe7929932c23bc76e3840d71bfb',
+    '81f08b1b7f9c4812b88a79b13e13c4f27efa2f246570dc9185d2b2165b0aeeef',
   'frontend/src/views/MarketView.vue':
-    '826507de513c6fcb1ec15e4a5785e77f5a03b8838785e273c9c8caca6f772528',
+    '1a2675955498d366d6f2b8171f7ff971d8b70450906864b13e23aee70de45429',
 })
 
 export const MARKET_INFERENCE_CONFIRMATION_UX_EVIDENCE = Object.freeze({
   count: 20,
-  contentBytes: 174446,
+  contentBytes: 175500,
   pathSetSha256: '6035c31eab716d0061c81427da214fbe9765571ba0d370e218b11edab27678f2',
-  sha256: 'a7dd45408695aba1ce132b0c0e1dc6647f473496764da6601147c13aa8ba47c0',
+  sha256: '70c3dffbaa4f6f7cbfd39498ff8b170576a207ea60b6eabe898d41a9ccfec2ee',
 })
 
 export const MESSENGER_RUNTIME_BASELINE = Object.freeze({
@@ -1269,6 +1270,9 @@ export function assertMarketInferenceConfirmationUxSemantics(entries) {
     "commodity_resolution: explicitCorrection ? 'EXPLICIT' : 'INFERRED'",
     'commodity_inference: explicitCorrection ? undefined : parsed.commodity_inference',
     '@select="selectInferredCommodity"',
+    'if (inference.candidates.length === 1)',
+    "commodity_resolution: 'INFERRED'",
+    ':start-editing="Number.isInteger(pendingCommodityInference.commodity_id)',
   ]
   for (const fragment of requiredMarketFragments) {
     if (!market.includes(fragment)) {
@@ -1288,6 +1292,8 @@ export function assertMarketInferenceConfirmationUxSemantics(entries) {
     'data-test="commodity-inference-cancel"',
     'v-if="isSingleSuggestion"',
     'v-else class="commodity-inference-options"',
+    'props.startEditing === true',
+    'تا ۱۰٪ اختلاف',
   ]
   for (const fragment of requiredModalFragments) {
     if (!modal.includes(fragment)) {

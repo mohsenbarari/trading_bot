@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 import re
 import secrets
+from typing import Mapping
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -167,10 +168,16 @@ async def observe_coin_inference_shadow(
         else catalog_result
     )
     edit_candidates: tuple[CatalogCoinCommodityEditCandidate, ...] = ()
-    if force_confirmation and len(presentation_decision.candidates) == 1:
+    if (
+        force_confirmation
+        and len(presentation_decision.candidates) == 1
+        and isinstance(snapshot, Mapping)
+    ):
         edit_candidates = await resolve_coin_inference_edit_candidates(
             db,
             presentation_decision,
+            snapshot=snapshot,
+            submitted_project_price=submitted_project_price,
             candidate_scope=candidate_scope,
         )
     return CoinInferenceShadowObservation(

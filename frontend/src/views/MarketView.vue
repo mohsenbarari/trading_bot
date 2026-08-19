@@ -786,6 +786,17 @@ function handleRecentOffersViewportChange() {
 
 function editPendingOfferPreview() {
   if (!pendingOfferPreview.value) return
+  const inference = pendingOfferPreview.value.commodity_inference
+  if (
+    inference?.mode === 'SELECTABLE'
+    && inference.status === 'CONFIRM'
+    && inference.candidates.length === 1
+    && (inference.edit_candidates?.length ?? 0) > 0
+  ) {
+    pendingCommodityInference.value = pendingOfferPreview.value
+    pendingOfferPreview.value = null
+    return
+  }
   offerText.value = buildOfferDraftText(pendingOfferPreview.value)
   parseError.value = ''
   cancelOfferPreview()
@@ -918,6 +929,16 @@ function parseAndSubmitTextOffer() {
             && inference.decision_key
             && inference.candidates.length > 0
           ) {
+            if (inference.candidates.length === 1) {
+              const suggested = inference.candidates[0]
+              pendingOfferPreview.value = {
+                ...parsed,
+                commodity_id: suggested.commodity_id,
+                commodity_name: suggested.commodity_name,
+                commodity_resolution: 'INFERRED',
+              }
+              return null
+            }
             pendingCommodityInference.value = parsed
             return null
           }
@@ -1203,6 +1224,7 @@ onUnmounted(() => {
       :candidates="pendingCommodityInference.commodity_inference.candidates"
       :edit-candidates="pendingCommodityInference.commodity_inference.edit_candidates"
       :low-date-hint="pendingCommodityInference.low_date_hint"
+      :start-editing="Number.isInteger(pendingCommodityInference.commodity_id) && Number(pendingCommodityInference.commodity_id) > 0"
       @select="selectInferredCommodity"
       @cancel="cancelOfferPreview"
     />

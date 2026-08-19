@@ -370,13 +370,18 @@ class BotTradeCreateTextOfferParseFlowTests(unittest.IsolatedAsyncioTestCase):
         ):
             await handle_text_offer(message, state, user=user, bot=SimpleNamespace())
 
-        self.assertEqual(respond.await_args.args[2], "کالای پیشنهادی: «ربع بهار»\nدرست است؟")
+        self.assertIn("پیش‌نمایش لفظ", respond.await_args.args[2])
+        self.assertIn("ربع بهار", respond.await_args.args[2])
         keyboard = respond.await_args.kwargs["reply_markup"]
         self.assertEqual(
             [[button.text for button in row] for row in keyboard.inline_keyboard],
-            [["✅ تأیید", "✏️ ویرایش"], ["❌ انصراف"]],
+            [["✅ تایید و ارسال", "✏️ ویرایش کالا"], ["❌ انصراف"]],
         )
-        stored = state.update_data.await_args.kwargs
+        stored_updates = [call.kwargs for call in state.update_data.await_args_list]
+        stored = next(
+            item for item in stored_updates
+            if "text_offer_inference_edit_candidates" in item
+        )
         self.assertEqual(stored["text_offer_inference_mode"], "model")
         self.assertEqual(
             stored["text_offer_inference_edit_candidates"],
@@ -385,7 +390,7 @@ class BotTradeCreateTextOfferParseFlowTests(unittest.IsolatedAsyncioTestCase):
                 {"commodity_id": 75, "commodity_name": "ربع تاریخ پایین"},
             ],
         )
-        state.set_state.assert_awaited_once_with(Trade.awaiting_text_inference_choice)
+        state.set_state.assert_awaited_once_with(Trade.awaiting_text_confirm)
 
     async def test_unique_selector_confirm_keeps_model_receipt(self):
         state = SimpleNamespace(
@@ -457,7 +462,10 @@ class BotTradeCreateTextOfferParseFlowTests(unittest.IsolatedAsyncioTestCase):
             await handle_text_offer_inference_suggestion_edit(callback, state, user)
 
         state.update_data.assert_awaited_once_with(text_offer_inference_mode="edit")
-        self.assertEqual(edit.await_args.args[2], "کالای درست را انتخاب کنید.")
+        self.assertEqual(
+            edit.await_args.args[2],
+            "کالای درست را از گزینه‌های نزدیک به قیمت لفظ انتخاب کنید.",
+        )
         keyboard = edit.await_args.kwargs["reply_markup"]
         self.assertEqual(
             [[button.text for button in row] for row in keyboard.inline_keyboard],

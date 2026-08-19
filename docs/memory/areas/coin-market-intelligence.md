@@ -4,8 +4,8 @@
   no constants/future replay.
 - `خ ن ف`/`ف ن ف`, `خ ف`/`ف ف`, or no marker mean tomorrow; `خ ن`/`ف ن`
   and `نق` mean cash. Future wins; exclude registration.
-- Prices accept project-thousand, full-Toman /1,000 or bounded
-  extra zeros; reject quantities/scripts/years. `رب` is quarter; `پ`/`ت پ`/
+- Prices accept project-thousand, full-Toman /1,000 or bounded zeros;
+  reject quantities/scripts/years. `رب` is quarter; `پ`/`ت پ`/
   `پایین`/`بالا 80` mark low-date.
 - Named offers need no anchors; decisive evidence may reject. Unnamed use
   unit-safe `MAIN_ONLINE` ranges plus 2h same-book anchors. Contradictions fail;
@@ -31,10 +31,10 @@
   opaque. Live jobs use `main`; retarget systemd before removal.
 - Estimator: `estimator-live`; home CASH/TOMORROW; `/shadow` shadow/realised.
 - Web UI shows recorded parser/estimator events/status/values; never recompute.
-- Staging imports production names/aliases via Iran authority; relay Snapshot
-  atomically to both peers. Read-only directory mounts keep replacements visible.
-  Preview/selection on, auto off. Omitted names: singleton confirm/edit/cancel,
-  multiple choose; edits are explicit same-family catalog choices without model receipt.
+- Staging catalog syncs from Iran; Snapshot relays to peers via
+  read-only mounts. Preview+selection on; auto off. Unnamed: singleton opens offer
+  preview (confirm/edit/cancel), multiple choose. Edits: same Snapshot/family/
+  settlement, ±10%, explicit/no model receipt.
 - Reviews use opaque keys/digests, no raw text/identity. Revisions correct
   facts; redacted-number syntax calibrates grammar. Review anchors never affect
   prior input.

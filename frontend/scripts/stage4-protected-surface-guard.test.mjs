@@ -493,15 +493,15 @@ describe('Stage 4 protected surface baseline', () => {
     ])
     expect(MARKET_INFERENCE_CONFIRMATION_UX_ALLOWED_FILE_SHA256).toEqual({
       'frontend/src/components/CommodityInferenceSelectionModal.vue':
-        'fb11d4fa909ffd8c64fa60b3b52809c3ad57ffe7929932c23bc76e3840d71bfb',
+        '81f08b1b7f9c4812b88a79b13e13c4f27efa2f246570dc9185d2b2165b0aeeef',
       'frontend/src/views/MarketView.vue':
-        '826507de513c6fcb1ec15e4a5785e77f5a03b8838785e273c9c8caca6f772528',
+        '1a2675955498d366d6f2b8171f7ff971d8b70450906864b13e23aee70de45429',
     })
     expect(MARKET_INFERENCE_CONFIRMATION_UX_EVIDENCE).toEqual({
       count: 20,
-      contentBytes: 174446,
+      contentBytes: 175500,
       pathSetSha256: '6035c31eab716d0061c81427da214fbe9765571ba0d370e218b11edab27678f2',
-      sha256: 'a7dd45408695aba1ce132b0c0e1dc6647f473496764da6601147c13aa8ba47c0',
+      sha256: '70c3dffbaa4f6f7cbfd39498ff8b170576a207ea60b6eabe898d41a9ccfec2ee',
     })
     expect(() => assertMarketInferenceConfirmationUxDisposition(entries)).not.toThrow()
   })

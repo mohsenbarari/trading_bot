@@ -14,6 +14,7 @@ const props = defineProps<{
   candidates: Candidate[]
   editCandidates?: Candidate[]
   lowDateHint?: boolean
+  startEditing?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -21,7 +22,7 @@ const emit = defineEmits<{
   (e: 'cancel'): void
 }>()
 
-const editing = ref(false)
+const editing = ref(props.startEditing === true)
 const isSingleSuggestion = computed(() => props.candidates.length === 1 && !editing.value)
 const visibleCandidates = computed(() => (
   editing.value ? (props.editCandidates ?? []) : props.candidates
@@ -31,9 +32,12 @@ const canEditSuggestion = computed(() => {
   return (props.editCandidates ?? []).some((candidate) => candidate.commodity_id !== suggestedId)
 })
 
-watch(() => props.candidates, () => {
-  editing.value = false
-})
+watch(
+  () => [props.candidates, props.startEditing] as const,
+  () => {
+    editing.value = props.startEditing === true
+  },
+)
 
 function confirmSuggestion() {
   const candidate = props.candidates[0]
@@ -58,7 +62,7 @@ function selectCandidate(candidate: Candidate) {
         <button type="button" aria-label="بستن" @click="emit('cancel')">×</button>
       </div>
       <p class="commodity-inference-copy">
-        <template v-if="editing">کالای درست را از گزینه‌های نزدیک انتخاب کنید.</template>
+        <template v-if="editing">کالای درست را از گزینه‌های نزدیک به قیمت لفظ (تا ۱۰٪ اختلاف) انتخاب کنید.</template>
         <template v-else-if="isSingleSuggestion">مدل این کالا را پیشنهاد می‌دهد. درستی آن را تأیید کنید.</template>
         <template v-else>یکی از کالاهای پیشنهادی را انتخاب کنید.</template>
         <span v-if="lowDateHint" class="commodity-inference-hint">فقط کالاهای تاریخ پایین نمایش داده شده‌اند.</span>

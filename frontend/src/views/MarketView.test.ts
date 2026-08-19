@@ -990,15 +990,11 @@ describe('MarketView.vue', () => {
     await wrapper.find('.send-btn').trigger('click')
     await flushPromises()
 
-    expect(wrapper.get('[data-test="commodity-inference-suggestion"]').text()).toContain('ربع بهار')
-    expect(wrapper.get('[data-test="commodity-inference-confirm"]').text()).toBe('تأیید')
-    expect(wrapper.get('[data-test="commodity-inference-edit"]').text()).toBe('ویرایش')
-    expect(wrapper.get('[data-test="commodity-inference-cancel"]').text()).toBe('انصراف')
-    expect(wrapper.find('[data-test="commodity-inference-option-73"]').exists()).toBe(false)
-
-    await wrapper.get('[data-test="commodity-inference-confirm"]').trigger('click')
-    await flushPromises()
     expect(wrapper.get('.offer-preview-card').text()).toContain('ربع بهار')
+    expect(wrapper.find('[data-test="commodity-inference-selector"]').exists()).toBe(false)
+    expect(wrapper.get('.offer-preview-confirm').text()).toBe('تایید و ارسال')
+    expect(wrapper.get('.offer-preview-edit').text()).toBe('ویرایش')
+    expect(wrapper.get('.offer-preview-cancel').text()).toBe('انصراف')
 
     await wrapper.find('.offer-preview-confirm').trigger('click')
     await flushPromises()
@@ -1061,11 +1057,13 @@ describe('MarketView.vue', () => {
     await wrapper.find('.text-offer-input').setValue('خ ف40 عدد 52000')
     await wrapper.find('.send-btn').trigger('click')
     await flushPromises()
-    await wrapper.get('[data-test="commodity-inference-edit"]').trigger('click')
+    expect(wrapper.get('.offer-preview-card').text()).toContain('ربع بهار')
+    await wrapper.get('.offer-preview-edit').trigger('click')
 
     expect(wrapper.get('[data-test="commodity-inference-option-73"]').text()).toBe('ربع بهار')
     expect(wrapper.get('[data-test="commodity-inference-option-75"]').text()).toBe('ربع تاریخ پایین')
     expect(wrapper.find('[data-test="commodity-inference-confirm"]').exists()).toBe(false)
+    expect(wrapper.get('.commodity-inference-copy').text()).toContain('۱۰٪')
 
     await wrapper.get('[data-test="commodity-inference-option-75"]').trigger('click')
     await flushPromises()

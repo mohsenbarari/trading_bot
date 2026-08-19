@@ -190,6 +190,8 @@ class CoinInferenceShadowObservationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(observation.decision.candidates, raw_decision.candidates)
         self.assertEqual(append.await_args.args[1].decision.status, "AUTO_SELECT")
         resolve_edits.assert_awaited_once()
+        self.assertIs(resolve_edits.await_args.kwargs["snapshot"], snapshot)
+        self.assertEqual(resolve_edits.await_args.kwargs["submitted_project_price"], 186_800)
 
 
 if __name__ == "__main__":
