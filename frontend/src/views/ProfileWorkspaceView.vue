@@ -55,6 +55,10 @@ const profileUser = computed(() => (
   isSelfRoute.value ? currentUser.value : publicProfileUser.value
 ))
 
+const invalidPublicProfile = computed(() => (
+  !isSelfRoute.value && publicProfileUser.value === null
+))
+
 const hasUnsafePublicProfileQuery = computed(() => (
   !isSelfRoute.value
   && publicProfileUser.value !== null
@@ -226,6 +230,16 @@ onMounted(async () => {
       >
         <template #actions>
           <AppButton type="button" class="profile-load-retry" @click="loadCurrentUser">تلاش دوباره</AppButton>
+        </template>
+      </AppErrorState>
+      <AppErrorState
+        v-else-if="invalidPublicProfile"
+        class="profile-load-error"
+        title="پروفایل معتبر نیست"
+        message="اطلاعات کاربر نامعتبر است."
+      >
+        <template #actions>
+          <AppButton type="button" @click="router.push('/')">بازگشت به خانه</AppButton>
         </template>
       </AppErrorState>
       <div v-else-if="isSelfRoute && currentUserLoading" class="loading-container">

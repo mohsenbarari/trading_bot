@@ -187,7 +187,7 @@ const DESCRIPTORS = {
     renderProfileId: 'member',
     canonical: null,
     states: {
-      loading: identityPageData('.ds-loading-state, .ui-loading-state', {
+      loading: identityPageData('.ui-loading-state', {
         settle: '.dashboard-content, .ds-loading-state',
       }),
       empty: noListInventory(
@@ -281,7 +281,7 @@ const DESCRIPTORS = {
     states: {
       loading: yes({
         endpoint: '/api/offers/page',
-        selector: '[data-test="offers-loading-skeleton"], .skeleton-card, .offers-list',
+        selector: '[data-test="offers-loading-skeleton"], .skeleton-card',
         settle: '.offers-list, .offer-card, [data-test="offers-loading-skeleton"]',
       }),
       empty: yes({
@@ -930,7 +930,7 @@ const DESCRIPTORS = {
       endpoint: '/api/users/',
       itemSelector: '.user-item, .ui-list-item',
       emptySelector: '.ui-empty-state, .users-result',
-      loadingSelector: '.ui-loading-state, [aria-busy="true"]',
+      loadingSelector: '.loading-state, .skeleton-loader, .skeleton-item',
       errorSelector: '.user-refresh-error, [role="alert"]',
       staleField: 'account_name',
       staleTrigger: 'in-page-refresh',

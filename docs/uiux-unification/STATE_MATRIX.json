@@ -2,7 +2,7 @@
   "schema_version": 1,
   "track": "webapp-uiux-unification-v3",
   "independent_of_stage8": true,
-  "status": "phase1-source-and-runtime-audit",
+  "status": "declared-source-matrix-not-runtime-acceptance",
   "access_profiles": [
     "guest",
     "watch",
@@ -5734,30 +5734,5 @@
       "runtime_status": "source-derived",
       "result": null
     }
-  ],
-  "runtime_audit": {
-    "off_repo_dir": "/tmp/uiux-unification-v3-phase1/uiux-v3-phase1-20260819T074125332Z",
-    "scenarios": 108,
-    "passed": 107,
-    "failed": 1,
-    "failed_ids": [
-      "home/390x844/error"
-    ],
-    "unknown_api": 0,
-    "page_errors": 0,
-    "external_requests": 0,
-    "mutating_requests": 0,
-    "screenshot_count": 108,
-    "screenshot_tree_sha256": "9985b1f09f0d62db35df9ef9e7696e79e553aec3747da75eb08c330dcb498f39",
-    "audit_sha256": "4cf1e45117b4345d82562402b14c60300603cf300d356e5a289ad33a3b859df0",
-    "dist_sha256": "9a3e536614403b398f88415facfbd52ffb15277d4e5e2a63ed0e54f05798b2be",
-    "classification": {
-      "home/390x844/error": {
-        "bucket": "confirmed-product",
-        "finding": "identity-error replaces page without visible main landmark",
-        "false_positive": false,
-        "phase_owner": 5
-      }
-    }
-  }
+  ]
 }

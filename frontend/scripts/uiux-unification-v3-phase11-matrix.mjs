@@ -24,12 +24,14 @@ import {
   newDiagnostics,
   newPage,
   readRuntimeRoute,
+  recoverIdentityPageDataAfterHold,
   visitPathFor,
   waitForApp,
   waitForNetworkSettle,
 } from './lib/stage8-full-acceptance-runtime.mjs'
 import { allowedProfileForRoute } from './lib/stage8-full-acceptance-runtime.mjs'
 import { getRouteDescriptor } from './lib/stage8-full-acceptance-descriptors.mjs'
+import { assertRequestedState } from './lib/uiux-unification-v3-state-evidence.mjs'
 
 const SCRIPT_PATH = fileURLToPath(import.meta.url)
 const FRONTEND = path.resolve(path.dirname(SCRIPT_PATH), '..')
@@ -71,7 +73,7 @@ const FAMILY_ROUTES = [
   'admin',
   'login',
 ]
-const KEYBOARD_ROUTES = ['login', 'profile', 'operations-customers', 'account']
+const KEYBOARD_ROUTES = ['home', 'login', 'profile', 'operations-customers', 'account']
 const ZOOM_ROUTES = ['home', 'profile', 'operations-customers', 'account', 'admin', 'login']
 const REDUCED_MOTION_ROUTES = ['market', 'home', 'profile']
 const PWA_ROUTES = ['home', 'account', 'profile']
@@ -101,6 +103,49 @@ function routeByName(matrix, name) {
   const route = matrix.routes.find((item) => item.name === name)
   if (!route) throw new Error(`missing route ${name}`)
   return route
+}
+
+async function visibleSelectorCount(page, selector) {
+  return page.locator(selector).evaluateAll((elements) => elements.filter((element) => {
+    if (!(element instanceof HTMLElement)) return false
+    const style = getComputedStyle(element)
+    if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0) return false
+    const rect = element.getBoundingClientRect()
+    return rect.width > 0 && rect.height > 0
+  }).length)
+}
+
+async function waitForVisibleSelector(page, selector, timeout = 5_000) {
+  await page.locator(selector).first().waitFor({ state: 'visible', timeout }).catch(() => {})
+  return visibleSelectorCount(page, selector)
+}
+
+async function waitForHiddenSelector(page, selector, timeout = 5_000) {
+  try {
+    await page.waitForFunction((candidate) => {
+      const visible = (element) => {
+        if (!(element instanceof HTMLElement)) return false
+        const style = getComputedStyle(element)
+        if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0) return false
+        const rect = element.getBoundingClientRect()
+        return rect.width > 0 && rect.height > 0
+      }
+      return [...document.querySelectorAll(candidate)].every((element) => !visible(element))
+    }, selector, { timeout })
+    return true
+  } catch {
+    return false
+  }
+}
+
+async function restoreInitialView(page) {
+  await page.evaluate(() => {
+    window.scrollTo(0, 0)
+    if (document.scrollingElement) document.scrollingElement.scrollTop = 0
+    const routeScroller = document.querySelector('.app-route-scroll')
+    if (routeScroller instanceof HTMLElement) routeScroller.scrollTop = 0
+  })
+  await page.waitForTimeout(50)
 }
 
 async function launchBrowser(engine) {
@@ -154,6 +199,10 @@ async function runOne({
   const expected = finalRouteExpectation(route, profile)
   const failures = []
   let probe = null
+  let requestedStateProbe = null
+  let requestedStateSelectorCount = null
+  let postReleaseProbe = null
+  let postReleaseSelectorCount = null
   let actual = null
   let keyboardReport = null
   const suffix = [
@@ -176,10 +225,25 @@ async function runOne({
     })
     if (state === 'loading') {
       await page.waitForTimeout(180)
+      requestedStateSelectorCount = await waitForVisibleSelector(page, descriptor.states[state].selector)
+      requestedStateProbe = await collectUiProbe(page)
+      failures.push(...assertRequestedState(
+        state,
+        descriptor.states[state],
+        requestedStateSelectorCount,
+      ))
+      await restoreInitialView(page)
+      await page.screenshot({ path: screenshotPath, fullPage: false })
       controller.releaseHeldRequest = true
     }
     await waitForApp(page)
     await waitForNetworkSettle(page).catch(() => {})
+    if (state === 'loading') {
+      if (descriptor.states[state]?.identityPageData) {
+        await recoverIdentityPageDataAfterHold(page)
+      }
+      await waitForHiddenSelector(page, descriptor.states[state].selector)
+    }
     if (zoom !== 1) {
       const session = await context.newCDPSession(page)
       await session.send('Emulation.setPageScaleFactor', { pageScaleFactor: zoom })
@@ -188,7 +252,43 @@ async function runOne({
     actual = await readRuntimeRoute(page)
     probe = await collectUiProbe(page)
     failures.push(...assertCommonUi(probe, expected, route, route))
+    if (state === 'loading') {
+      postReleaseProbe = probe
+      postReleaseSelectorCount = await visibleSelectorCount(page, descriptor.states[state].selector)
+      if (postReleaseSelectorCount > 0) failures.push('loading state did not settle after request release')
+    } else if (state === 'empty' || state === 'error') {
+      requestedStateProbe = probe
+      requestedStateSelectorCount = await visibleSelectorCount(page, descriptor.states[state].selector)
+      failures.push(...assertRequestedState(
+        state,
+        descriptor.states[state],
+        requestedStateSelectorCount,
+      ))
+    }
     if (keyboard) {
+      let identityMenu = null
+      if (route.name === 'home') {
+        await restoreInitialView(page)
+        const trigger = page.locator('.dashboard-account-menu__trigger')
+        await trigger.focus()
+        await page.keyboard.press('ArrowDown')
+        const menu = page.locator('#dashboard-account-menu[role="menu"]')
+        const firstItem = menu.locator('[role="menuitem"]').first()
+        const menuOpened = await menu.isVisible().catch(() => false)
+        const firstItemFocused = await firstItem.evaluate(
+          (element) => document.activeElement === element,
+        ).catch(() => false)
+        await page.keyboard.press('Escape')
+        const menuClosed = !(await menu.isVisible().catch(() => false))
+        const focusRestored = await trigger.evaluate(
+          (element) => document.activeElement === element,
+        ).catch(() => false)
+        identityMenu = { menuOpened, firstItemFocused, menuClosed, focusRestored }
+        if (!menuOpened) failures.push('home identity menu did not open from ArrowDown')
+        if (!firstItemFocused) failures.push('home identity menu did not focus its first item')
+        if (!menuClosed) failures.push('home identity menu did not close with Escape')
+        if (!focusRestored) failures.push('home identity menu did not restore trigger focus')
+      }
       const names = []
       for (let index = 0; index < 10; index += 1) {
         await page.keyboard.press('Tab')
@@ -210,13 +310,18 @@ async function runOne({
       keyboardReport = {
         tabStops: names.filter(Boolean).length,
         firstNamed: names.find((item) => item?.testId || item?.tag === 'button' || item?.tag === 'a') || null,
+        identityMenu,
       }
       if (keyboardReport.tabStops < 1) failures.push('keyboard produced no tab stop')
     }
-    await page.screenshot({ path: screenshotPath, fullPage: false })
+    if (state !== 'loading') {
+      await restoreInitialView(page)
+      await page.screenshot({ path: screenshotPath, fullPage: false })
+    }
   } catch (error) {
     failures.push(error instanceof Error ? error.message : String(error))
   } finally {
+    controller.releaseHeldRequest = true
     await context.close()
   }
   const counts = diagnosticCounts(diagnostics)
@@ -254,6 +359,23 @@ async function runOne({
           clippedTextCount: probe.clippedTextCount,
           minTarget: probe.minTarget,
           navVisible: probe.navVisible,
+        }
+      : null,
+    requestedStateEvidence: requestedStateProbe
+      ? {
+          selector: descriptor.states?.[state]?.selector || null,
+          visibleSelectorCount: requestedStateSelectorCount,
+          loadingVisible: requestedStateProbe.loadingVisible,
+          emptyVisible: requestedStateProbe.emptyVisible,
+          errorVisible: requestedStateProbe.errorVisible,
+        }
+      : null,
+    postReleaseEvidence: postReleaseProbe
+      ? {
+          loadingVisible: postReleaseProbe.loadingVisible,
+          emptyVisible: postReleaseProbe.emptyVisible,
+          errorVisible: postReleaseProbe.errorVisible,
+          visibleLoadingSelectorCount: postReleaseSelectorCount,
         }
       : null,
     keyboardReport,
@@ -324,11 +446,9 @@ async function main() {
       throw new Error(`chromium unavailable: ${launched.chromium.skipped}`)
     }
 
-    if (ONLY && ONLY !== 'all') {
-      // focused reruns keep the same fixture and assertion path
-    } else for (const route of matrix.routes) {
+    if (!ONLY || ONLY === 'all' || ONLY === 'states') for (const route of matrix.routes) {
       const profile = allowedProfileForRoute(route, profiles)
-      for (const viewport of CORE_VIEWPORTS) {
+      if (ONLY !== 'states') for (const viewport of CORE_VIEWPORTS) {
         scenarios.push(
           await runOne({
             browser: chromiumBrowser,

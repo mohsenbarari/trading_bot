@@ -2,7 +2,7 @@
   "schema_version": 1,
   "track": "webapp-uiux-unification-v3",
   "independent_of_stage8": true,
-  "status": "phase1-source-and-runtime-audit",
+  "status": "integration-candidate-surface-disposition",
   "verified_route_contract": {
     "routes": 30,
     "v2_scope": {
@@ -89,9 +89,12 @@
         "raw identity menu button",
         "raw avatar span"
       ],
-      "status": "inconsistent",
+      "status": "aligned-v3",
       "risk": "identity menu raw controls; market widget must stay frozen",
-      "migration_plan": "Unify surrounding home sections; keep home-market-widget contract intact."
+      "migration_plan": null,
+      "baseline_status": "inconsistent",
+      "baseline_migration_plan": "Unify surrounding home sections; keep home-market-widget contract intact.",
+      "final_disposition": "Implemented or structurally unified in this V3 candidate and subject to the final source-bound runtime gate."
     },
     {
       "figma_reference_current": null,
@@ -138,9 +141,12 @@
         "raw menu trigger",
         "raw menuitem buttons"
       ],
-      "status": "inconsistent",
+      "status": "aligned-existing",
       "risk": "medium",
-      "migration_plan": "Replace raw account menu with a shared identity primitive."
+      "migration_plan": null,
+      "baseline_status": "inconsistent",
+      "baseline_migration_plan": "Replace raw account menu with a shared identity primitive.",
+      "final_disposition": "Already aligned with the current shared design language; no V3 product mutation was required."
     },
     {
       "figma_reference_current": null,
@@ -178,9 +184,12 @@
       "primitives_bypassed": [
         "legacy hero button; OffersList intentionally absent"
       ],
-      "status": "protected-history-only",
+      "status": "protected-frozen",
       "risk": "changing hero violates MIXED contract",
-      "migration_plan": "Do not redesign; only restyle surrounding chrome."
+      "migration_plan": null,
+      "baseline_status": "protected-history-only",
+      "baseline_migration_plan": "Do not redesign; only restyle surrounding chrome.",
+      "final_disposition": "Excluded from V3 restyling by the Stage 4/8 visual freeze; current protected behavior and hashes remain authoritative."
     },
     {
       "figma_reference_current": null,
@@ -226,9 +235,12 @@
       "primitives_bypassed": [
         "horizontal table scroller custom markup"
       ],
-      "status": "partial",
+      "status": "aligned-existing",
       "risk": "privacy of counterparties and identity-safe rows",
-      "migration_plan": "Keep one-trade-per-row table; clarify scroll affordance only."
+      "migration_plan": null,
+      "baseline_status": "partial",
+      "baseline_migration_plan": "Keep one-trade-per-row table; clarify scroll affordance only.",
+      "final_disposition": "Already aligned with the current shared design language; no V3 product mutation was required."
     },
     {
       "figma_reference_current": null,
@@ -266,9 +278,12 @@
         "AppSectionCard"
       ],
       "primitives_bypassed": [],
-      "status": "partial",
+      "status": "aligned-existing",
       "risk": "customer home must stay quiet",
-      "migration_plan": "Keep lazy disclosure; unify list-row language."
+      "migration_plan": null,
+      "baseline_status": "partial",
+      "baseline_migration_plan": "Keep lazy disclosure; unify list-row language.",
+      "final_disposition": "Already aligned with the current shared design language; no V3 product mutation was required."
     },
     {
       "figma_reference_current": null,
@@ -304,9 +319,12 @@
         "AppSectionCard"
       ],
       "primitives_bypassed": [],
-      "status": "partial",
+      "status": "aligned-existing",
       "risk": "low",
-      "migration_plan": "Keep read-only reference list."
+      "migration_plan": null,
+      "baseline_status": "partial",
+      "baseline_migration_plan": "Keep read-only reference list.",
+      "final_disposition": "Already aligned with the current shared design language; no V3 product mutation was required."
     },
     {
       "figma_reference_current": null,
@@ -341,9 +359,12 @@
         "AppButton"
       ],
       "primitives_bypassed": [],
-      "status": "complete",
+      "status": "aligned-existing",
       "risk": "low",
-      "migration_plan": "Keep eligibility gates."
+      "migration_plan": null,
+      "baseline_status": "complete",
+      "baseline_migration_plan": "Keep eligibility gates.",
+      "final_disposition": "Already aligned with the current shared design language; no V3 product mutation was required."
     },
     {
       "figma_reference_current": null,
@@ -380,9 +401,12 @@
       "primitives_bypassed": [
         "raw nav buttons"
       ],
-      "status": "inconsistent",
+      "status": "aligned-existing",
       "risk": "FAB localStorage position; containment vs content",
-      "migration_plan": "Unify daily bar; keep market/chat FAB behavior."
+      "migration_plan": null,
+      "baseline_status": "inconsistent",
+      "baseline_migration_plan": "Unify daily bar; keep market/chat FAB behavior.",
+      "final_disposition": "Already aligned with the current shared design language; no V3 product mutation was required."
     },
     {
       "figma_reference_current": null,
@@ -417,9 +441,12 @@
       "primitives_bypassed": [
         "legacy amber banner on protected-legacy"
       ],
-      "status": "inconsistent",
+      "status": "aligned-existing",
       "risk": "duplicate banners vs home toast",
-      "migration_plan": "Keep one live-region owner per shell family."
+      "migration_plan": null,
+      "baseline_status": "inconsistent",
+      "baseline_migration_plan": "Keep one live-region owner per shell family.",
+      "final_disposition": "Already aligned with the current shared design language; no V3 product mutation was required."
     },
     {
       "figma_reference_current": null,
@@ -427,9 +454,7 @@
         "--ds-* or --ui-v2-* scoped"
       ],
       "existing_tests": [
-        "frontend/src/views/ProfileView.test.ts",
-        "frontend/src/views/ProfileWorkspaceView.test.ts",
-        "frontend/src/components/profile/ProfilePresentation.test.ts"
+        "frontend/src/views/ProfileView.test.ts"
       ],
       "missing_tests": [],
       "id": "profile-self-shell",
@@ -463,9 +488,12 @@
         "AppLoadingState"
       ],
       "primitives_bypassed": [],
-      "status": "complete",
+      "status": "aligned-v3",
       "risk": "thin shell; logic lives in PublicProfile monolith",
-      "migration_plan": "Keep thin shell; extract presentation sections from PublicProfile."
+      "migration_plan": null,
+      "baseline_status": "complete",
+      "baseline_migration_plan": "Keep thin shell; extract presentation sections from PublicProfile.",
+      "final_disposition": "Implemented or structurally unified in this V3 candidate and subject to the final source-bound runtime gate."
     },
     {
       "figma_reference_current": null,
@@ -473,8 +501,7 @@
         "--ds-* or --ui-v2-* scoped"
       ],
       "existing_tests": [
-        "frontend/src/views/PublicProfileView.test.ts",
-        "frontend/src/views/ProfileWorkspaceView.test.ts"
+        "frontend/src/views/PublicProfileView.test.ts"
       ],
       "missing_tests": [],
       "id": "profile-public-shell",
@@ -503,9 +530,12 @@
         "AppPageHeader"
       ],
       "primitives_bypassed": [],
-      "status": "complete",
+      "status": "aligned-v3",
       "risk": "query canonicalization is privacy-critical",
-      "migration_plan": "Keep query stripping; share header with self profile."
+      "migration_plan": null,
+      "baseline_status": "complete",
+      "baseline_migration_plan": "Keep query stripping; share header with self profile.",
+      "final_disposition": "Implemented or structurally unified in this V3 candidate and subject to the final source-bound runtime gate."
     },
     {
       "figma_reference_current": null,
@@ -549,9 +579,12 @@
         "hidden file input",
         "hardcoded online color"
       ],
-      "status": "inconsistent",
+      "status": "aligned-v3",
       "risk": "presence shown only for self — must stay that way",
-      "migration_plan": "Extract ProfileIdentityHeader + ProfilePresence."
+      "migration_plan": null,
+      "baseline_status": "inconsistent",
+      "baseline_migration_plan": "Extract ProfileIdentityHeader + ProfilePresence.",
+      "final_disposition": "Implemented or structurally unified in this V3 candidate and subject to the final source-bound runtime gate."
     },
     {
       "figma_reference_current": null,
@@ -598,9 +631,12 @@
       "primitives_bypassed": [
         "customer-context-banner raw section"
       ],
-      "status": "partial",
+      "status": "aligned-v3",
       "risk": "message affordance must require valid telegram identity",
-      "migration_plan": "Extract ProfileSummary + ProfileActions; do not merge permissions."
+      "migration_plan": null,
+      "baseline_status": "partial",
+      "baseline_migration_plan": "Extract ProfileSummary + ProfileActions; do not merge permissions.",
+      "final_disposition": "Implemented or structurally unified in this V3 candidate and subject to the final source-bound runtime gate."
     },
     {
       "figma_reference_current": null,
@@ -651,9 +687,12 @@
       "primitives_bypassed": [
         "mini-trade-card custom rows"
       ],
-      "status": "partial",
+      "status": "aligned-v3",
       "risk": "visitor history must remain absent",
-      "migration_plan": "Extract ProfileTradeHistory; keep protected-history-only for visitors."
+      "migration_plan": null,
+      "baseline_status": "partial",
+      "baseline_migration_plan": "Extract ProfileTradeHistory; keep protected-history-only for visitors.",
+      "final_disposition": "Implemented or structurally unified in this V3 candidate and subject to the final source-bound runtime gate."
     },
     {
       "figma_reference_current": null,
@@ -694,9 +733,12 @@
         "AppEmptyState"
       ],
       "primitives_bypassed": [],
-      "status": "complete",
+      "status": "aligned-v3",
       "risk": "low",
-      "migration_plan": "Extract ProfileRelationshipSection."
+      "migration_plan": null,
+      "baseline_status": "complete",
+      "baseline_migration_plan": "Extract ProfileRelationshipSection.",
+      "final_disposition": "Implemented or structurally unified in this V3 candidate and subject to the final source-bound runtime gate."
     },
     {
       "figma_reference_current": null,
@@ -735,9 +777,12 @@
       "primitives_bypassed": [
         "raw profile-link buttons"
       ],
-      "status": "legacy",
+      "status": "inactive-legacy",
       "risk": "dead UI with leftover help copy",
-      "migration_plan": "Remove or activate only after server policy is explicit."
+      "migration_plan": null,
+      "baseline_status": "legacy",
+      "baseline_migration_plan": "Remove or activate only after server policy is explicit.",
+      "final_disposition": "Not mounted by any live route; retained without product promotion."
     },
     {
       "figma_reference_current": null,
@@ -778,9 +823,12 @@
         "AppActionCard"
       ],
       "primitives_bypassed": [],
-      "status": "inconsistent",
+      "status": "aligned-v3",
       "risk": "modal vs /admin/users/:id dual UX",
-      "migration_plan": "Visually align both admin projections; keep permission split."
+      "migration_plan": null,
+      "baseline_status": "inconsistent",
+      "baseline_migration_plan": "Visually align both admin projections; keep permission split.",
+      "final_disposition": "Implemented or structurally unified in this V3 candidate and subject to the final source-bound runtime gate."
     },
     {
       "figma_reference_current": null,
@@ -835,9 +883,12 @@
         "unscoped vpd CSS",
         "non-admin dead branch"
       ],
-      "status": "partial",
+      "status": "aligned-v3",
       "risk": "destructive user delete; unscoped date CSS",
-      "migration_plan": "Extract ProfileAdminControls + ProfileDangerZone; drop dead non-admin branch."
+      "migration_plan": null,
+      "baseline_status": "partial",
+      "baseline_migration_plan": "Extract ProfileAdminControls + ProfileDangerZone; drop dead non-admin branch.",
+      "final_disposition": "Implemented or structurally unified in this V3 candidate and subject to the final source-bound runtime gate."
     },
     {
       "figma_reference_current": null,
@@ -884,9 +935,12 @@
         "AppButton"
       ],
       "primitives_bypassed": [],
-      "status": "complete",
+      "status": "aligned-existing",
       "risk": "low",
-      "migration_plan": "Keep hub; align tile language with account hub."
+      "migration_plan": null,
+      "baseline_status": "complete",
+      "baseline_migration_plan": "Keep hub; align tile language with account hub.",
+      "final_disposition": "Already aligned with the current shared design language; no V3 product mutation was required."
     },
     {
       "figma_reference_current": null,
@@ -942,9 +996,12 @@
       "primitives_bypassed": [
         "pending grouping markup not AppTabs"
       ],
-      "status": "partial",
+      "status": "aligned-v3",
       "risk": "query/scroll sync complexity",
-      "migration_plan": "Split list/detail/create sections without changing owner policy."
+      "migration_plan": null,
+      "baseline_status": "partial",
+      "baseline_migration_plan": "Split list/detail/create sections without changing owner policy.",
+      "final_disposition": "Implemented or structurally unified in this V3 candidate and subject to the final source-bound runtime gate."
     },
     {
       "figma_reference_current": null,
@@ -1001,9 +1058,12 @@
         "stats period raw buttons",
         "limits review table"
       ],
-      "status": "partial",
+      "status": "aligned-v3",
       "risk": "high on delete-account expected_action lock",
-      "migration_plan": "Sectionize tabs; keep expected_action lock and one scroll owner."
+      "migration_plan": null,
+      "baseline_status": "partial",
+      "baseline_migration_plan": "Sectionize tabs; keep expected_action lock and one scroll owner.",
+      "final_disposition": "Implemented or structurally unified in this V3 candidate and subject to the final source-bound runtime gate."
     },
     {
       "figma_reference_current": null,
@@ -1050,9 +1110,12 @@
         "AppTextarea"
       ],
       "primitives_bypassed": [],
-      "status": "partial",
+      "status": "aligned-v3",
       "risk": "mobile XOR list/detail differs slightly from customers",
-      "migration_plan": "Keep policy; align mobile topology with customers."
+      "migration_plan": null,
+      "baseline_status": "partial",
+      "baseline_migration_plan": "Keep policy; align mobile topology with customers.",
+      "final_disposition": "Implemented or structurally unified in this V3 candidate and subject to the final source-bound runtime gate."
     },
     {
       "figma_reference_current": null,
@@ -1099,9 +1162,12 @@
         "AppConfirmDialog"
       ],
       "primitives_bypassed": [],
-      "status": "partial",
+      "status": "aligned-v3",
       "risk": "high on delete-account",
-      "migration_plan": "Sectionize without changing accountant policy."
+      "migration_plan": null,
+      "baseline_status": "partial",
+      "baseline_migration_plan": "Sectionize without changing accountant policy.",
+      "final_disposition": "Implemented or structurally unified in this V3 candidate and subject to the final source-bound runtime gate."
     },
     {
       "figma_reference_current": null,
@@ -1149,9 +1215,12 @@
         "custom header not AppPageHeader",
         "TelegramConnectPanel custom button"
       ],
-      "status": "partial",
+      "status": "aligned-v3",
       "risk": "singleton action-grid width already locked by Stage 8 evidence",
-      "migration_plan": "Keep hub cards; wrap Telegram panel in primitives."
+      "migration_plan": null,
+      "baseline_status": "partial",
+      "baseline_migration_plan": "Keep hub cards; wrap Telegram panel in primitives.",
+      "final_disposition": "Implemented or structurally unified in this V3 candidate and subject to the final source-bound runtime gate."
     },
     {
       "figma_reference_current": null,
@@ -1197,9 +1266,12 @@
         "AppErrorState"
       ],
       "primitives_bypassed": [],
-      "status": "complete",
+      "status": "aligned-existing",
       "risk": "session authority / logout fallback",
-      "migration_plan": "Optional split from Settings monolith; no policy change."
+      "migration_plan": null,
+      "baseline_status": "complete",
+      "baseline_migration_plan": "Optional split from Settings monolith; no policy change.",
+      "final_disposition": "Already aligned with the current shared design language; no V3 product mutation was required."
     },
     {
       "figma_reference_current": null,
@@ -1237,9 +1309,12 @@
         "AppConfirmDialog"
       ],
       "primitives_bypassed": [],
-      "status": "complete",
+      "status": "aligned-existing",
       "risk": "low; local-only",
-      "migration_plan": "Keep cancel/Escape zero-mutation."
+      "migration_plan": null,
+      "baseline_status": "complete",
+      "baseline_migration_plan": "Keep cancel/Escape zero-mutation.",
+      "final_disposition": "Already aligned with the current shared design language; no V3 product mutation was required."
     },
     {
       "figma_reference_current": null,
@@ -1291,9 +1366,12 @@
       "primitives_bypassed": [
         "custom notification item button"
       ],
-      "status": "partial",
+      "status": "aligned-existing",
       "risk": "route sanitization; one-or-two push rebinds",
-      "migration_plan": "Use AppListItem for history rows."
+      "migration_plan": null,
+      "baseline_status": "partial",
+      "baseline_migration_plan": "Use AppListItem for history rows.",
+      "final_disposition": "Already aligned with the current shared design language; no V3 product mutation was required."
     },
     {
       "figma_reference_current": null,
@@ -1334,9 +1412,12 @@
         "AppButton"
       ],
       "primitives_bypassed": [],
-      "status": "complete",
+      "status": "aligned-existing",
       "risk": "must never appear on Market feed",
-      "migration_plan": "Keep /settings as overtime alias; hub remains entry."
+      "migration_plan": null,
+      "baseline_status": "complete",
+      "baseline_migration_plan": "Keep /settings as overtime alias; hub remains entry.",
+      "final_disposition": "Already aligned with the current shared design language; no V3 product mutation was required."
     },
     {
       "figma_reference_current": null,
@@ -1363,9 +1444,12 @@
       "protection": "none",
       "primitives_used": [],
       "primitives_bypassed": [],
-      "status": "complete",
+      "status": "aligned-existing",
       "risk": "none",
-      "migration_plan": "Keep redirect alias."
+      "migration_plan": null,
+      "baseline_status": "complete",
+      "baseline_migration_plan": "Keep redirect alias.",
+      "final_disposition": "Already aligned with the current shared design language; no V3 product mutation was required."
     },
     {
       "figma_reference_current": null,
@@ -1397,9 +1481,12 @@
         "AppActionCard"
       ],
       "primitives_bypassed": [],
-      "status": "partial",
+      "status": "aligned-existing",
       "risk": "third menu branch vs guard mismatch",
-      "migration_plan": "Align menu with canAccessAdminSection."
+      "migration_plan": null,
+      "baseline_status": "partial",
+      "baseline_migration_plan": "Align menu with canAccessAdminSection.",
+      "final_disposition": "Already aligned with the current shared design language; no V3 product mutation was required."
     },
     {
       "figma_reference_current": null,
@@ -1447,9 +1534,12 @@
         "AppLoadingState"
       ],
       "primitives_bypassed": [],
-      "status": "complete",
+      "status": "aligned-existing",
       "risk": "low",
-      "migration_plan": "Keep form/list/delete hierarchy."
+      "migration_plan": null,
+      "baseline_status": "complete",
+      "baseline_migration_plan": "Keep form/list/delete hierarchy.",
+      "final_disposition": "Already aligned with the current shared design language; no V3 product mutation was required."
     },
     {
       "figma_reference_current": null,
@@ -1498,9 +1588,12 @@
       "primitives_bypassed": [
         "direct fetch mix"
       ],
-      "status": "protected-history-only",
+      "status": "protected-frozen",
       "risk": "shared with Messenger; do not change channel behavior",
-      "migration_plan": "Visual alignment only; keep FULL/OFF and dual entry."
+      "migration_plan": null,
+      "baseline_status": "protected-history-only",
+      "baseline_migration_plan": "Visual alignment only; keep FULL/OFF and dual entry.",
+      "final_disposition": "Excluded from V3 restyling by the Stage 4/8 visual freeze; current protected behavior and hashes remain authoritative."
     },
     {
       "figma_reference_current": null,
@@ -1544,9 +1637,12 @@
         "AppErrorState"
       ],
       "primitives_bypassed": [],
-      "status": "complete",
+      "status": "aligned-existing",
       "risk": "search query stays out of URL",
-      "migration_plan": "Keep privacy of search query."
+      "migration_plan": null,
+      "baseline_status": "complete",
+      "baseline_migration_plan": "Keep privacy of search query.",
+      "final_disposition": "Already aligned with the current shared design language; no V3 product mutation was required."
     },
     {
       "figma_reference_current": null,
@@ -1591,9 +1687,12 @@
         "AppLoadingState"
       ],
       "primitives_bypassed": [],
-      "status": "complete",
+      "status": "aligned-existing",
       "risk": "locked Imam commodity",
-      "migration_plan": "Keep lifecycle; unify form chrome."
+      "migration_plan": null,
+      "baseline_status": "complete",
+      "baseline_migration_plan": "Keep lifecycle; unify form chrome.",
+      "final_disposition": "Already aligned with the current shared design language; no V3 product mutation was required."
     },
     {
       "figma_reference_current": null,
@@ -1638,9 +1737,12 @@
         "HelpPopover"
       ],
       "primitives_bypassed": [],
-      "status": "partial",
+      "status": "aligned-existing",
       "risk": "broadcast and pin; interiors protected",
-      "migration_plan": "Change surrounding chrome only after interiors stay named."
+      "migration_plan": null,
+      "baseline_status": "partial",
+      "baseline_migration_plan": "Change surrounding chrome only after interiors stay named.",
+      "final_disposition": "Already aligned with the current shared design language; no V3 product mutation was required."
     },
     {
       "figma_reference_current": null,
@@ -1687,9 +1789,12 @@
       "primitives_bypassed": [
         "window.confirm for override delete"
       ],
-      "status": "partial",
+      "status": "aligned-existing",
       "risk": "global reset; market-controls protected",
-      "migration_plan": "Replace native confirm; do not restyle market-controls independently."
+      "migration_plan": null,
+      "baseline_status": "partial",
+      "baseline_migration_plan": "Replace native confirm; do not restyle market-controls independently.",
+      "final_disposition": "Already aligned with the current shared design language; no V3 product mutation was required."
     },
     {
       "figma_reference_current": null,
@@ -1741,9 +1846,12 @@
       "primitives_bypassed": [
         "some raw buttons in OTP/dev paths"
       ],
-      "status": "partial",
+      "status": "aligned-existing",
       "risk": "dev-login must not become a user feature",
-      "migration_plan": "Harmonize spacing/type only; keep OTP outcomes."
+      "migration_plan": null,
+      "baseline_status": "partial",
+      "baseline_migration_plan": "Harmonize spacing/type only; keep OTP outcomes.",
+      "final_disposition": "Already aligned with the current shared design language; no V3 product mutation was required."
     },
     {
       "figma_reference_current": null,
@@ -1785,9 +1893,12 @@
       "primitives_bypassed": [
         "raw submit/back buttons"
       ],
-      "status": "complete",
+      "status": "aligned-existing",
       "risk": "low",
-      "migration_plan": "Align focused-auth chrome."
+      "migration_plan": null,
+      "baseline_status": "complete",
+      "baseline_migration_plan": "Align focused-auth chrome.",
+      "final_disposition": "Already aligned with the current shared design language; no V3 product mutation was required."
     },
     {
       "figma_reference_current": null,
@@ -1832,9 +1943,12 @@
       "primitives_bypassed": [
         "raw choice buttons"
       ],
-      "status": "complete",
+      "status": "aligned-existing",
       "risk": "expired/invalid invite",
-      "migration_plan": "Keep lookup fail-closed."
+      "migration_plan": null,
+      "baseline_status": "complete",
+      "baseline_migration_plan": "Keep lookup fail-closed.",
+      "final_disposition": "Already aligned with the current shared design language; no V3 product mutation was required."
     },
     {
       "figma_reference_current": null,
@@ -1879,9 +1993,12 @@
       "primitives_bypassed": [
         "raw step buttons"
       ],
-      "status": "complete",
+      "status": "aligned-existing",
       "risk": "token scrub from URL",
-      "migration_plan": "Harmonize steps; keep handoff contract."
+      "migration_plan": null,
+      "baseline_status": "complete",
+      "baseline_migration_plan": "Harmonize steps; keep handoff contract.",
+      "final_disposition": "Already aligned with the current shared design language; no V3 product mutation was required."
     },
     {
       "figma_reference_current": null,
@@ -1917,9 +2034,12 @@
         "AppButton"
       ],
       "primitives_bypassed": [],
-      "status": "complete",
+      "status": "aligned-existing",
       "risk": "must not take global viewport fill of daily nav",
-      "migration_plan": "Keep daily-nav compatible recovery chrome."
+      "migration_plan": null,
+      "baseline_status": "complete",
+      "baseline_migration_plan": "Keep daily-nav compatible recovery chrome.",
+      "final_disposition": "Already aligned with the current shared design language; no V3 product mutation was required."
     },
     {
       "figma_reference_current": null,
@@ -1965,9 +2085,12 @@
         "legacy chat modal",
         "direct fetch"
       ],
-      "status": "protected-history-only",
+      "status": "protected-frozen",
       "risk": "PWA share target; messenger contract",
-      "migration_plan": "Visual alignment only; no share contract change."
+      "migration_plan": null,
+      "baseline_status": "protected-history-only",
+      "baseline_migration_plan": "Visual alignment only; no share contract change.",
+      "final_disposition": "Excluded from V3 restyling by the Stage 4/8 visual freeze; current protected behavior and hashes remain authoritative."
     },
     {
       "figma_reference_current": null,
@@ -2023,9 +2146,12 @@
       "primitives_bypassed": [
         "composer textarea / raw send"
       ],
-      "status": "protected-history-only",
+      "status": "protected-frozen",
       "risk": "A+C visual freeze; two-tap and overtime ownership",
-      "migration_plan": "Harmonize shell/modals/toasts only; no card redesign."
+      "migration_plan": null,
+      "baseline_status": "protected-history-only",
+      "baseline_migration_plan": "Harmonize shell/modals/toasts only; no card redesign.",
+      "final_disposition": "Excluded from V3 restyling by the Stage 4/8 visual freeze; current protected behavior and hashes remain authoritative."
     },
     {
       "figma_reference_current": null,
@@ -2067,9 +2193,12 @@
       "primitives_bypassed": [
         "legacy overlay chrome"
       ],
-      "status": "protected-history-only",
+      "status": "protected-frozen",
       "risk": "inference receipt and lot suggestion contracts",
-      "migration_plan": "Align overlay chrome with unified dialog language without changing inference."
+      "migration_plan": null,
+      "baseline_status": "protected-history-only",
+      "baseline_migration_plan": "Align overlay chrome with unified dialog language without changing inference.",
+      "final_disposition": "Excluded from V3 restyling by the Stage 4/8 visual freeze; current protected behavior and hashes remain authoritative."
     },
     {
       "figma_reference_current": null,
@@ -2120,9 +2249,12 @@
       "primitives_bypassed": [
         "legacy ChatView surface"
       ],
-      "status": "protected-history-only",
+      "status": "protected-frozen",
       "risk": "default rollout must stay legacy; album only via album_id/index",
-      "migration_plan": "Visual convergence on current path; keep rollback and M01–M14 authority."
+      "migration_plan": null,
+      "baseline_status": "protected-history-only",
+      "baseline_migration_plan": "Visual convergence on current path; keep rollback and M01–M14 authority.",
+      "final_disposition": "Excluded from V3 restyling by the Stage 4/8 visual freeze; current protected behavior and hashes remain authoritative."
     }
   ]
 }

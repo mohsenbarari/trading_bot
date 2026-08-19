@@ -87,4 +87,50 @@ describe('ProfileWorkspaceView.vue', () => {
     expect(wrapper.getComponent({ name: 'PublicProfile' }).props('user')).toMatchObject({ id: 99 })
     expect(wrapper.get('[data-test="profile-workspace-root"]').classes()).toContain('public-profile-view')
   })
+
+  it('renders an actionable error instead of a blank public workspace for an invalid route id', async () => {
+    routeMock.name = 'public-profile'
+    routeMock.params = { id: 'invalid' }
+    routeMock.query = { highlight: 'stale-user-name' }
+
+    const wrapper = mount(ProfileWorkspaceView, {
+      global: {
+        stubs: {
+          PublicProfile: true,
+        },
+      },
+    })
+    await flushPromises()
+
+    expect(wrapper.findComponent({ name: 'PublicProfile' }).exists()).toBe(false)
+    expect(wrapper.text()).toContain('پروفایل معتبر نیست')
+    expect(wrapper.text()).toContain('اطلاعات کاربر نامعتبر است.')
+    expect(routerReplaceMock).not.toHaveBeenCalled()
+
+    await wrapper.get('button').trigger('click')
+    expect(routerPushMock).toHaveBeenCalledWith('/')
+  })
+
+  it('removes every query value from a valid public profile route', async () => {
+    routeMock.name = 'public-profile'
+    routeMock.params = { id: '99' }
+    routeMock.query = {
+      highlight: 'unsafe-name',
+      workspace: 'customers',
+    }
+
+    mount(ProfileWorkspaceView, {
+      global: {
+        stubs: {
+          PublicProfile: true,
+        },
+      },
+    })
+    await flushPromises()
+
+    expect(routerReplaceMock).toHaveBeenCalledWith({
+      name: 'public-profile',
+      params: { id: '99' },
+    })
+  })
 })

@@ -6,6 +6,15 @@
 سناریوی اجرا نشده pass اعلام نمی‌شود. هر N/A دلیل صریح دارد.
 این برنامه owner-approved یا production-ready اعلام نمی‌کند.
 
+## وضعیت شواهد پس از بازبینی مستقل
+
+اجرای ۱۶۶/۱۶۶ قبلی برای پذیرش state قابل استفاده نیست: harness پس از release و
+settle تصویر می‌گرفت و visibility حالت درخواستی را الزام نمی‌کرد. آن artifact حذف
+یا بازنویسی نمی‌شود، اما superseded/non-promotable است. اجرای اصلاحی اولیه هفت
+ادعای loading نادرست را fail-closed کرد؛ پس از اصلاح selector، انتظار mount و
+identity recovery، برش سخت‌گیرانهٔ state با ۴۸/۴۸ پاس شد. receipt نهایی فقط پس از
+اجرای کامل روی commit تمیز ثبت می‌شود.
+
 ## گیت‌های اجباری پایانی
 
 | فرمان | نتیجه | یادداشت |
@@ -16,10 +25,10 @@
 | `npm run guard:ui` | exit 0 | پس از برگرداندن فایل‌های منجمد و حذف نشانگرهای `--ui-v2-*` از CSS جدید |
 | `git diff --check` | سبز | |
 | آزمون‌های route/scope manifest | سبز | `uiux-unification-v3-inventory-guard.test.mjs` |
-| ماتریس مرورگر production محلی | ۱۶۶/۱۶۶ پس از اصلاح زوم CDP | Chromium + Firefox + WebKit |
+| ماتریس مرورگر production محلی | در انتظار اجرای نهایی تمیز | اجرای قبلی ۱۶۶/۱۶۶ superseded است؛ state gate اصلاحی ۴۸/۴۸ پاس شد |
 | accessibility / overflow / CTA / unnamed | در probe موجود | overflow افقی صفر؛ CTA پوشیده صفر در سناریوهای معتبر |
 | `memory-custodian check` | OK | از ریشهٔ مخزن |
-| merge-tree فقط خواندنی در برابر `origin/main` | بدون تعارض | `git merge-tree --write-tree` → `7a350eb676e39e56902af79afc0783d44872eed0` |
+| همگام‌سازی با `origin/main` | انجام شد | `2f8dd6e0` در شاخهٔ کاندید merge شد؛ main تغییر نکرد |
 
 ## محیط‌های اجراشده
 

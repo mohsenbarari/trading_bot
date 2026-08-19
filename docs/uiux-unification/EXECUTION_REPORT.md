@@ -4,7 +4,12 @@
 
 ## حکم برای ناظر
 
-`READY FOR INDEPENDENT UIUX INTEGRATION REVIEW`
+`CORRECTED FINAL INTEGRATION GATE IN PROGRESS`
+
+حکم قبلی `READY FOR INDEPENDENT UIUX INTEGRATION REVIEW` پس از بازبینی مستقل
+پس گرفته شد: harness قبلی visibility حالت درخواستی را الزام نمی‌کرد و تصویرها را
+پس از probe اسکرول‌دار می‌گرفت. artifact تاریخی حذف نمی‌شود، اما برای promotion
+معتبر نیست. حکم تازه فقط پس از اجرای کامل روی commit تمیز ثبت می‌شود.
 
 ## خط مبنای انزوا
 
@@ -14,9 +19,8 @@
 - شاخه: `candidate/webapp-uiux-unification-v3`
 - مبنای `origin/main` در انزوا: `7f723de9c4238a449ce008b083ab2baa3c20e581`
 - tree مبنا: `1b970cc6f5be6697ceebbd76c91d36c9ea1dddb9`
-- `main` در مخزن اصلی در پایان برنامه: `e64b6a22` و clean؛ با `origin/main` همسان است و در این مأموریت دست نخورده ماند
-- `origin/main` بعد از انزوا یک commit جلو رفت: `e64b6a22 fix(bot): route inferred commodity selections`
-- merge-tree فقط خواندنی: بدون تعارض، درخت ادغام `7a350eb676e39e56902af79afc0783d44872eed0`
+- شاخهٔ کاندید برای بازبینی اصلاحی با `origin/main` در `2f8dd6e0` همگام شد؛ merge بدون تعارض بود
+- `main` محلی در این کار تغییر نکرد
 - `production-main` خارج از scope است
 
 ## وضعیت فازها
@@ -34,14 +38,16 @@
 | 8 Market overlays | done | `c8ece02c` |
 | 9 Messenger | done | `5fbc79f8` سپس restore پوسته در `f286fd00` |
 | 10 shell مشترک | done | `e278fee8` |
-| 11 پذیرش شاخه | done | `f286fd00` + commit اسناد همین فاز |
+| 11 پذیرش شاخه | correction-gate-in-progress | receipt تمیز نهایی هنوز ثبت نشده است |
 
 ## فاز یک — ممیزی
 
 قرارداد مسیر مستقل تأیید شد: ۳۰ مسیر، ۱۰ route-scope، ۱۶ section-scope، ۴ off، ۲۳ NONE، ۳ MIXED، ۴ FULL.
 
-موجودی زنده: ۴۵ سطح با وضعیت معلوم. هیچ سطح زنده‌ای unknown نماند.
-ماتریس حالت: ۶۳۰ سلول ماشین‌خوان. Telegram Mini App خارج است.
+موجودی زنده: ۴۵ سطح با تعیین تکلیف نهایی؛ ۳۸ هم‌راستا، ۶ محافظت‌شده و
+منجمد، و یک legacy غیرزنده. وضعیت ممیزی اولیه در `baseline_status` حفظ شده است.
+ماتریس حالت: ۶۳۰ سلول ماشین‌خوانِ declared/source-derived و نه receipt اجرا.
+Telegram Mini App خارج است.
 
 مونتاژ فاز یک: ۱۰۸ سناریو، ۱۰۷ pass، یک کمبود landmark در خطای هویت خانه.
 شواهد: `/tmp/uiux-unification-v3-phase1/uiux-v3-phase1-20260819T074125332Z`
@@ -115,20 +121,16 @@
 - ۴۵ سطح زنده
 - ۹ پروفایل دسترسی در قرارداد؛ اجرا فقط روی نقش render هر مسیر
 - ۵ viewport برای خانوادهٔ اصلی؛ ۲ viewport برای همهٔ مسیرها
-- ۱۶۶ سناریوی مرورگر: ۱۶۶ pass پس از زوم CDP
+- اجرای تاریخی ۱۶۶/۱۶۶ superseded و non-promotable است؛ visibility حالت و origin تصویر را اثبات نمی‌کرد
+- برش اصلاحی state: ۴۸/۴۸ با selector قابل‌مشاهده و settlement پس از release
 - ۴۲ N/A حالت با دلیل descriptor
 - Firefox ۱۲/۱۲، WebKit ۱۲/۱۲ روی مسیرهای حساس
-- keyboard ۴/۴، reduced-motion ۳/۳، PWA ۳/۳، زوم CDP ۶/۶
+- قرارداد keyboard منوی هویت خانه به اجرای نهایی افزوده شد
 - هیچ سناریوی اجرا نشده pass اعلام نشد
 
 ## تست
 
-- Vitest: ۱۶۸ فایل، ۱۹۵۱ تست، exit 0
-- `vue-tsc --noEmit`: exit 0
-- `npm run build` موقت: exit 0
-- `npm run guard:ui`: exit 0
-- `git diff --check`: سبز
-- unknown API / خطای صفحه / درخواست خارجی / mutation محصولی در ماتریس فاز ۱۱: صفر
+- گیت‌های نهایی پس از اجرای تمیز دوباره ثبت می‌شوند
 
 ## عملکرد و ایمنی
 
@@ -140,14 +142,10 @@
 
 ## artifact خارج مخزن
 
-- مونتاژ فاز یک: `/tmp/uiux-unification-v3-phase1/uiux-v3-phase1-20260819T074125332Z`
-- ماتریس فاز ۱۱: `/tmp/uiux-unification-v3-phase11/uiux-v3-phase11-20260819T083412687Z`
-- زوم CDP: `/tmp/uiux-unification-v3-phase11/uiux-v3-phase11-20260819T084048883Z`
-- ادغام نتایج: `/tmp/uiux-unification-v3-phase11/MERGED_RUNTIME_AUDIT.json`
-- digest ادغام: `507b5e3e1cffce2ef23571f4f2e71f03b51b75134f5c37a5378fcbcd47ea861b`
-- digest تصاویر: `3d105f97f23b3ed9ef86f7f07a44927c1c2406d93a1e3222af6dbaaec61a1b19`
-- برگ تماس HTML: `CONTACT_SHEET.html` در پوشهٔ ماتریس فاز ۱۱
-- dist فاز ۱۱: `/tmp/uiux-unification-v3-dist-phase11`
+- artifactهای اجرای قبلی خارج مخزن می‌مانند و با digest ادغام
+  `507b5e3e1cffce2ef23571f4f2e71f03b51b75134f5c37a5378fcbcd47ea861b`
+  فقط به‌عنوان شاهد superseded/non-promotable نگهداری می‌شوند
+- artifact نهایی فقط با digest و شمارش redacted در receipt مستقل ثبت خواهد شد
 
 ## باقی‌ماندهٔ آگاهانه
 
@@ -155,5 +153,4 @@
 - confirm بومی حذف استثنای تقویم باقی ماند
 - Code Connect در مخزن نیست
 - ضرب کامل نقش × viewport × state × interaction اجرا نشد
-- یک commit بات روی `origin/main` (`e64b6a22`) بیرون از این شاخه است؛ merge-tree تعارض ندارد
 - Figma DRAFT است

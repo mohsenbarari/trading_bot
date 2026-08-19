@@ -37,7 +37,7 @@ function surface(entry) {
   }
 }
 
-const surfaces = [
+let surfaces = [
   surface({
     id: 'home-shell',
     family: 'home',
@@ -898,6 +898,51 @@ const surfaces = [
   }),
 ]
 
+const V3_IMPLEMENTED_SURFACES = new Set([
+  'home-shell',
+  'profile-self-shell',
+  'profile-public-shell',
+  'profile-identity-header',
+  'profile-summary-and-actions',
+  'profile-trade-history',
+  'profile-relationship-directory',
+  'profile-admin-overlay',
+  'admin-user-profile',
+  'operations-customers-list',
+  'operations-customers-detail',
+  'operations-accountants-list',
+  'operations-accountants-detail',
+  'account-hub',
+])
+
+function finalSurfaceStatus(item) {
+  if (item.status === 'protected-history-only') return 'protected-frozen'
+  if (item.status === 'legacy') return 'inactive-legacy'
+  if (V3_IMPLEMENTED_SURFACES.has(item.id)) return 'aligned-v3'
+  return 'aligned-existing'
+}
+
+surfaces = surfaces.map((item) => {
+  const baselineStatus = item.status
+  const baselineMigrationPlan = item.migration_plan
+  const status = finalSurfaceStatus(item)
+  const finalDisposition = status === 'protected-frozen'
+    ? 'Excluded from V3 restyling by the Stage 4/8 visual freeze; current protected behavior and hashes remain authoritative.'
+    : status === 'inactive-legacy'
+      ? 'Not mounted by any live route; retained without product promotion.'
+      : status === 'aligned-v3'
+        ? 'Implemented or structurally unified in this V3 candidate and subject to the final source-bound runtime gate.'
+        : 'Already aligned with the current shared design language; no V3 product mutation was required.'
+  return {
+    ...item,
+    baseline_status: baselineStatus,
+    baseline_migration_plan: baselineMigrationPlan,
+    status,
+    migration_plan: null,
+    final_disposition: finalDisposition,
+  }
+})
+
 const statuses = surfaces.map((item) => item.status)
 if (statuses.includes('unknown')) {
   throw new Error('inventory still contains unknown status')
@@ -908,7 +953,7 @@ const inventory = {
   schema_version: 1,
   track: 'webapp-uiux-unification-v3',
   independent_of_stage8: true,
-  status: 'phase1-source-and-runtime-audit',
+  status: 'integration-candidate-surface-disposition',
   verified_route_contract: {
     routes: contract.paths.length,
     v2_scope: contract.scopeCount,
@@ -1001,7 +1046,7 @@ const matrix = {
   schema_version: 1,
   track: 'webapp-uiux-unification-v3',
   independent_of_stage8: true,
-  status: 'phase1-source-matrix',
+  status: 'declared-source-matrix-not-runtime-acceptance',
   access_profiles: ['guest', 'watch', 'member', 'police', 'customer', 'accountant', 'owner-context', 'middle-admin', 'senior-admin'],
   viewports: ['360x740', '390x844', '430x932', '768x1024', '1440x900'],
   states: matrixStates,
