@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 import unittest
+from pathlib import Path
 
 from scripts.bridge_staging_market_inputs import (
     BRIDGE_VERSION,
@@ -23,6 +24,17 @@ def _row(columns: list[str], values: list[object]) -> sqlite3.Row:
 
 
 class StagingMarketInputBridgeTests(unittest.TestCase):
+    def test_systemd_bridge_relies_on_writer_lock_without_collector_ordering(self) -> None:
+        service_path = (
+            Path(__file__).resolve().parents[1]
+            / "deploy/coin_intelligence/systemd/coin-intelligence-staging-market-input-bridge.service"
+        )
+        service = service_path.read_text(encoding="utf-8")
+
+        self.assertIn("After=network-online.target\n", service)
+        self.assertNotIn("After=network-online.target coin-public-market", service)
+        self.assertIn("flock --exclusive --timeout 300", service)
+
     def test_legacy_herat_toman_stays_toman(self) -> None:
         columns = [
             "source_code", "instrument", "event_type", "side", "price_num", "price_unit",
