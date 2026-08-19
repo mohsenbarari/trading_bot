@@ -2,20 +2,94 @@
   "schema_version": 1,
   "track": "webapp-uiux-unification-v3",
   "independent_of_stage8": true,
-  "status": "phase0-documented-target",
+  "status": "draft-live-editable",
+  "not_acceptance_authority": true,
   "existing_file": {
     "fileKey": "z8jgJxST4O2APzWnlyP9gv",
-    "role": "read-only-historical-source",
-    "historical_pages_mutable": false
+    "role": "canonical-file-historical-pages-untouched",
+    "historical_pages_mutable": false,
+    "historical_pages": [
+      { "id": "0:1", "name": "00 — Visual Directions" },
+      { "id": "12:2", "name": "01 — Stage 0B-2 Home & Shell" },
+      { "id": "41:2", "name": "01.5 — UIUX v2 Foundations" },
+      { "id": "46:2", "name": "01.6 — UIUX v2 Components" },
+      { "id": "55:2", "name": "02 — Stage 0B-3 Operations & Workspaces" },
+      { "id": "75:2", "name": "03 — Stage 0B-4 Admin Users & Invitations" },
+      { "id": "117:2", "name": "04 — Stage 0B-5 Account, Profile, Security & Notifications" },
+      { "id": "168:1974", "name": "05 — Stage 0B-6 Final System Contract" },
+      { "id": "208:2", "name": "03 — Stage 2 Design System V2" },
+      { "id": "283:18", "name": "06 — Stage 4 Daily Core" },
+      { "id": "297:18", "name": "07 — Stage 5 Customer & Accountant Workspaces" },
+      { "id": "321:18", "name": "08 — Stage 6 Admin & Profile" },
+      { "id": "486:1455", "name": "09 — Stage 7 Motion & A11y" }
+    ]
   },
   "draft": {
     "title": "WebApp UIUX Unification V3 · DRAFT",
-    "status": "not-created",
-    "page_id": null,
-    "section_id": null,
+    "status": "created",
+    "page_id": "663:398",
+    "section_id": "663:399",
     "live_editable": true,
-    "not_acceptance_authority": true
+    "not_acceptance_authority": true,
+    "frames": {
+      "foundation_mobile_390": "663:400",
+      "foundation_desktop_1440": "663:401",
+      "foundation_mobile_overlays_390": "664:423",
+      "state_patterns_390": "663:6088",
+      "remaining_patterns_390": "664:6049"
+    }
   },
+  "code_connect": {
+    "repo_files": [],
+    "gap": "no Code Connect files in the frontend; mappings remain explicit gaps"
+  },
+  "token_map": [
+    { "code": "--ui-v2-color-surface-page", "figma": "color/surface/page", "id": "VariableID:39:2" },
+    { "code": "--ui-v2-color-surface-card", "figma": "color/surface/card", "id": "VariableID:39:3" },
+    { "code": "--ui-v2-color-text-strong", "figma": "color/text/strong", "id": "VariableID:39:7" },
+    { "code": "--ui-v2-color-text-secondary", "figma": "color/text/secondary", "id": "VariableID:39:8" },
+    { "code": "--ui-v2-color-action-primary", "figma": "color/action/primary", "id": "VariableID:39:14" },
+    { "code": "--ui-v2-color-border-focus", "figma": "color/border/focus", "id": "VariableID:39:13" },
+    { "code": "--ui-v2-spacing-16", "figma": "spacing/16", "id": "VariableID:39:28" },
+    { "code": "--ui-v2-radius-14", "figma": "radius/14", "id": "VariableID:39:34" },
+    { "code": "--ui-v2-stroke-focus", "figma": "stroke/focus", "id": "VariableID:39:42" }
+  ],
+  "component_map": [
+    { "code": "AppButton", "figma": "UIUX/Button", "id": "48:14", "status": "linked" },
+    { "code": "AppStatusBadge", "figma": "UIUX/Status", "id": "49:14", "status": "linked" },
+    { "code": "AppListItem", "figma": "UIUX/Relation Row", "id": "50:26", "status": "linked" },
+    { "code": "AppPageHeader", "figma": "UIUX/Authenticated Header", "id": "51:33", "status": "linked" },
+    { "code": "AppFormField", "figma": "UIUX/Form Field", "id": "77:610", "status": "linked" },
+    { "code": "AppDangerZone", "figma": "UIUX/Decision Panel", "id": "81:566", "status": "linked" },
+    { "code": "BottomNav", "figma": "UIUX/Bottom Navigation", "id": "52:46", "status": "linked" },
+    { "code": "AppActionCard", "figma": "UIUX/Account Action Row", "id": "121:14", "status": "linked-not-instanced-on-v3-draft" },
+    { "code": "ProfileIdentityHeader", "figma": "Identity Header frame on 663:400", "id": "663:5974", "status": "local-frame" },
+    { "code": "AppEmptyState", "figma": "Empty State frame", "id": "663:6012", "status": "local-frame" },
+    { "code": "AppToast", "figma": "Toast Banner frame", "id": "663:6015", "status": "local-frame" },
+    { "code": "AppMetricCard", "figma": "Metric Card frame", "id": "664:6050", "status": "local-frame" },
+    { "code": "AppFilterChips", "figma": "Filter Tabs frame", "id": "664:6053", "status": "local-frame" }
+  ],
+  "explicit_gaps": [
+    "AppResponsiveDialog / AppBottomSheet — no dedicated V3 component yet; Decision Panel is the closest linked pattern",
+    "controlled table/scroller",
+    "AppDisclosure",
+    "sticky keyboard-safe action area as a reusable component",
+    "history/status treatment as a reusable component",
+    "desktop rail as a reusable component rather than a composed frame",
+    "Code Connect files in the repository"
+  ],
+  "audit": {
+    "vazirmatn_count": 52,
+    "non_vazirmatn_count": 0,
+    "component_instance_count": 13,
+    "token_bound_count": 316,
+    "contrast_minimum": 4.55,
+    "focus_indicator_contrast": 4.23,
+    "overflow_crop_overlap": 0,
+    "privacy_findings": 0,
+    "privacy_note": "historical component defaults used sample names; V3 instances were overridden to synthetic labels"
+  },
+  "screens": [],
   "privacy_forbidden_in_figma": [
     "commit-tree-hash",
     "internal-endpoint",
@@ -24,8 +98,5 @@
     "token-credential-otp",
     "real-phone-or-personal-name",
     "test-result-or-acceptance-claim"
-  ],
-  "screens": [],
-  "component_map": [],
-  "token_map": []
+  ]
 }

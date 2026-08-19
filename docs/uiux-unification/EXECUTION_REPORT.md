@@ -18,7 +18,8 @@
 | فاز | وضعیت | HEAD پس از gate |
 |---|---|---|
 | 0 اتصال و انزوا | done | `5c43d920` |
-| 1 ممیزی | in-progress | ثبت پس از commit |
+| 1 ممیزی | done | `ab431004` |
+| 2 Figma و foundation | in-progress | ثبت پس از commit |
 | 2 Figma و foundation | pending | |
 | 3 پروفایل | pending | |
 | 4 عملیات | pending | |
@@ -63,6 +64,19 @@
 - ۱۰۸ screenshot خارج مخزن در `/tmp/uiux-unification-v3-phase1/uiux-v3-phase1-20260819T074125332Z`
 - digest تصاویر: `9985b1f09f0d62db35df9ef9e7696e79e553aec3747da75eb08c330dcb498f39`
 - digest گزارش: `4cf1e45117b4345d82562402b14c60300603cf300d356e5a289ad33a3b859df0`
+
+## فاز دو — Figma
+
+- فایل `z8jgJxST4O2APzWnlyP9gv` با دسترسی زنده بررسی شد؛ صفحه‌های تاریخی دست‌نخورده ماندند.
+- صفحهٔ جدید `663:398` با عنوان `WebApp UIUX Unification V3 · DRAFT` و section `663:399` ساخته شد.
+- قاب‌های foundation: موبایل `663:400`، دسکتاپ `663:401`، overlays `664:423`.
+- ۱۳ instance از componentهای موجود لینک شد؛ ۳۱۶ binding توکن.
+- همهٔ متن‌های اندازه‌گیری‌شده Vazirmatn هستند.
+- حداقل کنتراست متن ۴.۵۵؛ نشانگر فوکوس ۴.۲۳.
+- overflow/crop پس از جداکردن overlays صفر شد.
+- حریم: متن‌های نمونهٔ تاریخی در instanceهای V3 با برچسب ساختگی جایگزین شدند.
+- Code Connect در مخزن نیست و به‌عنوان gap صریح ثبت شد.
+- Figma در وضعیت DRAFT/live-editable است و پذیرش محصول نیست.
 
 کمبود واقعی در برابر false positive:
 
