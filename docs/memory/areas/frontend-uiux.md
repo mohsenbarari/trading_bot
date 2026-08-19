@@ -11,7 +11,7 @@ Load for Vue/PWA refactoring, Design System V2, Figma/Sites evidence, or shared 
 - 2026-08-11 | Owner-relation DELETE locks `expected_action`; Customer/Accountant query changes keep one root and scroll owner.
 - 2026-08-18 | Market keeps 44px two-tap cards, meter/hourglass, distinct traded/expired. Today trades are identity/private. Completed trades refresh Today/self-history via private events plus receipts and one five-second toast. Bot uses ☀️/📆 and hides customer route.
 - 2026-08-09 | Current-user authority is token-bound; owner-only routes use guards, not visibility.
-- 2026-08-19 | UIUX V3 candidate: 45 surfaces resolve to 38 aligned, 6 frozen, 1 inactive; its 630-cell matrix is declared-only. Invalid public IDs fail closed. Strict local production evidence is 167/167 including 48 visible states, identity keyboard, cross-browser, zoom/reduced/PWA; the old 166/166 is superseded. Owner/production authority remains false; Mini App stays excluded.
+- 2026-08-19 | UIUX V3 merged by fast-forward into `main` at `e74964f3` and deployed only to both staging roles after 167/167 strict runtime and 169/1959 tests. Coverage remains 38 aligned, 6 frozen, 1 inactive; invalid public IDs fail closed. Production/Sites authority remains false; Figma stays DRAFT and Mini App excluded.
 
 ## Constraints
 
