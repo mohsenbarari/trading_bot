@@ -427,13 +427,15 @@
         "--ds-* or --ui-v2-* scoped"
       ],
       "existing_tests": [
-        "frontend/src/views/ProfileView.test.ts"
+        "frontend/src/views/ProfileView.test.ts",
+        "frontend/src/views/ProfileWorkspaceView.test.ts",
+        "frontend/src/components/profile/ProfilePresentation.test.ts"
       ],
       "missing_tests": [],
       "id": "profile-self-shell",
       "family": "profile",
       "route": "/profile",
-      "source_component": "frontend/src/views/ProfileView.vue",
+      "source_component": "frontend/src/views/ProfileWorkspaceView.vue",
       "child_components": [
         "PublicProfile",
         "AppPage",
@@ -471,13 +473,14 @@
         "--ds-* or --ui-v2-* scoped"
       ],
       "existing_tests": [
-        "frontend/src/views/PublicProfileView.test.ts"
+        "frontend/src/views/PublicProfileView.test.ts",
+        "frontend/src/views/ProfileWorkspaceView.test.ts"
       ],
       "missing_tests": [],
       "id": "profile-public-shell",
       "family": "profile",
       "route": "/users/:id",
-      "source_component": "frontend/src/views/PublicProfileView.vue",
+      "source_component": "frontend/src/views/ProfileWorkspaceView.vue",
       "child_components": [
         "PublicProfile",
         "AppPage",

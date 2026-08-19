@@ -1,17 +1,23 @@
 # Execution Report — WebApp UIUX Unification V3
 
+این گزارش پذیرش مالک یا آمادهٔ تولید نیست.
+
+## حکم برای ناظر
+
+`READY FOR INDEPENDENT UIUX INTEGRATION REVIEW`
+
 ## خط مبنای انزوا
 
 - تاریخ ثبت: 2026-08-19
 - repository اصلی: `/root/trading-bot/trading_bot` روی `main`
 - worktree این برنامه: `/root/trading-bot/webapp-uiux-unification-v3`
 - شاخه: `candidate/webapp-uiux-unification-v3`
-- مبنای `origin/main`: `7f723de9c4238a449ce008b083ab2baa3c20e581`
+- مبنای `origin/main` در انزوا: `7f723de9c4238a449ce008b083ab2baa3c20e581`
 - tree مبنا: `1b970cc6f5be6697ceebbd76c91d36c9ea1dddb9`
-- وضعیت `main` در لحظهٔ انزوا: clean و هم‌تراز با `origin/main`
-- `production-main` جدا و خارج از scope است
-- commit فاز صفر: `5c43d920197fe20a8a959961017cc55c735eaeca`
-- tree پس از فاز صفر: `c5784407c043b7f5c8ebfcaf39ed78de33a87bf5`
+- `main` در مخزن اصلی در پایان برنامه: `e64b6a22` و clean؛ با `origin/main` همسان است و در این مأموریت دست نخورده ماند
+- `origin/main` بعد از انزوا یک commit جلو رفت: `e64b6a22 fix(bot): route inferred commodity selections`
+- merge-tree فقط خواندنی: بدون تعارض، درخت ادغام `7a350eb676e39e56902af79afc0783d44872eed0`
+- `production-main` خارج از scope است
 
 ## وضعیت فازها
 
@@ -23,122 +29,131 @@
 | 3 پروفایل | done | `79d4c5b2` |
 | 4 عملیات | done | `c13640b6` |
 | 5 خانه و حساب | done | `64316a7e` |
-| 6 مدیریت | done | `021997c4` |
-| 7 احراز و عمومی | done | `0f4ce95e` |
-| 8 Market overlays | in-progress | ثبت پس از commit |
-| 4 عملیات | pending | |
-| 5 خانه و حساب | pending | |
-| 6 مدیریت | pending | |
-| 7 احراز و عمومی | pending | |
-| 8 Market overlays | pending | |
-| 9 Messenger | pending | |
-| 10 shell مشترک | pending | |
-| 11 پذیرش شاخه | pending | |
+| 6 مدیریت | done | `021997c4` سپس restore در `f286fd00` |
+| 7 احراز و عمومی | done | `0f4ce95e` سپس restore ShareReceive در `f286fd00` |
+| 8 Market overlays | done | `c8ece02c` |
+| 9 Messenger | done | `5fbc79f8` سپس restore پوسته در `f286fd00` |
+| 10 shell مشترک | done | `e278fee8` |
+| 11 پذیرش شاخه | done | `f286fd00` + commit اسناد همین فاز |
 
 ## فاز یک — ممیزی
 
-قرارداد مسیر به‌صورت مستقل تأیید شد:
+قرارداد مسیر مستقل تأیید شد: ۳۰ مسیر، ۱۰ route-scope، ۱۶ section-scope، ۴ off، ۲۳ NONE، ۳ MIXED، ۴ FULL.
 
-- ۳۰ مسیر
-- ۱۰ route-scope
-- ۱۶ section-scope
-- ۴ off: `/market`، `/chat`، `/admin/channels`، `/share-receive`
-- ۲۳ NONE
-- ۳ MIXED
-- ۴ FULL
+موجودی زنده: ۴۵ سطح با وضعیت معلوم. هیچ سطح زنده‌ای unknown نماند.
+ماتریس حالت: ۶۳۰ سلول ماشین‌خوان. Telegram Mini App خارج است.
 
-موجودی زنده: ۴۵ سطح با وضعیت معلوم (۱۶ complete، ۱۶ partial، ۶ inconsistent، ۶ protected-history-only، ۱ legacy). هیچ سطح زنده‌ای unknown نماند.
-
-ماتریس حالت: ۶۳۰ سلول ماشین‌خوان. Telegram Mini App خارج از ماتریس است.
-
-ساخت production محلی: `/tmp/uiux-unification-v3-dist` با اثر انگشت `9a3e536614403b398f88415facfbd52ffb15277d4e5e2a63ed0e54f05798b2be`.
-
-مونتاژ runtime (Chromium، fixture محلی، بدون دستکاری رسید Stage 8):
-
-- ۱۰۸ سناریو (۳۰ مسیر × ۲ viewport اولیه + stateهای اصلی قابل‌اجرا)
-- ۱۰۷ pass
-- ۱ finding محصولی: `home/390x844/error` بدون landmark `main` در حالت خطای هویت
-- overflow افقی صفر
-- CTA پوشیده صفر
-- unnamed/nested interactive صفر در سناریوهای اجراشده
-- unknown API صفر
-- خطای صفحه صفر
-- درخواست خارجی صفر
-- mutation محصولی صفر
-- ۱۰۸ screenshot خارج مخزن در `/tmp/uiux-unification-v3-phase1/uiux-v3-phase1-20260819T074125332Z`
-- digest تصاویر: `9985b1f09f0d62db35df9ef9e7696e79e553aec3747da75eb08c330dcb498f39`
-- digest گزارش: `4cf1e45117b4345d82562402b14c60300603cf300d356e5a289ad33a3b859df0`
+مونتاژ فاز یک: ۱۰۸ سناریو، ۱۰۷ pass، یک کمبود landmark در خطای هویت خانه.
+شواهد: `/tmp/uiux-unification-v3-phase1/uiux-v3-phase1-20260819T074125332Z`
 
 ## فاز دو — Figma
 
-- فایل `z8jgJxST4O2APzWnlyP9gv` با دسترسی زنده بررسی شد؛ صفحه‌های تاریخی دست‌نخورده ماندند.
-- صفحهٔ جدید `663:398` با عنوان `WebApp UIUX Unification V3 · DRAFT` و section `663:399` ساخته شد.
-- قاب‌های foundation: موبایل `663:400`، دسکتاپ `663:401`، overlays `664:423`.
-- ۱۳ instance از componentهای موجود لینک شد؛ ۳۱۶ binding توکن.
-- همهٔ متن‌های اندازه‌گیری‌شده Vazirmatn هستند.
-- حداقل کنتراست متن ۴.۵۵؛ نشانگر فوکوس ۴.۲۳.
-- overflow/crop پس از جداکردن overlays صفر شد.
-- حریم: متن‌های نمونهٔ تاریخی در instanceهای V3 با برچسب ساختگی جایگزین شدند.
-- Code Connect در مخزن نیست و به‌عنوان gap صریح ثبت شد.
-- Figma در وضعیت DRAFT/live-editable است و پذیرش محصول نیست.
+- فایل `z8jgJxST4O2APzWnlyP9gv` زنده بررسی شد؛ صفحه‌های تاریخی دست‌نخورده ماندند.
+- صفحهٔ DRAFT `663:398`، foundation `663:399`
+- قاب‌ها: موبایل `663:400`، دسکتاپ `663:401`، overlays `664:423`، state `663:6088`، remaining `664:6049`
+- پروفایل `665:437`، عملیات `666:454`، خانه/حساب `667:488`
+- ۱۳ instance لینک، ۳۱۶ binding توکن، همهٔ متن‌های اندازه‌گیری‌شده Vazirmatn
+- حداقل کنتراست متن ۴.۵۵؛ فوکوس ۴.۲۳؛ overflow/crop صفر؛ یافتهٔ حریم صفر روی instanceهای V3
+- Code Connect در مخزن نیست و gap صریح است
+- Figma DRAFT است و پذیرش محصول نیست
 
 ## فاز سه — پروفایل
 
-- منطق درخواست و مجوز در `PublicProfile` و `UserProfile` ماند؛ فقط لایهٔ نمایش جدا شد.
-- کامپوننت‌های مشترک: `ProfileIdentityHeader`, `ProfilePresence`, `ProfileSummary`, `ProfileRelationshipSection`, `ProfileActions`, `ProfileTradeHistory`, `ProfileAdminControls`, `ProfileDangerZone`, `ProfilePageShell`.
-- مسیرهای `/profile` و `/users/:id` از یک ریشهٔ `ProfileWorkspaceView` استفاده می‌کنند تا جابه‌جایی بین خود و دیگری دوباره mount نشود.
-- `account_status` و نمایش پیام/مشتری بدون تغییر قرارداد سرور باقی ماند.
-- تست متمرکز presentation + تست‌های موجود PublicProfile/UserProfile/ProfileView سبز شد.
-- قاب Figma DRAFT پروفایل: section `665:437`، خود `665:438`، عمومی `665:457`؛ متن‌ها ساختگی و بدون دادهٔ شخصی.
+- منطق درخواست و مجوز در `PublicProfile` و `UserProfile` ماند
+- کامپوننت‌های نمایش مشترک ساخته شد
+- `/profile` و `/users/:id` از یک ریشهٔ `ProfileWorkspaceView` استفاده می‌کنند
+- `account_status` و نمایش پیام/مشتری بدون تغییر قرارداد سرور ماند
 
 ## فاز چهار — عملیات
 
-- منطق درخواست، `expected_action` و مجوز مشتری/حسابدار دست‌نخورده ماند.
-- `WorkspaceDetailHeader` و `WorkspaceFormActions` برای پرونده و اقدام‌های فرم مشترک شدند.
-- اقدام انصراف/ثبت در جریان سند است، `position: fixed` ندارد و فاصلهٔ پایین برای صفحهٔ کلید نرم را رعایت می‌کند.
-- تب‌ها همان `reveal-selection-on-keyboard` قبلی را حفظ کردند.
-- تست‌های Customer/Accountant و presentation سبز شد.
-- قاب Figma DRAFT عملیات: section `666:454`، مشتری `666:455`، حسابدار `666:475`.
+- `expected_action` و مجوز دست‌نخورده ماند
+- `WorkspaceDetailHeader` و `WorkspaceFormActions` مشترک شدند
+- action فرم `position: fixed` ندارد
 
 ## فاز پنج — خانه و حساب
 
-- خانه در همهٔ حالت‌ها از `AppPage`/`main` استفاده می‌کند؛ خطای هویت بدون landmark برطرف شد.
-- ویجت بازار دست‌نخورده ماند.
-- جدول معاملات امروز همان قرارداد تک‌سطری و اسکرول افقی کنترل‌شده را حفظ کرد.
-- نام بلند در خانه و حساب می‌شکند و بریده نمی‌شود.
-- شبکهٔ تک‌اقدام حساب عرض کامل دارد.
-- قاب Figma DRAFT: section `667:488`، خانه `667:489`، حساب `667:502`.
+- خانه در همهٔ حالت‌ها landmark `main` دارد؛ کمبود فاز یک برطرف شد
+- ویجت بازار دست‌نخورده ماند
+- نام بلند wrap می‌شود بدون کشیدن CSS خانه به کاتالوگ V2
 
 ## فاز شش — مدیریت
 
-- مدیر میانی و مدیر ارشد همان فهرست اکشن‌های قرارداد قبلی را دارند.
-- حذف استثنای تقویمی از `confirm` بومی به `AppConfirmDialog` منتقل شد؛ لغو/Escape تغییری ایجاد نمی‌کند.
-- پیام‌های مدیریت و تنظیمات سیستم mixed interior تغییر قرارداد نکردند.
+- مدیر میانی و ارشد طبق قرارداد قبلی ماندند
+- تلاش برای جایگزینی confirm تقویم با `AppConfirmDialog` گارد Stage 4/6 را شکست
+- confirm تقویم به متن بومی مجاز برگشت؛ فقط disposition بازنشانی تنظیمات مجاز است
 
 ## فاز هفت — احراز و عمومی
 
-- Login/Register/Invite/SetupPassword از قبل روی `AuthFlowShell` بودند و رفتار OTP عوض نشد.
-- SystemRecovery همچنان fill سراسری ندارد.
-- ShareReceive برای حالت‌های loading/error/sending از همان پوستهٔ احراز استفاده می‌کند؛ قرارداد پیام‌رسان و share عوض نشد.
-- Mini App تلگرام revive نشد.
+- Login/Register/Invite/SetupPassword روی `AuthFlowShell` ماندند
+- SystemRecovery fill سراسری ندارد
+- هماهنگ‌سازی ShareReceive با پوستهٔ احراز به‌خاطر freeze پیام‌رسان برگردانده شد
+- Mini App تلگرام revive نشد
 
 ## فاز هشت — Market
 
-- کارت‌ها، meter، hourglass، two-tap و تفکیک active/overtime/expired/traded دست‌نخورده ماندند.
-- `MarketView`، `AppOfferCard` و `useMarketRuntime` نسبت به `origin/main` صفر اختلاف دارند.
-- فقط پوسته و بازخوردهای مشترک از فازهای قبل روی Market اثر می‌گذارند؛ رفتار معامله تغییر نکرد.
+- `MarketView`، `AppOfferCard` و `useMarketRuntime` نسبت به مبنای انزوا صفر اختلاف دارند
 
-کمبود واقعی در برابر false positive:
+## فاز نه — Messenger
 
-- واقعی: landmark مفقود در خطای هویت خانه؛ دوگانگی مودال/مسیر پروفایل مدیر؛ monolith پروفایل؛ `confirm()` بومی در تنظیمات سیستم؛ منوی هویت خام
-- false positive جداشده: ادعای Vazirmatn روی مسیر FULL رخ نداد؛ بنر خطای تزریقی fixture به‌عنوان خطای محصول شمرده نشد
+- restyle پوسته (`Vazirmatn` / reduced-motion روی `MessengerView`) گارد runtime را شکست و برگردانده شد
+- rollout پیش‌فرض، legacy، schema و تشخیص آلبوم عوض نشد
 
-## ممنوعیت‌های اجرایی
+## فاز ده — shell
 
-- تغییر مستقیم `main`، merge، rebase مخرب، push بدون دستور بعدی
-- deploy روی staging یا production
-- تغییر Sites
-- تغییر قرارداد backend، دیتابیس، authorization یا business logic
-- حذف مسیر legacy پیام‌رسان یا تغییر rollout پیش‌فرض
-- بازنویسی رسیدهای تاریخی Stage 8
-- اعلام owner-approved یا production-ready
+- `AppPage` دارای `min-width: 0` و `max-width: 100%` است
+
+## فاز یازده — پاک‌سازی و پذیرش
+
+- فایل‌های hash-frozen به disposition مجاز برگشتند
+- CSS جدید از نشانگر کاتالوگ V2 خارج شد
+- selector مردهٔ قطعی حذف نشد
+- قرارداد مسیر و Stage 8 overwrite نشد
+
+## پوشش اجراشده
+
+- ۳۰ مسیر
+- ۴۵ سطح زنده
+- ۹ پروفایل دسترسی در قرارداد؛ اجرا فقط روی نقش render هر مسیر
+- ۵ viewport برای خانوادهٔ اصلی؛ ۲ viewport برای همهٔ مسیرها
+- ۱۶۶ سناریوی مرورگر: ۱۶۶ pass پس از زوم CDP
+- ۴۲ N/A حالت با دلیل descriptor
+- Firefox ۱۲/۱۲، WebKit ۱۲/۱۲ روی مسیرهای حساس
+- keyboard ۴/۴، reduced-motion ۳/۳، PWA ۳/۳، زوم CDP ۶/۶
+- هیچ سناریوی اجرا نشده pass اعلام نشد
+
+## تست
+
+- Vitest: ۱۶۸ فایل، ۱۹۵۱ تست، exit 0
+- `vue-tsc --noEmit`: exit 0
+- `npm run build` موقت: exit 0
+- `npm run guard:ui`: exit 0
+- `git diff --check`: سبز
+- unknown API / خطای صفحه / درخواست خارجی / mutation محصولی در ماتریس فاز ۱۱: صفر
+
+## عملکرد و ایمنی
+
+- access/privacy بدون تغییر قرارداد سرور
+- backend/schema نسبت به مبنای انزوا صفر اختلاف
+- رفتار Market و rollback Messenger بدون تغییر
+- staging/production و Sites دست‌نخورده
+- push و merge انجام نشد
+
+## artifact خارج مخزن
+
+- مونتاژ فاز یک: `/tmp/uiux-unification-v3-phase1/uiux-v3-phase1-20260819T074125332Z`
+- ماتریس فاز ۱۱: `/tmp/uiux-unification-v3-phase11/uiux-v3-phase11-20260819T083412687Z`
+- زوم CDP: `/tmp/uiux-unification-v3-phase11/uiux-v3-phase11-20260819T084048883Z`
+- ادغام نتایج: `/tmp/uiux-unification-v3-phase11/MERGED_RUNTIME_AUDIT.json`
+- digest ادغام: `507b5e3e1cffce2ef23571f4f2e71f03b51b75134f5c37a5378fcbcd47ea861b`
+- digest تصاویر: `3d105f97f23b3ed9ef86f7f07a44927c1c2406d93a1e3222af6dbaaec61a1b19`
+- برگ تماس HTML: `CONTACT_SHEET.html` در پوشهٔ ماتریس فاز ۱۱
+- dist فاز ۱۱: `/tmp/uiux-unification-v3-dist-phase11`
+
+## باقی‌ماندهٔ آگاهانه
+
+- همگرایی بصری Messenger و ShareReceive تا وقتی freeze Stage 4/8 برقرار است انجام نشد
+- confirm بومی حذف استثنای تقویم باقی ماند
+- Code Connect در مخزن نیست
+- ضرب کامل نقش × viewport × state × interaction اجرا نشد
+- یک commit بات روی `origin/main` (`e64b6a22`) بیرون از این شاخه است؛ merge-tree تعارض ندارد
+- Figma DRAFT است

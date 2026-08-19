@@ -7,10 +7,10 @@ visual freeze مرحلهٔ ۸ read-only می‌مانند و در این پوش�
 
 - نام: WebApp UIUX Unification V3
 - شاخه: `candidate/webapp-uiux-unification-v3`
-- worktree: sibling مستقل خارج از repository اصلی
-- مبنای کد: `origin/main` در لحظهٔ انزوا
+- worktree: `/root/trading-bot/webapp-uiux-unification-v3`
+- مبنای کد: `origin/main` در لحظهٔ انزوا (`7f723de9`)
 - مرجع Figma موجود: fileKey `z8jgJxST4O2APzWnlyP9gv` (صفحه‌های تاریخی دست‌نخورده)
-- صفحهٔ جدید پیشنهادی: `WebApp UIUX Unification V3 · DRAFT`
+- صفحهٔ جدید: `WebApp UIUX Unification V3 · DRAFT` (`663:398`)
 - Sites، staging، production و merge به `main` خارج از مجوز این برنامه است
 
 ## هدف بصری و UX
@@ -31,26 +31,29 @@ visual freeze مرحلهٔ ۸ read-only می‌مانند و در این پوش�
 - Market A+C و Messenger M01–M14 مرجع رفتار باقی می‌مانند.
 - مسیر legacy پیام‌رسان و rollout پیش‌فرض آن حذف یا عوض نمی‌شود.
 - Telegram Mini App منسوخ است و در ماتریس این برنامه نیست.
+- فایل‌های hash-frozen پیام‌رسان (از جمله ShareReceive) و confirm تقویم TradingSettings قابل restyle نیستند.
 
 ## فازها
 
-0. اتصال، انزوا و خط مبنا
-1. ممیزی جامع سطح و state (read-only محصول)
-2. Figma و foundation سیستم طراحی
-3. پروفایل و هویت
-4. عملیات مشتری و حسابدار
-5. خانه، Dashboard و Account
-6. مدیریت
-7. احراز، مسیرهای عمومی، recovery و share
-8. Market و overlayهای معامله (هماهنگ‌سازی پوسته، نه بازطراحی A+C)
-9. Messenger و سطوح مشترک (همگرایی بصری، بدون تغییر rollout)
-10. shell، navigation و overlay مشترک
-11. پاک‌سازی، پذیرش شاخه و گزارش ناظر
+| فاز | وضعیت |
+|---|---|
+| 0 اتصال، انزوا و خط مبنا | done |
+| 1 ممیزی جامع سطح و state | done |
+| 2 Figma و foundation سیستم طراحی | done |
+| 3 پروفایل و هویت | done |
+| 4 عملیات مشتری و حسابدار | done |
+| 5 خانه، Dashboard و Account | done |
+| 6 مدیریت | done؛ confirm تقویم به disposition Stage 6 برگشت |
+| 7 احراز، recovery و share | done؛ ShareReceive به فایل منجمد برگشت |
+| 8 Market overlays | done؛ A+C بازطراحی نشد |
+| 9 Messenger | done؛ restyle پوسته به‌خاطر freeze برگردانده شد |
+| 10 shell و overlay مشترک | done |
+| 11 پاک‌سازی، پذیرش شاخه و گزارش ناظر | done |
 
 ## گیت‌های بین‌فازی
 
-هر فاز پس از عبور واقعی از gate همان فاز، commit مستقل می‌گیرد و فاز بعد
-بدون تأیید مالک شروع می‌شود. توقف فقط برای مانع خارجی غیرقابل‌حل مجاز است.
+هر فاز پس از عبور واقعی از gate همان فاز، commit مستقل گرفته است.
+توقف فقط برای مانع خارجی غیرقابل‌حل مجاز بود. Figma در دسترس بود.
 
 ## خروجی‌های این پوشه
 
