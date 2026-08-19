@@ -139,6 +139,7 @@ describe('DashboardView.vue Stage 4 Home contract', () => {
     expect(wrapper.get('.dashboard-identity-error').text()).toContain(
       'دریافت اطلاعات خانه انجام نشد',
     )
+    expect(wrapper.get('main.dashboard-page').exists()).toBe(true)
     expect(wrapper.text()).not.toContain('private transport detail')
     expect(wrapper.text()).not.toContain('اینترنت')
     expect(wrapper.findComponent(PWAInstallOverlay).exists()).toBe(false)

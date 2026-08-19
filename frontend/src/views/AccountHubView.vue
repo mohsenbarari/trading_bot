@@ -381,9 +381,8 @@ onMounted(refreshIdentity)
 .account-identity-name-row strong {
   min-width: 0;
   max-width: min(16rem, 56vw);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  white-space: normal;
   color: var(--ds-text-primary);
   font-size: var(--ds-font-lg);
   line-height: 1.35;

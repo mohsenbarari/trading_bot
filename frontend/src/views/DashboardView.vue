@@ -20,6 +20,7 @@ import {
   AppErrorState,
   AppIconButton,
   AppLoadingState,
+  AppPage,
   AppStatusBadge,
   AppToast,
 } from '../components/ui'
@@ -264,7 +265,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="dashboard-page">
+  <AppPage class="dashboard-page">
     <AppLoadingState v-if="loading" class="ds-loading-state" label="در حال دریافت خانه" />
 
     <AppErrorState
@@ -419,7 +420,7 @@ onUnmounted(() => {
         </AppToast>
       </AppDesignSystemScope>
 
-      <main class="main-section">
+      <section class="main-section">
 
         <template v-if="!isInactiveAccount">
         <!-- Market Entry — Hero Button -->
@@ -454,14 +455,23 @@ onUnmounted(() => {
         <AppDesignSystemScope as="div" class="ui-v2-pwa-section">
           <PWAInstallOverlay :eligible="pwaPromptEligible" />
         </AppDesignSystemScope>
-      </main>
+      </section>
     </div>
-  </div>
+  </AppPage>
 </template>
 
 <style scoped>
 .dashboard-page {
   position: relative;
+}
+
+.user-name,
+:deep(.ui-v2-home-name) {
+  min-width: 0;
+  overflow: visible;
+  text-overflow: unset;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .dashboard-content {

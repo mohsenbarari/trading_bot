@@ -47,6 +47,11 @@
     "operations_frames": {
       "customer_390": "666:455",
       "accountant_1440": "666:475"
+    },
+    "home_account_section_id": "667:488",
+    "home_account_frames": {
+      "home_390": "667:489",
+      "account_1440": "667:502"
     }
   },
   "code_connect": {
