@@ -24,14 +24,14 @@ class PublisherB2BDispatchCadenceTests(unittest.TestCase):
             0.0,
         )
 
-    def test_idle_cycle_retains_backoff_period(self):
+    def test_idle_cycle_does_not_add_a_second_interval(self):
         self.assertEqual(
             publisher_b2b_dispatch_cycle_sleep_seconds(
                 interval_seconds=0.5,
                 claimed_count=0,
                 elapsed_seconds=0.3,
             ),
-            0.7,
+            0.2,
         )
 
 

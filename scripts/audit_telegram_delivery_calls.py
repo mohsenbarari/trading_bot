@@ -142,6 +142,9 @@ EXPECTED_RUNTIME_INVENTORY_COUNTS = {
     "queue_execution": 1,
 }
 EXPECTED_RUNTIME_INVENTORY_SHA256 = (
+    "76b85cd00e923dd9a4b213d9782b671ec8bfa552108cb20afd940cf3fca47f25"
+)
+PRE_QUEUE_LATENCY_TUNING_RUNTIME_INVENTORY_SHA256 = (
     "e69c3e81cd5e9c00954e06e7a7fd716c6735061011a1b8eedba9d31cbaf64ca2"
 )
 PRE_NEARBY_COIN_PREVIEW_RUNTIME_INVENTORY_SHA256 = (
@@ -180,6 +183,10 @@ OVERTIME_OWNER_PROMPT_RUNTIME_INVENTORY_SHA256 = (
 REVIEWED_RUNTIME_INVENTORY_SHA256 = frozenset(
     {
         EXPECTED_RUNTIME_INVENTORY_SHA256,
+        # Queue latency tuning changes idle polling only. It moves the one
+        # queue-execution identity below the new lane cadence branch without
+        # adding, removing, or reclassifying any of the 103 callsites.
+        PRE_QUEUE_LATENCY_TUNING_RUNTIME_INVENTORY_SHA256,
         # Singleton coin inference now enters the real offer preview and its
         # edit action opens the server-filtered nearby list. This only shifts
         # existing trade_create delivery identities; all 103 dispositions and

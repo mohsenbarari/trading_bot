@@ -164,11 +164,15 @@ class TelegramDeliveryQueueWorkerSafetyTests(unittest.IsolatedAsyncioTestCase):
                 places=6,
             )
 
-    def test_one_primary_slot_is_fast_without_accelerating_other_lanes(self):
+    def test_latency_sensitive_slots_use_bounded_fast_polling(self):
         with patch.object(
             worker.settings,
             "telegram_delivery_queue_primary_idle_poll_interval_seconds",
             0.2,
+        ), patch.object(
+            worker.settings,
+            "telegram_delivery_queue_publisher_idle_poll_interval_seconds",
+            0.5,
         ), patch.object(
             worker.settings,
             "telegram_delivery_queue_worker_interval_seconds",
@@ -186,18 +190,18 @@ class TelegramDeliveryQueueWorkerSafetyTests(unittest.IsolatedAsyncioTestCase):
                     worker.TELEGRAM_PRIMARY_BOT_IDENTITY,
                     "general-1",
                 ),
-                1.0,
+                0.2,
             )
             self.assertEqual(
                 worker._lane_idle_poll_interval_seconds(
                     worker.TELEGRAM_PRIMARY_BOT_IDENTITY,
                     "m0-reserved-0",
                 ),
-                1.0,
+                0.2,
             )
             self.assertEqual(
                 worker._lane_idle_poll_interval_seconds("publisher_1", "general-0"),
-                1.0,
+                0.5,
             )
             self.assertEqual(
                 worker._lane_idle_poll_interval_seconds(

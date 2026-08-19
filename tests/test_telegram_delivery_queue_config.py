@@ -29,6 +29,10 @@ class TelegramDeliveryQueueConfigTests(unittest.TestCase):
             0.2,
         )
         self.assertEqual(
+            settings.telegram_delivery_queue_publisher_idle_poll_interval_seconds,
+            0.5,
+        )
+        self.assertEqual(
             settings.telegram_notification_outbox_queue_feeder_interval_seconds,
             0.2,
         )
@@ -116,6 +120,7 @@ class TelegramDeliveryQueueConfigTests(unittest.TestCase):
     def test_nonfinite_negative_and_inverted_retry_config_fail_startup(self):
         invalid = (
             {"telegram_delivery_queue_primary_idle_poll_interval_seconds": 0},
+            {"telegram_delivery_queue_publisher_idle_poll_interval_seconds": 0},
             {"telegram_notification_outbox_queue_feeder_interval_seconds": 0},
             {
                 "telegram_delivery_queue_primary_idle_poll_interval_seconds": float(

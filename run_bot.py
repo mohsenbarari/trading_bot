@@ -200,11 +200,10 @@ def publisher_b2b_dispatch_cycle_sleep_seconds(
     claimed_count: int,
     elapsed_seconds: float,
 ) -> float:
-    """Keep B2B cadence measured from cycle start, not after network latency."""
+    """Keep B2B cadence measured from cycle start, including idle cycles."""
     interval = max(0.0, float(interval_seconds))
     elapsed = max(0.0, float(elapsed_seconds))
-    target_period = interval if int(claimed_count) > 0 else interval * 2
-    return max(0.0, target_period - elapsed)
+    return max(0.0, interval - elapsed)
 
 
 async def supervise_bot_runtime(

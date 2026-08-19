@@ -577,9 +577,12 @@ def _worker_interval_seconds() -> float:
 
 
 def _lane_idle_poll_interval_seconds(bot_identity: str, slot_name: str) -> float:
-    """Keep one Central Bot slot responsive without empty-poll fan-out."""
+    """Keep interactive and publisher lanes responsive with bounded polling."""
     identity = _normalize_lane_identity(bot_identity)
-    if identity == TELEGRAM_PRIMARY_BOT_IDENTITY and slot_name == "general-0":
+    if identity == TELEGRAM_PRIMARY_BOT_IDENTITY and (
+        slot_name in {"general-0", "general-1"}
+        or slot_name.startswith("m0-reserved-")
+    ):
         return max(
             0.1,
             float(
@@ -587,6 +590,17 @@ def _lane_idle_poll_interval_seconds(bot_identity: str, slot_name: str) -> float
                     settings,
                     "telegram_delivery_queue_primary_idle_poll_interval_seconds",
                     0.2,
+                )
+            ),
+        )
+    if identity in TELEGRAM_PUBLISHER_IDENTITIES:
+        return max(
+            0.1,
+            float(
+                getattr(
+                    settings,
+                    "telegram_delivery_queue_publisher_idle_poll_interval_seconds",
+                    0.5,
                 )
             ),
         )
