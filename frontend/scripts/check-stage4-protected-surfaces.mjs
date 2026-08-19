@@ -26,6 +26,8 @@ import {
   MARKET_FEED_HEADING_REMOVAL_KIND,
   MARKET_HISTORY_TERMINAL_VISUAL_ALLOWED_PATHS,
   MARKET_HISTORY_TERMINAL_VISUAL_KIND,
+  MARKET_INFERENCE_CONFIRMATION_UX_ALLOWED_PATHS,
+  MARKET_INFERENCE_CONFIRMATION_UX_KIND,
   MARKET_OVERTIME_REQUESTER_ACK_ALLOWED_PATHS,
   MARKET_OVERTIME_REQUESTER_ACK_KIND,
   STAGE6_MESSENGER_URL_PRIVACY_ALLOWED_PATHS,
@@ -156,6 +158,10 @@ try {
   } else if (market.kind === MARKET_CROSS_SERVER_LOT_SUGGESTION_KIND) {
     console.log(
       `PASS Market cross-server lot suggestion identity disposition (exact ${MARKET_CROSS_SERVER_LOT_SUGGESTION_ALLOWED_PATHS.length}-file overlay; ${market.evidence.count} files, ${market.evidence.contentBytes} bytes, ${market.evidence.pathSetSha256}, ${market.evidence.sha256})`,
+    )
+  } else if (market.kind === MARKET_INFERENCE_CONFIRMATION_UX_KIND) {
+    console.log(
+      `PASS Market inference confirmation UX disposition (exact ${MARKET_INFERENCE_CONFIRMATION_UX_ALLOWED_PATHS.length}-file overlay; ${market.evidence.count} files, ${market.evidence.contentBytes} bytes, ${market.evidence.pathSetSha256}, ${market.evidence.sha256})`,
     )
   } else {
     throw new Error(`unsupported Market runtime disposition: ${String(market.kind)}`)

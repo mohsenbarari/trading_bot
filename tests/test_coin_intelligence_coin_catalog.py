@@ -5,7 +5,10 @@ from __future__ import annotations
 from types import SimpleNamespace
 import unittest
 
-from core.market_intelligence.coin_catalog import resolve_coin_inference_against_catalog
+from core.market_intelligence.coin_catalog import (
+    resolve_coin_inference_against_catalog,
+    resolve_coin_inference_edit_candidates,
+)
 from core.market_intelligence.coin_inference import (
     CoinCommodityCandidate,
     CoinCommodityInference,
@@ -92,6 +95,57 @@ class CoinCatalogResolutionTests(unittest.IsolatedAsyncioTestCase):
         )
         result = await resolve_coin_inference_against_catalog(db, source)
         self.assertEqual((result.status, result.reason, db.executed), ("ABSTAIN", "SNAPSHOT_STALE_OR_FUTURE", []))
+
+    async def test_edit_choices_are_existing_same_family_canonical_commodities(self) -> None:
+        db = _CatalogDB(
+            {
+                "ربع بهار": [SimpleNamespace(id=73, name="ربع بهار")],
+                "ربع تاریخ پایین": [SimpleNamespace(id=75, name="ربع تاریخ پایین")],
+            }
+        )
+        decision = await resolve_coin_inference_against_catalog(
+            db,
+            inference(
+                "CONFIRM",
+                candidate("QUARTER_BAHAR", "ربع بهار"),
+            ),
+        )
+
+        choices = await resolve_coin_inference_edit_candidates(db, decision)
+
+        self.assertEqual(
+            [(item.commodity_id, item.commodity_code, item.commodity_name) for item in choices],
+            [
+                (73, "QUARTER_BAHAR", "ربع بهار"),
+                (75, "QUARTER_LOW_DATE", "ربع تاریخ پایین"),
+            ],
+        )
+
+    async def test_low_date_edit_scope_never_reintroduces_normal_date_variant(self) -> None:
+        db = _CatalogDB(
+            {
+                "نیم بهار": [SimpleNamespace(id=74, name="نیم بهار")],
+                "نیم تاریخ پایین": [SimpleNamespace(id=76, name="نیم تاریخ پایین")],
+            }
+        )
+        decision = await resolve_coin_inference_against_catalog(
+            db,
+            inference(
+                "CONFIRM",
+                candidate("HALF_LOW_DATE", "نیم تاریخ پایین"),
+            ),
+        )
+
+        choices = await resolve_coin_inference_edit_candidates(
+            db,
+            decision,
+            candidate_scope="LOW_DATE_ONLY",
+        )
+
+        self.assertEqual(
+            [(item.commodity_code, item.commodity_name) for item in choices],
+            [("HALF_LOW_DATE", "نیم تاریخ پایین")],
+        )
 
 
 if __name__ == "__main__":

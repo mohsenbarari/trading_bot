@@ -386,6 +386,32 @@ export const MARKET_CROSS_SERVER_LOT_SUGGESTION_EVIDENCE = Object.freeze({
   sha256: '310a154c29b733c13534d8f290b065b69f14bdefc64b4c34a5ceaa09a7971425',
 })
 
+// Explicit product-requested UX correction for omitted commodity names. The
+// unique model suggestion is static copy with confirm/edit/cancel actions;
+// ambiguous results remain a choice list, and edits are explicit same-family
+// corrections that cannot inherit the model receipt.
+export const MARKET_INFERENCE_CONFIRMATION_UX_KIND =
+  'market-inference-confirmation-ux'
+
+export const MARKET_INFERENCE_CONFIRMATION_UX_ALLOWED_PATHS = Object.freeze([
+  'frontend/src/components/CommodityInferenceSelectionModal.vue',
+  'frontend/src/views/MarketView.vue',
+])
+
+export const MARKET_INFERENCE_CONFIRMATION_UX_ALLOWED_FILE_SHA256 = Object.freeze({
+  'frontend/src/components/CommodityInferenceSelectionModal.vue':
+    'fb11d4fa909ffd8c64fa60b3b52809c3ad57ffe7929932c23bc76e3840d71bfb',
+  'frontend/src/views/MarketView.vue':
+    '826507de513c6fcb1ec15e4a5785e77f5a03b8838785e273c9c8caca6f772528',
+})
+
+export const MARKET_INFERENCE_CONFIRMATION_UX_EVIDENCE = Object.freeze({
+  count: 20,
+  contentBytes: 174446,
+  pathSetSha256: '6035c31eab716d0061c81427da214fbe9765571ba0d370e218b11edab27678f2',
+  sha256: 'a7dd45408695aba1ce132b0c0e1dc6647f473496764da6601147c13aa8ba47c0',
+})
+
 export const MESSENGER_RUNTIME_BASELINE = Object.freeze({
   count: 85,
   contentBytes: 1312405,
@@ -479,6 +505,7 @@ const RUNTIME_SOURCE_EXTENSION = /\.(?:css|[cm]?[jt]sx?|vue)$/
 const TEST_SOURCE = /(?:^|\/)[^/]+\.(?:spec|test)\.[^/]+$/
 
 const MARKET_EXACT_RUNTIME_PATHS = new Set([
+  'frontend/src/components/CommodityInferenceSelectionModal.vue',
   'frontend/src/components/OfferPreviewModal.vue',
   'frontend/src/components/OffersList.vue',
   'frontend/src/components/TradeLotSuggestionAlert.vue',
@@ -1229,6 +1256,76 @@ export function assertMarketCrossServerLotSuggestionDisposition(entries) {
   )
 }
 
+export function assertMarketInferenceConfirmationUxSemantics(entries) {
+  assertMarketCrossServerLotSuggestionSemantics(entries)
+  const market = sourceByPath(entries, 'frontend/src/views/MarketView.vue')
+  const modal = sourceByPath(
+    entries,
+    'frontend/src/components/CommodityInferenceSelectionModal.vue',
+  )
+  const requiredMarketFragments = [
+    'edit_candidates?: Array<Pick<CoinInferenceShadowCandidate',
+    ':edit-candidates="pendingCommodityInference.commodity_inference.edit_candidates"',
+    "commodity_resolution: explicitCorrection ? 'EXPLICIT' : 'INFERRED'",
+    'commodity_inference: explicitCorrection ? undefined : parsed.commodity_inference',
+    '@select="selectInferredCommodity"',
+  ]
+  for (const fragment of requiredMarketFragments) {
+    if (!market.includes(fragment)) {
+      throw new Error(`Market inference confirmation UX lost explicit correction contract: ${fragment}`)
+    }
+  }
+  if (market.includes('@edit="editPendingCommodityInference"')) {
+    throw new Error('Market inference confirmation UX restored free-text editing from the selector')
+  }
+  const requiredModalFragments = [
+    'const isSingleSuggestion = computed',
+    'editing.value ? (props.editCandidates ?? []) : props.candidates',
+    "emit('select', candidate, editing.value)",
+    'data-test="commodity-inference-suggestion"',
+    'data-test="commodity-inference-confirm"',
+    'data-test="commodity-inference-edit"',
+    'data-test="commodity-inference-cancel"',
+    'v-if="isSingleSuggestion"',
+    'v-else class="commodity-inference-options"',
+  ]
+  for (const fragment of requiredModalFragments) {
+    if (!modal.includes(fragment)) {
+      throw new Error(`Market inference confirmation UX lost selector semantics: ${fragment}`)
+    }
+  }
+  for (const label of ['تأیید', 'ویرایش', 'انصراف']) {
+    if (!modal.includes(label)) {
+      throw new Error(`Market inference confirmation UX lost action label: ${label}`)
+    }
+  }
+}
+
+function assertMarketInferenceConfirmationUxAllowedFiles(entries) {
+  const entriesByPath = new Map(entries.map((entry) => [entry.path, entry]))
+  for (const repoPath of MARKET_INFERENCE_CONFIRMATION_UX_ALLOWED_PATHS) {
+    const entry = entriesByPath.get(repoPath)
+    if (!entry) throw new Error(`Market inference confirmation UX allowed file is missing: ${repoPath}`)
+    const actualSha256 = fileSha256(entry.content)
+    const expectedSha256 = MARKET_INFERENCE_CONFIRMATION_UX_ALLOWED_FILE_SHA256[repoPath]
+    if (actualSha256 !== expectedSha256) {
+      throw new Error(
+        `Market inference confirmation UX allowed file drift: ${repoPath} ${expectedSha256} -> ${actualSha256}`,
+      )
+    }
+  }
+}
+
+export function assertMarketInferenceConfirmationUxDisposition(entries) {
+  assertMarketInferenceConfirmationUxAllowedFiles(entries)
+  assertMarketInferenceConfirmationUxSemantics(entries)
+  return assertProtectedFileSetEvidence(
+    'Market inference confirmation UX disposition',
+    protectedFileSetEvidence(entries, MARKET_RUNTIME_CONTRACT),
+    MARKET_INFERENCE_CONFIRMATION_UX_EVIDENCE,
+  )
+}
+
 export function resolveMarketRuntimeDisposition(entries) {
   const actual = protectedFileSetEvidence(entries, MARKET_RUNTIME_CONTRACT)
   try {
@@ -1307,23 +1404,31 @@ export function resolveMarketRuntimeDisposition(entries) {
                             evidence: assertMarketCrossServerLotSuggestionDisposition(entries),
                           }
                         } catch (lotSuggestionError) {
-                          const messages = [
-                            baselineError,
-                            integrationError,
-                            aPlusCError,
-                            lifecycleError,
-                            perimeterError,
-                            linearMeterError,
-                            compactConfirmError,
-                            feedHeadingError,
-                            terminalVisualError,
-                            customerHistoryError,
-                            requesterAckError,
-                            lotSuggestionError,
-                          ].map((error) => error instanceof Error ? error.message : String(error))
-                          throw new Error(
-                            `Market runtime rejected after Stage 4 baseline drift (${messages[0]}); main/UIUX integration disposition rejected (${messages[1]}); Market A+C disposition rejected (${messages[2]}); Market A+C lifecycle-clarity disposition rejected (${messages[3]}); Market A+C perimeter-deadline disposition rejected (${messages[4]}); Market A+C linear-meter disposition rejected (${messages[5]}); Market compact-confirm disposition rejected (${messages[6]}); Market feed-heading removal disposition rejected (${messages[7]}); Market terminal-history visual disposition rejected (${messages[8]}); Market customer-history access disposition rejected (${messages[9]}); Market overtime requester acknowledgement disposition rejected (${messages[10]}); Market cross-server lot suggestion identity disposition rejected (${messages[11]})`,
-                          )
+                          try {
+                            return {
+                              kind: MARKET_INFERENCE_CONFIRMATION_UX_KIND,
+                              evidence: assertMarketInferenceConfirmationUxDisposition(entries),
+                            }
+                          } catch (inferenceUxError) {
+                            const messages = [
+                              baselineError,
+                              integrationError,
+                              aPlusCError,
+                              lifecycleError,
+                              perimeterError,
+                              linearMeterError,
+                              compactConfirmError,
+                              feedHeadingError,
+                              terminalVisualError,
+                              customerHistoryError,
+                              requesterAckError,
+                              lotSuggestionError,
+                              inferenceUxError,
+                            ].map((error) => error instanceof Error ? error.message : String(error))
+                            throw new Error(
+                              `Market runtime rejected after Stage 4 baseline drift (${messages[0]}); main/UIUX integration disposition rejected (${messages[1]}); Market A+C disposition rejected (${messages[2]}); Market A+C lifecycle-clarity disposition rejected (${messages[3]}); Market A+C perimeter-deadline disposition rejected (${messages[4]}); Market A+C linear-meter disposition rejected (${messages[5]}); Market compact-confirm disposition rejected (${messages[6]}); Market feed-heading removal disposition rejected (${messages[7]}); Market terminal-history visual disposition rejected (${messages[8]}); Market customer-history access disposition rejected (${messages[9]}); Market overtime requester acknowledgement disposition rejected (${messages[10]}); Market cross-server lot suggestion identity disposition rejected (${messages[11]}); Market inference confirmation UX disposition rejected (${messages[12]})`,
+                            )
+                          }
                         }
                       }
                     }

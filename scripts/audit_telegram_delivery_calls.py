@@ -142,6 +142,9 @@ EXPECTED_RUNTIME_INVENTORY_COUNTS = {
     "queue_execution": 1,
 }
 EXPECTED_RUNTIME_INVENTORY_SHA256 = (
+    "faebde08f41c835bfd70203386e447bb8cc180a3ced0c91ffeafc1d59b7d232c"
+)
+PRE_COIN_INFERENCE_CONFIRMATION_RUNTIME_INVENTORY_SHA256 = (
     "8d0ef6132e6bdcd6a7bbbaf1525c9e270d63eae4e74d8272123e9585ceeac9d2"
 )
 PRE_REALTIME_RECOVERY_RUNTIME_INVENTORY_SHA256 = (
@@ -174,6 +177,10 @@ OVERTIME_OWNER_PROMPT_RUNTIME_INVENTORY_SHA256 = (
 REVIEWED_RUNTIME_INVENTORY_SHA256 = frozenset(
     {
         EXPECTED_RUNTIME_INVENTORY_SHA256,
+        # Coin-inference confirmation adds no Telegram delivery boundary. One
+        # API and four bot callsite identities only move below the new response
+        # contract and confirmation/edit UI; all 103 dispositions stay exact.
+        PRE_COIN_INFERENCE_CONFIRMATION_RUNTIME_INVENTORY_SHA256,
         # Exact reviewed inventory at the request-home cancellation boundary.
         # Subsequent realtime recovery work shifted existing callsites without
         # adding or reclassifying a Telegram delivery boundary.

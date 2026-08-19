@@ -294,6 +294,12 @@ class CoinInferencePreviewCandidateResponse(BaseModel):
     distance_to_center_relative: float
 
 
+class CoinInferenceEditCandidateResponse(BaseModel):
+    commodity_id: int
+    commodity_code: str
+    commodity_name: str
+
+
 class CoinInferencePreviewResponse(BaseModel):
     status: str
     decision_key: str
@@ -302,6 +308,7 @@ class CoinInferencePreviewResponse(BaseModel):
     snapshot_receipt: str | None
     reason: str | None
     candidates: list[CoinInferencePreviewCandidateResponse]
+    edit_candidates: list[CoinInferenceEditCandidateResponse] = Field(default_factory=list)
 
 
 def _coin_inference_preview_path_or_error() -> str:
@@ -338,6 +345,7 @@ def _catalog_inference_shadow_payload(
     decision: object,
     *,
     decision_key: str,
+    edit_candidates: object = (),
     mode: str = "SHADOW_ONLY",
 ) -> dict[str, object]:
     candidates = []
@@ -362,6 +370,14 @@ def _catalog_inference_shadow_payload(
         "snapshot_receipt": getattr(decision, "snapshot_receipt", None),
         "reason": getattr(decision, "reason", None),
         "candidates": candidates,
+        "edit_candidates": [
+            {
+                "commodity_id": int(item.commodity_id),
+                "commodity_code": str(item.commodity_code),
+                "commodity_name": str(item.commodity_name),
+            }
+            for item in (edit_candidates or ())
+        ],
     }
 
 
@@ -400,6 +416,7 @@ async def _shadow_inference_for_implicit_commodity(
         return _catalog_inference_shadow_payload(
             observation.decision,
             decision_key=observation.decision_key,
+            edit_candidates=observation.edit_candidates,
         )
     except Exception as exc:
         await db.rollback()
@@ -463,6 +480,7 @@ async def _selection_inference_for_missing_commodity(
         return _catalog_inference_shadow_payload(
             observation.decision,
             decision_key=observation.decision_key,
+            edit_candidates=observation.edit_candidates,
             mode="SELECTABLE",
         )
     except Exception as exc:
@@ -1593,6 +1611,14 @@ async def preview_coin_commodity_inference(
                 distance_to_center_relative=item.distance_to_center_relative,
             )
             for item in observation.decision.candidates
+        ],
+        edit_candidates=[
+            CoinInferenceEditCandidateResponse(
+                commodity_id=item.commodity_id,
+                commodity_code=item.commodity_code,
+                commodity_name=item.commodity_name,
+            )
+            for item in observation.edit_candidates
         ],
     )
 

@@ -62,6 +62,7 @@ interface CoinInferencePreview {
   snapshot_receipt: string | null
   reason: string | null
   candidates: CoinInferenceShadowCandidate[]
+  edit_candidates?: Array<Pick<CoinInferenceShadowCandidate, 'commodity_id' | 'commodity_code' | 'commodity_name'>>
 }
 
 interface OfferPriceWarning {
@@ -791,7 +792,10 @@ function editPendingOfferPreview() {
   focusOfferInput()
 }
 
-function selectInferredCommodity(candidate: CoinInferenceShadowCandidate) {
+function selectInferredCommodity(
+  candidate: Pick<CoinInferenceShadowCandidate, 'commodity_id' | 'commodity_code' | 'commodity_name'>,
+  explicitCorrection = false,
+) {
   const parsed = pendingCommodityInference.value
   if (!parsed) return
   pendingCommodityInference.value = null
@@ -799,17 +803,9 @@ function selectInferredCommodity(candidate: CoinInferenceShadowCandidate) {
     ...parsed,
     commodity_id: candidate.commodity_id,
     commodity_name: candidate.commodity_name,
-    commodity_resolution: 'INFERRED',
+    commodity_resolution: explicitCorrection ? 'EXPLICIT' : 'INFERRED',
+    commodity_inference: explicitCorrection ? undefined : parsed.commodity_inference,
   }
-}
-
-function editPendingCommodityInference() {
-  const parsed = pendingCommodityInference.value
-  if (!parsed) return
-  offerText.value = buildOfferDraftText(parsed)
-  pendingCommodityInference.value = null
-  parseError.value = ''
-  focusOfferInput()
 }
 
 async function confirmOfferPreview() {
@@ -1205,9 +1201,9 @@ onUnmounted(() => {
     <CommodityInferenceSelectionModal
       v-if="pendingCommodityInference?.commodity_inference?.mode === 'SELECTABLE'"
       :candidates="pendingCommodityInference.commodity_inference.candidates"
+      :edit-candidates="pendingCommodityInference.commodity_inference.edit_candidates"
       :low-date-hint="pendingCommodityInference.low_date_hint"
       @select="selectInferredCommodity"
-      @edit="editPendingCommodityInference"
       @cancel="cancelOfferPreview"
     />
 

@@ -2647,6 +2647,9 @@ async def _prepare_text_offer(
             if not candidates:
                 observation = None
             else:
+                edit_candidates = list(
+                    getattr(observation, "edit_candidates", ()) or candidates
+                )
                 await state.update_data(
                     text_offer_inference_draft={
                         "trade_type": result.trade_type,
@@ -2662,29 +2665,69 @@ async def _prepare_text_offer(
                         {"commodity_id": item.commodity_id, "commodity_name": item.commodity_name}
                         for item in candidates
                     ],
+                    text_offer_inference_edit_candidates=[
+                        {"commodity_id": item.commodity_id, "commodity_name": item.commodity_name}
+                        for item in edit_candidates
+                    ],
+                    text_offer_inference_mode="model",
                 )
-                choice_keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                    [
+                if len(candidates) == 1:
+                    suggested = candidates[0]
+                    action_row = [
                         InlineKeyboardButton(
-                            text=item.commodity_name,
-                            callback_data=TextOfferInferenceCandidateCallback(
-                                commodity_id=item.commodity_id
+                            text="✅ تأیید",
+                            callback_data=TextOfferActionCallback(
+                                action="confirm_commodity"
                             ).pack(),
                         )
-                        for item in candidates
-                    ],
-                    [
-                        InlineKeyboardButton(
-                            text="❌ انصراف",
-                            callback_data=TextOfferActionCallback(action="cancel").pack(),
+                    ]
+                    if any(
+                        item.commodity_id != suggested.commodity_id
+                        for item in edit_candidates
+                    ):
+                        action_row.append(
+                            InlineKeyboardButton(
+                                text="✏️ ویرایش",
+                                callback_data=TextOfferActionCallback(
+                                    action="edit_commodity"
+                                ).pack(),
+                            )
                         )
-                    ],
-                ])
+                    choice_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                        action_row,
+                        [
+                            InlineKeyboardButton(
+                                text="❌ انصراف",
+                                callback_data=TextOfferActionCallback(action="cancel").pack(),
+                            )
+                        ],
+                    ])
+                    prompt = f"کالای پیشنهادی: «{suggested.commodity_name}»\nدرست است؟"
+                else:
+                    choice_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                        *[
+                            [
+                                InlineKeyboardButton(
+                                    text=item.commodity_name,
+                                    callback_data=TextOfferInferenceCandidateCallback(
+                                        commodity_id=item.commodity_id
+                                    ).pack(),
+                                )
+                            ]
+                            for item in candidates
+                        ],
+                        [
+                            InlineKeyboardButton(
+                                text="❌ انصراف",
+                                callback_data=TextOfferActionCallback(action="cancel").pack(),
+                            )
+                        ],
+                    ])
+                    prompt = "کالای آفر را انتخاب کنید."
                 selection_message = await _text_offer_response(
                     message,
                     user,
-                    "قیمت آفر در بازهٔ چند کالای هم‌گروه است. کالای مدنظر را انتخاب کنید؛ "
-                    "پیش از ثبت نهایی دوباره با نرخ لحظه‌ای بررسی می‌شود.",
+                    prompt,
                     edit=edit_response,
                     reply_markup=choice_keyboard,
                 )
@@ -2986,6 +3029,23 @@ async def handle_unexpected_trade_builder_message(
     await _send_stale_trade_builder_guidance(message, user=user)
 
 
+async def _current_text_offer_inference_data(
+    callback: types.CallbackQuery,
+    state: FSMContext,
+) -> Mapping[str, object] | None:
+    data = await state.get_data()
+    expected_message_id = data.get("text_offer_inference_message_id")
+    actual_message_id = getattr(getattr(callback, "message", None), "message_id", None)
+    if isinstance(expected_message_id, int) and actual_message_id != expected_message_id:
+        await answer_callback_query_via_runtime(
+            callback,
+            "این انتخاب قدیمی است.",
+            show_alert=True,
+        )
+        return None
+    return data
+
+
 @router.callback_query(
     Trade.awaiting_text_inference_choice,
     TextOfferInferenceCandidateCallback.filter(),
@@ -3001,13 +3061,22 @@ async def handle_text_offer_inference_choice(
     if not user:
         await answer_callback_query_via_runtime(callback)
         return
-    data = await state.get_data()
-    expected_message_id = data.get("text_offer_inference_message_id")
-    actual_message_id = getattr(getattr(callback, "message", None), "message_id", None)
-    if isinstance(expected_message_id, int) and actual_message_id != expected_message_id:
-        await answer_callback_query_via_runtime(callback, "این انتخاب قدیمی است.", show_alert=True)
+    data = await _current_text_offer_inference_data(callback, state)
+    if data is None:
         return
-    candidates = data.get("text_offer_inference_candidates")
+    selection_mode = str(data.get("text_offer_inference_mode") or "model")
+    if selection_mode not in {"model", "edit"}:
+        await answer_callback_query_via_runtime(
+            callback,
+            "این انتخاب دیگر معتبر نیست.",
+            show_alert=True,
+        )
+        return
+    candidates = data.get(
+        "text_offer_inference_edit_candidates"
+        if selection_mode == "edit"
+        else "text_offer_inference_candidates"
+    )
     draft = data.get("text_offer_inference_draft")
     decision_key = str(data.get("text_offer_inference_decision_key") or "").strip()
     if not isinstance(candidates, list) or not isinstance(draft, Mapping) or not decision_key:
@@ -3033,6 +3102,65 @@ async def handle_text_offer_inference_choice(
         **dict(draft),
         commodity_id=int(selected["commodity_id"]),
         commodity_name=str(selected["commodity_name"]),
+        commodity_resolution=("EXPLICIT" if selection_mode == "edit" else "INFERRED"),
+    )
+    await _show_text_offer_preview(
+        callback.message,
+        state,
+        user,
+        result,
+        edit_response=True,
+        inference_selection=(
+            None
+            if selection_mode == "edit"
+            else {
+                "decision_key": decision_key,
+                "selected_commodity_id": int(selected["commodity_id"]),
+            }
+        ),
+    )
+    await answer_callback_query_via_runtime(callback)
+
+
+@router.callback_query(
+    Trade.awaiting_text_inference_choice,
+    TextOfferActionCallback.filter(F.action == "confirm_commodity"),
+)
+async def handle_text_offer_inference_suggestion_confirm(
+    callback: types.CallbackQuery,
+    state: FSMContext,
+    user: Optional[User],
+):
+    """Confirm the sole model suggestion before entering publish preview."""
+
+    if not user:
+        await answer_callback_query_via_runtime(callback)
+        return
+    data = await _current_text_offer_inference_data(callback, state)
+    if data is None:
+        return
+    candidates = data.get("text_offer_inference_candidates")
+    draft = data.get("text_offer_inference_draft")
+    decision_key = str(data.get("text_offer_inference_decision_key") or "").strip()
+    selection_mode = str(data.get("text_offer_inference_mode") or "model")
+    if (
+        selection_mode != "model"
+        or not isinstance(candidates, list)
+        or len(candidates) != 1
+        or not isinstance(draft, Mapping)
+        or not decision_key
+    ):
+        await answer_callback_query_via_runtime(
+            callback,
+            "این پیشنهاد دیگر معتبر نیست.",
+            show_alert=True,
+        )
+        return
+    selected = candidates[0]
+    result = SimpleNamespace(
+        **dict(draft),
+        commodity_id=int(selected["commodity_id"]),
+        commodity_name=str(selected["commodity_name"]),
         commodity_resolution="INFERRED",
     )
     await _show_text_offer_preview(
@@ -3045,6 +3173,69 @@ async def handle_text_offer_inference_choice(
             "decision_key": decision_key,
             "selected_commodity_id": int(selected["commodity_id"]),
         },
+    )
+    await answer_callback_query_via_runtime(callback)
+
+
+@router.callback_query(
+    Trade.awaiting_text_inference_choice,
+    TextOfferActionCallback.filter(F.action == "edit_commodity"),
+)
+async def handle_text_offer_inference_suggestion_edit(
+    callback: types.CallbackQuery,
+    state: FSMContext,
+    user: Optional[User],
+):
+    """Show explicit same-family alternatives for a unique suggestion."""
+
+    if not user:
+        await answer_callback_query_via_runtime(callback)
+        return
+    data = await _current_text_offer_inference_data(callback, state)
+    if data is None:
+        return
+    candidates = data.get("text_offer_inference_edit_candidates")
+    model_candidates = data.get("text_offer_inference_candidates")
+    selection_mode = str(data.get("text_offer_inference_mode") or "model")
+    if (
+        selection_mode != "model"
+        or not isinstance(model_candidates, list)
+        or len(model_candidates) != 1
+        or not isinstance(candidates, list)
+        or not candidates
+    ):
+        await answer_callback_query_via_runtime(
+            callback,
+            "گزینهٔ دیگری در دسترس نیست.",
+            show_alert=True,
+        )
+        return
+    await state.update_data(text_offer_inference_mode="edit")
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        *[
+            [
+                InlineKeyboardButton(
+                    text=str(item["commodity_name"]),
+                    callback_data=TextOfferInferenceCandidateCallback(
+                        commodity_id=int(item["commodity_id"])
+                    ).pack(),
+                )
+            ]
+            for item in candidates
+            if isinstance(item, Mapping)
+        ],
+        [
+            InlineKeyboardButton(
+                text="❌ انصراف",
+                callback_data=TextOfferActionCallback(action="cancel").pack(),
+            )
+        ],
+    ])
+    await edit_callback_message_via_runtime(
+        callback,
+        user,
+        "کالای درست را انتخاب کنید.",
+        reply_markup=keyboard,
     )
     await answer_callback_query_via_runtime(callback)
 

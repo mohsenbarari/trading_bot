@@ -95,6 +95,10 @@ class CoinInferenceShadowObservationTests(unittest.IsolatedAsyncioTestCase):
                 "core.market_intelligence.coin_inference_shadow.append_coin_inference_audit",
                 new=AsyncMock(),
             ) as append,
+            patch(
+                "core.market_intelligence.coin_inference_shadow.resolve_coin_inference_edit_candidates",
+                new=AsyncMock(return_value=()),
+            ),
         ):
             await observe_coin_inference_shadow(
                 db,
@@ -165,6 +169,10 @@ class CoinInferenceShadowObservationTests(unittest.IsolatedAsyncioTestCase):
                 "core.market_intelligence.coin_inference_shadow.append_coin_inference_audit",
                 new=AsyncMock(),
             ) as append,
+            patch(
+                "core.market_intelligence.coin_inference_shadow.resolve_coin_inference_edit_candidates",
+                new=AsyncMock(return_value=()),
+            ) as resolve_edits,
         ):
             observation = await observe_coin_inference_shadow(
                 db,
@@ -181,6 +189,7 @@ class CoinInferenceShadowObservationTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(observation.decision.candidates, raw_decision.candidates)
         self.assertEqual(append.await_args.args[1].decision.status, "AUTO_SELECT")
+        resolve_edits.assert_awaited_once()
 
 
 if __name__ == "__main__":

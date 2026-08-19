@@ -51,7 +51,7 @@ COIN_INFERENCE_CANDIDATE_SCOPES = frozenset(
         COIN_INFERENCE_CANDIDATE_SCOPE_LOW_DATE_ONLY,
     }
 )
-_LOW_DATE_COMMODITY_CODES = frozenset({"BAHAR", "HALF_LOW_DATE", "QUARTER_LOW_DATE"})
+COIN_LOW_DATE_COMMODITY_CODES = frozenset({"BAHAR", "HALF_LOW_DATE", "QUARTER_LOW_DATE"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -151,7 +151,7 @@ def infer_coin_commodity(
         code = str(item.get("commodity_code") or "")
         if code not in COIN_SPECS or str(item.get("settlement_term") or "") != settlement:
             continue
-        if scope == COIN_INFERENCE_CANDIDATE_SCOPE_LOW_DATE_ONLY and code not in _LOW_DATE_COMMODITY_CODES:
+        if scope == COIN_INFERENCE_CANDIDATE_SCOPE_LOW_DATE_ONLY and code not in COIN_LOW_DATE_COMMODITY_CODES:
             continue
         center = item.get("estimated_project_price")
         lower = item.get("lower_project_price")

@@ -45,6 +45,10 @@ import {
   MARKET_HISTORY_TERMINAL_VISUAL_ALLOWED_PATHS,
   MARKET_HISTORY_TERMINAL_VISUAL_EVIDENCE,
   MARKET_HISTORY_TERMINAL_VISUAL_KIND,
+  MARKET_INFERENCE_CONFIRMATION_UX_ALLOWED_FILE_SHA256,
+  MARKET_INFERENCE_CONFIRMATION_UX_ALLOWED_PATHS,
+  MARKET_INFERENCE_CONFIRMATION_UX_EVIDENCE,
+  MARKET_INFERENCE_CONFIRMATION_UX_KIND,
   MARKET_OVERTIME_REQUESTER_ACK_ALLOWED_FILE_SHA256,
   MARKET_OVERTIME_REQUESTER_ACK_ALLOWED_PATHS,
   MARKET_OVERTIME_REQUESTER_ACK_EVIDENCE,
@@ -88,6 +92,8 @@ import {
   assertMarketFeedHeadingRemovalSemantics,
   assertMarketHistoryTerminalVisualDisposition,
   assertMarketHistoryTerminalVisualSemantics,
+  assertMarketInferenceConfirmationUxDisposition,
+  assertMarketInferenceConfirmationUxSemantics,
   assertMarketOvertimeRequesterAcknowledgementDisposition,
   assertMarketOvertimeRequesterAcknowledgementSemantics,
   STAGE4_BASE_COMMIT,
@@ -312,12 +318,13 @@ describe('Stage 4 protected surface baseline', () => {
     )
   })
 
-  it('keeps every prior Market disposition immutable while admitting cross-server lot identity', () => {
+  it('keeps every prior Market disposition immutable while admitting inference confirmation UX', () => {
     expect(ownedPaths.market).toContain('frontend/src/utils/settlementType.ts')
+    expect(ownedPaths.market).toContain('frontend/src/components/CommodityInferenceSelectionModal.vue')
     const entries = readFileEntries(repoRoot, ownedPaths.market)
     expect(resolveMarketRuntimeDisposition(entries)).toMatchObject({
-      kind: MARKET_CROSS_SERVER_LOT_SUGGESTION_KIND,
-      evidence: MARKET_CROSS_SERVER_LOT_SUGGESTION_EVIDENCE,
+      kind: MARKET_INFERENCE_CONFIRMATION_UX_KIND,
+      evidence: MARKET_INFERENCE_CONFIRMATION_UX_EVIDENCE,
     })
     expect(MARKET_RUNTIME_BASELINE).toEqual({
       count: 19,
@@ -428,10 +435,10 @@ describe('Stage 4 protected surface baseline', () => {
     expect(MARKET_CUSTOMER_HISTORY_ACCESS_ALLOWED_PATHS).toEqual([
       'frontend/src/views/MarketView.vue',
     ])
-    for (const repoPath of MARKET_CUSTOMER_HISTORY_ACCESS_ALLOWED_PATHS) {
-      const entry = entries.find(({ path: candidate }) => candidate === repoPath)
-      expect(fileSha256(entry.content)).toBe(MARKET_CUSTOMER_HISTORY_ACCESS_ALLOWED_FILE_SHA256[repoPath])
-    }
+    expect(MARKET_CUSTOMER_HISTORY_ACCESS_ALLOWED_FILE_SHA256).toEqual({
+      'frontend/src/views/MarketView.vue':
+        '821aa2766f977bfef9e32ec56d68250a21d7d15aa5f9a7c1709ab0cf56f6ad13',
+    })
     expect(MARKET_CUSTOMER_HISTORY_ACCESS_EVIDENCE).toEqual({
       count: 19,
       contentBytes: 166783,
@@ -442,7 +449,7 @@ describe('Stage 4 protected surface baseline', () => {
     expect(Object.isFrozen(MARKET_CUSTOMER_HISTORY_ACCESS_ALLOWED_FILE_SHA256)).toBe(true)
     expect(Object.isFrozen(MARKET_CUSTOMER_HISTORY_ACCESS_EVIDENCE)).toBe(true)
     expect(() => assertMarketCustomerHistoryAccessDisposition(entries)).toThrow(
-      /contentBytes drift/,
+      /Market customer-history allowed file drift/,
     )
     expect(MARKET_OVERTIME_REQUESTER_ACK_KIND).toBe(
       'market-overtime-requester-local-acknowledgement',
@@ -479,7 +486,24 @@ describe('Stage 4 protected surface baseline', () => {
       pathSetSha256: '37aa0b51e20f4ae86f7daf6c3c231d93b3d1f288ade1471490a1f843a57c9589',
       sha256: '310a154c29b733c13534d8f290b065b69f14bdefc64b4c34a5ceaa09a7971425',
     })
-    expect(() => assertMarketCrossServerLotSuggestionDisposition(entries)).not.toThrow()
+    expect(() => assertMarketCrossServerLotSuggestionDisposition(entries)).toThrow(/count drift/)
+    expect(MARKET_INFERENCE_CONFIRMATION_UX_ALLOWED_PATHS).toEqual([
+      'frontend/src/components/CommodityInferenceSelectionModal.vue',
+      'frontend/src/views/MarketView.vue',
+    ])
+    expect(MARKET_INFERENCE_CONFIRMATION_UX_ALLOWED_FILE_SHA256).toEqual({
+      'frontend/src/components/CommodityInferenceSelectionModal.vue':
+        'fb11d4fa909ffd8c64fa60b3b52809c3ad57ffe7929932c23bc76e3840d71bfb',
+      'frontend/src/views/MarketView.vue':
+        '826507de513c6fcb1ec15e4a5785e77f5a03b8838785e273c9c8caca6f772528',
+    })
+    expect(MARKET_INFERENCE_CONFIRMATION_UX_EVIDENCE).toEqual({
+      count: 20,
+      contentBytes: 174446,
+      pathSetSha256: '6035c31eab716d0061c81427da214fbe9765571ba0d370e218b11edab27678f2',
+      sha256: 'a7dd45408695aba1ce132b0c0e1dc6647f473496764da6601147c13aa8ba47c0',
+    })
+    expect(() => assertMarketInferenceConfirmationUxDisposition(entries)).not.toThrow()
   })
 
   it('fails closed if the cross-server suggestion loses local or public identity', () => {
@@ -499,6 +523,28 @@ describe('Stage 4 protected surface baseline', () => {
     expect(() => resolveMarketRuntimeDisposition(withoutPublicId)).toThrow(
       /Market cross-server lot suggestion identity disposition rejected/,
     )
+  })
+
+  it('fails closed if the inference selector loses explicit confirmation or receipt separation', () => {
+    const entries = readFileEntries(repoRoot, ownedPaths.market)
+    const mutate = (repoPath, fragment) => entries.map((entry) => (
+      entry.path === repoPath
+        ? { ...entry, content: Buffer.from(entry.content.toString('utf8').replace(fragment, '')) }
+        : entry
+    ))
+
+    expect(() => assertMarketInferenceConfirmationUxSemantics(mutate(
+      'frontend/src/components/CommodityInferenceSelectionModal.vue',
+      'data-test="commodity-inference-confirm"',
+    ))).toThrow(/lost selector semantics/)
+    expect(() => assertMarketInferenceConfirmationUxSemantics(mutate(
+      'frontend/src/views/MarketView.vue',
+      'commodity_inference: explicitCorrection ? undefined : parsed.commodity_inference',
+    ))).toThrow(/lost explicit correction contract/)
+    expect(() => assertMarketInferenceConfirmationUxDisposition(mutate(
+      'frontend/src/components/CommodityInferenceSelectionModal.vue',
+      'کالای پیشنهادی',
+    ))).toThrow(/allowed file drift/)
   })
 
   it('fails closed if the customer history gate or accountant exclusion returns', () => {
@@ -553,16 +599,16 @@ describe('Stage 4 protected surface baseline', () => {
     )
   })
 
-  it('fails closed for any further Market drift inside or outside the customer-history allowlist', () => {
+  it('fails closed for any further Market drift inside or outside the inference UX allowlist', () => {
     const entries = readFileEntries(repoRoot, ownedPaths.market)
-    const allowedPath = MARKET_CUSTOMER_HISTORY_ACCESS_ALLOWED_PATHS[0]
+    const allowedPath = MARKET_INFERENCE_CONFIRMATION_UX_ALLOWED_PATHS[0]
     const changedAllowed = entries.map((entry) =>
       entry.path === allowedPath
         ? { ...entry, content: Buffer.concat([entry.content, Buffer.from('\n/* drift */')]) }
         : entry,
     )
     const unlistedPath = entries.find(
-      ({ path: repoPath }) => !MARKET_CUSTOMER_HISTORY_ACCESS_ALLOWED_PATHS.includes(repoPath),
+      ({ path: repoPath }) => !MARKET_INFERENCE_CONFIRMATION_UX_ALLOWED_PATHS.includes(repoPath),
     ).path
     const changedUnlisted = entries.map((entry) =>
       entry.path === unlistedPath
@@ -570,17 +616,17 @@ describe('Stage 4 protected surface baseline', () => {
         : entry,
     )
 
-    expect(() => assertMarketCustomerHistoryAccessDisposition(changedAllowed)).toThrow(
-      /Market customer-history allowed file drift/,
+    expect(() => assertMarketInferenceConfirmationUxDisposition(changedAllowed)).toThrow(
+      /Market inference confirmation UX allowed file drift/,
     )
     expect(() => resolveMarketRuntimeDisposition(changedAllowed)).toThrow(
-      /Market customer-history access disposition rejected/,
+      /Market inference confirmation UX disposition rejected/,
     )
-    expect(() => assertMarketCustomerHistoryAccessDisposition(changedUnlisted)).toThrow(
+    expect(() => assertMarketInferenceConfirmationUxDisposition(changedUnlisted)).toThrow(
       /contentBytes drift/,
     )
     expect(() => resolveMarketRuntimeDisposition(changedUnlisted)).toThrow(
-      /Market customer-history access disposition rejected/,
+      /Market inference confirmation UX disposition rejected/,
     )
   })
 

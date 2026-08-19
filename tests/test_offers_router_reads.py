@@ -15,6 +15,7 @@ from api.routers.offers import (
 )
 from core.market_intelligence.coin_catalog import (
     CatalogCoinCommodityCandidate,
+    CatalogCoinCommodityEditCandidate,
     CatalogCoinCommodityInference,
 )
 from core.market_intelligence.coin_inference_shadow import CoinInferenceShadowObservation
@@ -259,10 +260,25 @@ class OffersRouterReadTests(unittest.IsolatedAsyncioTestCase):
         decision = CatalogCoinCommodityInference(
             status="CONFIRM",
             settlement_term="CASH",
-            candidates=(),
+            candidates=(
+                CatalogCoinCommodityCandidate(
+                    commodity_id=73,
+                    commodity_code="QUARTER_BAHAR",
+                    commodity_name="ربع بهار",
+                    center_project_price=52_000,
+                    lower_project_price=51_000,
+                    upper_project_price=53_000,
+                    confidence="HIGH",
+                    distance_to_center_relative=0.0,
+                ),
+            ),
             snapshot_generated_at_utc="2026-08-04T10:00:00Z",
             snapshot_receipt="b" * 64,
             reason="AUTO_SELECTION_REQUIRES_CONFIRMATION",
+        )
+        edit_candidates = (
+            CatalogCoinCommodityEditCandidate(73, "QUARTER_BAHAR", "ربع بهار"),
+            CatalogCoinCommodityEditCandidate(75, "QUARTER_LOW_DATE", "ربع تاریخ پایین"),
         )
         with (
             patch("api.routers.offers.settings.coin_intelligence_inference_preview_enabled", False),
@@ -272,7 +288,13 @@ class OffersRouterReadTests(unittest.IsolatedAsyncioTestCase):
             patch("bot.utils.offer_parser.parse_offer_text", new=AsyncMock(return_value=(parsed, None))),
             patch(
                 "api.routers.offers.observe_coin_inference_shadow",
-                new=AsyncMock(return_value=CoinInferenceShadowObservation("a" * 64, decision)),
+                new=AsyncMock(
+                    return_value=CoinInferenceShadowObservation(
+                        "a" * 64,
+                        decision,
+                        edit_candidates,
+                    )
+                ),
             ) as observe,
         ):
             result = await parse_offer_text(
@@ -283,6 +305,21 @@ class OffersRouterReadTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual((result.data["commodity_id"], result.data["commodity_resolution"]), (None, "OMITTED"))
         self.assertEqual(result.data["commodity_inference"]["status"], "CONFIRM")
+        self.assertEqual(
+            result.data["commodity_inference"]["edit_candidates"],
+            [
+                {
+                    "commodity_id": 73,
+                    "commodity_code": "QUARTER_BAHAR",
+                    "commodity_name": "ربع بهار",
+                },
+                {
+                    "commodity_id": 75,
+                    "commodity_code": "QUARTER_LOW_DATE",
+                    "commodity_name": "ربع تاریخ پایین",
+                },
+            ],
+        )
         self.assertTrue(observe.await_args.kwargs["force_confirmation"])
 
     async def test_offer_read_options_only_load_owner_when_identity_is_required(self):

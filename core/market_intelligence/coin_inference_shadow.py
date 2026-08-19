@@ -16,7 +16,12 @@ import secrets
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .coin_catalog import CatalogCoinCommodityInference, resolve_coin_inference_against_catalog
+from .coin_catalog import (
+    CatalogCoinCommodityEditCandidate,
+    CatalogCoinCommodityInference,
+    resolve_coin_inference_against_catalog,
+    resolve_coin_inference_edit_candidates,
+)
 from .coin_inference import CoinCommodityInference, infer_coin_commodity
 from .coin_inference_audit import CoinInferenceAuditCommand, append_coin_inference_audit
 from .market_snapshot import AtomicMarketSnapshotProvider, MarketSnapshotUnavailable
@@ -32,6 +37,7 @@ class CoinInferenceShadowObservation:
 
     decision_key: str
     decision: CatalogCoinCommodityInference
+    edit_candidates: tuple[CatalogCoinCommodityEditCandidate, ...] = ()
 
 
 _SAFE_SOURCE_CODE_PATTERN = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
@@ -160,9 +166,17 @@ async def observe_coin_inference_shadow(
         if force_confirmation
         else catalog_result
     )
+    edit_candidates: tuple[CatalogCoinCommodityEditCandidate, ...] = ()
+    if force_confirmation and len(presentation_decision.candidates) == 1:
+        edit_candidates = await resolve_coin_inference_edit_candidates(
+            db,
+            presentation_decision,
+            candidate_scope=candidate_scope,
+        )
     return CoinInferenceShadowObservation(
         decision_key=decision_key,
         decision=presentation_decision,
+        edit_candidates=edit_candidates,
     )
 
 

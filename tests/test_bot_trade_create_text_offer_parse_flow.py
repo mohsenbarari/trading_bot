@@ -9,6 +9,8 @@ from bot.handlers.trade_create import (
     _text_offer_shadow_inference_summary,
     handle_text_offer,
     handle_text_offer_inference_choice,
+    handle_text_offer_inference_suggestion_confirm,
+    handle_text_offer_inference_suggestion_edit,
 )
 from core.enums import UserRole
 from core.telegram_delivery_queue_contract import TelegramDeliveryAction
@@ -317,6 +319,166 @@ class BotTradeCreateTextOfferParseFlowTests(unittest.IsolatedAsyncioTestCase):
             "selected_commodity_id": 71,
         })
         answer.assert_awaited_once()
+
+    async def test_unique_selector_shows_concise_confirm_edit_cancel_prompt(self):
+        user = SimpleNamespace(role=UserRole.STANDARD, trading_restricted_until=None, id=1)
+        parsed = SimpleNamespace(
+            trade_type="buy",
+            settlement_type="tomorrow",
+            commodity_id=None,
+            commodity_name=None,
+            commodity_resolution="OMITTED",
+            low_date_hint=False,
+            quantity=40,
+            price=52000,
+            is_wholesale=False,
+            lot_sizes=[40],
+            notes=None,
+        )
+        suggested = SimpleNamespace(commodity_id=73, commodity_name="ربع بهار")
+        nearby = SimpleNamespace(commodity_id=75, commodity_name="ربع تاریخ پایین")
+        observation = SimpleNamespace(
+            decision_key="a" * 64,
+            decision=SimpleNamespace(status="CONFIRM", candidates=(suggested,)),
+            edit_candidates=(suggested, nearby),
+        )
+        message = SimpleNamespace(text="خ ف40 عدد 52000")
+        state = SimpleNamespace(
+            get_state=AsyncMock(return_value=None),
+            update_data=AsyncMock(),
+            set_state=AsyncMock(),
+        )
+        with (
+            patch("bot.handlers.trade_create._bot_market_is_open", new=AsyncMock(return_value=True)),
+            patch(
+                "bot.handlers.trade_create.settings",
+                SimpleNamespace(
+                    coin_intelligence_inference_preview_enabled=False,
+                    coin_intelligence_inference_selection_enabled=True,
+                    coin_intelligence_inference_auto_selection_enabled=False,
+                ),
+            ),
+            patch("bot.utils.offer_parser.parse_offer_text", new=AsyncMock(return_value=(parsed, None))),
+            patch(
+                "bot.handlers.trade_create._text_offer_selection_observation",
+                new=AsyncMock(return_value=observation),
+            ),
+            patch(
+                "bot.handlers.trade_create._text_offer_response",
+                new=AsyncMock(return_value=SimpleNamespace()),
+            ) as respond,
+        ):
+            await handle_text_offer(message, state, user=user, bot=SimpleNamespace())
+
+        self.assertEqual(respond.await_args.args[2], "کالای پیشنهادی: «ربع بهار»\nدرست است؟")
+        keyboard = respond.await_args.kwargs["reply_markup"]
+        self.assertEqual(
+            [[button.text for button in row] for row in keyboard.inline_keyboard],
+            [["✅ تأیید", "✏️ ویرایش"], ["❌ انصراف"]],
+        )
+        stored = state.update_data.await_args.kwargs
+        self.assertEqual(stored["text_offer_inference_mode"], "model")
+        self.assertEqual(
+            stored["text_offer_inference_edit_candidates"],
+            [
+                {"commodity_id": 73, "commodity_name": "ربع بهار"},
+                {"commodity_id": 75, "commodity_name": "ربع تاریخ پایین"},
+            ],
+        )
+        state.set_state.assert_awaited_once_with(Trade.awaiting_text_inference_choice)
+
+    async def test_unique_selector_confirm_keeps_model_receipt(self):
+        state = SimpleNamespace(
+            get_data=AsyncMock(return_value={
+                "text_offer_inference_message_id": 91,
+                "text_offer_inference_decision_key": "a" * 64,
+                "text_offer_inference_candidates": [
+                    {"commodity_id": 73, "commodity_name": "ربع بهار"},
+                ],
+                "text_offer_inference_draft": {
+                    "trade_type": "buy",
+                    "settlement_type": "tomorrow",
+                    "quantity": 40,
+                    "price": 52000,
+                    "is_wholesale": False,
+                    "lot_sizes": [40],
+                    "notes": None,
+                },
+            }),
+        )
+        callback = SimpleNamespace(message=SimpleNamespace(message_id=91))
+        user = SimpleNamespace(id=1)
+        with (
+            patch("bot.handlers.trade_create._show_text_offer_preview", new=AsyncMock(return_value=True)) as show,
+            patch("bot.handlers.trade_create.answer_callback_query_via_runtime", new=AsyncMock()) as answer,
+        ):
+            await handle_text_offer_inference_suggestion_confirm(callback, state, user)
+
+        self.assertEqual(show.await_args.args[3].commodity_name, "ربع بهار")
+        self.assertEqual(show.await_args.args[3].commodity_resolution, "INFERRED")
+        self.assertEqual(show.await_args.kwargs["inference_selection"], {
+            "decision_key": "a" * 64,
+            "selected_commodity_id": 73,
+        })
+        answer.assert_awaited_once()
+
+    async def test_unique_selector_edit_is_explicit_and_drops_model_receipt(self):
+        data = {
+            "text_offer_inference_message_id": 91,
+            "text_offer_inference_decision_key": "a" * 64,
+            "text_offer_inference_candidates": [
+                {"commodity_id": 73, "commodity_name": "ربع بهار"},
+            ],
+            "text_offer_inference_edit_candidates": [
+                {"commodity_id": 73, "commodity_name": "ربع بهار"},
+                {"commodity_id": 75, "commodity_name": "ربع تاریخ پایین"},
+            ],
+            "text_offer_inference_mode": "model",
+            "text_offer_inference_draft": {
+                "trade_type": "buy",
+                "settlement_type": "tomorrow",
+                "quantity": 40,
+                "price": 52000,
+                "is_wholesale": False,
+                "lot_sizes": [40],
+                "notes": None,
+            },
+        }
+        state = SimpleNamespace(
+            get_data=AsyncMock(return_value=data),
+            update_data=AsyncMock(),
+        )
+        callback = SimpleNamespace(message=SimpleNamespace(message_id=91))
+        user = SimpleNamespace(id=1)
+        with (
+            patch("bot.handlers.trade_create.edit_callback_message_via_runtime", new=AsyncMock()) as edit,
+            patch("bot.handlers.trade_create.answer_callback_query_via_runtime", new=AsyncMock()),
+        ):
+            await handle_text_offer_inference_suggestion_edit(callback, state, user)
+
+        state.update_data.assert_awaited_once_with(text_offer_inference_mode="edit")
+        self.assertEqual(edit.await_args.args[2], "کالای درست را انتخاب کنید.")
+        keyboard = edit.await_args.kwargs["reply_markup"]
+        self.assertEqual(
+            [[button.text for button in row] for row in keyboard.inline_keyboard],
+            [["ربع بهار"], ["ربع تاریخ پایین"], ["❌ انصراف"]],
+        )
+
+        data["text_offer_inference_mode"] = "edit"
+        with (
+            patch("bot.handlers.trade_create._show_text_offer_preview", new=AsyncMock(return_value=True)) as show,
+            patch("bot.handlers.trade_create.answer_callback_query_via_runtime", new=AsyncMock()),
+        ):
+            await handle_text_offer_inference_choice(
+                callback,
+                TextOfferInferenceCandidateCallback(commodity_id=75),
+                state,
+                user,
+            )
+
+        self.assertEqual(show.await_args.args[3].commodity_name, "ربع تاریخ پایین")
+        self.assertEqual(show.await_args.args[3].commodity_resolution, "EXPLICIT")
+        self.assertIsNone(show.await_args.kwargs["inference_selection"])
 
     async def test_bot_shadow_summary_audits_only_an_omitted_commodity(self):
         result = SimpleNamespace(

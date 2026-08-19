@@ -10,7 +10,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.commodity import Commodity
 
-from .coin_inference import CoinCommodityCandidate, CoinCommodityInference
+from .coin_inference import (
+    CANONICAL_COMMODITY_NAMES,
+    COIN_CANDIDATE_FAMILY_BY_CODE,
+    COIN_INFERENCE_CANDIDATE_SCOPE_LOW_DATE_ONLY,
+    COIN_LOW_DATE_COMMODITY_CODES,
+    CoinCommodityCandidate,
+    CoinCommodityInference,
+    normalize_coin_inference_candidate_scope,
+)
 
 
 COIN_CATALOG_RESOLUTION_VERSION = "coin-catalog-resolution-v1"
@@ -46,6 +54,15 @@ class CatalogCoinCommodityInference:
             **asdict(self),
             "candidates": [asdict(item) for item in self.candidates],
         }
+
+
+@dataclass(frozen=True, slots=True)
+class CatalogCoinCommodityEditCandidate:
+    """One explicit same-family catalog choice shown after the user asks to edit."""
+
+    commodity_id: int
+    commodity_code: str
+    commodity_name: str
 
 
 def _abstain(inference: CoinCommodityInference, reason: str) -> CatalogCoinCommodityInference:
@@ -126,9 +143,56 @@ async def resolve_coin_inference_against_catalog(
     )
 
 
+async def resolve_coin_inference_edit_candidates(
+    db: AsyncSession,
+    inference: CatalogCoinCommodityInference,
+    *,
+    candidate_scope: str = "ALL",
+) -> tuple[CatalogCoinCommodityEditCandidate, ...]:
+    """Return existing same-family commodities for an explicit user correction.
+
+    These are not model candidates and must never inherit the inference receipt.
+    They merely keep the correction list relevant (full/half/quarter/one-gram)
+    while resolving every name against the local canonical catalog.
+    """
+
+    if inference.status not in {"AUTO_SELECT", "CONFIRM"} or not inference.candidates:
+        return ()
+    scope = normalize_coin_inference_candidate_scope(candidate_scope)
+    first_code = inference.candidates[0].commodity_code
+    family = COIN_CANDIDATE_FAMILY_BY_CODE.get(first_code)
+    if family is None:
+        return ()
+    ordered_codes = [candidate.commodity_code for candidate in inference.candidates]
+    ordered_codes.extend(
+        code
+        for code in CANONICAL_COMMODITY_NAMES
+        if COIN_CANDIDATE_FAMILY_BY_CODE.get(code) == family and code not in ordered_codes
+    )
+    if scope == COIN_INFERENCE_CANDIDATE_SCOPE_LOW_DATE_ONLY:
+        ordered_codes = [code for code in ordered_codes if code in COIN_LOW_DATE_COMMODITY_CODES]
+
+    resolved: list[CatalogCoinCommodityEditCandidate] = []
+    for code in ordered_codes:
+        name = CANONICAL_COMMODITY_NAMES[code]
+        commodity = await _find_exact_canonical_commodity(db, canonical_name=name)
+        if commodity is None:
+            continue
+        resolved.append(
+            CatalogCoinCommodityEditCandidate(
+                commodity_id=int(commodity.id),
+                commodity_code=code,
+                commodity_name=name,
+            )
+        )
+    return tuple(resolved)
+
+
 __all__ = [
     "COIN_CATALOG_RESOLUTION_VERSION",
     "CatalogCoinCommodityCandidate",
+    "CatalogCoinCommodityEditCandidate",
     "CatalogCoinCommodityInference",
     "resolve_coin_inference_against_catalog",
+    "resolve_coin_inference_edit_candidates",
 ]

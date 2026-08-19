@@ -921,6 +921,9 @@ describe('MarketView.vue', () => {
     await flushPromises()
 
     expect(wrapper.find('[data-test="commodity-inference-selector"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="commodity-inference-confirm"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="commodity-inference-edit"]').exists()).toBe(false)
+    expect(wrapper.get('[data-test="commodity-inference-cancel"]').text()).toBe('انصراف')
     await wrapper.find('[data-test="commodity-inference-option-72"]').trigger('click')
     await flushPromises()
     expect(wrapper.find('.offer-preview-card').text()).toContain('بهار')
@@ -937,6 +940,144 @@ describe('MarketView.vue', () => {
         selected_commodity_id: 72,
       },
     }))
+    wrapper.unmount()
+  })
+
+  it('shows a unique model result as a clear suggestion with confirm, edit, and cancel actions', async () => {
+    const wrapper = await mountMarketView()
+    await flushPromises()
+    marketViewMocks.apiFetchMock.mockClear()
+    marketViewMocks.apiFetchJsonMock.mockResolvedValueOnce({
+      success: true,
+      data: {
+        trade_type: 'buy',
+        settlement_type: 'tomorrow',
+        commodity_id: null,
+        commodity_name: null,
+        commodity_resolution: 'OMITTED',
+        low_date_hint: false,
+        quantity: 40,
+        price: 52000,
+        is_wholesale: false,
+        lot_sizes: [40],
+        notes: null,
+        commodity_inference: {
+          mode: 'SELECTABLE',
+          status: 'CONFIRM',
+          decision_key: 'c'.repeat(64),
+          snapshot_generated_at_utc: '2026-08-18T12:00:00+00:00',
+          snapshot_receipt: 'd'.repeat(64),
+          reason: 'AUTO_SELECTION_REQUIRES_CONFIRMATION',
+          candidates: [{
+            commodity_id: 73,
+            commodity_code: 'QUARTER_BAHAR',
+            commodity_name: 'ربع بهار',
+            center_project_price: 52000,
+            lower_project_price: 51000,
+            upper_project_price: 53000,
+            confidence: 'HIGH',
+            distance_to_center_relative: 0,
+          }],
+          edit_candidates: [
+            { commodity_id: 73, commodity_code: 'QUARTER_BAHAR', commodity_name: 'ربع بهار' },
+            { commodity_id: 75, commodity_code: 'QUARTER_LOW_DATE', commodity_name: 'ربع تاریخ پایین' },
+          ],
+        },
+      },
+    })
+
+    await wrapper.find('.text-offer-input').setValue('خ ف40 عدد 52000')
+    await wrapper.find('.send-btn').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="commodity-inference-suggestion"]').text()).toContain('ربع بهار')
+    expect(wrapper.get('[data-test="commodity-inference-confirm"]').text()).toBe('تأیید')
+    expect(wrapper.get('[data-test="commodity-inference-edit"]').text()).toBe('ویرایش')
+    expect(wrapper.get('[data-test="commodity-inference-cancel"]').text()).toBe('انصراف')
+    expect(wrapper.find('[data-test="commodity-inference-option-73"]').exists()).toBe(false)
+
+    await wrapper.get('[data-test="commodity-inference-confirm"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('.offer-preview-card').text()).toContain('ربع بهار')
+
+    await wrapper.find('.offer-preview-confirm').trigger('click')
+    await flushPromises()
+    const postCall = marketViewMocks.apiFetchMock.mock.calls.find(
+      ([path, options]) => path === '/api/offers/' && options?.method === 'POST',
+    )
+    expect(JSON.parse(String(postCall![1].body))).toEqual(expect.objectContaining({
+      commodity_id: 73,
+      commodity_inference: {
+        decision_key: 'c'.repeat(64),
+        selected_commodity_id: 73,
+      },
+    }))
+    wrapper.unmount()
+  })
+
+  it('treats a same-family edit choice as an explicit commodity without an inference receipt', async () => {
+    const wrapper = await mountMarketView()
+    await flushPromises()
+    marketViewMocks.apiFetchMock.mockClear()
+    marketViewMocks.apiFetchJsonMock.mockResolvedValueOnce({
+      success: true,
+      data: {
+        trade_type: 'buy',
+        settlement_type: 'tomorrow',
+        commodity_id: null,
+        commodity_name: null,
+        commodity_resolution: 'OMITTED',
+        low_date_hint: false,
+        quantity: 40,
+        price: 52000,
+        is_wholesale: false,
+        lot_sizes: [40],
+        notes: null,
+        commodity_inference: {
+          mode: 'SELECTABLE',
+          status: 'CONFIRM',
+          decision_key: 'e'.repeat(64),
+          snapshot_generated_at_utc: '2026-08-18T12:00:00+00:00',
+          snapshot_receipt: 'f'.repeat(64),
+          reason: 'AUTO_SELECTION_REQUIRES_CONFIRMATION',
+          candidates: [{
+            commodity_id: 73,
+            commodity_code: 'QUARTER_BAHAR',
+            commodity_name: 'ربع بهار',
+            center_project_price: 52000,
+            lower_project_price: 51000,
+            upper_project_price: 53000,
+            confidence: 'HIGH',
+            distance_to_center_relative: 0,
+          }],
+          edit_candidates: [
+            { commodity_id: 73, commodity_code: 'QUARTER_BAHAR', commodity_name: 'ربع بهار' },
+            { commodity_id: 75, commodity_code: 'QUARTER_LOW_DATE', commodity_name: 'ربع تاریخ پایین' },
+          ],
+        },
+      },
+    })
+
+    await wrapper.find('.text-offer-input').setValue('خ ف40 عدد 52000')
+    await wrapper.find('.send-btn').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-test="commodity-inference-edit"]').trigger('click')
+
+    expect(wrapper.get('[data-test="commodity-inference-option-73"]').text()).toBe('ربع بهار')
+    expect(wrapper.get('[data-test="commodity-inference-option-75"]').text()).toBe('ربع تاریخ پایین')
+    expect(wrapper.find('[data-test="commodity-inference-confirm"]').exists()).toBe(false)
+
+    await wrapper.get('[data-test="commodity-inference-option-75"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('.offer-preview-card').text()).toContain('ربع تاریخ پایین')
+    await wrapper.find('.offer-preview-confirm').trigger('click')
+    await flushPromises()
+    const postCall = marketViewMocks.apiFetchMock.mock.calls.find(
+      ([path, options]) => path === '/api/offers/' && options?.method === 'POST',
+    )
+    const payload = JSON.parse(String(postCall![1].body))
+    expect(payload.commodity_id).toBe(75)
+    expect(payload).not.toHaveProperty('commodity_inference')
     wrapper.unmount()
   })
 
