@@ -298,12 +298,18 @@ describe('TradingSettings.vue', () => {
 
     const overrideDeleteButton = wrapper.get('[data-testid="override-delete-2"]')
     expect(overrideDeleteButton.classes()).toContain('ui-button')
-    const confirmMock = vi.mocked(window.confirm)
-    confirmMock.mockClear()
     await overrideDeleteButton.trigger('click')
     await flushPromises()
 
-    expect(confirmMock).toHaveBeenCalledWith('آیا از حذف این استثنای تقویمی مطمئن هستید؟')
+    const deleteDialog = document.body.querySelector('.ui-confirm-dialog')
+    expect(deleteDialog?.textContent).toContain('لغو یا Escape هیچ تغییری ایجاد نمی‌کند.')
+    const confirmDelete = Array.from(deleteDialog!.querySelectorAll('button')).find((button) =>
+      button.textContent?.includes('حذف'),
+    )
+    expect(confirmDelete).toBeTruthy()
+    confirmDelete!.click()
+    await flushPromises()
+
     expect(wrapper.text()).toContain('استثنای تقویمی حذف شد')
     expect(wrapper.findAll('[data-testid="market-override-row"]').length).toBe(2)
 
