@@ -1147,6 +1147,13 @@ async function cancelOwnOffer(offerId: number) {
   box-shadow: none;
 }
 
+/* The denser history rows still need a calm visual boundary. A top-only
+   shadow separates consecutive terminal cards without adding height or
+   competing with their traded/expired tint and status rail. */
+.offer-card-wrap.is-history {
+  box-shadow: 0 -5px 12px -9px color-mix(in srgb, var(--ds-text-primary) 42%, transparent);
+}
+
 /* Terminal cards have no actions or deadline meter. Reuse that free space as
    a compact summary instead of preserving the taller active-offer stack. */
 .offer-card-inner--history {

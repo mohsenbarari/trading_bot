@@ -436,6 +436,29 @@ export const MARKET_HISTORY_COMPACT_SUMMARY_EVIDENCE = Object.freeze({
   sha256: '270e165727b0e2c6206a838059ea23626e89090652d050218c7d2abec1720c6e',
 })
 
+// Owner-directed follow-up to the compact terminal-history layout. It adds
+// only a subtle top-edge separation to read-only history cards; active-card
+// shadows, deadline meter, lifecycle tints and trade interactions stay on the
+// previously reviewed sources and semantics.
+export const MARKET_HISTORY_COMPACT_SEPARATION_KIND =
+  'market-history-compact-top-separation'
+
+export const MARKET_HISTORY_COMPACT_SEPARATION_ALLOWED_PATHS = Object.freeze([
+  'frontend/src/components/OffersList.vue',
+])
+
+export const MARKET_HISTORY_COMPACT_SEPARATION_ALLOWED_FILE_SHA256 = Object.freeze({
+  'frontend/src/components/OffersList.vue':
+    'dc794b51bda821aab696ee66f5a671af94ae949be61edcc205d65580382c1225',
+})
+
+export const MARKET_HISTORY_COMPACT_SEPARATION_EVIDENCE = Object.freeze({
+  count: 20,
+  contentBytes: 177912,
+  pathSetSha256: '6035c31eab716d0061c81427da214fbe9765571ba0d370e218b11edab27678f2',
+  sha256: '55ebb7e27f40240eaf3e69eb88439b0349d2696e567ec86f6181e9b7232736d3',
+})
+
 export const MESSENGER_RUNTIME_BASELINE = Object.freeze({
   count: 85,
   contentBytes: 1312405,
@@ -1398,6 +1421,45 @@ export function assertMarketHistoryCompactSummaryDisposition(entries) {
   )
 }
 
+export function assertMarketHistoryCompactSeparationSemantics(entries) {
+  assertMarketHistoryCompactSummarySemantics(entries)
+  const offers = sourceByPath(entries, 'frontend/src/components/OffersList.vue')
+  const requiredFragments = [
+    '.offer-card-wrap.is-history {',
+    'box-shadow: 0 -5px 12px -9px color-mix(in srgb, var(--ds-text-primary) 42%, transparent);',
+  ]
+  for (const fragment of requiredFragments) {
+    if (!offers.includes(fragment)) {
+      throw new Error(`Market history compact separation lost bounded styling: ${fragment}`)
+    }
+  }
+}
+
+function assertMarketHistoryCompactSeparationAllowedFiles(entries) {
+  const entriesByPath = new Map(entries.map((entry) => [entry.path, entry]))
+  for (const repoPath of MARKET_HISTORY_COMPACT_SEPARATION_ALLOWED_PATHS) {
+    const entry = entriesByPath.get(repoPath)
+    if (!entry) throw new Error(`Market history compact separation allowed file is missing: ${repoPath}`)
+    const actualSha256 = fileSha256(entry.content)
+    const expectedSha256 = MARKET_HISTORY_COMPACT_SEPARATION_ALLOWED_FILE_SHA256[repoPath]
+    if (actualSha256 !== expectedSha256) {
+      throw new Error(
+        `Market history compact separation allowed file drift: ${repoPath} ${expectedSha256} -> ${actualSha256}`,
+      )
+    }
+  }
+}
+
+export function assertMarketHistoryCompactSeparationDisposition(entries) {
+  assertMarketHistoryCompactSeparationAllowedFiles(entries)
+  assertMarketHistoryCompactSeparationSemantics(entries)
+  return assertProtectedFileSetEvidence(
+    'Market history compact separation disposition',
+    protectedFileSetEvidence(entries, MARKET_RUNTIME_CONTRACT),
+    MARKET_HISTORY_COMPACT_SEPARATION_EVIDENCE,
+  )
+}
+
 export function resolveMarketRuntimeDisposition(entries) {
   const actual = protectedFileSetEvidence(entries, MARKET_RUNTIME_CONTRACT)
   try {
@@ -1488,25 +1550,33 @@ export function resolveMarketRuntimeDisposition(entries) {
                                 evidence: assertMarketHistoryCompactSummaryDisposition(entries),
                               }
                             } catch (historyCompactError) {
-                              const messages = [
-                                baselineError,
-                                integrationError,
-                                aPlusCError,
-                                lifecycleError,
-                                perimeterError,
-                                linearMeterError,
-                                compactConfirmError,
-                                feedHeadingError,
-                                terminalVisualError,
-                                customerHistoryError,
-                                requesterAckError,
-                                lotSuggestionError,
-                                inferenceUxError,
-                                historyCompactError,
-                              ].map((error) => error instanceof Error ? error.message : String(error))
-                              throw new Error(
-                                `Market runtime rejected after Stage 4 baseline drift (${messages[0]}); main/UIUX integration disposition rejected (${messages[1]}); Market A+C disposition rejected (${messages[2]}); Market A+C lifecycle-clarity disposition rejected (${messages[3]}); Market A+C perimeter-deadline disposition rejected (${messages[4]}); Market A+C linear-meter disposition rejected (${messages[5]}); Market compact-confirm disposition rejected (${messages[6]}); Market feed-heading removal disposition rejected (${messages[7]}); Market terminal-history visual disposition rejected (${messages[8]}); Market customer-history access disposition rejected (${messages[9]}); Market overtime requester acknowledgement disposition rejected (${messages[10]}); Market cross-server lot suggestion identity disposition rejected (${messages[11]}); Market inference confirmation UX disposition rejected (${messages[12]}); Market history compact summary disposition rejected (${messages[13]})`,
-                              )
+                              try {
+                                return {
+                                  kind: MARKET_HISTORY_COMPACT_SEPARATION_KIND,
+                                  evidence: assertMarketHistoryCompactSeparationDisposition(entries),
+                                }
+                              } catch (historySeparationError) {
+                                const messages = [
+                                  baselineError,
+                                  integrationError,
+                                  aPlusCError,
+                                  lifecycleError,
+                                  perimeterError,
+                                  linearMeterError,
+                                  compactConfirmError,
+                                  feedHeadingError,
+                                  terminalVisualError,
+                                  customerHistoryError,
+                                  requesterAckError,
+                                  lotSuggestionError,
+                                  inferenceUxError,
+                                  historyCompactError,
+                                  historySeparationError,
+                                ].map((error) => error instanceof Error ? error.message : String(error))
+                                throw new Error(
+                                  `Market runtime rejected after Stage 4 baseline drift (${messages[0]}); main/UIUX integration disposition rejected (${messages[1]}); Market A+C disposition rejected (${messages[2]}); Market A+C lifecycle-clarity disposition rejected (${messages[3]}); Market A+C perimeter-deadline disposition rejected (${messages[4]}); Market A+C linear-meter disposition rejected (${messages[5]}); Market compact-confirm disposition rejected (${messages[6]}); Market feed-heading removal disposition rejected (${messages[7]}); Market terminal-history visual disposition rejected (${messages[8]}); Market customer-history access disposition rejected (${messages[9]}); Market overtime requester acknowledgement disposition rejected (${messages[10]}); Market cross-server lot suggestion identity disposition rejected (${messages[11]}); Market inference confirmation UX disposition rejected (${messages[12]}); Market history compact summary disposition rejected (${messages[13]}); Market history compact separation disposition rejected (${messages[14]})`,
+                                )
+                              }
                             }
                           }
                         }

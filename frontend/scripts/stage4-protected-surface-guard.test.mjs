@@ -53,6 +53,10 @@ import {
   MARKET_HISTORY_COMPACT_SUMMARY_ALLOWED_PATHS,
   MARKET_HISTORY_COMPACT_SUMMARY_EVIDENCE,
   MARKET_HISTORY_COMPACT_SUMMARY_KIND,
+  MARKET_HISTORY_COMPACT_SEPARATION_ALLOWED_FILE_SHA256,
+  MARKET_HISTORY_COMPACT_SEPARATION_ALLOWED_PATHS,
+  MARKET_HISTORY_COMPACT_SEPARATION_EVIDENCE,
+  MARKET_HISTORY_COMPACT_SEPARATION_KIND,
   MARKET_OVERTIME_REQUESTER_ACK_ALLOWED_FILE_SHA256,
   MARKET_OVERTIME_REQUESTER_ACK_ALLOWED_PATHS,
   MARKET_OVERTIME_REQUESTER_ACK_EVIDENCE,
@@ -100,6 +104,8 @@ import {
   assertMarketInferenceConfirmationUxSemantics,
   assertMarketHistoryCompactSummaryDisposition,
   assertMarketHistoryCompactSummarySemantics,
+  assertMarketHistoryCompactSeparationDisposition,
+  assertMarketHistoryCompactSeparationSemantics,
   assertMarketOvertimeRequesterAcknowledgementDisposition,
   assertMarketOvertimeRequesterAcknowledgementSemantics,
   STAGE4_BASE_COMMIT,
@@ -324,13 +330,13 @@ describe('Stage 4 protected surface baseline', () => {
     )
   })
 
-  it('keeps every prior Market disposition immutable while admitting compact terminal history', () => {
+  it('keeps every prior Market disposition immutable while admitting separated compact terminal history', () => {
     expect(ownedPaths.market).toContain('frontend/src/utils/settlementType.ts')
     expect(ownedPaths.market).toContain('frontend/src/components/CommodityInferenceSelectionModal.vue')
     const entries = readFileEntries(repoRoot, ownedPaths.market)
     expect(resolveMarketRuntimeDisposition(entries)).toMatchObject({
-      kind: MARKET_HISTORY_COMPACT_SUMMARY_KIND,
-      evidence: MARKET_HISTORY_COMPACT_SUMMARY_EVIDENCE,
+      kind: MARKET_HISTORY_COMPACT_SEPARATION_KIND,
+      evidence: MARKET_HISTORY_COMPACT_SEPARATION_EVIDENCE,
     })
     expect(MARKET_RUNTIME_BASELINE).toEqual({
       count: 19,
@@ -527,7 +533,25 @@ describe('Stage 4 protected surface baseline', () => {
     expect(Object.isFrozen(MARKET_HISTORY_COMPACT_SUMMARY_ALLOWED_PATHS)).toBe(true)
     expect(Object.isFrozen(MARKET_HISTORY_COMPACT_SUMMARY_ALLOWED_FILE_SHA256)).toBe(true)
     expect(Object.isFrozen(MARKET_HISTORY_COMPACT_SUMMARY_EVIDENCE)).toBe(true)
-    expect(() => assertMarketHistoryCompactSummaryDisposition(entries)).not.toThrow()
+    expect(() => assertMarketHistoryCompactSummaryDisposition(entries)).toThrow(/allowed file drift/)
+    expect(MARKET_HISTORY_COMPACT_SEPARATION_KIND).toBe('market-history-compact-top-separation')
+    expect(MARKET_HISTORY_COMPACT_SEPARATION_ALLOWED_PATHS).toEqual([
+      'frontend/src/components/OffersList.vue',
+    ])
+    expect(MARKET_HISTORY_COMPACT_SEPARATION_ALLOWED_FILE_SHA256).toEqual({
+      'frontend/src/components/OffersList.vue':
+        'dc794b51bda821aab696ee66f5a671af94ae949be61edcc205d65580382c1225',
+    })
+    expect(MARKET_HISTORY_COMPACT_SEPARATION_EVIDENCE).toEqual({
+      count: 20,
+      contentBytes: 177912,
+      pathSetSha256: '6035c31eab716d0061c81427da214fbe9765571ba0d370e218b11edab27678f2',
+      sha256: '55ebb7e27f40240eaf3e69eb88439b0349d2696e567ec86f6181e9b7232736d3',
+    })
+    expect(Object.isFrozen(MARKET_HISTORY_COMPACT_SEPARATION_ALLOWED_PATHS)).toBe(true)
+    expect(Object.isFrozen(MARKET_HISTORY_COMPACT_SEPARATION_ALLOWED_FILE_SHA256)).toBe(true)
+    expect(Object.isFrozen(MARKET_HISTORY_COMPACT_SEPARATION_EVIDENCE)).toBe(true)
+    expect(() => assertMarketHistoryCompactSeparationDisposition(entries)).not.toThrow()
   })
 
   it('fails closed if compact terminal history escapes its read-only responsive grid', () => {
@@ -547,6 +571,25 @@ describe('Stage 4 protected surface baseline', () => {
     expect(() => resolveMarketRuntimeDisposition(mutateOffers(
       'overflow-wrap: anywhere;',
     ))).toThrow(/Market history compact summary disposition rejected/)
+  })
+
+  it('fails closed if compact terminal history loses its top-only separation', () => {
+    const entries = readFileEntries(repoRoot, ownedPaths.market)
+    const mutateOffers = (fragment) => entries.map((entry) => (
+      entry.path === 'frontend/src/components/OffersList.vue'
+        ? { ...entry, content: Buffer.from(entry.content.toString('utf8').replace(fragment, '')) }
+        : entry
+    ))
+
+    expect(() => assertMarketHistoryCompactSeparationSemantics(mutateOffers(
+      'box-shadow: 0 -5px 12px -9px color-mix(in srgb, var(--ds-text-primary) 42%, transparent);',
+    ))).toThrow(/lost bounded styling/)
+    expect(() => assertMarketHistoryCompactSeparationDisposition(mutateOffers(
+      '.offer-card-wrap.is-history {',
+    ))).toThrow(/allowed file drift/)
+    expect(() => resolveMarketRuntimeDisposition(mutateOffers(
+      'box-shadow: 0 -5px 12px -9px color-mix(in srgb, var(--ds-text-primary) 42%, transparent);',
+    ))).toThrow(/Market history compact separation disposition rejected/)
   })
 
   it('fails closed if the cross-server suggestion loses local or public identity', () => {

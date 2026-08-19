@@ -120,7 +120,7 @@ class TelegramOfferChannelServiceTests(unittest.IsolatedAsyncioTestCase):
                     remaining_quantity=7,
                 )
             ),
-            "🤝 23 تا ✅",
+            "🤝 23/30 ✅",
         )
         self.assertEqual(
             channel_service.get_offer_channel_history_tag(
@@ -144,6 +144,10 @@ class TelegramOfferChannelServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("🟢خرید سکه 30 عدد نقد حاضر ☀️ 51,000", active_message)
         self.assertIn("توضیحات: تحویل فوری", active_message)
         self.assertIn("🤝 ✅", terminal_message)
+        self.assertIn(
+            f"\n{channel_service.TELEGRAM_OFFER_HISTORY_FOOTER_LTR_MARK}🤝 ✅\n",
+            terminal_message,
+        )
         self.assertTrue(active_message.endswith(channel_service.INVISIBLE_CHANNEL_PADDING))
 
         tomorrow_message = channel_service.build_offer_channel_message(
@@ -217,8 +221,12 @@ class TelegramOfferChannelServiceTests(unittest.IsolatedAsyncioTestCase):
         call = client.post.await_args
         self.assertTrue(call.args[0].endswith("/editMessageText"))
         payload = call.kwargs["json"]
-        self.assertIn("🤝 20 تا ✅", payload["text"])
-        self.assertNotIn("🤝 20تا ✅.", payload["text"])
+        self.assertIn("🤝 20/40 ✅", payload["text"])
+        self.assertNotIn(" تا ", payload["text"])
+        self.assertIn(
+            f"\n{channel_service.TELEGRAM_OFFER_HISTORY_FOOTER_LTR_MARK}🤝 20/40 ✅\n",
+            payload["text"],
+        )
         self.assertEqual(payload["reply_markup"], {"inline_keyboard": []})
 
     async def test_apply_terminal_state_can_use_publication_state_message_id(self):
@@ -404,7 +412,7 @@ class TelegramOfferChannelServiceTests(unittest.IsolatedAsyncioTestCase):
             offer,
             history_tag=channel_service.get_offer_channel_history_tag(offer),
         )
-        self.assertIn("🤝 20 تا ✅⏳", message)
+        self.assertIn("🤝 20/40 ✅⏳", message)
         self.assertNotIn(
             f"\n{channel_service.TELEGRAM_OFFER_OVERTIME_MARKER}\n",
             message,

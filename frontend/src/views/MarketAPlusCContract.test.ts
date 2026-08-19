@@ -154,6 +154,8 @@ describe('Market A+C source contracts', () => {
     expect(offersList).toContain('کامل معامله شد')
     expect(offersList).toContain("'offer-card-inner--history': isReadOnlyOffer(offer)")
     expect(offersList).toContain('.offer-card-inner--history .offer-main')
+    expect(offersList).toContain('.offer-card-wrap.is-history {')
+    expect(offersList).toContain('box-shadow: 0 -5px 12px -9px')
     expect(offersList).toContain('grid-template-columns: minmax(19rem, 0.92fr) minmax(0, 1.08fr)')
     expect(appOfferCard).toContain("'is-partially-traded': traded && partiallyTraded")
     expect(appOfferCard).toContain("'is-fully-traded': traded && !partiallyTraded")

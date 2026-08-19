@@ -32,6 +32,12 @@ INVISIBLE_CHANNEL_PADDING = "\u2800" * 35
 TELEGRAM_MESSAGE_NOT_MODIFIED = "message is not modified"
 TELEGRAM_OFFER_FULLY_TRADED_TAG = "🤝 ✅"
 TELEGRAM_OFFER_EXPIRED_TAG = "❌"
+# Telegram chooses paragraph alignment from Unicode direction. Partial-trade
+# tags used to contain the Persian word «تا», which made only that footer RTL
+# and pulled it away from the bottom-left terminal marker position. Keep the
+# footer deliberately LTR and numeric so every terminal marker occupies the
+# same stable corner regardless of the offer/notes length.
+TELEGRAM_OFFER_HISTORY_FOOTER_LTR_MARK = "\u200e"
 # Inventory M38 — channel overtime marker; never replaces trade history tags.
 TELEGRAM_OFFER_OVERTIME_MARKER = "⏳"
 TELEGRAM_OFFER_OVERTIME_FULLY_TRADED_TAG = (
@@ -228,24 +234,33 @@ def get_offer_channel_history_tag(offer: Any, traded_quantity: Optional[int] = N
     """Return the terminal Telegram emoji tag for channel history posts."""
     status = _status_value(getattr(offer, "status", None))
     if status == OfferStatus.COMPLETED.value:
-        return (
+        tag = (
             TELEGRAM_OFFER_OVERTIME_FULLY_TRADED_TAG
             if bool(getattr(offer, "overtime_trade_committed", False))
             else TELEGRAM_OFFER_FULLY_TRADED_TAG
         )
+        return tag
 
     if status != OfferStatus.EXPIRED.value:
         return None
 
     quantity = traded_quantity if traded_quantity is not None else infer_traded_quantity_from_offer(offer)
     if quantity and quantity > 0:
-        tag = f"🤝 {quantity:,} تا ✅"
-        return (
+        total_quantity = max(quantity, _finite_int(getattr(offer, "quantity", None)) or quantity)
+        tag = f"🤝 {quantity:,}/{total_quantity:,} ✅"
+        tagged = (
             f"{tag}{TELEGRAM_OFFER_OVERTIME_MARKER}"
             if bool(getattr(offer, "overtime_trade_committed", False))
             else tag
         )
+        return tagged
     return TELEGRAM_OFFER_EXPIRED_TAG
+
+
+def _left_aligned_offer_channel_history_footer(history_tag: Any) -> str:
+    """Keep terminal history metadata in Telegram's bottom-left paragraph."""
+    normalized = str(history_tag or "").strip().lstrip(TELEGRAM_OFFER_HISTORY_FOOTER_LTR_MARK)
+    return f"{TELEGRAM_OFFER_HISTORY_FOOTER_LTR_MARK}{normalized}"
 
 
 def project_offer_channel_lifecycle(
@@ -343,7 +358,7 @@ def build_offer_channel_message(
         # Trailing marker line; never replaces cash/future text or trade tags.
         message += f"\n{TELEGRAM_OFFER_OVERTIME_MARKER}"
     if history_tag:
-        message += f"\n{history_tag}"
+        message += f"\n{_left_aligned_offer_channel_history_footer(history_tag)}"
     return f"{message}\n{INVISIBLE_CHANNEL_PADDING}"
 
 
