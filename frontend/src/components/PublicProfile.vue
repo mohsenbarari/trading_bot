@@ -270,13 +270,13 @@ function normalizePublicProfile(payload: PublicUser, isRequestedSelfProfile: boo
     avatar_file_id: asTrimmedString(payload.avatar_file_id),
   };
 
-  // Public-profile projections are intentionally minimal for everybody except
-  // the account owner. This defensive normalization keeps an older or
-  // over-broad response from becoming a client-side fallback for PII.
+  // Contact fields are product-visible on every authorized profile. Other
+  // owner-only fields still fail closed if an older response is over-broad.
   if (!isRequestedSelfProfile) {
     return {
       ...commonProfile,
-      mobile_number: asSafeMaskedMobile(payload.mobile_number),
+      mobile_number: asTrimmedString(payload.mobile_number),
+      address: asTrimmedString(payload.address),
     };
   }
 
@@ -317,7 +317,6 @@ const profileIsOnline = computed(() => (
   isOwnProfile.value && isPresenceOnline(profileData.value?.last_seen_at)
 ));
 const profileMobileNumber = computed(() => {
-  if (!isOwnProfile.value) return asSafeMaskedMobile(profileData.value?.mobile_number) || '••••••••';
   return asTrimmedString(profileData.value?.mobile_number) || 'ثبت نشده';
 });
 function projectUserMobileLabel(user: ProjectUserDirectoryEntry) {
@@ -1927,37 +1926,19 @@ function handleHistoryPresetChipChange(value: string) {
         </template>
 
         <AppSectionCard
-          class="profile-section-card mt-4 card-with-help"
+          class="profile-section-card mt-4"
           title="اطلاعات شخصی"
-          :description="isOwnProfile
-            ? 'شماره تماس و آدرس ثبت‌شده شما در این بخش نمایش داده می‌شود.'
-            : 'برای حفظ حریم خصوصی، فقط شماره تماس ماسک‌شده در پروفایل عمومی نمایش داده می‌شود.'"
         >
-          <template #actions>
-            <HelpPopover
-              comfortable-target
-              button-test="public-profile-info-help"
-              note-test="public-profile-info-help-note"
-              label="راهنمای اطلاعات پروفایل"
-              :text="isOwnProfile
-                ? 'در این بخش شماره تماس و آدرس ثبت‌شده شما نمایش داده می‌شود و می‌توانید آدرس را مستقیم از همین قسمت ویرایش کنید.'
-                : 'در پروفایل عمومی، شماره تماس ماسک‌شده است و آدرس، وضعیت حضور، عضویت و جزئیات معاملات نمایش داده نمی‌شود.'"
-            />
-          </template>
-          
           <div class="profile-section-card__body">
             <div class="info-section">
               <div class="info-row">
                 <span class="label">شماره تماس</span>
                 <span class="value" dir="ltr">{{ profileMobileNumber }}</span>
               </div>
-              <p v-if="!isOwnProfile" class="profile-privacy-note">
-                آدرس، وضعیت حضور، عضویت و جزئیات معاملات این کاربر در پروفایل عمومی نمایش داده نمی‌شود.
-              </p>
-              <div v-if="isOwnProfile" class="info-row address-row">
+              <div class="info-row address-row">
                   <span class="label">آدرس</span>
                   <div v-if="!addressEditing" class="address-display-frame" :class="{ editable: isOwnProfile }">
-                    <span class="value address-value">{{ profileData.address }}</span>
+                    <span class="value address-value">{{ profileData.address || 'ثبت نشده' }}</span>
                     <AppIconButton
                       v-if="isOwnProfile"
                       class="address-edit-trigger"
@@ -2906,13 +2887,6 @@ function handleHistoryPresetChipChange(value: string) {
 
 .info-row:last-child {
   border-bottom: none;
-}
-
-.profile-privacy-note {
-  margin: 10px 0 0;
-  color: var(--ds-text-secondary);
-  font-size: 0.86rem;
-  line-height: 1.8;
 }
 
 .address-row {

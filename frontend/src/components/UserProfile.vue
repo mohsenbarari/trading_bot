@@ -40,6 +40,7 @@ type UserProfileUser = {
   id: number;
   account_name?: string | null;
   mobile_number?: string | null;
+  address?: string | null;
   role: string;
   account_status?: string | null;
   can_block_users?: boolean | null;
@@ -1171,6 +1172,10 @@ async function confirmPendingAction() {
       <div class="detail-item">
         <span class="label">موبایل</span>
         <span class="value">{{ user.mobile_number }}</span>
+      </div>
+      <div class="detail-item">
+        <span class="label">آدرس</span>
+        <span class="value">{{ user.address || 'ثبت نشده' }}</span>
       </div>
       <div class="detail-item">
           <span class="label">نقش</span>

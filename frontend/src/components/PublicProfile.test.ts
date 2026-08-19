@@ -246,7 +246,7 @@ describe('PublicProfile.vue', () => {
     )
   })
 
-  it('sanitizes an over-broad legacy public response for an ordinary peer', async () => {
+  it('shows approved contact fields but strips unrelated owner-only fields for an ordinary peer', async () => {
     const fetchMock = vi.mocked(fetch)
     fetchMock.mockResolvedValueOnce(makeResponse({
       id: 20,
@@ -304,9 +304,8 @@ describe('PublicProfile.vue', () => {
       }),
     }))
     expect(wrapper.text()).toContain('owner20')
-    expect(wrapper.text()).toContain('••••••••')
-    expect(wrapper.text()).not.toContain('09124444444')
-    expect(wrapper.text()).not.toContain('مشهد')
+    expect(wrapper.text()).toContain('09124444444')
+    expect(wrapper.text()).toContain('مشهد')
     expect(wrapper.text()).not.toContain('حسابدار فروش')
     expect(wrapper.text()).not.toContain('نمایش پروفایل مالک اصلی')
     expect(wrapper.text()).not.toContain('تاریخچه معاملات')
@@ -1191,14 +1190,14 @@ describe('PublicProfile.vue', () => {
       typeof url === 'string' && url.includes('/project-users?')
     ))).toBe(false)
     expect(wrapper.text()).toContain('owner20')
-    expect(wrapper.text()).toContain('••••••••')
-    expect(wrapper.text()).not.toContain('09124444444')
-    expect(wrapper.text()).not.toContain('مشهد')
+    expect(wrapper.text()).toContain('09124444444')
+    expect(wrapper.text()).toContain('مشهد')
     expect(wrapper.text()).not.toContain('حسابدار فروش')
     expect(wrapper.text()).not.toContain('لیست همکاران')
     expect(wrapper.text()).not.toContain('تنظیمات کاربری')
     expect(wrapper.text()).not.toContain('تاریخچه معاملات من')
-    expect(wrapper.find('.address-row').exists()).toBe(false)
+    expect(wrapper.find('.address-row').exists()).toBe(true)
+    expect(wrapper.find('.address-edit-trigger').exists()).toBe(false)
   })
 
   it('shows project-users fetch errors and lets the owner retry with a new search', async () => {
@@ -1511,7 +1510,8 @@ describe('PublicProfile.vue', () => {
     expect(wrapper.findAll('button').some((button) => button.text().includes('بلاک'))).toBe(true)
     expect(wrapper.text()).not.toContain('مشتری ویژه')
     expect(wrapper.text()).not.toContain('owner20')
-    expect(wrapper.text()).not.toContain('09127777777')
+    expect(wrapper.text()).toContain('09127777777')
+    expect(wrapper.text()).toContain('شیراز')
   })
 
   it('opens a local admin user manager for admin viewers on other profiles', async () => {
@@ -2035,8 +2035,8 @@ describe('PublicProfile.vue', () => {
     expect(wrapper.find('[data-test="public-profile-customers-help"]').exists()).toBe(false)
     expect(wrapper.find('.profile-accordion').exists()).toBe(false)
 
-    await wrapper.get('[data-test="public-profile-info-help"]').trigger('click')
-    expect(wrapper.text()).toContain('می‌توانید آدرس را مستقیم از همین قسمت ویرایش کنید')
+    expect(wrapper.find('[data-test="public-profile-info-help"]').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('برای حفظ حریم خصوصی')
     await wrapper.get('[data-test="public-profile-project-users-help"]').trigger('click')
     expect(wrapper.text()).toContain('با انتخاب نام هر همکار')
     await wrapper.get('[data-test="public-profile-accountants-help"]').trigger('click')

@@ -79,6 +79,7 @@ function makeUser(overrides: Record<string, unknown> = {}) {
     full_name: 'Owner Twelve',
     account_name: 'owner12',
     mobile_number: '09120000000',
+    address: 'بازار تهران، پلاک ۱۲',
     role: 'عادی',
     account_status: 'active',
     deactivated_at: null,
@@ -263,6 +264,7 @@ describe('UserProfile.vue authoritative admin actions', () => {
 
   it('renders admin chrome with shared ui action cards and form primitives', async () => {
     const wrapper = await mountProfile(makeUser())
+    expect(wrapper.text()).toContain('بازار تهران، پلاک ۱۲')
     expect(wrapper.get('.settings-btn').classes()).toContain('ui-action-card')
     expect(wrapper.get('.delete-btn').classes()).toContain('ui-action-card')
 

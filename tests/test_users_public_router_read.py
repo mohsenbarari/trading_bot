@@ -30,7 +30,6 @@ class FakeDB:
 
 class UsersPublicRouterReadTests(unittest.IsolatedAsyncioTestCase):
     _NON_SELF_PRIVATE_FIELDS = {
-        "address",
         "last_seen_at",
         "created_at",
         "created_at_jalali",
@@ -50,15 +49,14 @@ class UsersPublicRouterReadTests(unittest.IsolatedAsyncioTestCase):
         "customer_relations",
     }
 
-    def assert_minimal_non_self_projection(self, result, *, raw_mobile: str, raw_address: str):
+    def assert_contact_non_self_projection(self, result, *, raw_mobile: str, raw_address: str):
         payload = result.model_dump(exclude_none=True)
-        self.assertEqual(payload["mobile_number"], f"{raw_mobile[:4]}****{raw_mobile[-3:]}")
-        self.assertNotIn(raw_mobile, str(payload))
-        self.assertNotIn(raw_address, str(payload))
+        self.assertEqual(payload["mobile_number"], raw_mobile)
+        self.assertEqual(payload["address"], raw_address)
         self.assertTrue(self._NON_SELF_PRIVATE_FIELDS.isdisjoint(payload))
         return payload
 
-    def test_public_profile_route_omits_none_fields_and_private_data_from_wire_response(self):
+    def test_public_profile_route_returns_contact_fields_but_omits_unrelated_profile_data(self):
         route = next(route for route in router.routes if route.path == "/{user_id}")
         self.assertTrue(route.response_model_exclude_none)
 
@@ -95,10 +93,11 @@ class UsersPublicRouterReadTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.json(), {
             "id": 7,
             "account_name": "owner7",
-            "mobile_number": "0912****007",
+            "mobile_number": "09120000007",
+            "address": "نشانی خصوصی",
         })
-        self.assertNotIn(target.mobile_number, response.text)
-        self.assertNotIn(target.address, response.text)
+        self.assertIn(target.mobile_number, response.text)
+        self.assertIn(target.address, response.text)
 
     async def test_customer_authorization_helpers_and_empty_search_rows(self):
         relation = SimpleNamespace(owner_user_id=21, customer_user_id=91)
@@ -135,7 +134,7 @@ class UsersPublicRouterReadTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("customer_relations.deleted_at", compiled)
         self.assertNotIn("accountant_relations.deleted_at", compiled)
 
-    async def test_read_public_user_returns_masked_minimal_projection_for_normal_peer(self):
+    async def test_read_public_user_returns_contact_projection_for_normal_peer(self):
         user = SimpleNamespace(
             id=7,
             is_deleted=False,
@@ -162,15 +161,15 @@ class UsersPublicRouterReadTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result.id, user.id)
         self.assertEqual(result.account_name, user.account_name)
-        payload = self.assert_minimal_non_self_projection(
+        payload = self.assert_contact_non_self_projection(
             result,
             raw_mobile=user.mobile_number,
             raw_address=user.address,
         )
-        self.assertEqual(set(payload), {"id", "account_name", "mobile_number"})
+        self.assertEqual(set(payload), {"id", "account_name", "mobile_number", "address"})
         self.assertEqual(db.calls[0][1], 7)
 
-    async def test_read_public_user_returns_full_mobile_and_address_only_for_exact_self_request(self):
+    async def test_read_public_user_returns_full_mobile_and_address_for_exact_self_request(self):
         current_user = SimpleNamespace(
             id=44,
             is_deleted=False,
@@ -220,7 +219,7 @@ class UsersPublicRouterReadTests(unittest.IsolatedAsyncioTestCase):
         ):
             result = await read_public_user(44, db=FakeDB(None), current_user=owner)
 
-        self.assert_minimal_non_self_projection(
+        self.assert_contact_non_self_projection(
             result,
             raw_mobile=owner.mobile_number,
             raw_address=owner.address,
@@ -291,7 +290,7 @@ class UsersPublicRouterReadTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result.id, 20)
         self.assertEqual(result.account_name, "owner20")
-        self.assert_minimal_non_self_projection(
+        self.assert_contact_non_self_projection(
             result,
             raw_mobile=owner.mobile_number,
             raw_address=owner.address,
@@ -324,7 +323,7 @@ class UsersPublicRouterReadTests(unittest.IsolatedAsyncioTestCase):
                 )
         self.assertEqual(exc_info.exception.status_code, 404)
 
-    async def test_read_public_user_resolves_accountant_to_minimal_owner_profile(self):
+    async def test_read_public_user_resolves_accountant_to_owner_contact_profile(self):
         owner_user = SimpleNamespace(
             id=21,
             is_deleted=False,
@@ -359,14 +358,14 @@ class UsersPublicRouterReadTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result.id, owner_user.id)
         self.assertEqual(result.account_name, owner_user.account_name)
-        self.assert_minimal_non_self_projection(
+        self.assert_contact_non_self_projection(
             result,
             raw_mobile=owner_user.mobile_number,
             raw_address=owner_user.address,
         )
         self.assertEqual(db.calls, [])
 
-    async def test_read_public_user_does_not_grant_super_admin_pii_through_public_profile(self):
+    async def test_read_public_user_keeps_super_admin_to_the_contact_projection(self):
         owner_user = SimpleNamespace(
             id=21,
             is_deleted=False,
@@ -394,7 +393,7 @@ class UsersPublicRouterReadTests(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertEqual(result.id, 21)
-        self.assert_minimal_non_self_projection(
+        self.assert_contact_non_self_projection(
             result,
             raw_mobile=owner_user.mobile_number,
             raw_address=owner_user.address,
@@ -426,7 +425,7 @@ class UsersPublicRouterReadTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(exc_info.exception.status_code, 404)
 
-    async def test_read_public_user_keeps_owner_customer_authorization_but_hides_customer_context(self):
+    async def test_read_public_user_keeps_owner_customer_authorization_and_contact_projection(self):
         customer_user = SimpleNamespace(
             id=91,
             is_deleted=False,
@@ -463,13 +462,13 @@ class UsersPublicRouterReadTests(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertEqual(result.id, 91)
-        self.assert_minimal_non_self_projection(
+        self.assert_contact_non_self_projection(
             result,
             raw_mobile=customer_user.mobile_number,
             raw_address=customer_user.address,
         )
 
-    async def test_read_public_user_keeps_accountant_customer_authorization_but_hides_customer_context(self):
+    async def test_read_public_user_keeps_accountant_customer_authorization_and_contact_projection(self):
         customer_user = SimpleNamespace(
             id=91,
             is_deleted=False,
@@ -508,7 +507,7 @@ class UsersPublicRouterReadTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result.id, 91)
         self.assertEqual(result.account_name, "customer91")
-        self.assert_minimal_non_self_projection(
+        self.assert_contact_non_self_projection(
             result,
             raw_mobile=customer_user.mobile_number,
             raw_address=customer_user.address,
@@ -569,7 +568,7 @@ class UsersPublicRouterReadTests(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertEqual(result.id, 21)
-        self.assert_minimal_non_self_projection(
+        self.assert_contact_non_self_projection(
             result,
             raw_mobile=owner_user.mobile_number,
             raw_address=owner_user.address,
@@ -608,7 +607,7 @@ class UsersPublicRouterReadTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result.id, 21)
         self.assertEqual(result.account_name, "owner_principal")
-        self.assert_minimal_non_self_projection(
+        self.assert_contact_non_self_projection(
             result,
             raw_mobile=owner_user.mobile_number,
             raw_address=owner_user.address,

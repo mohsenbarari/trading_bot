@@ -75,6 +75,7 @@ class UserCreate(UserBase):
 
 class UserRead(UserBase):
     id: int
+    address: str | None = None
     role: UserRole
     account_status: UserAccountStatus = UserAccountStatus.ACTIVE
     deactivated_at: datetime | None = None
@@ -157,7 +158,7 @@ class UserRead(UserBase):
         from_attributes = True
 
 class UserPublicRead(BaseModel):
-    """حداقل دادهٔ پروفایل عمومی؛ فیلدهای self فقط با projection سمت سرور افزوده می‌شوند."""
+    """دادهٔ تماس پروفایلی که کاربر مجاز به مشاهدهٔ آن است."""
     id: int
     account_name: str
     mobile_number: str

@@ -39,28 +39,20 @@ PROJECT_DIRECTORY_ROLES = (
 
 def _serialize_public_user(
     user: User,
-    *,
-    include_self_details: bool = False,
 ) -> schemas.UserPublicRead:
-    """Return an explicit allow-list projection for the public-profile endpoint.
+    """Return the product-approved contact projection for an accessible profile.
 
-    A public-profile request is not an admin-detail grant.  Only an exact self
-    request can include the user's full mobile number and address; all other
-    viewers receive the same minimal projection, regardless of role.
+    Route authorization remains authoritative. Once a viewer is allowed to open
+    the profile, the full mobile number and address are visible product fields;
+    presence, relations, trade counts and management metadata stay excluded.
     """
-    payload = {
-        "id": user.id,
-        "account_name": user.account_name,
-        "avatar_file_id": getattr(user, "avatar_file_id", None),
-        "mobile_number": (
-            user.mobile_number
-            if include_self_details
-            else mask_mobile(user.mobile_number)
-        ),
-    }
-    if include_self_details:
-        payload["address"] = getattr(user, "address", None)
-    return schemas.UserPublicRead(**payload)
+    return schemas.UserPublicRead(
+        id=user.id,
+        account_name=user.account_name,
+        avatar_file_id=getattr(user, "avatar_file_id", None),
+        mobile_number=user.mobile_number,
+        address=getattr(user, "address", None),
+    )
 
 
 def _serialize_project_user_directory_entry(user: User) -> schemas.ProjectUserDirectoryEntry:
@@ -601,10 +593,10 @@ async def read_public_user(
         )
 
     # The requested identity, not any later accountant->owner resolution,
-    # defines self visibility.  This prevents an owner opening an accountant
-    # target from receiving the owner's full self projection by accident.
+    # defines self routing. This prevents an owner opening an accountant target
+    # from being treated as if they had opened their own profile.
     if user_id == current_user.id:
-        return _serialize_public_user(current_user, include_self_details=True)
+        return _serialize_public_user(current_user)
 
     relation = await get_active_accountant_relation_for_accountant(db, user_id)
     if relation and relation.owner_user and not relation.owner_user.is_deleted:
