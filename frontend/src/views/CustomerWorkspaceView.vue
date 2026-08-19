@@ -5,6 +5,8 @@ import { Clock, Copy, ReceiptText, ShieldAlert, UserPlus, Users } from 'lucide-v
 import CustomerNameWithBadge from '../components/CustomerNameWithBadge.vue'
 import {
   WorkspaceAccountDeletionDialog,
+  WorkspaceDetailHeader,
+  WorkspaceFormActions,
   WorkspaceNotice,
   WorkspaceSection,
   WorkspaceShell,
@@ -1610,22 +1612,23 @@ onBeforeUnmount(() => {
                 تلاش دوباره
               </AppButton>
             </WorkspaceNotice>
-            <header class="customer-detail-header ui-v2-workspace-customer-detail-header">
-              <div>
-                <h2><CustomerNameWithBadge :name="getRelationTitle(activeRelation)" /></h2>
-                <p>{{ getRelationDescription(activeRelation) }}</p>
-              </div>
-              <div class="customer-detail-badges ui-v2-workspace-customer-detail-badges">
-                <AppStatusBadge :tone="getStatusTone(activeRelation.status)">
-                  {{ getStatusLabel(activeRelation.status) }}
-                </AppStatusBadge>
-                <AppStatusBadge
-                  :tone="activeRelation.customer_tier === 'tier2' ? 'primary' : 'neutral'"
-                >
-                  {{ getTierLabel(activeRelation.customer_tier) }}
-                </AppStatusBadge>
-              </div>
-            </header>
+            <WorkspaceDetailHeader
+              header-class="customer-detail-header ui-v2-workspace-customer-detail-header"
+              badges-class="customer-detail-badges ui-v2-workspace-customer-detail-badges"
+              :description="getRelationDescription(activeRelation)"
+            >
+              <template #title>
+                <CustomerNameWithBadge :name="getRelationTitle(activeRelation)" />
+              </template>
+              <AppStatusBadge :tone="getStatusTone(activeRelation.status)">
+                {{ getStatusLabel(activeRelation.status) }}
+              </AppStatusBadge>
+              <AppStatusBadge
+                :tone="activeRelation.customer_tier === 'tier2' ? 'primary' : 'neutral'"
+              >
+                {{ getTierLabel(activeRelation.customer_tier) }}
+              </AppStatusBadge>
+            </WorkspaceDetailHeader>
 
             <div
               v-if="activeRelation.status === 'pending'"
@@ -1870,11 +1873,11 @@ onBeforeUnmount(() => {
                   :message="limitsNotice"
                 />
 
-                <div class="customer-inline-actions ui-v2-workspace-customer-inline-actions">
+                <WorkspaceFormActions action-class="customer-inline-actions ui-v2-workspace-customer-inline-actions">
                   <AppButton variant="primary" :loading="isSavingLimits" @click="saveDetailLimits">
                     مرور تغییرات
                   </AppButton>
-                </div>
+                </WorkspaceFormActions>
               </AppCard>
 
               <AppCard
@@ -1922,8 +1925,8 @@ onBeforeUnmount(() => {
                   title="ثبت تغییرات ناموفق بود"
                   :message="limitsError"
                 />
-                <div
-                  class="customer-financial-review__actions ui-v2-workspace-customer-financial-actions"
+                <WorkspaceFormActions
+                  action-class="customer-financial-review__actions ui-v2-workspace-customer-financial-actions"
                 >
                   <AppButton
                     variant="primary"
@@ -1939,7 +1942,7 @@ onBeforeUnmount(() => {
                   >
                     بازگشت و اصلاح
                   </AppButton>
-                </div>
+                </WorkspaceFormActions>
               </AppCard>
             </div>
 
@@ -2176,11 +2179,11 @@ onBeforeUnmount(() => {
                     </p>
                   </div>
                 </div>
-                <div class="customer-inline-actions ui-v2-workspace-customer-inline-actions">
+                <WorkspaceFormActions action-class="customer-inline-actions ui-v2-workspace-customer-inline-actions">
                   <AppButton variant="danger" @click="openAccountDeletionDialog(activeRelation)">
                     بررسی و حذف حساب
                   </AppButton>
-                </div>
+                </WorkspaceFormActions>
               </AppDangerZone>
               <AppDangerZone
                 v-else
@@ -2197,14 +2200,14 @@ onBeforeUnmount(() => {
                     </p>
                   </div>
                 </div>
-                <div class="customer-inline-actions ui-v2-workspace-customer-inline-actions">
+                <WorkspaceFormActions action-class="customer-inline-actions ui-v2-workspace-customer-inline-actions">
                   <AppButton
                     variant="danger"
                     @click="openConfirmDialog('close-relation', activeRelation)"
                   >
                     بررسی و بستن رابطه
                   </AppButton>
-                </div>
+                </WorkspaceFormActions>
               </AppDangerZone>
             </div>
           </div>
@@ -2324,7 +2327,7 @@ onBeforeUnmount(() => {
                 <p class="customer-pending-deadline ui-v2-workspace-customer-pending-deadline">
                   {{ formatInvitationDeadline(relation.expires_at) }}
                 </p>
-                <div class="customer-inline-actions ui-v2-workspace-customer-inline-actions">
+                <WorkspaceFormActions action-class="customer-inline-actions ui-v2-workspace-customer-inline-actions">
                   <AppButton size="sm" variant="primary" @click="openRelation(relation.id)">
                     بررسی دعوت
                   </AppButton>
@@ -2365,7 +2368,7 @@ onBeforeUnmount(() => {
                   >
                     لغو دعوت
                   </AppButton>
-                </div>
+                </WorkspaceFormActions>
                 <WorkspaceNotice
                   v-if="invitationSmsStatusMessage(relation.sms_status)"
                   v2-scope
@@ -2591,8 +2594,8 @@ onBeforeUnmount(() => {
           :message="createNotice"
         />
 
-        <div
-          class="ui-v2-workspace-inline-form-actions ui-v2-workspace-customer-create-actions"
+        <WorkspaceFormActions
+          action-class="ui-v2-workspace-inline-form-actions ui-v2-workspace-customer-create-actions"
         >
           <AppButton variant="secondary" :disabled="isCreateSubmitting" @click="closeCreatePanel">
             انصراف
@@ -2600,7 +2603,7 @@ onBeforeUnmount(() => {
           <AppButton variant="primary" :loading="isCreateSubmitting" @click="createRelation">
             ثبت دعوت مشتری
           </AppButton>
-        </div>
+        </WorkspaceFormActions>
       </div>
     </component>
   </div>

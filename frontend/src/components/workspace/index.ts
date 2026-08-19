@@ -1,5 +1,7 @@
 export { default as WorkspaceActionTile } from './WorkspaceActionTile.vue'
 export { default as WorkspaceDangerZone } from './WorkspaceDangerZone.vue'
+export { default as WorkspaceDetailHeader } from './WorkspaceDetailHeader.vue'
+export { default as WorkspaceFormActions } from './WorkspaceFormActions.vue'
 export { default as WorkspaceNotice } from './WorkspaceNotice.vue'
 export { default as WorkspaceSection } from './WorkspaceSection.vue'
 export { default as WorkspaceShell } from './WorkspaceShell.vue'

@@ -20,7 +20,8 @@
 | 0 اتصال و انزوا | done | `5c43d920` |
 | 1 ممیزی | done | `ab431004` |
 | 2 Figma و foundation | done | `1c67ea94` |
-| 3 پروفایل | in-progress | ثبت پس از commit |
+| 3 پروفایل | done | `79d4c5b2` |
+| 4 عملیات | in-progress | ثبت پس از commit |
 | 4 عملیات | pending | |
 | 5 خانه و حساب | pending | |
 | 6 مدیریت | pending | |
@@ -85,6 +86,15 @@
 - `account_status` و نمایش پیام/مشتری بدون تغییر قرارداد سرور باقی ماند.
 - تست متمرکز presentation + تست‌های موجود PublicProfile/UserProfile/ProfileView سبز شد.
 - قاب Figma DRAFT پروفایل: section `665:437`، خود `665:438`، عمومی `665:457`؛ متن‌ها ساختگی و بدون دادهٔ شخصی.
+
+## فاز چهار — عملیات
+
+- منطق درخواست، `expected_action` و مجوز مشتری/حسابدار دست‌نخورده ماند.
+- `WorkspaceDetailHeader` و `WorkspaceFormActions` برای پرونده و اقدام‌های فرم مشترک شدند.
+- اقدام انصراف/ثبت در جریان سند است، `position: fixed` ندارد و فاصلهٔ پایین برای صفحهٔ کلید نرم را رعایت می‌کند.
+- تب‌ها همان `reveal-selection-on-keyboard` قبلی را حفظ کردند.
+- تست‌های Customer/Accountant و presentation سبز شد.
+- قاب Figma DRAFT عملیات: section `666:454`، مشتری `666:455`، حسابدار `666:475`.
 
 کمبود واقعی در برابر false positive:
 

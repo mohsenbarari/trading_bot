@@ -4,6 +4,8 @@ import { useRoute, useRouter } from 'vue-router'
 import { BriefcaseBusiness, Clock, Copy, ShieldAlert, UserPlus } from 'lucide-vue-next'
 import {
   WorkspaceAccountDeletionDialog,
+  WorkspaceDetailHeader,
+  WorkspaceFormActions,
   WorkspaceNotice,
   WorkspaceSection,
   WorkspaceShell,
@@ -1256,17 +1258,16 @@ onBeforeUnmount(() => {
             v-else-if="activeRelation"
             class="accountant-detail-shell ui-v2-workspace-accountant-detail-shell"
           >
-            <header class="accountant-detail-header ui-v2-workspace-accountant-detail-header">
-              <div>
-                <h2>{{ getRelationTitle(activeRelation) }}</h2>
-                <p>{{ getRelationDescription(activeRelation) }}</p>
-              </div>
-              <div class="accountant-detail-badges ui-v2-workspace-accountant-detail-badges">
-                <AppStatusBadge :tone="getStatusTone(activeRelation.status)">
-                  {{ getStatusLabel(activeRelation.status) }}
-                </AppStatusBadge>
-              </div>
-            </header>
+            <WorkspaceDetailHeader
+              header-class="accountant-detail-header ui-v2-workspace-accountant-detail-header"
+              badges-class="accountant-detail-badges ui-v2-workspace-accountant-detail-badges"
+              :title="getRelationTitle(activeRelation)"
+              :description="getRelationDescription(activeRelation)"
+            >
+              <AppStatusBadge :tone="getStatusTone(activeRelation.status)">
+                {{ getStatusLabel(activeRelation.status) }}
+              </AppStatusBadge>
+            </WorkspaceDetailHeader>
 
             <WorkspaceNotice
               v-if="isTerminalRelation"
@@ -1382,7 +1383,7 @@ onBeforeUnmount(() => {
                   :message="dutyNotice"
                 />
 
-                <div class="accountant-inline-actions ui-v2-workspace-accountant-inline-actions">
+                <WorkspaceFormActions action-class="accountant-inline-actions ui-v2-workspace-accountant-inline-actions">
                   <AppButton
                     variant="secondary"
                     :disabled="isSavingDuty"
@@ -1401,7 +1402,7 @@ onBeforeUnmount(() => {
                   >
                     ذخیره تغییرات
                   </AppButton>
-                </div>
+                </WorkspaceFormActions>
               </AppCard>
             </div>
 
@@ -1528,7 +1529,7 @@ onBeforeUnmount(() => {
                     </p>
                   </div>
                 </div>
-                <div class="accountant-inline-actions ui-v2-workspace-accountant-inline-actions">
+                <WorkspaceFormActions action-class="accountant-inline-actions ui-v2-workspace-accountant-inline-actions">
                   <AppButton
                     variant="danger"
                     @click="
@@ -1550,7 +1551,7 @@ onBeforeUnmount(() => {
                           : 'حذف حساب'
                     }}
                   </AppButton>
-                </div>
+                </WorkspaceFormActions>
               </AppDangerZone>
             </div>
           </div>
@@ -1672,7 +1673,7 @@ onBeforeUnmount(() => {
                 <p class="accountant-pending-deadline ui-v2-workspace-accountant-pending-deadline">
                   {{ invitationDeadlineText(relation) }}
                 </p>
-                <div class="accountant-inline-actions ui-v2-workspace-accountant-inline-actions">
+                <WorkspaceFormActions action-class="accountant-inline-actions ui-v2-workspace-accountant-inline-actions">
                   <AppButton
                     v-if="invitationRelationLink(relation, 'web')"
                     size="sm"
@@ -1691,7 +1692,7 @@ onBeforeUnmount(() => {
                   >
                     لغو دعوت
                   </AppButton>
-                </div>
+                </WorkspaceFormActions>
                 <p
                   v-if="invitationSmsStatusMessage(relation.sms_status)"
                   class="accountant-pending-sms-status ui-v2-workspace-accountant-pending-sms-status"
@@ -1868,8 +1869,8 @@ onBeforeUnmount(() => {
           :message="createError"
         />
 
-        <div
-          class="ui-v2-workspace-inline-form-actions ui-v2-workspace-accountant-create-actions"
+        <WorkspaceFormActions
+          action-class="ui-v2-workspace-inline-form-actions ui-v2-workspace-accountant-create-actions"
         >
           <AppButton variant="secondary" :disabled="isCreateSubmitting" @click="closeCreatePanel">
             انصراف
@@ -1882,7 +1883,7 @@ onBeforeUnmount(() => {
           >
             ثبت دعوت حسابدار
           </AppButton>
-        </div>
+        </WorkspaceFormActions>
       </div>
     </component>
   </div>
