@@ -474,6 +474,26 @@ class TelegramFreshnessDecision:
     reason: str | None = None
 
 
+class TelegramDeliveryFreshnessChangedBeforeDispatch(RuntimeError):
+    """Expected fence signal when business state changes at provider entry.
+
+    The worker performs a final freshness check before entering the provider
+    section, while the Offer lifecycle adapter checks once more inside the
+    durable dispatch-marker transaction. A concurrent terminal transition between
+    those two boundaries must prevent the send without being reported as an
+    execution failure.
+    """
+
+    def __init__(self, decision: TelegramFreshnessDecision) -> None:
+        if decision.outcome == TelegramFreshnessOutcome.SEND:
+            raise ValueError("dispatch_freshness_change_requires_non_send_decision")
+        self.decision = decision
+        super().__init__(
+            "telegram_delivery_freshness_changed_before_dispatch:"
+            f"{decision.outcome.value}:{decision.reason or 'unspecified'}"
+        )
+
+
 @dataclass(frozen=True, slots=True)
 class TelegramKeyboardDecision:
     delete_active_anchor: bool

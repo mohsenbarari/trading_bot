@@ -69,6 +69,7 @@ from core.services.telegram_publisher_dispatch_service import (
 )
 from core.telegram_delivery_queue_contract import (
     TelegramDeliveryDecision,
+    TelegramDeliveryFreshnessChangedBeforeDispatch,
     TelegramDeliveryOutcome,
     TelegramDeliveryState,
     TelegramDestinationClass,
@@ -1466,6 +1467,41 @@ async def run_telegram_delivery_queue_cycle(
                 admission=admission,
             )
             key = "durable_dispatch_wait"
+            status_counts[key] = status_counts.get(key, 0) + 1
+            processed_count += 1
+            continue
+        except TelegramDeliveryFreshnessChangedBeforeDispatch as exc:
+            # Business state changed after the worker's last validator pass
+            # but before the durable dispatch marker. No provider call began.
+            # Return the lease to the queue without recording a job error; the
+            # next claim re-runs the authoritative validator and applies the
+            # new terminal/reclassification decision normally.
+            _leave_provider_dispatch(
+                lane_identity,
+                job_id=job_id,
+                lease_token=lease_token,
+            )
+            try:
+                deferred = await _defer_for_dispatch_limit(
+                    job_id=job_id,
+                    worker_id=active_worker_id,
+                    lease_token=lease_token,
+                    retry_seconds=0.1,
+                    reason=(
+                        "dispatch_freshness_changed:"
+                        f"{exc.decision.outcome.value}:"
+                        f"{exc.decision.reason or 'unspecified'}"
+                    ),
+                )
+            finally:
+                await _release_unused_rate_limit_probe(
+                    dispatch_limiter=dispatch_limiter,
+                    job=job,
+                    admission=admission,
+                )
+            if not deferred:
+                stale_fence_count += 1
+            key = f"dispatch_freshness_{exc.decision.outcome.value}"
             status_counts[key] = status_counts.get(key, 0) + 1
             processed_count += 1
             continue

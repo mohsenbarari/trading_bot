@@ -72,6 +72,10 @@ def _callback():
 
 
 class BotOfferOvertimePreferenceTests(unittest.IsolatedAsyncioTestCase):
+    def test_save_success_copy_contains_only_the_persisted_result(self):
+        detail = "✅ وقت اضافه لفظ‌های جدید شما روی ۵ دقیقه تنظیم شد."
+        self.assertEqual(handler._compose_save_success_text(detail), detail)
+
     def test_user_panel_keyboard_hides_overtime_button_when_not_eligible(self):
         keyboard = get_user_panel_keyboard(
             UserRole.STANDARD,

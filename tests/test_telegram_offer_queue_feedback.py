@@ -133,10 +133,11 @@ class TelegramOfferQueueFeedbackTests(unittest.IsolatedAsyncioTestCase):
             return_value=-100,
         ):
             with self.assertRaisesRegex(
-                feedback_module.TelegramOfferQueueFeedbackError,
-                "dispatch_guard_rejected",
-            ):
+                feedback_module.TelegramDeliveryFreshnessChangedBeforeDispatch,
+                "freshness_changed_before_dispatch:superseded:stale",
+            ) as caught:
                 await self.feedback.assert_dispatchable(self.db, job, utc_now())
+        self.assertIs(caught.exception.decision, stale)
 
     async def test_publish_success_records_canonical_message_identity(self):
         job = make_job(
