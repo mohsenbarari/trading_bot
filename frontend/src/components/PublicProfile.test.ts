@@ -17,10 +17,15 @@ const publicProfileRealtimeMocks = vi.hoisted(() => ({
   }),
   off: vi.fn(),
 }))
-const publicProfileSource = readFileSync(
+const publicProfileFileSource = readFileSync(
   resolve(process.cwd(), 'src/components/PublicProfile.vue'),
   'utf8',
 )
+const profileIdentityHeaderSource = readFileSync(
+  resolve(process.cwd(), 'src/components/profile/ProfileIdentityHeader.vue'),
+  'utf8',
+)
+const publicProfileSource = [publicProfileFileSource, profileIdentityHeaderSource].join('\n\n')
 
 vi.mock('../utils/chatFiles', () => ({
   buildChatFileUrl: buildChatFileUrlMock,
@@ -219,11 +224,12 @@ describe('PublicProfile.vue', () => {
   })
 
   it('renders remaining public-profile chrome with shared icon and button primitives', () => {
-    expect(publicProfileSource).toMatch(/<AppIconButton class="profile-nav-back"/)
+    expect(publicProfileFileSource).toMatch(/<ProfileIdentityHeader/)
+    expect(publicProfileSource).toMatch(/<AppIconButton[\s\S]*?class="profile-nav-back"/)
     expect(publicProfileSource).toMatch(/<AppButton class="retry-btn"/)
     expect(publicProfileSource).toMatch(/<AppIconButton\s+v-if="isOwnProfile"\s+class="address-edit-trigger"/)
     expect(publicProfileSource).toMatch(/data-test="profile-avatar-trigger"/)
-    expect(publicProfileSource).toMatch(/<button\s+v-if="showOwnerSections"[\s\S]*?class="profile-avatar profile-avatar-button profile-avatar-button--editable"/)
+    expect(publicProfileSource).toMatch(/<button\s+v-if="editable"[\s\S]*?class="profile-avatar profile-avatar-button profile-avatar-button--editable"/)
     expect(publicProfileSource).toMatch(/\.profile-link-btn\s*\{[\s\S]*?color:\s*var\(--ds-success-700\)/)
     expect(publicProfileSource).toMatch(/\.trade-counterparty \.profile-link-btn\s*\{[\s\S]*?color:\s*var\(--ds-success-700\)/)
     expect(publicProfileSource).toMatch(/background:\s*linear-gradient\(135deg,\s*var\(--ds-telegram-500\),\s*var\(--ds-info-500\) 58%,\s*var\(--ds-primary-500\) 100%\)/)

@@ -2,14 +2,11 @@
 import { computed, ref, onMounted, onUnmounted, watch } from 'vue';
 import {
   BriefcaseBusiness,
-  ChevronLeft,
   MessageCircle,
   Settings,
   ShieldBan,
   ShieldCheck,
   Users,
-  User as UserIcon,
-  Activity,
   Pencil,
   Wrench,
 } from 'lucide-vue-next';
@@ -20,7 +17,6 @@ import UserProfile from './UserProfile.vue';
 import JalaliDatePicker from './JalaliDatePicker.vue';
 import {
   AppButton,
-  AppActionCard,
   AppConfirmDialog,
   AppEmptyState,
   AppErrorState,
@@ -29,13 +25,21 @@ import {
   AppIconButton,
   AppInput,
   AppListItem,
-  AppMetricCard,
   AppResponsiveDialog,
   AppSectionCard,
   AppSelect,
   AppStatusBadge,
   AppTextarea,
 } from './ui';
+import {
+  ProfileActions,
+  ProfileAdminControls,
+  ProfileIdentityHeader,
+  ProfileRelationshipSection,
+  ProfileSummary,
+  ProfileTradeHistory,
+  type ProfileActionItem,
+} from './profile';
 import { isAdminRoleValue, readCachedCurrentUserRole } from '../utils/adminAccess';
 import { resolveTradeParticipantProfileTarget } from '../utils/accountantChatIdentity';
 import { apiFetch } from '../utils/auth';
@@ -644,6 +648,38 @@ function getActionIconComponent(action: ProfileActionCard) {
   return Settings;
 }
 
+function decorateProfileAction(
+  action: ProfileActionCard,
+  tone: ProfileActionItem['tone'],
+): ProfileActionItem {
+  return {
+    key: action.key,
+    label: action.label,
+    description: action.description,
+    disabled: action.disabled,
+    tone,
+    className: getActionButtonClass(action),
+    icon: getActionIconComponent(action),
+  };
+}
+
+const visitorActionItems = computed<ProfileActionItem[]>(() => (
+  visitorActionCards.value.map((action) => decorateProfileAction(
+    action,
+    action.key === 'block_toggle'
+      ? (publicBlockState.value ? 'success' : 'danger')
+      : action.key === 'message' ? 'info' : 'warning',
+  ))
+));
+
+const adminActionItems = computed<ProfileActionItem[]>(() => (
+  adminActionCards.value.map((action) => decorateProfileAction(action, 'warning'))
+));
+
+const ownerActionItems = computed<ProfileActionItem[]>(() => (
+  ownerOnlyActions.value.map((action) => decorateProfileAction(action, 'warning'))
+));
+
 async function loadProfile() {
   const requestRevision = ++profileRequestRevision;
   isLoading.value = true;
@@ -725,6 +761,16 @@ watch(
   () => props.viewerUserId,
   (nextViewerUserId, previousViewerUserId) => {
     if (Number(nextViewerUserId) !== Number(previousViewerUserId)) {
+      void loadProfile();
+    }
+  },
+);
+
+watch(
+  () => props.user?.id,
+  (nextUserId, previousUserId) => {
+    if (previousUserId == null) return;
+    if (Number(nextUserId) !== Number(previousUserId)) {
       void loadProfile();
     }
   },
@@ -1660,7 +1706,7 @@ function handleAdminUserManagerNavigate(view: string) {
   emit('navigate', view);
 }
 
-function handleActionClick(action: ProfileActionCard) {
+function handleActionClick(action: { key: string }) {
   if (!profileData.value) return;
   
   if (action.key === 'message') {
@@ -1826,56 +1872,28 @@ function handleHistoryPresetChipChange(value: string) {
 <template>
   <div class="card public-profile-typography">
     <input ref="avatarInput" type="file" accept="image/*" class="hidden-avatar-input" @change="handleAvatarSelected" />
-    <div class="header-row profile-header-row">
-      <div class="header-spacer">
-        <div v-if="profileData" class="profile-avatar-stack profile-avatar-stack--header">
-          <button
-            v-if="showOwnerSections"
-            type="button"
-            class="profile-avatar profile-avatar-button profile-avatar-button--editable"
-            data-test="profile-avatar-trigger"
-            :disabled="avatarBusy"
-            :aria-label="profileAvatarUrl ? 'تغییر آواتار' : 'افزودن آواتار'"
-            @click="triggerAvatarPicker"
-          >
-            <img v-if="profileAvatarUrl" :src="profileAvatarUrl" :alt="profileDisplayName" class="profile-avatar-image" />
-            <template v-else>{{ getAvatarInitial(profileDisplayName) }}</template>
-            <span class="profile-avatar-edit-indicator" aria-hidden="true">
-              <Pencil :size="12" />
-            </span>
-            <div v-if="avatarBusy" class="profile-avatar-busy">در حال ذخیره...</div>
-          </button>
-          <div v-else class="profile-avatar profile-avatar--readonly" data-test="profile-avatar-readonly">
-            <img v-if="profileAvatarUrl" :src="profileAvatarUrl" :alt="profileDisplayName" class="profile-avatar-image" />
-            <template v-else>{{ getAvatarInitial(profileDisplayName) }}</template>
-          </div>
-          <p
-            v-if="showOwnerSections && profilePresenceStatus"
-            class="profile-presence-status profile-presence-status--own"
-            :class="{ online: profileIsOnline }"
-          >
-            {{ profilePresenceStatus }}
-          </p>
-        </div>
-      </div>
-      <div class="header-title">
-         <h2 v-if="profileData">
-           <CustomerNameWithBadge
-             v-if="customerProfileContext"
-             :name="profileDisplayName"
-           />
-           <template v-else>{{ profileDisplayName }}</template>
-         </h2>
-         <h2 v-else-if="isLoading" class="skeleton-text-header">
-           <!-- Skeleton for Title -->
-           <div class="skeleton-box" style="width: 120px; height: 24px;"></div>
-         </h2>
-         <h2 v-else>پروفایل</h2>
-      </div>
-      <AppIconButton class="profile-nav-back" label="بازگشت" @click="$emit('navigate', 'home')">
-        <ChevronLeft :size="20" />
-      </AppIconButton>
-    </div>
+    <ProfileIdentityHeader
+      :display-name="profileData ? profileDisplayName : ''"
+      :avatar-url="profileAvatarUrl"
+      :avatar-initial="getAvatarInitial(profileDisplayName)"
+      :editable="showOwnerSections"
+      :avatar-busy="avatarBusy"
+      :show-presence="showOwnerSections"
+      :presence-status="profilePresenceStatus"
+      :online="profileIsOnline"
+      :hide-back-button="hideBackButton"
+      :loading="isLoading && !profileData"
+      @back="$emit('navigate', 'home')"
+      @pick-avatar="triggerAvatarPicker"
+    >
+      <template #title>
+        <CustomerNameWithBadge
+          v-if="customerProfileContext"
+          :name="profileDisplayName"
+        />
+        <template v-else>{{ profileDisplayName }}</template>
+      </template>
+    </ProfileIdentityHeader>
 
     <div v-if="isLoading" class="loading-state-skeleton">
        <LoadingSkeleton :count="1" :height="100" /> <!-- Info Section -->
@@ -1895,25 +1913,18 @@ function handleHistoryPresetChipChange(value: string) {
     </AppErrorState>
 
     <div v-else-if="profileData" class="profile-content" :class="{ 'profile-content--own': showOwnerSections }">
-      <section class="profile-section shared-profile-section">
-        <div v-if="showOwnerSections && customerProfileContext" class="customer-context-banner">
-          <div class="customer-context-title">پروفایل مشتری</div>
-          <p class="customer-context-copy">
-            <CustomerNameWithBadge :name="customerProfileContext.managementName" compact />
-            <span v-if="customerProfileContext.ownerAccountName"> | سرگروه: {{ customerProfileContext.ownerAccountName }}</span>
-            <span v-if="showCustomerTierInProfileBanner"> | {{ getCustomerTierLabel(customerProfileContext.customerTier) }}</span>
-          </p>
-        </div>
-
-        <section v-if="sharedStatCards.length > 0" class="profile-stats-grid" aria-label="خلاصه وضعیت پروفایل">
-          <AppMetricCard
-            v-for="stat in sharedStatCards"
-            :key="stat.key"
-            :label="stat.label"
-            :value="stat.value"
-            tone="neutral"
+      <ProfileSummary
+        :stats="sharedStatCards"
+        :customer-context="showOwnerSections ? customerProfileContext : null"
+        :customer-tier-label="customerProfileContext ? getCustomerTierLabel(customerProfileContext.customerTier) : ''"
+      >
+        <template #customer-name>
+          <CustomerNameWithBadge
+            v-if="customerProfileContext"
+            :name="customerProfileContext.managementName"
+            compact
           />
-        </section>
+        </template>
 
         <AppSectionCard
           class="profile-section-card mt-4 card-with-help"
@@ -1982,11 +1993,15 @@ function handleHistoryPresetChipChange(value: string) {
             </div>
           </div>
         </AppSectionCard>
-      </section>
+      </ProfileSummary>
 
-      <section v-if="showProjectUsersSection" class="profile-section project-users-section">
-        <AppSectionCard class="profile-section-card card-with-help" title="لیست همکاران" description="اعضای قابل مشاهده پروژه را جستجو و از همین بخش باز کنید.">
-          <template #actions>
+      <ProfileRelationshipSection
+        v-if="showProjectUsersSection"
+        section-class="project-users-section"
+        title="لیست همکاران"
+        description="اعضای قابل مشاهده پروژه را جستجو و از همین بخش باز کنید."
+      >
+        <template #actions>
             <HelpPopover
               comfortable-target
               button-test="public-profile-project-users-help"
@@ -1994,9 +2009,7 @@ function handleHistoryPresetChipChange(value: string) {
               label="راهنمای لیست همکاران"
               text="لیست همکاران، اعضای قابل مشاهده پروژه را نشان می‌دهد. با انتخاب نام هر همکار، پروفایل عمومی همان کاربر باز می‌شود."
             />
-          </template>
-
-          <div class="profile-section-card__body">
+        </template>
             <form class="project-users-search" @submit.prevent="submitProjectUsersSearch">
               <label class="sr-only" for="project-users-directory-search">جستجوی همکاران پروژه</label>
               <AppInput
@@ -2053,13 +2066,15 @@ function handleHistoryPresetChipChange(value: string) {
                 >نمایش بیشتر</AppButton>
               </div>
             </template>
-          </div>
-        </AppSectionCard>
-      </section>
+      </ProfileRelationshipSection>
 
-      <section v-if="showOwnerSections && accountantRelations.length > 0" class="profile-section accountant-relations-section">
-        <AppSectionCard class="profile-section-card card-with-help" title="لیست حسابداران" description="عنوان هر ردیف همان نام نمایشی رابطه است و توضیح وظیفه، در صورت ثبت، زیر آن می‌آید.">
-          <template #actions>
+      <ProfileRelationshipSection
+        v-if="showOwnerSections && accountantRelations.length > 0"
+        section-class="accountant-relations-section"
+        title="لیست حسابداران"
+        description="عنوان هر ردیف همان نام نمایشی رابطه است و توضیح وظیفه، در صورت ثبت، زیر آن می‌آید."
+      >
+        <template #actions>
             <HelpPopover
               comfortable-target
               button-test="public-profile-accountants-help"
@@ -2067,9 +2082,7 @@ function handleHistoryPresetChipChange(value: string) {
               label="راهنمای لیست حسابداران"
               text="این لیست حسابداران فعال مالک را نشان می‌دهد. عنوان هر ردیف همان نام نمایشی رابطه است و توضیح وظیفه، در صورت ثبت، زیر آن می‌آید."
             />
-          </template>
-
-          <div class="profile-section-card__body">
+        </template>
             <div class="public-accountant-list">
               <article
                 v-for="relation in accountantRelations"
@@ -2085,13 +2098,15 @@ function handleHistoryPresetChipChange(value: string) {
                 <p v-if="relation.duty_description" class="public-accountant-duty">{{ relation.duty_description }}</p>
               </article>
             </div>
-          </div>
-        </AppSectionCard>
-      </section>
+      </ProfileRelationshipSection>
 
-      <section v-if="showCustomerListSection" class="profile-section customer-relations-section">
-        <AppSectionCard class="profile-section-card card-with-help" title="مشتریان این مالک" description="نمایش این بخش به حسابداران همان مالک و مدیر ارشد محدود است.">
-          <template #actions>
+      <ProfileRelationshipSection
+        v-if="showCustomerListSection"
+        section-class="customer-relations-section"
+        title="مشتریان این مالک"
+        description="نمایش این بخش به حسابداران همان مالک و مدیر ارشد محدود است."
+      >
+        <template #actions>
             <HelpPopover
               comfortable-target
               button-test="public-profile-customers-help"
@@ -2099,9 +2114,7 @@ function handleHistoryPresetChipChange(value: string) {
               label="راهنمای مشتریان این مالک"
               text="این بخش مشتریان ثبت‌شده زیر این مالک را نشان می‌دهد. نمایش آن به حسابداران همان مالک و مدیر ارشد محدود است."
             />
-          </template>
-
-          <div class="profile-section-card__body">
+        </template>
             <div class="public-customer-list">
               <article
                 v-for="relation in customerRelations"
@@ -2128,13 +2141,17 @@ function handleHistoryPresetChipChange(value: string) {
                 </div>
               </article>
             </div>
-          </div>
-        </AppSectionCard>
-      </section>
+      </ProfileRelationshipSection>
 
-      <section v-if="showVisitorSections && visitorActionCards.length > 0" class="profile-section visitor-profile-section">
-        <AppSectionCard class="profile-menu-card" title="اقدام‌های عمومی" description="ارسال پیام و مدیریت دسترسی عمومی این کاربر از این بخش انجام می‌شود.">
-          <template #actions>
+      <ProfileActions
+        v-if="showVisitorSections"
+        section-class="visitor-profile-section"
+        title="اقدام‌های عمومی"
+        description="ارسال پیام و مدیریت دسترسی عمومی این کاربر از این بخش انجام می‌شود."
+        :actions="visitorActionItems"
+        @select="handleActionClick"
+      >
+        <template #actions>
             <HelpPopover
               floating
               comfortable-target
@@ -2143,26 +2160,7 @@ function handleHistoryPresetChipChange(value: string) {
               label="راهنمای منوی پروفایل عمومی"
               text="اقدام‌های عمومی این پروفایل در این بخش قرار گرفته‌اند تا مسیر پیام، بلاک و عملیات مشابه یکپارچه و قابل پیش‌بینی بماند."
             />
-          </template>
-          <div class="profile-action-grid">
-            <AppActionCard
-            v-for="action in visitorActionCards"
-            :key="action.key"
-            class="profile-action-card"
-            :class="[getActionButtonClass(action), { 'profile-action-card--disabled': Boolean(action.disabled) }]"
-            :title="action.label"
-            :description="action.description || undefined"
-            :disabled="Boolean(action.disabled)"
-            :tone="action.key === 'block_toggle' ? (publicBlockState ? 'success' : 'danger') : action.key === 'message' ? 'info' : 'warning'"
-            @select="handleActionClick(action)"
-          >
-            <template #icon>
-              <span class="profile-action-card__icon" aria-hidden="true">
-                <component :is="getActionIconComponent(action)" :size="18" />
-              </span>
-            </template>
-          </AppActionCard>
-          </div>
+        </template>
           <p
             v-if="publicBlockFeedback"
             class="public-block-feedback"
@@ -2172,12 +2170,19 @@ function handleHistoryPresetChipChange(value: string) {
           >
             {{ publicBlockFeedback.message }}
           </p>
-        </AppSectionCard>
-      </section>
+      </ProfileActions>
 
-      <section v-if="showAdminSections && adminActionCards.length > 0" class="profile-section owner-profile-section">
-        <p v-if="adminUserError" class="admin-user-error">{{ adminUserError }}</p>
-        <AppSectionCard class="profile-menu-card" title="مدیریت کاربر" description="ابزارهای مدیریتی این پروفایل از اقدام‌های عمومی جدا شده‌اند.">
+      <ProfileAdminControls
+        v-if="showAdminSections && adminActionItems.length > 0"
+        :error="adminUserError"
+      >
+        <ProfileActions
+          title="مدیریت کاربر"
+          description="ابزارهای مدیریتی این پروفایل از اقدام‌های عمومی جدا شده‌اند."
+          :actions="adminActionItems"
+          :loading="adminUserLoading"
+          @select="handleActionClick"
+        >
           <template #actions>
             <HelpPopover
               floating
@@ -2188,29 +2193,14 @@ function handleHistoryPresetChipChange(value: string) {
               text="تنظیمات مدیریتی کاربر از بخش عمومی جدا شده‌اند تا عملیات روزمره با ابزارهای مدیریتی مخلوط نشود."
             />
           </template>
-          <div class="profile-action-grid">
-            <AppActionCard
-            v-for="action in adminActionCards"
-            :key="action.key"
-            class="profile-action-card"
-            :class="getActionButtonClass(action)"
-            :title="adminUserLoading ? 'در حال بارگذاری...' : action.label"
-            tone="warning"
-            :disabled="adminUserLoading"
-            @select="handleActionClick(action)"
-          >
-            <template #icon>
-              <span class="profile-action-card__icon" aria-hidden="true">
-                <component :is="getActionIconComponent(action)" :size="18" />
-              </span>
-            </template>
-          </AppActionCard>
-          </div>
-        </AppSectionCard>
-      </section>
+        </ProfileActions>
+      </ProfileAdminControls>
 
-      <section v-if="showOwnerSections" class="profile-section">
-        <AppSectionCard class="profile-section-card card-with-help history-section-card" :title="tradeHistoryTitle" description="فیلترها و خروجی‌ها دقیقاً روی همین بازه و کالا اعمال می‌شوند.">
+      <ProfileTradeHistory
+        v-if="showOwnerSections"
+        :title="tradeHistoryTitle"
+        description="فیلترها و خروجی‌ها دقیقاً روی همین بازه و کالا اعمال می‌شوند."
+      >
           <template #actions>
             <HelpPopover
               comfortable-target
@@ -2394,12 +2384,17 @@ function handleHistoryPresetChipChange(value: string) {
                 </div>
             </div>
           </div>
-        </AppSectionCard>
-      </section>
+      </ProfileTradeHistory>
 
-      <section v-if="showOwnerSections && ownerOnlyActions.length > 0" class="profile-section owner-profile-section">
-        <AppSectionCard class="profile-menu-card" title="میانبرهای مدیریت پروفایل" description="تنظیمات، مشتریان و حسابداران از همین بخش در دسترس هستند.">
-          <template #actions>
+      <ProfileActions
+        v-if="showOwnerSections"
+        section-class="owner-profile-section"
+        title="میانبرهای مدیریت پروفایل"
+        description="تنظیمات، مشتریان و حسابداران از همین بخش در دسترس هستند."
+        :actions="ownerActionItems"
+        @select="handleActionClick"
+      >
+        <template #actions>
             <HelpPopover
               floating
               comfortable-target
@@ -2408,26 +2403,8 @@ function handleHistoryPresetChipChange(value: string) {
               label="راهنمای منوی مالک"
               text="میانبرهای تنظیمات، مشتریان و حسابداران در همین منو جمع شده‌اند تا ظاهر پروفایل شما با پروفایل عمومی بقیه بخش‌ها هم‌راستا بماند."
             />
-          </template>
-          <div class="profile-action-grid">
-            <AppActionCard
-            v-for="action in ownerOnlyActions"
-            :key="action.key"
-            class="profile-action-card"
-            :class="getActionButtonClass(action)"
-            :title="action.label"
-            tone="warning"
-            @select="handleActionClick(action)"
-          >
-            <template #icon>
-              <span class="profile-action-card__icon" aria-hidden="true">
-                <component :is="getActionIconComponent(action)" :size="18" />
-              </span>
-            </template>
-          </AppActionCard>
-          </div>
-        </AppSectionCard>
-      </section>
+        </template>
+      </ProfileActions>
     </div>
 
     <AppResponsiveDialog
@@ -3143,6 +3120,34 @@ function handleHistoryPresetChipChange(value: string) {
 .unblock-btn .profile-action-card__icon {
   background: color-mix(in srgb, var(--ds-success-500) 14%, transparent);
   color: var(--ds-success-800);
+}
+
+:deep(.profile-action-card) {
+  width: 100%;
+}
+
+:deep(.message-menu-btn) {
+  background: linear-gradient(135deg, var(--ds-info-50), color-mix(in srgb, var(--ds-info-50) 98%, var(--ds-info-500))) !important;
+  color: var(--ds-info-700) !important;
+  border-color: color-mix(in srgb, var(--ds-info-500) 22%, transparent) !important;
+}
+
+:deep(.settings-btn) {
+  background: linear-gradient(135deg, var(--ds-primary-50), var(--ds-primary-100)) !important;
+  color: var(--ds-primary-800) !important;
+  border-color: color-mix(in srgb, var(--ds-primary-500) 20%, transparent) !important;
+}
+
+:deep(.block-btn) {
+  background: var(--ds-danger-50) !important;
+  color: var(--ds-danger-800) !important;
+  border-color: var(--ds-danger-200) !important;
+}
+
+:deep(.unblock-btn) {
+  background: var(--ds-success-50) !important;
+  color: var(--ds-success-800) !important;
+  border-color: var(--ds-success-100) !important;
 }
 
 .retry-btn {

@@ -25,12 +25,12 @@ import { routeRequest } from '../utils/routeRequest';
 import CustomerNameWithBadge from './CustomerNameWithBadge.vue';
 import HelpPopover from './HelpPopover.vue';
 import JalaliDatePicker from './JalaliDatePicker.vue';
+import { ProfileIdentityHeader } from './profile';
 import {
   AppActionCard,
   AppButton,
   AppConfirmDialog,
   AppFormField,
-  AppIconButton,
   AppInput,
   AppResponsiveDialog,
   AppSelect,
@@ -1140,20 +1140,21 @@ async function confirmPendingAction() {
 
 <template>
   <div class="card admin-user-profile">
-    <div class="header-row">
-        <div class="header-spacer"></div>
-        <div class="header-title">
-            <h2>{{ isAdminView ? 'مدیریت کاربر' : 'پروفایل کاربری' }}</h2>
-        </div>
-        <AppIconButton
-          v-if="isAdminView"
-          class="profile-nav-back"
-          label="بازگشت به لیست کاربران"
-          @click="$emit('navigate', 'manage_users')"
-        >
-          <ChevronLeft :size="20" />
-        </AppIconButton>
-    </div>
+    <ProfileIdentityHeader
+      :display-name="userDisplayName"
+      :avatar-initial="userDisplayName.slice(0, 1)"
+      :hide-back-button="!isAdminView"
+      back-label="بازگشت به لیست کاربران"
+      @back="$emit('navigate', 'manage_users')"
+    >
+      <template #title>
+        <CustomerNameWithBadge
+          v-if="showCustomerContext && user.customer_management_name"
+          :name="userDisplayName"
+        />
+        <template v-else>{{ userDisplayName }}</template>
+      </template>
+    </ProfileIdentityHeader>
 
     <div class="profile-details">
       <div class="detail-item">

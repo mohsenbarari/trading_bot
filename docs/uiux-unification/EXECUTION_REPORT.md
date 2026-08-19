@@ -19,9 +19,8 @@
 |---|---|---|
 | 0 اتصال و انزوا | done | `5c43d920` |
 | 1 ممیزی | done | `ab431004` |
-| 2 Figma و foundation | in-progress | ثبت پس از commit |
-| 2 Figma و foundation | pending | |
-| 3 پروفایل | pending | |
+| 2 Figma و foundation | done | `1c67ea94` |
+| 3 پروفایل | in-progress | ثبت پس از commit |
 | 4 عملیات | pending | |
 | 5 خانه و حساب | pending | |
 | 6 مدیریت | pending | |
@@ -77,6 +76,15 @@
 - حریم: متن‌های نمونهٔ تاریخی در instanceهای V3 با برچسب ساختگی جایگزین شدند.
 - Code Connect در مخزن نیست و به‌عنوان gap صریح ثبت شد.
 - Figma در وضعیت DRAFT/live-editable است و پذیرش محصول نیست.
+
+## فاز سه — پروفایل
+
+- منطق درخواست و مجوز در `PublicProfile` و `UserProfile` ماند؛ فقط لایهٔ نمایش جدا شد.
+- کامپوننت‌های مشترک: `ProfileIdentityHeader`, `ProfilePresence`, `ProfileSummary`, `ProfileRelationshipSection`, `ProfileActions`, `ProfileTradeHistory`, `ProfileAdminControls`, `ProfileDangerZone`, `ProfilePageShell`.
+- مسیرهای `/profile` و `/users/:id` از یک ریشهٔ `ProfileWorkspaceView` استفاده می‌کنند تا جابه‌جایی بین خود و دیگری دوباره mount نشود.
+- `account_status` و نمایش پیام/مشتری بدون تغییر قرارداد سرور باقی ماند.
+- تست متمرکز presentation + تست‌های موجود PublicProfile/UserProfile/ProfileView سبز شد.
+- قاب Figma DRAFT پروفایل: section `665:437`، خود `665:438`، عمومی `665:457`؛ متن‌ها ساختگی و بدون دادهٔ شخصی.
 
 کمبود واقعی در برابر false positive:
 

@@ -118,13 +118,13 @@ const router = createRouter({
     {
       path: '/users/:id',
       name: 'public-profile',
-      component: () => import('../views/PublicProfileView.vue'),
+      component: () => import('../views/ProfileWorkspaceView.vue'),
       meta: routeMeta('public-profile', { requiresAuth: true }),
     },
     {
       path: '/profile',
       name: 'profile',
-      component: () => import('../views/ProfileView.vue'),
+      component: () => import('../views/ProfileWorkspaceView.vue'),
       meta: routeMeta('profile', { requiresAuth: true }),
     },
     {
