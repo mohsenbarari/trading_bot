@@ -49,6 +49,10 @@ import {
   MARKET_INFERENCE_CONFIRMATION_UX_ALLOWED_PATHS,
   MARKET_INFERENCE_CONFIRMATION_UX_EVIDENCE,
   MARKET_INFERENCE_CONFIRMATION_UX_KIND,
+  MARKET_HISTORY_COMPACT_SUMMARY_ALLOWED_FILE_SHA256,
+  MARKET_HISTORY_COMPACT_SUMMARY_ALLOWED_PATHS,
+  MARKET_HISTORY_COMPACT_SUMMARY_EVIDENCE,
+  MARKET_HISTORY_COMPACT_SUMMARY_KIND,
   MARKET_OVERTIME_REQUESTER_ACK_ALLOWED_FILE_SHA256,
   MARKET_OVERTIME_REQUESTER_ACK_ALLOWED_PATHS,
   MARKET_OVERTIME_REQUESTER_ACK_EVIDENCE,
@@ -94,6 +98,8 @@ import {
   assertMarketHistoryTerminalVisualSemantics,
   assertMarketInferenceConfirmationUxDisposition,
   assertMarketInferenceConfirmationUxSemantics,
+  assertMarketHistoryCompactSummaryDisposition,
+  assertMarketHistoryCompactSummarySemantics,
   assertMarketOvertimeRequesterAcknowledgementDisposition,
   assertMarketOvertimeRequesterAcknowledgementSemantics,
   STAGE4_BASE_COMMIT,
@@ -318,13 +324,13 @@ describe('Stage 4 protected surface baseline', () => {
     )
   })
 
-  it('keeps every prior Market disposition immutable while admitting inference confirmation UX', () => {
+  it('keeps every prior Market disposition immutable while admitting compact terminal history', () => {
     expect(ownedPaths.market).toContain('frontend/src/utils/settlementType.ts')
     expect(ownedPaths.market).toContain('frontend/src/components/CommodityInferenceSelectionModal.vue')
     const entries = readFileEntries(repoRoot, ownedPaths.market)
     expect(resolveMarketRuntimeDisposition(entries)).toMatchObject({
-      kind: MARKET_INFERENCE_CONFIRMATION_UX_KIND,
-      evidence: MARKET_INFERENCE_CONFIRMATION_UX_EVIDENCE,
+      kind: MARKET_HISTORY_COMPACT_SUMMARY_KIND,
+      evidence: MARKET_HISTORY_COMPACT_SUMMARY_EVIDENCE,
     })
     expect(MARKET_RUNTIME_BASELINE).toEqual({
       count: 19,
@@ -486,7 +492,7 @@ describe('Stage 4 protected surface baseline', () => {
       pathSetSha256: '37aa0b51e20f4ae86f7daf6c3c231d93b3d1f288ade1471490a1f843a57c9589',
       sha256: '310a154c29b733c13534d8f290b065b69f14bdefc64b4c34a5ceaa09a7971425',
     })
-    expect(() => assertMarketCrossServerLotSuggestionDisposition(entries)).toThrow(/count drift/)
+    expect(() => assertMarketCrossServerLotSuggestionDisposition(entries)).toThrow(/allowed file drift/)
     expect(MARKET_INFERENCE_CONFIRMATION_UX_ALLOWED_PATHS).toEqual([
       'frontend/src/components/CommodityInferenceSelectionModal.vue',
       'frontend/src/views/MarketView.vue',
@@ -503,7 +509,44 @@ describe('Stage 4 protected surface baseline', () => {
       pathSetSha256: '6035c31eab716d0061c81427da214fbe9765571ba0d370e218b11edab27678f2',
       sha256: '70c3dffbaa4f6f7cbfd39498ff8b170576a207ea60b6eabe898d41a9ccfec2ee',
     })
-    expect(() => assertMarketInferenceConfirmationUxDisposition(entries)).not.toThrow()
+    expect(() => assertMarketInferenceConfirmationUxDisposition(entries)).toThrow(/contentBytes drift/)
+    expect(MARKET_HISTORY_COMPACT_SUMMARY_KIND).toBe('market-history-compact-summary-layout')
+    expect(MARKET_HISTORY_COMPACT_SUMMARY_ALLOWED_PATHS).toEqual([
+      'frontend/src/components/OffersList.vue',
+    ])
+    expect(MARKET_HISTORY_COMPACT_SUMMARY_ALLOWED_FILE_SHA256).toEqual({
+      'frontend/src/components/OffersList.vue':
+        '4668b8819b41f6eee76b4fe7898bfab6f473c11addabffd8ae9685af882b16ea',
+    })
+    expect(MARKET_HISTORY_COMPACT_SUMMARY_EVIDENCE).toEqual({
+      count: 20,
+      contentBytes: 177578,
+      pathSetSha256: '6035c31eab716d0061c81427da214fbe9765571ba0d370e218b11edab27678f2',
+      sha256: '270e165727b0e2c6206a838059ea23626e89090652d050218c7d2abec1720c6e',
+    })
+    expect(Object.isFrozen(MARKET_HISTORY_COMPACT_SUMMARY_ALLOWED_PATHS)).toBe(true)
+    expect(Object.isFrozen(MARKET_HISTORY_COMPACT_SUMMARY_ALLOWED_FILE_SHA256)).toBe(true)
+    expect(Object.isFrozen(MARKET_HISTORY_COMPACT_SUMMARY_EVIDENCE)).toBe(true)
+    expect(() => assertMarketHistoryCompactSummaryDisposition(entries)).not.toThrow()
+  })
+
+  it('fails closed if compact terminal history escapes its read-only responsive grid', () => {
+    const entries = readFileEntries(repoRoot, ownedPaths.market)
+    const mutateOffers = (fragment) => entries.map((entry) => (
+      entry.path === 'frontend/src/components/OffersList.vue'
+        ? { ...entry, content: Buffer.from(entry.content.toString('utf8').replace(fragment, '')) }
+        : entry
+    ))
+
+    expect(() => assertMarketHistoryCompactSummarySemantics(mutateOffers(
+      "'offer-card-inner--history': isReadOnlyOffer(offer)",
+    ))).toThrow(/lost bounded layout/)
+    expect(() => assertMarketHistoryCompactSummaryDisposition(mutateOffers(
+      'grid-template-columns: minmax(19rem, 0.92fr) minmax(0, 1.08fr);',
+    ))).toThrow(/allowed file drift/)
+    expect(() => resolveMarketRuntimeDisposition(mutateOffers(
+      'overflow-wrap: anywhere;',
+    ))).toThrow(/Market history compact summary disposition rejected/)
   })
 
   it('fails closed if the cross-server suggestion loses local or public identity', () => {

@@ -1751,6 +1751,7 @@ describe('OffersList.vue', () => {
     })
 
     const cards = wrapper.findAll('[data-test="offer-card"]')
+    expect(wrapper.findAll('.offer-card-inner--history')).toHaveLength(3)
     expect(cards[0]!.get('[data-test="history-stamp"]').text()).toBe('منقضی · بدون معامله')
     expect(cards[1]!.get('[data-test="history-stamp"]').text()).toBe('بخشی معامله شد · 3 از 10')
     expect(cards[2]!.get('[data-test="history-stamp"]').text()).toBe('کامل معامله شد · 4 از 4')

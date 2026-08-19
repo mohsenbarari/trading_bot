@@ -936,7 +936,10 @@ async function cancelOwnOffer(offerId: number) {
       >
         <div
           class="offer-card-inner"
-          :class="offer.offer_type"
+          :class="[
+            offer.offer_type,
+            { 'offer-card-inner--history': isReadOnlyOffer(offer) },
+          ]"
         >
           <!-- Header: role badge + lifecycle chips + time -->
           <div class="offer-header">
@@ -1142,6 +1145,80 @@ async function cancelOwnOffer(offerId: number) {
 
 .offer-card-wrap.is-history .offer-card-inner {
   box-shadow: none;
+}
+
+/* Terminal cards have no actions or deadline meter. Reuse that free space as
+   a compact summary instead of preserving the taller active-offer stack. */
+.offer-card-inner--history {
+  display: grid;
+  gap: 0.22rem;
+  padding: 6px 8px 7px;
+}
+
+.offer-card-inner--history .offer-header {
+  align-items: flex-start;
+  margin-bottom: 0;
+}
+
+.offer-card-inner--history .offer-meta-end {
+  padding-block-start: 0.16rem;
+}
+
+.offer-card-inner--history .history-ribbon {
+  white-space: nowrap;
+}
+
+.offer-card-inner--history .offer-settlement :deep(.ui-settlement-badge__caption) {
+  display: none;
+}
+
+.offer-card-inner--history .offer-body {
+  display: grid;
+  gap: 0.2rem;
+  margin-bottom: 0;
+  min-width: 0;
+}
+
+.offer-card-inner--history .offer-main {
+  grid-template-columns: minmax(6.5rem, 1fr) auto;
+  align-items: center;
+  gap: 0.55rem;
+  min-width: 0;
+}
+
+.offer-card-inner--history .offer-metrics {
+  justify-content: flex-end;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 0.55rem;
+}
+
+.offer-card-inner--history :is(.offer-remaining, .offer-price-block) {
+  gap: 0.05rem;
+}
+
+.offer-card-inner--history :is(.offer-remaining-label, .offer-price-label) {
+  display: none;
+}
+
+.offer-card-inner--history .commodity {
+  min-width: 0;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.offer-card-inner--history .quantity-badge {
+  padding-block: 1px;
+}
+
+.offer-card-inner--history :deep(.customer-context-row) {
+  margin-top: 0;
+}
+
+.offer-card-inner--history .offer-notes {
+  margin-top: 0;
+  padding-block: 2px;
+  line-height: 1.35;
 }
 
 .offer-card-wrap.is-expired .offer-card-inner {
@@ -1658,6 +1735,24 @@ async function cancelOwnOffer(offerId: number) {
 
   .commodity {
     font-size: 14px;
+  }
+
+  .offer-card-inner.offer-card-inner--history {
+    grid-template-columns: minmax(19rem, 0.92fr) minmax(0, 1.08fr);
+    align-items: center;
+    gap: 0.85rem;
+    padding: 6px 10px;
+  }
+
+  .offer-card-inner--history :is(.offer-header, .offer-body) {
+    min-width: 0;
+  }
+
+  .offer-card-inner--history :is(.offer-remaining, .offer-price-block) {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 0.2rem;
+    white-space: nowrap;
   }
 }
 </style>
