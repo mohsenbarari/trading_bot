@@ -11,3 +11,10 @@ withDefaults(defineProps<{
     <slot />
   </main>
 </template>
+
+<style scoped>
+.ui-page {
+  min-width: 0;
+  max-width: 100%;
+}
+</style>
