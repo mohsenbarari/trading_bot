@@ -87,9 +87,68 @@ class CoinInferenceTests(unittest.TestCase):
         value = snapshot()
         set_rate(value, "IMAM", "TOMORROW", 186_900, 185_500, 188_300)
         stale = infer_coin_commodity(value, price_project_thousand_toman=186_900, settlement_term="TOMORROW", now_utc="2026-08-04T10:03:00Z")
-        outside = infer_coin_commodity(value, price_project_thousand_toman=190_000, settlement_term="TOMORROW", now_utc="2026-08-04T10:00:30Z")
+        outside = infer_coin_commodity(value, price_project_thousand_toman=210_000, settlement_term="TOMORROW", now_utc="2026-08-04T10:00:30Z")
         self.assertEqual((stale.status, stale.reason), ("ABSTAIN", "SNAPSHOT_STALE_OR_FUTURE"))
         self.assertEqual((outside.status, outside.reason), ("ABSTAIN", "PRICE_OUTSIDE_PUBLISHED_RANGES"))
+
+    def test_unique_nearest_center_within_ten_percent_requires_confirmation(self) -> None:
+        value = snapshot()
+        set_rate(value, "QUARTER_BAHAR", "CASH", 52_300, 52_000, 52_650)
+        set_rate(value, "QUARTER_LOW_DATE", "CASH", 47_300, 47_050, 47_600)
+
+        result = infer_coin_commodity(
+            value,
+            price_project_thousand_toman=51_500,
+            settlement_term="CASH",
+            now_utc="2026-08-04T10:00:30Z",
+        )
+
+        self.assertEqual(
+            (
+                result.status,
+                result.reason,
+                [item.commodity_code for item in result.candidates],
+            ),
+            (
+                "CONFIRM",
+                "NEAREST_CENTER_FALLBACK_REQUIRES_CONFIRMATION",
+                ["QUARTER_BAHAR"],
+            ),
+        )
+
+    def test_tied_nearby_centers_expose_same_family_choices(self) -> None:
+        value = snapshot()
+        set_rate(value, "QUARTER_BAHAR", "CASH", 52_000, 51_900, 52_100)
+        set_rate(value, "QUARTER_LOW_DATE", "CASH", 48_000, 47_900, 48_100)
+
+        result = infer_coin_commodity(
+            value,
+            price_project_thousand_toman=50_000,
+            settlement_term="CASH",
+            now_utc="2026-08-04T10:00:30Z",
+        )
+
+        self.assertEqual(
+            (result.status, [item.commodity_code for item in result.candidates]),
+            ("CONFIRM", ["QUARTER_BAHAR", "QUARTER_LOW_DATE"]),
+        )
+
+    def test_nearby_fallback_never_crosses_denomination_families(self) -> None:
+        value = snapshot()
+        set_rate(value, "IMAM", "CASH", 95_000, 94_500, 95_500)
+        set_rate(value, "HALF_BAHAR", "CASH", 105_000, 104_500, 105_500)
+
+        result = infer_coin_commodity(
+            value,
+            price_project_thousand_toman=100_000,
+            settlement_term="CASH",
+            now_utc="2026-08-04T10:00:30Z",
+        )
+
+        self.assertEqual(
+            (result.status, result.reason, result.candidates),
+            ("ABSTAIN", "CROSS_DENOMINATION_NEARBY_CANDIDATES", ()),
+        )
 
     def test_low_date_scope_excludes_normal_date_candidates(self) -> None:
         value = snapshot()

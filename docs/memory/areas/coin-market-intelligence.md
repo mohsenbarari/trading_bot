@@ -31,10 +31,10 @@
   opaque. Live jobs use `main`; retarget systemd before removal.
 - Estimator: `estimator-live`; home CASH/TOMORROW; `/shadow` shadow/realised.
 - Web UI shows recorded parser/estimator events/status/values; never recompute.
-- Staging catalog syncs from Iran; Snapshot relays to peers via
-  read-only mounts. Preview+selection on; auto off. Unnamed: singleton opens offer
-  preview (confirm/edit/cancel), multiple choose. Edits: same Snapshot/family/
-  settlement, ±10%, explicit/no model receipt.
+- Staging catalog syncs from Iran; Snapshot relays read-only. v3 ranks exact bands
+  first; otherwise a unique nearest center within ±10% confirms, while ties
+  require choice. Edits use the same Snapshot/family/settlement ±10% and no
+  model receipt; auto-selection stays off.
 - Reviews use opaque keys/digests, no raw text/identity. Revisions correct
   facts; redacted-number syntax calibrates grammar. Review anchors never affect
   prior input.

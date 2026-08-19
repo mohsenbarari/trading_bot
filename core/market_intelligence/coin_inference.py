@@ -14,7 +14,8 @@ from .market_contracts import normalize_utc
 from .market_snapshot import AtomicMarketSnapshotProvider, MarketSnapshotUnavailable, validate_market_snapshot
 
 
-COIN_INFERENCE_VERSION = "coin-inference-v2"
+COIN_INFERENCE_VERSION = "coin-inference-v3"
+COIN_INFERENCE_NEARBY_PRICE_RANGE_PERCENT = 10
 CANONICAL_COMMODITY_NAMES = {
     "IMAM": "امام",
     "BAHAR": "بهار",
@@ -144,7 +145,7 @@ def infer_coin_commodity(
     age = (now - generated).total_seconds()
     if age < 0 or age > maximum_snapshot_age_seconds:
         return _abstain(settlement, "SNAPSHOT_STALE_OR_FUTURE", snapshot)
-    candidates: list[CoinCommodityCandidate] = []
+    published_candidates: list[CoinCommodityCandidate] = []
     for item in rates.get("items") or []:
         if not isinstance(item, Mapping) or item.get("status") != "ESTIMATED":
             continue
@@ -158,9 +159,7 @@ def infer_coin_commodity(
         upper = item.get("upper_project_price")
         if not all(isinstance(value, int) and value > 0 for value in (center, lower, upper)):
             continue
-        if not int(lower) <= price <= int(upper):
-            continue
-        candidates.append(
+        published_candidates.append(
             CoinCommodityCandidate(
                 commodity_code=code,
                 commodity_name=CANONICAL_COMMODITY_NAMES[code],
@@ -171,9 +170,47 @@ def infer_coin_commodity(
                 distance_to_center_relative=round(abs(price - int(center)) / int(center), 6),
             )
         )
-    candidates.sort(key=lambda item: (item.distance_to_center_relative, item.commodity_code))
+    candidates = [
+        candidate
+        for candidate in published_candidates
+        if candidate.lower_project_price <= price <= candidate.upper_project_price
+    ]
+    used_nearby_fallback = False
     if not candidates:
-        return _abstain(settlement, "PRICE_OUTSIDE_PUBLISHED_RANGES", snapshot)
+        nearby_candidates = [
+            candidate
+            for candidate in published_candidates
+            if (
+                abs(candidate.center_project_price - price) * 100
+                <= price * COIN_INFERENCE_NEARBY_PRICE_RANGE_PERCENT
+            )
+        ]
+        nearby_candidates.sort(
+            key=lambda item: (
+                abs(item.center_project_price - price),
+                item.commodity_code,
+            )
+        )
+        if not nearby_candidates:
+            return _abstain(settlement, "PRICE_OUTSIDE_PUBLISHED_RANGES", snapshot)
+        nearby_families = {
+            COIN_CANDIDATE_FAMILY_BY_CODE[candidate.commodity_code]
+            for candidate in nearby_candidates
+        }
+        if len(nearby_families) != 1:
+            return _abstain(settlement, "CROSS_DENOMINATION_NEARBY_CANDIDATES", snapshot)
+        nearest_distance = abs(nearby_candidates[0].center_project_price - price)
+        equally_near = [
+            candidate
+            for candidate in nearby_candidates
+            if abs(candidate.center_project_price - price) == nearest_distance
+        ]
+        # A unique nearest center is a suggestion, never an automatic choice.
+        # If nearest centers tie, expose the complete nearby same-family set so
+        # the user makes the decision explicitly.
+        candidates = equally_near if len(equally_near) == 1 else nearby_candidates
+        used_nearby_fallback = True
+    candidates.sort(key=lambda item: (item.distance_to_center_relative, item.commodity_code))
     candidate_families = {
         COIN_CANDIDATE_FAMILY_BY_CODE[candidate.commodity_code]
         for candidate in candidates
@@ -182,14 +219,27 @@ def infer_coin_commodity(
         return _abstain(settlement, "CROSS_DENOMINATION_CANDIDATES", snapshot)
     # A unique high/medium rate can be selected; low paper fallback remains a
     # visible user confirmation until its production quality is demonstrated.
-    status = "AUTO_SELECT" if len(candidates) == 1 and candidates[0].confidence in {"HIGH", "MEDIUM"} else "CONFIRM"
+    status = (
+        "AUTO_SELECT"
+        if (
+            not used_nearby_fallback
+            and len(candidates) == 1
+            and candidates[0].confidence in {"HIGH", "MEDIUM"}
+        )
+        else "CONFIRM"
+    )
+    reason = None
+    if used_nearby_fallback:
+        reason = "NEAREST_CENTER_FALLBACK_REQUIRES_CONFIRMATION"
+    elif status == "CONFIRM":
+        reason = "MULTIPLE_OR_LOW_CONFIDENCE_CANDIDATES"
     return CoinCommodityInference(
         status=status,
         settlement_term=settlement,
         candidates=tuple(candidates),
         snapshot_generated_at_utc=str(snapshot["generated_at_utc"]),
         snapshot_receipt=_receipt(snapshot),
-        reason=None if status == "AUTO_SELECT" else "MULTIPLE_OR_LOW_CONFIDENCE_CANDIDATES",
+        reason=reason,
     )
 
 

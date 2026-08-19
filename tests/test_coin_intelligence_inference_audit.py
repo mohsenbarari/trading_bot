@@ -81,7 +81,7 @@ class CoinInferenceAuditTests(unittest.IsolatedAsyncioTestCase):
         result = await append_coin_inference_audit(db, command())
         self.assertIs(result, db.added[0])
         self.assertEqual((result.decision_status, result.selected_commodity_id, result.selected_commodity_name), ("AUTO_SELECT", 71, "امام"))
-        self.assertEqual((result.inference_version, result.catalog_resolution_version, db.flushes), ("coin-inference-v2", "coin-catalog-resolution-v1", 1))
+        self.assertEqual((result.inference_version, result.catalog_resolution_version, db.flushes), ("coin-inference-v3", "coin-catalog-resolution-v1", 1))
         self.assertEqual(result.candidate_scope, "ALL")
         self.assertEqual((result.dominant_underlying_source, result.market_regime), (None, "UNKNOWN"))
         self.assertFalse(any(token in name for name in result.__table__.columns.keys() for token in ("raw", "text", "user", "telegram", "message", "note")))
@@ -92,7 +92,7 @@ class CoinInferenceAuditTests(unittest.IsolatedAsyncioTestCase):
             source_surface="WEBAPP", decision_status="AUTO_SELECT", reason_code=None,
             settlement_term="TOMORROW", candidate_scope="ALL", submitted_project_price=186_800, candidate_count=1,
             selected_commodity_id=71, selected_commodity_code="IMAM", selected_commodity_name="امام",
-            inference_version="coin-inference-v2", catalog_resolution_version="coin-catalog-resolution-v1",
+            inference_version="coin-inference-v3", catalog_resolution_version="coin-catalog-resolution-v1",
             snapshot_receipt="b" * 64, snapshot_generated_at_utc=datetime(2026, 8, 4, 10, 0, tzinfo=timezone.utc),
             dominant_underlying_source=None, market_regime="UNKNOWN",
         )
@@ -106,7 +106,7 @@ class CoinInferenceAuditTests(unittest.IsolatedAsyncioTestCase):
             source_surface="WEBAPP", decision_status="AUTO_SELECT", reason_code=None,
             settlement_term="TOMORROW", candidate_scope="ALL", submitted_project_price=186_800, candidate_count=1,
             selected_commodity_id=71, selected_commodity_code="IMAM", selected_commodity_name="امام",
-            inference_version="coin-inference-v2", catalog_resolution_version="coin-catalog-resolution-v1",
+            inference_version="coin-inference-v3", catalog_resolution_version="coin-catalog-resolution-v1",
             snapshot_receipt="b" * 64, snapshot_generated_at_utc=datetime(2026, 8, 4, 10, 0, tzinfo=timezone.utc),
             dominant_underlying_source=None, market_regime="UNKNOWN",
         )
@@ -197,7 +197,7 @@ class CoinInferenceAuditStorageTests(unittest.TestCase):
                     candidate_scope="ALL",
                     submitted_project_price=186_800,
                     candidate_count=1,
-                    inference_version="coin-inference-v2",
+                    inference_version="coin-inference-v3",
                     catalog_resolution_version="coin-catalog-resolution-v1",
                     snapshot_receipt="b" * 64,
                     snapshot_generated_at_utc=datetime(2026, 8, 4, 10, 0, tzinfo=timezone.utc),
