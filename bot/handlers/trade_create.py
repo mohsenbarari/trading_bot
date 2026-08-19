@@ -3228,7 +3228,12 @@ async def handle_text_offer_inference_suggestion_edit(
             show_alert=True,
         )
         return
-    await state.update_data(text_offer_inference_mode="edit")
+    state_update: dict[str, object] = {"text_offer_inference_mode": "edit"}
+    message_id = getattr(getattr(callback, "message", None), "message_id", None)
+    if isinstance(message_id, int) and not isinstance(message_id, bool):
+        state_update["text_offer_inference_message_id"] = message_id
+    await state.update_data(**state_update)
+    await state.set_state(Trade.awaiting_text_inference_choice)
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         *[
             [
@@ -3340,6 +3345,7 @@ async def handle_text_offer_cancel(callback: types.CallbackQuery, state: FSMCont
 @router.callback_query(TradeActionCallback.filter())
 @router.callback_query(SkipNotesCallback.filter())
 @router.callback_query(TextOfferActionCallback.filter())
+@router.callback_query(TextOfferInferenceCandidateCallback.filter())
 @router.callback_query(TradeWizardActionCallback.filter())
 @router.callback_query(TradeWizardEditCallback.filter())
 async def handle_stale_trade_creation_callback(

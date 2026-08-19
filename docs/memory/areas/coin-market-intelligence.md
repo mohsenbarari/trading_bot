@@ -31,10 +31,10 @@
   opaque. Live jobs use `main`; retarget systemd before removal.
 - Estimator: `estimator-live`; home CASH/TOMORROW; `/shadow` shadow/realised.
 - Web UI shows recorded parser/estimator events/status/values; never recompute.
-- Staging catalog syncs from Iran; Snapshot relays read-only. v3 ranks exact bands
-  first; otherwise a unique nearest center within ±10% confirms, while ties
-  require choice. Edits use the same Snapshot/family/settlement ±10% and no
-  model receipt; auto-selection stays off.
+- Staging catalog mirrors Iran; Snapshot reads only. v3 uses exact bands, else
+  confirms one nearest same-family center within ±10%; ties require choice.
+  Edits reuse that Snapshot/scope, omit model receipt, and never auto-select.
+  Bot edits enter choice state before buttons; stale taps answer.
 - Reviews use opaque keys/digests, no raw text/identity. Revisions correct
   facts; redacted-number syntax calibrates grammar. Review anchors never affect
   prior input.
