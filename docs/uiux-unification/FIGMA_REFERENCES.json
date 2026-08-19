@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "track": "webapp-uiux-unification-v3",
+  "independent_of_stage8": true,
+  "status": "phase0-documented-target",
+  "existing_file": {
+    "fileKey": "z8jgJxST4O2APzWnlyP9gv",
+    "role": "read-only-historical-source",
+    "historical_pages_mutable": false
+  },
+  "draft": {
+    "title": "WebApp UIUX Unification V3 · DRAFT",
+    "status": "not-created",
+    "page_id": null,
+    "section_id": null,
+    "live_editable": true,
+    "not_acceptance_authority": true
+  },
+  "privacy_forbidden_in_figma": [
+    "commit-tree-hash",
+    "internal-endpoint",
+    "technical-route",
+    "localhost-or-tmp",
+    "token-credential-otp",
+    "real-phone-or-personal-name",
+    "test-result-or-acceptance-claim"
+  ],
+  "screens": [],
+  "component_map": [],
+  "token_map": []
+}

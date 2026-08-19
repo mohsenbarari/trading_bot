@@ -1,0 +1,63 @@
+{
+  "schema_version": 1,
+  "track": "webapp-uiux-unification-v3",
+  "independent_of_stage8": true,
+  "status": "phase0-skeleton",
+  "access_profiles": [
+    "guest",
+    "watch",
+    "member",
+    "police",
+    "customer",
+    "accountant",
+    "owner-context",
+    "middle-admin",
+    "senior-admin"
+  ],
+  "viewports": [
+    "360x740",
+    "390x844",
+    "430x932",
+    "768x1024",
+    "1440x900"
+  ],
+  "states": [
+    "loading",
+    "empty",
+    "normal",
+    "dense",
+    "error",
+    "retry",
+    "slow",
+    "offline",
+    "stale",
+    "long-persian",
+    "unbroken-ltr",
+    "unauthorized",
+    "not-found",
+    "partial-data"
+  ],
+  "interactions": [
+    "touch",
+    "pointer",
+    "keyboard",
+    "tab",
+    "shift-tab",
+    "enter-space",
+    "arrows-home-end",
+    "escape",
+    "browser-back",
+    "scroll-end",
+    "soft-keyboard",
+    "zoom-200",
+    "reduced-motion"
+  ],
+  "environments": ["mobile-browser", "desktop-browser", "installed-pwa"],
+  "excluded_environments": [
+    {
+      "id": "telegram-mini-app",
+      "reason": "retired-product-surface"
+    }
+  ],
+  "cells": []
+}

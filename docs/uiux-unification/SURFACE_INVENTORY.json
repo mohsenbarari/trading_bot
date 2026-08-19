@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "track": "webapp-uiux-unification-v3",
+  "independent_of_stage8": true,
+  "base_sha": "7f723de9c4238a449ce008b083ab2baa3c20e581",
+  "base_tree": "1b970cc6f5be6697ceebbd76c91d36c9ea1dddb9",
+  "status": "phase0-skeleton",
+  "notes": [
+    "Phase 0 lists the live route contract only. Phase 1 owns real subsurface, role, and state inventory.",
+    "Stage 8 receipts remain read-only historical records."
+  ],
+  "route_contract_expected": {
+    "routes": 30,
+    "v2_scope": { "route": 10, "section": 16, "off": 4 },
+    "protection": { "none": 23, "mixed": 3, "full": 4 },
+    "off_paths": ["/market", "/chat", "/admin/channels", "/share-receive"]
+  },
+  "surfaces": []
+}
