@@ -4,12 +4,13 @@
 
 ## حکم برای ناظر
 
-`CORRECTED FINAL INTEGRATION GATE IN PROGRESS`
+`READY FOR INDEPENDENT UIUX INTEGRATION REVIEW — NOT OWNER APPROVED`
 
 حکم قبلی `READY FOR INDEPENDENT UIUX INTEGRATION REVIEW` پس از بازبینی مستقل
 پس گرفته شد: harness قبلی visibility حالت درخواستی را الزام نمی‌کرد و تصویرها را
 پس از probe اسکرول‌دار می‌گرفت. artifact تاریخی حذف نمی‌شود، اما برای promotion
-معتبر نیست. حکم تازه فقط پس از اجرای کامل روی commit تمیز ثبت می‌شود.
+معتبر نیست. اجرای کامل اصلاح‌شده روی commit تمیز پاس شده و receipt مستقل دارد.
+این حکم مجوز merge، push، staging، production، Sites یا پذیرش زیبایی مالک نیست.
 
 ## خط مبنای انزوا
 
@@ -38,7 +39,7 @@
 | 8 Market overlays | done | `c8ece02c` |
 | 9 Messenger | done | `5fbc79f8` سپس restore پوسته در `f286fd00` |
 | 10 shell مشترک | done | `e278fee8` |
-| 11 پذیرش شاخه | correction-gate-in-progress | receipt تمیز نهایی هنوز ثبت نشده است |
+| 11 گیت شاخه | integration-candidate-gate-complete | `628a6265` + receipt نهایی |
 
 ## فاز یک — ممیزی
 
@@ -122,15 +123,22 @@ Telegram Mini App خارج است.
 - ۹ پروفایل دسترسی در قرارداد؛ اجرا فقط روی نقش render هر مسیر
 - ۵ viewport برای خانوادهٔ اصلی؛ ۲ viewport برای همهٔ مسیرها
 - اجرای تاریخی ۱۶۶/۱۶۶ superseded و non-promotable است؛ visibility حالت و origin تصویر را اثبات نمی‌کرد
-- برش اصلاحی state: ۴۸/۴۸ با selector قابل‌مشاهده و settlement پس از release
+- اجرای نهایی اصلاح‌شده: ۱۶۷/۱۶۷ روی commit تمیز `628a6265`
+- state قابل‌اجرا: ۴۸/۴۸ با selector قابل‌مشاهده؛ هر ۱۹ loading پس از release settle شد
 - ۴۲ N/A حالت با دلیل descriptor
 - Firefox ۱۲/۱۲، WebKit ۱۲/۱۲ روی مسیرهای حساس
-- قرارداد keyboard منوی هویت خانه به اجرای نهایی افزوده شد
+- keyboard پنج سناریو؛ منوی هویت خانه با ArrowDown/Escape و بازگشت focus پاس شد
+- reduced-motion ۳/۳، PWA ۳/۳، زوم CDP ۶/۶
 - هیچ سناریوی اجرا نشده pass اعلام نشد
 
 ## تست
 
-- گیت‌های نهایی پس از اجرای تمیز دوباره ثبت می‌شوند
+- Vitest کامل serial: ۱۶۹ فایل، ۱۹۵۹ تست، exit 0
+- production build ایزوله: ۲۲۰۵ module، ۱۷۳ فایل، exit 0
+- `vue-tsc --noEmit`: exit 0
+- `npm run guard:ui`: exit 0
+- `git diff --check`: سبز
+- unknown API / خطای صفحه / درخواست خارجی / mutation محصولی: صفر
 
 ## عملکرد و ایمنی
 
@@ -145,7 +153,16 @@ Telegram Mini App خارج است.
 - artifactهای اجرای قبلی خارج مخزن می‌مانند و با digest ادغام
   `507b5e3e1cffce2ef23571f4f2e71f03b51b75134f5c37a5378fcbcd47ea861b`
   فقط به‌عنوان شاهد superseded/non-promotable نگهداری می‌شوند
-- artifact نهایی فقط با digest و شمارش redacted در receipt مستقل ثبت خواهد شد
+- artifact نهایی فقط با digest و شمارش redacted در receipt مستقل ثبت شده است
+
+## receipt نهایی
+
+- فایل: `FINAL_INTEGRATION_RECEIPT.json`
+- source: commit `628a6265f25219f3d54b0a8dbb8ded358659925a`، tree `bc4777b8669f3177b2a4da8510aa715379f3f100`
+- report SHA-256: `e702d2cf814685c7adc4dabe182958dda49e334997e6fe49f6282dc167e9c711`
+- dist SHA-256: `b98708c8d303dc30759c091cd1a9d741cadb42a258b5f81d0e90d4926a0bb8dc`
+- ۱۶۷ تصویر خارج مخزن؛ aggregate SHA-256:
+  `5b1be8e07af71c047f1f4bfc8350524a00fa9f61fab261be1c371e64fd204be9`
 
 ## باقی‌ماندهٔ آگاهانه
 

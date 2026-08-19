@@ -12,20 +12,21 @@
 settle تصویر می‌گرفت و visibility حالت درخواستی را الزام نمی‌کرد. آن artifact حذف
 یا بازنویسی نمی‌شود، اما superseded/non-promotable است. اجرای اصلاحی اولیه هفت
 ادعای loading نادرست را fail-closed کرد؛ پس از اصلاح selector، انتظار mount و
-identity recovery، برش سخت‌گیرانهٔ state با ۴۸/۴۸ پاس شد. receipt نهایی فقط پس از
-اجرای کامل روی commit تمیز ثبت می‌شود.
+identity recovery، برش سخت‌گیرانهٔ state با ۴۸/۴۸ پاس شد. اجرای کامل اصلاح‌شده
+روی commit تمیز ۱۶۷/۱۶۷ پاس شد و receipt مستقل آن در
+`FINAL_INTEGRATION_RECEIPT.json` ثبت شده است.
 
 ## گیت‌های اجباری پایانی
 
 | فرمان | نتیجه | یادداشت |
 |---|---|---|
-| full frontend Vitest | exit 0 | ۱۶۸ فایل، ۱۹۵۱ تست. یک اجرای قبلی `LoginView` OTP به‌خاطر timeout زیر بار flake شد و در اجرای جدا و اجرای کامل بعدی سبز بود |
-| `FRONTEND_BUILD_OUT_DIR=/tmp/uiux-unification-v3-dist-phase11 npm run build` | exit 0 | `mini_app_dist` دست نخورد |
+| full frontend Vitest | exit 0 | ۱۶۹ فایل، ۱۹۵۹ تست؛ اجرای serial بدون timeout |
+| production build با خروجی ایزوله | exit 0 | ۲۲۰۵ module، ۱۷۳ فایل؛ `mini_app_dist` دست نخورد |
 | `npx vue-tsc --noEmit` | exit 0 | |
 | `npm run guard:ui` | exit 0 | پس از برگرداندن فایل‌های منجمد و حذف نشانگرهای `--ui-v2-*` از CSS جدید |
 | `git diff --check` | سبز | |
 | آزمون‌های route/scope manifest | سبز | `uiux-unification-v3-inventory-guard.test.mjs` |
-| ماتریس مرورگر production محلی | در انتظار اجرای نهایی تمیز | اجرای قبلی ۱۶۶/۱۶۶ superseded است؛ state gate اصلاحی ۴۸/۴۸ پاس شد |
+| ماتریس مرورگر production محلی | ۱۶۷/۱۶۷ | clean-bound؛ ۴۸ state قابل‌اجرا با evidence مستقیم، ۴۲ N/A دلیل‌دار، Firefox و WebKit هرکدام ۱۲/۱۲ |
 | accessibility / overflow / CTA / unnamed | در probe موجود | overflow افقی صفر؛ CTA پوشیده صفر در سناریوهای معتبر |
 | `memory-custodian check` | OK | از ریشهٔ مخزن |
 | همگام‌سازی با `origin/main` | انجام شد | `2f8dd6e0` در شاخهٔ کاندید merge شد؛ main تغییر نکرد |
@@ -48,7 +49,7 @@ identity recovery، برش سخت‌گیرانهٔ state با ۴۸/۴۸ پاس �
 
 ## تعامل‌های اجراشده
 
-- keyboard Tab روی ورود، پروفایل، عملیات مشتری، حساب
+- keyboard روی خانه، ورود، پروفایل، عملیات مشتری و حساب؛ منوی هویت خانه با ArrowDown/Escape و focus restoration
 - reduced-motion روی بازار، خانه، پروفایل
 - زوم ۲۰۰٪ با CDP `Emulation.setPageScaleFactor=2` روی ۶ مسیر حساس
 - زوم CSS `documentElement.style.zoom=2` به‌عنوان روش اشتباه کنار گذاشته شد؛ ۵ شکست آن false positive پروب بود
@@ -72,5 +73,5 @@ identity recovery، برش سخت‌گیرانهٔ state با ۴۸/۴۸ پاس �
 ## مقایسه bundle
 
 - فاز یک: ۱۷۶ فایل، اثر انگشت `9a3e536614403b398f88415facfbd52ffb15277d4e5e2a63ed0e54f05798b2be`، JS دارایی ۳٬۸۰۲٬۷۶۳ بایت
-- فاز یازده: ۱۷۳ فایل، اثر انگشت `fb178b038abf792414387aceb0c09dae77bc97a579ecd80aa68792b92882c10d`، JS دارایی ۳٬۸۰۳٬۳۹۰ بایت
-- اختلاف JS: ۶۲۷+ بایت
+- اجرای نهایی پس از همگام‌سازی main: ۱۷۳ فایل، اثر انگشت `b98708c8d303dc30759c091cd1a9d741cadb42a258b5f81d0e90d4926a0bb8dc`، JS دارایی ۳٬۸۶۶٬۵۹۳ بایت
+- اختلاف با فاز یک معیار مستقیم regression نیست، چون سه commit مستقل main نیز پیش از اجرای نهایی وارد شاخه شدند

@@ -1,0 +1,119 @@
+{
+  "schemaVersion": 1,
+  "track": "webapp-uiux-unification-v3",
+  "status": "passed-integration-candidate-not-owner-approved",
+  "runId": "uiux-v3-phase11-20260819T111914387Z",
+  "branch": "candidate/webapp-uiux-unification-v3",
+  "implementation": {
+    "originMainSnapshot": {
+      "commit": "2f8dd6e0f9aeaf464028f3078cc858516fbf08fe"
+    },
+    "sourceSnapshot": {
+      "commit": "628a6265f25219f3d54b0a8dbb8ded358659925a",
+      "tree": "bc4777b8669f3177b2a4da8510aa715379f3f100",
+      "cleanBeforeRun": true,
+      "cleanAfterRun": true
+    },
+    "sourceManifestSha256": {
+      "frontend/src/views/ProfileWorkspaceView.vue": "6a921479f385a4417a595d1d90dabf50b71900b4229262e61e84b73458ed5ad2",
+      "frontend/src/views/ProfileWorkspaceView.test.ts": "d93a67b0bf819fce75a8f34531f1b93dc2219b4366e707a2a729520064cdb82b",
+      "frontend/scripts/lib/stage8-full-acceptance-descriptors.mjs": "ad0eaa6b59102c469ecb167dacd24463d9b440e592a57a8172a10532716ccfd1",
+      "frontend/scripts/lib/uiux-unification-v3-phase1-inventory.mjs": "138a47498a167260f217e8b1ef20ead5eb16b0d3cf7fe8a036fd25c35b807954",
+      "frontend/scripts/lib/uiux-unification-v3-state-evidence.mjs": "f69e6bcb7209f1dcaaa20c4799e3c60472c9689e595708b0fd8b84e033fa773c",
+      "frontend/scripts/uiux-unification-v3-inventory-guard.test.mjs": "5a30d6870bbf39215f528ad6f36d8583af8a13de7de1d7097cb782e2557f95a7",
+      "frontend/scripts/uiux-unification-v3-phase11-matrix.mjs": "3d7d2b55bb79fe4bfa6d52e8d17eaa3712f9b521e6f4ff2309e3a1663cfeb616",
+      "frontend/scripts/uiux-unification-v3-state-evidence.test.mjs": "0b2edc95e3d3ec115c1d2722628a14057075a0bf2ab95ac7bb1db59193162839",
+      "docs/uiux-unification/SURFACE_INVENTORY.json": "9dac9985c16c5deeb65a23343d0b59bdbe1db05e8fda780cf9fc9bb455d17430",
+      "docs/uiux-unification/STATE_MATRIX.json": "d1ed289d2596a0e8bee366369a07162236b4d909036418370b196f73ced2b96a"
+    }
+  },
+  "inventory": {
+    "liveSurfaceCount": 45,
+    "alignedV3Count": 14,
+    "alignedExistingCount": 24,
+    "protectedFrozenCount": 6,
+    "inactiveLegacyCount": 1,
+    "unresolvedSurfaceCount": 0,
+    "declaredSourceMatrixCellCount": 630,
+    "runtimeResultsWrittenIntoDeclaredMatrix": 0
+  },
+  "browserReceipt": {
+    "reportSha256": "e702d2cf814685c7adc4dabe182958dda49e334997e6fe49f6282dc167e9c711",
+    "dist": {
+      "fileCount": 173,
+      "sha256": "b98708c8d303dc30759c091cd1a9d741cadb42a258b5f81d0e90d4926a0bb8dc"
+    },
+    "scenarioCount": 167,
+    "passedScenarioCount": 167,
+    "failedScenarioCount": 0,
+    "notApplicableStateCount": 42,
+    "engines": {
+      "chromium": 143,
+      "firefox": 12,
+      "webkit": 12
+    },
+    "states": {
+      "normal": 119,
+      "loading": 19,
+      "empty": 9,
+      "error": 20,
+      "applicableRequestedStateCount": 48,
+      "requestedStateEvidencePassed": 48,
+      "loadingPostReleaseSettlementPassed": 19
+    },
+    "interactionAndEnvironment": {
+      "keyboard": 5,
+      "homeIdentityMenuKeyboardContractPassed": true,
+      "reducedMotion": 3,
+      "zoom200Percent": 6,
+      "pwaSimulation": 3
+    },
+    "diagnostics": {
+      "falsePositiveFindings": 0,
+      "unknownApiRequests": 0,
+      "mutatingApiRequests": 0,
+      "pageErrors": 0,
+      "externalRequests": 0
+    },
+    "screenshots": {
+      "count": 167,
+      "aggregateSha256": "5b1be8e07af71c047f1f4bfc8350524a00fa9f61fab261be1c371e64fd204be9",
+      "committed": false
+    }
+  },
+  "regression": {
+    "vitest": {
+      "files": 169,
+      "tests": 1959,
+      "status": "passed"
+    },
+    "productionBuild": "passed",
+    "vueTscNoEmit": "passed",
+    "uiGuard": "passed",
+    "diffCheck": "passed"
+  },
+  "supersededEvidence": {
+    "reportSha256": "507b5e3e1cffce2ef23571f4f2e71f03b51b75134f5c37a5378fcbcd47ea861b",
+    "status": "non-promotable-state-visibility-and-screenshot-origin-not-proven"
+  },
+  "claimBoundary": {
+    "independentOfStage8": true,
+    "stage8Modified": false,
+    "fullCartesianAcceptanceClaimed": false,
+    "ownerApproved": false,
+    "productionReady": false,
+    "mergeAuthorized": false,
+    "pushAuthorized": false,
+    "deploymentAuthorized": false,
+    "figmaDraftIsAcceptanceEvidence": false,
+    "protectedFrozenInteriorsRestyled": false,
+    "telegramMiniAppIncluded": false
+  },
+  "retention": {
+    "rawBrowserReportCommitted": false,
+    "rawScreenshotsCommitted": false,
+    "onlyRedactedCountsAndDigestsCommitted": true,
+    "rawLocalExecutionPathsRetained": false,
+    "rawUrlsPayloadsCredentialsOrPiiRetained": false
+  }
+}

@@ -49,7 +49,7 @@ visual freeze مرحلهٔ ۸ read-only می‌مانند و در این پوش�
 | 8 Market overlays | protected-frozen؛ A+C بازطراحی نشد |
 | 9 Messenger | protected-frozen؛ restyle پوسته به‌خاطر freeze برگردانده شد |
 | 10 shell و overlay مشترک | implementation-complete |
-| 11 پاک‌سازی، پذیرش شاخه و گزارش ناظر | correction-gate-in-progress؛ نیازمند receipt تمیز نهایی |
+| 11 پاک‌سازی، گیت شاخه و گزارش ناظر | integration-candidate-gate-complete؛ owner approval و production readiness ادعا نمی‌شود |
 
 ## گیت‌های بین‌فازی
 
@@ -70,3 +70,4 @@ production-ready یا اجرای ضرب کامل ماتریس نیست. `protect
 - `FIGMA_REFERENCES.json`
 - `VALIDATION.md`
 - `EXECUTION_REPORT.md`
+- `FINAL_INTEGRATION_RECEIPT.json`

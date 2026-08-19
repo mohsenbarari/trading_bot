@@ -41,6 +41,7 @@ docs/uiux-unification/*
 !docs/uiux-unification/FIGMA_REFERENCES.json
 !docs/uiux-unification/VALIDATION.md
 !docs/uiux-unification/EXECUTION_REPORT.md
+!docs/uiux-unification/FINAL_INTEGRATION_RECEIPT.json
 !docs/AUTOMATED_TEST_CHECKLIST.md
 !docs/CROSS_SERVER_SYNC_PARITY_AUDIT_AND_ROADMAP.md
 !docs/MESSENGER_REFACTORING_ROADMAP.md
