@@ -24,7 +24,8 @@
 | 4 عملیات | done | `c13640b6` |
 | 5 خانه و حساب | done | `64316a7e` |
 | 6 مدیریت | done | `021997c4` |
-| 7 احراز و عمومی | in-progress | ثبت پس از commit |
+| 7 احراز و عمومی | done | `0f4ce95e` |
+| 8 Market overlays | in-progress | ثبت پس از commit |
 | 4 عملیات | pending | |
 | 5 خانه و حساب | pending | |
 | 6 مدیریت | pending | |
@@ -120,6 +121,12 @@
 - SystemRecovery همچنان fill سراسری ندارد.
 - ShareReceive برای حالت‌های loading/error/sending از همان پوستهٔ احراز استفاده می‌کند؛ قرارداد پیام‌رسان و share عوض نشد.
 - Mini App تلگرام revive نشد.
+
+## فاز هشت — Market
+
+- کارت‌ها، meter، hourglass، two-tap و تفکیک active/overtime/expired/traded دست‌نخورده ماندند.
+- `MarketView`، `AppOfferCard` و `useMarketRuntime` نسبت به `origin/main` صفر اختلاف دارند.
+- فقط پوسته و بازخوردهای مشترک از فازهای قبل روی Market اثر می‌گذارند؛ رفتار معامله تغییر نکرد.
 
 کمبود واقعی در برابر false positive:
 
