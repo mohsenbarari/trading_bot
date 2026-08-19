@@ -17,6 +17,11 @@ from core.telegram_delivery_preflight import (
     TelegramDeliveryPreflightReport,
     TelegramDeliveryPreflightRateLimitedError,
 )
+from core.telegram_delivery_queue_contract import (
+    TelegramDeliveryFreshnessChangedBeforeDispatch,
+    TelegramFreshnessDecision,
+    TelegramFreshnessOutcome,
+)
 from core.telegram_delivery_queue_worker import (
     TelegramDeliveryQueueImplementationIncompleteError,
     build_telegram_delivery_queue_lane_specs,
@@ -741,6 +746,84 @@ class TelegramDeliveryQueueWorkerSafetyTests(unittest.IsolatedAsyncioTestCase):
             reason="provider_fact_persistence_wait_before_dispatch",
         )
         mark.assert_not_awaited()
+        gateway.assert_not_awaited()
+        self.assertFalse(worker._provider_dispatch_entries)
+
+    async def test_dispatch_freshness_change_is_deferred_without_provider_error(self):
+        job = SimpleNamespace(
+            id=994,
+            lease_token=16,
+            method="editMessageText",
+            payload={"chat_id": -100, "message_id": 4, "text": "redacted"},
+            dedupe_key="freshness-changed-at-dispatch",
+            bot_identity="primary",
+            destination_key="channel:-100",
+        )
+        db = AsyncMock()
+        context = MagicMock()
+        context.__aenter__ = AsyncMock(return_value=db)
+        context.__aexit__ = AsyncMock(return_value=False)
+        decision = TelegramFreshnessDecision(
+            TelegramFreshnessOutcome.RECLASSIFY,
+            reason="offer_freshness_terminal_state_changed",
+        )
+        defer = AsyncMock(return_value=True)
+        gateway = AsyncMock()
+
+        with patch(
+            "core.telegram_delivery_queue_worker.assert_background_job_authority"
+        ), patch(
+            "core.telegram_delivery_queue_worker.configured_telegram_delivery_runtime",
+            return_value=self._queue_runtime(),
+        ), patch(
+            "core.telegram_delivery_queue_worker.AsyncSessionLocal",
+            return_value=context,
+        ), patch(
+            "core.telegram_delivery_queue_worker.claim_next_telegram_delivery_job",
+            new=AsyncMock(return_value=job),
+        ), patch(
+            "core.telegram_delivery_queue_worker.apply_telegram_delivery_freshness_result",
+            new=AsyncMock(return_value=True),
+        ), patch(
+            "core.telegram_delivery_queue_worker.telegram_delivery_database_now",
+            new=AsyncMock(return_value=worker.utc_now()),
+        ), patch(
+            "core.telegram_delivery_queue_worker._mark_dispatch_started_with_transient_retry",
+            new=AsyncMock(
+                side_effect=TelegramDeliveryFreshnessChangedBeforeDispatch(decision)
+            ),
+        ), patch(
+            "core.telegram_delivery_queue_worker._defer_for_dispatch_limit",
+            new=defer,
+        ):
+            report = await worker.run_telegram_delivery_queue_cycle(
+                bot_identity="primary",
+                freshness_validator=AsyncMock(
+                    return_value=TelegramFreshnessDecision(
+                        TelegramFreshnessOutcome.SEND,
+                        reason="current",
+                    )
+                ),
+                lifecycle_feedback=_NoopLifecycleFeedback(),
+                gateway_call=gateway,
+                dispatch_limiter=_AllowLimiter(),
+                recover_leases=False,
+                limit=1,
+            )
+
+        self.assertEqual(report.processed_count, 1)
+        self.assertEqual(report.stale_fence_count, 0)
+        self.assertEqual(report.status_counts, {"dispatch_freshness_reclassify": 1})
+        defer.assert_awaited_once_with(
+            job_id=994,
+            worker_id=ANY,
+            lease_token=16,
+            retry_seconds=0.1,
+            reason=(
+                "dispatch_freshness_changed:reclassify:"
+                "offer_freshness_terminal_state_changed"
+            ),
+        )
         gateway.assert_not_awaited()
         self.assertFalse(worker._provider_dispatch_entries)
 

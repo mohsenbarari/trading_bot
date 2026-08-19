@@ -29,6 +29,7 @@ from core.telegram_delivery_offer_freshness import (
 from core.telegram_delivery_queue_contract import (
     TelegramDeliveryAction,
     TelegramDeliveryDecision,
+    TelegramDeliveryFreshnessChangedBeforeDispatch,
     TelegramFeederKind,
     TelegramDeliveryOutcome,
     TelegramDeliveryState,
@@ -249,10 +250,7 @@ class TelegramOfferQueueLifecycleFeedback:
             expected_channel_id=_configured_channel_id(),
         )
         if decision.outcome != TelegramFreshnessOutcome.SEND:
-            raise TelegramOfferQueueFeedbackError(
-                "telegram_offer_queue_dispatch_guard_rejected:"
-                f"{decision.outcome.value}:{decision.reason or 'unspecified'}"
-            )
+            raise TelegramDeliveryFreshnessChangedBeforeDispatch(decision)
 
     async def apply_freshness(
         self,

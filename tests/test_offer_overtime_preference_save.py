@@ -14,7 +14,6 @@ from core.services.offer_overtime_preference_service import (
     BOT_SAVE_UNAVAILABLE_MESSAGE,
     INVALID_OVERTIME_VALUE_MESSAGE,
     OVERTIME_NOT_AVAILABLE_MESSAGE,
-    REACHABILITY_WARNING_MESSAGE,
     SAVE_SUCCESS_NONZERO_MESSAGE,
     SAVE_SUCCESS_ZERO_MESSAGE,
     OfferOvertimePreferenceError,
@@ -53,7 +52,7 @@ class PersistPreferenceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(user.offer_overtime_minutes, 5)
         self.assertEqual(result.offer_overtime_minutes, 5)
         self.assertEqual(result.detail, SAVE_SUCCESS_NONZERO_MESSAGE.format(minutes=5))
-        self.assertEqual(result.warning, REACHABILITY_WARNING_MESSAGE)
+        self.assertIsNone(result.warning)
 
     async def test_zero_save_uses_the_disabled_copy_without_warning(self):
         user = SimpleNamespace(id=7, offer_overtime_minutes=4)
@@ -108,7 +107,7 @@ class WebAppEndpointTests(unittest.IsolatedAsyncioTestCase):
         db.refresh.assert_awaited_once_with(user)
         cache_mock.assert_awaited_once_with(99)
         self.assertEqual(result.offer_overtime_minutes, 3)
-        self.assertEqual(result.warning, REACHABILITY_WARNING_MESSAGE)
+        self.assertIsNone(result.warning)
 
     async def test_webapp_save_on_foreign_is_rejected_without_a_write(self):
         user = SimpleNamespace(id=7, telegram_id=None, offer_overtime_minutes=0)
@@ -161,7 +160,9 @@ class BotForwardTests(unittest.IsolatedAsyncioTestCase):
         iran_body = {
             "offer_overtime_minutes": 6,
             "detail": SAVE_SUCCESS_NONZERO_MESSAGE.format(minutes=6),
-            "warning": REACHABILITY_WARNING_MESSAGE,
+            # Model an older Iran peer during a rolling deploy. Removed copy
+            # must not be propagated back into the bot response.
+            "warning": "legacy reachability warning",
         }
         with override_current_server(SERVER_FOREIGN), patch(
             "core.services.offer_overtime_preference_service.evaluate_overtime_preference_eligibility",
@@ -178,7 +179,7 @@ class BotForwardTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(user.offer_overtime_minutes, 0)
         db.commit.assert_not_awaited()
         self.assertEqual(result.offer_overtime_minutes, 6)
-        self.assertEqual(result.warning, REACHABILITY_WARNING_MESSAGE)
+        self.assertIsNone(result.warning)
 
     async def test_bot_save_outage_raises_approved_copy_without_local_write(self):
         user = SimpleNamespace(id=21, offer_overtime_minutes=1)

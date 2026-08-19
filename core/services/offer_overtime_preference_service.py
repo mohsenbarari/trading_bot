@@ -40,12 +40,6 @@ SAVE_SUCCESS_NONZERO_MESSAGE = "✅ وقت اضافه لفظ‌های جدید �
 #: Inventory M5.
 SAVE_SUCCESS_ZERO_MESSAGE = "✅ وقت اضافه برای لفظ‌های جدید شما غیرفعال شد."
 
-#: Inventory M6. Returned with every successful nonzero save.
-REACHABILITY_WARNING_MESSAGE = (
-    "تأیید هر لفظ فقط در همان محل ثبت لفظ نمایش داده می‌شود: "
-    "لفظ وب در وب‌اپ و لفظ بات در بات."
-)
-
 #: Inventory M7. Bot save failed because Iran did not persist the value.
 BOT_SAVE_UNAVAILABLE_MESSAGE = "تنظیم شما ذخیره نشد. لطفاً کمی بعد دوباره تلاش کنید."
 
@@ -218,13 +212,10 @@ async def evaluate_overtime_preference_eligibility(
 
 
 def format_overtime_preference_save_messages(minutes: int) -> tuple[str, str | None]:
-    """Return the approved success detail and optional reachability warning."""
+    """Return the approved success detail without legacy reachability copy."""
     if minutes == 0:
         return SAVE_SUCCESS_ZERO_MESSAGE, None
-    return (
-        SAVE_SUCCESS_NONZERO_MESSAGE.format(minutes=minutes),
-        REACHABILITY_WARNING_MESSAGE,
-    )
+    return SAVE_SUCCESS_NONZERO_MESSAGE.format(minutes=minutes), None
 
 
 async def persist_overtime_preference(
@@ -305,16 +296,13 @@ async def save_overtime_preference_from_bot(
         raise OfferOvertimePreferenceTransportError() from exc
 
     detail = body.get("detail")
-    warning = body.get("warning")
     if not isinstance(detail, str) or not detail:
-        detail, derived_warning = format_overtime_preference_save_messages(saved_minutes)
-        if warning is None:
-            warning = derived_warning
-    if warning is not None and not isinstance(warning, str):
-        warning = None
+        detail, _warning = format_overtime_preference_save_messages(saved_minutes)
 
     return OvertimePreferenceSaveResult(
         offer_overtime_minutes=saved_minutes,
         detail=detail,
-        warning=warning,
+        # Keep the response field for wire compatibility, but never propagate
+        # the removed cross-surface reachability copy from an older peer.
+        warning=None,
     )

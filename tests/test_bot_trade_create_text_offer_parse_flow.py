@@ -452,6 +452,7 @@ class BotTradeCreateTextOfferParseFlowTests(unittest.IsolatedAsyncioTestCase):
         state = SimpleNamespace(
             get_data=AsyncMock(return_value=data),
             update_data=AsyncMock(),
+            set_state=AsyncMock(),
         )
         callback = SimpleNamespace(message=SimpleNamespace(message_id=91))
         user = SimpleNamespace(id=1)
@@ -461,7 +462,11 @@ class BotTradeCreateTextOfferParseFlowTests(unittest.IsolatedAsyncioTestCase):
         ):
             await handle_text_offer_inference_suggestion_edit(callback, state, user)
 
-        state.update_data.assert_awaited_once_with(text_offer_inference_mode="edit")
+        state.update_data.assert_awaited_once_with(
+            text_offer_inference_mode="edit",
+            text_offer_inference_message_id=91,
+        )
+        state.set_state.assert_awaited_once_with(Trade.awaiting_text_inference_choice)
         self.assertEqual(
             edit.await_args.args[2],
             "کالای درست را از گزینه‌های نزدیک به قیمت لفظ انتخاب کنید.",

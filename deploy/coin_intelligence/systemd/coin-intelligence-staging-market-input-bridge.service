@@ -1,7 +1,10 @@
 [Unit]
 Description=Project existing market and group inputs into the staging Market Store
 Wants=network-online.target
-After=network-online.target coin-public-market-telegram.service coin-group-event-telegram.service trading-bot-private-gold-collector.service
+# The collectors and this bridge serialize writes with the same flock below.
+# Ordering this oneshot after fast recurring collectors can starve its systemd
+# start job indefinitely, so only network readiness belongs in After=.
+After=network-online.target
 
 [Service]
 Type=oneshot

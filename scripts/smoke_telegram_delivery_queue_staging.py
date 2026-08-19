@@ -2,8 +2,11 @@
 """Small live staging smoke for Queue-v1 after cutover.
 
 Creates one bot-origin offer, waits for sticky publication, expires it so the
-same publisher edits the channel message, checks B2B acknowledgement, delivers
-one private notification, then cleans only this run's fixture prefix.
+same publisher edits the channel message, checks B2B acknowledgement, and
+probes the private-message queue with a synthetic recipient. The probe reports
+provider delivery only when it is proven; the expected invalid-recipient
+quarantine is recorded as transport execution, not delivery. Every run cleans
+its own fixture prefix, including failed and interrupted runs.
 """
 from __future__ import annotations
 
@@ -75,6 +78,7 @@ FINAL_JOB_STATES = {
     TelegramDeliveryState.EXPIRED_INTERACTION.value,
     TelegramDeliveryState.PERMANENT_UNDELIVERABLE.value,
     TelegramDeliveryState.TERMINAL_FAILED.value,
+    TelegramDeliveryState.QUARANTINED.value,
 }
 FINAL_COMMAND_STATES = {
     TelegramPublisherDispatchState.ACKNOWLEDGED.value,
@@ -93,6 +97,75 @@ def _utc_now() -> str:
 
 def _enum(value: Any) -> str:
     return str(getattr(value, "value", value) or "").strip().lower()
+
+
+def _private_probe_terminal_report(
+    outbox: TelegramNotificationOutbox | None,
+    jobs: list[TelegramDeliveryJobRecord],
+) -> dict[str, Any] | None:
+    """Classify a synthetic private probe without claiming false delivery."""
+    if outbox is None or not jobs:
+        return None
+    outbox_status = _enum(getattr(outbox, "status", None))
+    for job in jobs:
+        state = _enum(getattr(job, "state", None))
+        reason = str(getattr(job, "outcome_reason", None) or "").strip()
+        attempts = int(getattr(job, "provider_attempt_count", 0) or 0)
+        if state in {
+            TelegramDeliveryState.SENT.value,
+            TelegramDeliveryState.SENT_NOOP.value,
+        } and outbox_status == "sent":
+            return {
+                "queue_terminal_outcome": state,
+                "provider_delivery_proven": True,
+                "provider_attempt_count": attempts,
+                "outbox_status": outbox_status,
+            }
+        if (
+            state == TelegramDeliveryState.QUARANTINED.value
+            and reason == "telegram_unknown_client_error"
+            and attempts >= 1
+        ):
+            return {
+                "queue_terminal_outcome": "synthetic_recipient_quarantined",
+                "provider_delivery_proven": False,
+                "provider_attempt_count": attempts,
+                "outbox_status": outbox_status,
+                "reason": reason,
+            }
+        if state in FINAL_JOB_STATES:
+            raise StagingSmokeError(
+                f"private_notification_unexpected_terminal:{state}:{reason or 'unspecified'}"
+            )
+    return None
+
+
+async def _private_probe_state(
+    run_id: str,
+) -> tuple[TelegramNotificationOutbox | None, list[TelegramDeliveryJobRecord]]:
+    async with AsyncSessionLocal() as db:
+        row = (
+            await db.execute(
+                select(TelegramNotificationOutbox).where(
+                    TelegramNotificationOutbox.source_id == run_id
+                )
+            )
+        ).scalar_one_or_none()
+        if row is None:
+            return None, []
+        queue_job_id = getattr(row, "queue_job_id", None)
+        if queue_job_id is not None:
+            statement = select(TelegramDeliveryJobRecord).where(
+                TelegramDeliveryJobRecord.id == int(queue_job_id)
+            )
+        else:
+            statement = select(TelegramDeliveryJobRecord).where(
+                TelegramDeliveryJobRecord.action_kind
+                == TelegramDeliveryAction.GENERAL_IMMEDIATE,
+                TelegramDeliveryJobRecord.source_natural_id == run_id,
+            )
+        jobs = (await db.execute(statement)).scalars().all()
+        return row, list(jobs)
 
 
 async def _wait(predicate, *, timeout: float, label: str) -> Any:
@@ -143,31 +216,11 @@ async def _commands_for_jobs(job_ids: list[int]) -> list[TelegramPublisherDispat
         return list(rows)
 
 
-async def run_smoke(*, confirm: str, artifact_dir: Path) -> dict[str, Any]:
-    if confirm != CONFIRM:
-        raise StagingSmokeError("smoke_confirmation_mismatch")
-    if str(getattr(settings, "environment", "")).strip().lower() != "staging":
-        raise StagingSmokeError("smoke_requires_staging")
-    if current_server() != SERVER_FOREIGN:
-        raise StagingSmokeError("smoke_requires_foreign_bot")
-    runtime = configured_telegram_delivery_runtime()
-    if runtime.mode != TelegramDeliveryRuntimeMode.QUEUE_V1 or not runtime.queue_worker_enabled:
-        raise StagingSmokeError("smoke_requires_queue_v1")
-    run_id = (
-        "telegram-queue-smoke-"
-        + datetime.now(timezone.utc).strftime("%Y%m%dt%H%M%Sz").lower()
-        + "-"
-        + secrets.token_hex(4)
-    )
-    receipt: dict[str, Any] = {
-        "schema_version": 1,
-        "command": "smoke",
-        "environment": "staging",
-        "production_authorized": False,
-        "run_id": run_id,
-        "started_at": _utc_now(),
-        "assertions": {},
-    }
+async def _run_smoke_scenario(
+    *,
+    run_id: str,
+    receipt: dict[str, Any],
+) -> dict[str, Any]:
     users = await create_load_fixture_users(run_id, user_count=3)
     owner = users[0]
     commodity_id, commodity_name = await resolve_commodity()
@@ -312,52 +365,86 @@ async def run_smoke(*, confirm: str, artifact_dir: Path) -> dict[str, Any]:
         )
         await db.commit()
 
-    async def private_done() -> bool:
-        async with AsyncSessionLocal() as db:
-            row = (
-                await db.execute(
-                    select(TelegramNotificationOutbox).where(
-                        TelegramNotificationOutbox.source_id == run_id
-                    )
-                )
-            ).scalar_one_or_none()
-            jobs = (
-                await db.execute(
-                    select(TelegramDeliveryJobRecord).where(
-                        TelegramDeliveryJobRecord.action_kind
-                        == TelegramDeliveryAction.GENERAL_IMMEDIATE,
-                        TelegramDeliveryJobRecord.source_natural_id == run_id,
-                    )
-                )
-            ).scalars().all()
-        if row is None:
-            return False
-        if _enum(getattr(row, "status", None)) in {
-            "sent",
-            "superseded",
-            "quarantined",
-        }:
-            return True
-        return any(_enum(job.state) in FINAL_JOB_STATES for job in jobs)
+    async def private_done() -> dict[str, Any] | None:
+        row, jobs = await _private_probe_state(run_id)
+        return _private_probe_terminal_report(row, jobs)
 
-    await _wait(private_done, timeout=90.0, label="private_notification")
-    receipt["assertions"]["private_notification"] = True
+    private_report = await _wait(
+        private_done,
+        timeout=90.0,
+        label="private_notification_queue_probe",
+    )
+    receipt["assertions"]["private_notification_queue_probe"] = private_report
 
-    cleanup = await cleanup_prefix(run_id, dry_run=False)
-    receipt["assertions"]["cleanup"] = {
-        "status": cleanup.get("status"),
-        "deleted_users": cleanup.get("deleted_users") or cleanup.get("user_count"),
-    }
     leftover = await _jobs(public_id)
     open_leftover = [job for job in leftover if _enum(job.state) not in FINAL_JOB_STATES]
     if open_leftover:
         raise StagingSmokeError("smoke_open_jobs_remain")
-    receipt["status"] = "passed"
+    return receipt
+
+
+def _validate_smoke_preconditions(confirm: str) -> None:
+    if confirm != CONFIRM:
+        raise StagingSmokeError("smoke_confirmation_mismatch")
+    if str(getattr(settings, "environment", "")).strip().lower() != "staging":
+        raise StagingSmokeError("smoke_requires_staging")
+    if current_server() != SERVER_FOREIGN:
+        raise StagingSmokeError("smoke_requires_foreign_bot")
+    runtime = configured_telegram_delivery_runtime()
+    if runtime.mode != TelegramDeliveryRuntimeMode.QUEUE_V1 or not runtime.queue_worker_enabled:
+        raise StagingSmokeError("smoke_requires_queue_v1")
+
+
+async def run_smoke(*, confirm: str, artifact_dir: Path) -> dict[str, Any]:
+    _validate_smoke_preconditions(confirm)
+    run_id = (
+        "telegram-queue-smoke-"
+        + datetime.now(timezone.utc).strftime("%Y%m%dt%H%M%Sz").lower()
+        + "-"
+        + secrets.token_hex(4)
+    )
+    receipt: dict[str, Any] = {
+        "schema_version": 2,
+        "command": "smoke",
+        "environment": "staging",
+        "production_authorized": False,
+        "run_id": run_id,
+        "started_at": _utc_now(),
+        "assertions": {},
+    }
+    failure: BaseException | None = None
+    try:
+        await _run_smoke_scenario(run_id=run_id, receipt=receipt)
+    except BaseException as exc:
+        failure = exc
+        receipt["status"] = "blocked"
+        receipt["error_code"] = (
+            str(exc) if isinstance(exc, StagingSmokeError) else type(exc).__name__
+        )
+
+    try:
+        cleanup = await cleanup_prefix(run_id, dry_run=False)
+        receipt["assertions"]["cleanup"] = {
+            "status": cleanup.get("status"),
+            "deleted_users": cleanup.get("deleted_users") or cleanup.get("user_count"),
+        }
+    except BaseException as cleanup_exc:
+        receipt["assertions"]["cleanup"] = {
+            "status": "failed",
+            "error_class": type(cleanup_exc).__name__,
+        }
+        prior = type(failure).__name__ if failure is not None else "none"
+        failure = StagingSmokeError(f"smoke_cleanup_failed_after:{prior}")
+
+    if failure is None:
+        receipt["status"] = "passed"
     receipt["finished_at"] = _utc_now()
     artifact_dir.mkdir(parents=True, exist_ok=True)
     path = artifact_dir / f"{run_id}.json"
     path.write_text(json.dumps(receipt, ensure_ascii=False, indent=2, sort_keys=True) + "\n")
     receipt["artifact"] = str(path)
+    if failure is not None:
+        raise failure
     return receipt
 
 

@@ -12,6 +12,7 @@ from bot.callbacks import (
     QuantityCallback,
     SkipNotesCallback,
     TextOfferActionCallback,
+    TextOfferInferenceCandidateCallback,
     TradeActionCallback,
     TradeSettlementCallback,
     TradeTypeCallback,
@@ -299,6 +300,7 @@ class BotTradeCreateStaleStateTextOfferTests(unittest.IsolatedAsyncioTestCase):
             TradeActionCallback(action="back_to_type").pack(),
             SkipNotesCallback(target="notes").pack(),
             TextOfferActionCallback(action="confirm").pack(),
+            TextOfferInferenceCandidateCallback(commodity_id=73).pack(),
             TradeWizardActionCallback(action="continue").pack(),
             TradeWizardEditCallback(field="commodity").pack(),
         )

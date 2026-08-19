@@ -107,9 +107,8 @@ def _overtime_preference_confirm_keyboard() -> InlineKeyboardMarkup:
     )
 
 
-def _compose_save_success_text(detail: str, warning: str | None) -> str:
-    if warning:
-        return f"{detail}\n\n{warning}"
+def _compose_save_success_text(detail: str) -> str:
+    """Render only the persisted setting result; legacy warnings stay hidden."""
     return detail
 
 
@@ -254,7 +253,7 @@ async def confirm_offer_overtime_preference(
     await answer_callback_message_via_runtime(
         callback,
         user,
-        _compose_save_success_text(result.detail, result.warning),
+        _compose_save_success_text(result.detail),
         source_key="overtime-preference-save-success",
         reply_markup=await _user_panel_reply_markup(user),
     )
