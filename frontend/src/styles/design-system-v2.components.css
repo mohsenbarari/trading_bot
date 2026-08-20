@@ -88,7 +88,7 @@
   justify-content: space-between;
   padding: var(--ui-v2-spacing-8) var(--ui-v2-spacing-16);
   border-block-end: var(--ui-v2-stroke-standard) solid var(--ui-v2-color-border-default);
-  background: var(--ui-v2-color-surface-card);
+  background: var(--ui-v2-color-surface-page);
 }
 
 :where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-public-header strong {
@@ -1014,9 +1014,9 @@
   margin: 0;
   padding: var(--ui-v2-spacing-16);
   border: var(--ui-v2-stroke-standard) solid var(--ui-v2-color-border-default);
-  border-radius: var(--ui-v2-radius-card);
+  border-radius: var(--ui-v2-radius-panel);
   background: var(--ui-v2-color-surface-card);
-  box-shadow: var(--ui-v2-effect-card);
+  box-shadow: none;
 }
 
 :where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-pwa-icon {
@@ -1068,13 +1068,14 @@
   display: flex;
   grid-column: 1 / -1;
   flex-wrap: wrap;
-  justify-content: flex-end;
+  justify-content: stretch;
   gap: var(--ui-v2-spacing-8);
 }
 
 :where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-pwa-actions .ui-button {
   box-sizing: border-box;
   display: inline-flex;
+  flex: 1 1 0;
   min-height: var(--ui-v2-size-cta-min);
   align-items: center;
   justify-content: center;

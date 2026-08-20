@@ -133,9 +133,9 @@ const handleInstall = async () => {
           <h3>نصب روی صفحه اصلی</h3>
           <p v-if="isIOS && !showIosGuide">برای نصب در آیفون، راهنمای کوتاه نصب را باز کنید.</p>
           <p v-else-if="isIOS" class="ui-v2-pwa-ios-guide">
-            در Safari دکمه Share را بزنید و سپس Add to Home Screen را انتخاب کنید.
+            در سافاری دکمه اشتراک را بزنید و «افزودن به صفحه اصلی» را انتخاب کنید.
           </p>
-          <p v-else>برای ورود سریع‌تر و تجربه پایدارتر، نسخه اپلیکیشن را نصب کنید.</p>
+          <p v-else>روی صفحه اصلی بگذارید تا مثل یک برنامه باز شود.</p>
         </div>
         <div class="ui-v2-pwa-actions">
           <AppButton class="pwa-action-dismiss" variant="ghost" size="sm" @click="dismiss"

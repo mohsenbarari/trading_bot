@@ -2,12 +2,12 @@
 import { computed, onMounted, ref } from 'vue'
 import type { Component } from 'vue'
 import { useRouter } from 'vue-router'
-import { Bell, Database, Settings, Smartphone, UserRound } from 'lucide-vue-next'
+import { Bell, ChevronLeft, Database, Settings, Smartphone, UserRound } from 'lucide-vue-next'
 import {
-  AppActionCard,
   AppBackButton,
   AppButton,
   AppErrorState,
+  AppListItem,
   AppLoadingState,
   AppPage,
   AppSectionCard,
@@ -261,18 +261,22 @@ onMounted(refreshIdentity)
             class="account-action-grid"
             :class="{ 'account-action-grid--single': profileActions.length === 1 }"
           >
-            <AppActionCard
+            <AppListItem
               v-for="action in profileActions"
               :key="action.key"
               class="hub-action"
+              interactive
               :title="action.title"
               :description="action.description"
               @select="action.action"
             >
-              <template #icon>
+              <template #leading>
                 <component :is="action.icon" :size="20" />
               </template>
-            </AppActionCard>
+              <template #trailing>
+                <ChevronLeft :size="18" aria-hidden="true" />
+              </template>
+            </AppListItem>
           </div>
           <TelegramConnectPanel
             v-if="showTelegramConnectPanel"
@@ -293,18 +297,22 @@ onMounted(refreshIdentity)
             class="account-action-grid"
             :class="{ 'account-action-grid--single': securityActions.length === 1 }"
           >
-            <AppActionCard
+            <AppListItem
               v-for="action in securityActions"
               :key="action.key"
               class="hub-action"
+              interactive
               :title="action.title"
               :description="action.description"
               @select="action.action"
             >
-              <template #icon>
+              <template #leading>
                 <component :is="action.icon" :size="20" />
               </template>
-            </AppActionCard>
+              <template #trailing>
+                <ChevronLeft :size="18" aria-hidden="true" />
+              </template>
+            </AppListItem>
           </div>
         </AppSectionCard>
 
@@ -317,18 +325,22 @@ onMounted(refreshIdentity)
             class="account-action-grid"
             :class="{ 'account-action-grid--single': notificationActions.length === 1 }"
           >
-            <AppActionCard
+            <AppListItem
               v-for="action in notificationActions"
               :key="action.key"
               class="hub-action"
+              interactive
               :title="action.title"
               :description="action.description"
               @select="action.action"
             >
-              <template #icon>
+              <template #leading>
                 <component :is="action.icon" :size="20" />
               </template>
-            </AppActionCard>
+              <template #trailing>
+                <ChevronLeft :size="18" aria-hidden="true" />
+              </template>
+            </AppListItem>
           </div>
         </AppSectionCard>
       </template>
@@ -432,6 +444,19 @@ onMounted(refreshIdentity)
 
 .account-telegram-panel {
   margin-top: 0.75rem;
+}
+
+.account-action-grid :deep(.ui-list-item) {
+  border: 0;
+  border-radius: 0;
+  background: var(--ds-bg-card);
+  box-shadow: inset 0 -1px 0 var(--ds-native-hairline);
+  padding-inline: 0.25rem;
+}
+
+.account-action-grid :deep(.ui-list-item--interactive:hover) {
+  transform: none;
+  box-shadow: inset 0 -1px 0 var(--ds-native-hairline);
 }
 
 @media (max-width: 700px) {

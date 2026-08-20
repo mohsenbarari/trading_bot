@@ -37,10 +37,13 @@ export default defineConfig({
         id: '/?source=pwa',
         name: 'Gold',
         short_name: 'Gold',
+        lang: 'fa',
+        dir: 'rtl',
         description: 'بازار امن معاملات طلا و سکه',
-        theme_color: '#ffffff',
-        background_color: '#ffffff',
+        theme_color: '#f2f2f7',
+        background_color: '#f2f2f7',
         display: 'standalone',
+        display_override: ['standalone', 'minimal-ui'],
         start_url: '/',
         scope: '/',
         orientation: 'portrait',
@@ -49,14 +52,26 @@ export default defineConfig({
             src: '/pwa-192x192.png',
             sizes: '192x192',
             type: 'image/png',
-            purpose: 'any maskable'
+            purpose: 'any',
           },
           {
             src: '/pwa-512x512.png',
             sizes: '512x512',
             type: 'image/png',
-            purpose: 'any maskable'
-          }
+            purpose: 'any',
+          },
+          {
+            src: '/pwa-maskable-192x192.png',
+            sizes: '192x192',
+            type: 'image/png',
+            purpose: 'maskable',
+          },
+          {
+            src: '/pwa-maskable-512x512.png',
+            sizes: '512x512',
+            type: 'image/png',
+            purpose: 'maskable',
+          },
         ],
         share_target: {
           action: '/share-receive',

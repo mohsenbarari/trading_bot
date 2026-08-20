@@ -236,6 +236,13 @@
     user-select: none;
     -webkit-touch-callout: none;
   }
+
+  @media (display-mode: standalone), (display-mode: minimal-ui) {
+    html,
+    body {
+      background: var(--ds-native-grouped-bg, #f2f2f7);
+    }
+  }
   
   /* Override for elements that MUST be selectable */
   input, textarea, [contenteditable="true"], .msg-text-content {

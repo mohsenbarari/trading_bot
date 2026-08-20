@@ -114,7 +114,7 @@ describe('PWAInstallOverlay.vue', () => {
     await wrapper.get('.pwa-action-install').trigger('click')
 
     expect(pwaOverlayMocks.installAppMock).not.toHaveBeenCalled()
-    expect(wrapper.text()).toContain('در Safari دکمه Share را بزنید')
+    expect(wrapper.text()).toContain('در سافاری دکمه اشتراک را بزنید')
   })
 
   it('calls installApp on supported browsers and hides the overlay when installation succeeds', async () => {
